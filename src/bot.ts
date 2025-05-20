@@ -459,7 +459,7 @@ bot.command("games", async (ctx: Context) => {
     const { activeGames, recentGames, totalTokensInGames } = await gameManager.getUserGames(ctx, telegramId);
     const metadata = await getTokenMetadata();
 
-    let response = "🎮 <b>Your Games</b>\n\n";
+    let response = "";
     let hasGames = false;
 
     // Combine sections

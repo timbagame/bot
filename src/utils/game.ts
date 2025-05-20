@@ -728,7 +728,7 @@ export class GameManager {
       const currentPlayers = gameAccount.players.length;
       const creatorPubkey = gameAccount.creator.toString();
       const status = Object.keys(gameAccount.status)[0] as GameStatus;
-      const gameType = Object.keys(gameAccount.gameType)[0];
+      const gameType = Object.keys(gameAccount.gameType)[0].charAt(0).toUpperCase() + Object.keys(gameAccount.gameType)[0].slice(1);
 
       // Calculate expiration time using blockchain time
       let expirationInfo = "";
@@ -771,184 +771,203 @@ export class GameManager {
     totalTokensInGames: number;
   }> {
     const playerKp = await this.wallet.getKeyPair(telegramId);
-    const playerPubkey = playerKp.publicKey;
     const allGames = await this.gameDb.getAllGames();
     const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
 
-    let activeGamesSection = "🔄 <b>Active Games</b>\n";
+    let activeGamesSection = "";
     let hasActiveGames = false;
     let totalTokensInGames = 0;
 
-    // Check games where user is creator
-    for (const gameData of allGames) {
+    // Get player's balance PDA once
+    const [playerBalancePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("player_balance"), playerKp.publicKey.toBuffer(), new PublicKey(this.tokenMint).toBuffer()],
+      this.program.programId
+    );
+
+    // Batch fetch all game accounts
+    const gameAccounts = new Map();
+    const gamePromises = allGames.map(async (gameData) => {
       try {
         const gamePda = new PublicKey(gameData.game_address);
         const gameAccount = await this.program.account.game.fetch(gamePda);
-        const gameStatus = Object.keys(gameAccount.status)[0] as GameStatus;
+        gameAccounts.set(gameData.game_address, gameAccount);
+      } catch (error) {
+        console.error(`Error fetching game ${gameData.game_address}:`, error);
+      }
+    });
+    await Promise.all(gamePromises);
 
-        // If game is not active on-chain, update database and skip
-        if (gameStatus.toLowerCase() !== "active") {
-          console.log(`Game ${gamePda.toBase58()} is ${gameStatus} on-chain, updating database...`);
-          try {
-            // Only update if the game doesn't have a completion time
-            if (!gameData.completed_at) {
-              const blockTime = await this.getBlockchainTime();
-              const completedAt = blockTime ? blockTime * 1000 : 0;
-              await this.gameDb.completeGame(gameData.game_address, gameAccount.winner?.toString() || "unknown", completedAt);
-            }
-          } catch (dbError) {
-            console.error(`Error updating game status in database: ${dbError}`);
-          }
-          continue;
+    // Get all usernames in one batch
+    const uniqueTelegramIds = new Set<string>();
+    allGames.forEach(game => {
+      uniqueTelegramIds.add(game.creator_telegram_id);
+    });
+    uniqueTelegramIds.add(telegramId.toString());
+
+    // Get winner Telegram IDs from database
+    const winnerTelegramIds = new Map<string, string>();
+    for (const game of allGames) {
+      if (game.winner_address && game.winner_address !== "cancelled" && game.winner_address !== "unknown") {
+        const winnerTelegramId = await this.gameDb.getPlayerTelegramId(game.winner_address);
+        if (winnerTelegramId) {
+          winnerTelegramIds.set(game.winner_address, winnerTelegramId);
+          uniqueTelegramIds.add(winnerTelegramId);
         }
+      }
+    }
 
-        // Check if game is expired
-        const { isExpired } = await this.checkGameStatus(gamePda);
+    const usernameMap = new Map<string, string>();
+    for (const id of uniqueTelegramIds) {
+      try {
+        const chatMember = await ctx.api.getChatMember(ctx.chat!.id, parseInt(id));
+        usernameMap.set(id, chatMember.user.username || chatMember.user.first_name);
+      } catch (error) {
+        console.error(`Error getting username for ${id}:`, error);
+        usernameMap.set(id, "Unknown");
+      }
+    }
 
-        // If game is expired, try to handle it
-        if (isExpired) {
-          await this.handleExpiredGame(ctx, gamePda, gameAccount);
-          continue; // Skip expired games from active games list
-        }
+    // Process active games
+    for (const gameData of allGames) {
+      try {
+        const gameAccount = gameAccounts.get(gameData.game_address);
+        if (!gameAccount) continue;
 
-        // Check if user is creator or player
+        const gameStatus = Object.keys(gameAccount.status)[0].toLowerCase();
+        if (gameStatus !== "active") continue;
+
         const isCreator = gameData.creator_telegram_id === telegramId.toString();
-        const [playerBalancePda] = PublicKey.findProgramAddressSync(
-          [Buffer.from("player_balance"), playerKp.publicKey.toBuffer(), new PublicKey(this.tokenMint).toBuffer()],
-          this.program.programId
-        );
         const isPlayer = gameAccount.players.some((p: PublicKey) => p.equals(playerBalancePda));
 
         if (isCreator || isPlayer) {
-          hasActiveGames = true;
+          if (!hasActiveGames) {
+            activeGamesSection = "🎮 <b>Active Games</b>\n\n";
+            hasActiveGames = true;
+          }
+          const gamePda = new PublicKey(gameData.game_address);
           const gameInfo = await this.getGameInfo(gamePda);
           activeGamesSection += `${gameInfo}\n\n`;
-          // Add to total tokens for active games
           totalTokensInGames += Number(gameAccount.amount);
         }
       } catch (error) {
-        console.error(`Error fetching game ${gameData.game_address}:`, error);
-        // If we can't fetch the game on-chain, it might be completed or cancelled
-        // Let's update the database to reflect this
-        try {
-          // Only update if the game doesn't have a completion time
-          if (!gameData.completed_at) {
-            const blockTime = await this.getBlockchainTime();
-            const completedAt = blockTime ? blockTime * 1000 : 0;
-            await this.gameDb.completeGame(gameData.game_address, "unknown", completedAt);
-          }
-        } catch (dbError) {
-          console.error(`Error updating game status in database: ${dbError}`);
-        }
+        console.error(`Error processing game ${gameData.game_address}:`, error);
       }
     }
 
-    // Then show last 5 games where player participated
-    let recentGamesSection = "📜 <b>Recent Games</b>\n";
-    let hasRecentGames = false;
+    // Process completed games
+    const categories = {
+      won: [] as any[],
+      lost: [] as any[],
+      cancelled: [] as any[]
+    };
 
-    // Get all games where player participated (as creator or player)
-    const playerGames = [];
     for (const game of allGames) {
-      try {
-        const gamePda = new PublicKey(game.game_address);
-        const gameAccount = await this.program.account.game.fetch(gamePda);
-        const isCreator = game.creator_telegram_id === telegramId.toString();
+      const gameAccount = gameAccounts.get(game.game_address);
+      if (!gameAccount) continue;
 
-        // Get player's balance PDA
-        const [playerBalancePda] = PublicKey.findProgramAddressSync(
-          [Buffer.from("player_balance"), playerPubkey.toBuffer(), new PublicKey(this.tokenMint).toBuffer()],
-          this.program.programId
-        );
+      const status = Object.keys(gameAccount.status)[0].toLowerCase();
+      if (status === 'active') continue;
 
-        // Check if player is in the game by checking their balance PDA
-        const isPlayer = gameAccount.players.some((p: PublicKey) => p.equals(playerBalancePda));
+      if (game.winner_address === "cancelled") {
+        categories.cancelled.push({ ...game, gameAccount });
+      } else if (game.winner_address) {
+        const winnerTelegramId = winnerTelegramIds.get(game.winner_address);
+        const winnerUsername = winnerTelegramId ? usernameMap.get(winnerTelegramId) || "Unknown" : "Unknown";
+        const currentUsername = usernameMap.get(telegramId.toString()) || "Unknown";
+        const isWinner = winnerUsername === currentUsername;
 
-        if (isCreator || isPlayer) {
-          playerGames.push({
-            ...game,
-            isCreator,
-            isPlayer
-          });
+        if (isWinner) {
+          categories.won.push({ ...game, gameAccount });
+        } else {
+          categories.lost.push({ ...game, gameAccount });
         }
-      } catch (error) {
-        console.error(`Error checking player participation for game ${game.game_address}:`, error);
       }
     }
 
-    // Sort games by completion time (most recent first)
-    const sortedGames = playerGames.sort((a, b) => {
+    // Sort games by completion time
+    const sortGames = (games: any[]) => games.sort((a, b) => {
       const timeA = a.completed_at || a.created_at;
       const timeB = b.completed_at || b.created_at;
       return timeB - timeA;
     });
 
-    // Take only the last 5 games
-    const recentGames = sortedGames.slice(0, 5);
+    categories.won = sortGames(categories.won);
+    categories.lost = sortGames(categories.lost);
+    categories.cancelled = sortGames(categories.cancelled);
 
-    for (const game of recentGames) {
-      hasRecentGames = true;
+    // Format recent games section
+    let recentGamesSection = "";
+    let hasRecentGames = false;
 
-      // Get game details from blockchain
-      try {
-        const gamePda = new PublicKey(game.game_address);
-        const gameAccount = await this.program.account.game.fetch(gamePda);
-        const gameType = Object.keys(gameAccount.gameType)[0];
-        const status = Object.keys(gameAccount.status)[0];
-        const amount = Number(gameAccount.amount);
+    // Helper function to format game info
+    const formatGameInfo = (game: any) => {
+      const gameAccount = game.gameAccount;
+      const gameType = Object.keys(gameAccount.gameType)[0];
+      const amount = Number(gameAccount.amount);
+      const creatorUsername = usernameMap.get(game.creator_telegram_id) || "Unknown";
 
-        // Get creator's username
-        const creatorTelegramId = game.creator_telegram_id;
-        let creatorUsername = "Unknown";
-        try {
-          const chatMember = await ctx.api.getChatMember(ctx.chat!.id, parseInt(creatorTelegramId));
-          creatorUsername = chatMember.user.username || chatMember.user.first_name;
-        } catch (error) {
-          console.error("Error getting creator's username:", error);
-        }
-
-        // Get winner's username if game is completed
-        let winnerInfo = "";
-        if (game.winner_address && game.winner_address !== "cancelled" && game.winner_address !== "unknown") {
-          const winnerTelegramId = await this.gameDb.getPlayerTelegramId(game.winner_address);
-          let winnerTag = game.winner_address.slice(0, 8) + "...";
-          if (winnerTelegramId) {
-            try {
-              const chatMember = await ctx.api.getChatMember(ctx.chat!.id, parseInt(winnerTelegramId));
-              const username = chatMember.user.username || chatMember.user.first_name;
-              winnerTag = `@${username}`;
-            } catch (error) {
-              console.error("Error getting winner's username:", error);
-            }
-          }
-          winnerInfo = `\nWinner: ${winnerTag}`;
-        } else if (gameAccount.winner && gameAccount.winner.toString() !== "11111111111111111111111111111111") {
-          // If winner not in database, try to get from blockchain
-          const winnerPubkey = gameAccount.winner.toString();
-          const winnerTelegramId = await this.gameDb.getPlayerTelegramId(winnerPubkey);
-          let winnerTag = winnerPubkey.slice(0, 8) + "...";
-          if (winnerTelegramId) {
-            try {
-              const chatMember = await ctx.api.getChatMember(ctx.chat!.id, parseInt(winnerTelegramId));
-              const username = chatMember.user.username || chatMember.user.first_name;
-              winnerTag = `@${username}`;
-            } catch (error) {
-              console.error("Error getting winner's username:", error);
-            }
-          }
-          winnerInfo = `\nWinner: ${winnerTag}`;
-        }
-
-        // Format game info
-        recentGamesSection += `Game: <code>${game.game_address.slice(0, 8)}...</code>\n` +
-          `Type: ${gameType.charAt(0).toUpperCase() + gameType.slice(1)}\n` +
-          `Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
-          `Creator: @${creatorUsername}\n` +
-          `Status: ${status.charAt(0).toUpperCase() + status.slice(1)}${winnerInfo}\n` +
-          `Completed: ${game.completed_at ? new Date(game.completed_at * 1000).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : 'N/A'}\n\n`;
-      } catch (error) {
-        console.error(`Error fetching game details for ${game.game_address}:`, error);
+      let winnerInfo = "";
+      if (game.winner_address && game.winner_address !== "cancelled" && game.winner_address !== "unknown") {
+        const winnerTelegramId = winnerTelegramIds.get(game.winner_address);
+        const winnerUsername = winnerTelegramId ? usernameMap.get(winnerTelegramId) || "Unknown" : "Unknown";
+        winnerInfo = `\nWinner: @${winnerUsername}`;
       }
+
+      return `Game: <code>${game.game_address.slice(0, 8)}...</code>\n` +
+        `Type: ${gameType.charAt(0).toUpperCase() + gameType.slice(1)}\n` +
+        `Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
+        `Creator: @${creatorUsername}${winnerInfo}\n` +
+        `Completed: ${game.completed_at ? new Date(game.completed_at * 1000).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : 'N/A'}\n\n`;
+    };
+
+    // Combine all completed games and sort by completion time
+    const allCompletedGames = [
+      ...categories.won.map(game => ({ ...game, category: 'won' })),
+      ...categories.lost.map(game => ({ ...game, category: 'lost' })),
+      ...categories.cancelled.map(game => ({ ...game, category: 'cancelled' }))
+    ].sort((a, b) => {
+      const timeA = a.completed_at || a.created_at;
+      const timeB = b.completed_at || b.created_at;
+      return timeB - timeA;
+    }).slice(0, 5);
+
+    // Group games by category
+    const groupedGames = {
+      won: allCompletedGames.filter(game => game.category === 'won'),
+      lost: allCompletedGames.filter(game => game.category === 'lost'),
+      cancelled: allCompletedGames.filter(game => game.category === 'cancelled')
+    };
+
+    // Add won games
+    if (groupedGames.won.length > 0) {
+      hasRecentGames = true;
+      recentGamesSection += "🏆 <b>Won Games</b>\n\n";
+      for (const game of groupedGames.won) {
+        recentGamesSection += formatGameInfo(game);
+      }
+    }
+
+    // Add lost games
+    if (groupedGames.lost.length > 0) {
+      hasRecentGames = true;
+      recentGamesSection += "😢 <b>Lost Games</b>\n\n";
+      for (const game of groupedGames.lost) {
+        recentGamesSection += formatGameInfo(game);
+      }
+    }
+
+    // Add cancelled games
+    if (groupedGames.cancelled.length > 0) {
+      hasRecentGames = true;
+      recentGamesSection += "❌ <b>Cancelled Games</b>\n\n";
+      for (const game of groupedGames.cancelled) {
+        recentGamesSection += formatGameInfo(game);
+      }
+    }
+
+    // Remove extra newlines at the end of recentGamesSection
+    if (recentGamesSection.endsWith('\n\n')) {
+      recentGamesSection = recentGamesSection.slice(0, -2);
     }
 
     return {
