@@ -287,6 +287,13 @@ bot.command("tip", async (ctx: Context) => {
     });
   }
 
+  // Check if the recipient is a bot
+  if (replyToMessage.from.is_bot) {
+    return ctx.reply("You cannot tip bots!", {
+      reply_to_message_id: ctx.message?.message_id
+    });
+  }
+
   const recipientTelegramId = BigInt(replyToMessage.from.id);
   if (recipientTelegramId === telegramId) {
     return ctx.reply("You can't tip yourself!", {
