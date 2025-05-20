@@ -136,7 +136,11 @@ export class OracleManager {
       }
 
       // Wait for transaction confirmation with timeout
-      const confirmationPromise = this.wallet.connection.confirmTransaction(tx);
+      const confirmationPromise = this.wallet.connection.confirmTransaction({
+        signature: tx,
+        blockhash: (await this.wallet.connection.getLatestBlockhash()).blockhash,
+        lastValidBlockHeight: (await this.wallet.connection.getLatestBlockhash()).lastValidBlockHeight
+      });
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error("Transaction confirmation timeout")), 30000)
       );

@@ -661,7 +661,11 @@ bot.on("callback_query", async (ctx) => {
       let confirmed = false;
       while (retries > 0 && !confirmed) {
         try {
-          const confirmation = await wallet.connection.confirmTransaction(tx);
+          const confirmation = await wallet.connection.confirmTransaction({
+            signature: tx,
+            blockhash: (await wallet.connection.getLatestBlockhash()).blockhash,
+            lastValidBlockHeight: (await wallet.connection.getLatestBlockhash()).lastValidBlockHeight
+          });
           if (confirmation.value.err) {
             throw new Error(`Transaction failed: ${confirmation.value.err}`);
           }

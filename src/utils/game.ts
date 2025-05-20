@@ -162,7 +162,11 @@ export class GameManager {
 
         const tx = await this.wallet.signAndSend([createAtaIx], [playerKeypair]);
         // Wait for confirmation
-        await this.wallet.connection.confirmTransaction(tx);
+        await this.wallet.connection.confirmTransaction({
+          signature: tx,
+          blockhash: (await this.wallet.connection.getLatestBlockhash()).blockhash,
+          lastValidBlockHeight: (await this.wallet.connection.getLatestBlockhash()).lastValidBlockHeight
+        });
         console.log("Player token account created");
       }
 
@@ -179,7 +183,11 @@ export class GameManager {
         .rpc();
 
       // Wait for confirmation
-      await this.wallet.connection.confirmTransaction(tx);
+      await this.wallet.connection.confirmTransaction({
+        signature: tx,
+        blockhash: (await this.wallet.connection.getLatestBlockhash()).blockhash,
+        lastValidBlockHeight: (await this.wallet.connection.getLatestBlockhash()).lastValidBlockHeight
+      });
       console.log("Player balance created");
     }
 
@@ -413,7 +421,11 @@ export class GameManager {
         .rpc();
 
       // Wait for transaction confirmation
-      await this.wallet.connection.confirmTransaction(tx);
+      await this.wallet.connection.confirmTransaction({
+        signature: tx,
+        blockhash: (await this.wallet.connection.getLatestBlockhash()).blockhash,
+        lastValidBlockHeight: (await this.wallet.connection.getLatestBlockhash()).lastValidBlockHeight
+      });
 
       // Update game message
       const creatorTelegramId = await this.gameDb.getCreatorTelegramId(gamePda.toBase58());
