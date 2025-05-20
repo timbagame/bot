@@ -20,7 +20,7 @@ const LAMPORTS_PER_SOL = 1_000_000_000; // Assuming 9 decimals for SOL
 let tokenMetadata: { decimals: number } | null = null;
 
 // Initialize game database
-const gameDb = GameDatabase.getInstance(wallet.connection);
+const gameDb = GameDatabase.getInstance();
 
 // Initialize Anchor with a wallet for admin operations
 const initializeAnchorProvider = async () => {
@@ -96,6 +96,21 @@ const getTokenMetadata = async () => {
   return tokenMetadata;
 };
 
+// Helper function to format balance message
+const formatBalanceMessage = async (playerKp: anchor.web3.Keypair, balance: any, tokenBalance: number, solBalance: number, metadata: { decimals: number }): Promise<string> => {
+  let response = "💰 <b>Your Balance</b>\n\n";
+  response += `Wallet Address: <code>${playerKp.publicKey.toBase58()}</code>\n`;
+  response += `SOL Balance: ${wallet.formatSolBalance(solBalance)} SOL\n`;
+  response += `Game Balance: ${wallet.formatTokenBalance(Number(balance.amount), metadata.decimals)} ${TICKER}\n`;
+  response += `Wallet Balance: ${wallet.formatTokenBalance(tokenBalance, metadata.decimals)} ${TICKER}`;
+  return response;
+};
+
+// Helper function to format error message
+const formatErrorMessage = (error: any, prefix: string = "❌"): string => {
+  return `${prefix} ${error.message || "Unknown error"}`;
+};
+
 // Command to display balance and wallet info
 bot.command(["start", "balance"], async (ctx: Context) => {
   const telegramId = BigInt(ctx.from?.id || 0);
@@ -115,12 +130,7 @@ bot.command(["start", "balance"], async (ctx: Context) => {
     const tokenBalance = await wallet.getTokenBalance(telegramId, TOKEN_MINT);
     const solBalance = await wallet.getBalance(telegramId);
 
-    // Format response
-    let response = "💰 <b>Your Balance</b>\n\n";
-    response += `Wallet Address: <code>${playerPubkey.toBase58()}</code>\n`;
-    response += `SOL Balance: ${wallet.formatSolBalance(solBalance)} SOL\n`;
-    response += `Game Balance: ${wallet.formatTokenBalance(Number(balance.amount), metadata.decimals)} ${TICKER}\n`;
-    response += `Wallet Balance: ${wallet.formatTokenBalance(tokenBalance, metadata.decimals)} ${TICKER}`;
+    const response = await formatBalanceMessage(playerKp, balance, tokenBalance, solBalance, metadata);
 
     await ctx.reply(response, {
       parse_mode: "HTML",
@@ -128,7 +138,7 @@ bot.command(["start", "balance"], async (ctx: Context) => {
     });
   } catch (error) {
     console.error("Error in balance command:", error);
-    await ctx.reply("❌ An error occurred while fetching your balance. Please try again later.", {
+    await ctx.reply(formatErrorMessage(error), {
       reply_to_message_id: ctx.message?.message_id
     });
   }

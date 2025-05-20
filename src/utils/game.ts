@@ -14,6 +14,7 @@ export class GameManager {
   private activeGameMessages: Map<string, GameMessage>;
   private gameAccountCache: Map<string, { account: any; timestamp: number }>;
   private readonly CACHE_DURATION = 30 * 1000; // 30 seconds
+  private pdaCache: Map<string, PublicKey>;
 
   private constructor(
     private program: anchor.Program<Coinflip>,
@@ -24,6 +25,7 @@ export class GameManager {
   ) {
     this.activeGameMessages = new Map();
     this.gameAccountCache = new Map();
+    this.pdaCache = new Map();
   }
 
   public static getInstance(
@@ -39,36 +41,21 @@ export class GameManager {
     return GameManager.instance;
   }
 
-  // Update getBlockchainTime to include fallback
-  private async getBlockchainTime(): Promise<number> {
-    try {
-      const blockTime = await this.wallet.connection.getBlockTime(
-        await this.wallet.connection.getSlot()
-      );
-      if (!blockTime) {
-        throw new Error("Could not get blockchain time");
-      }
-      return blockTime;
-    } catch (error) {
-      console.warn("Falling back to system time:", error);
-      return Math.floor(Date.now() / 1000);
+  // Helper function to get cached PDA
+  private getPda(seeds: Buffer[], programId: PublicKey): PublicKey {
+    const key = seeds.map(s => s.toString('hex')).join('_') + programId.toBase58();
+    if (!this.pdaCache.has(key)) {
+      const [pda] = PublicKey.findProgramAddressSync(seeds, programId);
+      this.pdaCache.set(key, pda);
     }
+    return this.pdaCache.get(key)!;
   }
 
   // Helper function to get all required PDAs and accounts for a game
   public async getGameAccounts(playerKp: anchor.web3.Keypair): Promise<GameAccounts> {
-    const [oraclePda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("oracle")],
-      this.program.programId
-    );
-    const [gameTokenPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("game_token"), new PublicKey(this.tokenMint).toBuffer()],
-      this.program.programId
-    );
-    const [gameVaultPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("game_vault"), new PublicKey(this.tokenMint).toBuffer()],
-      this.program.programId
-    );
+    const oraclePda = this.getPda([Buffer.from("oracle")], this.program.programId);
+    const gameTokenPda = this.getPda([Buffer.from("game_token"), new PublicKey(this.tokenMint).toBuffer()], this.program.programId);
+    const gameVaultPda = this.getPda([Buffer.from("game_vault"), new PublicKey(this.tokenMint).toBuffer()], this.program.programId);
 
     const playerBalancePda = await this.ensurePlayerBalance(playerKp);
     const playerTokenAccount = await getAssociatedTokenAddress(
@@ -93,7 +80,7 @@ export class GameManager {
 
   // Helper function to ensure player balance PDA exists
   public async ensurePlayerBalance(playerKeypair: anchor.web3.Keypair): Promise<PublicKey> {
-    const [playerBalancePda] = PublicKey.findProgramAddressSync(
+    const playerBalancePda = this.getPda(
       [Buffer.from("player_balance"), playerKeypair.publicKey.toBuffer(), new PublicKey(this.tokenMint).toBuffer()],
       this.program.programId
     );
@@ -128,7 +115,7 @@ export class GameManager {
         console.log("Player token account created");
       }
 
-      const [gameTokenPda] = PublicKey.findProgramAddressSync(
+      const gameTokenPda = this.getPda(
         [Buffer.from("game_token"), new PublicKey(this.tokenMint).toBuffer()],
         this.program.programId
       );
@@ -154,7 +141,7 @@ export class GameManager {
   // Helper function to get cached game account
   private async getCachedGameAccount(gamePda: PublicKey): Promise<any> {
     const cached = this.gameAccountCache.get(gamePda.toBase58());
-    const blockTime = await this.getBlockchainTime();
+    const blockTime = await this.wallet.getBlockchainTime();
     const now = blockTime * 1000;
 
     if (cached && now - cached.timestamp < this.CACHE_DURATION) {
@@ -174,7 +161,7 @@ export class GameManager {
     const createdAt = Number(gameAccount.createdAt);
     const timeout = Number(gameAccount.timeout);
     const expiresAt = createdAt + timeout;
-    const blockTime = await this.getBlockchainTime();
+    const blockTime = await this.wallet.getBlockchainTime();
     const isExpired = blockTime > expiresAt;
     const hasEnoughPlayers = gameAccount.players.length >= gameAccount.minPlayers;
 
@@ -266,7 +253,7 @@ export class GameManager {
       const winnerPubkeyStr = completedGameAccount.winner.toString();
 
       // Get the block time for the completion transaction
-      const blockTime = await this.getBlockchainTime();
+      const blockTime = await this.wallet.getBlockchainTime();
       const completedAt = blockTime * 1000;
 
       // Store the completion time in the database
@@ -342,7 +329,7 @@ export class GameManager {
           .rpc();
 
         // Get the block time for the cancellation transaction
-        const blockTime = await this.getBlockchainTime();
+        const blockTime = await this.wallet.getBlockchainTime();
         const completedAt = blockTime * 1000;
 
         await this.gameDb.completeGame(gamePda.toBase58(), "cancelled", completedAt);
@@ -551,7 +538,7 @@ export class GameManager {
     let expirationInfo = "";
     if (status.toLowerCase() === "active") {
       try {
-        const blockTime = await this.getBlockchainTime();
+        const blockTime = await this.wallet.getBlockchainTime();
         if (blockTime) {
           const createdAt = Number(gameAccount.createdAt);
           const timeout = Number(gameAccount.timeout);
@@ -734,7 +721,7 @@ export class GameManager {
       let expirationInfo = "";
       if (status.toLowerCase() === "active") {
         // Get current blockchain time
-        const blockTime = await this.getBlockchainTime();
+        const blockTime = await this.wallet.getBlockchainTime();
         if (!blockTime) {
           throw new Error("Could not get blockchain time");
         }

@@ -226,4 +226,20 @@ export class WalletManager {
   public formatTokenBalance(amount: number, decimals: number): string {
     return (amount / Math.pow(10, decimals)).toFixed(decimals);
   }
+
+  public async getBlockchainTime(): Promise<number> {
+    await this.throttle();
+    try {
+      const blockTime = await this.connection.getBlockTime(
+        await this.connection.getSlot()
+      );
+      if (!blockTime) {
+        throw new Error("Could not get blockchain time");
+      }
+      return blockTime;
+    } catch (error) {
+      console.warn("Falling back to system time:", error);
+      return Math.floor(Date.now() / 1000);
+    }
+  }
 }

@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import type { GameData, PlayerMapping } from "../types/database";
-import { Connection } from "@solana/web3.js";
+import { WalletManager } from "./wallet";
 
 /**
  * Database service for storing game-related data
@@ -8,34 +8,19 @@ import { Connection } from "@solana/web3.js";
 export class GameDatabase {
   private static instance: GameDatabase;
   private db: Database;
-  private connection: Connection;
+  private wallet: WalletManager;
 
-  private constructor(connection: Connection) {
-    this.connection = connection;
+  private constructor() {
     this.db = new Database("games.sqlite", { create: true });
+    this.wallet = WalletManager.getInstance(process.env.MNEMONIC!);
     this.initDb();
   }
 
-  public static getInstance(connection: Connection): GameDatabase {
+  public static getInstance(): GameDatabase {
     if (!GameDatabase.instance) {
-      GameDatabase.instance = new GameDatabase(connection);
+      GameDatabase.instance = new GameDatabase();
     }
     return GameDatabase.instance;
-  }
-
-  private async getBlockTime(): Promise<number> {
-    try {
-      const blockTime = await this.connection.getBlockTime(
-        await this.connection.getSlot()
-      );
-      if (!blockTime) {
-        throw new Error("Could not get blockchain time");
-      }
-      return blockTime;
-    } catch (error) {
-      console.warn("Falling back to system time:", error);
-      return Math.floor(Date.now() / 1000);
-    }
   }
 
   private async initDb(): Promise<void> {
@@ -74,7 +59,7 @@ export class GameDatabase {
   // Game methods
   public async saveGame(gameAddress: string, creatorTelegramId: string, secretKey: string, amount: number): Promise<void> {
     try {
-      const blockTime = await this.getBlockTime();
+      const blockTime = await this.wallet.getBlockchainTime();
       const stmt = this.db.prepare(
         'INSERT INTO games (game_address, creator_telegram_id, secret_key, amount, created_at, status) VALUES (?, ?, ?, ?, ?, ?)'
       );
@@ -97,7 +82,7 @@ export class GameDatabase {
 
   public async completeGame(gameAddress: string, winnerAddress: string, completedAt?: number): Promise<void> {
     try {
-      const blockTime = completedAt ? Math.floor(completedAt / 1000) : await this.getBlockTime();
+      const blockTime = completedAt ? Math.floor(completedAt / 1000) : await this.wallet.getBlockchainTime();
       const stmt = this.db.prepare(
         'UPDATE games SET winner_address = ?, completed_at = ?, status = ? WHERE game_address = ?'
       );
