@@ -16,6 +16,15 @@ export class GameManager {
   private readonly CACHE_DURATION = 30 * 1000; // 30 seconds
   private pdaCache: Map<string, PublicKey>;
 
+  // Common PDA seeds
+  private readonly PDA_SEEDS = {
+    ORACLE: Buffer.from("oracle"),
+    GAME_TOKEN: Buffer.from("game_token"),
+    GAME_VAULT: Buffer.from("game_vault"),
+    PLAYER_BALANCE: Buffer.from("player_balance"),
+    GAME: Buffer.from("game")
+  };
+
   private constructor(
     private program: anchor.Program<Coinflip>,
     private wallet: WalletManager,
@@ -51,12 +60,56 @@ export class GameManager {
     return this.pdaCache.get(key)!;
   }
 
+  // Helper function to get common PDAs
+  private getCommonPdas(): { oraclePda: PublicKey; gameTokenPda: PublicKey; gameVaultPda: PublicKey } {
+    const tokenMintBuffer = new PublicKey(this.tokenMint).toBuffer();
+    return {
+      oraclePda: this.getPda([this.PDA_SEEDS.ORACLE], this.program.programId),
+      gameTokenPda: this.getPda([this.PDA_SEEDS.GAME_TOKEN, tokenMintBuffer], this.program.programId),
+      gameVaultPda: this.getPda([this.PDA_SEEDS.GAME_VAULT, tokenMintBuffer], this.program.programId)
+    };
+  }
+
+  // Helper function to get player balance PDA
+  private getPlayerBalancePda(playerPubkey: PublicKey): PublicKey {
+    return this.getPda(
+      [this.PDA_SEEDS.PLAYER_BALANCE, playerPubkey.toBuffer(), new PublicKey(this.tokenMint).toBuffer()],
+      this.program.programId
+    );
+  }
+
+  // Helper function to get game PDA
+  private getGamePda(randomHash: Buffer): PublicKey {
+    return this.getPda([this.PDA_SEEDS.GAME, randomHash], this.program.programId);
+  }
+
+  // Helper function to calculate expiration time
+  private async calculateExpirationTime(gameAccount: any): Promise<string> {
+    try {
+      const blockTime = await this.wallet.getBlockchainTime();
+      if (!blockTime) return "";
+
+      const createdAt = Number(gameAccount.createdAt);
+      const timeout = Number(gameAccount.timeout);
+      const expiresAt = createdAt + timeout;
+      const timeLeft = expiresAt - blockTime;
+
+      if (timeLeft > 0) {
+        const hours = Math.floor(timeLeft / 3600);
+        const minutes = Math.floor((timeLeft % 3600) / 60);
+        return `\n⏰ Expires in: ${hours}h ${minutes}m`;
+      } else {
+        return "\n⚠️ Expired";
+      }
+    } catch (error) {
+      console.error("Error calculating expiration time:", error);
+      return "";
+    }
+  }
+
   // Helper function to get all required PDAs and accounts for a game
   public async getGameAccounts(playerKp: anchor.web3.Keypair): Promise<GameAccounts> {
-    const oraclePda = this.getPda([Buffer.from("oracle")], this.program.programId);
-    const gameTokenPda = this.getPda([Buffer.from("game_token"), new PublicKey(this.tokenMint).toBuffer()], this.program.programId);
-    const gameVaultPda = this.getPda([Buffer.from("game_vault"), new PublicKey(this.tokenMint).toBuffer()], this.program.programId);
-
+    const { oraclePda, gameTokenPda, gameVaultPda } = this.getCommonPdas();
     const playerBalancePda = await this.ensurePlayerBalance(playerKp);
     const playerTokenAccount = await getAssociatedTokenAddress(
       new PublicKey(this.tokenMint),
@@ -80,10 +133,7 @@ export class GameManager {
 
   // Helper function to ensure player balance PDA exists
   public async ensurePlayerBalance(playerKeypair: anchor.web3.Keypair): Promise<PublicKey> {
-    const playerBalancePda = this.getPda(
-      [Buffer.from("player_balance"), playerKeypair.publicKey.toBuffer(), new PublicKey(this.tokenMint).toBuffer()],
-      this.program.programId
-    );
+    const playerBalancePda = this.getPlayerBalancePda(playerKeypair.publicKey);
 
     try {
       await this.program.account.playerBalance.fetch(playerBalancePda);
@@ -115,10 +165,7 @@ export class GameManager {
         console.log("Player token account created");
       }
 
-      const gameTokenPda = this.getPda(
-        [Buffer.from("game_token"), new PublicKey(this.tokenMint).toBuffer()],
-        this.program.programId
-      );
+      const { gameTokenPda } = this.getCommonPdas();
 
       // Call the contract to initialize player balance
       const tx = await this.program.methods
@@ -418,7 +465,7 @@ export class GameManager {
   // Helper function to unjoin a game
   public async unjoinGame(ctx: Context, gamePda: PublicKey, playerKp: anchor.web3.Keypair): Promise<boolean> {
     try {
-      const gameAccount = await this.program.account.game.fetch(gamePda);
+      const gameAccount = await this.getCachedGameAccount(gamePda);
       const status = Object.keys(gameAccount.status)[0].toLowerCase();
 
       // Check if game is active
@@ -427,10 +474,7 @@ export class GameManager {
       }
 
       // Get player's balance PDA
-      const [playerBalancePda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("player_balance"), playerKp.publicKey.toBuffer(), new PublicKey(this.tokenMint).toBuffer()],
-        this.program.programId
-      );
+      const playerBalancePda = this.getPlayerBalancePda(playerKp.publicKey);
 
       // Check if player is in the game
       const isInGame = gameAccount.players.some((p: PublicKey) => p.equals(playerBalancePda));
@@ -471,13 +515,7 @@ export class GameManager {
         throw new Error("Could not find game creator");
       }
 
-      let creatorUsername = "Unknown";
-      try {
-        const chatMember = await ctx.api.getChatMember(ctx.chat!.id, parseInt(creatorTelegramId));
-        creatorUsername = chatMember.user.username || chatMember.user.first_name;
-      } catch (error) {
-        console.error("Error getting creator's username:", error);
-      }
+      const creatorUsername = await this.getUsernameFromTelegramId(ctx, creatorTelegramId);
 
       await this.updateGameMessage(
         ctx,
@@ -507,7 +545,7 @@ export class GameManager {
     txHash?: string
   ): Promise<GameMessageFormat> {
     const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
-    const gameAccount = await this.program.account.game.fetch(gamePda);
+    const gameAccount = await this.getCachedGameAccount(gamePda);
     const currentPlayers = gameAccount.players.length;
     const maxPlayers = gameAccount.maxPlayers;
 
@@ -524,25 +562,7 @@ export class GameManager {
     // Calculate expiration time using blockchain time
     let expirationInfo = "";
     if (status.toLowerCase() === "active") {
-      try {
-        const blockTime = await this.wallet.getBlockchainTime();
-        if (blockTime) {
-          const createdAt = Number(gameAccount.createdAt);
-          const timeout = Number(gameAccount.timeout);
-          const expiresAt = createdAt + timeout;
-          const timeLeft = expiresAt - blockTime;
-
-          if (timeLeft > 0) {
-            const hours = Math.floor(timeLeft / 3600);
-            const minutes = Math.floor((timeLeft % 3600) / 60);
-            expirationInfo = `\n⏰ Expires in: ${hours}h ${minutes}m`;
-          } else {
-            expirationInfo = "\n⚠️ Expired";
-          }
-        }
-      } catch (error) {
-        console.error("Error calculating expiration time:", error);
-      }
+      expirationInfo = await this.calculateExpirationTime(gameAccount);
     }
 
     let messageText = `<b>🪙 ${gameType} Game</b>\n\n` +
@@ -682,7 +702,7 @@ export class GameManager {
   // Helper function to get game info for display
   public async getGameInfo(gamePda: PublicKey): Promise<string> {
     try {
-      const gameAccount = await this.program.account.game.fetch(gamePda);
+      const gameAccount = await this.getCachedGameAccount(gamePda);
       const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
 
       // Format game details
@@ -696,24 +716,7 @@ export class GameManager {
       // Calculate expiration time using blockchain time
       let expirationInfo = "";
       if (status.toLowerCase() === "active") {
-        // Get current blockchain time
-        const blockTime = await this.wallet.getBlockchainTime();
-        if (!blockTime) {
-          throw new Error("Could not get blockchain time");
-        }
-
-        const createdAt = Number(gameAccount.createdAt);
-        const timeout = Number(gameAccount.timeout);
-        const expiresAt = createdAt + timeout;
-        const timeLeft = expiresAt - blockTime;
-
-        if (timeLeft > 0) {
-          const hours = Math.floor(timeLeft / 3600);
-          const minutes = Math.floor((timeLeft % 3600) / 60);
-          expirationInfo = `\nExpires in: ${hours}h ${minutes}m`;
-        } else {
-          expirationInfo = "\n⚠️ Expired";
-        }
+        expirationInfo = await this.calculateExpirationTime(gameAccount);
       }
 
       return `Game: <code>${gamePda.toBase58().slice(0, 8)}...</code>\n` +
@@ -742,17 +745,14 @@ export class GameManager {
     let totalTokensInGames = 0;
 
     // Get player's balance PDA once
-    const [playerBalancePda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("player_balance"), playerKp.publicKey.toBuffer(), new PublicKey(this.tokenMint).toBuffer()],
-      this.program.programId
-    );
+    const playerBalancePda = this.getPlayerBalancePda(playerKp.publicKey);
 
     // Batch fetch all game accounts
     const gameAccounts = new Map();
     const gamePromises = allGames.map(async (gameData) => {
       try {
         const gamePda = new PublicKey(gameData.game_address);
-        const gameAccount = await this.program.account.game.fetch(gamePda);
+        const gameAccount = await this.getCachedGameAccount(gamePda);
         gameAccounts.set(gameData.game_address, gameAccount);
       } catch (error) {
         console.error(`Error fetching game ${gameData.game_address}:`, error);
@@ -978,10 +978,7 @@ export class GameManager {
       const tokenBalance = await this.wallet.getTokenBalance(telegramId, this.tokenMint);
 
       // Get player's game balance
-      const [playerBalancePda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("player_balance"), playerKp.publicKey.toBuffer(), new PublicKey(this.tokenMint).toBuffer()],
-        this.program.programId
-      );
+      const playerBalancePda = this.getPlayerBalancePda(playerKp.publicKey);
 
       let gameBalance = 0;
       try {
@@ -1011,10 +1008,7 @@ export class GameManager {
       const randomHash = createHash('sha256').update(secretKey).digest();
 
       // Get all required PDAs and accounts
-      const [gamePda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("game"), randomHash],
-        this.program.programId
-      );
+      const gamePda = this.getGamePda(randomHash);
 
       // Ensure player balance PDA exists
       await this.ensurePlayerBalance(playerKp);
@@ -1023,29 +1017,8 @@ export class GameManager {
       console.log(`Saving creator balance PDA mapping - PDA: ${playerBalancePda.toBase58()}, Telegram ID: ${telegramId.toString()}`);
       this.gameDb.savePlayerMapping(playerBalancePda.toBase58(), telegramId.toString());
 
-      const [oraclePda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("oracle")],
-        this.program.programId
-      );
-      const [gameTokenPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("game_token"), new PublicKey(this.tokenMint).toBuffer()],
-        this.program.programId
-      );
-      const [gameVaultPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("game_vault"), new PublicKey(this.tokenMint).toBuffer()],
-        this.program.programId
-      );
-
-      // Get token accounts
-      const playerTokenAccount = await getAssociatedTokenAddress(
-        new PublicKey(this.tokenMint),
-        playerKp.publicKey
-      );
-      const gameTokenAccount = await getAssociatedTokenAddress(
-        new PublicKey(this.tokenMint),
-        gameVaultPda,
-        true
-      );
+      // Get all required PDAs and accounts
+      const accounts = await this.getGameAccounts(playerKp);
 
       // Create game on-chain
       const tx = await this.program.methods
@@ -1061,17 +1034,17 @@ export class GameManager {
         .accounts({
           player: playerKp.publicKey,
           playerBalance: playerBalancePda,
-          oracle: oraclePda,
-          gameToken: gameTokenPda,
-          playerTokenAccount: playerTokenAccount,
-          gameTokenAccount: gameTokenAccount,
+          oracle: accounts.oraclePda,
+          gameToken: accounts.gameTokenPda,
+          playerTokenAccount: accounts.playerTokenAccount,
+          gameTokenAccount: accounts.gameTokenAccount,
         })
         .signers([playerKp])
         .rpc();
 
       // Verify game creation
       try {
-        await this.program.account.game.fetch(gamePda);
+        await this.getCachedGameAccount(gamePda);
       } catch (error) {
         throw new Error("Game creation failed");
       }
