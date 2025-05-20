@@ -97,12 +97,22 @@ const getTokenMetadata = async () => {
 };
 
 // Helper function to format balance message
-const formatBalanceMessage = async (playerKp: anchor.web3.Keypair, balance: any, tokenBalance: number, solBalance: number, metadata: { decimals: number }): Promise<string> => {
+const formatBalanceMessage = async (ctx: Context, playerKp: anchor.web3.Keypair, balance: any, tokenBalance: number, solBalance: number, metadata: { decimals: number }): Promise<string> => {
   let response = "💰 <b>Your Balance</b>\n\n";
   response += `Wallet Address: <code>${playerKp.publicKey.toBase58()}</code>\n`;
   response += `SOL Balance: ${wallet.formatSolBalance(solBalance)} SOL\n`;
   response += `Game Balance: ${wallet.formatTokenBalance(Number(balance.amount), metadata.decimals)} ${TICKER}\n`;
   response += `Wallet Balance: ${wallet.formatTokenBalance(tokenBalance, metadata.decimals)} ${TICKER}`;
+
+  // Get total tokens in active games
+  const telegramId = await gameDb.getPlayerTelegramId(playerKp.publicKey.toBase58());
+  if (telegramId) {
+    const { totalTokensInGames } = await gameManager.getUserGames(ctx, BigInt(telegramId));
+    if (totalTokensInGames > 0) {
+      response += `\n\n🎮 Total in Active Games: ${wallet.formatTokenBalance(totalTokensInGames, metadata.decimals)} ${TICKER}`;
+    }
+  }
+
   return response;
 };
 
@@ -130,7 +140,7 @@ bot.command(["start", "balance"], async (ctx: Context) => {
     const tokenBalance = await wallet.getTokenBalance(telegramId, TOKEN_MINT);
     const solBalance = await wallet.getBalance(telegramId);
 
-    const response = await formatBalanceMessage(playerKp, balance, tokenBalance, solBalance, metadata);
+    const response = await formatBalanceMessage(ctx, playerKp, balance, tokenBalance, solBalance, metadata);
 
     await ctx.reply(response, {
       parse_mode: "HTML",
@@ -744,10 +754,11 @@ bot.on("callback_query", async (ctx) => {
       // Update game message with current status
       const creatorUsername = await gameManager.getGameCreatorUsername(ctx, gameAddress);
       console.log("Updating game message...");
+      const gameType = Object.keys(gameAccount.gameType)[0].charAt(0).toUpperCase() + Object.keys(gameAccount.gameType)[0].slice(1);
       await gameManager.updateGameMessage(
         ctx,
         gameAddress,
-        "Coinflip",
+        gameType,
         Number(game.amount),
         creatorUsername,
         "Active",
