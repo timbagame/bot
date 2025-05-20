@@ -731,20 +731,7 @@ bot.on("callback_query", async (ctx) => {
       await gameDb.savePlayerMapping(playerBalancePda.toBase58(), telegramId.toString());
 
       // Update game message with current status
-      const creatorTelegramId = await gameDb.getCreatorTelegramId(gameAddress);
-      if (!creatorTelegramId) {
-        console.error(`No creator telegram ID found for game ${gameAddress}`);
-        return;
-      }
-
-      let creatorUsername = "Unknown";
-      try {
-        const chatMember = await ctx.api.getChatMember(ctx.chat!.id, parseInt(creatorTelegramId));
-        creatorUsername = chatMember.user.username || chatMember.user.first_name;
-      } catch (error) {
-        console.error("Error getting creator's username:", error);
-      }
-
+      const creatorUsername = await gameManager.getGameCreatorUsername(ctx, gameAddress);
       console.log("Updating game message...");
       await gameManager.updateGameMessage(
         ctx,
@@ -799,20 +786,7 @@ bot.on("callback_query", async (ctx) => {
     try {
       const gamePda = new PublicKey(gameAddress);
       const currentGameAccount = await program.account.game.fetch(gamePda);
-      const creatorTelegramId = await gameDb.getCreatorTelegramId(gameAddress);
-      if (!creatorTelegramId) {
-        console.error(`No creator telegram ID found for game ${gameAddress}`);
-        await ctx.answerCallbackQuery("Error: Could not find game creator!");
-        return;
-      }
-
-      let creatorUsername = "Unknown";
-      try {
-        const chatMember = await ctx.api.getChatMember(ctx.chat!.id, parseInt(creatorTelegramId));
-        creatorUsername = chatMember.user.username || chatMember.user.first_name;
-      } catch (error) {
-        console.error("Error getting creator's username:", error);
-      }
+      const creatorUsername = await gameManager.getGameCreatorUsername(ctx, gameAddress);
 
       // Update game message with current status
       await gameManager.updateGameMessage(

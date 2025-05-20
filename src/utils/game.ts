@@ -516,21 +516,8 @@ export class GameManager {
     if (gameAccount.players.length > 0) {
       playerInfo = "\n👥 Players:\n";
       for (const playerBalancePda of gameAccount.players) {
-        // Try to get the player's Telegram ID from their balance PDA
-        const playerTelegramId = await this.gameDb.getPlayerTelegramId(playerBalancePda.toBase58());
-
-        if (playerTelegramId) {
-          try {
-            const chatMember = await ctx.api.getChatMember(ctx.chat!.id, parseInt(playerTelegramId));
-            const username = chatMember.user.username || chatMember.user.first_name;
-            playerInfo += `• @${username}\n`;
-          } catch (error) {
-            console.error(`Error getting chat member for ${playerTelegramId}:`, error);
-            playerInfo += `• ${playerBalancePda.toBase58().slice(0, 8)}...\n`;
-          }
-        } else {
-          playerInfo += `• ${playerBalancePda.toBase58().slice(0, 8)}...\n`;
-        }
+        const username = await this.getPlayerUsername(ctx, playerBalancePda.toBase58());
+        playerInfo += `• @${username}\n`;
       }
     }
 
@@ -565,19 +552,8 @@ export class GameManager {
       `Status: ${status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()}${expirationInfo}\n`;
 
     if (winnerAddress && winnerAddress !== "11111111111111111111111111111111") {
-      // Get winner's Telegram username
-      const winnerTelegramId = await this.gameDb.getPlayerTelegramId(winnerAddress);
-      let winnerTag = winnerAddress.slice(0, 8) + "...";
-      if (winnerTelegramId) {
-        try {
-          const chatMember = await ctx.api.getChatMember(ctx.chat!.id, parseInt(winnerTelegramId));
-          const username = chatMember.user.username || chatMember.user.first_name;
-          winnerTag = `@${username}`;
-        } catch (error) {
-          console.error("Error getting winner's username:", error);
-        }
-      }
-      messageText += `\n🏆 Winner: ${winnerTag}`;
+      const winnerUsername = await this.getPlayerUsername(ctx, winnerAddress);
+      messageText += `\n🏆 Winner: @${winnerUsername}`;
     }
 
     if (txHash) {
@@ -1125,5 +1101,35 @@ export class GameManager {
         reply_to_message_id: ctx.message?.message_id
       });
     }
+  }
+
+  // Helper function to get a user's username from their Telegram ID
+  private async getUsernameFromTelegramId(ctx: Context, telegramId: string): Promise<string> {
+    try {
+      const chatMember = await ctx.api.getChatMember(ctx.chat!.id, parseInt(telegramId));
+      return chatMember.user.username || chatMember.user.first_name;
+    } catch (error) {
+      console.error(`Error getting username for Telegram ID ${telegramId}:`, error);
+      return "Unknown";
+    }
+  }
+
+  // Helper function to get a game's creator username
+  public async getGameCreatorUsername(ctx: Context, gameAddress: string): Promise<string> {
+    const creatorTelegramId = await this.gameDb.getCreatorTelegramId(gameAddress);
+    if (!creatorTelegramId) {
+      console.error(`No creator telegram ID found for game ${gameAddress}`);
+      return "Unknown";
+    }
+    return this.getUsernameFromTelegramId(ctx, creatorTelegramId);
+  }
+
+  // Helper function to get a player's username from their public key
+  public async getPlayerUsername(ctx: Context, publicKey: string): Promise<string> {
+    const playerTelegramId = await this.gameDb.getPlayerTelegramId(publicKey);
+    if (!playerTelegramId) {
+      return publicKey.slice(0, 8) + "...";
+    }
+    return this.getUsernameFromTelegramId(ctx, playerTelegramId);
   }
 }
