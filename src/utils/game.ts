@@ -5,7 +5,7 @@ import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } fr
 import { WalletManager } from "./wallet";
 import { GameDatabase } from "./database";
 import { OracleManager } from "./oracle";
-import type { GameStatus, GameMessage, GameCancellationResult, GameInfo, GameAccounts, GameMessageFormat } from "../types/game";
+import type { GameMessage, GameCancellationResult, GameAccounts, GameMessageFormat } from "../types/game";
 import type { Coinflip } from "../../idl/idlType";
 
 export class GameManager {
@@ -209,11 +209,9 @@ export class GameManager {
     return account;
   }
 
-  // Helper function to check game status
-  public async checkGameStatus(gamePda: PublicKey): Promise<GameInfo> {
-    const gameAccount = await this.program.account.game.fetch(gamePda);
+  // Helper function to get game status info
+  private async getGameStatusInfo(gameAccount: any): Promise<{ status: string; isExpired: boolean; hasEnoughPlayers: boolean }> {
     const status = Object.keys(gameAccount.status)[0].toLowerCase();
-
     const createdAt = Number(gameAccount.createdAt);
     const timeout = Number(gameAccount.timeout);
     const expiresAt = createdAt + timeout;
@@ -222,6 +220,89 @@ export class GameManager {
     const hasEnoughPlayers = gameAccount.players.length >= gameAccount.minPlayers;
 
     return { status, isExpired, hasEnoughPlayers };
+  }
+
+  // Helper function to get game basic info
+  private async getGameBasicInfo(gameAccount: any): Promise<{
+    amount: number;
+    maxPlayers: number;
+    currentPlayers: number;
+    creatorPubkey: string;
+    status: string;
+    gameType: string;
+  }> {
+    const amount = Number(gameAccount.amount);
+    const maxPlayers = gameAccount.maxPlayers;
+    const currentPlayers = gameAccount.players.length;
+    const creatorPubkey = gameAccount.creator.toString();
+    const status = Object.keys(gameAccount.status)[0];
+    const gameType = this.formatGameType(gameAccount.gameType);
+
+    return {
+      amount,
+      maxPlayers,
+      currentPlayers,
+      creatorPubkey,
+      status,
+      gameType
+    };
+  }
+
+  // Helper function to get player info
+  private async getPlayerInfo(ctx: Context, gameAccount: any): Promise<string> {
+    let playerInfo = "";
+    if (gameAccount.players.length > 0) {
+      playerInfo = "\n👥 Players:\n";
+      for (const playerBalancePda of gameAccount.players) {
+        const username = await this.getPlayerUsername(ctx, playerBalancePda.toBase58());
+        playerInfo += `• @${username}\n`;
+      }
+    }
+    return playerInfo;
+  }
+
+  // Helper function to get winner info
+  private async getWinnerInfo(ctx: Context, gameAccount: any): Promise<string> {
+    if (gameAccount.winner && gameAccount.winner.toString() !== "11111111111111111111111111111111") {
+      const winnerUsername = await this.getPlayerUsername(ctx, gameAccount.winner.toString());
+      return `\n🏆 Winner: @${winnerUsername}`;
+    }
+    return "";
+  }
+
+  // Helper function to get creator info
+  private async getCreatorInfo(ctx: Context, gamePda: PublicKey, creatorPubkey: string): Promise<string> {
+    const creatorTelegramId = await this.gameDb.getCreatorTelegramId(gamePda.toBase58());
+    if (creatorTelegramId) {
+      const creatorUsername = await this.getUsernameFromTelegramId(ctx, creatorTelegramId);
+      if (creatorUsername !== "Unknown") {
+        return `@${creatorUsername}`;
+      }
+    }
+    return `<code>${creatorPubkey.slice(0, 8)}...</code>`;
+  }
+
+  // Helper function to format game type
+  private formatGameType(gameType: string): string {
+    return Object.keys(gameType)[0].charAt(0).toUpperCase() + Object.keys(gameType)[0].slice(1);
+  }
+
+  // Helper function to format game status
+  private formatGameStatus(status: string): string {
+    return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+  }
+
+  // Helper function to format date
+  private formatDate(timestamp: number): string {
+    return new Date(timestamp * 1000).toLocaleString('en-GB', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
   }
 
   // Helper function to handle game completion
@@ -260,19 +341,19 @@ export class GameManager {
   // Helper function to handle expired games
   public async handleExpiredGame(ctx: Context, gamePda: PublicKey, gameAccount: any): Promise<GameCancellationResult | false> {
     try {
-      const { isExpired, hasEnoughPlayers } = await this.checkGameStatus(gamePda);
+      const { status, isExpired, hasEnoughPlayers } = await this.getGameStatusInfo(gameAccount);
       if (!isExpired) return false;
 
       // Log detailed game state
       console.log(`\n=== Expired Game State for ${gamePda.toBase58()} ===`);
-      console.log(`Status: ${Object.keys(gameAccount.status)[0]}`);
+      console.log(`Status: ${status}`);
       console.log(`Players: ${gameAccount.players.length}/${gameAccount.maxPlayers}`);
       console.log(`Min Players: ${gameAccount.minPlayers}`);
-      console.log(`Created At: ${new Date(Number(gameAccount.createdAt) * 1000).toISOString()}`);
+      console.log(`Created At: ${this.formatDate(Number(gameAccount.createdAt))}`);
       console.log(`Timeout: ${gameAccount.timeout} seconds`);
       console.log(`Creator: ${gameAccount.creator.toBase58()}`);
       console.log(`Winner: ${gameAccount.winner?.toBase58() || 'Not set'}`);
-      console.log(`Game Type: ${Object.keys(gameAccount.gameType)[0]}`);
+      console.log(`Game Type: ${this.formatGameType(gameAccount.gameType)}`);
       console.log(`Amount: ${gameAccount.amount}`);
       console.log(`Is Expired: ${isExpired}`);
       console.log(`Has Enough Players: ${hasEnoughPlayers}`);
@@ -282,13 +363,11 @@ export class GameManager {
       const creatorTelegramId = await this.gameDb.getCreatorTelegramId(gamePda.toBase58());
       if (!creatorTelegramId) return false;
 
-      // If game has enough players, complete it
       if (hasEnoughPlayers) {
         const completed = await this.handleGameCompletion(ctx, gamePda);
-        return completed ? false : false; // Return false since we don't want to track completed games in the cancellation list
+        return completed ? false : false;
       }
 
-      // Otherwise, cancel the game and return funds
       const creatorKp = await this.wallet.getKeyPair(BigInt(creatorTelegramId));
       const accounts = await this.getGameAccounts(creatorKp);
 
@@ -308,13 +387,11 @@ export class GameManager {
           .signers([adminKp, creatorKp])
           .rpc();
 
-        // Get the block time for the cancellation transaction
         const blockTime = await this.wallet.getBlockchainTime();
         const completedAt = blockTime * 1000;
 
         await this.gameDb.completeGame(gamePda.toBase58(), "cancelled", completedAt);
 
-        // Return the cancellation info
         return {
           cancelled: true,
           amount: Number(gameAccount.amount),
@@ -324,7 +401,7 @@ export class GameManager {
       } catch (error: any) {
         if (error.message.includes("GameReadyForOracle")) {
           const completed = await this.handleGameCompletion(ctx, gamePda);
-          return completed ? false : false; // Return false since we don't want to track completed games in the cancellation list
+          return completed ? false : false;
         }
         throw error;
       }
@@ -464,41 +541,22 @@ export class GameManager {
   ): Promise<GameMessageFormat> {
     const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
     const gameAccount = await this.getCachedGameAccount(gamePda);
-    const currentPlayers = gameAccount.players.length;
-    const maxPlayers = gameAccount.maxPlayers;
+    const { currentPlayers, maxPlayers } = await this.getGameBasicInfo(gameAccount);
 
-    // Get player usernames
-    let playerInfo = "";
-    if (gameAccount.players.length > 0) {
-      playerInfo = "\n👥 Players:\n";
-      for (const playerBalancePda of gameAccount.players) {
-        const username = await this.getPlayerUsername(ctx, playerBalancePda.toBase58());
-        playerInfo += `• @${username}\n`;
-      }
-    }
-
-    // Calculate expiration time using blockchain time
-    let expirationInfo = "";
-    if (status.toLowerCase() === "active") {
-      expirationInfo = await this.calculateExpirationTime(gameAccount);
-    }
+    const playerInfo = await this.getPlayerInfo(ctx, gameAccount);
+    const expirationInfo = status.toLowerCase() === "active" ? await this.calculateExpirationTime(gameAccount) : "";
+    const winnerInfo = winnerAddress ? await this.getWinnerInfo(ctx, gameAccount) : "";
 
     let messageText = `<b>🪙 ${gameType} Game</b>\n\n` +
       `💰 Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
       `👤 Creator: @${creatorUsername}\n` +
       `👥 Players: ${currentPlayers}/${maxPlayers}${playerInfo}\n` +
-      `Status: ${status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()}${expirationInfo}\n`;
-
-    if (winnerAddress && winnerAddress !== "11111111111111111111111111111111") {
-      const winnerUsername = await this.getPlayerUsername(ctx, winnerAddress);
-      messageText += `\n🏆 Winner: @${winnerUsername}`;
-    }
+      `Status: ${this.formatGameStatus(status)}${expirationInfo}${winnerInfo}`;
 
     if (txHash) {
       messageText += `\n\nTransaction: <code>${txHash}</code>`;
     }
 
-    // Create keyboard based on game status
     const keyboard = [];
     if (status.toLowerCase() !== "completed") {
       keyboard.push([
@@ -506,7 +564,6 @@ export class GameManager {
         { text: "🔄 Refresh", callback_data: `refresh_${gamePda.toBase58()}` }
       ]);
 
-      // Add unjoin button if there are players in the game
       if (gameAccount.players.length > 0) {
         keyboard[0].push({ text: "❌ Unjoin", callback_data: `unjoin_${gamePda.toBase58()}` });
       }
@@ -618,34 +675,49 @@ export class GameManager {
   }
 
   // Helper function to get game info for display
-  public async getGameInfo(gamePda: PublicKey): Promise<string> {
+  public async getGameInfo(ctx: Context, gamePda: PublicKey): Promise<string> {
     try {
       const gameAccount = await this.getCachedGameAccount(gamePda);
       const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
+      const { amount, maxPlayers, currentPlayers, creatorPubkey, status, gameType } = await this.getGameBasicInfo(gameAccount);
 
-      // Format game details
-      const amount = Number(gameAccount.amount);
-      const maxPlayers = gameAccount.maxPlayers;
-      const currentPlayers = gameAccount.players.length;
-      const creatorPubkey = gameAccount.creator.toString();
-      const status = Object.keys(gameAccount.status)[0] as GameStatus;
-      const gameType = Object.keys(gameAccount.gameType)[0].charAt(0).toUpperCase() + Object.keys(gameAccount.gameType)[0].slice(1);
-
-      // Calculate expiration time using blockchain time
-      let expirationInfo = "";
-      if (status.toLowerCase() === "active") {
-        expirationInfo = await this.calculateExpirationTime(gameAccount);
-      }
+      const creatorInfo = await this.getCreatorInfo(ctx, gamePda, creatorPubkey);
+      const expirationInfo = status.toLowerCase() === "active" ? await this.calculateExpirationTime(gameAccount) : "";
+      const winnerInfo = status.toLowerCase() === "completed" ? await this.getWinnerInfo(ctx, gameAccount) : "";
 
       return `Game: <code>${gamePda.toBase58().slice(0, 8)}...</code>\n` +
              `Type: ${gameType}\n` +
              `Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
-             `Players: ${currentPlayers}/${maxPlayers}\n` +
-             `Status: ${status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()}${expirationInfo}\n` +
-             `Creator: <code>${creatorPubkey.slice(0, 8)}...</code>`;
+             `Creator: ${creatorInfo}\n` +
+             `Players: ${currentPlayers}/${maxPlayers}${expirationInfo}${winnerInfo}`;
     } catch (error: any) {
       return `Error fetching game: ${error.message}`;
     }
+  }
+
+  // Helper function to format game section
+  private async formatGameSection(
+    ctx: Context,
+    games: any[],
+    sectionTitle: string,
+    gameInfoCache: Map<string, string>
+  ): Promise<string> {
+    if (games.length === 0) return "";
+
+    let section = `${sectionTitle}\n\n`;
+    for (const game of games) {
+      let gameInfo = gameInfoCache.get(game.game_address);
+      if (!gameInfo) {
+        const gamePda = new PublicKey(game.game_address);
+        gameInfo = await this.getGameInfo(ctx, gamePda);
+        gameInfoCache.set(game.game_address, gameInfo);
+      }
+      section += `${gameInfo}\n`;
+      if (game.completed_at) {
+        section += `Completed: ${this.formatDate(game.completed_at)}\n\n`;
+      }
+    }
+    return section;
   }
 
   // Helper function to get user's games
@@ -656,7 +728,6 @@ export class GameManager {
   }> {
     const playerKp = await this.wallet.getKeyPair(telegramId);
     const allGames = await this.gameDb.getAllGames();
-    const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
 
     let activeGamesSection = "";
     let hasActiveGames = false;
@@ -708,6 +779,9 @@ export class GameManager {
       }
     }
 
+    // Cache for game info results
+    const gameInfoCache = new Map<string, string>();
+
     // Process active games
     for (const gameData of allGames) {
       try {
@@ -726,7 +800,8 @@ export class GameManager {
             hasActiveGames = true;
           }
           const gamePda = new PublicKey(gameData.game_address);
-          const gameInfo = await this.getGameInfo(gamePda);
+          const gameInfo = await this.getGameInfo(ctx, gamePda);
+          gameInfoCache.set(gameData.game_address, gameInfo);
           activeGamesSection += `${gameInfo}\n\n`;
           totalTokensInGames += Number(gameAccount.amount);
         }
@@ -772,34 +847,10 @@ export class GameManager {
       return timeB - timeA;
     });
 
+    // Sort all categories
     categories.won = sortGames(categories.won);
     categories.lost = sortGames(categories.lost);
     categories.cancelled = sortGames(categories.cancelled);
-
-    // Format recent games section
-    let recentGamesSection = "";
-    let hasRecentGames = false;
-
-    // Helper function to format game info
-    const formatGameInfo = (game: any) => {
-      const gameAccount = game.gameAccount;
-      const gameType = Object.keys(gameAccount.gameType)[0];
-      const amount = Number(gameAccount.amount);
-      const creatorUsername = usernameMap.get(game.creator_telegram_id) || "Unknown";
-
-      let winnerInfo = "";
-      if (game.winner_address && game.winner_address !== "cancelled" && game.winner_address !== "unknown") {
-        const winnerTelegramId = winnerTelegramIds.get(game.winner_address);
-        const winnerUsername = winnerTelegramId ? usernameMap.get(winnerTelegramId) || "Unknown" : "Unknown";
-        winnerInfo = `\nWinner: @${winnerUsername}`;
-      }
-
-      return `Game: <code>${game.game_address.slice(0, 8)}...</code>\n` +
-        `Type: ${gameType.charAt(0).toUpperCase() + gameType.slice(1)}\n` +
-        `Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
-        `Creator: @${creatorUsername}${winnerInfo}\n` +
-        `Completed: ${game.completed_at ? new Date(game.completed_at * 1000).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : 'N/A'}\n\n`;
-    };
 
     // Combine all completed games and sort by completion time
     const allCompletedGames = [
@@ -810,50 +861,27 @@ export class GameManager {
       const timeA = a.completed_at || a.created_at;
       const timeB = b.completed_at || b.created_at;
       return timeB - timeA;
-    }).slice(0, 5);
+    }).slice(0, 5); // Limit to 5 most recent games
 
-    // Group games by category
-    const groupedGames = {
+    // Group the limited games by category
+    const limitedCategories = {
       won: allCompletedGames.filter(game => game.category === 'won'),
       lost: allCompletedGames.filter(game => game.category === 'lost'),
       cancelled: allCompletedGames.filter(game => game.category === 'cancelled')
     };
 
-    // Add won games
-    if (groupedGames.won.length > 0) {
-      hasRecentGames = true;
-      recentGamesSection += "🏆 <b>Won Games</b>\n\n";
-      for (const game of groupedGames.won) {
-        recentGamesSection += formatGameInfo(game);
-      }
-    }
+    // Format recent games section using helper method
+    const recentGamesSections = [
+      await this.formatGameSection(ctx, limitedCategories.won, "🏆 <b>Won Games</b>", gameInfoCache),
+      await this.formatGameSection(ctx, limitedCategories.lost, "😢 <b>Lost Games</b>", gameInfoCache),
+      await this.formatGameSection(ctx, limitedCategories.cancelled, "❌ <b>Cancelled Games</b>", gameInfoCache)
+    ];
 
-    // Add lost games
-    if (groupedGames.lost.length > 0) {
-      hasRecentGames = true;
-      recentGamesSection += "😢 <b>Lost Games</b>\n\n";
-      for (const game of groupedGames.lost) {
-        recentGamesSection += formatGameInfo(game);
-      }
-    }
-
-    // Add cancelled games
-    if (groupedGames.cancelled.length > 0) {
-      hasRecentGames = true;
-      recentGamesSection += "❌ <b>Cancelled Games</b>\n\n";
-      for (const game of groupedGames.cancelled) {
-        recentGamesSection += formatGameInfo(game);
-      }
-    }
-
-    // Remove extra newlines at the end of recentGamesSection
-    if (recentGamesSection.endsWith('\n\n')) {
-      recentGamesSection = recentGamesSection.slice(0, -2);
-    }
+    const recentGamesSection = recentGamesSections.filter(section => section !== "").join("\n");
 
     return {
       activeGames: hasActiveGames ? activeGamesSection : "",
-      recentGames: hasRecentGames ? recentGamesSection : "",
+      recentGames: recentGamesSection,
       totalTokensInGames
     };
   }
