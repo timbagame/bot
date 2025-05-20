@@ -4,10 +4,9 @@ import * as anchor from "@coral-xyz/anchor";
 import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } from "@solana/spl-token";
 import { WalletManager } from "./wallet";
 import { GameDatabase } from "./database";
+import { OracleManager } from "./oracle";
 import type { GameStatus, GameMessage, GameCancellationResult, GameInfo, GameAccounts, GameMessageFormat } from "../types/game";
 import type { Coinflip } from "../../idl/idlType";
-import { randomBytes } from 'crypto';
-import { createHash } from 'crypto';
 
 export class GameManager {
   private static instance: GameManager;
@@ -29,6 +28,7 @@ export class GameManager {
     private program: anchor.Program<Coinflip>,
     private wallet: WalletManager,
     private gameDb: GameDatabase,
+    private oracleManager: OracleManager,
     private tokenMint: string,
     private ticker: string
   ) {
@@ -45,7 +45,8 @@ export class GameManager {
     ticker: string
   ): GameManager {
     if (!GameManager.instance) {
-      GameManager.instance = new GameManager(program, wallet, gameDb, tokenMint, ticker);
+      const oracleManager = OracleManager.getInstance(program, wallet);
+      GameManager.instance = new GameManager(program, wallet, gameDb, oracleManager, tokenMint, ticker);
     }
     return GameManager.instance;
   }
@@ -219,95 +220,23 @@ export class GameManager {
   public async handleGameCompletion(
     ctx: Context,
     gamePda: PublicKey,
-    gameAccount: any,
-    secretKey: Buffer,
-    adminKp: anchor.web3.Keypair
   ): Promise<boolean> {
     try {
-      const { oraclePda, gameTokenPda } = await this.getGameAccounts(adminKp);
+      const result = await this.oracleManager.completeGame(gamePda);
 
-      // Log detailed game state
-      console.log(`\n=== Game State for ${gamePda.toBase58()} ===`);
-      console.log(`Status: ${Object.keys(gameAccount.status)[0]}`);
-      console.log(`Players: ${gameAccount.players.length}/${gameAccount.maxPlayers}`);
-      console.log(`Min Players: ${gameAccount.minPlayers}`);
-      console.log(`Created At: ${new Date(Number(gameAccount.createdAt) * 1000).toISOString()}`);
-      console.log(`Timeout: ${gameAccount.timeout} seconds`);
-      console.log(`Creator: ${gameAccount.creator.toBase58()}`);
-      console.log(`Winner: ${gameAccount.winner?.toBase58() || 'Not set'}`);
-      console.log(`Game Type: ${Object.keys(gameAccount.gameType)[0]}`);
-      console.log(`Amount: ${gameAccount.amount}`);
-      console.log('================================\n');
-
-      // Calculate the winner using the same algorithm as the contract
-      let winnerIndex = 0;
-      const nPlayers = gameAccount.players.length;
-
-      if (nPlayers > 1) {
-        const randomBytes = secretKey.subarray(0, 8);
-        const randomNumber = BigInt('0x' + Buffer.from(randomBytes).reverse().toString('hex'));
-        const maxValid = BigInt('0xFFFFFFFFFFFFFFFF') - (BigInt('0xFFFFFFFFFFFFFFFF') % BigInt(nPlayers));
-        const finalNumber = randomNumber % maxValid;
-        winnerIndex = Number(finalNumber % BigInt(nPlayers));
+      if (!result.success) {
+        throw new Error(result.error || "Failed to complete game");
       }
-
-      const winnerBalancePda = gameAccount.players[winnerIndex];
-      console.log(`Calculated winner: ${winnerBalancePda.toBase58()} (index ${winnerIndex})`);
-
-      const gameMessage = this.activeGameMessages.get(gamePda.toBase58());
-      if (!gameMessage) {
-        console.error(`No game message found for game ${gamePda.toBase58()}`);
-        return false;
-      }
-
-      // Add retry logic for transaction
-      let retries = 3;
-      let tx: string | null = null;
-
-      while (retries > 0 && !tx) {
-        try {
-          tx = await this.program.methods
-            .completeGame([...secretKey])
-            .accounts({
-              game: gamePda,
-              oracle: oraclePda,
-              authority: adminKp.publicKey,
-              playerBalance: winnerBalancePda,
-              gameToken: gameTokenPda,
-            })
-            .signers([adminKp])
-            .rpc();
-        } catch (error: any) {
-          retries--;
-          if (retries === 0) throw error;
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      }
-
-      if (!tx) {
-        throw new Error("Failed to complete game after retries");
-      }
-
-      // Wait for transaction confirmation with timeout
-      const confirmationPromise = this.wallet.connection.confirmTransaction(tx);
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Transaction confirmation timeout")), 30000)
-      );
-
-      await Promise.race([confirmationPromise, timeoutPromise]);
-
-      const completedGameAccount = await this.getCachedGameAccount(gamePda);
-      const winnerPubkeyStr = completedGameAccount.winner.toString();
 
       // Get the block time for the completion transaction
       const blockTime = await this.wallet.getBlockchainTime();
       const completedAt = blockTime * 1000;
 
       // Store the completion time in the database
-      await this.gameDb.completeGame(gamePda.toBase58(), winnerPubkeyStr, completedAt);
+      await this.gameDb.completeGame(gamePda.toBase58(), result.winnerAddress!, completedAt);
 
       // Update game message with winner info
-      await this.updateGameMessageWithWinner(ctx, gamePda, winnerPubkeyStr);
+      await this.updateGameMessageWithWinner(ctx, gamePda, result.winnerAddress!);
 
       return true;
     } catch (error: any) {
@@ -347,11 +276,7 @@ export class GameManager {
 
       // If game has enough players, complete it
       if (hasEnoughPlayers) {
-        const gameData = await this.gameDb.getGame(gamePda.toBase58());
-        if (!gameData) return false;
-
-        const secretKey = Buffer.from(gameData.secret_key, "hex");
-        const completed = await this.handleGameCompletion(ctx, gamePda, gameAccount, secretKey, adminKp);
+        const completed = await this.handleGameCompletion(ctx, gamePda);
         return completed ? false : false; // Return false since we don't want to track completed games in the cancellation list
       }
 
@@ -390,11 +315,7 @@ export class GameManager {
         };
       } catch (error: any) {
         if (error.message.includes("GameReadyForOracle")) {
-          const gameData = await this.gameDb.getGame(gamePda.toBase58());
-          if (!gameData) return false;
-
-          const secretKey = Buffer.from(gameData.secret_key, "hex");
-          const completed = await this.handleGameCompletion(ctx, gamePda, gameAccount, secretKey, adminKp);
+          const completed = await this.handleGameCompletion(ctx, gamePda);
           return completed ? false : false; // Return false since we don't want to track completed games in the cancellation list
         }
         throw error;
@@ -414,16 +335,7 @@ export class GameManager {
         return false;
       }
 
-      const adminKp = await this.wallet.getAdminKeypair();
-      const gameData = await this.gameDb.getGame(gamePda.toBase58());
-      if (!gameData) {
-        console.error(`Error completing game: Game data not found for ${gamePda.toBase58()}`);
-        return false;
-      }
-      const secretKey = Buffer.from(gameData.secret_key, "hex");
-      const gameAccount = await this.program.account.game.fetch(gamePda);
-
-      return await this.handleGameCompletion(ctx, gamePda, gameAccount, secretKey, adminKp);
+      return await this.handleGameCompletion(ctx, gamePda);
     } catch (error) {
       console.error('Error auto-completing game:', error);
       return false;
@@ -1004,8 +916,8 @@ export class GameManager {
       console.log(`Saving creator mapping - Wallet Address: ${creatorPubkey}, Telegram ID: ${telegramId.toString()}`);
       this.gameDb.savePlayerMapping(creatorPubkey, telegramId.toString());
 
-      const secretKey = randomBytes(64);
-      const randomHash = createHash('sha256').update(secretKey).digest();
+      // Generate game secrets using oracle manager
+      const { randomHash } = this.oracleManager.generateGameSecrets();
 
       // Get all required PDAs and accounts
       const gamePda = this.getGamePda(randomHash);
@@ -1053,7 +965,6 @@ export class GameManager {
       this.gameDb.saveGame(
         gamePda.toBase58(),
         telegramId.toString(),
-        secretKey.toString('hex'),
         amount
       );
 

@@ -30,7 +30,6 @@ export class GameDatabase {
         CREATE TABLE IF NOT EXISTS games (
           game_address TEXT PRIMARY KEY,
           creator_telegram_id TEXT NOT NULL,
-          secret_key TEXT NOT NULL,
           amount INTEGER NOT NULL,
           created_at INTEGER NOT NULL,
           status TEXT NOT NULL,
@@ -38,6 +37,15 @@ export class GameDatabase {
           completed_at INTEGER,
           message_id INTEGER,
           chat_id INTEGER
+        )
+      `);
+
+      // Create secret keys table
+      await this.db.run(`
+        CREATE TABLE IF NOT EXISTS secret_keys (
+          game_address TEXT PRIMARY KEY,
+          secret_key TEXT NOT NULL,
+          FOREIGN KEY (game_address) REFERENCES games(game_address)
         )
       `);
 
@@ -57,15 +65,40 @@ export class GameDatabase {
   }
 
   // Game methods
-  public async saveGame(gameAddress: string, creatorTelegramId: string, secretKey: string, amount: number): Promise<void> {
+  public async saveGame(gameAddress: string, creatorTelegramId: string, amount: number): Promise<void> {
     try {
       const blockTime = await this.wallet.getBlockchainTime();
       const stmt = this.db.prepare(
-        'INSERT INTO games (game_address, creator_telegram_id, secret_key, amount, created_at, status) VALUES (?, ?, ?, ?, ?, ?)'
+        'INSERT INTO games (game_address, creator_telegram_id, amount, created_at, status) VALUES (?, ?, ?, ?, ?)'
       );
-      await stmt.run(gameAddress, creatorTelegramId, secretKey, amount, blockTime, 'active');
+      await stmt.run(gameAddress, creatorTelegramId, amount, blockTime, 'active');
     } catch (error) {
       console.error("Error saving game:", error);
+      throw error;
+    }
+  }
+
+  // Save oracle secret key for a game
+  public async saveOracleSecretKey(gameAddress: string, secretKey: string): Promise<void> {
+    try {
+      const stmt = this.db.prepare(
+        'INSERT OR REPLACE INTO secret_keys (game_address, secret_key) VALUES (?, ?)'
+      );
+      await stmt.run(gameAddress, secretKey);
+    } catch (error) {
+      console.error("Error saving oracle secret key:", error);
+      throw error;
+    }
+  }
+
+  // Get oracle secret key for a game
+  public async getOracleSecretKey(gameAddress: string): Promise<string | null> {
+    try {
+      const stmt = this.db.prepare('SELECT secret_key FROM secret_keys WHERE game_address = ?');
+      const result = stmt.get(gameAddress) as { secret_key: string } | null;
+      return result?.secret_key ?? null;
+    } catch (error) {
+      console.error("Error getting oracle secret key:", error);
       throw error;
     }
   }
