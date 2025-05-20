@@ -1,0 +1,11 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      TELEGRAM_TOKEN: ${TELEGRAM_TOKEN}
+      SOLANA_NETWORK: ${SOLANA_NETWORK}
+      MNEMONIC: ${MNEMONIC}
+      TOKEN_MINT: ${TOKEN_MINT}
+      TICKER: ${TICKER}

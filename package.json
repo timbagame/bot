@@ -1,25 +1,15 @@
 {
-  "name": "solana-wallet-telegram-bot",
-  "module": "index.ts",
-  "type": "module",
-  "private": true,
   "scripts": {
-    "start": "bun run index.ts",
-    "dev": "bun --watch run index.ts",
-    "build": "bun build index.ts --outdir ./dist"
-  },
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
+    "start": "bun --hot src/bot.ts"
   },
   "dependencies": {
-    "@grammyjs/menu": "^1.3.0",
-    "@solana/wallet-adapter-base": "^0.9.23",
     "@solana/web3.js": "^1.98.0",
-    "dotenv": "^16.4.7",
-    "grammy": "^1.35.0",
-    "grammy-inline-menu": "^9.2.0"
+    "@coral-xyz/anchor": "^0.31.0",
+    "@solana/spl-token": "^0.4.13",
+    "grammy": "^1.35.1",
+    "bip39": "^3.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.9"
   }
 }
