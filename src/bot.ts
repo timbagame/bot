@@ -737,13 +737,21 @@ bot.on("callback_query", async (ctx) => {
         return;
       }
 
+      let creatorUsername = "Unknown";
+      try {
+        const chatMember = await ctx.api.getChatMember(ctx.chat!.id, parseInt(creatorTelegramId));
+        creatorUsername = chatMember.user.username || chatMember.user.first_name;
+      } catch (error) {
+        console.error("Error getting creator's username:", error);
+      }
+
       console.log("Updating game message...");
       await gameManager.updateGameMessage(
         ctx,
         gameAddress,
         "Coinflip",
         Number(game.amount),
-        ctx.from.username || "Unknown",
+        creatorUsername,
         "Active",
         undefined
       );
@@ -798,13 +806,21 @@ bot.on("callback_query", async (ctx) => {
         return;
       }
 
+      let creatorUsername = "Unknown";
+      try {
+        const chatMember = await ctx.api.getChatMember(ctx.chat!.id, parseInt(creatorTelegramId));
+        creatorUsername = chatMember.user.username || chatMember.user.first_name;
+      } catch (error) {
+        console.error("Error getting creator's username:", error);
+      }
+
       // Update game message with current status
       await gameManager.updateGameMessage(
         ctx,
         gameAddress,
         "Coinflip",
         Number(game.amount),
-        ctx.from.username || "Unknown",
+        creatorUsername,
         Object.keys(currentGameAccount.status)[0],
         currentGameAccount.winner?.toString()
       );
