@@ -163,7 +163,7 @@ bot.command(["coinflip", "cf"], async (ctx) => {
 });
 
 // Simplified giveaway command
-bot.command("giveaway", async (ctx) => {
+bot.command(["giveaway", "ga"], async (ctx) => {
   if (!ctx.from) return;
 
   const args = ctx.message?.text?.split(" ");
