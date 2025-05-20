@@ -456,11 +456,6 @@ bot.command("games", async (ctx: Context) => {
   const telegramId = BigInt(ctx.from?.id || 0);
 
   try {
-    // Send message to indicate processing
-    const processingMsg = await ctx.reply("Fetching your games... Please wait.", {
-      reply_to_message_id: ctx.message?.message_id
-    });
-
     const { activeGames, recentGames, totalTokensInGames } = await gameManager.getUserGames(ctx, telegramId);
     const metadata = await getTokenMetadata();
 
@@ -486,8 +481,6 @@ bot.command("games", async (ctx: Context) => {
       response += `\n\n💰 Total tokens in active games: ${wallet.formatTokenBalance(totalTokensInGames, metadata.decimals)} ${TICKER}`;
     }
 
-    // Delete processing message and send response
-    await ctx.api.deleteMessage(ctx.chat!.id, processingMsg.message_id);
     await ctx.reply(response, {
       parse_mode: "HTML",
       reply_to_message_id: ctx.message?.message_id
@@ -810,6 +803,27 @@ bot.on("callback_query", async (ctx) => {
     } catch (error) {
       console.error("Error refreshing game:", error);
       await ctx.answerCallbackQuery("Error refreshing game status!");
+    }
+  } else if (callbackData.startsWith("unjoin_")) {
+    const gameAddress = callbackData.split("_")[1];
+    const game = await gameDb.getGame(gameAddress);
+
+    if (!game) {
+      await ctx.answerCallbackQuery("Game not found!");
+      return;
+    }
+
+    try {
+      const gamePda = new PublicKey(gameAddress);
+      const telegramId = BigInt(ctx.from.id);
+      const playerKp = await wallet.getKeyPair(telegramId);
+
+      // Call unjoin function
+      await gameManager.unjoinGame(ctx, gamePda, playerKp);
+      await ctx.answerCallbackQuery("Successfully unjoined the game!");
+    } catch (error: any) {
+      console.error("Error unjoining game:", error);
+      await ctx.answerCallbackQuery(`Error unjoining game: ${error.message || "Unknown error"}`);
     }
   }
 });

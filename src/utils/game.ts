@@ -434,6 +434,86 @@ export class GameManager {
     );
   }
 
+  // Helper function to unjoin a game
+  public async unjoinGame(ctx: Context, gamePda: PublicKey, playerKp: anchor.web3.Keypair): Promise<boolean> {
+    try {
+      const gameAccount = await this.program.account.game.fetch(gamePda);
+      const status = Object.keys(gameAccount.status)[0].toLowerCase();
+
+      // Check if game is active
+      if (status !== 'active') {
+        throw new Error("Game is not active");
+      }
+
+      // Get player's balance PDA
+      const [playerBalancePda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("player_balance"), playerKp.publicKey.toBuffer(), new PublicKey(this.tokenMint).toBuffer()],
+        this.program.programId
+      );
+
+      // Check if player is in the game
+      const isInGame = gameAccount.players.some((p: PublicKey) => p.equals(playerBalancePda));
+      if (!isInGame) {
+        throw new Error("You are not in this game");
+      }
+
+      // Check if player is the creator
+      if (gameAccount.creator.equals(playerKp.publicKey)) {
+        throw new Error("Game creator cannot unjoin");
+      }
+
+      // Get all required PDAs and accounts
+      const accounts = await this.getGameAccounts(playerKp);
+
+      // Call the contract to unjoin the game
+      const tx = await this.program.methods
+        .unjoinGame()
+        .accounts({
+          game: gamePda,
+          player: playerKp.publicKey,
+          playerBalance: playerBalancePda,
+          oracle: accounts.oraclePda,
+          gameToken: accounts.gameTokenPda,
+          gameVault: accounts.gameVaultPda,
+          playerTokenAccount: accounts.playerTokenAccount,
+          gameTokenAccount: accounts.gameTokenAccount,
+        })
+        .signers([playerKp])
+        .rpc();
+
+      // Wait for transaction confirmation
+      await this.wallet.connection.confirmTransaction(tx);
+
+      // Update game message
+      const creatorTelegramId = await this.gameDb.getCreatorTelegramId(gamePda.toBase58());
+      if (!creatorTelegramId) {
+        throw new Error("Could not find game creator");
+      }
+
+      let creatorUsername = "Unknown";
+      try {
+        const chatMember = await ctx.api.getChatMember(ctx.chat!.id, parseInt(creatorTelegramId));
+        creatorUsername = chatMember.user.username || chatMember.user.first_name;
+      } catch (error) {
+        console.error("Error getting creator's username:", error);
+      }
+
+      await this.updateGameMessage(
+        ctx,
+        gamePda.toBase58(),
+        Object.keys(gameAccount.gameType)[0].charAt(0).toUpperCase() + Object.keys(gameAccount.gameType)[0].slice(1),
+        Number(gameAccount.amount),
+        creatorUsername,
+        "Active"
+      );
+
+      return true;
+    } catch (error: any) {
+      console.error(`Error unjoining game ${gamePda.toBase58()}:`, error);
+      throw error;
+    }
+  }
+
   // Helper function to format game message
   private async formatGameMessage(
     ctx: Context,
@@ -525,12 +605,19 @@ export class GameManager {
       messageText += `\n\nTransaction: <code>${txHash}</code>`;
     }
 
-    const keyboard = status.toLowerCase() === "completed" ? [] : [
-      [
+    // Create keyboard based on game status
+    const keyboard = [];
+    if (status.toLowerCase() !== "completed") {
+      keyboard.push([
         { text: "🎮 Join Game", callback_data: `join_${gamePda.toBase58()}` },
         { text: "🔄 Refresh", callback_data: `refresh_${gamePda.toBase58()}` }
-      ]
-    ];
+      ]);
+
+      // Add unjoin button if there are players in the game
+      if (gameAccount.players.length > 0) {
+        keyboard[0].push({ text: "❌ Unjoin", callback_data: `unjoin_${gamePda.toBase58()}` });
+      }
+    }
 
     return { messageText, keyboard };
   }
