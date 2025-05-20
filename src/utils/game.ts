@@ -39,6 +39,22 @@ export class GameManager {
     return GameManager.instance;
   }
 
+  // Update getBlockchainTime to include fallback
+  private async getBlockchainTime(): Promise<number> {
+    try {
+      const blockTime = await this.wallet.connection.getBlockTime(
+        await this.wallet.connection.getSlot()
+      );
+      if (!blockTime) {
+        throw new Error("Could not get blockchain time");
+      }
+      return blockTime;
+    } catch (error) {
+      console.warn("Falling back to system time:", error);
+      return Math.floor(Date.now() / 1000);
+    }
+  }
+
   // Helper function to get all required PDAs and accounts for a game
   public async getGameAccounts(playerKp: anchor.web3.Keypair): Promise<GameAccounts> {
     const [oraclePda] = PublicKey.findProgramAddressSync(
@@ -138,12 +154,7 @@ export class GameManager {
   // Helper function to get cached game account
   private async getCachedGameAccount(gamePda: PublicKey): Promise<any> {
     const cached = this.gameAccountCache.get(gamePda.toBase58());
-    const blockTime = await this.wallet.connection.getBlockTime(
-      await this.wallet.connection.getSlot()
-    );
-    if (!blockTime) {
-      throw new Error("Could not get blockchain time");
-    }
+    const blockTime = await this.getBlockchainTime();
     const now = blockTime * 1000;
 
     if (cached && now - cached.timestamp < this.CACHE_DURATION) {
@@ -163,12 +174,7 @@ export class GameManager {
     const createdAt = Number(gameAccount.createdAt);
     const timeout = Number(gameAccount.timeout);
     const expiresAt = createdAt + timeout;
-    const blockTime = await this.wallet.connection.getBlockTime(
-      await this.wallet.connection.getSlot()
-    );
-    if (!blockTime) {
-      throw new Error("Could not get blockchain time");
-    }
+    const blockTime = await this.getBlockchainTime();
     const isExpired = blockTime > expiresAt;
     const hasEnoughPlayers = gameAccount.players.length >= gameAccount.minPlayers;
 
@@ -260,14 +266,8 @@ export class GameManager {
       const winnerPubkeyStr = completedGameAccount.winner.toString();
 
       // Get the block time for the completion transaction
-      const blockTime = await this.wallet.connection.getBlockTime(
-        await this.wallet.connection.getSignatureStatus(tx).then(status => status.value?.slot || 0)
-      );
-
-      // Convert block time to milliseconds for database storage
-      const completedAt = blockTime ? blockTime * 1000 : await this.wallet.connection.getBlockTime(
-        await this.wallet.connection.getSlot()
-      ).then(time => time ? time * 1000 : 0);
+      const blockTime = await this.getBlockchainTime();
+      const completedAt = blockTime * 1000;
 
       // Store the completion time in the database
       await this.gameDb.completeGame(gamePda.toBase58(), winnerPubkeyStr, completedAt);
@@ -342,14 +342,8 @@ export class GameManager {
           .rpc();
 
         // Get the block time for the cancellation transaction
-        const blockTime = await this.wallet.connection.getBlockTime(
-          await this.wallet.connection.getSignatureStatus(tx).then(status => status.value?.slot || 0)
-        );
-
-        // Convert block time to milliseconds for database storage
-        const completedAt = blockTime ? blockTime * 1000 : await this.wallet.connection.getBlockTime(
-          await this.wallet.connection.getSlot()
-        ).then(time => time ? time * 1000 : 0);
+        const blockTime = await this.getBlockchainTime();
+        const completedAt = blockTime * 1000;
 
         await this.gameDb.completeGame(gamePda.toBase58(), "cancelled", completedAt);
 
@@ -557,9 +551,7 @@ export class GameManager {
     let expirationInfo = "";
     if (status.toLowerCase() === "active") {
       try {
-        const blockTime = await this.wallet.connection.getBlockTime(
-          await this.wallet.connection.getSlot()
-        );
+        const blockTime = await this.getBlockchainTime();
         if (blockTime) {
           const createdAt = Number(gameAccount.createdAt);
           const timeout = Number(gameAccount.timeout);
@@ -742,9 +734,7 @@ export class GameManager {
       let expirationInfo = "";
       if (status.toLowerCase() === "active") {
         // Get current blockchain time
-        const blockTime = await this.wallet.connection.getBlockTime(
-          await this.wallet.connection.getSlot()
-        );
+        const blockTime = await this.getBlockchainTime();
         if (!blockTime) {
           throw new Error("Could not get blockchain time");
         }
@@ -802,9 +792,7 @@ export class GameManager {
           try {
             // Only update if the game doesn't have a completion time
             if (!gameData.completed_at) {
-              const blockTime = await this.wallet.connection.getBlockTime(
-                await this.wallet.connection.getSlot()
-              );
+              const blockTime = await this.getBlockchainTime();
               const completedAt = blockTime ? blockTime * 1000 : 0;
               await this.gameDb.completeGame(gameData.game_address, gameAccount.winner?.toString() || "unknown", completedAt);
             }
@@ -845,9 +833,7 @@ export class GameManager {
         try {
           // Only update if the game doesn't have a completion time
           if (!gameData.completed_at) {
-            const blockTime = await this.wallet.connection.getBlockTime(
-              await this.wallet.connection.getSlot()
-            );
+            const blockTime = await this.getBlockchainTime();
             const completedAt = blockTime ? blockTime * 1000 : 0;
             await this.gameDb.completeGame(gameData.game_address, "unknown", completedAt);
           }
