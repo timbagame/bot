@@ -583,7 +583,7 @@ export class GameManager {
       `💰 Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
       `👤 Creator: @${creatorUsername}\n` +
       `👥 Players: ${currentPlayers}/${maxPlayers}${playerInfo}\n` +
-      `Status: ${status}${expirationInfo}\n`;
+      `Status: ${status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()}${expirationInfo}\n`;
 
     if (winnerAddress && winnerAddress !== "11111111111111111111111111111111") {
       // Get winner's Telegram username
@@ -767,7 +767,7 @@ export class GameManager {
              `Type: ${gameType}\n` +
              `Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
              `Players: ${currentPlayers}/${maxPlayers}\n` +
-             `Status: ${status}${expirationInfo}\n` +
+             `Status: ${status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()}${expirationInfo}\n` +
              `Creator: <code>${creatorPubkey.slice(0, 8)}...</code>`;
     } catch (error: any) {
       return `Error fetching game: ${error.message}`;
