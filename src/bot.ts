@@ -177,7 +177,7 @@ bot.command("giveaway", async (ctx) => {
     });
   }
 
-  await gameManager.createGame(ctx, "giveaway", amount, maxPlayers, 1, 7200);
+  await gameManager.createGame(ctx, "giveaway", amount, maxPlayers, 1, 3600);
 });
 
 // Implement withdraw command
