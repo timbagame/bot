@@ -16,8 +16,10 @@ const TOKEN_MINT = process.env.TOKEN_MINT!;
 const TICKER = process.env.TICKER!;
 const LAMPORTS_PER_SOL = 1_000_000_000; // Assuming 9 decimals for SOL
 
-// Cache for token metadata
+// Add token metadata cache at the top level
 let tokenMetadata: { decimals: number } | null = null;
+let tokenMetadataLastFetch: number = 0;
+const TOKEN_METADATA_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 // Initialize game database
 const gameDb = GameDatabase.getInstance();
@@ -88,10 +90,12 @@ const setupAnchor = async () => {
   }
 };
 
-// Helper function to get token metadata
+// Helper function to get token metadata with caching
 const getTokenMetadata = async () => {
-  if (!tokenMetadata) {
+  const now = Date.now();
+  if (!tokenMetadata || now - tokenMetadataLastFetch > TOKEN_METADATA_CACHE_DURATION) {
     tokenMetadata = await wallet.getTokenMetadata(TOKEN_MINT);
+    tokenMetadataLastFetch = now;
   }
   return tokenMetadata;
 };
@@ -121,7 +125,7 @@ const formatErrorMessage = (error: any, prefix: string = "❌"): string => {
   return `${prefix} ${error.message || "Unknown error"}`;
 };
 
-// Command to display balance and wallet info
+// Optimize balance command
 bot.command(["start", "balance"], async (ctx: Context) => {
   const telegramId = BigInt(ctx.from?.id || 0);
   try {
@@ -135,10 +139,12 @@ bot.command(["start", "balance"], async (ctx: Context) => {
       program.programId
     );
 
-    // Get balances
-    const balance = await program.account.playerBalance.fetch(playerBalancePda);
-    const tokenBalance = await wallet.getTokenBalance(telegramId, TOKEN_MINT);
-    const solBalance = await wallet.getBalance(telegramId);
+    // Fetch all balances in parallel
+    const [balance, tokenBalance, solBalance] = await Promise.all([
+      program.account.playerBalance.fetch(playerBalancePda).catch(() => ({ amount: 0 })),
+      wallet.getTokenBalance(telegramId, TOKEN_MINT),
+      wallet.getBalance(telegramId)
+    ]);
 
     const response = await formatBalanceMessage(ctx, playerKp, balance, tokenBalance, solBalance, metadata);
 

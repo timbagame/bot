@@ -197,8 +197,7 @@ export class GameManager {
   // Helper function to get cached game account
   private async getCachedGameAccount(gamePda: PublicKey): Promise<any> {
     const cached = this.gameAccountCache.get(gamePda.toBase58());
-    const blockTime = await this.wallet.getBlockchainTime();
-    const now = blockTime * 1000;
+    const now = Date.now();
 
     if (cached && now - cached.timestamp < this.CACHE_DURATION) {
       return cached.account;
@@ -545,7 +544,15 @@ export class GameManager {
 
     const playerInfo = await this.getPlayerInfo(ctx, gameAccount);
     const expirationInfo = status.toLowerCase() === "active" ? await this.calculateExpirationTime(gameAccount) : "";
-    const winnerInfo = winnerAddress ? await this.getWinnerInfo(ctx, gameAccount) : "";
+
+    // Use the provided winnerAddress if available, otherwise try to get it from the game account
+    let winnerInfo = "";
+    if (winnerAddress) {
+      const winnerUsername = await this.getPlayerUsername(ctx, winnerAddress);
+      winnerInfo = `\n🏆 Winner: @${winnerUsername}`;
+    } else if (status.toLowerCase() === "completed") {
+      winnerInfo = await this.getWinnerInfo(ctx, gameAccount);
+    }
 
     let messageText = `<b>🪙 ${gameType} Game</b>\n\n` +
       `💰 Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
@@ -736,7 +743,7 @@ export class GameManager {
     // Get player's balance PDA once
     const playerBalancePda = this.getPlayerBalancePda(playerKp.publicKey);
 
-    // Batch fetch all game accounts
+    // Batch fetch all game accounts in parallel
     const gameAccounts = new Map();
     const gamePromises = allGames.map(async (gameData) => {
       try {
@@ -768,8 +775,9 @@ export class GameManager {
       }
     }
 
+    // Batch fetch all usernames in parallel
     const usernameMap = new Map<string, string>();
-    for (const id of uniqueTelegramIds) {
+    const usernamePromises = Array.from(uniqueTelegramIds).map(async (id) => {
       try {
         const username = await this.getUsernameFromTelegramId(ctx, id);
         usernameMap.set(id, username);
@@ -777,7 +785,8 @@ export class GameManager {
         console.error(`Error getting username for ${id}:`, error);
         usernameMap.set(id, "Unknown");
       }
-    }
+    });
+    await Promise.all(usernamePromises);
 
     // Cache for game info results
     const gameInfoCache = new Map<string, string>();
@@ -871,11 +880,11 @@ export class GameManager {
     };
 
     // Format recent games section using helper method
-    const recentGamesSections = [
-      await this.formatGameSection(ctx, limitedCategories.won, "🏆 <b>Won Games</b>", gameInfoCache),
-      await this.formatGameSection(ctx, limitedCategories.lost, "😢 <b>Lost Games</b>", gameInfoCache),
-      await this.formatGameSection(ctx, limitedCategories.cancelled, "❌ <b>Cancelled Games</b>", gameInfoCache)
-    ];
+    const recentGamesSections = await Promise.all([
+      this.formatGameSection(ctx, limitedCategories.won, "🏆 <b>Won Games</b>", gameInfoCache),
+      this.formatGameSection(ctx, limitedCategories.lost, "😢 <b>Lost Games</b>", gameInfoCache),
+      this.formatGameSection(ctx, limitedCategories.cancelled, "❌ <b>Cancelled Games</b>", gameInfoCache)
+    ]);
 
     const recentGamesSection = recentGamesSections.filter(section => section !== "").join("\n");
 
