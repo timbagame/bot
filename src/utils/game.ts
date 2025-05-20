@@ -355,13 +355,7 @@ export class GameManager {
     const creatorTelegramId = await this.gameDb.getCreatorTelegramId(gamePda.toBase58());
     if (!creatorTelegramId) return;
 
-    let creatorUsername = "Unknown";
-    try {
-      const chatMember = await ctx.api.getChatMember(ctx.chat!.id, parseInt(creatorTelegramId));
-      creatorUsername = chatMember.user.username || chatMember.user.first_name;
-    } catch (error) {
-      console.error("Error getting creator's username:", error);
-    }
+    const creatorUsername = await this.getUsernameFromTelegramId(ctx, creatorTelegramId);
 
     await this.updateGameMessage(
       ctx,
@@ -694,8 +688,8 @@ export class GameManager {
     const usernameMap = new Map<string, string>();
     for (const id of uniqueTelegramIds) {
       try {
-        const chatMember = await ctx.api.getChatMember(ctx.chat!.id, parseInt(id));
-        usernameMap.set(id, chatMember.user.username || chatMember.user.first_name);
+        const username = await this.getUsernameFromTelegramId(ctx, id);
+        usernameMap.set(id, username);
       } catch (error) {
         console.error(`Error getting username for ${id}:`, error);
         usernameMap.set(id, "Unknown");

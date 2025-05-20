@@ -746,8 +746,8 @@ bot.on("callback_query", async (ctx) => {
       // Check if this was the last player needed to fill the game
       if (updatedGameAccount.players.length === gameAccount.maxPlayers) {
         console.log(`Game ${gamePda.toBase58()} is full, waiting for join transaction to be fully processed...`);
-        // Wait for 2 seconds to ensure join transaction is fully processed
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Wait for 5 seconds to ensure join transaction and message update are fully processed
+        await new Promise(resolve => setTimeout(resolve, 5000));
 
         // Verify game is still full and active
         try {
