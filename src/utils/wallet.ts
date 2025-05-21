@@ -220,7 +220,7 @@ export class WalletManager {
   }
 
   public formatSolBalance(lamports: number): string {
-    return (lamports / LAMPORTS_PER_SOL).toFixed(4);
+    return (lamports / LAMPORTS_PER_SOL).toFixed(9);
   }
 
   public formatTokenBalance(amount: number, decimals: number): string {
