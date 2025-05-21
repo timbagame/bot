@@ -869,6 +869,56 @@ setupAnchor().then(async () => {
   await gameManager.reloadGameMessages();
   console.log(`Reloaded game message mappings from database`);
 
+  // Start periodic check for expired games
+  setInterval(async () => {
+    try {
+      const allGames = await gameDb.getAllGames();
+      for (const game of allGames) {
+        try {
+          const gamePda = new PublicKey(game.game_address);
+          const gameAccount = await program.account.game.fetch(gamePda);
+          const status = Object.keys(gameAccount.status)[0].toLowerCase();
+
+          // Only process active games
+          if (status !== 'active') continue;
+
+          // Check if game is expired
+          const blockTime = await wallet.getBlockchainTime();
+          const createdAt = Number(gameAccount.createdAt);
+          const timeout = Number(gameAccount.timeout);
+          const expiresAt = createdAt + timeout;
+          const isExpired = blockTime > expiresAt;
+
+          if (isExpired) {
+            console.log(`Processing expired game ${game.game_address}`);
+            // Create a dummy context for message updates
+            const dummyCtx = {
+              api: bot.api,
+              chat: { id: game.chat_id },
+              reply: async (text: string) => {
+                console.log(`Game ${game.game_address} update: ${text}`);
+              },
+              update: {} as any,
+              me: {} as any,
+              match: {} as any,
+              message: {} as any
+            } as unknown as Context;
+
+            // Handle the expired game
+            const result = await gameManager.handleExpiredGame(dummyCtx, gamePda, gameAccount);
+            if (result) {
+              console.log(`Successfully processed expired game ${game.game_address}`);
+            }
+          }
+        } catch (error) {
+          console.error(`Error processing game ${game.game_address}:`, error);
+        }
+      }
+    } catch (error) {
+      console.error("Error in periodic game check:", error);
+    }
+  }, 60000); // Check every minute
+
   bot.start();
 }).catch(error => {
   console.error("Failed to setup Anchor:", error);
