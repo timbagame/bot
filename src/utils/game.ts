@@ -833,6 +833,10 @@ export class GameManager {
       const status = Object.keys(gameAccount.status)[0].toLowerCase();
       if (status === 'active') continue;
 
+      // Check if user was a player in this game
+      const isPlayer = gameAccount.players.some((p: PublicKey) => p.equals(playerBalancePda));
+      if (!isPlayer) continue;
+
       if (game.winner_address === "cancelled") {
         categories.cancelled.push({ ...game, gameAccount });
       } else if (game.winner_address) {
