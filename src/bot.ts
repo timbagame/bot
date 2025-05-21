@@ -475,7 +475,9 @@ bot.command("help", async (ctx: Context) => {
     `/ga &lt;amount&gt; &lt;maxPlayers&gt; - Shorthand for giveaway command\n` +
     `/withdraw &lt;address&gt; &lt;amount&gt; - Withdraw tokens to external wallet\n` +
     `/wh &lt;address&gt; &lt;amount&gt; - Shorthand for withdraw command\n` +
-    `/tip &lt;amount&gt; - Reply to a user's message to send them tokens\n\n` +
+    `/tip &lt;amount&gt; - Reply to a user's message to send them tokens\n` +
+    `/active - Show your active games\n` +
+    `/games - Show your recent games\n\n` +
     `<b>ℹ️ Important:</b> Your player balance account will be automatically initialized when needed.`,
     {
       parse_mode: "HTML",
@@ -484,29 +486,24 @@ bot.command("help", async (ctx: Context) => {
   );
 });
 
-// Implement games command to show all games user is participating in
-bot.command("games", async (ctx: Context) => {
+// Implement active command to show only active games
+bot.command("active", async (ctx: Context) => {
   const telegramId = BigInt(ctx.from?.id || 0);
 
   try {
-    const { activeGames, recentGames, totalTokensInGames } = await gameManager.getUserGames(ctx, telegramId);
+    const { activeGames, totalTokensInGames } = await gameManager.getUserGames(ctx, telegramId);
     const metadata = await getTokenMetadata();
 
     let response = "";
     let hasGames = false;
 
-    // Combine sections
     if (activeGames) {
       response += activeGames;
       hasGames = true;
     }
-    if (recentGames) {
-      response += recentGames;
-      hasGames = true;
-    }
 
     if (!hasGames) {
-      response += "You don't have any active or recent games.";
+      response += "You don't have any active games.";
     }
 
     // Add total tokens in active games
@@ -519,8 +516,39 @@ bot.command("games", async (ctx: Context) => {
       reply_to_message_id: ctx.message?.message_id
     });
   } catch (error) {
+    console.error("Error in active command:", error);
+    await ctx.reply("❌ An error occurred while fetching your active games. Please try again later.", {
+      reply_to_message_id: ctx.message?.message_id
+    });
+  }
+});
+
+// Modify games command to show only recent games
+bot.command("games", async (ctx: Context) => {
+  const telegramId = BigInt(ctx.from?.id || 0);
+
+  try {
+    const { recentGames } = await gameManager.getUserGames(ctx, telegramId);
+
+    let response = "";
+    let hasGames = false;
+
+    if (recentGames) {
+      response += recentGames;
+      hasGames = true;
+    }
+
+    if (!hasGames) {
+      response += "You don't have any recent games.";
+    }
+
+    await ctx.reply(response, {
+      parse_mode: "HTML",
+      reply_to_message_id: ctx.message?.message_id
+    });
+  } catch (error) {
     console.error("Error in games command:", error);
-    await ctx.reply("❌ An error occurred while fetching your games. Please try again later.", {
+    await ctx.reply("❌ An error occurred while fetching your recent games. Please try again later.", {
       reply_to_message_id: ctx.message?.message_id
     });
   }
