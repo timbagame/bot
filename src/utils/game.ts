@@ -694,8 +694,7 @@ export class GameManager {
       const expirationInfo = status.toLowerCase() === "active" ? await this.calculateExpirationTime(gameAccount) : "";
       const winnerInfo = status.toLowerCase() === "completed" ? await this.getWinnerInfo(ctx, gameAccount) : "";
 
-      return `Game: <code>${gamePda.toBase58().slice(0, 8)}...</code>\n` +
-             `Type: ${gameType}\n` +
+      return `Type: ${gameType}\n` +
              `Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
              `Creator: ${creatorInfo}\n` +
              `Players: ${currentPlayers}/${maxPlayers}${expirationInfo}${winnerInfo}`;
