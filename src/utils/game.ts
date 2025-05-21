@@ -787,7 +787,7 @@ export class GameManager {
     }));
 
     // Process recent games
-    const recentGames = recentGamesData.map(gameData => {
+    const recentGames = await Promise.all(recentGamesData.map(async (gameData) => {
       const gameAccount = gameAccounts.get(gameData.game_address);
       if (!gameAccount) return null;
 
@@ -796,31 +796,54 @@ export class GameManager {
       const winnerAddress = gameData.winner_address;
       if (winnerAddress && winnerAddress !== "cancelled" && winnerAddress !== "unknown") {
         // Try to get the winner's Telegram ID from the database
-        this.gameDb.getPlayerTelegramId(winnerAddress).then(winnerTelegramId => {
-          if (winnerTelegramId) {
-            winnerUsername = usernameMap.get(winnerTelegramId) || "Unknown";
-          } else {
-            // If no Telegram ID found, use the public key
-            winnerUsername = winnerAddress.slice(0, 8) + "...";
-          }
-        });
+        const winnerTelegramId = await this.gameDb.getPlayerTelegramId(winnerAddress);
+        if (winnerTelegramId) {
+          winnerUsername = usernameMap.get(winnerTelegramId) || "Unknown";
+        } else {
+          // If no Telegram ID found, use the public key
+          winnerUsername = winnerAddress.slice(0, 8) + "...";
+        }
       }
 
       const currentUsername = usernameMap.get(telegramIdStr) || "Unknown";
       const isWinner = winnerUsername === currentUsername;
+      const isCreator = gameData.creator_telegram_id === telegramIdStr;
+
+      // Check if user is a player in the game
+      let isPlayer = false;
+      for (const p of gameAccount.players) {
+        const playerTelegramId = await this.gameDb.getPlayerTelegramId(p.toBase58());
+        if (playerTelegramId === telegramIdStr) {
+          isPlayer = true;
+          break;
+        }
+      }
+
+      // Determine game category
+      let category = "cancelled";
+      if (winnerAddress !== "cancelled") {
+        if (isWinner) {
+          category = "won";
+        } else if (isPlayer) {
+          category = "lost";
+        } else if (isCreator) {
+          category = "created";
+        }
+      }
 
       return {
         ...gameData,
         gameAccount,
-        category: winnerAddress === "cancelled" ? "cancelled" : isWinner ? "won" : "lost"
+        category
       };
-    }).filter(Boolean);
+    })).then(games => games.filter(Boolean));
 
     // Group recent games by category
     const categories = {
       won: recentGames.filter(game => game?.category === 'won'),
       lost: recentGames.filter(game => game?.category === 'lost'),
-      cancelled: recentGames.filter(game => game?.category === 'cancelled')
+      cancelled: recentGames.filter(game => game?.category === 'cancelled'),
+      created: recentGames.filter(game => game?.category === 'created')
     };
 
     // Format sections
@@ -831,6 +854,7 @@ export class GameManager {
     const recentGamesSections = await Promise.all([
       this.formatGameSection(ctx, categories.won, "🏆 <b>Won Games</b>", new Map()),
       this.formatGameSection(ctx, categories.lost, "😢 <b>Lost Games</b>", new Map()),
+      this.formatGameSection(ctx, categories.created, "🎮 <b>Created Games</b>", new Map()),
       this.formatGameSection(ctx, categories.cancelled, "❌ <b>Cancelled Games</b>", new Map())
     ]);
 
