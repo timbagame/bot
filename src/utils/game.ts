@@ -736,14 +736,11 @@ export class GameManager {
     totalTokensInGames: number;
   }> {
     const playerKp = await this.wallet.getKeyPair(telegramId);
-    const allGames = await this.gameDb.getAllGames();
-
-    let activeGamesSection = "";
-    let hasActiveGames = false;
+    const playerBalancePda = this.getPlayerBalancePda(playerKp.publicKey);
     let totalTokensInGames = 0;
 
-    // Get player's balance PDA once
-    const playerBalancePda = this.getPlayerBalancePda(playerKp.publicKey);
+    // Get all games in a single query
+    const allGames = await this.gameDb.getAllGames();
 
     // Batch fetch all game accounts in parallel
     const gameAccounts = new Map();
@@ -758,24 +755,25 @@ export class GameManager {
     });
     await Promise.all(gamePromises);
 
-    // Get all usernames in one batch
+    // Get all unique Telegram IDs for username fetching
     const uniqueTelegramIds = new Set<string>();
     allGames.forEach(game => {
       uniqueTelegramIds.add(game.creator_telegram_id);
     });
     uniqueTelegramIds.add(telegramId.toString());
 
-    // Get winner Telegram IDs from database
+    // Get winner Telegram IDs from database in batch
     const winnerTelegramIds = new Map<string, string>();
-    for (const game of allGames) {
-      if (game.winner_address && game.winner_address !== "cancelled" && game.winner_address !== "unknown") {
-        const winnerTelegramId = await this.gameDb.getPlayerTelegramId(game.winner_address);
+    const winnerPromises = allGames
+      .filter(game => game.winner_address && game.winner_address !== "cancelled" && game.winner_address !== "unknown")
+      .map(async (game) => {
+        const winnerTelegramId = await this.gameDb.getPlayerTelegramId(game.winner_address!);
         if (winnerTelegramId) {
-          winnerTelegramIds.set(game.winner_address, winnerTelegramId);
+          winnerTelegramIds.set(game.winner_address!, winnerTelegramId);
           uniqueTelegramIds.add(winnerTelegramId);
         }
-      }
-    }
+      });
+    await Promise.all(winnerPromises);
 
     // Batch fetch all usernames in parallel
     const usernameMap = new Map<string, string>();
@@ -790,112 +788,82 @@ export class GameManager {
     });
     await Promise.all(usernamePromises);
 
-    // Cache for game info results
-    const gameInfoCache = new Map<string, string>();
-
     // Process active games
-    for (const gameData of allGames) {
-      try {
+    const activeGames = await Promise.all(allGames
+      .filter(gameData => {
         const gameAccount = gameAccounts.get(gameData.game_address);
-        if (!gameAccount) continue;
+        if (!gameAccount) return false;
 
         const gameStatus = Object.keys(gameAccount.status)[0].toLowerCase();
-        if (gameStatus !== "active") continue;
+        if (gameStatus !== "active") return false;
 
         const isCreator = gameData.creator_telegram_id === telegramId.toString();
         const isPlayer = gameAccount.players.some((p: PublicKey) => p.equals(playerBalancePda));
 
         if (isCreator || isPlayer) {
-          if (!hasActiveGames) {
-            activeGamesSection = "🎮 <b>Active Games</b>\n\n";
-            hasActiveGames = true;
-          }
-          const gamePda = new PublicKey(gameData.game_address);
-          const gameInfo = await this.getGameInfo(ctx, gamePda);
-          gameInfoCache.set(gameData.game_address, gameInfo);
-          activeGamesSection += `${gameInfo}\n\n`;
           totalTokensInGames += Number(gameAccount.amount);
+          return true;
         }
-      } catch (error) {
-        console.error(`Error processing game ${gameData.game_address}:`, error);
-      }
-    }
+        return false;
+      })
+      .map(gameData => {
+        const gamePda = new PublicKey(gameData.game_address);
+        return this.getGameInfo(ctx, gamePda);
+      }));
 
     // Process completed games
-    const categories = {
-      won: [] as any[],
-      lost: [] as any[],
-      cancelled: [] as any[]
-    };
+    const completedGames = allGames
+      .filter(gameData => {
+        const gameAccount = gameAccounts.get(gameData.game_address);
+        if (!gameAccount) return false;
 
-    for (const game of allGames) {
-      const gameAccount = gameAccounts.get(game.game_address);
-      if (!gameAccount) continue;
+        const status = Object.keys(gameAccount.status)[0].toLowerCase();
+        if (status === 'active') return false;
 
-      const status = Object.keys(gameAccount.status)[0].toLowerCase();
-      if (status === 'active') continue;
-
-      // Check if user was a player in this game
-      const isPlayer = gameAccount.players.some((p: PublicKey) => p.equals(playerBalancePda));
-      if (!isPlayer) continue;
-
-      if (game.winner_address === "cancelled") {
-        categories.cancelled.push({ ...game, gameAccount });
-      } else if (game.winner_address) {
-        const winnerTelegramId = winnerTelegramIds.get(game.winner_address);
+        return gameAccount.players.some((p: PublicKey) => p.equals(playerBalancePda));
+      })
+      .map(gameData => {
+        const gameAccount = gameAccounts.get(gameData.game_address)!;
+        const winnerTelegramId = winnerTelegramIds.get(gameData.winner_address || "");
         const winnerUsername = winnerTelegramId ? usernameMap.get(winnerTelegramId) || "Unknown" : "Unknown";
         const currentUsername = usernameMap.get(telegramId.toString()) || "Unknown";
         const isWinner = winnerUsername === currentUsername;
 
-        if (isWinner) {
-          categories.won.push({ ...game, gameAccount });
-        } else {
-          categories.lost.push({ ...game, gameAccount });
-        }
-      }
-    }
+        return {
+          ...gameData,
+          gameAccount,
+          category: gameData.winner_address === "cancelled" ? "cancelled" : isWinner ? "won" : "lost"
+        };
+      })
+      .sort((a, b) => {
+        const timeA = a.completed_at || a.created_at;
+        const timeB = b.completed_at || b.created_at;
+        return timeB - timeA;
+      })
+      .slice(0, 5); // Limit to 5 most recent games
 
-    // Sort games by completion time
-    const sortGames = (games: any[]) => games.sort((a, b) => {
-      const timeA = a.completed_at || a.created_at;
-      const timeB = b.completed_at || b.created_at;
-      return timeB - timeA;
-    });
-
-    // Sort all categories
-    categories.won = sortGames(categories.won);
-    categories.lost = sortGames(categories.lost);
-    categories.cancelled = sortGames(categories.cancelled);
-
-    // Combine all completed games and sort by completion time
-    const allCompletedGames = [
-      ...categories.won.map(game => ({ ...game, category: 'won' })),
-      ...categories.lost.map(game => ({ ...game, category: 'lost' })),
-      ...categories.cancelled.map(game => ({ ...game, category: 'cancelled' }))
-    ].sort((a, b) => {
-      const timeA = a.completed_at || a.created_at;
-      const timeB = b.completed_at || b.created_at;
-      return timeB - timeA;
-    }).slice(0, 5); // Limit to 5 most recent games
-
-    // Group the limited games by category
-    const limitedCategories = {
-      won: allCompletedGames.filter(game => game.category === 'won'),
-      lost: allCompletedGames.filter(game => game.category === 'lost'),
-      cancelled: allCompletedGames.filter(game => game.category === 'cancelled')
+    // Group completed games by category
+    const categories = {
+      won: completedGames.filter(game => game.category === 'won'),
+      lost: completedGames.filter(game => game.category === 'lost'),
+      cancelled: completedGames.filter(game => game.category === 'cancelled')
     };
 
-    // Format recent games section using helper method
+    // Format sections
+    const activeGamesSection = activeGames.length > 0
+      ? "🎮 <b>Active Games</b>\n\n" + activeGames.join("\n\n")
+      : "";
+
     const recentGamesSections = await Promise.all([
-      this.formatGameSection(ctx, limitedCategories.won, "🏆 <b>Won Games</b>", gameInfoCache),
-      this.formatGameSection(ctx, limitedCategories.lost, "😢 <b>Lost Games</b>", gameInfoCache),
-      this.formatGameSection(ctx, limitedCategories.cancelled, "❌ <b>Cancelled Games</b>", gameInfoCache)
+      this.formatGameSection(ctx, categories.won, "🏆 <b>Won Games</b>", new Map()),
+      this.formatGameSection(ctx, categories.lost, "😢 <b>Lost Games</b>", new Map()),
+      this.formatGameSection(ctx, categories.cancelled, "❌ <b>Cancelled Games</b>", new Map())
     ]);
 
     const recentGamesSection = recentGamesSections.filter(section => section !== "").join("\n");
 
     return {
-      activeGames: hasActiveGames ? activeGamesSection : "",
+      activeGames: activeGamesSection,
       recentGames: recentGamesSection,
       totalTokensInGames
     };
