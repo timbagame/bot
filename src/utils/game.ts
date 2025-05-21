@@ -545,13 +545,15 @@ export class GameManager {
     const playerInfo = await this.getPlayerInfo(ctx, gameAccount);
     const expirationInfo = status.toLowerCase() === "active" ? await this.calculateExpirationTime(gameAccount) : "";
 
-    // Use the provided winnerAddress if available, otherwise try to get it from the game account
+    // Only show winner info if game is completed
     let winnerInfo = "";
-    if (winnerAddress) {
-      const winnerUsername = await this.getPlayerUsername(ctx, winnerAddress);
-      winnerInfo = `\n🏆 Winner: @${winnerUsername}`;
-    } else if (status.toLowerCase() === "completed") {
-      winnerInfo = await this.getWinnerInfo(ctx, gameAccount);
+    if (status.toLowerCase() === "completed") {
+      if (winnerAddress) {
+        const winnerUsername = await this.getPlayerUsername(ctx, winnerAddress);
+        winnerInfo = `\n🏆 Winner: @${winnerUsername}`;
+      } else {
+        winnerInfo = await this.getWinnerInfo(ctx, gameAccount);
+      }
     }
 
     let messageText = `<b>🪙 ${gameType} Game</b>\n\n` +
