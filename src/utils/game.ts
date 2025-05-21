@@ -735,16 +735,18 @@ export class GameManager {
     recentGames: string;
     totalTokensInGames: number;
   }> {
-    const playerKp = await this.wallet.getKeyPair(telegramId);
-    const playerBalancePda = this.getPlayerBalancePda(playerKp.publicKey);
+    const telegramIdStr = telegramId.toString();
     let totalTokensInGames = 0;
 
-    // Get all games in a single query
-    const allGames = await this.gameDb.getAllGames();
+    // Get active and recent games in parallel
+    const [activeGamesData, recentGamesData] = await Promise.all([
+      this.gameDb.getActiveGames(telegramIdStr),
+      this.gameDb.getRecentGames(telegramIdStr)
+    ]);
 
     // Batch fetch all game accounts in parallel
     const gameAccounts = new Map();
-    const gamePromises = allGames.map(async (gameData) => {
+    const gamePromises = [...activeGamesData, ...recentGamesData].map(async (gameData) => {
       try {
         const gamePda = new PublicKey(gameData.game_address);
         const gameAccount = await this.getCachedGameAccount(gamePda);
@@ -757,27 +759,14 @@ export class GameManager {
 
     // Get all unique Telegram IDs for username fetching
     const uniqueTelegramIds = new Set<string>();
-    allGames.forEach(game => {
+    [...activeGamesData, ...recentGamesData].forEach(game => {
       uniqueTelegramIds.add(game.creator_telegram_id);
     });
-    uniqueTelegramIds.add(telegramId.toString());
-
-    // Get winner Telegram IDs from database in batch
-    const winnerTelegramIds = new Map<string, string>();
-    const winnerPromises = allGames
-      .filter(game => game.winner_address && game.winner_address !== "cancelled" && game.winner_address !== "unknown")
-      .map(async (game) => {
-        const winnerTelegramId = await this.gameDb.getPlayerTelegramId(game.winner_address!);
-        if (winnerTelegramId) {
-          winnerTelegramIds.set(game.winner_address!, winnerTelegramId);
-          uniqueTelegramIds.add(winnerTelegramId);
-        }
-      });
-    await Promise.all(winnerPromises);
+    uniqueTelegramIds.add(telegramIdStr);
 
     // Batch fetch all usernames in parallel
     const usernameMap = new Map<string, string>();
-    const usernamePromises = Array.from(uniqueTelegramIds).map(async (id) => {
+    await Promise.all(Array.from(uniqueTelegramIds).map(async (id) => {
       try {
         const username = await this.getUsernameFromTelegramId(ctx, id);
         usernameMap.set(id, username);
@@ -785,73 +774,58 @@ export class GameManager {
         console.error(`Error getting username for ${id}:`, error);
         usernameMap.set(id, "Unknown");
       }
-    });
-    await Promise.all(usernamePromises);
+    }));
 
     // Process active games
-    const activeGames = await Promise.all(allGames
-      .filter(gameData => {
-        const gameAccount = gameAccounts.get(gameData.game_address);
-        if (!gameAccount) return false;
+    const activeGames = await Promise.all(activeGamesData.map(async (gameData) => {
+      const gameAccount = gameAccounts.get(gameData.game_address);
+      if (!gameAccount) return null;
 
-        const gameStatus = Object.keys(gameAccount.status)[0].toLowerCase();
-        if (gameStatus !== "active") return false;
+      totalTokensInGames += Number(gameAccount.amount);
+      const gamePda = new PublicKey(gameData.game_address);
+      return this.getGameInfo(ctx, gamePda);
+    }));
 
-        const isCreator = gameData.creator_telegram_id === telegramId.toString();
-        const isPlayer = gameAccount.players.some((p: PublicKey) => p.equals(playerBalancePda));
+    // Process recent games
+    const recentGames = recentGamesData.map(gameData => {
+      const gameAccount = gameAccounts.get(gameData.game_address);
+      if (!gameAccount) return null;
 
-        if (isCreator || isPlayer) {
-          totalTokensInGames += Number(gameAccount.amount);
-          return true;
-        }
-        return false;
-      })
-      .map(gameData => {
-        const gamePda = new PublicKey(gameData.game_address);
-        return this.getGameInfo(ctx, gamePda);
-      }));
+      // For winner resolution, use the winner's Telegram ID if available
+      let winnerUsername = "Unknown";
+      const winnerAddress = gameData.winner_address;
+      if (winnerAddress && winnerAddress !== "cancelled" && winnerAddress !== "unknown") {
+        // Try to get the winner's Telegram ID from the database
+        this.gameDb.getPlayerTelegramId(winnerAddress).then(winnerTelegramId => {
+          if (winnerTelegramId) {
+            winnerUsername = usernameMap.get(winnerTelegramId) || "Unknown";
+          } else {
+            // If no Telegram ID found, use the public key
+            winnerUsername = winnerAddress.slice(0, 8) + "...";
+          }
+        });
+      }
 
-    // Process completed games
-    const completedGames = allGames
-      .filter(gameData => {
-        const gameAccount = gameAccounts.get(gameData.game_address);
-        if (!gameAccount) return false;
+      const currentUsername = usernameMap.get(telegramIdStr) || "Unknown";
+      const isWinner = winnerUsername === currentUsername;
 
-        const status = Object.keys(gameAccount.status)[0].toLowerCase();
-        if (status === 'active') return false;
+      return {
+        ...gameData,
+        gameAccount,
+        category: winnerAddress === "cancelled" ? "cancelled" : isWinner ? "won" : "lost"
+      };
+    }).filter(Boolean);
 
-        return gameAccount.players.some((p: PublicKey) => p.equals(playerBalancePda));
-      })
-      .map(gameData => {
-        const gameAccount = gameAccounts.get(gameData.game_address)!;
-        const winnerTelegramId = winnerTelegramIds.get(gameData.winner_address || "");
-        const winnerUsername = winnerTelegramId ? usernameMap.get(winnerTelegramId) || "Unknown" : "Unknown";
-        const currentUsername = usernameMap.get(telegramId.toString()) || "Unknown";
-        const isWinner = winnerUsername === currentUsername;
-
-        return {
-          ...gameData,
-          gameAccount,
-          category: gameData.winner_address === "cancelled" ? "cancelled" : isWinner ? "won" : "lost"
-        };
-      })
-      .sort((a, b) => {
-        const timeA = a.completed_at || a.created_at;
-        const timeB = b.completed_at || b.created_at;
-        return timeB - timeA;
-      })
-      .slice(0, 5); // Limit to 5 most recent games
-
-    // Group completed games by category
+    // Group recent games by category
     const categories = {
-      won: completedGames.filter(game => game.category === 'won'),
-      lost: completedGames.filter(game => game.category === 'lost'),
-      cancelled: completedGames.filter(game => game.category === 'cancelled')
+      won: recentGames.filter(game => game?.category === 'won'),
+      lost: recentGames.filter(game => game?.category === 'lost'),
+      cancelled: recentGames.filter(game => game?.category === 'cancelled')
     };
 
     // Format sections
-    const activeGamesSection = activeGames.length > 0
-      ? "🎮 <b>Active Games</b>\n\n" + activeGames.join("\n\n")
+    const activeGamesSection = activeGames.filter(Boolean).length > 0
+      ? "🎮 <b>Active Games</b>\n\n" + activeGames.filter(Boolean).join("\n\n")
       : "";
 
     const recentGamesSections = await Promise.all([
@@ -1007,7 +981,14 @@ export class GameManager {
   // Helper function to get a user's username from their Telegram ID
   private async getUsernameFromTelegramId(ctx: Context, telegramId: string): Promise<string> {
     try {
-      const chatMember = await ctx.api.getChatMember(ctx.chat!.id, parseInt(telegramId));
+      // Check if the ID is a valid number
+      const numericId = parseInt(telegramId);
+      if (isNaN(numericId)) {
+        // If not a valid number, it's likely a public key
+        return telegramId.slice(0, 8) + "...";
+      }
+
+      const chatMember = await ctx.api.getChatMember(ctx.chat!.id, numericId);
       return chatMember.user.username || chatMember.user.first_name;
     } catch (error) {
       console.error(`Error getting username for Telegram ID ${telegramId}:`, error);

@@ -194,4 +194,42 @@ export class GameDatabase {
       throw error;
     }
   }
+
+  // Get active games for a player
+  public async getActiveGames(telegramId: string): Promise<GameData[]> {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT * FROM games
+        WHERE status = 'active'
+        AND (creator_telegram_id = ? OR game_address IN (
+          SELECT game_address FROM player_mappings
+          WHERE telegram_id = ?
+        ))
+      `);
+      return stmt.all(telegramId, telegramId) as GameData[];
+    } catch (error) {
+      console.error("Error getting active games:", error);
+      throw error;
+    }
+  }
+
+  // Get recent completed games for a player
+  public async getRecentGames(telegramId: string, limit: number = 5): Promise<GameData[]> {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT * FROM games
+        WHERE status = 'completed'
+        AND (creator_telegram_id = ? OR game_address IN (
+          SELECT game_address FROM player_mappings
+          WHERE telegram_id = ?
+        ))
+        ORDER BY completed_at DESC
+        LIMIT ?
+      `);
+      return stmt.all(telegramId, telegramId, limit) as GameData[];
+    } catch (error) {
+      console.error("Error getting recent games:", error);
+      throw error;
+    }
+  }
 }
