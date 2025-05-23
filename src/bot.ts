@@ -696,15 +696,15 @@ bot.on("callback_query", async (ctx) => {
         try {
           updatedGameAccount = await program.account.game.fetch(gamePda);
           console.log(`Current players in game: ${updatedGameAccount.players.length}`);
-          console.log(`Player balance PDA to check: ${playerBalancePda.toBase58()}`);
+          console.log(`Player public key to check: ${playerKp.publicKey.toBase58()}`);
           console.log("Current players in game:");
           updatedGameAccount.players.forEach((p: PublicKey) => {
             console.log(`- ${p.toBase58()}`);
           });
 
           playerWasAdded = updatedGameAccount.players.some((p: PublicKey) => {
-            const isAdded = p.equals(playerBalancePda);
-            console.log(`Checking player balance PDA ${p.toBase58()} against ${playerBalancePda.toBase58()}: ${isAdded}`);
+            const isAdded = p.equals(playerKp.publicKey);
+            console.log(`Checking player public key ${p.toBase58()} against ${playerKp.publicKey.toBase58()}: ${isAdded}`);
             return isAdded;
           });
 
@@ -740,9 +740,6 @@ bot.on("callback_query", async (ctx) => {
       const playerPubkey = playerKp.publicKey.toBase58();
       console.log(`Saving player mapping for joiner - Public Key: ${playerPubkey}, Telegram ID: ${telegramId.toString()}`);
       await gameDb.savePlayerMapping(playerPubkey, telegramId.toString());
-      // Also save mapping for the balance PDA
-      console.log(`Saving player mapping for balance PDA - PDA: ${playerBalancePda.toBase58()}, Telegram ID: ${telegramId.toString()}`);
-      await gameDb.savePlayerMapping(playerBalancePda.toBase58(), telegramId.toString());
 
       // Update game message with current status
       const creatorUsername = await gameManager.getGameCreatorUsername(ctx, gameAddress);

@@ -213,8 +213,8 @@ export class GameManager {
     let playerInfo = "";
     if (gameAccount.players.length > 0) {
       playerInfo = "\n👥 Players:\n";
-      for (const playerBalancePda of gameAccount.players) {
-        const username = await this.getPlayerUsername(ctx, playerBalancePda.toBase58());
+      for (const playerPubkey of gameAccount.players) {
+        const username = await this.getPlayerUsername(ctx, playerPubkey.toBase58());
         playerInfo += `• @${username}\n`;
       }
     }
@@ -417,11 +417,8 @@ export class GameManager {
         throw new Error("Game is not active");
       }
 
-      // Get player's balance PDA
-      const playerBalancePda = this.getPlayerBalancePda(playerKp.publicKey);
-
       // Check if player is in the game
-      const isInGame = gameAccount.players.some((p: PublicKey) => p.equals(playerBalancePda));
+      const isInGame = gameAccount.players.some((p: PublicKey) => p.equals(playerKp.publicKey));
       if (!isInGame) {
         throw new Error("You are not in this game");
       }
@@ -870,7 +867,7 @@ export class GameManager {
         return;
       }
 
-      // Save player mapping for creator - using both the wallet address and balance PDA
+      // Save player mapping for creator - using wallet address
       const creatorPubkey = playerKp.publicKey.toBase58();
       console.log(`Saving creator mapping - Wallet Address: ${creatorPubkey}, Telegram ID: ${telegramId.toString()}`);
       this.gameDb.savePlayerMapping(creatorPubkey, telegramId.toString());
@@ -884,9 +881,6 @@ export class GameManager {
       // Ensure player balance PDA exists
       await this.ensurePlayerBalance(playerKp);
       console.log(`Player balance PDA: ${playerBalancePda.toBase58()}`);
-      // Save creator's balance PDA mapping
-      console.log(`Saving creator balance PDA mapping - PDA: ${playerBalancePda.toBase58()}, Telegram ID: ${telegramId.toString()}`);
-      this.gameDb.savePlayerMapping(playerBalancePda.toBase58(), telegramId.toString());
 
       // Create game on-chain
       const tx = await this.program.methods
