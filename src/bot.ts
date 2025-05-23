@@ -90,16 +90,8 @@ const getPlayerData = async (telegramId: bigint): Promise<PlayerData> => {
 
 // Helper function to check and claim winnings
 const checkAndClaimWinnings = async (playerKp: anchor.web3.Keypair, isSol: boolean): Promise<number> => {
-  console.log(`💰 Checking winnings for player: ${playerKp.publicKey.toBase58()}, isSol: ${isSol}`);
-
-  if (isSol) {
-    console.log(`  Skipping claim for SOL transaction`);
-    return 0; // No claiming needed for SOL
-  }
-
-  const claimedAmount = await claimWinnings(playerKp);
-  console.log(`  Total claimed amount: ${claimedAmount}`);
-  return claimedAmount;
+  if (isSol) return 0;
+  return await claimWinnings(playerKp);
 };
 
 // Helper function to validate balance
