@@ -511,7 +511,7 @@ export class GameManager {
     const keyboard = [];
     if (status.toLowerCase() !== "completed") {
       keyboard.push([
-        { text: "🎮 Join Game", callback_data: `join_${gamePda.toBase58()}` },
+        { text: "🎮 Join", callback_data: `join_${gamePda.toBase58()}` },
         { text: "🔄 Refresh", callback_data: `refresh_${gamePda.toBase58()}` }
       ]);
 
