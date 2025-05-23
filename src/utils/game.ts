@@ -319,11 +319,25 @@ export class GameManager {
       const creatorTelegramId = this.gameDb.getCreatorTelegramId(gamePda.toBase58()); // Now synchronous
       if (!creatorTelegramId) return false;
 
+      // Fixed logic: Only try to complete if has enough players
       if (hasEnoughPlayers) {
-        const completed = await this.handleGameCompletion(ctx, gamePda);
-        return completed ? false : false;
+        console.log(`Game has enough players, attempting oracle completion...`);
+        try {
+          const completed = await this.handleGameCompletion(ctx, gamePda);
+          return completed ? false : false;
+        } catch (error: any) {
+          console.error(`Oracle completion failed: ${error.message}`);
+          if (error.message.includes("GameNotReadyForOracle")) {
+            console.log(`Game not ready for oracle, falling back to cancellation...`);
+            // Fall through to cancellation logic
+          } else {
+            throw error;
+          }
+        }
       }
 
+      // Cancel the game (either not enough players or oracle completion failed)
+      console.log(`Cancelling expired game (not enough players or oracle failed)...`);
       const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId)); // Now synchronous
 
       try {
@@ -341,6 +355,8 @@ export class GameManager {
 
         this.gameDb.completeGame(gamePda.toBase58(), "cancelled", completedAt); // Now synchronous
 
+        console.log(`Game cancelled successfully with tx: ${tx}`);
+
         return {
           cancelled: true,
           amount: Number(gameAccount.amount),
@@ -349,6 +365,7 @@ export class GameManager {
         };
       } catch (error: any) {
         if (error.message.includes("GameReadyForOracle")) {
+          console.log(`Game became ready for oracle during cancellation, trying completion again...`);
           const completed = await this.handleGameCompletion(ctx, gamePda);
           return completed ? false : false;
         }
