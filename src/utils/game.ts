@@ -225,7 +225,7 @@ export class GameManager {
   private async getPlayerInfo(ctx: Context, gameAccount: any): Promise<string> {
     if (gameAccount.players.length === 0) return "";
 
-    let playerInfo = "\n👥 Players:\n";
+    let playerInfo = "\n";
     for (const playerPubkey of gameAccount.players) {
       const username = await this.getPlayerUsername(ctx, playerPubkey.toBase58());
       playerInfo += `• @${username}\n`;
