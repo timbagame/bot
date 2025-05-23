@@ -968,6 +968,25 @@ bot.on("callback_query", async (ctx) => {
         undefined
       );
 
+      // Send a reply notification that the user joined
+      const joinerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
+      const tokenMetadata = await getTokenMetadata();
+      const playerCount = updatedGameAccount.players.length;
+      const maxPlayers = gameAccount.maxPlayers;
+      const gameName = gameType.toLowerCase();
+
+      // Get the game message for reply_to_message_id
+      const gameMessage = gameManager.getActiveGameMessage(gameAddress);
+
+      await ctx.reply(
+        `🎮 @${joinerUsername} joined the ${gameName}! (${playerCount}/${maxPlayers} players)\n\n` +
+        `💰 Amount: ${wallet.formatTokenBalance(Number(game.amount), tokenMetadata.decimals)} ${TICKER}`,
+        {
+          parse_mode: "HTML",
+          reply_to_message_id: gameMessage?.messageId
+        }
+      );
+
       // Check if this was the last player needed to fill the game
       if (updatedGameAccount.players.length === gameAccount.maxPlayers) {
         console.log(`Game ${gamePda.toBase58()} is full, waiting for join transaction to be fully processed...`);

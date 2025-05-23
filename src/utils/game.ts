@@ -191,6 +191,13 @@ export class GameManager {
     this.gameAccountCache.delete(gamePda.toBase58());
   }
 
+  /**
+   * Get the active game message for a given game address
+   */
+  public getActiveGameMessage(gameAddress: string): GameMessage | undefined {
+    return this.activeGameMessages.get(gameAddress);
+  }
+
   private async getGameStatusInfo(gameAccount: any): Promise<GameInfo> {
     const status = Object.keys(gameAccount.status)[0].toLowerCase();
     const createdAt = Number(gameAccount.createdAt);
@@ -313,6 +320,9 @@ export class GameManager {
 
         this.gameDb.completeGame(gamePda.toBase58(), "cancelled", completedAt);
 
+        // Send cancellation notification
+        await this.sendCancellationNotification(ctx, gameAccount, gamePda.toBase58());
+
         return {
           cancelled: true,
           amount: Number(gameAccount.amount),
@@ -359,16 +369,84 @@ export class GameManager {
     if (!creatorTelegramId) return;
 
     const creatorUsername = await this.getUsernameFromTelegramId(ctx, creatorTelegramId);
+    const gameType = Object.keys(gameAccount.gameType)[0].charAt(0).toUpperCase() + Object.keys(gameAccount.gameType)[0].slice(1);
 
     await this.updateGameMessage(
       ctx,
       gamePda.toBase58(),
-      Object.keys(gameAccount.gameType)[0].charAt(0).toUpperCase() + Object.keys(gameAccount.gameType)[0].slice(1),
+      gameType,
       Number(gameAccount.amount),
       creatorUsername,
       "Completed",
       winnerPubkeyStr
     );
+
+    // Send a completion notification reply
+    await this.sendCompletionNotification(ctx, gameAccount, winnerPubkeyStr, gameType, gameMessage.messageId);
+  }
+
+  /**
+   * Send a completion notification when a game finishes
+   */
+  private async sendCompletionNotification(
+    ctx: Context,
+    gameAccount: any,
+    winnerPubkeyStr: string,
+    gameType: string,
+    replyToMessageId: number
+  ): Promise<void> {
+    try {
+      const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
+      const winnerUsername = await this.getPlayerUsername(ctx, winnerPubkeyStr);
+      const amount = Number(gameAccount.amount);
+      const playerCount = gameAccount.players.length;
+
+      await ctx.reply(
+        `🎉 <b>${gameType} Completed!</b>\n\n` +
+        `🏆 Winner: @${winnerUsername}\n` +
+        `💰 Prize: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
+        `👥 Players: ${playerCount}`,
+        {
+          parse_mode: "HTML",
+          reply_to_message_id: replyToMessageId
+        }
+      );
+    } catch (error) {
+      console.error("Error sending completion notification:", error);
+    }
+  }
+
+  /**
+   * Send a cancellation notification when a game is cancelled
+   */
+  private async sendCancellationNotification(
+    ctx: Context,
+    gameAccount: any,
+    gameAddress: string
+  ): Promise<void> {
+    try {
+      const gameMessage = this.activeGameMessages.get(gameAddress);
+      if (!gameMessage) return;
+
+      const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
+      const gameType = formatGameType(gameAccount.gameType);
+      const amount = Number(gameAccount.amount);
+      const playerCount = gameAccount.players.length;
+
+      await ctx.reply(
+        `❌ <b>${gameType} Cancelled!</b>\n\n` +
+        `⏰ Game expired with insufficient players\n` +
+        `💰 Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
+        `👥 Players: ${playerCount}/${gameAccount.maxPlayers}\n\n` +
+        `💸 Funds have been returned to players`,
+        {
+          parse_mode: "HTML",
+          reply_to_message_id: gameMessage.messageId
+        }
+      );
+    } catch (error) {
+      console.error("Error sending cancellation notification:", error);
+    }
   }
 
   public async unjoinGame(ctx: Context, gamePda: PublicKey, playerKp: anchor.web3.Keypair): Promise<boolean> {
