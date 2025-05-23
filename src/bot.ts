@@ -978,6 +978,7 @@ bot.on("callback_query", async (ctx) => {
       // Get the game message for reply_to_message_id
       const gameMessage = gameManager.getActiveGameMessage(gameAddress);
 
+      console.log(`🎮 Sending join notification for @${joinerUsername} (${playerCount}/${maxPlayers} players)`);
       await ctx.reply(
         `🎮 @${joinerUsername} joined the ${gameName}! (${playerCount}/${maxPlayers} players)\n\n` +
         `💰 Amount: ${wallet.formatTokenBalance(Number(game.amount), tokenMetadata.decimals)} ${TICKER}`,
@@ -986,6 +987,7 @@ bot.on("callback_query", async (ctx) => {
           reply_to_message_id: gameMessage?.messageId
         }
       );
+      console.log(`✅ Join notification sent successfully`);
 
       // Check if this was the last player needed to fill the game
       if (updatedGameAccount.players.length === gameAccount.maxPlayers) {

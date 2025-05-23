@@ -257,17 +257,24 @@ export class GameManager {
     gamePda: PublicKey,
   ): Promise<boolean> {
     try {
+      console.log(`🎯 Starting game completion for ${gamePda.toBase58()}`);
       const result = await this.oracleManager.completeGame(gamePda);
 
       if (!result.success) {
+        console.log(`❌ Oracle completion failed: ${result.error}`);
         throw new Error(result.error || "Failed to complete game");
       }
+
+      console.log(`✅ Oracle completion successful, winner: ${result.winnerAddress}`);
 
       const blockTime = await this.wallet.getBlockchainTime();
       const completedAt = blockTime * 1000;
 
       this.gameDb.completeGame(gamePda.toBase58(), result.winnerAddress!, completedAt);
+      console.log(`💾 Saved game completion to database`);
+
       await this.updateGameMessageWithWinner(ctx, gamePda, result.winnerAddress!);
+      console.log(`📝 Updated game message with winner`);
 
       return true;
     } catch (error: any) {
@@ -396,6 +403,7 @@ export class GameManager {
     replyToMessageId: number
   ): Promise<void> {
     try {
+      console.log(`🎉 Sending completion notification for ${gameType} game, winner: ${winnerPubkeyStr}`);
       const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
       const winnerUsername = await this.getPlayerUsername(ctx, winnerPubkeyStr);
       const amount = Number(gameAccount.amount);
@@ -411,6 +419,7 @@ export class GameManager {
           reply_to_message_id: replyToMessageId
         }
       );
+      console.log(`✅ Completion notification sent successfully`);
     } catch (error) {
       console.error("Error sending completion notification:", error);
     }
