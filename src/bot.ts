@@ -970,7 +970,6 @@ bot.on("callback_query", async (ctx) => {
 
       // Send a reply notification that the user joined
       const joinerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
-      const tokenMetadata = await getTokenMetadata();
       const playerCount = updatedGameAccount.players.length;
       const maxPlayers = gameAccount.maxPlayers;
       const gameName = gameType.toLowerCase();
@@ -980,8 +979,7 @@ bot.on("callback_query", async (ctx) => {
 
       console.log(`🎮 Sending join notification for @${joinerUsername} (${playerCount}/${maxPlayers} players)`);
       await ctx.reply(
-        `🎮 @${joinerUsername} joined the ${gameName}! (${playerCount}/${maxPlayers} players)\n\n` +
-        `💰 Amount: ${wallet.formatTokenBalance(Number(game.amount), tokenMetadata.decimals)} ${TICKER}`,
+        `🎮 @${joinerUsername} joined the ${gameName}! (${playerCount}/${maxPlayers} players)`,
         {
           parse_mode: "HTML",
           reply_to_message_id: gameMessage?.messageId
