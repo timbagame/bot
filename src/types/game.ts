@@ -22,3 +22,19 @@ export interface GameMessageFormat {
   messageText: string;
   keyboard: any[];
 }
+
+export interface GameCategory {
+  won: any[];
+  lost: any[];
+  cancelled: any[];
+  created: any[];
+}
+
+export interface GameBasicInfo {
+  amount: number;
+  maxPlayers: number;
+  currentPlayers: number;
+  creatorPubkey: string;
+  status: string;
+  gameType: string;
+}

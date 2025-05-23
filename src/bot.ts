@@ -8,6 +8,7 @@ import idl from "../idl/idl.json";
 import { GameDatabase } from "./utils/database";
 import { SystemProgram } from "@solana/web3.js";
 import { GameManager } from "./utils/game";
+import type { ParsedAmount, PlayerData } from "./types/bot";
 
 // Initialize the bot and wallet manager
 const bot = new Bot(process.env.TELEGRAM_TOKEN!);
@@ -23,6 +24,143 @@ const TOKEN_METADATA_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 // Initialize game database
 const gameDb = GameDatabase.getInstance();
+
+// Global program variable to be initialized when needed
+let program: anchor.Program<Coinflip>;
+let gameManager: GameManager;
+
+// ================================
+// HELPER FUNCTIONS
+// ================================
+
+// Helper function to get token metadata with caching
+const getTokenMetadata = async () => {
+  const now = Date.now();
+  if (!tokenMetadata || now - tokenMetadataLastFetch > TOKEN_METADATA_CACHE_DURATION) {
+    tokenMetadata = await wallet.getTokenMetadata(TOKEN_MINT);
+    tokenMetadataLastFetch = now;
+  }
+  return tokenMetadata;
+};
+
+// Helper function to parse and validate amounts
+const parseAmount = async (args: string[], argIndex: number = 1): Promise<ParsedAmount | null> => {
+  if (!args || args.length <= argIndex) return null;
+
+  const metadata = await getTokenMetadata();
+  const isSol = args[args.length - 1].toUpperCase() === "SOL";
+  const amountStr = isSol ? args[argIndex] : args[argIndex];
+  const rawAmount = parseFloat(amountStr);
+
+  if (isNaN(rawAmount) || rawAmount <= 0) return null;
+
+  const amount = rawAmount * (isSol ? LAMPORTS_PER_SOL : Math.pow(10, metadata.decimals));
+  const formattedAmount = isSol
+    ? wallet.formatSolBalance(amount) + " SOL"
+    : wallet.formatTokenBalance(amount, metadata.decimals) + " " + TICKER;
+
+  return { amount, isSol, formattedAmount };
+};
+
+// Helper function to get player data
+const getPlayerData = async (telegramId: bigint): Promise<PlayerData> => {
+  const keypair = await wallet.getKeyPair(telegramId);
+  const [tokenBalance, solBalance] = await Promise.all([
+    wallet.getTokenBalance(telegramId, TOKEN_MINT),
+    wallet.getBalance(telegramId)
+  ]);
+
+  // Get player's game balance
+  let gameBalance = 0;
+  try {
+    const [playerBalancePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("player_balance"), keypair.publicKey.toBuffer(), new PublicKey(TOKEN_MINT).toBuffer()],
+      program.programId
+    );
+    const playerBalanceAccount = await program.account.playerBalance.fetch(playerBalancePda);
+    gameBalance = Number(playerBalanceAccount.amount);
+  } catch (error) {
+    // Player balance account doesn't exist yet
+  }
+
+  return { keypair, tokenBalance, solBalance, gameBalance };
+};
+
+// Helper function to check and claim winnings
+const checkAndClaimWinnings = async (playerKp: anchor.web3.Keypair, isSol: boolean): Promise<number> => {
+  if (isSol) return 0; // No claiming needed for SOL
+
+  return await claimWinnings(playerKp);
+};
+
+// Helper function to validate balance
+const validateBalance = async (playerData: PlayerData, amount: number, isSol: boolean): Promise<string | null> => {
+  const metadata = await getTokenMetadata();
+
+  if (isSol) {
+    if (playerData.solBalance < amount) {
+      return `Insufficient SOL balance. You have ${wallet.formatSolBalance(playerData.solBalance)} SOL but need ${wallet.formatSolBalance(amount)} SOL`;
+    }
+  } else {
+    const totalBalance = playerData.tokenBalance + playerData.gameBalance;
+    if (totalBalance < amount) {
+      return `Insufficient balance. You have ${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${TICKER} but need ${wallet.formatTokenBalance(amount, metadata.decimals)} ${TICKER}`;
+    }
+  }
+
+  return null; // No error
+};
+
+// Helper function to process transactions with loading state
+const processTransaction = async (
+  ctx: Context,
+  description: string,
+  transactionFn: () => Promise<string>
+): Promise<void> => {
+  const processingMsg = await ctx.reply(`Processing ${description}...`, {
+    reply_to_message_id: ctx.message?.message_id
+  });
+
+  try {
+    const tx = await transactionFn();
+
+    await ctx.api.editMessageText(
+      ctx.chat!.id,
+      processingMsg.message_id,
+      `${description} successful! 💸\n\nTransaction: ${tx}`,
+      { parse_mode: "HTML" }
+    );
+  } catch (error: any) {
+    await ctx.api.editMessageText(
+      ctx.chat!.id,
+      processingMsg.message_id,
+      `Error: ${error.message || "Unknown error"}`,
+      { parse_mode: "HTML" }
+    );
+    throw error;
+  }
+};
+
+// Helper function to handle errors consistently
+const handleCommandError = async (ctx: Context, error: any, commandName: string): Promise<void> => {
+  console.error(`Error in ${commandName} command:`, error);
+  await ctx.reply(`❌ ${error.message || "Unknown error"}`, {
+    reply_to_message_id: ctx.message?.message_id
+  });
+};
+
+// Helper function to validate address
+const validateAddress = (addressStr: string): PublicKey | null => {
+  try {
+    return new PublicKey(addressStr);
+  } catch {
+    return null;
+  }
+};
+
+// ================================
+// ANCHOR SETUP
+// ================================
 
 // Initialize Anchor with a wallet for admin operations
 const initializeAnchorProvider = async () => {
@@ -44,10 +182,6 @@ const initializeAnchorProvider = async () => {
 
   return new anchor.Program(idl as Coinflip, provider) as anchor.Program<Coinflip>;
 };
-
-// Global program variable to be initialized when needed
-let program: anchor.Program<Coinflip>;
-let gameManager: GameManager;
 
 // Initialize program when bot starts
 const setupAnchor = async () => {
@@ -90,63 +224,36 @@ const setupAnchor = async () => {
   }
 };
 
-// Helper function to get token metadata with caching
-const getTokenMetadata = async () => {
-  const now = Date.now();
-  if (!tokenMetadata || now - tokenMetadataLastFetch > TOKEN_METADATA_CACHE_DURATION) {
-    tokenMetadata = await wallet.getTokenMetadata(TOKEN_MINT);
-    tokenMetadataLastFetch = now;
-  }
-  return tokenMetadata;
-};
-
-// Helper function to format balance message
-const formatBalanceMessage = async (playerKp: anchor.web3.Keypair, balance: any, tokenBalance: number, solBalance: number, metadata: { decimals: number }): Promise<string> => {
-  let response = "💰 <b>Your Balance</b>\n\n";
-  response += `Wallet Address: <code>${playerKp.publicKey.toBase58()}</code>\n`;
-  response += `SOL Balance: ${wallet.formatSolBalance(solBalance)} SOL\n`;
-  response += `Token Balance: ${wallet.formatTokenBalance(tokenBalance + Number(balance.amount), metadata.decimals)} ${TICKER}`;
-
-  return response;
-};
-
-// Helper function to format error message
-const formatErrorMessage = (error: any, prefix: string = "❌"): string => {
-  return `${prefix} ${error.message || "Unknown error"}`;
-};
+// ================================
+// BOT COMMANDS
+// ================================
 
 // Optimize balance command
 bot.command(["start", "balance"], async (ctx: Context) => {
   const telegramId = BigInt(ctx.from?.id || 0);
   try {
-    const playerKp = await wallet.getKeyPair(telegramId);
-    const playerPubkey = playerKp.publicKey;
+    const playerData = await getPlayerData(telegramId);
     const metadata = await getTokenMetadata();
 
     // Get player's balance PDA
     const [playerBalancePda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("player_balance"), playerPubkey.toBuffer(), new PublicKey(TOKEN_MINT).toBuffer()],
+      [Buffer.from("player_balance"), playerData.keypair.publicKey.toBuffer(), new PublicKey(TOKEN_MINT).toBuffer()],
       program.programId
     );
 
-    // Fetch all balances in parallel
-    const [balance, tokenBalance, solBalance] = await Promise.all([
-      program.account.playerBalance.fetch(playerBalancePda).catch(() => ({ amount: 0 })),
-      wallet.getTokenBalance(telegramId, TOKEN_MINT),
-      wallet.getBalance(telegramId)
-    ]);
+    const balance = await program.account.playerBalance.fetch(playerBalancePda).catch(() => ({ amount: 0 }));
 
-    const response = await formatBalanceMessage(playerKp, balance, tokenBalance, solBalance, metadata);
+    let response = "💰 <b>Your Balance</b>\n\n";
+    response += `Wallet Address: <code>${playerData.keypair.publicKey.toBase58()}</code>\n`;
+    response += `SOL Balance: ${wallet.formatSolBalance(playerData.solBalance)} SOL\n`;
+    response += `Token Balance: ${wallet.formatTokenBalance(playerData.tokenBalance + Number(balance.amount), metadata.decimals)} ${TICKER}`;
 
     await ctx.reply(response, {
       parse_mode: "HTML",
       reply_to_message_id: ctx.message?.message_id
     });
   } catch (error) {
-    console.error("Error in balance command:", error);
-    await ctx.reply(formatErrorMessage(error), {
-      reply_to_message_id: ctx.message?.message_id
-    });
+    await handleCommandError(ctx, error, "balance");
   }
 });
 
@@ -155,17 +262,18 @@ bot.command(["coinflip", "cf"], async (ctx) => {
   if (!ctx.from) return;
 
   const args = ctx.message?.text?.split(" ");
-  const metadata = await getTokenMetadata();
-  const amount = parseFloat(args?.[1] || "0") * Math.pow(10, metadata.decimals);
+  if (!args) return;
+
+  const parsed = await parseAmount(args);
   const maxPlayers = parseInt(args?.[2] || "2") || 2;
 
-  if (amount <= 0) {
+  if (!parsed) {
     return ctx.reply("Usage: /coinflip <amount> <maxPlayers>\nExample: /coinflip 10 2", {
       reply_to_message_id: ctx.message?.message_id
     });
   }
 
-  await gameManager.createGame(ctx, "coinflip", amount, maxPlayers, 2, 3600);
+  await gameManager.createGame(ctx, "coinflip", parsed.amount, maxPlayers, 2, 3600);
 });
 
 // Simplified giveaway command
@@ -173,17 +281,18 @@ bot.command(["giveaway", "ga"], async (ctx) => {
   if (!ctx.from) return;
 
   const args = ctx.message?.text?.split(" ");
-  const metadata = await getTokenMetadata();
-  const amount = parseFloat(args?.[1] || "0") * Math.pow(10, metadata.decimals);
+  if (!args) return;
+
+  const parsed = await parseAmount(args);
   const maxPlayers = parseInt(args?.[2] || "5") || 5;
 
-  if (amount <= 0) {
+  if (!parsed) {
     return ctx.reply("Usage: /giveaway <amount> <maxPlayers>\nExample: /giveaway 100 5", {
       reply_to_message_id: ctx.message?.message_id
     });
   }
 
-  await gameManager.createGame(ctx, "giveaway", amount, maxPlayers, 1, 3600);
+  await gameManager.createGame(ctx, "giveaway", parsed.amount, maxPlayers, 1, 3600);
 });
 
 // Implement withdraw command
@@ -197,87 +306,50 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
     });
   }
 
-  let toAddress: PublicKey;
-  try {
-    toAddress = new PublicKey(args[1]);
-  } catch (error) {
+  const toAddress = validateAddress(args[1]);
+  if (!toAddress) {
     return ctx.reply("Invalid wallet address. Please provide a valid Solana address.", {
       reply_to_message_id: ctx.message?.message_id
     });
   }
 
-  const metadata = await getTokenMetadata();
-  const isSol = args[args.length - 1].toUpperCase() === "SOL";
-  const amountStr = isSol ? args[2] : args[2];
-  const amount = parseFloat(amountStr) * (isSol ? LAMPORTS_PER_SOL : Math.pow(10, metadata.decimals));
-
-  if (isNaN(amount) || amount <= 0) {
+  const parsed = await parseAmount(args, 2);
+  if (!parsed) {
     return ctx.reply("Please provide a valid amount greater than 0.", {
       reply_to_message_id: ctx.message?.message_id
     });
   }
 
   try {
-    // Get player keypair
-    const playerKp = await wallet.getKeyPair(telegramId);
+    const playerData = await getPlayerData(telegramId);
 
-    // First try to claim any winnings if not using SOL
-    if (!isSol) {
-      const claimableAmount = await claimWinnings(playerKp);
-      if (claimableAmount > 0) {
-        console.log(`Claimed ${claimableAmount} tokens from winnings`);
-      }
-    }
+    // Claim winnings if not using SOL
+    await checkAndClaimWinnings(playerData.keypair, parsed.isSol);
 
-    // Check appropriate balance
-    if (isSol) {
-      const solBalance = await wallet.getBalance(telegramId);
-      if (solBalance < amount) {
-        return ctx.reply(`Insufficient SOL balance. You have ${wallet.formatSolBalance(solBalance)} SOL but are trying to withdraw ${wallet.formatSolBalance(amount)} SOL`, {
-          reply_to_message_id: ctx.message?.message_id
-        });
-      }
-    } else {
-      const tokenBalance = await wallet.getTokenBalance(telegramId, TOKEN_MINT);
-      if (tokenBalance < amount) {
-        return ctx.reply(`Insufficient balance. You have ${wallet.formatTokenBalance(tokenBalance, metadata.decimals)} ${TICKER} but are trying to withdraw ${wallet.formatTokenBalance(amount, metadata.decimals)} ${TICKER}`, {
-          reply_to_message_id: ctx.message?.message_id
-        });
-      }
-    }
-
-    // Send message to indicate processing
-    const processingMsg = await ctx.reply(`Processing withdrawal of ${isSol ? wallet.formatSolBalance(amount) + " SOL" : wallet.formatTokenBalance(amount, metadata.decimals) + " " + TICKER}...`, {
-      reply_to_message_id: ctx.message?.message_id
-    });
-
-    let tx: string;
-    if (isSol) {
-      // Native SOL transfer
-      const transferSolIx = SystemProgram.transfer({
-        fromPubkey: playerKp.publicKey,
-        toPubkey: toAddress,
-        lamports: amount,
+    // Validate balance
+    const balanceError = await validateBalance(playerData, parsed.amount, parsed.isSol);
+    if (balanceError) {
+      return ctx.reply(balanceError, {
+        reply_to_message_id: ctx.message?.message_id
       });
-      tx = await wallet.signAndSend([transferSolIx], [playerKp]);
-    } else {
-      // WSOL transfer
-      tx = await wallet.transferToken(telegramId, toAddress, amount, TOKEN_MINT);
     }
 
-    // Update message with success
-    ctx.api.editMessageText(
-      ctx.chat!.id,
-      processingMsg.message_id,
-      `Withdrawal successful! 💸\n\nAmount: ${isSol ? wallet.formatSolBalance(amount) + " SOL" : wallet.formatTokenBalance(amount, metadata.decimals) + " " + TICKER}\nTo: ${toAddress.toBase58().slice(0, 8)}...\n\nTransaction: ${tx}`,
-      { parse_mode: "HTML" }
-    );
+    // Process transaction
+    await processTransaction(ctx, `Withdrawal of ${parsed.formattedAmount}`, async () => {
+      if (parsed.isSol) {
+        const transferSolIx = SystemProgram.transfer({
+          fromPubkey: playerData.keypair.publicKey,
+          toPubkey: toAddress,
+          lamports: parsed.amount,
+        });
+        return await wallet.signAndSend([transferSolIx], [playerData.keypair]);
+      } else {
+        return await wallet.transferToken(telegramId, toAddress, parsed.amount, TOKEN_MINT);
+      }
+    });
 
   } catch (error: any) {
-    console.error("Error processing withdrawal:", error);
-    ctx.reply(`Error processing withdrawal: ${error.message || "Unknown error"}`, {
-      reply_to_message_id: ctx.message?.message_id
-    });
+    await handleCommandError(ctx, error, "withdraw");
   }
 });
 
@@ -307,82 +379,47 @@ bot.command("tip", async (ctx: Context) => {
     });
   }
 
-  const metadata = await getTokenMetadata();
-  const isSol = args[args.length - 1].toUpperCase() === "SOL";
-  const amountStr = isSol ? args[1] : args[1];
-  const amount = parseFloat(amountStr) * (isSol ? LAMPORTS_PER_SOL : Math.pow(10, metadata.decimals));
-
-  if (isNaN(amount) || amount <= 0) {
+  const parsed = await parseAmount(args);
+  if (!parsed) {
     return ctx.reply("Please provide a valid amount greater than 0.", {
       reply_to_message_id: ctx.message?.message_id
     });
   }
 
   try {
-    // Get player keypair
-    const playerKp = await wallet.getKeyPair(telegramId);
+    const playerData = await getPlayerData(telegramId);
 
-    // First try to claim any winnings if not using SOL
-    if (!isSol) {
-      const claimableAmount = await claimWinnings(playerKp);
-      if (claimableAmount > 0) {
-        console.log(`Claimed ${claimableAmount} tokens from winnings`);
-      }
-    }
+    // Claim winnings if not using SOL
+    await checkAndClaimWinnings(playerData.keypair, parsed.isSol);
 
     // Get recipient public key
     const recipientPubKey = await wallet.getPublicKey(recipientTelegramId);
 
-    // Check appropriate balance
-    if (isSol) {
-      const solBalance = await wallet.getBalance(telegramId);
-      if (solBalance < amount) {
-        return ctx.reply(`Insufficient SOL balance. You have ${wallet.formatSolBalance(solBalance)} SOL but are trying to tip ${wallet.formatSolBalance(amount)} SOL`, {
-          reply_to_message_id: ctx.message?.message_id
-        });
-      }
-    } else {
-      const tokenBalance = await wallet.getTokenBalance(telegramId, TOKEN_MINT);
-      if (tokenBalance < amount) {
-        return ctx.reply(`Insufficient balance. You have ${wallet.formatTokenBalance(tokenBalance, metadata.decimals)} ${TICKER} but are trying to tip ${wallet.formatTokenBalance(amount, metadata.decimals)} ${TICKER}`, {
-          reply_to_message_id: ctx.message?.message_id
-        });
-      }
-    }
-
-    // Send message to indicate processing
-    const processingMsg = await ctx.reply(`Processing tip of ${isSol ? wallet.formatSolBalance(amount) + " SOL" : wallet.formatTokenBalance(amount, metadata.decimals) + " " + TICKER}...`, {
-      reply_to_message_id: ctx.message?.message_id
-    });
-
-    let tx: string;
-    if (isSol) {
-      // Native SOL transfer
-      const transferSolIx = SystemProgram.transfer({
-        fromPubkey: playerKp.publicKey,
-        toPubkey: recipientPubKey,
-        lamports: amount,
+    // Validate balance
+    const balanceError = await validateBalance(playerData, parsed.amount, parsed.isSol);
+    if (balanceError) {
+      return ctx.reply(balanceError, {
+        reply_to_message_id: ctx.message?.message_id
       });
-      tx = await wallet.signAndSend([transferSolIx], [playerKp]);
-    } else {
-      // WSOL transfer
-      tx = await wallet.transferToken(telegramId, recipientPubKey, amount, TOKEN_MINT);
     }
 
-    // Update message with success
+    // Process transaction
     const recipientName = replyToMessage.from.first_name || "User";
-    ctx.api.editMessageText(
-      ctx.chat!.id,
-      processingMsg.message_id,
-      `Tip sent successfully! 🎁\n\nAmount: ${isSol ? wallet.formatSolBalance(amount) + " SOL" : wallet.formatTokenBalance(amount, metadata.decimals) + " " + TICKER}\nTo: ${recipientName}\n\nTransaction: ${tx}`,
-      { parse_mode: "HTML" }
-    );
+    await processTransaction(ctx, `Tip of ${parsed.formattedAmount} to ${recipientName}`, async () => {
+      if (parsed.isSol) {
+        const transferSolIx = SystemProgram.transfer({
+          fromPubkey: playerData.keypair.publicKey,
+          toPubkey: recipientPubKey,
+          lamports: parsed.amount,
+        });
+        return await wallet.signAndSend([transferSolIx], [playerData.keypair]);
+      } else {
+        return await wallet.transferToken(telegramId, recipientPubKey, parsed.amount, TOKEN_MINT);
+      }
+    });
 
   } catch (error: any) {
-    console.error("Error processing tip:", error);
-    ctx.reply(`Error processing tip: ${error.message || "Unknown error"}`, {
-      reply_to_message_id: ctx.message?.message_id
-    });
+    await handleCommandError(ctx, error, "tip");
   }
 });
 
@@ -390,6 +427,9 @@ bot.command("tip", async (ctx: Context) => {
 bot.command("wrap", async (ctx: Context) => {
   const telegramId = BigInt(ctx.from?.id || 0);
   const args = ctx.message?.text?.split(" ");
+
+  if (!args) return;
+
   const amount = parseFloat(args?.[1] || "0") * LAMPORTS_PER_SOL; // Convert to lamports
 
   if (amount <= 0) {
@@ -399,63 +439,44 @@ bot.command("wrap", async (ctx: Context) => {
   }
 
   try {
+    const playerData = await getPlayerData(telegramId);
+
     // Check SOL balance
-    const solBalance = await wallet.getBalance(telegramId);
-    if (solBalance < amount) {
-      return ctx.reply(`Insufficient SOL balance. You have ${wallet.formatSolBalance(solBalance)} SOL but are trying to wrap ${wallet.formatSolBalance(amount)} SOL`, {
+    if (playerData.solBalance < amount) {
+      return ctx.reply(`Insufficient SOL balance. You have ${wallet.formatSolBalance(playerData.solBalance)} SOL but are trying to wrap ${wallet.formatSolBalance(amount)} SOL`, {
         reply_to_message_id: ctx.message?.message_id
       });
     }
 
-    // Get player keypair
-    const playerKp = await wallet.getKeyPair(telegramId);
+    // Process transaction
+    await processTransaction(ctx, `Wrapping ${wallet.formatSolBalance(amount)} SOL to WSOL`, async () => {
+      const wsolMint = new PublicKey(TOKEN_MINT);
+      const { address: wsolAccount, instructions: createAtaIx } = await wallet.findOrCreateAssociatedTokenAccount(
+        playerData.keypair.publicKey,
+        wsolMint,
+        playerData.keypair
+      );
 
-    // Get or create WSOL token account
-    const wsolMint = new PublicKey(TOKEN_MINT);
-    const { address: wsolAccount, instructions: createAtaIx } = await wallet.findOrCreateAssociatedTokenAccount(
-      playerKp.publicKey,
-      wsolMint,
-      playerKp
-    );
+      const transferSolIx = SystemProgram.transfer({
+        fromPubkey: playerData.keypair.publicKey,
+        toPubkey: wsolAccount,
+        lamports: amount,
+      });
 
-    // Create transfer SOL instruction
-    const transferSolIx = SystemProgram.transfer({
-      fromPubkey: playerKp.publicKey,
-      toPubkey: wsolAccount,
-      lamports: amount,
+      const syncNativeIx = createSyncNativeInstruction(wsolAccount);
+      const allInstructions = [...createAtaIx, transferSolIx, syncNativeIx];
+
+      return await wallet.signAndSend(allInstructions, [playerData.keypair]);
     });
-
-    // Create sync native instruction to convert SOL to WSOL
-    const syncNativeIx = createSyncNativeInstruction(wsolAccount);
-
-    // Send message to indicate processing
-    const processingMsg = await ctx.reply(`Wrapping ${wallet.formatSolBalance(amount)} SOL to WSOL...`, {
-      reply_to_message_id: ctx.message?.message_id
-    });
-
-    // Combine and send instructions
-    const allInstructions = [...createAtaIx, transferSolIx, syncNativeIx];
-    const tx = await wallet.signAndSend(allInstructions, [playerKp]);
-
-    // Update message with success
-    ctx.api.editMessageText(
-      ctx.chat!.id,
-      processingMsg.message_id,
-      `Successfully wrapped ${wallet.formatSolBalance(amount)} SOL to WSOL! 💰\n\nTransaction: ${tx}`,
-      { parse_mode: "HTML" }
-    );
 
   } catch (error: any) {
-    console.error("Error wrapping SOL:", error);
-    ctx.reply(`Error wrapping SOL: ${error.message || "Unknown error"}`, {
-      reply_to_message_id: ctx.message?.message_id
-    });
+    await handleCommandError(ctx, error, "wrap");
   }
 });
 
 // Implement help command
 bot.command("help", async (ctx: Context) => {
-  ctx.reply(
+  const helpText =
     `<b>📝 Available Commands:</b>\n\n` +
     `/start, /balance - Show your wallet address and balances\n` +
     `/wrap &lt;amount&gt; - Convert SOL to WSOL\n` +
@@ -468,12 +489,12 @@ bot.command("help", async (ctx: Context) => {
     `/tip &lt;amount&gt; - Reply to a user's message to send them tokens\n` +
     `/active - Show your active games\n` +
     `/games - Show your recent games\n\n` +
-    `<b>ℹ️ Important:</b> Your player balance account will be automatically initialized when needed.`,
-    {
-      parse_mode: "HTML",
-      reply_to_message_id: ctx.message?.message_id
-    }
-  );
+    `<b>ℹ️ Important:</b> Your player balance account will be automatically initialized when needed.`;
+
+  await ctx.reply(helpText, {
+    parse_mode: "HTML",
+    reply_to_message_id: ctx.message?.message_id
+  });
 });
 
 // Implement active command to show only active games
@@ -484,17 +505,7 @@ bot.command("active", async (ctx: Context) => {
     const { activeGames, totalTokensInGames } = await gameManager.getUserGames(ctx, telegramId);
     const metadata = await getTokenMetadata();
 
-    let response = "";
-    let hasGames = false;
-
-    if (activeGames) {
-      response += activeGames;
-      hasGames = true;
-    }
-
-    if (!hasGames) {
-      response += "You don't have any active games.";
-    }
+    let response = activeGames || "You don't have any active games.";
 
     // Add total tokens in active games
     if (totalTokensInGames > 0) {
@@ -506,10 +517,7 @@ bot.command("active", async (ctx: Context) => {
       reply_to_message_id: ctx.message?.message_id
     });
   } catch (error) {
-    console.error("Error in active command:", error);
-    await ctx.reply("❌ An error occurred while fetching your active games. Please try again later.", {
-      reply_to_message_id: ctx.message?.message_id
-    });
+    await handleCommandError(ctx, error, "active");
   }
 });
 
@@ -519,28 +527,14 @@ bot.command("games", async (ctx: Context) => {
 
   try {
     const { recentGames } = await gameManager.getUserGames(ctx, telegramId);
-
-    let response = "";
-    let hasGames = false;
-
-    if (recentGames) {
-      response += recentGames;
-      hasGames = true;
-    }
-
-    if (!hasGames) {
-      response += "You don't have any recent games.";
-    }
+    const response = recentGames || "You don't have any recent games.";
 
     await ctx.reply(response, {
       parse_mode: "HTML",
       reply_to_message_id: ctx.message?.message_id
     });
   } catch (error) {
-    console.error("Error in games command:", error);
-    await ctx.reply("❌ An error occurred while fetching your recent games. Please try again later.", {
-      reply_to_message_id: ctx.message?.message_id
-    });
+    await handleCommandError(ctx, error, "games");
   }
 });
 
@@ -733,6 +727,10 @@ bot.on("callback_query", async (ctx) => {
       const playerPubkey = playerKp.publicKey.toBase58();
       console.log(`Saving player mapping for joiner - Public Key: ${playerPubkey}, Telegram ID: ${telegramId.toString()}`);
       await gameDb.savePlayerMapping(playerPubkey, telegramId.toString());
+
+      // Save game participant record
+      console.log(`Saving game participant record - Game: ${gameAddress}, Telegram ID: ${telegramId.toString()}, Public Key: ${playerPubkey}`);
+      await gameDb.saveGameParticipant(gameAddress, telegramId.toString(), playerPubkey);
 
       // Update game message with current status
       const creatorUsername = await gameManager.getGameCreatorUsername(ctx, gameAddress);

@@ -4,6 +4,41 @@ import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, cre
 import * as fs from "fs";
 import * as path from "path";
 
+// ================================
+// HELPER FUNCTIONS
+// ================================
+
+// Helper function to check if error is account not found
+const isAccountNotFoundError = (error: any): boolean => {
+  return error instanceof SolanaJSONRPCError &&
+         error.message.includes('could not find account');
+};
+
+// Helper function to retry with exponential backoff
+const retryWithBackoff = async <T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelay: number = 1000
+): Promise<T> => {
+  let lastError: any;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (i < maxRetries - 1) {
+        const delay = baseDelay * Math.pow(2, i);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  throw lastError;
+};
+
+// ================================
+// WALLET MANAGER CLASS
+// ================================
+
 export class WalletManager {
   private static instance: WalletManager;
   private mnemonic: string;
@@ -86,7 +121,7 @@ export class WalletManager {
       const account = await this.connection.getTokenAccountBalance(ata, "confirmed");
       return account.value.uiAmount ? account.value.uiAmount * Math.pow(10, account.value.decimals) : 0;
     } catch (error: any) {
-      if (error instanceof SolanaJSONRPCError && error.message.includes('could not find account')) {
+      if (isAccountNotFoundError(error)) {
         console.log(`Token account ${ata.toBase58()} not found for user ${pubkey.toBase58()}`);
       } else {
         console.error(`Error getting token balance for ${pubkey.toBase58()}: ${error}`);
@@ -178,18 +213,9 @@ export class WalletManager {
     const tx = new VersionedTransaction(message);
     tx.sign(signers);
 
-    // Add retry logic for transaction sending
-    let retries = 3;
-    while (retries > 0) {
-      try {
-        return await this.connection.sendTransaction(tx, { skipPreflight: true });
-      } catch (error) {
-        retries--;
-        if (retries === 0) throw error;
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-    }
-    throw new Error("Failed to send transaction after retries");
+    return await retryWithBackoff(async () => {
+      return await this.connection.sendTransaction(tx, { skipPreflight: true });
+    });
   }
 
   public async getBlockchainTime(): Promise<number> {

@@ -5,8 +5,49 @@ import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } fr
 import { WalletManager } from "./wallet";
 import { GameDatabase } from "./database";
 import { OracleManager } from "./oracle";
-import type { GameMessage, GameCancellationResult, GameMessageFormat } from "../types/game";
+import type { GameMessage, GameCancellationResult, GameMessageFormat, GameCategory, GameInfo, GameBasicInfo } from "../types/game";
 import type { Coinflip } from "../../idl/idlType";
+
+// ================================
+// HELPER FUNCTIONS
+// ================================
+
+// Utility functions for text formatting
+const formatGameType = (gameType: any): string => {
+  return Object.keys(gameType)[0].charAt(0).toUpperCase() + Object.keys(gameType)[0].slice(1);
+};
+
+const formatGameStatus = (status: string): string => {
+  return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+};
+
+const formatDate = (timestamp: number): string => {
+  return new Date(timestamp * 1000).toLocaleString('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
+};
+
+// Utility function to categorize games
+const categorizeGame = (gameData: any, telegramIdStr: string, playerPublicKey: string): string => {
+  const winnerAddress = gameData.winner_address;
+  const isCreator = gameData.creator_telegram_id === telegramIdStr;
+  const isWinner = winnerAddress === playerPublicKey;
+
+  if (winnerAddress === "cancelled") return "cancelled";
+  if (isWinner) return "won";
+  if (isCreator) return "created";
+  return "lost";
+};
+
+// ================================
+// GAME MANAGER CLASS
+// ================================
 
 export class GameManager {
   private static instance: GameManager;
@@ -162,7 +203,7 @@ export class GameManager {
   }
 
   // Helper function to get game status info
-  private async getGameStatusInfo(gameAccount: any): Promise<{ status: string; isExpired: boolean; hasEnoughPlayers: boolean }> {
+  private async getGameStatusInfo(gameAccount: any): Promise<GameInfo> {
     const status = Object.keys(gameAccount.status)[0].toLowerCase();
     const createdAt = Number(gameAccount.createdAt);
     const timeout = Number(gameAccount.timeout);
@@ -175,51 +216,36 @@ export class GameManager {
   }
 
   // Helper function to get game basic info
-  private async getGameBasicInfo(gameAccount: any): Promise<{
-    amount: number;
-    maxPlayers: number;
-    currentPlayers: number;
-    creatorPubkey: string;
-    status: string;
-    gameType: string;
-  }> {
-    const amount = Number(gameAccount.amount);
-    const maxPlayers = gameAccount.maxPlayers;
-    const currentPlayers = gameAccount.players.length;
-    const creatorPubkey = gameAccount.creator.toString();
-    const status = Object.keys(gameAccount.status)[0];
-    const gameType = this.formatGameType(gameAccount.gameType);
-
+  private async getGameBasicInfo(gameAccount: any): Promise<GameBasicInfo> {
     return {
-      amount,
-      maxPlayers,
-      currentPlayers,
-      creatorPubkey,
-      status,
-      gameType
+      amount: Number(gameAccount.amount),
+      maxPlayers: gameAccount.maxPlayers,
+      currentPlayers: gameAccount.players.length,
+      creatorPubkey: gameAccount.creator.toString(),
+      status: Object.keys(gameAccount.status)[0],
+      gameType: formatGameType(gameAccount.gameType)
     };
   }
 
   // Helper function to get player info
   private async getPlayerInfo(ctx: Context, gameAccount: any): Promise<string> {
-    let playerInfo = "";
-    if (gameAccount.players.length > 0) {
-      playerInfo = "\n👥 Players:\n";
-      for (const playerPubkey of gameAccount.players) {
-        const username = await this.getPlayerUsername(ctx, playerPubkey.toBase58());
-        playerInfo += `• @${username}\n`;
-      }
+    if (gameAccount.players.length === 0) return "";
+
+    let playerInfo = "\n👥 Players:\n";
+    for (const playerPubkey of gameAccount.players) {
+      const username = await this.getPlayerUsername(ctx, playerPubkey.toBase58());
+      playerInfo += `• @${username}\n`;
     }
     return playerInfo;
   }
 
   // Helper function to get winner info
   private async getWinnerInfo(ctx: Context, gameAccount: any): Promise<string> {
-    if (gameAccount.winner && gameAccount.winner.toString() !== "11111111111111111111111111111111") {
-      const winnerUsername = await this.getPlayerUsername(ctx, gameAccount.winner.toString());
-      return `\n🏆 Winner: @${winnerUsername}`;
+    if (!gameAccount.winner || gameAccount.winner.toString() === "11111111111111111111111111111111") {
+      return "";
     }
-    return "";
+    const winnerUsername = await this.getPlayerUsername(ctx, gameAccount.winner.toString());
+    return `\n🏆 Winner: @${winnerUsername}`;
   }
 
   // Helper function to get creator info
@@ -232,29 +258,6 @@ export class GameManager {
       }
     }
     return `<code>${creatorPubkey.slice(0, 8)}...</code>`;
-  }
-
-  // Helper function to format game type
-  private formatGameType(gameType: string): string {
-    return Object.keys(gameType)[0].charAt(0).toUpperCase() + Object.keys(gameType)[0].slice(1);
-  }
-
-  // Helper function to format game status
-  private formatGameStatus(status: string): string {
-    return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
-  }
-
-  // Helper function to format date
-  private formatDate(timestamp: number): string {
-    return new Date(timestamp * 1000).toLocaleString('en-GB', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false
-    });
   }
 
   // Helper function to handle game completion
@@ -301,11 +304,11 @@ export class GameManager {
       console.log(`Status: ${status}`);
       console.log(`Players: ${gameAccount.players.length}/${gameAccount.maxPlayers}`);
       console.log(`Min Players: ${gameAccount.minPlayers}`);
-      console.log(`Created At: ${this.formatDate(Number(gameAccount.createdAt))}`);
+      console.log(`Created At: ${formatDate(Number(gameAccount.createdAt))}`);
       console.log(`Timeout: ${gameAccount.timeout} seconds`);
       console.log(`Creator: ${gameAccount.creator.toBase58()}`);
       console.log(`Winner: ${gameAccount.winner?.toBase58() || 'Not set'}`);
-      console.log(`Game Type: ${this.formatGameType(gameAccount.gameType)}`);
+      console.log(`Game Type: ${formatGameType(gameAccount.gameType)}`);
       console.log(`Amount: ${gameAccount.amount}`);
       console.log(`Is Expired: ${isExpired}`);
       console.log(`Has Enough Players: ${hasEnoughPlayers}`);
@@ -490,7 +493,7 @@ export class GameManager {
       `💰 Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
       `👤 Creator: @${creatorUsername}\n` +
       `👥 Players: ${currentPlayers}/${maxPlayers}${playerInfo}\n` +
-      `Status: ${this.formatGameStatus(status)}${expirationInfo}${winnerInfo}`;
+      `Status: ${formatGameStatus(status)}${expirationInfo}${winnerInfo}`;
 
     if (txHash) {
       messageText += `\n\nTransaction: <code>${txHash}</code>`;
@@ -652,30 +655,16 @@ export class GameManager {
       }
       section += `${gameInfo}\n`;
       if (game.completed_at) {
-        section += `Completed: ${this.formatDate(game.completed_at)}\n\n`;
+        section += `Completed: ${formatDate(game.completed_at)}\n\n`;
       }
     }
     return section;
   }
 
-  // Helper function to get user's games
-  public async getUserGames(ctx: Context, telegramId: bigint): Promise<{
-    activeGames: string;
-    recentGames: string;
-    totalTokensInGames: number;
-  }> {
-    const telegramIdStr = telegramId.toString();
-    let totalTokensInGames = 0;
-
-    // Get active and recent games in parallel
-    const [activeGamesData, recentGamesData] = await Promise.all([
-      this.gameDb.getActiveGames(telegramIdStr),
-      this.gameDb.getRecentGames(telegramIdStr)
-    ]);
-
-    // Batch fetch all game accounts in parallel
+  // Helper method to batch fetch game accounts
+  private async batchFetchGameAccounts(gameDataList: any[]): Promise<Map<string, any>> {
     const gameAccounts = new Map();
-    const gamePromises = [...activeGamesData, ...recentGamesData].map(async (gameData) => {
+    const gamePromises = gameDataList.map(async (gameData) => {
       try {
         const gamePda = new PublicKey(gameData.game_address);
         const gameAccount = await this.getCachedGameAccount(gamePda);
@@ -685,27 +674,16 @@ export class GameManager {
       }
     });
     await Promise.all(gamePromises);
+    return gameAccounts;
+  }
 
-    // Get all unique Telegram IDs for username fetching
-    const uniqueTelegramIds = new Set<string>();
-    [...activeGamesData, ...recentGamesData].forEach(game => {
-      uniqueTelegramIds.add(game.creator_telegram_id);
-    });
-    uniqueTelegramIds.add(telegramIdStr);
-
-    // Batch fetch all usernames in parallel
-    const usernameMap = new Map<string, string>();
-    await Promise.all(Array.from(uniqueTelegramIds).map(async (id) => {
-      try {
-        const username = await this.getUsernameFromTelegramId(ctx, id);
-        usernameMap.set(id, username);
-      } catch (error) {
-        console.error(`Error getting username for ${id}:`, error);
-        usernameMap.set(id, "Unknown");
-      }
-    }));
-
-    // Process active games
+  // Helper method to process active games
+  private async processActiveGames(
+    ctx: Context,
+    activeGamesData: any[],
+    gameAccounts: Map<string, any>
+  ): Promise<{ games: string[], totalTokens: number }> {
+    let totalTokensInGames = 0;
     const activeGames = await Promise.all(activeGamesData.map(async (gameData) => {
       const gameAccount = gameAccounts.get(gameData.game_address);
       if (!gameAccount) return null;
@@ -715,69 +693,65 @@ export class GameManager {
       return this.getGameInfo(ctx, gamePda);
     }));
 
-    // Process recent games
+    return {
+      games: activeGames.filter((game): game is string => game !== null),
+      totalTokens: totalTokensInGames
+    };
+  }
+
+  // Helper method to categorize recent games
+  private async categorizeRecentGames(
+    recentGamesData: any[],
+    gameAccounts: Map<string, any>,
+    telegramIdStr: string,
+    playerPublicKey: string
+  ): Promise<GameCategory> {
     const recentGames = await Promise.all(recentGamesData.map(async (gameData) => {
       const gameAccount = gameAccounts.get(gameData.game_address);
       if (!gameAccount) return null;
 
-      // For winner resolution, use the winner's Telegram ID if available
-      let winnerUsername = "Unknown";
-      const winnerAddress = gameData.winner_address;
-      if (winnerAddress && winnerAddress !== "cancelled" && winnerAddress !== "unknown") {
-        // Try to get the winner's Telegram ID from the database
-        const winnerTelegramId = await this.gameDb.getPlayerTelegramId(winnerAddress);
-        if (winnerTelegramId) {
-          winnerUsername = usernameMap.get(winnerTelegramId) || "Unknown";
-        } else {
-          // If no Telegram ID found, use the public key
-          winnerUsername = winnerAddress.slice(0, 8) + "...";
-        }
-      }
+      const category = categorizeGame(gameData, telegramIdStr, playerPublicKey);
 
-      const currentUsername = usernameMap.get(telegramIdStr) || "Unknown";
-      const isWinner = winnerUsername === currentUsername;
-      const isCreator = gameData.creator_telegram_id === telegramIdStr;
-
-      // Check if user is a player in the game
-      let isPlayer = false;
-      for (const p of gameAccount.players) {
-        const playerTelegramId = await this.gameDb.getPlayerTelegramId(p.toBase58());
-        if (playerTelegramId === telegramIdStr) {
-          isPlayer = true;
-          break;
-        }
-      }
-
-      // Determine game category
-      let category = "cancelled";
-      if (winnerAddress !== "cancelled") {
-        if (isWinner) {
-          category = "won";
-        } else if (isPlayer) {
-          category = "lost";
-        } else if (isCreator) {
-          category = "created";
-        }
-      }
-
-      return {
-        ...gameData,
-        gameAccount,
-        category
-      };
+      return { ...gameData, gameAccount, category };
     })).then(games => games.filter(Boolean));
 
-    // Group recent games by category
-    const categories = {
+    // Group by category
+    return {
       won: recentGames.filter(game => game?.category === 'won'),
       lost: recentGames.filter(game => game?.category === 'lost'),
       cancelled: recentGames.filter(game => game?.category === 'cancelled'),
       created: recentGames.filter(game => game?.category === 'created')
     };
+  }
+
+  // Helper function to get user's games
+  public async getUserGames(ctx: Context, telegramId: bigint): Promise<{
+    activeGames: string;
+    recentGames: string;
+    totalTokensInGames: number;
+  }> {
+    const telegramIdStr = telegramId.toString();
+
+    // Get player's public key
+    const playerKp = await this.wallet.getKeyPair(telegramId);
+    const playerPublicKey = playerKp.publicKey.toString();
+
+    // Get active and recent games in parallel
+    const [activeGamesData, recentGamesData] = await Promise.all([
+      this.gameDb.getActiveGames(telegramIdStr),
+      this.gameDb.getRecentGames(telegramIdStr)
+    ]);
+
+    // Batch fetch all game accounts
+    const gameAccounts = await this.batchFetchGameAccounts([...activeGamesData, ...recentGamesData]);
+
+    // Process games
+    const { games: activeGames, totalTokens } = await this.processActiveGames(ctx, activeGamesData, gameAccounts);
+    const categories = await this.categorizeRecentGames(recentGamesData, gameAccounts, telegramIdStr, playerPublicKey);
 
     // Format sections
-    const activeGamesSection = activeGames.filter(Boolean).length > 0
-      ? "🎮 <b>Active Games</b>\n\n" + activeGames.filter(Boolean).join("\n\n")
+    const activeGamesSection = activeGames.length > 0
+      ? "🎮 <b>Active Games</b>\n\n" + activeGames.join("\n\n")
       : "";
 
     const recentGamesSections = await Promise.all([
@@ -792,7 +766,7 @@ export class GameManager {
     return {
       activeGames: activeGamesSection,
       recentGames: recentGamesSection,
-      totalTokensInGames
+      totalTokensInGames: totalTokens
     };
   }
 
@@ -865,6 +839,10 @@ export class GameManager {
 
       // Get all required PDAs and accounts
       const gamePda = this.getGamePda(randomHash);
+
+      // Save creator as game participant
+      console.log(`Saving creator as game participant - Game: ${gamePda.toBase58()}, Telegram ID: ${telegramId.toString()}, Public Key: ${creatorPubkey}`);
+      this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
 
       // Ensure player balance PDA exists
       await this.ensurePlayerBalance(playerKp);

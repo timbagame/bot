@@ -67,6 +67,18 @@ export class GameDatabase {
         )
       `);
 
+      // Create game participants table to track who joined which games
+      await this.db.run(`
+        CREATE TABLE IF NOT EXISTS game_participants (
+          game_address TEXT NOT NULL,
+          telegram_id TEXT NOT NULL,
+          public_key TEXT NOT NULL,
+          joined_at INTEGER NOT NULL,
+          PRIMARY KEY (game_address, telegram_id),
+          FOREIGN KEY (game_address) REFERENCES games(game_address)
+        )
+      `);
+
       console.log("Database initialized");
     }, "Error initializing database");
   }
@@ -172,11 +184,11 @@ export class GameDatabase {
   public async getActiveGames(telegramId: string): Promise<GameData[]> {
     return this.executeDbOperation(async () => {
       const stmt = this.db.prepare(`
-        SELECT * FROM games
-        WHERE status = 'active'
-        AND (creator_telegram_id = ? OR game_address IN (
-          SELECT game_address FROM player_mappings
-          WHERE telegram_id = ?
+        SELECT DISTINCT g.* FROM games g
+        WHERE g.status = 'active'
+        AND (g.creator_telegram_id = ? OR EXISTS (
+          SELECT 1 FROM game_participants gp
+          WHERE gp.game_address = g.game_address AND gp.telegram_id = ?
         ))
       `);
       return stmt.all(telegramId, telegramId) as GameData[];
@@ -184,19 +196,65 @@ export class GameDatabase {
   }
 
   // Get recent completed games for a player
-  public async getRecentGames(telegramId: string, limit: number = 5): Promise<GameData[]> {
+  public async getRecentGames(telegramId: string, limit: number = 10): Promise<GameData[]> {
     return this.executeDbOperation(async () => {
+      // Get player's public key for winner checking
+      const playerMappingStmt = this.db.prepare('SELECT public_key FROM player_mappings WHERE telegram_id = ?');
+      const playerMapping = playerMappingStmt.get(telegramId) as { public_key: string } | null;
+
+      if (!playerMapping) {
+        // If no player mapping exists, only return games created by this telegram ID
+        const stmt = this.db.prepare(`
+          SELECT * FROM games
+          WHERE status = 'completed' AND creator_telegram_id = ?
+          ORDER BY completed_at DESC
+          LIMIT ?
+        `);
+        return stmt.all(telegramId, limit) as GameData[];
+      }
+
+      // Return games where player participated (created, joined, or won)
       const stmt = this.db.prepare(`
-        SELECT * FROM games
-        WHERE status = 'completed'
-        AND (creator_telegram_id = ? OR game_address IN (
-          SELECT game_address FROM player_mappings
-          WHERE telegram_id = ?
-        ))
-        ORDER BY completed_at DESC
+        SELECT DISTINCT g.* FROM games g
+        WHERE g.status = 'completed'
+        AND (g.creator_telegram_id = ?
+             OR g.winner_address = ?
+             OR EXISTS (
+               SELECT 1 FROM game_participants gp
+               WHERE gp.game_address = g.game_address AND gp.telegram_id = ?
+             ))
+        ORDER BY g.completed_at DESC
         LIMIT ?
       `);
-      return stmt.all(telegramId, telegramId, limit) as GameData[];
+      return stmt.all(telegramId, playerMapping.public_key, telegramId, limit) as GameData[];
     }, "Error getting recent games");
+  }
+
+  // Game participants methods
+  public async saveGameParticipant(gameAddress: string, telegramId: string, publicKey: string): Promise<void> {
+    await this.executeDbOperation(async () => {
+      const blockTime = await this.wallet.getBlockchainTime();
+      const stmt = this.db.prepare(`
+        INSERT OR REPLACE INTO game_participants (game_address, telegram_id, public_key, joined_at)
+        VALUES (?, ?, ?, ?)
+      `);
+      await stmt.run(gameAddress, telegramId, publicKey, blockTime);
+    }, "Error saving game participant");
+  }
+
+  public async getGameParticipants(gameAddress: string): Promise<string[]> {
+    return this.executeDbOperation(async () => {
+      const stmt = this.db.prepare('SELECT telegram_id FROM game_participants WHERE game_address = ?');
+      const results = stmt.all(gameAddress) as { telegram_id: string }[];
+      return results.map(r => r.telegram_id);
+    }, "Error getting game participants");
+  }
+
+  public async getPlayerParticipatedGames(telegramId: string): Promise<string[]> {
+    return this.executeDbOperation(async () => {
+      const stmt = this.db.prepare('SELECT game_address FROM game_participants WHERE telegram_id = ?');
+      const results = stmt.all(telegramId) as { game_address: string }[];
+      return results.map(r => r.game_address);
+    }, "Error getting player participated games");
   }
 }

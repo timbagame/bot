@@ -6,6 +6,30 @@ import { WalletManager } from "./wallet";
 import { GameDatabase } from "./database";
 import type { Coinflip } from "../../idl/idlType";
 
+// ================================
+// HELPER FUNCTIONS
+// ================================
+
+// Helper function to calculate winner index using the same algorithm as the contract
+const calculateWinnerIndex = (secretKeyBuffer: Buffer, nPlayers: number): number => {
+  if (nPlayers <= 1) return 0;
+
+  const randomBytes = secretKeyBuffer.subarray(0, 8);
+  const randomNumber = BigInt('0x' + Buffer.from(randomBytes).reverse().toString('hex'));
+  const maxValid = BigInt('0xFFFFFFFFFFFFFFFF') - (BigInt('0xFFFFFFFFFFFFFFFF') % BigInt(nPlayers));
+  const finalNumber = randomNumber % maxValid;
+  return Number(finalNumber % BigInt(nPlayers));
+};
+
+// Helper function to generate random hash from secret key
+const generateRandomHash = (secretKey: Buffer): Buffer => {
+  return createHash('sha256').update(secretKey).digest();
+};
+
+// ================================
+// ORACLE MANAGER CLASS
+// ================================
+
 export class OracleManager {
   private static instance: OracleManager;
   private readonly PDA_SEEDS = {
@@ -51,7 +75,7 @@ export class OracleManager {
   // Generate secret key and random hash for a new game
   public generateGameSecrets(): { randomHash: Buffer } {
     const secretKey = randomBytes(64);
-    const randomHash = createHash('sha256').update(secretKey).digest();
+    const randomHash = generateRandomHash(secretKey);
 
     // Store the secret key in the database
     this.gameDb.saveOracleSecretKey(
@@ -108,16 +132,7 @@ export class OracleManager {
       const secretKeyBuffer = Buffer.from(secretKey, "hex");
 
       // Calculate the winner using the same algorithm as the contract
-      let winnerIndex = 0;
-      const nPlayers = gameAccount.players.length;
-
-      if (nPlayers > 1) {
-        const randomBytes = secretKeyBuffer.subarray(0, 8);
-        const randomNumber = BigInt('0x' + Buffer.from(randomBytes).reverse().toString('hex'));
-        const maxValid = BigInt('0xFFFFFFFFFFFFFFFF') - (BigInt('0xFFFFFFFFFFFFFFFF') % BigInt(nPlayers));
-        const finalNumber = randomNumber % maxValid;
-        winnerIndex = Number(finalNumber % BigInt(nPlayers));
-      }
+      let winnerIndex = calculateWinnerIndex(secretKeyBuffer, gameAccount.players.length);
 
       const winnerAddress = gameAccount.players[winnerIndex];
 
