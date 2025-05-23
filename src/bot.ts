@@ -405,7 +405,9 @@ bot.command("tip", async (ctx: Context) => {
     }
 
     // Process transaction
-    const recipientName = replyToMessage.from.first_name || "User";
+    const recipientName = replyToMessage.from.username
+      ? `@${replyToMessage.from.username}`
+      : replyToMessage.from.first_name || "User";
     await processTransaction(ctx, `Tip of ${parsed.formattedAmount} to ${recipientName}`, async () => {
       if (parsed.isSol) {
         const transferSolIx = SystemProgram.transfer({
