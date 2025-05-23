@@ -841,47 +841,67 @@ bot.on("callback_query", async (ctx) => {
       const playerBalancePda = await gameManager.ensurePlayerBalance(playerKp);
       console.log(`Player balance PDA: ${playerBalancePda.toBase58()}`);
 
-      console.log("Sending join transaction...");
-      // Call the contract to join the game
-      const tx = await program.methods
-        .joinGame()
-        .accounts({
-          game: gamePda,
-          player: playerKp.publicKey,
-        })
-        .signers([playerKp])
-        .rpc();
+      // Check if game is private and handle accordingly
+      if (gameAccount.isPrivate) {
+        console.log("Game is private, using oracle authorization");
+        const result = await gameManager.joinPrivateGame(
+          gamePda,
+          playerKp,
+          ctx.chat?.id || 0
+        );
 
-      console.log(`Join transaction sent: ${tx}`);
+        if (!result.success) {
+          await ctx.answerCallbackQuery(result.error || "Failed to join private game");
+          return;
+        }
 
-      // Wait for transaction confirmation with retries
-      console.log("Waiting for transaction confirmation...");
-      let retries = 3;
-      let confirmed = false;
-      while (retries > 0 && !confirmed) {
-        try {
-          await wallet.confirmTransaction(tx);
-          confirmed = true;
-        } catch (error) {
-          console.error(`Confirmation attempt ${4 - retries} failed:`, error);
-          retries--;
-          if (retries > 0) {
-            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds between retries
+        console.log(`Successfully joined private game with tx: ${result.tx}`);
+      } else {
+        // Original logic for public games
+        console.log("Game is public, using standard join");
+
+        console.log("Sending join transaction...");
+        // Call the contract to join the game
+        const tx = await program.methods
+          .joinGame()
+          .accounts({
+            game: gamePda,
+            player: playerKp.publicKey,
+          })
+          .signers([playerKp])
+          .rpc();
+
+        console.log(`Join transaction sent: ${tx}`);
+
+        // Wait for transaction confirmation with retries
+        console.log("Waiting for transaction confirmation...");
+        let retries = 3;
+        let confirmed = false;
+        while (retries > 0 && !confirmed) {
+          try {
+            await wallet.confirmTransaction(tx);
+            confirmed = true;
+          } catch (error) {
+            console.error(`Confirmation attempt ${4 - retries} failed:`, error);
+            retries--;
+            if (retries > 0) {
+              await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds between retries
+            }
           }
         }
-      }
 
-      if (!confirmed) {
-        throw new Error("Failed to confirm transaction after multiple attempts");
+        if (!confirmed) {
+          throw new Error("Failed to confirm transaction after multiple attempts");
+        }
+        console.log("Transaction confirmed");
       }
-      console.log("Transaction confirmed");
 
       // Verify player was added to the game with retries
       console.log("Verifying player was added to game...");
-      retries = 3;
+      let verificationRetries = 3;
       let playerWasAdded = false;
       let updatedGameAccount: any;
-      while (retries > 0 && !playerWasAdded) {
+      while (verificationRetries > 0 && !playerWasAdded) {
         try {
           updatedGameAccount = await program.account.game.fetch(gamePda);
           console.log(`Current players in game: ${updatedGameAccount.players.length}`);
@@ -898,9 +918,9 @@ bot.on("callback_query", async (ctx) => {
           });
 
           if (!playerWasAdded) {
-            console.log(`Verification attempt ${4 - retries} failed: Player not found in game`);
-            retries--;
-            if (retries > 0) {
+            console.log(`Verification attempt ${4 - verificationRetries} failed: Player not found in game`);
+            verificationRetries--;
+            if (verificationRetries > 0) {
               console.log("Waiting 2 seconds before next verification attempt...");
               await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds between retries
             }
@@ -908,9 +928,9 @@ bot.on("callback_query", async (ctx) => {
             console.log("Player was successfully verified in the game!");
           }
         } catch (error) {
-          console.error(`Verification attempt ${4 - retries} failed with error:`, error);
-          retries--;
-          if (retries > 0) {
+          console.error(`Verification attempt ${4 - verificationRetries} failed with error:`, error);
+          verificationRetries--;
+          if (verificationRetries > 0) {
             console.log("Waiting 2 seconds before next verification attempt...");
             await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds between retries
           }

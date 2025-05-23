@@ -412,6 +412,47 @@ export class GameManager {
     }
   }
 
+  /**
+   * Joins a player to a private game with oracle authorization
+   */
+  public async joinPrivateGame(
+    gamePda: PublicKey,
+    playerKp: anchor.web3.Keypair,
+    chatId: number
+  ): Promise<{ success: boolean; tx?: string; error?: string }> {
+    try {
+      // Verify oracle authorization
+      const authResult = await this.oracleManager.authorizePlayer(gamePda, chatId);
+
+      if (!authResult.authorized) {
+        return { success: false, error: authResult.error || "Not authorized to join this private game" };
+      }
+
+      const adminKp = authResult.adminKeypair!;
+
+      // Ensure player has balance account
+      await this.ensurePlayerBalance(playerKp);
+
+      // Execute transaction with oracle authorization (simplified)
+      const tx = await this.program.methods
+        .joinGame()
+        .accounts({
+          game: gamePda,
+          player: playerKp.publicKey,
+          authority: adminKp.publicKey, // Oracle authority for private games
+        })
+        .signers([playerKp, adminKp]) // Include both player and oracle authority
+        .rpc();
+
+      await this.wallet.confirmTransaction(tx);
+
+      return { success: true, tx };
+    } catch (error: any) {
+      console.error(`Error joining private game:`, error);
+      return { success: false, error: error.message || "Unknown error" };
+    }
+  }
+
   private getGameStatusText(status: string, currentPlayers: number, minPlayers: number, maxPlayers: number): string {
     if (status.toLowerCase() !== "active") {
       return formatGameStatus(status);
@@ -789,7 +830,7 @@ export class GameManager {
           maxPlayers,
           minPlayers,
           timeout,
-          false,
+          true,
           [...randomHash]
         )
         .accounts({

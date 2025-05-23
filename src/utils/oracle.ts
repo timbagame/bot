@@ -174,4 +174,36 @@ export class OracleManager {
       return false;
     }
   }
+
+  /**
+   * Authorizes a player to join a private game
+   * Verifies that the player is in the same Telegram group as the creator
+   */
+  public async authorizePlayer(
+    gamePda: PublicKey,
+    chatId: number
+  ): Promise<{ authorized: boolean; adminKeypair?: anchor.web3.Keypair; error?: string }> {
+    try {
+      // Get game information
+      const game = this.gameDb.getGame(gamePda.toBase58());
+      if (!game) {
+        return { authorized: false, error: "Game not found in database" };
+      }
+
+      // Verify that the game has a chat_id and matches the current chat
+      if (!game.chat_id) {
+        return { authorized: false, error: "Game does not have a registered chat" };
+      }
+
+      if (game.chat_id !== chatId) {
+        return { authorized: false, error: "Player not in same chat as game creator" };
+      }
+
+      const adminKp = this.wallet.getAdminKeypair();
+      return { authorized: true, adminKeypair: adminKp };
+    } catch (error) {
+      console.error(`Error authorizing player:`, error);
+      return { authorized: false, error: (error as Error).message };
+    }
+  }
 }
