@@ -7,30 +7,20 @@ import * as path from "path";
 export class WalletManager {
   private static instance: WalletManager;
   private mnemonic: string;
-  public connection!: Connection;
+  private connection: Connection;
+  private adminKeypair: Keypair | null = null;
   private lastCallTime: number = 0;
   private readonly rateLimit: number = 1000;
-  private adminKeypair: Keypair | null = null;
-  private connectionPool: Connection[] = [];
-  private currentConnectionIndex: number = 0;
-  private readonly maxConnections: number = 3;
 
   private constructor(mnemonic: string) {
     this.mnemonic = mnemonic;
-    this.initializeConnectionPool();
+    this.connection = new Connection(process.env.SOLANA_NETWORK!, "confirmed");
     this.loadAdminKeypair();
   }
 
-  private initializeConnectionPool() {
-    for (let i = 0; i < this.maxConnections; i++) {
-      this.connectionPool.push(new Connection(process.env.SOLANA_NETWORK!, "confirmed"));
-    }
-    this.connection = this.connectionPool[0];
-  }
-
-  private getNextConnection(): Connection {
-    this.currentConnectionIndex = (this.currentConnectionIndex + 1) % this.maxConnections;
-    return this.connectionPool[this.currentConnectionIndex];
+  public static getInstance(mnemonic: string): WalletManager {
+    if (!this.instance) this.instance = new WalletManager(mnemonic);
+    return this.instance;
   }
 
   private async throttle(): Promise<void> {
@@ -40,13 +30,6 @@ export class WalletManager {
       await new Promise(resolve => setTimeout(resolve, timeToWait));
     }
     this.lastCallTime = now;
-    // Rotate connection for better load distribution
-    this.connection = this.getNextConnection();
-  }
-
-  public static getInstance(mnemonic: string): WalletManager {
-    if (!this.instance) this.instance = new WalletManager(mnemonic);
-    return this.instance;
   }
 
   private loadAdminKeypair(): void {
@@ -209,24 +192,6 @@ export class WalletManager {
     throw new Error("Failed to send transaction after retries");
   }
 
-  public async getRecentBlockhash(): Promise<string> {
-    await this.throttle();
-    return (await this.connection.getLatestBlockhash()).blockhash;
-  }
-
-  public async getMinimumBalanceForRentExemption(size: number): Promise<number> {
-    await this.throttle();
-    return this.connection.getMinimumBalanceForRentExemption(size);
-  }
-
-  public formatSolBalance(lamports: number): string {
-    return (lamports / LAMPORTS_PER_SOL).toFixed(9);
-  }
-
-  public formatTokenBalance(amount: number, decimals: number): string {
-    return (amount / Math.pow(10, decimals)).toFixed(decimals);
-  }
-
   public async getBlockchainTime(): Promise<number> {
     await this.throttle();
     try {
@@ -241,5 +206,46 @@ export class WalletManager {
       console.warn("Falling back to system time:", error);
       return Math.floor(Date.now() / 1000);
     }
+  }
+
+  public async confirmTransaction(signature: string): Promise<void> {
+    await this.throttle();
+    await Promise.race([
+      this.connection.confirmTransaction({
+        signature,
+        blockhash: (await this.connection.getLatestBlockhash()).blockhash,
+        lastValidBlockHeight: (await this.connection.getLatestBlockhash()).lastValidBlockHeight
+      }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Transaction confirmation timeout")), 30000)
+      )
+    ]);
+  }
+
+  public formatSolBalance(lamports: number): string {
+    return (lamports / LAMPORTS_PER_SOL).toFixed(9);
+  }
+
+  public formatTokenBalance(amount: number, decimals: number): string {
+    return (amount / Math.pow(10, decimals)).toFixed(decimals);
+  }
+
+  public async getLatestBlockhash(): Promise<{ blockhash: string; lastValidBlockHeight: number }> {
+    await this.throttle();
+    return this.connection.getLatestBlockhash();
+  }
+
+  public async getTokenAccountBalance(tokenAccount: PublicKey): Promise<any> {
+    await this.throttle();
+    return this.connection.getTokenAccountBalance(tokenAccount);
+  }
+
+  public async getAccountInfo(publicKey: PublicKey): Promise<any> {
+    await this.throttle();
+    return this.connection.getAccountInfo(publicKey);
+  }
+
+  public getConnection(): Connection {
+    return this.connection;
   }
 }

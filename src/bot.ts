@@ -34,7 +34,7 @@ const initializeAnchorProvider = async () => {
 
   // Initialize provider with connection from wallet manager
   const provider = new anchor.AnchorProvider(
-    wallet.connection,
+    await wallet.getConnection(),
     adminWallet,
     { commitment: "confirmed" }
   );
@@ -664,14 +664,7 @@ bot.on("callback_query", async (ctx) => {
       let confirmed = false;
       while (retries > 0 && !confirmed) {
         try {
-          const confirmation = await wallet.connection.confirmTransaction({
-            signature: tx,
-            blockhash: (await wallet.connection.getLatestBlockhash()).blockhash,
-            lastValidBlockHeight: (await wallet.connection.getLatestBlockhash()).lastValidBlockHeight
-          });
-          if (confirmation.value.err) {
-            throw new Error(`Transaction failed: ${confirmation.value.err}`);
-          }
+          await wallet.confirmTransaction(tx);
           confirmed = true;
         } catch (error) {
           console.error(`Confirmation attempt ${4 - retries} failed:`, error);

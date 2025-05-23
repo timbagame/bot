@@ -19,7 +19,7 @@ const initializeAnchorProvider = async () => {
 
   // Initialize provider with connection from wallet manager
   const provider = new anchor.AnchorProvider(
-    wallet.connection,
+    wallet.getConnection(),
     adminWallet,
     { commitment: "confirmed" }
   );

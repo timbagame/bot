@@ -62,6 +62,26 @@ export class OracleManager {
     return { randomHash };
   }
 
+  // Helper function to retry an operation
+  private async retryOperation<T>(
+    operation: () => Promise<T>,
+    maxRetries: number = 3,
+    delay: number = 1000
+  ): Promise<T> {
+    let lastError: any;
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        if (i < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+    throw lastError;
+  }
+
   // Complete a game using the oracle
   public async completeGame(
     gamePda: PublicKey
@@ -101,43 +121,21 @@ export class OracleManager {
 
       const winnerAddress = gameAccount.players[winnerIndex];
 
-      // Add retry logic for transaction
-      let retries = 3;
-      let tx: string | null = null;
-
-      while (retries > 0 && !tx) {
-        try {
-          tx = await this.program.methods
-            .completeGame([...secretKeyBuffer])
-            .accounts({
-              game: gamePda,
-              player: winnerAddress,
-              authority: adminKp.publicKey,
-            })
-            .signers([adminKp])
-            .rpc();
-        } catch (error: any) {
-          retries--;
-          if (retries === 0) throw error;
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      }
-
-      if (!tx) {
-        throw new Error("Failed to complete game after retries");
-      }
-
-      // Wait for transaction confirmation with timeout
-      const confirmationPromise = this.wallet.connection.confirmTransaction({
-        signature: tx,
-        blockhash: (await this.wallet.connection.getLatestBlockhash()).blockhash,
-        lastValidBlockHeight: (await this.wallet.connection.getLatestBlockhash()).lastValidBlockHeight
+      // Send transaction with retry logic
+      const tx = await this.retryOperation(async () => {
+        return await this.program.methods
+          .completeGame([...secretKeyBuffer])
+          .accounts({
+            game: gamePda,
+            player: winnerAddress,
+            authority: adminKp.publicKey,
+          })
+          .signers([adminKp])
+          .rpc();
       });
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Transaction confirmation timeout")), 30000)
-      );
 
-      await Promise.race([confirmationPromise, timeoutPromise]);
+      // Wait for transaction confirmation
+      await this.wallet.confirmTransaction(tx);
 
       // Get the completed game account to verify winner
       const completedGameAccount = await this.program.account.game.fetch(gamePda);

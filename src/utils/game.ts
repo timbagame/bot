@@ -112,7 +112,7 @@ export class GameManager {
       );
 
       try {
-        await this.wallet.connection.getTokenAccountBalance(playerTokenAccount);
+        await this.wallet.getTokenAccountBalance(playerTokenAccount);
         console.log("Player token account already exists");
       } catch (error) {
         console.log("Creating player token account");
@@ -125,11 +125,7 @@ export class GameManager {
 
         const tx = await this.wallet.signAndSend([createAtaIx], [playerKeypair]);
         // Wait for confirmation
-        await this.wallet.connection.confirmTransaction({
-          signature: tx,
-          blockhash: (await this.wallet.connection.getLatestBlockhash()).blockhash,
-          lastValidBlockHeight: (await this.wallet.connection.getLatestBlockhash()).lastValidBlockHeight
-        });
+        await this.wallet.confirmTransaction(tx);
         console.log("Player token account created");
       }
 
@@ -144,11 +140,7 @@ export class GameManager {
         .rpc();
 
       // Wait for confirmation
-      await this.wallet.connection.confirmTransaction({
-        signature: tx,
-        blockhash: (await this.wallet.connection.getLatestBlockhash()).blockhash,
-        lastValidBlockHeight: (await this.wallet.connection.getLatestBlockhash()).lastValidBlockHeight
-      });
+      await this.wallet.confirmTransaction(tx);
       console.log("Player balance created");
     }
 
@@ -439,11 +431,7 @@ export class GameManager {
         .rpc();
 
       // Wait for transaction confirmation
-      await this.wallet.connection.confirmTransaction({
-        signature: tx,
-        blockhash: (await this.wallet.connection.getLatestBlockhash()).blockhash,
-        lastValidBlockHeight: (await this.wallet.connection.getLatestBlockhash()).lastValidBlockHeight
-      });
+      await this.wallet.confirmTransaction(tx);
 
       // Update game message
       const creatorTelegramId = await this.gameDb.getCreatorTelegramId(gamePda.toBase58());
