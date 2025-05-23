@@ -5,7 +5,7 @@ import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } fr
 import { WalletManager } from "./wallet";
 import { GameDatabase } from "./database";
 import { OracleManager } from "./oracle";
-import type { GameMessage, GameCancellationResult, GameAccounts, GameMessageFormat } from "../types/game";
+import type { GameMessage, GameCancellationResult, GameMessageFormat } from "../types/game";
 import type { Coinflip } from "../../idl/idlType";
 
 export class GameManager {
@@ -17,9 +17,6 @@ export class GameManager {
 
   // Common PDA seeds
   private readonly PDA_SEEDS = {
-    ORACLE: Buffer.from("oracle"),
-    GAME_TOKEN: Buffer.from("game_token"),
-    GAME_VAULT: Buffer.from("game_vault"),
     PLAYER_BALANCE: Buffer.from("player_balance"),
     GAME: Buffer.from("game")
   };
@@ -61,16 +58,6 @@ export class GameManager {
     return this.pdaCache.get(key)!;
   }
 
-  // Helper function to get common PDAs
-  private getCommonPdas(): { oraclePda: PublicKey; gameTokenPda: PublicKey; gameVaultPda: PublicKey } {
-    const tokenMintBuffer = new PublicKey(this.tokenMint).toBuffer();
-    return {
-      oraclePda: this.getPda([this.PDA_SEEDS.ORACLE], this.program.programId),
-      gameTokenPda: this.getPda([this.PDA_SEEDS.GAME_TOKEN, tokenMintBuffer], this.program.programId),
-      gameVaultPda: this.getPda([this.PDA_SEEDS.GAME_VAULT, tokenMintBuffer], this.program.programId)
-    };
-  }
-
   // Helper function to get player balance PDA
   private getPlayerBalancePda(playerPubkey: PublicKey): PublicKey {
     return this.getPda(
@@ -106,30 +93,6 @@ export class GameManager {
       console.error("Error calculating expiration time:", error);
       return "";
     }
-  }
-
-  // Helper function to get all required PDAs and accounts for a game
-  public async getGameAccounts(playerKp: anchor.web3.Keypair): Promise<GameAccounts> {
-    const { oraclePda, gameTokenPda, gameVaultPda } = this.getCommonPdas();
-    const playerBalancePda = await this.ensurePlayerBalance(playerKp);
-    const playerTokenAccount = await getAssociatedTokenAddress(
-      new PublicKey(this.tokenMint),
-      playerKp.publicKey
-    );
-    const gameTokenAccount = await getAssociatedTokenAddress(
-      new PublicKey(this.tokenMint),
-      gameVaultPda,
-      true
-    );
-
-    return {
-      oraclePda,
-      gameTokenPda,
-      gameVaultPda,
-      playerBalancePda,
-      playerTokenAccount,
-      gameTokenAccount
-    };
   }
 
   // Helper function to ensure player balance PDA exists
@@ -170,14 +133,12 @@ export class GameManager {
         console.log("Player token account created");
       }
 
-      const { gameTokenPda } = this.getCommonPdas();
-
       // Call the contract to initialize player balance
       const tx = await this.program.methods
         .initializePlayerBalance()
         .accounts({
-          gameToken: gameTokenPda,
           player: playerKeypair.publicKey,
+          tokenMint: new PublicKey(this.tokenMint),
         })
         .signers([playerKeypair])
         .rpc();
@@ -368,20 +329,13 @@ export class GameManager {
       }
 
       const creatorKp = await this.wallet.getKeyPair(BigInt(creatorTelegramId));
-      const accounts = await this.getGameAccounts(creatorKp);
 
       try {
         const tx = await this.program.methods
           .cancelGame()
           .accounts({
             game: gamePda,
-            oracle: accounts.oraclePda,
-            gameToken: accounts.gameTokenPda,
-            gameTokenAccount: accounts.gameTokenAccount,
-            gameVault: accounts.gameVaultPda,
             player: gameAccount.creator,
-            playerBalance: accounts.playerBalancePda,
-            playerTokenAccount: accounts.playerTokenAccount,
           })
           .signers([adminKp, creatorKp])
           .rpc();
@@ -477,21 +431,12 @@ export class GameManager {
         throw new Error("Game creator cannot unjoin");
       }
 
-      // Get all required PDAs and accounts
-      const accounts = await this.getGameAccounts(playerKp);
-
       // Call the contract to unjoin the game
       const tx = await this.program.methods
         .unjoinGame()
         .accounts({
           game: gamePda,
           player: playerKp.publicKey,
-          playerBalance: playerBalancePda,
-          oracle: accounts.oraclePda,
-          gameToken: accounts.gameTokenPda,
-          gameVault: accounts.gameVaultPda,
-          playerTokenAccount: accounts.playerTokenAccount,
-          gameTokenAccount: accounts.gameTokenAccount,
         })
         .signers([playerKp])
         .rpc();
@@ -943,9 +888,6 @@ export class GameManager {
       console.log(`Saving creator balance PDA mapping - PDA: ${playerBalancePda.toBase58()}, Telegram ID: ${telegramId.toString()}`);
       this.gameDb.savePlayerMapping(playerBalancePda.toBase58(), telegramId.toString());
 
-      // Get all required PDAs and accounts
-      const accounts = await this.getGameAccounts(playerKp);
-
       // Create game on-chain
       const tx = await this.program.methods
         .initializeGame(
@@ -959,11 +901,7 @@ export class GameManager {
         )
         .accounts({
           player: playerKp.publicKey,
-          playerBalance: playerBalancePda,
-          oracle: accounts.oraclePda,
-          gameToken: accounts.gameTokenPda,
-          playerTokenAccount: accounts.playerTokenAccount,
-          gameTokenAccount: accounts.gameTokenAccount,
+          tokenMint: new PublicKey(this.tokenMint),
         })
         .signers([playerKp])
         .rpc();

@@ -1,5 +1,3 @@
-import { PublicKey } from "@solana/web3.js";
-
 export type GameStatus = "Active" | "Completed" | "Cancelled";
 
 export interface GameMessage {
@@ -18,15 +16,6 @@ export interface GameInfo {
   status: string;
   isExpired: boolean;
   hasEnoughPlayers: boolean;
-}
-
-export interface GameAccounts {
-  oraclePda: PublicKey;
-  gameTokenPda: PublicKey;
-  gameVaultPda: PublicKey;
-  playerBalancePda: PublicKey;
-  playerTokenAccount: PublicKey;
-  gameTokenAccount: PublicKey;
 }
 
 export interface GameMessageFormat {

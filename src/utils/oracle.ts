@@ -99,13 +99,7 @@ export class OracleManager {
         winnerIndex = Number(finalNumber % BigInt(nPlayers));
       }
 
-      const winnerBalancePda = gameAccount.players[winnerIndex];
-
-      // Get game token PDA
-      const [gameTokenPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("game_token"), new PublicKey(process.env.TOKEN_MINT!).toBuffer()],
-        this.program.programId
-      );
+      const winnerAddress = gameAccount.players[winnerIndex];
 
       // Add retry logic for transaction
       let retries = 3;
@@ -117,10 +111,8 @@ export class OracleManager {
             .completeGame([...secretKeyBuffer])
             .accounts({
               game: gamePda,
-              oracle: oraclePda,
+              player: winnerAddress,
               authority: adminKp.publicKey,
-              playerBalance: winnerBalancePda,
-              gameToken: gameTokenPda,
             })
             .signers([adminKp])
             .rpc();

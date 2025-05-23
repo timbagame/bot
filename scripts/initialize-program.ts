@@ -5,7 +5,6 @@ import type { Coinflip } from "../idl/idlType";
 import idl from "../idl/idl.json";
 
 const TOKEN_MINT = process.env.TOKEN_MINT!;
-const TICKER = process.env.TICKER!;
 
 // Initialize wallet manager
 const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
@@ -89,7 +88,7 @@ const initializeGameToken = async (program: anchor.Program<Coinflip>) => {
     // Check if Game Token exists
     try {
       const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
-      console.log(`Game Token already exists: ${gameTokenAccount.ticker}`);
+      console.log(`Game Token already exists: ${gameTokenAccount.tokenMint.toString()}`);
       return gameTokenPda;
     } catch (error) {
       console.log("Game Token doesn't exist, creating...");
@@ -98,22 +97,14 @@ const initializeGameToken = async (program: anchor.Program<Coinflip>) => {
     // Get admin keypair from JSON file
     const adminKeypair = await wallet.getAdminKeypair();
 
-    // Get Oracle PDA
-    const [oraclePda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("oracle")],
-      program.programId
-    );
-
     // Initialize Game Token
     const tx = await program.methods
       .initializeToken(
-        TICKER,
         new anchor.BN(1_000), // Minimum amount in lamports (0.001 token)
         true // Enabled
       )
       .accounts({
         tokenMint: tokenMintPubkey,
-        oracle: oraclePda,
         authority: adminKeypair.publicKey,
       })
       .signers([adminKeypair])

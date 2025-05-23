@@ -2,7 +2,7 @@ import { Bot, Context } from "grammy";
 import { WalletManager } from "./utils/wallet";
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
-import { getAssociatedTokenAddress, createSyncNativeInstruction } from "@solana/spl-token";
+import { createSyncNativeInstruction } from "@solana/spl-token";
 import type { Coinflip } from "../idl/idlType";
 import idl from "../idl/idl.json";
 import { GameDatabase } from "./utils/database";
@@ -79,7 +79,7 @@ const setupAnchor = async () => {
       );
 
       const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
-      console.log(`Game token found: ${gameTokenAccount.ticker}`);
+      console.log(`Game token found: ${gameTokenAccount.tokenMint.toString()}`);
     } catch (error) {
       console.log("Game token not found, it might need to be initialized");
     }
@@ -645,32 +645,6 @@ bot.on("callback_query", async (ctx) => {
       const playerBalancePda = await gameManager.ensurePlayerBalance(playerKp);
       console.log(`Player balance PDA: ${playerBalancePda.toBase58()}`);
 
-      const [oraclePda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("oracle")],
-        program.programId
-      );
-
-      const [gameTokenPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("game_token"), new PublicKey(TOKEN_MINT).toBuffer()],
-        program.programId
-      );
-
-      const [gameVaultPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("game_vault"), new PublicKey(TOKEN_MINT).toBuffer()],
-        program.programId
-      );
-
-      // Get token accounts
-      const playerTokenAccount = await getAssociatedTokenAddress(
-        new PublicKey(TOKEN_MINT),
-        playerKp.publicKey
-      );
-      const gameTokenAccount = await getAssociatedTokenAddress(
-        new PublicKey(TOKEN_MINT),
-        gameVaultPda,
-        true
-      );
-
       console.log("Sending join transaction...");
       // Call the contract to join the game
       const tx = await program.methods
@@ -678,11 +652,6 @@ bot.on("callback_query", async (ctx) => {
         .accounts({
           game: gamePda,
           player: playerKp.publicKey,
-          playerBalance: playerBalancePda,
-          oracle: oraclePda,
-          gameToken: gameTokenPda,
-          playerTokenAccount: playerTokenAccount,
-          gameTokenAccount: gameTokenAccount,
         })
         .signers([playerKp])
         .rpc();
@@ -958,39 +927,12 @@ const claimWinnings = async (playerKp: anchor.web3.Keypair): Promise<number> => 
     return 0;
   }
 
-  const [gameTokenPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("game_token"), new PublicKey(TOKEN_MINT).toBuffer()],
-    program.programId
-  );
-
-  const [gameVaultPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("game_vault"), new PublicKey(TOKEN_MINT).toBuffer()],
-    program.programId
-  );
-
-  // Get player's token account
-  const playerTokenAccount = await getAssociatedTokenAddress(
-    new PublicKey(TOKEN_MINT),
-    playerKp.publicKey
-  );
-
-  // Get game's token account
-  const gameTokenAccount = await getAssociatedTokenAddress(
-    new PublicKey(TOKEN_MINT),
-    gameVaultPda,
-    true
-  );
-
   // Call the contract to claim the win
   await program.methods
     .claimWin()
     .accounts({
-      playerBalance: playerBalancePda,
       player: playerKp.publicKey,
-      gameToken: gameTokenPda,
-      playerTokenAccount: playerTokenAccount,
-      gameTokenAccount: gameTokenAccount,
-      gameVault: gameVaultPda,
+      tokenMint: new PublicKey(TOKEN_MINT),
     })
     .signers([playerKp])
     .rpc();
