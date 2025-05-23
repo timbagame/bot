@@ -41,6 +41,7 @@ const categorizeGame = (gameData: any, telegramIdStr: string, playerPublicKey: s
 
   if (winnerAddress === "cancelled") return "cancelled";
   if (isWinner) return "won";
+  if (winnerAddress && winnerAddress !== playerPublicKey) return "lost";
   if (isCreator) return "created";
   return "lost";
 };
