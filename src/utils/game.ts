@@ -170,17 +170,25 @@ export class GameManager {
     return playerBalancePda;
   }
 
-  private async getCachedGameAccount(gamePda: PublicKey): Promise<any> {
-    const cached = this.gameAccountCache.get(gamePda.toBase58());
+  private async getCachedGameAccount(gamePda: PublicKey, forceFresh: boolean = false): Promise<any> {
+    const cacheKey = gamePda.toBase58();
+    const cached = this.gameAccountCache.get(cacheKey);
     const now = Date.now();
 
-    if (cached && now - cached.timestamp < this.CACHE_DURATION) {
+    if (!forceFresh && cached && now - cached.timestamp < this.CACHE_DURATION) {
       return cached.account;
     }
 
     const account = await this.program.account.game.fetch(gamePda);
-    this.gameAccountCache.set(gamePda.toBase58(), { account, timestamp: now });
+    this.gameAccountCache.set(cacheKey, { account, timestamp: now });
     return account;
+  }
+
+  /**
+   * Clear the game account cache for a specific game
+   */
+  private clearGameAccountCache(gamePda: PublicKey): void {
+    this.gameAccountCache.delete(gamePda.toBase58());
   }
 
   private async getGameStatusInfo(gameAccount: any): Promise<GameInfo> {
@@ -343,7 +351,10 @@ export class GameManager {
     const gameMessage = this.activeGameMessages.get(gamePda.toBase58());
     if (!gameMessage) return;
 
-    const gameAccount = await this.getCachedGameAccount(gamePda);
+    // Clear cache to ensure we get the latest game state with all players
+    this.clearGameAccountCache(gamePda);
+
+    const gameAccount = await this.getCachedGameAccount(gamePda, true);
     const creatorTelegramId = this.gameDb.getCreatorTelegramId(gamePda.toBase58());
     if (!creatorTelegramId) return;
 
@@ -477,10 +488,11 @@ export class GameManager {
     creatorUsername: string,
     status: string,
     winnerAddress?: string,
-    txHash?: string
+    txHash?: string,
+    forceFresh: boolean = false
   ): Promise<GameMessageFormat> {
     const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
-    const gameAccount = await this.getCachedGameAccount(gamePda);
+    const gameAccount = await this.getCachedGameAccount(gamePda, forceFresh);
     const { currentPlayers, maxPlayers, minPlayers } = await this.getGameBasicInfo(gameAccount);
 
     const playerInfo = await this.getPlayerInfo(ctx, gameAccount);
@@ -576,6 +588,8 @@ export class GameManager {
 
     try {
       const gamePda = new PublicKey(gameAddress);
+      // Force fresh data when showing winner to ensure we have the correct player list
+      const forceFresh = status.toLowerCase() === "completed";
       const { messageText, keyboard } = await this.formatGameMessage(
         ctx,
         gamePda,
@@ -583,7 +597,9 @@ export class GameManager {
         amount,
         creatorUsername,
         status,
-        winnerAddress
+        winnerAddress,
+        undefined,
+        forceFresh
       );
 
       try {
