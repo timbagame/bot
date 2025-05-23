@@ -221,6 +221,7 @@ export class GameManager {
     return {
       amount: Number(gameAccount.amount),
       maxPlayers: gameAccount.maxPlayers,
+      minPlayers: gameAccount.minPlayers,
       currentPlayers: gameAccount.players.length,
       creatorPubkey: gameAccount.creator.toString(),
       status: Object.keys(gameAccount.status)[0],
@@ -478,6 +479,24 @@ export class GameManager {
     }
   }
 
+  // Helper function to generate dynamic status based on player count
+  private getGameStatusText(status: string, currentPlayers: number, minPlayers: number, maxPlayers: number): string {
+    if (status.toLowerCase() !== "active") {
+      return formatGameStatus(status);
+    }
+
+    // For active games, be more specific
+    if (currentPlayers < minPlayers) {
+      const needed = minPlayers - currentPlayers;
+      return `${needed} more until minimum`;
+    } else if (currentPlayers < maxPlayers) {
+      const needed = maxPlayers - currentPlayers;
+      return `Ready to start (${needed} more until full)`;
+    } else {
+      return `Full - starting soon!`;
+    }
+  }
+
   // Helper function to format game message
   private async formatGameMessage(
     ctx: Context,
@@ -491,10 +510,13 @@ export class GameManager {
   ): Promise<GameMessageFormat> {
     const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
     const gameAccount = await this.getCachedGameAccount(gamePda);
-    const { currentPlayers, maxPlayers } = await this.getGameBasicInfo(gameAccount);
+    const { currentPlayers, maxPlayers, minPlayers } = await this.getGameBasicInfo(gameAccount);
 
     const playerInfo = await this.getPlayerInfo(ctx, gameAccount);
     const expirationInfo = status.toLowerCase() === "active" ? await this.calculateExpirationTime(gameAccount) : "";
+
+    // Generate dynamic status text
+    const statusText = this.getGameStatusText(status, currentPlayers, minPlayers, maxPlayers);
 
     // Only show winner info if game is completed
     let winnerInfo = "";
@@ -510,8 +532,15 @@ export class GameManager {
     let messageText = `<b>🪙 ${gameType} Game</b>\n\n` +
       `💰 Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
       `👤 Creator: @${creatorUsername}\n` +
-      `👥 Players: ${currentPlayers}/${maxPlayers}${playerInfo}\n` +
-      `Status: ${formatGameStatus(status)}${expirationInfo}${winnerInfo}`;
+      `👥 Players: ${currentPlayers}/${maxPlayers}${playerInfo}\n`;
+
+    // Only show status for non-completed games
+    if (status.toLowerCase() !== "completed") {
+      messageText += `Status: ${statusText}${expirationInfo}`;
+    }
+
+    // Add winner info for completed games
+    messageText += winnerInfo;
 
     if (txHash) {
       messageText += `\n\nTransaction: <code>${txHash}</code>`;
@@ -639,16 +668,20 @@ export class GameManager {
     try {
       const gameAccount = await this.getCachedGameAccount(gamePda);
       const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
-      const { amount, maxPlayers, currentPlayers, creatorPubkey, status, gameType } = await this.getGameBasicInfo(gameAccount);
+      const { amount, maxPlayers, minPlayers, currentPlayers, creatorPubkey, status, gameType } = await this.getGameBasicInfo(gameAccount);
 
       const creatorInfo = await this.getCreatorInfo(ctx, gamePda, creatorPubkey);
       const expirationInfo = status.toLowerCase() === "active" ? await this.calculateExpirationTime(gameAccount) : "";
       const winnerInfo = status.toLowerCase() === "completed" ? await this.getWinnerInfo(ctx, gameAccount) : "";
 
+      // Generate dynamic status text
+      const statusText = this.getGameStatusText(status, currentPlayers, minPlayers, maxPlayers);
+
       return `Type: ${gameType}\n` +
              `Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
              `Creator: ${creatorInfo}\n` +
-             `Players: ${currentPlayers}/${maxPlayers}${expirationInfo}${winnerInfo}`;
+             `Players: ${currentPlayers}/${maxPlayers}\n` +
+             `Status: ${statusText}${expirationInfo}${winnerInfo}`;
     } catch (error: any) {
       return `Error fetching game: ${error.message}`;
     }

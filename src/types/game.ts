@@ -33,6 +33,7 @@ export interface GameCategory {
 export interface GameBasicInfo {
   amount: number;
   maxPlayers: number;
+  minPlayers: number;
   currentPlayers: number;
   creatorPubkey: string;
   status: string;
