@@ -203,9 +203,18 @@ export class WalletManager {
     amount: number,
     tokenMint: string
   ): Promise<string> {
+    console.log(`🔄 Starting token transfer:`);
+    console.log(`  From Telegram ID: ${fromTelegramId}`);
+    console.log(`  To Address: ${toAddress.toBase58()}`);
+    console.log(`  Amount: ${amount}`);
+    console.log(`  Token Mint: ${tokenMint}`);
+
     const fromKeypair = this.getKeyPair(fromTelegramId);
     const tokenMintPubkey = new PublicKey(tokenMint);
     const { decimals } = await this.getTokenMetadata(tokenMint);
+
+    console.log(`  From Keypair: ${fromKeypair.publicKey.toBase58()}`);
+    console.log(`  Token decimals: ${decimals}`);
 
     const [
       { address: fromTokenAccount, instructions: fromInstructions },
@@ -214,6 +223,26 @@ export class WalletManager {
       this.findOrCreateAssociatedTokenAccount(fromKeypair.publicKey, tokenMintPubkey, fromKeypair),
       this.findOrCreateAssociatedTokenAccount(toAddress, tokenMintPubkey, fromKeypair)
     ]);
+
+    console.log(`  From Token Account: ${fromTokenAccount.toBase58()}`);
+    console.log(`  To Token Account: ${toTokenAccount.toBase58()}`);
+    console.log(`  From Instructions: ${fromInstructions.length}`);
+    console.log(`  To Instructions: ${toInstructions.length}`);
+
+    // Check balances before transfer
+    try {
+      const fromBalance = await this.getTokenAccountBalance(fromTokenAccount);
+      console.log(`  From Account Balance Before: ${fromBalance.value.uiAmount} tokens`);
+    } catch (error) {
+      console.log(`  Could not get from account balance: ${error}`);
+    }
+
+    try {
+      const toBalance = await this.getTokenAccountBalance(toTokenAccount);
+      console.log(`  To Account Balance Before: ${toBalance.value.uiAmount} tokens`);
+    } catch (error) {
+      console.log(`  Could not get to account balance (might not exist yet): ${error}`);
+    }
 
     const transferInstruction = createTransferCheckedInstruction(
       fromTokenAccount,
@@ -224,7 +253,34 @@ export class WalletManager {
       decimals
     );
 
-    return this.signAndSend([...fromInstructions, ...toInstructions, transferInstruction], [fromKeypair]);
+    console.log(`  Transfer instruction created with amount: ${amount} (raw), ${amount / Math.pow(10, decimals)} (UI)`);
+
+    const allInstructions = [...fromInstructions, ...toInstructions, transferInstruction];
+    console.log(`  Total instructions: ${allInstructions.length}`);
+
+    const txSignature = await this.signAndSend(allInstructions, [fromKeypair]);
+    console.log(`  Transaction signature: ${txSignature}`);
+
+    // Wait a bit for the transaction to be processed
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Check balances after transfer
+    try {
+      const fromBalance = await this.getTokenAccountBalance(fromTokenAccount);
+      console.log(`  From Account Balance After: ${fromBalance.value.uiAmount} tokens`);
+    } catch (error) {
+      console.log(`  Could not get from account balance after: ${error}`);
+    }
+
+    try {
+      const toBalance = await this.getTokenAccountBalance(toTokenAccount);
+      console.log(`  To Account Balance After: ${toBalance.value.uiAmount} tokens`);
+    } catch (error) {
+      console.log(`  Could not get to account balance after: ${error}`);
+    }
+
+    console.log(`✅ Token transfer completed`);
+    return txSignature;
   }
 
   public async signAndSend(instructions: TransactionInstruction[], signers: Keypair[]): Promise<string> {

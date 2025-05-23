@@ -90,9 +90,16 @@ const getPlayerData = async (telegramId: bigint): Promise<PlayerData> => {
 
 // Helper function to check and claim winnings
 const checkAndClaimWinnings = async (playerKp: anchor.web3.Keypair, isSol: boolean): Promise<number> => {
-  if (isSol) return 0; // No claiming needed for SOL
+  console.log(`💰 Checking winnings for player: ${playerKp.publicKey.toBase58()}, isSol: ${isSol}`);
 
-  return await claimWinnings(playerKp);
+  if (isSol) {
+    console.log(`  Skipping claim for SOL transaction`);
+    return 0; // No claiming needed for SOL
+  }
+
+  const claimedAmount = await claimWinnings(playerKp);
+  console.log(`  Total claimed amount: ${claimedAmount}`);
+  return claimedAmount;
 };
 
 // Helper function to validate balance
@@ -490,13 +497,174 @@ bot.command("help", async (ctx: Context) => {
     `/wh &lt;address&gt; &lt;amount&gt; - Shorthand for withdraw command\n` +
     `/tip &lt;amount&gt; - Reply to a user's message to send them tokens\n` +
     `/active - Show your active games\n` +
-    `/games - Show your recent games\n\n` +
+    `/games - Show your recent games\n` +
+    `/debug - Show detailed wallet debug info (reply to user for their info too)\n` +
+    `/checktx &lt;signature&gt; - Check transaction details and status\n\n` +
     `<b>ℹ️ Important:</b> Your player balance account will be automatically initialized when needed.`;
 
   await ctx.reply(helpText, {
     parse_mode: "HTML",
     reply_to_message_id: ctx.message?.message_id
   });
+});
+
+// Add after the help command, before the active command
+bot.command("debug", async (ctx: Context) => {
+  const telegramId = BigInt(ctx.from?.id || 0);
+  const replyToMessage = ctx.message?.reply_to_message;
+
+  try {
+    const playerData = await getPlayerData(telegramId);
+    const metadata = await getTokenMetadata();
+
+    let response = `🔍 <b>Debug Info for ${ctx.from?.first_name || 'You'}</b>\n\n`;
+    response += `Telegram ID: <code>${telegramId}</code>\n`;
+    response += `Wallet Address: <code>${playerData.keypair.publicKey.toBase58()}</code>\n`;
+    response += `SOL Balance: ${wallet.formatSolBalance(playerData.solBalance)} SOL\n`;
+    response += `Token Balance: ${wallet.formatTokenBalance(playerData.tokenBalance, metadata.decimals)} ${TICKER}\n`;
+    response += `Game Balance: ${wallet.formatTokenBalance(playerData.gameBalance, metadata.decimals)} ${TICKER}\n\n`;
+
+    // Get token account address
+    const { getAssociatedTokenAddress } = await import("@solana/spl-token");
+    const tokenAccount = await getAssociatedTokenAddress(
+      new PublicKey(TOKEN_MINT),
+      playerData.keypair.publicKey
+    );
+    response += `Token Account: <code>${tokenAccount.toBase58()}</code>\n\n`;
+
+    // If replying to someone, show their info too
+    if (replyToMessage && replyToMessage.from && !replyToMessage.from.is_bot) {
+      const recipientTelegramId = BigInt(replyToMessage.from.id);
+      const recipientData = await getPlayerData(recipientTelegramId);
+      const recipientTokenAccount = await getAssociatedTokenAddress(
+        new PublicKey(TOKEN_MINT),
+        recipientData.keypair.publicKey
+      );
+
+      response += `<b>Reply Target: ${replyToMessage.from.first_name || 'User'}</b>\n`;
+      response += `Telegram ID: <code>${recipientTelegramId}</code>\n`;
+      response += `Wallet Address: <code>${recipientData.keypair.publicKey.toBase58()}</code>\n`;
+      response += `SOL Balance: ${wallet.formatSolBalance(recipientData.solBalance)} SOL\n`;
+      response += `Token Balance: ${wallet.formatTokenBalance(recipientData.tokenBalance, metadata.decimals)} ${TICKER}\n`;
+      response += `Game Balance: ${wallet.formatTokenBalance(recipientData.gameBalance, metadata.decimals)} ${TICKER}\n`;
+      response += `Token Account: <code>${recipientTokenAccount.toBase58()}</code>\n`;
+    }
+
+    await ctx.reply(response, {
+      parse_mode: "HTML",
+      reply_to_message_id: ctx.message?.message_id
+    });
+  } catch (error) {
+    await handleCommandError(ctx, error, "debug");
+  }
+});
+
+// Add after the debug command
+bot.command("checktx", async (ctx: Context) => {
+  const args = ctx.message?.text?.split(" ");
+
+  if (!args || args.length < 2) {
+    return ctx.reply("Usage: /checktx <transaction_signature>", {
+      reply_to_message_id: ctx.message?.message_id
+    });
+  }
+
+  const signature = args[1];
+
+  try {
+    console.log(`Checking transaction: ${signature}`);
+
+    // Get transaction details
+    const connection = wallet.getConnection();
+    const txDetails = await connection.getTransaction(signature, {
+      commitment: "confirmed",
+      maxSupportedTransactionVersion: 0
+    });
+
+    if (!txDetails) {
+      return ctx.reply("Transaction not found or not confirmed yet.", {
+        reply_to_message_id: ctx.message?.message_id
+      });
+    }
+
+    let response = `🔍 <b>Transaction Details</b>\n\n`;
+    response += `Signature: <code>${signature}</code>\n`;
+    response += `Slot: ${txDetails.slot}\n`;
+    response += `Block Time: ${txDetails.blockTime ? new Date(txDetails.blockTime * 1000).toISOString() : 'Unknown'}\n`;
+    response += `Fee: ${txDetails.meta?.fee || 0} lamports\n`;
+    response += `Status: ${txDetails.meta?.err ? '❌ Failed' : '✅ Success'}\n`;
+
+    if (txDetails.meta?.err) {
+      response += `Error: <code>${JSON.stringify(txDetails.meta.err)}</code>\n`;
+    }
+
+    // Check token transfers in the transaction
+    if (txDetails.meta?.preTokenBalances && txDetails.meta?.postTokenBalances) {
+      response += `\n<b>Token Balance Changes:</b>\n`;
+
+      const preBalances = txDetails.meta.preTokenBalances;
+      const postBalances = txDetails.meta.postTokenBalances;
+
+      // Group balances by account
+      const balanceChanges = new Map();
+
+      preBalances.forEach(balance => {
+        if (balance.mint === TOKEN_MINT) {
+          balanceChanges.set(balance.accountIndex, {
+            account: balance.owner,
+            pre: balance.uiTokenAmount.uiAmount || 0,
+            post: 0
+          });
+        }
+      });
+
+      postBalances.forEach(balance => {
+        if (balance.mint === TOKEN_MINT) {
+          const existing = balanceChanges.get(balance.accountIndex) || {
+            account: balance.owner,
+            pre: 0,
+            post: 0
+          };
+          existing.post = balance.uiTokenAmount.uiAmount || 0;
+          balanceChanges.set(balance.accountIndex, existing);
+        }
+      });
+
+      balanceChanges.forEach((change, accountIndex) => {
+        const diff = change.post - change.pre;
+        const direction = diff > 0 ? '📈' : diff < 0 ? '📉' : '➖';
+        response += `${direction} Account ${accountIndex}: ${change.pre} → ${change.post} ${TICKER} (${diff > 0 ? '+' : ''}${diff})\n`;
+      });
+    }
+
+    // Show account keys involved
+    if (txDetails.transaction.message) {
+      response += `\n<b>Accounts involved:</b>\n`;
+      try {
+        const accountKeys = txDetails.transaction.message.getAccountKeys();
+        accountKeys.keySegments().forEach((segment: any[], segmentIndex: number) => {
+          segment.forEach((key: any, index: number) => {
+            const globalIndex = segmentIndex * segment.length + index;
+            response += `${globalIndex}: <code>${key.toBase58()}</code>\n`;
+          });
+        });
+      } catch (error) {
+        // Fallback for legacy transaction format
+        response += `Unable to parse account keys\n`;
+      }
+    }
+
+    await ctx.reply(response, {
+      parse_mode: "HTML",
+      reply_to_message_id: ctx.message?.message_id
+    });
+
+  } catch (error: any) {
+    console.error("Error checking transaction:", error);
+    await ctx.reply(`Error checking transaction: ${error.message}`, {
+      reply_to_message_id: ctx.message?.message_id
+    });
+  }
 });
 
 // Implement active command to show only active games
@@ -905,29 +1073,63 @@ setupAnchor().then(async () => {
 
 // Helper function to claim winnings
 const claimWinnings = async (playerKp: anchor.web3.Keypair): Promise<number> => {
+  console.log(`🏆 Starting claim winnings process for player: ${playerKp.publicKey.toBase58()}`);
+
   // Get program addresses
   const [playerBalancePda] = PublicKey.findProgramAddressSync(
     [Buffer.from("player_balance"), playerKp.publicKey.toBuffer(), new PublicKey(TOKEN_MINT).toBuffer()],
     program.programId
   );
 
-  // Get player balance
-  const playerBalance = await program.account.playerBalance.fetch(playerBalancePda);
-  const claimableAmount = Number(playerBalance.amount);
+  console.log(`  Player Balance PDA: ${playerBalancePda.toBase58()}`);
 
-  if (claimableAmount <= 0) {
-    return 0;
+  try {
+    // Get player balance
+    const playerBalance = await program.account.playerBalance.fetch(playerBalancePda);
+    const claimableAmount = Number(playerBalance.amount);
+
+    console.log(`  Claimable amount: ${claimableAmount} (raw), ${claimableAmount / Math.pow(10, 9)} (UI)`);
+
+    if (claimableAmount <= 0) {
+      console.log(`  No winnings to claim, returning 0`);
+      return 0;
+    }
+
+    console.log(`  Executing claimWin() transaction...`);
+
+    // Call the contract to claim the win
+    const tx = await program.methods
+      .claimWin()
+      .accounts({
+        player: playerKp.publicKey,
+        tokenMint: new PublicKey(TOKEN_MINT),
+      })
+      .signers([playerKp])
+      .rpc();
+
+    console.log(`  Claim transaction signature: ${tx}`);
+
+    // Wait for confirmation
+    await wallet.confirmTransaction(tx);
+    console.log(`  Claim transaction confirmed`);
+
+    // Verify the claim worked
+    try {
+      const updatedPlayerBalance = await program.account.playerBalance.fetch(playerBalancePda);
+      const remainingAmount = Number(updatedPlayerBalance.amount);
+      console.log(`  Remaining balance after claim: ${remainingAmount}`);
+    } catch (error) {
+      console.log(`  Could not fetch updated balance: ${error}`);
+    }
+
+    console.log(`✅ Claim winnings completed successfully, claimed: ${claimableAmount}`);
+    return claimableAmount;
+  } catch (error: any) {
+    if (error.message?.includes('Account does not exist')) {
+      console.log(`  Player balance account does not exist, no winnings to claim`);
+      return 0;
+    }
+    console.error(`❌ Error in claim winnings: ${error}`);
+    throw error;
   }
-
-  // Call the contract to claim the win
-  await program.methods
-    .claimWin()
-    .accounts({
-      player: playerKp.publicKey,
-      tokenMint: new PublicKey(TOKEN_MINT),
-    })
-    .signers([playerKp])
-    .rpc();
-
-  return claimableAmount;
 };
