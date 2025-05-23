@@ -406,13 +406,14 @@ export class GameManager {
       console.log(`🎉 Sending completion notification for ${gameType} game, winner: ${winnerPubkeyStr}`);
       const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
       const winnerUsername = await this.getPlayerUsername(ctx, winnerPubkeyStr);
-      const amount = Number(gameAccount.amount);
+      const entryAmount = Number(gameAccount.amount);
       const playerCount = gameAccount.players.length;
+      const totalPrize = entryAmount * playerCount; // Winner gets total from all players
 
       await ctx.reply(
         `🎉 <b>${gameType} Completed!</b>\n\n` +
         `🏆 Winner: @${winnerUsername}\n` +
-        `💰 Prize: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
+        `💰 Prize: ${this.wallet.formatTokenBalance(totalPrize, metadata.decimals)} ${this.ticker}\n` +
         `👥 Players: ${playerCount}`,
         {
           parse_mode: "HTML",
