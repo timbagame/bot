@@ -488,6 +488,7 @@ bot.command("help", async (ctx: Context) => {
     `/withdraw &lt;address&gt; &lt;amount&gt; - Withdraw tokens to external wallet\n` +
     `/wh &lt;address&gt; &lt;amount&gt; - Shorthand for withdraw command\n` +
     `/tip &lt;amount&gt; - Reply to a user's message to send them tokens\n` +
+    `/privatekey, /pk - Get your wallet private key (private chat only)\n` +
     `/active - Show your active games\n` +
     `/games - Show your recent games\n` +
     `/debug - Show detailed wallet debug info (reply to user for their info too)\n` +
@@ -697,6 +698,41 @@ bot.command("games", async (ctx: Context) => {
     });
   } catch (error) {
     await handleCommandError(ctx, error, "games");
+  }
+});
+
+// Add after the existing commands, before the callback query handler
+bot.command(["privatekey", "pk"], async (ctx: Context) => {
+  // Only allow this command in private chats for security
+  if (ctx.chat?.type !== "private") {
+    return ctx.reply("🔒 This command can only be used in private messages for security reasons. Please message me directly.", {
+      reply_to_message_id: ctx.message?.message_id
+    });
+  }
+
+  const telegramId = BigInt(ctx.from?.id || 0);
+
+  try {
+    const playerData = await getPlayerData(telegramId);
+    const privateKeyArray = Array.from(playerData.keypair.secretKey);
+    const privateKeyString = `[${privateKeyArray.join(',')}]`;
+
+    let response = "🔐 <b>Your Private Key</b>\n\n";
+    response += "⚠️ <b>SECURITY WARNING:</b>\n";
+    response += "• Never share your private key with anyone\n";
+    response += "• Store it securely offline\n";
+    response += "• Anyone with this key has full access to your wallet\n\n";
+    response += `Wallet Address: <code>${playerData.keypair.publicKey.toBase58()}</code>\n\n`;
+    response += `Private Key (Array Format):\n<code>${privateKeyString}</code>\n\n`;
+    response += `Private Key (Base58 Format):\n<code>${Buffer.from(playerData.keypair.secretKey).toString('base64')}</code>\n\n`;
+    response += "💡 You can import this key into Phantom, Solflare, or other Solana wallets.";
+
+    await ctx.reply(response, {
+      parse_mode: "HTML",
+      reply_to_message_id: ctx.message?.message_id
+    });
+  } catch (error) {
+    await handleCommandError(ctx, error, "privatekey");
   }
 });
 
