@@ -743,12 +743,15 @@ export class GameManager {
       this.gameDb.getRecentGames(telegramIdStr)
     ]);
 
+    // Limit to last 5 recent games, then categorize
+    const last5RecentGames = recentGamesData.slice(0, 5);
+
     // Batch fetch all game accounts
-    const gameAccounts = await this.batchFetchGameAccounts([...activeGamesData, ...recentGamesData]);
+    const gameAccounts = await this.batchFetchGameAccounts([...activeGamesData, ...last5RecentGames]);
 
     // Process games
     const { games: activeGames, totalTokens } = await this.processActiveGames(ctx, activeGamesData, gameAccounts);
-    const categories = await this.categorizeRecentGames(recentGamesData, gameAccounts, telegramIdStr, playerPublicKey);
+    const categories = await this.categorizeRecentGames(last5RecentGames, gameAccounts, telegramIdStr, playerPublicKey);
 
     // Format sections
     const activeGamesSection = activeGames.length > 0
