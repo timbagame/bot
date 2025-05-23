@@ -32,6 +32,8 @@ const generateRandomHash = (secretKey: Buffer): Buffer => {
 
 export class OracleManager {
   private static instance: OracleManager;
+  private pdaCache: Map<string, PublicKey> = new Map();
+
   private readonly PDA_SEEDS = {
     ORACLE: Buffer.from("oracle"),
     GAME: Buffer.from("game")
@@ -54,22 +56,24 @@ export class OracleManager {
     return OracleManager.instance;
   }
 
+  // Cached PDA generation
+  private getPda(seeds: Buffer[], programId: PublicKey): PublicKey {
+    const key = seeds.map(s => s.toString('hex')).join('_') + programId.toBase58();
+    if (!this.pdaCache.has(key)) {
+      const [pda] = PublicKey.findProgramAddressSync(seeds, programId);
+      this.pdaCache.set(key, pda);
+    }
+    return this.pdaCache.get(key)!;
+  }
+
   // Helper function to get oracle PDA
   private getOraclePda(): PublicKey {
-    const [pda] = PublicKey.findProgramAddressSync(
-      [this.PDA_SEEDS.ORACLE],
-      this.program.programId
-    );
-    return pda;
+    return this.getPda([this.PDA_SEEDS.ORACLE], this.program.programId);
   }
 
   // Helper function to get game PDA
   private getGamePda(randomHash: Buffer): PublicKey {
-    const [pda] = PublicKey.findProgramAddressSync(
-      [this.PDA_SEEDS.GAME, randomHash],
-      this.program.programId
-    );
-    return pda;
+    return this.getPda([this.PDA_SEEDS.GAME, randomHash], this.program.programId);
   }
 
   // Generate secret key and random hash for a new game
@@ -77,7 +81,7 @@ export class OracleManager {
     const secretKey = randomBytes(64);
     const randomHash = generateRandomHash(secretKey);
 
-    // Store the secret key in the database
+    // Store the secret key in the database (synchronous)
     this.gameDb.saveOracleSecretKey(
       this.getGamePda(randomHash).toBase58(),
       secretKey.toString('hex')
@@ -86,7 +90,7 @@ export class OracleManager {
     return { randomHash };
   }
 
-  // Helper function to retry an operation
+  // Helper function to retry an operation with improved error handling
   private async retryOperation<T>(
     operation: () => Promise<T>,
     maxRetries: number = 3,
@@ -99,7 +103,8 @@ export class OracleManager {
       } catch (error) {
         lastError = error;
         if (i < maxRetries - 1) {
-          await new Promise(resolve => setTimeout(resolve, delay));
+          const backoffDelay = delay * Math.pow(1.5, i); // More conservative backoff
+          await new Promise(resolve => setTimeout(resolve, backoffDelay));
         }
       }
     }
@@ -111,29 +116,28 @@ export class OracleManager {
     gamePda: PublicKey
   ): Promise<{ success: boolean; winnerAddress?: string; error?: any }> {
     try {
-      const adminKp = await this.wallet.getAdminKeypair();
+      const adminKp = this.wallet.getAdminKeypair(); // Now synchronous
       const oraclePda = this.getOraclePda();
 
-      // Verify if the admin is indeed the oracle authority
-      const oracleAccount = await this.program.account.oracle.fetch(oraclePda);
+      // Batch fetch oracle and game account info
+      const [oracleAccount, gameAccount] = await Promise.all([
+        this.program.account.oracle.fetch(oraclePda),
+        this.program.account.game.fetch(gamePda)
+      ]);
+
+      // Verify authority
       if (!oracleAccount.authority.equals(adminKp.publicKey)) {
         throw new Error("Unauthorized: Admin is not the oracle authority");
       }
 
-      // Fetch the game account
-      const gameAccount = await this.program.account.game.fetch(gamePda);
-
-      // Get the secret key from the database
-      const secretKey = await this.gameDb.getOracleSecretKey(gamePda.toBase58());
+      // Get the secret key from the database (synchronous)
+      const secretKey = this.gameDb.getOracleSecretKey(gamePda.toBase58());
       if (!secretKey) {
         throw new Error("Secret key not found");
       }
 
       const secretKeyBuffer = Buffer.from(secretKey, "hex");
-
-      // Calculate the winner using the same algorithm as the contract
-      let winnerIndex = calculateWinnerIndex(secretKeyBuffer, gameAccount.players.length);
-
+      const winnerIndex = calculateWinnerIndex(secretKeyBuffer, gameAccount.players.length);
       const winnerAddress = gameAccount.players[winnerIndex];
 
       // Send transaction with retry logic
@@ -152,7 +156,7 @@ export class OracleManager {
       // Wait for transaction confirmation
       await this.wallet.confirmTransaction(tx);
 
-      // Get the completed game account to verify winner
+      // Verify completion and get winner
       const completedGameAccount = await this.program.account.game.fetch(gamePda);
       const winnerPubkeyStr = completedGameAccount.winner.toString();
 
@@ -166,9 +170,13 @@ export class OracleManager {
   // Check if a game is ready to be completed by the oracle
   public async isGameReadyForOracle(gamePda: PublicKey): Promise<boolean> {
     try {
-      const gameAccount = await this.program.account.game.fetch(gamePda);
+      // Fetch game account and blockchain time concurrently
+      const [gameAccount, blockTime] = await Promise.all([
+        this.program.account.game.fetch(gamePda),
+        this.wallet.getBlockchainTime()
+      ]);
+
       const status = Object.keys(gameAccount.status)[0].toLowerCase();
-      const blockTime = await this.wallet.getBlockchainTime();
       const createdAt = Number(gameAccount.createdAt);
       const timeout = Number(gameAccount.timeout);
       const expiresAt = createdAt + timeout;

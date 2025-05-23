@@ -278,7 +278,7 @@ export class GameManager {
       const completedAt = blockTime * 1000;
 
       // Store the completion time in the database
-      await this.gameDb.completeGame(gamePda.toBase58(), result.winnerAddress!, completedAt);
+      this.gameDb.completeGame(gamePda.toBase58(), result.winnerAddress!, completedAt); // Now synchronous
 
       // Update game message with winner info
       await this.updateGameMessageWithWinner(ctx, gamePda, result.winnerAddress!);
@@ -315,8 +315,8 @@ export class GameManager {
       console.log(`Has Enough Players: ${hasEnoughPlayers}`);
       console.log('================================\n');
 
-      const adminKp = await this.wallet.getAdminKeypair();
-      const creatorTelegramId = await this.gameDb.getCreatorTelegramId(gamePda.toBase58());
+      const adminKp = this.wallet.getAdminKeypair(); // Now synchronous
+      const creatorTelegramId = this.gameDb.getCreatorTelegramId(gamePda.toBase58()); // Now synchronous
       if (!creatorTelegramId) return false;
 
       if (hasEnoughPlayers) {
@@ -324,7 +324,7 @@ export class GameManager {
         return completed ? false : false;
       }
 
-      const creatorKp = await this.wallet.getKeyPair(BigInt(creatorTelegramId));
+      const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId)); // Now synchronous
 
       try {
         const tx = await this.program.methods
@@ -339,7 +339,7 @@ export class GameManager {
         const blockTime = await this.wallet.getBlockchainTime();
         const completedAt = blockTime * 1000;
 
-        await this.gameDb.completeGame(gamePda.toBase58(), "cancelled", completedAt);
+        this.gameDb.completeGame(gamePda.toBase58(), "cancelled", completedAt); // Now synchronous
 
         return {
           cancelled: true,
@@ -386,7 +386,7 @@ export class GameManager {
     if (!gameMessage) return;
 
     const gameAccount = await this.getCachedGameAccount(gamePda);
-    const creatorTelegramId = await this.gameDb.getCreatorTelegramId(gamePda.toBase58());
+    const creatorTelegramId = this.gameDb.getCreatorTelegramId(gamePda.toBase58()); // Now synchronous
     if (!creatorTelegramId) return;
 
     const creatorUsername = await this.getUsernameFromTelegramId(ctx, creatorTelegramId);
@@ -734,7 +734,7 @@ export class GameManager {
     const telegramIdStr = telegramId.toString();
 
     // Get player's public key
-    const playerKp = await this.wallet.getKeyPair(telegramId);
+    const playerKp = this.wallet.getKeyPair(telegramId); // Now synchronous
     const playerPublicKey = playerKp.publicKey.toString();
 
     // Get active and recent games in parallel
@@ -806,7 +806,7 @@ export class GameManager {
 
     try {
       // Get player keypair and create PDAs
-      const playerKp = await this.wallet.getKeyPair(telegramId);
+      const playerKp = this.wallet.getKeyPair(telegramId); // Now synchronous
 
       // Check wallet balance
       const tokenBalance = await this.wallet.getTokenBalance(telegramId, this.tokenMint);
@@ -836,7 +836,7 @@ export class GameManager {
       // Save player mapping for creator - using wallet address
       const creatorPubkey = playerKp.publicKey.toBase58();
       console.log(`Saving creator mapping - Wallet Address: ${creatorPubkey}, Telegram ID: ${telegramId.toString()}`);
-      this.gameDb.savePlayerMapping(creatorPubkey, telegramId.toString());
+      this.gameDb.savePlayerMapping(creatorPubkey, telegramId.toString()); // Now synchronous
 
       // Generate game secrets using oracle manager
       const { randomHash } = this.oracleManager.generateGameSecrets();
@@ -846,7 +846,7 @@ export class GameManager {
 
       // Save creator as game participant
       console.log(`Saving creator as game participant - Game: ${gamePda.toBase58()}, Telegram ID: ${telegramId.toString()}, Public Key: ${creatorPubkey}`);
-      this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
+      this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey); // Now synchronous
 
       // Ensure player balance PDA exists
       await this.ensurePlayerBalance(playerKp);
@@ -882,7 +882,7 @@ export class GameManager {
         gamePda.toBase58(),
         telegramId.toString(),
         amount
-      );
+      ); // Now synchronous
 
       // Create game message
       await this.createGameMessage(
@@ -923,7 +923,7 @@ export class GameManager {
 
   // Helper function to get a game's creator username
   public async getGameCreatorUsername(ctx: Context, gameAddress: string): Promise<string> {
-    const creatorTelegramId = await this.gameDb.getCreatorTelegramId(gameAddress);
+    const creatorTelegramId = this.gameDb.getCreatorTelegramId(gameAddress); // Now synchronous
     if (!creatorTelegramId) {
       console.error(`No creator telegram ID found for game ${gameAddress}`);
       return "Unknown";
@@ -933,7 +933,7 @@ export class GameManager {
 
   // Helper function to get a player's username from their public key
   public async getPlayerUsername(ctx: Context, publicKey: string): Promise<string> {
-    const playerTelegramId = await this.gameDb.getPlayerTelegramId(publicKey);
+    const playerTelegramId = this.gameDb.getPlayerTelegramId(publicKey); // Now synchronous
     if (!playerTelegramId) {
       return publicKey.slice(0, 8) + "...";
     }

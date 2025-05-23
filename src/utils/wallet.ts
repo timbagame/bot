@@ -45,7 +45,14 @@ export class WalletManager {
   private connection: Connection;
   private adminKeypair: Keypair | null = null;
   private lastCallTime: number = 0;
-  private readonly rateLimit: number = 1000;
+  private readonly rateLimit: number = 500; // Reduced rate limit for better performance
+
+  // Caching for expensive operations
+  private keypairCache: Map<string, Keypair> = new Map();
+  private tokenMetadataCache: Map<string, { decimals: number; timestamp: number }> = new Map();
+  private blockhashCache: { blockhash: string; lastValidBlockHeight: number; timestamp: number } | null = null;
+  private readonly CACHE_DURATION = 30 * 1000; // 30 seconds
+  private readonly BLOCKHASH_CACHE_DURATION = 10 * 1000; // 10 seconds
 
   private constructor(mnemonic: string) {
     this.mnemonic = mnemonic;
@@ -80,12 +87,20 @@ export class WalletManager {
     }
   }
 
-  public async getKeyPair(index: bigint): Promise<Keypair> {
-    const seed = mnemonicToSeedSync(this.mnemonic, index.toString());
-    return Keypair.fromSeed(seed.subarray(0, 32));
+  // Optimized keypair generation with caching
+  public getKeyPair(index: bigint): Keypair {
+    const cacheKey = index.toString();
+    if (this.keypairCache.has(cacheKey)) {
+      return this.keypairCache.get(cacheKey)!;
+    }
+
+    const seed = mnemonicToSeedSync(this.mnemonic, cacheKey);
+    const keypair = Keypair.fromSeed(seed.subarray(0, 32));
+    this.keypairCache.set(cacheKey, keypair);
+    return keypair;
   }
 
-  public async getAdminKeypair(): Promise<Keypair> {
+  public getAdminKeypair(): Keypair {
     if (this.adminKeypair) return this.adminKeypair;
 
     const keypairPath = path.join(process.cwd(), "admin-keypair.json");
@@ -102,19 +117,19 @@ export class WalletManager {
     }
   }
 
-  public async getPublicKey(telegramId: bigint): Promise<PublicKey> {
-    return (await this.getKeyPair(telegramId)).publicKey;
+  public getPublicKey(telegramId: bigint): PublicKey {
+    return this.getKeyPair(telegramId).publicKey;
   }
 
   public async getBalance(telegramId: bigint): Promise<number> {
     await this.throttle();
-    const pubkey = await this.getPublicKey(telegramId);
+    const pubkey = this.getPublicKey(telegramId);
     return this.connection.getBalance(pubkey);
   }
 
   public async getTokenBalance(telegramId: bigint, tokenMint: string): Promise<number> {
     await this.throttle();
-    const pubkey = await this.getPublicKey(telegramId);
+    const pubkey = this.getPublicKey(telegramId);
     const ata = await getAssociatedTokenAddress(new PublicKey(tokenMint), pubkey);
 
     try {
@@ -130,13 +145,24 @@ export class WalletManager {
     }
   }
 
+  // Optimized token metadata with caching
   public async getTokenMetadata(tokenMint: string): Promise<{ decimals: number }> {
+    const cached = this.tokenMetadataCache.get(tokenMint);
+    const now = Date.now();
+
+    if (cached && now - cached.timestamp < this.CACHE_DURATION) {
+      return { decimals: cached.decimals };
+    }
+
     await this.throttle();
     const account = await this.connection.getParsedAccountInfo(new PublicKey(tokenMint));
     if (!account.value) {
       throw new Error("Token account not found");
     }
-    return { decimals: (account.value as any).data.parsed.info.decimals };
+
+    const decimals = (account.value as any).data.parsed.info.decimals;
+    this.tokenMetadataCache.set(tokenMint, { decimals, timestamp: now });
+    return { decimals };
   }
 
   public async findOrCreateAssociatedTokenAccount(
@@ -144,11 +170,11 @@ export class WalletManager {
     tokenMint: PublicKey,
     payer: Keypair
   ): Promise<{ address: PublicKey; instructions: TransactionInstruction[] }> {
-    await this.throttle();
     const associatedTokenAddress = await getAssociatedTokenAddress(tokenMint, owner);
     const instructions: TransactionInstruction[] = [];
 
     try {
+      await this.throttle();
       const accountInfo = await this.connection.getAccountInfo(associatedTokenAddress);
       if (!accountInfo) {
         instructions.push(createAssociatedTokenAccountInstruction(
@@ -177,7 +203,7 @@ export class WalletManager {
     amount: number,
     tokenMint: string
   ): Promise<string> {
-    const fromKeypair = await this.getKeyPair(fromTelegramId);
+    const fromKeypair = this.getKeyPair(fromTelegramId);
     const tokenMintPubkey = new PublicKey(tokenMint);
     const { decimals } = await this.getTokenMetadata(tokenMint);
 
@@ -203,7 +229,7 @@ export class WalletManager {
 
   public async signAndSend(instructions: TransactionInstruction[], signers: Keypair[]): Promise<string> {
     await this.throttle();
-    const { blockhash } = await this.connection.getLatestBlockhash();
+    const { blockhash } = await this.getCachedLatestBlockhash();
     const message = new TransactionMessage({
       payerKey: signers[0].publicKey,
       recentBlockhash: blockhash,
@@ -218,12 +244,12 @@ export class WalletManager {
     });
   }
 
+  // Optimized blockchain time with fallback
   public async getBlockchainTime(): Promise<number> {
-    await this.throttle();
     try {
-      const blockTime = await this.connection.getBlockTime(
-        await this.connection.getSlot()
-      );
+      await this.throttle();
+      const slot = await this.connection.getSlot();
+      const blockTime = await this.connection.getBlockTime(slot);
       if (!blockTime) {
         throw new Error("Could not get blockchain time");
       }
@@ -234,13 +260,15 @@ export class WalletManager {
     }
   }
 
+  // Optimized transaction confirmation
   public async confirmTransaction(signature: string): Promise<void> {
-    await this.throttle();
+    const { blockhash, lastValidBlockHeight } = await this.getCachedLatestBlockhash();
+
     await Promise.race([
       this.connection.confirmTransaction({
         signature,
-        blockhash: (await this.connection.getLatestBlockhash()).blockhash,
-        lastValidBlockHeight: (await this.connection.getLatestBlockhash()).lastValidBlockHeight
+        blockhash,
+        lastValidBlockHeight
       }),
       new Promise((_, reject) =>
         setTimeout(() => reject(new Error("Transaction confirmation timeout")), 30000)
@@ -249,16 +277,35 @@ export class WalletManager {
   }
 
   public formatSolBalance(lamports: number): string {
-    return (lamports / LAMPORTS_PER_SOL).toFixed(9);
+    return (lamports / LAMPORTS_PER_SOL).toFixed(6); // Reduced precision for better readability
   }
 
   public formatTokenBalance(amount: number, decimals: number): string {
-    return (amount / Math.pow(10, decimals)).toFixed(decimals);
+    const formatted = (amount / Math.pow(10, decimals));
+    return formatted < 1 ? formatted.toFixed(decimals) : formatted.toFixed(Math.min(decimals, 6));
+  }
+
+  // Cached latest blockhash
+  private async getCachedLatestBlockhash(): Promise<{ blockhash: string; lastValidBlockHeight: number }> {
+    const now = Date.now();
+    if (this.blockhashCache && now - this.blockhashCache.timestamp < this.BLOCKHASH_CACHE_DURATION) {
+      return {
+        blockhash: this.blockhashCache.blockhash,
+        lastValidBlockHeight: this.blockhashCache.lastValidBlockHeight
+      };
+    }
+
+    await this.throttle();
+    const result = await this.connection.getLatestBlockhash();
+    this.blockhashCache = {
+      ...result,
+      timestamp: now
+    };
+    return result;
   }
 
   public async getLatestBlockhash(): Promise<{ blockhash: string; lastValidBlockHeight: number }> {
-    await this.throttle();
-    return this.connection.getLatestBlockhash();
+    return this.getCachedLatestBlockhash();
   }
 
   public async getTokenAccountBalance(tokenAccount: PublicKey): Promise<any> {

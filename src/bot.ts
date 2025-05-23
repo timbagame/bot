@@ -62,9 +62,11 @@ const parseAmount = async (args: string[], argIndex: number = 1): Promise<Parsed
   return { amount, isSol, formattedAmount };
 };
 
-// Helper function to get player data
+// Helper function to get player data - optimized
 const getPlayerData = async (telegramId: bigint): Promise<PlayerData> => {
-  const keypair = await wallet.getKeyPair(telegramId);
+  const keypair = wallet.getKeyPair(telegramId); // Now synchronous
+
+  // Batch fetch balances concurrently
   const [tokenBalance, solBalance] = await Promise.all([
     wallet.getTokenBalance(telegramId, TOKEN_MINT),
     wallet.getBalance(telegramId)
@@ -165,14 +167,14 @@ const validateAddress = (addressStr: string): PublicKey | null => {
 // Initialize Anchor with a wallet for admin operations
 const initializeAnchorProvider = async () => {
   // Get admin keypair from the JSON file
-  const adminKeypair = await wallet.getAdminKeypair();
+  const adminKeypair = wallet.getAdminKeypair(); // Now synchronous
 
   // Create a wallet adapter for Anchor
   const adminWallet = new anchor.Wallet(adminKeypair);
 
   // Initialize provider with connection from wallet manager
   const provider = new anchor.AnchorProvider(
-    await wallet.getConnection(),
+    wallet.getConnection(), // Now synchronous
     adminWallet,
     { commitment: "confirmed" }
   );
@@ -393,7 +395,7 @@ bot.command("tip", async (ctx: Context) => {
     await checkAndClaimWinnings(playerData.keypair, parsed.isSol);
 
     // Get recipient public key
-    const recipientPubKey = await wallet.getPublicKey(recipientTelegramId);
+    const recipientPubKey = wallet.getPublicKey(recipientTelegramId); // Now synchronous
 
     // Validate balance
     const balanceError = await validateBalance(playerData, parsed.amount, parsed.isSol);
@@ -563,7 +565,7 @@ bot.on("callback_query", async (ctx) => {
       // Get player keypair
       const telegramId = BigInt(ctx.from.id);
       console.log(`Processing join for Telegram ID: ${telegramId}`);
-      const playerKp = await wallet.getKeyPair(telegramId);
+      const playerKp = wallet.getKeyPair(telegramId); // Now synchronous
       console.log(`Player public key: ${playerKp.publicKey.toBase58()}`);
       const metadata = await getTokenMetadata();
 
@@ -607,24 +609,26 @@ bot.on("callback_query", async (ctx) => {
         return;
       }
 
-      // Check user balance
-      const tokenBalance = await wallet.getTokenBalance(telegramId, TOKEN_MINT);
+      // Batch fetch balances for better performance
+      const [tokenBalance, gameBalance] = await Promise.all([
+        wallet.getTokenBalance(telegramId, TOKEN_MINT),
+        (async () => {
+          try {
+            const [playerBalancePda] = PublicKey.findProgramAddressSync(
+              [Buffer.from("player_balance"), playerKp.publicKey.toBuffer(), new PublicKey(TOKEN_MINT).toBuffer()],
+              program.programId
+            );
+            const playerBalance = await program.account.playerBalance.fetch(playerBalancePda);
+            return Number(playerBalance.amount);
+          } catch (error) {
+            console.log("Player balance account not found or error fetching it");
+            return 0;
+          }
+        })()
+      ]);
+
       const gameAmount = Number(gameAccount.amount);
       console.log(`Player balance: ${tokenBalance}, game amount: ${gameAmount}`);
-
-      // Get player's game balance
-      let gameBalance = 0;
-      try {
-        const [playerBalancePda] = PublicKey.findProgramAddressSync(
-          [Buffer.from("player_balance"), playerKp.publicKey.toBuffer(), new PublicKey(TOKEN_MINT).toBuffer()],
-          program.programId
-        );
-        const playerBalance = await program.account.playerBalance.fetch(playerBalancePda);
-        gameBalance = Number(playerBalance.amount);
-      } catch (error) {
-        console.log("Player balance account not found or error fetching it");
-      }
-
       const totalBalance = tokenBalance + gameBalance;
       console.log(`Total balance (wallet + game): ${totalBalance}`);
 
@@ -726,11 +730,11 @@ bot.on("callback_query", async (ctx) => {
       // Save player mapping after confirming player was added
       const playerPubkey = playerKp.publicKey.toBase58();
       console.log(`Saving player mapping for joiner - Public Key: ${playerPubkey}, Telegram ID: ${telegramId.toString()}`);
-      await gameDb.savePlayerMapping(playerPubkey, telegramId.toString());
+      gameDb.savePlayerMapping(playerPubkey, telegramId.toString()); // Now synchronous
 
       // Save game participant record
       console.log(`Saving game participant record - Game: ${gameAddress}, Telegram ID: ${telegramId.toString()}, Public Key: ${playerPubkey}`);
-      await gameDb.saveGameParticipant(gameAddress, telegramId.toString(), playerPubkey);
+      gameDb.saveGameParticipant(gameAddress, telegramId.toString(), playerPubkey); // Now synchronous
 
       // Update game message with current status
       const creatorUsername = await gameManager.getGameCreatorUsername(ctx, gameAddress);
@@ -779,7 +783,7 @@ bot.on("callback_query", async (ctx) => {
     }
   } else if (callbackData.startsWith("refresh_")) {
     const gameAddress = callbackData.split("_")[1];
-    const game = await gameDb.getGame(gameAddress);
+    const game = gameDb.getGame(gameAddress); // Now synchronous
 
     if (!game) {
       await ctx.answerCallbackQuery("Game not found!");
@@ -809,7 +813,7 @@ bot.on("callback_query", async (ctx) => {
     }
   } else if (callbackData.startsWith("unjoin_")) {
     const gameAddress = callbackData.split("_")[1];
-    const game = await gameDb.getGame(gameAddress);
+    const game = gameDb.getGame(gameAddress); // Now synchronous
 
     if (!game) {
       await ctx.answerCallbackQuery("Game not found!");
@@ -819,7 +823,7 @@ bot.on("callback_query", async (ctx) => {
     try {
       const gamePda = new PublicKey(gameAddress);
       const telegramId = BigInt(ctx.from.id);
-      const playerKp = await wallet.getKeyPair(telegramId);
+      const playerKp = wallet.getKeyPair(telegramId); // Now synchronous
 
       // Call unjoin function
       await gameManager.unjoinGame(ctx, gamePda, playerKp);
