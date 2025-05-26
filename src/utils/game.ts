@@ -5,6 +5,8 @@ import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } fr
 import { WalletManager } from "./wallet";
 import { GameDatabase } from "./database";
 import { OracleManager } from "./oracle";
+import { formatUserFriendlyError } from "./errors";
+import { GAME_ACCOUNT_CACHE_DURATION } from "./constants";
 import type { GameMessage, GameCancellationResult, GameMessageFormat, GameCategory, GameInfo, GameBasicInfo } from "../types/game";
 import type { Coinflip } from "../../idl/idlType";
 
@@ -52,7 +54,7 @@ export class GameManager {
   private static instance: GameManager;
   private activeGameMessages: Map<string, GameMessage>;
   private gameAccountCache: Map<string, { account: any; timestamp: number }>;
-  private readonly CACHE_DURATION = 30 * 1000;
+  private readonly CACHE_DURATION = GAME_ACCOUNT_CACHE_DURATION;
   private pdaCache: Map<string, PublicKey>;
 
   private readonly PDA_SEEDS = {
@@ -968,7 +970,8 @@ export class GameManager {
 
     } catch (error: any) {
       console.error(`Error creating ${gameType} game:`, error);
-      await ctx.reply(`Error creating game: ${error.message || "Unknown error"}`, {
+      const userFriendlyError = formatUserFriendlyError(error, this.wallet);
+      await ctx.reply(userFriendlyError, {
         reply_to_message_id: ctx.message?.message_id
       });
     }

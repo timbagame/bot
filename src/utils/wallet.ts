@@ -3,6 +3,7 @@ import { Connection, Keypair, PublicKey, TransactionInstruction, VersionedTransa
 import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferCheckedInstruction } from "@solana/spl-token";
 import * as fs from "fs";
 import * as path from "path";
+import { WALLET_RATE_LIMIT_MS, TOKEN_METADATA_CACHE_DURATION, BLOCKHASH_CACHE_DURATION } from "./constants";
 
 // ================================
 // HELPER FUNCTIONS
@@ -45,14 +46,14 @@ export class WalletManager {
   private connection: Connection;
   private adminKeypair: Keypair | null = null;
   private lastCallTime: number = 0;
-  private readonly rateLimit: number = 500; // Reduced rate limit for better performance
+  private readonly rateLimit: number = WALLET_RATE_LIMIT_MS; // Use shared constant
 
   // Caching for expensive operations
   private keypairCache: Map<string, Keypair> = new Map();
   private tokenMetadataCache: Map<string, { decimals: number; timestamp: number }> = new Map();
   private blockhashCache: { blockhash: string; lastValidBlockHeight: number; timestamp: number } | null = null;
-  private readonly CACHE_DURATION = 30 * 1000; // 30 seconds
-  private readonly BLOCKHASH_CACHE_DURATION = 10 * 1000; // 10 seconds
+  private readonly CACHE_DURATION = TOKEN_METADATA_CACHE_DURATION;
+  private readonly BLOCKHASH_CACHE_DURATION = BLOCKHASH_CACHE_DURATION;
 
   private constructor(mnemonic: string) {
     this.mnemonic = mnemonic;

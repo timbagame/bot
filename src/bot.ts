@@ -8,18 +8,18 @@ import idl from "../idl/idl.json";
 import { GameDatabase } from "./utils/database";
 import { SystemProgram } from "@solana/web3.js";
 import { GameManager } from "./utils/game";
+import { parseTransactionError, truncateErrorForCallback, formatUserFriendlyError } from "./utils/errors";
+import {
+  LAMPORTS_PER_SOL,
+  GAME_TIMEOUT,
+  COINFLIP_MAX_PLAYERS,
+  GIVEAWAY_MAX_PLAYERS,
+  RETRY_DELAY_MS,
+  GAME_COMPLETION_WAIT_MS,
+  EXPIRED_GAMES_CHECK_INTERVAL_MS,
+  TOKEN_METADATA_CACHE_DURATION
+} from "./utils/constants";
 import type { ParsedAmount, PlayerData } from "./types/bot";
-
-// ================================
-// CONFIGURATION CONSTANTS
-// ================================
-const GAME_TIMEOUT = parseInt(process.env['GAME_TIMEOUT'] || "3600"); // 1 hour default
-const COINFLIP_DEFAULT_MAX_PLAYERS = parseInt(process.env['COINFLIP_DEFAULT_MAX_PLAYERS'] || "2");
-const GIVEAWAY_DEFAULT_MAX_PLAYERS = parseInt(process.env['GIVEAWAY_DEFAULT_MAX_PLAYERS'] || "5");
-const RETRY_DELAY_MS = parseInt(process.env['RETRY_DELAY_MS'] || "2000");
-const GAME_COMPLETION_WAIT_MS = parseInt(process.env['GAME_COMPLETION_WAIT_MS'] || "5000");
-const EXPIRED_GAMES_CHECK_INTERVAL_MS = parseInt(process.env['EXPIRED_GAMES_CHECK_INTERVAL_MS'] || "60000");
-const LAMPORTS_PER_SOL = 1_000_000_000; // Solana constant
 
 // Initialize the bot and wallet manager
 const bot = new Bot(process.env.TELEGRAM_TOKEN!);
@@ -30,7 +30,6 @@ const TICKER = process.env.TICKER!;
 // Add token metadata cache at the top level
 let tokenMetadata: { decimals: number } | null = null;
 let tokenMetadataLastFetch: number = 0;
-const TOKEN_METADATA_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 // Initialize game database
 const gameDb = GameDatabase.getInstance();
@@ -142,10 +141,11 @@ const processTransaction = async (
       { parse_mode: "HTML" }
     );
   } catch (error: any) {
+    const userFriendlyError = formatUserFriendlyError(error, wallet);
     await ctx.api.editMessageText(
       ctx.chat!.id,
       processingMsg.message_id,
-      `Error: ${error.message || "Unknown error"}`,
+      userFriendlyError,
       { parse_mode: "HTML" }
     );
     throw error;
@@ -155,7 +155,8 @@ const processTransaction = async (
 // Helper function to handle errors consistently
 const handleCommandError = async (ctx: Context, error: any, commandName: string): Promise<void> => {
   console.error(`Error in ${commandName} command:`, error);
-  await ctx.reply(`❌ ${error.message || "Unknown error"}`, {
+  const userFriendlyError = formatUserFriendlyError(error, wallet);
+  await ctx.reply(userFriendlyError, {
     reply_to_message_id: ctx.message?.message_id
   });
 };
@@ -276,7 +277,7 @@ bot.command(["coinflip", "cf"], async (ctx) => {
   if (!args) return;
 
   const parsed = await parseAmount(args);
-  const maxPlayers = parseInt(args?.[2] || COINFLIP_DEFAULT_MAX_PLAYERS.toString()) || COINFLIP_DEFAULT_MAX_PLAYERS;
+  const maxPlayers = parseInt(args?.[2] || COINFLIP_MAX_PLAYERS.toString()) || COINFLIP_MAX_PLAYERS;
 
   if (!parsed) {
     return ctx.reply("Usage: /coinflip <amount> <maxPlayers>\nExample: /coinflip 10 2", {
@@ -295,7 +296,7 @@ bot.command(["giveaway", "ga"], async (ctx) => {
   if (!args) return;
 
   const parsed = await parseAmount(args);
-  const maxPlayers = parseInt(args?.[2] || GIVEAWAY_DEFAULT_MAX_PLAYERS.toString()) || GIVEAWAY_DEFAULT_MAX_PLAYERS;
+  const maxPlayers = parseInt(args?.[2] || GIVEAWAY_MAX_PLAYERS.toString()) || GIVEAWAY_MAX_PLAYERS;
 
   if (!parsed) {
     return ctx.reply("Usage: /giveaway <amount> <maxPlayers>\nExample: /giveaway 100 5", {
@@ -1026,7 +1027,8 @@ bot.on("callback_query", async (ctx) => {
 
     } catch (error: any) {
       console.error("Error joining game:", error);
-      await ctx.answerCallbackQuery(`Error joining game: ${error.message || "Unknown error"}`);
+      const userFriendlyError = parseTransactionError(error, wallet);
+      await ctx.answerCallbackQuery(truncateErrorForCallback(userFriendlyError));
     }
   } else if (callbackData.startsWith("refresh_")) {
     const gameAddress = callbackData.split("_")[1];
@@ -1080,7 +1082,8 @@ bot.on("callback_query", async (ctx) => {
       await ctx.answerCallbackQuery("Successfully unjoined the game!");
     } catch (error: any) {
       console.error("Error unjoining game:", error);
-      await ctx.answerCallbackQuery(`Error unjoining game: ${error.message || "Unknown error"}`);
+      const userFriendlyError = parseTransactionError(error, wallet);
+      await ctx.answerCallbackQuery(truncateErrorForCallback(userFriendlyError));
     }
   }
 });
