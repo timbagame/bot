@@ -670,6 +670,7 @@ export class GameManager {
           .accounts({
             game: gamePda,
             player: gameAccount.creator,
+            creator: gameAccount.creator,
           })
           .signers([adminKp, creatorKp])
           .rpc();

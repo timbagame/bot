@@ -126,6 +126,7 @@ export class OracleManager {
           .accounts({
             game: gamePda,
             player: winnerAddress,
+            creator: gameAccount.creator,
             authority: adminKp.publicKey,
           })
           .signers([adminKp])
