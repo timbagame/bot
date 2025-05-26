@@ -285,12 +285,10 @@ export class GameManager {
     // Winner info
     let winnerInfo = "";
     if (status.toLowerCase() === "completed") {
-      if (winnerAddress) {
-        const winnerUsername = await this.getPlayerUsername(ctx, winnerAddress);
-        winnerInfo = `\n🏆 Winner: @${winnerUsername}`;
-      } else if (gameAccount.winner && gameAccount.winner.toString() !== DEFAULT_NULL_ADDRESS) {
-        const winnerUsername = await this.getPlayerUsername(ctx, gameAccount.winner.toString());
-        winnerInfo = `\n🏆 Winner: @${winnerUsername}`;
+      const winner = winnerAddress || (gameAccount.winner && gameAccount.winner.toString() !== DEFAULT_NULL_ADDRESS ? gameAccount.winner.toString() : null);
+      if (winner) {
+        const winnerUsername = await this.getPlayerUsername(ctx, winner);
+        winnerInfo = `\nWinner: @${winnerUsername}`;
       }
     }
 
@@ -450,7 +448,7 @@ export class GameManager {
       let winnerInfo = "";
       if (status.toLowerCase() === "completed" && gameAccount.winner && gameAccount.winner.toString() !== DEFAULT_NULL_ADDRESS) {
         const winnerUsername = await this.getPlayerUsername(ctx, gameAccount.winner.toString());
-        winnerInfo = `\n🏆 Winner: @${winnerUsername}`;
+        winnerInfo = `\nWinner: @${winnerUsername}`;
       }
 
       const statusText = this.getGameStatusText(status, currentPlayers, minPlayers, maxPlayers);
