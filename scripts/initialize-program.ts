@@ -49,7 +49,7 @@ const initializeOracle = async (program: anchor.Program<Coinflip>) => {
     }
 
     // Get admin keypair from JSON file
-    const adminKeypair = await wallet.getAdminKeypair();
+    const adminKeypair = wallet.getAdminKeypair();
 
     // Initialize Oracle
     const tx = await program.methods
@@ -95,9 +95,53 @@ const initializeGameToken = async (program: anchor.Program<Coinflip>) => {
     }
 
     // Get admin keypair from JSON file
-    const adminKeypair = await wallet.getAdminKeypair();
+    const adminKeypair = wallet.getAdminKeypair();
 
-    // Initialize Game Token
+    // Get Game Vault PDA
+    const [gameVaultPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("game_vault"), tokenMintPubkey.toBuffer()],
+      program.programId
+    );
+
+    // Get Game Token Account (ATA) - this needs to be created first
+    const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } = await import("@solana/spl-token");
+    const gameTokenAccount = await getAssociatedTokenAddress(
+      tokenMintPubkey,
+      gameVaultPda,
+      true // allowOwnerOffCurve
+    );
+
+    console.log(`Game Vault PDA: ${gameVaultPda.toBase58()}`);
+    console.log(`Game Token Account (ATA): ${gameTokenAccount.toBase58()}`);
+
+    // Check if the ATA already exists, if not create it
+    try {
+      const accountInfo = await wallet.getConnection().getAccountInfo(gameTokenAccount);
+      if (!accountInfo) {
+        console.log("Creating Associated Token Account for game vault...");
+
+        // Create the ATA instruction
+        const createAtaIx = createAssociatedTokenAccountInstruction(
+          adminKeypair.publicKey, // payer
+          gameTokenAccount, // ata
+          gameVaultPda, // owner
+          tokenMintPubkey // mint
+        );
+
+        // Send the ATA creation transaction
+        const createAtaTx = await wallet.signAndSend([createAtaIx], [adminKeypair]);
+        await wallet.confirmTransaction(createAtaTx);
+        console.log(`ATA created! Transaction: ${createAtaTx}`);
+      } else {
+        console.log("ATA already exists");
+      }
+    } catch (ataError) {
+      console.error("Error creating ATA:", ataError);
+      throw ataError;
+    }
+
+    // Now initialize Game Token
+    console.log("Initializing game token...");
     const tx = await program.methods
       .initializeToken(
         new anchor.BN(1_000), // Minimum amount in lamports (0.001 token)
@@ -110,6 +154,7 @@ const initializeGameToken = async (program: anchor.Program<Coinflip>) => {
       .signers([adminKeypair])
       .rpc();
 
+    await wallet.confirmTransaction(tx);
     console.log(`Game Token initialized! Transaction: ${tx}`);
     return gameTokenPda;
   } catch (error) {
