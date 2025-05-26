@@ -1032,11 +1032,14 @@ bot.on("callback_query", async (ctx) => {
       const currentGameAccount = await program.account.game.fetch(gamePda);
       const creatorUsername = await gameManager.getGameCreatorUsername(ctx, gameAddress);
 
+      // Get the actual game type from the game account
+      const gameType = Object.keys(currentGameAccount.gameType)[0].charAt(0).toUpperCase() + Object.keys(currentGameAccount.gameType)[0].slice(1);
+
       // Update game message with current status
       await gameManager.updateGameMessage(
         ctx,
         gameAddress,
-        "Coinflip",
+        gameType,
         Number(game.amount),
         creatorUsername,
         Object.keys(currentGameAccount.status)[0],
