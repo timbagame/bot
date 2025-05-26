@@ -20,6 +20,9 @@
           "signer": true
         },
         {
+          "name": "creator"
+        },
+        {
           "name": "player_balance",
           "writable": true,
           "pda": {
@@ -468,6 +471,9 @@
           "name": "player"
         },
         {
+          "name": "creator"
+        },
+        {
           "name": "player_balance",
           "writable": true,
           "pda": {
@@ -695,37 +701,11 @@
       ],
       "args": [
         {
-          "name": "game_type",
+          "name": "config",
           "type": {
             "defined": {
-              "name": "GameType"
+              "name": "GameConfig"
             }
-          }
-        },
-        {
-          "name": "amount",
-          "type": "u64"
-        },
-        {
-          "name": "max_players",
-          "type": "u16"
-        },
-        {
-          "name": "min_players",
-          "type": "u16"
-        },
-        {
-          "name": "timeout",
-          "type": "u32"
-        },
-        {
-          "name": "is_private",
-          "type": "bool"
-        },
-        {
-          "name": "_random_hash",
-          "type": {
-            "array": ["u8", 32]
           }
         }
       ]
@@ -758,24 +738,12 @@
       ],
       "args": [
         {
-          "name": "fee_percentage",
-          "type": "u8"
-        },
-        {
-          "name": "oracle_buffer_time",
-          "type": "u16"
-        },
-        {
-          "name": "max_players",
-          "type": "u16"
-        },
-        {
-          "name": "max_timeout",
-          "type": "u32"
-        },
-        {
-          "name": "min_timeout",
-          "type": "u32"
+          "name": "config",
+          "type": {
+            "defined": {
+              "name": "OracleConfig"
+            }
+          }
         }
       ]
     },
@@ -975,12 +943,12 @@
       ],
       "args": [
         {
-          "name": "min_amount",
-          "type": "u64"
-        },
-        {
-          "name": "enabled",
-          "type": "bool"
+          "name": "config",
+          "type": {
+            "defined": {
+              "name": "TokenConfig"
+            }
+          }
         }
       ]
     },
@@ -1334,24 +1302,12 @@
       ],
       "args": [
         {
-          "name": "fee_percentage",
-          "type": "u8"
-        },
-        {
-          "name": "oracle_buffer_time",
-          "type": "u16"
-        },
-        {
-          "name": "max_players",
-          "type": "u16"
-        },
-        {
-          "name": "max_timeout",
-          "type": "u32"
-        },
-        {
-          "name": "min_timeout",
-          "type": "u32"
+          "name": "config",
+          "type": {
+            "defined": {
+              "name": "OracleConfig"
+            }
+          }
         }
       ]
     },
@@ -1396,12 +1352,12 @@
       ],
       "args": [
         {
-          "name": "min_amount",
-          "type": "u64"
-        },
-        {
-          "name": "enabled",
-          "type": "bool"
+          "name": "config",
+          "type": {
+            "defined": {
+              "name": "TokenConfig"
+            }
+          }
         }
       ]
     }
@@ -1426,67 +1382,67 @@
   ],
   "errors": [
     {
-      "code": 6000,
-      "name": "GameFull",
-      "msg": "Game already full"
-    },
-    {
-      "code": 6001,
-      "name": "GameNotActive",
-      "msg": "Game not active"
-    },
-    {
-      "code": 6002,
-      "name": "GameReadyForOracle",
-      "msg": "Game ready for oracle"
-    },
-    {
-      "code": 6003,
-      "name": "GameNotReadyForOracle",
-      "msg": "Game not ready for oracle"
-    },
-    {
-      "code": 6004,
-      "name": "AlreadyJoined",
-      "msg": "Player already joined"
-    },
-    {
-      "code": 6005,
-      "name": "UnauthorizedPlayer",
-      "msg": "Unauthorized player"
-    },
-    {
-      "code": 6006,
-      "name": "InsufficientBalance",
-      "msg": "Insufficient balance"
-    },
-    {
-      "code": 6007,
-      "name": "InvalidPlayersCount",
-      "msg": "Invalid players count"
-    },
-    {
-      "code": 6008,
-      "name": "InvalidTimeout",
-      "msg": "Invalid timeout"
-    },
-    {
-      "code": 6009,
-      "name": "InvalidAmount",
-      "msg": "Invalid amount"
-    },
-    {
-      "code": 6010,
-      "name": "InvalidSecretKey",
-      "msg": "Invalid secret key"
-    },
-    {
-      "code": 6011,
+      "code": 7000,
       "name": "UnauthorizedAuthority",
       "msg": "Unauthorized authority"
     },
     {
-      "code": 6012,
+      "code": 7001,
+      "name": "UnauthorizedPlayer",
+      "msg": "Unauthorized player"
+    },
+    {
+      "code": 7100,
+      "name": "GameNotActive",
+      "msg": "Game not active"
+    },
+    {
+      "code": 7101,
+      "name": "GameFull",
+      "msg": "Game already full"
+    },
+    {
+      "code": 7102,
+      "name": "GameReadyForOracle",
+      "msg": "Game ready for oracle"
+    },
+    {
+      "code": 7103,
+      "name": "GameNotReadyForOracle",
+      "msg": "Game not ready for oracle"
+    },
+    {
+      "code": 7200,
+      "name": "AlreadyJoined",
+      "msg": "Player already joined"
+    },
+    {
+      "code": 7201,
+      "name": "InsufficientBalance",
+      "msg": "Insufficient balance"
+    },
+    {
+      "code": 7300,
+      "name": "InvalidPlayersCount",
+      "msg": "Invalid players count"
+    },
+    {
+      "code": 7301,
+      "name": "InvalidTimeout",
+      "msg": "Invalid timeout"
+    },
+    {
+      "code": 7302,
+      "name": "InvalidAmount",
+      "msg": "Invalid amount"
+    },
+    {
+      "code": 7303,
+      "name": "InvalidSecretKey",
+      "msg": "Invalid secret key"
+    },
+    {
+      "code": 7400,
       "name": "TokenNotEnabled",
       "msg": "Token not enabled"
     }
@@ -1546,6 +1502,42 @@
           {
             "name": "created_at",
             "type": "u64"
+          },
+          {
+            "name": "timeout",
+            "type": "u32"
+          },
+          {
+            "name": "is_private",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game_type",
+            "type": {
+              "defined": {
+                "name": "GameType"
+              }
+            }
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "max_players",
+            "type": "u16"
+          },
+          {
+            "name": "min_players",
+            "type": "u16"
           },
           {
             "name": "timeout",
@@ -1646,6 +1638,34 @@
       }
     },
     {
+      "name": "OracleConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "fee_percentage",
+            "type": "u8"
+          },
+          {
+            "name": "oracle_buffer_time",
+            "type": "u16"
+          },
+          {
+            "name": "max_players",
+            "type": "u16"
+          },
+          {
+            "name": "max_timeout",
+            "type": "u32"
+          },
+          {
+            "name": "min_timeout",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
       "name": "PlayerBalance",
       "type": {
         "kind": "struct",
@@ -1661,6 +1681,22 @@
           {
             "name": "amount",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TokenConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "min_amount",
+            "type": "u64"
+          },
+          {
+            "name": "enabled",
+            "type": "bool"
           }
         ]
       }

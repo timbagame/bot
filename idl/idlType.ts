@@ -35,6 +35,9 @@ export type Coinflip = {
           "signer": true
         },
         {
+          "name": "creator"
+        },
+        {
           "name": "playerBalance",
           "writable": true,
           "pda": {
@@ -971,6 +974,9 @@ export type Coinflip = {
           "name": "player"
         },
         {
+          "name": "creator"
+        },
+        {
           "name": "playerBalance",
           "writable": true,
           "pda": {
@@ -1397,40 +1403,11 @@ export type Coinflip = {
       ],
       "args": [
         {
-          "name": "gameType",
+          "name": "config",
           "type": {
             "defined": {
-              "name": "gameType"
+              "name": "gameConfig"
             }
-          }
-        },
-        {
-          "name": "amount",
-          "type": "u64"
-        },
-        {
-          "name": "maxPlayers",
-          "type": "u16"
-        },
-        {
-          "name": "minPlayers",
-          "type": "u16"
-        },
-        {
-          "name": "timeout",
-          "type": "u32"
-        },
-        {
-          "name": "isPrivate",
-          "type": "bool"
-        },
-        {
-          "name": "randomHash",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
           }
         }
       ]
@@ -1479,24 +1456,12 @@ export type Coinflip = {
       ],
       "args": [
         {
-          "name": "feePercentage",
-          "type": "u8"
-        },
-        {
-          "name": "oracleBufferTime",
-          "type": "u16"
-        },
-        {
-          "name": "maxPlayers",
-          "type": "u16"
-        },
-        {
-          "name": "maxTimeout",
-          "type": "u32"
-        },
-        {
-          "name": "minTimeout",
-          "type": "u32"
+          "name": "config",
+          "type": {
+            "defined": {
+              "name": "oracleConfig"
+            }
+          }
         }
       ]
     },
@@ -1883,12 +1848,12 @@ export type Coinflip = {
       ],
       "args": [
         {
-          "name": "minAmount",
-          "type": "u64"
-        },
-        {
-          "name": "enabled",
-          "type": "bool"
+          "name": "config",
+          "type": {
+            "defined": {
+              "name": "tokenConfig"
+            }
+          }
         }
       ]
     },
@@ -2592,24 +2557,12 @@ export type Coinflip = {
       ],
       "args": [
         {
-          "name": "feePercentage",
-          "type": "u8"
-        },
-        {
-          "name": "oracleBufferTime",
-          "type": "u16"
-        },
-        {
-          "name": "maxPlayers",
-          "type": "u16"
-        },
-        {
-          "name": "maxTimeout",
-          "type": "u32"
-        },
-        {
-          "name": "minTimeout",
-          "type": "u32"
+          "name": "config",
+          "type": {
+            "defined": {
+              "name": "oracleConfig"
+            }
+          }
         }
       ]
     },
@@ -2681,12 +2634,12 @@ export type Coinflip = {
       ],
       "args": [
         {
-          "name": "minAmount",
-          "type": "u64"
-        },
-        {
-          "name": "enabled",
-          "type": "bool"
+          "name": "config",
+          "type": {
+            "defined": {
+              "name": "tokenConfig"
+            }
+          }
         }
       ]
     }
@@ -2747,67 +2700,67 @@ export type Coinflip = {
   ],
   "errors": [
     {
-      "code": 6000,
-      "name": "gameFull",
-      "msg": "Game already full"
-    },
-    {
-      "code": 6001,
-      "name": "gameNotActive",
-      "msg": "Game not active"
-    },
-    {
-      "code": 6002,
-      "name": "gameReadyForOracle",
-      "msg": "Game ready for oracle"
-    },
-    {
-      "code": 6003,
-      "name": "gameNotReadyForOracle",
-      "msg": "Game not ready for oracle"
-    },
-    {
-      "code": 6004,
-      "name": "alreadyJoined",
-      "msg": "Player already joined"
-    },
-    {
-      "code": 6005,
-      "name": "unauthorizedPlayer",
-      "msg": "Unauthorized player"
-    },
-    {
-      "code": 6006,
-      "name": "insufficientBalance",
-      "msg": "Insufficient balance"
-    },
-    {
-      "code": 6007,
-      "name": "invalidPlayersCount",
-      "msg": "Invalid players count"
-    },
-    {
-      "code": 6008,
-      "name": "invalidTimeout",
-      "msg": "Invalid timeout"
-    },
-    {
-      "code": 6009,
-      "name": "invalidAmount",
-      "msg": "Invalid amount"
-    },
-    {
-      "code": 6010,
-      "name": "invalidSecretKey",
-      "msg": "Invalid secret key"
-    },
-    {
-      "code": 6011,
+      "code": 7000,
       "name": "unauthorizedAuthority",
       "msg": "Unauthorized authority"
     },
     {
-      "code": 6012,
+      "code": 7001,
+      "name": "unauthorizedPlayer",
+      "msg": "Unauthorized player"
+    },
+    {
+      "code": 7100,
+      "name": "gameNotActive",
+      "msg": "Game not active"
+    },
+    {
+      "code": 7101,
+      "name": "gameFull",
+      "msg": "Game already full"
+    },
+    {
+      "code": 7102,
+      "name": "gameReadyForOracle",
+      "msg": "Game ready for oracle"
+    },
+    {
+      "code": 7103,
+      "name": "gameNotReadyForOracle",
+      "msg": "Game not ready for oracle"
+    },
+    {
+      "code": 7200,
+      "name": "alreadyJoined",
+      "msg": "Player already joined"
+    },
+    {
+      "code": 7201,
+      "name": "insufficientBalance",
+      "msg": "Insufficient balance"
+    },
+    {
+      "code": 7300,
+      "name": "invalidPlayersCount",
+      "msg": "Invalid players count"
+    },
+    {
+      "code": 7301,
+      "name": "invalidTimeout",
+      "msg": "Invalid timeout"
+    },
+    {
+      "code": 7302,
+      "name": "invalidAmount",
+      "msg": "Invalid amount"
+    },
+    {
+      "code": 7303,
+      "name": "invalidSecretKey",
+      "msg": "Invalid secret key"
+    },
+    {
+      "code": 7400,
       "name": "tokenNotEnabled",
       "msg": "Token not enabled"
     }
@@ -2867,6 +2820,42 @@ export type Coinflip = {
           {
             "name": "createdAt",
             "type": "u64"
+          },
+          {
+            "name": "timeout",
+            "type": "u32"
+          },
+          {
+            "name": "isPrivate",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "gameConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "gameType",
+            "type": {
+              "defined": {
+                "name": "gameType"
+              }
+            }
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "maxPlayers",
+            "type": "u16"
+          },
+          {
+            "name": "minPlayers",
+            "type": "u16"
           },
           {
             "name": "timeout",
@@ -2967,6 +2956,34 @@ export type Coinflip = {
       }
     },
     {
+      "name": "oracleConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "feePercentage",
+            "type": "u8"
+          },
+          {
+            "name": "oracleBufferTime",
+            "type": "u16"
+          },
+          {
+            "name": "maxPlayers",
+            "type": "u16"
+          },
+          {
+            "name": "maxTimeout",
+            "type": "u32"
+          },
+          {
+            "name": "minTimeout",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
       "name": "playerBalance",
       "type": {
         "kind": "struct",
@@ -2982,6 +2999,22 @@ export type Coinflip = {
           {
             "name": "amount",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "tokenConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "minAmount",
+            "type": "u64"
+          },
+          {
+            "name": "enabled",
+            "type": "bool"
           }
         ]
       }
