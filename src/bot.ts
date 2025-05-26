@@ -19,7 +19,7 @@ import {
   EXPIRED_GAMES_CHECK_INTERVAL_MS,
   TOKEN_METADATA_CACHE_DURATION
 } from "./utils/constants";
-import type { ParsedAmount, PlayerData } from "./types/bot";
+import type { ParsedAmount, PlayerData } from "./types";
 
 // Initialize the bot and wallet manager
 const bot = new Bot(process.env.TELEGRAM_TOKEN!);

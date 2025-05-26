@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import type { GameData, PlayerMapping } from "../types/database";
+import type { GameData, PlayerMapping } from "../types";
 
 /**
  * Database service for storing game-related data
