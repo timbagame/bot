@@ -10,12 +10,22 @@ import { SystemProgram } from "@solana/web3.js";
 import { GameManager } from "./utils/game";
 import type { ParsedAmount, PlayerData } from "./types/bot";
 
+// ================================
+// CONFIGURATION CONSTANTS
+// ================================
+const GAME_TIMEOUT = parseInt(process.env['GAME_TIMEOUT'] || "3600"); // 1 hour default
+const COINFLIP_DEFAULT_MAX_PLAYERS = parseInt(process.env['COINFLIP_DEFAULT_MAX_PLAYERS'] || "2");
+const GIVEAWAY_DEFAULT_MAX_PLAYERS = parseInt(process.env['GIVEAWAY_DEFAULT_MAX_PLAYERS'] || "5");
+const RETRY_DELAY_MS = parseInt(process.env['RETRY_DELAY_MS'] || "2000");
+const GAME_COMPLETION_WAIT_MS = parseInt(process.env['GAME_COMPLETION_WAIT_MS'] || "5000");
+const EXPIRED_GAMES_CHECK_INTERVAL_MS = parseInt(process.env['EXPIRED_GAMES_CHECK_INTERVAL_MS'] || "60000");
+const LAMPORTS_PER_SOL = 1_000_000_000; // Solana constant
+
 // Initialize the bot and wallet manager
 const bot = new Bot(process.env.TELEGRAM_TOKEN!);
 const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
 const TOKEN_MINT = process.env.TOKEN_MINT!;
 const TICKER = process.env.TICKER!;
-const LAMPORTS_PER_SOL = 1_000_000_000; // Assuming 9 decimals for SOL
 
 // Add token metadata cache at the top level
 let tokenMetadata: { decimals: number } | null = null;
@@ -266,7 +276,7 @@ bot.command(["coinflip", "cf"], async (ctx) => {
   if (!args) return;
 
   const parsed = await parseAmount(args);
-  const maxPlayers = parseInt(args?.[2] || "2") || 2;
+  const maxPlayers = parseInt(args?.[2] || COINFLIP_DEFAULT_MAX_PLAYERS.toString()) || COINFLIP_DEFAULT_MAX_PLAYERS;
 
   if (!parsed) {
     return ctx.reply("Usage: /coinflip <amount> <maxPlayers>\nExample: /coinflip 10 2", {
@@ -274,7 +284,7 @@ bot.command(["coinflip", "cf"], async (ctx) => {
     });
   }
 
-  await gameManager.createGame(ctx, "coinflip", parsed.amount, maxPlayers, 2, 3600);
+  await gameManager.createGame(ctx, "coinflip", parsed.amount, maxPlayers, 2, GAME_TIMEOUT);
 });
 
 // Simplified giveaway command
@@ -285,7 +295,7 @@ bot.command(["giveaway", "ga"], async (ctx) => {
   if (!args) return;
 
   const parsed = await parseAmount(args);
-  const maxPlayers = parseInt(args?.[2] || "5") || 5;
+  const maxPlayers = parseInt(args?.[2] || GIVEAWAY_DEFAULT_MAX_PLAYERS.toString()) || GIVEAWAY_DEFAULT_MAX_PLAYERS;
 
   if (!parsed) {
     return ctx.reply("Usage: /giveaway <amount> <maxPlayers>\nExample: /giveaway 100 5", {
@@ -293,7 +303,7 @@ bot.command(["giveaway", "ga"], async (ctx) => {
     });
   }
 
-  await gameManager.createGame(ctx, "giveaway", parsed.amount, maxPlayers, 1, 3600);
+  await gameManager.createGame(ctx, "giveaway", parsed.amount, maxPlayers, 1, GAME_TIMEOUT);
 });
 
 // Implement withdraw command
@@ -885,7 +895,7 @@ bot.on("callback_query", async (ctx) => {
             console.error(`Confirmation attempt ${4 - retries} failed:`, error);
             retries--;
             if (retries > 0) {
-              await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds between retries
+              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS)); // Wait between retries
             }
           }
         }
@@ -922,7 +932,7 @@ bot.on("callback_query", async (ctx) => {
             verificationRetries--;
             if (verificationRetries > 0) {
               console.log("Waiting 2 seconds before next verification attempt...");
-              await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds between retries
+              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS)); // Wait between retries
             }
           } else {
             console.log("Player was successfully verified in the game!");
@@ -932,7 +942,7 @@ bot.on("callback_query", async (ctx) => {
           verificationRetries--;
           if (verificationRetries > 0) {
             console.log("Waiting 2 seconds before next verification attempt...");
-            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds between retries
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS)); // Wait between retries
           }
         }
       }
@@ -991,7 +1001,7 @@ bot.on("callback_query", async (ctx) => {
       if (updatedGameAccount.players.length === gameAccount.maxPlayers) {
         console.log(`Game ${gamePda.toBase58()} is full, waiting for join transaction to be fully processed...`);
         // Wait for 5 seconds to ensure join transaction and message update are fully processed
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        await new Promise(resolve => setTimeout(resolve, GAME_COMPLETION_WAIT_MS));
 
         // Verify game is still full and active
         try {
@@ -1136,7 +1146,7 @@ setupAnchor().then(async () => {
     } catch (error) {
       console.error("Error in periodic game check:", error);
     }
-  }, 60000); // Check every minute
+  }, EXPIRED_GAMES_CHECK_INTERVAL_MS); // Check every minute
 
   bot.start();
 }).catch(error => {
