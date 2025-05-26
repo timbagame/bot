@@ -128,7 +128,7 @@ export class GameManager {
       );
 
       try {
-        await this.wallet.getTokenAccountBalance(playerTokenAccount);
+        await this.wallet.getConnection().getAccountInfo(playerTokenAccount);
       } catch (error) {
         const createAtaIx = createAssociatedTokenAccountInstruction(
           playerKeypair.publicKey,

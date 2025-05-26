@@ -8,6 +8,7 @@ import idl from "../idl/idl.json";
 import { GameDatabase } from "./utils/database";
 import { SystemProgram } from "@solana/web3.js";
 import { GameManager } from "./utils/game";
+import { PDAManager } from "./utils/pda";
 import { parseTransactionError, truncateErrorForCallback, formatUserFriendlyError } from "./utils/errors";
 import {
   LAMPORTS_PER_SOL,
@@ -73,7 +74,7 @@ const parseAmount = async (args: string[], argIndex: number = 1): Promise<Parsed
 
 // Helper function to get player data - optimized
 const getPlayerData = async (telegramId: bigint): Promise<PlayerData> => {
-  const keypair = wallet.getKeyPair(telegramId); // Now synchronous
+  const keypair = wallet.getKeyPair(telegramId);
 
   // Batch fetch balances concurrently
   const [tokenBalance, solBalance] = await Promise.all([
@@ -84,8 +85,9 @@ const getPlayerData = async (telegramId: bigint): Promise<PlayerData> => {
   // Get player's game balance
   let gameBalance = 0;
   try {
-    const [playerBalancePda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("player_balance"), keypair.publicKey.toBuffer(), new PublicKey(TOKEN_MINT).toBuffer()],
+    const playerBalancePda = PDAManager.getPlayerBalancePDA(
+      keypair.publicKey,
+      new PublicKey(TOKEN_MINT),
       program.programId
     );
     const playerBalanceAccount = await program.account.playerBalance.fetch(playerBalancePda);
@@ -177,14 +179,14 @@ const validateAddress = (addressStr: string): PublicKey | null => {
 // Initialize Anchor with a wallet for admin operations
 const initializeAnchorProvider = async () => {
   // Get admin keypair from the JSON file
-  const adminKeypair = wallet.getAdminKeypair(); // Now synchronous
+  const adminKeypair = wallet.getAdminKeypair();
 
   // Create a wallet adapter for Anchor
   const adminWallet = new anchor.Wallet(adminKeypair);
 
   // Initialize provider with connection from wallet manager
   const provider = new anchor.AnchorProvider(
-    wallet.getConnection(), // Now synchronous
+    wallet.getConnection(),
     adminWallet,
     { commitment: "confirmed" }
   );
@@ -206,10 +208,7 @@ const setupAnchor = async () => {
 
     // Check if Oracle is already initialized
     try {
-      const [oraclePda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("oracle")],
-        program.programId
-      );
+      const oraclePda = PDAManager.getOraclePDA(program.programId);
 
       const oracleAccount = await program.account.oracle.fetch(oraclePda);
       console.log(`Oracle found, authority: ${oracleAccount.authority.toString()}`);
@@ -219,8 +218,8 @@ const setupAnchor = async () => {
 
     // Check if game token is initialized
     try {
-      const [gameTokenPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("game_token"), new PublicKey(TOKEN_MINT).toBuffer()],
+      const gameTokenPda = PDAManager.getGameTokenPDA(
+        new PublicKey(TOKEN_MINT),
         program.programId
       );
 
@@ -248,8 +247,9 @@ bot.command(["start", "balance"], async (ctx: Context) => {
     const metadata = await getTokenMetadata();
 
     // Get player's balance PDA
-    const [playerBalancePda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("player_balance"), playerData.keypair.publicKey.toBuffer(), new PublicKey(TOKEN_MINT).toBuffer()],
+    const playerBalancePda = PDAManager.getPlayerBalancePDA(
+      playerData.keypair.publicKey,
+      new PublicKey(TOKEN_MINT),
       program.programId
     );
 
@@ -405,7 +405,7 @@ bot.command("tip", async (ctx: Context) => {
     await checkAndClaimWinnings(playerData.keypair, parsed.isSol);
 
     // Get recipient public key
-    const recipientPubKey = wallet.getPublicKey(recipientTelegramId); // Now synchronous
+    const recipientPubKey = wallet.getPublicKey(recipientTelegramId);
 
     // Validate balance
     const balanceError = await validateBalance(playerData, parsed.amount, parsed.isSol);
@@ -655,7 +655,7 @@ bot.command("checktx", async (ctx: Context) => {
           });
         });
       } catch (error) {
-        // Fallback for legacy transaction format
+        // Handle different transaction message formats
         response += `Unable to parse account keys\n`;
       }
     }
@@ -774,7 +774,7 @@ bot.on("callback_query", async (ctx) => {
       // Get player keypair
       const telegramId = BigInt(ctx.from.id);
       console.log(`Processing join for Telegram ID: ${telegramId}`);
-      const playerKp = wallet.getKeyPair(telegramId); // Now synchronous
+      const playerKp = wallet.getKeyPair(telegramId);
       console.log(`Player public key: ${playerKp.publicKey.toBase58()}`);
       const metadata = await getTokenMetadata();
 
@@ -823,8 +823,9 @@ bot.on("callback_query", async (ctx) => {
         wallet.getTokenBalance(telegramId, TOKEN_MINT),
         (async () => {
           try {
-            const [playerBalancePda] = PublicKey.findProgramAddressSync(
-              [Buffer.from("player_balance"), playerKp.publicKey.toBuffer(), new PublicKey(TOKEN_MINT).toBuffer()],
+            const playerBalancePda = PDAManager.getPlayerBalancePDA(
+              playerKp.publicKey,
+              new PublicKey(TOKEN_MINT),
               program.programId
             );
             const playerBalance = await program.account.playerBalance.fetch(playerBalancePda);
@@ -896,7 +897,7 @@ bot.on("callback_query", async (ctx) => {
             console.error(`Confirmation attempt ${4 - retries} failed:`, error);
             retries--;
             if (retries > 0) {
-              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS)); // Wait between retries
+              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
             }
           }
         }
@@ -933,7 +934,7 @@ bot.on("callback_query", async (ctx) => {
             verificationRetries--;
             if (verificationRetries > 0) {
               console.log("Waiting 2 seconds before next verification attempt...");
-              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS)); // Wait between retries
+              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
             }
           } else {
             console.log("Player was successfully verified in the game!");
@@ -943,7 +944,7 @@ bot.on("callback_query", async (ctx) => {
           verificationRetries--;
           if (verificationRetries > 0) {
             console.log("Waiting 2 seconds before next verification attempt...");
-            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS)); // Wait between retries
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
           }
         }
       }
@@ -959,11 +960,11 @@ bot.on("callback_query", async (ctx) => {
       // Save player mapping after confirming player was added
       const playerPubkey = playerKp.publicKey.toBase58();
       console.log(`Saving player mapping for joiner - Public Key: ${playerPubkey}, Telegram ID: ${telegramId.toString()}`);
-      gameDb.savePlayerMapping(playerPubkey, telegramId.toString()); // Now synchronous
+      gameDb.savePlayerMapping(playerPubkey, telegramId.toString());
 
       // Save game participant record
       console.log(`Saving game participant record - Game: ${gameAddress}, Telegram ID: ${telegramId.toString()}, Public Key: ${playerPubkey}`);
-      gameDb.saveGameParticipant(gameAddress, telegramId.toString(), playerPubkey); // Now synchronous
+      gameDb.saveGameParticipant(gameAddress, telegramId.toString(), playerPubkey);
 
       // Update game message with current status
       const creatorUsername = await gameManager.getGameCreatorUsername(ctx, gameAddress);
@@ -1032,7 +1033,7 @@ bot.on("callback_query", async (ctx) => {
     }
   } else if (callbackData.startsWith("refresh_")) {
     const gameAddress = callbackData.split("_")[1];
-    const game = gameDb.getGame(gameAddress); // Now synchronous
+    const game = gameDb.getGame(gameAddress);
 
     if (!game) {
       await ctx.answerCallbackQuery("Game not found!");
@@ -1065,7 +1066,7 @@ bot.on("callback_query", async (ctx) => {
     }
   } else if (callbackData.startsWith("unjoin_")) {
     const gameAddress = callbackData.split("_")[1];
-    const game = gameDb.getGame(gameAddress); // Now synchronous
+    const game = gameDb.getGame(gameAddress);
 
     if (!game) {
       await ctx.answerCallbackQuery("Game not found!");
@@ -1075,7 +1076,7 @@ bot.on("callback_query", async (ctx) => {
     try {
       const gamePda = new PublicKey(gameAddress);
       const telegramId = BigInt(ctx.from.id);
-      const playerKp = wallet.getKeyPair(telegramId); // Now synchronous
+      const playerKp = wallet.getKeyPair(telegramId);
 
       // Call unjoin function
       await gameManager.unjoinGame(ctx, gamePda, playerKp);
@@ -1161,8 +1162,9 @@ const claimWinnings = async (playerKp: anchor.web3.Keypair): Promise<number> => 
   console.log(`🏆 Starting claim winnings process for player: ${playerKp.publicKey.toBase58()}`);
 
   // Get program addresses
-  const [playerBalancePda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("player_balance"), playerKp.publicKey.toBuffer(), new PublicKey(TOKEN_MINT).toBuffer()],
+  const playerBalancePda = PDAManager.getPlayerBalancePDA(
+    playerKp.publicKey,
+    new PublicKey(TOKEN_MINT),
     program.programId
   );
 

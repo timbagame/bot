@@ -321,18 +321,4 @@ export class WalletManager {
       ? formatted.toFixed(decimals)
       : formatted.toFixed(Math.min(decimals, TOKEN_BALANCE_MAX_PRECISION));
   }
-
-  // ================================
-  // LEGACY METHODS (for compatibility)
-  // ================================
-
-  public async getTokenAccountBalance(tokenAccount: PublicKey): Promise<any> {
-    await this.throttle();
-    return this.connection.getTokenAccountBalance(tokenAccount);
-  }
-
-  public async getAccountInfo(publicKey: PublicKey): Promise<any> {
-    await this.throttle();
-    return this.connection.getAccountInfo(publicKey);
-  }
 }
