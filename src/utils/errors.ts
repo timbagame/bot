@@ -1,117 +1,147 @@
 import { WalletManager } from "./wallet";
-import { LAMPORTS_PER_SOL, MIN_SOL_FOR_TX, CALLBACK_MESSAGE_MAX_LENGTH } from "./constants";
-
-// ================================
-// ERROR PARSING CONSTANTS
-// ================================
-
-const ERROR_PATTERNS = {
-  INSUFFICIENT_LAMPORTS: /Transfer: insufficient lamports (\d+), need (\d+)/,
-  INSUFFICIENT_LAMPORTS_ALT: /insufficient lamports (\d+), need (\d+)/,
-  LOGS_SECTION: /Logs:\s*\[(.*?)\]/s,
-  LAMPORTS_IN_LOGS: /insufficient lamports (\d+), need (\d+)/,
-  CUSTOM_PROGRAM_ERROR: /custom program error: 0x1/,
-  SIMULATION_FAILED: /Transaction simulation failed/
-} as const;
+import {
+  LAMPORTS_PER_SOL,
+  MIN_SOL_FOR_TX,
+  CALLBACK_MESSAGE_MAX_LENGTH,
+  SOL_BALANCE_PRECISION
+} from "./constants";
 
 // ================================
 // ERROR CLASSIFICATION
 // ================================
 
-const isInsufficientFundsError = (message: string): boolean => {
-  return message.includes('insufficient funds') ||
-         message.includes('Insufficient') ||
-         message.includes('insufficient lamports');
-};
+const ERROR_PATTERNS = {
+  INSUFFICIENT_LAMPORTS: /insufficient lamports (\d+), need (\d+)/i,
+  CUSTOM_PROGRAM_ERROR: /custom program error: 0x1/i,
+  SIMULATION_FAILED: /Transaction simulation failed/i,
+  LOGS_SECTION: /Logs:\s*\[(.*?)\]/s,
+} as const;
 
-const isAccountNotFoundError = (message: string): boolean => {
-  return message.includes('could not find account') || message.includes('Account does not exist');
-};
+const ErrorType = {
+  INSUFFICIENT_FUNDS: 'insufficient_funds',
+  ACCOUNT_NOT_FOUND: 'account_not_found',
+  SIMULATION_FAILED: 'simulation_failed',
+  ANCHOR_ERROR: 'anchor_error',
+  ACCOUNT_CREATION: 'account_creation',
+  UNKNOWN: 'unknown'
+} as const;
 
-const isSimulationFailedError = (message: string): boolean => {
-  return message.includes('Simulation failed') ||
-         message.includes('Transaction simulation failed') ||
-         ERROR_PATTERNS.SIMULATION_FAILED.test(message);
-};
-
-const isAnchorError = (message: string): boolean => {
-  return message.includes('AnchorError') || message.includes('custom program error');
-};
-
-const isAccountCreationError = (message: string): boolean => {
-  return message.includes('InitializePlayerBalance') ||
-         message.includes('account creation') ||
-         (message.includes('custom program error: 0x1') && message.includes('insufficient lamports'));
-};
+type ErrorTypeValue = typeof ErrorType[keyof typeof ErrorType];
 
 // ================================
-// ERROR MESSAGE FORMATTERS
+// ERROR DETECTION
 // ================================
 
-const formatInsufficientLamportsError = (
-  currentLamports: number,
-  neededLamports: number,
-  walletManager?: WalletManager,
-  isAccountCreation: boolean = false
-): string => {
-  const currentSol = currentLamports / LAMPORTS_PER_SOL;
-  const neededSol = neededLamports / LAMPORTS_PER_SOL;
-  const missingSol = (neededLamports - currentLamports) / LAMPORTS_PER_SOL;
+const classifyError = (message: string): ErrorTypeValue => {
+  const lowerMessage = message.toLowerCase();
 
-  let errorType = isAccountCreation ? "account creation" : "transaction";
-
-  if (walletManager) {
-    return `💰 Insufficient SOL for ${errorType}!\n\n` +
-           `Current balance: ${walletManager.formatSolBalance(currentLamports)} SOL\n` +
-           `Required amount: ${walletManager.formatSolBalance(neededLamports)} SOL\n` +
-           `Missing: ${walletManager.formatSolBalance(neededLamports - currentLamports)} SOL\n\n` +
-           `Please add ${missingSol.toFixed(6)} SOL to your wallet to continue.`;
+  if (lowerMessage.includes('insufficient funds') ||
+      lowerMessage.includes('insufficient lamports') ||
+      lowerMessage.includes('insufficient')) {
+    return ErrorType.INSUFFICIENT_FUNDS;
   }
 
-  return `💰 Insufficient SOL for ${errorType}!\n\n` +
-         `You have: ${currentSol.toFixed(6)} SOL\n` +
-         `You need: ${neededSol.toFixed(6)} SOL\n` +
-         `Missing: ${missingSol.toFixed(6)} SOL\n\n` +
-         `Please add ${missingSol.toFixed(6)} SOL to your wallet to continue.`;
+  if (lowerMessage.includes('could not find account') ||
+      lowerMessage.includes('account does not exist')) {
+    return ErrorType.ACCOUNT_NOT_FOUND;
+  }
+
+  if (ERROR_PATTERNS.SIMULATION_FAILED.test(message)) {
+    return ErrorType.SIMULATION_FAILED;
+  }
+
+  if (lowerMessage.includes('anchorerror') ||
+      lowerMessage.includes('custom program error')) {
+    return ErrorType.ANCHOR_ERROR;
+  }
+
+  if (lowerMessage.includes('initializeplayerbalance') ||
+      lowerMessage.includes('account creation')) {
+    return ErrorType.ACCOUNT_CREATION;
+  }
+
+  return ErrorType.UNKNOWN;
 };
 
-const extractLamportsFromError = (errorMessage: string): { current: number; needed: number } | null => {
-  // Try different patterns to extract lamports info
-  const patterns = [
-    ERROR_PATTERNS.INSUFFICIENT_LAMPORTS,
-    ERROR_PATTERNS.INSUFFICIENT_LAMPORTS_ALT,
-    ERROR_PATTERNS.LAMPORTS_IN_LOGS
-  ];
+// ================================
+// LAMPORTS EXTRACTION
+// ================================
 
-  for (const pattern of patterns) {
-    const match = errorMessage.match(pattern);
+const extractLamportsInfo = (errorMessage: string): { current: number; needed: number } | null => {
+  // Try main error message first
+  let match = errorMessage.match(ERROR_PATTERNS.INSUFFICIENT_LAMPORTS);
+  if (match) {
+    return { current: parseInt(match[1]), needed: parseInt(match[2]) };
+  }
+
+  // Try logs section
+  const logsMatch = errorMessage.match(ERROR_PATTERNS.LOGS_SECTION);
+  if (logsMatch) {
+    match = logsMatch[1].match(ERROR_PATTERNS.INSUFFICIENT_LAMPORTS);
     if (match) {
-      return {
-        current: parseInt(match[1]),
-        needed: parseInt(match[2])
-      };
+      return { current: parseInt(match[1]), needed: parseInt(match[2]) };
     }
   }
 
   return null;
 };
 
-const extractLamportsFromLogs = (logs: string): { current: number; needed: number } | null => {
-  return extractLamportsFromError(logs);
+// ================================
+// ERROR FORMATTERS
+// ================================
+
+const formatInsufficientFundsError = (
+  currentLamports: number,
+  neededLamports: number,
+  walletManager?: WalletManager,
+  isAccountCreation: boolean = false
+): string => {
+  const errorType = isAccountCreation ? "account creation" : "transaction";
+  const missingSol = (neededLamports - currentLamports) / LAMPORTS_PER_SOL;
+
+  if (walletManager) {
+    return `💰 Insufficient SOL for ${errorType}!\n\n` +
+           `Current: ${walletManager.formatSolBalance(currentLamports)} SOL\n` +
+           `Required: ${walletManager.formatSolBalance(neededLamports)} SOL\n` +
+           `Missing: ${walletManager.formatSolBalance(neededLamports - currentLamports)} SOL\n\n` +
+           `Please add ${missingSol.toFixed(SOL_BALANCE_PRECISION)} SOL to continue.`;
+  }
+
+  return `💰 Insufficient SOL for ${errorType}!\n\n` +
+         `Missing: ${missingSol.toFixed(SOL_BALANCE_PRECISION)} SOL\n\n` +
+         `Please add SOL to your wallet to continue.`;
+};
+
+const formatGenericError = (errorType: ErrorTypeValue, originalMessage: string): string => {
+  const errorMessages: Record<ErrorTypeValue, string> = {
+    [ErrorType.INSUFFICIENT_FUNDS]: `💰 Insufficient funds!\n\nEnsure you have at least ${MIN_SOL_FOR_TX} SOL for fees.\nUse /balance to check your current balance.`,
+
+    [ErrorType.ACCOUNT_NOT_FOUND]: `🏗️ Account setup required!\n\nThis requires creating accounts on Solana.\nEnsure you have at least ${MIN_SOL_FOR_TX} SOL for fees.\nUse /balance to check your balance.`,
+
+    [ErrorType.SIMULATION_FAILED]: `❌ Transaction failed!\n\nUsually means insufficient SOL for fees.\nEnsure you have at least ${MIN_SOL_FOR_TX} SOL.\nUse /balance to check your balance.`,
+
+    [ErrorType.ANCHOR_ERROR]: `⚠️ Smart contract error!\n\nTransaction failed due to contract rules.\nCheck your balance and try again.\nContact support if issue persists.`,
+
+    [ErrorType.ACCOUNT_CREATION]: `🏗️ Account creation failed!\n\nEnsure you have at least ${MIN_SOL_FOR_TX} SOL for fees.\nUse /balance to check your balance.`,
+
+    [ErrorType.UNKNOWN]: `❌ Transaction failed!\n\n${originalMessage}\n\n💡 Try:\n• Check your SOL balance (min ${MIN_SOL_FOR_TX})\n• Wait a moment and retry\n• Use /balance to check balances`
+  };
+
+  return errorMessages[errorType];
 };
 
 // ================================
-// MAIN ERROR PARSER
+// MAIN FUNCTIONS
 // ================================
 
 export const parseTransactionError = (error: any, walletManager?: WalletManager): string => {
   const errorMessage = error.message || error.toString();
 
-  // First, try to extract lamports info from the main error message
-  const lamportsInfo = extractLamportsFromError(errorMessage);
+  // Try to extract specific lamports info first
+  const lamportsInfo = extractLamportsInfo(errorMessage);
   if (lamportsInfo) {
-    const isAccountCreation = isAccountCreationError(errorMessage);
-    return formatInsufficientLamportsError(
+    const isAccountCreation = classifyError(errorMessage) === ErrorType.ACCOUNT_CREATION;
+    return formatInsufficientFundsError(
       lamportsInfo.current,
       lamportsInfo.needed,
       walletManager,
@@ -119,75 +149,23 @@ export const parseTransactionError = (error: any, walletManager?: WalletManager)
     );
   }
 
-  // Check for simulation failed errors with logs
-  if (isSimulationFailedError(errorMessage)) {
-    const logsMatch = errorMessage.match(ERROR_PATTERNS.LOGS_SECTION);
-    if (logsMatch) {
-      const lamportsInfo = extractLamportsFromLogs(logsMatch[1]);
-      if (lamportsInfo) {
-        const isAccountCreation = isAccountCreationError(errorMessage);
-        return formatInsufficientLamportsError(
-          lamportsInfo.current,
-          lamportsInfo.needed,
-          walletManager,
-          isAccountCreation
-        );
-      }
-    }
-
-    // Check if it's a custom program error 0x1 which often means insufficient funds
-    if (ERROR_PATTERNS.CUSTOM_PROGRAM_ERROR.test(errorMessage)) {
-      return `💰 Insufficient SOL for transaction!\n\n` +
-             `This error typically occurs when you don't have enough SOL for transaction fees or account creation.\n` +
-             `Please ensure you have at least ${MIN_SOL_FOR_TX} SOL in your wallet.\n\n` +
-             `Use /balance to check your current SOL balance.`;
-    }
-
-    return `❌ Transaction simulation failed!\n\n` +
-           `This usually means insufficient SOL for fees. Please ensure you have at least ${MIN_SOL_FOR_TX} SOL for transaction costs.\n\n` +
-           `Use /balance to check your current balance.`;
+  // Handle custom program error 0x1 (common insufficient funds)
+  if (ERROR_PATTERNS.CUSTOM_PROGRAM_ERROR.test(errorMessage)) {
+    return `💰 Insufficient SOL!\n\nThis usually means not enough SOL for fees.\nEnsure you have at least ${MIN_SOL_FOR_TX} SOL.\nUse /balance to check your balance.`;
   }
 
-  // Check for other error types
-  if (isInsufficientFundsError(errorMessage)) {
-    return `💰 Insufficient funds for this transaction!\n\n` +
-           `Please check your balance and ensure you have enough SOL for transaction fees.\n` +
-           `Minimum recommended: ${MIN_SOL_FOR_TX} SOL\n\n` +
-           `Use /balance to check your current balance.`;
-  }
-
-  if (isAccountNotFoundError(errorMessage)) {
-    return `🏗️ Account initialization required!\n\n` +
-           `This transaction requires creating new accounts on Solana.\n` +
-           `Please ensure you have at least ${MIN_SOL_FOR_TX} SOL for account creation fees.\n\n` +
-           `Use /balance to check your current balance.`;
-  }
-
-  if (isAnchorError(errorMessage)) {
-    return `⚠️ Smart contract error!\n\n` +
-           `The transaction failed due to a contract-level issue.\n` +
-           `This might be due to insufficient funds or invalid transaction state.\n\n` +
-           `Please try again or contact support if the issue persists.`;
-  }
-
-  // Default fallback with more helpful information
-  return `❌ Transaction failed!\n\n` +
-         `Error: ${errorMessage}\n\n` +
-         `💡 Common solutions:\n` +
-         `• Ensure you have at least ${MIN_SOL_FOR_TX} SOL for fees\n` +
-         `• Check your token balance\n` +
-         `• Try again in a few moments\n\n` +
-         `Use /balance to check your current balances.`;
-};
-
-// ================================
-// UTILITY FUNCTIONS
-// ================================
-
-export const truncateErrorForCallback = (error: string, maxLength: number = CALLBACK_MESSAGE_MAX_LENGTH): string => {
-  return error.length > maxLength ? `${error.substring(0, maxLength)}...` : error;
+  // Classify and format other errors
+  const errorType = classifyError(errorMessage);
+  return formatGenericError(errorType, errorMessage);
 };
 
 export const formatUserFriendlyError = (error: any, walletManager?: WalletManager): string => {
   return parseTransactionError(error, walletManager);
+};
+
+export const truncateErrorForCallback = (
+  error: string,
+  maxLength: number = CALLBACK_MESSAGE_MAX_LENGTH
+): string => {
+  return error.length > maxLength ? `${error.substring(0, maxLength)}...` : error;
 };

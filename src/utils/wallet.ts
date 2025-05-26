@@ -3,22 +3,27 @@ import { Connection, Keypair, PublicKey, TransactionInstruction, VersionedTransa
 import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferCheckedInstruction } from "@solana/spl-token";
 import * as fs from "fs";
 import * as path from "path";
-import { WALLET_RATE_LIMIT_MS, TOKEN_METADATA_CACHE_DURATION, BLOCKHASH_CACHE_DURATION } from "./constants";
+import {
+  WALLET_RATE_LIMIT_MS,
+  TOKEN_METADATA_CACHE_DURATION,
+  BLOCKHASH_CACHE_DURATION,
+  SOL_BALANCE_PRECISION,
+  TOKEN_BALANCE_MAX_PRECISION,
+  MAX_RETRIES,
+  CONFIRMATION_TIMEOUT_MS
+} from "./constants";
 
 // ================================
-// HELPER FUNCTIONS
+// UTILITY FUNCTIONS
 // ================================
 
-// Helper function to check if error is account not found
 const isAccountNotFoundError = (error: any): boolean => {
-  return error instanceof SolanaJSONRPCError &&
-         error.message.includes('could not find account');
+  return error instanceof SolanaJSONRPCError && error.message.includes('could not find account');
 };
 
-// Helper function to retry with exponential backoff
 const retryWithBackoff = async <T>(
   operation: () => Promise<T>,
-  maxRetries: number = 3,
+  maxRetries: number = MAX_RETRIES,
   baseDelay: number = 1000
 ): Promise<T> => {
   let lastError: any;
@@ -46,14 +51,11 @@ export class WalletManager {
   private connection: Connection;
   private adminKeypair: Keypair | null = null;
   private lastCallTime: number = 0;
-  private readonly rateLimit: number = WALLET_RATE_LIMIT_MS; // Use shared constant
 
-  // Caching for expensive operations
-  private keypairCache: Map<string, Keypair> = new Map();
-  private tokenMetadataCache: Map<string, { decimals: number; timestamp: number }> = new Map();
+  // Simplified caching
+  private keypairCache = new Map<string, Keypair>();
+  private tokenMetadataCache = new Map<string, { decimals: number; timestamp: number }>();
   private blockhashCache: { blockhash: string; lastValidBlockHeight: number; timestamp: number } | null = null;
-  private readonly CACHE_DURATION = TOKEN_METADATA_CACHE_DURATION;
-  private readonly BLOCKHASH_CACHE_DURATION = BLOCKHASH_CACHE_DURATION;
 
   private constructor(mnemonic: string) {
     this.mnemonic = mnemonic;
@@ -68,7 +70,7 @@ export class WalletManager {
 
   private async throttle(): Promise<void> {
     const now = Date.now();
-    const timeToWait = this.rateLimit - (now - this.lastCallTime);
+    const timeToWait = WALLET_RATE_LIMIT_MS - (now - this.lastCallTime);
     if (timeToWait > 0) {
       await new Promise(resolve => setTimeout(resolve, timeToWait));
     }
@@ -88,7 +90,10 @@ export class WalletManager {
     }
   }
 
-  // Optimized keypair generation with caching
+  // ================================
+  // PUBLIC METHODS
+  // ================================
+
   public getKeyPair(index: bigint): Keypair {
     const cacheKey = index.toString();
     if (this.keypairCache.has(cacheKey)) {
@@ -122,6 +127,14 @@ export class WalletManager {
     return this.getKeyPair(telegramId).publicKey;
   }
 
+  public getConnection(): Connection {
+    return this.connection;
+  }
+
+  // ================================
+  // BALANCE METHODS
+  // ================================
+
   public async getBalance(telegramId: bigint): Promise<number> {
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
@@ -146,12 +159,11 @@ export class WalletManager {
     }
   }
 
-  // Optimized token metadata with caching
   public async getTokenMetadata(tokenMint: string): Promise<{ decimals: number }> {
     const cached = this.tokenMetadataCache.get(tokenMint);
     const now = Date.now();
 
-    if (cached && now - cached.timestamp < this.CACHE_DURATION) {
+    if (cached && now - cached.timestamp < TOKEN_METADATA_CACHE_DURATION) {
       return { decimals: cached.decimals };
     }
 
@@ -165,6 +177,10 @@ export class WalletManager {
     this.tokenMetadataCache.set(tokenMint, { decimals, timestamp: now });
     return { decimals };
   }
+
+  // ================================
+  // TRANSACTION METHODS
+  // ================================
 
   public async findOrCreateAssociatedTokenAccount(
     owner: PublicKey,
@@ -231,7 +247,7 @@ export class WalletManager {
 
   public async signAndSend(instructions: TransactionInstruction[], signers: Keypair[]): Promise<string> {
     await this.throttle();
-    const { blockhash } = await this.getCachedLatestBlockhash();
+    const { blockhash } = await this.getLatestBlockhash();
     const message = new TransactionMessage({
       payerKey: signers[0].publicKey,
       recentBlockhash: blockhash,
@@ -246,7 +262,25 @@ export class WalletManager {
     });
   }
 
-  // Optimized blockchain time with fallback
+  public async confirmTransaction(signature: string): Promise<void> {
+    const { blockhash, lastValidBlockHeight } = await this.getLatestBlockhash();
+
+    await Promise.race([
+      this.connection.confirmTransaction({
+        signature,
+        blockhash,
+        lastValidBlockHeight
+      }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Transaction confirmation timeout")), CONFIRMATION_TIMEOUT_MS)
+      )
+    ]);
+  }
+
+  // ================================
+  // UTILITY METHODS
+  // ================================
+
   public async getBlockchainTime(): Promise<number> {
     try {
       await this.throttle();
@@ -262,35 +296,9 @@ export class WalletManager {
     }
   }
 
-  // Optimized transaction confirmation
-  public async confirmTransaction(signature: string): Promise<void> {
-    const { blockhash, lastValidBlockHeight } = await this.getCachedLatestBlockhash();
-
-    await Promise.race([
-      this.connection.confirmTransaction({
-        signature,
-        blockhash,
-        lastValidBlockHeight
-      }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Transaction confirmation timeout")), 30000)
-      )
-    ]);
-  }
-
-  public formatSolBalance(lamports: number): string {
-    return (lamports / LAMPORTS_PER_SOL).toFixed(6); // Reduced precision for better readability
-  }
-
-  public formatTokenBalance(amount: number, decimals: number): string {
-    const formatted = (amount / Math.pow(10, decimals));
-    return formatted < 1 ? formatted.toFixed(decimals) : formatted.toFixed(Math.min(decimals, 6));
-  }
-
-  // Cached latest blockhash
-  private async getCachedLatestBlockhash(): Promise<{ blockhash: string; lastValidBlockHeight: number }> {
+  public async getLatestBlockhash(): Promise<{ blockhash: string; lastValidBlockHeight: number }> {
     const now = Date.now();
-    if (this.blockhashCache && now - this.blockhashCache.timestamp < this.BLOCKHASH_CACHE_DURATION) {
+    if (this.blockhashCache && now - this.blockhashCache.timestamp < BLOCKHASH_CACHE_DURATION) {
       return {
         blockhash: this.blockhashCache.blockhash,
         lastValidBlockHeight: this.blockhashCache.lastValidBlockHeight
@@ -299,16 +307,24 @@ export class WalletManager {
 
     await this.throttle();
     const result = await this.connection.getLatestBlockhash();
-    this.blockhashCache = {
-      ...result,
-      timestamp: now
-    };
+    this.blockhashCache = { ...result, timestamp: now };
     return result;
   }
 
-  public async getLatestBlockhash(): Promise<{ blockhash: string; lastValidBlockHeight: number }> {
-    return this.getCachedLatestBlockhash();
+  public formatSolBalance(lamports: number): string {
+    return (lamports / LAMPORTS_PER_SOL).toFixed(SOL_BALANCE_PRECISION);
   }
+
+  public formatTokenBalance(amount: number, decimals: number): string {
+    const formatted = (amount / Math.pow(10, decimals));
+    return formatted < 1
+      ? formatted.toFixed(decimals)
+      : formatted.toFixed(Math.min(decimals, TOKEN_BALANCE_MAX_PRECISION));
+  }
+
+  // ================================
+  // LEGACY METHODS (for compatibility)
+  // ================================
 
   public async getTokenAccountBalance(tokenAccount: PublicKey): Promise<any> {
     await this.throttle();
@@ -318,9 +334,5 @@ export class WalletManager {
   public async getAccountInfo(publicKey: PublicKey): Promise<any> {
     await this.throttle();
     return this.connection.getAccountInfo(publicKey);
-  }
-
-  public getConnection(): Connection {
-    return this.connection;
   }
 }

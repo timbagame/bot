@@ -1,13 +1,14 @@
 import { PublicKey } from "@solana/web3.js";
 import * as anchor from "@coral-xyz/anchor";
-import { randomBytes } from 'crypto';
-import { createHash } from 'crypto';
+import { randomBytes, createHash } from 'crypto';
 import { WalletManager } from "./wallet";
 import { GameDatabase } from "./database";
+import { PDAManager } from "./pda";
+import { MAX_RETRIES } from "./constants";
 import type { Coinflip } from "../../idl/idlType";
 
 // ================================
-// HELPER FUNCTIONS
+// UTILITY FUNCTIONS
 // ================================
 
 const calculateWinnerIndex = (secretKeyBuffer: Buffer, nPlayers: number): number => {
@@ -24,18 +25,32 @@ const generateRandomHash = (secretKey: Buffer): Buffer => {
   return createHash('sha256').update(secretKey).digest();
 };
 
+const retryOperation = async <T>(
+  operation: () => Promise<T>,
+  maxRetries: number = MAX_RETRIES,
+  delay: number = 1000
+): Promise<T> => {
+  let lastError: any;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (i < maxRetries - 1) {
+        const backoffDelay = delay * Math.pow(1.5, i);
+        await new Promise(resolve => setTimeout(resolve, backoffDelay));
+      }
+    }
+  }
+  throw lastError;
+};
+
 // ================================
 // ORACLE MANAGER CLASS
 // ================================
 
 export class OracleManager {
   private static instance: OracleManager;
-  private pdaCache: Map<string, PublicKey> = new Map();
-
-  private readonly PDA_SEEDS = {
-    ORACLE: Buffer.from("oracle"),
-    GAME: Buffer.from("game")
-  };
 
   private constructor(
     private program: anchor.Program<Coinflip>,
@@ -54,81 +69,58 @@ export class OracleManager {
     return OracleManager.instance;
   }
 
-  private getPda(seeds: Buffer[], programId: PublicKey): PublicKey {
-    const key = seeds.map(s => s.toString('hex')).join('_') + programId.toBase58();
-    if (!this.pdaCache.has(key)) {
-      const [pda] = PublicKey.findProgramAddressSync(seeds, programId);
-      this.pdaCache.set(key, pda);
-    }
-    return this.pdaCache.get(key)!;
-  }
-
-  private getOraclePda(): PublicKey {
-    return this.getPda([this.PDA_SEEDS.ORACLE], this.program.programId);
-  }
-
-  private getGamePda(randomHash: Buffer): PublicKey {
-    return this.getPda([this.PDA_SEEDS.GAME, randomHash], this.program.programId);
-  }
+  // ================================
+  // GAME SECRETS GENERATION
+  // ================================
 
   public generateGameSecrets(): { randomHash: Buffer } {
     const secretKey = randomBytes(64);
     const randomHash = generateRandomHash(secretKey);
+    const gamePda = PDAManager.getGamePDA(randomHash, this.program.programId);
 
     this.gameDb.saveOracleSecretKey(
-      this.getGamePda(randomHash).toBase58(),
+      gamePda.toBase58(),
       secretKey.toString('hex')
     );
 
     return { randomHash };
   }
 
-  private async retryOperation<T>(
-    operation: () => Promise<T>,
-    maxRetries: number = 3,
-    delay: number = 1000
-  ): Promise<T> {
-    let lastError: any;
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        return await operation();
-      } catch (error) {
-        lastError = error;
-        if (i < maxRetries - 1) {
-          const backoffDelay = delay * Math.pow(1.5, i);
-          await new Promise(resolve => setTimeout(resolve, backoffDelay));
-        }
-      }
-    }
-    throw lastError;
-  }
+  // ================================
+  // GAME COMPLETION
+  // ================================
 
   public async completeGame(
     gamePda: PublicKey
   ): Promise<{ success: boolean; winnerAddress?: string; error?: any }> {
     try {
       const adminKp = this.wallet.getAdminKeypair();
-      const oraclePda = this.getOraclePda();
+      const oraclePda = PDAManager.getOraclePDA(this.program.programId);
 
+      // Fetch oracle and game accounts in parallel
       const [oracleAccount, gameAccount] = await Promise.all([
         this.program.account.oracle.fetch(oraclePda),
         this.program.account.game.fetch(gamePda)
       ]);
 
+      // Verify oracle authority
       if (!oracleAccount.authority.equals(adminKp.publicKey)) {
         throw new Error("Unauthorized: Admin is not the oracle authority");
       }
 
+      // Get secret key
       const secretKey = this.gameDb.getOracleSecretKey(gamePda.toBase58());
       if (!secretKey) {
         throw new Error("Secret key not found");
       }
 
+      // Calculate winner
       const secretKeyBuffer = Buffer.from(secretKey, "hex");
       const winnerIndex = calculateWinnerIndex(secretKeyBuffer, gameAccount.players.length);
       const winnerAddress = gameAccount.players[winnerIndex];
 
-      const tx = await this.retryOperation(async () => {
+      // Execute completion transaction with retry
+      const tx = await retryOperation(async () => {
         return await this.program.methods
           .completeGame([...secretKeyBuffer])
           .accounts({
@@ -142,6 +134,7 @@ export class OracleManager {
 
       await this.wallet.confirmTransaction(tx);
 
+      // Get final winner from completed game
       const completedGameAccount = await this.program.account.game.fetch(gamePda);
       const winnerPubkeyStr = completedGameAccount.winner.toString();
 
@@ -151,6 +144,10 @@ export class OracleManager {
       return { success: false, error };
     }
   }
+
+  // ================================
+  // GAME STATUS CHECKS
+  // ================================
 
   public async isGameReadyForOracle(gamePda: PublicKey): Promise<boolean> {
     try {
@@ -175,22 +172,20 @@ export class OracleManager {
     }
   }
 
-  /**
-   * Authorizes a player to join a private game
-   * Verifies that the player is in the same Telegram group as the creator
-   */
+  // ================================
+  // PRIVATE GAME AUTHORIZATION
+  // ================================
+
   public async authorizePlayer(
     gamePda: PublicKey,
     chatId: number
   ): Promise<{ authorized: boolean; adminKeypair?: anchor.web3.Keypair; error?: string }> {
     try {
-      // Get game information
       const game = this.gameDb.getGame(gamePda.toBase58());
       if (!game) {
         return { authorized: false, error: "Game not found in database" };
       }
 
-      // Verify that the game has a chat_id and matches the current chat
       if (!game.chat_id) {
         return { authorized: false, error: "Game does not have a registered chat" };
       }
