@@ -644,7 +644,6 @@ export class GameManager {
       const { isExpired, hasEnoughPlayers } = await this.getGameStatusInfo(gameAccount);
       if (!isExpired) return false;
 
-      const adminKp = this.wallet.getAdminKeypair();
       const creatorTelegramId = this.gameDb.getCreatorTelegramId(gamePda.toBase58());
       if (!creatorTelegramId) return false;
 
@@ -672,7 +671,7 @@ export class GameManager {
             player: gameAccount.creator,
             creator: gameAccount.creator,
           })
-          .signers([adminKp, creatorKp])
+          .signers([creatorKp])
           .rpc();
 
         const blockTime = await this.wallet.getBlockchainTime();
