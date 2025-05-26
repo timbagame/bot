@@ -3,7 +3,7 @@
 // ================================
 
 export const LAMPORTS_PER_SOL = 1_000_000_000;
-export const MIN_SOL_FOR_TX = 0.002;
+export const MIN_SOL_FOR_TX = 0.005;
 
 // ================================
 // GAME CONSTANTS
