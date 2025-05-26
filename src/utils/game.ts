@@ -912,7 +912,7 @@ export class GameManager {
       const totalBalance = tokenBalance + gameBalance;
       if (totalBalance < amount) {
         await ctx.reply(
-          `Insufficient balance. You have ${this.wallet.formatTokenBalance(tokenBalance, metadata.decimals)} ${this.ticker} in wallet and ${this.wallet.formatTokenBalance(gameBalance, metadata.decimals)} ${this.ticker} in game balance (total: ${this.wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${this.ticker}) but the game requires ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}`,
+          `Insufficient balance. You have ${this.wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${this.ticker} but need ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}`,
           { reply_to_message_id: ctx.message?.message_id }
         );
         return;

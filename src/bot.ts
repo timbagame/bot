@@ -831,7 +831,7 @@ bot.on("callback_query", async (ctx) => {
       console.log(`Total balance (wallet + game): ${totalBalance}`);
 
       if (totalBalance < gameAmount) {
-        await ctx.answerCallbackQuery(`Insufficient balance. You have ${wallet.formatTokenBalance(tokenBalance, metadata.decimals)} ${TICKER} in wallet and ${wallet.formatTokenBalance(gameBalance, metadata.decimals)} ${TICKER} in game balance (total: ${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${TICKER}) but the game requires ${wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${TICKER}`);
+        await ctx.answerCallbackQuery(`Insufficient balance. You have ${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${TICKER} but need ${wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${TICKER}`);
         return;
       }
 
