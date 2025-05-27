@@ -6,6 +6,7 @@ import { GameDatabase } from "./database";
 import { PDAManager } from "./pda";
 import { MAX_RETRIES } from "./constants";
 import type { Coinflip } from "../../idl/idlType";
+import type { GameCompletedEvent, OracleResult, AuthorizationResult } from "../types";
 
 // ================================
 // UTILITY FUNCTIONS
@@ -92,7 +93,7 @@ export class OracleManager {
 
   public async completeGame(
     gamePda: PublicKey
-  ): Promise<{ success: boolean; winnerAddress?: string; error?: any }> {
+  ): Promise<OracleResult> {
     try {
       const adminKp = this.wallet.getAdminKeypair();
       const oraclePda = PDAManager.getOraclePDA(this.program.programId);
@@ -119,26 +120,75 @@ export class OracleManager {
       const winnerIndex = calculateWinnerIndex(secretKeyBuffer, gameAccount.players.length);
       const winnerAddress = gameAccount.players[winnerIndex];
 
-      // Execute completion transaction with retry
-      const tx = await retryOperation(async () => {
-        return await this.program.methods
-          .completeGame([...secretKeyBuffer])
-          .accounts({
-            game: gamePda,
-            player: winnerAddress,
-            creator: gameAccount.creator,
-            authority: adminKp.publicKey,
-          })
-          .signers([adminKp])
-          .rpc();
+      // Set up event listener for GameCompleted event
+      let gameCompletedEvent: GameCompletedEvent | null = null;
+      const eventListener = this.program.addEventListener('gameCompleted', (event: any) => {
+        // Check if this is the event for our game
+        if (event.gameKey.equals(gamePda)) {
+          gameCompletedEvent = {
+            gameKey: event.gameKey,
+            creator: event.creator,
+            winner: event.winner,
+            gameType: event.gameType,
+            amount: event.amount,
+            players: event.players,
+            tokenMint: event.tokenMint,
+            winnerAmount: event.winnerAmount,
+            feeAmount: event.feeAmount
+          };
+        }
       });
 
-      await this.wallet.confirmTransaction(tx);
+      try {
+        // Execute completion transaction with retry
+        const tx = await retryOperation(async () => {
+          return await this.program.methods
+            .completeGame([...secretKeyBuffer])
+            .accounts({
+              game: gamePda,
+              player: winnerAddress,
+              creator: gameAccount.creator,
+              authority: adminKp.publicKey,
+            })
+            .signers([adminKp])
+            .rpc();
+        });
 
-      // Return winner address directly since Game account no longer has winner field
-      const winnerPubkeyStr = winnerAddress.toString();
+        await this.wallet.confirmTransaction(tx);
 
-      return { success: true, winnerAddress: winnerPubkeyStr };
+        // Wait a bit for the event to be emitted
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Remove the event listener
+        await this.program.removeEventListener(eventListener);
+
+        if (gameCompletedEvent) {
+          return { success: true, event: gameCompletedEvent };
+        } else {
+          // Fallback: return basic info if event wasn't captured
+          return {
+            success: true,
+            event: {
+              gameKey: gamePda,
+              creator: gameAccount.creator,
+              winner: winnerAddress,
+              gameType: gameAccount.gameType,
+              amount: gameAccount.amount,
+              players: gameAccount.players,
+              tokenMint: gameAccount.tokenMint,
+              winnerAmount: new anchor.BN(0), // We don't have this info without the event
+              feeAmount: new anchor.BN(0) // We don't have this info without the event
+            }
+          };
+        }
+      } finally {
+        // Ensure we always clean up the event listener
+        try {
+          await this.program.removeEventListener(eventListener);
+        } catch (error) {
+          // Ignore cleanup errors
+        }
+      }
     } catch (error) {
       console.error(`Error completing game ${gamePda.toBase58()}:`, error);
       return { success: false, error };
@@ -178,7 +228,7 @@ export class OracleManager {
   public async authorizePlayer(
     gamePda: PublicKey,
     chatId: number
-  ): Promise<{ authorized: boolean; adminKeypair?: anchor.web3.Keypair; error?: string }> {
+  ): Promise<AuthorizationResult> {
     try {
       const game = this.gameDb.getGame(gamePda.toBase58());
       if (!game) {

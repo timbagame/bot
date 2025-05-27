@@ -20,7 +20,7 @@ import {
   EXPIRED_GAMES_CHECK_INTERVAL_MS,
   TOKEN_METADATA_CACHE_DURATION
 } from "./utils/constants";
-import type { ParsedAmount, PlayerData } from "./types";
+import type { ParsedAmount, PlayerData, GameCompletedEvent } from "./types";
 
 // Initialize the bot and wallet manager
 const bot = new Bot(process.env.TELEGRAM_TOKEN!);
@@ -1091,6 +1091,51 @@ setupAnchor().then(async () => {
   // Reload game message mappings from database
   await gameManager.reloadGameMessages();
   console.log(`Reloaded game message mappings from database`);
+
+  // Set up global event listener for GameCompleted events
+  console.log("Setting up GameCompleted event listener...");
+  program.addEventListener('gameCompleted', async (event: GameCompletedEvent) => {
+    try {
+      console.log(`🎉 GameCompleted event received for game: ${event.gameKey.toString()}`);
+
+      const gameAddress = event.gameKey.toString();
+      const winnerAddress = event.winner.toString();
+
+      // Update database with completion
+      const blockTime = await wallet.getBlockchainTime();
+      const completedAt = blockTime * 1000;
+      gameDb.completeGame(gameAddress, winnerAddress, completedAt);
+
+      // Get game info for notifications
+      const gameData = gameDb.getGame(gameAddress);
+      if (!gameData || !gameData.chat_id) {
+        console.log(`No game data or chat_id found for game ${gameAddress}`);
+        return;
+      }
+
+      // Create a context-like object for notifications
+      const dummyCtx = {
+        api: bot.api,
+        chat: { id: gameData.chat_id },
+        reply: async (text: string, options?: any) => {
+          try {
+            await bot.api.sendMessage(gameData.chat_id!, text, options);
+          } catch (error) {
+            console.error(`Error sending notification to chat ${gameData.chat_id}:`, error);
+          }
+        }
+      } as unknown as Context;
+
+      // Update game message and send notification
+      await gameManager.updateGameMessageWithCompletedEvent(dummyCtx, new PublicKey(gameAddress), event);
+
+      console.log(`✅ Successfully processed GameCompleted event for game ${gameAddress}`);
+    } catch (error) {
+      console.error("Error processing GameCompleted event:", error);
+    }
+  });
+
+  console.log("GameCompleted event listener set up successfully");
 
   // Start periodic check for expired games
   setInterval(async () => {

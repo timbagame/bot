@@ -1,4 +1,5 @@
 import * as anchor from "@coral-xyz/anchor";
+import { PublicKey } from "@solana/web3.js";
 
 // ================================
 // DATABASE TYPES
@@ -84,13 +85,25 @@ export interface GameBasicInfo {
   gameType: string;
 }
 
+export interface GameCompletedEvent {
+  gameKey: PublicKey;
+  creator: PublicKey;
+  winner: PublicKey;
+  gameType: any;
+  amount: anchor.BN;
+  players: PublicKey[];
+  tokenMint: PublicKey;
+  winnerAmount: anchor.BN;
+  feeAmount: anchor.BN;
+}
+
 // ================================
 // ORACLE TYPES
 // ================================
 
 export interface OracleResult {
   success: boolean;
-  winnerAddress?: string;
+  event?: GameCompletedEvent;
   error?: any;
 }
 

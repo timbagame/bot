@@ -20,7 +20,8 @@ import type {
   GameCategory,
   GameInfo,
   GameBasicInfo,
-  GameType
+  GameType,
+  GameCompletedEvent
 } from "../types";
 import type { Coinflip } from "../../idl/idlType";
 
@@ -579,15 +580,22 @@ export class GameManager {
         throw new Error(result.error || "Failed to complete game");
       }
 
-      console.log(`✅ Oracle completion successful, winner: ${result.winnerAddress}`);
+      console.log(`✅ Oracle completion successful`);
+
+      if (!result.event) {
+        throw new Error("No event data received from completion");
+      }
+
+      const event = result.event;
+      const winnerAddress = event.winner.toString();
 
       const blockTime = await this.wallet.getBlockchainTime();
       const completedAt = blockTime * 1000;
 
-      this.gameDb.completeGame(gamePda.toBase58(), result.winnerAddress!, completedAt);
+      this.gameDb.completeGame(gamePda.toBase58(), winnerAddress, completedAt);
       console.log(`💾 Saved game completion to database`);
 
-      await this.updateGameMessageWithWinner(ctx, gamePda, result.winnerAddress!);
+      await this.updateGameMessageWithWinner(ctx, gamePda, event);
       console.log(`📝 Updated game message with winner`);
 
       return true;
@@ -601,47 +609,54 @@ export class GameManager {
     }
   }
 
-  private async updateGameMessageWithWinner(ctx: Context, gamePda: PublicKey, winnerPubkeyStr: string): Promise<void> {
+  private async updateGameMessageWithWinner(ctx: Context, gamePda: PublicKey, event: GameCompletedEvent): Promise<void> {
     const gameMessage = this.activeGameMessages.get(gamePda.toBase58());
     if (!gameMessage) return;
 
     this.clearGameAccountCache(gamePda);
 
-    const gameAccount = await this.getCachedGameAccount(gamePda, true);
     const creatorTelegramId = this.gameDb.getCreatorTelegramId(gamePda.toBase58());
     if (!creatorTelegramId) return;
 
     const creatorUsername = await this.getUsernameFromTelegramId(ctx, creatorTelegramId);
-    const gameType = formatGameType(gameAccount.gameType);
+    const gameType = Object.keys(event.gameType)[0].charAt(0).toUpperCase() + Object.keys(event.gameType)[0].slice(1);
 
     await this.updateGameMessage(
       ctx,
       gamePda.toBase58(),
       gameType,
-      Number(gameAccount.amount),
+      Number(event.amount),
       creatorUsername,
       "Completed",
-      winnerPubkeyStr
+      event.winner.toString()
     );
 
-    // Send completion notification
+    // Send detailed completion notification with event data
     try {
       const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
-      const winnerUsername = await this.getPlayerUsername(ctx, winnerPubkeyStr);
-      const entryAmount = Number(gameAccount.amount);
-      const playerCount = gameAccount.players.length;
-      const totalPrize = entryAmount * playerCount;
+      const winnerUsername = await this.getPlayerUsername(ctx, event.winner.toString());
+      const entryAmount = Number(event.amount);
+      const playerCount = event.players.length;
+      const totalPool = entryAmount * playerCount;
+      const winnerAmount = Number(event.winnerAmount);
+      const feeAmount = Number(event.feeAmount);
 
-      await ctx.reply(
-        `🎉 <b>${gameType} Completed!</b>\n\n` +
-        `🏆 Winner: @${winnerUsername}\n` +
-        `💰 Prize: ${this.wallet.formatTokenBalance(totalPrize, metadata.decimals)} ${this.ticker}\n` +
-        `👥 Players: ${playerCount}`,
-        {
-          parse_mode: "HTML",
-          reply_to_message_id: gameMessage.messageId
-        }
-      );
+      let notificationText = `🎉 <b>${gameType} Completed!</b>\n\n`;
+      notificationText += `🏆 Winner: @${winnerUsername}\n`;
+      notificationText += `💰 Entry Amount: ${this.wallet.formatTokenBalance(entryAmount, metadata.decimals)} ${this.ticker}\n`;
+      notificationText += `🎯 Total Pool: ${this.wallet.formatTokenBalance(totalPool, metadata.decimals)} ${this.ticker}\n`;
+      notificationText += `💸 Winner Receives: ${this.wallet.formatTokenBalance(winnerAmount, metadata.decimals)} ${this.ticker}\n`;
+
+      if (feeAmount > 0) {
+        notificationText += `📊 Protocol Fee: ${this.wallet.formatTokenBalance(feeAmount, metadata.decimals)} ${this.ticker}\n`;
+      }
+
+      notificationText += `👥 Players: ${playerCount}`;
+
+      await ctx.reply(notificationText, {
+        parse_mode: "HTML",
+        reply_to_message_id: gameMessage.messageId
+      });
     } catch (error) {
       console.error("Error sending completion notification:", error);
     }
@@ -911,6 +926,14 @@ export class GameManager {
       recentGames: recentGamesSections,
       totalTokensInGames
     };
+  }
+
+  // ================================
+  // EVENT HANDLING
+  // ================================
+
+  public async updateGameMessageWithCompletedEvent(ctx: Context, gamePda: PublicKey, event: GameCompletedEvent): Promise<void> {
+    await this.updateGameMessageWithWinner(ctx, gamePda, event);
   }
 
   // ================================
