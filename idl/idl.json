@@ -321,6 +321,12 @@
               "name": "GameConfig"
             }
           }
+        },
+        {
+          "name": "_random_hash",
+          "type": {
+            "array": ["u8", 32]
+          }
         }
       ]
     },

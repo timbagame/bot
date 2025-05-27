@@ -505,7 +505,8 @@ bot.command("help", async (ctx: Context) => {
     `/active - Show your active games\n` +
     `/games - Show your recent games\n` +
     `/debug - Show detailed wallet debug info (reply to user for their info too)\n` +
-    `/checktx &lt;signature&gt; - Check transaction details and status\n\n` +
+    `/checktx &lt;signature&gt; - Check transaction details and status\n` +
+    `/oracle - Check Oracle configuration\n\n` +
     `<b>ℹ️ Important:</b> Your player balance account will be automatically initialized when needed.`;
 
   await ctx.reply(helpText, {
@@ -746,6 +747,30 @@ bot.command(["privatekey", "pk"], async (ctx: Context) => {
     });
   } catch (error) {
     await handleCommandError(ctx, error, "privatekey");
+  }
+});
+
+// Add after the existing commands, before the callback query handler
+bot.command("oracle", async (ctx: Context) => {
+  try {
+    const oraclePda = PDAManager.getOraclePDA(program.programId);
+    const oracleAccount = await program.account.oracle.fetch(oraclePda);
+
+    let response = "🔮 <b>Oracle Configuration</b>\n\n";
+    response += `Authority: <code>${oracleAccount.authority.toString()}</code>\n`;
+    response += `Fee Percentage: ${oracleAccount.feePercentage}%\n`;
+    response += `Min Timeout: ${oracleAccount.minTimeout} seconds (${oracleAccount.minTimeout / 60} minutes)\n`;
+    response += `Max Timeout: ${oracleAccount.maxTimeout} seconds (${oracleAccount.maxTimeout / 60} minutes)\n`;
+    response += `Max Players: ${oracleAccount.maxPlayers}\n`;
+    response += `Oracle Buffer Time: ${oracleAccount.oracleBufferTime} seconds\n\n`;
+    response += `Current Game Timeout: ${GAME_TIMEOUT} seconds (${GAME_TIMEOUT / 60} minutes)`;
+
+    await ctx.reply(response, {
+      parse_mode: "HTML",
+      reply_to_message_id: ctx.message?.message_id
+    });
+  } catch (error) {
+    await handleCommandError(ctx, error, "oracle");
   }
 });
 

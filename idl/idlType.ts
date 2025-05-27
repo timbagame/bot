@@ -571,6 +571,15 @@ export type Coinflip = {
               "name": "gameConfig"
             }
           }
+        },
+        {
+          "name": "randomHash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
         }
       ]
     },

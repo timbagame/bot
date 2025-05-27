@@ -527,7 +527,7 @@ export class GameManager {
       };
 
       const tx = await this.program.methods
-        .initializeGame(gameConfig, randomHash)
+        .initializeGame(gameConfig, [...randomHash])
         .accounts({
           player: playerKp.publicKey,
           tokenMint: new PublicKey(this.tokenMint),
