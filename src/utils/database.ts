@@ -37,6 +37,15 @@ export class GameDatabase {
         )
       `);
 
+      // Add game_type column if it doesn't exist (for backwards compatibility)
+      try {
+        this.db.run(`
+          ALTER TABLE games ADD COLUMN game_type TEXT DEFAULT 'unknown'
+        `);
+      } catch (error) {
+        // Column might already exist, ignore error
+      }
+
       // Create secret keys table
       this.db.run(`
         CREATE TABLE IF NOT EXISTS secret_keys (
@@ -74,12 +83,12 @@ export class GameDatabase {
   }
 
   // Game methods
-  public saveGame(gameAddress: string, creatorTelegramId: string, amount: number): void {
+  public saveGame(gameAddress: string, creatorTelegramId: string, amount: number, gameType?: string): void {
     try {
       const stmt = this.db.prepare(
-        'INSERT INTO games (game_address, creator_telegram_id, amount, created_at) VALUES (?, ?, ?, ?)'
+        'INSERT INTO games (game_address, creator_telegram_id, amount, created_at, game_type) VALUES (?, ?, ?, ?, ?)'
       );
-      stmt.run(gameAddress, creatorTelegramId, amount, Date.now());
+      stmt.run(gameAddress, creatorTelegramId, amount, Date.now(), gameType || 'unknown');
     } catch (error) {
       console.error("Error saving game:", error);
       throw error;

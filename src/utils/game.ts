@@ -368,6 +368,37 @@ export class GameManager {
     }
   }
 
+  // Helper method to get game info for completed games from database
+  public async getCompletedGameInfo(ctx: Context, gameData: any): Promise<string> {
+    try {
+      const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
+
+      // For completed games, use stored game type from database
+      const participants = this.gameDb.getGameParticipants(gameData.game_address);
+      const gameType = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
+
+      const creatorTelegramId = gameData.creator_telegram_id;
+      const creatorInfo = creatorTelegramId
+        ? `@${await this.getUsernameFromTelegramId(ctx, creatorTelegramId)}`
+        : "Unknown";
+
+      let winnerInfo = "";
+      if (gameData.winner_address && gameData.winner_address !== "cancelled" && gameData.winner_address !== DEFAULT_NULL_ADDRESS) {
+        const winnerUsername = await this.getPlayerUsername(ctx, gameData.winner_address);
+        winnerInfo = `\nWinner: @${winnerUsername}`;
+      } else if (gameData.winner_address === "cancelled") {
+        winnerInfo = `\nStatus: Cancelled`;
+      }
+
+      return `Type: ${gameType}\n` +
+             `Amount: ${this.wallet.formatTokenBalance(gameData.amount, metadata.decimals)} ${this.ticker}\n` +
+             `Creator: ${creatorInfo}\n` +
+             `Players: ${participants.length}${winnerInfo}`;
+    } catch (error: any) {
+      return `Error getting game info: ${error.message}`;
+    }
+  }
+
   public async createGame(
     ctx: Context,
     gameType: GameType,
@@ -422,7 +453,7 @@ export class GameManager {
         .signers([playerKp])
         .rpc();
 
-      this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount);
+      this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType);
 
       await this.createGameMessage(
         ctx,
@@ -725,9 +756,10 @@ export class GameManager {
     // Recent games
     const recentGames = await Promise.all(recentGamesData.map(async (gameData) => {
       try {
-        const gamePda = new PublicKey(gameData.game_address);
         const category = categorizeGame(gameData, telegramIdStr, playerPublicKey);
-        const gameInfo = await this.getGameInfo(ctx, gamePda);
+        // For completed games, use database info instead of trying to fetch from blockchain
+        // since completed game accounts are closed to reclaim rent
+        const gameInfo = await this.getCompletedGameInfo(ctx, gameData);
         return { category, gameInfo, completedAt: gameData.completed_at };
       } catch (error) {
         console.error(`Error processing game ${gameData.game_address}:`, error);
