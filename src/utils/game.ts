@@ -160,13 +160,15 @@ export class GameManager {
   // ================================
 
   private async getGameStatusInfo(gameAccount: any): Promise<GameInfo> {
-    const status = Object.keys(gameAccount.status)[0].toLowerCase();
     const createdAt = Number(gameAccount.createdAt);
     const timeout = Number(gameAccount.timeout);
     const expiresAt = createdAt + timeout;
     const blockTime = await this.wallet.getBlockchainTime();
     const isExpired = blockTime > expiresAt;
     const hasEnoughPlayers = gameAccount.players.length >= gameAccount.minPlayers;
+
+    // Since status field is removed, we'll determine status based on game state
+    const status = "active"; // All existing games are considered active
 
     return { status, isExpired, hasEnoughPlayers };
   }
@@ -427,7 +429,7 @@ export class GameManager {
       minPlayers: gameAccount.minPlayers,
       currentPlayers: gameAccount.players.length,
       creatorPubkey: gameAccount.creator.toString(),
-      status: Object.keys(gameAccount.status)[0],
+      status: "active", // Since status field is removed, assume active
       gameType: formatGameType(gameAccount.gameType)
     };
   }
@@ -436,22 +438,26 @@ export class GameManager {
     try {
       const gameAccount = await this.getCachedGameAccount(gamePda);
       const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
-      const { amount, maxPlayers, minPlayers, currentPlayers, creatorPubkey, status, gameType } = await this.getGameBasicInfo(gameAccount);
+      const { amount, maxPlayers, minPlayers, currentPlayers, creatorPubkey, gameType } = await this.getGameBasicInfo(gameAccount);
 
       const creatorTelegramId = this.gameDb.getCreatorTelegramId(gamePda.toBase58());
       const creatorInfo = creatorTelegramId
         ? `@${await this.getUsernameFromTelegramId(ctx, creatorTelegramId)}`
         : `<code>${creatorPubkey.slice(0, ADDRESS_DISPLAY_LENGTH)}...</code>`;
 
-      const expirationInfo = status.toLowerCase() === "active" ? await this.calculateExpirationTime(gameAccount) : "";
+      const expirationInfo = await this.calculateExpirationTime(gameAccount);
 
       let winnerInfo = "";
-      if (status.toLowerCase() === "completed" && gameAccount.winner && gameAccount.winner.toString() !== DEFAULT_NULL_ADDRESS) {
-        const winnerUsername = await this.getPlayerUsername(ctx, gameAccount.winner.toString());
+      let gameStatus = "active"; // Since status field is removed, assume active initially
+      // Since Game account no longer has winner field, we'll check database for completed games
+      const gameData = this.gameDb.getGame(gamePda.toBase58());
+      if (gameData && gameData.winner_address && gameData.winner_address !== "cancelled" && gameData.winner_address !== DEFAULT_NULL_ADDRESS) {
+        const winnerUsername = await this.getPlayerUsername(ctx, gameData.winner_address);
         winnerInfo = `\nWinner: @${winnerUsername}`;
+        gameStatus = "completed";
       }
 
-      const statusText = this.getGameStatusText(status, currentPlayers, minPlayers, maxPlayers);
+      const statusText = this.getGameStatusText(gameStatus, currentPlayers, minPlayers, maxPlayers);
 
       return `Type: ${gameType}\n` +
              `Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
@@ -509,16 +515,18 @@ export class GameManager {
       this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
       await this.ensurePlayerBalance(playerKp);
 
+      // Create GameConfig object for the new structure
+      const gameConfig = {
+        gameType: { [gameType]: {} },
+        amount: new anchor.BN(amount),
+        maxPlayers,
+        minPlayers,
+        timeout,
+        isPrivate: true
+      };
+
       const tx = await this.program.methods
-        .initializeGame(
-          { [gameType]: {} },
-          new anchor.BN(amount),
-          maxPlayers,
-          minPlayers,
-          timeout,
-          true,
-          [...randomHash]
-        )
+        .initializeGame(gameConfig, randomHash)
         .accounts({
           player: playerKp.publicKey,
           tokenMint: new PublicKey(this.tokenMint),
@@ -668,7 +676,6 @@ export class GameManager {
           .cancelGame()
           .accounts({
             game: gamePda,
-            player: gameAccount.creator,
             creator: gameAccount.creator,
           })
           .signers([creatorKp])
@@ -737,11 +744,6 @@ export class GameManager {
   public async unjoinGame(ctx: Context, gamePda: PublicKey, playerKp: anchor.web3.Keypair): Promise<boolean> {
     try {
       const gameAccount = await this.getCachedGameAccount(gamePda);
-      const status = Object.keys(gameAccount.status)[0].toLowerCase();
-
-      if (status !== 'active') {
-        throw new Error("Game is not active");
-      }
 
       const isInGame = gameAccount.players.some((p: PublicKey) => p.equals(playerKp.publicKey));
       if (!isInGame) {

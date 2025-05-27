@@ -784,15 +784,6 @@ bot.on("callback_query", async (ctx) => {
       const gameAccount = await program.account.game.fetch(gamePda);
       console.log(`Current players in game: ${gameAccount.players.length}`);
 
-      // Check if game is active
-      const gameStatus = Object.keys(gameAccount.status)[0].toLowerCase();
-      console.log(`Game status: ${gameStatus}`);
-      if (gameStatus !== 'active') {
-        console.log(`Game is not active, status is ${gameStatus}`);
-        await ctx.answerCallbackQuery("This game is no longer active!");
-        return;
-      }
-
       // Check if user is already in the game
       const players = gameAccount.players;
       const isAlreadyInGame = players.some((p: PublicKey) => p.equals(playerKp.publicKey));
@@ -1005,11 +996,10 @@ bot.on("callback_query", async (ctx) => {
         // Wait for 5 seconds to ensure join transaction and message update are fully processed
         await new Promise(resolve => setTimeout(resolve, GAME_COMPLETION_WAIT_MS));
 
-        // Verify game is still full and active
+        // Verify game is still full
         try {
           const finalGameAccount = await program.account.game.fetch(gamePda);
-          if (finalGameAccount.players.length === gameAccount.maxPlayers &&
-              Object.keys(finalGameAccount.status)[0].toLowerCase() === 'active') {
+          if (finalGameAccount.players.length === gameAccount.maxPlayers) {
             console.log(`Join transaction fully processed, attempting to complete game...`);
             // Automatically complete the game
             const completed = await gameManager.autoCompleteGame(ctx, gamePda);
@@ -1055,8 +1045,8 @@ bot.on("callback_query", async (ctx) => {
         gameType,
         Number(game.amount),
         creatorUsername,
-        Object.keys(currentGameAccount.status)[0],
-        currentGameAccount.winner?.toString()
+        "Active", // Since we can no longer get status from game account, assume active if it exists
+        undefined
       );
 
       await ctx.answerCallbackQuery("Game status refreshed!");
@@ -1110,10 +1100,6 @@ setupAnchor().then(async () => {
         try {
           const gamePda = new PublicKey(game.game_address);
           const gameAccount = await program.account.game.fetch(gamePda);
-          const status = Object.keys(gameAccount.status)[0].toLowerCase();
-
-          // Only process active games
-          if (status !== 'active') continue;
 
           // Check if game is expired
           const blockTime = await wallet.getBlockchainTime();
@@ -1182,11 +1168,11 @@ const claimWinnings = async (playerKp: anchor.web3.Keypair): Promise<number> => 
       return 0;
     }
 
-    console.log(`  Executing claimWin() transaction...`);
+    console.log(`  Executing withdrawPlayerBalance() transaction...`);
 
-    // Call the contract to claim the win
+    // Call the contract to withdraw player balance
     const tx = await program.methods
-      .claimWin()
+      .withdrawPlayerBalance()
       .accounts({
         player: playerKp.publicKey,
         tokenMint: new PublicKey(TOKEN_MINT),
@@ -1194,17 +1180,17 @@ const claimWinnings = async (playerKp: anchor.web3.Keypair): Promise<number> => 
       .signers([playerKp])
       .rpc();
 
-    console.log(`  Claim transaction signature: ${tx}`);
+    console.log(`  Withdraw transaction signature: ${tx}`);
 
     // Wait for confirmation
     await wallet.confirmTransaction(tx);
-    console.log(`  Claim transaction confirmed`);
+    console.log(`  Withdraw transaction confirmed`);
 
-    // Verify the claim worked
+    // Verify the withdrawal worked
     try {
       const updatedPlayerBalance = await program.account.playerBalance.fetch(playerBalancePda);
       const remainingAmount = Number(updatedPlayerBalance.amount);
-      console.log(`  Remaining balance after claim: ${remainingAmount}`);
+      console.log(`  Remaining balance after withdrawal: ${remainingAmount}`);
     } catch (error) {
       console.log(`  Could not fetch updated balance: ${error}`);
     }

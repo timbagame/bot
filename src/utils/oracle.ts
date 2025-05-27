@@ -135,9 +135,8 @@ export class OracleManager {
 
       await this.wallet.confirmTransaction(tx);
 
-      // Get final winner from completed game
-      const completedGameAccount = await this.program.account.game.fetch(gamePda);
-      const winnerPubkeyStr = completedGameAccount.winner.toString();
+      // Return winner address directly since Game account no longer has winner field
+      const winnerPubkeyStr = winnerAddress.toString();
 
       return { success: true, winnerAddress: winnerPubkeyStr };
     } catch (error) {
@@ -157,16 +156,15 @@ export class OracleManager {
         this.wallet.getBlockchainTime()
       ]);
 
-      const status = Object.keys(gameAccount.status)[0].toLowerCase();
       const createdAt = Number(gameAccount.createdAt);
       const timeout = Number(gameAccount.timeout);
       const expiresAt = createdAt + timeout;
       const isExpired = blockTime > expiresAt;
 
-      return status === 'active' && (
-        gameAccount.players.length >= gameAccount.maxPlayers ||
-        (isExpired && gameAccount.players.length >= gameAccount.minPlayers)
-      );
+      // Since we can no longer check game status from the account, we check if it still exists
+      // and meets the completion criteria
+      return gameAccount.players.length >= gameAccount.maxPlayers ||
+        (isExpired && gameAccount.players.length >= gameAccount.minPlayers);
     } catch (error) {
       console.error(`Error checking game status:`, error);
       return false;
