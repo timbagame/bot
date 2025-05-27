@@ -7,22 +7,13 @@ import { GameDatabase } from "./database";
 import { OracleManager } from "./oracle";
 import { PDAManager } from "./pda";
 import { formatUserFriendlyError } from "./errors";
-import {
-  GAME_ACCOUNT_CACHE_DURATION,
-  DEFAULT_NULL_ADDRESS,
-  ADDRESS_DISPLAY_LENGTH,
-  GAME_INFO_LIMIT
-} from "./constants";
+import { DEFAULT_NULL_ADDRESS, ADDRESS_DISPLAY_LENGTH, GAME_INFO_LIMIT } from "./constants";
 import type {
   GameMessage,
   GameCancellationResult,
   GameMessageFormat,
   GameCategory,
-  GameInfo,
-  GameBasicInfo,
-  GameType,
-  GameCompletedEvent
-} from "../types";
+  GameType} from "../types";
 import type { Coinflip } from "../../idl/idlType";
 
 // ================================
@@ -60,7 +51,6 @@ const categorizeGame = (gameData: any, telegramIdStr: string, playerPublicKey: s
 export class GameManager {
   private static instance: GameManager;
   private activeGameMessages = new Map<string, GameMessage>();
-  private gameAccountCache = new Map<string, { account: any; timestamp: number }>();
 
   private constructor(
     private program: anchor.Program<Coinflip>,
@@ -83,28 +73,6 @@ export class GameManager {
       GameManager.instance = new GameManager(program, wallet, gameDb, oracleManager, tokenMint, ticker);
     }
     return GameManager.instance;
-  }
-
-  // ================================
-  // CACHE MANAGEMENT
-  // ================================
-
-  private async getCachedGameAccount(gamePda: PublicKey, forceFresh: boolean = false): Promise<any> {
-    const cacheKey = gamePda.toBase58();
-    const cached = this.gameAccountCache.get(cacheKey);
-    const now = Date.now();
-
-    if (!forceFresh && cached && now - cached.timestamp < GAME_ACCOUNT_CACHE_DURATION) {
-      return cached.account;
-    }
-
-    const account = await this.program.account.game.fetch(gamePda);
-    this.gameAccountCache.set(cacheKey, { account, timestamp: now });
-    return account;
-  }
-
-  private clearGameAccountCache(gamePda: PublicKey): void {
-    this.gameAccountCache.delete(gamePda.toBase58());
   }
 
   // ================================
@@ -157,47 +125,6 @@ export class GameManager {
   }
 
   // ================================
-  // GAME STATUS UTILITIES
-  // ================================
-
-  private async getGameStatusInfo(gameAccount: any): Promise<GameInfo> {
-    const createdAt = Number(gameAccount.createdAt);
-    const timeout = Number(gameAccount.timeout);
-    const expiresAt = createdAt + timeout;
-    const blockTime = await this.wallet.getBlockchainTime();
-    const isExpired = blockTime > expiresAt;
-    const hasEnoughPlayers = gameAccount.players.length >= gameAccount.minPlayers;
-
-    // Since status field is removed, we'll determine status based on game state
-    const status = "active"; // All existing games are considered active
-
-    return { status, isExpired, hasEnoughPlayers };
-  }
-
-  private async calculateExpirationTime(gameAccount: any): Promise<string> {
-    try {
-      const blockTime = await this.wallet.getBlockchainTime();
-      if (!blockTime) return "";
-
-      const createdAt = Number(gameAccount.createdAt);
-      const timeout = Number(gameAccount.timeout);
-      const expiresAt = createdAt + timeout;
-      const timeLeft = expiresAt - blockTime;
-
-      if (timeLeft > 0) {
-        const hours = Math.floor(timeLeft / 3600);
-        const minutes = Math.floor((timeLeft % 3600) / 60);
-        return `\n⏰ Expires in: ${hours}h ${minutes}m`;
-      } else {
-        return "\n⚠️ Expired";
-      }
-    } catch (error) {
-      console.error("Error calculating expiration time:", error);
-      return "";
-    }
-  }
-
-  // ================================
   // USERNAME UTILITIES
   // ================================
 
@@ -241,22 +168,6 @@ export class GameManager {
     return this.activeGameMessages.get(gameAddress);
   }
 
-  private getGameStatusText(status: string, currentPlayers: number, minPlayers: number, maxPlayers: number): string {
-    if (status.toLowerCase() !== "active") {
-      return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
-    }
-
-    if (currentPlayers < minPlayers) {
-      const needed = minPlayers - currentPlayers;
-      return `${needed} more until minimum`;
-    } else if (currentPlayers < maxPlayers) {
-      const needed = maxPlayers - currentPlayers;
-      return `Ready to start (${needed} more until full)`;
-    } else {
-      return `Full - starting soon!`;
-    }
-  }
-
   private async formatGameMessage(
     ctx: Context,
     gamePda: PublicKey,
@@ -265,54 +176,33 @@ export class GameManager {
     creatorUsername: string,
     status: string,
     winnerAddress?: string,
-    txHash?: string,
-    forceFresh: boolean = false
+    txHash?: string
   ): Promise<GameMessageFormat> {
     const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
 
-    // For completed games, don't try to fetch the game account as it may be closed
     let gameAccount: any;
     let currentPlayers = 0;
-    let maxPlayers = 2; // Default fallback
-    let minPlayers = 1; // Default fallback
+    let maxPlayers = 2;
     let playerInfo = "";
-    let expirationInfo = "";
 
     if (status.toLowerCase() === "completed") {
-      // For completed games, use database info and don't fetch the closed account
-      const gameData = this.gameDb.getGame(gamePda.toBase58());
-      if (gameData) {
-        // Get participant count from database
-        const participants = this.gameDb.getGameParticipants(gamePda.toBase58());
-        currentPlayers = participants.length;
+      // For completed games, use database info
+      const participants = this.gameDb.getGameParticipants(gamePda.toBase58());
+      currentPlayers = participants.length;
 
-        // Set reasonable defaults based on game type
-        if (gameType.toLowerCase() === "coinflip") {
-          maxPlayers = 2;
-          minPlayers = 2;
-        } else if (gameType.toLowerCase() === "giveaway") {
-          maxPlayers = 5;
-          minPlayers = 1;
-        }
-
-        // Build player info from database
-        if (participants.length > 0) {
-          playerInfo = "\n";
-          for (const telegramId of participants) {
-            const username = await this.getUsernameFromTelegramId(ctx, telegramId);
-            playerInfo += `• @${username}\n`;
-          }
+      if (participants.length > 0) {
+        playerInfo = "\n";
+        for (const telegramId of participants) {
+          const username = await this.getUsernameFromTelegramId(ctx, telegramId);
+          playerInfo += `• @${username}\n`;
         }
       }
     } else {
-      // For active games, fetch the game account normally
-      gameAccount = await this.getCachedGameAccount(gamePda, forceFresh);
-      const basicInfo = await this.getGameBasicInfo(gameAccount);
-      currentPlayers = basicInfo.currentPlayers;
-      maxPlayers = basicInfo.maxPlayers;
-      minPlayers = basicInfo.minPlayers;
+      // For active games, fetch the game account
+      gameAccount = await this.program.account.game.fetch(gamePda);
+      currentPlayers = gameAccount.players.length;
+      maxPlayers = gameAccount.maxPlayers;
 
-      // Player info for active games
       if (currentPlayers > 0) {
         playerInfo = "\n";
         for (const playerPubkey of gameAccount.players) {
@@ -320,20 +210,13 @@ export class GameManager {
           playerInfo += `• @${username}\n`;
         }
       }
-
-      expirationInfo = await this.calculateExpirationTime(gameAccount);
     }
-
-    const statusText = this.getGameStatusText(status, currentPlayers, minPlayers, maxPlayers);
 
     // Winner info
     let winnerInfo = "";
-    if (status.toLowerCase() === "completed") {
-      const winner = winnerAddress;
-      if (winner) {
-        const winnerUsername = await this.getPlayerUsername(ctx, winner);
-        winnerInfo = `\nWinner: @${winnerUsername}`;
-      }
+    if (status.toLowerCase() === "completed" && winnerAddress) {
+      const winnerUsername = await this.getPlayerUsername(ctx, winnerAddress);
+      winnerInfo = `\nWinner: @${winnerUsername}`;
     }
 
     let messageText = `<b>🪙 ${gameType} Game</b>\n\n` +
@@ -342,7 +225,10 @@ export class GameManager {
       `👥 Players: ${currentPlayers}/${maxPlayers}${playerInfo}\n`;
 
     if (status.toLowerCase() !== "completed") {
-      messageText += `Status: ${statusText}${expirationInfo}`;
+      const statusText = currentPlayers < maxPlayers ?
+        `${maxPlayers - currentPlayers} more needed` :
+        "Full - starting soon!";
+      messageText += `Status: ${statusText}`;
     }
 
     messageText += winnerInfo;
@@ -415,18 +301,14 @@ export class GameManager {
     if (!gameMessage) return;
 
     try {
-      const gamePda = new PublicKey(gameAddress);
-      const forceFresh = status.toLowerCase() === "completed";
       const { messageText, keyboard } = await this.formatGameMessage(
         ctx,
-        gamePda,
+        new PublicKey(gameAddress),
         gameType,
         amount,
         creatorUsername,
         status,
-        winnerAddress,
-        undefined,
-        forceFresh
+        winnerAddress
       );
 
       try {
@@ -443,17 +325,7 @@ export class GameManager {
         if (error.description?.includes("message is not modified")) {
           return;
         }
-
         console.error("Error updating game message:", error);
-        const newMessage = await ctx.reply(messageText, {
-          parse_mode: "HTML",
-          reply_markup: keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined
-        });
-        this.activeGameMessages.set(gameAddress, {
-          messageId: newMessage.message_id,
-          chatId: ctx.chat?.id || 0
-        });
-        this.gameDb.saveGameMessage(gameAddress, newMessage.message_id, ctx.chat?.id || 0);
       }
     } catch (error) {
       console.error("Error in updateGameMessage:", error);
@@ -464,48 +336,33 @@ export class GameManager {
   // GAME OPERATIONS
   // ================================
 
-  private async getGameBasicInfo(gameAccount: any): Promise<GameBasicInfo> {
-    return {
-      amount: Number(gameAccount.amount),
-      maxPlayers: gameAccount.maxPlayers,
-      minPlayers: gameAccount.minPlayers,
-      currentPlayers: gameAccount.players.length,
-      creatorPubkey: gameAccount.creator.toString(),
-      status: "active", // Since status field is removed, assume active
-      gameType: formatGameType(gameAccount.gameType)
-    };
-  }
-
   public async getGameInfo(ctx: Context, gamePda: PublicKey): Promise<string> {
     try {
-      const gameAccount = await this.getCachedGameAccount(gamePda);
+      const gameAccount = await this.program.account.game.fetch(gamePda);
       const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
-      const { amount, maxPlayers, minPlayers, currentPlayers, creatorPubkey, gameType } = await this.getGameBasicInfo(gameAccount);
+
+      const amount = Number(gameAccount.amount);
+      const maxPlayers = gameAccount.maxPlayers;
+      const currentPlayers = gameAccount.players.length;
+      const creatorPubkey = gameAccount.creator.toString();
+      const gameType = formatGameType(gameAccount.gameType);
 
       const creatorTelegramId = this.gameDb.getCreatorTelegramId(gamePda.toBase58());
       const creatorInfo = creatorTelegramId
         ? `@${await this.getUsernameFromTelegramId(ctx, creatorTelegramId)}`
         : `<code>${creatorPubkey.slice(0, ADDRESS_DISPLAY_LENGTH)}...</code>`;
 
-      const expirationInfo = await this.calculateExpirationTime(gameAccount);
-
       let winnerInfo = "";
-      let gameStatus = "active"; // Since status field is removed, assume active initially
-      // Since Game account no longer has winner field, we'll check database for completed games
       const gameData = this.gameDb.getGame(gamePda.toBase58());
       if (gameData && gameData.winner_address && gameData.winner_address !== "cancelled" && gameData.winner_address !== DEFAULT_NULL_ADDRESS) {
         const winnerUsername = await this.getPlayerUsername(ctx, gameData.winner_address);
         winnerInfo = `\nWinner: @${winnerUsername}`;
-        gameStatus = "completed";
       }
-
-      const statusText = this.getGameStatusText(gameStatus, currentPlayers, minPlayers, maxPlayers);
 
       return `Type: ${gameType}\n` +
              `Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
              `Creator: ${creatorInfo}\n` +
-             `Players: ${currentPlayers}/${maxPlayers}\n` +
-             `Status: ${statusText}${expirationInfo}${winnerInfo}`;
+             `Players: ${currentPlayers}/${maxPlayers}${winnerInfo}`;
     } catch (error: any) {
       return `Error fetching game: ${error.message}`;
     }
@@ -524,20 +381,10 @@ export class GameManager {
 
     try {
       const playerKp = this.wallet.getKeyPair(telegramId);
-      const tokenBalance = await this.wallet.getTokenBalance(telegramId, this.tokenMint);
-      const playerBalancePda = PDAManager.getPlayerBalancePDA(
-        playerKp.publicKey,
-        new PublicKey(this.tokenMint),
-        this.program.programId
-      );
-
-      let gameBalance = 0;
-      try {
-        const playerBalance = await this.program.account.playerBalance.fetch(playerBalancePda);
-        gameBalance = Number(playerBalance.amount);
-      } catch (error) {
-        // Player balance account not found
-      }
+      const [tokenBalance, gameBalance] = await Promise.all([
+        this.wallet.getTokenBalance(telegramId, this.tokenMint),
+        this.getPlayerGameBalance(playerKp.publicKey)
+      ]);
 
       const totalBalance = tokenBalance + gameBalance;
       if (totalBalance < amount) {
@@ -557,7 +404,6 @@ export class GameManager {
       this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
       await this.ensurePlayerBalance(playerKp);
 
-      // Create GameConfig object for the new structure
       const gameConfig = {
         gameType: { [gameType]: {} },
         amount: new anchor.BN(amount),
@@ -576,17 +422,7 @@ export class GameManager {
         .signers([playerKp])
         .rpc();
 
-      try {
-        await this.getCachedGameAccount(gamePda);
-      } catch (error) {
-        throw new Error("Game creation failed");
-      }
-
-      this.gameDb.saveGame(
-        gamePda.toBase58(),
-        telegramId.toString(),
-        amount
-      );
+      this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount);
 
       await this.createGameMessage(
         ctx,
@@ -608,6 +444,24 @@ export class GameManager {
   }
 
   // ================================
+  // HELPER METHODS
+  // ================================
+
+  private async getPlayerGameBalance(playerPubkey: PublicKey): Promise<number> {
+    try {
+      const playerBalancePda = PDAManager.getPlayerBalancePDA(
+        playerPubkey,
+        new PublicKey(this.tokenMint),
+        this.program.programId
+      );
+      const playerBalance = await this.program.account.playerBalance.fetch(playerBalancePda);
+      return Number(playerBalance.amount);
+    } catch (error) {
+      return 0;
+    }
+  }
+
+  // ================================
   // COMPLETION AND EXPIRATION
   // ================================
 
@@ -621,67 +475,53 @@ export class GameManager {
         throw new Error(result.error || "Failed to complete game");
       }
 
-      console.log(`✅ Oracle completion successful`);
-
       if (!result.event) {
         throw new Error("No event data received from completion");
       }
 
       const event = result.event;
       const winnerAddress = event.winner.toString();
-
       const blockTime = await this.wallet.getBlockchainTime();
       const completedAt = blockTime * 1000;
 
       this.gameDb.completeGame(gamePda.toBase58(), winnerAddress, completedAt);
-      console.log(`💾 Saved game completion to database`);
 
-      await this.updateGameMessageWithWinner(ctx, gamePda, event);
-      console.log(`📝 Updated game message with winner`);
+      const creatorTelegramId = this.gameDb.getCreatorTelegramId(gamePda.toBase58());
+      if (creatorTelegramId) {
+        const creatorUsername = await this.getUsernameFromTelegramId(ctx, creatorTelegramId);
+        const gameType = formatGameType(event.gameType);
+
+        await this.updateGameMessage(
+          ctx,
+          gamePda.toBase58(),
+          gameType,
+          Number(event.amount),
+          creatorUsername,
+          "Completed",
+          winnerAddress
+        );
+      }
 
       return true;
     } catch (error: any) {
       console.error(`Error completing game ${gamePda.toBase58()}:`, error);
-      if (error.message.includes("GameReadyForOracle")) {
-        ctx.reply(`Game is already being completed by the oracle. Please wait for it to finish.`);
-        return true;
-      }
       throw error;
     }
   }
 
-  private async updateGameMessageWithWinner(ctx: Context, gamePda: PublicKey, event: GameCompletedEvent): Promise<void> {
-    const gameMessage = this.activeGameMessages.get(gamePda.toBase58());
-    if (!gameMessage) return;
-
-    this.clearGameAccountCache(gamePda);
-
-    const creatorTelegramId = this.gameDb.getCreatorTelegramId(gamePda.toBase58());
-    if (!creatorTelegramId) return;
-
-    const creatorUsername = await this.getUsernameFromTelegramId(ctx, creatorTelegramId);
-    const gameType = Object.keys(event.gameType)[0].charAt(0).toUpperCase() + Object.keys(event.gameType)[0].slice(1);
-
-    await this.updateGameMessage(
-      ctx,
-      gamePda.toBase58(),
-      gameType,
-      Number(event.amount),
-      creatorUsername,
-      "Completed",
-      event.winner.toString()
-    );
-
-    // Don't send detailed completion notification here - it's handled by the global event listener
-    // This prevents duplicate notifications
-  }
-
   public async handleExpiredGame(ctx: Context, gamePda: PublicKey, gameAccount: any): Promise<GameCancellationResult | false> {
     try {
-      const { isExpired, hasEnoughPlayers } = await this.getGameStatusInfo(gameAccount);
+      const blockTime = await this.wallet.getBlockchainTime();
+      const createdAt = Number(gameAccount.createdAt);
+      const timeout = Number(gameAccount.timeout);
+      const expiresAt = createdAt + timeout;
+      const isExpired = blockTime > expiresAt;
+
       if (!isExpired) return false;
 
+      const hasEnoughPlayers = gameAccount.players.length >= gameAccount.minPlayers;
       const creatorTelegramId = this.gameDb.getCreatorTelegramId(gamePda.toBase58());
+
       if (!creatorTelegramId) return false;
 
       if (hasEnoughPlayers) {
@@ -690,65 +530,51 @@ export class GameManager {
           return completed ? false : false;
         } catch (error: any) {
           console.error(`Oracle completion failed: ${error.message}`);
-          if (error.message.includes("GameNotReadyForOracle")) {
-            // Fall through to cancellation logic
-          } else {
-            throw error;
-          }
         }
       }
 
+      // Cancel the game
       const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
 
-      try {
-        const tx = await this.program.methods
-          .cancelGame()
-          .accounts({
-            game: gamePda,
-            creator: gameAccount.creator,
-          })
-          .signers([creatorKp])
-          .rpc();
+      const tx = await this.program.methods
+        .cancelGame()
+        .accounts({
+          game: gamePda,
+          creator: gameAccount.creator,
+        })
+        .signers([creatorKp])
+        .rpc();
 
-        const blockTime = await this.wallet.getBlockchainTime();
-        const completedAt = blockTime * 1000;
+      const completedAt = blockTime * 1000;
+      this.gameDb.completeGame(gamePda.toBase58(), "cancelled", completedAt);
 
-        this.gameDb.completeGame(gamePda.toBase58(), "cancelled", completedAt);
+      // Send cancellation notification
+      const gameMessage = this.activeGameMessages.get(gamePda.toBase58());
+      if (gameMessage) {
+        const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
+        const gameType = formatGameType(gameAccount.gameType);
+        const amount = Number(gameAccount.amount);
+        const playerCount = gameAccount.players.length;
 
-        // Send cancellation notification
-        const gameMessage = this.activeGameMessages.get(gamePda.toBase58());
-        if (gameMessage) {
-          const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
-          const gameType = formatGameType(gameAccount.gameType);
-          const amount = Number(gameAccount.amount);
-          const playerCount = gameAccount.players.length;
-
-          await ctx.reply(
-            `❌ <b>${gameType} Cancelled!</b>\n\n` +
-            `⏰ Game expired with insufficient players\n` +
-            `💰 Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
-            `👥 Players: ${playerCount}/${gameAccount.maxPlayers}\n\n` +
-            `💸 Funds have been returned to players`,
-            {
-              parse_mode: "HTML",
-              reply_to_message_id: gameMessage.messageId
-            }
-          );
-        }
-
-        return {
-          cancelled: true,
-          amount: Number(gameAccount.amount),
-          creator: gameAccount.creator.toString(),
-          tx
-        };
-      } catch (error: any) {
-        if (error.message.includes("GameReadyForOracle")) {
-          const completed = await this.handleGameCompletion(ctx, gamePda);
-          return completed ? false : false;
-        }
-        throw error;
+        await ctx.reply(
+          `❌ <b>${gameType} Cancelled!</b>\n\n` +
+          `⏰ Game expired with insufficient players\n` +
+          `💰 Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
+          `👥 Players: ${playerCount}/${gameAccount.maxPlayers}\n\n` +
+          `💸 Funds have been returned to players`,
+          {
+            parse_mode: "HTML",
+            reply_to_message_id: gameMessage.messageId
+          }
+        );
       }
+
+      return {
+        cancelled: true,
+        amount: Number(gameAccount.amount),
+        creator: gameAccount.creator.toString(),
+        tx
+      };
     } catch (error) {
       console.error(`Error handling expired game ${gamePda.toBase58()}:`, error);
       return false;
@@ -757,10 +583,6 @@ export class GameManager {
 
   public async autoCompleteGame(gamePda: PublicKey): Promise<boolean> {
     try {
-      const gameInfo = this.activeGameMessages.get(gamePda.toBase58());
-      if (!gameInfo) return false;
-
-      // Just trigger the oracle completion - the global event listener will handle message updates
       const result = await this.oracleManager.completeGame(gamePda);
 
       if (!result.success) {
@@ -768,7 +590,6 @@ export class GameManager {
         return false;
       }
 
-      // Update database with completion
       if (result.event) {
         const winnerAddress = result.event.winner.toString();
         const blockTime = await this.wallet.getBlockchainTime();
@@ -776,7 +597,6 @@ export class GameManager {
         this.gameDb.completeGame(gamePda.toBase58(), winnerAddress, completedAt);
       }
 
-      console.log(`✅ Auto-completion successful for ${gamePda.toBase58()}`);
       return true;
     } catch (error) {
       console.error('Error auto-completing game:', error);
@@ -790,7 +610,7 @@ export class GameManager {
 
   public async unjoinGame(ctx: Context, gamePda: PublicKey, playerKp: anchor.web3.Keypair): Promise<boolean> {
     try {
-      const gameAccount = await this.getCachedGameAccount(gamePda);
+      const gameAccount = await this.program.account.game.fetch(gamePda);
 
       const isInGame = gameAccount.players.some((p: PublicKey) => p.equals(playerKp.publicKey));
       if (!isInGame) {
@@ -809,20 +629,17 @@ export class GameManager {
       await this.wallet.confirmTransaction(tx);
 
       const creatorTelegramId = await this.gameDb.getCreatorTelegramId(gamePda.toBase58());
-      if (!creatorTelegramId) {
-        throw new Error("Could not find game creator");
+      if (creatorTelegramId) {
+        const creatorUsername = await this.getUsernameFromTelegramId(ctx, creatorTelegramId);
+        await this.updateGameMessage(
+          ctx,
+          gamePda.toBase58(),
+          formatGameType(gameAccount.gameType),
+          Number(gameAccount.amount),
+          creatorUsername,
+          "Active"
+        );
       }
-
-      const creatorUsername = await this.getUsernameFromTelegramId(ctx, creatorTelegramId);
-
-      await this.updateGameMessage(
-        ctx,
-        gamePda.toBase58(),
-        formatGameType(gameAccount.gameType),
-        Number(gameAccount.amount),
-        creatorUsername,
-        "Active"
-      );
 
       return true;
     } catch (error: any) {
@@ -848,7 +665,6 @@ export class GameManager {
       }
 
       const adminKp = authResult.adminKeypair!;
-
       await this.ensurePlayerBalance(playerKp);
 
       const tx = await this.program.methods
@@ -862,7 +678,6 @@ export class GameManager {
         .rpc();
 
       await this.wallet.confirmTransaction(tx);
-
       return { success: true, tx };
     } catch (error: any) {
       console.error(`Error joining private game:`, error);
@@ -893,7 +708,7 @@ export class GameManager {
     const activeGames = await Promise.all(activeGamesData.map(async (gameData) => {
       try {
         const gamePda = new PublicKey(gameData.game_address);
-        const gameAccount = await this.getCachedGameAccount(gamePda);
+        const gameAccount = await this.program.account.game.fetch(gamePda);
         totalTokensInGames += Number(gameAccount.amount);
         return this.getGameInfo(ctx, gamePda);
       } catch (error) {
@@ -954,14 +769,6 @@ export class GameManager {
       recentGames: recentGamesSections,
       totalTokensInGames
     };
-  }
-
-  // ================================
-  // EVENT HANDLING
-  // ================================
-
-  public async updateGameMessageWithCompletedEvent(ctx: Context, gamePda: PublicKey, event: GameCompletedEvent): Promise<void> {
-    await this.updateGameMessageWithWinner(ctx, gamePda, event);
   }
 
   // ================================

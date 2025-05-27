@@ -10,13 +10,12 @@ import { GameDatabase } from "./utils/database";
 import { SystemProgram } from "@solana/web3.js";
 import { GameManager } from "./utils/game";
 import { PDAManager } from "./utils/pda";
-import { parseTransactionError, truncateErrorForCallback, formatUserFriendlyError } from "./utils/errors";
+import { formatUserFriendlyError } from "./utils/errors";
 import {
   LAMPORTS_PER_SOL,
   GAME_TIMEOUT,
   COINFLIP_MAX_PLAYERS,
   GIVEAWAY_MAX_PLAYERS,
-  RETRY_DELAY_MS,
   GAME_COMPLETION_WAIT_MS,
   EXPIRED_GAMES_CHECK_INTERVAL_MS,
   TOKEN_METADATA_CACHE_DURATION
@@ -61,7 +60,7 @@ let program: anchor.Program<Coinflip>;
 let gameManager: GameManager;
 
 // ================================
-// HELPER FUNCTIONS
+// SIMPLIFIED HELPER FUNCTIONS
 // ================================
 
 // Helper function to get token metadata with caching
@@ -80,8 +79,7 @@ const parseAmount = async (args: string[], argIndex: number = 1): Promise<Parsed
 
   const metadata = await getTokenMetadata();
   const isSol = args[args.length - 1].toUpperCase() === "SOL";
-  const amountStr = isSol ? args[argIndex] : args[argIndex];
-  const rawAmount = parseFloat(amountStr);
+  const rawAmount = parseFloat(args[argIndex]);
 
   if (isNaN(rawAmount) || rawAmount <= 0) return null;
 
@@ -120,43 +118,46 @@ const getPlayerData = async (telegramId: bigint): Promise<PlayerData> => {
   return { keypair, tokenBalance, solBalance, gameBalance };
 };
 
-// Helper function to check and claim winnings
-const checkAndClaimWinnings = async (playerKp: anchor.web3.Keypair, isSol: boolean): Promise<number> => {
-  if (isSol) return 0;
-  return await claimWinnings(playerKp);
-};
-
-// Helper function to validate balance
-const validateBalance = async (playerData: PlayerData, amount: number, isSol: boolean): Promise<string | null> => {
+// Helper function to process transactions with loading state
+const validateAndProcessTransaction = async (
+  ctx: Context,
+  telegramId: bigint,
+  amount: number,
+  isSol: boolean,
+  description: string,
+  transactionFn: (playerData: PlayerData) => Promise<string>
+): Promise<void> => {
+  const playerData = await getPlayerData(telegramId);
   const metadata = await getTokenMetadata();
 
-  if (isSol) {
-    if (playerData.solBalance < amount) {
-      return `Insufficient SOL balance. You have ${wallet.formatSolBalance(playerData.solBalance)} SOL but need ${wallet.formatSolBalance(amount)} SOL`;
-    }
-  } else {
-    const totalBalance = playerData.tokenBalance + playerData.gameBalance;
-    if (totalBalance < amount) {
-      return `Insufficient balance. You have ${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${TICKER} but need ${wallet.formatTokenBalance(amount, metadata.decimals)} ${TICKER}`;
-    }
+  // Claim winnings if not using SOL
+  if (!isSol) {
+    await claimWinnings(playerData.keypair);
   }
 
-  return null; // No error
-};
+  // Validate balance
+  const totalBalance = isSol ? playerData.solBalance : playerData.tokenBalance + playerData.gameBalance;
+  if (totalBalance < amount) {
+    const balanceStr = isSol
+      ? `${wallet.formatSolBalance(totalBalance)} SOL`
+      : `${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${TICKER}`;
+    const needStr = isSol
+      ? `${wallet.formatSolBalance(amount)} SOL`
+      : `${wallet.formatTokenBalance(amount, metadata.decimals)} ${TICKER}`;
 
-// Helper function to process transactions with loading state
-const processTransaction = async (
-  ctx: Context,
-  description: string,
-  transactionFn: () => Promise<string>
-): Promise<void> => {
+    await ctx.reply(`Insufficient balance. You have ${balanceStr} but need ${needStr}`, {
+      reply_to_message_id: ctx.message?.message_id
+    });
+    return;
+  }
+
+  // Process transaction with loading state
   const processingMsg = await ctx.reply(`Processing ${description}...`, {
     reply_to_message_id: ctx.message?.message_id
   });
 
   try {
-    const tx = await transactionFn();
-
+    const tx = await transactionFn(playerData);
     await ctx.api.editMessageText(
       ctx.chat!.id,
       processingMsg.message_id,
@@ -182,15 +183,6 @@ const handleCommandError = async (ctx: Context, error: any, commandName: string)
   await ctx.reply(userFriendlyError, {
     reply_to_message_id: ctx.message?.message_id
   });
-};
-
-// Helper function to validate address
-const validateAddress = (addressStr: string): PublicKey | null => {
-  try {
-    return new PublicKey(addressStr);
-  } catch {
-    return null;
-  }
 };
 
 // ================================
@@ -339,8 +331,10 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
     });
   }
 
-  const toAddress = validateAddress(args[1]);
-  if (!toAddress) {
+  let toAddress: PublicKey;
+  try {
+    toAddress = new PublicKey(args[1]);
+  } catch {
     return ctx.reply("Invalid wallet address. Please provide a valid Solana address.", {
       reply_to_message_id: ctx.message?.message_id
     });
@@ -354,33 +348,25 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
   }
 
   try {
-    const playerData = await getPlayerData(telegramId);
-
-    // Claim winnings if not using SOL
-    await checkAndClaimWinnings(playerData.keypair, parsed.isSol);
-
-    // Validate balance
-    const balanceError = await validateBalance(playerData, parsed.amount, parsed.isSol);
-    if (balanceError) {
-      return ctx.reply(balanceError, {
-        reply_to_message_id: ctx.message?.message_id
-      });
-    }
-
-    // Process transaction
-    await processTransaction(ctx, `Withdrawal of ${parsed.formattedAmount}`, async () => {
-      if (parsed.isSol) {
-        const transferSolIx = SystemProgram.transfer({
-          fromPubkey: playerData.keypair.publicKey,
-          toPubkey: toAddress,
-          lamports: parsed.amount,
-        });
-        return await wallet.signAndSend([transferSolIx], [playerData.keypair]);
-      } else {
-        return await wallet.transferToken(telegramId, toAddress, parsed.amount, TOKEN_MINT);
+    await validateAndProcessTransaction(
+      ctx,
+      telegramId,
+      parsed.amount,
+      parsed.isSol,
+      `Withdrawal of ${parsed.formattedAmount}`,
+      async (playerData) => {
+        if (parsed.isSol) {
+          const transferSolIx = SystemProgram.transfer({
+            fromPubkey: playerData.keypair.publicKey,
+            toPubkey: toAddress,
+            lamports: parsed.amount,
+          });
+          return await wallet.signAndSend([transferSolIx], [playerData.keypair]);
+        } else {
+          return await wallet.transferToken(telegramId, toAddress, parsed.amount, TOKEN_MINT);
+        }
       }
-    });
-
+    );
   } catch (error: any) {
     await handleCommandError(ctx, error, "withdraw");
   }
@@ -420,39 +406,30 @@ bot.command("tip", async (ctx: Context) => {
   }
 
   try {
-    const playerData = await getPlayerData(telegramId);
-
-    // Claim winnings if not using SOL
-    await checkAndClaimWinnings(playerData.keypair, parsed.isSol);
-
-    // Get recipient public key
     const recipientPubKey = wallet.getPublicKey(recipientTelegramId);
-
-    // Validate balance
-    const balanceError = await validateBalance(playerData, parsed.amount, parsed.isSol);
-    if (balanceError) {
-      return ctx.reply(balanceError, {
-        reply_to_message_id: ctx.message?.message_id
-      });
-    }
-
-    // Process transaction
     const recipientName = replyToMessage.from.username
       ? `@${replyToMessage.from.username}`
       : replyToMessage.from.first_name || "User";
-    await processTransaction(ctx, `Tip of ${parsed.formattedAmount} to ${recipientName}`, async () => {
-      if (parsed.isSol) {
-        const transferSolIx = SystemProgram.transfer({
-          fromPubkey: playerData.keypair.publicKey,
-          toPubkey: recipientPubKey,
-          lamports: parsed.amount,
-        });
-        return await wallet.signAndSend([transferSolIx], [playerData.keypair]);
-      } else {
-        return await wallet.transferToken(telegramId, recipientPubKey, parsed.amount, TOKEN_MINT);
-      }
-    });
 
+    await validateAndProcessTransaction(
+      ctx,
+      telegramId,
+      parsed.amount,
+      parsed.isSol,
+      `Tip of ${parsed.formattedAmount} to ${recipientName}`,
+      async (playerData) => {
+        if (parsed.isSol) {
+          const transferSolIx = SystemProgram.transfer({
+            fromPubkey: playerData.keypair.publicKey,
+            toPubkey: recipientPubKey,
+            lamports: parsed.amount,
+          });
+          return await wallet.signAndSend([transferSolIx], [playerData.keypair]);
+        } else {
+          return await wallet.transferToken(telegramId, recipientPubKey, parsed.amount, TOKEN_MINT);
+        }
+      }
+    );
   } catch (error: any) {
     await handleCommandError(ctx, error, "tip");
   }
@@ -465,7 +442,7 @@ bot.command("wrap", async (ctx: Context) => {
 
   if (!args) return;
 
-  const amount = parseFloat(args?.[1] || "0") * LAMPORTS_PER_SOL; // Convert to lamports
+  const amount = parseFloat(args?.[1] || "0") * LAMPORTS_PER_SOL;
 
   if (amount <= 0) {
     return ctx.reply("Usage: /wrap <amount>\nExample: /wrap 0.1", {
@@ -474,36 +451,32 @@ bot.command("wrap", async (ctx: Context) => {
   }
 
   try {
-    const playerData = await getPlayerData(telegramId);
+    await validateAndProcessTransaction(
+      ctx,
+      telegramId,
+      amount,
+      true, // isSol
+      `Wrapping ${wallet.formatSolBalance(amount)} SOL to WSOL`,
+      async (playerData) => {
+        const wsolMint = new PublicKey(TOKEN_MINT);
+        const { address: wsolAccount, instructions: createAtaIx } = await wallet.findOrCreateAssociatedTokenAccount(
+          playerData.keypair.publicKey,
+          wsolMint,
+          playerData.keypair
+        );
 
-    // Check SOL balance
-    if (playerData.solBalance < amount) {
-      return ctx.reply(`Insufficient SOL balance. You have ${wallet.formatSolBalance(playerData.solBalance)} SOL but are trying to wrap ${wallet.formatSolBalance(amount)} SOL`, {
-        reply_to_message_id: ctx.message?.message_id
-      });
-    }
+        const transferSolIx = SystemProgram.transfer({
+          fromPubkey: playerData.keypair.publicKey,
+          toPubkey: wsolAccount,
+          lamports: amount,
+        });
 
-    // Process transaction
-    await processTransaction(ctx, `Wrapping ${wallet.formatSolBalance(amount)} SOL to WSOL`, async () => {
-      const wsolMint = new PublicKey(TOKEN_MINT);
-      const { address: wsolAccount, instructions: createAtaIx } = await wallet.findOrCreateAssociatedTokenAccount(
-        playerData.keypair.publicKey,
-        wsolMint,
-        playerData.keypair
-      );
+        const syncNativeIx = createSyncNativeInstruction(wsolAccount);
+        const allInstructions = [...createAtaIx, transferSolIx, syncNativeIx];
 
-      const transferSolIx = SystemProgram.transfer({
-        fromPubkey: playerData.keypair.publicKey,
-        toPubkey: wsolAccount,
-        lamports: amount,
-      });
-
-      const syncNativeIx = createSyncNativeInstruction(wsolAccount);
-      const allInstructions = [...createAtaIx, transferSolIx, syncNativeIx];
-
-      return await wallet.signAndSend(allInstructions, [playerData.keypair]);
-    });
-
+        return await wallet.signAndSend(allInstructions, [playerData.keypair]);
+      }
+    );
   } catch (error: any) {
     await handleCommandError(ctx, error, "wrap");
   }
@@ -602,7 +575,6 @@ bot.command("checktx", async (ctx: Context) => {
   try {
     console.log(`Checking transaction: ${signature}`);
 
-    // Get transaction details
     const connection = wallet.getConnection();
     const txDetails = await connection.getTransaction(signature, {
       commitment: "confirmed",
@@ -624,62 +596,6 @@ bot.command("checktx", async (ctx: Context) => {
 
     if (txDetails.meta?.err) {
       response += `Error: <code>${JSON.stringify(txDetails.meta.err)}</code>\n`;
-    }
-
-    // Check token transfers in the transaction
-    if (txDetails.meta?.preTokenBalances && txDetails.meta?.postTokenBalances) {
-      response += `\n<b>Token Balance Changes:</b>\n`;
-
-      const preBalances = txDetails.meta.preTokenBalances;
-      const postBalances = txDetails.meta.postTokenBalances;
-
-      // Group balances by account
-      const balanceChanges = new Map();
-
-      preBalances.forEach(balance => {
-        if (balance.mint === TOKEN_MINT) {
-          balanceChanges.set(balance.accountIndex, {
-            account: balance.owner,
-            pre: balance.uiTokenAmount.uiAmount || 0,
-            post: 0
-          });
-        }
-      });
-
-      postBalances.forEach(balance => {
-        if (balance.mint === TOKEN_MINT) {
-          const existing = balanceChanges.get(balance.accountIndex) || {
-            account: balance.owner,
-            pre: 0,
-            post: 0
-          };
-          existing.post = balance.uiTokenAmount.uiAmount || 0;
-          balanceChanges.set(balance.accountIndex, existing);
-        }
-      });
-
-      balanceChanges.forEach((change, accountIndex) => {
-        const diff = change.post - change.pre;
-        const direction = diff > 0 ? '📈' : diff < 0 ? '📉' : '➖';
-        response += `${direction} Account ${accountIndex}: ${change.pre} → ${change.post} ${TICKER} (${diff > 0 ? '+' : ''}${diff})\n`;
-      });
-    }
-
-    // Show account keys involved
-    if (txDetails.transaction.message) {
-      response += `\n<b>Accounts involved:</b>\n`;
-      try {
-        const accountKeys = txDetails.transaction.message.getAccountKeys();
-        accountKeys.keySegments().forEach((segment: any[], segmentIndex: number) => {
-          segment.forEach((key: any, index: number) => {
-            const globalIndex = segmentIndex * segment.length + index;
-            response += `${globalIndex}: <code>${key.toBase58()}</code>\n`;
-          });
-        });
-      } catch (error) {
-        // Handle different transaction message formats
-        response += `Unable to parse account keys\n`;
-      }
     }
 
     await ctx.reply(response, {
@@ -705,7 +621,6 @@ bot.command("active", async (ctx: Context) => {
 
     let response = activeGames || "You don't have any active games.";
 
-    // Add total tokens in active games
     if (totalTokensInGames > 0) {
       response += `\n\n💰 Total tokens in active games: ${wallet.formatTokenBalance(totalTokensInGames, metadata.decimals)} ${TICKER}`;
     }
@@ -798,337 +713,210 @@ bot.command("oracle", async (ctx: Context) => {
 // Handle callback queries for game actions
 bot.on("callback_query", async (ctx) => {
   const callbackData = ctx.callbackQuery.data;
-  if (!callbackData || !ctx.from) return;  // Add check for ctx.from
+  if (!callbackData || !ctx.from) return;
 
-  if (callbackData.startsWith("join_")) {
-    const gameAddress = callbackData.split("_")[1];
-    const game = await gameDb.getGame(gameAddress);
+  const [action, gameAddress] = callbackData.split("_");
+  const game = await gameDb.getGame(gameAddress);
 
-    if (!game) {
-      console.log("Game not found in database");
-      await ctx.answerCallbackQuery("Game not found!");
-      return;
+  if (!game) {
+    await ctx.answerCallbackQuery("Game not found!");
+    return;
+  }
+
+  try {
+    const gamePda = new PublicKey(gameAddress);
+    const telegramId = BigInt(ctx.from.id);
+    const playerKp = wallet.getKeyPair(telegramId);
+
+    switch (action) {
+      case "join":
+        await handleJoinGame(ctx, gamePda, playerKp, telegramId, game);
+        break;
+      case "unjoin":
+        await gameManager.unjoinGame(ctx, gamePda, playerKp);
+        await ctx.answerCallbackQuery("Successfully unjoined the game!");
+        break;
+      case "refresh":
+        await handleRefreshGame(ctx, gamePda, game);
+        break;
     }
-
-    if (game.status !== "active") {
-      console.log(`Game status is ${game.status}, not active`);
-      await ctx.answerCallbackQuery("This game is no longer active!");
-      return;
-    }
-
-    try {
-      // Get player keypair
-      const telegramId = BigInt(ctx.from.id);
-      console.log(`Processing join for Telegram ID: ${telegramId}`);
-      const playerKp = wallet.getKeyPair(telegramId);
-      console.log(`Player public key: ${playerKp.publicKey.toBase58()}`);
-      const metadata = await getTokenMetadata();
-
-      // Fetch game to verify it exists and is active
-      const gamePda = new PublicKey(gameAddress);
-      console.log(`Fetching game account for ${gamePda.toBase58()}`);
-      const gameAccount = await program.account.game.fetch(gamePda);
-      console.log(`Current players in game: ${gameAccount.players.length}`);
-
-      // Check if user is already in the game
-      const players = gameAccount.players;
-      const isAlreadyInGame = players.some((p: PublicKey) => p.equals(playerKp.publicKey));
-      console.log(`Player already in game: ${isAlreadyInGame}`);
-      if (isAlreadyInGame) {
-        await ctx.answerCallbackQuery("You have already joined this game!");
-        return;
-      }
-
-      // Check if user is the creator of the game
-      const isCreator = gameAccount.creator.equals(playerKp.publicKey);
-      console.log(`Player is creator: ${isCreator}`);
-      if (isCreator) {
-        await ctx.answerCallbackQuery("You are the creator of this game!");
-        return;
-      }
-
-      // Check if game is full
-      console.log(`Game max players: ${gameAccount.maxPlayers}, current players: ${players.length}`);
-      if (players.length >= gameAccount.maxPlayers) {
-        console.log("Game is full");
-        await ctx.answerCallbackQuery("This game is already full!");
-        return;
-      }
-
-      // Batch fetch balances for better performance
-      const [tokenBalance, gameBalance] = await Promise.all([
-        wallet.getTokenBalance(telegramId, TOKEN_MINT),
-        (async () => {
-          try {
-            const playerBalancePda = PDAManager.getPlayerBalancePDA(
-              playerKp.publicKey,
-              new PublicKey(TOKEN_MINT),
-              program.programId
-            );
-            const playerBalance = await program.account.playerBalance.fetch(playerBalancePda);
-            return Number(playerBalance.amount);
-          } catch (error) {
-            console.log("Player balance account not found or error fetching it");
-            return 0;
-          }
-        })()
-      ]);
-
-      const gameAmount = Number(gameAccount.amount);
-      console.log(`Player balance: ${tokenBalance}, game amount: ${gameAmount}`);
-      const totalBalance = tokenBalance + gameBalance;
-      console.log(`Total balance (wallet + game): ${totalBalance}`);
-
-      if (totalBalance < gameAmount) {
-        await ctx.answerCallbackQuery(`Insufficient balance. You have ${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${TICKER} but need ${wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${TICKER}`);
-        return;
-      }
-
-      console.log("All checks passed, proceeding with join transaction");
-
-      // Ensure player has balance PDA
-      const playerBalancePda = await gameManager.ensurePlayerBalance(playerKp);
-      console.log(`Player balance PDA: ${playerBalancePda.toBase58()}`);
-
-      // Check if game is private and handle accordingly
-      if (gameAccount.isPrivate) {
-        console.log("Game is private, using oracle authorization");
-        const result = await gameManager.joinPrivateGame(
-          gamePda,
-          playerKp,
-          ctx.chat?.id || 0
-        );
-
-        if (!result.success) {
-          await ctx.answerCallbackQuery(result.error || "Failed to join private game");
-          return;
-        }
-
-        console.log(`Successfully joined private game with tx: ${result.tx}`);
-      } else {
-        // Original logic for public games
-        console.log("Game is public, using standard join");
-
-        console.log("Sending join transaction...");
-        // Call the contract to join the game
-        const tx = await program.methods
-          .joinGame()
-          .accounts({
-            game: gamePda,
-            player: playerKp.publicKey,
-          })
-          .signers([playerKp])
-          .rpc();
-
-        console.log(`Join transaction sent: ${tx}`);
-
-        // Wait for transaction confirmation with retries
-        console.log("Waiting for transaction confirmation...");
-        let retries = 3;
-        let confirmed = false;
-        while (retries > 0 && !confirmed) {
-          try {
-            await wallet.confirmTransaction(tx);
-            confirmed = true;
-          } catch (error) {
-            console.error(`Confirmation attempt ${4 - retries} failed:`, error);
-            retries--;
-            if (retries > 0) {
-              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-            }
-          }
-        }
-
-        if (!confirmed) {
-          throw new Error("Failed to confirm transaction after multiple attempts");
-        }
-        console.log("Transaction confirmed");
-      }
-
-      // Verify player was added to the game with retries
-      console.log("Verifying player was added to game...");
-      let verificationRetries = 3;
-      let playerWasAdded = false;
-      let updatedGameAccount: any;
-      while (verificationRetries > 0 && !playerWasAdded) {
-        try {
-          updatedGameAccount = await program.account.game.fetch(gamePda);
-          console.log(`Current players in game: ${updatedGameAccount.players.length}`);
-          console.log(`Player public key to check: ${playerKp.publicKey.toBase58()}`);
-          console.log("Current players in game:");
-          updatedGameAccount.players.forEach((p: PublicKey) => {
-            console.log(`- ${p.toBase58()}`);
-          });
-
-          playerWasAdded = updatedGameAccount.players.some((p: PublicKey) => {
-            const isAdded = p.equals(playerKp.publicKey);
-            console.log(`Checking player public key ${p.toBase58()} against ${playerKp.publicKey.toBase58()}: ${isAdded}`);
-            return isAdded;
-          });
-
-          if (!playerWasAdded) {
-            console.log(`Verification attempt ${4 - verificationRetries} failed: Player not found in game`);
-            verificationRetries--;
-            if (verificationRetries > 0) {
-              console.log("Waiting 2 seconds before next verification attempt...");
-              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-            }
-          } else {
-            console.log("Player was successfully verified in the game!");
-          }
-        } catch (error) {
-          console.error(`Verification attempt ${4 - verificationRetries} failed with error:`, error);
-          verificationRetries--;
-          if (verificationRetries > 0) {
-            console.log("Waiting 2 seconds before next verification attempt...");
-            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-          }
-        }
-      }
-
-      console.log(`Final verification result - Player was added to game: ${playerWasAdded}`);
-
-      if (!playerWasAdded) {
-        console.error("Player was not added to the game after transaction confirmation");
-        await ctx.answerCallbackQuery("Error: Failed to join game. Please try again.");
-        return;
-      }
-
-      // Save player mapping after confirming player was added
-      const playerPubkey = playerKp.publicKey.toBase58();
-      console.log(`Saving player mapping for joiner - Public Key: ${playerPubkey}, Telegram ID: ${telegramId.toString()}`);
-      gameDb.savePlayerMapping(playerPubkey, telegramId.toString());
-
-      // Save game participant record
-      console.log(`Saving game participant record - Game: ${gameAddress}, Telegram ID: ${telegramId.toString()}, Public Key: ${playerPubkey}`);
-      gameDb.saveGameParticipant(gameAddress, telegramId.toString(), playerPubkey);
-
-      // Update game message with current status
-      const creatorUsername = await gameManager.getGameCreatorUsername(ctx, gameAddress);
-      console.log("Updating game message...");
-      const gameType = Object.keys(gameAccount.gameType)[0].charAt(0).toUpperCase() + Object.keys(gameAccount.gameType)[0].slice(1);
-      await gameManager.updateGameMessage(
-        ctx,
-        gameAddress,
-        gameType,
-        Number(game.amount),
-        creatorUsername,
-        "Active",
-        undefined
-      );
-
-      // Send a reply notification that the user joined
-      const joinerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
-      const playerCount = updatedGameAccount.players.length;
-      const maxPlayers = gameAccount.maxPlayers;
-      const gameName = gameType.toLowerCase();
-
-      // Get the game message for reply_to_message_id
-      const gameMessage = gameManager.getActiveGameMessage(gameAddress);
-
-      console.log(`🎮 Sending join notification for @${joinerUsername} (${playerCount}/${maxPlayers} players)`);
-      await ctx.reply(
-        `🎮 @${joinerUsername} joined the ${gameName}! (${playerCount}/${maxPlayers} players)`,
-        {
-          parse_mode: "HTML",
-          reply_to_message_id: gameMessage?.messageId
-        }
-      );
-      console.log(`✅ Join notification sent successfully`);
-
-      // Check if this was the last player needed to fill the game
-      if (updatedGameAccount.players.length === gameAccount.maxPlayers) {
-        console.log(`Game ${gamePda.toBase58()} is full, waiting for join transaction to be fully processed...`);
-        // Wait for 5 seconds to ensure join transaction and message update are fully processed
-        await new Promise(resolve => setTimeout(resolve, GAME_COMPLETION_WAIT_MS));
-
-        // Verify game is still full
-        try {
-          const finalGameAccount = await program.account.game.fetch(gamePda);
-          if (finalGameAccount.players.length === gameAccount.maxPlayers) {
-            console.log(`Join transaction fully processed, attempting to complete game...`);
-            // Automatically complete the game
-            const completed = await gameManager.autoCompleteGame(gamePda);
-            if (!completed) {
-              ctx.reply("⚠️ Game is full but could not be automatically completed. Please try again later or contact support.");
-            }
-          } else {
-            console.log(`Game state changed after join, skipping auto-completion`);
-          }
-        } catch (error) {
-          console.error(`Error verifying game state before completion:`, error);
-        }
-      }
-
-      console.log("Join process completed successfully");
-
-    } catch (error: any) {
-      console.error("Error joining game:", error);
-      const userFriendlyError = parseTransactionError(error, wallet);
-      await ctx.answerCallbackQuery(truncateErrorForCallback(userFriendlyError));
-    }
-  } else if (callbackData.startsWith("refresh_")) {
-    const gameAddress = callbackData.split("_")[1];
-    const game = gameDb.getGame(gameAddress);
-
-    if (!game) {
-      await ctx.answerCallbackQuery("Game not found!");
-      return;
-    }
-
-    try {
-      const gamePda = new PublicKey(gameAddress);
-      const currentGameAccount = await program.account.game.fetch(gamePda);
-      const creatorUsername = await gameManager.getGameCreatorUsername(ctx, gameAddress);
-
-      // Get the actual game type from the game account
-      const gameType = Object.keys(currentGameAccount.gameType)[0].charAt(0).toUpperCase() + Object.keys(currentGameAccount.gameType)[0].slice(1);
-
-      // Update game message with current status
-      await gameManager.updateGameMessage(
-        ctx,
-        gameAddress,
-        gameType,
-        Number(game.amount),
-        creatorUsername,
-        "Active", // Since we can no longer get status from game account, assume active if it exists
-        undefined
-      );
-
-      await ctx.answerCallbackQuery("Game status refreshed!");
-    } catch (error) {
-      console.error("Error refreshing game:", error);
-      await ctx.answerCallbackQuery("Error refreshing game status!");
-    }
-  } else if (callbackData.startsWith("unjoin_")) {
-    const gameAddress = callbackData.split("_")[1];
-    const game = gameDb.getGame(gameAddress);
-
-    if (!game) {
-      await ctx.answerCallbackQuery("Game not found!");
-      return;
-    }
-
-    try {
-      const gamePda = new PublicKey(gameAddress);
-      const telegramId = BigInt(ctx.from.id);
-      const playerKp = wallet.getKeyPair(telegramId);
-
-      // Call unjoin function
-      await gameManager.unjoinGame(ctx, gamePda, playerKp);
-      await ctx.answerCallbackQuery("Successfully unjoined the game!");
-    } catch (error: any) {
-      console.error("Error unjoining game:", error);
-      const userFriendlyError = parseTransactionError(error, wallet);
-      await ctx.answerCallbackQuery(truncateErrorForCallback(userFriendlyError));
-    }
+  } catch (error: any) {
+    console.error(`Error in callback ${action}:`, error);
+    const userFriendlyError = formatUserFriendlyError(error, wallet);
+    await ctx.answerCallbackQuery(userFriendlyError.substring(0, 180));
   }
 });
+
+// Helper functions for callback handling
+const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, telegramId: bigint, game: any) => {
+  if (game.status !== "active") {
+    await ctx.answerCallbackQuery("This game is no longer active!");
+    return;
+  }
+
+  const gameAccount = await program.account.game.fetch(gamePda);
+  const players = gameAccount.players;
+
+  const isAlreadyInGame = players.some((p: PublicKey) => p.equals(playerKp.publicKey));
+  if (isAlreadyInGame) {
+    await ctx.answerCallbackQuery("You have already joined this game!");
+    return;
+  }
+
+  const isCreator = gameAccount.creator.equals(playerKp.publicKey);
+  if (isCreator) {
+    await ctx.answerCallbackQuery("You are the creator of this game!");
+    return;
+  }
+
+  if (players.length >= gameAccount.maxPlayers) {
+    await ctx.answerCallbackQuery("This game is already full!");
+    return;
+  }
+
+  // Check balance
+  const [tokenBalance, gameBalance] = await Promise.all([
+    wallet.getTokenBalance(telegramId, TOKEN_MINT),
+    (async () => {
+      try {
+        const playerBalancePda = PDAManager.getPlayerBalancePDA(
+          playerKp.publicKey,
+          new PublicKey(TOKEN_MINT),
+          program.programId
+        );
+        const playerBalance = await program.account.playerBalance.fetch(playerBalancePda);
+        return Number(playerBalance.amount);
+      } catch (error) {
+        return 0;
+      }
+    })()
+  ]);
+
+  const gameAmount = Number(gameAccount.amount);
+  const totalBalance = tokenBalance + gameBalance;
+
+  if (totalBalance < gameAmount) {
+    const metadata = await getTokenMetadata();
+    await ctx.answerCallbackQuery(`Insufficient balance. You have ${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${TICKER} but need ${wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${TICKER}`);
+    return;
+  }
+
+  // Ensure player balance and join
+  await gameManager.ensurePlayerBalance(playerKp);
+
+  if (gameAccount.isPrivate) {
+    const result = await gameManager.joinPrivateGame(gamePda, playerKp, ctx.chat?.id || 0);
+    if (!result.success) {
+      await ctx.answerCallbackQuery(result.error || "Failed to join private game");
+      return;
+    }
+  } else {
+    const tx = await program.methods
+      .joinGame()
+      .accounts({
+        game: gamePda,
+        player: playerKp.publicKey,
+      })
+      .signers([playerKp])
+      .rpc();
+    await wallet.confirmTransaction(tx);
+  }
+
+  // Save player mapping and participant
+  const playerPubkey = playerKp.publicKey.toBase58();
+  gameDb.savePlayerMapping(playerPubkey, telegramId.toString());
+  gameDb.saveGameParticipant(game.game_address, telegramId.toString(), playerPubkey);
+
+  // Update game message
+  const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
+  const gameType = Object.keys(gameAccount.gameType)[0].charAt(0).toUpperCase() + Object.keys(gameAccount.gameType)[0].slice(1);
+  await gameManager.updateGameMessage(ctx, game.game_address, gameType, Number(game.amount), creatorUsername, "Active");
+
+  // Send join notification
+  const joinerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
+  const updatedGameAccount = await program.account.game.fetch(gamePda);
+  const playerCount = updatedGameAccount.players.length;
+  const maxPlayers = gameAccount.maxPlayers;
+  const gameName = gameType.toLowerCase();
+
+  const gameMessage = gameManager.getActiveGameMessage(game.game_address);
+  await ctx.reply(
+    `🎮 @${joinerUsername} joined the ${gameName}! (${playerCount}/${maxPlayers} players)`,
+    {
+      parse_mode: "HTML",
+      reply_to_message_id: gameMessage?.messageId
+    }
+  );
+
+  // Auto-complete if full
+  if (updatedGameAccount.players.length === gameAccount.maxPlayers) {
+    await new Promise(resolve => setTimeout(resolve, GAME_COMPLETION_WAIT_MS));
+    const finalGameAccount = await program.account.game.fetch(gamePda);
+    if (finalGameAccount.players.length === gameAccount.maxPlayers) {
+      const completed = await gameManager.autoCompleteGame(gamePda);
+      if (!completed) {
+        ctx.reply("⚠️ Game is full but could not be automatically completed. Please try again later or contact support.");
+      }
+    }
+  }
+};
+
+const handleRefreshGame = async (ctx: any, gamePda: PublicKey, game: any) => {
+  const currentGameAccount = await program.account.game.fetch(gamePda);
+  const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
+  const gameType = Object.keys(currentGameAccount.gameType)[0].charAt(0).toUpperCase() + Object.keys(currentGameAccount.gameType)[0].slice(1);
+
+  await gameManager.updateGameMessage(
+    ctx,
+    game.game_address,
+    gameType,
+    Number(game.amount),
+    creatorUsername,
+    "Active"
+  );
+
+  await ctx.answerCallbackQuery("Game status refreshed!");
+};
 
 // Error handling
 bot.catch((err) => {
   console.error("Bot error:", err);
 });
+
+// Helper function to claim winnings
+const claimWinnings = async (playerKp: anchor.web3.Keypair): Promise<number> => {
+  const playerBalancePda = PDAManager.getPlayerBalancePDA(
+    playerKp.publicKey,
+    new PublicKey(TOKEN_MINT),
+    program.programId
+  );
+
+  try {
+    const playerBalance = await program.account.playerBalance.fetch(playerBalancePda);
+    const claimableAmount = Number(playerBalance.amount);
+
+    if (claimableAmount <= 0) {
+      return 0;
+    }
+
+    const tx = await program.methods
+      .withdrawPlayerBalance()
+      .accounts({
+        player: playerKp.publicKey,
+        tokenMint: new PublicKey(TOKEN_MINT),
+      })
+      .signers([playerKp])
+      .rpc();
+
+    await wallet.confirmTransaction(tx);
+    return claimableAmount;
+  } catch (error: any) {
+    if (error.message?.includes('Account does not exist')) {
+      return 0;
+    }
+    throw error;
+  }
+};
 
 // Start the bot and setup Anchor
 setupAnchor().then(async () => {
@@ -1329,67 +1117,3 @@ setupAnchor().then(async () => {
 }).catch(error => {
   console.error("Failed to setup Anchor:", error);
 });
-
-// Helper function to claim winnings
-const claimWinnings = async (playerKp: anchor.web3.Keypair): Promise<number> => {
-  console.log(`🏆 Starting claim winnings process for player: ${playerKp.publicKey.toBase58()}`);
-
-  // Get program addresses
-  const playerBalancePda = PDAManager.getPlayerBalancePDA(
-    playerKp.publicKey,
-    new PublicKey(TOKEN_MINT),
-    program.programId
-  );
-
-  console.log(`  Player Balance PDA: ${playerBalancePda.toBase58()}`);
-
-  try {
-    // Get player balance
-    const playerBalance = await program.account.playerBalance.fetch(playerBalancePda);
-    const claimableAmount = Number(playerBalance.amount);
-
-    console.log(`  Claimable amount: ${claimableAmount} (raw), ${claimableAmount / Math.pow(10, 9)} (UI)`);
-
-    if (claimableAmount <= 0) {
-      console.log(`  No winnings to claim, returning 0`);
-      return 0;
-    }
-
-    console.log(`  Executing withdrawPlayerBalance() transaction...`);
-
-    // Call the contract to withdraw player balance
-    const tx = await program.methods
-      .withdrawPlayerBalance()
-      .accounts({
-        player: playerKp.publicKey,
-        tokenMint: new PublicKey(TOKEN_MINT),
-      })
-      .signers([playerKp])
-      .rpc();
-
-    console.log(`  Withdraw transaction signature: ${tx}`);
-
-    // Wait for confirmation
-    await wallet.confirmTransaction(tx);
-    console.log(`  Withdraw transaction confirmed`);
-
-    // Verify the withdrawal worked
-    try {
-      const updatedPlayerBalance = await program.account.playerBalance.fetch(playerBalancePda);
-      const remainingAmount = Number(updatedPlayerBalance.amount);
-      console.log(`  Remaining balance after withdrawal: ${remainingAmount}`);
-    } catch (error) {
-      console.log(`  Could not fetch updated balance: ${error}`);
-    }
-
-    console.log(`✅ Claim winnings completed successfully, claimed: ${claimableAmount}`);
-    return claimableAmount;
-  } catch (error: any) {
-    if (error.message?.includes('Account does not exist')) {
-      console.log(`  Player balance account does not exist, no winnings to claim`);
-      return 0;
-    }
-    console.error(`❌ Error in claim winnings: ${error}`);
-    throw error;
-  }
-};

@@ -1,12 +1,9 @@
 import { PublicKey } from "@solana/web3.js";
 
 /**
- * Unified PDA (Program Derived Address) management utility
- * Consolidates PDA logic from multiple files and provides caching
+ * Simplified PDA (Program Derived Address) management utility
  */
 export class PDAManager {
-  private static cache: Map<string, PublicKey> = new Map();
-
   private static readonly SEEDS = {
     ORACLE: "oracle",
     GAME: "game",
@@ -14,35 +11,14 @@ export class PDAManager {
     GAME_TOKEN: "game_token"
   } as const;
 
-  private static getCacheKey(seeds: (string | Buffer | PublicKey)[], programId: PublicKey): string {
-    const seedStrs = seeds.map(s => {
-      if (s instanceof PublicKey) return s.toBase58();
-      if (s instanceof Buffer) return s.toString('hex');
-      return s;
-    });
-    return seedStrs.join('_') + '_' + programId.toBase58();
-  }
-
   private static findPDA(seeds: (string | Buffer | PublicKey)[], programId: PublicKey): PublicKey {
-    const cacheKey = this.getCacheKey(seeds, programId);
-
-    if (this.cache.has(cacheKey)) {
-      return this.cache.get(cacheKey)!;
-    }
-
     const bufferSeeds = seeds.map(s => {
-      if (s instanceof PublicKey) {
-        return s.toBuffer();
-      }
-      if (s instanceof Buffer) {
-        return s;
-      }
-      // s is string
+      if (s instanceof PublicKey) return s.toBuffer();
+      if (s instanceof Buffer) return s;
       return Buffer.from(s as string, 'utf8');
     });
 
     const [pda] = PublicKey.findProgramAddressSync(bufferSeeds, programId);
-    this.cache.set(cacheKey, pda);
     return pda;
   }
 
@@ -60,9 +36,5 @@ export class PDAManager {
 
   static getGameTokenPDA(tokenMint: PublicKey, programId: PublicKey): PublicKey {
     return this.findPDA([this.SEEDS.GAME_TOKEN, tokenMint], programId);
-  }
-
-  static clearCache(): void {
-    this.cache.clear();
   }
 }

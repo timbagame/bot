@@ -6,7 +6,7 @@ import { GameDatabase } from "./database";
 import { PDAManager } from "./pda";
 import { MAX_RETRIES } from "./constants";
 import type { Coinflip } from "../../idl/idlType";
-import type { GameCompletedEvent, OracleResult, AuthorizationResult } from "../types";
+import type { OracleResult, AuthorizationResult } from "../types";
 
 // ================================
 // UTILITY FUNCTIONS
@@ -20,10 +20,6 @@ const calculateWinnerIndex = (secretKeyBuffer: Buffer, nPlayers: number): number
   const maxValid = BigInt('0xFFFFFFFFFFFFFFFF') - (BigInt('0xFFFFFFFFFFFFFFFF') % BigInt(nPlayers));
   const finalNumber = randomNumber % maxValid;
   return Number(finalNumber % BigInt(nPlayers));
-};
-
-const generateRandomHash = (secretKey: Buffer): Buffer => {
-  return createHash('sha256').update(secretKey).digest();
 };
 
 const retryOperation = async <T>(
@@ -76,7 +72,7 @@ export class OracleManager {
 
   public generateGameSecrets(): { randomHash: Buffer } {
     const secretKey = randomBytes(64);
-    const randomHash = generateRandomHash(secretKey);
+    const randomHash = createHash('sha256').update(secretKey).digest();
     const gamePda = PDAManager.getGamePDA(randomHash, this.program.programId);
 
     this.gameDb.saveOracleSecretKey(
@@ -91,14 +87,12 @@ export class OracleManager {
   // GAME COMPLETION
   // ================================
 
-  public async completeGame(
-    gamePda: PublicKey
-  ): Promise<OracleResult> {
+  public async completeGame(gamePda: PublicKey): Promise<OracleResult> {
     try {
       const adminKp = this.wallet.getAdminKeypair();
       const oraclePda = PDAManager.getOraclePDA(this.program.programId);
 
-      // Fetch oracle and game accounts in parallel
+      // Fetch oracle and game accounts
       const [oracleAccount, gameAccount] = await Promise.all([
         this.program.account.oracle.fetch(oraclePda),
         this.program.account.game.fetch(gamePda)
@@ -109,86 +103,47 @@ export class OracleManager {
         throw new Error("Unauthorized: Admin is not the oracle authority");
       }
 
-      // Get secret key
+      // Get secret key and calculate winner
       const secretKey = this.gameDb.getOracleSecretKey(gamePda.toBase58());
       if (!secretKey) {
         throw new Error("Secret key not found");
       }
 
-      // Calculate winner
       const secretKeyBuffer = Buffer.from(secretKey, "hex");
       const winnerIndex = calculateWinnerIndex(secretKeyBuffer, gameAccount.players.length);
       const winnerAddress = gameAccount.players[winnerIndex];
 
-      // Set up event listener for GameCompleted event
-      let gameCompletedEvent: GameCompletedEvent | null = null;
-      const eventListener = this.program.addEventListener('gameCompleted', (event: any) => {
-        // Check if this is the event for our game
-        if (event.gameKey.equals(gamePda)) {
-          gameCompletedEvent = {
-            gameKey: event.gameKey,
-            creator: event.creator,
-            winner: event.winner,
-            gameType: event.gameType,
-            amount: event.amount,
-            players: event.players,
-            tokenMint: event.tokenMint,
-            winnerAmount: event.winnerAmount,
-            feeAmount: event.feeAmount
-          };
-        }
+      // Execute completion transaction with retry
+      const tx = await retryOperation(async () => {
+        return await this.program.methods
+          .completeGame([...secretKeyBuffer])
+          .accounts({
+            game: gamePda,
+            player: winnerAddress,
+            creator: gameAccount.creator,
+            authority: adminKp.publicKey,
+          })
+          .signers([adminKp])
+          .rpc();
       });
 
-      try {
-        // Execute completion transaction with retry
-        const tx = await retryOperation(async () => {
-          return await this.program.methods
-            .completeGame([...secretKeyBuffer])
-            .accounts({
-              game: gamePda,
-              player: winnerAddress,
-              creator: gameAccount.creator,
-              authority: adminKp.publicKey,
-            })
-            .signers([adminKp])
-            .rpc();
-        });
+      await this.wallet.confirmTransaction(tx);
 
-        await this.wallet.confirmTransaction(tx);
-
-        // Wait a bit for the event to be emitted
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // Remove the event listener
-        await this.program.removeEventListener(eventListener);
-
-        if (gameCompletedEvent) {
-          return { success: true, event: gameCompletedEvent };
-        } else {
-          // Fallback: return basic info if event wasn't captured
-          return {
-            success: true,
-            event: {
-              gameKey: gamePda,
-              creator: gameAccount.creator,
-              winner: winnerAddress,
-              gameType: gameAccount.gameType,
-              amount: gameAccount.amount,
-              players: gameAccount.players,
-              tokenMint: gameAccount.tokenMint,
-              winnerAmount: new anchor.BN(0), // We don't have this info without the event
-              feeAmount: new anchor.BN(0) // We don't have this info without the event
-            }
-          };
+      // Return success with basic event info
+      return {
+        success: true,
+        event: {
+          gameKey: gamePda,
+          creator: gameAccount.creator,
+          winner: winnerAddress,
+          gameType: gameAccount.gameType,
+          amount: gameAccount.amount,
+          players: gameAccount.players,
+          tokenMint: gameAccount.tokenMint,
+          winnerAmount: new anchor.BN(0), // Event data not available here
+          feeAmount: new anchor.BN(0) // Event data not available here
         }
-      } finally {
-        // Ensure we always clean up the event listener
-        try {
-          await this.program.removeEventListener(eventListener);
-        } catch (error) {
-          // Ignore cleanup errors
-        }
-      }
+      };
     } catch (error) {
       console.error(`Error completing game ${gamePda.toBase58()}:`, error);
       return { success: false, error };
@@ -211,8 +166,6 @@ export class OracleManager {
       const expiresAt = createdAt + timeout;
       const isExpired = blockTime > expiresAt;
 
-      // Since we can no longer check game status from the account, we check if it still exists
-      // and meets the completion criteria
       return gameAccount.players.length >= gameAccount.maxPlayers ||
         (isExpired && gameAccount.players.length >= gameAccount.minPlayers);
     } catch (error) {
@@ -225,21 +178,14 @@ export class OracleManager {
   // PRIVATE GAME AUTHORIZATION
   // ================================
 
-  public async authorizePlayer(
-    gamePda: PublicKey,
-    chatId: number
-  ): Promise<AuthorizationResult> {
+  public async authorizePlayer(gamePda: PublicKey, chatId: number): Promise<AuthorizationResult> {
     try {
       const game = this.gameDb.getGame(gamePda.toBase58());
       if (!game) {
         return { authorized: false, error: "Game not found in database" };
       }
 
-      if (!game.chat_id) {
-        return { authorized: false, error: "Game does not have a registered chat" };
-      }
-
-      if (game.chat_id !== chatId) {
+      if (!game.chat_id || game.chat_id !== chatId) {
         return { authorized: false, error: "Player not in same chat as game creator" };
       }
 

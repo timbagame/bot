@@ -17,10 +17,6 @@ import {
 // UTILITY FUNCTIONS
 // ================================
 
-const isAccountNotFoundError = (error: any): boolean => {
-  return error instanceof SolanaJSONRPCError && error.message.includes('could not find account');
-};
-
 const retryWithBackoff = async <T>(
   operation: () => Promise<T>,
   maxRetries: number = MAX_RETRIES,
@@ -150,7 +146,7 @@ export class WalletManager {
       const account = await this.connection.getTokenAccountBalance(ata, "confirmed");
       return account.value.uiAmount ? account.value.uiAmount * Math.pow(10, account.value.decimals) : 0;
     } catch (error: any) {
-      if (isAccountNotFoundError(error)) {
+      if (error instanceof SolanaJSONRPCError && error.message.includes('could not find account')) {
         console.log(`Token account ${ata.toBase58()} not found for user ${pubkey.toBase58()}`);
       } else {
         console.error(`Error getting token balance for ${pubkey.toBase58()}: ${error}`);
