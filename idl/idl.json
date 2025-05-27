@@ -21,8 +21,7 @@
         },
         {
           "name": "authority",
-          "signer": true,
-          "optional": true
+          "signer": true
         },
         {
           "name": "player_balance",
@@ -753,8 +752,7 @@
         },
         {
           "name": "authority",
-          "signer": true,
-          "optional": true
+          "signer": true
         },
         {
           "name": "player_balance",

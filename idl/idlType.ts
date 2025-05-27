@@ -36,8 +36,7 @@ export type Coinflip = {
         },
         {
           "name": "authority",
-          "signer": true,
-          "optional": true
+          "signer": true
         },
         {
           "name": "playerBalance",
@@ -1385,8 +1384,7 @@ export type Coinflip = {
         },
         {
           "name": "authority",
-          "signer": true,
-          "optional": true
+          "signer": true
         },
         {
           "name": "playerBalance",
