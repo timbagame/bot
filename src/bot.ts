@@ -1062,6 +1062,11 @@ setupAnchor().then(async () => {
             continue;
           }
 
+          // Skip orphaned games - they are handled by blockchain scan
+          if (game.creator_telegram_id === "orphaned") {
+            continue;
+          }
+
           const gamePda = new PublicKey(game.game_address);
           const gameAccount = await program.account.game.fetch(gamePda);
 

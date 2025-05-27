@@ -132,6 +132,16 @@ export class OracleManager {
 
       console.log(`Cancelling orphaned game ${gamePda.toBase58()} using oracle authority`);
 
+      // Check if there are any non-creator players to unjoin
+      const nonCreatorPlayers = gameAccount.players.filter((player: any) => !player.equals(gameAccount.creator));
+
+      if (nonCreatorPlayers.length > 0) {
+        console.log(`Game has ${nonCreatorPlayers.length} non-creator players, unjoining them first`);
+        await this.unjoinAllPlayers(gamePda, gameAccount, adminKp);
+      } else if (gameAccount.players.length > 0) {
+        console.log(`Only creator is in game, can cancel directly`);
+      }
+
       // Execute cancellation transaction with retry
       const tx = await retryOperation(async () => {
         return await this.program.methods
@@ -154,6 +164,39 @@ export class OracleManager {
     } catch (error) {
       console.error(`Error cancelling game with authority ${gamePda.toBase58()}:`, error);
       return { success: false, error };
+    }
+  }
+
+  private async unjoinAllPlayers(gamePda: PublicKey, gameAccount: any, adminKp: any): Promise<void> {
+    for (const playerPubkey of gameAccount.players) {
+      try {
+        // Skip the creator - they can cancel with players in the game
+        if (playerPubkey.equals(gameAccount.creator)) {
+          console.log(`Skipping creator ${playerPubkey.toBase58()} - they can cancel with players`);
+          continue;
+        }
+
+        console.log(`Unjoining player ${playerPubkey.toBase58()} from game ${gamePda.toBase58()}`);
+
+        const tx = await retryOperation(async () => {
+          return await this.program.methods
+            .unjoinGame()
+            .accounts({
+              game: gamePda,
+              player: playerPubkey,
+              authority: adminKp.publicKey,
+            })
+            .signers([adminKp])
+            .rpc();
+        });
+
+        await this.wallet.confirmTransaction(tx);
+        console.log(`Successfully unjoined player ${playerPubkey.toBase58()}`);
+
+      } catch (error) {
+        console.error(`Failed to unjoin player ${playerPubkey.toBase58()}:`, error);
+        // Continue with other players even if one fails
+      }
     }
   }
 

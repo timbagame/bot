@@ -599,6 +599,23 @@ export class GameManager {
       }
 
       // Cancel the game
+      if (creatorTelegramId === "orphaned") {
+        // For orphaned games, use oracle authority cancellation
+        const result = await this.oracleManager.cancelGameWithAuthority(gamePda);
+        if (!result.success) {
+          throw new Error(`Failed to cancel orphaned game: ${result.error}`);
+        }
+        const completedAt = blockTime * 1000;
+        this.gameDb.completeGame(gamePda.toBase58(), "cancelled", completedAt);
+        return {
+          cancelled: true,
+          amount: Number(gameAccount.amount),
+          creator: gameAccount.creator.toString(),
+          tx: "oracle_cancelled"
+        };
+      }
+
+      // For regular games, use creator cancellation
       const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
 
       const tx = await this.program.methods
