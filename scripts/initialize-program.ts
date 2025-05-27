@@ -54,8 +54,8 @@ const initializeOracle = async (program: anchor.Program<Coinflip>) => {
     // Initialize Oracle
     const tx = await program.methods
       .initializeOracle(
-        5, // Fee percentage
-        60, // Oracle buffer time
+        1, // Fee percentage
+        300, // Oracle buffer time
         100, // Max players
         7200, // Max timeout
         300 // Min timeout
