@@ -669,15 +669,15 @@ bot.command(["privatekey", "pk"], async (ctx: Context) => {
     const privateKeyArray = Array.from(playerData.keypair.secretKey);
     const privateKeyString = `[${privateKeyArray.join(',')}]`;
 
-    let response = "🔐 <b>Your Private Key</b>\n\n";
-    response += "⚠️ <b>SECURITY WARNING:</b>\n";
-    response += "• Never share your private key with anyone\n";
-    response += "• Store it securely offline\n";
-    response += "• Anyone with this key has full access to your wallet\n\n";
+    let response = `🔐 <b>Your Private Key</b>\n\n`;
+    response += `⚠️ <b>SECURITY WARNING:</b>\n`;
+    response += `• Never share your private key with anyone\n`;
+    response += `• Store it securely offline\n`;
+    response += `• Anyone with this key has full access to your wallet\n\n`;
     response += `Wallet Address: <code>${playerData.keypair.publicKey.toBase58()}</code>\n\n`;
     response += `Private Key (Array Format):\n<code>${privateKeyString}</code>\n\n`;
     response += `Private Key (Base58 Format):\n<code>${Buffer.from(playerData.keypair.secretKey).toString('base64')}</code>\n\n`;
-    response += "💡 You can import this key into Phantom, Solflare, or other Solana wallets.";
+    response += `💡 You can import this key into Phantom, Solflare, or other Solana wallets.`;
 
     await ctx.reply(response, {
       parse_mode: "HTML",
@@ -800,12 +800,6 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
   const isAlreadyInGame = players.some((p: PublicKey) => p.equals(playerKp.publicKey));
   if (isAlreadyInGame) {
     await ctx.answerCallbackQuery("You have already joined this game!");
-    return;
-  }
-
-  const isCreator = gameAccount.creator.equals(playerKp.publicKey);
-  if (isCreator) {
-    await ctx.answerCallbackQuery("You are the creator of this game!");
     return;
   }
 
