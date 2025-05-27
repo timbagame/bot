@@ -7,6 +7,7 @@
     "@coral-xyz/anchor": "^0.31.0",
     "@solana/spl-token": "^0.4.13",
     "grammy": "^1.35.1",
+    "@grammyjs/runner": "^2.0.3",
     "bip39": "^3.1.0"
   },
   "devDependencies": {

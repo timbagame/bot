@@ -4,6 +4,7 @@
     "": {
       "dependencies": {
         "@coral-xyz/anchor": "^0.31.0",
+        "@grammyjs/runner": "^2.0.3",
         "@solana/spl-token": "^0.4.13",
         "@solana/web3.js": "^1.98.0",
         "bip39": "^3.1.0",
@@ -22,6 +23,8 @@
     "@coral-xyz/anchor-errors": ["@coral-xyz/anchor-errors@0.31.0", "", {}, "sha512-SUERksFSQ+4F11hkROIwHq4mcoSMXJxwVWLoklefi4dU679zVWFVcTq6O7otvjY8wlUaRXeE+iYcQWZTw2ll6w=="],
 
     "@coral-xyz/borsh": ["@coral-xyz/borsh@0.31.0", "", { "dependencies": { "bn.js": "^5.1.2", "buffer-layout": "^1.2.0" }, "peerDependencies": { "@solana/web3.js": "^1.69.0" } }, "sha512-DwdQ5fuj+rGQCTKRnxnW1W2lvcpBaFc9m9M1TcGGlm+bwCcggmDgbLKLgF+LjIrKnc7Nd+bCACx5RA9YTK2I4Q=="],
+
+    "@grammyjs/runner": ["@grammyjs/runner@2.0.3", "", { "dependencies": { "abort-controller": "^3.0.0" }, "peerDependencies": { "grammy": "^1.13.1" } }, "sha512-nckmTs1dPWfVQteK9cxqxzE+0m1VRvluLWB8UgFzsjg62w3qthPJt0TYtJBEdG7OedvfQq4vnFAyE6iaMkR42A=="],
 
     "@grammyjs/types": ["@grammyjs/types@3.19.0", "", {}, "sha512-N0MS+RJG+AGSNuka1GWVj88oyK1oti4I0eQq6jGo4hic3P9MwFfnHjGQuIExZ3tlJUrZYwC/T7gk4Tu3+guJyg=="],
 

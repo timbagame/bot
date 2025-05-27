@@ -1,4 +1,5 @@
 import { Bot, Context } from "grammy";
+import { run, sequentialize } from "@grammyjs/runner";
 import { WalletManager } from "./utils/wallet";
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
@@ -27,6 +28,26 @@ const bot = new Bot(process.env.TELEGRAM_TOKEN!);
 const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
 const TOKEN_MINT = process.env.TOKEN_MINT!;
 const TICKER = process.env.TICKER!;
+
+// Configure concurrent processing with sequentialization
+// This ensures operations for the same user are processed in order
+// while allowing concurrent processing between different users
+bot.use(sequentialize((ctx) => {
+  // Sequentialize by user ID for all user operations
+  const userId = ctx.from?.id?.toString();
+  if (!userId) return undefined;
+
+  // For callback queries, also sequentialize by game address to prevent race conditions
+  if (ctx.callbackQuery?.data) {
+    const callbackData = ctx.callbackQuery.data;
+    if (callbackData.startsWith("join_") || callbackData.startsWith("unjoin_") || callbackData.startsWith("refresh_")) {
+      const gameAddress = callbackData.split("_")[1];
+      return [userId, `game_${gameAddress}`];
+    }
+  }
+
+  return userId;
+}));
 
 // Add token metadata cache at the top level
 let tokenMetadata: { decimals: number } | null = null;
@@ -1264,7 +1285,47 @@ setupAnchor().then(async () => {
     }
   }, EXPIRED_GAMES_CHECK_INTERVAL_MS); // Check every minute
 
-  bot.start();
+  // Start the bot with concurrent processing
+  console.log("Starting bot with concurrent processing...");
+  const handle = run(bot, {
+    runner: {
+      fetch: {
+        // Only handle updates we actually process
+        allowed_updates: [
+          "message",
+          "callback_query"
+        ]
+      }
+    }
+  });
+
+  // Set up graceful shutdown
+  const shutdown = async (signal: string) => {
+    console.log(`\n🛑 Received ${signal}, shutting down gracefully...`);
+    try {
+      await handle?.stop();
+      console.log("✅ Bot stopped successfully");
+      process.exit(0);
+    } catch (error) {
+      console.error("❌ Error during shutdown:", error);
+      process.exit(1);
+    }
+  };
+
+  // Handle different shutdown signals
+  process.once("SIGINT", () => shutdown("SIGINT"));
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+
+  // Handle the runner task completion
+  handle?.task()?.then(() => {
+    console.log("🏁 Bot runner task completed");
+  }).catch((error) => {
+    console.error("❌ Bot runner task failed:", error);
+  });
+
+  console.log("✅ Bot is running with concurrent processing!");
+  console.log("📊 Concurrent update processing is now enabled");
+  console.log("🔄 Game operations are sequentialized per user to prevent conflicts");
 }).catch(error => {
   console.error("Failed to setup Anchor:", error);
 });
