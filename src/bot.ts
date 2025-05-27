@@ -1170,28 +1170,16 @@ setupAnchor().then(async () => {
         console.log(`📝 Updated game message for completed game ${gameAddress}`);
       }
 
-      // Send detailed completion notification
+      // Send simplified completion notification
       try {
         const metadata = await wallet.getTokenMetadata(TOKEN_MINT);
         const winnerUsername = await gameManager.getPlayerUsername(dummyCtx, winnerAddress);
-        const entryAmount = Number(event.amount);
-        const playerCount = event.players.length;
-        const totalPool = entryAmount * playerCount;
         const winnerAmount = Number(event.winnerAmount);
-        const feeAmount = Number(event.feeAmount);
         const gameType = Object.keys(event.gameType)[0].charAt(0).toUpperCase() + Object.keys(event.gameType)[0].slice(1);
 
         let notificationText = `🎉 <b>${gameType} Completed!</b>\n\n`;
         notificationText += `🏆 Winner: @${winnerUsername}\n`;
-        notificationText += `💰 Entry Amount: ${wallet.formatTokenBalance(entryAmount, metadata.decimals)} ${TICKER}\n`;
-        notificationText += `🎯 Total Pool: ${wallet.formatTokenBalance(totalPool, metadata.decimals)} ${TICKER}\n`;
-        notificationText += `💸 Winner Receives: ${wallet.formatTokenBalance(winnerAmount, metadata.decimals)} ${TICKER}\n`;
-
-        if (feeAmount > 0) {
-          notificationText += `📊 Protocol Fee: ${wallet.formatTokenBalance(feeAmount, metadata.decimals)} ${TICKER}\n`;
-        }
-
-        notificationText += `👥 Players: ${playerCount}`;
+        notificationText += `💰 Prize: ${wallet.formatTokenBalance(winnerAmount, metadata.decimals)} ${TICKER}`;
 
         // Get the game message for reply_to_message_id
         const gameMessage = gameManager.getActiveGameMessage(gameAddress);
