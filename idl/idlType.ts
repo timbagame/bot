@@ -2274,6 +2274,11 @@ export type Coinflip = {
       "msg": "Game not ready for oracle"
     },
     {
+      "code": 7104,
+      "name": "coinflipHasActivePlayers",
+      "msg": "Cannot cancel coinflip game with active players"
+    },
+    {
       "code": 7200,
       "name": "alreadyJoined",
       "msg": "Player already joined"

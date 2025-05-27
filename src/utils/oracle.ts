@@ -106,7 +106,8 @@ export class OracleManager {
       // Get secret key and calculate winner
       const secretKey = this.gameDb.getOracleSecretKey(gamePda.toBase58());
       if (!secretKey) {
-        throw new Error("Secret key not found");
+        console.log(`No secret key found for game ${gamePda.toBase58()}, attempting oracle cancellation instead`);
+        return await this.cancelGameWithAuthority(gamePda);
       }
 
       const secretKeyBuffer = Buffer.from(secretKey, "hex");
@@ -146,6 +147,62 @@ export class OracleManager {
       };
     } catch (error) {
       console.error(`Error completing game ${gamePda.toBase58()}:`, error);
+      return { success: false, error };
+    }
+  }
+
+  public async cancelGameWithAuthority(gamePda: PublicKey): Promise<OracleResult> {
+    try {
+      const adminKp = this.wallet.getAdminKeypair();
+      const oraclePda = PDAManager.getOraclePDA(this.program.programId);
+
+      // Fetch oracle and game accounts
+      const [oracleAccount, gameAccount] = await Promise.all([
+        this.program.account.oracle.fetch(oraclePda),
+        this.program.account.game.fetch(gamePda)
+      ]);
+
+      // Verify oracle authority
+      if (!oracleAccount.authority.equals(adminKp.publicKey)) {
+        throw new Error("Unauthorized: Admin is not the oracle authority");
+      }
+
+      console.log(`Cancelling orphaned game ${gamePda.toBase58()} using oracle authority`);
+
+      // Execute cancellation transaction with retry
+      const tx = await retryOperation(async () => {
+        return await this.program.methods
+          .cancelGame()
+          .accounts({
+            game: gamePda,
+            creator: gameAccount.creator,
+            authority: adminKp.publicKey,
+          })
+          .signers([adminKp])
+          .rpc();
+      });
+
+      await this.wallet.confirmTransaction(tx);
+
+      console.log(`Successfully cancelled orphaned game ${gamePda.toBase58()} with tx: ${tx}`);
+
+      // Return success with cancellation event info
+      return {
+        success: true,
+        event: {
+          gameKey: gamePda,
+          creator: gameAccount.creator,
+          winner: new PublicKey("11111111111111111111111111111111"), // Use null address for cancelled games
+          gameType: gameAccount.gameType,
+          amount: gameAccount.amount,
+          players: gameAccount.players,
+          tokenMint: gameAccount.tokenMint,
+          winnerAmount: new anchor.BN(0),
+          feeAmount: new anchor.BN(0)
+        }
+      };
+    } catch (error) {
+      console.error(`Error cancelling game with authority ${gamePda.toBase58()}:`, error);
       return { success: false, error };
     }
   }

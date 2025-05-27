@@ -1220,6 +1220,11 @@
       "msg": "Game not ready for oracle"
     },
     {
+      "code": 7104,
+      "name": "CoinflipHasActivePlayers",
+      "msg": "Cannot cancel coinflip game with active players"
+    },
+    {
       "code": 7200,
       "name": "AlreadyJoined",
       "msg": "Player already joined"
