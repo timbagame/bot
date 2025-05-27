@@ -1220,6 +1220,11 @@ setupAnchor().then(async () => {
       const allGames = await gameDb.getAllGames();
       for (const game of allGames) {
         try {
+          // Skip games that are already completed
+          if (game.status === "completed") {
+            continue;
+          }
+
           const gamePda = new PublicKey(game.game_address);
           const gameAccount = await program.account.game.fetch(gamePda);
 
@@ -1251,8 +1256,19 @@ setupAnchor().then(async () => {
               console.log(`Successfully processed expired game ${game.game_address}`);
             }
           }
-        } catch (error) {
-          console.error(`Error processing game ${game.game_address}:`, error);
+        } catch (error: any) {
+          // If we can't fetch the game account, it might be completed and closed
+          // Check if it's in our database as completed
+          if (error.message?.includes('Account does not exist')) {
+            const gameData = gameDb.getGame(game.game_address);
+            if (gameData && gameData.status !== "completed") {
+              console.log(`Game ${game.game_address} account not found but not marked as completed in DB - marking as completed`);
+              // Mark as completed if the account is gone but not marked in DB
+              gameDb.completeGame(game.game_address, "cancelled", Date.now());
+            }
+          } else {
+            console.error(`Error processing game ${game.game_address}:`, error);
+          }
         }
       }
     } catch (error) {
