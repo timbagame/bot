@@ -18,6 +18,7 @@ import {
   GIVEAWAY_MAX_PLAYERS,
   GAME_COMPLETION_WAIT_MS,
   EXPIRED_GAMES_CHECK_INTERVAL_MS,
+  BLOCKCHAIN_SCAN_INTERVAL_MS,
   TOKEN_METADATA_CACHE_DURATION
 } from "./utils/constants";
 import type { ParsedAmount, PlayerData, GameCompletedEvent } from "./types";
@@ -500,7 +501,8 @@ bot.command("help", async (ctx: Context) => {
     `/games - Show your recent games\n` +
     `/debug - Show detailed wallet debug info (reply to user for their info too)\n` +
     `/checktx &lt;signature&gt; - Check transaction details and status\n` +
-    `/oracle - Check Oracle configuration\n\n` +
+    `/oracle - Check Oracle configuration\n` +
+    `/scan - Scan blockchain for orphaned games (private chat only)\n\n` +
     `<b>ℹ️ Important:</b> Your player balance account will be automatically initialized when needed.`;
 
   await ctx.reply(helpText, {
@@ -707,6 +709,44 @@ bot.command("oracle", async (ctx: Context) => {
     });
   } catch (error) {
     await handleCommandError(ctx, error, "oracle");
+  }
+});
+
+// Add after the existing commands, before the callback query handler
+bot.command("scan", async (ctx: Context) => {
+  // Only allow this command in private chats or from specific users for security
+  if (ctx.chat?.type !== "private") {
+    return ctx.reply("🔒 This command can only be used in private messages for security reasons.", {
+      reply_to_message_id: ctx.message?.message_id
+    });
+  }
+
+  try {
+    const processingMsg = await ctx.reply("🔍 Starting blockchain scan for orphaned games...", {
+      reply_to_message_id: ctx.message?.message_id
+    });
+
+    await gameManager.scanBlockchainForOrphanedGames();
+
+    // Get statistics after the scan
+    const stats = gameDb.getOrphanedGameStats();
+
+    let response = "✅ Blockchain scan completed successfully!\n\n";
+    response += `📊 <b>Orphaned Game Statistics:</b>\n`;
+    response += `Total Found: ${stats.total}\n`;
+    response += `Active: ${stats.active}\n`;
+    response += `Completed: ${stats.completed}\n`;
+    response += `Failed: ${stats.failed}\n\n`;
+    response += `Check console logs for detailed information.`;
+
+    await ctx.api.editMessageText(
+      ctx.chat!.id,
+      processingMsg.message_id,
+      response,
+      { parse_mode: "HTML" }
+    );
+  } catch (error) {
+    await handleCommandError(ctx, error, "scan");
   }
 });
 
@@ -1072,6 +1112,17 @@ setupAnchor().then(async () => {
       console.error("Error in periodic game check:", error);
     }
   }, EXPIRED_GAMES_CHECK_INTERVAL_MS); // Check every minute
+
+  // Start periodic blockchain scan for orphaned games (less frequent)
+  setInterval(async () => {
+    try {
+      await gameManager.scanBlockchainForOrphanedGames();
+    } catch (error) {
+      console.error("Error in periodic blockchain scan:", error);
+    }
+  }, BLOCKCHAIN_SCAN_INTERVAL_MS); // Check every 15 minutes
+
+  console.log(`🔍 Periodic blockchain scan enabled (every ${BLOCKCHAIN_SCAN_INTERVAL_MS / 60000} minutes)`);
 
   // Start the bot with concurrent processing
   console.log("Starting bot with concurrent processing...");

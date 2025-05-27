@@ -17,8 +17,12 @@
         },
         {
           "name": "creator",
-          "writable": true,
-          "signer": true
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "optional": true
         },
         {
           "name": "player_balance",

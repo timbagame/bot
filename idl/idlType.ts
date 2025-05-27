@@ -32,8 +32,12 @@ export type Coinflip = {
         },
         {
           "name": "creator",
-          "writable": true,
-          "signer": true
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "optional": true
         },
         {
           "name": "playerBalance",

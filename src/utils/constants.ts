@@ -23,7 +23,8 @@ export const CONFIRMATION_TIMEOUT_MS = 30000;
 // ================================
 
 export const GAME_COMPLETION_WAIT_MS = 5000;
-export const EXPIRED_GAMES_CHECK_INTERVAL_MS = 60000;
+export const EXPIRED_GAMES_CHECK_INTERVAL_MS = 60000; // 1 minute
+export const BLOCKCHAIN_SCAN_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 
 // ================================
 // CACHE DURATIONS (in milliseconds)

@@ -153,6 +153,54 @@ export class GameDatabase {
     }
   }
 
+  public gameExists(gameAddress: string): boolean {
+    try {
+      const stmt = this.db.prepare('SELECT 1 FROM games WHERE game_address = ? LIMIT 1');
+      const result = stmt.get(gameAddress);
+      return !!result;
+    } catch (error) {
+      console.error("Error checking if game exists:", error);
+      return false;
+    }
+  }
+
+  public saveOrphanedGame(gameAddress: string, amount: number, gameType: string, status: string = 'orphaned'): void {
+    try {
+      const stmt = this.db.prepare(
+        'INSERT OR REPLACE INTO games (game_address, creator_telegram_id, amount, created_at, game_type, status) VALUES (?, ?, ?, ?, ?, ?)'
+      );
+      stmt.run(gameAddress, 'orphaned', amount, Date.now(), gameType, status);
+      console.log(`Saved orphaned game ${gameAddress} to database`);
+    } catch (error) {
+      console.error("Error saving orphaned game:", error);
+      throw error;
+    }
+  }
+
+  public getOrphanedGameStats(): { total: number; active: number; completed: number; failed: number } {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT
+          COUNT(*) as total,
+          SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active,
+          SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+        FROM games
+        WHERE creator_telegram_id = 'orphaned'
+      `);
+      const result = stmt.get() as any;
+      return {
+        total: result.total || 0,
+        active: result.active || 0,
+        completed: result.completed || 0,
+        failed: result.failed || 0
+      };
+    } catch (error) {
+      console.error("Error getting orphaned game stats:", error);
+      return { total: 0, active: 0, completed: 0, failed: 0 };
+    }
+  }
+
   public saveGameMessage(gameAddress: string, messageId: number, chatId: number): void {
     try {
       const stmt = this.db.prepare(
