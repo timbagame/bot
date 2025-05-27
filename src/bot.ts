@@ -829,7 +829,9 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
   const gameAmount = Number(gameAccount.amount);
   const totalBalance = tokenBalance + gameBalance;
 
-  if (totalBalance < gameAmount) {
+  // Only check balance for coinflips, giveaways are free to join
+  const currentGameType = Object.keys(gameAccount.gameType)[0];
+  if (currentGameType === "coinflip" && totalBalance < gameAmount) {
     const metadata = await getTokenMetadata();
     await ctx.answerCallbackQuery(`Insufficient balance. You have ${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${TICKER} but need ${wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${TICKER}`);
     return;
