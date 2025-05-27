@@ -797,10 +797,6 @@ export class GameManager {
         throw new Error("You are not in this game");
       }
 
-      if (gameAccount.creator.equals(playerKp.publicKey)) {
-        throw new Error("Game creator cannot unjoin");
-      }
-
       const tx = await this.program.methods
         .unjoinGame()
         .accounts({
