@@ -52,14 +52,16 @@ const initializeOracle = async (program: anchor.Program<Coinflip>) => {
     const adminKeypair = wallet.getAdminKeypair();
 
     // Initialize Oracle
+    const oracleConfig = {
+      feePercentage: 1,        // 1% fee
+      oracleBufferTime: 300,   // 5 minute buffer
+      maxPlayers: 100,         // 100 max players
+      maxTimeout: 7200,        // 2 hours max timeout
+      minTimeout: 300          // 5 minutes min timeout
+    };
+
     const tx = await program.methods
-      .initializeOracle(
-        1, // Fee percentage
-        300, // Oracle buffer time
-        100, // Max players
-        7200, // Max timeout
-        300 // Min timeout
-      )
+      .initializeOracle(oracleConfig)
       .accounts({
         authority: adminKeypair.publicKey,
       })
