@@ -704,6 +704,7 @@ export class GameManager {
         .accounts({
           game: gamePda,
           player: playerKp.publicKey,
+          authority: playerKp.publicKey,
         })
         .signers([playerKp])
         .rpc();
