@@ -89,19 +89,7 @@ export class OracleManager {
 
   public async completeGame(gamePda: PublicKey): Promise<OracleResult> {
     try {
-      const adminKp = this.wallet.getAdminKeypair();
-      const oraclePda = PDAManager.getOraclePDA(this.program.programId);
-
-      // Fetch oracle and game accounts
-      const [oracleAccount, gameAccount] = await Promise.all([
-        this.program.account.oracle.fetch(oraclePda),
-        this.program.account.game.fetch(gamePda)
-      ]);
-
-      // Verify oracle authority
-      if (!oracleAccount.authority.equals(adminKp.publicKey)) {
-        throw new Error("Unauthorized: Admin is not the oracle authority");
-      }
+      const { adminKp, gameAccount } = await this.validateOracleAuthority(gamePda);
 
       // Get secret key and calculate winner
       const secretKey = this.gameDb.getOracleSecretKey(gamePda.toBase58());
@@ -131,20 +119,7 @@ export class OracleManager {
       await this.wallet.confirmTransaction(tx);
 
       // Return success with basic event info
-      return {
-        success: true,
-        event: {
-          gameKey: gamePda,
-          creator: gameAccount.creator,
-          winner: winnerAddress,
-          gameType: gameAccount.gameType,
-          amount: gameAccount.amount,
-          players: gameAccount.players,
-          tokenMint: gameAccount.tokenMint,
-          winnerAmount: new anchor.BN(0), // Event data not available here
-          feeAmount: new anchor.BN(0) // Event data not available here
-        }
-      };
+      return this.createSuccessResult(gamePda, gameAccount, winnerAddress);
     } catch (error) {
       console.error(`Error completing game ${gamePda.toBase58()}:`, error);
       return { success: false, error };
@@ -153,19 +128,7 @@ export class OracleManager {
 
   public async cancelGameWithAuthority(gamePda: PublicKey): Promise<OracleResult> {
     try {
-      const adminKp = this.wallet.getAdminKeypair();
-      const oraclePda = PDAManager.getOraclePDA(this.program.programId);
-
-      // Fetch oracle and game accounts
-      const [oracleAccount, gameAccount] = await Promise.all([
-        this.program.account.oracle.fetch(oraclePda),
-        this.program.account.game.fetch(gamePda)
-      ]);
-
-      // Verify oracle authority
-      if (!oracleAccount.authority.equals(adminKp.publicKey)) {
-        throw new Error("Unauthorized: Admin is not the oracle authority");
-      }
+      const { adminKp, gameAccount } = await this.validateOracleAuthority(gamePda);
 
       console.log(`Cancelling orphaned game ${gamePda.toBase58()} using oracle authority`);
 
@@ -187,20 +150,7 @@ export class OracleManager {
       console.log(`Successfully cancelled orphaned game ${gamePda.toBase58()} with tx: ${tx}`);
 
       // Return success with cancellation event info
-      return {
-        success: true,
-        event: {
-          gameKey: gamePda,
-          creator: gameAccount.creator,
-          winner: new PublicKey("11111111111111111111111111111111"), // Use null address for cancelled games
-          gameType: gameAccount.gameType,
-          amount: gameAccount.amount,
-          players: gameAccount.players,
-          tokenMint: gameAccount.tokenMint,
-          winnerAmount: new anchor.BN(0),
-          feeAmount: new anchor.BN(0)
-        }
-      };
+      return this.createSuccessResult(gamePda, gameAccount, new PublicKey("11111111111111111111111111111111"));
     } catch (error) {
       console.error(`Error cancelling game with authority ${gamePda.toBase58()}:`, error);
       return { success: false, error };
@@ -252,5 +202,44 @@ export class OracleManager {
       console.error(`Error authorizing player:`, error);
       return { authorized: false, error: (error as Error).message };
     }
+  }
+
+  // ================================
+  // HELPER METHODS
+  // ================================
+
+  private async validateOracleAuthority(gamePda: PublicKey): Promise<{ adminKp: any; gameAccount: any }> {
+    const adminKp = this.wallet.getAdminKeypair();
+    const oraclePda = PDAManager.getOraclePDA(this.program.programId);
+
+    // Fetch oracle and game accounts
+    const [oracleAccount, gameAccount] = await Promise.all([
+      this.program.account.oracle.fetch(oraclePda),
+      this.program.account.game.fetch(gamePda)
+    ]);
+
+    // Verify oracle authority
+    if (!oracleAccount.authority.equals(adminKp.publicKey)) {
+      throw new Error("Unauthorized: Admin is not the oracle authority");
+    }
+
+    return { adminKp, gameAccount };
+  }
+
+  private createSuccessResult(gamePda: PublicKey, gameAccount: any, winnerAddress: PublicKey): OracleResult {
+    return {
+      success: true,
+      event: {
+        gameKey: gamePda,
+        creator: gameAccount.creator,
+        winner: winnerAddress,
+        gameType: gameAccount.gameType,
+        amount: gameAccount.amount,
+        players: gameAccount.players,
+        tokenMint: gameAccount.tokenMint,
+        winnerAmount: new anchor.BN(0), // Event data not available here
+        feeAmount: new anchor.BN(0) // Event data not available here
+      }
+    };
   }
 }

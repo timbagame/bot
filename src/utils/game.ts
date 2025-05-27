@@ -866,143 +866,132 @@ export class GameManager {
     try {
       console.log("🔍 Starting blockchain scan for orphaned games...");
 
-      // Get all game accounts from the blockchain
-      const connection = this.wallet.getConnection();
-
-      const programAccounts = await connection.getProgramAccounts(this.program.programId, {
-        // Remove the dataSize filter since it varies based on max_players
-        // Game space = 100 + (32 * max_players) bytes
-        // We'll rely on parsing to identify valid game accounts
-      });
-
-      console.log(`📊 Found ${programAccounts.length} program accounts on blockchain`);
-
-      const orphanedGames: { address: string; account: any }[] = [];
-      let validGameAccounts = 0;
-
-      for (const { pubkey } of programAccounts) {
-        try {
-          // Try to parse as a game account - this will throw if it's not a valid game account
-          const gameAccount = await this.program.account.game.fetch(pubkey);
-          validGameAccounts++;
-
-          const gameAddress = pubkey.toBase58();
-
-          // Check if this game exists in our database
-          if (!this.gameDb.gameExists(gameAddress)) {
-            // This is an orphaned game - exists on blockchain but not in database
-            orphanedGames.push({ address: gameAddress, account: gameAccount });
-            console.log(`🔍 Found orphaned game: ${gameAddress} (max_players: ${gameAccount.maxPlayers})`);
-          }
-        } catch (error) {
-          // Skip accounts that can't be parsed as game accounts
-          // This is expected for other account types in the program
-          continue;
-        }
-      }
-
-      console.log(`🎮 Found ${validGameAccounts} valid game accounts on blockchain`);
+      const orphanedGames = await this.findOrphanedGames();
       console.log(`🚨 Found ${orphanedGames.length} orphaned games`);
 
-      // Process orphaned games
       let processedCount = 0;
       for (const { address, account } of orphanedGames) {
-        try {
-          const gamePda = new PublicKey(address);
-          const blockTime = await this.wallet.getBlockchainTime();
-          const createdAt = Number(account.createdAt);
-          const timeout = Number(account.timeout);
-          const expiresAt = createdAt + timeout;
-          const isExpired = blockTime > expiresAt;
-          const gameType = Object.keys(account.gameType)[0];
-
-          console.log(`📋 Orphaned game ${address}: players=${account.players.length}/${account.maxPlayers}, expired=${isExpired}, type=${gameType}`);
-
-          // Only handle games that are expired and have insufficient players
-          if (isExpired && account.players.length < account.minPlayers) {
-            console.log(`🔄 Processing expired orphaned game: ${address}`);
-
-            // Try to cancel the game if we can
-            try {
-              const creatorKp = this.wallet.getAdminKeypair(); // Use admin for orphaned games
-
-              const tx = await this.program.methods
-                .cancelGame()
-                .accounts({
-                  game: gamePda,
-                  creator: account.creator,
-                })
-                .signers([creatorKp])
-                .rpc();
-
-              console.log(`✅ Successfully cancelled orphaned game ${address} with tx: ${tx}`);
-              processedCount++;
-
-              // Add entry to database to track this processed game
-              this.gameDb.saveOrphanedGame(address, Number(account.amount), gameType, 'completed');
-              this.gameDb.completeGame(address, "cancelled", blockTime * 1000);
-
-            } catch (cancelError: any) {
-              console.error(`❌ Failed to cancel orphaned game ${address}:`, cancelError.message);
-
-              // If we can't cancel, check if the game was already completed
-              if (cancelError.message?.includes('Account does not exist')) {
-                console.log(`ℹ️ Orphaned game ${address} was already completed/closed`);
-                // Still track it in our database as processed
-                this.gameDb.saveOrphanedGame(address, Number(account.amount), gameType, 'completed');
-                this.gameDb.completeGame(address, "unknown", blockTime * 1000);
-              } else {
-                // Track failed attempts to avoid retrying immediately
-                this.gameDb.saveOrphanedGame(address, Number(account.amount), gameType, 'failed');
-              }
-            }
-          } else if (!isExpired) {
-            console.log(`⏰ Orphaned game ${address} is not yet expired`);
-            // Track active orphaned games in database
-            this.gameDb.saveOrphanedGame(address, Number(account.amount), gameType, 'active');
-          } else if (account.players.length >= account.minPlayers) {
-            console.log(`👥 Orphaned game ${address} has enough players, attempting completion`);
-
-            // Try to complete the game if it has enough players
-            try {
-              const result = await this.oracleManager.completeGame(gamePda);
-              if (result.success) {
-                console.log(`✅ Successfully completed orphaned game ${address}`);
-                processedCount++;
-
-                // Add to database
-                const winnerAddress = result.event?.winner.toString() || "unknown";
-                this.gameDb.saveOrphanedGame(address, Number(account.amount), gameType, 'completed');
-                this.gameDb.completeGame(address, winnerAddress, blockTime * 1000);
-              } else {
-                console.log(`❌ Oracle completion failed for orphaned game ${address}`);
-                this.gameDb.saveOrphanedGame(address, Number(account.amount), gameType, 'failed');
-              }
-            } catch (completeError: any) {
-              console.error(`❌ Failed to complete orphaned game ${address}:`, completeError.message);
-              if (completeError.message?.includes('Account does not exist')) {
-                console.log(`ℹ️ Orphaned game ${address} was already completed/closed`);
-                this.gameDb.saveOrphanedGame(address, Number(account.amount), gameType, 'completed');
-                this.gameDb.completeGame(address, "unknown", blockTime * 1000);
-              } else {
-                this.gameDb.saveOrphanedGame(address, Number(account.amount), gameType, 'failed');
-              }
-            }
-          }
-
-        } catch (error: any) {
-          console.error(`❌ Error processing orphaned game ${address}:`, error.message);
-        }
+        const processed = await this.processOrphanedGame(address, account);
+        if (processed) processedCount++;
       }
 
       console.log(`🏁 Blockchain scan completed. Processed ${processedCount}/${orphanedGames.length} orphaned games`);
-
-      // Log statistics
-      const stats = this.gameDb.getOrphanedGameStats();
-      console.log(`📊 Orphaned game statistics - Total: ${stats.total}, Active: ${stats.active}, Completed: ${stats.completed}, Failed: ${stats.failed}`);
+      this.logOrphanedGameStats();
 
     } catch (error) {
       console.error("❌ Error during blockchain scan:", error);
     }
+  }
+
+  private async findOrphanedGames(): Promise<{ address: string; account: any }[]> {
+    const connection = this.wallet.getConnection();
+    const programAccounts = await connection.getProgramAccounts(this.program.programId);
+
+    console.log(`📊 Found ${programAccounts.length} program accounts on blockchain`);
+
+    const orphanedGames: { address: string; account: any }[] = [];
+    let validGameAccounts = 0;
+
+    for (const { pubkey } of programAccounts) {
+      try {
+        const gameAccount = await this.program.account.game.fetch(pubkey);
+        validGameAccounts++;
+
+        const gameAddress = pubkey.toBase58();
+        if (!this.gameDb.gameExists(gameAddress)) {
+          orphanedGames.push({ address: gameAddress, account: gameAccount });
+          console.log(`🔍 Found orphaned game: ${gameAddress} (${gameAccount.players.length}/${gameAccount.maxPlayers})`);
+        }
+      } catch (error) {
+        // Skip non-game accounts
+        continue;
+      }
+    }
+
+    console.log(`🎮 Found ${validGameAccounts} valid game accounts on blockchain`);
+    return orphanedGames;
+  }
+
+  private async processOrphanedGame(address: string, account: any): Promise<boolean> {
+    try {
+      const gamePda = new PublicKey(address);
+      const blockTime = await this.wallet.getBlockchainTime();
+      const gameType = Object.keys(account.gameType)[0];
+
+      const isExpired = blockTime > (Number(account.createdAt) + Number(account.timeout));
+      const hasEnoughPlayers = account.players.length >= account.minPlayers;
+
+      console.log(`📋 Processing ${address}: ${account.players.length}/${account.maxPlayers}, expired=${isExpired}`);
+
+      // Track in database first
+      this.gameDb.saveOrphanedGame(address, Number(account.amount), gameType, 'active');
+
+      // Determine action: complete, cancel, or skip
+      if (hasEnoughPlayers) {
+        return await this.tryCompleteOrCancel(gamePda, address, account, gameType, blockTime);
+      } else if (isExpired) {
+        return await this.tryCancelGame(gamePda, address, account, gameType, blockTime);
+      } else {
+        console.log(`⏰ Game ${address} not ready for processing`);
+        return false;
+      }
+
+    } catch (error: any) {
+      console.error(`❌ Error processing orphaned game ${address}:`, error.message);
+      return false;
+    }
+  }
+
+  private async tryCompleteOrCancel(gamePda: PublicKey, address: string, account: any, gameType: string, blockTime: number): Promise<boolean> {
+    console.log(`👥 Attempting completion for game ${address}`);
+
+    try {
+      const result = await this.oracleManager.completeGame(gamePda);
+      if (result.success) {
+        const winnerAddress = result.event?.winner.toString() || "unknown";
+        this.completeOrphanedGame(address, winnerAddress, gameType, blockTime);
+        console.log(`✅ Completed orphaned game ${address}`);
+        return true;
+      }
+    } catch (error: any) {
+      console.log(`⚠️ Completion failed for ${address}, falling back to cancellation`);
+    }
+
+    // Fallback to cancellation
+    return await this.tryCancelGame(gamePda, address, account, gameType, blockTime);
+  }
+
+  private async tryCancelGame(gamePda: PublicKey, address: string, account: any, gameType: string, blockTime: number): Promise<boolean> {
+    console.log(`🔄 Attempting cancellation for game ${address}`);
+
+    try {
+      const result = await this.oracleManager.cancelGameWithAuthority(gamePda);
+      if (result.success) {
+        this.completeOrphanedGame(address, "cancelled", gameType, blockTime);
+        console.log(`✅ Cancelled orphaned game ${address}`);
+        return true;
+      }
+    } catch (error: any) {
+      if (error.message?.includes('Account does not exist')) {
+        this.completeOrphanedGame(address, "unknown", gameType, blockTime);
+        console.log(`ℹ️ Game ${address} was already closed`);
+        return true;
+      } else {
+        this.gameDb.saveOrphanedGame(address, Number(account.amount), gameType, 'failed');
+        console.error(`❌ Failed to cancel ${address}:`, error.message);
+      }
+    }
+
+    return false;
+  }
+
+  private completeOrphanedGame(address: string, winnerAddress: string, gameType: string, blockTime: number): void {
+    this.gameDb.saveOrphanedGame(address, 0, gameType, 'completed'); // Amount doesn't matter for completed
+    this.gameDb.completeGame(address, winnerAddress, blockTime * 1000);
+  }
+
+  private logOrphanedGameStats(): void {
+    const stats = this.gameDb.getOrphanedGameStats();
+    console.log(`📊 Orphaned game statistics - Total: ${stats.total}, Active: ${stats.active}, Completed: ${stats.completed}, Failed: ${stats.failed}`);
   }
 }
