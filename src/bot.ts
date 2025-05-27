@@ -1027,7 +1027,7 @@ bot.on("callback_query", async (ctx) => {
           if (finalGameAccount.players.length === gameAccount.maxPlayers) {
             console.log(`Join transaction fully processed, attempting to complete game...`);
             // Automatically complete the game
-            const completed = await gameManager.autoCompleteGame(ctx, gamePda);
+            const completed = await gameManager.autoCompleteGame(gamePda);
             if (!completed) {
               ctx.reply("⚠️ Game is full but could not be automatically completed. Please try again later or contact support.");
             }
@@ -1130,6 +1130,7 @@ setupAnchor().then(async () => {
       const blockTime = await wallet.getBlockchainTime();
       const completedAt = blockTime * 1000;
       gameDb.completeGame(gameAddress, winnerAddress, completedAt);
+      console.log(`💾 Updated database with completion for game ${gameAddress}`);
 
       // Get game info for notifications
       const gameData = gameDb.getGame(gameAddress);
@@ -1144,15 +1145,66 @@ setupAnchor().then(async () => {
         chat: { id: gameData.chat_id },
         reply: async (text: string, options?: any) => {
           try {
-            await bot.api.sendMessage(gameData.chat_id!, text, options);
+            return await bot.api.sendMessage(gameData.chat_id!, text, options);
           } catch (error) {
             console.error(`Error sending notification to chat ${gameData.chat_id}:`, error);
           }
         }
       } as unknown as Context;
 
-      // Update game message and send notification
-      await gameManager.updateGameMessageWithCompletedEvent(dummyCtx, new PublicKey(gameAddress), event);
+      // Update game message to show completion
+      const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
+      if (creatorTelegramId) {
+        const creatorUsername = await gameManager.getUsernameFromTelegramId(dummyCtx, creatorTelegramId);
+        const gameType = Object.keys(event.gameType)[0].charAt(0).toUpperCase() + Object.keys(event.gameType)[0].slice(1);
+
+        await gameManager.updateGameMessage(
+          dummyCtx,
+          gameAddress,
+          gameType,
+          Number(event.amount),
+          creatorUsername,
+          "Completed",
+          winnerAddress
+        );
+        console.log(`📝 Updated game message for completed game ${gameAddress}`);
+      }
+
+      // Send detailed completion notification
+      try {
+        const metadata = await wallet.getTokenMetadata(TOKEN_MINT);
+        const winnerUsername = await gameManager.getPlayerUsername(dummyCtx, winnerAddress);
+        const entryAmount = Number(event.amount);
+        const playerCount = event.players.length;
+        const totalPool = entryAmount * playerCount;
+        const winnerAmount = Number(event.winnerAmount);
+        const feeAmount = Number(event.feeAmount);
+        const gameType = Object.keys(event.gameType)[0].charAt(0).toUpperCase() + Object.keys(event.gameType)[0].slice(1);
+
+        let notificationText = `🎉 <b>${gameType} Completed!</b>\n\n`;
+        notificationText += `🏆 Winner: @${winnerUsername}\n`;
+        notificationText += `💰 Entry Amount: ${wallet.formatTokenBalance(entryAmount, metadata.decimals)} ${TICKER}\n`;
+        notificationText += `🎯 Total Pool: ${wallet.formatTokenBalance(totalPool, metadata.decimals)} ${TICKER}\n`;
+        notificationText += `💸 Winner Receives: ${wallet.formatTokenBalance(winnerAmount, metadata.decimals)} ${TICKER}\n`;
+
+        if (feeAmount > 0) {
+          notificationText += `📊 Protocol Fee: ${wallet.formatTokenBalance(feeAmount, metadata.decimals)} ${TICKER}\n`;
+        }
+
+        notificationText += `👥 Players: ${playerCount}`;
+
+        // Get the game message for reply_to_message_id
+        const gameMessage = gameManager.getActiveGameMessage(gameAddress);
+        const replyToMessageId = gameMessage?.messageId;
+
+        await dummyCtx.reply(notificationText, {
+          parse_mode: "HTML",
+          reply_to_message_id: replyToMessageId
+        });
+        console.log(`🎊 Sent completion notification for game ${gameAddress}`);
+      } catch (error) {
+        console.error("Error sending completion notification:", error);
+      }
 
       console.log(`✅ Successfully processed GameCompleted event for game ${gameAddress}`);
     } catch (error) {
