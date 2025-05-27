@@ -32,6 +32,27 @@ const formatDate = (timestamp: number): string => {
   });
 };
 
+const formatExpirationTime = (createdAt: number, timeout: number, prefix: string = "⏰ "): string => {
+  const expiresAt = createdAt + timeout;
+  const expirationDate = new Date(expiresAt * 1000);
+  const now = new Date();
+  const timeUntilExpiry = expirationDate.getTime() - now.getTime();
+
+  if (timeUntilExpiry > 0) {
+    const minutesLeft = Math.floor(timeUntilExpiry / (1000 * 60));
+    const hoursLeft = Math.floor(minutesLeft / 60);
+    const remainingMinutes = minutesLeft % 60;
+
+    if (hoursLeft > 0) {
+      return `${prefix}Expires in: ${hoursLeft}h ${remainingMinutes}m`;
+    } else {
+      return `${prefix}Expires in: ${minutesLeft}m`;
+    }
+  } else {
+    return `${prefix}Expired`;
+  }
+};
+
 const categorizeGame = (gameData: any, telegramIdStr: string, playerPublicKey: string): string => {
   const winnerAddress = gameData.winner_address;
   const isCreator = gameData.creator_telegram_id === telegramIdStr;
@@ -184,6 +205,7 @@ export class GameManager {
     let currentPlayers = 0;
     let maxPlayers = 2;
     let playerInfo = "";
+    let expirationInfo = "";
 
     if (status.toLowerCase() === "completed") {
       // For completed games, use database info
@@ -210,6 +232,13 @@ export class GameManager {
           playerInfo += `• @${username}\n`;
         }
       }
+
+      // Add expiration info for active games
+      if (gameAccount) {
+        const createdAt = Number(gameAccount.createdAt);
+        const timeout = Number(gameAccount.timeout);
+        expirationInfo = "\n" + formatExpirationTime(createdAt, timeout);
+      }
     }
 
     // Winner info
@@ -222,13 +251,13 @@ export class GameManager {
     let messageText = `<b>🪙 ${gameType} Game</b>\n\n` +
       `💰 Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
       `👤 Creator: @${creatorUsername}\n` +
-      `👥 Players: ${currentPlayers}/${maxPlayers}${playerInfo}\n`;
+      `👥 Players: ${currentPlayers}/${maxPlayers}${playerInfo}`;
 
     if (status.toLowerCase() !== "completed") {
       const statusText = currentPlayers < maxPlayers ?
         `${maxPlayers - currentPlayers} more needed` :
         "Full - starting soon!";
-      messageText += `Status: ${statusText}`;
+      messageText += `\nStatus: ${statusText}${expirationInfo}`;
     }
 
     messageText += winnerInfo;
@@ -352,6 +381,11 @@ export class GameManager {
         ? `@${await this.getUsernameFromTelegramId(ctx, creatorTelegramId)}`
         : `<code>${creatorPubkey.slice(0, ADDRESS_DISPLAY_LENGTH)}...</code>`;
 
+      // Add expiration info
+      const createdAt = Number(gameAccount.createdAt);
+      const timeout = Number(gameAccount.timeout);
+      const expirationInfo = "\n" + formatExpirationTime(createdAt, timeout);
+
       let winnerInfo = "";
       const gameData = this.gameDb.getGame(gamePda.toBase58());
       if (gameData && gameData.winner_address && gameData.winner_address !== "cancelled" && gameData.winner_address !== DEFAULT_NULL_ADDRESS) {
@@ -362,7 +396,7 @@ export class GameManager {
       return `Type: ${gameType}\n` +
              `Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
              `Creator: ${creatorInfo}\n` +
-             `Players: ${currentPlayers}/${maxPlayers}${winnerInfo}`;
+             `Players: ${currentPlayers}/${maxPlayers}${expirationInfo}${winnerInfo}`;
     } catch (error: any) {
       return `Error fetching game: ${error.message}`;
     }
