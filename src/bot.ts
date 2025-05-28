@@ -763,6 +763,13 @@ bot.on("callback_query", async (ctx) => {
     return;
   }
 
+  // Check if the game is completed before allowing any actions
+  if (game.status === "completed") {
+    const statusMessage = game.winner_address === "cancelled" ? "cancelled" : "completed";
+    await ctx.answerCallbackQuery(`This game has already been ${statusMessage}!`);
+    return;
+  }
+
   try {
     const gamePda = new PublicKey(gameAddress);
     const telegramId = BigInt(ctx.from.id);
@@ -782,8 +789,18 @@ bot.on("callback_query", async (ctx) => {
     }
   } catch (error: any) {
     console.error(`Error in callback ${action}:`, error);
-    const userFriendlyError = formatUserFriendlyError(error, wallet);
-    await ctx.answerCallbackQuery(userFriendlyError.substring(0, 180));
+
+    // Handle specific case where account doesn't exist (game was completed/cancelled)
+    if (error.message?.includes('Account does not exist')) {
+      // Update database if needed
+      if (game.status === "active") {
+        gameDb.completeGame(gameAddress, "cancelled", Date.now());
+      }
+      await ctx.answerCallbackQuery("This game is no longer active!");
+    } else {
+      const userFriendlyError = formatUserFriendlyError(error, wallet);
+      await ctx.answerCallbackQuery(userFriendlyError.substring(0, 180));
+    }
   }
 });
 
@@ -794,124 +811,166 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
     return;
   }
 
-  const gameAccount = await program.account.game.fetch(gamePda);
-  const players = gameAccount.players;
+  try {
+    const gameAccount = await program.account.game.fetch(gamePda);
+    const players = gameAccount.players;
 
-  const isAlreadyInGame = players.some((p: PublicKey) => p.equals(playerKp.publicKey));
-  if (isAlreadyInGame) {
-    await ctx.answerCallbackQuery("You have already joined this game!");
-    return;
-  }
-
-  if (players.length >= gameAccount.maxPlayers) {
-    await ctx.answerCallbackQuery("This game is already full!");
-    return;
-  }
-
-  // Check balance
-  const [tokenBalance, gameBalance] = await Promise.all([
-    wallet.getTokenBalance(telegramId, TOKEN_MINT),
-    (async () => {
-      try {
-        const playerBalancePda = PDAManager.getPlayerBalancePDA(
-          playerKp.publicKey,
-          new PublicKey(TOKEN_MINT),
-          program.programId
-        );
-        const playerBalance = await program.account.playerBalance.fetch(playerBalancePda);
-        return Number(playerBalance.amount);
-      } catch (error) {
-        return 0;
-      }
-    })()
-  ]);
-
-  const gameAmount = Number(gameAccount.amount);
-  const totalBalance = tokenBalance + gameBalance;
-
-  // Only check balance for coinflips, giveaways are free to join
-  const currentGameType = Object.keys(gameAccount.gameType)[0];
-  if (currentGameType === "coinflip" && totalBalance < gameAmount) {
-    const metadata = await getTokenMetadata();
-    await ctx.answerCallbackQuery(`Insufficient balance. You have ${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${TICKER} but need ${wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${TICKER}`);
-    return;
-  }
-
-  // Ensure player balance and join
-  await gameManager.ensurePlayerBalance(playerKp);
-
-  if (gameAccount.isPrivate) {
-    const result = await gameManager.joinPrivateGame(gamePda, playerKp, ctx.chat?.id || 0);
-    if (!result.success) {
-      await ctx.answerCallbackQuery(result.error || "Failed to join private game");
+    const isAlreadyInGame = players.some((p: PublicKey) => p.equals(playerKp.publicKey));
+    if (isAlreadyInGame) {
+      await ctx.answerCallbackQuery("You have already joined this game!");
       return;
     }
-  } else {
-    const tx = await program.methods
-      .joinGame()
-      .accounts({
-        game: gamePda,
-        player: playerKp.publicKey,
-      })
-      .signers([playerKp])
-      .rpc();
-    await wallet.confirmTransaction(tx);
-  }
 
-  // Save player mapping and participant
-  const playerPubkey = playerKp.publicKey.toBase58();
-  gameDb.savePlayerMapping(playerPubkey, telegramId.toString());
-  gameDb.saveGameParticipant(game.game_address, telegramId.toString(), playerPubkey);
-
-  // Update game message
-  const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
-  const gameType = Object.keys(gameAccount.gameType)[0].charAt(0).toUpperCase() + Object.keys(gameAccount.gameType)[0].slice(1);
-  await gameManager.updateGameMessage(ctx, game.game_address, gameType, Number(game.amount), creatorUsername, "Active");
-
-  // Send join notification
-  const joinerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
-  const updatedGameAccount = await program.account.game.fetch(gamePda);
-  const playerCount = updatedGameAccount.players.length;
-  const maxPlayers = gameAccount.maxPlayers;
-  const gameName = gameType.toLowerCase();
-
-  const gameMessage = gameManager.getActiveGameMessage(game.game_address);
-  await ctx.reply(
-    `🎮 @${joinerUsername} joined the ${gameName}! (${playerCount}/${maxPlayers} players)`,
-    {
-      parse_mode: "HTML",
-      reply_to_message_id: gameMessage?.messageId
+    if (players.length >= gameAccount.maxPlayers) {
+      await ctx.answerCallbackQuery("This game is already full!");
+      return;
     }
-  );
 
-  // Auto-complete if full
-  if (updatedGameAccount.players.length === gameAccount.maxPlayers) {
-    await new Promise(resolve => setTimeout(resolve, GAME_COMPLETION_WAIT_MS));
-    const finalGameAccount = await program.account.game.fetch(gamePda);
-    if (finalGameAccount.players.length === gameAccount.maxPlayers) {
-      const completed = await gameManager.autoCompleteGame(gamePda);
-      if (!completed) {
-        ctx.reply("⚠️ Game is full but could not be automatically completed. Please try again later or contact support.");
+    // Check balance
+    const [tokenBalance, gameBalance] = await Promise.all([
+      wallet.getTokenBalance(telegramId, TOKEN_MINT),
+      (async () => {
+        try {
+          const playerBalancePda = PDAManager.getPlayerBalancePDA(
+            playerKp.publicKey,
+            new PublicKey(TOKEN_MINT),
+            program.programId
+          );
+          const playerBalance = await program.account.playerBalance.fetch(playerBalancePda);
+          return Number(playerBalance.amount);
+        } catch (error) {
+          return 0;
+        }
+      })()
+    ]);
+
+    const gameAmount = Number(gameAccount.amount);
+    const totalBalance = tokenBalance + gameBalance;
+
+    // Only check balance for coinflips, giveaways are free to join
+    const currentGameType = Object.keys(gameAccount.gameType)[0];
+    if (currentGameType === "coinflip" && totalBalance < gameAmount) {
+      const metadata = await getTokenMetadata();
+      await ctx.answerCallbackQuery(`Insufficient balance. You have ${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${TICKER} but need ${wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${TICKER}`);
+      return;
+    }
+
+    // Ensure player balance and join
+    await gameManager.ensurePlayerBalance(playerKp);
+
+    if (gameAccount.isPrivate) {
+      const result = await gameManager.joinPrivateGame(gamePda, playerKp, ctx.chat?.id || 0);
+      if (!result.success) {
+        await ctx.answerCallbackQuery(result.error || "Failed to join private game");
+        return;
       }
+    } else {
+      const tx = await program.methods
+        .joinGame()
+        .accounts({
+          game: gamePda,
+          player: playerKp.publicKey,
+        })
+        .signers([playerKp])
+        .rpc();
+      await wallet.confirmTransaction(tx);
+    }
+
+    // Save player mapping and participant
+    const playerPubkey = playerKp.publicKey.toBase58();
+    gameDb.savePlayerMapping(playerPubkey, telegramId.toString());
+    gameDb.saveGameParticipant(game.game_address, telegramId.toString(), playerPubkey);
+
+    // Update game message
+    const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
+    const gameType = Object.keys(gameAccount.gameType)[0].charAt(0).toUpperCase() + Object.keys(gameAccount.gameType)[0].slice(1);
+    await gameManager.updateGameMessage(ctx, game.game_address, gameType, Number(game.amount), creatorUsername, "Active");
+
+    // Send join notification
+    const joinerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
+    const updatedGameAccount = await program.account.game.fetch(gamePda);
+    const playerCount = updatedGameAccount.players.length;
+    const maxPlayers = gameAccount.maxPlayers;
+    const gameName = gameType.toLowerCase();
+
+    const gameMessage = gameManager.getActiveGameMessage(game.game_address);
+    await ctx.reply(
+      `🎮 @${joinerUsername} joined the ${gameName}! (${playerCount}/${maxPlayers} players)`,
+      {
+        parse_mode: "HTML",
+        reply_to_message_id: gameMessage?.messageId
+      }
+    );
+
+    // Auto-complete if full
+    if (updatedGameAccount.players.length === gameAccount.maxPlayers) {
+      await new Promise(resolve => setTimeout(resolve, GAME_COMPLETION_WAIT_MS));
+      const finalGameAccount = await program.account.game.fetch(gamePda);
+      if (finalGameAccount.players.length === gameAccount.maxPlayers) {
+        const completed = await gameManager.autoCompleteGame(gamePda);
+        if (!completed) {
+          ctx.reply("⚠️ Game is full but could not be automatically completed. Please try again later or contact support.");
+        }
+      }
+    }
+  } catch (error: any) {
+    // Handle specific case where account doesn't exist
+    if (error.message?.includes('Account does not exist')) {
+      // Update database if needed
+      if (game.status === "active") {
+        gameDb.completeGame(game.game_address, "cancelled", Date.now());
+      }
+      await ctx.answerCallbackQuery("This game is no longer active!");
+    } else {
+      // Re-throw the error to be handled by the outer catch block
+      throw error;
     }
   }
 };
 
 const handleRefreshGame = async (ctx: any, gamePda: PublicKey, game: any) => {
-  const currentGameAccount = await program.account.game.fetch(gamePda);
-  const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
-  const gameType = Object.keys(currentGameAccount.gameType)[0].charAt(0).toUpperCase() + Object.keys(currentGameAccount.gameType)[0].slice(1);
+  // First check if the game is completed in the database
+  const gameData = gameDb.getGame(game.game_address);
+  if (!gameData) {
+    await ctx.answerCallbackQuery("Game not found!");
+    return;
+  }
 
-  await gameManager.updateGameMessage(
-    ctx,
-    game.game_address,
-    gameType,
-    Number(game.amount),
-    creatorUsername,
-    "Active"
-  );
+  // If the game is completed, we can't fetch the account from blockchain since it's closed
+  if (gameData.status === "completed") {
+    await ctx.answerCallbackQuery("This game has already been completed!");
+    return;
+  }
 
-  await ctx.answerCallbackQuery("Game status refreshed!");
+  try {
+    // Only try to fetch from blockchain if the game is still active
+    const currentGameAccount = await program.account.game.fetch(gamePda);
+    const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
+    const gameType = Object.keys(currentGameAccount.gameType)[0].charAt(0).toUpperCase() + Object.keys(currentGameAccount.gameType)[0].slice(1);
+
+    await gameManager.updateGameMessage(
+      ctx,
+      game.game_address,
+      gameType,
+      Number(game.amount),
+      creatorUsername,
+      "Active"
+    );
+
+    await ctx.answerCallbackQuery("Game status refreshed!");
+  } catch (error: any) {
+    // Handle the case where the account doesn't exist (game was completed/cancelled)
+    if (error.message?.includes('Account does not exist')) {
+      // Mark the game as completed in the database if it's not already
+      if (gameData.status === "active") {
+        gameDb.completeGame(game.game_address, "cancelled", Date.now());
+      }
+      await ctx.answerCallbackQuery("This game is no longer active!");
+    } else {
+      console.error(`Error refreshing game ${game.game_address}:`, error);
+      await ctx.answerCallbackQuery("Error refreshing game status!");
+    }
+  }
 };
 
 // Error handling

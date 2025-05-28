@@ -208,7 +208,7 @@ export class GameManager {
     let expirationInfo = "";
 
     if (status.toLowerCase() === "completed") {
-      // For completed games, use database info
+      // For completed games, use database info since the account is closed
       const participants = this.gameDb.getGameParticipants(gamePda.toBase58());
       currentPlayers = participants.length;
 
@@ -220,24 +220,46 @@ export class GameManager {
         }
       }
     } else {
-      // For active games, fetch the game account
-      gameAccount = await this.program.account.game.fetch(gamePda);
-      currentPlayers = gameAccount.players.length;
-      maxPlayers = gameAccount.maxPlayers;
+      // For active games, try to fetch the game account, but handle the case where it might be closed
+      try {
+        gameAccount = await this.program.account.game.fetch(gamePda);
+        currentPlayers = gameAccount.players.length;
+        maxPlayers = gameAccount.maxPlayers;
 
-      if (currentPlayers > 0) {
-        playerInfo = "\n";
-        for (const playerPubkey of gameAccount.players) {
-          const username = await this.getPlayerUsername(ctx, playerPubkey.toBase58());
-          playerInfo += `• @${username}\n`;
+        if (currentPlayers > 0) {
+          playerInfo = "\n";
+          for (const playerPubkey of gameAccount.players) {
+            const username = await this.getPlayerUsername(ctx, playerPubkey.toBase58());
+            playerInfo += `• @${username}\n`;
+          }
         }
-      }
 
-      // Add expiration info for active games
-      if (gameAccount) {
-        const createdAt = Number(gameAccount.createdAt);
-        const timeout = Number(gameAccount.timeout);
-        expirationInfo = "\n" + formatExpirationTime(createdAt, timeout);
+        // Add expiration info for active games
+        if (gameAccount) {
+          const createdAt = Number(gameAccount.createdAt);
+          const timeout = Number(gameAccount.timeout);
+          expirationInfo = "\n" + formatExpirationTime(createdAt, timeout);
+        }
+      } catch (error: any) {
+        // If we can't fetch the account, it's likely been closed due to completion
+        if (error.message?.includes('Account does not exist')) {
+          console.log(`Game account ${gamePda.toBase58()} no longer exists, likely completed`);
+
+          // Update the status to completed and use database info
+          status = "completed";
+          const participants = this.gameDb.getGameParticipants(gamePda.toBase58());
+          currentPlayers = participants.length;
+
+          if (participants.length > 0) {
+            playerInfo = "\n";
+            for (const telegramId of participants) {
+              const username = await this.getUsernameFromTelegramId(ctx, telegramId);
+              playerInfo += `• @${username}\n`;
+            }
+          }
+        } else {
+          throw error; // Re-throw if it's a different error
+        }
       }
     }
 
@@ -266,7 +288,7 @@ export class GameManager {
       messageText += `\n\nTransaction: <code>${txHash}</code>`;
     }
 
-    // Keyboard
+    // Keyboard - only show buttons for active games
     const keyboard = [];
     if (status.toLowerCase() !== "completed") {
       keyboard.push([
