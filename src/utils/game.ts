@@ -20,14 +20,18 @@ import type { Coinflip } from "../../idl/idlType";
 // UTILITY FUNCTIONS
 // ================================
 
-const formatGameType = (gameType: any): string => {
+const formatGameType = (gameType: Record<string, any>): string => {
   return Object.keys(gameType)[0].charAt(0).toUpperCase() + Object.keys(gameType)[0].slice(1);
 };
 
 const formatDate = (timestamp: number): string => {
   return new Date(timestamp).toLocaleString('en-GB', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
     hour12: false
   });
 };
@@ -53,7 +57,11 @@ const formatExpirationTime = (createdAt: number, timeout: number, prefix: string
   }
 };
 
-const categorizeGame = (gameData: any, telegramIdStr: string, playerPublicKey: string): string => {
+const categorizeGame = (
+  gameData: any,
+  telegramIdStr: string,
+  playerPublicKey: string
+): "cancelled" | "won" | "lost" | "created" => {
   const winnerAddress = gameData.winner_address;
   const isCreator = gameData.creator_telegram_id === telegramIdStr;
   const isWinner = winnerAddress === playerPublicKey;
@@ -151,13 +159,13 @@ export class GameManager {
 
   public async getUsernameFromTelegramId(ctx: Context, telegramId: string): Promise<string> {
     try {
-      const numericId = parseInt(telegramId);
+      const numericId = parseInt(telegramId, 10);
       if (isNaN(numericId)) {
         return telegramId.slice(0, ADDRESS_DISPLAY_LENGTH) + "...";
       }
 
       const chatMember = await ctx.api.getChatMember(ctx.chat!.id, numericId);
-      return chatMember.user.username || chatMember.user.first_name;
+      return chatMember.user.username || chatMember.user.first_name || "Unknown User";
     } catch (error) {
       console.error(`Error getting username for Telegram ID ${telegramId}:`, error);
       return "Unknown";

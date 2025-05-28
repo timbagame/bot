@@ -2,12 +2,11 @@ import { Bot, Context } from "grammy";
 import { run, sequentialize } from "@grammyjs/runner";
 import { WalletManager } from "./utils/wallet";
 import * as anchor from "@coral-xyz/anchor";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { createSyncNativeInstruction } from "@solana/spl-token";
 import type { Coinflip } from "../idl/idlType";
 import idl from "../idl/idl.json";
 import { GameDatabase } from "./utils/database";
-import { SystemProgram } from "@solana/web3.js";
 import { GameManager } from "./utils/game";
 import { PDAManager } from "./utils/pda";
 import { formatUserFriendlyError } from "./utils/errors";
@@ -29,11 +28,27 @@ const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
 const TOKEN_MINT = process.env.TOKEN_MINT!;
 const TICKER = process.env.TICKER!;
 
-// Configure concurrent processing with sequentialization
-// This ensures operations for the same user are processed in order
-// while allowing concurrent processing between different users
-bot.use(sequentialize((ctx) => {
-  // Sequentialize by user ID for all user operations
+// Initialize game database
+const gameDb = GameDatabase.getInstance();
+
+// Global program variable to be initialized when needed
+let program: anchor.Program<Coinflip>;
+let gameManager: GameManager;
+
+// Token metadata cache
+let tokenMetadata: { decimals: number } | null = null;
+let tokenMetadataLastFetch: number = 0;
+
+// ================================
+// BOT SEQUENTIALIZATION
+// ================================
+
+/**
+ * Configure concurrent processing with sequentialization
+ * This ensures operations for the same user are processed in order
+ * while allowing concurrent processing between different users
+ */
+const getSequentializationKey = (ctx: Context): string | string[] | undefined => {
   const userId = ctx.from?.id?.toString();
   if (!userId) return undefined;
 
@@ -47,18 +62,10 @@ bot.use(sequentialize((ctx) => {
   }
 
   return userId;
-}));
+};
 
-// Add token metadata cache at the top level
-let tokenMetadata: { decimals: number } | null = null;
-let tokenMetadataLastFetch: number = 0;
-
-// Initialize game database
-const gameDb = GameDatabase.getInstance();
-
-// Global program variable to be initialized when needed
-let program: anchor.Program<Coinflip>;
-let gameManager: GameManager;
+// Configure concurrent processing with sequentialization
+bot.use(sequentialize(getSequentializationKey));
 
 // ================================
 // SIMPLIFIED HELPER FUNCTIONS
@@ -186,6 +193,19 @@ const handleCommandError = async (ctx: Context, error: any, commandName: string)
   });
 };
 
+// Helper function for consistent replies
+const replyToMessage = async (ctx: Context, text: string, parseMode: "HTML" | "MarkdownV2" = "HTML"): Promise<void> => {
+  await ctx.reply(text, {
+    parse_mode: parseMode,
+    reply_to_message_id: ctx.message?.message_id
+  });
+};
+
+// Helper function for usage error messages
+const replyUsageError = async (ctx: Context, message: string): Promise<void> => {
+  return replyToMessage(ctx, message);
+};
+
 // ================================
 // ANCHOR SETUP
 // ================================
@@ -294,9 +314,7 @@ bot.command(["coinflip", "cf"], async (ctx) => {
   const maxPlayers = parseInt(args?.[2] || COINFLIP_MAX_PLAYERS.toString()) || COINFLIP_MAX_PLAYERS;
 
   if (!parsed) {
-    return ctx.reply("Usage: /coinflip <amount> <maxPlayers>\nExample: /coinflip 10 2", {
-      reply_to_message_id: ctx.message?.message_id
-    });
+    return replyUsageError(ctx, "Usage: /coinflip <amount> <maxPlayers>\nExample: /coinflip 10 2");
   }
 
   await gameManager.createGame(ctx, "coinflip", parsed.amount, maxPlayers, 2, GAME_TIMEOUT);
@@ -313,9 +331,7 @@ bot.command(["giveaway", "ga"], async (ctx) => {
   const maxPlayers = parseInt(args?.[2] || GIVEAWAY_MAX_PLAYERS.toString()) || GIVEAWAY_MAX_PLAYERS;
 
   if (!parsed) {
-    return ctx.reply("Usage: /giveaway <amount> <maxPlayers>\nExample: /giveaway 100 5", {
-      reply_to_message_id: ctx.message?.message_id
-    });
+    return replyUsageError(ctx, "Usage: /giveaway <amount> <maxPlayers>\nExample: /giveaway 100 5");
   }
 
   await gameManager.createGame(ctx, "giveaway", parsed.amount, maxPlayers, 1, GAME_TIMEOUT);
@@ -327,25 +343,19 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
   const args = ctx.message?.text?.split(" ");
 
   if (!args || args.length < 3) {
-    return ctx.reply("Usage: /withdraw <address> <amount> or /withdraw <address> <amount> SOL", {
-      reply_to_message_id: ctx.message?.message_id
-    });
+    return replyUsageError(ctx, "Usage: /withdraw <address> <amount> or /withdraw <address> <amount> SOL");
   }
 
   let toAddress: PublicKey;
   try {
     toAddress = new PublicKey(args[1]);
   } catch {
-    return ctx.reply("Invalid wallet address. Please provide a valid Solana address.", {
-      reply_to_message_id: ctx.message?.message_id
-    });
+    return replyToMessage(ctx, "Invalid wallet address. Please provide a valid Solana address.");
   }
 
   const parsed = await parseAmount(args, 2);
   if (!parsed) {
-    return ctx.reply("Please provide a valid amount greater than 0.", {
-      reply_to_message_id: ctx.message?.message_id
-    });
+    return replyToMessage(ctx, "Please provide a valid amount greater than 0.");
   }
 
   try {
@@ -376,41 +386,33 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
 // Implement tip command
 bot.command("tip", async (ctx: Context) => {
   const telegramId = BigInt(ctx.from?.id || 0);
-  const replyToMessage = ctx.message?.reply_to_message;
+  const repliedMessage = ctx.message?.reply_to_message;
   const args = ctx.message?.text?.split(" ");
 
-  if (!replyToMessage || !replyToMessage.from || !args || args.length < 2) {
-    return ctx.reply("Usage: Reply to a user's message with /tip <amount> or /tip <amount> SOL", {
-      reply_to_message_id: ctx.message?.message_id
-    });
+  if (!repliedMessage || !repliedMessage.from || !args || args.length < 2) {
+    return replyUsageError(ctx, "Usage: Reply to a user's message with /tip <amount> or /tip <amount> SOL");
   }
 
   // Check if the recipient is a bot
-  if (replyToMessage.from.is_bot) {
-    return ctx.reply("You cannot tip bots!", {
-      reply_to_message_id: ctx.message?.message_id
-    });
+  if (repliedMessage.from.is_bot) {
+    return replyToMessage(ctx, "You cannot tip bots!");
   }
 
-  const recipientTelegramId = BigInt(replyToMessage.from.id);
+  const recipientTelegramId = BigInt(repliedMessage.from.id);
   if (recipientTelegramId === telegramId) {
-    return ctx.reply("You can't tip yourself!", {
-      reply_to_message_id: ctx.message?.message_id
-    });
+    return replyToMessage(ctx, "You can't tip yourself!");
   }
 
   const parsed = await parseAmount(args);
   if (!parsed) {
-    return ctx.reply("Please provide a valid amount greater than 0.", {
-      reply_to_message_id: ctx.message?.message_id
-    });
+    return replyToMessage(ctx, "Please provide a valid amount greater than 0.");
   }
 
   try {
     const recipientPubKey = wallet.getPublicKey(recipientTelegramId);
-    const recipientName = replyToMessage.from.username
-      ? `@${replyToMessage.from.username}`
-      : replyToMessage.from.first_name || "User";
+    const recipientName = repliedMessage.from.username
+      ? `@${repliedMessage.from.username}`
+      : repliedMessage.from.first_name || "User";
 
     await validateAndProcessTransaction(
       ctx,
@@ -446,9 +448,7 @@ bot.command("wrap", async (ctx: Context) => {
   const amount = parseFloat(args?.[1] || "0") * LAMPORTS_PER_SOL;
 
   if (amount <= 0) {
-    return ctx.reply("Usage: /wrap <amount>\nExample: /wrap 0.1", {
-      reply_to_message_id: ctx.message?.message_id
-    });
+    return replyUsageError(ctx, "Usage: /wrap <amount>\nExample: /wrap 0.1");
   }
 
   try {

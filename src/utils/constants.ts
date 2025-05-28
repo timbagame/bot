@@ -15,7 +15,6 @@ export const GAME_TIMEOUT = 3600; // 1 hour
 export const COINFLIP_MAX_PLAYERS = 2;
 export const GIVEAWAY_MAX_PLAYERS = 5;
 export const MAX_RETRIES = 3;
-export const RETRY_DELAY_MS = 2000;
 export const CONFIRMATION_TIMEOUT_MS = 30000;
 
 // ================================
