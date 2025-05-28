@@ -11,6 +11,7 @@ export interface GameData {
   amount: number;
   created_at: number;
   status: string;
+  game_type: string;
   winner_address?: string;
   completed_at?: number;
   message_id?: number;

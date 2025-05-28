@@ -765,8 +765,38 @@ bot.on("callback_query", async (ctx) => {
 
   // Check if the game is completed before allowing any actions
   if (game.status === "completed") {
-    const statusMessage = game.winner_address === "cancelled" ? "cancelled" : "completed";
-    await ctx.answerCallbackQuery(`This game has already been ${statusMessage}!`);
+    // For completed games, update the message with final state instead of just showing a popup
+    try {
+      const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
+      const gameData = gameDb.getGame(game.game_address);
+
+      if (gameData) {
+        // Determine game type from database
+        const gameType = gameData.game_type ?
+          gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1) :
+          "Game";
+
+        await gameManager.updateGameMessage(
+          ctx,
+          game.game_address,
+          gameType,
+          Number(game.amount),
+          creatorUsername,
+          "Completed",
+          gameData.winner_address || undefined
+        );
+
+        const statusMessage = gameData.winner_address === "cancelled" ? "cancelled" : "completed";
+        await ctx.answerCallbackQuery(`Game ${statusMessage} - message updated!`);
+      } else {
+        const statusMessage = game.winner_address === "cancelled" ? "cancelled" : "completed";
+        await ctx.answerCallbackQuery(`This game has already been ${statusMessage}!`);
+      }
+    } catch (error) {
+      console.error("Error updating completed game message:", error);
+      const statusMessage = game.winner_address === "cancelled" ? "cancelled" : "completed";
+      await ctx.answerCallbackQuery(`This game has already been ${statusMessage}!`);
+    }
     return;
   }
 
@@ -794,7 +824,7 @@ bot.on("callback_query", async (ctx) => {
     if (error.message?.includes('Account does not exist')) {
       // Update database if needed
       if (game.status === "active") {
-        gameDb.completeGame(gameAddress, "cancelled", Date.now());
+        gameDb.completeGame(game.game_address, "cancelled", Date.now());
       }
       await ctx.answerCallbackQuery("This game is no longer active!");
     } else {

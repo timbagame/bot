@@ -266,8 +266,12 @@ export class GameManager {
     // Winner info
     let winnerInfo = "";
     if (status.toLowerCase() === "completed" && winnerAddress) {
-      const winnerUsername = await this.getPlayerUsername(ctx, winnerAddress);
-      winnerInfo = `\nWinner: @${winnerUsername}`;
+      if (winnerAddress === "cancelled" || winnerAddress === DEFAULT_NULL_ADDRESS) {
+        winnerInfo = `\nStatus: Cancelled`;
+      } else {
+        const winnerUsername = await this.getPlayerUsername(ctx, winnerAddress);
+        winnerInfo = `\nWinner: @${winnerUsername}`;
+      }
     }
 
     let messageText = `<b>🪙 ${gameType} Game</b>\n\n` +
