@@ -1,8 +1,14 @@
 {
-  "name": "oracle",
-  "module": "index.ts",
-  "type": "module",
-  "private": true,
+  "name": "timba-oracle",
+  "scripts": {
+    "start": "bun run index.ts",
+    "dev": "bun run --watch index.ts"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.30.0",
+    "@solana/web3.js": "^1.87.6",
+    "@solana/spl-token": "^0.4.1"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },

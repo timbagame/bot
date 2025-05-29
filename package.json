@@ -1,6 +1,8 @@
 {
+  "name": "timba-bot",
   "scripts": {
-    "start": "bun --hot src/bot.ts"
+    "start": "bun run src/bot.ts",
+    "dev": "bun run --watch src/bot.ts"
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.0",
@@ -12,5 +14,8 @@
   },
   "devDependencies": {
     "@types/bun": "^1.2.9"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
   }
 }

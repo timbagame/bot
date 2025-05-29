@@ -13,6 +13,9 @@
       "devDependencies": {
         "@types/bun": "^1.2.9",
       },
+      "peerDependencies": {
+        "typescript": "^5",
+      },
     },
   },
   "packages": {
