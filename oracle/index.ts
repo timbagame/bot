@@ -3,7 +3,7 @@ import { PublicKey } from "@solana/web3.js";
 
 /**
  * Oracle API Server
- * Provides endpoints for requesting random hashes and tracks game completion
+ * Provides endpoints for requesting random hashes and automatically completes games
  */
 
 const PORT = process.env["ORACLE_PORT"] || 3001;
@@ -66,68 +66,6 @@ const server = Bun.serve({
           });
         } catch (error: any) {
           console.error('Error generating hash:', error);
-          return new Response(JSON.stringify({
-            success: false,
-            error: error.message
-          }), {
-            status: 500,
-            headers: {
-              'Content-Type': 'application/json',
-              ...corsHeaders
-            }
-          });
-        }
-      }
-
-      // Track game endpoint
-      if (path === '/track-game' && method === 'POST') {
-        try {
-          const body = await request.json();
-          const { gameAddress } = body;
-
-          if (!gameAddress) {
-            return new Response(JSON.stringify({
-              success: false,
-              error: 'gameAddress is required'
-            }), {
-              status: 400,
-              headers: {
-                'Content-Type': 'application/json',
-                ...corsHeaders
-              }
-            });
-          }
-
-          // Validate that gameAddress is a valid Solana public key
-          try {
-            new PublicKey(gameAddress);
-          } catch (error) {
-            return new Response(JSON.stringify({
-              success: false,
-              error: 'Invalid gameAddress: must be a valid Solana public key'
-            }), {
-              status: 400,
-              headers: {
-                'Content-Type': 'application/json',
-                ...corsHeaders
-              }
-            });
-          }
-
-          oracle.trackGame(gameAddress);
-
-          return new Response(JSON.stringify({
-            success: true,
-            message: `Game ${gameAddress} is now being tracked`
-          }), {
-            status: 200,
-            headers: {
-              'Content-Type': 'application/json',
-              ...corsHeaders
-            }
-          });
-        } catch (error: any) {
-          console.error('Error tracking game:', error);
           return new Response(JSON.stringify({
             success: false,
             error: error.message
@@ -242,22 +180,28 @@ const server = Bun.serve({
               <ul>
                 <li><code>GET /health</code> - Health check</li>
                 <li><code>POST /generate-hash</code> - Generate random hash for new game</li>
-                <li><code>POST /track-game</code> - Start tracking a game for completion</li>
                 <li><code>POST /complete-game</code> - Manually complete a game (for testing)</li>
                 <li><code>GET /stats</code> - Get Oracle statistics</li>
               </ul>
+              <h2>How It Works:</h2>
+              <p>The Oracle <strong>automatically scans the blockchain</strong> every 30 seconds for active games that need completion. You only need to:</p>
+              <ol>
+                <li>Call <code>/generate-hash</code> when creating a new game</li>
+                <li>Use the returned hash and game address in your game creation</li>
+                <li>The Oracle will automatically complete the game when ready!</li>
+              </ol>
               <h2>Usage Examples:</h2>
               <pre>
 # Generate hash for new game
 curl -X POST http://localhost:${PORT}/generate-hash
 
-# Track a game
-curl -X POST http://localhost:${PORT}/track-game \\
-  -H "Content-Type: application/json" \\
-  -d '{"gameAddress": "GAME_ADDRESS_HERE"}'
-
 # Get statistics
 curl http://localhost:${PORT}/stats
+
+# Manual completion (testing only)
+curl -X POST http://localhost:${PORT}/complete-game \\
+  -H "Content-Type: application/json" \\
+  -d '{"gameAddress": "GAME_ADDRESS_HERE"}'
               </pre>
             </body>
           </html>
@@ -305,10 +249,10 @@ console.log('🔮 Starting Oracle API Server...');
 console.log(`📡 Server running on http://localhost:${PORT}`);
 console.log('🔍 Background game completion process starting...');
 
-// Process pending games every 30 seconds
+// Scan and complete games every 30 seconds
 setInterval(async () => {
   try {
-    await oracle.processPendingGames();
+    await oracle.scanAndCompleteActiveGames();
   } catch (error) {
     console.error('Error in background game processing:', error);
   }
@@ -338,7 +282,6 @@ console.log('✅ Oracle API is running!');
 console.log('📋 Available endpoints:');
 console.log(`   GET  http://localhost:${PORT}/health`);
 console.log(`   POST http://localhost:${PORT}/generate-hash`);
-console.log(`   POST http://localhost:${PORT}/track-game`);
 console.log(`   POST http://localhost:${PORT}/complete-game`);
 console.log(`   GET  http://localhost:${PORT}/stats`);
 console.log(`   GET  http://localhost:${PORT}/ (documentation)`);

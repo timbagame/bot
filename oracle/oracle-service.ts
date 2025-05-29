@@ -78,14 +78,6 @@ export class OracleService {
   }
 
   /**
-   * Start tracking a game for completion
-   */
-  public trackGame(gameAddress: string): void {
-    this.db.trackGame(gameAddress);
-    console.log(`Started tracking game: ${gameAddress}`);
-  }
-
-  /**
    * Check if a game is ready for completion
    */
   public async isGameReadyForCompletion(gamePda: PublicKey): Promise<boolean> {
@@ -183,52 +175,63 @@ export class OracleService {
   }
 
   /**
-   * Process all pending games
+   * Scan blockchain for active games and complete ready ones
    */
-  public async processPendingGames(): Promise<void> {
-    const pendingGames = this.db.getPendingGames();
-    console.log(`Processing ${pendingGames.length} pending games...`);
+  public async scanAndCompleteActiveGames(): Promise<void> {
+    try {
+      console.log('🔍 Scanning blockchain for active games...');
 
-    for (const game of pendingGames) {
-      try {
-        // Skip games that have failed too many times
-        if (game.completion_attempts >= 5) {
-          console.log(`Skipping game ${game.game_address} - too many attempts (${game.completion_attempts})`);
-          continue;
-        }
+      // Get all game accounts from the program
+      const gameAccounts = await this.program.account.game.all();
+      console.log(`Found ${gameAccounts.length} total games on blockchain`);
 
-        // Skip games checked recently (within last 30 seconds)
-        const now = Date.now();
-        if (now - game.last_checked < 30000) {
-          continue;
-        }
+      let readyCount = 0;
+      let completedCount = 0;
+      let errorCount = 0;
 
-        // Validate game address before processing
+      for (const gameAccountInfo of gameAccounts) {
         try {
-          new PublicKey(game.game_address);
+          const gameAddress = gameAccountInfo.publicKey.toBase58();
+
+          // Check if we have the secret key for this game
+          const secretData = this.db.getSecretKey(gameAddress);
+          if (!secretData) {
+            // This game wasn't created through our oracle, skip it
+            continue;
+          }
+
+          // Check if game is ready for completion
+          const isReady = await this.isGameReadyForCompletion(gameAccountInfo.publicKey);
+          if (!isReady) {
+            continue;
+          }
+
+          readyCount++;
+          console.log(`🎯 Game ${gameAddress} is ready for completion`);
+
+          // Complete the game
+          const result = await this.completeGame(gameAddress);
+          if (result.success) {
+            completedCount++;
+            console.log(`✅ Successfully completed game ${gameAddress}`);
+          } else {
+            errorCount++;
+            console.log(`❌ Failed to complete game ${gameAddress}: ${result.error}`);
+          }
+
+          // Small delay between completions to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
         } catch (error: any) {
-          console.log(`❌ Invalid game address ${game.game_address}, marking as failed: ${error.message}`);
-          this.db.updateGameStatus(game.game_address, 'error', `Invalid game address: ${error.message}`);
-          continue;
+          errorCount++;
+          console.error(`Error processing game ${gameAccountInfo.publicKey.toBase58()}:`, error);
         }
-
-        console.log(`Checking game ${game.game_address}...`);
-        this.db.incrementCompletionAttempts(game.game_address);
-
-        const result = await this.completeGame(game.game_address);
-
-        if (result.success) {
-          console.log(`✅ Completed game ${game.game_address}`);
-        } else {
-          console.log(`⚠️ Could not complete game ${game.game_address}: ${result.error}`);
-        }
-
-        // Small delay between game completions
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-      } catch (error) {
-        console.error(`Error processing game ${game.game_address}:`, error);
       }
+
+      console.log(`📊 Scan complete: ${readyCount} ready, ${completedCount} completed, ${errorCount} errors`);
+
+    } catch (error: any) {
+      console.error('❌ Error scanning active games:', error);
     }
   }
 
