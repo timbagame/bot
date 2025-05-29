@@ -1,32 +1,16 @@
 import { PublicKey } from "@solana/web3.js";
-import type { AuthorizationResult } from "../types";
+import type {
+  AuthorizationResult,
+  OracleApiResponse,
+  OracleStats,
+  OracleStatsResponse
+} from "../types";
 import { GameDatabase } from "./database";
 import { WalletManager } from "./wallet";
 
 // ================================
 // ORACLE API CLIENT
 // ================================
-
-interface OracleApiResponse {
-  success: boolean;
-  randomHash?: string;
-  gameAddress?: string;
-  error?: string;
-}
-
-interface OracleStats {
-  totalSecrets: number;
-  usedSecrets: number;
-  pendingGames: number;
-  completedGames: number;
-}
-
-interface OracleStatsResponse {
-  success: boolean;
-  stats?: OracleStats;
-  timestamp?: string;
-  error?: string;
-}
 
 export class OracleClient {
   private static instance: OracleClient;

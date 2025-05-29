@@ -114,6 +114,39 @@ export interface AuthorizationResult {
   error?: string;
 }
 
+export interface OracleApiResponse {
+  success: boolean;
+  randomHash?: string;
+  gameAddress?: string;
+  error?: string;
+}
+
+export interface OracleStats {
+  totalSecrets: number;
+  usedSecrets: number;
+  pendingGames: number;
+  completedGames: number;
+}
+
+export interface OracleStatsResponse {
+  success: boolean;
+  stats?: OracleStats;
+  timestamp?: string;
+  error?: string;
+}
+
+export interface OracleHealthResponse {
+  status: string;
+  timestamp: string;
+  uptime: number;
+}
+
+export interface OracleCompletionResponse {
+  success: boolean;
+  txHash?: string;
+  error?: string;
+}
+
 // ================================
 // UTILITY TYPES
 // ================================
