@@ -101,7 +101,7 @@ export class GameManager {
     ticker: string
   ): GameManager {
     if (!GameManager.instance) {
-      const oracleClient = OracleClient.getInstance();
+      const oracleClient = OracleClient.getInstance(wallet);
       GameManager.instance = new GameManager(program, wallet, gameDb, oracleClient, tokenMint, ticker);
     }
     return GameManager.instance;
@@ -578,7 +578,7 @@ export class GameManager {
   // COMPLETION AND EXPIRATION
   // ================================
 
-  public async handleGameCompletion(ctx: Context, gamePda: PublicKey): Promise<boolean> {
+  public async handleGameCompletion(gamePda: PublicKey): Promise<boolean> {
     try {
       console.log(`🎯 Game completion will be handled by external oracle for ${gamePda.toBase58()}`);
       // The external oracle service will automatically complete this game

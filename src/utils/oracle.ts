@@ -1,6 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 import type { AuthorizationResult } from "../types";
 import { GameDatabase } from "./database";
+import { WalletManager } from "./wallet";
 
 // ================================
 // ORACLE API CLIENT
@@ -31,15 +32,19 @@ export class OracleClient {
   private static instance: OracleClient;
   private gameDb: GameDatabase;
   private oracleApiUrl: string;
+  private wallet?: WalletManager;
 
   private constructor() {
     this.gameDb = GameDatabase.getInstance();
     this.oracleApiUrl = process.env["ORACLE_API_URL"] || 'http://localhost:3001';
   }
 
-  public static getInstance(): OracleClient {
+  public static getInstance(wallet?: WalletManager): OracleClient {
     if (!OracleClient.instance) {
       OracleClient.instance = new OracleClient();
+    }
+    if (wallet) {
+      OracleClient.instance.wallet = wallet;
     }
     return OracleClient.instance;
   }
@@ -142,8 +147,12 @@ export class OracleClient {
       }
 
       // For private games, we still need admin keypair for authorization
-      // But we don't need it for oracle operations anymore
-      return { authorized: true };
+      if (!this.wallet) {
+        return { authorized: false, error: "Wallet manager not available" };
+      }
+
+      const adminKeypair = this.wallet.getAdminKeypair();
+      return { authorized: true, adminKeypair };
     } catch (error) {
       console.error(`Error authorizing player:`, error);
       return { authorized: false, error: (error as Error).message };
