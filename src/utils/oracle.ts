@@ -1,157 +1,133 @@
 import { PublicKey } from "@solana/web3.js";
-import * as anchor from "@coral-xyz/anchor";
-import { randomBytes, createHash } from 'crypto';
-import { WalletManager } from "./wallet";
+import type { AuthorizationResult } from "../types";
 import { GameDatabase } from "./database";
-import { PDAManager } from "./pda";
-import { MAX_RETRIES } from "./constants";
-import type { Coinflip } from "../../idl/idlType";
-import type { OracleResult, AuthorizationResult } from "../types";
 
 // ================================
-// UTILITY FUNCTIONS
+// ORACLE API CLIENT
 // ================================
 
-const calculateWinnerIndex = (secretKeyBuffer: Buffer, nPlayers: number): number => {
-  if (nPlayers <= 1) return 0;
+interface OracleApiResponse {
+  success: boolean;
+  randomHash?: string;
+  gameAddress?: string;
+  error?: string;
+}
 
-  const randomBytes = secretKeyBuffer.subarray(0, 8);
-  const randomNumber = BigInt('0x' + Buffer.from(randomBytes).reverse().toString('hex'));
-  const maxValid = BigInt('0xFFFFFFFFFFFFFFFF') - (BigInt('0xFFFFFFFFFFFFFFFF') % BigInt(nPlayers));
-  const finalNumber = randomNumber % maxValid;
-  return Number(finalNumber % BigInt(nPlayers));
-};
+interface OracleStats {
+  totalSecrets: number;
+  usedSecrets: number;
+  pendingGames: number;
+  completedGames: number;
+}
 
-const retryOperation = async <T>(
-  operation: () => Promise<T>,
-  maxRetries: number = MAX_RETRIES,
-  delay: number = 1000
-): Promise<T> => {
-  let lastError: any;
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await operation();
-    } catch (error) {
-      lastError = error;
-      if (i < maxRetries - 1) {
-        const backoffDelay = delay * Math.pow(1.5, i);
-        await new Promise(resolve => setTimeout(resolve, backoffDelay));
-      }
+interface OracleStatsResponse {
+  success: boolean;
+  stats?: OracleStats;
+  timestamp?: string;
+  error?: string;
+}
+
+export class OracleClient {
+  private static instance: OracleClient;
+  private gameDb: GameDatabase;
+  private oracleApiUrl: string;
+
+  private constructor() {
+    this.gameDb = GameDatabase.getInstance();
+    this.oracleApiUrl = process.env["ORACLE_API_URL"] || 'http://localhost:3001';
+  }
+
+  public static getInstance(): OracleClient {
+    if (!OracleClient.instance) {
+      OracleClient.instance = new OracleClient();
     }
-  }
-  throw lastError;
-};
-
-// ================================
-// ORACLE MANAGER CLASS
-// ================================
-
-export class OracleManager {
-  private static instance: OracleManager;
-
-  private constructor(
-    private program: anchor.Program<Coinflip>,
-    private wallet: WalletManager,
-    private gameDb: GameDatabase
-  ) {}
-
-  public static getInstance(
-    program: anchor.Program<Coinflip>,
-    wallet: WalletManager
-  ): OracleManager {
-    if (!OracleManager.instance) {
-      const gameDb = GameDatabase.getInstance();
-      OracleManager.instance = new OracleManager(program, wallet, gameDb);
-    }
-    return OracleManager.instance;
+    return OracleClient.instance;
   }
 
   // ================================
-  // GAME SECRETS GENERATION
+  // ORACLE API METHODS
   // ================================
 
-  public generateGameSecrets(): { randomHash: Buffer } {
-    const secretKey = randomBytes(64);
-    const randomHash = createHash('sha256').update(secretKey).digest();
-    const gamePda = PDAManager.getGamePDA(randomHash, this.program.programId);
-
-    this.gameDb.saveOracleSecretKey(
-      gamePda.toBase58(),
-      secretKey.toString('hex')
-    );
-
-    return { randomHash };
-  }
-
-  // ================================
-  // GAME COMPLETION
-  // ================================
-
-  public async completeGame(gamePda: PublicKey): Promise<OracleResult> {
+  /**
+   * Request a random hash from the oracle API for game creation
+   */
+  public async generateGameSecrets(): Promise<{ randomHash: string; gameAddress: string }> {
     try {
-      const { adminKp, gameAccount } = await this.validateOracleAuthority(gamePda);
-
-      // Get secret key and calculate winner
-      const secretKey = this.gameDb.getOracleSecretKey(gamePda.toBase58());
-      if (!secretKey) {
-        console.log(`No secret key found for game ${gamePda.toBase58()}, cannot complete without secret key`);
-        return { success: false, error: "No secret key found for game completion" };
-      }
-
-      const secretKeyBuffer = Buffer.from(secretKey, "hex");
-      const winnerIndex = calculateWinnerIndex(secretKeyBuffer, gameAccount.players.length);
-      const winnerAddress = gameAccount.players[winnerIndex];
-
-      // Execute completion transaction with retry
-      const tx = await retryOperation(async () => {
-        return await this.program.methods
-          .completeGame([...secretKeyBuffer])
-          .accounts({
-            game: gamePda,
-            player: winnerAddress,
-            creator: gameAccount.creator,
-            authority: adminKp.publicKey,
-          })
-          .signers([adminKp])
-          .rpc();
+      const response = await fetch(`${this.oracleApiUrl}/generate-hash`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
       });
 
-      await this.wallet.confirmTransaction(tx);
+      if (!response.ok) {
+        throw new Error(`Oracle API request failed: ${response.status} ${response.statusText}`);
+      }
 
-      // Return success with basic event info
-      return this.createSuccessResult(gamePda, gameAccount, winnerAddress);
+      const data: OracleApiResponse = await response.json();
+
+      if (!data.success || !data.randomHash || !data.gameAddress) {
+        throw new Error(data.error || 'Failed to generate random hash');
+      }
+
+      console.log(`✅ Generated random hash from oracle: ${data.randomHash}`);
+      console.log(`📍 Game address: ${data.gameAddress}`);
+
+      return {
+        randomHash: data.randomHash,
+        gameAddress: data.gameAddress
+      };
     } catch (error) {
-      console.error(`Error completing game ${gamePda.toBase58()}:`, error);
-      return { success: false, error };
+      console.error('❌ Error requesting random hash from oracle:', error);
+      throw new Error(`Oracle API unavailable: ${(error as Error).message}`);
     }
   }
 
-  // ================================
-  // GAME STATUS CHECKS
-  // ================================
-
-  public async isGameReadyForOracle(gamePda: PublicKey): Promise<boolean> {
+  /**
+   * Get oracle statistics
+   */
+  public async getStats(): Promise<OracleStats | null> {
     try {
-      const [gameAccount, blockTime] = await Promise.all([
-        this.program.account.game.fetch(gamePda),
-        this.wallet.getBlockchainTime()
-      ]);
+      const response = await fetch(`${this.oracleApiUrl}/stats`);
 
-      const createdAt = Number(gameAccount.createdAt);
-      const timeout = Number(gameAccount.timeout);
-      const expiresAt = createdAt + timeout;
-      const isExpired = blockTime > expiresAt;
+      if (!response.ok) {
+        console.warn(`Oracle stats request failed: ${response.status}`);
+        return null;
+      }
 
-      return gameAccount.players.length >= gameAccount.maxPlayers ||
-        (isExpired && gameAccount.players.length >= gameAccount.minPlayers);
+      const data: OracleStatsResponse = await response.json();
+
+      if (!data.success || !data.stats) {
+        console.warn('Oracle stats not available:', data.error);
+        return null;
+      }
+
+      return data.stats;
     } catch (error) {
-      console.error(`Error checking game status:`, error);
+      console.warn('Error fetching oracle stats:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Check if oracle API is healthy
+   */
+  public async isHealthy(): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.oracleApiUrl}/health`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(5000) // 5 second timeout
+      });
+
+      return response.ok;
+    } catch (error) {
+      console.warn('Oracle health check failed:', error);
       return false;
     }
   }
 
   // ================================
-  // PRIVATE GAME AUTHORIZATION
+  // PRIVATE GAME AUTHORIZATION (kept for private games)
   // ================================
 
   public async authorizePlayer(gamePda: PublicKey, chatId: number): Promise<AuthorizationResult> {
@@ -165,8 +141,9 @@ export class OracleManager {
         return { authorized: false, error: "Player not in same chat as game creator" };
       }
 
-      const adminKp = this.wallet.getAdminKeypair();
-      return { authorized: true, adminKeypair: adminKp };
+      // For private games, we still need admin keypair for authorization
+      // But we don't need it for oracle operations anymore
+      return { authorized: true };
     } catch (error) {
       console.error(`Error authorizing player:`, error);
       return { authorized: false, error: (error as Error).message };
@@ -174,41 +151,27 @@ export class OracleManager {
   }
 
   // ================================
-  // HELPER METHODS
+  // UTILITY METHODS
   // ================================
 
-  private async validateOracleAuthority(gamePda: PublicKey): Promise<{ adminKp: any; gameAccount: any }> {
-    const adminKp = this.wallet.getAdminKeypair();
-    const oraclePda = PDAManager.getOraclePDA(this.program.programId);
-
-    // Fetch oracle and game accounts
-    const [oracleAccount, gameAccount] = await Promise.all([
-      this.program.account.oracle.fetch(oraclePda),
-      this.program.account.game.fetch(gamePda)
-    ]);
-
-    // Verify oracle authority
-    if (!oracleAccount.authority.equals(adminKp.publicKey)) {
-      throw new Error("Unauthorized: Admin is not the oracle authority");
-    }
-
-    return { adminKp, gameAccount };
+  /**
+   * Convert hex string to Buffer (for random hash)
+   */
+  public hexToBuffer(hex: string): Buffer {
+    return Buffer.from(hex, 'hex');
   }
 
-  private createSuccessResult(gamePda: PublicKey, gameAccount: any, winnerAddress: PublicKey): OracleResult {
-    return {
-      success: true,
-      event: {
-        gameKey: gamePda,
-        creator: gameAccount.creator,
-        winner: winnerAddress,
-        gameType: gameAccount.gameType,
-        amount: gameAccount.amount,
-        players: gameAccount.players,
-        tokenMint: gameAccount.tokenMint,
-        winnerAmount: new anchor.BN(0), // Event data not available here
-        feeAmount: new anchor.BN(0) // Event data not available here
-      }
-    };
+  /**
+   * Get oracle API URL
+   */
+  public getOracleUrl(): string {
+    return this.oracleApiUrl;
+  }
+
+  /**
+   * Set oracle API URL (for testing or different environments)
+   */
+  public setOracleUrl(url: string): void {
+    this.oracleApiUrl = url;
   }
 }

@@ -4,7 +4,7 @@ import * as anchor from "@coral-xyz/anchor";
 import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } from "@solana/spl-token";
 import { WalletManager } from "./wallet";
 import { GameDatabase } from "./database";
-import { OracleManager } from "./oracle";
+import { OracleClient } from "./oracle";
 import { PDAManager } from "./pda";
 import { formatUserFriendlyError } from "./errors";
 import { DEFAULT_NULL_ADDRESS, ADDRESS_DISPLAY_LENGTH, GAME_INFO_LIMIT } from "./constants";
@@ -88,7 +88,7 @@ export class GameManager {
     private program: anchor.Program<Coinflip>,
     private wallet: WalletManager,
     private gameDb: GameDatabase,
-    private oracleManager: OracleManager,
+    private oracleClient: OracleClient,
     private tokenMint: string,
     private ticker: string
   ) {}
@@ -101,8 +101,8 @@ export class GameManager {
     ticker: string
   ): GameManager {
     if (!GameManager.instance) {
-      const oracleManager = OracleManager.getInstance(program, wallet);
-      GameManager.instance = new GameManager(program, wallet, gameDb, oracleManager, tokenMint, ticker);
+      const oracleClient = OracleClient.getInstance();
+      GameManager.instance = new GameManager(program, wallet, gameDb, oracleClient, tokenMint, ticker);
     }
     return GameManager.instance;
   }
@@ -500,8 +500,19 @@ export class GameManager {
       const creatorPubkey = playerKp.publicKey.toBase58();
       this.gameDb.savePlayerMapping(creatorPubkey, telegramId.toString());
 
-      const { randomHash } = this.oracleManager.generateGameSecrets();
-      const gamePda = PDAManager.getGamePDA(randomHash, this.program.programId);
+      // Check if oracle is available
+      const isOracleHealthy = await this.oracleClient.isHealthy();
+      if (!isOracleHealthy) {
+        await ctx.reply(
+          "❌ Oracle service is unavailable. Please try again later.",
+          { reply_to_message_id: ctx.message?.message_id }
+        );
+        return;
+      }
+
+      const { randomHash, gameAddress } = await this.oracleClient.generateGameSecrets();
+      const randomHashBuffer = this.oracleClient.hexToBuffer(randomHash);
+      const gamePda = new PublicKey(gameAddress);
 
       this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
       await this.ensurePlayerBalance(playerKp);
@@ -516,7 +527,7 @@ export class GameManager {
       };
 
       const tx = await this.program.methods
-        .initializeGame(gameConfig, [...randomHash])
+        .initializeGame(gameConfig, [...randomHashBuffer])
         .accounts({
           player: playerKp.publicKey,
           tokenMint: new PublicKey(this.tokenMint),
@@ -569,45 +580,13 @@ export class GameManager {
 
   public async handleGameCompletion(ctx: Context, gamePda: PublicKey): Promise<boolean> {
     try {
-      console.log(`🎯 Starting game completion for ${gamePda.toBase58()}`);
-      const result = await this.oracleManager.completeGame(gamePda);
-
-      if (!result.success) {
-        console.log(`❌ Oracle completion failed: ${result.error}`);
-        throw new Error(result.error || "Failed to complete game");
-      }
-
-      if (!result.event) {
-        throw new Error("No event data received from completion");
-      }
-
-      const event = result.event;
-      const winnerAddress = event.winner.toString();
-      const blockTime = await this.wallet.getBlockchainTime();
-      const completedAt = blockTime * 1000;
-
-      this.gameDb.completeGame(gamePda.toBase58(), winnerAddress, completedAt);
-
-      const creatorTelegramId = this.gameDb.getCreatorTelegramId(gamePda.toBase58());
-      if (creatorTelegramId) {
-        const creatorUsername = await this.getUsernameFromTelegramId(ctx, creatorTelegramId);
-        const gameType = formatGameType(event.gameType);
-
-        await this.updateGameMessage(
-          ctx,
-          gamePda.toBase58(),
-          gameType,
-          Number(event.amount),
-          creatorUsername,
-          "Completed",
-          winnerAddress
-        );
-      }
-
+      console.log(`🎯 Game completion will be handled by external oracle for ${gamePda.toBase58()}`);
+      // The external oracle service will automatically complete this game
+      // when it becomes ready (full or expired with enough players)
       return true;
     } catch (error: any) {
-      console.error(`Error completing game ${gamePda.toBase58()}:`, error);
-      throw error;
+      console.error(`Error in game completion handling ${gamePda.toBase58()}:`, error);
+      return false;
     }
   }
 
@@ -627,15 +606,12 @@ export class GameManager {
       if (!creatorTelegramId) return false;
 
       if (hasEnoughPlayers) {
-        try {
-          const completed = await this.handleGameCompletion(ctx, gamePda);
-          return completed ? false : false;
-        } catch (error: any) {
-          console.error(`Oracle completion failed: ${error.message}`);
-        }
+        // Game has enough players and is expired, let the oracle complete it
+        console.log(`🎯 Game ${gamePda.toBase58()} is ready for oracle completion (expired with enough players)`);
+        return false; // Don't cancel, let oracle complete
       }
 
-      // Cancel the game
+      // Cancel the game if it doesn't have enough players
       if (creatorTelegramId === "orphaned") {
         // For orphaned games, try to cancel using player keys if available
         const result = await this.cancelGameWithPlayerKeys(gamePda);
@@ -712,23 +688,12 @@ export class GameManager {
 
   public async autoCompleteGame(gamePda: PublicKey): Promise<boolean> {
     try {
-      const result = await this.oracleManager.completeGame(gamePda);
-
-      if (!result.success) {
-        console.log(`❌ Auto-completion failed: ${result.error}`);
-        return false;
-      }
-
-      if (result.event) {
-        const winnerAddress = result.event.winner.toString();
-        const blockTime = await this.wallet.getBlockchainTime();
-        const completedAt = blockTime * 1000;
-        this.gameDb.completeGame(gamePda.toBase58(), winnerAddress, completedAt);
-      }
-
+      console.log(`🎯 Auto-completion delegated to external oracle for ${gamePda.toBase58()}`);
+      // The external oracle service will automatically complete this game
+      // No need for manual completion here
       return true;
     } catch (error) {
-      console.error('Error auto-completing game:', error);
+      console.error('Error in auto-completion handling:', error);
       return false;
     }
   }
@@ -876,7 +841,7 @@ export class GameManager {
     chatId: number
   ): Promise<{ success: boolean; tx?: string; error?: string }> {
     try {
-      const authResult = await this.oracleManager.authorizePlayer(gamePda, chatId);
+      const authResult = await this.oracleClient.authorizePlayer(gamePda, chatId);
 
       if (!authResult.authorized) {
         return { success: false, error: authResult.error || "Not authorized to join this private game" };
@@ -1097,21 +1062,19 @@ export class GameManager {
   }
 
   private async tryCompleteOrCancel(gamePda: PublicKey, address: string, account: any, gameType: string, blockTime: number): Promise<boolean> {
-    console.log(`👥 Attempting completion for game ${address}`);
+    console.log(`👥 Game ${address} has enough players - external oracle will complete it`);
 
     try {
-      const result = await this.oracleManager.completeGame(gamePda);
-      if (result.success) {
-        const winnerAddress = result.event?.winner.toString() || "unknown";
-        this.completeOrphanedGame(address, winnerAddress, gameType, blockTime);
-        console.log(`✅ Completed orphaned game ${address}`);
-        return true;
-      }
+      // The external oracle service will automatically complete games that are ready
+      // We just need to track that this game exists and let the oracle handle it
+      this.gameDb.saveOrphanedGame(address, Number(account.amount), gameType, 'pending_completion');
+      console.log(`✅ Marked orphaned game ${address} for oracle completion`);
+      return true;
     } catch (error: any) {
-      console.log(`⚠️ Completion failed for ${address}, falling back to cancellation`);
+      console.log(`⚠️ Error tracking game for completion ${address}, falling back to cancellation`);
     }
 
-    // Fallback to cancellation
+    // Fallback to cancellation if tracking fails
     return await this.tryCancelGame(gamePda, address, account, gameType, blockTime);
   }
 
