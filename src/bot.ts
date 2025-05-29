@@ -934,7 +934,8 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
 
     // Update game message
     const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
-    const gameType = Object.keys(gameAccount.gameType)[0].charAt(0).toUpperCase() + Object.keys(gameAccount.gameType)[0].slice(1);
+    const gameTypeKeys = Object.keys(gameAccount.gameType);
+    const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
     await gameManager.updateGameMessage(ctx, game.game_address, gameType, Number(game.amount), creatorUsername, "Active");
 
     // Send join notification
@@ -997,7 +998,8 @@ const handleRefreshGame = async (ctx: any, gamePda: PublicKey, game: any) => {
     // Only try to fetch from blockchain if the game is still active
     const currentGameAccount = await program.account.game.fetch(gamePda);
     const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
-    const gameType = Object.keys(currentGameAccount.gameType)[0].charAt(0).toUpperCase() + Object.keys(currentGameAccount.gameType)[0].slice(1);
+    const gameTypeKeys = Object.keys(currentGameAccount.gameType);
+    const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
 
     await gameManager.updateGameMessage(
       ctx,
@@ -1111,7 +1113,8 @@ setupAnchor().then(async () => {
       const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
       if (creatorTelegramId) {
         const creatorUsername = await gameManager.getUsernameFromTelegramId(dummyCtx, creatorTelegramId);
-        const gameType = Object.keys(event.gameType)[0].charAt(0).toUpperCase() + Object.keys(event.gameType)[0].slice(1);
+        const gameTypeKeys = Object.keys(event.gameType);
+        const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
 
         await gameManager.updateGameMessage(
           dummyCtx,
@@ -1130,7 +1133,8 @@ setupAnchor().then(async () => {
         const metadata = await wallet.getTokenMetadata(TOKEN_MINT);
         const winnerUsername = await gameManager.getPlayerUsername(dummyCtx, winnerAddress);
         const winnerAmount = Number(event.winnerAmount);
-        const gameType = Object.keys(event.gameType)[0].charAt(0).toUpperCase() + Object.keys(event.gameType)[0].slice(1);
+        const gameTypeKeys = Object.keys(event.gameType);
+        const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
 
         let notificationText = `🎉 <b>${gameType} Completed!</b>\n\n`;
         notificationText += `🏆 Winner: @${winnerUsername}\n`;
