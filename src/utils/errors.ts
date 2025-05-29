@@ -14,7 +14,8 @@ const INSUFFICIENT_LAMPORTS_PATTERN = /insufficient lamports (\d+), need (\d+)/i
 
 const extractLamportsInfo = (errorMessage: string): { current: number; needed: number } | null => {
   const match = errorMessage.match(INSUFFICIENT_LAMPORTS_PATTERN);
-  return match ? { current: parseInt(match[1]), needed: parseInt(match[2]) } : null;
+  if (!match || !match[1] || !match[2]) return null;
+  return { current: parseInt(match[1]), needed: parseInt(match[2]) };
 };
 
 const formatInsufficientFundsError = (

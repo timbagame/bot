@@ -21,7 +21,10 @@ import type { Coinflip } from "../../idl/idlType";
 // ================================
 
 const formatGameType = (gameType: Record<string, any>): string => {
-  return Object.keys(gameType)[0].charAt(0).toUpperCase() + Object.keys(gameType)[0].slice(1);
+  const keys = Object.keys(gameType);
+  const firstKey = keys[0];
+  if (!firstKey) return "Unknown";
+  return firstKey.charAt(0).toUpperCase() + firstKey.slice(1);
 };
 
 const formatDate = (timestamp: number): string => {
@@ -309,7 +312,7 @@ export class GameManager {
       ]);
 
       if (currentPlayers > 0) {
-        keyboard[0].push({ text: "❌ Unjoin", callback_data: `unjoin_${gamePda.toBase58()}` });
+        keyboard[0]?.push({ text: "❌ Unjoin", callback_data: `unjoin_${gamePda.toBase58()}` });
       }
     }
 
@@ -1066,7 +1069,8 @@ export class GameManager {
     try {
       const gamePda = new PublicKey(address);
       const blockTime = await this.wallet.getBlockchainTime();
-      const gameType = Object.keys(account.gameType)[0];
+      const gameTypeKeys = Object.keys(account.gameType);
+      const gameType = gameTypeKeys[0] || "unknown";
 
       const isExpired = blockTime > (Number(account.createdAt) + Number(account.timeout));
       const hasEnoughPlayers = account.players.length >= account.minPlayers;

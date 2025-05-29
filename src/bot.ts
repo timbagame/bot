@@ -86,8 +86,14 @@ const parseAmount = async (args: string[], argIndex: number = 1): Promise<Parsed
   if (!args || args.length <= argIndex) return null;
 
   const metadata = await getTokenMetadata();
-  const isSol = args[args.length - 1].toUpperCase() === "SOL";
-  const rawAmount = parseFloat(args[argIndex]);
+  const lastArg = args[args.length - 1];
+  if (!lastArg) return null;
+
+  const isSol = lastArg.toUpperCase() === "SOL";
+  const amountArg = args[argIndex];
+  if (!amountArg) return null;
+
+  const rawAmount = parseFloat(amountArg);
 
   if (isNaN(rawAmount) || rawAmount <= 0) return null;
 
@@ -346,9 +352,14 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
     return replyUsageError(ctx, "Usage: /withdraw <address> <amount> or /withdraw <address> <amount> SOL");
   }
 
+  const addressArg = args[1];
+  if (!addressArg) {
+    return replyToMessage(ctx, "Invalid wallet address. Please provide a valid Solana address.");
+  }
+
   let toAddress: PublicKey;
   try {
-    toAddress = new PublicKey(args[1]);
+    toAddress = new PublicKey(addressArg);
   } catch {
     return replyToMessage(ctx, "Invalid wallet address. Please provide a valid Solana address.");
   }
@@ -573,6 +584,11 @@ bot.command("checktx", async (ctx: Context) => {
   }
 
   const signature = args[1];
+  if (!signature) {
+    return ctx.reply("Usage: /checktx <transaction_signature>", {
+      reply_to_message_id: ctx.message?.message_id
+    });
+  }
 
   try {
     console.log(`Checking transaction: ${signature}`);
@@ -755,7 +771,12 @@ bot.on("callback_query", async (ctx) => {
   const callbackData = ctx.callbackQuery.data;
   if (!callbackData || !ctx.from) return;
 
-  const [action, gameAddress] = callbackData.split("_");
+  const splitData = callbackData.split("_");
+  if (splitData.length < 2) return;
+
+  const [action, gameAddress] = splitData;
+  if (!gameAddress) return;
+
   const game = await gameDb.getGame(gameAddress);
 
   if (!game) {

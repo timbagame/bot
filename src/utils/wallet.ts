@@ -243,9 +243,14 @@ export class WalletManager {
 
   public async signAndSend(instructions: TransactionInstruction[], signers: Keypair[]): Promise<string> {
     await this.throttle();
+
+    if (signers.length === 0) {
+      throw new Error("No signers provided");
+    }
+
     const { blockhash } = await this.getLatestBlockhash();
     const message = new TransactionMessage({
-      payerKey: signers[0].publicKey,
+      payerKey: signers[0]!.publicKey,
       recentBlockhash: blockhash,
       instructions
     }).compileToV0Message();
