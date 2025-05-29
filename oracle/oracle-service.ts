@@ -203,6 +203,15 @@ export class OracleService {
           continue;
         }
 
+        // Validate game address before processing
+        try {
+          new PublicKey(game.game_address);
+        } catch (error: any) {
+          console.log(`❌ Invalid game address ${game.game_address}, marking as failed: ${error.message}`);
+          this.db.updateGameStatus(game.game_address, 'error', `Invalid game address: ${error.message}`);
+          continue;
+        }
+
         console.log(`Checking game ${game.game_address}...`);
         this.db.incrementCompletionAttempts(game.game_address);
 

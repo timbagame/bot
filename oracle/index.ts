@@ -1,4 +1,5 @@
 import { OracleService } from "./oracle-service.ts";
+import { PublicKey } from "@solana/web3.js";
 
 /**
  * Oracle API Server
@@ -97,6 +98,22 @@ const server = Bun.serve({
             });
           }
 
+          // Validate that gameAddress is a valid Solana public key
+          try {
+            new PublicKey(gameAddress);
+          } catch (error) {
+            return new Response(JSON.stringify({
+              success: false,
+              error: 'Invalid gameAddress: must be a valid Solana public key'
+            }), {
+              status: 400,
+              headers: {
+                'Content-Type': 'application/json',
+                ...corsHeaders
+              }
+            });
+          }
+
           oracle.trackGame(gameAddress);
 
           return new Response(JSON.stringify({
@@ -134,6 +151,22 @@ const server = Bun.serve({
             return new Response(JSON.stringify({
               success: false,
               error: 'gameAddress is required'
+            }), {
+              status: 400,
+              headers: {
+                'Content-Type': 'application/json',
+                ...corsHeaders
+              }
+            });
+          }
+
+          // Validate that gameAddress is a valid Solana public key
+          try {
+            new PublicKey(gameAddress);
+          } catch (error) {
+            return new Response(JSON.stringify({
+              success: false,
+              error: 'Invalid gameAddress: must be a valid Solana public key'
             }), {
               status: 400,
               headers: {
