@@ -634,10 +634,19 @@ export class GameManager {
 
       // Cancel the game
       if (creatorTelegramId === "orphaned") {
-        // For orphaned games, use oracle authority cancellation
-        const result = await this.oracleManager.cancelGameWithAuthority(gamePda);
+        // For orphaned games, try to cancel using player keys if available
+        const result = await this.cancelGameWithPlayerKeys(gamePda);
         if (!result.success) {
-          throw new Error(`Failed to cancel orphaned game: ${result.error}`);
+          console.log(`Failed to cancel orphaned game with player keys: ${result.error}`);
+          // Mark as completed since we can't process it
+          const completedAt = blockTime * 1000;
+          this.gameDb.completeGame(gamePda.toBase58(), "cancelled", completedAt);
+          return {
+            cancelled: true,
+            amount: Number(gameAccount.amount),
+            creator: gameAccount.creator.toString(),
+            tx: "marked_cancelled"
+          };
         }
         const completedAt = blockTime * 1000;
         this.gameDb.completeGame(gamePda.toBase58(), "cancelled", completedAt);
@@ -645,7 +654,7 @@ export class GameManager {
           cancelled: true,
           amount: Number(gameAccount.amount),
           creator: gameAccount.creator.toString(),
-          tx: "oracle_cancelled"
+          tx: result.tx || "player_cancelled"
         };
       }
 
@@ -763,6 +772,94 @@ export class GameManager {
     } catch (error: any) {
       console.error(`Error unjoining game ${gamePda.toBase58()}:`, error);
       throw error;
+    }
+  }
+
+  // ================================
+  // PLAYER-BASED GAME CANCELLATION
+  // ================================
+
+  public async cancelGameWithPlayerKeys(gamePda: PublicKey): Promise<{ success: boolean; tx?: string; error?: string }> {
+    try {
+      const gameAccount = await this.program.account.game.fetch(gamePda);
+      console.log(`Attempting to cancel game ${gamePda.toBase58()} using player keys`);
+
+      // Check if there are any non-creator players to unjoin first
+      const nonCreatorPlayers = gameAccount.players.filter((player: any) => !player.equals(gameAccount.creator));
+
+      if (nonCreatorPlayers.length > 0) {
+        console.log(`Game has ${nonCreatorPlayers.length} non-creator players, unjoining them first`);
+        await this.unjoinAllPlayersWithKeys(gamePda, gameAccount);
+      }
+
+      // Now cancel the game using creator's key
+      const creatorPubkey = gameAccount.creator.toBase58();
+      const creatorTelegramId = this.gameDb.getPlayerTelegramId(creatorPubkey);
+
+      if (!creatorTelegramId) {
+        console.log(`No telegram ID found for creator ${creatorPubkey}, cannot cancel game`);
+        return { success: false, error: "Creator not found in database" };
+      }
+
+      const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
+
+      const tx = await this.program.methods
+        .cancelGame()
+        .accounts({
+          game: gamePda,
+          creator: gameAccount.creator,
+          authority: creatorKp.publicKey,
+        })
+        .signers([creatorKp])
+        .rpc();
+
+      await this.wallet.confirmTransaction(tx);
+      console.log(`Successfully cancelled game ${gamePda.toBase58()} with tx: ${tx}`);
+
+      return { success: true, tx };
+    } catch (error: any) {
+      console.error(`Error cancelling game with player keys ${gamePda.toBase58()}:`, error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  private async unjoinAllPlayersWithKeys(gamePda: PublicKey, gameAccount: any): Promise<void> {
+    for (const playerPubkey of gameAccount.players) {
+      try {
+        // Skip the creator - they can cancel with players in the game
+        if (playerPubkey.equals(gameAccount.creator)) {
+          console.log(`Skipping creator ${playerPubkey.toBase58()} - they can cancel with players`);
+          continue;
+        }
+
+        // Look up player's telegram ID from database
+        const playerTelegramId = this.gameDb.getPlayerTelegramId(playerPubkey.toBase58());
+        if (!playerTelegramId) {
+          console.log(`No telegram ID found for player ${playerPubkey.toBase58()}, skipping unjoin`);
+          continue;
+        }
+
+        console.log(`Unjoining player ${playerPubkey.toBase58()} from game ${gamePda.toBase58()}`);
+
+        const playerKp = this.wallet.getKeyPair(BigInt(playerTelegramId));
+
+        const tx = await this.program.methods
+          .unjoinGame()
+          .accounts({
+            game: gamePda,
+            player: playerPubkey,
+            authority: playerKp.publicKey,
+          })
+          .signers([playerKp])
+          .rpc();
+
+        await this.wallet.confirmTransaction(tx);
+        console.log(`Successfully unjoined player ${playerPubkey.toBase58()}`);
+
+      } catch (error) {
+        console.error(`Failed to unjoin player ${playerPubkey.toBase58()}:`, error);
+        // Continue with other players even if one fails
+      }
     }
   }
 
@@ -1018,7 +1115,7 @@ export class GameManager {
     console.log(`🔄 Attempting cancellation for game ${address}`);
 
     try {
-      const result = await this.oracleManager.cancelGameWithAuthority(gamePda);
+      const result = await this.cancelGameWithPlayerKeys(gamePda);
       if (result.success) {
         this.completeOrphanedGame(address, "cancelled", gameType, blockTime);
         console.log(`✅ Cancelled orphaned game ${address}`);

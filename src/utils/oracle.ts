@@ -94,8 +94,8 @@ export class OracleManager {
       // Get secret key and calculate winner
       const secretKey = this.gameDb.getOracleSecretKey(gamePda.toBase58());
       if (!secretKey) {
-        console.log(`No secret key found for game ${gamePda.toBase58()}, attempting oracle cancellation instead`);
-        return await this.cancelGameWithAuthority(gamePda);
+        console.log(`No secret key found for game ${gamePda.toBase58()}, cannot complete without secret key`);
+        return { success: false, error: "No secret key found for game completion" };
       }
 
       const secretKeyBuffer = Buffer.from(secretKey, "hex");
@@ -123,80 +123,6 @@ export class OracleManager {
     } catch (error) {
       console.error(`Error completing game ${gamePda.toBase58()}:`, error);
       return { success: false, error };
-    }
-  }
-
-  public async cancelGameWithAuthority(gamePda: PublicKey): Promise<OracleResult> {
-    try {
-      const { adminKp, gameAccount } = await this.validateOracleAuthority(gamePda);
-
-      console.log(`Cancelling orphaned game ${gamePda.toBase58()} using oracle authority`);
-
-      // Check if there are any non-creator players to unjoin
-      const nonCreatorPlayers = gameAccount.players.filter((player: any) => !player.equals(gameAccount.creator));
-
-      if (nonCreatorPlayers.length > 0) {
-        console.log(`Game has ${nonCreatorPlayers.length} non-creator players, unjoining them first`);
-        await this.unjoinAllPlayers(gamePda, gameAccount, adminKp);
-      } else if (gameAccount.players.length > 0) {
-        console.log(`Only creator is in game, can cancel directly`);
-      }
-
-      // Execute cancellation transaction with retry
-      const tx = await retryOperation(async () => {
-        return await this.program.methods
-          .cancelGame()
-          .accounts({
-            game: gamePda,
-            creator: gameAccount.creator,
-            authority: adminKp.publicKey,
-          })
-          .signers([adminKp])
-          .rpc();
-      });
-
-      await this.wallet.confirmTransaction(tx);
-
-      console.log(`Successfully cancelled orphaned game ${gamePda.toBase58()} with tx: ${tx}`);
-
-      // Return success with cancellation event info
-      return this.createSuccessResult(gamePda, gameAccount, new PublicKey("11111111111111111111111111111111"));
-    } catch (error) {
-      console.error(`Error cancelling game with authority ${gamePda.toBase58()}:`, error);
-      return { success: false, error };
-    }
-  }
-
-  private async unjoinAllPlayers(gamePda: PublicKey, gameAccount: any, adminKp: any): Promise<void> {
-    for (const playerPubkey of gameAccount.players) {
-      try {
-        // Skip the creator - they can cancel with players in the game
-        if (playerPubkey.equals(gameAccount.creator)) {
-          console.log(`Skipping creator ${playerPubkey.toBase58()} - they can cancel with players`);
-          continue;
-        }
-
-        console.log(`Unjoining player ${playerPubkey.toBase58()} from game ${gamePda.toBase58()}`);
-
-        const tx = await retryOperation(async () => {
-          return await this.program.methods
-            .unjoinGame()
-            .accounts({
-              game: gamePda,
-              player: playerPubkey,
-              authority: adminKp.publicKey,
-            })
-            .signers([adminKp])
-            .rpc();
-        });
-
-        await this.wallet.confirmTransaction(tx);
-        console.log(`Successfully unjoined player ${playerPubkey.toBase58()}`);
-
-      } catch (error) {
-        console.error(`Failed to unjoin player ${playerPubkey.toBase58()}:`, error);
-        // Continue with other players even if one fails
-      }
     }
   }
 
