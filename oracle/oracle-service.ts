@@ -181,9 +181,47 @@ export class OracleService {
     try {
       console.log('🔍 Scanning blockchain for active games...');
 
-      // Get all game accounts from the program
-      const gameAccounts = await this.program.account.game.all();
-      console.log(`Found ${gameAccounts.length} total games on blockchain`);
+      // Get all game accounts from the program with error handling
+      let gameAccounts: Array<{ publicKey: PublicKey; account: any }> = [];
+
+      try {
+        // First, get raw program accounts to filter by discriminator
+        const programAccounts = await this.connection.getProgramAccounts(this.program.programId);
+        console.log(`Found ${programAccounts.length} total program accounts`);
+
+        // Game account discriminator from the IDL
+        const gameDiscriminator = [27, 90, 166, 125, 74, 100, 121, 18];
+
+        // Filter for game accounts by discriminator
+        const potentialGameAccounts = programAccounts.filter(account => {
+          if (account.account.data.length < 8) return false;
+          const accountDiscriminator = Array.from(account.account.data.slice(0, 8));
+          return accountDiscriminator.every((byte, index) => byte === gameDiscriminator[index]);
+        });
+
+        console.log(`Found ${potentialGameAccounts.length} accounts with game discriminator`);
+
+        // Now try to deserialize each account individually
+        for (const accountInfo of potentialGameAccounts) {
+          try {
+            const gameAccount = await this.program.account.game.fetch(accountInfo.pubkey);
+            gameAccounts.push({
+              publicKey: accountInfo.pubkey,
+              account: gameAccount
+            });
+          } catch (error: any) {
+            console.warn(`⚠️ Failed to deserialize game account ${accountInfo.pubkey.toBase58()}: ${error.message}`);
+            // Skip this account and continue with others
+            continue;
+          }
+        }
+
+        console.log(`Successfully deserialized ${gameAccounts.length} game accounts`);
+
+      } catch (error: any) {
+        console.error('❌ Error getting program accounts:', error);
+        return; // Exit early if we can't get accounts at all
+      }
 
       let readyCount = 0;
       let completedCount = 0;
