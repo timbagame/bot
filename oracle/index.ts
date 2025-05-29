@@ -5,7 +5,7 @@ import { OracleService } from "./oracle-service.ts";
  * Provides endpoints for requesting random hashes and tracks game completion
  */
 
-const PORT = process.env.ORACLE_PORT || 3001;
+const PORT = process.env["ORACLE_PORT"] || 3001;
 const oracle = OracleService.getInstance();
 
 // Initialize the server

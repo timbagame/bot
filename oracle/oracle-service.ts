@@ -19,7 +19,7 @@ export class OracleService {
 
   private constructor() {
     this.db = OracleDatabase.getInstance();
-    this.connection = new Connection(process.env.SOLANA_NETWORK!, "confirmed");
+    this.connection = new Connection(process.env["SOLANA_NETWORK"]!, "confirmed");
     this.adminKeypair = this.loadAdminKeypair();
     this.program = this.initializeProgram();
   }
@@ -139,6 +139,10 @@ export class OracleService {
       const secretKeyBuffer = Buffer.from(secretData.secretKey, "hex");
       const winnerIndex = this.calculateWinnerIndex(secretKeyBuffer, gameAccount.players.length);
       const winnerAddress = gameAccount.players[winnerIndex];
+
+      if (!winnerAddress) {
+        return { success: false, error: "Unable to determine winner - no players found" };
+      }
 
       // Verify oracle authority
       const oraclePda = this.getOraclePDA();
