@@ -162,7 +162,11 @@ The Oracle maintains detailed tracking with:
 
 - **Retryable Errors**: Network issues, timeouts, RPC errors
 - **Permanent Errors**: Invalid games, missing secrets, authorization failures
-- **Retry Logic**: Up to 3 attempts with exponential backoff
+- **Smart Retry System**: Progressive cooldowns instead of hard retry limits
+  - **Immediate Retries**: 2 quick retries for transient errors (timeouts, network issues)
+  - **Progressive Cooldowns**: 5min → 30min → 2hr → 6hr based on attempt count
+  - **Auto-Reset**: Retry counters reset after 24 hours (game conditions may have changed)
+  - **Never Permanently Skipped**: Games are never permanently abandoned
 
 ## 🛡 Security Features
 

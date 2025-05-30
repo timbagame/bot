@@ -36,7 +36,6 @@ export class OracleService {
   private isScanning: boolean = false;
   private lastScanTime: number = 0;
   private scanCooldown: number = 30000; // 30 seconds
-  private maxRetries: number = 3;
   private retryDelay: number = 5000; // 5 seconds
 
   private constructor() {
@@ -119,12 +118,34 @@ export class OracleService {
       return gameAccount.players.length >= gameAccount.maxPlayers ||
         (isExpired && gameAccount.players.length >= gameAccount.minPlayers);
     } catch (error: any) {
+      console.error(`Error checking game readiness for ${gamePda.toBase58()}:`, error.message);
+
+      // Check if it's an account not found error
       if (error.message?.includes('Account does not exist')) {
-        console.log(`Game ${gamePda.toBase58()} no longer exists (already completed)`);
+        console.log(`✅ Game ${gamePda.toBase58()} account confirmed not to exist (completed or closed)`);
+        this.db.markGameCompleted(gamePda.toBase58());
         return false;
       }
-      console.error(`Error checking game readiness for ${gamePda.toBase58()}:`, error);
-      return false;
+
+      // For other errors (invalid data, deserialization issues), check if account exists
+      try {
+        const accountInfo = await this.connection.getAccountInfo(gamePda);
+        if (!accountInfo) {
+          console.log(`✅ Game ${gamePda.toBase58()} account confirmed not to exist (completed or closed)`);
+          this.db.markGameCompleted(gamePda.toBase58());
+          return false;
+        } else {
+          // Account exists but we can't deserialize it as a game - likely invalid/corrupted
+          console.log(`⚠️ Game ${gamePda.toBase58()} account exists but contains invalid game data - marking as completed`);
+          console.log(`   Account owner: ${accountInfo.owner.toBase58()}, data length: ${accountInfo.data.length}`);
+          this.db.markGameCompleted(gamePda.toBase58());
+          return false;
+        }
+      } catch (checkError: any) {
+        console.error(`❌ Unable to verify game ${gamePda.toBase58()} account existence:`, checkError.message);
+        // For network/RPC errors, don't assume game is gone - throw error to retry later
+        throw error;
+      }
     }
   }
 
@@ -205,9 +226,11 @@ export class OracleService {
       this.db.updateGameStatus(gameAddress, retryable ? 'error_retryable' : 'error', error.message);
       this.db.incrementCompletionAttempts(gameAddress);
 
-      // Retry if possible
-      if (retryable && retryCount < this.maxRetries) {
-        console.log(`🔄 Retrying game completion for ${gameAddress} in ${this.retryDelay}ms`);
+      // Immediate retry logic (within this call) - only for quick retryable errors
+      // The broader retry logic is handled by the cooldown system
+      const immediateRetryLimit = 2; // Only 2 immediate retries per call
+      if (retryable && retryCount < immediateRetryLimit && this.isImmediateRetryableError(error)) {
+        console.log(`🔄 Immediate retry for game ${gameAddress} in ${this.retryDelay}ms (quick retry ${retryCount + 1}/${immediateRetryLimit})`);
         await new Promise(resolve => setTimeout(resolve, this.retryDelay));
         return this.completeGame(gameAddress, retryCount + 1);
       }
@@ -253,16 +276,42 @@ export class OracleService {
 
       for (const pendingGame of pendingGames) {
         try {
-          // Skip games that have failed too many times
-          if (pendingGame.completion_attempts >= this.maxRetries) {
-            console.log(`⏭️ Skipping game ${pendingGame.game_address} (max retries exceeded)`);
+          // Smart retry logic: use cooldown periods instead of permanent skipping
+          const shouldSkip = this.shouldSkipGameForCooldown(pendingGame);
+          if (shouldSkip.skip) {
+            console.log(`⏭️ Skipping game ${pendingGame.game_address} (${shouldSkip.reason})`);
             continue;
           }
 
-          const gamePda = new PublicKey(pendingGame.game_address);
-          const isReady = await this.isGameReadyForCompletion(gamePda);
+          // Reset retry count if it's been a long time since the last attempt
+          if (shouldSkip.resetRetries) {
+            console.log(`🔄 Resetting retry count for game ${pendingGame.game_address} (long cooldown period)`);
+            this.db.resetCompletionAttempts(pendingGame.game_address);
+          }
 
-          if (isReady) {
+          const gamePda = new PublicKey(pendingGame.game_address);
+          let isReady: boolean;
+          let gameWasCompleted = false;
+
+          try {
+            isReady = await this.isGameReadyForCompletion(gamePda);
+          } catch (checkError: any) {
+            // If we can't check the game due to RPC/network issues, skip for this round
+            console.warn(`⚠️ Unable to check game ${pendingGame.game_address} readiness: ${checkError.message}`);
+            console.log(`🔄 Will retry checking this game in the next scan cycle`);
+            continue;
+          }
+
+          // Check if the game was marked as completed during the readiness check
+          // (this happens when the game account no longer exists)
+          const currentDbStatus = await this.getGameDbStatus(pendingGame.game_address);
+          if (currentDbStatus?.status === 'completed') {
+            console.log(`✅ Game ${pendingGame.game_address} was marked as completed (no longer exists on-chain)`);
+            result.completedGames++;
+            gameWasCompleted = true;
+          }
+
+          if (isReady && !gameWasCompleted) {
             result.readyGames++;
             const completionResult = await this.completeGame(pendingGame.game_address);
 
@@ -299,6 +348,55 @@ export class OracleService {
     } finally {
       this.isScanning = false;
     }
+  }
+
+  /**
+   * Smart cooldown logic for failed games
+   */
+  private shouldSkipGameForCooldown(pendingGame: {
+    game_address: string;
+    last_checked: number;
+    completion_attempts: number;
+    first_seen: number;
+  }): { skip: boolean; reason?: string; resetRetries?: boolean } {
+    const now = Date.now();
+    const timeSinceLastAttempt = now - pendingGame.last_checked;
+    const timeSinceFirstSeen = now - pendingGame.first_seen;
+
+    // If it's been more than 24 hours since first seen, reset retry count
+    // The game conditions might have changed significantly
+    if (timeSinceFirstSeen > 24 * 60 * 60 * 1000) {
+      return { skip: false, resetRetries: true };
+    }
+
+    // If no previous attempts, always try
+    if (pendingGame.completion_attempts === 0) {
+      return { skip: false };
+    }
+
+    // Progressive cooldown based on attempt count
+    let cooldownMinutes: number;
+    if (pendingGame.completion_attempts <= 3) {
+      cooldownMinutes = 5; // 5 minutes for first few attempts
+    } else if (pendingGame.completion_attempts <= 6) {
+      cooldownMinutes = 30; // 30 minutes for medium attempts
+    } else if (pendingGame.completion_attempts <= 10) {
+      cooldownMinutes = 120; // 2 hours for many attempts
+    } else {
+      cooldownMinutes = 360; // 6 hours for excessive attempts
+    }
+
+    const cooldownMs = cooldownMinutes * 60 * 1000;
+
+    if (timeSinceLastAttempt < cooldownMs) {
+      const remainingMinutes = Math.ceil((cooldownMs - timeSinceLastAttempt) / (60 * 1000));
+      return {
+        skip: true,
+        reason: `cooldown active, ${remainingMinutes}m remaining (attempt ${pendingGame.completion_attempts})`
+      };
+    }
+
+    return { skip: false };
   }
 
   /**
@@ -419,6 +517,23 @@ export class OracleService {
   }
 
   /**
+   * Determine if an error should be retried immediately (vs waiting for cooldown)
+   */
+  private isImmediateRetryableError(error: any): boolean {
+    const immediateRetryErrors = [
+      'Transaction timeout',
+      'Network error',
+      'Connection timeout',
+      'blockhash not found'
+    ];
+
+    const errorMessage = error.message?.toLowerCase() || '';
+    return immediateRetryErrors.some(retryableError =>
+      errorMessage.includes(retryableError.toLowerCase())
+    );
+  }
+
+  /**
    * Get Oracle PDA
    */
   private getOraclePDA(): PublicKey {
@@ -493,5 +608,88 @@ export class OracleService {
    */
   public getStats() {
     return this.db.getStats();
+  }
+
+  /**
+   * Get detailed information about a specific game (for debugging)
+   */
+  public async debugGameStatus(gameAddress: string): Promise<{
+    exists: boolean;
+    accountInfo?: any;
+    gameData?: any;
+    secretExists: boolean;
+    dbStatus?: any;
+    error?: string;
+  }> {
+    try {
+      const gamePda = new PublicKey(gameAddress);
+
+      // Check if account exists at all
+      const accountInfo = await this.connection.getAccountInfo(gamePda);
+
+      if (!accountInfo) {
+        return {
+          exists: false,
+          secretExists: !!this.db.getSecretKey(gameAddress),
+          dbStatus: await this.getGameDbStatus(gameAddress)
+        };
+      }
+
+      // Try to fetch game data
+      let gameData = null;
+      try {
+        gameData = await this.program.account.game.fetch(gamePda);
+      } catch (fetchError: any) {
+        return {
+          exists: true,
+          accountInfo: {
+            lamports: accountInfo.lamports,
+            owner: accountInfo.owner.toBase58(),
+            dataLength: accountInfo.data.length
+          },
+          secretExists: !!this.db.getSecretKey(gameAddress),
+          dbStatus: await this.getGameDbStatus(gameAddress),
+          error: `Failed to deserialize game data: ${fetchError.message}`
+        };
+      }
+
+      return {
+        exists: true,
+        accountInfo: {
+          lamports: accountInfo.lamports,
+          owner: accountInfo.owner.toBase58(),
+          dataLength: accountInfo.data.length
+        },
+        gameData: {
+          players: gameData.players.length,
+          maxPlayers: gameData.maxPlayers,
+          minPlayers: gameData.minPlayers,
+          createdAt: Number(gameData.createdAt),
+          timeout: Number(gameData.timeout),
+          creator: gameData.creator.toBase58()
+        },
+        secretExists: !!this.db.getSecretKey(gameAddress),
+        dbStatus: await this.getGameDbStatus(gameAddress)
+      };
+
+    } catch (error: any) {
+      return {
+        exists: false,
+        secretExists: !!this.db.getSecretKey(gameAddress),
+        dbStatus: await this.getGameDbStatus(gameAddress),
+        error: error.message
+      };
+    }
+  }
+
+  private async getGameDbStatus(gameAddress: string): Promise<any> {
+    try {
+      const stmt = this.db['db'].prepare(
+        'SELECT * FROM game_tracking WHERE game_address = ?'
+      );
+      return stmt.get(gameAddress);
+    } catch (error) {
+      return null;
+    }
   }
 }

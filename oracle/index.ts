@@ -320,6 +320,102 @@ const server = Bun.serve({
         }
       }
 
+      // Debug specific game endpoint
+      if (path === '/debug-game' && method === 'POST') {
+        try {
+          const body = await request.json();
+          const { gameAddress } = body;
+
+          if (!gameAddress) {
+            return createResponse({
+              success: false,
+              error: 'gameAddress is required'
+            }, 400, rateLimitHeaders);
+          }
+
+          // Validate that gameAddress is a valid Solana public key
+          try {
+            new PublicKey(gameAddress);
+          } catch (error) {
+            return createResponse({
+              success: false,
+              error: 'Invalid gameAddress: must be a valid Solana public key'
+            }, 400, rateLimitHeaders);
+          }
+
+          const debugInfo = await oracle.debugGameStatus(gameAddress);
+
+          return createResponse({
+            success: true,
+            gameAddress,
+            debugInfo,
+            timestamp: new Date().toISOString()
+          }, 200, rateLimitHeaders);
+        } catch (error: any) {
+          console.error('Error debugging game:', error);
+          errorCount++;
+          return createResponse({
+            success: false,
+            error: error.message
+          }, 500, rateLimitHeaders);
+        }
+      }
+
+      // Cleanup game endpoint (mark non-existent games as completed)
+      if (path === '/cleanup-game' && method === 'POST') {
+        try {
+          const body = await request.json();
+          const { gameAddress } = body;
+
+          if (!gameAddress) {
+            return createResponse({
+              success: false,
+              error: 'gameAddress is required'
+            }, 400, rateLimitHeaders);
+          }
+
+          // Validate that gameAddress is a valid Solana public key
+          try {
+            new PublicKey(gameAddress);
+          } catch (error) {
+            return createResponse({
+              success: false,
+              error: 'Invalid gameAddress: must be a valid Solana public key'
+            }, 400, rateLimitHeaders);
+          }
+
+          // Check if game exists on-chain
+          const debugInfo = await oracle.debugGameStatus(gameAddress);
+
+          if (!debugInfo.exists) {
+            // Mark as completed since it doesn't exist
+            const db = oracle['db'];
+            db.markGameCompleted(gameAddress);
+
+            return createResponse({
+              success: true,
+              message: `Game ${gameAddress} marked as completed (not found on-chain)`,
+              gameAddress,
+              timestamp: new Date().toISOString()
+            }, 200, rateLimitHeaders);
+          } else {
+            return createResponse({
+              success: false,
+              error: 'Game still exists on-chain, cannot mark as completed',
+              gameAddress,
+              debugInfo
+            }, 400, rateLimitHeaders);
+          }
+        } catch (error: any) {
+          console.error('Error cleaning up game:', error);
+          errorCount++;
+          return createResponse({
+            success: false,
+            error: error.message
+          }, 500, rateLimitHeaders);
+        }
+      }
+
       // Enhanced API documentation endpoint
       if (path === '/' && method === 'GET') {
         const documentation = `
@@ -387,6 +483,16 @@ const server = Bun.serve({
                 <p>Trigger immediate blockchain scan</p>
               </div>
 
+              <div class="endpoint">
+                <div class="method">POST</div> <code>/debug-game</code> ${API_KEY ? '<span class="auth-required">🔒 Auth Required</span>' : ''}
+                <p>Debug specific game status</p>
+              </div>
+
+              <div class="endpoint">
+                <div class="method">POST</div> <code>/cleanup-game</code> ${API_KEY ? '<span class="auth-required">🔒 Auth Required</span>' : ''}
+                <p>Mark a game as completed (if not found on-chain)</p>
+              </div>
+
               <h2>⚡ Rate Limiting</h2>
               <p>Limit: ${RATE_LIMIT_MAX_REQUESTS} requests per ${RATE_LIMIT_WINDOW / 1000} seconds per IP</p>
               <p>Rate limit headers included in responses:</p>
@@ -413,6 +519,18 @@ curl "http://localhost:${PORT}/pending-games"
 
 # Force immediate scan (admin)
 curl -X POST "http://localhost:${PORT}/force-scan" \\
+  ${API_KEY ? '-H "Authorization: Bearer YOUR_API_KEY"' : ''}
+
+# Debug specific game status
+curl -X POST "http://localhost:${PORT}/debug-game" \\
+  -H "Content-Type: application/json" \\
+  -d '{"gameAddress": "GAME_ADDRESS_HERE"}' \\
+  ${API_KEY ? '-H "Authorization: Bearer YOUR_API_KEY"' : ''}
+
+# Mark game as completed (if not found on-chain)
+curl -X POST "http://localhost:${PORT}/cleanup-game" \\
+  -H "Content-Type: application/json" \\
+  -d '{"gameAddress": "GAME_ADDRESS_HERE"}' \\
   ${API_KEY ? '-H "Authorization: Bearer YOUR_API_KEY"' : ''}
               </pre>
 
@@ -450,6 +568,8 @@ curl -X POST "http://localhost:${PORT}/force-scan" \\
           'GET /pending-games',
           'GET /failed-games',
           'POST /force-scan',
+          'POST /debug-game',
+          'POST /cleanup-game',
           'GET / (documentation)'
         ]
       }, 404, rateLimitHeaders);
@@ -556,6 +676,8 @@ console.log(`   GET  http://localhost:${PORT}/stats - Comprehensive statistics`)
 console.log(`   GET  http://localhost:${PORT}/pending-games - Monitor pending games`);
 console.log(`   GET  http://localhost:${PORT}/failed-games - Debug failed games`);
 console.log(`   POST http://localhost:${PORT}/force-scan - Force blockchain scan ${API_KEY ? '🔒' : ''}`);
+console.log(`   POST http://localhost:${PORT}/debug-game - Debug specific game status ${API_KEY ? '🔒' : ''}`);
+console.log(`   POST http://localhost:${PORT}/cleanup-game - Mark game as completed ${API_KEY ? '🔒' : ''}`);
 console.log(`   GET  http://localhost:${PORT}/ - Interactive documentation`);
 console.log('');
 console.log('🔧 Environment:');

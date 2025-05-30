@@ -218,6 +218,17 @@ export class OracleDatabase {
     }
   }
 
+  public resetCompletionAttempts(gameAddress: string): void {
+    try {
+      const stmt = this.db.prepare(
+        'UPDATE game_tracking SET completion_attempts = 0, last_checked = ? WHERE game_address = ?'
+      );
+      stmt.run(Date.now(), gameAddress);
+    } catch (error) {
+      console.error("Error resetting completion attempts:", error);
+    }
+  }
+
   public getPendingGames(): Array<{
     game_address: string;
     last_checked: number;
