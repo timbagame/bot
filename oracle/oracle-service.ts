@@ -7,6 +7,23 @@ import idl from "./idl/idl.json" with { type: "json" };
 import * as fs from "fs";
 import * as path from "path";
 
+// Types for better error handling
+interface GameCompletionResult {
+  success: boolean;
+  error?: string;
+  txHash?: string;
+  retryable?: boolean;
+}
+
+interface ScanResult {
+  totalAccounts: number;
+  validGameAccounts: number;
+  readyGames: number;
+  completedGames: number;
+  errors: number;
+  retryableErrors: number;
+}
+
 /**
  * Oracle Service for generating secrets and completing games
  */
@@ -16,6 +33,11 @@ export class OracleService {
   private connection: Connection;
   private adminKeypair: Keypair;
   private db: OracleDatabase;
+  private isScanning: boolean = false;
+  private lastScanTime: number = 0;
+  private scanCooldown: number = 30000; // 30 seconds
+  private maxRetries: number = 3;
+  private retryDelay: number = 5000; // 5 seconds
 
   private constructor() {
     this.db = OracleDatabase.getInstance();
@@ -63,12 +85,13 @@ export class OracleService {
     const randomHash = createHash('sha256').update(secretKey).digest();
     const gamePda = this.getGamePDA(randomHash);
 
-    // Save secret key to database
+    // Save secret key to database and track game
     this.db.saveSecretKey(
       gamePda.toBase58(),
       secretKey.toString('hex'),
       randomHash.toString('hex')
     );
+    this.db.trackGame(gamePda.toBase58());
 
     console.log(`Generated secrets for game: ${gamePda.toBase58()}`);
     return {
@@ -78,7 +101,7 @@ export class OracleService {
   }
 
   /**
-   * Check if a game is ready for completion
+   * Check if a game is ready for completion with better error handling
    */
   public async isGameReadyForCompletion(gamePda: PublicKey): Promise<boolean> {
     try {
@@ -100,28 +123,28 @@ export class OracleService {
         console.log(`Game ${gamePda.toBase58()} no longer exists (already completed)`);
         return false;
       }
-      console.error(`Error checking game readiness:`, error);
+      console.error(`Error checking game readiness for ${gamePda.toBase58()}:`, error);
       return false;
     }
   }
 
   /**
-   * Complete a game using the oracle
+   * Complete a game with retry mechanism
    */
-  public async completeGame(gameAddress: string): Promise<{ success: boolean; error?: string; txHash?: string }> {
+  public async completeGame(gameAddress: string, retryCount: number = 0): Promise<GameCompletionResult> {
     try {
       const gamePda = new PublicKey(gameAddress);
 
       // Get secret key from database
       const secretData = this.db.getSecretKey(gameAddress);
       if (!secretData) {
-        return { success: false, error: "No secret key found for game" };
+        return { success: false, error: "No secret key found for game", retryable: false };
       }
 
       // Check if game is ready
       const isReady = await this.isGameReadyForCompletion(gamePda);
       if (!isReady) {
-        return { success: false, error: "Game is not ready for completion" };
+        return { success: false, error: "Game is not ready for completion", retryable: true };
       }
 
       // Get game account
@@ -133,7 +156,7 @@ export class OracleService {
       const winnerAddress = gameAccount.players[winnerIndex];
 
       if (!winnerAddress) {
-        return { success: false, error: "Unable to determine winner - no players found" };
+        return { success: false, error: "Unable to determine winner - no players found", retryable: false };
       }
 
       // Verify oracle authority
@@ -141,22 +164,27 @@ export class OracleService {
       const oracleAccount = await this.program.account.oracle.fetch(oraclePda);
 
       if (!oracleAccount.authority.equals(this.adminKeypair.publicKey)) {
-        return { success: false, error: "Unauthorized: Admin is not the oracle authority" };
+        return { success: false, error: "Unauthorized: Admin is not the oracle authority", retryable: false };
       }
 
       console.log(`Completing game ${gameAddress}, winner: ${winnerAddress.toBase58()}`);
 
-      // Execute completion transaction
-      const tx = await this.program.methods
-        .completeGame([...secretKeyBuffer])
-        .accounts({
-          game: gamePda,
-          player: winnerAddress,
-          creator: gameAccount.creator,
-          authority: this.adminKeypair.publicKey,
-        })
-        .signers([this.adminKeypair])
-        .rpc();
+      // Execute completion transaction with timeout
+      const tx = await Promise.race([
+        this.program.methods
+          .completeGame([...secretKeyBuffer])
+          .accounts({
+            game: gamePda,
+            player: winnerAddress,
+            creator: gameAccount.creator,
+            authority: this.adminKeypair.publicKey,
+          })
+          .signers([this.adminKeypair])
+          .rpc(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Transaction timeout")), 60000)
+        )
+      ]);
 
       await this.confirmTransaction(tx);
 
@@ -168,109 +196,226 @@ export class OracleService {
       return { success: true, txHash: tx };
 
     } catch (error: any) {
-      console.error(`❌ Error completing game ${gameAddress}:`, error);
-      this.db.updateGameStatus(gameAddress, 'error', error.message);
-      return { success: false, error: error.message };
+      console.error(`❌ Error completing game ${gameAddress} (attempt ${retryCount + 1}):`, error);
+
+      // Determine if error is retryable
+      const retryable = this.isRetryableError(error);
+
+      // Update database with error
+      this.db.updateGameStatus(gameAddress, retryable ? 'error_retryable' : 'error', error.message);
+      this.db.incrementCompletionAttempts(gameAddress);
+
+      // Retry if possible
+      if (retryable && retryCount < this.maxRetries) {
+        console.log(`🔄 Retrying game completion for ${gameAddress} in ${this.retryDelay}ms`);
+        await new Promise(resolve => setTimeout(resolve, this.retryDelay));
+        return this.completeGame(gameAddress, retryCount + 1);
+      }
+
+      return { success: false, error: error.message, retryable };
     }
   }
 
   /**
-   * Scan blockchain for active games and complete ready ones
+   * Improved blockchain scanning with better performance and error handling
    */
-  public async scanAndCompleteActiveGames(): Promise<void> {
+  public async scanAndCompleteActiveGames(): Promise<ScanResult> {
+    if (this.isScanning) {
+      console.log('⏳ Scan already in progress, skipping...');
+      return { totalAccounts: 0, validGameAccounts: 0, readyGames: 0, completedGames: 0, errors: 0, retryableErrors: 0 };
+    }
+
+    const now = Date.now();
+    if (now - this.lastScanTime < this.scanCooldown) {
+      const remaining = this.scanCooldown - (now - this.lastScanTime);
+      console.log(`⏰ Scan cooldown active, ${Math.ceil(remaining / 1000)}s remaining`);
+      return { totalAccounts: 0, validGameAccounts: 0, readyGames: 0, completedGames: 0, errors: 0, retryableErrors: 0 };
+    }
+
+    this.isScanning = true;
+    this.lastScanTime = now;
+
     try {
       console.log('🔍 Scanning blockchain for active games...');
 
-      // Get all game accounts from the program with error handling
-      let gameAccounts: Array<{ publicKey: PublicKey; account: any }> = [];
+      const result: ScanResult = {
+        totalAccounts: 0,
+        validGameAccounts: 0,
+        readyGames: 0,
+        completedGames: 0,
+        errors: 0,
+        retryableErrors: 0
+      };
 
-      try {
-        // First, get raw program accounts to filter by discriminator
-        const programAccounts = await this.connection.getProgramAccounts(this.program.programId);
-        console.log(`Found ${programAccounts.length} total program accounts`);
+      // First, check pending games from database for quick retry
+      const pendingGames = this.db.getPendingGames();
+      console.log(`📋 Found ${pendingGames.length} pending games in database`);
 
-        // Game account discriminator from the IDL
-        const gameDiscriminator = [27, 90, 166, 125, 74, 100, 121, 18];
-
-        // Filter for game accounts by discriminator
-        const potentialGameAccounts = programAccounts.filter(account => {
-          if (account.account.data.length < 8) return false;
-          const accountDiscriminator = Array.from(account.account.data.slice(0, 8));
-          return accountDiscriminator.every((byte, index) => byte === gameDiscriminator[index]);
-        });
-
-        console.log(`Found ${potentialGameAccounts.length} accounts with game discriminator`);
-
-        // Now try to deserialize each account individually
-        for (const accountInfo of potentialGameAccounts) {
-          try {
-            const gameAccount = await this.program.account.game.fetch(accountInfo.pubkey);
-            gameAccounts.push({
-              publicKey: accountInfo.pubkey,
-              account: gameAccount
-            });
-          } catch (error: any) {
-            console.warn(`⚠️ Failed to deserialize game account ${accountInfo.pubkey.toBase58()}: ${error.message}`);
-            // Skip this account and continue with others
+      for (const pendingGame of pendingGames) {
+        try {
+          // Skip games that have failed too many times
+          if (pendingGame.completion_attempts >= this.maxRetries) {
+            console.log(`⏭️ Skipping game ${pendingGame.game_address} (max retries exceeded)`);
             continue;
           }
+
+          const gamePda = new PublicKey(pendingGame.game_address);
+          const isReady = await this.isGameReadyForCompletion(gamePda);
+
+          if (isReady) {
+            result.readyGames++;
+            const completionResult = await this.completeGame(pendingGame.game_address);
+
+            if (completionResult.success) {
+              result.completedGames++;
+            } else {
+              result.errors++;
+              if (completionResult.retryable) {
+                result.retryableErrors++;
+              }
+            }
+          }
+
+          // Rate limiting between operations
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+        } catch (error: any) {
+          result.errors++;
+          console.error(`Error processing pending game ${pendingGame.game_address}:`, error);
         }
-
-        console.log(`Successfully deserialized ${gameAccounts.length} game accounts`);
-
-      } catch (error: any) {
-        console.error('❌ Error getting program accounts:', error);
-        return; // Exit early if we can't get accounts at all
       }
 
-      let readyCount = 0;
-      let completedCount = 0;
-      let errorCount = 0;
+      // Then scan blockchain for new games (less frequently)
+      if (pendingGames.length === 0 || now % (5 * 60 * 1000) < this.scanCooldown) {
+        await this.scanBlockchainForNewGames(result);
+      }
 
-      for (const gameAccountInfo of gameAccounts) {
+      console.log(`📊 Scan complete:`, result);
+      return result;
+
+    } catch (error: any) {
+      console.error('❌ Error in scan process:', error);
+      return { totalAccounts: 0, validGameAccounts: 0, readyGames: 0, completedGames: 0, errors: 1, retryableErrors: 0 };
+    } finally {
+      this.isScanning = false;
+    }
+  }
+
+  /**
+   * Scan blockchain for new games with improved filtering
+   */
+  private async scanBlockchainForNewGames(result: ScanResult): Promise<void> {
+    try {
+      // Get program accounts with better filtering
+      const programAccounts = await this.connection.getProgramAccounts(this.program.programId, {
+        filters: [
+          {
+            // Filter by account size (approximate game account size)
+            dataSize: 8 + 32 + 8 + 4 + 4 + 8 + 8 + 32 + (32 * 10) + 1 // Approximate game account structure
+          }
+        ]
+      });
+
+      result.totalAccounts = programAccounts.length;
+      console.log(`Found ${programAccounts.length} potential game accounts`);
+
+      // Game account discriminator
+      const gameDiscriminator = [27, 90, 166, 125, 74, 100, 121, 18];
+
+      for (const accountInfo of programAccounts) {
         try {
-          const gameAddress = gameAccountInfo.publicKey.toBase58();
+          // Validate discriminator
+          if (accountInfo.account.data.length < 8) continue;
+
+          const accountDiscriminator = Array.from(accountInfo.account.data.slice(0, 8));
+          const isGameAccount = accountDiscriminator.every((byte, index) => byte === gameDiscriminator[index]);
+
+          if (!isGameAccount) continue;
+
+          // Safely try to deserialize
+          const gameAccount = await this.safelyFetchGameAccount(accountInfo.pubkey);
+          if (!gameAccount) continue;
+
+          result.validGameAccounts++;
+
+          const gameAddress = accountInfo.pubkey.toBase58();
 
           // Check if we have the secret key for this game
           const secretData = this.db.getSecretKey(gameAddress);
           if (!secretData) {
-            // This game wasn't created through our oracle, skip it
+            // Track unknown games for debugging
+            console.log(`🔍 Found game not created by our oracle: ${gameAddress}`);
             continue;
           }
 
           // Check if game is ready for completion
-          const isReady = await this.isGameReadyForCompletion(gameAccountInfo.publicKey);
-          if (!isReady) {
-            continue;
-          }
+          const isReady = await this.isGameReadyForCompletion(accountInfo.pubkey);
+          if (!isReady) continue;
 
-          readyCount++;
+          result.readyGames++;
           console.log(`🎯 Game ${gameAddress} is ready for completion`);
 
           // Complete the game
-          const result = await this.completeGame(gameAddress);
-          if (result.success) {
-            completedCount++;
-            console.log(`✅ Successfully completed game ${gameAddress}`);
+          const completionResult = await this.completeGame(gameAddress);
+          if (completionResult.success) {
+            result.completedGames++;
           } else {
-            errorCount++;
-            console.log(`❌ Failed to complete game ${gameAddress}: ${result.error}`);
+            result.errors++;
+            if (completionResult.retryable) {
+              result.retryableErrors++;
+            }
           }
 
-          // Small delay between completions to avoid rate limiting
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          // Rate limiting
+          await new Promise(resolve => setTimeout(resolve, 2000));
 
         } catch (error: any) {
-          errorCount++;
-          console.error(`Error processing game ${gameAccountInfo.publicKey.toBase58()}:`, error);
+          result.errors++;
+          console.warn(`⚠️ Error processing account ${accountInfo.pubkey.toBase58()}:`, error.message);
         }
       }
-
-      console.log(`📊 Scan complete: ${readyCount} ready, ${completedCount} completed, ${errorCount} errors`);
-
     } catch (error: any) {
-      console.error('❌ Error scanning active games:', error);
+      console.error('❌ Error scanning blockchain:', error);
+      throw error;
     }
+  }
+
+  /**
+   * Safely fetch game account with better error handling
+   */
+  private async safelyFetchGameAccount(pubkey: PublicKey): Promise<any | null> {
+    try {
+      return await this.program.account.game.fetch(pubkey);
+    } catch (error: any) {
+      if (error.message?.includes('Account does not exist')) {
+        return null;
+      }
+      if (error.message?.includes('offset') && error.message?.includes('out of range')) {
+        console.warn(`⚠️ Invalid game account data structure: ${pubkey.toBase58()}`);
+        return null;
+      }
+      // Re-throw other errors
+      throw error;
+    }
+  }
+
+  /**
+   * Determine if an error is retryable
+   */
+  private isRetryableError(error: any): boolean {
+    const retryableErrors = [
+      'Transaction timeout',
+      'Network error',
+      'RPC error',
+      'Connection timeout',
+      'blockhash not found',
+      'block height exceeded'
+    ];
+
+    const errorMessage = error.message?.toLowerCase() || '';
+    return retryableErrors.some(retryableError =>
+      errorMessage.includes(retryableError.toLowerCase())
+    );
   }
 
   /**

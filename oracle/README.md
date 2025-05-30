@@ -1,202 +1,284 @@
-# Oracle API
+# Oracle API 🔮
 
-Independent Oracle service for Solana game completion. This service generates random hashes for new games and automatically completes games when they're ready.
+A production-ready Oracle service for Solana Coinflip games with comprehensive monitoring, error handling, and security features.
 
-## Features
+## 🚀 Key Features
 
-- **Random Hash Generation**: Provides secure random hashes for game initialization
-- **Automatic Game Completion**: Monitors and completes games when they're full or expired
-- **Secret Key Management**: Securely stores and manages secret keys for game completion
-- **REST API**: Clean HTTP API for integration with any client
-- **Background Processing**: Continuously monitors games for completion
-- **Statistics**: Real-time statistics and monitoring
+### 🔐 Security & Authentication
 
-## Quick Start
+- **API Key Authentication**: Optional API key protection for sensitive endpoints
+- **Rate Limiting**: 100 requests per minute per IP (configurable)
+- **CORS Support**: Proper cross-origin request handling
 
-1. **Install dependencies**:
+### 📊 Enhanced Monitoring
+
+- **Comprehensive Metrics**: Detailed performance and success tracking
+- **Failed Game Debugging**: View and analyze failed completions
+- **Pending Game Monitoring**: Track games waiting for completion
+- **Real-time Health Checks**: Detailed system status with Oracle metrics
+
+### 🔄 Improved Reliability
+
+- **Smart Retry Logic**: Automatic retry with exponential backoff for transient errors
+- **Better Error Classification**: Distinguishes between retryable and permanent errors
+- **Adaptive Scanning**: Automatically adjusts scan frequency based on workload
+- **Database Optimization**: Indexed queries and automatic cleanup
+
+### 🛠 Performance Optimizations
+
+- **Efficient Account Filtering**: Reduced RPC calls with better discriminator filtering
+- **Prioritized Processing**: Database-tracked pending games processed first
+- **Connection Pooling**: Improved Solana RPC connection handling
+- **Memory Management**: Automatic cleanup of old records
+
+## 📡 API Endpoints
+
+### Public Endpoints
+
+- `GET /health` - System health with detailed metrics
+- `GET /stats?hours=24` - Comprehensive Oracle statistics
+- `GET /pending-games` - Monitor games waiting for completion
+- `GET /failed-games?limit=50` - Debug failed game completions
+- `GET /` - Interactive API documentation
+
+### Protected Endpoints (require API key)
+
+- `POST /generate-hash` - Generate secrets for new games
+- `POST /complete-game` - Manually complete a specific game
+- `POST /force-scan` - Trigger immediate blockchain scan
+
+## 🔧 Configuration
+
+### Environment Variables
+
+```bash
+# Required
+SOLANA_NETWORK=https://api.devnet.solana.com
+
+# Optional Security
+ORACLE_API_KEY=your_secret_api_key_here
+
+# Optional Performance Tuning
+ORACLE_PORT=3001
+RATE_LIMIT_MAX_REQUESTS=100
+RATE_LIMIT_WINDOW=60000
+```
+
+### Authentication
+
+When `ORACLE_API_KEY` is set, protected endpoints require authentication:
+
+```bash
+# Header method
+curl -H "Authorization: Bearer YOUR_API_KEY" \
+  -X POST http://localhost:3001/generate-hash
+
+# Query parameter method
+curl -X POST "http://localhost:3001/generate-hash?api_key=YOUR_API_KEY"
+```
+
+## 🚀 Quick Start
+
+1. **Install dependencies**
 
    ```bash
    bun install
    ```
 
-2. **Copy admin keypair**:
-
-   ```bash
-   cp ../admin-keypair.json ./admin-keypair.json
-   ```
-
-3. **Set up environment**:
+2. **Configure environment**
 
    ```bash
    cp env.example .env
-   # Edit .env with your configuration
+   # Edit .env with your settings
    ```
 
-4. **Start the Oracle API**:
+3. **Start the Oracle**
    ```bash
    bun start
    ```
 
-The Oracle API will be available at `http://localhost:3001`.
+## 📊 Monitoring & Observability
 
-## API Endpoints
+### Health Check
 
-### `POST /generate-hash`
-
-Generate a random hash and secret key for a new game.
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "randomHash": "abc123...",
-  "gameAddress": "GAME_PDA_ADDRESS"
-}
+```bash
+curl http://localhost:3001/health
 ```
 
-### `POST /track-game`
+Returns detailed system information including:
 
-Start tracking a game for automatic completion.
+- Server uptime and version
+- Request statistics and error rates
+- Oracle performance metrics
+- Current game counts
 
-**Request:**
+### Statistics Dashboard
 
-```json
-{
-  "gameAddress": "GAME_PDA_ADDRESS"
-}
+```bash
+curl "http://localhost:3001/stats?hours=24"
 ```
 
-**Response:**
+Provides comprehensive metrics:
 
-```json
-{
-  "success": true,
-  "message": "Game GAME_PDA_ADDRESS is now being tracked"
-}
+- Secret generation and usage
+- Game completion rates
+- Error tracking
+- Performance statistics
+- 24-hour activity summary
+
+### Real-time Monitoring
+
+```bash
+# Monitor pending games
+curl http://localhost:3001/pending-games
+
+# Check failed completions
+curl http://localhost:3001/failed-games
+
+# Force immediate scan
+curl -X POST http://localhost:3001/force-scan \
+  -H "Authorization: Bearer YOUR_API_KEY"
 ```
 
-### `POST /complete-game`
+## 🔍 How It Works
 
-Manually complete a game (for testing/debugging).
+### Automatic Game Completion
 
-**Request:**
+1. **Game Creation**: Call `/generate-hash` to get secrets for new games
+2. **Background Scanning**: Oracle automatically scans every 30 seconds
+3. **Smart Processing**: Prioritizes database-tracked games over blockchain discovery
+4. **Adaptive Timing**: Adjusts scan frequency based on workload
+5. **Reliable Completion**: Retry mechanism handles transient failures
 
-```json
-{
-  "gameAddress": "GAME_PDA_ADDRESS"
-}
+### Database Schema
+
+The Oracle maintains detailed tracking with:
+
+- **secret_keys**: Game secrets and usage tracking
+- **game_tracking**: Game lifecycle and completion attempts
+- **metrics**: Performance and error metrics
+
+### Error Handling
+
+- **Retryable Errors**: Network issues, timeouts, RPC errors
+- **Permanent Errors**: Invalid games, missing secrets, authorization failures
+- **Retry Logic**: Up to 3 attempts with exponential backoff
+
+## 🛡 Security Features
+
+### Rate Limiting
+
+- Default: 100 requests per minute per IP
+- Headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
+- Configurable limits and windows
+
+### API Key Authentication
+
+- Optional but recommended for production
+- Supports header and query parameter methods
+- Public endpoints remain accessible
+
+### Input Validation
+
+- Solana public key validation
+- Request body validation
+- Error message sanitization
+
+## 🔧 Advanced Configuration
+
+### Adaptive Scanning
+
+The Oracle automatically adjusts scan frequency:
+
+- **Normal**: 30 seconds when games need processing
+- **Reduced**: Up to 2 minutes when no work available
+- **Burst**: Immediate processing for pending games
+
+### Database Maintenance
+
+- **Automatic Cleanup**: Removes records older than 30 days
+- **Index Optimization**: Efficient queries for large datasets
+- **Metrics Retention**: Configurable data retention periods
+
+### Performance Tuning
+
+```typescript
+// Configurable timeouts
+TRANSACTION_TIMEOUT = 60000;
+CONNECTION_TIMEOUT = 30000;
+RETRY_DELAY = 5000;
+MAX_RETRIES = 3;
 ```
 
-**Response:**
+## 📈 Production Deployment
 
-```json
-{
-  "success": true,
-  "txHash": "TRANSACTION_HASH"
-}
+### Recommended Setup
+
+```bash
+# Production environment
+SOLANA_NETWORK=https://api.mainnet-beta.solana.com
+ORACLE_API_KEY=your_strong_random_key
+ORACLE_PORT=3001
+
+# Enhanced security
+RATE_LIMIT_MAX_REQUESTS=50
+RATE_LIMIT_WINDOW=60000
+
+# Performance optimization
+DATABASE_CLEANUP_DAYS=30
 ```
 
-### `GET /stats`
+### Monitoring Integration
 
-Get Oracle statistics.
+The Oracle provides metrics endpoints compatible with:
 
-**Response:**
+- Prometheus/Grafana monitoring
+- Custom alerting systems
+- Health check services
+- Load balancer integration
 
-```json
-{
-  "success": true,
-  "stats": {
-    "totalSecrets": 10,
-    "usedSecrets": 5,
-    "pendingGames": 3,
-    "completedGames": 2
-  },
-  "timestamp": "2024-01-01T00:00:00.000Z"
-}
+### Error Alerting
+
+Monitor these endpoints for alerts:
+
+- `/health` - Overall system health
+- `/stats` - Error rate thresholds
+- `/failed-games` - Failed completion tracking
+
+## 🧪 Testing
+
+### Manual Testing
+
+```bash
+# Generate game secrets
+curl -X POST http://localhost:3001/generate-hash
+
+# Monitor the process
+curl http://localhost:3001/pending-games
+
+# Check completion
+curl http://localhost:3001/stats
 ```
 
-### `GET /health`
+### Integration Testing
 
-Health check endpoint.
+The Oracle provides endpoints for integration with your game client:
 
-**Response:**
+1. Call `/generate-hash` before game creation
+2. Use returned `randomHash` and `gameAddress` in your transaction
+3. Monitor completion via `/pending-games` or `/stats`
 
-```json
-{
-  "status": "healthy",
-  "timestamp": "2024-01-01T00:00:00.000Z",
-  "uptime": 12345.67
-}
-```
+## 🤝 Contributing
 
-## Environment Variables
+The Oracle API is designed for extensibility:
 
-- `SOLANA_NETWORK`: Solana RPC endpoint (default: devnet)
-- `ORACLE_PORT`: API server port (default: 3001)
+- Modular error handling system
+- Pluggable metrics collection
+- Configurable retry strategies
+- Extensible endpoint framework
 
-## File Requirements
+## 🔗 Related
 
-- `admin-keypair.json`: Admin keypair file (same as the bot)
-- `.env`: Environment variables (copy from `env.example`)
-
-## How It Works
-
-1. **Hash Generation**: When requested, generates a cryptographically secure random hash and corresponding secret key
-2. **Secret Storage**: Stores the secret key in a local SQLite database linked to the game address
-3. **Game Tracking**: Games can be registered for tracking via the API
-4. **Background Monitoring**: Every 30 seconds, checks all pending games for completion readiness
-5. **Automatic Completion**: When a game is full or expired with enough players, automatically completes it using the stored secret
-6. **Cleanup**: Marks secrets as used and games as completed after successful completion
-
-## Integration Example
-
-```javascript
-// Generate hash for new game
-const response = await fetch("http://localhost:3001/generate-hash", {
-  method: "POST",
-});
-const { randomHash, gameAddress } = await response.json();
-
-// Use randomHash to initialize game on-chain
-// ...
-
-// Start tracking the game
-await fetch("http://localhost:3001/track-game", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ gameAddress }),
-});
-
-// Oracle will automatically complete the game when ready
-```
-
-## Development
-
-- `bun dev`: Start with file watching
-- `bun start`: Start in production mode
-
-## Database
-
-The Oracle uses SQLite for local storage:
-
-- `oracle.sqlite`: Stores secret keys and game tracking information
-- Automatically created on first run
-- Contains tables for secret keys and game tracking status
-
-## Security
-
-- Secret keys are generated using crypto-secure random bytes
-- Admin keypair is required for game completion transactions
-- Only the Oracle service has access to the secret keys
-- Games can only be completed by the authorized Oracle
-
-## Monitoring
-
-The Oracle logs important events and provides statistics:
-
-- Game secret generation
-- Game tracking start/stop
-- Completion attempts and results
-- Background processing status
-- Regular statistics output every 5 minutes
+- [Game Client Integration Guide](../bot/README.md)
+- [Solana Program Documentation](../README.md)
+- [Development Setup](./DEVELOPMENT.md)
