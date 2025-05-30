@@ -58,12 +58,6 @@ export type GameCancellationResult = {
   tx: string;
 } | false;
 
-export interface GameInfo {
-  status: string;
-  isExpired: boolean;
-  hasEnoughPlayers: boolean;
-}
-
 export interface GameMessageFormat {
   messageText: string;
   keyboard: any[];
@@ -74,16 +68,6 @@ export interface GameCategory {
   lost: any[];
   cancelled: any[];
   created: any[];
-}
-
-export interface GameBasicInfo {
-  amount: number;
-  maxPlayers: number;
-  minPlayers: number;
-  currentPlayers: number;
-  creatorPubkey: string;
-  status: string;
-  gameType: string;
 }
 
 export interface GameCompletedEvent {
@@ -101,12 +85,6 @@ export interface GameCompletedEvent {
 // ================================
 // ORACLE TYPES
 // ================================
-
-export interface OracleResult {
-  success: boolean;
-  event?: GameCompletedEvent;
-  error?: any;
-}
 
 export interface AuthorizationResult {
   authorized: boolean;
@@ -139,12 +117,6 @@ export interface OracleHealthResponse {
   status: string;
   timestamp: string;
   uptime: number;
-}
-
-export interface OracleCompletionResponse {
-  success: boolean;
-  txHash?: string;
-  error?: string;
 }
 
 // ================================

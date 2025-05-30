@@ -575,20 +575,8 @@ export class GameManager {
   }
 
   // ================================
-  // COMPLETION AND EXPIRATION
+  // EXPIRATION HANDLING
   // ================================
-
-  public async handleGameCompletion(gamePda: PublicKey): Promise<boolean> {
-    try {
-      console.log(`🎯 Game completion will be handled by external oracle for ${gamePda.toBase58()}`);
-      // The external oracle service will automatically complete this game
-      // when it becomes ready (full or expired with enough players)
-      return true;
-    } catch (error: any) {
-      console.error(`Error in game completion handling ${gamePda.toBase58()}:`, error);
-      return false;
-    }
-  }
 
   public async handleExpiredGame(ctx: Context, gamePda: PublicKey, gameAccount: any): Promise<GameCancellationResult | false> {
     try {
@@ -682,18 +670,6 @@ export class GameManager {
       };
     } catch (error) {
       console.error(`Error handling expired game ${gamePda.toBase58()}:`, error);
-      return false;
-    }
-  }
-
-  public async autoCompleteGame(gamePda: PublicKey): Promise<boolean> {
-    try {
-      console.log(`🎯 Auto-completion delegated to external oracle for ${gamePda.toBase58()}`);
-      // The external oracle service will automatically complete this game
-      // No need for manual completion here
-      return true;
-    } catch (error) {
-      console.error('Error in auto-completion handling:', error);
       return false;
     }
   }
@@ -1045,9 +1021,13 @@ export class GameManager {
       // Track in database first
       this.gameDb.saveOrphanedGame(address, Number(account.amount), gameType, 'active');
 
-      // Determine action: complete, cancel, or skip
+      // Determine action: let oracle complete, cancel, or skip
       if (hasEnoughPlayers) {
-        return await this.tryCompleteOrCancel(gamePda, address, account, gameType, blockTime);
+        // The external oracle service will automatically complete games that are ready
+        // We just need to track that this game exists and let the oracle handle it
+        this.gameDb.saveOrphanedGame(address, Number(account.amount), gameType, 'pending_completion');
+        console.log(`✅ Marked orphaned game ${address} for oracle completion`);
+        return true;
       } else if (isExpired) {
         return await this.tryCancelGame(gamePda, address, account, gameType, blockTime);
       } else {
@@ -1059,23 +1039,6 @@ export class GameManager {
       console.error(`❌ Error processing orphaned game ${address}:`, error.message);
       return false;
     }
-  }
-
-  private async tryCompleteOrCancel(gamePda: PublicKey, address: string, account: any, gameType: string, blockTime: number): Promise<boolean> {
-    console.log(`👥 Game ${address} has enough players - external oracle will complete it`);
-
-    try {
-      // The external oracle service will automatically complete games that are ready
-      // We just need to track that this game exists and let the oracle handle it
-      this.gameDb.saveOrphanedGame(address, Number(account.amount), gameType, 'pending_completion');
-      console.log(`✅ Marked orphaned game ${address} for oracle completion`);
-      return true;
-    } catch (error: any) {
-      console.log(`⚠️ Error tracking game for completion ${address}, falling back to cancellation`);
-    }
-
-    // Fallback to cancellation if tracking fails
-    return await this.tryCancelGame(gamePda, address, account, gameType, blockTime);
   }
 
   private async tryCancelGame(gamePda: PublicKey, address: string, account: any, gameType: string, blockTime: number): Promise<boolean> {

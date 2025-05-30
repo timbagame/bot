@@ -15,7 +15,6 @@ import {
   GAME_TIMEOUT,
   COINFLIP_MAX_PLAYERS,
   GIVEAWAY_MAX_PLAYERS,
-  GAME_COMPLETION_WAIT_MS,
   EXPIRED_GAMES_CHECK_INTERVAL_MS,
   BLOCKCHAIN_SCAN_INTERVAL_MS,
   TOKEN_METADATA_CACHE_DURATION
@@ -954,17 +953,9 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
       }
     );
 
-    // Auto-complete if full
-    if (updatedGameAccount.players.length === gameAccount.maxPlayers) {
-      await new Promise(resolve => setTimeout(resolve, GAME_COMPLETION_WAIT_MS));
-      const finalGameAccount = await program.account.game.fetch(gamePda);
-      if (finalGameAccount.players.length === gameAccount.maxPlayers) {
-        const completed = await gameManager.autoCompleteGame(gamePda);
-        if (!completed) {
-          ctx.reply("⚠️ Game is full but could not be automatically completed. Please try again later or contact support.");
-        }
-      }
-    }
+    // Note: Game completion is now handled automatically by the external oracle service
+    // when the game is full or expires with enough players
+
   } catch (error: any) {
     // Handle specific case where account doesn't exist
     if (error.message?.includes('Account does not exist')) {
