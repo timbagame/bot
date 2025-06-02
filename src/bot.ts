@@ -21,16 +21,17 @@ import {
 } from "./utils/constants";
 import type { ParsedAmount, PlayerData, GameCompletedEvent } from "./types";
 
-// Initialize the bot and wallet manager
+// ================================
+// GLOBAL INSTANCES
+// ================================
+
 const bot = new Bot(process.env.TELEGRAM_TOKEN!);
 const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
+const gameDb = GameDatabase.getInstance();
+
 const TOKEN_MINT = process.env.TOKEN_MINT!;
 const TICKER = process.env.TICKER!;
 
-// Initialize game database
-const gameDb = GameDatabase.getInstance();
-
-// Global program variable to be initialized when needed
 let program: anchor.Program<Coinflip>;
 let gameManager: GameManager;
 
@@ -42,11 +43,6 @@ let tokenMetadataLastFetch: number = 0;
 // BOT SEQUENTIALIZATION
 // ================================
 
-/**
- * Configure concurrent processing with sequentialization
- * This ensures operations for the same user are processed in order
- * while allowing concurrent processing between different users
- */
 const getSequentializationKey = (ctx: Context): string | string[] | undefined => {
   const userId = ctx.from?.id?.toString();
   if (!userId) return undefined;
@@ -63,14 +59,12 @@ const getSequentializationKey = (ctx: Context): string | string[] | undefined =>
   return userId;
 };
 
-// Configure concurrent processing with sequentialization
 bot.use(sequentialize(getSequentializationKey));
 
 // ================================
-// SIMPLIFIED HELPER FUNCTIONS
+// UTILITY FUNCTIONS
 // ================================
 
-// Helper function to get token metadata with caching
 const getTokenMetadata = async () => {
   const now = Date.now();
   if (!tokenMetadata || now - tokenMetadataLastFetch > TOKEN_METADATA_CACHE_DURATION) {
@@ -80,7 +74,6 @@ const getTokenMetadata = async () => {
   return tokenMetadata;
 };
 
-// Helper function to parse and validate amounts
 const parseAmount = async (args: string[], argIndex: number = 1): Promise<ParsedAmount | null> => {
   if (!args || args.length <= argIndex) return null;
 
@@ -93,7 +86,6 @@ const parseAmount = async (args: string[], argIndex: number = 1): Promise<Parsed
   if (!amountArg) return null;
 
   const rawAmount = parseFloat(amountArg);
-
   if (isNaN(rawAmount) || rawAmount <= 0) return null;
 
   const amount = rawAmount * (isSol ? LAMPORTS_PER_SOL : Math.pow(10, metadata.decimals));
@@ -104,17 +96,14 @@ const parseAmount = async (args: string[], argIndex: number = 1): Promise<Parsed
   return { amount, isSol, formattedAmount };
 };
 
-// Helper function to get player data - optimized
 const getPlayerData = async (telegramId: bigint): Promise<PlayerData> => {
   const keypair = wallet.getKeyPair(telegramId);
 
-  // Batch fetch balances concurrently
   const [tokenBalance, solBalance] = await Promise.all([
     wallet.getTokenBalance(telegramId, TOKEN_MINT),
     wallet.getBalance(telegramId)
   ]);
 
-  // Get player's game balance
   let gameBalance = 0;
   try {
     const playerBalancePda = PDAManager.getPlayerBalancePDA(
@@ -131,7 +120,40 @@ const getPlayerData = async (telegramId: bigint): Promise<PlayerData> => {
   return { keypair, tokenBalance, solBalance, gameBalance };
 };
 
-// Helper function to process transactions with loading state
+const claimWinnings = async (playerKp: anchor.web3.Keypair): Promise<number> => {
+  const playerBalancePda = PDAManager.getPlayerBalancePDA(
+    playerKp.publicKey,
+    new PublicKey(TOKEN_MINT),
+    program.programId
+  );
+
+  try {
+    const playerBalance = await program.account.playerBalance.fetch(playerBalancePda);
+    const claimableAmount = Number(playerBalance.amount);
+
+    if (claimableAmount <= 0) return 0;
+
+    const tx = await program.methods
+      .withdrawPlayerBalance()
+      .accounts({
+        player: playerKp.publicKey,
+        tokenMint: new PublicKey(TOKEN_MINT),
+      })
+      .signers([playerKp])
+      .rpc();
+
+    await wallet.confirmTransaction(tx);
+    return claimableAmount;
+  } catch (error: any) {
+    if (error.message?.includes('Account does not exist')) return 0;
+    throw error;
+  }
+};
+
+// ================================
+// TRANSACTION PROCESSING
+// ================================
+
 const validateAndProcessTransaction = async (
   ctx: Context,
   telegramId: bigint,
@@ -189,7 +211,10 @@ const validateAndProcessTransaction = async (
   }
 };
 
-// Helper function to handle errors consistently
+// ================================
+// RESPONSE HELPERS
+// ================================
+
 const handleCommandError = async (ctx: Context, error: any, commandName: string): Promise<void> => {
   console.error(`Error in ${commandName} command:`, error);
   const userFriendlyError = formatUserFriendlyError(error, wallet);
@@ -198,7 +223,6 @@ const handleCommandError = async (ctx: Context, error: any, commandName: string)
   });
 };
 
-// Helper function for consistent replies
 const replyToMessage = async (ctx: Context, text: string, parseMode: "HTML" | "MarkdownV2" = "HTML"): Promise<void> => {
   await ctx.reply(text, {
     parse_mode: parseMode,
@@ -206,7 +230,6 @@ const replyToMessage = async (ctx: Context, text: string, parseMode: "HTML" | "M
   });
 };
 
-// Helper function for usage error messages
 const replyUsageError = async (ctx: Context, message: string): Promise<void> => {
   return replyToMessage(ctx, message);
 };
@@ -215,58 +238,29 @@ const replyUsageError = async (ctx: Context, message: string): Promise<void> => 
 // ANCHOR SETUP
 // ================================
 
-// Initialize Anchor with a wallet for admin operations
 const initializeAnchorProvider = async () => {
-  // Get admin keypair from the JSON file
   const adminKeypair = wallet.getAdminKeypair();
-
-  // Create a wallet adapter for Anchor
   const adminWallet = new anchor.Wallet(adminKeypair);
-
-  // Initialize provider with connection from wallet manager
   const provider = new anchor.AnchorProvider(
     wallet.getConnection(),
     adminWallet,
     { commitment: "confirmed" }
   );
 
-  // Set the provider globally
   anchor.setProvider(provider);
-
   return new anchor.Program(idl as Coinflip, provider) as anchor.Program<Coinflip>;
 };
 
-// Initialize program when bot starts
 const setupAnchor = async () => {
   try {
     program = await initializeAnchorProvider();
     console.log(`Initialized Anchor program: ${program.programId}`);
 
-    // Initialize game manager
     gameManager = GameManager.getInstance(program, wallet, gameDb, TOKEN_MINT, TICKER);
 
-    // Check if Oracle is already initialized
-    try {
-      const oraclePda = PDAManager.getOraclePDA(program.programId);
-
-      const oracleAccount = await program.account.oracle.fetch(oraclePda);
-      console.log(`Oracle found, authority: ${oracleAccount.authority.toString()}`);
-    } catch (error) {
-      console.log("Oracle not found, it might need to be initialized");
-    }
-
-    // Check if game token is initialized
-    try {
-      const gameTokenPda = PDAManager.getGameTokenPDA(
-        new PublicKey(TOKEN_MINT),
-        program.programId
-      );
-
-      const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
-      console.log(`Game token found: ${gameTokenAccount.tokenMint.toString()}`);
-    } catch (error) {
-      console.log("Game token not found, it might need to be initialized");
-    }
+    // Check Oracle initialization
+    await checkOracleStatus();
+    await checkGameTokenStatus();
   } catch (error) {
     console.error("Error initializing Anchor program:", error);
     console.error("Make sure admin-keypair.json exists in the project root directory.");
@@ -274,18 +268,39 @@ const setupAnchor = async () => {
   }
 };
 
+const checkOracleStatus = async () => {
+  try {
+    const oraclePda = PDAManager.getOraclePDA(program.programId);
+    const oracleAccount = await program.account.oracle.fetch(oraclePda);
+    console.log(`Oracle found, authority: ${oracleAccount.authority.toString()}`);
+  } catch (error) {
+    console.log("Oracle not found, it might need to be initialized");
+  }
+};
+
+const checkGameTokenStatus = async () => {
+  try {
+    const gameTokenPda = PDAManager.getGameTokenPDA(
+      new PublicKey(TOKEN_MINT),
+      program.programId
+    );
+    const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
+    console.log(`Game token found: ${gameTokenAccount.tokenMint.toString()}`);
+  } catch (error) {
+    console.log("Game token not found, it might need to be initialized");
+  }
+};
+
 // ================================
 // BOT COMMANDS
 // ================================
 
-// Optimize balance command
 bot.command(["start", "balance"], async (ctx: Context) => {
   const telegramId = BigInt(ctx.from?.id || 0);
   try {
     const playerData = await getPlayerData(telegramId);
     const metadata = await getTokenMetadata();
 
-    // Get player's balance PDA
     const playerBalancePda = PDAManager.getPlayerBalancePDA(
       playerData.keypair.publicKey,
       new PublicKey(TOKEN_MINT),
@@ -294,10 +309,13 @@ bot.command(["start", "balance"], async (ctx: Context) => {
 
     const balance = await program.account.playerBalance.fetch(playerBalancePda).catch(() => ({ amount: 0 }));
 
-    let response = "💰 <b>Your Balance</b>\n\n";
-    response += `Wallet Address: <code>${playerData.keypair.publicKey.toBase58()}</code>\n`;
-    response += `SOL Balance: ${wallet.formatSolBalance(playerData.solBalance)} SOL\n`;
-    response += `Token Balance: ${wallet.formatTokenBalance(playerData.tokenBalance + Number(balance.amount), metadata.decimals)} ${TICKER}`;
+    const response = [
+      "💰 <b>Your Balance</b>",
+      "",
+      `Wallet Address: <code>${playerData.keypair.publicKey.toBase58()}</code>`,
+      `SOL Balance: ${wallet.formatSolBalance(playerData.solBalance)} SOL`,
+      `Token Balance: ${wallet.formatTokenBalance(playerData.tokenBalance + Number(balance.amount), metadata.decimals)} ${TICKER}`
+    ].join("\n");
 
     await ctx.reply(response, {
       parse_mode: "HTML",
@@ -308,7 +326,6 @@ bot.command(["start", "balance"], async (ctx: Context) => {
   }
 });
 
-// Simplified coinflip command
 bot.command(["coinflip", "cf"], async (ctx) => {
   if (!ctx.from) return;
 
@@ -325,7 +342,6 @@ bot.command(["coinflip", "cf"], async (ctx) => {
   await gameManager.createGame(ctx, "coinflip", parsed.amount, maxPlayers, 2, GAME_TIMEOUT);
 });
 
-// Simplified giveaway command
 bot.command(["giveaway", "ga"], async (ctx) => {
   if (!ctx.from) return;
 
@@ -342,7 +358,10 @@ bot.command(["giveaway", "ga"], async (ctx) => {
   await gameManager.createGame(ctx, "giveaway", parsed.amount, maxPlayers, 1, GAME_TIMEOUT);
 });
 
-// Implement withdraw command
+// ================================
+// WALLET COMMANDS
+// ================================
+
 bot.command(["withdraw", "wh"], async (ctx: Context) => {
   const telegramId = BigInt(ctx.from?.id || 0);
   const args = ctx.message?.text?.split(" ");
@@ -393,7 +412,6 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
   }
 });
 
-// Implement tip command
 bot.command("tip", async (ctx: Context) => {
   const telegramId = BigInt(ctx.from?.id || 0);
   const repliedMessage = ctx.message?.reply_to_message;
@@ -403,7 +421,6 @@ bot.command("tip", async (ctx: Context) => {
     return replyUsageError(ctx, "Usage: Reply to a user's message with /tip <amount> or /tip <amount> SOL");
   }
 
-  // Check if the recipient is a bot
   if (repliedMessage.from.is_bot) {
     return replyToMessage(ctx, "You cannot tip bots!");
   }
@@ -448,7 +465,6 @@ bot.command("tip", async (ctx: Context) => {
   }
 });
 
-// Implement wrap command
 bot.command("wrap", async (ctx: Context) => {
   const telegramId = BigInt(ctx.from?.id || 0);
   const args = ctx.message?.text?.split(" ");
@@ -493,74 +509,62 @@ bot.command("wrap", async (ctx: Context) => {
   }
 });
 
-// Implement help command
-bot.command("help", async (ctx: Context) => {
-  const helpText =
-    `<b>📝 Available Commands:</b>\n\n` +
-    `/start, /balance - Show your wallet address and balances\n` +
-    `/wrap &lt;amount&gt; - Convert SOL to WSOL\n` +
-    `/coinflip &lt;amount&gt; &lt;maxPlayers&gt; - Create a new coinflip game\n` +
-    `/cf &lt;amount&gt; &lt;maxPlayers&gt; - Shorthand for coinflip command\n` +
-    `/giveaway &lt;amount&gt; &lt;maxPlayers&gt; - Create a new giveaway\n` +
-    `/ga &lt;amount&gt; &lt;maxPlayers&gt; - Shorthand for giveaway command\n` +
-    `/withdraw &lt;address&gt; &lt;amount&gt; - Withdraw tokens to external wallet\n` +
-    `/wh &lt;address&gt; &lt;amount&gt; - Shorthand for withdraw command\n` +
-    `/tip &lt;amount&gt; - Reply to a user's message to send them tokens\n` +
-    `/privatekey, /pk - Get your wallet private key (private chat only)\n` +
-    `/active - Show your active games\n` +
-    `/games - Show your recent games\n` +
-    `/debug - Show detailed wallet debug info (reply to user for their info too)\n` +
-    `/checktx &lt;signature&gt; - Check transaction details and status\n` +
-    `/oracle - Check Oracle configuration\n` +
-    `/scan - Scan blockchain for orphaned games (private chat only)\n\n` +
-    `<b>ℹ️ Important:</b> Your player balance account will be automatically initialized when needed.`;
+// ================================
+// INFORMATION COMMANDS
+// ================================
 
-  await ctx.reply(helpText, {
+bot.command("help", async (ctx: Context) => {
+  const helpSections = [
+    "<b>📝 Available Commands:</b>",
+    "",
+    "<b>💰 Wallet Commands:</b>",
+    "/start, /balance - Show your wallet address and balances",
+    "/wrap <amount> - Convert SOL to WSOL",
+    "/withdraw <address> <amount> - Withdraw tokens to external wallet",
+    "/wh <address> <amount> - Shorthand for withdraw command",
+    "/tip <amount> - Reply to a user's message to send them tokens",
+    "/privatekey, /pk - Get your wallet private key (private chat only)",
+    "",
+    "<b>🎮 Game Commands:</b>",
+    "/coinflip <amount> <maxPlayers> - Create a new coinflip game",
+    "/cf <amount> <maxPlayers> - Shorthand for coinflip command",
+    "/giveaway <amount> <maxPlayers> - Create a new giveaway",
+    "/ga <amount> <maxPlayers> - Shorthand for giveaway command",
+    "/active - Show your active games",
+    "/games - Show your recent games",
+    "",
+    "<b>🔧 Utility Commands:</b>",
+    "/debug - Show detailed wallet debug info (reply to user for their info too)",
+    "/checktx <signature> - Check transaction details and status",
+    "/oracle - Check Oracle configuration",
+    "/scan - Scan blockchain for orphaned games (private chat only)",
+    "",
+    "<b>ℹ️ Important:</b> Your player balance account will be automatically initialized when needed."
+  ];
+
+  await ctx.reply(helpSections.join("\n"), {
     parse_mode: "HTML",
     reply_to_message_id: ctx.message?.message_id
   });
 });
 
-// Add after the help command, before the active command
 bot.command("debug", async (ctx: Context) => {
   const telegramId = BigInt(ctx.from?.id || 0);
   const replyToMessage = ctx.message?.reply_to_message;
 
   try {
-    const playerData = await getPlayerData(telegramId);
-    const metadata = await getTokenMetadata();
-
-    let response = `🔍 <b>Debug Info for ${ctx.from?.first_name || 'You'}</b>\n\n`;
-    response += `Telegram ID: <code>${telegramId}</code>\n`;
-    response += `Wallet Address: <code>${playerData.keypair.publicKey.toBase58()}</code>\n`;
-    response += `SOL Balance: ${wallet.formatSolBalance(playerData.solBalance)} SOL\n`;
-    response += `Token Balance: ${wallet.formatTokenBalance(playerData.tokenBalance, metadata.decimals)} ${TICKER}\n`;
-    response += `Game Balance: ${wallet.formatTokenBalance(playerData.gameBalance, metadata.decimals)} ${TICKER}\n\n`;
-
-    // Get token account address
-    const { getAssociatedTokenAddress } = await import("@solana/spl-token");
-    const tokenAccount = await getAssociatedTokenAddress(
-      new PublicKey(TOKEN_MINT),
-      playerData.keypair.publicKey
-    );
-    response += `Token Account: <code>${tokenAccount.toBase58()}</code>\n\n`;
+    const debugInfo = await buildDebugInfo(telegramId, ctx.from?.first_name || 'You');
+    let response = debugInfo;
 
     // If replying to someone, show their info too
     if (replyToMessage && replyToMessage.from && !replyToMessage.from.is_bot) {
       const recipientTelegramId = BigInt(replyToMessage.from.id);
-      const recipientData = await getPlayerData(recipientTelegramId);
-      const recipientTokenAccount = await getAssociatedTokenAddress(
-        new PublicKey(TOKEN_MINT),
-        recipientData.keypair.publicKey
+      const recipientDebugInfo = await buildDebugInfo(
+        recipientTelegramId,
+        replyToMessage.from.first_name || 'User',
+        true
       );
-
-      response += `<b>Reply Target: ${replyToMessage.from.first_name || 'User'}</b>\n`;
-      response += `Telegram ID: <code>${recipientTelegramId}</code>\n`;
-      response += `Wallet Address: <code>${recipientData.keypair.publicKey.toBase58()}</code>\n`;
-      response += `SOL Balance: ${wallet.formatSolBalance(recipientData.solBalance)} SOL\n`;
-      response += `Token Balance: ${wallet.formatTokenBalance(recipientData.tokenBalance, metadata.decimals)} ${TICKER}\n`;
-      response += `Game Balance: ${wallet.formatTokenBalance(recipientData.gameBalance, metadata.decimals)} ${TICKER}\n`;
-      response += `Token Account: <code>${recipientTokenAccount.toBase58()}</code>\n`;
+      response += "\n\n" + recipientDebugInfo;
     }
 
     await ctx.reply(response, {
@@ -572,17 +576,34 @@ bot.command("debug", async (ctx: Context) => {
   }
 });
 
-// Add after the debug command
+const buildDebugInfo = async (telegramId: bigint, name: string, isReplyTarget: boolean = false): Promise<string> => {
+  const playerData = await getPlayerData(telegramId);
+  const metadata = await getTokenMetadata();
+
+  const { getAssociatedTokenAddress } = await import("@solana/spl-token");
+  const tokenAccount = await getAssociatedTokenAddress(
+    new PublicKey(TOKEN_MINT),
+    playerData.keypair.publicKey
+  );
+
+  const prefix = isReplyTarget ? `<b>Reply Target: ${name}</b>` : `🔍 <b>Debug Info for ${name}</b>`;
+
+  return [
+    prefix,
+    "",
+    `Telegram ID: <code>${telegramId}</code>`,
+    `Wallet Address: <code>${playerData.keypair.publicKey.toBase58()}</code>`,
+    `SOL Balance: ${wallet.formatSolBalance(playerData.solBalance)} SOL`,
+    `Token Balance: ${wallet.formatTokenBalance(playerData.tokenBalance, metadata.decimals)} ${TICKER}`,
+    `Game Balance: ${wallet.formatTokenBalance(playerData.gameBalance, metadata.decimals)} ${TICKER}`,
+    `Token Account: <code>${tokenAccount.toBase58()}</code>`
+  ].join("\n");
+};
+
 bot.command("checktx", async (ctx: Context) => {
   const args = ctx.message?.text?.split(" ");
+  const signature = args?.[1];
 
-  if (!args || args.length < 2) {
-    return ctx.reply("Usage: /checktx <transaction_signature>", {
-      reply_to_message_id: ctx.message?.message_id
-    });
-  }
-
-  const signature = args[1];
   if (!signature) {
     return ctx.reply("Usage: /checktx <transaction_signature>", {
       reply_to_message_id: ctx.message?.message_id
@@ -591,7 +612,6 @@ bot.command("checktx", async (ctx: Context) => {
 
   try {
     console.log(`Checking transaction: ${signature}`);
-
     const connection = wallet.getConnection();
     const txDetails = await connection.getTransaction(signature, {
       commitment: "confirmed",
@@ -604,18 +624,21 @@ bot.command("checktx", async (ctx: Context) => {
       });
     }
 
-    let response = `🔍 <b>Transaction Details</b>\n\n`;
-    response += `Signature: <code>${signature}</code>\n`;
-    response += `Slot: ${txDetails.slot}\n`;
-    response += `Block Time: ${txDetails.blockTime ? new Date(txDetails.blockTime * 1000).toISOString() : 'Unknown'}\n`;
-    response += `Fee: ${txDetails.meta?.fee || 0} lamports\n`;
-    response += `Status: ${txDetails.meta?.err ? '❌ Failed' : '✅ Success'}\n`;
+    const response = [
+      "🔍 <b>Transaction Details</b>",
+      "",
+      `Signature: <code>${signature}</code>`,
+      `Slot: ${txDetails.slot}`,
+      `Block Time: ${txDetails.blockTime ? new Date(txDetails.blockTime * 1000).toISOString() : 'Unknown'}`,
+      `Fee: ${txDetails.meta?.fee || 0} lamports`,
+      `Status: ${txDetails.meta?.err ? '❌ Failed' : '✅ Success'}`
+    ];
 
     if (txDetails.meta?.err) {
-      response += `Error: <code>${JSON.stringify(txDetails.meta.err)}</code>\n`;
+      response.push(`Error: <code>${JSON.stringify(txDetails.meta.err)}</code>`);
     }
 
-    await ctx.reply(response, {
+    await ctx.reply(response.join("\n"), {
       parse_mode: "HTML",
       reply_to_message_id: ctx.message?.message_id
     });
@@ -628,7 +651,6 @@ bot.command("checktx", async (ctx: Context) => {
   }
 });
 
-// Implement active command to show only active games
 bot.command("active", async (ctx: Context) => {
   const telegramId = BigInt(ctx.from?.id || 0);
 
@@ -651,7 +673,6 @@ bot.command("active", async (ctx: Context) => {
   }
 });
 
-// Modify games command to show only recent games
 bot.command("games", async (ctx: Context) => {
   const telegramId = BigInt(ctx.from?.id || 0);
 
@@ -668,9 +689,11 @@ bot.command("games", async (ctx: Context) => {
   }
 });
 
-// Add after the existing commands, before the callback query handler
+// ================================
+// SECURE COMMANDS
+// ================================
+
 bot.command(["privatekey", "pk"], async (ctx: Context) => {
-  // Only allow this command in private chats for security
   if (ctx.chat?.type !== "private") {
     return ctx.reply("🔒 This command can only be used in private messages for security reasons. Please message me directly.", {
       reply_to_message_id: ctx.message?.message_id
@@ -684,15 +707,22 @@ bot.command(["privatekey", "pk"], async (ctx: Context) => {
     const privateKeyArray = Array.from(playerData.keypair.secretKey);
     const privateKeyString = `[${privateKeyArray.join(',')}]`;
 
-    let response = `🔐 <b>Your Private Key</b>\n\n`;
-    response += `⚠️ <b>SECURITY WARNING:</b>\n`;
-    response += `• Never share your private key with anyone\n`;
-    response += `• Store it securely offline\n`;
-    response += `• Anyone with this key has full access to your wallet\n\n`;
-    response += `Wallet Address: <code>${playerData.keypair.publicKey.toBase58()}</code>\n\n`;
-    response += `Private Key (Array Format):\n<code>${privateKeyString}</code>\n\n`;
-    response += `Private Key (Base58 Format):\n<code>${Buffer.from(playerData.keypair.secretKey).toString('base64')}</code>\n\n`;
-    response += `💡 You can import this key into Phantom, Solflare, or other Solana wallets.`;
+    const response = [
+      "🔐 <b>Your Private Key</b>",
+      "",
+      "⚠️ <b>SECURITY WARNING:</b>",
+      "• Never share your private key with anyone",
+      "• Store it securely offline",
+      "• Anyone with this key has full access to your wallet",
+      "",
+      `Wallet Address: <code>${playerData.keypair.publicKey.toBase58()}</code>`,
+      "",
+      `Private Key (Array Format):\n<code>${privateKeyString}</code>`,
+      "",
+      `Private Key (Base58 Format):\n<code>${Buffer.from(playerData.keypair.secretKey).toString('base64')}</code>`,
+      "",
+      "💡 You can import this key into Phantom, Solflare, or other Solana wallets."
+    ].join("\n");
 
     await ctx.reply(response, {
       parse_mode: "HTML",
@@ -703,20 +733,23 @@ bot.command(["privatekey", "pk"], async (ctx: Context) => {
   }
 });
 
-// Add after the existing commands, before the callback query handler
 bot.command("oracle", async (ctx: Context) => {
   try {
     const oraclePda = PDAManager.getOraclePDA(program.programId);
     const oracleAccount = await program.account.oracle.fetch(oraclePda);
 
-    let response = "🔮 <b>Oracle Configuration</b>\n\n";
-    response += `Authority: <code>${oracleAccount.authority.toString()}</code>\n`;
-    response += `Fee Percentage: ${oracleAccount.feePercentage}%\n`;
-    response += `Min Timeout: ${oracleAccount.minTimeout} seconds (${oracleAccount.minTimeout / 60} minutes)\n`;
-    response += `Max Timeout: ${oracleAccount.maxTimeout} seconds (${oracleAccount.maxTimeout / 60} minutes)\n`;
-    response += `Max Players: ${oracleAccount.maxPlayers}\n`;
-    response += `Oracle Buffer Time: ${oracleAccount.oracleBufferTime} seconds\n\n`;
-    response += `Current Game Timeout: ${GAME_TIMEOUT} seconds (${GAME_TIMEOUT / 60} minutes)`;
+    const response = [
+      "🔮 <b>Oracle Configuration</b>",
+      "",
+      `Authority: <code>${oracleAccount.authority.toString()}</code>`,
+      `Fee Percentage: ${oracleAccount.feePercentage}%`,
+      `Min Timeout: ${oracleAccount.minTimeout} seconds (${oracleAccount.minTimeout / 60} minutes)`,
+      `Max Timeout: ${oracleAccount.maxTimeout} seconds (${oracleAccount.maxTimeout / 60} minutes)`,
+      `Max Players: ${oracleAccount.maxPlayers}`,
+      `Oracle Buffer Time: ${oracleAccount.oracleBufferTime} seconds`,
+      "",
+      `Current Game Timeout: ${GAME_TIMEOUT} seconds (${GAME_TIMEOUT / 60} minutes)`
+    ].join("\n");
 
     await ctx.reply(response, {
       parse_mode: "HTML",
@@ -727,9 +760,7 @@ bot.command("oracle", async (ctx: Context) => {
   }
 });
 
-// Add after the existing commands, before the callback query handler
 bot.command("scan", async (ctx: Context) => {
-  // Only allow this command in private chats or from specific users for security
   if (ctx.chat?.type !== "private") {
     return ctx.reply("🔒 This command can only be used in private messages for security reasons.", {
       reply_to_message_id: ctx.message?.message_id
@@ -742,17 +773,19 @@ bot.command("scan", async (ctx: Context) => {
     });
 
     await gameManager.scanBlockchainForOrphanedGames();
-
-    // Get statistics after the scan
     const stats = gameDb.getOrphanedGameStats();
 
-    let response = "✅ Blockchain scan completed successfully!\n\n";
-    response += `📊 <b>Orphaned Game Statistics:</b>\n`;
-    response += `Total Found: ${stats.total}\n`;
-    response += `Active: ${stats.active}\n`;
-    response += `Completed: ${stats.completed}\n`;
-    response += `Failed: ${stats.failed}\n\n`;
-    response += `Check console logs for detailed information.`;
+    const response = [
+      "✅ Blockchain scan completed successfully!",
+      "",
+      "📊 <b>Orphaned Game Statistics:</b>",
+      `Total Found: ${stats.total}`,
+      `Active: ${stats.active}`,
+      `Completed: ${stats.completed}`,
+      `Failed: ${stats.failed}`,
+      "",
+      "Check console logs for detailed information."
+    ].join("\n");
 
     await ctx.api.editMessageText(
       ctx.chat!.id,
@@ -765,7 +798,10 @@ bot.command("scan", async (ctx: Context) => {
   }
 });
 
-// Handle callback queries for game actions
+// ================================
+// CALLBACK QUERY HANDLING
+// ================================
+
 bot.on("callback_query", async (ctx) => {
   const callbackData = ctx.callbackQuery.data;
   if (!callbackData || !ctx.from) return;
@@ -785,38 +821,7 @@ bot.on("callback_query", async (ctx) => {
 
   // Check if the game is completed before allowing any actions
   if (game.status === "completed") {
-    // For completed games, update the message with final state instead of just showing a popup
-    try {
-      const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
-      const gameData = gameDb.getGame(game.game_address);
-
-      if (gameData) {
-        // Determine game type from database
-        const gameType = gameData.game_type ?
-          gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1) :
-          "Game";
-
-        await gameManager.updateGameMessage(
-          ctx,
-          game.game_address,
-          gameType,
-          Number(game.amount),
-          creatorUsername,
-          "Completed",
-          gameData.winner_address || undefined
-        );
-
-        const statusMessage = gameData.winner_address === "cancelled" ? "cancelled" : "completed";
-        await ctx.answerCallbackQuery(`Game ${statusMessage} - message updated!`);
-      } else {
-        const statusMessage = game.winner_address === "cancelled" ? "cancelled" : "completed";
-        await ctx.answerCallbackQuery(`This game has already been ${statusMessage}!`);
-      }
-    } catch (error) {
-      console.error("Error updating completed game message:", error);
-      const statusMessage = game.winner_address === "cancelled" ? "cancelled" : "completed";
-      await ctx.answerCallbackQuery(`This game has already been ${statusMessage}!`);
-    }
+    await handleCompletedGameCallback(ctx, game);
     return;
   }
 
@@ -850,7 +855,40 @@ bot.on("callback_query", async (ctx) => {
   }
 });
 
-// Helper functions for callback handling
+const handleCompletedGameCallback = async (ctx: any, game: any) => {
+  try {
+    const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
+    const gameData = gameDb.getGame(game.game_address);
+
+    if (gameData) {
+      // Determine game type from database
+      const gameType = gameData.game_type ?
+        gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1) :
+        "Game";
+
+      await gameManager.updateGameMessage(
+        ctx,
+        game.game_address,
+        gameType,
+        Number(game.amount),
+        creatorUsername,
+        "Completed",
+        gameData.winner_address || undefined
+      );
+
+      const statusMessage = gameData.winner_address === "cancelled" ? "cancelled" : "completed";
+      await ctx.answerCallbackQuery(`Game ${statusMessage} - message updated!`);
+    } else {
+      const statusMessage = game.winner_address === "cancelled" ? "cancelled" : "completed";
+      await ctx.answerCallbackQuery(`This game has already been ${statusMessage}!`);
+    }
+  } catch (error) {
+    console.error("Error updating completed game message:", error);
+    const statusMessage = game.winner_address === "cancelled" ? "cancelled" : "completed";
+    await ctx.answerCallbackQuery(`This game has already been ${statusMessage}!`);
+  }
+};
+
 const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, telegramId: bigint, game: any) => {
   if (game.status !== "active") {
     await ctx.answerCallbackQuery("This game is no longer active!");
@@ -1005,45 +1043,14 @@ const handleRefreshGame = async (ctx: any, gamePda: PublicKey, game: any) => {
   }
 };
 
+// ================================
+// ERROR HANDLING & BOT STARTUP
+// ================================
+
 // Error handling
 bot.catch((err) => {
   console.error("Bot error:", err);
 });
-
-// Helper function to claim winnings
-const claimWinnings = async (playerKp: anchor.web3.Keypair): Promise<number> => {
-  const playerBalancePda = PDAManager.getPlayerBalancePDA(
-    playerKp.publicKey,
-    new PublicKey(TOKEN_MINT),
-    program.programId
-  );
-
-  try {
-    const playerBalance = await program.account.playerBalance.fetch(playerBalancePda);
-    const claimableAmount = Number(playerBalance.amount);
-
-    if (claimableAmount <= 0) {
-      return 0;
-    }
-
-    const tx = await program.methods
-      .withdrawPlayerBalance()
-      .accounts({
-        player: playerKp.publicKey,
-        tokenMint: new PublicKey(TOKEN_MINT),
-      })
-      .signers([playerKp])
-      .rpc();
-
-    await wallet.confirmTransaction(tx);
-    return claimableAmount;
-  } catch (error: any) {
-    if (error.message?.includes('Account does not exist')) {
-      return 0;
-    }
-    throw error;
-  }
-};
 
 // Start the bot and setup Anchor
 setupAnchor().then(async () => {
