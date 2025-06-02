@@ -842,10 +842,6 @@ bot.on("callback_query", async (ctx) => {
 
     // Handle specific case where account doesn't exist (game was completed/cancelled)
     if (error.message?.includes('Account does not exist')) {
-      // Update database if needed
-      if (game.status === "active") {
-        gameDb.completeGame(game.game_address, "cancelled", Date.now());
-      }
       await ctx.answerCallbackQuery("This game is no longer active!");
     } else {
       const userFriendlyError = formatUserFriendlyError(error, wallet);
@@ -957,12 +953,8 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
     // when the game is full or expires with enough players
 
   } catch (error: any) {
-    // Handle specific case where account doesn't exist
+    // Handle specific case where account doesn't exist (game was completed/cancelled)
     if (error.message?.includes('Account does not exist')) {
-      // Update database if needed
-      if (game.status === "active") {
-        gameDb.completeGame(game.game_address, "cancelled", Date.now());
-      }
       await ctx.answerCallbackQuery("This game is no longer active!");
     } else {
       // Re-throw the error to be handled by the outer catch block
@@ -1005,10 +997,6 @@ const handleRefreshGame = async (ctx: any, gamePda: PublicKey, game: any) => {
   } catch (error: any) {
     // Handle the case where the account doesn't exist (game was completed/cancelled)
     if (error.message?.includes('Account does not exist')) {
-      // Mark the game as completed in the database if it's not already
-      if (gameData.status === "active") {
-        gameDb.completeGame(game.game_address, "cancelled", Date.now());
-      }
       await ctx.answerCallbackQuery("This game is no longer active!");
     } else {
       console.error(`Error refreshing game ${game.game_address}:`, error);
@@ -1205,9 +1193,8 @@ setupAnchor().then(async () => {
           if (error.message?.includes('Account does not exist')) {
             const gameData = gameDb.getGame(game.game_address);
             if (gameData && gameData.status !== "completed") {
-              console.log(`Game ${game.game_address} account not found but not marked as completed in DB - marking as completed`);
-              // Mark as completed if the account is gone but not marked in DB
-              gameDb.completeGame(game.game_address, "cancelled", Date.now());
+              console.log(`Game ${game.game_address} account not found but not marked as completed in DB`);
+              // Don't automatically mark as cancelled - it might have been completed by the oracle
             }
           } else {
             console.error(`Error processing game ${game.game_address}:`, error);
