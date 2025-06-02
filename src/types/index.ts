@@ -76,7 +76,7 @@ export interface GameCompletedEvent {
   winner: PublicKey;
   gameType: any;
   amount: anchor.BN;
-  players: PublicKey[];
+  playersCount: number;
   tokenMint: PublicKey;
   winnerAmount: anchor.BN;
   feeAmount: anchor.BN;
