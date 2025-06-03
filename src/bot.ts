@@ -1366,7 +1366,13 @@ setupAnchor().then(async () => {
 
       // Send simplified completion notification
       try {
-        const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
+        // Use the game's actual token instead of default
+        if (!gameData.token_mint || !gameData.token_ticker) {
+          console.error(`Missing token info for completion notification of game ${gameAddress}`);
+          return;
+        }
+
+        const metadata = await wallet.getTokenMetadata(gameData.token_mint);
         const winnerUsername = await gameManager.getPlayerUsername(dummyCtx, winnerAddress);
         const winnerAmount = Number(event.winnerAmount);
         const gameTypeKeys = Object.keys(event.gameType);
@@ -1374,7 +1380,7 @@ setupAnchor().then(async () => {
 
         let notificationText = `🎉 <b>${gameType} Completed!</b>\n\n`;
         notificationText += `🏆 Winner: @${winnerUsername}\n`;
-        notificationText += `💰 Prize: ${wallet.formatTokenBalance(winnerAmount, metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`;
+        notificationText += `💰 Prize: ${wallet.formatTokenBalance(winnerAmount, metadata.decimals)} ${gameData.token_ticker}`;
 
         // Get the game message for reply_to_message_id
         const gameMessage = gameManager.getActiveGameMessage(gameAddress);
