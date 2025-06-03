@@ -414,7 +414,7 @@ bot.command(["coinflip", "cf"], async (ctx) => {
     if (parsed.error === "unknown_token") {
       return replyToMessage(ctx, `❌ Unknown token "${parsed.unknownToken}"`);
     }
-    return replyUsageError(ctx, "Usage: /coinflip <amount> [TOKEN] <maxPlayers>\nExample: /coinflip 10 2 or /coinflip 10 TIMBA 2");
+    return replyUsageError(ctx, "Usage: /coinflip &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt;\nExample: /coinflip 10 2 or /coinflip 10 TIMBA 2");
   }
 
   // Check if token was specified to adjust maxPlayers index
@@ -441,7 +441,7 @@ bot.command(["giveaway", "ga"], async (ctx) => {
     if (parsed.error === "unknown_token") {
       return replyToMessage(ctx, `❌ Unknown token "${parsed.unknownToken}"`);
     }
-    return replyUsageError(ctx, "Usage: /giveaway <amount> [TOKEN] <maxPlayers>\nExample: /giveaway 100 5 or /giveaway 100 TIMBA 5");
+    return replyUsageError(ctx, "Usage: /giveaway &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt;\nExample: /giveaway 100 5 or /giveaway 100 TIMBA 5");
   }
 
   // Check if token was specified to adjust maxPlayers index
@@ -461,7 +461,7 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
   const args = ctx.message?.text?.split(" ");
 
   if (!args || args.length < 3) {
-    return replyUsageError(ctx, "Usage: /withdraw <address> <amount> [TOKEN] or /withdraw <address> <amount> SOL");
+    return replyUsageError(ctx, "Usage: /withdraw &lt;address&gt; &lt;amount&gt; [TOKEN] or /withdraw &lt;address&gt; &lt;amount&gt; SOL");
   }
 
   const addressArg = args[1];
@@ -515,7 +515,7 @@ bot.command("tip", async (ctx: Context) => {
   const args = ctx.message?.text?.split(" ");
 
   if (!repliedMessage || !repliedMessage.from || !args || args.length < 2) {
-    return replyUsageError(ctx, "Usage: Reply to a user's message with /tip <amount> [TOKEN] or /tip <amount> SOL");
+    return replyUsageError(ctx, "Usage: Reply to a user's message with /tip &lt;amount&gt; [TOKEN] or /tip &lt;amount&gt; SOL");
   }
 
   if (repliedMessage.from.is_bot) {
@@ -574,7 +574,7 @@ bot.command("wrap", async (ctx: Context) => {
   const amount = parseFloat(args?.[1] || "0") * LAMPORTS_PER_SOL;
 
   if (amount <= 0) {
-    return replyUsageError(ctx, "Usage: /wrap <amount>\nExample: /wrap 0.1");
+    return replyUsageError(ctx, "Usage: /wrap &lt;amount&gt;\nExample: /wrap 0.1");
   }
 
   try {
