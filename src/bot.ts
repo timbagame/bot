@@ -20,9 +20,7 @@ import {
   TOKEN_METADATA_CACHE_DURATION,
   DEFAULT_TOKEN_MINT,
   DEFAULT_TOKEN_TICKER,
-  TOKENS_LIST,
-  MAX_TOKENS_DISPLAY,
-  MIN_TOKEN_BALANCE_DISPLAY
+  TOKENS_LIST
 } from "./utils/constants";
 import type { PlayerData, GameCompletedEvent } from "./types";
 import { TokenDatabase } from "./utils/token-database";
@@ -344,19 +342,6 @@ bot.command(["start", "balance"], async (ctx: Context) => {
     // Efficiently get all token balances in a single RPC call
     const allTokenBalances = await wallet.getAllApprovedTokenBalances(telegramId, approvedTokens);
 
-    // Filter out very small balances and sort by balance value (highest first)
-    const significantTokens = allTokenBalances
-      .filter(token => {
-        const uiAmount = token.balance / Math.pow(10, token.decimals);
-        return uiAmount >= MIN_TOKEN_BALANCE_DISPLAY;
-      })
-      .sort((a, b) => {
-        // Sort by UI amount (highest first)
-        const aUI = a.balance / Math.pow(10, a.decimals);
-        const bUI = b.balance / Math.pow(10, b.decimals);
-        return bUI - aUI;
-      });
-
     // Build the response
     const response = [
       "💰 <b>Your Balance</b>",
@@ -367,40 +352,28 @@ bot.command(["start", "balance"], async (ctx: Context) => {
     ];
 
     // Add token balances section
-    if (significantTokens.length > 0) {
+    if (allTokenBalances.length > 0) {
       response.push("", "🪙 <b>Token Balances:</b>");
 
-      // Determine how many tokens to show
-      const tokensToShow = significantTokens.slice(0, MAX_TOKENS_DISPLAY);
-      const hasMoreTokens = significantTokens.length > MAX_TOKENS_DISPLAY;
-
-      for (const token of tokensToShow) {
+      for (const token of allTokenBalances) {
         let balanceText = `${wallet.formatTokenBalance(token.balance, token.decimals)} ${token.ticker}`;
 
         // Add game balance for the default token
         if (token.mint === DEFAULT_TOKEN_MINT) {
           const gameBalance = Number(defaultTokenGameBalance.amount);
           const totalBalance = token.balance + gameBalance;
-          if (gameBalance > 0) {
-            balanceText = `${wallet.formatTokenBalance(totalBalance, token.decimals)} ${token.ticker} (${wallet.formatTokenBalance(gameBalance, token.decimals)} in games)`;
-          }
+          balanceText = `${wallet.formatTokenBalance(totalBalance, token.decimals)} ${token.ticker}`;
         }
 
         response.push(`• ${balanceText}`);
       }
 
-      // Show pagination info if there are more tokens
-      if (hasMoreTokens) {
-        const remainingCount = significantTokens.length - MAX_TOKENS_DISPLAY;
-        response.push(`• ... and ${remainingCount} more token${remainingCount === 1 ? '' : 's'}`);
-      }
-
       // If user doesn't have the default token but has game balance, show it
-      const hasDefaultToken = significantTokens.some(t => t.mint === DEFAULT_TOKEN_MINT);
+      const hasDefaultToken = allTokenBalances.some(t => t.mint === DEFAULT_TOKEN_MINT);
       if (!hasDefaultToken) {
         const gameBalance = Number(defaultTokenGameBalance.amount);
         if (gameBalance > 0) {
-          response.push(`• ${wallet.formatTokenBalance(gameBalance, metadata.decimals)} ${DEFAULT_TOKEN_TICKER} (in games)`);
+          response.push(`• ${wallet.formatTokenBalance(gameBalance, metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`);
         }
       }
     } else {
@@ -408,18 +381,14 @@ bot.command(["start", "balance"], async (ctx: Context) => {
       const defaultTokenBalance = playerData.tokenBalance + Number(defaultTokenGameBalance.amount);
       if (defaultTokenBalance > 0) {
         response.push("", "🪙 <b>Token Balances:</b>");
-        let balanceText = `${wallet.formatTokenBalance(defaultTokenBalance, metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`;
-        if (Number(defaultTokenGameBalance.amount) > 0) {
-          balanceText += ` (${wallet.formatTokenBalance(Number(defaultTokenGameBalance.amount), metadata.decimals)} in games)`;
-        }
+        const balanceText = `${wallet.formatTokenBalance(defaultTokenBalance, metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`;
         response.push(`• ${balanceText}`);
       }
     }
 
     // Add helpful info
-    response.push("", "💡 Only showing tokens with significant balances");
-    if (approvedTokens.length > significantTokens.length) {
-      response.push(`📊 ${approvedTokens.length} approved tokens available • ${significantTokens.length} owned`);
+    if (approvedTokens.length > allTokenBalances.length) {
+      response.push("", `📊 ${approvedTokens.length} approved tokens available • ${allTokenBalances.length} owned`);
     }
 
     await ctx.reply(response.join("\n"), {
