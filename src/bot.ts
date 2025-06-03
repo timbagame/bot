@@ -1,12 +1,13 @@
 import { Bot, Context } from "grammy";
 import { run, sequentialize } from "@grammyjs/runner";
 import { WalletManager } from "./utils/wallet";
+import { TokenManager } from "./utils/token-manager";
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { createSyncNativeInstruction } from "@solana/spl-token";
 import type { Coinflip } from "../idl/idlType";
 import idl from "../idl/idl.json";
-import { GameDatabase } from "./utils/database";
+import { GameDatabase } from "./utils/game-database";
 import { GameManager } from "./utils/game";
 import { PDAManager } from "./utils/pda";
 import { formatUserFriendlyError } from "./utils/errors";
@@ -16,9 +17,13 @@ import {
   COINFLIP_MAX_PLAYERS,
   GIVEAWAY_MAX_PLAYERS,
   EXPIRED_GAMES_CHECK_INTERVAL_MS,
-  TOKEN_METADATA_CACHE_DURATION
+  TOKEN_METADATA_CACHE_DURATION,
+  DEFAULT_TOKEN_MINT,
+  DEFAULT_TOKEN_TICKER,
+  TOKENS_LIST
 } from "./utils/constants";
-import type { ParsedAmount, PlayerData, GameCompletedEvent } from "./types";
+import type { PlayerData, GameCompletedEvent } from "./types";
+import { TokenDatabase } from "./utils/token-database";
 
 // ================================
 // GLOBAL INSTANCES
@@ -27,12 +32,11 @@ import type { ParsedAmount, PlayerData, GameCompletedEvent } from "./types";
 const bot = new Bot(process.env.TELEGRAM_TOKEN!);
 const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
 const gameDb = GameDatabase.getInstance();
-
-const TOKEN_MINT = process.env.TOKEN_MINT!;
-const TICKER = process.env.TICKER!;
+const tokenDb = TokenDatabase.getInstance();
 
 let program: anchor.Program<Coinflip>;
 let gameManager: GameManager;
+let tokenManager: TokenManager;
 
 // Token metadata cache
 let tokenMetadata: { decimals: number } | null = null;
@@ -67,39 +71,18 @@ bot.use(sequentialize(getSequentializationKey));
 const getTokenMetadata = async () => {
   const now = Date.now();
   if (!tokenMetadata || now - tokenMetadataLastFetch > TOKEN_METADATA_CACHE_DURATION) {
-    tokenMetadata = await wallet.getTokenMetadata(TOKEN_MINT);
+    tokenMetadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
     tokenMetadataLastFetch = now;
   }
   return tokenMetadata;
 };
 
-const parseAmount = async (args: string[], argIndex: number = 1): Promise<ParsedAmount | null> => {
-  if (!args || args.length <= argIndex) return null;
-
-  const metadata = await getTokenMetadata();
-  const lastArg = args[args.length - 1];
-  if (!lastArg) return null;
-
-  const isSol = lastArg.toUpperCase() === "SOL";
-  const amountArg = args[argIndex];
-  if (!amountArg) return null;
-
-  const rawAmount = parseFloat(amountArg);
-  if (isNaN(rawAmount) || rawAmount <= 0) return null;
-
-  const amount = rawAmount * (isSol ? LAMPORTS_PER_SOL : Math.pow(10, metadata.decimals));
-  const formattedAmount = isSol
-    ? wallet.formatSolBalance(amount) + " SOL"
-    : wallet.formatTokenBalance(amount, metadata.decimals) + " " + TICKER;
-
-  return { amount, isSol, formattedAmount };
-};
-
-const getPlayerData = async (telegramId: bigint): Promise<PlayerData> => {
+const getPlayerData = async (telegramId: bigint, tokenMint?: string): Promise<PlayerData> => {
   const keypair = wallet.getKeyPair(telegramId);
 
+  const effectiveTokenMint = tokenMint || DEFAULT_TOKEN_MINT;
   const [tokenBalance, solBalance] = await Promise.all([
-    wallet.getTokenBalance(telegramId, TOKEN_MINT),
+    wallet.getTokenBalance(telegramId, effectiveTokenMint),
     wallet.getBalance(telegramId)
   ]);
 
@@ -107,7 +90,7 @@ const getPlayerData = async (telegramId: bigint): Promise<PlayerData> => {
   try {
     const playerBalancePda = PDAManager.getPlayerBalancePDA(
       keypair.publicKey,
-      new PublicKey(TOKEN_MINT),
+      new PublicKey(effectiveTokenMint),
       program.programId
     );
     const playerBalanceAccount = await program.account.playerBalance.fetch(playerBalancePda);
@@ -119,10 +102,22 @@ const getPlayerData = async (telegramId: bigint): Promise<PlayerData> => {
   return { keypair, tokenBalance, solBalance, gameBalance };
 };
 
+const isUserGroupAdmin = async (ctx: Context, userId: number): Promise<boolean> => {
+  try {
+    if (!ctx.chat || ctx.chat.type === "private") return false;
+
+    const member = await ctx.api.getChatMember(ctx.chat.id, userId);
+    return member.status === "administrator" || member.status === "creator";
+  } catch (error) {
+    console.warn(`Error checking admin status for user ${userId}:`, error);
+    return false;
+  }
+};
+
 const claimWinnings = async (playerKp: anchor.web3.Keypair): Promise<number> => {
   const playerBalancePda = PDAManager.getPlayerBalancePDA(
     playerKp.publicKey,
-    new PublicKey(TOKEN_MINT),
+    new PublicKey(DEFAULT_TOKEN_MINT),
     program.programId
   );
 
@@ -136,7 +131,7 @@ const claimWinnings = async (playerKp: anchor.web3.Keypair): Promise<number> => 
       .withdrawPlayerBalance()
       .accounts({
         player: playerKp.publicKey,
-        tokenMint: new PublicKey(TOKEN_MINT),
+        tokenMint: new PublicKey(DEFAULT_TOKEN_MINT),
       })
       .signers([playerKp])
       .rpc();
@@ -174,10 +169,10 @@ const validateAndProcessTransaction = async (
   if (totalBalance < amount) {
     const balanceStr = isSol
       ? `${wallet.formatSolBalance(totalBalance)} SOL`
-      : `${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${TICKER}`;
+      : `${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`;
     const needStr = isSol
       ? `${wallet.formatSolBalance(amount)} SOL`
-      : `${wallet.formatTokenBalance(amount, metadata.decimals)} ${TICKER}`;
+      : `${wallet.formatTokenBalance(amount, metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`;
 
     await ctx.reply(`Insufficient balance. You have ${balanceStr} but need ${needStr}`, {
       reply_to_message_id: ctx.message?.message_id
@@ -255,7 +250,14 @@ const setupAnchor = async () => {
     program = await initializeAnchorProvider();
     console.log(`Initialized Anchor program: ${program.programId}`);
 
-    gameManager = GameManager.getInstance(program, wallet, gameDb, TOKEN_MINT, TICKER);
+    // Initialize TokenManager
+    tokenManager = TokenManager.getInstance(wallet, DEFAULT_TOKEN_MINT, DEFAULT_TOKEN_TICKER);
+    console.log(`Initialized TokenManager with default token: ${DEFAULT_TOKEN_TICKER}`);
+
+    // Add common tokens to the database
+    await initializeCommonTokens();
+
+    gameManager = GameManager.getInstance(program, wallet, gameDb, DEFAULT_TOKEN_MINT, DEFAULT_TOKEN_TICKER);
 
     // Check Oracle initialization
     await checkOracleStatus();
@@ -264,6 +266,32 @@ const setupAnchor = async () => {
     console.error("Error initializing Anchor program:", error);
     console.error("Make sure admin-keypair.json exists in the project root directory.");
     throw error;
+  }
+};
+
+const initializeCommonTokens = async () => {
+  try {
+    console.log("Initializing common tokens...");
+
+    // Add the default token first
+    await tokenManager.addToken(DEFAULT_TOKEN_MINT, DEFAULT_TOKEN_TICKER);
+    console.log(`Added default token: ${DEFAULT_TOKEN_TICKER}`);
+
+    // Add approved tokens
+    for (const token of TOKENS_LIST) {
+      try {
+        const success = await tokenManager.addToken(token.mint, token.ticker);
+        if (success) {
+          console.log(`Added common token: ${token.ticker}`);
+        }
+      } catch (error) {
+        console.warn(`Could not add common token ${token.ticker}:`, error);
+      }
+    }
+
+    console.log(`Initialized token database with ${tokenDb.getTokenCount()} tokens`);
+  } catch (error) {
+    console.warn("Error initializing common tokens:", error);
   }
 };
 
@@ -280,7 +308,7 @@ const checkOracleStatus = async () => {
 const checkGameTokenStatus = async () => {
   try {
     const gameTokenPda = PDAManager.getGameTokenPDA(
-      new PublicKey(TOKEN_MINT),
+      new PublicKey(DEFAULT_TOKEN_MINT),
       program.programId
     );
     const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
@@ -302,7 +330,7 @@ bot.command(["start", "balance"], async (ctx: Context) => {
 
     const playerBalancePda = PDAManager.getPlayerBalancePDA(
       playerData.keypair.publicKey,
-      new PublicKey(TOKEN_MINT),
+      new PublicKey(DEFAULT_TOKEN_MINT),
       program.programId
     );
 
@@ -313,7 +341,7 @@ bot.command(["start", "balance"], async (ctx: Context) => {
       "",
       `Wallet Address: <code>${playerData.keypair.publicKey.toBase58()}</code>`,
       `SOL Balance: ${wallet.formatSolBalance(playerData.solBalance)} SOL`,
-      `Token Balance: ${wallet.formatTokenBalance(playerData.tokenBalance + Number(balance.amount), metadata.decimals)} ${TICKER}`
+      `Token Balance: ${wallet.formatTokenBalance(playerData.tokenBalance + Number(balance.amount), metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`
     ].join("\n");
 
     await ctx.reply(response, {
@@ -336,12 +364,15 @@ bot.command(["coinflip", "cf"], async (ctx) => {
   const args = ctx.message?.text?.split(" ");
   if (!args) return;
 
-  const parsed = await parseAmount(args);
-  const maxPlayers = parseInt(args?.[2] || COINFLIP_MAX_PLAYERS.toString()) || COINFLIP_MAX_PLAYERS;
-
+  const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id);
   if (!parsed) {
-    return replyUsageError(ctx, "Usage: /coinflip <amount> <maxPlayers>\nExample: /coinflip 10 2");
+    return replyUsageError(ctx, "Usage: /coinflip <amount> [TOKEN] <maxPlayers>\nExample: /coinflip 10 2 or /coinflip 10 TIMBA 2");
   }
+
+  // Check if token was specified to adjust maxPlayers index
+  const tokenSpecified = args[2] && (args[2].toUpperCase() === "SOL" || tokenManager.getKnownTokenByTicker(args[2]));
+  const maxPlayersIndex = tokenSpecified ? 3 : 2;
+  const maxPlayers = parseInt(args?.[maxPlayersIndex] || COINFLIP_MAX_PLAYERS.toString()) || COINFLIP_MAX_PLAYERS;
 
   await gameManager.createGame(ctx, "coinflip", parsed.amount, maxPlayers, 2, GAME_TIMEOUT);
 });
@@ -357,12 +388,15 @@ bot.command(["giveaway", "ga"], async (ctx) => {
   const args = ctx.message?.text?.split(" ");
   if (!args) return;
 
-  const parsed = await parseAmount(args);
-  const maxPlayers = parseInt(args?.[2] || GIVEAWAY_MAX_PLAYERS.toString()) || GIVEAWAY_MAX_PLAYERS;
-
+  const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id);
   if (!parsed) {
-    return replyUsageError(ctx, "Usage: /giveaway <amount> <maxPlayers>\nExample: /giveaway 100 5");
+    return replyUsageError(ctx, "Usage: /giveaway <amount> [TOKEN] <maxPlayers>\nExample: /giveaway 100 5 or /giveaway 100 TIMBA 5");
   }
+
+  // Check if token was specified to adjust maxPlayers index
+  const tokenSpecified = args[2] && (args[2].toUpperCase() === "SOL" || tokenManager.getKnownTokenByTicker(args[2]));
+  const maxPlayersIndex = tokenSpecified ? 3 : 2;
+  const maxPlayers = parseInt(args?.[maxPlayersIndex] || GIVEAWAY_MAX_PLAYERS.toString()) || GIVEAWAY_MAX_PLAYERS;
 
   await gameManager.createGame(ctx, "giveaway", parsed.amount, maxPlayers, 1, GAME_TIMEOUT);
 });
@@ -376,7 +410,7 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
   const args = ctx.message?.text?.split(" ");
 
   if (!args || args.length < 3) {
-    return replyUsageError(ctx, "Usage: /withdraw <address> <amount> or /withdraw <address> <amount> SOL");
+    return replyUsageError(ctx, "Usage: /withdraw <address> <amount> [TOKEN] or /withdraw <address> <amount> SOL");
   }
 
   const addressArg = args[1];
@@ -391,7 +425,7 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
     return replyToMessage(ctx, "Invalid wallet address. Please provide a valid Solana address.");
   }
 
-  const parsed = await parseAmount(args, 2);
+  const parsed = await tokenManager.parseAmount(args, 2, ctx.chat?.id);
   if (!parsed) {
     return replyToMessage(ctx, "Please provide a valid amount greater than 0.");
   }
@@ -412,7 +446,7 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
           });
           return await wallet.signAndSend([transferSolIx], [playerData.keypair]);
         } else {
-          return await wallet.transferToken(telegramId, toAddress, parsed.amount, TOKEN_MINT);
+          return await wallet.transferToken(telegramId, toAddress, parsed.amount, parsed.tokenMint);
         }
       }
     );
@@ -427,7 +461,7 @@ bot.command("tip", async (ctx: Context) => {
   const args = ctx.message?.text?.split(" ");
 
   if (!repliedMessage || !repliedMessage.from || !args || args.length < 2) {
-    return replyUsageError(ctx, "Usage: Reply to a user's message with /tip <amount> or /tip <amount> SOL");
+    return replyUsageError(ctx, "Usage: Reply to a user's message with /tip <amount> [TOKEN] or /tip <amount> SOL");
   }
 
   if (repliedMessage.from.is_bot) {
@@ -439,7 +473,7 @@ bot.command("tip", async (ctx: Context) => {
     return replyToMessage(ctx, "You can't tip yourself!");
   }
 
-  const parsed = await parseAmount(args);
+  const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id);
   if (!parsed) {
     return replyToMessage(ctx, "Please provide a valid amount greater than 0.");
   }
@@ -465,7 +499,7 @@ bot.command("tip", async (ctx: Context) => {
           });
           return await wallet.signAndSend([transferSolIx], [playerData.keypair]);
         } else {
-          return await wallet.transferToken(telegramId, recipientPubKey, parsed.amount, TOKEN_MINT);
+          return await wallet.transferToken(telegramId, recipientPubKey, parsed.amount, parsed.tokenMint);
         }
       }
     );
@@ -494,7 +528,7 @@ bot.command("wrap", async (ctx: Context) => {
       true, // isSol
       `Wrapping ${wallet.formatSolBalance(amount)} SOL to WSOL`,
       async (playerData) => {
-        const wsolMint = new PublicKey(TOKEN_MINT);
+        const wsolMint = new PublicKey(DEFAULT_TOKEN_MINT);
         const { address: wsolAccount, instructions: createAtaIx } = await wallet.findOrCreateAssociatedTokenAccount(
           playerData.keypair.publicKey,
           wsolMint,
@@ -519,6 +553,93 @@ bot.command("wrap", async (ctx: Context) => {
 });
 
 // ================================
+// TOKEN MANAGEMENT COMMANDS
+// ================================
+
+bot.command("default", async (ctx: Context) => {
+  if (!ctx.from) return;
+
+  // Check if this is a private chat
+  if (ctx.chat?.type === "private") {
+    return replyToMessage(ctx, "🚫 Default tokens can only be set in groups or channels.");
+  }
+
+  const args = ctx.message?.text?.split(" ");
+
+  if (!args || args.length < 2) {
+    // Show current default token (anyone can view)
+    const chatConfig = tokenManager.getChatDefaultToken(ctx.chat!.id);
+    if (chatConfig) {
+      const setBy = await gameManager.getUsernameFromTelegramId(ctx, chatConfig.set_by_telegram_id);
+      return replyToMessage(ctx,
+        `📄 Current default token: ${chatConfig.token_ticker}\n` +
+        `🏷️ Token mint: <code>${chatConfig.token_mint}</code>\n` +
+        `👤 Set by: @${setBy}\n` +
+        `📅 Set at: ${new Date(chatConfig.set_at).toLocaleString()}\n\n` +
+        `Use /default <TOKEN_TICKER> to change or /default clear to remove.`
+      );
+    } else {
+      const defaultToken = tokenManager.getDefaultToken();
+      return replyToMessage(ctx,
+        `📄 No default token set for this chat.\n` +
+        `🔄 Using bot default: ${defaultToken.tokenTicker}\n\n` +
+        `Use /default <TOKEN_TICKER> to set a default token for this chat.`
+      );
+    }
+  }
+
+  // For changing the default token, check admin permissions
+  const isAdmin = await isUserGroupAdmin(ctx, ctx.from.id);
+  if (!isAdmin) {
+    return replyToMessage(ctx,
+      "🔒 Only group administrators can change the default token.\n\n" +
+      "💡 Contact a group admin to set or change the default token for this chat."
+    );
+  }
+
+  const tokenInput = args[1];
+  if (!tokenInput) {
+    return replyToMessage(ctx, "Please provide a token ticker.");
+  }
+
+  // Handle clear command
+  if (tokenInput.toUpperCase() === "CLEAR" || tokenInput.toUpperCase() === "REMOVE") {
+    tokenManager.removeChatDefaultToken(ctx.chat!.id);
+    return replyToMessage(ctx, "✅ Default token cleared for this chat. Using bot default token now.");
+  }
+
+  // Try to find the token
+  const knownToken = tokenManager.getKnownTokenByTicker(tokenInput);
+  if (!knownToken) {
+    const allTokens = tokenManager.getAllKnownTokens();
+    let response = `❌ Token "${tokenInput.toUpperCase()}" not found.\n\n`;
+
+    if (allTokens.length > 0) {
+      response += "📋 Known tokens:\n";
+      for (const token of allTokens.slice(0, 10)) { // Show max 10 tokens
+        response += `• ${token.token_ticker}\n`;
+      }
+      if (allTokens.length > 10) {
+        response += `... and ${allTokens.length - 10} more.`;
+      }
+    } else {
+      response += "💡 Contact the bot administrator to add new tokens.";
+    }
+
+    return replyToMessage(ctx, response);
+  }
+
+  // Set the default token
+  tokenManager.setChatDefaultToken(ctx.chat!.id, knownToken.token_mint, knownToken.token_ticker, ctx.from.id.toString());
+
+  return replyToMessage(ctx,
+    `✅ Default token set to ${knownToken.token_ticker}\n` +
+    `🏷️ Token mint: <code>${knownToken.token_mint}</code>\n\n` +
+    `All games and transactions will now use ${knownToken.token_ticker} by default unless specified otherwise.`
+  );
+});
+
+// ================================
 // INFORMATION COMMANDS
 // ================================
 
@@ -529,18 +650,21 @@ bot.command("help", async (ctx: Context) => {
     "<b>💰 Wallet Commands:</b>",
     "/start, /balance - Show your wallet address and balances",
     "/wrap &lt;amount&gt; - Convert SOL to WSOL",
-    "/withdraw &lt;address&gt; &lt;amount&gt; - Withdraw tokens to external wallet",
-    "/wh &lt;address&gt; &lt;amount&gt; - Shorthand for withdraw command",
-    "/tip &lt;amount&gt; - Reply to a user's message to send them tokens",
+    "/withdraw &lt;address&gt; &lt;amount&gt; [TOKEN] - Withdraw tokens to external wallet",
+    "/wh &lt;address&gt; &lt;amount&gt; [TOKEN] - Shorthand for withdraw command",
+    "/tip &lt;amount&gt; [TOKEN] - Reply to a user's message to send them tokens",
     "/privatekey, /pk - Get your wallet private key (private chat only)",
     "",
     "<b>🎮 Game Commands:</b>",
-    "/coinflip &lt;amount&gt; &lt;maxPlayers&gt; - Create a new coinflip game",
-    "/cf &lt;amount&gt; &lt;maxPlayers&gt; - Shorthand for coinflip command",
-    "/giveaway &lt;amount&gt; &lt;maxPlayers&gt; - Create a new giveaway",
-    "/ga &lt;amount&gt; &lt;maxPlayers&gt; - Shorthand for giveaway command",
+    "/coinflip &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Create a new coinflip game",
+    "/cf &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Shorthand for coinflip command",
+    "/giveaway &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Create a new giveaway",
+    "/ga &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Shorthand for giveaway command",
     "/active - Show your active games",
     "/games - Show your recent games",
+    "",
+    "<b>🪙 Token Management:</b>",
+    "/default [TOKEN] - Show/set default token for this chat (admin only to set)",
     "",
     "<b>🔧 Utility Commands:</b>",
     "/debug - Show detailed wallet debug info (reply to user for their info too)",
@@ -548,7 +672,11 @@ bot.command("help", async (ctx: Context) => {
     "/oracle - Check Oracle configuration",
     "/scan - Scan blockchain for orphaned games (private chat only)",
     "",
-    "<b>ℹ️ Important:</b> Your player balance account will be automatically initialized when needed."
+    "<b>ℹ️ Important:</b> ",
+    "• Your player balance account will be automatically initialized when needed",
+    "• Specify token after amount: /coinflip 100 TIMBA 2 or /tip 50 SOL",
+    "• Group admins can set default tokens with /default &lt;TOKEN&gt;",
+    "• Contact bot administrator to add support for new SPL tokens"
   ];
 
   await ctx.reply(helpSections.join("\n"), {
@@ -591,7 +719,7 @@ const buildDebugInfo = async (telegramId: bigint, name: string, isReplyTarget: b
 
   const { getAssociatedTokenAddress } = await import("@solana/spl-token");
   const tokenAccount = await getAssociatedTokenAddress(
-    new PublicKey(TOKEN_MINT),
+    new PublicKey(DEFAULT_TOKEN_MINT),
     playerData.keypair.publicKey
   );
 
@@ -603,8 +731,8 @@ const buildDebugInfo = async (telegramId: bigint, name: string, isReplyTarget: b
     `Telegram ID: <code>${telegramId}</code>`,
     `Wallet Address: <code>${playerData.keypair.publicKey.toBase58()}</code>`,
     `SOL Balance: ${wallet.formatSolBalance(playerData.solBalance)} SOL`,
-    `Token Balance: ${wallet.formatTokenBalance(playerData.tokenBalance, metadata.decimals)} ${TICKER}`,
-    `Game Balance: ${wallet.formatTokenBalance(playerData.gameBalance, metadata.decimals)} ${TICKER}`,
+    `Token Balance: ${wallet.formatTokenBalance(playerData.tokenBalance, metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`,
+    `Game Balance: ${wallet.formatTokenBalance(playerData.gameBalance, metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`,
     `Token Account: <code>${tokenAccount.toBase58()}</code>`
   ].join("\n");
 };
@@ -670,7 +798,7 @@ bot.command("active", async (ctx: Context) => {
     let response = activeGames || "You don't have any active games.";
 
     if (totalTokensInGames > 0) {
-      response += `\n\n💰 Total tokens in active games: ${wallet.formatTokenBalance(totalTokensInGames, metadata.decimals)} ${TICKER}`;
+      response += `\n\n💰 Total tokens in active games: ${wallet.formatTokenBalance(totalTokensInGames, metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`;
     }
 
     await ctx.reply(response, {
@@ -914,12 +1042,12 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
 
     // Check balance
     const [tokenBalance, gameBalance] = await Promise.all([
-      wallet.getTokenBalance(telegramId, TOKEN_MINT),
+      wallet.getTokenBalance(telegramId, DEFAULT_TOKEN_MINT),
       (async () => {
         try {
           const playerBalancePda = PDAManager.getPlayerBalancePDA(
             playerKp.publicKey,
-            new PublicKey(TOKEN_MINT),
+            new PublicKey(DEFAULT_TOKEN_MINT),
             program.programId
           );
           const playerBalance = await program.account.playerBalance.fetch(playerBalancePda);
@@ -937,7 +1065,7 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
     const currentGameType = Object.keys(gameAccount.gameType)[0];
     if (currentGameType === "coinflip" && totalBalance < gameAmount) {
       const metadata = await getTokenMetadata();
-      await ctx.answerCallbackQuery(`Insufficient balance. You have ${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${TICKER} but need ${wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${TICKER}`);
+      await ctx.answerCallbackQuery(`Insufficient balance. You have ${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${DEFAULT_TOKEN_TICKER} but need ${wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`);
       return;
     }
 
@@ -1118,7 +1246,7 @@ setupAnchor().then(async () => {
 
       // Send simplified completion notification
       try {
-        const metadata = await wallet.getTokenMetadata(TOKEN_MINT);
+        const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
         const winnerUsername = await gameManager.getPlayerUsername(dummyCtx, winnerAddress);
         const winnerAmount = Number(event.winnerAmount);
         const gameTypeKeys = Object.keys(event.gameType);
@@ -1126,7 +1254,7 @@ setupAnchor().then(async () => {
 
         let notificationText = `🎉 <b>${gameType} Completed!</b>\n\n`;
         notificationText += `🏆 Winner: @${winnerUsername}\n`;
-        notificationText += `💰 Prize: ${wallet.formatTokenBalance(winnerAmount, metadata.decimals)} ${TICKER}`;
+        notificationText += `💰 Prize: ${wallet.formatTokenBalance(winnerAmount, metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`;
 
         // Get the game message for reply_to_message_id
         const gameMessage = gameManager.getActiveGameMessage(gameAddress);

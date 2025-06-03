@@ -5,7 +5,7 @@ import type {
   OracleStats,
   OracleStatsResponse
 } from "../types";
-import { GameDatabase } from "./database";
+import { GameDatabase } from "./game-database";
 import { WalletManager } from "./wallet";
 
 // ================================

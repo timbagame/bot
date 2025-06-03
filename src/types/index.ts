@@ -16,11 +16,28 @@ export interface GameData {
   completed_at?: number;
   message_id?: number;
   chat_id?: number;
+  token_mint?: string;
+  token_ticker?: string;
 }
 
 export interface PlayerMapping {
   public_key: string;
   telegram_id: string;
+}
+
+export interface ChatTokenConfig {
+  chat_id: number;
+  token_mint: string;
+  token_ticker: string;
+  set_by_telegram_id: string;
+  set_at: number;
+}
+
+export interface KnownToken {
+  token_mint: string;
+  token_ticker: string;
+  decimals: number;
+  added_at: number;
 }
 
 // ================================
@@ -31,6 +48,8 @@ export interface ParsedAmount {
   amount: number;
   isSol: boolean;
   formattedAmount: string;
+  tokenMint: string;
+  tokenTicker: string;
 }
 
 export interface PlayerData {

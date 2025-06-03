@@ -3,7 +3,7 @@ import { Context } from "grammy";
 import * as anchor from "@coral-xyz/anchor";
 import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } from "@solana/spl-token";
 import { WalletManager } from "./wallet";
-import { GameDatabase } from "./database";
+import { GameDatabase } from "./game-database";
 import { OracleClient } from "./oracle";
 import { PDAManager } from "./pda";
 import { formatUserFriendlyError } from "./errors";

@@ -34,7 +34,9 @@ export class GameDatabase {
           completed_at INTEGER,
           message_id INTEGER,
           chat_id INTEGER,
-          game_type TEXT NOT NULL
+          game_type TEXT NOT NULL,
+          token_mint TEXT,
+          token_ticker TEXT
         )
       `);
 
@@ -67,20 +69,20 @@ export class GameDatabase {
         )
       `);
 
-      console.log("Database initialized");
+      console.log("Game database initialized");
     } catch (error) {
-      console.error("Error initializing database:", error);
+      console.error("Error initializing game database:", error);
       throw error;
     }
   }
 
   // Game methods
-  public saveGame(gameAddress: string, creatorTelegramId: string, amount: number, gameType: string): void {
+  public saveGame(gameAddress: string, creatorTelegramId: string, amount: number, gameType: string, tokenMint?: string, tokenTicker?: string): void {
     try {
       const stmt = this.db.prepare(
-        'INSERT INTO games (game_address, creator_telegram_id, amount, created_at, game_type) VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO games (game_address, creator_telegram_id, amount, created_at, game_type, token_mint, token_ticker) VALUES (?, ?, ?, ?, ?, ?, ?)'
       );
-      stmt.run(gameAddress, creatorTelegramId, amount, Date.now(), gameType);
+      stmt.run(gameAddress, creatorTelegramId, amount, Date.now(), gameType, tokenMint || null, tokenTicker || null);
     } catch (error) {
       console.error("Error saving game:", error);
       throw error;
