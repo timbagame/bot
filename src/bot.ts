@@ -328,6 +328,11 @@ bot.command(["start", "balance"], async (ctx: Context) => {
 bot.command(["coinflip", "cf"], async (ctx) => {
   if (!ctx.from) return;
 
+  // Check if this is a private chat
+  if (ctx.chat?.type === "private") {
+    return replyToMessage(ctx, "🚫 Coinflip games cannot be created in private chats since other players can't join. Please use this command in a group or channel where other players can participate!");
+  }
+
   const args = ctx.message?.text?.split(" ");
   if (!args) return;
 
@@ -343,6 +348,11 @@ bot.command(["coinflip", "cf"], async (ctx) => {
 
 bot.command(["giveaway", "ga"], async (ctx) => {
   if (!ctx.from) return;
+
+  // Check if this is a private chat
+  if (ctx.chat?.type === "private") {
+    return replyToMessage(ctx, "🚫 Giveaway games cannot be created in private chats since other players can't join. Please use this command in a group or channel where other players can participate!");
+  }
 
   const args = ctx.message?.text?.split(" ");
   if (!args) return;
