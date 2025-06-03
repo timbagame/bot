@@ -512,9 +512,23 @@ export class GameManager {
   ): Promise<void> {
     const telegramId = BigInt(ctx.from?.id || 0);
 
-    // Use the token from parsed amount, not the default
-    const tokenMint = parsedAmount.isSol ? DEFAULT_TOKEN_MINT : parsedAmount.tokenMint;
-    const tokenTicker = parsedAmount.isSol ? DEFAULT_TOKEN_TICKER : parsedAmount.tokenTicker;
+    // Validate that SOL is not used for games
+    if (parsedAmount.isSol) {
+      await ctx.reply(
+        `❌ Native SOL games are not supported!\n\n` +
+        `💡 Supported tokens for games:\n` +
+        `• Use approved SPL tokens (check with /balance)\n` +
+        `• For SOL-based games, use WSOL instead\n` +
+        `• You can wrap SOL to WSOL using /wrap command\n\n` +
+        `Example: /cf 1000 WSOL 2`,
+        { reply_to_message_id: ctx.message?.message_id }
+      );
+      return;
+    }
+
+    // Use the token from parsed amount
+    const tokenMint = parsedAmount.tokenMint;
+    const tokenTicker = parsedAmount.tokenTicker;
     const amount = parsedAmount.amount;
 
     // Get metadata for the specific token
