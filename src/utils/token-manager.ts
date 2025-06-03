@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import { ChatDatabase } from "./chat-database";
 import { TokenDatabase } from "./token-database";
 import { WalletManager } from "./wallet";
-import type { ParsedAmount, ChatTokenConfig, KnownToken } from "../types";
+import type { ParseAmountResult, ChatTokenConfig, KnownToken } from "../types";
 
 // ================================
 // MULTI-TOKEN MANAGER
@@ -38,13 +38,17 @@ export class TokenManager {
   // TOKEN PARSING WITH MULTI-TOKEN SUPPORT
   // ================================
 
-  public async parseAmount(args: string[], argIndex: number = 1, chatId?: number): Promise<ParsedAmount | null> {
-    if (!args || args.length <= argIndex) return null;
+  public async parseAmount(args: string[], argIndex: number = 1, chatId?: number): Promise<ParseAmountResult> {
+    if (!args || args.length <= argIndex) {
+      return { success: false, error: "invalid_amount" };
+    }
 
     const { tokenMint, tokenTicker } = await this.resolveTokenForChat(chatId);
 
     const amountArg = args[argIndex];
-    if (!amountArg) return null;
+    if (!amountArg) {
+      return { success: false, error: "invalid_amount" };
+    }
 
     // Check if the argument after amount is a token ticker
     const tokenArg = args[argIndex + 1];
@@ -62,12 +66,17 @@ export class TokenManager {
         if (knownToken) {
           resolvedTokenMint = knownToken.token_mint;
           resolvedTokenTicker = knownToken.token_ticker;
+        } else {
+          // Invalid token specified - return error with token name
+          return { success: false, error: "unknown_token", unknownToken: tokenArg.toUpperCase() };
         }
       }
     }
 
     const rawAmount = parseFloat(amountArg);
-    if (isNaN(rawAmount) || rawAmount <= 0) return null;
+    if (isNaN(rawAmount) || rawAmount <= 0) {
+      return { success: false, error: "invalid_amount" };
+    }
 
     let amount: number;
     let formattedAmount: string;
@@ -82,11 +91,14 @@ export class TokenManager {
     }
 
     return {
-      amount,
-      isSol,
-      formattedAmount,
-      tokenMint: isSol ? "SOL" : resolvedTokenMint,
-      tokenTicker: isSol ? "SOL" : resolvedTokenTicker
+      success: true,
+      data: {
+        amount,
+        isSol,
+        formattedAmount,
+        tokenMint: isSol ? "SOL" : resolvedTokenMint,
+        tokenTicker: isSol ? "SOL" : resolvedTokenTicker
+      }
     };
   }
 

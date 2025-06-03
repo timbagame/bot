@@ -410,16 +410,19 @@ bot.command(["coinflip", "cf"], async (ctx) => {
   if (!args) return;
 
   const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id);
-  if (!parsed) {
+  if (!parsed.success) {
+    if (parsed.error === "unknown_token") {
+      return replyToMessage(ctx, `❌ Unknown token "${parsed.unknownToken}"`);
+    }
     return replyUsageError(ctx, "Usage: /coinflip <amount> [TOKEN] <maxPlayers>\nExample: /coinflip 10 2 or /coinflip 10 TIMBA 2");
   }
 
   // Check if token was specified to adjust maxPlayers index
-  const tokenSpecified = args[2] && (args[2].toUpperCase() === "SOL" || tokenManager.getKnownTokenByTicker(args[2]));
+  const tokenSpecified = !!args[2];
   const maxPlayersIndex = tokenSpecified ? 3 : 2;
   const maxPlayers = parseInt(args?.[maxPlayersIndex] || COINFLIP_MAX_PLAYERS.toString()) || COINFLIP_MAX_PLAYERS;
 
-  await gameManager.createGame(ctx, "coinflip", parsed, maxPlayers, 2, GAME_TIMEOUT);
+  await gameManager.createGame(ctx, "coinflip", parsed.data!, maxPlayers, 2, GAME_TIMEOUT);
 });
 
 bot.command(["giveaway", "ga"], async (ctx) => {
@@ -434,16 +437,19 @@ bot.command(["giveaway", "ga"], async (ctx) => {
   if (!args) return;
 
   const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id);
-  if (!parsed) {
+  if (!parsed.success) {
+    if (parsed.error === "unknown_token") {
+      return replyToMessage(ctx, `❌ Unknown token "${parsed.unknownToken}"`);
+    }
     return replyUsageError(ctx, "Usage: /giveaway <amount> [TOKEN] <maxPlayers>\nExample: /giveaway 100 5 or /giveaway 100 TIMBA 5");
   }
 
   // Check if token was specified to adjust maxPlayers index
-  const tokenSpecified = args[2] && (args[2].toUpperCase() === "SOL" || tokenManager.getKnownTokenByTicker(args[2]));
+  const tokenSpecified = !!args[2];
   const maxPlayersIndex = tokenSpecified ? 3 : 2;
   const maxPlayers = parseInt(args?.[maxPlayersIndex] || GIVEAWAY_MAX_PLAYERS.toString()) || GIVEAWAY_MAX_PLAYERS;
 
-  await gameManager.createGame(ctx, "giveaway", parsed, maxPlayers, 1, GAME_TIMEOUT);
+  await gameManager.createGame(ctx, "giveaway", parsed.data!, maxPlayers, 1, GAME_TIMEOUT);
 });
 
 // ================================
@@ -471,7 +477,10 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
   }
 
   const parsed = await tokenManager.parseAmount(args, 2, ctx.chat?.id);
-  if (!parsed) {
+  if (!parsed.success) {
+    if (parsed.error === "unknown_token") {
+      return replyToMessage(ctx, `❌ Unknown token "${parsed.unknownToken}"`);
+    }
     return replyToMessage(ctx, "Please provide a valid amount greater than 0.");
   }
 
@@ -479,19 +488,19 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
     await validateAndProcessTransaction(
       ctx,
       telegramId,
-      parsed.amount,
-      parsed.isSol,
-      `Withdrawal of ${parsed.formattedAmount}`,
+      parsed.data!.amount,
+      parsed.data!.isSol,
+      `Withdrawal of ${parsed.data!.formattedAmount}`,
       async (playerData) => {
-        if (parsed.isSol) {
+        if (parsed.data!.isSol) {
           const transferSolIx = SystemProgram.transfer({
             fromPubkey: playerData.keypair.publicKey,
             toPubkey: toAddress,
-            lamports: parsed.amount,
+            lamports: parsed.data!.amount,
           });
           return await wallet.signAndSend([transferSolIx], [playerData.keypair]);
         } else {
-          return await wallet.transferToken(telegramId, toAddress, parsed.amount, parsed.tokenMint);
+          return await wallet.transferToken(telegramId, toAddress, parsed.data!.amount, parsed.data!.tokenMint);
         }
       }
     );
@@ -519,7 +528,10 @@ bot.command("tip", async (ctx: Context) => {
   }
 
   const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id);
-  if (!parsed) {
+  if (!parsed.success) {
+    if (parsed.error === "unknown_token") {
+      return replyToMessage(ctx, `❌ Unknown token "${parsed.unknownToken}"`);
+    }
     return replyToMessage(ctx, "Please provide a valid amount greater than 0.");
   }
 
@@ -532,19 +544,19 @@ bot.command("tip", async (ctx: Context) => {
     await validateAndProcessTransaction(
       ctx,
       telegramId,
-      parsed.amount,
-      parsed.isSol,
-      `Tip of ${parsed.formattedAmount} to ${recipientName}`,
+      parsed.data!.amount,
+      parsed.data!.isSol,
+      `Tip of ${parsed.data!.formattedAmount} to ${recipientName}`,
       async (playerData) => {
-        if (parsed.isSol) {
+        if (parsed.data!.isSol) {
           const transferSolIx = SystemProgram.transfer({
             fromPubkey: playerData.keypair.publicKey,
             toPubkey: recipientPubKey,
-            lamports: parsed.amount,
+            lamports: parsed.data!.amount,
           });
           return await wallet.signAndSend([transferSolIx], [playerData.keypair]);
         } else {
-          return await wallet.transferToken(telegramId, recipientPubKey, parsed.amount, parsed.tokenMint);
+          return await wallet.transferToken(telegramId, recipientPubKey, parsed.data!.amount, parsed.data!.tokenMint);
         }
       }
     );

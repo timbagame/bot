@@ -52,6 +52,13 @@ export interface ParsedAmount {
   tokenTicker: string;
 }
 
+export interface ParseAmountResult {
+  success: boolean;
+  data?: ParsedAmount;
+  error?: "invalid_amount" | "unknown_token";
+  unknownToken?: string;
+}
+
 export interface PlayerData {
   keypair: anchor.web3.Keypair;
   tokenBalance: number;
