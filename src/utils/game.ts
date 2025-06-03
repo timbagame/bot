@@ -1017,24 +1017,190 @@ export class GameManager {
   private async cancelOrphanedGame(address: string): Promise<boolean> {
     try {
       const gamePda = new PublicKey(address);
-      console.log(`🔄 Attempting to cancel orphaned game ${address}`);
+      const gameAccount = await this.program.account.game.fetch(gamePda);
 
-      const result = await this.cancelGameWithPlayerKeys(gamePda);
-      if (result.success) {
-        console.log(`✅ Successfully cancelled orphaned game ${address}`);
-        return true;
-      } else {
-        console.log(`❌ Failed to cancel orphaned game ${address}: ${result.error}`);
+      if (!this.isGameExpiredWithBuffer(gameAccount)) {
+        console.log(`⏰ Game ${address} hasn't passed buffer time yet, skipping`);
         return false;
       }
+
+      const gameType = this.getGameType(gameAccount);
+      console.log(`🔄 Processing expired ${gameType} game ${address} (${gameAccount.players.length}/${gameAccount.maxPlayers})`);
+
+      return gameType === "giveaway"
+        ? await this.handleExpiredGiveaway(gamePda, gameAccount, address)
+        : await this.handleExpiredCoinflip(gamePda, gameAccount, address);
+
     } catch (error: any) {
-      if (error.message?.includes('Account does not exist')) {
-        console.log(`ℹ️ Orphaned game ${address} was already closed`);
-        return true;
+      return this.handleGameProcessingError(error, address);
+    }
+  }
+
+  private isGameExpiredWithBuffer(gameAccount: any): boolean {
+    const blockTime = Date.now() / 1000; // Use system time for simplicity
+    const gameCreatedAt = Number(gameAccount.createdAt);
+    const gameTimeout = Number(gameAccount.timeout);
+    const oracleBufferTime = 300; // 5 minutes
+    const finalDeadline = gameCreatedAt + gameTimeout + oracleBufferTime;
+
+    return blockTime > finalDeadline;
+  }
+
+  private getGameType(gameAccount: any): string {
+    const gameTypeKeys = Object.keys(gameAccount.gameType);
+    return gameTypeKeys[0] || "unknown";
+  }
+
+  private handleGameProcessingError(error: any, address: string): boolean {
+    if (error.message?.includes('Account does not exist')) {
+      console.log(`ℹ️ Orphaned game ${address} was already closed`);
+      return true;
+    } else {
+      console.error(`❌ Error processing orphaned game ${address}:`, error.message);
+      return false;
+    }
+  }
+
+  private async handleExpiredGiveaway(gamePda: PublicKey, gameAccount: any, address: string): Promise<boolean> {
+    const creatorTelegramId = this.gameDb.getPlayerTelegramId(gameAccount.creator.toBase58());
+
+    if (!creatorTelegramId) {
+      console.log(`❌ No creator key available for giveaway ${address}`);
+      return false;
+    }
+
+    return await this.cancelGameWithCreator(gamePda, gameAccount, creatorTelegramId, address, "giveaway");
+  }
+
+  private async handleExpiredCoinflip(gamePda: PublicKey, gameAccount: any, address: string): Promise<boolean> {
+    const playerKeyInfo = this.analyzePlayerKeys(gameAccount);
+    console.log(`🪙 Coinflip ${address}: ${playerKeyInfo.available.length}/${playerKeyInfo.total} player keys available`);
+
+    // Strategy 1: Complete cleanup (unjoin all non-creators, then cancel)
+    if (playerKeyInfo.canCompleteCleanup) {
+      return await this.executeCompleteCleanup(gamePda, gameAccount, playerKeyInfo, address);
+    }
+
+    // Strategy 2: Partial cleanup (unjoin available players only)
+    return await this.executePartialCleanup(gamePda, playerKeyInfo, address);
+  }
+
+  private analyzePlayerKeys(gameAccount: any) {
+    const allPlayers = gameAccount.players as PublicKey[];
+    const creatorPubkey = gameAccount.creator;
+    const available: Array<{pubkey: PublicKey, telegramId: string, isCreator: boolean}> = [];
+    const unavailable: PublicKey[] = [];
+
+    for (const playerPubkey of allPlayers) {
+      const telegramId = this.gameDb.getPlayerTelegramId(playerPubkey.toBase58());
+      if (telegramId) {
+        available.push({
+          pubkey: playerPubkey,
+          telegramId,
+          isCreator: playerPubkey.equals(creatorPubkey)
+        });
       } else {
-        console.error(`❌ Error cancelling orphaned game ${address}:`, error.message);
-        return false;
+        unavailable.push(playerPubkey);
       }
     }
+
+    const nonCreators = available.filter(p => !p.isCreator);
+    const creator = available.find(p => p.isCreator);
+    const canCompleteCleanup = unavailable.length === 0 && creator !== undefined;
+
+    return {
+      available,
+      unavailable,
+      nonCreators,
+      creator,
+      canCompleteCleanup,
+      total: allPlayers.length
+    };
+  }
+
+  private async executeCompleteCleanup(gamePda: PublicKey, gameAccount: any, playerKeyInfo: any, address: string): Promise<boolean> {
+    console.log(`🔧 Strategy 1: Complete cleanup - unjoin ${playerKeyInfo.nonCreators.length} non-creators, then cancel`);
+
+    // Unjoin all non-creator players
+    await this.unjoinPlayers(gamePda, playerKeyInfo.nonCreators);
+
+    // Cancel with creator
+    return await this.cancelGameWithCreator(
+      gamePda,
+      gameAccount,
+      playerKeyInfo.creator.telegramId,
+      address,
+      "coinflip"
+    );
+  }
+
+  private async executePartialCleanup(gamePda: PublicKey, playerKeyInfo: any, address: string): Promise<boolean> {
+    console.log(`🔧 Strategy 2: Partial cleanup - unjoin ${playerKeyInfo.available.length} available players`);
+
+    const unjoinedCount = await this.unjoinPlayers(gamePda, playerKeyInfo.available);
+    console.log(`📊 Unjoined ${unjoinedCount}/${playerKeyInfo.available.length} players from coinflip ${address}`);
+
+    return unjoinedCount > 0;
+  }
+
+  private async unjoinPlayers(gamePda: PublicKey, players: Array<{pubkey: PublicKey, telegramId: string, isCreator: boolean}>): Promise<number> {
+    let unjoinedCount = 0;
+
+    for (const player of players) {
+      try {
+        const playerKp = this.wallet.getKeyPair(BigInt(player.telegramId));
+        await this.unjoinPlayerFromGame(gamePda, playerKp, player.pubkey);
+        console.log(`➡️ Unjoined ${player.isCreator ? 'creator' : 'player'} ${player.pubkey.toBase58().slice(0, 8)}...`);
+        unjoinedCount++;
+      } catch (error) {
+        console.error(`Failed to unjoin ${player.pubkey.toBase58()}:`, error);
+      }
+    }
+
+    return unjoinedCount;
+  }
+
+  private async cancelGameWithCreator(
+    gamePda: PublicKey,
+    gameAccount: any,
+    creatorTelegramId: string,
+    address: string,
+    gameType: string
+  ): Promise<boolean> {
+    try {
+      console.log(`🎁 Cancelling expired ${gameType} ${address} with creator key`);
+      const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
+
+      const tx = await this.program.methods
+        .cancelGame()
+        .accounts({
+          game: gamePda,
+          creator: gameAccount.creator,
+          authority: creatorKp.publicKey,
+        })
+        .signers([creatorKp])
+        .rpc();
+
+      await this.wallet.confirmTransaction(tx);
+      console.log(`✅ Successfully cancelled expired ${gameType} ${address}`);
+      return true;
+    } catch (error: any) {
+      console.error(`❌ Failed to cancel expired ${gameType} ${address}:`, error.message);
+      return false;
+    }
+  }
+
+  private async unjoinPlayerFromGame(gamePda: PublicKey, playerKp: any, playerPubkey: PublicKey): Promise<void> {
+    const tx = await this.program.methods
+      .unjoinGame()
+      .accounts({
+        game: gamePda,
+        player: playerPubkey,
+        authority: playerKp.publicKey,
+      })
+      .signers([playerKp])
+      .rpc();
+
+    await this.wallet.confirmTransaction(tx);
   }
 }
