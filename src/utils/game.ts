@@ -215,6 +215,7 @@ export class GameManager {
     let gameAccount: any;
     let currentPlayers = 0;
     let maxPlayers = 2;
+    let minPlayers = 1;
     let playerInfo = "";
     let expirationInfo = "";
 
@@ -236,6 +237,7 @@ export class GameManager {
         gameAccount = await this.program.account.game.fetch(gamePda);
         currentPlayers = gameAccount.players.length;
         maxPlayers = gameAccount.maxPlayers;
+        minPlayers = gameAccount.minPlayers;
 
         if (currentPlayers > 0) {
           playerInfo = "\n";
@@ -291,9 +293,16 @@ export class GameManager {
       `👥 Players: ${currentPlayers}/${maxPlayers}${playerInfo}`;
 
     if (status.toLowerCase() !== "completed") {
-      const statusText = currentPlayers < maxPlayers ?
-        `${maxPlayers - currentPlayers} more needed` :
-        "Full - starting soon!";
+      let statusText: string;
+      if (currentPlayers < minPlayers) {
+        const neededForMin = minPlayers - currentPlayers;
+        statusText = `${neededForMin} more until minimum`;
+      } else if (currentPlayers < maxPlayers) {
+        const neededForMax = maxPlayers - currentPlayers;
+        statusText = `Minimum reached, ${neededForMax} more until full`;
+      } else {
+        statusText = "Full - starting soon!";
+      }
       messageText += `\nStatus: ${statusText}${expirationInfo}`;
     }
 
