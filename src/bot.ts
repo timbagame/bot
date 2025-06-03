@@ -16,7 +16,6 @@ import {
   COINFLIP_MAX_PLAYERS,
   GIVEAWAY_MAX_PLAYERS,
   EXPIRED_GAMES_CHECK_INTERVAL_MS,
-  BLOCKCHAIN_SCAN_INTERVAL_MS,
   TOKEN_METADATA_CACHE_DURATION
 } from "./utils/constants";
 import type { ParsedAmount, PlayerData, GameCompletedEvent } from "./types";
@@ -773,16 +772,9 @@ bot.command("scan", async (ctx: Context) => {
     });
 
     await gameManager.scanBlockchainForOrphanedGames();
-    const stats = gameDb.getOrphanedGameStats();
 
     const response = [
       "✅ Blockchain scan completed successfully!",
-      "",
-      "📊 <b>Orphaned Game Statistics:</b>",
-      `Total Found: ${stats.total}`,
-      `Active: ${stats.active}`,
-      `Completed: ${stats.completed}`,
-      `Failed: ${stats.failed}`,
       "",
       "Check console logs for detailed information."
     ].join("\n");
@@ -1158,11 +1150,6 @@ setupAnchor().then(async () => {
             continue;
           }
 
-          // Skip orphaned games - they are handled by blockchain scan
-          if (game.creator_telegram_id === "orphaned") {
-            continue;
-          }
-
           const gamePda = new PublicKey(game.game_address);
           const gameAccount = await program.account.game.fetch(gamePda);
 
@@ -1213,17 +1200,6 @@ setupAnchor().then(async () => {
     }
   }, EXPIRED_GAMES_CHECK_INTERVAL_MS); // Check every minute
 
-  // Start periodic blockchain scan for orphaned games (less frequent)
-  setInterval(async () => {
-    try {
-      await gameManager.scanBlockchainForOrphanedGames();
-    } catch (error) {
-      console.error("Error in periodic blockchain scan:", error);
-    }
-  }, BLOCKCHAIN_SCAN_INTERVAL_MS); // Check every 15 minutes
-
-  console.log(`🔍 Periodic blockchain scan enabled (every ${BLOCKCHAIN_SCAN_INTERVAL_MS / 60000} minutes)`);
-
   // Start the bot with concurrent processing
   console.log("Starting bot with concurrent processing...");
   const handle = run(bot, {
@@ -1261,10 +1237,6 @@ setupAnchor().then(async () => {
   }).catch((error) => {
     console.error("❌ Bot runner task failed:", error);
   });
-
-  console.log("✅ Bot is running with concurrent processing!");
-  console.log("📊 Concurrent update processing is now enabled");
-  console.log("🔄 Game operations are sequentialized per user to prevent conflicts");
 }).catch(error => {
   console.error("Failed to setup Anchor:", error);
 });
