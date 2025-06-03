@@ -38,7 +38,6 @@ export const WALLET_RATE_LIMIT_MS = 500;
 export const CALLBACK_MESSAGE_MAX_LENGTH = 180;
 export const GAME_INFO_LIMIT = 5;
 export const ADDRESS_DISPLAY_LENGTH = 8;
-export const MAX_TOKENS_DISPLAY = 20; // Maximum tokens to show in balance command
 
 // ================================
 // DEFAULTS

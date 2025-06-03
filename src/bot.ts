@@ -327,20 +327,48 @@ bot.command(["start", "balance"], async (ctx: Context) => {
   try {
     const playerData = await getPlayerData(telegramId);
 
-    // Get the default token metadata and game balance
-    const metadata = await getTokenMetadata();
-    const playerBalancePda = PDAManager.getPlayerBalancePDA(
-      playerData.keypair.publicKey,
-      new PublicKey(DEFAULT_TOKEN_MINT),
-      program.programId
-    );
-    const defaultTokenGameBalance = await program.account.playerBalance.fetch(playerBalancePda).catch(() => ({ amount: 0 }));
-
     // Get all approved tokens with metadata
     const approvedTokens = tokenManager.getAllApprovedTokensWithMetadata();
 
     // Efficiently get all token balances in a single RPC call
     const allTokenBalances = await wallet.getAllApprovedTokenBalances(telegramId, approvedTokens);
+
+    // Build token list with game balance included for ALL tokens
+    const tokenBalancesToShow = await Promise.all(
+      allTokenBalances.map(async (token) => {
+        try {
+          const tokenPlayerData = await getPlayerData(telegramId, token.mint);
+          return {
+            ...token,
+            balance: token.balance + tokenPlayerData.gameBalance
+          };
+        } catch (error) {
+          // If error getting game balance, just show wallet balance
+          return token;
+        }
+      })
+    );
+
+    // If any approved token has game balance but no wallet balance, add it
+    for (const approvedToken of approvedTokens) {
+      const hasToken = allTokenBalances.some(t => t.mint === approvedToken.token_mint);
+      if (!hasToken) {
+        try {
+          const tokenPlayerData = await getPlayerData(telegramId, approvedToken.token_mint);
+          if (tokenPlayerData.gameBalance > 0) {
+            tokenBalancesToShow.push({
+              mint: approvedToken.token_mint,
+              ticker: approvedToken.token_ticker,
+              balance: tokenPlayerData.gameBalance,
+              decimals: approvedToken.decimals,
+              rawBalance: tokenPlayerData.gameBalance.toString()
+            });
+          }
+        } catch (error) {
+          // Ignore if can't get game balance
+        }
+      }
+    }
 
     // Build the response
     const response = [
@@ -352,43 +380,13 @@ bot.command(["start", "balance"], async (ctx: Context) => {
     ];
 
     // Add token balances section
-    if (allTokenBalances.length > 0) {
+    if (tokenBalancesToShow.length > 0) {
       response.push("", "🪙 <b>Token Balances:</b>");
 
-      for (const token of allTokenBalances) {
-        let balanceText = `${wallet.formatTokenBalance(token.balance, token.decimals)} ${token.ticker}`;
-
-        // Add game balance for the default token
-        if (token.mint === DEFAULT_TOKEN_MINT) {
-          const gameBalance = Number(defaultTokenGameBalance.amount);
-          const totalBalance = token.balance + gameBalance;
-          balanceText = `${wallet.formatTokenBalance(totalBalance, token.decimals)} ${token.ticker}`;
-        }
-
+      for (const token of tokenBalancesToShow) {
+        const balanceText = `${wallet.formatTokenBalance(token.balance, token.decimals)} ${token.ticker}`;
         response.push(`• ${balanceText}`);
       }
-
-      // If user doesn't have the default token but has game balance, show it
-      const hasDefaultToken = allTokenBalances.some(t => t.mint === DEFAULT_TOKEN_MINT);
-      if (!hasDefaultToken) {
-        const gameBalance = Number(defaultTokenGameBalance.amount);
-        if (gameBalance > 0) {
-          response.push(`• ${wallet.formatTokenBalance(gameBalance, metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`);
-        }
-      }
-    } else {
-      // No approved tokens found, show default token info
-      const defaultTokenBalance = playerData.tokenBalance + Number(defaultTokenGameBalance.amount);
-      if (defaultTokenBalance > 0) {
-        response.push("", "🪙 <b>Token Balances:</b>");
-        const balanceText = `${wallet.formatTokenBalance(defaultTokenBalance, metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`;
-        response.push(`• ${balanceText}`);
-      }
-    }
-
-    // Add helpful info
-    if (approvedTokens.length > allTokenBalances.length) {
-      response.push("", `📊 ${approvedTokens.length} approved tokens available • ${allTokenBalances.length} owned`);
     }
 
     await ctx.reply(response.join("\n"), {
