@@ -89,20 +89,16 @@ export class GameManager {
     private wallet: WalletManager,
     private gameDb: GameDatabase,
     private oracleClient: OracleClient,
-    private tokenMint: string,
-    private ticker: string
   ) {}
 
   public static getInstance(
     program: anchor.Program<Coinflip>,
     wallet: WalletManager,
-    gameDb: GameDatabase,
-    tokenMint: string,
-    ticker: string
+    gameDb: GameDatabase
   ): GameManager {
     if (!GameManager.instance) {
       const oracleClient = OracleClient.getInstance(wallet);
-      GameManager.instance = new GameManager(program, wallet, gameDb, oracleClient, tokenMint, ticker);
+      GameManager.instance = new GameManager(program, wallet, gameDb, oracleClient);
     }
     return GameManager.instance;
   }
@@ -424,7 +420,17 @@ export class GameManager {
   public async getGameInfo(ctx: Context, gamePda: PublicKey): Promise<string> {
     try {
       const gameAccount = await this.program.account.game.fetch(gamePda);
-      const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
+
+      // Get token info from database
+      const gameData = this.gameDb.getGame(gamePda.toBase58());
+      if (!gameData?.token_mint || !gameData?.token_ticker) {
+        return `Error: Game token information not found`;
+      }
+
+      const tokenMint = gameData.token_mint;
+      const tokenTicker = gameData.token_ticker;
+
+      const metadata = await this.wallet.getTokenMetadata(tokenMint);
 
       const amount = Number(gameAccount.amount);
       const maxPlayers = gameAccount.maxPlayers;
@@ -443,14 +449,13 @@ export class GameManager {
       const expirationInfo = "\n" + formatExpirationTime(createdAt, timeout);
 
       let winnerInfo = "";
-      const gameData = this.gameDb.getGame(gamePda.toBase58());
       if (gameData && gameData.winner_address && gameData.winner_address !== "cancelled" && gameData.winner_address !== DEFAULT_NULL_ADDRESS) {
         const winnerUsername = await this.getPlayerUsername(ctx, gameData.winner_address);
         winnerInfo = `\nWinner: @${winnerUsername}`;
       }
 
       return `Type: ${gameType}\n` +
-             `Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
+             `Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}\n` +
              `Creator: ${creatorInfo}\n` +
              `Players: ${currentPlayers}/${maxPlayers}${expirationInfo}${winnerInfo}`;
     } catch (error: any) {
@@ -461,7 +466,15 @@ export class GameManager {
   // Helper method to get game info for completed games from database
   public async getCompletedGameInfo(ctx: Context, gameData: any): Promise<string> {
     try {
-      const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
+      // Use token info from the game data
+      if (!gameData.token_mint || !gameData.token_ticker) {
+        return `Error: Game token information not found`;
+      }
+
+      const tokenMint = gameData.token_mint;
+      const tokenTicker = gameData.token_ticker;
+
+      const metadata = await this.wallet.getTokenMetadata(tokenMint);
 
       // For completed games, use stored game type from database
       const participants = this.gameDb.getGameParticipants(gameData.game_address);
@@ -481,7 +494,7 @@ export class GameManager {
       }
 
       return `Type: ${gameType}\n` +
-             `Amount: ${this.wallet.formatTokenBalance(gameData.amount, metadata.decimals)} ${this.ticker}\n` +
+             `Amount: ${this.wallet.formatTokenBalance(gameData.amount, metadata.decimals)} ${tokenTicker}\n` +
              `Creator: ${creatorInfo}\n` +
              `Players: ${participants.length}${winnerInfo}`;
     } catch (error: any) {
@@ -673,7 +686,22 @@ export class GameManager {
       // Send cancellation notification
       const gameMessage = this.activeGameMessages.get(gamePda.toBase58());
       if (gameMessage) {
-        const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
+        // Get token info from database
+        const gameData = this.gameDb.getGame(gamePda.toBase58());
+        if (!gameData?.token_mint || !gameData?.token_ticker) {
+          console.error(`Missing token info for cancelled game ${gamePda.toBase58()}`);
+          return {
+            cancelled: true,
+            amount: Number(gameAccount.amount),
+            creator: gameAccount.creator.toString(),
+            tx
+          };
+        }
+
+        const tokenMint = gameData.token_mint;
+        const tokenTicker = gameData.token_ticker;
+
+        const metadata = await this.wallet.getTokenMetadata(tokenMint);
         const gameType = formatGameType(gameAccount.gameType);
         const amount = Number(gameAccount.amount);
         const playerCount = gameAccount.players.length;
@@ -681,7 +709,7 @@ export class GameManager {
         await ctx.reply(
           `❌ <b>${gameType} Cancelled!</b>\n\n` +
           `⏰ Game expired with insufficient players\n` +
-          `💰 Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
+          `💰 Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}\n` +
           `👥 Players: ${playerCount}/${gameAccount.maxPlayers}\n\n` +
           `💸 Funds have been returned to players`,
           {
@@ -731,6 +759,14 @@ export class GameManager {
       const creatorTelegramId = await this.gameDb.getCreatorTelegramId(gamePda.toBase58());
       if (creatorTelegramId) {
         const creatorUsername = await this.getUsernameFromTelegramId(ctx, creatorTelegramId);
+
+        // Get token info from database
+        const gameData = this.gameDb.getGame(gamePda.toBase58());
+        if (!gameData?.token_mint || !gameData?.token_ticker) {
+          console.error(`Missing token info for game ${gamePda.toBase58()}`);
+          throw new Error("Game data incomplete - please contact support");
+        }
+
         await this.updateGameMessage(
           ctx,
           gamePda.toBase58(),
@@ -738,8 +774,8 @@ export class GameManager {
           Number(gameAccount.amount),
           creatorUsername,
           "Active",
-          this.tokenMint,
-          this.ticker
+          gameData.token_mint,
+          gameData.token_ticker
         );
       }
 
@@ -856,7 +892,11 @@ export class GameManager {
 
       // Get game data to determine the token mint
       const gameData = this.gameDb.getGame(gamePda.toBase58());
-      const tokenMint = gameData?.token_mint || this.tokenMint;
+      if (!gameData?.token_mint) {
+        return { success: false, error: "Game data incomplete - token info missing" };
+      }
+
+      const tokenMint = gameData.token_mint;
 
       const adminKp = authResult.adminKeypair!;
       await this.ensurePlayerBalance(playerKp, tokenMint);
@@ -886,7 +926,6 @@ export class GameManager {
   public async getUserGames(ctx: Context, telegramId: bigint): Promise<{
     activeGames: string;
     recentGames: string;
-    totalTokensInGames: number;
   }> {
     const telegramIdStr = telegramId.toString();
     const playerKp = this.wallet.getKeyPair(telegramId);
@@ -898,12 +937,10 @@ export class GameManager {
     ]);
 
     // Active games
-    let totalTokensInGames = 0;
     const activeGames = await Promise.all(activeGamesData.map(async (gameData) => {
       try {
         const gamePda = new PublicKey(gameData.game_address);
-        const gameAccount = await this.program.account.game.fetch(gamePda);
-        totalTokensInGames += Number(gameAccount.amount);
+        await this.program.account.game.fetch(gamePda);
         return this.getGameInfo(ctx, gamePda);
       } catch (error) {
         console.error(`Error fetching game ${gameData.game_address}:`, error);
@@ -961,8 +998,7 @@ export class GameManager {
 
     return {
       activeGames: activeGamesSection,
-      recentGames: recentGamesSections,
-      totalTokensInGames
+      recentGames: recentGamesSections
     };
   }
 

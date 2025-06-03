@@ -259,7 +259,7 @@ const setupAnchor = async () => {
     // Add common tokens to the database
     await initializeCommonTokens();
 
-    gameManager = GameManager.getInstance(program, wallet, gameDb, DEFAULT_TOKEN_MINT, DEFAULT_TOKEN_TICKER);
+    gameManager = GameManager.getInstance(program, wallet, gameDb);
 
     // Check Oracle initialization
     await checkOracleStatus();
@@ -870,14 +870,9 @@ bot.command("active", async (ctx: Context) => {
   const telegramId = BigInt(ctx.from?.id || 0);
 
   try {
-    const { activeGames, totalTokensInGames } = await gameManager.getUserGames(ctx, telegramId);
-    const metadata = await getTokenMetadata();
+    const { activeGames } = await gameManager.getUserGames(ctx, telegramId);
 
     let response = activeGames || "You don't have any active games.";
-
-    if (totalTokensInGames > 0) {
-      response += `\n\n💰 Total tokens in active games: ${wallet.formatTokenBalance(totalTokensInGames, metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`;
-    }
 
     await ctx.reply(response, {
       parse_mode: "HTML",
