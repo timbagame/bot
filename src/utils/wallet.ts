@@ -155,6 +155,82 @@ export class WalletManager {
     }
   }
 
+  /**
+   * Efficiently get all token balances for approved tokens in a single RPC call
+   * Returns only tokens with non-zero balances that are in the approved tokens list
+   */
+  public async getAllApprovedTokenBalances(
+    telegramId: bigint,
+    approvedTokens: Array<{ token_mint: string; token_ticker: string; decimals: number }>
+  ): Promise<Array<{ mint: string; ticker: string; balance: number; decimals: number; rawBalance: string }>> {
+    await this.throttle();
+    const pubkey = this.getPublicKey(telegramId);
+
+    // Early return if no approved tokens
+    if (approvedTokens.length === 0) {
+      return [];
+    }
+
+    try {
+      // Get all token accounts for the user in a single RPC call
+      const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(pubkey, {
+        programId: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA") // SPL Token program
+      });
+
+      // Early return if user has no token accounts
+      if (!tokenAccounts.value || tokenAccounts.value.length === 0) {
+        return [];
+      }
+
+      const results: Array<{ mint: string; ticker: string; balance: number; decimals: number; rawBalance: string }> = [];
+
+      // Create a map of approved token mints for O(1) lookup
+      const approvedTokensMap = new Map(
+        approvedTokens.map(token => [token.token_mint, token])
+      );
+
+      // Process each token account
+      for (const accountInfo of tokenAccounts.value) {
+        try {
+          const parsedData = accountInfo.account.data.parsed;
+          const tokenAmount = parsedData.info.tokenAmount;
+          const mint = parsedData.info.mint;
+
+          // Only include tokens that:
+          // 1. Are in our approved tokens list
+          // 2. Have a non-zero balance
+          const approvedToken = approvedTokensMap.get(mint);
+          if (approvedToken && parseFloat(tokenAmount.amount) > 0) {
+            const balance = parseFloat(tokenAmount.amount);
+            results.push({
+              mint,
+              ticker: approvedToken.token_ticker,
+              balance,
+              decimals: tokenAmount.decimals,
+              rawBalance: tokenAmount.amount
+            });
+          }
+        } catch (error) {
+          // Skip malformed token accounts
+          console.warn(`Skipping malformed token account: ${error}`);
+          continue;
+        }
+      }
+
+      return results.sort((a, b) => a.ticker.localeCompare(b.ticker));
+
+    } catch (error: any) {
+      // Handle the case where user has no token accounts gracefully
+      if (error.message?.includes('could not find account') || error.message?.includes('Invalid param')) {
+        console.log(`No token accounts found for user ${pubkey.toBase58()}`);
+        return [];
+      }
+
+      console.error(`Error getting all token balances for ${pubkey.toBase58()}:`, error);
+      return [];
+    }
+  }
+
   public async getTokenMetadata(tokenMint: string): Promise<{ decimals: number }> {
     const cached = this.tokenMetadataCache.get(tokenMint);
     const now = Date.now();

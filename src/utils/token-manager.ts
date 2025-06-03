@@ -177,6 +177,13 @@ export class TokenManager {
     return this.tokenDb.getTokenCount();
   }
 
+  /**
+   * Get all approved tokens with their metadata for efficient balance checking
+   */
+  public getAllApprovedTokensWithMetadata(): Array<{ token_mint: string; token_ticker: string; decimals: number }> {
+    return this.tokenDb.getAllKnownTokens();
+  }
+
   // ================================
   // DEFAULT TOKEN METHODS
   // ================================
