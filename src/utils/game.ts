@@ -7,7 +7,7 @@ import { GameDatabase } from "./game-database";
 import { OracleClient } from "./oracle";
 import { PDAManager } from "./pda";
 import { formatUserFriendlyError } from "./errors";
-import { DEFAULT_NULL_ADDRESS, ADDRESS_DISPLAY_LENGTH, GAME_INFO_LIMIT, DEFAULT_TOKEN_MINT, DEFAULT_TOKEN_TICKER } from "./constants";
+import { DEFAULT_NULL_ADDRESS, ADDRESS_DISPLAY_LENGTH, GAME_INFO_LIMIT } from "./constants";
 import type {
   GameMessage,
   GameCancellationResult,
