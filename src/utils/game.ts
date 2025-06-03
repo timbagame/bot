@@ -1022,24 +1022,36 @@ export class GameManager {
       const gameTypeKeys = Object.keys(account.gameType);
       const gameType = gameTypeKeys[0] || "unknown";
 
-      const isExpired = blockTime > (Number(account.createdAt) + Number(account.timeout));
+      const gameCreatedAt = Number(account.createdAt);
+      const gameTimeout = Number(account.timeout);
+      const expiresAt = gameCreatedAt + gameTimeout;
+      const oracleBufferTime = 300; // 5 minutes buffer time
+      const finalDeadline = expiresAt + oracleBufferTime;
+
+      const isExpired = blockTime > expiresAt;
+      const isTooOld = blockTime > finalDeadline;
       const hasEnoughPlayers = account.players.length >= account.minPlayers;
 
-      console.log(`📋 Processing ${address}: ${account.players.length}/${account.maxPlayers}, expired=${isExpired}`);
+      console.log(`📋 Processing ${address}: ${account.players.length}/${account.maxPlayers}, expired=${isExpired}, tooOld=${isTooOld}`);
 
       // Track in database first
       this.gameDb.saveOrphanedGame(address, Number(account.amount), gameType, 'active');
 
-      // Determine action: let oracle complete, cancel, or skip
-      if (hasEnoughPlayers) {
-        // The external oracle service will automatically complete games that are ready
-        // We just need to track that this game exists and let the oracle handle it
+      // Determine action based on game state
+      if (isTooOld) {
+        // Game is way past expiration + buffer, cancel it regardless of player count
+        console.log(`⏰ Game ${address} is too old (past buffer time), cancelling...`);
+        return await this.tryCancelGame(gamePda, address, account, gameType, blockTime);
+      } else if (hasEnoughPlayers && isExpired) {
+        // Game has enough players and is expired but within buffer time, let oracle complete it
         this.gameDb.saveOrphanedGame(address, Number(account.amount), gameType, 'pending_completion');
         console.log(`✅ Marked orphaned game ${address} for oracle completion`);
         return true;
       } else if (isExpired) {
+        // Game is expired but doesn't have enough players, cancel it
         return await this.tryCancelGame(gamePda, address, account, gameType, blockTime);
       } else {
+        // Game is not expired yet, skip it
         console.log(`⏰ Game ${address} not ready for processing`);
         return false;
       }
