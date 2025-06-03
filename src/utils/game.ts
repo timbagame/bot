@@ -7,7 +7,7 @@ import { GameDatabase } from "./game-database";
 import { OracleClient } from "./oracle";
 import { PDAManager } from "./pda";
 import { formatUserFriendlyError } from "./errors";
-import { DEFAULT_NULL_ADDRESS, ADDRESS_DISPLAY_LENGTH, GAME_INFO_LIMIT } from "./constants";
+import { DEFAULT_NULL_ADDRESS, ADDRESS_DISPLAY_LENGTH, GAME_INFO_LIMIT, DEFAULT_TOKEN_MINT, DEFAULT_TOKEN_TICKER } from "./constants";
 import type {
   GameMessage,
   GameCancellationResult,
@@ -111,10 +111,10 @@ export class GameManager {
   // PLAYER BALANCE MANAGEMENT
   // ================================
 
-  public async ensurePlayerBalance(playerKeypair: anchor.web3.Keypair): Promise<PublicKey> {
+  public async ensurePlayerBalance(playerKeypair: anchor.web3.Keypair, tokenMint: string): Promise<PublicKey> {
     const playerBalancePda = PDAManager.getPlayerBalancePDA(
       playerKeypair.publicKey,
-      new PublicKey(this.tokenMint),
+      new PublicKey(tokenMint),
       this.program.programId
     );
 
@@ -124,7 +124,7 @@ export class GameManager {
     } catch (error) {
       // Create token account if needed
       const playerTokenAccount = await getAssociatedTokenAddress(
-        new PublicKey(this.tokenMint),
+        new PublicKey(tokenMint),
         playerKeypair.publicKey
       );
 
@@ -135,7 +135,7 @@ export class GameManager {
           playerKeypair.publicKey,
           playerTokenAccount,
           playerKeypair.publicKey,
-          new PublicKey(this.tokenMint)
+          new PublicKey(tokenMint)
         );
         const tx = await this.wallet.signAndSend([createAtaIx], [playerKeypair]);
         await this.wallet.confirmTransaction(tx);
@@ -146,7 +146,7 @@ export class GameManager {
         .initializePlayerBalance()
         .accounts({
           player: playerKeypair.publicKey,
-          tokenMint: new PublicKey(this.tokenMint),
+          tokenMint: new PublicKey(tokenMint),
         })
         .signers([playerKeypair])
         .rpc();
@@ -207,10 +207,12 @@ export class GameManager {
     amount: number,
     creatorUsername: string,
     status: string,
+    tokenMint: string,
+    tokenTicker: string,
     winnerAddress?: string,
     txHash?: string
   ): Promise<GameMessageFormat> {
-    const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
+    const metadata = await this.wallet.getTokenMetadata(tokenMint);
 
     let gameAccount: any;
     let currentPlayers = 0;
@@ -288,7 +290,7 @@ export class GameManager {
     }
 
     let messageText = `<b>🪙 ${gameType} Game</b>\n\n` +
-      `💰 Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}\n` +
+      `💰 Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}\n` +
       `👤 Creator: @${creatorUsername}\n` +
       `👥 Players: ${currentPlayers}/${maxPlayers}${playerInfo}`;
 
@@ -334,6 +336,8 @@ export class GameManager {
     gameType: string,
     amount: number,
     creatorUsername: string,
+    tokenMint: string,
+    tokenTicker: string,
     status: string = "Active",
     txHash?: string
   ): Promise<number> {
@@ -344,6 +348,8 @@ export class GameManager {
       amount,
       creatorUsername,
       status,
+      tokenMint,
+      tokenTicker,
       undefined,
       txHash
     );
@@ -370,6 +376,8 @@ export class GameManager {
     amount: number,
     creatorUsername: string,
     status: string,
+    tokenMint: string,
+    tokenTicker: string,
     winnerAddress?: string
   ): Promise<void> {
     const gameMessage = this.activeGameMessages.get(gameAddress);
@@ -383,6 +391,8 @@ export class GameManager {
         amount,
         creatorUsername,
         status,
+        tokenMint,
+        tokenTicker,
         winnerAddress
       );
 
@@ -482,25 +492,32 @@ export class GameManager {
   public async createGame(
     ctx: Context,
     gameType: GameType,
-    amount: number,
+    parsedAmount: { amount: number; tokenMint: string; tokenTicker: string; isSol: boolean },
     maxPlayers: number,
     minPlayers: number,
     timeout: number
   ): Promise<void> {
     const telegramId = BigInt(ctx.from?.id || 0);
-    const metadata = await this.wallet.getTokenMetadata(this.tokenMint);
+
+    // Use the token from parsed amount, not the default
+    const tokenMint = parsedAmount.isSol ? DEFAULT_TOKEN_MINT : parsedAmount.tokenMint;
+    const tokenTicker = parsedAmount.isSol ? DEFAULT_TOKEN_TICKER : parsedAmount.tokenTicker;
+    const amount = parsedAmount.amount;
+
+    // Get metadata for the specific token
+    const metadata = await this.wallet.getTokenMetadata(tokenMint);
 
     try {
       const playerKp = this.wallet.getKeyPair(telegramId);
       const [tokenBalance, gameBalance] = await Promise.all([
-        this.wallet.getTokenBalance(telegramId, this.tokenMint),
-        this.getPlayerGameBalance(playerKp.publicKey)
+        this.wallet.getTokenBalance(telegramId, tokenMint),
+        this.getPlayerGameBalance(playerKp.publicKey, tokenMint)
       ]);
 
       const totalBalance = tokenBalance + gameBalance;
       if (totalBalance < amount) {
         await ctx.reply(
-          `Insufficient balance. You have ${this.wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${this.ticker} but need ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${this.ticker}`,
+          `Insufficient balance. You have ${this.wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${tokenTicker} but need ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}`,
           { reply_to_message_id: ctx.message?.message_id }
         );
         return;
@@ -524,7 +541,7 @@ export class GameManager {
       const gamePda = new PublicKey(gameAddress);
 
       this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
-      await this.ensurePlayerBalance(playerKp);
+      await this.ensurePlayerBalance(playerKp, tokenMint);
 
       const gameConfig = {
         gameType: { [gameType]: {} },
@@ -539,12 +556,13 @@ export class GameManager {
         .initializeGame(gameConfig, [...randomHashBuffer])
         .accounts({
           player: playerKp.publicKey,
-          tokenMint: new PublicKey(this.tokenMint),
+          tokenMint: new PublicKey(tokenMint),
         })
         .signers([playerKp])
         .rpc();
 
-      this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType);
+      // Save game with token information
+      this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker);
 
       await this.createGameMessage(
         ctx,
@@ -552,6 +570,8 @@ export class GameManager {
         gameType.charAt(0).toUpperCase() + gameType.slice(1),
         amount,
         ctx.from?.username || "Unknown",
+        tokenMint,
+        tokenTicker,
         "Active",
         tx
       );
@@ -569,11 +589,11 @@ export class GameManager {
   // HELPER METHODS
   // ================================
 
-  private async getPlayerGameBalance(playerPubkey: PublicKey): Promise<number> {
+  private async getPlayerGameBalance(playerPubkey: PublicKey, tokenMint: string): Promise<number> {
     try {
       const playerBalancePda = PDAManager.getPlayerBalancePDA(
         playerPubkey,
-        new PublicKey(this.tokenMint),
+        new PublicKey(tokenMint),
         this.program.programId
       );
       const playerBalance = await this.program.account.playerBalance.fetch(playerBalancePda);
@@ -717,7 +737,9 @@ export class GameManager {
           formatGameType(gameAccount.gameType),
           Number(gameAccount.amount),
           creatorUsername,
-          "Active"
+          "Active",
+          this.tokenMint,
+          this.ticker
         );
       }
 
@@ -832,8 +854,12 @@ export class GameManager {
         return { success: false, error: authResult.error || "Not authorized to join this private game" };
       }
 
+      // Get game data to determine the token mint
+      const gameData = this.gameDb.getGame(gamePda.toBase58());
+      const tokenMint = gameData?.token_mint || this.tokenMint;
+
       const adminKp = authResult.adminKeypair!;
-      await this.ensurePlayerBalance(playerKp);
+      await this.ensurePlayerBalance(playerKp, tokenMint);
 
       const tx = await this.program.methods
         .joinGame()

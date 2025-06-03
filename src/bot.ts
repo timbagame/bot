@@ -452,7 +452,7 @@ bot.command(["coinflip", "cf"], async (ctx) => {
   const maxPlayersIndex = tokenSpecified ? 3 : 2;
   const maxPlayers = parseInt(args?.[maxPlayersIndex] || COINFLIP_MAX_PLAYERS.toString()) || COINFLIP_MAX_PLAYERS;
 
-  await gameManager.createGame(ctx, "coinflip", parsed.amount, maxPlayers, 2, GAME_TIMEOUT);
+  await gameManager.createGame(ctx, "coinflip", parsed, maxPlayers, 2, GAME_TIMEOUT);
 });
 
 bot.command(["giveaway", "ga"], async (ctx) => {
@@ -476,7 +476,7 @@ bot.command(["giveaway", "ga"], async (ctx) => {
   const maxPlayersIndex = tokenSpecified ? 3 : 2;
   const maxPlayers = parseInt(args?.[maxPlayersIndex] || GIVEAWAY_MAX_PLAYERS.toString()) || GIVEAWAY_MAX_PLAYERS;
 
-  await gameManager.createGame(ctx, "giveaway", parsed.amount, maxPlayers, 1, GAME_TIMEOUT);
+  await gameManager.createGame(ctx, "giveaway", parsed, maxPlayers, 1, GAME_TIMEOUT);
 });
 
 // ================================
@@ -1069,6 +1069,13 @@ const handleCompletedGameCallback = async (ctx: any, game: any) => {
     const gameData = gameDb.getGame(game.game_address);
 
     if (gameData) {
+      // Ensure token info exists
+      if (!gameData.token_mint || !gameData.token_ticker) {
+        console.error(`Missing token info for game ${game.game_address}`);
+        await ctx.answerCallbackQuery("Game data incomplete - please contact support");
+        return;
+      }
+
       // Determine game type from database
       const gameType = gameData.game_type ?
         gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1) :
@@ -1081,6 +1088,8 @@ const handleCompletedGameCallback = async (ctx: any, game: any) => {
         Number(game.amount),
         creatorUsername,
         "Completed",
+        gameData.token_mint,
+        gameData.token_ticker,
         gameData.winner_address || undefined
       );
 
@@ -1119,13 +1128,27 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
     }
 
     // Check balance
+    const gameData = gameDb.getGame(game.game_address);
+    if (!gameData) {
+      await ctx.answerCallbackQuery("Game not found!");
+      return;
+    }
+
+    // Ensure token info exists
+    if (!gameData.token_mint || !gameData.token_ticker) {
+      console.error(`Missing token info for game ${game.game_address}`);
+      await ctx.answerCallbackQuery("Game data incomplete - please contact support");
+      return;
+    }
+
+    const tokenMint = gameData.token_mint;
     const [tokenBalance, gameBalance] = await Promise.all([
-      wallet.getTokenBalance(telegramId, DEFAULT_TOKEN_MINT),
+      wallet.getTokenBalance(telegramId, tokenMint),
       (async () => {
         try {
           const playerBalancePda = PDAManager.getPlayerBalancePDA(
             playerKp.publicKey,
-            new PublicKey(DEFAULT_TOKEN_MINT),
+            new PublicKey(tokenMint),
             program.programId
           );
           const playerBalance = await program.account.playerBalance.fetch(playerBalancePda);
@@ -1142,13 +1165,14 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
     // Only check balance for coinflips, giveaways are free to join
     const currentGameType = Object.keys(gameAccount.gameType)[0];
     if (currentGameType === "coinflip" && totalBalance < gameAmount) {
-      const metadata = await getTokenMetadata();
-      await ctx.answerCallbackQuery(`Insufficient balance. You have ${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${DEFAULT_TOKEN_TICKER} but need ${wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`);
+      const metadata = await wallet.getTokenMetadata(tokenMint);
+      const tokenTicker = gameData.token_ticker;
+      await ctx.answerCallbackQuery(`Insufficient balance. You have ${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${tokenTicker} but need ${wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${tokenTicker}`);
       return;
     }
 
     // Ensure player balance and join
-    await gameManager.ensurePlayerBalance(playerKp);
+    await gameManager.ensurePlayerBalance(playerKp, tokenMint);
 
     if (gameAccount.isPrivate) {
       const result = await gameManager.joinPrivateGame(gamePda, playerKp, ctx.chat?.id || 0);
@@ -1177,7 +1201,8 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
     const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
     const gameTypeKeys = Object.keys(gameAccount.gameType);
     const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
-    await gameManager.updateGameMessage(ctx, game.game_address, gameType, Number(game.amount), creatorUsername, "Active");
+    const tokenTicker = gameData.token_ticker;
+    await gameManager.updateGameMessage(ctx, game.game_address, gameType, Number(game.amount), creatorUsername, "Active", tokenMint, tokenTicker);
 
     // Send join notification
     const joinerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
@@ -1217,6 +1242,13 @@ const handleRefreshGame = async (ctx: any, gamePda: PublicKey, game: any) => {
     return;
   }
 
+  // Ensure token info exists
+  if (!gameData.token_mint || !gameData.token_ticker) {
+    console.error(`Missing token info for game ${game.game_address}`);
+    await ctx.answerCallbackQuery("Game data incomplete - please contact support");
+    return;
+  }
+
   // If the game is completed, we can't fetch the account from blockchain since it's closed
   if (gameData.status === "completed") {
     await ctx.answerCallbackQuery("This game has already been completed!");
@@ -1236,7 +1268,9 @@ const handleRefreshGame = async (ctx: any, gamePda: PublicKey, game: any) => {
       gameType,
       Number(game.amount),
       creatorUsername,
-      "Active"
+      "Active",
+      gameData.token_mint,
+      gameData.token_ticker
     );
 
     await ctx.answerCallbackQuery("Game status refreshed!");
@@ -1310,6 +1344,12 @@ setupAnchor().then(async () => {
         const gameTypeKeys = Object.keys(event.gameType);
         const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
 
+        // Ensure token info exists
+        if (!gameData.token_mint || !gameData.token_ticker) {
+          console.error(`Missing token info for completed game ${gameAddress}`);
+          return;
+        }
+
         await gameManager.updateGameMessage(
           dummyCtx,
           gameAddress,
@@ -1317,6 +1357,8 @@ setupAnchor().then(async () => {
           Number(event.amount),
           creatorUsername,
           "Completed",
+          gameData.token_mint,
+          gameData.token_ticker,
           winnerAddress
         );
         console.log(`📝 Updated game message for completed game ${gameAddress}`);
