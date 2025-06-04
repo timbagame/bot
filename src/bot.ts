@@ -418,7 +418,7 @@ bot.command(["coinflip", "cf"], async (ctx) => {
   }
 
   // Check if token was specified to adjust maxPlayers index
-  const tokenSpecified = !!args[2];
+  const tokenSpecified = parsed.data!.tokenWasSpecified;
   const maxPlayersIndex = tokenSpecified ? 3 : 2;
   const maxPlayers = parseInt(args?.[maxPlayersIndex] || COINFLIP_MAX_PLAYERS.toString()) || COINFLIP_MAX_PLAYERS;
 
@@ -445,7 +445,7 @@ bot.command(["giveaway", "ga"], async (ctx) => {
   }
 
   // Check if token was specified to adjust maxPlayers index
-  const tokenSpecified = !!args[2];
+  const tokenSpecified = parsed.data!.tokenWasSpecified;
   const maxPlayersIndex = tokenSpecified ? 3 : 2;
   const maxPlayers = parseInt(args?.[maxPlayersIndex] || GIVEAWAY_MAX_PLAYERS.toString()) || GIVEAWAY_MAX_PLAYERS;
 

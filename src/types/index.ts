@@ -50,6 +50,7 @@ export interface ParsedAmount {
   formattedAmount: string;
   tokenMint: string;
   tokenTicker: string;
+  tokenWasSpecified: boolean;
 }
 
 export interface ParseAmountResult {

@@ -56,19 +56,24 @@ export class TokenManager {
     let resolvedTokenMint = tokenMint;
     let resolvedTokenTicker = tokenTicker;
     let isSol = false;
+    let tokenWasSpecified = false;
 
     if (tokenArg) {
       if (tokenArg.toUpperCase() === "SOL") {
         isSol = true;
+        tokenWasSpecified = true;
       } else {
         // Check if it's a known token ticker
         const knownToken = this.tokenDb.getKnownTokenByTicker(tokenArg);
         if (knownToken) {
           resolvedTokenMint = knownToken.token_mint;
           resolvedTokenTicker = knownToken.token_ticker;
+          tokenWasSpecified = true;
         } else {
-          // Invalid token specified - return error with token name
-          return { success: false, error: "unknown_token", unknownToken: tokenArg.toUpperCase() };
+          // If it's not a valid token, assume it's the next parameter (like maxPlayers)
+          // and use the default token instead
+          tokenWasSpecified = false;
+          // Don't return error - just proceed with default token
         }
       }
     }
@@ -97,7 +102,8 @@ export class TokenManager {
         isSol,
         formattedAmount,
         tokenMint: isSol ? "SOL" : resolvedTokenMint,
-        tokenTicker: isSol ? "SOL" : resolvedTokenTicker
+        tokenTicker: isSol ? "SOL" : resolvedTokenTicker,
+        tokenWasSpecified
       }
     };
   }
