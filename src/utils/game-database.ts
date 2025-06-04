@@ -202,6 +202,17 @@ export class GameDatabase {
     }
   }
 
+  public getPlayerPublicKey(telegramId: string): string | null {
+    try {
+      const stmt = this.db.prepare('SELECT public_key FROM player_mappings WHERE telegram_id = ?');
+      const result = stmt.get(telegramId) as { public_key: string } | undefined;
+      return result?.public_key || null;
+    } catch (error) {
+      console.error("Error getting player public key:", error);
+      throw error;
+    }
+  }
+
   public getAllPlayerMappings(): PlayerMapping[] {
     try {
       return this.db.query('SELECT * FROM player_mappings').all() as PlayerMapping[];
@@ -292,18 +303,6 @@ export class GameDatabase {
     } catch (error) {
       console.error("Error getting recent games:", error);
       throw error;
-    }
-  }
-
-  // Helper method to get player's public key
-  private getPlayerPublicKey(telegramId: string): string | null {
-    try {
-      const stmt = this.db.prepare('SELECT public_key FROM player_mappings WHERE telegram_id = ?');
-      const result = stmt.get(telegramId) as { public_key: string } | undefined;
-      return result?.public_key || null;
-    } catch (error) {
-      console.error("Error getting player public key:", error);
-      return null;
     }
   }
 }

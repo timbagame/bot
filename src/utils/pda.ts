@@ -8,7 +8,8 @@ export class PDAManager {
     ORACLE: "oracle",
     GAME: "game",
     PLAYER_BALANCE: "player_balance",
-    GAME_TOKEN: "game_token"
+    GAME_TOKEN: "game_token",
+    PLAYER_PARTICIPATION: "player_participation"
   } as const;
 
   private static findPDA(seeds: (string | Buffer | PublicKey)[], programId: PublicKey): PublicKey {
@@ -36,5 +37,9 @@ export class PDAManager {
 
   static getGameTokenPDA(tokenMint: PublicKey, programId: PublicKey): PublicKey {
     return this.findPDA([this.SEEDS.GAME_TOKEN, tokenMint], programId);
+  }
+
+  static getPlayerParticipationPDA(gameAddress: PublicKey, playerPubkey: PublicKey, programId: PublicKey): PublicKey {
+    return this.findPDA([this.SEEDS.PLAYER_PARTICIPATION, gameAddress, playerPubkey], programId);
   }
 }

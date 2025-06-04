@@ -104,6 +104,35 @@ export class GameManager {
   }
 
   // ================================
+  // PLAYER UTILITIES
+  // ================================
+
+  /**
+   * Helper method to check if a player is in a game by checking PlayerParticipation account
+   */
+  private async isPlayerInGame(gamePda: PublicKey, playerPubkey: PublicKey): Promise<boolean> {
+    try {
+      const playerParticipationPda = PDAManager.getPlayerParticipationPDA(
+        gamePda,
+        playerPubkey,
+        this.program.programId
+      );
+      await this.program.account.playerParticipation.fetch(playerParticipationPda);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * Helper method to get all players in a game from the database
+   * Since the contract no longer stores players array, we use our database tracking
+   */
+  private getGamePlayers(gameAddress: string): string[] {
+    return this.gameDb.getGameParticipants(gameAddress);
+  }
+
+  // ================================
   // PLAYER BALANCE MANAGEMENT
   // ================================
 
@@ -233,14 +262,16 @@ export class GameManager {
       // For active games, try to fetch the game account, but handle the case where it might be closed
       try {
         gameAccount = await this.program.account.game.fetch(gamePda);
-        currentPlayers = gameAccount.players.length;
+        currentPlayers = gameAccount.playerCount;
         maxPlayers = gameAccount.maxPlayers;
         minPlayers = gameAccount.minPlayers;
 
-        if (currentPlayers > 0) {
+        // Get player information from database since players array no longer exists in contract
+        const participants = this.gameDb.getGameParticipants(gamePda.toBase58());
+        if (participants.length > 0) {
           playerInfo = "\n";
-          for (const playerPubkey of gameAccount.players) {
-            const username = await this.getPlayerUsername(ctx, playerPubkey.toBase58());
+          for (const telegramId of participants) {
+            const username = await this.getUsernameFromTelegramId(ctx, telegramId);
             playerInfo += `• @${username}\n`;
           }
         }
@@ -434,7 +465,7 @@ export class GameManager {
 
       const amount = Number(gameAccount.amount);
       const maxPlayers = gameAccount.maxPlayers;
-      const currentPlayers = gameAccount.players.length;
+      const currentPlayers = gameAccount.playerCount;
       const creatorPubkey = gameAccount.creator.toString();
       const gameType = formatGameType(gameAccount.gameType);
 
@@ -580,7 +611,7 @@ export class GameManager {
       };
 
       const tx = await this.program.methods
-        .initializeGame(gameConfig, [...randomHashBuffer])
+        .initializeGame(gameConfig, Array.from(randomHashBuffer))
         .accounts({
           player: playerKp.publicKey,
           tokenMint: new PublicKey(tokenMint),
@@ -644,7 +675,7 @@ export class GameManager {
 
       if (!isExpired) return false;
 
-      const hasEnoughPlayers = gameAccount.players.length >= gameAccount.minPlayers;
+      const hasEnoughPlayers = gameAccount.playerCount >= gameAccount.minPlayers;
       const creatorTelegramId = this.gameDb.getCreatorTelegramId(gamePda.toBase58());
 
       if (!creatorTelegramId) return false;
@@ -718,7 +749,7 @@ export class GameManager {
         const metadata = await this.wallet.getTokenMetadata(tokenMint);
         const gameType = formatGameType(gameAccount.gameType);
         const amount = Number(gameAccount.amount);
-        const playerCount = gameAccount.players.length;
+        const playerCount = gameAccount.playerCount;
 
         await ctx.reply(
           `❌ <b>${gameType} Cancelled!</b>\n\n` +
@@ -753,7 +784,7 @@ export class GameManager {
     try {
       const gameAccount = await this.program.account.game.fetch(gamePda);
 
-      const isInGame = gameAccount.players.some((p: PublicKey) => p.equals(playerKp.publicKey));
+      const isInGame = await this.isPlayerInGame(gamePda, playerKp.publicKey);
       if (!isInGame) {
         throw new Error("You are not in this game");
       }
@@ -809,8 +840,12 @@ export class GameManager {
       const gameAccount = await this.program.account.game.fetch(gamePda);
       console.log(`Attempting to cancel game ${gamePda.toBase58()} using player keys`);
 
-      // Check if there are any non-creator players to unjoin first
-      const nonCreatorPlayers = gameAccount.players.filter((player: any) => !player.equals(gameAccount.creator));
+      // Get players from database since the contract no longer stores players array
+      const participants = this.getGamePlayers(gamePda.toBase58());
+      const nonCreatorPlayers = participants.filter(telegramId => {
+        const publicKey = this.gameDb.getPlayerPublicKey(telegramId);
+        return publicKey !== gameAccount.creator.toBase58();
+      });
 
       if (nonCreatorPlayers.length > 0) {
         console.log(`Game has ${nonCreatorPlayers.length} non-creator players, unjoining them first`);
@@ -849,40 +884,45 @@ export class GameManager {
   }
 
   private async unjoinAllPlayersWithKeys(gamePda: PublicKey, gameAccount: any): Promise<void> {
-    for (const playerPubkey of gameAccount.players) {
+    // Get players from database
+    const participants = this.getGamePlayers(gamePda.toBase58());
+
+    for (const telegramId of participants) {
       try {
+        // Get the public key for this telegram ID
+        const playerPubkey = this.gameDb.getPlayerPublicKey(telegramId);
+        if (!playerPubkey) {
+          console.log(`No public key found for telegram ID ${telegramId}, skipping unjoin`);
+          continue;
+        }
+
+        const playerPublicKey = new PublicKey(playerPubkey);
+
         // Skip the creator - they can cancel with players in the game
-        if (playerPubkey.equals(gameAccount.creator)) {
-          console.log(`Skipping creator ${playerPubkey.toBase58()} - they can cancel with players`);
+        if (playerPublicKey.equals(gameAccount.creator)) {
+          console.log(`Skipping creator ${playerPublicKey.toBase58()} - they can cancel with players`);
           continue;
         }
 
-        // Look up player's telegram ID from database
-        const playerTelegramId = this.gameDb.getPlayerTelegramId(playerPubkey.toBase58());
-        if (!playerTelegramId) {
-          console.log(`No telegram ID found for player ${playerPubkey.toBase58()}, skipping unjoin`);
-          continue;
-        }
+        console.log(`Unjoining player ${playerPublicKey.toBase58()} from game ${gamePda.toBase58()}`);
 
-        console.log(`Unjoining player ${playerPubkey.toBase58()} from game ${gamePda.toBase58()}`);
-
-        const playerKp = this.wallet.getKeyPair(BigInt(playerTelegramId));
+        const playerKp = this.wallet.getKeyPair(BigInt(telegramId));
 
         const tx = await this.program.methods
           .unjoinGame()
           .accounts({
             game: gamePda,
-            player: playerPubkey,
+            player: playerPublicKey,
             authority: playerKp.publicKey,
           })
           .signers([playerKp])
           .rpc();
 
         await this.wallet.confirmTransaction(tx);
-        console.log(`Successfully unjoined player ${playerPubkey.toBase58()}`);
+        console.log(`Successfully unjoined player ${playerPublicKey.toBase58()}`);
 
       } catch (error) {
-        console.error(`Failed to unjoin player ${playerPubkey.toBase58()}:`, error);
+        console.error(`Failed to unjoin player ${telegramId}:`, error);
         // Continue with other players even if one fails
       }
     }
@@ -1078,7 +1118,7 @@ export class GameManager {
         const gameAddress = pubkey.toBase58();
         if (!this.gameDb.gameExists(gameAddress)) {
           orphanedGames.push({ address: gameAddress, account: gameAccount });
-          console.log(`🔍 Found orphaned game: ${gameAddress} (${gameAccount.players.length}/${gameAccount.maxPlayers})`);
+          console.log(`🔍 Found orphaned game: ${gameAddress} (${gameAccount.playerCount}/${gameAccount.maxPlayers})`);
         }
       } catch (error) {
         // Skip non-game accounts
@@ -1101,7 +1141,7 @@ export class GameManager {
       }
 
       const gameType = this.getGameType(gameAccount);
-      console.log(`🔄 Processing expired ${gameType} game ${address} (${gameAccount.players.length}/${gameAccount.maxPlayers})`);
+      console.log(`🔄 Processing expired ${gameType} game ${address} (${gameAccount.playerCount}/${gameAccount.maxPlayers})`);
 
       return gameType === "giveaway"
         ? await this.handleExpiredGiveaway(gamePda, gameAccount, address)
@@ -1149,7 +1189,7 @@ export class GameManager {
   }
 
   private async handleExpiredCoinflip(gamePda: PublicKey, gameAccount: any, address: string): Promise<boolean> {
-    const playerKeyInfo = this.analyzePlayerKeys(gameAccount);
+    const playerKeyInfo = this.analyzePlayerKeys(gameAccount, address);
     console.log(`🪙 Coinflip ${address}: ${playerKeyInfo.available.length}/${playerKeyInfo.total} player keys available`);
 
     // Strategy 1: Complete cleanup (unjoin all non-creators, then cancel)
@@ -1161,22 +1201,28 @@ export class GameManager {
     return await this.executePartialCleanup(gamePda, playerKeyInfo, address);
   }
 
-  private analyzePlayerKeys(gameAccount: any) {
-    const allPlayers = gameAccount.players as PublicKey[];
+  private analyzePlayerKeys(gameAccount: any, gameAddress: string) {
+    // Get players from database since contract no longer stores players array
+    const participantTelegramIds = this.getGamePlayers(gameAddress);
     const creatorPubkey = gameAccount.creator;
     const available: Array<{pubkey: PublicKey, telegramId: string, isCreator: boolean}> = [];
-    const unavailable: PublicKey[] = [];
+    const unavailable: string[] = [];
 
-    for (const playerPubkey of allPlayers) {
-      const telegramId = this.gameDb.getPlayerTelegramId(playerPubkey.toBase58());
-      if (telegramId) {
-        available.push({
-          pubkey: playerPubkey,
-          telegramId,
-          isCreator: playerPubkey.equals(creatorPubkey)
-        });
-      } else {
-        unavailable.push(playerPubkey);
+    for (const telegramId of participantTelegramIds) {
+      try {
+        const playerPubkeyStr = this.gameDb.getPlayerPublicKey(telegramId);
+        if (playerPubkeyStr) {
+          const playerPubkey = new PublicKey(playerPubkeyStr);
+          available.push({
+            pubkey: playerPubkey,
+            telegramId,
+            isCreator: playerPubkey.equals(creatorPubkey)
+          });
+        } else {
+          unavailable.push(telegramId);
+        }
+      } catch (error) {
+        unavailable.push(telegramId);
       }
     }
 
@@ -1190,7 +1236,7 @@ export class GameManager {
       nonCreators,
       creator,
       canCompleteCleanup,
-      total: allPlayers.length
+      total: participantTelegramIds.length
     };
   }
 

@@ -108,7 +108,8 @@ async function initializeGameToken() {
     try {
       const existingGameToken = await program.account.gameToken.fetch(gameTokenPda);
       console.log('⚠️  Game token already exists!');
-      console.log(`   Token Mint: ${existingGameToken.tokenMint.toString()}`);
+      console.log(`   Min Amount: ${existingGameToken.minAmount.toString()}`);
+      console.log(`   Enabled: ${existingGameToken.enabled}`);
       console.log(`   Initialized: ${new Date().toISOString()}`);
       return;
     } catch (error) {
@@ -179,7 +180,10 @@ async function initializeGameToken() {
 
     console.log('\n🎉 Game Token Details:');
     console.log('=====================================');
-    console.log(`Token Mint: ${gameTokenData.tokenMint.toString()}`);
+    console.log(`Token Mint: ${CONFIG.TIMBA_MINT}`);
+    console.log(`Min Amount: ${gameTokenData.minAmount.toString()}`);
+    console.log(`Fee Amount: ${gameTokenData.feeAmount.toString()}`);
+    console.log(`Enabled: ${gameTokenData.enabled}`);
     console.log(`Game Token PDA: ${gameTokenPda.toBase58()}`);
     console.log(`Authority: ${adminKeypair.publicKey.toBase58()}`);
     console.log(`Network: ${CONFIG.NETWORK}`);

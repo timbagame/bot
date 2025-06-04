@@ -312,7 +312,7 @@ const checkGameTokenStatus = async () => {
       program.programId
     );
     const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
-    console.log(`Game token found: ${gameTokenAccount.tokenMint.toString()}`);
+    console.log(`Game token found with min amount: ${gameTokenAccount.minAmount.toString()}`);
   } catch (error) {
     console.log("Game token not found, it might need to be initialized");
   }
@@ -1088,15 +1088,29 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
 
   try {
     const gameAccount = await program.account.game.fetch(gamePda);
-    const players = gameAccount.players;
 
-    const isAlreadyInGame = players.some((p: PublicKey) => p.equals(playerKp.publicKey));
+    // Check if player already joined by checking PlayerParticipation account
+    const playerParticipationPda = PDAManager.getPlayerParticipationPDA(
+      gamePda,
+      playerKp.publicKey,
+      program.programId
+    );
+
+    let isAlreadyInGame = false;
+    try {
+      await program.account.playerParticipation.fetch(playerParticipationPda);
+      isAlreadyInGame = true;
+    } catch (error) {
+      // PlayerParticipation account doesn't exist, so player is not in game
+      isAlreadyInGame = false;
+    }
+
     if (isAlreadyInGame) {
       await ctx.answerCallbackQuery("You have already joined this game!");
       return;
     }
 
-    if (players.length >= gameAccount.maxPlayers) {
+    if (gameAccount.playerCount >= gameAccount.maxPlayers) {
       await ctx.answerCallbackQuery("This game is already full!");
       return;
     }
@@ -1181,7 +1195,7 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
     // Send join notification
     const joinerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
     const updatedGameAccount = await program.account.game.fetch(gamePda);
-    const playerCount = updatedGameAccount.players.length;
+    const playerCount = updatedGameAccount.playerCount;
     const maxPlayers = gameAccount.maxPlayers;
     const gameName = gameType.toLowerCase();
 

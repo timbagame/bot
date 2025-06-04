@@ -90,7 +90,7 @@ const initializeGameToken = async (program: anchor.Program<Coinflip>) => {
     // Check if Game Token exists
     try {
       const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
-      console.log(`Game Token already exists: ${gameTokenAccount.tokenMint.toString()}`);
+      console.log(`Game Token already exists with min amount: ${gameTokenAccount.minAmount.toString()}`);
       return gameTokenPda;
     } catch (error) {
       console.log("Game Token doesn't exist, creating...");
