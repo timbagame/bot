@@ -809,16 +809,7 @@ export class GameManager {
         throw new Error("You are not in this game");
       }
 
-      const tx = await this.program.methods
-        .unjoinGame()
-        .accounts({
-          game: gamePda,
-          player: playerKp.publicKey,
-        })
-        .signers([playerKp])
-        .rpc();
-
-      await this.wallet.confirmTransaction(tx);
+      await this.unjoinPlayerFromGame(gamePda, playerKp, playerKp.publicKey);
 
       const creatorTelegramId = await this.gameDb.getCreatorTelegramId(gamePda.toBase58());
       if (creatorTelegramId) {
@@ -926,17 +917,7 @@ export class GameManager {
         console.log(`Unjoining player ${playerPublicKey.toBase58()} from game ${gamePda.toBase58()}`);
 
         const playerKp = this.wallet.getKeyPair(BigInt(telegramId));
-
-        const tx = await this.program.methods
-          .unjoinGame()
-          .accounts({
-            game: gamePda,
-            player: playerPublicKey,
-          })
-          .signers([playerKp])
-          .rpc();
-
-        await this.wallet.confirmTransaction(tx);
+        await this.unjoinPlayerFromGame(gamePda, playerKp, playerPublicKey);
         console.log(`Successfully unjoined player ${playerPublicKey.toBase58()}`);
 
       } catch (error) {
@@ -944,6 +925,19 @@ export class GameManager {
         // Continue with other players even if one fails
       }
     }
+  }
+
+  private async unjoinPlayerFromGame(gamePda: PublicKey, playerKp: any, playerPubkey: PublicKey): Promise<void> {
+    const tx = await this.program.methods
+      .unjoinGame()
+      .accounts({
+        game: gamePda,
+        player: playerPubkey,
+      })
+      .signers([playerKp])
+      .rpc();
+
+    await this.wallet.confirmTransaction(tx);
   }
 
   // ================================
@@ -1328,18 +1322,5 @@ export class GameManager {
       console.error(`❌ Failed to cancel expired ${gameType} ${address}:`, error.message);
       return false;
     }
-  }
-
-  private async unjoinPlayerFromGame(gamePda: PublicKey, playerKp: any, playerPubkey: PublicKey): Promise<void> {
-    const tx = await this.program.methods
-      .unjoinGame()
-      .accounts({
-        game: gamePda,
-        player: playerPubkey,
-      })
-      .signers([playerKp])
-      .rpc();
-
-    await this.wallet.confirmTransaction(tx);
   }
 }
