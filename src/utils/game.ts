@@ -598,7 +598,6 @@ export class GameManager {
       const randomHashBuffer = this.oracleClient.hexToBuffer(randomHash);
       const gamePda = new PublicKey(gameAddress);
 
-      this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
       await this.ensurePlayerBalance(playerKp, tokenMint);
 
       const gameConfig = {
@@ -618,6 +617,27 @@ export class GameManager {
         })
         .signers([playerKp])
         .rpc();
+
+      await this.wallet.confirmTransaction(tx);
+
+      // Automatically join the creator to the game since the new contract
+      // structure requires explicit PlayerParticipation accounts for all players
+      console.log(`🎮 Auto-joining creator to game ${gamePda.toBase58()}...`);
+
+      const joinTx = await this.program.methods
+        .joinGame()
+        .accounts({
+          game: gamePda,
+          player: playerKp.publicKey,
+        })
+        .signers([playerKp])
+        .rpc();
+
+      await this.wallet.confirmTransaction(joinTx);
+      console.log(`✅ Creator successfully joined game: ${joinTx}`);
+
+      // Save creator as participant only AFTER successfully joining on-chain
+      this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
 
       // Save game with token information
       this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker);
