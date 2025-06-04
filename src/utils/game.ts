@@ -814,7 +814,6 @@ export class GameManager {
         .accounts({
           game: gamePda,
           player: playerKp.publicKey,
-          authority: playerKp.publicKey,
         })
         .signers([playerKp])
         .rpc();
@@ -933,7 +932,6 @@ export class GameManager {
           .accounts({
             game: gamePda,
             player: playerPublicKey,
-            authority: playerKp.publicKey,
           })
           .signers([playerKp])
           .rpc();
@@ -1338,7 +1336,6 @@ export class GameManager {
       .accounts({
         game: gamePda,
         player: playerPubkey,
-        authority: playerKp.publicKey,
       })
       .signers([playerKp])
       .rpc();
