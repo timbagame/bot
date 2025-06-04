@@ -109,10 +109,26 @@ async function initializeGameToken() {
       const existingGameToken = await program.account.gameToken.fetch(gameTokenPda);
       console.log('⚠️  Game token already exists!');
       console.log(`   Min Amount: ${existingGameToken.minAmount.toString()}`);
+      console.log(`   Fee Amount: ${existingGameToken.feeAmount.toString()}`);
       console.log(`   Enabled: ${existingGameToken.enabled}`);
       console.log(`   Initialized: ${new Date().toISOString()}`);
       return;
-    } catch (error) {
+    } catch (error: any) {
+      // Check if account exists but has incompatible structure
+      const accountInfo = await connection.getAccountInfo(gameTokenPda);
+      if (accountInfo) {
+        console.log('⚠️  GameToken account exists but has incompatible structure (likely from old contract version)');
+        console.log(`   Account Owner: ${accountInfo.owner.toBase58()}`);
+        console.log(`   Account Data Length: ${accountInfo.data.length} bytes`);
+        console.log(`   Account Lamports: ${accountInfo.lamports}`);
+        console.log('\n❌ Cannot initialize new GameToken over existing account.');
+        console.log('💡 You may need to:');
+        console.log('   1. Close the old account first, or');
+        console.log('   2. Use a migration script to update the account structure, or');
+        console.log('   3. Deploy with a different program ID');
+        throw new Error('GameToken account exists with incompatible structure');
+      }
+
       // Game token doesn't exist, proceed with initialization
       console.log('📝 Game token not found, proceeding with initialization...');
     }
