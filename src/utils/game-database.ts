@@ -257,6 +257,18 @@ export class GameDatabase {
     }
   }
 
+  public removeGameParticipant(gameAddress: string, telegramId: string): void {
+    try {
+      const stmt = this.db.prepare(
+        'DELETE FROM game_participants WHERE game_address = ? AND telegram_id = ?'
+      );
+      stmt.run(gameAddress, telegramId);
+    } catch (error) {
+      console.error("Error removing game participant:", error);
+      throw error;
+    }
+  }
+
   // Get active games for a player
   public getActiveGames(telegramId: string): GameData[] {
     try {

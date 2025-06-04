@@ -938,6 +938,13 @@ export class GameManager {
       .rpc();
 
     await this.wallet.confirmTransaction(tx);
+
+    // Remove participant from database tracking
+    const playerTelegramId = this.gameDb.getPlayerTelegramId(playerPubkey.toBase58());
+    if (playerTelegramId) {
+      this.gameDb.removeGameParticipant(gamePda.toBase58(), playerTelegramId);
+      console.log(`Removed player ${playerTelegramId} from game participants tracking`);
+    }
   }
 
   // ================================
