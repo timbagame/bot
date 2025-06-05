@@ -206,6 +206,81 @@ const validateAndProcessTransaction = async (
 };
 
 // ================================
+// CLEANUP UTILITIES
+// ================================
+
+const cleanupPlayerParticipation = async (
+  gameAddress: string,
+  winnerAddress: string
+): Promise<void> => {
+  try {
+    console.log(`🧹 Starting PlayerParticipation cleanup for game ${gameAddress}`);
+
+    // Get all participants from the database
+    const participants = gameDb.getGameParticipants(gameAddress);
+    const gamePda = new PublicKey(gameAddress);
+    const winnerPubkey = new PublicKey(winnerAddress);
+
+    let cleanupCount = 0;
+    let failedCleanups = 0;
+
+    for (const telegramId of participants) {
+      try {
+        const playerPubkey = gameDb.getPlayerPublicKey(telegramId);
+        if (!playerPubkey) {
+          console.warn(`No public key found for participant ${telegramId} in game ${gameAddress}`);
+          continue;
+        }
+
+        const playerPubkeyObj = new PublicKey(playerPubkey);
+
+        // Skip the winner - their PlayerParticipation account is already closed by completeGame instruction
+        if (playerPubkeyObj.equals(winnerPubkey)) {
+          console.log(`⏭️ Skipping cleanup for winner ${playerPubkey.slice(0, 8)}...`);
+          continue;
+        }
+
+        // Get the player's keypair for signing the cleanup transaction
+        const playerKp = wallet.getKeyPair(BigInt(telegramId));
+
+        // Execute cleanup instruction directly (account should exist since game just completed)
+        const tx = await program.methods
+          .cleanupPlayerParticipation()
+          .accounts({
+            game: gamePda,
+            player: playerPubkeyObj,
+          })
+          .signers([playerKp])
+          .rpc();
+
+        await wallet.confirmTransaction(tx);
+        cleanupCount++;
+
+        console.log(`🧹 Cleaned up PlayerParticipation for ${playerPubkey.slice(0, 8)}... - tx: ${tx.slice(0, 8)}...`);
+
+        // Small delay to avoid overwhelming the RPC
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+      } catch (error: any) {
+        // Check if the account doesn't exist (already cleaned up) vs other errors
+        if (error.message?.includes('Account does not exist') || error.message?.includes('could not find account')) {
+          console.log(`✅ PlayerParticipation account already cleaned up for participant ${telegramId}`);
+        } else {
+          failedCleanups++;
+          console.error(`❌ Failed to cleanup PlayerParticipation for participant ${telegramId}:`, error.message);
+        }
+        // Continue with other participants even if one fails
+      }
+    }
+
+    console.log(`🧹 PlayerParticipation cleanup completed for game ${gameAddress}: ${cleanupCount} successful, ${failedCleanups} failed`);
+
+  } catch (error) {
+    console.error(`❌ Error during PlayerParticipation cleanup for game ${gameAddress}:`, error);
+  }
+};
+
+// ================================
 // RESPONSE HELPERS
 // ================================
 
@@ -1389,6 +1464,15 @@ setupAnchor().then(async () => {
         console.log(`🎊 Sent completion notification for game ${gameAddress}`);
       } catch (error) {
         console.error("Error sending completion notification:", error);
+      }
+
+      // Cleanup PlayerParticipation accounts for non-winning players to recover rent
+      try {
+        console.log(`🧹 Initiating PlayerParticipation cleanup for completed game ${gameAddress}`);
+        await cleanupPlayerParticipation(gameAddress, winnerAddress);
+      } catch (error) {
+        console.error(`❌ Error during PlayerParticipation cleanup for game ${gameAddress}:`, error);
+        // Don't fail the whole event handler if cleanup fails
       }
 
       console.log(`✅ Successfully processed GameCompleted event for game ${gameAddress}`);
