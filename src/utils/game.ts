@@ -634,24 +634,29 @@ export class GameManager {
 
       await this.wallet.confirmTransaction(tx);
 
-      // Automatically join the creator to the game since the new contract
-      // structure requires explicit PlayerParticipation accounts for all players
-      console.log(`🎮 Auto-joining creator to game ${gamePda.toBase58()}...`);
+      // Only auto-join creator for coinflip games, not giveaways
+      if (gameType === "coinflip") {
+        // Automatically join the creator to the game since the new contract
+        // structure requires explicit PlayerParticipation accounts for all players
+        console.log(`🎮 Auto-joining creator to coinflip game ${gamePda.toBase58()}...`);
 
-      const joinTx = await this.program.methods
-        .joinGame()
-        .accounts({
-          game: gamePda,
-          player: playerKp.publicKey,
-        })
-        .signers([playerKp])
-        .rpc();
+        const joinTx = await this.program.methods
+          .joinGame()
+          .accounts({
+            game: gamePda,
+            player: playerKp.publicKey,
+          })
+          .signers([playerKp])
+          .rpc();
 
-      await this.wallet.confirmTransaction(joinTx);
-      console.log(`✅ Creator successfully joined game: ${joinTx}`);
+        await this.wallet.confirmTransaction(joinTx);
+        console.log(`✅ Creator successfully joined coinflip game: ${joinTx}`);
 
-      // Save creator as participant only AFTER successfully joining on-chain
-      this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
+        // Save creator as participant only AFTER successfully joining on-chain
+        this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
+      } else {
+        console.log(`🎁 Giveaway game ${gamePda.toBase58()} created - creator not auto-joined`);
+      }
 
       // Save game with token information
       this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker, maxPlayers, minPlayers);
