@@ -547,6 +547,47 @@ export class GameManager {
     }
   }
 
+  // Helper method for transaction confirmation with timeout recovery
+  private async confirmTransactionWithRecovery(
+    signature: string,
+    gamePda: PublicKey,
+    operationType: "Game creation" | "Player join",
+    playerPubkey?: PublicKey
+  ): Promise<boolean> {
+    try {
+      await this.wallet.confirmTransaction(signature);
+      console.log(`✅ ${operationType} transaction confirmed: ${signature}`);
+      return true;
+    } catch (confirmError: any) {
+      console.warn(`⚠️ ${operationType} confirmation failed: ${confirmError.message}`);
+
+      // Only try recovery for timeout errors
+      if (confirmError.message?.includes('timeout') || confirmError.message?.includes('not confirmed')) {
+        console.log(`🔍 Checking if ${operationType} succeeded despite timeout...`);
+
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        try {
+          if (operationType === "Game creation") {
+            await this.program.account.game.fetch(gamePda);
+            console.log(`✅ Game account found - transaction ${signature} succeeded despite timeout`);
+            return true;
+          } else if (operationType === "Player join" && playerPubkey) {
+            const isInGame = await this.isPlayerInGame(gamePda, playerPubkey);
+            if (isInGame) {
+              console.log(`✅ Player join confirmed despite timeout - tx: ${signature}`);
+              return true;
+            }
+          }
+        } catch (checkError) {
+          console.error(`❌ ${operationType} verification failed, transaction ${signature} likely failed`);
+        }
+      }
+
+      throw confirmError;
+    }
+  }
+
   public async createGame(
     ctx: Context,
     gameType: GameType,
@@ -571,12 +612,7 @@ export class GameManager {
       return;
     }
 
-    // Use the token from parsed amount
-    const tokenMint = parsedAmount.tokenMint;
-    const tokenTicker = parsedAmount.tokenTicker;
-    const amount = parsedAmount.amount;
-
-    // Get metadata for the specific token
+    const { tokenMint, tokenTicker, amount } = parsedAmount;
     const metadata = await this.wallet.getTokenMetadata(tokenMint);
 
     try {
@@ -598,13 +634,11 @@ export class GameManager {
       const creatorPubkey = playerKp.publicKey.toBase58();
       this.gameDb.savePlayerMapping(creatorPubkey, telegramId.toString());
 
-      // Check if oracle is available
+      // Check oracle and generate game secrets
       const isOracleHealthy = await this.oracleClient.isHealthy();
       if (!isOracleHealthy) {
-        await ctx.reply(
-          "❌ Oracle service is unavailable. Please try again later.",
-          { reply_to_message_id: ctx.message?.message_id }
-        );
+        await ctx.reply("❌ Oracle service is unavailable. Please try again later.",
+          { reply_to_message_id: ctx.message?.message_id });
         return;
       }
 
@@ -614,6 +648,7 @@ export class GameManager {
 
       await this.ensurePlayerBalance(playerKp, tokenMint);
 
+      // Create game
       const gameConfig = {
         gameType: { [gameType]: {} },
         amount: new anchor.BN(amount),
@@ -623,7 +658,6 @@ export class GameManager {
         isPrivate: true
       };
 
-      // Build the instruction directly
       const gameInstruction = await this.program.methods
         .initializeGame(gameConfig, Array.from(randomHashBuffer))
         .accounts({
@@ -632,175 +666,20 @@ export class GameManager {
         })
         .instruction();
 
-      // Sign and send using consistent instruction-based approach
       const tx = await this.wallet.sendTransaction([gameInstruction], [playerKp]);
+      const gameCreationConfirmed = await this.confirmTransactionWithRecovery(tx, gamePda, "Game creation");
 
-      // Try to confirm the transaction, but don't fail if confirmation times out
-      let gameCreationConfirmed = false;
-      try {
-        await this.wallet.confirmTransaction(tx);
-        gameCreationConfirmed = true;
-        console.log(`✅ Game creation transaction confirmed: ${tx}`);
-      } catch (confirmError: any) {
-        console.warn(`⚠️ Game creation confirmation failed for ${gameType} ${gamePda.toBase58()}: ${confirmError.message}`);
-
-        // If it's a timeout error, the transaction might still have succeeded
-        if (confirmError.message?.includes('timeout') || confirmError.message?.includes('not confirmed')) {
-          console.log(`🔍 Checking if game account was created despite timeout...`);
-
-          // Give a brief moment for the transaction to propagate
-          await new Promise(resolve => setTimeout(resolve, 2000));
-
-          try {
-            // Try to fetch the game account to see if it was actually created
-            await this.program.account.game.fetch(gamePda);
-            gameCreationConfirmed = true;
-            console.log(`✅ Game account found - transaction ${tx} succeeded despite timeout`);
-          } catch (fetchError) {
-            console.error(`❌ Game account not found, transaction ${tx} likely failed`);
-            throw confirmError; // Re-throw the original confirmation error
-          }
-        } else {
-          throw confirmError; // Re-throw for non-timeout errors
-        }
-      }
-
-      // Only proceed with subsequent operations if game creation was confirmed
       if (!gameCreationConfirmed) {
         throw new Error("Game creation could not be confirmed");
       }
 
-      // Save game with token information immediately after successful creation
+      // Save game and create message
       this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker, maxPlayers, minPlayers);
+      await this.createGameMessage(ctx, gamePda.toBase58(), gameType.charAt(0).toUpperCase() + gameType.slice(1), amount, ctx.from?.username || "Unknown", tokenMint, tokenTicker, "Active", tx);
 
-      // Create game message immediately after successful creation
-      await this.createGameMessage(
-        ctx,
-        gamePda.toBase58(),
-        gameType.charAt(0).toUpperCase() + gameType.slice(1),
-        amount,
-        ctx.from?.username || "Unknown",
-        tokenMint,
-        tokenTicker,
-        "Active",
-        tx
-      );
-
-      // Only auto-join creator for coinflip games, not giveaways (separate action)
+      // Auto-join for coinflips
       if (gameType === "coinflip") {
-        // Automatically join the creator to the game since the new contract
-        // structure requires explicit PlayerParticipation accounts for all players
-        console.log(`🎮 Auto-joining creator to coinflip game ${gamePda.toBase58()}...`);
-
-        try {
-          // Check if the created game is private and use appropriate join method
-          const gameAccount = await this.program.account.game.fetch(gamePda);
-
-          if (gameAccount.isPrivate) {
-            // Use private game join logic
-            console.log(`🔐 Game is private, using authorized join...`);
-            const result = await this.joinPrivateGame(gamePda, playerKp, ctx.chat?.id || 0);
-
-            if (result.success) {
-              console.log(`✅ Creator successfully joined private coinflip game: ${result.tx}`);
-              // Save creator as participant
-              this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
-
-              // Update the game message to reflect the new player count
-              await this.updateGameMessage(
-                ctx,
-                gamePda.toBase58(),
-                gameType.charAt(0).toUpperCase() + gameType.slice(1),
-                amount,
-                ctx.from?.username || "Unknown",
-                "Active",
-                tokenMint,
-                tokenTicker
-              );
-            } else {
-              throw new Error(result.error || "Failed to join private game");
-            }
-          } else {
-            // Use regular join logic for public games
-            console.log(`🌐 Game is public, using regular join...`);
-            const joinInstruction = await this.program.methods
-              .joinGame()
-              .accounts({
-                game: gamePda,
-                player: playerKp.publicKey,
-              })
-              .instruction();
-
-            const joinTx = await this.wallet.sendTransaction([joinInstruction], [playerKp]);
-
-            // Similar timeout handling for join transaction
-            try {
-              await this.wallet.confirmTransaction(joinTx);
-              console.log(`✅ Creator successfully joined coinflip game: ${joinTx}`);
-
-              // Save creator as participant only AFTER successfully joining on-chain
-              this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
-
-              // Update the game message to reflect the new player count
-              await this.updateGameMessage(
-                ctx,
-                gamePda.toBase58(),
-                gameType.charAt(0).toUpperCase() + gameType.slice(1),
-                amount,
-                ctx.from?.username || "Unknown",
-                "Active",
-                tokenMint,
-                tokenTicker
-              );
-            } catch (joinConfirmError: any) {
-              console.warn(`⚠️ Join confirmation failed: ${joinConfirmError.message}`);
-
-              if (joinConfirmError.message?.includes('timeout') || joinConfirmError.message?.includes('not confirmed')) {
-                // Give a brief moment for the transaction to propagate
-                await new Promise(resolve => setTimeout(resolve, 1000));
-
-                try {
-                  // Check if player is actually in the game
-                  const isInGame = await this.isPlayerInGame(gamePda, playerKp.publicKey);
-                  if (isInGame) {
-                    console.log(`✅ Player join confirmed despite timeout - tx: ${joinTx}`);
-                    this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
-
-                    // Update the game message to reflect the new player count
-                    await this.updateGameMessage(
-                      ctx,
-                      gamePda.toBase58(),
-                      gameType.charAt(0).toUpperCase() + gameType.slice(1),
-                      amount,
-                      ctx.from?.username || "Unknown",
-                      "Active",
-                      tokenMint,
-                      tokenTicker
-                    );
-                  } else {
-                    throw joinConfirmError;
-                  }
-                } catch (checkError) {
-                  throw joinConfirmError;
-                }
-              } else {
-                throw joinConfirmError;
-              }
-            }
-          }
-        } catch (joinError: any) {
-          console.error(`❌ Failed to auto-join creator to coinflip game: ${joinError.message}`);
-          // Don't fail the entire game creation - just notify about the join failure
-          await ctx.reply(
-            `⚠️ <b>Game created successfully, but failed to auto-join creator!</b>\n\n` +
-            `Please manually join the game using the "🎮 Join" button.\n\n` +
-            `Error: ${joinError.message}`,
-            {
-              parse_mode: "HTML",
-              reply_to_message_id: ctx.message?.message_id
-            }
-          );
-        }
+        await this.handleCoinflipAutoJoin(ctx, gamePda, playerKp, telegramId, creatorPubkey, gameType, amount, tokenMint, tokenTicker);
       } else {
         console.log(`🎁 Giveaway game ${gamePda.toBase58()} created - creator not auto-joined`);
       }
@@ -808,9 +687,62 @@ export class GameManager {
     } catch (error: any) {
       console.error(`Error creating ${gameType} game:`, error);
       const userFriendlyError = formatUserFriendlyError(error, this.wallet);
-      await ctx.reply(userFriendlyError, {
-        reply_to_message_id: ctx.message?.message_id
-      });
+      await ctx.reply(userFriendlyError, { reply_to_message_id: ctx.message?.message_id });
+    }
+  }
+
+  private async handleCoinflipAutoJoin(
+    ctx: Context,
+    gamePda: PublicKey,
+    playerKp: anchor.web3.Keypair,
+    telegramId: bigint,
+    creatorPubkey: string,
+    gameType: string,
+    amount: number,
+    tokenMint: string,
+    tokenTicker: string
+  ): Promise<void> {
+    console.log(`🎮 Auto-joining creator to coinflip game ${gamePda.toBase58()}...`);
+
+    try {
+      const gameAccount = await this.program.account.game.fetch(gamePda);
+
+      let joinTx: string;
+      if (gameAccount.isPrivate) {
+        console.log(`🔐 Game is private, using authorized join...`);
+        const result = await this.joinPrivateGame(gamePda, playerKp, ctx.chat?.id || 0);
+        if (!result.success) {
+          throw new Error(result.error || "Failed to join private game");
+        }
+        joinTx = result.tx!;
+      } else {
+        console.log(`🌐 Game is public, using regular join...`);
+        const joinInstruction = await this.program.methods
+          .joinGame()
+          .accounts({
+            game: gamePda,
+            player: playerKp.publicKey,
+          })
+          .instruction();
+        joinTx = await this.wallet.sendTransaction([joinInstruction], [playerKp]);
+      }
+
+      // Confirm join with timeout recovery
+      const joinConfirmed = await this.confirmTransactionWithRecovery(joinTx, gamePda, "Player join", playerKp.publicKey);
+
+      if (joinConfirmed) {
+        this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
+        await this.updateGameMessage(ctx, gamePda.toBase58(), gameType.charAt(0).toUpperCase() + gameType.slice(1), amount, ctx.from?.username || "Unknown", "Active", tokenMint, tokenTicker);
+      }
+
+    } catch (joinError: any) {
+      console.error(`❌ Failed to auto-join creator to coinflip game: ${joinError.message}`);
+      await ctx.reply(
+        `⚠️ <b>Game created successfully, but failed to auto-join creator!</b>\n\n` +
+        `Please manually join the game using the "🎮 Join" button.\n\n` +
+        `Error: ${joinError.message}`,
+        { parse_mode: "HTML", reply_to_message_id: ctx.message?.message_id }
+      );
     }
   }
 

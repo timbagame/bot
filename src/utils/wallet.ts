@@ -320,9 +320,9 @@ export class WalletManager {
   public async confirmTransaction(signature: string): Promise<void> {
     const startTime = Date.now();
     const timeout = CONFIRMATION_TIMEOUT_MS;
-    const pollInterval = 1000; // Poll every 1 second
+    const pollInterval = 1000;
 
-    console.log(`🔍 Starting confirmation for transaction ${signature.slice(0, 8)}... (timeout: ${timeout}ms)`);
+    console.log(`🔍 Confirming transaction ${signature.slice(0, 8)}... (timeout: ${timeout}ms)`);
 
     while (Date.now() - startTime < timeout) {
       try {
@@ -334,28 +334,20 @@ export class WalletManager {
             throw new Error(`Transaction failed: ${JSON.stringify(result.value.err)}`);
           }
 
-          // If confirmationStatus is 'confirmed' or 'finalized', the transaction succeeded
-          if (result.value.confirmationStatus === 'confirmed' ||
-              result.value.confirmationStatus === 'finalized') {
-            console.log(`✅ Transaction ${signature.slice(0, 8)}... confirmed in ${Date.now() - startTime}ms with status: ${result.value.confirmationStatus}`);
+          if (result.value.confirmationStatus === 'confirmed' || result.value.confirmationStatus === 'finalized') {
+            console.log(`✅ Transaction ${signature.slice(0, 8)}... confirmed in ${Date.now() - startTime}ms`);
             return;
           }
 
-          // Log current status if it exists but isn't confirmed yet
           if (result.value.confirmationStatus) {
-            console.log(`⏳ Transaction ${signature.slice(0, 8)}... status: ${result.value.confirmationStatus} (${Date.now() - startTime}ms elapsed)`);
+            console.log(`⏳ Transaction ${signature.slice(0, 8)}... status: ${result.value.confirmationStatus}`);
           }
-        } else {
-          // Transaction not found yet
-          console.log(`🔄 Transaction ${signature.slice(0, 8)}... not found yet (${Date.now() - startTime}ms elapsed)`);
         }
 
-        // Wait before next poll
         await new Promise(resolve => setTimeout(resolve, pollInterval));
       } catch (error: any) {
-        // If it's a network error, continue polling
         if (error.message?.includes('429') || error.message?.includes('timeout')) {
-          console.warn(`⚠️ Network issue checking ${signature.slice(0, 8)}..., retrying in ${pollInterval * 2}ms`);
+          console.warn(`⚠️ Network issue checking ${signature.slice(0, 8)}..., retrying`);
           await new Promise(resolve => setTimeout(resolve, pollInterval * 2));
           continue;
         }
@@ -366,16 +358,10 @@ export class WalletManager {
 
     // Final check before giving up
     try {
-      console.log(`🔍 Final check for transaction ${signature.slice(0, 8)}... before timeout`);
       const finalResult = await this.connection.getSignatureStatus(signature);
-      if (finalResult?.value?.confirmationStatus === 'confirmed' ||
-          finalResult?.value?.confirmationStatus === 'finalized') {
-        console.log(`✅ Transaction ${signature.slice(0, 8)}... confirmed on final check with status: ${finalResult.value.confirmationStatus}`);
+      if (finalResult?.value?.confirmationStatus === 'confirmed' || finalResult?.value?.confirmationStatus === 'finalized') {
+        console.log(`✅ Transaction ${signature.slice(0, 8)}... confirmed on final check`);
         return;
-      }
-
-      if (finalResult?.value) {
-        console.log(`⏳ Final status for ${signature.slice(0, 8)}...: ${finalResult.value.confirmationStatus || 'unknown'}`);
       }
     } catch (error) {
       console.warn(`⚠️ Error on final check for ${signature.slice(0, 8)}...:`, error);
@@ -386,18 +372,7 @@ export class WalletManager {
   }
 
   /**
-   * Unified transaction method - ALWAYS uses raw instructions + VersionedTransaction
-   *
-   * Why this approach is clean and consistent:
-   * - Single transaction path through the entire codebase
-   * - Always uses modern VersionedTransaction format
-   * - No type checking or branching logic needed
-   * - Predictable behavior and easier to debug
-   * - Future-proof with Solana's latest standards
-   *
-   * Usage: Extract instructions from Anchor methods using .instruction()
-   * Example: const ix = await program.methods.doSomething().instruction()
-   *          await wallet.sendTransaction([ix], [signer])
+   * Unified transaction method using VersionedTransaction for all operations
    */
   public async sendTransaction(
     instructions: TransactionInstruction[],
@@ -409,10 +384,7 @@ export class WalletManager {
       throw new Error("No signers provided");
     }
 
-    // Get fresh blockhash
     const latestBlockhash = await this.connection.getLatestBlockhash('confirmed');
-
-    // Always use VersionedTransaction for consistency
     const message = new TransactionMessage({
       payerKey: signers[0]!.publicKey,
       recentBlockhash: latestBlockhash.blockhash,
@@ -430,7 +402,7 @@ export class WalletManager {
       });
     });
 
-    console.log(`Transaction sent: ${signature.slice(0, 8)}... using blockhash ${latestBlockhash.blockhash.slice(0, 8)}...`);
+    console.log(`📤 Transaction sent: ${signature.slice(0, 8)}...`);
     return signature;
   }
 
