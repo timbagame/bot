@@ -251,6 +251,13 @@ export class GameManager {
       const participants = this.gameDb.getGameParticipants(gamePda.toBase58());
       currentPlayers = participants.length;
 
+      // Get maxPlayers and minPlayers from database for completed games
+      const gameData = this.gameDb.getGame(gamePda.toBase58());
+      if (gameData) {
+        maxPlayers = gameData.max_players || 2;
+        minPlayers = gameData.min_players || 1;
+      }
+
       if (participants.length > 0) {
         playerInfo = "\n";
         for (const telegramId of participants) {
@@ -291,6 +298,13 @@ export class GameManager {
           status = "completed";
           const participants = this.gameDb.getGameParticipants(gamePda.toBase58());
           currentPlayers = participants.length;
+
+          // Get maxPlayers and minPlayers from database for completed games
+          const gameData = this.gameDb.getGame(gamePda.toBase58());
+          if (gameData) {
+            maxPlayers = gameData.max_players || 2;
+            minPlayers = gameData.min_players || 1;
+          }
 
           if (participants.length > 0) {
             playerInfo = "\n";
@@ -640,7 +654,7 @@ export class GameManager {
       this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
 
       // Save game with token information
-      this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker);
+      this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker, maxPlayers, minPlayers);
 
       await this.createGameMessage(
         ctx,

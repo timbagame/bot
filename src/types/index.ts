@@ -18,6 +18,8 @@ export interface GameData {
   chat_id?: number;
   token_mint?: string;
   token_ticker?: string;
+  max_players?: number;
+  min_players?: number;
 }
 
 export interface PlayerMapping {
