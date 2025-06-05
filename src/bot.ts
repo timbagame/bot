@@ -310,10 +310,19 @@ const replyUsageError = async (ctx: Context, message: string): Promise<void> => 
 const initializeAnchorProvider = async () => {
   const adminKeypair = wallet.getAdminKeypair();
   const adminWallet = new anchor.Wallet(adminKeypair);
+
+  // Configure connection with longer timeouts
+  const connection = wallet.getConnection();
+
   const provider = new anchor.AnchorProvider(
-    wallet.getConnection(),
+    connection,
     adminWallet,
-    { commitment: "confirmed" }
+    {
+      commitment: "confirmed",
+      preflightCommitment: "confirmed",
+      skipPreflight: false,
+      maxRetries: 3
+    }
   );
 
   anchor.setProvider(provider);
@@ -581,7 +590,7 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
             toPubkey: toAddress,
             lamports: parsed.data!.amount,
           });
-          return await wallet.signAndSend([transferSolIx], [playerData.keypair]);
+          return await wallet.sendTransaction([transferSolIx], [playerData.keypair]);
         } else {
           return await wallet.transferToken(telegramId, toAddress, parsed.data!.amount, parsed.data!.tokenMint);
         }
@@ -637,7 +646,7 @@ bot.command("tip", async (ctx: Context) => {
             toPubkey: recipientPubKey,
             lamports: parsed.data!.amount,
           });
-          return await wallet.signAndSend([transferSolIx], [playerData.keypair]);
+          return await wallet.sendTransaction([transferSolIx], [playerData.keypair]);
         } else {
           return await wallet.transferToken(telegramId, recipientPubKey, parsed.data!.amount, parsed.data!.tokenMint);
         }
@@ -684,7 +693,7 @@ bot.command("wrap", async (ctx: Context) => {
         const syncNativeIx = createSyncNativeInstruction(wsolAccount);
         const allInstructions = [...createAtaIx, transferSolIx, syncNativeIx];
 
-        return await wallet.signAndSend(allInstructions, [playerData.keypair]);
+        return await wallet.sendTransaction(allInstructions, [playerData.keypair]);
       }
     );
   } catch (error: any) {
@@ -1252,14 +1261,15 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
         return;
       }
     } else {
-      const tx = await program.methods
+      const joinInstruction = await program.methods
         .joinGame()
         .accounts({
           game: gamePda,
           player: playerKp.publicKey,
         })
-        .signers([playerKp])
-        .rpc();
+        .instruction();
+
+      const tx = await wallet.sendTransaction([joinInstruction], [playerKp]);
       await wallet.confirmTransaction(tx);
     }
 

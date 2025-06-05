@@ -314,44 +314,124 @@ export class WalletManager {
     );
 
     const allInstructions = [...fromInstructions, ...toInstructions, transferInstruction];
-    return await this.signAndSend(allInstructions, [fromKeypair]);
+    return await this.sendTransaction(allInstructions, [fromKeypair]);
   }
 
-  public async signAndSend(instructions: TransactionInstruction[], signers: Keypair[]): Promise<string> {
+  public async confirmTransaction(signature: string): Promise<void> {
+    const startTime = Date.now();
+    const timeout = CONFIRMATION_TIMEOUT_MS;
+    const pollInterval = 1000; // Poll every 1 second
+
+    console.log(`🔍 Starting confirmation for transaction ${signature.slice(0, 8)}... (timeout: ${timeout}ms)`);
+
+    while (Date.now() - startTime < timeout) {
+      try {
+        const result = await this.connection.getSignatureStatus(signature);
+
+        if (result?.value) {
+          if (result.value.err) {
+            console.error(`❌ Transaction ${signature.slice(0, 8)}... failed:`, result.value.err);
+            throw new Error(`Transaction failed: ${JSON.stringify(result.value.err)}`);
+          }
+
+          // If confirmationStatus is 'confirmed' or 'finalized', the transaction succeeded
+          if (result.value.confirmationStatus === 'confirmed' ||
+              result.value.confirmationStatus === 'finalized') {
+            console.log(`✅ Transaction ${signature.slice(0, 8)}... confirmed in ${Date.now() - startTime}ms with status: ${result.value.confirmationStatus}`);
+            return;
+          }
+
+          // Log current status if it exists but isn't confirmed yet
+          if (result.value.confirmationStatus) {
+            console.log(`⏳ Transaction ${signature.slice(0, 8)}... status: ${result.value.confirmationStatus} (${Date.now() - startTime}ms elapsed)`);
+          }
+        } else {
+          // Transaction not found yet
+          console.log(`🔄 Transaction ${signature.slice(0, 8)}... not found yet (${Date.now() - startTime}ms elapsed)`);
+        }
+
+        // Wait before next poll
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+      } catch (error: any) {
+        // If it's a network error, continue polling
+        if (error.message?.includes('429') || error.message?.includes('timeout')) {
+          console.warn(`⚠️ Network issue checking ${signature.slice(0, 8)}..., retrying in ${pollInterval * 2}ms`);
+          await new Promise(resolve => setTimeout(resolve, pollInterval * 2));
+          continue;
+        }
+        console.error(`❌ Error checking transaction status for ${signature.slice(0, 8)}...:`, error.message);
+        throw error;
+      }
+    }
+
+    // Final check before giving up
+    try {
+      console.log(`🔍 Final check for transaction ${signature.slice(0, 8)}... before timeout`);
+      const finalResult = await this.connection.getSignatureStatus(signature);
+      if (finalResult?.value?.confirmationStatus === 'confirmed' ||
+          finalResult?.value?.confirmationStatus === 'finalized') {
+        console.log(`✅ Transaction ${signature.slice(0, 8)}... confirmed on final check with status: ${finalResult.value.confirmationStatus}`);
+        return;
+      }
+
+      if (finalResult?.value) {
+        console.log(`⏳ Final status for ${signature.slice(0, 8)}...: ${finalResult.value.confirmationStatus || 'unknown'}`);
+      }
+    } catch (error) {
+      console.warn(`⚠️ Error on final check for ${signature.slice(0, 8)}...:`, error);
+    }
+
+    console.error(`⏰ Transaction confirmation timeout for ${signature.slice(0, 8)}... after ${timeout}ms`);
+    throw new Error(`Transaction confirmation timeout after ${timeout}ms. Transaction may still succeed - check signature ${signature}`);
+  }
+
+  /**
+   * Unified transaction method - ALWAYS uses raw instructions + VersionedTransaction
+   *
+   * Why this approach is clean and consistent:
+   * - Single transaction path through the entire codebase
+   * - Always uses modern VersionedTransaction format
+   * - No type checking or branching logic needed
+   * - Predictable behavior and easier to debug
+   * - Future-proof with Solana's latest standards
+   *
+   * Usage: Extract instructions from Anchor methods using .instruction()
+   * Example: const ix = await program.methods.doSomething().instruction()
+   *          await wallet.sendTransaction([ix], [signer])
+   */
+  public async sendTransaction(
+    instructions: TransactionInstruction[],
+    signers: Keypair[]
+  ): Promise<string> {
     await this.throttle();
 
     if (signers.length === 0) {
       throw new Error("No signers provided");
     }
 
-    const { blockhash } = await this.getLatestBlockhash();
+    // Get fresh blockhash
+    const latestBlockhash = await this.connection.getLatestBlockhash('confirmed');
+
+    // Always use VersionedTransaction for consistency
     const message = new TransactionMessage({
       payerKey: signers[0]!.publicKey,
-      recentBlockhash: blockhash,
-      instructions
+      recentBlockhash: latestBlockhash.blockhash,
+      instructions: instructions
     }).compileToV0Message();
 
     const tx = new VersionedTransaction(message);
     tx.sign(signers);
 
-    return await retryWithBackoff(async () => {
-      return await this.connection.sendTransaction(tx, { skipPreflight: true });
+    const signature = await retryWithBackoff(async () => {
+      return await this.connection.sendTransaction(tx, {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+        maxRetries: 3
+      });
     });
-  }
 
-  public async confirmTransaction(signature: string): Promise<void> {
-    const { blockhash, lastValidBlockHeight } = await this.getLatestBlockhash();
-
-    await Promise.race([
-      this.connection.confirmTransaction({
-        signature,
-        blockhash,
-        lastValidBlockHeight
-      }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Transaction confirmation timeout")), CONFIRMATION_TIMEOUT_MS)
-      )
-    ]);
+    console.log(`Transaction sent: ${signature.slice(0, 8)}... using blockhash ${latestBlockhash.blockhash.slice(0, 8)}...`);
+    return signature;
   }
 
   // ================================

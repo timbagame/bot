@@ -131,7 +131,7 @@ const initializeGameToken = async (program: anchor.Program<Coinflip>) => {
         );
 
         // Send the ATA creation transaction
-        const createAtaTx = await wallet.signAndSend([createAtaIx], [adminKeypair]);
+        const createAtaTx = await wallet.sendTransaction([createAtaIx], [adminKeypair]);
         await wallet.confirmTransaction(createAtaTx);
         console.log(`ATA created! Transaction: ${createAtaTx}`);
       } else {

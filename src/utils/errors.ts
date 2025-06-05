@@ -40,6 +40,27 @@ export const parseTransactionError = (error: any, walletManager?: WalletManager)
   const errorMessage = error.message || error.toString();
   const lowerMessage = errorMessage.toLowerCase();
 
+  // Handle transaction timeout specifically
+  if (lowerMessage.includes('transaction confirmation timeout') ||
+      lowerMessage.includes('transaction was not confirmed') ||
+      lowerMessage.includes('transactionexpiredtimeouterror')) {
+    // Try multiple patterns to extract the signature
+    let signatureMatch = errorMessage.match(/signature ([A-Za-z0-9]{44,})/);
+    if (!signatureMatch) {
+      signatureMatch = errorMessage.match(/Check signature ([A-Za-z0-9]{44,})/);
+    }
+    if (!signatureMatch) {
+      signatureMatch = errorMessage.match(/([A-Za-z0-9]{80,88})/); // Look for any signature-like string
+    }
+
+    const signature = signatureMatch ? signatureMatch[1] : '';
+
+    return `⏳ Transaction confirmation timed out!\n\n` +
+           `The transaction may have succeeded but confirmation took longer than expected.\n\n` +
+           `${signature ? `Use /checktx ${signature} to verify the transaction status.\n\n` : ''}` +
+           `💡 This can happen during network congestion. Please check the transaction status before retrying.`;
+  }
+
   // Check for specific lamports info first
   const lamportsInfo = extractLamportsInfo(errorMessage);
   if (lamportsInfo) {
