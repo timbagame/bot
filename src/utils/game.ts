@@ -706,10 +706,14 @@ export class GameManager {
         return false; // Don't cancel, let oracle complete
       }
 
+      // Determine game type
+      const gameType = this.getGameType(gameAccount);
+      console.log(`🔄 Processing expired ${gameType} game ${gamePda.toBase58()} (${gameAccount.playerCount}/${gameAccount.maxPlayers})`);
+
       // Cancel the game if it doesn't have enough players
       if (creatorTelegramId === "orphaned") {
         // For orphaned games, try to cancel using player keys if available
-        const result = await this.cancelGameWithPlayerKeys(gamePda);
+        const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
         if (!result.success) {
           console.log(`Failed to cancel orphaned game with player keys: ${result.error}`);
           // Mark as completed since we can't process it
@@ -732,18 +736,67 @@ export class GameManager {
         };
       }
 
-      // For regular games, use creator cancellation
+      // For regular games, handle based on game type
       const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
+      let tx: string;
 
-      const tx = await this.program.methods
-        .cancelGame()
-        .accounts({
-          game: gamePda,
-          creator: gameAccount.creator,
-        })
-        .signers([creatorKp])
-        .rpc();
+      if (gameType === "coinflip") {
+        // For coinflip games, unjoin all players including creator first
+        console.log(`🪙 Coinflip cancellation: unjoining all players first`);
 
+        // Get all participants from database
+        const participants = this.getGamePlayers(gamePda.toBase58());
+        let allPlayersUnjoined = true;
+
+        // Unjoin all players including creator
+        for (const telegramId of participants) {
+          try {
+            const playerPubkey = this.gameDb.getPlayerPublicKey(telegramId);
+            if (playerPubkey) {
+              const playerKp = this.wallet.getKeyPair(BigInt(telegramId));
+              await this.unjoinPlayerFromGame(gamePda, playerKp, new PublicKey(playerPubkey));
+              console.log(`➡️ Unjoined player ${playerPubkey.slice(0, 8)}... from coinflip`);
+            } else {
+              console.error(`No public key found for player ${telegramId}`);
+              allPlayersUnjoined = false;
+            }
+          } catch (error) {
+            console.error(`Failed to unjoin player ${telegramId}:`, error);
+            allPlayersUnjoined = false;
+            // Continue with other players but mark as failed
+          }
+        }
+
+        // Only proceed if all players were successfully unjoined
+        if (!allPlayersUnjoined) {
+          console.log(`❌ Could not unjoin all players from coinflip ${gamePda.toBase58()}, skipping cancellation`);
+          return false;
+        }
+
+        // Now cancel the empty game
+        tx = await this.program.methods
+          .cancelGame()
+          .accounts({
+            game: gamePda,
+            creator: gameAccount.creator,
+          })
+          .signers([creatorKp])
+          .rpc();
+      } else {
+        // For giveaway games, cancel directly without unjoining
+        console.log(`🎁 Giveaway cancellation: cancelling directly`);
+
+        tx = await this.program.methods
+          .cancelGame()
+          .accounts({
+            game: gamePda,
+            creator: gameAccount.creator,
+          })
+          .signers([creatorKp])
+          .rpc();
+      }
+
+      await this.wallet.confirmTransaction(tx);
       const completedAt = blockTime * 1000;
       this.gameDb.completeGame(gamePda.toBase58(), "cancelled", completedAt);
 
@@ -766,12 +819,12 @@ export class GameManager {
         const tokenTicker = gameData.token_ticker;
 
         const metadata = await this.wallet.getTokenMetadata(tokenMint);
-        const gameType = formatGameType(gameAccount.gameType);
+        const gameTypeFormatted = formatGameType(gameAccount.gameType);
         const amount = Number(gameAccount.amount);
         const playerCount = gameAccount.playerCount;
 
         await ctx.reply(
-          `❌ <b>${gameType} Cancelled!</b>\n\n` +
+          `❌ <b>${gameTypeFormatted} Cancelled!</b>\n\n` +
           `⏰ Game expired with insufficient players\n` +
           `💰 Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}\n` +
           `👥 Players: ${playerCount}/${gameAccount.maxPlayers}\n\n` +
@@ -783,6 +836,7 @@ export class GameManager {
         );
       }
 
+      console.log(`✅ Successfully cancelled expired ${gameType} ${gamePda.toBase58()}`);
       return {
         cancelled: true,
         amount: Number(gameAccount.amount),
@@ -844,21 +898,45 @@ export class GameManager {
   // PLAYER-BASED GAME CANCELLATION
   // ================================
 
-  public async cancelGameWithPlayerKeys(gamePda: PublicKey): Promise<{ success: boolean; tx?: string; error?: string }> {
+  public async cancelGameWithPlayerKeys(gamePda: PublicKey, gameType: string): Promise<{ success: boolean; tx?: string; error?: string }> {
     try {
       const gameAccount = await this.program.account.game.fetch(gamePda);
-      console.log(`Attempting to cancel game ${gamePda.toBase58()} using player keys`);
+      console.log(`Attempting to cancel ${gameType} game ${gamePda.toBase58()} using player keys`);
 
-      // Get players from database since the contract no longer stores players array
-      const participants = this.getGamePlayers(gamePda.toBase58());
-      const nonCreatorPlayers = participants.filter(telegramId => {
-        const publicKey = this.gameDb.getPlayerPublicKey(telegramId);
-        return publicKey !== gameAccount.creator.toBase58();
-      });
+      // For coinflip games, unjoin all players first
+      if (gameType === "coinflip") {
+        // Get players from database since the contract no longer stores players array
+        const participants = this.getGamePlayers(gamePda.toBase58());
 
-      if (nonCreatorPlayers.length > 0) {
-        console.log(`Game has ${nonCreatorPlayers.length} non-creator players, unjoining them first`);
-        await this.unjoinAllPlayersWithKeys(gamePda, gameAccount);
+        if (participants.length > 0) {
+          console.log(`Coinflip has ${participants.length} players, unjoining all of them first`);
+          let allPlayersUnjoined = true;
+
+          // Unjoin all players including creator
+          for (const telegramId of participants) {
+            try {
+              const playerPubkey = this.gameDb.getPlayerPublicKey(telegramId);
+              if (playerPubkey) {
+                const playerKp = this.wallet.getKeyPair(BigInt(telegramId));
+                await this.unjoinPlayerFromGame(gamePda, playerKp, new PublicKey(playerPubkey));
+                console.log(`➡️ Unjoined player ${playerPubkey.slice(0, 8)}... from coinflip`);
+              } else {
+                console.error(`No public key found for player ${telegramId}`);
+                allPlayersUnjoined = false;
+              }
+            } catch (error) {
+              console.error(`Failed to unjoin player ${telegramId}:`, error);
+              allPlayersUnjoined = false;
+              // Continue with other players but mark as failed
+            }
+          }
+
+          // Only proceed if all players were successfully unjoined
+          if (!allPlayersUnjoined) {
+            console.log(`❌ Could not unjoin all players from coinflip ${gamePda.toBase58()}, skipping cancellation`);
+            return { success: false, error: "Could not unjoin all players from coinflip game" };
+          }
+        }
       }
 
       // Now cancel the game using creator's key
@@ -882,46 +960,12 @@ export class GameManager {
         .rpc();
 
       await this.wallet.confirmTransaction(tx);
-      console.log(`Successfully cancelled game ${gamePda.toBase58()} with tx: ${tx}`);
+      console.log(`Successfully cancelled ${gameType} game ${gamePda.toBase58()} with tx: ${tx}`);
 
       return { success: true, tx };
     } catch (error: any) {
-      console.error(`Error cancelling game with player keys ${gamePda.toBase58()}:`, error);
+      console.error(`Error cancelling ${gameType} game with player keys ${gamePda.toBase58()}:`, error);
       return { success: false, error: error.message };
-    }
-  }
-
-  private async unjoinAllPlayersWithKeys(gamePda: PublicKey, gameAccount: any): Promise<void> {
-    // Get players from database
-    const participants = this.getGamePlayers(gamePda.toBase58());
-
-    for (const telegramId of participants) {
-      try {
-        // Get the public key for this telegram ID
-        const playerPubkey = this.gameDb.getPlayerPublicKey(telegramId);
-        if (!playerPubkey) {
-          console.log(`No public key found for telegram ID ${telegramId}, skipping unjoin`);
-          continue;
-        }
-
-        const playerPublicKey = new PublicKey(playerPubkey);
-
-        // Skip the creator - they can cancel with players in the game
-        if (playerPublicKey.equals(gameAccount.creator)) {
-          console.log(`Skipping creator ${playerPublicKey.toBase58()} - they can cancel with players`);
-          continue;
-        }
-
-        console.log(`Unjoining player ${playerPublicKey.toBase58()} from game ${gamePda.toBase58()}`);
-
-        const playerKp = this.wallet.getKeyPair(BigInt(telegramId));
-        await this.unjoinPlayerFromGame(gamePda, playerKp, playerPublicKey);
-        console.log(`Successfully unjoined player ${playerPublicKey.toBase58()}`);
-
-      } catch (error) {
-        console.error(`Failed to unjoin player ${telegramId}:`, error);
-        // Continue with other players even if one fails
-      }
     }
   }
 
@@ -1258,10 +1302,16 @@ export class GameManager {
   }
 
   private async executeCompleteCleanup(gamePda: PublicKey, gameAccount: any, playerKeyInfo: any, address: string): Promise<boolean> {
-    console.log(`🔧 Strategy 1: Complete cleanup - unjoin ${playerKeyInfo.nonCreators.length} non-creators, then cancel`);
+    console.log(`🔧 Strategy 1: Complete cleanup - unjoin all ${playerKeyInfo.available.length} players, then cancel`);
 
-    // Unjoin all non-creator players
-    await this.unjoinPlayers(gamePda, playerKeyInfo.nonCreators);
+    // Unjoin ALL players including creator for coinflip games
+    const unjoinedCount = await this.unjoinPlayers(gamePda, playerKeyInfo.available);
+
+    // Only proceed if all players were successfully unjoined
+    if (unjoinedCount !== playerKeyInfo.available.length) {
+      console.log(`❌ Could only unjoin ${unjoinedCount}/${playerKeyInfo.available.length} players from coinflip ${address}, skipping cancellation`);
+      return false;
+    }
 
     // Cancel with creator
     return await this.cancelGameWithCreator(
