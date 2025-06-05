@@ -127,15 +127,15 @@ const claimWinnings = async (playerKp: anchor.web3.Keypair): Promise<number> => 
 
     if (claimableAmount <= 0) return 0;
 
-    const tx = await program.methods
+    const withdrawInstruction = await program.methods
       .withdrawPlayerBalance()
       .accounts({
         player: playerKp.publicKey,
         tokenMint: new PublicKey(DEFAULT_TOKEN_MINT),
       })
-      .signers([playerKp])
-      .rpc();
+      .instruction();
 
+    const tx = await wallet.sendTransaction([withdrawInstruction], [playerKp]);
     await wallet.confirmTransaction(tx);
     return claimableAmount;
   } catch (error: any) {
@@ -244,15 +244,15 @@ const cleanupPlayerParticipation = async (
         const playerKp = wallet.getKeyPair(BigInt(telegramId));
 
         // Execute cleanup instruction directly (account should exist since game just completed)
-        const tx = await program.methods
+        const cleanupInstruction = await program.methods
           .cleanupPlayerParticipation()
           .accounts({
             game: gamePda,
             player: playerPubkeyObj,
           })
-          .signers([playerKp])
-          .rpc();
+          .instruction();
 
+        const tx = await wallet.sendTransaction([cleanupInstruction], [playerKp]);
         await wallet.confirmTransaction(tx);
         cleanupCount++;
 

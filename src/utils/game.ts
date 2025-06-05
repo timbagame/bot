@@ -167,15 +167,15 @@ export class GameManager {
       }
 
       // Initialize player balance
-      const tx = await this.program.methods
+      const initInstruction = await this.program.methods
         .initializePlayerBalance()
         .accounts({
           player: playerKeypair.publicKey,
           tokenMint: new PublicKey(tokenMint),
         })
-        .signers([playerKeypair])
-        .rpc();
+        .instruction();
 
+      const tx = await this.wallet.sendTransaction([initInstruction], [playerKeypair]);
       await this.wallet.confirmTransaction(tx);
       return playerBalancePda;
     }
@@ -857,26 +857,28 @@ export class GameManager {
         }
 
         // Now cancel the empty game
-        tx = await this.program.methods
+        const cancelInstruction = await this.program.methods
           .cancelGame()
           .accounts({
             game: gamePda,
             creator: gameAccount.creator,
           })
-          .signers([creatorKp])
-          .rpc();
+          .instruction();
+
+        tx = await this.wallet.sendTransaction([cancelInstruction], [creatorKp]);
       } else {
         // For giveaway games, cancel directly without unjoining
         console.log(`🎁 Giveaway cancellation: cancelling directly`);
 
-        tx = await this.program.methods
+        const cancelInstruction = await this.program.methods
           .cancelGame()
           .accounts({
             game: gamePda,
             creator: gameAccount.creator,
           })
-          .signers([creatorKp])
-          .rpc();
+          .instruction();
+
+        tx = await this.wallet.sendTransaction([cancelInstruction], [creatorKp]);
       }
 
       await this.wallet.confirmTransaction(tx);
@@ -1033,15 +1035,15 @@ export class GameManager {
 
       const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
 
-      const tx = await this.program.methods
+      const cancelInstruction = await this.program.methods
         .cancelGame()
         .accounts({
           game: gamePda,
           creator: gameAccount.creator,
         })
-        .signers([creatorKp])
-        .rpc();
+        .instruction();
 
+      const tx = await this.wallet.sendTransaction([cancelInstruction], [creatorKp]);
       await this.wallet.confirmTransaction(tx);
       console.log(`Successfully cancelled ${gameType} game ${gamePda.toBase58()} with tx: ${tx}`);
 
@@ -1053,15 +1055,15 @@ export class GameManager {
   }
 
   private async unjoinPlayerFromGame(gamePda: PublicKey, playerKp: any, playerPubkey: PublicKey): Promise<void> {
-    const tx = await this.program.methods
+    const unjoinInstruction = await this.program.methods
       .unjoinGame()
       .accounts({
         game: gamePda,
         player: playerPubkey,
       })
-      .signers([playerKp])
-      .rpc();
+      .instruction();
 
+    const tx = await this.wallet.sendTransaction([unjoinInstruction], [playerKp]);
     await this.wallet.confirmTransaction(tx);
 
     // Remove participant from database tracking
@@ -1099,16 +1101,16 @@ export class GameManager {
       const adminKp = authResult.adminKeypair!;
       await this.ensurePlayerBalance(playerKp, tokenMint);
 
-      const tx = await this.program.methods
+      const joinInstruction = await this.program.methods
         .joinGame()
         .accounts({
           game: gamePda,
           player: playerKp.publicKey,
           authority: adminKp.publicKey,
         })
-        .signers([playerKp, adminKp])
-        .rpc();
+        .instruction();
 
+      const tx = await this.wallet.sendTransaction([joinInstruction], [playerKp, adminKp]);
       await this.wallet.confirmTransaction(tx);
       return { success: true, tx };
     } catch (error: any) {
@@ -1443,15 +1445,15 @@ export class GameManager {
       console.log(`🎁 Cancelling expired ${gameType} ${address} with creator key`);
       const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
 
-      const tx = await this.program.methods
+      const cancelInstruction = await this.program.methods
         .cancelGame()
         .accounts({
           game: gamePda,
           creator: gameAccount.creator,
         })
-        .signers([creatorKp])
-        .rpc();
+        .instruction();
 
+      const tx = await this.wallet.sendTransaction([cancelInstruction], [creatorKp]);
       await this.wallet.confirmTransaction(tx);
       console.log(`✅ Successfully cancelled expired ${gameType} ${address}`);
       return true;

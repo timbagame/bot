@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Coinflip } from "../idl/idlType";
 import idl from "../idl/idl.json";
+import { WalletManager } from "../src/utils/wallet";
 
 // ================================
 // CONFIGURATION
@@ -175,7 +176,7 @@ async function initializeGameToken() {
 
     // Initialize game token
     console.log('\n🔄 Initializing game token...');
-    const tx = await program.methods
+    const tokenInstruction = await program.methods
       .initializeToken({
         minAmount: new anchor.BN(1_000), // Minimum amount in lamports (0.001 token)
         enabled: true // Enabled
@@ -184,11 +185,12 @@ async function initializeGameToken() {
         tokenMint: timbaMint,
         authority: adminKeypair.publicKey,
       })
-      .signers([adminKeypair])
-      .rpc();
+      .instruction();
 
+    // Create wallet manager for transaction sending
+    const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
+    const tx = await wallet.sendTransaction([tokenInstruction], [adminKeypair]);
     console.log(`✅ Game token initialized successfully!`);
-    console.log(`📝 Transaction: ${tx}`);
 
     // Verify initialization
     console.log('\n🔍 Verifying initialization...');

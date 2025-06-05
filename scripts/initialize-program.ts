@@ -60,14 +60,14 @@ const initializeOracle = async (program: anchor.Program<Coinflip>) => {
       minTimeout: 300          // 5 minutes min timeout
     };
 
-    const tx = await program.methods
+    const oracleInstruction = await program.methods
       .initializeOracle(oracleConfig)
       .accounts({
         authority: adminKeypair.publicKey,
       })
-      .signers([adminKeypair])
-      .rpc();
+      .instruction();
 
+    const tx = await wallet.sendTransaction([oracleInstruction], [adminKeypair]);
     console.log(`Oracle initialized! Transaction: ${tx}`);
     return oraclePda;
   } catch (error) {
@@ -144,7 +144,7 @@ const initializeGameToken = async (program: anchor.Program<Coinflip>) => {
 
     // Now initialize Game Token
     console.log("Initializing game token...");
-    const tx = await program.methods
+    const tokenInstruction = await program.methods
       .initializeToken(
         new anchor.BN(1_000), // Minimum amount in lamports (0.001 token)
         true // Enabled
@@ -153,9 +153,9 @@ const initializeGameToken = async (program: anchor.Program<Coinflip>) => {
         tokenMint: tokenMintPubkey,
         authority: adminKeypair.publicKey,
       })
-      .signers([adminKeypair])
-      .rpc();
+      .instruction();
 
+    const tx = await wallet.sendTransaction([tokenInstruction], [adminKeypair]);
     await wallet.confirmTransaction(tx);
     console.log(`Game Token initialized! Transaction: ${tx}`);
     return gameTokenPda;

@@ -75,15 +75,15 @@ const updateOracle = async () => {
     console.log("\n🔄 Updating Oracle...");
 
     // Update oracle configuration
-    const tx = await program.methods
+    const updateInstruction = await program.methods
       .updateOracle(newConfig)
       .accounts({
         oldAuthority: adminKeypair.publicKey,
         newAuthority: adminKeypair.publicKey, // Same authority
       })
-      .signers([adminKeypair]) // Both old and new authority are the same
-      .rpc();
+      .instruction();
 
+    const tx = await wallet.sendTransaction([updateInstruction], [adminKeypair]);
     console.log(`✅ Oracle updated successfully!`);
     console.log(`Transaction: ${tx}`);
 
