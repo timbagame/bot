@@ -312,7 +312,15 @@ const checkGameTokenStatus = async () => {
       program.programId
     );
     const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
-    console.log(`Game token found with min amount: ${gameTokenAccount.minAmount.toString()}`);
+
+    // Get token metadata to format the amount properly
+    const metadata = await getTokenMetadata();
+    const formattedMinAmount = wallet.formatTokenBalance(
+      Number(gameTokenAccount.minAmount),
+      metadata.decimals
+    );
+
+    console.log(`Game token found with min amount: ${formattedMinAmount} ${DEFAULT_TOKEN_TICKER} (${gameTokenAccount.minAmount.toString()} raw units)`);
   } catch (error) {
     console.log("Game token not found, it might need to be initialized");
   }
