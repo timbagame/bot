@@ -329,8 +329,8 @@ const setupAnchor = async () => {
     tokenManager = TokenManager.getInstance(wallet, DEFAULT_TOKEN_MINT, DEFAULT_TOKEN_TICKER);
     console.log(`Initialized TokenManager with default token: ${DEFAULT_TOKEN_TICKER}`);
 
-    // Add common tokens to the database
-    await initializeCommonTokens();
+    // Add tokens list to the database
+    await initializeTokensList();
 
     gameManager = GameManager.getInstance(program, wallet, gameDb);
 
@@ -344,9 +344,9 @@ const setupAnchor = async () => {
   }
 };
 
-const initializeCommonTokens = async () => {
+const initializeTokensList = async () => {
   try {
-    console.log("Initializing common tokens...");
+    console.log("Initializing approved tokens...");
 
     // Add the default token first
     await tokenManager.addToken(DEFAULT_TOKEN_MINT, DEFAULT_TOKEN_TICKER);
@@ -357,16 +357,16 @@ const initializeCommonTokens = async () => {
       try {
         const success = await tokenManager.addToken(token.mint, token.ticker);
         if (success) {
-          console.log(`Added common token: ${token.ticker}`);
+          console.log(`Added approved token: ${token.ticker}`);
         }
       } catch (error) {
-        console.warn(`Could not add common token ${token.ticker}:`, error);
+        console.warn(`Could not add approved token ${token.ticker}:`, error);
       }
     }
 
     console.log(`Initialized token database with ${tokenDb.getTokenCount()} tokens`);
   } catch (error) {
-    console.warn("Error initializing common tokens:", error);
+    console.warn("Error initializing approved tokens:", error);
   }
 };
 
