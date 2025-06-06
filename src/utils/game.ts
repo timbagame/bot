@@ -1047,8 +1047,9 @@ export class GameManager {
       const gameAccount = await this.program.account.game.fetch(gamePda);
       console.log(`Attempting to cancel ${gameType} game ${gamePda.toBase58()} using player keys`);
 
-      // For coinflip, dumbflip, and snowball games, unjoin all players first
-      if (gameType === "coinflip" || gameType === "dumbflip" || gameType === "snowball") {
+      // For coinflip and dumbflip games, unjoin all players first
+      // For snowball games, we can't unjoin players once there are 2+, so skip unjoining
+      if (gameType === "coinflip" || gameType === "dumbflip") {
         // Get players from database since the contract no longer stores players array
         const participants = this.getGamePlayers(gamePda.toBase58());
 
@@ -1079,6 +1080,36 @@ export class GameManager {
           if (!allPlayersUnjoined) {
             console.log(`❌ Could not unjoin all players from ${gameType} ${gamePda.toBase58()}, skipping cancellation`);
             return { success: false, error: `Could not unjoin all players from ${gameType} game` };
+          }
+        }
+      }
+
+      // For snowball games with multiple players, we cannot unjoin them, so we skip the unjoin step
+      if (gameType === "snowball") {
+        const participants = this.getGamePlayers(gamePda.toBase58());
+        if (participants.length >= 2) {
+          console.log(`❄️ Snowball game has ${participants.length} players - cannot unjoin, proceeding directly to cancellation`);
+        } else if (participants.length === 1) {
+          // If only 1 player, we can unjoin them
+          const telegramId = participants[0];
+          if (!telegramId) {
+            console.error(`No telegram ID found for single player in snowball`);
+            return { success: false, error: `Player telegram ID not found for snowball game` };
+          }
+
+          try {
+            const playerPubkey = this.gameDb.getPlayerPublicKey(telegramId);
+            if (playerPubkey) {
+              const playerKp = this.wallet.getKeyPair(BigInt(telegramId));
+              await this.unjoinPlayerFromGame(gamePda, playerKp, new PublicKey(playerPubkey));
+              console.log(`➡️ Unjoined single player ${playerPubkey.slice(0, 8)}... from snowball`);
+            } else {
+              console.error(`No public key found for single player ${telegramId} in snowball`);
+              return { success: false, error: `Player public key not found for snowball game` };
+            }
+          } catch (error) {
+            console.error(`Failed to unjoin single player ${telegramId} from snowball:`, error);
+            return { success: false, error: `Could not unjoin single player from snowball game` };
           }
         }
       }
