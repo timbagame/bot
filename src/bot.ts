@@ -24,6 +24,7 @@ import {
 } from "./utils/constants";
 import type { PlayerData, GameCompletedEvent, PlayerJoinedEvent, PlayerUnjoinedEvent } from "./types";
 import { TokenDatabase } from "./utils/token-database";
+import { OracleClient } from "./utils/oracle";
 
 // ================================
 // GLOBAL INSTANCES
@@ -1284,30 +1285,86 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
     // For snowball games, if player is already in the game, roll the snowball instead
     if (isAlreadyInGame && gameData?.game_type === "snowball") {
       try {
-        // Execute roll snowball instruction
-        const rollInstruction = await program.methods
-          .rollSnowballGame()
-          .accounts({
-            game: gamePda,
-            player: playerKp.publicKey,
-          })
-          .instruction();
+        // Check if this is a private game and handle accordingly
+        if (gameAccount.isPrivate) {
+          // For private games, we need to authorize and include the authority
+          const oracleClient = OracleClient.getInstance(wallet);
+          const authResult = await oracleClient.authorizePlayer(gamePda, ctx.chat?.id || 0);
+          if (!authResult.authorized) {
+            await ctx.answerCallbackQuery(authResult.error || "Not authorized to roll this private snowball");
+            return;
+          }
 
-        const tx = await wallet.sendTransaction([rollInstruction], [playerKp]);
-        await wallet.confirmTransaction(tx);
+          const adminKp = authResult.adminKeypair!;
+          const rollInstruction = await program.methods
+            .rollSnowballGame()
+            .accounts({
+              game: gamePda,
+              player: playerKp.publicKey,
+              authority: adminKp.publicKey,
+            })
+            .instruction();
 
-        // Fetch updated game account to get the new totalPot
-        const updatedGameAccount = await program.account.game.fetch(gamePda);
-        const currentTotalPot = Number(updatedGameAccount.totalPot || 0);
+          const tx = await wallet.sendTransaction([rollInstruction], [playerKp, adminKp]);
 
-        // Update game message and show new expected winner with current totalPot
-        const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
-        const gameTypeKeys = Object.keys(gameAccount.gameType);
-        const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
-        const tokenTicker = gameData.token_ticker;
-        await gameManager.updateGameMessage(ctx, game.game_address, gameType, Number(game.amount), creatorUsername, "Active", tokenMint, tokenTicker, undefined, currentTotalPot);
+          // Respond immediately to avoid callback timeout
+          await ctx.answerCallbackQuery("🎲 Rolling private snowball...");
 
-        await ctx.answerCallbackQuery("🎲 Snowball rolled! The pot grows and the expected winner has changed! 🎯");
+          // Handle confirmation and updates asynchronously
+          (async () => {
+            try {
+              await wallet.confirmTransaction(tx);
+
+              // Fetch updated game account to get the new totalPot
+              const updatedGameAccount = await program.account.game.fetch(gamePda);
+              const currentTotalPot = Number(updatedGameAccount.totalPot || 0);
+
+              // Update game message and show new expected winner with current totalPot
+              const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
+              const gameTypeKeys = Object.keys(gameAccount.gameType);
+              const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
+              const tokenTicker = gameData.token_ticker || "TOKEN";
+              await gameManager.updateGameMessage(ctx, game.game_address, gameType, Number(game.amount), creatorUsername, "Active", tokenMint, tokenTicker, undefined, currentTotalPot);
+            } catch (error) {
+              console.error("Error confirming private snowball roll:", error);
+            }
+          })();
+        } else {
+          // For public games, no authority needed
+          const rollInstruction = await program.methods
+            .rollSnowballGame()
+            .accounts({
+              game: gamePda,
+              player: playerKp.publicKey,
+            })
+            .instruction();
+
+          const tx = await wallet.sendTransaction([rollInstruction], [playerKp]);
+
+          // Respond immediately to avoid callback timeout
+          await ctx.answerCallbackQuery("🎲 Rolling snowball...");
+
+          // Handle confirmation and updates asynchronously
+          (async () => {
+            try {
+              await wallet.confirmTransaction(tx);
+
+              // Fetch updated game account to get the new totalPot
+              const updatedGameAccount = await program.account.game.fetch(gamePda);
+              const currentTotalPot = Number(updatedGameAccount.totalPot || 0);
+
+              // Update game message and show new expected winner with current totalPot
+              const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
+              const gameTypeKeys = Object.keys(gameAccount.gameType);
+              const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
+              const tokenTicker = gameData.token_ticker || "TOKEN";
+              await gameManager.updateGameMessage(ctx, game.game_address, gameType, Number(game.amount), creatorUsername, "Active", tokenMint, tokenTicker, undefined, currentTotalPot);
+            } catch (error) {
+              console.error("Error confirming snowball roll:", error);
+            }
+          })();
+        }
+
         return;
       } catch (error: any) {
         const userFriendlyError = formatUserFriendlyError(error, wallet);
