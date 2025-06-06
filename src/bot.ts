@@ -864,11 +864,11 @@ bot.command("help", async (ctx: Context) => {
     "<b>🎮 Game Commands:</b>",
     "/coinflip &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Create a new coinflip game",
     "/cf &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Shorthand for coinflip command",
-    "/dumbflip &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Create a dumbflip game (shows expected winner)",
+    "/dumbflip &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Create a dumbflip game (shows expected winner, can roll)",
     "/df &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Shorthand for dumbflip command",
     "/giveaway &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Create a new giveaway",
     "/ga &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Shorthand for giveaway command",
-    "/snowball &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Create a snowball game (click join again to roll)",
+    "/snowball &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Create a snowball game (growing pot, can roll)",
     "/sb &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Shorthand for snowball command",
     "/active - Show your active games",
     "/games - Show your recent games",
@@ -886,6 +886,8 @@ bot.command("help", async (ctx: Context) => {
     "• Your player balance account will be automatically initialized when needed",
     "• Specify token after amount: /coinflip 100 TIMBA 2 or /tip 50 SOL",
     "• Group admins can set default tokens with /default &lt;TOKEN&gt;",
+    "• Only the last player who joined can unjoin (to maintain game order)",
+    "• Dumbflip and snowball games support rolling to change expected winner",
     "• Contact bot administrator to add support for new SPL tokens"
   ];
 
@@ -1170,18 +1172,29 @@ bot.on("callback_query", async (ctx) => {
         await handleJoinGame(ctx, gamePda, playerKp, telegramId, game);
         break;
       case "unjoin":
-        // Check if this is a snowball game and prevent unjoin if more than 1 player
+        // Implement "last player only" unjoin restriction for all game types
         const gameData = gameDb.getGame(gameAddress);
-        if (gameData?.game_type === "snowball") {
-          const gameAccount = await program.account.game.fetch(gamePda);
-          if (gameAccount.playersCount > 1) {
-            await ctx.answerCallbackQuery("❄️ Cannot leave snowball games once there are 2+ players!");
-            return;
-          }
+        const gameAccount = await program.account.game.fetch(gamePda);
+
+        // Special snowball restriction: cannot unjoin if 2+ players
+        if (gameData?.game_type === "snowball" && gameAccount.playersCount > 1) {
+          await ctx.answerCallbackQuery("❄️ Cannot leave snowball games once there are 2+ players!");
+          return;
         }
 
-        await gameManager.unjoinGame(ctx, gamePda, playerKp);
-        await ctx.answerCallbackQuery("Successfully unjoined the game!");
+        // General restriction: only last player can unjoin (to prevent index gaps)
+        // This will be enforced by the contract, but we can provide a user-friendly message
+        try {
+          await gameManager.unjoinGame(ctx, gamePda, playerKp);
+          await ctx.answerCallbackQuery("Successfully unjoined the game!");
+        } catch (error: any) {
+          if (error.message?.includes("OnlyLastPlayerCanUnjoin") || error.message?.includes("Only the last player can unjoin")) {
+            await ctx.answerCallbackQuery("❌ Only the last player who joined can unjoin to maintain game order!");
+          } else {
+            const userFriendlyError = formatUserFriendlyError(error, wallet);
+            await ctx.answerCallbackQuery(userFriendlyError.substring(0, 180));
+          }
+        }
         break;
       case "refresh":
         await handleRefreshGame(ctx, gamePda, game);
@@ -1284,8 +1297,8 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
       isAlreadyInGame = false;
     }
 
-    // For snowball games, if player is already in the game, roll the snowball instead
-    if (isAlreadyInGame && gameData?.game_type === "snowball") {
+    // For snowball and dumbflip games, if player is already in the game, roll instead
+    if (isAlreadyInGame && (gameData?.game_type === "snowball" || gameData?.game_type === "dumbflip")) {
       try {
         // Check if this is a private game and handle accordingly
         if (gameAccount.isPrivate) {
@@ -1310,7 +1323,8 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
           const tx = await wallet.sendTransaction([rollInstruction], [playerKp, adminKp]);
 
           // Respond immediately to avoid callback timeout
-          await ctx.answerCallbackQuery("🎲 Rolled the private snowball!");
+          const gameTypeName = gameData.game_type === "snowball" ? "snowball" : "dice";
+          await ctx.answerCallbackQuery(`🎲 Rolled the private ${gameTypeName}!`);
 
           // Handle confirmation and updates asynchronously
           (async () => {
@@ -1356,7 +1370,8 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
           const tx = await wallet.sendTransaction([rollInstruction], [playerKp]);
 
           // Respond immediately to avoid callback timeout
-          await ctx.answerCallbackQuery("🎲 Rolled the snowball!");
+          const gameTypeName = gameData.game_type === "snowball" ? "snowball" : "dice";
+          await ctx.answerCallbackQuery(`🎲 Rolled the ${gameTypeName}!`);
 
           // Handle confirmation and updates asynchronously
           (async () => {

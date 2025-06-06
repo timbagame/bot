@@ -339,8 +339,8 @@ export class GameManager {
     // Keyboard - only show buttons for active games
     const keyboard = [];
     if (status.toLowerCase() !== "completed") {
-      // Change button text for snowball games
-      const joinButtonText = gameType.toLowerCase() === "snowball" ? "❄️ Roll" : "🎮 Join";
+      // Change button text for snowball and dumbflip games
+      const joinButtonText = (gameType.toLowerCase() === "snowball" || gameType.toLowerCase() === "dumbflip") ? "🎲 Roll" : "🎮 Join";
 
       keyboard.push([
         { text: joinButtonText, callback_data: `join_${gamePda.toBase58()}` },
