@@ -621,9 +621,8 @@ export class GameManager {
         return;
       }
 
-      const { randomHash, gameAddress } = await this.oracleClient.generateGameSecrets(gameType);
+                  const { randomHash, secretKey } = await this.oracleClient.generateGameSecrets(gameType);
       const randomHashBuffer = this.oracleClient.hexToBuffer(randomHash);
-      const gamePda = new PublicKey(gameAddress);
 
       await this.ensurePlayerBalance(playerKp, tokenMint);
 
@@ -646,14 +645,27 @@ export class GameManager {
         .instruction();
 
       const tx = await this.wallet.sendTransaction([gameInstruction], [playerKp]);
+
+      // Listen for GameInitialized event to get the correct nonce and game address
+      const { gamePda, eventNonce } = await this.waitForGameInitializedEvent(tx, new PublicKey(tokenMint), randomHashBuffer);
+
+      console.log(`📍 Game address from event: ${gamePda.toBase58()} (nonce: ${eventNonce})`);
+
       const gameCreationConfirmed = await this.confirmTransactionWithRecovery(tx, gamePda, "Game creation");
 
       if (!gameCreationConfirmed) {
         throw new Error("Game creation could not be confirmed");
       }
 
-      // Save game and create message
+            // Save game and create message
       this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker, maxPlayers, minPlayers);
+
+      // Store secret key for dumbflip and snowball games with derived game address
+      if ((gameType === "dumbflip" || gameType === "snowball") && secretKey) {
+        this.gameDb.saveOracleSecretKey(gamePda.toBase58(), secretKey);
+        console.log(`🔐 Secret key stored for ${gameType} game`);
+      }
+
       await this.createGameMessage(ctx, gamePda.toBase58(), gameType.charAt(0).toUpperCase() + gameType.slice(1), amount, ctx.from?.username || "Unknown", tokenMint, tokenTicker, "Active", tx);
 
       // Auto-join logic based on game type
@@ -723,6 +735,52 @@ export class GameManager {
         { parse_mode: "HTML", reply_to_message_id: ctx.message?.message_id }
       );
     }
+  }
+
+  // ================================
+  // EVENT LISTENING
+  // ================================
+
+    /**
+   * Wait for GameInitialized event to get the correct nonce and derive game address
+   */
+  private async waitForGameInitializedEvent(
+    txSignature: string,
+    tokenMint: PublicKey,
+    randomHashBuffer: Buffer
+  ): Promise<{ gamePda: PublicKey; eventNonce: number }> {
+    console.log(`🔍 Waiting for GameInitialized event from tx: ${txSignature.slice(0, 8)}...`);
+
+    const maxWaitTime = 30000; // 30 seconds
+
+    return new Promise((resolve, reject) => {
+      // Set up one-time event listener for GameInitialized
+      const listener = this.program.addEventListener('gameInitialized', (event, _slot, signature) => {
+        try {
+          // Check if this event is from our transaction
+          if (signature === txSignature) {
+            const eventNonce = Number(event.nonce);
+            const gamePda = PDAManager.getGamePDA(tokenMint, randomHashBuffer, eventNonce, this.program.programId);
+
+            console.log(`✅ Received GameInitialized event with nonce: ${eventNonce}`);
+
+            // Remove the listener and resolve
+            this.program.removeEventListener(listener);
+            resolve({ gamePda, eventNonce });
+          }
+        } catch (error) {
+          console.error('Error processing GameInitialized event:', error);
+          this.program.removeEventListener(listener);
+          reject(error);
+        }
+      });
+
+      // Set timeout to cleanup if event never comes
+      setTimeout(() => {
+        this.program.removeEventListener(listener);
+        reject(new Error(`GameInitialized event not received within ${maxWaitTime}ms for tx: ${txSignature}`));
+      }, maxWaitTime);
+    });
   }
 
   // ================================

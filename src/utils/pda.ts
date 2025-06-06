@@ -27,8 +27,10 @@ export class PDAManager {
     return this.findPDA([this.SEEDS.ORACLE], programId);
   }
 
-  static getGamePDA(randomHash: Buffer, programId: PublicKey): PublicKey {
-    return this.findPDA([this.SEEDS.GAME, randomHash], programId);
+  static getGamePDA(tokenMint: PublicKey, randomHash: Buffer, nonce: number, programId: PublicKey): PublicKey {
+    const nonceBuffer = Buffer.alloc(8);
+    nonceBuffer.writeBigUInt64LE(BigInt(nonce), 0);
+    return this.findPDA([this.SEEDS.GAME, tokenMint, randomHash, nonceBuffer], programId);
   }
 
   static getPlayerBalancePDA(playerPubkey: PublicKey, tokenMint: PublicKey, programId: PublicKey): PublicKey {

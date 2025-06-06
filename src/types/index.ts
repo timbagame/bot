@@ -151,7 +151,6 @@ export interface AuthorizationResult {
 export interface OracleApiResponse {
   success: boolean;
   randomHash?: string;
-  gameAddress?: string;
   secretKey?: string;
   error?: string;
 }
