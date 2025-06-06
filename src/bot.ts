@@ -1296,12 +1296,16 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
         const tx = await wallet.sendTransaction([rollInstruction], [playerKp]);
         await wallet.confirmTransaction(tx);
 
-        // Update game message and show new expected winner
+        // Fetch updated game account to get the new totalPot
+        const updatedGameAccount = await program.account.game.fetch(gamePda);
+        const currentTotalPot = Number(updatedGameAccount.totalPot || 0);
+
+        // Update game message and show new expected winner with current totalPot
         const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
         const gameTypeKeys = Object.keys(gameAccount.gameType);
         const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
         const tokenTicker = gameData.token_ticker;
-        await gameManager.updateGameMessage(ctx, game.game_address, gameType, Number(game.amount), creatorUsername, "Active", tokenMint, tokenTicker);
+        await gameManager.updateGameMessage(ctx, game.game_address, gameType, Number(game.amount), creatorUsername, "Active", tokenMint, tokenTicker, undefined, currentTotalPot);
 
         await ctx.answerCallbackQuery("🎲 Snowball rolled! The pot grows and the expected winner has changed! 🎯");
         return;
@@ -1600,8 +1604,9 @@ setupAnchor().then(async () => {
     try {
       const gameAddress = event.gameKey.toString();
       const lastSlot = event.lastSlot.toString();
+      const totalPot = Number(event.totalPot);
 
-      console.log(`👤 PlayerJoined event: ${event.player.toString().slice(0, 8)}... joined game ${gameAddress.slice(0, 8)}... (lastSlot: ${lastSlot})`);
+      console.log(`👤 PlayerJoined event: ${event.player.toString().slice(0, 8)}... joined game ${gameAddress.slice(0, 8)}... (lastSlot: ${lastSlot}, totalPot: ${totalPot})`);
 
       // Update the lastSlot in database for winner calculation
       gameDb.updateGameLastSlot(gameAddress, lastSlot);
@@ -1628,7 +1633,9 @@ setupAnchor().then(async () => {
             creatorUsername,
             "Active",
             gameData.token_mint,
-            gameData.token_ticker
+            gameData.token_ticker,
+            undefined,
+            totalPot
           );
         }
       }
@@ -1643,8 +1650,9 @@ setupAnchor().then(async () => {
     try {
       const gameAddress = event.gameKey.toString();
       const lastSlot = event.lastSlot.toString();
+      const totalPot = Number(event.totalPot);
 
-      console.log(`👤 PlayerUnjoined event: ${event.player.toString().slice(0, 8)}... left game ${gameAddress.slice(0, 8)}... (lastSlot: ${lastSlot})`);
+      console.log(`👤 PlayerUnjoined event: ${event.player.toString().slice(0, 8)}... left game ${gameAddress.slice(0, 8)}... (lastSlot: ${lastSlot}, totalPot: ${totalPot})`);
 
       // Update the lastSlot in database for winner calculation
       gameDb.updateGameLastSlot(gameAddress, lastSlot);
@@ -1671,7 +1679,9 @@ setupAnchor().then(async () => {
             creatorUsername,
             "Active",
             gameData.token_mint,
-            gameData.token_ticker
+            gameData.token_ticker,
+            undefined,
+            totalPot
           );
         }
       }

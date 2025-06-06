@@ -233,7 +233,8 @@ export class GameManager {
     tokenMint: string,
     tokenTicker: string,
     winnerAddress?: string,
-    txHash?: string
+    txHash?: string,
+    providedTotalPot?: number
   ): Promise<GameMessageFormat> {
     const metadata = await this.wallet.getTokenMetadata(tokenMint);
 
@@ -241,6 +242,7 @@ export class GameManager {
     let currentPlayers = 0;
     let maxPlayers = 2;
     let minPlayers = 1;
+    let totalPot = providedTotalPot ?? amount; // Use provided totalPot if available, otherwise default to amount per player
     let playerInfo = "";
     let expirationInfo = "";
 
@@ -248,6 +250,9 @@ export class GameManager {
       // For completed games, use database info since the account is closed
       const participants = this.gameDb.getGameParticipants(gamePda.toBase58());
       currentPlayers = participants.length;
+      if (!providedTotalPot) {
+        totalPot = amount * currentPlayers; // Calculate total pot for completed games only if not provided
+      }
 
       // Get maxPlayers and minPlayers from database for completed games
       const gameData = this.gameDb.getGame(gamePda.toBase58());
@@ -270,6 +275,9 @@ export class GameManager {
         currentPlayers = gameAccount.playerCount;
         maxPlayers = gameAccount.maxPlayers;
         minPlayers = gameAccount.minPlayers;
+        if (!providedTotalPot) {
+          totalPot = Number(gameAccount.totalPot || 0) || (amount * currentPlayers); // Use totalPot from contract if available and not provided
+        }
 
         // Get player information from database since players array no longer exists in contract
         const participants = this.gameDb.getGameParticipants(gamePda.toBase58());
@@ -293,6 +301,9 @@ export class GameManager {
           status = "completed";
           const participants = this.gameDb.getGameParticipants(gamePda.toBase58());
           currentPlayers = participants.length;
+          if (!providedTotalPot) {
+            totalPot = amount * currentPlayers; // Calculate total pot for completed games only if not provided
+          }
 
           // Get maxPlayers and minPlayers from database for completed games
           const gameData = this.gameDb.getGame(gamePda.toBase58());
@@ -325,8 +336,14 @@ export class GameManager {
       }
     }
 
+    // Show amount per player and total pot
+    let amountDisplay = `💰 Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}`;
+    if (currentPlayers > 1 || totalPot !== amount) {
+      amountDisplay += `\n🎯 Total Pot: ${this.wallet.formatTokenBalance(totalPot, metadata.decimals)} ${tokenTicker}`;
+    }
+
     let messageText = `<b>🪙 ${gameType} Game</b>\n\n` +
-      `💰 Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}\n` +
+      `${amountDisplay}\n` +
       `👤 Creator: @${creatorUsername}\n` +
       `👥 Players: ${currentPlayers}/${maxPlayers}${playerInfo}`;
 
@@ -357,13 +374,22 @@ export class GameManager {
     // Keyboard - only show buttons for active games
     const keyboard = [];
     if (status.toLowerCase() !== "completed") {
+      // Change button text for snowball games
+      const joinButtonText = gameType.toLowerCase() === "snowball" ? "❄️ Roll" : "🎮 Join";
+
       keyboard.push([
-        { text: "🎮 Join", callback_data: `join_${gamePda.toBase58()}` },
+        { text: joinButtonText, callback_data: `join_${gamePda.toBase58()}` },
         { text: "🔄 Refresh", callback_data: `refresh_${gamePda.toBase58()}` }
       ]);
 
+      // For snowball games, hide unjoin button if 2+ players (since you can't unjoin)
+      // For other games, show unjoin button if there are any players
       if (currentPlayers > 0) {
-        keyboard[0]?.push({ text: "❌ Unjoin", callback_data: `unjoin_${gamePda.toBase58()}` });
+        if (gameType.toLowerCase() === "snowball" && currentPlayers >= 2) {
+          // Don't add unjoin button for snowball games with 2+ players
+        } else {
+          keyboard[0]?.push({ text: "❌ Unjoin", callback_data: `unjoin_${gamePda.toBase58()}` });
+        }
       }
     }
 
@@ -418,7 +444,8 @@ export class GameManager {
     status: string,
     tokenMint: string,
     tokenTicker: string,
-    winnerAddress?: string
+    winnerAddress?: string,
+    totalPot?: number
   ): Promise<void> {
     const gameMessage = this.activeGameMessages.get(gameAddress);
     if (!gameMessage) return;
@@ -433,7 +460,9 @@ export class GameManager {
         status,
         tokenMint,
         tokenTicker,
-        winnerAddress
+        winnerAddress,
+        undefined,
+        totalPot
       );
 
       try {
