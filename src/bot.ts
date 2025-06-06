@@ -16,6 +16,8 @@ import {
   GAME_TIMEOUT,
   COINFLIP_MAX_PLAYERS,
   GIVEAWAY_MAX_PLAYERS,
+  SNOWBALL_TIMEOUT,
+  SNOWBALL_MAX_PLAYERS,
   EXPIRED_GAMES_CHECK_INTERVAL_MS,
   TOKEN_METADATA_CACHE_DURATION,
   DEFAULT_TOKEN_MINT,
@@ -594,9 +596,9 @@ bot.command(["snowball", "sb"], async (ctx) => {
   // Check if token was specified to adjust maxPlayers index
   const tokenSpecified = parsed.data!.tokenWasSpecified;
   const maxPlayersIndex = tokenSpecified ? 3 : 2;
-  const maxPlayers = parseInt(args?.[maxPlayersIndex] || COINFLIP_MAX_PLAYERS.toString()) || COINFLIP_MAX_PLAYERS;
+  const maxPlayers = parseInt(args?.[maxPlayersIndex] || SNOWBALL_MAX_PLAYERS.toString()) || SNOWBALL_MAX_PLAYERS;
 
-  await gameManager.createGame(ctx, "snowball", parsed.data!, maxPlayers, 2, GAME_TIMEOUT);
+  await gameManager.createGame(ctx, "snowball", parsed.data!, maxPlayers, 2, SNOWBALL_TIMEOUT);
 });
 
 // ================================
