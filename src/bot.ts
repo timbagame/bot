@@ -1308,7 +1308,7 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
           const tx = await wallet.sendTransaction([rollInstruction], [playerKp, adminKp]);
 
           // Respond immediately to avoid callback timeout
-          await ctx.answerCallbackQuery("🎲 Rolling private snowball...");
+          await ctx.answerCallbackQuery("🎲 Rolled the private snowball!");
 
           // Handle confirmation and updates asynchronously
           (async () => {
@@ -1325,6 +1325,18 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
               const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
               const tokenTicker = gameData.token_ticker || "TOKEN";
               await gameManager.updateGameMessage(ctx, game.game_address, gameType, Number(game.amount), creatorUsername, "Active", tokenMint, tokenTicker, undefined, currentTotalPot);
+
+              // Send roll notification message
+              const rollerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
+              const metadata = await wallet.getTokenMetadata(tokenMint);
+              const gameMessage = gameManager.getActiveGameMessage(game.game_address);
+              await ctx.reply(
+                `❄️ @${rollerUsername} rolled the snowball! Total pot: ${wallet.formatTokenBalance(currentTotalPot, metadata.decimals)} ${tokenTicker}`,
+                {
+                  parse_mode: "HTML",
+                  reply_to_message_id: gameMessage?.messageId
+                }
+              );
             } catch (error) {
               console.error("Error confirming private snowball roll:", error);
             }
@@ -1342,7 +1354,7 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
           const tx = await wallet.sendTransaction([rollInstruction], [playerKp]);
 
           // Respond immediately to avoid callback timeout
-          await ctx.answerCallbackQuery("🎲 Rolling snowball...");
+          await ctx.answerCallbackQuery("🎲 Rolled the snowball!");
 
           // Handle confirmation and updates asynchronously
           (async () => {
@@ -1359,6 +1371,18 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
               const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
               const tokenTicker = gameData.token_ticker || "TOKEN";
               await gameManager.updateGameMessage(ctx, game.game_address, gameType, Number(game.amount), creatorUsername, "Active", tokenMint, tokenTicker, undefined, currentTotalPot);
+
+              // Send roll notification message
+              const rollerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
+              const metadata = await wallet.getTokenMetadata(tokenMint);
+              const gameMessage = gameManager.getActiveGameMessage(game.game_address);
+              await ctx.reply(
+                `❄️ @${rollerUsername} rolled the snowball! Total pot: ${wallet.formatTokenBalance(currentTotalPot, metadata.decimals)} ${tokenTicker}`,
+                {
+                  parse_mode: "HTML",
+                  reply_to_message_id: gameMessage?.messageId
+                }
+              );
             } catch (error) {
               console.error("Error confirming snowball roll:", error);
             }
