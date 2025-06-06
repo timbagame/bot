@@ -230,98 +230,61 @@ export class GameManager {
     amount: number,
     creatorUsername: string,
     status: string,
-    tokenMint: string,
+    _tokenMint: string,
     tokenTicker: string,
     winnerAddress?: string,
     txHash?: string,
     providedTotalPot?: number
   ): Promise<GameMessageFormat> {
-    const metadata = await this.wallet.getTokenMetadata(tokenMint);
-
-    let gameAccount: any;
-    let currentPlayers = 0;
-    let maxPlayers = 2;
-    let minPlayers = 1;
+    let currentPlayers: number = 0;
+    let maxPlayers: number = 2;
+    let minPlayers: number = 1;
     let totalPot = providedTotalPot ?? amount; // Use provided totalPot if available, otherwise default to amount per player
-    let playerInfo = "";
     let expirationInfo = "";
 
     if (status.toLowerCase() === "completed") {
-      // For completed games, use database info since the account is closed
-      const participants = this.gameDb.getGameParticipants(gamePda.toBase58());
-      currentPlayers = participants.length;
+      // For completed games, we might not have access to the game account
       if (!providedTotalPot) {
         totalPot = amount * currentPlayers; // Calculate total pot for completed games only if not provided
       }
-
-      // Get maxPlayers and minPlayers from database for completed games
-      const gameData = this.gameDb.getGame(gamePda.toBase58());
-      if (gameData) {
-        maxPlayers = gameData.max_players || 2;
-        minPlayers = gameData.min_players || 1;
-      }
-
-      if (participants.length > 0) {
-        playerInfo = "\n";
-        for (const telegramId of participants) {
-          const username = await this.getUsernameFromTelegramId(ctx, telegramId);
-          playerInfo += `• @${username}\n`;
-        }
-      }
+      currentPlayers = 0; // Will be set from the game data
+      maxPlayers = 0; // Will be set from the game data
+      minPlayers = 0; // Will be set from the game data
     } else {
-      // For active games, try to fetch the game account, but handle the case where it might be closed
+      // For active games, fetch current state from blockchain
       try {
-        gameAccount = await this.program.account.game.fetch(gamePda);
-        currentPlayers = gameAccount.playerCount;
+        const gameAccount = await this.program.account.game.fetch(gamePda);
+        currentPlayers = gameAccount.playersCount;
         maxPlayers = gameAccount.maxPlayers;
         minPlayers = gameAccount.minPlayers;
+
+        // If totalPot is not provided, use totalAmount from the game account or calculate it
         if (!providedTotalPot) {
-          totalPot = Number(gameAccount.totalPot || 0) || (amount * currentPlayers); // Use totalPot from contract if available and not provided
+          totalPot = Number(gameAccount.totalAmount || 0) || (amount * currentPlayers); // Use totalAmount from contract if available and not provided
         }
 
-        // Get player information from database since players array no longer exists in contract
-        const participants = this.gameDb.getGameParticipants(gamePda.toBase58());
-        if (participants.length > 0) {
-          playerInfo = "\n";
-          for (const telegramId of participants) {
-            const username = await this.getUsernameFromTelegramId(ctx, telegramId);
-            playerInfo += `• @${username}\n`;
-          }
-        }
+        // Calculate expiration time
+        const createdAt = Number(gameAccount.createdAt);
+        const timeout = Number(gameAccount.timeout);
+        const expiresAt = createdAt + timeout;
+        expirationInfo = await formatExpirationTime(expiresAt, this.wallet, "\n⏰ ");
+      } catch (error) {
+        console.warn(`Warning: Could not fetch game account for ${gamePda.toBase58()}:`, error);
+        currentPlayers = 0;
+        maxPlayers = 0;
+        minPlayers = 0;
+      }
+    }
 
-        // Add expiration info for active games
-        const expiresAt = Number(gameAccount.expiresAt);
-        expirationInfo = "\n" + await formatExpirationTime(expiresAt, this.wallet);
-      } catch (error: any) {
-        // If we can't fetch the account, it's likely been closed due to completion
-        if (error.message?.includes('Account does not exist')) {
-          console.log(`Game account ${gamePda.toBase58()} no longer exists, likely completed`);
+    if (status.toLowerCase() === "completed") {
+      // For completed games where we don't have game account access, get player count from participants
+      const participants = this.getGamePlayers(gamePda.toBase58());
+      currentPlayers = participants.length;
+      maxPlayers = currentPlayers; // Set max to current for display purposes
+      minPlayers = currentPlayers; // Set min to current for display purposes
 
-          // Update the status to completed and use database info
-          status = "completed";
-          const participants = this.gameDb.getGameParticipants(gamePda.toBase58());
-          currentPlayers = participants.length;
-          if (!providedTotalPot) {
-            totalPot = amount * currentPlayers; // Calculate total pot for completed games only if not provided
-          }
-
-          // Get maxPlayers and minPlayers from database for completed games
-          const gameData = this.gameDb.getGame(gamePda.toBase58());
-          if (gameData) {
-            maxPlayers = gameData.max_players || 2;
-            minPlayers = gameData.min_players || 1;
-          }
-
-          if (participants.length > 0) {
-            playerInfo = "\n";
-            for (const telegramId of participants) {
-              const username = await this.getUsernameFromTelegramId(ctx, telegramId);
-              playerInfo += `• @${username}\n`;
-            }
-          }
-        } else {
-          throw error; // Re-throw if it's a different error
-        }
+      if (!providedTotalPot) {
+        totalPot = amount * currentPlayers; // Calculate total pot for completed games only if not provided
       }
     }
 
@@ -337,17 +300,17 @@ export class GameManager {
     }
 
     // Show amount per player and total pot
-    let amountDisplay = `💰 Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}`;
+    let amountDisplay = `💰 Amount: ${this.wallet.formatTokenBalance(amount, 9)} ${tokenTicker}`;
     // For snowball games, always show total pot since it's a growing pot concept
     // For other games, only show total pot when there are multiple players or when totalPot != amount
     if (gameType.toLowerCase() === "snowball" || currentPlayers > 1 || totalPot !== amount) {
-      amountDisplay += `\n🎯 Total Pot: ${this.wallet.formatTokenBalance(totalPot, metadata.decimals)} ${tokenTicker}`;
+      amountDisplay += `\n🎯 Total Pot: ${this.wallet.formatTokenBalance(totalPot, 9)} ${tokenTicker}`;
     }
 
     let messageText = `<b>🪙 ${gameType} Game</b>\n\n` +
       `${amountDisplay}\n` +
       `👤 Creator: @${creatorUsername}\n` +
-      `👥 Players: ${currentPlayers}/${maxPlayers}${playerInfo}`;
+      `👥 Players: ${currentPlayers}/${maxPlayers}${expirationInfo}`;
 
     if (status.toLowerCase() !== "completed") {
       let statusText: string;
@@ -495,6 +458,8 @@ export class GameManager {
   public async getGameInfo(ctx: Context, gamePda: PublicKey): Promise<string> {
     try {
       const gameAccount = await this.program.account.game.fetch(gamePda);
+      const amount = Number(gameAccount.ticketAmount);
+      const currentPlayers = gameAccount.playersCount;
 
       // Get token info from database
       const gameData = this.gameDb.getGame(gamePda.toBase58());
@@ -507,9 +472,7 @@ export class GameManager {
 
       const metadata = await this.wallet.getTokenMetadata(tokenMint);
 
-      const amount = Number(gameAccount.amount);
       const maxPlayers = gameAccount.maxPlayers;
-      const currentPlayers = gameAccount.playerCount;
       const creatorPubkey = gameAccount.creator.toString();
       const gameType = formatGameType(gameAccount.gameType);
 
@@ -519,7 +482,7 @@ export class GameManager {
         : `<code>${creatorPubkey.slice(0, ADDRESS_DISPLAY_LENGTH)}...</code>`;
 
       // Add expiration info
-      const expiresAt = Number(gameAccount.expiresAt);
+      const expiresAt = Number(gameAccount.createdAt) + Number(gameAccount.timeout);
       const expirationInfo = "\n" + await formatExpirationTime(expiresAt, this.wallet);
 
       let winnerInfo = "";
@@ -540,43 +503,26 @@ export class GameManager {
   // Helper method to get game info for completed games from database
   public async getCompletedGameInfo(ctx: Context, gameData: any): Promise<string> {
     try {
-      // Use token info from the game data
-      if (!gameData.token_mint || !gameData.token_ticker) {
-        return `Error: Game token information not found`;
-      }
+      const winnerUsername = await this.getPlayerUsername(ctx, gameData.winner_address);
+      const creatorUsername = await this.getUsernameFromTelegramId(ctx, gameData.creator_telegram_id);
+      const amount = Number(gameData.amount);
+      const playerCount = gameData.max_players || 2;
 
-      const tokenMint = gameData.token_mint;
-      const tokenTicker = gameData.token_ticker;
+      const gameTypeText = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
 
-      const metadata = await this.wallet.getTokenMetadata(tokenMint);
-
-      // For completed games, use stored game type from database
-      const participants = this.gameDb.getGameParticipants(gameData.game_address);
-      const gameType = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
-
-      const creatorTelegramId = gameData.creator_telegram_id;
-      const creatorInfo = creatorTelegramId
-        ? `@${await this.getUsernameFromTelegramId(ctx, creatorTelegramId)}`
-        : "Unknown";
-
-      let winnerInfo = "";
-      if (gameData.winner_address && gameData.winner_address !== "cancelled" && gameData.winner_address !== DEFAULT_NULL_ADDRESS) {
-        const winnerUsername = await this.getPlayerUsername(ctx, gameData.winner_address);
-        winnerInfo = `\nWinner: @${winnerUsername}`;
-      } else if (gameData.winner_address === "cancelled") {
-        winnerInfo = `\nStatus: Cancelled`;
-      }
-
-      // Add expiration info
-      const expiresAt = Number(gameData.expiresAt);
-      const expirationInfo = "\n" + await formatExpirationTime(expiresAt, this.wallet);
-
-      return `Type: ${gameType}\n` +
-             `Amount: ${this.wallet.formatTokenBalance(gameData.amount, metadata.decimals)} ${tokenTicker}\n` +
-             `Creator: ${creatorInfo}\n` +
-             `Players: ${participants.length}${expirationInfo}${winnerInfo}`;
-    } catch (error: any) {
-      return `Error getting game info: ${error.message}`;
+      return [
+        `<b>🏆 ${gameTypeText} Completed</b>`,
+        "",
+        `💰 Amount: ${this.wallet.formatTokenBalance(amount, 9)} ${gameData.token_ticker || "WSOL"}`,
+        `👥 Players: ${playerCount}/${gameData.max_players || playerCount}`,
+        `👤 Creator: @${creatorUsername}`,
+        `🎉 Winner: @${winnerUsername}`,
+        "",
+        `<i>Game completed at ${formatDate(gameData.completed_at || Date.now())}</i>`
+      ].join("\n");
+    } catch (error) {
+      console.error("Error formatting completed game info:", error);
+      return "❌ Error loading game details";
     }
   }
 
@@ -694,7 +640,7 @@ export class GameManager {
       const gameInstruction = await this.program.methods
         .initializeGame(gameConfig, Array.from(randomHashBuffer))
         .accounts({
-          player: playerKp.publicKey,
+          creator: playerKp.publicKey,
           tokenMint: new PublicKey(tokenMint),
         })
         .instruction();
@@ -916,169 +862,49 @@ export class GameManager {
   // EXPIRATION HANDLING
   // ================================
 
-  public async handleExpiredGame(ctx: Context, gamePda: PublicKey, gameAccount: any): Promise<GameCancellationResult | false> {
-    try {
-      const blockTime = await this.wallet.getBlockchainTime();
-      const expiresAt = Number(gameAccount.expiresAt);
-      const timeRemaining = Math.max(0, expiresAt - blockTime);
-      const isExpired = timeRemaining <= 0;
+  public async handleExpiredGame(gamePda: PublicKey, gameAccount: any): Promise<GameCancellationResult | false> {
+    const gameType = this.getGameType(gameAccount);
+    const hasEnoughPlayers = gameAccount.playersCount >= gameAccount.minPlayers;
 
-      if (!isExpired) return false;
-
-      const hasEnoughPlayers = gameAccount.playerCount >= gameAccount.minPlayers;
-      const creatorTelegramId = this.gameDb.getCreatorTelegramId(gamePda.toBase58());
-
-      if (!creatorTelegramId) return false;
-
-      if (hasEnoughPlayers) {
-        // Game has enough players and is expired, let the oracle complete it
-        console.log(`🎯 Game ${gamePda.toBase58()} is ready for oracle completion (expired with enough players)`);
-        return false; // Don't cancel, let oracle complete
-      }
-
-      // Determine game type
-      const gameType = this.getGameType(gameAccount);
-      console.log(`🔄 Processing expired ${gameType} game ${gamePda.toBase58()} (${gameAccount.playerCount}/${gameAccount.maxPlayers})`);
-
-      // Cancel the game if it doesn't have enough players
-      if (creatorTelegramId === "orphaned") {
-        // For orphaned games, try to cancel using player keys if available
-        const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
-        if (!result.success) {
-          console.log(`Failed to cancel orphaned game with player keys: ${result.error}`);
-          // Mark as completed since we can't process it
-          const completedAt = blockTime * 1000;
-          this.gameDb.completeGame(gamePda.toBase58(), "cancelled", completedAt);
-          return {
-            cancelled: true,
-            amount: Number(gameAccount.amount),
-            creator: gameAccount.creator.toString(),
-            tx: "marked_cancelled"
-          };
-        }
-        const completedAt = blockTime * 1000;
-        this.gameDb.completeGame(gamePda.toBase58(), "cancelled", completedAt);
-        return {
-          cancelled: true,
-          amount: Number(gameAccount.amount),
-          creator: gameAccount.creator.toString(),
-          tx: result.tx || "player_cancelled"
-        };
-      }
-
-      // For regular games, handle based on game type
-      const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
-      let tx: string;
-
-      if (gameType === "coinflip" || gameType === "dumbflip" || gameType === "snowball") {
-        // For coinflip, dumbflip, and snowball games, unjoin all players first
-        console.log(`🪙 ${gameType.charAt(0).toUpperCase() + gameType.slice(1)} cancellation: unjoining all players first`);
-
-        // Get all participants from database
-        const participants = this.getGamePlayers(gamePda.toBase58());
-        let allPlayersUnjoined = true;
-
-        // Unjoin all players including creator
-        for (const telegramId of participants) {
-          try {
-            const playerPubkey = this.gameDb.getPlayerPublicKey(telegramId);
-            if (playerPubkey) {
-              const playerKp = this.wallet.getKeyPair(BigInt(telegramId));
-              await this.unjoinPlayerFromGame(gamePda, playerKp, new PublicKey(playerPubkey));
-              console.log(`➡️ Unjoined player ${playerPubkey.slice(0, 8)}... from ${gameType}`);
-            } else {
-              console.error(`No public key found for player ${telegramId}`);
-              allPlayersUnjoined = false;
-            }
-          } catch (error) {
-            console.error(`Failed to unjoin player ${telegramId}:`, error);
-            allPlayersUnjoined = false;
-            // Continue with other players but mark as failed
-          }
-        }
-
-        // Only proceed if all players were successfully unjoined
-        if (!allPlayersUnjoined) {
-          console.log(`❌ Could not unjoin all players from ${gameType} ${gamePda.toBase58()}, skipping cancellation`);
-          return false;
-        }
-
-        // Now cancel the empty game
-        const cancelInstruction = await this.program.methods
-          .cancelGame()
-          .accounts({
-            game: gamePda,
-            creator: gameAccount.creator,
-          })
-          .instruction();
-
-        tx = await this.wallet.sendTransaction([cancelInstruction], [creatorKp]);
-      } else {
-        // For giveaway games, cancel directly without unjoining
-        console.log(`🎁 ${gameType.charAt(0).toUpperCase() + gameType.slice(1)} cancellation: cancelling directly`);
-
-        const cancelInstruction = await this.program.methods
-          .cancelGame()
-          .accounts({
-            game: gamePda,
-            creator: gameAccount.creator,
-          })
-          .instruction();
-
-        tx = await this.wallet.sendTransaction([cancelInstruction], [creatorKp]);
-      }
-
-      await this.wallet.confirmTransaction(tx);
-      const completedAt = blockTime * 1000;
-      this.gameDb.completeGame(gamePda.toBase58(), "cancelled", completedAt);
-
-      // Send cancellation notification
-      const gameMessage = this.activeGameMessages.get(gamePda.toBase58());
-      if (gameMessage) {
-        // Get token info from database
-        const gameData = this.gameDb.getGame(gamePda.toBase58());
-        if (!gameData?.token_mint || !gameData?.token_ticker) {
-          console.error(`Missing token info for cancelled game ${gamePda.toBase58()}`);
-          return {
-            cancelled: true,
-            amount: Number(gameAccount.amount),
-            creator: gameAccount.creator.toString(),
-            tx
-          };
-        }
-
-        const tokenMint = gameData.token_mint;
-        const tokenTicker = gameData.token_ticker;
-
-        const metadata = await this.wallet.getTokenMetadata(tokenMint);
-        const gameTypeFormatted = formatGameType(gameAccount.gameType);
-        const amount = Number(gameAccount.amount);
-        const playerCount = gameAccount.playerCount;
-
-        await ctx.reply(
-          `❌ <b>${gameTypeFormatted} Cancelled!</b>\n\n` +
-          `⏰ Game expired with insufficient players\n` +
-          `💰 Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}\n` +
-          `👥 Players: ${playerCount}/${gameAccount.maxPlayers}\n\n` +
-          `💸 Funds have been returned to players`,
-          {
-            parse_mode: "HTML",
-            reply_to_message_id: gameMessage.messageId
-          }
-        );
-      }
-
-      console.log(`✅ Successfully cancelled expired ${gameType} ${gamePda.toBase58()}`);
-      return {
-        cancelled: true,
-        amount: Number(gameAccount.amount),
-        creator: gameAccount.creator.toString(),
-        tx
-      };
-    } catch (error) {
-      console.error(`Error handling expired game ${gamePda.toBase58()}:`, error);
+    if (!this.isGameExpiredWithBuffer(gameAccount)) {
       return false;
     }
+
+    console.log(`🔄 Processing expired ${gameType} game ${gamePda.toBase58()} (${gameAccount.playersCount}/${gameAccount.maxPlayers})`);
+
+    // For giveaways and expired games with enough players, complete the game
+    if (gameType === "giveaway" || hasEnoughPlayers) {
+      try {
+        const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
+        if (result.success) {
+          return {
+            cancelled: true,
+            amount: Number(gameAccount.ticketAmount),
+            creator: gameAccount.creator.toBase58(),
+            tx: result.tx!
+          };
+        }
+      } catch (error) {
+        console.error(`Error completing expired ${gameType} game:`, error);
+      }
+    }
+
+    // For other expired games, cancel and refund
+    try {
+      const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
+      if (result.success) {
+        return {
+          cancelled: true,
+          amount: Number(gameAccount.ticketAmount),
+          creator: gameAccount.creator.toBase58(),
+          tx: result.tx!
+        };
+      }
+    } catch (error) {
+      console.error(`Error cancelling expired game:`, error);
+    }
+
+    return false;
   }
 
   // ================================
@@ -1111,7 +937,7 @@ export class GameManager {
           ctx,
           gamePda.toBase58(),
           formatGameType(gameAccount.gameType),
-          Number(gameAccount.amount),
+          Number(gameAccount.ticketAmount),
           creatorUsername,
           "Active",
           gameData.token_mint,
@@ -1395,31 +1221,25 @@ export class GameManager {
   }
 
   private async findOrphanedGames(): Promise<{ address: string; account: any }[]> {
-    const connection = this.wallet.getConnection();
-    const programAccounts = await connection.getProgramAccounts(this.program.programId);
-
-    console.log(`📊 Found ${programAccounts.length} program accounts on blockchain`);
-
     const orphanedGames: { address: string; account: any }[] = [];
-    let validGameAccounts = 0;
 
-    for (const { pubkey } of programAccounts) {
-      try {
-        const gameAccount = await this.program.account.game.fetch(pubkey);
-        validGameAccounts++;
+    try {
+      const allGameAccounts = await this.program.account.game.all();
 
-        const gameAddress = pubkey.toBase58();
+      for (const gameAccountInfo of allGameAccounts) {
+        const gameAddress = gameAccountInfo.publicKey.toBase58();
+        const gameAccount = gameAccountInfo.account;
+
+        // Check if this game is in our database
         if (!this.gameDb.gameExists(gameAddress)) {
+          console.log(`🔍 Found orphaned game: ${gameAddress} (${gameAccount.playersCount}/${gameAccount.maxPlayers})`);
           orphanedGames.push({ address: gameAddress, account: gameAccount });
-          console.log(`🔍 Found orphaned game: ${gameAddress} (${gameAccount.playerCount}/${gameAccount.maxPlayers})`);
         }
-      } catch (error) {
-        // Skip non-game accounts
-        continue;
       }
+    } catch (error) {
+      console.error("Error scanning for orphaned games:", error);
     }
 
-    console.log(`🎮 Found ${validGameAccounts} valid game accounts on blockchain`);
     return orphanedGames;
   }
 
@@ -1434,7 +1254,7 @@ export class GameManager {
       }
 
       const gameType = this.getGameType(gameAccount);
-      console.log(`🔄 Processing expired ${gameType} game ${address} (${gameAccount.playerCount}/${gameAccount.maxPlayers})`);
+      console.log(`🔄 Processing expired ${gameType} game ${address} (${gameAccount.playersCount}/${gameAccount.maxPlayers})`);
 
       return gameType === "giveaway"
         ? await this.handleExpiredGiveaway(gamePda, gameAccount, address)
@@ -1446,11 +1266,12 @@ export class GameManager {
   }
 
   private isGameExpiredWithBuffer(gameAccount: any): boolean {
-    const now = Math.floor(Date.now() / 1000);
-    const expiresAt = Number(gameAccount.expiresAt);
-    const oracleBufferTime = 300; // 5 minutes buffer
-    const finalDeadline = expiresAt + oracleBufferTime;
-    return now > finalDeadline;
+    const currentTime = Math.floor(Date.now() / 1000);
+    const createdAt = Number(gameAccount.createdAt);
+    const timeout = Number(gameAccount.timeout);
+    const expiresAt = createdAt + timeout;
+    const bufferTime = 300; // 5 minutes buffer
+    return currentTime > (expiresAt + bufferTime);
   }
 
   private getGameType(gameAccount: any): string {
@@ -1469,14 +1290,19 @@ export class GameManager {
   }
 
   private async handleExpiredGiveaway(gamePda: PublicKey, gameAccount: any, address: string): Promise<boolean> {
-    const creatorTelegramId = this.gameDb.getPlayerTelegramId(gameAccount.creator.toBase58());
+    const gameType = this.getGameType(gameAccount);
 
-    if (!creatorTelegramId) {
-      console.log(`❌ No creator key available for giveaway ${address}`);
-      return false;
+    if (this.isGameExpiredWithBuffer(gameAccount)) {
+      console.log(`🔄 Processing expired ${gameType} game ${address} (${gameAccount.playersCount}/${gameAccount.maxPlayers})`);
+
+      const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
+      if (result.success) {
+        console.log(`✅ Successfully handled expired giveaway: ${address}`);
+        return true;
+      }
     }
 
-    return await this.cancelGameWithCreator(gamePda, gameAccount, creatorTelegramId, address, "giveaway");
+    return false;
   }
 
   private async handleExpiredCoinflip(gamePda: PublicKey, gameAccount: any, address: string): Promise<boolean> {

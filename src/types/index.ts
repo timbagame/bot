@@ -101,34 +101,41 @@ export interface GameCategory {
 
 export interface GameCompletedEvent {
   gameKey: PublicKey;
-  creator: PublicKey;
   winner: PublicKey;
-  gameType: any;
-  amount: anchor.BN;
+  totalAmount: anchor.BN;
   playersCount: number;
-  tokenMint: PublicKey;
   winnerAmount: anchor.BN;
   feeAmount: anchor.BN;
+  timestamp: anchor.BN;
 }
 
 export interface PlayerJoinedEvent {
   gameKey: PublicKey;
   player: PublicKey;
-  gameType: any;
-  amount: anchor.BN;
-  totalPot: anchor.BN;
-  currentPlayers: number;
-  lastSlot: anchor.BN;
+  totalAmount: anchor.BN;
+  playersCount: number;
+  playerIndex: number;
+  slotEntropy: anchor.BN;
+  timestamp: anchor.BN;
 }
 
 export interface PlayerUnjoinedEvent {
   gameKey: PublicKey;
   player: PublicKey;
-  gameType: any;
-  amount: anchor.BN;
-  totalPot: anchor.BN;
-  currentPlayers: number;
-  lastSlot: anchor.BN;
+  totalAmount: anchor.BN;
+  playersCount: number;
+  playerIndex: number;
+  slotEntropy: anchor.BN;
+  timestamp: anchor.BN;
+}
+
+export interface PlayerRolledEvent {
+  gameKey: PublicKey;
+  player: PublicKey;
+  totalAmount: anchor.BN;
+  playerIndex: number;
+  slotEntropy: anchor.BN;
+  timestamp: anchor.BN;
 }
 
 // ================================

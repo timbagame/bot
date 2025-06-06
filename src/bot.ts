@@ -1174,7 +1174,7 @@ bot.on("callback_query", async (ctx) => {
         const gameData = gameDb.getGame(gameAddress);
         if (gameData?.game_type === "snowball") {
           const gameAccount = await program.account.game.fetch(gamePda);
-          if (gameAccount.playerCount > 1) {
+          if (gameAccount.playersCount > 1) {
             await ctx.answerCallbackQuery("❄️ Cannot leave snowball games once there are 2+ players!");
             return;
           }
@@ -1299,7 +1299,7 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
 
           const adminKp = authResult.adminKeypair!;
           const rollInstruction = await program.methods
-            .rollSnowballGame()
+            .rollGame()
             .accounts({
               game: gamePda,
               player: playerKp.publicKey,
@@ -1317,9 +1317,9 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
             try {
               await wallet.confirmTransaction(tx);
 
-              // Fetch updated game account to get the new totalPot
+              // Fetch updated game account to get the new totalAmount
               const updatedGameAccount = await program.account.game.fetch(gamePda);
-              const currentTotalPot = Number(updatedGameAccount.totalPot || 0);
+              const currentTotalPot = Number(updatedGameAccount.totalAmount || 0);
 
               // Update game message and show new expected winner with current totalPot
               const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
@@ -1346,7 +1346,7 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
         } else {
           // For public games, no authority needed
           const rollInstruction = await program.methods
-            .rollSnowballGame()
+            .rollGame()
             .accounts({
               game: gamePda,
               player: playerKp.publicKey,
@@ -1363,9 +1363,9 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
             try {
               await wallet.confirmTransaction(tx);
 
-              // Fetch updated game account to get the new totalPot
+              // Fetch updated game account to get the new totalAmount
               const updatedGameAccount = await program.account.game.fetch(gamePda);
-              const currentTotalPot = Number(updatedGameAccount.totalPot || 0);
+              const currentTotalPot = Number(updatedGameAccount.totalAmount || 0);
 
               // Update game message and show new expected winner with current totalPot
               const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
@@ -1404,7 +1404,7 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
       return;
     }
 
-    if (gameAccount.playerCount >= gameAccount.maxPlayers) {
+    if (gameAccount.playersCount >= gameAccount.maxPlayers) {
       await ctx.answerCallbackQuery("This game is already full!");
       return;
     }
@@ -1427,7 +1427,7 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
       })()
     ]);
 
-    const gameAmount = Number(gameAccount.amount);
+    const gameAmount = Number(gameAccount.ticketAmount);
     const totalBalance = tokenBalance + gameBalance;
 
     // Only check balance for coinflips, dumbflips and snowballs, giveaways are free to join
@@ -1476,7 +1476,7 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
     // Send join notification
     const joinerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
     const updatedGameAccount = await program.account.game.fetch(gamePda);
-    const playerCount = updatedGameAccount.playerCount;
+    const playerCount = updatedGameAccount.playersCount;
     const maxPlayers = gameAccount.maxPlayers;
     const gameName = gameType.toLowerCase();
 
@@ -1610,8 +1610,7 @@ setupAnchor().then(async () => {
       const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
       if (creatorTelegramId) {
         const creatorUsername = await gameManager.getUsernameFromTelegramId(dummyCtx, creatorTelegramId);
-        const gameTypeKeys = Object.keys(event.gameType);
-        const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
+        const gameType = gameData.game_type ? gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1) : "Game";
 
         // Ensure token info exists
         if (!gameData.token_mint || !gameData.token_ticker) {
@@ -1623,7 +1622,7 @@ setupAnchor().then(async () => {
           dummyCtx,
           gameAddress,
           gameType,
-          Number(event.amount),
+          gameData.amount,
           creatorUsername,
           "Completed",
           gameData.token_mint,
@@ -1644,8 +1643,7 @@ setupAnchor().then(async () => {
         const metadata = await wallet.getTokenMetadata(gameData.token_mint);
         const winnerUsername = await gameManager.getPlayerUsername(dummyCtx, winnerAddress);
         const winnerAmount = Number(event.winnerAmount);
-        const gameTypeKeys = Object.keys(event.gameType);
-        const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
+        const gameType = gameData.game_type ? gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1) : "Game";
 
         let notificationText = `🎉 <b>${gameType} Completed!</b>\n\n`;
         notificationText += `🏆 Winner: @${winnerUsername}\n`;
@@ -1686,8 +1684,8 @@ setupAnchor().then(async () => {
   program.addEventListener('playerJoined', async (event: PlayerJoinedEvent) => {
     try {
       const gameAddress = event.gameKey.toString();
-      const lastSlot = event.lastSlot.toString();
-      const totalPot = Number(event.totalPot);
+      const lastSlot = event.slotEntropy.toString();
+      const totalPot = Number(event.totalAmount);
 
       console.log(`👤 PlayerJoined event: ${event.player.toString().slice(0, 8)}... joined game ${gameAddress.slice(0, 8)}... (lastSlot: ${lastSlot}, totalPot: ${totalPot})`);
 
@@ -1705,14 +1703,13 @@ setupAnchor().then(async () => {
         const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
         if (creatorTelegramId && gameData.token_mint && gameData.token_ticker) {
           const creatorUsername = await gameManager.getUsernameFromTelegramId(dummyCtx, creatorTelegramId);
-          const gameTypeKeys = Object.keys(event.gameType);
-          const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
+          const gameType = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
 
           await gameManager.updateGameMessage(
             dummyCtx,
             gameAddress,
             gameType,
-            Number(event.amount),
+            gameData.amount,
             creatorUsername,
             "Active",
             gameData.token_mint,
@@ -1732,8 +1729,8 @@ setupAnchor().then(async () => {
   program.addEventListener('playerUnjoined', async (event: PlayerUnjoinedEvent) => {
     try {
       const gameAddress = event.gameKey.toString();
-      const lastSlot = event.lastSlot.toString();
-      const totalPot = Number(event.totalPot);
+      const lastSlot = event.slotEntropy.toString();
+      const totalPot = Number(event.totalAmount);
 
       console.log(`👤 PlayerUnjoined event: ${event.player.toString().slice(0, 8)}... left game ${gameAddress.slice(0, 8)}... (lastSlot: ${lastSlot}, totalPot: ${totalPot})`);
 
@@ -1751,14 +1748,13 @@ setupAnchor().then(async () => {
         const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
         if (creatorTelegramId && gameData.token_mint && gameData.token_ticker) {
           const creatorUsername = await gameManager.getUsernameFromTelegramId(dummyCtx, creatorTelegramId);
-          const gameTypeKeys = Object.keys(event.gameType);
-          const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
+          const gameType = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
 
           await gameManager.updateGameMessage(
             dummyCtx,
             gameAddress,
             gameType,
-            Number(event.amount),
+            gameData.amount,
             creatorUsername,
             "Active",
             gameData.token_mint,
@@ -1791,26 +1787,16 @@ setupAnchor().then(async () => {
 
           // Check if game is expired
           const blockTime = await wallet.getBlockchainTime();
-          const expiresAt = Number(gameAccount.expiresAt);
+          const createdAt = Number(gameAccount.createdAt);
+          const timeout = Number(gameAccount.timeout);
+          const expiresAt = createdAt + timeout;
           const isExpired = blockTime > expiresAt;
 
           if (isExpired) {
             console.log(`Processing expired game ${game.game_address}`);
-            // Create a dummy context for message updates
-            const dummyCtx = {
-              api: bot.api,
-              chat: { id: game.chat_id },
-              reply: async (text: string) => {
-                console.log(`Game ${game.game_address} update: ${text}`);
-              },
-              update: {} as any,
-              me: {} as any,
-              match: {} as any,
-              message: {} as any
-            } as unknown as Context;
 
             // Handle the expired game
-            const result = await gameManager.handleExpiredGame(dummyCtx, gamePda, gameAccount);
+            const result = await gameManager.handleExpiredGame(gamePda, gameAccount);
             if (result) {
               console.log(`Successfully processed expired game ${game.game_address}`);
             }
