@@ -24,7 +24,7 @@ import {
   DEFAULT_TOKEN_TICKER,
   TOKENS_LIST
 } from "./utils/constants";
-import type { PlayerData, GameCompletedEvent, PlayerJoinedEvent, PlayerUnjoinedEvent } from "./types";
+import type { PlayerData, GameCompletedEvent, PlayerJoinedEvent, PlayerUnjoinedEvent, PlayerRolledEvent } from "./types";
 import { TokenDatabase } from "./utils/token-database";
 import { OracleClient } from "./utils/oracle";
 
@@ -304,6 +304,25 @@ const replyToMessage = async (ctx: Context, text: string, parseMode: "HTML" | "M
 
 const replyUsageError = async (ctx: Context, message: string): Promise<void> => {
   return replyToMessage(ctx, message);
+};
+
+/**
+ * Safe callback query response with timeout handling
+ */
+const safeAnswerCallbackQuery = async (ctx: any, text: string): Promise<void> => {
+  try {
+    await ctx.answerCallbackQuery(text);
+  } catch (error: any) {
+    // Check if it's a timeout error or invalid query ID
+    if (error.description?.includes("query is too old") ||
+        error.description?.includes("query ID is invalid") ||
+        error.error_code === 400) {
+      console.warn(`⚠️ Callback query timeout/invalid: ${text.substring(0, 50)}...`);
+      return; // Silently ignore timeout errors
+    }
+    // For other errors, still log them
+    console.error("Error answering callback query:", error);
+  }
 };
 
 // ================================
@@ -880,7 +899,7 @@ bot.command("help", async (ctx: Context) => {
     "/debug - Show detailed wallet debug info (reply to user for their info too)",
     "/checktx &lt;signature&gt; - Check transaction details and status",
     "/oracle - Check Oracle configuration",
-    "/scan - Scan blockchain for orphaned games (private chat only)",
+          "/scan - Scan blockchain for orphaned games (private chat only)",
     "",
     "<b>ℹ️ Important:</b> ",
     "• Your player balance account will be automatically initialized when needed",
@@ -1135,6 +1154,8 @@ bot.command("scan", async (ctx: Context) => {
   }
 });
 
+
+
 // ================================
 // CALLBACK QUERY HANDLING
 // ================================
@@ -1324,7 +1345,7 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
 
           // Respond immediately to avoid callback timeout
           const gameTypeName = gameData.game_type === "snowball" ? "snowball" : "dice";
-          await ctx.answerCallbackQuery(`🎲 Rolled the private ${gameTypeName}!`);
+          await safeAnswerCallbackQuery(ctx, `🎲 Rolled the private ${gameTypeName}!`);
 
           // Handle confirmation and updates asynchronously
           (async () => {
@@ -1371,7 +1392,7 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
 
           // Respond immediately to avoid callback timeout
           const gameTypeName = gameData.game_type === "snowball" ? "snowball" : "dice";
-          await ctx.answerCallbackQuery(`🎲 Rolled the ${gameTypeName}!`);
+          await safeAnswerCallbackQuery(ctx, `🎲 Rolled the ${gameTypeName}!`);
 
           // Handle confirmation and updates asynchronously
           (async () => {
@@ -1409,18 +1430,18 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
         return;
       } catch (error: any) {
         const userFriendlyError = formatUserFriendlyError(error, wallet);
-        await ctx.answerCallbackQuery(userFriendlyError.substring(0, 180));
+        await safeAnswerCallbackQuery(ctx, userFriendlyError.substring(0, 180));
         return;
       }
     }
 
     if (isAlreadyInGame) {
-      await ctx.answerCallbackQuery("You have already joined this game!");
+      await safeAnswerCallbackQuery(ctx, "You have already joined this game!");
       return;
     }
 
     if (gameAccount.playersCount >= gameAccount.maxPlayers) {
-      await ctx.answerCallbackQuery("This game is already full!");
+      await safeAnswerCallbackQuery(ctx, "This game is already full!");
       return;
     }
 
@@ -1450,7 +1471,7 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
     if ((currentGameType === "coinflip" || currentGameType === "dumbflip" || currentGameType === "snowball") && totalBalance < gameAmount) {
       const metadata = await wallet.getTokenMetadata(tokenMint);
       const tokenTicker = gameData.token_ticker;
-      await ctx.answerCallbackQuery(`Insufficient balance. You have ${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${tokenTicker} but need ${wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${tokenTicker}`);
+      await safeAnswerCallbackQuery(ctx, `Insufficient balance. You have ${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${tokenTicker} but need ${wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${tokenTicker}`);
       return;
     }
 
@@ -1701,37 +1722,41 @@ setupAnchor().then(async () => {
       const gameAddress = event.gameKey.toString();
       const lastSlot = event.slotEntropy.toString();
       const totalPot = Number(event.totalAmount);
+      const timestamp = Number(event.timestamp);
 
-      console.log(`👤 PlayerJoined event: ${event.player.toString().slice(0, 8)}... joined game ${gameAddress.slice(0, 8)}... (lastSlot: ${lastSlot}, totalPot: ${totalPot})`);
+      console.log(`👤 PlayerJoined event: ${event.player.toString().slice(0, 8)}... joined game ${gameAddress.slice(0, 8)}... (lastSlot: ${lastSlot}, totalPot: ${totalPot}, timestamp: ${timestamp})`);
 
-      // Update the lastSlot in database for winner calculation
-      gameDb.updateGameLastSlot(gameAddress, lastSlot);
+      // Update the lastSlot in database for winner calculation (only if timestamp is newer)
+      const slotWasUpdated = gameDb.updateGameLastSlotWithTimestamp(gameAddress, lastSlot, timestamp);
 
       // For dumbflip and snowball games, update the game message to show new expected winner
-      const gameData = gameDb.getGame(gameAddress);
-      if (gameData && (gameData.game_type === "dumbflip" || gameData.game_type === "snowball") && gameData.chat_id) {
-        const dummyCtx = {
-          api: bot.api,
-          chat: { id: gameData.chat_id }
-        } as unknown as Context;
+      // Only update if the slot was actually updated (not an out-of-order event)
+      if (slotWasUpdated) {
+        const gameData = gameDb.getGame(gameAddress);
+        if (gameData && (gameData.game_type === "dumbflip" || gameData.game_type === "snowball") && gameData.chat_id) {
+          const dummyCtx = {
+            api: bot.api,
+            chat: { id: gameData.chat_id }
+          } as unknown as Context;
 
-        const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
-        if (creatorTelegramId && gameData.token_mint && gameData.token_ticker) {
-          const creatorUsername = await gameManager.getUsernameFromTelegramId(dummyCtx, creatorTelegramId);
-          const gameType = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
+          const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
+          if (creatorTelegramId && gameData.token_mint && gameData.token_ticker) {
+            const creatorUsername = await gameManager.getUsernameFromTelegramId(dummyCtx, creatorTelegramId);
+            const gameType = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
 
-          await gameManager.updateGameMessage(
-            dummyCtx,
-            gameAddress,
-            gameType,
-            gameData.amount,
-            creatorUsername,
-            "Active",
-            gameData.token_mint,
-            gameData.token_ticker,
-            undefined,
-            totalPot
-          );
+            await gameManager.updateGameMessage(
+              dummyCtx,
+              gameAddress,
+              gameType,
+              gameData.amount,
+              creatorUsername,
+              "Active",
+              gameData.token_mint,
+              gameData.token_ticker,
+              undefined,
+              totalPot
+            );
+          }
         }
       }
     } catch (error) {
@@ -1746,41 +1771,94 @@ setupAnchor().then(async () => {
       const gameAddress = event.gameKey.toString();
       const lastSlot = event.slotEntropy.toString();
       const totalPot = Number(event.totalAmount);
+      const timestamp = Number(event.timestamp);
 
-      console.log(`👤 PlayerUnjoined event: ${event.player.toString().slice(0, 8)}... left game ${gameAddress.slice(0, 8)}... (lastSlot: ${lastSlot}, totalPot: ${totalPot})`);
+      console.log(`👤 PlayerUnjoined event: ${event.player.toString().slice(0, 8)}... left game ${gameAddress.slice(0, 8)}... (lastSlot: ${lastSlot}, totalPot: ${totalPot}, timestamp: ${timestamp})`);
 
-      // Update the lastSlot in database for winner calculation
-      gameDb.updateGameLastSlot(gameAddress, lastSlot);
+      // Update the lastSlot in database for winner calculation (only if timestamp is newer)
+      const slotWasUpdated = gameDb.updateGameLastSlotWithTimestamp(gameAddress, lastSlot, timestamp);
 
       // For dumbflip and snowball games, update the game message to show new expected winner
-      const gameData = gameDb.getGame(gameAddress);
-      if (gameData && (gameData.game_type === "dumbflip" || gameData.game_type === "snowball") && gameData.chat_id) {
-        const dummyCtx = {
-          api: bot.api,
-          chat: { id: gameData.chat_id }
-        } as unknown as Context;
+      // Only update if the slot was actually updated (not an out-of-order event)
+      if (slotWasUpdated) {
+        const gameData = gameDb.getGame(gameAddress);
+        if (gameData && (gameData.game_type === "dumbflip" || gameData.game_type === "snowball") && gameData.chat_id) {
+          const dummyCtx = {
+            api: bot.api,
+            chat: { id: gameData.chat_id }
+          } as unknown as Context;
 
-        const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
-        if (creatorTelegramId && gameData.token_mint && gameData.token_ticker) {
-          const creatorUsername = await gameManager.getUsernameFromTelegramId(dummyCtx, creatorTelegramId);
-          const gameType = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
+          const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
+          if (creatorTelegramId && gameData.token_mint && gameData.token_ticker) {
+            const creatorUsername = await gameManager.getUsernameFromTelegramId(dummyCtx, creatorTelegramId);
+            const gameType = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
 
-          await gameManager.updateGameMessage(
-            dummyCtx,
-            gameAddress,
-            gameType,
-            gameData.amount,
-            creatorUsername,
-            "Active",
-            gameData.token_mint,
-            gameData.token_ticker,
-            undefined,
-            totalPot
-          );
+            await gameManager.updateGameMessage(
+              dummyCtx,
+              gameAddress,
+              gameType,
+              gameData.amount,
+              creatorUsername,
+              "Active",
+              gameData.token_mint,
+              gameData.token_ticker,
+              undefined,
+              totalPot
+            );
+          }
         }
       }
     } catch (error) {
       console.error("Error processing PlayerUnjoined event:", error);
+    }
+  });
+
+  // Set up PlayerRolled event listener to track lastSlot for winner calculation
+  console.log("Setting up PlayerRolled event listener...");
+  program.addEventListener('playerRolled', async (event: PlayerRolledEvent) => {
+    try {
+      const gameAddress = event.gameKey.toString();
+      const lastSlot = event.slotEntropy.toString();
+      const totalPot = Number(event.totalAmount);
+      const timestamp = Number(event.timestamp);
+
+      console.log(`🎲 PlayerRolled event: ${event.player.toString().slice(0, 8)}... rolled in game ${gameAddress.slice(0, 8)}... (lastSlot: ${lastSlot}, totalPot: ${totalPot}, timestamp: ${timestamp})`);
+
+      // Update the lastSlot in database for winner calculation (only if timestamp is newer)
+      const slotWasUpdated = gameDb.updateGameLastSlotWithTimestamp(gameAddress, lastSlot, timestamp);
+
+      // For dumbflip and snowball games, update the game message to show new expected winner
+      // Only update if the slot was actually updated (not an out-of-order event)
+      if (slotWasUpdated) {
+        const gameData = gameDb.getGame(gameAddress);
+        if (gameData && (gameData.game_type === "dumbflip" || gameData.game_type === "snowball") && gameData.chat_id) {
+          const dummyCtx = {
+            api: bot.api,
+            chat: { id: gameData.chat_id }
+          } as unknown as Context;
+
+          const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
+          if (creatorTelegramId && gameData.token_mint && gameData.token_ticker) {
+            const creatorUsername = await gameManager.getUsernameFromTelegramId(dummyCtx, creatorTelegramId);
+            const gameType = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
+
+            await gameManager.updateGameMessage(
+              dummyCtx,
+              gameAddress,
+              gameType,
+              gameData.amount,
+              creatorUsername,
+              "Active",
+              gameData.token_mint,
+              gameData.token_ticker,
+              undefined,
+              totalPot
+            );
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error processing PlayerRolled event:", error);
     }
   });
 

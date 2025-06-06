@@ -813,6 +813,18 @@ export class GameManager {
         return null;
       }
 
+      // Validate inputs before calculating
+      if (participants.length <= 0) {
+        console.warn(`Invalid participants length for game ${gameAddress}: ${participants.length}`);
+        return null;
+      }
+
+      const lastSlotBigInt = BigInt(lastSlot);
+      if (lastSlotBigInt < 0n) {
+        console.warn(`Invalid lastSlot for game ${gameAddress}: ${lastSlot}`);
+        return null;
+      }
+
       return this.calculateWinnerFromSecretAndSlot(secretKey, lastSlot, participants);
     } catch (error) {
       console.error('Error calculating expected winner:', error);
@@ -841,10 +853,19 @@ export class GameManager {
       return 0;
     }
 
+    if (nPlayers <= 0) {
+      throw new Error("Number of players must be greater than 0");
+    }
+
     // Convert secret key from hex string to buffer
     const secretKeyBuffer = Buffer.from(secretKey, 'hex');
     if (secretKeyBuffer.length !== 32) {
       throw new Error("Invalid secret key length - must be 32 bytes");
+    }
+
+    // Validate lastSlot is within safe range
+    if (lastSlot < 0n) {
+      throw new Error("Last slot cannot be negative");
     }
 
     // Hash combination of secret key and last_slot for additional entropy (matching contract logic)
@@ -853,9 +874,15 @@ export class GameManager {
 
     // Convert bigint to little-endian bytes (matching contract's to_le_bytes())
     const lastSlotBytes = Buffer.alloc(8);
-    const lastSlotNum = Number(lastSlot);
-    lastSlotBytes.writeUInt32LE(lastSlotNum & 0xffffffff, 0);
-    lastSlotBytes.writeUInt32LE(Math.floor(lastSlotNum / 0x100000000), 4);
+
+    // Handle large numbers by converting to bigint and then to buffer safely
+    const lastSlotBigInt = BigInt(lastSlot);
+    const low32 = Number(lastSlotBigInt & BigInt(0xffffffff));
+    const high32 = Number((lastSlotBigInt >> BigInt(32)) & BigInt(0xffffffff));
+
+    // Write as unsigned 32-bit integers
+    lastSlotBytes.writeUInt32LE(low32, 0);
+    lastSlotBytes.writeUInt32LE(high32, 4);
     lastSlotBytes.copy(combinedData, 32);
 
     // Hash the combined data (matching contract's hash() function)
@@ -905,14 +932,15 @@ export class GameManager {
 
       const expectedWinnerTelegramId = await this.getExpectedWinner(gameAddress, participants);
       if (!expectedWinnerTelegramId) {
-        return "";
+        return "\n🎯 Expected winner: Calculating...";
       }
 
       const expectedWinnerUsername = await this.getUsernameFromTelegramId(ctx, expectedWinnerTelegramId);
       return `\n🎯 Expected winner: @${expectedWinnerUsername}`;
     } catch (error) {
       console.error('Error getting expected winner info:', error);
-      return "";
+      // Return a fallback message instead of empty string to show there was an issue
+      return "\n🎯 Expected winner: Error calculating";
     }
   }
 

@@ -39,9 +39,20 @@ export class GameDatabase {
           token_ticker TEXT,
           max_players INTEGER,
           min_players INTEGER,
-          last_slot TEXT
+          last_slot TEXT,
+          last_slot_timestamp INTEGER
         )
       `);
+
+      // Add the new column if it doesn't exist (for existing databases)
+      try {
+        this.db.run('ALTER TABLE games ADD COLUMN last_slot_timestamp INTEGER');
+      } catch (error: any) {
+        // Column already exists, ignore the error
+        if (!error.message?.includes('duplicate column name')) {
+          console.warn('Error adding last_slot_timestamp column:', error.message);
+        }
+      }
 
       // Create secret keys table
       this.db.run(`
@@ -322,14 +333,57 @@ export class GameDatabase {
   }
 
   /**
+   * Update the lastSlot for a game only if the timestamp is newer (used for winner calculation)
+   */
+  public updateGameLastSlotWithTimestamp(gameAddress: string, lastSlot: string, timestamp: number): boolean {
+    try {
+      // First check if we should update (only if timestamp is newer)
+      const currentStmt = this.db.prepare("SELECT last_slot_timestamp FROM games WHERE game_address = ?");
+      const current = currentStmt.get(gameAddress) as { last_slot_timestamp: number | null } | undefined;
+
+      // If no current timestamp or the new one is newer, update
+      if (!current?.last_slot_timestamp || timestamp > current.last_slot_timestamp) {
+        const updateStmt = this.db.prepare("UPDATE games SET last_slot = ?, last_slot_timestamp = ? WHERE game_address = ?");
+        updateStmt.run(lastSlot, timestamp, gameAddress);
+        console.log(`🕐 Updated lastSlot for game ${gameAddress.slice(0, 8)}... to ${lastSlot} (timestamp: ${timestamp})`);
+        return true; // Updated
+      } else {
+        console.log(`⏰ Skipped outdated slot update for game ${gameAddress.slice(0, 8)}... (current: ${current.last_slot_timestamp}, received: ${timestamp})`);
+        return false; // Not updated due to older timestamp
+      }
+    } catch (error) {
+      console.error("Error updating game lastSlot with timestamp:", error);
+      return false;
+    }
+  }
+
+  /**
    * Update the lastSlot for a game (used for winner calculation)
+   * @deprecated Use updateGameLastSlotWithTimestamp instead for proper ordering
    */
   public updateGameLastSlot(gameAddress: string, lastSlot: string): void {
     try {
-      const stmt = this.db.prepare("UPDATE games SET last_slot = ? WHERE game_address = ?");
-      stmt.run(lastSlot, gameAddress);
+      const stmt = this.db.prepare("UPDATE games SET last_slot = ?, last_slot_timestamp = ? WHERE game_address = ?");
+      stmt.run(lastSlot, Date.now(), gameAddress);
     } catch (error) {
       console.error("Error updating game lastSlot:", error);
+    }
+  }
+
+  /**
+   * Get the lastSlot and its timestamp for a game
+   */
+  public getGameLastSlotWithTimestamp(gameAddress: string): { lastSlot: string | null; timestamp: number | null } {
+    try {
+      const stmt = this.db.prepare("SELECT last_slot, last_slot_timestamp FROM games WHERE game_address = ?");
+      const result = stmt.get(gameAddress) as { last_slot: string | null; last_slot_timestamp: number | null } | undefined;
+      return {
+        lastSlot: result?.last_slot || null,
+        timestamp: result?.last_slot_timestamp || null
+      };
+    } catch (error) {
+      console.error("Error getting game lastSlot with timestamp:", error);
+      return { lastSlot: null, timestamp: null };
     }
   }
 
@@ -344,6 +398,38 @@ export class GameDatabase {
     } catch (error) {
       console.error("Error getting game lastSlot:", error);
       return null;
+    }
+  }
+
+  /**
+   * Validate and fix slot timestamp consistency for all games
+   * This can be used to diagnose and fix any issues with out-of-order events
+   */
+  public validateSlotTimestamps(): { checked: number; fixed: number; issues: string[] } {
+    try {
+      const games = this.getAllGames().filter(g => g.status === 'active');
+      let checked = 0;
+      let fixed = 0;
+      const issues: string[] = [];
+
+      for (const game of games) {
+        checked++;
+        const { lastSlot, timestamp } = this.getGameLastSlotWithTimestamp(game.game_address);
+
+        // Check if we have a slot but no timestamp (from old version)
+        if (lastSlot && !timestamp) {
+          // Set current time as timestamp for games without timestamps
+          const stmt = this.db.prepare("UPDATE games SET last_slot_timestamp = ? WHERE game_address = ?");
+          stmt.run(Date.now(), game.game_address);
+          fixed++;
+          issues.push(`Fixed missing timestamp for game ${game.game_address.slice(0, 8)}...`);
+        }
+      }
+
+      return { checked, fixed, issues };
+    } catch (error) {
+      console.error("Error validating slot timestamps:", error);
+      return { checked: 0, fixed: 0, issues: [`Validation failed: ${error}`] };
     }
   }
 }
