@@ -22,7 +22,7 @@ import {
   DEFAULT_TOKEN_TICKER,
   TOKENS_LIST
 } from "./utils/constants";
-import type { PlayerData, GameCompletedEvent } from "./types";
+import type { PlayerData, GameCompletedEvent, PlayerJoinedEvent, PlayerUnjoinedEvent } from "./types";
 import { TokenDatabase } from "./utils/token-database";
 
 // ================================
@@ -544,6 +544,60 @@ bot.command(["giveaway", "ga"], async (ctx) => {
   await gameManager.createGame(ctx, "giveaway", parsed.data!, maxPlayers, 1, GAME_TIMEOUT);
 });
 
+bot.command(["dumbflip", "df"], async (ctx) => {
+  if (!ctx.from) return;
+
+  // Check if this is a private chat
+  if (ctx.chat?.type === "private") {
+    return replyToMessage(ctx, "🚫 Dumbflip games cannot be created in private chats since other players can't join. Please use this command in a group or channel where other players can participate!");
+  }
+
+  const args = ctx.message?.text?.split(" ");
+  if (!args) return;
+
+  const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id);
+  if (!parsed.success) {
+    if (parsed.error === "unknown_token") {
+      return replyToMessage(ctx, `❌ Unknown token "${parsed.unknownToken}"`);
+    }
+    return replyUsageError(ctx, "Usage: /dumbflip &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt;\nExample: /dumbflip 10 2 or /dumbflip 10 TIMBA 2");
+  }
+
+  // Check if token was specified to adjust maxPlayers index
+  const tokenSpecified = parsed.data!.tokenWasSpecified;
+  const maxPlayersIndex = tokenSpecified ? 3 : 2;
+  const maxPlayers = parseInt(args?.[maxPlayersIndex] || COINFLIP_MAX_PLAYERS.toString()) || COINFLIP_MAX_PLAYERS;
+
+  await gameManager.createGame(ctx, "dumbflip", parsed.data!, maxPlayers, 2, GAME_TIMEOUT);
+});
+
+bot.command(["snowball", "sb"], async (ctx) => {
+  if (!ctx.from) return;
+
+  // Check if this is a private chat
+  if (ctx.chat?.type === "private") {
+    return replyToMessage(ctx, "🚫 Snowball games cannot be created in private chats since other players can't join. Please use this command in a group or channel where other players can participate!");
+  }
+
+  const args = ctx.message?.text?.split(" ");
+  if (!args) return;
+
+  const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id);
+  if (!parsed.success) {
+    if (parsed.error === "unknown_token") {
+      return replyToMessage(ctx, `❌ Unknown token "${parsed.unknownToken}"`);
+    }
+    return replyUsageError(ctx, "Usage: /snowball &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt;\nExample: /snowball 100 5 or /snowball 100 TIMBA 5");
+  }
+
+  // Check if token was specified to adjust maxPlayers index
+  const tokenSpecified = parsed.data!.tokenWasSpecified;
+  const maxPlayersIndex = tokenSpecified ? 3 : 2;
+  const maxPlayers = parseInt(args?.[maxPlayersIndex] || COINFLIP_MAX_PLAYERS.toString()) || COINFLIP_MAX_PLAYERS;
+
+  await gameManager.createGame(ctx, "snowball", parsed.data!, maxPlayers, 2, GAME_TIMEOUT);
+});
+
 // ================================
 // WALLET COMMANDS
 // ================================
@@ -807,8 +861,12 @@ bot.command("help", async (ctx: Context) => {
     "<b>🎮 Game Commands:</b>",
     "/coinflip &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Create a new coinflip game",
     "/cf &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Shorthand for coinflip command",
+    "/dumbflip &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Create a dumbflip game (shows expected winner)",
+    "/df &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Shorthand for dumbflip command",
     "/giveaway &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Create a new giveaway",
     "/ga &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Shorthand for giveaway command",
+    "/snowball &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Create a snowball game (click join again to roll)",
+    "/sb &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Shorthand for snowball command",
     "/active - Show your active games",
     "/games - Show your recent games",
     "",
@@ -1109,6 +1167,16 @@ bot.on("callback_query", async (ctx) => {
         await handleJoinGame(ctx, gamePda, playerKp, telegramId, game);
         break;
       case "unjoin":
+        // Check if this is a snowball game and prevent unjoin if more than 1 player
+        const gameData = gameDb.getGame(gameAddress);
+        if (gameData?.game_type === "snowball") {
+          const gameAccount = await program.account.game.fetch(gamePda);
+          if (gameAccount.playerCount > 1) {
+            await ctx.answerCallbackQuery("❄️ Cannot leave snowball games once there are 2+ players!");
+            return;
+          }
+        }
+
         await gameManager.unjoinGame(ctx, gamePda, playerKp);
         await ctx.answerCallbackQuery("Successfully unjoined the game!");
         break;
@@ -1181,6 +1249,22 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
   try {
     const gameAccount = await program.account.game.fetch(gamePda);
 
+    // Check balance
+    const gameData = gameDb.getGame(game.game_address);
+    if (!gameData) {
+      await ctx.answerCallbackQuery("Game not found!");
+      return;
+    }
+
+    // Ensure token info exists
+    if (!gameData.token_mint || !gameData.token_ticker) {
+      console.error(`Missing token info for game ${game.game_address}`);
+      await ctx.answerCallbackQuery("Game data incomplete - please contact support");
+      return;
+    }
+
+    const tokenMint = gameData.token_mint;
+
     // Check if player already joined by checking PlayerParticipation account
     const playerParticipationPda = PDAManager.getPlayerParticipationPDA(
       gamePda,
@@ -1197,6 +1281,37 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
       isAlreadyInGame = false;
     }
 
+    // For snowball games, if player is already in the game, roll the snowball instead
+    if (isAlreadyInGame && gameData?.game_type === "snowball") {
+      try {
+        // Execute roll snowball instruction
+        const rollInstruction = await program.methods
+          .rollSnowballGame()
+          .accounts({
+            game: gamePda,
+            player: playerKp.publicKey,
+          })
+          .instruction();
+
+        const tx = await wallet.sendTransaction([rollInstruction], [playerKp]);
+        await wallet.confirmTransaction(tx);
+
+        // Update game message and show new expected winner
+        const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
+        const gameTypeKeys = Object.keys(gameAccount.gameType);
+        const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
+        const tokenTicker = gameData.token_ticker;
+        await gameManager.updateGameMessage(ctx, game.game_address, gameType, Number(game.amount), creatorUsername, "Active", tokenMint, tokenTicker);
+
+        await ctx.answerCallbackQuery("🎲 Snowball rolled! The pot grows and the expected winner has changed! 🎯");
+        return;
+      } catch (error: any) {
+        const userFriendlyError = formatUserFriendlyError(error, wallet);
+        await ctx.answerCallbackQuery(userFriendlyError.substring(0, 180));
+        return;
+      }
+    }
+
     if (isAlreadyInGame) {
       await ctx.answerCallbackQuery("You have already joined this game!");
       return;
@@ -1207,21 +1322,7 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
       return;
     }
 
-    // Check balance
-    const gameData = gameDb.getGame(game.game_address);
-    if (!gameData) {
-      await ctx.answerCallbackQuery("Game not found!");
-      return;
-    }
-
-    // Ensure token info exists
-    if (!gameData.token_mint || !gameData.token_ticker) {
-      console.error(`Missing token info for game ${game.game_address}`);
-      await ctx.answerCallbackQuery("Game data incomplete - please contact support");
-      return;
-    }
-
-    const tokenMint = gameData.token_mint;
+    // Balance checking for games that require payment
     const [tokenBalance, gameBalance] = await Promise.all([
       wallet.getTokenBalance(telegramId, tokenMint),
       (async () => {
@@ -1242,9 +1343,9 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
     const gameAmount = Number(gameAccount.amount);
     const totalBalance = tokenBalance + gameBalance;
 
-    // Only check balance for coinflips, giveaways are free to join
+    // Only check balance for coinflips, dumbflips and snowballs, giveaways are free to join
     const currentGameType = Object.keys(gameAccount.gameType)[0];
-    if (currentGameType === "coinflip" && totalBalance < gameAmount) {
+    if ((currentGameType === "coinflip" || currentGameType === "dumbflip" || currentGameType === "snowball") && totalBalance < gameAmount) {
       const metadata = await wallet.getTokenMetadata(tokenMint);
       const tokenTicker = gameData.token_ticker;
       await ctx.answerCallbackQuery(`Insufficient balance. You have ${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${tokenTicker} but need ${wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${tokenTicker}`);
@@ -1492,6 +1593,94 @@ setupAnchor().then(async () => {
   });
 
   console.log("GameCompleted event listener set up successfully");
+
+  // Set up PlayerJoined event listener to track lastSlot for winner calculation
+  console.log("Setting up PlayerJoined event listener...");
+  program.addEventListener('playerJoined', async (event: PlayerJoinedEvent) => {
+    try {
+      const gameAddress = event.gameKey.toString();
+      const lastSlot = event.lastSlot.toString();
+
+      console.log(`👤 PlayerJoined event: ${event.player.toString().slice(0, 8)}... joined game ${gameAddress.slice(0, 8)}... (lastSlot: ${lastSlot})`);
+
+      // Update the lastSlot in database for winner calculation
+      gameDb.updateGameLastSlot(gameAddress, lastSlot);
+
+      // For dumbflip and snowball games, update the game message to show new expected winner
+      const gameData = gameDb.getGame(gameAddress);
+      if (gameData && (gameData.game_type === "dumbflip" || gameData.game_type === "snowball") && gameData.chat_id) {
+        const dummyCtx = {
+          api: bot.api,
+          chat: { id: gameData.chat_id }
+        } as unknown as Context;
+
+        const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
+        if (creatorTelegramId && gameData.token_mint && gameData.token_ticker) {
+          const creatorUsername = await gameManager.getUsernameFromTelegramId(dummyCtx, creatorTelegramId);
+          const gameTypeKeys = Object.keys(event.gameType);
+          const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
+
+          await gameManager.updateGameMessage(
+            dummyCtx,
+            gameAddress,
+            gameType,
+            Number(event.amount),
+            creatorUsername,
+            "Active",
+            gameData.token_mint,
+            gameData.token_ticker
+          );
+        }
+      }
+    } catch (error) {
+      console.error("Error processing PlayerJoined event:", error);
+    }
+  });
+
+  // Set up PlayerUnjoined event listener to track lastSlot for winner calculation
+  console.log("Setting up PlayerUnjoined event listener...");
+  program.addEventListener('playerUnjoined', async (event: PlayerUnjoinedEvent) => {
+    try {
+      const gameAddress = event.gameKey.toString();
+      const lastSlot = event.lastSlot.toString();
+
+      console.log(`👤 PlayerUnjoined event: ${event.player.toString().slice(0, 8)}... left game ${gameAddress.slice(0, 8)}... (lastSlot: ${lastSlot})`);
+
+      // Update the lastSlot in database for winner calculation
+      gameDb.updateGameLastSlot(gameAddress, lastSlot);
+
+      // For dumbflip and snowball games, update the game message to show new expected winner
+      const gameData = gameDb.getGame(gameAddress);
+      if (gameData && (gameData.game_type === "dumbflip" || gameData.game_type === "snowball") && gameData.chat_id) {
+        const dummyCtx = {
+          api: bot.api,
+          chat: { id: gameData.chat_id }
+        } as unknown as Context;
+
+        const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
+        if (creatorTelegramId && gameData.token_mint && gameData.token_ticker) {
+          const creatorUsername = await gameManager.getUsernameFromTelegramId(dummyCtx, creatorTelegramId);
+          const gameTypeKeys = Object.keys(event.gameType);
+          const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
+
+          await gameManager.updateGameMessage(
+            dummyCtx,
+            gameAddress,
+            gameType,
+            Number(event.amount),
+            creatorUsername,
+            "Active",
+            gameData.token_mint,
+            gameData.token_ticker
+          );
+        }
+      }
+    } catch (error) {
+      console.error("Error processing PlayerUnjoined event:", error);
+    }
+  });
+
+  console.log("Player event listeners set up successfully");
 
   // Start periodic check for expired games
   setInterval(async () => {

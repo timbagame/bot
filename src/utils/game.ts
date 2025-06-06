@@ -2,6 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import { Context } from "grammy";
 import * as anchor from "@coral-xyz/anchor";
 import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } from "@solana/spl-token";
+import { createHash } from "crypto";
 import { WalletManager } from "./wallet";
 import { GameDatabase } from "./game-database";
 import { OracleClient } from "./oracle";
@@ -341,6 +342,10 @@ export class GameManager {
         statusText = "Full - starting soon!";
       }
       messageText += `\nStatus: ${statusText}${expirationInfo}`;
+
+      // Add expected winner info for dumbflip and snowball games
+      const expectedWinnerInfo = await this.getExpectedWinnerInfo(ctx, gamePda.toBase58(), gameType.toLowerCase());
+      messageText += expectedWinnerInfo;
     }
 
     messageText += winnerInfo;
@@ -639,7 +644,7 @@ export class GameManager {
         return;
       }
 
-      const { randomHash, gameAddress } = await this.oracleClient.generateGameSecrets();
+      const { randomHash, gameAddress } = await this.oracleClient.generateGameSecrets(gameType);
       const randomHashBuffer = this.oracleClient.hexToBuffer(randomHash);
       const gamePda = new PublicKey(gameAddress);
 
@@ -674,11 +679,11 @@ export class GameManager {
       this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker, maxPlayers, minPlayers);
       await this.createGameMessage(ctx, gamePda.toBase58(), gameType.charAt(0).toUpperCase() + gameType.slice(1), amount, ctx.from?.username || "Unknown", tokenMint, tokenTicker, "Active", tx);
 
-      // Auto-join for coinflips
-      if (gameType === "coinflip") {
-        await this.handleCoinflipAutoJoin(ctx, gamePda, playerKp, telegramId, creatorPubkey, gameType, amount, tokenMint, tokenTicker);
+      // Auto-join logic based on game type
+      if (gameType === "coinflip" || gameType === "dumbflip" || gameType === "snowball") {
+        await this.handleGameAutoJoin(ctx, gamePda, playerKp, telegramId, creatorPubkey, gameType, amount, tokenMint, tokenTicker);
       } else {
-        console.log(`🎁 Giveaway game ${gamePda.toBase58()} created - creator not auto-joined`);
+        console.log(`🎁 ${gameType.charAt(0).toUpperCase() + gameType.slice(1)} game ${gamePda.toBase58()} created - creator not auto-joined`);
       }
 
     } catch (error: any) {
@@ -688,7 +693,7 @@ export class GameManager {
     }
   }
 
-  private async handleCoinflipAutoJoin(
+  private async handleGameAutoJoin(
     ctx: Context,
     gamePda: PublicKey,
     playerKp: anchor.web3.Keypair,
@@ -699,7 +704,7 @@ export class GameManager {
     tokenMint: string,
     tokenTicker: string
   ): Promise<void> {
-    console.log(`🎮 Auto-joining creator to coinflip game ${gamePda.toBase58()}...`);
+    console.log(`🎮 Auto-joining creator to ${gameType} game ${gamePda.toBase58()}...`);
 
     try {
       const gameAccount = await this.program.account.game.fetch(gamePda);
@@ -733,7 +738,7 @@ export class GameManager {
       }
 
     } catch (joinError: any) {
-      console.error(`❌ Failed to auto-join creator to coinflip game: ${joinError.message}`);
+      console.error(`❌ Failed to auto-join creator to ${gameType} game: ${joinError.message}`);
       await ctx.reply(
         `⚠️ <b>Game created successfully, but failed to auto-join creator!</b>\n\n` +
         `Please manually join the game using the "🎮 Join" button.\n\n` +
@@ -758,6 +763,121 @@ export class GameManager {
       return Number(playerBalance.amount);
     } catch (error) {
       return 0;
+    }
+  }
+
+  /**
+   * Get expected winner for dumbflip and snowball games using secret key and lastSlot
+   */
+  private async getExpectedWinner(gameAddress: string, participants: string[]): Promise<string | null> {
+    try {
+      const secretKey = this.gameDb.getOracleSecretKey(gameAddress);
+      const lastSlot = this.gameDb.getGameLastSlot(gameAddress);
+
+      if (!secretKey || !lastSlot || participants.length === 0) {
+        return null;
+      }
+
+      return this.calculateWinnerFromSecretAndSlot(secretKey, lastSlot, participants);
+    } catch (error) {
+      console.error('Error calculating expected winner:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Calculate winner index using secret key and lastSlot (matching contract logic)
+   */
+  private calculateWinnerFromSecretAndSlot(secretKey: string, lastSlot: string, participants: string[]): string | null {
+    try {
+      const winnerIndex = this.calculateWinnerIndex(secretKey, BigInt(lastSlot), participants.length);
+      return participants[winnerIndex] || null;
+    } catch (error) {
+      console.error('Error in winner calculation:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Calculate winner index using the exact same algorithm as the contract
+   */
+  private calculateWinnerIndex(secretKey: string, lastSlot: bigint, nPlayers: number): number {
+    if (nPlayers <= 1) {
+      return 0;
+    }
+
+    // Convert secret key from hex string to buffer
+    const secretKeyBuffer = Buffer.from(secretKey, 'hex');
+    if (secretKeyBuffer.length !== 32) {
+      throw new Error("Invalid secret key length - must be 32 bytes");
+    }
+
+    // Hash combination of secret key and last_slot for additional entropy (matching contract logic)
+    const combinedData = Buffer.alloc(40); // 32 bytes secret + 8 bytes last_slot
+    secretKeyBuffer.copy(combinedData, 0, 0, 32);
+
+    // Convert bigint to little-endian bytes (matching contract's to_le_bytes())
+    const lastSlotBytes = Buffer.alloc(8);
+    const lastSlotNum = Number(lastSlot);
+    lastSlotBytes.writeUInt32LE(lastSlotNum & 0xffffffff, 0);
+    lastSlotBytes.writeUInt32LE(Math.floor(lastSlotNum / 0x100000000), 4);
+    lastSlotBytes.copy(combinedData, 32);
+
+    // Hash the combined data (matching contract's hash() function)
+    const entropyHash = createHash('sha256').update(combinedData).digest();
+
+    const maxU64 = BigInt('0xFFFFFFFFFFFFFFFF');
+    const nPlayersBig = BigInt(nPlayers);
+    const maxValid = maxU64 - (maxU64 % nPlayersBig);
+
+    // Try sliding 8-byte windows through the hashed entropy
+    for (let startPos = 0; startPos <= (32 - 8); startPos++) {
+      // Extract 8 bytes and convert to u64 using little-endian (matching contract)
+      const window = entropyHash.subarray(startPos, startPos + 8);
+
+      // Convert to BigInt using little-endian format
+      let randomU64 = BigInt(0);
+      for (let i = 0; i < 8; i++) {
+        const byte = window[i];
+        if (byte === undefined) {
+          throw new Error("Invalid entropy hash buffer size");
+        }
+        randomU64 |= BigInt(byte) << (BigInt(i) * BigInt(8));
+      }
+
+      // Use this value if it's in the unbiased range
+      if (randomU64 < maxValid) {
+        return Number(randomU64 % nPlayersBig);
+      }
+    }
+
+    throw new Error("Unable to generate unbiased random number - game must be cancelled");
+  }
+
+  /**
+   * Get expected winner info for display in game messages
+   */
+  private async getExpectedWinnerInfo(ctx: Context, gameAddress: string, gameType: string): Promise<string> {
+    if (gameType !== "dumbflip" && gameType !== "snowball") {
+      return "";
+    }
+
+    try {
+      const participants = this.gameDb.getGameParticipants(gameAddress);
+      if (participants.length === 0) {
+        return "\n🎯 Expected winner: No players yet";
+      }
+
+      const expectedWinnerTelegramId = await this.getExpectedWinner(gameAddress, participants);
+      if (!expectedWinnerTelegramId) {
+        return "";
+      }
+
+      const expectedWinnerUsername = await this.getUsernameFromTelegramId(ctx, expectedWinnerTelegramId);
+      return `\n🎯 Expected winner: @${expectedWinnerUsername}`;
+    } catch (error) {
+      console.error('Error getting expected winner info:', error);
+      return "";
     }
   }
 
@@ -819,9 +939,9 @@ export class GameManager {
       const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
       let tx: string;
 
-      if (gameType === "coinflip") {
-        // For coinflip games, unjoin all players including creator first
-        console.log(`🪙 Coinflip cancellation: unjoining all players first`);
+      if (gameType === "coinflip" || gameType === "dumbflip" || gameType === "snowball") {
+        // For coinflip, dumbflip, and snowball games, unjoin all players first
+        console.log(`🪙 ${gameType.charAt(0).toUpperCase() + gameType.slice(1)} cancellation: unjoining all players first`);
 
         // Get all participants from database
         const participants = this.getGamePlayers(gamePda.toBase58());
@@ -834,7 +954,7 @@ export class GameManager {
             if (playerPubkey) {
               const playerKp = this.wallet.getKeyPair(BigInt(telegramId));
               await this.unjoinPlayerFromGame(gamePda, playerKp, new PublicKey(playerPubkey));
-              console.log(`➡️ Unjoined player ${playerPubkey.slice(0, 8)}... from coinflip`);
+              console.log(`➡️ Unjoined player ${playerPubkey.slice(0, 8)}... from ${gameType}`);
             } else {
               console.error(`No public key found for player ${telegramId}`);
               allPlayersUnjoined = false;
@@ -848,7 +968,7 @@ export class GameManager {
 
         // Only proceed if all players were successfully unjoined
         if (!allPlayersUnjoined) {
-          console.log(`❌ Could not unjoin all players from coinflip ${gamePda.toBase58()}, skipping cancellation`);
+          console.log(`❌ Could not unjoin all players from ${gameType} ${gamePda.toBase58()}, skipping cancellation`);
           return false;
         }
 
@@ -864,7 +984,7 @@ export class GameManager {
         tx = await this.wallet.sendTransaction([cancelInstruction], [creatorKp]);
       } else {
         // For giveaway games, cancel directly without unjoining
-        console.log(`🎁 Giveaway cancellation: cancelling directly`);
+        console.log(`🎁 ${gameType.charAt(0).toUpperCase() + gameType.slice(1)} cancellation: cancelling directly`);
 
         const cancelInstruction = await this.program.methods
           .cancelGame()
@@ -984,13 +1104,13 @@ export class GameManager {
       const gameAccount = await this.program.account.game.fetch(gamePda);
       console.log(`Attempting to cancel ${gameType} game ${gamePda.toBase58()} using player keys`);
 
-      // For coinflip games, unjoin all players first
-      if (gameType === "coinflip") {
+      // For coinflip, dumbflip, and snowball games, unjoin all players first
+      if (gameType === "coinflip" || gameType === "dumbflip" || gameType === "snowball") {
         // Get players from database since the contract no longer stores players array
         const participants = this.getGamePlayers(gamePda.toBase58());
 
         if (participants.length > 0) {
-          console.log(`Coinflip has ${participants.length} players, unjoining all of them first`);
+          console.log(`${gameType.charAt(0).toUpperCase() + gameType.slice(1)} has ${participants.length} players, unjoining all of them first`);
           let allPlayersUnjoined = true;
 
           // Unjoin all players including creator
@@ -1000,7 +1120,7 @@ export class GameManager {
               if (playerPubkey) {
                 const playerKp = this.wallet.getKeyPair(BigInt(telegramId));
                 await this.unjoinPlayerFromGame(gamePda, playerKp, new PublicKey(playerPubkey));
-                console.log(`➡️ Unjoined player ${playerPubkey.slice(0, 8)}... from coinflip`);
+                console.log(`➡️ Unjoined player ${playerPubkey.slice(0, 8)}... from ${gameType}`);
               } else {
                 console.error(`No public key found for player ${telegramId}`);
                 allPlayersUnjoined = false;
@@ -1014,8 +1134,8 @@ export class GameManager {
 
           // Only proceed if all players were successfully unjoined
           if (!allPlayersUnjoined) {
-            console.log(`❌ Could not unjoin all players from coinflip ${gamePda.toBase58()}, skipping cancellation`);
-            return { success: false, error: "Could not unjoin all players from coinflip game" };
+            console.log(`❌ Could not unjoin all players from ${gameType} ${gamePda.toBase58()}, skipping cancellation`);
+            return { success: false, error: `Could not unjoin all players from ${gameType} game` };
           }
         }
       }

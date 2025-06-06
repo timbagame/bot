@@ -111,6 +111,26 @@ export interface GameCompletedEvent {
   feeAmount: anchor.BN;
 }
 
+export interface PlayerJoinedEvent {
+  gameKey: PublicKey;
+  player: PublicKey;
+  gameType: any;
+  amount: anchor.BN;
+  totalPot: anchor.BN;
+  currentPlayers: number;
+  lastSlot: anchor.BN;
+}
+
+export interface PlayerUnjoinedEvent {
+  gameKey: PublicKey;
+  player: PublicKey;
+  gameType: any;
+  amount: anchor.BN;
+  totalPot: anchor.BN;
+  currentPlayers: number;
+  lastSlot: anchor.BN;
+}
+
 // ================================
 // ORACLE TYPES
 // ================================
@@ -125,6 +145,7 @@ export interface OracleApiResponse {
   success: boolean;
   randomHash?: string;
   gameAddress?: string;
+  secretKey?: string;
   error?: string;
 }
 
@@ -152,7 +173,7 @@ export interface OracleHealthResponse {
 // UTILITY TYPES
 // ================================
 
-export type GameType = "coinflip" | "giveaway";
+export type GameType = "coinflip" | "giveaway" | "dumbflip" | "snowball";
 
 export interface TokenMetadata {
   decimals: number;

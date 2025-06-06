@@ -38,7 +38,8 @@ export class GameDatabase {
           token_mint TEXT,
           token_ticker TEXT,
           max_players INTEGER,
-          min_players INTEGER
+          min_players INTEGER,
+          last_slot TEXT
         )
       `);
 
@@ -105,12 +106,12 @@ export class GameDatabase {
 
   public getOracleSecretKey(gameAddress: string): string | null {
     try {
-      const stmt = this.db.prepare('SELECT secret_key FROM secret_keys WHERE game_address = ?');
+      const stmt = this.db.prepare("SELECT secret_key FROM secret_keys WHERE game_address = ?");
       const result = stmt.get(gameAddress) as { secret_key: string } | undefined;
       return result?.secret_key || null;
     } catch (error) {
       console.error("Error getting oracle secret key:", error);
-      throw error;
+      return null;
     }
   }
 
@@ -317,6 +318,32 @@ export class GameDatabase {
     } catch (error) {
       console.error("Error getting recent games:", error);
       throw error;
+    }
+  }
+
+  /**
+   * Update the lastSlot for a game (used for winner calculation)
+   */
+  public updateGameLastSlot(gameAddress: string, lastSlot: string): void {
+    try {
+      const stmt = this.db.prepare("UPDATE games SET last_slot = ? WHERE game_address = ?");
+      stmt.run(lastSlot, gameAddress);
+    } catch (error) {
+      console.error("Error updating game lastSlot:", error);
+    }
+  }
+
+  /**
+   * Get the lastSlot for a game
+   */
+  public getGameLastSlot(gameAddress: string): string | null {
+    try {
+      const stmt = this.db.prepare("SELECT last_slot FROM games WHERE game_address = ?");
+      const result = stmt.get(gameAddress) as { last_slot: string } | undefined;
+      return result?.last_slot || null;
+    } catch (error) {
+      console.error("Error getting game lastSlot:", error);
+      return null;
     }
   }
 }

@@ -3,7 +3,8 @@ import type {
   AuthorizationResult,
   OracleApiResponse,
   OracleStats,
-  OracleStatsResponse
+  OracleStatsResponse,
+  GameType
 } from "../types";
 import { GameDatabase } from "./game-database";
 import { WalletManager } from "./wallet";
@@ -40,13 +41,14 @@ export class OracleClient {
   /**
    * Request a random hash from the oracle API for game creation
    */
-  public async generateGameSecrets(): Promise<{ randomHash: string; gameAddress: string }> {
+  public async generateGameSecrets(gameType: GameType): Promise<{ randomHash: string; gameAddress: string; secretKey?: string }> {
     try {
       const response = await fetch(`${this.oracleApiUrl}/generate-hash`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
+        body: JSON.stringify({ gameType })
       });
 
       if (!response.ok) {
@@ -59,13 +61,23 @@ export class OracleClient {
         throw new Error(data.error || 'Failed to generate random hash');
       }
 
-      console.log(`✅ Generated random hash from oracle: ${data.randomHash}`);
+      console.log(`✅ Generated random hash from oracle for ${gameType}: ${data.randomHash}`);
       console.log(`📍 Game address: ${data.gameAddress}`);
 
-      return {
+      const result: { randomHash: string; gameAddress: string; secretKey?: string } = {
         randomHash: data.randomHash,
         gameAddress: data.gameAddress
       };
+
+      // Store secret key for dumbflip and snowball games
+      if ((gameType === "dumbflip" || gameType === "snowball") && data.secretKey) {
+        result.secretKey = data.secretKey;
+        // Store in database for later use
+        this.gameDb.saveOracleSecretKey(data.gameAddress, data.secretKey);
+        console.log(`🔐 Secret key stored for ${gameType} game`);
+      }
+
+      return result;
     } catch (error) {
       console.error('❌ Error requesting random hash from oracle:', error);
       throw new Error(`Oracle API unavailable: ${(error as Error).message}`);
