@@ -338,7 +338,9 @@ export class GameManager {
 
     // Show amount per player and total pot
     let amountDisplay = `💰 Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}`;
-    if (currentPlayers > 1 || totalPot !== amount) {
+    // For snowball games, always show total pot since it's a growing pot concept
+    // For other games, only show total pot when there are multiple players or when totalPot != amount
+    if (gameType.toLowerCase() === "snowball" || currentPlayers > 1 || totalPot !== amount) {
       amountDisplay += `\n🎯 Total Pot: ${this.wallet.formatTokenBalance(totalPot, metadata.decimals)} ${tokenTicker}`;
     }
 
