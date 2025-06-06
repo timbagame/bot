@@ -754,6 +754,8 @@ export class GameManager {
     const maxWaitTime = 30000; // 30 seconds
 
     return new Promise((resolve, reject) => {
+      let listenerRemoved = false;
+
       // Set up one-time event listener for GameInitialized
       const listener = this.program.addEventListener('gameInitialized', (event, _slot, signature) => {
         try {
@@ -764,20 +766,41 @@ export class GameManager {
 
             console.log(`✅ Received GameInitialized event with nonce: ${eventNonce}`);
 
-            // Remove the listener and resolve
-            this.program.removeEventListener(listener);
+            // Remove the listener and resolve (only if not already removed)
+            if (!listenerRemoved) {
+              listenerRemoved = true;
+              try {
+                this.program.removeEventListener(listener);
+              } catch (removeError) {
+                console.warn('Event listener already removed:', removeError);
+              }
+            }
             resolve({ gamePda, eventNonce });
           }
         } catch (error) {
           console.error('Error processing GameInitialized event:', error);
-          this.program.removeEventListener(listener);
+          if (!listenerRemoved) {
+            listenerRemoved = true;
+            try {
+              this.program.removeEventListener(listener);
+            } catch (removeError) {
+              console.warn('Event listener already removed:', removeError);
+            }
+          }
           reject(error);
         }
       });
 
       // Set timeout to cleanup if event never comes
       setTimeout(() => {
-        this.program.removeEventListener(listener);
+        if (!listenerRemoved) {
+          listenerRemoved = true;
+          try {
+            this.program.removeEventListener(listener);
+          } catch (removeError) {
+            console.warn('Event listener already removed during timeout:', removeError);
+          }
+        }
         reject(new Error(`GameInitialized event not received within ${maxWaitTime}ms for tx: ${txSignature}`));
       }, maxWaitTime);
     });
@@ -1084,13 +1107,14 @@ export class GameManager {
         }
       }
 
-      // For snowball games with multiple players, we cannot unjoin them, so we skip the unjoin step
+            // For snowball games, check if cancellation is possible based on player count
       if (gameType === "snowball") {
         const participants = this.getGamePlayers(gamePda.toBase58());
         if (participants.length >= 2) {
-          console.log(`❄️ Snowball game has ${participants.length} players - cannot unjoin, proceeding directly to cancellation`);
+          console.log(`❄️ Snowball game has ${participants.length} players - contract prevents cancellation with multiple players`);
+          return { success: false, error: `Snowball games with multiple players cannot be cancelled` };
         } else if (participants.length === 1) {
-          // If only 1 player, we can unjoin them
+          // If only 1 player, we can unjoin them first, then cancel
           const telegramId = participants[0];
           if (!telegramId) {
             console.error(`No telegram ID found for single player in snowball`);
@@ -1112,6 +1136,7 @@ export class GameManager {
             return { success: false, error: `Could not unjoin single player from snowball game` };
           }
         }
+        // If 0 players or single player successfully unjoined, proceed to cancellation
       }
 
       // Now cancel the game using creator's key
