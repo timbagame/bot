@@ -39,24 +39,21 @@ const formatDate = (timestamp: number): string => {
   });
 };
 
-const formatExpirationTime = (createdAt: number, timeout: number, prefix: string = "⏰ "): string => {
-  const expiresAt = createdAt + timeout;
-  const expirationDate = new Date(expiresAt * 1000);
-  const now = new Date();
-  const timeUntilExpiry = expirationDate.getTime() - now.getTime();
+const formatExpirationTime = async (expiresAt: number, walletManager?: WalletManager, prefix: string = "⏰ "): Promise<string> => {
+  const blockTime = walletManager ? await walletManager.getBlockchainTime() : Math.floor(Date.now() / 1000);
+  const timeRemaining = Math.max(0, expiresAt - blockTime);
 
-  if (timeUntilExpiry > 0) {
-    const minutesLeft = Math.floor(timeUntilExpiry / (1000 * 60));
-    const hoursLeft = Math.floor(minutesLeft / 60);
-    const remainingMinutes = minutesLeft % 60;
-
-    if (hoursLeft > 0) {
-      return `${prefix}Expires in: ${hoursLeft}h ${remainingMinutes}m`;
-    } else {
-      return `${prefix}Expires in: ${minutesLeft}m`;
-    }
-  } else {
+  if (timeRemaining <= 0) {
     return `${prefix}Expired`;
+  }
+
+  const hours = Math.floor(timeRemaining / 3600);
+  const minutes = Math.floor((timeRemaining % 3600) / 60);
+
+  if (hours > 0) {
+    return `${prefix}Expires in: ${hours}h ${minutes}m`;
+  } else {
+    return `${prefix}Expires in: ${minutes}m`;
   }
 };
 
@@ -284,11 +281,8 @@ export class GameManager {
         }
 
         // Add expiration info for active games
-        if (gameAccount) {
-          const createdAt = Number(gameAccount.createdAt);
-          const timeout = Number(gameAccount.timeout);
-          expirationInfo = "\n" + formatExpirationTime(createdAt, timeout);
-        }
+        const expiresAt = Number(gameAccount.expiresAt);
+        expirationInfo = "\n" + await formatExpirationTime(expiresAt, this.wallet);
       } catch (error: any) {
         // If we can't fetch the account, it's likely been closed due to completion
         if (error.message?.includes('Account does not exist')) {
@@ -489,9 +483,8 @@ export class GameManager {
         : `<code>${creatorPubkey.slice(0, ADDRESS_DISPLAY_LENGTH)}...</code>`;
 
       // Add expiration info
-      const createdAt = Number(gameAccount.createdAt);
-      const timeout = Number(gameAccount.timeout);
-      const expirationInfo = "\n" + formatExpirationTime(createdAt, timeout);
+      const expiresAt = Number(gameAccount.expiresAt);
+      const expirationInfo = "\n" + await formatExpirationTime(expiresAt, this.wallet);
 
       let winnerInfo = "";
       if (gameData && gameData.winner_address && gameData.winner_address !== "cancelled" && gameData.winner_address !== DEFAULT_NULL_ADDRESS) {
@@ -538,10 +531,14 @@ export class GameManager {
         winnerInfo = `\nStatus: Cancelled`;
       }
 
+      // Add expiration info
+      const expiresAt = Number(gameData.expiresAt);
+      const expirationInfo = "\n" + await formatExpirationTime(expiresAt, this.wallet);
+
       return `Type: ${gameType}\n` +
              `Amount: ${this.wallet.formatTokenBalance(gameData.amount, metadata.decimals)} ${tokenTicker}\n` +
              `Creator: ${creatorInfo}\n` +
-             `Players: ${participants.length}${winnerInfo}`;
+             `Players: ${participants.length}${expirationInfo}${winnerInfo}`;
     } catch (error: any) {
       return `Error getting game info: ${error.message}`;
     }
@@ -771,10 +768,9 @@ export class GameManager {
   public async handleExpiredGame(ctx: Context, gamePda: PublicKey, gameAccount: any): Promise<GameCancellationResult | false> {
     try {
       const blockTime = await this.wallet.getBlockchainTime();
-      const createdAt = Number(gameAccount.createdAt);
-      const timeout = Number(gameAccount.timeout);
-      const expiresAt = createdAt + timeout;
-      const isExpired = blockTime > expiresAt;
+      const expiresAt = Number(gameAccount.expiresAt);
+      const timeRemaining = Math.max(0, expiresAt - blockTime);
+      const isExpired = timeRemaining <= 0;
 
       if (!isExpired) return false;
 
@@ -1299,13 +1295,11 @@ export class GameManager {
   }
 
   private isGameExpiredWithBuffer(gameAccount: any): boolean {
-    const blockTime = Date.now() / 1000; // Use system time for simplicity
-    const gameCreatedAt = Number(gameAccount.createdAt);
-    const gameTimeout = Number(gameAccount.timeout);
-    const oracleBufferTime = 300; // 5 minutes
-    const finalDeadline = gameCreatedAt + gameTimeout + oracleBufferTime;
-
-    return blockTime > finalDeadline;
+    const now = Math.floor(Date.now() / 1000);
+    const expiresAt = Number(gameAccount.expiresAt);
+    const oracleBufferTime = 300; // 5 minutes buffer
+    const finalDeadline = expiresAt + oracleBufferTime;
+    return now > finalDeadline;
   }
 
   private getGameType(gameAccount: any): string {

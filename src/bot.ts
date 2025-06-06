@@ -245,7 +245,7 @@ const cleanupPlayerParticipation = async (
 
         // Execute cleanup instruction directly (account should exist since game just completed)
         const cleanupInstruction = await program.methods
-          .cleanupPlayerParticipation()
+          .cleanPlayerParticipation()
           .accounts({
             game: gamePda,
             player: playerPubkeyObj,
@@ -1509,9 +1509,7 @@ setupAnchor().then(async () => {
 
           // Check if game is expired
           const blockTime = await wallet.getBlockchainTime();
-          const createdAt = Number(gameAccount.createdAt);
-          const timeout = Number(gameAccount.timeout);
-          const expiresAt = createdAt + timeout;
+          const expiresAt = Number(gameAccount.expiresAt);
           const isExpired = blockTime > expiresAt;
 
           if (isExpired) {
