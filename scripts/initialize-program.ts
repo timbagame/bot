@@ -3,8 +3,7 @@ import * as anchor from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
 import type { Coinflip } from "../idl/idlType";
 import idl from "../idl/idl.json";
-
-const TOKEN_MINT = process.env.TOKEN_MINT!;
+import { DEFAULT_TOKEN_MINT } from "../src/utils/constants";
 
 // Initialize wallet manager
 const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
@@ -55,9 +54,9 @@ const initializeOracle = async (program: anchor.Program<Coinflip>) => {
     const oracleConfig = {
       feePercentage: 1,        // 1% fee
       oracleBufferTime: 300,   // 5 minute buffer
-      maxPlayers: 100,         // 100 max players
-      maxTimeout: 7200,        // 2 hours max timeout
-      minTimeout: 300          // 5 minutes min timeout
+      maxPlayers: 1000000,         // 1.000.000 max players
+      maxTimeout: 86400,        // 24 hours max timeout
+      minTimeout: 60          // 1 minute min timeout
     };
 
     const oracleInstruction = await program.methods
@@ -79,7 +78,7 @@ const initializeOracle = async (program: anchor.Program<Coinflip>) => {
 // Initialize Game Token if it doesn't exist
 const initializeGameToken = async (program: anchor.Program<Coinflip>) => {
   try {
-    const tokenMintPubkey = new PublicKey(TOKEN_MINT);
+    const tokenMintPubkey = new PublicKey(DEFAULT_TOKEN_MINT);
 
     // Get Game Token PDA
     const [gameTokenPda] = PublicKey.findProgramAddressSync(
@@ -146,7 +145,7 @@ const initializeGameToken = async (program: anchor.Program<Coinflip>) => {
     console.log("Initializing game token...");
     const tokenInstruction = await program.methods
       .initializeToken(
-        new anchor.BN(1_000), // Minimum amount in lamports (0.001 token)
+        new anchor.BN(1_000), // Minimum amount in lamports
         true // Enabled
       )
       .accounts({
@@ -158,6 +157,20 @@ const initializeGameToken = async (program: anchor.Program<Coinflip>) => {
     const tx = await wallet.sendTransaction([tokenInstruction], [adminKeypair]);
     await wallet.confirmTransaction(tx);
     console.log(`Game Token initialized! Transaction: ${tx}`);
+
+    // Wait and verify the account was created
+    console.log("Verifying game token account...");
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Try to fetch the account to verify initialization
+    try {
+      const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
+      console.log(`✅ Game Token verified with min amount: ${gameTokenAccount.minAmount.toString()}`);
+    } catch (verifyError) {
+      console.warn(`⚠️ Could not immediately verify game token account, but transaction was confirmed: ${tx}`);
+      console.log("The account may take a moment to be available on the network.");
+    }
+
     return gameTokenPda;
   } catch (error) {
     console.error("Error initializing Game Token:", error);

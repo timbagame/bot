@@ -178,7 +178,7 @@ async function initializeGameToken() {
     console.log('\n🔄 Initializing game token...');
     const tokenInstruction = await program.methods
       .initializeToken({
-        minAmount: new anchor.BN(1_000), // Minimum amount in lamports (0.001 token)
+        minAmount: new anchor.BN(1_000), // Minimum amount in lamports
         enabled: true // Enabled
       })
       .accounts({
@@ -194,7 +194,35 @@ async function initializeGameToken() {
 
     // Verify initialization
     console.log('\n🔍 Verifying initialization...');
-    const gameTokenData = await program.account.gameToken.fetch(gameTokenPda);
+
+    // Wait a moment for account to be available
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Retry fetching the account with exponential backoff
+    let gameTokenData: any = null;
+    let retries = 0;
+    const maxRetries = 5;
+
+    while (retries < maxRetries) {
+      try {
+        gameTokenData = await program.account.gameToken.fetch(gameTokenPda);
+        break;
+      } catch (error: any) {
+        retries++;
+        if (retries === maxRetries) {
+          console.error(`❌ Failed to verify account after ${maxRetries} attempts`);
+          console.error('This might be a timing issue. The account may still be initializing.');
+          console.error('You can manually verify by checking the account later.');
+          throw error;
+        }
+        console.log(`⏳ Attempt ${retries}/${maxRetries} - Account not found, retrying in ${retries * 2} seconds...`);
+        await new Promise(resolve => setTimeout(resolve, retries * 2000));
+      }
+    }
+
+    if (!gameTokenData) {
+      throw new Error('Failed to fetch game token data after successful initialization');
+    }
 
     console.log('\n🎉 Game Token Details:');
     console.log('=====================================');

@@ -6,8 +6,6 @@ declare global {
             TELEGRAM_TOKEN: string;
             SOLANA_NETWORK: string;
             MNEMONIC: string;
-            TOKEN_MINT: string;
-            TICKER: string;
         }
     }
 }
