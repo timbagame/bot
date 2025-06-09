@@ -1070,7 +1070,8 @@ export class GameManager {
       const gameAccount = await this.program.account.game.fetch(gamePda);
       console.log(`Attempting to cancel ${gameType} game ${gamePda.toBase58()} using player keys`);
 
-            // For all game types, unjoin all players first before cancellation (after buffer time)
+            // For competitive game types, unjoin all players first before cancellation (after buffer time)
+      // Giveaways can be cancelled without unjoining players since creator is giving away their tokens
       if (gameType === "coinflip" || gameType === "dumbflip" || gameType === "snowball") {
         // Get players from database since the contract no longer stores players array
         const participants = this.getGamePlayers(gamePda.toBase58());
