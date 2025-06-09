@@ -310,7 +310,7 @@ export class GameManager {
     let messageText = `<b>🪙 ${gameType} Game</b>\n\n` +
       `${amountDisplay}\n` +
       `👤 Creator: @${creatorUsername}\n` +
-      `👥 Players: ${currentPlayers}/${maxPlayers}${expirationInfo}`;
+      `👥 Players: ${currentPlayers}/${maxPlayers}`;
 
     if (status.toLowerCase() !== "completed") {
       let statusText: string;
