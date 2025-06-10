@@ -8,7 +8,7 @@ import { GameDatabase } from "./game-database";
 import { OracleClient } from "./oracle";
 import { PDAManager } from "./pda";
 import { formatUserFriendlyError } from "./errors";
-import { DEFAULT_NULL_ADDRESS, ADDRESS_DISPLAY_LENGTH, GAME_INFO_LIMIT } from "./constants";
+import { DEFAULT_NULL_ADDRESS, ADDRESS_DISPLAY_LENGTH, GAME_INFO_LIMIT, GAME_EXPIRATION_BUFFER_TIME, PLAYER_CLEANUP_DELAY_MS } from "./constants";
 import type {
   GameMessage,
   GameCancellationResult,
@@ -183,6 +183,9 @@ export class GameManager {
   // USERNAME UTILITIES
   // ================================
 
+  /**
+   * Get username from Telegram ID with consistent error handling
+   */
   public async getUsernameFromTelegramId(ctx: Context, telegramId: string): Promise<string> {
     try {
       const numericId = parseInt(telegramId, 10);
@@ -193,20 +196,33 @@ export class GameManager {
       const chatMember = await ctx.api.getChatMember(ctx.chat!.id, numericId);
       return chatMember.user.username || chatMember.user.first_name || "Unknown User";
     } catch (error) {
-      console.error(`Error getting username for Telegram ID ${telegramId}:`, error);
-      return "Unknown";
+      console.warn(`Error getting username for Telegram ID ${telegramId}:`, error);
+      return `User${telegramId.slice(0, 6)}`;
     }
   }
 
+  /**
+   * Get game creator username with fallback to address display
+   */
   public async getGameCreatorUsername(ctx: Context, gameAddress: string): Promise<string> {
     const creatorTelegramId = this.gameDb.getCreatorTelegramId(gameAddress);
     if (!creatorTelegramId) {
-      console.error(`No creator telegram ID found for game ${gameAddress}`);
-      return "Unknown";
+      console.warn(`No creator telegram ID found for game ${gameAddress}`);
+      // Try to get creator from game account as fallback
+      try {
+        const gamePda = new PublicKey(gameAddress);
+        const gameAccount = await this.program.account.game.fetch(gamePda);
+        return gameAccount.creator.toString().slice(0, ADDRESS_DISPLAY_LENGTH) + "...";
+      } catch (error) {
+        return "Unknown";
+      }
     }
     return this.getUsernameFromTelegramId(ctx, creatorTelegramId);
   }
 
+  /**
+   * Get player username with fallback to address display
+   */
   public async getPlayerUsername(ctx: Context, publicKey: string): Promise<string> {
     const playerTelegramId = this.gameDb.getPlayerTelegramId(publicKey);
     if (!playerTelegramId) {
@@ -531,15 +547,16 @@ export class GameManager {
         console.log(`🧹 Cleaned up PlayerParticipation for ${playerPubkey.slice(0, 8)}... - tx: ${tx.slice(0, 8)}...`);
 
         // Small delay to avoid overwhelming the RPC
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, PLAYER_CLEANUP_DELAY_MS));
 
       } catch (error: any) {
         // Check if the account doesn't exist (already cleaned up) vs other errors
         if (error.message?.includes('Account does not exist') || error.message?.includes('could not find account')) {
           console.log(`✅ PlayerParticipation account already cleaned up for participant ${telegramId}`);
+          // Don't increment failed count for accounts that are already cleaned up
         } else {
           failedCount++;
-          console.error(`❌ Failed to cleanup PlayerParticipation for participant ${telegramId}:`, error.message);
+          console.error(`❌ Failed to cleanup PlayerParticipation for participant ${telegramId}:`, error.message || error);
         }
       }
     }
@@ -1408,8 +1425,7 @@ export class GameManager {
     const createdAt = Number(gameAccount.createdAt);
     const timeout = Number(gameAccount.timeout);
     const expiresAt = createdAt + timeout;
-    const bufferTime = 300; // 5 minutes buffer
-    return currentTime > (expiresAt + bufferTime);
+    return currentTime > (expiresAt + GAME_EXPIRATION_BUFFER_TIME);
   }
 
   private getGameType(gameAccount: any): string {

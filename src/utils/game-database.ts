@@ -358,19 +358,6 @@ export class GameDatabase {
   }
 
   /**
-   * Update the lastSlot for a game (used for winner calculation)
-   * @deprecated Use updateGameLastSlotWithTimestamp instead for proper ordering
-   */
-  public updateGameLastSlot(gameAddress: string, lastSlot: string): void {
-    try {
-      const stmt = this.db.prepare("UPDATE games SET last_slot = ?, last_slot_timestamp = ? WHERE game_address = ?");
-      stmt.run(lastSlot, Date.now(), gameAddress);
-    } catch (error) {
-      console.error("Error updating game lastSlot:", error);
-    }
-  }
-
-  /**
    * Get the lastSlot and its timestamp for a game
    */
   public getGameLastSlotWithTimestamp(gameAddress: string): { lastSlot: string | null; timestamp: number | null } {

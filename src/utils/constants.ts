@@ -29,7 +29,6 @@ export const EXPIRED_GAMES_CHECK_INTERVAL_MS = 60000; // 1 minute
 // CACHE DURATIONS (in milliseconds)
 // ================================
 
-export const TOKEN_METADATA_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 export const BLOCKHASH_CACHE_DURATION = 10 * 1000; // 10 seconds
 
 // ================================
@@ -51,3 +50,10 @@ export const DEFAULT_TOKEN_TICKER = "TIMBA";
 export const TOKENS_LIST = [
   { mint: "So11111111111111111111111111111111111111112", ticker: "WSOL" },
 ];
+
+// ================================
+// GAME BUFFER AND TIMING
+// ================================
+
+export const GAME_EXPIRATION_BUFFER_TIME = 300; // 5 minutes buffer for expired games
+export const PLAYER_CLEANUP_DELAY_MS = 100; // Delay between player participation cleanups

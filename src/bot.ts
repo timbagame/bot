@@ -19,7 +19,7 @@ import {
   SNOWBALL_TIMEOUT,
   SNOWBALL_MAX_PLAYERS,
   EXPIRED_GAMES_CHECK_INTERVAL_MS,
-  TOKEN_METADATA_CACHE_DURATION,
+  GAME_EXPIRATION_BUFFER_TIME,
   DEFAULT_TOKEN_MINT,
   DEFAULT_TOKEN_TICKER,
   TOKENS_LIST
@@ -41,9 +41,7 @@ let program: anchor.Program<Coinflip>;
 let gameManager: GameManager;
 let tokenManager: TokenManager;
 
-// Token metadata cache
-let tokenMetadata: { decimals: number } | null = null;
-let tokenMetadataLastFetch: number = 0;
+// Removed redundant token metadata cache - using WalletManager's built-in caching
 
 // ================================
 // BOT SEQUENTIALIZATION
@@ -71,13 +69,8 @@ bot.use(sequentialize(getSequentializationKey));
 // UTILITY FUNCTIONS
 // ================================
 
-const getTokenMetadata = async () => {
-  const now = Date.now();
-  if (!tokenMetadata || now - tokenMetadataLastFetch > TOKEN_METADATA_CACHE_DURATION) {
-    tokenMetadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
-    tokenMetadataLastFetch = now;
-  }
-  return tokenMetadata;
+const getDefaultTokenMetadata = async () => {
+  return await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
 };
 
 const getPlayerData = async (telegramId: bigint, tokenMint?: string): Promise<PlayerData> => {
@@ -160,7 +153,7 @@ const validateAndProcessTransaction = async (
   transactionFn: (playerData: PlayerData) => Promise<string>
 ): Promise<void> => {
   const playerData = await getPlayerData(telegramId);
-  const metadata = await getTokenMetadata();
+  const metadata = await getDefaultTokenMetadata();
 
   // Claim winnings if not using SOL
   if (!isSol) {
@@ -349,7 +342,7 @@ const checkGameTokenStatus = async () => {
     const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
 
     // Get token metadata to format the amount properly
-    const metadata = await getTokenMetadata();
+    const metadata = await getDefaultTokenMetadata();
     const formattedMinAmount = wallet.formatTokenBalance(
       Number(gameTokenAccount.minAmount),
       metadata.decimals
@@ -875,7 +868,7 @@ bot.command("debug", async (ctx: Context) => {
 
 const buildDebugInfo = async (telegramId: bigint, name: string, isReplyTarget: boolean = false): Promise<string> => {
   const playerData = await getPlayerData(telegramId);
-  const metadata = await getTokenMetadata();
+  const metadata = await getDefaultTokenMetadata();
 
   const { getAssociatedTokenAddress } = await import("@solana/spl-token");
   const tokenAccount = await getAssociatedTokenAddress(
@@ -1812,8 +1805,7 @@ setupAnchor().then(async () => {
           const createdAt = Number(gameAccount.createdAt);
           const timeout = Number(gameAccount.timeout);
           const expiresAt = createdAt + timeout;
-          const bufferTime = 300; // 5 minutes buffer - must match GameManager.isGameExpiredWithBuffer
-          const isExpired = blockTime > (expiresAt + bufferTime);
+          const isExpired = blockTime > (expiresAt + GAME_EXPIRATION_BUFFER_TIME);
 
           if (isExpired) {
             console.log(`Processing expired game ${game.game_address} (${gameAccount.playersCount}/${gameAccount.maxPlayers})`);

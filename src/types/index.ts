@@ -137,17 +137,6 @@ export interface PlayerRolledEvent {
   timestamp: anchor.BN;
 }
 
-export interface PlayerParticipationCleanedEvent {
-  gameKey: PublicKey;
-  player: PublicKey;
-  totalAmount: anchor.BN;
-  playersCount: number;
-  playerIndex: number;
-  refundAmount: anchor.BN;
-  isCompletedGame: boolean;
-  timestamp: anchor.BN;
-}
-
 // ================================
 // ORACLE TYPES
 // ================================

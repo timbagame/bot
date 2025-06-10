@@ -5,7 +5,6 @@ import * as fs from "fs";
 import * as path from "path";
 import {
   WALLET_RATE_LIMIT_MS,
-  TOKEN_METADATA_CACHE_DURATION,
   BLOCKHASH_CACHE_DURATION,
   SOL_BALANCE_PRECISION,
   TOKEN_BALANCE_MAX_PRECISION,
@@ -235,6 +234,8 @@ export class WalletManager {
     const cached = this.tokenMetadataCache.get(tokenMint);
     const now = Date.now();
 
+    // Cache token metadata for 5 minutes
+    const TOKEN_METADATA_CACHE_DURATION = 5 * 60 * 1000;
     if (cached && now - cached.timestamp < TOKEN_METADATA_CACHE_DURATION) {
       return { decimals: cached.decimals };
     }
