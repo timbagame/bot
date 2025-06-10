@@ -1857,8 +1857,43 @@ setupAnchor().then(async () => {
           if (error.message?.includes('Account does not exist')) {
             const gameData = gameDb.getGame(game.game_address);
             if (gameData && gameData.status !== "completed") {
-              console.log(`Game ${game.game_address} account not found but not marked as completed in DB`);
-              // Don't automatically mark as cancelled - it might have been completed by the oracle
+              console.log(`🧹 Cleaning up orphaned game ${game.game_address} - account closed but DB shows active`);
+
+              // Mark as completed with cancelled status since we don't know the actual outcome
+              gameDb.completeGame(game.game_address, "cancelled", Date.now());
+
+              // Try to update the game message if we have the chat info
+              if (gameData.chat_id && gameData.message_id) {
+                try {
+                  const dummyCtx = {
+                    api: bot.api,
+                    chat: { id: gameData.chat_id }
+                  } as unknown as Context;
+
+                  const creatorTelegramId = gameDb.getCreatorTelegramId(game.game_address);
+                  if (creatorTelegramId && gameData.token_mint && gameData.token_ticker) {
+                    const creatorUsername = await gameManager.getUsernameFromTelegramId(dummyCtx, creatorTelegramId);
+                    const gameType = gameData.game_type ? gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1) : "Game";
+
+                    await gameManager.updateGameMessage(
+                      dummyCtx,
+                      game.game_address,
+                      gameType,
+                      gameData.amount,
+                      creatorUsername,
+                      "Completed",
+                      gameData.token_mint,
+                      gameData.token_ticker,
+                      "cancelled"
+                    );
+                    console.log(`📝 Updated message for cleaned up game ${game.game_address}`);
+                  }
+                } catch (messageError) {
+                  console.warn(`Could not update message for cleaned up game ${game.game_address}:`, messageError);
+                }
+              }
+
+              console.log(`✅ Successfully cleaned up orphaned game ${game.game_address}`);
             }
           } else {
             console.error(`Error processing game ${game.game_address}:`, error);
