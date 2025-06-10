@@ -621,7 +621,7 @@ export class GameManager {
         return;
       }
 
-                  const { randomHash, secretKey } = await this.oracleClient.generateGameSecrets(gameType);
+      const { randomHash, secretKey } = await this.oracleClient.generateGameSecrets(gameType);
       const randomHashBuffer = this.oracleClient.hexToBuffer(randomHash);
 
       await this.ensurePlayerBalance(playerKp, tokenMint);
@@ -646,10 +646,10 @@ export class GameManager {
 
       const tx = await this.wallet.sendTransaction([gameInstruction], [playerKp]);
 
-      // Listen for GameInitialized event to get the correct nonce and game address
-      const { gamePda, eventNonce } = await this.waitForGameInitializedEvent(tx, new PublicKey(tokenMint), randomHashBuffer);
+      // Game PDA is now derived directly from random hash (no nonce needed)
+      const gamePda = PDAManager.getGamePDA(randomHashBuffer, this.program.programId);
 
-      console.log(`📍 Game address from event: ${gamePda.toBase58()} (nonce: ${eventNonce})`);
+      console.log(`📍 Game address: ${gamePda.toBase58()}`);
 
       const gameCreationConfirmed = await this.confirmTransactionWithRecovery(tx, gamePda, "Game creation");
 
@@ -657,7 +657,7 @@ export class GameManager {
         throw new Error("Game creation could not be confirmed");
       }
 
-            // Save game and create message
+      // Save game and create message
       this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker, maxPlayers, minPlayers);
 
       // Store secret key for dumbflip and snowball games with derived game address
@@ -741,70 +741,8 @@ export class GameManager {
   // EVENT LISTENING
   // ================================
 
-    /**
-   * Wait for GameInitialized event to get the correct nonce and derive game address
-   */
-  private async waitForGameInitializedEvent(
-    txSignature: string,
-    tokenMint: PublicKey,
-    randomHashBuffer: Buffer
-  ): Promise<{ gamePda: PublicKey; eventNonce: number }> {
-    console.log(`🔍 Waiting for GameInitialized event from tx: ${txSignature.slice(0, 8)}...`);
-
-    const maxWaitTime = 30000; // 30 seconds
-
-    return new Promise((resolve, reject) => {
-      let listenerRemoved = false;
-
-      // Set up one-time event listener for GameInitialized
-      const listener = this.program.addEventListener('gameInitialized', (event, _slot, signature) => {
-        try {
-          // Check if this event is from our transaction
-          if (signature === txSignature) {
-            const eventNonce = Number(event.nonce);
-            const gamePda = PDAManager.getGamePDA(tokenMint, randomHashBuffer, eventNonce, this.program.programId);
-
-            console.log(`✅ Received GameInitialized event with nonce: ${eventNonce}`);
-
-            // Remove the listener and resolve (only if not already removed)
-            if (!listenerRemoved) {
-              listenerRemoved = true;
-              try {
-                this.program.removeEventListener(listener);
-              } catch (removeError) {
-                console.warn('Event listener already removed:', removeError);
-              }
-            }
-            resolve({ gamePda, eventNonce });
-          }
-        } catch (error) {
-          console.error('Error processing GameInitialized event:', error);
-          if (!listenerRemoved) {
-            listenerRemoved = true;
-            try {
-              this.program.removeEventListener(listener);
-            } catch (removeError) {
-              console.warn('Event listener already removed:', removeError);
-            }
-          }
-          reject(error);
-        }
-      });
-
-      // Set timeout to cleanup if event never comes
-      setTimeout(() => {
-        if (!listenerRemoved) {
-          listenerRemoved = true;
-          try {
-            this.program.removeEventListener(listener);
-          } catch (removeError) {
-            console.warn('Event listener already removed during timeout:', removeError);
-          }
-        }
-        reject(new Error(`GameInitialized event not received within ${maxWaitTime}ms for tx: ${txSignature}`));
-      }, maxWaitTime);
-    });
-  }
+  // This method is no longer needed since game PDA is derived directly from random hash
+  // Removed waitForGameInitializedEvent method
 
   // ================================
   // HELPER METHODS
@@ -1118,17 +1056,17 @@ export class GameManager {
 
       const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
 
-      const cancelInstruction = await this.program.methods
-        .cancelGame()
+      const closeInstruction = await this.program.methods
+        .closeGame()
         .accounts({
           game: gamePda,
           creator: gameAccount.creator,
         })
         .instruction();
 
-      const tx = await this.wallet.sendTransaction([cancelInstruction], [creatorKp]);
+      const tx = await this.wallet.sendTransaction([closeInstruction], [creatorKp]);
       await this.wallet.confirmTransaction(tx);
-      console.log(`Successfully cancelled ${gameType} game ${gamePda.toBase58()} with tx: ${tx}`);
+      console.log(`Successfully closed ${gameType} game ${gamePda.toBase58()} with tx: ${tx}`);
 
       return { success: true, tx };
     } catch (error: any) {
@@ -1526,17 +1464,17 @@ export class GameManager {
       console.log(`🎁 Cancelling expired ${gameType} ${address} with creator key`);
       const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
 
-      const cancelInstruction = await this.program.methods
-        .cancelGame()
+      const closeInstruction = await this.program.methods
+        .closeGame()
         .accounts({
           game: gamePda,
           creator: gameAccount.creator,
         })
         .instruction();
 
-      const tx = await this.wallet.sendTransaction([cancelInstruction], [creatorKp]);
+      const tx = await this.wallet.sendTransaction([closeInstruction], [creatorKp]);
       await this.wallet.confirmTransaction(tx);
-      console.log(`✅ Successfully cancelled expired ${gameType} ${address}`);
+      console.log(`✅ Successfully closed expired ${gameType} ${address}`);
       return true;
     } catch (error: any) {
       console.error(`❌ Failed to cancel expired ${gameType} ${address}:`, error.message);

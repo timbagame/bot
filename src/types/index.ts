@@ -102,7 +102,6 @@ export interface GameCategory {
 export interface GameCompletedEvent {
   gameKey: PublicKey;
   winner: PublicKey;
-  totalAmount: anchor.BN;
   playersCount: number;
   winnerAmount: anchor.BN;
   feeAmount: anchor.BN;
@@ -115,7 +114,7 @@ export interface PlayerJoinedEvent {
   totalAmount: anchor.BN;
   playersCount: number;
   playerIndex: number;
-  slotEntropy: anchor.BN;
+  lastSlot: anchor.BN;
   timestamp: anchor.BN;
 }
 
@@ -125,7 +124,7 @@ export interface PlayerUnjoinedEvent {
   totalAmount: anchor.BN;
   playersCount: number;
   playerIndex: number;
-  slotEntropy: anchor.BN;
+  lastSlot: anchor.BN;
   timestamp: anchor.BN;
 }
 
@@ -134,7 +133,18 @@ export interface PlayerRolledEvent {
   player: PublicKey;
   totalAmount: anchor.BN;
   playerIndex: number;
-  slotEntropy: anchor.BN;
+  lastSlot: anchor.BN;
+  timestamp: anchor.BN;
+}
+
+export interface PlayerParticipationCleanedEvent {
+  gameKey: PublicKey;
+  player: PublicKey;
+  totalAmount: anchor.BN;
+  playersCount: number;
+  playerIndex: number;
+  refundAmount: anchor.BN;
+  isCompletedGame: boolean;
   timestamp: anchor.BN;
 }
 

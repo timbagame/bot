@@ -1720,7 +1720,7 @@ setupAnchor().then(async () => {
   program.addEventListener('playerJoined', async (event: PlayerJoinedEvent) => {
     try {
       const gameAddress = event.gameKey.toString();
-      const lastSlot = event.slotEntropy.toString();
+      const lastSlot = event.lastSlot.toString();
       const totalPot = Number(event.totalAmount);
       const timestamp = Number(event.timestamp);
 
@@ -1769,7 +1769,7 @@ setupAnchor().then(async () => {
   program.addEventListener('playerUnjoined', async (event: PlayerUnjoinedEvent) => {
     try {
       const gameAddress = event.gameKey.toString();
-      const lastSlot = event.slotEntropy.toString();
+      const lastSlot = event.lastSlot.toString();
       const totalPot = Number(event.totalAmount);
       const timestamp = Number(event.timestamp);
 
@@ -1818,7 +1818,7 @@ setupAnchor().then(async () => {
   program.addEventListener('playerRolled', async (event: PlayerRolledEvent) => {
     try {
       const gameAddress = event.gameKey.toString();
-      const lastSlot = event.slotEntropy.toString();
+      const lastSlot = event.lastSlot.toString();
       const totalPot = Number(event.totalAmount);
       const timestamp = Number(event.timestamp);
 
