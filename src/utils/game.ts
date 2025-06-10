@@ -301,9 +301,8 @@ export class GameManager {
 
     // Show amount per player and total pot
     let amountDisplay = `💰 Amount: ${this.wallet.formatTokenBalance(amount, 9)} ${tokenTicker}`;
-    // For snowball games, always show total pot since it's a growing pot concept
-    // For other games, only show total pot when there are multiple players or when totalPot != amount
-    if (gameType.toLowerCase() === "snowball" || currentPlayers > 1 || totalPot !== amount) {
+    // Always show total pot if there are players or if it's different from the base amount
+    if (currentPlayers > 0 || totalPot !== amount) {
       amountDisplay += `\n🎯 Total Pot: ${this.wallet.formatTokenBalance(totalPot, 9)} ${tokenTicker}`;
     }
 
@@ -312,6 +311,29 @@ export class GameManager {
       `👤 Creator: @${creatorUsername}\n` +
       `👥 Players: ${currentPlayers}/${maxPlayers}`;
 
+    // Add list of players if any have joined
+    if (currentPlayers > 0 && status.toLowerCase() !== "completed") {
+      try {
+        const participants = this.getGamePlayers(gamePda.toBase58());
+        if (participants.length > 0) {
+          const playerNames = await Promise.all(
+            participants.map(async (telegramId, index) => {
+              try {
+                const username = await this.getUsernameFromTelegramId(ctx, telegramId);
+                return `${index + 1}. @${username}`;
+              } catch (error) {
+                return `${index + 1}. Player ${telegramId.slice(0, 6)}...`;
+              }
+            })
+          );
+          messageText += `\n\n👥 <b>Players:</b>\n${playerNames.join('\n')}`;
+        }
+      } catch (error) {
+        console.error('Error getting player list:', error);
+      }
+    }
+
+    // Add status and expiration info for active games
     if (status.toLowerCase() !== "completed") {
       let statusText: string;
       if (currentPlayers < minPlayers) {
