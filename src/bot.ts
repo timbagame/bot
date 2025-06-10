@@ -1807,20 +1807,56 @@ setupAnchor().then(async () => {
           const gamePda = new PublicKey(game.game_address);
           const gameAccount = await program.account.game.fetch(gamePda);
 
-          // Check if game is expired
+          // Check if game is expired with buffer time (5 minutes after normal expiration)
           const blockTime = await wallet.getBlockchainTime();
           const createdAt = Number(gameAccount.createdAt);
           const timeout = Number(gameAccount.timeout);
           const expiresAt = createdAt + timeout;
-          const isExpired = blockTime > expiresAt;
+          const bufferTime = 300; // 5 minutes buffer - must match GameManager.isGameExpiredWithBuffer
+          const isExpired = blockTime > (expiresAt + bufferTime);
 
           if (isExpired) {
-            console.log(`Processing expired game ${game.game_address}`);
+            console.log(`Processing expired game ${game.game_address} (${gameAccount.playersCount}/${gameAccount.maxPlayers})`);
 
             // Handle the expired game
             const result = await gameManager.handleExpiredGame(gamePda, gameAccount);
             if (result) {
-              console.log(`Successfully processed expired game ${game.game_address}`);
+              console.log(`✅ Successfully processed expired game ${game.game_address}`);
+
+              // Update the database to mark the game as completed
+              gameDb.completeGame(game.game_address, "cancelled", Date.now());
+
+              // Update the game message to show it's been cancelled
+              if (game.chat_id && game.message_id) {
+                try {
+                  const dummyCtx = {
+                    api: bot.api,
+                    chat: { id: game.chat_id }
+                  } as unknown as Context;
+
+                  const creatorTelegramId = gameDb.getCreatorTelegramId(game.game_address);
+                  if (creatorTelegramId && game.token_mint && game.token_ticker) {
+                    const creatorUsername = await gameManager.getUsernameFromTelegramId(dummyCtx, creatorTelegramId);
+                    const gameType = game.game_type ? game.game_type.charAt(0).toUpperCase() + game.game_type.slice(1) : "Game";
+
+                    await gameManager.updateGameMessage(
+                      dummyCtx,
+                      game.game_address,
+                      gameType,
+                      game.amount,
+                      creatorUsername,
+                      "Completed",
+                      game.token_mint,
+                      game.token_ticker,
+                      "cancelled"
+                    );
+                  }
+                } catch (error) {
+                  console.error(`Error updating message for cancelled game ${game.game_address}:`, error);
+                }
+              }
+            } else {
+              console.warn(`⚠️ Failed to process expired game ${game.game_address}`);
             }
           }
         } catch (error: any) {
