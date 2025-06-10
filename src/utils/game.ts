@@ -299,11 +299,11 @@ export class GameManager {
       }
     }
 
-    // Show amount per player and total pot
-    let amountDisplay = `💰 Amount: ${this.wallet.formatTokenBalance(amount, 9)} ${tokenTicker}`;
-    // Always show total pot if there are players or if it's different from the base amount
+    // Show ticket amount and current prize
+    let amountDisplay = `🎫 Ticket Amount: ${this.wallet.formatTokenBalance(amount, 9)} ${tokenTicker}`;
+    // Always show current prize if there are players or if it's different from the base amount
     if (currentPlayers > 0 || totalPot !== amount) {
-      amountDisplay += `\n🎯 Total Pot: ${this.wallet.formatTokenBalance(totalPot, 9)} ${tokenTicker}`;
+      amountDisplay += `\n🏆 Current Prize: ${this.wallet.formatTokenBalance(totalPot, 9)} ${tokenTicker}`;
     }
 
     let messageText = `<b>🪙 ${gameType} Game</b>\n\n` +
