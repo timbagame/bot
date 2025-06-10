@@ -455,6 +455,94 @@ export class GameManager {
   // GAME OPERATIONS
   // ================================
 
+  // ================================
+  // CLEANUP UTILITIES
+  // ================================
+
+  /**
+   * Clean up PlayerParticipation accounts for all players in a game
+   * This should be called before closing a game to recover rent
+   */
+  private async cleanupAllPlayerParticipations(
+    gamePda: PublicKey,
+    gameAddress: string,
+    skipWinner?: string
+  ): Promise<{ cleaned: number; failed: number }> {
+    console.log(`🧹 Starting PlayerParticipation cleanup for game ${gameAddress}`);
+
+    const participants = this.getGamePlayers(gameAddress);
+    let cleanedCount = 0;
+    let failedCount = 0;
+
+    for (const telegramId of participants) {
+      try {
+        const playerPubkey = this.gameDb.getPlayerPublicKey(telegramId);
+        if (!playerPubkey) {
+          console.warn(`No public key found for participant ${telegramId} in game ${gameAddress}`);
+          continue;
+        }
+
+        const playerPubkeyObj = new PublicKey(playerPubkey);
+
+        // Skip the winner if specified - their PlayerParticipation account is already closed by completeGame instruction
+        if (skipWinner && playerPubkeyObj.equals(new PublicKey(skipWinner))) {
+          console.log(`⏭️ Skipping cleanup for winner ${playerPubkey.slice(0, 8)}...`);
+          continue;
+        }
+
+        // Get the player's keypair for signing the cleanup transaction
+        const playerKp = this.wallet.getKeyPair(BigInt(telegramId));
+
+        // Execute cleanup instruction
+        const cleanupInstruction = await this.program.methods
+          .cleanPlayerParticipation()
+          .accounts({
+            game: gamePda,
+            player: playerPubkeyObj,
+          })
+          .instruction();
+
+        const tx = await this.wallet.sendTransaction([cleanupInstruction], [playerKp]);
+        await this.wallet.confirmTransaction(tx);
+        cleanedCount++;
+
+        console.log(`🧹 Cleaned up PlayerParticipation for ${playerPubkey.slice(0, 8)}... - tx: ${tx.slice(0, 8)}...`);
+
+        // Small delay to avoid overwhelming the RPC
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+      } catch (error: any) {
+        // Check if the account doesn't exist (already cleaned up) vs other errors
+        if (error.message?.includes('Account does not exist') || error.message?.includes('could not find account')) {
+          console.log(`✅ PlayerParticipation account already cleaned up for participant ${telegramId}`);
+        } else {
+          failedCount++;
+          console.error(`❌ Failed to cleanup PlayerParticipation for participant ${telegramId}:`, error.message);
+        }
+      }
+    }
+
+    console.log(`🧹 PlayerParticipation cleanup completed for game ${gameAddress}: ${cleanedCount} successful, ${failedCount} failed`);
+    return { cleaned: cleanedCount, failed: failedCount };
+  }
+
+  /**
+   * Public method to clean up PlayerParticipation accounts for completed games
+   * This should be called after a game is completed to recover rent
+   */
+  public async cleanupCompletedGameParticipations(
+    gameAddress: string,
+    winnerAddress: string
+  ): Promise<{ cleaned: number; failed: number }> {
+    try {
+      const gamePda = new PublicKey(gameAddress);
+      return await this.cleanupAllPlayerParticipations(gamePda, gameAddress, winnerAddress);
+    } catch (error) {
+      console.error(`❌ Error during completed game PlayerParticipation cleanup for ${gameAddress}:`, error);
+      return { cleaned: 0, failed: 0 };
+    }
+  }
+
   public async getGameInfo(ctx: Context, gamePda: PublicKey): Promise<string> {
     try {
       const gameAccount = await this.program.account.game.fetch(gamePda);
@@ -1000,57 +1088,37 @@ export class GameManager {
   }
 
   // ================================
-  // PLAYER-BASED GAME CANCELLATION
+  // GAME CLOSURE AND CLEANUP
   // ================================
 
   public async cancelGameWithPlayerKeys(gamePda: PublicKey, gameType: string): Promise<{ success: boolean; tx?: string; error?: string }> {
     try {
       const gameAccount = await this.program.account.game.fetch(gamePda);
-      console.log(`Attempting to cancel ${gameType} game ${gamePda.toBase58()} using player keys`);
+      const gameAddress = gamePda.toBase58();
+      console.log(`Attempting to close ${gameType} game ${gameAddress} with cleanup`);
 
-            // For competitive game types, unjoin all players first before cancellation (after buffer time)
-      // Giveaways can be cancelled without unjoining players since creator is giving away their tokens
-      if (gameType === "coinflip" || gameType === "dumbflip" || gameType === "snowball") {
-        // Get players from database since the contract no longer stores players array
-        const participants = this.getGamePlayers(gamePda.toBase58());
+      // Step 1: Clean up all PlayerParticipation accounts first to recover rent
+      const participants = this.getGamePlayers(gameAddress);
+      if (participants.length > 0) {
+        console.log(`🧹 Cleaning up PlayerParticipation accounts for ${participants.length} players before closing game`);
 
-        if (participants.length > 0) {
-          console.log(`${gameType.charAt(0).toUpperCase() + gameType.slice(1)} has ${participants.length} players, unjoining all of them first`);
-          let allPlayersUnjoined = true;
+        try {
+          const cleanupResult = await this.cleanupAllPlayerParticipations(gamePda, gameAddress);
+          console.log(`🧹 PlayerParticipation cleanup result: ${cleanupResult.cleaned} cleaned, ${cleanupResult.failed} failed`);
 
-          // Unjoin all players including creator
-          for (const telegramId of participants) {
-            try {
-              const playerPubkey = this.gameDb.getPlayerPublicKey(telegramId);
-              if (playerPubkey) {
-                const playerKp = this.wallet.getKeyPair(BigInt(telegramId));
-                await this.unjoinPlayerFromGame(gamePda, playerKp, new PublicKey(playerPubkey));
-                console.log(`➡️ Unjoined player ${playerPubkey.slice(0, 8)}... from ${gameType}`);
-              } else {
-                console.error(`No public key found for player ${telegramId}`);
-                allPlayersUnjoined = false;
-              }
-            } catch (error) {
-              console.error(`Failed to unjoin player ${telegramId}:`, error);
-              allPlayersUnjoined = false;
-              // Continue with other players but mark as failed
-            }
-          }
-
-          // Only proceed if all players were successfully unjoined
-          if (!allPlayersUnjoined) {
-            console.log(`❌ Could not unjoin all players from ${gameType} ${gamePda.toBase58()}, skipping cancellation`);
-            return { success: false, error: `Could not unjoin all players from ${gameType} game` };
-          }
+          // Continue even if some cleanups failed - we'll still try to close the game
+        } catch (error) {
+          console.error(`❌ Error during PlayerParticipation cleanup for ${gameType} ${gameAddress}:`, error);
+          // Continue with game closure even if cleanup fails
         }
       }
 
-      // Now cancel the game using creator's key
+      // Step 2: Close the game using creator's key to recover remaining rent
       const creatorPubkey = gameAccount.creator.toBase58();
       const creatorTelegramId = this.gameDb.getPlayerTelegramId(creatorPubkey);
 
       if (!creatorTelegramId) {
-        console.log(`No telegram ID found for creator ${creatorPubkey}, cannot cancel game`);
+        console.log(`No telegram ID found for creator ${creatorPubkey}, cannot close game`);
         return { success: false, error: "Creator not found in database" };
       }
 
@@ -1066,11 +1134,11 @@ export class GameManager {
 
       const tx = await this.wallet.sendTransaction([closeInstruction], [creatorKp]);
       await this.wallet.confirmTransaction(tx);
-      console.log(`Successfully closed ${gameType} game ${gamePda.toBase58()} with tx: ${tx}`);
+      console.log(`✅ Successfully closed ${gameType} game ${gameAddress} with tx: ${tx}`);
 
       return { success: true, tx };
     } catch (error: any) {
-      console.error(`Error cancelling ${gameType} game with player keys ${gamePda.toBase58()}:`, error);
+      console.error(`❌ Error closing ${gameType} game ${gamePda.toBase58()}:`, error);
       return { success: false, error: error.message };
     }
   }
@@ -1461,7 +1529,23 @@ export class GameManager {
     gameType: string
   ): Promise<boolean> {
     try {
-      console.log(`🎁 Cancelling expired ${gameType} ${address} with creator key`);
+      console.log(`🎁 Closing expired ${gameType} ${address} with cleanup`);
+
+      // Step 1: Clean up PlayerParticipation accounts first
+      const participants = this.getGamePlayers(address);
+      if (participants.length > 0) {
+        console.log(`🧹 Cleaning up PlayerParticipation accounts for ${participants.length} players before closing`);
+
+        try {
+          const cleanupResult = await this.cleanupAllPlayerParticipations(gamePda, address);
+          console.log(`🧹 PlayerParticipation cleanup result: ${cleanupResult.cleaned} cleaned, ${cleanupResult.failed} failed`);
+        } catch (error) {
+          console.error(`❌ Error during PlayerParticipation cleanup for expired ${gameType} ${address}:`, error);
+          // Continue with game closure even if cleanup fails
+        }
+      }
+
+      // Step 2: Close the game
       const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
 
       const closeInstruction = await this.program.methods
@@ -1474,10 +1558,10 @@ export class GameManager {
 
       const tx = await this.wallet.sendTransaction([closeInstruction], [creatorKp]);
       await this.wallet.confirmTransaction(tx);
-      console.log(`✅ Successfully closed expired ${gameType} ${address}`);
+      console.log(`✅ Successfully closed expired ${gameType} ${address} with tx: ${tx}`);
       return true;
     } catch (error: any) {
-      console.error(`❌ Failed to cancel expired ${gameType} ${address}:`, error.message);
+      console.error(`❌ Failed to close expired ${gameType} ${address}:`, error.message);
       return false;
     }
   }
