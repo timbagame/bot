@@ -11,7 +11,7 @@
         "grammy": "^1.36.3",
       },
       "devDependencies": {
-        "@types/bun": "latest",
+        "@types/bun": "^1.2.16",
       },
       "peerDependencies": {
         "typescript": "^5.8.2",
