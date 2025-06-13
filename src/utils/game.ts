@@ -21,6 +21,11 @@ import type { Coinflip } from "../../idl/idlType";
 // UTILITY FUNCTIONS
 // ================================
 
+const logAndFormatError = (error: any, operation: string, walletManager?: WalletManager): string => {
+  console.error(`Error in ${operation}:`, error);
+  return walletManager ? formatUserFriendlyError(error, walletManager) : error.message;
+};
+
 const formatGameType = (gameType: Record<string, any>): string => {
   const keys = Object.keys(gameType);
   const firstKey = keys[0];
@@ -239,6 +244,74 @@ export class GameManager {
     return this.activeGameMessages.get(gameAddress);
   }
 
+  private async getActiveGameStats(gamePda: PublicKey, amount: number, providedTotalPot?: number) {
+    try {
+      const gameAccount = await this.program.account.game.fetch(gamePda);
+      const currentPlayers = gameAccount.playersCount;
+      const maxPlayers = gameAccount.maxPlayers;
+      const minPlayers = gameAccount.minPlayers;
+      
+      const totalPot = providedTotalPot ?? (Number(gameAccount.totalAmount || 0) || (amount * currentPlayers));
+      
+      const createdAt = Number(gameAccount.createdAt);
+      const timeout = Number(gameAccount.timeout);
+      const expiresAt = createdAt + timeout;
+      const expirationInfo = await formatExpirationTime(expiresAt, this.wallet, "\n⏰ ");
+      
+      return { currentPlayers, maxPlayers, minPlayers, totalPot, expirationInfo };
+    } catch (error) {
+      console.warn(`Warning: Could not fetch game account for ${gamePda.toBase58()}:`, error);
+      return { currentPlayers: 0, maxPlayers: 0, minPlayers: 0, totalPot: amount, expirationInfo: "" };
+    }
+  }
+
+  private async getCompletedGameStats(gamePda: PublicKey, amount: number, providedTotalPot?: number) {
+    const participants = this.getGamePlayers(gamePda.toBase58());
+    const currentPlayers = participants.length;
+    const totalPot = providedTotalPot ?? (amount * currentPlayers);
+    
+    return {
+      currentPlayers,
+      maxPlayers: currentPlayers,
+      minPlayers: currentPlayers,
+      totalPot,
+      expirationInfo: ""
+    };
+  }
+
+  private async getWinnerInfo(ctx: Context, status: string, winnerAddress?: string): Promise<string> {
+    if (status.toLowerCase() !== "completed" || !winnerAddress) return "";
+    
+    if (winnerAddress === "cancelled" || winnerAddress === DEFAULT_NULL_ADDRESS) {
+      return `\nStatus: Cancelled`;
+    }
+    
+    const winnerUsername = await this.getPlayerUsername(ctx, winnerAddress);
+    return `\nWinner: @${winnerUsername}`;
+  }
+
+  private generateGameKeyboard(status: string, gameType: string, currentPlayers: number, gamePda: PublicKey) {
+    if (status.toLowerCase() === "completed") return [];
+
+    const isRollGame = gameType.toLowerCase() === "snowball" || gameType.toLowerCase() === "dumbflip";
+    const joinButtonText = isRollGame ? "🎲 Roll" : "🎮 Join";
+
+    const keyboard = [[
+      { text: joinButtonText, callback_data: `join_${gamePda.toBase58()}` },
+      { text: "🔄 Refresh", callback_data: `refresh_${gamePda.toBase58()}` }
+    ]];
+
+    // Add unjoin button with specific rules for different game types
+    if (currentPlayers > 0) {
+      const canUnjoin = !(gameType.toLowerCase() === "snowball" && currentPlayers >= 2);
+      if (canUnjoin) {
+        keyboard[0]?.push({ text: "❌ Unjoin", callback_data: `unjoin_${gamePda.toBase58()}` });
+      }
+    }
+
+    return keyboard;
+  }
+
   private async formatGameMessage(
     ctx: Context,
     gamePda: PublicKey,
@@ -252,68 +325,15 @@ export class GameManager {
     txHash?: string,
     providedTotalPot?: number
   ): Promise<GameMessageFormat> {
-    let currentPlayers: number = 0;
-    let maxPlayers: number = 2;
-    let minPlayers: number = 1;
-    let totalPot = providedTotalPot ?? amount; // Use provided totalPot if available, otherwise default to amount per player
-    let expirationInfo = "";
+    const isCompleted = status.toLowerCase() === "completed";
+    
+    const gameStats = isCompleted 
+      ? await this.getCompletedGameStats(gamePda, amount, providedTotalPot)
+      : await this.getActiveGameStats(gamePda, amount, providedTotalPot);
 
-    if (status.toLowerCase() === "completed") {
-      // For completed games, we might not have access to the game account
-      if (!providedTotalPot) {
-        totalPot = amount * currentPlayers; // Calculate total pot for completed games only if not provided
-      }
-      currentPlayers = 0; // Will be set from the game data
-      maxPlayers = 0; // Will be set from the game data
-      minPlayers = 0; // Will be set from the game data
-    } else {
-      // For active games, fetch current state from blockchain
-      try {
-        const gameAccount = await this.program.account.game.fetch(gamePda);
-        currentPlayers = gameAccount.playersCount;
-        maxPlayers = gameAccount.maxPlayers;
-        minPlayers = gameAccount.minPlayers;
+    const { currentPlayers, maxPlayers, minPlayers, totalPot, expirationInfo } = gameStats;
 
-        // If totalPot is not provided, use totalAmount from the game account or calculate it
-        if (!providedTotalPot) {
-          totalPot = Number(gameAccount.totalAmount || 0) || (amount * currentPlayers); // Use totalAmount from contract if available and not provided
-        }
-
-        // Calculate expiration time
-        const createdAt = Number(gameAccount.createdAt);
-        const timeout = Number(gameAccount.timeout);
-        const expiresAt = createdAt + timeout;
-        expirationInfo = await formatExpirationTime(expiresAt, this.wallet, "\n⏰ ");
-      } catch (error) {
-        console.warn(`Warning: Could not fetch game account for ${gamePda.toBase58()}:`, error);
-        currentPlayers = 0;
-        maxPlayers = 0;
-        minPlayers = 0;
-      }
-    }
-
-    if (status.toLowerCase() === "completed") {
-      // For completed games where we don't have game account access, get player count from participants
-      const participants = this.getGamePlayers(gamePda.toBase58());
-      currentPlayers = participants.length;
-      maxPlayers = currentPlayers; // Set max to current for display purposes
-      minPlayers = currentPlayers; // Set min to current for display purposes
-
-      if (!providedTotalPot) {
-        totalPot = amount * currentPlayers; // Calculate total pot for completed games only if not provided
-      }
-    }
-
-    // Winner info
-    let winnerInfo = "";
-    if (status.toLowerCase() === "completed" && winnerAddress) {
-      if (winnerAddress === "cancelled" || winnerAddress === DEFAULT_NULL_ADDRESS) {
-        winnerInfo = `\nStatus: Cancelled`;
-      } else {
-        const winnerUsername = await this.getPlayerUsername(ctx, winnerAddress);
-        winnerInfo = `\nWinner: @${winnerUsername}`;
-      }
-    }
+    const winnerInfo = await this.getWinnerInfo(ctx, status, winnerAddress);
 
     // Show ticket amount and current prize
     let amountDisplay = `🎫 Ticket Amount: ${this.wallet.formatTokenBalance(amount, 9)} ${tokenTicker}`;
@@ -374,27 +394,7 @@ export class GameManager {
       messageText += `\n\nTransaction: <code>${txHash}</code>`;
     }
 
-    // Keyboard - only show buttons for active games
-    const keyboard = [];
-    if (status.toLowerCase() !== "completed") {
-      // Change button text for snowball and dumbflip games
-      const joinButtonText = (gameType.toLowerCase() === "snowball" || gameType.toLowerCase() === "dumbflip") ? "🎲 Roll" : "🎮 Join";
-
-      keyboard.push([
-        { text: joinButtonText, callback_data: `join_${gamePda.toBase58()}` },
-        { text: "🔄 Refresh", callback_data: `refresh_${gamePda.toBase58()}` }
-      ]);
-
-      // For snowball games, hide unjoin button if 2+ players (since you can't unjoin)
-      // For other games, show unjoin button if there are any players
-      if (currentPlayers > 0) {
-        if (gameType.toLowerCase() === "snowball" && currentPlayers >= 2) {
-          // Don't add unjoin button for snowball games with 2+ players
-        } else {
-          keyboard[0]?.push({ text: "❌ Unjoin", callback_data: `unjoin_${gamePda.toBase58()}` });
-        }
-      }
-    }
+    const keyboard = this.generateGameKeyboard(status, gameType, currentPlayers, gamePda);
 
     return { messageText, keyboard };
   }
@@ -429,7 +429,7 @@ export class GameManager {
       reply_to_message_id: ctx.message?.message_id
     });
 
-    await this.gameDb.saveGameMessage(gameAddress, message.message_id, message.chat.id);
+    this.gameDb.saveGameMessage(gameAddress, message.message_id, message.chat.id);
     this.activeGameMessages.set(gameAddress, {
       messageId: message.message_id,
       chatId: message.chat.id
@@ -803,8 +803,7 @@ export class GameManager {
       }
 
     } catch (error: any) {
-      console.error(`Error creating ${gameType} game:`, error);
-      const userFriendlyError = formatUserFriendlyError(error, this.wallet);
+      const userFriendlyError = logAndFormatError(error, `creating ${gameType} game`, this.wallet);
       await ctx.reply(userFriendlyError, { reply_to_message_id: ctx.message?.message_id });
     }
   }
@@ -854,11 +853,11 @@ export class GameManager {
       }
 
     } catch (joinError: any) {
-      console.error(`❌ Failed to auto-join creator to ${gameType} game: ${joinError.message}`);
+      const errorMsg = logAndFormatError(joinError, `auto-joining creator to ${gameType} game`);
       await ctx.reply(
         `⚠️ <b>Game created successfully, but failed to auto-join creator!</b>\n\n` +
         `Please manually join the game using the "🎮 Join" button.\n\n` +
-        `Error: ${joinError.message}`,
+        `Error: ${errorMsg}`,
         { parse_mode: "HTML", reply_to_message_id: ctx.message?.message_id }
       );
     }
@@ -1096,7 +1095,7 @@ export class GameManager {
 
       await this.unjoinPlayerFromGame(gamePda, playerKp, playerKp.publicKey);
 
-      const creatorTelegramId = await this.gameDb.getCreatorTelegramId(gamePda.toBase58());
+      const creatorTelegramId = this.gameDb.getCreatorTelegramId(gamePda.toBase58());
       if (creatorTelegramId) {
         const creatorUsername = await this.getUsernameFromTelegramId(ctx, creatorTelegramId);
 
@@ -1287,37 +1286,13 @@ export class GameManager {
     ]);
 
     // Active games
-    const activeGames = await Promise.all(activeGamesData.map(async (gameData) => {
-      try {
-        const gamePda = new PublicKey(gameData.game_address);
-        await this.program.account.game.fetch(gamePda);
-        return this.getGameInfo(ctx, gamePda);
-      } catch (error) {
-        console.error(`Error fetching game ${gameData.game_address}:`, error);
-        return null;
-      }
-    }));
-
-    const validActiveGames = activeGames.filter((game): game is string => game !== null);
+    const validActiveGames = await this.processActiveGames(ctx, activeGamesData);
     const activeGamesSection = validActiveGames.length > 0
       ? "🎮 <b>Active Games</b>\n\n" + validActiveGames.join("\n\n")
       : "";
 
     // Recent games
-    const recentGames = await Promise.all(recentGamesData.map(async (gameData) => {
-      try {
-        const category = categorizeGame(gameData, telegramIdStr, playerPublicKey);
-        // For completed games, use database info instead of trying to fetch from blockchain
-        // since completed game accounts are closed to reclaim rent
-        const gameInfo = await this.getCompletedGameInfo(ctx, gameData);
-        return { category, gameInfo, completedAt: gameData.completed_at };
-      } catch (error) {
-        console.error(`Error processing game ${gameData.game_address}:`, error);
-        return null;
-      }
-    }));
-
-    const validRecentGames = recentGames.filter((game): game is any => game !== null);
+    const validRecentGames = await this.processRecentGames(ctx, recentGamesData, telegramIdStr, playerPublicKey);
 
     // Categorize recent games
     const categories: GameCategory = {
@@ -1327,17 +1302,7 @@ export class GameManager {
       created: validRecentGames.filter(g => g.category === 'created')
     };
 
-    const formatSection = (games: any[], title: string): string => {
-      if (games.length === 0) return "";
-      let section = `${title}\n\n`;
-      for (const game of games) {
-        section += `${game.gameInfo}\n`;
-        if (game.completedAt) {
-          section += `Completed: ${formatDate(game.completedAt)}\n\n`;
-        }
-      }
-      return section;
-    };
+    const formatSection = this.formatGameSection.bind(this);
 
     const recentGamesSections = [
       formatSection(categories.won, "🏆 <b>Won Games</b>"),
@@ -1352,12 +1317,54 @@ export class GameManager {
     };
   }
 
+  private async processActiveGames(ctx: Context, activeGamesData: any[]): Promise<string[]> {
+    const activeGames = await Promise.all(activeGamesData.map(async (gameData) => {
+      try {
+        const gamePda = new PublicKey(gameData.game_address);
+        await this.program.account.game.fetch(gamePda);
+        return this.getGameInfo(ctx, gamePda);
+      } catch (error) {
+        console.error(`Error fetching game ${gameData.game_address}:`, error);
+        return null;
+      }
+    }));
+
+    return activeGames.filter((game): game is string => game !== null);
+  }
+
+  private async processRecentGames(ctx: Context, recentGamesData: any[], telegramIdStr: string, playerPublicKey: string): Promise<any[]> {
+    const recentGames = await Promise.all(recentGamesData.map(async (gameData) => {
+      try {
+        const category = categorizeGame(gameData, telegramIdStr, playerPublicKey);
+        const gameInfo = await this.getCompletedGameInfo(ctx, gameData);
+        return { category, gameInfo, completedAt: gameData.completed_at };
+      } catch (error) {
+        console.error(`Error processing game ${gameData.game_address}:`, error);
+        return null;
+      }
+    }));
+
+    return recentGames.filter((game): game is any => game !== null);
+  }
+
+  private formatGameSection(games: any[], title: string): string {
+    if (games.length === 0) return "";
+    let section = `${title}\n\n`;
+    for (const game of games) {
+      section += `${game.gameInfo}\n`;
+      if (game.completedAt) {
+        section += `Completed: ${formatDate(game.completedAt)}\n\n`;
+      }
+    }
+    return section;
+  }
+
   // ================================
   // RELOAD FUNCTIONALITY
   // ================================
 
   public async reloadGameMessages(): Promise<void> {
-    const allGames = await this.gameDb.getAllGames();
+    const allGames = this.gameDb.getAllGames();
     try {
       for (const game of allGames) {
         if (game.message_id && game.chat_id) {
