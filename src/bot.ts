@@ -304,9 +304,7 @@ const validateAndProcessTransaction = async (
 const handleCommandError = async (ctx: Context, error: any, commandName: string): Promise<void> => {
   console.error(`Error in ${commandName} command:`, error);
   const userFriendlyError = formatUserFriendlyError(error, wallet);
-  await ctx.reply(userFriendlyError, {
-    reply_to_message_id: ctx.message?.message_id
-  });
+  await replyToMessage(ctx, userFriendlyError);
 };
 
 const replyToMessage = async (ctx: Context, text: string, parseMode: "HTML" | "MarkdownV2" = "HTML"): Promise<void> => {
@@ -318,6 +316,17 @@ const replyToMessage = async (ctx: Context, text: string, parseMode: "HTML" | "M
 
 const replyUsageError = async (ctx: Context, message: string): Promise<void> => {
   return replyToMessage(ctx, message);
+};
+
+const handleCallbackError = async (ctx: any, error: any, action: string): Promise<void> => {
+  console.error(`Error in callback ${action}:`, error);
+
+  if (error.message?.includes('Account does not exist')) {
+    await safeAnswerCallbackQuery(ctx, "This game is no longer active!");
+  } else {
+    const userFriendlyError = formatUserFriendlyError(error, wallet);
+    await safeAnswerCallbackQuery(ctx, userFriendlyError.substring(0, 180));
+  }
 };
 
 // ================================
@@ -1113,9 +1122,6 @@ bot.command("scan", async (ctx: Context) => {
 // CALLBACK QUERY HANDLING
 // ================================
 
-/**
- * Handle unjoin game action with proper restrictions
- */
 const handleUnjoinGameCallback = async (ctx: any, gamePda: PublicKey, playerKp: any, gameAddress: string): Promise<void> => {
   const gameData = gameDb.getGame(gameAddress);
   if (!gameData) {
@@ -1125,7 +1131,6 @@ const handleUnjoinGameCallback = async (ctx: any, gamePda: PublicKey, playerKp: 
 
   const gameAccount = await program.account.game.fetch(gamePda);
 
-  // Special snowball restriction: cannot unjoin if 2+ players
   if (gameData.game_type === "snowball" && gameAccount.playersCount > 1) {
     await safeAnswerCallbackQuery(ctx, "❄️ Cannot leave snowball games once there are 2+ players!");
     return;
@@ -1140,9 +1145,6 @@ const handleUnjoinGameCallback = async (ctx: any, gamePda: PublicKey, playerKp: 
   }
 };
 
-/**
- * Handle refresh game action
- */
 const handleRefreshGameCallback = async (ctx: any, gamePda: PublicKey, gameAddress: string): Promise<void> => {
   const gameData = gameDb.getGame(gameAddress);
   const validation = validateGameTokenData(gameData);
@@ -1152,7 +1154,6 @@ const handleRefreshGameCallback = async (ctx: any, gamePda: PublicKey, gameAddre
     return;
   }
 
-  // gameData is guaranteed to exist and have token info after validation
   if (gameData!.status === "completed") {
     await safeAnswerCallbackQuery(ctx, "This game has already been completed!");
     return;
@@ -1180,6 +1181,124 @@ const handleRefreshGameCallback = async (ctx: any, gamePda: PublicKey, gameAddre
   }
 };
 
+const handleGameRoll = async (ctx: any, gamePda: PublicKey, playerKp: any, gameAccount: any, gameData: any, game: any): Promise<void> => {
+  try {
+    const tokenMint = gameData.token_mint;
+    const gameTypeName = gameData.game_type === "snowball" ? "snowball" : "dice";
+
+    if (gameAccount.isPrivate) {
+      const oracleClient = OracleClient.getInstance(wallet);
+      const authResult = await oracleClient.authorizePlayer(gamePda, ctx.chat?.id || 0);
+      if (!authResult.authorized) {
+        await ctx.answerCallbackQuery(authResult.error || "Not authorized to roll this private snowball");
+        return;
+      }
+
+      const adminKp = authResult.adminKeypair!;
+      const rollInstruction = await program.methods
+        .rollGame()
+        .accounts({
+          game: gamePda,
+          player: playerKp.publicKey,
+          authority: adminKp.publicKey,
+        })
+        .instruction();
+
+      const tx = await wallet.sendTransaction([rollInstruction], [playerKp, adminKp]);
+      await safeAnswerCallbackQuery(ctx, `🎲 Rolled the private ${gameTypeName}!`);
+      await handleRollConfirmation(ctx, tx, gamePda, gameAccount, gameData, game, tokenMint);
+    } else {
+      const rollInstruction = await program.methods
+        .rollGame()
+        .accounts({
+          game: gamePda,
+          player: playerKp.publicKey,
+        })
+        .instruction();
+
+      const tx = await wallet.sendTransaction([rollInstruction], [playerKp]);
+      await safeAnswerCallbackQuery(ctx, `🎲 Rolled the ${gameTypeName}!`);
+      await handleRollConfirmation(ctx, tx, gamePda, gameAccount, gameData, game, tokenMint);
+    }
+  } catch (error: any) {
+    const userFriendlyError = formatUserFriendlyError(error, wallet);
+    await safeAnswerCallbackQuery(ctx, userFriendlyError.substring(0, 180));
+  }
+};
+
+const handleRollConfirmation = async (ctx: any, tx: string, gamePda: PublicKey, gameAccount: any, gameData: any, game: any, tokenMint: string): Promise<void> => {
+  (async () => {
+    try {
+      await wallet.confirmTransaction(tx);
+
+      const updatedGameAccount = await program.account.game.fetch(gamePda);
+      const currentTotalPot = Number(updatedGameAccount.totalAmount || 0);
+
+      const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
+      const gameTypeKeys = Object.keys(gameAccount.gameType);
+      const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
+      const tokenTicker = gameData.token_ticker || "TOKEN";
+      
+      await gameManager.updateGameMessage(ctx, game.game_address, gameType, Number(game.amount), creatorUsername, "Active", tokenMint, tokenTicker, undefined, currentTotalPot);
+
+      const rollerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
+      const metadata = await wallet.getTokenMetadata(tokenMint);
+      const gameMessage = gameManager.getActiveGameMessage(game.game_address);
+      
+      await ctx.reply(
+        `❄️ @${rollerUsername} rolled the snowball! Total pot: ${wallet.formatTokenBalance(currentTotalPot, metadata.decimals)} ${tokenTicker}`,
+        {
+          parse_mode: "HTML",
+          reply_to_message_id: gameMessage?.messageId
+        }
+      );
+    } catch (error) {
+      console.error("Error confirming snowball roll:", error);
+    }
+  })();
+};
+
+const handlePlayerEvent = async (event: any, eventName: string, emoji: string, action: string): Promise<void> => {
+  try {
+    const gameAddress = event.gameKey.toString();
+    const lastSlot = event.lastSlot.toString();
+    const totalPot = Number(event.totalAmount);
+    const timestamp = Number(event.timestamp);
+
+    console.log(`${emoji} ${eventName} event: ${event.player.toString().slice(0, 8)}... ${action} game ${gameAddress.slice(0, 8)}... (lastSlot: ${lastSlot}, totalPot: ${totalPot}, timestamp: ${timestamp})`);
+
+    const slotWasUpdated = gameDb.updateGameLastSlotWithTimestamp(gameAddress, lastSlot, timestamp);
+
+    if (slotWasUpdated) {
+      const gameData = gameDb.getGame(gameAddress);
+      if (gameData && (gameData.game_type === "dumbflip" || gameData.game_type === "snowball") && gameData.chat_id) {
+        const dummyCtx = createApiContext(gameData.chat_id);
+        const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
+        
+        if (creatorTelegramId && gameData.token_mint && gameData.token_ticker) {
+          const creatorUsername = await gameManager.getUsernameFromTelegramId(dummyCtx, creatorTelegramId);
+          const gameType = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
+
+          await gameManager.updateGameMessage(
+            dummyCtx,
+            gameAddress,
+            gameType,
+            gameData.amount,
+            creatorUsername,
+            "Active",
+            gameData.token_mint,
+            gameData.token_ticker,
+            undefined,
+            totalPot
+          );
+        }
+      }
+    }
+  } catch (error) {
+    console.error(`Error processing ${eventName} event:`, error);
+  }
+};
+
 bot.on("callback_query", async (ctx) => {
   const callbackData = ctx.callbackQuery.data;
   if (!callbackData || !ctx.from) return;
@@ -1188,7 +1307,7 @@ bot.on("callback_query", async (ctx) => {
   if (splitData.length < 2) return;
 
   const [action, gameAddress] = splitData;
-  if (!gameAddress) return;
+  if (!action || !gameAddress) return;
 
   const game = gameDb.getGame(gameAddress);
   if (!game) {
@@ -1219,14 +1338,7 @@ bot.on("callback_query", async (ctx) => {
         break;
     }
   } catch (error: any) {
-    console.error(`Error in callback ${action}:`, error);
-
-    if (error.message?.includes('Account does not exist')) {
-      await safeAnswerCallbackQuery(ctx, "This game is no longer active!");
-    } else {
-      const userFriendlyError = formatUserFriendlyError(error, wallet);
-      await safeAnswerCallbackQuery(ctx, userFriendlyError.substring(0, 180));
-    }
+    await handleCallbackError(ctx, error, action);
   }
 });
 
@@ -1314,121 +1426,9 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
       isAlreadyInGame = false;
     }
 
-    // For snowball and dumbflip games, if player is already in the game, roll instead
     if (isAlreadyInGame && (gameData?.game_type === "snowball" || gameData?.game_type === "dumbflip")) {
-      try {
-        // Check if this is a private game and handle accordingly
-        if (gameAccount.isPrivate) {
-          // For private games, we need to authorize and include the authority
-          const oracleClient = OracleClient.getInstance(wallet);
-          const authResult = await oracleClient.authorizePlayer(gamePda, ctx.chat?.id || 0);
-          if (!authResult.authorized) {
-            await ctx.answerCallbackQuery(authResult.error || "Not authorized to roll this private snowball");
-            return;
-          }
-
-          const adminKp = authResult.adminKeypair!;
-          const rollInstruction = await program.methods
-            .rollGame()
-            .accounts({
-              game: gamePda,
-              player: playerKp.publicKey,
-              authority: adminKp.publicKey,
-            })
-            .instruction();
-
-          const tx = await wallet.sendTransaction([rollInstruction], [playerKp, adminKp]);
-
-          // Respond immediately to avoid callback timeout
-          const gameTypeName = gameData.game_type === "snowball" ? "snowball" : "dice";
-          await safeAnswerCallbackQuery(ctx, `🎲 Rolled the private ${gameTypeName}!`);
-
-          // Handle confirmation and updates asynchronously
-          (async () => {
-            try {
-              await wallet.confirmTransaction(tx);
-
-              // Fetch updated game account to get the new totalAmount
-              const updatedGameAccount = await program.account.game.fetch(gamePda);
-              const currentTotalPot = Number(updatedGameAccount.totalAmount || 0);
-
-              // Update game message and show new expected winner with current totalPot
-              const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
-              const gameTypeKeys = Object.keys(gameAccount.gameType);
-              const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
-              const tokenTicker = gameData.token_ticker || "TOKEN";
-              await gameManager.updateGameMessage(ctx, game.game_address, gameType, Number(game.amount), creatorUsername, "Active", tokenMint, tokenTicker, undefined, currentTotalPot);
-
-              // Send roll notification message
-              const rollerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
-              const metadata = await wallet.getTokenMetadata(tokenMint);
-              const gameMessage = gameManager.getActiveGameMessage(game.game_address);
-              await ctx.reply(
-                `❄️ @${rollerUsername} rolled the snowball! Total pot: ${wallet.formatTokenBalance(currentTotalPot, metadata.decimals)} ${tokenTicker}`,
-                {
-                  parse_mode: "HTML",
-                  reply_to_message_id: gameMessage?.messageId
-                }
-              );
-            } catch (error) {
-              console.error("Error confirming private snowball roll:", error);
-            }
-          })();
-        } else {
-          // For public games, no authority needed
-          const rollInstruction = await program.methods
-            .rollGame()
-            .accounts({
-              game: gamePda,
-              player: playerKp.publicKey,
-            })
-            .instruction();
-
-          const tx = await wallet.sendTransaction([rollInstruction], [playerKp]);
-
-          // Respond immediately to avoid callback timeout
-          const gameTypeName = gameData.game_type === "snowball" ? "snowball" : "dice";
-          await safeAnswerCallbackQuery(ctx, `🎲 Rolled the ${gameTypeName}!`);
-
-          // Handle confirmation and updates asynchronously
-          (async () => {
-            try {
-              await wallet.confirmTransaction(tx);
-
-              // Fetch updated game account to get the new totalAmount
-              const updatedGameAccount = await program.account.game.fetch(gamePda);
-              const currentTotalPot = Number(updatedGameAccount.totalAmount || 0);
-
-              // Update game message and show new expected winner with current totalPot
-              const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
-              const gameTypeKeys = Object.keys(gameAccount.gameType);
-              const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
-              const tokenTicker = gameData.token_ticker || "TOKEN";
-              await gameManager.updateGameMessage(ctx, game.game_address, gameType, Number(game.amount), creatorUsername, "Active", tokenMint, tokenTicker, undefined, currentTotalPot);
-
-              // Send roll notification message
-              const rollerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
-              const metadata = await wallet.getTokenMetadata(tokenMint);
-              const gameMessage = gameManager.getActiveGameMessage(game.game_address);
-              await ctx.reply(
-                `❄️ @${rollerUsername} rolled the snowball! Total pot: ${wallet.formatTokenBalance(currentTotalPot, metadata.decimals)} ${tokenTicker}`,
-                {
-                  parse_mode: "HTML",
-                  reply_to_message_id: gameMessage?.messageId
-                }
-              );
-            } catch (error) {
-              console.error("Error confirming snowball roll:", error);
-            }
-          })();
-        }
-
-        return;
-      } catch (error: any) {
-        const userFriendlyError = formatUserFriendlyError(error, wallet);
-        await safeAnswerCallbackQuery(ctx, userFriendlyError.substring(0, 180));
-        return;
-      }
+      await handleGameRoll(ctx, gamePda, playerKp, gameAccount, gameData, game);
+      return;
     }
 
     if (isAlreadyInGame) {
@@ -1628,148 +1628,19 @@ setupAnchor().then(async () => {
   // Set up PlayerJoined event listener to track lastSlot for winner calculation
   console.log("Setting up PlayerJoined event listener...");
   program.addEventListener('playerJoined', async (event: PlayerJoinedEvent) => {
-    try {
-      const gameAddress = event.gameKey.toString();
-      const lastSlot = event.lastSlot.toString();
-      const totalPot = Number(event.totalAmount);
-      const timestamp = Number(event.timestamp);
-
-      console.log(`👤 PlayerJoined event: ${event.player.toString().slice(0, 8)}... joined game ${gameAddress.slice(0, 8)}... (lastSlot: ${lastSlot}, totalPot: ${totalPot}, timestamp: ${timestamp})`);
-
-      // Update the lastSlot in database for winner calculation (only if timestamp is newer)
-      const slotWasUpdated = gameDb.updateGameLastSlotWithTimestamp(gameAddress, lastSlot, timestamp);
-
-      // For dumbflip and snowball games, update the game message to show new expected winner
-      // Only update if the slot was actually updated (not an out-of-order event)
-      if (slotWasUpdated) {
-        const gameData = gameDb.getGame(gameAddress);
-        if (gameData && (gameData.game_type === "dumbflip" || gameData.game_type === "snowball") && gameData.chat_id) {
-          const dummyCtx = {
-            api: bot.api,
-            chat: { id: gameData.chat_id }
-          } as unknown as Context;
-
-          const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
-          if (creatorTelegramId && gameData.token_mint && gameData.token_ticker) {
-            const creatorUsername = await gameManager.getUsernameFromTelegramId(dummyCtx, creatorTelegramId);
-            const gameType = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
-
-            await gameManager.updateGameMessage(
-              dummyCtx,
-              gameAddress,
-              gameType,
-              gameData.amount,
-              creatorUsername,
-              "Active",
-              gameData.token_mint,
-              gameData.token_ticker,
-              undefined,
-              totalPot
-            );
-          }
-        }
-      }
-    } catch (error) {
-      console.error("Error processing PlayerJoined event:", error);
-    }
+    await handlePlayerEvent(event, "PlayerJoined", "👤", "joined");
   });
 
   // Set up PlayerUnjoined event listener to track lastSlot for winner calculation
   console.log("Setting up PlayerUnjoined event listener...");
   program.addEventListener('playerUnjoined', async (event: PlayerUnjoinedEvent) => {
-    try {
-      const gameAddress = event.gameKey.toString();
-      const lastSlot = event.lastSlot.toString();
-      const totalPot = Number(event.totalAmount);
-      const timestamp = Number(event.timestamp);
-
-      console.log(`👤 PlayerUnjoined event: ${event.player.toString().slice(0, 8)}... left game ${gameAddress.slice(0, 8)}... (lastSlot: ${lastSlot}, totalPot: ${totalPot}, timestamp: ${timestamp})`);
-
-      // Update the lastSlot in database for winner calculation (only if timestamp is newer)
-      const slotWasUpdated = gameDb.updateGameLastSlotWithTimestamp(gameAddress, lastSlot, timestamp);
-
-      // For dumbflip and snowball games, update the game message to show new expected winner
-      // Only update if the slot was actually updated (not an out-of-order event)
-      if (slotWasUpdated) {
-        const gameData = gameDb.getGame(gameAddress);
-        if (gameData && (gameData.game_type === "dumbflip" || gameData.game_type === "snowball") && gameData.chat_id) {
-          const dummyCtx = {
-            api: bot.api,
-            chat: { id: gameData.chat_id }
-          } as unknown as Context;
-
-          const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
-          if (creatorTelegramId && gameData.token_mint && gameData.token_ticker) {
-            const creatorUsername = await gameManager.getUsernameFromTelegramId(dummyCtx, creatorTelegramId);
-            const gameType = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
-
-            await gameManager.updateGameMessage(
-              dummyCtx,
-              gameAddress,
-              gameType,
-              gameData.amount,
-              creatorUsername,
-              "Active",
-              gameData.token_mint,
-              gameData.token_ticker,
-              undefined,
-              totalPot
-            );
-          }
-        }
-      }
-    } catch (error) {
-      console.error("Error processing PlayerUnjoined event:", error);
-    }
+    await handlePlayerEvent(event, "PlayerUnjoined", "👤", "left");
   });
 
   // Set up PlayerRolled event listener to track lastSlot for winner calculation
   console.log("Setting up PlayerRolled event listener...");
   program.addEventListener('playerRolled', async (event: PlayerRolledEvent) => {
-    try {
-      const gameAddress = event.gameKey.toString();
-      const lastSlot = event.lastSlot.toString();
-      const totalPot = Number(event.totalAmount);
-      const timestamp = Number(event.timestamp);
-
-      console.log(`🎲 PlayerRolled event: ${event.player.toString().slice(0, 8)}... rolled in game ${gameAddress.slice(0, 8)}... (lastSlot: ${lastSlot}, totalPot: ${totalPot}, timestamp: ${timestamp})`);
-
-      // Update the lastSlot in database for winner calculation (only if timestamp is newer)
-      const slotWasUpdated = gameDb.updateGameLastSlotWithTimestamp(gameAddress, lastSlot, timestamp);
-
-      // For dumbflip and snowball games, update the game message to show new expected winner
-      // Only update if the slot was actually updated (not an out-of-order event)
-      if (slotWasUpdated) {
-        const gameData = gameDb.getGame(gameAddress);
-        if (gameData && (gameData.game_type === "dumbflip" || gameData.game_type === "snowball") && gameData.chat_id) {
-          const dummyCtx = {
-            api: bot.api,
-            chat: { id: gameData.chat_id }
-          } as unknown as Context;
-
-          const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
-          if (creatorTelegramId && gameData.token_mint && gameData.token_ticker) {
-            const creatorUsername = await gameManager.getUsernameFromTelegramId(dummyCtx, creatorTelegramId);
-            const gameType = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
-
-            await gameManager.updateGameMessage(
-              dummyCtx,
-              gameAddress,
-              gameType,
-              gameData.amount,
-              creatorUsername,
-              "Active",
-              gameData.token_mint,
-              gameData.token_ticker,
-              undefined,
-              totalPot
-            );
-          }
-        }
-      }
-    } catch (error) {
-      console.error("Error processing PlayerRolled event:", error);
-    }
+    await handlePlayerEvent(event, "PlayerRolled", "🎲", "rolled in");
   });
 
   console.log("Player event listeners set up successfully");
