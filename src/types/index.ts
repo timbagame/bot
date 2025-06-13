@@ -206,14 +206,6 @@ export interface GameStats {
   expirationInfo: string;
 }
 
-export interface RollGameParams {
-  ctx: any; // Use any to match existing Grammy Context usage
-  gamePda: PublicKey;
-  playerKp: anchor.web3.Keypair;
-  gameAccount: any;
-  gameData: GameData;
-  game: GameData;
-}
 
 export interface CallbackError {
   message?: string;

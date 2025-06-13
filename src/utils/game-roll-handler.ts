@@ -1,6 +1,6 @@
 import { PublicKey } from "@solana/web3.js";
 import * as anchor from "@coral-xyz/anchor";
-import type { RollGameParams, GameData } from "../types";
+import type { GameData } from "../types";
 import { handleCallbackErrorSafe } from "./context-helpers";
 
 // ================================
@@ -11,7 +11,7 @@ import { handleCallbackErrorSafe } from "./context-helpers";
  * Main entry point for handling game rolls - replaces the complex handleGameRoll function
  */
 export const handleGameRoll = async (
-  ctx: any, // Use any to match the existing signature
+  ctx: any,
   gamePda: PublicKey,
   playerKp: anchor.web3.Keypair,
   gameAccount: any,
@@ -19,13 +19,37 @@ export const handleGameRoll = async (
   game: GameData
 ): Promise<void> => {
   try {
-    const params: RollGameParams = { ctx, gamePda, playerKp, gameAccount, gameData, game };
+    const { wallet } = await import("../bot");
+    
+    let rollInstruction: any;
+    let signers: anchor.web3.Keypair[];
     
     if (gameAccount.isPrivate) {
-      await handlePrivateGameRoll(params);
+      const { OracleClient } = await import("./oracle");
+      const oracleClient = OracleClient.getInstance(wallet);
+      const authResult = await oracleClient.authorizePlayer(gamePda, ctx.chat?.id || 0);
+      
+      if (!authResult.authorized) {
+        const errorMessage = authResult.error || "Not authorized to roll this game";
+        await safeAnswerCallbackQuery(ctx, errorMessage);
+        return;
+      }
+
+      const adminKp = authResult.adminKeypair!;
+      rollInstruction = await createRollInstruction(gamePda, playerKp.publicKey, adminKp.publicKey);
+      signers = [playerKp, adminKp];
     } else {
-      await handlePublicGameRoll(params);
+      rollInstruction = await createRollInstruction(gamePda, playerKp.publicKey);
+      signers = [playerKp];
     }
+
+    const tx = await wallet.sendTransaction([rollInstruction], signers);
+    
+    const gameTypeName = getGameTypeName(gameData.game_type);
+    await safeAnswerCallbackQuery(ctx, `🎲 Rolled the ${gameTypeName}!`);
+    
+    await handleRollConfirmation(ctx, tx, gamePda, gameAccount, gameData, game, gameData.token_mint!);
+    
   } catch (error: any) {
     await handleCallbackErrorSafe(ctx, error, "game_roll", { 
       maxLength: 180,
@@ -34,56 +58,6 @@ export const handleGameRoll = async (
   }
 };
 
-/**
- * Handle rolling for private games (requires authorization)
- */
-const handlePrivateGameRoll = async (params: RollGameParams): Promise<void> => {
-  const { ctx, gamePda, playerKp, gameAccount, gameData, game } = params;
-  
-  // Import OracleClient dynamically to avoid circular dependencies
-  const { OracleClient } = await import("./oracle");
-  const { wallet } = await import("../bot"); // Assuming wallet is exported from bot
-  
-  const oracleClient = OracleClient.getInstance(wallet);
-  const authResult = await oracleClient.authorizePlayer(gamePda, ctx.chat?.id || 0);
-  
-  if (!authResult.authorized) {
-    const errorMessage = authResult.error || "Not authorized to roll this private game";
-    await safeAnswerCallbackQuery(ctx, errorMessage);
-    return;
-  }
-
-  const adminKp = authResult.adminKeypair!;
-  const rollInstruction = await createRollInstruction(
-    gamePda, 
-    playerKp.publicKey, 
-    adminKp.publicKey
-  );
-
-  const tx = await wallet.sendTransaction([rollInstruction], [playerKp, adminKp]);
-  
-  const gameTypeName = getGameTypeName(gameData.game_type);
-  await safeAnswerCallbackQuery(ctx, `🎲 Rolled the private ${gameTypeName}!`);
-  
-  await handleRollConfirmation(ctx, tx, gamePda, gameAccount, gameData, game, gameData.token_mint!);
-};
-
-/**
- * Handle rolling for public games
- */
-const handlePublicGameRoll = async (params: RollGameParams): Promise<void> => {
-  const { ctx, gamePda, playerKp, gameAccount, gameData, game } = params;
-  
-  const { wallet } = await import("../bot");
-  
-  const rollInstruction = await createRollInstruction(gamePda, playerKp.publicKey);
-  const tx = await wallet.sendTransaction([rollInstruction], [playerKp]);
-  
-  const gameTypeName = getGameTypeName(gameData.game_type);
-  await safeAnswerCallbackQuery(ctx, `🎲 Rolled the ${gameTypeName}!`);
-  
-  await handleRollConfirmation(ctx, tx, gamePda, gameAccount, gameData, game, gameData.token_mint!);
-};
 
 /**
  * Create roll instruction based on whether authority is needed
