@@ -12,6 +12,8 @@ This is a Telegram bot for creating and playing coinflip and giveaway games on S
 - `bun run src/bot.ts` - Run the bot
 - `bun run --watch src/bot.ts` - Run with hot reload
 - `bun run dev` - Alias for watch mode
+- `bun start` - Production start command
+- `docker-compose up` - Run in container
 
 ## Architecture
 
@@ -21,9 +23,9 @@ This is a Telegram bot for creating and playing coinflip and giveaway games on S
 - **Game Management** (`src/utils/game.ts`): Handles game creation, joining, completion via Anchor program
 - **Wallet System** (`src/utils/wallet.ts`): Singleton wallet manager with mnemonic-based keypairs
 - **Database Layer**: Multiple SQLite databases for different concerns:
-  - `games.sqlite` - Game records and player mappings
-  - `tokens.sqlite` - Token metadata and chat-specific token configs
-  - `chat-settings.sqlite` - Chat-specific settings
+  - `games.sqlite` - Game records and player mappings (`src/utils/game-database.ts`)
+  - `tokens.sqlite` - Token metadata and chat-specific token configs (`src/utils/token-database.ts`)
+  - `chat-settings.sqlite` - Chat-specific settings (`src/utils/chat-database.ts`)
 - **Oracle System** (`src/utils/oracle.ts`): Manages game completion randomness and timeouts
 - **Token Management** (`src/utils/token-manager.ts`): SPL token operations and metadata caching
 
@@ -34,8 +36,15 @@ This is a Telegram bot for creating and playing coinflip and giveaway games on S
 - **Sequentialized Operations**: Uses @grammyjs/runner with sequentialize for thread safety
 - **Error Handling**: Centralized user-friendly error formatting in `src/utils/errors.ts`
 
-### Game Lifecycle
+### Game Types and Lifecycle
 
+**Supported Game Types:**
+- **Coinflip**: 1v1 or multiplayer coinflip games with token stakes
+- **Giveaway**: Free-to-join giveaway games with token prizes
+- **Snowball**: Time-limited multiplayer games
+- **Dumbflip**: Additional game variant
+
+**Game Lifecycle:**
 1. User creates game via `/coinflip` or `/giveaway` commands
 2. Players join until max capacity reached
 3. Oracle determines winner using verifiable randomness
@@ -69,3 +78,31 @@ This is a Telegram bot for creating and playing coinflip and giveaway games on S
 - WSOL support for native SOL wrapping
 - Dynamic token support via database configuration
 - Per-chat token settings with admin controls
+
+## Key Technical Details
+
+### Runtime and Dependencies
+- **Runtime**: Bun (JavaScript runtime and package manager)
+- **Core Dependencies**: 
+  - `grammy` (^1.36.3) - Telegram bot framework
+  - `@grammyjs/runner` (^2.0.3) - Bot runner with sequentialization
+  - `@solana/web3.js` (^1.98.2) - Solana blockchain interactions
+  - `@coral-xyz/anchor` (^0.31.1) - Anchor smart contract framework
+  - `@solana/spl-token` (^0.4.13) - SPL token operations
+  - `bip39` (^3.1.0) - Mnemonic seed phrase handling
+
+### File Structure References
+- `src/types/index.ts` - Core types and interfaces
+- `src/types/env.d.ts` - Environment variable types
+- `idl/idlType.ts` - Smart contract IDL types
+- `src/utils/constants.ts` - Configuration constants
+- `admin-keypair.json` - Admin wallet keypair
+- `Dockerfile` and `docker-compose.yml` - Container configuration
+
+### Security and Operations
+- Private key access restricted to private chats only
+- Rate limiting on wallet operations and commands
+- Input validation on all user commands
+- Comprehensive logging and error tracking
+- Automatic cleanup of expired games
+- Blockchain scanning for orphaned games
