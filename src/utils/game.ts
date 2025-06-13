@@ -657,17 +657,22 @@ export class GameManager {
       // Handle different winner states
       let winnerLine = "";
       if (gameData.winner_address === "cancelled" || gameData.winner_address === DEFAULT_NULL_ADDRESS) {
-        winnerLine = "❌ Status: Cancelled";
+        winnerLine = "";
       } else {
         const winnerUsername = await this.getPlayerUsername(ctx, gameData.winner_address);
         winnerLine = `🏆 Winner: @${winnerUsername}`;
       }
 
-      return [
+      const lines = [
         `${gameTypeText} • ${this.wallet.formatTokenBalance(amount, 9)} ${gameData.token_ticker || "WSOL"}`,
-        `👤 Creator: @${creatorUsername} • ${playerCount} players`,
-        winnerLine
-      ].join("\n");
+        `👤 Creator: @${creatorUsername} • ${playerCount} players`
+      ];
+      
+      if (winnerLine) {
+        lines.push(winnerLine);
+      }
+      
+      return lines.join("\n");
     } catch (error) {
       console.error("Error formatting completed game info:", error);
       return "❌ Error loading game details";
