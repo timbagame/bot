@@ -1183,11 +1183,33 @@ export class GameManager {
   }
 
   private async unjoinPlayerFromGame(gamePda: PublicKey, playerKp: any, playerPubkey: PublicKey): Promise<void> {
+    // Get the last player from game participants in database
+    const participantIds = this.gameDb.getGameParticipants(gamePda.toBase58());
+    
+    if (participantIds.length === 0) {
+      throw new Error('No participants found in game');
+    }
+    
+    const lastPlayerTelegramId = participantIds[participantIds.length - 1];
+    
+    if (!lastPlayerTelegramId) {
+      throw new Error('Last player telegram ID not found');
+    }
+    
+    const lastPlayerPublicKey = this.gameDb.getPlayerPublicKey(lastPlayerTelegramId);
+    
+    if (!lastPlayerPublicKey) {
+      throw new Error('Could not find last player public key');
+    }
+    
+    const lastPlayerPubkey = new PublicKey(lastPlayerPublicKey);
+    
     const unjoinInstruction = await this.program.methods
       .unjoinGame()
       .accounts({
         game: gamePda,
         player: playerPubkey,
+        lastPlayer: lastPlayerPubkey,
       })
       .instruction();
 
