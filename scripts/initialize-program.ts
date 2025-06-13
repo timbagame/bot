@@ -3,7 +3,6 @@ import * as anchor from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
 import type { Coinflip } from "../idl/idlType";
 import idl from "../idl/idl.json";
-import { DEFAULT_TOKEN_MINT } from "../src/utils/constants";
 
 // Initialize wallet manager
 const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
@@ -75,108 +74,6 @@ const initializeOracle = async (program: anchor.Program<Coinflip>) => {
   }
 };
 
-// Initialize Game Token if it doesn't exist
-const initializeGameToken = async (program: anchor.Program<Coinflip>) => {
-  try {
-    const tokenMintPubkey = new PublicKey(DEFAULT_TOKEN_MINT);
-
-    // Get Game Token PDA
-    const [gameTokenPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("game_token"), tokenMintPubkey.toBuffer()],
-      program.programId
-    );
-
-    // Check if Game Token exists
-    try {
-      const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
-      console.log(`Game Token already exists with min amount: ${gameTokenAccount.minAmount.toString()}`);
-      return gameTokenPda;
-    } catch (error) {
-      console.log("Game Token doesn't exist, creating...");
-    }
-
-    // Get admin keypair from JSON file
-    const adminKeypair = wallet.getAdminKeypair();
-
-    // Get Game Vault PDA
-    const [gameVaultPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("game_vault"), tokenMintPubkey.toBuffer()],
-      program.programId
-    );
-
-    // Get Game Token Account (ATA) - this needs to be created first
-    const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } = await import("@solana/spl-token");
-    const gameTokenAccount = await getAssociatedTokenAddress(
-      tokenMintPubkey,
-      gameVaultPda,
-      true // allowOwnerOffCurve
-    );
-
-    console.log(`Game Vault PDA: ${gameVaultPda.toBase58()}`);
-    console.log(`Game Token Account (ATA): ${gameTokenAccount.toBase58()}`);
-
-    // Check if the ATA already exists, if not create it
-    try {
-      const accountInfo = await wallet.getConnection().getAccountInfo(gameTokenAccount);
-      if (!accountInfo) {
-        console.log("Creating Associated Token Account for game vault...");
-
-        // Create the ATA instruction
-        const createAtaIx = createAssociatedTokenAccountInstruction(
-          adminKeypair.publicKey, // payer
-          gameTokenAccount, // ata
-          gameVaultPda, // owner
-          tokenMintPubkey // mint
-        );
-
-        // Send the ATA creation transaction
-        const createAtaTx = await wallet.sendTransaction([createAtaIx], [adminKeypair]);
-        await wallet.confirmTransaction(createAtaTx);
-        console.log(`ATA created! Transaction: ${createAtaTx}`);
-      } else {
-        console.log("ATA already exists");
-      }
-    } catch (ataError) {
-      console.error("Error creating ATA:", ataError);
-      throw ataError;
-    }
-
-    // Now initialize Game Token
-    console.log("Initializing game token...");
-    const tokenInstruction = await program.methods
-      .initializeToken(
-        new anchor.BN(1_000), // Minimum amount in lamports
-        true // Enabled
-      )
-      .accounts({
-        tokenMint: tokenMintPubkey,
-        authority: adminKeypair.publicKey,
-      })
-      .instruction();
-
-    const tx = await wallet.sendTransaction([tokenInstruction], [adminKeypair]);
-    await wallet.confirmTransaction(tx);
-    console.log(`Game Token initialized! Transaction: ${tx}`);
-
-    // Wait and verify the account was created
-    console.log("Verifying game token account...");
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // Try to fetch the account to verify initialization
-    try {
-      const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
-      console.log(`✅ Game Token verified with min amount: ${gameTokenAccount.minAmount.toString()}`);
-    } catch (verifyError) {
-      console.warn(`⚠️ Could not immediately verify game token account, but transaction was confirmed: ${tx}`);
-      console.log("The account may take a moment to be available on the network.");
-    }
-
-    return gameTokenPda;
-  } catch (error) {
-    console.error("Error initializing Game Token:", error);
-    return null;
-  }
-};
 
 // Main function
 const initializeProgram = async () => {
@@ -192,14 +89,8 @@ const initializeProgram = async () => {
       return;
     }
 
-    // Initialize Game Token
-    const gameTokenPda = await initializeGameToken(program);
-    if (!gameTokenPda) {
-      console.log("Failed to initialize Game Token. Aborting.");
-      return;
-    }
-
     console.log("Program initialization completed successfully!");
+    console.log("Note: Game tokens should be initialized separately using the initialize-game-token.ts script");
   } catch (error) {
     console.error("Error initializing program:", error);
   }

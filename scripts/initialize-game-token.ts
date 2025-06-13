@@ -23,6 +23,10 @@ const CONFIG = {
   // Token configuration
   TIMBA_MINT: 'BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4',
   TIMBA_TICKER: 'TIMBA',
+  
+  // WSOL configuration (Wrapped SOL)
+  WSOL_MINT: 'So11111111111111111111111111111111111111112',
+  WSOL_TICKER: 'WSOL',
 
   // Program configuration
   ADMIN_KEYPAIR_PATH: './admin-keypair.json'
@@ -53,11 +57,178 @@ const checkBalance = async (connection: Connection, keypair: Keypair, minBalance
 };
 
 // ================================
+// TOKEN INITIALIZATION FUNCTIONS
+// ================================
+
+async function initializeToken(
+  program: anchor.Program<Coinflip>,
+  connection: Connection,
+  adminKeypair: Keypair,
+  wallet: WalletManager,
+  tokenMint: string,
+  tokenTicker: string
+) {
+  console.log(`\n🔄 Initializing ${tokenTicker} Game Token...`);
+
+  // Validate token mint
+  const mint = new PublicKey(tokenMint);
+  console.log(`🪙 ${tokenTicker} Mint: ${mint.toBase58()}`);
+
+  // Check if token mint exists
+  const mintAccount = await connection.getAccountInfo(mint);
+  if (!mintAccount) {
+    throw new Error(`❌ Token mint ${tokenMint} does not exist on ${CONFIG.NETWORK}`);
+  }
+  console.log(`✅ ${tokenTicker} mint verified`);
+
+  // Derive game token PDA
+  const [gameTokenPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("game_token"), mint.toBuffer()],
+    program.programId
+  );
+  console.log(`🎯 ${tokenTicker} Game Token PDA: ${gameTokenPda.toBase58()}`);
+
+  // Derive game vault PDA
+  const [gameVaultPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("game_vault"), mint.toBuffer()],
+    program.programId
+  );
+  console.log(`🏦 ${tokenTicker} Game Vault PDA: ${gameVaultPda.toBase58()}`);
+
+  // Check if game token already exists
+  try {
+    const existingGameToken = await program.account.gameToken.fetch(gameTokenPda);
+    console.log(`⚠️  ${tokenTicker} game token already exists!`);
+    console.log(`   Min Amount: ${existingGameToken.minAmount.toString()}`);
+    console.log(`   Fee Amount: ${existingGameToken.feeAmount.toString()}`);
+    console.log(`   Enabled: ${existingGameToken.enabled}`);
+    return {
+      tokenMint,
+      tokenTicker,
+      gameTokenPda: gameTokenPda.toBase58(),
+      gameVaultPda: gameVaultPda.toBase58(),
+      alreadyExists: true
+    };
+  } catch (error: any) {
+    // Check if account exists but has incompatible structure
+    const accountInfo = await connection.getAccountInfo(gameTokenPda);
+    if (accountInfo) {
+      console.log(`⚠️  ${tokenTicker} GameToken account exists but has incompatible structure`);
+      console.log(`   Account Owner: ${accountInfo.owner.toBase58()}`);
+      console.log(`   Account Data Length: ${accountInfo.data.length} bytes`);
+      console.log(`   Account Lamports: ${accountInfo.lamports}`);
+      console.log(`\n❌ Cannot initialize new ${tokenTicker} GameToken over existing account.`);
+      throw new Error(`${tokenTicker} GameToken account exists with incompatible structure`);
+    }
+
+    // Game token doesn't exist, proceed with initialization
+    console.log(`📝 ${tokenTicker} game token not found, proceeding with initialization...`);
+  }
+
+  // Create Associated Token Account for game vault
+  const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } = await import("@solana/spl-token");
+  const gameTokenAccount = await getAssociatedTokenAddress(
+    mint,
+    gameVaultPda,
+    true // allowOwnerOffCurve
+  );
+  console.log(`🏪 ${tokenTicker} Game Token Account (ATA): ${gameTokenAccount.toBase58()}`);
+
+  // Check if the ATA already exists, if not create it
+  try {
+    const accountInfo = await connection.getAccountInfo(gameTokenAccount);
+    if (!accountInfo) {
+      console.log(`🔧 Creating Associated Token Account for ${tokenTicker} game vault...`);
+
+      // Create the ATA instruction
+      const createAtaIx = createAssociatedTokenAccountInstruction(
+        adminKeypair.publicKey, // payer
+        gameTokenAccount, // ata
+        gameVaultPda, // owner
+        mint // mint
+      );
+
+      // Send the ATA creation transaction
+      const { Transaction } = await import('@solana/web3.js');
+      const createAtaTx = new Transaction().add(createAtaIx);
+      createAtaTx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+      createAtaTx.feePayer = adminKeypair.publicKey;
+
+      const createAtaTxSignature = await connection.sendTransaction(createAtaTx, [adminKeypair]);
+      await connection.confirmTransaction(createAtaTxSignature, 'confirmed');
+      console.log(`✅ ${tokenTicker} ATA created! Transaction: ${createAtaTxSignature}`);
+    } else {
+      console.log(`✅ ${tokenTicker} ATA already exists`);
+    }
+  } catch (ataError) {
+    console.error(`❌ Error creating ${tokenTicker} ATA:`, ataError);
+    throw ataError;
+  }
+
+  // Initialize game token
+  console.log(`\n🔄 Initializing ${tokenTicker} game token...`);
+  const tokenInstruction = await program.methods
+    .initializeToken({
+      minAmount: new anchor.BN(tokenTicker === 'WSOL' ? 10_000_000 : 1_000), // 0.01 SOL for WSOL, 1000 lamports for others
+      enabled: true
+    })
+    .accounts({
+      tokenMint: mint,
+      authority: adminKeypair.publicKey,
+    })
+    .instruction();
+
+  const tx = await wallet.sendTransaction([tokenInstruction], [adminKeypair]);
+  console.log(`✅ ${tokenTicker} game token initialized successfully!`);
+
+  // Verify initialization
+  console.log(`\n🔍 Verifying ${tokenTicker} initialization...`);
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
+  // Retry fetching the account with exponential backoff
+  let gameTokenData: any = null;
+  let retries = 0;
+  const maxRetries = 5;
+
+  while (retries < maxRetries) {
+    try {
+      gameTokenData = await program.account.gameToken.fetch(gameTokenPda);
+      break;
+    } catch (error: any) {
+      retries++;
+      if (retries === maxRetries) {
+        console.error(`❌ Failed to verify ${tokenTicker} account after ${maxRetries} attempts`);
+        throw error;
+      }
+      console.log(`⏳ Attempt ${retries}/${maxRetries} - ${tokenTicker} account not found, retrying in ${retries * 2} seconds...`);
+      await new Promise(resolve => setTimeout(resolve, retries * 2000));
+    }
+  }
+
+  if (!gameTokenData) {
+    throw new Error(`Failed to fetch ${tokenTicker} game token data after successful initialization`);
+  }
+
+  return {
+    tokenMint,
+    tokenTicker,
+    gameTokenPda: gameTokenPda.toBase58(),
+    gameVaultPda: gameVaultPda.toBase58(),
+    gameTokenAccount: gameTokenAccount.toBase58(),
+    minAmount: gameTokenData.minAmount.toString(),
+    feeAmount: gameTokenData.feeAmount.toString(),
+    enabled: gameTokenData.enabled,
+    transaction: tx,
+    alreadyExists: false
+  };
+}
+
+// ================================
 // MAIN FUNCTION
 // ================================
 
 async function initializeGameToken() {
-  console.log('🚀 Initializing TIMBA Game Token...\n');
+  console.log('🚀 Initializing Game Tokens (TIMBA + WSOL)...\n');
 
   // Connect to network
   const connection = new Connection(CONFIG.RPC_URL, 'confirmed');
@@ -68,7 +239,7 @@ async function initializeGameToken() {
   console.log(`🔑 Admin keypair loaded: ${adminKeypair.publicKey.toBase58()}`);
 
   // Check balance
-  await checkBalance(connection, adminKeypair);
+  await checkBalance(connection, adminKeypair, 0.2); // Need more SOL for multiple token initializations
 
   // Setup Anchor provider
   const adminWallet = new anchor.Wallet(adminKeypair);
@@ -79,196 +250,106 @@ async function initializeGameToken() {
   const program = new anchor.Program(idl as Coinflip, provider) as anchor.Program<Coinflip>;
   console.log(`📋 Program ID: ${program.programId.toBase58()}`);
 
+  // Create wallet manager for transaction sending
+  const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
+
   try {
-    // Validate TIMBA mint
-    const timbaMint = new PublicKey(CONFIG.TIMBA_MINT);
-    console.log(`🪙 TIMBA Mint: ${timbaMint.toBase58()}`);
+    const results = [];
 
-    // Check if token mint exists
-    const mintAccount = await connection.getAccountInfo(timbaMint);
-    if (!mintAccount) {
-      throw new Error(`❌ Token mint ${CONFIG.TIMBA_MINT} does not exist on ${CONFIG.NETWORK}`);
-    }
-    console.log('✅ Token mint verified');
-
-    // Derive game token PDA
-    const [gameTokenPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("game_token"), timbaMint.toBuffer()],
-      program.programId
+    // Initialize TIMBA token
+    console.log('\n' + '='.repeat(50));
+    console.log('🟡 INITIALIZING TIMBA TOKEN');
+    console.log('='.repeat(50));
+    
+    const timbaResult = await initializeToken(
+      program,
+      connection,
+      adminKeypair,
+      wallet,
+      CONFIG.TIMBA_MINT,
+      CONFIG.TIMBA_TICKER
     );
-    console.log(`🎯 Game Token PDA: ${gameTokenPda.toBase58()}`);
+    results.push(timbaResult);
 
-    // Derive game vault PDA
-    const [gameVaultPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("game_vault"), timbaMint.toBuffer()],
-      program.programId
+    // Initialize WSOL token
+    console.log('\n' + '='.repeat(50));
+    console.log('🔵 INITIALIZING WSOL TOKEN');
+    console.log('='.repeat(50));
+    
+    const wsolResult = await initializeToken(
+      program,
+      connection,
+      adminKeypair,
+      wallet,
+      CONFIG.WSOL_MINT,
+      CONFIG.WSOL_TICKER
     );
-    console.log(`🏦 Game Vault PDA: ${gameVaultPda.toBase58()}`);
+    results.push(wsolResult);
 
-    // Check if game token already exists
-    try {
-      const existingGameToken = await program.account.gameToken.fetch(gameTokenPda);
-      console.log('⚠️  Game token already exists!');
-      console.log(`   Min Amount: ${existingGameToken.minAmount.toString()}`);
-      console.log(`   Fee Amount: ${existingGameToken.feeAmount.toString()}`);
-      console.log(`   Enabled: ${existingGameToken.enabled}`);
-      console.log(`   Initialized: ${new Date().toISOString()}`);
-      return;
-    } catch (error: any) {
-      // Check if account exists but has incompatible structure
-      const accountInfo = await connection.getAccountInfo(gameTokenPda);
-      if (accountInfo) {
-        console.log('⚠️  GameToken account exists but has incompatible structure (likely from old contract version)');
-        console.log(`   Account Owner: ${accountInfo.owner.toBase58()}`);
-        console.log(`   Account Data Length: ${accountInfo.data.length} bytes`);
-        console.log(`   Account Lamports: ${accountInfo.lamports}`);
-        console.log('\n❌ Cannot initialize new GameToken over existing account.');
-        console.log('💡 You may need to:');
-        console.log('   1. Close the old account first, or');
-        console.log('   2. Use a migration script to update the account structure, or');
-        console.log('   3. Deploy with a different program ID');
-        throw new Error('GameToken account exists with incompatible structure');
+    // Display comprehensive summary
+    console.log('\n' + '='.repeat(60));
+    console.log('🎉 INITIALIZATION COMPLETE - SUMMARY');
+    console.log('='.repeat(60));
+    
+    results.forEach((result, index) => {
+      const status = result.alreadyExists ? 'Already Existed' : 'Newly Initialized';
+      console.log(`\n${index + 1}. ${result.tokenTicker} Token [${status}]:`);
+      console.log(`   • Mint: ${result.tokenMint}`);
+      console.log(`   • Game Token PDA: ${result.gameTokenPda}`);
+      console.log(`   • Game Vault PDA: ${result.gameVaultPda}`);
+      
+      if (!result.alreadyExists) {
+        console.log(`   • Game Token Account: ${result.gameTokenAccount}`);
+        console.log(`   • Min Amount: ${result.minAmount}`);
+        console.log(`   • Fee Amount: ${result.feeAmount}`);
+        console.log(`   • Enabled: ${result.enabled}`);
+        console.log(`   • Transaction: ${result.transaction}`);
       }
+    });
 
-      // Game token doesn't exist, proceed with initialization
-      console.log('📝 Game token not found, proceeding with initialization...');
-    }
-
-    // Create Associated Token Account for game vault
-    const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } = await import("@solana/spl-token");
-    const gameTokenAccount = await getAssociatedTokenAddress(
-      timbaMint,
-      gameVaultPda,
-      true // allowOwnerOffCurve
-    );
-    console.log(`🏪 Game Token Account (ATA): ${gameTokenAccount.toBase58()}`);
-
-    // Check if the ATA already exists, if not create it
-    try {
-      const accountInfo = await connection.getAccountInfo(gameTokenAccount);
-      if (!accountInfo) {
-        console.log('🔧 Creating Associated Token Account for game vault...');
-
-        // Create the ATA instruction
-        const createAtaIx = createAssociatedTokenAccountInstruction(
-          adminKeypair.publicKey, // payer
-          gameTokenAccount, // ata
-          gameVaultPda, // owner
-          timbaMint // mint
-        );
-
-        // Send the ATA creation transaction
-        const { Transaction } = await import('@solana/web3.js');
-        const createAtaTx = new Transaction().add(createAtaIx);
-        createAtaTx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-        createAtaTx.feePayer = adminKeypair.publicKey;
-
-        const createAtaTxSignature = await connection.sendTransaction(createAtaTx, [adminKeypair]);
-        await connection.confirmTransaction(createAtaTxSignature, 'confirmed');
-        console.log(`✅ ATA created! Transaction: ${createAtaTxSignature}`);
-      } else {
-        console.log('✅ ATA already exists');
-      }
-    } catch (ataError) {
-      console.error('❌ Error creating ATA:', ataError);
-      throw ataError;
-    }
-
-    // Initialize game token
-    console.log('\n🔄 Initializing game token...');
-    const tokenInstruction = await program.methods
-      .initializeToken({
-        minAmount: new anchor.BN(1_000), // Minimum amount in lamports
-        enabled: true // Enabled
-      })
-      .accounts({
-        tokenMint: timbaMint,
-        authority: adminKeypair.publicKey,
-      })
-      .instruction();
-
-    // Create wallet manager for transaction sending
-    const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
-    const tx = await wallet.sendTransaction([tokenInstruction], [adminKeypair]);
-    console.log(`✅ Game token initialized successfully!`);
-
-    // Verify initialization
-    console.log('\n🔍 Verifying initialization...');
-
-    // Wait a moment for account to be available
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // Retry fetching the account with exponential backoff
-    let gameTokenData: any = null;
-    let retries = 0;
-    const maxRetries = 5;
-
-    while (retries < maxRetries) {
-      try {
-        gameTokenData = await program.account.gameToken.fetch(gameTokenPda);
-        break;
-      } catch (error: any) {
-        retries++;
-        if (retries === maxRetries) {
-          console.error(`❌ Failed to verify account after ${maxRetries} attempts`);
-          console.error('This might be a timing issue. The account may still be initializing.');
-          console.error('You can manually verify by checking the account later.');
-          throw error;
-        }
-        console.log(`⏳ Attempt ${retries}/${maxRetries} - Account not found, retrying in ${retries * 2} seconds...`);
-        await new Promise(resolve => setTimeout(resolve, retries * 2000));
-      }
-    }
-
-    if (!gameTokenData) {
-      throw new Error('Failed to fetch game token data after successful initialization');
-    }
-
-    console.log('\n🎉 Game Token Details:');
-    console.log('=====================================');
-    console.log(`Token Mint: ${CONFIG.TIMBA_MINT}`);
-    console.log(`Min Amount: ${gameTokenData.minAmount.toString()}`);
-    console.log(`Fee Amount: ${gameTokenData.feeAmount.toString()}`);
-    console.log(`Enabled: ${gameTokenData.enabled}`);
-    console.log(`Game Token PDA: ${gameTokenPda.toBase58()}`);
-    console.log(`Authority: ${adminKeypair.publicKey.toBase58()}`);
-    console.log(`Network: ${CONFIG.NETWORK}`);
-    console.log(`Initialized at: ${new Date().toISOString()}`);
-
-    // Display summary
-    console.log('\n📋 Summary:');
-    console.log(`• Token: ${CONFIG.TIMBA_TICKER}`);
-    console.log(`• Mint: ${CONFIG.TIMBA_MINT}`);
-    console.log(`• Game Token PDA: ${gameTokenPda.toBase58()}`);
-    console.log(`• Game Token Account (ATA): ${gameTokenAccount.toBase58()}`);
-    console.log(`• Transaction: ${tx}`);
-
+    // Explorer links
     console.log('\n🔗 Explorer Links:');
-    console.log(`• Transaction: https://solscan.io/tx/${tx}?cluster=${CONFIG.NETWORK}`);
-    console.log(`• Token Mint: https://solscan.io/token/${CONFIG.TIMBA_MINT}?cluster=${CONFIG.NETWORK}`);
-    console.log(`• Game Token PDA: https://solscan.io/account/${gameTokenPda.toBase58()}?cluster=${CONFIG.NETWORK}`);
-    console.log(`• Game Token Account: https://solscan.io/account/${gameTokenAccount.toBase58()}?cluster=${CONFIG.NETWORK}`);
+    results.forEach((result) => {
+      if (!result.alreadyExists) {
+        console.log(`\n${result.tokenTicker}:`);
+        console.log(`• Transaction: https://solscan.io/tx/${result.transaction}?cluster=${CONFIG.NETWORK}`);
+        console.log(`• Token Mint: https://solscan.io/token/${result.tokenMint}?cluster=${CONFIG.NETWORK}`);
+        console.log(`• Game Token PDA: https://solscan.io/account/${result.gameTokenPda}?cluster=${CONFIG.NETWORK}`);
+        console.log(`• Game Token Account: https://solscan.io/account/${result.gameTokenAccount}?cluster=${CONFIG.NETWORK}`);
+      }
+    });
 
     // Save initialization info
     const initInfo = {
-      tokenMint: CONFIG.TIMBA_MINT,
-      tokenTicker: CONFIG.TIMBA_TICKER,
-      gameTokenPda: gameTokenPda.toBase58(),
-      authority: adminKeypair.publicKey.toBase58(),
-      transaction: tx,
       network: CONFIG.NETWORK,
-      initializedAt: new Date().toISOString()
+      programId: program.programId.toBase58(),
+      authority: adminKeypair.publicKey.toBase58(),
+      initializedAt: new Date().toISOString(),
+      tokens: results.map(result => ({
+        ticker: result.tokenTicker,
+        mint: result.tokenMint,
+        gameTokenPda: result.gameTokenPda,
+        gameVaultPda: result.gameVaultPda,
+        ...(result.alreadyExists ? { status: 'already_existed' } : {
+          gameTokenAccount: result.gameTokenAccount,
+          minAmount: result.minAmount,
+          feeAmount: result.feeAmount,
+          enabled: result.enabled,
+          transaction: result.transaction,
+          status: 'newly_initialized'
+        })
+      }))
     };
 
-    const outputPath = path.join(process.cwd(), 'timba-game-token-info.json');
+    const outputPath = path.join(process.cwd(), 'game-tokens-info.json');
     fs.writeFileSync(outputPath, JSON.stringify(initInfo, null, 2));
     console.log(`\n💾 Initialization info saved to ${outputPath}`);
 
   } catch (error: any) {
-    console.error('\n❌ Error initializing game token:', error);
+    console.error('\n❌ Error initializing game tokens:', error);
 
     if (error.message?.includes('already in use')) {
-      console.log('💡 The game token may already be initialized. Run the script again to verify.');
+      console.log('💡 One or more game tokens may already be initialized. Check the output above.');
     } else if (error.message?.includes('insufficient')) {
       console.log('💡 Make sure you have enough SOL for transaction fees.');
     } else if (error.message?.includes('signature verification failed')) {
@@ -286,13 +367,13 @@ async function initializeGameToken() {
 if (require.main === module) {
   initializeGameToken()
     .then(() => {
-      console.log('\n✅ TIMBA game token initialization completed successfully!');
+      console.log('\n✅ Game tokens initialization completed successfully!');
       process.exit(0);
     })
     .catch((error) => {
-      console.error('\n❌ Failed to initialize TIMBA game token:', error);
+      console.error('\n❌ Failed to initialize game tokens:', error);
       process.exit(1);
     });
 }
 
-export { initializeGameToken, CONFIG };
+export { initializeGameToken, initializeToken, CONFIG };
