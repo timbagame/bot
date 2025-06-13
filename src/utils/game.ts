@@ -618,10 +618,8 @@ export class GameManager {
         winnerInfo = `\nWinner: @${winnerUsername}`;
       }
 
-      return `Type: ${gameType}\n` +
-             `Amount: ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}\n` +
-             `Creator: ${creatorInfo}\n` +
-             `Players: ${currentPlayers}/${maxPlayers}${expirationInfo}${winnerInfo}`;
+      return `${gameType} • ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}\n` +
+             `👤 Creator: ${creatorInfo} • ${currentPlayers}/${maxPlayers} players${expirationInfo}${winnerInfo}`;
     } catch (error: any) {
       return `Error fetching game: ${error.message}`;
     }
