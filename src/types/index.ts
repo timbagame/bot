@@ -183,3 +183,46 @@ export type GameType = "coinflip" | "giveaway" | "dumbflip" | "snowball";
 export interface TokenMetadata {
   decimals: number;
 }
+
+// ================================
+// ENHANCED TYPES FOR REFACTORING
+// ================================
+
+export type PlayerEvent = PlayerJoinedEvent | PlayerUnjoinedEvent | PlayerRolledEvent;
+
+export interface ApiContext {
+  api: any;
+  chat: { id: number };
+  from?: { username?: string; first_name?: string };
+  answerCallbackQuery?: (text: string) => Promise<void>;
+  reply?: (text: string, options?: any) => Promise<any>;
+}
+
+export interface GameStats {
+  currentPlayers: number;
+  maxPlayers: number;
+  minPlayers: number;
+  totalPot: number;
+  expirationInfo: string;
+}
+
+export interface RollGameParams {
+  ctx: any; // Use any to match existing Grammy Context usage
+  gamePda: PublicKey;
+  playerKp: anchor.web3.Keypair;
+  gameAccount: any;
+  gameData: GameData;
+  game: GameData;
+}
+
+export interface CallbackError {
+  message?: string;
+  code?: string;
+  isAccountNotFound?: boolean;
+}
+
+export interface ErrorHandlingOptions {
+  maxLength?: number;
+  includeDetails?: boolean;
+  fallbackMessage?: string;
+}

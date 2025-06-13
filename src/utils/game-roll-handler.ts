@@ -1,0 +1,226 @@
+import { PublicKey } from "@solana/web3.js";
+import * as anchor from "@coral-xyz/anchor";
+import type { RollGameParams, GameData } from "../types";
+import { handleCallbackErrorSafe } from "./context-helpers";
+
+// ================================
+// GAME ROLL HANDLING
+// ================================
+
+/**
+ * Main entry point for handling game rolls - replaces the complex handleGameRoll function
+ */
+export const handleGameRoll = async (
+  ctx: any, // Use any to match the existing signature
+  gamePda: PublicKey,
+  playerKp: anchor.web3.Keypair,
+  gameAccount: any,
+  gameData: GameData,
+  game: GameData
+): Promise<void> => {
+  try {
+    const params: RollGameParams = { ctx, gamePda, playerKp, gameAccount, gameData, game };
+    
+    if (gameAccount.isPrivate) {
+      await handlePrivateGameRoll(params);
+    } else {
+      await handlePublicGameRoll(params);
+    }
+  } catch (error: any) {
+    await handleCallbackErrorSafe(ctx, error, "game_roll", { 
+      maxLength: 180,
+      fallbackMessage: "Failed to roll. Please try again." 
+    });
+  }
+};
+
+/**
+ * Handle rolling for private games (requires authorization)
+ */
+const handlePrivateGameRoll = async (params: RollGameParams): Promise<void> => {
+  const { ctx, gamePda, playerKp, gameAccount, gameData, game } = params;
+  
+  // Import OracleClient dynamically to avoid circular dependencies
+  const { OracleClient } = await import("./oracle");
+  const { wallet } = await import("../bot"); // Assuming wallet is exported from bot
+  
+  const oracleClient = OracleClient.getInstance(wallet);
+  const authResult = await oracleClient.authorizePlayer(gamePda, ctx.chat?.id || 0);
+  
+  if (!authResult.authorized) {
+    const errorMessage = authResult.error || "Not authorized to roll this private game";
+    await safeAnswerCallbackQuery(ctx, errorMessage);
+    return;
+  }
+
+  const adminKp = authResult.adminKeypair!;
+  const rollInstruction = await createRollInstruction(
+    gamePda, 
+    playerKp.publicKey, 
+    adminKp.publicKey
+  );
+
+  const tx = await wallet.sendTransaction([rollInstruction], [playerKp, adminKp]);
+  
+  const gameTypeName = getGameTypeName(gameData.game_type);
+  await safeAnswerCallbackQuery(ctx, `🎲 Rolled the private ${gameTypeName}!`);
+  
+  await handleRollConfirmation(ctx, tx, gamePda, gameAccount, gameData, game, gameData.token_mint!);
+};
+
+/**
+ * Handle rolling for public games
+ */
+const handlePublicGameRoll = async (params: RollGameParams): Promise<void> => {
+  const { ctx, gamePda, playerKp, gameAccount, gameData, game } = params;
+  
+  const { wallet } = await import("../bot");
+  
+  const rollInstruction = await createRollInstruction(gamePda, playerKp.publicKey);
+  const tx = await wallet.sendTransaction([rollInstruction], [playerKp]);
+  
+  const gameTypeName = getGameTypeName(gameData.game_type);
+  await safeAnswerCallbackQuery(ctx, `🎲 Rolled the ${gameTypeName}!`);
+  
+  await handleRollConfirmation(ctx, tx, gamePda, gameAccount, gameData, game, gameData.token_mint!);
+};
+
+/**
+ * Create roll instruction based on whether authority is needed
+ */
+const createRollInstruction = async (
+  gamePda: PublicKey,
+  playerPubkey: PublicKey,
+  authority?: PublicKey
+): Promise<any> => {
+  const { program } = await import("../bot");
+  
+  const accounts: any = {
+    game: gamePda,
+    player: playerPubkey,
+  };
+  
+  if (authority) {
+    accounts.authority = authority;
+  }
+  
+  return await program.methods
+    .rollGame()
+    .accounts(accounts)
+    .instruction();
+};
+
+/**
+ * Handle post-roll confirmation and UI updates
+ */
+const handleRollConfirmation = async (
+  ctx: any,
+  tx: string,
+  gamePda: PublicKey,
+  gameAccount: any,
+  gameData: GameData,
+  game: GameData,
+  tokenMint: string
+): Promise<void> => {
+  // Run confirmation asynchronously to avoid blocking the callback response
+  (async () => {
+    try {
+      const { wallet, gameManager, program } = await import("../bot");
+      
+      await wallet.confirmTransaction(tx);
+
+      const updatedGameAccount = await program.account.game.fetch(gamePda);
+      const currentTotalPot = Number(updatedGameAccount.totalAmount || 0);
+
+      const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
+      const gameType = formatGameType(gameAccount.gameType);
+      const tokenTicker = gameData.token_ticker || "TOKEN";
+      
+      await gameManager.updateGameMessage(
+        ctx, 
+        game.game_address, 
+        gameType, 
+        Number(game.amount), 
+        creatorUsername, 
+        "Active", 
+        tokenMint, 
+        tokenTicker, 
+        undefined, 
+        currentTotalPot
+      );
+
+      await sendRollNotification(ctx, currentTotalPot, tokenMint, tokenTicker, game.game_address);
+      
+    } catch (error) {
+      console.error("Error confirming game roll:", error);
+    }
+  })();
+};
+
+/**
+ * Send roll notification message
+ */
+const sendRollNotification = async (
+  ctx: any,
+  totalPot: number,
+  tokenMint: string,
+  tokenTicker: string,
+  gameAddress: string
+): Promise<void> => {
+  try {
+    const { wallet, gameManager } = await import("../bot");
+    
+    const rollerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
+    const metadata = await wallet.getTokenMetadata(tokenMint);
+    const gameMessage = gameManager.getActiveGameMessage(gameAddress);
+    
+    if (ctx.reply) {
+      await ctx.reply(
+        `❄️ @${rollerUsername} rolled the snowball! Total pot: ${wallet.formatTokenBalance(totalPot, metadata.decimals)} ${tokenTicker}`,
+        {
+          parse_mode: "HTML",
+          reply_to_message_id: gameMessage?.messageId
+        }
+      );
+    }
+  } catch (error) {
+    console.error("Error sending roll notification:", error);
+  }
+};
+
+/**
+ * Get user-friendly game type name
+ */
+const getGameTypeName = (gameType: string): string => {
+  switch (gameType) {
+    case "snowball":
+      return "snowball";
+    case "dumbflip":
+      return "dice";
+    default:
+      return "game";
+  }
+};
+
+/**
+ * Format game type for display
+ */
+const formatGameType = (gameType: Record<string, any>): string => {
+  const keys = Object.keys(gameType);
+  const firstKey = keys[0];
+  if (!firstKey) return "Game";
+  return firstKey.charAt(0).toUpperCase() + firstKey.slice(1);
+};
+
+/**
+ * Safe callback query answering
+ */
+const safeAnswerCallbackQuery = async (ctx: any, text: string): Promise<void> => {
+  try {
+    if (ctx.answerCallbackQuery) {
+      await ctx.answerCallbackQuery(text);
+    }
+  } catch (error) {
+    console.error("Failed to answer callback query:", error);
+  }
+};

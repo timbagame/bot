@@ -24,21 +24,31 @@ import {
   DEFAULT_TOKEN_TICKER,
   TOKENS_LIST
 } from "./utils/constants";
-import type { PlayerData, GameCompletedEvent, PlayerJoinedEvent, PlayerUnjoinedEvent, PlayerRolledEvent } from "./types";
+import type { 
+  PlayerData, 
+  GameCompletedEvent, 
+  PlayerJoinedEvent, 
+  PlayerUnjoinedEvent, 
+  PlayerRolledEvent,
+  PlayerEvent
+} from "./types";
 import { TokenDatabase } from "./utils/token-database";
-import { OracleClient } from "./utils/oracle";
+import { handleCallbackErrorSafe } from "./utils/context-helpers";
+import { handleGameRoll } from "./utils/game-roll-handler";
 
 // ================================
 // GLOBAL INSTANCES
 // ================================
 
-const bot = new Bot(process.env.TELEGRAM_TOKEN!);
-const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
+// Module-level exports for use by utility modules
+export const bot = new Bot(process.env.TELEGRAM_TOKEN!);
+export const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
 const gameDb = GameDatabase.getInstance();
-const tokenDb = TokenDatabase.getInstance();
 
-let program: anchor.Program<Coinflip>;
-let gameManager: GameManager;
+// These will be initialized in setupAnchor
+export let gameManager: GameManager;
+export let program: anchor.Program<Coinflip>;
+const tokenDb = TokenDatabase.getInstance();
 let tokenManager: TokenManager;
 
 // ================================
@@ -48,8 +58,8 @@ let tokenManager: TokenManager;
 /**
  * Create a minimal context object for API operations
  */
-const createApiContext = (chatId: number): Context => ({
-  api: bot.api,
+const createApiContext = (chatId: number, api?: any): Context => ({
+  api: api || bot.api,
   chat: { id: chatId }
 } as unknown as Context);
 
@@ -319,14 +329,11 @@ const replyUsageError = async (ctx: Context, message: string): Promise<void> => 
 };
 
 const handleCallbackError = async (ctx: any, error: any, action: string): Promise<void> => {
-  console.error(`Error in callback ${action}:`, error);
-
-  if (error.message?.includes('Account does not exist')) {
-    await safeAnswerCallbackQuery(ctx, "This game is no longer active!");
-  } else {
-    const userFriendlyError = formatUserFriendlyError(error, wallet);
-    await safeAnswerCallbackQuery(ctx, userFriendlyError.substring(0, 180));
-  }
+  await handleCallbackErrorSafe(ctx, error, action, {
+    maxLength: 180,
+    includeDetails: false,
+    fallbackMessage: "An error occurred. Please try again."
+  });
 };
 
 // ================================
@@ -1181,84 +1188,9 @@ const handleRefreshGameCallback = async (ctx: any, gamePda: PublicKey, gameAddre
   }
 };
 
-const handleGameRoll = async (ctx: any, gamePda: PublicKey, playerKp: any, gameAccount: any, gameData: any, game: any): Promise<void> => {
-  try {
-    const tokenMint = gameData.token_mint;
-    const gameTypeName = gameData.game_type === "snowball" ? "snowball" : "dice";
+// handleGameRoll and handleRollConfirmation moved to game-roll-handler.ts
 
-    if (gameAccount.isPrivate) {
-      const oracleClient = OracleClient.getInstance(wallet);
-      const authResult = await oracleClient.authorizePlayer(gamePda, ctx.chat?.id || 0);
-      if (!authResult.authorized) {
-        await ctx.answerCallbackQuery(authResult.error || "Not authorized to roll this private snowball");
-        return;
-      }
-
-      const adminKp = authResult.adminKeypair!;
-      const rollInstruction = await program.methods
-        .rollGame()
-        .accounts({
-          game: gamePda,
-          player: playerKp.publicKey,
-          authority: adminKp.publicKey,
-        })
-        .instruction();
-
-      const tx = await wallet.sendTransaction([rollInstruction], [playerKp, adminKp]);
-      await safeAnswerCallbackQuery(ctx, `🎲 Rolled the private ${gameTypeName}!`);
-      await handleRollConfirmation(ctx, tx, gamePda, gameAccount, gameData, game, tokenMint);
-    } else {
-      const rollInstruction = await program.methods
-        .rollGame()
-        .accounts({
-          game: gamePda,
-          player: playerKp.publicKey,
-        })
-        .instruction();
-
-      const tx = await wallet.sendTransaction([rollInstruction], [playerKp]);
-      await safeAnswerCallbackQuery(ctx, `🎲 Rolled the ${gameTypeName}!`);
-      await handleRollConfirmation(ctx, tx, gamePda, gameAccount, gameData, game, tokenMint);
-    }
-  } catch (error: any) {
-    const userFriendlyError = formatUserFriendlyError(error, wallet);
-    await safeAnswerCallbackQuery(ctx, userFriendlyError.substring(0, 180));
-  }
-};
-
-const handleRollConfirmation = async (ctx: any, tx: string, gamePda: PublicKey, gameAccount: any, gameData: any, game: any, tokenMint: string): Promise<void> => {
-  (async () => {
-    try {
-      await wallet.confirmTransaction(tx);
-
-      const updatedGameAccount = await program.account.game.fetch(gamePda);
-      const currentTotalPot = Number(updatedGameAccount.totalAmount || 0);
-
-      const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
-      const gameTypeKeys = Object.keys(gameAccount.gameType);
-      const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
-      const tokenTicker = gameData.token_ticker || "TOKEN";
-      
-      await gameManager.updateGameMessage(ctx, game.game_address, gameType, Number(game.amount), creatorUsername, "Active", tokenMint, tokenTicker, undefined, currentTotalPot);
-
-      const rollerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
-      const metadata = await wallet.getTokenMetadata(tokenMint);
-      const gameMessage = gameManager.getActiveGameMessage(game.game_address);
-      
-      await ctx.reply(
-        `❄️ @${rollerUsername} rolled the snowball! Total pot: ${wallet.formatTokenBalance(currentTotalPot, metadata.decimals)} ${tokenTicker}`,
-        {
-          parse_mode: "HTML",
-          reply_to_message_id: gameMessage?.messageId
-        }
-      );
-    } catch (error) {
-      console.error("Error confirming snowball roll:", error);
-    }
-  })();
-};
-
-const handlePlayerEvent = async (event: any, eventName: string, emoji: string, action: string): Promise<void> => {
+const handlePlayerEvent = async (event: PlayerEvent, eventName: string, emoji: string, action: string): Promise<void> => {
   try {
     const gameAddress = event.gameKey.toString();
     const lastSlot = event.lastSlot.toString();
@@ -1272,25 +1204,29 @@ const handlePlayerEvent = async (event: any, eventName: string, emoji: string, a
     if (slotWasUpdated) {
       const gameData = gameDb.getGame(gameAddress);
       if (gameData && (gameData.game_type === "dumbflip" || gameData.game_type === "snowball") && gameData.chat_id) {
-        const dummyCtx = createApiContext(gameData.chat_id);
-        const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
-        
-        if (creatorTelegramId && gameData.token_mint && gameData.token_ticker) {
-          const creatorUsername = await gameManager.getUsernameFromTelegramId(dummyCtx, creatorTelegramId);
-          const gameType = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
+        try {
+          const apiCtx = createApiContext(gameData.chat_id, bot.api);
+          const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
+          
+          if (creatorTelegramId && gameData.token_mint && gameData.token_ticker) {
+            const creatorUsername = await gameManager.getUsernameFromTelegramId(apiCtx, creatorTelegramId);
+            const gameType = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
 
-          await gameManager.updateGameMessage(
-            dummyCtx,
-            gameAddress,
-            gameType,
-            gameData.amount,
-            creatorUsername,
-            "Active",
-            gameData.token_mint,
-            gameData.token_ticker,
-            undefined,
-            totalPot
-          );
+            await gameManager.updateGameMessage(
+              apiCtx,
+              gameAddress,
+              gameType,
+              gameData.amount,
+              creatorUsername,
+              "Active",
+              gameData.token_mint,
+              gameData.token_ticker,
+              undefined,
+              totalPot
+            );
+          }
+        } catch (contextError) {
+          console.error(`Error creating context for chat ${gameData.chat_id}:`, contextError);
         }
       }
     }
@@ -1739,6 +1675,7 @@ setupAnchor().then(async () => {
   }).catch((error) => {
     console.error("❌ Bot runner task failed:", error);
   });
+
 }).catch(error => {
   console.error("Failed to setup Anchor:", error);
 });
