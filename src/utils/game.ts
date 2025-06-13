@@ -362,7 +362,7 @@ export class GameManager {
               }
             })
           );
-          messageText += `\n${playerNames.join('\n')}`;
+          messageText += `\n${playerNames.join('\n')}\n`;
         }
       } catch (error) {
         console.error('Error getting player list:', error);
