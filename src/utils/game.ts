@@ -335,17 +335,13 @@ export class GameManager {
 
     const winnerInfo = await this.getWinnerInfo(ctx, status, winnerAddress);
 
-    // Show ticket amount and current prize
-    let amountDisplay = `🎫 Ticket Amount: ${this.wallet.formatTokenBalance(amount, 9)} ${tokenTicker}`;
-    // Always show current prize if there are players or if it's different from the base amount
-    if (currentPlayers > 0 || totalPot !== amount) {
-      amountDisplay += `\n🏆 Current Prize: ${this.wallet.formatTokenBalance(totalPot, 9)} ${tokenTicker}`;
-    }
+    let messageText = `<b>${gameType} • ${this.wallet.formatTokenBalance(amount, 9)} ${tokenTicker}</b>\n` +
+      `👤 Creator: @${creatorUsername} • ${currentPlayers}/${maxPlayers} players`;
 
-    let messageText = `<b>🪙 ${gameType} Game</b>\n\n` +
-      `${amountDisplay}\n` +
-      `👤 Creator: @${creatorUsername}\n` +
-      `👥 Players: ${currentPlayers}/${maxPlayers}`;
+    // Show current prize if different from base amount
+    if (currentPlayers > 0 || totalPot !== amount) {
+      messageText += `\n🏆 Current Prize: ${this.wallet.formatTokenBalance(totalPot, 9)} ${tokenTicker}`;
+    }
 
     // Add list of players if any have joined
     if (currentPlayers > 0 && status.toLowerCase() !== "completed") {
@@ -643,7 +639,7 @@ export class GameManager {
       }
 
       return [
-        `<b>${gameTypeText}</b> • ${this.wallet.formatTokenBalance(amount, 9)} ${gameData.token_ticker || "WSOL"}`,
+        `${gameTypeText} • ${this.wallet.formatTokenBalance(amount, 9)} ${gameData.token_ticker || "WSOL"}`,
         `👤 Creator: @${creatorUsername} • ${playerCount} players`,
         winnerLine
       ].join("\n");
