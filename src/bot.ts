@@ -859,7 +859,6 @@ bot.command("help", async (ctx: Context) => {
     "• Your player balance account will be automatically initialized when needed",
     "• Specify token after amount: /coinflip 100 TIMBA 2 or /tip 50 SOL",
     "• Group admins can set default tokens with /default &lt;TOKEN&gt;",
-    "• Only the last player who joined can unjoin (to maintain game order)",
     "• Dumbflip and snowball games support rolling to change expected winner",
     "• Contact bot administrator to add support for new SPL tokens"
   ];
@@ -1136,12 +1135,8 @@ const handleUnjoinGameCallback = async (ctx: any, gamePda: PublicKey, playerKp: 
     await gameManager.unjoinGame(ctx, gamePda, playerKp);
     await safeAnswerCallbackQuery(ctx, "Successfully unjoined the game!");
   } catch (error: any) {
-    if (error.message?.includes("OnlyLastPlayerCanUnjoin") || error.message?.includes("Only the last player can unjoin")) {
-      await safeAnswerCallbackQuery(ctx, "❌ Only the last player who joined can unjoin to maintain game order!");
-    } else {
-      const userFriendlyError = formatUserFriendlyError(error, wallet);
-      await safeAnswerCallbackQuery(ctx, userFriendlyError.substring(0, 180));
-    }
+    const userFriendlyError = formatUserFriendlyError(error, wallet);
+    await safeAnswerCallbackQuery(ctx, userFriendlyError.substring(0, 180));
   }
 };
 
