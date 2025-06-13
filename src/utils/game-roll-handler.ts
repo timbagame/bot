@@ -149,7 +149,7 @@ const handleRollConfirmation = async (
         currentTotalPot
       );
 
-      await sendRollNotification(ctx, currentTotalPot, tokenMint, tokenTicker, game.game_address);
+      await sendRollNotification(ctx, currentTotalPot, tokenMint, tokenTicker, game.game_address, gameData.game_type);
       
     } catch (error) {
       console.error("Error confirming game roll:", error);
@@ -165,7 +165,8 @@ const sendRollNotification = async (
   totalPot: number,
   tokenMint: string,
   tokenTicker: string,
-  gameAddress: string
+  gameAddress: string,
+  gameType: string
 ): Promise<void> => {
   try {
     const { wallet, gameManager } = await import("../bot");
@@ -175,13 +176,17 @@ const sendRollNotification = async (
     const gameMessage = gameManager.getActiveGameMessage(gameAddress);
     
     if (ctx.reply) {
-      await ctx.reply(
-        `❄️ @${rollerUsername} rolled the snowball! Total pot: ${wallet.formatTokenBalance(totalPot, metadata.decimals)} ${tokenTicker}`,
-        {
-          parse_mode: "HTML",
-          reply_to_message_id: gameMessage?.messageId
-        }
-      );
+      let rollMessage: string;
+      if (gameType === "snowball") {
+        rollMessage = `❄️ @${rollerUsername} rolled the snowball! Total pot: ${wallet.formatTokenBalance(totalPot, metadata.decimals)} ${tokenTicker}`;
+      } else {
+        rollMessage = `🎲 @${rollerUsername} rolled the dumbflip! Total pot: ${wallet.formatTokenBalance(totalPot, metadata.decimals)} ${tokenTicker}`;
+      }
+
+      await ctx.reply(rollMessage, {
+        parse_mode: "HTML",
+        reply_to_message_id: gameMessage?.messageId
+      });
     }
   } catch (error) {
     console.error("Error sending roll notification:", error);
@@ -196,7 +201,7 @@ const getGameTypeName = (gameType: string): string => {
     case "snowball":
       return "snowball";
     case "dumbflip":
-      return "dice";
+      return "dumbflip";
     default:
       return "game";
   }

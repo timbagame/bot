@@ -26,11 +26,26 @@ const logAndFormatError = (error: any, operation: string, walletManager?: Wallet
   return walletManager ? formatUserFriendlyError(error, walletManager) : error.message;
 };
 
+const formatGameTypeWithEmoji = (gameType: string): string => {
+  switch (gameType.toLowerCase()) {
+    case "coinflip":
+      return "🪙 Coinflip";
+    case "giveaway":
+      return "🎁 Giveaway";
+    case "dumbflip":
+      return "🎲 Dumbflip";
+    case "snowball":
+      return "❄️ Snowball";
+    default:
+      return `🎮 ${gameType.charAt(0).toUpperCase() + gameType.slice(1)}`;
+  }
+};
+
 const formatGameType = (gameType: Record<string, any>): string => {
   const keys = Object.keys(gameType);
   const firstKey = keys[0];
   if (!firstKey) return "Unknown";
-  return firstKey.charAt(0).toUpperCase() + firstKey.slice(1);
+  return formatGameTypeWithEmoji(firstKey);
 };
 
 const formatDate = (timestamp: number): string => {
@@ -293,8 +308,18 @@ export class GameManager {
   private generateGameKeyboard(status: string, gameType: string, currentPlayers: number, gamePda: PublicKey) {
     if (status.toLowerCase() === "completed") return [];
 
-    const isRollGame = gameType.toLowerCase() === "snowball" || gameType.toLowerCase() === "dumbflip";
-    const joinButtonText = isRollGame ? "🎲 Roll" : "🎮 Join";
+    let joinButtonText: string;
+    switch (gameType.toLowerCase()) {
+      case "dumbflip":
+        joinButtonText = "🎲 Roll";
+        break;
+      case "snowball":
+        joinButtonText = "❄️ Roll";
+        break;
+      default:
+        joinButtonText = "🎮 Join";
+        break;
+    }
 
     const keyboard = [[
       { text: joinButtonText, callback_data: `join_${gamePda.toBase58()}` },
@@ -335,7 +360,7 @@ export class GameManager {
 
     const winnerInfo = await this.getWinnerInfo(ctx, status, winnerAddress);
 
-    let messageText = `<b>${gameType} • ${this.wallet.formatTokenBalance(amount, 9)} ${tokenTicker}</b>\n` +
+    let messageText = `<b>${formatGameTypeWithEmoji(gameType)} • ${this.wallet.formatTokenBalance(amount, 9)} ${tokenTicker}</b>\n` +
       `👤 Creator: @${creatorUsername} • ${currentPlayers}/${maxPlayers} players`;
 
     // Show current prize if different from base amount
@@ -614,7 +639,7 @@ export class GameManager {
         winnerInfo = `\nWinner: @${winnerUsername}`;
       }
 
-      return `${gameType} • ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}\n` +
+      return `${formatGameTypeWithEmoji(gameType)} • ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}\n` +
              `👤 Creator: ${creatorInfo} • ${currentPlayers}/${maxPlayers} players${expirationInfo}${winnerInfo}`;
     } catch (error: any) {
       return `Error fetching game: ${error.message}`;
@@ -627,7 +652,7 @@ export class GameManager {
       const creatorUsername = await this.getUsernameFromTelegramId(ctx, gameData.creator_telegram_id);
       const amount = Number(gameData.amount);
       const playerCount = gameData.max_players || 2;
-      const gameTypeText = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
+      const gameTypeText = formatGameTypeWithEmoji(gameData.game_type);
       
       // Handle different winner states
       let winnerLine = "";
