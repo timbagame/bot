@@ -630,22 +630,24 @@ export class GameManager {
   // Helper method to get game info for completed games from database
   public async getCompletedGameInfo(ctx: Context, gameData: any): Promise<string> {
     try {
-      const winnerUsername = await this.getPlayerUsername(ctx, gameData.winner_address);
       const creatorUsername = await this.getUsernameFromTelegramId(ctx, gameData.creator_telegram_id);
       const amount = Number(gameData.amount);
       const playerCount = gameData.max_players || 2;
-
       const gameTypeText = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
+      
+      // Handle different winner states
+      let winnerLine = "";
+      if (gameData.winner_address === "cancelled" || gameData.winner_address === DEFAULT_NULL_ADDRESS) {
+        winnerLine = "❌ Status: Cancelled";
+      } else {
+        const winnerUsername = await this.getPlayerUsername(ctx, gameData.winner_address);
+        winnerLine = `🏆 Winner: @${winnerUsername}`;
+      }
 
       return [
-        `<b>🏆 ${gameTypeText} Completed</b>`,
-        "",
-        `💰 Amount: ${this.wallet.formatTokenBalance(amount, 9)} ${gameData.token_ticker || "WSOL"}`,
-        `👥 Players: ${playerCount}/${gameData.max_players || playerCount}`,
-        `👤 Creator: @${creatorUsername}`,
-        `🎉 Winner: @${winnerUsername}`,
-        "",
-        `<i>Game completed at ${formatDate(gameData.completed_at || Date.now())}</i>`
+        `<b>${gameTypeText}</b> • ${this.wallet.formatTokenBalance(amount, 9)} ${gameData.token_ticker || "WSOL"}`,
+        `👤 Creator: @${creatorUsername} • ${playerCount} players`,
+        winnerLine
       ].join("\n");
     } catch (error) {
       console.error("Error formatting completed game info:", error);
@@ -1353,7 +1355,9 @@ export class GameManager {
     for (const game of games) {
       section += `${game.gameInfo}\n`;
       if (game.completedAt) {
-        section += `Completed: ${formatDate(game.completedAt)}\n\n`;
+        section += `📅 ${formatDate(game.completedAt)}\n\n`;
+      } else {
+        section += "\n";
       }
     }
     return section;
