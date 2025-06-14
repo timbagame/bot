@@ -222,6 +222,7 @@ export class GameManager {
 
   /**
    * Get game creator username with fallback to address display
+   * Returns @username for Telegram users or formatted address for blockchain players
    */
   public async getGameCreatorUsername(ctx: Context, gameAddress: string): Promise<string> {
     const creatorTelegramId = this.gameDb.getCreatorTelegramId(gameAddress);
@@ -231,23 +232,33 @@ export class GameManager {
       try {
         const gamePda = new PublicKey(gameAddress);
         const gameAccount = await this.program.account.game.fetch(gamePda);
-        return gameAccount.creator.toString().slice(0, ADDRESS_DISPLAY_LENGTH) + "...";
+        const creatorAddress = gameAccount.creator.toString();
+        // Format as GLAi...BPCg style for blockchain players
+        return creatorAddress.length >= 8 
+          ? `${creatorAddress.slice(0, 4)}...${creatorAddress.slice(-4)}`
+          : creatorAddress.slice(0, ADDRESS_DISPLAY_LENGTH) + "...";
       } catch (error) {
         return "Unknown";
       }
     }
-    return this.getUsernameFromTelegramId(ctx, creatorTelegramId);
+    const username = await this.getUsernameFromTelegramId(ctx, creatorTelegramId);
+    return `@${username}`;
   }
 
   /**
    * Get player username with fallback to address display
+   * Returns @username for Telegram users or formatted address for blockchain players
    */
   public async getPlayerUsername(ctx: Context, publicKey: string): Promise<string> {
     const playerTelegramId = this.gameDb.getPlayerTelegramId(publicKey);
     if (!playerTelegramId) {
-      return publicKey.slice(0, ADDRESS_DISPLAY_LENGTH) + "...";
+      // Format as GLAi...BPCg style for blockchain players
+      return publicKey.length >= 8 
+        ? `${publicKey.slice(0, 4)}...${publicKey.slice(-4)}`
+        : publicKey.slice(0, ADDRESS_DISPLAY_LENGTH) + "...";
     }
-    return this.getUsernameFromTelegramId(ctx, playerTelegramId);
+    const username = await this.getUsernameFromTelegramId(ctx, playerTelegramId);
+    return `@${username}`;
   }
 
   // ================================
@@ -301,7 +312,7 @@ export class GameManager {
     }
     
     const winnerUsername = await this.getPlayerUsername(ctx, winnerAddress);
-    return `\nWinner: @${winnerUsername}`;
+    return `\nWinner: ${winnerUsername}`;
   }
 
   private generateGameKeyboard(status: string, gameType: string, currentPlayers: number, gamePda: PublicKey) {
@@ -360,7 +371,7 @@ export class GameManager {
     const winnerInfo = await this.getWinnerInfo(ctx, status, winnerAddress);
 
     let messageText = `<b>${formatGameTypeWithEmoji(gameType)} • ${this.wallet.formatTokenBalance(amount, 9)} ${tokenTicker}</b>\n` +
-      `👤 Creator: @${creatorUsername} • ${currentPlayers}/${maxPlayers} players`;
+      `👤 Creator: ${creatorUsername} • ${currentPlayers}/${maxPlayers} players`;
 
     // Show current prize if different from base amount
     if (currentPlayers > 0 || totalPot !== amount) {
