@@ -3,8 +3,7 @@ import type {
   AuthorizationResult,
   OracleApiResponse,
   OracleStats,
-  OracleStatsResponse,
-  GameType
+  OracleStatsResponse
 } from "../types";
 import { GameDatabase } from "./game-database";
 import { WalletManager } from "./wallet";
@@ -41,14 +40,13 @@ export class OracleClient {
   /**
    * Request a random hash from the oracle API for game creation
    */
-  public async generateGameSecrets(gameType: GameType): Promise<{ randomHash: string; secretKey?: string }> {
+  public async generateGameSecrets(): Promise<{ randomHash: string }> {
     try {
       const response = await fetch(`${this.oracleApiUrl}/generate-hash`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ gameType })
+        }
       });
 
       if (!response.ok) {
@@ -61,19 +59,11 @@ export class OracleClient {
         throw new Error(data.error || 'Failed to generate random hash');
       }
 
-      console.log(`✅ Generated random hash from oracle for ${gameType}: ${data.randomHash}`);
+      console.log(`✅ Generated random hash from oracle: ${data.randomHash}`);
 
-      const result: { randomHash: string; secretKey?: string } = {
+      return {
         randomHash: data.randomHash
       };
-
-      // Store secret key for dumbflip and snowball games
-      if ((gameType === "dumbflip" || gameType === "snowball") && data.secretKey) {
-        result.secretKey = data.secretKey;
-        console.log(`🔐 Secret key received for ${gameType} game`);
-      }
-
-      return result;
     } catch (error) {
       console.error('❌ Error requesting random hash from oracle:', error);
       throw new Error(`Oracle API unavailable: ${(error as Error).message}`);
@@ -120,6 +110,31 @@ export class OracleClient {
     } catch (error) {
       console.warn('Oracle health check failed:', error);
       return false;
+    }
+  }
+
+  /**
+   * Get the current winner for a specific game (dumbflip/snowball)
+   */
+  public async getCurrentWinner(gameAddress: string): Promise<{ success: boolean; winner?: string; error?: string }> {
+    try {
+      const response = await fetch(`${this.oracleApiUrl}/current-winner/${gameAddress}`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(10000) // 10 second timeout
+      });
+
+      if (!response.ok) {
+        throw new Error(`Oracle API request failed: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('❌ Error getting current winner from oracle:', error);
+      return { 
+        success: false, 
+        error: `Oracle API unavailable: ${(error as Error).message}` 
+      };
     }
   }
 

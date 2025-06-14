@@ -54,14 +54,6 @@ export class GameDatabase {
         }
       }
 
-      // Create secret keys table
-      this.db.run(`
-        CREATE TABLE IF NOT EXISTS secret_keys (
-          game_address TEXT PRIMARY KEY,
-          secret_key TEXT NOT NULL,
-          FOREIGN KEY (game_address) REFERENCES games(game_address)
-        )
-      `);
 
       // Create player mappings table
       this.db.run(`
@@ -103,28 +95,6 @@ export class GameDatabase {
     }
   }
 
-  public saveOracleSecretKey(gameAddress: string, secretKey: string): void {
-    try {
-      const stmt = this.db.prepare(
-        'INSERT OR REPLACE INTO secret_keys (game_address, secret_key) VALUES (?, ?)'
-      );
-      stmt.run(gameAddress, secretKey);
-    } catch (error) {
-      console.error("Error saving oracle secret key:", error);
-      throw error;
-    }
-  }
-
-  public getOracleSecretKey(gameAddress: string): string | null {
-    try {
-      const stmt = this.db.prepare("SELECT secret_key FROM secret_keys WHERE game_address = ?");
-      const result = stmt.get(gameAddress) as { secret_key: string } | undefined;
-      return result?.secret_key || null;
-    } catch (error) {
-      console.error("Error getting oracle secret key:", error);
-      return null;
-    }
-  }
 
   public getGame(gameAddress: string): GameData | null {
     try {

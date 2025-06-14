@@ -2,7 +2,6 @@ import { PublicKey } from "@solana/web3.js";
 import { Context } from "grammy";
 import * as anchor from "@coral-xyz/anchor";
 import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } from "@solana/spl-token";
-import { createHash } from "crypto";
 import { WalletManager } from "./wallet";
 import { GameDatabase } from "./game-database";
 import { OracleClient } from "./oracle";
@@ -210,7 +209,7 @@ export class GameManager {
     try {
       const numericId = parseInt(telegramId, 10);
       if (isNaN(numericId)) {
-        return telegramId.slice(0, ADDRESS_DISPLAY_LENGTH) + "...";
+        throw new Error(`Invalid Telegram ID: ${telegramId}`);
       }
 
       const chatMember = await ctx.api.getChatMember(ctx.chat!.id, numericId);
@@ -774,7 +773,7 @@ export class GameManager {
         return;
       }
 
-      const { randomHash, secretKey } = await this.oracleClient.generateGameSecrets(gameType);
+      const { randomHash } = await this.oracleClient.generateGameSecrets();
       const randomHashBuffer = this.oracleClient.hexToBuffer(randomHash);
 
       await this.ensurePlayerBalance(playerKp, tokenMint);
@@ -812,12 +811,6 @@ export class GameManager {
 
       // Save game and create message
       this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker, maxPlayers, minPlayers);
-
-      // Store secret key for dumbflip and snowball games with derived game address
-      if ((gameType === "dumbflip" || gameType === "snowball") && secretKey) {
-        this.gameDb.saveOracleSecretKey(gamePda.toBase58(), secretKey);
-        console.log(`🔐 Secret key stored for ${gameType} game`);
-      }
 
       await this.createGameMessage(ctx, gamePda.toBase58(), gameType.charAt(0).toUpperCase() + gameType.slice(1), amount, ctx.from?.username || "Unknown", tokenMint, tokenTicker, "Active", tx);
 
@@ -915,119 +908,35 @@ export class GameManager {
   }
 
   /**
-   * Get expected winner for dumbflip and snowball games using secret key and lastSlot
+   * Get expected winner for dumbflip and snowball games using oracle API
    */
   private async getExpectedWinner(gameAddress: string, participants: string[]): Promise<string | null> {
     try {
-      const secretKey = this.gameDb.getOracleSecretKey(gameAddress);
-      const lastSlot = this.gameDb.getGameLastSlot(gameAddress);
-
-      if (!secretKey || !lastSlot || participants.length === 0) {
+      if (participants.length === 0) {
         return null;
       }
 
-      // Validate inputs before calculating
-      if (participants.length <= 0) {
-        console.warn(`Invalid participants length for game ${gameAddress}: ${participants.length}`);
+      const result = await this.oracleClient.getCurrentWinner(gameAddress);
+      if (!result.success || !result.winner) {
+        console.warn(`Failed to get winner from oracle for game ${gameAddress}: ${result.error}`);
         return null;
       }
 
-      const lastSlotBigInt = BigInt(lastSlot);
-      if (lastSlotBigInt < 0n) {
-        console.warn(`Invalid lastSlot for game ${gameAddress}: ${lastSlot}`);
-        return null;
+      // Oracle returns Solana address, try to convert to Telegram ID
+      const telegramId = this.gameDb.getPlayerTelegramId(result.winner);
+      if (telegramId) {
+        return telegramId;
       }
 
-      return this.calculateWinnerFromSecretAndSlot(secretKey, lastSlot, participants);
+      // No Telegram mapping found - player joined via blockchain directly
+      // Return the Solana address for display
+      return result.winner;
     } catch (error) {
-      console.error('Error calculating expected winner:', error);
+      console.error('Error getting expected winner from oracle:', error);
       return null;
     }
   }
 
-  /**
-   * Calculate winner index using secret key and lastSlot (matching contract logic)
-   */
-  private calculateWinnerFromSecretAndSlot(secretKey: string, lastSlot: string, participants: string[]): string | null {
-    try {
-      const winnerIndex = this.calculateWinnerIndex(secretKey, BigInt(lastSlot), participants.length);
-      return participants[winnerIndex] || null;
-    } catch (error) {
-      console.error('Error in winner calculation:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Calculate winner index using the exact same algorithm as the contract
-   */
-  private calculateWinnerIndex(secretKey: string, lastSlot: bigint, nPlayers: number): number {
-    if (nPlayers <= 1) {
-      return 0;
-    }
-
-    if (nPlayers <= 0) {
-      throw new Error("Number of players must be greater than 0");
-    }
-
-    // Convert secret key from hex string to buffer
-    const secretKeyBuffer = Buffer.from(secretKey, 'hex');
-    if (secretKeyBuffer.length !== 32) {
-      throw new Error("Invalid secret key length - must be 32 bytes");
-    }
-
-    // Validate lastSlot is within safe range
-    if (lastSlot < 0n) {
-      throw new Error("Last slot cannot be negative");
-    }
-
-    // Hash combination of secret key and last_slot for additional entropy (matching contract logic)
-    const combinedData = Buffer.alloc(40); // 32 bytes secret + 8 bytes last_slot
-    secretKeyBuffer.copy(combinedData, 0, 0, 32);
-
-    // Convert bigint to little-endian bytes (matching contract's to_le_bytes())
-    const lastSlotBytes = Buffer.alloc(8);
-
-    // Handle large numbers by converting to bigint and then to buffer safely
-    const lastSlotBigInt = BigInt(lastSlot);
-    const low32 = Number(lastSlotBigInt & BigInt(0xffffffff));
-    const high32 = Number((lastSlotBigInt >> BigInt(32)) & BigInt(0xffffffff));
-
-    // Write as unsigned 32-bit integers
-    lastSlotBytes.writeUInt32LE(low32, 0);
-    lastSlotBytes.writeUInt32LE(high32, 4);
-    lastSlotBytes.copy(combinedData, 32);
-
-    // Hash the combined data (matching contract's hash() function)
-    const entropyHash = createHash('sha256').update(combinedData).digest();
-
-    const maxU64 = BigInt('0xFFFFFFFFFFFFFFFF');
-    const nPlayersBig = BigInt(nPlayers);
-    const maxValid = maxU64 - (maxU64 % nPlayersBig);
-
-    // Try sliding 8-byte windows through the hashed entropy
-    for (let startPos = 0; startPos <= (32 - 8); startPos++) {
-      // Extract 8 bytes and convert to u64 using little-endian (matching contract)
-      const window = entropyHash.subarray(startPos, startPos + 8);
-
-      // Convert to BigInt using little-endian format
-      let randomU64 = BigInt(0);
-      for (let i = 0; i < 8; i++) {
-        const byte = window[i];
-        if (byte === undefined) {
-          throw new Error("Invalid entropy hash buffer size");
-        }
-        randomU64 |= BigInt(byte) << (BigInt(i) * BigInt(8));
-      }
-
-      // Use this value if it's in the unbiased range
-      if (randomU64 < maxValid) {
-        return Number(randomU64 % nPlayersBig);
-      }
-    }
-
-    throw new Error("Unable to generate unbiased random number - game must be cancelled");
-  }
 
   /**
    * Get expected winner info for display in game messages
@@ -1043,13 +952,24 @@ export class GameManager {
         return "\n🎯 Expected winner: No players yet";
       }
 
-      const expectedWinnerTelegramId = await this.getExpectedWinner(gameAddress, participants);
-      if (!expectedWinnerTelegramId) {
+      const expectedWinner = await this.getExpectedWinner(gameAddress, participants);
+      if (!expectedWinner) {
         return "\n🎯 Expected winner: Calculating...";
       }
 
-      const expectedWinnerUsername = await this.getUsernameFromTelegramId(ctx, expectedWinnerTelegramId);
-      return `\n🎯 Expected winner: @${expectedWinnerUsername}`;
+      // Check if it's a Telegram ID (numeric) or Solana address
+      const numericId = parseInt(expectedWinner, 10);
+      if (!isNaN(numericId)) {
+        // It's a Telegram ID - get the username
+        const expectedWinnerUsername = await this.getUsernameFromTelegramId(ctx, expectedWinner);
+        return `\n🎯 Expected winner: @${expectedWinnerUsername}`;
+      } else {
+        // It's a Solana address - format it nicely
+        const formattedAddress = expectedWinner.length >= 32 
+          ? `${expectedWinner.slice(0, 4)}...${expectedWinner.slice(-4)}`
+          : expectedWinner.slice(0, 8) + "...";
+        return `\n🎯 Expected winner: ${formattedAddress}`;
+      }
     } catch (error) {
       console.error('Error getting expected winner info:', error);
       // Return a fallback message instead of empty string to show there was an issue
