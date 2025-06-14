@@ -646,9 +646,9 @@ export class GameManager {
       const creatorPubkey = gameAccount.creator.toString();
       const gameType = formatGameType(gameAccount.gameType);
 
-      const creatorTelegramId = this.gameDb.getCreatorTelegramId(gamePda.toBase58());
-      const creatorInfo = creatorTelegramId
-        ? `@${await this.getUsernameFromTelegramId(ctx, creatorTelegramId)}`
+      const creatorUsername = await this.getGameCreatorUsername(ctx, gamePda.toBase58());
+      const creatorInfo = creatorUsername !== "Unknown"
+        ? creatorUsername
         : `<code>${creatorPubkey.slice(0, ADDRESS_DISPLAY_LENGTH)}...</code>`;
 
       // Add expiration info
@@ -1065,28 +1065,25 @@ export class GameManager {
 
       await this.unjoinPlayerFromGame(gamePda, playerKp, playerKp.publicKey);
 
-      const creatorTelegramId = this.gameDb.getCreatorTelegramId(gamePda.toBase58());
-      if (creatorTelegramId) {
-        const creatorUsername = await this.getUsernameFromTelegramId(ctx, creatorTelegramId) || "Unknown";
-
-        // Get token info from database
-        const gameData = this.gameDb.getGame(gamePda.toBase58());
-        if (!gameData?.token_mint || !gameData?.token_ticker) {
-          console.error(`Missing token info for game ${gamePda.toBase58()}`);
-          throw new Error("Game data incomplete - please contact support");
-        }
-
-        await this.updateGameMessage(
-          ctx,
-          gamePda.toBase58(),
-          formatGameType(gameAccount.gameType),
-          Number(gameAccount.ticketAmount),
-          creatorUsername,
-          "Active",
-          gameData.token_mint,
-          gameData.token_ticker
-        );
+      const creatorUsername = await this.getGameCreatorUsername(ctx, gamePda.toBase58());
+      
+      // Get token info from database
+      const gameData = this.gameDb.getGame(gamePda.toBase58());
+      if (!gameData?.token_mint || !gameData?.token_ticker) {
+        console.error(`Missing token info for game ${gamePda.toBase58()}`);
+        throw new Error("Game data incomplete - please contact support");
       }
+
+      await this.updateGameMessage(
+        ctx,
+        gamePda.toBase58(),
+        formatGameType(gameAccount.gameType),
+        Number(gameAccount.ticketAmount),
+        creatorUsername,
+        "Active",
+        gameData.token_mint,
+        gameData.token_ticker
+      );
 
       return true;
     } catch (error: any) {

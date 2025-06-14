@@ -104,18 +104,14 @@ const updateGameMessageSafely = async (
 
   try {
     const ctx = createApiContext(gameData.chat_id);
-    const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
+    const creatorUsername = await gameManager.getGameCreatorUsername(ctx, gameAddress);
+    const gameType = gameData.game_type ?
+      gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1) : "Game";
 
-    if (creatorTelegramId) {
-      const creatorUsername = await gameManager.getUsernameFromTelegramId(ctx, creatorTelegramId);
-      const gameType = gameData.game_type ?
-        gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1) : "Game";
-
-      await gameManager.updateGameMessage(
-        ctx, gameAddress, gameType, gameData.amount, creatorUsername,
-        status, gameData.token_mint, gameData.token_ticker, winnerAddress
-      );
-    }
+    await gameManager.updateGameMessage(
+      ctx, gameAddress, gameType, gameData.amount, creatorUsername,
+      status, gameData.token_mint, gameData.token_ticker, winnerAddress
+    );
   } catch (error) {
     console.warn(`Could not update message for game ${gameAddress}:`, error);
   }
@@ -1206,10 +1202,9 @@ const handlePlayerEvent = async (event: PlayerEvent, eventName: string, emoji: s
       if (gameData && (gameData.game_type === "dumbflip" || gameData.game_type === "snowball") && gameData.chat_id) {
         try {
           const apiCtx = createApiContext(gameData.chat_id, bot.api);
-          const creatorTelegramId = gameDb.getCreatorTelegramId(gameAddress);
           
-          if (creatorTelegramId && gameData.token_mint && gameData.token_ticker) {
-            const creatorUsername = await gameManager.getUsernameFromTelegramId(apiCtx, creatorTelegramId);
+          if (gameData.token_mint && gameData.token_ticker) {
+            const creatorUsername = await gameManager.getGameCreatorUsername(apiCtx, gameAddress);
             const gameType = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
 
             await gameManager.updateGameMessage(
