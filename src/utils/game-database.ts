@@ -139,6 +139,30 @@ export class GameDatabase {
     }
   }
 
+  public getCreatorInfo(gameAddress: string): { telegramId: string | null; publicKey: string | null } | null {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT g.creator_telegram_id, pm.public_key
+        FROM games g
+        LEFT JOIN player_mappings pm ON g.creator_telegram_id = pm.telegram_id
+        WHERE g.game_address = ?
+      `);
+      const result = stmt.get(gameAddress) as { creator_telegram_id: string; public_key: string | null } | undefined;
+      
+      if (!result) {
+        return null;
+      }
+      
+      return {
+        telegramId: result.creator_telegram_id,
+        publicKey: result.public_key || null
+      };
+    } catch (error) {
+      console.error("Error getting creator info:", error);
+      throw error;
+    }
+  }
+
   public gameExists(gameAddress: string): boolean {
     try {
       const stmt = this.db.prepare('SELECT 1 FROM games WHERE game_address = ? LIMIT 1');

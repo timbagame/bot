@@ -203,9 +203,18 @@ export class GameManager {
   // ================================
 
   /**
+   * Format Solana address for display
+   */
+  private formatAddress(address: string): string {
+    return address.length >= 8 
+      ? `${address.slice(0, 4)}...${address.slice(-4)}`
+      : address.slice(0, ADDRESS_DISPLAY_LENGTH) + "...";
+  }
+
+  /**
    * Get username from Telegram ID with consistent error handling
    */
-  public async getUsernameFromTelegramId(ctx: Context, telegramId: string): Promise<string> {
+  public async getUsernameFromTelegramId(ctx: Context, telegramId: string): Promise<string | null> {
     try {
       const numericId = parseInt(telegramId, 10);
       if (isNaN(numericId)) {
@@ -213,36 +222,37 @@ export class GameManager {
       }
 
       const chatMember = await ctx.api.getChatMember(ctx.chat!.id, numericId);
-      return chatMember.user.username || chatMember.user.first_name || "Unknown User";
+      return chatMember.user.username || chatMember.user.first_name || null;
     } catch (error) {
       console.warn(`Error getting username for Telegram ID ${telegramId}:`, error);
-      return `User${telegramId.slice(0, 6)}`;
+      return null;
     }
   }
 
   /**
-   * Get game creator username with fallback to address display
+   * Get game creator display name - optimized single method
    * Returns @username for Telegram users or formatted address for blockchain players
    */
   public async getGameCreatorUsername(ctx: Context, gameAddress: string): Promise<string> {
-    const creatorTelegramId = this.gameDb.getCreatorTelegramId(gameAddress);
-    if (!creatorTelegramId) {
-      console.warn(`No creator telegram ID found for game ${gameAddress}`);
-      // Try to get creator from game account as fallback
-      try {
-        const gamePda = new PublicKey(gameAddress);
-        const gameAccount = await this.program.account.game.fetch(gamePda);
-        const creatorAddress = gameAccount.creator.toString();
-        // Format as GLAi...BPCg style for blockchain players
-        return creatorAddress.length >= 8 
-          ? `${creatorAddress.slice(0, 4)}...${creatorAddress.slice(-4)}`
-          : creatorAddress.slice(0, ADDRESS_DISPLAY_LENGTH) + "...";
-      } catch (error) {
-        return "Unknown";
+    const creatorInfo = this.gameDb.getCreatorInfo(gameAddress);
+    if (!creatorInfo) {
+      return "Unknown";
+    }
+    
+    // If we have telegram ID, try to get username
+    if (creatorInfo.telegramId) {
+      const username = await this.getUsernameFromTelegramId(ctx, creatorInfo.telegramId);
+      if (username) {
+        return `@${username}`;
       }
     }
-    const username = await this.getUsernameFromTelegramId(ctx, creatorTelegramId);
-    return `@${username}`;
+    
+    // Fall back to formatted address
+    if (creatorInfo.publicKey) {
+      return this.formatAddress(creatorInfo.publicKey);
+    }
+    
+    return "Unknown";
   }
 
   /**
@@ -252,12 +262,14 @@ export class GameManager {
   public async getPlayerUsername(ctx: Context, publicKey: string): Promise<string> {
     const playerTelegramId = this.gameDb.getPlayerTelegramId(publicKey);
     if (!playerTelegramId) {
-      // Format as GLAi...BPCg style for blockchain players
-      return publicKey.length >= 8 
-        ? `${publicKey.slice(0, 4)}...${publicKey.slice(-4)}`
-        : publicKey.slice(0, ADDRESS_DISPLAY_LENGTH) + "...";
+      return this.formatAddress(publicKey);
     }
+    
     const username = await this.getUsernameFromTelegramId(ctx, playerTelegramId);
+    if (!username) {
+      return this.formatAddress(publicKey);
+    }
+    
     return `@${username}`;
   }
 
@@ -973,13 +985,14 @@ export class GameManager {
       if (!isNaN(numericId)) {
         // It's a Telegram ID - get the username
         const expectedWinnerUsername = await this.getUsernameFromTelegramId(ctx, expectedWinner);
-        return `\n🎯 Expected winner: @${expectedWinnerUsername}`;
+        if (expectedWinnerUsername) {
+          return `\n🎯 Expected winner: @${expectedWinnerUsername}`;
+        }
+        // Username resolution failed, fall back to User + partial ID
+        return `\n🎯 Expected winner: User${expectedWinner.slice(0, 6)}`;
       } else {
         // It's a Solana address - format it nicely
-        const formattedAddress = expectedWinner.length >= 32 
-          ? `${expectedWinner.slice(0, 4)}...${expectedWinner.slice(-4)}`
-          : expectedWinner.slice(0, 8) + "...";
-        return `\n🎯 Expected winner: ${formattedAddress}`;
+        return `\n🎯 Expected winner: ${this.formatAddress(expectedWinner)}`;
       }
     } catch (error) {
       console.error('Error getting expected winner info:', error);
@@ -1054,7 +1067,7 @@ export class GameManager {
 
       const creatorTelegramId = this.gameDb.getCreatorTelegramId(gamePda.toBase58());
       if (creatorTelegramId) {
-        const creatorUsername = await this.getUsernameFromTelegramId(ctx, creatorTelegramId);
+        const creatorUsername = await this.getUsernameFromTelegramId(ctx, creatorTelegramId) || "Unknown";
 
         // Get token info from database
         const gameData = this.gameDb.getGame(gamePda.toBase58());
