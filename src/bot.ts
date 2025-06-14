@@ -24,11 +24,11 @@ import {
   DEFAULT_TOKEN_TICKER,
   TOKENS_LIST
 } from "./utils/constants";
-import type { 
-  PlayerData, 
-  GameCompletedEvent, 
-  PlayerJoinedEvent, 
-  PlayerUnjoinedEvent, 
+import type {
+  PlayerData,
+  GameCompletedEvent,
+  PlayerJoinedEvent,
+  PlayerUnjoinedEvent,
   PlayerRolledEvent,
   PlayerEvent
 } from "./types";
@@ -1202,7 +1202,7 @@ const handlePlayerEvent = async (event: PlayerEvent, eventName: string, emoji: s
       if (gameData && (gameData.game_type === "dumbflip" || gameData.game_type === "snowball") && gameData.chat_id) {
         try {
           const apiCtx = createApiContext(gameData.chat_id, bot.api);
-          
+
           if (gameData.token_mint && gameData.token_ticker) {
             const creatorUsername = await gameManager.getGameCreatorUsername(apiCtx, gameAddress);
             const gameType = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
@@ -1501,7 +1501,7 @@ setupAnchor().then(async () => {
     const gameType = gameData.game_type ? gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1) : "Game";
 
     let notificationText = `🎉 <b>${gameType} Completed!</b>\n\n`;
-    notificationText += `🏆 Winner: @${winnerUsername}\n`;
+    notificationText += `🏆 Winner: ${winnerUsername}\n`;
     notificationText += `💰 Prize: ${wallet.formatTokenBalance(winnerAmount, metadata.decimals)} ${gameData.token_ticker}`;
 
     const gameMessage = gameManager.getActiveGameMessage(event.gameKey.toString());

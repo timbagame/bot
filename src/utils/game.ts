@@ -206,7 +206,7 @@ export class GameManager {
    * Format Solana address for display
    */
   private formatAddress(address: string): string {
-    return address.length >= 8 
+    return address.length >= 8
       ? `${address.slice(0, 4)}...${address.slice(-4)}`
       : address.slice(0, ADDRESS_DISPLAY_LENGTH) + "...";
   }
@@ -238,7 +238,7 @@ export class GameManager {
     if (!creatorInfo) {
       return "Unknown";
     }
-    
+
     // If we have telegram ID, try to get username
     if (creatorInfo.telegramId) {
       const username = await this.getUsernameFromTelegramId(ctx, creatorInfo.telegramId);
@@ -246,12 +246,12 @@ export class GameManager {
         return `@${username}`;
       }
     }
-    
+
     // Fall back to formatted address
     if (creatorInfo.publicKey) {
       return this.formatAddress(creatorInfo.publicKey);
     }
-    
+
     return "Unknown";
   }
 
@@ -264,12 +264,12 @@ export class GameManager {
     if (!playerTelegramId) {
       return this.formatAddress(publicKey);
     }
-    
+
     const username = await this.getUsernameFromTelegramId(ctx, playerTelegramId);
     if (!username) {
       return this.formatAddress(publicKey);
     }
-    
+
     return `@${username}`;
   }
 
@@ -287,14 +287,14 @@ export class GameManager {
       const currentPlayers = gameAccount.playersCount;
       const maxPlayers = gameAccount.maxPlayers;
       const minPlayers = gameAccount.minPlayers;
-      
+
       const totalPot = providedTotalPot ?? (Number(gameAccount.totalAmount || 0) || (amount * currentPlayers));
-      
+
       const createdAt = Number(gameAccount.createdAt);
       const timeout = Number(gameAccount.timeout);
       const expiresAt = createdAt + timeout;
       const expirationInfo = await formatExpirationTime(expiresAt, this.wallet, "\n⏰ ");
-      
+
       return { currentPlayers, maxPlayers, minPlayers, totalPot, expirationInfo };
     } catch (error) {
       console.warn(`Warning: Could not fetch game account for ${gamePda.toBase58()}:`, error);
@@ -306,7 +306,7 @@ export class GameManager {
     const participants = this.getGamePlayers(gamePda.toBase58());
     const currentPlayers = participants.length;
     const totalPot = providedTotalPot ?? (amount * currentPlayers);
-    
+
     return {
       currentPlayers,
       maxPlayers: currentPlayers,
@@ -318,11 +318,11 @@ export class GameManager {
 
   private async getWinnerInfo(ctx: Context, status: string, winnerAddress?: string): Promise<string> {
     if (status.toLowerCase() !== "completed" || !winnerAddress) return "";
-    
+
     if (winnerAddress === "cancelled" || winnerAddress === DEFAULT_NULL_ADDRESS) {
       return `\nStatus: Cancelled`;
     }
-    
+
     const winnerUsername = await this.getPlayerUsername(ctx, winnerAddress);
     return `\nWinner: ${winnerUsername}`;
   }
@@ -373,8 +373,8 @@ export class GameManager {
     providedTotalPot?: number
   ): Promise<GameMessageFormat> {
     const isCompleted = status.toLowerCase() === "completed";
-    
-    const gameStats = isCompleted 
+
+    const gameStats = isCompleted
       ? await this.getCompletedGameStats(gamePda, amount, providedTotalPot)
       : await this.getActiveGameStats(gamePda, amount, providedTotalPot);
 
@@ -675,7 +675,7 @@ export class GameManager {
       const amount = Number(gameData.amount);
       const playerCount = gameData.max_players || 2;
       const gameTypeText = formatGameTypeWithEmoji(gameData.game_type);
-      
+
       // Handle different winner states
       let winnerLine = "";
       if (gameData.winner_address === "cancelled" || gameData.winner_address === DEFAULT_NULL_ADDRESS) {
@@ -689,11 +689,11 @@ export class GameManager {
         `${gameTypeText} • ${this.wallet.formatTokenBalance(amount, 9)} ${gameData.token_ticker || "WSOL"}`,
         `👤 Creator: @${creatorUsername} • ${playerCount} players`
       ];
-      
+
       if (winnerLine) {
         lines.push(winnerLine);
       }
-      
+
       return lines.join("\n");
     } catch (error) {
       console.error("Error formatting completed game info:", error);
@@ -835,7 +835,8 @@ export class GameManager {
       // Save game and create message
       this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker, maxPlayers, minPlayers);
 
-      await this.createGameMessage(ctx, gamePda.toBase58(), gameType.charAt(0).toUpperCase() + gameType.slice(1), amount, ctx.from?.username || "Unknown", tokenMint, tokenTicker, "Active", tx);
+      const creatorUsername = await this.getGameCreatorUsername(ctx, gamePda.toBase58());
+      await this.createGameMessage(ctx, gamePda.toBase58(), gameType.charAt(0).toUpperCase() + gameType.slice(1), amount, creatorUsername, tokenMint, tokenTicker, "Active", tx);
 
       // Auto-join logic based on game type
       if (gameType === "coinflip" || gameType === "dumbflip" || gameType === "snowball") {
@@ -891,7 +892,8 @@ export class GameManager {
 
       if (joinConfirmed) {
         this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
-        await this.updateGameMessage(ctx, gamePda.toBase58(), gameType.charAt(0).toUpperCase() + gameType.slice(1), amount, ctx.from?.username || "Unknown", "Active", tokenMint, tokenTicker);
+        const creatorUsername = await this.getGameCreatorUsername(ctx, gamePda.toBase58());
+        await this.updateGameMessage(ctx, gamePda.toBase58(), gameType.charAt(0).toUpperCase() + gameType.slice(1), amount, creatorUsername, "Active", tokenMint, tokenTicker);
       }
 
     } catch (joinError: any) {
@@ -1066,7 +1068,7 @@ export class GameManager {
       await this.unjoinPlayerFromGame(gamePda, playerKp, playerKp.publicKey);
 
       const creatorUsername = await this.getGameCreatorUsername(ctx, gamePda.toBase58());
-      
+
       // Get token info from database
       const gameData = this.gameDb.getGame(gamePda.toBase58());
       if (!gameData?.token_mint || !gameData?.token_ticker) {
@@ -1151,25 +1153,25 @@ export class GameManager {
   private async unjoinPlayerFromGame(gamePda: PublicKey, playerKp: any, playerPubkey: PublicKey): Promise<void> {
     // Get the last player from game participants in database
     const participantIds = this.gameDb.getGameParticipants(gamePda.toBase58());
-    
+
     if (participantIds.length === 0) {
       throw new Error('No participants found in game');
     }
-    
+
     const lastPlayerTelegramId = participantIds[participantIds.length - 1];
-    
+
     if (!lastPlayerTelegramId) {
       throw new Error('Last player telegram ID not found');
     }
-    
+
     const lastPlayerPublicKey = this.gameDb.getPlayerPublicKey(lastPlayerTelegramId);
-    
+
     if (!lastPlayerPublicKey) {
       throw new Error('Could not find last player public key');
     }
-    
+
     const lastPlayerPubkey = new PublicKey(lastPlayerPublicKey);
-    
+
     const unjoinInstruction = await this.program.methods
       .unjoinGame()
       .accounts({
