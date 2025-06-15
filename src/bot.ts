@@ -284,11 +284,11 @@ const validateAndProcessTransaction = async (
   });
 
   try {
-    const tx = await transactionFn(playerData);
+    await transactionFn(playerData);
     await ctx.api.editMessageText(
       ctx.chat!.id,
       processingMsg.message_id,
-      `${description} successful! 💸\n\nTransaction: ${tx}`,
+      `${description} successful! 💸`,
       { parse_mode: "HTML" }
     );
   } catch (error: any) {

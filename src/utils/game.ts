@@ -369,7 +369,6 @@ export class GameManager {
     _tokenMint: string,
     tokenTicker: string,
     winnerAddress?: string,
-    txHash?: string,
     providedTotalPot?: number
   ): Promise<GameMessageFormat> {
     const isCompleted = status.toLowerCase() === "completed";
@@ -433,10 +432,6 @@ export class GameManager {
 
     messageText += winnerInfo;
 
-    if (txHash) {
-      messageText += `\n\nTransaction: <code>${txHash}</code>`;
-    }
-
     const keyboard = this.generateGameKeyboard(status, gameType, currentPlayers, gamePda);
 
     return { messageText, keyboard };
@@ -450,8 +445,7 @@ export class GameManager {
     creatorUsername: string,
     tokenMint: string,
     tokenTicker: string,
-    status: string = "Active",
-    txHash?: string
+    status: string = "Active"
   ): Promise<number> {
     const { messageText, keyboard } = await this.formatGameMessage(
       ctx,
@@ -462,8 +456,7 @@ export class GameManager {
       status,
       tokenMint,
       tokenTicker,
-      undefined,
-      txHash
+      undefined
     );
 
     const message = await ctx.reply(messageText, {
@@ -507,7 +500,6 @@ export class GameManager {
         tokenMint,
         tokenTicker,
         winnerAddress,
-        undefined,
         totalPot
       );
 
@@ -836,7 +828,7 @@ export class GameManager {
       this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker, maxPlayers, minPlayers);
 
       const creatorUsername = await this.getGameCreatorUsername(ctx, gamePda.toBase58());
-      await this.createGameMessage(ctx, gamePda.toBase58(), gameType.charAt(0).toUpperCase() + gameType.slice(1), amount, creatorUsername, tokenMint, tokenTicker, "Active", tx);
+      await this.createGameMessage(ctx, gamePda.toBase58(), gameType.charAt(0).toUpperCase() + gameType.slice(1), amount, creatorUsername, tokenMint, tokenTicker, "Active");
 
       // Auto-join logic based on game type
       if (gameType === "coinflip" || gameType === "dumbflip" || gameType === "snowball") {
