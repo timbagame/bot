@@ -289,7 +289,7 @@ export class GameManager {
       const maxPlayers = gameAccount.maxPlayers;
       const minPlayers = gameAccount.minPlayers;
 
-      const totalPot = providedTotalPot ?? (Number(gameAccount.totalAmount || 0) || (amount * Math.max(currentPlayers, 1)));
+      const totalPot = providedTotalPot ?? (Number(gameAccount.totalAmount || 0) || (amount * currentPlayers));
 
       const createdAt = Number(gameAccount.createdAt);
       const timeout = Number(gameAccount.timeout);

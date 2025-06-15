@@ -48,20 +48,28 @@ export class GameDatabase {
       try {
         this.db.run('ALTER TABLE games ADD COLUMN last_slot_timestamp INTEGER');
       } catch (error: any) {
-        // Column already exists, ignore the error
-        if (!error.message?.includes('duplicate column name')) {
-          console.warn('Error adding last_slot_timestamp column:', error.message);
+        // Column already exists, ignore specific SQLite duplicate column errors
+        if (error.message?.includes('duplicate column name') || 
+            error.message?.includes('already exists')) {
+          // Expected error when column already exists, safe to ignore
+        } else {
+          // Unexpected error during migration, log for investigation
+          console.error('Unexpected error adding last_slot_timestamp column:', error.message);
+          throw error;
         }
       }
 
       try {
         this.db.run('ALTER TABLE games ADD COLUMN chat_id INTEGER');
       } catch (error: any) {
-        // Column already exists, ignore the error - check for various SQLite error patterns
-        if (!error.message?.includes('duplicate column name') && 
-            !error.message?.includes('already exists') &&
-            !error.message?.includes('SQLITE_ERROR')) {
-          console.warn('Error adding chat_id column:', error.message);
+        // Column already exists, ignore specific SQLite duplicate column errors
+        if (error.message?.includes('duplicate column name') || 
+            error.message?.includes('already exists')) {
+          // Expected error when column already exists, safe to ignore
+        } else {
+          // Unexpected error during migration, log for investigation
+          console.error('Unexpected error adding chat_id column:', error.message);
+          throw error;
         }
       }
 

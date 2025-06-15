@@ -278,8 +278,9 @@ const validateAndProcessTransaction = async (
 
   try {
     const tx = await transactionFn(playerData);
-    const successMessage = tx && tx.trim() 
-      ? `${description} successful! 💸\n\n<code>${tx}</code>`
+    const txString = tx ? tx.toString().trim() : '';
+    const successMessage = txString 
+      ? `${description} successful! 💸\n\n<code>${txString}</code>`
       : `${description} successful! 💸`;
     
     await ctx.api.editMessageText(
@@ -568,13 +569,11 @@ const createGameCommand = async (
 
   // Update game message if auto-join was successful (to show the creator as joined)
   if (result.autoJoinResult?.success) {
-    // Wait for blockchain state to be updated after auto-join transaction
+    // Transaction is already confirmed by confirmTransactionWithRecovery, update immediately
     try {
-      // Give blockchain a moment to process the transaction
-      await new Promise(resolve => setTimeout(resolve, 1000));
       await gameManager.updateGameMessageFromData(ctx, result.gameAddress, "Active");
     } catch (error) {
-      console.warn("Failed to update game message after auto-join:", error);
+      console.error("Failed to update game message after auto-join:", error);
       // Don't retry automatically to avoid cascading failures
     }
   }
@@ -1509,7 +1508,7 @@ setupAnchor().then(async () => {
       gameDb.completeGame(game.game_address, "cancelled", Date.now());
       await updateGameMessageSafely(game.game_address, game, "Completed", "cancelled");
     } else {
-      console.warn(`⚠️ Failed to process expired game ${game.game_address}`);
+      console.error(`⚠️ Failed to process expired game ${game.game_address}`);
     }
   };
 
