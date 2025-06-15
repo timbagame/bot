@@ -106,20 +106,11 @@ const handleRollConfirmation = async (
       const updatedGameAccount = await program.account.game.fetch(gamePda);
       const currentTotalPot = Number(updatedGameAccount.totalAmount || 0);
 
-      const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
-      const gameType = formatGameType(gameAccount.gameType);
-      const tokenTicker = gameData.token_ticker || "TOKEN";
-      
-      await gameManager.updateGameMessage(
-        ctx, 
-        game.game_address, 
-        gameType, 
-        Number(game.amount), 
-        creatorUsername, 
-        "Active", 
-        tokenMint, 
-        tokenTicker, 
-        undefined, 
+      await gameManager.updateGameMessageFromData(
+        ctx,
+        game.game_address,
+        "Active",
+        undefined,
         currentTotalPot
       );
 

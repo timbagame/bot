@@ -524,6 +524,45 @@ export class GameManager {
     }
   }
 
+  /**
+   * Simplified updateGameMessage that automatically fetches required data
+   * This reduces duplication and ensures consistency across the codebase
+   */
+  public async updateGameMessageFromData(
+    ctx: Context,
+    gameAddress: string,
+    status: string = "Active",
+    winnerAddress?: string,
+    totalPot?: number
+  ): Promise<void> {
+    try {
+      const gameData = this.gameDb.getGame(gameAddress);
+      if (!gameData) {
+        console.warn(`No game data found for ${gameAddress}`);
+        return;
+      }
+
+      const creatorUsername = await this.getGameCreatorUsername(ctx, gameAddress);
+      const gameType = gameData.game_type ? 
+        gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1) : "Game";
+
+      await this.updateGameMessage(
+        ctx,
+        gameAddress,
+        gameType,
+        gameData.amount,
+        creatorUsername,
+        status,
+        gameData.token_mint || "",
+        gameData.token_ticker || "",
+        winnerAddress,
+        totalPot
+      );
+    } catch (error) {
+      console.error(`Error updating game message for ${gameAddress}:`, error);
+    }
+  }
+
   // ================================
   // GAME OPERATIONS
   // ================================
@@ -832,7 +871,7 @@ export class GameManager {
 
       // Auto-join logic based on game type
       if (gameType === "coinflip" || gameType === "dumbflip" || gameType === "snowball") {
-        await this.handleGameAutoJoin(ctx, gamePda, playerKp, telegramId, creatorPubkey, gameType, amount, tokenMint, tokenTicker);
+        await this.handleGameAutoJoin(ctx, gamePda, playerKp, telegramId, creatorPubkey, gameType);
       } else {
         console.log(`🎁 ${gameType.charAt(0).toUpperCase() + gameType.slice(1)} game ${gamePda.toBase58()} created - creator not auto-joined`);
       }
@@ -849,10 +888,7 @@ export class GameManager {
     playerKp: anchor.web3.Keypair,
     telegramId: bigint,
     creatorPubkey: string,
-    gameType: string,
-    amount: number,
-    tokenMint: string,
-    tokenTicker: string
+    gameType: string
   ): Promise<void> {
     console.log(`🎮 Auto-joining creator to ${gameType} game ${gamePda.toBase58()}...`);
 
@@ -884,8 +920,7 @@ export class GameManager {
 
       if (joinConfirmed) {
         this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
-        const creatorUsername = await this.getGameCreatorUsername(ctx, gamePda.toBase58());
-        await this.updateGameMessage(ctx, gamePda.toBase58(), gameType.charAt(0).toUpperCase() + gameType.slice(1), amount, creatorUsername, "Active", tokenMint, tokenTicker);
+        await this.updateGameMessageFromData(ctx, gamePda.toBase58(), "Active");
       }
 
     } catch (joinError: any) {
@@ -1050,34 +1085,13 @@ export class GameManager {
 
   public async unjoinGame(ctx: Context, gamePda: PublicKey, playerKp: anchor.web3.Keypair): Promise<boolean> {
     try {
-      const gameAccount = await this.program.account.game.fetch(gamePda);
-
       const isInGame = await this.isPlayerInGame(gamePda, playerKp.publicKey);
       if (!isInGame) {
         throw new Error("You are not in this game");
       }
 
       await this.unjoinPlayerFromGame(gamePda, playerKp, playerKp.publicKey);
-
-      const creatorUsername = await this.getGameCreatorUsername(ctx, gamePda.toBase58());
-
-      // Get token info from database
-      const gameData = this.gameDb.getGame(gamePda.toBase58());
-      if (!gameData?.token_mint || !gameData?.token_ticker) {
-        console.error(`Missing token info for game ${gamePda.toBase58()}`);
-        throw new Error("Game data incomplete - please contact support");
-      }
-
-      await this.updateGameMessage(
-        ctx,
-        gamePda.toBase58(),
-        formatGameType(gameAccount.gameType),
-        Number(gameAccount.ticketAmount),
-        creatorUsername,
-        "Active",
-        gameData.token_mint,
-        gameData.token_ticker
-      );
+      await this.updateGameMessageFromData(ctx, gamePda.toBase58(), "Active");
 
       return true;
     } catch (error: any) {
