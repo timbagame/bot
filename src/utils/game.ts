@@ -779,28 +779,27 @@ export class GameManager {
     parsedAmount: { amount: number; tokenMint: string; tokenTicker: string; isSol: boolean },
     maxPlayers: number,
     minPlayers: number,
-    timeout: number
-  ): Promise<void> {
-    const telegramId = BigInt(ctx.from?.id || 0);
-
+    timeout: number,
+    telegramId: bigint
+  ): Promise<{ success: boolean; error?: string; gameAddress?: string; gameMessageId?: number; autoJoinResult?: { success: boolean; error?: string } }> {
+    
     // Validate that SOL is not used for games
     if (parsedAmount.isSol) {
-      await ctx.reply(
-        `❌ Native SOL games are not supported!\n\n` +
-        `💡 Supported tokens for games:\n` +
-        `• Use approved SPL tokens (check with /balance)\n` +
-        `• For SOL-based games, use WSOL instead\n` +
-        `• You can wrap SOL to WSOL using /wrap command\n\n` +
-        `Example: /cf 1000 WSOL 2`,
-        { reply_to_message_id: ctx.message?.message_id }
-      );
-      return;
+      return {
+        success: false,
+        error: `❌ Native SOL games are not supported!\n\n` +
+               `💡 Supported tokens for games:\n` +
+               `• Use approved SPL tokens (check with /balance)\n` +
+               `• For SOL-based games, use WSOL instead\n` +
+               `• You can wrap SOL to WSOL using /wrap command\n\n` +
+               `Example: /cf 1000 WSOL 2`
+      };
     }
 
     const { tokenMint, tokenTicker, amount } = parsedAmount;
-    const metadata = await this.wallet.getTokenMetadata(tokenMint);
 
     try {
+      const metadata = await this.wallet.getTokenMetadata(tokenMint);
       const playerKp = this.wallet.getKeyPair(telegramId);
       const [tokenBalance, gameBalance] = await Promise.all([
         this.wallet.getTokenBalance(telegramId, tokenMint),
@@ -809,11 +808,10 @@ export class GameManager {
 
       const totalBalance = tokenBalance + gameBalance;
       if (totalBalance < amount) {
-        await ctx.reply(
-          `Insufficient balance. You have ${this.wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${tokenTicker} but need ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}`,
-          { reply_to_message_id: ctx.message?.message_id }
-        );
-        return;
+        return {
+          success: false,
+          error: `Insufficient balance. You have ${this.wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${tokenTicker} but need ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}`
+        };
       }
 
       const creatorPubkey = playerKp.publicKey.toBase58();
@@ -822,9 +820,10 @@ export class GameManager {
       // Check oracle and generate game secrets
       const isOracleHealthy = await this.oracleClient.isHealthy();
       if (!isOracleHealthy) {
-        await ctx.reply("❌ Oracle service is unavailable. Please try again later.",
-          { reply_to_message_id: ctx.message?.message_id });
-        return;
+        return {
+          success: false,
+          error: "❌ Oracle service is unavailable. Please try again later."
+        };
       }
 
       const { randomHash } = await this.oracleClient.generateGameSecrets();
@@ -867,18 +866,29 @@ export class GameManager {
       this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker, maxPlayers, minPlayers);
 
       const creatorUsername = await this.getGameCreatorUsername(ctx, gamePda.toBase58());
-      await this.createGameMessage(ctx, gamePda.toBase58(), gameType.charAt(0).toUpperCase() + gameType.slice(1), amount, creatorUsername, tokenMint, tokenTicker, "Active");
+      const gameMessageId = await this.createGameMessage(ctx, gamePda.toBase58(), gameType.charAt(0).toUpperCase() + gameType.slice(1), amount, creatorUsername, tokenMint, tokenTicker, "Active");
 
       // Auto-join logic based on game type
+      let autoJoinResult: { success: boolean; error?: string } | undefined;
       if (gameType === "coinflip" || gameType === "dumbflip" || gameType === "snowball") {
-        await this.handleGameAutoJoin(ctx, gamePda, playerKp, telegramId, creatorPubkey, gameType);
+        autoJoinResult = await this.handleGameAutoJoin(ctx, gamePda, playerKp, telegramId, creatorPubkey, gameType);
       } else {
         console.log(`🎁 ${gameType.charAt(0).toUpperCase() + gameType.slice(1)} game ${gamePda.toBase58()} created - creator not auto-joined`);
       }
 
+      return {
+        success: true,
+        gameAddress: gamePda.toBase58(),
+        gameMessageId,
+        autoJoinResult
+      };
+
     } catch (error: any) {
       const userFriendlyError = logAndFormatError(error, `creating ${gameType} game`, this.wallet);
-      await ctx.reply(userFriendlyError, { reply_to_message_id: ctx.message?.message_id });
+      return {
+        success: false,
+        error: userFriendlyError
+      };
     }
   }
 
@@ -889,7 +899,7 @@ export class GameManager {
     telegramId: bigint,
     creatorPubkey: string,
     gameType: string
-  ): Promise<void> {
+  ): Promise<{ success: boolean; error?: string }> {
     console.log(`🎮 Auto-joining creator to ${gameType} game ${gamePda.toBase58()}...`);
 
     try {
@@ -900,7 +910,7 @@ export class GameManager {
         console.log(`🔐 Game is private, using authorized join...`);
         const result = await this.joinPrivateGame(gamePda, playerKp, ctx.chat?.id || 0);
         if (!result.success) {
-          throw new Error(result.error || "Failed to join private game");
+          return { success: false, error: result.error || "Failed to join private game" };
         }
         joinTx = result.tx!;
       } else {
@@ -920,17 +930,17 @@ export class GameManager {
 
       if (joinConfirmed) {
         this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
-        await this.updateGameMessageFromData(ctx, gamePda.toBase58(), "Active");
+        return { success: true };
+      } else {
+        return { success: false, error: "Failed to confirm auto-join transaction" };
       }
 
     } catch (joinError: any) {
       const errorMsg = logAndFormatError(joinError, `auto-joining creator to ${gameType} game`);
-      await ctx.reply(
-        `⚠️ <b>Game created successfully, but failed to auto-join creator!</b>\n\n` +
-        `Please manually join the game using the "🎮 Join" button.\n\n` +
-        `Error: ${errorMsg}`,
-        { parse_mode: "HTML", reply_to_message_id: ctx.message?.message_id }
-      );
+      return { 
+        success: false, 
+        error: `⚠️ Game created successfully, but failed to auto-join creator!\n\nPlease manually join the game using the "🎮 Join" button.\n\nError: ${errorMsg}`
+      };
     }
   }
 
@@ -1087,9 +1097,9 @@ export class GameManager {
    * Comprehensive join game method that handles all validation and logic
    */
   public async joinGame(
-    ctx: Context,
     gameAddress: string,
-    telegramId: bigint
+    telegramId: bigint,
+    chatId?: number
   ): Promise<{ success: boolean; error?: string; isRoll?: boolean }> {
     try {
       const gamePda = new PublicKey(gameAddress);
@@ -1152,7 +1162,7 @@ export class GameManager {
       await this.ensurePlayerBalance(playerKp, gameData.token_mint);
 
       if (gameAccount.isPrivate) {
-        const result = await this.joinPrivateGame(gamePda, playerKp, ctx.chat?.id || 0);
+        const result = await this.joinPrivateGame(gamePda, playerKp, chatId || 0);
         if (!result.success) {
           return { success: false, error: result.error || "Failed to join private game" };
         }
@@ -1174,9 +1184,6 @@ export class GameManager {
       this.gameDb.savePlayerMapping(playerPubkey, telegramId.toString());
       this.gameDb.saveGameParticipant(gameAddress, telegramId.toString(), playerPubkey);
 
-      // Update game message
-      await this.updateGameMessageFromData(ctx, gameAddress, "Active");
-
       return { success: true };
 
     } catch (error: any) {
@@ -1189,7 +1196,6 @@ export class GameManager {
    * Enhanced unjoin game method with all validation
    */
   public async unjoinGame(
-    ctx: Context, 
     gameAddress: string, 
     telegramId: bigint
   ): Promise<{ success: boolean; error?: string }> {
@@ -1219,9 +1225,6 @@ export class GameManager {
 
       // Execute unjoin
       await this.unjoinPlayerFromGame(gamePda, playerKp, playerKp.publicKey);
-      
-      // Update game message
-      await this.updateGameMessageFromData(ctx, gameAddress, "Active");
 
       return { success: true };
 

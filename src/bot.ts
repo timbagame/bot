@@ -532,7 +532,19 @@ const createGameCommand = async (
   const maxPlayersIndex = tokenSpecified ? 3 : 2;
   const maxPlayers = parseInt(args?.[maxPlayersIndex] || defaultMaxPlayers.toString()) || defaultMaxPlayers;
 
-  await gameManager.createGame(ctx, gameType, parsed.data!, maxPlayers, minPlayers, timeout);
+  const result = await gameManager.createGame(ctx, gameType, parsed.data!, maxPlayers, minPlayers, timeout, BigInt(ctx.from.id));
+
+  if (!result.success) {
+    return replyToMessage(ctx, result.error || "Failed to create game");
+  }
+
+  // Handle auto-join result if present
+  if (result.autoJoinResult && !result.autoJoinResult.success) {
+    await ctx.reply(
+      result.autoJoinResult.error || "Failed to auto-join game",
+      { parse_mode: "HTML", reply_to_message_id: ctx.message?.message_id }
+    );
+  }
 };
 
 bot.command(["coinflip", "cf"], async (ctx) => {
@@ -1120,9 +1132,11 @@ bot.command("scan", async (ctx: Context) => {
 
 const handleUnjoinGameCallback = async (ctx: any, gameAddress: string, telegramId: bigint): Promise<void> => {
   try {
-    const result = await gameManager.unjoinGame(ctx, gameAddress, telegramId);
+    const result = await gameManager.unjoinGame(gameAddress, telegramId);
     
     if (result.success) {
+      // Update game message after successful unjoin
+      await gameManager.updateGameMessageFromData(ctx, gameAddress, "Active");
       await safeAnswerCallbackQuery(ctx, "Successfully unjoined the game!");
     } else {
       await safeAnswerCallbackQuery(ctx, result.error || "Failed to unjoin game");
@@ -1263,12 +1277,15 @@ const handleCompletedGameCallback = async (ctx: any, game: any) => {
 
 const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, telegramId: bigint, game: any) => {
   try {
-    const result = await gameManager.joinGame(ctx, game.game_address, telegramId);
+    const result = await gameManager.joinGame(game.game_address, telegramId, ctx.chat?.id);
     
     if (!result.success) {
       await safeAnswerCallbackQuery(ctx, result.error || "Failed to join game");
       return;
     }
+
+    // Update game message after successful join
+    await gameManager.updateGameMessageFromData(ctx, game.game_address, "Active");
 
     // Handle special case: rolling for snowball/dumbflip games
     if (result.isRoll) {
