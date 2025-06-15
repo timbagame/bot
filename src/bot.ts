@@ -538,14 +538,17 @@ const createGameCommand = async (
     return replyToMessage(ctx, result.error || "Failed to create game");
   }
 
-  // Create game message in UI layer
-  if (result.gameAddress && result.creatorUsername) {
+  // Create game message in UI layer with proper creator username
+  if (result.gameAddress) {
+    // Get creator username from ctx instead of using the formatted address from GameManager
+    const creatorUsername = ctx.from?.username ? `@${ctx.from.username}` : "Unknown";
+    
     const gameMessageId = await gameManager.createGameMessage(
       ctx, 
       result.gameAddress, 
       gameType.charAt(0).toUpperCase() + gameType.slice(1), 
       parsed.data!.amount, 
-      result.creatorUsername, 
+      creatorUsername, 
       parsed.data!.tokenMint, 
       parsed.data!.tokenTicker, 
       "Active"
@@ -553,7 +556,14 @@ const createGameCommand = async (
 
     // Update game message if auto-join was successful (to show the creator as joined)
     if (result.autoJoinResult?.success) {
-      await gameManager.updateGameMessageFromData(ctx, result.gameAddress, "Active");
+      // Add delay to allow blockchain state to update and be consistent
+      setTimeout(async () => {
+        try {
+          await gameManager.updateGameMessageFromData(ctx, result.gameAddress, "Active");
+        } catch (error) {
+          console.warn("Failed to update game message after auto-join:", error);
+        }
+      }, 2000);
     }
   }
 

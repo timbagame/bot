@@ -255,23 +255,6 @@ export class GameManager {
     return "Unknown";
   }
 
-  /**
-   * Get game creator username without Context dependency (for pure business logic)
-   */
-  private async getGameCreatorUsernameByAddress(gameAddress: string): Promise<string> {
-    const creatorInfo = this.gameDb.getCreatorInfo(gameAddress);
-    if (!creatorInfo) {
-      return "Unknown";
-    }
-
-    // For now, just return formatted address since we can't get Telegram username without ctx
-    // This will be handled in the UI layer
-    if (creatorInfo.publicKey) {
-      return this.formatAddress(creatorInfo.publicKey);
-    }
-
-    return "Unknown";
-  }
 
   /**
    * Get player username with fallback to address display
@@ -306,7 +289,7 @@ export class GameManager {
       const maxPlayers = gameAccount.maxPlayers;
       const minPlayers = gameAccount.minPlayers;
 
-      const totalPot = providedTotalPot ?? (Number(gameAccount.totalAmount || 0) || (amount * currentPlayers));
+      const totalPot = providedTotalPot ?? (Number(gameAccount.totalAmount || 0) || (amount * Math.max(currentPlayers, 1)));
 
       const createdAt = Number(gameAccount.createdAt);
       const timeout = Number(gameAccount.timeout);
@@ -799,7 +782,7 @@ export class GameManager {
     timeout: number,
     telegramId: bigint,
     chatId?: number
-  ): Promise<{ success: boolean; error?: string; gameAddress?: string; creatorUsername?: string; autoJoinResult?: { success: boolean; error?: string } }> {
+  ): Promise<{ success: boolean; error?: string; gameAddress?: string; autoJoinResult?: { success: boolean; error?: string } }> {
     
     // Validate that SOL is not used for games
     if (parsedAmount.isSol) {
@@ -884,9 +867,7 @@ export class GameManager {
       }
 
       // Save game
-      this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker, maxPlayers, minPlayers);
-
-      const creatorUsername = await this.getGameCreatorUsernameByAddress(gamePda.toBase58());
+      this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker, maxPlayers, minPlayers, chatId);
 
       // Auto-join logic based on game type
       let autoJoinResult: { success: boolean; error?: string } | undefined;
@@ -899,7 +880,6 @@ export class GameManager {
       return {
         success: true,
         gameAddress: gamePda.toBase58(),
-        creatorUsername,
         autoJoinResult
       };
 

@@ -83,12 +83,12 @@ export class GameDatabase {
   }
 
   // Game methods
-  public saveGame(gameAddress: string, creatorTelegramId: string, amount: number, gameType: string, tokenMint?: string, tokenTicker?: string, maxPlayers?: number, minPlayers?: number): void {
+  public saveGame(gameAddress: string, creatorTelegramId: string, amount: number, gameType: string, tokenMint?: string, tokenTicker?: string, maxPlayers?: number, minPlayers?: number, chatId?: number): void {
     try {
       const stmt = this.db.prepare(
-        'INSERT INTO games (game_address, creator_telegram_id, amount, created_at, game_type, token_mint, token_ticker, max_players, min_players) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO games (game_address, creator_telegram_id, amount, created_at, game_type, token_mint, token_ticker, max_players, min_players, chat_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       );
-      stmt.run(gameAddress, creatorTelegramId, amount, Date.now(), gameType, tokenMint || null, tokenTicker || null, maxPlayers || null, minPlayers || null);
+      stmt.run(gameAddress, creatorTelegramId, amount, Date.now(), gameType, tokenMint || null, tokenTicker || null, maxPlayers || null, minPlayers || null, chatId || null);
     } catch (error) {
       console.error("Error saving game:", error);
       throw error;
