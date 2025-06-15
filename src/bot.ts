@@ -532,10 +532,29 @@ const createGameCommand = async (
   const maxPlayersIndex = tokenSpecified ? 3 : 2;
   const maxPlayers = parseInt(args?.[maxPlayersIndex] || defaultMaxPlayers.toString()) || defaultMaxPlayers;
 
-  const result = await gameManager.createGame(ctx, gameType, parsed.data!, maxPlayers, minPlayers, timeout, BigInt(ctx.from.id));
+  const result = await gameManager.createGame(gameType, parsed.data!, maxPlayers, minPlayers, timeout, BigInt(ctx.from.id), ctx.chat?.id);
 
   if (!result.success) {
     return replyToMessage(ctx, result.error || "Failed to create game");
+  }
+
+  // Create game message in UI layer
+  if (result.gameAddress && result.creatorUsername) {
+    const gameMessageId = await gameManager.createGameMessage(
+      ctx, 
+      result.gameAddress, 
+      gameType.charAt(0).toUpperCase() + gameType.slice(1), 
+      parsed.data!.amount, 
+      result.creatorUsername, 
+      parsed.data!.tokenMint, 
+      parsed.data!.tokenTicker, 
+      "Active"
+    );
+
+    // Update game message if auto-join was successful (to show the creator as joined)
+    if (result.autoJoinResult?.success) {
+      await gameManager.updateGameMessageFromData(ctx, result.gameAddress, "Active");
+    }
   }
 
   // Handle auto-join result if present

@@ -256,6 +256,24 @@ export class GameManager {
   }
 
   /**
+   * Get game creator username without Context dependency (for pure business logic)
+   */
+  private async getGameCreatorUsernameByAddress(gameAddress: string): Promise<string> {
+    const creatorInfo = this.gameDb.getCreatorInfo(gameAddress);
+    if (!creatorInfo) {
+      return "Unknown";
+    }
+
+    // For now, just return formatted address since we can't get Telegram username without ctx
+    // This will be handled in the UI layer
+    if (creatorInfo.publicKey) {
+      return this.formatAddress(creatorInfo.publicKey);
+    }
+
+    return "Unknown";
+  }
+
+  /**
    * Get player username with fallback to address display
    * Returns @username for Telegram users or formatted address for blockchain players
    */
@@ -774,14 +792,14 @@ export class GameManager {
   }
 
   public async createGame(
-    ctx: Context,
     gameType: GameType,
     parsedAmount: { amount: number; tokenMint: string; tokenTicker: string; isSol: boolean },
     maxPlayers: number,
     minPlayers: number,
     timeout: number,
-    telegramId: bigint
-  ): Promise<{ success: boolean; error?: string; gameAddress?: string; gameMessageId?: number; autoJoinResult?: { success: boolean; error?: string } }> {
+    telegramId: bigint,
+    chatId?: number
+  ): Promise<{ success: boolean; error?: string; gameAddress?: string; creatorUsername?: string; autoJoinResult?: { success: boolean; error?: string } }> {
     
     // Validate that SOL is not used for games
     if (parsedAmount.isSol) {
@@ -859,19 +877,21 @@ export class GameManager {
       const gameCreationConfirmed = await this.confirmTransactionWithRecovery(tx, gamePda, "Game creation");
 
       if (!gameCreationConfirmed) {
-        throw new Error("Game creation could not be confirmed");
+        return {
+          success: false,
+          error: "Game creation could not be confirmed"
+        };
       }
 
-      // Save game and create message
+      // Save game
       this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker, maxPlayers, minPlayers);
 
-      const creatorUsername = await this.getGameCreatorUsername(ctx, gamePda.toBase58());
-      const gameMessageId = await this.createGameMessage(ctx, gamePda.toBase58(), gameType.charAt(0).toUpperCase() + gameType.slice(1), amount, creatorUsername, tokenMint, tokenTicker, "Active");
+      const creatorUsername = await this.getGameCreatorUsernameByAddress(gamePda.toBase58());
 
       // Auto-join logic based on game type
       let autoJoinResult: { success: boolean; error?: string } | undefined;
       if (gameType === "coinflip" || gameType === "dumbflip" || gameType === "snowball") {
-        autoJoinResult = await this.handleGameAutoJoin(ctx, gamePda, playerKp, telegramId, creatorPubkey, gameType);
+        autoJoinResult = await this.handleGameAutoJoinPure(gamePda, playerKp, telegramId, creatorPubkey, gameType, chatId || 0);
       } else {
         console.log(`🎁 ${gameType.charAt(0).toUpperCase() + gameType.slice(1)} game ${gamePda.toBase58()} created - creator not auto-joined`);
       }
@@ -879,7 +899,7 @@ export class GameManager {
       return {
         success: true,
         gameAddress: gamePda.toBase58(),
-        gameMessageId,
+        creatorUsername,
         autoJoinResult
       };
 
@@ -892,13 +912,14 @@ export class GameManager {
     }
   }
 
-  private async handleGameAutoJoin(
-    ctx: Context,
+
+  private async handleGameAutoJoinPure(
     gamePda: PublicKey,
     playerKp: anchor.web3.Keypair,
     telegramId: bigint,
     creatorPubkey: string,
-    gameType: string
+    gameType: string,
+    chatId?: number
   ): Promise<{ success: boolean; error?: string }> {
     console.log(`🎮 Auto-joining creator to ${gameType} game ${gamePda.toBase58()}...`);
 
@@ -908,7 +929,7 @@ export class GameManager {
       let joinTx: string;
       if (gameAccount.isPrivate) {
         console.log(`🔐 Game is private, using authorized join...`);
-        const result = await this.joinPrivateGame(gamePda, playerKp, ctx.chat?.id || 0);
+        const result = await this.joinPrivateGame(gamePda, playerKp, chatId || 0);
         if (!result.success) {
           return { success: false, error: result.error || "Failed to join private game" };
         }
