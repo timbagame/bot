@@ -43,14 +43,8 @@ export const truncateErrorMessage = (
   options: ErrorHandlingOptions = {}
 ): string => {
   const {
-    maxLength = 180,
-    includeDetails = false, // Future use for detailed error messages
-    fallbackMessage = "An error occurred. Please try again." // Future use for fallback
+    maxLength = 180
   } = options;
-  
-  // Suppress unused variable warnings - these are for future extensibility
-  void includeDetails;
-  void fallbackMessage;
 
   if (message.length <= maxLength) {
     return message;

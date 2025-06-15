@@ -52,8 +52,7 @@ export const handleGameRoll = async (
     
   } catch (error: any) {
     await handleCallbackErrorSafe(ctx, error, "game_roll", { 
-      maxLength: 180,
-      fallbackMessage: "Failed to roll. Please try again." 
+      maxLength: 180
     });
   }
 };

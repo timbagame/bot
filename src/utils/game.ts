@@ -946,13 +946,6 @@ export class GameManager {
   }
 
   // ================================
-  // EVENT LISTENING
-  // ================================
-
-  // This method is no longer needed since game PDA is derived directly from random hash
-  // Removed waitForGameInitializedEvent method
-
-  // ================================
   // HELPER METHODS
   // ================================
 

@@ -324,9 +324,7 @@ const replyUsageError = async (ctx: Context, message: string): Promise<void> => 
 
 const handleCallbackError = async (ctx: any, error: any, action: string): Promise<void> => {
   await handleCallbackErrorSafe(ctx, error, action, {
-    maxLength: 180,
-    includeDetails: false,
-    fallbackMessage: "An error occurred. Please try again."
+    maxLength: 180
   });
 };
 

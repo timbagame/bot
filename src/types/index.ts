@@ -215,6 +215,4 @@ export interface CallbackError {
 
 export interface ErrorHandlingOptions {
   maxLength?: number;
-  includeDetails?: boolean;
-  fallbackMessage?: string;
 }
