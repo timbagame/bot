@@ -278,7 +278,7 @@ const validateAndProcessTransaction = async (
 
   try {
     const tx = await transactionFn(playerData);
-    const successMessage = tx 
+    const successMessage = tx && tx.trim() 
       ? `${description} successful! 💸\n\n<code>${tx}</code>`
       : `${description} successful! 💸`;
     
@@ -548,39 +548,34 @@ const createGameCommand = async (
   }
 
   // Create game message in UI layer with proper creator username
-  if (result.gameAddress) {
-    // Get creator username from ctx instead of using the formatted address from GameManager
-    const creatorUsername = ctx.from?.username ? `@${ctx.from.username}` : "Unknown";
-    
-    const gameMessageId = await gameManager.createGameMessage(
-      ctx, 
-      result.gameAddress, 
-      gameType.charAt(0).toUpperCase() + gameType.slice(1), 
-      parsed.data!.amount, 
-      creatorUsername, 
-      parsed.data!.tokenMint, 
-      parsed.data!.tokenTicker, 
-      "Active"
-    );
+  if (!result.gameAddress) {
+    return replyToMessage(ctx, "Game created but address not returned - please contact support");
+  }
 
-    // Update game message if auto-join was successful (to show the creator as joined)
-    if (result.autoJoinResult?.success) {
-      // Add small delay to ensure blockchain state is queryable after confirmation
-      setTimeout(async () => {
-        try {
-          await gameManager.updateGameMessageFromData(ctx, result.gameAddress, "Active");
-        } catch (error) {
-          console.warn("Failed to update game message after auto-join:", error);
-          // Retry once after additional delay
-          setTimeout(async () => {
-            try {
-              await gameManager.updateGameMessageFromData(ctx, result.gameAddress, "Active");
-            } catch (retryError) {
-              console.error("Failed to update game message after auto-join retry:", retryError);
-            }
-          }, 1000);
-        }
-      }, 500);
+  // Get creator username from ctx instead of using the formatted address from GameManager
+  const creatorUsername = ctx.from?.username ? `@${ctx.from.username}` : "Unknown";
+  
+  await gameManager.createGameMessage(
+    ctx, 
+    result.gameAddress, 
+    gameType.charAt(0).toUpperCase() + gameType.slice(1), 
+    parsed.data!.amount, 
+    creatorUsername, 
+    parsed.data!.tokenMint, 
+    parsed.data!.tokenTicker, 
+    "Active"
+  );
+
+  // Update game message if auto-join was successful (to show the creator as joined)
+  if (result.autoJoinResult?.success) {
+    // Wait for blockchain state to be updated after auto-join transaction
+    try {
+      // Give blockchain a moment to process the transaction
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      await gameManager.updateGameMessageFromData(ctx, result.gameAddress, "Active");
+    } catch (error) {
+      console.warn("Failed to update game message after auto-join:", error);
+      // Don't retry automatically to avoid cascading failures
     }
   }
 
@@ -1316,13 +1311,13 @@ const handleCompletedGameCallback = async (ctx: any, game: any) => {
       const statusMessage = gameData.winner_address === "cancelled" ? "cancelled" : "completed";
       await ctx.answerCallbackQuery(`Game ${statusMessage} - message updated!`);
     } else {
-      const statusMessage = game.winner_address === "cancelled" ? "cancelled" : "completed";
-      await ctx.answerCallbackQuery(`This game has already been ${statusMessage}!`);
+      // Game data not found in database - game may have been cleaned up
+      console.warn(`Game data not found for ${game.game_address}`);
+      await ctx.answerCallbackQuery("Game data not found - game may have been completed");
     }
   } catch (error) {
     console.error("Error updating completed game message:", error);
-    const statusMessage = game.winner_address === "cancelled" ? "cancelled" : "completed";
-    await ctx.answerCallbackQuery(`This game has already been ${statusMessage}!`);
+    await ctx.answerCallbackQuery("Failed to update game message");
   }
 };
 
