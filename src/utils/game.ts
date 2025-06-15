@@ -1080,25 +1080,157 @@ export class GameManager {
   }
 
   // ================================
-  // UNJOIN FUNCTIONALITY
+  // JOIN/UNJOIN FUNCTIONALITY
   // ================================
 
-  public async unjoinGame(ctx: Context, gamePda: PublicKey, playerKp: anchor.web3.Keypair): Promise<boolean> {
+  /**
+   * Comprehensive join game method that handles all validation and logic
+   */
+  public async joinGame(
+    ctx: Context,
+    gameAddress: string,
+    telegramId: bigint
+  ): Promise<{ success: boolean; error?: string; isRoll?: boolean }> {
     try {
-      const isInGame = await this.isPlayerInGame(gamePda, playerKp.publicKey);
-      if (!isInGame) {
-        throw new Error("You are not in this game");
+      const gamePda = new PublicKey(gameAddress);
+      const playerKp = this.wallet.getKeyPair(telegramId);
+      
+      // Get game data and validate
+      const gameData = this.gameDb.getGame(gameAddress);
+      if (!gameData) {
+        return { success: false, error: "Game not found!" };
       }
 
-      await this.unjoinPlayerFromGame(gamePda, playerKp, playerKp.publicKey);
-      await this.updateGameMessageFromData(ctx, gamePda.toBase58(), "Active");
+      if (gameData.status !== "active") {
+        return { success: false, error: "This game is no longer active!" };
+      }
 
-      return true;
+      // Validate token data
+      if (!gameData.token_mint || !gameData.token_ticker) {
+        return { success: false, error: "Game data incomplete - please contact support" };
+      }
+
+      // Fetch blockchain game state
+      const gameAccount = await this.program.account.game.fetch(gamePda);
+      
+      // Check if player already in game
+      const isInGame = await this.isPlayerInGame(gamePda, playerKp.publicKey);
+      
+      // Handle special case: rolling for snowball/dumbflip games
+      if (isInGame && (gameData.game_type === "snowball" || gameData.game_type === "dumbflip")) {
+        return { success: true, isRoll: true };
+      }
+
+      if (isInGame) {
+        return { success: false, error: "You have already joined this game!" };
+      }
+
+      if (gameAccount.playersCount >= gameAccount.maxPlayers) {
+        return { success: false, error: "This game is already full!" };
+      }
+
+      // Balance validation for paid games
+      const currentGameType = Object.keys(gameAccount.gameType)[0];
+      if (currentGameType === "coinflip" || currentGameType === "dumbflip" || currentGameType === "snowball") {
+        const gameAmount = Number(gameAccount.ticketAmount);
+        const [tokenBalance, gameBalance] = await Promise.all([
+          this.wallet.getTokenBalance(telegramId, gameData.token_mint),
+          this.getPlayerGameBalance(playerKp.publicKey, gameData.token_mint)
+        ]);
+
+        const totalBalance = tokenBalance + gameBalance;
+        if (totalBalance < gameAmount) {
+          const metadata = await this.wallet.getTokenMetadata(gameData.token_mint);
+          return { 
+            success: false, 
+            error: `Insufficient balance. You have ${this.wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${gameData.token_ticker} but need ${this.wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${gameData.token_ticker}` 
+          };
+        }
+      }
+
+      // Ensure player balance and execute join
+      await this.ensurePlayerBalance(playerKp, gameData.token_mint);
+
+      if (gameAccount.isPrivate) {
+        const result = await this.joinPrivateGame(gamePda, playerKp, ctx.chat?.id || 0);
+        if (!result.success) {
+          return { success: false, error: result.error || "Failed to join private game" };
+        }
+      } else {
+        const joinInstruction = await this.program.methods
+          .joinGame()
+          .accounts({
+            game: gamePda,
+            player: playerKp.publicKey,
+          })
+          .instruction();
+
+        const tx = await this.wallet.sendTransaction([joinInstruction], [playerKp]);
+        await this.wallet.confirmTransaction(tx);
+      }
+
+      // Update database
+      const playerPubkey = playerKp.publicKey.toBase58();
+      this.gameDb.savePlayerMapping(playerPubkey, telegramId.toString());
+      this.gameDb.saveGameParticipant(gameAddress, telegramId.toString(), playerPubkey);
+
+      // Update game message
+      await this.updateGameMessageFromData(ctx, gameAddress, "Active");
+
+      return { success: true };
+
     } catch (error: any) {
-      console.error(`Error unjoining game ${gamePda.toBase58()}:`, error);
-      throw error;
+      console.error(`Error joining game ${gameAddress}:`, error);
+      return { success: false, error: error.message || "Failed to join game" };
     }
   }
+
+  /**
+   * Enhanced unjoin game method with all validation
+   */
+  public async unjoinGame(
+    ctx: Context, 
+    gameAddress: string, 
+    telegramId: bigint
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const gamePda = new PublicKey(gameAddress);
+      const playerKp = this.wallet.getKeyPair(telegramId);
+      
+      // Get game data for validation
+      const gameData = this.gameDb.getGame(gameAddress);
+      if (!gameData) {
+        return { success: false, error: "Game not found!" };
+      }
+
+      // Fetch current game state
+      const gameAccount = await this.program.account.game.fetch(gamePda);
+
+      // Snowball-specific restriction
+      if (gameData.game_type === "snowball" && gameAccount.playersCount > 1) {
+        return { success: false, error: "❄️ Cannot leave snowball games once there are 2+ players!" };
+      }
+
+      // Check if player is actually in the game
+      const isInGame = await this.isPlayerInGame(gamePda, playerKp.publicKey);
+      if (!isInGame) {
+        return { success: false, error: "You are not in this game" };
+      }
+
+      // Execute unjoin
+      await this.unjoinPlayerFromGame(gamePda, playerKp, playerKp.publicKey);
+      
+      // Update game message
+      await this.updateGameMessageFromData(ctx, gameAddress, "Active");
+
+      return { success: true };
+
+    } catch (error: any) {
+      console.error(`Error unjoining game ${gameAddress}:`, error);
+      return { success: false, error: error.message || "Failed to unjoin game" };
+    }
+  }
+
 
   // ================================
   // GAME CLOSURE AND CLEANUP

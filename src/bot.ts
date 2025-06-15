@@ -1118,23 +1118,15 @@ bot.command("scan", async (ctx: Context) => {
 // CALLBACK QUERY HANDLING
 // ================================
 
-const handleUnjoinGameCallback = async (ctx: any, gamePda: PublicKey, playerKp: any, gameAddress: string): Promise<void> => {
-  const gameData = gameDb.getGame(gameAddress);
-  if (!gameData) {
-    await safeAnswerCallbackQuery(ctx, "Game not found!");
-    return;
-  }
-
-  const gameAccount = await program.account.game.fetch(gamePda);
-
-  if (gameData.game_type === "snowball" && gameAccount.playersCount > 1) {
-    await safeAnswerCallbackQuery(ctx, "❄️ Cannot leave snowball games once there are 2+ players!");
-    return;
-  }
-
+const handleUnjoinGameCallback = async (ctx: any, gameAddress: string, telegramId: bigint): Promise<void> => {
   try {
-    await gameManager.unjoinGame(ctx, gamePda, playerKp);
-    await safeAnswerCallbackQuery(ctx, "Successfully unjoined the game!");
+    const result = await gameManager.unjoinGame(ctx, gameAddress, telegramId);
+    
+    if (result.success) {
+      await safeAnswerCallbackQuery(ctx, "Successfully unjoined the game!");
+    } else {
+      await safeAnswerCallbackQuery(ctx, result.error || "Failed to unjoin game");
+    }
   } catch (error: any) {
     const userFriendlyError = formatUserFriendlyError(error, wallet);
     await safeAnswerCallbackQuery(ctx, userFriendlyError.substring(0, 180));
@@ -1233,7 +1225,7 @@ bot.on("callback_query", async (ctx) => {
         await handleJoinGame(ctx, gamePda, playerKp, telegramId, game);
         break;
       case "unjoin":
-        await handleUnjoinGameCallback(ctx, gamePda, playerKp, gameAddress);
+        await handleUnjoinGameCallback(ctx, gameAddress, telegramId);
         break;
       case "refresh":
         await handleRefreshGameCallback(ctx, gamePda, gameAddress);
@@ -1270,127 +1262,30 @@ const handleCompletedGameCallback = async (ctx: any, game: any) => {
 };
 
 const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, telegramId: bigint, game: any) => {
-  if (game.status !== "active") {
-    await ctx.answerCallbackQuery("This game is no longer active!");
-    return;
-  }
-
   try {
-    const gameAccount = await program.account.game.fetch(gamePda);
-
-    // Check balance
-    const gameData = gameDb.getGame(game.game_address);
-    if (!gameData) {
-      await ctx.answerCallbackQuery("Game not found!");
+    const result = await gameManager.joinGame(ctx, game.game_address, telegramId);
+    
+    if (!result.success) {
+      await safeAnswerCallbackQuery(ctx, result.error || "Failed to join game");
       return;
     }
 
-    // Ensure token info exists
-    if (!gameData.token_mint || !gameData.token_ticker) {
-      console.error(`Missing token info for game ${game.game_address}`);
-      await ctx.answerCallbackQuery("Game data incomplete - please contact support");
-      return;
-    }
-
-    const tokenMint = gameData.token_mint;
-
-    // Check if player already joined by checking PlayerParticipation account
-    const playerParticipationPda = PDAManager.getPlayerParticipationPDA(
-      gamePda,
-      playerKp.publicKey,
-      program.programId
-    );
-
-    let isAlreadyInGame = false;
-    try {
-      await program.account.playerParticipation.fetch(playerParticipationPda);
-      isAlreadyInGame = true;
-    } catch (error) {
-      // PlayerParticipation account doesn't exist, so player is not in game
-      isAlreadyInGame = false;
-    }
-
-    if (isAlreadyInGame && (gameData?.game_type === "snowball" || gameData?.game_type === "dumbflip")) {
-      await handleGameRoll(ctx, gamePda, playerKp, gameAccount, gameData, game);
-      return;
-    }
-
-    if (isAlreadyInGame) {
-      await safeAnswerCallbackQuery(ctx, "You have already joined this game!");
-      return;
-    }
-
-    if (gameAccount.playersCount >= gameAccount.maxPlayers) {
-      await safeAnswerCallbackQuery(ctx, "This game is already full!");
-      return;
-    }
-
-    // Balance checking for games that require payment
-    const [tokenBalance, gameBalance] = await Promise.all([
-      wallet.getTokenBalance(telegramId, tokenMint),
-      (async () => {
-        try {
-          const playerBalancePda = PDAManager.getPlayerBalancePDA(
-            playerKp.publicKey,
-            new PublicKey(tokenMint),
-            program.programId
-          );
-          const playerBalance = await program.account.playerBalance.fetch(playerBalancePda);
-          return Number(playerBalance.amount);
-        } catch (error) {
-          return 0;
-        }
-      })()
-    ]);
-
-    const gameAmount = Number(gameAccount.ticketAmount);
-    const totalBalance = tokenBalance + gameBalance;
-
-    // Only check balance for coinflips, dumbflips and snowballs, giveaways are free to join
-    const currentGameType = Object.keys(gameAccount.gameType)[0];
-    if ((currentGameType === "coinflip" || currentGameType === "dumbflip" || currentGameType === "snowball") && totalBalance < gameAmount) {
-      const metadata = await wallet.getTokenMetadata(tokenMint);
-      const tokenTicker = gameData.token_ticker;
-      await safeAnswerCallbackQuery(ctx, `Insufficient balance. You have ${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${tokenTicker} but need ${wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${tokenTicker}`);
-      return;
-    }
-
-    // Ensure player balance and join
-    await gameManager.ensurePlayerBalance(playerKp, tokenMint);
-
-    if (gameAccount.isPrivate) {
-      const result = await gameManager.joinPrivateGame(gamePda, playerKp, ctx.chat?.id || 0);
-      if (!result.success) {
-        await ctx.answerCallbackQuery(result.error || "Failed to join private game");
-        return;
+    // Handle special case: rolling for snowball/dumbflip games
+    if (result.isRoll) {
+      const gameAccount = await program.account.game.fetch(gamePda);
+      const gameData = gameDb.getGame(game.game_address);
+      if (gameData) {
+        await handleGameRoll(ctx, gamePda, playerKp, gameAccount, gameData, game);
       }
-    } else {
-      const joinInstruction = await program.methods
-        .joinGame()
-        .accounts({
-          game: gamePda,
-          player: playerKp.publicKey,
-        })
-        .instruction();
-
-      const tx = await wallet.sendTransaction([joinInstruction], [playerKp]);
-      await wallet.confirmTransaction(tx);
+      return;
     }
-
-    // Save player mapping and participant
-    const playerPubkey = playerKp.publicKey.toBase58();
-    gameDb.savePlayerMapping(playerPubkey, telegramId.toString());
-    gameDb.saveGameParticipant(game.game_address, telegramId.toString(), playerPubkey);
-
-    // Update game message
-    await gameManager.updateGameMessageFromData(ctx, game.game_address, "Active");
 
     // Send join notification
     const joinerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
     const updatedGameAccount = await program.account.game.fetch(gamePda);
     const playerCount = updatedGameAccount.playersCount;
-    const maxPlayers = gameAccount.maxPlayers;
-    const gameTypeKeys = Object.keys(gameAccount.gameType);
+    const maxPlayers = updatedGameAccount.maxPlayers;
+    const gameTypeKeys = Object.keys(updatedGameAccount.gameType);
     const gameName = gameTypeKeys[0] || "game";
 
     const gameMessage = gameManager.getActiveGameMessage(game.game_address);
@@ -1401,9 +1296,6 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
         reply_to_message_id: gameMessage?.messageId
       }
     );
-
-    // Note: Game completion is now handled automatically by the external oracle service
-    // when the game is full or expires with enough players
 
   } catch (error: any) {
     // Handle specific case where account doesn't exist (game was completed/cancelled)
