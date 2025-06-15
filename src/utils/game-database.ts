@@ -44,13 +44,22 @@ export class GameDatabase {
         )
       `);
 
-      // Add the new column if it doesn't exist (for existing databases)
+      // Add the new columns if they don't exist (for existing databases)
       try {
         this.db.run('ALTER TABLE games ADD COLUMN last_slot_timestamp INTEGER');
       } catch (error: any) {
         // Column already exists, ignore the error
         if (!error.message?.includes('duplicate column name')) {
           console.warn('Error adding last_slot_timestamp column:', error.message);
+        }
+      }
+
+      try {
+        this.db.run('ALTER TABLE games ADD COLUMN chat_id INTEGER');
+      } catch (error: any) {
+        // Column already exists, ignore the error
+        if (!error.message?.includes('duplicate column name')) {
+          console.warn('Error adding chat_id column:', error.message);
         }
       }
 

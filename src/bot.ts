@@ -277,11 +277,15 @@ const validateAndProcessTransaction = async (
   });
 
   try {
-    await transactionFn(playerData);
+    const tx = await transactionFn(playerData);
+    const successMessage = tx 
+      ? `${description} successful! 💸\n\n<code>${tx}</code>`
+      : `${description} successful! 💸`;
+    
     await ctx.api.editMessageText(
       ctx.chat!.id,
       processingMsg.message_id,
-      `${description} successful! 💸`,
+      successMessage,
       { parse_mode: "HTML" }
     );
   } catch (error: any) {
@@ -532,6 +536,11 @@ const createGameCommand = async (
   const maxPlayersIndex = tokenSpecified ? 3 : 2;
   const maxPlayers = parseInt(args?.[maxPlayersIndex] || defaultMaxPlayers.toString()) || defaultMaxPlayers;
 
+  // Validate context parameters
+  if (!ctx.from?.id) {
+    return replyToMessage(ctx, "Unable to identify user. Please try again.");
+  }
+
   const result = await gameManager.createGame(gameType, parsed.data!, maxPlayers, minPlayers, timeout, BigInt(ctx.from.id), ctx.chat?.id);
 
   if (!result.success) {
@@ -556,12 +565,22 @@ const createGameCommand = async (
 
     // Update game message if auto-join was successful (to show the creator as joined)
     if (result.autoJoinResult?.success) {
-      // Auto-join transaction is already confirmed, safe to update message immediately
-      try {
-        await gameManager.updateGameMessageFromData(ctx, result.gameAddress, "Active");
-      } catch (error) {
-        console.warn("Failed to update game message after auto-join:", error);
-      }
+      // Add small delay to ensure blockchain state is queryable after confirmation
+      setTimeout(async () => {
+        try {
+          await gameManager.updateGameMessageFromData(ctx, result.gameAddress, "Active");
+        } catch (error) {
+          console.warn("Failed to update game message after auto-join:", error);
+          // Retry once after additional delay
+          setTimeout(async () => {
+            try {
+              await gameManager.updateGameMessageFromData(ctx, result.gameAddress, "Active");
+            } catch (retryError) {
+              console.error("Failed to update game message after auto-join retry:", retryError);
+            }
+          }, 1000);
+        }
+      }, 500);
     }
   }
 
@@ -1257,6 +1276,11 @@ bot.on("callback_query", async (ctx) => {
   }
 
   try {
+    if (!ctx.from?.id) {
+      await ctx.answerCallbackQuery("Unable to identify user. Please try again.");
+      return;
+    }
+
     const gamePda = new PublicKey(gameAddress);
     const telegramId = BigInt(ctx.from.id);
     const playerKp = wallet.getKeyPair(telegramId);
@@ -1322,10 +1346,17 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
 
     // Handle special case: rolling for snowball/dumbflip games
     if (result.isRoll) {
-      const gameAccount = await program.account.game.fetch(gamePda);
-      const gameData = gameDb.getGame(game.game_address);
-      if (gameData) {
-        await handleGameRoll(ctx, gamePda, playerKp, gameAccount, gameData, game);
+      try {
+        const gameAccount = await program.account.game.fetch(gamePda);
+        const gameData = gameDb.getGame(game.game_address);
+        if (gameData) {
+          await handleGameRoll(ctx, gamePda, playerKp, gameAccount, gameData, game);
+        } else {
+          await safeAnswerCallbackQuery(ctx, "Game data not found for rolling");
+        }
+      } catch (error) {
+        console.error("Error handling game roll:", error);
+        await safeAnswerCallbackQuery(ctx, "Failed to roll game. Please try again.");
       }
       return;
     }
