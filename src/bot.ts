@@ -556,14 +556,12 @@ const createGameCommand = async (
 
     // Update game message if auto-join was successful (to show the creator as joined)
     if (result.autoJoinResult?.success) {
-      // Add delay to allow blockchain state to update and be consistent
-      setTimeout(async () => {
-        try {
-          await gameManager.updateGameMessageFromData(ctx, result.gameAddress, "Active");
-        } catch (error) {
-          console.warn("Failed to update game message after auto-join:", error);
-        }
-      }, 2000);
+      // Auto-join transaction is already confirmed, safe to update message immediately
+      try {
+        await gameManager.updateGameMessageFromData(ctx, result.gameAddress, "Active");
+      } catch (error) {
+        console.warn("Failed to update game message after auto-join:", error);
+      }
     }
   }
 
@@ -1305,6 +1303,12 @@ const handleCompletedGameCallback = async (ctx: any, game: any) => {
 };
 
 const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, telegramId: bigint, game: any) => {
+  // Validate game status before attempting to join
+  if (game.status !== "active") {
+    await safeAnswerCallbackQuery(ctx, "This game is no longer active!");
+    return;
+  }
+
   try {
     const result = await gameManager.joinGame(game.game_address, telegramId, ctx.chat?.id);
     
