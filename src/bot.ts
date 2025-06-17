@@ -92,7 +92,7 @@ const safeAnswerCallbackQuery = async (ctx: any, text: string): Promise<void> =>
 };
 
 /**
- * Update game message with proper error handling
+ * Update game message with proper error handling using simplified interface
  */
 const updateGameMessageSafely = async (
   gameAddress: string,
@@ -104,14 +104,7 @@ const updateGameMessageSafely = async (
 
   try {
     const ctx = createApiContext(gameData.chat_id);
-    const creatorUsername = await gameManager.getGameCreatorUsername(ctx, gameAddress);
-    const gameType = gameData.game_type ?
-      gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1) : "Game";
-
-    await gameManager.updateGameMessage(
-      ctx, gameAddress, gameType, gameData.amount, creatorUsername,
-      status, gameData.token_mint, gameData.token_ticker, winnerAddress
-    );
+    await gameManager.updateGameMessageFromData(ctx, gameAddress, status, winnerAddress);
   } catch (error) {
     console.warn(`Could not update message for game ${gameAddress}:`, error);
   }
@@ -285,10 +278,15 @@ const validateAndProcessTransaction = async (
 
   try {
     const tx = await transactionFn(playerData);
+    const txString = tx ? tx.toString().trim() : '';
+    const successMessage = txString 
+      ? `${description} successful! 💸\n\n<code>${txString}</code>`
+      : `${description} successful! 💸`;
+    
     await ctx.api.editMessageText(
       ctx.chat!.id,
       processingMsg.message_id,
-      `${description} successful! 💸\n\nTransaction: ${tx}`,
+      successMessage,
       { parse_mode: "HTML" }
     );
   } catch (error: any) {
@@ -326,9 +324,7 @@ const replyUsageError = async (ctx: Context, message: string): Promise<void> => 
 
 const handleCallbackError = async (ctx: any, error: any, action: string): Promise<void> => {
   await handleCallbackErrorSafe(ctx, error, action, {
-    maxLength: 180,
-    includeDetails: false,
-    fallbackMessage: "An error occurred. Please try again."
+    maxLength: 180
   });
 };
 
@@ -539,7 +535,54 @@ const createGameCommand = async (
   const maxPlayersIndex = tokenSpecified ? 3 : 2;
   const maxPlayers = parseInt(args?.[maxPlayersIndex] || defaultMaxPlayers.toString()) || defaultMaxPlayers;
 
-  await gameManager.createGame(ctx, gameType, parsed.data!, maxPlayers, minPlayers, timeout);
+  // Validate context parameters
+  if (!ctx.from?.id) {
+    return replyToMessage(ctx, "Unable to identify user. Please try again.");
+  }
+
+  const result = await gameManager.createGame(gameType, parsed.data!, maxPlayers, minPlayers, timeout, BigInt(ctx.from.id), ctx.chat?.id);
+
+  if (!result.success) {
+    return replyToMessage(ctx, result.error || "Failed to create game");
+  }
+
+  // Create game message in UI layer with proper creator username
+  if (!result.gameAddress) {
+    return replyToMessage(ctx, "Game created but address not returned - please contact support");
+  }
+
+  // Get creator username from ctx instead of using the formatted address from GameManager
+  const creatorUsername = ctx.from?.username ? `@${ctx.from.username}` : "Unknown";
+  
+  await gameManager.createGameMessage(
+    ctx, 
+    result.gameAddress, 
+    gameType.charAt(0).toUpperCase() + gameType.slice(1), 
+    parsed.data!.amount, 
+    creatorUsername, 
+    parsed.data!.tokenMint, 
+    parsed.data!.tokenTicker, 
+    "Active"
+  );
+
+  // Update game message if auto-join was successful (to show the creator as joined)
+  if (result.autoJoinResult?.success) {
+    // Transaction is already confirmed by confirmTransactionWithRecovery, update immediately
+    try {
+      await gameManager.updateGameMessageFromData(ctx, result.gameAddress, "Active");
+    } catch (error) {
+      console.error("Failed to update game message after auto-join:", error);
+      // Don't retry automatically to avoid cascading failures
+    }
+  }
+
+  // Handle auto-join result if present
+  if (result.autoJoinResult && !result.autoJoinResult.success) {
+    await ctx.reply(
+      result.autoJoinResult.error || "Failed to auto-join game",
+      { parse_mode: "HTML", reply_to_message_id: ctx.message?.message_id }
+    );
+  }
 };
 
 bot.command(["coinflip", "cf"], async (ctx) => {
@@ -1125,23 +1168,17 @@ bot.command("scan", async (ctx: Context) => {
 // CALLBACK QUERY HANDLING
 // ================================
 
-const handleUnjoinGameCallback = async (ctx: any, gamePda: PublicKey, playerKp: any, gameAddress: string): Promise<void> => {
-  const gameData = gameDb.getGame(gameAddress);
-  if (!gameData) {
-    await safeAnswerCallbackQuery(ctx, "Game not found!");
-    return;
-  }
-
-  const gameAccount = await program.account.game.fetch(gamePda);
-
-  if (gameData.game_type === "snowball" && gameAccount.playersCount > 1) {
-    await safeAnswerCallbackQuery(ctx, "❄️ Cannot leave snowball games once there are 2+ players!");
-    return;
-  }
-
+const handleUnjoinGameCallback = async (ctx: any, gameAddress: string, telegramId: bigint): Promise<void> => {
   try {
-    await gameManager.unjoinGame(ctx, gamePda, playerKp);
-    await safeAnswerCallbackQuery(ctx, "Successfully unjoined the game!");
+    const result = await gameManager.unjoinGame(gameAddress, telegramId);
+    
+    if (result.success) {
+      // Update game message after successful unjoin
+      await gameManager.updateGameMessageFromData(ctx, gameAddress, "Active");
+      await safeAnswerCallbackQuery(ctx, "Successfully unjoined the game!");
+    } else {
+      await safeAnswerCallbackQuery(ctx, result.error || "Failed to unjoin game");
+    }
   } catch (error: any) {
     const userFriendlyError = formatUserFriendlyError(error, wallet);
     await safeAnswerCallbackQuery(ctx, userFriendlyError.substring(0, 180));
@@ -1163,15 +1200,10 @@ const handleRefreshGameCallback = async (ctx: any, gamePda: PublicKey, gameAddre
   }
 
   try {
-    const currentGameAccount = await program.account.game.fetch(gamePda);
-    const creatorUsername = await gameManager.getGameCreatorUsername(ctx, gameAddress);
-    const gameTypeKeys = Object.keys(currentGameAccount.gameType);
-    const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
-
-    await gameManager.updateGameMessage(
-      ctx, gameAddress, gameType, Number(gameData!.amount), creatorUsername, "Active",
-      gameData!.token_mint!, gameData!.token_ticker!
-    );
+    // Verify game still exists on blockchain
+    await program.account.game.fetch(gamePda);
+    
+    await gameManager.updateGameMessageFromData(ctx, gameAddress, "Active");
 
     await safeAnswerCallbackQuery(ctx, "Game status refreshed!");
   } catch (error: any) {
@@ -1202,24 +1234,7 @@ const handlePlayerEvent = async (event: PlayerEvent, eventName: string, emoji: s
       if (gameData && (gameData.game_type === "dumbflip" || gameData.game_type === "snowball") && gameData.chat_id) {
         try {
           const apiCtx = createApiContext(gameData.chat_id, bot.api);
-
-          if (gameData.token_mint && gameData.token_ticker) {
-            const creatorUsername = await gameManager.getGameCreatorUsername(apiCtx, gameAddress);
-            const gameType = gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1);
-
-            await gameManager.updateGameMessage(
-              apiCtx,
-              gameAddress,
-              gameType,
-              gameData.amount,
-              creatorUsername,
-              "Active",
-              gameData.token_mint,
-              gameData.token_ticker,
-              undefined,
-              totalPot
-            );
-          }
+          await gameManager.updateGameMessageFromData(apiCtx, gameAddress, "Active", undefined, totalPot);
         } catch (contextError) {
           console.error(`Error creating context for chat ${gameData.chat_id}:`, contextError);
         }
@@ -1253,6 +1268,11 @@ bot.on("callback_query", async (ctx) => {
   }
 
   try {
+    if (!ctx.from?.id) {
+      await ctx.answerCallbackQuery("Unable to identify user. Please try again.");
+      return;
+    }
+
     const gamePda = new PublicKey(gameAddress);
     const telegramId = BigInt(ctx.from.id);
     const playerKp = wallet.getKeyPair(telegramId);
@@ -1262,7 +1282,7 @@ bot.on("callback_query", async (ctx) => {
         await handleJoinGame(ctx, gamePda, playerKp, telegramId, game);
         break;
       case "unjoin":
-        await handleUnjoinGameCallback(ctx, gamePda, playerKp, gameAddress);
+        await handleUnjoinGameCallback(ctx, gameAddress, telegramId);
         break;
       case "refresh":
         await handleRefreshGameCallback(ctx, gamePda, gameAddress);
@@ -1275,173 +1295,71 @@ bot.on("callback_query", async (ctx) => {
 
 const handleCompletedGameCallback = async (ctx: any, game: any) => {
   try {
-    const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
     const gameData = gameDb.getGame(game.game_address);
 
     if (gameData) {
-      // Ensure token info exists
-      if (!gameData.token_mint || !gameData.token_ticker) {
-        console.error(`Missing token info for game ${game.game_address}`);
-        await ctx.answerCallbackQuery("Game data incomplete - please contact support");
-        return;
-      }
-
-      // Determine game type from database
-      const gameType = gameData.game_type ?
-        gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1) :
-        "Game";
-
-      await gameManager.updateGameMessage(
+      await gameManager.updateGameMessageFromData(
         ctx,
         game.game_address,
-        gameType,
-        Number(game.amount),
-        creatorUsername,
         "Completed",
-        gameData.token_mint,
-        gameData.token_ticker,
         gameData.winner_address || undefined
       );
 
       const statusMessage = gameData.winner_address === "cancelled" ? "cancelled" : "completed";
       await ctx.answerCallbackQuery(`Game ${statusMessage} - message updated!`);
     } else {
-      const statusMessage = game.winner_address === "cancelled" ? "cancelled" : "completed";
-      await ctx.answerCallbackQuery(`This game has already been ${statusMessage}!`);
+      // Game data not found in database - game may have been cleaned up
+      console.warn(`Game data not found for ${game.game_address}`);
+      await ctx.answerCallbackQuery("Game data not found - game may have been completed");
     }
   } catch (error) {
     console.error("Error updating completed game message:", error);
-    const statusMessage = game.winner_address === "cancelled" ? "cancelled" : "completed";
-    await ctx.answerCallbackQuery(`This game has already been ${statusMessage}!`);
+    await ctx.answerCallbackQuery("Failed to update game message");
   }
 };
 
 const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, telegramId: bigint, game: any) => {
+  // Validate game status before attempting to join
   if (game.status !== "active") {
-    await ctx.answerCallbackQuery("This game is no longer active!");
+    await safeAnswerCallbackQuery(ctx, "This game is no longer active!");
     return;
   }
 
   try {
-    const gameAccount = await program.account.game.fetch(gamePda);
-
-    // Check balance
-    const gameData = gameDb.getGame(game.game_address);
-    if (!gameData) {
-      await ctx.answerCallbackQuery("Game not found!");
+    const result = await gameManager.joinGame(game.game_address, telegramId, ctx.chat?.id);
+    
+    if (!result.success) {
+      await safeAnswerCallbackQuery(ctx, result.error || "Failed to join game");
       return;
     }
 
-    // Ensure token info exists
-    if (!gameData.token_mint || !gameData.token_ticker) {
-      console.error(`Missing token info for game ${game.game_address}`);
-      await ctx.answerCallbackQuery("Game data incomplete - please contact support");
-      return;
-    }
+    // Update game message after successful join
+    await gameManager.updateGameMessageFromData(ctx, game.game_address, "Active");
 
-    const tokenMint = gameData.token_mint;
-
-    // Check if player already joined by checking PlayerParticipation account
-    const playerParticipationPda = PDAManager.getPlayerParticipationPDA(
-      gamePda,
-      playerKp.publicKey,
-      program.programId
-    );
-
-    let isAlreadyInGame = false;
-    try {
-      await program.account.playerParticipation.fetch(playerParticipationPda);
-      isAlreadyInGame = true;
-    } catch (error) {
-      // PlayerParticipation account doesn't exist, so player is not in game
-      isAlreadyInGame = false;
-    }
-
-    if (isAlreadyInGame && (gameData?.game_type === "snowball" || gameData?.game_type === "dumbflip")) {
-      await handleGameRoll(ctx, gamePda, playerKp, gameAccount, gameData, game);
-      return;
-    }
-
-    if (isAlreadyInGame) {
-      await safeAnswerCallbackQuery(ctx, "You have already joined this game!");
-      return;
-    }
-
-    if (gameAccount.playersCount >= gameAccount.maxPlayers) {
-      await safeAnswerCallbackQuery(ctx, "This game is already full!");
-      return;
-    }
-
-    // Balance checking for games that require payment
-    const [tokenBalance, gameBalance] = await Promise.all([
-      wallet.getTokenBalance(telegramId, tokenMint),
-      (async () => {
-        try {
-          const playerBalancePda = PDAManager.getPlayerBalancePDA(
-            playerKp.publicKey,
-            new PublicKey(tokenMint),
-            program.programId
-          );
-          const playerBalance = await program.account.playerBalance.fetch(playerBalancePda);
-          return Number(playerBalance.amount);
-        } catch (error) {
-          return 0;
+    // Handle special case: rolling for snowball/dumbflip games
+    if (result.isRoll) {
+      try {
+        const gameAccount = await program.account.game.fetch(gamePda);
+        const gameData = gameDb.getGame(game.game_address);
+        if (gameData) {
+          await handleGameRoll(ctx, gamePda, playerKp, gameAccount, gameData, game);
+        } else {
+          await safeAnswerCallbackQuery(ctx, "Game data not found for rolling");
         }
-      })()
-    ]);
-
-    const gameAmount = Number(gameAccount.ticketAmount);
-    const totalBalance = tokenBalance + gameBalance;
-
-    // Only check balance for coinflips, dumbflips and snowballs, giveaways are free to join
-    const currentGameType = Object.keys(gameAccount.gameType)[0];
-    if ((currentGameType === "coinflip" || currentGameType === "dumbflip" || currentGameType === "snowball") && totalBalance < gameAmount) {
-      const metadata = await wallet.getTokenMetadata(tokenMint);
-      const tokenTicker = gameData.token_ticker;
-      await safeAnswerCallbackQuery(ctx, `Insufficient balance. You have ${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${tokenTicker} but need ${wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${tokenTicker}`);
+      } catch (error) {
+        console.error("Error handling game roll:", error);
+        await safeAnswerCallbackQuery(ctx, "Failed to roll game. Please try again.");
+      }
       return;
     }
-
-    // Ensure player balance and join
-    await gameManager.ensurePlayerBalance(playerKp, tokenMint);
-
-    if (gameAccount.isPrivate) {
-      const result = await gameManager.joinPrivateGame(gamePda, playerKp, ctx.chat?.id || 0);
-      if (!result.success) {
-        await ctx.answerCallbackQuery(result.error || "Failed to join private game");
-        return;
-      }
-    } else {
-      const joinInstruction = await program.methods
-        .joinGame()
-        .accounts({
-          game: gamePda,
-          player: playerKp.publicKey,
-        })
-        .instruction();
-
-      const tx = await wallet.sendTransaction([joinInstruction], [playerKp]);
-      await wallet.confirmTransaction(tx);
-    }
-
-    // Save player mapping and participant
-    const playerPubkey = playerKp.publicKey.toBase58();
-    gameDb.savePlayerMapping(playerPubkey, telegramId.toString());
-    gameDb.saveGameParticipant(game.game_address, telegramId.toString(), playerPubkey);
-
-    // Update game message
-    const creatorUsername = await gameManager.getGameCreatorUsername(ctx, game.game_address);
-    const gameTypeKeys = Object.keys(gameAccount.gameType);
-    const gameType = gameTypeKeys[0] ? gameTypeKeys[0].charAt(0).toUpperCase() + gameTypeKeys[0].slice(1) : "Game";
-    const tokenTicker = gameData.token_ticker;
-    await gameManager.updateGameMessage(ctx, game.game_address, gameType, Number(game.amount), creatorUsername, "Active", tokenMint, tokenTicker);
 
     // Send join notification
     const joinerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
     const updatedGameAccount = await program.account.game.fetch(gamePda);
     const playerCount = updatedGameAccount.playersCount;
-    const maxPlayers = gameAccount.maxPlayers;
-    const gameName = gameType.toLowerCase();
+    const maxPlayers = updatedGameAccount.maxPlayers;
+    const gameTypeKeys = Object.keys(updatedGameAccount.gameType);
+    const gameName = gameTypeKeys[0] || "game";
 
     const gameMessage = gameManager.getActiveGameMessage(game.game_address);
     await ctx.reply(
@@ -1451,9 +1369,6 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
         reply_to_message_id: gameMessage?.messageId
       }
     );
-
-    // Note: Game completion is now handled automatically by the external oracle service
-    // when the game is full or expires with enough players
 
   } catch (error: any) {
     // Handle specific case where account doesn't exist (game was completed/cancelled)
@@ -1591,7 +1506,7 @@ setupAnchor().then(async () => {
       gameDb.completeGame(game.game_address, "cancelled", Date.now());
       await updateGameMessageSafely(game.game_address, game, "Completed", "cancelled");
     } else {
-      console.warn(`⚠️ Failed to process expired game ${game.game_address}`);
+      console.error(`⚠️ Failed to process expired game ${game.game_address}`);
     }
   };
 

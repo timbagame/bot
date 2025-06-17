@@ -44,17 +44,6 @@ export class GameDatabase {
         )
       `);
 
-      // Add the new column if it doesn't exist (for existing databases)
-      try {
-        this.db.run('ALTER TABLE games ADD COLUMN last_slot_timestamp INTEGER');
-      } catch (error: any) {
-        // Column already exists, ignore the error
-        if (!error.message?.includes('duplicate column name')) {
-          console.warn('Error adding last_slot_timestamp column:', error.message);
-        }
-      }
-
-
       // Create player mappings table
       this.db.run(`
         CREATE TABLE IF NOT EXISTS player_mappings (
@@ -83,12 +72,12 @@ export class GameDatabase {
   }
 
   // Game methods
-  public saveGame(gameAddress: string, creatorTelegramId: string, amount: number, gameType: string, tokenMint?: string, tokenTicker?: string, maxPlayers?: number, minPlayers?: number): void {
+  public saveGame(gameAddress: string, creatorTelegramId: string, amount: number, gameType: string, tokenMint?: string, tokenTicker?: string, maxPlayers?: number, minPlayers?: number, chatId?: number): void {
     try {
       const stmt = this.db.prepare(
-        'INSERT INTO games (game_address, creator_telegram_id, amount, created_at, game_type, token_mint, token_ticker, max_players, min_players) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO games (game_address, creator_telegram_id, amount, created_at, game_type, token_mint, token_ticker, max_players, min_players, chat_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       );
-      stmt.run(gameAddress, creatorTelegramId, amount, Date.now(), gameType, tokenMint || null, tokenTicker || null, maxPlayers || null, minPlayers || null);
+      stmt.run(gameAddress, creatorTelegramId, amount, Date.now(), gameType, tokenMint || null, tokenTicker || null, maxPlayers || null, minPlayers || null, chatId || null);
     } catch (error) {
       console.error("Error saving game:", error);
       throw error;
@@ -382,35 +371,4 @@ export class GameDatabase {
     }
   }
 
-  /**
-   * Validate and fix slot timestamp consistency for all games
-   * This can be used to diagnose and fix any issues with out-of-order events
-   */
-  public validateSlotTimestamps(): { checked: number; fixed: number; issues: string[] } {
-    try {
-      const games = this.getAllGames().filter(g => g.status === 'active');
-      let checked = 0;
-      let fixed = 0;
-      const issues: string[] = [];
-
-      for (const game of games) {
-        checked++;
-        const { lastSlot, timestamp } = this.getGameLastSlotWithTimestamp(game.game_address);
-
-        // Check if we have a slot but no timestamp (from old version)
-        if (lastSlot && !timestamp) {
-          // Set current time as timestamp for games without timestamps
-          const stmt = this.db.prepare("UPDATE games SET last_slot_timestamp = ? WHERE game_address = ?");
-          stmt.run(Date.now(), game.game_address);
-          fixed++;
-          issues.push(`Fixed missing timestamp for game ${game.game_address.slice(0, 8)}...`);
-        }
-      }
-
-      return { checked, fixed, issues };
-    } catch (error) {
-      console.error("Error validating slot timestamps:", error);
-      return { checked: 0, fixed: 0, issues: [`Validation failed: ${error}`] };
-    }
-  }
 }

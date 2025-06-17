@@ -255,6 +255,7 @@ export class GameManager {
     return "Unknown";
   }
 
+
   /**
    * Get player username with fallback to address display
    * Returns @username for Telegram users or formatted address for blockchain players
@@ -369,7 +370,6 @@ export class GameManager {
     _tokenMint: string,
     tokenTicker: string,
     winnerAddress?: string,
-    txHash?: string,
     providedTotalPot?: number
   ): Promise<GameMessageFormat> {
     const isCompleted = status.toLowerCase() === "completed";
@@ -433,10 +433,6 @@ export class GameManager {
 
     messageText += winnerInfo;
 
-    if (txHash) {
-      messageText += `\n\nTransaction: <code>${txHash}</code>`;
-    }
-
     const keyboard = this.generateGameKeyboard(status, gameType, currentPlayers, gamePda);
 
     return { messageText, keyboard };
@@ -450,8 +446,7 @@ export class GameManager {
     creatorUsername: string,
     tokenMint: string,
     tokenTicker: string,
-    status: string = "Active",
-    txHash?: string
+    status: string = "Active"
   ): Promise<number> {
     const { messageText, keyboard } = await this.formatGameMessage(
       ctx,
@@ -462,8 +457,7 @@ export class GameManager {
       status,
       tokenMint,
       tokenTicker,
-      undefined,
-      txHash
+      undefined
     );
 
     const message = await ctx.reply(messageText, {
@@ -507,7 +501,6 @@ export class GameManager {
         tokenMint,
         tokenTicker,
         winnerAddress,
-        undefined,
         totalPot
       );
 
@@ -529,6 +522,45 @@ export class GameManager {
       }
     } catch (error) {
       console.error("Error in updateGameMessage:", error);
+    }
+  }
+
+  /**
+   * Simplified updateGameMessage that automatically fetches required data
+   * This reduces duplication and ensures consistency across the codebase
+   */
+  public async updateGameMessageFromData(
+    ctx: Context,
+    gameAddress: string,
+    status: string = "Active",
+    winnerAddress?: string,
+    totalPot?: number
+  ): Promise<void> {
+    try {
+      const gameData = this.gameDb.getGame(gameAddress);
+      if (!gameData) {
+        console.warn(`No game data found for ${gameAddress}`);
+        return;
+      }
+
+      const creatorUsername = await this.getGameCreatorUsername(ctx, gameAddress);
+      const gameType = gameData.game_type ? 
+        gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1) : "Game";
+
+      await this.updateGameMessage(
+        ctx,
+        gameAddress,
+        gameType,
+        gameData.amount,
+        creatorUsername,
+        status,
+        gameData.token_mint || "",
+        gameData.token_ticker || "",
+        winnerAddress,
+        totalPot
+      );
+    } catch (error) {
+      console.error(`Error updating game message for ${gameAddress}:`, error);
     }
   }
 
@@ -743,33 +775,32 @@ export class GameManager {
   }
 
   public async createGame(
-    ctx: Context,
     gameType: GameType,
     parsedAmount: { amount: number; tokenMint: string; tokenTicker: string; isSol: boolean },
     maxPlayers: number,
     minPlayers: number,
-    timeout: number
-  ): Promise<void> {
-    const telegramId = BigInt(ctx.from?.id || 0);
-
+    timeout: number,
+    telegramId: bigint,
+    chatId?: number
+  ): Promise<{ success: boolean; error?: string; gameAddress?: string; autoJoinResult?: { success: boolean; error?: string } }> {
+    
     // Validate that SOL is not used for games
     if (parsedAmount.isSol) {
-      await ctx.reply(
-        `❌ Native SOL games are not supported!\n\n` +
-        `💡 Supported tokens for games:\n` +
-        `• Use approved SPL tokens (check with /balance)\n` +
-        `• For SOL-based games, use WSOL instead\n` +
-        `• You can wrap SOL to WSOL using /wrap command\n\n` +
-        `Example: /cf 1000 WSOL 2`,
-        { reply_to_message_id: ctx.message?.message_id }
-      );
-      return;
+      return {
+        success: false,
+        error: `❌ Native SOL games are not supported!\n\n` +
+               `💡 Supported tokens for games:\n` +
+               `• Use approved SPL tokens (check with /balance)\n` +
+               `• For SOL-based games, use WSOL instead\n` +
+               `• You can wrap SOL to WSOL using /wrap command\n\n` +
+               `Example: /cf 1000 WSOL 2`
+      };
     }
 
     const { tokenMint, tokenTicker, amount } = parsedAmount;
-    const metadata = await this.wallet.getTokenMetadata(tokenMint);
 
     try {
+      const metadata = await this.wallet.getTokenMetadata(tokenMint);
       const playerKp = this.wallet.getKeyPair(telegramId);
       const [tokenBalance, gameBalance] = await Promise.all([
         this.wallet.getTokenBalance(telegramId, tokenMint),
@@ -778,11 +809,10 @@ export class GameManager {
 
       const totalBalance = tokenBalance + gameBalance;
       if (totalBalance < amount) {
-        await ctx.reply(
-          `Insufficient balance. You have ${this.wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${tokenTicker} but need ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}`,
-          { reply_to_message_id: ctx.message?.message_id }
-        );
-        return;
+        return {
+          success: false,
+          error: `Insufficient balance. You have ${this.wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${tokenTicker} but need ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}`
+        };
       }
 
       const creatorPubkey = playerKp.publicKey.toBase58();
@@ -791,9 +821,10 @@ export class GameManager {
       // Check oracle and generate game secrets
       const isOracleHealthy = await this.oracleClient.isHealthy();
       if (!isOracleHealthy) {
-        await ctx.reply("❌ Oracle service is unavailable. Please try again later.",
-          { reply_to_message_id: ctx.message?.message_id });
-        return;
+        return {
+          success: false,
+          error: "❌ Oracle service is unavailable. Please try again later."
+        };
       }
 
       const { randomHash } = await this.oracleClient.generateGameSecrets();
@@ -829,39 +860,47 @@ export class GameManager {
       const gameCreationConfirmed = await this.confirmTransactionWithRecovery(tx, gamePda, "Game creation");
 
       if (!gameCreationConfirmed) {
-        throw new Error("Game creation could not be confirmed");
+        return {
+          success: false,
+          error: "Game creation could not be confirmed"
+        };
       }
 
-      // Save game and create message
-      this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker, maxPlayers, minPlayers);
-
-      const creatorUsername = await this.getGameCreatorUsername(ctx, gamePda.toBase58());
-      await this.createGameMessage(ctx, gamePda.toBase58(), gameType.charAt(0).toUpperCase() + gameType.slice(1), amount, creatorUsername, tokenMint, tokenTicker, "Active", tx);
+      // Save game
+      this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker, maxPlayers, minPlayers, chatId);
 
       // Auto-join logic based on game type
+      let autoJoinResult: { success: boolean; error?: string } | undefined;
       if (gameType === "coinflip" || gameType === "dumbflip" || gameType === "snowball") {
-        await this.handleGameAutoJoin(ctx, gamePda, playerKp, telegramId, creatorPubkey, gameType, amount, tokenMint, tokenTicker);
+        autoJoinResult = await this.handleGameAutoJoinPure(gamePda, playerKp, telegramId, creatorPubkey, gameType, chatId || 0);
       } else {
         console.log(`🎁 ${gameType.charAt(0).toUpperCase() + gameType.slice(1)} game ${gamePda.toBase58()} created - creator not auto-joined`);
       }
 
+      return {
+        success: true,
+        gameAddress: gamePda.toBase58(),
+        autoJoinResult
+      };
+
     } catch (error: any) {
       const userFriendlyError = logAndFormatError(error, `creating ${gameType} game`, this.wallet);
-      await ctx.reply(userFriendlyError, { reply_to_message_id: ctx.message?.message_id });
+      return {
+        success: false,
+        error: userFriendlyError
+      };
     }
   }
 
-  private async handleGameAutoJoin(
-    ctx: Context,
+
+  private async handleGameAutoJoinPure(
     gamePda: PublicKey,
     playerKp: anchor.web3.Keypair,
     telegramId: bigint,
     creatorPubkey: string,
     gameType: string,
-    amount: number,
-    tokenMint: string,
-    tokenTicker: string
-  ): Promise<void> {
+    chatId?: number
+  ): Promise<{ success: boolean; error?: string }> {
     console.log(`🎮 Auto-joining creator to ${gameType} game ${gamePda.toBase58()}...`);
 
     try {
@@ -870,9 +909,9 @@ export class GameManager {
       let joinTx: string;
       if (gameAccount.isPrivate) {
         console.log(`🔐 Game is private, using authorized join...`);
-        const result = await this.joinPrivateGame(gamePda, playerKp, ctx.chat?.id || 0);
+        const result = await this.joinPrivateGame(gamePda, playerKp, chatId || 0);
         if (!result.success) {
-          throw new Error(result.error || "Failed to join private game");
+          return { success: false, error: result.error || "Failed to join private game" };
         }
         joinTx = result.tx!;
       } else {
@@ -892,27 +931,19 @@ export class GameManager {
 
       if (joinConfirmed) {
         this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
-        const creatorUsername = await this.getGameCreatorUsername(ctx, gamePda.toBase58());
-        await this.updateGameMessage(ctx, gamePda.toBase58(), gameType.charAt(0).toUpperCase() + gameType.slice(1), amount, creatorUsername, "Active", tokenMint, tokenTicker);
+        return { success: true };
+      } else {
+        return { success: false, error: "Failed to confirm auto-join transaction" };
       }
 
     } catch (joinError: any) {
       const errorMsg = logAndFormatError(joinError, `auto-joining creator to ${gameType} game`);
-      await ctx.reply(
-        `⚠️ <b>Game created successfully, but failed to auto-join creator!</b>\n\n` +
-        `Please manually join the game using the "🎮 Join" button.\n\n` +
-        `Error: ${errorMsg}`,
-        { parse_mode: "HTML", reply_to_message_id: ctx.message?.message_id }
-      );
+      return { 
+        success: false, 
+        error: `⚠️ Game created successfully, but failed to auto-join creator!\n\nPlease manually join the game using the "🎮 Join" button.\n\nError: ${errorMsg}`
+      };
     }
   }
-
-  // ================================
-  // EVENT LISTENING
-  // ================================
-
-  // This method is no longer needed since game PDA is derived directly from random hash
-  // Removed waitForGameInitializedEvent method
 
   // ================================
   // HELPER METHODS
@@ -1053,46 +1084,150 @@ export class GameManager {
   }
 
   // ================================
-  // UNJOIN FUNCTIONALITY
+  // JOIN/UNJOIN FUNCTIONALITY
   // ================================
 
-  public async unjoinGame(ctx: Context, gamePda: PublicKey, playerKp: anchor.web3.Keypair): Promise<boolean> {
+  /**
+   * Comprehensive join game method that handles all validation and logic
+   */
+  public async joinGame(
+    gameAddress: string,
+    telegramId: bigint,
+    chatId?: number
+  ): Promise<{ success: boolean; error?: string; isRoll?: boolean }> {
     try {
+      const gamePda = new PublicKey(gameAddress);
+      const playerKp = this.wallet.getKeyPair(telegramId);
+      
+      // Get game data and validate
+      const gameData = this.gameDb.getGame(gameAddress);
+      if (!gameData) {
+        return { success: false, error: "Game not found!" };
+      }
+
+      if (gameData.status !== "active") {
+        return { success: false, error: "This game is no longer active!" };
+      }
+
+      // Validate token data
+      if (!gameData.token_mint || !gameData.token_ticker) {
+        return { success: false, error: "Game data incomplete - please contact support" };
+      }
+
+      // Fetch blockchain game state
       const gameAccount = await this.program.account.game.fetch(gamePda);
-
+      
+      // Check if player already in game
       const isInGame = await this.isPlayerInGame(gamePda, playerKp.publicKey);
-      if (!isInGame) {
-        throw new Error("You are not in this game");
+      
+      // Handle special case: rolling for snowball/dumbflip games
+      if (isInGame && (gameData.game_type === "snowball" || gameData.game_type === "dumbflip")) {
+        return { success: true, isRoll: true };
       }
 
-      await this.unjoinPlayerFromGame(gamePda, playerKp, playerKp.publicKey);
-
-      const creatorUsername = await this.getGameCreatorUsername(ctx, gamePda.toBase58());
-
-      // Get token info from database
-      const gameData = this.gameDb.getGame(gamePda.toBase58());
-      if (!gameData?.token_mint || !gameData?.token_ticker) {
-        console.error(`Missing token info for game ${gamePda.toBase58()}`);
-        throw new Error("Game data incomplete - please contact support");
+      if (isInGame) {
+        return { success: false, error: "You have already joined this game!" };
       }
 
-      await this.updateGameMessage(
-        ctx,
-        gamePda.toBase58(),
-        formatGameType(gameAccount.gameType),
-        Number(gameAccount.ticketAmount),
-        creatorUsername,
-        "Active",
-        gameData.token_mint,
-        gameData.token_ticker
-      );
+      if (gameAccount.playersCount >= gameAccount.maxPlayers) {
+        return { success: false, error: "This game is already full!" };
+      }
 
-      return true;
+      // Balance validation for paid games
+      const currentGameType = Object.keys(gameAccount.gameType)[0];
+      if (currentGameType === "coinflip" || currentGameType === "dumbflip" || currentGameType === "snowball") {
+        const gameAmount = Number(gameAccount.ticketAmount);
+        const [tokenBalance, gameBalance] = await Promise.all([
+          this.wallet.getTokenBalance(telegramId, gameData.token_mint),
+          this.getPlayerGameBalance(playerKp.publicKey, gameData.token_mint)
+        ]);
+
+        const totalBalance = tokenBalance + gameBalance;
+        if (totalBalance < gameAmount) {
+          const metadata = await this.wallet.getTokenMetadata(gameData.token_mint);
+          return { 
+            success: false, 
+            error: `Insufficient balance. You have ${this.wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${gameData.token_ticker} but need ${this.wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${gameData.token_ticker}` 
+          };
+        }
+      }
+
+      // Ensure player balance and execute join
+      await this.ensurePlayerBalance(playerKp, gameData.token_mint);
+
+      if (gameAccount.isPrivate) {
+        const result = await this.joinPrivateGame(gamePda, playerKp, chatId || 0);
+        if (!result.success) {
+          return { success: false, error: result.error || "Failed to join private game" };
+        }
+      } else {
+        const joinInstruction = await this.program.methods
+          .joinGame()
+          .accounts({
+            game: gamePda,
+            player: playerKp.publicKey,
+          })
+          .instruction();
+
+        const tx = await this.wallet.sendTransaction([joinInstruction], [playerKp]);
+        await this.wallet.confirmTransaction(tx);
+      }
+
+      // Update database
+      const playerPubkey = playerKp.publicKey.toBase58();
+      this.gameDb.savePlayerMapping(playerPubkey, telegramId.toString());
+      this.gameDb.saveGameParticipant(gameAddress, telegramId.toString(), playerPubkey);
+
+      return { success: true };
+
     } catch (error: any) {
-      console.error(`Error unjoining game ${gamePda.toBase58()}:`, error);
-      throw error;
+      console.error(`Error joining game ${gameAddress}:`, error);
+      return { success: false, error: error.message || "Failed to join game" };
     }
   }
+
+  /**
+   * Enhanced unjoin game method with all validation
+   */
+  public async unjoinGame(
+    gameAddress: string, 
+    telegramId: bigint
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const gamePda = new PublicKey(gameAddress);
+      const playerKp = this.wallet.getKeyPair(telegramId);
+      
+      // Get game data for validation
+      const gameData = this.gameDb.getGame(gameAddress);
+      if (!gameData) {
+        return { success: false, error: "Game not found!" };
+      }
+
+      // Fetch current game state
+      const gameAccount = await this.program.account.game.fetch(gamePda);
+
+      // Snowball-specific restriction
+      if (gameData.game_type === "snowball" && gameAccount.playersCount > 1) {
+        return { success: false, error: "❄️ Cannot leave snowball games once there are 2+ players!" };
+      }
+
+      // Check if player is actually in the game
+      const isInGame = await this.isPlayerInGame(gamePda, playerKp.publicKey);
+      if (!isInGame) {
+        return { success: false, error: "You are not in this game" };
+      }
+
+      // Execute unjoin
+      await this.unjoinPlayerFromGame(gamePda, playerKp, playerKp.publicKey);
+
+      return { success: true };
+
+    } catch (error: any) {
+      console.error(`Error unjoining game ${gameAddress}:`, error);
+      return { success: false, error: error.message || "Failed to unjoin game" };
+    }
+  }
+
 
   // ================================
   // GAME CLOSURE AND CLEANUP
