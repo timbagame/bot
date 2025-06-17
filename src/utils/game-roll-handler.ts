@@ -2,6 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import * as anchor from "@coral-xyz/anchor";
 import type { GameData } from "../types";
 import { handleCallbackErrorSafe } from "./context-helpers";
+import { TokenDatabase } from "./token-database";
 
 // ================================
 // GAME ROLL HANDLING
@@ -48,7 +49,7 @@ export const handleGameRoll = async (
     const gameTypeName = getGameTypeName(gameData.game_type);
     await safeAnswerCallbackQuery(ctx, `🎲 Rolled the ${gameTypeName}!`);
     
-    await handleRollConfirmation(ctx, tx, gamePda, gameAccount, gameData, game, gameData.token_mint!);
+    await handleRollConfirmation(ctx, tx, gamePda, gameData, game, gameData.token_mint!);
     
   } catch (error: any) {
     await handleCallbackErrorSafe(ctx, error, "game_roll", { 
@@ -90,7 +91,6 @@ const handleRollConfirmation = async (
   ctx: any,
   tx: string,
   gamePda: PublicKey,
-  gameAccount: any,
   gameData: GameData,
   game: GameData,
   tokenMint: string
@@ -113,6 +113,9 @@ const handleRollConfirmation = async (
         currentTotalPot
       );
 
+      const tokenDb = TokenDatabase.getInstance();
+      const knownToken = tokenDb.getKnownTokenByMint(tokenMint);
+      const tokenTicker = knownToken?.token_ticker || "TOKEN";
       await sendRollNotification(ctx, currentTotalPot, tokenMint, tokenTicker, game.game_address, gameData.game_type);
       
     } catch (error) {
@@ -171,15 +174,6 @@ const getGameTypeName = (gameType: string): string => {
   }
 };
 
-/**
- * Format game type for display
- */
-const formatGameType = (gameType: Record<string, any>): string => {
-  const keys = Object.keys(gameType);
-  const firstKey = keys[0];
-  if (!firstKey) return "Game";
-  return firstKey.charAt(0).toUpperCase() + firstKey.slice(1);
-};
 
 /**
  * Safe callback query answering
