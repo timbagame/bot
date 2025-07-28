@@ -174,7 +174,7 @@ async function initializeToken(
     })
     .accounts({
       tokenMint: mint,
-      authority: adminKeypair.publicKey,
+      oracleOperator: adminKeypair.publicKey,
     })
     .instruction();
 
