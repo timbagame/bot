@@ -102,7 +102,7 @@ export interface GameCategory {
 export interface GameCompletedEvent {
   gameKey: PublicKey;
   winner: PublicKey;
-  playersCount: number;
+  ticketsCount: number;
   winnerAmount: anchor.BN;
   feeAmount: anchor.BN;
   timestamp: anchor.BN;
@@ -112,8 +112,8 @@ export interface PlayerJoinedEvent {
   gameKey: PublicKey;
   player: PublicKey;
   totalAmount: anchor.BN;
-  playersCount: number;
-  playerIndex: number;
+  ticketsCount: number;
+  ticketIndex: number;
   lastSlot: anchor.BN;
   timestamp: anchor.BN;
 }
@@ -122,8 +122,8 @@ export interface PlayerUnjoinedEvent {
   gameKey: PublicKey;
   player: PublicKey;
   totalAmount: anchor.BN;
-  playersCount: number;
-  playerIndex: number;
+  ticketsCount: number;
+  ticketIndex: number;
   lastSlot: anchor.BN;
   timestamp: anchor.BN;
 }
@@ -132,7 +132,8 @@ export interface PlayerRolledEvent {
   gameKey: PublicKey;
   player: PublicKey;
   totalAmount: anchor.BN;
-  playerIndex: number;
+  ticketsCount: number;
+  ticketIndex: number;
   lastSlot: anchor.BN;
   timestamp: anchor.BN;
 }
@@ -199,9 +200,9 @@ export interface ApiContext {
 }
 
 export interface GameStats {
-  currentPlayers: number;
-  maxPlayers: number;
-  minPlayers: number;
+  currentTickets: number;
+  maxTickets: number;
+  minTickets: number;
   totalPot: number;
   expirationInfo: string;
 }

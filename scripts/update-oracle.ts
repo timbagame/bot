@@ -40,16 +40,16 @@ const updateOracle = async () => {
     try {
       const currentOracle = await program.account.oracle.fetch(oraclePda);
       console.log("\nCurrent Oracle Configuration:");
-      console.log(`- Authority: ${currentOracle.authority.toString()}`);
+      console.log(`- Operator: ${currentOracle.operator.toString()}`);
       console.log(`- Fee Percentage: ${currentOracle.feePercentage}%`);
       console.log(`- Min Timeout: ${currentOracle.minTimeout} seconds (${Math.round(currentOracle.minTimeout / 60)} minutes)`);
       console.log(`- Max Timeout: ${currentOracle.maxTimeout} seconds (${Math.round(currentOracle.maxTimeout / 60)} minutes)`);
-      console.log(`- Max Players: ${currentOracle.maxPlayers}`);
+      console.log(`- Max Tickets: ${currentOracle.maxTickets}`);
       console.log(`- Oracle Buffer Time: ${currentOracle.oracleBufferTime} seconds`);
 
-      // Verify authority
-      if (!currentOracle.authority.equals(adminKeypair.publicKey)) {
-        throw new Error(`Authority mismatch. Expected: ${adminKeypair.publicKey.toString()}, Found: ${currentOracle.authority.toString()}`);
+      // Verify operator
+      if (!currentOracle.operator.equals(adminKeypair.publicKey)) {
+        throw new Error(`Operator mismatch. Expected: ${adminKeypair.publicKey.toString()}, Found: ${currentOracle.operator.toString()}`);
       }
     } catch (error) {
       console.error("Error fetching current oracle:", error);
@@ -60,7 +60,7 @@ const updateOracle = async () => {
     const newConfig = {
       feePercentage: 1,        // 1% fee
       oracleBufferTime: 300,    // 5 minute buffer
-      maxPlayers: 100,         // 100 max players
+      maxTickets: 100,         // 100 max tickets
       maxTimeout: 7200,        // 2 hours max timeout
       minTimeout: 300          // 5 minutes min timeout
     };
@@ -69,7 +69,7 @@ const updateOracle = async () => {
     console.log(`- Fee Percentage: ${newConfig.feePercentage}%`);
     console.log(`- Min Timeout: ${newConfig.minTimeout} seconds (${Math.round(newConfig.minTimeout / 60)} minutes)`);
     console.log(`- Max Timeout: ${newConfig.maxTimeout} seconds (${Math.round(newConfig.maxTimeout / 60)} minutes)`);
-    console.log(`- Max Players: ${newConfig.maxPlayers}`);
+    console.log(`- Max Tickets: ${newConfig.maxTickets}`);
     console.log(`- Oracle Buffer Time: ${newConfig.oracleBufferTime} seconds`);
 
     console.log("\n🔄 Updating Oracle...");
@@ -78,8 +78,8 @@ const updateOracle = async () => {
     const updateInstruction = await program.methods
       .updateOracle(newConfig)
       .accounts({
-        oldAuthority: adminKeypair.publicKey,
-        newAuthority: adminKeypair.publicKey, // Same authority
+        oldOracleOperator: adminKeypair.publicKey,
+        newOracleOperator: adminKeypair.publicKey, // Same operator
       })
       .instruction();
 
@@ -90,11 +90,11 @@ const updateOracle = async () => {
     // Verify the update
     const updatedOracle = await program.account.oracle.fetch(oraclePda);
     console.log("\nUpdated Oracle Configuration:");
-    console.log(`- Authority: ${updatedOracle.authority.toString()}`);
+    console.log(`- Operator: ${updatedOracle.operator.toString()}`);
     console.log(`- Fee Percentage: ${updatedOracle.feePercentage}%`);
     console.log(`- Min Timeout: ${updatedOracle.minTimeout} seconds (${Math.round(updatedOracle.minTimeout / 60)} minutes)`);
     console.log(`- Max Timeout: ${updatedOracle.maxTimeout} seconds (${Math.round(updatedOracle.maxTimeout / 60)} minutes)`);
-    console.log(`- Max Players: ${updatedOracle.maxPlayers}`);
+    console.log(`- Max Tickets: ${updatedOracle.maxTickets}`);
     console.log(`- Oracle Buffer Time: ${updatedOracle.oracleBufferTime} seconds`);
 
   } catch (error) {

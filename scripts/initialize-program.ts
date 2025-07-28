@@ -40,7 +40,7 @@ const initializeOracle = async (program: anchor.Program<Coinflip>) => {
     // Check if Oracle exists
     try {
       const oracleAccount = await program.account.oracle.fetch(oraclePda);
-      console.log(`Oracle already exists, authority: ${oracleAccount.authority.toString()}`);
+      console.log(`Oracle already exists, operator: ${oracleAccount.operator.toString()}`);
       return oraclePda;
     } catch (error) {
       console.log("Oracle doesn't exist, creating...");
@@ -53,7 +53,7 @@ const initializeOracle = async (program: anchor.Program<Coinflip>) => {
     const oracleConfig = {
       feePercentage: 1,        // 1% fee
       oracleBufferTime: 300,   // 5 minute buffer
-      maxPlayers: 1000000,         // 1.000.000 max players
+      maxTickets: 1000000,         // 1.000.000 max tickets
       maxTimeout: 86400,        // 24 hours max timeout
       minTimeout: 60          // 1 minute min timeout
     };
@@ -61,7 +61,7 @@ const initializeOracle = async (program: anchor.Program<Coinflip>) => {
     const oracleInstruction = await program.methods
       .initializeOracle(oracleConfig)
       .accounts({
-        authority: adminKeypair.publicKey,
+        oracleOperator: adminKeypair.publicKey,
       })
       .instruction();
 

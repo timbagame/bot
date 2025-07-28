@@ -400,7 +400,7 @@ const checkOracleStatus = async () => {
   try {
     const oraclePda = PDAManager.getOraclePDA(program.programId);
     const oracleAccount = await program.account.oracle.fetch(oraclePda);
-    console.log(`Oracle found, authority: ${oracleAccount.authority.toString()}`);
+    console.log(`Oracle found, operator: ${oracleAccount.operator.toString()}`);
   } catch (error) {
     console.log("Oracle not found, it might need to be initialized");
   }
@@ -1112,11 +1112,11 @@ bot.command("oracle", async (ctx: Context) => {
     const response = [
       "🔮 <b>Oracle Configuration</b>",
       "",
-      `Authority: <code>${oracleAccount.authority.toString()}</code>`,
+      `Operator: <code>${oracleAccount.operator.toString()}</code>`,
       `Fee Percentage: ${oracleAccount.feePercentage}%`,
       `Min Timeout: ${oracleAccount.minTimeout} seconds (${oracleAccount.minTimeout / 60} minutes)`,
       `Max Timeout: ${oracleAccount.maxTimeout} seconds (${oracleAccount.maxTimeout / 60} minutes)`,
-      `Max Players: ${oracleAccount.maxPlayers}`,
+      `Max Tickets: ${oracleAccount.maxTickets}`,
       `Oracle Buffer Time: ${oracleAccount.oracleBufferTime} seconds`,
       "",
       `Current Game Timeout: ${GAME_TIMEOUT} seconds (${GAME_TIMEOUT / 60} minutes)`
@@ -1356,14 +1356,14 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
     // Send join notification
     const joinerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
     const updatedGameAccount = await program.account.game.fetch(gamePda);
-    const playerCount = updatedGameAccount.playersCount;
-    const maxPlayers = updatedGameAccount.maxPlayers;
+    const ticketCount = updatedGameAccount.ticketsCount;
+    const maxTickets = updatedGameAccount.maxTickets;
     const gameTypeKeys = Object.keys(updatedGameAccount.gameType);
     const gameName = gameTypeKeys[0] || "game";
 
     const gameMessage = gameManager.getActiveGameMessage(game.game_address);
     await ctx.reply(
-      `🎮 @${joinerUsername} joined the ${gameName}! (${playerCount}/${maxPlayers} players)`,
+      `🎮 @${joinerUsername} joined the ${gameName}! (${ticketCount}/${maxTickets} tickets)`,
       {
         parse_mode: "HTML",
         reply_to_message_id: gameMessage?.messageId
@@ -1498,7 +1498,7 @@ setupAnchor().then(async () => {
     const gamePda = new PublicKey(game.game_address);
     const gameAccount = await program.account.game.fetch(gamePda);
 
-    console.log(`Processing expired game ${game.game_address} (${gameAccount.playersCount}/${gameAccount.maxPlayers})`);
+    console.log(`Processing expired game ${game.game_address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`);
 
     const result = await gameManager.handleExpiredGame(gamePda, gameAccount);
     if (result) {

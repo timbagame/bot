@@ -125,17 +125,13 @@ export class GameManager {
   // ================================
 
   /**
-   * Helper method to check if a player is in a game by checking PlayerParticipation account
+   * Helper method to check if a player is in a game by checking database records
+   * Since the contract no longer has PlayerParticipation accounts
    */
   private async isPlayerInGame(gamePda: PublicKey, playerPubkey: PublicKey): Promise<boolean> {
     try {
-      const playerParticipationPda = PDAManager.getPlayerParticipationPDA(
-        gamePda,
-        playerPubkey,
-        this.program.programId
-      );
-      await this.program.account.playerParticipation.fetch(playerParticipationPda);
-      return true;
+      const participants = this.gameDb.getGameParticipants(gamePda.toBase58());
+      return participants.includes(playerPubkey.toBase58());
     } catch (error) {
       return false;
     }
@@ -285,33 +281,33 @@ export class GameManager {
   private async getActiveGameStats(gamePda: PublicKey, amount: number, providedTotalPot?: number) {
     try {
       const gameAccount = await this.program.account.game.fetch(gamePda);
-      const currentPlayers = gameAccount.playersCount;
-      const maxPlayers = gameAccount.maxPlayers;
-      const minPlayers = gameAccount.minPlayers;
+      const currentTickets = gameAccount.ticketsCount;
+      const maxTickets = gameAccount.maxTickets;
+      const minTickets = gameAccount.minTickets;
 
-      const totalPot = providedTotalPot ?? (Number(gameAccount.totalAmount || 0) || (amount * currentPlayers));
+      const totalPot = providedTotalPot ?? (Number(gameAccount.totalAmount || 0) || (amount * currentTickets));
 
       const createdAt = Number(gameAccount.createdAt);
       const timeout = Number(gameAccount.timeout);
       const expiresAt = createdAt + timeout;
       const expirationInfo = await formatExpirationTime(expiresAt, this.wallet, "\n⏰ ");
 
-      return { currentPlayers, maxPlayers, minPlayers, totalPot, expirationInfo };
+      return { currentTickets, maxTickets, minTickets, totalPot, expirationInfo };
     } catch (error) {
       console.warn(`Warning: Could not fetch game account for ${gamePda.toBase58()}:`, error);
-      return { currentPlayers: 0, maxPlayers: 0, minPlayers: 0, totalPot: amount, expirationInfo: "" };
+      return { currentTickets: 0, maxTickets: 0, minTickets: 0, totalPot: amount, expirationInfo: "" };
     }
   }
 
   private async getCompletedGameStats(gamePda: PublicKey, amount: number, providedTotalPot?: number) {
     const participants = this.getGamePlayers(gamePda.toBase58());
-    const currentPlayers = participants.length;
-    const totalPot = providedTotalPot ?? (amount * currentPlayers);
+    const currentTickets = participants.length;
+    const totalPot = providedTotalPot ?? (amount * currentTickets);
 
     return {
-      currentPlayers,
-      maxPlayers: currentPlayers,
-      minPlayers: currentPlayers,
+      currentTickets,
+      maxTickets: currentTickets,
+      minTickets: currentTickets,
       totalPot,
       expirationInfo: ""
     };
@@ -328,7 +324,7 @@ export class GameManager {
     return `\nWinner: ${winnerUsername}`;
   }
 
-  private generateGameKeyboard(status: string, gameType: string, currentPlayers: number, gamePda: PublicKey) {
+  private generateGameKeyboard(status: string, gameType: string, currentTickets: number, gamePda: PublicKey) {
     if (status.toLowerCase() === "completed") return [];
 
     let joinButtonText: string;
@@ -350,8 +346,8 @@ export class GameManager {
     ]];
 
     // Add unjoin button with specific rules for different game types
-    if (currentPlayers > 0) {
-      const canUnjoin = !(gameType.toLowerCase() === "snowball" && currentPlayers >= 2);
+    if (currentTickets > 0) {
+      const canUnjoin = !(gameType.toLowerCase() === "snowball" && currentTickets >= 2);
       if (canUnjoin) {
         keyboard[0]?.push({ text: "❌ Unjoin", callback_data: `unjoin_${gamePda.toBase58()}` });
       }
@@ -378,20 +374,20 @@ export class GameManager {
       ? await this.getCompletedGameStats(gamePda, amount, providedTotalPot)
       : await this.getActiveGameStats(gamePda, amount, providedTotalPot);
 
-    const { currentPlayers, maxPlayers, minPlayers, totalPot, expirationInfo } = gameStats;
+    const { currentTickets, maxTickets, minTickets, totalPot, expirationInfo } = gameStats;
 
     const winnerInfo = await this.getWinnerInfo(ctx, status, winnerAddress);
 
     let messageText = `<b>${formatGameTypeWithEmoji(gameType)} • ${this.wallet.formatTokenBalance(amount, 9)} ${tokenTicker}</b>\n` +
-      `👤 Creator: ${creatorUsername} • ${currentPlayers}/${maxPlayers} players`;
+      `👤 Creator: ${creatorUsername} • ${currentTickets}/${maxTickets} tickets`;
 
     // Show current prize if different from base amount
-    if (currentPlayers > 0 || totalPot !== amount) {
+    if (currentTickets > 0 || totalPot !== amount) {
       messageText += `\n🏆 Current Prize: ${this.wallet.formatTokenBalance(totalPot, 9)} ${tokenTicker}`;
     }
 
     // Add list of players if any have joined
-    if (currentPlayers > 0 && status.toLowerCase() !== "completed") {
+    if (currentTickets > 0 && status.toLowerCase() !== "completed") {
       try {
         const participants = this.getGamePlayers(gamePda.toBase58());
         if (participants.length > 0) {
@@ -415,11 +411,11 @@ export class GameManager {
     // Add status and expiration info for active games
     if (status.toLowerCase() !== "completed") {
       let statusText: string;
-      if (currentPlayers < minPlayers) {
-        const neededForMin = minPlayers - currentPlayers;
+      if (currentTickets < minTickets) {
+        const neededForMin = minTickets - currentTickets;
         statusText = `${neededForMin} more until minimum`;
-      } else if (currentPlayers < maxPlayers) {
-        const neededForMax = maxPlayers - currentPlayers;
+      } else if (currentTickets < maxTickets) {
+        const neededForMax = maxTickets - currentTickets;
         statusText = `Minimum reached, ${neededForMax} more until full`;
       } else {
         statusText = "Full - starting soon!";
@@ -433,7 +429,7 @@ export class GameManager {
 
     messageText += winnerInfo;
 
-    const keyboard = this.generateGameKeyboard(status, gameType, currentPlayers, gamePda);
+    const keyboard = this.generateGameKeyboard(status, gameType, currentTickets, gamePda);
 
     return { messageText, keyboard };
   }
@@ -573,71 +569,16 @@ export class GameManager {
   // ================================
 
   /**
-   * Clean up PlayerParticipation accounts for all players in a game
-   * This should be called before closing a game to recover rent
+   * Cleanup is no longer needed in the new contract architecture
+   * This method is kept for compatibility but does nothing
    */
   private async cleanupAllPlayerParticipations(
     gamePda: PublicKey,
     gameAddress: string,
     skipWinner?: string
   ): Promise<{ cleaned: number; failed: number }> {
-    console.log(`🧹 Starting PlayerParticipation cleanup for game ${gameAddress}`);
-
-    const participants = this.getGamePlayers(gameAddress);
-    let cleanedCount = 0;
-    let failedCount = 0;
-
-    for (const telegramId of participants) {
-      try {
-        const playerPubkey = this.gameDb.getPlayerPublicKey(telegramId);
-        if (!playerPubkey) {
-          console.warn(`No public key found for participant ${telegramId} in game ${gameAddress}`);
-          continue;
-        }
-
-        const playerPubkeyObj = new PublicKey(playerPubkey);
-
-        // Skip the winner if specified - their PlayerParticipation account is already closed by completeGame instruction
-        if (skipWinner && playerPubkeyObj.equals(new PublicKey(skipWinner))) {
-          console.log(`⏭️ Skipping cleanup for winner ${playerPubkey.slice(0, 8)}...`);
-          continue;
-        }
-
-        // Get the player's keypair for signing the cleanup transaction
-        const playerKp = this.wallet.getKeyPair(BigInt(telegramId));
-
-        // Execute cleanup instruction
-        const cleanupInstruction = await this.program.methods
-          .cleanPlayerParticipation()
-          .accounts({
-            game: gamePda,
-            player: playerPubkeyObj,
-          })
-          .instruction();
-
-        const tx = await this.wallet.sendTransaction([cleanupInstruction], [playerKp]);
-        await this.wallet.confirmTransaction(tx);
-        cleanedCount++;
-
-        console.log(`🧹 Cleaned up PlayerParticipation for ${playerPubkey.slice(0, 8)}... - tx: ${tx.slice(0, 8)}...`);
-
-        // Small delay to avoid overwhelming the RPC
-        await new Promise(resolve => setTimeout(resolve, PLAYER_CLEANUP_DELAY_MS));
-
-      } catch (error: any) {
-        // Check if the account doesn't exist (already cleaned up) vs other errors
-        if (error.message?.includes('Account does not exist') || error.message?.includes('could not find account')) {
-          console.log(`✅ PlayerParticipation account already cleaned up for participant ${telegramId}`);
-          // Don't increment failed count for accounts that are already cleaned up
-        } else {
-          failedCount++;
-          console.error(`❌ Failed to cleanup PlayerParticipation for participant ${telegramId}:`, error.message || error);
-        }
-      }
-    }
-
-    console.log(`🧹 PlayerParticipation cleanup completed for game ${gameAddress}: ${cleanedCount} successful, ${failedCount} failed`);
-    return { cleaned: cleanedCount, failed: failedCount };
+    console.log(`ℹ️ PlayerParticipation cleanup not needed in new contract architecture for game ${gameAddress}`);
+    return { cleaned: 0, failed: 0 };
   }
 
   /**
@@ -661,7 +602,7 @@ export class GameManager {
     try {
       const gameAccount = await this.program.account.game.fetch(gamePda);
       const amount = Number(gameAccount.ticketAmount);
-      const currentPlayers = gameAccount.playersCount;
+      const currentTickets = gameAccount.ticketsCount;
 
       // Get token info from database
       const gameData = this.gameDb.getGame(gamePda.toBase58());
@@ -674,7 +615,7 @@ export class GameManager {
 
       const metadata = await this.wallet.getTokenMetadata(tokenMint);
 
-      const maxPlayers = gameAccount.maxPlayers;
+      const maxTickets = gameAccount.maxTickets;
       const creatorPubkey = gameAccount.creator.toString();
       const gameType = formatGameType(gameAccount.gameType);
 
@@ -694,7 +635,7 @@ export class GameManager {
       }
 
       return `${gameType} • ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}\n` +
-             `👤 Creator: ${creatorInfo} • ${currentPlayers}/${maxPlayers} players${expirationInfo}${winnerInfo}`;
+             `👤 Creator: ${creatorInfo} • ${currentTickets}/${maxTickets} tickets${expirationInfo}${winnerInfo}`;
     } catch (error: any) {
       return `Error fetching game: ${error.message}`;
     }
@@ -1040,16 +981,16 @@ export class GameManager {
 
   public async handleExpiredGame(gamePda: PublicKey, gameAccount: any): Promise<GameCancellationResult | false> {
     const gameType = this.getGameType(gameAccount);
-    const hasEnoughPlayers = gameAccount.playersCount >= gameAccount.minPlayers;
+    const hasEnoughTickets = gameAccount.ticketsCount >= gameAccount.minTickets;
 
     if (!this.isGameExpiredWithBuffer(gameAccount)) {
       return false;
     }
 
-    console.log(`🔄 Processing expired ${gameType} game ${gamePda.toBase58()} (${gameAccount.playersCount}/${gameAccount.maxPlayers})`);
+    console.log(`🔄 Processing expired ${gameType} game ${gamePda.toBase58()} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`);
 
     // For giveaways and expired games with enough players, complete the game
-    if (gameType === "giveaway" || hasEnoughPlayers) {
+    if (gameType === "giveaway" || hasEnoughTickets) {
       try {
         const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
         if (result.success) {
@@ -1129,7 +1070,7 @@ export class GameManager {
         return { success: false, error: "You have already joined this game!" };
       }
 
-      if (gameAccount.playersCount >= gameAccount.maxPlayers) {
+      if (gameAccount.ticketsCount >= gameAccount.maxTickets) {
         return { success: false, error: "This game is already full!" };
       }
 
@@ -1207,7 +1148,7 @@ export class GameManager {
       const gameAccount = await this.program.account.game.fetch(gamePda);
 
       // Snowball-specific restriction
-      if (gameData.game_type === "snowball" && gameAccount.playersCount > 1) {
+      if (gameData.game_type === "snowball" && gameAccount.ticketsCount > 1) {
         return { success: false, error: "❄️ Cannot leave snowball games once there are 2+ players!" };
       }
 
@@ -1293,26 +1234,17 @@ export class GameManager {
       throw new Error('No participants found in game');
     }
 
-    const lastPlayerTelegramId = participantIds[participantIds.length - 1];
+    // Note: The new contract architecture doesn't require last player tracking
 
-    if (!lastPlayerTelegramId) {
-      throw new Error('Last player telegram ID not found');
-    }
-
-    const lastPlayerPublicKey = this.gameDb.getPlayerPublicKey(lastPlayerTelegramId);
-
-    if (!lastPlayerPublicKey) {
-      throw new Error('Could not find last player public key');
-    }
-
-    const lastPlayerPubkey = new PublicKey(lastPlayerPublicKey);
-
+    // For the new contract architecture, we need to provide the ticket index
+    // For now, we'll use 0 as the ticket index (this may need to be dynamic based on game state)
+    const ticketIndex = 0;
+    
     const unjoinInstruction = await this.program.methods
-      .unjoinGame()
+      .unjoinGame(ticketIndex)
       .accounts({
         game: gamePda,
         player: playerPubkey,
-        lastPlayer: lastPlayerPubkey,
       })
       .instruction();
 
@@ -1359,7 +1291,7 @@ export class GameManager {
         .accounts({
           game: gamePda,
           player: playerKp.publicKey,
-          authority: adminKp.publicKey,
+          oracleOperator: adminKp.publicKey,
         })
         .instruction();
 
@@ -1522,7 +1454,7 @@ export class GameManager {
 
         // Check if this game is in our database
         if (!this.gameDb.gameExists(gameAddress)) {
-          console.log(`🔍 Found orphaned game: ${gameAddress} (${gameAccount.playersCount}/${gameAccount.maxPlayers})`);
+          console.log(`🔍 Found orphaned game: ${gameAddress} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`);
           orphanedGames.push({ address: gameAddress, account: gameAccount });
         }
       }
@@ -1544,7 +1476,7 @@ export class GameManager {
       }
 
       const gameType = this.getGameType(gameAccount);
-      console.log(`🔄 Processing expired ${gameType} game ${address} (${gameAccount.playersCount}/${gameAccount.maxPlayers})`);
+      console.log(`🔄 Processing expired ${gameType} game ${address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`);
 
       return gameType === "giveaway"
         ? await this.handleExpiredGiveaway(gamePda, gameAccount, address)
@@ -1582,7 +1514,7 @@ export class GameManager {
     const gameType = this.getGameType(gameAccount);
 
     if (this.isGameExpiredWithBuffer(gameAccount)) {
-      console.log(`🔄 Processing expired ${gameType} game ${address} (${gameAccount.playersCount}/${gameAccount.maxPlayers})`);
+      console.log(`🔄 Processing expired ${gameType} game ${address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`);
 
       const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
       if (result.success) {
