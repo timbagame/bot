@@ -7,7 +7,7 @@ import { GameDatabase } from "./game-database";
 import { OracleClient } from "./oracle";
 import { PDAManager } from "./pda";
 import { formatUserFriendlyError } from "./errors";
-import { DEFAULT_NULL_ADDRESS, ADDRESS_DISPLAY_LENGTH, GAME_INFO_LIMIT, GAME_EXPIRATION_BUFFER_TIME, PLAYER_CLEANUP_DELAY_MS } from "./constants";
+import { DEFAULT_NULL_ADDRESS, ADDRESS_DISPLAY_LENGTH, GAME_INFO_LIMIT, GAME_EXPIRATION_BUFFER_TIME } from "./constants";
 import type {
   GameMessage,
   GameCancellationResult,
@@ -540,7 +540,7 @@ export class GameManager {
       }
 
       const creatorUsername = await this.getGameCreatorUsername(ctx, gameAddress);
-      const gameType = gameData.game_type ? 
+      const gameType = gameData.game_type ?
         gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1) : "Game";
 
       await this.updateGameMessage(
@@ -563,40 +563,6 @@ export class GameManager {
   // ================================
   // GAME OPERATIONS
   // ================================
-
-  // ================================
-  // CLEANUP UTILITIES
-  // ================================
-
-  /**
-   * Cleanup is no longer needed in the new contract architecture
-   * This method is kept for compatibility but does nothing
-   */
-  private async cleanupAllPlayerParticipations(
-    gamePda: PublicKey,
-    gameAddress: string,
-    skipWinner?: string
-  ): Promise<{ cleaned: number; failed: number }> {
-    console.log(`ℹ️ PlayerParticipation cleanup not needed in new contract architecture for game ${gameAddress}`);
-    return { cleaned: 0, failed: 0 };
-  }
-
-  /**
-   * Public method to clean up PlayerParticipation accounts for completed games
-   * This should be called after a game is completed to recover rent
-   */
-  public async cleanupCompletedGameParticipations(
-    gameAddress: string,
-    winnerAddress: string
-  ): Promise<{ cleaned: number; failed: number }> {
-    try {
-      const gamePda = new PublicKey(gameAddress);
-      return await this.cleanupAllPlayerParticipations(gamePda, gameAddress, winnerAddress);
-    } catch (error) {
-      console.error(`❌ Error during completed game PlayerParticipation cleanup for ${gameAddress}:`, error);
-      return { cleaned: 0, failed: 0 };
-    }
-  }
 
   public async getGameInfo(ctx: Context, gamePda: PublicKey): Promise<string> {
     try {
@@ -724,7 +690,7 @@ export class GameManager {
     telegramId: bigint,
     chatId?: number
   ): Promise<{ success: boolean; error?: string; gameAddress?: string; autoJoinResult?: { success: boolean; error?: string } }> {
-    
+
     // Validate that SOL is not used for games
     if (parsedAmount.isSol) {
       return {
@@ -879,8 +845,8 @@ export class GameManager {
 
     } catch (joinError: any) {
       const errorMsg = logAndFormatError(joinError, `auto-joining creator to ${gameType} game`);
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: `⚠️ Game created successfully, but failed to auto-join creator!\n\nPlease manually join the game using the "🎮 Join" button.\n\nError: ${errorMsg}`
       };
     }
@@ -1039,7 +1005,7 @@ export class GameManager {
     try {
       const gamePda = new PublicKey(gameAddress);
       const playerKp = this.wallet.getKeyPair(telegramId);
-      
+
       // Get game data and validate
       const gameData = this.gameDb.getGame(gameAddress);
       if (!gameData) {
@@ -1057,10 +1023,10 @@ export class GameManager {
 
       // Fetch blockchain game state
       const gameAccount = await this.program.account.game.fetch(gamePda);
-      
+
       // Check if player already in game
       const isInGame = await this.isPlayerInGame(gamePda, playerKp.publicKey);
-      
+
       // Handle special case: rolling for snowball/dumbflip games
       if (isInGame && (gameData.game_type === "snowball" || gameData.game_type === "dumbflip")) {
         return { success: true, isRoll: true };
@@ -1086,9 +1052,9 @@ export class GameManager {
         const totalBalance = tokenBalance + gameBalance;
         if (totalBalance < gameAmount) {
           const metadata = await this.wallet.getTokenMetadata(gameData.token_mint);
-          return { 
-            success: false, 
-            error: `Insufficient balance. You have ${this.wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${gameData.token_ticker} but need ${this.wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${gameData.token_ticker}` 
+          return {
+            success: false,
+            error: `Insufficient balance. You have ${this.wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${gameData.token_ticker} but need ${this.wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${gameData.token_ticker}`
           };
         }
       }
@@ -1131,13 +1097,13 @@ export class GameManager {
    * Enhanced unjoin game method with all validation
    */
   public async unjoinGame(
-    gameAddress: string, 
+    gameAddress: string,
     telegramId: bigint
   ): Promise<{ success: boolean; error?: string }> {
     try {
       const gamePda = new PublicKey(gameAddress);
       const playerKp = this.wallet.getKeyPair(telegramId);
-      
+
       // Get game data for validation
       const gameData = this.gameDb.getGame(gameAddress);
       if (!gameData) {
@@ -1180,21 +1146,7 @@ export class GameManager {
       const gameAddress = gamePda.toBase58();
       console.log(`Attempting to close ${gameType} game ${gameAddress} with cleanup`);
 
-      // Step 1: Clean up all PlayerParticipation accounts first to recover rent
-      const participants = this.getGamePlayers(gameAddress);
-      if (participants.length > 0) {
-        console.log(`🧹 Cleaning up PlayerParticipation accounts for ${participants.length} players before closing game`);
-
-        try {
-          const cleanupResult = await this.cleanupAllPlayerParticipations(gamePda, gameAddress);
-          console.log(`🧹 PlayerParticipation cleanup result: ${cleanupResult.cleaned} cleaned, ${cleanupResult.failed} failed`);
-
-          // Continue even if some cleanups failed - we'll still try to close the game
-        } catch (error) {
-          console.error(`❌ Error during PlayerParticipation cleanup for ${gameType} ${gameAddress}:`, error);
-          // Continue with game closure even if cleanup fails
-        }
-      }
+      // Note: PlayerParticipation cleanup no longer needed in new contract architecture
 
       // Step 2: Close the game using creator's key to recover remaining rent
       const creatorPubkey = gameAccount.creator.toBase58();
@@ -1239,7 +1191,7 @@ export class GameManager {
     // For the new contract architecture, we need to provide the ticket index
     // For now, we'll use 0 as the ticket index (this may need to be dynamic based on game state)
     const ticketIndex = 0;
-    
+
     const unjoinInstruction = await this.program.methods
       .unjoinGame(ticketIndex)
       .accounts({
@@ -1636,19 +1588,7 @@ export class GameManager {
     try {
       console.log(`🎁 Closing expired ${gameType} ${address} with cleanup`);
 
-      // Step 1: Clean up PlayerParticipation accounts first
-      const participants = this.getGamePlayers(address);
-      if (participants.length > 0) {
-        console.log(`🧹 Cleaning up PlayerParticipation accounts for ${participants.length} players before closing`);
-
-        try {
-          const cleanupResult = await this.cleanupAllPlayerParticipations(gamePda, address);
-          console.log(`🧹 PlayerParticipation cleanup result: ${cleanupResult.cleaned} cleaned, ${cleanupResult.failed} failed`);
-        } catch (error) {
-          console.error(`❌ Error during PlayerParticipation cleanup for expired ${gameType} ${address}:`, error);
-          // Continue with game closure even if cleanup fails
-        }
-      }
+      // Note: PlayerParticipation cleanup no longer needed in new contract architecture
 
       // Step 2: Close the game
       const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));

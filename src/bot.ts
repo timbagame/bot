@@ -1455,13 +1455,7 @@ setupAnchor().then(async () => {
         console.error("Error sending completion notification:", error);
       }
 
-      // Cleanup PlayerParticipation accounts
-      try {
-        console.log(`🧹 Initiating PlayerParticipation cleanup for completed game ${gameAddress}`);
-        await gameManager.cleanupCompletedGameParticipations(gameAddress, winnerAddress);
-      } catch (error) {
-        console.error(`❌ Error during PlayerParticipation cleanup for game ${gameAddress}:`, error);
-      }
+      // Note: PlayerParticipation cleanup no longer needed in new contract architecture
 
       console.log(`✅ Successfully processed GameCompleted event for game ${gameAddress}`);
     } catch (error) {
