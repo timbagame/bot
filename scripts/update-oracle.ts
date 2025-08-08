@@ -46,6 +46,7 @@ const updateOracle = async () => {
       console.log(`- Max Timeout: ${currentOracle.maxTimeout} seconds (${Math.round(currentOracle.maxTimeout / 60)} minutes)`);
       console.log(`- Max Tickets: ${currentOracle.maxTickets}`);
       console.log(`- Oracle Buffer Time: ${currentOracle.oracleBufferTime} seconds`);
+    console.log(`- Filter Cleanup Buffer: ${currentOracle.filterCleanupBuffer} seconds`);
 
       // Verify operator
       if (!currentOracle.operator.equals(adminKeypair.publicKey)) {
@@ -58,11 +59,12 @@ const updateOracle = async () => {
 
     // New configuration with correct values
     const newConfig = {
-      feePercentage: 1,        // 1% fee
-      oracleBufferTime: 300,    // 5 minute buffer
-      maxTickets: 50000,         // 50.000 max tickets
-      maxTimeout: 86400,        // 24 hours max timeout
-      minTimeout: 60          // 1 minute min timeout
+      feePercentage: 1,          // 1% fee
+      oracleBufferTime: 300,     // 5 minute buffer
+      maxTickets: 50000,         // 50,000 max tickets
+      maxTimeout: 86400,          // 24 hours max timeout
+      minTimeout: 60,            // 1 minute min timeout
+      filterCleanupBuffer: 86400,  // extra buffer for bloom-filter cleanup
     };
 
     console.log("\nNew Oracle Configuration:");
@@ -71,6 +73,7 @@ const updateOracle = async () => {
     console.log(`- Max Timeout: ${newConfig.maxTimeout} seconds (${Math.round(newConfig.maxTimeout / 60)} minutes)`);
     console.log(`- Max Tickets: ${newConfig.maxTickets}`);
     console.log(`- Oracle Buffer Time: ${newConfig.oracleBufferTime} seconds`);
+    console.log(`- Filter Cleanup Buffer: ${newConfig.filterCleanupBuffer} seconds`);
 
     console.log("\n🔄 Updating Oracle...");
 
@@ -96,6 +99,7 @@ const updateOracle = async () => {
     console.log(`- Max Timeout: ${updatedOracle.maxTimeout} seconds (${Math.round(updatedOracle.maxTimeout / 60)} minutes)`);
     console.log(`- Max Tickets: ${updatedOracle.maxTickets}`);
     console.log(`- Oracle Buffer Time: ${updatedOracle.oracleBufferTime} seconds`);
+    console.log(`- Filter Cleanup Buffer: ${updatedOracle.filterCleanupBuffer} seconds`);
 
   } catch (error) {
     console.error("❌ Error updating Oracle:", error);

@@ -51,11 +51,12 @@ const initializeOracle = async (program: anchor.Program<Coinflip>) => {
 
     // Initialize Oracle
     const oracleConfig = {
-      feePercentage: 1,        // 1% fee
-      oracleBufferTime: 300,   // 5 minute buffer
-      maxTickets: 50000,         // 50.000 max tickets
+      feePercentage: 1,         // 1% fee
+      oracleBufferTime: 300,    // 5 minute buffer before cancellation is allowed
+      maxTickets: 50000,        // 50,000 max tickets
       maxTimeout: 86400,        // 24 hours max timeout
-      minTimeout: 60          // 1 minute min timeout
+      minTimeout: 60,           // 1 minute min timeout
+      filterCleanupBuffer: 86400, // extra buffer (seconds) for bloom-filter cleanup after buffer window
     };
 
     const oracleInstruction = await program.methods
