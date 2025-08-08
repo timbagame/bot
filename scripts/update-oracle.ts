@@ -60,9 +60,9 @@ const updateOracle = async () => {
     const newConfig = {
       feePercentage: 1,        // 1% fee
       oracleBufferTime: 300,    // 5 minute buffer
-      maxTickets: 100,         // 100 max tickets
-      maxTimeout: 7200,        // 2 hours max timeout
-      minTimeout: 300          // 5 minutes min timeout
+      maxTickets: 50000,         // 50.000 max tickets
+      maxTimeout: 86400,        // 24 hours max timeout
+      minTimeout: 60          // 1 minute min timeout
     };
 
     console.log("\nNew Oracle Configuration:");

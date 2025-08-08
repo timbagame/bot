@@ -53,7 +53,7 @@ const initializeOracle = async (program: anchor.Program<Coinflip>) => {
     const oracleConfig = {
       feePercentage: 1,        // 1% fee
       oracleBufferTime: 300,   // 5 minute buffer
-      maxTickets: 1000000,         // 1.000.000 max tickets
+      maxTickets: 50000,         // 50.000 max tickets
       maxTimeout: 86400,        // 24 hours max timeout
       minTimeout: 60          // 1 minute min timeout
     };
