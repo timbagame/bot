@@ -10,7 +10,7 @@ const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
 // Initialize Anchor with a wallet for admin operations
 const initializeAnchorProvider = async () => {
   // Get admin keypair from JSON file
-  const adminKeypair = await wallet.getAdminKeypair();
+  const adminKeypair = wallet.getAdminKeypair();
 
   // Create a wallet adapter for Anchor
   const adminWallet = new anchor.Wallet(adminKeypair);
