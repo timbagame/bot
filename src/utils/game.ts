@@ -626,7 +626,7 @@ export class GameManager {
 
       const lines = [
         `${gameTypeText} • ${this.wallet.formatTokenBalance(amount, 9)} ${gameData.token_ticker || "WSOL"}`,
-        `👤 Creator: @${creatorUsername} • ${playerCount} players`
+        `👤 Creator: @${creatorUsername} • ${playerCount} tickets`
       ];
 
       if (winnerLine) {
@@ -684,8 +684,8 @@ export class GameManager {
   public async createGame(
     gameType: GameType,
     parsedAmount: { amount: number; tokenMint: string; tokenTicker: string; isSol: boolean },
-    maxPlayers: number,
-    minPlayers: number,
+    maxTickets: number,
+    minTickets: number,
     timeout: number,
     telegramId: bigint,
     chatId?: number
@@ -745,8 +745,8 @@ export class GameManager {
         // u64 must be BN
         amount: new anchor.BN(amount),
         // u32 are fine as numbers, but field names must match IDL
-        maxTickets: maxPlayers,
-        minTickets: minPlayers,
+        maxTickets: maxTickets,
+        minTickets: minTickets,
         // u64 must be BN
         timeout: new anchor.BN(timeout),
         isPrivate: true
@@ -777,7 +777,7 @@ export class GameManager {
       }
 
       // Save game
-      this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker, maxPlayers, minPlayers, chatId);
+      this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker, maxTickets, minTickets, chatId);
 
       // Auto-join logic based on game type
       let autoJoinResult: { success: boolean; error?: string } | undefined;
@@ -915,7 +915,7 @@ export class GameManager {
     try {
       const participants = this.gameDb.getGameParticipants(gameAddress);
       if (participants.length === 0) {
-        return "\n🎯 Expected winner: No players yet";
+        return "\n🎯 Expected winner: No tickets yet";
       }
 
       const expectedWinner = await this.getExpectedWinner(gameAddress, participants);
@@ -1118,7 +1118,7 @@ export class GameManager {
 
       // Snowball-specific restriction
       if (gameData.game_type === "snowball" && gameAccount.ticketsCount > 1) {
-        return { success: false, error: "❄️ Cannot leave snowball games once there are 2+ players!" };
+        return { success: false, error: "❄️ Cannot leave snowball games once there are 2+ tickets!" };
       }
 
       // Check if player is actually in the game

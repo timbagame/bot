@@ -12,10 +12,10 @@ export const TOKEN_BALANCE_MAX_PRECISION = 6;
 // ================================
 
 export const GAME_TIMEOUT = 3600; // 1 hour
-export const COINFLIP_MAX_PLAYERS = 2;
-export const GIVEAWAY_MAX_PLAYERS = 5;
+export const COINFLIP_MAX_TICKETS = 2;
+export const GIVEAWAY_MAX_TICKETS = 5;
 export const SNOWBALL_TIMEOUT = 300; // 5 minutes
-export const SNOWBALL_MAX_PLAYERS = 5;
+export const SNOWBALL_MAX_TICKETS = 5;
 export const MAX_RETRIES = 3;
 export const CONFIRMATION_TIMEOUT_MS = 45000; // Increased to 45 seconds
 

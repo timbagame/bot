@@ -14,10 +14,10 @@ import { formatUserFriendlyError } from "./utils/errors";
 import {
   LAMPORTS_PER_SOL,
   GAME_TIMEOUT,
-  COINFLIP_MAX_PLAYERS,
-  GIVEAWAY_MAX_PLAYERS,
+  COINFLIP_MAX_TICKETS,
+  GIVEAWAY_MAX_TICKETS,
   SNOWBALL_TIMEOUT,
-  SNOWBALL_MAX_PLAYERS,
+  SNOWBALL_MAX_TICKETS,
   EXPIRED_GAMES_CHECK_INTERVAL_MS,
   GAME_EXPIRATION_BUFFER_TIME,
   DEFAULT_TOKEN_MINT,
@@ -509,15 +509,15 @@ bot.command(["start", "balance"], async (ctx: Context) => {
 const createGameCommand = async (
   ctx: Context,
   gameType: "coinflip" | "giveaway" | "dumbflip" | "snowball",
-  defaultMaxPlayers: number,
-  minPlayers: number,
+  defaultMaxTickets: number,
+  minTickets: number,
   timeout: number,
   usageExample: string
 ) => {
   if (!ctx.from) return;
 
   if (ctx.chat?.type === "private") {
-    return replyToMessage(ctx, `🚫 ${gameType.charAt(0).toUpperCase() + gameType.slice(1)} games cannot be created in private chats since other players can't join. Please use this command in a group or channel where other players can participate!`);
+    return replyToMessage(ctx, `🚫 ${gameType.charAt(0).toUpperCase() + gameType.slice(1)} games cannot be created in private chats since other participants can't join. Please use this command in a group or channel where others can participate!`);
   }
 
   const args = ctx.message?.text?.split(" ");
@@ -532,15 +532,15 @@ const createGameCommand = async (
   }
 
   const tokenSpecified = parsed.data!.tokenWasSpecified;
-  const maxPlayersIndex = tokenSpecified ? 3 : 2;
-  const maxPlayers = parseInt(args?.[maxPlayersIndex] || defaultMaxPlayers.toString()) || defaultMaxPlayers;
+  const maxTicketsIndex = tokenSpecified ? 3 : 2;
+  const maxTickets = parseInt(args?.[maxTicketsIndex] || defaultMaxTickets.toString()) || defaultMaxTickets;
 
   // Validate context parameters
   if (!ctx.from?.id) {
     return replyToMessage(ctx, "Unable to identify user. Please try again.");
   }
 
-  const result = await gameManager.createGame(gameType, parsed.data!, maxPlayers, minPlayers, timeout, BigInt(ctx.from.id), ctx.chat?.id);
+  const result = await gameManager.createGame(gameType, parsed.data!, maxTickets, minTickets, timeout, BigInt(ctx.from.id), ctx.chat?.id);
 
   if (!result.success) {
     return replyToMessage(ctx, result.error || "Failed to create game");
@@ -589,10 +589,10 @@ bot.command(["coinflip", "cf"], async (ctx) => {
   await createGameCommand(
     ctx,
     "coinflip",
-    COINFLIP_MAX_PLAYERS,
+    COINFLIP_MAX_TICKETS,
     2,
     GAME_TIMEOUT,
-    "Usage: /coinflip &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt;\nExample: /coinflip 10 2 or /coinflip 10 TIMBA 2"
+    "Usage: /coinflip &lt;amount&gt; [TOKEN] &lt;maxTickets&gt;\nExample: /coinflip 10 2 or /coinflip 10 TIMBA 2"
   );
 });
 
@@ -600,10 +600,10 @@ bot.command(["giveaway", "ga"], async (ctx) => {
   await createGameCommand(
     ctx,
     "giveaway",
-    GIVEAWAY_MAX_PLAYERS,
+    GIVEAWAY_MAX_TICKETS,
     1,
     GAME_TIMEOUT,
-    "Usage: /giveaway &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt;\nExample: /giveaway 100 5 or /giveaway 100 TIMBA 5"
+    "Usage: /giveaway &lt;amount&gt; [TOKEN] &lt;maxTickets&gt;\nExample: /giveaway 100 5 or /giveaway 100 TIMBA 5"
   );
 });
 
@@ -611,10 +611,10 @@ bot.command(["dumbflip", "df"], async (ctx) => {
   await createGameCommand(
     ctx,
     "dumbflip",
-    COINFLIP_MAX_PLAYERS,
+    COINFLIP_MAX_TICKETS,
     2,
     GAME_TIMEOUT,
-    "Usage: /dumbflip &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt;\nExample: /dumbflip 10 2 or /dumbflip 10 TIMBA 2"
+    "Usage: /dumbflip &lt;amount&gt; [TOKEN] &lt;maxTickets&gt;\nExample: /dumbflip 10 2 or /dumbflip 10 TIMBA 2"
   );
 });
 
@@ -622,10 +622,10 @@ bot.command(["snowball", "sb"], async (ctx) => {
   await createGameCommand(
     ctx,
     "snowball",
-    SNOWBALL_MAX_PLAYERS,
+    SNOWBALL_MAX_TICKETS,
     2,
     SNOWBALL_TIMEOUT,
-    "Usage: /snowball &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt;\nExample: /snowball 100 5 or /snowball 100 TIMBA 5"
+    "Usage: /snowball &lt;amount&gt; [TOKEN] &lt;maxTickets&gt;\nExample: /snowball 100 5 or /snowball 100 TIMBA 5"
   );
 });
 
@@ -890,14 +890,14 @@ bot.command("help", async (ctx: Context) => {
     "/privatekey, /pk - Get your wallet private key (private chat only)",
     "",
     "<b>🎮 Game Commands:</b>",
-    "/coinflip &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Create a new coinflip game",
-    "/cf &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Shorthand for coinflip command",
-    "/dumbflip &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Create a dumbflip game (shows expected winner, can roll)",
-    "/df &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Shorthand for dumbflip command",
-    "/giveaway &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Create a new giveaway",
-    "/ga &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Shorthand for giveaway command",
-    "/snowball &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Create a snowball game (growing pot, can roll)",
-    "/sb &lt;amount&gt; [TOKEN] &lt;maxPlayers&gt; - Shorthand for snowball command",
+    "/coinflip &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Create a new coinflip game",
+    "/cf &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Shorthand for coinflip command",
+    "/dumbflip &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Create a dumbflip game (shows expected winner, can roll)",
+    "/df &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Shorthand for dumbflip command",
+    "/giveaway &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Create a new giveaway",
+    "/ga &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Shorthand for giveaway command",
+    "/snowball &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Create a snowball game (growing pot, can roll)",
+    "/sb &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Shorthand for snowball command",
     "/active - Show your active games",
     "/games - Show your recent games",
     "",
