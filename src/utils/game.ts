@@ -1012,8 +1012,13 @@ export class GameManager {
             };
           }
         }
-      } catch (error) {
-        console.error("Post-cleanup close attempt failed:", error);
+      } catch (error: any) {
+        // If account doesn't exist, the game was already successfully closed
+        if (error.message?.includes('Account does not exist')) {
+          console.log("✅ Game account already closed successfully");
+        } else {
+          console.error("Post-cleanup close attempt failed:", error);
+        }
       }
       return false;
     }
