@@ -150,7 +150,7 @@ const getSequentializationKey = (ctx: Context): string | string[] | undefined =>
 
   if (ctx.callbackQuery?.data) {
     const callbackData = ctx.callbackQuery.data;
-    if (callbackData.startsWith("join_") || callbackData.startsWith("unjoin_") || callbackData.startsWith("refresh_")) {
+    if (callbackData.startsWith("join_") || callbackData.startsWith("refresh_")) {
       const gameAddress = callbackData.split("_")[1];
       return [userId, `game_${gameAddress}`];
     }
@@ -1168,23 +1168,6 @@ bot.command("scan", async (ctx: Context) => {
 // CALLBACK QUERY HANDLING
 // ================================
 
-const handleUnjoinGameCallback = async (ctx: any, gameAddress: string, telegramId: bigint): Promise<void> => {
-  try {
-    const result = await gameManager.unjoinGame(gameAddress, telegramId);
-    
-    if (result.success) {
-      // Update game message after successful unjoin
-      await gameManager.updateGameMessageFromData(ctx, gameAddress, "Active");
-      await safeAnswerCallbackQuery(ctx, "Successfully unjoined the game!");
-    } else {
-      await safeAnswerCallbackQuery(ctx, result.error || "Failed to unjoin game");
-    }
-  } catch (error: any) {
-    const userFriendlyError = formatUserFriendlyError(error, wallet);
-    await safeAnswerCallbackQuery(ctx, userFriendlyError.substring(0, 180));
-  }
-};
-
 const handleRefreshGameCallback = async (ctx: any, gamePda: PublicKey, gameAddress: string): Promise<void> => {
   const gameData = gameDb.getGame(gameAddress);
   const validation = validateGameTokenData(gameData);
@@ -1280,9 +1263,6 @@ bot.on("callback_query", async (ctx) => {
     switch (action) {
       case "join":
         await handleJoinGame(ctx, gamePda, playerKp, telegramId, game);
-        break;
-      case "unjoin":
-        await handleUnjoinGameCallback(ctx, gameAddress, telegramId);
         break;
       case "refresh":
         await handleRefreshGameCallback(ctx, gamePda, gameAddress);
