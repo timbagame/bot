@@ -59,12 +59,16 @@ const updateOracle = async () => {
 
     // New configuration with correct values
     const newConfig = {
-      feePercentage: 1,          // 1% fee
-      oracleBufferTime: 300,     // 5 minute buffer
-      maxTickets: 50000,         // 50,000 max tickets
-      maxTimeout: 86400,          // 24 hours max timeout
-      minTimeout: 60,            // 1 minute min timeout
-      filterCleanupBuffer: 86400,  // extra buffer for bloom-filter cleanup
+      // u8
+      feePercentage: 1,                 // 1% fee
+      // u64 fields must be BN
+      oracleBufferTime: new anchor.BN(300),
+      // u32
+      maxTickets: 50000,                // 50,000 max tickets
+      // u64 fields must be BN
+      maxTimeout: new anchor.BN(86400), // 24 hours
+      minTimeout: new anchor.BN(60),    // 1 minute
+      filterCleanupBuffer: new anchor.BN(86400),
     };
 
     console.log("\nNew Oracle Configuration:");
