@@ -324,7 +324,7 @@ export class GameManager {
     return `\nWinner: ${winnerUsername}`;
   }
 
-  private generateGameKeyboard(status: string, gameType: string, currentTickets: number, gamePda: PublicKey) {
+  private generateGameKeyboard(status: string, gameType: string, gamePda: PublicKey) {
     if (status.toLowerCase() === "completed") return [];
 
     let joinButtonText: string;
@@ -421,7 +421,7 @@ export class GameManager {
 
     messageText += winnerInfo;
 
-    const keyboard = this.generateGameKeyboard(status, gameType, currentTickets, gamePda);
+    const keyboard = this.generateGameKeyboard(status, gameType, gamePda);
 
     return { messageText, keyboard };
   }
