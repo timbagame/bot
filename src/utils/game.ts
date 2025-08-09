@@ -345,14 +345,6 @@ export class GameManager {
       { text: "🔄 Refresh", callback_data: `refresh_${gamePda.toBase58()}` }
     ]];
 
-    // Add unjoin button with specific rules for different game types
-    if (currentTickets > 0) {
-      const canUnjoin = !(gameType.toLowerCase() === "snowball" && currentTickets >= 2);
-      if (canUnjoin) {
-        keyboard[0]?.push({ text: "❌ Unjoin", callback_data: `unjoin_${gamePda.toBase58()}` });
-      }
-    }
-
     return keyboard;
   }
 
