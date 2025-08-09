@@ -742,10 +742,13 @@ export class GameManager {
       // Create game
       const gameConfig = {
         gameType: { [gameType]: {} },
+        // u64 must be BN
         amount: new anchor.BN(amount),
-        maxPlayers,
-        minPlayers,
-        timeout,
+        // u32 are fine as numbers, but field names must match IDL
+        maxTickets: maxPlayers,
+        minTickets: minPlayers,
+        // u64 must be BN
+        timeout: new anchor.BN(timeout),
         isPrivate: true
       };
 
