@@ -942,16 +942,40 @@ export class GameManager {
 
   public async handleExpiredGame(gamePda: PublicKey, gameAccount: any): Promise<GameCancellationResult | false> {
     const gameType = this.getGameType(gameAccount);
-    const hasEnoughTickets = gameAccount.ticketsCount >= gameAccount.minTickets;
+    const ticketsCount = Number(gameAccount.ticketsCount || 0);
+    const hasEnoughTickets = ticketsCount >= Number(gameAccount.minTickets || 0);
 
     if (!this.isGameExpiredWithBuffer(gameAccount)) {
       return false;
     }
 
-    console.log(`🔄 Processing expired ${gameType} game ${gamePda.toBase58()} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`);
+    console.log(`🔄 Processing expired ${gameType} game ${gamePda.toBase58()} (${ticketsCount}/${gameAccount.maxTickets})`);
 
-    // For giveaways and expired games with enough players, complete the game
-    if (gameType === "giveaway" || hasEnoughTickets) {
+    // Giveaway: close only if no participants; otherwise wait for oracle completion
+    if (gameType === "giveaway") {
+      if (ticketsCount === 0) {
+        try {
+          const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
+          if (result.success) {
+            return {
+              cancelled: true,
+              amount: Number(gameAccount.ticketAmount),
+              creator: gameAccount.creator.toBase58(),
+              tx: result.tx!
+            };
+          }
+        } catch (error) {
+          console.error(`Error closing expired giveaway:`, error);
+        }
+      } else {
+        console.log("⏳ Giveaway has participants; waiting for oracle to complete.");
+      }
+      return false;
+    }
+
+    // Competitive games (coinflip/dumbflip/snowball):
+    // If there are no participants, we can close directly.
+    if (ticketsCount === 0) {
       try {
         const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
         if (result.success) {
@@ -963,25 +987,39 @@ export class GameManager {
           };
         }
       } catch (error) {
-        console.error(`Error completing expired ${gameType} game:`, error);
+        console.error(`Error closing expired ${gameType} with zero tickets:`, error);
       }
+      return false;
     }
 
-    // For other expired games, cancel and refund
-    try {
-      const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
-      if (result.success) {
-        return {
-          cancelled: true,
-          amount: Number(gameAccount.ticketAmount),
-          creator: gameAccount.creator.toBase58(),
-          tx: result.tx!
-        };
+    // If there are participants but not enough to complete, try to unjoin them.
+    if (!hasEnoughTickets) {
+      const didCleanup = await this.handleExpiredCoinflip(gamePda, gameAccount, gamePda.toBase58());
+      if (!didCleanup) return false;
+
+      // After cleanup, check if game can now be closed
+      try {
+        const refreshed = await this.program.account.game.fetch(gamePda);
+        const remaining = Number(refreshed.ticketsCount || 0);
+        if (remaining === 0) {
+          const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
+          if (result.success) {
+            return {
+              cancelled: true,
+              amount: Number(refreshed.ticketAmount),
+              creator: refreshed.creator.toBase58(),
+              tx: result.tx!
+            };
+          }
+        }
+      } catch (error) {
+        console.error("Post-cleanup close attempt failed:", error);
       }
-    } catch (error) {
-      console.error(`Error cancelling expired game:`, error);
+      return false;
     }
 
+    // Has enough tickets -> wait for oracle completion, do not attempt close
+    console.log("⏳ Game has minimum tickets; waiting for oracle to complete.");
     return false;
   }
 
