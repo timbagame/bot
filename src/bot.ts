@@ -247,7 +247,6 @@ const validateAndProcessTransaction = async (
   const playerData = await getPlayerData(telegramId);
   const metadata = await getDefaultTokenMetadata();
 
-
   // Validate balance
   const totalBalance = isSol
     ? playerData.solBalance
