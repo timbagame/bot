@@ -10,6 +10,7 @@ export class PDAManager {
     PLAYER_GAMES: "player_games",
     GAME_TOKEN: "game_token",
     PLAYER_PARTICIPATION: "player_participation",
+    ORACLE: "oracle",
   } as const;
 
   /**
