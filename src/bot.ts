@@ -247,10 +247,6 @@ const validateAndProcessTransaction = async (
   const playerData = await getPlayerData(telegramId);
   const metadata = await getDefaultTokenMetadata();
 
-  // Claim winnings if not using SOL
-  if (!isSol) {
-    await claimWinnings(playerData.keypair);
-  }
 
   // Validate balance
   const totalBalance = isSol
