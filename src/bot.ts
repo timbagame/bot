@@ -178,18 +178,8 @@ const getPlayerData = async (telegramId: bigint, tokenMint?: string): Promise<Pl
     wallet.getBalance(telegramId)
   ]);
 
-  let gameBalance = 0;
-  try {
-    const playerBalancePda = PDAManager.getPlayerBalancePDA(
-      keypair.publicKey,
-      new PublicKey(effectiveTokenMint),
-      program.programId
-    );
-    const playerBalanceAccount = await program.account.playerBalance.fetch(playerBalancePda);
-    gameBalance = Number(playerBalanceAccount.amount);
-  } catch (error) {
-    // Player balance account doesn't exist yet
-  }
+  // PlayerGames no longer tracks token balances; funds are handled per-game
+  const gameBalance = 0;
 
   return { keypair, tokenBalance, solBalance, gameBalance };
 };
@@ -205,34 +195,9 @@ const isUserGroupAdmin = async (ctx: Context, userId: number): Promise<boolean> 
   }
 };
 
-const claimWinnings = async (playerKp: anchor.web3.Keypair): Promise<number> => {
-  const playerBalancePda = PDAManager.getPlayerBalancePDA(
-    playerKp.publicKey,
-    new PublicKey(DEFAULT_TOKEN_MINT),
-    program.programId
-  );
-
-  try {
-    const playerBalance = await program.account.playerBalance.fetch(playerBalancePda);
-    const claimableAmount = Number(playerBalance.amount);
-
-    if (claimableAmount <= 0) return 0;
-
-    const withdrawInstruction = await program.methods
-      .withdrawPlayerBalance()
-      .accounts({
-        player: playerKp.publicKey,
-        tokenMint: new PublicKey(DEFAULT_TOKEN_MINT),
-      })
-      .instruction();
-
-    const tx = await wallet.sendTransaction([withdrawInstruction], [playerKp]);
-    await wallet.confirmTransaction(tx);
-    return claimableAmount;
-  } catch (error: any) {
-    if (error.message?.includes('Account does not exist')) return 0;
-    throw error;
-  }
+const claimWinnings = async (_playerKp: anchor.web3.Keypair): Promise<number> => {
+  // No-op: Contract no longer uses PlayerBalance; winnings are settled during game ops
+  return 0;
 };
 
 // ================================

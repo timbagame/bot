@@ -146,21 +146,21 @@ export class GameManager {
   }
 
   // ================================
-  // PLAYER BALANCE MANAGEMENT
+  // PLAYER GAMES ACCOUNT MANAGEMENT
   // ================================
 
-  public async ensurePlayerBalance(playerKeypair: anchor.web3.Keypair, tokenMint: string): Promise<PublicKey> {
-    const playerBalancePda = PDAManager.getPlayerBalancePDA(
+  public async ensurePlayerGames(playerKeypair: anchor.web3.Keypair, tokenMint: string): Promise<PublicKey> {
+    const playerGamesPda = PDAManager.getPlayerGamesPDA(
       playerKeypair.publicKey,
       new PublicKey(tokenMint),
       this.program.programId
     );
 
     try {
-      await this.program.account.playerBalance.fetch(playerBalancePda);
-      return playerBalancePda;
+      await this.program.account.playerGames.fetch(playerGamesPda);
+      return playerGamesPda;
     } catch (error) {
-      // Create token account if needed
+      // Ensure token account exists (ATA) for transfers
       const playerTokenAccount = await getAssociatedTokenAddress(
         new PublicKey(tokenMint),
         playerKeypair.publicKey
@@ -179,9 +179,9 @@ export class GameManager {
         await this.wallet.confirmTransaction(tx);
       }
 
-      // Initialize player balance
+      // Initialize player games account
       const initInstruction = await this.program.methods
-        .initializePlayerBalance()
+        .initializePlayerGames()
         .accounts({
           player: playerKeypair.publicKey,
           tokenMint: new PublicKey(tokenMint),
@@ -190,7 +190,7 @@ export class GameManager {
 
       const tx = await this.wallet.sendTransaction([initInstruction], [playerKeypair]);
       await this.wallet.confirmTransaction(tx);
-      return playerBalancePda;
+      return playerGamesPda;
     }
   }
 
@@ -701,12 +701,8 @@ export class GameManager {
     try {
       const metadata = await this.wallet.getTokenMetadata(tokenMint);
       const playerKp = this.wallet.getKeyPair(telegramId);
-      const [tokenBalance, gameBalance] = await Promise.all([
-        this.wallet.getTokenBalance(telegramId, tokenMint),
-        this.getPlayerGameBalance(playerKp.publicKey, tokenMint)
-      ]);
-
-      const totalBalance = tokenBalance + gameBalance;
+      const tokenBalance = await this.wallet.getTokenBalance(telegramId, tokenMint);
+      const totalBalance = tokenBalance;
       if (totalBalance < amount) {
         return {
           success: false,
@@ -729,7 +725,7 @@ export class GameManager {
       const { randomHash } = await this.oracleClient.generateGameSecrets();
       const randomHashBuffer = this.oracleClient.hexToBuffer(randomHash);
 
-      await this.ensurePlayerBalance(playerKp, tokenMint);
+      await this.ensurePlayerGames(playerKp, tokenMint);
 
       // Create game
       const gameConfig = {
@@ -851,19 +847,7 @@ export class GameManager {
   // HELPER METHODS
   // ================================
 
-  private async getPlayerGameBalance(playerPubkey: PublicKey, tokenMint: string): Promise<number> {
-    try {
-      const playerBalancePda = PDAManager.getPlayerBalancePDA(
-        playerPubkey,
-        new PublicKey(tokenMint),
-        this.program.programId
-      );
-      const playerBalance = await this.program.account.playerBalance.fetch(playerBalancePda);
-      return Number(playerBalance.amount);
-    } catch (error) {
-      return 0;
-    }
-  }
+  // Note: Player balance account was removed in the program. Balances are in token accounts.
 
   /**
    * Get expected winner for dumbflip and snowball games using oracle API
@@ -1082,12 +1066,8 @@ export class GameManager {
       const currentGameType = Object.keys(gameAccount.gameType)[0];
       if (currentGameType === "coinflip" || currentGameType === "dumbflip" || currentGameType === "snowball") {
         const gameAmount = Number(gameAccount.ticketAmount);
-        const [tokenBalance, gameBalance] = await Promise.all([
-          this.wallet.getTokenBalance(telegramId, gameData.token_mint),
-          this.getPlayerGameBalance(playerKp.publicKey, gameData.token_mint)
-        ]);
-
-        const totalBalance = tokenBalance + gameBalance;
+        const tokenBalance = await this.wallet.getTokenBalance(telegramId, gameData.token_mint);
+        const totalBalance = tokenBalance;
         if (totalBalance < gameAmount) {
           const metadata = await this.wallet.getTokenMetadata(gameData.token_mint);
           return {
@@ -1098,7 +1078,7 @@ export class GameManager {
       }
 
       // Ensure player balance and execute join
-      await this.ensurePlayerBalance(playerKp, gameData.token_mint);
+      await this.ensurePlayerGames(playerKp, gameData.token_mint);
 
       if (gameAccount.isPrivate) {
         const result = await this.joinPrivateGame(gamePda, playerKp, chatId || 0);
@@ -1274,7 +1254,7 @@ export class GameManager {
       const tokenMint = gameData.token_mint;
 
       const adminKp = authResult.adminKeypair!;
-      await this.ensurePlayerBalance(playerKp, tokenMint);
+      await this.ensurePlayerGames(playerKp, tokenMint);
 
       const joinInstruction = await this.program.methods
         .joinGame()

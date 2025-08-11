@@ -9,6 +9,7 @@ export class PDAManager {
     ORACLE: "oracle",
     GAME: "game",
     PLAYER_BALANCE: "player_balance",
+    PLAYER_GAMES: "player_games",
     GAME_TOKEN: "game_token",
     PLAYER_PARTICIPATION: "player_participation"
   } as const;
@@ -46,6 +47,13 @@ export class PDAManager {
    */
   static getPlayerBalancePDA(playerPubkey: PublicKey, tokenMint: PublicKey, programId: PublicKey): PublicKey {
     return this.findPDA([this.SEEDS.PLAYER_BALANCE, playerPubkey, tokenMint], programId);
+  }
+
+  /**
+   * Get Player Games PDA - New account tracking player participation metadata
+   */
+  static getPlayerGamesPDA(playerPubkey: PublicKey, tokenMint: PublicKey, programId: PublicKey): PublicKey {
+    return this.findPDA([this.SEEDS.PLAYER_GAMES, playerPubkey, tokenMint], programId);
   }
 
   /**
