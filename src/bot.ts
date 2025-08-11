@@ -196,7 +196,7 @@ const isUserGroupAdmin = async (ctx: Context, userId: number): Promise<boolean> 
 };
 
 const claimWinnings = async (_playerKp: anchor.web3.Keypair): Promise<number> => {
-  // No-op: Contract no longer uses PlayerBalance; winnings are settled during game ops
+  // No-op: Contract no longer uses PlayerGames; winnings are settled during game ops
   return 0;
 };
 

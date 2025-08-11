@@ -45,8 +45,9 @@ export class PDAManager {
   /**
    * Get Player Balance PDA - Used for player's token balance in games
    */
+  // Deprecated: use getPlayerGamesPDA instead
   static getPlayerBalancePDA(playerPubkey: PublicKey, tokenMint: PublicKey, programId: PublicKey): PublicKey {
-    return this.findPDA([this.SEEDS.PLAYER_BALANCE, playerPubkey, tokenMint], programId);
+    return this.findPDA([this.SEEDS.PLAYER_GAMES, playerPubkey, tokenMint], programId);
   }
 
   /**
