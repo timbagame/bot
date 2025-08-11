@@ -232,13 +232,6 @@ const isUserGroupAdmin = async (
   }
 };
 
-const claimWinnings = async (
-  _playerKp: anchor.web3.Keypair
-): Promise<number> => {
-  // No-op: Contract no longer uses PlayerGames; winnings are settled during game ops
-  return 0;
-};
-
 // ================================
 // TRANSACTION PROCESSING
 // ================================
