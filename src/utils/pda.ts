@@ -6,22 +6,23 @@ import { PublicKey } from "@solana/web3.js";
  */
 export class PDAManager {
   private static readonly SEEDS = {
-    ORACLE: "oracle",
     GAME: "game",
-    PLAYER_BALANCE: "player_balance",
     PLAYER_GAMES: "player_games",
     GAME_TOKEN: "game_token",
-    PLAYER_PARTICIPATION: "player_participation"
+    PLAYER_PARTICIPATION: "player_participation",
   } as const;
 
   /**
    * Internal helper to find PDA from seeds and program ID
    */
-  private static findPDA(seeds: (string | Buffer | PublicKey)[], programId: PublicKey): PublicKey {
-    const bufferSeeds = seeds.map(s => {
+  private static findPDA(
+    seeds: (string | Buffer | PublicKey)[],
+    programId: PublicKey
+  ): PublicKey {
+    const bufferSeeds = seeds.map((s) => {
       if (s instanceof PublicKey) return s.toBuffer();
       if (s instanceof Buffer) return s;
-      return Buffer.from(s as string, 'utf8');
+      return Buffer.from(s as string, "utf8");
     });
 
     const [pda] = PublicKey.findProgramAddressSync(bufferSeeds, programId);
@@ -45,29 +46,42 @@ export class PDAManager {
   /**
    * Get Player Balance PDA - Used for player's token balance in games
    */
-  // Deprecated: use getPlayerGamesPDA instead
-  static getPlayerBalancePDA(playerPubkey: PublicKey, tokenMint: PublicKey, programId: PublicKey): PublicKey {
-    return this.findPDA([this.SEEDS.PLAYER_GAMES, playerPubkey, tokenMint], programId);
-  }
 
   /**
    * Get Player Games PDA - New account tracking player participation metadata
    */
-  static getPlayerGamesPDA(playerPubkey: PublicKey, tokenMint: PublicKey, programId: PublicKey): PublicKey {
-    return this.findPDA([this.SEEDS.PLAYER_GAMES, playerPubkey, tokenMint], programId);
+  static getPlayerGamesPDA(
+    playerPubkey: PublicKey,
+    tokenMint: PublicKey,
+    programId: PublicKey
+  ): PublicKey {
+    return this.findPDA(
+      [this.SEEDS.PLAYER_GAMES, playerPubkey, tokenMint],
+      programId
+    );
   }
 
   /**
    * Get Game Token PDA - Used for game token configuration
    */
-  static getGameTokenPDA(tokenMint: PublicKey, programId: PublicKey): PublicKey {
+  static getGameTokenPDA(
+    tokenMint: PublicKey,
+    programId: PublicKey
+  ): PublicKey {
     return this.findPDA([this.SEEDS.GAME_TOKEN, tokenMint], programId);
   }
 
   /**
    * Get Player Participation PDA - Used to track player participation in specific games
    */
-  static getPlayerParticipationPDA(gameAddress: PublicKey, playerPubkey: PublicKey, programId: PublicKey): PublicKey {
-    return this.findPDA([this.SEEDS.PLAYER_PARTICIPATION, gameAddress, playerPubkey], programId);
+  static getPlayerParticipationPDA(
+    gameAddress: PublicKey,
+    playerPubkey: PublicKey,
+    programId: PublicKey
+  ): PublicKey {
+    return this.findPDA(
+      [this.SEEDS.PLAYER_PARTICIPATION, gameAddress, playerPubkey],
+      programId
+    );
   }
 }

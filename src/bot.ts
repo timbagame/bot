@@ -22,7 +22,7 @@ import {
   GAME_EXPIRATION_BUFFER_TIME,
   DEFAULT_TOKEN_MINT,
   DEFAULT_TOKEN_TICKER,
-  TOKENS_LIST
+  TOKENS_LIST,
 } from "./utils/constants";
 import type {
   PlayerData,
@@ -30,7 +30,7 @@ import type {
   PlayerJoinedEvent,
   PlayerUnjoinedEvent,
   PlayerRolledEvent,
-  PlayerEvent
+  PlayerEvent,
 } from "./types";
 import { TokenDatabase } from "./utils/token-database";
 import { handleCallbackErrorSafe } from "./utils/context-helpers";
@@ -58,15 +58,18 @@ let tokenManager: TokenManager;
 /**
  * Create a minimal context object for API operations
  */
-const createApiContext = (chatId: number, api?: any): Context => ({
-  api: api || bot.api,
-  chat: { id: chatId }
-} as unknown as Context);
+const createApiContext = (chatId: number, api?: any): Context =>
+  ({
+    api: api || bot.api,
+    chat: { id: chatId },
+  } as unknown as Context);
 
 /**
  * Validate that game data has required token information
  */
-const validateGameTokenData = (gameData: any): { isValid: boolean; error?: string } => {
+const validateGameTokenData = (
+  gameData: any
+): { isValid: boolean; error?: string } => {
   if (!gameData) return { isValid: false, error: "Game not found" };
   if (!gameData.token_mint || !gameData.token_ticker) {
     return { isValid: false, error: "Game missing token information" };
@@ -77,13 +80,18 @@ const validateGameTokenData = (gameData: any): { isValid: boolean; error?: strin
 /**
  * Safe callback query response with timeout handling
  */
-const safeAnswerCallbackQuery = async (ctx: any, text: string): Promise<void> => {
+const safeAnswerCallbackQuery = async (
+  ctx: any,
+  text: string
+): Promise<void> => {
   try {
     await ctx.answerCallbackQuery(text);
   } catch (error: any) {
-    if (error.description?.includes("query is too old") ||
-        error.description?.includes("query ID is invalid") ||
-        error.error_code === 400) {
+    if (
+      error.description?.includes("query is too old") ||
+      error.description?.includes("query ID is invalid") ||
+      error.error_code === 400
+    ) {
       console.warn(`⚠️ Callback query timeout: ${text.substring(0, 50)}...`);
     } else {
       console.error("Error answering callback query:", error);
@@ -104,7 +112,12 @@ const updateGameMessageSafely = async (
 
   try {
     const ctx = createApiContext(gameData.chat_id);
-    await gameManager.updateGameMessageFromData(ctx, gameAddress, status, winnerAddress);
+    await gameManager.updateGameMessageFromData(
+      ctx,
+      gameAddress,
+      status,
+      winnerAddress
+    );
   } catch (error) {
     console.warn(`Could not update message for game ${gameAddress}:`, error);
   }
@@ -113,14 +126,22 @@ const updateGameMessageSafely = async (
 /**
  * Process game completion event with all related updates
  */
-const processGameCompletion = async (gameAddress: string, winnerAddress: string): Promise<void> => {
+const processGameCompletion = async (
+  gameAddress: string,
+  winnerAddress: string
+): Promise<void> => {
   // Update database
   const blockTime = await wallet.getBlockchainTime();
   gameDb.completeGame(gameAddress, winnerAddress, blockTime * 1000);
 
   // Update game message
   const gameData = gameDb.getGame(gameAddress);
-  await updateGameMessageSafely(gameAddress, gameData, "Completed", winnerAddress);
+  await updateGameMessageSafely(
+    gameAddress,
+    gameData,
+    "Completed",
+    winnerAddress
+  );
 
   console.log(`✅ Processed game completion: ${gameAddress}`);
 };
@@ -135,7 +156,12 @@ const cleanupOrphanedGame = async (gameAddress: string): Promise<void> => {
   console.log(`🧹 Cleaning up orphaned game ${gameAddress}`);
 
   gameDb.completeGame(gameAddress, "cancelled", Date.now());
-  await updateGameMessageSafely(gameAddress, gameData, "Completed", "cancelled");
+  await updateGameMessageSafely(
+    gameAddress,
+    gameData,
+    "Completed",
+    "cancelled"
+  );
 
   console.log(`✅ Successfully cleaned up orphaned game ${gameAddress}`);
 };
@@ -144,13 +170,18 @@ const cleanupOrphanedGame = async (gameAddress: string): Promise<void> => {
 // BOT SEQUENTIALIZATION
 // ================================
 
-const getSequentializationKey = (ctx: Context): string | string[] | undefined => {
+const getSequentializationKey = (
+  ctx: Context
+): string | string[] | undefined => {
   const userId = ctx.from?.id?.toString();
   if (!userId) return undefined;
 
   if (ctx.callbackQuery?.data) {
     const callbackData = ctx.callbackQuery.data;
-    if (callbackData.startsWith("join_") || callbackData.startsWith("refresh_")) {
+    if (
+      callbackData.startsWith("join_") ||
+      callbackData.startsWith("refresh_")
+    ) {
       const gameAddress = callbackData.split("_")[1];
       return [userId, `game_${gameAddress}`];
     }
@@ -169,13 +200,16 @@ const getDefaultTokenMetadata = async () => {
   return await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
 };
 
-const getPlayerData = async (telegramId: bigint, tokenMint?: string): Promise<PlayerData> => {
+const getPlayerData = async (
+  telegramId: bigint,
+  tokenMint?: string
+): Promise<PlayerData> => {
   const keypair = wallet.getKeyPair(telegramId);
   const effectiveTokenMint = tokenMint || DEFAULT_TOKEN_MINT;
 
   const [tokenBalance, solBalance] = await Promise.all([
     wallet.getTokenBalance(telegramId, effectiveTokenMint),
-    wallet.getBalance(telegramId)
+    wallet.getBalance(telegramId),
   ]);
 
   // PlayerGames no longer tracks token balances; funds are handled per-game
@@ -184,7 +218,10 @@ const getPlayerData = async (telegramId: bigint, tokenMint?: string): Promise<Pl
   return { keypair, tokenBalance, solBalance, gameBalance };
 };
 
-const isUserGroupAdmin = async (ctx: Context, userId: number): Promise<boolean> => {
+const isUserGroupAdmin = async (
+  ctx: Context,
+  userId: number
+): Promise<boolean> => {
   try {
     if (!ctx.chat || ctx.chat.type === "private") return false;
     const member = await ctx.api.getChatMember(ctx.chat.id, userId);
@@ -195,7 +232,9 @@ const isUserGroupAdmin = async (ctx: Context, userId: number): Promise<boolean> 
   }
 };
 
-const claimWinnings = async (_playerKp: anchor.web3.Keypair): Promise<number> => {
+const claimWinnings = async (
+  _playerKp: anchor.web3.Keypair
+): Promise<number> => {
   // No-op: Contract no longer uses PlayerGames; winnings are settled during game ops
   return 0;
 };
@@ -221,33 +260,44 @@ const validateAndProcessTransaction = async (
   }
 
   // Validate balance
-  const totalBalance = isSol ? playerData.solBalance : playerData.tokenBalance + playerData.gameBalance;
+  const totalBalance = isSol
+    ? playerData.solBalance
+    : playerData.tokenBalance + playerData.gameBalance;
   if (totalBalance < amount) {
     const balanceStr = isSol
       ? `${wallet.formatSolBalance(totalBalance)} SOL`
-      : `${wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`;
+      : `${wallet.formatTokenBalance(
+          totalBalance,
+          metadata.decimals
+        )} ${DEFAULT_TOKEN_TICKER}`;
     const needStr = isSol
       ? `${wallet.formatSolBalance(amount)} SOL`
-      : `${wallet.formatTokenBalance(amount, metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`;
+      : `${wallet.formatTokenBalance(
+          amount,
+          metadata.decimals
+        )} ${DEFAULT_TOKEN_TICKER}`;
 
-    await ctx.reply(`Insufficient balance. You have ${balanceStr} but need ${needStr}`, {
-      reply_to_message_id: ctx.message?.message_id
-    });
+    await ctx.reply(
+      `Insufficient balance. You have ${balanceStr} but need ${needStr}`,
+      {
+        reply_to_message_id: ctx.message?.message_id,
+      }
+    );
     return;
   }
 
   // Process transaction with loading state
   const processingMsg = await ctx.reply(`Processing ${description}...`, {
-    reply_to_message_id: ctx.message?.message_id
+    reply_to_message_id: ctx.message?.message_id,
   });
 
   try {
     const tx = await transactionFn(playerData);
-    const txString = tx ? tx.toString().trim() : '';
-    const successMessage = txString 
+    const txString = tx ? tx.toString().trim() : "";
+    const successMessage = txString
       ? `${description} successful! 💸\n\n<code>${txString}</code>`
       : `${description} successful! 💸`;
-    
+
     await ctx.api.editMessageText(
       ctx.chat!.id,
       processingMsg.message_id,
@@ -270,26 +320,41 @@ const validateAndProcessTransaction = async (
 // RESPONSE HELPERS
 // ================================
 
-const handleCommandError = async (ctx: Context, error: any, commandName: string): Promise<void> => {
+const handleCommandError = async (
+  ctx: Context,
+  error: any,
+  commandName: string
+): Promise<void> => {
   console.error(`Error in ${commandName} command:`, error);
   const userFriendlyError = formatUserFriendlyError(error, wallet);
   await replyToMessage(ctx, userFriendlyError);
 };
 
-const replyToMessage = async (ctx: Context, text: string, parseMode: "HTML" | "MarkdownV2" = "HTML"): Promise<void> => {
+const replyToMessage = async (
+  ctx: Context,
+  text: string,
+  parseMode: "HTML" | "MarkdownV2" = "HTML"
+): Promise<void> => {
   await ctx.reply(text, {
     parse_mode: parseMode,
-    reply_to_message_id: ctx.message?.message_id
+    reply_to_message_id: ctx.message?.message_id,
   });
 };
 
-const replyUsageError = async (ctx: Context, message: string): Promise<void> => {
+const replyUsageError = async (
+  ctx: Context,
+  message: string
+): Promise<void> => {
   return replyToMessage(ctx, message);
 };
 
-const handleCallbackError = async (ctx: any, error: any, action: string): Promise<void> => {
+const handleCallbackError = async (
+  ctx: any,
+  error: any,
+  action: string
+): Promise<void> => {
   await handleCallbackErrorSafe(ctx, error, action, {
-    maxLength: 180
+    maxLength: 180,
   });
 };
 
@@ -302,19 +367,18 @@ const initializeAnchorProvider = async () => {
   const adminWallet = new anchor.Wallet(adminKeypair);
   const connection = wallet.getConnection();
 
-  const provider = new anchor.AnchorProvider(
-    connection,
-    adminWallet,
-    {
-      commitment: "confirmed",
-      preflightCommitment: "confirmed",
-      skipPreflight: false,
-      maxRetries: 3
-    }
-  );
+  const provider = new anchor.AnchorProvider(connection, adminWallet, {
+    commitment: "confirmed",
+    preflightCommitment: "confirmed",
+    skipPreflight: false,
+    maxRetries: 3,
+  });
 
   anchor.setProvider(provider);
-  return new anchor.Program(idl as Coinflip, provider) as anchor.Program<Coinflip>;
+  return new anchor.Program(
+    idl as Coinflip,
+    provider
+  ) as anchor.Program<Coinflip>;
 };
 
 const setupAnchor = async () => {
@@ -322,8 +386,14 @@ const setupAnchor = async () => {
     program = await initializeAnchorProvider();
     console.log(`Initialized Anchor program: ${program.programId}`);
 
-    tokenManager = TokenManager.getInstance(wallet, DEFAULT_TOKEN_MINT, DEFAULT_TOKEN_TICKER);
-    console.log(`Initialized TokenManager with default token: ${DEFAULT_TOKEN_TICKER}`);
+    tokenManager = TokenManager.getInstance(
+      wallet,
+      DEFAULT_TOKEN_MINT,
+      DEFAULT_TOKEN_TICKER
+    );
+    console.log(
+      `Initialized TokenManager with default token: ${DEFAULT_TOKEN_TICKER}`
+    );
 
     await initializeTokensList();
     gameManager = GameManager.getInstance(program, wallet, gameDb);
@@ -332,7 +402,9 @@ const setupAnchor = async () => {
     await checkGameTokenStatus();
   } catch (error) {
     console.error("Error initializing Anchor program:", error);
-    console.error("Make sure admin-keypair.json exists in the project root directory.");
+    console.error(
+      "Make sure admin-keypair.json exists in the project root directory."
+    );
     throw error;
   }
 };
@@ -355,7 +427,9 @@ const initializeTokensList = async () => {
       }
     }
 
-    console.log(`Initialized token database with ${tokenDb.getTokenCount()} tokens`);
+    console.log(
+      `Initialized token database with ${tokenDb.getTokenCount()} tokens`
+    );
   } catch (error) {
     console.warn("Error initializing approved tokens:", error);
   }
@@ -377,7 +451,9 @@ const checkGameTokenStatus = async () => {
       new PublicKey(DEFAULT_TOKEN_MINT),
       program.programId
     );
-    const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
+    const gameTokenAccount = await program.account.gameToken.fetch(
+      gameTokenPda
+    );
 
     const metadata = await getDefaultTokenMetadata();
     const formattedMinAmount = wallet.formatTokenBalance(
@@ -385,7 +461,9 @@ const checkGameTokenStatus = async () => {
       metadata.decimals
     );
 
-    console.log(`Game token found with min amount: ${formattedMinAmount} ${DEFAULT_TOKEN_TICKER} (${gameTokenAccount.minAmount.toString()} raw units)`);
+    console.log(
+      `Game token found with min amount: ${formattedMinAmount} ${DEFAULT_TOKEN_TICKER} (${gameTokenAccount.minAmount.toString()} raw units)`
+    );
   } catch (error) {
     console.log("Game token not found, it might need to be initialized");
   }
@@ -398,14 +476,23 @@ const checkGameTokenStatus = async () => {
 /**
  * Build token balances for display, including game balances
  */
-const buildTokenBalances = async (telegramId: bigint, approvedTokens: any[]) => {
-  const allTokenBalances = await wallet.getAllApprovedTokenBalances(telegramId, approvedTokens);
+const buildTokenBalances = async (
+  telegramId: bigint,
+  approvedTokens: any[]
+) => {
+  const allTokenBalances = await wallet.getAllApprovedTokenBalances(
+    telegramId,
+    approvedTokens
+  );
 
   const tokenBalancesToShow = await Promise.all(
     allTokenBalances.map(async (token) => {
       try {
         const tokenPlayerData = await getPlayerData(telegramId, token.mint);
-        return { ...token, balance: token.balance + tokenPlayerData.gameBalance };
+        return {
+          ...token,
+          balance: token.balance + tokenPlayerData.gameBalance,
+        };
       } catch (error) {
         return token; // If error getting game balance, just show wallet balance
       }
@@ -414,17 +501,22 @@ const buildTokenBalances = async (telegramId: bigint, approvedTokens: any[]) => 
 
   // Add tokens that have game balance but no wallet balance
   for (const approvedToken of approvedTokens) {
-    const hasToken = allTokenBalances.some(t => t.mint === approvedToken.token_mint);
+    const hasToken = allTokenBalances.some(
+      (t) => t.mint === approvedToken.token_mint
+    );
     if (!hasToken) {
       try {
-        const tokenPlayerData = await getPlayerData(telegramId, approvedToken.token_mint);
+        const tokenPlayerData = await getPlayerData(
+          telegramId,
+          approvedToken.token_mint
+        );
         if (tokenPlayerData.gameBalance > 0) {
           tokenBalancesToShow.push({
             mint: approvedToken.token_mint,
             ticker: approvedToken.token_ticker,
             balance: tokenPlayerData.gameBalance,
             decimals: approvedToken.decimals,
-            rawBalance: tokenPlayerData.gameBalance.toString()
+            rawBalance: tokenPlayerData.gameBalance.toString(),
           });
         }
       } catch (error) {
@@ -441,27 +533,33 @@ bot.command(["start", "balance"], async (ctx: Context) => {
   try {
     const playerData = await getPlayerData(telegramId);
     const approvedTokens = tokenManager.getAllApprovedTokensWithMetadata();
-    const tokenBalancesToShow = await buildTokenBalances(telegramId, approvedTokens);
+    const tokenBalancesToShow = await buildTokenBalances(
+      telegramId,
+      approvedTokens
+    );
 
     const response = [
       "💰 <b>Your Balance</b>",
       "",
       `Wallet Address: <code>${playerData.keypair.publicKey.toBase58()}</code>`,
       "",
-      `💎 SOL Balance: ${wallet.formatSolBalance(playerData.solBalance)} SOL`
+      `💎 SOL Balance: ${wallet.formatSolBalance(playerData.solBalance)} SOL`,
     ];
 
     if (tokenBalancesToShow.length > 0) {
       response.push("", "🪙 <b>Token Balances:</b>");
       for (const token of tokenBalancesToShow) {
-        const balanceText = `${wallet.formatTokenBalance(token.balance, token.decimals)} ${token.ticker}`;
+        const balanceText = `${wallet.formatTokenBalance(
+          token.balance,
+          token.decimals
+        )} ${token.ticker}`;
         response.push(`• ${balanceText}`);
       }
     }
 
     await ctx.reply(response.join("\n"), {
       parse_mode: "HTML",
-      reply_to_message_id: ctx.message?.message_id
+      reply_to_message_id: ctx.message?.message_id,
     });
   } catch (error) {
     await handleCommandError(ctx, error, "balance");
@@ -482,7 +580,12 @@ const createGameCommand = async (
   if (!ctx.from) return;
 
   if (ctx.chat?.type === "private") {
-    return replyToMessage(ctx, `🚫 ${gameType.charAt(0).toUpperCase() + gameType.slice(1)} games cannot be created in private chats since other participants can't join. Please use this command in a group or channel where others can participate!`);
+    return replyToMessage(
+      ctx,
+      `🚫 ${
+        gameType.charAt(0).toUpperCase() + gameType.slice(1)
+      } games cannot be created in private chats since other participants can't join. Please use this command in a group or channel where others can participate!`
+    );
   }
 
   const args = ctx.message?.text?.split(" ");
@@ -498,14 +601,24 @@ const createGameCommand = async (
 
   const tokenSpecified = parsed.data!.tokenWasSpecified;
   const maxTicketsIndex = tokenSpecified ? 3 : 2;
-  const maxTickets = parseInt(args?.[maxTicketsIndex] || defaultMaxTickets.toString()) || defaultMaxTickets;
+  const maxTickets =
+    parseInt(args?.[maxTicketsIndex] || defaultMaxTickets.toString()) ||
+    defaultMaxTickets;
 
   // Validate context parameters
   if (!ctx.from?.id) {
     return replyToMessage(ctx, "Unable to identify user. Please try again.");
   }
 
-  const result = await gameManager.createGame(gameType, parsed.data!, maxTickets, minTickets, timeout, BigInt(ctx.from.id), ctx.chat?.id);
+  const result = await gameManager.createGame(
+    gameType,
+    parsed.data!,
+    maxTickets,
+    minTickets,
+    timeout,
+    BigInt(ctx.from.id),
+    ctx.chat?.id
+  );
 
   if (!result.success) {
     return replyToMessage(ctx, result.error || "Failed to create game");
@@ -513,20 +626,25 @@ const createGameCommand = async (
 
   // Create game message in UI layer with proper creator username
   if (!result.gameAddress) {
-    return replyToMessage(ctx, "Game created but address not returned - please contact support");
+    return replyToMessage(
+      ctx,
+      "Game created but address not returned - please contact support"
+    );
   }
 
   // Get creator username from ctx instead of using the formatted address from GameManager
-  const creatorUsername = ctx.from?.username ? `@${ctx.from.username}` : "Unknown";
-  
+  const creatorUsername = ctx.from?.username
+    ? `@${ctx.from.username}`
+    : "Unknown";
+
   await gameManager.createGameMessage(
-    ctx, 
-    result.gameAddress, 
-    gameType.charAt(0).toUpperCase() + gameType.slice(1), 
-    parsed.data!.amount, 
-    creatorUsername, 
-    parsed.data!.tokenMint, 
-    parsed.data!.tokenTicker, 
+    ctx,
+    result.gameAddress,
+    gameType.charAt(0).toUpperCase() + gameType.slice(1),
+    parsed.data!.amount,
+    creatorUsername,
+    parsed.data!.tokenMint,
+    parsed.data!.tokenTicker,
     "Active"
   );
 
@@ -534,7 +652,11 @@ const createGameCommand = async (
   if (result.autoJoinResult?.success) {
     // Transaction is already confirmed by confirmTransactionWithRecovery, update immediately
     try {
-      await gameManager.updateGameMessageFromData(ctx, result.gameAddress, "Active");
+      await gameManager.updateGameMessageFromData(
+        ctx,
+        result.gameAddress,
+        "Active"
+      );
     } catch (error) {
       console.error("Failed to update game message after auto-join:", error);
       // Don't retry automatically to avoid cascading failures
@@ -543,10 +665,10 @@ const createGameCommand = async (
 
   // Handle auto-join result if present
   if (result.autoJoinResult && !result.autoJoinResult.success) {
-    await ctx.reply(
-      result.autoJoinResult.error || "Failed to auto-join game",
-      { parse_mode: "HTML", reply_to_message_id: ctx.message?.message_id }
-    );
+    await ctx.reply(result.autoJoinResult.error || "Failed to auto-join game", {
+      parse_mode: "HTML",
+      reply_to_message_id: ctx.message?.message_id,
+    });
   }
 };
 
@@ -603,19 +725,28 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
   const args = ctx.message?.text?.split(" ");
 
   if (!args || args.length < 3) {
-    return replyUsageError(ctx, "Usage: /withdraw &lt;address&gt; &lt;amount&gt; [TOKEN] or /withdraw &lt;address&gt; &lt;amount&gt; SOL");
+    return replyUsageError(
+      ctx,
+      "Usage: /withdraw &lt;address&gt; &lt;amount&gt; [TOKEN] or /withdraw &lt;address&gt; &lt;amount&gt; SOL"
+    );
   }
 
   const addressArg = args[1];
   if (!addressArg) {
-    return replyToMessage(ctx, "Invalid wallet address. Please provide a valid Solana address.");
+    return replyToMessage(
+      ctx,
+      "Invalid wallet address. Please provide a valid Solana address."
+    );
   }
 
   let toAddress: PublicKey;
   try {
     toAddress = new PublicKey(addressArg);
   } catch {
-    return replyToMessage(ctx, "Invalid wallet address. Please provide a valid Solana address.");
+    return replyToMessage(
+      ctx,
+      "Invalid wallet address. Please provide a valid Solana address."
+    );
   }
 
   const parsed = await tokenManager.parseAmount(args, 2, ctx.chat?.id);
@@ -640,9 +771,17 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
             toPubkey: toAddress,
             lamports: parsed.data!.amount,
           });
-          return await wallet.sendTransaction([transferSolIx], [playerData.keypair]);
+          return await wallet.sendTransaction(
+            [transferSolIx],
+            [playerData.keypair]
+          );
         } else {
-          return await wallet.transferToken(telegramId, toAddress, parsed.data!.amount, parsed.data!.tokenMint);
+          return await wallet.transferToken(
+            telegramId,
+            toAddress,
+            parsed.data!.amount,
+            parsed.data!.tokenMint
+          );
         }
       }
     );
@@ -657,7 +796,10 @@ bot.command("tip", async (ctx: Context) => {
   const args = ctx.message?.text?.split(" ");
 
   if (!repliedMessage || !repliedMessage.from || !args || args.length < 2) {
-    return replyUsageError(ctx, "Usage: Reply to a user's message with /tip &lt;amount&gt; [TOKEN] or /tip &lt;amount&gt; SOL");
+    return replyUsageError(
+      ctx,
+      "Usage: Reply to a user's message with /tip &lt;amount&gt; [TOKEN] or /tip &lt;amount&gt; SOL"
+    );
   }
 
   if (repliedMessage.from.is_bot) {
@@ -696,9 +838,17 @@ bot.command("tip", async (ctx: Context) => {
             toPubkey: recipientPubKey,
             lamports: parsed.data!.amount,
           });
-          return await wallet.sendTransaction([transferSolIx], [playerData.keypair]);
+          return await wallet.sendTransaction(
+            [transferSolIx],
+            [playerData.keypair]
+          );
         } else {
-          return await wallet.transferToken(telegramId, recipientPubKey, parsed.data!.amount, parsed.data!.tokenMint);
+          return await wallet.transferToken(
+            telegramId,
+            recipientPubKey,
+            parsed.data!.amount,
+            parsed.data!.tokenMint
+          );
         }
       }
     );
@@ -716,7 +866,10 @@ bot.command("wrap", async (ctx: Context) => {
   const amount = parseFloat(args?.[1] || "0") * LAMPORTS_PER_SOL;
 
   if (amount <= 0) {
-    return replyUsageError(ctx, "Usage: /wrap &lt;amount&gt;\nExample: /wrap 0.1");
+    return replyUsageError(
+      ctx,
+      "Usage: /wrap &lt;amount&gt;\nExample: /wrap 0.1"
+    );
   }
 
   try {
@@ -728,11 +881,12 @@ bot.command("wrap", async (ctx: Context) => {
       `Wrapping ${wallet.formatSolBalance(amount)} SOL to WSOL`,
       async (playerData) => {
         const wsolMint = new PublicKey(DEFAULT_TOKEN_MINT);
-        const { address: wsolAccount, instructions: createAtaIx } = await wallet.findOrCreateAssociatedTokenAccount(
-          playerData.keypair.publicKey,
-          wsolMint,
-          playerData.keypair
-        );
+        const { address: wsolAccount, instructions: createAtaIx } =
+          await wallet.findOrCreateAssociatedTokenAccount(
+            playerData.keypair.publicKey,
+            wsolMint,
+            playerData.keypair
+          );
 
         const transferSolIx = SystemProgram.transfer({
           fromPubkey: playerData.keypair.publicKey,
@@ -743,7 +897,9 @@ bot.command("wrap", async (ctx: Context) => {
         const syncNativeIx = createSyncNativeInstruction(wsolAccount);
         const allInstructions = [...createAtaIx, transferSolIx, syncNativeIx];
 
-        return await wallet.sendTransaction(allInstructions, [playerData.keypair]);
+        return await wallet.sendTransaction(allInstructions, [
+          playerData.keypair,
+        ]);
       }
     );
   } catch (error: any) {
@@ -760,7 +916,10 @@ bot.command("default", async (ctx: Context) => {
 
   // Check if this is a private chat
   if (ctx.chat?.type === "private") {
-    return replyToMessage(ctx, "🚫 Default tokens can only be set in groups or channels.");
+    return replyToMessage(
+      ctx,
+      "🚫 Default tokens can only be set in groups or channels."
+    );
   }
 
   const args = ctx.message?.text?.split(" ");
@@ -769,20 +928,25 @@ bot.command("default", async (ctx: Context) => {
     // Show current default token (anyone can view)
     const chatConfig = tokenManager.getChatDefaultToken(ctx.chat!.id);
     if (chatConfig) {
-      const setBy = await gameManager.getUsernameFromTelegramId(ctx, chatConfig.set_by_telegram_id);
-      return replyToMessage(ctx,
+      const setBy = await gameManager.getUsernameFromTelegramId(
+        ctx,
+        chatConfig.set_by_telegram_id
+      );
+      return replyToMessage(
+        ctx,
         `📄 Current default token: ${chatConfig.token_ticker}\n` +
-        `🏷️ Token mint: <code>${chatConfig.token_mint}</code>\n` +
-        `👤 Set by: @${setBy}\n` +
-        `📅 Set at: ${new Date(chatConfig.set_at).toLocaleString()}\n\n` +
-        `Use /default &lt;TOKEN_TICKER&gt; to change or /default clear to remove.`
+          `🏷️ Token mint: <code>${chatConfig.token_mint}</code>\n` +
+          `👤 Set by: @${setBy}\n` +
+          `📅 Set at: ${new Date(chatConfig.set_at).toLocaleString()}\n\n` +
+          `Use /default &lt;TOKEN_TICKER&gt; to change or /default clear to remove.`
       );
     } else {
       const defaultToken = tokenManager.getDefaultToken();
-      return replyToMessage(ctx,
+      return replyToMessage(
+        ctx,
         `📄 No default token set for this chat.\n` +
-        `🔄 Using bot default: ${defaultToken.tokenTicker}\n\n` +
-        `Use /default &lt;TOKEN_TICKER&gt; to set a default token for this chat.`
+          `🔄 Using bot default: ${defaultToken.tokenTicker}\n\n` +
+          `Use /default &lt;TOKEN_TICKER&gt; to set a default token for this chat.`
       );
     }
   }
@@ -790,9 +954,10 @@ bot.command("default", async (ctx: Context) => {
   // For changing the default token, check admin permissions
   const isAdmin = await isUserGroupAdmin(ctx, ctx.from.id);
   if (!isAdmin) {
-    return replyToMessage(ctx,
+    return replyToMessage(
+      ctx,
       "🔒 Only group administrators can change the default token.\n\n" +
-      "💡 Contact a group admin to set or change the default token for this chat."
+        "💡 Contact a group admin to set or change the default token for this chat."
     );
   }
 
@@ -802,9 +967,15 @@ bot.command("default", async (ctx: Context) => {
   }
 
   // Handle clear command
-  if (tokenInput.toUpperCase() === "CLEAR" || tokenInput.toUpperCase() === "REMOVE") {
+  if (
+    tokenInput.toUpperCase() === "CLEAR" ||
+    tokenInput.toUpperCase() === "REMOVE"
+  ) {
     tokenManager.removeChatDefaultToken(ctx.chat!.id);
-    return replyToMessage(ctx, "✅ Default token cleared for this chat. Using bot default token now.");
+    return replyToMessage(
+      ctx,
+      "✅ Default token cleared for this chat. Using bot default token now."
+    );
   }
 
   // Try to find the token
@@ -815,7 +986,8 @@ bot.command("default", async (ctx: Context) => {
 
     if (allTokens.length > 0) {
       response += "📋 Known tokens:\n";
-      for (const token of allTokens.slice(0, 10)) { // Show max 10 tokens
+      for (const token of allTokens.slice(0, 10)) {
+        // Show max 10 tokens
         response += `• ${token.token_ticker}\n`;
       }
       if (allTokens.length > 10) {
@@ -829,12 +1001,18 @@ bot.command("default", async (ctx: Context) => {
   }
 
   // Set the default token
-  tokenManager.setChatDefaultToken(ctx.chat!.id, knownToken.token_mint, knownToken.token_ticker, ctx.from.id.toString());
+  tokenManager.setChatDefaultToken(
+    ctx.chat!.id,
+    knownToken.token_mint,
+    knownToken.token_ticker,
+    ctx.from.id.toString()
+  );
 
-  return replyToMessage(ctx,
+  return replyToMessage(
+    ctx,
     `✅ Default token set to ${knownToken.token_ticker}\n` +
-    `🏷️ Token mint: <code>${knownToken.token_mint}</code>\n\n` +
-    `All games and transactions will now use ${knownToken.token_ticker} by default unless specified otherwise.`
+      `🏷️ Token mint: <code>${knownToken.token_mint}</code>\n\n` +
+      `All games and transactions will now use ${knownToken.token_ticker} by default unless specified otherwise.`
   );
 });
 
@@ -873,19 +1051,19 @@ bot.command("help", async (ctx: Context) => {
     "/debug - Show detailed wallet debug info (reply to user for their info too)",
     "/checktx &lt;signature&gt; - Check transaction details and status",
     "/oracle - Check Oracle configuration",
-          "/scan - Scan blockchain for orphaned games (private chat only)",
+    "/scan - Scan blockchain for orphaned games (private chat only)",
     "",
     "<b>ℹ️ Important:</b> ",
     "• Your player balance account will be automatically initialized when needed",
     "• Specify token after amount: /coinflip 100 TIMBA 2 or /tip 50 SOL",
     "• Group admins can set default tokens with /default &lt;TOKEN&gt;",
     "• Dumbflip and snowball games support rolling to change expected winner",
-    "• Contact bot administrator to add support for new SPL tokens"
+    "• Contact bot administrator to add support for new SPL tokens",
   ];
 
   await ctx.reply(helpSections.join("\n"), {
     parse_mode: "HTML",
-    reply_to_message_id: ctx.message?.message_id
+    reply_to_message_id: ctx.message?.message_id,
   });
 });
 
@@ -894,7 +1072,10 @@ bot.command("debug", async (ctx: Context) => {
   const replyToMessage = ctx.message?.reply_to_message;
 
   try {
-    const debugInfo = await buildDebugInfo(telegramId, ctx.from?.first_name || 'You');
+    const debugInfo = await buildDebugInfo(
+      telegramId,
+      ctx.from?.first_name || "You"
+    );
     let response = debugInfo;
 
     // If replying to someone, show their info too
@@ -902,7 +1083,7 @@ bot.command("debug", async (ctx: Context) => {
       const recipientTelegramId = BigInt(replyToMessage.from.id);
       const recipientDebugInfo = await buildDebugInfo(
         recipientTelegramId,
-        replyToMessage.from.first_name || 'User',
+        replyToMessage.from.first_name || "User",
         true
       );
       response += "\n\n" + recipientDebugInfo;
@@ -910,14 +1091,18 @@ bot.command("debug", async (ctx: Context) => {
 
     await ctx.reply(response, {
       parse_mode: "HTML",
-      reply_to_message_id: ctx.message?.message_id
+      reply_to_message_id: ctx.message?.message_id,
     });
   } catch (error) {
     await handleCommandError(ctx, error, "debug");
   }
 });
 
-const buildDebugInfo = async (telegramId: bigint, name: string, isReplyTarget: boolean = false): Promise<string> => {
+const buildDebugInfo = async (
+  telegramId: bigint,
+  name: string,
+  isReplyTarget: boolean = false
+): Promise<string> => {
   const playerData = await getPlayerData(telegramId);
   const metadata = await getDefaultTokenMetadata();
 
@@ -927,7 +1112,9 @@ const buildDebugInfo = async (telegramId: bigint, name: string, isReplyTarget: b
     playerData.keypair.publicKey
   );
 
-  const prefix = isReplyTarget ? `<b>Reply Target: ${name}</b>` : `🔍 <b>Debug Info for ${name}</b>`;
+  const prefix = isReplyTarget
+    ? `<b>Reply Target: ${name}</b>`
+    : `🔍 <b>Debug Info for ${name}</b>`;
 
   return [
     prefix,
@@ -935,9 +1122,15 @@ const buildDebugInfo = async (telegramId: bigint, name: string, isReplyTarget: b
     `Telegram ID: <code>${telegramId}</code>`,
     `Wallet Address: <code>${playerData.keypair.publicKey.toBase58()}</code>`,
     `SOL Balance: ${wallet.formatSolBalance(playerData.solBalance)} SOL`,
-    `Token Balance: ${wallet.formatTokenBalance(playerData.tokenBalance, metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`,
-    `Game Balance: ${wallet.formatTokenBalance(playerData.gameBalance, metadata.decimals)} ${DEFAULT_TOKEN_TICKER}`,
-    `Token Account: <code>${tokenAccount.toBase58()}</code>`
+    `Token Balance: ${wallet.formatTokenBalance(
+      playerData.tokenBalance,
+      metadata.decimals
+    )} ${DEFAULT_TOKEN_TICKER}`,
+    `Game Balance: ${wallet.formatTokenBalance(
+      playerData.gameBalance,
+      metadata.decimals
+    )} ${DEFAULT_TOKEN_TICKER}`,
+    `Token Account: <code>${tokenAccount.toBase58()}</code>`,
   ].join("\n");
 };
 
@@ -947,7 +1140,7 @@ bot.command("checktx", async (ctx: Context) => {
 
   if (!signature) {
     return ctx.reply("Usage: /checktx <transaction_signature>", {
-      reply_to_message_id: ctx.message?.message_id
+      reply_to_message_id: ctx.message?.message_id,
     });
   }
 
@@ -956,12 +1149,12 @@ bot.command("checktx", async (ctx: Context) => {
     const connection = wallet.getConnection();
     const txDetails = await connection.getTransaction(signature, {
       commitment: "confirmed",
-      maxSupportedTransactionVersion: 0
+      maxSupportedTransactionVersion: 0,
     });
 
     if (!txDetails) {
       return ctx.reply("Transaction not found or not confirmed yet.", {
-        reply_to_message_id: ctx.message?.message_id
+        reply_to_message_id: ctx.message?.message_id,
       });
     }
 
@@ -970,24 +1163,29 @@ bot.command("checktx", async (ctx: Context) => {
       "",
       `Signature: <code>${signature}</code>`,
       `Slot: ${txDetails.slot}`,
-      `Block Time: ${txDetails.blockTime ? new Date(txDetails.blockTime * 1000).toISOString() : 'Unknown'}`,
+      `Block Time: ${
+        txDetails.blockTime
+          ? new Date(txDetails.blockTime * 1000).toISOString()
+          : "Unknown"
+      }`,
       `Fee: ${txDetails.meta?.fee || 0} lamports`,
-      `Status: ${txDetails.meta?.err ? '❌ Failed' : '✅ Success'}`
+      `Status: ${txDetails.meta?.err ? "❌ Failed" : "✅ Success"}`,
     ];
 
     if (txDetails.meta?.err) {
-      response.push(`Error: <code>${JSON.stringify(txDetails.meta.err)}</code>`);
+      response.push(
+        `Error: <code>${JSON.stringify(txDetails.meta.err)}</code>`
+      );
     }
 
     await ctx.reply(response.join("\n"), {
       parse_mode: "HTML",
-      reply_to_message_id: ctx.message?.message_id
+      reply_to_message_id: ctx.message?.message_id,
     });
-
   } catch (error: any) {
     console.error("Error checking transaction:", error);
     await ctx.reply(`Error checking transaction: ${error.message}`, {
-      reply_to_message_id: ctx.message?.message_id
+      reply_to_message_id: ctx.message?.message_id,
     });
   }
 });
@@ -1002,7 +1200,7 @@ bot.command("active", async (ctx: Context) => {
 
     await ctx.reply(response, {
       parse_mode: "HTML",
-      reply_to_message_id: ctx.message?.message_id
+      reply_to_message_id: ctx.message?.message_id,
     });
   } catch (error) {
     await handleCommandError(ctx, error, "active");
@@ -1018,7 +1216,7 @@ bot.command("games", async (ctx: Context) => {
 
     await ctx.reply(response, {
       parse_mode: "HTML",
-      reply_to_message_id: ctx.message?.message_id
+      reply_to_message_id: ctx.message?.message_id,
     });
   } catch (error) {
     await handleCommandError(ctx, error, "games");
@@ -1031,9 +1229,12 @@ bot.command("games", async (ctx: Context) => {
 
 bot.command(["privatekey", "pk"], async (ctx: Context) => {
   if (ctx.chat?.type !== "private") {
-    return ctx.reply("🔒 This command can only be used in private messages for security reasons. Please message me directly.", {
-      reply_to_message_id: ctx.message?.message_id
-    });
+    return ctx.reply(
+      "🔒 This command can only be used in private messages for security reasons. Please message me directly.",
+      {
+        reply_to_message_id: ctx.message?.message_id,
+      }
+    );
   }
 
   const telegramId = BigInt(ctx.from?.id || 0);
@@ -1041,7 +1242,7 @@ bot.command(["privatekey", "pk"], async (ctx: Context) => {
   try {
     const playerData = await getPlayerData(telegramId);
     const privateKeyArray = Array.from(playerData.keypair.secretKey);
-    const privateKeyString = `[${privateKeyArray.join(',')}]`;
+    const privateKeyString = `[${privateKeyArray.join(",")}]`;
 
     const response = [
       "🔐 <b>Your Private Key</b>",
@@ -1055,14 +1256,16 @@ bot.command(["privatekey", "pk"], async (ctx: Context) => {
       "",
       `Private Key (Array Format):\n<code>${privateKeyString}</code>`,
       "",
-      `Private Key (Base58 Format):\n<code>${Buffer.from(playerData.keypair.secretKey).toString('base64')}</code>`,
+      `Private Key (Base58 Format):\n<code>${Buffer.from(
+        playerData.keypair.secretKey
+      ).toString("base64")}</code>`,
       "",
-      "💡 You can import this key into Phantom, Solflare, or other Solana wallets."
+      "💡 You can import this key into Phantom, Solflare, or other Solana wallets.",
     ].join("\n");
 
     await ctx.reply(response, {
       parse_mode: "HTML",
-      reply_to_message_id: ctx.message?.message_id
+      reply_to_message_id: ctx.message?.message_id,
     });
   } catch (error) {
     await handleCommandError(ctx, error, "privatekey");
@@ -1079,17 +1282,23 @@ bot.command("oracle", async (ctx: Context) => {
       "",
       `Operator: <code>${oracleAccount.operator.toString()}</code>`,
       `Fee Percentage: ${oracleAccount.feePercentage}%`,
-      `Min Timeout: ${oracleAccount.minTimeout} seconds (${oracleAccount.minTimeout / 60} minutes)`,
-      `Max Timeout: ${oracleAccount.maxTimeout} seconds (${oracleAccount.maxTimeout / 60} minutes)`,
+      `Min Timeout: ${oracleAccount.minTimeout} seconds (${
+        oracleAccount.minTimeout / 60
+      } minutes)`,
+      `Max Timeout: ${oracleAccount.maxTimeout} seconds (${
+        oracleAccount.maxTimeout / 60
+      } minutes)`,
       `Max Tickets: ${oracleAccount.maxTickets}`,
       `Oracle Buffer Time: ${oracleAccount.oracleBufferTime} seconds`,
       "",
-      `Current Game Timeout: ${GAME_TIMEOUT} seconds (${GAME_TIMEOUT / 60} minutes)`
+      `Current Game Timeout: ${GAME_TIMEOUT} seconds (${
+        GAME_TIMEOUT / 60
+      } minutes)`,
     ].join("\n");
 
     await ctx.reply(response, {
       parse_mode: "HTML",
-      reply_to_message_id: ctx.message?.message_id
+      reply_to_message_id: ctx.message?.message_id,
     });
   } catch (error) {
     await handleCommandError(ctx, error, "oracle");
@@ -1098,22 +1307,28 @@ bot.command("oracle", async (ctx: Context) => {
 
 bot.command("scan", async (ctx: Context) => {
   if (ctx.chat?.type !== "private") {
-    return ctx.reply("🔒 This command can only be used in private messages for security reasons.", {
-      reply_to_message_id: ctx.message?.message_id
-    });
+    return ctx.reply(
+      "🔒 This command can only be used in private messages for security reasons.",
+      {
+        reply_to_message_id: ctx.message?.message_id,
+      }
+    );
   }
 
   try {
-    const processingMsg = await ctx.reply("🔍 Starting blockchain scan for orphaned games...", {
-      reply_to_message_id: ctx.message?.message_id
-    });
+    const processingMsg = await ctx.reply(
+      "🔍 Starting blockchain scan for orphaned games...",
+      {
+        reply_to_message_id: ctx.message?.message_id,
+      }
+    );
 
     await gameManager.scanBlockchainForOrphanedGames();
 
     const response = [
       "✅ Blockchain scan completed successfully!",
       "",
-      "Check console logs for detailed information."
+      "Check console logs for detailed information.",
     ].join("\n");
 
     await ctx.api.editMessageText(
@@ -1127,13 +1342,15 @@ bot.command("scan", async (ctx: Context) => {
   }
 });
 
-
-
 // ================================
 // CALLBACK QUERY HANDLING
 // ================================
 
-const handleRefreshGameCallback = async (ctx: any, gamePda: PublicKey, gameAddress: string): Promise<void> => {
+const handleRefreshGameCallback = async (
+  ctx: any,
+  gamePda: PublicKey,
+  gameAddress: string
+): Promise<void> => {
   const gameData = gameDb.getGame(gameAddress);
   const validation = validateGameTokenData(gameData);
 
@@ -1150,12 +1367,12 @@ const handleRefreshGameCallback = async (ctx: any, gamePda: PublicKey, gameAddre
   try {
     // Verify game still exists on blockchain
     await program.account.game.fetch(gamePda);
-    
+
     await gameManager.updateGameMessageFromData(ctx, gameAddress, "Active");
 
     await safeAnswerCallbackQuery(ctx, "Game status refreshed!");
   } catch (error: any) {
-    if (error.message?.includes('Account does not exist')) {
+    if (error.message?.includes("Account does not exist")) {
       await safeAnswerCallbackQuery(ctx, "This game is no longer active!");
     } else {
       console.error(`Error refreshing game ${gameAddress}:`, error);
@@ -1166,25 +1383,55 @@ const handleRefreshGameCallback = async (ctx: any, gamePda: PublicKey, gameAddre
 
 // handleGameRoll and handleRollConfirmation moved to game-roll-handler.ts
 
-const handlePlayerEvent = async (event: PlayerEvent, eventName: string, emoji: string, action: string): Promise<void> => {
+const handlePlayerEvent = async (
+  event: PlayerEvent,
+  eventName: string,
+  emoji: string,
+  action: string
+): Promise<void> => {
   try {
     const gameAddress = event.gameKey.toString();
     const lastSlot = event.lastSlot.toString();
     const totalPot = Number(event.totalAmount);
     const timestamp = Number(event.timestamp);
 
-    console.log(`${emoji} ${eventName} event: ${event.player.toString().slice(0, 8)}... ${action} game ${gameAddress.slice(0, 8)}... (lastSlot: ${lastSlot}, totalPot: ${totalPot}, timestamp: ${timestamp})`);
+    console.log(
+      `${emoji} ${eventName} event: ${event.player
+        .toString()
+        .slice(0, 8)}... ${action} game ${gameAddress.slice(
+        0,
+        8
+      )}... (lastSlot: ${lastSlot}, totalPot: ${totalPot}, timestamp: ${timestamp})`
+    );
 
-    const slotWasUpdated = gameDb.updateGameLastSlotWithTimestamp(gameAddress, lastSlot, timestamp);
+    const slotWasUpdated = gameDb.updateGameLastSlotWithTimestamp(
+      gameAddress,
+      lastSlot,
+      timestamp
+    );
 
     if (slotWasUpdated) {
       const gameData = gameDb.getGame(gameAddress);
-      if (gameData && (gameData.game_type === "dumbflip" || gameData.game_type === "snowball") && gameData.chat_id) {
+      if (
+        gameData &&
+        (gameData.game_type === "dumbflip" ||
+          gameData.game_type === "snowball") &&
+        gameData.chat_id
+      ) {
         try {
           const apiCtx = createApiContext(gameData.chat_id, bot.api);
-          await gameManager.updateGameMessageFromData(apiCtx, gameAddress, "Active", undefined, totalPot);
+          await gameManager.updateGameMessageFromData(
+            apiCtx,
+            gameAddress,
+            "Active",
+            undefined,
+            totalPot
+          );
         } catch (contextError) {
-          console.error(`Error creating context for chat ${gameData.chat_id}:`, contextError);
+          console.error(
+            `Error creating context for chat ${gameData.chat_id}:`,
+            contextError
+          );
         }
       }
     }
@@ -1217,7 +1464,9 @@ bot.on("callback_query", async (ctx) => {
 
   try {
     if (!ctx.from?.id) {
-      await ctx.answerCallbackQuery("Unable to identify user. Please try again.");
+      await ctx.answerCallbackQuery(
+        "Unable to identify user. Please try again."
+      );
       return;
     }
 
@@ -1250,12 +1499,15 @@ const handleCompletedGameCallback = async (ctx: any, game: any) => {
         gameData.winner_address || undefined
       );
 
-      const statusMessage = gameData.winner_address === "cancelled" ? "cancelled" : "completed";
+      const statusMessage =
+        gameData.winner_address === "cancelled" ? "cancelled" : "completed";
       await ctx.answerCallbackQuery(`Game ${statusMessage} - message updated!`);
     } else {
       // Game data not found in database - game may have been cleaned up
       console.warn(`Game data not found for ${game.game_address}`);
-      await ctx.answerCallbackQuery("Game data not found - game may have been completed");
+      await ctx.answerCallbackQuery(
+        "Game data not found - game may have been completed"
+      );
     }
   } catch (error) {
     console.error("Error updating completed game message:", error);
@@ -1263,7 +1515,13 @@ const handleCompletedGameCallback = async (ctx: any, game: any) => {
   }
 };
 
-const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, telegramId: bigint, game: any) => {
+const handleJoinGame = async (
+  ctx: any,
+  gamePda: PublicKey,
+  playerKp: any,
+  telegramId: bigint,
+  game: any
+) => {
   // Validate game status before attempting to join
   if (game.status !== "active") {
     await safeAnswerCallbackQuery(ctx, "This game is no longer active!");
@@ -1271,15 +1529,23 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
   }
 
   try {
-    const result = await gameManager.joinGame(game.game_address, telegramId, ctx.chat?.id);
-    
+    const result = await gameManager.joinGame(
+      game.game_address,
+      telegramId,
+      ctx.chat?.id
+    );
+
     if (!result.success) {
       await safeAnswerCallbackQuery(ctx, result.error || "Failed to join game");
       return;
     }
 
     // Update game message after successful join
-    await gameManager.updateGameMessageFromData(ctx, game.game_address, "Active");
+    await gameManager.updateGameMessageFromData(
+      ctx,
+      game.game_address,
+      "Active"
+    );
 
     // Handle special case: rolling for snowball/dumbflip games
     if (result.isRoll) {
@@ -1287,19 +1553,30 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
         const gameAccount = await program.account.game.fetch(gamePda);
         const gameData = gameDb.getGame(game.game_address);
         if (gameData) {
-          await handleGameRoll(ctx, gamePda, playerKp, gameAccount, gameData, game);
+          await handleGameRoll(
+            ctx,
+            gamePda,
+            playerKp,
+            gameAccount,
+            gameData,
+            game
+          );
         } else {
           await safeAnswerCallbackQuery(ctx, "Game data not found for rolling");
         }
       } catch (error) {
         console.error("Error handling game roll:", error);
-        await safeAnswerCallbackQuery(ctx, "Failed to roll game. Please try again.");
+        await safeAnswerCallbackQuery(
+          ctx,
+          "Failed to roll game. Please try again."
+        );
       }
       return;
     }
 
     // Send join notification
-    const joinerUsername = ctx.from?.username || ctx.from?.first_name || "Player";
+    const joinerUsername =
+      ctx.from?.username || ctx.from?.first_name || "Player";
     const updatedGameAccount = await program.account.game.fetch(gamePda);
     const ticketCount = updatedGameAccount.ticketsCount;
     const maxTickets = updatedGameAccount.maxTickets;
@@ -1311,13 +1588,12 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
       `🎮 @${joinerUsername} joined the ${gameName}! (${ticketCount}/${maxTickets} tickets)`,
       {
         parse_mode: "HTML",
-        reply_to_message_id: gameMessage?.messageId
+        reply_to_message_id: gameMessage?.messageId,
       }
     );
-
   } catch (error: any) {
     // Handle specific case where account doesn't exist (game was completed/cancelled)
-    if (error.message?.includes('Account does not exist')) {
+    if (error.message?.includes("Account does not exist")) {
       await ctx.answerCallbackQuery("This game is no longer active!");
     } else {
       // Re-throw the error to be handled by the outer catch block
@@ -1325,8 +1601,6 @@ const handleJoinGame = async (ctx: any, gamePda: PublicKey, playerKp: any, teleg
     }
   }
 };
-
-
 
 // ================================
 // ERROR HANDLING & BOT STARTUP
@@ -1338,193 +1612,243 @@ bot.catch((err) => {
 });
 
 // Start the bot and setup Anchor
-setupAnchor().then(async () => {
-  console.log("Starting bot...");
+setupAnchor()
+  .then(async () => {
+    console.log("Starting bot...");
 
-  // Reload game message mappings from database
-  await gameManager.reloadGameMessages();
-  console.log(`Reloaded game message mappings from database`);
+    // Reload game message mappings from database
+    await gameManager.reloadGameMessages();
+    console.log(`Reloaded game message mappings from database`);
 
-  /**
-   * Send completion notification to chat
-   */
-  const sendCompletionNotification = async (gameData: any, winnerAddress: string, event: GameCompletedEvent): Promise<void> => {
-    if (!gameData.token_mint || !gameData.token_ticker) {
-      console.error(`Missing token info for completion notification of game ${event.gameKey.toString()}`);
-      return;
-    }
-
-    const ctx = createApiContext(gameData.chat_id);
-    const metadata = await wallet.getTokenMetadata(gameData.token_mint);
-    const winnerUsername = await gameManager.getPlayerUsername(ctx, winnerAddress);
-    const winnerAmount = Number(event.winnerAmount);
-    const gameType = gameData.game_type ? gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1) : "Game";
-
-    let notificationText = `🎉 <b>${gameType} Completed!</b>\n\n`;
-    notificationText += `🏆 Winner: ${winnerUsername}\n`;
-    notificationText += `💰 Prize: ${wallet.formatTokenBalance(winnerAmount, metadata.decimals)} ${gameData.token_ticker}`;
-
-    const gameMessage = gameManager.getActiveGameMessage(event.gameKey.toString());
-    const replyToMessageId = gameMessage?.messageId;
-
-    await bot.api.sendMessage(gameData.chat_id, notificationText, {
-      parse_mode: "HTML",
-      reply_to_message_id: replyToMessageId
-    });
-  };
-
-  // Set up global event listener for GameCompleted events
-  console.log("Setting up GameCompleted event listener...");
-  program.addEventListener('gameCompleted', async (event: GameCompletedEvent) => {
-    try {
-      const gameAddress = event.gameKey.toString();
-      const winnerAddress = event.winner.toString();
-
-      console.log(`🎉 GameCompleted event received for game: ${gameAddress}`);
-
-      // Process game completion
-      await processGameCompletion(gameAddress, winnerAddress);
-
-      // Get game info for notifications
-      const gameData = gameDb.getGame(gameAddress);
-      if (!gameData?.chat_id) {
-        console.log(`No game data or chat_id found for game ${gameAddress}`);
+    /**
+     * Send completion notification to chat
+     */
+    const sendCompletionNotification = async (
+      gameData: any,
+      winnerAddress: string,
+      event: GameCompletedEvent
+    ): Promise<void> => {
+      if (!gameData.token_mint || !gameData.token_ticker) {
+        console.error(
+          `Missing token info for completion notification of game ${event.gameKey.toString()}`
+        );
         return;
       }
 
-      // Send completion notification
-      try {
-        await sendCompletionNotification(gameData, winnerAddress, event);
-        console.log(`🎊 Sent completion notification for game ${gameAddress}`);
-      } catch (error) {
-        console.error("Error sending completion notification:", error);
-      }
+      const ctx = createApiContext(gameData.chat_id);
+      const metadata = await wallet.getTokenMetadata(gameData.token_mint);
+      const winnerUsername = await gameManager.getPlayerUsername(
+        ctx,
+        winnerAddress
+      );
+      const winnerAmount = Number(event.winnerAmount);
+      const gameType = gameData.game_type
+        ? gameData.game_type.charAt(0).toUpperCase() +
+          gameData.game_type.slice(1)
+        : "Game";
 
-      // Note: PlayerParticipation cleanup no longer needed in new contract architecture
+      let notificationText = `🎉 <b>${gameType} Completed!</b>\n\n`;
+      notificationText += `🏆 Winner: ${winnerUsername}\n`;
+      notificationText += `💰 Prize: ${wallet.formatTokenBalance(
+        winnerAmount,
+        metadata.decimals
+      )} ${gameData.token_ticker}`;
 
-      console.log(`✅ Successfully processed GameCompleted event for game ${gameAddress}`);
-    } catch (error) {
-      console.error("Error processing GameCompleted event:", error);
-    }
-  });
+      const gameMessage = gameManager.getActiveGameMessage(
+        event.gameKey.toString()
+      );
+      const replyToMessageId = gameMessage?.messageId;
 
-  console.log("GameCompleted event listener set up successfully");
+      await bot.api.sendMessage(gameData.chat_id, notificationText, {
+        parse_mode: "HTML",
+        reply_to_message_id: replyToMessageId,
+      });
+    };
 
-  // Set up PlayerJoined event listener to track lastSlot for winner calculation
-  console.log("Setting up PlayerJoined event listener...");
-  program.addEventListener('playerJoined', async (event: PlayerJoinedEvent) => {
-    await handlePlayerEvent(event, "PlayerJoined", "👤", "joined");
-  });
-
-  // Set up PlayerUnjoined event listener to track lastSlot for winner calculation
-  console.log("Setting up PlayerUnjoined event listener...");
-  program.addEventListener('playerUnjoined', async (event: PlayerUnjoinedEvent) => {
-    await handlePlayerEvent(event, "PlayerUnjoined", "👤", "left");
-  });
-
-  // Set up PlayerRolled event listener to track lastSlot for winner calculation
-  console.log("Setting up PlayerRolled event listener...");
-  program.addEventListener('playerRolled', async (event: PlayerRolledEvent) => {
-    await handlePlayerEvent(event, "PlayerRolled", "🎲", "rolled in");
-  });
-
-  console.log("Player event listeners set up successfully");
-
-  /**
-   * Process expired game with cancellation
-   */
-  const processExpiredGame = async (game: any): Promise<void> => {
-    const gamePda = new PublicKey(game.game_address);
-    const gameAccount = await program.account.game.fetch(gamePda);
-
-    console.log(`Processing expired game ${game.game_address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`);
-
-    const result = await gameManager.handleExpiredGame(gamePda, gameAccount);
-    if (result) {
-      console.log(`✅ Successfully processed expired game ${game.game_address}`);
-      gameDb.completeGame(game.game_address, "cancelled", Date.now());
-      await updateGameMessageSafely(game.game_address, game, "Completed", "cancelled");
-    } else {
-      console.error(`⚠️ Failed to process expired game ${game.game_address}`);
-    }
-  };
-
-  /**
-   * Check if game is expired
-   */
-  const isGameExpired = async (gameAccount: any): Promise<boolean> => {
-    const blockTime = await wallet.getBlockchainTime();
-    const createdAt = Number(gameAccount.createdAt);
-    const timeout = Number(gameAccount.timeout);
-    const expiresAt = createdAt + timeout;
-    return blockTime > (expiresAt + GAME_EXPIRATION_BUFFER_TIME);
-  };
-
-  // Start periodic check for expired games
-  setInterval(async () => {
-    try {
-      const allGames = gameDb.getAllGames();
-      for (const game of allGames) {
-        if (game.status === "completed") continue;
-
+    // Set up global event listener for GameCompleted events
+    console.log("Setting up GameCompleted event listener...");
+    program.addEventListener(
+      "gameCompleted",
+      async (event: GameCompletedEvent) => {
         try {
-          const gamePda = new PublicKey(game.game_address);
-          const gameAccount = await program.account.game.fetch(gamePda);
+          const gameAddress = event.gameKey.toString();
+          const winnerAddress = event.winner.toString();
 
-          if (await isGameExpired(gameAccount)) {
-            await processExpiredGame(game);
+          console.log(
+            `🎉 GameCompleted event received for game: ${gameAddress}`
+          );
+
+          // Process game completion
+          await processGameCompletion(gameAddress, winnerAddress);
+
+          // Get game info for notifications
+          const gameData = gameDb.getGame(gameAddress);
+          if (!gameData?.chat_id) {
+            console.log(
+              `No game data or chat_id found for game ${gameAddress}`
+            );
+            return;
           }
-        } catch (error: any) {
-          if (error.message?.includes('Account does not exist')) {
-            await cleanupOrphanedGame(game.game_address);
-          } else {
-            console.error(`Error processing game ${game.game_address}:`, error);
+
+          // Send completion notification
+          try {
+            await sendCompletionNotification(gameData, winnerAddress, event);
+            console.log(
+              `🎊 Sent completion notification for game ${gameAddress}`
+            );
+          } catch (error) {
+            console.error("Error sending completion notification:", error);
           }
+
+          // Note: PlayerParticipation cleanup no longer needed in new contract architecture
+
+          console.log(
+            `✅ Successfully processed GameCompleted event for game ${gameAddress}`
+          );
+        } catch (error) {
+          console.error("Error processing GameCompleted event:", error);
         }
       }
-    } catch (error) {
-      console.error("Error in periodic game check:", error);
-    }
-  }, EXPIRED_GAMES_CHECK_INTERVAL_MS);
+    );
 
-  // Start the bot with concurrent processing
-  console.log("Starting bot with concurrent processing...");
-  const handle = run(bot, {
-    runner: {
-      fetch: {
-        // Only handle updates we actually process
-        allowed_updates: [
-          "message",
-          "callback_query"
-        ]
+    console.log("GameCompleted event listener set up successfully");
+
+    // Set up PlayerJoined event listener to track lastSlot for winner calculation
+    console.log("Setting up PlayerJoined event listener...");
+    program.addEventListener(
+      "playerJoined",
+      async (event: PlayerJoinedEvent) => {
+        await handlePlayerEvent(event, "PlayerJoined", "👤", "joined");
       }
-    }
+    );
+
+    // Set up PlayerUnjoined event listener to track lastSlot for winner calculation
+    console.log("Setting up PlayerUnjoined event listener...");
+    program.addEventListener(
+      "playerUnjoined",
+      async (event: PlayerUnjoinedEvent) => {
+        await handlePlayerEvent(event, "PlayerUnjoined", "👤", "left");
+      }
+    );
+
+    // Set up PlayerRolled event listener to track lastSlot for winner calculation
+    console.log("Setting up PlayerRolled event listener...");
+    program.addEventListener(
+      "playerRolled",
+      async (event: PlayerRolledEvent) => {
+        await handlePlayerEvent(event, "PlayerRolled", "🎲", "rolled in");
+      }
+    );
+
+    console.log("Player event listeners set up successfully");
+
+    /**
+     * Process expired game with cancellation
+     */
+    const processExpiredGame = async (game: any): Promise<void> => {
+      const gamePda = new PublicKey(game.game_address);
+      const gameAccount = await program.account.game.fetch(gamePda);
+
+      console.log(
+        `Processing expired game ${game.game_address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`
+      );
+
+      const result = await gameManager.handleExpiredGame(gamePda, gameAccount);
+      if (result) {
+        console.log(
+          `✅ Successfully processed expired game ${game.game_address}`
+        );
+        gameDb.completeGame(game.game_address, "cancelled", Date.now());
+        await updateGameMessageSafely(
+          game.game_address,
+          game,
+          "Completed",
+          "cancelled"
+        );
+      } else {
+        console.error(`⚠️ Failed to process expired game ${game.game_address}`);
+      }
+    };
+
+    /**
+     * Check if game is expired
+     */
+    const isGameExpired = async (gameAccount: any): Promise<boolean> => {
+      const blockTime = await wallet.getBlockchainTime();
+      const createdAt = Number(gameAccount.createdAt);
+      const timeout = Number(gameAccount.timeout);
+      const expiresAt = createdAt + timeout;
+      return blockTime > expiresAt + GAME_EXPIRATION_BUFFER_TIME;
+    };
+
+    // Start periodic check for expired games
+    setInterval(async () => {
+      try {
+        const allGames = gameDb.getAllGames();
+        for (const game of allGames) {
+          if (game.status === "completed") continue;
+
+          try {
+            const gamePda = new PublicKey(game.game_address);
+            const gameAccount = await program.account.game.fetch(gamePda);
+
+            if (await isGameExpired(gameAccount)) {
+              await processExpiredGame(game);
+            }
+          } catch (error: any) {
+            if (error.message?.includes("Account does not exist")) {
+              await cleanupOrphanedGame(game.game_address);
+            } else {
+              console.error(
+                `Error processing game ${game.game_address}:`,
+                error
+              );
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error in periodic game check:", error);
+      }
+    }, EXPIRED_GAMES_CHECK_INTERVAL_MS);
+
+    // Start the bot with concurrent processing
+    console.log("Starting bot with concurrent processing...");
+    const handle = run(bot, {
+      runner: {
+        fetch: {
+          // Only handle updates we actually process
+          allowed_updates: ["message", "callback_query"],
+        },
+      },
+    });
+
+    // Set up graceful shutdown
+    const shutdown = async (signal: string) => {
+      console.log(`\n🛑 Received ${signal}, shutting down gracefully...`);
+      try {
+        await handle?.stop();
+        console.log("✅ Bot stopped successfully");
+        process.exit(0);
+      } catch (error) {
+        console.error("❌ Error during shutdown:", error);
+        process.exit(1);
+      }
+    };
+
+    // Handle different shutdown signals
+    process.once("SIGINT", () => shutdown("SIGINT"));
+    process.once("SIGTERM", () => shutdown("SIGTERM"));
+
+    // Handle the runner task completion
+    handle
+      ?.task()
+      ?.then(() => {
+        console.log("🏁 Bot runner task completed");
+      })
+      .catch((error) => {
+        console.error("❌ Bot runner task failed:", error);
+      });
+  })
+  .catch((error) => {
+    console.error("Failed to setup Anchor:", error);
   });
-
-  // Set up graceful shutdown
-  const shutdown = async (signal: string) => {
-    console.log(`\n🛑 Received ${signal}, shutting down gracefully...`);
-    try {
-      await handle?.stop();
-      console.log("✅ Bot stopped successfully");
-      process.exit(0);
-    } catch (error) {
-      console.error("❌ Error during shutdown:", error);
-      process.exit(1);
-    }
-  };
-
-  // Handle different shutdown signals
-  process.once("SIGINT", () => shutdown("SIGINT"));
-  process.once("SIGTERM", () => shutdown("SIGTERM"));
-
-  // Handle the runner task completion
-  handle?.task()?.then(() => {
-    console.log("🏁 Bot runner task completed");
-  }).catch((error) => {
-    console.error("❌ Bot runner task failed:", error);
-  });
-
-}).catch(error => {
-  console.error("Failed to setup Anchor:", error);
-});
