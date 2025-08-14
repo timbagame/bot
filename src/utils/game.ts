@@ -181,7 +181,7 @@ export class GameManager {
 
       // Initialize player games account
       const initInstruction = await this.program.methods
-        .initializePlayerGames()
+        // initializePlayerGames removed
         .accounts({
           player: playerKeypair.publicKey,
           tokenMint: new PublicKey(tokenMint),

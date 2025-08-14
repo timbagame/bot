@@ -7,7 +7,7 @@ import { PublicKey } from "@solana/web3.js";
 export class PDAManager {
   private static readonly SEEDS = {
     GAME: "game",
-    PLAYER_GAMES: "player_games",
+    // PLAYER_GAMES removed
     GAME_TOKEN: "game_token",
     PLAYER_PARTICIPATION: "player_participation",
     ORACLE: "oracle",
@@ -51,16 +51,7 @@ export class PDAManager {
   /**
    * Get Player Games PDA - New account tracking player participation metadata
    */
-  static getPlayerGamesPDA(
-    playerPubkey: PublicKey,
-    tokenMint: PublicKey,
-    programId: PublicKey
-  ): PublicKey {
-    return this.findPDA(
-      [this.SEEDS.PLAYER_GAMES, playerPubkey, tokenMint],
-      programId
-    );
-  }
+  // getPlayerGamesPDA removed
 
   /**
    * Get Game Token PDA - Used for game token configuration
