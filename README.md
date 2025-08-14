@@ -82,7 +82,7 @@ src/
 - ✅ Consolidated duplicate imports
 - ✅ Added proper TypeScript type annotations
 - ✅ Created helper functions for consistent reply patterns
-- ✅ Removed unused constants and variables
+- ✅ Pruned unused constants and variables
 - ✅ Improved error handling patterns
 
 ### Bot Features

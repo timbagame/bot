@@ -31,7 +31,6 @@ import type {
 } from "./types";
 import { TokenDatabase } from "./utils/token-database";
 import { handleCallbackErrorSafe } from "./utils/context-helpers";
-// game-roll-handler removed with roll feature deprecation
 
 // ================================
 // GLOBAL INSTANCES
@@ -209,7 +208,7 @@ const getPlayerData = async (
     wallet.getBalance(telegramId),
   ]);
 
-  // PlayerGames no longer tracks token balances; funds are handled per-game
+  // Funds are handled per-game; no separate aggregate player balance account
   const gameBalance = 0;
 
   return { keypair, tokenBalance, solBalance, gameBalance };
@@ -1342,8 +1341,6 @@ const handleRefreshGameCallback = async (
   }
 };
 
-// handleGameRoll and handleRollConfirmation moved to game-roll-handler.ts
-
 const handlePlayerEvent = async (
   event: PlayerEvent,
   eventName: string,
@@ -1503,8 +1500,6 @@ const handleJoinGame = async (
       "Active"
     );
 
-    // Rolling feature removed
-
     // Send join notification
     const joinerUsername =
       ctx.from?.username || ctx.from?.first_name || "Player";
@@ -1631,8 +1626,6 @@ setupAnchor()
             console.error("Error sending completion notification:", error);
           }
 
-          // Note: PlayerParticipation cleanup no longer needed in new contract architecture
-
           console.log(
             `✅ Successfully processed GameCompleted event for game ${gameAddress}`
           );
@@ -1661,9 +1654,6 @@ setupAnchor()
         await handlePlayerEvent(event, "PlayerUnjoined", "👤", "left");
       }
     );
-
-    // PlayerRolled event removed
-    // console.log("PlayerRolled event listener removed");
 
     console.log("Player event listeners set up successfully");
 

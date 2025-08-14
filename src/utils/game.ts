@@ -144,10 +144,7 @@ export class GameManager {
   // PLAYER UTILITIES
   // ================================
 
-  /**
-   * Helper method to check if a player is in a game by checking database records
-   * Since the contract no longer has PlayerParticipation accounts
-   */
+  /** Check if a player is in a game via database records */
   private async isPlayerInGame(
     gamePda: PublicKey,
     playerPubkey: PublicKey
@@ -160,15 +157,10 @@ export class GameManager {
     }
   }
 
-  /**
-   * Helper method to get all players in a game from the database
-   * Since the contract no longer stores players array, we use our database tracking
-   */
+  /** Get all players in a game from the database */
   private getGamePlayers(gameAddress: string): string[] {
     return this.gameDb.getGameParticipants(gameAddress);
   }
-
-  // PlayerGames account management deprecated - removed
 
   // ================================
   // USERNAME UTILITIES
@@ -819,8 +811,6 @@ export class GameManager {
       const { randomHash } = await this.oracleClient.generateGameSecrets();
       const randomHashBuffer = this.oracleClient.hexToBuffer(randomHash);
 
-      // ensurePlayerGames deprecated - no action needed
-
       // Create game
       const gameConfig = {
         gameType: { [gameType]: {} },
@@ -1000,7 +990,7 @@ export class GameManager {
   // HELPER METHODS
   // ================================
 
-  // Note: Player balance account was removed in the program. Balances are in token accounts.
+  // Balances are tracked directly in token accounts (no separate player balance account)
 
   // ================================
   // EXPIRATION HANDLING
@@ -1189,8 +1179,7 @@ export class GameManager {
         }
       }
 
-      // Ensure player balance and execute join
-      // ensurePlayerGames deprecated - no action needed
+      // Execute join
 
       if (gameAccount.isPrivate) {
         const result = await this.joinPrivateGame(
@@ -1287,8 +1276,6 @@ export class GameManager {
         `Attempting to close ${gameType} game ${gameAddress} with cleanup`
       );
 
-      // Note: PlayerParticipation cleanup no longer needed in new contract architecture
-
       // Step 2: Close the game using creator's key to recover remaining rent
       const creatorPubkey = gameAccount.creator.toBase58();
       const creatorTelegramId = this.gameDb.getPlayerTelegramId(creatorPubkey);
@@ -1341,8 +1328,6 @@ export class GameManager {
       throw new Error("No participants found in game");
     }
 
-    // Note: The new contract architecture doesn't require last player tracking
-
     // Determine ticket index from database order (join order reflects ticket order)
     const ticketIndex = participantIds.findIndex((id) => {
       const mappedPubkey = this.gameDb.getPlayerPublicKey(id);
@@ -1373,7 +1358,7 @@ export class GameManager {
     if (playerTelegramId) {
       this.gameDb.removeGameParticipant(gamePda.toBase58(), playerTelegramId);
       console.log(
-        `Removed player ${playerTelegramId} from game participants tracking`
+        `Unjoined player ${playerTelegramId} from game participants tracking`
       );
     }
   }
@@ -1862,8 +1847,6 @@ export class GameManager {
   ): Promise<boolean> {
     try {
       console.log(`🎁 Closing expired ${gameType} ${address} with cleanup`);
-
-      // Note: PlayerParticipation cleanup no longer needed in new contract architecture
 
       // Step 2: Close the game
       const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));

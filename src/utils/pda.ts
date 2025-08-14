@@ -7,7 +7,6 @@ import { PublicKey } from "@solana/web3.js";
 export class PDAManager {
   private static readonly SEEDS = {
     GAME: "game",
-    // PLAYER_GAMES removed
     GAME_TOKEN: "game_token",
     PLAYER_PARTICIPATION: "player_participation",
     ORACLE: "oracle",
@@ -48,10 +47,7 @@ export class PDAManager {
    * Get Player Balance PDA - Used for player's token balance in games
    */
 
-  /**
-   * Get Player Games PDA - New account tracking player participation metadata
-   */
-  // getPlayerGamesPDA removed
+  // PlayerGames PDA not used in current participation tracking model
 
   /**
    * Get Game Token PDA - Used for game token configuration
