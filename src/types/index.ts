@@ -80,12 +80,14 @@ export interface GameMessage {
   chatId: number;
 }
 
-export type GameCancellationResult = {
-  cancelled: true;
-  amount: number;
-  creator: string;
-  tx: string;
-} | false;
+export type GameCancellationResult =
+  | {
+      cancelled: true;
+      amount: number;
+      creator: string;
+      tx: string;
+    }
+  | false;
 
 export interface GameMessageFormat {
   messageText: string;
@@ -128,15 +130,7 @@ export interface PlayerUnjoinedEvent {
   timestamp: anchor.BN;
 }
 
-export interface PlayerRolledEvent {
-  gameKey: PublicKey;
-  player: PublicKey;
-  totalAmount: anchor.BN;
-  ticketsCount: number;
-  ticketIndex: number;
-  lastSlot: anchor.BN;
-  timestamp: anchor.BN;
-}
+// PlayerRolledEvent removed
 
 // ================================
 // ORACLE TYPES
@@ -179,7 +173,7 @@ export interface OracleHealthResponse {
 // UTILITY TYPES
 // ================================
 
-export type GameType = "coinflip" | "giveaway" | "dumbflip" | "snowball";
+export type GameType = "coinflip" | "giveaway";
 
 export interface TokenMetadata {
   decimals: number;
@@ -189,7 +183,7 @@ export interface TokenMetadata {
 // ENHANCED TYPES FOR REFACTORING
 // ================================
 
-export type PlayerEvent = PlayerJoinedEvent | PlayerUnjoinedEvent | PlayerRolledEvent;
+export type PlayerEvent = PlayerJoinedEvent | PlayerUnjoinedEvent;
 
 export interface ApiContext {
   api: any;
@@ -206,7 +200,6 @@ export interface GameStats {
   totalPot: number;
   expirationInfo: string;
 }
-
 
 export interface CallbackError {
   message?: string;

@@ -3,7 +3,7 @@ import type {
   AuthorizationResult,
   OracleApiResponse,
   OracleStats,
-  OracleStatsResponse
+  OracleStatsResponse,
 } from "../types";
 import { GameDatabase } from "./game-database";
 import { WalletManager } from "./wallet";
@@ -20,7 +20,8 @@ export class OracleClient {
 
   private constructor() {
     this.gameDb = GameDatabase.getInstance();
-    this.oracleApiUrl = process.env["ORACLE_API_URL"] || 'http://localhost:3001';
+    this.oracleApiUrl =
+      process.env["ORACLE_API_URL"] || "http://localhost:3001";
   }
 
   public static getInstance(wallet?: WalletManager): OracleClient {
@@ -43,29 +44,31 @@ export class OracleClient {
   public async generateGameSecrets(): Promise<{ randomHash: string }> {
     try {
       const response = await fetch(`${this.oracleApiUrl}/generate-hash`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-        }
+          "Content-Type": "application/json",
+        },
       });
 
       if (!response.ok) {
-        throw new Error(`Oracle API request failed: ${response.status} ${response.statusText}`);
+        throw new Error(
+          `Oracle API request failed: ${response.status} ${response.statusText}`
+        );
       }
 
       const data: OracleApiResponse = await response.json();
 
       if (!data.success || !data.randomHash) {
-        throw new Error(data.error || 'Failed to generate random hash');
+        throw new Error(data.error || "Failed to generate random hash");
       }
 
       console.log(`✅ Generated random hash from oracle: ${data.randomHash}`);
 
       return {
-        randomHash: data.randomHash
+        randomHash: data.randomHash,
       };
     } catch (error) {
-      console.error('❌ Error requesting random hash from oracle:', error);
+      console.error("❌ Error requesting random hash from oracle:", error);
       throw new Error(`Oracle API unavailable: ${(error as Error).message}`);
     }
   }
@@ -85,13 +88,13 @@ export class OracleClient {
       const data: OracleStatsResponse = await response.json();
 
       if (!data.success || !data.stats) {
-        console.warn('Oracle stats not available:', data.error);
+        console.warn("Oracle stats not available:", data.error);
         return null;
       }
 
       return data.stats;
     } catch (error) {
-      console.warn('Error fetching oracle stats:', error);
+      console.warn("Error fetching oracle stats:", error);
       return null;
     }
   }
@@ -102,39 +105,14 @@ export class OracleClient {
   public async isHealthy(): Promise<boolean> {
     try {
       const response = await fetch(`${this.oracleApiUrl}/health`, {
-        method: 'GET',
-        signal: AbortSignal.timeout(5000) // 5 second timeout
+        method: "GET",
+        signal: AbortSignal.timeout(5000), // 5 second timeout
       });
 
       return response.ok;
     } catch (error) {
-      console.warn('Oracle health check failed:', error);
+      console.warn("Oracle health check failed:", error);
       return false;
-    }
-  }
-
-  /**
-   * Get the current winner for a specific game (dumbflip/snowball)
-   */
-  public async getCurrentWinner(gameAddress: string): Promise<{ success: boolean; winner?: string; error?: string }> {
-    try {
-      const response = await fetch(`${this.oracleApiUrl}/current-winner/${gameAddress}`, {
-        method: 'GET',
-        signal: AbortSignal.timeout(10000) // 10 second timeout
-      });
-
-      if (!response.ok) {
-        throw new Error(`Oracle API request failed: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      return data;
-    } catch (error) {
-      console.error('❌ Error getting current winner from oracle:', error);
-      return { 
-        success: false, 
-        error: `Oracle API unavailable: ${(error as Error).message}` 
-      };
     }
   }
 
@@ -142,7 +120,10 @@ export class OracleClient {
   // PRIVATE GAME AUTHORIZATION (kept for private games)
   // ================================
 
-  public async authorizePlayer(gamePda: PublicKey, chatId: number): Promise<AuthorizationResult> {
+  public async authorizePlayer(
+    gamePda: PublicKey,
+    chatId: number
+  ): Promise<AuthorizationResult> {
     try {
       const game = this.gameDb.getGame(gamePda.toBase58());
       if (!game) {
@@ -150,7 +131,10 @@ export class OracleClient {
       }
 
       if (!game.chat_id || game.chat_id !== chatId) {
-        return { authorized: false, error: "Player not in same chat as game creator" };
+        return {
+          authorized: false,
+          error: "Player not in same chat as game creator",
+        };
       }
 
       // For private games, we still need admin keypair for authorization
@@ -174,7 +158,7 @@ export class OracleClient {
    * Convert hex string to Buffer (for random hash)
    */
   public hexToBuffer(hex: string): Buffer {
-    return Buffer.from(hex, 'hex');
+    return Buffer.from(hex, "hex");
   }
 
   /**

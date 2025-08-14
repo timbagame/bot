@@ -16,8 +16,6 @@ import {
   GAME_TIMEOUT,
   COINFLIP_MAX_TICKETS,
   GIVEAWAY_MAX_TICKETS,
-  SNOWBALL_TIMEOUT,
-  SNOWBALL_MAX_TICKETS,
   EXPIRED_GAMES_CHECK_INTERVAL_MS,
   GAME_EXPIRATION_BUFFER_TIME,
   DEFAULT_TOKEN_MINT,
@@ -29,12 +27,11 @@ import type {
   GameCompletedEvent,
   PlayerJoinedEvent,
   PlayerUnjoinedEvent,
-  PlayerRolledEvent,
   PlayerEvent,
 } from "./types";
 import { TokenDatabase } from "./utils/token-database";
 import { handleCallbackErrorSafe } from "./utils/context-helpers";
-import { handleGameRoll } from "./utils/game-roll-handler";
+// game-roll-handler removed with roll feature deprecation
 
 // ================================
 // GLOBAL INSTANCES
@@ -559,7 +556,7 @@ bot.command(["start", "balance"], async (ctx: Context) => {
  */
 const createGameCommand = async (
   ctx: Context,
-  gameType: "coinflip" | "giveaway" | "dumbflip" | "snowball",
+  gameType: "coinflip" | "giveaway",
   defaultMaxTickets: number,
   minTickets: number,
   timeout: number,
@@ -679,28 +676,6 @@ bot.command(["giveaway", "ga"], async (ctx) => {
     1,
     GAME_TIMEOUT,
     "Usage: /giveaway &lt;amount&gt; [TOKEN] &lt;maxTickets&gt;\nExample: /giveaway 100 5 or /giveaway 100 TIMBA 5"
-  );
-});
-
-bot.command(["dumbflip", "df"], async (ctx) => {
-  await createGameCommand(
-    ctx,
-    "dumbflip",
-    COINFLIP_MAX_TICKETS,
-    2,
-    GAME_TIMEOUT,
-    "Usage: /dumbflip &lt;amount&gt; [TOKEN] &lt;maxTickets&gt;\nExample: /dumbflip 10 2 or /dumbflip 10 TIMBA 2"
-  );
-});
-
-bot.command(["snowball", "sb"], async (ctx) => {
-  await createGameCommand(
-    ctx,
-    "snowball",
-    SNOWBALL_MAX_TICKETS,
-    2,
-    SNOWBALL_TIMEOUT,
-    "Usage: /snowball &lt;amount&gt; [TOKEN] &lt;maxTickets&gt;\nExample: /snowball 100 5 or /snowball 100 TIMBA 5"
   );
 });
 
@@ -1023,12 +998,10 @@ bot.command("help", async (ctx: Context) => {
     "<b>🎮 Game Commands:</b>",
     "/coinflip &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Create a new coinflip game",
     "/cf &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Shorthand for coinflip command",
-    "/dumbflip &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Create a dumbflip game (shows expected winner, can roll)",
-    "/df &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Shorthand for dumbflip command",
+
     "/giveaway &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Create a new giveaway",
     "/ga &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Shorthand for giveaway command",
-    "/snowball &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Create a snowball game (growing pot, can roll)",
-    "/sb &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Shorthand for snowball command",
+
     "/active - Show your active games",
     "/games - Show your recent games",
     "",
@@ -1045,7 +1018,7 @@ bot.command("help", async (ctx: Context) => {
     "• Your player balance account will be automatically initialized when needed",
     "• Specify token after amount: /coinflip 100 TIMBA 2 or /tip 50 SOL",
     "• Group admins can set default tokens with /default &lt;TOKEN&gt;",
-    "• Dumbflip and snowball games support rolling to change expected winner",
+
     "• Contact bot administrator to add support for new SPL tokens",
   ];
 
@@ -1400,12 +1373,7 @@ const handlePlayerEvent = async (
 
     if (slotWasUpdated) {
       const gameData = gameDb.getGame(gameAddress);
-      if (
-        gameData &&
-        (gameData.game_type === "dumbflip" ||
-          gameData.game_type === "snowball") &&
-        gameData.chat_id
-      ) {
+      if (gameData?.chat_id) {
         try {
           const apiCtx = createApiContext(gameData.chat_id, bot.api);
           await gameManager.updateGameMessageFromData(
@@ -1506,7 +1474,7 @@ const handleCompletedGameCallback = async (ctx: any, game: any) => {
 const handleJoinGame = async (
   ctx: any,
   gamePda: PublicKey,
-  playerKp: any,
+  _playerKp: any,
   telegramId: bigint,
   game: any
 ) => {
@@ -1535,32 +1503,7 @@ const handleJoinGame = async (
       "Active"
     );
 
-    // Handle special case: rolling for snowball/dumbflip games
-    if (result.isRoll) {
-      try {
-        const gameAccount = await program.account.game.fetch(gamePda);
-        const gameData = gameDb.getGame(game.game_address);
-        if (gameData) {
-          await handleGameRoll(
-            ctx,
-            gamePda,
-            playerKp,
-            gameAccount,
-            gameData,
-            game
-          );
-        } else {
-          await safeAnswerCallbackQuery(ctx, "Game data not found for rolling");
-        }
-      } catch (error) {
-        console.error("Error handling game roll:", error);
-        await safeAnswerCallbackQuery(
-          ctx,
-          "Failed to roll game. Please try again."
-        );
-      }
-      return;
-    }
+    // Rolling feature removed
 
     // Send join notification
     const joinerUsername =
@@ -1719,14 +1662,8 @@ setupAnchor()
       }
     );
 
-    // Set up PlayerRolled event listener to track lastSlot for winner calculation
-    console.log("Setting up PlayerRolled event listener...");
-    program.addEventListener(
-      "playerRolled",
-      async (event: PlayerRolledEvent) => {
-        await handlePlayerEvent(event, "PlayerRolled", "🎲", "rolled in");
-      }
-    );
+    // PlayerRolled event removed
+    // console.log("PlayerRolled event listener removed");
 
     console.log("Player event listeners set up successfully");
 

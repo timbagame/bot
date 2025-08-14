@@ -1,28 +1,40 @@
 import { PublicKey } from "@solana/web3.js";
 import { Context } from "grammy";
 import * as anchor from "@coral-xyz/anchor";
-import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } from "@solana/spl-token";
+
 import { WalletManager } from "./wallet";
 import { GameDatabase } from "./game-database";
 import { OracleClient } from "./oracle";
 import { PDAManager } from "./pda";
 import { formatUserFriendlyError } from "./errors";
-import { DEFAULT_NULL_ADDRESS, ADDRESS_DISPLAY_LENGTH, GAME_INFO_LIMIT, GAME_EXPIRATION_BUFFER_TIME } from "./constants";
+import {
+  DEFAULT_NULL_ADDRESS,
+  ADDRESS_DISPLAY_LENGTH,
+  GAME_INFO_LIMIT,
+  GAME_EXPIRATION_BUFFER_TIME,
+} from "./constants";
 import type {
   GameMessage,
   GameCancellationResult,
   GameMessageFormat,
   GameCategory,
-  GameType} from "../types";
+  GameType,
+} from "../types";
 import type { Coinflip } from "../../idl/idlType";
 
 // ================================
 // UTILITY FUNCTIONS
 // ================================
 
-const logAndFormatError = (error: any, operation: string, walletManager?: WalletManager): string => {
+const logAndFormatError = (
+  error: any,
+  operation: string,
+  walletManager?: WalletManager
+): string => {
   console.error(`Error in ${operation}:`, error);
-  return walletManager ? formatUserFriendlyError(error, walletManager) : error.message;
+  return walletManager
+    ? formatUserFriendlyError(error, walletManager)
+    : error.message;
 };
 
 const formatGameTypeWithEmoji = (gameType: string): string => {
@@ -31,10 +43,7 @@ const formatGameTypeWithEmoji = (gameType: string): string => {
       return "🪙 Coinflip";
     case "giveaway":
       return "🎁 Giveaway";
-    case "dumbflip":
-      return "🎲 Dumbflip";
-    case "snowball":
-      return "❄️ Snowball";
+
     default:
       return `🎮 ${gameType.charAt(0).toUpperCase() + gameType.slice(1)}`;
   }
@@ -48,19 +57,25 @@ const formatGameType = (gameType: Record<string, any>): string => {
 };
 
 const formatDate = (timestamp: number): string => {
-  return new Date(timestamp).toLocaleString('en-GB', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
+  return new Date(timestamp).toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
   });
 };
 
-const formatExpirationTime = async (expiresAt: number, walletManager?: WalletManager, prefix: string = "⏰ "): Promise<string> => {
-  const blockTime = walletManager ? await walletManager.getBlockchainTime() : Math.floor(Date.now() / 1000);
+const formatExpirationTime = async (
+  expiresAt: number,
+  walletManager?: WalletManager,
+  prefix: string = "⏰ "
+): Promise<string> => {
+  const blockTime = walletManager
+    ? await walletManager.getBlockchainTime()
+    : Math.floor(Date.now() / 1000);
   const timeRemaining = Math.max(0, expiresAt - blockTime);
 
   if (timeRemaining <= 0) {
@@ -105,7 +120,7 @@ export class GameManager {
     private program: anchor.Program<Coinflip>,
     private wallet: WalletManager,
     private gameDb: GameDatabase,
-    private oracleClient: OracleClient,
+    private oracleClient: OracleClient
   ) {}
 
   public static getInstance(
@@ -115,7 +130,12 @@ export class GameManager {
   ): GameManager {
     if (!GameManager.instance) {
       const oracleClient = OracleClient.getInstance(wallet);
-      GameManager.instance = new GameManager(program, wallet, gameDb, oracleClient);
+      GameManager.instance = new GameManager(
+        program,
+        wallet,
+        gameDb,
+        oracleClient
+      );
     }
     return GameManager.instance;
   }
@@ -128,7 +148,10 @@ export class GameManager {
    * Helper method to check if a player is in a game by checking database records
    * Since the contract no longer has PlayerParticipation accounts
    */
-  private async isPlayerInGame(gamePda: PublicKey, playerPubkey: PublicKey): Promise<boolean> {
+  private async isPlayerInGame(
+    gamePda: PublicKey,
+    playerPubkey: PublicKey
+  ): Promise<boolean> {
     try {
       const participants = this.gameDb.getGameParticipants(gamePda.toBase58());
       return participants.includes(playerPubkey.toBase58());
@@ -145,54 +168,7 @@ export class GameManager {
     return this.gameDb.getGameParticipants(gameAddress);
   }
 
-  // ================================
-  // PLAYER GAMES ACCOUNT MANAGEMENT
-  // ================================
-
-  public async ensurePlayerGames(playerKeypair: anchor.web3.Keypair, tokenMint: string): Promise<PublicKey> {
-    const playerGamesPda = PDAManager.getPlayerGamesPDA(
-      playerKeypair.publicKey,
-      new PublicKey(tokenMint),
-      this.program.programId
-    );
-
-    try {
-      await this.program.account.playerGames.fetch(playerGamesPda);
-      return playerGamesPda;
-    } catch (error) {
-      // Ensure token account exists (ATA) for transfers
-      const playerTokenAccount = await getAssociatedTokenAddress(
-        new PublicKey(tokenMint),
-        playerKeypair.publicKey
-      );
-
-      try {
-        await this.wallet.getConnection().getAccountInfo(playerTokenAccount);
-      } catch (error) {
-        const createAtaIx = createAssociatedTokenAccountInstruction(
-          playerKeypair.publicKey,
-          playerTokenAccount,
-          playerKeypair.publicKey,
-          new PublicKey(tokenMint)
-        );
-        const tx = await this.wallet.sendTransaction([createAtaIx], [playerKeypair]);
-        await this.wallet.confirmTransaction(tx);
-      }
-
-      // Initialize player games account
-      const initInstruction = await this.program.methods
-        // initializePlayerGames removed
-        .accounts({
-          player: playerKeypair.publicKey,
-          tokenMint: new PublicKey(tokenMint),
-        })
-        .instruction();
-
-      const tx = await this.wallet.sendTransaction([initInstruction], [playerKeypair]);
-      await this.wallet.confirmTransaction(tx);
-      return playerGamesPda;
-    }
-  }
+  // PlayerGames account management deprecated - removed
 
   // ================================
   // USERNAME UTILITIES
@@ -210,7 +186,10 @@ export class GameManager {
   /**
    * Get username from Telegram ID with consistent error handling
    */
-  public async getUsernameFromTelegramId(ctx: Context, telegramId: string): Promise<string | null> {
+  public async getUsernameFromTelegramId(
+    ctx: Context,
+    telegramId: string
+  ): Promise<string | null> {
     try {
       const numericId = parseInt(telegramId, 10);
       if (isNaN(numericId)) {
@@ -220,7 +199,10 @@ export class GameManager {
       const chatMember = await ctx.api.getChatMember(ctx.chat!.id, numericId);
       return chatMember.user.username || chatMember.user.first_name || null;
     } catch (error) {
-      console.warn(`Error getting username for Telegram ID ${telegramId}:`, error);
+      console.warn(
+        `Error getting username for Telegram ID ${telegramId}:`,
+        error
+      );
       return null;
     }
   }
@@ -229,7 +211,10 @@ export class GameManager {
    * Get game creator display name - optimized single method
    * Returns @username for Telegram users or formatted address for blockchain players
    */
-  public async getGameCreatorUsername(ctx: Context, gameAddress: string): Promise<string> {
+  public async getGameCreatorUsername(
+    ctx: Context,
+    gameAddress: string
+  ): Promise<string> {
     const creatorInfo = this.gameDb.getCreatorInfo(gameAddress);
     if (!creatorInfo) {
       return "Unknown";
@@ -237,7 +222,10 @@ export class GameManager {
 
     // If we have telegram ID, try to get username
     if (creatorInfo.telegramId) {
-      const username = await this.getUsernameFromTelegramId(ctx, creatorInfo.telegramId);
+      const username = await this.getUsernameFromTelegramId(
+        ctx,
+        creatorInfo.telegramId
+      );
       if (username) {
         return `@${username}`;
       }
@@ -251,18 +239,23 @@ export class GameManager {
     return "Unknown";
   }
 
-
   /**
    * Get player username with fallback to address display
    * Returns @username for Telegram users or formatted address for blockchain players
    */
-  public async getPlayerUsername(ctx: Context, publicKey: string): Promise<string> {
+  public async getPlayerUsername(
+    ctx: Context,
+    publicKey: string
+  ): Promise<string> {
     const playerTelegramId = this.gameDb.getPlayerTelegramId(publicKey);
     if (!playerTelegramId) {
       return this.formatAddress(publicKey);
     }
 
-    const username = await this.getUsernameFromTelegramId(ctx, playerTelegramId);
+    const username = await this.getUsernameFromTelegramId(
+      ctx,
+      playerTelegramId
+    );
     if (!username) {
       return this.formatAddress(publicKey);
     }
@@ -278,45 +271,81 @@ export class GameManager {
     return this.activeGameMessages.get(gameAddress);
   }
 
-  private async getActiveGameStats(gamePda: PublicKey, amount: number, providedTotalPot?: number) {
+  private async getActiveGameStats(
+    gamePda: PublicKey,
+    amount: number,
+    providedTotalPot?: number
+  ) {
     try {
       const gameAccount = await this.program.account.game.fetch(gamePda);
       const currentTickets = gameAccount.ticketsCount;
       const maxTickets = gameAccount.maxTickets;
       const minTickets = gameAccount.minTickets;
 
-      const totalPot = providedTotalPot ?? (Number(gameAccount.totalAmount || 0) || (amount * currentTickets));
+      const totalPot =
+        providedTotalPot ??
+        (Number(gameAccount.totalAmount || 0) || amount * currentTickets);
 
       const createdAt = Number(gameAccount.createdAt);
       const timeout = Number(gameAccount.timeout);
       const expiresAt = createdAt + timeout;
-      const expirationInfo = await formatExpirationTime(expiresAt, this.wallet, "\n⏰ ");
+      const expirationInfo = await formatExpirationTime(
+        expiresAt,
+        this.wallet,
+        "\n⏰ "
+      );
 
-      return { currentTickets, maxTickets, minTickets, totalPot, expirationInfo };
+      return {
+        currentTickets,
+        maxTickets,
+        minTickets,
+        totalPot,
+        expirationInfo,
+      };
     } catch (error) {
-      console.warn(`Warning: Could not fetch game account for ${gamePda.toBase58()}:`, error);
-      return { currentTickets: 0, maxTickets: 0, minTickets: 0, totalPot: amount, expirationInfo: "" };
+      console.warn(
+        `Warning: Could not fetch game account for ${gamePda.toBase58()}:`,
+        error
+      );
+      return {
+        currentTickets: 0,
+        maxTickets: 0,
+        minTickets: 0,
+        totalPot: amount,
+        expirationInfo: "",
+      };
     }
   }
 
-  private async getCompletedGameStats(gamePda: PublicKey, amount: number, providedTotalPot?: number) {
+  private async getCompletedGameStats(
+    gamePda: PublicKey,
+    amount: number,
+    providedTotalPot?: number
+  ) {
     const participants = this.getGamePlayers(gamePda.toBase58());
     const currentTickets = participants.length;
-    const totalPot = providedTotalPot ?? (amount * currentTickets);
+    const totalPot = providedTotalPot ?? amount * currentTickets;
 
     return {
       currentTickets,
       maxTickets: currentTickets,
       minTickets: currentTickets,
       totalPot,
-      expirationInfo: ""
+      expirationInfo: "",
     };
   }
 
-  private async getWinnerInfo(ctx: Context, status: string, winnerAddress?: string): Promise<string> {
+  private async getWinnerInfo(
+    ctx: Context,
+    status: string,
+    winnerAddress?: string
+  ): Promise<string> {
     if (status.toLowerCase() !== "completed" || !winnerAddress) return "";
 
-    if (winnerAddress === "cancelled" || winnerAddress === DEFAULT_NULL_ADDRESS) {
+    if (
+      winnerAddress === "cancelled" ||
+      winnerAddress === DEFAULT_NULL_ADDRESS
+    ) {
       return `\nStatus: Cancelled`;
     }
 
@@ -324,26 +353,19 @@ export class GameManager {
     return `\nWinner: ${winnerUsername}`;
   }
 
-  private generateGameKeyboard(status: string, gameType: string, gamePda: PublicKey) {
+  private generateGameKeyboard(
+    status: string,
+    gamePda: PublicKey
+  ) {
+    // _gameType unused post-refactor
     if (status.toLowerCase() === "completed") return [];
 
-    let joinButtonText: string;
-    switch (gameType.toLowerCase()) {
-      case "dumbflip":
-        joinButtonText = "🎲 Roll";
-        break;
-      case "snowball":
-        joinButtonText = "❄️ Roll";
-        break;
-      default:
-        joinButtonText = "🎮 Join";
-        break;
-    }
-
-    const keyboard = [[
-      { text: joinButtonText, callback_data: `join_${gamePda.toBase58()}` },
-      { text: "🔄 Refresh", callback_data: `refresh_${gamePda.toBase58()}` }
-    ]];
+    const keyboard = [
+      [
+        { text: "🎮 Join", callback_data: `join_${gamePda.toBase58()}` },
+        { text: "🔄 Refresh", callback_data: `refresh_${gamePda.toBase58()}` },
+      ],
+    ];
 
     return keyboard;
   }
@@ -355,7 +377,7 @@ export class GameManager {
     amount: number,
     creatorUsername: string,
     status: string,
-    _tokenMint: string,
+    _tokenMint: string, // deprecated/unused tokenMint param retained for signature compatibility
     tokenTicker: string,
     winnerAddress?: string,
     providedTotalPot?: number
@@ -366,16 +388,23 @@ export class GameManager {
       ? await this.getCompletedGameStats(gamePda, amount, providedTotalPot)
       : await this.getActiveGameStats(gamePda, amount, providedTotalPot);
 
-    const { currentTickets, maxTickets, minTickets, totalPot, expirationInfo } = gameStats;
+    const { currentTickets, maxTickets, minTickets, totalPot, expirationInfo } =
+      gameStats;
 
     const winnerInfo = await this.getWinnerInfo(ctx, status, winnerAddress);
 
-    let messageText = `<b>${formatGameTypeWithEmoji(gameType)} • ${this.wallet.formatTokenBalance(amount, 9)} ${tokenTicker}</b>\n` +
+    let messageText =
+      `<b>${formatGameTypeWithEmoji(
+        gameType
+      )} • ${this.wallet.formatTokenBalance(amount, 9)} ${tokenTicker}</b>\n` +
       `👤 Creator: ${creatorUsername} • ${currentTickets}/${maxTickets} tickets`;
 
     // Show current prize if different from base amount
     if (currentTickets > 0 || totalPot !== amount) {
-      messageText += `\n🏆 Current Prize: ${this.wallet.formatTokenBalance(totalPot, 9)} ${tokenTicker}`;
+      messageText += `\n🏆 Current Prize: ${this.wallet.formatTokenBalance(
+        totalPot,
+        9
+      )} ${tokenTicker}`;
     }
 
     // Add list of players if any have joined
@@ -386,17 +415,20 @@ export class GameManager {
           const playerNames = await Promise.all(
             participants.map(async (telegramId, index) => {
               try {
-                const username = await this.getUsernameFromTelegramId(ctx, telegramId);
+                const username = await this.getUsernameFromTelegramId(
+                  ctx,
+                  telegramId
+                );
                 return `${index + 1}. @${username}`;
               } catch (error) {
                 return `${index + 1}. Player ${telegramId.slice(0, 6)}...`;
               }
             })
           );
-          messageText += `\n${playerNames.join('\n')}\n`;
+          messageText += `\n${playerNames.join("\n")}\n`;
         }
       } catch (error) {
-        console.error('Error getting player list:', error);
+        console.error("Error getting player list:", error);
       }
     }
 
@@ -413,15 +445,11 @@ export class GameManager {
         statusText = "Full - starting soon!";
       }
       messageText += `\nStatus: ${statusText}${expirationInfo}`;
-
-      // Add expected winner info for dumbflip and snowball games
-      const expectedWinnerInfo = await this.getExpectedWinnerInfo(ctx, gamePda.toBase58(), gameType.toLowerCase());
-      messageText += expectedWinnerInfo;
     }
 
     messageText += winnerInfo;
 
-    const keyboard = this.generateGameKeyboard(status, gameType, gamePda);
+    const keyboard = this.generateGameKeyboard(status, gamePda);
 
     return { messageText, keyboard };
   }
@@ -443,7 +471,7 @@ export class GameManager {
       amount,
       creatorUsername,
       status,
-      tokenMint,
+      tokenMint, // still passed to maintain signature though unused
       tokenTicker,
       undefined
     );
@@ -451,13 +479,17 @@ export class GameManager {
     const message = await ctx.reply(messageText, {
       parse_mode: "HTML",
       reply_markup: { inline_keyboard: keyboard },
-      reply_to_message_id: ctx.message?.message_id
+      reply_to_message_id: ctx.message?.message_id,
     });
 
-    this.gameDb.saveGameMessage(gameAddress, message.message_id, message.chat.id);
+    this.gameDb.saveGameMessage(
+      gameAddress,
+      message.message_id,
+      message.chat.id
+    );
     this.activeGameMessages.set(gameAddress, {
       messageId: message.message_id,
-      chatId: message.chat.id
+      chatId: message.chat.id,
     });
 
     return message.message_id;
@@ -486,7 +518,7 @@ export class GameManager {
         amount,
         creatorUsername,
         status,
-        tokenMint,
+        tokenMint, // unused tokenMint retained
         tokenTicker,
         winnerAddress,
         totalPot
@@ -499,7 +531,8 @@ export class GameManager {
           messageText,
           {
             parse_mode: "HTML",
-            reply_markup: keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined
+            reply_markup:
+              keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined,
           }
         );
       } catch (error: any) {
@@ -531,9 +564,14 @@ export class GameManager {
         return;
       }
 
-      const creatorUsername = await this.getGameCreatorUsername(ctx, gameAddress);
-      const gameType = gameData.game_type ?
-        gameData.game_type.charAt(0).toUpperCase() + gameData.game_type.slice(1) : "Game";
+      const creatorUsername = await this.getGameCreatorUsername(
+        ctx,
+        gameAddress
+      );
+      const gameType = gameData.game_type
+        ? gameData.game_type.charAt(0).toUpperCase() +
+          gameData.game_type.slice(1)
+        : "Game";
 
       await this.updateGameMessage(
         ctx,
@@ -577,48 +615,81 @@ export class GameManager {
       const creatorPubkey = gameAccount.creator.toString();
       const gameType = formatGameType(gameAccount.gameType);
 
-      const creatorUsername = await this.getGameCreatorUsername(ctx, gamePda.toBase58());
-      const creatorInfo = creatorUsername !== "Unknown"
-        ? creatorUsername
-        : `<code>${creatorPubkey.slice(0, ADDRESS_DISPLAY_LENGTH)}...</code>`;
+      const creatorUsername = await this.getGameCreatorUsername(
+        ctx,
+        gamePda.toBase58()
+      );
+      const creatorInfo =
+        creatorUsername !== "Unknown"
+          ? creatorUsername
+          : `<code>${creatorPubkey.slice(0, ADDRESS_DISPLAY_LENGTH)}...</code>`;
 
       // Add expiration info
-      const expiresAt = Number(gameAccount.createdAt) + Number(gameAccount.timeout);
-      const expirationInfo = "\n" + await formatExpirationTime(expiresAt, this.wallet);
+      const expiresAt =
+        Number(gameAccount.createdAt) + Number(gameAccount.timeout);
+      const expirationInfo =
+        "\n" + (await formatExpirationTime(expiresAt, this.wallet));
 
       let winnerInfo = "";
-      if (gameData && gameData.winner_address && gameData.winner_address !== "cancelled" && gameData.winner_address !== DEFAULT_NULL_ADDRESS) {
-        const winnerUsername = await this.getPlayerUsername(ctx, gameData.winner_address);
+      if (
+        gameData &&
+        gameData.winner_address &&
+        gameData.winner_address !== "cancelled" &&
+        gameData.winner_address !== DEFAULT_NULL_ADDRESS
+      ) {
+        const winnerUsername = await this.getPlayerUsername(
+          ctx,
+          gameData.winner_address
+        );
         winnerInfo = `\nWinner: @${winnerUsername}`;
       }
 
-      return `${gameType} • ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}\n` +
-             `👤 Creator: ${creatorInfo} • ${currentTickets}/${maxTickets} tickets${expirationInfo}${winnerInfo}`;
+      return (
+        `${gameType} • ${this.wallet.formatTokenBalance(
+          amount,
+          metadata.decimals
+        )} ${tokenTicker}\n` +
+        `👤 Creator: ${creatorInfo} • ${currentTickets}/${maxTickets} tickets${expirationInfo}${winnerInfo}`
+      );
     } catch (error: any) {
       return `Error fetching game: ${error.message}`;
     }
   }
 
   // Helper method to get game info for completed games from database
-  public async getCompletedGameInfo(ctx: Context, gameData: any): Promise<string> {
+  public async getCompletedGameInfo(
+    ctx: Context,
+    gameData: any
+  ): Promise<string> {
     try {
-      const creatorUsername = await this.getUsernameFromTelegramId(ctx, gameData.creator_telegram_id);
+      const creatorUsername = await this.getUsernameFromTelegramId(
+        ctx,
+        gameData.creator_telegram_id
+      );
       const amount = Number(gameData.amount);
       const playerCount = gameData.max_players || 2;
       const gameTypeText = formatGameTypeWithEmoji(gameData.game_type);
 
       // Handle different winner states
       let winnerLine = "";
-      if (gameData.winner_address === "cancelled" || gameData.winner_address === DEFAULT_NULL_ADDRESS) {
+      if (
+        gameData.winner_address === "cancelled" ||
+        gameData.winner_address === DEFAULT_NULL_ADDRESS
+      ) {
         winnerLine = "";
       } else {
-        const winnerUsername = await this.getPlayerUsername(ctx, gameData.winner_address);
+        const winnerUsername = await this.getPlayerUsername(
+          ctx,
+          gameData.winner_address
+        );
         winnerLine = `🏆 Winner: @${winnerUsername}`;
       }
 
       const lines = [
-        `${gameTypeText} • ${this.wallet.formatTokenBalance(amount, 9)} ${gameData.token_ticker || "WSOL"}`,
-        `👤 Creator: @${creatorUsername} • ${playerCount} tickets`
+        `${gameTypeText} • ${this.wallet.formatTokenBalance(amount, 9)} ${
+          gameData.token_ticker || "WSOL"
+        }`,
+        `👤 Creator: @${creatorUsername} • ${playerCount} tickets`,
       ];
 
       if (winnerLine) {
@@ -644,28 +715,41 @@ export class GameManager {
       console.log(`✅ ${operationType} transaction confirmed: ${signature}`);
       return true;
     } catch (confirmError: any) {
-      console.warn(`⚠️ ${operationType} confirmation failed: ${confirmError.message}`);
+      console.warn(
+        `⚠️ ${operationType} confirmation failed: ${confirmError.message}`
+      );
 
       // Only try recovery for timeout errors
-      if (confirmError.message?.includes('timeout') || confirmError.message?.includes('not confirmed')) {
-        console.log(`🔍 Checking if ${operationType} succeeded despite timeout...`);
+      if (
+        confirmError.message?.includes("timeout") ||
+        confirmError.message?.includes("not confirmed")
+      ) {
+        console.log(
+          `🔍 Checking if ${operationType} succeeded despite timeout...`
+        );
 
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise((resolve) => setTimeout(resolve, 2000));
 
         try {
           if (operationType === "Game creation") {
             await this.program.account.game.fetch(gamePda);
-            console.log(`✅ Game account found - transaction ${signature} succeeded despite timeout`);
+            console.log(
+              `✅ Game account found - transaction ${signature} succeeded despite timeout`
+            );
             return true;
           } else if (operationType === "Player join" && playerPubkey) {
             const isInGame = await this.isPlayerInGame(gamePda, playerPubkey);
             if (isInGame) {
-              console.log(`✅ Player join confirmed despite timeout - tx: ${signature}`);
+              console.log(
+                `✅ Player join confirmed despite timeout - tx: ${signature}`
+              );
               return true;
             }
           }
         } catch (checkError) {
-          console.error(`❌ ${operationType} verification failed, transaction ${signature} likely failed`);
+          console.error(
+            `❌ ${operationType} verification failed, transaction ${signature} likely failed`
+          );
         }
       }
 
@@ -675,24 +759,34 @@ export class GameManager {
 
   public async createGame(
     gameType: GameType,
-    parsedAmount: { amount: number; tokenMint: string; tokenTicker: string; isSol: boolean },
+    parsedAmount: {
+      amount: number;
+      tokenMint: string;
+      tokenTicker: string;
+      isSol: boolean;
+    },
     maxTickets: number,
     minTickets: number,
     timeout: number,
     telegramId: bigint,
     chatId?: number
-  ): Promise<{ success: boolean; error?: string; gameAddress?: string; autoJoinResult?: { success: boolean; error?: string } }> {
-
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    gameAddress?: string;
+    autoJoinResult?: { success: boolean; error?: string };
+  }> {
     // Validate that SOL is not used for games
     if (parsedAmount.isSol) {
       return {
         success: false,
-        error: `❌ Native SOL games are not supported!\n\n` +
-               `💡 Supported tokens for games:\n` +
-               `• Use approved SPL tokens (check with /balance)\n` +
-               `• For SOL-based games, use WSOL instead\n` +
-               `• You can wrap SOL to WSOL using /wrap command\n\n` +
-               `Example: /cf 1000 WSOL 2`
+        error:
+          `❌ Native SOL games are not supported!\n\n` +
+          `💡 Supported tokens for games:\n` +
+          `• Use approved SPL tokens (check with /balance)\n` +
+          `• For SOL-based games, use WSOL instead\n` +
+          `• You can wrap SOL to WSOL using /wrap command\n\n` +
+          `Example: /cf 1000 WSOL 2`,
       };
     }
 
@@ -701,12 +795,21 @@ export class GameManager {
     try {
       const metadata = await this.wallet.getTokenMetadata(tokenMint);
       const playerKp = this.wallet.getKeyPair(telegramId);
-      const tokenBalance = await this.wallet.getTokenBalance(telegramId, tokenMint);
+      const tokenBalance = await this.wallet.getTokenBalance(
+        telegramId,
+        tokenMint
+      );
       const totalBalance = tokenBalance;
       if (totalBalance < amount) {
         return {
           success: false,
-          error: `Insufficient balance. You have ${this.wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${tokenTicker} but need ${this.wallet.formatTokenBalance(amount, metadata.decimals)} ${tokenTicker}`
+          error: `Insufficient balance. You have ${this.wallet.formatTokenBalance(
+            totalBalance,
+            metadata.decimals
+          )} ${tokenTicker} but need ${this.wallet.formatTokenBalance(
+            amount,
+            metadata.decimals
+          )} ${tokenTicker}`,
         };
       }
 
@@ -718,14 +821,14 @@ export class GameManager {
       if (!isOracleHealthy) {
         return {
           success: false,
-          error: "❌ Oracle service is unavailable. Please try again later."
+          error: "❌ Oracle service is unavailable. Please try again later.",
         };
       }
 
       const { randomHash } = await this.oracleClient.generateGameSecrets();
       const randomHashBuffer = this.oracleClient.hexToBuffer(randomHash);
 
-      await this.ensurePlayerGames(playerKp, tokenMint);
+      // ensurePlayerGames deprecated - no action needed
 
       // Create game
       const gameConfig = {
@@ -737,7 +840,7 @@ export class GameManager {
         minTickets: minTickets,
         // u64 must be BN
         timeout: new anchor.BN(timeout),
-        isPrivate: true
+        isPrivate: true,
       };
 
       const gameInstruction = await this.program.methods
@@ -748,48 +851,81 @@ export class GameManager {
         })
         .instruction();
 
-      const tx = await this.wallet.sendTransaction([gameInstruction], [playerKp]);
+      const tx = await this.wallet.sendTransaction(
+        [gameInstruction],
+        [playerKp]
+      );
 
       // Game PDA is now derived directly from random hash (no nonce needed)
-      const gamePda = PDAManager.getGamePDA(randomHashBuffer, this.program.programId);
+      const gamePda = PDAManager.getGamePDA(
+        randomHashBuffer,
+        this.program.programId
+      );
 
       console.log(`📍 Game address: ${gamePda.toBase58()}`);
 
-      const gameCreationConfirmed = await this.confirmTransactionWithRecovery(tx, gamePda, "Game creation");
+      const gameCreationConfirmed = await this.confirmTransactionWithRecovery(
+        tx,
+        gamePda,
+        "Game creation"
+      );
 
       if (!gameCreationConfirmed) {
         return {
           success: false,
-          error: "Game creation could not be confirmed"
+          error: "Game creation could not be confirmed",
         };
       }
 
       // Save game
-      this.gameDb.saveGame(gamePda.toBase58(), telegramId.toString(), amount, gameType, tokenMint, tokenTicker, maxTickets, minTickets, chatId);
+      this.gameDb.saveGame(
+        gamePda.toBase58(),
+        telegramId.toString(),
+        amount,
+        gameType,
+        tokenMint,
+        tokenTicker,
+        maxTickets,
+        minTickets,
+        chatId
+      );
 
       // Auto-join logic based on game type
       let autoJoinResult: { success: boolean; error?: string } | undefined;
-      if (gameType === "coinflip" || gameType === "dumbflip" || gameType === "snowball") {
-        autoJoinResult = await this.handleGameAutoJoinPure(gamePda, playerKp, telegramId, creatorPubkey, gameType, chatId || 0);
+      if (gameType === "coinflip") {
+        autoJoinResult = await this.handleGameAutoJoinPure(
+          gamePda,
+          playerKp,
+          telegramId,
+          creatorPubkey,
+          gameType,
+          chatId || 0
+        );
       } else {
-        console.log(`🎁 ${gameType.charAt(0).toUpperCase() + gameType.slice(1)} game ${gamePda.toBase58()} created - creator not auto-joined`);
+        console.log(
+          `🎁 ${
+            gameType.charAt(0).toUpperCase() + gameType.slice(1)
+          } game ${gamePda.toBase58()} created - creator not auto-joined`
+        );
       }
 
       return {
         success: true,
         gameAddress: gamePda.toBase58(),
-        autoJoinResult
+        autoJoinResult,
       };
-
     } catch (error: any) {
-      const userFriendlyError = logAndFormatError(error, `creating ${gameType} game`, this.wallet);
+      const userFriendlyError = logAndFormatError(
+        error,
+        `creating ${gameType} game`,
+        this.wallet
+      );
       return {
         success: false,
-        error: userFriendlyError
+        error: userFriendlyError,
       };
     }
   }
-
 
   private async handleGameAutoJoinPure(
     gamePda: PublicKey,
@@ -799,7 +935,9 @@ export class GameManager {
     gameType: string,
     chatId?: number
   ): Promise<{ success: boolean; error?: string }> {
-    console.log(`🎮 Auto-joining creator to ${gameType} game ${gamePda.toBase58()}...`);
+    console.log(
+      `🎮 Auto-joining creator to ${gameType} game ${gamePda.toBase58()}...`
+    );
 
     try {
       const gameAccount = await this.program.account.game.fetch(gamePda);
@@ -807,9 +945,16 @@ export class GameManager {
       let joinTx: string;
       if (gameAccount.isPrivate) {
         console.log(`🔐 Game is private, using authorized join...`);
-        const result = await this.joinPrivateGame(gamePda, playerKp, chatId || 0);
+        const result = await this.joinPrivateGame(
+          gamePda,
+          playerKp,
+          chatId || 0
+        );
         if (!result.success) {
-          return { success: false, error: result.error || "Failed to join private game" };
+          return {
+            success: false,
+            error: result.error || "Failed to join private game",
+          };
         }
         joinTx = result.tx!;
       } else {
@@ -821,24 +966,41 @@ export class GameManager {
             player: playerKp.publicKey,
           })
           .instruction();
-        joinTx = await this.wallet.sendTransaction([joinInstruction], [playerKp]);
+        joinTx = await this.wallet.sendTransaction(
+          [joinInstruction],
+          [playerKp]
+        );
       }
 
       // Confirm join with timeout recovery
-      const joinConfirmed = await this.confirmTransactionWithRecovery(joinTx, gamePda, "Player join", playerKp.publicKey);
+      const joinConfirmed = await this.confirmTransactionWithRecovery(
+        joinTx,
+        gamePda,
+        "Player join",
+        playerKp.publicKey
+      );
 
       if (joinConfirmed) {
-        this.gameDb.saveGameParticipant(gamePda.toBase58(), telegramId.toString(), creatorPubkey);
+        this.gameDb.saveGameParticipant(
+          gamePda.toBase58(),
+          telegramId.toString(),
+          creatorPubkey
+        );
         return { success: true };
       } else {
-        return { success: false, error: "Failed to confirm auto-join transaction" };
+        return {
+          success: false,
+          error: "Failed to confirm auto-join transaction",
+        };
       }
-
     } catch (joinError: any) {
-      const errorMsg = logAndFormatError(joinError, `auto-joining creator to ${gameType} game`);
+      const errorMsg = logAndFormatError(
+        joinError,
+        `auto-joining creator to ${gameType} game`
+      );
       return {
         success: false,
-        error: `⚠️ Game created successfully, but failed to auto-join creator!\n\nPlease manually join the game using the "🎮 Join" button.\n\nError: ${errorMsg}`
+        error: `⚠️ Game created successfully, but failed to auto-join creator!\n\nPlease manually join the game using the "🎮 Join" button.\n\nError: ${errorMsg}`,
       };
     }
   }
@@ -849,91 +1011,30 @@ export class GameManager {
 
   // Note: Player balance account was removed in the program. Balances are in token accounts.
 
-  /**
-   * Get expected winner for dumbflip and snowball games using oracle API
-   */
-  private async getExpectedWinner(gameAddress: string, participants: string[]): Promise<string | null> {
-    try {
-      if (participants.length === 0) {
-        return null;
-      }
-
-      const result = await this.oracleClient.getCurrentWinner(gameAddress);
-      if (!result.success || !result.winner) {
-        console.warn(`Failed to get winner from oracle for game ${gameAddress}: ${result.error}`);
-        return null;
-      }
-
-      // Oracle returns Solana address, try to convert to Telegram ID
-      const telegramId = this.gameDb.getPlayerTelegramId(result.winner);
-      if (telegramId) {
-        return telegramId;
-      }
-
-      // No Telegram mapping found - player joined via blockchain directly
-      // Return the Solana address for display
-      return result.winner;
-    } catch (error) {
-      console.error('Error getting expected winner from oracle:', error);
-      return null;
-    }
-  }
-
-
-  /**
-   * Get expected winner info for display in game messages
-   */
-  private async getExpectedWinnerInfo(ctx: Context, gameAddress: string, gameType: string): Promise<string> {
-    if (gameType !== "dumbflip" && gameType !== "snowball") {
-      return "";
-    }
-
-    try {
-      const participants = this.gameDb.getGameParticipants(gameAddress);
-      if (participants.length === 0) {
-        return "\n🎯 Expected winner: No tickets yet";
-      }
-
-      const expectedWinner = await this.getExpectedWinner(gameAddress, participants);
-      if (!expectedWinner) {
-        return "\n🎯 Expected winner: Calculating...";
-      }
-
-      // Check if it's a Telegram ID (numeric) or Solana address
-      const numericId = parseInt(expectedWinner, 10);
-      if (!isNaN(numericId)) {
-        // It's a Telegram ID - get the username
-        const expectedWinnerUsername = await this.getUsernameFromTelegramId(ctx, expectedWinner);
-        if (expectedWinnerUsername) {
-          return `\n🎯 Expected winner: @${expectedWinnerUsername}`;
-        }
-        // Username resolution failed, fall back to User + partial ID
-        return `\n🎯 Expected winner: User${expectedWinner.slice(0, 6)}`;
-      } else {
-        // It's a Solana address - format it nicely
-        return `\n🎯 Expected winner: ${this.formatAddress(expectedWinner)}`;
-      }
-    } catch (error) {
-      console.error('Error getting expected winner info:', error);
-      // Return a fallback message instead of empty string to show there was an issue
-      return "\n🎯 Expected winner: Error calculating";
-    }
-  }
-
+  // ================================
+  // EXPIRATION HANDLING
   // ================================
   // EXPIRATION HANDLING
   // ================================
 
-  public async handleExpiredGame(gamePda: PublicKey, gameAccount: any): Promise<GameCancellationResult | false> {
+  public async handleExpiredGame(
+    gamePda: PublicKey,
+    gameAccount: any
+  ): Promise<GameCancellationResult | false> {
     const gameType = this.getGameType(gameAccount);
     const ticketsCount = Number(gameAccount.ticketsCount || 0);
-    const hasEnoughTickets = ticketsCount >= Number(gameAccount.minTickets || 0);
+    const hasEnoughTickets =
+      ticketsCount >= Number(gameAccount.minTickets || 0);
 
     if (!this.isGameExpiredWithBuffer(gameAccount)) {
       return false;
     }
 
-    console.log(`🔄 Processing expired ${gameType} game ${gamePda.toBase58()} (${ticketsCount}/${gameAccount.maxTickets})`);
+    console.log(
+      `🔄 Processing expired ${gameType} game ${gamePda.toBase58()} (${ticketsCount}/${
+        gameAccount.maxTickets
+      })`
+    );
 
     // Giveaway: close only if no participants; otherwise wait for oracle completion
     if (gameType === "giveaway") {
@@ -945,19 +1046,21 @@ export class GameManager {
               cancelled: true,
               amount: Number(gameAccount.ticketAmount),
               creator: gameAccount.creator.toBase58(),
-              tx: result.tx!
+              tx: result.tx!,
             };
           }
         } catch (error) {
           console.error(`Error closing expired giveaway:`, error);
         }
       } else {
-        console.log("⏳ Giveaway has participants; waiting for oracle to complete.");
+        console.log(
+          "⏳ Giveaway has participants; waiting for oracle to complete."
+        );
       }
       return false;
     }
 
-    // Competitive games (coinflip/dumbflip/snowball):
+    // Competitive games (coinflip):
     // If there are no participants, we can close directly.
     if (ticketsCount === 0) {
       try {
@@ -967,18 +1070,25 @@ export class GameManager {
             cancelled: true,
             amount: Number(gameAccount.ticketAmount),
             creator: gameAccount.creator.toBase58(),
-            tx: result.tx!
+            tx: result.tx!,
           };
         }
       } catch (error) {
-        console.error(`Error closing expired ${gameType} with zero tickets:`, error);
+        console.error(
+          `Error closing expired ${gameType} with zero tickets:`,
+          error
+        );
       }
       return false;
     }
 
     // If there are participants but not enough to complete, try to unjoin them.
     if (!hasEnoughTickets) {
-      const didCleanup = await this.handleExpiredCoinflip(gamePda, gameAccount, gamePda.toBase58());
+      const didCleanup = await this.handleExpiredCoinflip(
+        gamePda,
+        gameAccount,
+        gamePda.toBase58()
+      );
       if (!didCleanup) return false;
 
       // After cleanup, check if game can now be closed
@@ -992,13 +1102,13 @@ export class GameManager {
               cancelled: true,
               amount: Number(refreshed.ticketAmount),
               creator: refreshed.creator.toBase58(),
-              tx: result.tx!
+              tx: result.tx!,
             };
           }
         }
       } catch (error: any) {
         // If account doesn't exist, the game was already successfully closed
-        if (error.message?.includes('Account does not exist')) {
+        if (error.message?.includes("Account does not exist")) {
           console.log("✅ Game account already closed successfully");
         } else {
           console.error("Post-cleanup close attempt failed:", error);
@@ -1040,7 +1150,10 @@ export class GameManager {
 
       // Validate token data
       if (!gameData.token_mint || !gameData.token_ticker) {
-        return { success: false, error: "Game data incomplete - please contact support" };
+        return {
+          success: false,
+          error: "Game data incomplete - please contact support",
+        };
       }
 
       // Fetch blockchain game state
@@ -1048,11 +1161,6 @@ export class GameManager {
 
       // Check if player already in game
       const isInGame = await this.isPlayerInGame(gamePda, playerKp.publicKey);
-
-      // Handle special case: rolling for snowball/dumbflip games
-      if (isInGame && (gameData.game_type === "snowball" || gameData.game_type === "dumbflip")) {
-        return { success: true, isRoll: true };
-      }
 
       if (isInGame) {
         return { success: false, error: "You have already joined this game!" };
@@ -1064,26 +1172,46 @@ export class GameManager {
 
       // Balance validation for paid games
       const currentGameType = Object.keys(gameAccount.gameType)[0];
-      if (currentGameType === "coinflip" || currentGameType === "dumbflip" || currentGameType === "snowball") {
+      if (currentGameType === "coinflip") {
         const gameAmount = Number(gameAccount.ticketAmount);
-        const tokenBalance = await this.wallet.getTokenBalance(telegramId, gameData.token_mint);
+        const tokenBalance = await this.wallet.getTokenBalance(
+          telegramId,
+          gameData.token_mint
+        );
         const totalBalance = tokenBalance;
         if (totalBalance < gameAmount) {
-          const metadata = await this.wallet.getTokenMetadata(gameData.token_mint);
+          const metadata = await this.wallet.getTokenMetadata(
+            gameData.token_mint
+          );
           return {
             success: false,
-            error: `Insufficient balance. You have ${this.wallet.formatTokenBalance(totalBalance, metadata.decimals)} ${gameData.token_ticker} but need ${this.wallet.formatTokenBalance(gameAmount, metadata.decimals)} ${gameData.token_ticker}`
+            error: `Insufficient balance. You have ${this.wallet.formatTokenBalance(
+              totalBalance,
+              metadata.decimals
+            )} ${
+              gameData.token_ticker
+            } but need ${this.wallet.formatTokenBalance(
+              gameAmount,
+              metadata.decimals
+            )} ${gameData.token_ticker}`,
           };
         }
       }
 
       // Ensure player balance and execute join
-      await this.ensurePlayerGames(playerKp, gameData.token_mint);
+      // ensurePlayerGames deprecated - no action needed
 
       if (gameAccount.isPrivate) {
-        const result = await this.joinPrivateGame(gamePda, playerKp, chatId || 0);
+        const result = await this.joinPrivateGame(
+          gamePda,
+          playerKp,
+          chatId || 0
+        );
         if (!result.success) {
-          return { success: false, error: result.error || "Failed to join private game" };
+          return {
+            success: false,
+            error: result.error || "Failed to join private game",
+          };
         }
       } else {
         const joinInstruction = await this.program.methods
@@ -1094,17 +1222,23 @@ export class GameManager {
           })
           .instruction();
 
-        const tx = await this.wallet.sendTransaction([joinInstruction], [playerKp]);
+        const tx = await this.wallet.sendTransaction(
+          [joinInstruction],
+          [playerKp]
+        );
         await this.wallet.confirmTransaction(tx);
       }
 
       // Update database
       const playerPubkey = playerKp.publicKey.toBase58();
       this.gameDb.savePlayerMapping(playerPubkey, telegramId.toString());
-      this.gameDb.saveGameParticipant(gameAddress, telegramId.toString(), playerPubkey);
+      this.gameDb.saveGameParticipant(
+        gameAddress,
+        telegramId.toString(),
+        playerPubkey
+      );
 
       return { success: true };
-
     } catch (error: any) {
       console.error(`Error joining game ${gameAddress}:`, error);
       return { success: false, error: error.message || "Failed to join game" };
@@ -1131,11 +1265,6 @@ export class GameManager {
       // Fetch current game state
       const gameAccount = await this.program.account.game.fetch(gamePda);
 
-      // Snowball-specific restriction
-      if (gameData.game_type === "snowball" && gameAccount.ticketsCount > 1) {
-        return { success: false, error: "❄️ Cannot leave snowball games once there are 2+ tickets!" };
-      }
-
       // Check if player is actually in the game
       const isInGame = await this.isPlayerInGame(gamePda, playerKp.publicKey);
       if (!isInGame) {
@@ -1146,23 +1275,29 @@ export class GameManager {
       await this.unjoinPlayerFromGame(gamePda, playerKp, playerKp.publicKey);
 
       return { success: true };
-
     } catch (error: any) {
       console.error(`Error unjoining game ${gameAddress}:`, error);
-      return { success: false, error: error.message || "Failed to unjoin game" };
+      return {
+        success: false,
+        error: error.message || "Failed to unjoin game",
+      };
     }
   }
-
 
   // ================================
   // GAME CLOSURE AND CLEANUP
   // ================================
 
-  public async cancelGameWithPlayerKeys(gamePda: PublicKey, gameType: string): Promise<{ success: boolean; tx?: string; error?: string }> {
+  public async cancelGameWithPlayerKeys(
+    gamePda: PublicKey,
+    gameType: string
+  ): Promise<{ success: boolean; tx?: string; error?: string }> {
     try {
       const gameAccount = await this.program.account.game.fetch(gamePda);
       const gameAddress = gamePda.toBase58();
-      console.log(`Attempting to close ${gameType} game ${gameAddress} with cleanup`);
+      console.log(
+        `Attempting to close ${gameType} game ${gameAddress} with cleanup`
+      );
 
       // Note: PlayerParticipation cleanup no longer needed in new contract architecture
 
@@ -1171,7 +1306,9 @@ export class GameManager {
       const creatorTelegramId = this.gameDb.getPlayerTelegramId(creatorPubkey);
 
       if (!creatorTelegramId) {
-        console.log(`No telegram ID found for creator ${creatorPubkey}, cannot close game`);
+        console.log(
+          `No telegram ID found for creator ${creatorPubkey}, cannot close game`
+        );
         return { success: false, error: "Creator not found in database" };
       }
 
@@ -1185,30 +1322,47 @@ export class GameManager {
         })
         .instruction();
 
-      const tx = await this.wallet.sendTransaction([closeInstruction], [creatorKp]);
+      const tx = await this.wallet.sendTransaction(
+        [closeInstruction],
+        [creatorKp]
+      );
       await this.wallet.confirmTransaction(tx);
-      console.log(`✅ Successfully closed ${gameType} game ${gameAddress} with tx: ${tx}`);
+      console.log(
+        `✅ Successfully closed ${gameType} game ${gameAddress} with tx: ${tx}`
+      );
 
       return { success: true, tx };
     } catch (error: any) {
-      console.error(`❌ Error closing ${gameType} game ${gamePda.toBase58()}:`, error);
+      console.error(
+        `❌ Error closing ${gameType} game ${gamePda.toBase58()}:`,
+        error
+      );
       return { success: false, error: error.message };
     }
   }
 
-  private async unjoinPlayerFromGame(gamePda: PublicKey, playerKp: any, playerPubkey: PublicKey): Promise<void> {
+  private async unjoinPlayerFromGame(
+    gamePda: PublicKey,
+    playerKp: any,
+    playerPubkey: PublicKey
+  ): Promise<void> {
     // Get the last player from game participants in database
     const participantIds = this.gameDb.getGameParticipants(gamePda.toBase58());
 
     if (participantIds.length === 0) {
-      throw new Error('No participants found in game');
+      throw new Error("No participants found in game");
     }
 
     // Note: The new contract architecture doesn't require last player tracking
 
-    // For the new contract architecture, we need to provide the ticket index
-    // For now, we'll use 0 as the ticket index (this may need to be dynamic based on game state)
-    const ticketIndex = 0;
+    // Determine ticket index from database order (join order reflects ticket order)
+    const ticketIndex = participantIds.findIndex((id) => {
+      const mappedPubkey = this.gameDb.getPlayerPublicKey(id);
+      return mappedPubkey === playerPubkey.toBase58();
+    });
+    if (ticketIndex === -1) {
+      throw new Error("Ticket index not found for player");
+    }
 
     const unjoinInstruction = await this.program.methods
       .unjoinGame(ticketIndex)
@@ -1218,14 +1372,21 @@ export class GameManager {
       })
       .instruction();
 
-    const tx = await this.wallet.sendTransaction([unjoinInstruction], [playerKp]);
+    const tx = await this.wallet.sendTransaction(
+      [unjoinInstruction],
+      [playerKp]
+    );
     await this.wallet.confirmTransaction(tx);
 
     // Remove participant from database tracking
-    const playerTelegramId = this.gameDb.getPlayerTelegramId(playerPubkey.toBase58());
+    const playerTelegramId = this.gameDb.getPlayerTelegramId(
+      playerPubkey.toBase58()
+    );
     if (playerTelegramId) {
       this.gameDb.removeGameParticipant(gamePda.toBase58(), playerTelegramId);
-      console.log(`Removed player ${playerTelegramId} from game participants tracking`);
+      console.log(
+        `Removed player ${playerTelegramId} from game participants tracking`
+      );
     }
   }
 
@@ -1239,22 +1400,31 @@ export class GameManager {
     chatId: number
   ): Promise<{ success: boolean; tx?: string; error?: string }> {
     try {
-      const authResult = await this.oracleClient.authorizePlayer(gamePda, chatId);
+      const authResult = await this.oracleClient.authorizePlayer(
+        gamePda,
+        chatId
+      );
 
       if (!authResult.authorized) {
-        return { success: false, error: authResult.error || "Not authorized to join this private game" };
+        return {
+          success: false,
+          error: authResult.error || "Not authorized to join this private game",
+        };
       }
 
       // Get game data to determine the token mint
       const gameData = this.gameDb.getGame(gamePda.toBase58());
       if (!gameData?.token_mint) {
-        return { success: false, error: "Game data incomplete - token info missing" };
+        return {
+          success: false,
+          error: "Game data incomplete - token info missing",
+        };
       }
 
       const tokenMint = gameData.token_mint;
 
       const adminKp = authResult.adminKeypair!;
-      await this.ensurePlayerGames(playerKp, tokenMint);
+      // ensurePlayerGames deprecated - no action needed
 
       const joinInstruction = await this.program.methods
         .joinGame()
@@ -1265,7 +1435,10 @@ export class GameManager {
         })
         .instruction();
 
-      const tx = await this.wallet.sendTransaction([joinInstruction], [playerKp, adminKp]);
+      const tx = await this.wallet.sendTransaction(
+        [joinInstruction],
+        [playerKp, adminKp]
+      );
       await this.wallet.confirmTransaction(tx);
       return { success: true, tx };
     } catch (error: any) {
@@ -1278,7 +1451,10 @@ export class GameManager {
   // USER GAMES
   // ================================
 
-  public async getUserGames(ctx: Context, telegramId: bigint): Promise<{
+  public async getUserGames(
+    ctx: Context,
+    telegramId: bigint
+  ): Promise<{
     activeGames: string;
     recentGames: string;
   }> {
@@ -1288,24 +1464,33 @@ export class GameManager {
 
     const [activeGamesData, recentGamesData] = await Promise.all([
       this.gameDb.getActiveGames(telegramIdStr),
-      this.gameDb.getRecentGames(telegramIdStr, GAME_INFO_LIMIT)
+      this.gameDb.getRecentGames(telegramIdStr, GAME_INFO_LIMIT),
     ]);
 
     // Active games
-    const validActiveGames = await this.processActiveGames(ctx, activeGamesData);
-    const activeGamesSection = validActiveGames.length > 0
-      ? "🎮 <b>Active Games</b>\n\n" + validActiveGames.join("\n\n")
-      : "";
+    const validActiveGames = await this.processActiveGames(
+      ctx,
+      activeGamesData
+    );
+    const activeGamesSection =
+      validActiveGames.length > 0
+        ? "🎮 <b>Active Games</b>\n\n" + validActiveGames.join("\n\n")
+        : "";
 
     // Recent games
-    const validRecentGames = await this.processRecentGames(ctx, recentGamesData, telegramIdStr, playerPublicKey);
+    const validRecentGames = await this.processRecentGames(
+      ctx,
+      recentGamesData,
+      telegramIdStr,
+      playerPublicKey
+    );
 
     // Categorize recent games
     const categories: GameCategory = {
-      won: validRecentGames.filter(g => g.category === 'won'),
-      lost: validRecentGames.filter(g => g.category === 'lost'),
-      cancelled: validRecentGames.filter(g => g.category === 'cancelled'),
-      created: validRecentGames.filter(g => g.category === 'created')
+      won: validRecentGames.filter((g) => g.category === "won"),
+      lost: validRecentGames.filter((g) => g.category === "lost"),
+      cancelled: validRecentGames.filter((g) => g.category === "cancelled"),
+      created: validRecentGames.filter((g) => g.category === "created"),
     };
 
     const formatSection = this.formatGameSection.bind(this);
@@ -1314,41 +1499,62 @@ export class GameManager {
       formatSection(categories.won, "🏆 <b>Won Games</b>"),
       formatSection(categories.lost, "😢 <b>Lost Games</b>"),
       formatSection(categories.created, "🎮 <b>Created Games</b>"),
-      formatSection(categories.cancelled, "❌ <b>Cancelled Games</b>")
-    ].filter(section => section !== "").join("\n");
+      formatSection(categories.cancelled, "❌ <b>Cancelled Games</b>"),
+    ]
+      .filter((section) => section !== "")
+      .join("\n");
 
     return {
       activeGames: activeGamesSection,
-      recentGames: recentGamesSections
+      recentGames: recentGamesSections,
     };
   }
 
-  private async processActiveGames(ctx: Context, activeGamesData: any[]): Promise<string[]> {
-    const activeGames = await Promise.all(activeGamesData.map(async (gameData) => {
-      try {
-        const gamePda = new PublicKey(gameData.game_address);
-        await this.program.account.game.fetch(gamePda);
-        return this.getGameInfo(ctx, gamePda);
-      } catch (error) {
-        console.error(`Error fetching game ${gameData.game_address}:`, error);
-        return null;
-      }
-    }));
+  private async processActiveGames(
+    ctx: Context,
+    activeGamesData: any[]
+  ): Promise<string[]> {
+    const activeGames = await Promise.all(
+      activeGamesData.map(async (gameData) => {
+        try {
+          const gamePda = new PublicKey(gameData.game_address);
+          await this.program.account.game.fetch(gamePda);
+          return this.getGameInfo(ctx, gamePda);
+        } catch (error) {
+          console.error(`Error fetching game ${gameData.game_address}:`, error);
+          return null;
+        }
+      })
+    );
 
     return activeGames.filter((game): game is string => game !== null);
   }
 
-  private async processRecentGames(ctx: Context, recentGamesData: any[], telegramIdStr: string, playerPublicKey: string): Promise<any[]> {
-    const recentGames = await Promise.all(recentGamesData.map(async (gameData) => {
-      try {
-        const category = categorizeGame(gameData, telegramIdStr, playerPublicKey);
-        const gameInfo = await this.getCompletedGameInfo(ctx, gameData);
-        return { category, gameInfo, completedAt: gameData.completed_at };
-      } catch (error) {
-        console.error(`Error processing game ${gameData.game_address}:`, error);
-        return null;
-      }
-    }));
+  private async processRecentGames(
+    ctx: Context,
+    recentGamesData: any[],
+    telegramIdStr: string,
+    playerPublicKey: string
+  ): Promise<any[]> {
+    const recentGames = await Promise.all(
+      recentGamesData.map(async (gameData) => {
+        try {
+          const category = categorizeGame(
+            gameData,
+            telegramIdStr,
+            playerPublicKey
+          );
+          const gameInfo = await this.getCompletedGameInfo(ctx, gameData);
+          return { category, gameInfo, completedAt: gameData.completed_at };
+        } catch (error) {
+          console.error(
+            `Error processing game ${gameData.game_address}:`,
+            error
+          );
+          return null;
+        }
+      })
+    );
 
     return recentGames.filter((game): game is any => game !== null);
   }
@@ -1378,13 +1584,13 @@ export class GameManager {
         if (game.message_id && game.chat_id) {
           this.activeGameMessages.set(game.game_address, {
             messageId: game.message_id,
-            chatId: game.chat_id
+            chatId: game.chat_id,
           });
         }
       }
       console.log(`Reloaded ${this.activeGameMessages.size} game messages`);
     } catch (error) {
-      console.error('Error reloading game messages:', error);
+      console.error("Error reloading game messages:", error);
     }
   }
 
@@ -1405,14 +1611,17 @@ export class GameManager {
         if (cancelled) cancelledCount++;
       }
 
-      console.log(`🏁 Blockchain scan completed. Cancelled ${cancelledCount}/${orphanedGames.length} orphaned games`);
-
+      console.log(
+        `🏁 Blockchain scan completed. Cancelled ${cancelledCount}/${orphanedGames.length} orphaned games`
+      );
     } catch (error) {
       console.error("❌ Error during blockchain scan:", error);
     }
   }
 
-  private async findOrphanedGames(): Promise<{ address: string; account: any }[]> {
+  private async findOrphanedGames(): Promise<
+    { address: string; account: any }[]
+  > {
     const orphanedGames: { address: string; account: any }[] = [];
 
     try {
@@ -1424,7 +1633,9 @@ export class GameManager {
 
         // Check if this game is in our database
         if (!this.gameDb.gameExists(gameAddress)) {
-          console.log(`🔍 Found orphaned game: ${gameAddress} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`);
+          console.log(
+            `🔍 Found orphaned game: ${gameAddress} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`
+          );
           orphanedGames.push({ address: gameAddress, account: gameAccount });
         }
       }
@@ -1441,17 +1652,20 @@ export class GameManager {
       const gameAccount = await this.program.account.game.fetch(gamePda);
 
       if (!this.isGameExpiredWithBuffer(gameAccount)) {
-        console.log(`⏰ Game ${address} hasn't passed buffer time yet, skipping`);
+        console.log(
+          `⏰ Game ${address} hasn't passed buffer time yet, skipping`
+        );
         return false;
       }
 
       const gameType = this.getGameType(gameAccount);
-      console.log(`🔄 Processing expired ${gameType} game ${address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`);
+      console.log(
+        `🔄 Processing expired ${gameType} game ${address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`
+      );
 
       return gameType === "giveaway"
         ? await this.handleExpiredGiveaway(gamePda, gameAccount, address)
         : await this.handleExpiredCoinflip(gamePda, gameAccount, address);
-
     } catch (error: any) {
       return this.handleGameProcessingError(error, address);
     }
@@ -1462,7 +1676,7 @@ export class GameManager {
     const createdAt = Number(gameAccount.createdAt);
     const timeout = Number(gameAccount.timeout);
     const expiresAt = createdAt + timeout;
-    return currentTime > (expiresAt + GAME_EXPIRATION_BUFFER_TIME);
+    return currentTime > expiresAt + GAME_EXPIRATION_BUFFER_TIME;
   }
 
   private getGameType(gameAccount: any): string {
@@ -1471,20 +1685,29 @@ export class GameManager {
   }
 
   private handleGameProcessingError(error: any, address: string): boolean {
-    if (error.message?.includes('Account does not exist')) {
+    if (error.message?.includes("Account does not exist")) {
       console.log(`ℹ️ Orphaned game ${address} was already closed`);
       return true;
     } else {
-      console.error(`❌ Error processing orphaned game ${address}:`, error.message);
+      console.error(
+        `❌ Error processing orphaned game ${address}:`,
+        error.message
+      );
       return false;
     }
   }
 
-  private async handleExpiredGiveaway(gamePda: PublicKey, gameAccount: any, address: string): Promise<boolean> {
+  private async handleExpiredGiveaway(
+    gamePda: PublicKey,
+    gameAccount: any,
+    address: string
+  ): Promise<boolean> {
     const gameType = this.getGameType(gameAccount);
 
     if (this.isGameExpiredWithBuffer(gameAccount)) {
-      console.log(`🔄 Processing expired ${gameType} game ${address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`);
+      console.log(
+        `🔄 Processing expired ${gameType} game ${address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`
+      );
 
       const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
       if (result.success) {
@@ -1496,13 +1719,24 @@ export class GameManager {
     return false;
   }
 
-  private async handleExpiredCoinflip(gamePda: PublicKey, gameAccount: any, address: string): Promise<boolean> {
+  private async handleExpiredCoinflip(
+    gamePda: PublicKey,
+    gameAccount: any,
+    address: string
+  ): Promise<boolean> {
     const playerKeyInfo = this.analyzePlayerKeys(gameAccount, address);
-    console.log(`🪙 Coinflip ${address}: ${playerKeyInfo.available.length}/${playerKeyInfo.total} player keys available`);
+    console.log(
+      `🪙 Coinflip ${address}: ${playerKeyInfo.available.length}/${playerKeyInfo.total} player keys available`
+    );
 
     // Strategy 1: Complete cleanup (unjoin all non-creators, then cancel)
     if (playerKeyInfo.canCompleteCleanup) {
-      return await this.executeCompleteCleanup(gamePda, gameAccount, playerKeyInfo, address);
+      return await this.executeCompleteCleanup(
+        gamePda,
+        gameAccount,
+        playerKeyInfo,
+        address
+      );
     }
 
     // Strategy 2: Partial cleanup (unjoin available players only)
@@ -1513,7 +1747,11 @@ export class GameManager {
     // Get players from database since contract no longer stores players array
     const participantTelegramIds = this.getGamePlayers(gameAddress);
     const creatorPubkey = gameAccount.creator;
-    const available: Array<{pubkey: PublicKey, telegramId: string, isCreator: boolean}> = [];
+    const available: Array<{
+      pubkey: PublicKey;
+      telegramId: string;
+      isCreator: boolean;
+    }> = [];
     const unavailable: string[] = [];
 
     for (const telegramId of participantTelegramIds) {
@@ -1524,7 +1762,7 @@ export class GameManager {
           available.push({
             pubkey: playerPubkey,
             telegramId,
-            isCreator: playerPubkey.equals(creatorPubkey)
+            isCreator: playerPubkey.equals(creatorPubkey),
           });
         } else {
           unavailable.push(telegramId);
@@ -1534,9 +1772,10 @@ export class GameManager {
       }
     }
 
-    const nonCreators = available.filter(p => !p.isCreator);
-    const creator = available.find(p => p.isCreator);
-    const canCompleteCleanup = unavailable.length === 0 && creator !== undefined;
+    const nonCreators = available.filter((p) => !p.isCreator);
+    const creator = available.find((p) => p.isCreator);
+    const canCompleteCleanup =
+      unavailable.length === 0 && creator !== undefined;
 
     return {
       available,
@@ -1544,19 +1783,31 @@ export class GameManager {
       nonCreators,
       creator,
       canCompleteCleanup,
-      total: participantTelegramIds.length
+      total: participantTelegramIds.length,
     };
   }
 
-  private async executeCompleteCleanup(gamePda: PublicKey, gameAccount: any, playerKeyInfo: any, address: string): Promise<boolean> {
-    console.log(`🔧 Strategy 1: Complete cleanup - unjoin all ${playerKeyInfo.available.length} players, then cancel`);
+  private async executeCompleteCleanup(
+    gamePda: PublicKey,
+    gameAccount: any,
+    playerKeyInfo: any,
+    address: string
+  ): Promise<boolean> {
+    console.log(
+      `🔧 Strategy 1: Complete cleanup - unjoin all ${playerKeyInfo.available.length} players, then cancel`
+    );
 
     // Unjoin ALL players including creator for coinflip games
-    const unjoinedCount = await this.unjoinPlayers(gamePda, playerKeyInfo.available);
+    const unjoinedCount = await this.unjoinPlayers(
+      gamePda,
+      playerKeyInfo.available
+    );
 
     // Only proceed if all players were successfully unjoined
     if (unjoinedCount !== playerKeyInfo.available.length) {
-      console.log(`❌ Could only unjoin ${unjoinedCount}/${playerKeyInfo.available.length} players from coinflip ${address}, skipping cancellation`);
+      console.log(
+        `❌ Could only unjoin ${unjoinedCount}/${playerKeyInfo.available.length} players from coinflip ${address}, skipping cancellation`
+      );
       return false;
     }
 
@@ -1570,23 +1821,45 @@ export class GameManager {
     );
   }
 
-  private async executePartialCleanup(gamePda: PublicKey, playerKeyInfo: any, address: string): Promise<boolean> {
-    console.log(`🔧 Strategy 2: Partial cleanup - unjoin ${playerKeyInfo.available.length} available players`);
+  private async executePartialCleanup(
+    gamePda: PublicKey,
+    playerKeyInfo: any,
+    address: string
+  ): Promise<boolean> {
+    console.log(
+      `🔧 Strategy 2: Partial cleanup - unjoin ${playerKeyInfo.available.length} available players`
+    );
 
-    const unjoinedCount = await this.unjoinPlayers(gamePda, playerKeyInfo.available);
-    console.log(`📊 Unjoined ${unjoinedCount}/${playerKeyInfo.available.length} players from coinflip ${address}`);
+    const unjoinedCount = await this.unjoinPlayers(
+      gamePda,
+      playerKeyInfo.available
+    );
+    console.log(
+      `📊 Unjoined ${unjoinedCount}/${playerKeyInfo.available.length} players from coinflip ${address}`
+    );
 
     return unjoinedCount > 0;
   }
 
-  private async unjoinPlayers(gamePda: PublicKey, players: Array<{pubkey: PublicKey, telegramId: string, isCreator: boolean}>): Promise<number> {
+  private async unjoinPlayers(
+    gamePda: PublicKey,
+    players: Array<{
+      pubkey: PublicKey;
+      telegramId: string;
+      isCreator: boolean;
+    }>
+  ): Promise<number> {
     let unjoinedCount = 0;
 
     for (const player of players) {
       try {
         const playerKp = this.wallet.getKeyPair(BigInt(player.telegramId));
         await this.unjoinPlayerFromGame(gamePda, playerKp, player.pubkey);
-        console.log(`➡️ Unjoined ${player.isCreator ? 'creator' : 'player'} ${player.pubkey.toBase58().slice(0, 8)}...`);
+        console.log(
+          `➡️ Unjoined ${
+            player.isCreator ? "creator" : "player"
+          } ${player.pubkey.toBase58().slice(0, 8)}...`
+        );
         unjoinedCount++;
       } catch (error) {
         console.error(`Failed to unjoin ${player.pubkey.toBase58()}:`, error);
@@ -1619,12 +1892,20 @@ export class GameManager {
         })
         .instruction();
 
-      const tx = await this.wallet.sendTransaction([closeInstruction], [creatorKp]);
+      const tx = await this.wallet.sendTransaction(
+        [closeInstruction],
+        [creatorKp]
+      );
       await this.wallet.confirmTransaction(tx);
-      console.log(`✅ Successfully closed expired ${gameType} ${address} with tx: ${tx}`);
+      console.log(
+        `✅ Successfully closed expired ${gameType} ${address} with tx: ${tx}`
+      );
       return true;
     } catch (error: any) {
-      console.error(`❌ Failed to close expired ${gameType} ${address}:`, error.message);
+      console.error(
+        `❌ Failed to close expired ${gameType} ${address}:`,
+        error.message
+      );
       return false;
     }
   }
