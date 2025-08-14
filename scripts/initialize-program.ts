@@ -60,7 +60,7 @@ const initializeOracle = async (program: anchor.Program<Coinflip>) => {
       // u64 fields must be BN
       maxTimeout: new anchor.BN(86400),         // 24 hours max timeout
       minTimeout: new anchor.BN(60),            // 1 minute min timeout
-      filterCleanupBuffer: new anchor.BN(86400) // extra buffer for bloom-filter cleanup
+
     };
 
     const oracleInstruction = await program.methods

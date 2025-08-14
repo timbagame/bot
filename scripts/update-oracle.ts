@@ -46,7 +46,7 @@ const updateOracle = async () => {
       console.log(`- Max Timeout: ${currentOracle.maxTimeout} seconds (${Math.round(currentOracle.maxTimeout / 60)} minutes)`);
       console.log(`- Max Tickets: ${currentOracle.maxTickets}`);
       console.log(`- Oracle Buffer Time: ${currentOracle.oracleBufferTime} seconds`);
-    console.log(`- Filter Cleanup Buffer: ${currentOracle.filterCleanupBuffer} seconds`);
+
 
       // Verify operator
       if (!currentOracle.operator.equals(adminKeypair.publicKey)) {
@@ -68,7 +68,7 @@ const updateOracle = async () => {
       // u64 fields must be BN
       maxTimeout: new anchor.BN(86400), // 24 hours
       minTimeout: new anchor.BN(60),    // 1 minute
-      filterCleanupBuffer: new anchor.BN(86400),
+
     };
 
     console.log("\nNew Oracle Configuration:");
@@ -77,7 +77,7 @@ const updateOracle = async () => {
     console.log(`- Max Timeout: ${newConfig.maxTimeout} seconds (${Math.round(newConfig.maxTimeout / 60)} minutes)`);
     console.log(`- Max Tickets: ${newConfig.maxTickets}`);
     console.log(`- Oracle Buffer Time: ${newConfig.oracleBufferTime} seconds`);
-    console.log(`- Filter Cleanup Buffer: ${newConfig.filterCleanupBuffer} seconds`);
+
 
     console.log("\n🔄 Updating Oracle...");
 
@@ -103,7 +103,7 @@ const updateOracle = async () => {
     console.log(`- Max Timeout: ${updatedOracle.maxTimeout} seconds (${Math.round(updatedOracle.maxTimeout / 60)} minutes)`);
     console.log(`- Max Tickets: ${updatedOracle.maxTickets}`);
     console.log(`- Oracle Buffer Time: ${updatedOracle.oracleBufferTime} seconds`);
-    console.log(`- Filter Cleanup Buffer: ${updatedOracle.filterCleanupBuffer} seconds`);
+
 
   } catch (error) {
     console.error("❌ Error updating Oracle:", error);
