@@ -1328,17 +1328,17 @@ export class GameManager {
       throw new Error("No participants found in game");
     }
 
-    // Determine ticket index from database order (join order reflects ticket order)
-    const ticketIndex = participantIds.findIndex((id) => {
-      const mappedPubkey = this.gameDb.getPlayerPublicKey(id);
-      return mappedPubkey === playerPubkey.toBase58();
+    // Ensure player is tracked for this game (defensive check)
+    const isTracked = participantIds.some((id) => {
+      const mapped = this.gameDb.getPlayerPublicKey(id);
+      return mapped === playerPubkey.toBase58();
     });
-    if (ticketIndex === -1) {
-      throw new Error("Ticket index not found for player");
+    if (!isTracked) {
+      throw new Error("Player not found in game participants");
     }
 
     const unjoinInstruction = await this.program.methods
-      .unjoinGame(ticketIndex)
+      .unjoinGame()
       .accounts({
         game: gamePda,
         player: playerPubkey,
