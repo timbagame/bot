@@ -353,10 +353,7 @@ export class GameManager {
     return `\nWinner: ${winnerUsername}`;
   }
 
-  private generateGameKeyboard(
-    status: string,
-    gamePda: PublicKey
-  ) {
+  private generateGameKeyboard(status: string, gamePda: PublicKey) {
     // _gameType unused post-refactor
     if (status.toLowerCase() === "completed") return [];
 
@@ -377,7 +374,6 @@ export class GameManager {
     amount: number,
     creatorUsername: string,
     status: string,
-    _tokenMint: string, // deprecated/unused tokenMint param retained for signature compatibility
     tokenTicker: string,
     winnerAddress?: string,
     providedTotalPot?: number
@@ -460,7 +456,7 @@ export class GameManager {
     gameType: string,
     amount: number,
     creatorUsername: string,
-    tokenMint: string,
+    _tokenMint: string,
     tokenTicker: string,
     status: string = "Active"
   ): Promise<number> {
@@ -471,7 +467,6 @@ export class GameManager {
       amount,
       creatorUsername,
       status,
-      tokenMint, // still passed to maintain signature though unused
       tokenTicker,
       undefined
     );
@@ -502,7 +497,6 @@ export class GameManager {
     amount: number,
     creatorUsername: string,
     status: string,
-    tokenMint: string,
     tokenTicker: string,
     winnerAddress?: string,
     totalPot?: number
@@ -518,7 +512,6 @@ export class GameManager {
         amount,
         creatorUsername,
         status,
-        tokenMint, // unused tokenMint retained
         tokenTicker,
         winnerAddress,
         totalPot
@@ -580,7 +573,6 @@ export class GameManager {
         gameData.amount,
         creatorUsername,
         status,
-        gameData.token_mint || "",
         gameData.token_ticker || "",
         winnerAddress,
         totalPot
@@ -732,7 +724,7 @@ export class GameManager {
 
         try {
           if (operationType === "Game creation") {
-            await this.program.account.game.fetch(gamePda);
+            const gameAccount = await this.program.account.game.fetch(gamePda);
             console.log(
               `✅ Game account found - transaction ${signature} succeeded despite timeout`
             );
@@ -1421,10 +1413,7 @@ export class GameManager {
         };
       }
 
-      const tokenMint = gameData.token_mint;
-
       const adminKp = authResult.adminKeypair!;
-      // ensurePlayerGames deprecated - no action needed
 
       const joinInstruction = await this.program.methods
         .joinGame()
@@ -1518,7 +1507,7 @@ export class GameManager {
       activeGamesData.map(async (gameData) => {
         try {
           const gamePda = new PublicKey(gameData.game_address);
-          await this.program.account.game.fetch(gamePda);
+          const gameAccount = await this.program.account.game.fetch(gamePda);
           return this.getGameInfo(ctx, gamePda);
         } catch (error) {
           console.error(`Error fetching game ${gameData.game_address}:`, error);
