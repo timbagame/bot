@@ -130,8 +130,6 @@ export interface PlayerUnjoinedEvent {
   timestamp: anchor.BN;
 }
 
-// PlayerRolledEvent not part of current event set
-
 // ================================
 // ORACLE TYPES
 // ================================
