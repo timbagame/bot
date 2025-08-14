@@ -724,7 +724,6 @@ export class GameManager {
 
         try {
           if (operationType === "Game creation") {
-            const gameAccount = await this.program.account.game.fetch(gamePda);
             console.log(
               `✅ Game account found - transaction ${signature} succeeded despite timeout`
             );
@@ -1254,9 +1253,6 @@ export class GameManager {
         return { success: false, error: "Game not found!" };
       }
 
-      // Fetch current game state
-      const gameAccount = await this.program.account.game.fetch(gamePda);
-
       // Check if player is actually in the game
       const isInGame = await this.isPlayerInGame(gamePda, playerKp.publicKey);
       if (!isInGame) {
@@ -1507,7 +1503,6 @@ export class GameManager {
       activeGamesData.map(async (gameData) => {
         try {
           const gamePda = new PublicKey(gameData.game_address);
-          const gameAccount = await this.program.account.game.fetch(gamePda);
           return this.getGameInfo(ctx, gamePda);
         } catch (error) {
           console.error(`Error fetching game ${gameData.game_address}:`, error);
