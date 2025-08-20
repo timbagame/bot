@@ -240,15 +240,39 @@ export class WalletManager {
       return { decimals: cached.decimals };
     }
 
-    await this.throttle();
-    const account = await this.connection.getParsedAccountInfo(new PublicKey(tokenMint));
-    if (!account.value) {
-      throw new Error("Token account not found");
+    // Handle known tokens with hardcoded decimals
+    const knownTokens: { [key: string]: number } = {
+      'So11111111111111111111111111111111111111112': 9, // WSOL
+      'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 6, // USDC
+      'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': 6, // USDT
+      'BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4': 9, // TIMBA
+    };
+
+    if (knownTokens[tokenMint]) {
+      const decimals = knownTokens[tokenMint];
+      this.tokenMetadataCache.set(tokenMint, { decimals, timestamp: now });
+      return { decimals };
     }
 
-    const decimals = (account.value as any).data.parsed.info.decimals;
-    this.tokenMetadataCache.set(tokenMint, { decimals, timestamp: now });
-    return { decimals };
+    await this.throttle();
+    try {
+      const account = await this.connection.getParsedAccountInfo(new PublicKey(tokenMint));
+      if (!account.value || !account.value.data) {
+        throw new Error("Token mint account not found or has no data");
+      }
+
+      const parsedData = account.value.data as any;
+      if (parsedData.parsed && parsedData.parsed.info && parsedData.parsed.info.decimals !== undefined) {
+        const decimals = parsedData.parsed.info.decimals;
+        this.tokenMetadataCache.set(tokenMint, { decimals, timestamp: now });
+        return { decimals };
+      } else {
+        throw new Error("Unable to parse token decimals from account data");
+      }
+    } catch (error) {
+      console.error(`Error getting token metadata for ${tokenMint}:`, error);
+      throw new Error(`Failed to get token metadata: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
   // ================================
@@ -405,6 +429,48 @@ export class WalletManager {
 
     console.log(`📤 Transaction sent: ${signature.slice(0, 8)}...`);
     return signature;
+  }
+
+  /**
+   * Sign and send a pre-serialized transaction (e.g., from Jupiter)
+   */
+  public async signAndSendSerializedTransaction(
+    serializedTxBase64: string,
+    signer: Keypair
+  ): Promise<string> {
+    await this.throttle();
+
+    try {
+      // Deserialize the transaction
+      const txBuffer = Buffer.from(serializedTxBase64, 'base64');
+      const tx = VersionedTransaction.deserialize(txBuffer);
+
+      // Sign the transaction
+      tx.sign([signer]);
+
+      // Send the transaction with more permissive settings for Jupiter transactions
+      const signature = await retryWithBackoff(async () => {
+        return await this.connection.sendTransaction(tx, {
+          skipPreflight: true, // Skip preflight for complex Jupiter transactions
+          preflightCommitment: 'processed',
+          maxRetries: 5
+        });
+      });
+
+      console.log(`📤 Serialized transaction sent: ${signature.slice(0, 8)}...`);
+      return signature;
+    } catch (error: any) {
+      console.error("Error signing and sending serialized transaction:", error);
+      
+      // Check for specific address lookup table error
+      if (error.message?.includes('address table account') || 
+          error.message?.includes('lookup table') ||
+          error.message?.includes('AddressTableLookup')) {
+        throw new Error('Jupiter transaction failed due to address lookup table issue. Try again with a different amount or wait a moment.');
+      }
+      
+      throw new Error(`Failed to send transaction: ${error.message}`);
+    }
   }
 
   // ================================
