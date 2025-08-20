@@ -11,6 +11,7 @@ import { GameDatabase } from "./utils/game-database";
 import { GameManager } from "./utils/game";
 import { PDAManager } from "./utils/pda";
 import { formatUserFriendlyError } from "./utils/errors";
+import { SwapManager } from "./utils/swap-manager";
 import {
   LAMPORTS_PER_SOL,
   GAME_TIMEOUT,
@@ -46,6 +47,7 @@ export let gameManager: GameManager;
 export let program: anchor.Program<Coinflip>;
 const tokenDb = TokenDatabase.getInstance();
 let tokenManager: TokenManager;
+let swapManager: SwapManager;
 
 // ================================
 // HELPER FUNCTIONS
@@ -378,6 +380,9 @@ const setupAnchor = async () => {
     console.log(
       `Initialized TokenManager with default token: ${DEFAULT_TOKEN_TICKER}`
     );
+
+    swapManager = new SwapManager(wallet.getConnection(), wallet);
+    console.log('Initialized SwapManager with pump.fun integration');
 
     await initializeTokensList();
     gameManager = GameManager.getInstance(program, wallet, gameDb);
@@ -916,19 +921,15 @@ bot.command("swap", sequentialize((ctx) => [ctx.from?.id, "swap"]), async (ctx: 
   }
 
   try {
-    const { NetworkDetector } = await import("./utils/network-detector");
-    const currentNetwork = NetworkDetector.getCurrentNetwork();
-    const isMainnet = NetworkDetector.supportsJupiter(currentNetwork);
+    const processingMsg = await ctx.reply(`🔄 Processing swap request...`);
     
-    const processingMsg = await ctx.reply(`🔄 Processing swap request... (${NetworkDetector.getNetworkDisplayName(currentNetwork)})`);
-    
-    // Get token information (handle SOL and common tokens specially)
-    const getTokenInfo = (ticker: string) => {
-      const upperTicker = ticker.toUpperCase();
+    // Get token information (handle SOL, common tokens, and mint addresses)
+    const getTokenInfo = async (tickerOrMint: string) => {
+      const upperTicker = tickerOrMint.toUpperCase();
       
       if (upperTicker === 'SOL') {
         return {
-          token_mint: 'SOL', // Keep as SOL, will convert to proper mint later
+          token_mint: 'So11111111111111111111111111111111111111112', // WSOL mint for swaps
           token_ticker: 'SOL',
           decimals: 9,
           added_at: 0
@@ -944,17 +945,42 @@ bot.command("swap", sequentialize((ctx) => [ctx.from?.id, "swap"]), async (ctx: 
         };
       }
       
-      return tokenManager.getKnownTokenByTicker(ticker);
+      // Check if it's a known token by ticker
+      const knownToken = tokenManager.getKnownTokenByTicker(tickerOrMint);
+      if (knownToken) {
+        return knownToken;
+      }
+      
+      // Check if it looks like a mint address (44 characters, base58)
+      if (tickerOrMint.length === 44 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(tickerOrMint)) {
+        try {
+          // Auto-discover token info including pump.fun detection
+          const tokenInfo = await tokenManager.autoDiscoverTokenInfo(tickerOrMint);
+          if (tokenInfo) {
+            return {
+              token_mint: tickerOrMint,
+              token_ticker: tokenInfo.ticker,
+              decimals: tokenInfo.decimals,
+              added_at: Date.now(),
+              isPumpFun: tokenInfo.isPumpFun
+            };
+          }
+        } catch (error) {
+          console.log(`Failed to auto-discover token ${tickerOrMint}:`, error);
+        }
+      }
+      
+      return null;
     };
 
-    const fromTokenInfo = getTokenInfo(fromToken);
-    const toTokenInfo = getTokenInfo(toToken);
+    const fromTokenInfo = await getTokenInfo(fromToken);
+    const toTokenInfo = await getTokenInfo(toToken);
     
     if (!fromTokenInfo || !toTokenInfo) {
       await ctx.api.editMessageText(
         ctx.chat!.id,
         processingMsg.message_id,
-        "❌ One or both tokens not found or not approved for this chat"
+        "❌ One or both tokens not found. Use token ticker (SOL, USDC) or valid mint address"
       );
       return;
     }
@@ -975,7 +1001,7 @@ bot.command("swap", sequentialize((ctx) => [ctx.from?.id, "swap"]), async (ctx: 
         return;
       }
     } else {
-      userBalance = await wallet.getTokenBalance(telegramId, fromTokenInfo.token_mint);
+      userBalance = await wallet.getTokenBalance(telegramId, fromTokenInfo.token_mint === 'So11111111111111111111111111111111111111112' ? 'SOL' : fromTokenInfo.token_mint);
       if (userBalance < rawAmount) {
         await ctx.api.editMessageText(
           ctx.chat!.id,
@@ -986,90 +1012,27 @@ bot.command("swap", sequentialize((ctx) => [ctx.from?.id, "swap"]), async (ctx: 
       }
     }
 
-    let quote: any;
-    let quoteMessage: string;
+    // Use unified swap manager with pump.fun support
+    const quote = await swapManager.getQuote({
+      inputMint: fromTokenInfo.token_mint,
+      outputMint: toTokenInfo.token_mint,
+      amount: rawAmount.toString(),
+      slippageBps: Math.floor(slippagePercent * 100),
+      userKeypair,
+      inputDecimals: fromTokenInfo.decimals,
+      outputDecimals: toTokenInfo.decimals,
+      inputTicker: fromToken.toUpperCase(),
+      outputTicker: toToken.toUpperCase()
+    });
 
-    if (isMainnet) {
-      // Use Jupiter for mainnet
-      const { JupiterClient, getJupiterMint, validateSlippage } = await import("./utils/jupiter");
-      const jupiterClient = new JupiterClient();
-
-      // Convert to Jupiter mints (handles SOL -> WSOL conversion)
-      const inputMint = getJupiterMint(fromTokenInfo.token_mint);
-      const outputMint = getJupiterMint(toTokenInfo.token_mint);
-      
-      // Additional validation: prevent same mint after conversion
-      if (inputMint === outputMint) {
-        await ctx.api.editMessageText(
-          ctx.chat!.id,
-          processingMsg.message_id,
-          `❌ Cannot swap between same tokens after mint resolution.\nFrom: ${fromToken} (${inputMint.slice(0,8)}...)\nTo: ${toToken} (${outputMint.slice(0,8)}...)\n\nTry different token pairs.`
-        );
-        return;
-      }
-      
-      const slippageBps = Math.floor(slippagePercent * 100); // Convert % to basis points
-      
-      // Validate slippage
-      const slippageValidation = validateSlippage(slippageBps);
-      if (!slippageValidation.valid) {
-        await ctx.api.editMessageText(
-          ctx.chat!.id,
-          processingMsg.message_id,
-          `❌ ${slippageValidation.error}`
-        );
-        return;
-      }
-
-      // Get quote from Jupiter
-      quote = await jupiterClient.getQuote({
-        inputMint,
-        outputMint,
-        amount: rawAmount.toString(),
-        slippageBps,
-      });
-
-      // Format quote for display
-      quoteMessage = jupiterClient.formatQuoteForDisplay(
-        quote,
-        fromTokenInfo.decimals,
-        toTokenInfo.decimals,
-        fromToken,
-        toToken
-      );
-    } else {
-      // Use simulator for devnet/testnet
-      const { DevnetSwapSimulator } = await import("./utils/devnet-swap-simulator");
-      const simulator = new DevnetSwapSimulator(wallet);
-
-      if (!simulator.canSimulatePair(fromToken.toUpperCase(), toToken.toUpperCase())) {
-        const supportedPairs = simulator.getSupportedPairs();
-        await ctx.api.editMessageText(
-          ctx.chat!.id,
-          processingMsg.message_id,
-          `❌ Devnet simulation not available for ${fromToken} → ${toToken}\n\nSupported pairs:\n${supportedPairs.map(p => `• ${p.replace('_', ' → ')}`).join('\n')}`
-        );
-        return;
-      }
-
-      quote = await simulator.getSimulatedQuote(
-        fromTokenInfo.token_mint,
-        toTokenInfo.token_mint,
-        rawAmount.toString(),
-        fromTokenInfo.decimals,
-        toTokenInfo.decimals,
-        fromToken.toUpperCase(),
-        toToken.toUpperCase()
-      );
-
-      quoteMessage = simulator.formatQuoteForDisplay(
-        quote,
-        fromTokenInfo.decimals,
-        toTokenInfo.decimals,
-        fromToken,
-        toToken
-      );
-    }
+    // Format quote for display
+    const quoteMessage = swapManager.formatQuoteForDisplay(
+      quote,
+      fromTokenInfo.decimals,
+      toTokenInfo.decimals,
+      fromToken.toUpperCase(),
+      toToken.toUpperCase()
+    );
 
     await ctx.api.editMessageText(
       ctx.chat!.id,
@@ -1097,7 +1060,7 @@ bot.command("swap", sequentialize((ctx) => [ctx.from?.id, "swap"]), async (ctx: 
       toToken,
       userKeypair,
       telegramId,
-      isMainnet
+      slippagePercent
     };
     
     // Store with timeout (5 minutes)
@@ -1139,80 +1102,38 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
   }
 
   try {
-    await ctx.editMessageText(`🔄 Executing swap... (${swapData.isMainnet ? 'Jupiter' : 'Devnet Simulator'})`);
+    await ctx.editMessageText(`🔄 Executing swap via ${swapData.quote.provider}...`);
     
-    let signature: string;
+    // Create swap transaction using SwapManager
+    const instructions = await swapManager.createSwapTransaction({
+      inputMint: swapData.fromTokenInfo.token_mint,
+      outputMint: swapData.toTokenInfo.token_mint,
+      amount: swapData.quote.inputAmount,
+      slippageBps: Math.floor(swapData.slippagePercent * 100),
+      userKeypair: swapData.userKeypair,
+      inputDecimals: swapData.fromTokenInfo.decimals,
+      outputDecimals: swapData.toTokenInfo.decimals,
+      inputTicker: swapData.fromToken.toUpperCase(),
+      outputTicker: swapData.toToken.toUpperCase()
+    }, swapData.quote);
 
-    if (swapData.isMainnet) {
-      // Use Jupiter for mainnet
-      const { JupiterClient } = await import("./utils/jupiter");
-      const jupiterClient = new JupiterClient();
-      
-      // Get swap transaction from Jupiter with optimized settings
-      const swapResponse = await jupiterClient.getSwapTransaction({
-        userPublicKey: swapData.userKeypair.publicKey.toBase58(),
-        quoteResponse: swapData.quote,
-        wrapAndUnwrapSol: true,
-        useSharedAccounts: false, // Disable shared accounts for simpler transactions
-        asLegacyTransaction: true, // Use legacy transaction format
-        dynamicComputeUnitLimit: true,
-        skipUserAccountsRpcCalls: true,
-        prioritizationFeeLamports: 10000, // Use only prioritization fee, not compute unit price
-      });
+    // Execute transaction
+    const signature = await wallet.sendTransaction(instructions, [swapData.userKeypair]);
 
-      // Sign and send the transaction
-      signature = await wallet.signAndSendSerializedTransaction(
-        swapResponse.swapTransaction,
-        swapData.userKeypair
-      );
-
-      // Wait for confirmation
-      await wallet.confirmTransaction(signature);
-    } else {
-      // Use devnet simulator
-      const { DevnetSwapSimulator } = await import("./utils/devnet-swap-simulator");
-      const simulator = new DevnetSwapSimulator(wallet);
-
-      // Create simulated swap instructions
-      const instructions = await simulator.createSimulatedSwapInstructions(
-        swapData.userKeypair,
-        swapData.quote,
-        swapData.fromToken.toUpperCase(),
-        swapData.toToken.toUpperCase(),
-        swapData.fromTokenInfo.decimals,
-        swapData.toTokenInfo.decimals
-      );
-
-      if (instructions.length > 0) {
-        // Execute real transaction (for SOL/WSOL swaps)
-        signature = await wallet.sendTransaction(instructions, [swapData.userKeypair]);
-        await wallet.confirmTransaction(signature);
-      } else {
-        // Pure simulation - no real transaction
-        signature = "SIM" + Date.now().toString().slice(-8);
-        console.log(`Simulated swap: ${swapData.fromToken} → ${swapData.toToken}`);
-      }
-    }
-
-    const isRealTransaction = swapData.isMainnet || signature.length > 20; // Real signature is longer
-    const isSimulation = !swapData.isMainnet && signature.startsWith('SIM');
+    // Wait for confirmation
+    await wallet.confirmTransaction(signature);
     
     const successMessage = [
-      isSimulation ? "✅ **Swap Simulation Completed!**" : "✅ **Swap Completed Successfully!**",
+      "✅ **Swap Completed Successfully!**",
       "",
-      swapData.isMainnet 
-        ? `🔗 **Transaction:** [${signature.slice(0, 8)}...](https://solscan.io/tx/${signature})`
-        : isRealTransaction 
-          ? `🔗 **Devnet Transaction:** [${signature.slice(0, 8)}...](https://solscan.io/tx/${signature}?cluster=devnet)`
-          : `🔗 **Simulation ID:** ${signature}`,
-      `📥 **Input:** ${wallet.formatTokenBalance(parseInt(swapData.quote.inputAmount || swapData.quote.inAmount), swapData.fromTokenInfo.decimals)} ${swapData.fromToken}`,
-      `📤 **Output:** ${wallet.formatTokenBalance(parseInt(swapData.quote.outputAmount || swapData.quote.outAmount), swapData.toTokenInfo.decimals)} ${swapData.toToken}`,
+      `🚀 **Provider:** ${swapData.quote.provider.toUpperCase()}`,
+      `🔗 **Transaction:** [${signature.slice(0, 8)}...](https://solscan.io/tx/${signature})`,
+      `📥 **Input:** ${wallet.formatTokenBalance(parseInt(swapData.quote.inputAmount), swapData.fromTokenInfo.decimals)} ${swapData.fromToken}`,
+      `📤 **Output:** ${wallet.formatTokenBalance(parseInt(swapData.quote.outputAmount), swapData.toTokenInfo.decimals)} ${swapData.toToken}`,
       "",
-      isSimulation 
-        ? "⚠️ **Pure Simulation** - No real tokens were transferred"
-        : swapData.isMainnet 
-          ? "✅ **Real Transaction** - Tokens transferred on Mainnet"
-          : "✅ **Real Transaction** - Executed on Devnet"
+      swapData.quote.provider === 'pump-fun' 
+        ? "🔥 **Pump.fun Token** - Non-graduated token swap"
+        : "✅ **Mainnet Transaction** - Tokens transferred successfully"
     ].join("\n");
 
     await ctx.editMessageText(successMessage, { parse_mode: "Markdown" });
