@@ -35,7 +35,7 @@ export interface SwapRequest {
 
 export class SwapManager {
   private jupiterClient: JupiterClient;
-  private pumpFunClient: PumpFunClient;
+  public pumpFunClient: PumpFunClient;
   private devnetSimulator: DevnetSwapSimulator;
   private connection: Connection;
   private wallet: WalletManager;
