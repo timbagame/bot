@@ -172,6 +172,10 @@ export class TokenManager {
     return this.tokenDb.getKnownTokenByTicker(ticker);
   }
 
+  public getKnownTokenByMint(tokenMint: string): KnownToken | null {
+    return this.tokenDb.getKnownTokenByMint(tokenMint);
+  }
+
   public removeToken(tokenMint: string): void {
     this.tokenDb.removeKnownToken(tokenMint);
   }

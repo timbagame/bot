@@ -1123,6 +1123,61 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
     // Wait for confirmation
     await wallet.confirmTransaction(signature);
     
+    // Auto-register tokens if they're not already known
+    try {
+      // Import SwapManager to access pumpFunClient
+      const { pumpFunClient } = swapManager as any;
+      
+      // Register input token if not known
+      const inputTokenMint = swapData.fromTokenInfo.token_mint;
+      let inputTokenTicker = swapData.fromToken.toUpperCase();
+      
+      if (inputTokenTicker !== 'SOL') {
+        const existingInputToken = tokenManager.getKnownTokenByMint(inputTokenMint);
+        if (!existingInputToken) {
+          // Try to get real metadata for pump.fun tokens
+          if (swapData.quote.provider === 'pump-fun' && pumpFunClient) {
+            const metadata = await pumpFunClient.getTokenMetadata(inputTokenMint);
+            if (metadata && metadata.symbol) {
+              inputTokenTicker = metadata.symbol.toUpperCase();
+            }
+          }
+          
+          console.log(`Auto-registering input token from swap: ${inputTokenTicker} (${inputTokenMint})`);
+          const registered = await tokenManager.addToken(inputTokenMint, inputTokenTicker);
+          if (registered) {
+            console.log(`Successfully auto-registered input token: ${inputTokenTicker}`);
+          }
+        }
+      }
+      
+      // Register output token if not known
+      const outputTokenMint = swapData.toTokenInfo.token_mint;
+      let outputTokenTicker = swapData.toToken.toUpperCase();
+      
+      if (outputTokenTicker !== 'SOL') {
+        const existingOutputToken = tokenManager.getKnownTokenByMint(outputTokenMint);
+        if (!existingOutputToken) {
+          // Try to get real metadata for pump.fun tokens
+          if (swapData.quote.provider === 'pump-fun' && pumpFunClient) {
+            const metadata = await pumpFunClient.getTokenMetadata(outputTokenMint);
+            if (metadata && metadata.symbol) {
+              outputTokenTicker = metadata.symbol.toUpperCase();
+            }
+          }
+          
+          console.log(`Auto-registering output token from swap: ${outputTokenTicker} (${outputTokenMint})`);
+          const registered = await tokenManager.addToken(outputTokenMint, outputTokenTicker);
+          if (registered) {
+            console.log(`Successfully auto-registered output token: ${outputTokenTicker}`);
+          }
+        }
+      }
+    } catch (error) {
+      console.warn("Failed to auto-register tokens:", error);
+      // Don't fail the swap if auto-registration fails
+    }
+    
     const successMessage = [
       "✅ **Swap Completed Successfully!**",
       "",
