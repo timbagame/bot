@@ -54,7 +54,8 @@
       "Bash(\"C:\\Users\\franc\\.bun\\bin\\bun.exe\" run -e \"const m = require(''@metaplex-foundation/mpl-token-metadata''); console.log(Object.keys(m))\")",
       "Bash(\"C:\\Users\\franc\\.bun\\bin\\bun.exe\" run check-sdk-methods.js)",
       "Bash(\"C:\\Users\\franc\\.bun\\bin\\bun.exe\" install bn.js)",
-      "Bash(\"C:\\Users\\franc\\.bun\\bin\\bun.exe\" run update-token-tickers.js)"
+      "Bash(\"C:\\Users\\franc\\.bun\\bin\\bun.exe\" run update-token-tickers.js)",
+      "Bash(git pull:*)"
     ],
     "deny": [],
     "ask": [],
