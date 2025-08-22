@@ -1,5 +1,5 @@
-import * as anchor from "@coral-xyz/anchor";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, Keypair } from "@solana/web3.js";
+type BN = any;
 
 // ================================
 // DATABASE TYPES
@@ -63,7 +63,7 @@ export interface ParseAmountResult {
 }
 
 export interface PlayerData {
-  keypair: anchor.web3.Keypair;
+  keypair: Keypair;
   tokenBalance: number;
   solBalance: number;
   gameBalance: number;
@@ -105,29 +105,29 @@ export interface GameCompletedEvent {
   gameKey: PublicKey;
   winner: PublicKey;
   ticketsCount: number;
-  winnerAmount: anchor.BN;
-  feeAmount: anchor.BN;
-  timestamp: anchor.BN;
+  winnerAmount: BN;
+  feeAmount: BN;
+  timestamp: BN;
 }
 
 export interface PlayerJoinedEvent {
   gameKey: PublicKey;
   player: PublicKey;
-  totalAmount: anchor.BN;
+  totalAmount: BN;
   ticketsCount: number;
   ticketIndex: number;
-  lastSlot: anchor.BN;
-  timestamp: anchor.BN;
+  lastSlot: BN;
+  timestamp: BN;
 }
 
 export interface PlayerUnjoinedEvent {
   gameKey: PublicKey;
   player: PublicKey;
-  totalAmount: anchor.BN;
+  totalAmount: BN;
   ticketsCount: number;
   ticketIndex: number;
-  lastSlot: anchor.BN;
-  timestamp: anchor.BN;
+  lastSlot: BN;
+  timestamp: BN;
 }
 
 // ================================
@@ -136,7 +136,7 @@ export interface PlayerUnjoinedEvent {
 
 export interface AuthorizationResult {
   authorized: boolean;
-  adminKeypair?: anchor.web3.Keypair;
+  adminKeypair?: Keypair;
   error?: string;
 }
 

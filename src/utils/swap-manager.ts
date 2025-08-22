@@ -1,8 +1,9 @@
-import { Connection, PublicKey, Keypair, TransactionInstruction, Transaction, VersionedTransaction, AddressLookupTableAccount } from '@solana/web3.js';
+import { Connection, PublicKey, Keypair, TransactionInstruction, VersionedTransaction } from '@solana/web3.js';
 import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } from '@solana/spl-token';
 import { JupiterClient } from './jupiter';
 import { PumpFunClient, validatePumpFunSwap } from './pump-fun';
-import { NetworkDetector, SolanaNetwork } from './network-detector';
+import { NetworkDetector } from './network-detector';
+import type { SolanaNetwork } from './network-detector';
 import { WalletManager } from './wallet';
 
 // ================================
@@ -46,14 +47,14 @@ export class SwapManager {
     this.network = NetworkDetector.getCurrentNetwork();
     
     this.jupiterClient = new JupiterClient();
-    this.pumpFunClient = new PumpFunClient(connection, wallet);
+    this.pumpFunClient = new PumpFunClient(connection);
   }
 
   /**
    * Get the best quote for a token swap across all providers
    */
   async getQuote(request: SwapRequest): Promise<SwapQuote> {
-    const { inputMint, outputMint, amount, slippageBps = 500, inputDecimals, outputDecimals, inputTicker, outputTicker } = request;
+    const { inputMint, outputMint, amount, slippageBps = 500, inputDecimals, outputDecimals } = request;
 
     // First check if this involves a pump.fun token (skip SOL/WSOL and known major tokens)
     const isSolInput = inputMint === 'So11111111111111111111111111111111111111112' || inputMint === 'SOL';
@@ -107,8 +108,6 @@ export class SwapManager {
         inputMint,
         outputMint,
         amount,
-        inputDecimals,
-        outputDecimals,
         slippageBps
       );
 
@@ -155,8 +154,6 @@ export class SwapManager {
               inputMint,
               outputMint,
               amount,
-              inputDecimals,
-              outputDecimals,
               slippageBps
             );
 
@@ -256,7 +253,7 @@ export class SwapManager {
     // If we need to create token accounts, do that first
     if (setupInstructions.length > 0) {
       console.log(`Creating ${setupInstructions.length} token accounts before Jupiter swap`);
-      const setupTxid = await this.wallet.sendTransaction(setupInstructions, userKeypair);
+      const setupTxid = await this.wallet.sendTransaction(setupInstructions, [userKeypair]);
       console.log(`Token accounts created: ${setupTxid}`);
       
       // Wait a bit for the accounts to be created
@@ -479,135 +476,6 @@ export class SwapManager {
     }
   }
 
-  /**
-   * Parse Jupiter transaction and extract instructions (deprecated - use executeJupiterTransaction instead)
-   */
-  private async parseJupiterTransaction(base64Transaction: string, userKeypair: Keypair): Promise<TransactionInstruction[]> {
-    try {
-      // Decode the base64 transaction
-      const transactionBuffer = Buffer.from(base64Transaction, 'base64');
-      
-      // Try to deserialize as VersionedTransaction first (Jupiter uses V0 transactions)
-      try {
-        const versionedTx = VersionedTransaction.deserialize(transactionBuffer);
-        
-        // For V0 transactions, we need to resolve address lookup tables
-        const message = versionedTx.message;
-        if (message.version === 0) {
-          console.log('Processing Jupiter V0 transaction with lookup tables');
-          
-          // Get all address lookup table accounts
-          const lookupTableAccounts: AddressLookupTableAccount[] = [];
-          
-          if (message.addressTableLookups && message.addressTableLookups.length > 0) {
-            for (const lookup of message.addressTableLookups) {
-              try {
-                const lookupTableAccount = await this.connection.getAddressLookupTable(lookup.accountKey);
-                if (lookupTableAccount && lookupTableAccount.value) {
-                  lookupTableAccounts.push(lookupTableAccount.value);
-                }
-              } catch (lookupError) {
-                console.warn(`Failed to fetch lookup table ${lookup.accountKey.toString()}:`, lookupError);
-              }
-            }
-          }
-          
-          // Decompile the message to get the full account keys array
-          const allAccountKeys: PublicKey[] = [...message.staticAccountKeys];
-          
-          // Add accounts from lookup tables
-          for (let i = 0; i < message.addressTableLookups.length; i++) {
-            const lookup = message.addressTableLookups[i];
-            const lookupTable = lookupTableAccounts[i];
-            
-            if (lookupTable) {
-              // Add writable accounts
-              for (const index of lookup.writableIndexes) {
-                if (index < lookupTable.state.addresses.length) {
-                  allAccountKeys.push(lookupTable.state.addresses[index]);
-                }
-              }
-              // Add readonly accounts  
-              for (const index of lookup.readonlyIndexes) {
-                if (index < lookupTable.state.addresses.length) {
-                  allAccountKeys.push(lookupTable.state.addresses[index]);
-                }
-              }
-            }
-          }
-          
-          // Build instructions using the complete account keys array
-          const instructions: TransactionInstruction[] = [];
-          
-          for (const compiledIx of message.compiledInstructions) {
-            // Validate program ID index
-            if (compiledIx.programIdIndex >= allAccountKeys.length) {
-              console.warn(`Invalid program ID index: ${compiledIx.programIdIndex}, max: ${allAccountKeys.length - 1}`);
-              continue;
-            }
-            
-            const programId = allAccountKeys[compiledIx.programIdIndex];
-            
-            // Build account keys for this instruction
-            const keys = compiledIx.accountKeyIndexes.map((accountIndex, keyIndex) => {
-              if (accountIndex >= allAccountKeys.length) {
-                console.warn(`Invalid account index: ${accountIndex}, max: ${allAccountKeys.length - 1}`);
-                return null;
-              }
-              
-              const pubkey = allAccountKeys[accountIndex];
-              
-              // Determine if account is signer
-              const isSigner = accountIndex < message.header.numRequiredSignatures;
-              
-              // Determine if account is writable
-              let isWritable = false;
-              if (accountIndex < message.header.numRequiredSignatures) {
-                // Signed account - writable if not in readonly signed accounts
-                isWritable = accountIndex < (message.header.numRequiredSignatures - message.header.numReadonlySignedAccounts);
-              } else {
-                // Unsigned account - writable if not in readonly unsigned accounts  
-                const unsignedStartIndex = message.header.numRequiredSignatures;
-                const readonlyUnsignedStartIndex = message.staticAccountKeys.length - message.header.numReadonlyUnsignedAccounts;
-                isWritable = accountIndex >= unsignedStartIndex && accountIndex < readonlyUnsignedStartIndex;
-              }
-              
-              return {
-                pubkey,
-                isSigner,
-                isWritable
-              };
-            }).filter(key => key !== null); // Remove invalid keys
-            
-            if (keys.length > 0) {
-              instructions.push(new TransactionInstruction({
-                programId,
-                keys: keys as any[],
-                data: Buffer.from(compiledIx.data)
-              }));
-            }
-          }
-          
-          console.log(`Parsed ${instructions.length} instructions from Jupiter V0 transaction`);
-          return instructions;
-        }
-        
-        // Handle legacy versioned transaction (shouldn't happen with Jupiter but fallback)
-        throw new Error('Non-V0 versioned transaction not supported');
-        
-      } catch (versionedError) {
-        console.log('Failed to parse as versioned transaction, trying legacy format:', versionedError);
-        
-        // Fallback to legacy transaction format
-        const legacyTx = Transaction.from(transactionBuffer);
-        console.log(`Parsed ${legacyTx.instructions.length} instructions from legacy transaction`);
-        return legacyTx.instructions;
-      }
-    } catch (error: any) {
-      console.error('Error parsing Jupiter transaction:', error);
-      throw new Error(`Failed to parse Jupiter transaction: ${error.message}`);
-    }
-  }
 
   /**
    * Check if swap is possible

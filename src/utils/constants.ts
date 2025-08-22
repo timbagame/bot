@@ -14,8 +14,6 @@ export const TOKEN_BALANCE_MAX_PRECISION = 6;
 export const GAME_TIMEOUT = 3600; // 1 hour
 export const COINFLIP_MAX_TICKETS = 2;
 export const GIVEAWAY_MAX_TICKETS = 5;
-export const SNOWBALL_TIMEOUT = 300; // 5 minutes
-export const SNOWBALL_MAX_TICKETS = 5;
 export const MAX_RETRIES = 3;
 export const CONFIRMATION_TIMEOUT_MS = 45000; // Increased to 45 seconds
 
@@ -57,15 +55,3 @@ export const TOKENS_LIST = [
 // ================================
 
 export const GAME_EXPIRATION_BUFFER_TIME = 300; // 5 minutes buffer for expired games
-export const PLAYER_CLEANUP_DELAY_MS = 100; // Delay between player participation cleanups
-
-// ================================
-// JUPITER SWAP CONSTANTS
-// ================================
-
-export const JUPITER_BASE_URL = "https://quote-api.jup.ag";
-export const JUPITER_DEFAULT_SLIPPAGE_BPS = 100; // 1%
-export const JUPITER_MAX_SLIPPAGE_BPS = 500; // 5%
-export const JUPITER_MIN_SLIPPAGE_BPS = 10; // 0.1%
-export const JUPITER_MAX_PRICE_IMPACT = 5; // 5%
-export const JUPITER_PLATFORM_FEE_BPS = 0; // No platform fee by default

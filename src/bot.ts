@@ -632,7 +632,6 @@ const createGameCommand = async (
     gameType.charAt(0).toUpperCase() + gameType.slice(1),
     parsed.data!.amount,
     creatorUsername,
-    parsed.data!.tokenMint,
     parsed.data!.tokenTicker,
     "Active"
   );
@@ -878,20 +877,30 @@ bot.command("wrap", async (ctx: Context) => {
 // SWAP COMMAND
 // ================================
 
-bot.command("swap", sequentialize((ctx) => [ctx.from?.id, "swap"]), async (ctx: Context) => {
-  const telegramId = BigInt(ctx.from?.id || 0);
-  const args = ctx.message?.text?.split(" ").slice(1);
+bot.command(
+  "swap",
+  sequentialize((ctx) => [ctx.from?.id?.toString() ?? "0", "swap"]),
+  async (ctx: Context) => {
+    const telegramId = BigInt(ctx.from?.id || 0);
+    const args = ctx.message?.text?.split(" ").slice(1);
 
-  if (!args || args.length < 3) {
-    return replyUsageError(
-      ctx,
-      "Usage: /swap &lt;amount&gt; &lt;FROM&gt; &lt;TO&gt; [slippage%]\nExamples:\n• /swap 10 USDC SOL\n• /swap 100 USDT USDC 1.5"
-    );
-  }
+    if (!args || args.length < 3) {
+      return replyUsageError(
+        ctx,
+        "Usage: /swap &lt;amount&gt; &lt;FROM&gt; &lt;TO&gt; [slippage%]\nExamples:\n• /swap 10 USDC SOL\n• /swap 100 USDT USDC 1.5"
+      );
+    }
 
-  const [amountStr, fromToken, toToken, slippageStr] = args;
-  const amount = parseFloat(amountStr);
-  const slippagePercent = slippageStr ? parseFloat(slippageStr) : 2.0; // Default 2% for better success rate
+    const [amountStr, fromToken, toToken, slippageStr] = args as [
+      string,
+      string,
+      string,
+      string?
+    ];
+    const amount = parseFloat(amountStr);
+    const slippagePercent = slippageStr
+      ? parseFloat(slippageStr)
+      : 2.0; // Default 2% for better success rate
 
   if (amount <= 0) {
     return replyUsageError(ctx, "Amount must be greater than 0");
@@ -1804,11 +1813,9 @@ bot.on("callback_query", async (ctx) => {
 
     const gamePda = new PublicKey(gameAddress);
     const telegramId = BigInt(ctx.from.id);
-    const playerKp = wallet.getKeyPair(telegramId);
-
     switch (action) {
       case "join":
-        await handleJoinGame(ctx, gamePda, playerKp, telegramId, game);
+        await handleJoinGame(ctx, gamePda, telegramId, game);
         break;
       case "refresh":
         await handleRefreshGameCallback(ctx, gamePda, gameAddress);
@@ -1850,7 +1857,6 @@ const handleCompletedGameCallback = async (ctx: any, game: any) => {
 const handleJoinGame = async (
   ctx: any,
   gamePda: PublicKey,
-  _playerKp: any,
   telegramId: bigint,
   game: any
 ) => {

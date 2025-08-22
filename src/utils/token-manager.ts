@@ -244,7 +244,7 @@ export class TokenManager {
       // Check if it's a pump.fun token
       let isPumpFun = false;
       if (isPotentialPumpFunToken(tokenMint)) {
-        const pumpFunClient = new PumpFunClient(this.wallet.getConnection(), this.wallet);
+        const pumpFunClient = new PumpFunClient(this.wallet.getConnection());
         const pumpInfo = await pumpFunClient.isPumpFunToken(tokenMint);
         isPumpFun = pumpInfo.isPumpFun && !pumpInfo.isGraduated;
       }
@@ -274,7 +274,7 @@ export class TokenManager {
     }
 
     try {
-      const pumpFunClient = new PumpFunClient(this.wallet.getConnection(), this.wallet);
+      const pumpFunClient = new PumpFunClient(this.wallet.getConnection());
       return await pumpFunClient.isPumpFunToken(tokenMint);
     } catch {
       return { isPumpFun: false, isGraduated: false };

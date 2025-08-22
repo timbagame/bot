@@ -346,7 +346,6 @@ export class GameManager {
   }
 
   private generateGameKeyboard(status: string, gamePda: PublicKey) {
-    // _gameType unused post-refactor
     if (status.toLowerCase() === "completed") return [];
 
     const keyboard = [
@@ -448,7 +447,6 @@ export class GameManager {
     gameType: string,
     amount: number,
     creatorUsername: string,
-    _tokenMint: string,
     tokenTicker: string,
     status: string = "Active"
   ): Promise<number> {
