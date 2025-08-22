@@ -1,30 +1,17 @@
-import { Database } from "bun:sqlite";
 import type { GameData, PlayerMapping } from "../types";
+import { BaseDatabase } from "./base-database";
 
 /**
  * Database service for storing game-related data
  */
-export class GameDatabase {
+export class GameDatabase extends BaseDatabase {
   private static instance: GameDatabase;
-  private db: Database;
 
   private constructor() {
-    this.db = new Database("games.sqlite", { create: true });
-    this.initDb();
-  }
-
-  public static getInstance(): GameDatabase {
-    if (!GameDatabase.instance) {
-      GameDatabase.instance = new GameDatabase();
-    }
-    return GameDatabase.instance;
-  }
-
-  private initDb(): void {
-    try {
-      // Create games table
-      this.db.run(`
-        CREATE TABLE IF NOT EXISTS games (
+    super(
+      "games.sqlite",
+      [
+        `CREATE TABLE IF NOT EXISTS games (
           game_address TEXT PRIMARY KEY,
           creator_telegram_id TEXT NOT NULL,
           amount INTEGER NOT NULL,
@@ -41,34 +28,29 @@ export class GameDatabase {
           min_players INTEGER,
           last_slot TEXT,
           last_slot_timestamp INTEGER
-        )
-      `);
-
-      // Create player mappings table
-      this.db.run(`
-        CREATE TABLE IF NOT EXISTS player_mappings (
+        )`,
+        `CREATE TABLE IF NOT EXISTS player_mappings (
           public_key TEXT PRIMARY KEY,
           telegram_id TEXT NOT NULL
-        )
-      `);
-
-      // Create game participants table
-      this.db.run(`
-        CREATE TABLE IF NOT EXISTS game_participants (
+        )`,
+        `CREATE TABLE IF NOT EXISTS game_participants (
           game_address TEXT NOT NULL,
           telegram_id TEXT NOT NULL,
           public_key TEXT NOT NULL,
           joined_at INTEGER NOT NULL,
           PRIMARY KEY (game_address, telegram_id),
           FOREIGN KEY (game_address) REFERENCES games(game_address)
-        )
-      `);
+        )`,
+      ],
+      "Game"
+    );
+  }
 
-      console.log("Game database initialized");
-    } catch (error) {
-      console.error("Error initializing game database:", error);
-      throw error;
+  public static getInstance(): GameDatabase {
+    if (!GameDatabase.instance) {
+      GameDatabase.instance = new GameDatabase();
     }
+    return GameDatabase.instance;
   }
 
   // Game methods

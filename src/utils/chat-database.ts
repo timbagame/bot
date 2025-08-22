@@ -1,16 +1,33 @@
-import { Database } from "bun:sqlite";
 import type { ChatTokenConfig } from "../types";
+import { BaseDatabase } from "./base-database";
 
 /**
  * Database service for storing chat-related settings
  */
-export class ChatDatabase {
+export class ChatDatabase extends BaseDatabase {
   private static instance: ChatDatabase;
-  private db: Database;
 
   private constructor() {
-    this.db = new Database("chat-settings.sqlite", { create: true });
-    this.initDb();
+    super(
+      "chat-settings.sqlite",
+      [
+        `CREATE TABLE IF NOT EXISTS chat_token_configs (
+          chat_id INTEGER PRIMARY KEY,
+          token_mint TEXT NOT NULL,
+          token_ticker TEXT NOT NULL,
+          set_by_telegram_id TEXT NOT NULL,
+          set_at INTEGER NOT NULL
+        )`,
+        `CREATE TABLE IF NOT EXISTS chat_settings (
+          chat_id INTEGER PRIMARY KEY,
+          chat_title TEXT,
+          chat_type TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )`,
+      ],
+      "Chat"
+    );
   }
 
   public static getInstance(): ChatDatabase {
@@ -18,37 +35,6 @@ export class ChatDatabase {
       ChatDatabase.instance = new ChatDatabase();
     }
     return ChatDatabase.instance;
-  }
-
-  private initDb(): void {
-    try {
-      // Create chat token configurations table
-      this.db.run(`
-        CREATE TABLE IF NOT EXISTS chat_token_configs (
-          chat_id INTEGER PRIMARY KEY,
-          token_mint TEXT NOT NULL,
-          token_ticker TEXT NOT NULL,
-          set_by_telegram_id TEXT NOT NULL,
-          set_at INTEGER NOT NULL
-        )
-      `);
-
-      // Create chat settings table for future extensibility
-      this.db.run(`
-        CREATE TABLE IF NOT EXISTS chat_settings (
-          chat_id INTEGER PRIMARY KEY,
-          chat_title TEXT,
-          chat_type TEXT,
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL
-        )
-      `);
-
-      console.log("Chat database initialized");
-    } catch (error) {
-      console.error("Error initializing chat database:", error);
-      throw error;
-    }
   }
 
   // ================================

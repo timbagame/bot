@@ -1,16 +1,33 @@
-import { Database } from "bun:sqlite";
 import type { KnownToken } from "../types";
+import { BaseDatabase } from "./base-database";
 
 /**
  * Database service for storing token-related data
  */
-export class TokenDatabase {
+export class TokenDatabase extends BaseDatabase {
   private static instance: TokenDatabase;
-  private db: Database;
 
   private constructor() {
-    this.db = new Database("tokens.sqlite", { create: true });
-    this.initDb();
+    super(
+      "tokens.sqlite",
+      [
+        `CREATE TABLE IF NOT EXISTS known_tokens (
+          token_mint TEXT PRIMARY KEY,
+          token_ticker TEXT NOT NULL,
+          decimals INTEGER NOT NULL,
+          added_at INTEGER NOT NULL
+        )`,
+        `CREATE TABLE IF NOT EXISTS token_metadata (
+          token_mint TEXT PRIMARY KEY,
+          name TEXT,
+          symbol TEXT,
+          decimals INTEGER NOT NULL,
+          logo_uri TEXT,
+          last_updated INTEGER NOT NULL
+        )`,
+      ],
+      "Token"
+    );
   }
 
   public static getInstance(): TokenDatabase {
@@ -18,37 +35,6 @@ export class TokenDatabase {
       TokenDatabase.instance = new TokenDatabase();
     }
     return TokenDatabase.instance;
-  }
-
-  private initDb(): void {
-    try {
-      // Create known tokens table
-      this.db.run(`
-        CREATE TABLE IF NOT EXISTS known_tokens (
-          token_mint TEXT PRIMARY KEY,
-          token_ticker TEXT NOT NULL,
-          decimals INTEGER NOT NULL,
-          added_at INTEGER NOT NULL
-        )
-      `);
-
-      // Create token metadata cache table for future use
-      this.db.run(`
-        CREATE TABLE IF NOT EXISTS token_metadata (
-          token_mint TEXT PRIMARY KEY,
-          name TEXT,
-          symbol TEXT,
-          decimals INTEGER NOT NULL,
-          logo_uri TEXT,
-          last_updated INTEGER NOT NULL
-        )
-      `);
-
-      console.log("Token database initialized");
-    } catch (error) {
-      console.error("Error initializing token database:", error);
-      throw error;
-    }
   }
 
   // ================================
