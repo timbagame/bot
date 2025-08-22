@@ -8,12 +8,10 @@ import type { CallbackError, ErrorHandlingOptions } from "../types";
  * Safely truncates error messages for callback queries with better context preservation
  */
 const truncateErrorMessage = (
-  message: string, 
+  message: string,
   options: ErrorHandlingOptions = {}
 ): string => {
-  const {
-    maxLength = 180
-  } = options;
+  const { maxLength = 180 } = options;
 
   if (message.length <= maxLength) {
     return message;
@@ -21,7 +19,9 @@ const truncateErrorMessage = (
 
   // Try to preserve important parts of the error message
   const importantPrefixes = ["❌", "⚠️", "Error:", "Failed:", "Invalid:"];
-  const hasImportantPrefix = importantPrefixes.some(prefix => message.startsWith(prefix));
+  const hasImportantPrefix = importantPrefixes.some((prefix) =>
+    message.startsWith(prefix)
+  );
 
   if (hasImportantPrefix) {
     // Find the first sentence or important part
@@ -34,8 +34,9 @@ const truncateErrorMessage = (
   // Truncate but try to end at a word boundary
   const truncated = message.substring(0, maxLength - 3);
   const lastSpace = truncated.lastIndexOf(" ");
-  
-  if (lastSpace > maxLength * 0.7) { // Only use word boundary if it's not too short
+
+  if (lastSpace > maxLength * 0.7) {
+    // Only use word boundary if it's not too short
     return truncated.substring(0, lastSpace) + "...";
   }
 
@@ -47,12 +48,13 @@ const truncateErrorMessage = (
  */
 const categorizeError = (error: any): CallbackError => {
   const errorMessage = error?.message || error?.toString() || "Unknown error";
-  
+
   return {
     message: errorMessage,
     code: error?.code,
-    isAccountNotFound: errorMessage.includes('Account does not exist') || 
-                      errorMessage.includes('could not find account')
+    isAccountNotFound:
+      errorMessage.includes("Account does not exist") ||
+      errorMessage.includes("could not find account"),
   };
 };
 
@@ -60,15 +62,15 @@ const categorizeError = (error: any): CallbackError => {
  * Enhanced error handler for callback queries
  */
 export const handleCallbackErrorSafe = async (
-  ctx: any, 
-  error: any, 
+  ctx: any,
+  error: any,
   action: string,
   options: ErrorHandlingOptions = {}
 ): Promise<void> => {
   console.error(`Error in callback ${action}:`, error);
 
   const categorizedError = categorizeError(error);
-  
+
   if (categorizedError.isAccountNotFound) {
     await safeAnswerCallbackQuery(ctx, "This game is no longer active!");
     return;
@@ -81,7 +83,8 @@ export const handleCallbackErrorSafe = async (
     const { wallet } = await import("../bot");
     errorMessage = formatUserFriendlyError(error, wallet);
   } catch (importError) {
-    errorMessage = categorizedError.message || "An error occurred. Please try again.";
+    errorMessage =
+      categorizedError.message || "An error occurred. Please try again.";
   }
 
   const truncatedMessage = truncateErrorMessage(errorMessage, options);
@@ -91,7 +94,10 @@ export const handleCallbackErrorSafe = async (
 /**
  * Safe callback query answering with fallback
  */
-const safeAnswerCallbackQuery = async (ctx: any, text: string): Promise<void> => {
+const safeAnswerCallbackQuery = async (
+  ctx: any,
+  text: string
+): Promise<void> => {
   try {
     if (ctx?.answerCallbackQuery) {
       await ctx.answerCallbackQuery(text);

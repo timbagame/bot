@@ -43,7 +43,8 @@ export const ADDRESS_DISPLAY_LENGTH = 8;
 // ================================
 
 export const DEFAULT_NULL_ADDRESS = "11111111111111111111111111111111";
-export const DEFAULT_TOKEN_MINT = "BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4";
+export const DEFAULT_TOKEN_MINT =
+  "BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4";
 export const DEFAULT_TOKEN_TICKER = "TIMBA";
 export const TOKENS_LIST = [
   { mint: "So11111111111111111111111111111111111111112", ticker: "WSOL" },

@@ -25,7 +25,10 @@ const initializeAnchorProvider = async () => {
   // Set the provider globally
   anchor.setProvider(provider);
 
-  return new anchor.Program(idl as Coinflip, provider) as anchor.Program<Coinflip>;
+  return new anchor.Program(
+    idl as Coinflip,
+    provider
+  ) as anchor.Program<Coinflip>;
 };
 
 // Initialize Oracle if it doesn't exist
@@ -40,7 +43,9 @@ const initializeOracle = async (program: anchor.Program<Coinflip>) => {
     // Check if Oracle exists
     try {
       const oracleAccount = await program.account.oracle.fetch(oraclePda);
-      console.log(`Oracle already exists, operator: ${oracleAccount.operator.toString()}`);
+      console.log(
+        `Oracle already exists, operator: ${oracleAccount.operator.toString()}`
+      );
       return oraclePda;
     } catch (error) {
       console.log("Oracle doesn't exist, creating...");
@@ -54,13 +59,12 @@ const initializeOracle = async (program: anchor.Program<Coinflip>) => {
       // u8
       feePercentage: 1,
       // u64 fields must be BN
-      oracleBufferTime: new anchor.BN(300),     // 5 minute buffer before cancellation
+      oracleBufferTime: new anchor.BN(300), // 5 minute buffer before cancellation
       // u32
-      maxTickets: 50000,                        // 50,000 max tickets
+      maxTickets: 50000, // 50,000 max tickets
       // u64 fields must be BN
-      maxTimeout: new anchor.BN(86400),         // 24 hours max timeout
-      minTimeout: new anchor.BN(60),            // 1 minute min timeout
-
+      maxTimeout: new anchor.BN(86400), // 24 hours max timeout
+      minTimeout: new anchor.BN(60), // 1 minute min timeout
     };
 
     const oracleInstruction = await program.methods
@@ -70,7 +74,10 @@ const initializeOracle = async (program: anchor.Program<Coinflip>) => {
       })
       .instruction();
 
-    const tx = await wallet.sendTransaction([oracleInstruction], [adminKeypair]);
+    const tx = await wallet.sendTransaction(
+      [oracleInstruction],
+      [adminKeypair]
+    );
     console.log(`Oracle initialized! Transaction: ${tx}`);
     return oraclePda;
   } catch (error) {
@@ -78,7 +85,6 @@ const initializeOracle = async (program: anchor.Program<Coinflip>) => {
     return null;
   }
 };
-
 
 // Main function
 const initializeProgram = async () => {
@@ -95,7 +101,9 @@ const initializeProgram = async () => {
     }
 
     console.log("Program initialization completed successfully!");
-    console.log("Note: Game tokens should be initialized separately using the initialize-game-token.ts script");
+    console.log(
+      "Note: Game tokens should be initialized separately using the initialize-game-token.ts script"
+    );
   } catch (error) {
     console.error("Error initializing program:", error);
   }

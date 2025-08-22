@@ -29,7 +29,10 @@ const updateOracle = async () => {
     anchor.setProvider(provider);
 
     // Initialize program
-    const program = new anchor.Program(idl as Coinflip, provider) as anchor.Program<Coinflip>;
+    const program = new anchor.Program(
+      idl as Coinflip,
+      provider
+    ) as anchor.Program<Coinflip>;
     console.log(`Program ID: ${program.programId}`);
 
     // Get Oracle PDA
@@ -42,15 +45,26 @@ const updateOracle = async () => {
       console.log("\nCurrent Oracle Configuration:");
       console.log(`- Operator: ${currentOracle.operator.toString()}`);
       console.log(`- Fee Percentage: ${currentOracle.feePercentage}%`);
-      console.log(`- Min Timeout: ${currentOracle.minTimeout} seconds (${Math.round(currentOracle.minTimeout / 60)} minutes)`);
-      console.log(`- Max Timeout: ${currentOracle.maxTimeout} seconds (${Math.round(currentOracle.maxTimeout / 60)} minutes)`);
+      console.log(
+        `- Min Timeout: ${currentOracle.minTimeout} seconds (${Math.round(
+          currentOracle.minTimeout / 60
+        )} minutes)`
+      );
+      console.log(
+        `- Max Timeout: ${currentOracle.maxTimeout} seconds (${Math.round(
+          currentOracle.maxTimeout / 60
+        )} minutes)`
+      );
       console.log(`- Max Tickets: ${currentOracle.maxTickets}`);
-      console.log(`- Oracle Buffer Time: ${currentOracle.oracleBufferTime} seconds`);
-
+      console.log(
+        `- Oracle Buffer Time: ${currentOracle.oracleBufferTime} seconds`
+      );
 
       // Verify operator
       if (!currentOracle.operator.equals(adminKeypair.publicKey)) {
-        throw new Error(`Operator mismatch. Expected: ${adminKeypair.publicKey.toString()}, Found: ${currentOracle.operator.toString()}`);
+        throw new Error(
+          `Operator mismatch. Expected: ${adminKeypair.publicKey.toString()}, Found: ${currentOracle.operator.toString()}`
+        );
       }
     } catch (error) {
       console.error("Error fetching current oracle:", error);
@@ -60,24 +74,30 @@ const updateOracle = async () => {
     // New configuration with correct values
     const newConfig = {
       // u8
-      feePercentage: 1,                 // 1% fee
+      feePercentage: 1, // 1% fee
       // u64 fields must be BN
       oracleBufferTime: new anchor.BN(300),
       // u32
-      maxTickets: 50000,                // 50,000 max tickets
+      maxTickets: 50000, // 50,000 max tickets
       // u64 fields must be BN
       maxTimeout: new anchor.BN(86400), // 24 hours
-      minTimeout: new anchor.BN(60),    // 1 minute
-
+      minTimeout: new anchor.BN(60), // 1 minute
     };
 
     console.log("\nNew Oracle Configuration:");
     console.log(`- Fee Percentage: ${newConfig.feePercentage}%`);
-    console.log(`- Min Timeout: ${newConfig.minTimeout} seconds (${Math.round(newConfig.minTimeout / 60)} minutes)`);
-    console.log(`- Max Timeout: ${newConfig.maxTimeout} seconds (${Math.round(newConfig.maxTimeout / 60)} minutes)`);
+    console.log(
+      `- Min Timeout: ${newConfig.minTimeout} seconds (${Math.round(
+        newConfig.minTimeout / 60
+      )} minutes)`
+    );
+    console.log(
+      `- Max Timeout: ${newConfig.maxTimeout} seconds (${Math.round(
+        newConfig.maxTimeout / 60
+      )} minutes)`
+    );
     console.log(`- Max Tickets: ${newConfig.maxTickets}`);
     console.log(`- Oracle Buffer Time: ${newConfig.oracleBufferTime} seconds`);
-
 
     console.log("\n🔄 Updating Oracle...");
 
@@ -90,7 +110,10 @@ const updateOracle = async () => {
       })
       .instruction();
 
-    const tx = await wallet.sendTransaction([updateInstruction], [adminKeypair]);
+    const tx = await wallet.sendTransaction(
+      [updateInstruction],
+      [adminKeypair]
+    );
     console.log(`✅ Oracle updated successfully!`);
     console.log(`Transaction: ${tx}`);
 
@@ -99,12 +122,20 @@ const updateOracle = async () => {
     console.log("\nUpdated Oracle Configuration:");
     console.log(`- Operator: ${updatedOracle.operator.toString()}`);
     console.log(`- Fee Percentage: ${updatedOracle.feePercentage}%`);
-    console.log(`- Min Timeout: ${updatedOracle.minTimeout} seconds (${Math.round(updatedOracle.minTimeout / 60)} minutes)`);
-    console.log(`- Max Timeout: ${updatedOracle.maxTimeout} seconds (${Math.round(updatedOracle.maxTimeout / 60)} minutes)`);
+    console.log(
+      `- Min Timeout: ${updatedOracle.minTimeout} seconds (${Math.round(
+        updatedOracle.minTimeout / 60
+      )} minutes)`
+    );
+    console.log(
+      `- Max Timeout: ${updatedOracle.maxTimeout} seconds (${Math.round(
+        updatedOracle.maxTimeout / 60
+      )} minutes)`
+    );
     console.log(`- Max Tickets: ${updatedOracle.maxTickets}`);
-    console.log(`- Oracle Buffer Time: ${updatedOracle.oracleBufferTime} seconds`);
-
-
+    console.log(
+      `- Oracle Buffer Time: ${updatedOracle.oracleBufferTime} seconds`
+    );
   } catch (error) {
     console.error("❌ Error updating Oracle:", error);
   }

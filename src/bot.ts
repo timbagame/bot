@@ -382,7 +382,7 @@ const setupAnchor = async () => {
     );
 
     swapManager = new SwapManager(wallet.getConnection(), wallet);
-    console.log('Initialized SwapManager with pump.fun integration');
+    console.log("Initialized SwapManager with pump.fun integration");
 
     await initializeTokensList();
     gameManager = GameManager.getInstance(program, wallet, gameDb);
@@ -898,192 +898,231 @@ bot.command(
       string?
     ];
     const amount = parseFloat(amountStr);
-    const slippagePercent = slippageStr
-      ? parseFloat(slippageStr)
-      : 2.0; // Default 2% for better success rate
+    const slippagePercent = slippageStr ? parseFloat(slippageStr) : 2.0; // Default 2% for better success rate
 
-  if (amount <= 0) {
-    return replyUsageError(ctx, "Amount must be greater than 0");
-  }
+    if (amount <= 0) {
+      return replyUsageError(ctx, "Amount must be greater than 0");
+    }
 
-  if (slippagePercent < 0.1 || slippagePercent > 5.0) {
-    return replyUsageError(ctx, "Slippage must be between 0.1% and 5%");
-  }
+    if (slippagePercent < 0.1 || slippagePercent > 5.0) {
+      return replyUsageError(ctx, "Slippage must be between 0.1% and 5%");
+    }
 
-  // Validate different tokens
-  if (fromToken.toLowerCase() === toToken.toLowerCase()) {
-    return replyUsageError(ctx, "Cannot swap the same token. Try different token pairs");
-  }
+    // Validate different tokens
+    if (fromToken.toLowerCase() === toToken.toLowerCase()) {
+      return replyUsageError(
+        ctx,
+        "Cannot swap the same token. Try different token pairs"
+      );
+    }
 
-  // Handle SOL/WSOL special case - they're the same underlying token
-  const isSolToWsol = (fromToken.toLowerCase() === 'sol' && toToken.toLowerCase() === 'wsol') ||
-                      (fromToken.toLowerCase() === 'wsol' && toToken.toLowerCase() === 'sol');
-  
-  if (isSolToWsol) {
-    return replyUsageError(ctx, "SOL and WSOL are the same token for swapping purposes. Use /wrap to convert SOL to WSOL, or try different token pairs.");
-  }
+    // Handle SOL/WSOL special case - they're the same underlying token
+    const isSolToWsol =
+      (fromToken.toLowerCase() === "sol" && toToken.toLowerCase() === "wsol") ||
+      (fromToken.toLowerCase() === "wsol" && toToken.toLowerCase() === "sol");
 
-  // Warn about known non-tradable tokens
-  const nonTradableTokens = ['TIMBA'];
-  if (nonTradableTokens.includes(fromToken.toUpperCase()) || nonTradableTokens.includes(toToken.toUpperCase())) {
-    return replyUsageError(ctx, "⚠️ TIMBA is not tradable on Jupiter. Try: /swap 10 USDC SOL");
-  }
+    if (isSolToWsol) {
+      return replyUsageError(
+        ctx,
+        "SOL and WSOL are the same token for swapping purposes. Use /wrap to convert SOL to WSOL, or try different token pairs."
+      );
+    }
 
-  try {
-    const processingMsg = await ctx.reply(`🔄 Processing swap request...`);
-    
-    // Get token information (handle SOL, common tokens, and mint addresses)
-    const getTokenInfo = async (tickerOrMint: string) => {
-      const upperTicker = tickerOrMint.toUpperCase();
-      
-      if (upperTicker === 'SOL') {
-        return {
-          token_mint: 'So11111111111111111111111111111111111111112', // WSOL mint for swaps
-          token_ticker: 'SOL',
-          decimals: 9,
-          added_at: 0
-        };
-      }
-      
-      if (upperTicker === 'USDC') {
-        return {
-          token_mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-          token_ticker: 'USDC',
-          decimals: 6,
-          added_at: 0
-        };
-      }
-      
-      // Check if it's a known token by ticker
-      const knownToken = tokenManager.getKnownTokenByTicker(tickerOrMint);
-      if (knownToken) {
-        return knownToken;
-      }
-      
-      // Check if it looks like a mint address (44 characters, base58)
-      if (tickerOrMint.length === 44 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(tickerOrMint)) {
-        try {
-          // Auto-discover token info including pump.fun detection
-          const tokenInfo = await tokenManager.autoDiscoverTokenInfo(tickerOrMint);
-          if (tokenInfo) {
-            return {
-              token_mint: tickerOrMint,
-              token_ticker: tokenInfo.ticker,
-              decimals: tokenInfo.decimals,
-              added_at: Date.now(),
-              isPumpFun: tokenInfo.isPumpFun
-            };
+    // Warn about known non-tradable tokens
+    const nonTradableTokens = ["TIMBA"];
+    if (
+      nonTradableTokens.includes(fromToken.toUpperCase()) ||
+      nonTradableTokens.includes(toToken.toUpperCase())
+    ) {
+      return replyUsageError(
+        ctx,
+        "⚠️ TIMBA is not tradable on Jupiter. Try: /swap 10 USDC SOL"
+      );
+    }
+
+    try {
+      const processingMsg = await ctx.reply(`🔄 Processing swap request...`);
+
+      // Get token information (handle SOL, common tokens, and mint addresses)
+      const getTokenInfo = async (tickerOrMint: string) => {
+        const upperTicker = tickerOrMint.toUpperCase();
+
+        if (upperTicker === "SOL") {
+          return {
+            token_mint: "So11111111111111111111111111111111111111112", // WSOL mint for swaps
+            token_ticker: "SOL",
+            decimals: 9,
+            added_at: 0,
+          };
+        }
+
+        if (upperTicker === "USDC") {
+          return {
+            token_mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            token_ticker: "USDC",
+            decimals: 6,
+            added_at: 0,
+          };
+        }
+
+        // Check if it's a known token by ticker
+        const knownToken = tokenManager.getKnownTokenByTicker(tickerOrMint);
+        if (knownToken) {
+          return knownToken;
+        }
+
+        // Check if it looks like a mint address (44 characters, base58)
+        if (
+          tickerOrMint.length === 44 &&
+          /^[1-9A-HJ-NP-Za-km-z]+$/.test(tickerOrMint)
+        ) {
+          try {
+            // Auto-discover token info including pump.fun detection
+            const tokenInfo = await tokenManager.autoDiscoverTokenInfo(
+              tickerOrMint
+            );
+            if (tokenInfo) {
+              return {
+                token_mint: tickerOrMint,
+                token_ticker: tokenInfo.ticker,
+                decimals: tokenInfo.decimals,
+                added_at: Date.now(),
+                isPumpFun: tokenInfo.isPumpFun,
+              };
+            }
+          } catch (error) {
+            console.log(
+              `Failed to auto-discover token ${tickerOrMint}:`,
+              error
+            );
           }
-        } catch (error) {
-          console.log(`Failed to auto-discover token ${tickerOrMint}:`, error);
+        }
+
+        return null;
+      };
+
+      const fromTokenInfo = await getTokenInfo(fromToken);
+      const toTokenInfo = await getTokenInfo(toToken);
+
+      if (!fromTokenInfo || !toTokenInfo) {
+        await ctx.api.editMessageText(
+          ctx.chat!.id,
+          processingMsg.message_id,
+          "❌ One or both tokens not found. Use token ticker (SOL, USDC) or valid mint address"
+        );
+        return;
+      }
+
+      // Check user balance
+      const userKeypair = wallet.getKeyPair(telegramId);
+      const rawAmount = Math.floor(
+        amount * Math.pow(10, fromTokenInfo.decimals)
+      );
+      let userBalance: number;
+
+      if (fromToken.toLowerCase() === "sol") {
+        userBalance = await wallet.getBalance(telegramId);
+        if (userBalance < rawAmount + 0.01 * LAMPORTS_PER_SOL) {
+          // Reserve for fees
+          await ctx.api.editMessageText(
+            ctx.chat!.id,
+            processingMsg.message_id,
+            `❌ Insufficient SOL balance. You need at least ${
+              amount + 0.01
+            } SOL (including fees)`
+          );
+          return;
+        }
+      } else {
+        userBalance = await wallet.getTokenBalance(
+          telegramId,
+          fromTokenInfo.token_mint ===
+            "So11111111111111111111111111111111111111112"
+            ? "SOL"
+            : fromTokenInfo.token_mint
+        );
+        if (userBalance < rawAmount) {
+          await ctx.api.editMessageText(
+            ctx.chat!.id,
+            processingMsg.message_id,
+            `❌ Insufficient ${fromToken} balance. You have ${wallet.formatTokenBalance(
+              userBalance,
+              fromTokenInfo.decimals
+            )} ${fromToken}`
+          );
+          return;
         }
       }
-      
-      return null;
-    };
 
-    const fromTokenInfo = await getTokenInfo(fromToken);
-    const toTokenInfo = await getTokenInfo(toToken);
-    
-    if (!fromTokenInfo || !toTokenInfo) {
+      // Use unified swap manager with pump.fun support
+      const quote = await swapManager.getQuote({
+        inputMint: fromTokenInfo.token_mint,
+        outputMint: toTokenInfo.token_mint,
+        amount: rawAmount.toString(),
+        slippageBps: Math.floor(slippagePercent * 100),
+        userKeypair,
+        inputDecimals: fromTokenInfo.decimals,
+        outputDecimals: toTokenInfo.decimals,
+        inputTicker: fromToken.toUpperCase(),
+        outputTicker: toToken.toUpperCase(),
+      });
+
+      // Format quote for display
+      const quoteMessage = swapManager.formatQuoteForDisplay(
+        quote,
+        fromTokenInfo.decimals,
+        toTokenInfo.decimals,
+        fromToken.toUpperCase(),
+        toToken.toUpperCase()
+      );
+
       await ctx.api.editMessageText(
         ctx.chat!.id,
         processingMsg.message_id,
-        "❌ One or both tokens not found. Use token ticker (SOL, USDC) or valid mint address"
-      );
-      return;
-    }
-
-    // Check user balance
-    const userKeypair = wallet.getKeyPair(telegramId);
-    const rawAmount = Math.floor(amount * Math.pow(10, fromTokenInfo.decimals));
-    let userBalance: number;
-    
-    if (fromToken.toLowerCase() === 'sol') {
-      userBalance = await wallet.getBalance(telegramId);
-      if (userBalance < rawAmount + (0.01 * LAMPORTS_PER_SOL)) { // Reserve for fees
-        await ctx.api.editMessageText(
-          ctx.chat!.id,
-          processingMsg.message_id,
-          `❌ Insufficient SOL balance. You need at least ${amount + 0.01} SOL (including fees)`
-        );
-        return;
-      }
-    } else {
-      userBalance = await wallet.getTokenBalance(telegramId, fromTokenInfo.token_mint === 'So11111111111111111111111111111111111111112' ? 'SOL' : fromTokenInfo.token_mint);
-      if (userBalance < rawAmount) {
-        await ctx.api.editMessageText(
-          ctx.chat!.id,
-          processingMsg.message_id,
-          `❌ Insufficient ${fromToken} balance. You have ${wallet.formatTokenBalance(userBalance, fromTokenInfo.decimals)} ${fromToken}`
-        );
-        return;
-      }
-    }
-
-    // Use unified swap manager with pump.fun support
-    const quote = await swapManager.getQuote({
-      inputMint: fromTokenInfo.token_mint,
-      outputMint: toTokenInfo.token_mint,
-      amount: rawAmount.toString(),
-      slippageBps: Math.floor(slippagePercent * 100),
-      userKeypair,
-      inputDecimals: fromTokenInfo.decimals,
-      outputDecimals: toTokenInfo.decimals,
-      inputTicker: fromToken.toUpperCase(),
-      outputTicker: toToken.toUpperCase()
-    });
-
-    // Format quote for display
-    const quoteMessage = swapManager.formatQuoteForDisplay(
-      quote,
-      fromTokenInfo.decimals,
-      toTokenInfo.decimals,
-      fromToken.toUpperCase(),
-      toToken.toUpperCase()
-    );
-
-    await ctx.api.editMessageText(
-      ctx.chat!.id,
-      processingMsg.message_id,
-      quoteMessage,
-      {
-        parse_mode: "Markdown",
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "✅ Confirm Swap", callback_data: `swap_confirm_${telegramId}` },
-              { text: "❌ Cancel", callback_data: `swap_cancel_${telegramId}` }
-            ]
-          ]
+        quoteMessage,
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: "✅ Confirm Swap",
+                  callback_data: `swap_confirm_${telegramId}`,
+                },
+                {
+                  text: "❌ Cancel",
+                  callback_data: `swap_cancel_${telegramId}`,
+                },
+              ],
+            ],
+          },
         }
-      }
-    );
+      );
 
-    // Store swap data temporarily for callback
-    const swapData = {
-      quote,
-      fromTokenInfo,
-      toTokenInfo,
-      fromToken,
-      toToken,
-      userKeypair,
-      telegramId,
-      slippagePercent
-    };
-    
-    // Store with timeout (5 minutes)
-    setTimeout(() => {
-      swapDataCache.delete(telegramId.toString());
-    }, 5 * 60 * 1000);
-    
-    swapDataCache.set(telegramId.toString(), swapData);
+      // Store swap data temporarily for callback
+      const swapData = {
+        quote,
+        fromTokenInfo,
+        toTokenInfo,
+        fromToken,
+        toToken,
+        userKeypair,
+        telegramId,
+        slippagePercent,
+      };
 
-  } catch (error: any) {
-    console.error("Swap error:", error);
-    await handleCommandError(ctx, error, "swap");
+      // Store with timeout (5 minutes)
+      setTimeout(() => {
+        swapDataCache.delete(telegramId.toString());
+      }, 5 * 60 * 1000);
+
+      swapDataCache.set(telegramId.toString(), swapData);
+    } catch (error: any) {
+      console.error("Swap error:", error);
+      await handleCommandError(ctx, error, "swap");
+    }
   }
-});
+);
 
 // Temporary cache for swap data
 const swapDataCache = new Map();
@@ -1092,7 +1131,7 @@ const swapDataCache = new Map();
 bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
   const [, action, userId] = ctx.match!;
   const telegramId = BigInt(ctx.from?.id || 0);
-  
+
   if (telegramId.toString() !== userId) {
     return safeAnswerCallbackQuery(ctx, "❌ This swap is not for you");
   }
@@ -1111,91 +1150,121 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
   }
 
   try {
-    await ctx.editMessageText(`🔄 Executing swap via ${swapData.quote.provider}...`);
-    
+    await ctx.editMessageText(
+      `🔄 Executing swap via ${swapData.quote.provider}...`
+    );
+
     let signature: string;
-    
-    if (swapData.quote.provider === 'jupiter') {
+
+    if (swapData.quote.provider === "jupiter") {
       // Use special Jupiter execution method
-      signature = await swapManager.executeJupiterSwap({
-        inputMint: swapData.fromTokenInfo.token_mint,
-        outputMint: swapData.toTokenInfo.token_mint,
-        amount: swapData.quote.inputAmount,
-        slippageBps: Math.floor(swapData.slippagePercent * 100),
-        userKeypair: swapData.userKeypair,
-        inputDecimals: swapData.fromTokenInfo.decimals,
-        outputDecimals: swapData.toTokenInfo.decimals,
-        inputTicker: swapData.fromToken.toUpperCase(),
-        outputTicker: swapData.toToken.toUpperCase()
-      }, swapData.quote);
+      signature = await swapManager.executeJupiterSwap(
+        {
+          inputMint: swapData.fromTokenInfo.token_mint,
+          outputMint: swapData.toTokenInfo.token_mint,
+          amount: swapData.quote.inputAmount,
+          slippageBps: Math.floor(swapData.slippagePercent * 100),
+          userKeypair: swapData.userKeypair,
+          inputDecimals: swapData.fromTokenInfo.decimals,
+          outputDecimals: swapData.toTokenInfo.decimals,
+          inputTicker: swapData.fromToken.toUpperCase(),
+          outputTicker: swapData.toToken.toUpperCase(),
+        },
+        swapData.quote
+      );
     } else {
       // Use regular instruction-based approach for other providers
-      const instructions = await swapManager.createSwapTransaction({
-        inputMint: swapData.fromTokenInfo.token_mint,
-        outputMint: swapData.toTokenInfo.token_mint,
-        amount: swapData.quote.inputAmount,
-        slippageBps: Math.floor(swapData.slippagePercent * 100),
-        userKeypair: swapData.userKeypair,
-        inputDecimals: swapData.fromTokenInfo.decimals,
-        outputDecimals: swapData.toTokenInfo.decimals,
-        inputTicker: swapData.fromToken.toUpperCase(),
-        outputTicker: swapData.toToken.toUpperCase()
-      }, swapData.quote);
+      const instructions = await swapManager.createSwapTransaction(
+        {
+          inputMint: swapData.fromTokenInfo.token_mint,
+          outputMint: swapData.toTokenInfo.token_mint,
+          amount: swapData.quote.inputAmount,
+          slippageBps: Math.floor(swapData.slippagePercent * 100),
+          userKeypair: swapData.userKeypair,
+          inputDecimals: swapData.fromTokenInfo.decimals,
+          outputDecimals: swapData.toTokenInfo.decimals,
+          inputTicker: swapData.fromToken.toUpperCase(),
+          outputTicker: swapData.toToken.toUpperCase(),
+        },
+        swapData.quote
+      );
 
       // Execute transaction
-      signature = await wallet.sendTransaction(instructions, [swapData.userKeypair]);
+      signature = await wallet.sendTransaction(instructions, [
+        swapData.userKeypair,
+      ]);
 
       // Wait for confirmation
       await wallet.confirmTransaction(signature);
     }
-    
+
     // Auto-register tokens if they're not already known
     try {
       // Import SwapManager to access pumpFunClient
       const { pumpFunClient } = swapManager as any;
-      
+
       // Register input token if not known
       const inputTokenMint = swapData.fromTokenInfo.token_mint;
       let inputTokenTicker = swapData.fromToken.toUpperCase();
-      
-      if (inputTokenTicker !== 'SOL') {
-        const existingInputToken = tokenManager.getKnownTokenByMint(inputTokenMint);
+
+      if (inputTokenTicker !== "SOL") {
+        const existingInputToken =
+          tokenManager.getKnownTokenByMint(inputTokenMint);
         if (!existingInputToken) {
           // Try to get real metadata for pump.fun tokens
-          if (swapData.quote.provider === 'pump-fun' && pumpFunClient) {
-            const metadata = await pumpFunClient.getTokenMetadata(inputTokenMint);
+          if (swapData.quote.provider === "pump-fun" && pumpFunClient) {
+            const metadata = await pumpFunClient.getTokenMetadata(
+              inputTokenMint
+            );
             if (metadata && metadata.symbol) {
               inputTokenTicker = metadata.symbol.toUpperCase();
             }
           }
-          
-          console.log(`Auto-registering input token from swap: ${inputTokenTicker} (${inputTokenMint})`);
-          const registered = await tokenManager.addToken(inputTokenMint, inputTokenTicker);
+
+          console.log(
+            `Auto-registering input token from swap: ${inputTokenTicker} (${inputTokenMint})`
+          );
+          const registered = await tokenManager.addToken(
+            inputTokenMint,
+            inputTokenTicker
+          );
           if (registered) {
-            console.log(`Successfully auto-registered input token: ${inputTokenTicker}`);
+            console.log(
+              `Successfully auto-registered input token: ${inputTokenTicker}`
+            );
           }
         }
       }
-      
+
       // Register output token if not known
       const outputTokenMint = swapData.toTokenInfo.token_mint;
       let outputTokenTicker = swapData.toToken.toUpperCase();
-      
-      if (outputTokenTicker !== 'SOL') {
-        const existingOutputToken = tokenManager.getKnownTokenByMint(outputTokenMint);
+
+      if (outputTokenTicker !== "SOL") {
+        const existingOutputToken =
+          tokenManager.getKnownTokenByMint(outputTokenMint);
         if (!existingOutputToken) {
           // Try to get real metadata for pump.fun tokens
-          if (swapData.quote.provider === 'pump-fun' && pumpFunClient) {
-            const metadata = await pumpFunClient.getTokenMetadata(outputTokenMint);
+          if (swapData.quote.provider === "pump-fun" && pumpFunClient) {
+            const metadata = await pumpFunClient.getTokenMetadata(
+              outputTokenMint
+            );
             if (metadata && metadata.symbol) {
               outputTokenTicker = metadata.symbol.toUpperCase();
             }
           }
-          
-          console.log(`Auto-registering output token from swap: ${outputTokenTicker} (${outputTokenMint})`);
-          const registered = await tokenManager.addToken(outputTokenMint, outputTokenTicker);
+
+          console.log(
+            `Auto-registering output token from swap: ${outputTokenTicker} (${outputTokenMint})`
+          );
+          const registered = await tokenManager.addToken(
+            outputTokenMint,
+            outputTokenTicker
+          );
           if (registered) {
-            console.log(`Successfully auto-registered output token: ${outputTokenTicker}`);
+            console.log(
+              `Successfully auto-registered output token: ${outputTokenTicker}`
+            );
           }
         }
       }
@@ -1203,54 +1272,74 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
       console.warn("Failed to auto-register tokens:", error);
       // Don't fail the swap if auto-registration fails
     }
-    
+
     const successMessage = [
       "✅ **Swap Completed Successfully!**",
       "",
       `🚀 **Provider:** ${swapData.quote.provider.toUpperCase()}`,
-      `🔗 **Transaction:** [${signature.slice(0, 8)}...](https://solscan.io/tx/${signature})`,
-      `📥 **Input:** ${wallet.formatTokenBalance(parseInt(swapData.quote.inputAmount), swapData.fromTokenInfo.decimals)} ${swapData.fromToken}`,
-      `📤 **Output:** ${wallet.formatTokenBalance(parseInt(swapData.quote.outputAmount), swapData.toTokenInfo.decimals)} ${swapData.toToken}`,
+      `🔗 **Transaction:** [${signature.slice(
+        0,
+        8
+      )}...](https://solscan.io/tx/${signature})`,
+      `📥 **Input:** ${wallet.formatTokenBalance(
+        parseInt(swapData.quote.inputAmount),
+        swapData.fromTokenInfo.decimals
+      )} ${swapData.fromToken}`,
+      `📤 **Output:** ${wallet.formatTokenBalance(
+        parseInt(swapData.quote.outputAmount),
+        swapData.toTokenInfo.decimals
+      )} ${swapData.toToken}`,
       "",
-      swapData.quote.provider === 'pump-fun' 
+      swapData.quote.provider === "pump-fun"
         ? "🔥 **Pump.fun Token** - Non-graduated token swap"
-        : "✅ **Mainnet Transaction** - Tokens transferred successfully"
+        : "✅ **Mainnet Transaction** - Tokens transferred successfully",
     ].join("\n");
 
     await ctx.editMessageText(successMessage, { parse_mode: "Markdown" });
     await safeAnswerCallbackQuery(ctx, "Swap completed!");
-    
-    swapDataCache.delete(userId);
 
+    swapDataCache.delete(userId);
   } catch (error: any) {
     console.error("Swap execution error:", error);
-    
+
     // Handle timeout specially - transaction might have succeeded
-    if (error.message?.includes('Transaction confirmation timeout')) {
-      const signature = error.message.match(/signature ([A-Za-z0-9]{44,})/)?.[1];
-      
+    if (error.message?.includes("Transaction confirmation timeout")) {
+      const signature = error.message.match(
+        /signature ([A-Za-z0-9]{44,})/
+      )?.[1];
+
       const timeoutMessage = [
         "⏳ **Swap Transaction Timeout**",
         "",
         "The swap transaction was sent but confirmation timed out.",
         "This often happens during network congestion.",
         "",
-        signature ? `🔗 **Check Status:** [${signature.slice(0, 8)}...](https://solscan.io/tx/${signature})` : "",
+        signature
+          ? `🔗 **Check Status:** [${signature.slice(
+              0,
+              8
+            )}...](https://solscan.io/tx/${signature})`
+          : "",
         "",
         "💡 **Next Steps:**",
         "• Transaction may still succeed - check your balance",
         "• Use `/checktx ${signature || 'SIGNATURE'}` to verify",
-        "• Wait a few minutes before trying again"
-      ].filter(Boolean).join("\n");
-      
+        "• Wait a few minutes before trying again",
+      ]
+        .filter(Boolean)
+        .join("\n");
+
       await ctx.editMessageText(timeoutMessage, { parse_mode: "Markdown" });
-      await safeAnswerCallbackQuery(ctx, "Transaction timeout - may still succeed");
+      await safeAnswerCallbackQuery(
+        ctx,
+        "Transaction timeout - may still succeed"
+      );
     } else {
       const errorMessage = `❌ Swap failed: ${formatUserFriendlyError(error)}`;
       await ctx.editMessageText(errorMessage);
       await safeAnswerCallbackQuery(ctx, "Swap failed");
     }
-    
+
     swapDataCache.delete(userId);
   }
 });

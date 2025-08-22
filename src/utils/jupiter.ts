@@ -1,4 +1,3 @@
-
 // ================================
 // JUPITER TYPES
 // ================================
@@ -68,7 +67,7 @@ export interface JupiterSwapResponse {
 
 export class JupiterClient {
   private baseUrl: string;
-  
+
   constructor(baseUrl: string = "https://quote-api.jup.ag") {
     this.baseUrl = baseUrl;
   }
@@ -84,40 +83,42 @@ export class JupiterClient {
     });
 
     if (request.slippageBps !== undefined) {
-      params.append('slippageBps', request.slippageBps.toString());
+      params.append("slippageBps", request.slippageBps.toString());
     }
-    
+
     if (request.platformFeeBps !== undefined) {
-      params.append('platformFeeBps', request.platformFeeBps.toString());
+      params.append("platformFeeBps", request.platformFeeBps.toString());
     }
 
     if (request.maxAccounts !== undefined) {
-      params.append('maxAccounts', request.maxAccounts.toString());
+      params.append("maxAccounts", request.maxAccounts.toString());
     }
 
     if (request.onlyDirectRoutes !== undefined) {
-      params.append('onlyDirectRoutes', request.onlyDirectRoutes.toString());
+      params.append("onlyDirectRoutes", request.onlyDirectRoutes.toString());
     }
 
     const url = `${this.baseUrl}/v6/quote?${params.toString()}`;
-    
+
     try {
       const response = await fetch(url, {
-        method: 'GET',
+        method: "GET",
         headers: {
-          'Accept': 'application/json',
+          Accept: "application/json",
         },
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Jupiter quote failed: ${response.status} ${response.statusText} - ${errorText}`);
+        throw new Error(
+          `Jupiter quote failed: ${response.status} ${response.statusText} - ${errorText}`
+        );
       }
 
       const data = await response.json();
       return data as JupiterQuoteResponse;
     } catch (error: any) {
-      console.error('Error getting Jupiter quote:', error);
+      console.error("Error getting Jupiter quote:", error);
       throw new Error(`Failed to get swap quote: ${error.message}`);
     }
   }
@@ -125,28 +126,32 @@ export class JupiterClient {
   /**
    * Get a swap transaction from Jupiter
    */
-  async getSwapTransaction(request: JupiterSwapRequest): Promise<JupiterSwapResponse> {
+  async getSwapTransaction(
+    request: JupiterSwapRequest
+  ): Promise<JupiterSwapResponse> {
     const url = `${this.baseUrl}/v6/swap`;
-    
+
     try {
       const response = await fetch(url, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
+          "Content-Type": "application/json",
+          Accept: "application/json",
         },
         body: JSON.stringify(request),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Jupiter swap failed: ${response.status} ${response.statusText} - ${errorText}`);
+        throw new Error(
+          `Jupiter swap failed: ${response.status} ${response.statusText} - ${errorText}`
+        );
       }
 
       const data = await response.json();
       return data as JupiterSwapResponse;
     } catch (error: any) {
-      console.error('Error getting Jupiter swap transaction:', error);
+      console.error("Error getting Jupiter swap transaction:", error);
       throw new Error(`Failed to get swap transaction: ${error.message}`);
     }
   }
@@ -154,22 +159,37 @@ export class JupiterClient {
   /**
    * Format quote for user display
    */
-  formatQuoteForDisplay(quote: JupiterQuoteResponse, inputDecimals: number, outputDecimals: number, inputTicker: string, outputTicker: string): string {
-    const inputAmount = parseFloat(quote.inAmount) / Math.pow(10, inputDecimals);
-    const outputAmount = parseFloat(quote.outAmount) / Math.pow(10, outputDecimals);
+  formatQuoteForDisplay(
+    quote: JupiterQuoteResponse,
+    inputDecimals: number,
+    outputDecimals: number,
+    inputTicker: string,
+    outputTicker: string
+  ): string {
+    const inputAmount =
+      parseFloat(quote.inAmount) / Math.pow(10, inputDecimals);
+    const outputAmount =
+      parseFloat(quote.outAmount) / Math.pow(10, outputDecimals);
     const priceImpact = parseFloat(quote.priceImpactPct);
     const slippage = quote.slippageBps / 100;
 
     let message = `🔄 **Swap Preview**\n\n`;
     message += `📥 **You pay:** ${inputAmount.toFixed(6)} ${inputTicker}\n`;
-    message += `📤 **You receive:** ${outputAmount.toFixed(6)} ${outputTicker}\n`;
-    message += `💹 **Rate:** 1 ${inputTicker} = ${(outputAmount / inputAmount).toFixed(6)} ${outputTicker}\n`;
+    message += `📤 **You receive:** ${outputAmount.toFixed(
+      6
+    )} ${outputTicker}\n`;
+    message += `💹 **Rate:** 1 ${inputTicker} = ${(
+      outputAmount / inputAmount
+    ).toFixed(6)} ${outputTicker}\n`;
     message += `📊 **Price Impact:** ${priceImpact.toFixed(2)}%\n`;
     message += `🎯 **Slippage:** ${slippage}%\n`;
 
     if (quote.platformFee) {
-      const feeAmount = parseFloat(quote.platformFee.amount) / Math.pow(10, inputDecimals);
-      message += `💰 **Platform Fee:** ${feeAmount.toFixed(6)} ${inputTicker}\n`;
+      const feeAmount =
+        parseFloat(quote.platformFee.amount) / Math.pow(10, inputDecimals);
+      message += `💰 **Platform Fee:** ${feeAmount.toFixed(
+        6
+      )} ${inputTicker}\n`;
     }
 
     // Add route information
@@ -184,5 +204,4 @@ export class JupiterClient {
 
     return message;
   }
-
 }

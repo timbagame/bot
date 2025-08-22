@@ -1,6 +1,19 @@
 import { mnemonicToSeedSync } from "bip39";
-import { Connection, Keypair, PublicKey, TransactionInstruction, VersionedTransaction, TransactionMessage, LAMPORTS_PER_SOL, SolanaJSONRPCError } from "@solana/web3.js";
-import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferCheckedInstruction } from "@solana/spl-token";
+import {
+  Connection,
+  Keypair,
+  PublicKey,
+  TransactionInstruction,
+  VersionedTransaction,
+  TransactionMessage,
+  LAMPORTS_PER_SOL,
+  SolanaJSONRPCError,
+} from "@solana/web3.js";
+import {
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
+  createTransferCheckedInstruction,
+} from "@solana/spl-token";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -9,7 +22,7 @@ import {
   SOL_BALANCE_PRECISION,
   TOKEN_BALANCE_MAX_PRECISION,
   MAX_RETRIES,
-  CONFIRMATION_TIMEOUT_MS
+  CONFIRMATION_TIMEOUT_MS,
 } from "./constants";
 
 // ================================
@@ -29,7 +42,7 @@ const retryWithBackoff = async <T>(
       lastError = error;
       if (i < maxRetries - 1) {
         const delay = baseDelay * Math.pow(2, i);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
   }
@@ -49,8 +62,15 @@ export class WalletManager {
 
   // Simplified caching
   private keypairCache = new Map<string, Keypair>();
-  private tokenMetadataCache = new Map<string, { decimals: number; timestamp: number }>();
-  private blockhashCache: { blockhash: string; lastValidBlockHeight: number; timestamp: number } | null = null;
+  private tokenMetadataCache = new Map<
+    string,
+    { decimals: number; timestamp: number }
+  >();
+  private blockhashCache: {
+    blockhash: string;
+    lastValidBlockHeight: number;
+    timestamp: number;
+  } | null = null;
 
   private constructor(mnemonic: string) {
     this.mnemonic = mnemonic;
@@ -67,7 +87,7 @@ export class WalletManager {
     const now = Date.now();
     const timeToWait = WALLET_RATE_LIMIT_MS - (now - this.lastCallTime);
     if (timeToWait > 0) {
-      await new Promise(resolve => setTimeout(resolve, timeToWait));
+      await new Promise((resolve) => setTimeout(resolve, timeToWait));
     }
     this.lastCallTime = now;
   }
@@ -78,7 +98,9 @@ export class WalletManager {
       if (fs.existsSync(keypairPath)) {
         const keypairData = JSON.parse(fs.readFileSync(keypairPath, "utf-8"));
         this.adminKeypair = Keypair.fromSecretKey(new Uint8Array(keypairData));
-        console.log(`Loaded admin keypair: ${this.adminKeypair.publicKey.toBase58()}`);
+        console.log(
+          `Loaded admin keypair: ${this.adminKeypair.publicKey.toBase58()}`
+        );
       }
     } catch (error) {
       console.error("Failed to load admin keypair:", error);
@@ -114,7 +136,9 @@ export class WalletManager {
       this.adminKeypair = Keypair.fromSecretKey(new Uint8Array(keypairData));
       return this.adminKeypair;
     } catch (error) {
-      throw new Error("Failed to load admin keypair. Make sure admin-keypair.json exists in the project root.");
+      throw new Error(
+        "Failed to load admin keypair. Make sure admin-keypair.json exists in the project root."
+      );
     }
   }
 
@@ -136,19 +160,37 @@ export class WalletManager {
     return this.connection.getBalance(pubkey);
   }
 
-  public async getTokenBalance(telegramId: bigint, tokenMint: string): Promise<number> {
+  public async getTokenBalance(
+    telegramId: bigint,
+    tokenMint: string
+  ): Promise<number> {
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
-    const ata = await getAssociatedTokenAddress(new PublicKey(tokenMint), pubkey);
+    const ata = await getAssociatedTokenAddress(
+      new PublicKey(tokenMint),
+      pubkey
+    );
 
     try {
-      const account = await this.connection.getTokenAccountBalance(ata, "confirmed");
-      return account.value.uiAmount ? account.value.uiAmount * Math.pow(10, account.value.decimals) : 0;
+      const account = await this.connection.getTokenAccountBalance(
+        ata,
+        "confirmed"
+      );
+      return account.value.uiAmount
+        ? account.value.uiAmount * Math.pow(10, account.value.decimals)
+        : 0;
     } catch (error: any) {
-      if (error instanceof SolanaJSONRPCError && error.message.includes('could not find account')) {
-        console.log(`Token account ${ata.toBase58()} not found for user ${pubkey.toBase58()}`);
+      if (
+        error instanceof SolanaJSONRPCError &&
+        error.message.includes("could not find account")
+      ) {
+        console.log(
+          `Token account ${ata.toBase58()} not found for user ${pubkey.toBase58()}`
+        );
       } else {
-        console.error(`Error getting token balance for ${pubkey.toBase58()}: ${error}`);
+        console.error(
+          `Error getting token balance for ${pubkey.toBase58()}: ${error}`
+        );
       }
       return 0;
     }
@@ -160,8 +202,20 @@ export class WalletManager {
    */
   public async getAllApprovedTokenBalances(
     telegramId: bigint,
-    approvedTokens: Array<{ token_mint: string; token_ticker: string; decimals: number }>
-  ): Promise<Array<{ mint: string; ticker: string; balance: number; decimals: number; rawBalance: string }>> {
+    approvedTokens: Array<{
+      token_mint: string;
+      token_ticker: string;
+      decimals: number;
+    }>
+  ): Promise<
+    Array<{
+      mint: string;
+      ticker: string;
+      balance: number;
+      decimals: number;
+      rawBalance: string;
+    }>
+  > {
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
 
@@ -172,20 +226,31 @@ export class WalletManager {
 
     try {
       // Get all token accounts for the user in a single RPC call
-      const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(pubkey, {
-        programId: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA") // SPL Token program
-      });
+      const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(
+        pubkey,
+        {
+          programId: new PublicKey(
+            "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+          ), // SPL Token program
+        }
+      );
 
       // Early return if user has no token accounts
       if (!tokenAccounts.value || tokenAccounts.value.length === 0) {
         return [];
       }
 
-      const results: Array<{ mint: string; ticker: string; balance: number; decimals: number; rawBalance: string }> = [];
+      const results: Array<{
+        mint: string;
+        ticker: string;
+        balance: number;
+        decimals: number;
+        rawBalance: string;
+      }> = [];
 
       // Create a map of approved token mints for O(1) lookup
       const approvedTokensMap = new Map(
-        approvedTokens.map(token => [token.token_mint, token])
+        approvedTokens.map((token) => [token.token_mint, token])
       );
 
       // Process each token account
@@ -206,7 +271,7 @@ export class WalletManager {
               ticker: approvedToken.token_ticker,
               balance,
               decimals: tokenAmount.decimals,
-              rawBalance: tokenAmount.amount
+              rawBalance: tokenAmount.amount,
             });
           }
         } catch (error) {
@@ -217,20 +282,27 @@ export class WalletManager {
       }
 
       return results.sort((a, b) => a.ticker.localeCompare(b.ticker));
-
     } catch (error: any) {
       // Handle the case where user has no token accounts gracefully
-      if (error.message?.includes('could not find account') || error.message?.includes('Invalid param')) {
+      if (
+        error.message?.includes("could not find account") ||
+        error.message?.includes("Invalid param")
+      ) {
         console.log(`No token accounts found for user ${pubkey.toBase58()}`);
         return [];
       }
 
-      console.error(`Error getting all token balances for ${pubkey.toBase58()}:`, error);
+      console.error(
+        `Error getting all token balances for ${pubkey.toBase58()}:`,
+        error
+      );
       return [];
     }
   }
 
-  public async getTokenMetadata(tokenMint: string): Promise<{ decimals: number }> {
+  public async getTokenMetadata(
+    tokenMint: string
+  ): Promise<{ decimals: number }> {
     const cached = this.tokenMetadataCache.get(tokenMint);
     const now = Date.now();
 
@@ -242,10 +314,10 @@ export class WalletManager {
 
     // Handle known tokens with hardcoded decimals
     const knownTokens: { [key: string]: number } = {
-      'So11111111111111111111111111111111111111112': 9, // WSOL
-      'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 6, // USDC
-      'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': 6, // USDT
-      'BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4': 9, // TIMBA
+      So11111111111111111111111111111111111111112: 9, // WSOL
+      EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: 6, // USDC
+      Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: 6, // USDT
+      BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4: 9, // TIMBA
     };
 
     if (knownTokens[tokenMint]) {
@@ -256,13 +328,19 @@ export class WalletManager {
 
     await this.throttle();
     try {
-      const account = await this.connection.getParsedAccountInfo(new PublicKey(tokenMint));
+      const account = await this.connection.getParsedAccountInfo(
+        new PublicKey(tokenMint)
+      );
       if (!account.value || !account.value.data) {
         throw new Error("Token mint account not found or has no data");
       }
 
       const parsedData = account.value.data as any;
-      if (parsedData.parsed && parsedData.parsed.info && parsedData.parsed.info.decimals !== undefined) {
+      if (
+        parsedData.parsed &&
+        parsedData.parsed.info &&
+        parsedData.parsed.info.decimals !== undefined
+      ) {
         const decimals = parsedData.parsed.info.decimals;
         this.tokenMetadataCache.set(tokenMint, { decimals, timestamp: now });
         return { decimals };
@@ -271,7 +349,11 @@ export class WalletManager {
       }
     } catch (error) {
       console.error(`Error getting token metadata for ${tokenMint}:`, error);
-      throw new Error(`Failed to get token metadata: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(
+        `Failed to get token metadata: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
     }
   }
 
@@ -284,28 +366,39 @@ export class WalletManager {
     tokenMint: PublicKey,
     payer: Keypair
   ): Promise<{ address: PublicKey; instructions: TransactionInstruction[] }> {
-    const associatedTokenAddress = await getAssociatedTokenAddress(tokenMint, owner);
+    const associatedTokenAddress = await getAssociatedTokenAddress(
+      tokenMint,
+      owner
+    );
     const instructions: TransactionInstruction[] = [];
 
     try {
       await this.throttle();
-      const accountInfo = await this.connection.getAccountInfo(associatedTokenAddress);
+      const accountInfo = await this.connection.getAccountInfo(
+        associatedTokenAddress
+      );
       if (!accountInfo) {
-        instructions.push(createAssociatedTokenAccountInstruction(
+        instructions.push(
+          createAssociatedTokenAccountInstruction(
+            payer.publicKey,
+            associatedTokenAddress,
+            owner,
+            tokenMint
+          )
+        );
+      }
+    } catch (error) {
+      console.error(
+        `Error checking token account ${associatedTokenAddress.toBase58()}: ${error}`
+      );
+      instructions.push(
+        createAssociatedTokenAccountInstruction(
           payer.publicKey,
           associatedTokenAddress,
           owner,
           tokenMint
-        ));
-      }
-    } catch (error) {
-      console.error(`Error checking token account ${associatedTokenAddress.toBase58()}: ${error}`);
-      instructions.push(createAssociatedTokenAccountInstruction(
-        payer.publicKey,
-        associatedTokenAddress,
-        owner,
-        tokenMint
-      ));
+        )
+      );
     }
 
     return { address: associatedTokenAddress, instructions };
@@ -323,10 +416,18 @@ export class WalletManager {
 
     const [
       { address: fromTokenAccount, instructions: fromInstructions },
-      { address: toTokenAccount, instructions: toInstructions }
+      { address: toTokenAccount, instructions: toInstructions },
     ] = await Promise.all([
-      this.findOrCreateAssociatedTokenAccount(fromKeypair.publicKey, tokenMintPubkey, fromKeypair),
-      this.findOrCreateAssociatedTokenAccount(toAddress, tokenMintPubkey, fromKeypair)
+      this.findOrCreateAssociatedTokenAccount(
+        fromKeypair.publicKey,
+        tokenMintPubkey,
+        fromKeypair
+      ),
+      this.findOrCreateAssociatedTokenAccount(
+        toAddress,
+        tokenMintPubkey,
+        fromKeypair
+      ),
     ]);
 
     const transferInstruction = createTransferCheckedInstruction(
@@ -338,7 +439,11 @@ export class WalletManager {
       decimals
     );
 
-    const allInstructions = [...fromInstructions, ...toInstructions, transferInstruction];
+    const allInstructions = [
+      ...fromInstructions,
+      ...toInstructions,
+      transferInstruction,
+    ];
     return await this.sendTransaction(allInstructions, [fromKeypair]);
   }
 
@@ -347,7 +452,12 @@ export class WalletManager {
     const timeout = CONFIRMATION_TIMEOUT_MS;
     const pollInterval = 1000;
 
-    console.log(`🔍 Confirming transaction ${signature.slice(0, 8)}... (timeout: ${timeout}ms)`);
+    console.log(
+      `🔍 Confirming transaction ${signature.slice(
+        0,
+        8
+      )}... (timeout: ${timeout}ms)`
+    );
 
     while (Date.now() - startTime < timeout) {
       try {
@@ -355,28 +465,55 @@ export class WalletManager {
 
         if (result?.value) {
           if (result.value.err) {
-            console.error(`❌ Transaction ${signature.slice(0, 8)}... failed:`, result.value.err);
-            throw new Error(`Transaction failed: ${JSON.stringify(result.value.err)}`);
+            console.error(
+              `❌ Transaction ${signature.slice(0, 8)}... failed:`,
+              result.value.err
+            );
+            throw new Error(
+              `Transaction failed: ${JSON.stringify(result.value.err)}`
+            );
           }
 
-          if (result.value.confirmationStatus === 'confirmed' || result.value.confirmationStatus === 'finalized') {
-            console.log(`✅ Transaction ${signature.slice(0, 8)}... confirmed in ${Date.now() - startTime}ms`);
+          if (
+            result.value.confirmationStatus === "confirmed" ||
+            result.value.confirmationStatus === "finalized"
+          ) {
+            console.log(
+              `✅ Transaction ${signature.slice(0, 8)}... confirmed in ${
+                Date.now() - startTime
+              }ms`
+            );
             return;
           }
 
           if (result.value.confirmationStatus) {
-            console.log(`⏳ Transaction ${signature.slice(0, 8)}... status: ${result.value.confirmationStatus}`);
+            console.log(
+              `⏳ Transaction ${signature.slice(0, 8)}... status: ${
+                result.value.confirmationStatus
+              }`
+            );
           }
         }
 
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
       } catch (error: any) {
-        if (error.message?.includes('429') || error.message?.includes('timeout')) {
-          console.warn(`⚠️ Network issue checking ${signature.slice(0, 8)}..., retrying`);
-          await new Promise(resolve => setTimeout(resolve, pollInterval * 2));
+        if (
+          error.message?.includes("429") ||
+          error.message?.includes("timeout")
+        ) {
+          console.warn(
+            `⚠️ Network issue checking ${signature.slice(0, 8)}..., retrying`
+          );
+          await new Promise((resolve) => setTimeout(resolve, pollInterval * 2));
           continue;
         }
-        console.error(`❌ Error checking transaction status for ${signature.slice(0, 8)}...:`, error.message);
+        console.error(
+          `❌ Error checking transaction status for ${signature.slice(
+            0,
+            8
+          )}...:`,
+          error.message
+        );
         throw error;
       }
     }
@@ -384,16 +521,31 @@ export class WalletManager {
     // Final check before giving up
     try {
       const finalResult = await this.connection.getSignatureStatus(signature);
-      if (finalResult?.value?.confirmationStatus === 'confirmed' || finalResult?.value?.confirmationStatus === 'finalized') {
-        console.log(`✅ Transaction ${signature.slice(0, 8)}... confirmed on final check`);
+      if (
+        finalResult?.value?.confirmationStatus === "confirmed" ||
+        finalResult?.value?.confirmationStatus === "finalized"
+      ) {
+        console.log(
+          `✅ Transaction ${signature.slice(0, 8)}... confirmed on final check`
+        );
         return;
       }
     } catch (error) {
-      console.warn(`⚠️ Error on final check for ${signature.slice(0, 8)}...:`, error);
+      console.warn(
+        `⚠️ Error on final check for ${signature.slice(0, 8)}...:`,
+        error
+      );
     }
 
-    console.error(`⏰ Transaction confirmation timeout for ${signature.slice(0, 8)}... after ${timeout}ms`);
-    throw new Error(`Transaction confirmation timeout after ${timeout}ms. Transaction may still succeed - check signature ${signature}`);
+    console.error(
+      `⏰ Transaction confirmation timeout for ${signature.slice(
+        0,
+        8
+      )}... after ${timeout}ms`
+    );
+    throw new Error(
+      `Transaction confirmation timeout after ${timeout}ms. Transaction may still succeed - check signature ${signature}`
+    );
   }
 
   /**
@@ -409,11 +561,13 @@ export class WalletManager {
       throw new Error("No signers provided");
     }
 
-    const latestBlockhash = await this.connection.getLatestBlockhash('confirmed');
+    const latestBlockhash = await this.connection.getLatestBlockhash(
+      "confirmed"
+    );
     const message = new TransactionMessage({
       payerKey: signers[0]!.publicKey,
       recentBlockhash: latestBlockhash.blockhash,
-      instructions: instructions
+      instructions: instructions,
     }).compileToV0Message();
 
     const tx = new VersionedTransaction(message);
@@ -422,8 +576,8 @@ export class WalletManager {
     const signature = await retryWithBackoff(async () => {
       return await this.connection.sendTransaction(tx, {
         skipPreflight: false,
-        preflightCommitment: 'confirmed',
-        maxRetries: 3
+        preflightCommitment: "confirmed",
+        maxRetries: 3,
       });
     });
 
@@ -442,7 +596,7 @@ export class WalletManager {
 
     try {
       // Deserialize the transaction
-      const txBuffer = Buffer.from(serializedTxBase64, 'base64');
+      const txBuffer = Buffer.from(serializedTxBase64, "base64");
       const tx = VersionedTransaction.deserialize(txBuffer);
 
       // Sign the transaction
@@ -452,23 +606,29 @@ export class WalletManager {
       const signature = await retryWithBackoff(async () => {
         return await this.connection.sendTransaction(tx, {
           skipPreflight: true, // Skip preflight for complex Jupiter transactions
-          preflightCommitment: 'processed',
-          maxRetries: 5
+          preflightCommitment: "processed",
+          maxRetries: 5,
         });
       });
 
-      console.log(`📤 Serialized transaction sent: ${signature.slice(0, 8)}...`);
+      console.log(
+        `📤 Serialized transaction sent: ${signature.slice(0, 8)}...`
+      );
       return signature;
     } catch (error: any) {
       console.error("Error signing and sending serialized transaction:", error);
-      
+
       // Check for specific address lookup table error
-      if (error.message?.includes('address table account') || 
-          error.message?.includes('lookup table') ||
-          error.message?.includes('AddressTableLookup')) {
-        throw new Error('Jupiter transaction failed due to address lookup table issue. Try again with a different amount or wait a moment.');
+      if (
+        error.message?.includes("address table account") ||
+        error.message?.includes("lookup table") ||
+        error.message?.includes("AddressTableLookup")
+      ) {
+        throw new Error(
+          "Jupiter transaction failed due to address lookup table issue. Try again with a different amount or wait a moment."
+        );
       }
-      
+
       throw new Error(`Failed to send transaction: ${error.message}`);
     }
   }
@@ -492,12 +652,18 @@ export class WalletManager {
     }
   }
 
-  public async getLatestBlockhash(): Promise<{ blockhash: string; lastValidBlockHeight: number }> {
+  public async getLatestBlockhash(): Promise<{
+    blockhash: string;
+    lastValidBlockHeight: number;
+  }> {
     const now = Date.now();
-    if (this.blockhashCache && now - this.blockhashCache.timestamp < BLOCKHASH_CACHE_DURATION) {
+    if (
+      this.blockhashCache &&
+      now - this.blockhashCache.timestamp < BLOCKHASH_CACHE_DURATION
+    ) {
       return {
         blockhash: this.blockhashCache.blockhash,
-        lastValidBlockHeight: this.blockhashCache.lastValidBlockHeight
+        lastValidBlockHeight: this.blockhashCache.lastValidBlockHeight,
       };
     }
 
@@ -512,7 +678,7 @@ export class WalletManager {
   }
 
   public formatTokenBalance(amount: number, decimals: number): string {
-    const formatted = (amount / Math.pow(10, decimals));
+    const formatted = amount / Math.pow(10, decimals);
     return formatted < 1
       ? formatted.toFixed(decimals)
       : formatted.toFixed(Math.min(decimals, TOKEN_BALANCE_MAX_PRECISION));

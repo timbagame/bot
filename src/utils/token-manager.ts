@@ -17,7 +17,11 @@ export class TokenManager {
   private defaultTokenMint: string;
   private defaultTokenTicker: string;
 
-  private constructor(wallet: WalletManager, defaultTokenMint: string, defaultTokenTicker: string) {
+  private constructor(
+    wallet: WalletManager,
+    defaultTokenMint: string,
+    defaultTokenTicker: string
+  ) {
     this.chatDb = ChatDatabase.getInstance();
     this.tokenDb = TokenDatabase.getInstance();
     this.wallet = wallet;
@@ -25,12 +29,22 @@ export class TokenManager {
     this.defaultTokenTicker = defaultTokenTicker;
   }
 
-  public static getInstance(wallet?: WalletManager, defaultTokenMint?: string, defaultTokenTicker?: string): TokenManager {
+  public static getInstance(
+    wallet?: WalletManager,
+    defaultTokenMint?: string,
+    defaultTokenTicker?: string
+  ): TokenManager {
     if (!TokenManager.instance) {
       if (!wallet || !defaultTokenMint || !defaultTokenTicker) {
-        throw new Error("TokenManager first initialization requires wallet and default token info");
+        throw new Error(
+          "TokenManager first initialization requires wallet and default token info"
+        );
       }
-      TokenManager.instance = new TokenManager(wallet, defaultTokenMint, defaultTokenTicker);
+      TokenManager.instance = new TokenManager(
+        wallet,
+        defaultTokenMint,
+        defaultTokenTicker
+      );
     }
     return TokenManager.instance;
   }
@@ -39,7 +53,11 @@ export class TokenManager {
   // TOKEN PARSING WITH MULTI-TOKEN SUPPORT
   // ================================
 
-  public async parseAmount(args: string[], argIndex: number = 1, chatId?: number): Promise<ParseAmountResult> {
+  public async parseAmount(
+    args: string[],
+    argIndex: number = 1,
+    chatId?: number
+  ): Promise<ParseAmountResult> {
     if (!args || args.length <= argIndex) {
       return { success: false, error: "invalid_amount" };
     }
@@ -93,7 +111,10 @@ export class TokenManager {
     } else {
       const metadata = await this.wallet.getTokenMetadata(resolvedTokenMint);
       amount = rawAmount * Math.pow(10, metadata.decimals);
-      formattedAmount = this.wallet.formatTokenBalance(amount, metadata.decimals) + " " + resolvedTokenTicker;
+      formattedAmount =
+        this.wallet.formatTokenBalance(amount, metadata.decimals) +
+        " " +
+        resolvedTokenTicker;
     }
 
     return {
@@ -104,8 +125,8 @@ export class TokenManager {
         formattedAmount,
         tokenMint: isSol ? "SOL" : resolvedTokenMint,
         tokenTicker: isSol ? "SOL" : resolvedTokenTicker,
-        tokenWasSpecified
-      }
+        tokenWasSpecified,
+      },
     };
   }
 
@@ -113,11 +134,13 @@ export class TokenManager {
   // TOKEN RESOLUTION
   // ================================
 
-  public async resolveTokenForChat(chatId?: number): Promise<{ tokenMint: string; tokenTicker: string }> {
+  public async resolveTokenForChat(
+    chatId?: number
+  ): Promise<{ tokenMint: string; tokenTicker: string }> {
     if (!chatId) {
       return {
         tokenMint: this.defaultTokenMint,
-        tokenTicker: this.defaultTokenTicker
+        tokenTicker: this.defaultTokenTicker,
       };
     }
 
@@ -125,13 +148,13 @@ export class TokenManager {
     if (chatConfig) {
       return {
         tokenMint: chatConfig.token_mint,
-        tokenTicker: chatConfig.token_ticker
+        tokenTicker: chatConfig.token_ticker,
       };
     }
 
     return {
       tokenMint: this.defaultTokenMint,
-      tokenTicker: this.defaultTokenTicker
+      tokenTicker: this.defaultTokenTicker,
     };
   }
 
@@ -144,7 +167,11 @@ export class TokenManager {
       // Validate token mint exists on blockchain
       const metadata = await this.wallet.getTokenMetadata(tokenMint);
 
-      this.tokenDb.addKnownToken(tokenMint, ticker.toUpperCase(), metadata.decimals);
+      this.tokenDb.addKnownToken(
+        tokenMint,
+        ticker.toUpperCase(),
+        metadata.decimals
+      );
       return true;
     } catch (error) {
       console.error(`Error adding token ${ticker}:`, error);
@@ -152,8 +179,18 @@ export class TokenManager {
     }
   }
 
-  public setChatDefaultToken(chatId: number, tokenMint: string, tokenTicker: string, setByTelegramId: string): void {
-    this.chatDb.setChatDefaultToken(chatId, tokenMint, tokenTicker, setByTelegramId);
+  public setChatDefaultToken(
+    chatId: number,
+    tokenMint: string,
+    tokenTicker: string,
+    setByTelegramId: string
+  ): void {
+    this.chatDb.setChatDefaultToken(
+      chatId,
+      tokenMint,
+      tokenTicker,
+      setByTelegramId
+    );
   }
 
   public getChatDefaultToken(chatId: number): ChatTokenConfig | null {
@@ -203,7 +240,11 @@ export class TokenManager {
   /**
    * Get all approved tokens with their metadata for efficient balance checking
    */
-  public getAllApprovedTokensWithMetadata(): Array<{ token_mint: string; token_ticker: string; decimals: number }> {
+  public getAllApprovedTokensWithMetadata(): Array<{
+    token_mint: string;
+    token_ticker: string;
+    decimals: number;
+  }> {
     return this.tokenDb.getAllKnownTokens();
   }
 
@@ -214,7 +255,7 @@ export class TokenManager {
   public getDefaultToken(): { tokenMint: string; tokenTicker: string } {
     return {
       tokenMint: this.defaultTokenMint,
-      tokenTicker: this.defaultTokenTicker
+      tokenTicker: this.defaultTokenTicker,
     };
   }
 
@@ -237,10 +278,12 @@ export class TokenManager {
     }
   }
 
-  public async autoDiscoverTokenInfo(tokenMint: string): Promise<{ ticker: string; decimals: number; isPumpFun?: boolean } | null> {
+  public async autoDiscoverTokenInfo(
+    tokenMint: string
+  ): Promise<{ ticker: string; decimals: number; isPumpFun?: boolean } | null> {
     try {
       const metadata = await this.wallet.getTokenMetadata(tokenMint);
-      
+
       // Check if it's a pump.fun token
       let isPumpFun = false;
       if (isPotentialPumpFunToken(tokenMint)) {
@@ -248,16 +291,16 @@ export class TokenManager {
         const pumpInfo = await pumpFunClient.isPumpFunToken(tokenMint);
         isPumpFun = pumpInfo.isPumpFun && !pumpInfo.isGraduated;
       }
-      
+
       // For auto-discovery, we could add more logic here to fetch token name/symbol
       // For now, we'll use a simple format
       const shortMint = tokenMint.slice(0, 8).toUpperCase();
       const ticker = isPumpFun ? `PUMP_${shortMint}` : `TOKEN_${shortMint}`;
-      
+
       return {
         ticker,
         decimals: metadata.decimals,
-        isPumpFun
+        isPumpFun,
       };
     } catch {
       return null;
@@ -268,7 +311,9 @@ export class TokenManager {
   // PUMP.FUN INTEGRATION
   // ================================
 
-  public async checkPumpFunToken(tokenMint: string): Promise<{ isPumpFun: boolean; isGraduated: boolean }> {
+  public async checkPumpFunToken(
+    tokenMint: string
+  ): Promise<{ isPumpFun: boolean; isGraduated: boolean }> {
     if (!isPotentialPumpFunToken(tokenMint)) {
       return { isPumpFun: false, isGraduated: false };
     }

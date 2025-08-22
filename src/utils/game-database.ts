@@ -72,22 +72,44 @@ export class GameDatabase {
   }
 
   // Game methods
-  public saveGame(gameAddress: string, creatorTelegramId: string, amount: number, gameType: string, tokenMint?: string, tokenTicker?: string, maxPlayers?: number, minPlayers?: number, chatId?: number): void {
+  public saveGame(
+    gameAddress: string,
+    creatorTelegramId: string,
+    amount: number,
+    gameType: string,
+    tokenMint?: string,
+    tokenTicker?: string,
+    maxPlayers?: number,
+    minPlayers?: number,
+    chatId?: number
+  ): void {
     try {
       const stmt = this.db.prepare(
-        'INSERT INTO games (game_address, creator_telegram_id, amount, created_at, game_type, token_mint, token_ticker, max_players, min_players, chat_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        "INSERT INTO games (game_address, creator_telegram_id, amount, created_at, game_type, token_mint, token_ticker, max_players, min_players, chat_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       );
-      stmt.run(gameAddress, creatorTelegramId, amount, Date.now(), gameType, tokenMint || null, tokenTicker || null, maxPlayers || null, minPlayers || null, chatId || null);
+      stmt.run(
+        gameAddress,
+        creatorTelegramId,
+        amount,
+        Date.now(),
+        gameType,
+        tokenMint || null,
+        tokenTicker || null,
+        maxPlayers || null,
+        minPlayers || null,
+        chatId || null
+      );
     } catch (error) {
       console.error("Error saving game:", error);
       throw error;
     }
   }
 
-
   public getGame(gameAddress: string): GameData | null {
     try {
-      const stmt = this.db.prepare('SELECT * FROM games WHERE game_address = ?');
+      const stmt = this.db.prepare(
+        "SELECT * FROM games WHERE game_address = ?"
+      );
       return (stmt.get(gameAddress) as GameData) || null;
     } catch (error) {
       console.error("Error getting game:", error);
@@ -95,13 +117,17 @@ export class GameDatabase {
     }
   }
 
-  public completeGame(gameAddress: string, winnerAddress: string, completedAt?: number): void {
+  public completeGame(
+    gameAddress: string,
+    winnerAddress: string,
+    completedAt?: number
+  ): void {
     try {
       const timestamp = completedAt || Date.now();
       const stmt = this.db.prepare(
-        'UPDATE games SET winner_address = ?, completed_at = ?, status = ? WHERE game_address = ?'
+        "UPDATE games SET winner_address = ?, completed_at = ?, status = ? WHERE game_address = ?"
       );
-      stmt.run(winnerAddress, timestamp, 'completed', gameAddress);
+      stmt.run(winnerAddress, timestamp, "completed", gameAddress);
     } catch (error) {
       console.error("Error completing game:", error);
       throw error;
@@ -110,7 +136,7 @@ export class GameDatabase {
 
   public getAllGames(): GameData[] {
     try {
-      return this.db.query('SELECT * FROM games').all() as GameData[];
+      return this.db.query("SELECT * FROM games").all() as GameData[];
     } catch (error) {
       console.error("Error getting all games:", error);
       throw error;
@@ -119,8 +145,12 @@ export class GameDatabase {
 
   public getCreatorTelegramId(gameAddress: string): string | null {
     try {
-      const stmt = this.db.prepare('SELECT creator_telegram_id FROM games WHERE game_address = ?');
-      const result = stmt.get(gameAddress) as { creator_telegram_id: string } | undefined;
+      const stmt = this.db.prepare(
+        "SELECT creator_telegram_id FROM games WHERE game_address = ?"
+      );
+      const result = stmt.get(gameAddress) as
+        | { creator_telegram_id: string }
+        | undefined;
       return result?.creator_telegram_id || null;
     } catch (error) {
       console.error("Error getting creator telegram ID:", error);
@@ -128,7 +158,9 @@ export class GameDatabase {
     }
   }
 
-  public getCreatorInfo(gameAddress: string): { telegramId: string | null; publicKey: string | null } | null {
+  public getCreatorInfo(
+    gameAddress: string
+  ): { telegramId: string | null; publicKey: string | null } | null {
     try {
       const stmt = this.db.prepare(`
         SELECT g.creator_telegram_id, pm.public_key
@@ -136,15 +168,17 @@ export class GameDatabase {
         LEFT JOIN player_mappings pm ON g.creator_telegram_id = pm.telegram_id
         WHERE g.game_address = ?
       `);
-      const result = stmt.get(gameAddress) as { creator_telegram_id: string; public_key: string | null } | undefined;
-      
+      const result = stmt.get(gameAddress) as
+        | { creator_telegram_id: string; public_key: string | null }
+        | undefined;
+
       if (!result) {
         return null;
       }
-      
+
       return {
         telegramId: result.creator_telegram_id,
-        publicKey: result.public_key || null
+        publicKey: result.public_key || null,
       };
     } catch (error) {
       console.error("Error getting creator info:", error);
@@ -154,7 +188,9 @@ export class GameDatabase {
 
   public gameExists(gameAddress: string): boolean {
     try {
-      const stmt = this.db.prepare('SELECT 1 FROM games WHERE game_address = ? LIMIT 1');
+      const stmt = this.db.prepare(
+        "SELECT 1 FROM games WHERE game_address = ? LIMIT 1"
+      );
       const result = stmt.get(gameAddress);
       return !!result;
     } catch (error) {
@@ -163,10 +199,14 @@ export class GameDatabase {
     }
   }
 
-  public saveGameMessage(gameAddress: string, messageId: number, chatId: number): void {
+  public saveGameMessage(
+    gameAddress: string,
+    messageId: number,
+    chatId: number
+  ): void {
     try {
       const stmt = this.db.prepare(
-        'UPDATE games SET message_id = ?, chat_id = ? WHERE game_address = ?'
+        "UPDATE games SET message_id = ?, chat_id = ? WHERE game_address = ?"
       );
       stmt.run(messageId, chatId, gameAddress);
     } catch (error) {
@@ -179,7 +219,7 @@ export class GameDatabase {
   public savePlayerMapping(publicKey: string, telegramId: string): void {
     try {
       const stmt = this.db.prepare(
-        'INSERT OR REPLACE INTO player_mappings (public_key, telegram_id) VALUES (?, ?)'
+        "INSERT OR REPLACE INTO player_mappings (public_key, telegram_id) VALUES (?, ?)"
       );
       stmt.run(publicKey, telegramId);
     } catch (error) {
@@ -190,7 +230,9 @@ export class GameDatabase {
 
   public getPlayerTelegramId(publicKey: string): string | null {
     try {
-      const stmt = this.db.prepare('SELECT telegram_id FROM player_mappings WHERE public_key = ?');
+      const stmt = this.db.prepare(
+        "SELECT telegram_id FROM player_mappings WHERE public_key = ?"
+      );
       const result = stmt.get(publicKey) as { telegram_id: string } | undefined;
       return result?.telegram_id || null;
     } catch (error) {
@@ -201,7 +243,9 @@ export class GameDatabase {
 
   public getPlayerPublicKey(telegramId: string): string | null {
     try {
-      const stmt = this.db.prepare('SELECT public_key FROM player_mappings WHERE telegram_id = ?');
+      const stmt = this.db.prepare(
+        "SELECT public_key FROM player_mappings WHERE telegram_id = ?"
+      );
       const result = stmt.get(telegramId) as { public_key: string } | undefined;
       return result?.public_key || null;
     } catch (error) {
@@ -212,7 +256,9 @@ export class GameDatabase {
 
   public getAllPlayerMappings(): PlayerMapping[] {
     try {
-      return this.db.query('SELECT * FROM player_mappings').all() as PlayerMapping[];
+      return this.db
+        .query("SELECT * FROM player_mappings")
+        .all() as PlayerMapping[];
     } catch (error) {
       console.error("Error getting all player mappings:", error);
       throw error;
@@ -220,10 +266,14 @@ export class GameDatabase {
   }
 
   // Game participant methods
-  public saveGameParticipant(gameAddress: string, telegramId: string, publicKey: string): void {
+  public saveGameParticipant(
+    gameAddress: string,
+    telegramId: string,
+    publicKey: string
+  ): void {
     try {
       const stmt = this.db.prepare(
-        'INSERT OR REPLACE INTO game_participants (game_address, telegram_id, public_key, joined_at) VALUES (?, ?, ?, ?)'
+        "INSERT OR REPLACE INTO game_participants (game_address, telegram_id, public_key, joined_at) VALUES (?, ?, ?, ?)"
       );
       stmt.run(gameAddress, telegramId, publicKey, Date.now());
     } catch (error) {
@@ -234,9 +284,11 @@ export class GameDatabase {
 
   public getGameParticipants(gameAddress: string): string[] {
     try {
-      const stmt = this.db.prepare('SELECT telegram_id FROM game_participants WHERE game_address = ?');
+      const stmt = this.db.prepare(
+        "SELECT telegram_id FROM game_participants WHERE game_address = ?"
+      );
       const results = stmt.all(gameAddress) as { telegram_id: string }[];
-      return results.map(r => r.telegram_id);
+      return results.map((r) => r.telegram_id);
     } catch (error) {
       console.error("Error getting game participants:", error);
       throw error;
@@ -245,9 +297,11 @@ export class GameDatabase {
 
   public getPlayerParticipatedGames(telegramId: string): string[] {
     try {
-      const stmt = this.db.prepare('SELECT game_address FROM game_participants WHERE telegram_id = ?');
+      const stmt = this.db.prepare(
+        "SELECT game_address FROM game_participants WHERE telegram_id = ?"
+      );
       const results = stmt.all(telegramId) as { game_address: string }[];
-      return results.map(r => r.game_address);
+      return results.map((r) => r.game_address);
     } catch (error) {
       console.error("Error getting player participated games:", error);
       throw error;
@@ -257,7 +311,7 @@ export class GameDatabase {
   public removeGameParticipant(gameAddress: string, telegramId: string): void {
     try {
       const stmt = this.db.prepare(
-        'DELETE FROM game_participants WHERE game_address = ? AND telegram_id = ?'
+        "DELETE FROM game_participants WHERE game_address = ? AND telegram_id = ?"
       );
       stmt.run(gameAddress, telegramId);
     } catch (error) {
@@ -318,20 +372,45 @@ export class GameDatabase {
   /**
    * Update the lastSlot for a game only if the timestamp is newer (used for winner calculation)
    */
-  public updateGameLastSlotWithTimestamp(gameAddress: string, lastSlot: string, timestamp: number): boolean {
+  public updateGameLastSlotWithTimestamp(
+    gameAddress: string,
+    lastSlot: string,
+    timestamp: number
+  ): boolean {
     try {
       // First check if we should update (only if timestamp is newer)
-      const currentStmt = this.db.prepare("SELECT last_slot_timestamp FROM games WHERE game_address = ?");
-      const current = currentStmt.get(gameAddress) as { last_slot_timestamp: number | null } | undefined;
+      const currentStmt = this.db.prepare(
+        "SELECT last_slot_timestamp FROM games WHERE game_address = ?"
+      );
+      const current = currentStmt.get(gameAddress) as
+        | { last_slot_timestamp: number | null }
+        | undefined;
 
       // If no current timestamp or the new one is newer, update
-      if (!current?.last_slot_timestamp || timestamp > current.last_slot_timestamp) {
-        const updateStmt = this.db.prepare("UPDATE games SET last_slot = ?, last_slot_timestamp = ? WHERE game_address = ?");
+      if (
+        !current?.last_slot_timestamp ||
+        timestamp > current.last_slot_timestamp
+      ) {
+        const updateStmt = this.db.prepare(
+          "UPDATE games SET last_slot = ?, last_slot_timestamp = ? WHERE game_address = ?"
+        );
         updateStmt.run(lastSlot, timestamp, gameAddress);
-        console.log(`🕐 Updated lastSlot for game ${gameAddress.slice(0, 8)}... to ${lastSlot} (timestamp: ${timestamp})`);
+        console.log(
+          `🕐 Updated lastSlot for game ${gameAddress.slice(
+            0,
+            8
+          )}... to ${lastSlot} (timestamp: ${timestamp})`
+        );
         return true; // Updated
       } else {
-        console.log(`⏰ Skipped outdated slot update for game ${gameAddress.slice(0, 8)}... (current: ${current.last_slot_timestamp}, received: ${timestamp})`);
+        console.log(
+          `⏰ Skipped outdated slot update for game ${gameAddress.slice(
+            0,
+            8
+          )}... (current: ${
+            current.last_slot_timestamp
+          }, received: ${timestamp})`
+        );
         return false; // Not updated due to older timestamp
       }
     } catch (error) {
@@ -343,13 +422,20 @@ export class GameDatabase {
   /**
    * Get the lastSlot and its timestamp for a game
    */
-  public getGameLastSlotWithTimestamp(gameAddress: string): { lastSlot: string | null; timestamp: number | null } {
+  public getGameLastSlotWithTimestamp(gameAddress: string): {
+    lastSlot: string | null;
+    timestamp: number | null;
+  } {
     try {
-      const stmt = this.db.prepare("SELECT last_slot, last_slot_timestamp FROM games WHERE game_address = ?");
-      const result = stmt.get(gameAddress) as { last_slot: string | null; last_slot_timestamp: number | null } | undefined;
+      const stmt = this.db.prepare(
+        "SELECT last_slot, last_slot_timestamp FROM games WHERE game_address = ?"
+      );
+      const result = stmt.get(gameAddress) as
+        | { last_slot: string | null; last_slot_timestamp: number | null }
+        | undefined;
       return {
         lastSlot: result?.last_slot || null,
-        timestamp: result?.last_slot_timestamp || null
+        timestamp: result?.last_slot_timestamp || null,
       };
     } catch (error) {
       console.error("Error getting game lastSlot with timestamp:", error);
@@ -362,7 +448,9 @@ export class GameDatabase {
    */
   public getGameLastSlot(gameAddress: string): string | null {
     try {
-      const stmt = this.db.prepare("SELECT last_slot FROM games WHERE game_address = ?");
+      const stmt = this.db.prepare(
+        "SELECT last_slot FROM games WHERE game_address = ?"
+      );
       const result = stmt.get(gameAddress) as { last_slot: string } | undefined;
       return result?.last_slot || null;
     } catch (error) {
@@ -370,5 +458,4 @@ export class GameDatabase {
       return null;
     }
   }
-
 }
