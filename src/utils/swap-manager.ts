@@ -2,7 +2,6 @@ import { Connection, PublicKey, Keypair, TransactionInstruction, Transaction, Ve
 import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } from '@solana/spl-token';
 import { JupiterClient } from './jupiter';
 import { PumpFunClient, validatePumpFunSwap } from './pump-fun';
-import { DevnetSwapSimulator } from './devnet-swap-simulator';
 import { NetworkDetector, SolanaNetwork } from './network-detector';
 import { WalletManager } from './wallet';
 
@@ -17,7 +16,7 @@ export interface SwapQuote {
   outputAmount: string;
   estimatedRate: number;
   slippage: number;
-  provider: 'jupiter' | 'pump-fun' | 'devnet-simulator';
+  provider: 'jupiter' | 'pump-fun';
   priceImpact?: string;
   platformFee?: any;
 }
@@ -37,7 +36,6 @@ export interface SwapRequest {
 export class SwapManager {
   private jupiterClient: JupiterClient;
   public pumpFunClient: PumpFunClient;
-  private devnetSimulator: DevnetSwapSimulator;
   private connection: Connection;
   private wallet: WalletManager;
   private network: SolanaNetwork;
@@ -49,7 +47,6 @@ export class SwapManager {
     
     this.jupiterClient = new JupiterClient();
     this.pumpFunClient = new PumpFunClient(connection, wallet);
-    this.devnetSimulator = new DevnetSwapSimulator(wallet);
   }
 
   /**
@@ -179,26 +176,27 @@ export class SwapManager {
       }
     }
 
-    // For devnet/testnet, use simulator
-    const devnetQuote = await this.devnetSimulator.getSimulatedQuote(
+    // Fallback to Jupiter for all other cases
+    const jupiterQuote = await this.jupiterClient.getQuote({
       inputMint,
       outputMint,
       amount,
-      inputDecimals,
-      outputDecimals,
-      inputTicker,
-      outputTicker
-    );
+      slippageBps
+    });
+
+    const inputAmount = parseFloat(jupiterQuote.inAmount) / Math.pow(10, inputDecimals);
+    const outputAmount = parseFloat(jupiterQuote.outAmount) / Math.pow(10, outputDecimals);
+    const estimatedRate = outputAmount / inputAmount;
 
     return {
-      inputMint: devnetQuote.inputMint,
-      outputMint: devnetQuote.outputMint,
-      inputAmount: devnetQuote.inputAmount,
-      outputAmount: devnetQuote.outputAmount,
-      estimatedRate: devnetQuote.estimatedRate,
-      slippage: devnetQuote.simulatedSlippage,
-      provider: 'devnet-simulator',
-      priceImpact: devnetQuote.priceImpact
+      inputMint: jupiterQuote.inputMint,
+      outputMint: jupiterQuote.outputMint,
+      inputAmount: jupiterQuote.inAmount,
+      outputAmount: jupiterQuote.outAmount,
+      estimatedRate,
+      slippage: jupiterQuote.slippageBps / 100,
+      provider: 'jupiter',
+      priceImpact: jupiterQuote.priceImpactPct
     };
   }
 
@@ -233,24 +231,6 @@ export class SwapManager {
         // This avoids the complexity of address lookup table resolution
         throw new Error('Jupiter swaps should use executeJupiterSwap method instead');
 
-      case 'devnet-simulator':
-        swapInstructions = await this.devnetSimulator.createSimulatedSwapInstructions(
-          userKeypair,
-          {
-            inputMint: quote.inputMint,
-            outputMint: quote.outputMint,
-            inputAmount: quote.inputAmount,
-            outputAmount: quote.outputAmount,
-            estimatedRate: quote.estimatedRate,
-            priceImpact: quote.priceImpact || '0',
-            simulatedSlippage: quote.slippage
-          },
-          request.inputTicker,
-          request.outputTicker,
-          request.inputDecimals,
-          request.outputDecimals
-        );
-        break;
 
       default:
         throw new Error(`Unsupported swap provider: ${quote.provider}`);
@@ -344,22 +324,6 @@ export class SwapManager {
           outputTicker
         );
 
-      case 'devnet-simulator':
-        return this.devnetSimulator.formatQuoteForDisplay(
-          {
-            inputMint: quote.inputMint,
-            outputMint: quote.outputMint,
-            inputAmount: quote.inputAmount,
-            outputAmount: quote.outputAmount,
-            estimatedRate: quote.estimatedRate,
-            priceImpact: quote.priceImpact || '0',
-            simulatedSlippage: quote.slippage
-          },
-          inputDecimals,
-          outputDecimals,
-          inputTicker,
-          outputTicker
-        );
 
       default:
         return `Unsupported provider: ${quote.provider}`;
@@ -369,7 +333,7 @@ export class SwapManager {
   /**
    * Get the best available provider for a token pair
    */
-  async getBestProvider(inputMint: string, outputMint: string): Promise<'jupiter' | 'pump-fun' | 'devnet-simulator'> {
+  async getBestProvider(inputMint: string, outputMint: string): Promise<'jupiter' | 'pump-fun'> {
     // Check for pump.fun tokens first (skip SOL/WSOL and known major tokens)
     if (this.network === 'mainnet') {
       const isSolInput = inputMint === 'So11111111111111111111111111111111111111112' || inputMint === 'SOL';
@@ -417,7 +381,7 @@ export class SwapManager {
       return 'jupiter';
     }
 
-    return 'devnet-simulator';
+    return 'jupiter';
   }
 
   /**
@@ -664,16 +628,6 @@ export class SwapManager {
           // Jupiter can handle most token pairs on mainnet
           return { canSwap: true, provider };
 
-        case 'devnet-simulator':
-          // Check if simulator supports this pair
-          const inputTicker = inputMint === 'SOL' ? 'SOL' : 'TOKEN';
-          const outputTicker = outputMint === 'SOL' ? 'SOL' : 'TOKEN';
-          const canSimulate = this.devnetSimulator.canSimulatePair(inputTicker, outputTicker);
-          
-          if (!canSimulate) {
-            return { canSwap: false, reason: 'Token pair not supported in devnet simulator' };
-          }
-          return { canSwap: true, provider };
 
         default:
           return { canSwap: false, reason: 'No suitable provider found' };
