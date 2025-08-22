@@ -1,4 +1,4 @@
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, Keypair } from "@solana/web3.js";
 import { Context } from "grammy";
 import * as anchor from "@coral-xyz/anchor";
 
@@ -908,7 +908,7 @@ export class GameManager {
 
   private async handleGameAutoJoinPure(
     gamePda: PublicKey,
-    playerKp: anchor.web3.Keypair,
+    playerKp: Keypair,
     telegramId: bigint,
     creatorPubkey: string,
     gameType: string,
@@ -1367,7 +1367,7 @@ export class GameManager {
 
   public async joinPrivateGame(
     gamePda: PublicKey,
-    playerKp: anchor.web3.Keypair,
+    playerKp: Keypair,
     chatId: number
   ): Promise<{ success: boolean; tx?: string; error?: string }> {
     try {

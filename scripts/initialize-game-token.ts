@@ -280,10 +280,16 @@ async function initializeGameToken() {
   await checkBalance(connection, adminKeypair, 0.2); // Need more SOL for multiple token initializations
 
   // Setup Anchor provider
-  const adminWallet = new anchor.Wallet(adminKeypair);
-  const provider = new anchor.AnchorProvider(connection, adminWallet, {
-    commitment: "confirmed",
-  });
+  const adminWallet = new anchor.Wallet(
+    adminKeypair as anchor.web3.Keypair
+  );
+  const provider = new anchor.AnchorProvider(
+    connection as unknown as anchor.web3.Connection,
+    adminWallet,
+    {
+      commitment: "confirmed",
+    }
+  );
   anchor.setProvider(provider);
 
   // Initialize program
