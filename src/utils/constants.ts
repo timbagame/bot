@@ -49,6 +49,7 @@ export const DEFAULT_TOKEN_MINT = "BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4"
 export const DEFAULT_TOKEN_TICKER = "TIMBA";
 export const TOKENS_LIST = [
   { mint: "So11111111111111111111111111111111111111112", ticker: "WSOL" },
+  { mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", ticker: "USDC" },
 ];
 
 // ================================
@@ -57,3 +58,14 @@ export const TOKENS_LIST = [
 
 export const GAME_EXPIRATION_BUFFER_TIME = 300; // 5 minutes buffer for expired games
 export const PLAYER_CLEANUP_DELAY_MS = 100; // Delay between player participation cleanups
+
+// ================================
+// JUPITER SWAP CONSTANTS
+// ================================
+
+export const JUPITER_BASE_URL = "https://quote-api.jup.ag";
+export const JUPITER_DEFAULT_SLIPPAGE_BPS = 100; // 1%
+export const JUPITER_MAX_SLIPPAGE_BPS = 500; // 5%
+export const JUPITER_MIN_SLIPPAGE_BPS = 10; // 0.1%
+export const JUPITER_MAX_PRICE_IMPACT = 5; // 5%
+export const JUPITER_PLATFORM_FEE_BPS = 0; // No platform fee by default

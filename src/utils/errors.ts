@@ -86,6 +86,37 @@ export const parseTransactionError = (error: any, walletManager?: WalletManager)
     return `❌ Transaction failed!\n\nUsually means insufficient SOL for fees.\nEnsure you have at least ${MIN_SOL_FOR_TX} SOL.\nUse /balance to check your balance.`;
   }
 
+  // Handle Jupiter API errors
+  if (lowerMessage.includes('jupiter') || lowerMessage.includes('swap')) {
+    if (lowerMessage.includes('no route found') || lowerMessage.includes('no routes')) {
+      return `🛣️ No swap route available!\n\nJupiter couldn't find a route for this token pair.\nTry:\n• Different token pair\n• Smaller amount\n• Wait a few minutes and retry`;
+    }
+    
+    if (lowerMessage.includes('slippage')) {
+      return `📊 Slippage error!\n\nThe price changed too much during the swap.\nTry:\n• Increase slippage tolerance\n• Use smaller amount\n• Wait for better market conditions`;
+    }
+    
+    if (lowerMessage.includes('price impact')) {
+      return `💹 Price impact too high!\n\nThis swap would significantly affect the token price.\nTry:\n• Smaller swap amount\n• Split into multiple smaller swaps`;
+    }
+
+    if (lowerMessage.includes('quote failed') || lowerMessage.includes('failed to get swap quote')) {
+      return `📋 Quote unavailable!\n\nCouldn't get pricing for this swap.\nTry:\n• Check token symbols are correct\n• Wait a moment and retry\n• Ensure both tokens are supported`;
+    }
+
+    if (lowerMessage.includes('token_not_tradable') || lowerMessage.includes('is not tradable')) {
+      return `🚫 Token not tradable!\n\nThis token is not available for trading on Jupiter.\nTry swapping between:\n• SOL ↔ WSOL\n• SOL ↔ USDC\n• WSOL ↔ USDC\n\nUse tokens with higher liquidity for better swap routes.`;
+    }
+
+    if (lowerMessage.includes('circular_arbitrage_is_disabled') || lowerMessage.includes('input and output mints are not allowed to be equal')) {
+      return `🔄 Cannot swap same token!\n\nYou're trying to swap a token for itself.\nExample: SOL → SOL is not allowed.\n\nTry:\n• SOL → WSOL\n• WSOL → SOL\n• Different token pairs`;
+    }
+
+    if (lowerMessage.includes('address table account') || lowerMessage.includes('lookup table') || lowerMessage.includes('addresstablelookup')) {
+      return `🔗 Address lookup table error!\n\nJupiter transaction uses advanced features not supported.\nTry:\n• Smaller swap amount\n• Wait a few minutes and retry\n• Use simpler token pairs`;
+    }
+  }
+
   // Default error message
   return `❌ Transaction failed!\n\n${errorMessage}\n\n💡 Try:\n• Check your SOL balance (min ${MIN_SOL_FOR_TX})\n• Wait a moment and retry\n• Use /balance to check balances`;
 };
