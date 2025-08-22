@@ -8,15 +8,15 @@
     "@coral-xyz/anchor": "^0.31.1",
     "@grammyjs/runner": "^2.0.3",
     "@metaplex-foundation/mpl-token-metadata": "^3.4.0",
-    "@pump-fun/pump-sdk": "^1.17.5",
+    "@pump-fun/pump-sdk": "^1.17.6",
     "@solana/spl-token": "^0.4.13",
-    "@solana/web3.js": "^1.98.2",
+    "@solana/web3.js": "^1.98.4",
     "bip39": "^3.1.0",
     "bn.js": "^5.2.2",
-    "grammy": "^1.36.3"
+    "grammy": "^1.38.1"
   },
   "devDependencies": {
-    "@types/bun": "^1.2.16"
+    "@types/bun": "^1.2.20"
   },
   "peerDependencies": {
     "typescript": "^5.8.2"
