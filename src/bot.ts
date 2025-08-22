@@ -1104,24 +1104,41 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
   try {
     await ctx.editMessageText(`🔄 Executing swap via ${swapData.quote.provider}...`);
     
-    // Create swap transaction using SwapManager
-    const instructions = await swapManager.createSwapTransaction({
-      inputMint: swapData.fromTokenInfo.token_mint,
-      outputMint: swapData.toTokenInfo.token_mint,
-      amount: swapData.quote.inputAmount,
-      slippageBps: Math.floor(swapData.slippagePercent * 100),
-      userKeypair: swapData.userKeypair,
-      inputDecimals: swapData.fromTokenInfo.decimals,
-      outputDecimals: swapData.toTokenInfo.decimals,
-      inputTicker: swapData.fromToken.toUpperCase(),
-      outputTicker: swapData.toToken.toUpperCase()
-    }, swapData.quote);
+    let signature: string;
+    
+    if (swapData.quote.provider === 'jupiter') {
+      // Use special Jupiter execution method
+      signature = await swapManager.executeJupiterSwap({
+        inputMint: swapData.fromTokenInfo.token_mint,
+        outputMint: swapData.toTokenInfo.token_mint,
+        amount: swapData.quote.inputAmount,
+        slippageBps: Math.floor(swapData.slippagePercent * 100),
+        userKeypair: swapData.userKeypair,
+        inputDecimals: swapData.fromTokenInfo.decimals,
+        outputDecimals: swapData.toTokenInfo.decimals,
+        inputTicker: swapData.fromToken.toUpperCase(),
+        outputTicker: swapData.toToken.toUpperCase()
+      }, swapData.quote);
+    } else {
+      // Use regular instruction-based approach for other providers
+      const instructions = await swapManager.createSwapTransaction({
+        inputMint: swapData.fromTokenInfo.token_mint,
+        outputMint: swapData.toTokenInfo.token_mint,
+        amount: swapData.quote.inputAmount,
+        slippageBps: Math.floor(swapData.slippagePercent * 100),
+        userKeypair: swapData.userKeypair,
+        inputDecimals: swapData.fromTokenInfo.decimals,
+        outputDecimals: swapData.toTokenInfo.decimals,
+        inputTicker: swapData.fromToken.toUpperCase(),
+        outputTicker: swapData.toToken.toUpperCase()
+      }, swapData.quote);
 
-    // Execute transaction
-    const signature = await wallet.sendTransaction(instructions, [swapData.userKeypair]);
+      // Execute transaction
+      signature = await wallet.sendTransaction(instructions, [swapData.userKeypair]);
 
-    // Wait for confirmation
-    await wallet.confirmTransaction(signature);
+      // Wait for confirmation
+      await wallet.confirmTransaction(signature);
+    }
     
     // Auto-register tokens if they're not already known
     try {
