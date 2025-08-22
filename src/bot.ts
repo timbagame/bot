@@ -350,15 +350,21 @@ const handleCallbackError = async (
 
 const initializeAnchorProvider = async () => {
   const adminKeypair = wallet.getAdminKeypair();
-  const adminWallet = new anchor.Wallet(adminKeypair);
+  const adminWallet = new anchor.Wallet(
+    adminKeypair as anchor.web3.Keypair
+  );
   const connection = wallet.getConnection();
 
-  const provider = new anchor.AnchorProvider(connection, adminWallet, {
-    commitment: "confirmed",
-    preflightCommitment: "confirmed",
-    skipPreflight: false,
-    maxRetries: 3,
-  });
+  const provider = new anchor.AnchorProvider(
+    connection as unknown as anchor.web3.Connection,
+    adminWallet,
+    {
+      commitment: "confirmed",
+      preflightCommitment: "confirmed",
+      skipPreflight: false,
+      maxRetries: 3,
+    }
+  );
 
   anchor.setProvider(provider);
   return new anchor.Program(

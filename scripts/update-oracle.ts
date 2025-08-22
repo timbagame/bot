@@ -16,11 +16,13 @@ const updateOracle = async () => {
     console.log(`Admin public key: ${adminKeypair.publicKey.toString()}`);
 
     // Create wallet adapter for Anchor
-    const adminWallet = new anchor.Wallet(adminKeypair);
+    const adminWallet = new anchor.Wallet(
+      adminKeypair as anchor.web3.Keypair
+    );
 
     // Initialize provider
     const provider = new anchor.AnchorProvider(
-      wallet.getConnection(),
+      wallet.getConnection() as unknown as anchor.web3.Connection,
       adminWallet,
       { commitment: "confirmed" }
     );
