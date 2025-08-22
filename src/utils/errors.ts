@@ -46,10 +46,11 @@ const formatInsufficientFundsError = (
 };
 
 export const parseTransactionError = (
-  error: any,
+  error: unknown,
   walletManager?: WalletManager
 ): string => {
-  const errorMessage = error.message || error.toString();
+  const errorMessage =
+    error instanceof Error ? error.message : String(error);
   const lowerMessage = errorMessage.toLowerCase();
 
   // Handle transaction timeout specifically
@@ -68,7 +69,7 @@ export const parseTransactionError = (
     let signature = "";
     for (const pattern of signaturePatterns) {
       const match = errorMessage.match(pattern);
-      if (match) {
+      if (match && match[1]) {
         signature = match[1];
         break;
       }
@@ -169,7 +170,7 @@ export const parseTransactionError = (
 };
 
 export const formatUserFriendlyError = (
-  error: any,
+  error: unknown,
   walletManager?: WalletManager
 ): string => {
   return parseTransactionError(error, walletManager);
