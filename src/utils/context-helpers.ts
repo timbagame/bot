@@ -1,35 +1,4 @@
-import type { ApiContext, CallbackError, ErrorHandlingOptions } from "../types";
-
-// ================================
-// CONTEXT CREATION UTILITIES
-// ================================
-
-/**
- * Creates a safe API context for event handling
- * This replaces the fragile inline context creation
- */
-export const createApiContext = (chatId: number, api: any): ApiContext => {
-  if (!chatId || !api) {
-    throw new Error("Invalid parameters for context creation");
-  }
-
-  return {
-    api,
-    chat: { id: chatId },
-    answerCallbackQuery: async (text: string) => {
-      // No-op for event contexts that don't have callback queries
-      console.log(`Context callback query: ${text}`);
-    },
-    reply: async (text: string, options?: any) => {
-      try {
-        return await api.sendMessage(chatId, text, options);
-      } catch (error) {
-        console.error(`Failed to send message to chat ${chatId}:`, error);
-        throw error;
-      }
-    }
-  };
-};
+import type { CallbackError, ErrorHandlingOptions } from "../types";
 
 // ================================
 // ERROR HANDLING UTILITIES
@@ -38,7 +7,7 @@ export const createApiContext = (chatId: number, api: any): ApiContext => {
 /**
  * Safely truncates error messages for callback queries with better context preservation
  */
-export const truncateErrorMessage = (
+const truncateErrorMessage = (
   message: string, 
   options: ErrorHandlingOptions = {}
 ): string => {
@@ -76,7 +45,7 @@ export const truncateErrorMessage = (
 /**
  * Categorizes errors for better handling
  */
-export const categorizeError = (error: any): CallbackError => {
+const categorizeError = (error: any): CallbackError => {
   const errorMessage = error?.message || error?.toString() || "Unknown error";
   
   return {

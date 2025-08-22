@@ -56,7 +56,7 @@ export class OracleClient {
         );
       }
 
-      const data: OracleApiResponse = await response.json();
+      const data = (await response.json()) as OracleApiResponse;
 
       if (!data.success || !data.randomHash) {
         throw new Error(data.error || "Failed to generate random hash");
@@ -85,7 +85,7 @@ export class OracleClient {
         return null;
       }
 
-      const data: OracleStatsResponse = await response.json();
+      const data = (await response.json()) as OracleStatsResponse;
 
       if (!data.success || !data.stats) {
         console.warn("Oracle stats not available:", data.error);

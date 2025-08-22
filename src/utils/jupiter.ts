@@ -1,4 +1,3 @@
-import { PublicKey } from "@solana/web3.js";
 
 // ================================
 // JUPITER TYPES
@@ -176,7 +175,9 @@ export class JupiterClient {
     // Add route information
     if (quote.routePlan.length > 0) {
       const mainRoute = quote.routePlan[0];
-      message += `🛣️ **Route:** ${mainRoute.swapInfo.label}\n`;
+      if (mainRoute) {
+        message += `🛣️ **Route:** ${mainRoute.swapInfo.label}\n`;
+      }
     }
 
     message += `\n⏱️ **Time taken:** ${quote.timeTaken}ms`;
@@ -184,86 +185,4 @@ export class JupiterClient {
     return message;
   }
 
-  /**
-   * Validate swap parameters
-   */
-  validateSwapParams(inputMint: string, outputMint: string, amount: string): { valid: boolean; error?: string } {
-    try {
-      // Validate mint addresses
-      new PublicKey(inputMint);
-      new PublicKey(outputMint);
-    } catch {
-      return { valid: false, error: "Invalid token mint address" };
-    }
-
-    // Validate amount
-    const numAmount = parseFloat(amount);
-    if (isNaN(numAmount) || numAmount <= 0) {
-      return { valid: false, error: "Invalid amount" };
-    }
-
-    // Check if trying to swap same token
-    if (inputMint === outputMint) {
-      return { valid: false, error: "Cannot swap the same token" };
-    }
-
-    return { valid: true };
-  }
-
-  /**
-   * Get default slippage based on token volatility
-   */
-  getDefaultSlippage(inputMint: string, outputMint: string): number {
-    // Default slippage in basis points (100 = 1%)
-    const DEFAULT_SLIPPAGE_BPS = 100;
-    
-    // Could add logic here to adjust slippage based on token pair
-    // For now, use a conservative default
-    return DEFAULT_SLIPPAGE_BPS;
-  }
-}
-
-// ================================
-// UTILITY FUNCTIONS
-// ================================
-
-/**
- * Convert SOL to WSOL mint for Jupiter
- */
-export function getJupiterMint(mint: string): string {
-  // SOL should be represented as WSOL mint for Jupiter
-  if (mint === "SOL") {
-    return "So11111111111111111111111111111111111111112"; // WSOL mint
-  }
-  // WSOL mint is already correct
-  if (mint === "So11111111111111111111111111111111111111112") {
-    return mint;
-  }
-  return mint;
-}
-
-/**
- * Check if price impact is too high
- */
-export function isPriceImpactTooHigh(priceImpactPct: string, maxImpact: number = 5): boolean {
-  const impact = parseFloat(priceImpactPct);
-  return impact > maxImpact;
-}
-
-/**
- * Validate slippage range
- */
-export function validateSlippage(slippageBps: number): { valid: boolean; error?: string } {
-  const MIN_SLIPPAGE = 10; // 0.1%
-  const MAX_SLIPPAGE = 500; // 5%
-  
-  if (slippageBps < MIN_SLIPPAGE) {
-    return { valid: false, error: `Slippage too low. Minimum: ${MIN_SLIPPAGE / 100}%` };
-  }
-  
-  if (slippageBps > MAX_SLIPPAGE) {
-    return { valid: false, error: `Slippage too high. Maximum: ${MAX_SLIPPAGE / 100}%` };
-  }
-  
-  return { valid: true };
 }

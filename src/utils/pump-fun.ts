@@ -1,7 +1,6 @@
 import { Connection, PublicKey, Keypair, TransactionInstruction } from '@solana/web3.js';
 import { PumpSdk } from '@pump-fun/pump-sdk';
 import { deserializeMetadata } from '@metaplex-foundation/mpl-token-metadata';
-import { WalletManager } from './wallet';
 import { NetworkDetector } from './network-detector';
 import BN from 'bn.js';
 
@@ -34,11 +33,9 @@ export interface PumpFunSwapRequest {
 export class PumpFunClient {
   private sdk: PumpSdk;
   private connection: Connection;
-  private wallet: WalletManager;
 
-  constructor(connection: Connection, wallet: WalletManager) {
+  constructor(connection: Connection) {
     this.connection = connection;
-    this.wallet = wallet;
     this.sdk = new PumpSdk(connection);
   }
 
@@ -64,7 +61,7 @@ export class PumpFunClient {
         
         const metadataAccount = await this.connection.getAccountInfo(metadataPDA);
         if (metadataAccount) {
-          const [metadata] = deserializeMetadata(metadataAccount);
+          const metadata = deserializeMetadata(metadataAccount as any);
           const symbol = metadata.symbol.replace(/\0/g, '').trim();
           const name = metadata.name.replace(/\0/g, '').trim();
           
@@ -91,7 +88,7 @@ export class PumpFunClient {
       try {
         const response = await fetch(`https://frontend-api.pump.fun/coins/${mintAddress}`);
         if (response.ok) {
-          const data = await response.json();
+          const data: any = await response.json();
           if (data && data.symbol) {
             return {
               symbol: data.symbol.toUpperCase(),
@@ -108,7 +105,7 @@ export class PumpFunClient {
       try {
         const response = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mintAddress}`);
         if (response.ok) {
-          const data = await response.json();
+          const data: any = await response.json();
           if (data && data.pairs && data.pairs.length > 0) {
             const pair = data.pairs[0];
             if (pair.baseToken && pair.baseToken.symbol) {
@@ -176,8 +173,6 @@ export class PumpFunClient {
     inputMint: string,
     outputMint: string,
     amount: string,
-    inputDecimals: number,
-    outputDecimals: number,
     slippageBps: number = 500
   ): Promise<PumpFunQuote> {
     try {
@@ -347,7 +342,7 @@ export class PumpFunClient {
       console.log(`Created ${isBuy ? 'buy' : 'sell'} instructions for pump.fun token ${pumpMint.toString()}`);
       return instructions;
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating pump.fun swap transaction:', error);
       throw new Error(`Failed to create pump.fun swap: ${error.message}`);
     }
