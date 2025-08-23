@@ -17,3 +17,29 @@ test("parseTransactionError formats insufficient lamports message", () => {
   expect(message).toContain("Insufficient SOL");
 });
 
+test("parseTransactionError handles transaction timeout with signature", () => {
+  const signature = "A".repeat(88);
+  const error = new Error(`Transaction confirmation timeout. signature ${signature}`);
+  const message = parseTransactionError(error);
+  expect(message).toContain(`/checktx ${signature}`);
+});
+
+test("parseTransactionError handles transaction timeout without signature", () => {
+  const error = new Error("transaction was not confirmed");
+  const message = parseTransactionError(error);
+  expect(message).not.toContain("/checktx");
+});
+
+test("parseTransactionError handles Jupiter no route errors", () => {
+  const error = new Error("Jupiter error: no route found");
+  const message = parseTransactionError(error);
+  expect(message).toContain("No swap route available");
+});
+
+test("parseTransactionError returns default message for unknown errors", () => {
+  const error = new Error("some random error");
+  const message = parseTransactionError(error);
+  expect(message).toContain("Transaction failed");
+  expect(message).toContain("some random error");
+});
+
