@@ -13,12 +13,35 @@ import {
 const INSUFFICIENT_LAMPORTS_PATTERN =
   /insufficient lamports (\d+), need (\d+)/i;
 
+const TRANSACTION_TIMEOUT_PATTERNS = [
+  "transaction confirmation timeout",
+  "transaction was not confirmed",
+  "transactionexpiredtimeouterror",
+];
+
+const SIGNATURE_PATTERNS = [
+  /signature ([A-Za-z0-9]{44,})/,
+  /Check signature ([A-Za-z0-9]{44,})/,
+  /([A-Za-z0-9]{80,88})/,
+];
+
 const extractLamportsInfo = (
   errorMessage: string
 ): { current: number; needed: number } | null => {
   const match = errorMessage.match(INSUFFICIENT_LAMPORTS_PATTERN);
   if (!match || !match[1] || !match[2]) return null;
   return { current: parseInt(match[1]), needed: parseInt(match[2]) };
+};
+
+const isTransactionTimeoutError = (message: string): boolean =>
+  TRANSACTION_TIMEOUT_PATTERNS.some((p) => message.includes(p));
+
+const extractSignature = (errorMessage: string): string | null => {
+  for (const pattern of SIGNATURE_PATTERNS) {
+    const match = errorMessage.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return null;
 };
 
 const formatInsufficientFundsError = (
@@ -54,26 +77,8 @@ export const parseTransactionError = (
   const lowerMessage = errorMessage.toLowerCase();
 
   // Handle transaction timeout specifically
-  if (
-    lowerMessage.includes("transaction confirmation timeout") ||
-    lowerMessage.includes("transaction was not confirmed") ||
-    lowerMessage.includes("transactionexpiredtimeouterror")
-  ) {
-    // Extract signature from error message
-    const signaturePatterns = [
-      /signature ([A-Za-z0-9]{44,})/,
-      /Check signature ([A-Za-z0-9]{44,})/,
-      /([A-Za-z0-9]{80,88})/,
-    ];
-
-    let signature = "";
-    for (const pattern of signaturePatterns) {
-      const match = errorMessage.match(pattern);
-      if (match && match[1]) {
-        signature = match[1];
-        break;
-      }
-    }
+  if (isTransactionTimeoutError(lowerMessage)) {
+    const signature = extractSignature(errorMessage);
 
     return (
       `⏳ Transaction confirmation timed out!\n\n` +
