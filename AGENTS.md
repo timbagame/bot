@@ -15,6 +15,7 @@
 - Live dev: `bun run --watch src/bot.ts`
 - Scripts: `bun run scripts/initialize-program.ts`
 - Docker: `docker compose up --build`
+- Type-check: `bunx tsc --noEmit`
 - Tests: `bun test` (see Testing Guidelines)
 
 ## Coding Style & Naming Conventions
