@@ -123,6 +123,12 @@ src/
 
 ## 🧪 Testing
 
+Run the TypeScript type checker:
+
+```bash
+bunx tsc --noEmit
+```
+
 Run the test suite with Bun:
 
 ```bash
