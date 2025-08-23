@@ -29,11 +29,11 @@ test("categorizeError flags account not found errors", () => {
 });
 
 test("categorizeError returns message and code", () => {
-  const error = { message: "oops", code: 500 };
+  const error = { message: "oops", code: "500" };
   const categorized = categorizeError(error);
   expect(categorized).toEqual({
     message: "oops",
-    code: 500,
+    code: "500",
     isAccountNotFound: false,
   });
 });
