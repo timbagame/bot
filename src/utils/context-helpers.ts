@@ -7,7 +7,7 @@ import type { CallbackError, ErrorHandlingOptions } from "../types";
 /**
  * Safely truncates error messages for callback queries with better context preservation
  */
-const truncateErrorMessage = (
+export const truncateErrorMessage = (
   message: string,
   options: ErrorHandlingOptions = {}
 ): string => {
@@ -46,7 +46,7 @@ const truncateErrorMessage = (
 /**
  * Categorizes errors for better handling
  */
-const categorizeError = (error: any): CallbackError => {
+export const categorizeError = (error: any): CallbackError => {
   const errorMessage = error?.message || error?.toString() || "Unknown error";
 
   return {
