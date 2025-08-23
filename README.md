@@ -20,13 +20,15 @@ src/
 │   ├── index.ts        # Core types and interfaces
 │   └── env.d.ts        # Environment variable types
 └── utils/              # Utility modules
-    ├── constants.ts    # Configuration constants
-    ├── database.ts     # SQLite database management
-    ├── errors.ts       # Error handling utilities
-    ├── game.ts         # Game management logic
-    ├── oracle.ts       # Oracle management for game completion
-    ├── pda.ts          # Program Derived Address utilities
-    └── wallet.ts       # Solana wallet management
+    ├── base-database.ts    # SQLite database base class
+    ├── chat-database.ts    # Chat settings storage
+    ├── token-database.ts   # Token metadata storage
+    ├── constants.ts        # Configuration constants
+    ├── errors.ts           # Error handling utilities
+    ├── game.ts             # Game management logic
+    ├── oracle.ts           # Oracle management for game completion
+    ├── pda.ts              # Program Derived Address utilities
+    └── wallet.ts           # Solana wallet management
 ```
 
 ## 🔧 Commands
