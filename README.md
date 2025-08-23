@@ -119,6 +119,20 @@ src/
    bun src/bot.ts
    ```
 
+## 🧪 Testing
+
+Run the test suite with Bun:
+
+```bash
+bun test
+```
+
+To inspect coverage:
+
+```bash
+bun test --coverage
+```
+
 ## 📊 Monitoring
 
 The bot includes comprehensive logging and monitoring:
