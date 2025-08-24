@@ -116,10 +116,20 @@ export class SwapManager {
         throw new Error(validation.error);
       }
 
+      // Pump.fun expects decimal amounts, but we might receive raw amounts
+      // If amount is a large integer (raw), convert it back to decimal
+      const amountFloat = parseFloat(amount);
+      const probablyRawAmount = amountFloat > 1000000 && Number.isInteger(amountFloat);
+      const decimalAmount = probablyRawAmount ? 
+        (amountFloat / Math.pow(10, inputDecimals)).toString() : 
+        amount;
+      
+      console.log(`   🔄 Amount conversion for pump.fun: ${amount} → ${decimalAmount} (probablyRaw: ${probablyRawAmount})`);
+
       const pumpQuote = await this.pumpFunClient.getQuote(
         inputMint,
         outputMint,
-        amount,
+        decimalAmount,
         inputDecimals,
         outputDecimals,
         slippageBps
@@ -168,10 +178,20 @@ export class SwapManager {
           const validation = validatePumpFunSwap(inputMint, outputMint, amount);
           if (validation.valid) {
             console.log(`   ✅ Pump.fun validation passed, getting quote...`);
+            
+            // Same decimal conversion as above
+            const amountFloat = parseFloat(amount);
+            const probablyRawAmount = amountFloat > 1000000 && Number.isInteger(amountFloat);
+            const decimalAmount = probablyRawAmount ? 
+              (amountFloat / Math.pow(10, inputDecimals)).toString() : 
+              amount;
+            
+            console.log(`   🔄 Amount conversion for pump.fun fallback: ${amount} → ${decimalAmount} (probablyRaw: ${probablyRawAmount})`);
+            
             const pumpQuote = await this.pumpFunClient.getQuote(
               inputMint,
               outputMint,
-              amount,
+              decimalAmount,
               inputDecimals,
               outputDecimals,
               slippageBps

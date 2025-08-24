@@ -3874,7 +3874,7 @@ bot.on("callback_query", async (ctx, next) => {
     const quote = await swapManager.getQuote({
       inputMint: sellData.fromTokenInfo.token_mint,
       outputMint: sellData.toTokenInfo.token_mint,
-      amount: sellData.rawAmount, // Use raw amount instead of decimal amount
+      amount: sellData.rawAmount, // Use raw amount - swapManager will convert for pump.fun if needed
       slippageBps: 200, // Use same 2% slippage as successful BUY/SWAP
       userKeypair: userKeypair,
       inputDecimals: sellData.fromTokenInfo.decimals || 6,
@@ -6280,8 +6280,8 @@ const showSellQuoteAndConfirmation = async (ctx: any, tokenToSell: string, amoun
     transactionCache.set(txId, {
       fromToken: tokenToSell,
       toToken: toToken,
-      amount: actualAmount,  // Keep decimal for display
-      rawAmount: rawAmount.toString(), // Add raw amount for API calls
+      amount: actualAmount,  // Keep decimal for display and pump.fun
+      rawAmount: rawAmount.toString(), // Add raw amount for Jupiter
       fromTokenInfo: {
         token_mint: tokenInfo.token_mint,
         decimals: tokenInfo.decimals
