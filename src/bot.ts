@@ -2695,7 +2695,7 @@ bot.callbackQuery("cmd_swap", async (ctx) => {
 
 // Track user input states
 const userStates = new Map<string, {
-  type: 'send_custom_amount' | 'send_address' | 'wrap_custom_amount' | 'swap_to_token' | 'swap_custom_amount' | 'buy_contract_address' | 'buy_token_symbol' | 'buy_custom_amount';
+  type: 'send_custom_amount' | 'send_address' | 'wrap_custom_amount' | 'swap_to_token' | 'swap_custom_amount' | 'buy_contract_address' | 'buy_token_symbol' | 'buy_custom_amount' | 'buy_custom_slippage' | 'sell_custom_amount';
   token?: string;
   amount?: string;
   fromToken?: string;
@@ -2704,6 +2704,7 @@ const userStates = new Map<string, {
   targetToken?: string;
   tokenToSell?: string;
   contractAddress?: string;
+  txId?: string;
   messageId: number;
   timestamp: number;
 }>();
@@ -4250,6 +4251,105 @@ bot.on("callback_query", async (ctx, next) => {
   }
 });
 
+// Handle BUY slippage selection
+bot.on("callback_query", async (ctx, next) => {
+  const callbackData = ctx.callbackQuery?.data;
+  if (!callbackData?.startsWith('buy_slip_')) {
+    return await next();
+  }
+
+  const parts = callbackData.replace('buy_slip_', '').split('_');
+  if (parts.length < 2) return await next();
+  
+  const txId = parts[0];
+  const slippageValue = parts[1];
+  
+  console.log(`⚙️ BUY slippage change: ${slippageValue}% for txId: ${txId}`);
+  
+  try {
+    const buyData = transactionCache.get(txId);
+    if (!buyData) {
+      await ctx.answerCallbackQuery("❌ Transaction expired. Please try again.");
+      return;
+    }
+    
+    if (slippageValue === 'custom') {
+      // Handle custom slippage input
+      const userId = ctx.from?.id?.toString();
+      if (!userId) return;
+
+      const response = [
+        `⚙️ <b>CUSTOM SLIPPAGE</b>`,
+        "",
+        `<b>Current:</b> ${buyData.quote.slippage || 1.0}%`,
+        "",
+        `Please send a message with your desired slippage percentage.`,
+        "",
+        `<b>Examples:</b>`,
+        `• <code>0.5</code> (0.5% slippage)`,
+        `• <code>1.5</code> (1.5% slippage)`,
+        `• <code>3</code> (3% slippage)`,
+        "",
+        `<b>Range:</b> 0.1% - 10%`,
+        `⏱️ <i>This will timeout in 5 minutes</i>`
+      ];
+
+      await ctx.editMessageText(response.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("❌ Cancel", `buy_slip_back_${txId}`).row()
+      });
+
+      setUserState(userId, {
+        type: 'buy_custom_slippage',
+        txId: txId,
+        messageId: ctx.callbackQuery?.message?.message_id
+      });
+
+      await ctx.answerCallbackQuery("Send custom slippage as message");
+      return;
+    }
+    
+    // Update slippage for predefined values
+    const newSlippage = parseFloat(slippageValue);
+    if (isNaN(newSlippage) || newSlippage < 0.1 || newSlippage > 10) {
+      await ctx.answerCallbackQuery("❌ Invalid slippage value");
+      return;
+    }
+    
+    // Update the cached buy data with new slippage
+    buyData.quote.slippage = newSlippage;
+    transactionCache.set(txId, buyData);
+    
+    // Regenerate quote with new slippage
+    await regenerateBuyQuoteWithSlippage(ctx, txId, newSlippage);
+    await ctx.answerCallbackQuery(`✅ Slippage set to ${newSlippage}%`);
+    
+  } catch (error: any) {
+    console.error("Error in slippage change:", error);
+    await ctx.answerCallbackQuery("❌ Error updating slippage");
+  }
+});
+
+// Handle BUY slippage back button
+bot.on("callback_query", async (ctx, next) => {
+  const callbackData = ctx.callbackQuery?.data;
+  if (!callbackData?.startsWith('buy_slip_back_')) {
+    return await next();
+  }
+
+  const txId = callbackData.replace('buy_slip_back_', '');
+  
+  try {
+    // Regenerate the original buy confirmation screen
+    await regenerateBuyQuoteWithSlippage(ctx, txId);
+    await ctx.answerCallbackQuery("⚙️ Back to confirmation");
+  } catch (error) {
+    console.error("Error going back from slippage:", error);
+    await ctx.answerCallbackQuery("❌ Error loading confirmation");
+  }
+});
+
 // ================================
 // SWAP INTERFACE HANDLERS
 // ================================
@@ -4853,10 +4953,17 @@ const showBuyQuoteAndConfirmation = async (ctx: any, paymentToken: string, targe
       quote: quote
     });
 
+    const currentSlippage = quote.slippage || 1.0;
+    
     await ctx.editMessageText(response, {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard()
         .text("✅ CONFIRM BUY", `confirm_buy_${txId}`).row()
+        .text("⚙️ SLIPPAGE", `buy_slippage_${txId}`).row()
+        .text("0.5%", `buy_slip_${txId}_0.5`).text("1%", `buy_slip_${txId}_1.0`)
+        .text("2%", `buy_slip_${txId}_2.0`).row()
+        .text("3%", `buy_slip_${txId}_3.0`).text("5%", `buy_slip_${txId}_5.0`)
+        .text("✏️", `buy_slip_${txId}_custom`).row()
         .text("❌ Cancel", `buy_with_${paymentToken}`).row()
     });
     
@@ -4919,6 +5026,8 @@ bot.on("message:text", async (ctx, next) => {
       await handleBuyCustomAmountInput(ctx, userState, userMessage);
     } else if (userState.type === 'sell_custom_amount') {
       await handleSellCustomAmountInput(ctx, userState, userMessage);
+    } else if (userState.type === 'buy_custom_slippage') {
+      await handleBuyCustomSlippageInput(ctx, userState, userMessage);
     }
   } catch (error) {
     console.error("Error handling user input:", error);
@@ -5766,6 +5875,137 @@ const showSellQuoteAndConfirmation = async (ctx: any, tokenToSell: string, amoun
       reply_markup: new InlineKeyboard()
         .text("← TRY AGAIN", "cmd_sell").row()
     });
+  }
+};
+
+/**
+ * Handle BUY custom slippage input
+ */
+const handleBuyCustomSlippageInput = async (ctx: any, userState: any, slippageInput: string) => {
+  const txId = userState.txId;
+  
+  console.log(`⚙️ Custom slippage input: ${slippageInput} for txId: ${txId}`);
+  
+  try {
+    const slippage = parseFloat(slippageInput);
+    if (isNaN(slippage) || slippage < 0.1 || slippage > 10) {
+      throw new Error("Slippage must be between 0.1% and 10%");
+    }
+    
+    // Update the cached buy data with new slippage
+    const buyData = transactionCache.get(txId);
+    if (!buyData) {
+      throw new Error("Transaction expired. Please try again.");
+    }
+    
+    buyData.quote.slippage = slippage;
+    transactionCache.set(txId, buyData);
+    
+    // Regenerate quote with new slippage
+    const walletCtx = {
+      ...ctx,
+      editMessageText: async (text: string, options: any) => {
+        return await ctx.api.editMessageText(ctx.chat.id, userState.messageId, text, options);
+      }
+    };
+    
+    await regenerateBuyQuoteWithSlippage(walletCtx, txId, slippage);
+    
+  } catch (error: any) {
+    console.error("Error processing custom slippage:", error);
+    
+    const errorMessage = [
+      "❌ <b>Invalid Slippage</b>",
+      "",
+      `<b>Input:</b> ${slippageInput}`,
+      "",
+      `<b>Error:</b> ${error.message}`,
+      "",
+      "Please enter a valid slippage percentage:",
+      "",
+      `<b>Examples:</b>`,
+      `• <code>0.5</code> (0.5% slippage)`,
+      `• <code>1</code> (1% slippage)`,
+      `• <code>2.5</code> (2.5% slippage)`,
+      "",
+      `<b>Range:</b> 0.1% - 10%`,
+      `⏱️ <i>This will timeout in 5 minutes</i>`
+    ];
+
+    await ctx.api.editMessageText(
+      ctx.chat.id,
+      userState.messageId,
+      errorMessage.join("\n"),
+      {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("❌ Cancel", `buy_slip_back_${txId}`).row()
+      }
+    );
+    
+    // Keep the same state for retry
+    setUserState(ctx.from.id.toString(), {
+      type: 'buy_custom_slippage',
+      txId: txId,
+      messageId: userState.messageId
+    });
+  }
+};
+
+/**
+ * Regenerate buy quote with new slippage
+ */
+const regenerateBuyQuoteWithSlippage = async (ctx: any, txId: string, newSlippage?: number) => {
+  try {
+    const buyData = transactionCache.get(txId);
+    if (!buyData) {
+      throw new Error("Transaction expired");
+    }
+    
+    const quote = buyData.quote;
+    const slippage = newSlippage || quote.slippage || 1.0;
+    
+    // Update slippage in quote if provided
+    if (newSlippage) {
+      quote.slippage = newSlippage;
+      transactionCache.set(txId, buyData);
+    }
+    
+    const response = [
+      `🟢 <b>BUY CONFIRMATION</b>`,
+      "",
+      `<b>You Pay:</b> ${buyData.amount} ${buyData.fromToken}`,
+      `<b>You Receive:</b> ~${quote.outputAmount} ${buyData.toToken}`,
+      "",
+      `<b>Rate:</b> ${quote.estimatedRate?.toFixed(6) || 'N/A'} ${buyData.toToken}/${buyData.fromToken}`,
+      `<b>Provider:</b> ${quote.provider} ${quote.provider === 'pump-fun' ? '(ungraduated)' : '(graduated)'}`,
+      `<b>Slippage:</b> ${slippage.toFixed(1)}%`,
+      "",
+      `⚠️ <b>Confirm this purchase?</b>`,
+    ].join("\n");
+
+    await ctx.editMessageText(response, {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard()
+        .text("✅ CONFIRM BUY", `confirm_buy_${txId}`).row()
+        .text("⚙️ SLIPPAGE", `buy_slippage_${txId}`).row()
+        .text("0.5%", `buy_slip_${txId}_0.5`).text("1%", `buy_slip_${txId}_1.0`)
+        .text("2%", `buy_slip_${txId}_2.0`).row()
+        .text("3%", `buy_slip_${txId}_3.0`).text("5%", `buy_slip_${txId}_5.0`)
+        .text("✏️", `buy_slip_${txId}_custom`).row()
+        .text("❌ Cancel", `buy_with_${buyData.fromToken}`).row()
+    });
+    
+  } catch (error: any) {
+    console.error("Error regenerating buy quote:", error);
+    await ctx.editMessageText(
+      `❌ <b>Error</b>\n\n${error.message}\n\nPlease try again.`,
+      {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("← TRY AGAIN", "cmd_buy").row()
+      }
+    );
   }
 };
 
