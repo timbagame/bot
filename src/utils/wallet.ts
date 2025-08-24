@@ -1,5 +1,5 @@
 import { mnemonicToSeedSync } from "bip39";
-import { Connection, Keypair, PublicKey, TransactionInstruction, VersionedTransaction, TransactionMessage, LAMPORTS_PER_SOL, SolanaJSONRPCError } from "@solana/web3.js";
+import { Connection, Keypair, PublicKey, TransactionInstruction, VersionedTransaction, TransactionMessage, LAMPORTS_PER_SOL, SolanaJSONRPCError, SystemProgram } from "@solana/web3.js";
 import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferCheckedInstruction } from "@solana/spl-token";
 import * as fs from "fs";
 import * as path from "path";
@@ -340,6 +340,23 @@ export class WalletManager {
 
     const allInstructions = [...fromInstructions, ...toInstructions, transferInstruction];
     return await this.sendTransaction(allInstructions, [fromKeypair]);
+  }
+
+  public async transferSol(
+    fromTelegramId: bigint,
+    toAddress: PublicKey,
+    amount: number
+  ): Promise<string> {
+    const fromKeypair = this.getKeyPair(fromTelegramId);
+    const lamports = Math.floor(amount * LAMPORTS_PER_SOL);
+    
+    const transferInstruction = SystemProgram.transfer({
+      fromPubkey: fromKeypair.publicKey,
+      toPubkey: toAddress,
+      lamports: lamports
+    });
+
+    return await this.sendTransaction([transferInstruction], [fromKeypair]);
   }
 
   public async confirmTransaction(signature: string): Promise<void> {
