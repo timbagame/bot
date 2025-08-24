@@ -5297,13 +5297,14 @@ const handleBuyContractAddressInput = async (ctx: any, userState: any, contractA
     
     // Show payment method selection for this token
     const response = [
-      `🔍 <b>TOKEN FOUND</b>`,
+      `✅ <b>TOKEN IDENTIFIED</b>`,
       "",
-      `<b>Token:</b> ${tokenInfo.symbol}`,
-      `<b>Name:</b> ${tokenInfo.name}`,
-      `<b>Address:</b> <code>${contractAddress}</code>`,
+      `🏷️ <b>Ticker:</b> ${tokenInfo.symbol}`,
+      `📝 <b>Name:</b> ${tokenInfo.name}`,
+      `🔗 <b>Address:</b> <code>${contractAddress.slice(0, 6)}...${contractAddress.slice(-6)}</code>`,
+      `${tokenInfo.verified ? '✅ <b>Verified</b>' : '⚠️ <b>Unverified</b>'}`,
       "",
-      `<b>Select payment method:</b>`,
+      `<b>💰 Select payment method to buy ${tokenInfo.symbol}:</b>`,
     ];
     
     // Get user balances to show available payment options
@@ -5434,13 +5435,14 @@ const handleBuyTokenSymbolInput = async (ctx: any, userState: any, tokenSymbol: 
     
     // Show payment method selection for this token
     const response = [
-      `🔍 <b>TOKEN FOUND</b>`,
+      `✅ <b>TOKEN IDENTIFIED</b>`,
       "",
-      `<b>Token:</b> ${tokenInfo.symbol}`,
-      `<b>Name:</b> ${tokenInfo.name}`,
-      `<b>Address:</b> <code>${tokenInfo.address}</code>`,
+      `🏷️ <b>Ticker:</b> ${tokenInfo.symbol}`,
+      `📝 <b>Name:</b> ${tokenInfo.name}`,
+      `🔗 <b>Address:</b> <code>${tokenInfo.address.slice(0, 6)}...${tokenInfo.address.slice(-6)}</code>`,
+      `${tokenInfo.verified ? '✅ <b>Verified</b>' : '⚠️ <b>Unverified</b>'}`,
       "",
-      `<b>Select payment method:</b>`,
+      `<b>💰 Select payment method to buy ${tokenInfo.symbol}:</b>`,
     ];
     
     // Get user balances to show available payment options
