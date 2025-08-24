@@ -6189,12 +6189,18 @@ const showSellQuoteAndConfirmation = async (ctx: any, tokenToSell: string, amoun
       throw new Error(`Token ${tokenToSell} not found in wallet`);
     }
     
-    // Get the actual token info with mint address from approved tokens
+    // Get the actual token info - first try approved tokens, then use wallet balance info
     const approvedTokens = tokenManager.getAllApprovedTokensWithMetadata();
-    const tokenInfo = approvedTokens.find(t => t.token_ticker === tokenToSell);
+    let tokenInfo = approvedTokens.find(t => t.token_ticker === tokenToSell);
     
+    // If not in approved tokens, use the info from wallet balance (for dynamic tokens)
     if (!tokenInfo) {
-      throw new Error(`Token ${tokenToSell} not found in approved tokens`);
+      tokenInfo = {
+        token_mint: tokenBalance.mint,
+        token_ticker: tokenBalance.ticker,
+        decimals: tokenBalance.decimals
+      };
+      console.log(`🔍 Using dynamic token info for ${tokenToSell}: mint=${tokenBalance.mint}, decimals=${tokenBalance.decimals}`);
     }
     
     // Calculate actual amount to sell (convert from raw balance to decimal amount)
