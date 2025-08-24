@@ -3558,6 +3558,221 @@ bot.callbackQuery("cmd_sell", async (ctx) => {
   }
 });
 
+// Handle SELL token selection
+bot.on("callback_query", async (ctx, next) => {
+  const callbackData = ctx.callbackQuery?.data;
+  if (!callbackData?.startsWith('sell_token_')) {
+    return await next();
+  }
+
+  const tokenToSell = callbackData.replace('sell_token_', '');
+  console.log(`🔴 SELL token selected: ${tokenToSell}`);
+  
+  try {
+    // Show sell amount selection for this token
+    await showSellAmountSelection(ctx, tokenToSell);
+    await ctx.answerCallbackQuery(`Sell ${tokenToSell}`);
+  } catch (error) {
+    console.error("Error in sell_token selection:", error);
+    await ctx.answerCallbackQuery("❌ Error processing token selection");
+  }
+});
+
+// Handle SELL amount selection
+bot.on("callback_query", async (ctx, next) => {
+  const callbackData = ctx.callbackQuery?.data;
+  if (!callbackData?.startsWith('sell_amount_')) {
+    return await next();
+  }
+
+  // Parse callback data: sell_amount_TOKEN_AMOUNT
+  const parts = callbackData.replace('sell_amount_', '').split('_');
+  if (parts.length < 2) {
+    return await next();
+  }
+
+  const tokenToSell = parts[0];
+  const amount = parts.slice(1).join('_'); // Handle cases where amount might contain underscores
+  
+  console.log(`🔴 SELL amount selected: ${amount} ${tokenToSell}`);
+  
+  try {
+    const telegramId = BigInt(ctx.from?.id || 0);
+    
+    if (amount === 'CUSTOM') {
+      // Handle custom amount input for SELL
+      const userId = ctx.from?.id?.toString();
+      if (!userId) return;
+
+      const response = [
+        `🔴 <b>SELL ${tokenToSell} - CUSTOM AMOUNT</b>`,
+        "",
+        `Please send a message with the amount of ${tokenToSell} you want to sell.`,
+        "",
+        `<b>Examples:</b>`,
+        `• <code>100</code> (sell 100 ${tokenToSell})`,
+        `• <code>50%</code> (sell 50% of balance)`,
+        `• <code>max</code> (sell all ${tokenToSell})`,
+        "",
+        `⏱️ <i>This will timeout in 5 minutes</i>`,
+      ];
+
+      await ctx.editMessageText(response.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("❌ Cancel", "cmd_sell").row()
+      });
+
+      setUserState(userId, {
+        type: 'sell_custom_amount',
+        tokenToSell: tokenToSell,
+        messageId: ctx.callbackQuery?.message?.message_id
+      });
+
+      await ctx.answerCallbackQuery("Send custom amount as message");
+      return;
+    }
+    
+    // Handle predefined amounts or percentages
+    await showSellQuoteAndConfirmation(ctx, tokenToSell, amount, telegramId);
+    
+  } catch (error: any) {
+    console.error("Error in sell_amount:", error);
+    
+    const errorMessage = [
+      "❌ <b>Error Processing Sell Request</b>",
+      "",
+      `<b>Error:</b> ${error.message}`,
+      "",
+      "Please try again or contact support if the issue persists."
+    ];
+
+    await ctx.editMessageText(errorMessage.join("\n"), {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard()
+        .text("← TRY AGAIN", "cmd_sell").row()
+    });
+    
+    await ctx.answerCallbackQuery("❌ Error processing sell request");
+  }
+});
+
+// Handle SELL confirmation
+bot.on("callback_query", async (ctx, next) => {
+  const callbackData = ctx.callbackQuery?.data;
+  if (!callbackData?.startsWith('confirm_sell_')) {
+    return await next();
+  }
+
+  const txId = callbackData.replace('confirm_sell_', '');
+  const sellData = transactionCache.get(txId);
+  
+  if (!sellData) {
+    await ctx.answerCallbackQuery("❌ Transaction expired. Please try again.");
+    return;
+  }
+  
+  console.log(`✅ SELL confirmation for: ${sellData.amount} ${sellData.fromToken} → ${sellData.toToken}`);
+  
+  try {
+    // Show processing state
+    await ctx.editMessageText(
+      [
+        "⏳ <b>Processing Sell Transaction...</b>",
+        "",
+        `🔄 <i>Executing ${sellData.amount} ${sellData.fromToken} → ${sellData.toToken}</i>`,
+        "",
+        "Please wait, this may take a few moments..."
+      ].join("\n"),
+      { parse_mode: "HTML" }
+    );
+    
+    await safeAnswerCallbackQuery(ctx, "Processing sell...");
+    
+    const userId = ctx.from?.id?.toString();
+    if (!userId) {
+      throw new Error("User ID not found");
+    }
+    
+    const telegramId = BigInt(ctx.from?.id || 0);
+    const userKeypair = wallet.getKeyPair(telegramId);
+    
+    // Use the same swap infrastructure for selling (token → SOL or token → token)
+    const swapManager = (await import('./utils/swap-manager.js')).swapManager;
+    
+    const quote = await swapManager.getSwapQuote({
+      inputMint: sellData.fromTokenInfo.token_mint,
+      outputMint: sellData.toTokenInfo.token_mint,
+      amount: sellData.amount,
+      slippagePercent: 1.0,
+      userPublicKey: userKeypair.publicKey.toBase58()
+    });
+    
+    if (!quote) {
+      throw new Error("Unable to get swap quote for sell");
+    }
+    
+    const instructions = await swapManager.getSwapInstructions({
+      fromToken: sellData.fromToken,
+      toToken: sellData.toToken,
+      amount: sellData.amount,
+      slippageBps: Math.floor(1.0 * 100),
+      userKeypair: userKeypair,
+      inputDecimals: sellData.fromTokenInfo.decimals,
+      outputDecimals: sellData.toTokenInfo.decimals,
+      inputTicker: sellData.fromToken,
+      outputTicker: sellData.toToken
+    }, quote);
+    
+    // Execute transaction
+    const signature = await wallet.sendTransaction(instructions, [userKeypair]);
+    
+    // Wait for confirmation
+    await wallet.confirmTransaction(signature);
+    
+    const successMessage = [
+      "✅ <b>Sell Transaction Completed!</b>",
+      "",
+      `🔗 <b>Transaction:</b> [${signature.slice(0, 8)}...](https://solscan.io/tx/${signature})`,
+      `💰 <b>Sold:</b> ${sellData.amount} ${sellData.fromToken}`,
+      `🎯 <b>Received:</b> ${sellData.toToken}`,
+      "",
+      "🎉 <b>Tokens successfully sold!</b>"
+    ].join("\n");
+
+    await ctx.editMessageText(successMessage, { 
+      parse_mode: "Markdown",
+      reply_markup: new InlineKeyboard()
+        .text("💰 WALLET", "main_wallet")
+        .text("🔴 SELL MORE", "cmd_sell").row()
+    });
+    await safeAnswerCallbackQuery(ctx, "Sell completed!");
+    
+    transactionCache.delete(txId);
+
+  } catch (error: any) {
+    console.error("Sell execution error:", error);
+    
+    const errorMessage = [
+      "❌ <b>Sell Transaction Failed</b>",
+      "",
+      `<b>Error:</b> ${error.message}`,
+      "",
+      "The transaction could not be completed. Please check your balance and try again."
+    ].join("\n");
+
+    await ctx.editMessageText(errorMessage, {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard()
+        .text("← TRY AGAIN", "cmd_sell")
+        .text("💰 WALLET", "main_wallet").row()
+    });
+    
+    await safeAnswerCallbackQuery(ctx, "❌ Sell failed");
+    transactionCache.delete(txId);
+  }
+});
+
 // Handle "buy with" payment method selection
 bot.on("callback_query", async (ctx, next) => {
   const callbackData = ctx.callbackQuery?.data;
@@ -4643,6 +4858,8 @@ bot.on("message:text", async (ctx, next) => {
       await handleBuyTokenSymbolInput(ctx, userState, userMessage);
     } else if (userState.type === 'buy_custom_amount') {
       await handleBuyCustomAmountInput(ctx, userState, userMessage);
+    } else if (userState.type === 'sell_custom_amount') {
+      await handleSellCustomAmountInput(ctx, userState, userMessage);
     }
   } catch (error) {
     console.error("Error handling user input:", error);
@@ -5209,6 +5426,263 @@ const handleBuyCustomAmountInput = async (ctx: any, userState: any, amount: stri
       paymentToken: paymentToken,
       targetToken: targetToken,
       messageId: userState.messageId
+    });
+  }
+};
+
+/**
+ * Handle SELL custom amount input
+ */
+const handleSellCustomAmountInput = async (ctx: any, userState: any, amount: string) => {
+  const tokenToSell = userState.tokenToSell;
+  const telegramId = BigInt(ctx.from?.id || 0);
+  
+  try {
+    // Handle percentage amounts
+    let actualAmount = amount;
+    if (amount.includes('%')) {
+      const percentage = parseFloat(amount.replace('%', ''));
+      if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
+        throw new Error("Invalid percentage format");
+      }
+      
+      // Get current balance to calculate percentage
+      const { tokenBalances } = await getCachedWalletData(telegramId);
+      const tokenBalance = tokenBalances.find(t => t.ticker === tokenToSell);
+      
+      if (!tokenBalance) {
+        throw new Error(`Token ${tokenToSell} not found in wallet`);
+      }
+      
+      actualAmount = ((tokenBalance.balance * percentage) / 100).toString();
+    } else if (amount.toLowerCase() === 'max') {
+      actualAmount = 'max';
+    } else {
+      const numAmount = parseFloat(amount);
+      if (isNaN(numAmount) || numAmount <= 0) {
+        throw new Error("Invalid amount format");
+      }
+      actualAmount = amount;
+    }
+    
+    console.log(`🔴 Custom SELL amount received: ${actualAmount} ${tokenToSell}`);
+    
+    // Show quote and confirmation
+    const walletCtx = {
+      ...ctx,
+      editMessageText: async (text: string, options: any) => {
+        return await ctx.api.editMessageText(ctx.chat.id, userState.messageId, text, options);
+      }
+    };
+    
+    await showSellQuoteAndConfirmation(walletCtx, tokenToSell, actualAmount, telegramId);
+    
+  } catch (error: any) {
+    console.error("Error processing custom sell amount:", error);
+    
+    const errorMessage = [
+      "❌ <b>Invalid Amount</b>",
+      "",
+      `<b>Token:</b> ${tokenToSell}`,
+      `<b>Amount:</b> ${amount}`,
+      "",
+      `<b>Error:</b> ${error.message}`,
+      "",
+      "Please enter a valid amount:",
+      "",
+      `<b>Examples:</b>`,
+      `• <code>100</code> (sell 100 ${tokenToSell})`,
+      `• <code>50%</code> (sell 50% of balance)`,
+      `• <code>max</code> (sell all ${tokenToSell})`,
+      "",
+      `⏱️ <i>This will timeout in 5 minutes</i>`
+    ];
+
+    await ctx.api.editMessageText(
+      ctx.chat.id,
+      userState.messageId,
+      errorMessage.join("\n"),
+      {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("❌ Cancel", "cmd_sell").row()
+      }
+    );
+    
+    // Keep the same state for retry
+    setUserState(ctx.from.id.toString(), {
+      type: 'sell_custom_amount',
+      tokenToSell: tokenToSell,
+      messageId: userState.messageId
+    });
+  }
+};
+
+// ================================
+// SELL HELPER FUNCTIONS
+// ================================
+
+/**
+ * Show sell amount selection for a specific token
+ */
+const showSellAmountSelection = async (ctx: any, tokenToSell: string) => {
+  const telegramId = BigInt(ctx.from?.id || 0);
+  
+  // Get balance for the token being sold
+  const { tokenBalances } = await getCachedWalletData(telegramId);
+  const tokenBalance = tokenBalances.find(t => t.ticker === tokenToSell);
+  
+  if (!tokenBalance) {
+    throw new Error(`Token ${tokenToSell} not found in wallet`);
+  }
+  
+  const formattedBalance = wallet.formatTokenBalance(tokenBalance.balance, tokenBalance.decimals);
+  
+  const response = [
+    `🔴 <b>SELL ${tokenToSell}</b>`,
+    "",
+    `<b>Available:</b> ${formattedBalance} ${tokenToSell}`,
+    "",
+    `<b>Select amount to sell:</b>`
+  ];
+
+  const keyboard = new InlineKeyboard();
+  
+  // Add percentage options for selling
+  keyboard
+    .text("25%", `sell_amount_${tokenToSell}_25%`)
+    .text("50%", `sell_amount_${tokenToSell}_50%`).row()
+    .text("75%", `sell_amount_${tokenToSell}_75%`)
+    .text("MAX", `sell_amount_${tokenToSell}_max`).row();
+  
+  // Add custom amount option
+  keyboard
+    .text("✏️ Custom", `sell_amount_${tokenToSell}_CUSTOM`).row();
+    
+  keyboard.text("← BACK", "cmd_sell").row();
+
+  await ctx.editMessageText(response.join("\n"), {
+    parse_mode: "HTML",
+    reply_markup: keyboard
+  });
+};
+
+/**
+ * Show sell quote and confirmation
+ */
+const showSellQuoteAndConfirmation = async (ctx: any, tokenToSell: string, amount: string, telegramId: BigInt) => {
+  // Update message to show loading
+  await ctx.editMessageText(
+    `🔄 <b>GETTING SELL QUOTE</b>\n\nSell ${amount} ${tokenToSell} for SOL\n\n<i>Finding best price...</i>`,
+    {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard()
+    }
+  );
+  
+  try {
+    // Get token info for the token being sold
+    const { tokenBalances } = await getCachedWalletData(telegramId);
+    const tokenBalance = tokenBalances.find(t => t.ticker === tokenToSell);
+    
+    if (!tokenBalance) {
+      throw new Error(`Token ${tokenToSell} not found in wallet`);
+    }
+    
+    // Calculate actual amount to sell
+    let actualAmount = amount;
+    if (amount.includes('%')) {
+      const percentage = parseFloat(amount.replace('%', ''));
+      actualAmount = ((tokenBalance.balance * percentage) / 100).toString();
+    } else if (amount.toLowerCase() === 'max') {
+      actualAmount = tokenBalance.balance.toString();
+    }
+    
+    // For SELL, we typically sell tokens for SOL
+    const toToken = 'SOL';
+    const toTokenInfo = {
+      token_mint: 'So11111111111111111111111111111111111111112',
+      decimals: 9
+    };
+    
+    // Get a swap quote (token → SOL)
+    const swapManager = (await import('./utils/swap-manager.js')).swapManager;
+    
+    const quote = await swapManager.getSwapQuote({
+      inputMint: tokenBalance.token_mint,
+      outputMint: toTokenInfo.token_mint,
+      amount: actualAmount,
+      slippagePercent: 1.0,
+      userPublicKey: wallet.getKeyPair(telegramId).publicKey.toBase58()
+    });
+    
+    if (!quote) {
+      throw new Error(`Cannot get quote for selling ${tokenToSell}`);
+    }
+    
+    // Create transaction ID for caching
+    const txId = Math.random().toString(36).substring(2, 15);
+    
+    // Cache sell data
+    transactionCache.set(txId, {
+      fromToken: tokenToSell,
+      toToken: toToken,
+      amount: actualAmount,
+      fromTokenInfo: {
+        token_mint: tokenBalance.token_mint,
+        decimals: tokenBalance.decimals
+      },
+      toTokenInfo: toTokenInfo,
+      quote: quote,
+      userKeypair: wallet.getKeyPair(telegramId)
+    });
+    
+    // Format for SELL terminology
+    const expectedOutput = wallet.formatTokenBalance(
+      parseInt(quote.outputAmount), 
+      toTokenInfo.decimals
+    );
+    
+    const response = [
+      `🔴 <b>SELL CONFIRMATION</b>`,
+      "",
+      `<b>You Sell:</b> ${actualAmount} ${tokenToSell}`,
+      `<b>You Get:</b> ~${expectedOutput} ${toToken}`,
+      "",
+      `<b>Provider:</b> ${quote.provider?.toUpperCase() || 'Auto'}`,
+      `<b>Slippage:</b> 1.0%`,
+      "",
+      `⚠️ <i>Price may change before execution</i>`
+    ];
+
+    await ctx.editMessageText(response.join("\n"), {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard()
+        .text("✅ CONFIRM SELL", `confirm_sell_${txId}`).row()
+        .text("❌ Cancel", "cmd_sell").row()
+    });
+    
+  } catch (error: any) {
+    console.error("Error getting sell quote:", error);
+    
+    const errorResponse = [
+      `❌ <b>SELL QUOTE FAILED</b>`,
+      "",
+      `<b>Token:</b> ${tokenToSell}`,
+      `<b>Amount:</b> ${amount}`,
+      "",
+      `<b>Error:</b> ${error.message}`,
+      "",
+      "This could happen if:",
+      "• Token has no liquidity",
+      "• Network issues",
+      "• Token is not tradable"
+    ];
+
+    await ctx.editMessageText(errorResponse.join("\n"), {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard()
+        .text("← TRY AGAIN", "cmd_sell").row()
     });
   }
 };
