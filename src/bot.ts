@@ -160,10 +160,11 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
     await ctx.editMessageText(loadingResponse.join("\n"), {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard()
-        .text("🔄 REFRESH", "wallet_refresh").row()
-        .text("💸 WITHDRAW", "cmd_withdraw").text("🟢 BUY", "cmd_buy").row()
-        .text("🔴 SELL", "cmd_sell").text("🔧 WRAP", "cmd_wrap").row()
-        .text("🔐 KEY", "cmd_privatekey").text("← BACK", "back_main").row()
+        .text("🔄 REFRESH", "wallet_refresh").text("📋 HISTORY", "cmd_history").row()
+        .text("💸 WITHDRAW", "cmd_withdraw").row()
+        .text("🟢 BUY", "cmd_buy").text("🔴 SELL", "cmd_sell").row()
+        .text("🔧 WRAP", "cmd_wrap").text("🔐 KEY", "cmd_privatekey").row()
+        .text("← BACK", "back_main").row()
     });
   }
 
@@ -195,10 +196,11 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
     await ctx.editMessageText(response.join("\n"), {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard()
-        .text("🔄 REFRESH", "wallet_refresh").row()
-        .text("💸 WITHDRAW", "cmd_withdraw").text("🟢 BUY", "cmd_buy").row()
-        .text("🔴 SELL", "cmd_sell").text("🔧 WRAP", "cmd_wrap").row()
-        .text("🔐 KEY", "cmd_privatekey").text("← BACK", "back_main").row()
+        .text("🔄 REFRESH", "wallet_refresh").text("📋 HISTORY", "cmd_history").row()
+        .text("💸 WITHDRAW", "cmd_withdraw").row()
+        .text("🟢 BUY", "cmd_buy").text("🔴 SELL", "cmd_sell").row()
+        .text("🔧 WRAP", "cmd_wrap").text("🔐 KEY", "cmd_privatekey").row()
+        .text("← BACK", "back_main").row()
     });
 
   } catch (error) {
@@ -215,10 +217,11 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
     await ctx.editMessageText(errorResponse.join("\n"), {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard()
-        .text("🔄 REFRESH", "wallet_refresh").row()
-        .text("💸 WITHDRAW", "cmd_withdraw").text("🟢 BUY", "cmd_buy").row()
-        .text("🔴 SELL", "cmd_sell").text("🔧 WRAP", "cmd_wrap").row()
-        .text("🔐 KEY", "cmd_privatekey").text("← BACK", "back_main").row()
+        .text("🔄 REFRESH", "wallet_refresh").text("📋 HISTORY", "cmd_history").row()
+        .text("💸 WITHDRAW", "cmd_withdraw").row()
+        .text("🟢 BUY", "cmd_buy").text("🔴 SELL", "cmd_sell").row()
+        .text("🔧 WRAP", "cmd_wrap").text("🔐 KEY", "cmd_privatekey").row()
+        .text("← BACK", "back_main").row()
     });
   }
 };
@@ -2205,6 +2208,47 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
   } catch (error) {
     console.error("Error in cmd_privatekey:", error);
     await ctx.answerCallbackQuery("❌ Error showing private key");
+  }
+});
+
+bot.callbackQuery("cmd_history", async (ctx) => {
+  try {
+    const telegramId = BigInt(ctx.from?.id || 0);
+    
+    // Use the existing games functionality to get user history
+    const { recentGames } = await gameManager.getUserGames(ctx, telegramId);
+    
+    const response = [
+      `📋 <b>TRANSACTION HISTORY</b>`,
+      "",
+      recentGames || "You don't have any recent games or transactions.",
+      "",
+      `<i>Game history and wallet transaction history</i>`
+    ];
+
+    await ctx.editMessageText(response.join("\n"), {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard()
+        .text("← BACK TO WALLET", "main_wallet").row()
+    });
+    await ctx.answerCallbackQuery("📋 History loaded");
+  } catch (error) {
+    console.error("Error in cmd_history:", error);
+    
+    const errorResponse = [
+      `📋 <b>TRANSACTION HISTORY</b>`,
+      "",
+      "❌ Unable to load transaction history at this time.",
+      "",
+      "Please try again later or contact support if the issue persists."
+    ];
+    
+    await ctx.editMessageText(errorResponse.join("\n"), {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard()
+        .text("← BACK TO WALLET", "main_wallet").row()
+    });
+    await ctx.answerCallbackQuery("❌ Error loading history");
   }
 });
 
