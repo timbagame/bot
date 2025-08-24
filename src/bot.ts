@@ -141,6 +141,32 @@ const updateGameMessageSafely = async (
 /**
  * Dynamic wallet UI that loads balances automatically
  */
+// Simple function to get USD prices (placeholder for now)
+const getTokenPriceUSD = async (tokenMint: string): Promise<number> => {
+  try {
+    // For SOL
+    if (tokenMint === 'So11111111111111111111111111111111111111112' || tokenMint === 'SOL') {
+      // Simple SOL price fetch (you can replace with real API)
+      return 150; // Placeholder SOL price
+    }
+    
+    // For USDC (stable coin)
+    if (tokenMint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v') {
+      return 1.0; // USDC is pegged to $1
+    }
+    
+    // For DAOS token (placeholder price - you can integrate real API later)
+    if (tokenMint === 'FPyD25czYkvztSsgyCP7bxd2xnvDAp1LVjyiJhQidaos') {
+      return 0.001; // Placeholder DAOS price - update with real price
+    }
+    
+    // For other tokens, return 0 for now (can be enhanced later)
+    return 0;
+  } catch (error) {
+    return 0;
+  }
+};
+
 const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
   const telegramId = BigInt(ctx.from?.id || 0);
   const keypair = wallet.getKeyPair(telegramId);
@@ -149,12 +175,12 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
   
   // Show loading state first
   if (showLoadingMessage) {
+    const loadingContent = `╔╦╗╦╔╦╗╔╗ ╔═╗\n ║ ║║║║╠╩╗╠═╣\n ╩ ╩╩ ╩╚═╝╩ ╩\n\n⏳ Loading balances...`;
+    
     const loadingResponse = [
-      `💳 <b>WALLET</b>`,
+      `<pre>${loadingContent}</pre>`,
       "",
-      `<code>${shortAddress}</code>`,
-      "",
-      "⏳ <i>Loading balances...</i>",
+      `<code>${walletAddress}</code>`,
     ];
 
     await ctx.editMessageText(loadingResponse.join("\n"), {
@@ -163,7 +189,7 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
         .text("🔄 REFRESH", "wallet_refresh").text("📋 HISTORY", "cmd_history").row()
         .text("💸 WITHDRAW", "cmd_withdraw").row()
         .text("🟢 BUY", "cmd_buy").text("🔴 SELL", "cmd_sell").row()
-        .text("🔧 WRAP", "cmd_wrap").text("🔐 KEY", "cmd_privatekey").row()
+        .text("⚙️ SETTINGS", "wallet_settings").row()
         .text("← BACK", "back_main").row()
     });
   }
@@ -173,25 +199,38 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
     const formattedSolBalance = wallet.formatSolBalance(solBalance);
     
-    // Build response with balances
-    const response = [
-      `💳 <b>WALLET</b>`,
-      "",
-      `<code>${shortAddress}</code>`,
-      "",
-      `💰 <b>SOL:</b> ${formattedSolBalance}`,
-    ];
+    // Calculate total USD value
+    let totalUSD = 0;
+    
+    // Add SOL value
+    const solPriceUSD = await getTokenPriceUSD('SOL');
+    const solDecimalBalance = solBalance / LAMPORTS_PER_SOL;
+    totalUSD += solDecimalBalance * solPriceUSD;
+    
+    // Build wallet info without address
+    let walletContent = `╔╦╗╦╔╦╗╔╗ ╔═╗\n ║ ║║║║╠╩╗╠═╣\n ╩ ╩╩ ╩╚═╝╩ ╩\n\nSOL: ${formattedSolBalance}`;
 
-    // Add token balances
+    // Add token balances (calculate USD)
     if (tokenBalances.length > 0) {
-      response.push("");
-      tokenBalances.forEach(token => {
+      for (const token of tokenBalances) {
         const formatted = wallet.formatTokenBalance(token.balance, token.decimals);
-        response.push(`🪙 <b>${token.ticker}:</b> ${formatted}`);
-      });
-    } else {
-      response.push(`🪙 <b>No tokens found</b>`);
+        walletContent += `\n${token.ticker}: ${formatted}`;
+        
+        // Add to total USD (prices would be 0 for now, but structure is ready)
+        const tokenPriceUSD = await getTokenPriceUSD(token.mint);
+        const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
+        totalUSD += tokenDecimalBalance * tokenPriceUSD;
+      }
     }
+    
+    // Add total USD value
+    walletContent += `\n\nTotal USD: $${totalUSD.toFixed(2)}`;
+
+    const response = [
+      `<pre>${walletContent}</pre>`,
+      "",
+      `<code>${walletAddress}</code>`,
+    ];
 
     await ctx.editMessageText(response.join("\n"), {
       parse_mode: "HTML",
@@ -199,7 +238,7 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
         .text("🔄 REFRESH", "wallet_refresh").text("📋 HISTORY", "cmd_history").row()
         .text("💸 WITHDRAW", "cmd_withdraw").row()
         .text("🟢 BUY", "cmd_buy").text("🔴 SELL", "cmd_sell").row()
-        .text("🔧 WRAP", "cmd_wrap").text("🔐 KEY", "cmd_privatekey").row()
+        .text("⚙️ SETTINGS", "wallet_settings").row()
         .text("← BACK", "back_main").row()
     });
 
@@ -220,7 +259,7 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
         .text("🔄 REFRESH", "wallet_refresh").text("📋 HISTORY", "cmd_history").row()
         .text("💸 WITHDRAW", "cmd_withdraw").row()
         .text("🟢 BUY", "cmd_buy").text("🔴 SELL", "cmd_sell").row()
-        .text("🔧 WRAP", "cmd_wrap").text("🔐 KEY", "cmd_privatekey").row()
+        .text("⚙️ SETTINGS", "wallet_settings").row()
         .text("← BACK", "back_main").row()
     });
   }
@@ -631,11 +670,15 @@ bot.command("start", async (ctx: Context) => {
     const walletAddress = keypair.publicKey.toBase58();
     const shortAddress = `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`;
 
+    // Build welcome message with ASCII banner
+    const timbaAscii = `╔╦╗╦╔╦╗╔╗ ╔═╗\n ║ ║║║║╠╩╗╠═╣\n ╩ ╩╩ ╩╚═╝╩ ╩`;
+    
     const response = [
-      "💰 <b>TIMBA</b> 💰",
+      `<pre>${timbaAscii}</pre>`,
       "",
-      `PLAYER: ${username.toUpperCase()}`,
-      `WALLET: <code>${shortAddress}</code>`,
+      `<b>WELCOME ${username.toUpperCase()}</b>`,
+      "",
+      `<code>${walletAddress}</code>`,
     ];
 
     // Send response with menu for private chats
@@ -1958,7 +2001,7 @@ bot.on("callback_query", async (ctx, next) => {
 
   // Skip non-game callbacks (let them be handled by specific handlers)
   const nonGameCallbacks = [
-    'main_wallet', 'wallet_refresh', 'main_settings', 'back_main', 
+    'main_wallet', 'wallet_refresh', 'wallet_settings', 'main_settings', 'back_main', 
     'cmd_help', 'cmd_balance', 'cmd_withdraw', 'cmd_swap', 'cmd_wrap', 
     'cmd_privatekey', 'admin_menu', 'cmd_oracle', 'cmd_scan',
     'help_wallet', 'help_games', 'help_utility', 'help_examples',
@@ -2115,6 +2158,10 @@ const handleJoinGame = async (
 bot.callbackQuery("main_wallet", async (ctx) => {
   console.log("🔔 WALLET BUTTON PRESSED by user:", ctx.from?.id);
   try {
+    // Clear wallet cache to ensure fresh balances
+    const cacheKey = `wallet_${ctx.from?.id}`;
+    walletDataCache.delete(cacheKey);
+    
     await showWalletUI(ctx, true);
     await ctx.answerCallbackQuery();
     console.log("✅ Wallet UI shown successfully");
@@ -2126,11 +2173,44 @@ bot.callbackQuery("main_wallet", async (ctx) => {
 
 bot.callbackQuery("wallet_refresh", async (ctx) => {
   try {
+    // Clear wallet cache to force fresh balance update
+    const cacheKey = `wallet_${ctx.from?.id}`;
+    walletDataCache.delete(cacheKey);
+    
     await showWalletUI(ctx, true);
     await ctx.answerCallbackQuery();
   } catch (error) {
     console.error("Error in wallet_refresh:", error);
     await ctx.answerCallbackQuery("❌ Error refreshing wallet");
+  }
+});
+
+bot.callbackQuery("wallet_settings", async (ctx) => {
+  try {
+    const telegramId = BigInt(ctx.from?.id || 0);
+    const keypair = wallet.getKeyPair(telegramId);
+    const walletAddress = keypair.publicKey.toBase58();
+    const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
+
+    const settingsContent = `╔╦╗╦╔╦╗╔╗ ╔═╗\n ║ ║║║║╠╩╗╠═╣\n ╩ ╩╩ ╩╚═╝╩ ╩\n\n⚙️ SETTINGS\n\nChoose an option:`;
+    
+    const response = [
+      `<pre>${settingsContent}</pre>`,
+      "",
+      `<code>${walletAddress}</code>`,
+    ];
+
+    await ctx.editMessageText(response.join("\n"), {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard()
+        .text("🔧 WRAP SOL", "cmd_wrap").text("🔐 PRIVATE KEY", "cmd_privatekey").row()
+        .text("← BACK TO WALLET", "main_wallet").row()
+    });
+
+    await ctx.answerCallbackQuery("⚙️ Settings");
+  } catch (error) {
+    console.error("Error in wallet_settings:", error);
+    await ctx.answerCallbackQuery("❌ Error loading settings");
   }
 });
 
@@ -2160,12 +2240,12 @@ bot.callbackQuery("cmd_withdraw", async (ctx) => {
     
     // Add SOL option
     const formattedSolBalance = wallet.formatSolBalance(solBalance);
-    keyboard.text(`💰 SOL (${formattedSolBalance})`, `send_select_SOL`).row();
+    keyboard.text(`SOL (${formattedSolBalance})`, `send_select_SOL`).row();
     
     // Add token options (limit to 5 for better UX)
     for (const token of tokenBalances.slice(0, 5)) {
       const formatted = wallet.formatTokenBalance(token.balance, token.decimals);
-      keyboard.text(`🪙 ${token.ticker} (${formatted})`, `send_select_${token.ticker}`).row();
+      keyboard.text(`${token.ticker} (${formatted})`, `send_select_${token.ticker}`).row();
     }
     
     keyboard.text("← BACK TO WALLET", "main_wallet").row();
@@ -2219,41 +2299,118 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
 
 bot.callbackQuery("cmd_history", async (ctx) => {
   try {
+    await ctx.answerCallbackQuery("🔍 Loading transaction history...");
+    
     const telegramId = BigInt(ctx.from?.id || 0);
     
-    // Use the existing games functionality to get user history
-    const { recentGames } = await gameManager.getUserGames(ctx, telegramId);
+    // Get user's wallet address
+    const userKeypair = wallet.getKeyPair(telegramId);
+    const walletAddress = userKeypair.publicKey.toBase58();
     
-    const response = [
-      `📋 <b>TRANSACTION HISTORY</b>`,
+    console.log(`📋 Fetching transaction history for wallet: ${walletAddress}`);
+    
+    // Fetch transactions using Solana RPC (always works, no API key needed)
+    const connection = wallet.getConnection();
+    const pubkey = new PublicKey(walletAddress);
+    
+    const signatures = await connection.getSignaturesForAddress(pubkey, { limit: 15 });
+    console.log(`📊 Found ${signatures.length} transaction signatures`);
+    
+    // Use signature info directly to avoid rate limits (much faster)
+    const transactions = signatures.slice(0, 10).map(sig => ({
+      signature: sig.signature,
+      blockTime: sig.blockTime,
+      slot: sig.slot,
+      err: sig.err,
+      status: sig.err ? 'Failed' : 'Success',
+      // Use confirmation status and memo for basic info
+      confirmationStatus: sig.confirmationStatus || 'unknown'
+    }));
+    
+    if (transactions.length === 0) {
+      await ctx.editMessageText([
+        "📋 <b>TRANSACTION HISTORY</b>",
+        "",
+        "🔍 No transactions found for this wallet.",
+        "",
+        `💳 <b>Wallet:</b> <code>${walletAddress.slice(0, 8)}...${walletAddress.slice(-8)}</code>`,
+        "",
+        "Start trading to see your transaction history here!"
+      ].join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("🟢 BUY", "cmd_buy").text("🔴 SELL", "cmd_sell").row()
+          .text("← BACK TO WALLET", "main_wallet").row()
+      });
+      return;
+    }
+    
+    // Format transactions for display (simple version to avoid rate limits)
+    const formattedTxs = transactions.map((tx: any, index: number) => {
+      const date = tx.blockTime 
+        ? new Date(tx.blockTime * 1000).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          })
+        : 'Unknown date';
+      
+      const statusIcon = tx.status === 'Success' ? '✅' : '❌';
+      const signature = tx.signature;
+      
+      // Simple generic transaction display
+      const typeIcon = '📊';
+      const description = 'Transaction';
+      
+      // Show confirmation status
+      const confirmationText = tx.confirmationStatus === 'finalized' ? 'Confirmed' : 'Processing';
+      
+      return `${statusIcon}${typeIcon} ${description} • <code>${date}</code>\n🔗 <a href="https://solscan.io/tx/${signature}">View Details</a>`;
+    });
+    
+    const historyMessage = [
+      "📋 <b>TRANSACTION HISTORY</b>",
       "",
-      recentGames || "You don't have any recent games or transactions.",
+      `💳 <b>Wallet:</b> <code>${walletAddress.slice(0, 8)}...${walletAddress.slice(-8)}</code>`,
+      `📊 <b>Total Found:</b> ${transactions.length} transactions`,
+      `📄 <b>Showing:</b> Last ${Math.min(transactions.length, 10)}`,
       "",
-      `<i>Game history and wallet transaction history</i>`
+      ...formattedTxs
     ];
-
-    await ctx.editMessageText(response.join("\n"), {
+    
+    if (transactions.length > 10) {
+      historyMessage.push("");
+      historyMessage.push(`... and ${transactions.length - 10} more on Solscan`);
+    }
+    
+    await ctx.editMessageText(historyMessage.join("\n"), {
       parse_mode: "HTML",
+      disable_web_page_preview: true,
       reply_markup: new InlineKeyboard()
+        .text("🔄 REFRESH", "cmd_history")
+        .webApp("🔍 FULL HISTORY", `https://solscan.io/account/${walletAddress}#transactions`).row()
         .text("← BACK TO WALLET", "main_wallet").row()
     });
-    await ctx.answerCallbackQuery("📋 History loaded");
+    
   } catch (error) {
-    console.error("Error in cmd_history:", error);
+    console.error("Error fetching transaction history:", error);
     
-    const errorResponse = [
-      `📋 <b>TRANSACTION HISTORY</b>`,
+    await ctx.editMessageText([
+      "📋 <b>TRANSACTION HISTORY</b>",
       "",
-      "❌ Unable to load transaction history at this time.",
+      "❌ Unable to load transaction history.",
       "",
-      "Please try again later or contact support if the issue persists."
-    ];
-    
-    await ctx.editMessageText(errorResponse.join("\n"), {
+      `<b>Error:</b> ${error.message || 'Unknown error'}`,
+      "",
+      "Please try again or check your internet connection."
+    ].join("\n"), {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard()
+        .text("🔄 TRY AGAIN", "cmd_history")
         .text("← BACK TO WALLET", "main_wallet").row()
     });
+    
     await ctx.answerCallbackQuery("❌ Error loading history");
   }
 });
@@ -2661,14 +2818,14 @@ bot.callbackQuery("cmd_swap", async (ctx) => {
     // Add SOL option if user has balance
     if (solBalance > 0) {
       const formattedSolBalance = wallet.formatSolBalance(solBalance);
-      keyboard.text(`💰 SOL (${formattedSolBalance})`, `swap_from_SOL`).row();
+      keyboard.text(`SOL (${formattedSolBalance})`, `swap_from_SOL`).row();
     }
     
     // Add token options (only tokens with balance)
     for (const token of tokenBalances.slice(0, 6)) {
       if (parseFloat(token.rawBalance) > 0) {
         const formatted = wallet.formatTokenBalance(token.balance, token.decimals);
-        keyboard.text(`🪙 ${token.ticker} (${formatted})`, `swap_from_${token.ticker}`).row();
+        keyboard.text(`${token.ticker} (${formatted})`, `swap_from_${token.ticker}`).row();
       }
     }
     
@@ -2904,12 +3061,12 @@ bot.on("callback_query", async (ctx, next) => {
       keyboard
         .text("0.01 SOL", `send_amount_${token}_0.01`).text("0.1 SOL", `send_amount_${token}_0.1`).row()
         .text("0.5 SOL", `send_amount_${token}_0.5`).text("1 SOL", `send_amount_${token}_1`).row()
-        .text("💰 Max", `send_amount_${token}_max`).row();
+        .text("Max", `send_amount_${token}_max`).row();
     } else {
       // For tokens, use different amounts
       keyboard
         .text("10", `send_amount_${token}_10`).text("100", `send_amount_${token}_100`).row()
-        .text("1000", `send_amount_${token}_1000`).text("💰 Max", `send_amount_${token}_max`).row();
+        .text("1000", `send_amount_${token}_1000`).text("Max", `send_amount_${token}_max`).row();
     }
     
     keyboard
@@ -3058,11 +3215,15 @@ bot.callbackQuery("back_main", async (ctx) => {
     const walletAddress = keypair.publicKey.toBase58();
     const shortAddress = `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`;
 
+    // Build main menu with same format as /start
+    const timbaAscii = `╔╦╗╦╔╦╗╔╗ ╔═╗\n ║ ║║║║╠╩╗╠═╣\n ╩ ╩╩ ╩╚═╝╩ ╩`;
+    
     const response = [
-      "💰 <b>TIMBA</b> 💰",
+      `<pre>${timbaAscii}</pre>`,
       "",
-      `PLAYER: ${username.toUpperCase()}`,
-      `WALLET: <code>${shortAddress}</code>`,
+      `<b>WELCOME ${username.toUpperCase()}</b>`,
+      "",
+      `<code>${walletAddress}</code>`,
     ];
 
     await ctx.editMessageText(response.join("\n"), {
@@ -3477,45 +3638,51 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
     const telegramId = BigInt(ctx.from?.id || 0);
     const keypair = wallet.getKeyPair(telegramId);
     const shortAddress = `${keypair.publicKey.toBase58().slice(0, 6)}...${keypair.publicKey.toBase58().slice(-6)}`;
+    const userId = ctx.from?.id?.toString();
     
-    // Use cached wallet data to show payment options
-    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
+    if (!userId) return;
     
-    const response = [
-      `🟢 <b>BUY TOKENS</b>`,
-      "",
-      `<b>From Wallet:</b> <code>${shortAddress}</code>`,
-      "",
-      `<b>Choose payment method:</b>`,
-    ];
+    // Use cached wallet data to check SOL balance
+    const { solBalance } = await getCachedWalletData(telegramId);
+    const formattedSolBalance = wallet.formatSolBalance(solBalance);
+    
+    // Calculate USD value
+    const solPriceUSD = await getTokenPriceUSD('SOL');
+    const solDecimalBalance = solBalance / 1000000000; // LAMPORTS_PER_SOL
+    const totalUSD = solDecimalBalance * solPriceUSD;
 
-    const keyboard = new InlineKeyboard();
-    
-    // Add SOL option if user has balance
-    if (solBalance > 0.01) { // Need at least 0.01 SOL for fees
-      const formattedSolBalance = wallet.formatSolBalance(solBalance);
-      keyboard.text(`💰 SOL (${formattedSolBalance})`, `buy_with_SOL`).row();
-    }
-    
-    // Add token payment options (only tokens with balance)
-    for (const token of tokenBalances.slice(0, 4)) {
-      if (parseFloat(token.rawBalance) > 0) {
-        const formatted = wallet.formatTokenBalance(token.balance, token.decimals);
-        keyboard.text(`🪙 ${token.ticker} (${formatted})`, `buy_with_${token.ticker}`).row();
-      }
-    }
-    
-    if (keyboard.inline_keyboard.length === 0) {
-      keyboard.text("❌ No funds available for trading").row();
-    }
-    
-    keyboard.text("← BACK TO WALLET", "main_wallet").row();
+    const response = [
+      `<pre>╔╦╗╦╔╦╗╔╗ ╔═╗   ╔╗ ╦ ╦╦ ╦
+ ║ ║║║║╠╩╗╠═╣ ─ ╠╩╗║ ║╚╦╝
+ ╩ ╩╩ ╩╚═╝╩ ╩   ╚═╝╚═╝ ╩ 
+       ╔╦╗╔═╗╦╔═╔═╗╔╗╔╔═╗
+        ║ ║ ║╠╩╗║╣ ║║║╚═╗
+        ╩ ╚═╝╩ ╩╚═╝╝╚╝╚═╝
+
+Supported Platforms:
+• Pump.fun tokens
+• DAOS.fun tokens
+• Any token on Jupiter DEX</pre>`,
+      "",
+      `SOL: ${formattedSolBalance} ($${totalUSD.toFixed(2)})`,
+      "",
+      `Send the contract address as a message`
+    ];
 
     await ctx.editMessageText(response.join("\n"), {
       parse_mode: "HTML",
-      reply_markup: keyboard
+      reply_markup: new InlineKeyboard()
+        .text("❌ Cancel", "main_wallet").row()
     });
-    await ctx.answerCallbackQuery("🟢 Select payment method");
+    
+    // Set user state for contract address input
+    setUserState(userId, {
+      type: 'buy_contract_address', 
+      fromToken: 'SOL', // Use fromToken to match existing code
+      messageId: ctx.callbackQuery?.message?.message_id
+    });
+
+    await ctx.answerCallbackQuery("Send contract address as message");
   } catch (error) {
     console.error("Error in cmd_buy:", error);
     await ctx.answerCallbackQuery("❌ Error loading buy interface");
@@ -3546,7 +3713,7 @@ bot.callbackQuery("cmd_sell", async (ctx) => {
     for (const token of tokenBalances.slice(0, 6)) {
       if (parseFloat(token.rawBalance) > 0) {
         const formatted = wallet.formatTokenBalance(token.balance, token.decimals);
-        keyboard.text(`🪙 ${token.ticker} (${formatted})`, `sell_token_${token.ticker}`).row();
+        keyboard.text(`${token.ticker} (${formatted})`, `sell_token_${token.ticker}`).row();
         hasTokens = true;
       }
     }
@@ -3707,56 +3874,90 @@ bot.on("callback_query", async (ctx, next) => {
     const telegramId = BigInt(ctx.from?.id || 0);
     const userKeypair = wallet.getKeyPair(telegramId);
     
-    // Use the same swap infrastructure for selling (token → SOL or token → token)
-    const swapManager = (await import('./utils/swap-manager.js')).swapManager;
+    // Use the existing global swapManager instance
     
-    const quote = await swapManager.getSwapQuote({
+    const quote = await swapManager.getQuote({
       inputMint: sellData.fromTokenInfo.token_mint,
       outputMint: sellData.toTokenInfo.token_mint,
       amount: sellData.amount,
-      slippagePercent: 1.0,
-      userPublicKey: userKeypair.publicKey.toBase58()
+      slippageBps: 200, // Use same 2% slippage as successful BUY/SWAP
+      userKeypair: userKeypair,
+      inputDecimals: sellData.fromTokenInfo.decimals || 6,
+      outputDecimals: 9, // SOL decimals
+      inputTicker: sellData.fromToken.toUpperCase(),
+      outputTicker: sellData.toToken.toUpperCase()
     });
     
     if (!quote) {
       throw new Error("Unable to get swap quote for sell");
     }
     
-    const instructions = await swapManager.getSwapInstructions({
-      fromToken: sellData.fromToken,
-      toToken: sellData.toToken,
-      amount: sellData.amount,
-      slippageBps: Math.floor(1.0 * 100),
-      userKeypair: userKeypair,
-      inputDecimals: sellData.fromTokenInfo.decimals,
-      outputDecimals: sellData.toTokenInfo.decimals,
-      inputTicker: sellData.fromToken,
-      outputTicker: sellData.toToken
-    }, quote);
+    // Use the same successful approach as BUY command
+    let signature: string;
     
-    // Execute transaction
-    const signature = await wallet.sendTransaction(instructions, [userKeypair]);
+    if (quote.provider === 'jupiter') {
+      // Use Jupiter execution method
+      signature = await swapManager.executeJupiterSwap({
+        inputMint: quote.inputMint,
+        outputMint: quote.outputMint,
+        amount: quote.inputAmount, // Use quote amount like successful BUY/SWAP
+        slippageBps: Math.floor(2.0 * 100), // Use same 2% slippage as successful BUY/SWAP
+        userKeypair: userKeypair,
+        inputDecimals: quote.inputDecimals || sellData.fromTokenInfo.decimals,
+        outputDecimals: quote.outputDecimals || 9,
+        inputTicker: sellData.fromToken.toUpperCase(),
+        outputTicker: sellData.toToken.toUpperCase()
+      }, quote);
+    } else {
+      // Use instruction-based approach for other providers (pump.fun)
+      const instructions = await swapManager.createSwapTransaction({
+        inputMint: quote.inputMint,
+        outputMint: quote.outputMint,
+        amount: quote.inputAmount, // Use quote amount like successful BUY/SWAP
+        slippageBps: Math.floor(2.0 * 100), // Use same 2% slippage as successful BUY/SWAP
+        userKeypair: userKeypair,
+        inputDecimals: quote.inputDecimals || sellData.fromTokenInfo.decimals,
+        outputDecimals: quote.outputDecimals || 9,
+        inputTicker: sellData.fromToken.toUpperCase(),
+        outputTicker: sellData.toToken.toUpperCase()
+      }, quote);
+      
+      // Execute transaction
+      signature = await wallet.sendTransaction(instructions, [userKeypair]);
+    }
+    
+    console.log(`🚀 Sell transaction submitted: ${signature}`);
     
     // Wait for confirmation
     await wallet.confirmTransaction(signature);
     
     const successMessage = [
-      "✅ <b>Sell Transaction Completed!</b>",
+      "✅ <b>SELL COMPLETED!</b>",
       "",
-      `🔗 <b>Transaction:</b> [${signature.slice(0, 8)}...](https://solscan.io/tx/${signature})`,
       `💰 <b>Sold:</b> ${sellData.amount} ${sellData.fromToken}`,
       `🎯 <b>Received:</b> ${sellData.toToken}`,
       "",
-      "🎉 <b>Tokens successfully sold!</b>"
+      `🔗 <b>Transaction:</b> <code>${signature.slice(0, 8)}...${signature.slice(-8)}</code>`,
+      "",
+      "🎉 <b>Sale successful!</b>"
     ].join("\n");
 
     await ctx.editMessageText(successMessage, { 
-      parse_mode: "Markdown",
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
       reply_markup: new InlineKeyboard()
+        .webApp("🔍 VIEW TX", `https://solscan.io/tx/${signature}`).row()
         .text("💰 WALLET", "main_wallet")
         .text("🔴 SELL MORE", "cmd_sell").row()
     });
     await safeAnswerCallbackQuery(ctx, "Sell completed!");
+    
+    // Clear wallet cache to force fresh balance on next wallet access
+    const cacheKey = ctx.from?.id?.toString();
+    if (cacheKey) {
+      walletDataCache.delete(cacheKey);
+      console.log(`🧹 Cleared wallet cache for user ${cacheKey} after SELL`);
+    }
     
     transactionCache.delete(txId);
 
@@ -3798,6 +3999,38 @@ bot.on("callback_query", async (ctx, next) => {
     const keypair = wallet.getKeyPair(telegramId);
     const shortAddress = `${keypair.publicKey.toBase58().slice(0, 6)}...${keypair.publicKey.toBase58().slice(-6)}`;
     
+    // Handle "other_tokens" case - show available tokens
+    if (paymentToken === 'other_tokens') {
+      const { tokenBalances } = await getCachedWalletData(telegramId);
+      
+      const response = [
+        `🟢 <b>BUY TOKENS</b>`,
+        "",
+        `<b>From:</b> <code>${shortAddress}</code>`,
+        "",
+        `<b>Choose token to pay with:</b>`,
+      ];
+
+      const keyboard = new InlineKeyboard();
+      
+      // Show available tokens
+      for (const token of tokenBalances.slice(0, 6)) {
+        if (parseFloat(token.rawBalance) > 0) {
+          const formatted = wallet.formatTokenBalance(token.balance, token.decimals);
+          keyboard.text(`${token.ticker} (${formatted})`, `buy_with_${token.ticker}`).row();
+        }
+      }
+      
+      keyboard.text("← BACK", "cmd_buy").row();
+
+      await ctx.editMessageText(response.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: keyboard
+      });
+      await ctx.answerCallbackQuery("Select payment token");
+      return;
+    }
+    
     const response = [
       `🟢 <b>BUY TOKENS</b>`,
       "",
@@ -3809,14 +4042,10 @@ bot.on("callback_query", async (ctx, next) => {
 
     const keyboard = new InlineKeyboard();
     
-    // Popular tokens section
-    keyboard.text("🔥 POPULAR TOKENS", "buy_popular_header").row();
-    
+    // Popular tokens section - only TIMBA and USDC
     const popularTokens = [
       { symbol: 'TIMBA', name: '🎲 TIMBA' },
-      { symbol: 'WSOL', name: '🔄 WSOL' },
-      { symbol: 'USDC', name: '💵 USDC' },
-      { symbol: 'BONK', name: '🐶 BONK' }
+      { symbol: 'USDC', name: '💵 USDC' }
     ];
     
     for (const token of popularTokens) {
@@ -3827,7 +4056,6 @@ bot.on("callback_query", async (ctx, next) => {
     
     // Custom options
     keyboard.text("📋 PASTE CONTRACT ADDRESS", `buy_contract_${paymentToken}`).row();
-    keyboard.text("🔍 SEARCH BY SYMBOL", `buy_search_${paymentToken}`).row();
     
     keyboard.text("← BACK", "cmd_buy").row();
 
@@ -4017,15 +4245,30 @@ bot.on("callback_query", async (ctx, next) => {
     return await next();
   }
 
-  // Parse callback data: buy_amount_PAYMENTTOKEN_TARGETTOKEN_AMOUNT
+  // Parse callback data: buy_amount_PAYMENTTOKEN_TARGETTOKEN_AMOUNT or buy_amount_PAYMENTTOKEN_TOKENTXID_AMOUNT
   const parts = callbackData.replace('buy_amount_', '').split('_');
   if (parts.length < 3) {
     return await next();
   }
 
   const paymentToken = parts[0];
-  const targetToken = parts[1];
+  const secondPart = parts[1];
   const amount = parts.slice(2).join('_'); // Handle cases where amount might contain underscores
+  
+  // Check if second part is a transaction ID (from contract address flow) or target token
+  let targetToken = secondPart;
+  let contractAddress = null;
+  let tokenInfo = null;
+  
+  // If it looks like a transaction ID (short alphanumeric), look it up in cache
+  if (secondPart.length < 20 && /^[a-z0-9]+$/.test(secondPart)) {
+    const cachedInfo = transactionCache.get(secondPart);
+    if (cachedInfo) {
+      targetToken = cachedInfo.targetToken;
+      contractAddress = cachedInfo.targetTokenAddress;
+      tokenInfo = cachedInfo.tokenMetadata;
+    }
+  }
   
   console.log(`💰 BUY amount selected: ${amount} ${paymentToken} → ${targetToken}`);
   
@@ -4033,9 +4276,12 @@ bot.on("callback_query", async (ctx, next) => {
     const telegramId = BigInt(ctx.from?.id || 0);
     const userId = ctx.from?.id?.toString();
     
-    // Get existing user state to check for dynamic token info
+    // Get existing user state to check for dynamic token info  
     const existingState = getUserState(userId, false); // Don't clear it yet
-    const contractAddress = existingState?.contractAddress;
+    // Use contractAddress from transaction cache if available, otherwise from user state
+    if (!contractAddress) {
+      contractAddress = existingState?.contractAddress;
+    }
     
     if (amount === 'CUSTOM') {
       // Handle custom amount input
@@ -4108,7 +4354,8 @@ bot.on("callback_query", async (ctx, next) => {
   }
 
   const txId = callbackData.replace('confirm_buy_', '');
-  const buyData = transactionCache.get(txId);
+  // Handle both transactionCache (new format with tx_ prefix) and old format
+  let buyData = transactionCache.get(txId) || pendingTransactions.get(txId);
   
   if (!buyData) {
     await ctx.answerCallbackQuery("❌ Transaction expired. Please try again.");
@@ -4140,114 +4387,262 @@ bot.on("callback_query", async (ctx, next) => {
     const telegramId = BigInt(ctx.from?.id || 0);
     const userKeypair = wallet.getKeyPair(telegramId);
     
-    // Use the same swap infrastructure that's already working
-    const swapManager = (await import('./utils/swap-manager.js')).swapManager;
+    // Use the existing global swapManager instance
     
     let signature: string;
     let instructions: any[];
     
-    // Handle SOL → Token or Token → Token swaps
-    if (buyData.fromToken === 'SOL' && buyData.toToken !== 'SOL') {
-      // Buying tokens with SOL - use Jupiter or pump.fun based on token
-      const quote = await swapManager.getSwapQuote({
-        inputMint: "So11111111111111111111111111111111111111112", // SOL
-        outputMint: buyData.toTokenInfo.token_mint,
-        amount: buyData.amount,
-        slippagePercent: 1.0,
-        userPublicKey: userKeypair.publicKey.toBase58()
-      });
-      
-      if (!quote) {
-        throw new Error("Unable to get swap quote");
-      }
-      
-      instructions = await swapManager.getSwapInstructions({
-        fromToken: buyData.fromToken,
-        toToken: buyData.toToken,
-        amount: buyData.amount,
-        slippageBps: Math.floor(1.0 * 100),
+    // Use the existing quote that was already generated and stored
+    if (!buyData.quote) {
+      throw new Error("No quote data available for this transaction");
+    }
+
+    // Execute the swap using the stored quote (same logic as confirm_swap)
+    const quote = buyData.quote;
+    
+    // Use the same successful approach as the working /swap command
+    
+    if (quote.provider === 'jupiter') {
+      // Use Jupiter execution method
+      signature = await swapManager.executeJupiterSwap({
+        inputMint: quote.inputMint,
+        outputMint: quote.outputMint,
+        amount: quote.inputAmount, // Use quote amount like successful swap does
+        slippageBps: Math.floor(2.0 * 100), // Use same 2% slippage as successful swap
         userKeypair: userKeypair,
-        inputDecimals: 9, // SOL decimals
-        outputDecimals: buyData.toTokenInfo.decimals,
-        inputTicker: buyData.fromToken,
-        outputTicker: buyData.toToken
-      }, quote);
-      
-    } else if (buyData.fromToken !== 'SOL' && buyData.toToken !== 'SOL') {
-      // Token → Token swap
-      const quote = await swapManager.getSwapQuote({
-        inputMint: buyData.fromTokenInfo.token_mint,
-        outputMint: buyData.toTokenInfo.token_mint,
-        amount: buyData.amount,
-        slippagePercent: 1.0,
-        userPublicKey: userKeypair.publicKey.toBase58()
-      });
-      
-      if (!quote) {
-        throw new Error("Unable to get swap quote");
-      }
-      
-      instructions = await swapManager.getSwapInstructions({
-        fromToken: buyData.fromToken,
-        toToken: buyData.toToken,
-        amount: buyData.amount,
-        slippageBps: Math.floor(1.0 * 100),
-        userKeypair: userKeypair,
-        inputDecimals: buyData.fromTokenInfo.decimals,
-        outputDecimals: buyData.toTokenInfo.decimals,
-        inputTicker: buyData.fromToken,
-        outputTicker: buyData.toToken
+        inputDecimals: quote.inputDecimals || 9,
+        outputDecimals: quote.outputDecimals || 9,
+        inputTicker: buyData.fromToken.toUpperCase(),
+        outputTicker: buyData.toToken.toUpperCase()
       }, quote);
     } else {
-      throw new Error("Invalid buy configuration");
+      // Use instruction-based approach for other providers (pump.fun)
+      instructions = await swapManager.createSwapTransaction({
+        inputMint: quote.inputMint,
+        outputMint: quote.outputMint,
+        amount: quote.inputAmount, // Use quote amount like successful swap does
+        slippageBps: Math.floor(2.0 * 100), // Use same 2% slippage as successful swap
+        userKeypair: userKeypair,
+        inputDecimals: quote.inputDecimals || 9,
+        outputDecimals: quote.outputDecimals || 6,
+        inputTicker: buyData.fromToken.toUpperCase(),
+        outputTicker: buyData.toToken.toUpperCase()
+      }, quote);
+      
+      // Execute transaction
+      signature = await wallet.sendTransaction(instructions, [userKeypair]);
     }
     
-    // Execute transaction
-    signature = await wallet.sendTransaction(instructions, [userKeypair]);
+    console.log(`🚀 Buy transaction submitted: ${signature}`);
     
     // Wait for confirmation
     await wallet.confirmTransaction(signature);
     
     const successMessage = [
-      "✅ <b>Buy Transaction Completed!</b>",
+      "✅ <b>BUY COMPLETED!</b>",
       "",
-      `🔗 <b>Transaction:</b> [${signature.slice(0, 8)}...](https://solscan.io/tx/${signature})`,
       `💰 <b>Spent:</b> ${buyData.amount} ${buyData.fromToken}`,
       `🎯 <b>Received:</b> ${buyData.toToken} tokens`,
       "",
-      "🎉 <b>Tokens successfully purchased!</b>"
+      `🔗 <b>Transaction:</b> <code>${signature.slice(0, 8)}...${signature.slice(-8)}</code>`,
+      "",
+      "🎉 <b>Purchase successful!</b>"
     ].join("\n");
 
     await ctx.editMessageText(successMessage, { 
-      parse_mode: "Markdown",
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
       reply_markup: new InlineKeyboard()
+        .webApp("🔍 VIEW TX", `https://solscan.io/tx/${signature}`).row()
         .text("💰 WALLET", "main_wallet")
         .text("🔄 BUY MORE", "cmd_buy").row()
     });
     await safeAnswerCallbackQuery(ctx, "Buy completed!");
+    
+    // Clear wallet cache to force fresh balance on next wallet access
+    const cacheKey = ctx.from?.id?.toString();
+    if (cacheKey) {
+      walletDataCache.delete(cacheKey);
+      console.log(`🧹 Cleared wallet cache for user ${cacheKey} after BUY`);
+    }
     
     transactionCache.delete(txId);
 
   } catch (error: any) {
     console.error("Buy execution error:", error);
     
-    const errorMessage = [
-      "❌ <b>Buy Transaction Failed</b>",
-      "",
-      `<b>Error:</b> ${error.message}`,
-      "",
-      "The transaction could not be completed. Please check your balance and try again."
-    ].join("\n");
+    let errorMessage: string;
+    let keyboard = new InlineKeyboard();
+    
+    // Handle specific error types
+    if (error.message?.includes('TooMuchSolRequired') || 
+        error.message?.includes('slippage') ||
+        error.transactionLogs?.some((log: string) => log.includes('TooMuchSolRequired'))) {
+      
+      // Extract the actual amounts needed from logs if available
+      let requiredAmount = null;
+      let yourAmount = null;
+      
+      if (error.transactionLogs) {
+        for (const log of error.transactionLogs) {
+          if (log.includes('Left:') && log.includes('Right:')) {
+            const leftMatch = log.match(/Left: (\d+)/);
+            const rightMatch = log.match(/Right: (\d+)/);
+            if (leftMatch && rightMatch) {
+              yourAmount = parseInt(leftMatch[1]) / 1000000000; // Convert lamports to SOL
+              requiredAmount = parseInt(rightMatch[1]) / 1000000000;
+              break;
+            }
+          }
+        }
+      }
+      
+      let suggestionText = "• Try a slightly higher amount";
+      let buttonText = "💡 TRY HIGHER";
+      
+      if (requiredAmount && yourAmount) {
+        const difference = requiredAmount - yourAmount;
+        const suggestedAmount = requiredAmount + (difference * 0.1); // Add 10% buffer
+        const isDifferenceSmall = difference < 0.001;
+        
+        suggestionText = isDifferenceSmall 
+          ? `• Try with ${suggestedAmount.toFixed(6)} SOL (includes fees/buffer)`
+          : `• Try with ${suggestedAmount.toFixed(4)} SOL (price moved)`;
+        buttonText = `💡 ${suggestedAmount.toFixed(6)} SOL`;
+      }
+      
+      // Get difference amount for better messaging
+      const difference = requiredAmount && yourAmount ? requiredAmount - yourAmount : 0;
+      const isDifferenceSmall = difference > 0 && difference < 0.001; // Less than 0.001 SOL
+      
+      // Slippage error - offer specific solutions
+      errorMessage = [
+        isDifferenceSmall ? "⚠️ <b>Small Amount Missing</b>" : "⚠️ <b>Amount Adjustment Needed</b>",
+        "",
+        `You tried: ${buyData.amount} ${buyData.fromToken}`,
+        requiredAmount ? `Need: ${requiredAmount.toFixed(6)} ${buyData.fromToken}` : "But need slightly more",
+        isDifferenceSmall ? `Difference: ${difference.toFixed(6)} SOL (likely fees/precision)` : "",
+        "",
+        "<b>Why this happens:</b>",
+        isDifferenceSmall ? "• Transaction fees not included in quote" : "• Price moved or slippage protection",
+        isDifferenceSmall ? "• Small calculation differences in SDK" : "• Market volatility",
+        "",
+        "<b>Solutions:</b>",
+        suggestionText,
+        "• Wait and retry",
+        "",
+        "🛡️ <i>This protects you from failed transactions!</i>"
+      ].filter(line => line !== "").join("\n");
+      
+      keyboard
+        .text(buttonText, `buy_retry_exact_${txId}`)
+        .text("🔄 RETRY SAME", `confirm_buy_${txId}`).row()
+        .text("← BACK TO BUY", "cmd_buy")
+        .text("💰 WALLET", "main_wallet").row();
+        
+      // Store the exact amount needed for the retry button
+      if (requiredAmount) {
+        const retryAmount = requiredAmount + (requiredAmount - yourAmount) * 0.1;
+        buyData.retryAmount = retryAmount.toFixed(4);
+      }
+        
+    } else if (error.message?.includes('Insufficient funds') || 
+               error.message?.includes('insufficient')) {
+      
+      // Insufficient funds error
+      errorMessage = [
+        "❌ <b>Insufficient Funds</b>",
+        "",
+        `You don't have enough ${buyData.fromToken} to complete this purchase.`,
+        `Needed: ${buyData.amount} ${buyData.fromToken}`,
+        "",
+        "Please check your balance and try a smaller amount."
+      ].join("\n");
+      
+      keyboard
+        .text("💰 CHECK BALANCE", "main_wallet")
+        .text("← TRY SMALLER", "cmd_buy").row();
+        
+    } else {
+      
+      // Generic error
+      errorMessage = [
+        "❌ <b>Buy Transaction Failed</b>",
+        "",
+        `<b>Error:</b> ${error.message || 'Unknown error'}`,
+        "",
+        "The transaction could not be completed. Please try again."
+      ].join("\n");
+      
+      keyboard
+        .text("🔄 TRY AGAIN", "cmd_buy")
+        .text("💰 WALLET", "main_wallet").row();
+    }
 
     await ctx.editMessageText(errorMessage, {
       parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
-        .text("← TRY AGAIN", "cmd_buy")
-        .text("💰 WALLET", "main_wallet").row()
+      reply_markup: keyboard
     });
     
     await safeAnswerCallbackQuery(ctx, "❌ Buy failed");
     transactionCache.delete(txId);
+  }
+});
+
+// Handle BUY retry with exact amount needed
+bot.on("callback_query", async (ctx, next) => {
+  const callbackData = ctx.callbackQuery?.data;
+  if (!callbackData?.startsWith('buy_retry_exact_')) {
+    return await next();
+  }
+
+  const txId = callbackData.replace('buy_retry_exact_', '');
+  const buyData = transactionCache.get(txId) || pendingTransactions.get(txId);
+  
+  if (!buyData) {
+    await ctx.answerCallbackQuery("❌ Transaction expired. Please try again.");
+    return;
+  }
+  
+  try {
+    // Use the exact retry amount calculated from the error, or add small buffer
+    let newAmount = buyData.retryAmount || (parseFloat(buyData.amount) * 1.01).toString();
+    
+    console.log(`💡 Retrying buy with exact amount needed: ${newAmount} ${buyData.fromToken} → ${buyData.toToken}`);
+    
+    // Update the stored transaction with new amount
+    if (transactionCache.has(txId)) {
+      buyData.amount = newAmount;
+      transactionCache.set(txId, buyData);
+    } else if (pendingTransactions.has(txId)) {
+      buyData.amount = newAmount;
+      pendingTransactions.set(txId, buyData);
+    }
+    
+    // Show updated confirmation with new amount
+    await ctx.editMessageText(
+      [
+        "💡 <b>Using Exact Amount Needed</b>",
+        "",
+        `📈 <b>Original:</b> ${buyData.amount} ${buyData.fromToken}`,
+        `✅ <b>New Amount:</b> ${newAmount} ${buyData.fromToken}`,
+        `🎯 <b>Buying:</b> ${buyData.toToken}`,
+        "",
+        "This matches the current price. Ready to proceed?"
+      ].join("\n"),
+      {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("✅ CONFIRM BUY", `confirm_buy_${txId}`).row()
+          .text("← BACK TO BUY", "cmd_buy").row()
+      }
+    );
+    
+    await ctx.answerCallbackQuery("💡 Amount increased slightly");
+    
+  } catch (error) {
+    console.error("Error in buy retry higher:", error);
+    await ctx.answerCallbackQuery("❌ Error processing retry");
   }
 });
 
@@ -4384,14 +4779,14 @@ bot.on("callback_query", async (ctx, next) => {
     
     // Add SOL option if not swapping from SOL
     if (fromToken !== 'SOL') {
-      keyboard.text(`💰 SOL`, `swap_to_${fromToken}_SOL`).row();
+      keyboard.text(`SOL`, `swap_to_${fromToken}_SOL`).row();
     }
     
     // Add popular tokens (USDC, WSOL, TIMBA)
     const popularTokens = ['USDC', 'WSOL', 'TIMBA'];
     for (const token of popularTokens) {
       if (token !== fromToken) {
-        keyboard.text(`🪙 ${token}`, `swap_to_${fromToken}_${token}`).row();
+        keyboard.text(`${token}`, `swap_to_${fromToken}_${token}`).row();
       }
     }
     
@@ -4796,70 +5191,60 @@ const showBuyAmountSelection = async (ctx: any, paymentToken: string, targetToke
 /**
  * Fetch and validate token metadata by contract address
  */
-const fetchTokenMetadata = async (contractAddress: string) => {
+const fetchTokenMetadata = async (contractAddress: string, telegramId?: bigint) => {
   try {
     // Validate contract address format
     if (contractAddress.length !== 44) {
       throw new Error("Invalid contract address format (must be 44 characters)");
     }
     
-    // Try to get metadata using wallet's token metadata function first
+    // Use the same method as wallet balance: check if token exists in wallet
+    if (telegramId) {
+      console.log("🔍 Checking wallet balances for token metadata...");
+      try {
+        const { tokenBalances } = await getCachedWalletData(telegramId);
+        const existingToken = tokenBalances.find(token => token.mint === contractAddress);
+        
+        if (existingToken) {
+          console.log("✅ Found token in wallet balance:", existingToken);
+          return {
+            address: contractAddress,
+            symbol: existingToken.ticker,
+            name: existingToken.ticker,
+            decimals: existingToken.decimals,
+            verified: true
+          };
+        }
+      } catch (walletError) {
+        console.log("Wallet balance check failed:", walletError.message);
+      }
+    }
+    
+    // Try to get metadata using wallet's metadata function
     try {
       const metadata = await wallet.getTokenMetadata(contractAddress);
-      
-      return {
-        address: contractAddress,
-        symbol: metadata.symbol || 'UNKNOWN',
-        name: metadata.name || 'Unknown Token',
-        decimals: metadata.decimals || 9,
-        verified: true
-      };
-    } catch (walletError) {
-      console.log("Wallet metadata failed, trying pump.fun...", walletError.message);
-      
-      // If wallet metadata fails, try pump.fun
-      try {
-        console.log("🚀 Attempting to import swap-manager for pump.fun metadata...");
-        const swapManager = (await import('./utils/swap-manager.js')).swapManager;
-        console.log("📦 SwapManager imported:", !!swapManager);
-        
-        const pumpFunClient = (swapManager as any).pumpFunClient;
-        console.log("🔥 PumpFunClient available:", !!pumpFunClient);
-        
-        if (pumpFunClient) {
-          console.log("📞 Calling pumpFunClient.getTokenMetadata for:", contractAddress);
-          const pumpMetadata = await pumpFunClient.getTokenMetadata(contractAddress);
-          console.log("📋 Pump.fun metadata result:", pumpMetadata);
-          
-          if (pumpMetadata && pumpMetadata.symbol) {
-            const result = {
-              address: contractAddress,
-              symbol: pumpMetadata.symbol.toUpperCase(),
-              name: pumpMetadata.name || pumpMetadata.symbol,
-              decimals: 6, // pump.fun tokens typically use 6 decimals
-              verified: false
-            };
-            console.log("✅ Returning pump.fun metadata:", result);
-            return result;
-          } else {
-            console.log("❌ Pump.fun metadata missing symbol:", pumpMetadata);
-          }
-        } else {
-          console.log("❌ PumpFunClient not available in swapManager");
-        }
-      } catch (pumpError) {
-        console.log("💥 Pump.fun metadata error:", pumpError);
+      if (metadata && metadata.symbol && metadata.symbol !== 'UNKNOWN') {
+        return {
+          address: contractAddress,
+          symbol: metadata.symbol,
+          name: metadata.name || metadata.symbol,
+          decimals: metadata.decimals || 6,
+          verified: true
+        };
       }
-      
-      // If both fail, return basic info
-      return {
-        address: contractAddress,
-        symbol: `${contractAddress.slice(0, 4)}...${contractAddress.slice(-4)}`,
-        name: 'Unknown Token',
-        decimals: 6,
-        verified: false
-      };
+    } catch (metadataError) {
+      console.log("Wallet metadata failed:", metadataError.message);
     }
+    
+    // Fallback: return truncated address as symbol
+    return {
+      address: contractAddress,
+      symbol: `${contractAddress.slice(0, 4)}...${contractAddress.slice(-4)}`,
+      name: 'Unknown Token',
+      decimals: 6,
+      verified: false
+    };
+    
   } catch (error) {
     console.error("Error fetching token metadata:", error);
     throw new Error(`Failed to fetch token information: ${error.message}`);
@@ -4942,14 +5327,21 @@ const showBuyQuoteAndConfirmation = async (ctx: any, paymentToken: string, targe
     
     // Format for BUY terminology
     const response = [
-      `🟢 <b>BUY CONFIRMATION</b>`,
-      "",
-      `<b>You Pay:</b> ${actualAmount} ${paymentToken}`,
-      `<b>You Receive:</b> ~${quote.outputAmount} ${targetToken}`,
-      "",
-      `<b>Rate:</b> ${quote.estimatedRate.toFixed(6)} ${targetToken}/${paymentToken}`,
-      `<b>Provider:</b> ${quote.provider} ${quote.provider === 'pump-fun' ? '(ungraduated)' : '(graduated)'}`,
-      `<b>Slippage:</b> ${quote.slippage ? quote.slippage.toFixed(1) + '%' : '1.0%'}`,
+      `<pre>╔╦╗╦╔╦╗╔╗ ╔═╗
+ ║ ║║║║╠╩╗╠═╣
+ ╩ ╩╩ ╩╚═╝╩ ╩
+
+BUY CONFIRMATION
+
+You Pay: ${actualAmount} ${paymentToken}
+You Receive: ~${quote.outputAmount} ${targetToken}
+
+Rate: ${quote.estimatedRate.toFixed(6)} ${targetToken}/${paymentToken}
+Provider: ${quote.provider} ${quote.provider === 'pump-fun' ? '(ungraduated)' : '(graduated)'}
+Slippage: ${quote.slippage ? quote.slippage.toFixed(1) + '%' : '1.0%'}
+
+Address:
+${outputMint}</pre>`,
       "",
       `⚠️ <b>Confirm this purchase?</b>`,
     ].join("\n");
@@ -5241,7 +5633,7 @@ const handleSwapCustomAmountInput = async (ctx: any, userState: any, amount: str
       }
     }
     
-    actualAmount = ((balance * percentage) / 100).toString();
+    actualAmount = (balance * (percentage / 100)).toString();
   } else if (amount.toLowerCase() === 'max') {
     actualAmount = 'max';
   } else {
@@ -5299,7 +5691,7 @@ const handleBuyContractAddressInput = async (ctx: any, userState: any, contractA
     );
     
     // Try to fetch token metadata
-    const tokenInfo = await fetchTokenMetadata(contractAddress);
+    const tokenInfo = await fetchTokenMetadata(contractAddress, telegramId);
     
     if (!tokenInfo) {
       throw new Error("Unable to fetch token metadata. Please check the contract address.");
@@ -5307,21 +5699,12 @@ const handleBuyContractAddressInput = async (ctx: any, userState: any, contractA
     
     console.log(`✅ Token found: ${tokenInfo.symbol} (${contractAddress})`);
     
-    // Show payment method selection for this token
-    const response = [
-      `✅ <b>TOKEN IDENTIFIED</b>`,
-      "",
-      `🏷️ <b>Ticker:</b> ${tokenInfo.symbol}`,
-      `📝 <b>Name:</b> ${tokenInfo.name}`,
-      `🔗 <b>Address:</b> <code>${contractAddress.slice(0, 6)}...${contractAddress.slice(-6)}</code>`,
-      `${tokenInfo.verified ? '✅ <b>Verified</b>' : '⚠️ <b>Unverified</b>'}`,
-      "",
-      `<b>💰 Select payment method to buy ${tokenInfo.symbol}:</b>`,
-    ];
+    // Use the payment method that was already selected
+    const paymentToken = userState.fromToken;
     
-    // Get user balances to show available payment options
-    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-    const keyboard = new InlineKeyboard();
+    if (!paymentToken) {
+      throw new Error("Payment token not found in user state");
+    }
     
     // Create a shorter transaction ID for the callback data
     const tokenTxId = Math.random().toString(36).substring(2, 15);
@@ -5330,22 +5713,37 @@ const handleBuyContractAddressInput = async (ctx: any, userState: any, contractA
     transactionCache.set(tokenTxId, {
       targetToken: tokenInfo.symbol,
       targetTokenAddress: contractAddress,
-      tokenMetadata: tokenInfo
+      tokenMetadata: tokenInfo,
+      paymentToken: paymentToken
     });
     
-    // Add SOL if available
-    if (solBalance > 0.001) {
-      const formattedSolBalance = wallet.formatSolBalance(solBalance);
-      keyboard.text(`💰 SOL (${formattedSolBalance})`, `buy_dynamic_SOL_${tokenTxId}`).row();
-    }
+    // Show token identification and go directly to buy options
+    const response = [
+      `<pre>╔╦╗╦╔╦╗╔╗ ╔═╗
+ ║ ║║║║╠╩╗╠═╣
+ ╩ ╩╩ ╩╚═╝╩ ╩
+
+TOKEN IDENTIFIED
+
+Buying: ${tokenInfo.symbol}
+Name: ${tokenInfo.name}
+Paying with: ${paymentToken}
+${tokenInfo.verified ? 'Status: Verified' : 'Status: Unverified'}
+
+Address:
+${contractAddress}</pre>`,
+      "",
+      `<b>Select amount to buy:</b>`,
+    ];
     
-    // Add token balances if available
-    for (const token of tokenBalances) {
-      if (token.balance > 0 && token.ticker !== tokenInfo.symbol) {
-        const formatted = wallet.formatTokenBalance(token.balance, token.decimals);
-        keyboard.text(`🪙 ${token.ticker} (${formatted})`, `buy_dynamic_${token.ticker}_${tokenTxId}`).row();
-      }
+    const keyboard = new InlineKeyboard();
+    
+    // Add amount buttons using transaction ID
+    const amounts = ['0.01', '0.05', '0.1', '0.5', '1'];
+    for (const amount of amounts) {
+      keyboard.text(`${amount} ${paymentToken}`, `buy_amount_${paymentToken}_${tokenTxId}_${amount}`).row();
     }
+    keyboard.text(`✏️ CUSTOM AMOUNT`, `buy_amount_${paymentToken}_${tokenTxId}_CUSTOM`).row();
     
     keyboard.text("← BACK", "cmd_buy").row();
     
@@ -5358,6 +5756,9 @@ const handleBuyContractAddressInput = async (ctx: any, userState: any, contractA
         reply_markup: keyboard
       }
     );
+    
+    // Clear user state since we now have direct buy buttons with contract address in callback
+    userStates.delete(ctx.from.id.toString());
     
   } catch (error: any) {
     console.error("Error processing contract address:", error);
@@ -5474,14 +5875,14 @@ const handleBuyTokenSymbolInput = async (ctx: any, userState: any, tokenSymbol: 
     // Add SOL if available
     if (solBalance > 0.001) {
       const formattedSolBalance = wallet.formatSolBalance(solBalance);
-      keyboard.text(`💰 SOL (${formattedSolBalance})`, `buy_dynamic_SOL_${tokenTxId}`).row();
+      keyboard.text(`SOL (${formattedSolBalance})`, `buy_dynamic_SOL_${tokenTxId}`).row();
     }
     
     // Add token balances if available
     for (const token of tokenBalances) {
       if (token.balance > 0 && token.ticker !== tokenInfo.symbol) {
         const formatted = wallet.formatTokenBalance(token.balance, token.decimals);
-        keyboard.text(`🪙 ${token.ticker} (${formatted})`, `buy_dynamic_${token.ticker}_${tokenTxId}`).row();
+        keyboard.text(`${token.ticker} (${formatted})`, `buy_dynamic_${token.ticker}_${tokenTxId}`).row();
       }
     }
     
@@ -5568,7 +5969,7 @@ const handleBuyCustomAmountInput = async (ctx: any, userState: any, amount: stri
         }
       }
       
-      actualAmount = ((balance * percentage) / 100).toString();
+      actualAmount = (balance * (percentage / 100)).toString();
     } else if (amount.toLowerCase() === 'max') {
       actualAmount = 'max';
     } else {
@@ -5659,7 +6060,8 @@ const handleSellCustomAmountInput = async (ctx: any, userState: any, amount: str
         throw new Error(`Token ${tokenToSell} not found in wallet`);
       }
       
-      actualAmount = ((tokenBalance.balance * percentage) / 100).toString();
+      const decimalBalance = tokenBalance.balance / Math.pow(10, tokenBalance.decimals);
+      actualAmount = (decimalBalance * (percentage / 100)).toString();
     } else if (amount.toLowerCase() === 'max') {
       actualAmount = 'max';
     } else {
@@ -5794,14 +6196,33 @@ const showSellQuoteAndConfirmation = async (ctx: any, tokenToSell: string, amoun
       throw new Error(`Token ${tokenToSell} not found in wallet`);
     }
     
-    // Calculate actual amount to sell
+    // Get the actual token info with mint address from approved tokens
+    const approvedTokens = tokenManager.getAllApprovedTokensWithMetadata();
+    const tokenInfo = approvedTokens.find(t => t.token_ticker === tokenToSell);
+    
+    if (!tokenInfo) {
+      throw new Error(`Token ${tokenToSell} not found in approved tokens`);
+    }
+    
+    // Calculate actual amount to sell (convert from raw balance to decimal amount)
+    const decimalBalance = tokenBalance.balance / Math.pow(10, tokenBalance.decimals);
+    console.log(`💰 Token balance: ${tokenBalance.balance} raw = ${decimalBalance} decimal`);
+    
     let actualAmount = amount;
     if (amount.includes('%')) {
       const percentage = parseFloat(amount.replace('%', ''));
-      actualAmount = ((tokenBalance.balance * percentage) / 100).toString();
+      actualAmount = (decimalBalance * (percentage / 100)).toString();
     } else if (amount.toLowerCase() === 'max') {
-      actualAmount = tokenBalance.balance.toString();
+      actualAmount = decimalBalance.toString();
     }
+    
+    // Validate that actualAmount is not greater than available balance
+    const actualAmountFloat = parseFloat(actualAmount);
+    if (actualAmountFloat > decimalBalance) {
+      throw new Error(`Cannot sell ${actualAmountFloat} ${tokenToSell}. You only have ${decimalBalance} ${tokenToSell}`);
+    }
+    
+    console.log(`🔢 Sell calculation: ${amount} → ${actualAmount} (max: ${decimalBalance})`);
     
     // For SELL, we typically sell tokens for SOL
     const toToken = 'SOL';
@@ -5810,15 +6231,18 @@ const showSellQuoteAndConfirmation = async (ctx: any, tokenToSell: string, amoun
       decimals: 9
     };
     
-    // Get a swap quote (token → SOL)
-    const swapManager = (await import('./utils/swap-manager.js')).swapManager;
+    // Use the existing global swapManager instance
     
-    const quote = await swapManager.getSwapQuote({
-      inputMint: tokenBalance.token_mint,
+    const quote = await swapManager.getQuote({
+      inputMint: tokenInfo.token_mint, // Use tokenInfo instead of tokenBalance
       outputMint: toTokenInfo.token_mint,
       amount: actualAmount,
-      slippagePercent: 1.0,
-      userPublicKey: wallet.getKeyPair(telegramId).publicKey.toBase58()
+      slippageBps: 200, // Use same 2% slippage as successful BUY/SWAP
+      userKeypair: wallet.getKeyPair(telegramId),
+      inputDecimals: tokenInfo.decimals || 6, // Use tokenInfo decimals
+      outputDecimals: toTokenInfo.decimals || 9,
+      inputTicker: tokenToSell.toUpperCase(),
+      outputTicker: "SOL"
     });
     
     if (!quote) {
@@ -5834,8 +6258,8 @@ const showSellQuoteAndConfirmation = async (ctx: any, tokenToSell: string, amoun
       toToken: toToken,
       amount: actualAmount,
       fromTokenInfo: {
-        token_mint: tokenBalance.token_mint,
-        decimals: tokenBalance.decimals
+        token_mint: tokenInfo.token_mint,
+        decimals: tokenInfo.decimals
       },
       toTokenInfo: toTokenInfo,
       quote: quote,
@@ -5985,18 +6409,27 @@ const regenerateBuyQuoteWithSlippage = async (ctx: any, txId: string, newSlippag
       transactionCache.set(txId, buyData);
     }
     
-    const response = [
-      `🟢 <b>BUY CONFIRMATION</b>`,
-      "",
-      `<b>You Pay:</b> ${buyData.amount} ${buyData.fromToken}`,
-      `<b>You Receive:</b> ~${quote.outputAmount} ${buyData.toToken}`,
-      "",
-      `<b>Rate:</b> ${quote.estimatedRate?.toFixed(6) || 'N/A'} ${buyData.toToken}/${buyData.fromToken}`,
-      `<b>Provider:</b> ${quote.provider} ${quote.provider === 'pump-fun' ? '(ungraduated)' : '(graduated)'}`,
-      `<b>Slippage:</b> ${slippage.toFixed(1)}%`,
-      "",
-      `⚠️ <b>Confirm this purchase?</b>`,
-    ].join("\n");
+    const response = `<pre>
+████████╗██╗███╗   ███╗██████╗  █████╗ 
+╚══██╔══╝██║████╗ ████║██╔══██╗██╔══██╗
+   ██║   ██║██╔████╔██║██████╔╝███████║
+   ██║   ██║██║╚██╔╝██║██╔══██╗██╔══██║
+   ██║   ██║██║ ╚═╝ ██║██████╔╝██║  ██║
+   ╚═╝   ╚═╝╚═╝     ╚═╝╚═════╝ ╚═╝  ╚═╝
+
+BUY CONFIRMATION
+
+You Pay: ${buyData.amount} ${buyData.fromToken}
+You Receive: ~${quote.outputAmount} ${buyData.toToken}
+
+Rate: ${quote.estimatedRate?.toFixed(6) || 'N/A'} ${buyData.toToken}/${buyData.fromToken}
+Provider: ${quote.provider} ${quote.provider === 'pump-fun' ? '(ungraduated)' : '(graduated)'}
+Slippage: ${slippage.toFixed(1)}%
+
+Contract: ${buyData.contractAddress || 'N/A'}
+</pre>
+
+⚠️ <b>Confirm this purchase?</b>`;
 
     await ctx.editMessageText(response, {
       parse_mode: "HTML",

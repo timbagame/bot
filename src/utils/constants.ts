@@ -50,6 +50,7 @@ export const DEFAULT_TOKEN_TICKER = "TIMBA";
 export const TOKENS_LIST = [
   { mint: "So11111111111111111111111111111111111111112", ticker: "WSOL" },
   { mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", ticker: "USDC" },
+  { mint: "FPyD25czYkvztSsgyCP7bxd2xnvDAp1LVjyiJhQidaos", ticker: "DAOS" },
 ];
 
 // ================================

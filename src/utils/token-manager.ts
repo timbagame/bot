@@ -204,7 +204,9 @@ export class TokenManager {
    * Get all approved tokens with their metadata for efficient balance checking
    */
   public getAllApprovedTokensWithMetadata(): Array<{ token_mint: string; token_ticker: string; decimals: number }> {
-    return this.tokenDb.getAllKnownTokens();
+    const tokens = this.tokenDb.getAllKnownTokens();
+    console.log(`📋 getAllApprovedTokensWithMetadata returning ${tokens.length} tokens:`, tokens.map(t => `${t.token_ticker}(${t.token_mint})`));
+    return tokens;
   }
 
   // ================================

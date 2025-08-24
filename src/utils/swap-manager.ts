@@ -1,5 +1,5 @@
 import { Connection, PublicKey, Keypair, TransactionInstruction, Transaction, VersionedTransaction, AddressLookupTableAccount } from '@solana/web3.js';
-import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } from '@solana/spl-token';
+import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
 import { JupiterClient } from './jupiter';
 import { PumpFunClient, validatePumpFunSwap } from './pump-fun';
 import { NetworkDetector, SolanaNetwork } from './network-detector';
@@ -54,6 +54,12 @@ export class SwapManager {
    */
   async getQuote(request: SwapRequest): Promise<SwapQuote> {
     const { inputMint, outputMint, amount, slippageBps = 500, inputDecimals, outputDecimals, inputTicker, outputTicker } = request;
+    
+    console.log(`🔍 SwapManager.getQuote called:`);
+    console.log(`   Input: ${inputMint} (${inputTicker})`);
+    console.log(`   Output: ${outputMint} (${outputTicker})`);
+    console.log(`   Amount: ${amount}`);
+    console.log(`   Network: ${this.network}`);
 
     // First check if this involves a pump.fun token (skip SOL/WSOL and known major tokens)
     const isSolInput = inputMint === 'So11111111111111111111111111111111111111112' || inputMint === 'SOL';
@@ -78,26 +84,33 @@ export class SwapManager {
     
     if (!isSolInput && !isKnownMajorToken(inputMint)) {
       try {
+        console.log(`   Checking if input token ${inputMint} is pump.fun...`);
         inputPumpInfo = await this.pumpFunClient.isPumpFunToken(inputMint);
+        console.log(`   Input pump.fun result: isPumpFun=${inputPumpInfo.isPumpFun}, isGraduated=${inputPumpInfo.isGraduated}`);
       } catch (error) {
-        console.log(`Input token ${inputMint} is not a pump.fun token`);
+        console.log(`   Input token ${inputMint} is not a pump.fun token: ${error.message}`);
       }
     }
     
     if (!isSolOutput && !isKnownMajorToken(outputMint)) {
       try {
+        console.log(`   Checking if output token ${outputMint} is pump.fun...`);
         outputPumpInfo = await this.pumpFunClient.isPumpFunToken(outputMint);
+        console.log(`   Output pump.fun result: isPumpFun=${outputPumpInfo.isPumpFun}, isGraduated=${outputPumpInfo.isGraduated}`);
       } catch (error) {
-        console.log(`Output token ${outputMint} is not a pump.fun token`);
+        console.log(`   Output token ${outputMint} is not a pump.fun token: ${error.message}`);
       }
     }
     
     const hasPumpFunToken = inputPumpInfo.isPumpFun || outputPumpInfo.isPumpFun;
     const hasNonGraduatedPumpFun = (inputPumpInfo.isPumpFun && !inputPumpInfo.isGraduated) || 
                                    (outputPumpInfo.isPumpFun && !outputPumpInfo.isGraduated);
+                                   
+    console.log(`   Detection results: hasPumpFunToken=${hasPumpFunToken}, hasNonGraduatedPumpFun=${hasNonGraduatedPumpFun}`);
 
     // If we have a non-graduated pump.fun token, use pump.fun
     if (hasNonGraduatedPumpFun && this.network === 'mainnet') {
+      console.log(`   🎯 Using pump.fun for quote`);
       const validation = validatePumpFunSwap(inputMint, outputMint, amount);
       if (!validation.valid) {
         throw new Error(validation.error);
@@ -125,6 +138,7 @@ export class SwapManager {
 
     // For mainnet and graduated tokens, use Jupiter
     if (this.network === 'mainnet') {
+      console.log(`   🚀 Using Jupiter for quote`);
       try {
         const jupiterQuote = await this.jupiterClient.getQuote({
           inputMint,
@@ -148,9 +162,15 @@ export class SwapManager {
         console.log('Jupiter quote failed, checking if pump.fun can handle this:', error);
         
         // If Jupiter fails, try pump.fun as fallback
-        if (hasPumpFunToken) {
+        // Force check if this could be a pump.fun swap (SOL + another token)
+        const couldBePumpFun = (isSolInput && !isSolOutput) || (!isSolInput && isSolOutput);
+        
+        if (hasPumpFunToken || couldBePumpFun) {
+          console.log(`   🔄 Trying pump.fun fallback (hasPumpFunToken=${hasPumpFunToken}, couldBePumpFun=${couldBePumpFun})`);
+          
           const validation = validatePumpFunSwap(inputMint, outputMint, amount);
           if (validation.valid) {
+            console.log(`   ✅ Pump.fun validation passed, getting quote...`);
             const pumpQuote = await this.pumpFunClient.getQuote(
               inputMint,
               outputMint,
@@ -169,7 +189,11 @@ export class SwapManager {
               slippage: pumpQuote.slippage,
               provider: 'pump-fun'
             };
+          } else {
+            console.log(`   ❌ Pump.fun validation failed: ${validation.error}`);
           }
+        } else {
+          console.log(`   ❌ Cannot use pump.fun fallback: hasPumpFunToken=${hasPumpFunToken}, couldBePumpFun=${couldBePumpFun}`);
         }
         
         throw error;
@@ -256,7 +280,7 @@ export class SwapManager {
     // If we need to create token accounts, do that first
     if (setupInstructions.length > 0) {
       console.log(`Creating ${setupInstructions.length} token accounts before Jupiter swap`);
-      const setupTxid = await this.wallet.sendTransaction(setupInstructions, userKeypair);
+      const setupTxid = await this.wallet.sendTransaction(setupInstructions, [userKeypair]);
       console.log(`Token accounts created: ${setupTxid}`);
       
       // Wait a bit for the accounts to be created
@@ -385,6 +409,26 @@ export class SwapManager {
   }
 
   /**
+   * Detect if a token uses Token-2022 program
+   */
+  private async isToken2022(mintAddress: string): Promise<boolean> {
+    try {
+      const mintPubkey = new PublicKey(mintAddress);
+      const mintInfo = await this.connection.getAccountInfo(mintPubkey);
+      
+      if (!mintInfo) {
+        return false;
+      }
+      
+      // Check if the owner is Token-2022 program
+      return mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID);
+    } catch (error) {
+      console.log(`Error checking token program for ${mintAddress}:`, error);
+      return false;
+    }
+  }
+
+  /**
    * Create token accounts if they don't exist
    */
   private async createTokenAccountsIfNeeded(userKeypair: Keypair, inputMint: string, outputMint: string): Promise<TransactionInstruction[]> {
@@ -392,21 +436,28 @@ export class SwapManager {
     
     // Check input token account (skip for SOL/WSOL)
     if (inputMint !== 'So11111111111111111111111111111111111111112' && inputMint !== 'SOL') {
+      const isInput2022 = await this.isToken2022(inputMint);
+      const mintPubkey = new PublicKey(inputMint);
+      
       const inputTokenAccount = await getAssociatedTokenAddress(
-        new PublicKey(inputMint),
-        userKeypair.publicKey
+        mintPubkey, 
+        userKeypair.publicKey,
+        false,
+        isInput2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
       );
       
       const inputAccountInfo = await this.connection.getAccountInfo(inputTokenAccount);
       if (!inputAccountInfo) {
         // Account doesn't exist, create it
-        console.log(`Creating input token account for ${inputMint}`);
+        console.log(`Creating input token account for ${inputMint} (Token-${isInput2022 ? '2022' : 'SPL'})`);
+        
         instructions.push(
           createAssociatedTokenAccountInstruction(
             userKeypair.publicKey, // payer
             inputTokenAccount, // ata
             userKeypair.publicKey, // owner
-            new PublicKey(inputMint) // mint
+            mintPubkey, // mint
+            isInput2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
           )
         );
       }
@@ -414,21 +465,28 @@ export class SwapManager {
     
     // Check output token account (skip for SOL/WSOL)
     if (outputMint !== 'So11111111111111111111111111111111111111112' && outputMint !== 'SOL') {
+      const isOutput2022 = await this.isToken2022(outputMint);
+      const mintPubkey = new PublicKey(outputMint);
+      
       const outputTokenAccount = await getAssociatedTokenAddress(
-        new PublicKey(outputMint),
-        userKeypair.publicKey
+        mintPubkey, 
+        userKeypair.publicKey,
+        false,
+        isOutput2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
       );
       
       const outputAccountInfo = await this.connection.getAccountInfo(outputTokenAccount);
       if (!outputAccountInfo) {
         // Account doesn't exist, create it
-        console.log(`Creating output token account for ${outputMint}`);
+        console.log(`Creating output token account for ${outputMint} (Token-${isOutput2022 ? '2022' : 'SPL'})`);
+        
         instructions.push(
           createAssociatedTokenAccountInstruction(
             userKeypair.publicKey, // payer
             outputTokenAccount, // ata
             userKeypair.publicKey, // owner
-            new PublicKey(outputMint) // mint
+            mintPubkey, // mint
+            isOutput2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
           )
         );
       }

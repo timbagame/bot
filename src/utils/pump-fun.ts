@@ -89,39 +89,65 @@ export class PumpFunClient {
       
       // Method 2: Try pump.fun API
       try {
+        console.log(`🔍 Fetching from pump.fun API: https://frontend-api.pump.fun/coins/${mintAddress}`);
         const response = await fetch(`https://frontend-api.pump.fun/coins/${mintAddress}`);
+        console.log(`📡 Pump.fun API response status: ${response.status}`);
+        
         if (response.ok) {
           const data = await response.json();
+          console.log('🎯 Pump.fun API data:', data);
+          
           if (data && data.symbol) {
-            return {
+            const result = {
               symbol: data.symbol.toUpperCase(),
               name: data.name || 'Pump.fun Token',
               decimals: 6
             };
+            console.log('✅ Returning pump.fun API metadata:', result);
+            return result;
+          } else {
+            console.log('❌ Pump.fun API data missing symbol:', data);
           }
+        } else {
+          console.log(`❌ Pump.fun API failed with status: ${response.status}`);
         }
       } catch (apiError) {
-        console.log('Pump.fun API not available, trying alternative sources');
+        console.log('💥 Pump.fun API error:', apiError);
       }
       
       // Method 3: Try DexScreener API
       try {
+        console.log(`🔍 Fetching from DexScreener API: https://api.dexscreener.com/latest/dex/tokens/${mintAddress}`);
         const response = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mintAddress}`);
+        console.log(`📡 DexScreener API response status: ${response.status}`);
+        
         if (response.ok) {
           const data = await response.json();
+          console.log('🎯 DexScreener API data:', JSON.stringify(data, null, 2));
+          
           if (data && data.pairs && data.pairs.length > 0) {
             const pair = data.pairs[0];
+            console.log('🔗 First pair data:', pair);
+            
             if (pair.baseToken && pair.baseToken.symbol) {
-              return {
+              const result = {
                 symbol: pair.baseToken.symbol.toUpperCase(),
                 name: pair.baseToken.name || 'Token',
                 decimals: 6
               };
+              console.log('✅ Returning DexScreener metadata:', result);
+              return result;
+            } else {
+              console.log('❌ DexScreener pair missing baseToken symbol');
             }
+          } else {
+            console.log('❌ DexScreener no pairs found');
           }
+        } else {
+          console.log(`❌ DexScreener API failed with status: ${response.status}`);
         }
       } catch (dexError) {
-        console.log('DexScreener API not available');
+        console.log('💥 DexScreener API error:', dexError);
       }
       
       // Method 4: Check if it's a pump.fun token at all
@@ -228,6 +254,23 @@ export class PumpFunClient {
         const tokenAmount = this.calculateBuyAmount(bondingCurve, solAmountLamports);
         outputAmount = tokenAmount.toString();
         estimatedRate = tokenAmount / solAmountLamports;
+        
+        // FINAL FIX: Don't pre-calculate amounts - let pump.fun handle it dynamically
+        // The issue is that pump.fun calculates amounts in real-time based on fresh curve data
+        // Pre-calculating creates a mismatch when the curve changes between quote and execution
+        
+        // Successfully using original amount - pump.fun handles slippage dynamically
+        
+        // Return the original amount - createSwapTransaction will handle the dynamic calculation
+        return {
+          inputMint,
+          outputMint,
+          inputAmount: amount, // Use original amount, not calculated
+          outputAmount,
+          estimatedRate,
+          slippage: slippageBps / 100,
+          isGraduated: false
+        };
       } else {
         // Calculate how much SOL we get for the token amount
         const tokenAmount = parseInt(amount);
@@ -270,12 +313,17 @@ export class PumpFunClient {
         // Buying pump.fun token with SOL
         pumpMint = new PublicKey(outputMint);
         isBuy = true;
-        amountLamports = BigInt(amount);
+        amountLamports = BigInt(Math.floor(parseFloat(amount)));
       } else if (!isSolInput && isSolOutput) {
         // Selling pump.fun token for SOL
         pumpMint = new PublicKey(inputMint);
         isBuy = false;
-        amountLamports = BigInt(amount);
+        // For selling tokens, convert decimal amount to raw token amount
+        // Pump.fun tokens typically have 6 decimals
+        const decimalAmount = parseFloat(amount);
+        const rawTokenAmount = Math.floor(decimalAmount * Math.pow(10, 6));
+        amountLamports = BigInt(rawTokenAmount);
+        console.log(`🔢 SELL conversion: ${amount} → ${decimalAmount} → ${rawTokenAmount} raw tokens`);
       } else {
         throw new Error('Pump.fun swaps must involve SOL and a pump.fun token');
       }
@@ -297,7 +345,10 @@ export class PumpFunClient {
         
         // Calculate token amount we'll receive for the SOL amount
         const expectedTokenAmount = this.calculateBuyAmount(buyState.bondingCurve, Number(solAmount));
-        const minTokensOut = Math.floor(expectedTokenAmount * (1 - slippageBps / 10000));
+        // CRITICAL FIX: Use a more generous slippage tolerance for minTokensOut
+        // This allows pump.fun to handle the dynamic curve changes
+        const generousSlippageBps = Math.max(slippageBps, 500); // At least 5% slippage
+        const minTokensOut = Math.floor(expectedTokenAmount * (1 - generousSlippageBps / 10000));
         
         console.log(`Creating buy instructions for ${solAmount} lamports, expecting ~${expectedTokenAmount} tokens`);
         
@@ -398,6 +449,29 @@ export class PumpFunClient {
     } catch (error) {
       console.error('Error calculating sell amount:', error);
       return Math.floor(tokenAmount / 1000000);
+    }
+  }
+
+  /**
+   * Calculate the required SOL amount that pump.fun actually needs
+   * Based on observed patterns: pump.fun typically needs ~0.01-0.02% more than the requested amount
+   */
+  private calculateRequiredSolForTokens(bondingCurve: any, expectedTokens: number, slippageBps: number, userRequestedAmount: number): number {
+    try {
+      // Simple approach: add a small buffer based on the typical difference we see
+      // The error showed we needed 10,001,330 instead of 10,000,000 (0.0133% more)
+      
+      // MUCH SIMPLER: The user requested a specific SOL amount
+      // But pump.fun needs slightly more due to bonding curve math
+      // Just add the typical difference we've observed
+      const buffer = Math.max(2000, Math.floor(userRequestedAmount * 0.0002)); // 0.02% buffer
+      
+      return userRequestedAmount + buffer;
+    } catch (error) {
+      console.error('Error calculating required SOL amount:', error);
+      // Fallback: just add 2000 lamports (0.000002 SOL) buffer
+      const originalSol = Math.floor(expectedTokens / 1000000);
+      return originalSol + 2000;
     }
   }
 
