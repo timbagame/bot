@@ -4819,24 +4819,36 @@ const fetchTokenMetadata = async (contractAddress: string) => {
       
       // If wallet metadata fails, try pump.fun
       try {
+        console.log("🚀 Attempting to import swap-manager for pump.fun metadata...");
         const swapManager = (await import('./utils/swap-manager.js')).swapManager;
+        console.log("📦 SwapManager imported:", !!swapManager);
+        
         const pumpFunClient = (swapManager as any).pumpFunClient;
+        console.log("🔥 PumpFunClient available:", !!pumpFunClient);
         
         if (pumpFunClient) {
+          console.log("📞 Calling pumpFunClient.getTokenMetadata for:", contractAddress);
           const pumpMetadata = await pumpFunClient.getTokenMetadata(contractAddress);
+          console.log("📋 Pump.fun metadata result:", pumpMetadata);
           
           if (pumpMetadata && pumpMetadata.symbol) {
-            return {
+            const result = {
               address: contractAddress,
               symbol: pumpMetadata.symbol.toUpperCase(),
               name: pumpMetadata.name || pumpMetadata.symbol,
               decimals: 6, // pump.fun tokens typically use 6 decimals
               verified: false
             };
+            console.log("✅ Returning pump.fun metadata:", result);
+            return result;
+          } else {
+            console.log("❌ Pump.fun metadata missing symbol:", pumpMetadata);
           }
+        } else {
+          console.log("❌ PumpFunClient not available in swapManager");
         }
       } catch (pumpError) {
-        console.log("Pump.fun metadata also failed:", pumpError.message);
+        console.log("💥 Pump.fun metadata error:", pumpError);
       }
       
       // If both fail, return basic info
