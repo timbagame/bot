@@ -6223,6 +6223,10 @@ const showSellQuoteAndConfirmation = async (ctx: any, tokenToSell: string, amoun
     
     console.log(`🔢 Sell calculation: ${amount} → ${actualAmount} (max: ${decimalBalance})`);
     
+    // Convert decimal amount to raw amount (multiply by token decimals)
+    const rawAmount = Math.floor(parseFloat(actualAmount) * Math.pow(10, tokenInfo.decimals));
+    console.log(`🔄 Converting ${actualAmount} to raw amount: ${rawAmount} (using ${tokenInfo.decimals} decimals)`);
+    
     // For SELL, we typically sell tokens for SOL
     const toToken = 'SOL';
     const toTokenInfo = {
@@ -6235,7 +6239,7 @@ const showSellQuoteAndConfirmation = async (ctx: any, tokenToSell: string, amoun
     const quote = await swapManager.getQuote({
       inputMint: tokenInfo.token_mint, // Use tokenInfo instead of tokenBalance
       outputMint: toTokenInfo.token_mint,
-      amount: actualAmount,
+      amount: rawAmount.toString(), // Use raw amount as string
       slippageBps: 200, // Use same 2% slippage as successful BUY/SWAP
       userKeypair: wallet.getKeyPair(telegramId),
       inputDecimals: tokenInfo.decimals || 6, // Use tokenInfo decimals
