@@ -2700,6 +2700,9 @@ const userStates = new Map<string, {
   amount?: string;
   fromToken?: string;
   toToken?: string;
+  paymentToken?: string;
+  targetToken?: string;
+  tokenToSell?: string;
   contractAddress?: string;
   messageId: number;
   timestamp: number;
@@ -4027,10 +4030,14 @@ bot.on("callback_query", async (ctx, next) => {
   
   try {
     const telegramId = BigInt(ctx.from?.id || 0);
+    const userId = ctx.from?.id?.toString();
+    
+    // Get existing user state to check for dynamic token info
+    const existingState = getUserState(userId, false); // Don't clear it yet
+    const contractAddress = existingState?.contractAddress;
     
     if (amount === 'CUSTOM') {
       // Handle custom amount input
-      const userId = ctx.from?.id?.toString();
       if (!userId) return;
 
       const response = [
@@ -4060,6 +4067,7 @@ bot.on("callback_query", async (ctx, next) => {
         type: 'buy_custom_amount',
         paymentToken: paymentToken,
         targetToken: targetToken,
+        contractAddress: contractAddress, // Preserve contract address from previous state
         messageId: ctx.callbackQuery?.message?.message_id
       });
 
@@ -4068,7 +4076,7 @@ bot.on("callback_query", async (ctx, next) => {
     }
     
     // Handle predefined amounts or percentages
-    await showBuyQuoteAndConfirmation(ctx, paymentToken, targetToken, amount, telegramId);
+    await showBuyQuoteAndConfirmation(ctx, paymentToken, targetToken, amount, contractAddress);
     
   } catch (error: any) {
     console.error("Error in buy_amount:", error);
