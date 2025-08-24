@@ -3867,11 +3867,20 @@ bot.on("callback_query", async (ctx, next) => {
   }
 
   const parts = callbackData.replace('buy_dynamic_', '').split('_');
-  if (parts.length < 3) return await next();
+  if (parts.length < 2) return await next();
   
   const paymentToken = parts[0];
-  const targetToken = parts[1];
-  const contractAddress = parts.slice(2).join('_'); // Handle addresses with underscores
+  const tokenTxId = parts[1];
+  
+  // Get the cached token info
+  const tokenData = transactionCache.get(tokenTxId);
+  if (!tokenData) {
+    await ctx.answerCallbackQuery("❌ Token data expired. Please try again.");
+    return;
+  }
+  
+  const targetToken = tokenData.targetToken;
+  const contractAddress = tokenData.targetTokenAddress;
   
   console.log(`🟢 Dynamic token buy: ${paymentToken} → ${targetToken} (${contractAddress})`);
   
@@ -5145,17 +5154,27 @@ const handleBuyContractAddressInput = async (ctx: any, userState: any, contractA
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
     const keyboard = new InlineKeyboard();
     
+    // Create a shorter transaction ID for the callback data
+    const tokenTxId = Math.random().toString(36).substring(2, 15);
+    
+    // Cache the token info with the transaction ID
+    transactionCache.set(tokenTxId, {
+      targetToken: tokenInfo.symbol,
+      targetTokenAddress: contractAddress,
+      tokenMetadata: tokenInfo
+    });
+    
     // Add SOL if available
     if (solBalance > 0.001) {
       const formattedSolBalance = wallet.formatSolBalance(solBalance);
-      keyboard.text(`💰 SOL (${formattedSolBalance})`, `buy_dynamic_SOL_${tokenInfo.symbol}_${contractAddress}`).row();
+      keyboard.text(`💰 SOL (${formattedSolBalance})`, `buy_dynamic_SOL_${tokenTxId}`).row();
     }
     
     // Add token balances if available
     for (const token of tokenBalances) {
       if (token.balance > 0 && token.ticker !== tokenInfo.symbol) {
         const formatted = wallet.formatTokenBalance(token.balance, token.decimals);
-        keyboard.text(`🪙 ${token.ticker} (${formatted})`, `buy_dynamic_${token.ticker}_${tokenInfo.symbol}_${contractAddress}`).row();
+        keyboard.text(`🪙 ${token.ticker} (${formatted})`, `buy_dynamic_${token.ticker}_${tokenTxId}`).row();
       }
     }
     
@@ -5272,17 +5291,27 @@ const handleBuyTokenSymbolInput = async (ctx: any, userState: any, tokenSymbol: 
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
     const keyboard = new InlineKeyboard();
     
+    // Create a shorter transaction ID for the callback data
+    const tokenTxId = Math.random().toString(36).substring(2, 15);
+    
+    // Cache the token info with the transaction ID
+    transactionCache.set(tokenTxId, {
+      targetToken: tokenInfo.symbol,
+      targetTokenAddress: tokenInfo.address,
+      tokenMetadata: tokenInfo
+    });
+    
     // Add SOL if available
     if (solBalance > 0.001) {
       const formattedSolBalance = wallet.formatSolBalance(solBalance);
-      keyboard.text(`💰 SOL (${formattedSolBalance})`, `buy_dynamic_SOL_${tokenInfo.symbol}_${tokenInfo.address}`).row();
+      keyboard.text(`💰 SOL (${formattedSolBalance})`, `buy_dynamic_SOL_${tokenTxId}`).row();
     }
     
     // Add token balances if available
     for (const token of tokenBalances) {
       if (token.balance > 0 && token.ticker !== tokenInfo.symbol) {
         const formatted = wallet.formatTokenBalance(token.balance, token.decimals);
-        keyboard.text(`🪙 ${token.ticker} (${formatted})`, `buy_dynamic_${token.ticker}_${tokenInfo.symbol}_${tokenInfo.address}`).row();
+        keyboard.text(`🪙 ${token.ticker} (${formatted})`, `buy_dynamic_${token.ticker}_${tokenTxId}`).row();
       }
     }
     
