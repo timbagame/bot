@@ -2579,7 +2579,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
           amount: quote.inputAmount, // Use inputAmount from quote like original
-          slippageBps: 500,
+          slippageBps: 100,
           userKeypair: keypair,
           inputDecimals: quote.inputDecimals || 9,
           outputDecimals: quote.outputDecimals || 9,
@@ -2592,7 +2592,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
           amount: quote.inputAmount, // Use inputAmount from quote like original
-          slippageBps: 500,
+          slippageBps: 100,
           userKeypair: keypair,
           inputDecimals: quote.inputDecimals || 9,
           outputDecimals: quote.outputDecimals || 9,
@@ -4567,7 +4567,7 @@ const showSwapQuoteAndConfirmation = async (ctx: any, fromToken: string, toToken
       inputMint,
       outputMint,
       amount: baseAmount, // Use base units (same as rawAmount.toString())
-      slippageBps: 500, // 0.5%
+      slippageBps: 100, // 1.0%
       userKeypair: keypair,
       inputDecimals,
       outputDecimals,
@@ -4820,7 +4820,7 @@ const showBuyQuoteAndConfirmation = async (ctx: any, paymentToken: string, targe
       inputMint,
       outputMint,
       amount: baseAmount,
-      slippageBps: 500, // 0.5%
+      slippageBps: 100, // 1.0%
       userKeypair: keypair,
       inputDecimals,
       outputDecimals,
@@ -4837,7 +4837,7 @@ const showBuyQuoteAndConfirmation = async (ctx: any, paymentToken: string, targe
       "",
       `<b>Rate:</b> ${quote.estimatedRate.toFixed(6)} ${targetToken}/${paymentToken}`,
       `<b>Provider:</b> ${quote.provider} ${quote.provider === 'pump-fun' ? '(ungraduated)' : '(graduated)'}`,
-      `<b>Slippage:</b> ${(quote.slippage * 100).toFixed(1)}%`,
+      `<b>Slippage:</b> ${quote.slippage ? quote.slippage.toFixed(1) + '%' : '1.0%'}`,
       "",
       `⚠️ <b>Confirm this purchase?</b>`,
     ].join("\n");
