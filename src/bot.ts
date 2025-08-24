@@ -1254,6 +1254,9 @@ bot.command("swap", sequentialize((ctx) => [ctx.from?.id, "swap"]), async (ctx: 
 // Temporary cache for swap data
 const swapDataCache = new Map();
 
+// Transaction cache for buy/sell operations with TTL
+const transactionCache = new Map();
+
 // Swap confirmation callbacks
 bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
   const [, action, userId] = ctx.match!;
