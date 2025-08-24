@@ -1958,13 +1958,16 @@ bot.on("callback_query", async (ctx, next) => {
     'main_wallet', 'wallet_refresh', 'main_settings', 'back_main', 
     'cmd_help', 'cmd_balance', 'cmd_withdraw', 'cmd_swap', 'cmd_wrap', 
     'cmd_privatekey', 'admin_menu', 'cmd_oracle', 'cmd_scan',
-    'help_wallet', 'help_games', 'help_utility', 'help_examples'
+    'help_wallet', 'help_games', 'help_utility', 'help_examples',
+    'cmd_buy', 'cmd_sell', 'cmd_history'
   ];
   
   // Also skip send/swap/wrap interface callbacks
   if (callbackData.startsWith('send_') || 
       callbackData.startsWith('swap_') || 
       callbackData.startsWith('wrap_') ||
+      callbackData.startsWith('buy_') ||
+      callbackData.startsWith('sell_') ||
       callbackData.startsWith('confirm_') ||
       nonGameCallbacks.includes(callbackData)) {
     console.log("🔄 Calling next() for non-game callback:", callbackData);
