@@ -3900,7 +3900,8 @@ bot.on("callback_query", async (ctx, next) => {
       });
     }
     
-    await showBuyAmountSelection(ctx, paymentToken, targetToken);
+    // For dynamic tokens, pass contract address to amount selection
+    await showBuyAmountSelection(ctx, paymentToken, targetToken, contractAddress);
     await ctx.answerCallbackQuery(`Buy ${targetToken} with ${paymentToken}`);
   } catch (error) {
     console.error("Error in dynamic token selection:", error);
@@ -4615,7 +4616,7 @@ const showSwapQuoteAndConfirmation = async (ctx: any, fromToken: string, toToken
 /**
  * Show buy amount selection interface
  */
-const showBuyAmountSelection = async (ctx: any, paymentToken: string, targetToken: string) => {
+const showBuyAmountSelection = async (ctx: any, paymentToken: string, targetToken: string, contractAddress?: string) => {
   const telegramId = BigInt(ctx.from?.id || 0);
   
   // Get balance for the payment token
@@ -4694,16 +4695,51 @@ const fetchTokenMetadata = async (contractAddress: string) => {
       throw new Error("Invalid contract address format (must be 44 characters)");
     }
     
-    // Try to get metadata using wallet's token metadata function
-    const metadata = await wallet.getTokenMetadata(contractAddress);
-    
-    return {
-      address: contractAddress,
-      symbol: metadata.symbol || 'UNKNOWN',
-      name: metadata.name || 'Unknown Token',
-      decimals: metadata.decimals || 9,
-      verified: true
-    };
+    // Try to get metadata using wallet's token metadata function first
+    try {
+      const metadata = await wallet.getTokenMetadata(contractAddress);
+      
+      return {
+        address: contractAddress,
+        symbol: metadata.symbol || 'UNKNOWN',
+        name: metadata.name || 'Unknown Token',
+        decimals: metadata.decimals || 9,
+        verified: true
+      };
+    } catch (walletError) {
+      console.log("Wallet metadata failed, trying pump.fun...", walletError.message);
+      
+      // If wallet metadata fails, try pump.fun
+      try {
+        const swapManager = (await import('./utils/swap-manager.js')).swapManager;
+        const pumpFunClient = (swapManager as any).pumpFunClient;
+        
+        if (pumpFunClient) {
+          const pumpMetadata = await pumpFunClient.getTokenMetadata(contractAddress);
+          
+          if (pumpMetadata && pumpMetadata.symbol) {
+            return {
+              address: contractAddress,
+              symbol: pumpMetadata.symbol.toUpperCase(),
+              name: pumpMetadata.name || pumpMetadata.symbol,
+              decimals: 6, // pump.fun tokens typically use 6 decimals
+              verified: false
+            };
+          }
+        }
+      } catch (pumpError) {
+        console.log("Pump.fun metadata also failed:", pumpError.message);
+      }
+      
+      // If both fail, return basic info
+      return {
+        address: contractAddress,
+        symbol: `${contractAddress.slice(0, 4)}...${contractAddress.slice(-4)}`,
+        name: 'Unknown Token',
+        decimals: 6,
+        verified: false
+      };
+    }
   } catch (error) {
     console.error("Error fetching token metadata:", error);
     throw new Error(`Failed to fetch token information: ${error.message}`);
@@ -5374,7 +5410,10 @@ const handleBuyTokenSymbolInput = async (ctx: any, userState: any, tokenSymbol: 
 const handleBuyCustomAmountInput = async (ctx: any, userState: any, amount: string) => {
   const paymentToken = userState.paymentToken;
   const targetToken = userState.targetToken;
+  const contractAddress = userState.contractAddress;
   const telegramId = BigInt(ctx.from?.id || 0);
+  
+  console.log(`📝 Custom amount debug:`, { amount, paymentToken, targetToken, contractAddress });
   
   try {
     // Handle percentage amounts
@@ -5419,7 +5458,7 @@ const handleBuyCustomAmountInput = async (ctx: any, userState: any, amount: stri
       }
     };
     
-    await showBuyQuoteAndConfirmation(walletCtx, paymentToken, targetToken, actualAmount, telegramId);
+    await showBuyQuoteAndConfirmation(walletCtx, paymentToken, targetToken, actualAmount, contractAddress);
     
   } catch (error: any) {
     console.error("Error processing custom buy amount:", error);
