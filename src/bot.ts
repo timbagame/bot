@@ -6223,9 +6223,30 @@ const showSellQuoteAndConfirmation = async (ctx: any, tokenToSell: string, amoun
     
     console.log(`🔢 Sell calculation: ${amount} → ${actualAmount} (max: ${decimalBalance})`);
     
-    // Convert decimal amount to raw amount (multiply by token decimals)
-    const rawAmount = Math.floor(parseFloat(actualAmount) * Math.pow(10, tokenInfo.decimals));
-    console.log(`🔄 Converting ${actualAmount} to raw amount: ${rawAmount} (using ${tokenInfo.decimals} decimals)`);
+    // Convert decimal amount to raw amount using BigInt for precision
+    const decimalAmount = parseFloat(actualAmount);
+    
+    // Use string multiplication to avoid floating point precision issues
+    const decimalParts = decimalAmount.toString().split('.');
+    const integerPart = decimalParts[0] || '0';
+    const decimalPart = (decimalParts[1] || '').padEnd(tokenInfo.decimals, '0').slice(0, tokenInfo.decimals);
+    
+    // Combine integer and decimal parts
+    const rawAmountStr = integerPart + decimalPart;
+    const rawAmount = BigInt(rawAmountStr);
+    
+    console.log(`🔄 Converting ${actualAmount} to raw amount:`);
+    console.log(`   Decimal amount: ${decimalAmount}`);
+    console.log(`   Token decimals: ${tokenInfo.decimals}`);
+    console.log(`   Integer part: "${integerPart}"`);
+    console.log(`   Decimal part: "${decimalPart}"`);
+    console.log(`   Raw amount string: "${rawAmountStr}"`);
+    console.log(`   Final raw amount: ${rawAmount.toString()}`);
+    
+    // Validate that rawAmount is positive
+    if (rawAmount <= 0n) {
+      throw new Error(`Invalid amount: ${rawAmount.toString()} (from ${actualAmount})`);
+    }
     
     // For SELL, we typically sell tokens for SOL
     const toToken = 'SOL';
@@ -6239,7 +6260,7 @@ const showSellQuoteAndConfirmation = async (ctx: any, tokenToSell: string, amoun
     const quote = await swapManager.getQuote({
       inputMint: tokenInfo.token_mint, // Use tokenInfo instead of tokenBalance
       outputMint: toTokenInfo.token_mint,
-      amount: rawAmount.toString(), // Use raw amount as string
+      amount: rawAmount.toString(), // Use BigInt raw amount as string
       slippageBps: 200, // Use same 2% slippage as successful BUY/SWAP
       userKeypair: wallet.getKeyPair(telegramId),
       inputDecimals: tokenInfo.decimals || 6, // Use tokenInfo decimals
