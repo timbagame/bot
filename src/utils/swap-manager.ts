@@ -159,14 +159,11 @@ export class SwapManager {
           platformFee: jupiterQuote.platformFee
         };
       } catch (error) {
-        console.log('Jupiter quote failed, checking if pump.fun can handle this:', error);
+        console.log('Jupiter quote failed:', error);
         
-        // If Jupiter fails, try pump.fun as fallback
-        // Force check if this could be a pump.fun swap (SOL + another token)
-        const couldBePumpFun = (isSolInput && !isSolOutput) || (!isSolInput && isSolOutput);
-        
-        if (hasPumpFunToken || couldBePumpFun) {
-          console.log(`   🔄 Trying pump.fun fallback (hasPumpFunToken=${hasPumpFunToken}, couldBePumpFun=${couldBePumpFun})`);
+        // Only try pump.fun as fallback if we actually detected a pump.fun token
+        if (hasPumpFunToken && hasNonGraduatedPumpFun) {
+          console.log(`   🔄 Trying pump.fun fallback for confirmed pump.fun token`);
           
           const validation = validatePumpFunSwap(inputMint, outputMint, amount);
           if (validation.valid) {
@@ -193,10 +190,11 @@ export class SwapManager {
             console.log(`   ❌ Pump.fun validation failed: ${validation.error}`);
           }
         } else {
-          console.log(`   ❌ Cannot use pump.fun fallback: hasPumpFunToken=${hasPumpFunToken}, couldBePumpFun=${couldBePumpFun}`);
+          console.log(`   ❌ No pump.fun fallback: not a confirmed pump.fun token (hasPumpFunToken=${hasPumpFunToken}, hasNonGraduatedPumpFun=${hasNonGraduatedPumpFun})`);
         }
         
-        throw error;
+        // For non-pump.fun tokens (like DAOS.fun), Jupiter failure means no quote available
+        throw new Error(`No quote available for ${inputTicker} → ${outputTicker}. ${error.message}`);
       }
     }
 
