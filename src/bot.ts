@@ -175,7 +175,7 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
   
   // Show loading state first
   if (showLoadingMessage) {
-    const loadingContent = `╔╦╗╦╔╦╗╔╗ ╔═╗\n ║ ║║║║╠╩╗╠═╣\n ╩ ╩╩ ╩╚═╝╩ ╩\n\n⏳ Loading balances...`;
+    const loadingContent = `▀█▀ █ █▄█ █▄▄ ▄▀█\n █  █ █ █ █▄█ █▀█\n\n⏳ Loading balances...`;
     
     const loadingResponse = [
       `<pre>${loadingContent}</pre>`,
@@ -208,7 +208,7 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
     totalUSD += solDecimalBalance * solPriceUSD;
     
     // Build wallet info without address
-    let walletContent = `╔╦╗╦╔╦╗╔╗ ╔═╗\n ║ ║║║║╠╩╗╠═╣\n ╩ ╩╩ ╩╚═╝╩ ╩\n\nSOL: ${formattedSolBalance}`;
+    let walletContent = `▀█▀ █ █▄█ █▄▄ ▄▀█\n █  █ █ █ █▄█ █▀█\n\nSOL: ${formattedSolBalance}`;
 
     // Add token balances (calculate USD)
     if (tokenBalances.length > 0) {
@@ -671,7 +671,7 @@ bot.command("start", async (ctx: Context) => {
     const shortAddress = `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`;
 
     // Build welcome message with ASCII banner
-    const timbaAscii = `╔╦╗╦╔╦╗╔╗ ╔═╗\n ║ ║║║║╠╩╗╠═╣\n ╩ ╩╩ ╩╚═╝╩ ╩`;
+    const timbaAscii = `▀█▀ █ █▄█ █▄▄ ▄▀█\n █  █ █ █ █▄█ █▀█`;
     
     const response = [
       `<pre>${timbaAscii}</pre>`,
@@ -2192,7 +2192,7 @@ bot.callbackQuery("wallet_settings", async (ctx) => {
     const walletAddress = keypair.publicKey.toBase58();
     const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
 
-    const settingsContent = `╔╦╗╦╔╦╗╔╗ ╔═╗\n ║ ║║║║╠╩╗╠═╣\n ╩ ╩╩ ╩╚═╝╩ ╩\n\n⚙️ SETTINGS\n\nChoose an option:`;
+    const settingsContent = `▀█▀ █ █▄█ █▄▄ ▄▀█\n █  █ █ █ █▄█ █▀█\n\n⚙️ SETTINGS\n\nChoose an option:`;
     
     const response = [
       `<pre>${settingsContent}</pre>`,
@@ -3216,7 +3216,7 @@ bot.callbackQuery("back_main", async (ctx) => {
     const shortAddress = `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`;
 
     // Build main menu with same format as /start
-    const timbaAscii = `╔╦╗╦╔╦╗╔╗ ╔═╗\n ║ ║║║║╠╩╗╠═╣\n ╩ ╩╩ ╩╚═╝╩ ╩`;
+    const timbaAscii = `▀█▀ █ █▄█ █▄▄ ▄▀█\n █  █ █ █ █▄█ █▀█`;
     
     const response = [
       `<pre>${timbaAscii}</pre>`,
@@ -3652,16 +3652,14 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
     const totalUSD = solDecimalBalance * solPriceUSD;
 
     const response = [
-      `<pre>╔╦╗╦╔╦╗╔╗ ╔═╗   ╔╗ ╦ ╦╦ ╦
- ║ ║║║║╠╩╗╠═╣ ─ ╠╩╗║ ║╚╦╝
- ╩ ╩╩ ╩╚═╝╩ ╩   ╚═╝╚═╝ ╩ 
-       ╔╦╗╔═╗╦╔═╔═╗╔╗╔╔═╗
-        ║ ║ ║╠╩╗║╣ ║║║╚═╗
-        ╩ ╚═╝╩ ╩╚═╝╝╚╝╚═╝
+      `<pre>▀█▀ █ █▄█ █▄▄ ▄▀█   █▄▄ █ █ █▄█
+ █  █ █ █ █▄█ █▀█ ─ █▄█ █▄█  █ 
+           ▀█▀ █▀█ █▄▀ █▀▀ █▄█ █▀
+            █  █▄█ █ █ █▄▄ █ █ ▄█
 
 Supported Platforms:
 • Pump.fun tokens
-• DAOS.fun tokens
+• DAOS.fun tokens  
 • Any token on Jupiter DEX</pre>`,
       "",
       `SOL: ${formattedSolBalance} ($${totalUSD.toFixed(2)})`,
@@ -5719,9 +5717,8 @@ const handleBuyContractAddressInput = async (ctx: any, userState: any, contractA
     
     // Show token identification and go directly to buy options
     const response = [
-      `<pre>╔╦╗╦╔╦╗╔╗ ╔═╗
- ║ ║║║║╠╩╗╠═╣
- ╩ ╩╩ ╩╚═╝╩ ╩
+      `<pre>▀█▀ █ █▄█ █▄▄ ▄▀█
+ █  █ █ █ █▄█ █▀█
 
 TOKEN IDENTIFIED
 
@@ -6409,13 +6406,8 @@ const regenerateBuyQuoteWithSlippage = async (ctx: any, txId: string, newSlippag
       transactionCache.set(txId, buyData);
     }
     
-    const response = `<pre>
-████████╗██╗███╗   ███╗██████╗  █████╗ 
-╚══██╔══╝██║████╗ ████║██╔══██╗██╔══██╗
-   ██║   ██║██╔████╔██║██████╔╝███████║
-   ██║   ██║██║╚██╔╝██║██╔══██╗██╔══██║
-   ██║   ██║██║ ╚═╝ ██║██████╔╝██║  ██║
-   ╚═╝   ╚═╝╚═╝     ╚═╝╚═════╝ ╚═╝  ╚═╝
+    const response = `<pre>▀█▀ █ █▄█ █▄▄ ▄▀█
+ █  █ █ █ █▄█ █▀█
 
 BUY CONFIRMATION
 
