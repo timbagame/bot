@@ -1,8 +1,8 @@
 {
   "name": "timba-bot",
   "scripts": {
-    "start": "bun run src/bot.ts",
-    "dev": "bun run --watch src/bot.ts"
+    "start": "bun --env-file=.env run src/bot.ts",
+    "dev": "bun --env-file=.env run --watch src/bot.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.1",
