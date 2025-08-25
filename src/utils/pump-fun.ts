@@ -321,7 +321,9 @@ export class PumpFunClient {
         // Buying pump.fun token with SOL
         pumpMint = new PublicKey(outputMint);
         isBuy = true;
-        amountLamports = BigInt(Math.floor(parseFloat(amount)));
+        // Convert SOL amount to lamports (SOL has 9 decimals)
+        const solAmount = parseFloat(amount);
+        amountLamports = BigInt(Math.floor(solAmount * 1_000_000_000));
       } else if (!isSolInput && isSolOutput) {
         // Selling pump.fun token for SOL
         pumpMint = new PublicKey(inputMint);
