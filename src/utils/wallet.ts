@@ -6,8 +6,6 @@ import * as path from "path";
 import {
   WALLET_RATE_LIMIT_MS,
   BLOCKHASH_CACHE_DURATION,
-  SOL_BALANCE_PRECISION,
-  TOKEN_BALANCE_MAX_PRECISION,
   MAX_RETRIES,
   CONFIRMATION_TIMEOUT_MS
 } from "./constants";
@@ -262,7 +260,7 @@ export class WalletManager {
               
               if (fullMetadata.symbol && fullMetadata.symbol !== 'UNKNOWN') {
                 finalTicker = fullMetadata.symbol;
-                console.log(`✅ Updated ticker for ${mint}: ${approvedToken.token_ticker} → ${finalTicker}`);
+                console.log(`✅ Updated ticker for ${mint}: ${finalApprovedToken.token_ticker} → ${finalTicker}`);
               } else {
                 console.log(`⚠️ No valid symbol found in metadata for ${mint}`);
               }
@@ -321,7 +319,7 @@ export class WalletManager {
       if (metadataAccount && metadataAccount.data) {
         // Import deserializeMetadata dynamically
         const { deserializeMetadata } = await import('@metaplex-foundation/mpl-token-metadata');
-        const metadata = deserializeMetadata(metadataAccount);
+        const metadata = deserializeMetadata(metadataAccount as any);
         
         const symbol = metadata.symbol?.trim() || '';
         const name = metadata.name?.trim() || '';
@@ -347,7 +345,7 @@ export class WalletManager {
       const response = await fetch(`https://api.solana.fm/v0/tokens/${tokenMint}`);
       console.log(`📡 SolanaFM API response status: ${response.status}`);
       if (response.ok) {
-        const data = await response.json();
+        const data = await response.json() as any;
         console.log(`📋 SolanaFM API data:`, data);
         if (data && data.tokenInfo && data.tokenInfo.symbol) {
           const basicMetadata = await this.getTokenMetadata(tokenMint);
@@ -368,7 +366,7 @@ export class WalletManager {
       const response = await fetch(`https://tokens.jup.ag/token/${tokenMint}`);
       console.log(`📡 Jupiter API response status: ${response.status}`);
       if (response.ok) {
-        const data = await response.json();
+        const data = await response.json() as any;
         console.log(`📋 Jupiter API data:`, data);
         if (data && data.symbol) {
           const basicMetadata = await this.getTokenMetadata(tokenMint);
@@ -389,7 +387,7 @@ export class WalletManager {
       const response = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${tokenMint}`);
       console.log(`📡 DexScreener API response status: ${response.status}`);
       if (response.ok) {
-        const data = await response.json();
+        const data = await response.json() as any;
         console.log(`📋 DexScreener API data:`, data);
         if (data.pairs && data.pairs.length > 0) {
           const pair = data.pairs[0];

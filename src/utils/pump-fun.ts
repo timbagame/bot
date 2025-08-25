@@ -34,11 +34,9 @@ export interface PumpFunSwapRequest {
 export class PumpFunClient {
   private sdk: PumpSdk;
   private connection: Connection;
-  private wallet: WalletManager;
 
-  constructor(connection: Connection, wallet: WalletManager) {
+  constructor(connection: Connection, _wallet: WalletManager) {
     this.connection = connection;
-    this.wallet = wallet;
     this.sdk = new PumpSdk(connection);
   }
 
@@ -64,23 +62,27 @@ export class PumpFunClient {
         
         const metadataAccount = await this.connection.getAccountInfo(metadataPDA);
         if (metadataAccount) {
-          const [metadata] = deserializeMetadata(metadataAccount);
-          const symbol = metadata.symbol.replace(/\0/g, '').trim();
-          const name = metadata.name.replace(/\0/g, '').trim();
+          try {
+            const metadata = deserializeMetadata(metadataAccount as any);
+            const symbol = (metadata as any).symbol.replace(/\0/g, '').trim();
+            const name = (metadata as any).name.replace(/\0/g, '').trim();
           
-          if (symbol && symbol !== '' && symbol !== 'UNKNOWN') {
-            // Get decimals from mint
-            const mintInfo = await this.connection.getParsedAccountInfo(mint);
-            let decimals = 6; // Default for pump.fun
-            if (mintInfo.value && 'parsed' in mintInfo.value.data) {
-              decimals = mintInfo.value.data.parsed.info.decimals || 6;
+            if (symbol && symbol !== '' && symbol !== 'UNKNOWN') {
+              // Get decimals from mint
+              const mintInfo = await this.connection.getParsedAccountInfo(mint);
+              let decimals = 6; // Default for pump.fun
+              if (mintInfo.value && 'parsed' in mintInfo.value.data) {
+                decimals = mintInfo.value.data.parsed.info.decimals || 6;
+              }
+              
+              return {
+                symbol: symbol,
+                name: name || 'Pump.fun Token',
+                decimals
+              };
             }
-            
-            return {
-              symbol: symbol,
-              name: name || 'Pump.fun Token',
-              decimals
-            };
+          } catch (deserializeError) {
+            console.log('Error deserializing metadata:', deserializeError);
           }
         }
       } catch (metaplexError) {
@@ -94,7 +96,7 @@ export class PumpFunClient {
         console.log(`📡 Pump.fun API response status: ${response.status}`);
         
         if (response.ok) {
-          const data = await response.json();
+          const data = await response.json() as any;
           console.log('🎯 Pump.fun API data:', data);
           
           if (data && data.symbol) {
@@ -122,7 +124,7 @@ export class PumpFunClient {
         console.log(`📡 DexScreener API response status: ${response.status}`);
         
         if (response.ok) {
-          const data = await response.json();
+          const data = await response.json() as any;
           console.log('🎯 DexScreener API data:', JSON.stringify(data, null, 2));
           
           if (data && data.pairs && data.pairs.length > 0) {
@@ -208,8 +210,8 @@ export class PumpFunClient {
     inputMint: string,
     outputMint: string,
     amount: string,
-    inputDecimals: number,
-    outputDecimals: number,
+    _inputDecimals: number,
+    _outputDecimals: number,
     slippageBps: number = 500
   ): Promise<PumpFunQuote> {
     try {
@@ -406,7 +408,7 @@ export class PumpFunClient {
       
     } catch (error) {
       console.error('Error creating pump.fun swap transaction:', error);
-      throw new Error(`Failed to create pump.fun swap: ${error.message}`);
+      throw new Error(`Failed to create pump.fun swap: ${(error as Error).message}`);
     }
   }
 
@@ -458,28 +460,6 @@ export class PumpFunClient {
     }
   }
 
-  /**
-   * Calculate the required SOL amount that pump.fun actually needs
-   * Based on observed patterns: pump.fun typically needs ~0.01-0.02% more than the requested amount
-   */
-  private calculateRequiredSolForTokens(bondingCurve: any, expectedTokens: number, slippageBps: number, userRequestedAmount: number): number {
-    try {
-      // Simple approach: add a small buffer based on the typical difference we see
-      // The error showed we needed 10,001,330 instead of 10,000,000 (0.0133% more)
-      
-      // MUCH SIMPLER: The user requested a specific SOL amount
-      // But pump.fun needs slightly more due to bonding curve math
-      // Just add the typical difference we've observed
-      const buffer = Math.max(2000, Math.floor(userRequestedAmount * 0.0002)); // 0.02% buffer
-      
-      return userRequestedAmount + buffer;
-    } catch (error) {
-      console.error('Error calculating required SOL amount:', error);
-      // Fallback: just add 2000 lamports (0.000002 SOL) buffer
-      const originalSol = Math.floor(expectedTokens / 1000000);
-      return originalSol + 2000;
-    }
-  }
 
   /**
    * Format quote for user display

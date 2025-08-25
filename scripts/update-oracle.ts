@@ -42,8 +42,8 @@ const updateOracle = async () => {
       console.log("\nCurrent Oracle Configuration:");
       console.log(`- Operator: ${currentOracle.operator.toString()}`);
       console.log(`- Fee Percentage: ${currentOracle.feePercentage}%`);
-      console.log(`- Min Timeout: ${currentOracle.minTimeout} seconds (${Math.round(currentOracle.minTimeout / 60)} minutes)`);
-      console.log(`- Max Timeout: ${currentOracle.maxTimeout} seconds (${Math.round(currentOracle.maxTimeout / 60)} minutes)`);
+      console.log(`- Min Timeout: ${currentOracle.minTimeout} seconds (${Math.round(currentOracle.minTimeout.toNumber() / 60)} minutes)`);
+      console.log(`- Max Timeout: ${currentOracle.maxTimeout} seconds (${Math.round(currentOracle.maxTimeout.toNumber() / 60)} minutes)`);
       console.log(`- Max Tickets: ${currentOracle.maxTickets}`);
       console.log(`- Oracle Buffer Time: ${currentOracle.oracleBufferTime} seconds`);
 
@@ -73,8 +73,8 @@ const updateOracle = async () => {
 
     console.log("\nNew Oracle Configuration:");
     console.log(`- Fee Percentage: ${newConfig.feePercentage}%`);
-    console.log(`- Min Timeout: ${newConfig.minTimeout} seconds (${Math.round(newConfig.minTimeout / 60)} minutes)`);
-    console.log(`- Max Timeout: ${newConfig.maxTimeout} seconds (${Math.round(newConfig.maxTimeout / 60)} minutes)`);
+    console.log(`- Min Timeout: ${newConfig.minTimeout} seconds (${Math.round(newConfig.minTimeout.toNumber() / 60)} minutes)`);
+    console.log(`- Max Timeout: ${newConfig.maxTimeout} seconds (${Math.round(newConfig.maxTimeout.toNumber() / 60)} minutes)`);
     console.log(`- Max Tickets: ${newConfig.maxTickets}`);
     console.log(`- Oracle Buffer Time: ${newConfig.oracleBufferTime} seconds`);
 
@@ -99,8 +99,8 @@ const updateOracle = async () => {
     console.log("\nUpdated Oracle Configuration:");
     console.log(`- Operator: ${updatedOracle.operator.toString()}`);
     console.log(`- Fee Percentage: ${updatedOracle.feePercentage}%`);
-    console.log(`- Min Timeout: ${updatedOracle.minTimeout} seconds (${Math.round(updatedOracle.minTimeout / 60)} minutes)`);
-    console.log(`- Max Timeout: ${updatedOracle.maxTimeout} seconds (${Math.round(updatedOracle.maxTimeout / 60)} minutes)`);
+    console.log(`- Min Timeout: ${updatedOracle.minTimeout} seconds (${Math.round(updatedOracle.minTimeout.toNumber() / 60)} minutes)`);
+    console.log(`- Max Timeout: ${updatedOracle.maxTimeout} seconds (${Math.round(updatedOracle.maxTimeout.toNumber() / 60)} minutes)`);
     console.log(`- Max Tickets: ${updatedOracle.maxTickets}`);
     console.log(`- Oracle Buffer Time: ${updatedOracle.oracleBufferTime} seconds`);
 

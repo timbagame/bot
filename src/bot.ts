@@ -59,6 +59,98 @@ const isPrivateChat = (ctx: Context): boolean => {
   return ctx.chat?.type === "private";
 };
 
+/**
+ * Track chats that have had their first interaction
+ */
+const initiatedChats = new Set<number>();
+
+/**
+ * Show bot info screen for first message in chat
+ */
+const showBotInfoScreen = async (ctx: Context) => {
+  const botInfoScreen = [
+    "🤖 <b>TIMBA BOT</b>",
+    "",
+    "<b>Your Gateway to Solana</b>",
+    "",
+    "🚀 <b>What is TIMBA?</b>",
+    "A powerful Solana trading and gaming bot that gives you:",
+    "",
+    "💳 <b>Personal Wallet</b>",
+    "• Secure, auto-generated Solana wallet",
+    "• Send, receive, and manage tokens",
+    "• View transaction history",
+    "",
+    "🔄 <b>Token Trading</b>",
+    "• Swap tokens instantly via Jupiter",
+    "• Support for all major Solana tokens",
+    "• Real-time price quotes",
+    "",
+    "🎮 <b>Gaming Platform</b>",
+    "• Coinflip games with friends",
+    "• Token giveaways and contests",
+    "• Fair and transparent results",
+    "",
+    "⚡ <b>Fast & Secure</b>",
+    "• Built on Solana blockchain",
+    "• Your keys, your crypto",
+    "• Lightning-fast transactions",
+    "",
+    "Ready to start trading and gaming on Solana?"
+  ];
+
+  await ctx.reply(botInfoScreen.join("\n"), {
+    parse_mode: "HTML",
+    reply_markup: new InlineKeyboard()
+      .text("🚀 GET STARTED", "start_bot").row()
+  });
+};
+
+// Auto-show bot info when user starts private chat (my_chat_member event)
+bot.on("my_chat_member", async (ctx) => {
+  try {
+    const chatMember = ctx.myChatMember;
+    const chat = ctx.chat;
+    
+    // Only for private chats when bot is added/unblocked
+    if (chat?.type === "private" && 
+        chatMember?.old_chat_member?.status === "kicked" && 
+        chatMember?.new_chat_member?.status === "member") {
+      
+      console.log(`🔄 User ${ctx.from?.username || ctx.from?.first_name} started private chat with bot`);
+      
+      // Show bot info screen automatically
+      await showBotInfoScreen(ctx);
+      return;
+    }
+  } catch (error) {
+    console.error("Error in my_chat_member handler:", error);
+  }
+});
+
+// Fallback: Auto-show bot info screen for first message in private chat
+bot.use(async (ctx, next) => {
+  // Only for private chats and text messages
+  if (ctx.chat?.type === "private" && ctx.message?.text && ctx.chat?.id) {
+    const chatId = ctx.chat.id;
+    
+    // If this is the first interaction in this chat and not a command
+    if (!initiatedChats.has(chatId) && !ctx.message.text.startsWith('/')) {
+      initiatedChats.add(chatId);
+      
+      // Show bot info screen instead of processing the message
+      await showBotInfoScreen(ctx);
+      return; // Don't continue to next handlers
+    }
+    
+    // Mark chat as initiated if it's not already
+    initiatedChats.add(chatId);
+  }
+  
+  // Continue to other handlers
+  await next();
+});
+
 // These will be initialized in setupAnchor
 export let gameManager: GameManager;
 export let program: anchor.Program<Coinflip>;
@@ -168,7 +260,7 @@ const getTokenPriceUSD = async (tokenMint: string): Promise<number> => {
 };
 
 const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   const keypair = wallet.getKeyPair(telegramId);
   const walletAddress = keypair.publicKey.toBase58();
   const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
@@ -697,13 +789,21 @@ const buildTokenBalances = async (
 };
 
 bot.command("start", async (ctx: Context) => {
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   
   try {
+    // Check if this is first interaction in private chat
+    if (isPrivateChat(ctx) && ctx.chat?.id && !initiatedChats.has(ctx.chat.id)) {
+      // First time user - show bot info screen instead of main menu
+      console.log(`🆕 First time user: ${ctx.from?.username || ctx.from?.first_name} started with /start`);
+      await showBotInfoScreen(ctx);
+      return;
+    }
+
     const keypair = wallet.getKeyPair(telegramId);
     const username = ctx.from?.username ? `@${ctx.from.username}` : ctx.from?.first_name || "User";
     const walletAddress = keypair.publicKey.toBase58();
-    const shortAddress = `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`;
+    const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
 
     // Build welcome message
     const welcomeMessage = [
@@ -714,6 +814,11 @@ bot.command("start", async (ctx: Context) => {
 
     // Send response with menu for private chats
     if (isPrivateChat(ctx)) {
+      // Mark this chat as initiated
+      if (ctx.chat?.id) {
+        initiatedChats.add(ctx.chat.id);
+      }
+      
       // Use same animated banner as wallet
       const welcomeAnimationFileId = "CgACAgEAAxkBAAIEF2irzq9DBOMIkGfEzQQPe1huXlJVAAJdBgACaPJgRai8H1bQmnXpNgQ";
       
@@ -742,7 +847,7 @@ bot.command("start", async (ctx: Context) => {
 });
 
 bot.command("balance", async (ctx: Context) => {
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   
   // Use dynamic wallet UI for private chats
   if (isPrivateChat(ctx)) {
@@ -755,7 +860,7 @@ bot.command("balance", async (ctx: Context) => {
       const walletCtx = {
         ...ctx,
         editMessageText: async (text: string, options: any) => {
-          return await ctx.api.editMessageText(ctx.chat.id, message.message_id, text, options);
+          return await ctx.api.editMessageText(ctx.chat?.id!, message.message_id, text, options);
         }
       };
       
@@ -941,7 +1046,7 @@ bot.command(["giveaway", "ga"], async (ctx) => {
 // ================================
 
 bot.command(["withdraw", "wh"], async (ctx: Context) => {
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   const args = ctx.message?.text?.split(" ");
 
   if (!args || args.length < 3) {
@@ -1011,7 +1116,7 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
 });
 
 bot.command("tip", async (ctx: Context) => {
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   const repliedMessage = ctx.message?.reply_to_message;
   const args = ctx.message?.text?.split(" ");
 
@@ -1078,7 +1183,7 @@ bot.command("tip", async (ctx: Context) => {
 });
 
 bot.command("wrap", async (ctx: Context) => {
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   const args = ctx.message?.text?.split(" ");
 
   if (!args) return;
@@ -1131,8 +1236,8 @@ bot.command("wrap", async (ctx: Context) => {
 // SWAP COMMAND
 // ================================
 
-bot.command("swap", sequentialize((ctx) => [ctx.from?.id, "swap"]), async (ctx: Context) => {
-  const telegramId = BigInt(ctx.from?.id || 0);
+bot.command("swap", sequentialize((ctx) => [String(ctx.from?.id || 0), "swap"]), async (ctx: Context) => {
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   const args = ctx.message?.text?.split(" ").slice(1);
 
   if (!args || args.length < 3) {
@@ -1143,7 +1248,7 @@ bot.command("swap", sequentialize((ctx) => [ctx.from?.id, "swap"]), async (ctx: 
   }
 
   const [amountStr, fromToken, toToken, slippageStr] = args;
-  const amount = parseFloat(amountStr);
+  const amount = parseFloat(amountStr || "0");
   const slippagePercent = slippageStr ? parseFloat(slippageStr) : 2.0; // Default 2% for better success rate
 
   if (amount <= 0) {
@@ -1152,6 +1257,10 @@ bot.command("swap", sequentialize((ctx) => [ctx.from?.id, "swap"]), async (ctx: 
 
   if (slippagePercent < 0.1 || slippagePercent > 5.0) {
     return replyUsageError(ctx, "Slippage must be between 0.1% and 5%");
+  }
+
+  if (!fromToken || !toToken) {
+    return replyUsageError(ctx, "Please specify both FROM and TO tokens");
   }
 
   // Validate different tokens
@@ -1338,7 +1447,7 @@ const transactionCache = new Map();
 // Swap confirmation callbacks
 bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
   const [, action, userId] = ctx.match!;
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   
   if (telegramId.toString() !== userId) {
     return safeAnswerCallbackQuery(ctx, "❌ This swap is not for you");
@@ -1417,7 +1526,7 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
                 console.log(`🔍 Got pump.fun metadata for input token: ${inputTokenTicker}`);
               }
             } catch (metadataError) {
-              console.log(`⚠️ Could not fetch pump.fun metadata for input token ${inputTokenMint}:`, metadataError.message);
+              console.log(`⚠️ Could not fetch pump.fun metadata for input token ${inputTokenMint}:`, (metadataError as Error).message);
             }
           }
           
@@ -1453,7 +1562,7 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
                 console.log(`🔍 Got pump.fun metadata for output token: ${outputTokenTicker}`);
               }
             } catch (metadataError) {
-              console.log(`⚠️ Could not fetch pump.fun metadata for output token ${outputTokenMint}:`, metadataError.message);
+              console.log(`⚠️ Could not fetch pump.fun metadata for output token ${outputTokenMint}:`, (metadataError as Error).message);
             }
           }
           
@@ -1499,8 +1608,8 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
     console.error("Swap execution error:", error);
     
     // Handle timeout specially - transaction might have succeeded
-    if (error.message?.includes('Transaction confirmation timeout')) {
-      const signature = error.message.match(/signature ([A-Za-z0-9]{44,})/)?.[1];
+    if ((error as Error).message?.includes('Transaction confirmation timeout')) {
+      const signature = (error as Error).message.match(/signature ([A-Za-z0-9]{44,})/)?.[1];
       
       const timeoutMessage = [
         "⏳ **Swap Transaction Timeout**",
@@ -1643,7 +1752,7 @@ bot.command("default", async (ctx: Context) => {
 
 // Admin command to debug token metadata
 bot.command("debugtoken", async (ctx) => {
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   
   if (!ctx.chat?.type || ctx.chat.type !== 'private') {
     await ctx.reply("❌ This command only works in private chats");
@@ -1653,7 +1762,7 @@ bot.command("debugtoken", async (ctx) => {
   // Simple admin check - you can replace this with your admin system
   const keypair = wallet.getKeyPair(telegramId);
   const walletAddress = keypair.publicKey.toBase58();
-  const isUserAdmin = walletAddress === process.env.ADMIN_WALLET || telegramId.toString() === "73785873"; // Your telegram ID
+  const isUserAdmin = walletAddress === process.env['ADMIN_WALLET'] || telegramId.toString() === "73785873"; // Your telegram ID
   
   if (!isUserAdmin) {
     await ctx.reply("❌ You don't have permission to use this command");
@@ -1667,6 +1776,10 @@ bot.command("debugtoken", async (ctx) => {
   }
   
   const mintAddress = args[0];
+  if (!mintAddress) {
+    await ctx.reply("❌ Please provide a mint address");
+    return;
+  }
   
   await ctx.reply("🔍 Investigating token metadata...");
   
@@ -1739,15 +1852,15 @@ bot.command("debugtoken", async (ctx) => {
     
     // Determine best symbol from all sources
     const bestSymbol = fullMetadata.symbol || 
-                      (solanaFmData?.tokenInfo?.symbol) ||
-                      (jupiterData?.symbol) ||
-                      (dexData?.pairs?.[0]?.baseToken?.symbol) ||
+                      ((solanaFmData as any)?.tokenInfo?.symbol) ||
+                      ((jupiterData as any)?.symbol) ||
+                      ((dexData as any)?.pairs?.[0]?.baseToken?.symbol) ||
                       null;
     
     const bestName = fullMetadata.name || 
-                    (solanaFmData?.tokenInfo?.name) ||
-                    (jupiterData?.name) ||
-                    (dexData?.pairs?.[0]?.baseToken?.name) ||
+                    ((solanaFmData as any)?.tokenInfo?.name) ||
+                    ((jupiterData as any)?.name) ||
+                    ((dexData as any)?.pairs?.[0]?.baseToken?.name) ||
                     null;
 
     // Build comprehensive report
@@ -1758,24 +1871,24 @@ bot.command("debugtoken", async (ctx) => {
       "",
       "**📋 Basic Metadata:**",
       `• Decimals: ${basicMetadata.decimals}`,
-      `• Symbol: ${basicMetadata.symbol || 'N/A'}`,
-      `• Name: ${basicMetadata.name || 'N/A'}`,
+      `• Symbol: ${(basicMetadata as any).symbol || 'N/A'}`,
+      `• Name: ${(basicMetadata as any).name || 'N/A'}`,
       "",
       "**🔍 Full Metadata (Metaplex):**",
       `• Symbol: ${fullMetadata.symbol || 'N/A'}`,
       `• Name: ${fullMetadata.name || 'N/A'}`,
       "",
       "**🌐 SolanaFM API:**",
-      `• Symbol: ${solanaFmData?.tokenInfo?.symbol || 'N/A'}`,
-      `• Name: ${solanaFmData?.tokenInfo?.name || 'N/A'}`,
+      `• Symbol: ${((solanaFmData as any)?.tokenInfo?.symbol) || 'N/A'}`,
+      `• Name: ${((solanaFmData as any)?.tokenInfo?.name) || 'N/A'}`,
       "",
       "**🪐 Jupiter API:**", 
-      `• Symbol: ${jupiterData?.symbol || 'N/A'}`,
-      `• Name: ${jupiterData?.name || 'N/A'}`,
+      `• Symbol: ${((jupiterData as any)?.symbol) || 'N/A'}`,
+      `• Name: ${((jupiterData as any)?.name) || 'N/A'}`,
       "",
       "**📊 DexScreener API:**",
-      `• Symbol: ${dexData?.pairs?.[0]?.baseToken?.symbol || 'N/A'}`,
-      `• Name: ${dexData?.pairs?.[0]?.baseToken?.name || 'N/A'}`,
+      `• Symbol: ${((dexData as any)?.pairs?.[0]?.baseToken?.symbol) || 'N/A'}`,
+      `• Name: ${((dexData as any)?.pairs?.[0]?.baseToken?.name) || 'N/A'}`,
       "",
       "**🚀 Pump.fun Status:**",
       `• Is Pump.fun: ${pumpInfo.isPumpFun ? 'Yes' : 'No'}`,
@@ -1799,13 +1912,13 @@ bot.command("debugtoken", async (ctx) => {
     
   } catch (error) {
     console.error(`❌ Error in token debug:`, error);
-    await ctx.reply(`❌ Error investigating token: ${error.message}`);
+    await ctx.reply(`❌ Error investigating token: ${(error as Error).message}`);
   }
 });
 
 // Admin command to manually add tokens
 bot.command("addtoken", async (ctx) => {
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   
   if (!ctx.chat?.type || ctx.chat.type !== 'private') {
     await ctx.reply("❌ This command only works in private chats");
@@ -1815,7 +1928,7 @@ bot.command("addtoken", async (ctx) => {
   // Simple admin check - you can replace this with your admin system  
   const keypair = wallet.getKeyPair(telegramId);
   const walletAddress = keypair.publicKey.toBase58();
-  const isUserAdmin = walletAddress === process.env.ADMIN_WALLET || telegramId.toString() === "73785873"; // Your telegram ID
+  const isUserAdmin = walletAddress === process.env['ADMIN_WALLET'] || telegramId.toString() === "73785873"; // Your telegram ID
   
   if (!isUserAdmin) {
     await ctx.reply("❌ You don't have permission to use this command");
@@ -1829,6 +1942,10 @@ bot.command("addtoken", async (ctx) => {
   }
   
   const [mintAddress, ticker] = args;
+  if (!mintAddress || !ticker) {
+    await ctx.reply("❌ Please provide both mint address and ticker");
+    return;
+  }
   
   try {
     console.log(`🔄 Admin adding token: ${ticker} (${mintAddress})`);
@@ -1845,9 +1962,10 @@ bot.command("addtoken", async (ctx) => {
     }
   } catch (error) {
     console.error(`❌ Error in admin addtoken:`, error);
-    await ctx.reply(`❌ Error adding token: ${error.message}`);
+    await ctx.reply(`❌ Error adding token: ${(error as Error).message}`);
   }
 });
+
 
 // Command to refresh wallet cache
 bot.command("refresh", async (ctx) => {
@@ -1855,7 +1973,7 @@ bot.command("refresh", async (ctx) => {
     return; // Only works in private chats
   }
   
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   
   try {
     // Clear cache and reload wallet
@@ -1937,7 +2055,7 @@ bot.command("help", async (ctx: Context) => {
 });
 
 bot.command("debug", async (ctx: Context) => {
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   const replyToMessage = ctx.message?.reply_to_message;
 
   try {
@@ -2053,14 +2171,14 @@ bot.command("checktx", async (ctx: Context) => {
     });
   } catch (error: any) {
     console.error("Error checking transaction:", error);
-    await ctx.reply(`Error checking transaction: ${error.message}`, {
+    await ctx.reply(`Error checking transaction: ${(error as Error).message}`, {
       reply_to_message_id: ctx.message?.message_id,
     });
   }
 });
 
 bot.command("active", async (ctx: Context) => {
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
 
   try {
     const { activeGames } = await gameManager.getUserGames(ctx, telegramId);
@@ -2077,7 +2195,7 @@ bot.command("active", async (ctx: Context) => {
 });
 
 bot.command("games", async (ctx: Context) => {
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
 
   try {
     const { recentGames } = await gameManager.getUserGames(ctx, telegramId);
@@ -2106,7 +2224,7 @@ bot.command(["privatekey", "pk"], async (ctx: Context) => {
     );
   }
 
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
 
   try {
     const playerData = await getPlayerData(telegramId);
@@ -2152,10 +2270,10 @@ bot.command("oracle", async (ctx: Context) => {
       `Operator: <code>${oracleAccount.operator.toString()}</code>`,
       `Fee Percentage: ${oracleAccount.feePercentage}%`,
       `Min Timeout: ${oracleAccount.minTimeout} seconds (${
-        oracleAccount.minTimeout / 60
+        oracleAccount.minTimeout.toNumber() / 60
       } minutes)`,
       `Max Timeout: ${oracleAccount.maxTimeout} seconds (${
-        oracleAccount.maxTimeout / 60
+        oracleAccount.maxTimeout.toNumber() / 60
       } minutes)`,
       `Max Tickets: ${oracleAccount.maxTickets}`,
       `Oracle Buffer Time: ${oracleAccount.oracleBufferTime} seconds`,
@@ -2241,7 +2359,7 @@ const handleRefreshGameCallback = async (
 
     await safeAnswerCallbackQuery(ctx, "Game status refreshed!");
   } catch (error: any) {
-    if (error.message?.includes("Account does not exist")) {
+    if ((error as Error).message?.includes("Account does not exist")) {
       await safeAnswerCallbackQuery(ctx, "This game is no longer active!");
     } else {
       console.error(`Error refreshing game ${gameAddress}:`, error);
@@ -2451,7 +2569,7 @@ const handleJoinGame = async (
     );
   } catch (error: any) {
     // Handle specific case where account doesn't exist (game was completed/cancelled)
-    if (error.message?.includes("Account does not exist")) {
+    if ((error as Error).message?.includes("Account does not exist")) {
       await ctx.answerCallbackQuery("This game is no longer active!");
     } else {
       // Re-throw the error to be handled by the outer catch block
@@ -2496,11 +2614,6 @@ bot.callbackQuery("wallet_refresh", async (ctx) => {
 
 bot.callbackQuery("wallet_settings", async (ctx) => {
   try {
-    const telegramId = BigInt(ctx.from?.id || 0);
-    const keypair = wallet.getKeyPair(telegramId);
-    const walletAddress = keypair.publicKey.toBase58();
-    const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
-
     const settingsContent = `T I M B A\n\n⚙️ SETTINGS\n\nChoose an option:`;
     
     const response = [
@@ -2542,7 +2655,7 @@ bot.callbackQuery("wallet_settings", async (ctx) => {
 
 bot.callbackQuery("cmd_withdraw", async (ctx) => {
   try {
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
     const walletAddress = keypair.publicKey.toBase58();
     const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
@@ -2604,7 +2717,7 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
       return;
     }
     
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
     const privateKeyArray = Array.from(keypair.secretKey);
     const privateKeyString = `[${privateKeyArray.join(',')}]`;
@@ -2636,7 +2749,7 @@ bot.callbackQuery("cmd_history", async (ctx) => {
   try {
     await ctx.answerCallbackQuery("🔍 Loading transaction history...");
     
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     
     // Get user's wallet address
     const userKeypair = wallet.getKeyPair(telegramId);
@@ -2698,7 +2811,7 @@ bot.callbackQuery("cmd_history", async (ctx) => {
     }
     
     // Format transactions for display (simple version to avoid rate limits)
-    const formattedTxs = transactions.map((tx: any, index: number) => {
+    const formattedTxs = transactions.map((tx: any) => {
       const date = tx.blockTime 
         ? new Date(tx.blockTime * 1000).toLocaleDateString('en-US', {
             month: 'short',
@@ -2714,9 +2827,6 @@ bot.callbackQuery("cmd_history", async (ctx) => {
       // Simple generic transaction display
       const typeIcon = '📊';
       const description = 'Transaction';
-      
-      // Show confirmation status
-      const confirmationText = tx.confirmationStatus === 'finalized' ? 'Confirmed' : 'Processing';
       
       return `${statusIcon}${typeIcon} ${description} • <code>${date}</code>\n🔗 <a href="https://solscan.io/tx/${signature}">View Details</a>`;
     });
@@ -2740,7 +2850,7 @@ bot.callbackQuery("cmd_history", async (ctx) => {
     try {
       await ctx.editMessageText(historyMessage.join("\n"), {
         parse_mode: "HTML",
-        disable_web_page_preview: true,
+        link_preview_options: { is_disabled: true },
         reply_markup: new InlineKeyboard()
           .text("🔄 REFRESH", "cmd_history")
           .webApp("🔍 FULL HISTORY", `https://solscan.io/account/${walletAddress}#transactions`).row()
@@ -2754,7 +2864,7 @@ bot.callbackQuery("cmd_history", async (ctx) => {
       
       await ctx.reply(historyMessage.join("\n"), {
         parse_mode: "HTML",
-        disable_web_page_preview: true,
+        link_preview_options: { is_disabled: true },
         reply_markup: new InlineKeyboard()
           .text("🔄 REFRESH", "cmd_history")
           .webApp("🔍 FULL HISTORY", `https://solscan.io/account/${walletAddress}#transactions`).row()
@@ -2770,7 +2880,7 @@ bot.callbackQuery("cmd_history", async (ctx) => {
       "",
       "❌ Unable to load transaction history.",
       "",
-      `<b>Error:</b> ${error.message || 'Unknown error'}`,
+      `<b>Error:</b> ${(error as Error).message || 'Unknown error'}`,
       "",
       "Please try again or check your internet connection."
     ].join("\n");
@@ -2803,7 +2913,7 @@ bot.callbackQuery("cmd_history", async (ctx) => {
 
 bot.callbackQuery("cmd_wrap", async (ctx) => {
   try {
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const solBalance = await wallet.getBalance(telegramId);
     const formattedSolBalance = wallet.formatSolBalance(solBalance);
     
@@ -2951,6 +3061,9 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
     
     // Execute actual transaction
     try {
+      if (!transaction.address) {
+        throw new Error("Invalid recipient address");
+      }
       const toPublicKey = new PublicKey(transaction.address);
       let txSignature: string;
       let actualAmount = transaction.amount;
@@ -2959,14 +3072,14 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
         // Handle SOL transfer
         if (transaction.amount === 'max') {
           // Calculate max SOL (leave some for transaction fees)
-          const balance = await wallet.getSolBalance(BigInt(transaction.userId));
+          const balance = await wallet.getBalance(BigInt(transaction.userId));
           actualAmount = (balance - 0.01).toString(); // Leave 0.01 SOL for fees
         }
         
         txSignature = await wallet.transferSol(
           BigInt(transaction.userId),
           toPublicKey,
-          parseFloat(actualAmount)
+          parseFloat(actualAmount || '0')
         );
       } else {
         // Handle token transfer
@@ -2976,6 +3089,10 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
           'USDC': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
         };
         
+        if (!transaction.token) {
+          throw new Error('Token not specified in transaction');
+        }
+        
         const tokenMint = tokenMints[transaction.token];
         if (!tokenMint) {
           throw new Error(`Unknown token: ${transaction.token}`);
@@ -2983,18 +3100,17 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
         
         if (transaction.amount === 'max') {
           // Get max token balance
-          const balances = await wallet.getTokenBalances(BigInt(transaction.userId));
-          const tokenBalance = balances.find(b => b.ticker === transaction.token);
+          const tokenBalance = await wallet.getTokenBalance(BigInt(transaction.userId), tokenMint);
           if (!tokenBalance) {
             throw new Error(`No ${transaction.token} balance found`);
           }
-          actualAmount = tokenBalance.balance.toString();
+          actualAmount = tokenBalance.toString();
         }
         
         txSignature = await wallet.transferToken(
           BigInt(transaction.userId),
           toPublicKey,
-          parseFloat(actualAmount),
+          parseFloat(actualAmount || '0'),
           tokenMint
         );
       }
@@ -3010,7 +3126,7 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
         `✅ <b>TRANSACTION COMPLETED</b>\n\nSent ${actualAmount} ${transaction.token}\nTo: <code>${transaction.address}</code>\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`,
         {
           parse_mode: "HTML",
-          disable_web_page_preview: true,
+          link_preview_options: { is_disabled: true },
           reply_markup: new InlineKeyboard()
             .text("← BACK TO WALLET", "main_wallet").row()
         }
@@ -3019,7 +3135,7 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
     } catch (txError) {
       console.error("Transaction failed:", txError);
       await ctx.editMessageText(
-        `❌ <b>TRANSACTION FAILED</b>\n\n${txError.message}\n\nPlease try again.`,
+        `❌ <b>TRANSACTION FAILED</b>\n\n${(txError as Error).message}\n\nPlease try again.`,
         {
           parse_mode: "HTML", 
           reply_markup: new InlineKeyboard()
@@ -3126,8 +3242,8 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
           userKeypair: keypair,
           inputDecimals: quote.inputDecimals || 9,
           outputDecimals: quote.outputDecimals || 9,
-          inputTicker: transaction.fromToken.toUpperCase(),
-          outputTicker: transaction.toToken.toUpperCase()
+          inputTicker: transaction.fromToken?.toUpperCase() || 'UNKNOWN',
+          outputTicker: transaction.toToken?.toUpperCase() || 'UNKNOWN'
         }, quote);
       } else {
         // Use instruction-based approach for other providers
@@ -3139,8 +3255,8 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
           userKeypair: keypair,
           inputDecimals: quote.inputDecimals || 9,
           outputDecimals: quote.outputDecimals || 9,
-          inputTicker: transaction.fromToken.toUpperCase(),
-          outputTicker: transaction.toToken.toUpperCase()
+          inputTicker: transaction.fromToken?.toUpperCase() || 'UNKNOWN',
+          outputTicker: transaction.toToken?.toUpperCase() || 'UNKNOWN'
         }, quote);
         
         txSignature = await wallet.sendTransaction(instructions, [keypair]);
@@ -3157,7 +3273,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
         `✅ <b>SWAP COMPLETED</b>\n\nSwapped ${transaction.amount} ${transaction.fromToken}\nReceived ~${quote.outputAmount} ${transaction.toToken}\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`,
         {
           parse_mode: "HTML",
-          disable_web_page_preview: true,
+          link_preview_options: { is_disabled: true },
           reply_markup: new InlineKeyboard()
             .text("← BACK TO WALLET", "main_wallet").row()
         }
@@ -3166,7 +3282,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
     } catch (swapError) {
       console.error("Swap transaction failed:", swapError);
       await ctx.editMessageText(
-        `❌ <b>SWAP FAILED</b>\n\n${swapError.message}\n\nPlease try again.`,
+        `❌ <b>SWAP FAILED</b>\n\n${(swapError as Error).message}\n\nPlease try again.`,
         {
           parse_mode: "HTML", 
           reply_markup: new InlineKeyboard()
@@ -3184,7 +3300,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
 
 bot.callbackQuery("cmd_swap", async (ctx) => {
   try {
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
     const shortAddress = `${keypair.publicKey.toBase58().slice(0, 6)}...${keypair.publicKey.toBase58().slice(-6)}`;
     
@@ -3416,7 +3532,7 @@ bot.on("callback_query", async (ctx, next) => {
   console.log("🔔 Token selected for send:", token);
   
   try {
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
     const shortAddress = `${keypair.publicKey.toBase58().slice(0, 6)}...${keypair.publicKey.toBase58().slice(-6)}`;
     
@@ -3425,16 +3541,13 @@ bot.on("callback_query", async (ctx, next) => {
     
     // Get balance for selected token
     let balance = "0";
-    let decimals = 9;
     
     if (token === "SOL") {
       balance = wallet.formatSolBalance(solBalance);
-      decimals = 9;
     } else {
       const selectedToken = tokenBalances.find(t => t.ticker === token);
       if (selectedToken) {
         balance = wallet.formatTokenBalance(selectedToken.balance, selectedToken.decimals);
-        decimals = selectedToken.decimals;
       }
     }
     
@@ -3579,7 +3692,7 @@ bot.on("callback_query", async (ctx, next) => {
 
 bot.callbackQuery("main_settings", async (ctx) => {
   try {
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
     const walletAddress = keypair.publicKey.toBase58();
     const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
@@ -3636,7 +3749,7 @@ System Overview:
 // INFO Statistics handler
 bot.callbackQuery("info_stats", async (ctx) => {
   try {
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
     const formattedSolBalance = wallet.formatSolBalance(solBalance);
     
@@ -3690,13 +3803,52 @@ Personal Wallet Stats:
   }
 });
 
-bot.callbackQuery("back_main", async (ctx) => {
+// Handle "GET STARTED" button from bot info screen - triggers /start
+bot.callbackQuery("start_bot", async (ctx) => {
   try {
-    const telegramId = BigInt(ctx.from?.id || 0);
+    // Delete the info message
+    try {
+      await ctx.deleteMessage();
+    } catch {}
+    
+    // Manually trigger start command logic
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
     const username = ctx.from?.username ? `@${ctx.from.username}` : ctx.from?.first_name || "User";
     const walletAddress = keypair.publicKey.toBase58();
-    const shortAddress = `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`;
+
+    const welcomeMessage = [
+      `<b>WELCOME ${username.toUpperCase()}</b>`,
+      "",
+      `<code>${walletAddress}</code>`,
+    ];
+
+    // Mark chat as initiated
+    if (ctx.chat?.id) {
+      initiatedChats.add(ctx.chat.id);
+    }
+
+    const welcomeAnimationFileId = "CgACAgEAAxkBAAIEF2irzq9DBOMIkGfEzQQPe1huXlJVAAJdBgACaPJgRai8H1bQmnXpNgQ";
+    
+    await ctx.replyWithAnimation(welcomeAnimationFileId, {
+      caption: welcomeMessage.join("\n"),
+      parse_mode: "HTML",
+      reply_markup: createMainMenuKeyboard()
+    });
+
+    await ctx.answerCallbackQuery("🚀 Welcome to TIMBA!");
+  } catch (error) {
+    console.error("Error in start_bot:", error);
+    await ctx.answerCallbackQuery("❌ Error loading main menu");
+  }
+});
+
+bot.callbackQuery("back_main", async (ctx) => {
+  try {
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+    const keypair = wallet.getKeyPair(telegramId);
+    const username = ctx.from?.username ? `@${ctx.from.username}` : ctx.from?.first_name || "User";
+    const walletAddress = keypair.publicKey.toBase58();
 
     // Build main menu with same format as /start
     const welcomeMessage = [
@@ -3876,8 +4028,8 @@ bot.callbackQuery("cmd_oracle", async (ctx) => {
 
       await ctx.editMessageText(
         "📊 <b>ORACLE STATUS</b>\n\n" +
-        `🔑 <b>Authority:</b> <code>${oracleAccount.authority.toBase58()}</code>\n` +
-        `🎲 <b>Randomness Source:</b> <code>${oracleAccount.randomnessAccount.toBase58()}</code>\n` +
+        `🔑 <b>Operator:</b> <code>${oracleAccount.operator.toBase58()}</code>\n` +
+        `🎰 <b>Fee Percentage:</b> ${oracleAccount.feePercentage}%\n` +
         `⚡ <b>Status:</b> Online and operational\n\n` +
         "✅ Oracle is properly configured for game randomness",
         {
@@ -3988,10 +4140,10 @@ bot.callbackQuery("scan_confirm", async (ctx) => {
 bot.callbackQuery("admin_menu", async (ctx) => {
   try {
     // Check if user has admin privileges (you can implement proper admin check here)
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
     const walletAddress = keypair.publicKey.toBase58();
-    const isAdmin = walletAddress === process.env.ADMIN_WALLET; // You can set this in env
+    const isAdmin = walletAddress === process.env['ADMIN_WALLET']; // You can set this in env
     
     const adminContent = [
       `<pre>T I M B A - A D M I N  P A N E L
@@ -4155,9 +4307,7 @@ bot.callbackQuery("admin_cleanup", adminPlaceholderHandler("System Cleanup", "ad
 
 bot.callbackQuery("cmd_buy", async (ctx) => {
   try {
-    const telegramId = BigInt(ctx.from?.id || 0);
-    const keypair = wallet.getKeyPair(telegramId);
-    const shortAddress = `${keypair.publicKey.toBase58().slice(0, 6)}...${keypair.publicKey.toBase58().slice(-6)}`;
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const userId = ctx.from?.id?.toString();
     
     if (!userId) return;
@@ -4220,7 +4370,7 @@ Supported Platforms:
 
 bot.callbackQuery("cmd_sell", async (ctx) => {
   try {
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
     const shortAddress = `${keypair.publicKey.toBase58().slice(0, 6)}...${keypair.publicKey.toBase58().slice(-6)}`;
     
@@ -4257,14 +4407,17 @@ Supported Platforms:
               token.mint.length > 30 && token.rawBalance && token.decimals !== undefined) {
             
             // Get a quote for selling this token amount to SOL
-            const quote = await swapManager.getQuote(
-              token.mint, // input (token to sell)
-              'So11111111111111111111111111111111111111112', // output (SOL)
-              token.rawBalance, // amount to sell
-              token.decimals, // input decimals
-              9, // SOL decimals
-              500 // 5% slippage
-            );
+            const quote = await swapManager.getQuote({
+              inputMint: token.mint, // input (token to sell)
+              outputMint: 'So11111111111111111111111111111111111111112', // output (SOL)
+              amount: token.rawBalance, // amount to sell
+              slippageBps: 500, // 5% slippage
+              userKeypair: wallet.getKeyPair(telegramId),
+              inputDecimals: token.decimals,
+              outputDecimals: 9,
+              inputTicker: token.ticker.toUpperCase(),
+              outputTicker: 'SOL'
+            });
             
             // Format the SOL amount we'd receive
             const solAmount = parseFloat(quote.outputAmount) / 1000000000; // Convert lamports to SOL
@@ -4276,7 +4429,7 @@ Supported Platforms:
           }
         } catch (error) {
           // If quote fails, just show token balance without SOL estimate
-          console.log(`Could not get quote for ${token.ticker || 'unknown token'}: ${error.message}`);
+          console.log(`Could not get quote for ${token.ticker || 'unknown token'}: ${(error as Error).message}`);
         }
         
         keyboard.text(`${token.ticker} (${formatted}${solEstimate})`, `sell_token_${token.ticker}`).row();
@@ -4350,10 +4503,15 @@ bot.on("callback_query", async (ctx, next) => {
   const tokenToSell = parts[0];
   const amount = parts.slice(1).join('_'); // Handle cases where amount might contain underscores
   
+  if (!tokenToSell || !amount) {
+    console.error('Invalid sell callback data');
+    return await next();
+  }
+  
   console.log(`🔴 SELL amount selected: ${amount} ${tokenToSell}`);
   
   try {
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     
     if (amount === 'CUSTOM') {
       // Handle custom amount input for SELL
@@ -4398,7 +4556,7 @@ bot.on("callback_query", async (ctx, next) => {
     const errorMessage = [
       "❌ <b>Error Processing Sell Request</b>",
       "",
-      `<b>Error:</b> ${error.message}`,
+      `<b>Error:</b> ${(error as Error).message}`,
       "",
       "Please try again or contact support if the issue persists."
     ];
@@ -4450,7 +4608,7 @@ bot.on("callback_query", async (ctx, next) => {
       throw new Error("User ID not found");
     }
     
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const userKeypair = wallet.getKeyPair(telegramId);
     
     // Use the existing global swapManager instance
@@ -4482,8 +4640,8 @@ bot.on("callback_query", async (ctx, next) => {
         amount: quote.inputAmount, // Use quote amount like successful BUY/SWAP
         slippageBps: Math.floor(2.0 * 100), // Use same 2% slippage as successful BUY/SWAP
         userKeypair: userKeypair,
-        inputDecimals: quote.inputDecimals || sellData.fromTokenInfo.decimals,
-        outputDecimals: quote.outputDecimals || 9,
+        inputDecimals: sellData.fromTokenInfo.decimals,
+        outputDecimals: 9,
         inputTicker: sellData.fromToken.toUpperCase(),
         outputTicker: sellData.toToken.toUpperCase()
       }, quote);
@@ -4495,8 +4653,8 @@ bot.on("callback_query", async (ctx, next) => {
         amount: quote.inputAmount, // Use quote amount like successful BUY/SWAP
         slippageBps: Math.floor(2.0 * 100), // Use same 2% slippage as successful BUY/SWAP
         userKeypair: userKeypair,
-        inputDecimals: quote.inputDecimals || sellData.fromTokenInfo.decimals,
-        outputDecimals: quote.outputDecimals || 9,
+        inputDecimals: sellData.fromTokenInfo.decimals,
+        outputDecimals: 9,
         inputTicker: sellData.fromToken.toUpperCase(),
         outputTicker: sellData.toToken.toUpperCase()
       }, quote);
@@ -4523,7 +4681,7 @@ bot.on("callback_query", async (ctx, next) => {
 
     await ctx.editMessageText(successMessage, { 
       parse_mode: "HTML",
-      disable_web_page_preview: true,
+      link_preview_options: { is_disabled: true },
       reply_markup: new InlineKeyboard()
         .webApp("🔍 VIEW TX", `https://solscan.io/tx/${signature}`).row()
         .text("💰 WALLET", "main_wallet")
@@ -4546,7 +4704,7 @@ bot.on("callback_query", async (ctx, next) => {
     const errorMessage = [
       "❌ <b>Sell Transaction Failed</b>",
       "",
-      `<b>Error:</b> ${error.message}`,
+      `<b>Error:</b> ${(error as Error).message}`,
       "",
       "The transaction could not be completed. Please check your balance and try again."
     ].join("\n");
@@ -4574,7 +4732,7 @@ bot.on("callback_query", async (ctx, next) => {
   console.log(`🟢 Buy with payment method selected: ${paymentToken}`);
   
   try {
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
     const shortAddress = `${keypair.publicKey.toBase58().slice(0, 6)}...${keypair.publicKey.toBase58().slice(-6)}`;
     
@@ -4662,6 +4820,11 @@ bot.on("callback_query", async (ctx, next) => {
   const paymentToken = parts[0];
   const targetToken = parts[1];
   
+  if (!paymentToken || !targetToken) {
+    console.error('Invalid buy popular callback data');
+    return await next();
+  }
+  
   console.log(`🟢 Popular token buy: ${paymentToken} → ${targetToken}`);
   
   try {
@@ -4685,6 +4848,11 @@ bot.on("callback_query", async (ctx, next) => {
   
   const paymentToken = parts[0];
   const tokenTxId = parts[1];
+  
+  if (!paymentToken || !tokenTxId) {
+    console.error('Invalid buy dynamic callback data');
+    return await next();
+  }
   
   // Get the cached token info
   const tokenData = transactionCache.get(tokenTxId);
@@ -4834,25 +5002,30 @@ bot.on("callback_query", async (ctx, next) => {
   const secondPart = parts[1];
   const amount = parts.slice(2).join('_'); // Handle cases where amount might contain underscores
   
+  if (!paymentToken || !secondPart || !amount) {
+    return await ctx.answerCallbackQuery("❌ Invalid buy parameters");
+  }
+  
   // Check if second part is a transaction ID (from contract address flow) or target token
   let targetToken = secondPart;
-  let contractAddress = null;
-  let tokenInfo = null;
+  let contractAddress: string | undefined;
   
   // If it looks like a transaction ID (short alphanumeric), look it up in cache
   if (secondPart.length < 20 && /^[a-z0-9]+$/.test(secondPart)) {
     const cachedInfo = transactionCache.get(secondPart);
-    if (cachedInfo) {
+    if (cachedInfo && cachedInfo.targetToken) {
       targetToken = cachedInfo.targetToken;
       contractAddress = cachedInfo.targetTokenAddress;
-      tokenInfo = cachedInfo.tokenMetadata;
     }
+  }
+  
+  if (!targetToken) {
+    return await ctx.answerCallbackQuery("❌ Invalid target token");
   }
   
   console.log(`💰 BUY amount selected: ${amount} ${paymentToken} → ${targetToken}`);
   
   try {
-    const telegramId = BigInt(ctx.from?.id || 0);
     const userId = ctx.from?.id?.toString();
     
     // Get existing user state to check for dynamic token info  
@@ -4910,7 +5083,7 @@ bot.on("callback_query", async (ctx, next) => {
     const errorMessage = [
       "❌ <b>Error Processing Buy Request</b>",
       "",
-      `<b>Error:</b> ${error.message}`,
+      `<b>Error:</b> ${(error as Error).message}`,
       "",
       "Please try again or contact support if the issue persists."
     ];
@@ -4963,7 +5136,7 @@ bot.on("callback_query", async (ctx, next) => {
       throw new Error("User ID not found");
     }
     
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const userKeypair = wallet.getKeyPair(telegramId);
     
     // Use the existing global swapManager instance
@@ -5030,7 +5203,7 @@ bot.on("callback_query", async (ctx, next) => {
 
     await ctx.editMessageText(successMessage, { 
       parse_mode: "HTML",
-      disable_web_page_preview: true,
+      link_preview_options: { is_disabled: true },
       reply_markup: new InlineKeyboard()
         .webApp("🔍 VIEW TX", `https://solscan.io/tx/${signature}`).row()
         .text("💰 WALLET", "main_wallet")
@@ -5054,8 +5227,8 @@ bot.on("callback_query", async (ctx, next) => {
     let keyboard = new InlineKeyboard();
     
     // Handle specific error types
-    if (error.message?.includes('TooMuchSolRequired') || 
-        error.message?.includes('slippage') ||
+    if ((error as Error).message?.includes('TooMuchSolRequired') || 
+        (error as Error).message?.includes('slippage') ||
         error.transactionLogs?.some((log: string) => log.includes('TooMuchSolRequired'))) {
       
       // Extract the actual amounts needed from logs if available
@@ -5120,13 +5293,13 @@ bot.on("callback_query", async (ctx, next) => {
         .text("💰 WALLET", "main_wallet").row();
         
       // Store the exact amount needed for the retry button
-      if (requiredAmount) {
+      if (requiredAmount && yourAmount !== null) {
         const retryAmount = requiredAmount + (requiredAmount - yourAmount) * 0.1;
         buyData.retryAmount = retryAmount.toFixed(4);
       }
         
-    } else if (error.message?.includes('Insufficient funds') || 
-               error.message?.includes('insufficient')) {
+    } else if ((error as Error).message?.includes('Insufficient funds') || 
+               (error as Error).message?.includes('insufficient')) {
       
       // Insufficient funds error
       errorMessage = [
@@ -5148,7 +5321,7 @@ bot.on("callback_query", async (ctx, next) => {
       errorMessage = [
         "❌ <b>Buy Transaction Failed</b>",
         "",
-        `<b>Error:</b> ${error.message || 'Unknown error'}`,
+        `<b>Error:</b> ${(error as Error).message || 'Unknown error'}`,
         "",
         "The transaction could not be completed. Please try again."
       ].join("\n");
@@ -5237,6 +5410,10 @@ bot.on("callback_query", async (ctx, next) => {
   
   const txId = parts[0];
   const slippageValue = parts[1];
+  
+  if (!txId || !slippageValue) {
+    return await ctx.answerCallbackQuery("❌ Invalid slippage request");
+  }
   
   console.log(`⚙️ BUY slippage change: ${slippageValue}% for txId: ${txId}`);
   
@@ -5339,12 +5516,12 @@ bot.on("callback_query", async (ctx, next) => {
   console.log("🔔 Swap FROM token selected:", fromToken);
   
   try {
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
     const shortAddress = `${keypair.publicKey.toBase58().slice(0, 6)}...${keypair.publicKey.toBase58().slice(-6)}`;
     
     // Get available tokens to swap TO (exclude the FROM token)
-    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
+    await getCachedWalletData(telegramId);
     
     const response = [
       `💱 <b>SWAP ${fromToken}</b>`,
@@ -5396,6 +5573,10 @@ bot.on("callback_query", async (ctx, next) => {
   
   const fromToken = parts[0];
   const toToken = parts.slice(1).join('_');
+  
+  if (!fromToken || !toToken) {
+    return await ctx.answerCallbackQuery("❌ Invalid swap pair");
+  }
   
   console.log(`🔔 Swap pair selected: ${fromToken} → ${toToken}`);
   
@@ -5458,6 +5639,10 @@ bot.on("callback_query", async (ctx, next) => {
   const toToken = parts[1];
   const amount = parts.slice(2).join('_');
   
+  if (!fromToken || !toToken || !amount) {
+    return await ctx.answerCallbackQuery("❌ Invalid swap parameters");
+  }
+  
   console.log(`🔔 Swap amount selected: ${amount} ${fromToken} → ${toToken}`);
   
   try {
@@ -5499,7 +5684,7 @@ bot.on("callback_query", async (ctx, next) => {
     }
     
     // Get quote and show confirmation
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     await showSwapQuoteAndConfirmation(ctx, fromToken, toToken, amount, telegramId);
     await ctx.answerCallbackQuery("Getting swap quote...");
   } catch (error) {
@@ -5512,7 +5697,7 @@ bot.on("callback_query", async (ctx, next) => {
  * Show swap amount selection interface
  */
 const showSwapAmountSelection = async (ctx: any, fromToken: string, toToken: string) => {
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   
   // Get balance for the FROM token
   const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
@@ -5584,7 +5769,7 @@ const showSwapAmountSelection = async (ctx: any, fromToken: string, toToken: str
  * Show swap quote and confirmation
  */
 const showSwapQuoteAndConfirmation = async (ctx: any, fromToken: string, toToken: string, amount: string, telegramId?: bigint) => {
-  const userId = telegramId || BigInt(ctx.from?.id || 0);
+  const userId = telegramId || BigInt(ctx.from?.id || 0) as bigint;
   
   // Update message to show loading
   await ctx.editMessageText(
@@ -5681,7 +5866,7 @@ const showSwapQuoteAndConfirmation = async (ctx: any, fromToken: string, toToken
   } catch (error) {
     console.error("Error getting swap quote:", error);
     await ctx.editMessageText(
-      `❌ <b>QUOTE ERROR</b>\n\n${error.message}\n\nPlease try again.`,
+      `❌ <b>QUOTE ERROR</b>\n\n${(error as Error).message}\n\nPlease try again.`,
       {
         parse_mode: "HTML", 
         reply_markup: new InlineKeyboard()
@@ -5698,8 +5883,8 @@ const showSwapQuoteAndConfirmation = async (ctx: any, fromToken: string, toToken
 /**
  * Show buy amount selection interface
  */
-const showBuyAmountSelection = async (ctx: any, paymentToken: string, targetToken: string, contractAddress?: string) => {
-  const telegramId = BigInt(ctx.from?.id || 0);
+const showBuyAmountSelection = async (ctx: any, paymentToken: string, targetToken: string, _contractAddress?: string) => {
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   
   // Get balance for the payment token
   const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
@@ -5795,24 +5980,24 @@ const fetchTokenMetadata = async (contractAddress: string, telegramId?: bigint) 
           };
         }
       } catch (walletError) {
-        console.log("Wallet balance check failed:", walletError.message);
+        console.log("Wallet balance check failed:", (walletError as Error).message);
       }
     }
     
     // Try to get metadata using wallet's metadata function
     try {
       const metadata = await wallet.getTokenMetadata(contractAddress);
-      if (metadata && metadata.symbol && metadata.symbol !== 'UNKNOWN') {
+      if (metadata && typeof metadata === 'object' && 'symbol' in metadata && metadata.symbol && metadata.symbol !== 'UNKNOWN') {
         return {
           address: contractAddress,
-          symbol: metadata.symbol,
-          name: metadata.name || metadata.symbol,
+          symbol: (metadata as any).symbol,
+          name: (metadata as any).name || (metadata as any).symbol,
           decimals: metadata.decimals || 6,
           verified: true
         };
       }
     } catch (metadataError) {
-      console.log("Wallet metadata failed:", metadataError.message);
+      console.log("Wallet metadata failed:", (metadataError as Error).message);
     }
     
     // Fallback: return truncated address as symbol
@@ -5826,7 +6011,7 @@ const fetchTokenMetadata = async (contractAddress: string, telegramId?: bigint) 
     
   } catch (error) {
     console.error("Error fetching token metadata:", error);
-    throw new Error(`Failed to fetch token information: ${error.message}`);
+    throw new Error(`Failed to fetch token information: ${(error as Error).message}`);
   }
 };
 
@@ -5834,7 +6019,7 @@ const fetchTokenMetadata = async (contractAddress: string, telegramId?: bigint) 
  * Show buy quote and confirmation with auto-detection
  */
 const showBuyQuoteAndConfirmation = async (ctx: any, paymentToken: string, targetToken: string, amount: string, contractAddress?: string) => {
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   
   // Update message to show loading
   await ctx.editMessageText(
@@ -5936,8 +6121,6 @@ ${outputMint}</pre>`,
       quote: quote
     });
 
-    const currentSlippage = quote.slippage || 1.0;
-    
     await ctx.editMessageText(response, {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard()
@@ -5953,7 +6136,7 @@ ${outputMint}</pre>`,
   } catch (error) {
     console.error("Error getting buy quote:", error);
     await ctx.editMessageText(
-      `❌ <b>QUOTE ERROR</b>\n\n${error.message}\n\nPlease try again.`,
+      `❌ <b>QUOTE ERROR</b>\n\n${(error as Error).message}\n\nPlease try again.`,
       {
         parse_mode: "HTML", 
         reply_markup: new InlineKeyboard()
@@ -6194,7 +6377,7 @@ const handleSwapToTokenInput = async (ctx: any, userState: any, tokenInput: stri
 const handleSwapCustomAmountInput = async (ctx: any, userState: any, amount: string) => {
   const fromToken = userState.fromToken;
   const toToken = userState.toToken;
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   
   // Handle percentage amounts
   let actualAmount = amount;
@@ -6245,7 +6428,7 @@ const handleSwapCustomAmountInput = async (ctx: any, userState: any, amount: str
  * Handle BUY contract address input
  */
 const handleBuyContractAddressInput = async (ctx: any, userState: any, contractAddress: string) => {
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   
   try {
     console.log(`🔍 Validating contract address: ${contractAddress}`);
@@ -6370,7 +6553,7 @@ ${contractAddress}</pre>`,
       "",
       `<b>Address:</b> <code>${contractAddress}</code>`,
       "",
-      `<b>Error:</b> ${error.message}`,
+      `<b>Error:</b> ${(error as Error).message}`,
       "",
       "Please enter a valid Solana contract address (SPL Token mint):",
       "",
@@ -6414,7 +6597,7 @@ ${contractAddress}</pre>`,
  * Handle BUY token symbol input
  */
 const handleBuyTokenSymbolInput = async (ctx: any, userState: any, tokenSymbol: string) => {
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   
   try {
     console.log(`🔍 Searching for token: ${tokenSymbol}`);
@@ -6459,11 +6642,11 @@ const handleBuyTokenSymbolInput = async (ctx: any, userState: any, tokenSymbol: 
     
     // Try to find token by symbol in our known tokens first
     let tokenInfo = null;
-    const knownTokens = tokenManager.getKnownTokens();
-    const knownToken = knownTokens.find(t => t.ticker.toUpperCase() === cleanSymbol);
+    const knownTokens = tokenManager.getAllKnownTokens();
+    const knownToken = knownTokens.find((t: any) => t.ticker.toUpperCase() === cleanSymbol);
     
     if (knownToken) {
-      tokenInfo = await fetchTokenMetadata(knownToken.mint);
+      tokenInfo = await fetchTokenMetadata(knownToken.token_mint);
     }
     
     if (!tokenInfo) {
@@ -6539,7 +6722,7 @@ const handleBuyTokenSymbolInput = async (ctx: any, userState: any, tokenSymbol: 
       "",
       `<b>Symbol:</b> ${tokenSymbol}`,
       "",
-      `<b>Error:</b> ${error.message}`,
+      `<b>Error:</b> ${(error as Error).message}`,
       "",
       "Please enter a valid token symbol:",
       "",
@@ -6588,7 +6771,7 @@ const handleBuyCustomAmountInput = async (ctx: any, userState: any, amount: stri
   const paymentToken = userState.paymentToken;
   const targetToken = userState.targetToken;
   const contractAddress = userState.contractAddress;
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   
   console.log(`📝 Custom amount debug:`, { amount, paymentToken, targetToken, contractAddress });
   
@@ -6647,7 +6830,7 @@ const handleBuyCustomAmountInput = async (ctx: any, userState: any, amount: stri
       `<b>Target Token:</b> ${targetToken}`,
       `<b>Amount:</b> ${amount}`,
       "",
-      `<b>Error:</b> ${error.message}`,
+      `<b>Error:</b> ${(error as Error).message}`,
       "",
       "Please enter a valid amount:",
       "",
@@ -6686,7 +6869,7 @@ const handleBuyCustomAmountInput = async (ctx: any, userState: any, amount: stri
  */
 const handleSellCustomAmountInput = async (ctx: any, userState: any, amount: string) => {
   const tokenToSell = userState.tokenToSell;
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   
   try {
     // Handle percentage amounts
@@ -6738,7 +6921,7 @@ const handleSellCustomAmountInput = async (ctx: any, userState: any, amount: str
       `<b>Token:</b> ${tokenToSell}`,
       `<b>Amount:</b> ${amount}`,
       "",
-      `<b>Error:</b> ${error.message}`,
+      `<b>Error:</b> ${(error as Error).message}`,
       "",
       "Please enter a valid amount:",
       "",
@@ -6778,7 +6961,7 @@ const handleSellCustomAmountInput = async (ctx: any, userState: any, amount: str
  * Show sell amount selection for a specific token
  */
 const showSellAmountSelection = async (ctx: any, tokenToSell: string) => {
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   
   // Get balance for the token being sold
   const { tokenBalances } = await getCachedWalletData(telegramId);
@@ -6822,7 +7005,7 @@ const showSellAmountSelection = async (ctx: any, tokenToSell: string) => {
 /**
  * Show sell quote and confirmation
  */
-const showSellQuoteAndConfirmation = async (ctx: any, tokenToSell: string, amount: string, telegramId: BigInt) => {
+const showSellQuoteAndConfirmation = async (ctx: any, tokenToSell: string, amount: string, telegramId: bigint) => {
   // Update message to show loading
   await ctx.editMessageText(
     `🔄 <b>GETTING SELL QUOTE</b>\n\nSell ${amount} ${tokenToSell} for SOL\n\n<i>Finding best price...</i>`,
@@ -6977,7 +7160,7 @@ const showSellQuoteAndConfirmation = async (ctx: any, tokenToSell: string, amoun
       `<b>Token:</b> ${tokenToSell}`,
       `<b>Amount:</b> ${amount}`,
       "",
-      `<b>Error:</b> ${error.message}`,
+      `<b>Error:</b> ${(error as Error).message}`,
       "",
       "This could happen if:",
       "• Token has no liquidity",
@@ -7034,7 +7217,7 @@ const handleBuyCustomSlippageInput = async (ctx: any, userState: any, slippageIn
       "",
       `<b>Input:</b> ${slippageInput}`,
       "",
-      `<b>Error:</b> ${error.message}`,
+      `<b>Error:</b> ${(error as Error).message}`,
       "",
       "Please enter a valid slippage percentage:",
       "",
@@ -7117,7 +7300,7 @@ Contract: ${buyData.contractAddress || 'N/A'}
   } catch (error: any) {
     console.error("Error regenerating buy quote:", error);
     await ctx.editMessageText(
-      `❌ <b>Error</b>\n\n${error.message}\n\nPlease try again.`,
+      `❌ <b>Error</b>\n\n${(error as Error).message}\n\nPlease try again.`,
       {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
@@ -7301,7 +7484,7 @@ setupAnchor()
               await processExpiredGame(game);
             }
           } catch (error: any) {
-            if (error.message?.includes("Account does not exist")) {
+            if ((error as Error).message?.includes("Account does not exist")) {
               await cleanupOrphanedGame(game.game_address);
             } else {
               console.error(

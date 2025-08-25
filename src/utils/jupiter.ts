@@ -176,7 +176,9 @@ export class JupiterClient {
     // Add route information
     if (quote.routePlan.length > 0) {
       const mainRoute = quote.routePlan[0];
-      message += `🛣️ **Route:** ${mainRoute.swapInfo.label}\n`;
+      if (mainRoute && mainRoute.swapInfo) {
+        message += `🛣️ **Route:** ${mainRoute.swapInfo.label}\n`;
+      }
     }
 
     message += `\n⏱️ **Time taken:** ${quote.timeTaken}ms`;
@@ -213,7 +215,7 @@ export class JupiterClient {
   /**
    * Get default slippage based on token volatility
    */
-  getDefaultSlippage(inputMint: string, outputMint: string): number {
+  getDefaultSlippage(_inputMint: string, _outputMint: string): number {
     // Default slippage in basis points (100 = 1%)
     const DEFAULT_SLIPPAGE_BPS = 100;
     
