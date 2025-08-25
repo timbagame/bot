@@ -176,6 +176,12 @@ export class PumpFunClient {
    */
   async isPumpFunToken(mintAddress: string): Promise<{ isPumpFun: boolean; isGraduated: boolean }> {
     try {
+      // Check if mintAddress is valid
+      if (!mintAddress || mintAddress === 'undefined' || typeof mintAddress !== 'string') {
+        console.log(`Token ${mintAddress} is not a pump.fun token: invalid mint address`);
+        return { isPumpFun: false, isGraduated: false };
+      }
+      
       const mint = new PublicKey(mintAddress);
       
       // Use pump.fun SDK to check if token exists in their program

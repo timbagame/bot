@@ -211,17 +211,49 @@ export class WalletManager {
           const tokenAmount = parsedData.info.tokenAmount;
           const mint = parsedData.info.mint;
 
-          // Only include tokens that:
-          // 1. Are in our approved tokens list
-          // 2. Have a non-zero balance
           const approvedToken = approvedTokensMap.get(mint);
           console.log(`🔍 Token found: ${mint}, approved: ${!!approvedToken}, ticker: ${approvedToken?.token_ticker}, raw amount: ${tokenAmount.amount}, decimals: ${tokenAmount.decimals}`);
           
-          if (approvedToken && parseFloat(tokenAmount.amount) > 0) {
+          // Auto-register tokens with non-zero balance that aren't approved
+          if (!approvedToken && parseFloat(tokenAmount.amount) > 0) {
+            console.log(`🔄 Auto-registering unknown token with balance: ${mint}`);
+            
+            try {
+              // Import TokenManager dynamically to avoid circular imports
+              const { TokenManager } = await import('./token-manager');
+              const tokenManager = TokenManager.getInstance();
+              
+              // Try to get metadata for the unknown token
+              const fullMetadata = await this.getFullTokenMetadata(mint);
+              let ticker = fullMetadata.symbol || `TOKEN_${mint.slice(-4)}`;
+              
+              console.log(`📝 Auto-registering token: ${ticker} (${mint})`);
+              const registered = await tokenManager.addToken(mint, ticker);
+              
+              if (registered) {
+                console.log(`✅ Successfully auto-registered: ${ticker}`);
+                // Add to approved tokens map for immediate use
+                approvedTokensMap.set(mint, {
+                  token_mint: mint,
+                  token_ticker: ticker,
+                  decimals: tokenAmount.decimals
+                });
+              } else {
+                console.log(`❌ Failed to auto-register: ${ticker}`);
+                continue; // Skip this token if registration failed
+              }
+            } catch (regError) {
+              console.error(`❌ Error auto-registering token ${mint}:`, regError);
+              continue; // Skip this token if auto-registration failed
+            }
+          }
+          
+          const finalApprovedToken = approvedTokensMap.get(mint);
+          if (finalApprovedToken && parseFloat(tokenAmount.amount) > 0) {
             const balance = parseFloat(tokenAmount.amount);
             
             // Try to get real ticker from metadata, fallback to approved ticker
-            let finalTicker = approvedToken.token_ticker;
+            let finalTicker = finalApprovedToken.token_ticker;
             console.log(`🔍 Attempting to get metadata for token ${mint} (current ticker: ${finalTicker})`);
             
             try {
@@ -309,6 +341,27 @@ export class WalletManager {
 
     // Try external APIs as fallback
     console.log(`🌐 Trying external APIs for token: ${tokenMint}`);
+    
+    // Try SolanaFM API first (good for old tokens)
+    try {
+      const response = await fetch(`https://api.solana.fm/v0/tokens/${tokenMint}`);
+      console.log(`📡 SolanaFM API response status: ${response.status}`);
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`📋 SolanaFM API data:`, data);
+        if (data && data.tokenInfo && data.tokenInfo.symbol) {
+          const basicMetadata = await this.getTokenMetadata(tokenMint);
+          console.log(`✅ Got symbol from SolanaFM API: ${data.tokenInfo.symbol}`);
+          return {
+            decimals: basicMetadata.decimals,
+            symbol: data.tokenInfo.symbol,
+            name: data.tokenInfo.name || data.tokenInfo.symbol
+          };
+        }
+      }
+    } catch (error) {
+      console.log('SolanaFM API not available for', tokenMint, error);
+    }
     
     try {
       // Try Jupiter token list API

@@ -173,25 +173,51 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
   const walletAddress = keypair.publicKey.toBase58();
   const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
   
+  // Wallet animated banner file_id (GIF type for animated banner display)
+  const walletImageFileId = "CgACAgEAAxkBAAIEF2irzq9DBOMIkGfEzQQPe1huXlJVAAJdBgACaPJgRai8H1bQmnXpNgQ";
+  
   // Show loading state first
   if (showLoadingMessage) {
-    const loadingContent = `T I M B A\n\n⏳ Loading balances...`;
+    const loadingContent = `⏳ Loading balances...`;
     
-    const loadingResponse = [
-      `<pre>${loadingContent}</pre>`,
+    const loadingCaption = [
+      loadingContent,
       "",
       `<code>${walletAddress}</code>`,
     ];
 
-    await ctx.editMessageText(loadingResponse.join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
-        .text("🔄 REFRESH", "wallet_refresh").text("📋 HISTORY", "cmd_history").row()
-        .text("💸 WITHDRAW", "cmd_withdraw").row()
-        .text("🟢 BUY", "cmd_buy").text("🔴 SELL", "cmd_sell").row()
-        .text("⚙️ SETTINGS", "wallet_settings").row()
-        .text("← BACK", "back_main").row()
-    });
+    // Try to edit existing message as photo, if fails send new photo
+    try {
+      await ctx.editMessageMedia({
+        type: "animation",
+        media: walletImageFileId,
+        caption: loadingCaption.join("\n"),
+        parse_mode: "HTML"
+      }, {
+        reply_markup: new InlineKeyboard()
+          .text("🔄 REFRESH", "wallet_refresh").text("📋 HISTORY", "cmd_history").row()
+          .text("💸 WITHDRAW", "cmd_withdraw").row()
+          .text("🟢 BUY", "cmd_buy").text("🔴 SELL", "cmd_sell").row()
+          .text("⚙️ SETTINGS", "wallet_settings").row()
+          .text("← BACK", "back_main").row()
+      });
+    } catch (error) {
+      // If edit fails, delete old message and send new photo
+      try {
+        await ctx.deleteMessage();
+      } catch {}
+      
+      await ctx.replyWithAnimation(walletImageFileId, {
+        caption: loadingCaption.join("\n"),
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("🔄 REFRESH", "wallet_refresh").text("📋 HISTORY", "cmd_history").row()
+          .text("💸 WITHDRAW", "cmd_withdraw").row()
+          .text("🟢 BUY", "cmd_buy").text("🔴 SELL", "cmd_sell").row()
+          .text("⚙️ SETTINGS", "wallet_settings").row()
+          .text("← BACK", "back_main").row()
+      });
+    }
   }
 
   try {
@@ -208,7 +234,7 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
     totalUSD += solDecimalBalance * solPriceUSD;
     
     // Build wallet info without address
-    let walletContent = `T I M B A\n\nSOL: ${formattedSolBalance}`;
+    let walletContent = `SOL: ${formattedSolBalance}`;
 
     // Add token balances (calculate USD)
     if (tokenBalances.length > 0) {
@@ -224,16 +250,21 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
     }
     
     // Add total USD value
-    walletContent += `\n\nTotal USD: $${totalUSD.toFixed(2)}`;
+    walletContent += `\n\nTOTAL USD: $${totalUSD.toFixed(2)}`;
 
-    const response = [
-      `<pre>${walletContent}</pre>`,
+    const finalCaption = [
+      walletContent,
       "",
       `<code>${walletAddress}</code>`,
     ];
 
-    await ctx.editMessageText(response.join("\n"), {
-      parse_mode: "HTML",
+    // Update with final wallet data and image
+    await ctx.editMessageMedia({
+      type: "animation",
+      media: walletImageFileId,
+      caption: finalCaption.join("\n"),
+      parse_mode: "HTML"
+    }, {
       reply_markup: new InlineKeyboard()
         .text("🔄 REFRESH", "wallet_refresh").text("📋 HISTORY", "cmd_history").row()
         .text("💸 WITHDRAW", "cmd_withdraw").row()
@@ -253,8 +284,12 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
       "<i>Tap REFRESH to try again</i>",
     ];
 
-    await ctx.editMessageText(errorResponse.join("\n"), {
-      parse_mode: "HTML",
+    await ctx.editMessageMedia({
+      type: "animation", 
+      media: walletImageFileId,
+      caption: errorResponse.join("\n"),
+      parse_mode: "HTML"
+    }, {
       reply_markup: new InlineKeyboard()
         .text("🔄 REFRESH", "wallet_refresh").text("📋 HISTORY", "cmd_history").row()
         .text("💸 WITHDRAW", "cmd_withdraw").row()
@@ -670,12 +705,8 @@ bot.command("start", async (ctx: Context) => {
     const walletAddress = keypair.publicKey.toBase58();
     const shortAddress = `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`;
 
-    // Build welcome message with ASCII banner
-    const timbaAscii = `T I M B A`;
-    
-    const response = [
-      `<pre>${timbaAscii}</pre>`,
-      "",
+    // Build welcome message
+    const welcomeMessage = [
       `<b>WELCOME ${username.toUpperCase()}</b>`,
       "",
       `<code>${walletAddress}</code>`,
@@ -683,7 +714,11 @@ bot.command("start", async (ctx: Context) => {
 
     // Send response with menu for private chats
     if (isPrivateChat(ctx)) {
-      await ctx.reply(response.join("\n"), {
+      // Use same animated banner as wallet
+      const welcomeAnimationFileId = "CgACAgEAAxkBAAIEF2irzq9DBOMIkGfEzQQPe1huXlJVAAJdBgACaPJgRai8H1bQmnXpNgQ";
+      
+      await ctx.replyWithAnimation(welcomeAnimationFileId, {
+        caption: welcomeMessage.join("\n"),
         parse_mode: "HTML",
         reply_markup: createMainMenuKeyboard(),
       });
@@ -1375,17 +1410,30 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
         if (!existingInputToken) {
           // Try to get real metadata for pump.fun tokens
           if (swapData.quote.provider === 'pump-fun' && pumpFunClient) {
-            const metadata = await pumpFunClient.getTokenMetadata(inputTokenMint);
-            if (metadata && metadata.symbol) {
-              inputTokenTicker = metadata.symbol.toUpperCase();
+            try {
+              const metadata = await pumpFunClient.getTokenMetadata(inputTokenMint);
+              if (metadata && metadata.symbol) {
+                inputTokenTicker = metadata.symbol.toUpperCase();
+                console.log(`🔍 Got pump.fun metadata for input token: ${inputTokenTicker}`);
+              }
+            } catch (metadataError) {
+              console.log(`⚠️ Could not fetch pump.fun metadata for input token ${inputTokenMint}:`, metadataError.message);
             }
           }
           
-          console.log(`Auto-registering input token from swap: ${inputTokenTicker} (${inputTokenMint})`);
-          const registered = await tokenManager.addToken(inputTokenMint, inputTokenTicker);
-          if (registered) {
-            console.log(`Successfully auto-registered input token: ${inputTokenTicker}`);
+          console.log(`🔄 Auto-registering input token from swap: ${inputTokenTicker} (${inputTokenMint})`);
+          try {
+            const registered = await tokenManager.addToken(inputTokenMint, inputTokenTicker);
+            if (registered) {
+              console.log(`✅ Successfully auto-registered input token: ${inputTokenTicker}`);
+            } else {
+              console.log(`❌ Failed to auto-register input token: ${inputTokenTicker} (${inputTokenMint})`);
+            }
+          } catch (regError) {
+            console.error(`❌ Error auto-registering input token ${inputTokenTicker}:`, regError);
           }
+        } else {
+          console.log(`✅ Input token already registered: ${existingInputToken.token_ticker} (${inputTokenMint})`);
         }
       }
       
@@ -1398,17 +1446,30 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
         if (!existingOutputToken) {
           // Try to get real metadata for pump.fun tokens
           if (swapData.quote.provider === 'pump-fun' && pumpFunClient) {
-            const metadata = await pumpFunClient.getTokenMetadata(outputTokenMint);
-            if (metadata && metadata.symbol) {
-              outputTokenTicker = metadata.symbol.toUpperCase();
+            try {
+              const metadata = await pumpFunClient.getTokenMetadata(outputTokenMint);
+              if (metadata && metadata.symbol) {
+                outputTokenTicker = metadata.symbol.toUpperCase();
+                console.log(`🔍 Got pump.fun metadata for output token: ${outputTokenTicker}`);
+              }
+            } catch (metadataError) {
+              console.log(`⚠️ Could not fetch pump.fun metadata for output token ${outputTokenMint}:`, metadataError.message);
             }
           }
           
-          console.log(`Auto-registering output token from swap: ${outputTokenTicker} (${outputTokenMint})`);
-          const registered = await tokenManager.addToken(outputTokenMint, outputTokenTicker);
-          if (registered) {
-            console.log(`Successfully auto-registered output token: ${outputTokenTicker}`);
+          console.log(`🔄 Auto-registering output token from swap: ${outputTokenTicker} (${outputTokenMint})`);
+          try {
+            const registered = await tokenManager.addToken(outputTokenMint, outputTokenTicker);
+            if (registered) {
+              console.log(`✅ Successfully auto-registered output token: ${outputTokenTicker}`);
+            } else {
+              console.log(`❌ Failed to auto-register output token: ${outputTokenTicker} (${outputTokenMint})`);
+            }
+          } catch (regError) {
+            console.error(`❌ Error auto-registering output token ${outputTokenTicker}:`, regError);
           }
+        } else {
+          console.log(`✅ Output token already registered: ${existingOutputToken.token_ticker} (${outputTokenMint})`);
         }
       }
     } catch (error) {
@@ -1579,6 +1640,254 @@ bot.command("default", async (ctx: Context) => {
 // ================================
 // INFORMATION COMMANDS
 // ================================
+
+// Admin command to debug token metadata
+bot.command("debugtoken", async (ctx) => {
+  const telegramId = BigInt(ctx.from?.id || 0);
+  
+  if (!ctx.chat?.type || ctx.chat.type !== 'private') {
+    await ctx.reply("❌ This command only works in private chats");
+    return;
+  }
+  
+  // Simple admin check - you can replace this with your admin system
+  const keypair = wallet.getKeyPair(telegramId);
+  const walletAddress = keypair.publicKey.toBase58();
+  const isUserAdmin = walletAddress === process.env.ADMIN_WALLET || telegramId.toString() === "73785873"; // Your telegram ID
+  
+  if (!isUserAdmin) {
+    await ctx.reply("❌ You don't have permission to use this command");
+    return;
+  }
+  
+  const args = ctx.message?.text?.split(' ').slice(1) || [];
+  if (args.length < 1) {
+    await ctx.reply("❌ Usage: /debugtoken <mint_address>\n\nExample: /debugtoken CvuZk1iAPQsWdTy777a4dY78ue8z6HsRbk8UZCXvMSmB");
+    return;
+  }
+  
+  const mintAddress = args[0];
+  
+  await ctx.reply("🔍 Investigating token metadata...");
+  
+  try {
+    console.log(`🕵️ DEBUG: Starting investigation for token: ${mintAddress}`);
+    
+    // 1. Check basic token metadata
+    console.log(`📋 Step 1: Getting basic token metadata`);
+    const basicMetadata = await wallet.getTokenMetadata(mintAddress);
+    console.log(`📋 Basic metadata:`, basicMetadata);
+    
+    // 2. Check full token metadata (Metaplex + APIs)
+    console.log(`📋 Step 2: Getting full token metadata`);
+    const fullMetadata = await wallet.getFullTokenMetadata(mintAddress);
+    console.log(`📋 Full metadata:`, fullMetadata);
+    
+    // 3. Check if it's a pump.fun token
+    console.log(`📋 Step 3: Checking if it's pump.fun token`);
+    const pumpInfo = await swapManager.pumpFunClient.isPumpFunToken(mintAddress);
+    console.log(`📋 Pump.fun info:`, pumpInfo);
+    
+    // 4. Try to get pump.fun metadata
+    if (pumpInfo.isPumpFun) {
+      console.log(`📋 Step 4: Getting pump.fun metadata`);
+      try {
+        const pumpMetadata = await swapManager.pumpFunClient.getTokenMetadata(mintAddress);
+        console.log(`📋 Pump.fun metadata:`, pumpMetadata);
+      } catch (error) {
+        console.log(`❌ Pump.fun metadata error:`, error);
+      }
+    }
+    
+    // 5. Check if token is already registered
+    console.log(`📋 Step 5: Checking if token is already registered`);
+    const existingToken = tokenManager.getKnownTokenByMint(mintAddress);
+    console.log(`📋 Existing token:`, existingToken);
+    
+    // 6. Try SolanaFM API (good for old tokens)
+    console.log(`📋 Step 6: Checking SolanaFM`);
+    let solanaFmData = null;
+    try {
+      const solanaFmResponse = await fetch(`https://api.solana.fm/v0/tokens/${mintAddress}`);
+      solanaFmData = await solanaFmResponse.json();
+      console.log(`📋 SolanaFM data:`, solanaFmData);
+    } catch (error) {
+      console.log(`❌ SolanaFM API error:`, error);
+    }
+    
+    // 7. Try to fetch from Jupiter token list
+    console.log(`📋 Step 7: Checking Jupiter token list`);
+    let jupiterData = null;
+    try {
+      const jupiterResponse = await fetch(`https://tokens.jup.ag/token/${mintAddress}`);
+      jupiterData = await jupiterResponse.json();
+      console.log(`📋 Jupiter data:`, jupiterData);
+    } catch (error) {
+      console.log(`❌ Jupiter API error:`, error);
+    }
+    
+    // 8. Try DexScreener
+    console.log(`📋 Step 8: Checking DexScreener`);
+    let dexData = null;
+    try {
+      const dexResponse = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mintAddress}`);
+      dexData = await dexResponse.json();
+      console.log(`📋 DexScreener data:`, dexData);
+    } catch (error) {
+      console.log(`❌ DexScreener API error:`, error);
+    }
+    
+    // Determine best symbol from all sources
+    const bestSymbol = fullMetadata.symbol || 
+                      (solanaFmData?.tokenInfo?.symbol) ||
+                      (jupiterData?.symbol) ||
+                      (dexData?.pairs?.[0]?.baseToken?.symbol) ||
+                      null;
+    
+    const bestName = fullMetadata.name || 
+                    (solanaFmData?.tokenInfo?.name) ||
+                    (jupiterData?.name) ||
+                    (dexData?.pairs?.[0]?.baseToken?.name) ||
+                    null;
+
+    // Build comprehensive report
+    const report = [
+      "🕵️ **Token Investigation Report**",
+      "",
+      `**Address:** \`${mintAddress}\``,
+      "",
+      "**📋 Basic Metadata:**",
+      `• Decimals: ${basicMetadata.decimals}`,
+      `• Symbol: ${basicMetadata.symbol || 'N/A'}`,
+      `• Name: ${basicMetadata.name || 'N/A'}`,
+      "",
+      "**🔍 Full Metadata (Metaplex):**",
+      `• Symbol: ${fullMetadata.symbol || 'N/A'}`,
+      `• Name: ${fullMetadata.name || 'N/A'}`,
+      "",
+      "**🌐 SolanaFM API:**",
+      `• Symbol: ${solanaFmData?.tokenInfo?.symbol || 'N/A'}`,
+      `• Name: ${solanaFmData?.tokenInfo?.name || 'N/A'}`,
+      "",
+      "**🪐 Jupiter API:**", 
+      `• Symbol: ${jupiterData?.symbol || 'N/A'}`,
+      `• Name: ${jupiterData?.name || 'N/A'}`,
+      "",
+      "**📊 DexScreener API:**",
+      `• Symbol: ${dexData?.pairs?.[0]?.baseToken?.symbol || 'N/A'}`,
+      `• Name: ${dexData?.pairs?.[0]?.baseToken?.name || 'N/A'}`,
+      "",
+      "**🚀 Pump.fun Status:**",
+      `• Is Pump.fun: ${pumpInfo.isPumpFun ? 'Yes' : 'No'}`,
+      `• Is Graduated: ${pumpInfo.isGraduated ? 'Yes' : 'No'}`,
+      "",
+      "**📝 Registration Status:**",
+      `• Already registered: ${existingToken ? 'Yes' : 'No'}`,
+      existingToken ? `• Current ticker: ${existingToken.token_ticker}` : "",
+      "",
+      "**💡 Best Available Symbol:**",
+      bestSymbol ? `**${bestSymbol}**` : "❌ No symbol found",
+      bestName ? `Name: ${bestName}` : "",
+      "",
+      "**🔧 Recommendation:**",
+      bestSymbol ? 
+        `Add with: \`/addtoken ${mintAddress} ${bestSymbol}\`` : 
+        "❌ Cannot auto-detect symbol - might be old/unsupported token format"
+    ].filter(line => line !== "");
+    
+    await ctx.reply(report.join("\n"), { parse_mode: "Markdown" });
+    
+  } catch (error) {
+    console.error(`❌ Error in token debug:`, error);
+    await ctx.reply(`❌ Error investigating token: ${error.message}`);
+  }
+});
+
+// Admin command to manually add tokens
+bot.command("addtoken", async (ctx) => {
+  const telegramId = BigInt(ctx.from?.id || 0);
+  
+  if (!ctx.chat?.type || ctx.chat.type !== 'private') {
+    await ctx.reply("❌ This command only works in private chats");
+    return;
+  }
+  
+  // Simple admin check - you can replace this with your admin system  
+  const keypair = wallet.getKeyPair(telegramId);
+  const walletAddress = keypair.publicKey.toBase58();
+  const isUserAdmin = walletAddress === process.env.ADMIN_WALLET || telegramId.toString() === "73785873"; // Your telegram ID
+  
+  if (!isUserAdmin) {
+    await ctx.reply("❌ You don't have permission to use this command");
+    return;
+  }
+  
+  const args = ctx.message?.text?.split(' ').slice(1) || [];
+  if (args.length < 2) {
+    await ctx.reply("❌ Usage: /addtoken <mint_address> <ticker>\n\nExample: /addtoken CvuZk1iAPQsWdTy777a4dY78ue8z6HsRbk8UZCXvMSmB AISU");
+    return;
+  }
+  
+  const [mintAddress, ticker] = args;
+  
+  try {
+    console.log(`🔄 Admin adding token: ${ticker} (${mintAddress})`);
+    const registered = await tokenManager.addToken(mintAddress, ticker.toUpperCase());
+    
+    if (registered) {
+      await ctx.reply(`✅ Successfully added token: ${ticker.toUpperCase()}\n\nAddress: \`${mintAddress}\`\n\nThis token will now appear in wallet balances if you hold any.`, {
+        parse_mode: "Markdown"
+      });
+      console.log(`✅ Admin successfully added token: ${ticker.toUpperCase()} (${mintAddress})`);
+    } else {
+      await ctx.reply(`❌ Failed to add token: ${ticker.toUpperCase()}\n\nThe token might already exist or the address might be invalid.`);
+      console.log(`❌ Admin failed to add token: ${ticker.toUpperCase()} (${mintAddress})`);
+    }
+  } catch (error) {
+    console.error(`❌ Error in admin addtoken:`, error);
+    await ctx.reply(`❌ Error adding token: ${error.message}`);
+  }
+});
+
+// Command to refresh wallet cache
+bot.command("refresh", async (ctx) => {
+  if (!ctx.chat?.type || ctx.chat.type !== 'private') {
+    return; // Only works in private chats
+  }
+  
+  const telegramId = BigInt(ctx.from?.id || 0);
+  
+  try {
+    // Clear cache and reload wallet
+    clearWalletCache(telegramId);
+    await ctx.reply("🔄 Refreshing wallet data...");
+    
+    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
+    
+    const report = [
+      "🔄 **Wallet Refreshed**",
+      "",
+      `💰 **SOL Balance:** ${wallet.formatSolBalance(solBalance)}`,
+      `🪙 **Tokens Found:** ${tokenBalances.length}`,
+      "",
+      "**Token Balances:**"
+    ];
+    
+    for (const token of tokenBalances.slice(0, 10)) {
+      const formatted = wallet.formatTokenBalance(token.balance, token.decimals);
+      report.push(`• ${token.ticker}: ${formatted}`);
+    }
+    
+    if (tokenBalances.length > 10) {
+      report.push(`• ... and ${tokenBalances.length - 10} more`);
+    }
+    
+    await ctx.reply(report.join("\n"), { parse_mode: "Markdown" });
+  } catch (error) {
+    console.error("Error refreshing wallet:", error);
+    await ctx.reply("❌ Error refreshing wallet data. Please try again.");
+  }
+});
 
 bot.command("help", async (ctx: Context) => {
   const helpSections = [
@@ -2195,17 +2504,30 @@ bot.callbackQuery("wallet_settings", async (ctx) => {
     const settingsContent = `T I M B A\n\n⚙️ SETTINGS\n\nChoose an option:`;
     
     const response = [
-      `<pre>${settingsContent}</pre>`,
-      "",
-      `<code>${walletAddress}</code>`,
+      `<pre>${settingsContent}</pre>`
     ];
 
-    await ctx.editMessageText(response.join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
-        .text("🔧 WRAP SOL", "cmd_wrap").text("🔐 PRIVATE KEY", "cmd_privatekey").row()
-        .text("← BACK TO WALLET", "main_wallet").row()
-    });
+    // Try to edit as text, if fails (because current message has media), delete and send new
+    try {
+      await ctx.editMessageText(response.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("🔧 WRAP SOL", "cmd_wrap").text("🔐 PRIVATE KEY", "cmd_privatekey").row()
+          .text("← BACK TO WALLET", "main_wallet").row()
+      });
+    } catch (error) {
+      // If edit fails because message has media, delete and send new text message
+      try {
+        await ctx.deleteMessage();
+      } catch {}
+      
+      await ctx.reply(response.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("🔧 WRAP SOL", "cmd_wrap").text("🔐 PRIVATE KEY", "cmd_privatekey").row()
+          .text("← BACK TO WALLET", "main_wallet").row()
+      });
+    }
 
     await ctx.answerCallbackQuery("⚙️ Settings");
   } catch (error) {
@@ -2229,11 +2551,11 @@ bot.callbackQuery("cmd_withdraw", async (ctx) => {
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
     
     const response = [
-      `📤 <b>SEND TOKENS</b>`,
+      `💸 <b>WITHDRAW</b>`,
       "",
       `<b>From:</b> <code>${shortAddress}</code>`,
       "",
-      `<b>Select token to send:</b>`,
+      `<b>Select token to withdraw:</b>`,
     ];
 
     const keyboard = new InlineKeyboard();
@@ -2250,11 +2572,24 @@ bot.callbackQuery("cmd_withdraw", async (ctx) => {
     
     keyboard.text("← BACK TO WALLET", "main_wallet").row();
 
-    await ctx.editMessageText(response.join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: keyboard
-    });
-    await ctx.answerCallbackQuery("📤 Select token to send");
+    // Try to edit as text, if fails (because current message has media), delete and send new
+    try {
+      await ctx.editMessageText(response.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: keyboard
+      });
+    } catch (error) {
+      // If edit fails because message has media, delete and send new text message
+      try {
+        await ctx.deleteMessage();
+      } catch {}
+      
+      await ctx.reply(response.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: keyboard
+      });
+    }
+    await ctx.answerCallbackQuery("💸 Select token to withdraw");
   } catch (error) {
     console.error("Error in cmd_withdraw:", error);
     await ctx.answerCallbackQuery("❌ Error loading send menu");
@@ -2280,7 +2615,7 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
       `⚠️ <b>KEEP THIS SECRET!</b>`,
       `Never share your private key with anyone.`,
       "",
-      `<code>${privateKeyString}</code>`,
+      `<span class="tg-spoiler">${privateKeyString}</span>`,
       "",
       `You can import this key into Phantom, Solflare, or other Solana wallets.`,
     ];
@@ -2328,7 +2663,7 @@ bot.callbackQuery("cmd_history", async (ctx) => {
     }));
     
     if (transactions.length === 0) {
-      await ctx.editMessageText([
+      const noTxResponse = [
         "📋 <b>TRANSACTION HISTORY</b>",
         "",
         "🔍 No transactions found for this wallet.",
@@ -2336,12 +2671,29 @@ bot.callbackQuery("cmd_history", async (ctx) => {
         `💳 <b>Wallet:</b> <code>${walletAddress.slice(0, 8)}...${walletAddress.slice(-8)}</code>`,
         "",
         "Start trading to see your transaction history here!"
-      ].join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("🟢 BUY", "cmd_buy").text("🔴 SELL", "cmd_sell").row()
-          .text("← BACK TO WALLET", "main_wallet").row()
-      });
+      ].join("\n");
+      
+      // Try to edit as text, if fails (because current message has media), delete and send new
+      try {
+        await ctx.editMessageText(noTxResponse, {
+          parse_mode: "HTML",
+          reply_markup: new InlineKeyboard()
+            .text("🟢 BUY", "cmd_buy").text("🔴 SELL", "cmd_sell").row()
+            .text("← BACK TO WALLET", "main_wallet").row()
+        });
+      } catch (error) {
+        // If edit fails because message has media, delete and send new text message
+        try {
+          await ctx.deleteMessage();
+        } catch {}
+        
+        await ctx.reply(noTxResponse, {
+          parse_mode: "HTML",
+          reply_markup: new InlineKeyboard()
+            .text("🟢 BUY", "cmd_buy").text("🔴 SELL", "cmd_sell").row()
+            .text("← BACK TO WALLET", "main_wallet").row()
+        });
+      }
       return;
     }
     
@@ -2384,19 +2736,36 @@ bot.callbackQuery("cmd_history", async (ctx) => {
       historyMessage.push(`... and ${transactions.length - 10} more on Solscan`);
     }
     
-    await ctx.editMessageText(historyMessage.join("\n"), {
-      parse_mode: "HTML",
-      disable_web_page_preview: true,
-      reply_markup: new InlineKeyboard()
-        .text("🔄 REFRESH", "cmd_history")
-        .webApp("🔍 FULL HISTORY", `https://solscan.io/account/${walletAddress}#transactions`).row()
-        .text("← BACK TO WALLET", "main_wallet").row()
-    });
+    // Try to edit as text, if fails (because current message has media), delete and send new
+    try {
+      await ctx.editMessageText(historyMessage.join("\n"), {
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+        reply_markup: new InlineKeyboard()
+          .text("🔄 REFRESH", "cmd_history")
+          .webApp("🔍 FULL HISTORY", `https://solscan.io/account/${walletAddress}#transactions`).row()
+          .text("← BACK TO WALLET", "main_wallet").row()
+      });
+    } catch (error) {
+      // If edit fails because message has media, delete and send new text message
+      try {
+        await ctx.deleteMessage();
+      } catch {}
+      
+      await ctx.reply(historyMessage.join("\n"), {
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+        reply_markup: new InlineKeyboard()
+          .text("🔄 REFRESH", "cmd_history")
+          .webApp("🔍 FULL HISTORY", `https://solscan.io/account/${walletAddress}#transactions`).row()
+          .text("← BACK TO WALLET", "main_wallet").row()
+      });
+    }
     
   } catch (error) {
     console.error("Error fetching transaction history:", error);
     
-    await ctx.editMessageText([
+    const errorResponse = [
       "📋 <b>TRANSACTION HISTORY</b>",
       "",
       "❌ Unable to load transaction history.",
@@ -2404,12 +2773,29 @@ bot.callbackQuery("cmd_history", async (ctx) => {
       `<b>Error:</b> ${error.message || 'Unknown error'}`,
       "",
       "Please try again or check your internet connection."
-    ].join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
-        .text("🔄 TRY AGAIN", "cmd_history")
-        .text("← BACK TO WALLET", "main_wallet").row()
-    });
+    ].join("\n");
+    
+    // Try to edit as text, if fails (because current message has media), delete and send new
+    try {
+      await ctx.editMessageText(errorResponse, {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("🔄 TRY AGAIN", "cmd_history")
+          .text("← BACK TO WALLET", "main_wallet").row()
+      });
+    } catch (error) {
+      // If edit fails because message has media, delete and send new text message
+      try {
+        await ctx.deleteMessage();
+      } catch {}
+      
+      await ctx.reply(errorResponse, {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("🔄 TRY AGAIN", "cmd_history")
+          .text("← BACK TO WALLET", "main_wallet").row()
+      });
+    }
     
     await ctx.answerCallbackQuery("❌ Error loading history");
   }
@@ -3008,6 +3394,13 @@ const getCachedWalletData = async (telegramId: bigint) => {
   }
 };
 
+// Function to clear wallet cache (useful after token registration)
+const clearWalletCache = (telegramId: bigint) => {
+  const cacheKey = telegramId.toString();
+  walletDataCache.delete(cacheKey);
+  console.log(`🗑️ Cleared wallet cache for user: ${telegramId}`);
+};
+
 // ================================
 // SEND TOKEN INTERFACE HANDLERS
 // ================================
@@ -3186,24 +3579,114 @@ bot.on("callback_query", async (ctx, next) => {
 
 bot.callbackQuery("main_settings", async (ctx) => {
   try {
-    await ctx.editMessageText(
-      "⚙️ <b>INFO & ADMIN</b>\n\n" +
-      "📊 <b>Available Commands:</b>\n" +
-      "▪️ Oracle status\n" +
-      "▪️ Blockchain scan\n" +
-      "▪️ Help information",
-      {
+    const telegramId = BigInt(ctx.from?.id || 0);
+    const keypair = wallet.getKeyPair(telegramId);
+    const walletAddress = keypair.publicKey.toBase58();
+    const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
+
+    const infoContent = [
+      `<pre>T I M B A - I N F O R M A T I O N
+
+System Overview:
+• Solana blockchain integration
+• Real-time token swapping  
+• Secure wallet management
+• Multi-platform support</pre>`,
+      "",
+      `<b>Your Wallet:</b> <code>${shortAddress}</code>`,
+      `<b>Network:</b> Solana Mainnet`,
+      "",
+      `<b>Supported Features:</b>`,
+      `• Token swapping (Jupiter/Pump.fun)`,
+      `• Game creation & participation`,
+      `• Transaction history tracking`,
+      `• Real-time balance monitoring`,
+    ];
+
+    // Try to edit as text, if fails (because current message has media), delete and send new
+    try {
+      await ctx.editMessageText(infoContent.join("\n"), {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("📊 Oracle Status", "cmd_oracle").row()
-          .text("🔍 Scan Blockchain", "cmd_scan").text("❓ Help", "cmd_help").row()
-          .text("⬅️ Back to Main", "back_main")
-      }
-    );
-    await ctx.answerCallbackQuery("⚙️ Info & Admin menu");
+          .text("📊 Oracle Status", "cmd_oracle").text("🔍 Blockchain Scan", "cmd_scan").row()
+          .text("❓ Help", "cmd_help").text("📈 Statistics", "info_stats").row()
+          .text("← BACK", "back_main").row()
+      });
+    } catch (error) {
+      // If edit fails because message has media, delete and send new text message
+      try {
+        await ctx.deleteMessage();
+      } catch {}
+      
+      await ctx.reply(infoContent.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("📊 Oracle Status", "cmd_oracle").text("🔍 Blockchain Scan", "cmd_scan").row()
+          .text("❓ Help", "cmd_help").text("📈 Statistics", "info_stats").row()
+          .text("← BACK", "back_main").row()
+      });
+    }
+    await ctx.answerCallbackQuery("ℹ️ System information");
   } catch (error) {
     console.error("Error in main_settings:", error);
-    await ctx.answerCallbackQuery("❌ Error loading settings menu");
+    await ctx.answerCallbackQuery("❌ Error loading info menu");
+  }
+});
+
+// INFO Statistics handler
+bot.callbackQuery("info_stats", async (ctx) => {
+  try {
+    const telegramId = BigInt(ctx.from?.id || 0);
+    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
+    const formattedSolBalance = wallet.formatSolBalance(solBalance);
+    
+    // Calculate total tokens and USD value
+    const solPriceUSD = await getTokenPriceUSD('SOL');
+    const solDecimalBalance = solBalance / 1000000000; // LAMPORTS_PER_SOL
+    const totalUSD = solDecimalBalance * solPriceUSD;
+    
+    const statsContent = [
+      `<pre>T I M B A - S T A T I S T I C S
+
+Personal Wallet Stats:
+• Total Tokens: ${tokenBalances.length} types
+• SOL Balance: ${formattedSolBalance}
+• USD Value: $${totalUSD.toFixed(2)}
+• Network: Solana Mainnet</pre>`,
+      "",
+      `<b>System Health:</b> ✅ Operational`,
+      `<b>Oracle:</b> 🟢 Online`,
+      `<b>Swap Services:</b> 🟢 Available`,
+      `<b>Games:</b> 🟢 Active`,
+      "",
+      `<b>Available Tokens:</b> ${tokenBalances.filter(t => parseFloat(t.rawBalance) > 0).length} with balance`,
+    ];
+
+    // Try to edit as text, if fails (because current message has media), delete and send new
+    try {
+      await ctx.editMessageText(statsContent.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("🔄 Refresh Stats", "info_stats").text("📊 Oracle Status", "cmd_oracle").row()
+          .text("← BACK TO INFO", "main_settings").text("🏠 Main", "back_main").row()
+      });
+    } catch (error) {
+      // If edit fails because message has media, delete and send new text message
+      try {
+        await ctx.deleteMessage();
+      } catch {}
+      
+      await ctx.reply(statsContent.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("🔄 Refresh Stats", "info_stats").text("📊 Oracle Status", "cmd_oracle").row()
+          .text("← BACK TO INFO", "main_settings").text("🏠 Main", "back_main").row()
+      });
+    }
+    await ctx.answerCallbackQuery("📈 Statistics updated");
+  } catch (error) {
+    console.error("Error in info_stats:", error);
+    await ctx.answerCallbackQuery("❌ Error loading statistics");
   }
 });
 
@@ -3216,19 +3699,24 @@ bot.callbackQuery("back_main", async (ctx) => {
     const shortAddress = `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`;
 
     // Build main menu with same format as /start
-    const timbaAscii = `T I M B A`;
-    
-    const response = [
-      `<pre>${timbaAscii}</pre>`,
-      "",
+    const welcomeMessage = [
       `<b>WELCOME ${username.toUpperCase()}</b>`,
       "",
       `<code>${walletAddress}</code>`,
     ];
 
-    await ctx.editMessageText(response.join("\n"), {
+    // Always delete current message and send new animated one for consistency
+    try {
+      await ctx.deleteMessage();
+    } catch {}
+    
+    // Use same animated banner as /start
+    const welcomeAnimationFileId = "CgACAgEAAxkBAAIEF2irzq9DBOMIkGfEzQQPe1huXlJVAAJdBgACaPJgRai8H1bQmnXpNgQ";
+    
+    await ctx.replyWithAnimation(welcomeAnimationFileId, {
+      caption: welcomeMessage.join("\n"),
       parse_mode: "HTML",
-      reply_markup: createMainMenuKeyboard()
+      reply_markup: createMainMenuKeyboard(),
     });
     await ctx.answerCallbackQuery("🏠 Main menu");
   } catch (error) {
@@ -3501,20 +3989,52 @@ bot.callbackQuery("admin_menu", async (ctx) => {
   try {
     // Check if user has admin privileges (you can implement proper admin check here)
     const telegramId = BigInt(ctx.from?.id || 0);
+    const keypair = wallet.getKeyPair(telegramId);
+    const walletAddress = keypair.publicKey.toBase58();
+    const isAdmin = walletAddress === process.env.ADMIN_WALLET; // You can set this in env
     
-    await ctx.editMessageText(
-      "🔧 <b>ADMIN PANEL</b>\n\n" +
-      "Administrative tools and system management:",
-      {
+    const adminContent = [
+      `<pre>T I M B A - A D M I N  P A N E L
+
+System Administration:
+• Token management & approval
+• Game monitoring & control
+• System diagnostics & health
+• User & transaction oversight</pre>`,
+      "",
+      `<b>Admin Status:</b> ${isAdmin ? '✅ Authorized' : '⚠️ Limited Access'}`,
+      `<b>System:</b> Solana Mainnet`,
+      `<b>Network:</b> Connected`,
+      "",
+      `<b>Available Tools:</b>`,
+    ];
+
+    // Try to edit as text, if fails (because current message has media), delete and send new
+    try {
+      await ctx.editMessageText(adminContent.join("\n"), {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("🪙 MANAGE TOKENS", "admin_tokens").text("🎮 MANAGE GAMES", "admin_games").row()
-          .text("👥 USER MANAGEMENT", "admin_users").text("📊 SYSTEM STATUS", "admin_system").row()
-          .text("🔧 SETTINGS", "admin_settings").text("📝 LOGS", "admin_logs").row()
-          .text("⬅️ Back to Main", "back_main").row()
-      }
-    );
-    await ctx.answerCallbackQuery("🔧 Admin Panel");
+          .text("🪙 Token Manager", "admin_tokens").text("🎮 Game Monitor", "admin_games").row()
+          .text("📊 System Status", "admin_system").text("🔍 Diagnostics", "cmd_scan").row()
+          .text("📊 Oracle Status", "cmd_oracle").text("📝 System Logs", "admin_logs").row()
+          .text("← BACK", "back_main").row()
+      });
+    } catch (error) {
+      // If edit fails because message has media, delete and send new text message
+      try {
+        await ctx.deleteMessage();
+      } catch {}
+      
+      await ctx.reply(adminContent.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("🪙 Token Manager", "admin_tokens").text("🎮 Game Monitor", "admin_games").row()
+          .text("📊 System Status", "admin_system").text("🔍 Diagnostics", "cmd_scan").row()
+          .text("📊 Oracle Status", "cmd_oracle").text("📝 System Logs", "admin_logs").row()
+          .text("← BACK", "back_main").row()
+      });
+    }
+    await ctx.answerCallbackQuery("🔧 Admin Panel accessed");
   } catch (error) {
     console.error("Error in admin_menu:", error);
     await ctx.answerCallbackQuery("❌ Error loading admin panel");
@@ -3664,11 +4184,25 @@ Supported Platforms:
       `Send the contract address as a message`
     ];
 
-    await ctx.editMessageText(response.join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
-        .text("❌ Cancel", "main_wallet").row()
-    });
+    // Try to edit as text, if fails (because current message has media), delete and send new
+    try {
+      await ctx.editMessageText(response.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("❌ Cancel", "main_wallet").row()
+      });
+    } catch (error) {
+      // If edit fails because message has media, delete and send new text message
+      try {
+        await ctx.deleteMessage();
+      } catch {}
+      
+      await ctx.reply(response.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("❌ Cancel", "main_wallet").row()
+      });
+    }
     
     // Set user state for contract address input
     setUserState(userId, {
@@ -3694,7 +4228,12 @@ bot.callbackQuery("cmd_sell", async (ctx) => {
     const { tokenBalances } = await getCachedWalletData(telegramId);
     
     const response = [
-      `🔴 <b>SELL TOKENS</b>`,
+      `<pre>T I M B A - S E L L  T O K E N S
+
+Supported Platforms:
+• Pump.fun tokens
+• DAOS.fun tokens  
+• Any token on Jupiter DEX</pre>`,
       "",
       `<b>From Wallet:</b> <code>${shortAddress}</code>`,
       "",
@@ -3708,7 +4247,39 @@ bot.callbackQuery("cmd_sell", async (ctx) => {
     for (const token of tokenBalances.slice(0, 6)) {
       if (parseFloat(token.rawBalance) > 0) {
         const formatted = wallet.formatTokenBalance(token.balance, token.decimals);
-        keyboard.text(`${token.ticker} (${formatted})`, `sell_token_${token.ticker}`).row();
+        
+        // Try to get estimated SOL value for this token
+        let solEstimate = "";
+        try {
+          // Only get quote if we have valid token data and the token is not SOL itself
+          if (token.mint && token.mint !== 'undefined' && token.mint !== 'So11111111111111111111111111111111111111112' && 
+              token.ticker && token.ticker !== 'undefined' && typeof token.mint === 'string' && 
+              token.mint.length > 30 && token.rawBalance && token.decimals !== undefined) {
+            
+            // Get a quote for selling this token amount to SOL
+            const quote = await swapManager.getQuote(
+              token.mint, // input (token to sell)
+              'So11111111111111111111111111111111111111112', // output (SOL)
+              token.rawBalance, // amount to sell
+              token.decimals, // input decimals
+              9, // SOL decimals
+              500 // 5% slippage
+            );
+            
+            // Format the SOL amount we'd receive
+            const solAmount = parseFloat(quote.outputAmount) / 1000000000; // Convert lamports to SOL
+            if (solAmount > 0.001) {
+              solEstimate = ` → ${solAmount.toFixed(4)} SOL`;
+            } else if (solAmount > 0) {
+              solEstimate = ` → ${solAmount.toFixed(6)} SOL`;
+            }
+          }
+        } catch (error) {
+          // If quote fails, just show token balance without SOL estimate
+          console.log(`Could not get quote for ${token.ticker || 'unknown token'}: ${error.message}`);
+        }
+        
+        keyboard.text(`${token.ticker} (${formatted}${solEstimate})`, `sell_token_${token.ticker}`).row();
         hasTokens = true;
       }
     }
@@ -3719,10 +4290,23 @@ bot.callbackQuery("cmd_sell", async (ctx) => {
     
     keyboard.text("← BACK TO WALLET", "main_wallet").row();
 
-    await ctx.editMessageText(response.join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: keyboard
-    });
+    // Try to edit as text, if fails (because current message has media), delete and send new
+    try {
+      await ctx.editMessageText(response.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: keyboard
+      });
+    } catch (error) {
+      // If edit fails because message has media, delete and send new text message
+      try {
+        await ctx.deleteMessage();
+      } catch {}
+      
+      await ctx.reply(response.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: keyboard
+      });
+    }
     await ctx.answerCallbackQuery("🔴 Select token to sell");
   } catch (error) {
     console.error("Error in cmd_sell:", error);
@@ -5392,6 +5976,7 @@ bot.catch((err) => {
 // MESSAGE HANDLER FOR USER INPUT
 // ================================
 
+
 // Handle text messages when user is in input state
 bot.on("message:text", async (ctx, next) => {
   const userId = ctx.from?.id?.toString();
@@ -5433,18 +6018,22 @@ bot.on("message:text", async (ctx, next) => {
     
     // Try to update the original message with error
     try {
-      await ctx.api.editMessageText(
-        ctx.chat.id,
-        userState.messageId,
-        "❌ <b>Error processing input</b>\n\nPlease try again.",
-        {
-          parse_mode: "HTML",
-          reply_markup: new InlineKeyboard()
-            .text("← BACK TO WALLET", "main_wallet").row()
-        }
-      );
+      await ctx.editMessageText("❌ <b>Error processing input</b>\n\nPlease try again.", {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("← BACK TO WALLET", "main_wallet").row()
+      });
     } catch (editError) {
-      console.error("Failed to update message with error:", editError);
+      // If edit fails, delete and send new message
+      try {
+        await ctx.deleteMessage();
+      } catch {}
+      
+      await ctx.reply("❌ <b>Error processing input</b>\n\nPlease try again.", {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("← BACK TO WALLET", "main_wallet").row()
+      });
     }
   }
 });
@@ -5667,23 +6256,36 @@ const handleBuyContractAddressInput = async (ctx: any, userState: any, contractA
     }
     
     // Show loading state
-    await ctx.api.editMessageText(
-      ctx.chat.id,
-      userState.messageId,
-      [
-        "🔍 <b>Fetching Token Information...</b>",
-        "",
-        `<b>Contract Address:</b>`,
-        `<code>${contractAddress}</code>`,
-        "",
-        "🔄 <i>Please wait while we validate and fetch token metadata...</i>"
-      ].join("\n"),
-      {
+    const loadingMessage = [
+      "🔍 <b>Fetching Token Information...</b>",
+      "",
+      `<b>Contract Address:</b>`,
+      `<code>${contractAddress}</code>`,
+      "",
+      "🔄 <i>Please wait while we validate and fetch token metadata...</i>"
+    ].join("\n");
+    
+    try {
+      await ctx.editMessageText(loadingMessage, {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
           .text("❌ Cancel", "cmd_buy").row()
-      }
-    );
+      });
+    } catch (error) {
+      // If edit fails because message has media or doesn't exist, delete and send new
+      try {
+        await ctx.deleteMessage();
+      } catch {}
+      
+      const newMsg = await ctx.reply(loadingMessage, {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("❌ Cancel", "cmd_buy").row()
+      });
+      
+      // Update the message ID in user state
+      userState.messageId = newMsg.message_id;
+    }
     
     // Try to fetch token metadata
     const tokenInfo = await fetchTokenMetadata(contractAddress, telegramId);
@@ -5740,15 +6342,22 @@ ${contractAddress}</pre>`,
     
     keyboard.text("← BACK", "cmd_buy").row();
     
-    await ctx.api.editMessageText(
-      ctx.chat.id,
-      userState.messageId,
-      response.join("\n"),
-      {
+    try {
+      await ctx.editMessageText(response.join("\n"), {
         parse_mode: "HTML",
         reply_markup: keyboard
-      }
-    );
+      });
+    } catch (error) {
+      // If edit fails because message has media or doesn't exist, delete and send new
+      try {
+        await ctx.deleteMessage();
+      } catch {}
+      
+      await ctx.reply(response.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: keyboard
+      });
+    }
     
     // Clear user state since we now have direct buy buttons with contract address in callback
     userStates.delete(ctx.from.id.toString());
@@ -5771,16 +6380,27 @@ ${contractAddress}</pre>`,
       `⏱️ <i>This will timeout in 5 minutes</i>`
     ];
 
-    await ctx.api.editMessageText(
-      ctx.chat.id,
-      userState.messageId,
-      errorMessage.join("\n"),
-      {
+    try {
+      await ctx.editMessageText(errorMessage.join("\n"), {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
           .text("❌ Cancel", "cmd_buy").row()
-      }
-    );
+      });
+    } catch (error) {
+      // If edit fails because message has media or doesn't exist, delete and send new
+      try {
+        await ctx.deleteMessage();
+      } catch {}
+      
+      const newMsg = await ctx.reply(errorMessage.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("❌ Cancel", "cmd_buy").row()
+      });
+      
+      // Update the message ID in user state
+      userState.messageId = newMsg.message_id;
+    }
     
     // Keep the same state for retry
     setUserState(ctx.from.id.toString(), {
@@ -5807,22 +6427,35 @@ const handleBuyTokenSymbolInput = async (ctx: any, userState: any, tokenSymbol: 
     }
     
     // Show loading state
-    await ctx.api.editMessageText(
-      ctx.chat.id,
-      userState.messageId,
-      [
-        "🔍 <b>Searching for Token...</b>",
-        "",
-        `<b>Symbol:</b> ${cleanSymbol}`,
-        "",
-        "🔄 <i>Please wait while we search for tokens matching this symbol...</i>"
-      ].join("\n"),
-      {
+    const loadingMessage = [
+      "🔍 <b>Searching for Token...</b>",
+      "",
+      `<b>Symbol:</b> ${cleanSymbol}`,
+      "",
+      "🔄 <i>Please wait while we search for tokens matching this symbol...</i>"
+    ].join("\n");
+    
+    try {
+      await ctx.editMessageText(loadingMessage, {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
           .text("❌ Cancel", "cmd_buy").row()
-      }
-    );
+      });
+    } catch (error) {
+      // If edit fails because message has media or doesn't exist, delete and send new
+      try {
+        await ctx.deleteMessage();
+      } catch {}
+      
+      const newMsg = await ctx.reply(loadingMessage, {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("❌ Cancel", "cmd_buy").row()
+      });
+      
+      // Update the message ID in user state
+      userState.messageId = newMsg.message_id;
+    }
     
     // Try to find token by symbol in our known tokens first
     let tokenInfo = null;
@@ -5881,15 +6514,22 @@ const handleBuyTokenSymbolInput = async (ctx: any, userState: any, tokenSymbol: 
     
     keyboard.text("← BACK", "cmd_buy").row();
     
-    await ctx.api.editMessageText(
-      ctx.chat.id,
-      userState.messageId,
-      response.join("\n"),
-      {
+    try {
+      await ctx.editMessageText(response.join("\n"), {
         parse_mode: "HTML",
         reply_markup: keyboard
-      }
-    );
+      });
+    } catch (error) {
+      // If edit fails because message has media or doesn't exist, delete and send new
+      try {
+        await ctx.deleteMessage();
+      } catch {}
+      
+      await ctx.reply(response.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: keyboard
+      });
+    }
     
   } catch (error: any) {
     console.error("Error searching for token:", error);
@@ -5909,17 +6549,29 @@ const handleBuyTokenSymbolInput = async (ctx: any, userState: any, tokenSymbol: 
       `⏱️ <i>This will timeout in 5 minutes</i>`
     ];
 
-    await ctx.api.editMessageText(
-      ctx.chat.id,
-      userState.messageId,
-      errorMessage.join("\n"),
-      {
+    try {
+      await ctx.editMessageText(errorMessage.join("\n"), {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
           .text("🔗 Use Contract Address", "buy_contract_")
           .text("❌ Cancel", "cmd_buy").row()
-      }
-    );
+      });
+    } catch (error) {
+      // If edit fails because message has media or doesn't exist, delete and send new
+      try {
+        await ctx.deleteMessage();
+      } catch {}
+      
+      const newMsg = await ctx.reply(errorMessage.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text("🔗 Use Contract Address", "buy_contract_")
+          .text("❌ Cancel", "cmd_buy").row()
+      });
+      
+      // Update the message ID in user state
+      userState.messageId = newMsg.message_id;
+    }
     
     // Keep the same state for retry
     setUserState(ctx.from.id.toString(), {
