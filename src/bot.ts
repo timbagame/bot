@@ -351,7 +351,7 @@ const handleCallbackError = async (
 const initializeAnchorProvider = async () => {
   const adminKeypair = wallet.getAdminKeypair();
   const adminWallet = new anchor.Wallet(
-    adminKeypair as anchor.web3.Keypair
+    adminKeypair as unknown as anchor.web3.Keypair
   );
   const connection = wallet.getConnection();
 

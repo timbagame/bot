@@ -281,7 +281,7 @@ async function initializeGameToken() {
 
   // Setup Anchor provider
   const adminWallet = new anchor.Wallet(
-    adminKeypair as anchor.web3.Keypair
+    adminKeypair as unknown as anchor.web3.Keypair
   );
   const provider = new anchor.AnchorProvider(
     connection as unknown as anchor.web3.Connection,
