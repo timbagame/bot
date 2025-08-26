@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { Database } from "bun:sqlite";
 import path from "path";
 
 // ================================
@@ -27,12 +27,12 @@ export interface TransactionRecord {
 // ================================
 
 export class TransactionHistory {
-  private db: Database.Database;
+  private db: Database;
   private static instance: TransactionHistory | null = null;
 
   constructor() {
     const dbPath = path.join(process.cwd(), "transaction-history.sqlite");
-    this.db = new Database(dbPath);
+    this.db = new Database(dbPath, { create: true });
     this.initializeTables();
     console.log("📊 TransactionHistory database initialized");
   }
@@ -46,8 +46,8 @@ export class TransactionHistory {
 
   private initializeTables(): void {
     // Create transaction history table
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS transaction_history (
+    this.db.run(
+      `CREATE TABLE IF NOT EXISTS transaction_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL,
         transaction_type TEXT NOT NULL,
@@ -63,15 +63,19 @@ export class TransactionHistory {
         network TEXT DEFAULT 'mainnet',
         block_height INTEGER,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+      )`
+    );
 
     // Create indexes for better performance
-    this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_user_timestamp ON transaction_history(user_id, timestamp DESC);
-      CREATE INDEX IF NOT EXISTS idx_signature ON transaction_history(signature);
-      CREATE INDEX IF NOT EXISTS idx_type_user ON transaction_history(transaction_type, user_id);
-    `);
+    this.db.run(
+      `CREATE INDEX IF NOT EXISTS idx_user_timestamp ON transaction_history(user_id, timestamp DESC)`
+    );
+    this.db.run(
+      `CREATE INDEX IF NOT EXISTS idx_signature ON transaction_history(signature)`
+    );
+    this.db.run(
+      `CREATE INDEX IF NOT EXISTS idx_type_user ON transaction_history(transaction_type, user_id)`
+    );
   }
 
   /**

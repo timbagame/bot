@@ -58,7 +58,7 @@ export class SwapManager {
     this.network = NetworkDetector.getCurrentNetwork();
 
     this.jupiterClient = new JupiterClient();
-    this.pumpFunClient = new PumpFunClient(connection, wallet);
+    this.pumpFunClient = new PumpFunClient(connection);
   }
 
   /**

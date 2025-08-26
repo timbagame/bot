@@ -6,7 +6,6 @@ import {
 } from "@solana/web3.js";
 import { PumpSdk } from "@pump-fun/pump-sdk";
 import { deserializeMetadata } from "@metaplex-foundation/mpl-token-metadata";
-import { WalletManager } from "./wallet";
 import { NetworkDetector } from "./network-detector";
 import BN from "bn.js";
 
@@ -40,7 +39,7 @@ export class PumpFunClient {
   private sdk: PumpSdk;
   private connection: Connection;
 
-  constructor(connection: Connection, _wallet: WalletManager) {
+  constructor(connection: Connection) {
     this.connection = connection;
     this.sdk = new PumpSdk(connection);
   }
