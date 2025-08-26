@@ -23,6 +23,7 @@ import {
   MAX_RETRIES,
   CONFIRMATION_TIMEOUT_MS,
 } from "./constants";
+import { formatAmount } from "./format-amount";
 
 // ================================
 // UTILITY FUNCTIONS
@@ -918,11 +919,14 @@ export class WalletManager {
   }
 
   public formatSolBalance(lamports: number): string {
-    return (lamports / LAMPORTS_PER_SOL).toFixed(4);
+    return formatAmount(lamports, 9, { maxFractionDigits: 6, trim: true });
   }
 
   public formatTokenBalance(amount: number, decimals: number): string {
-    const formatted = amount / Math.pow(10, decimals);
-    return formatted.toFixed(4);
+    const maxFraction = Math.min(6, Math.max(0, decimals));
+    return formatAmount(amount, decimals, {
+      maxFractionDigits: maxFraction,
+      trim: true,
+    });
   }
 }
