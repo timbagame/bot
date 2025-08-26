@@ -7,6 +7,7 @@ import {
 import { PumpSdk } from "@pump-fun/pump-sdk";
 import { deserializeMetadata } from "@metaplex-foundation/mpl-token-metadata";
 import { NetworkDetector } from "./network-detector";
+import { formatAmount } from "./format-amount";
 import BN from "bn.js";
 
 // ================================
@@ -561,19 +562,30 @@ export class PumpFunClient {
     inputTicker: string,
     outputTicker: string
   ): string {
-    const inputAmount =
-      parseFloat(quote.inputAmount) / Math.pow(10, inputDecimals);
-    const outputAmount =
-      parseFloat(quote.outputAmount) / Math.pow(10, outputDecimals);
+    // Convert decimal strings to raw smallest units for consistent formatting
+    const inputRaw = Math.round(
+      parseFloat(quote.inputAmount) * Math.pow(10, inputDecimals)
+    );
+    const outputRaw = Math.round(
+      parseFloat(quote.outputAmount) * Math.pow(10, outputDecimals)
+    );
+
+    const inputAmountStr = formatAmount(inputRaw, inputDecimals, {
+      maxFractionDigits: Math.min(6, inputDecimals),
+      trim: true,
+    });
+    const outputAmountStr = formatAmount(outputRaw, outputDecimals, {
+      maxFractionDigits: Math.min(6, outputDecimals),
+      trim: true,
+    });
 
     let message = `🚀 **Pump.fun Swap Preview**\n\n`;
-    message += `📥 **You pay:** ${inputAmount.toFixed(6)} ${inputTicker}\n`;
-    message += `📤 **You receive:** ${outputAmount.toFixed(
-      6
-    )} ${outputTicker}\n`;
-    message += `💹 **Rate:** 1 ${inputTicker} = ${(
-      outputAmount / inputAmount
-    ).toFixed(6)} ${outputTicker}\n`;
+    message += `📥 **You pay:** ${inputAmountStr} ${inputTicker}\n`;
+    message += `📤 **You receive:** ${outputAmountStr} ${outputTicker}\n`;
+    const inputDec = parseFloat(inputAmountStr || "0");
+    const outputDec = parseFloat(outputAmountStr || "0");
+    const rate = inputDec > 0 ? (outputDec / inputDec).toFixed(6) : "0";
+    message += `💹 **Rate:** 1 ${inputTicker} = ${rate} ${outputTicker}\n`;
     message += `🎯 **Slippage:** ${quote.slippage}%\n`;
     message += `🔥 **Pump.fun Token** (Not graduated)\n`;
 
