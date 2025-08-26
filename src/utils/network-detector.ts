@@ -4,6 +4,15 @@
 
 export type SolanaNetwork = "mainnet" | "devnet" | "testnet" | "localnet";
 
+const JUPITER_NETWORKS = new Set<SolanaNetwork>(["mainnet"]);
+
+const NETWORK_DISPLAY_NAMES: Record<SolanaNetwork, string> = {
+  mainnet: "Mainnet",
+  devnet: "Devnet",
+  testnet: "Testnet",
+  localnet: "Localnet",
+};
+
 export class NetworkDetector {
   /**
    * Detect network based on RPC URL
@@ -31,29 +40,14 @@ export class NetworkDetector {
    * Check if network supports Jupiter
    */
   static supportsJupiter(network: SolanaNetwork): boolean {
-    return network === "mainnet";
-  }
-
-  /**
-   * Check if network supports simulation
-   */
-  static supportsSimulation(network: SolanaNetwork): boolean {
-    return (
-      network === "devnet" || network === "testnet" || network === "localnet"
-    );
+    return JUPITER_NETWORKS.has(network);
   }
 
   /**
    * Get network display name
    */
   static getNetworkDisplayName(network: SolanaNetwork): string {
-    const names = {
-      mainnet: "Mainnet",
-      devnet: "Devnet",
-      testnet: "Testnet",
-      localnet: "Localnet",
-    };
-    return names[network];
+    return NETWORK_DISPLAY_NAMES[network];
   }
 
   /**
