@@ -62,7 +62,8 @@ export class TransactionHistory {
         timestamp INTEGER NOT NULL,
         network TEXT DEFAULT 'mainnet',
         block_height INTEGER,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`
     );
 
@@ -76,6 +77,7 @@ export class TransactionHistory {
     this.db.run(
       `CREATE INDEX IF NOT EXISTS idx_type_user ON transaction_history(transaction_type, user_id)`
     );
+
   }
 
   /**

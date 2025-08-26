@@ -301,13 +301,6 @@ export class PumpFunClient {
         outputAmount = tokenAmount.toString();
         estimatedRate = tokenAmount / solAmountLamports;
 
-        // FINAL FIX: Don't pre-calculate amounts - let pump.fun handle it dynamically
-        // The issue is that pump.fun calculates amounts in real-time based on fresh curve data
-        // Pre-calculating creates a mismatch when the curve changes between quote and execution
-
-        // Successfully using original amount - pump.fun handles slippage dynamically
-
-        // Return the original amount - createSwapTransaction will handle the dynamic calculation
         return {
           inputMint,
           outputMint,
@@ -418,8 +411,6 @@ export class PumpFunClient {
           buyState.bondingCurve,
           Number(solAmount)
         );
-        // CRITICAL FIX: Use a more generous slippage tolerance for minTokensOut
-        // This allows pump.fun to handle the dynamic curve changes
         const generousSlippageBps = Math.max(slippageBps, 500); // At least 5% slippage
         const minTokensOut = Math.floor(
           expectedTokenAmount * (1 - generousSlippageBps / 10000)
