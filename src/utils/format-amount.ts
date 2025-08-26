@@ -50,11 +50,10 @@ export function formatAmount(
   const needed = Math.max(decimals + 1 - digits.length, 0);
   const padded = (needed > 0 ? "0".repeat(needed) : "") + digits;
 
-  let integerPart =
-    decimals === 0 ? padded : padded.slice(0, Math.max(padded.length - decimals, 0)) || "0";
+  let integerPart = decimals === 0 ? padded : padded.slice(0, -decimals) || "0";
   let fractionalFull = decimals === 0 ? "" : padded.slice(-decimals).padStart(decimals, "0");
 
-  const desired = Math.max(0, Math.min(maxFractionDigits, Math.max(0, decimals)));
+  const desired = Math.max(0, Math.min(maxFractionDigits, decimals));
 
   // Rounding
   if (decimals === 0 || desired === 0) {
