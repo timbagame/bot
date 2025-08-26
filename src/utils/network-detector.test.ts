@@ -26,3 +26,20 @@ test("detectNetwork defaults to mainnet", () => {
   );
   expect(network).toBe("mainnet");
 });
+
+test("supportsJupiter only on mainnet", () => {
+  expect(NetworkDetector.supportsJupiter("mainnet")).toBe(true);
+  expect(NetworkDetector.supportsJupiter("devnet")).toBe(false);
+});
+
+test("getNetworkDisplayName returns friendly names", () => {
+  expect(NetworkDetector.getNetworkDisplayName("devnet")).toBe("Devnet");
+  expect(NetworkDetector.getNetworkDisplayName("mainnet")).toBe("Mainnet");
+});
+
+test("getCurrentNetwork reads from environment", () => {
+  const original = process.env.SOLANA_NETWORK;
+  process.env.SOLANA_NETWORK = "https://api.testnet.solana.com";
+  expect(NetworkDetector.getCurrentNetwork()).toBe("testnet");
+  process.env.SOLANA_NETWORK = original;
+});
