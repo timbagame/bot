@@ -5842,12 +5842,12 @@ bot.on("callback_query", async (ctx, next) => {
         const suggestedAmount = requiredAmount + difference * 0.1; // Add 10% buffer
         const isDifferenceSmall = difference < 0.001;
 
+        const suggestedLamports = Math.round(suggestedAmount * 1_000_000_000);
+        const suggestedStr = wallet.formatSolBalance(suggestedLamports);
         suggestionText = isDifferenceSmall
-          ? `• Try with ${suggestedAmount.toFixed(
-              6
-            )} SOL (includes fees/buffer)`
-          : `• Try with ${suggestedAmount.toFixed(4)} SOL (price moved)`;
-        buttonText = `💡 ${suggestedAmount.toFixed(6)} SOL`;
+          ? `• Try with ${suggestedStr} SOL (includes fees/buffer)`
+          : `• Try with ${suggestedStr} SOL (price moved)`;
+        buttonText = `💡 ${suggestedStr} SOL`;
       }
 
       // Get difference amount for better messaging
@@ -5863,10 +5863,10 @@ bot.on("callback_query", async (ctx, next) => {
         "",
         `You tried: ${buyData.amount} ${buyData.fromToken}`,
         requiredAmount
-          ? `Need: ${requiredAmount.toFixed(6)} ${buyData.fromToken}`
+          ? `Need: ${wallet.formatSolBalance(Math.round(requiredAmount * 1_000_000_000))} ${buyData.fromToken}`
           : "But need slightly more",
         isDifferenceSmall
-          ? `Difference: ${difference.toFixed(6)} SOL (likely fees/precision)`
+          ? `Difference: ${wallet.formatSolBalance(Math.round(difference * 1_000_000_000))} SOL (likely fees/precision)`
           : "",
         "",
         "<b>Why this happens:</b>",
