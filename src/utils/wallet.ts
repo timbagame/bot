@@ -8,6 +8,7 @@ import {
   TransactionMessage,
   LAMPORTS_PER_SOL,
   SolanaJSONRPCError,
+  SystemProgram,
 } from "@solana/web3.js";
 import {
   getAssociatedTokenAddress,
@@ -19,11 +20,10 @@ import * as path from "path";
 import {
   WALLET_RATE_LIMIT_MS,
   BLOCKHASH_CACHE_DURATION,
-  SOL_BALANCE_PRECISION,
-  TOKEN_BALANCE_MAX_PRECISION,
   MAX_RETRIES,
   CONFIRMATION_TIMEOUT_MS,
 } from "./constants";
+import { formatAmount } from "./format-amount";
 
 // ================================
 // UTILITY FUNCTIONS
@@ -225,18 +225,41 @@ export class WalletManager {
     }
 
     try {
-      // Get all token accounts for the user in a single RPC call
-      const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(
-        pubkey,
-        {
+      console.log(
+        `🔍 Getting token accounts for user: ${telegramId}, pubkey: ${pubkey.toBase58()}`
+      );
+
+      // Get all token accounts for both SPL Token and Token-2022 programs
+      const [splTokenAccounts, token2022Accounts] = await Promise.all([
+        this.connection.getParsedTokenAccountsByOwner(pubkey, {
           programId: new PublicKey(
             "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
           ), // SPL Token program
-        }
+        }),
+        this.connection.getParsedTokenAccountsByOwner(pubkey, {
+          programId: new PublicKey(
+            "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+          ), // Token-2022 program
+        }),
+      ]);
+
+      // Combine both token account arrays
+      const allTokenAccounts = [
+        ...(splTokenAccounts.value || []),
+        ...(token2022Accounts.value || []),
+      ];
+
+      console.log(
+        `📊 Found ${
+          splTokenAccounts.value?.length || 0
+        } SPL token accounts and ${
+          token2022Accounts.value?.length || 0
+        } Token-2022 accounts (${allTokenAccounts.length} total)`
       );
 
       // Early return if user has no token accounts
-      if (!tokenAccounts.value || tokenAccounts.value.length === 0) {
+      if (!allTokenAccounts || allTokenAccounts.length === 0) {
+        console.log(`❌ No token accounts found for user ${telegramId}`);
         return [];
       }
 
@@ -254,21 +277,99 @@ export class WalletManager {
       );
 
       // Process each token account
-      for (const accountInfo of tokenAccounts.value) {
+      for (const accountInfo of allTokenAccounts) {
         try {
           const parsedData = accountInfo.account.data.parsed;
           const tokenAmount = parsedData.info.tokenAmount;
           const mint = parsedData.info.mint;
 
-          // Only include tokens that:
-          // 1. Are in our approved tokens list
-          // 2. Have a non-zero balance
           const approvedToken = approvedTokensMap.get(mint);
-          if (approvedToken && parseFloat(tokenAmount.amount) > 0) {
+          console.log(
+            `🔍 Token found: ${mint}, approved: ${!!approvedToken}, ticker: ${
+              approvedToken?.token_ticker
+            }, raw amount: ${tokenAmount.amount}, decimals: ${
+              tokenAmount.decimals
+            }`
+          );
+
+          // Auto-register tokens with non-zero balance that aren't approved
+          if (!approvedToken && parseFloat(tokenAmount.amount) > 0) {
+            console.log(
+              `🔄 Auto-registering unknown token with balance: ${mint}`
+            );
+
+            try {
+              // Import TokenManager dynamically to avoid circular imports
+              const { TokenManager } = await import("./token-manager");
+              const tokenManager = TokenManager.getInstance();
+
+              // Try to get metadata for the unknown token
+              const fullMetadata = await this.getFullTokenMetadata(mint);
+              let ticker = fullMetadata.symbol || `TOKEN_${mint.slice(-4)}`;
+
+              console.log(`📝 Auto-registering token: ${ticker} (${mint})`);
+              const registered = await tokenManager.addToken(mint, ticker);
+
+              if (registered) {
+                console.log(`✅ Successfully auto-registered: ${ticker}`);
+                // Add to approved tokens map for immediate use
+                approvedTokensMap.set(mint, {
+                  token_mint: mint,
+                  token_ticker: ticker,
+                  decimals: tokenAmount.decimals,
+                });
+              } else {
+                console.log(`❌ Failed to auto-register: ${ticker}`);
+                continue; // Skip this token if registration failed
+              }
+            } catch (regError) {
+              console.error(
+                `❌ Error auto-registering token ${mint}:`,
+                regError
+              );
+              continue; // Skip this token if auto-registration failed
+            }
+          }
+
+          const finalApprovedToken = approvedTokensMap.get(mint);
+          if (finalApprovedToken && parseFloat(tokenAmount.amount) > 0) {
             const balance = parseFloat(tokenAmount.amount);
+
+            // Try to get real ticker from metadata, fallback to approved ticker
+            let finalTicker = finalApprovedToken.token_ticker;
+            console.log(
+              `🔍 Attempting to get metadata for token ${mint} (current ticker: ${finalTicker})`
+            );
+
+            try {
+              const fullMetadata = await this.getFullTokenMetadata(mint);
+              console.log(`📋 Full metadata result for ${mint}:`, fullMetadata);
+
+              if (fullMetadata.symbol && fullMetadata.symbol !== "UNKNOWN") {
+                finalTicker = fullMetadata.symbol;
+                console.log(
+                  `✅ Updated ticker for ${mint}: ${finalApprovedToken.token_ticker} → ${finalTicker}`
+                );
+              } else {
+                console.log(`⚠️ No valid symbol found in metadata for ${mint}`);
+              }
+            } catch (error) {
+              // Use fallback ticker
+              console.log(
+                `❌ Error getting metadata for ${mint}, using fallback ticker: ${finalTicker}`,
+                error
+              );
+            }
+
+            console.log(
+              `✅ Adding token: ${finalTicker}, balance: ${balance}, formatted: ${this.formatTokenBalance(
+                balance,
+                tokenAmount.decimals
+              )}`
+            );
             results.push({
               mint,
-              ticker: approvedToken.token_ticker,
+              ticker: finalTicker,
               balance,
               decimals: tokenAmount.decimals,
               rawBalance: tokenAmount.amount,
@@ -300,6 +401,132 @@ export class WalletManager {
     }
   }
 
+  /**
+   * Get full token metadata including symbol and name
+   */
+  public async getFullTokenMetadata(
+    tokenMint: string
+  ): Promise<{ decimals: number; symbol?: string; name?: string }> {
+    try {
+      // Try to get metadata from Metaplex first
+      const metadataPDA = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from("metadata"),
+          new PublicKey(
+            "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+          ).toBuffer(),
+          new PublicKey(tokenMint).toBuffer(),
+        ],
+        new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s")
+      )[0];
+
+      const metadataAccount = await this.connection.getAccountInfo(metadataPDA);
+
+      if (metadataAccount && metadataAccount.data) {
+        // Import deserializeMetadata dynamically
+        const { deserializeMetadata } = await import(
+          "@metaplex-foundation/mpl-token-metadata"
+        );
+        const metadata = deserializeMetadata(metadataAccount as any);
+
+        const symbol = metadata.symbol?.trim() || "";
+        const name = metadata.name?.trim() || "";
+
+        if (symbol && symbol !== "" && symbol !== "UNKNOWN") {
+          const basicMetadata = await this.getTokenMetadata(tokenMint);
+          return {
+            decimals: basicMetadata.decimals,
+            symbol: symbol,
+            name: name || "Token",
+          };
+        }
+      }
+    } catch (error) {
+      console.log("Metaplex metadata not available for", tokenMint);
+    }
+
+    // Try external APIs as fallback
+    console.log(`🌐 Trying external APIs for token: ${tokenMint}`);
+
+    // Try SolanaFM API first (good for old tokens)
+    try {
+      const response = await fetch(
+        `https://api.solana.fm/v0/tokens/${tokenMint}`
+      );
+      console.log(`📡 SolanaFM API response status: ${response.status}`);
+      if (response.ok) {
+        const data = (await response.json()) as any;
+        console.log(`📋 SolanaFM API data:`, data);
+        if (data && data.tokenInfo && data.tokenInfo.symbol) {
+          const basicMetadata = await this.getTokenMetadata(tokenMint);
+          console.log(
+            `✅ Got symbol from SolanaFM API: ${data.tokenInfo.symbol}`
+          );
+          return {
+            decimals: basicMetadata.decimals,
+            symbol: data.tokenInfo.symbol,
+            name: data.tokenInfo.name || data.tokenInfo.symbol,
+          };
+        }
+      }
+    } catch (error) {
+      console.log("SolanaFM API not available for", tokenMint, error);
+    }
+
+    try {
+      // Try Jupiter token list API
+      const response = await fetch(`https://tokens.jup.ag/token/${tokenMint}`);
+      console.log(`📡 Jupiter API response status: ${response.status}`);
+      if (response.ok) {
+        const data = (await response.json()) as any;
+        console.log(`📋 Jupiter API data:`, data);
+        if (data && data.symbol) {
+          const basicMetadata = await this.getTokenMetadata(tokenMint);
+          console.log(`✅ Got symbol from Jupiter API: ${data.symbol}`);
+          return {
+            decimals: basicMetadata.decimals,
+            symbol: data.symbol,
+            name: data.name || data.symbol,
+          };
+        }
+      }
+    } catch (error) {
+      console.log("Jupiter API not available for", tokenMint, error);
+    }
+
+    // Try DexScreener API as fallback
+    try {
+      const response = await fetch(
+        `https://api.dexscreener.com/latest/dex/tokens/${tokenMint}`
+      );
+      console.log(`📡 DexScreener API response status: ${response.status}`);
+      if (response.ok) {
+        const data = (await response.json()) as any;
+        console.log(`📋 DexScreener API data:`, data);
+        if (data.pairs && data.pairs.length > 0) {
+          const pair = data.pairs[0];
+          if (pair.baseToken && pair.baseToken.symbol) {
+            const basicMetadata = await this.getTokenMetadata(tokenMint);
+            console.log(
+              `✅ Got symbol from DexScreener: ${pair.baseToken.symbol}`
+            );
+            return {
+              decimals: basicMetadata.decimals,
+              symbol: pair.baseToken.symbol,
+              name: pair.baseToken.name || pair.baseToken.symbol,
+            };
+          }
+        }
+      }
+    } catch (error) {
+      console.log("DexScreener API not available for", tokenMint, error);
+    }
+
+    // Fallback to basic metadata
+    const basicMetadata = await this.getTokenMetadata(tokenMint);
+    return { decimals: basicMetadata.decimals };
+  }
+
   public async getTokenMetadata(
     tokenMint: string
   ): Promise<{ decimals: number }> {
@@ -318,6 +545,7 @@ export class WalletManager {
       EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: 6, // USDC
       Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: 6, // USDT
       BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4: 9, // TIMBA
+      FPyD25czYkvztSsgyCP7bxd2xnvDAp1LVjyiJhQidaos: 9, // DAOS
     };
 
     if (knownTokens[tokenMint]) {
@@ -445,6 +673,23 @@ export class WalletManager {
       transferInstruction,
     ];
     return await this.sendTransaction(allInstructions, [fromKeypair]);
+  }
+
+  public async transferSol(
+    fromTelegramId: bigint,
+    toAddress: PublicKey,
+    amount: number
+  ): Promise<string> {
+    const fromKeypair = this.getKeyPair(fromTelegramId);
+    const lamports = Math.floor(amount * LAMPORTS_PER_SOL);
+
+    const transferInstruction = SystemProgram.transfer({
+      fromPubkey: fromKeypair.publicKey,
+      toPubkey: toAddress,
+      lamports: lamports,
+    });
+
+    return await this.sendTransaction([transferInstruction], [fromKeypair]);
   }
 
   public async confirmTransaction(signature: string): Promise<void> {
@@ -674,13 +919,14 @@ export class WalletManager {
   }
 
   public formatSolBalance(lamports: number): string {
-    return (lamports / LAMPORTS_PER_SOL).toFixed(SOL_BALANCE_PRECISION);
+    return formatAmount(lamports, 9, { maxFractionDigits: 6, trim: true });
   }
 
   public formatTokenBalance(amount: number, decimals: number): string {
-    const formatted = amount / Math.pow(10, decimals);
-    return formatted < 1
-      ? formatted.toFixed(decimals)
-      : formatted.toFixed(Math.min(decimals, TOKEN_BALANCE_MAX_PRECISION));
+    const maxFraction = Math.min(6, Math.max(0, decimals));
+    return formatAmount(amount, decimals, {
+      maxFractionDigits: maxFraction,
+      trim: true,
+    });
   }
 }

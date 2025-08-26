@@ -8,6 +8,8 @@ import {
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
+  TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
 } from "@solana/spl-token";
 import { JupiterClient } from "./jupiter";
 import { PumpFunClient, validatePumpFunSwap } from "./pump-fun";
@@ -70,7 +72,15 @@ export class SwapManager {
       slippageBps = 500,
       inputDecimals,
       outputDecimals,
+      inputTicker,
+      outputTicker,
     } = request;
+
+    console.log(`🔍 SwapManager.getQuote called:`);
+    console.log(`   Input: ${inputMint} (${inputTicker})`);
+    console.log(`   Output: ${outputMint} (${outputTicker})`);
+    console.log(`   Amount: ${amount}`);
+    console.log(`   Network: ${this.network}`);
 
     // First check if this involves a pump.fun token (skip SOL/WSOL and known major tokens)
     const isSolInput =
@@ -99,17 +109,33 @@ export class SwapManager {
 
     if (!isSolInput && !isKnownMajorToken(inputMint)) {
       try {
+        console.log(`   Checking if input token ${inputMint} is pump.fun...`);
         inputPumpInfo = await this.pumpFunClient.isPumpFunToken(inputMint);
+        console.log(
+          `   Input pump.fun result: isPumpFun=${inputPumpInfo.isPumpFun}, isGraduated=${inputPumpInfo.isGraduated}`
+        );
       } catch (error) {
-        console.log(`Input token ${inputMint} is not a pump.fun token`);
+        console.log(
+          `   Input token ${inputMint} is not a pump.fun token: ${
+            (error as Error).message
+          }`
+        );
       }
     }
 
     if (!isSolOutput && !isKnownMajorToken(outputMint)) {
       try {
+        console.log(`   Checking if output token ${outputMint} is pump.fun...`);
         outputPumpInfo = await this.pumpFunClient.isPumpFunToken(outputMint);
+        console.log(
+          `   Output pump.fun result: isPumpFun=${outputPumpInfo.isPumpFun}, isGraduated=${outputPumpInfo.isGraduated}`
+        );
       } catch (error) {
-        console.log(`Output token ${outputMint} is not a pump.fun token`);
+        console.log(
+          `   Output token ${outputMint} is not a pump.fun token: ${
+            (error as Error).message
+          }`
+        );
       }
     }
 
@@ -118,17 +144,37 @@ export class SwapManager {
       (inputPumpInfo.isPumpFun && !inputPumpInfo.isGraduated) ||
       (outputPumpInfo.isPumpFun && !outputPumpInfo.isGraduated);
 
+    console.log(
+      `   Detection results: hasPumpFunToken=${hasPumpFunToken}, hasNonGraduatedPumpFun=${hasNonGraduatedPumpFun}`
+    );
+
     // If we have a non-graduated pump.fun token, use pump.fun
     if (hasNonGraduatedPumpFun && this.network === "mainnet") {
+      console.log(`   🎯 Using pump.fun for quote`);
       const validation = validatePumpFunSwap(inputMint, outputMint, amount);
       if (!validation.valid) {
         throw new Error(validation.error);
       }
 
+      // Pump.fun expects decimal amounts, but we might receive raw amounts
+      // If amount is a large integer (raw), convert it back to decimal
+      const amountFloat = parseFloat(amount);
+      const probablyRawAmount =
+        amountFloat > 1000000 && Number.isInteger(amountFloat);
+      const decimalAmount = probablyRawAmount
+        ? (amountFloat / Math.pow(10, inputDecimals)).toString()
+        : amount;
+
+      console.log(
+        `   🔄 Amount conversion for pump.fun: ${amount} → ${decimalAmount} (probablyRaw: ${probablyRawAmount})`
+      );
+
       const pumpQuote = await this.pumpFunClient.getQuote(
         inputMint,
         outputMint,
-        amount,
+        decimalAmount,
+        inputDecimals,
+        outputDecimals,
         slippageBps
       );
 
@@ -145,6 +191,7 @@ export class SwapManager {
 
     // For mainnet and graduated tokens, use Jupiter
     if (this.network === "mainnet") {
+      console.log(`   🚀 Using Jupiter for quote`);
       try {
         const jupiterQuote = await this.jupiterClient.getQuote({
           inputMint,
@@ -167,19 +214,36 @@ export class SwapManager {
           platformFee: jupiterQuote.platformFee,
         };
       } catch (error) {
-        console.log(
-          "Jupiter quote failed, checking if pump.fun can handle this:",
-          error
-        );
+        console.log("Jupiter quote failed:", error);
 
-        // If Jupiter fails, try pump.fun as fallback
-        if (hasPumpFunToken) {
+        // Only try pump.fun as fallback if we actually detected a pump.fun token
+        if (hasPumpFunToken && hasNonGraduatedPumpFun) {
+          console.log(
+            `   🔄 Trying pump.fun fallback for confirmed pump.fun token`
+          );
+
           const validation = validatePumpFunSwap(inputMint, outputMint, amount);
           if (validation.valid) {
+            console.log(`   ✅ Pump.fun validation passed, getting quote...`);
+
+            // Same decimal conversion as above
+            const amountFloat = parseFloat(amount);
+            const probablyRawAmount =
+              amountFloat > 1000000 && Number.isInteger(amountFloat);
+            const decimalAmount = probablyRawAmount
+              ? (amountFloat / Math.pow(10, inputDecimals)).toString()
+              : amount;
+
+            console.log(
+              `   🔄 Amount conversion for pump.fun fallback: ${amount} → ${decimalAmount} (probablyRaw: ${probablyRawAmount})`
+            );
+
             const pumpQuote = await this.pumpFunClient.getQuote(
               inputMint,
               outputMint,
-              amount,
+              decimalAmount,
+              inputDecimals,
+              outputDecimals,
               slippageBps
             );
 
@@ -192,10 +256,23 @@ export class SwapManager {
               slippage: pumpQuote.slippage,
               provider: "pump-fun",
             };
+          } else {
+            console.log(
+              `   ❌ Pump.fun validation failed: ${validation.error}`
+            );
           }
+        } else {
+          console.log(
+            `   ❌ No pump.fun fallback: not a confirmed pump.fun token (hasPumpFunToken=${hasPumpFunToken}, hasNonGraduatedPumpFun=${hasNonGraduatedPumpFun})`
+          );
         }
 
-        throw error;
+        // For non-pump.fun tokens (like DAOS.fun), Jupiter failure means no quote available
+        throw new Error(
+          `No quote available for ${inputTicker} → ${outputTicker}. ${
+            (error as Error).message
+          }`
+        );
       }
     }
 
@@ -437,6 +514,26 @@ export class SwapManager {
   }
 
   /**
+   * Detect if a token uses Token-2022 program
+   */
+  private async isToken2022(mintAddress: string): Promise<boolean> {
+    try {
+      const mintPubkey = new PublicKey(mintAddress);
+      const mintInfo = await this.connection.getAccountInfo(mintPubkey);
+
+      if (!mintInfo) {
+        return false;
+      }
+
+      // Check if the owner is Token-2022 program
+      return mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID);
+    } catch (error) {
+      console.log(`Error checking token program for ${mintAddress}:`, error);
+      return false;
+    }
+  }
+
+  /**
    * Create token accounts if they don't exist
    */
   private async createTokenAccountsIfNeeded(
@@ -451,9 +548,14 @@ export class SwapManager {
       inputMint !== "So11111111111111111111111111111111111111112" &&
       inputMint !== "SOL"
     ) {
+      const isInput2022 = await this.isToken2022(inputMint);
+      const mintPubkey = new PublicKey(inputMint);
+
       const inputTokenAccount = await getAssociatedTokenAddress(
-        new PublicKey(inputMint),
-        userKeypair.publicKey
+        mintPubkey,
+        userKeypair.publicKey,
+        false,
+        isInput2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
       );
 
       const inputAccountInfo = await this.connection.getAccountInfo(
@@ -461,13 +563,19 @@ export class SwapManager {
       );
       if (!inputAccountInfo) {
         // Account doesn't exist, create it
-        console.log(`Creating input token account for ${inputMint}`);
+        console.log(
+          `Creating input token account for ${inputMint} (Token-${
+            isInput2022 ? "2022" : "SPL"
+          })`
+        );
+
         instructions.push(
           createAssociatedTokenAccountInstruction(
             userKeypair.publicKey, // payer
             inputTokenAccount, // ata
             userKeypair.publicKey, // owner
-            new PublicKey(inputMint) // mint
+            mintPubkey, // mint
+            isInput2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
           )
         );
       }
@@ -478,9 +586,14 @@ export class SwapManager {
       outputMint !== "So11111111111111111111111111111111111111112" &&
       outputMint !== "SOL"
     ) {
+      const isOutput2022 = await this.isToken2022(outputMint);
+      const mintPubkey = new PublicKey(outputMint);
+
       const outputTokenAccount = await getAssociatedTokenAddress(
-        new PublicKey(outputMint),
-        userKeypair.publicKey
+        mintPubkey,
+        userKeypair.publicKey,
+        false,
+        isOutput2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
       );
 
       const outputAccountInfo = await this.connection.getAccountInfo(
@@ -488,13 +601,19 @@ export class SwapManager {
       );
       if (!outputAccountInfo) {
         // Account doesn't exist, create it
-        console.log(`Creating output token account for ${outputMint}`);
+        console.log(
+          `Creating output token account for ${outputMint} (Token-${
+            isOutput2022 ? "2022" : "SPL"
+          })`
+        );
+
         instructions.push(
           createAssociatedTokenAccountInstruction(
             userKeypair.publicKey, // payer
             outputTokenAccount, // ata
             userKeypair.publicKey, // owner
-            new PublicKey(outputMint) // mint
+            mintPubkey, // mint
+            isOutput2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
           )
         );
       }

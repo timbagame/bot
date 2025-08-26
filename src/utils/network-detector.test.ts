@@ -26,4 +26,3 @@ test("detectNetwork defaults to mainnet", () => {
   );
   expect(network).toBe("mainnet");
 });
-

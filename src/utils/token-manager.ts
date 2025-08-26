@@ -245,7 +245,12 @@ export class TokenManager {
     token_ticker: string;
     decimals: number;
   }> {
-    return this.tokenDb.getAllKnownTokens();
+    const tokens = this.tokenDb.getAllKnownTokens();
+    console.log(
+      `📋 getAllApprovedTokensWithMetadata returning ${tokens.length} tokens:`,
+      tokens.map((t) => `${t.token_ticker}(${t.token_mint})`)
+    );
+    return tokens;
   }
 
   // ================================
@@ -283,6 +288,9 @@ export class TokenManager {
   ): Promise<{ ticker: string; decimals: number; isPumpFun?: boolean } | null> {
     try {
       const metadata = await this.wallet.getTokenMetadata(tokenMint);
+      if (!metadata) {
+        return null;
+      }
 
       // Check if it's a pump.fun token
       let isPumpFun = false;

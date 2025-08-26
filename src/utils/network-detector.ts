@@ -28,6 +28,35 @@ export class NetworkDetector {
   }
 
   /**
+   * Check if network supports Jupiter
+   */
+  static supportsJupiter(network: SolanaNetwork): boolean {
+    return network === "mainnet";
+  }
+
+  /**
+   * Check if network supports simulation
+   */
+  static supportsSimulation(network: SolanaNetwork): boolean {
+    return (
+      network === "devnet" || network === "testnet" || network === "localnet"
+    );
+  }
+
+  /**
+   * Get network display name
+   */
+  static getNetworkDisplayName(network: SolanaNetwork): string {
+    const names = {
+      mainnet: "Mainnet",
+      devnet: "Devnet",
+      testnet: "Testnet",
+      localnet: "Localnet",
+    };
+    return names[network];
+  }
+
+  /**
    * Get current network from environment
    */
   static getCurrentNetwork(): SolanaNetwork {

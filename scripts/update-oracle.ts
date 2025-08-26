@@ -17,7 +17,7 @@ const updateOracle = async () => {
 
     // Create wallet adapter for Anchor
     const adminWallet = new anchor.Wallet(
-      adminKeypair as anchor.web3.Keypair
+      adminKeypair as unknown as anchor.web3.Keypair
     );
 
     // Initialize provider

@@ -811,7 +811,7 @@ export class GameManager {
 
       // Create game
       const gameConfig = {
-        gameType: { [gameType]: {} },
+        gameType: gameType === "coinflip" ? { coinflip: {} } : { giveaway: {} },
         // u64 must be BN
         amount: new anchor.BN(amount),
         // u32 are fine as numbers, but field names must match IDL

@@ -7,6 +7,7 @@ import {
 import { PumpSdk } from "@pump-fun/pump-sdk";
 import { deserializeMetadata } from "@metaplex-foundation/mpl-token-metadata";
 import { NetworkDetector } from "./network-detector";
+import { formatAmount } from "./format-amount";
 import BN from "bn.js";
 
 // ================================
@@ -72,23 +73,27 @@ export class PumpFunClient {
           metadataPDA
         );
         if (metadataAccount) {
-          const metadata = deserializeMetadata(metadataAccount as any);
-          const symbol = metadata.symbol.replace(/\0/g, "").trim();
-          const name = metadata.name.replace(/\0/g, "").trim();
+          try {
+            const metadata = deserializeMetadata(metadataAccount as any);
+            const symbol = (metadata as any).symbol.replace(/\0/g, "").trim();
+            const name = (metadata as any).name.replace(/\0/g, "").trim();
 
-          if (symbol && symbol !== "" && symbol !== "UNKNOWN") {
-            // Get decimals from mint
-            const mintInfo = await this.connection.getParsedAccountInfo(mint);
-            let decimals = 6; // Default for pump.fun
-            if (mintInfo.value && "parsed" in mintInfo.value.data) {
-              decimals = mintInfo.value.data.parsed.info.decimals || 6;
+            if (symbol && symbol !== "" && symbol !== "UNKNOWN") {
+              // Get decimals from mint
+              const mintInfo = await this.connection.getParsedAccountInfo(mint);
+              let decimals = 6; // Default for pump.fun
+              if (mintInfo.value && "parsed" in mintInfo.value.data) {
+                decimals = mintInfo.value.data.parsed.info.decimals || 6;
+              }
+
+              return {
+                symbol: symbol,
+                name: name || "Pump.fun Token",
+                decimals,
+              };
             }
-
-            return {
-              symbol: symbol,
-              name: name || "Pump.fun Token",
-              decimals,
-            };
+          } catch (deserializeError) {
+            console.log("Error deserializing metadata:", deserializeError);
           }
         }
       } catch (metaplexError) {
@@ -97,43 +102,78 @@ export class PumpFunClient {
 
       // Method 2: Try pump.fun API
       try {
+        console.log(
+          `🔍 Fetching from pump.fun API: https://frontend-api.pump.fun/coins/${mintAddress}`
+        );
         const response = await fetch(
           `https://frontend-api.pump.fun/coins/${mintAddress}`
         );
+        console.log(`📡 Pump.fun API response status: ${response.status}`);
+
         if (response.ok) {
-          const data: any = await response.json();
+          const data = (await response.json()) as any;
+          console.log("🎯 Pump.fun API data:", data);
+
           if (data && data.symbol) {
-            return {
+            const result = {
               symbol: data.symbol.toUpperCase(),
               name: data.name || "Pump.fun Token",
               decimals: 6,
             };
+            console.log("✅ Returning pump.fun API metadata:", result);
+            return result;
+          } else {
+            console.log("❌ Pump.fun API data missing symbol:", data);
           }
+        } else {
+          console.log(`❌ Pump.fun API failed with status: ${response.status}`);
         }
       } catch (apiError) {
-        console.log("Pump.fun API not available, trying alternative sources");
+        console.log("💥 Pump.fun API error:", apiError);
       }
 
       // Method 3: Try DexScreener API
       try {
+        console.log(
+          `🔍 Fetching from DexScreener API: https://api.dexscreener.com/latest/dex/tokens/${mintAddress}`
+        );
         const response = await fetch(
           `https://api.dexscreener.com/latest/dex/tokens/${mintAddress}`
         );
+        console.log(`📡 DexScreener API response status: ${response.status}`);
+
         if (response.ok) {
-          const data: any = await response.json();
+          const data = (await response.json()) as any;
+          console.log(
+            "🎯 DexScreener API data:",
+            JSON.stringify(data, null, 2)
+          );
+
           if (data && data.pairs && data.pairs.length > 0) {
             const pair = data.pairs[0];
+            console.log("🔗 First pair data:", pair);
+
             if (pair.baseToken && pair.baseToken.symbol) {
-              return {
+              const result = {
                 symbol: pair.baseToken.symbol.toUpperCase(),
                 name: pair.baseToken.name || "Token",
                 decimals: 6,
               };
+              console.log("✅ Returning DexScreener metadata:", result);
+              return result;
+            } else {
+              console.log("❌ DexScreener pair missing baseToken symbol");
             }
+          } else {
+            console.log("❌ DexScreener no pairs found");
           }
+        } else {
+          console.log(
+            `❌ DexScreener API failed with status: ${response.status}`
+          );
         }
       } catch (dexError) {
-        console.log("DexScreener API not available");
+        console.log("💥 DexScreener API error:", dexError);
       }
 
       // Method 4: Check if it's a pump.fun token at all
@@ -164,6 +204,18 @@ export class PumpFunClient {
     mintAddress: string
   ): Promise<{ isPumpFun: boolean; isGraduated: boolean }> {
     try {
+      // Check if mintAddress is valid
+      if (
+        !mintAddress ||
+        mintAddress === "undefined" ||
+        typeof mintAddress !== "string"
+      ) {
+        console.log(
+          `Token ${mintAddress} is not a pump.fun token: invalid mint address`
+        );
+        return { isPumpFun: false, isGraduated: false };
+      }
+
       const mint = new PublicKey(mintAddress);
 
       // Use pump.fun SDK to check if token exists in their program
@@ -190,6 +242,8 @@ export class PumpFunClient {
     inputMint: string,
     outputMint: string,
     amount: string,
+    _inputDecimals: number,
+    _outputDecimals: number,
     slippageBps: number = 500
   ): Promise<PumpFunQuote> {
     try {
@@ -247,6 +301,16 @@ export class PumpFunClient {
         );
         outputAmount = tokenAmount.toString();
         estimatedRate = tokenAmount / solAmountLamports;
+
+        return {
+          inputMint,
+          outputMint,
+          inputAmount: amount, // Use original amount, not calculated
+          outputAmount,
+          estimatedRate,
+          slippage: slippageBps / 100,
+          isGraduated: false,
+        };
       } else {
         // Calculate how much SOL we get for the token amount
         const tokenAmount = parseInt(amount);
@@ -304,12 +368,21 @@ export class PumpFunClient {
         // Buying pump.fun token with SOL
         pumpMint = new PublicKey(outputMint);
         isBuy = true;
-        amountLamports = BigInt(amount);
+        // Convert SOL amount to lamports (SOL has 9 decimals)
+        const solAmount = parseFloat(amount);
+        amountLamports = BigInt(Math.floor(solAmount * 1_000_000_000));
       } else if (!isSolInput && isSolOutput) {
         // Selling pump.fun token for SOL
         pumpMint = new PublicKey(inputMint);
         isBuy = false;
-        amountLamports = BigInt(amount);
+        // For selling tokens, convert decimal amount to raw token amount
+        // Pump.fun tokens typically have 6 decimals
+        const decimalAmount = parseFloat(amount);
+        const rawTokenAmount = Math.floor(decimalAmount * Math.pow(10, 6));
+        amountLamports = BigInt(rawTokenAmount);
+        console.log(
+          `🔢 SELL conversion: ${amount} → ${decimalAmount} → ${rawTokenAmount} raw tokens`
+        );
       } else {
         throw new Error("Pump.fun swaps must involve SOL and a pump.fun token");
       }
@@ -339,8 +412,9 @@ export class PumpFunClient {
           buyState.bondingCurve,
           Number(solAmount)
         );
+        const generousSlippageBps = Math.max(slippageBps, 500); // At least 5% slippage
         const minTokensOut = Math.floor(
-          expectedTokenAmount * (1 - slippageBps / 10000)
+          expectedTokenAmount * (1 - generousSlippageBps / 10000)
         );
 
         console.log(
@@ -408,9 +482,11 @@ export class PumpFunClient {
         } instructions for pump.fun token ${pumpMint.toString()}`
       );
       return instructions;
-    } catch (error: any) {
+    } catch (error) {
       console.error("Error creating pump.fun swap transaction:", error);
-      throw new Error(`Failed to create pump.fun swap: ${error.message}`);
+      throw new Error(
+        `Failed to create pump.fun swap: ${(error as Error).message}`
+      );
     }
   }
 
@@ -486,19 +562,30 @@ export class PumpFunClient {
     inputTicker: string,
     outputTicker: string
   ): string {
-    const inputAmount =
-      parseFloat(quote.inputAmount) / Math.pow(10, inputDecimals);
-    const outputAmount =
-      parseFloat(quote.outputAmount) / Math.pow(10, outputDecimals);
+    // Convert decimal strings to raw smallest units for consistent formatting
+    const inputRaw = Math.round(
+      parseFloat(quote.inputAmount) * Math.pow(10, inputDecimals)
+    );
+    const outputRaw = Math.round(
+      parseFloat(quote.outputAmount) * Math.pow(10, outputDecimals)
+    );
+
+    const inputAmountStr = formatAmount(inputRaw, inputDecimals, {
+      maxFractionDigits: Math.min(6, inputDecimals),
+      trim: true,
+    });
+    const outputAmountStr = formatAmount(outputRaw, outputDecimals, {
+      maxFractionDigits: Math.min(6, outputDecimals),
+      trim: true,
+    });
 
     let message = `🚀 **Pump.fun Swap Preview**\n\n`;
-    message += `📥 **You pay:** ${inputAmount.toFixed(6)} ${inputTicker}\n`;
-    message += `📤 **You receive:** ${outputAmount.toFixed(
-      6
-    )} ${outputTicker}\n`;
-    message += `💹 **Rate:** 1 ${inputTicker} = ${(
-      outputAmount / inputAmount
-    ).toFixed(6)} ${outputTicker}\n`;
+    message += `📥 **You pay:** ${inputAmountStr} ${inputTicker}\n`;
+    message += `📤 **You receive:** ${outputAmountStr} ${outputTicker}\n`;
+    const inputDec = parseFloat(inputAmountStr || "0");
+    const outputDec = parseFloat(outputAmountStr || "0");
+    const rate = inputDec > 0 ? (outputDec / inputDec).toFixed(6) : "0";
+    message += `💹 **Rate:** 1 ${inputTicker} = ${rate} ${outputTicker}\n`;
     message += `🎯 **Slippage:** ${quote.slippage}%\n`;
     message += `🔥 **Pump.fun Token** (Not graduated)\n`;
 
