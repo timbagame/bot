@@ -1,13 +1,27 @@
 import { mnemonicToSeedSync } from "bip39";
-import { Connection, Keypair, PublicKey, TransactionInstruction, VersionedTransaction, TransactionMessage, LAMPORTS_PER_SOL, SolanaJSONRPCError, SystemProgram } from "@solana/web3.js";
-import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferCheckedInstruction } from "@solana/spl-token";
+import {
+  Connection,
+  Keypair,
+  PublicKey,
+  TransactionInstruction,
+  VersionedTransaction,
+  TransactionMessage,
+  LAMPORTS_PER_SOL,
+  SolanaJSONRPCError,
+  SystemProgram,
+} from "@solana/web3.js";
+import {
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
+  createTransferCheckedInstruction,
+} from "@solana/spl-token";
 import * as fs from "fs";
 import * as path from "path";
 import {
   WALLET_RATE_LIMIT_MS,
   BLOCKHASH_CACHE_DURATION,
   MAX_RETRIES,
-  CONFIRMATION_TIMEOUT_MS
+  CONFIRMATION_TIMEOUT_MS,
 } from "./constants";
 
 // ================================
@@ -27,7 +41,7 @@ const retryWithBackoff = async <T>(
       lastError = error;
       if (i < maxRetries - 1) {
         const delay = baseDelay * Math.pow(2, i);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
   }
@@ -47,8 +61,15 @@ export class WalletManager {
 
   // Simplified caching
   private keypairCache = new Map<string, Keypair>();
-  private tokenMetadataCache = new Map<string, { decimals: number; timestamp: number }>();
-  private blockhashCache: { blockhash: string; lastValidBlockHeight: number; timestamp: number } | null = null;
+  private tokenMetadataCache = new Map<
+    string,
+    { decimals: number; timestamp: number }
+  >();
+  private blockhashCache: {
+    blockhash: string;
+    lastValidBlockHeight: number;
+    timestamp: number;
+  } | null = null;
 
   private constructor(mnemonic: string) {
     this.mnemonic = mnemonic;
@@ -65,7 +86,7 @@ export class WalletManager {
     const now = Date.now();
     const timeToWait = WALLET_RATE_LIMIT_MS - (now - this.lastCallTime);
     if (timeToWait > 0) {
-      await new Promise(resolve => setTimeout(resolve, timeToWait));
+      await new Promise((resolve) => setTimeout(resolve, timeToWait));
     }
     this.lastCallTime = now;
   }
@@ -76,7 +97,9 @@ export class WalletManager {
       if (fs.existsSync(keypairPath)) {
         const keypairData = JSON.parse(fs.readFileSync(keypairPath, "utf-8"));
         this.adminKeypair = Keypair.fromSecretKey(new Uint8Array(keypairData));
-        console.log(`Loaded admin keypair: ${this.adminKeypair.publicKey.toBase58()}`);
+        console.log(
+          `Loaded admin keypair: ${this.adminKeypair.publicKey.toBase58()}`
+        );
       }
     } catch (error) {
       console.error("Failed to load admin keypair:", error);
@@ -112,7 +135,9 @@ export class WalletManager {
       this.adminKeypair = Keypair.fromSecretKey(new Uint8Array(keypairData));
       return this.adminKeypair;
     } catch (error) {
-      throw new Error("Failed to load admin keypair. Make sure admin-keypair.json exists in the project root.");
+      throw new Error(
+        "Failed to load admin keypair. Make sure admin-keypair.json exists in the project root."
+      );
     }
   }
 
@@ -134,19 +159,37 @@ export class WalletManager {
     return this.connection.getBalance(pubkey);
   }
 
-  public async getTokenBalance(telegramId: bigint, tokenMint: string): Promise<number> {
+  public async getTokenBalance(
+    telegramId: bigint,
+    tokenMint: string
+  ): Promise<number> {
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
-    const ata = await getAssociatedTokenAddress(new PublicKey(tokenMint), pubkey);
+    const ata = await getAssociatedTokenAddress(
+      new PublicKey(tokenMint),
+      pubkey
+    );
 
     try {
-      const account = await this.connection.getTokenAccountBalance(ata, "confirmed");
-      return account.value.uiAmount ? account.value.uiAmount * Math.pow(10, account.value.decimals) : 0;
+      const account = await this.connection.getTokenAccountBalance(
+        ata,
+        "confirmed"
+      );
+      return account.value.uiAmount
+        ? account.value.uiAmount * Math.pow(10, account.value.decimals)
+        : 0;
     } catch (error: any) {
-      if (error instanceof SolanaJSONRPCError && error.message.includes('could not find account')) {
-        console.log(`Token account ${ata.toBase58()} not found for user ${pubkey.toBase58()}`);
+      if (
+        error instanceof SolanaJSONRPCError &&
+        error.message.includes("could not find account")
+      ) {
+        console.log(
+          `Token account ${ata.toBase58()} not found for user ${pubkey.toBase58()}`
+        );
       } else {
-        console.error(`Error getting token balance for ${pubkey.toBase58()}: ${error}`);
+        console.error(
+          `Error getting token balance for ${pubkey.toBase58()}: ${error}`
+        );
       }
       return 0;
     }
@@ -158,8 +201,20 @@ export class WalletManager {
    */
   public async getAllApprovedTokenBalances(
     telegramId: bigint,
-    approvedTokens: Array<{ token_mint: string; token_ticker: string; decimals: number }>
-  ): Promise<Array<{ mint: string; ticker: string; balance: number; decimals: number; rawBalance: string }>> {
+    approvedTokens: Array<{
+      token_mint: string;
+      token_ticker: string;
+      decimals: number;
+    }>
+  ): Promise<
+    Array<{
+      mint: string;
+      ticker: string;
+      balance: number;
+      decimals: number;
+      rawBalance: string;
+    }>
+  > {
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
 
@@ -169,25 +224,37 @@ export class WalletManager {
     }
 
     try {
-      console.log(`🔍 Getting token accounts for user: ${telegramId}, pubkey: ${pubkey.toBase58()}`);
-      
+      console.log(
+        `🔍 Getting token accounts for user: ${telegramId}, pubkey: ${pubkey.toBase58()}`
+      );
+
       // Get all token accounts for both SPL Token and Token-2022 programs
       const [splTokenAccounts, token2022Accounts] = await Promise.all([
         this.connection.getParsedTokenAccountsByOwner(pubkey, {
-          programId: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA") // SPL Token program
+          programId: new PublicKey(
+            "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+          ), // SPL Token program
         }),
         this.connection.getParsedTokenAccountsByOwner(pubkey, {
-          programId: new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb") // Token-2022 program
-        })
+          programId: new PublicKey(
+            "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+          ), // Token-2022 program
+        }),
       ]);
 
       // Combine both token account arrays
       const allTokenAccounts = [
-        ...splTokenAccounts.value || [],
-        ...token2022Accounts.value || []
+        ...(splTokenAccounts.value || []),
+        ...(token2022Accounts.value || []),
       ];
 
-      console.log(`📊 Found ${splTokenAccounts.value?.length || 0} SPL token accounts and ${token2022Accounts.value?.length || 0} Token-2022 accounts (${allTokenAccounts.length} total)`);
+      console.log(
+        `📊 Found ${
+          splTokenAccounts.value?.length || 0
+        } SPL token accounts and ${
+          token2022Accounts.value?.length || 0
+        } Token-2022 accounts (${allTokenAccounts.length} total)`
+      );
 
       // Early return if user has no token accounts
       if (!allTokenAccounts || allTokenAccounts.length === 0) {
@@ -195,11 +262,17 @@ export class WalletManager {
         return [];
       }
 
-      const results: Array<{ mint: string; ticker: string; balance: number; decimals: number; rawBalance: string }> = [];
+      const results: Array<{
+        mint: string;
+        ticker: string;
+        balance: number;
+        decimals: number;
+        rawBalance: string;
+      }> = [];
 
       // Create a map of approved token mints for O(1) lookup
       const approvedTokensMap = new Map(
-        approvedTokens.map(token => [token.token_mint, token])
+        approvedTokens.map((token) => [token.token_mint, token])
       );
 
       // Process each token account
@@ -210,72 +283,95 @@ export class WalletManager {
           const mint = parsedData.info.mint;
 
           const approvedToken = approvedTokensMap.get(mint);
-          console.log(`🔍 Token found: ${mint}, approved: ${!!approvedToken}, ticker: ${approvedToken?.token_ticker}, raw amount: ${tokenAmount.amount}, decimals: ${tokenAmount.decimals}`);
-          
+          console.log(
+            `🔍 Token found: ${mint}, approved: ${!!approvedToken}, ticker: ${
+              approvedToken?.token_ticker
+            }, raw amount: ${tokenAmount.amount}, decimals: ${
+              tokenAmount.decimals
+            }`
+          );
+
           // Auto-register tokens with non-zero balance that aren't approved
           if (!approvedToken && parseFloat(tokenAmount.amount) > 0) {
-            console.log(`🔄 Auto-registering unknown token with balance: ${mint}`);
-            
+            console.log(
+              `🔄 Auto-registering unknown token with balance: ${mint}`
+            );
+
             try {
               // Import TokenManager dynamically to avoid circular imports
-              const { TokenManager } = await import('./token-manager');
+              const { TokenManager } = await import("./token-manager");
               const tokenManager = TokenManager.getInstance();
-              
+
               // Try to get metadata for the unknown token
               const fullMetadata = await this.getFullTokenMetadata(mint);
               let ticker = fullMetadata.symbol || `TOKEN_${mint.slice(-4)}`;
-              
+
               console.log(`📝 Auto-registering token: ${ticker} (${mint})`);
               const registered = await tokenManager.addToken(mint, ticker);
-              
+
               if (registered) {
                 console.log(`✅ Successfully auto-registered: ${ticker}`);
                 // Add to approved tokens map for immediate use
                 approvedTokensMap.set(mint, {
                   token_mint: mint,
                   token_ticker: ticker,
-                  decimals: tokenAmount.decimals
+                  decimals: tokenAmount.decimals,
                 });
               } else {
                 console.log(`❌ Failed to auto-register: ${ticker}`);
                 continue; // Skip this token if registration failed
               }
             } catch (regError) {
-              console.error(`❌ Error auto-registering token ${mint}:`, regError);
+              console.error(
+                `❌ Error auto-registering token ${mint}:`,
+                regError
+              );
               continue; // Skip this token if auto-registration failed
             }
           }
-          
+
           const finalApprovedToken = approvedTokensMap.get(mint);
           if (finalApprovedToken && parseFloat(tokenAmount.amount) > 0) {
             const balance = parseFloat(tokenAmount.amount);
-            
+
             // Try to get real ticker from metadata, fallback to approved ticker
             let finalTicker = finalApprovedToken.token_ticker;
-            console.log(`🔍 Attempting to get metadata for token ${mint} (current ticker: ${finalTicker})`);
-            
+            console.log(
+              `🔍 Attempting to get metadata for token ${mint} (current ticker: ${finalTicker})`
+            );
+
             try {
               const fullMetadata = await this.getFullTokenMetadata(mint);
               console.log(`📋 Full metadata result for ${mint}:`, fullMetadata);
-              
-              if (fullMetadata.symbol && fullMetadata.symbol !== 'UNKNOWN') {
+
+              if (fullMetadata.symbol && fullMetadata.symbol !== "UNKNOWN") {
                 finalTicker = fullMetadata.symbol;
-                console.log(`✅ Updated ticker for ${mint}: ${finalApprovedToken.token_ticker} → ${finalTicker}`);
+                console.log(
+                  `✅ Updated ticker for ${mint}: ${finalApprovedToken.token_ticker} → ${finalTicker}`
+                );
               } else {
                 console.log(`⚠️ No valid symbol found in metadata for ${mint}`);
               }
             } catch (error) {
               // Use fallback ticker
-              console.log(`❌ Error getting metadata for ${mint}, using fallback ticker: ${finalTicker}`, error);
+              console.log(
+                `❌ Error getting metadata for ${mint}, using fallback ticker: ${finalTicker}`,
+                error
+              );
             }
-            
-            console.log(`✅ Adding token: ${finalTicker}, balance: ${balance}, formatted: ${this.formatTokenBalance(balance, tokenAmount.decimals)}`);
+
+            console.log(
+              `✅ Adding token: ${finalTicker}, balance: ${balance}, formatted: ${this.formatTokenBalance(
+                balance,
+                tokenAmount.decimals
+              )}`
+            );
             results.push({
               mint,
               ticker: finalTicker,
               balance,
               decimals: tokenAmount.decimals,
-              rawBalance: tokenAmount.amount
+              rawBalance: tokenAmount.amount,
             });
           }
         } catch (error) {
@@ -286,15 +382,20 @@ export class WalletManager {
       }
 
       return results.sort((a, b) => a.ticker.localeCompare(b.ticker));
-
     } catch (error: any) {
       // Handle the case where user has no token accounts gracefully
-      if (error.message?.includes('could not find account') || error.message?.includes('Invalid param')) {
+      if (
+        error.message?.includes("could not find account") ||
+        error.message?.includes("Invalid param")
+      ) {
         console.log(`No token accounts found for user ${pubkey.toBase58()}`);
         return [];
       }
 
-      console.error(`Error getting all token balances for ${pubkey.toBase58()}:`, error);
+      console.error(
+        `Error getting all token balances for ${pubkey.toBase58()}:`,
+        error
+      );
       return [];
     }
   }
@@ -302,71 +403,81 @@ export class WalletManager {
   /**
    * Get full token metadata including symbol and name
    */
-  public async getFullTokenMetadata(tokenMint: string): Promise<{ decimals: number; symbol?: string; name?: string }> {
+  public async getFullTokenMetadata(
+    tokenMint: string
+  ): Promise<{ decimals: number; symbol?: string; name?: string }> {
     try {
       // Try to get metadata from Metaplex first
       const metadataPDA = PublicKey.findProgramAddressSync(
         [
-          Buffer.from('metadata'),
-          new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s').toBuffer(),
-          new PublicKey(tokenMint).toBuffer()
+          Buffer.from("metadata"),
+          new PublicKey(
+            "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+          ).toBuffer(),
+          new PublicKey(tokenMint).toBuffer(),
         ],
-        new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s')
+        new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s")
       )[0];
 
       const metadataAccount = await this.connection.getAccountInfo(metadataPDA);
-      
+
       if (metadataAccount && metadataAccount.data) {
         // Import deserializeMetadata dynamically
-        const { deserializeMetadata } = await import('@metaplex-foundation/mpl-token-metadata');
+        const { deserializeMetadata } = await import(
+          "@metaplex-foundation/mpl-token-metadata"
+        );
         const metadata = deserializeMetadata(metadataAccount as any);
-        
-        const symbol = metadata.symbol?.trim() || '';
-        const name = metadata.name?.trim() || '';
-        
-        if (symbol && symbol !== '' && symbol !== 'UNKNOWN') {
+
+        const symbol = metadata.symbol?.trim() || "";
+        const name = metadata.name?.trim() || "";
+
+        if (symbol && symbol !== "" && symbol !== "UNKNOWN") {
           const basicMetadata = await this.getTokenMetadata(tokenMint);
           return {
             decimals: basicMetadata.decimals,
             symbol: symbol,
-            name: name || 'Token'
+            name: name || "Token",
           };
         }
       }
     } catch (error) {
-      console.log('Metaplex metadata not available for', tokenMint);
+      console.log("Metaplex metadata not available for", tokenMint);
     }
 
     // Try external APIs as fallback
     console.log(`🌐 Trying external APIs for token: ${tokenMint}`);
-    
+
     // Try SolanaFM API first (good for old tokens)
     try {
-      const response = await fetch(`https://api.solana.fm/v0/tokens/${tokenMint}`);
+      const response = await fetch(
+        `https://api.solana.fm/v0/tokens/${tokenMint}`
+      );
       console.log(`📡 SolanaFM API response status: ${response.status}`);
       if (response.ok) {
-        const data = await response.json() as any;
+        const data = (await response.json()) as any;
         console.log(`📋 SolanaFM API data:`, data);
         if (data && data.tokenInfo && data.tokenInfo.symbol) {
           const basicMetadata = await this.getTokenMetadata(tokenMint);
-          console.log(`✅ Got symbol from SolanaFM API: ${data.tokenInfo.symbol}`);
+          console.log(
+            `✅ Got symbol from SolanaFM API: ${data.tokenInfo.symbol}`
+          );
           return {
             decimals: basicMetadata.decimals,
             symbol: data.tokenInfo.symbol,
-            name: data.tokenInfo.name || data.tokenInfo.symbol
+            name: data.tokenInfo.name || data.tokenInfo.symbol,
           };
         }
       }
     } catch (error) {
-      console.log('SolanaFM API not available for', tokenMint, error);
+      console.log("SolanaFM API not available for", tokenMint, error);
     }
-    
+
     try {
       // Try Jupiter token list API
       const response = await fetch(`https://tokens.jup.ag/token/${tokenMint}`);
       console.log(`📡 Jupiter API response status: ${response.status}`);
       if (response.ok) {
-        const data = await response.json() as any;
+        const data = (await response.json()) as any;
         console.log(`📋 Jupiter API data:`, data);
         if (data && data.symbol) {
           const basicMetadata = await this.getTokenMetadata(tokenMint);
@@ -374,36 +485,40 @@ export class WalletManager {
           return {
             decimals: basicMetadata.decimals,
             symbol: data.symbol,
-            name: data.name || data.symbol
+            name: data.name || data.symbol,
           };
         }
       }
     } catch (error) {
-      console.log('Jupiter API not available for', tokenMint, error);
+      console.log("Jupiter API not available for", tokenMint, error);
     }
 
     // Try DexScreener API as fallback
     try {
-      const response = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${tokenMint}`);
+      const response = await fetch(
+        `https://api.dexscreener.com/latest/dex/tokens/${tokenMint}`
+      );
       console.log(`📡 DexScreener API response status: ${response.status}`);
       if (response.ok) {
-        const data = await response.json() as any;
+        const data = (await response.json()) as any;
         console.log(`📋 DexScreener API data:`, data);
         if (data.pairs && data.pairs.length > 0) {
           const pair = data.pairs[0];
           if (pair.baseToken && pair.baseToken.symbol) {
             const basicMetadata = await this.getTokenMetadata(tokenMint);
-            console.log(`✅ Got symbol from DexScreener: ${pair.baseToken.symbol}`);
+            console.log(
+              `✅ Got symbol from DexScreener: ${pair.baseToken.symbol}`
+            );
             return {
               decimals: basicMetadata.decimals,
               symbol: pair.baseToken.symbol,
-              name: pair.baseToken.name || pair.baseToken.symbol
+              name: pair.baseToken.name || pair.baseToken.symbol,
             };
           }
         }
       }
     } catch (error) {
-      console.log('DexScreener API not available for', tokenMint, error);
+      console.log("DexScreener API not available for", tokenMint, error);
     }
 
     // Fallback to basic metadata
@@ -411,7 +526,9 @@ export class WalletManager {
     return { decimals: basicMetadata.decimals };
   }
 
-  public async getTokenMetadata(tokenMint: string): Promise<{ decimals: number }> {
+  public async getTokenMetadata(
+    tokenMint: string
+  ): Promise<{ decimals: number }> {
     const cached = this.tokenMetadataCache.get(tokenMint);
     const now = Date.now();
 
@@ -423,11 +540,11 @@ export class WalletManager {
 
     // Handle known tokens with hardcoded decimals
     const knownTokens: { [key: string]: number } = {
-      'So11111111111111111111111111111111111111112': 9, // WSOL
-      'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 6, // USDC
-      'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': 6, // USDT
-      'BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4': 9, // TIMBA
-      'FPyD25czYkvztSsgyCP7bxd2xnvDAp1LVjyiJhQidaos': 9, // DAOS
+      So11111111111111111111111111111111111111112: 9, // WSOL
+      EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: 6, // USDC
+      Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: 6, // USDT
+      BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4: 9, // TIMBA
+      FPyD25czYkvztSsgyCP7bxd2xnvDAp1LVjyiJhQidaos: 9, // DAOS
     };
 
     if (knownTokens[tokenMint]) {
@@ -438,13 +555,19 @@ export class WalletManager {
 
     await this.throttle();
     try {
-      const account = await this.connection.getParsedAccountInfo(new PublicKey(tokenMint));
+      const account = await this.connection.getParsedAccountInfo(
+        new PublicKey(tokenMint)
+      );
       if (!account.value || !account.value.data) {
         throw new Error("Token mint account not found or has no data");
       }
 
       const parsedData = account.value.data as any;
-      if (parsedData.parsed && parsedData.parsed.info && parsedData.parsed.info.decimals !== undefined) {
+      if (
+        parsedData.parsed &&
+        parsedData.parsed.info &&
+        parsedData.parsed.info.decimals !== undefined
+      ) {
         const decimals = parsedData.parsed.info.decimals;
         this.tokenMetadataCache.set(tokenMint, { decimals, timestamp: now });
         return { decimals };
@@ -453,7 +576,11 @@ export class WalletManager {
       }
     } catch (error) {
       console.error(`Error getting token metadata for ${tokenMint}:`, error);
-      throw new Error(`Failed to get token metadata: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(
+        `Failed to get token metadata: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
     }
   }
 
@@ -466,28 +593,39 @@ export class WalletManager {
     tokenMint: PublicKey,
     payer: Keypair
   ): Promise<{ address: PublicKey; instructions: TransactionInstruction[] }> {
-    const associatedTokenAddress = await getAssociatedTokenAddress(tokenMint, owner);
+    const associatedTokenAddress = await getAssociatedTokenAddress(
+      tokenMint,
+      owner
+    );
     const instructions: TransactionInstruction[] = [];
 
     try {
       await this.throttle();
-      const accountInfo = await this.connection.getAccountInfo(associatedTokenAddress);
+      const accountInfo = await this.connection.getAccountInfo(
+        associatedTokenAddress
+      );
       if (!accountInfo) {
-        instructions.push(createAssociatedTokenAccountInstruction(
+        instructions.push(
+          createAssociatedTokenAccountInstruction(
+            payer.publicKey,
+            associatedTokenAddress,
+            owner,
+            tokenMint
+          )
+        );
+      }
+    } catch (error) {
+      console.error(
+        `Error checking token account ${associatedTokenAddress.toBase58()}: ${error}`
+      );
+      instructions.push(
+        createAssociatedTokenAccountInstruction(
           payer.publicKey,
           associatedTokenAddress,
           owner,
           tokenMint
-        ));
-      }
-    } catch (error) {
-      console.error(`Error checking token account ${associatedTokenAddress.toBase58()}: ${error}`);
-      instructions.push(createAssociatedTokenAccountInstruction(
-        payer.publicKey,
-        associatedTokenAddress,
-        owner,
-        tokenMint
-      ));
+        )
+      );
     }
 
     return { address: associatedTokenAddress, instructions };
@@ -505,10 +643,18 @@ export class WalletManager {
 
     const [
       { address: fromTokenAccount, instructions: fromInstructions },
-      { address: toTokenAccount, instructions: toInstructions }
+      { address: toTokenAccount, instructions: toInstructions },
     ] = await Promise.all([
-      this.findOrCreateAssociatedTokenAccount(fromKeypair.publicKey, tokenMintPubkey, fromKeypair),
-      this.findOrCreateAssociatedTokenAccount(toAddress, tokenMintPubkey, fromKeypair)
+      this.findOrCreateAssociatedTokenAccount(
+        fromKeypair.publicKey,
+        tokenMintPubkey,
+        fromKeypair
+      ),
+      this.findOrCreateAssociatedTokenAccount(
+        toAddress,
+        tokenMintPubkey,
+        fromKeypair
+      ),
     ]);
 
     const transferInstruction = createTransferCheckedInstruction(
@@ -520,7 +666,11 @@ export class WalletManager {
       decimals
     );
 
-    const allInstructions = [...fromInstructions, ...toInstructions, transferInstruction];
+    const allInstructions = [
+      ...fromInstructions,
+      ...toInstructions,
+      transferInstruction,
+    ];
     return await this.sendTransaction(allInstructions, [fromKeypair]);
   }
 
@@ -531,11 +681,11 @@ export class WalletManager {
   ): Promise<string> {
     const fromKeypair = this.getKeyPair(fromTelegramId);
     const lamports = Math.floor(amount * LAMPORTS_PER_SOL);
-    
+
     const transferInstruction = SystemProgram.transfer({
       fromPubkey: fromKeypair.publicKey,
       toPubkey: toAddress,
-      lamports: lamports
+      lamports: lamports,
     });
 
     return await this.sendTransaction([transferInstruction], [fromKeypair]);
@@ -546,7 +696,12 @@ export class WalletManager {
     const timeout = CONFIRMATION_TIMEOUT_MS;
     const pollInterval = 1000;
 
-    console.log(`🔍 Confirming transaction ${signature.slice(0, 8)}... (timeout: ${timeout}ms)`);
+    console.log(
+      `🔍 Confirming transaction ${signature.slice(
+        0,
+        8
+      )}... (timeout: ${timeout}ms)`
+    );
 
     while (Date.now() - startTime < timeout) {
       try {
@@ -554,28 +709,55 @@ export class WalletManager {
 
         if (result?.value) {
           if (result.value.err) {
-            console.error(`❌ Transaction ${signature.slice(0, 8)}... failed:`, result.value.err);
-            throw new Error(`Transaction failed: ${JSON.stringify(result.value.err)}`);
+            console.error(
+              `❌ Transaction ${signature.slice(0, 8)}... failed:`,
+              result.value.err
+            );
+            throw new Error(
+              `Transaction failed: ${JSON.stringify(result.value.err)}`
+            );
           }
 
-          if (result.value.confirmationStatus === 'confirmed' || result.value.confirmationStatus === 'finalized') {
-            console.log(`✅ Transaction ${signature.slice(0, 8)}... confirmed in ${Date.now() - startTime}ms`);
+          if (
+            result.value.confirmationStatus === "confirmed" ||
+            result.value.confirmationStatus === "finalized"
+          ) {
+            console.log(
+              `✅ Transaction ${signature.slice(0, 8)}... confirmed in ${
+                Date.now() - startTime
+              }ms`
+            );
             return;
           }
 
           if (result.value.confirmationStatus) {
-            console.log(`⏳ Transaction ${signature.slice(0, 8)}... status: ${result.value.confirmationStatus}`);
+            console.log(
+              `⏳ Transaction ${signature.slice(0, 8)}... status: ${
+                result.value.confirmationStatus
+              }`
+            );
           }
         }
 
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
+        await new Promise((resolve) => setTimeout(resolve, pollInterval));
       } catch (error: any) {
-        if (error.message?.includes('429') || error.message?.includes('timeout')) {
-          console.warn(`⚠️ Network issue checking ${signature.slice(0, 8)}..., retrying`);
-          await new Promise(resolve => setTimeout(resolve, pollInterval * 2));
+        if (
+          error.message?.includes("429") ||
+          error.message?.includes("timeout")
+        ) {
+          console.warn(
+            `⚠️ Network issue checking ${signature.slice(0, 8)}..., retrying`
+          );
+          await new Promise((resolve) => setTimeout(resolve, pollInterval * 2));
           continue;
         }
-        console.error(`❌ Error checking transaction status for ${signature.slice(0, 8)}...:`, error.message);
+        console.error(
+          `❌ Error checking transaction status for ${signature.slice(
+            0,
+            8
+          )}...:`,
+          error.message
+        );
         throw error;
       }
     }
@@ -583,16 +765,31 @@ export class WalletManager {
     // Final check before giving up
     try {
       const finalResult = await this.connection.getSignatureStatus(signature);
-      if (finalResult?.value?.confirmationStatus === 'confirmed' || finalResult?.value?.confirmationStatus === 'finalized') {
-        console.log(`✅ Transaction ${signature.slice(0, 8)}... confirmed on final check`);
+      if (
+        finalResult?.value?.confirmationStatus === "confirmed" ||
+        finalResult?.value?.confirmationStatus === "finalized"
+      ) {
+        console.log(
+          `✅ Transaction ${signature.slice(0, 8)}... confirmed on final check`
+        );
         return;
       }
     } catch (error) {
-      console.warn(`⚠️ Error on final check for ${signature.slice(0, 8)}...:`, error);
+      console.warn(
+        `⚠️ Error on final check for ${signature.slice(0, 8)}...:`,
+        error
+      );
     }
 
-    console.error(`⏰ Transaction confirmation timeout for ${signature.slice(0, 8)}... after ${timeout}ms`);
-    throw new Error(`Transaction confirmation timeout after ${timeout}ms. Transaction may still succeed - check signature ${signature}`);
+    console.error(
+      `⏰ Transaction confirmation timeout for ${signature.slice(
+        0,
+        8
+      )}... after ${timeout}ms`
+    );
+    throw new Error(
+      `Transaction confirmation timeout after ${timeout}ms. Transaction may still succeed - check signature ${signature}`
+    );
   }
 
   /**
@@ -608,11 +805,13 @@ export class WalletManager {
       throw new Error("No signers provided");
     }
 
-    const latestBlockhash = await this.connection.getLatestBlockhash('confirmed');
+    const latestBlockhash = await this.connection.getLatestBlockhash(
+      "confirmed"
+    );
     const message = new TransactionMessage({
       payerKey: signers[0]!.publicKey,
       recentBlockhash: latestBlockhash.blockhash,
-      instructions: instructions
+      instructions: instructions,
     }).compileToV0Message();
 
     const tx = new VersionedTransaction(message);
@@ -621,8 +820,8 @@ export class WalletManager {
     const signature = await retryWithBackoff(async () => {
       return await this.connection.sendTransaction(tx, {
         skipPreflight: false,
-        preflightCommitment: 'confirmed',
-        maxRetries: 3
+        preflightCommitment: "confirmed",
+        maxRetries: 3,
       });
     });
 
@@ -641,7 +840,7 @@ export class WalletManager {
 
     try {
       // Deserialize the transaction
-      const txBuffer = Buffer.from(serializedTxBase64, 'base64');
+      const txBuffer = Buffer.from(serializedTxBase64, "base64");
       const tx = VersionedTransaction.deserialize(txBuffer);
 
       // Sign the transaction
@@ -651,23 +850,29 @@ export class WalletManager {
       const signature = await retryWithBackoff(async () => {
         return await this.connection.sendTransaction(tx, {
           skipPreflight: true, // Skip preflight for complex Jupiter transactions
-          preflightCommitment: 'processed',
-          maxRetries: 5
+          preflightCommitment: "processed",
+          maxRetries: 5,
         });
       });
 
-      console.log(`📤 Serialized transaction sent: ${signature.slice(0, 8)}...`);
+      console.log(
+        `📤 Serialized transaction sent: ${signature.slice(0, 8)}...`
+      );
       return signature;
     } catch (error: any) {
       console.error("Error signing and sending serialized transaction:", error);
-      
+
       // Check for specific address lookup table error
-      if (error.message?.includes('address table account') || 
-          error.message?.includes('lookup table') ||
-          error.message?.includes('AddressTableLookup')) {
-        throw new Error('Jupiter transaction failed due to address lookup table issue. Try again with a different amount or wait a moment.');
+      if (
+        error.message?.includes("address table account") ||
+        error.message?.includes("lookup table") ||
+        error.message?.includes("AddressTableLookup")
+      ) {
+        throw new Error(
+          "Jupiter transaction failed due to address lookup table issue. Try again with a different amount or wait a moment."
+        );
       }
-      
+
       throw new Error(`Failed to send transaction: ${error.message}`);
     }
   }
@@ -691,12 +896,18 @@ export class WalletManager {
     }
   }
 
-  public async getLatestBlockhash(): Promise<{ blockhash: string; lastValidBlockHeight: number }> {
+  public async getLatestBlockhash(): Promise<{
+    blockhash: string;
+    lastValidBlockHeight: number;
+  }> {
     const now = Date.now();
-    if (this.blockhashCache && now - this.blockhashCache.timestamp < BLOCKHASH_CACHE_DURATION) {
+    if (
+      this.blockhashCache &&
+      now - this.blockhashCache.timestamp < BLOCKHASH_CACHE_DURATION
+    ) {
       return {
         blockhash: this.blockhashCache.blockhash,
-        lastValidBlockHeight: this.blockhashCache.lastValidBlockHeight
+        lastValidBlockHeight: this.blockhashCache.lastValidBlockHeight,
       };
     }
 
@@ -711,7 +922,7 @@ export class WalletManager {
   }
 
   public formatTokenBalance(amount: number, decimals: number): string {
-    const formatted = (amount / Math.pow(10, decimals));
+    const formatted = amount / Math.pow(10, decimals);
     return formatted.toFixed(4);
   }
 }

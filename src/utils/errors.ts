@@ -72,8 +72,7 @@ export const parseTransactionError = (
   error: unknown,
   walletManager?: WalletManager
 ): string => {
-  const errorMessage =
-    error instanceof Error ? error.message : String(error);
+  const errorMessage = error instanceof Error ? error.message : String(error);
   const lowerMessage = errorMessage.toLowerCase();
 
   // Handle transaction timeout specifically

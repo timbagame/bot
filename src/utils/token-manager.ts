@@ -240,9 +240,16 @@ export class TokenManager {
   /**
    * Get all approved tokens with their metadata for efficient balance checking
    */
-  public getAllApprovedTokensWithMetadata(): Array<{ token_mint: string; token_ticker: string; decimals: number }> {
+  public getAllApprovedTokensWithMetadata(): Array<{
+    token_mint: string;
+    token_ticker: string;
+    decimals: number;
+  }> {
     const tokens = this.tokenDb.getAllKnownTokens();
-    console.log(`📋 getAllApprovedTokensWithMetadata returning ${tokens.length} tokens:`, tokens.map(t => `${t.token_ticker}(${t.token_mint})`));
+    console.log(
+      `📋 getAllApprovedTokensWithMetadata returning ${tokens.length} tokens:`,
+      tokens.map((t) => `${t.token_ticker}(${t.token_mint})`)
+    );
     return tokens;
   }
 
@@ -276,7 +283,9 @@ export class TokenManager {
     }
   }
 
-  public async autoDiscoverTokenInfo(tokenMint: string): Promise<{ ticker: string; decimals: number; isPumpFun?: boolean } | null> {
+  public async autoDiscoverTokenInfo(
+    tokenMint: string
+  ): Promise<{ ticker: string; decimals: number; isPumpFun?: boolean } | null> {
     try {
       const metadata = await this.wallet.getTokenMetadata(tokenMint);
       if (!metadata) {
@@ -286,20 +295,23 @@ export class TokenManager {
       // Check if it's a pump.fun token
       let isPumpFun = false;
       if (isPotentialPumpFunToken(tokenMint)) {
-        const pumpFunClient = new PumpFunClient(this.wallet.getConnection(), this.wallet);
+        const pumpFunClient = new PumpFunClient(
+          this.wallet.getConnection(),
+          this.wallet
+        );
         const pumpInfo = await pumpFunClient.isPumpFunToken(tokenMint);
         isPumpFun = pumpInfo.isPumpFun && !pumpInfo.isGraduated;
       }
-      
+
       // For auto-discovery, we could add more logic here to fetch token name/symbol
       // For now, we'll use a simple format
       const shortMint = tokenMint.slice(0, 8).toUpperCase();
       const ticker = isPumpFun ? `PUMP_${shortMint}` : `TOKEN_${shortMint}`;
-      
+
       return {
         ticker,
         decimals: metadata.decimals,
-        isPumpFun
+        isPumpFun,
       };
     } catch {
       return null;
@@ -310,13 +322,18 @@ export class TokenManager {
   // PUMP.FUN INTEGRATION
   // ================================
 
-  public async checkPumpFunToken(tokenMint: string): Promise<{ isPumpFun: boolean; isGraduated: boolean }> {
+  public async checkPumpFunToken(
+    tokenMint: string
+  ): Promise<{ isPumpFun: boolean; isGraduated: boolean }> {
     if (!isPotentialPumpFunToken(tokenMint)) {
       return { isPumpFun: false, isGraduated: false };
     }
 
     try {
-      const pumpFunClient = new PumpFunClient(this.wallet.getConnection(), this.wallet);
+      const pumpFunClient = new PumpFunClient(
+        this.wallet.getConnection(),
+        this.wallet
+      );
       return await pumpFunClient.isPumpFunToken(tokenMint);
     } catch {
       return { isPumpFun: false, isGraduated: false };

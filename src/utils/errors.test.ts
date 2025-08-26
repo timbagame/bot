@@ -8,7 +8,9 @@ test("truncateErrorForCallback returns original message when under limit", () =>
 
 test("truncateErrorForCallback truncates long message and appends ellipsis", () => {
   const longMessage = "a".repeat(50);
-  expect(truncateErrorForCallback(longMessage, 10)).toBe("a".repeat(10) + "...");
+  expect(truncateErrorForCallback(longMessage, 10)).toBe(
+    "a".repeat(10) + "..."
+  );
 });
 
 test("parseTransactionError formats insufficient lamports message", () => {
@@ -19,7 +21,9 @@ test("parseTransactionError formats insufficient lamports message", () => {
 
 test("parseTransactionError handles transaction timeout with signature", () => {
   const signature = "A".repeat(88);
-  const error = new Error(`Transaction confirmation timeout. signature ${signature}`);
+  const error = new Error(
+    `Transaction confirmation timeout. signature ${signature}`
+  );
   const message = parseTransactionError(error);
   expect(message).toContain(`/checktx ${signature}`);
 });
@@ -42,4 +46,3 @@ test("parseTransactionError returns default message for unknown errors", () => {
   expect(message).toContain("Transaction failed");
   expect(message).toContain("some random error");
 });
-

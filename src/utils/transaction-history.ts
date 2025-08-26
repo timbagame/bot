@@ -1,5 +1,5 @@
-import Database from 'better-sqlite3';
-import path from 'path';
+import Database from "better-sqlite3";
+import path from "path";
 
 // ================================
 // TRANSACTION HISTORY TYPES
@@ -8,7 +8,7 @@ import path from 'path';
 export interface TransactionRecord {
   id?: number;
   user_id: string;
-  transaction_type: 'BUY' | 'SELL' | 'DEPOSIT' | 'WITHDRAW' | 'WRAP' | 'SWAP';
+  transaction_type: "BUY" | "SELL" | "DEPOSIT" | "WITHDRAW" | "WRAP" | "SWAP";
   signature: string;
   from_token: string;
   to_token: string;
@@ -16,7 +16,7 @@ export interface TransactionRecord {
   amount_out?: string;
   price_impact?: string;
   fee?: string;
-  status: 'PENDING' | 'SUCCESS' | 'FAILED';
+  status: "PENDING" | "SUCCESS" | "FAILED";
   timestamp: number;
   network?: string;
   block_height?: number;
@@ -31,10 +31,10 @@ export class TransactionHistory {
   private static instance: TransactionHistory | null = null;
 
   constructor() {
-    const dbPath = path.join(process.cwd(), 'transaction-history.sqlite');
+    const dbPath = path.join(process.cwd(), "transaction-history.sqlite");
     this.db = new Database(dbPath);
     this.initializeTables();
-    console.log('📊 TransactionHistory database initialized');
+    console.log("📊 TransactionHistory database initialized");
   }
 
   static getInstance(): TransactionHistory {
@@ -79,7 +79,7 @@ export class TransactionHistory {
    */
   addTransaction(record: TransactionRecord): number {
     const stmt = this.db.prepare(`
-      INSERT INTO transaction_history 
+      INSERT INTO transaction_history
       (user_id, transaction_type, signature, from_token, to_token, amount_in, amount_out, price_impact, fee, status, timestamp, network, block_height)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
@@ -97,14 +97,16 @@ export class TransactionHistory {
         record.fee || null,
         record.status,
         record.timestamp,
-        record.network || 'mainnet',
+        record.network || "mainnet",
         record.block_height || null
       );
-      
-      console.log(`📝 Added transaction record: ${record.transaction_type} ${record.from_token}→${record.to_token} for user ${record.user_id}`);
+
+      console.log(
+        `📝 Added transaction record: ${record.transaction_type} ${record.from_token}→${record.to_token} for user ${record.user_id}`
+      );
       return result.lastInsertRowid as number;
     } catch (error) {
-      console.error('Error adding transaction record:', error);
+      console.error("Error adding transaction record:", error);
       throw error;
     }
   }
@@ -112,9 +114,13 @@ export class TransactionHistory {
   /**
    * Update transaction status (useful for pending → success/failed)
    */
-  updateTransactionStatus(signature: string, status: 'SUCCESS' | 'FAILED', blockHeight?: number): void {
+  updateTransactionStatus(
+    signature: string,
+    status: "SUCCESS" | "FAILED",
+    blockHeight?: number
+  ): void {
     const stmt = this.db.prepare(`
-      UPDATE transaction_history 
+      UPDATE transaction_history
       SET status = ?, block_height = ?, updated_at = CURRENT_TIMESTAMP
       WHERE signature = ?
     `);
@@ -123,18 +129,22 @@ export class TransactionHistory {
       stmt.run(status, blockHeight || null, signature);
       console.log(`🔄 Updated transaction ${signature} status to ${status}`);
     } catch (error) {
-      console.error('Error updating transaction status:', error);
+      console.error("Error updating transaction status:", error);
     }
   }
 
   /**
    * Get transaction history for a user
    */
-  getUserHistory(userId: string, limit: number = 20, offset: number = 0): TransactionRecord[] {
+  getUserHistory(
+    userId: string,
+    limit: number = 20,
+    offset: number = 0
+  ): TransactionRecord[] {
     const stmt = this.db.prepare(`
-      SELECT * FROM transaction_history 
-      WHERE user_id = ? 
-      ORDER BY timestamp DESC 
+      SELECT * FROM transaction_history
+      WHERE user_id = ?
+      ORDER BY timestamp DESC
       LIMIT ? OFFSET ?
     `);
 
@@ -142,7 +152,7 @@ export class TransactionHistory {
       const records = stmt.all(userId, limit, offset) as TransactionRecord[];
       return records;
     } catch (error) {
-      console.error('Error getting user history:', error);
+      console.error("Error getting user history:", error);
       return [];
     }
   }
@@ -150,11 +160,15 @@ export class TransactionHistory {
   /**
    * Get transaction history by type
    */
-  getUserHistoryByType(userId: string, type: TransactionRecord['transaction_type'], limit: number = 10): TransactionRecord[] {
+  getUserHistoryByType(
+    userId: string,
+    type: TransactionRecord["transaction_type"],
+    limit: number = 10
+  ): TransactionRecord[] {
     const stmt = this.db.prepare(`
-      SELECT * FROM transaction_history 
+      SELECT * FROM transaction_history
       WHERE user_id = ? AND transaction_type = ?
-      ORDER BY timestamp DESC 
+      ORDER BY timestamp DESC
       LIMIT ?
     `);
 
@@ -162,7 +176,7 @@ export class TransactionHistory {
       const records = stmt.all(userId, type, limit) as TransactionRecord[];
       return records;
     } catch (error) {
-      console.error('Error getting user history by type:', error);
+      console.error("Error getting user history by type:", error);
       return [];
     }
   }
@@ -179,7 +193,7 @@ export class TransactionHistory {
       const result = stmt.get(userId) as { count: number };
       return result.count;
     } catch (error) {
-      console.error('Error getting transaction count:', error);
+      console.error("Error getting transaction count:", error);
       return 0;
     }
   }
@@ -189,16 +203,16 @@ export class TransactionHistory {
    */
   getRecentTransactions(limit: number = 10): TransactionRecord[] {
     const stmt = this.db.prepare(`
-      SELECT * FROM transaction_history 
+      SELECT * FROM transaction_history
       WHERE status = 'SUCCESS'
-      ORDER BY timestamp DESC 
+      ORDER BY timestamp DESC
       LIMIT ?
     `);
 
     try {
       return stmt.all(limit) as TransactionRecord[];
     } catch (error) {
-      console.error('Error getting recent transactions:', error);
+      console.error("Error getting recent transactions:", error);
       return [];
     }
   }
@@ -207,19 +221,21 @@ export class TransactionHistory {
    * Clean old transactions (optional - keep last N days)
    */
   cleanOldTransactions(daysToKeep: number = 90): number {
-    const cutoffTime = Date.now() - (daysToKeep * 24 * 60 * 60 * 1000);
-    
+    const cutoffTime = Date.now() - daysToKeep * 24 * 60 * 60 * 1000;
+
     const stmt = this.db.prepare(`
-      DELETE FROM transaction_history 
+      DELETE FROM transaction_history
       WHERE timestamp < ? AND status != 'PENDING'
     `);
 
     try {
       const result = stmt.run(cutoffTime);
-      console.log(`🧹 Cleaned ${result.changes} old transaction records (older than ${daysToKeep} days)`);
+      console.log(
+        `🧹 Cleaned ${result.changes} old transaction records (older than ${daysToKeep} days)`
+      );
       return result.changes as number;
     } catch (error) {
-      console.error('Error cleaning old transactions:', error);
+      console.error("Error cleaning old transactions:", error);
       return 0;
     }
   }
@@ -240,16 +256,17 @@ export class TransactionHistory {
  * Format transaction for display
  */
 export function formatTransactionForDisplay(tx: TransactionRecord): string {
-  const date = new Date(tx.timestamp).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
+  const date = new Date(tx.timestamp).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 
-  const statusIcon = tx.status === 'SUCCESS' ? '✅' : tx.status === 'FAILED' ? '❌' : '⏳';
+  const statusIcon =
+    tx.status === "SUCCESS" ? "✅" : tx.status === "FAILED" ? "❌" : "⏳";
   const typeIcon = getTransactionTypeIcon(tx.transaction_type);
-  
+
   let amountText = `${tx.amount_in} ${tx.from_token}`;
   if (tx.amount_out && tx.to_token) {
     amountText += ` → ${tx.amount_out} ${tx.to_token}`;
@@ -258,15 +275,24 @@ export function formatTransactionForDisplay(tx: TransactionRecord): string {
   return `${statusIcon}${typeIcon} ${amountText}\n<code>${date}</code> • <a href="https://solscan.io/tx/${tx.signature}">View</a>`;
 }
 
-function getTransactionTypeIcon(type: TransactionRecord['transaction_type']): string {
+function getTransactionTypeIcon(
+  type: TransactionRecord["transaction_type"]
+): string {
   switch (type) {
-    case 'BUY': return '🟢';
-    case 'SELL': return '🔴';
-    case 'DEPOSIT': return '💰';
-    case 'WITHDRAW': return '💸';
-    case 'WRAP': return '🔄';
-    case 'SWAP': return '🔀';
-    default: return '📊';
+    case "BUY":
+      return "🟢";
+    case "SELL":
+      return "🔴";
+    case "DEPOSIT":
+      return "💰";
+    case "WITHDRAW":
+      return "💸";
+    case "WRAP":
+      return "🔄";
+    case "SWAP":
+      return "🔀";
+    default:
+      return "📊";
   }
 }
 
@@ -275,13 +301,13 @@ function getTransactionTypeIcon(type: TransactionRecord['transaction_type']): st
  */
 export function createTransactionRecord(
   userId: string,
-  type: TransactionRecord['transaction_type'],
+  type: TransactionRecord["transaction_type"],
   signature: string,
   fromToken: string,
   toToken: string,
   amountIn: string,
   amountOut?: string,
-  status: 'PENDING' | 'SUCCESS' | 'FAILED' = 'PENDING'
+  status: "PENDING" | "SUCCESS" | "FAILED" = "PENDING"
 ): TransactionRecord {
   return {
     user_id: userId,
@@ -292,6 +318,6 @@ export function createTransactionRecord(
     amount_in: amountIn,
     amount_out: amountOut,
     status,
-    timestamp: Date.now()
+    timestamp: Date.now(),
   };
 }

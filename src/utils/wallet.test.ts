@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { WalletManager } from "./wallet";
 
-const mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const mnemonic =
+  "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 process.env.SOLANA_NETWORK = "https://api.devnet.solana.com";
 
 const resetInstance = () => {
