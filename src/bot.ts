@@ -621,10 +621,10 @@ const handleCallbackError = async (
 
 const initializeAnchorProvider = async () => {
   const adminKeypair = wallet.getAdminKeypair();
-  const adminWallet = new anchor.Wallet(adminKeypair);
+  const adminWallet = new anchor.Wallet(adminKeypair as unknown as anchor.web3.Keypair);
   const connection = wallet.getConnection();
 
-  const provider = new anchor.AnchorProvider(connection, adminWallet, {
+  const provider = new anchor.AnchorProvider(connection as unknown as anchor.web3.Connection, adminWallet, {
     commitment: "confirmed",
     preflightCommitment: "confirmed",
     skipPreflight: false,
@@ -990,7 +990,6 @@ const createGameCommand = async (
     gameType.charAt(0).toUpperCase() + gameType.slice(1),
     parsed.data!.amount,
     creatorUsername,
-    parsed.data!.tokenMint,
     parsed.data!.tokenTicker,
     "Active"
   );
