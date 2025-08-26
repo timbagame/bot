@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(\"C:\\Users\\franc\\.bun\\bin\\bun.exe\" run --no-watch src/bot.ts)"
-    ],
-    "deny": [],
-    "ask": []
-  }
-}
