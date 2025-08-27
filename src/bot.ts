@@ -2979,7 +2979,7 @@ bot.callbackQuery("cmd_withdraw", async (ctx) => {
         reply_markup: keyboard,
       });
     }
-    await ctx.answerCallbackQuery("💸 Select token to withdraw");
+    await ctx.answerCallbackQuery("💸 Select Token to Withdraw");
   } catch (error) {
     console.error("Error in cmd_withdraw:", error);
     await ctx.answerCallbackQuery("❌ Error loading send menu");
@@ -4316,13 +4316,13 @@ bot.callbackQuery("cmd_help", async (ctx) => {
       {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("💰 WALLET COMMANDS", "help_wallet")
+          .text("💰 Wallet Commands", "help_wallet")
           .row()
-          .text("🎮 GAME COMMANDS", "help_games")
+          .text("🎮 Game Commands", "help_games")
           .row()
-          .text("🔧 UTILITY COMMANDS", "help_utility")
+          .text("🔧 Utility Commands", "help_utility")
           .row()
-          .text("📋 EXAMPLES", "help_examples")
+          .text("📋 Examples", "help_examples")
           .row()
           .text("⬅️ Back to Main", "back_main"),
       }
@@ -4337,7 +4337,7 @@ bot.callbackQuery("cmd_help", async (ctx) => {
 bot.callbackQuery("help_wallet", async (ctx) => {
   try {
     await ctx.editMessageText(
-      "💰 <b>WALLET COMMANDS</b>\n\n" +
+      "💰 <b>Wallet Commands</b>\n\n" +
         "<code>/start</code> - Show your wallet info\n" +
         "<code>/balance</code> - Show detailed balances\n" +
         "<code>/wrap &lt;amount&gt;</code> - Convert SOL to WSOL\n" +
@@ -4349,10 +4349,10 @@ bot.callbackQuery("help_wallet", async (ctx) => {
       {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("🎮 GAMES", "help_games")
-          .text("🔧 UTILITY", "help_utility")
+          .text("🎮 Games", "help_games")
+          .text("🔧 Utility", "help_utility")
           .row()
-          .text("📋 EXAMPLES", "help_examples")
+          .text("📋 Examples", "help_examples")
           .row()
           .text("⬅️ Help Menu", "cmd_help")
           .text("🏠 Main", "back_main")
@@ -4369,7 +4369,7 @@ bot.callbackQuery("help_wallet", async (ctx) => {
 bot.callbackQuery("help_games", async (ctx) => {
   try {
     await ctx.editMessageText(
-      "🎮 <b>GAME COMMANDS</b>\n\n" +
+      "🎮 <b>Game Commands</b>\n\n" +
         "<code>/coinflip &lt;amount&gt; [TOKEN] &lt;players&gt;</code> - Create coinflip\n" +
         "<code>/giveaway &lt;amount&gt; [TOKEN] &lt;players&gt;</code> - Create giveaway\n" +
         "<code>/active</code> - Show active games\n" +
@@ -4381,10 +4381,10 @@ bot.callbackQuery("help_games", async (ctx) => {
       {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("💰 WALLET", "help_wallet")
-          .text("🔧 UTILITY", "help_utility")
+          .text("💰 Wallet", "help_wallet")
+          .text("🔧 Utility", "help_utility")
           .row()
-          .text("📋 EXAMPLES", "help_examples")
+          .text("📋 Examples", "help_examples")
           .row()
           .text("⬅️ Help Menu", "cmd_help")
           .text("🏠 Main", "back_main")
@@ -4401,7 +4401,7 @@ bot.callbackQuery("help_games", async (ctx) => {
 bot.callbackQuery("help_utility", async (ctx) => {
   try {
     await ctx.editMessageText(
-      "🔧 <b>UTILITY COMMANDS</b>\n\n" +
+      "🔧 <b>Utility Commands</b>\n\n" +
         "<code>/debug</code> - Show wallet debug info\n" +
         "<code>/checktx &lt;signature&gt;</code> - Check transaction status\n" +
         "<code>/oracle</code> - Check oracle status\n" +
@@ -4414,10 +4414,10 @@ bot.callbackQuery("help_utility", async (ctx) => {
       {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("💰 WALLET", "help_wallet")
-          .text("🎮 GAMES", "help_games")
+          .text("💰 Wallet", "help_wallet")
+          .text("🎮 Games", "help_games")
           .row()
-          .text("📋 EXAMPLES", "help_examples")
+          .text("📋 Examples", "help_examples")
           .row()
           .text("⬅️ Help Menu", "cmd_help")
           .text("🏠 Main", "back_main")
@@ -4434,7 +4434,7 @@ bot.callbackQuery("help_utility", async (ctx) => {
 bot.callbackQuery("help_examples", async (ctx) => {
   try {
     await ctx.editMessageText(
-      "📋 <b>COMMAND EXAMPLES</b>\n\n" +
+      "📋 <b>Command Examples</b>\n\n" +
         "<b>💰 Wallet Examples:</b>\n" +
         "<code>/swap 100 USDC SOL</code>\n" +
         "<code>/withdraw [address] 50 TIMBA</code>\n" +
@@ -4448,10 +4448,10 @@ bot.callbackQuery("help_examples", async (ctx) => {
       {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("💰 WALLET", "help_wallet")
-          .text("🎮 GAMES", "help_games")
+          .text("💰 Wallet", "help_wallet")
+          .text("🎮 Games", "help_games")
           .row()
-          .text("🔧 UTILITY", "help_utility")
+          .text("🔧 Utility", "help_utility")
           .row()
           .text("⬅️ Help Menu", "cmd_help")
           .text("🏠 Main", "back_main")
@@ -5109,7 +5109,7 @@ bot.on("callback_query", async (ctx, next) => {
 
     await ctx.editMessageText(errorMessage.join("\n"), {
       parse_mode: "HTML",
-      reply_markup: new InlineKeyboard().text("← TRY AGAIN", "cmd_sell").row(),
+      reply_markup: new InlineKeyboard().text("← Try Again", "cmd_sell").row(),
     });
 
     await ctx.answerCallbackQuery("❌ Error processing sell request");
@@ -5269,7 +5269,7 @@ bot.on("callback_query", async (ctx, next) => {
     await ctx.editMessageText(errorMessage, {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard()
-        .text("← TRY AGAIN", "cmd_sell")
+      .text("← Try Again", "cmd_sell")
         .text("💰 WALLET", "main_wallet")
         .row(),
     });
@@ -5323,7 +5323,7 @@ bot.on("callback_query", async (ctx, next) => {
         }
       }
 
-      keyboard.text("← BACK", "cmd_buy").row();
+      keyboard.text("← Back", "cmd_buy").row();
 
       await ctx.editMessageText(response.join("\n"), {
         parse_mode: "HTML",
@@ -5364,7 +5364,7 @@ bot.on("callback_query", async (ctx, next) => {
       .text("📋 PASTE CONTRACT ADDRESS", `buy_contract_${paymentToken}`)
       .row();
 
-    keyboard.text("← BACK", "cmd_buy").row();
+    keyboard.text("← Back", "cmd_buy").row();
 
     await ctx.editMessageText(response.join("\n"), {
       parse_mode: "HTML",
@@ -5908,10 +5908,10 @@ bot.on("callback_query", async (ctx, next) => {
 
       keyboard
         .text(buttonText, `buy_retry_exact_${txId}`)
-        .text("🔄 RETRY SAME", `confirm_buy_${txId}`)
+        .text("🔄 Retry Same", `confirm_buy_${txId}`)
         .row()
-        .text("← BACK TO BUY", "cmd_buy")
-        .text("💰 WALLET", "main_wallet")
+        .text("← Back to Buy", "cmd_buy")
+        .text("💰 Wallet", "main_wallet")
         .row();
 
       // Store the exact amount needed for the retry button
@@ -5935,8 +5935,8 @@ bot.on("callback_query", async (ctx, next) => {
       ].join("\n");
 
       keyboard
-        .text("💰 CHECK BALANCE", "main_wallet")
-        .text("← TRY SMALLER", "cmd_buy")
+        .text("💰 Check Balance", "main_wallet")
+        .text("← Try Smaller", "cmd_buy")
         .row();
     } else {
       // Generic error
@@ -5949,8 +5949,8 @@ bot.on("callback_query", async (ctx, next) => {
       ].join("\n");
 
       keyboard
-        .text("🔄 TRY AGAIN", "cmd_buy")
-        .text("💰 WALLET", "main_wallet")
+        .text("🔄 Try Again", "cmd_buy")
+        .text("💰 Wallet", "main_wallet")
         .row();
     }
 
@@ -6408,7 +6408,7 @@ const showSwapAmountSelection = async (
     keyboard.text("❌ Insufficient balance").row();
   }
 
-  keyboard.text("← BACK", `swap_to_${fromToken}_${toToken}`).row();
+  keyboard.text("← Back", `swap_to_${fromToken}_${toToken}`).row();
 
   await ctx.editMessageText(response.join("\n"), {
     parse_mode: "HTML",
@@ -6524,7 +6524,7 @@ const showSwapQuoteAndConfirmation = async (
     await ctx.editMessageText(response, {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard()
-        .text("✅ CONFIRM SWAP", `confirm_swap_${txId}`)
+        .text("✅ Confirm Swap", `confirm_swap_${txId}`)
         .row()
         .text("❌ Cancel", `swap_to_${fromToken}_${toToken}`)
         .row(),
@@ -6538,7 +6538,7 @@ const showSwapQuoteAndConfirmation = async (
       {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("← TRY AGAIN", `swap_to_${fromToken}_${toToken}`)
+          .text("← Try Again", `swap_to_${fromToken}_${toToken}`)
           .row(),
       }
     );
@@ -6629,7 +6629,7 @@ const showBuyAmountSelection = async (
     keyboard.text("❌ Insufficient balance").row();
   }
 
-  keyboard.text("← BACK", `buy_with_${paymentToken}`).row();
+  keyboard.text("← Back", `buy_with_${paymentToken}`).row();
 
   await ctx.editMessageText(response.join("\n"), {
     parse_mode: "HTML",
@@ -6845,9 +6845,9 @@ ${outputMint}</pre>`,
     await ctx.editMessageText(response, {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard()
-        .text("✅ CONFIRM BUY", `confirm_buy_${txId}`)
+        .text("✅ Confirm Buy", `confirm_buy_${txId}`)
         .row()
-        .text("⚙️ SLIPPAGE", `buy_slippage_${txId}`)
+        .text("⚙️ Slippage", `buy_slippage_${txId}`)
         .row()
         .text("0.5%", `buy_slip_${txId}_0.5`)
         .text("1%", `buy_slip_${txId}_1.0`)
@@ -6869,7 +6869,7 @@ ${outputMint}</pre>`,
       {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("← TRY AGAIN", `buy_with_${paymentToken}`)
+          .text("← Try Again", `buy_with_${paymentToken}`)
           .row(),
       }
     );
@@ -8046,7 +8046,7 @@ const showSellQuoteAndConfirmation = async (
 
     await ctx.editMessageText(errorResponse.join("\n"), {
       parse_mode: "HTML",
-      reply_markup: new InlineKeyboard().text("← TRY AGAIN", "cmd_sell").row(),
+      reply_markup: new InlineKeyboard().text("← Try Again", "cmd_sell").row(),
     });
   }
 };
