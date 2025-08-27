@@ -40,6 +40,26 @@ test("parseTransactionError handles Jupiter no route errors", () => {
   expect(message).toContain("No swap route available");
 });
 
+test("parseTransactionError handles address lookup table errors", () => {
+  const error = new Error(
+    "Jupiter: address table account not found in AddressTableLookup"
+  );
+  const message = parseTransactionError(error);
+  expect(message).toContain("Address lookup table error");
+});
+
+test("parseTransactionError handles slippage errors", () => {
+  const error = new Error("Jupiter: slippage exceeded");
+  const message = parseTransactionError(error);
+  expect(message).toContain("Slippage error");
+});
+
+test("parseTransactionError handles price impact errors", () => {
+  const error = new Error("Jupiter: price impact too high");
+  const message = parseTransactionError(error);
+  expect(message).toContain("Price impact too high");
+});
+
 test("parseTransactionError returns default message for unknown errors", () => {
   const error = new Error("some random error");
   const message = parseTransactionError(error);

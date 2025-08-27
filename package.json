@@ -2,7 +2,10 @@
   "name": "timba-bot",
   "scripts": {
     "start": "bun run src/bot.ts",
-    "dev": "bun run --watch src/bot.ts"
+    "dev": "bun run --watch src/bot.ts",
+    "test": "bun test",
+    "typecheck": "bun x tsc -p tsconfig.json --noEmit",
+    "coverage": "bun test --coverage"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.1",
