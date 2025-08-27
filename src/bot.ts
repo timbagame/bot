@@ -24,7 +24,13 @@ import {
   TOKENS_LIST,
 } from "./utils/constants";
 import { mergeWsolIntoSol } from "./utils/balance";
-import { createMainMenuKeyboard, createWalletKeyboard } from "./utils/keyboards";
+import {
+  createMainMenuKeyboard,
+  createWalletKeyboard,
+  createScanPromptKeyboard,
+  createBackToInfoMainKeyboard,
+  createScanResultKeyboard,
+} from "./utils/keyboards";
 import { buildWalletCaption } from "./utils/wallet-ui";
 import type {
   PlayerData,
@@ -4470,12 +4476,7 @@ bot.callbackQuery("cmd_scan", async (ctx) => {
         "Do you want to start the scan?",
       {
         parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("🔍 Start Scan", "scan_confirm")
-          .row()
-          .text("⬅️ Back to Info", "main_settings")
-          .text("🏠 Main", "back_main")
-          .row(),
+        reply_markup: createScanPromptKeyboard(),
       }
     );
     await ctx.answerCallbackQuery("🔍 Blockchain Scanner");
@@ -4494,10 +4495,7 @@ bot.callbackQuery("scan_confirm", async (ctx) => {
         "Please wait...",
       {
         parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("⬅️ Back to Info", "main_settings")
-          .text("🏠 Main", "back_main")
-          .row(),
+        reply_markup: createBackToInfoMainKeyboard(),
       }
     );
 
@@ -4515,12 +4513,7 @@ bot.callbackQuery("scan_confirm", async (ctx) => {
               "All games and transactions are properly synchronized.",
             {
               parse_mode: "HTML",
-              reply_markup: new InlineKeyboard()
-                .text("🔄 Scan Again", "scan_confirm")
-                .row()
-                .text("⬅️ Back to Info", "main_settings")
-                .text("🏠 Main", "back_main")
-                .row(),
+              reply_markup: createScanResultKeyboard(),
             }
           );
         } catch (e) {
