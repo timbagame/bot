@@ -4,7 +4,7 @@ import { mergeWsolIntoSol, type TokenBalance } from "./balance";
 const WSOL = "So11111111111111111111111111111111111111112";
 
 test("mergeWsolIntoSol merges WSOL into SOL and removes WSOL token", () => {
-  const solLamports = 200n as unknown as number; // using number for compatibility with existing types
+  const solLamports = 200; // lamports as number for util
   const tokens: TokenBalance[] = [
     {
       mint: WSOL,
@@ -23,7 +23,7 @@ test("mergeWsolIntoSol merges WSOL into SOL and removes WSOL token", () => {
   ];
 
   const { solLamports: merged, tokenBalances } = mergeWsolIntoSol(
-    solLamports as number,
+    solLamports,
     tokens,
     WSOL
   );
@@ -54,4 +54,3 @@ test("mergeWsolIntoSol is a no-op when WSOL not present", () => {
   expect(merged).toBe(solLamports);
   expect(tokenBalances).toEqual(tokens);
 });
-

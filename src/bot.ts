@@ -25,6 +25,7 @@ import {
 } from "./utils/constants";
 import { mergeWsolIntoSol } from "./utils/balance";
 import { createMainMenuKeyboard, createWalletKeyboard } from "./utils/keyboards";
+import { buildWalletCaption } from "./utils/wallet-ui";
 import type {
   PlayerData,
   GameCompletedEvent,
@@ -316,45 +317,38 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
     const formattedSolBalance = wallet.formatSolBalance(solBalance);
 
-    // Calculate total USD value
+    // Calculate total USD value and token display lines
     let totalUSD = 0;
-
-    // Add SOL value
     const solPriceUSD = await getTokenPriceUSD("SOL");
     const solDecimalBalance = solBalance / LAMPORTS_PER_SOL;
     totalUSD += solDecimalBalance * solPriceUSD;
 
-    // Build wallet info without address
-    let walletContent = `SOL: ${formattedSolBalance}`;
+    const tokenLines: Array<{ ticker: string; formatted: string }> = [];
+    for (const token of tokenBalances) {
+      const formatted = wallet.formatTokenBalance(
+        token.balance,
+        token.decimals
+      );
+      tokenLines.push({ ticker: token.ticker, formatted });
 
-    // Add token balances (calculate USD)
-    if (tokenBalances.length > 0) {
-      for (const token of tokenBalances) {
-        const formatted = wallet.formatTokenBalance(
-          token.balance,
-          token.decimals
-        );
-        walletContent += `\n${token.ticker}: ${formatted}`;
-
-        // Add to total USD (prices would be 0 for now, but structure is ready)
-        const tokenPriceUSD = await getTokenPriceUSD(token.mint);
-        const tokenDecimalBalance =
-          token.balance / Math.pow(10, token.decimals);
-        totalUSD += tokenDecimalBalance * tokenPriceUSD;
-      }
+      const tokenPriceUSD = await getTokenPriceUSD(token.mint);
+      const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
+      totalUSD += tokenDecimalBalance * tokenPriceUSD;
     }
 
-    // Add total USD value
-    walletContent += `\n\nTOTAL USD: $${totalUSD.toFixed(2)}`;
-
-    const finalCaption = [walletContent, "", `<code>${walletAddress}</code>`];
+    const caption = buildWalletCaption(
+      formattedSolBalance,
+      tokenLines,
+      totalUSD,
+      walletAddress
+    );
 
     // Update with final wallet data and image
     await ctx.editMessageMedia(
       {
         type: "animation",
         media: walletImageFileId,
-        caption: finalCaption.join("\n"),
+        caption,
         parse_mode: "HTML",
       },
       {
