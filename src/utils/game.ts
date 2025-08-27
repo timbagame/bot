@@ -21,7 +21,12 @@ import type {
   GameType,
 } from "../types";
 import type { Coinflip } from "../../idl/idlType";
-import { buildGameStatus } from "./game-ui";
+import {
+  buildGameStatus,
+  buildGameHeader,
+  buildPrizeLine,
+  buildParticipantsList,
+} from "./game-ui";
 
 // ================================
 // UTILITY FUNCTIONS
@@ -381,9 +386,6 @@ export class GameManager {
 
     const winnerInfo = await this.getWinnerInfo(ctx, status, winnerAddress);
 
-    const { buildGameHeader, buildPrizeLine, buildParticipantsList } = await import(
-      "./game-ui"
-    );
     const header = buildGameHeader(
       formatGameTypeWithEmoji(gameType),
       this.wallet.formatTokenBalance(amount, 9),
@@ -429,11 +431,7 @@ export class GameManager {
 
     // Add status and expiration info for active games
     if (status.toLowerCase() !== "completed") {
-      const statusText = buildGameStatus(
-        currentTickets,
-        minTickets,
-        maxTickets
-      );
+      const statusText = buildGameStatus(currentTickets, minTickets, maxTickets);
       messageText += `\nStatus: ${statusText}${expirationInfo}`;
     }
 
