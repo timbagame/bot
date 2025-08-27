@@ -345,7 +345,13 @@ export class WalletManager {
               const fullMetadata = await this.getFullTokenMetadata(mint);
               console.log(`📋 Full metadata result for ${mint}:`, fullMetadata);
 
-              if (fullMetadata.symbol && fullMetadata.symbol !== "UNKNOWN") {
+              // Preserve WSOL ticker for the wrapped SOL mint to avoid
+              // confusing duplication with native SOL balances
+              const WSOL_MINT = "So11111111111111111111111111111111111111112";
+              if (mint === WSOL_MINT) {
+                // Always show WSOL for the wrapped SOL mint
+                finalTicker = "WSOL";
+              } else if (fullMetadata.symbol && fullMetadata.symbol !== "UNKNOWN") {
                 finalTicker = fullMetadata.symbol;
                 console.log(
                   `✅ Updated ticker for ${mint}: ${finalApprovedToken.token_ticker} → ${finalTicker}`

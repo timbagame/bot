@@ -952,12 +952,25 @@ bot.command("balance", async (ctx: Context) => {
 
   // Original behavior for group chats
   try {
-    const playerData = await getPlayerData(telegramId);
-    const approvedTokens = tokenManager.getAllApprovedTokensWithMetadata();
-    const tokenBalancesToShow = await buildTokenBalances(
+  const playerData = await getPlayerData(telegramId);
+  const approvedTokens = tokenManager.getAllApprovedTokensWithMetadata();
+  const tokenBalancesToShow = await buildTokenBalances(
       telegramId,
       approvedTokens
     );
+
+    // Merge WSOL into native SOL for display in group chats
+    const WSOL_MINT =
+      (TOKENS_LIST.find((t) => t.ticker === "WSOL")?.mint as string) ||
+      "So11111111111111111111111111111111111111112";
+    let solDisplayLamports = playerData.solBalance;
+    const wsolIndex = tokenBalancesToShow.findIndex(
+      (t) => t.mint === WSOL_MINT
+    );
+    if (wsolIndex !== -1) {
+      solDisplayLamports += tokenBalancesToShow[wsolIndex]!.balance; // balance is in raw units (lamports for WSOL)
+      tokenBalancesToShow.splice(wsolIndex, 1);
+    }
 
     const username = ctx.from?.username
       ? `@${ctx.from.username}`
@@ -973,7 +986,7 @@ bot.command("balance", async (ctx: Context) => {
       `PLAYER: ${username.toUpperCase()}`,
       `WALLET: <code>${shortAddress}</code>`,
       "",
-      `SOL: ${wallet.formatSolBalance(playerData.solBalance)}`,
+      `SOL: ${wallet.formatSolBalance(solDisplayLamports)}`,
     ];
 
     if (tokenBalancesToShow.length > 0) {
@@ -3840,14 +3853,26 @@ const getCachedWalletData = async (telegramId: bigint) => {
 
   try {
     // Fetch fresh data
-    const solBalance = await wallet.getBalance(telegramId);
+    let solBalance = await wallet.getBalance(telegramId);
     const approvedTokens = tokenManager
       ? tokenManager.getAllApprovedTokensWithMetadata()
       : [];
-    const tokenBalances = await wallet.getAllApprovedTokenBalances(
+    let tokenBalances = await wallet.getAllApprovedTokenBalances(
       telegramId,
       approvedTokens
     );
+
+    // Merge WSOL into native SOL in cached data for wallet UI
+    const WSOL_MINT =
+      (TOKENS_LIST.find((t) => t.ticker === "WSOL")?.mint as string) ||
+      "So11111111111111111111111111111111111111112";
+    const wsolIdx = tokenBalances.findIndex((t) => t.mint === WSOL_MINT);
+    if (wsolIdx !== -1) {
+      solBalance += tokenBalances[wsolIdx]!.balance; // WSOL balance is in lamports (decimals 9)
+      tokenBalances = tokenBalances
+        .slice(0, wsolIdx)
+        .concat(tokenBalances.slice(wsolIdx + 1));
+    }
 
     const data = {
       solBalance,
