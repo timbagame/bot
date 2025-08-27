@@ -976,16 +976,11 @@ bot.command("balance", async (ctx: Context) => {
       ? `@${ctx.from.username}`
       : ctx.from?.first_name || "User";
     const walletAddress = playerData.keypair.publicKey.toBase58();
-    const shortAddress = `${walletAddress.slice(0, 4)}...${walletAddress.slice(
-      -4
-    )}`;
 
     const response = [
-      "💰 <b>YOUR BALANCE</b>",
-      "",
-      `PLAYER: ${username.toUpperCase()}`,
-      `WALLET: <code>${shortAddress}</code>`,
-      "",
+      "💰 <b>Balance</b>",
+      `Player: ${username}`,
+      `Wallet: <code>${walletAddress}</code>`,
       `SOL: ${wallet.formatSolBalance(solDisplayLamports)}`,
     ];
 
