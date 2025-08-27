@@ -18,3 +18,40 @@ export function buildGameStatus(
   return "Full - starting soon!";
 }
 
+/**
+ * Build the game header line with emoji, amount, ticker and creator/ticket info.
+ */
+export function buildGameHeader(
+  gameTypeLabel: string,
+  amountFormatted: string,
+  tokenTicker: string,
+  creatorUsername: string,
+  currentTickets: number,
+  maxTickets: number
+): string {
+  return (
+    `<b>${gameTypeLabel} • ${amountFormatted} ${tokenTicker}</b>\n` +
+    `👤 Creator: ${creatorUsername} • ${currentTickets}/${maxTickets} tickets`
+  );
+}
+
+/**
+ * Build prize line if needed, otherwise return empty string.
+ */
+export function buildPrizeLine(
+  show: boolean,
+  totalFormatted: string,
+  tokenTicker: string
+): string {
+  if (!show) return "";
+  return `\n🏆 Current Prize: ${totalFormatted} ${tokenTicker}`;
+}
+
+/**
+ * Build participants list given usernames; returns empty when none.
+ */
+export function buildParticipantsList(usernames: string[]): string {
+  if (!usernames.length) return "";
+  const lines = usernames.map((u, i) => `${i + 1}. ${u}`);
+  return `\n${lines.join("\n")}\n`;
+}

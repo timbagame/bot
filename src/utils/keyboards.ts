@@ -52,7 +52,9 @@ export const createScanResultKeyboard = (): InlineKeyboard => {
     .row();
 };
 
-export const createConfirmWrapKeyboard = (amount: number | string): InlineKeyboard => {
+export const createConfirmWrapKeyboard = (
+  amount: number | string
+): InlineKeyboard => {
   return new InlineKeyboard()
     .text("✅ Confirm Wrap", `confirm_wrap_${String(amount)}`)
     .row()

@@ -381,19 +381,26 @@ export class GameManager {
 
     const winnerInfo = await this.getWinnerInfo(ctx, status, winnerAddress);
 
-    let messageText =
-      `<b>${formatGameTypeWithEmoji(
-        gameType
-      )} • ${this.wallet.formatTokenBalance(amount, 9)} ${tokenTicker}</b>\n` +
-      `👤 Creator: ${creatorUsername} • ${currentTickets}/${maxTickets} tickets`;
+    const { buildGameHeader, buildPrizeLine, buildParticipantsList } = await import(
+      "./game-ui"
+    );
+    const header = buildGameHeader(
+      formatGameTypeWithEmoji(gameType),
+      this.wallet.formatTokenBalance(amount, 9),
+      tokenTicker,
+      creatorUsername,
+      currentTickets,
+      maxTickets
+    );
+    let messageText = header;
 
     // Show current prize if different from base amount
-    if (currentTickets > 0 || totalPot !== amount) {
-      messageText += `\n🏆 Current Prize: ${this.wallet.formatTokenBalance(
-        totalPot,
-        9
-      )} ${tokenTicker}`;
-    }
+    const prize = buildPrizeLine(
+      currentTickets > 0 || totalPot !== amount,
+      this.wallet.formatTokenBalance(totalPot, 9),
+      tokenTicker
+    );
+    messageText += prize;
 
     // Add list of players if any have joined
     if (currentTickets > 0 && status.toLowerCase() !== "completed") {
@@ -401,19 +408,19 @@ export class GameManager {
         const participants = this.getGamePlayers(gamePda.toBase58());
         if (participants.length > 0) {
           const playerNames = await Promise.all(
-            participants.map(async (telegramId, index) => {
+            participants.map(async (telegramId) => {
               try {
                 const username = await this.getUsernameFromTelegramId(
                   ctx,
                   telegramId
                 );
-                return `${index + 1}. @${username}`;
+                return `@${username}`;
               } catch (error) {
-                return `${index + 1}. Player ${telegramId.slice(0, 6)}...`;
+                return `Player ${telegramId.slice(0, 6)}...`;
               }
             })
           );
-          messageText += `\n${playerNames.join("\n")}\n`;
+          messageText += buildParticipantsList(playerNames);
         }
       } catch (error) {
         console.error("Error getting player list:", error);
