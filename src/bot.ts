@@ -47,12 +47,12 @@ const gameDb = GameDatabase.getInstance();
  */
 const createMainMenuKeyboard = (): InlineKeyboard => {
   return new InlineKeyboard()
-    .text("💳 WALLET", "main_wallet")
+    .text("💳 Wallet", "main_wallet")
     .row()
-    .text("⚙️ INFO", "main_settings")
-    .text("🔧 ADMIN", "admin_menu")
+    .text("⚙️ Info", "main_settings")
+    .text("🔧 Admin", "admin_menu")
     .row()
-    .text("❓ HELP", "cmd_help")
+    .text("❓ Help", "cmd_help")
     .row();
 };
 
@@ -305,17 +305,17 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
         },
         {
           reply_markup: new InlineKeyboard()
-            .text("🔄 REFRESH", "wallet_refresh")
-            .text("📋 HISTORY", "cmd_history")
+            .text("🔄 Refresh", "wallet_refresh")
+            .text("📋 History", "cmd_history")
             .row()
-            .text("💸 WITHDRAW", "cmd_withdraw")
+            .text("💸 Withdraw", "cmd_withdraw")
             .row()
-            .text("🟢 BUY", "cmd_buy")
-            .text("🔴 SELL", "cmd_sell")
+            .text("🟢 Buy", "cmd_buy")
+            .text("🔴 Sell", "cmd_sell")
             .row()
-            .text("⚙️ SETTINGS", "wallet_settings")
+            .text("⚙️ Settings", "wallet_settings")
             .row()
-            .text("← BACK", "back_main")
+            .text("← Back", "back_main")
             .row(),
         }
       );
@@ -329,17 +329,17 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
         caption: loadingCaption.join("\n"),
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("🔄 REFRESH", "wallet_refresh")
-          .text("📋 HISTORY", "cmd_history")
+          .text("🔄 Refresh", "wallet_refresh")
+          .text("📋 History", "cmd_history")
           .row()
-          .text("💸 WITHDRAW", "cmd_withdraw")
+          .text("💸 Withdraw", "cmd_withdraw")
           .row()
-          .text("🟢 BUY", "cmd_buy")
-          .text("🔴 SELL", "cmd_sell")
+          .text("🟢 Buy", "cmd_buy")
+          .text("🔴 Sell", "cmd_sell")
           .row()
-          .text("⚙️ SETTINGS", "wallet_settings")
+          .text("⚙️ Settings", "wallet_settings")
           .row()
-          .text("← BACK", "back_main")
+          .text("← Back", "back_main")
           .row(),
       });
     }
@@ -393,24 +393,24 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
       },
       {
         reply_markup: new InlineKeyboard()
-          .text("🔄 REFRESH", "wallet_refresh")
-          .text("📋 HISTORY", "cmd_history")
+          .text("🔄 Refresh", "wallet_refresh")
+          .text("📋 History", "cmd_history")
           .row()
-          .text("💸 WITHDRAW", "cmd_withdraw")
+          .text("💸 Withdraw", "cmd_withdraw")
           .row()
-          .text("🟢 BUY", "cmd_buy")
-          .text("🔴 SELL", "cmd_sell")
+          .text("🟢 Buy", "cmd_buy")
+          .text("🔴 Sell", "cmd_sell")
           .row()
-          .text("⚙️ SETTINGS", "wallet_settings")
+          .text("⚙️ Settings", "wallet_settings")
           .row()
-          .text("← BACK", "back_main")
+          .text("← Back", "back_main")
           .row(),
       }
     );
   } catch (error) {
     console.error("Error loading balances:", error);
     const errorResponse = [
-      `💳 <b>WALLET</b>`,
+      `💳 <b>Wallet</b>`,
       "",
       `<code>${shortAddress}</code>`,
       "",
@@ -427,17 +427,17 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
       },
       {
         reply_markup: new InlineKeyboard()
-          .text("🔄 REFRESH", "wallet_refresh")
-          .text("📋 HISTORY", "cmd_history")
+          .text("🔄 Refresh", "wallet_refresh")
+          .text("📋 History", "cmd_history")
           .row()
-          .text("💸 WITHDRAW", "cmd_withdraw")
+          .text("💸 Withdraw", "cmd_withdraw")
           .row()
-          .text("🟢 BUY", "cmd_buy")
-          .text("🔴 SELL", "cmd_sell")
+          .text("🟢 Buy", "cmd_buy")
+          .text("🔴 Sell", "cmd_sell")
           .row()
-          .text("⚙️ SETTINGS", "wallet_settings")
+          .text("⚙️ Settings", "wallet_settings")
           .row()
-          .text("← BACK", "back_main")
+          .text("← Back", "back_main")
           .row(),
       }
     );
@@ -900,13 +900,13 @@ bot.command("start", async (ctx: Context) => {
       });
     } else {
       // Simple group chat response
-      const groupResponse = [
-        "💰 <b>TIMBA BOT</b>",
-        "",
-        `WALLET: <code>${shortAddress}</code>`,
-        "",
-        "Use /balance to check your balances",
-      ];
+    const groupResponse = [
+      "💰 <b>TIMBA BOT</b>",
+      "",
+      `Wallet: <code>${shortAddress}</code>`,
+      "",
+      "Use /balance to check your balances",
+    ];
 
       await ctx.reply(groupResponse.join("\n"), {
         parse_mode: "HTML",
@@ -924,7 +924,7 @@ bot.command("balance", async (ctx: Context) => {
   if (isPrivateChat(ctx)) {
     try {
       const message = await ctx.reply(
-        "💳 <b>WALLET</b>\n⏳ <i>Loading...</i>",
+        "💳 <b>Wallet</b>\n⏳ <i>Loading...</i>",
         {
           parse_mode: "HTML",
         }
