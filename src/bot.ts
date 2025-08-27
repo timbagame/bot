@@ -23,6 +23,8 @@ import {
   DEFAULT_TOKEN_TICKER,
   TOKENS_LIST,
 } from "./utils/constants";
+import { mergeWsolIntoSol } from "./utils/balance";
+import { createMainMenuKeyboard, createWalletKeyboard } from "./utils/keyboards";
 import type {
   PlayerData,
   GameCompletedEvent,
@@ -42,19 +44,7 @@ export const bot = new Bot(process.env.TELEGRAM_TOKEN!);
 export const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
 const gameDb = GameDatabase.getInstance();
 
-/**
- * Create main menu keyboard for private chats
- */
-const createMainMenuKeyboard = (): InlineKeyboard => {
-  return new InlineKeyboard()
-    .text("💳 Wallet", "main_wallet")
-    .row()
-    .text("⚙️ Info", "main_settings")
-    .text("🔧 Admin", "admin_menu")
-    .row()
-    .text("❓ Help", "cmd_help")
-    .row();
-};
+// Main menu keyboard moved to utils/keyboards.ts
 
 /**
  * Check if the context is a private chat
@@ -304,19 +294,7 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
           parse_mode: "HTML",
         },
         {
-          reply_markup: new InlineKeyboard()
-            .text("🔄 Refresh", "wallet_refresh")
-            .text("📋 History", "cmd_history")
-            .row()
-            .text("💸 Withdraw", "cmd_withdraw")
-            .row()
-            .text("🟢 Buy", "cmd_buy")
-            .text("🔴 Sell", "cmd_sell")
-            .row()
-            .text("⚙️ Settings", "wallet_settings")
-            .row()
-            .text("← Back", "back_main")
-            .row(),
+          reply_markup: createWalletKeyboard(),
         }
       );
     } catch (error) {
@@ -328,19 +306,7 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
       await ctx.replyWithAnimation(walletImageFileId, {
         caption: loadingCaption.join("\n"),
         parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("🔄 Refresh", "wallet_refresh")
-          .text("📋 History", "cmd_history")
-          .row()
-          .text("💸 Withdraw", "cmd_withdraw")
-          .row()
-          .text("🟢 Buy", "cmd_buy")
-          .text("🔴 Sell", "cmd_sell")
-          .row()
-          .text("⚙️ Settings", "wallet_settings")
-          .row()
-          .text("← Back", "back_main")
-          .row(),
+        reply_markup: createWalletKeyboard(),
       });
     }
   }
@@ -392,19 +358,7 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
         parse_mode: "HTML",
       },
       {
-        reply_markup: new InlineKeyboard()
-          .text("🔄 Refresh", "wallet_refresh")
-          .text("📋 History", "cmd_history")
-          .row()
-          .text("💸 Withdraw", "cmd_withdraw")
-          .row()
-          .text("🟢 Buy", "cmd_buy")
-          .text("🔴 Sell", "cmd_sell")
-          .row()
-          .text("⚙️ Settings", "wallet_settings")
-          .row()
-          .text("← Back", "back_main")
-          .row(),
+        reply_markup: createWalletKeyboard(),
       }
     );
   } catch (error) {
@@ -426,19 +380,7 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
         parse_mode: "HTML",
       },
       {
-        reply_markup: new InlineKeyboard()
-          .text("🔄 Refresh", "wallet_refresh")
-          .text("📋 History", "cmd_history")
-          .row()
-          .text("💸 Withdraw", "cmd_withdraw")
-          .row()
-          .text("🟢 Buy", "cmd_buy")
-          .text("🔴 Sell", "cmd_sell")
-          .row()
-          .text("⚙️ Settings", "wallet_settings")
-          .row()
-          .text("← Back", "back_main")
-          .row(),
+        reply_markup: createWalletKeyboard(),
       }
     );
   }
@@ -3861,17 +3803,13 @@ const getCachedWalletData = async (telegramId: bigint) => {
       approvedTokens
     );
 
-    // Merge WSOL into native SOL in cached data for wallet UI
+    // Merge WSOL into SOL using util
     const WSOL_MINT =
       (TOKENS_LIST.find((t) => t.ticker === "WSOL")?.mint as string) ||
       "So11111111111111111111111111111111111111112";
-    const wsolIdx = tokenBalances.findIndex((t) => t.mint === WSOL_MINT);
-    if (wsolIdx !== -1) {
-      solBalance += tokenBalances[wsolIdx]!.balance; // WSOL balance is in lamports (decimals 9)
-      tokenBalances = tokenBalances
-        .slice(0, wsolIdx)
-        .concat(tokenBalances.slice(wsolIdx + 1));
-    }
+    const merged = mergeWsolIntoSol(solBalance, tokenBalances, WSOL_MINT);
+    solBalance = merged.solLamports;
+    tokenBalances = merged.tokenBalances;
 
     const data = {
       solBalance,
