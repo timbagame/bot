@@ -415,7 +415,7 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
       `<code>${shortAddress}</code>`,
       "",
       "❌ <i>Error loading balances</i>",
-      "<i>Tap REFRESH to try again</i>",
+      "<i>Tap Refresh to try again</i>",
     ];
 
     await ctx.editMessageMedia(
@@ -3079,7 +3079,7 @@ bot.callbackQuery("cmd_history", async (ctx) => {
           .text("🟢 Buy", "cmd_buy")
           .text("🔴 Sell", "cmd_sell")
             .row()
-            .text("← BACK TO WALLET", "main_wallet")
+            .text("← Back to Wallet", "main_wallet")
             .row(),
         });
       } catch (error) {
@@ -3094,7 +3094,7 @@ bot.callbackQuery("cmd_history", async (ctx) => {
           .text("🟢 Buy", "cmd_buy")
           .text("🔴 Sell", "cmd_sell")
             .row()
-            .text("← BACK TO WALLET", "main_wallet")
+            .text("← Back to Wallet", "main_wallet")
             .row(),
         });
       }
@@ -3330,7 +3330,7 @@ bot.on("callback_query", async (ctx, next) => {
     await ctx.editMessageText(response.join("\n"), {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard()
-        .text("✅ CONFIRM WRAP", `confirm_wrap_${amount}`)
+        .text("✅ Confirm Wrap", `confirm_wrap_${amount}`)
         .row()
         .text("❌ Cancel", "cmd_wrap")
         .row(),
@@ -3447,7 +3447,7 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
           parse_mode: "HTML",
           link_preview_options: { is_disabled: true },
           reply_markup: new InlineKeyboard()
-            .text("← BACK TO WALLET", "main_wallet")
+            .text("← Back to Wallet", "main_wallet")
             .row(),
         }
       );
@@ -3460,7 +3460,7 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
         {
           parse_mode: "HTML",
           reply_markup: new InlineKeyboard()
-            .text("← BACK TO WALLET", "main_wallet")
+            .text("← Back to Wallet", "main_wallet")
             .row(),
         }
       );
@@ -3499,7 +3499,7 @@ bot.callbackQuery(/^confirm_wrap_/, async (ctx) => {
           {
             parse_mode: "HTML",
             reply_markup: new InlineKeyboard()
-              .text("← BACK TO WALLET", "main_wallet")
+              .text("← Back to Wallet", "main_wallet")
               .row(),
           }
         );
@@ -3606,7 +3606,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
           parse_mode: "HTML",
           link_preview_options: { is_disabled: true },
           reply_markup: new InlineKeyboard()
-            .text("← BACK TO WALLET", "main_wallet")
+            .text("← Back to Wallet", "main_wallet")
             .row(),
         }
       );
@@ -3619,7 +3619,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
         {
           parse_mode: "HTML",
           reply_markup: new InlineKeyboard()
-            .text("← BACK TO WALLET", "main_wallet")
+            .text("← Back to Wallet", "main_wallet")
             .row(),
         }
       );
@@ -3676,7 +3676,7 @@ bot.callbackQuery("cmd_swap", async (ctx) => {
       keyboard.text("❌ No tokens available to swap").row();
     }
 
-    keyboard.text("← BACK TO WALLET", "main_wallet").row();
+    keyboard.text("← Back to Wallet", "main_wallet").row();
 
     await ctx.editMessageText(response.join("\n"), {
       parse_mode: "HTML",
@@ -3975,7 +3975,7 @@ bot.on("callback_query", async (ctx, next) => {
     keyboard
       .text("✏️ Custom Amount", `send_custom_${token}`)
       .row()
-      .text("← BACK", "cmd_withdraw")
+      .text("← Back", "cmd_withdraw")
       .row();
 
     await ctx.editMessageText(response.join("\n"), {
@@ -4486,7 +4486,7 @@ bot.callbackQuery("cmd_oracle", async (ctx) => {
         {
           parse_mode: "HTML",
           reply_markup: new InlineKeyboard()
-            .text("🔍 SCAN BLOCKCHAIN", "cmd_scan")
+            .text("🔍 Scan Blockchain", "cmd_scan")
             .row()
             .text("⬅️ Back to Info", "main_settings")
             .text("🏠 Main", "back_main")
@@ -4501,7 +4501,7 @@ bot.callbackQuery("cmd_oracle", async (ctx) => {
         {
           parse_mode: "HTML",
           reply_markup: new InlineKeyboard()
-            .text("🔍 SCAN BLOCKCHAIN", "cmd_scan")
+            .text("🔍 Scan Blockchain", "cmd_scan")
             .row()
             .text("⬅️ Back to Info", "main_settings")
             .text("🏠 Main", "back_main")
@@ -4642,7 +4642,7 @@ System Administration:
           .text("📊 Oracle Status", "cmd_oracle")
           .text("📝 System Logs", "admin_logs")
           .row()
-          .text("← BACK", "back_main")
+          .text("← Back", "back_main")
           .row(),
       });
     } catch (error) {
@@ -4663,7 +4663,7 @@ System Administration:
           .text("📊 Oracle Status", "cmd_oracle")
           .text("📝 System Logs", "admin_logs")
           .row()
-          .text("← BACK", "back_main")
+          .text("← Back", "back_main")
           .row(),
       });
     }
@@ -4989,7 +4989,7 @@ Supported Platforms:
       keyboard.text("❌ No tokens available to sell").row();
     }
 
-    keyboard.text("← BACK TO WALLET", "main_wallet").row();
+    keyboard.text("← Back to Wallet", "main_wallet").row();
 
     // Try to edit as text, if fails (because current message has media), delete and send new
     try {
@@ -5241,8 +5241,8 @@ bot.on("callback_query", async (ctx, next) => {
       reply_markup: new InlineKeyboard()
         .webApp("🔍 VIEW TX", `https://solscan.io/tx/${signature}`)
         .row()
-        .text("💰 WALLET", "main_wallet")
-        .text("🔴 SELL MORE", "cmd_sell")
+        .text("💰 Wallet", "main_wallet")
+        .text("🔴 Sell More", "cmd_sell")
         .row(),
     });
     await safeAnswerCallbackQuery(ctx, "Sell completed!");
@@ -5270,7 +5270,7 @@ bot.on("callback_query", async (ctx, next) => {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard()
       .text("← Try Again", "cmd_sell")
-        .text("💰 WALLET", "main_wallet")
+        .text("💰 Wallet", "main_wallet")
         .row(),
     });
 
@@ -5361,7 +5361,7 @@ bot.on("callback_query", async (ctx, next) => {
 
     // Custom options
     keyboard
-      .text("📋 PASTE CONTRACT ADDRESS", `buy_contract_${paymentToken}`)
+      .text("📋 Paste Contract Address", `buy_contract_${paymentToken}`)
       .row();
 
     keyboard.text("← Back", "cmd_buy").row();
@@ -5680,7 +5680,7 @@ bot.on("callback_query", async (ctx, next) => {
     await ctx.editMessageText(errorMessage.join("\n"), {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard()
-        .text("← TRY AGAIN", `buy_with_${paymentToken}`)
+        .text("← Try Again", `buy_with_${paymentToken}`)
         .row(),
     });
 
@@ -5808,8 +5808,8 @@ bot.on("callback_query", async (ctx, next) => {
       reply_markup: new InlineKeyboard()
         .webApp("🔍 VIEW TX", `https://solscan.io/tx/${signature}`)
         .row()
-        .text("💰 WALLET", "main_wallet")
-        .text("🔄 BUY MORE", "cmd_buy")
+        .text("💰 Wallet", "main_wallet")
+        .text("🔄 Buy More", "cmd_buy")
         .row(),
     });
     await safeAnswerCallbackQuery(ctx, "Buy completed!");
@@ -6011,9 +6011,9 @@ bot.on("callback_query", async (ctx, next) => {
       {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("✅ CONFIRM BUY", `confirm_buy_${txId}`)
+          .text("✅ Confirm Buy", `confirm_buy_${txId}`)
           .row()
-          .text("← BACK TO BUY", "cmd_buy")
+          .text("← Back to Buy", "cmd_buy")
           .row(),
       }
     );
@@ -6179,7 +6179,7 @@ bot.on("callback_query", async (ctx, next) => {
 
     // Add "Other Token" option
     keyboard.text("🔍 Other Token", `swap_to_${fromToken}_OTHER`).row();
-    keyboard.text("← BACK TO SWAP", "cmd_swap").row();
+    keyboard.text("← Back to Swap", "cmd_swap").row();
 
     await ctx.editMessageText(response.join("\n"), {
       parse_mode: "HTML",
@@ -6935,7 +6935,7 @@ bot.on("message:text", async (ctx, next) => {
         {
           parse_mode: "HTML",
           reply_markup: new InlineKeyboard()
-            .text("← BACK TO WALLET", "main_wallet")
+            .text("← Back to Wallet", "main_wallet")
             .row(),
         }
       );
@@ -6948,7 +6948,7 @@ bot.on("message:text", async (ctx, next) => {
       await ctx.reply("❌ <b>Error processing input</b>\n\nPlease try again.", {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("← BACK TO WALLET", "main_wallet")
+          .text("← Back to Wallet", "main_wallet")
           .row(),
       });
     }
@@ -7053,7 +7053,7 @@ const handleAddressInput = async (
     {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard()
-        .text("✅ CONFIRM SEND", `confirm_send_${txId}`)
+        .text("✅ Confirm Send", `confirm_send_${txId}`)
         .row()
         .text("❌ Cancel", `send_select_${token}`)
         .row(),
@@ -7093,7 +7093,7 @@ const handleWrapAmountInput = async (
     {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard()
-        .text("✅ CONFIRM WRAP", `confirm_wrap_${amount}`)
+        .text("✅ Confirm Wrap", `confirm_wrap_${amount}`)
         .row()
         .text("❌ Cancel", "cmd_wrap")
         .row(),
@@ -7318,7 +7318,7 @@ ${contractAddress}</pre>`,
       )
       .row();
 
-    keyboard.text("← BACK", "cmd_buy").row();
+      keyboard.text("← Back", "cmd_buy").row();
 
     try {
       await ctx.editMessageText(response.join("\n"), {
@@ -7506,7 +7506,7 @@ const handleBuyTokenSymbolInput = async (
       }
     }
 
-    keyboard.text("← BACK", "cmd_buy").row();
+  keyboard.text("← Back", "cmd_buy").row();
 
     try {
       await ctx.editMessageText(response.join("\n"), {
@@ -7851,7 +7851,7 @@ const showSellAmountSelection = async (ctx: any, tokenToSell: string) => {
   // Add custom amount option
   keyboard.text("✏️ Custom", `sell_amount_${tokenToSell}_CUSTOM`).row();
 
-  keyboard.text("← BACK", "cmd_sell").row();
+  keyboard.text("← Back", "cmd_sell").row();
 
   await ctx.editMessageText(response.join("\n"), {
     parse_mode: "HTML",
@@ -8022,7 +8022,7 @@ const showSellQuoteAndConfirmation = async (
     await ctx.editMessageText(response.join("\n"), {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard()
-        .text("✅ CONFIRM SELL", `confirm_sell_${txId}`)
+        .text("✅ Confirm Sell", `confirm_sell_${txId}`)
         .row()
         .text("❌ Cancel", "cmd_sell")
         .row(),
@@ -8180,9 +8180,9 @@ Contract: ${buyData.contractAddress || "N/A"}
     await ctx.editMessageText(response, {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard()
-        .text("✅ CONFIRM BUY", `confirm_buy_${txId}`)
+        .text("✅ Confirm Buy", `confirm_buy_${txId}`)
         .row()
-        .text("⚙️ SLIPPAGE", `buy_slippage_${txId}`)
+        .text("⚙️ Slippage", `buy_slippage_${txId}`)
         .row()
         .text("0.5%", `buy_slip_${txId}_0.5`)
         .text("1%", `buy_slip_${txId}_1.0`)
@@ -8201,7 +8201,7 @@ Contract: ${buyData.contractAddress || "N/A"}
       `❌ <b>Error</b>\n\n${(error as Error).message}\n\nPlease try again.`,
       {
         parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("← TRY AGAIN", "cmd_buy").row(),
+        reply_markup: new InlineKeyboard().text("← Try Again", "cmd_buy").row(),
       }
     );
   }
