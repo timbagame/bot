@@ -4,7 +4,7 @@ import { WalletManager } from "./utils/wallet";
 import { TokenManager } from "./utils/token-manager";
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
-import { createSyncNativeInstruction } from "@solana/spl-token";
+import { createSyncNativeInstruction, getAssociatedTokenAddress } from "@solana/spl-token";
 import type { Coinflip } from "../idl/idlType";
 import idl from "../idl/idl.json";
 import { GameDatabase } from "./utils/game-database";
@@ -2286,7 +2286,6 @@ const buildDebugInfo = async (
   const playerData = await getPlayerData(telegramId);
   const metadata = await getDefaultTokenMetadata();
 
-  const { getAssociatedTokenAddress } = await import("@solana/spl-token");
   const tokenAccount = await getAssociatedTokenAddress(
     new PublicKey(DEFAULT_TOKEN_MINT),
     playerData.keypair.publicKey
@@ -6768,8 +6767,7 @@ ${outputMint}</pre>`,
 
     await ctx.editMessageText(response, {
       parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
-        .text("✅ Confirm Buy", `confirm_buy_${txId}`)
+      reply_markup: createConfirmBuyKeyboard(txId)
         .row()
         .text("⚙️ Slippage", `buy_slippage_${txId}`)
         .row()
@@ -7016,11 +7014,7 @@ const handleWrapAmountInput = async (
     response.join("\n"),
     {
       parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
-        .text("✅ Confirm Wrap", `confirm_wrap_${amount}`)
-        .row()
-        .text("❌ Cancel", "cmd_wrap")
-        .row(),
+      reply_markup: createConfirmWrapKeyboard(amount),
     }
   );
 };
@@ -8099,8 +8093,7 @@ Contract: ${buyData.contractAddress || "N/A"}
 
     await ctx.editMessageText(response, {
       parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
-        .text("✅ Confirm Buy", `confirm_buy_${txId}`)
+      reply_markup: createConfirmBuyKeyboard(txId)
         .row()
         .text("⚙️ Slippage", `buy_slippage_${txId}`)
         .row()

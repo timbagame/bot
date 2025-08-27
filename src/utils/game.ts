@@ -26,6 +26,7 @@ import {
   buildGameHeader,
   buildPrizeLine,
   buildParticipantsList,
+  buildExpirationText,
 } from "./game-ui";
 
 // ================================
@@ -83,19 +84,7 @@ const formatExpirationTime = async (
     ? await walletManager.getBlockchainTime()
     : Math.floor(Date.now() / 1000);
   const timeRemaining = Math.max(0, expiresAt - blockTime);
-
-  if (timeRemaining <= 0) {
-    return `${prefix}Expired`;
-  }
-
-  const hours = Math.floor(timeRemaining / 3600);
-  const minutes = Math.floor((timeRemaining % 3600) / 60);
-
-  if (hours > 0) {
-    return `${prefix}Expires in: ${hours}h ${minutes}m`;
-  } else {
-    return `${prefix}Expires in: ${minutes}m`;
-  }
+  return buildExpirationText(timeRemaining, prefix);
 };
 
 const categorizeGame = (

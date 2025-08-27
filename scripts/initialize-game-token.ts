@@ -3,7 +3,12 @@ import {
   Keypair,
   PublicKey,
   LAMPORTS_PER_SOL,
+  Transaction,
 } from "@solana/web3.js";
+import {
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
+} from "@solana/spl-token";
 import * as anchor from "@coral-xyz/anchor";
 import * as fs from "fs";
 import * as path from "path";
@@ -144,8 +149,6 @@ async function initializeToken(
   }
 
   // Create Associated Token Account for game vault
-  const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } =
-    await import("@solana/spl-token");
   const gameTokenAccount = await getAssociatedTokenAddress(
     mint,
     gameVaultPda,
@@ -172,7 +175,6 @@ async function initializeToken(
       );
 
       // Send the ATA creation transaction
-      const { Transaction } = await import("@solana/web3.js");
       const createAtaTx = new Transaction().add(createAtaIx);
       createAtaTx.recentBlockhash = (
         await connection.getLatestBlockhash()
