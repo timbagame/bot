@@ -2960,7 +2960,7 @@ bot.callbackQuery("cmd_withdraw", async (ctx) => {
         .row();
     }
 
-    keyboard.text("← BACK TO WALLET", "main_wallet").row();
+    keyboard.text("← Back to Wallet", "main_wallet").row();
 
     // Try to edit as text, if fails (because current message has media), delete and send new
     try {
@@ -3002,9 +3002,9 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
     const privateKeyString = `[${privateKeyArray.join(",")}]`;
 
     const response = [
-      `🔐 <b>PRIVATE KEY</b>`,
+      `🔐 <b>Private Key</b>`,
       "",
-      `⚠️ <b>KEEP THIS SECRET!</b>`,
+      `⚠️ <b>Keep This Secret!</b>`,
       `Never share your private key with anyone.`,
       "",
       `<span class="tg-spoiler">${privateKeyString}</span>`,
@@ -3015,7 +3015,7 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
     await ctx.editMessageText(response.join("\n"), {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard()
-        .text("← BACK TO WALLET", "main_wallet")
+        .text("← Back to Wallet", "main_wallet")
         .row(),
     });
     await ctx.answerCallbackQuery("🔐 Private key shown");
@@ -4197,7 +4197,7 @@ Personal Wallet Stats:
           .text("🔄 Refresh Stats", "info_stats")
           .text("📊 Oracle Status", "cmd_oracle")
           .row()
-          .text("← BACK TO INFO", "main_settings")
+          .text("← Back to Info", "main_settings")
           .text("🏠 Main", "back_main")
           .row(),
       });
@@ -4213,7 +4213,7 @@ Personal Wallet Stats:
           .text("🔄 Refresh Stats", "info_stats")
           .text("📊 Oracle Status", "cmd_oracle")
           .row()
-          .text("← BACK TO INFO", "main_settings")
+          .text("← Back to Info", "main_settings")
           .text("🏠 Main", "back_main")
           .row(),
       });
@@ -4535,7 +4535,7 @@ bot.callbackQuery("cmd_scan", async (ctx) => {
       {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("🔍 START SCAN", "scan_confirm")
+          .text("🔍 Start Scan", "scan_confirm")
           .row()
           .text("⬅️ Back to Info", "main_settings")
           .text("🏠 Main", "back_main")
@@ -4580,7 +4580,7 @@ bot.callbackQuery("scan_confirm", async (ctx) => {
             {
               parse_mode: "HTML",
               reply_markup: new InlineKeyboard()
-                .text("🔄 SCAN AGAIN", "scan_confirm")
+                .text("🔄 Scan Again", "scan_confirm")
                 .row()
                 .text("⬅️ Back to Info", "main_settings")
                 .text("🏠 Main", "back_main")
