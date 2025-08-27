@@ -2852,7 +2852,7 @@ bot.callbackQuery("main_wallet", async (ctx) => {
   console.log("🔔 WALLET BUTTON PRESSED by user:", ctx.from?.id);
   try {
     // Clear wallet cache to ensure fresh balances
-    const cacheKey = `wallet_${ctx.from?.id}`;
+    const cacheKey = getWalletCacheKey(ctx.from?.id || "");
     walletDataCache.delete(cacheKey);
 
     await showWalletUI(ctx, true);
@@ -2867,7 +2867,7 @@ bot.callbackQuery("main_wallet", async (ctx) => {
 bot.callbackQuery("wallet_refresh", async (ctx) => {
   try {
     // Clear wallet cache to force fresh balance update
-    const cacheKey = `wallet_${ctx.from?.id}`;
+    const cacheKey = getWalletCacheKey(ctx.from?.id || "");
     walletDataCache.delete(cacheKey);
 
     await showWalletUI(ctx, true);
@@ -3830,11 +3830,15 @@ const walletDataCache = new Map<
 
 const WALLET_CACHE_DURATION = 30 * 1000; // 30 seconds
 
+// Consistent cache key generator
+const getWalletCacheKey = (telegramId: bigint | number | string): string =>
+  String(telegramId);
+
 /**
  * Get cached wallet data or fetch fresh data
  */
 const getCachedWalletData = async (telegramId: bigint) => {
-  const cacheKey = telegramId.toString();
+  const cacheKey = getWalletCacheKey(telegramId);
   const cached = walletDataCache.get(cacheKey);
   const now = Date.now();
 
@@ -3895,7 +3899,7 @@ const getCachedWalletData = async (telegramId: bigint) => {
 
 // Function to clear wallet cache (useful after token registration)
 const clearWalletCache = (telegramId: bigint) => {
-  const cacheKey = telegramId.toString();
+  const cacheKey = getWalletCacheKey(telegramId);
   walletDataCache.delete(cacheKey);
   console.log(`🗑️ Cleared wallet cache for user: ${telegramId}`);
 };
@@ -5248,7 +5252,7 @@ bot.on("callback_query", async (ctx, next) => {
     await safeAnswerCallbackQuery(ctx, "Sell completed!");
 
     // Clear wallet cache to force fresh balance on next wallet access
-    const cacheKey = ctx.from?.id?.toString();
+    const cacheKey = getWalletCacheKey(ctx.from?.id || "");
     if (cacheKey) {
       walletDataCache.delete(cacheKey);
       console.log(`🧹 Cleared wallet cache for user ${cacheKey} after SELL`);
@@ -5815,7 +5819,7 @@ bot.on("callback_query", async (ctx, next) => {
     await safeAnswerCallbackQuery(ctx, "Buy completed!");
 
     // Clear wallet cache to force fresh balance on next wallet access
-    const cacheKey = ctx.from?.id?.toString();
+    const cacheKey = getWalletCacheKey(ctx.from?.id || "");
     if (cacheKey) {
       walletDataCache.delete(cacheKey);
       console.log(`🧹 Cleared wallet cache for user ${cacheKey} after BUY`);
