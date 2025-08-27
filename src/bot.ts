@@ -106,7 +106,7 @@ const showBotInfoScreen = async (ctx: Context) => {
   await ctx.reply(botInfoScreen.join("\n"), {
     parse_mode: "HTML",
     reply_markup: new InlineKeyboard()
-      .text("🚀 GET STARTED", "start_bot")
+      .text("🚀 Get Started", "start_bot")
       .row(),
   });
 };
@@ -2880,7 +2880,7 @@ bot.callbackQuery("wallet_refresh", async (ctx) => {
 
 bot.callbackQuery("wallet_settings", async (ctx) => {
   try {
-    const settingsContent = `T I M B A\n\n⚙️ SETTINGS\n\nChoose an option:`;
+    const settingsContent = `T I M B A\n\n⚙️ Settings\n\nChoose an option:`;
 
     const response = [`<pre>${settingsContent}</pre>`];
 
@@ -2889,10 +2889,10 @@ bot.callbackQuery("wallet_settings", async (ctx) => {
       await ctx.editMessageText(response.join("\n"), {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("🔧 WRAP SOL", "cmd_wrap")
-          .text("🔐 PRIVATE KEY", "cmd_privatekey")
+          .text("🔧 Wrap SOL", "cmd_wrap")
+          .text("🔐 Private Key", "cmd_privatekey")
           .row()
-          .text("← BACK TO WALLET", "main_wallet")
+          .text("← Back to Wallet", "main_wallet")
           .row(),
       });
     } catch (error) {
@@ -2904,10 +2904,10 @@ bot.callbackQuery("wallet_settings", async (ctx) => {
       await ctx.reply(response.join("\n"), {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("🔧 WRAP SOL", "cmd_wrap")
-          .text("🔐 PRIVATE KEY", "cmd_privatekey")
+          .text("🔧 Wrap SOL", "cmd_wrap")
+          .text("🔐 Private Key", "cmd_privatekey")
           .row()
-          .text("← BACK TO WALLET", "main_wallet")
+          .text("← Back to Wallet", "main_wallet")
           .row(),
       });
     }
@@ -3076,8 +3076,8 @@ bot.callbackQuery("cmd_history", async (ctx) => {
         await ctx.editMessageText(noTxResponse, {
           parse_mode: "HTML",
           reply_markup: new InlineKeyboard()
-            .text("🟢 BUY", "cmd_buy")
-            .text("🔴 SELL", "cmd_sell")
+          .text("🟢 Buy", "cmd_buy")
+          .text("🔴 Sell", "cmd_sell")
             .row()
             .text("← BACK TO WALLET", "main_wallet")
             .row(),
@@ -3091,8 +3091,8 @@ bot.callbackQuery("cmd_history", async (ctx) => {
         await ctx.reply(noTxResponse, {
           parse_mode: "HTML",
           reply_markup: new InlineKeyboard()
-            .text("🟢 BUY", "cmd_buy")
-            .text("🔴 SELL", "cmd_sell")
+          .text("🟢 Buy", "cmd_buy")
+          .text("🔴 Sell", "cmd_sell")
             .row()
             .text("← BACK TO WALLET", "main_wallet")
             .row(),
@@ -3148,13 +3148,13 @@ bot.callbackQuery("cmd_history", async (ctx) => {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
         reply_markup: new InlineKeyboard()
-          .text("🔄 REFRESH", "cmd_history")
+          .text("🔄 Refresh", "cmd_history")
           .webApp(
             "🔍 FULL HISTORY",
             `https://solscan.io/account/${walletAddress}#transactions`
           )
           .row()
-          .text("← BACK TO WALLET", "main_wallet")
+          .text("← Back to Wallet", "main_wallet")
           .row(),
       });
     } catch (error) {
@@ -3167,13 +3167,13 @@ bot.callbackQuery("cmd_history", async (ctx) => {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
         reply_markup: new InlineKeyboard()
-          .text("🔄 REFRESH", "cmd_history")
+          .text("🔄 Refresh", "cmd_history")
           .webApp(
             "🔍 FULL HISTORY",
             `https://solscan.io/account/${walletAddress}#transactions`
           )
           .row()
-          .text("← BACK TO WALLET", "main_wallet")
+          .text("← Back to Wallet", "main_wallet")
           .row(),
       });
     }
@@ -3195,8 +3195,8 @@ bot.callbackQuery("cmd_history", async (ctx) => {
       await ctx.editMessageText(errorResponse, {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("🔄 TRY AGAIN", "cmd_history")
-          .text("← BACK TO WALLET", "main_wallet")
+          .text("🔄 Try Again", "cmd_history")
+          .text("← Back to Wallet", "main_wallet")
           .row(),
       });
     } catch (error) {
@@ -3208,8 +3208,8 @@ bot.callbackQuery("cmd_history", async (ctx) => {
       await ctx.reply(errorResponse, {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("🔄 TRY AGAIN", "cmd_history")
-          .text("← BACK TO WALLET", "main_wallet")
+          .text("🔄 Try Again", "cmd_history")
+          .text("← Back to Wallet", "main_wallet")
           .row(),
       });
     }
@@ -3251,7 +3251,7 @@ bot.callbackQuery("cmd_wrap", async (ctx) => {
       keyboard.text("❌ Insufficient SOL balance").row();
     }
 
-    keyboard.text("← BACK TO WALLET", "main_wallet").row();
+    keyboard.text("← Back to Wallet", "main_wallet").row();
 
     await ctx.editMessageText(response.join("\n"), {
       parse_mode: "HTML",
@@ -4129,7 +4129,7 @@ System Overview:
           .text("❓ Help", "cmd_help")
           .text("📈 Statistics", "info_stats")
           .row()
-          .text("← BACK", "back_main")
+          .text("← Back", "back_main")
           .row(),
       });
     } catch (error) {
@@ -4147,7 +4147,7 @@ System Overview:
           .text("❓ Help", "cmd_help")
           .text("📈 Statistics", "info_stats")
           .row()
-          .text("← BACK", "back_main")
+          .text("← Back", "back_main")
           .row(),
       });
     }
@@ -4686,10 +4686,10 @@ bot.callbackQuery("admin_tokens", async (ctx) => {
       {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("➕ ADD TOKEN", "admin_add_token")
-          .text("📊 TOKEN STATS", "admin_token_stats")
+          .text("➕ Add Token", "admin_add_token")
+          .text("📊 Token Stats", "admin_token_stats")
           .row()
-          .text("🎯 DEFAULT TOKENS", "admin_default_tokens")
+          .text("🎯 Default Tokens", "admin_default_tokens")
           .row()
           .text("⬅️ Admin Panel", "admin_menu")
           .text("🏠 Main", "back_main")
@@ -4715,10 +4715,10 @@ bot.callbackQuery("admin_games", async (ctx) => {
       {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("🎯 ACTIVE GAMES", "admin_active_games")
-          .text("📊 GAME STATS", "admin_game_stats")
+          .text("🎯 Active Games", "admin_active_games")
+          .text("📊 Game Stats", "admin_game_stats")
           .row()
-          .text("🧹 CLEANUP", "admin_cleanup")
+          .text("🧹 Cleanup", "admin_cleanup")
           .row()
           .text("⬅️ Admin Panel", "admin_menu")
           .text("🏠 Main", "back_main")
@@ -4747,10 +4747,10 @@ bot.callbackQuery("admin_system", async (ctx) => {
       {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("🔄 REFRESH STATUS", "admin_system")
+          .text("🔄 Refresh Status", "admin_system")
           .row()
-          .text("📝 VIEW LOGS", "admin_logs")
-          .text("⚙️ SETTINGS", "admin_settings")
+          .text("📝 View Logs", "admin_logs")
+          .text("⚙️ Settings", "admin_settings")
           .row()
           .text("⬅️ Admin Panel", "admin_menu")
           .text("🏠 Main", "back_main")
