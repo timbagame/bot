@@ -14,6 +14,8 @@ This is a Telegram bot for creating and playing coinflip and giveaway games on S
 - `bun run dev` - Alias for watch mode
 - `bun start` - Production start command
 - `docker-compose up` - Run in container
+ - `bunx tsc --noEmit` - Type-check the codebase
+ - `bun test` - Run unit tests (add `--coverage` for coverage)
 
 ## Architecture
 
@@ -35,6 +37,7 @@ This is a Telegram bot for creating and playing coinflip and giveaway games on S
 - **Event-Driven**: Bot listens for Anchor program events (PlayerJoined, GameCompleted, etc.)
 - **Sequentialized Operations**: Uses @grammyjs/runner with sequentialize for thread safety
 - **Error Handling**: Centralized user-friendly error formatting in `src/utils/errors.ts`
+- **UI Builders**: Common keyboards in `src/utils/keyboards.ts`; wallet caption in `src/utils/wallet-ui.ts`; game status in `src/utils/game-ui.ts`
 
 ### Game Types and Lifecycle
 

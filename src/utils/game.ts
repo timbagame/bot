@@ -21,6 +21,7 @@ import type {
   GameType,
 } from "../types";
 import type { Coinflip } from "../../idl/idlType";
+import { buildGameStatus } from "./game-ui";
 
 // ================================
 // UTILITY FUNCTIONS
@@ -421,16 +422,11 @@ export class GameManager {
 
     // Add status and expiration info for active games
     if (status.toLowerCase() !== "completed") {
-      let statusText: string;
-      if (currentTickets < minTickets) {
-        const neededForMin = minTickets - currentTickets;
-        statusText = `${neededForMin} more until minimum`;
-      } else if (currentTickets < maxTickets) {
-        const neededForMax = maxTickets - currentTickets;
-        statusText = `Minimum reached, ${neededForMax} more until full`;
-      } else {
-        statusText = "Full - starting soon!";
-      }
+      const statusText = buildGameStatus(
+        currentTickets,
+        minTickets,
+        maxTickets
+      );
       messageText += `\nStatus: ${statusText}${expirationInfo}`;
     }
 

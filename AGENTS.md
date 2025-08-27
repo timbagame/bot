@@ -16,7 +16,8 @@
 - Scripts: `bun run scripts/initialize-program.ts`
 - Docker: `docker compose up --build`
 - Type-check: `bunx tsc --noEmit`
-- Tests: `bun test` (see Testing Guidelines)
+- Tests: `bun test`
+- Coverage: `bun test --coverage`
 
 ## Coding Style & Naming Conventions
 - Language: TypeScript (strict mode, ESM). Prefer named exports; avoid default exports.

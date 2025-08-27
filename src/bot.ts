@@ -30,6 +30,9 @@ import {
   createScanPromptKeyboard,
   createBackToInfoMainKeyboard,
   createScanResultKeyboard,
+  createConfirmWrapKeyboard,
+  createConfirmBuyKeyboard,
+  createConfirmSellKeyboard,
 } from "./utils/keyboards";
 import { buildWalletCaption } from "./utils/wallet-ui";
 import type {
@@ -3271,11 +3274,7 @@ bot.on("callback_query", async (ctx, next) => {
 
     await ctx.editMessageText(response.join("\n"), {
       parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
-        .text("✅ Confirm Wrap", `confirm_wrap_${amount}`)
-        .row()
-        .text("❌ Cancel", "cmd_wrap")
-        .row(),
+        reply_markup: createConfirmWrapKeyboard(amount),
     });
 
     await ctx.answerCallbackQuery("Confirm wrap transaction");
@@ -5939,11 +5938,7 @@ bot.on("callback_query", async (ctx, next) => {
       ].join("\n"),
       {
         parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("✅ Confirm Buy", `confirm_buy_${txId}`)
-          .row()
-          .text("← Back to Buy", "cmd_buy")
-          .row(),
+        reply_markup: createConfirmBuyKeyboard(txId),
       }
     );
 
@@ -7950,11 +7945,7 @@ const showSellQuoteAndConfirmation = async (
 
     await ctx.editMessageText(response.join("\n"), {
       parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
-        .text("✅ Confirm Sell", `confirm_sell_${txId}`)
-        .row()
-        .text("❌ Cancel", "cmd_sell")
-        .row(),
+      reply_markup: createConfirmSellKeyboard(txId),
     });
   } catch (error: any) {
     console.error("Error getting sell quote:", error);

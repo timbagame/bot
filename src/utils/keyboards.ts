@@ -51,3 +51,27 @@ export const createScanResultKeyboard = (): InlineKeyboard => {
     .text("🏠 Main", "back_main")
     .row();
 };
+
+export const createConfirmWrapKeyboard = (amount: number | string): InlineKeyboard => {
+  return new InlineKeyboard()
+    .text("✅ Confirm Wrap", `confirm_wrap_${String(amount)}`)
+    .row()
+    .text("❌ Cancel", "cmd_wrap")
+    .row();
+};
+
+export const createConfirmBuyKeyboard = (txId: string): InlineKeyboard => {
+  return new InlineKeyboard()
+    .text("✅ Confirm Buy", `confirm_buy_${txId}`)
+    .row()
+    .text("← Back to Buy", "cmd_buy")
+    .row();
+};
+
+export const createConfirmSellKeyboard = (txId: string): InlineKeyboard => {
+  return new InlineKeyboard()
+    .text("✅ Confirm Sell", `confirm_sell_${txId}`)
+    .row()
+    .text("❌ Cancel", "cmd_sell")
+    .row();
+};
