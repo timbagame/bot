@@ -107,8 +107,8 @@ export const createAmountSelectionKeyboard = (gameType: string, userBalance?: nu
       .filter((value, index, self) => self.indexOf(value) === index);
     
     // If we filtered out too many, add some safe amounts
-    while (amounts.length < 3 && amounts[amounts.length - 1] < balance) {
-      const lastAmount = amounts[amounts.length - 1];
+    while (amounts.length < 3 && amounts.length > 0 && (amounts[amounts.length - 1] ?? 0) < balance) {
+      const lastAmount = amounts[amounts.length - 1]!;
       const nextAmount = Math.min(lastAmount * 2, balance);
       if (nextAmount > lastAmount) {
         amounts.push(nextAmount);

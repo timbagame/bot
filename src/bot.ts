@@ -15,15 +15,13 @@ import { SwapManager } from "./utils/swap-manager";
 import {
   LAMPORTS_PER_SOL,
   GAME_TIMEOUT,
-  COINFLIP_MAX_TICKETS,
-  GIVEAWAY_MAX_TICKETS,
   EXPIRED_GAMES_CHECK_INTERVAL_MS,
   GAME_EXPIRATION_BUFFER_TIME,
   DEFAULT_TOKEN_MINT,
   DEFAULT_TOKEN_TICKER,
   TOKENS_LIST,
   WINNER_VIDEO_ID,
-  COINFLIP_START_VIDEO_ID,
+  JUPITER_BASE_URL,
 } from "./utils/constants";
 import { mergeWsolIntoSol } from "./utils/balance";
 import {
@@ -92,6 +90,9 @@ const userSessions = new Map<number, {
   waitingFor: string; 
   gameType: string; 
   userBalance: number;
+  messageId?: number;
+  chatId?: number;
+  amount?: string;
 }>();
 
 // Main menu keyboard moved to utils/keyboards.ts
@@ -989,110 +990,6 @@ bot.command("balance", async (ctx: Context) => {
   }
 });
 
-/**
- * Generic game creation handler to reduce code duplication
- */
-const createGameCommand = async (
-  ctx: Context,
-  gameType: "coinflip" | "giveaway",
-  defaultMaxTickets: number,
-  minTickets: number,
-  timeout: number,
-  usageExample: string
-) => {
-  if (!ctx.from) return;
-
-  if (ctx.chat?.type === "private") {
-    return replyToMessage(
-      ctx,
-      `🚫 ${
-        gameType.charAt(0).toUpperCase() + gameType.slice(1)
-      } games cannot be created in private chats since other participants can't join. Please use this command in a group or channel where others can participate!`
-    );
-  }
-
-  const args = ctx.message?.text?.split(" ");
-  if (!args) return;
-
-  const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id);
-  if (!parsed.success) {
-    if (parsed.error === "unknown_token") {
-      return replyToMessage(ctx, `❌ Unknown token "${parsed.unknownToken}"`);
-    }
-    return replyUsageError(ctx, usageExample);
-  }
-
-  const tokenSpecified = parsed.data!.tokenWasSpecified;
-  const maxTicketsIndex = tokenSpecified ? 3 : 2;
-  const maxTickets =
-    parseInt(args?.[maxTicketsIndex] || defaultMaxTickets.toString()) ||
-    defaultMaxTickets;
-
-  // Validate context parameters
-  if (!ctx.from?.id) {
-    return replyToMessage(ctx, "Unable to identify user. Please try again.");
-  }
-
-  const result = await gameManager.createGame(
-    gameType,
-    parsed.data!,
-    maxTickets,
-    minTickets,
-    timeout,
-    BigInt(ctx.from.id),
-    ctx.chat?.id
-  );
-
-  if (!result.success) {
-    return replyToMessage(ctx, result.error || "Failed to create game");
-  }
-
-  // Create game message in UI layer with proper creator username
-  if (!result.gameAddress) {
-    return replyToMessage(
-      ctx,
-      "Game created but address not returned - please contact support"
-    );
-  }
-
-  // Get creator username from ctx instead of using the formatted address from GameManager
-  const creatorUsername = ctx.from?.username
-    ? `@${ctx.from.username}`
-    : "Unknown";
-
-  await gameManager.createGameMessage(
-    ctx,
-    result.gameAddress,
-    gameType.charAt(0).toUpperCase() + gameType.slice(1),
-    parsed.data!.amount,
-    creatorUsername,
-    parsed.data!.tokenTicker,
-    "Active"
-  );
-
-  // Update game message if auto-join was successful (to show the creator as joined)
-  if (result.autoJoinResult?.success) {
-    // Transaction is already confirmed by confirmTransactionWithRecovery, update immediately
-    try {
-      await gameManager.updateGameMessageFromData(
-        ctx,
-        result.gameAddress,
-        "Active"
-      );
-    } catch (error) {
-      console.error("Failed to update game message after auto-join:", error);
-      // Don't retry automatically to avoid cascading failures
-    }
-  }
-
-  // Handle auto-join result if present
-  if (result.autoJoinResult && !result.autoJoinResult.success) {
-    await ctx.reply(result.autoJoinResult.error || "Failed to auto-join game", {
-      parse_mode: "HTML",
-      reply_to_message_id: ctx.message?.message_id,
-    });
-  }
-};
 
 bot.command(["coinflip", "cf"], async (ctx) => {
   try {
@@ -1845,7 +1742,7 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
       "",
       swapData.quote.provider === "pump-fun"
         ? "🔥 **Pump.fun Token** - Non-graduated token swap"
-        : `✅ **${getNetworkFromRPC(process.env.SOLANA_NETWORK || wallet.connection.rpcEndpoint)} Transaction** - Tokens transferred successfully`,
+        : `✅ **${getNetworkFromRPC(process.env.SOLANA_NETWORK || wallet.getConnection().rpcEndpoint)} Transaction** - Tokens transferred successfully`,
     ].join("\n");
 
     await ctx.editMessageText(successMessage, { parse_mode: "Markdown" });
@@ -3302,6 +3199,7 @@ bot.callbackQuery(/^custom_players_(coinflip|giveaway)_(.+)$/, async (ctx) => {
     userSessions.set(ctx.from?.id || 0, { 
       waitingFor: "players_input",
       gameType: gameType,
+      userBalance: 0, // Add required field
       amount: amount,
       messageId: ctx.callbackQuery?.message?.message_id || 0,
       chatId: ctx.chat?.id || 0
@@ -3366,8 +3264,8 @@ bot.on("message:text", async (ctx, next) => {
         const errorMessage = `❌ Invalid number of players. Please enter a number between ${minPlayers} and ${maxPlayers}.`;
         try {
           await ctx.api.editMessageText(
-            userSession.chatId, 
-            userSession.messageId, 
+            userSession.chatId!, 
+            userSession.messageId!, 
             errorMessage,
             { parse_mode: "HTML" }
           );
@@ -3381,7 +3279,7 @@ bot.on("message:text", async (ctx, next) => {
       const confirmMessage = [
         `<b>CONFIRM ${userSession.gameType.toUpperCase()}</b>`,
         "",
-        `Amount: <b>${userSession.amount} TIMBA</b>`,
+        `Amount: <b>${userSession.amount!} TIMBA</b>`,
         `Players: <b>${players}</b>`,
         "",
         userSession.gameType === "coinflip" 
@@ -3393,18 +3291,18 @@ bot.on("message:text", async (ctx, next) => {
 
       try {
         await ctx.api.editMessageText(
-          userSession.chatId,
-          userSession.messageId,
+          userSession.chatId!,
+          userSession.messageId!,
           confirmMessage,
           {
             parse_mode: "HTML",
-            reply_markup: createGameConfirmKeyboard(userSession.gameType, userSession.amount, players.toString())
+            reply_markup: createGameConfirmKeyboard(userSession.gameType, userSession.amount!, players.toString())
           }
         );
       } catch (error) {
         await ctx.reply(confirmMessage, {
           parse_mode: "HTML",
-          reply_markup: createGameConfirmKeyboard(userSession.gameType, userSession.amount, players.toString())
+          reply_markup: createGameConfirmKeyboard(userSession.gameType, userSession.amount!, players.toString())
         });
       }
       
@@ -3419,8 +3317,8 @@ bot.on("message:text", async (ctx, next) => {
       // Update the original message with error
       try {
         await ctx.api.editMessageText(
-          userSession.chatId, 
-          userSession.messageId, 
+          userSession.chatId!, 
+          userSession.messageId!, 
           "❌ Invalid amount. Please use /coinflip or /giveaway to try again.",
           { parse_mode: "HTML" }
         );
@@ -3436,8 +3334,8 @@ bot.on("message:text", async (ctx, next) => {
       // Update the original message with error
       try {
         await ctx.api.editMessageText(
-          userSession.chatId, 
-          userSession.messageId,
+          userSession.chatId!, 
+          userSession.messageId!,
           `❌ Amount too high. Your balance is ${userSession.userBalance.toFixed(2)} TIMBA. Please use /coinflip or /giveaway to try again.`,
           { parse_mode: "HTML" }
         );
@@ -3467,8 +3365,8 @@ bot.on("message:text", async (ctx, next) => {
     // Update the original message with player selection
     try {
       await ctx.api.editMessageText(
-        userSession.chatId,
-        userSession.messageId,
+        userSession.chatId!,
+        userSession.messageId!,
         playerMessage,
         {
           parse_mode: "HTML",
@@ -4751,7 +4649,7 @@ System Overview:
 • Multi-platform gaming system</pre>`,
       "",
       `<b>Your Wallet:</b> <code>${shortAddress}</code>`,
-      `<b>Network:</b> Solana ${getNetworkFromRPC(process.env.SOLANA_NETWORK || wallet.connection.rpcEndpoint)}`,
+      `<b>Network:</b> Solana ${getNetworkFromRPC(process.env.SOLANA_NETWORK || wallet.getConnection().rpcEndpoint)}`,
       "",
       `<b>Available Tools:</b>`,
       `• Oracle status monitoring`,
@@ -4905,7 +4803,7 @@ bot.callbackQuery("info_system", async (ctx) => {
     const memUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
     
     // Detect network dynamically
-    const currentNetwork = getNetworkFromRPC(process.env.SOLANA_NETWORK || wallet.connection.rpcEndpoint);
+    const currentNetwork = getNetworkFromRPC(process.env.SOLANA_NETWORK || wallet.getConnection().rpcEndpoint);
     
     // Check oracle connectivity
     let oracleStatus = "🔴 Offline";
@@ -4922,7 +4820,7 @@ bot.callbackQuery("info_system", async (ctx) => {
     // Check RPC connection
     let rpcStatus = "🔴 Offline";
     try {
-      const slot = await wallet.connection.getSlot();
+      const slot = await wallet.getConnection().getSlot();
       if (slot > 0) {
         rpcStatus = "🟢 Online";
       }
@@ -4933,7 +4831,7 @@ bot.callbackQuery("info_system", async (ctx) => {
     // Check Jupiter/Swap services
     let swapStatus = "🔴 Offline";
     try {
-      const jupiterBaseUrl = process.env.JUPITER_BASE_URL || 'https://quote-api.jup.ag';
+      const jupiterBaseUrl = process.env['JUPITER_BASE_URL'] || JUPITER_BASE_URL;
       const jupiterHealthy = await checkServiceHealth(jupiterBaseUrl);
       swapStatus = jupiterHealthy ? "🟢 Online" : "🔴 Offline";
     } catch (error) {
@@ -4948,7 +4846,7 @@ bot.callbackQuery("info_system", async (ctx) => {
 
 Network Information:
 • Network: ${currentNetwork}
-• RPC Endpoint: ${wallet.connection.rpcEndpoint}
+• RPC Endpoint: ${wallet.getConnection().rpcEndpoint}
 
 Runtime Information:
 • Uptime: ${uptimeHours}h ${uptimeMinutes % 60}m
@@ -5429,7 +5327,7 @@ bot.callbackQuery("admin_system", async (ctx) => {
     // Check RPC connection
     let rpcStatus = "🔴 Offline";
     try {
-      const slot = await wallet.connection.getSlot();
+      const slot = await wallet.getConnection().getSlot();
       if (slot > 0) {
         rpcStatus = "🟢 Online";
       }
@@ -5453,7 +5351,7 @@ bot.callbackQuery("admin_system", async (ctx) => {
     const dbStatus = "🟢 Online";
     const botStatus = "🟢 Online";
     
-    const currentNetwork = getNetworkFromRPC(process.env.SOLANA_NETWORK || wallet.connection.rpcEndpoint);
+    const currentNetwork = getNetworkFromRPC(process.env.SOLANA_NETWORK || wallet.getConnection().rpcEndpoint);
     
     await ctx.editMessageText(
       `📊 <b>SYSTEM STATUS</b>\n\n` +

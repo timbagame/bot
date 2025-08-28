@@ -440,4 +440,52 @@ export class GameDatabase extends BaseDatabase {
       return null;
     }
   }
+
+  /**
+   * Get games created by a player
+   */
+  public getGamesByCreator(telegramId: bigint): any[] {
+    try {
+      const stmt = this.db.prepare(
+        "SELECT * FROM games WHERE creator_telegram_id = ? ORDER BY created_at DESC"
+      );
+      return stmt.all(telegramId.toString()) as any[];
+    } catch (error) {
+      console.error("Error getting games by creator:", error);
+      return [];
+    }
+  }
+
+  /**
+   * Get games joined by a player
+   */
+  public getGamesByPlayer(telegramId: bigint): any[] {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT DISTINCT g.* FROM games g
+        LEFT JOIN game_participants gp ON g.game_address = gp.game_address
+        WHERE gp.telegram_id = ?
+        ORDER BY g.created_at DESC
+      `);
+      return stmt.all(telegramId.toString()) as any[];
+    } catch (error) {
+      console.error("Error getting games by player:", error);
+      return [];
+    }
+  }
+
+  /**
+   * Get player info by telegram ID
+   */
+  public getPlayer(telegramId: string): any {
+    try {
+      const stmt = this.db.prepare(
+        "SELECT * FROM player_mappings WHERE telegram_id = ?"
+      );
+      return stmt.get(telegramId) as any;
+    } catch (error) {
+      console.error("Error getting player:", error);
+      return null;
+    }
+  }
 }
