@@ -93,6 +93,7 @@ const userSessions = new Map<number, {
   messageId?: number;
   chatId?: number;
   amount?: string;
+  creatorId?: string;
 }>();
 
 // Main menu keyboard moved to utils/keyboards.ts
@@ -3123,6 +3124,52 @@ bot.callbackQuery(/^custom_amount_(coinflip|giveaway)$/, async (ctx) => {
   }
 });
 
+// Custom amount callback - shows slider interface (new format with creator ID)
+bot.callbackQuery(/^custom_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
+  try {
+    const gameType = ctx.match![1] as string;
+    const creatorId = ctx.match![2] as string;
+    const currentUserId = ctx.from?.id?.toString();
+    
+    console.log("🔔 Creator-protected custom_amount callback triggered:", ctx.callbackQuery?.data);
+    console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
+    
+    // Check if the user pressing the button is the creator
+    if (currentUserId !== creatorId) {
+      await ctx.answerCallbackQuery("❌ Only the game creator can modify this setup!");
+      return;
+    }
+    
+    const telegramId = BigInt(ctx.from?.id || 0);
+    
+    // Get user's balance for max limit
+    let userBalance = 1000;
+    try {
+      const timbaBalance = await wallet.getTokenBalance(telegramId, DEFAULT_TOKEN_MINT);
+      const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
+      userBalance = timbaBalance / Math.pow(10, metadata.decimals);
+    } catch (error) {
+      console.error("Error getting balance for slider:", error);
+    }
+    
+    // Start with a reasonable amount
+    const startAmount = Math.min(50, Math.floor(userBalance * 0.1));
+    
+    await ctx.editMessageText(
+      `🎯 <b>CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>\n\n💰 Balance: <b>${userBalance.toFixed(2)} TIMBA</b>\n\nAdjust the amount using the controls below:`,
+      {
+        parse_mode: "HTML",
+        reply_markup: createSliderAmountKeyboard(gameType, startAmount, userBalance, creatorId)
+      }
+    );
+    
+    await ctx.answerCallbackQuery();
+  } catch (error) {
+    console.error("Error in creator-protected custom_amount callback:", error);
+    await ctx.answerCallbackQuery("❌ Error loading custom amount");
+  }
+});
+
 // Slider controls callback
 bot.callbackQuery(/^slider_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
   try {
@@ -3161,6 +3208,53 @@ bot.callbackQuery(/^slider_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
   } catch (error) {
     console.error("Error in slider callback:", error);
+    await ctx.answerCallbackQuery("❌ Error adjusting amount");
+  }
+});
+
+// Slider controls callback (new format with creator ID)
+bot.callbackQuery(/^slider_(coinflip|giveaway)_(\d+)_(\d+)$/, async (ctx) => {
+  try {
+    const gameType = ctx.match![1] as string;
+    const newAmount = parseInt(ctx.match![2] as string);
+    const creatorId = ctx.match![3] as string;
+    const currentUserId = ctx.from?.id?.toString();
+    
+    console.log("🔔 Creator-protected slider callback triggered:", ctx.callbackQuery?.data);
+    console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
+    
+    // Check if the user pressing the button is the creator
+    if (currentUserId !== creatorId) {
+      await ctx.answerCallbackQuery("❌ Only the game creator can modify this setup!");
+      return;
+    }
+    
+    const telegramId = BigInt(ctx.from?.id || 0);
+    
+    // Get user's balance for validation
+    let userBalance = 1000; // Default fallback
+    try {
+      const timbaBalance = await wallet.getTokenBalance(telegramId, DEFAULT_TOKEN_MINT);
+      const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
+      userBalance = timbaBalance / Math.pow(10, metadata.decimals);
+    } catch (error) {
+      console.error("Error getting balance for slider:", error);
+    }
+    
+    // Validate amount
+    const validAmount = Math.max(1, Math.min(Math.floor(userBalance), newAmount));
+    
+    await ctx.editMessageText(
+      `🎯 <b>CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>\n\n💰 Balance: <b>${userBalance.toFixed(2)} TIMBA</b>\n\nAdjust the amount using the controls below:`,
+      {
+        parse_mode: "HTML",
+        reply_markup: createSliderAmountKeyboard(gameType, validAmount, userBalance, creatorId)
+      }
+    );
+    
+    await ctx.answerCallbackQuery();
+  } catch (error) {
+    console.error("Error in creator-protected slider callback:", error);
     await ctx.answerCallbackQuery("❌ Error adjusting amount");
   }
 });
@@ -3214,6 +3308,49 @@ bot.callbackQuery(/^back_to_amounts_(coinflip|giveaway)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
   } catch (error) {
     console.error("Error in back_to_amounts callback:", error);
+    await ctx.answerCallbackQuery("❌ Error going back");
+  }
+});
+
+// Back to amounts callback (new format with creator ID)
+bot.callbackQuery(/^back_to_amounts_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
+  try {
+    const gameType = ctx.match![1] as string;
+    const creatorId = ctx.match![2] as string;
+    const currentUserId = ctx.from?.id?.toString();
+    
+    console.log("🔔 Creator-protected back_to_amounts callback triggered:", ctx.callbackQuery?.data);
+    console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
+    
+    // Check if the user pressing the button is the creator
+    if (currentUserId !== creatorId) {
+      await ctx.answerCallbackQuery("❌ Only the game creator can modify this setup!");
+      return;
+    }
+    
+    const telegramId = BigInt(ctx.from?.id || 0);
+    
+    // Get user balance
+    let userBalance = 1000;
+    try {
+      const timbaBalance = await wallet.getTokenBalance(telegramId, DEFAULT_TOKEN_MINT);
+      const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
+      userBalance = timbaBalance / Math.pow(10, metadata.decimals);
+    } catch (error) {
+      console.error("Error getting balance:", error);
+    }
+    
+    await ctx.editMessageText(
+      `💰 <b>SELECT AMOUNT - ${gameType.toUpperCase()}</b>\n\nChoose how much you want to play with:`,
+      {
+        parse_mode: "HTML",
+        reply_markup: createAmountSelectionKeyboard(gameType, userBalance, creatorId)
+      }
+    );
+    
+    await ctx.answerCallbackQuery();
+  } catch (error) {
+    console.error("Error in creator-protected back_to_amounts callback:", error);
     await ctx.answerCallbackQuery("❌ Error going back");
   }
 });
@@ -3276,6 +3413,73 @@ bot.callbackQuery(/^type_amount_(coinflip|giveaway)$/, async (ctx) => {
   }
 });
 
+// Type amount callback - prompts user to type amount (new format with creator ID)
+bot.callbackQuery(/^type_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
+  try {
+    const gameType = ctx.match![1] as string;
+    const creatorId = ctx.match![2] as string;
+    const currentUserId = ctx.from?.id?.toString();
+    
+    console.log("🔔 Creator-protected type_amount callback triggered:", ctx.callbackQuery?.data);
+    console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
+    
+    // Check if the user pressing the button is the creator
+    if (currentUserId !== creatorId) {
+      await ctx.answerCallbackQuery("❌ Only the game creator can modify this setup!");
+      return;
+    }
+    
+    const telegramId = BigInt(ctx.from?.id || 0);
+    
+    // Get user balance for validation
+    let userBalance = 1000;
+    try {
+      const timbaBalance = await wallet.getTokenBalance(telegramId, DEFAULT_TOKEN_MINT);
+      const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
+      userBalance = timbaBalance / Math.pow(10, metadata.decimals);
+    } catch (error) {
+      console.error("Error getting balance:", error);
+    }
+    
+    const typeMessage = [
+      `✏️ <b>TYPE CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>`,
+      "",
+      `💰 Your balance: <b>${userBalance.toFixed(2)} TIMBA</b>`,
+      "",
+      "Please type the amount you want to use.",
+      "",
+      "<b>Example:</b>",
+      "• Type: <code>75</code> for 75 TIMBA",
+      "• Type: <code>150.5</code> for 150.5 TIMBA",
+      "",
+      `Min: 1 TIMBA • Max: ${Math.floor(userBalance)} TIMBA`
+    ].join("\n");
+
+    await ctx.editMessageText(typeMessage, {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard()
+        .text("❌ Cancel", `cancel_game_setup_${creatorId}`)
+        .row()
+    });
+    
+    await ctx.answerCallbackQuery("Type your amount...");
+    
+    // Store the game type and message ID in user session for the text handler
+    userSessions.set(ctx.from?.id || 0, { 
+      waitingFor: "amount_input",
+      gameType: gameType,
+      userBalance: userBalance,
+      messageId: ctx.callbackQuery?.message?.message_id || 0,
+      chatId: ctx.chat?.id || 0,
+      creatorId: creatorId
+    });
+    
+  } catch (error) {
+    console.error("Error in creator-protected type_amount callback:", error);
+    await ctx.answerCallbackQuery("❌ Error setting up text input");
+  }
+});
+
 // Custom players callback - prompts user to type number of players
 bot.callbackQuery(/^custom_players_(coinflip|giveaway)_(.+)$/, async (ctx) => {
   try {
@@ -3316,6 +3520,63 @@ bot.callbackQuery(/^custom_players_(coinflip|giveaway)_(.+)$/, async (ctx) => {
     
   } catch (error) {
     console.error("Error in custom_players callback:", error);
+    await ctx.answerCallbackQuery("❌ Error setting up players input");
+  }
+});
+
+// Custom players callback - prompts user to type number of players (new format with creator ID)
+bot.callbackQuery(/^custom_players_(coinflip|giveaway)_(.+)_(\d+)$/, async (ctx) => {
+  try {
+    const gameType = ctx.match![1] as string;
+    const amount = ctx.match![2] as string;
+    const creatorId = ctx.match![3] as string;
+    const currentUserId = ctx.from?.id?.toString();
+    
+    console.log("🔔 Creator-protected custom_players callback triggered:", ctx.callbackQuery?.data);
+    console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
+    
+    // Check if the user pressing the button is the creator
+    if (currentUserId !== creatorId) {
+      await ctx.answerCallbackQuery("❌ Only the game creator can modify this setup!");
+      return;
+    }
+    
+    const playersMessage = [
+      `👥 <b>TYPE CUSTOM PLAYERS - ${gameType.toUpperCase()}</b>`,
+      "",
+      `Amount: <b>${amount} TIMBA</b>`,
+      "",
+      "Please type the number of players for this game.",
+      "",
+      "<b>Example:</b>",
+      "• Type: <code>4</code> for 4 players",
+      "• Type: <code>10</code> for 10 players",
+      "",
+      `Range: 2-${gameType === "coinflip" ? "8" : "20"} players`
+    ].join("\n");
+
+    await ctx.editMessageText(playersMessage, {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard()
+        .text("❌ Cancel", `cancel_game_setup_${creatorId}`)
+        .row()
+    });
+    
+    await ctx.answerCallbackQuery("Type the number of players...");
+    
+    // Store data for text input handler
+    userSessions.set(ctx.from?.id || 0, { 
+      waitingFor: "players_input",
+      gameType: gameType,
+      userBalance: 0, // Add required field
+      amount: amount,
+      messageId: ctx.callbackQuery?.message?.message_id || 0,
+      chatId: ctx.chat?.id || 0,
+      creatorId: creatorId
+    });
+    
+  } catch (error) {
+    console.error("Error in creator-protected custom_players callback:", error);
     await ctx.answerCallbackQuery("❌ Error setting up players input");
   }
 });
@@ -3431,13 +3692,13 @@ bot.on("message:text", async (ctx, next) => {
           confirmMessage,
           {
             parse_mode: "HTML",
-            reply_markup: createGameConfirmKeyboard(userSession.gameType, userSession.amount!, players.toString())
+            reply_markup: createGameConfirmKeyboard(userSession.gameType, userSession.amount!, players.toString(), userSession.creatorId)
           }
         );
       } catch (error) {
         await ctx.reply(confirmMessage, {
           parse_mode: "HTML",
-          reply_markup: createGameConfirmKeyboard(userSession.gameType, userSession.amount!, players.toString())
+          reply_markup: createGameConfirmKeyboard(userSession.gameType, userSession.amount!, players.toString(), userSession.creatorId)
         });
       }
       
@@ -3505,14 +3766,14 @@ bot.on("message:text", async (ctx, next) => {
         playerMessage,
         {
           parse_mode: "HTML",
-          reply_markup: createPlayerSelectionKeyboard(userSession.gameType, amount.toString())
+          reply_markup: createPlayerSelectionKeyboard(userSession.gameType, amount.toString(), userSession.creatorId)
         }
       );
     } catch (error) {
       // Fallback to new message if edit fails
       await ctx.reply(playerMessage, {
         parse_mode: "HTML",
-        reply_markup: createPlayerSelectionKeyboard(userSession.gameType, amount.toString())
+        reply_markup: createPlayerSelectionKeyboard(userSession.gameType, amount.toString(), userSession.creatorId)
       });
     }
     
@@ -9098,6 +9359,47 @@ setupAnchor()
           allowed_updates: ["message", "callback_query"],
         },
       },
+    });
+
+    // ================================
+    // TEMPORARY: VIDEO/GIF ID GETTER (Private chats only)
+    // ================================
+    bot.on("message:video", async (ctx) => {
+      if (ctx.chat?.type === "private") {
+        const fileId = ctx.message.video.file_id;
+        const fileName = ctx.message.video.file_name || "video";
+        const duration = ctx.message.video.duration || 0;
+        const width = ctx.message.video.width || 0;
+        const height = ctx.message.video.height || 0;
+        
+        await ctx.reply(
+          `🎥 <b>Video ID</b>\n\n` +
+          `<code>${fileId}</code>\n\n` +
+          `📄 Name: ${fileName}\n` +
+          `⏱ Duration: ${duration}s\n` +
+          `📏 Size: ${width}x${height}`,
+          { parse_mode: "HTML" }
+        );
+      }
+    });
+
+    bot.on("message:animation", async (ctx) => {
+      if (ctx.chat?.type === "private") {
+        const fileId = ctx.message.animation.file_id;
+        const fileName = ctx.message.animation.file_name || "animation.gif";
+        const duration = ctx.message.animation.duration || 0;
+        const width = ctx.message.animation.width || 0;
+        const height = ctx.message.animation.height || 0;
+        
+        await ctx.reply(
+          `🎭 <b>GIF/Animation ID</b>\n\n` +
+          `<code>${fileId}</code>\n\n` +
+          `📄 Name: ${fileName}\n` +
+          `⏱ Duration: ${duration}s\n` +
+          `📏 Size: ${width}x${height}`,
+          { parse_mode: "HTML" }
+        );
+      }
     });
 
     // Set up graceful shutdown
