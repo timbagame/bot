@@ -1031,7 +1031,7 @@ bot.command(["coinflip", "cf"], async (ctx) => {
 
     await ctx.reply(coinflipMessage, {
       parse_mode: "HTML",
-      reply_markup: createAmountSelectionKeyboard("coinflip", userBalance)
+      reply_markup: createAmountSelectionKeyboard("coinflip", userBalance, ctx.from?.id.toString())
     });
   } catch (error) {
     console.error("Error in coinflip command:", error);
@@ -1076,7 +1076,7 @@ bot.command(["giveaway", "ga"], async (ctx) => {
 
     await ctx.reply(giveawayMessage, {
       parse_mode: "HTML",
-      reply_markup: createAmountSelectionKeyboard("giveaway", userBalance)
+      reply_markup: createAmountSelectionKeyboard("giveaway", userBalance, ctx.from?.id.toString())
     });
   } catch (error) {
     console.error("Error in giveaway command:", error);
@@ -2812,10 +2812,10 @@ const handleJoinGame = async (
 // ================================
 
 
-// Amount selection callbacks
+// Amount selection callbacks (old format for backward compatibility)
 bot.callbackQuery(/^amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
   try {
-    console.log("🔔 Amount callback triggered:", ctx.callbackQuery?.data);
+    console.log("⚠️ Old format amount callback - no creator protection:", ctx.callbackQuery?.data);
     const gameType = ctx.match![1] as string;
     const amount = ctx.match![2] as string;
     
@@ -2836,6 +2836,46 @@ bot.callbackQuery(/^amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
     await ctx.editMessageText(playerMessage, {
       parse_mode: "HTML",
       reply_markup: createPlayerSelectionKeyboard(gameType, amount)
+    });
+    
+    await ctx.answerCallbackQuery();
+  } catch (error) {
+    console.error("Error in old amount callback:", error);
+    await ctx.answerCallbackQuery("❌ Error selecting amount");
+  }
+});
+
+// Amount selection callbacks (new format with creatorId)
+bot.callbackQuery(/^amount_(coinflip|giveaway)_(\d+)_(\d+)$/, async (ctx) => {
+  try {
+    console.log("🔔 Amount callback triggered:", ctx.callbackQuery?.data);
+    const gameType = ctx.match![1] as string;
+    const amount = ctx.match![2] as string;
+    const creatorId = ctx.match![3] as string;
+    
+    // Check if the user pressing the button is the creator
+    if (ctx.from?.id.toString() !== creatorId) {
+      await ctx.answerCallbackQuery("🚫 Only the game creator can modify this game setup!");
+      return;
+    }
+    
+    const playerMessage = [
+      `<b>${gameType.toUpperCase()} - CHOOSE PLAYERS</b>`,
+      "",
+      `Amount: <b>${amount} TIMBA</b>`,
+      "",
+      "Select the number of players:",
+      "",
+      gameType === "coinflip" 
+        ? "• All players compete for the total stakes"
+        : "• More players = higher chance for everyone",
+      "",
+      "Choose number of players:"
+    ].join("\n");
+
+    await ctx.editMessageText(playerMessage, {
+      parse_mode: "HTML",
+      reply_markup: createPlayerSelectionKeyboard(gameType, amount, creatorId)
     });
     
     await ctx.answerCallbackQuery();

@@ -81,7 +81,7 @@ export const createConfirmSellKeyboard = (txId: string): InlineKeyboard => {
 // ================================
 
 
-export const createAmountSelectionKeyboard = (gameType: string, userBalance?: number): InlineKeyboard => {
+export const createAmountSelectionKeyboard = (gameType: string, userBalance?: number, creatorId?: string): InlineKeyboard => {
   let amounts: number[] = [10, 25, 50]; // Simple 3 default amounts
   
   if (userBalance && userBalance > 0) {
@@ -126,13 +126,14 @@ export const createAmountSelectionKeyboard = (gameType: string, userBalance?: nu
   
   // Add all 3 amount buttons in one row
   amounts.forEach(amount => {
-    keyboard.text(`💰 ${amount} TIMBA`, `amount_${gameType}_${amount}`);
+    const callbackData = creatorId ? `amount_${gameType}_${amount}_${creatorId}` : `amount_${gameType}_${amount}`;
+    keyboard.text(`💰 ${amount} TIMBA`, callbackData);
   });
   keyboard.row();
   
   // Custom amount and cancel buttons
   keyboard
-    .text("📊 Custom Amount", `custom_amount_${gameType}`)
+    .text("📊 Custom Amount", creatorId ? `custom_amount_${gameType}_${creatorId}` : `custom_amount_${gameType}`)
     .row()
     .text("❌ Cancel", `cancel_game_setup`)
     .row();
@@ -140,33 +141,33 @@ export const createAmountSelectionKeyboard = (gameType: string, userBalance?: nu
   return keyboard;
 };
 
-export const createPlayerSelectionKeyboard = (gameType: string, amount: string): InlineKeyboard => {
+export const createPlayerSelectionKeyboard = (gameType: string, amount: string, creatorId?: string): InlineKeyboard => {
   const keyboard = new InlineKeyboard();
   
   if (gameType === "coinflip") {
     keyboard
-      .text("👥 2 Players", `players_${gameType}_${amount}_2`)
-      .text("👥 3 Players", `players_${gameType}_${amount}_3`)
-      .text("👥 4 Players", `players_${gameType}_${amount}_4`)
+      .text("👥 2 Players", creatorId ? `players_${gameType}_${amount}_2_${creatorId}` : `players_${gameType}_${amount}_2`)
+      .text("👥 3 Players", creatorId ? `players_${gameType}_${amount}_3_${creatorId}` : `players_${gameType}_${amount}_3`)
+      .text("👥 4 Players", creatorId ? `players_${gameType}_${amount}_4_${creatorId}` : `players_${gameType}_${amount}_4`)
       .row()
-      .text("👥 5 Players", `players_${gameType}_${amount}_5`)
-      .text("👥 6 Players", `players_${gameType}_${amount}_6`)
-      .text("👥 8 Players", `players_${gameType}_${amount}_8`)
+      .text("👥 5 Players", creatorId ? `players_${gameType}_${amount}_5_${creatorId}` : `players_${gameType}_${amount}_5`)
+      .text("👥 6 Players", creatorId ? `players_${gameType}_${amount}_6_${creatorId}` : `players_${gameType}_${amount}_6`)
+      .text("👥 8 Players", creatorId ? `players_${gameType}_${amount}_8_${creatorId}` : `players_${gameType}_${amount}_8`)
       .row();
   } else if (gameType === "giveaway") {
     keyboard
-      .text("👥 2 Players", `players_${gameType}_${amount}_2`)
-      .text("👥 3 Players", `players_${gameType}_${amount}_3`)
-      .text("👥 5 Players", `players_${gameType}_${amount}_5`)
+      .text("👥 2 Players", creatorId ? `players_${gameType}_${amount}_2_${creatorId}` : `players_${gameType}_${amount}_2`)
+      .text("👥 3 Players", creatorId ? `players_${gameType}_${amount}_3_${creatorId}` : `players_${gameType}_${amount}_3`)
+      .text("👥 5 Players", creatorId ? `players_${gameType}_${amount}_5_${creatorId}` : `players_${gameType}_${amount}_5`)
       .row()
-      .text("👥 10 Players", `players_${gameType}_${amount}_10`)
-      .text("👥 15 Players", `players_${gameType}_${amount}_15`)
-      .text("👥 20 Players", `players_${gameType}_${amount}_20`)
+      .text("👥 10 Players", creatorId ? `players_${gameType}_${amount}_10_${creatorId}` : `players_${gameType}_${amount}_10`)
+      .text("👥 15 Players", creatorId ? `players_${gameType}_${amount}_15_${creatorId}` : `players_${gameType}_${amount}_15`)
+      .text("👥 20 Players", creatorId ? `players_${gameType}_${amount}_20_${creatorId}` : `players_${gameType}_${amount}_20`)
       .row();
   }
   
   keyboard
-    .text("📊 Custom Players", `custom_players_${gameType}_${amount}`)
+    .text("📊 Custom Players", creatorId ? `custom_players_${gameType}_${amount}_${creatorId}` : `custom_players_${gameType}_${amount}`)
     .row()
     .text("❌ Cancel", `cancel_game_setup`)
     .row();
@@ -177,12 +178,13 @@ export const createPlayerSelectionKeyboard = (gameType: string, amount: string):
 export const createGameConfirmKeyboard = (
   gameType: string, 
   amount: string, 
-  players: string
+  players: string,
+  creatorId?: string
 ): InlineKeyboard => {
   return new InlineKeyboard()
-    .text("✅ Create Game", `confirm_game_${gameType}_${amount}_${players}`)
+    .text("✅ Create Game", creatorId ? `confirm_game_${gameType}_${amount}_${players}_${creatorId}` : `confirm_game_${gameType}_${amount}_${players}`)
     .row()
-    .text("🔙 Back to Players", `amount_${gameType}_${amount}`)
+    .text("🔙 Back to Players", creatorId ? `amount_${gameType}_${amount}_${creatorId}` : `amount_${gameType}_${amount}`)
     .row();
 };
 
@@ -193,7 +195,8 @@ export const createGameConfirmKeyboard = (
 export const createSliderAmountKeyboard = (
   gameType: string, 
   currentAmount: number,
-  userBalance: number
+  userBalance: number,
+  creatorId?: string
 ): InlineKeyboard => {
   // Simplified step sizes
   let step: number;
@@ -223,25 +226,25 @@ export const createSliderAmountKeyboard = (
     .row()
     
     // Simplified controls
-    .text("⏪", `slider_${gameType}_${downBig}`)
-    .text(`-${step}`, `slider_${gameType}_${down}`)
-    .text(`+${step}`, `slider_${gameType}_${up}`)
-    .text("⏩", `slider_${gameType}_${upBig}`)
+    .text("⏪", creatorId ? `slider_${gameType}_${downBig}_${creatorId}` : `slider_${gameType}_${downBig}`)
+    .text(`-${step}`, creatorId ? `slider_${gameType}_${down}_${creatorId}` : `slider_${gameType}_${down}`)
+    .text(`+${step}`, creatorId ? `slider_${gameType}_${up}_${creatorId}` : `slider_${gameType}_${up}`)
+    .text("⏩", creatorId ? `slider_${gameType}_${upBig}_${creatorId}` : `slider_${gameType}_${upBig}`)
     .row()
     
     // Quick options based on balance
-    .text("🏠 Min", `slider_${gameType}_1`)
-    .text("🎯 25%", `slider_${gameType}_${Math.floor(maxAmount * 0.25)}`)
-    .text("🔥 50%", `slider_${gameType}_${Math.floor(maxAmount * 0.5)}`)
-    .text("💎 Max", `slider_${gameType}_${maxAmount}`)
+    .text("🏠 Min", creatorId ? `slider_${gameType}_1_${creatorId}` : `slider_${gameType}_1`)
+    .text("🎯 25%", creatorId ? `slider_${gameType}_${Math.floor(maxAmount * 0.25)}_${creatorId}` : `slider_${gameType}_${Math.floor(maxAmount * 0.25)}`)
+    .text("🔥 50%", creatorId ? `slider_${gameType}_${Math.floor(maxAmount * 0.5)}_${creatorId}` : `slider_${gameType}_${Math.floor(maxAmount * 0.5)}`)
+    .text("💎 Max", creatorId ? `slider_${gameType}_${maxAmount}_${creatorId}` : `slider_${gameType}_${maxAmount}`)
     .row()
     
     // Action buttons
-    .text(`✅ Use ${currentAmount} TIMBA`, `amount_${gameType}_${currentAmount}`)
+    .text(`✅ Use ${currentAmount} TIMBA`, creatorId ? `amount_${gameType}_${currentAmount}_${creatorId}` : `amount_${gameType}_${currentAmount}`)
     .row()
-    .text("✏️ Type Amount", `type_amount_${gameType}`)
+    .text("✏️ Type Amount", creatorId ? `type_amount_${gameType}_${creatorId}` : `type_amount_${gameType}`)
     .row()
-    .text("🔙 Back", `back_to_amounts_${gameType}`)
+    .text("🔙 Back", creatorId ? `back_to_amounts_${gameType}_${creatorId}` : `back_to_amounts_${gameType}`)
     .text("❌ Cancel", `cancel_game_setup`)
     .row();
 
