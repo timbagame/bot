@@ -924,6 +924,7 @@ bot.command("balance", async (ctx: Context) => {
 
     const response = [
       "💰 <b>Balance</b>",
+      "",
       `Player: ${username}`,
       `Wallet: <code>${walletAddress}</code>`,
       `SOL: ${wallet.formatSolBalance(solDisplayLamports)}`,
