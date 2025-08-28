@@ -80,8 +80,9 @@ export const handleCallbackErrorSafe = async (
   let errorMessage: string;
   try {
     const { formatUserFriendlyError } = await import("./errors");
-    const { wallet } = await import("../bot");
-    errorMessage = formatUserFriendlyError(error, wallet);
+    // Avoid importing bot entry to prevent side-effects in test/runtime
+    // Format without wallet context; formatter handles this gracefully
+    errorMessage = formatUserFriendlyError(error);
   } catch (importError) {
     errorMessage =
       categorizedError.message || "An error occurred. Please try again.";
