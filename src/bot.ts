@@ -61,6 +61,32 @@ export const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
 const startTime = Date.now();
 const gameDb = GameDatabase.getInstance();
 
+// Helper function to detect network from RPC URL
+const getNetworkFromRPC = (rpcUrl: string): string => {
+  if (rpcUrl.includes('devnet')) return 'Devnet';
+  if (rpcUrl.includes('testnet')) return 'Testnet';
+  if (rpcUrl.includes('mainnet') || rpcUrl.includes('api.solana.com')) return 'Mainnet';
+  return 'Custom Network';
+};
+
+// Helper function to check service availability
+const checkServiceHealth = async (url: string, timeout = 5000): Promise<boolean> => {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    
+    const response = await fetch(url, {
+      signal: controller.signal,
+      method: 'HEAD'
+    });
+    
+    clearTimeout(timeoutId);
+    return response.ok;
+  } catch (error) {
+    return false;
+  }
+};
+
 // User sessions for text input handling
 const userSessions = new Map<number, { 
   waitingFor: string; 
@@ -1819,7 +1845,7 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
       "",
       swapData.quote.provider === "pump-fun"
         ? "🔥 **Pump.fun Token** - Non-graduated token swap"
-        : "✅ **Mainnet Transaction** - Tokens transferred successfully",
+        : `✅ **${getNetworkFromRPC(process.env.SOLANA_NETWORK || wallet.connection.rpcEndpoint)} Transaction** - Tokens transferred successfully`,
     ].join("\n");
 
     await ctx.editMessageText(successMessage, { parse_mode: "Markdown" });
@@ -4725,7 +4751,7 @@ System Overview:
 • Multi-platform gaming system</pre>`,
       "",
       `<b>Your Wallet:</b> <code>${shortAddress}</code>`,
-      `<b>Network:</b> Solana Mainnet`,
+      `<b>Network:</b> Solana ${getNetworkFromRPC(process.env.SOLANA_NETWORK || wallet.connection.rpcEndpoint)}`,
       "",
       `<b>Available Tools:</b>`,
       `• Oracle status monitoring`,
@@ -4878,6 +4904,9 @@ bot.callbackQuery("info_system", async (ctx) => {
     const memUsage = process.memoryUsage();
     const memUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
     
+    // Detect network dynamically
+    const currentNetwork = getNetworkFromRPC(process.env.SOLANA_NETWORK || wallet.connection.rpcEndpoint);
+    
     // Check oracle connectivity
     let oracleStatus = "🔴 Offline";
     try {
@@ -4887,11 +4916,39 @@ bot.callbackQuery("info_system", async (ctx) => {
         oracleStatus = "🟢 Online";
       }
     } catch (error) {
-      oracleStatus = "🟡 Unknown";
+      oracleStatus = "🔴 Offline";
     }
+    
+    // Check RPC connection
+    let rpcStatus = "🔴 Offline";
+    try {
+      const slot = await wallet.connection.getSlot();
+      if (slot > 0) {
+        rpcStatus = "🟢 Online";
+      }
+    } catch (error) {
+      rpcStatus = "🔴 Offline";
+    }
+    
+    // Check Jupiter/Swap services
+    let swapStatus = "🔴 Offline";
+    try {
+      const jupiterBaseUrl = process.env.JUPITER_BASE_URL || 'https://quote-api.jup.ag';
+      const jupiterHealthy = await checkServiceHealth(jupiterBaseUrl);
+      swapStatus = jupiterHealthy ? "🟢 Online" : "🔴 Offline";
+    } catch (error) {
+      swapStatus = "🔴 Offline";
+    }
+    
+    // Database is always operational if we got this far
+    const dbStatus = "🟢 Online";
     
     const systemContent = [
       `<pre>S Y S T E M  S T A T U S
+
+Network Information:
+• Network: ${currentNetwork}
+• RPC Endpoint: ${wallet.connection.rpcEndpoint}
 
 Runtime Information:
 • Uptime: ${uptimeHours}h ${uptimeMinutes % 60}m
@@ -4906,9 +4963,9 @@ Game Statistics:
 
 Service Health:
 • Oracle: ${oracleStatus}
-• Swap Services: 🟢 Available
-• Database: 🟢 Operational
-• RPC Connection: 🟢 Active</pre>`,
+• Swap Services: ${swapStatus}
+• Database: ${dbStatus}
+• RPC Connection: ${rpcStatus}</pre>`,
     ];
 
     // Try to edit as text, if fails (because current message has media), delete and send new
@@ -5358,16 +5415,56 @@ bot.callbackQuery("admin_games", async (ctx) => {
 
 bot.callbackQuery("admin_system", async (ctx) => {
   try {
+    // Get real system data dynamically
+    const now = Date.now();
+    const uptimeMs = now - startTime;
+    const uptimeSeconds = Math.floor(uptimeMs / 1000);
+    const uptimeMinutes = Math.floor(uptimeSeconds / 60);
+    const uptimeHours = Math.floor(uptimeMinutes / 60);
+    
+    // Memory usage
+    const memUsage = process.memoryUsage();
+    const memUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+    
+    // Check RPC connection
+    let rpcStatus = "🔴 Offline";
+    try {
+      const slot = await wallet.connection.getSlot();
+      if (slot > 0) {
+        rpcStatus = "🟢 Online";
+      }
+    } catch (error) {
+      rpcStatus = "🔴 Offline";
+    }
+    
+    // Check oracle connectivity
+    let oracleStatus = "🔴 Offline";
+    try {
+      const oraclePda = PDAManager.getOraclePDA(program.programId);
+      const oracleAccount = await program.account.oracle.fetch(oraclePda);
+      if (oracleAccount.operator) {
+        oracleStatus = "🟢 Online";
+      }
+    } catch (error) {
+      oracleStatus = "🔴 Offline";
+    }
+    
+    // Database is online if we got this far
+    const dbStatus = "🟢 Online";
+    const botStatus = "🟢 Online";
+    
+    const currentNetwork = getNetworkFromRPC(process.env.SOLANA_NETWORK || wallet.connection.rpcEndpoint);
+    
     await ctx.editMessageText(
-      "📊 <b>SYSTEM STATUS</b>\n\n" +
-        "🟢 <b>Bot Status:</b> Online\n" +
-        "🟢 <b>Database:</b> Connected\n" +
-        "🟢 <b>Solana RPC:</b> Connected\n" +
-        "🟢 <b>Oracle:</b> Operational\n\n" +
-        "⚡ <b>Performance:</b>\n" +
-        "• Average response time: <50ms\n" +
-        "• Active users: 24h stats\n" +
-        "• Memory usage: Normal",
+      `📊 <b>SYSTEM STATUS</b>\n\n` +
+        `${botStatus} <b>Bot Status:</b> Running\n` +
+        `${dbStatus} <b>Database:</b> Connected\n` +
+        `${rpcStatus} <b>Solana RPC:</b> ${currentNetwork}\n` +
+        `${oracleStatus} <b>Oracle:</b> Service Status\n\n` +
+        `⚡ <b>Performance:</b>\n` +
+        `• Uptime: ${uptimeHours}h ${uptimeMinutes % 60}m\n` +
+        `• Memory usage: ${memUsedMB}MB\n` +
+        `• Platform: ${process.platform}`,
       {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
