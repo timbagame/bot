@@ -135,7 +135,7 @@ export const createAmountSelectionKeyboard = (gameType: string, userBalance?: nu
   keyboard
     .text("📊 Custom Amount", creatorId ? `custom_amount_${gameType}_${creatorId}` : `custom_amount_${gameType}`)
     .row()
-    .text("❌ Cancel", `cancel_game_setup`)
+    .text("❌ Cancel", creatorId ? `cancel_game_setup_${creatorId}` : `cancel_game_setup`)
     .row();
   
   return keyboard;
@@ -169,7 +169,7 @@ export const createPlayerSelectionKeyboard = (gameType: string, amount: string, 
   keyboard
     .text("📊 Custom Players", creatorId ? `custom_players_${gameType}_${amount}_${creatorId}` : `custom_players_${gameType}_${amount}`)
     .row()
-    .text("❌ Cancel", `cancel_game_setup`)
+    .text("❌ Cancel", creatorId ? `cancel_game_setup_${creatorId}` : `cancel_game_setup`)
     .row();
     
   return keyboard;
@@ -245,7 +245,7 @@ export const createSliderAmountKeyboard = (
     .text("✏️ Type Amount", creatorId ? `type_amount_${gameType}_${creatorId}` : `type_amount_${gameType}`)
     .row()
     .text("🔙 Back", creatorId ? `back_to_amounts_${gameType}_${creatorId}` : `back_to_amounts_${gameType}`)
-    .text("❌ Cancel", `cancel_game_setup`)
+    .text("❌ Cancel", creatorId ? `cancel_game_setup_${creatorId}` : `cancel_game_setup`)
     .row();
 
   return keyboard;

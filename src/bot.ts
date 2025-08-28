@@ -3251,7 +3251,7 @@ bot.callbackQuery(/^type_amount_(coinflip|giveaway)$/, async (ctx) => {
     await ctx.editMessageText(typeMessage, {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard()
-        .text("❌ Cancel", `cancel_game_setup`)
+        .text("❌ Cancel", `cancel_game_setup_${ctx.from?.id}`)
         .row()
     });
     
@@ -3325,15 +3325,41 @@ bot.callbackQuery("noop", async (ctx) => {
   await ctx.answerCallbackQuery();
 });
 
-// Cancel game setup callback
+// Cancel game setup callback (old format - no creator protection)
 bot.callbackQuery("cancel_game_setup", async (ctx) => {
   try {
+    console.log("⚠️ Old format cancel_game_setup - no creator protection:", ctx.callbackQuery?.data);
     await ctx.editMessageText("❌ Game creation cancelled.", {
       parse_mode: "HTML"
     });
     await ctx.answerCallbackQuery("Cancelled");
   } catch (error) {
     console.error("Error in cancel callback:", error);
+    await ctx.answerCallbackQuery("❌ Error cancelling");
+  }
+});
+
+// Cancel game setup callback (new format with creator ID protection)
+bot.callbackQuery(/^cancel_game_setup_(\d+)$/, async (ctx) => {
+  try {
+    const creatorId = ctx.match![1] as string;
+    const currentUserId = ctx.from?.id?.toString();
+    
+    console.log("🔔 Creator-protected cancel callback triggered:", ctx.callbackQuery?.data);
+    console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
+    
+    // Check if the user pressing the button is the creator
+    if (currentUserId !== creatorId) {
+      await ctx.answerCallbackQuery("❌ Only the game creator can cancel this setup!");
+      return;
+    }
+    
+    await ctx.editMessageText("❌ Game creation cancelled.", {
+      parse_mode: "HTML"
+    });
+    await ctx.answerCallbackQuery("Cancelled");
+  } catch (error) {
+    console.error("Error in creator-protected cancel callback:", error);
     await ctx.answerCallbackQuery("❌ Error cancelling");
   }
 });
