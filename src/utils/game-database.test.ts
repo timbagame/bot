@@ -3,7 +3,11 @@ import { rmSync } from "fs";
 import { GameDatabase } from "./game-database";
 
 beforeEach(() => {
-  rmSync("games.sqlite", { force: true });
+  try {
+    rmSync("games.sqlite", { force: true });
+  } catch (error) {
+    // Ignore if file is locked or doesn't exist
+  }
   // @ts-ignore reset singleton
   GameDatabase["instance"] = undefined;
 });

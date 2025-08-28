@@ -1,13 +1,36 @@
-import { expect, test } from "bun:test";
+import { expect, test, beforeEach, afterEach } from "bun:test";
 import { ChatDatabase } from "./chat-database";
 import { rmSync } from "fs";
 
-test("ChatDatabase manages chat token configs", () => {
-  rmSync("chat-settings.sqlite", { force: true });
+let testDbName: string;
+let db: ChatDatabase;
+
+beforeEach(() => {
+  testDbName = `chat-settings-test-${Date.now()}-${Math.random()}.sqlite`;
   // @ts-ignore - reset singleton for clean test
   ChatDatabase["instance"] = undefined;
+});
 
-  const db = ChatDatabase.getInstance();
+afterEach(() => {
+  if (db && (db as any).db) {
+    try {
+      (db as any).db.close();
+    } catch {}
+  }
+  try {
+    rmSync(testDbName, { force: true });
+  } catch {}
+});
+
+test("ChatDatabase manages chat token configs", () => {
+  db = ChatDatabase.getInstance();
+  
+  // Clear any existing data first
+  const existingChats = (db as any).db.query("SELECT chat_id FROM chat_settings").all();
+  for (const chat of existingChats) {
+    db.removeChatDefaultToken(chat.chat_id);
+  }
+  
   db.setChatDefaultToken(123, "mint", "TOK", "user1");
 
   const config = db.getChatDefaultToken(123);

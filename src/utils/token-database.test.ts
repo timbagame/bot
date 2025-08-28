@@ -3,7 +3,11 @@ import { TokenDatabase } from "./token-database";
 import { rmSync } from "fs";
 
 test("TokenDatabase stores and retrieves known tokens", () => {
-  rmSync("tokens.sqlite", { force: true });
+  try {
+    rmSync("tokens.sqlite", { force: true });
+  } catch (error) {
+    // Ignore if file is locked or doesn't exist
+  }
   // @ts-ignore - reset singleton for clean test
   TokenDatabase["instance"] = undefined;
 

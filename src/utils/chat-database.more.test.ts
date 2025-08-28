@@ -3,7 +3,11 @@ import { rmSync } from "fs";
 import { ChatDatabase } from "./chat-database";
 
 beforeEach(() => {
-  rmSync("chat-settings.sqlite", { force: true });
+  try {
+    rmSync("chat-settings.sqlite", { force: true });
+  } catch (error) {
+    // Ignore if file is locked or doesn't exist
+  }
   // @ts-ignore reset singleton
   ChatDatabase["instance"] = undefined;
 });
