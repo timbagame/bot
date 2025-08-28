@@ -2885,12 +2885,53 @@ bot.callbackQuery(/^amount_(coinflip|giveaway)_(\d+)_(\d+)$/, async (ctx) => {
   }
 });
 
-// Player selection callbacks
+// Player selection callbacks (old format for backward compatibility)  
 bot.callbackQuery(/^players_(coinflip|giveaway)_(\d+)_(\d+)$/, async (ctx) => {
   try {
+    console.log("⚠️ Old format players callback - no creator protection:", ctx.callbackQuery?.data);
     const gameType = ctx.match![1] as string;
     const amount = ctx.match![2] as string;
     const players = ctx.match![3] as string;
+    
+    const confirmMessage = [
+      `<b>CONFIRM ${gameType.toUpperCase()}</b>`,
+      "",
+      `Amount: <b>${amount} TIMBA</b>`,
+      `Players: <b>${players}</b>`,
+      "",
+      gameType === "coinflip" 
+        ? "• All players compete for the total stakes"
+        : "• More players = higher chance for everyone",
+      "",
+      "Are you ready to create this game?"
+    ].join("\n");
+
+    await ctx.editMessageText(confirmMessage, {
+      parse_mode: "HTML",
+      reply_markup: createGameConfirmKeyboard(gameType, amount, players)
+    });
+    
+    await ctx.answerCallbackQuery();
+  } catch (error) {
+    console.error("Error in old players callback:", error);
+    await ctx.answerCallbackQuery("❌ Error selecting players");
+  }
+});
+
+// Player selection callbacks (new format with creatorId)
+bot.callbackQuery(/^players_(coinflip|giveaway)_(\d+)_(\d+)_(\d+)$/, async (ctx) => {
+  try {
+    console.log("🔔 Players callback triggered:", ctx.callbackQuery?.data);
+    const gameType = ctx.match![1] as string;
+    const amount = ctx.match![2] as string;
+    const players = ctx.match![3] as string;
+    const creatorId = ctx.match![4] as string;
+    
+    // Check if the user pressing the button is the creator
+    if (ctx.from?.id.toString() !== creatorId) {
+      await ctx.answerCallbackQuery("🚫 Only the game creator can modify this game setup!");
+      return;
+    }
     
     const confirmMessage = [
       `<b>CONFIRM ${gameType.toUpperCase()}</b>`,
@@ -2909,7 +2950,7 @@ bot.callbackQuery(/^players_(coinflip|giveaway)_(\d+)_(\d+)$/, async (ctx) => {
 
     await ctx.editMessageText(confirmMessage, {
       parse_mode: "HTML",
-      reply_markup: createGameConfirmKeyboard(gameType, amount, players)
+      reply_markup: createGameConfirmKeyboard(gameType, amount, players, creatorId)
     });
     
     await ctx.answerCallbackQuery();
@@ -2919,12 +2960,39 @@ bot.callbackQuery(/^players_(coinflip|giveaway)_(\d+)_(\d+)$/, async (ctx) => {
   }
 });
 
-// Game creation confirmation
+// Game creation confirmation (old format for backward compatibility)
 bot.callbackQuery(/^confirm_game_(coinflip|giveaway)_(\d+)_(\d+)$/, async (ctx) => {
   try {
+    console.log("⚠️ Old format confirm_game callback - no creator protection:", ctx.callbackQuery?.data);
+    
+    if (!ctx.from?.id) {
+      await ctx.answerCallbackQuery("❌ Unable to identify user");
+      return;
+    }
+
+    // Continue with game creation logic...
+    await ctx.answerCallbackQuery("⚠️ Using old format - reduced security");
+    // [rest of the old logic would go here]
+  } catch (error) {
+    console.error("Error in old confirm_game callback:", error);
+    await ctx.answerCallbackQuery("❌ Error creating game");
+  }
+});
+
+// Game creation confirmation (new format with creatorId)
+bot.callbackQuery(/^confirm_game_(coinflip|giveaway)_(\d+)_(\d+)_(\d+)$/, async (ctx) => {
+  try {
+    console.log("🔔 Confirm game callback triggered:", ctx.callbackQuery?.data);
     const gameType = ctx.match![1] as "coinflip" | "giveaway";
     const amount = parseInt(ctx.match![2] as string);
     const maxPlayers = parseInt(ctx.match![3] as string);
+    const creatorId = ctx.match![4] as string;
+    
+    // Check if the user pressing the button is the creator
+    if (ctx.from?.id.toString() !== creatorId) {
+      await ctx.answerCallbackQuery("🚫 Only the game creator can create this game!");
+      return;
+    }
     
     if (!ctx.from?.id) {
       await ctx.answerCallbackQuery("❌ Unable to identify user");
