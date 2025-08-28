@@ -13,6 +13,7 @@ import {
   GAME_INFO_LIMIT,
   GAME_EXPIRATION_BUFFER_TIME,
   COINFLIP_START_VIDEO_ID,
+  WINNER_VIDEO_ID,
 } from "./constants";
 import type {
   GameMessage,
@@ -235,8 +236,13 @@ export class GameManager {
     ctx: Context,
     publicKey: string
   ): Promise<string> {
+    console.log(`🔍 Getting username for publicKey: ${publicKey}`);
+    
     const playerTelegramId = this.gameDb.getPlayerTelegramId(publicKey);
+    console.log(`🔍 Found telegramId: ${playerTelegramId} for publicKey: ${publicKey}`);
+    
     if (!playerTelegramId) {
+      console.log(`⚠️ No telegram ID found for publicKey: ${publicKey}`);
       return this.formatAddress(publicKey);
     }
 
@@ -244,7 +250,10 @@ export class GameManager {
       ctx,
       playerTelegramId
     );
+    console.log(`🔍 Found username: ${username} for telegramId: ${playerTelegramId}`);
+    
     if (!username) {
+      console.log(`⚠️ No username found for telegramId: ${playerTelegramId}`);
       return this.formatAddress(publicKey);
     }
 
@@ -532,12 +541,15 @@ export class GameManager {
       try {
         // Use editMessageMedia for coinflip games (to keep video), editMessageText for others
         if (gameType.toLowerCase() === "coinflip") {
+          // Use winner video if game is completed, start video otherwise
+          const videoId = status.toLowerCase() === "completed" ? WINNER_VIDEO_ID : COINFLIP_START_VIDEO_ID;
+          
           await ctx.api.editMessageMedia(
             gameMessage.chatId,
             gameMessage.messageId,
             {
               type: "video",
-              media: COINFLIP_START_VIDEO_ID,
+              media: videoId,
               caption: messageText,
               parse_mode: "HTML",
             },

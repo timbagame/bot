@@ -264,7 +264,8 @@ const updateGameMessageSafely = async (
   gameAddress: string,
   gameData: any,
   status: string = "Completed",
-  winnerAddress?: string
+  winnerAddress?: string,
+  totalPot?: number
 ): Promise<void> => {
   if (!gameData?.chat_id || !gameData?.message_id) return;
 
@@ -274,7 +275,8 @@ const updateGameMessageSafely = async (
       ctx,
       gameAddress,
       status,
-      winnerAddress
+      winnerAddress,
+      totalPot
     );
   } catch (error) {
     console.warn(`Could not update message for game ${gameAddress}:`, error);
@@ -434,7 +436,8 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
  */
 const processGameCompletion = async (
   gameAddress: string,
-  winnerAddress: string
+  winnerAddress: string,
+  totalPot?: number
 ): Promise<void> => {
   // Update database
   const blockTime = await wallet.getBlockchainTime();
@@ -446,10 +449,11 @@ const processGameCompletion = async (
     gameAddress,
     gameData,
     "Completed",
-    winnerAddress
+    winnerAddress,
+    totalPot
   );
 
-  console.log(`✅ Processed game completion: ${gameAddress}`);
+  console.log(`✅ Processed game completion: ${gameAddress} with prize: ${totalPot}`);
 };
 
 /**
@@ -8815,50 +8819,6 @@ setupAnchor()
     await gameManager.reloadGameMessages();
     console.log(`Reloaded game message mappings from database`);
 
-    /**
-     * Send completion notification to chat
-     */
-    const sendCompletionNotification = async (
-      gameData: any,
-      winnerAddress: string,
-      event: GameCompletedEvent
-    ): Promise<void> => {
-      if (!gameData.token_mint || !gameData.token_ticker) {
-        console.error(
-          `Missing token info for completion notification of game ${event.gameKey.toString()}`
-        );
-        return;
-      }
-
-      const ctx = createApiContext(gameData.chat_id);
-      const metadata = await wallet.getTokenMetadata(gameData.token_mint);
-      const winnerUsername = await gameManager.getPlayerUsername(
-        ctx,
-        winnerAddress
-      );
-      const winnerAmount = Number(event.winnerAmount);
-      const gameType = gameData.game_type
-        ? gameData.game_type.charAt(0).toUpperCase() +
-          gameData.game_type.slice(1)
-        : "Game";
-
-      let notificationText = `🎉 <b>${gameType} Completed!</b>\n\n`;
-      notificationText += `🏆 Winner: ${winnerUsername}\n`;
-      notificationText += `💰 Prize: ${wallet.formatTokenBalance(
-        winnerAmount,
-        metadata.decimals
-      )} ${gameData.token_ticker}`;
-
-      const gameMessage = gameManager.getActiveGameMessage(
-        event.gameKey.toString()
-      );
-      const replyToMessageId = gameMessage?.messageId;
-
-      await bot.api.sendMessage(gameData.chat_id, notificationText, {
-        parse_mode: "HTML",
-        reply_to_message_id: replyToMessageId,
-      });
-    };
 
     // Set up global event listener for GameCompleted events
     console.log("Setting up GameCompleted event listener...");
@@ -8873,43 +8833,9 @@ setupAnchor()
             `🎉 GameCompleted event received for game: ${gameAddress}`
           );
 
-          // Process game completion
-          await processGameCompletion(gameAddress, winnerAddress);
-
-          // Send winner video
-          const gameData = gameDb.getGame(gameAddress);
-          if (!gameData?.chat_id) {
-            console.log(
-              `No game data or chat_id found for game ${gameAddress}`
-            );
-            return;
-          }
-
-          // Send winner celebration video to chat
-          try {
-            const winnerPlayer = gameDb.getPlayer(winnerAddress);
-            const winnerUsername = winnerPlayer?.telegram_username || "Unknown";
-            const gameTypeText = gameData.game_type?.toUpperCase() || "GAME";
-            
-            await bot.api.sendVideo(gameData.chat_id, WINNER_VIDEO_ID, {
-              caption: `🎉 <b>${gameTypeText} COMPLETED!</b>\n\nWinner: @${winnerUsername}`,
-              parse_mode: "HTML"
-            });
-            
-            console.log(`🎬 Winner video sent to chat ${gameData.chat_id}`);
-          } catch (error) {
-            console.error("Error sending winner video:", error);
-          }
-
-          // Send completion notification
-          try {
-            await sendCompletionNotification(gameData, winnerAddress, event);
-            console.log(
-              `🎊 Sent completion notification for game ${gameAddress}`
-            );
-          } catch (error) {
-            console.error("Error sending completion notification:", error);
-          }
+          // Process game completion with total pot from event
+          const totalPot = Number(event.winnerAmount);
+          await processGameCompletion(gameAddress, winnerAddress, totalPot);
 
           console.log(
             `✅ Successfully processed GameCompleted event for game ${gameAddress}`
