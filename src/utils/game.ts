@@ -1525,7 +1525,19 @@ export class GameManager {
     const activeGames = await Promise.all(
       activeGamesData.map(async (gameData) => {
         try {
-          const gamePda = new PublicKey(gameData.game_address);
+          if (!gameData.game_address) {
+            console.error(`Game data missing address:`, gameData);
+            return null;
+          }
+          
+          let gamePda: PublicKey;
+          try {
+            gamePda = new PublicKey(gameData.game_address);
+          } catch (pkError) {
+            console.error(`Invalid game address format: ${gameData.game_address}`);
+            return null;
+          }
+          
           return this.getGameInfo(ctx, gamePda);
         } catch (error) {
           console.error(`Error fetching game ${gameData.game_address}:`, error);

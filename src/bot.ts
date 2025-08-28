@@ -2996,10 +2996,7 @@ bot.callbackQuery(/^custom_amount_(coinflip|giveaway)$/, async (ctx) => {
       `📊 <b>CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>`,
       "",
       `Balance: <b>${userBalance.toFixed(2)} TIMBA</b>`,
-      "",
-      "Use the controls below to adjust the amount:",
-      "",
-      "⏪⏩ Large steps • ◀️▶️ Medium steps • 🔽🔼 Small steps"
+      ""
     ].join("\n");
 
     await ctx.editMessageText(sliderMessage, {
@@ -8949,7 +8946,13 @@ setupAnchor()
      * Process expired game with cancellation
      */
     const processExpiredGame = async (game: any): Promise<void> => {
-      const gamePda = new PublicKey(game.game_address);
+      let gamePda: PublicKey;
+      try {
+        gamePda = new PublicKey(game.game_address);
+      } catch (error) {
+        console.error(`❌ Invalid game address in processExpiredGame: ${game.game_address}`);
+        return;
+      }
       const gameAccount = await program.account.game.fetch(gamePda);
 
       console.log(
@@ -8992,7 +8995,19 @@ setupAnchor()
           if (game.status === "completed") continue;
 
           try {
-            const gamePda = new PublicKey(game.game_address);
+            // Validate game address before creating PublicKey
+            if (!game.game_address) {
+              console.log(`🗑️ Skipping game with null address`);
+              continue;
+            }
+            
+            let gamePda: PublicKey;
+            try {
+              gamePda = new PublicKey(game.game_address);
+            } catch (pkError) {
+              console.log(`🗑️ Skipping game with invalid address format: ${game.game_address}`);
+              continue;
+            }
             const gameAccount = await program.account.game.fetch(gamePda);
 
             if (await isGameExpired(gameAccount)) {
