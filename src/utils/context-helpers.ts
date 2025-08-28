@@ -1,4 +1,5 @@
 import type { CallbackError, ErrorHandlingOptions } from "../types";
+import { formatUserFriendlyError } from "./errors";
 
 // ================================
 // ERROR HANDLING UTILITIES
@@ -76,17 +77,8 @@ export const handleCallbackErrorSafe = async (
     return;
   }
 
-  // Try to import and use proper error formatting
-  let errorMessage: string;
-  try {
-    const { formatUserFriendlyError } = await import("./errors");
-    // Avoid importing bot entry to prevent side-effects in test/runtime
-    // Format without wallet context; formatter handles this gracefully
-    errorMessage = formatUserFriendlyError(error);
-  } catch (importError) {
-    errorMessage =
-      categorizedError.message || "An error occurred. Please try again.";
-  }
+  // Format without wallet context; formatter handles this gracefully
+  const errorMessage = formatUserFriendlyError(error);
 
   const truncatedMessage = truncateErrorMessage(errorMessage, options);
   await safeAnswerCallbackQuery(ctx, truncatedMessage);
