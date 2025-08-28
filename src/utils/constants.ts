@@ -69,3 +69,13 @@ export const JUPITER_MAX_SLIPPAGE_BPS = 500; // 5%
 export const JUPITER_MIN_SLIPPAGE_BPS = 10; // 0.1%
 export const JUPITER_MAX_PRICE_IMPACT = 5; // 5%
 export const JUPITER_PLATFORM_FEE_BPS = 0; // No platform fee by default
+
+// ================================
+// MEDIA FILE IDs 
+// ================================
+
+// General/Winner video - for /start, wallet, and winner announcements
+export const WINNER_VIDEO_ID = "BAACAgEAAxkBAAIE1WivzsUV7cps9-rSyWoah847uOl7AAKqBQACEHGART3oJ4oxnXoCNgQ";
+
+// Coinflip start video - for when coinflip rounds begin
+export const COINFLIP_START_VIDEO_ID = "BAACAgEAAxkBAAIE12ivzwbUNAQX5PGPk5H8K9PEOmKYAAKrBQACEHGARfHRJ8fc8kH3NgQ";

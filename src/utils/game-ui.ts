@@ -31,7 +31,7 @@ export function buildGameHeader(
 ): string {
   return (
     `<b>${gameTypeLabel} • ${amountFormatted} ${tokenTicker}</b>\n` +
-    `👤 Creator: ${creatorUsername} • ${currentTickets}/${maxTickets} tickets`
+    `Creator: ${creatorUsername} • ${currentTickets}/${maxTickets} tickets`
   );
 }
 
@@ -44,7 +44,7 @@ export function buildPrizeLine(
   tokenTicker: string
 ): string {
   if (!show) return "";
-  return `\n🏆 Current Prize: ${totalFormatted} ${tokenTicker}`;
+  return `\nCurrent Prize: ${totalFormatted} ${tokenTicker}`;
 }
 
 /**
@@ -62,7 +62,7 @@ export function buildParticipantsList(usernames: string[]): string {
  */
 export function buildExpirationText(
   secondsRemaining: number,
-  prefix: string = "⏰ "
+  prefix: string = ""
 ): string {
   const minutes = Math.floor(secondsRemaining / 60);
   const hours = Math.floor(minutes / 60);

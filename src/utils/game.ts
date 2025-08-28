@@ -12,6 +12,7 @@ import {
   ADDRESS_DISPLAY_LENGTH,
   GAME_INFO_LIMIT,
   GAME_EXPIRATION_BUFFER_TIME,
+  COINFLIP_START_VIDEO_ID,
 } from "./constants";
 import type {
   GameMessage,
@@ -47,12 +48,12 @@ const logAndFormatError = (
 const formatGameTypeWithEmoji = (gameType: string): string => {
   switch (gameType.toLowerCase()) {
     case "coinflip":
-      return "🪙 Coinflip";
+      return "Coinflip";
     case "giveaway":
-      return "🎁 Giveaway";
+      return "Giveaway";
 
     default:
-      return `🎮 ${gameType.charAt(0).toUpperCase() + gameType.slice(1)}`;
+      return `${gameType.charAt(0).toUpperCase() + gameType.slice(1)}`;
   }
 };
 
@@ -269,9 +270,18 @@ export class GameManager {
       const maxTickets = gameAccount.maxTickets;
       const minTickets = gameAccount.minTickets;
 
-      const totalPot =
-        providedTotalPot ??
-        (Number(gameAccount.totalAmount || 0) || amount * currentTickets);
+      // Calculate totalPot based on game type
+      let totalPot = providedTotalPot;
+      if (!totalPot) {
+        const gameType = this.getGameType(gameAccount);
+        if (gameType === "giveaway") {
+          // For giveaways, totalPot is just the amount (prize from creator)
+          totalPot = Number(gameAccount.totalAmount || 0) || amount;
+        } else {
+          // For coinflips, totalPot = amount * participants
+          totalPot = Number(gameAccount.totalAmount || 0) || amount * currentTickets;
+        }
+      }
 
       const createdAt = Number(gameAccount.createdAt);
       const timeout = Number(gameAccount.timeout);
@@ -311,7 +321,21 @@ export class GameManager {
   ) {
     const participants = this.getGamePlayers(gamePda.toBase58());
     const currentTickets = participants.length;
-    const totalPot = providedTotalPot ?? amount * currentTickets;
+    
+    // Get game type from database to calculate totalPot correctly
+    let totalPot = providedTotalPot;
+    if (!totalPot) {
+      const gameData = this.gameDb.getGame(gamePda.toBase58());
+      const gameType = gameData?.game_type || "coinflip"; // default to coinflip if not found
+      
+      if (gameType === "giveaway") {
+        // For giveaways, totalPot is just the amount (prize from creator)
+        totalPot = amount;
+      } else {
+        // For coinflips, totalPot = amount * participants
+        totalPot = amount * currentTickets;
+      }
+    }
 
     return {
       currentTickets,
@@ -451,11 +475,19 @@ export class GameManager {
       undefined
     );
 
-    const message = await ctx.reply(messageText, {
-      parse_mode: "HTML",
-      reply_markup: { inline_keyboard: keyboard },
-      reply_to_message_id: ctx.message?.message_id,
-    });
+    // Use video for coinflip games, text for others
+    const message = gameType.toLowerCase() === "coinflip" 
+      ? await ctx.replyWithVideo(COINFLIP_START_VIDEO_ID, {
+          caption: messageText,
+          parse_mode: "HTML",
+          reply_markup: { inline_keyboard: keyboard },
+          reply_to_message_id: ctx.message?.message_id,
+        })
+      : await ctx.reply(messageText, {
+          parse_mode: "HTML",
+          reply_markup: { inline_keyboard: keyboard },
+          reply_to_message_id: ctx.message?.message_id,
+        });
 
     this.gameDb.saveGameMessage(
       gameAddress,
@@ -498,16 +530,34 @@ export class GameManager {
       );
 
       try {
-        await ctx.api.editMessageText(
-          gameMessage.chatId,
-          gameMessage.messageId,
-          messageText,
-          {
-            parse_mode: "HTML",
-            reply_markup:
-              keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined,
-          }
-        );
+        // Use editMessageMedia for coinflip games (to keep video), editMessageText for others
+        if (gameType.toLowerCase() === "coinflip") {
+          await ctx.api.editMessageMedia(
+            gameMessage.chatId,
+            gameMessage.messageId,
+            {
+              type: "video",
+              media: COINFLIP_START_VIDEO_ID,
+              caption: messageText,
+              parse_mode: "HTML",
+            },
+            {
+              reply_markup:
+                keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined,
+            }
+          );
+        } else {
+          await ctx.api.editMessageText(
+            gameMessage.chatId,
+            gameMessage.messageId,
+            messageText,
+            {
+              parse_mode: "HTML",
+              reply_markup:
+                keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined,
+            }
+          );
+        }
       } catch (error: any) {
         if (error.description?.includes("message is not modified")) {
           return;
@@ -654,7 +704,7 @@ export class GameManager {
           ctx,
           gameData.winner_address
         );
-        winnerLine = `🏆 Winner: @${winnerUsername}`;
+        winnerLine = `Winner: @${winnerUsername}`;
       }
 
       const lines = [
@@ -969,7 +1019,7 @@ export class GameManager {
       );
       return {
         success: false,
-        error: `⚠️ Game created successfully, but failed to auto-join creator!\n\nPlease manually join the game using the "🎮 Join" button.\n\nError: ${errorMsg}`,
+        error: `Game created successfully, but failed to auto-join creator!\n\nPlease manually join the game using the "🎮 Join" button.\n\nError: ${errorMsg}`,
       };
     }
   }
@@ -1432,7 +1482,7 @@ export class GameManager {
     );
     const activeGamesSection =
       validActiveGames.length > 0
-        ? "🎮 <b>Active Games</b>\n\n" + validActiveGames.join("\n\n")
+        ? "<b>Active Games</b>\n\n" + validActiveGames.join("\n\n")
         : "";
 
     // Recent games
@@ -1454,10 +1504,10 @@ export class GameManager {
     const formatSection = this.formatGameSection.bind(this);
 
     const recentGamesSections = [
-      formatSection(categories.won, "🏆 <b>Won Games</b>"),
-      formatSection(categories.lost, "😢 <b>Lost Games</b>"),
-      formatSection(categories.created, "🎮 <b>Created Games</b>"),
-      formatSection(categories.cancelled, "❌ <b>Cancelled Games</b>"),
+      formatSection(categories.won, "<b>Won Games</b>"),
+      formatSection(categories.lost, "<b>Lost Games</b>"),
+      formatSection(categories.created, "<b>Created Games</b>"),
+      formatSection(categories.cancelled, "<b>Cancelled Games</b>"),
     ]
       .filter((section) => section !== "")
       .join("\n");

@@ -4,9 +4,7 @@ export const createMainMenuKeyboard = (): InlineKeyboard => {
   return new InlineKeyboard()
     .text("💳 Wallet", "main_wallet")
     .row()
-    .text("⚙️ Info", "main_settings")
-    .text("🔧 Admin", "admin_menu")
-    .row()
+    .text("⚙️ Settings", "main_settings")
     .text("❓ Help", "cmd_help")
     .row();
 };
@@ -76,4 +74,176 @@ export const createConfirmSellKeyboard = (txId: string): InlineKeyboard => {
     .row()
     .text("❌ Cancel", "cmd_sell")
     .row();
+};
+
+// ================================
+// GAME SETUP KEYBOARDS
+// ================================
+
+
+export const createAmountSelectionKeyboard = (gameType: string, userBalance?: number): InlineKeyboard => {
+  let amounts: number[] = [10, 25, 50]; // Simple 3 default amounts
+  
+  if (userBalance && userBalance > 0) {
+    const balance = Math.floor(userBalance);
+    console.log(`🔍 Original balance: ${userBalance} → Floored balance: ${balance}`);
+    
+    // Simple 3 amounts based on balance ranges
+    if (balance < 10) {
+      amounts = [1, 3, balance];
+    } else if (balance < 50) {
+      amounts = [5, 10, 25];
+    } else if (balance < 200) {
+      amounts = [10, 25, 50];
+    } else if (balance < 1000) {
+      amounts = [50, 100, 250];
+    } else {
+      amounts = [100, 500, 1000];
+    }
+    
+    // Ensure none exceed balance
+    amounts = amounts
+      .filter(a => a <= balance)
+      .filter((value, index, self) => self.indexOf(value) === index);
+    
+    // If we filtered out too many, add some safe amounts
+    while (amounts.length < 3 && amounts[amounts.length - 1] < balance) {
+      const lastAmount = amounts[amounts.length - 1];
+      const nextAmount = Math.min(lastAmount * 2, balance);
+      if (nextAmount > lastAmount) {
+        amounts.push(nextAmount);
+      } else {
+        break;
+      }
+    }
+    
+    console.log(`✅ Final 3 amounts for balance ${balance}: ${amounts.join(', ')}`);
+  } else {
+    console.log(`🔍 No balance provided, using default amounts: ${amounts.join(', ')}`);
+  }
+  
+  const keyboard = new InlineKeyboard();
+  
+  // Add all 3 amount buttons in one row
+  amounts.forEach(amount => {
+    keyboard.text(`💰 ${amount} TIMBA`, `amount_${gameType}_${amount}`);
+  });
+  keyboard.row();
+  
+  // Custom amount and cancel buttons
+  keyboard
+    .text("📊 Custom Amount", `custom_amount_${gameType}`)
+    .row()
+    .text("❌ Cancel", `cancel_game_setup`)
+    .row();
+  
+  return keyboard;
+};
+
+export const createPlayerSelectionKeyboard = (gameType: string, amount: string): InlineKeyboard => {
+  const keyboard = new InlineKeyboard();
+  
+  if (gameType === "coinflip") {
+    keyboard
+      .text("👥 2 Players", `players_${gameType}_${amount}_2`)
+      .text("👥 3 Players", `players_${gameType}_${amount}_3`)
+      .text("👥 4 Players", `players_${gameType}_${amount}_4`)
+      .row()
+      .text("👥 5 Players", `players_${gameType}_${amount}_5`)
+      .text("👥 6 Players", `players_${gameType}_${amount}_6`)
+      .text("👥 8 Players", `players_${gameType}_${amount}_8`)
+      .row();
+  } else if (gameType === "giveaway") {
+    keyboard
+      .text("👥 2 Players", `players_${gameType}_${amount}_2`)
+      .text("👥 3 Players", `players_${gameType}_${amount}_3`)
+      .text("👥 5 Players", `players_${gameType}_${amount}_5`)
+      .row()
+      .text("👥 10 Players", `players_${gameType}_${amount}_10`)
+      .text("👥 15 Players", `players_${gameType}_${amount}_15`)
+      .text("👥 20 Players", `players_${gameType}_${amount}_20`)
+      .row();
+  }
+  
+  keyboard
+    .text("📊 Custom Players", `custom_players_${gameType}_${amount}`)
+    .row()
+    .text("❌ Cancel", `cancel_game_setup`)
+    .row();
+    
+  return keyboard;
+};
+
+export const createGameConfirmKeyboard = (
+  gameType: string, 
+  amount: string, 
+  players: string
+): InlineKeyboard => {
+  return new InlineKeyboard()
+    .text("✅ Create Game", `confirm_game_${gameType}_${amount}_${players}`)
+    .row()
+    .text("🔙 Back to Players", `amount_${gameType}_${amount}`)
+    .row();
+};
+
+// ================================
+// SLIDER AMOUNT KEYBOARD
+// ================================
+
+export const createSliderAmountKeyboard = (
+  gameType: string, 
+  currentAmount: number,
+  userBalance: number
+): InlineKeyboard => {
+  // Simplified step sizes
+  let step: number;
+  
+  if (currentAmount <= 50) {
+    step = 1;
+  } else if (currentAmount <= 200) {
+    step = 5;
+  } else if (currentAmount <= 1000) {
+    step = 25;
+  } else {
+    step = 100;
+  }
+
+  // Calculate new amounts
+  const minAmount = 1;
+  const maxAmount = Math.floor(userBalance);
+  
+  const down = Math.max(minAmount, currentAmount - step);
+  const up = Math.min(maxAmount, currentAmount + step);
+  const downBig = Math.max(minAmount, currentAmount - step * 5);
+  const upBig = Math.min(maxAmount, currentAmount + step * 5);
+
+  const keyboard = new InlineKeyboard()
+    // Amount display
+    .text(`💰 ${currentAmount} TIMBA`, `noop`)
+    .row()
+    
+    // Simplified controls
+    .text("⏪", `slider_${gameType}_${downBig}`)
+    .text(`-${step}`, `slider_${gameType}_${down}`)
+    .text(`+${step}`, `slider_${gameType}_${up}`)
+    .text("⏩", `slider_${gameType}_${upBig}`)
+    .row()
+    
+    // Quick options based on balance
+    .text("🏠 Min", `slider_${gameType}_1`)
+    .text("🎯 25%", `slider_${gameType}_${Math.floor(maxAmount * 0.25)}`)
+    .text("🔥 50%", `slider_${gameType}_${Math.floor(maxAmount * 0.5)}`)
+    .text("💎 Max", `slider_${gameType}_${maxAmount}`)
+    .row()
+    
+    // Action buttons
+    .text(`✅ Use ${currentAmount} TIMBA`, `amount_${gameType}_${currentAmount}`)
+    .row()
+    .text("✏️ Type Amount", `type_amount_${gameType}`)
+    .row()
+    .text("🔙 Back", `back_to_amounts_${gameType}`)
+    .text("❌ Cancel", `cancel_game_setup`)
+    .row();
+
+  return keyboard;
 };
