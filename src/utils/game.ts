@@ -386,7 +386,35 @@ export class GameManager {
     return keyboard;
   }
 
-  private async formatGameMessage(
+  public async formatAndSendGameMessage(
+    ctx: Context,
+    gamePda: PublicKey,
+    gameType: string,
+    amount: number,
+    creatorUsername: string,
+    status: string,
+    tokenTicker: string,
+    winnerAddress?: string,
+    providedTotalPot?: number
+  ): Promise<any> {
+    const formatted = await this.formatGameMessage(
+      ctx, gamePda, gameType, amount, creatorUsername, status, tokenTicker, winnerAddress, providedTotalPot
+    );
+    
+    // Use video for coinflip games, text for others
+    return gameType.toLowerCase() === "coinflip" 
+      ? await ctx.replyWithVideo(COINFLIP_START_VIDEO_ID, {
+          caption: formatted.messageText,
+          parse_mode: "HTML",
+          reply_markup: { inline_keyboard: formatted.keyboard },
+        })
+      : await ctx.reply(formatted.messageText, {
+          parse_mode: "HTML",
+          reply_markup: { inline_keyboard: formatted.keyboard },
+        });
+  }
+
+  public async formatGameMessage(
     ctx: Context,
     gamePda: PublicKey,
     gameType: string,
@@ -850,16 +878,27 @@ export class GameManager {
       this.gameDb.savePlayerMapping(creatorPubkey, telegramId.toString());
 
       // Check oracle and generate game secrets
+      console.log("🔍 Checking Oracle health for game creation...");
       const isOracleHealthy = await this.oracleClient.isHealthy();
+      
+      let randomHash: string;
+      let randomHashBuffer: Buffer;
+      
       if (!isOracleHealthy) {
-        return {
-          success: false,
-          error: "❌ Oracle service is unavailable. Please try again later.",
-        };
+        console.warn("⚠️ Oracle is unhealthy, using fallback random generation");
+        // Fallback: generate random hash locally for development
+        const fallbackRandom = Math.random().toString(36).substring(2, 15) + 
+                              Math.random().toString(36).substring(2, 15);
+        randomHash = Buffer.from(fallbackRandom).toString('hex').padStart(64, '0');
+        randomHashBuffer = Buffer.from(randomHash, 'hex');
+        
+        console.log(`🎲 Using fallback random hash: ${randomHash.substring(0, 10)}...`);
+      } else {
+        console.log("✅ Oracle is healthy, generating proper random hash");
+        const secretsResponse = await this.oracleClient.generateGameSecrets();
+        randomHash = secretsResponse.randomHash;
+        randomHashBuffer = this.oracleClient.hexToBuffer(randomHash);
       }
-
-      const { randomHash } = await this.oracleClient.generateGameSecrets();
-      const randomHashBuffer = this.oracleClient.hexToBuffer(randomHash);
 
       // Create game
       const gameConfig = {

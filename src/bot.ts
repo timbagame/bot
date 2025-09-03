@@ -10,6 +10,7 @@ import idl from "../idl/idl.json";
 import { GameDatabase } from "./utils/game-database";
 import { GameManager } from "./utils/game";
 import { PDAManager } from "./utils/pda";
+import { OracleClient } from "./utils/oracle";
 import { formatUserFriendlyError } from "./utils/errors";
 import { SwapManager } from "./utils/swap-manager";
 import {
@@ -37,6 +38,7 @@ import {
   createPlayerSelectionKeyboard,
   createGameConfirmKeyboard,
   createSliderAmountKeyboard,
+  getFeeWarningMessage,
 } from "./utils/keyboards";
 import { buildWalletCaption } from "./utils/wallet-ui";
 import type {
@@ -753,6 +755,28 @@ const checkOracleStatus = async () => {
   }
 };
 
+/**
+ * Get the actual minimum amount from smart contract
+ */
+export const getContractMinimumAmount = async (): Promise<number> => {
+  try {
+    const gameTokenPda = PDAManager.getGameTokenPDA(
+      new PublicKey(DEFAULT_TOKEN_MINT),
+      program.programId
+    );
+    const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
+
+    const metadata = await getDefaultTokenMetadata();
+    const minAmountFormatted = Number(gameTokenAccount.minAmount) / Math.pow(10, metadata.decimals);
+    
+    console.log(`✅ Contract minimum: ${minAmountFormatted} ${DEFAULT_TOKEN_TICKER}`);
+    return minAmountFormatted;
+  } catch (error) {
+    console.warn("⚠️ Could not fetch minimum from contract, using fallback:", error);
+    return 20; // Fallback
+  }
+};
+
 const checkGameTokenStatus = async () => {
   try {
     const gameTokenPda = PDAManager.getGameTokenPDA(
@@ -865,12 +889,40 @@ bot.command("start", async (ctx: Context) => {
       -6
     )}`;
 
+    // Calculate total USD balance for private chats
+    let totalUSDBalance = 0;
+    if (isPrivateChat(ctx)) {
+      try {
+        const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
+        
+        // Calculate SOL value in USD
+        const solPriceUSD = await getTokenPriceUSD("SOL");
+        const solDecimalBalance = solBalance / LAMPORTS_PER_SOL;
+        totalUSDBalance += solDecimalBalance * solPriceUSD;
+
+        // Calculate token values in USD
+        for (const token of tokenBalances) {
+          const tokenPriceUSD = await getTokenPriceUSD(token.mint);
+          const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
+          totalUSDBalance += tokenDecimalBalance * tokenPriceUSD;
+        }
+      } catch (error) {
+        console.warn("Error calculating USD balance for /start:", error);
+        totalUSDBalance = 0;
+      }
+    }
+
     // Build welcome message
     const welcomeMessage = [
       `<b>WELCOME ${username.toUpperCase()}</b>`,
       "",
       `<code>${walletAddress}</code>`,
     ];
+
+    // Add USD balance for private chats
+    if (isPrivateChat(ctx) && totalUSDBalance > 0) {
+      welcomeMessage.push("", `💰 <b>$${totalUSDBalance.toFixed(2)} USD</b>`);
+    }
 
     // Send response with menu for private chats
     if (isPrivateChat(ctx)) {
@@ -964,25 +1016,25 @@ bot.command("balance", async (ctx: Context) => {
       : ctx.from?.first_name || "User";
     const walletAddress = playerData.keypair.publicKey.toBase58();
 
+    const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
+    
     const response = [
-      "💰 <b>Balance</b>",
+      `<b>${username}</b>`,
+      `<code>${shortAddress}</code>`,
       "",
-      `Player: ${username}`,
-      `Wallet: <code>${walletAddress}</code>`,
-      `SOL: ${wallet.formatSolBalance(solDisplayLamports)}`,
+      `${wallet.formatSolBalance(solDisplayLamports)} SOL`,
     ];
 
     if (tokenBalancesToShow.length > 0) {
-      response.push("");
-      for (const token of tokenBalancesToShow.slice(0, 5)) {
+      for (const token of tokenBalancesToShow.slice(0, 4)) {
         const balance = wallet.formatTokenBalance(
           token.balance,
           token.decimals
         );
-        response.push(`${token.ticker}: ${balance}`);
+        response.push(`${balance} ${token.ticker}`);
       }
-      if (tokenBalancesToShow.length > 5) {
-        response.push(`+${tokenBalancesToShow.length - 5} more tokens`);
+      if (tokenBalancesToShow.length > 4) {
+        response.push(`<i>+${tokenBalancesToShow.length - 4} more tokens</i>`);
       }
     }
 
@@ -1003,8 +1055,108 @@ bot.command(["coinflip", "cf"], async (ctx) => {
       return ctx.reply("❌ Coinflip games can only be created in groups!");
     }
 
-    // Get user's TIMBA balance
     const telegramId = BigInt(ctx.from?.id || 0);
+    const args = ctx.message?.text?.split(" ");
+
+    // If arguments provided, use command-based creation (original functionality)
+    if (args && args.length >= 2) {
+      console.log("🎮 Command-based coinflip creation:", args);
+      
+      // Show creating message
+      const creatingMsg = await ctx.reply("🎮 Creating your game...", { parse_mode: "HTML" });
+      
+      try {
+        // Parse arguments: /cf <amount> [TOKEN] [maxPlayers]
+        const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id);
+        if (!parsed.success) {
+          if (parsed.error === "unknown_token") {
+            return ctx.reply(`❌ Unknown token "${parsed.unknownToken}"`);
+          }
+          return ctx.reply("❌ Please provide a valid amount greater than 0.\n\nUsage: `/cf <amount>` or `/cf <amount> <maxPlayers>`");
+        }
+
+        // Get maxPlayers from arguments (default to 2 for coinflip)
+        let maxPlayers = 2;
+        const playersArg = args[args.length - 1]; // Last argument might be players
+        if (playersArg && !isNaN(parseInt(playersArg)) && parseInt(playersArg) !== parsed.data!.amount) {
+          const requestedPlayers = parseInt(playersArg);
+          if (requestedPlayers >= 2 && requestedPlayers <= 8) {
+            maxPlayers = requestedPlayers;
+          } else {
+            return ctx.reply("❌ Coinflip supports 2-8 players maximum.");
+          }
+        }
+
+        // Check user has enough balance
+        const userBalance = await wallet.getTokenBalance(telegramId, parsed.data!.tokenMint);
+        const tokenMetadata = await wallet.getTokenMetadata(parsed.data!.tokenMint);
+        const requiredAmount = parsed.data!.amount;
+        
+        if (userBalance < requiredAmount) {
+          const formatted = wallet.formatTokenBalance(userBalance, tokenMetadata.decimals);
+          return ctx.reply(`❌ Insufficient balance. You have ${formatted} ${parsed.data!.tokenTicker}, need ${parsed.data!.formattedAmount}.`);
+        }
+
+        // Create game directly using GameManager
+        const gameResult = await gameManager.createGame(
+          "coinflip",
+          {
+            amount: parsed.data!.amount,
+            tokenMint: parsed.data!.tokenMint,
+            tokenTicker: parsed.data!.tokenTicker,
+            isSol: parsed.data!.isSol
+          },
+          maxPlayers, // maxTickets
+          2, // minTickets (coinflip always needs 2)
+          60 * 60, // timeout (1 hour)
+          telegramId,
+          ctx.chat?.id || 0
+        );
+
+        if (!gameResult.success) {
+          return ctx.reply(`❌ Failed to create game: ${gameResult.error}`);
+        }
+
+        // Handle auto-join result if present
+        if (gameResult.autoJoinResult && !gameResult.autoJoinResult.success) {
+          await ctx.reply(gameResult.autoJoinResult.error || "Failed to auto-join game", {
+            parse_mode: "HTML",
+          });
+        }
+
+        // Delete temporary and original messages
+        try {
+          await ctx.api.deleteMessage(ctx.chat!.id, creatingMsg.message_id);
+          if (ctx.message?.message_id) {
+            await ctx.api.deleteMessage(ctx.chat!.id, ctx.message.message_id);
+          }
+        } catch (error) {
+          console.log("Could not delete messages:", error);
+        }
+
+        // Use standard game UI formatting with video for coinflip
+        const creatorUsername = ctx.from?.username || ctx.from?.first_name || "Unknown";
+        await gameManager.formatAndSendGameMessage(
+          ctx,
+          new PublicKey(gameResult.gameAddress!),
+          "coinflip",
+          parsed.data!.amount,
+          creatorUsername,
+          "Active",
+          parsed.data!.tokenTicker
+        );
+
+        return;
+      } catch (error) {
+        console.error("Error in command-based coinflip:", error);
+        return ctx.reply("❌ Error creating coinflip game. Please try again.");
+      }
+    }
+
+    // No arguments - show UI (new functionality)
+    console.log("🎮 UI-based coinflip creation");
+    
+    // Get user's TIMBA balance
     let balanceText = "";
     let userBalance = 0;
     
@@ -1019,20 +1171,27 @@ bot.command(["coinflip", "cf"], async (ctx) => {
       balanceText = "\n⚠️ Could not load balance\n";
     }
 
-    const coinflipMessage = [
-      "🪙 <b>CREATE COINFLIP</b>",
-      "",
-      "Choose the amount each player will stake:",
-      balanceText,
-      "• Winner takes all the stakes",
-      "• Fair and transparent results",
-      "",
-      "Select amount:"
-    ].join("\n");
-
+    // Create enhanced message with fee warnings
+    let coinflipMessage = "🪙 <b>CREATE COINFLIP</b>\n\n";
+    coinflipMessage += "Choose the amount each player will stake:\n";
+    coinflipMessage += balanceText;
+    
+    // Get contract minimum for warnings and UX
+    const contractMin = await getContractMinimumAmount();
+    
+    // Add fee warning for low balance  
+    if (userBalance < contractMin) {
+      coinflipMessage += `\n⚠️ <b>Fee Warning:</b> Oracle fees (~5-10%) are significant with small bets.\n`;
+      coinflipMessage += `Contract minimum: ${contractMin} TIMBA for better value.\n`;
+    }
+    
+    coinflipMessage += "\n• Winner takes all the stakes\n";
+    coinflipMessage += "• Fair and transparent results\n\n";
+    coinflipMessage += "Select amount:";
+    
     await ctx.reply(coinflipMessage, {
       parse_mode: "HTML",
-      reply_markup: createAmountSelectionKeyboard("coinflip", userBalance, ctx.from?.id.toString())
+      reply_markup: createAmountSelectionKeyboard("coinflip", userBalance, ctx.from?.id.toString(), contractMin)
     });
   } catch (error) {
     console.error("Error in coinflip command:", error);
@@ -1047,8 +1206,103 @@ bot.command(["giveaway", "ga"], async (ctx) => {
       return ctx.reply("❌ Giveaway games can only be created in groups!");
     }
 
-    // Get user's TIMBA balance
     const telegramId = BigInt(ctx.from?.id || 0);
+    const args = ctx.message?.text?.split(" ");
+
+    // If arguments provided, use command-based creation (original functionality)
+    if (args && args.length >= 2) {
+      console.log("🎁 Command-based giveaway creation:", args);
+      
+      // Show creating message
+      const creatingMsg = await ctx.reply("🎮 Creating your game...", { parse_mode: "HTML" });
+      
+      try {
+        // Parse arguments: /ga <amount> [TOKEN] [maxPlayers]
+        const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id);
+        if (!parsed.success) {
+          if (parsed.error === "unknown_token") {
+            return ctx.reply(`❌ Unknown token "${parsed.unknownToken}"`);
+          }
+          return ctx.reply("❌ Please provide a valid amount greater than 0.\n\nUsage: `/ga <amount>` or `/ga <amount> <maxPlayers>`");
+        }
+
+        // Get maxPlayers from arguments (default to 10 for giveaway)
+        let maxPlayers = 10;
+        const playersArg = args[args.length - 1]; // Last argument might be players
+        if (playersArg && !isNaN(parseInt(playersArg)) && parseInt(playersArg) !== parsed.data!.amount) {
+          const requestedPlayers = parseInt(playersArg);
+          if (requestedPlayers >= 2 && requestedPlayers <= 30) {
+            maxPlayers = requestedPlayers;
+          } else {
+            return ctx.reply("❌ Giveaway supports 2-30 players maximum.");
+          }
+        }
+
+        // Check user has enough balance
+        const userBalance = await wallet.getTokenBalance(telegramId, parsed.data!.tokenMint);
+        const tokenMetadata = await wallet.getTokenMetadata(parsed.data!.tokenMint);
+        const requiredAmount = parsed.data!.amount; // This is already in raw format from parseAmount
+        
+        if (userBalance < requiredAmount) {
+          const formatted = wallet.formatTokenBalance(userBalance, tokenMetadata.decimals);
+          return ctx.reply(`❌ Insufficient balance. You have ${formatted} ${parsed.data!.tokenTicker}, need ${parsed.data!.formattedAmount}.`);
+        }
+
+        // Create game directly using GameManager
+        const gameResult = await gameManager.createGame(
+          "giveaway",
+          parsed.data!,
+          maxPlayers,
+          1, // minPlayers for giveaway
+          3600, // 1 hour timeout
+          telegramId,
+          ctx.chat?.id || 0
+        );
+
+        if (!gameResult.success) {
+          return ctx.reply(`❌ Failed to create game: ${gameResult.error}`);
+        }
+
+        // Handle auto-join result if present
+        if (gameResult.autoJoinResult && !gameResult.autoJoinResult.success) {
+          await ctx.reply(gameResult.autoJoinResult.error || "Failed to auto-join game", {
+            parse_mode: "HTML",
+          });
+        }
+
+        // Delete temporary and original messages
+        try {
+          await ctx.api.deleteMessage(ctx.chat!.id, creatingMsg.message_id);
+          if (ctx.message?.message_id) {
+            await ctx.api.deleteMessage(ctx.chat!.id, ctx.message.message_id);
+          }
+        } catch (error) {
+          console.log("Could not delete messages:", error);
+        }
+
+        // Use standard game UI formatting (text for giveaway)
+        const creatorUsername = ctx.from?.username || ctx.from?.first_name || "Unknown";
+        await gameManager.formatAndSendGameMessage(
+          ctx,
+          new PublicKey(gameResult.gameAddress!),
+          "giveaway",
+          parsed.data!.amount,
+          creatorUsername,
+          "Active",
+          parsed.data!.tokenTicker
+        );
+
+        return;
+      } catch (error) {
+        console.error("Error in command-based giveaway:", error);
+        return ctx.reply("❌ Error creating giveaway game. Please try again.");
+      }
+    }
+
+    // No arguments - show UI (new functionality)
+    console.log("🎁 UI-based giveaway creation");
+    
+    // Get user's TIMBA balance
     let balanceText = "";
     let userBalance = 0;
     
@@ -1063,21 +1317,28 @@ bot.command(["giveaway", "ga"], async (ctx) => {
       balanceText = "\n⚠️ Could not load balance\n";
     }
 
-    const giveawayMessage = [
-      "🎁 <b>CREATE GIVEAWAY</b>",
-      "",
-      "Choose the prize amount you want to give away:",
-      balanceText,
-      "• Free to join for all players",
-      "• One lucky winner gets the prize",
-      "• Fair and transparent results",
-      "",
-      "Select prize amount:"
-    ].join("\n");
+    // Create enhanced message with fee warnings  
+    let giveawayMessage = "🎁 <b>CREATE GIVEAWAY</b>\n\n";
+    giveawayMessage += "Choose the prize amount you want to give away:\n";
+    giveawayMessage += balanceText;
+    
+    // Get contract minimum for warnings and UX
+    const contractMin = await getContractMinimumAmount();
+    
+    // Add fee warning for low balance
+    if (userBalance < contractMin) {
+      giveawayMessage += `\n⚠️ <b>Fee Warning:</b> Oracle fees (~5-10%) reduce the actual prize.\n`;
+      giveawayMessage += `With ${userBalance.toFixed(0)} TIMBA prize, winner gets ~${(userBalance * 0.9).toFixed(0)} TIMBA after fees.\n`;
+    }
+    
+    giveawayMessage += "\n• Free to join for all players\n";
+    giveawayMessage += "• One lucky winner gets the prize\n";
+    giveawayMessage += "• Fair and transparent results\n\n";
+    giveawayMessage += "Select prize amount:";
 
     await ctx.reply(giveawayMessage, {
       parse_mode: "HTML",
-      reply_markup: createAmountSelectionKeyboard("giveaway", userBalance, ctx.from?.id.toString())
+      reply_markup: createAmountSelectionKeyboard("giveaway", userBalance, ctx.from?.id.toString(), contractMin)
     });
   } catch (error) {
     console.error("Error in giveaway command:", error);
@@ -3279,30 +3540,42 @@ bot.callbackQuery(/^back_to_amounts_(coinflip|giveaway)$/, async (ctx) => {
       balanceText = "\n⚠️ Could not load balance\n";
     }
 
-    const message = gameType === "coinflip" ? [
-      "🪙 <b>CREATE COINFLIP</b>",
-      "",
-      "Choose the amount each player will stake:",
-      balanceText,
-      "• Winner takes all the stakes",
-      "• Fair and transparent results",
-      "",
-      "Select amount:"
-    ].join("\n") : [
-      "🎁 <b>CREATE GIVEAWAY</b>",
-      "",
-      "Choose the prize amount you want to give away:",
-      balanceText,
-      "• Free to join for all players",
-      "• One lucky winner gets the prize",
-      "• Fair and transparent results",
-      "",
-      "Select prize amount:"
-    ].join("\n");
+    // Get contract minimum for warnings and UX
+    const contractMin = await getContractMinimumAmount();
+    
+    // Create enhanced message with fee warnings
+    let message: string;
+    
+    if (gameType === "coinflip") {
+      message = "🪙 <b>CREATE COINFLIP</b>\n\n";
+      message += "Choose the amount each player will stake:\n";
+      message += balanceText;
+      
+      if (userBalance < contractMin) {
+        message += `\n⚠️ <b>Fee Warning:</b> Oracle fees (~5-10%) are significant with small bets.\n`;
+      }
+      
+      message += "\n• Winner takes all the stakes\n";
+      message += "• Fair and transparent results\n\n";
+      message += "Select amount:";
+    } else {
+      message = "🎁 <b>CREATE GIVEAWAY</b>\n\n";
+      message += "Choose the prize amount you want to give away:\n";
+      message += balanceText;
+      
+      if (userBalance < contractMin) {
+        message += `\n⚠️ <b>Fee Warning:</b> Oracle fees (~5-10%) reduce the actual prize.\n`;
+      }
+      
+      message += "\n• Free to join for all players\n";
+      message += "• One lucky winner gets the prize\n";
+      message += "• Fair and transparent results\n\n";
+      message += "Select prize amount:";
+    }
 
     await ctx.editMessageText(message, {
       parse_mode: "HTML",
-      reply_markup: createAmountSelectionKeyboard(gameType, userBalance)
+      reply_markup: createAmountSelectionKeyboard(gameType, userBalance, undefined, contractMin)
     });
     
     await ctx.answerCallbackQuery();
@@ -3340,11 +3613,14 @@ bot.callbackQuery(/^back_to_amounts_(coinflip|giveaway)_(\d+)$/, async (ctx) => 
       console.error("Error getting balance:", error);
     }
     
+    // Get contract minimum for accurate warnings and UX
+    const contractMin = await getContractMinimumAmount();
+    
     await ctx.editMessageText(
-      `💰 <b>SELECT AMOUNT - ${gameType.toUpperCase()}</b>\n\nChoose how much you want to play with:`,
+      getFeeWarningMessage(gameType, userBalance, contractMin),
       {
         parse_mode: "HTML",
-        reply_markup: createAmountSelectionKeyboard(gameType, userBalance, creatorId)
+        reply_markup: createAmountSelectionKeyboard(gameType, userBalance, creatorId, contractMin)
       }
     );
     
@@ -3791,10 +4067,7 @@ bot.on("message:text", async (ctx, next) => {
 bot.callbackQuery("main_wallet", async (ctx) => {
   console.log("🔔 WALLET BUTTON PRESSED by user:", ctx.from?.id);
   try {
-    // Clear wallet cache to ensure fresh balances
-    const cacheKey = getWalletCacheKey(ctx.from?.id || "");
-    walletDataCache.delete(cacheKey);
-
+    // Use cached data if available, don't force refresh unless explicitly requested
     await showWalletUI(ctx, true);
     await ctx.answerCallbackQuery();
     console.log("✅ Wallet UI shown successfully");
@@ -4335,31 +4608,29 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
         );
       } else {
         // Handle token transfer
-        const tokenMints: { [key: string]: string } = {
-          TIMBA: "BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4",
-          WSOL: "So11111111111111111111111111111111111111112",
-          USDC: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-        };
-
         if (!transaction.token) {
           throw new Error("Token not specified in transaction");
         }
 
-        const tokenMint = tokenMints[transaction.token];
+        // Get token mint dynamically from token manager or wallet data
+        const { tokenBalances } = await getCachedWalletData(BigInt(transaction.userId));
+        const tokenBalance = tokenBalances.find((t) => t.ticker === transaction.token);
+        
+        if (!tokenBalance) {
+          throw new Error(`Token ${transaction.token} not found in wallet`);
+        }
+
+        const tokenMint = tokenBalance.mint;
         if (!tokenMint) {
-          throw new Error(`Unknown token: ${transaction.token}`);
+          throw new Error(`Token mint not found for ${transaction.token}`);
         }
 
         if (transaction.amount === "max") {
-          // Get max token balance
-          const tokenBalance = await wallet.getTokenBalance(
-            BigInt(transaction.userId),
-            tokenMint
-          );
-          if (!tokenBalance) {
+          // Use the token balance we already found
+          if (!tokenBalance.balance || tokenBalance.balance <= 0) {
             throw new Error(`No ${transaction.token} balance found`);
           }
-          actualAmount = tokenBalance.toString();
+          actualAmount = tokenBalance.balance.toString();
         }
 
         txSignature = await wallet.transferToken(
@@ -5064,8 +5335,6 @@ System Overview:
           .text("📈 Wallet Statistics", "info_stats")
           .text("🖥️ System Status", "info_system")
           .row()
-          .text("❓ Help", "cmd_help")
-          .row()
           .text("← Back", "back_main")
           .row(),
       });
@@ -5083,8 +5352,6 @@ System Overview:
           .row()
           .text("📈 Wallet Statistics", "info_stats")
           .text("🖥️ System Status", "info_system")
-          .row()
-          .text("❓ Help", "cmd_help")
           .row()
           .text("← Back", "back_main")
           .row(),
@@ -5347,12 +5614,40 @@ bot.callbackQuery("back_main", async (ctx) => {
       : ctx.from?.first_name || "User";
     const walletAddress = keypair.publicKey.toBase58();
 
+    // Calculate total USD balance for private chats
+    let totalUSDBalance = 0;
+    if (isPrivateChat(ctx)) {
+      try {
+        const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
+        
+        // Calculate SOL value in USD
+        const solPriceUSD = await getTokenPriceUSD("SOL");
+        const solDecimalBalance = solBalance / LAMPORTS_PER_SOL;
+        totalUSDBalance += solDecimalBalance * solPriceUSD;
+
+        // Calculate token values in USD
+        for (const token of tokenBalances) {
+          const tokenPriceUSD = await getTokenPriceUSD(token.mint);
+          const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
+          totalUSDBalance += tokenDecimalBalance * tokenPriceUSD;
+        }
+      } catch (error) {
+        console.warn("Error calculating USD balance for back_main:", error);
+        totalUSDBalance = 0;
+      }
+    }
+
     // Build main menu with same format as /start
     const welcomeMessage = [
       `<b>WELCOME ${username.toUpperCase()}</b>`,
       "",
       `<code>${walletAddress}</code>`,
     ];
+
+    // Add USD balance for private chats
+    if (isPrivateChat(ctx) && totalUSDBalance > 0) {
+      welcomeMessage.push("", `💰 <b>$${totalUSDBalance.toFixed(2)} USD</b>`);
+    }
 
     // Always delete current message and send new animated one for consistency
     try {
@@ -5378,22 +5673,35 @@ bot.callbackQuery("back_main", async (ctx) => {
 
 bot.callbackQuery("cmd_help", async (ctx) => {
   try {
-    await ctx.editMessageText(
-      "❓ <b>HELP CENTER</b>\n\n" + "Choose a category to get detailed help:",
-      {
+    const helpContent = "❓ <b>HELP CENTER</b>\n\n" + "Choose a category to get detailed help:";
+    const helpKeyboard = new InlineKeyboard()
+      .text("💰 Wallet Commands", "help_wallet")
+      .row()
+      .text("🎮 Game Commands", "help_games")
+      .row()
+      .text("🔧 Utility Commands", "help_utility")
+      .row()
+      .text("📋 Examples", "help_examples")
+      .row()
+      .text("⬅️ Back to Main", "back_main");
+
+    // Try to edit as text, if fails (because current message has media), delete and send new
+    try {
+      await ctx.editMessageText(helpContent, {
         parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("💰 Wallet Commands", "help_wallet")
-          .row()
-          .text("🎮 Game Commands", "help_games")
-          .row()
-          .text("🔧 Utility Commands", "help_utility")
-          .row()
-          .text("📋 Examples", "help_examples")
-          .row()
-          .text("⬅️ Back to Main", "back_main"),
-      }
-    );
+        reply_markup: helpKeyboard,
+      });
+    } catch (error) {
+      // If edit fails because message has media, delete and send new text message
+      try {
+        await ctx.deleteMessage();
+      } catch {}
+
+      await ctx.reply(helpContent, {
+        parse_mode: "HTML",
+        reply_markup: helpKeyboard,
+      });
+    }
     await ctx.answerCallbackQuery("❓ Help Center");
   } catch (error) {
     console.error("Error in cmd_help:", error);
@@ -5540,16 +5848,29 @@ bot.callbackQuery("cmd_oracle", async (ctx) => {
   try {
     await ctx.answerCallbackQuery("📊 Checking oracle status...");
 
+    // Check Oracle API health first
+    const oracleClient = OracleClient.getInstance();
+    const isApiHealthy = await oracleClient.isHealthy();
+    const oracleUrl = oracleClient.getOracleUrl();
+
     try {
       const oraclePda = PDAManager.getOraclePDA(program.programId);
       const oracleAccount = await program.account.oracle.fetch(oraclePda);
+
+      const healthStatus = isApiHealthy ? "✅ Healthy" : "❌ Unhealthy (Timeout)";
+      const apiStatus = isApiHealthy ? "🟢 API Online" : "🔴 API Offline";
 
       await ctx.editMessageText(
         "📊 <b>ORACLE STATUS</b>\n\n" +
           `🔑 <b>Operator:</b> <code>${oracleAccount.operator.toBase58()}</code>\n` +
           `🎰 <b>Fee Percentage:</b> ${oracleAccount.feePercentage}%\n` +
-          `⚡ <b>Status:</b> Online and operational\n\n` +
-          "✅ Oracle is properly configured for game randomness",
+          `⚡ <b>Blockchain:</b> Online and operational\n\n` +
+          `🌐 <b>API Health:</b> ${healthStatus}\n` +
+          `📍 <b>API URL:</b> <code>${oracleUrl}</code>\n` +
+          `${apiStatus}\n\n` +
+          (isApiHealthy 
+            ? "✅ Oracle is ready for game creation" 
+            : "⚠️ Games will use fallback randomness"),
         {
           parse_mode: "HTML",
           reply_markup: new InlineKeyboard()
@@ -5561,10 +5882,19 @@ bot.callbackQuery("cmd_oracle", async (ctx) => {
         }
       );
     } catch (error) {
+      const healthStatus = isApiHealthy ? "✅ Healthy" : "❌ Unhealthy (Timeout)";
+      const apiStatus = isApiHealthy ? "🟢 API Online" : "🔴 API Offline";
+
       await ctx.editMessageText(
         "📊 <b>ORACLE STATUS</b>\n\n" +
-          "❌ <b>Status:</b> Oracle not found or not initialized\n\n" +
-          "⚠️ This might indicate the oracle needs to be set up by an administrator.",
+          "❌ <b>Blockchain:</b> Oracle not found or not initialized\n\n" +
+          `🌐 <b>API Health:</b> ${healthStatus}\n` +
+          `📍 <b>API URL:</b> <code>${oracleUrl}</code>\n` +
+          `${apiStatus}\n\n` +
+          "⚠️ Oracle needs to be set up by an administrator.\n" +
+          (isApiHealthy 
+            ? "API is available but blockchain oracle is missing." 
+            : "Both API and blockchain oracle are unavailable."),
         {
           parse_mode: "HTML",
           reply_markup: new InlineKeyboard()
@@ -7899,7 +8229,7 @@ bot.catch((err) => {
 // Handle text messages when user is in input state
 bot.on("message:text", async (ctx, next) => {
   const userId = ctx.from?.id?.toString();
-  const userState = getUserState(userId, true); // Get and clear state
+  const userState = getUserState(userId, false); // Get state but DON'T clear it yet
 
   if (!userState) {
     return await next(); // Not waiting for input, continue to other handlers
@@ -7932,7 +8262,12 @@ bot.on("message:text", async (ctx, next) => {
     } else if (userState.type === "buy_custom_slippage") {
       await handleBuyCustomSlippageInput(ctx, userState, userMessage);
     }
+    
+    // Clear state after successful processing
+    userStates.delete(userId);
   } catch (error) {
+    // Clear state even on error to prevent stuck states
+    userStates.delete(userId);
     console.error("Error handling user input:", error);
 
     // Try to update the original message with error
@@ -8889,11 +9224,18 @@ const showSellQuoteAndConfirmation = async (
       throw new Error(`Token ${tokenToSell} not found in wallet`);
     }
 
-    // Get the actual token info - first try approved tokens, then use wallet balance info
+    // Get the actual token info - prioritize matching the exact mint from wallet balance
     const approvedTokens = tokenManager.getAllApprovedTokensWithMetadata();
-    let tokenInfo = approvedTokens.find((t) => t.token_ticker === tokenToSell);
+    let tokenInfo = approvedTokens.find((t) => 
+      t.token_ticker === tokenToSell && t.token_mint === tokenBalance.mint
+    );
 
-    // If not in approved tokens, use the info from wallet balance (for dynamic tokens)
+    // If not found by exact mint match, try any token with matching ticker
+    if (!tokenInfo) {
+      tokenInfo = approvedTokens.find((t) => t.token_ticker === tokenToSell);
+    }
+
+    // If still not in approved tokens, use the info from wallet balance (for dynamic tokens)
     if (!tokenInfo) {
       tokenInfo = {
         token_mint: tokenBalance.mint,
@@ -8902,6 +9244,10 @@ const showSellQuoteAndConfirmation = async (
       };
       console.log(
         `🔍 Using dynamic token info for ${tokenToSell}: mint=${tokenBalance.mint}, decimals=${tokenBalance.decimals}`
+      );
+    } else {
+      console.log(
+        `🔍 Using approved token info for ${tokenToSell}: mint=${tokenInfo.token_mint}, decimals=${tokenInfo.decimals}`
       );
     }
 

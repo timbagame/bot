@@ -44,12 +44,13 @@ export const ADDRESS_DISPLAY_LENGTH = 8;
 
 export const DEFAULT_NULL_ADDRESS = "11111111111111111111111111111111";
 export const DEFAULT_TOKEN_MINT =
-  "BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4";
+  "BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4"; // TIMBA devnet (for development)
 export const DEFAULT_TOKEN_TICKER = "TIMBA";
 export const TOKENS_LIST = [
   { mint: "So11111111111111111111111111111111111111112", ticker: "WSOL" },
   { mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", ticker: "USDC" },
   { mint: "FPyD25czYkvztSsgyCP7bxd2xnvDAp1LVjyiJhQidaos", ticker: "DAOS" },
+  { mint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump", ticker: "TIMBA" }, // TIMBA mainnet
 ];
 
 // ================================

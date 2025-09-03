@@ -14,6 +14,8 @@ import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
   createTransferCheckedInstruction,
+  TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
 } from "@solana/spl-token";
 import * as fs from "fs";
 import * as path from "path";
@@ -550,7 +552,8 @@ export class WalletManager {
       So11111111111111111111111111111111111111112: 9, // WSOL
       EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: 6, // USDC
       Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: 6, // USDT
-      BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4: 9, // TIMBA
+      BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4: 9, // TIMBA devnet
+      F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump: 6, // TIMBA mainnet
       FPyD25czYkvztSsgyCP7bxd2xnvDAp1LVjyiJhQidaos: 9, // DAOS
     };
 
@@ -598,11 +601,14 @@ export class WalletManager {
   public async findOrCreateAssociatedTokenAccount(
     owner: PublicKey,
     tokenMint: PublicKey,
-    payer: Keypair
+    payer: Keypair,
+    programId: PublicKey = TOKEN_PROGRAM_ID
   ): Promise<{ address: PublicKey; instructions: TransactionInstruction[] }> {
     const associatedTokenAddress = await getAssociatedTokenAddress(
       tokenMint,
-      owner
+      owner,
+      false,
+      programId
     );
     const instructions: TransactionInstruction[] = [];
 
@@ -617,7 +623,8 @@ export class WalletManager {
             payer.publicKey,
             associatedTokenAddress,
             owner,
-            tokenMint
+            tokenMint,
+            programId
           )
         );
       }
@@ -630,12 +637,33 @@ export class WalletManager {
           payer.publicKey,
           associatedTokenAddress,
           owner,
-          tokenMint
+          tokenMint,
+          programId
         )
       );
     }
 
     return { address: associatedTokenAddress, instructions };
+  }
+
+  /**
+   * Check if a token uses Token-2022 program
+   */
+  private async isToken2022(mintAddress: string): Promise<boolean> {
+    try {
+      const mintPubkey = new PublicKey(mintAddress);
+      const mintInfo = await this.connection.getAccountInfo(mintPubkey);
+      
+      if (!mintInfo) {
+        return false;
+      }
+
+      // Check if the owner is Token-2022 program
+      return mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID);
+    } catch (error) {
+      console.log(`Error checking token program for ${mintAddress}:`, error);
+      return false;
+    }
   }
 
   public async transferToken(
@@ -648,6 +676,11 @@ export class WalletManager {
     const tokenMintPubkey = new PublicKey(tokenMint);
     const { decimals } = await this.getTokenMetadata(tokenMint);
 
+    // Detect if this is a Token-2022 token
+    const isToken2022 = await this.isToken2022(tokenMint);
+    const programId = isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+    console.log(`🔍 Token ${tokenMint} is ${isToken2022 ? 'Token-2022' : 'SPL Token'}, using program ${programId.toBase58()}`);
+
     const [
       { address: fromTokenAccount, instructions: fromInstructions },
       { address: toTokenAccount, instructions: toInstructions },
@@ -655,12 +688,14 @@ export class WalletManager {
       this.findOrCreateAssociatedTokenAccount(
         fromKeypair.publicKey,
         tokenMintPubkey,
-        fromKeypair
+        fromKeypair,
+        programId
       ),
       this.findOrCreateAssociatedTokenAccount(
         toAddress,
         tokenMintPubkey,
-        fromKeypair
+        fromKeypair,
+        programId
       ),
     ]);
 
@@ -670,7 +705,9 @@ export class WalletManager {
       toTokenAccount,
       fromKeypair.publicKey,
       amount,
-      decimals
+      decimals,
+      [],
+      programId
     );
 
     const allInstructions = [
@@ -929,10 +966,12 @@ export class WalletManager {
   }
 
   public formatTokenBalance(amount: number, decimals: number): string {
-    const maxFraction = Math.min(6, Math.max(0, decimals));
-    return formatAmount(amount, decimals, {
-      maxFractionDigits: maxFraction,
-      trim: true,
-    });
+    // Convert from raw amount to decimal amount
+    const decimalAmount = amount / Math.pow(10, decimals);
+    
+    // If balance is 0, show 4 decimals. If > 0, show 2 decimals
+    const fractionDigits = decimalAmount === 0 ? 4 : 2;
+    
+    return decimalAmount.toFixed(fractionDigits);
   }
 }

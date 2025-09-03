@@ -11,13 +11,13 @@ export const createMainMenuKeyboard = (): InlineKeyboard => {
 
 export const createWalletKeyboard = (): InlineKeyboard => {
   return new InlineKeyboard()
-    .text("🔄 Refresh", "wallet_refresh")
-    .text("📋 History", "cmd_history")
-    .row()
     .text("💸 Withdraw", "cmd_withdraw")
     .row()
     .text("🟢 Buy", "cmd_buy")
     .text("🔴 Sell", "cmd_sell")
+    .row()
+    .text("🔄 Refresh", "wallet_refresh")
+    .text("📋 History", "cmd_history")
     .row()
     .text("⚙️ Settings", "wallet_settings")
     .row()
@@ -81,43 +81,94 @@ export const createConfirmSellKeyboard = (txId: string): InlineKeyboard => {
 // ================================
 
 
-export const createAmountSelectionKeyboard = (gameType: string, userBalance?: number, creatorId?: string): InlineKeyboard => {
+/**
+ * Calculate minimum recommended bet to avoid excessive fees
+ * Uses provided minimum or falls back to reasonable default
+ */
+const calculateMinimumRecommendedBet = (balance: number, contractMinimum: number = 20): number => {
+  if (balance < contractMinimum) {
+    // If balance is less than contract minimum, use what they have
+    return Math.max(1, Math.floor(balance));
+  }
+  
+  return contractMinimum;
+};
+
+/**
+ * Generate fee warning message for low balance users
+ */
+export const getFeeWarningMessage = (gameType: string, balance: number, contractMinimum: number = 20): string => {
+  let message = `💰 <b>SELECT AMOUNT - ${gameType.toUpperCase()}</b>\n\n`;
+  
+  if (balance < contractMinimum) {
+    message += `⚠️ <b>Low Balance Warning</b>\n`;
+    message += `Your balance: ${balance.toFixed(0)} TIMBA\n`;
+    message += `Contract minimum: ${contractMinimum} TIMBA\n\n`;
+    message += `<i>Oracle fees (~5-10%) will reduce winnings significantly with small bets.</i>\n\n`;
+  }
+  
+  message += `Choose how much you want to play with:`;
+  
+  return message;
+};
+
+export const createAmountSelectionKeyboard = (gameType: string, userBalance?: number, creatorId?: string, contractMinimum: number = 20): InlineKeyboard => {
   let amounts: number[] = [10, 25, 50]; // Simple 3 default amounts
   
   if (userBalance && userBalance > 0) {
     const balance = Math.floor(userBalance);
-    console.log(`🔍 Original balance: ${userBalance} → Floored balance: ${balance}`);
+    const minRecommended = calculateMinimumRecommendedBet(balance, contractMinimum);
+    console.log(`🔍 Balance: ${balance}, Min recommended: ${minRecommended} (contract: ${contractMinimum})`);
     
-    // Simple 3 amounts based on balance ranges
-    if (balance < 10) {
-      amounts = [1, 3, balance];
+    // Fee-optimized amounts based on balance ranges
+    if (balance < minRecommended) {
+      // Very small balance - show what they have but warn about fees
+      amounts = [1, Math.floor(balance * 0.5), balance];
     } else if (balance < 50) {
-      amounts = [5, 10, 25];
+      // Small balance - start with minimum recommended
+      amounts = [minRecommended, 30, Math.min(45, balance)];
     } else if (balance < 200) {
-      amounts = [10, 25, 50];
+      // Medium balance - good range for most players
+      amounts = [25, 50, 100];
     } else if (balance < 1000) {
-      amounts = [50, 100, 250];
+      // Large balance - higher stakes
+      amounts = [50, 150, 300];
     } else {
+      // Very large balance - high roller amounts
       amounts = [100, 500, 1000];
     }
     
-    // Ensure none exceed balance
+    // Ensure none exceed balance and remove duplicates
     amounts = amounts
-      .filter(a => a <= balance)
-      .filter((value, index, self) => self.indexOf(value) === index);
+      .filter(a => a <= balance && a > 0)
+      .filter((value, index, self) => self.indexOf(value) === index)
+      .sort((a, b) => a - b); // Sort ascending
     
     // If we filtered out too many, add some safe amounts
-    while (amounts.length < 3 && amounts.length > 0 && (amounts[amounts.length - 1] ?? 0) < balance) {
+    while (amounts.length < 3 && amounts.length > 0) {
       const lastAmount = amounts[amounts.length - 1]!;
       const nextAmount = Math.min(lastAmount * 2, balance);
       if (nextAmount > lastAmount) {
         amounts.push(nextAmount);
       } else {
-        break;
+        // Try adding a mid-point if possible
+        const midPoint = Math.floor((amounts[0]! + balance) / 2);
+        if (midPoint > amounts[amounts.length - 1]! && midPoint <= balance) {
+          amounts.push(midPoint);
+        } else {
+          break;
+        }
       }
     }
     
-    console.log(`✅ Final 3 amounts for balance ${balance}: ${amounts.join(', ')}`);
+    // Ensure we have exactly 3 amounts, remove extras if needed
+    amounts = amounts.slice(0, 3);
+    
+    const warningNote = balance < minRecommended 
+      ? ` (⚠️ Low balance - fees will be significant)` 
+      : "";
+    
+    console.log(`✅ Contract-based amounts for balance ${balance}: ${amounts.join(', ')}${warningNote}`);
   } else {
     console.log(`🔍 No balance provided, using default amounts: ${amounts.join(', ')}`);
   }
