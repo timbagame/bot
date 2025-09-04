@@ -52,6 +52,7 @@ import type {
 import { TokenDatabase } from "./utils/token-database";
 import { handleCallbackErrorSafe } from "./utils/context-helpers";
 import { recentUpdateGuard } from "./utils/recent-update";
+import { checkServiceHealth } from "./utils/service-health";
 
 // ================================
 // GLOBAL INSTANCES
@@ -71,23 +72,7 @@ const getNetworkFromRPC = (rpcUrl: string): string => {
   return 'Custom Network';
 };
 
-// Helper function to check service availability
-const checkServiceHealth = async (url: string, timeout = 5000): Promise<boolean> => {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
-    
-    const response = await fetch(url, {
-      signal: controller.signal,
-      method: 'HEAD'
-    });
-    
-    clearTimeout(timeoutId);
-    return response.ok;
-  } catch (error) {
-    return false;
-  }
-};
+// Helper moved to utils/service-health.ts as checkServiceHealth
 
 // User sessions for text input handling
 const userSessions = new Map<number, { 
