@@ -28,7 +28,7 @@
 
 ## Testing Guidelines
 - Framework: Bun test runner (`bun test`).
-- Location: `src/**/*.test.ts` (or `__tests__` folders). Name files like `wallet.test.ts`.
+- Location: `tests/**/*.test.ts`. Name files like `wallet.test.ts`.
 - Scope: unit-test `utils/*` and DB helpers; mock network/Telegram and Solana RPC. Do not hit mainnet in tests.
 - Run: `bun test` locally; add focused tests for bug fixes.
 
