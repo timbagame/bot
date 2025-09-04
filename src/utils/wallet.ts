@@ -27,6 +27,19 @@ import {
 } from "./constants";
 import { formatAmount } from "./format-amount";
 
+// Lightweight dependency handles for testability
+type HttpFetch = (input: string, init?: any) => Promise<{
+  ok: boolean;
+  status: number;
+  json: () => Promise<any>;
+}>;
+
+type WalletDeps = {
+  connection?: Connection;
+  fetch?: HttpFetch;
+  timeNow?: () => number;
+};
+
 // ================================
 // UTILITY FUNCTIONS
 // ================================
@@ -59,6 +72,8 @@ export class WalletManager {
   private static instance: WalletManager;
   private mnemonic: string;
   private connection: Connection;
+  private fetchFn: HttpFetch;
+  private timeNow?: () => number;
   private adminKeypair: Keypair | null = null;
   private lastCallTime: number = 0;
 
@@ -74,9 +89,12 @@ export class WalletManager {
     timestamp: number;
   } | null = null;
 
-  private constructor(mnemonic: string) {
+  private constructor(mnemonic: string, deps?: WalletDeps) {
     this.mnemonic = mnemonic;
-    this.connection = new Connection(process.env.SOLANA_NETWORK!, "confirmed");
+    this.connection =
+      deps?.connection ?? new Connection(process.env.SOLANA_NETWORK!, "confirmed");
+    this.fetchFn = deps?.fetch ?? (globalThis.fetch as any);
+    this.timeNow = deps?.timeNow;
     this.loadAdminKeypair();
   }
 
@@ -85,8 +103,13 @@ export class WalletManager {
     return this.instance;
   }
 
+  // For tests: create a non-singleton instance with injected dependencies
+  public static createForTest(mnemonic: string, deps: WalletDeps): WalletManager {
+    return new WalletManager(mnemonic, deps);
+  }
+
   private async throttle(): Promise<void> {
-    const now = Date.now();
+    const now = this.timeNow ? this.timeNow() : Date.now();
     const timeToWait = WALLET_RATE_LIMIT_MS - (now - this.lastCallTime);
     if (timeToWait > 0) {
       await new Promise((resolve) => setTimeout(resolve, timeToWait));
@@ -458,7 +481,7 @@ export class WalletManager {
 
     // Try SolanaFM API first (good for old tokens)
     try {
-      const response = await fetch(
+      const response = await this.fetchFn(
         `https://api.solana.fm/v0/tokens/${tokenMint}`
       );
       console.log(`📡 SolanaFM API response status: ${response.status}`);
@@ -483,7 +506,7 @@ export class WalletManager {
 
     try {
       // Try Jupiter token list API
-      const response = await fetch(`https://tokens.jup.ag/token/${tokenMint}`);
+      const response = await this.fetchFn(`https://tokens.jup.ag/token/${tokenMint}`);
       console.log(`📡 Jupiter API response status: ${response.status}`);
       if (response.ok) {
         const data = (await response.json()) as any;
@@ -504,7 +527,7 @@ export class WalletManager {
 
     // Try DexScreener API as fallback
     try {
-      const response = await fetch(
+      const response = await this.fetchFn(
         `https://api.dexscreener.com/latest/dex/tokens/${tokenMint}`
       );
       console.log(`📡 DexScreener API response status: ${response.status}`);
@@ -539,7 +562,7 @@ export class WalletManager {
     tokenMint: string
   ): Promise<{ decimals: number }> {
     const cached = this.tokenMetadataCache.get(tokenMint);
-    const now = Date.now();
+    const now = this.timeNow ? this.timeNow() : Date.now();
 
     // Cache token metadata for 5 minutes
     const TOKEN_METADATA_CACHE_DURATION = 5 * 60 * 1000;
