@@ -558,7 +558,8 @@ const validateAndProcessTransaction = async (
   amount: number,
   isSol: boolean,
   description: string,
-  transactionFn: (playerData: PlayerData) => Promise<string>
+  transactionFn: (playerData: PlayerData) => Promise<string>,
+  showSolscanLink: boolean = false
 ): Promise<void> => {
   const playerData = await getPlayerData(telegramId);
   const metadata = await getDefaultTokenMetadata();
@@ -598,15 +599,42 @@ const validateAndProcessTransaction = async (
   try {
     const tx = await transactionFn(playerData);
     const txString = tx ? tx.toString().trim() : "";
-    const successMessage = txString
+    
+    // Debug: Log transaction details when creating Solscan link
+    if (showSolscanLink) {
+      console.log(`🔗 Solscan link requested. txString: "${txString}", length: ${txString?.length || 0}`);
+    }
+    
+    let successMessage = txString
       ? `${description} successful! 💸\n\n<code>${txString}</code>`
       : `${description} successful! 💸`;
+
+    // Add Solscan link if requested and we have a transaction signature
+    if (showSolscanLink && txString) {
+      // Determine the correct Solscan URL based on the RPC endpoint
+      const rpcUrl = process.env.RPC_URL || "";
+      const isDevnet = rpcUrl.includes("devnet") || rpcUrl.includes("dev") || rpcUrl.includes("localhost");
+      const isTestnet = rpcUrl.includes("testnet") || rpcUrl.includes("test");
+      
+      let solscanUrl = `https://solscan.io/tx/${txString}`;
+      if (isDevnet) {
+        solscanUrl = `https://solscan.io/tx/${txString}?cluster=devnet`;
+      } else if (isTestnet) {
+        solscanUrl = `https://solscan.io/tx/${txString}?cluster=testnet`;
+      }
+      
+      console.log(`🔗 Generated Solscan URL: ${solscanUrl} (isDevnet: ${isDevnet}, isTestnet: ${isTestnet})`);
+      successMessage += `\n\n<a href="${solscanUrl}">View in Blockchain</a>`;
+    }
 
     await ctx.api.editMessageText(
       ctx.chat!.id,
       processingMsg.message_id,
       successMessage,
-      { parse_mode: "HTML" }
+      { 
+        parse_mode: "HTML",
+        disable_web_page_preview: showSolscanLink && !!txString
+      }
     );
   } catch (error: any) {
     const userFriendlyError = formatUserFriendlyError(error, wallet);
@@ -864,6 +892,11 @@ const buildTokenBalances = async (
 };
 
 bot.command("start", async (ctx: Context) => {
+  // Check if it's a private chat
+  if (!isPrivateChat(ctx)) {
+    return ctx.reply("❌ The /start command can only be used in private chat. Please message me directly!");
+  }
+
   const telegramId = BigInt(ctx.from?.id || 0) as bigint;
 
   try {
@@ -960,6 +993,11 @@ bot.command("start", async (ctx: Context) => {
 });
 
 bot.command("balance", async (ctx: Context) => {
+  // Check if it's a private chat
+  if (!isPrivateChat(ctx)) {
+    return ctx.reply("❌ The /balance command can only be used in private chat. Please message me directly!");
+  }
+
   const telegramId = BigInt(ctx.from?.id || 0) as bigint;
 
   // Use dynamic wallet UI for private chats
@@ -1075,6 +1113,9 @@ bot.command(["coinflip", "cf"], async (ctx) => {
           if (parsed.error === "unknown_token") {
             return ctx.reply(`❌ Unknown token "${parsed.unknownToken}"`);
           }
+          if (parsed.error === "sol_not_supported") {
+            return ctx.reply(parsed.solError || "❌ SOL games are not supported");
+          }
           return ctx.reply("❌ Please provide a valid amount greater than 0.\n\nUsage: `/cf <amount>` or `/cf <amount> <maxPlayers>`");
         }
 
@@ -1127,27 +1168,27 @@ bot.command(["coinflip", "cf"], async (ctx) => {
           });
         }
 
-        // Delete temporary and original messages
-        try {
-          await ctx.api.deleteMessage(ctx.chat!.id, creatingMsg.message_id);
-          if (ctx.message?.message_id) {
-            await ctx.api.deleteMessage(ctx.chat!.id, ctx.message.message_id);
-          }
-        } catch (error) {
-          console.log("Could not delete messages:", error);
-        }
-
-        // Use standard game UI formatting with video for coinflip
-        const creatorUsername = ctx.from?.username || ctx.from?.first_name || "Unknown";
-        await gameManager.formatAndSendGameMessage(
+        // Use the same method as UI creation to ensure consistency
+        const creatorUsername = ctx.from?.username 
+          ? `@${ctx.from.username}` 
+          : ctx.from?.first_name || "Unknown";
+        await gameManager.createGameMessage(
           ctx,
-          new PublicKey(gameResult.gameAddress!),
-          "coinflip",
+          gameResult.gameAddress!,
+          "Coinflip",
           parsed.data!.amount,
           creatorUsername,
-          "Active",
-          parsed.data!.tokenTicker
+          parsed.data!.tokenTicker,
+          "Active"
         );
+
+        // Delete temporary message after creating the game message
+        try {
+          await ctx.api.deleteMessage(ctx.chat!.id, creatingMsg.message_id);
+          // Don't delete the original command message since the game message replies to it
+        } catch (error) {
+          console.log("Could not delete creating message:", error);
+        }
 
         return;
       } catch (error) {
@@ -1226,6 +1267,9 @@ bot.command(["giveaway", "ga"], async (ctx) => {
           if (parsed.error === "unknown_token") {
             return ctx.reply(`❌ Unknown token "${parsed.unknownToken}"`);
           }
+          if (parsed.error === "sol_not_supported") {
+            return ctx.reply(parsed.solError || "❌ SOL games are not supported");
+          }
           return ctx.reply("❌ Please provide a valid amount greater than 0.\n\nUsage: `/ga <amount>` or `/ga <amount> <maxPlayers>`");
         }
 
@@ -1273,27 +1317,27 @@ bot.command(["giveaway", "ga"], async (ctx) => {
           });
         }
 
-        // Delete temporary and original messages
-        try {
-          await ctx.api.deleteMessage(ctx.chat!.id, creatingMsg.message_id);
-          if (ctx.message?.message_id) {
-            await ctx.api.deleteMessage(ctx.chat!.id, ctx.message.message_id);
-          }
-        } catch (error) {
-          console.log("Could not delete messages:", error);
-        }
-
-        // Use standard game UI formatting (text for giveaway)
-        const creatorUsername = ctx.from?.username || ctx.from?.first_name || "Unknown";
-        await gameManager.formatAndSendGameMessage(
+        // Use the same method as UI creation to ensure consistency
+        const creatorUsername = ctx.from?.username 
+          ? `@${ctx.from.username}` 
+          : ctx.from?.first_name || "Unknown";
+        await gameManager.createGameMessage(
           ctx,
-          new PublicKey(gameResult.gameAddress!),
-          "giveaway",
+          gameResult.gameAddress!,
+          "Giveaway",
           parsed.data!.amount,
           creatorUsername,
-          "Active",
-          parsed.data!.tokenTicker
+          parsed.data!.tokenTicker,
+          "Active"
         );
+
+        // Delete temporary message after creating the game message
+        try {
+          await ctx.api.deleteMessage(ctx.chat!.id, creatingMsg.message_id);
+          // Don't delete the original command message since the game message replies to it
+        } catch (error) {
+          console.log("Could not delete creating message:", error);
+        }
 
         return;
       } catch (error) {
@@ -1444,11 +1488,12 @@ bot.command("tip", async (ctx: Context) => {
     return replyToMessage(ctx, "You can't tip yourself!");
   }
 
-  const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id);
+  const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id, "tip");
   if (!parsed.success) {
     if (parsed.error === "unknown_token") {
       return replyToMessage(ctx, `❌ Unknown token "${parsed.unknownToken}"`);
     }
+    // Note: sol_not_supported won't occur for tips since SOL is allowed
     return replyToMessage(ctx, "Please provide a valid amount greater than 0.");
   }
 
@@ -1483,7 +1528,8 @@ bot.command("tip", async (ctx: Context) => {
             parsed.data!.tokenMint
           );
         }
-      }
+      },
+      true // Show Solscan link for tips
     );
   } catch (error: any) {
     await handleCommandError(ctx, error, "tip");
@@ -2869,6 +2915,70 @@ const handlePlayerEvent = async (
             undefined,
             totalPot
           );
+
+          // Check if game should be completed when PlayerJoined (eventName check)
+          if (eventName === "PlayerJoined") {
+            // Get current game state from blockchain to check if it's ready for completion
+            try {
+              const gamePda = new PublicKey(gameAddress);
+              const gameAccount = await program.account.game.fetch(gamePda);
+              
+              // Check if game is full (current players >= max tickets)
+              if (gameAccount.ticketsCount >= gameAccount.maxTickets) {
+                console.log(`🎯 Game ${gameAddress.slice(0,8)}... is full (${gameAccount.ticketsCount}/${gameAccount.maxTickets}), triggering completion`);
+                
+                // Instead of relying on external oracle notification, we'll simulate direct completion
+                // This is a temporary solution until the oracle service is properly implemented
+                console.log(`⏰ Setting 3-second timer for game completion simulation...`);
+                
+                setTimeout(async () => {
+                  try {
+                    console.log(`🎲 Simulating game completion for ${gameAddress.slice(0,8)}...`);
+                    
+                    // For now, we'll randomly select a winner from the participants
+                    // In production, this would be handled by the oracle with proper randomness
+                    const winnerIndex = Math.floor(Math.random() * gameAccount.ticketsCount);
+                    console.log(`🎯 Selected winner index: ${winnerIndex}`);
+                    
+                    // Get participants from game account
+                    const participants = gameAccount.participantHashes || [];
+                    if (participants.length > winnerIndex) {
+                      // This is a simplified approach - in production the oracle would handle this
+                      console.log(`🏆 Winner determined, oracle should complete the game now...`);
+                      
+                      // Notify via a different endpoint or mechanism
+                      const oracleClient = OracleClient.getInstance();
+                      try {
+                        const completeResponse = await fetch(`${oracleClient.getOracleUrl()}/complete-game`, {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                          },
+                          body: JSON.stringify({
+                            gameAddress: gameAddress,
+                            winnerIndex: winnerIndex,
+                            totalTickets: gameAccount.ticketsCount
+                          })
+                        });
+
+                        if (completeResponse.ok) {
+                          console.log(`✅ Oracle completion request sent successfully`);
+                        } else {
+                          console.log(`⚠️ Oracle completion request failed: ${completeResponse.status}`);
+                        }
+                      } catch (completeError) {
+                        console.error(`Error requesting oracle completion:`, completeError);
+                      }
+                    }
+                  } catch (completionError) {
+                    console.error(`Error in game completion simulation:`, completionError);
+                  }
+                }, 3000); // 3 second delay to allow for final processing
+              }
+            } catch (gameStateError) {
+              console.error(`Error checking game state for completion:`, gameStateError);
+            }
+          }
         } catch (contextError) {
           console.error(
             `Error creating context for chat ${gameData.chat_id}:`,
@@ -3044,23 +3154,29 @@ const handleJoinGame = async (
       "Active"
     );
 
-    // Send join notification
-    const joinerUsername =
-      ctx.from?.username || ctx.from?.first_name || "Player";
+    // Send join notification (commented out to prevent duplicate messages)
+    // const joinerUsername =
+    //   ctx.from?.username || ctx.from?.first_name || "Player";
+    // const updatedGameAccount = await program.account.game.fetch(gamePda);
+    // const ticketCount = updatedGameAccount.ticketsCount;
+    // const maxTickets = updatedGameAccount.maxTickets;
+    // const gameTypeKeys = Object.keys(updatedGameAccount.gameType);
+    // const gameName = gameTypeKeys[0] || "game";
+
+    // const gameMessage = gameManager.getActiveGameMessage(game.game_address);
+    // await ctx.reply(
+    //   `🎮 @${joinerUsername} joined the ${gameName}! (${ticketCount}/${maxTickets} tickets)`,
+    //   {
+    //     parse_mode: "HTML",
+    //     reply_to_message_id: gameMessage?.messageId,
+    //   }
+    // );
+
+    // Just show callback confirmation instead
     const updatedGameAccount = await program.account.game.fetch(gamePda);
     const ticketCount = updatedGameAccount.ticketsCount;
     const maxTickets = updatedGameAccount.maxTickets;
-    const gameTypeKeys = Object.keys(updatedGameAccount.gameType);
-    const gameName = gameTypeKeys[0] || "game";
-
-    const gameMessage = gameManager.getActiveGameMessage(game.game_address);
-    await ctx.reply(
-      `🎮 @${joinerUsername} joined the ${gameName}! (${ticketCount}/${maxTickets} tickets)`,
-      {
-        parse_mode: "HTML",
-        reply_to_message_id: gameMessage?.messageId,
-      }
-    );
+    await safeAnswerCallbackQuery(ctx, `✅ Joined! (${ticketCount}/${maxTickets})`);
   } catch (error: any) {
     // Handle specific case where account doesn't exist (game was completed/cancelled)
     if ((error as Error).message?.includes("Account does not exist")) {

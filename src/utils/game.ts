@@ -397,12 +397,13 @@ export class GameManager {
     winnerAddress?: string,
     providedTotalPot?: number
   ): Promise<any> {
+    const gameAddress = gamePda.toBase58();
     const formatted = await this.formatGameMessage(
       ctx, gamePda, gameType, amount, creatorUsername, status, tokenTicker, winnerAddress, providedTotalPot
     );
     
     // Use video for coinflip games, text for others
-    return gameType.toLowerCase() === "coinflip" 
+    const message = gameType.toLowerCase() === "coinflip" 
       ? await ctx.replyWithVideo(COINFLIP_START_VIDEO_ID, {
           caption: formatted.messageText,
           parse_mode: "HTML",
@@ -412,6 +413,19 @@ export class GameManager {
           parse_mode: "HTML",
           reply_markup: { inline_keyboard: formatted.keyboard },
         });
+
+    // Save the game message to database and activeGameMessages for future updates
+    this.gameDb.saveGameMessage(
+      gameAddress,
+      message.message_id,
+      message.chat.id
+    );
+    this.activeGameMessages.set(gameAddress, {
+      messageId: message.message_id,
+      chatId: message.chat.id,
+    });
+
+    return message;
   }
 
   public async formatGameMessage(

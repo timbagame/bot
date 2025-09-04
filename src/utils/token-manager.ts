@@ -56,7 +56,8 @@ export class TokenManager {
   public async parseAmount(
     args: string[],
     argIndex: number = 1,
-    chatId?: number
+    chatId?: number,
+    context: "game" | "tip" = "game"
   ): Promise<ParseAmountResult> {
     if (!args || args.length <= argIndex) {
       return { success: false, error: "invalid_amount" };
@@ -79,8 +80,25 @@ export class TokenManager {
 
     if (tokenArg) {
       if (tokenArg.toUpperCase() === "SOL") {
-        isSol = true;
-        tokenWasSpecified = true;
+        if (context === "game") {
+          // Return error for SOL games
+          return {
+            success: false,
+            error: "sol_not_supported",
+            solError: "❌ Native SOL games are not supported!\n\n" +
+                     "💡 Supported tokens for games:\n" +
+                     "• Use approved SPL tokens (check with /balance)\n" +
+                     "• For SOL-based games, use WSOL instead\n" +
+                     "• You can wrap SOL to WSOL using /wrap command\n\n" +
+                     "Example: /cf 1000 WSOL 2"
+          };
+        } else {
+          // Allow SOL for tips - set special values
+          resolvedTokenMint = "SOL";
+          resolvedTokenTicker = "SOL";
+          isSol = true;
+          tokenWasSpecified = true;
+        }
       } else {
         // Check if it's a known token ticker
         const knownToken = this.tokenDb.getKnownTokenByTicker(tokenArg);
@@ -89,10 +107,23 @@ export class TokenManager {
           resolvedTokenTicker = knownToken.token_ticker;
           tokenWasSpecified = true;
         } else {
-          // If it's not a valid token, assume it's the next parameter (like maxPlayers)
-          // and use the default token instead
+          // Check if it looks like a token ticker but isn't a number
+          const upperTokenArg = tokenArg.toUpperCase();
+          const isLikelyToken = isNaN(parseInt(tokenArg)) && 
+                               tokenArg.length >= 2 && 
+                               tokenArg.length <= 12 &&
+                               /^[A-Za-z]+$/.test(tokenArg); // Letters only (case insensitive)
+          
+          if (isLikelyToken) {
+            // It looks like a token ticker but we don't recognize it
+            return { 
+              success: false, 
+              error: "unknown_token", 
+              unknownToken: upperTokenArg 
+            };
+          }
+          // If it doesn't look like a token (e.g., number for maxPlayers), use default token
           tokenWasSpecified = false;
-          // Don't return error - just proceed with default token
         }
       }
     }
@@ -111,10 +142,7 @@ export class TokenManager {
     } else {
       const metadata = await this.wallet.getTokenMetadata(resolvedTokenMint);
       amount = rawAmount * Math.pow(10, metadata.decimals);
-      formattedAmount =
-        this.wallet.formatTokenBalance(amount, metadata.decimals) +
-        " " +
-        resolvedTokenTicker;
+      formattedAmount = this.wallet.formatTokenBalance(amount, metadata.decimals) + " " + resolvedTokenTicker;
     }
 
     return {
