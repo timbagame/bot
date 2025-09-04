@@ -27,8 +27,10 @@ export function inferMaxPlayers(
   if (args.length > playersIndex) {
     const candidate = args[playersIndex];
     if (typeof candidate === "string") {
-      const maybe = parseInt(candidate);
-      if (!isNaN(maybe)) {
+      const trimmed = candidate.trim();
+      // Only accept pure integer strings (no decimals, no suffixes like "4x")
+      if (/^\d+$/.test(trimmed)) {
+        const maybe = Number(trimmed);
         if (maybe < minPlayers || maybe > maxPlayers) {
           return { ok: false, error: `Players must be between ${minPlayers}-${maxPlayers}.` };
         }
