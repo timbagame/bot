@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { createPlayerSelectionKeyboard, createGameConfirmKeyboard } from "./keyboards";
+import { createPlayerSelectionKeyboard, createGameConfirmKeyboard } from "../src/utils/keyboards";
 
 // Helper to extract callback_data strings from InlineKeyboard
 function extractCallbacks(kb: any): string[] {
@@ -39,4 +39,3 @@ test("game confirm keyboard embeds decimal amount and creatorId", () => {
   expect(confirm).toBeTruthy();
   expect(/confirm_game_giveaway_0\.75_10_999$/.test(confirm)).toBe(true);
 });
-

@@ -24,4 +24,3 @@ test("confirm callback regex accepts decimals and captures groups", () => {
   expect(m[3]).toBe("10");
   expect(m[4]).toBe("999");
 });
-

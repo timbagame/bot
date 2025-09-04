@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test";
-import { WalletManager } from "./wallet";
+import { WalletManager } from "../src/utils/wallet";
 import { PublicKey } from "@solana/web3.js";
 
 // Minimal Response-like factory

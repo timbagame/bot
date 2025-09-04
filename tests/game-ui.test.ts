@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildGameStatus } from "./game-ui";
+import { buildGameStatus } from "../src/utils/game-ui";
 
 test("buildGameStatus before minimum", () => {
   expect(buildGameStatus(0, 2, 5)).toBe("2 more until minimum");
@@ -14,4 +14,3 @@ test("buildGameStatus after minimum but not full", () => {
 test("buildGameStatus full", () => {
   expect(buildGameStatus(5, 2, 5)).toBe("Full - starting soon!");
 });
-

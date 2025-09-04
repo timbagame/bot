@@ -7,7 +7,7 @@ import {
   createGameConfirmKeyboard,
   createSliderAmountKeyboard,
   getFeeWarningMessage,
-} from "./keyboards";
+} from "../src/utils/keyboards";
 
 // Helper to extract callback_data strings from InlineKeyboard
 function extractCallbacks(kb: any): string[] {
@@ -170,4 +170,3 @@ describe("keyboards: slider amount", () => {
     expect(callbacks).toContain("slider_coinflip_88_777");
   });
 });
-

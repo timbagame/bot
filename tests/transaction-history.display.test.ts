@@ -1,6 +1,6 @@
 import { expect, test, beforeEach } from "bun:test";
 import { rmSync } from "fs";
-import { TransactionHistory, createTransactionRecord, formatTransactionForDisplay } from "./transaction-history";
+import { TransactionHistory, createTransactionRecord, formatTransactionForDisplay } from "../src/utils/transaction-history";
 
 beforeEach(() => {
   rmSync("transaction-history.sqlite", { force: true });
@@ -38,4 +38,3 @@ test("TransactionHistory add + display roundtrip smoke", () => {
   const display = formatTransactionForDisplay(list[0]!);
   expect(display).toContain("⏳"); // pending icon
 });
-

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { handleCallbackErrorSafe, truncateErrorMessage } from "./context-helpers";
+import { handleCallbackErrorSafe, truncateErrorMessage } from "../src/utils/context-helpers";
 
 test("safeAnswerCallbackQuery falls back to ctx.api.answerCallbackQuery when no direct method", async () => {
   let answered = false;
@@ -22,4 +22,3 @@ test("truncateErrorMessage honors important prefix and first sentence", () => {
   // Should keep just the first sentence due to important prefix
   expect(truncated).toBe("❌ Failure: Something bad happened.");
 });
-

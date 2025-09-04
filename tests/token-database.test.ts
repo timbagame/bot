@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { TokenDatabase } from "./token-database";
+import { TokenDatabase } from "../src/utils/token-database";
 import { rmSync } from "fs";
 
 test("TokenDatabase stores and retrieves known tokens", () => {

@@ -1,6 +1,6 @@
 import { expect, test, beforeEach } from "bun:test";
 import { rmSync } from "fs";
-import { ChatDatabase } from "./chat-database";
+import { ChatDatabase } from "../src/utils/chat-database";
 
 beforeEach(() => {
   try {
@@ -29,4 +29,3 @@ test("ChatDatabase: chat info save/get and counts", () => {
   expect(info.chat_title).toBe("Cool Chat");
   expect(info.chat_type).toBe("supergroup");
 });
-

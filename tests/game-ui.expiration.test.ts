@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildExpirationText } from "./game-ui";
+import { buildExpirationText } from "../src/utils/game-ui";
 
 test("buildExpirationText minutes-only", () => {
   expect(buildExpirationText(1200)).toBe("Expires in: 20m");

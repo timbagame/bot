@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { inferMaxPlayers } from "./arg-parsing";
+import { inferMaxPlayers } from "../src/utils/arg-parsing";
 
 // For coinflip: default 2, range 2-100
 const cf = (args: string[], tokenWasSpecified: boolean) =>

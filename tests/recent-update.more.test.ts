@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { recentUpdateGuard, shouldDropUpdate } from "./recent-update";
+import { recentUpdateGuard, shouldDropUpdate } from "../src/utils/recent-update";
 
 test("recentUpdateGuard: calls next when no date present", async () => {
   let called = 0;

@@ -1,6 +1,6 @@
 import { expect, test, beforeEach } from "bun:test";
 import { rmSync } from "fs";
-import { GameDatabase } from "./game-database";
+import { GameDatabase } from "../src/utils/game-database";
 
 beforeEach(() => {
   try {

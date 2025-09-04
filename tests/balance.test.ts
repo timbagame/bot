@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mergeWsolIntoSol, type TokenBalance } from "./balance";
+import { mergeWsolIntoSol, type TokenBalance } from "../src/utils/balance";
 
 const WSOL = "So11111111111111111111111111111111111111112";
 

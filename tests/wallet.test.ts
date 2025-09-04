@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { WalletManager } from "./wallet";
+import { WalletManager } from "../src/utils/wallet";
 
 const mnemonic =
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";

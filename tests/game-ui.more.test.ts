@@ -3,7 +3,7 @@ import {
   buildGameHeader,
   buildPrizeLine,
   buildParticipantsList,
-} from "./game-ui";
+} from "../src/utils/game-ui";
 
 test("buildGameHeader formats header line", () => {
   const header = buildGameHeader(
@@ -34,4 +34,3 @@ test("buildParticipantsList formats numbered list", () => {
 test("buildParticipantsList empty yields empty string", () => {
   expect(buildParticipantsList([])).toBe("");
 });
-

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { truncateErrorMessage, categorizeError } from "./context-helpers";
+import { truncateErrorMessage, categorizeError } from "../src/utils/context-helpers";
 
 test("truncateErrorMessage returns original message when under limit", () => {
   const message = "short error";

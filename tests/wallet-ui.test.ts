@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildWalletCaption } from "./wallet-ui";
+import { buildWalletCaption } from "../src/utils/wallet-ui";
 
 test("buildWalletCaption formats lines and total with address", () => {
   const caption = buildWalletCaption(
@@ -18,4 +18,3 @@ test("buildWalletCaption formats lines and total with address", () => {
   expect(caption).toContain("TOTAL USD: $123.45");
   expect(caption).toContain("<code>AbCdEf</code>");
 });
-

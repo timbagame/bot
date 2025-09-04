@@ -1,6 +1,6 @@
 import { expect, test, beforeEach } from "bun:test";
 import { rmSync } from "fs";
-import { TokenDatabase } from "./token-database";
+import { TokenDatabase } from "../src/utils/token-database";
 
 beforeEach(() => {
   try {
@@ -35,4 +35,3 @@ test("TokenDatabase: metadata CRUD and cleanup", () => {
   const removed = db.cleanupOldMetadata(3650);
   expect(removed).toBe(0);
 });
-

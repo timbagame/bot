@@ -1,5 +1,5 @@
 import { expect, test, beforeEach, afterEach } from "bun:test";
-import { ChatDatabase } from "./chat-database";
+import { ChatDatabase } from "../src/utils/chat-database";
 import { rmSync } from "fs";
 
 let db: ChatDatabase;

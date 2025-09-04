@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { formatAmount } from "./format-amount";
+import { formatAmount } from "../src/utils/format-amount";
 
 test("formatAmount formats basic integer", () => {
   expect(formatAmount(123456, 5)).toBe("1.23456");
