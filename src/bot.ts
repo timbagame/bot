@@ -1178,8 +1178,8 @@ bot.command(["coinflip", "cf"], async (ctx) => {
           "Coinflip",
           parsed.data!.amount,
           creatorUsername,
-          parsed.data!.tokenTicker,
-          "Active"
+          "Active",
+          parsed.data!.tokenTicker
         );
 
         // Delete temporary message after creating the game message
@@ -1327,8 +1327,8 @@ bot.command(["giveaway", "ga"], async (ctx) => {
           "Giveaway",
           parsed.data!.amount,
           creatorUsername,
-          parsed.data!.tokenTicker,
-          "Active"
+          "Active",
+          parsed.data!.tokenTicker
         );
 
         // Delete temporary message after creating the game message
@@ -3290,8 +3290,8 @@ bot.callbackQuery(/^confirm_game_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)
       gameType.charAt(0).toUpperCase() + gameType.slice(1),
       gameData.amount,
       creatorUsername,
-      gameData.tokenTicker,
-      "Active"
+      "Active",
+      gameData.tokenTicker
     );
 
 
@@ -5098,7 +5098,7 @@ bot.callbackQuery("info_stats", async (ctx) => {
     const solDecimalBalance = solBalance / 1000000000; // LAMPORTS_PER_SOL
     const totalUSD = solDecimalBalance * solPriceUSD;
 
-    // Get user's game statistics
+    // Get user's game statistics (use DB fields)
     const userId = ctx.from?.id;
     let gameStats = "";
     try {
@@ -5106,9 +5106,10 @@ bot.callbackQuery("info_stats", async (ctx) => {
         const gameDatabase = GameDatabase.getInstance();
         const gamesCreated = await gameDatabase.getGamesByCreator(BigInt(userId));
         const gamesJoined = await gameDatabase.getGamesByPlayer(BigInt(userId));
-        const completedGames = gamesJoined.filter(g => g.isCompleted);
-        const wonGames = completedGames.filter(g => g.winnerId === BigInt(userId));
-        
+        const playerPubkey = gameDatabase.getPlayerPublicKey(String(userId));
+        const completedGames = gamesJoined.filter((g: any) => g.status === 'completed');
+        const wonGames = completedGames.filter((g: any) => playerPubkey && g.winner_address === playerPubkey);
+
         gameStats = `
 Game Statistics:
 • Games Created: ${gamesCreated.length}

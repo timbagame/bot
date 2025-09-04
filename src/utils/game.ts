@@ -899,14 +899,33 @@ export class GameManager {
       let randomHashBuffer: Buffer;
       
       if (!isOracleHealthy) {
-        console.warn("⚠️ Oracle is unhealthy, using fallback random generation");
+        const allowFallback =
+          process.env["ALLOW_LOCAL_RANDOM_FALLBACK"] === "1" ||
+          process.env["ALLOW_LOCAL_RANDOM_FALLBACK"]?.toLowerCase() === "true";
+
+        if (!allowFallback) {
+          return {
+            success: false,
+            error:
+              "❌ Oracle service is unavailable. Please try again later.",
+          };
+        }
+
+        console.warn(
+          "⚠️ Oracle is unhealthy, using fallback random generation (development only)"
+        );
         // Fallback: generate random hash locally for development
-        const fallbackRandom = Math.random().toString(36).substring(2, 15) + 
-                              Math.random().toString(36).substring(2, 15);
-        randomHash = Buffer.from(fallbackRandom).toString('hex').padStart(64, '0');
-        randomHashBuffer = Buffer.from(randomHash, 'hex');
-        
-        console.log(`🎲 Using fallback random hash: ${randomHash.substring(0, 10)}...`);
+        const fallbackRandom =
+          Math.random().toString(36).substring(2, 15) +
+          Math.random().toString(36).substring(2, 15);
+        randomHash = Buffer.from(fallbackRandom)
+          .toString("hex")
+          .padStart(64, "0");
+        randomHashBuffer = Buffer.from(randomHash, "hex");
+
+        console.log(
+          `🎲 Using fallback random hash: ${randomHash.substring(0, 10)}...`
+        );
       } else {
         console.log("✅ Oracle is healthy, generating proper random hash");
         const secretsResponse = await this.oracleClient.generateGameSecrets();
