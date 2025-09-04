@@ -5,18 +5,19 @@
 export async function checkServiceHealth(
   url: string,
   timeout = 5000,
-  fetchImpl: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> = fetch as any
+  fetchImpl: (input: string | URL, init?: any) => Promise<{ ok: boolean }>
+    = (fetch as any)
 ): Promise<boolean> {
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    const hasAbort = typeof (globalThis as any).AbortController !== "undefined";
+    const controller = hasAbort ? new (globalThis as any).AbortController() : undefined;
+    const timeoutId = setTimeout(() => controller?.abort?.(), timeout);
 
-    const response = await fetchImpl(url, { method: "HEAD", signal: controller.signal });
+    const response = await fetchImpl(url, { method: "HEAD", signal: controller?.signal });
 
     clearTimeout(timeoutId);
-    return response.ok;
+    return !!(response && (response as any).ok);
   } catch {
     return false;
   }
 }
-
