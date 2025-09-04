@@ -2,11 +2,12 @@ import { expect, test, beforeEach, afterEach } from "bun:test";
 import { ChatDatabase } from "./chat-database";
 import { rmSync } from "fs";
 
-let testDbName: string;
 let db: ChatDatabase;
 
 beforeEach(() => {
-  testDbName = `chat-settings-test-${Date.now()}-${Math.random()}.sqlite`;
+  try {
+    rmSync("chat-settings.sqlite", { force: true });
+  } catch {}
   // @ts-ignore - reset singleton for clean test
   ChatDatabase["instance"] = undefined;
 });
@@ -18,7 +19,7 @@ afterEach(() => {
     } catch {}
   }
   try {
-    rmSync(testDbName, { force: true });
+    rmSync("chat-settings.sqlite", { force: true });
   } catch {}
 });
 

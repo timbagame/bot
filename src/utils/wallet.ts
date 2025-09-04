@@ -966,12 +966,7 @@ export class WalletManager {
   }
 
   public formatTokenBalance(amount: number, decimals: number): string {
-    // Convert from raw amount to decimal amount
-    const decimalAmount = amount / Math.pow(10, decimals);
-    
-    // If balance is 0, show 4 decimals. If > 0, show 2 decimals
-    const fractionDigits = decimalAmount === 0 ? 4 : 2;
-    
-    return decimalAmount.toFixed(fractionDigits);
+    // Use shared formatter for consistent rounding and trimming
+    return formatAmount(amount, decimals, { maxFractionDigits: 6, trim: true });
   }
 }
