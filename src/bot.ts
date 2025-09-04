@@ -100,6 +100,9 @@ const userSessions = new Map<number, {
   creatorId?: string;
 }>();
 
+// Test-only accessor for verifying session behavior in unit tests
+export const __testSessions = userSessions;
+
 // Main menu keyboard moved to utils/keyboards.ts
 
 /**
@@ -3457,6 +3460,9 @@ bot.callbackQuery(/^back_to_amounts_(coinflip|giveaway)_(\d+)$/, async (ctx) => 
     // Get contract minimum for accurate warnings and UX
     const contractMin = await getContractMinimumAmount();
     
+    // Clear any pending typed-input session for this user when navigating back
+    userSessions.delete(ctx.from?.id || 0);
+
     await ctx.editMessageText(
       getFeeWarningMessage(gameType, userBalance, contractMin),
       {
@@ -3619,6 +3625,9 @@ bot.callbackQuery(/^cancel_game_setup_(\d+)$/, async (ctx) => {
       return;
     }
     
+    // Clear any pending typed-input session for this user to avoid hijacking
+    userSessions.delete(ctx.from?.id || 0);
+
     await ctx.editMessageText("❌ Game creation cancelled.", {
       parse_mode: "HTML"
     });
