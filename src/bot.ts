@@ -3074,38 +3074,6 @@ const handleJoinGame = async (
 // ================================
 
 
-// Amount selection callbacks (old format for backward compatibility)
-bot.callbackQuery(/^amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
-  try {
-    console.log("⚠️ Old format amount callback - no creator protection:", ctx.callbackQuery?.data);
-    const gameType = ctx.match![1] as string;
-    const amount = ctx.match![2] as string;
-    
-    const playerMessage = [
-      `<b>${gameType.toUpperCase()} - CHOOSE PLAYERS</b>`,
-      "",
-      `Amount: <b>${amount} TIMBA</b>`,
-      "",
-      "Select the number of players:",
-      "",
-      gameType === "coinflip" 
-        ? "• All players compete for the total stakes"
-        : "• More players = higher chance for everyone",
-      "",
-      "Choose number of players:"
-    ].join("\n");
-
-    await ctx.editMessageText(playerMessage, {
-      parse_mode: "HTML",
-      reply_markup: createPlayerSelectionKeyboard(gameType, amount)
-    });
-    
-    await ctx.answerCallbackQuery();
-  } catch (error) {
-    console.error("Error in old amount callback:", error);
-    await ctx.answerCallbackQuery("❌ Error selecting amount");
-  }
-});
 
 // Amount selection callbacks (new format with creatorId)
 bot.callbackQuery(/^amount_(coinflip|giveaway)_(\d+)_(\d+)$/, async (ctx) => {
@@ -3147,41 +3115,9 @@ bot.callbackQuery(/^amount_(coinflip|giveaway)_(\d+)_(\d+)$/, async (ctx) => {
   }
 });
 
-// Player selection callbacks (old format for backward compatibility)  
-bot.callbackQuery(/^players_(coinflip|giveaway)_(\d+)_(\d+)$/, async (ctx) => {
-  try {
-    console.log("⚠️ Old format players callback - no creator protection:", ctx.callbackQuery?.data);
-    const gameType = ctx.match![1] as string;
-    const amount = ctx.match![2] as string;
-    const players = ctx.match![3] as string;
-    
-    const confirmMessage = [
-      `<b>CONFIRM ${gameType.toUpperCase()}</b>`,
-      "",
-      `Amount: <b>${amount} TIMBA</b>`,
-      `Players: <b>${players}</b>`,
-      "",
-      gameType === "coinflip" 
-        ? "• All players compete for the total stakes"
-        : "• More players = higher chance for everyone",
-      "",
-      "Are you ready to create this game?"
-    ].join("\n");
-
-    await ctx.editMessageText(confirmMessage, {
-      parse_mode: "HTML",
-      reply_markup: createGameConfirmKeyboard(gameType, amount, players)
-    });
-    
-    await ctx.answerCallbackQuery();
-  } catch (error) {
-    console.error("Error in old players callback:", error);
-    await ctx.answerCallbackQuery("❌ Error selecting players");
-  }
-});
 
 // Player selection callbacks (new format with creatorId)
-bot.callbackQuery(/^players_(coinflip|giveaway)_(\d+)_(\d+)_(\d+)$/, async (ctx) => {
+bot.callbackQuery(/^players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/, async (ctx) => {
   try {
     console.log("🔔 Players callback triggered:", ctx.callbackQuery?.data);
     const gameType = ctx.match![1] as string;
@@ -3202,7 +3138,7 @@ bot.callbackQuery(/^players_(coinflip|giveaway)_(\d+)_(\d+)_(\d+)$/, async (ctx)
       `Players: <b>${players}</b>`,
       "",
       gameType === "coinflip" 
-        ? `• Total prize pool: <b>${parseInt(amount) * parseInt(players)} TIMBA</b>`
+        ? `• Total prize pool: <b>${parseFloat(amount) * parseInt(players)} TIMBA</b>`
         : `• Prize for winner: <b>${amount} TIMBA</b>`,
       "",
       "⚠️ Make sure you have enough TIMBA in your wallet!",
@@ -3222,31 +3158,13 @@ bot.callbackQuery(/^players_(coinflip|giveaway)_(\d+)_(\d+)_(\d+)$/, async (ctx)
   }
 });
 
-// Game creation confirmation (old format for backward compatibility)
-bot.callbackQuery(/^confirm_game_(coinflip|giveaway)_(\d+)_(\d+)$/, async (ctx) => {
-  try {
-    console.log("⚠️ Old format confirm_game callback - no creator protection:", ctx.callbackQuery?.data);
-    
-    if (!ctx.from?.id) {
-      await ctx.answerCallbackQuery("❌ Unable to identify user");
-      return;
-    }
-
-    // Continue with game creation logic...
-    await ctx.answerCallbackQuery("⚠️ Using old format - reduced security");
-    // [rest of the old logic would go here]
-  } catch (error) {
-    console.error("Error in old confirm_game callback:", error);
-    await ctx.answerCallbackQuery("❌ Error creating game");
-  }
-});
 
 // Game creation confirmation (new format with creatorId)
-bot.callbackQuery(/^confirm_game_(coinflip|giveaway)_(\d+)_(\d+)_(\d+)$/, async (ctx) => {
+bot.callbackQuery(/^confirm_game_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/, async (ctx) => {
   try {
     console.log("🔔 Confirm game callback triggered:", ctx.callbackQuery?.data);
     const gameType = ctx.match![1] as "coinflip" | "giveaway";
-    const amount = parseInt(ctx.match![2] as string);
+    const amount = parseFloat(ctx.match![2] as string);
     const maxPlayers = parseInt(ctx.match![3] as string);
     const creatorId = ctx.match![4] as string;
     
@@ -3269,7 +3187,7 @@ bot.callbackQuery(/^confirm_game_(coinflip|giveaway)_(\d+)_(\d+)_(\d+)$/, async 
     
     // Prepare game data like tokenManager.parseAmount would
     const gameData = {
-      amount: amount * Math.pow(10, metadata.decimals), // Convert to raw amount with correct decimals
+      amount: Math.round(amount * Math.pow(10, metadata.decimals)), // Convert to raw amount with correct decimals
       isSol: false,
       formattedAmount: amount.toString(),
       tokenMint: DEFAULT_TOKEN_MINT,
@@ -3348,42 +3266,6 @@ bot.callbackQuery(/^confirm_game_(coinflip|giveaway)_(\d+)_(\d+)_(\d+)$/, async 
   }
 });
 
-// Custom amount callback - shows slider interface
-bot.callbackQuery(/^custom_amount_(coinflip|giveaway)$/, async (ctx) => {
-  try {
-    const gameType = ctx.match![1] as string;
-    const telegramId = BigInt(ctx.from?.id || 0);
-    
-    // Get user's balance for max limit
-    let userBalance = 1000; // Default fallback
-    try {
-      const timbaBalance = await wallet.getTokenBalance(telegramId, DEFAULT_TOKEN_MINT);
-      const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
-      userBalance = timbaBalance / Math.pow(10, metadata.decimals);
-    } catch (error) {
-      console.error("Error getting balance for slider:", error);
-    }
-    
-    const startAmount = Math.min(50, Math.floor(userBalance)); // Start at 50 or max balance
-    
-    const sliderMessage = [
-      `📊 <b>CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>`,
-      "",
-      `Balance: <b>${userBalance.toFixed(2)} TIMBA</b>`,
-      ""
-    ].join("\n");
-
-    await ctx.editMessageText(sliderMessage, {
-      parse_mode: "HTML",
-      reply_markup: createSliderAmountKeyboard(gameType, startAmount, userBalance)
-    });
-    
-    await ctx.answerCallbackQuery();
-  } catch (error) {
-    console.error("Error in custom_amount callback:", error);
-    await ctx.answerCallbackQuery("❌ Error loading custom amount");
-  }
-});
 
 // Custom amount callback - shows slider interface (new format with creator ID)
 bot.callbackQuery(/^custom_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
@@ -3431,47 +3313,6 @@ bot.callbackQuery(/^custom_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
   }
 });
 
-// Slider controls callback
-bot.callbackQuery(/^slider_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
-  try {
-    const gameType = ctx.match![1] as string;
-    const newAmount = parseInt(ctx.match![2] as string);
-    const telegramId = BigInt(ctx.from?.id || 0);
-    
-    // Get user's balance for validation
-    let userBalance = 1000; // Default fallback
-    try {
-      const timbaBalance = await wallet.getTokenBalance(telegramId, DEFAULT_TOKEN_MINT);
-      const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
-      userBalance = timbaBalance / Math.pow(10, metadata.decimals);
-    } catch (error) {
-      console.error("Error getting balance for slider:", error);
-    }
-    
-    // Validate amount
-    const validAmount = Math.max(1, Math.min(Math.floor(userBalance), newAmount));
-    
-    const sliderMessage = [
-      `📊 <b>CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>`,
-      "",
-      `Balance: <b>${userBalance.toFixed(2)} TIMBA</b>`,
-      "",
-      "Use the controls below to adjust the amount:",
-      "",
-      "⏪⏩ Large steps • ◀️▶️ Medium steps • 🔽🔼 Small steps"
-    ].join("\n");
-
-    await ctx.editMessageText(sliderMessage, {
-      parse_mode: "HTML",
-      reply_markup: createSliderAmountKeyboard(gameType, validAmount, userBalance)
-    });
-    
-    await ctx.answerCallbackQuery();
-  } catch (error) {
-    console.error("Error in slider callback:", error);
-    await ctx.answerCallbackQuery("❌ Error adjusting amount");
-  }
-});
 
 // Slider controls callback (new format with creator ID)
 bot.callbackQuery(/^slider_(coinflip|giveaway)_(\d+)_(\d+)$/, async (ctx) => {
@@ -3520,70 +3361,6 @@ bot.callbackQuery(/^slider_(coinflip|giveaway)_(\d+)_(\d+)$/, async (ctx) => {
   }
 });
 
-// Back to amounts callback
-bot.callbackQuery(/^back_to_amounts_(coinflip|giveaway)$/, async (ctx) => {
-  try {
-    const gameType = ctx.match![1] as string;
-    const telegramId = BigInt(ctx.from?.id || 0);
-    
-    // Get user's balance
-    let balanceText = "";
-    let userBalance = 0;
-    try {
-      const timbaBalance = await wallet.getTokenBalance(telegramId, DEFAULT_TOKEN_MINT);
-      const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
-      const formattedBalance = wallet.formatTokenBalance(timbaBalance, metadata.decimals);
-      userBalance = timbaBalance / Math.pow(10, metadata.decimals);
-      balanceText = `\n💰 Your balance: <b>${formattedBalance} TIMBA</b>\n`;
-    } catch (error) {
-      console.error("Error getting balance:", error);
-      balanceText = "\n⚠️ Could not load balance\n";
-    }
-
-    // Get contract minimum for warnings and UX
-    const contractMin = await getContractMinimumAmount();
-    
-    // Create enhanced message with fee warnings
-    let message: string;
-    
-    if (gameType === "coinflip") {
-      message = "🪙 <b>CREATE COINFLIP</b>\n\n";
-      message += "Choose the amount each player will stake:\n";
-      message += balanceText;
-      
-      if (userBalance < contractMin) {
-        message += `\n⚠️ <b>Fee Warning:</b> Oracle fees (~5-10%) are significant with small bets.\n`;
-      }
-      
-      message += "\n• Winner takes all the stakes\n";
-      message += "• Fair and transparent results\n\n";
-      message += "Select amount:";
-    } else {
-      message = "🎁 <b>CREATE GIVEAWAY</b>\n\n";
-      message += "Choose the prize amount you want to give away:\n";
-      message += balanceText;
-      
-      if (userBalance < contractMin) {
-        message += `\n⚠️ <b>Fee Warning:</b> Oracle fees (~5-10%) reduce the actual prize.\n`;
-      }
-      
-      message += "\n• Free to join for all players\n";
-      message += "• One lucky winner gets the prize\n";
-      message += "• Fair and transparent results\n\n";
-      message += "Select prize amount:";
-    }
-
-    await ctx.editMessageText(message, {
-      parse_mode: "HTML",
-      reply_markup: createAmountSelectionKeyboard(gameType, userBalance, undefined, contractMin)
-    });
-    
-    await ctx.answerCallbackQuery();
-  } catch (error) {
-    console.error("Error in back_to_amounts callback:", error);
-    await ctx.answerCallbackQuery("❌ Error going back");
-  }
-});
 
 // Back to amounts callback (new format with creator ID)
 bot.callbackQuery(/^back_to_amounts_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
@@ -3631,63 +3408,6 @@ bot.callbackQuery(/^back_to_amounts_(coinflip|giveaway)_(\d+)$/, async (ctx) => 
   }
 });
 
-// Type amount callback - prompts user to type amount
-bot.callbackQuery(/^type_amount_(coinflip|giveaway)$/, async (ctx) => {
-  try {
-    const gameType = ctx.match![1] as string;
-    const telegramId = BigInt(ctx.from?.id || 0);
-    
-    // Get user balance for validation
-    let userBalance = 1000;
-    try {
-      const timbaBalance = await wallet.getTokenBalance(telegramId, DEFAULT_TOKEN_MINT);
-      const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
-      userBalance = timbaBalance / Math.pow(10, metadata.decimals);
-    } catch (error) {
-      console.error("Error getting balance:", error);
-    }
-    
-    const typeMessage = [
-      `✏️ <b>TYPE CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>`,
-      "",
-      `💰 Your balance: <b>${userBalance.toFixed(2)} TIMBA</b>`,
-      "",
-      "Please type the amount you want to use.",
-      "",
-      "<b>Example:</b>",
-      "• Type: <code>75</code> for 75 TIMBA",
-      "• Type: <code>150.5</code> for 150.5 TIMBA",
-      "",
-      `Min: 1 TIMBA • Max: ${Math.floor(userBalance)} TIMBA`
-    ].join("\n");
-
-    await ctx.editMessageText(typeMessage, {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
-        .text("❌ Cancel", `cancel_game_setup_${ctx.from?.id}`)
-        .row()
-    });
-    
-    await ctx.editMessageText(typeMessage, {
-      parse_mode: "HTML"
-    });
-    
-    await ctx.answerCallbackQuery("Type your amount...");
-    
-    // Store the game type and message ID in user session for the text handler
-    userSessions.set(ctx.from?.id || 0, { 
-      waitingFor: "amount_input",
-      gameType: gameType,
-      userBalance: userBalance,
-      messageId: ctx.callbackQuery?.message?.message_id || 0,
-      chatId: ctx.chat?.id || 0
-    });
-    
-  } catch (error) {
-    console.error("Error in type_amount callback:", error);
-    await ctx.answerCallbackQuery("❌ Error setting up text input");
-  }
-});
 
 // Type amount callback - prompts user to type amount (new format with creator ID)
 bot.callbackQuery(/^type_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
@@ -3756,49 +3476,6 @@ bot.callbackQuery(/^type_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
   }
 });
 
-// Custom players callback - prompts user to type number of players
-bot.callbackQuery(/^custom_players_(coinflip|giveaway)_(.+)$/, async (ctx) => {
-  try {
-    const gameType = ctx.match![1] as string;
-    const amount = ctx.match![2] as string;
-    
-    const maxPlayers = gameType === "coinflip" ? 8 : 30;
-    const minPlayers = gameType === "coinflip" ? 2 : 2;
-    
-    const typeMessage = [
-      `<b>TYPE CUSTOM PLAYERS - ${gameType.toUpperCase()}</b>`,
-      "",
-      `Amount: <b>${amount} TIMBA</b>`,
-      "",
-      "Please type the number of players.",
-      "",
-      "<b>Example:</b>",
-      "• Type: <code>7</code> for 7 players",
-      "",
-      `Min: ${minPlayers} players • Max: ${maxPlayers} players`
-    ].join("\n");
-
-    await ctx.editMessageText(typeMessage, {
-      parse_mode: "HTML"
-    });
-    
-    await ctx.answerCallbackQuery("Type number of players...");
-    
-    // Store the game info in user session for the text handler
-    userSessions.set(ctx.from?.id || 0, { 
-      waitingFor: "players_input",
-      gameType: gameType,
-      userBalance: 0, // Add required field
-      amount: amount,
-      messageId: ctx.callbackQuery?.message?.message_id || 0,
-      chatId: ctx.chat?.id || 0
-    });
-    
-  } catch (error) {
-    console.error("Error in custom_players callback:", error);
-    await ctx.answerCallbackQuery("❌ Error setting up players input");
-  }
-});
 
 // Custom players callback - prompts user to type number of players (new format with creator ID)
 bot.callbackQuery(/^custom_players_(coinflip|giveaway)_(.+)_(\d+)$/, async (ctx) => {
@@ -3862,19 +3539,6 @@ bot.callbackQuery("noop", async (ctx) => {
   await ctx.answerCallbackQuery();
 });
 
-// Cancel game setup callback (old format - no creator protection)
-bot.callbackQuery("cancel_game_setup", async (ctx) => {
-  try {
-    console.log("⚠️ Old format cancel_game_setup - no creator protection:", ctx.callbackQuery?.data);
-    await ctx.editMessageText("❌ Game creation cancelled.", {
-      parse_mode: "HTML"
-    });
-    await ctx.answerCallbackQuery("Cancelled");
-  } catch (error) {
-    console.error("Error in cancel callback:", error);
-    await ctx.answerCallbackQuery("❌ Error cancelling");
-  }
-});
 
 // Cancel game setup callback (new format with creator ID protection)
 bot.callbackQuery(/^cancel_game_setup_(\d+)$/, async (ctx) => {
