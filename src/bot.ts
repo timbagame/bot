@@ -2916,69 +2916,8 @@ const handlePlayerEvent = async (
             totalPot
           );
 
-          // Check if game should be completed when PlayerJoined (eventName check)
-          if (eventName === "PlayerJoined") {
-            // Get current game state from blockchain to check if it's ready for completion
-            try {
-              const gamePda = new PublicKey(gameAddress);
-              const gameAccount = await program.account.game.fetch(gamePda);
-              
-              // Check if game is full (current players >= max tickets)
-              if (gameAccount.ticketsCount >= gameAccount.maxTickets) {
-                console.log(`🎯 Game ${gameAddress.slice(0,8)}... is full (${gameAccount.ticketsCount}/${gameAccount.maxTickets}), triggering completion`);
-                
-                // Instead of relying on external oracle notification, we'll simulate direct completion
-                // This is a temporary solution until the oracle service is properly implemented
-                console.log(`⏰ Setting 3-second timer for game completion simulation...`);
-                
-                setTimeout(async () => {
-                  try {
-                    console.log(`🎲 Simulating game completion for ${gameAddress.slice(0,8)}...`);
-                    
-                    // For now, we'll randomly select a winner from the participants
-                    // In production, this would be handled by the oracle with proper randomness
-                    const winnerIndex = Math.floor(Math.random() * gameAccount.ticketsCount);
-                    console.log(`🎯 Selected winner index: ${winnerIndex}`);
-                    
-                    // Get participants from game account
-                    const participants = gameAccount.participantHashes || [];
-                    if (participants.length > winnerIndex) {
-                      // This is a simplified approach - in production the oracle would handle this
-                      console.log(`🏆 Winner determined, oracle should complete the game now...`);
-                      
-                      // Notify via a different endpoint or mechanism
-                      const oracleClient = OracleClient.getInstance();
-                      try {
-                        const completeResponse = await fetch(`${oracleClient.getOracleUrl()}/complete-game`, {
-                          method: "POST",
-                          headers: {
-                            "Content-Type": "application/json",
-                          },
-                          body: JSON.stringify({
-                            gameAddress: gameAddress,
-                            winnerIndex: winnerIndex,
-                            totalTickets: gameAccount.ticketsCount
-                          })
-                        });
-
-                        if (completeResponse.ok) {
-                          console.log(`✅ Oracle completion request sent successfully`);
-                        } else {
-                          console.log(`⚠️ Oracle completion request failed: ${completeResponse.status}`);
-                        }
-                      } catch (completeError) {
-                        console.error(`Error requesting oracle completion:`, completeError);
-                      }
-                    }
-                  } catch (completionError) {
-                    console.error(`Error in game completion simulation:`, completionError);
-                  }
-                }, 3000); // 3 second delay to allow for final processing
-              }
-            } catch (gameStateError) {
-              console.error(`Error checking game state for completion:`, gameStateError);
-            }
-          }
+          // Game completion is handled autonomously by the oracle
+          // The bot only processes GameCompleted events from Solana
         } catch (contextError) {
           console.error(
             `Error creating context for chat ${gameData.chat_id}:`,
