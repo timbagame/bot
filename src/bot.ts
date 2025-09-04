@@ -50,6 +50,7 @@ import type {
 } from "./types";
 import { TokenDatabase } from "./utils/token-database";
 import { handleCallbackErrorSafe } from "./utils/context-helpers";
+import { recentUpdateGuard } from "./utils/recent-update";
 
 // ================================
 // GLOBAL INSTANCES
@@ -504,6 +505,8 @@ const getSequentializationKey = (
 };
 
 bot.use(sequentialize(getSequentializationKey));
+// Drop stale updates to avoid reacting to old messages/callbacks
+bot.use(recentUpdateGuard);
 
 // ================================
 // UTILITY FUNCTIONS
