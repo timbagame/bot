@@ -612,7 +612,7 @@ const validateAndProcessTransaction = async (
     // Add Solscan link if requested and we have a transaction signature
     if (showSolscanLink && txString) {
       // Determine the correct Solscan URL based on the RPC endpoint
-      const rpcUrl = process.env.RPC_URL || "";
+      const rpcUrl = process.env['RPC_URL'] || "";
       const isDevnet = rpcUrl.includes("devnet") || rpcUrl.includes("dev") || rpcUrl.includes("localhost");
       const isTestnet = rpcUrl.includes("testnet") || rpcUrl.includes("test");
       
@@ -633,7 +633,7 @@ const validateAndProcessTransaction = async (
       successMessage,
       { 
         parse_mode: "HTML",
-        disable_web_page_preview: showSolscanLink && !!txString
+        link_preview_options: { is_disabled: showSolscanLink && !!txString }
       }
     );
   } catch (error: any) {
