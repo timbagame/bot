@@ -41,6 +41,7 @@ import {
   getFeeWarningMessage,
 } from "./utils/keyboards";
 import { buildWalletCaption } from "./utils/wallet-ui";
+import { inferMaxPlayers } from "./utils/arg-parsing";
 import type {
   PlayerData,
   GameCompletedEvent,
@@ -1119,17 +1120,17 @@ bot.command(["coinflip", "cf"], async (ctx) => {
           return ctx.reply("❌ Please provide a valid amount greater than 0.\n\nUsage: `/cf <amount>` or `/cf <amount> <maxPlayers>`");
         }
 
-        // Get maxPlayers from arguments (default to 2 for coinflip)
-        let maxPlayers = 2;
-        const playersArg = args[args.length - 1]; // Last argument might be players
-        if (playersArg && !isNaN(parseInt(playersArg)) && parseInt(playersArg) !== parsed.data!.amount) {
-          const requestedPlayers = parseInt(playersArg);
-          if (requestedPlayers >= 2 && requestedPlayers <= 8) {
-            maxPlayers = requestedPlayers;
-          } else {
-            return ctx.reply("❌ Coinflip supports 2-8 players maximum.");
-          }
+        // Get maxPlayers from arguments using robust index-based parsing
+        const inferredCf = inferMaxPlayers(
+          args,
+          1 /* amountArgIndex */,
+          !!parsed.data!.tokenWasSpecified,
+          2 /* default */, 2 /* min */, 100 /* max */
+        );
+        if (!inferredCf.ok) {
+          return ctx.reply(`❌ Coinflip ${inferredCf.error}`);
         }
+        const maxPlayers = inferredCf.value;
 
         // Check user has enough balance
         const userBalance = await wallet.getTokenBalance(telegramId, parsed.data!.tokenMint);
@@ -1273,17 +1274,17 @@ bot.command(["giveaway", "ga"], async (ctx) => {
           return ctx.reply("❌ Please provide a valid amount greater than 0.\n\nUsage: `/ga <amount>` or `/ga <amount> <maxPlayers>`");
         }
 
-        // Get maxPlayers from arguments (default to 10 for giveaway)
-        let maxPlayers = 10;
-        const playersArg = args[args.length - 1]; // Last argument might be players
-        if (playersArg && !isNaN(parseInt(playersArg)) && parseInt(playersArg) !== parsed.data!.amount) {
-          const requestedPlayers = parseInt(playersArg);
-          if (requestedPlayers >= 2 && requestedPlayers <= 30) {
-            maxPlayers = requestedPlayers;
-          } else {
-            return ctx.reply("❌ Giveaway supports 2-30 players maximum.");
-          }
+        // Get maxPlayers from arguments using robust index-based parsing
+        const inferredGa = inferMaxPlayers(
+          args,
+          1 /* amountArgIndex */,
+          !!parsed.data!.tokenWasSpecified,
+          10 /* default */, 2 /* min */, 100 /* max */
+        );
+        if (!inferredGa.ok) {
+          return ctx.reply(`❌ Giveaway ${inferredGa.error}`);
         }
+        const maxPlayers = inferredGa.value;
 
         // Check user has enough balance
         const userBalance = await wallet.getTokenBalance(telegramId, parsed.data!.tokenMint);
@@ -3224,6 +3225,11 @@ bot.callbackQuery(/^confirm_game_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)
     const gameType = ctx.match![1] as "coinflip" | "giveaway";
     const amount = parseFloat(ctx.match![2] as string);
     const maxPlayers = parseInt(ctx.match![3] as string);
+    const minPlayers = gameType === "coinflip" ? 2 : 1;
+    if (isNaN(maxPlayers) || maxPlayers < minPlayers || maxPlayers > 100) {
+      await ctx.answerCallbackQuery(`❌ Players must be between ${minPlayers} and 100`);
+      return;
+    }
     const creatorId = ctx.match![4] as string;
     
     // Check if the user pressing the button is the creator
@@ -3648,7 +3654,7 @@ bot.on("message:text", async (ctx, next) => {
     // Handle players input
     if (userSession.waitingFor === "players_input") {
       const players = parseInt(inputText);
-      const maxPlayers = userSession.gameType === "coinflip" ? 8 : 30;
+      const maxPlayers = 100;
       const minPlayers = 2;
       
       console.log(`🔍 Custom players input: "${inputText}" -> ${players} (gameType: ${userSession.gameType}, min: ${minPlayers}, max: ${maxPlayers})`);
