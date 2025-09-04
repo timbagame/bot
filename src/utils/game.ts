@@ -581,25 +581,39 @@ export class GameManager {
       );
 
       try {
-        // Use editMessageMedia for coinflip games (to keep video), editMessageText for others
+        // For coinflip games, only switch media when moving to winner video;
+        // otherwise update caption to reduce media edits.
         if (gameType.toLowerCase() === "coinflip") {
-          // Use winner video if game is completed, start video otherwise
-          const videoId = status.toLowerCase() === "completed" ? WINNER_VIDEO_ID : COINFLIP_START_VIDEO_ID;
-          
-          await ctx.api.editMessageMedia(
-            gameMessage.chatId,
-            gameMessage.messageId,
-            {
-              type: "video",
-              media: videoId,
-              caption: messageText,
-              parse_mode: "HTML",
-            },
-            {
-              reply_markup:
-                keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined,
-            }
-          );
+          const isCompleted = status.toLowerCase() === "completed";
+          if (isCompleted) {
+            const videoId = WINNER_VIDEO_ID;
+            await ctx.api.editMessageMedia(
+              gameMessage.chatId,
+              gameMessage.messageId,
+              {
+                type: "video",
+                media: videoId,
+                caption: messageText,
+                parse_mode: "HTML",
+              },
+              {
+                reply_markup:
+                  keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined,
+              }
+            );
+          } else {
+            // Caption-only update for active coinflip to avoid media churn
+            await ctx.api.editMessageCaption(
+              gameMessage.chatId,
+              gameMessage.messageId,
+              {
+                caption: messageText,
+                parse_mode: "HTML",
+                reply_markup:
+                  keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined,
+              }
+            );
+          }
         } else {
           await ctx.api.editMessageText(
             gameMessage.chatId,
@@ -899,33 +913,10 @@ export class GameManager {
       let randomHashBuffer: Buffer;
       
       if (!isOracleHealthy) {
-        const allowFallback =
-          process.env["ALLOW_LOCAL_RANDOM_FALLBACK"] === "1" ||
-          process.env["ALLOW_LOCAL_RANDOM_FALLBACK"]?.toLowerCase() === "true";
-
-        if (!allowFallback) {
-          return {
-            success: false,
-            error:
-              "❌ Oracle service is unavailable. Please try again later.",
-          };
-        }
-
-        console.warn(
-          "⚠️ Oracle is unhealthy, using fallback random generation (development only)"
-        );
-        // Fallback: generate random hash locally for development
-        const fallbackRandom =
-          Math.random().toString(36).substring(2, 15) +
-          Math.random().toString(36).substring(2, 15);
-        randomHash = Buffer.from(fallbackRandom)
-          .toString("hex")
-          .padStart(64, "0");
-        randomHashBuffer = Buffer.from(randomHash, "hex");
-
-        console.log(
-          `🎲 Using fallback random hash: ${randomHash.substring(0, 10)}...`
-        );
+        return {
+          success: false,
+          error: "❌ Oracle service is unavailable. Please try again later.",
+        };
       } else {
         console.log("✅ Oracle is healthy, generating proper random hash");
         const secretsResponse = await this.oracleClient.generateGameSecrets();
