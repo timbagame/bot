@@ -1348,7 +1348,8 @@ bot.command(["giveaway", "ga"], async (ctx) => {
 
     await ctx.reply(giveawayMessage, {
       parse_mode: "HTML",
-      reply_markup: createAmountSelectionKeyboard("giveaway", userBalance, ctx.from?.id.toString(), contractMin)
+      reply_markup: createAmountSelectionKeyboard("giveaway", userBalance, ctx.from?.id.toString(), contractMin),
+      reply_to_message_id: ctx.message?.message_id
     });
   } catch (error) {
     console.error("Error in giveaway command:", error);
