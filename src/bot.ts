@@ -1415,7 +1415,8 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
     );
   }
 
-  const parsed = await tokenManager.parseAmount(args, 2, ctx.chat?.id);
+  // Allow SOL withdrawals by parsing in a non-game context
+  const parsed = await tokenManager.parseAmount(args, 2, ctx.chat?.id, "tip");
   if (!parsed.success) {
     if (parsed.error === "unknown_token") {
       return replyToMessage(ctx, `❌ Unknown token "${parsed.unknownToken}"`);
