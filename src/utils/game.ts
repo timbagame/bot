@@ -513,7 +513,8 @@ export class GameManager {
     amount: number,
     creatorUsername: string,
     tokenTicker: string,
-    status: string = "Active"
+    status: string = "Active",
+    replyToMessageId?: number
   ): Promise<number> {
     const { messageText, keyboard } = await this.formatGameMessage(
       ctx,
@@ -527,17 +528,18 @@ export class GameManager {
     );
 
     // Use video for coinflip games, text for others
+    const replyTo = replyToMessageId ?? (ctx as any).message?.message_id;
     const message = gameType.toLowerCase() === "coinflip" 
       ? await ctx.replyWithVideo(COINFLIP_START_VIDEO_ID, {
           caption: messageText,
           parse_mode: "HTML",
           reply_markup: { inline_keyboard: keyboard },
-          reply_to_message_id: ctx.message?.message_id,
+          reply_to_message_id: replyTo,
         })
       : await ctx.reply(messageText, {
           parse_mode: "HTML",
           reply_markup: { inline_keyboard: keyboard },
-          reply_to_message_id: ctx.message?.message_id,
+          reply_to_message_id: replyTo,
         });
 
     this.gameDb.saveGameMessage(

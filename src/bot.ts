@@ -3239,15 +3239,28 @@ bot.callbackQuery(/^confirm_game_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)
       ? `@${ctx.from.username}`
       : "Unknown";
 
-    // Create game message
+    // Determine the user's original message ID to reply to (if UI message was a reply)
+    const replyToUserMessageId = (ctx.callbackQuery as any)?.message?.reply_to_message?.message_id as number | undefined;
+
+    // Delete the confirmation message to keep chat clean
+    try {
+      if (ctx.chat?.id && ctx.callbackQuery?.message?.message_id) {
+        await ctx.api.deleteMessage(ctx.chat.id, ctx.callbackQuery.message.message_id);
+      }
+    } catch (e) {
+      console.warn("Could not delete confirmation message:", e);
+    }
+
+    // Create game message, replying to the user's original command if available
     await gameManager.createGameMessage(
       ctx,
       result.gameAddress,
       gameType.charAt(0).toUpperCase() + gameType.slice(1),
       gameData.amount,
       creatorUsername,
+      gameData.tokenTicker,
       "Active",
-      gameData.tokenTicker
+      replyToUserMessageId
     );
 
 
