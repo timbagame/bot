@@ -1065,8 +1065,7 @@ bot.command(["coinflip", "cf"], async (ctx) => {
     if (args && args.length >= 2) {
       console.log("🎮 Command-based coinflip creation:", args);
       
-      // Show creating message
-      const creatingMsg = await ctx.reply("🎮 Creating your game...", { parse_mode: "HTML" });
+      // No creating placeholder message; proceed directly
       
       try {
         // Parse arguments: /cf <amount> [TOKEN] [maxPlayers]
@@ -1144,13 +1143,7 @@ bot.command(["coinflip", "cf"], async (ctx) => {
           parsed.data!.tokenTicker
         );
 
-        // Delete temporary message after creating the game message
-        try {
-          await ctx.api.deleteMessage(ctx.chat!.id, creatingMsg.message_id);
-          // Don't delete the original command message since the game message replies to it
-        } catch (error) {
-          console.log("Could not delete creating message:", error);
-        }
+        // No temporary message to delete
 
         return;
       } catch (error) {
@@ -1220,8 +1213,7 @@ bot.command(["giveaway", "ga"], async (ctx) => {
     if (args && args.length >= 2) {
       console.log("🎁 Command-based giveaway creation:", args);
       
-      // Show creating message
-      const creatingMsg = await ctx.reply("🎮 Creating your game...", { parse_mode: "HTML" });
+      // No creating placeholder message; proceed directly
       
       try {
         // Parse arguments: /ga <amount> [TOKEN] [maxPlayers]
@@ -1294,13 +1286,7 @@ bot.command(["giveaway", "ga"], async (ctx) => {
           parsed.data!.tokenTicker
         );
 
-        // Delete temporary message after creating the game message
-        try {
-          await ctx.api.deleteMessage(ctx.chat!.id, creatingMsg.message_id);
-          // Don't delete the original command message since the game message replies to it
-        } catch (error) {
-          console.log("Could not delete creating message:", error);
-        }
+        // No temporary message to delete
 
         return;
       } catch (error) {
@@ -3207,7 +3193,7 @@ bot.callbackQuery(/^confirm_game_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)
       return;
     }
 
-    await ctx.editMessageText("🎮 Creating your game...", { parse_mode: "HTML" });
+    // Avoid showing a placeholder; just acknowledge via callback
     await ctx.answerCallbackQuery("Creating game...");
     
     // Get correct decimals for TIMBA token
