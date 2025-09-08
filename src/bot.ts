@@ -53,6 +53,7 @@ import { TokenDatabase } from "./utils/token-database";
 import { handleCallbackErrorSafe } from "./utils/context-helpers";
 import { recentUpdateGuard } from "./utils/recent-update";
 import { checkServiceHealth } from "./utils/service-health";
+import { getPriceUSD } from "./utils/prices";
 
 // ================================
 // GLOBAL INSTANCES
@@ -279,34 +280,6 @@ const updateGameMessageSafely = async (
 /**
  * Dynamic wallet UI that loads balances automatically
  */
-// Simple function to get USD prices (placeholder for now)
-const getTokenPriceUSD = async (tokenMint: string): Promise<number> => {
-  try {
-    // For SOL
-    if (
-      tokenMint === "So11111111111111111111111111111111111111112" ||
-      tokenMint === "SOL"
-    ) {
-      // Simple SOL price fetch (you can replace with real API)
-      return 150; // Placeholder SOL price
-    }
-
-    // For USDC (stable coin)
-    if (tokenMint === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v") {
-      return 1.0; // USDC is pegged to $1
-    }
-
-    // For DAOS token (placeholder price - you can integrate real API later)
-    if (tokenMint === "FPyD25czYkvztSsgyCP7bxd2xnvDAp1LVjyiJhQidaos") {
-      return 0.001; // Placeholder DAOS price - update with real price
-    }
-
-    // For other tokens, return 0 for now (can be enhanced later)
-    return 0;
-  } catch (error) {
-    return 0;
-  }
-};
 
 const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
   const telegramId = BigInt(ctx.from?.id || 0) as bigint;
@@ -363,7 +336,7 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
 
     // Calculate total USD value and token display lines
     let totalUSD = 0;
-    const solPriceUSD = await getTokenPriceUSD("SOL");
+    const solPriceUSD = await getPriceUSD("SOL");
     const solDecimalBalance = solBalance / LAMPORTS_PER_SOL;
     totalUSD += solDecimalBalance * solPriceUSD;
 
@@ -375,7 +348,7 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
       );
       tokenLines.push({ ticker: token.ticker, formatted });
 
-      const tokenPriceUSD = await getTokenPriceUSD(token.mint);
+      const tokenPriceUSD = await getPriceUSD(token.mint);
       const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
       totalUSD += tokenDecimalBalance * tokenPriceUSD;
     }
@@ -921,13 +894,13 @@ bot.command("start", async (ctx: Context) => {
         const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
         
         // Calculate SOL value in USD
-        const solPriceUSD = await getTokenPriceUSD("SOL");
+        const solPriceUSD = await getPriceUSD("SOL");
         const solDecimalBalance = solBalance / LAMPORTS_PER_SOL;
         totalUSDBalance += solDecimalBalance * solPriceUSD;
 
         // Calculate token values in USD
         for (const token of tokenBalances) {
-          const tokenPriceUSD = await getTokenPriceUSD(token.mint);
+          const tokenPriceUSD = await getPriceUSD(token.mint);
           const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
           totalUSDBalance += tokenDecimalBalance * tokenPriceUSD;
         }
@@ -5095,7 +5068,7 @@ bot.callbackQuery("info_stats", async (ctx) => {
     const formattedSolBalance = wallet.formatSolBalance(solBalance);
 
     // Calculate total tokens and USD value
-    const solPriceUSD = await getTokenPriceUSD("SOL");
+    const solPriceUSD = await getPriceUSD("SOL");
     const solDecimalBalance = solBalance / 1000000000; // LAMPORTS_PER_SOL
     const totalUSD = solDecimalBalance * solPriceUSD;
 
@@ -5345,13 +5318,13 @@ bot.callbackQuery("back_main", async (ctx) => {
         const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
         
         // Calculate SOL value in USD
-        const solPriceUSD = await getTokenPriceUSD("SOL");
+        const solPriceUSD = await getPriceUSD("SOL");
         const solDecimalBalance = solBalance / LAMPORTS_PER_SOL;
         totalUSDBalance += solDecimalBalance * solPriceUSD;
 
         // Calculate token values in USD
         for (const token of tokenBalances) {
-          const tokenPriceUSD = await getTokenPriceUSD(token.mint);
+          const tokenPriceUSD = await getPriceUSD(token.mint);
           const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
           totalUSDBalance += tokenDecimalBalance * tokenPriceUSD;
         }
@@ -5908,7 +5881,7 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
     const formattedSolBalance = wallet.formatSolBalance(solBalance);
 
     // Calculate USD value
-    const solPriceUSD = await getTokenPriceUSD("SOL");
+    const solPriceUSD = await getPriceUSD("SOL");
     const solDecimalBalance = solBalance / 1000000000; // LAMPORTS_PER_SOL
     const totalUSD = solDecimalBalance * solPriceUSD;
 

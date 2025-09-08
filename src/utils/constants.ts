@@ -72,6 +72,19 @@ export const JUPITER_MAX_PRICE_IMPACT = 5; // 5%
 export const JUPITER_PLATFORM_FEE_BPS = 0; // No platform fee by default
 
 // ================================
+// PRICES CONFIG
+// ================================
+
+// Jupiter Price API base
+export const JUPITER_PRICE_URL = "https://price.jup.ag/v6/price";
+// Toggle price fetching (disable to avoid network)
+export const PRICES_ENABLED = (process.env["PRICES_ENABLED"] ?? "true").toLowerCase() !== "false";
+// Cache TTL (ms) for token prices
+export const PRICES_CACHE_TTL_MS = Number(process.env["PRICES_CACHE_TTL_MS"] ?? 60_000);
+// Request timeout (ms)
+export const PRICES_TIMEOUT_MS = Number(process.env["PRICES_TIMEOUT_MS"] ?? 3_000);
+
+// ================================
 // MEDIA FILE IDs 
 // ================================
 
