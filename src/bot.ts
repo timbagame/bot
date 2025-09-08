@@ -1197,7 +1197,8 @@ bot.command(["coinflip", "cf"], async (ctx) => {
     
     await ctx.reply(coinflipMessage, {
       parse_mode: "HTML",
-      reply_markup: createAmountSelectionKeyboard("coinflip", userBalance, ctx.from?.id.toString(), contractMin)
+      reply_markup: createAmountSelectionKeyboard("coinflip", userBalance, ctx.from?.id.toString(), contractMin),
+      reply_to_message_id: ctx.message?.message_id
     });
   } catch (error) {
     console.error("Error in coinflip command:", error);
