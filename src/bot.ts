@@ -1139,8 +1139,8 @@ bot.command(["coinflip", "cf"], async (ctx) => {
           "Coinflip",
           parsed.data!.amount,
           creatorUsername,
-          "Active",
-          parsed.data!.tokenTicker
+          parsed.data!.tokenTicker,
+          "Active"
         );
 
         // No temporary message to delete
@@ -1282,8 +1282,8 @@ bot.command(["giveaway", "ga"], async (ctx) => {
           "Giveaway",
           parsed.data!.amount,
           creatorUsername,
-          "Active",
-          parsed.data!.tokenTicker
+          parsed.data!.tokenTicker,
+          "Active"
         );
 
         // No temporary message to delete
