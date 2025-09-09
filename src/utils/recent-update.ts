@@ -16,6 +16,13 @@ function getUpdateUnixSeconds(ctx: Context): number | null {
 }
 
 export async function recentUpdateGuard(ctx: Context, next: NextFunction) {
+  // Allow game actions to work for the full game lifetime.
+  // These callbacks are safe to process even for older messages because
+  // we validate game status on-chain and in the DB in their handlers.
+  const cbData = (ctx as any).callbackQuery?.data as string | undefined;
+  if (cbData && (cbData.startsWith("join_") || cbData.startsWith("refresh_"))) {
+    return next();
+  }
   const envVal = process.env["MAX_UPDATE_AGE_SEC"];
   const maxAgeSec = envVal ? Number(envVal) : DEFAULT_MAX_AGE_SEC;
   const updateUnix = getUpdateUnixSeconds(ctx);
