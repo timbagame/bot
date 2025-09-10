@@ -405,7 +405,6 @@ const showWalletUI = async (ctx: any) => {
         }
       );
     } catch (e) {
-      try { await ctx.deleteMessage(); } catch {}
       await ctx.replyWithVideo(walletVideoFileId, {
         caption,
         parse_mode: "HTML",
@@ -437,7 +436,6 @@ const showWalletUI = async (ctx: any) => {
         }
       );
     } catch (e) {
-      try { await ctx.deleteMessage(); } catch {}
       await ctx.replyWithVideo(walletVideoFileId, {
         caption: errorResponse.join("\n"),
         parse_mode: "HTML",
