@@ -3625,6 +3625,11 @@ bot.on("message:text", async (ctx, next) => {
     if (!userSession || (userSession.waitingFor !== "amount_input" && userSession.waitingFor !== "players_input")) {
       return await next(); // Not waiting for input, pass to other handlers
     }
+
+    // Only handle messages from the same chat where session was created
+    if (userSession.chatId && ctx.chat?.id !== userSession.chatId) {
+      return await next();
+    }
     
     // Delete the user's message to keep chat clean
     try {
@@ -4226,6 +4231,7 @@ bot.on("callback_query", async (ctx, next) => {
     setUserState(userId, {
       type: "wrap_custom_amount",
       messageId: ctx.callbackQuery?.message?.message_id,
+      chatId: ctx.chat?.id,
     });
 
     await ctx.answerCallbackQuery("Send the amount as a message");
@@ -4640,6 +4646,7 @@ const userStates = new Map<
     contractAddress?: string;
     txId?: string;
     messageId: number;
+    chatId?: number;
     timestamp: number;
   }
 >();
@@ -4955,6 +4962,7 @@ bot.on("callback_query", async (ctx, next) => {
       token: token,
       amount: amount,
       messageId: ctx.callbackQuery?.message?.message_id,
+      chatId: ctx.chat?.id,
     });
 
     await ctx.answerCallbackQuery("Send the wallet address as a message");
@@ -5003,6 +5011,7 @@ bot.on("callback_query", async (ctx, next) => {
       type: "send_custom_amount",
       token: token,
       messageId: ctx.callbackQuery?.message?.message_id,
+      chatId: ctx.chat?.id,
     });
 
     await ctx.answerCallbackQuery("Send the amount as a message");
@@ -6146,6 +6155,7 @@ bot.on("callback_query", async (ctx, next) => {
         type: "sell_custom_amount",
         tokenToSell: tokenToSell,
         messageId: ctx.callbackQuery?.message?.message_id,
+        chatId: ctx.chat?.id,
       });
 
       await ctx.answerCallbackQuery("Send custom amount as message");
@@ -6506,6 +6516,7 @@ bot.on("callback_query", async (ctx, next) => {
         targetToken: targetToken,
         contractAddress: contractAddress,
         messageId: ctx.callbackQuery?.message?.message_id,
+        chatId: ctx.chat?.id,
       });
     }
 
@@ -6566,6 +6577,7 @@ bot.on("callback_query", async (ctx, next) => {
       type: "buy_contract_address",
       fromToken: paymentToken,
       messageId: ctx.callbackQuery?.message?.message_id,
+      chatId: ctx.chat?.id,
     });
 
     await ctx.answerCallbackQuery("Send contract address as message");
@@ -6615,6 +6627,7 @@ bot.on("callback_query", async (ctx, next) => {
       type: "buy_token_symbol",
       fromToken: paymentToken,
       messageId: ctx.callbackQuery?.message?.message_id,
+      chatId: ctx.chat?.id,
     });
 
     await ctx.answerCallbackQuery("Send token symbol as message");
@@ -7139,6 +7152,7 @@ bot.on("callback_query", async (ctx, next) => {
         type: "buy_custom_slippage",
         txId: txId,
         messageId: ctx.callbackQuery?.message?.message_id,
+        chatId: ctx.chat?.id,
       });
 
       await ctx.answerCallbackQuery("Send custom slippage as message");
@@ -7294,6 +7308,7 @@ bot.on("callback_query", async (ctx, next) => {
         type: "swap_to_token",
         fromToken: fromToken,
         messageId: ctx.callbackQuery?.message?.message_id,
+        chatId: ctx.chat?.id,
       });
 
       await ctx.answerCallbackQuery("Send token mint or symbol");
@@ -7362,6 +7377,7 @@ bot.on("callback_query", async (ctx, next) => {
         fromToken: fromToken,
         toToken: toToken,
         messageId: ctx.callbackQuery?.message?.message_id,
+        chatId: ctx.chat?.id,
       });
 
       await ctx.answerCallbackQuery("Send amount as message");
@@ -7951,6 +7967,11 @@ bot.on("message:text", async (ctx, next) => {
     return await next(); // Not waiting for input, continue to other handlers
   }
 
+  // Only process input in the same chat where the state was created
+  if (userState.chatId && ctx.chat?.id !== userState.chatId) {
+    return await next();
+  }
+
   const userMessage = ctx.message.text.trim();
 
   try {
@@ -8061,6 +8082,7 @@ const handleCustomAmountInput = async (
     token: token,
     amount: amount,
     messageId: userState.messageId,
+    chatId: ctx.chat?.id,
   });
 };
 
