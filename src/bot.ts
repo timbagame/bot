@@ -18,6 +18,7 @@ import {
   GAME_TIMEOUT,
   EXPIRED_GAMES_CHECK_INTERVAL_MS,
   GAME_EXPIRATION_BUFFER_TIME,
+  DEFAULT_NULL_ADDRESS,
   DEFAULT_TOKEN_MINT,
   DEFAULT_TOKEN_TICKER,
   TOKENS_LIST,
@@ -9326,6 +9327,12 @@ setupAnchor()
               console.log(`🗑️ Skipping game with null address`);
               continue;
             }
+            // Skip placeholder/null address and clean it up
+            if (game.game_address === DEFAULT_NULL_ADDRESS) {
+              console.log(`🗑️ Skipping placeholder game address ${game.game_address}`);
+              await cleanupOrphanedGame(game.game_address);
+              continue;
+            }
             
             let gamePda: PublicKey;
             try {
@@ -9340,7 +9347,8 @@ setupAnchor()
               await processExpiredGame(game);
             }
           } catch (error: any) {
-            if ((error as Error).message?.includes("Account does not exist")) {
+            const msg = (error as Error).message || "";
+            if (msg.includes("Account does not exist") || msg.includes("Invalid account discriminator")) {
               await cleanupOrphanedGame(game.game_address);
             } else {
               console.error(
