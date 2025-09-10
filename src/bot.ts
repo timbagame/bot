@@ -62,6 +62,16 @@ import { getPriceUSD } from "./utils/prices";
 
 // Module-level exports for use by utility modules
 export const bot = new Bot(process.env.TELEGRAM_TOKEN!);
+// Global error boundary for unhandled middleware errors
+bot.catch((err) => {
+  try {
+    const ctx = err.ctx as Context | undefined;
+    const path = ctx?.update?.callback_query ? 'callback_query' : ctx?.update?.message ? 'message' : 'update';
+    console.error(`Bot error while handling ${path}:`, err.error || err);
+  } catch (e) {
+    console.error('Bot error (logging failed):', err);
+  }
+});
 export const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
 const startTime = Date.now();
 const gameDb = GameDatabase.getInstance();
@@ -2720,7 +2730,7 @@ bot.command(["privatekey", "pk"], async (ctx: Context) => {
       "",
       `Private Key (Array Format):\n<code>${privateKeyString}</code>`,
       "",
-      `Private Key (Base58 Format):\n<code>${Buffer.from(
+      `Private Key (Base64 Format):\n<code>${Buffer.from(
         playerData.keypair.secretKey
       ).toString("base64")}</code>`,
       "",
