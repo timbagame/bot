@@ -1037,11 +1037,11 @@ bot.command("balance", async (ctx: Context) => {
       : ctx.from?.first_name || "User";
     const walletAddress = playerData.keypair.publicKey.toBase58();
 
-    const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
+    // const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
     
     const response = [
       `<b>${username}</b>`,
-      `<code>${shortAddress}</code>`,
+      `<code>${walletAddress}</code>`,
       "",
       `${wallet.formatSolBalance(solDisplayLamports)} SOL`,
     ];
