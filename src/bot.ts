@@ -318,7 +318,7 @@ const updateGameMessageSafely = async (
  * Dynamic wallet UI that loads balances automatically
  */
 
-const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
+const showWalletUI = async (ctx: any) => {
   const telegramId = BigInt(ctx.from?.id || 0) as bigint;
   const keypair = wallet.getKeyPair(telegramId);
   const walletAddress = keypair.publicKey.toBase58();
@@ -328,44 +328,6 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
 
   // Wallet video file_id
   const walletVideoFileId = WINNER_VIDEO_ID;
-
-  // Show loading state first (only when explicitly requested)
-  if (showLoadingMessage) {
-    const loadingContent = `⏳ Loading balances...`;
-
-    const loadingCaption = [
-      loadingContent,
-      "",
-      `<code>${walletAddress}</code>`,
-    ];
-
-    // Try to edit existing message as media, if fails send new video
-    try {
-      await ctx.editMessageMedia(
-        {
-          type: "video",
-          media: walletVideoFileId,
-          caption: loadingCaption.join("\n"),
-          parse_mode: "HTML",
-        },
-        {
-          reply_markup: createWalletKeyboard(),
-        }
-      );
-    } catch (error) {
-      // If edit fails, delete old message and send new video
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
-      await ctx.replyWithVideo(walletVideoFileId, {
-        caption: loadingCaption.join("\n"),
-        parse_mode: "HTML",
-        reply_markup: createWalletKeyboard(),
-        reply_to_message_id: ctx.message?.message_id,
-      });
-    }
-  }
 
   try {
     // Use cached wallet data
@@ -398,9 +360,8 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
       walletAddress
     );
 
-    // Render final wallet UI
-    if (showLoadingMessage) {
-      // When loading message was shown, we expect to edit that message
+    // Try to update current message; if not possible, send a fresh one
+    try {
       await ctx.editMessageMedia(
         {
           type: "video",
@@ -412,8 +373,8 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
           reply_markup: createWalletKeyboard(),
         }
       );
-    } else {
-      // No loading message shown: send the final message directly
+    } catch (e) {
+      try { await ctx.deleteMessage(); } catch {}
       await ctx.replyWithVideo(walletVideoFileId, {
         caption,
         parse_mode: "HTML",
@@ -432,30 +393,27 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
       "<i>Tap Refresh to try again</i>",
     ];
 
-    if (showLoadingMessage) {
-      try {
-        await ctx.editMessageMedia(
-          {
-            type: "video",
-            media: walletVideoFileId,
-            caption: errorResponse.join("\n"),
-            parse_mode: "HTML",
-          },
-          {
-            reply_markup: createWalletKeyboard(),
-          }
-        );
-        return;
-      } catch {}
+    try {
+      await ctx.editMessageMedia(
+        {
+          type: "video",
+          media: walletVideoFileId,
+          caption: errorResponse.join("\n"),
+          parse_mode: "HTML",
+        },
+        {
+          reply_markup: createWalletKeyboard(),
+        }
+      );
+    } catch (e) {
+      try { await ctx.deleteMessage(); } catch {}
+      await ctx.replyWithVideo(walletVideoFileId, {
+        caption: errorResponse.join("\n"),
+        parse_mode: "HTML",
+        reply_markup: createWalletKeyboard(),
+        reply_to_message_id: ctx.message?.message_id,
+      });
     }
-
-    // Fallback: send a fresh message
-    await ctx.replyWithVideo(walletVideoFileId, {
-      caption: errorResponse.join("\n"),
-      parse_mode: "HTML",
-      reply_markup: createWalletKeyboard(),
-      reply_to_message_id: ctx.message?.message_id,
-    });
   }
 };
 
@@ -1028,7 +986,7 @@ bot.command("balance", async (ctx: Context) => {
       } catch {}
 
       // Show final wallet UI directly (no interim loading text)
-      await showWalletUI(ctx, false);
+      await showWalletUI(ctx);
     } catch (error) {
       await handleCommandError(ctx, error, "balance");
     }
@@ -3812,7 +3770,7 @@ bot.callbackQuery("main_wallet", async (ctx) => {
   console.log("🔔 WALLET BUTTON PRESSED by user:", ctx.from?.id);
   try {
     // Use cached data if available, don't force refresh unless explicitly requested
-    await showWalletUI(ctx, true);
+    await showWalletUI(ctx);
     await ctx.answerCallbackQuery();
     console.log("✅ Wallet UI shown successfully");
   } catch (error) {
@@ -3827,7 +3785,7 @@ bot.callbackQuery("wallet_refresh", async (ctx) => {
     const cacheKey = getWalletCacheKey(ctx.from?.id || "");
     walletDataCache.delete(cacheKey);
 
-    await showWalletUI(ctx, true);
+    await showWalletUI(ctx);
     await ctx.answerCallbackQuery();
   } catch (error) {
     console.error("Error in wallet_refresh:", error);
