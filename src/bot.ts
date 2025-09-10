@@ -25,7 +25,7 @@ import {
   JUPITER_BASE_URL,
 } from "./utils/constants";
 import { mergeWsolIntoSol } from "./utils/balance";
-import { createDmMessageAdapter } from "./utils/ctx-adapter";
+// import { createDmMessageAdapter } from "./utils/ctx-adapter";
 import {
   createMainMenuKeyboard,
   createWalletKeyboard,
@@ -329,7 +329,7 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
   // Wallet video file_id
   const walletVideoFileId = WINNER_VIDEO_ID;
 
-  // Show loading state first
+  // Show loading state first (only when explicitly requested)
   if (showLoadingMessage) {
     const loadingContent = `⏳ Loading balances...`;
 
@@ -339,7 +339,7 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
       `<code>${walletAddress}</code>`,
     ];
 
-    // Try to edit existing message as photo, if fails send new photo
+    // Try to edit existing message as media, if fails send new video
     try {
       await ctx.editMessageMedia(
         {
@@ -353,7 +353,7 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
         }
       );
     } catch (error) {
-      // If edit fails, delete old message and send new photo
+      // If edit fails, delete old message and send new video
       try {
         await ctx.deleteMessage();
       } catch {}
@@ -362,6 +362,7 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
         caption: loadingCaption.join("\n"),
         parse_mode: "HTML",
         reply_markup: createWalletKeyboard(),
+        reply_to_message_id: ctx.message?.message_id,
       });
     }
   }
@@ -397,18 +398,29 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
       walletAddress
     );
 
-    // Update with final wallet data and image
-    await ctx.editMessageMedia(
-      {
-        type: "video",
-        media: walletVideoFileId,
+    // Render final wallet UI
+    if (showLoadingMessage) {
+      // When loading message was shown, we expect to edit that message
+      await ctx.editMessageMedia(
+        {
+          type: "video",
+          media: walletVideoFileId,
+          caption,
+          parse_mode: "HTML",
+        },
+        {
+          reply_markup: createWalletKeyboard(),
+        }
+      );
+    } else {
+      // No loading message shown: send the final message directly
+      await ctx.replyWithVideo(walletVideoFileId, {
         caption,
         parse_mode: "HTML",
-      },
-      {
         reply_markup: createWalletKeyboard(),
-      }
-    );
+        reply_to_message_id: ctx.message?.message_id,
+      });
+    }
   } catch (error) {
     console.error("Error loading balances:", error);
     const errorResponse = [
@@ -420,17 +432,30 @@ const showWalletUI = async (ctx: any, showLoadingMessage: boolean = true) => {
       "<i>Tap Refresh to try again</i>",
     ];
 
-    await ctx.editMessageMedia(
-      {
-        type: "video",
-        media: walletVideoFileId,
-        caption: errorResponse.join("\n"),
-        parse_mode: "HTML",
-      },
-      {
-        reply_markup: createWalletKeyboard(),
-      }
-    );
+    if (showLoadingMessage) {
+      try {
+        await ctx.editMessageMedia(
+          {
+            type: "video",
+            media: walletVideoFileId,
+            caption: errorResponse.join("\n"),
+            parse_mode: "HTML",
+          },
+          {
+            reply_markup: createWalletKeyboard(),
+          }
+        );
+        return;
+      } catch {}
+    }
+
+    // Fallback: send a fresh message
+    await ctx.replyWithVideo(walletVideoFileId, {
+      caption: errorResponse.join("\n"),
+      parse_mode: "HTML",
+      reply_markup: createWalletKeyboard(),
+      reply_to_message_id: ctx.message?.message_id,
+    });
   }
 };
 
@@ -1002,19 +1027,8 @@ bot.command("balance", async (ctx: Context) => {
         clearWalletCache(telegramId);
       } catch {}
 
-      const message = await ctx.reply(
-        "💳 <b>Wallet</b>\n⏳ <i>Loading...</i>",
-        {
-          parse_mode: "HTML",
-          reply_to_message_id: (ctx as any).message?.message_id,
-        }
-      );
-
-      // Adapter context that targets the message we just sent
-      const walletCtx = createDmMessageAdapter(ctx as any, ctx.chat?.id!, message.message_id);
-
-      // Show loading state then balances, handling media edits correctly
-      await showWalletUI(walletCtx, true);
+      // Show final wallet UI directly (no interim loading text)
+      await showWalletUI(ctx, false);
     } catch (error) {
       await handleCommandError(ctx, error, "balance");
     }
