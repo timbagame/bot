@@ -6,7 +6,7 @@ import {
   TransactionHistory,
   createTransactionRecord,
   type TransactionRecord,
-} from "./transaction-history";
+} from "../src/utils/transaction-history";
 
 const dbPath = path.join(process.cwd(), "transaction-history.sqlite");
 
@@ -67,4 +67,3 @@ describe("TransactionHistory", () => {
     expect(row.block_height).toBe(999);
   });
 });
-

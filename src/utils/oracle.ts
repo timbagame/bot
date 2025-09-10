@@ -104,14 +104,21 @@ export class OracleClient {
    */
   public async isHealthy(): Promise<boolean> {
     try {
+      console.log(`🔍 Checking Oracle health at: ${this.oracleApiUrl}/health`);
       const response = await fetch(`${this.oracleApiUrl}/health`, {
         method: "GET",
         signal: AbortSignal.timeout(5000), // 5 second timeout
       });
 
+      console.log(`🔍 Oracle health response: ${response.status} ${response.statusText}`);
       return response.ok;
     } catch (error) {
-      console.warn("Oracle health check failed:", error);
+      console.error("❌ Oracle health check failed:", {
+        url: `${this.oracleApiUrl}/health`,
+        error: error instanceof Error ? error.message : String(error),
+        type: error?.constructor?.name || typeof error,
+        code: (error as any)?.code
+      });
       return false;
     }
   }

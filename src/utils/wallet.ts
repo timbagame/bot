@@ -14,6 +14,8 @@ import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
   createTransferCheckedInstruction,
+  TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
 } from "@solana/spl-token";
 import * as fs from "fs";
 import * as path from "path";
@@ -24,6 +26,19 @@ import {
   CONFIRMATION_TIMEOUT_MS,
 } from "./constants";
 import { formatAmount } from "./format-amount";
+
+// Lightweight dependency handles for testability
+type HttpFetch = (input: string, init?: any) => Promise<{
+  ok: boolean;
+  status: number;
+  json: () => Promise<any>;
+}>;
+
+type WalletDeps = {
+  connection?: Connection;
+  fetch?: HttpFetch;
+  timeNow?: () => number;
+};
 
 // ================================
 // UTILITY FUNCTIONS
@@ -57,6 +72,8 @@ export class WalletManager {
   private static instance: WalletManager;
   private mnemonic: string;
   private connection: Connection;
+  private fetchFn: HttpFetch;
+  private timeNow?: () => number;
   private adminKeypair: Keypair | null = null;
   private lastCallTime: number = 0;
 
@@ -72,9 +89,12 @@ export class WalletManager {
     timestamp: number;
   } | null = null;
 
-  private constructor(mnemonic: string) {
+  private constructor(mnemonic: string, deps?: WalletDeps) {
     this.mnemonic = mnemonic;
-    this.connection = new Connection(process.env.SOLANA_NETWORK!, "confirmed");
+    this.connection =
+      deps?.connection ?? new Connection(process.env.SOLANA_NETWORK!, "confirmed");
+    this.fetchFn = deps?.fetch ?? (globalThis.fetch as any);
+    this.timeNow = deps?.timeNow;
     this.loadAdminKeypair();
   }
 
@@ -83,8 +103,13 @@ export class WalletManager {
     return this.instance;
   }
 
+  // For tests: create a non-singleton instance with injected dependencies
+  public static createForTest(mnemonic: string, deps: WalletDeps): WalletManager {
+    return new WalletManager(mnemonic, deps);
+  }
+
   private async throttle(): Promise<void> {
-    const now = Date.now();
+    const now = this.timeNow ? this.timeNow() : Date.now();
     const timeToWait = WALLET_RATE_LIMIT_MS - (now - this.lastCallTime);
     if (timeToWait > 0) {
       await new Promise((resolve) => setTimeout(resolve, timeToWait));
@@ -456,7 +481,7 @@ export class WalletManager {
 
     // Try SolanaFM API first (good for old tokens)
     try {
-      const response = await fetch(
+      const response = await this.fetchFn(
         `https://api.solana.fm/v0/tokens/${tokenMint}`
       );
       console.log(`📡 SolanaFM API response status: ${response.status}`);
@@ -481,7 +506,7 @@ export class WalletManager {
 
     try {
       // Try Jupiter token list API
-      const response = await fetch(`https://tokens.jup.ag/token/${tokenMint}`);
+      const response = await this.fetchFn(`https://tokens.jup.ag/token/${tokenMint}`);
       console.log(`📡 Jupiter API response status: ${response.status}`);
       if (response.ok) {
         const data = (await response.json()) as any;
@@ -502,7 +527,7 @@ export class WalletManager {
 
     // Try DexScreener API as fallback
     try {
-      const response = await fetch(
+      const response = await this.fetchFn(
         `https://api.dexscreener.com/latest/dex/tokens/${tokenMint}`
       );
       console.log(`📡 DexScreener API response status: ${response.status}`);
@@ -537,7 +562,7 @@ export class WalletManager {
     tokenMint: string
   ): Promise<{ decimals: number }> {
     const cached = this.tokenMetadataCache.get(tokenMint);
-    const now = Date.now();
+    const now = this.timeNow ? this.timeNow() : Date.now();
 
     // Cache token metadata for 5 minutes
     const TOKEN_METADATA_CACHE_DURATION = 5 * 60 * 1000;
@@ -550,7 +575,8 @@ export class WalletManager {
       So11111111111111111111111111111111111111112: 9, // WSOL
       EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: 6, // USDC
       Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: 6, // USDT
-      BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4: 9, // TIMBA
+      BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4: 9, // TIMBA devnet
+      F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump: 6, // TIMBA mainnet
       FPyD25czYkvztSsgyCP7bxd2xnvDAp1LVjyiJhQidaos: 9, // DAOS
     };
 
@@ -598,11 +624,14 @@ export class WalletManager {
   public async findOrCreateAssociatedTokenAccount(
     owner: PublicKey,
     tokenMint: PublicKey,
-    payer: Keypair
+    payer: Keypair,
+    programId: PublicKey = TOKEN_PROGRAM_ID
   ): Promise<{ address: PublicKey; instructions: TransactionInstruction[] }> {
     const associatedTokenAddress = await getAssociatedTokenAddress(
       tokenMint,
-      owner
+      owner,
+      false,
+      programId
     );
     const instructions: TransactionInstruction[] = [];
 
@@ -617,7 +646,8 @@ export class WalletManager {
             payer.publicKey,
             associatedTokenAddress,
             owner,
-            tokenMint
+            tokenMint,
+            programId
           )
         );
       }
@@ -630,12 +660,33 @@ export class WalletManager {
           payer.publicKey,
           associatedTokenAddress,
           owner,
-          tokenMint
+          tokenMint,
+          programId
         )
       );
     }
 
     return { address: associatedTokenAddress, instructions };
+  }
+
+  /**
+   * Check if a token uses Token-2022 program
+   */
+  private async isToken2022(mintAddress: string): Promise<boolean> {
+    try {
+      const mintPubkey = new PublicKey(mintAddress);
+      const mintInfo = await this.connection.getAccountInfo(mintPubkey);
+      
+      if (!mintInfo) {
+        return false;
+      }
+
+      // Check if the owner is Token-2022 program
+      return mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID);
+    } catch (error) {
+      console.log(`Error checking token program for ${mintAddress}:`, error);
+      return false;
+    }
   }
 
   public async transferToken(
@@ -648,6 +699,11 @@ export class WalletManager {
     const tokenMintPubkey = new PublicKey(tokenMint);
     const { decimals } = await this.getTokenMetadata(tokenMint);
 
+    // Detect if this is a Token-2022 token
+    const isToken2022 = await this.isToken2022(tokenMint);
+    const programId = isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+    console.log(`🔍 Token ${tokenMint} is ${isToken2022 ? 'Token-2022' : 'SPL Token'}, using program ${programId.toBase58()}`);
+
     const [
       { address: fromTokenAccount, instructions: fromInstructions },
       { address: toTokenAccount, instructions: toInstructions },
@@ -655,12 +711,14 @@ export class WalletManager {
       this.findOrCreateAssociatedTokenAccount(
         fromKeypair.publicKey,
         tokenMintPubkey,
-        fromKeypair
+        fromKeypair,
+        programId
       ),
       this.findOrCreateAssociatedTokenAccount(
         toAddress,
         tokenMintPubkey,
-        fromKeypair
+        fromKeypair,
+        programId
       ),
     ]);
 
@@ -670,7 +728,9 @@ export class WalletManager {
       toTokenAccount,
       fromKeypair.publicKey,
       amount,
-      decimals
+      decimals,
+      [],
+      programId
     );
 
     const allInstructions = [
@@ -929,10 +989,7 @@ export class WalletManager {
   }
 
   public formatTokenBalance(amount: number, decimals: number): string {
-    const maxFraction = Math.min(6, Math.max(0, decimals));
-    return formatAmount(amount, decimals, {
-      maxFractionDigits: maxFraction,
-      trim: true,
-    });
+    // Use shared formatter for consistent rounding and trimming
+    return formatAmount(amount, decimals, { maxFractionDigits: 6, trim: true });
   }
 }

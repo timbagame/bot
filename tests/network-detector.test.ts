@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { NetworkDetector } from "./network-detector";
+import { NetworkDetector } from "../src/utils/network-detector";
 
 test("detectNetwork identifies devnet", () => {
   const network = NetworkDetector.detectNetwork(

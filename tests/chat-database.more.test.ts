@@ -1,9 +1,13 @@
 import { expect, test, beforeEach } from "bun:test";
 import { rmSync } from "fs";
-import { ChatDatabase } from "./chat-database";
+import { ChatDatabase } from "../src/utils/chat-database";
 
 beforeEach(() => {
-  rmSync("chat-settings.sqlite", { force: true });
+  try {
+    rmSync("chat-settings.sqlite", { force: true });
+  } catch (error) {
+    // Ignore if file is locked or doesn't exist
+  }
   // @ts-ignore reset singleton
   ChatDatabase["instance"] = undefined;
 });
@@ -25,4 +29,3 @@ test("ChatDatabase: chat info save/get and counts", () => {
   expect(info.chat_title).toBe("Cool Chat");
   expect(info.chat_type).toBe("supergroup");
 });
-

@@ -12,6 +12,8 @@ import {
   ADDRESS_DISPLAY_LENGTH,
   GAME_INFO_LIMIT,
   GAME_EXPIRATION_BUFFER_TIME,
+  COINFLIP_START_VIDEO_ID,
+  WINNER_VIDEO_ID,
 } from "./constants";
 import type {
   GameMessage,
@@ -47,12 +49,12 @@ const logAndFormatError = (
 const formatGameTypeWithEmoji = (gameType: string): string => {
   switch (gameType.toLowerCase()) {
     case "coinflip":
-      return "🪙 Coinflip";
+      return "Coinflip";
     case "giveaway":
-      return "🎁 Giveaway";
+      return "Giveaway";
 
     default:
-      return `🎮 ${gameType.charAt(0).toUpperCase() + gameType.slice(1)}`;
+      return `${gameType.charAt(0).toUpperCase() + gameType.slice(1)}`;
   }
 };
 
@@ -234,8 +236,13 @@ export class GameManager {
     ctx: Context,
     publicKey: string
   ): Promise<string> {
+    console.log(`🔍 Getting username for publicKey: ${publicKey}`);
+    
     const playerTelegramId = this.gameDb.getPlayerTelegramId(publicKey);
+    console.log(`🔍 Found telegramId: ${playerTelegramId} for publicKey: ${publicKey}`);
+    
     if (!playerTelegramId) {
+      console.log(`⚠️ No telegram ID found for publicKey: ${publicKey}`);
       return this.formatAddress(publicKey);
     }
 
@@ -243,7 +250,10 @@ export class GameManager {
       ctx,
       playerTelegramId
     );
+    console.log(`🔍 Found username: ${username} for telegramId: ${playerTelegramId}`);
+    
     if (!username) {
+      console.log(`⚠️ No username found for telegramId: ${playerTelegramId}`);
       return this.formatAddress(publicKey);
     }
 
@@ -269,9 +279,18 @@ export class GameManager {
       const maxTickets = gameAccount.maxTickets;
       const minTickets = gameAccount.minTickets;
 
-      const totalPot =
-        providedTotalPot ??
-        (Number(gameAccount.totalAmount || 0) || amount * currentTickets);
+      // Calculate totalPot based on game type
+      let totalPot = providedTotalPot;
+      if (!totalPot) {
+        const gameType = this.getGameType(gameAccount);
+        if (gameType === "giveaway") {
+          // For giveaways, totalPot is just the amount (prize from creator)
+          totalPot = Number(gameAccount.totalAmount || 0) || amount;
+        } else {
+          // For coinflips, totalPot = amount * participants
+          totalPot = Number(gameAccount.totalAmount || 0) || amount * currentTickets;
+        }
+      }
 
       const createdAt = Number(gameAccount.createdAt);
       const timeout = Number(gameAccount.timeout);
@@ -311,7 +330,21 @@ export class GameManager {
   ) {
     const participants = this.getGamePlayers(gamePda.toBase58());
     const currentTickets = participants.length;
-    const totalPot = providedTotalPot ?? amount * currentTickets;
+    
+    // Get game type from database to calculate totalPot correctly
+    let totalPot = providedTotalPot;
+    if (!totalPot) {
+      const gameData = this.gameDb.getGame(gamePda.toBase58());
+      const gameType = gameData?.game_type || "coinflip"; // default to coinflip if not found
+      
+      if (gameType === "giveaway") {
+        // For giveaways, totalPot is just the amount (prize from creator)
+        totalPot = amount;
+      } else {
+        // For coinflips, totalPot = amount * participants
+        totalPot = amount * currentTickets;
+      }
+    }
 
     return {
       currentTickets,
@@ -353,7 +386,49 @@ export class GameManager {
     return keyboard;
   }
 
-  private async formatGameMessage(
+  public async formatAndSendGameMessage(
+    ctx: Context,
+    gamePda: PublicKey,
+    gameType: string,
+    amount: number,
+    creatorUsername: string,
+    status: string,
+    tokenTicker: string,
+    winnerAddress?: string,
+    providedTotalPot?: number
+  ): Promise<any> {
+    const gameAddress = gamePda.toBase58();
+    const formatted = await this.formatGameMessage(
+      ctx, gamePda, gameType, amount, creatorUsername, status, tokenTicker, winnerAddress, providedTotalPot
+    );
+    
+    // Use video for coinflip games, text for others
+    const message = gameType.toLowerCase() === "coinflip" 
+      ? await ctx.replyWithVideo(COINFLIP_START_VIDEO_ID, {
+          caption: formatted.messageText,
+          parse_mode: "HTML",
+          reply_markup: { inline_keyboard: formatted.keyboard },
+        })
+      : await ctx.reply(formatted.messageText, {
+          parse_mode: "HTML",
+          reply_markup: { inline_keyboard: formatted.keyboard },
+        });
+
+    // Save the game message to database and activeGameMessages for future updates
+    this.gameDb.saveGameMessage(
+      gameAddress,
+      message.message_id,
+      message.chat.id
+    );
+    this.activeGameMessages.set(gameAddress, {
+      messageId: message.message_id,
+      chatId: message.chat.id,
+    });
+
+    return message;
+  }
+
+  public async formatGameMessage(
     ctx: Context,
     gamePda: PublicKey,
     gameType: string,
@@ -438,7 +513,8 @@ export class GameManager {
     amount: number,
     creatorUsername: string,
     tokenTicker: string,
-    status: string = "Active"
+    status: string = "Active",
+    replyToMessageId?: number
   ): Promise<number> {
     const { messageText, keyboard } = await this.formatGameMessage(
       ctx,
@@ -451,11 +527,20 @@ export class GameManager {
       undefined
     );
 
-    const message = await ctx.reply(messageText, {
-      parse_mode: "HTML",
-      reply_markup: { inline_keyboard: keyboard },
-      reply_to_message_id: ctx.message?.message_id,
-    });
+    // Use video for coinflip games, text for others
+    const replyTo = replyToMessageId ?? (ctx as any).message?.message_id;
+    const message = gameType.toLowerCase() === "coinflip" 
+      ? await ctx.replyWithVideo(COINFLIP_START_VIDEO_ID, {
+          caption: messageText,
+          parse_mode: "HTML",
+          reply_markup: { inline_keyboard: keyboard },
+          reply_to_message_id: replyTo,
+        })
+      : await ctx.reply(messageText, {
+          parse_mode: "HTML",
+          reply_markup: { inline_keyboard: keyboard },
+          reply_to_message_id: replyTo,
+        });
 
     this.gameDb.saveGameMessage(
       gameAddress,
@@ -498,16 +583,51 @@ export class GameManager {
       );
 
       try {
-        await ctx.api.editMessageText(
-          gameMessage.chatId,
-          gameMessage.messageId,
-          messageText,
-          {
-            parse_mode: "HTML",
-            reply_markup:
-              keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined,
+        // For coinflip games, only switch media when moving to winner video;
+        // otherwise update caption to reduce media edits.
+        if (gameType.toLowerCase() === "coinflip") {
+          const isCompleted = status.toLowerCase() === "completed";
+          if (isCompleted) {
+            const videoId = WINNER_VIDEO_ID;
+            await ctx.api.editMessageMedia(
+              gameMessage.chatId,
+              gameMessage.messageId,
+              {
+                type: "video",
+                media: videoId,
+                caption: messageText,
+                parse_mode: "HTML",
+              },
+              {
+                reply_markup:
+                  keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined,
+              }
+            );
+          } else {
+            // Caption-only update for active coinflip to avoid media churn
+            await ctx.api.editMessageCaption(
+              gameMessage.chatId,
+              gameMessage.messageId,
+              {
+                caption: messageText,
+                parse_mode: "HTML",
+                reply_markup:
+                  keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined,
+              }
+            );
           }
-        );
+        } else {
+          await ctx.api.editMessageText(
+            gameMessage.chatId,
+            gameMessage.messageId,
+            messageText,
+            {
+              parse_mode: "HTML",
+              reply_markup:
+                keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined,
+            }
+          );
+        }
       } catch (error: any) {
         if (error.description?.includes("message is not modified")) {
           return;
@@ -654,7 +774,7 @@ export class GameManager {
           ctx,
           gameData.winner_address
         );
-        winnerLine = `🏆 Winner: @${winnerUsername}`;
+        winnerLine = `Winner: @${winnerUsername}`;
       }
 
       const lines = [
@@ -788,16 +908,23 @@ export class GameManager {
       this.gameDb.savePlayerMapping(creatorPubkey, telegramId.toString());
 
       // Check oracle and generate game secrets
+      console.log("🔍 Checking Oracle health for game creation...");
       const isOracleHealthy = await this.oracleClient.isHealthy();
+      
+      let randomHash: string;
+      let randomHashBuffer: Buffer;
+      
       if (!isOracleHealthy) {
         return {
           success: false,
           error: "❌ Oracle service is unavailable. Please try again later.",
         };
+      } else {
+        console.log("✅ Oracle is healthy, generating proper random hash");
+        const secretsResponse = await this.oracleClient.generateGameSecrets();
+        randomHash = secretsResponse.randomHash;
+        randomHashBuffer = this.oracleClient.hexToBuffer(randomHash);
       }
-
-      const { randomHash } = await this.oracleClient.generateGameSecrets();
-      const randomHashBuffer = this.oracleClient.hexToBuffer(randomHash);
 
       // Create game
       const gameConfig = {
@@ -969,7 +1096,7 @@ export class GameManager {
       );
       return {
         success: false,
-        error: `⚠️ Game created successfully, but failed to auto-join creator!\n\nPlease manually join the game using the "🎮 Join" button.\n\nError: ${errorMsg}`,
+        error: `Game created successfully, but failed to auto-join creator!\n\nPlease manually join the game using the "🎮 Join" button.\n\nError: ${errorMsg}`,
       };
     }
   }
@@ -1432,7 +1559,7 @@ export class GameManager {
     );
     const activeGamesSection =
       validActiveGames.length > 0
-        ? "🎮 <b>Active Games</b>\n\n" + validActiveGames.join("\n\n")
+        ? "<b>Active Games</b>\n\n" + validActiveGames.join("\n\n")
         : "";
 
     // Recent games
@@ -1454,10 +1581,10 @@ export class GameManager {
     const formatSection = this.formatGameSection.bind(this);
 
     const recentGamesSections = [
-      formatSection(categories.won, "🏆 <b>Won Games</b>"),
-      formatSection(categories.lost, "😢 <b>Lost Games</b>"),
-      formatSection(categories.created, "🎮 <b>Created Games</b>"),
-      formatSection(categories.cancelled, "❌ <b>Cancelled Games</b>"),
+      formatSection(categories.won, "<b>Won Games</b>"),
+      formatSection(categories.lost, "<b>Lost Games</b>"),
+      formatSection(categories.created, "<b>Created Games</b>"),
+      formatSection(categories.cancelled, "<b>Cancelled Games</b>"),
     ]
       .filter((section) => section !== "")
       .join("\n");
@@ -1475,7 +1602,19 @@ export class GameManager {
     const activeGames = await Promise.all(
       activeGamesData.map(async (gameData) => {
         try {
-          const gamePda = new PublicKey(gameData.game_address);
+          if (!gameData.game_address) {
+            console.error(`Game data missing address:`, gameData);
+            return null;
+          }
+          
+          let gamePda: PublicKey;
+          try {
+            gamePda = new PublicKey(gameData.game_address);
+          } catch (pkError) {
+            console.error(`Invalid game address format: ${gameData.game_address}`);
+            return null;
+          }
+          
           return this.getGameInfo(ctx, gamePda);
         } catch (error) {
           console.error(`Error fetching game ${gameData.game_address}:`, error);

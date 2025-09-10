@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { parseTransactionError, truncateErrorForCallback } from "./errors";
+import { parseTransactionError, truncateErrorForCallback } from "../src/utils/errors";
 
 test("truncateErrorForCallback returns original message when under limit", () => {
   const message = "short error";

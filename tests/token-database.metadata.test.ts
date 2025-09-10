@@ -1,9 +1,13 @@
 import { expect, test, beforeEach } from "bun:test";
 import { rmSync } from "fs";
-import { TokenDatabase } from "./token-database";
+import { TokenDatabase } from "../src/utils/token-database";
 
 beforeEach(() => {
-  rmSync("tokens.sqlite", { force: true });
+  try {
+    rmSync("tokens.sqlite", { force: true });
+  } catch (error) {
+    // Ignore if file is locked or doesn't exist
+  }
   // @ts-ignore reset singleton
   TokenDatabase["instance"] = undefined;
 });
@@ -31,4 +35,3 @@ test("TokenDatabase: metadata CRUD and cleanup", () => {
   const removed = db.cleanupOldMetadata(3650);
   expect(removed).toBe(0);
 });
-

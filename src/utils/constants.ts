@@ -44,12 +44,13 @@ export const ADDRESS_DISPLAY_LENGTH = 8;
 
 export const DEFAULT_NULL_ADDRESS = "11111111111111111111111111111111";
 export const DEFAULT_TOKEN_MINT =
-  "BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4";
+  "BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4"; // TIMBA devnet (for development)
 export const DEFAULT_TOKEN_TICKER = "TIMBA";
 export const TOKENS_LIST = [
   { mint: "So11111111111111111111111111111111111111112", ticker: "WSOL" },
   { mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", ticker: "USDC" },
   { mint: "FPyD25czYkvztSsgyCP7bxd2xnvDAp1LVjyiJhQidaos", ticker: "DAOS" },
+  { mint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump", ticker: "TIMBA" }, // TIMBA mainnet
 ];
 
 // ================================
@@ -69,3 +70,26 @@ export const JUPITER_MAX_SLIPPAGE_BPS = 500; // 5%
 export const JUPITER_MIN_SLIPPAGE_BPS = 10; // 0.1%
 export const JUPITER_MAX_PRICE_IMPACT = 5; // 5%
 export const JUPITER_PLATFORM_FEE_BPS = 0; // No platform fee by default
+
+// ================================
+// PRICES CONFIG
+// ================================
+
+// Jupiter Price API base
+export const JUPITER_PRICE_URL = "https://price.jup.ag/v6/price";
+// Toggle price fetching (disable to avoid network)
+export const PRICES_ENABLED = (process.env["PRICES_ENABLED"] ?? "true").toLowerCase() !== "false";
+// Cache TTL (ms) for token prices
+export const PRICES_CACHE_TTL_MS = Number(process.env["PRICES_CACHE_TTL_MS"] ?? 60_000);
+// Request timeout (ms)
+export const PRICES_TIMEOUT_MS = Number(process.env["PRICES_TIMEOUT_MS"] ?? 3_000);
+
+// ================================
+// MEDIA FILE IDs 
+// ================================
+
+// General/Winner video - for /start, wallet, and winner announcements
+export const WINNER_VIDEO_ID = "BAACAgEAAxkBAAIE1WivzsUV7cps9-rSyWoah847uOl7AAKqBQACEHGART3oJ4oxnXoCNgQ";
+
+// Coinflip start video - for when coinflip rounds begin
+export const COINFLIP_START_VIDEO_ID = "BAACAgEAAxkBAAIE12ivzwbUNAQX5PGPk5H8K9PEOmKYAAKrBQACEHGARfHRJ8fc8kH3NgQ";

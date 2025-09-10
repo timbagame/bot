@@ -1,5 +1,5 @@
 import { expect, test, beforeAll } from "bun:test";
-import { handleCallbackErrorSafe } from "./context-helpers";
+import { handleCallbackErrorSafe } from "../src/utils/context-helpers";
 
 beforeAll(() => {
   // Minimal env so dynamic imports in handler are safe
@@ -45,4 +45,3 @@ test("handleCallbackErrorSafe: formats generic errors via utilities", async () =
   // Default formatter in errors.ts for simulation/custom program errors
   expect(calls[0]).toContain("Transaction failed");
 });
-

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { Keypair, PublicKey } from "@solana/web3.js";
-import { PDAManager } from "./pda";
+import { PDAManager } from "../src/utils/pda";
 
 test("getOraclePDA derives expected address", () => {
   const programId = Keypair.generate().publicKey;
