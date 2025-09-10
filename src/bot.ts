@@ -4698,6 +4698,13 @@ const getUserState = (userId: string, clear = false) => {
   return state;
 };
 
+// ============
+// Test-only helpers
+// ============
+export const __test_setUserState = (userId: string, state: any) => setUserState(userId, state);
+export const __test_getUserState = (userId: string) => userStates.get(userId);
+export const __test_clearUserState = (userId: string) => userStates.delete(userId);
+
 /**
  * Generate unique transaction ID
  */
