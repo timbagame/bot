@@ -1006,6 +1006,7 @@ bot.command("balance", async (ctx: Context) => {
         "💳 <b>Wallet</b>\n⏳ <i>Loading...</i>",
         {
           parse_mode: "HTML",
+          reply_to_message_id: (ctx as any).message?.message_id,
         }
       );
 
