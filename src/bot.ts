@@ -906,8 +906,8 @@ bot.command("start", async (ctx: Context) => {
     }
 
     const keypair = wallet.getKeyPair(telegramId);
-    const username = ctx.from?.username
-      ? `@${ctx.from.username}`
+    const displayName = ctx.from?.username
+      ? `@${ctx.from.username.toLowerCase()}`
       : ctx.from?.first_name || "User";
     const walletAddress = keypair.publicKey.toBase58();
     const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(
@@ -939,7 +939,7 @@ bot.command("start", async (ctx: Context) => {
 
     // Build welcome message
     const welcomeMessage = [
-      `<b>WELCOME ${username.toUpperCase()}</b>`,
+      `<b>Welcome ${displayName}</b>`,
       "",
       `<code>${walletAddress}</code>`,
     ];
@@ -1032,15 +1032,15 @@ bot.command("balance", async (ctx: Context) => {
       tokenBalancesToShow.splice(wsolIndex, 1);
     }
 
-    const username = ctx.from?.username
-      ? `@${ctx.from.username}`
+    const displayName = ctx.from?.username
+      ? `@${ctx.from.username.toLowerCase()}`
       : ctx.from?.first_name || "User";
     const walletAddress = playerData.keypair.publicKey.toBase58();
 
     // const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
     
     const response = [
-      `<b>${username}</b>`,
+      `<b>${displayName}</b>`,
       `<code>${walletAddress}</code>`,
       "",
       `${wallet.formatSolBalance(solDisplayLamports)} SOL`,
@@ -5308,13 +5308,13 @@ bot.callbackQuery("start_bot", async (ctx) => {
     // Manually trigger start command logic
     const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
-    const username = ctx.from?.username
-      ? `@${ctx.from.username}`
+    const displayName = ctx.from?.username
+      ? `@${ctx.from.username.toLowerCase()}`
       : ctx.from?.first_name || "User";
     const walletAddress = keypair.publicKey.toBase58();
 
     const welcomeMessage = [
-      `<b>WELCOME ${username.toUpperCase()}</b>`,
+      `<b>Welcome ${displayName}</b>`,
       "",
       `<code>${walletAddress}</code>`,
     ];
@@ -5341,8 +5341,8 @@ bot.callbackQuery("back_main", async (ctx) => {
   try {
     const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
-    const username = ctx.from?.username
-      ? `@${ctx.from.username}`
+    const displayName = ctx.from?.username
+      ? `@${ctx.from.username.toLowerCase()}`
       : ctx.from?.first_name || "User";
     const walletAddress = keypair.publicKey.toBase58();
 
@@ -5371,7 +5371,7 @@ bot.callbackQuery("back_main", async (ctx) => {
 
     // Build main menu with same format as /start
     const welcomeMessage = [
-      `<b>WELCOME ${username.toUpperCase()}</b>`,
+      `<b>Welcome ${displayName}</b>`,
       "",
       `<code>${walletAddress}</code>`,
     ];
