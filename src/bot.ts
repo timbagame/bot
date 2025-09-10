@@ -72,6 +72,37 @@ bot.catch((err) => {
     console.error('Bot error (logging failed):', err);
   }
 });
+
+// Ensure all new messages are replies to the triggering message by default
+bot.use(async (ctx, next) => {
+  try {
+    const replyId = ctx.message?.message_id ?? ctx.callbackQuery?.message?.message_id;
+    // Patch ctx.reply to always include reply_to_message_id unless provided
+    const origReply = (ctx as any).reply?.bind(ctx);
+    if (origReply) {
+      (ctx as any).reply = (text: string, other?: any) => {
+        const base = other ?? {};
+        if (replyId && (base.reply_to_message_id === undefined || base.reply_to_message_id === null)) {
+          base.reply_to_message_id = replyId;
+        }
+        return origReply(text, base);
+      };
+    }
+
+    // Patch ctx.replyWithVideo similarly
+    const origReplyWithVideo = (ctx as any).replyWithVideo?.bind(ctx);
+    if (origReplyWithVideo) {
+      (ctx as any).replyWithVideo = (video: any, other?: any) => {
+        const base = other ?? {};
+        if (replyId && (base.reply_to_message_id === undefined || base.reply_to_message_id === null)) {
+          base.reply_to_message_id = replyId;
+        }
+        return origReplyWithVideo(video, base);
+      };
+    }
+  } catch {}
+  await next();
+});
 export const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
 const startTime = Date.now();
 const gameDb = GameDatabase.getInstance();
