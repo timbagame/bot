@@ -955,16 +955,16 @@ bot.command("start", async (ctx: Context) => {
 });
 
 bot.command("balance", async (ctx: Context) => {
-  // Check if it's a private chat
-  if (!isPrivateChat(ctx)) {
-    return ctx.reply("❌ The /balance command can only be used in private chat. Please message me directly!");
-  }
-
   const telegramId = BigInt(ctx.from?.id || 0) as bigint;
 
-  // Use dynamic wallet UI for private chats
+  // Private chats: show full interactive wallet UI
   if (isPrivateChat(ctx)) {
     try {
+      // Ensure fresh data for private wallet view
+      try {
+        clearWalletCache(telegramId);
+      } catch {}
+
       const message = await ctx.reply(
         "💳 <b>Wallet</b>\n⏳ <i>Loading...</i>",
         {
@@ -972,27 +972,41 @@ bot.command("balance", async (ctx: Context) => {
         }
       );
 
-      // Create a context-like object for the wallet UI
-      const walletCtx = {
+      // Adapter context that targets the message we just sent
+      let currentMessageId = message.message_id;
+      const chatId = ctx.chat?.id!;
+      const walletCtx: any = {
+        // Spread first, then explicitly re-assign identity fields
         ...ctx,
+        from: ctx.from,
+        chat: ctx.chat,
         editMessageText: async (text: string, options: any) => {
-          return await ctx.api.editMessageText(
-            ctx.chat?.id!,
-            message.message_id,
-            text,
-            options
-          );
+          return await ctx.api.editMessageText(chatId, currentMessageId, text, options);
+        },
+        editMessageMedia: async (media: any, other?: any) => {
+          return await ctx.api.editMessageMedia(chatId, currentMessageId, media, other);
+        },
+        deleteMessage: async () => {
+          try { await ctx.api.deleteMessage(chatId, currentMessageId); } catch {}
+        },
+        replyWithVideo: async (...args: any[]) => {
+          const sent: any = await (ctx as any).replyWithVideo(...args);
+          if (sent && sent.message_id) {
+            currentMessageId = sent.message_id;
+          }
+          return sent;
         },
       };
 
-      await showWalletUI(walletCtx, false);
+      // Show loading state then balances, handling media edits correctly
+      await showWalletUI(walletCtx, true);
     } catch (error) {
       await handleCommandError(ctx, error, "balance");
     }
     return;
   }
 
-  // Original behavior for group chats
+  // Group/supergroup chats: show a concise, non-interactive summary
   try {
   const playerData = await getPlayerData(telegramId);
   const approvedTokens = tokenManager.getAllApprovedTokensWithMetadata();
