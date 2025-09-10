@@ -25,6 +25,7 @@ import {
   JUPITER_BASE_URL,
 } from "./utils/constants";
 import { mergeWsolIntoSol } from "./utils/balance";
+import { createDmMessageAdapter } from "./utils/ctx-adapter";
 import {
   createMainMenuKeyboard,
   createWalletKeyboard,
@@ -88,6 +89,32 @@ const userSessions = new Map<number, {
 
 // Test-only accessor for verifying session behavior in unit tests
 export const __testSessions = userSessions;
+// Test-only helpers to manipulate wallet cache in unit tests
+export const __test_setWalletCache = (
+  telegramId: bigint | number | string,
+  data: {
+    solBalance: number;
+    tokenBalances: Array<{
+      mint: string;
+      ticker: string;
+      balance: number;
+      decimals: number;
+      rawBalance: string;
+    }>;
+    approvedTokens?: any[];
+  },
+  ts?: number
+) => {
+  const cacheKey = getWalletCacheKey(telegramId as any);
+  walletDataCache.set(cacheKey, {
+    data: {
+      solBalance: data.solBalance,
+      tokenBalances: data.tokenBalances,
+      approvedTokens: data.approvedTokens ?? [],
+    },
+    timestamp: ts ?? Date.now(),
+  });
+};
 
 // Main menu keyboard moved to utils/keyboards.ts
 
@@ -973,30 +1000,7 @@ bot.command("balance", async (ctx: Context) => {
       );
 
       // Adapter context that targets the message we just sent
-      let currentMessageId = message.message_id;
-      const chatId = ctx.chat?.id!;
-      const walletCtx: any = {
-        // Spread first, then explicitly re-assign identity fields
-        ...ctx,
-        from: ctx.from,
-        chat: ctx.chat,
-        editMessageText: async (text: string, options: any) => {
-          return await ctx.api.editMessageText(chatId, currentMessageId, text, options);
-        },
-        editMessageMedia: async (media: any, other?: any) => {
-          return await ctx.api.editMessageMedia(chatId, currentMessageId, media, other);
-        },
-        deleteMessage: async () => {
-          try { await ctx.api.deleteMessage(chatId, currentMessageId); } catch {}
-        },
-        replyWithVideo: async (...args: any[]) => {
-          const sent: any = await (ctx as any).replyWithVideo(...args);
-          if (sent && sent.message_id) {
-            currentMessageId = sent.message_id;
-          }
-          return sent;
-        },
-      };
+      const walletCtx = createDmMessageAdapter(ctx as any, ctx.chat?.id!, message.message_id);
 
       // Show loading state then balances, handling media edits correctly
       await showWalletUI(walletCtx, true);
