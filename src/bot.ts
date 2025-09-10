@@ -5953,6 +5953,7 @@ Supported Platforms:
       type: "buy_contract_address",
       fromToken: "SOL", // Use fromToken to match existing code
       messageId: ctx.callbackQuery?.message?.message_id,
+      chatId: ctx.chat?.id,
     });
 
     await ctx.answerCallbackQuery("Send contract address as message");
