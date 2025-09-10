@@ -73,31 +73,53 @@ bot.catch((err) => {
   }
 });
 
-// Ensure all new messages are replies to the triggering message by default
+// Ensure all new messages are replies to the triggering message by default,
+// and gracefully fall back if the reply target no longer exists.
 bot.use(async (ctx, next) => {
   try {
     const replyId = ctx.message?.message_id ?? ctx.callbackQuery?.message?.message_id;
     // Patch ctx.reply to always include reply_to_message_id unless provided
     const origReply = (ctx as any).reply?.bind(ctx);
     if (origReply) {
-      (ctx as any).reply = (text: string, other?: any) => {
+      (ctx as any).reply = async (text: string, other?: any) => {
         const base = other ?? {};
         if (replyId && (base.reply_to_message_id === undefined || base.reply_to_message_id === null)) {
           base.reply_to_message_id = replyId;
         }
-        return origReply(text, base);
+        try {
+          return await origReply(text, base);
+        } catch (err: any) {
+          const desc: string = err?.description || err?.message || "";
+          if (desc.includes("message to be replied not found")) {
+            // Retry without reply_to_message_id
+            const retry = { ...base };
+            delete retry.reply_to_message_id;
+            return await origReply(text, retry);
+          }
+          throw err;
+        }
       };
     }
 
     // Patch ctx.replyWithVideo similarly
     const origReplyWithVideo = (ctx as any).replyWithVideo?.bind(ctx);
     if (origReplyWithVideo) {
-      (ctx as any).replyWithVideo = (video: any, other?: any) => {
+      (ctx as any).replyWithVideo = async (video: any, other?: any) => {
         const base = other ?? {};
         if (replyId && (base.reply_to_message_id === undefined || base.reply_to_message_id === null)) {
           base.reply_to_message_id = replyId;
         }
-        return origReplyWithVideo(video, base);
+        try {
+          return await origReplyWithVideo(video, base);
+        } catch (err: any) {
+          const desc: string = err?.description || err?.message || "";
+          if (desc.includes("message to be replied not found")) {
+            const retry = { ...base };
+            delete retry.reply_to_message_id;
+            return await origReplyWithVideo(video, retry);
+          }
+          throw err;
+        }
       };
     }
   } catch {}
@@ -3642,12 +3664,7 @@ bot.on("message:text", async (ctx, next) => {
       return await next();
     }
     
-    // Delete the user's message to keep chat clean
-    try {
-      await ctx.deleteMessage();
-    } catch (error) {
-      console.log("Could not delete user message:", error);
-    }
+    // Keep user's message (avoid deleting to preserve reply chain)
     
     // Clear the session
     userSessions.delete(ctx.from?.id || 0);
@@ -3828,7 +3845,7 @@ bot.callbackQuery("wallet_settings", async (ctx) => {
 
     const response = [`<pre>${settingsContent}</pre>`];
 
-    // Try to edit as text, if fails (because current message has media), delete and send new
+    // Try to edit as text; if it fails (e.g., current message has media), send a new message without deleting the original
     try {
       await ctx.editMessageText(response.join("\n"), {
         parse_mode: "HTML",
@@ -3840,11 +3857,6 @@ bot.callbackQuery("wallet_settings", async (ctx) => {
           .row(),
       });
     } catch (error) {
-      // If edit fails because message has media, delete and send new text message
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
       await ctx.reply(response.join("\n"), {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
@@ -3906,18 +3918,13 @@ bot.callbackQuery("cmd_withdraw", async (ctx) => {
 
     keyboard.text("← Back to Wallet", "main_wallet").row();
 
-    // Try to edit as text, if fails (because current message has media), delete and send new
+    // Try to edit as text; if it fails (e.g., media message), send a new message without deleting the original
     try {
       await ctx.editMessageText(response.join("\n"), {
         parse_mode: "HTML",
         reply_markup: keyboard,
       });
     } catch (error) {
-      // If edit fails because message has media, delete and send new text message
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
       await ctx.reply(response.join("\n"), {
         parse_mode: "HTML",
         reply_markup: keyboard,
@@ -4015,7 +4022,7 @@ bot.callbackQuery("cmd_history", async (ctx) => {
         "Start trading to see your transaction history here!",
       ].join("\n");
 
-      // Try to edit as text, if fails (because current message has media), delete and send new
+      // Try to edit as text; if it fails (e.g., media message), send a new one without deleting
       try {
         await ctx.editMessageText(noTxResponse, {
           parse_mode: "HTML",
@@ -4027,11 +4034,6 @@ bot.callbackQuery("cmd_history", async (ctx) => {
             .row(),
         });
       } catch (error) {
-        // If edit fails because message has media, delete and send new text message
-        try {
-          await ctx.deleteMessage();
-        } catch {}
-
         await ctx.reply(noTxResponse, {
           parse_mode: "HTML",
           reply_markup: new InlineKeyboard()
@@ -4086,7 +4088,7 @@ bot.callbackQuery("cmd_history", async (ctx) => {
       );
     }
 
-    // Try to edit as text, if fails (because current message has media), delete and send new
+    // Try to edit as text; if it fails (e.g., media message), send a new message without deleting the original
     try {
       await ctx.editMessageText(historyMessage.join("\n"), {
         parse_mode: "HTML",
@@ -4102,11 +4104,6 @@ bot.callbackQuery("cmd_history", async (ctx) => {
           .row(),
       });
     } catch (error) {
-      // If edit fails because message has media, delete and send new text message
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
       await ctx.reply(historyMessage.join("\n"), {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
@@ -4134,7 +4131,7 @@ bot.callbackQuery("cmd_history", async (ctx) => {
       "Please try again or check your internet connection.",
     ].join("\n");
 
-    // Try to edit as text, if fails (because current message has media), delete and send new
+    // Try to edit as text; if it fails (e.g., media message), send a new one without deleting
     try {
       await ctx.editMessageText(errorResponse, {
         parse_mode: "HTML",
@@ -4144,11 +4141,6 @@ bot.callbackQuery("cmd_history", async (ctx) => {
           .row(),
       });
     } catch (error) {
-      // If edit fails because message has media, delete and send new text message
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
       await ctx.reply(errorResponse, {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
@@ -5066,7 +5058,7 @@ System Overview:
       `• Personal wallet statistics`,
     ];
 
-    // Try to edit as text, if fails (because current message has media), delete and send new
+    // Try to edit as text; if it fails (e.g., media message), send a new one without deleting
     try {
       await ctx.editMessageText(settingsContent.join("\n"), {
         parse_mode: "HTML",
@@ -5082,9 +5074,7 @@ System Overview:
       });
     } catch (error) {
       // If edit fails because message has media, delete and send new text message
-      try {
-        await ctx.deleteMessage();
-      } catch {}
+      
 
       await ctx.reply(settingsContent.join("\n"), {
         parse_mode: "HTML",
@@ -5168,9 +5158,7 @@ Balance Overview:
       });
     } catch (error) {
       // If edit fails because message has media, delete and send new text message
-      try {
-        await ctx.deleteMessage();
-      } catch {}
+      
 
       await ctx.reply(statsContent.join("\n"), {
         parse_mode: "HTML",
@@ -5286,9 +5274,7 @@ Service Health:
       });
     } catch (error) {
       // If edit fails because message has media, delete and send new text message
-      try {
-        await ctx.deleteMessage();
-      } catch {}
+      
 
       await ctx.reply(systemContent.join("\n"), {
         parse_mode: "HTML",
@@ -5312,9 +5298,7 @@ Service Health:
 bot.callbackQuery("start_bot", async (ctx) => {
   try {
     // Delete the info message
-    try {
-      await ctx.deleteMessage();
-    } catch {}
+      
 
     // Manually trigger start command logic
     const telegramId = BigInt(ctx.from?.id || 0) as bigint;
@@ -5392,11 +5376,6 @@ bot.callbackQuery("back_main", async (ctx) => {
       welcomeMessage.push("", `💰 <b>$${totalUSDBalance.toFixed(2)} USD</b>`);
     }
 
-    // Always delete current message and send new animated one for consistency
-    try {
-      await ctx.deleteMessage();
-    } catch {}
-
     // Use same video as /start
     await ctx.replyWithVideo(WINNER_VIDEO_ID, {
       caption: welcomeMessage.join("\n"),
@@ -5435,11 +5414,6 @@ bot.callbackQuery("cmd_help", async (ctx) => {
         reply_markup: helpKeyboard,
       });
     } catch (error) {
-      // If edit fails because message has media, delete and send new text message
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
       await ctx.reply(helpContent, {
         parse_mode: "HTML",
         reply_markup: helpKeyboard,
@@ -6024,11 +5998,6 @@ Supported Platforms:
         reply_markup: keyboard,
       });
     } catch (error) {
-      // If edit fails because message has media, delete and send new text message
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
       await ctx.reply(response.join("\n"), {
         parse_mode: "HTML",
         reply_markup: keyboard,
@@ -7934,8 +7903,6 @@ bot.on("message:text", async (ctx, next) => {
   const userMessage = ctx.message.text.trim();
 
   try {
-    // Delete user's message to keep chat clean
-    await ctx.deleteMessage();
 
     if (userState.type === "send_custom_amount") {
       await handleCustomAmountInput(ctx, userState, userMessage);
@@ -7978,11 +7945,6 @@ bot.on("message:text", async (ctx, next) => {
         }
       );
     } catch (editError) {
-      // If edit fails, delete and send new message
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
       await ctx.reply("❌ <b>Error processing input</b>\n\nPlease try again.", {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
