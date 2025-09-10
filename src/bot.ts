@@ -907,7 +907,7 @@ bot.command("start", async (ctx: Context) => {
 
     const keypair = wallet.getKeyPair(telegramId);
     const displayName = ctx.from?.username
-      ? `@${ctx.from.username.toLowerCase()}`
+      ? `@${ctx.from.username}`
       : ctx.from?.first_name || "User";
     const walletAddress = keypair.publicKey.toBase58();
     const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(
@@ -1033,7 +1033,7 @@ bot.command("balance", async (ctx: Context) => {
     }
 
     const displayName = ctx.from?.username
-      ? `@${ctx.from.username.toLowerCase()}`
+      ? `@${ctx.from.username}`
       : ctx.from?.first_name || "User";
     const walletAddress = playerData.keypair.publicKey.toBase58();
 
@@ -5309,7 +5309,7 @@ bot.callbackQuery("start_bot", async (ctx) => {
     const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
     const displayName = ctx.from?.username
-      ? `@${ctx.from.username.toLowerCase()}`
+      ? `@${ctx.from.username}`
       : ctx.from?.first_name || "User";
     const walletAddress = keypair.publicKey.toBase58();
 
@@ -5342,7 +5342,7 @@ bot.callbackQuery("back_main", async (ctx) => {
     const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
     const displayName = ctx.from?.username
-      ? `@${ctx.from.username.toLowerCase()}`
+      ? `@${ctx.from.username}`
       : ctx.from?.first_name || "User";
     const walletAddress = keypair.publicKey.toBase58();
 
@@ -5838,67 +5838,7 @@ bot.callbackQuery("admin_system", async (ctx) => {
   }
 });
 
-// Placeholder handlers for admin sub-menus
-const adminPlaceholderHandler = (menuName: string, backCallback: string) => {
-  return async (ctx: any) => {
-    try {
-      await ctx.editMessageText(
-        `🔧 <b>${menuName.toUpperCase()}</b>\n\n` +
-          "⚠️ This admin feature is coming soon!\n\n" +
-          "This section will include advanced management tools for administrators.",
-        {
-          parse_mode: "HTML",
-          reply_markup: new InlineKeyboard()
-            .text(`⬅️ Back`, backCallback)
-            .text("🏠 Main", "back_main")
-            .row(),
-        }
-      );
-      await ctx.answerCallbackQuery(`🔧 ${menuName}`);
-    } catch (error) {
-      console.error(`Error in ${menuName.toLowerCase()}:`, error);
-      await ctx.answerCallbackQuery("❌ Error loading menu");
-    }
-  };
-};
-
-// Register placeholder admin handlers
-bot.callbackQuery(
-  "admin_users",
-  adminPlaceholderHandler("User Management", "admin_menu")
-);
-bot.callbackQuery(
-  "admin_settings",
-  adminPlaceholderHandler("System Settings", "admin_menu")
-);
-bot.callbackQuery(
-  "admin_logs",
-  adminPlaceholderHandler("System Logs", "admin_menu")
-);
-bot.callbackQuery(
-  "admin_add_token",
-  adminPlaceholderHandler("Add Token", "admin_tokens")
-);
-bot.callbackQuery(
-  "admin_token_stats",
-  adminPlaceholderHandler("Token Statistics", "admin_tokens")
-);
-bot.callbackQuery(
-  "admin_default_tokens",
-  adminPlaceholderHandler("Default Tokens", "admin_tokens")
-);
-bot.callbackQuery(
-  "admin_active_games",
-  adminPlaceholderHandler("Active Games", "admin_games")
-);
-bot.callbackQuery(
-  "admin_game_stats",
-  adminPlaceholderHandler("Game Statistics", "admin_games")
-);
-bot.callbackQuery(
-  "admin_cleanup",
-  adminPlaceholderHandler("System Cleanup", "admin_games")
-);
+// (Removed admin placeholder handlers)
 
 // ================================
 // BUY/SELL INTERFACE HANDLERS
