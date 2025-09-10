@@ -2919,7 +2919,6 @@ bot.on("callback_query", async (ctx, next) => {
     "cmd_swap",
     "cmd_wrap",
     "cmd_privatekey",
-    "admin_menu",
     "cmd_oracle",
     "cmd_scan",
     "scan_confirm",
