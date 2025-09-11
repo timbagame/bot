@@ -1,12 +1,19 @@
 import { expect, test, beforeAll } from "bun:test";
-import { bot, __testSessions, wallet } from "../src/bot";
+
+// Set required env vars before importing the bot
+process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
+process.env.MNEMONIC =
+  process.env.MNEMONIC ||
+  "test walk nut penalty hip pave soap entry language right filter choice";
+process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost";
+
+let bot: any;
+let __testSessions: any;
+let wallet: any;
 
 // Stub Telegram API calls to avoid network
-beforeAll(() => {
-  // Ensure envs present for module init
-  process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
-  process.env.MNEMONIC = process.env.MNEMONIC || "test walk nut penalty hip pave soap entry language right filter choice";
-  process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost";
+beforeAll(async () => {
+  ({ bot, __testSessions, wallet } = await import("../src/bot"));
 
   // Replace global fetch used by grammy API with a dummy success
   // for methods invoked in these handlers

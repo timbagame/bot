@@ -1,11 +1,27 @@
 import { expect, test, beforeAll } from "bun:test";
-import { bot, wallet, __test_setUserState, __test_getUserState, __test_clearUserState } from "../src/bot";
 
-beforeAll(() => {
-  process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
-  process.env.MNEMONIC = process.env.MNEMONIC || "test walk nut penalty hip pave soap entry language right filter choice";
-  process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost";
-  process.env["PRICES_ENABLED"] = "false";
+// Ensure required env vars are set before importing the bot module
+process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
+process.env.MNEMONIC =
+  process.env.MNEMONIC ||
+  "test walk nut penalty hip pave soap entry language right filter choice";
+process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost";
+process.env["PRICES_ENABLED"] = "false";
+
+let bot: any;
+let wallet: any;
+let __test_setUserState: any;
+let __test_getUserState: any;
+let __test_clearUserState: any;
+
+beforeAll(async () => {
+  ({
+    bot,
+    wallet,
+    __test_setUserState,
+    __test_getUserState,
+    __test_clearUserState,
+  } = await import("../src/bot"));
 
   // Provide botInfo to avoid getMe()
   (bot as any).botInfo = {
