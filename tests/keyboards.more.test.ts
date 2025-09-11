@@ -2,6 +2,12 @@ import { expect, test, describe } from "bun:test";
 import {
   createMainMenuKeyboard,
   createWalletKeyboard,
+  createBackToInfoMainKeyboard,
+  createScanPromptKeyboard,
+  createScanResultKeyboard,
+  createConfirmWrapKeyboard,
+  createConfirmBuyKeyboard,
+  createConfirmSellKeyboard,
   createAmountSelectionKeyboard,
   createPlayerSelectionKeyboard,
   createGameConfirmKeyboard,
@@ -68,6 +74,51 @@ describe("keyboards: main and wallet", () => {
     expect(callbacks).toContain("cmd_history");
     expect(callbacks).toContain("wallet_settings");
     expect(callbacks).toContain("back_main");
+  });
+});
+
+describe("keyboards: misc menus", () => {
+  test("back to info keyboard provides navigation callbacks", () => {
+    const kb = createBackToInfoMainKeyboard();
+    const callbacks = extractCallbacks(kb);
+    expect(callbacks).toEqual(["main_settings", "back_main"]);
+  });
+
+  test("scan prompt keyboard includes confirm and navigation", () => {
+    const kb = createScanPromptKeyboard();
+    const callbacks = extractCallbacks(kb);
+    expect(callbacks).toContain("scan_confirm");
+    expect(callbacks).toContain("main_settings");
+    expect(callbacks).toContain("back_main");
+  });
+
+  test("scan result keyboard includes rescan and navigation", () => {
+    const kb = createScanResultKeyboard();
+    const callbacks = extractCallbacks(kb);
+    expect(callbacks).toContain("scan_confirm");
+    expect(callbacks).toContain("main_settings");
+    expect(callbacks).toContain("back_main");
+  });
+
+  test("confirm wrap keyboard embeds amount and cancel", () => {
+    const kb = createConfirmWrapKeyboard(42);
+    const callbacks = extractCallbacks(kb);
+    expect(callbacks).toContain("confirm_wrap_42");
+    expect(callbacks).toContain("cmd_wrap");
+  });
+
+  test("confirm buy keyboard embeds tx id and back to buy", () => {
+    const kb = createConfirmBuyKeyboard("abc123");
+    const callbacks = extractCallbacks(kb);
+    expect(callbacks).toContain("confirm_buy_abc123");
+    expect(callbacks).toContain("cmd_buy");
+  });
+
+  test("confirm sell keyboard embeds tx id and cancel", () => {
+    const kb = createConfirmSellKeyboard("tx789");
+    const callbacks = extractCallbacks(kb);
+    expect(callbacks).toContain("confirm_sell_tx789");
+    expect(callbacks).toContain("cmd_sell");
   });
 });
 
