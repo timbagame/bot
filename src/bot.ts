@@ -44,7 +44,7 @@ import {
   getFeeWarningMessage,
 } from "./utils/keyboards";
 import { buildWalletCaption } from "./utils/wallet-ui";
-import { showWalletUI as showWalletUIHandler, onMainWallet, onWalletRefresh, onWalletSettings } from "./handlers/wallet";
+import { showWalletUI as showWalletUIHandler, onMainWallet, onWalletRefresh, onWalletSettings, onBalance } from "./handlers/wallet";
 import { inferMaxPlayers } from "./utils/arg-parsing";
 import type {
   PlayerData,
@@ -330,16 +330,6 @@ const updateGameMessageSafely = async (
  */
 
 const showWalletUI = async (ctx: any) => {
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
-  const keypair = wallet.getKeyPair(telegramId);
-  const walletAddress = keypair.publicKey.toBase58();
-  const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(
-    -6
-  )}`;
-
-  // Wallet video file_id
-  const walletVideoFileId = WINNER_VIDEO_ID;
-
   await showWalletUIHandler(ctx, {
     wallet,
     getCachedWalletData,
@@ -909,80 +899,17 @@ bot.command("start", async (ctx: Context) => {
 });
 
 bot.command("balance", async (ctx: Context) => {
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
-
-  // Private chats: show full interactive wallet UI
-  if (isPrivateChat(ctx)) {
-    try {
-      // Ensure fresh data for private wallet view
-      try {
-        clearWalletCache(telegramId);
-      } catch {}
-
-      // Show final wallet UI directly (no interim loading text)
-      await showWalletUI(ctx);
-    } catch (error) {
-      await handleCommandError(ctx, error, "balance");
-    }
-    return;
-  }
-
-  // Group/supergroup chats: show a concise, non-interactive summary
-  try {
-  const playerData = await getPlayerData(telegramId);
-  const approvedTokens = tokenManager.getAllApprovedTokensWithMetadata();
-  const tokenBalancesToShow = await buildTokenBalances(
-      telegramId,
-      approvedTokens
-    );
-
-    // Merge WSOL into native SOL for display in group chats
-    const WSOL_MINT =
-      (TOKENS_LIST.find((t) => t.ticker === "WSOL")?.mint as string) ||
-      "So11111111111111111111111111111111111111112";
-    let solDisplayLamports = playerData.solBalance;
-    const wsolIndex = tokenBalancesToShow.findIndex(
-      (t) => t.mint === WSOL_MINT
-    );
-    if (wsolIndex !== -1) {
-      solDisplayLamports += tokenBalancesToShow[wsolIndex]!.balance; // balance is in raw units (lamports for WSOL)
-      tokenBalancesToShow.splice(wsolIndex, 1);
-    }
-
-    const displayName = ctx.from?.username
-      ? `@${ctx.from.username}`
-      : ctx.from?.first_name || "User";
-    const walletAddress = playerData.keypair.publicKey.toBase58();
-
-    // const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
-    
-    const response = [
-      `<b>${displayName}</b>`,
-      `<code>${walletAddress}</code>`,
-      "",
-      `${wallet.formatSolBalance(solDisplayLamports)} SOL`,
-    ];
-
-    if (tokenBalancesToShow.length > 0) {
-      for (const token of tokenBalancesToShow.slice(0, 4)) {
-        const balance = wallet.formatTokenBalance(
-          token.balance,
-          token.decimals
-        );
-        response.push(`${balance} ${token.ticker}`);
-      }
-      if (tokenBalancesToShow.length > 4) {
-        response.push(`<i>+${tokenBalancesToShow.length - 4} more tokens</i>`);
-      }
-    }
-
-    await ctx.reply(response.join("\n"), {
-      parse_mode: "HTML",
-      reply_to_message_id: ctx.message?.message_id,
-    });
-  } catch (error) {
-    await handleCommandError(ctx, error, "balance");
-  }
+  await onBalance(ctx as any, {
+    isPrivateChat,
+    clearWalletCache,
+    showWalletUI: (c: any) => showWalletUI(c),
+    getPlayerData,
+    getApprovedTokens: () => tokenManager.getAllApprovedTokensWithMetadata(),
+    buildTokenBalances,
+    TOKENS_LIST,
+    wallet,
+    handleCommandError,
+  });
 });
 
 
@@ -6440,7 +6367,7 @@ bot.on("callback_query", async (ctx, next) => {
 
   const txId = callbackData.replace("confirm_buy_", "");
   // Handle both transactionCache (new format with tx_ prefix) and old format
-  let buyData = transactionCache.get(txId) || pendingTransactions.get(txId);
+  let buyData = transactionCache.get(txId) || getPendingTransaction<any>(txId, false);
 
   if (!buyData) {
     await ctx.answerCallbackQuery("❌ Transaction expired. Please try again.");
@@ -6715,7 +6642,7 @@ bot.on("callback_query", async (ctx, next) => {
   }
 
   const txId = callbackData.replace("buy_retry_exact_", "");
-  const buyData = transactionCache.get(txId) || pendingTransactions.get(txId);
+  const buyData = transactionCache.get(txId) || getPendingTransaction<any>(txId, false);
 
   if (!buyData) {
     await ctx.answerCallbackQuery("❌ Transaction expired. Please try again.");
@@ -6735,9 +6662,9 @@ bot.on("callback_query", async (ctx, next) => {
     if (transactionCache.has(txId)) {
       buyData.amount = newAmount;
       transactionCache.set(txId, buyData);
-    } else if (pendingTransactions.has(txId)) {
+    } else {
       buyData.amount = newAmount;
-      pendingTransactions.set(txId, buyData);
+      storePendingTransaction(txId, buyData);
     }
 
     // Show updated confirmation with new amount
@@ -7671,10 +7598,10 @@ bot.on("message:text", async (ctx, next) => {
     }
     
     // Clear state after successful processing
-    userStates.delete(userId);
+    getUserState(userId, true);
   } catch (error) {
     // Clear state even on error to prevent stuck states
-    userStates.delete(userId);
+    getUserState(userId, true);
     console.error("Error handling user input:", error);
 
     // Try to update the original message with error
@@ -8079,7 +8006,7 @@ ${contractAddress}</pre>`,
     }
 
     // Clear user state since we now have direct buy buttons with contract address in callback
-    userStates.delete(ctx.from.id.toString());
+    getUserState(ctx.from.id.toString(), true);
   } catch (error: any) {
     console.error("Error processing contract address:", error);
 

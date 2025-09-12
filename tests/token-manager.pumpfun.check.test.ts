@@ -11,7 +11,8 @@ function makeWallet() {
 
 describe("TokenManager.checkPumpFunToken", () => {
   test("returns false when not potential pump.fun token", async () => {
-    const tm = new TokenManager(makeWallet());
+    // Use public API: create instance via getInstance instead of constructor
+    const tm = (TokenManager as any).getInstance(makeWallet(), "MINT", "TOK");
     const res = await tm.checkPumpFunToken("not-a-mint");
     expect(res.isPumpFun).toBe(false);
     expect(res.isGraduated).toBe(false);
@@ -22,7 +23,7 @@ describe("TokenManager.checkPumpFunToken", () => {
     const orig = PumpFunClient.prototype.isPumpFunToken;
     PumpFunClient.prototype.isPumpFunToken = (async () => { throw new Error("boom"); }) as any;
     try {
-      const tm = new TokenManager(makeWallet());
+      const tm = (TokenManager as any).getInstance(makeWallet(), "MINT2", "TOK2");
       // Valid base58 32-byte pubkey length string (44 chars)
       const res = await tm.checkPumpFunToken("11111111111111111111111111111111R7V3pV");
       expect(res.isPumpFun).toBe(false);
@@ -32,4 +33,3 @@ describe("TokenManager.checkPumpFunToken", () => {
     }
   });
 });
-

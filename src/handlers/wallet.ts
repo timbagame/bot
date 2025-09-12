@@ -4,6 +4,7 @@ export type ShowWalletUIDeps = {
   wallet: {
     getKeyPair: (id: bigint) => any;
     formatSolBalance: (lamports: number) => string;
+    formatTokenBalance?: (n: number, d: number) => string;
   };
   getCachedWalletData: (telegramId: bigint) => Promise<{ solBalance: number; tokenBalances: Array<{ mint: string; ticker: string; balance: number; decimals: number }> }>;
   getPriceUSD: (mint: string) => Promise<number>;
@@ -114,5 +115,85 @@ export async function onWalletSettings(ctx: any, deps: WalletHandlersDeps) {
   } catch (error) {
     console.error("Error in wallet_settings:", error);
     await ctx.answerCallbackQuery("❌ Error loading settings");
+  }
+}
+
+// ================================
+// BALANCE COMMAND HANDLER
+// ================================
+
+export type BalanceDeps = {
+  isPrivateChat: (ctx: any) => boolean;
+  clearWalletCache: (telegramId: bigint) => void;
+  showWalletUI: (ctx: any) => Promise<void>;
+  getPlayerData: (telegramId: bigint) => Promise<{ keypair: any; solBalance: number }>;
+  getApprovedTokens: () => Array<{ token_mint: string; token_ticker: string; decimals: number }>;
+  buildTokenBalances: (telegramId: bigint, approvedTokens: any[]) => Promise<Array<{ mint: string; ticker: string; balance: number; decimals: number }>>;
+  TOKENS_LIST: Array<{ mint: string; ticker: string }>;
+  wallet: { formatTokenBalance: (n: number, d: number) => string; formatSolBalance: (n: number) => string };
+  handleCommandError: (ctx: any, error: any, name: string) => Promise<void>;
+};
+
+export async function onBalance(ctx: any, deps: BalanceDeps) {
+  const {
+    isPrivateChat,
+    clearWalletCache,
+    showWalletUI,
+    getPlayerData,
+    getApprovedTokens,
+    buildTokenBalances,
+    TOKENS_LIST,
+    wallet,
+    handleCommandError,
+  } = deps;
+
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+
+  if (isPrivateChat(ctx)) {
+    try {
+      try { clearWalletCache(telegramId); } catch {}
+      await showWalletUI(ctx);
+    } catch (error) {
+      await handleCommandError(ctx, error, "balance");
+    }
+    return;
+  }
+
+  try {
+    const playerData = await getPlayerData(telegramId);
+    const approvedTokens = getApprovedTokens();
+    const tokenBalancesToShow = await buildTokenBalances(telegramId, approvedTokens);
+
+    const WSOL_MINT = (TOKENS_LIST.find((t) => t.ticker === "WSOL")?.mint as string) || "So11111111111111111111111111111111111111112";
+    let solDisplayLamports = playerData.solBalance;
+    const wsolIndex = tokenBalancesToShow.findIndex((t) => t.mint === WSOL_MINT);
+    if (wsolIndex !== -1) {
+      solDisplayLamports += tokenBalancesToShow[wsolIndex]!.balance;
+      tokenBalancesToShow.splice(wsolIndex, 1);
+    }
+
+    const displayName = ctx.from?.username ? `@${ctx.from.username}` : ctx.from?.first_name || "User";
+    const walletAddress = playerData.keypair.publicKey.toBase58();
+
+    const response = [
+      `<b>${displayName}</b>`,
+      `<code>${walletAddress}</code>`,
+      "",
+      `${wallet.formatSolBalance(solDisplayLamports)} SOL`,
+    ];
+
+    if (tokenBalancesToShow.length > 0) {
+      for (const token of tokenBalancesToShow.slice(0, 4)) {
+        const balance = wallet.formatTokenBalance(token.balance, token.decimals);
+        response.push(`${balance} ${token.ticker}`);
+      }
+      if (tokenBalancesToShow.length > 4) {
+        response.push(`<i>+${tokenBalancesToShow.length - 4} more tokens</i>`);
+      }
+    }
+
+    await ctx.reply(response.join("\n"), { parse_mode: "HTML", reply_to_message_id: ctx.message?.message_id });
+  } catch (error) {
+    await handleCommandError(ctx, error, "balance");
   }
 }

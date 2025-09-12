@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { Connection, Keypair } from "@solana/web3.js";
+import { Connection } from "@solana/web3.js";
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
 
@@ -70,4 +70,3 @@ describe("SwapManager.formatQuoteForDisplay", () => {
     expect(msg).toContain("Unsupported provider");
   });
 });
-

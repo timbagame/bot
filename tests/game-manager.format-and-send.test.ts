@@ -33,7 +33,7 @@ describe("GameManager.formatAndSendGameMessage", () => {
     } as any);
     const ctx = ctxStub();
     const pda = new PublicKey("BPFLoader1111111111111111111111111111111111");
-    const msg = await gm.formatAndSendGameMessage(ctx as any, pda, "coinflip", 1_000_000_000, "@creator", "Active", "TOK");
+    await gm.formatAndSendGameMessage(ctx as any, pda, "coinflip", 1_000_000_000, "@creator", "Active", "TOK");
     expect((ctx as any).__calls[0][0]).toBe("video");
     const saved = gm.getActiveGameMessage(pda.toBase58());
     expect(saved?.messageId).toBe(101);
@@ -47,10 +47,9 @@ describe("GameManager.formatAndSendGameMessage", () => {
     } as any);
     const ctx = ctxStub();
     const pda = new PublicKey("BPFLoader2111111111111111111111111111111111");
-    const msg = await gm.formatAndSendGameMessage(ctx as any, pda, "giveaway", 1_000_000_000, "@creator", "Active", "TOK");
+    await gm.formatAndSendGameMessage(ctx as any, pda, "giveaway", 1_000_000_000, "@creator", "Active", "TOK");
     expect((ctx as any).__calls[0][0]).toBe("text");
     const saved = gm.getActiveGameMessage(pda.toBase58());
     expect(saved?.messageId).toBe(202);
   });
 });
-

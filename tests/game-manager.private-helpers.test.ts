@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { GameManager } from "../src/utils/game";
-import { PublicKey } from "@solana/web3.js";
+// PublicKey not needed in this test
 
 function resetGM() {
   // @ts-ignore
@@ -36,4 +36,3 @@ describe("GameManager private helpers", () => {
     expect((gm as any).handleGameProcessingError(new Error("boom"), "addr")).toBe(false);
   });
 });
-
