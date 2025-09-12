@@ -1,4 +1,3 @@
-/* c8 ignore start */
 import { Bot, Context, InlineKeyboard } from "grammy";
 import { run, sequentialize } from "@grammyjs/runner";
 import { WalletManager } from "./utils/wallet";
@@ -57,6 +56,8 @@ import { handleCallbackErrorSafe } from "./utils/context-helpers";
 import { recentUpdateGuard } from "./utils/recent-update";
 import { checkServiceHealth } from "./utils/service-health";
 import { getPriceUSD } from "./utils/prices";
+import { patchReplyBehavior } from "./utils/reply-patch";
+import { getNetworkFromRPC } from "./utils/network-display";
 
 // ================================
 // GLOBAL INSTANCES
@@ -78,66 +79,14 @@ bot.catch((err) => {
 // Ensure all new messages are replies to the triggering message by default,
 // and gracefully fall back if the reply target no longer exists.
 bot.use(async (ctx, next) => {
-  try {
-    const replyId = ctx.message?.message_id ?? ctx.callbackQuery?.message?.message_id;
-    // Patch ctx.reply to always include reply_to_message_id unless provided
-    const origReply = (ctx as any).reply?.bind(ctx);
-    if (origReply) {
-      (ctx as any).reply = async (text: string, other?: any) => {
-        const base = other ?? {};
-        if (replyId && (base.reply_to_message_id === undefined || base.reply_to_message_id === null)) {
-          base.reply_to_message_id = replyId;
-        }
-        try {
-          return await origReply(text, base);
-        } catch (err: any) {
-          const desc: string = err?.description || err?.message || "";
-          if (desc.includes("message to be replied not found")) {
-            // Retry without reply_to_message_id
-            const retry = { ...base };
-            delete retry.reply_to_message_id;
-            return await origReply(text, retry);
-          }
-          throw err;
-        }
-      };
-    }
-
-    // Patch ctx.replyWithVideo similarly
-    const origReplyWithVideo = (ctx as any).replyWithVideo?.bind(ctx);
-    if (origReplyWithVideo) {
-      (ctx as any).replyWithVideo = async (video: any, other?: any) => {
-        const base = other ?? {};
-        if (replyId && (base.reply_to_message_id === undefined || base.reply_to_message_id === null)) {
-          base.reply_to_message_id = replyId;
-        }
-        try {
-          return await origReplyWithVideo(video, base);
-        } catch (err: any) {
-          const desc: string = err?.description || err?.message || "";
-          if (desc.includes("message to be replied not found")) {
-            const retry = { ...base };
-            delete retry.reply_to_message_id;
-            return await origReplyWithVideo(video, retry);
-          }
-          throw err;
-        }
-      };
-    }
-  } catch {}
+  try { patchReplyBehavior(ctx); } catch {}
   await next();
 });
 export const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
 const startTime = Date.now();
 const gameDb = GameDatabase.getInstance();
 
-// Helper function to detect network from RPC URL
-const getNetworkFromRPC = (rpcUrl: string): string => {
-  if (rpcUrl.includes('devnet')) return 'Devnet';
-  if (rpcUrl.includes('testnet')) return 'Testnet';
-  if (rpcUrl.includes('mainnet') || rpcUrl.includes('api.solana.com')) return 'Mainnet';
-  return 'Custom Network';
-};
+// See utils/network-display.ts for getNetworkFromRPC
 
 // Helper moved to utils/service-health.ts as checkServiceHealth
 
@@ -9448,5 +9397,3 @@ setupAnchor()
     console.error("Failed to setup Anchor:", error);
   });
 }
-
-/* c8 ignore stop */
