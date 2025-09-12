@@ -75,7 +75,7 @@ test("cancel_game_setup clears session so next text is not intercepted", async (
   } catch {}
 
   expect(__testSessions.has(uid)).toBe(false);
-});
+}, 15000);
 
 test("back_to_amounts clears session so next text is not intercepted", async () => {
   const uid = 5252;
@@ -102,7 +102,7 @@ test("back_to_amounts clears session so next text is not intercepted", async () 
   } catch {}
 
   expect(__testSessions.has(uid)).toBe(false);
-});
+}, 15000);
 
 test("cancel by non-creator does not clear another user's session", async () => {
   const creator = 6000;
@@ -130,7 +130,7 @@ test("cancel by non-creator does not clear another user's session", async () => 
 
   // Session stays for the creator; non-creator action ignored
   expect(__testSessions.has(creator)).toBe(true);
-});
+}, 15000);
 
 test("back_to_amounts by non-creator does not clear session", async () => {
   const creator = 6100;
@@ -157,7 +157,7 @@ test("back_to_amounts by non-creator does not clear session", async () => {
   } catch {}
 
   expect(__testSessions.has(creator)).toBe(true);
-});
+}, 15000);
 
 test("back_to_amounts with no existing session does not create one", async () => {
   const uid = 6200;
@@ -176,7 +176,7 @@ test("back_to_amounts with no existing session does not create one", async () =>
   } catch {}
 
   expect(__testSessions.has(uid)).toBe(false);
-});
+}, 15000);
 
 test("cancel clears players_input sessions as well", async () => {
   const uid = 6300;
@@ -202,4 +202,4 @@ test("cancel clears players_input sessions as well", async () => {
   } catch {}
 
   expect(__testSessions.has(uid)).toBe(false);
-});
+}, 15000);

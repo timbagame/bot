@@ -9211,7 +9211,8 @@ Contract: ${buyData.contractAddress || "N/A"}
   }
 };
 
-// Start the bot and setup Anchor
+// Start the bot and setup Anchor (skip during tests)
+if (process.env.NODE_ENV !== "test") {
 setupAnchor()
   .then(async () => {
     console.log("Starting bot...");
@@ -9445,3 +9446,4 @@ setupAnchor()
   .catch((error) => {
     console.error("Failed to setup Anchor:", error);
   });
+}
