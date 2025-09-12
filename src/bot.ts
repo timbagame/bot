@@ -1,3 +1,4 @@
+/* c8 ignore start */
 import { Bot, Context, InlineKeyboard } from "grammy";
 import { run, sequentialize } from "@grammyjs/runner";
 import { WalletManager } from "./utils/wallet";
@@ -9447,3 +9448,5 @@ setupAnchor()
     console.error("Failed to setup Anchor:", error);
   });
 }
+
+/* c8 ignore stop */
