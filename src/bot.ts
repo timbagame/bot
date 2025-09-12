@@ -26,6 +26,7 @@ import {
   JUPITER_BASE_URL,
 } from "./utils/constants";
 import { mergeWsolIntoSol } from "./utils/balance";
+import { setUserState, getUserState, storePendingTransaction, getPendingTransaction } from "./utils/user-state";
 // import { createDmMessageAdapter } from "./utils/ctx-adapter";
 import {
   createMainMenuKeyboard,
@@ -43,6 +44,7 @@ import {
   getFeeWarningMessage,
 } from "./utils/keyboards";
 import { buildWalletCaption } from "./utils/wallet-ui";
+import { showWalletUI as showWalletUIHandler, onMainWallet, onWalletRefresh, onWalletSettings } from "./handlers/wallet";
 import { inferMaxPlayers } from "./utils/arg-parsing";
 import type {
   PlayerData,
@@ -129,6 +131,11 @@ export const __test_setWalletCache = (
     timestamp: ts ?? Date.now(),
   });
 };
+
+// Test-only proxies for user-state helpers
+export const __test_setUserState = (userId: string, state: any) => setUserState(userId, state);
+export const __test_getUserState = (userId: string) => getUserState(userId, false);
+export const __test_clearUserState = (userId: string) => { getUserState(userId, true); };
 
 // Main menu keyboard moved to utils/keyboards.ts
 
@@ -333,90 +340,15 @@ const showWalletUI = async (ctx: any) => {
   // Wallet video file_id
   const walletVideoFileId = WINNER_VIDEO_ID;
 
-  try {
-    // Use cached wallet data
-    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-    const formattedSolBalance = wallet.formatSolBalance(solBalance);
-
-    // Calculate total USD value and token display lines
-    let totalUSD = 0;
-    const solPriceUSD = await getPriceUSD("SOL");
-    const solDecimalBalance = solBalance / LAMPORTS_PER_SOL;
-    totalUSD += solDecimalBalance * solPriceUSD;
-
-    const tokenLines: Array<{ ticker: string; formatted: string }> = [];
-    for (const token of tokenBalances) {
-      const formatted = wallet.formatTokenBalance(
-        token.balance,
-        token.decimals
-      );
-      tokenLines.push({ ticker: token.ticker, formatted });
-
-      const tokenPriceUSD = await getPriceUSD(token.mint);
-      const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
-      totalUSD += tokenDecimalBalance * tokenPriceUSD;
-    }
-
-    const caption = buildWalletCaption(
-      formattedSolBalance,
-      tokenLines,
-      totalUSD,
-      walletAddress
-    );
-
-    // Try to update current message; if not possible, send a fresh one
-    try {
-      await ctx.editMessageMedia(
-        {
-          type: "video",
-          media: walletVideoFileId,
-          caption,
-          parse_mode: "HTML",
-        },
-        {
-          reply_markup: createWalletKeyboard(),
-        }
-      );
-    } catch (e) {
-      await ctx.replyWithVideo(walletVideoFileId, {
-        caption,
-        parse_mode: "HTML",
-        reply_markup: createWalletKeyboard(),
-        reply_to_message_id: ctx.message?.message_id,
-      });
-    }
-  } catch (error) {
-    console.error("Error loading balances:", error);
-    const errorResponse = [
-      `💳 <b>Wallet</b>`,
-      "",
-      `<code>${shortAddress}</code>`,
-      "",
-      "❌ <i>Error loading balances</i>",
-      "<i>Tap Refresh to try again</i>",
-    ];
-
-    try {
-      await ctx.editMessageMedia(
-        {
-          type: "video",
-          media: walletVideoFileId,
-          caption: errorResponse.join("\n"),
-          parse_mode: "HTML",
-        },
-        {
-          reply_markup: createWalletKeyboard(),
-        }
-      );
-    } catch (e) {
-      await ctx.replyWithVideo(walletVideoFileId, {
-        caption: errorResponse.join("\n"),
-        parse_mode: "HTML",
-        reply_markup: createWalletKeyboard(),
-        reply_to_message_id: ctx.message?.message_id,
-      });
-    }
-  }
+  await showWalletUIHandler(ctx, {
+    wallet,
+    getCachedWalletData,
+    getPriceUSD,
+    buildWalletCaption,
+    createWalletKeyboard,
+    WINNER_VIDEO_ID,
+    LAMPORTS_PER_SOL,
+  });
 };
 
 /**
@@ -3764,66 +3696,45 @@ bot.on("message:text", async (ctx, next) => {
 // ================================
 
 bot.callbackQuery("main_wallet", async (ctx) => {
-  console.log("🔔 WALLET BUTTON PRESSED by user:", ctx.from?.id);
-  try {
-    // Use cached data if available, don't force refresh unless explicitly requested
-    await showWalletUI(ctx);
-    await ctx.answerCallbackQuery();
-    console.log("✅ Wallet UI shown successfully");
-  } catch (error) {
-    console.error("❌ Error in main_wallet:", error);
-    await ctx.answerCallbackQuery("❌ Error loading wallet menu");
-  }
+  const deps = {
+    showWalletUI: (c: any) => showWalletUI(c),
+    clearWalletCache: (id: bigint | string | number) => clearWalletCache(BigInt(id as any)),
+    createSettingsKeyboard: () => new InlineKeyboard()
+      .text("🔧 Wrap SOL", "cmd_wrap")
+      .text("🔐 Private Key", "cmd_privatekey")
+      .row()
+      .text("← Back to Wallet", "main_wallet")
+      .row(),
+  };
+  await onMainWallet(ctx as any, deps);
 });
 
 bot.callbackQuery("wallet_refresh", async (ctx) => {
-  try {
-    // Clear wallet cache to force fresh balance update
-    const cacheKey = getWalletCacheKey(ctx.from?.id || "");
-    walletDataCache.delete(cacheKey);
-
-    await showWalletUI(ctx);
-    await ctx.answerCallbackQuery();
-  } catch (error) {
-    console.error("Error in wallet_refresh:", error);
-    await ctx.answerCallbackQuery("❌ Error refreshing wallet");
-  }
+  const deps = {
+    showWalletUI: (c: any) => showWalletUI(c),
+    clearWalletCache: (id: bigint | string | number) => clearWalletCache(BigInt(id as any)),
+    createSettingsKeyboard: () => new InlineKeyboard()
+      .text("🔧 Wrap SOL", "cmd_wrap")
+      .text("🔐 Private Key", "cmd_privatekey")
+      .row()
+      .text("← Back to Wallet", "main_wallet")
+      .row(),
+  };
+  await onWalletRefresh(ctx as any, deps);
 });
 
 bot.callbackQuery("wallet_settings", async (ctx) => {
-  try {
-    const settingsContent = `T I M B A\n\n⚙️ Settings\n\nChoose an option:`;
-
-    const response = [`<pre>${settingsContent}</pre>`];
-
-    // Try to edit as text; if it fails (e.g., current message has media), send a new message without deleting the original
-    try {
-      await ctx.editMessageText(response.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("🔧 Wrap SOL", "cmd_wrap")
-          .text("🔐 Private Key", "cmd_privatekey")
-          .row()
-          .text("← Back to Wallet", "main_wallet")
-          .row(),
-      });
-    } catch (error) {
-      await ctx.reply(response.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("🔧 Wrap SOL", "cmd_wrap")
-          .text("🔐 Private Key", "cmd_privatekey")
-          .row()
-          .text("← Back to Wallet", "main_wallet")
-          .row(),
-      });
-    }
-
-    await ctx.answerCallbackQuery("⚙️ Settings");
-  } catch (error) {
-    console.error("Error in wallet_settings:", error);
-    await ctx.answerCallbackQuery("❌ Error loading settings");
-  }
+  const deps = {
+    showWalletUI: (c: any) => showWalletUI(c),
+    clearWalletCache: (id: bigint | string | number) => clearWalletCache(BigInt(id as any)),
+    createSettingsKeyboard: () => new InlineKeyboard()
+      .text("🔧 Wrap SOL", "cmd_wrap")
+      .text("🔐 Private Key", "cmd_privatekey")
+      .row()
+      .text("← Back to Wallet", "main_wallet")
+      .row(),
+  };
+  await onWalletSettings(ctx as any, deps);
 });
 
 // ================================
@@ -4572,127 +4483,9 @@ bot.callbackQuery("cmd_swap", async (ctx) => {
 });
 
 // ================================
-// USER STATE MANAGEMENT
-// ================================
-
-// Track user input states
-const userStates = new Map<
-  string,
-  {
-    type:
-      | "send_custom_amount"
-      | "send_address"
-      | "wrap_custom_amount"
-      | "swap_to_token"
-      | "swap_custom_amount"
-      | "buy_contract_address"
-      | "buy_token_symbol"
-      | "buy_custom_amount"
-      | "buy_custom_slippage"
-      | "sell_custom_amount";
-    token?: string;
-    amount?: string;
-    fromToken?: string;
-    toToken?: string;
-    paymentToken?: string;
-    targetToken?: string;
-    tokenToSell?: string;
-    contractAddress?: string;
-    txId?: string;
-    messageId: number;
-    chatId?: number;
-    timestamp: number;
-  }
->();
-
-// Track pending transactions with full details
-const pendingTransactions = new Map<
-  string,
-  {
-    type: "send" | "wrap" | "swap";
-    token?: string;
-    amount?: string;
-    address?: string;
-    fromToken?: string;
-    toToken?: string;
-    quote?: any;
-    userId: string;
-    timestamp: number;
-  }
->();
-
-const USER_STATE_TIMEOUT = 5 * 60 * 1000; // 5 minutes timeout
-
-/**
- * Set user state and clean up old states
- */
-const setUserState = (userId: string, state: any) => {
-  // Clean up expired states
-  const now = Date.now();
-  for (const [id, userState] of userStates.entries()) {
-    if (now - userState.timestamp > USER_STATE_TIMEOUT) {
-      userStates.delete(id);
-    }
-  }
-
-  userStates.set(userId, {
-    ...state,
-    timestamp: now,
-  });
-};
-
-/**
- * Get and optionally clear user state
- */
-const getUserState = (userId: string, clear = false) => {
-  const state = userStates.get(userId);
-  if (clear && state) {
-    userStates.delete(userId);
-  }
-  return state;
-};
-
-// ============
-// Test-only helpers
-// ============
-export const __test_setUserState = (userId: string, state: any) => setUserState(userId, state);
-export const __test_getUserState = (userId: string) => userStates.get(userId);
-export const __test_clearUserState = (userId: string) => userStates.delete(userId);
-
-/**
- * Generate unique transaction ID
- */
+// Generate unique transaction ID
 const generateTransactionId = (): string => {
   return `tx_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-};
-
-/**
- * Store pending transaction
- */
-const storePendingTransaction = (txId: string, transaction: any) => {
-  // Clean up expired transactions
-  const now = Date.now();
-  for (const [id, tx] of pendingTransactions.entries()) {
-    if (now - tx.timestamp > USER_STATE_TIMEOUT) {
-      pendingTransactions.delete(id);
-    }
-  }
-
-  pendingTransactions.set(txId, {
-    ...transaction,
-    timestamp: now,
-  });
-};
-
-/**
- * Get and remove pending transaction
- */
-const getPendingTransaction = (txId: string, remove = true) => {
-  const transaction = pendingTransactions.get(txId);
-  if (remove && transaction) {
-    pendingTransactions.delete(txId);
-  }
-  return transaction;
 };
 
 // ================================
