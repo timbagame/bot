@@ -7,7 +7,7 @@ class FakeConn {}
 describe("PumpFunClient quotes (SDK stubbed)", () => {
   let orig: string | undefined;
   beforeEach(() => { orig = process.env.SOLANA_NETWORK; process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com"; });
-  afterEach(() => { process.env.SOLANA_NETWORK = orig; });
+  afterEach(() => { process.env.SOLANA_NETWORK = orig || process.env.SOLANA_NETWORK!; });
   test("buy path: SOL -> PUMP calculates token amount from curve", async () => {
     const pfc = new PumpFunClient(new FakeConn() as any);
     // Force pump.fun detection and provide simple bonding curve

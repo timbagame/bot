@@ -1,12 +1,15 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { PumpFunClient } from "../src/utils/pump-fun";
 import { Keypair } from "@solana/web3.js";
 
 class FakeConn {}
 
 describe("PumpFunClient.createSwapTransaction", () => {
+  let origNet: string | undefined;
+  beforeEach(() => { origNet = process.env.SOLANA_NETWORK; process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com"; });
+  afterEach(() => { process.env.SOLANA_NETWORK = origNet || process.env.SOLANA_NETWORK!; });
+
   test("throws when no SOL leg present", async () => {
-    process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
     const pfc = new PumpFunClient(new FakeConn() as any);
     await expect(pfc.createSwapTransaction({
       inputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
@@ -17,7 +20,6 @@ describe("PumpFunClient.createSwapTransaction", () => {
   });
 
   test("returns instructions for buy (SOL -> PUMP)", async () => {
-    process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
     const pfc = new PumpFunClient(new FakeConn() as any);
     // Confirm pump.fun token and non-graduated
     (pfc as any).isPumpFunToken = async () => ({ isPumpFun: true, isGraduated: false });
@@ -38,7 +40,6 @@ describe("PumpFunClient.createSwapTransaction", () => {
   });
 
   test("returns instructions for sell (PUMP -> SOL)", async () => {
-    process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
     const pfc = new PumpFunClient(new FakeConn() as any);
     (pfc as any).isPumpFunToken = async () => ({ isPumpFun: true, isGraduated: false });
     (pfc as any).sdk = {
@@ -56,4 +57,3 @@ describe("PumpFunClient.createSwapTransaction", () => {
     expect(Array.isArray(ix)).toBe(true);
   });
 });
-

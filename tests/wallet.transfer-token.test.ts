@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import { WalletManager } from "../src/utils/wallet";
@@ -6,14 +6,11 @@ import { WalletManager } from "../src/utils/wallet";
 const MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
 describe("WalletManager.transferToken", () => {
-  let nowSpy: any;
-  beforeEach(() => { nowSpy = Date.now; /* no-op but ready if needed */ });
-  afterEach(() => { /* restore if modified */ });
 
   test("sends SPL token transfer with ATA creations when missing", async () => {
     const conn: any = {
       // Mint owner is SPL program
-      getAccountInfo: async (pk: PublicKey) => ({ owner: TOKEN_PROGRAM_ID }),
+      getAccountInfo: async (_pk: PublicKey) => ({ owner: TOKEN_PROGRAM_ID }),
     } as Partial<Connection> as any;
 
     // Ensure ATAs are treated as missing (findOrCreate will add them)

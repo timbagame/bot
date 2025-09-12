@@ -18,7 +18,7 @@ class FakeConnection implements Partial<Connection> {
 describe("SwapManager token account setup", () => {
   let orig: string | undefined;
   beforeEach(() => { orig = process.env.SOLANA_NETWORK; process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com"; });
-  afterEach(() => { process.env.SOLANA_NETWORK = orig; });
+  afterEach(() => { process.env.SOLANA_NETWORK = orig || process.env.SOLANA_NETWORK!; });
   test("creates ATAs for SPL and Token-2022 mints when missing", async () => {
     const user = Keypair.generate();
 

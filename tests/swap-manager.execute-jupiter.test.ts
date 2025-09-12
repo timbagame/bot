@@ -1,11 +1,14 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Connection, Keypair } from "@solana/web3.js";
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
 
 describe("SwapManager.executeJupiterSwap", () => {
+  let origNet: string | undefined;
+  beforeEach(() => { origNet = process.env.SOLANA_NETWORK; process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com"; });
+  afterEach(() => { process.env.SOLANA_NETWORK = origNet || process.env.SOLANA_NETWORK!; });
+
   test("executes serialized Jupiter transaction and returns signature", async () => {
-    process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",

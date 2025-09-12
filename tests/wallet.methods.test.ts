@@ -3,7 +3,7 @@ import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { WalletManager } from "../src/utils/wallet";
 
 class ConnFailTime implements Partial<Connection> {
-  async getSlot() { throw new Error("rpc down"); }
+  async getSlot(_cfg?: any): Promise<number> { throw new Error("rpc down"); }
   async getBlockTime(_slot: number) { return null as any; }
 }
 
@@ -32,4 +32,3 @@ test("findOrCreateAssociatedTokenAccount returns create instruction when missing
   const res = await wm.findOrCreateAssociatedTokenAccount(owner.publicKey, mint, payer);
   expect(res.instructions.length).toBe(1);
 });
-
