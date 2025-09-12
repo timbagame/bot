@@ -1,0 +1,83 @@
+import { describe, test, expect } from "bun:test";
+import { PublicKey } from "@solana/web3.js";
+import { GameManager } from "../src/utils/game";
+
+function resetGM() {
+  // @ts-ignore
+  GameManager["instance"] = undefined;
+}
+
+function programStub(gameAccount: any) {
+  return {
+    account: { game: { fetch: async () => gameAccount } },
+  } as any;
+}
+
+function walletStub(opts?: { blockTime?: number; decimals?: number }) {
+  const blockTime = opts?.blockTime ?? Math.floor(Date.now() / 1000);
+  const decimals = opts?.decimals ?? 9;
+  return {
+    getBlockchainTime: async () => blockTime,
+    getTokenMetadata: async () => ({ decimals }),
+    formatTokenBalance: (amount: number, d: number) => (amount / Math.pow(10, d)).toFixed(0),
+  } as any;
+}
+
+function dbStub(overrides: Partial<any> = {}) {
+  return {
+    getGame: (_addr: string) => ({ token_mint: "MINT", token_ticker: "TOK", ...overrides }),
+    getCreatorInfo: (_addr: string) => ({ telegramId: "777" }),
+    getPlayerTelegramId: (pk: string) => ({
+      WINNER111: "999",
+    } as Record<string, string>)[pk] || null,
+  } as any;
+}
+
+function ctxStub() {
+  return {
+    chat: { id: 42, type: "private" },
+    api: {
+      getChatMember: async (_chat: number, id: number) => ({ user: { username: `user${id}` } }),
+    },
+  } as any;
+}
+
+describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
+  test("getGameInfo formats active coinflip with creator", async () => {
+    resetGM();
+    const createdAt = 1_000_000;
+    const timeout = 60;
+    const gameAcc = {
+      ticketAmount: 1_000_000_000,
+      ticketsCount: 1,
+      maxTickets: 2,
+      createdAt,
+      timeout,
+      creator: new PublicKey("11111111111111111111111111111111"),
+      gameType: { coinflip: {} },
+    };
+    const gm = GameManager.getInstance(programStub(gameAcc), walletStub({ blockTime: createdAt + 30 }), dbStub());
+    const info = await gm.getGameInfo(ctxStub(), new PublicKey("11111111111111111111111111111111"));
+    expect(info).toContain("Coinflip");
+    expect(info).toContain("TOK");
+    expect(info).toContain("Creator: @user777");
+    expect(info).toContain("/2 tickets");
+  });
+
+  test("getCompletedGameInfo shows winner line", async () => {
+    resetGM();
+    const gm = GameManager.getInstance(programStub({}), walletStub(), dbStub());
+    const ctx = ctxStub();
+    const out = await gm.getCompletedGameInfo(ctx, {
+      creator_telegram_id: "777",
+      amount: 1_000_000_000,
+      token_ticker: "TOK",
+      max_players: 3,
+      game_type: "giveaway",
+      winner_address: "WINNER111",
+    });
+    expect(out).toContain("Winner:");
+    expect(out).toContain("user999");
+    expect(out).toContain("Giveaway");
+  });
+});

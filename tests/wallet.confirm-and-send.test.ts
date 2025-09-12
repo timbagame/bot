@@ -63,5 +63,36 @@ describe("WalletManager confirmTransaction and sendTransaction", () => {
     const sig = await wm.transferSol(1n, Keypair.generate().publicKey, 0.5);
     expect(sig).toBe("ABCDEF12");
   });
-});
 
+  test("confirmTransaction retries on 429 then succeeds", async () => {
+    let calls = 0;
+    const conn: any = {
+      getSignatureStatus: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error("429 Too Many Requests");
+        return { value: { confirmationStatus: "confirmed" } };
+      },
+    };
+    const wm = WalletManager.createForTest(MNEMONIC, {
+      connection: conn,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+    await wm.confirmTransaction("FAKESIG");
+    expect(calls).toBeGreaterThanOrEqual(2);
+  });
+
+  test("getTokenBalance returns 0 on generic error", async () => {
+    const conn: any = {
+      getTokenAccountBalance: async () => { throw new Error("unexpected"); },
+      getParsedAccountInfo: async (_pk: any) => ({ value: { data: { parsed: { info: { decimals: 6 } } } } }),
+    };
+    const wm = WalletManager.createForTest(MNEMONIC, {
+      connection: conn,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+    const val = await wm.getTokenBalance(1n, "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+    expect(val).toBe(0);
+  });
+});
