@@ -3,28 +3,47 @@ import { WalletManager } from "../src/utils/wallet";
 import { GameDatabase } from "../src/utils/game-database";
 import { ChatDatabase } from "../src/utils/chat-database";
 import { TokenManager } from "../src/utils/token-manager";
+import { DEFAULT_TOKEN_MINT, DEFAULT_TOKEN_TICKER } from "../src/utils/constants";
 
 describe("Bot Integration Tests", () => {
   let wallet: WalletManager;
   let gameDb: GameDatabase;
   let chatDb: ChatDatabase;
   let tokenManager: TokenManager;
+  const originalMnemonic = process.env.MNEMONIC;
+  const originalSolanaNetwork = process.env.SOLANA_NETWORK;
 
   beforeAll(async () => {
     // Setup test environment
     process.env.NODE_ENV = "test";
     process.env.MNEMONIC =
       "test test test test test test test test test test test junk";
+    process.env.SOLANA_NETWORK =
+      process.env.SOLANA_NETWORK || "http://localhost:8899";
 
     // Initialize components
     wallet = WalletManager.getInstance(process.env.MNEMONIC);
     gameDb = GameDatabase.getInstance();
     chatDb = ChatDatabase.getInstance();
-    tokenManager = TokenManager.getInstance();
+    tokenManager = TokenManager.getInstance(
+      wallet,
+      DEFAULT_TOKEN_MINT,
+      DEFAULT_TOKEN_TICKER
+    );
   });
 
   afterAll(async () => {
-    // Cleanup
+    if (originalMnemonic === undefined) {
+      delete process.env.MNEMONIC;
+    } else {
+      process.env.MNEMONIC = originalMnemonic;
+    }
+
+    if (originalSolanaNetwork === undefined) {
+      delete process.env.SOLANA_NETWORK;
+    } else {
+      process.env.SOLANA_NETWORK = originalSolanaNetwork;
+    }
   });
 
   describe("Database Integration", () => {
