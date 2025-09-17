@@ -12,7 +12,7 @@ describe("PumpFunClient quotes (SDK stubbed)", () => {
     const pfc = new PumpFunClient(new FakeConn() as any);
     // Force pump.fun detection and provide simple bonding curve
     (pfc as any).isPumpFunToken = async () => ({ isPumpFun: true, isGraduated: false });
-    (pfc as any).onlineSdk = {
+    (pfc as any).sdk = {
       fetchBondingCurve: async () => ({
         virtualSolReserves: { toString: () => String(1_000_000_000_000) },
         virtualTokenReserves: { toString: () => String(1_000_000_000) },
@@ -37,7 +37,7 @@ describe("PumpFunClient quotes (SDK stubbed)", () => {
   test("sell path: PUMP -> SOL calculates lamports from curve", async () => {
     const pfc = new PumpFunClient(new FakeConn() as any);
     (pfc as any).isPumpFunToken = async () => ({ isPumpFun: true, isGraduated: false });
-    (pfc as any).onlineSdk = {
+    (pfc as any).sdk = {
       fetchBondingCurve: async () => ({
         virtualSolReserves: { toString: () => String(1_000_000_000_000) },
         virtualTokenReserves: { toString: () => String(1_000_000_000) },
