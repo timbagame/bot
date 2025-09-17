@@ -3,6 +3,7 @@ import { WalletManager } from "../src/utils/wallet";
 import { GameDatabase } from "../src/utils/game-database";
 import { ChatDatabase } from "../src/utils/chat-database";
 import { TokenManager } from "../src/utils/token-manager";
+import { DEFAULT_TOKEN_MINT, DEFAULT_TOKEN_TICKER } from "../src/utils/constants";
 
 describe("Bot Integration Tests", () => {
   let wallet: WalletManager;
@@ -20,7 +21,11 @@ describe("Bot Integration Tests", () => {
     wallet = WalletManager.getInstance(process.env.MNEMONIC);
     gameDb = GameDatabase.getInstance();
     chatDb = ChatDatabase.getInstance();
-    tokenManager = TokenManager.getInstance();
+    tokenManager = TokenManager.getInstance(
+      wallet,
+      DEFAULT_TOKEN_MINT,
+      DEFAULT_TOKEN_TICKER
+    );
   });
 
   afterAll(async () => {
