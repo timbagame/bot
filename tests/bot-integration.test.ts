@@ -34,13 +34,13 @@ describe("Bot Integration Tests", () => {
 
   afterAll(async () => {
     if (originalMnemonic === undefined) {
-      Reflect.deleteProperty(process.env, "MNEMONIC");
+      delete process.env.MNEMONIC;
     } else {
       process.env.MNEMONIC = originalMnemonic;
     }
 
     if (originalSolanaNetwork === undefined) {
-      Reflect.deleteProperty(process.env, "SOLANA_NETWORK");
+      delete process.env.SOLANA_NETWORK;
     } else {
       process.env.SOLANA_NETWORK = originalSolanaNetwork;
     }
