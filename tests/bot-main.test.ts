@@ -34,19 +34,19 @@ describe("Bot Main Entry Point Tests", () => {
   afterAll(() => {
     process.env.NODE_ENV = originalNodeEnv;
     if (originalToken === undefined) {
-      delete process.env.TELEGRAM_TOKEN;
+      Reflect.deleteProperty(process.env, "TELEGRAM_TOKEN");
     } else {
       process.env.TELEGRAM_TOKEN = originalToken;
     }
 
     if (originalMnemonic === undefined) {
-      delete process.env.MNEMONIC;
+      Reflect.deleteProperty(process.env, "MNEMONIC");
     } else {
       process.env.MNEMONIC = originalMnemonic;
     }
 
     if (originalSolanaNetwork === undefined) {
-      delete process.env.SOLANA_NETWORK;
+      Reflect.deleteProperty(process.env, "SOLANA_NETWORK");
     } else {
       process.env.SOLANA_NETWORK = originalSolanaNetwork;
     }

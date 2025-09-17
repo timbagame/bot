@@ -24,11 +24,23 @@ describe("PumpFunClient.createSwapTransaction", () => {
     // Confirm pump.fun token and non-graduated
     (pfc as any).isPumpFunToken = async () => ({ isPumpFun: true, isGraduated: false });
     // SDK returns placeholder arrays
-    (pfc as any).sdk = {
+    (pfc as any).onlineSdk = {
       fetchGlobal: async () => ({}),
-      fetchBuyState: async () => ({ bondingCurve: { virtualSolReserves: { toString: () => "1" }, virtualTokenReserves: { toString: () => "1" } } }),
+      fetchBuyState: async () => ({
+        bondingCurve: {
+          virtualSolReserves: { toString: () => "1" },
+          virtualTokenReserves: { toString: () => "1" },
+        },
+        bondingCurveAccountInfo: {},
+        associatedUserAccountInfo: null,
+      }),
+      fetchBondingCurve: async () => ({
+        virtualSolReserves: { toString: () => "1" },
+        virtualTokenReserves: { toString: () => "1" },
+      }),
+    };
+    (pfc as any).sdk = {
       buyInstructions: async () => [],
-      fetchBondingCurve: async () => ({ virtualSolReserves: { toString: () => "1" }, virtualTokenReserves: { toString: () => "1" } }),
     };
     const ix = await pfc.createSwapTransaction({
       inputMint: "So11111111111111111111111111111111111111112",
@@ -42,11 +54,22 @@ describe("PumpFunClient.createSwapTransaction", () => {
   test("returns instructions for sell (PUMP -> SOL)", async () => {
     const pfc = new PumpFunClient(new FakeConn() as any);
     (pfc as any).isPumpFunToken = async () => ({ isPumpFun: true, isGraduated: false });
-    (pfc as any).sdk = {
+    (pfc as any).onlineSdk = {
       fetchGlobal: async () => ({}),
-      fetchSellState: async (_mint: any, _user: any) => ({ bondingCurveAccountInfo: {}, bondingCurve: { virtualSolReserves: { toString: () => "1" }, virtualTokenReserves: { toString: () => "1" } } }),
+      fetchSellState: async (_mint: any, _user: any) => ({
+        bondingCurveAccountInfo: {},
+        bondingCurve: {
+          virtualSolReserves: { toString: () => "1" },
+          virtualTokenReserves: { toString: () => "1" },
+        },
+      }),
+      fetchBondingCurve: async () => ({
+        virtualSolReserves: { toString: () => "1" },
+        virtualTokenReserves: { toString: () => "1" },
+      }),
+    };
+    (pfc as any).sdk = {
       sellInstructions: async () => [],
-      fetchBondingCurve: async () => ({ virtualSolReserves: { toString: () => "1" }, virtualTokenReserves: { toString: () => "1" } }),
     };
     const ix = await pfc.createSwapTransaction({
       inputMint: Keypair.generate().publicKey.toBase58(),
