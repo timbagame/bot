@@ -4,7 +4,8 @@ import {
   Keypair,
   TransactionInstruction,
 } from "@solana/web3.js";
-import * as PumpFun from "@pump-fun/pump-sdk";
+import { PumpSdk, OnlinePumpSdk } from "@pump-fun/pump-sdk";
+import type { BondingCurve } from "@pump-fun/pump-sdk";
 import { deserializeMetadata } from "@metaplex-foundation/mpl-token-metadata";
 import { NetworkDetector } from "./network-detector";
 import { formatAmount } from "./format-amount";
@@ -36,17 +37,15 @@ export interface PumpFunSwapRequest {
 // PUMP.FUN CLIENT
 // ================================
 
-type BondingCurve = PumpFun.BondingCurve;
-
 export class PumpFunClient {
-  private readonly offlineSdk: PumpFun.PumpSdk;
-  private readonly onlineSdk: PumpFun.OnlinePumpSdk;
+  private readonly offlineSdk: PumpSdk;
+  private readonly onlineSdk: OnlinePumpSdk;
   private readonly connection: Connection;
 
   constructor(connection: Connection) {
     this.connection = connection;
-    this.offlineSdk = new PumpFun.PumpSdk();
-    this.onlineSdk = new PumpFun.OnlinePumpSdk(connection);
+    this.offlineSdk = new PumpSdk();
+    this.onlineSdk = new OnlinePumpSdk(connection);
   }
 
   /**
