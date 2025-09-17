@@ -4,7 +4,8 @@ import {
   Keypair,
   TransactionInstruction,
 } from "@solana/web3.js";
-import { PumpSdk, OnlinePumpSdk } from "@pump-fun/pump-sdk";
+import type { AccountInfo } from "@solana/web3.js";
+import * as pumpFunSdk from "@pump-fun/pump-sdk";
 import { deserializeMetadata } from "@metaplex-foundation/mpl-token-metadata";
 import { NetworkDetector } from "./network-detector";
 import { formatAmount } from "./format-amount";
@@ -36,15 +37,76 @@ export interface PumpFunSwapRequest {
 // PUMP.FUN CLIENT
 // ================================
 
+interface PumpFunSdk {
+  buyInstructions(params: {
+    global: unknown;
+    bondingCurveAccountInfo: AccountInfo<Buffer>;
+    bondingCurve: unknown;
+    associatedUserAccountInfo: AccountInfo<Buffer> | null;
+    mint: PublicKey;
+    user: PublicKey;
+    amount: unknown;
+    solAmount: unknown;
+    slippage: number;
+  }): Promise<TransactionInstruction[]>;
+  sellInstructions(params: {
+    global: unknown;
+    bondingCurveAccountInfo: AccountInfo<Buffer>;
+    bondingCurve: unknown;
+    mint: PublicKey;
+    user: PublicKey;
+    amount: unknown;
+    solAmount: unknown;
+    slippage: number;
+  }): Promise<TransactionInstruction[]>;
+}
+
+interface PumpFunOnlineSdk {
+  fetchGlobal(): Promise<unknown>;
+  fetchBondingCurve(mint: PublicKey): Promise<any>;
+  fetchBuyState(
+    mint: PublicKey,
+    user: PublicKey
+  ): Promise<{
+    bondingCurveAccountInfo: AccountInfo<Buffer>;
+    bondingCurve: any;
+    associatedUserAccountInfo: AccountInfo<Buffer> | null;
+  }>;
+  fetchSellState(
+    mint: PublicKey,
+    user: PublicKey
+  ): Promise<{
+    bondingCurveAccountInfo: AccountInfo<Buffer>;
+    bondingCurve: any;
+  }>;
+}
+
+type PumpFunSdkModule = {
+  PumpSdk: new () => PumpFunSdk;
+  OnlinePumpSdk: new (connection: Connection) => PumpFunOnlineSdk;
+};
+
 export class PumpFunClient {
-  private readonly sdk: PumpSdk;
-  private readonly onlineSdk: OnlinePumpSdk;
+  private readonly sdk: PumpFunSdk;
+  private readonly onlineSdk: PumpFunOnlineSdk;
   private readonly connection: Connection;
 
   constructor(connection: Connection) {
     this.connection = connection;
-    this.sdk = new PumpSdk();
-    this.onlineSdk = new OnlinePumpSdk(connection);
+    const pumpModule = pumpFunSdk as Partial<PumpFunSdkModule>;
+    const PumpSdkCtor = pumpModule.PumpSdk;
+    const OnlinePumpSdkCtor = pumpModule.OnlinePumpSdk;
+
+    if (!PumpSdkCtor) {
+      throw new Error("PumpSdk export not found in @pump-fun/pump-sdk");
+    }
+
+    if (!OnlinePumpSdkCtor) {
+      throw new Error("OnlinePumpSdk export not found in @pump-fun/pump-sdk");
+    }
+
+    this.sdk = new PumpSdkCtor();
+    this.onlineSdk = new OnlinePumpSdkCtor(connection);
   }
 
   /**
