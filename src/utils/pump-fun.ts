@@ -4,7 +4,7 @@ import {
   Keypair,
   TransactionInstruction,
 } from "@solana/web3.js";
-import { PumpSdk } from "@pump-fun/pump-sdk";
+import { OnlinePumpSdk, PumpSdk, type BondingCurve } from "@pump-fun/pump-sdk";
 import { deserializeMetadata } from "@metaplex-foundation/mpl-token-metadata";
 import { NetworkDetector } from "./network-detector";
 import { formatAmount } from "./format-amount";
@@ -37,12 +37,14 @@ export interface PumpFunSwapRequest {
 // ================================
 
 export class PumpFunClient {
-  private sdk: PumpSdk;
-  private connection: Connection;
+  private readonly offlineSdk: PumpSdk;
+  private readonly onlineSdk: OnlinePumpSdk;
+  private readonly connection: Connection;
 
   constructor(connection: Connection) {
     this.connection = connection;
-    this.sdk = new PumpSdk(connection);
+    this.offlineSdk = new PumpSdk();
+    this.onlineSdk = new OnlinePumpSdk(connection);
   }
 
   /**
@@ -177,7 +179,7 @@ export class PumpFunClient {
       }
 
       // Method 4: Check if it's a pump.fun token at all
-      const bondingCurve = await this.sdk.fetchBondingCurve(mint);
+      const bondingCurve = await this.fetchBondingCurveOptional(mint);
       if (!bondingCurve) {
         return null;
       }
@@ -219,7 +221,7 @@ export class PumpFunClient {
       const mint = new PublicKey(mintAddress);
 
       // Use pump.fun SDK to check if token exists in their program
-      const bondingCurve = await this.sdk.fetchBondingCurve(mint);
+      const bondingCurve = await this.fetchBondingCurveOptional(mint);
 
       if (!bondingCurve) {
         return { isPumpFun: false, isGraduated: false };
@@ -284,7 +286,7 @@ export class PumpFunClient {
       }
 
       // Get bonding curve to calculate amounts
-      const bondingCurve = await this.sdk.fetchBondingCurve(pumpMint);
+      const bondingCurve = await this.fetchBondingCurveOptional(pumpMint);
       if (!bondingCurve) {
         throw new Error("Could not fetch bonding curve data");
       }
@@ -395,8 +397,8 @@ export class PumpFunClient {
         const solAmount = amountLamports;
 
         // First fetch required data using the SDK's fetch methods
-        const global = await this.sdk.fetchGlobal();
-        const buyState = await this.sdk.fetchBuyState(
+        const global = await this.onlineSdk.fetchGlobal();
+        const buyState = await this.onlineSdk.fetchBuyState(
           pumpMint,
           userKeypair.publicKey
         );
@@ -422,7 +424,7 @@ export class PumpFunClient {
         );
 
         // Use the SDK with the correct object format - use BN for amounts
-        instructions = await this.sdk.buyInstructions({
+        instructions = await this.offlineSdk.buyInstructions({
           global,
           bondingCurveAccountInfo: buyState.bondingCurveAccountInfo,
           bondingCurve: buyState.bondingCurve,
@@ -438,8 +440,8 @@ export class PumpFunClient {
         const tokenAmount = amountLamports;
 
         // First fetch required data using the SDK's fetch methods
-        const global = await this.sdk.fetchGlobal();
-        const sellState = await this.sdk.fetchSellState(
+        const global = await this.onlineSdk.fetchGlobal();
+        const sellState = await this.onlineSdk.fetchSellState(
           pumpMint,
           userKeypair.publicKey
         );
@@ -464,7 +466,7 @@ export class PumpFunClient {
         );
 
         // Use the SDK with the correct object format - use BN for amounts
-        instructions = await this.sdk.sellInstructions({
+        instructions = await this.offlineSdk.sellInstructions({
           global,
           bondingCurveAccountInfo: sellState.bondingCurveAccountInfo,
           bondingCurve: sellState.bondingCurve,
@@ -549,6 +551,20 @@ export class PumpFunClient {
     } catch (error) {
       console.error("Error calculating sell amount:", error);
       return Math.floor(tokenAmount / 1000000);
+    }
+  }
+
+  private async fetchBondingCurveOptional(
+    mint: PublicKey
+  ): Promise<BondingCurve | null> {
+    try {
+      return await this.onlineSdk.fetchBondingCurve(mint);
+    } catch (error) {
+      console.debug(
+        `Pump.fun bonding curve fetch failed for ${mint.toBase58()}:`,
+        error
+      );
+      return null;
     }
   }
 

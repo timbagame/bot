@@ -3,9 +3,9 @@ export {};
 declare global {
   namespace NodeJS {
     interface ProcessEnv {
-      TELEGRAM_TOKEN: string;
-      SOLANA_NETWORK: string;
-      MNEMONIC: string;
+      TELEGRAM_TOKEN?: string;
+      SOLANA_NETWORK?: string;
+      MNEMONIC?: string;
     }
   }
 }
