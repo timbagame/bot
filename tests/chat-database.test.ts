@@ -18,6 +18,9 @@ afterEach(() => {
       (db as any).db.close();
     } catch {}
   }
+  // Reset singleton so other tests get a fresh connection
+  // @ts-ignore
+  ChatDatabase["instance"] = undefined;
   try {
     rmSync("chat-settings.sqlite", { force: true });
   } catch {}

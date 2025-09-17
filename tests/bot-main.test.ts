@@ -1,201 +1,131 @@
-import { describe, test, expect, beforeAll, afterAll, mock } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 
-// Mock the main bot module components
-const mockBot = {
-  command: mock(() => {}),
-  callbackQuery: mock(() => {}),
-  on: mock(() => {}),
-  use: mock(() => {}),
-  catch: mock(() => {}),
-  start: mock(() => {}),
-};
-
-const mockWallet = {
-  getInstance: mock(() => ({
-    getKeyPair: mock(() => ({ publicKey: { toBase58: () => "test-key" } })),
-    getBalance: mock(() => Promise.resolve(1000000)),
-    getTokenBalance: mock(() => Promise.resolve(500000)),
-    getTokenMetadata: mock(() =>
-      Promise.resolve({ decimals: 6, symbol: "TEST" })
-    ),
-  })),
-};
-
-const mockGameManager = {
-  getInstance: mock(() => ({
-    createGame: mock(() => Promise.resolve({ success: true })),
-    updateGameMessageFromData: mock(() => Promise.resolve()),
-  })),
-};
-
-const mockOracleClient = {
-  isHealthy: mock(() => Promise.resolve(true)),
-};
-
-const mockTokenManager = {
-  getInstance: mock(() => ({
-    parseAmount: mock(() => ({ success: true, data: { amount: 1000000 } })),
-    getAllApprovedTokensWithMetadata: mock(() => []),
-  })),
-};
-
-const mockGameDb = {
-  getInstance: mock(() => ({
-    saveGame: mock(() => {}),
-    getGame: mock(() => null),
-    completeGame: mock(() => {}),
-  })),
-};
-
-const mockChatDb = {
-  getInstance: mock(() => ({
-    setChatDefaultToken: mock(() => {}),
-    getChatDefaultToken: mock(() => null),
-  })),
-};
-
-// Mock the modules
-mock.module("../src/utils/wallet", () => mockWallet);
-mock.module("../src/utils/game", () => mockGameManager);
-mock.module("../src/utils/oracle", () => ({ OracleClient: mockOracleClient }));
-mock.module("../src/utils/token-manager", () => mockTokenManager);
-mock.module("../src/utils/game-database", () => mockGameDb);
-mock.module("../src/utils/chat-database", () => mockChatDb);
-
-// Mock the bot module itself to avoid the NODE_ENV check
-mock.module("../src/bot", () => ({
-  bot: mockBot,
-  wallet: mockWallet.getInstance(),
-}));
+let botModule: typeof import("../src/bot");
+const originalNodeEnv = process.env.NODE_ENV;
+const originalToken = process.env.TELEGRAM_TOKEN;
+const originalMnemonic = process.env.MNEMONIC;
+const originalSolanaNetwork = process.env.SOLANA_NETWORK;
 
 describe("Bot Main Entry Point Tests", () => {
   beforeAll(async () => {
-    // Set up test environment
     process.env.NODE_ENV = "test";
-    process.env.TELEGRAM_TOKEN = "test-token";
+    process.env.TELEGRAM_TOKEN =
+      process.env.TELEGRAM_TOKEN || "test-token";
     process.env.MNEMONIC =
+      process.env.MNEMONIC ||
       "test test test test test test test test test test test junk";
+    process.env.SOLANA_NETWORK =
+      process.env.SOLANA_NETWORK || "http://localhost:8899";
+
+    botModule = await import("../src/bot");
+
+    // Provide cached botInfo so tests touching bot.api do not trigger network calls
+    (botModule.bot as any).botInfo = {
+      id: 0,
+      is_bot: true,
+      first_name: "test-bot",
+      username: "test_bot",
+      can_join_groups: true,
+      can_read_all_group_messages: false,
+      supports_inline_queries: false,
+    };
   });
 
-  afterAll(async () => {
-    // Cleanup
+  afterAll(() => {
+    process.env.NODE_ENV = originalNodeEnv;
+    if (originalToken === undefined) {
+      delete process.env.TELEGRAM_TOKEN;
+    } else {
+      process.env.TELEGRAM_TOKEN = originalToken;
+    }
+
+    if (originalMnemonic === undefined) {
+      delete process.env.MNEMONIC;
+    } else {
+      process.env.MNEMONIC = originalMnemonic;
+    }
+
+    if (originalSolanaNetwork === undefined) {
+      delete process.env.SOLANA_NETWORK;
+    } else {
+      process.env.SOLANA_NETWORK = originalSolanaNetwork;
+    }
   });
 
   describe("Bot Initialization", () => {
-    test("should have proper bot configuration structure", async () => {
-      // Test that we can import the bot module structure
-      // Note: Full initialization is skipped in test environment due to NODE_ENV check
-      const botModule = await import("../src/bot");
-
-      // Verify the module exports the expected structure
+    test("exports bot instance with expected interface", () => {
       expect(botModule).toHaveProperty("bot");
       expect(typeof botModule.bot).toBe("object");
+      expect(typeof botModule.bot.command).toBe("function");
+      expect(typeof botModule.bot.callbackQuery).toBe("function");
+      expect(typeof botModule.bot.on).toBe("function");
+      expect(typeof botModule.bot.use).toBe("function");
+      expect(typeof botModule.bot.catch).toBe("function");
     });
 
-    test("should export wallet instance", async () => {
-      const botModule = await import("../src/bot");
-
-      // Verify wallet is exported
+    test("exports wallet manager singleton", () => {
       expect(botModule).toHaveProperty("wallet");
       expect(typeof botModule.wallet).toBe("object");
-    });
-
-    test("should export game manager when available", async () => {
-      const botModule = await import("../src/bot");
-
-      // gameManager may not be initialized in test environment due to NODE_ENV check
-      // Just verify the module structure is correct
-      expect(botModule).toBeDefined();
-      expect(typeof botModule).toBe("object");
-    });
-  });
-
-  describe("Error Handling", () => {
-    test("should handle basic error scenarios", async () => {
-      // Test basic error handling patterns
-      expect(() => {
-        throw new Error("Test error");
-      }).toThrow("Test error");
+      expect(typeof botModule.wallet.getKeyPair).toBe("function");
+      expect(typeof botModule.wallet.getBalance).toBe("function");
+      expect(typeof botModule.wallet.getTokenBalance).toBe("function");
     });
   });
 
   describe("Middleware Setup", () => {
-    test("should have middleware configuration structure", async () => {
-      // Test middleware setup concepts without full initialization
-      // The actual middleware setup happens during bot initialization
-      expect(typeof mockBot.use).toBe("function");
-      expect(typeof mockBot.catch).toBe("function");
+    test("supports registering middleware", () => {
+      const result = botModule.bot.use(async (_ctx, next) => {
+        await next();
+      });
+
+      expect(typeof result.use).toBe("function");
     });
 
-    test("should support sequentialization middleware", async () => {
-      // Verify the bot supports middleware registration
-      expect(mockBot).toHaveProperty("use");
-      expect(typeof mockBot.use).toBe("function");
-    });
+    test("allows replacing error handler via catch", () => {
+      const handler = () => {};
+      botModule.bot.catch(handler);
 
-    test("should support error handling middleware", async () => {
-      // Verify error handling capabilities
-      expect(mockBot).toHaveProperty("catch");
-      expect(typeof mockBot.catch).toBe("function");
-    });
-  });
-
-  describe("Bot Startup Process", () => {
-    test("should have component initialization structure", async () => {
-      // Test that the initialization components are properly structured
-      expect(typeof mockWallet.getInstance).toBe("function");
-      expect(typeof mockGameDb.getInstance).toBe("function");
-      expect(typeof mockChatDb.getInstance).toBe("function");
-    });
-
-    test("should support graceful error handling during setup", async () => {
-      // Test error handling patterns without full initialization
-      expect(() => {
-        throw new Error("Setup error test");
-      }).toThrow("Setup error test");
+      expect((botModule.bot as any).errorHandler).toBe(handler);
     });
   });
 
   describe("Global State Management", () => {
-    test("should have global state structure", async () => {
-      // Test global state concepts without full initialization
-      const botModule = await import("../src/bot");
+    test("exposes test helpers for user state", () => {
+      expect(typeof botModule.__test_setUserState).toBe("function");
+      expect(typeof botModule.__test_getUserState).toBe("function");
+      expect(typeof botModule.__test_clearUserState).toBe("function");
 
-      // Verify module has expected exports
-      expect(botModule).toHaveProperty("bot");
-      expect(botModule).toHaveProperty("wallet");
+      botModule.__test_setUserState("42", { foo: "bar" });
+      expect(botModule.__test_getUserState("42")).toMatchObject({ foo: "bar" });
+      botModule.__test_clearUserState("42");
+      expect(botModule.__test_getUserState("42")).toBeUndefined();
     });
 
-    test("should support test helper patterns", async () => {
-      // Test that test helpers are conceptually available
-      // (Actual test helpers may not be available in test environment)
-      const botModule = await import("../src/bot");
-
-      // Just verify the module can be imported without errors
-      expect(botModule).toBeDefined();
-      expect(typeof botModule).toBe("object");
+    test("tracks user sessions map", () => {
+      expect(botModule).toHaveProperty("__testSessions");
+      const sessions = botModule.__testSessions as Map<any, any>;
+      sessions.set(1, { waitingFor: "amount" });
+      expect(sessions.get(1)?.waitingFor).toBe("amount");
+      sessions.delete(1);
     });
   });
 
   describe("Event Listener Setup", () => {
-    test("should support event listener patterns", async () => {
-      // Test event listener concepts without full blockchain setup
-      const mockProgram = {
-        addEventListener: mock(() => {}),
-        account: {
-          game: { fetch: mock(() => Promise.resolve({})) },
-          oracle: { fetch: mock(() => Promise.resolve({ operator: "test" })) },
-        },
+    test("provides access to wallet cache helpers", () => {
+      expect(typeof botModule.__test_setWalletCache).toBe("function");
+      const cacheData = {
+        solBalance: 1,
+        tokenBalances: [],
+        approvedTokens: [],
       };
-
-      // Verify the program structure supports event listeners
-      expect(mockProgram).toHaveProperty("addEventListener");
-      expect(typeof mockProgram.addEventListener).toBe("function");
+      botModule.__test_setWalletCache("1", cacheData);
+      // cache is internal, but calling again should not throw
+      botModule.__test_setWalletCache("1", cacheData, Date.now() - 1);
     });
 
-    test("should support game lifecycle events", async () => {
-      // Test that the system can handle game-related events conceptually
-      expect(true).toBe(true); // Basic test to ensure test suite runs
+    test("bot exposes start helper without auto starting", () => {
+      expect(typeof botModule.bot.start).toBe("function");
+      expect(process.env.NODE_ENV).toBe("test");
     });
   });
 });
