@@ -45,6 +45,7 @@ import {
   getFeeWarningMessage,
 } from "./utils/keyboards";
 import { buildWalletCaption } from "./utils/wallet-ui";
+import { formatAmount } from "./utils/format-amount";
 import { showWalletUI as showWalletUIHandler, onMainWallet, onWalletRefresh, onWalletSettings, onBalance } from "./handlers/wallet";
 import { inferMaxPlayers } from "./utils/arg-parsing";
 import type {
@@ -141,7 +142,7 @@ export const __test_clearUserState = (userId: string) => { getUserState(userId, 
 // Main menu keyboard moved to utils/keyboards.ts
 
 const SOL_FEE_BUFFER_LAMPORTS = Math.ceil(MIN_SOL_FOR_TX * LAMPORTS_PER_SOL);
-const decimalAmountPattern = /^\d+(\.\d+)?$/;
+const decimalAmountPattern = /^(?:\d+\.?\d*|\.\d+)$/;
 
 const toRawAmount = (value: string, decimals: number): number => {
   const normalized = value.trim();
@@ -4150,15 +4151,16 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
               "Not enough SOL to cover fees. Keep a small amount for transaction costs."
             );
           }
+          formattedAmount = wallet.formatSolBalance(lamportsToSend);
         } else {
           lamportsToSend = toRawAmount(transaction.amount, 9);
           if (lamportsToSend + SOL_FEE_BUFFER_LAMPORTS > balanceLamports) {
             throw new Error("Insufficient SOL balance for this transfer");
           }
+          formattedAmount = transaction.amount;
         }
 
         const solAmount = lamportsToSend / LAMPORTS_PER_SOL;
-        formattedAmount = wallet.formatSolBalance(lamportsToSend);
 
         txSignature = await wallet.transferSol(
           telegramId,
@@ -4190,6 +4192,10 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
           if (rawAmount <= 0) {
             throw new Error(`No ${transaction.token} balance found`);
           }
+          formattedAmount = wallet.formatTokenBalance(
+            rawAmount,
+            tokenBalance.decimals
+          );
         } else {
           rawAmount = toRawAmount(
             transaction.amount,
@@ -4198,12 +4204,8 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
           if (rawAmount > tokenBalance.balance) {
             throw new Error("Insufficient token balance for this transfer");
           }
+          formattedAmount = transaction.amount;
         }
-
-        formattedAmount = wallet.formatTokenBalance(
-          rawAmount,
-          tokenBalance.decimals
-        );
 
         txSignature = await wallet.transferToken(
           telegramId,
@@ -7289,6 +7291,9 @@ const showSwapQuoteAndConfirmation = async (
       fromToken,
       toToken,
       amount: displayAmount,
+      rawAmount: baseAmount,
+      inputDecimals,
+      outputDecimals,
       userId: userId.toString(),
       quote: quote, // Store the quote for execution
     });
@@ -7952,31 +7957,30 @@ const handleSwapCustomAmountInput = async (
       throw new Error("Invalid percentage format");
     }
 
-    // Get current balance to calculate percentage
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
 
-    let balance = 0;
     if (fromToken === "SOL") {
-      balance = solBalance;
-      const lamportsPortion = Math.floor(balance * (percentage / 100));
+      const lamportsPortion = Math.floor(solBalance * (percentage / 100));
       if (lamportsPortion <= 0) {
         throw new Error("Percentage results in zero amount");
       }
-      actualAmount = wallet.formatSolBalance(lamportsPortion);
+      actualAmount = formatAmount(lamportsPortion, 9, {
+        maxFractionDigits: 9,
+        trim: true,
+      });
     } else {
       const tokenBalance = tokenBalances.find((t) => t.ticker === fromToken);
       if (!tokenBalance) {
         throw new Error(`Token ${fromToken} not found in wallet`);
       }
-      balance = tokenBalance.balance;
-      const tokenPortion = Math.floor(balance * (percentage / 100));
+      const tokenPortion = Math.floor(tokenBalance.balance * (percentage / 100));
       if (tokenPortion <= 0) {
         throw new Error("Percentage results in zero amount");
       }
-      actualAmount = wallet.formatTokenBalance(
-        tokenPortion,
-        tokenBalance.decimals
-      );
+      actualAmount = formatAmount(tokenPortion, tokenBalance.decimals, {
+        maxFractionDigits: tokenBalance.decimals,
+        trim: true,
+      });
     }
   } else if (amount.toLowerCase() === "max") {
     actualAmount = "max";
@@ -8414,19 +8418,19 @@ const handleBuyCustomAmountInput = async (
         throw new Error("Invalid percentage format");
       }
 
-      // Get current balance to calculate percentage
       const { solBalance, tokenBalances } = await getCachedWalletData(
         telegramId
       );
 
-      let balance = 0;
       if (paymentToken === "SOL") {
-        balance = solBalance;
-        const lamportsPortion = Math.floor(balance * (percentage / 100));
+        const lamportsPortion = Math.floor(solBalance * (percentage / 100));
         if (lamportsPortion <= 0) {
           throw new Error("Percentage results in zero amount");
         }
-        actualAmount = wallet.formatSolBalance(lamportsPortion);
+        actualAmount = formatAmount(lamportsPortion, 9, {
+          maxFractionDigits: 9,
+          trim: true,
+        });
       } else {
         const tokenBalance = tokenBalances.find(
           (t) => t.ticker === paymentToken
@@ -8434,15 +8438,14 @@ const handleBuyCustomAmountInput = async (
         if (!tokenBalance) {
           throw new Error(`Token ${paymentToken} not found in wallet`);
         }
-        balance = tokenBalance.balance;
-        const tokenPortion = Math.floor(balance * (percentage / 100));
+        const tokenPortion = Math.floor(tokenBalance.balance * (percentage / 100));
         if (tokenPortion <= 0) {
           throw new Error("Percentage results in zero amount");
         }
-        actualAmount = wallet.formatTokenBalance(
-          tokenPortion,
-          tokenBalance.decimals
-        );
+        actualAmount = formatAmount(tokenPortion, tokenBalance.decimals, {
+          maxFractionDigits: tokenBalance.decimals,
+          trim: true,
+        });
       }
     } else if (amount.toLowerCase() === "max") {
       actualAmount = "max";
@@ -8543,7 +8546,6 @@ const handleSellCustomAmountInput = async (
         throw new Error("Invalid percentage format");
       }
 
-      // Get current balance to calculate percentage
       const { tokenBalances } = await getCachedWalletData(telegramId);
       const tokenBalance = tokenBalances.find((t) => t.ticker === tokenToSell);
 
@@ -8557,10 +8559,10 @@ const handleSellCustomAmountInput = async (
       if (tokenPortion <= 0) {
         throw new Error("Percentage results in zero amount");
       }
-      actualAmount = wallet.formatTokenBalance(
-        tokenPortion,
-        tokenBalance.decimals
-      );
+      actualAmount = formatAmount(tokenPortion, tokenBalance.decimals, {
+        maxFractionDigits: tokenBalance.decimals,
+        trim: true,
+      });
     } else if (amount.toLowerCase() === "max") {
       actualAmount = "max";
     } else {
