@@ -15,6 +15,7 @@ import { formatUserFriendlyError } from "./utils/errors";
 import { SwapManager } from "./utils/swap-manager";
 import {
   LAMPORTS_PER_SOL,
+  MIN_SOL_FOR_TX,
   GAME_TIMEOUT,
   EXPIRED_GAMES_CHECK_INTERVAL_MS,
   GAME_EXPIRATION_BUFFER_TIME,
@@ -138,6 +139,36 @@ export const __test_getUserState = (userId: string) => getUserState(userId, fals
 export const __test_clearUserState = (userId: string) => { getUserState(userId, true); };
 
 // Main menu keyboard moved to utils/keyboards.ts
+
+const SOL_FEE_BUFFER_LAMPORTS = Math.ceil(MIN_SOL_FOR_TX * LAMPORTS_PER_SOL);
+const decimalAmountPattern = /^\d+(\.\d+)?$/;
+
+const toRawAmount = (value: string, decimals: number): number => {
+  const normalized = value.trim();
+  if (!decimalAmountPattern.test(normalized)) {
+    throw new Error("Invalid amount format");
+  }
+  const [intPartRaw = "0", fracPartRaw = ""] = normalized.split(".");
+  const intPart = intPartRaw === "" ? "0" : intPartRaw;
+  const paddedFraction = (fracPartRaw + "0".repeat(decimals)).slice(
+    0,
+    decimals
+  );
+  const rawBigInt =
+    BigInt(intPart) * 10n ** BigInt(decimals) +
+    (paddedFraction.length > 0 ? BigInt(paddedFraction) : 0n);
+
+  if (rawBigInt === 0n) {
+    throw new Error("Amount must be greater than zero");
+  }
+  if (rawBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error("Amount is too large");
+  }
+  return Number(rawBigInt);
+};
+
+const clampLamportsForFees = (lamports: number): number =>
+  Math.max(0, lamports - SOL_FEE_BUFFER_LAMPORTS);
 
 /**
  * Check if the context is a private chat
@@ -4102,33 +4133,48 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
       if (!transaction.address) {
         throw new Error("Invalid recipient address");
       }
+
       const toPublicKey = new PublicKey(transaction.address);
+      const telegramId = BigInt(transaction.userId);
       let txSignature: string;
-      let actualAmount = transaction.amount;
+      let formattedAmount: string;
 
       if (transaction.token === "SOL") {
-        // Handle SOL transfer
+        const balanceLamports = await wallet.getBalance(telegramId);
+        let lamportsToSend: number;
+
         if (transaction.amount === "max") {
-          // Calculate max SOL (leave some for transaction fees)
-          const balance = await wallet.getBalance(BigInt(transaction.userId));
-          actualAmount = (balance - 0.01).toString(); // Leave 0.01 SOL for fees
+          lamportsToSend = clampLamportsForFees(balanceLamports);
+          if (lamportsToSend <= 0) {
+            throw new Error(
+              "Not enough SOL to cover fees. Keep a small amount for transaction costs."
+            );
+          }
+        } else {
+          lamportsToSend = toRawAmount(transaction.amount, 9);
+          if (lamportsToSend + SOL_FEE_BUFFER_LAMPORTS > balanceLamports) {
+            throw new Error("Insufficient SOL balance for this transfer");
+          }
         }
 
+        const solAmount = lamportsToSend / LAMPORTS_PER_SOL;
+        formattedAmount = wallet.formatSolBalance(lamportsToSend);
+
         txSignature = await wallet.transferSol(
-          BigInt(transaction.userId),
+          telegramId,
           toPublicKey,
-          parseFloat(actualAmount || "0")
+          solAmount
         );
       } else {
-        // Handle token transfer
         if (!transaction.token) {
           throw new Error("Token not specified in transaction");
         }
 
-        // Get token mint dynamically from token manager or wallet data
-        const { tokenBalances } = await getCachedWalletData(BigInt(transaction.userId));
-        const tokenBalance = tokenBalances.find((t) => t.ticker === transaction.token);
-        
+        const { tokenBalances } = await getCachedWalletData(telegramId);
+        const tokenBalance = tokenBalances.find(
+          (t) => t.ticker === transaction.token
+        );
+
         if (!tokenBalance) {
           throw new Error(`Token ${transaction.token} not found in wallet`);
         }
@@ -4138,31 +4184,43 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
           throw new Error(`Token mint not found for ${transaction.token}`);
         }
 
+        let rawAmount = 0;
         if (transaction.amount === "max") {
-          // Use the token balance we already found
-          if (!tokenBalance.balance || tokenBalance.balance <= 0) {
+          rawAmount = Math.floor(tokenBalance.balance);
+          if (rawAmount <= 0) {
             throw new Error(`No ${transaction.token} balance found`);
           }
-          actualAmount = tokenBalance.balance.toString();
+        } else {
+          rawAmount = toRawAmount(
+            transaction.amount,
+            tokenBalance.decimals
+          );
+          if (rawAmount > tokenBalance.balance) {
+            throw new Error("Insufficient token balance for this transfer");
+          }
         }
 
+        formattedAmount = wallet.formatTokenBalance(
+          rawAmount,
+          tokenBalance.decimals
+        );
+
         txSignature = await wallet.transferToken(
-          BigInt(transaction.userId),
+          telegramId,
           toPublicKey,
-          parseFloat(actualAmount || "0"),
+          rawAmount,
           tokenMint
         );
       }
 
       console.log(`🚀 Transaction submitted: ${txSignature}`);
 
-      // Wait for confirmation
       await wallet.confirmTransaction(txSignature);
+      clearWalletCache(telegramId);
 
-      // Show success with Solscan link
       const solscanUrl = `https://solscan.io/tx/${txSignature}`;
       await ctx.editMessageText(
-        `✅ <b>TRANSACTION COMPLETED</b>\n\nSent ${actualAmount} ${transaction.token}\nTo: <code>${transaction.address}</code>\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`,
+        `✅ <b>TRANSACTION COMPLETED</b>\n\nSent ${formattedAmount} ${transaction.token}\nTo: <code>${transaction.address}</code>\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`,
         {
           parse_mode: "HTML",
           link_preview_options: { is_disabled: true },
@@ -4198,35 +4256,51 @@ bot.callbackQuery(/^confirm_wrap_/, async (ctx) => {
   try {
     const callbackData = ctx.callbackQuery?.data || "";
     const amount = callbackData.replace("confirm_wrap_", "");
-
     console.log(`✅ Confirmed wrap: ${amount} SOL`);
 
-    // Update message to show processing state
+    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+    const balanceLamports = await wallet.getBalance(telegramId);
+    const lamportsToWrap = toRawAmount(amount, 9);
+
+    if (lamportsToWrap + SOL_FEE_BUFFER_LAMPORTS > balanceLamports) {
+      await ctx.answerCallbackQuery("❌ Insufficient SOL for wrap");
+      await ctx.editMessageText(
+        `❌ <b>WRAP FAILED</b>\n\nNot enough SOL to wrap ${amount}.\nKeep at least ${MIN_SOL_FOR_TX} SOL for fees and try again.`,
+        {
+          parse_mode: "HTML",
+          reply_markup: new InlineKeyboard()
+            .text("← Back to Wallet", "main_wallet")
+            .row(),
+        }
+      );
+      return;
+    }
+
     await ctx.editMessageText(
-      `🔄 <b>PROCESSING WRAP</b>\n\nWrapping ${amount} SOL to WSOL...\n\n<i>Please wait...</i>`,
+      `🔄 <b>PROCESSING WRAP</b>\n\nWrapping ${wallet.formatSolBalance(lamportsToWrap)} SOL to WSOL...\n\n<i>Please wait...</i>`,
       {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard(),
       }
     );
 
-    // TODO: Implement actual wrap transaction here
-    // For now, simulate with a delay and show success
-    setTimeout(async () => {
-      try {
-        await ctx.editMessageText(
-          `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${amount} SOL to ${amount} WSOL`,
-          {
-            parse_mode: "HTML",
-            reply_markup: new InlineKeyboard()
-              .text("← Back to Wallet", "main_wallet")
-              .row(),
-          }
-        );
-      } catch (error) {
-        console.error("Error updating wrap completion message:", error);
+    const signature = await wallet.wrapSol(telegramId, lamportsToWrap);
+    await wallet.confirmTransaction(signature);
+    clearWalletCache(telegramId);
+
+    const formattedAmount = wallet.formatSolBalance(lamportsToWrap);
+    const solscanUrl = `https://solscan.io/tx/${signature}`;
+
+    await ctx.editMessageText(
+      `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${formattedAmount} SOL to WSOL\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`,
+      {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+        reply_markup: new InlineKeyboard()
+          .text("← Back to Wallet", "main_wallet")
+          .row(),
       }
-    }, 2000);
+    );
 
     await ctx.answerCallbackQuery("✅ Wrap transaction submitted");
   } catch (error) {
@@ -7012,16 +7086,17 @@ const showSwapAmountSelection = async (
   // Get balance for the FROM token
   const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
 
-  let balance = "0";
+  let balanceDecimal = 0;
   let formattedBalance = "0";
 
   if (fromToken === "SOL") {
-    balance = solBalance.toString();
+    balanceDecimal = solBalance / LAMPORTS_PER_SOL;
     formattedBalance = wallet.formatSolBalance(solBalance);
   } else {
     const tokenBalance = tokenBalances.find((t) => t.ticker === fromToken);
     if (tokenBalance) {
-      balance = tokenBalance.balance.toString();
+      balanceDecimal =
+        tokenBalance.balance / Math.pow(10, tokenBalance.decimals);
       formattedBalance = wallet.formatTokenBalance(
         tokenBalance.balance,
         tokenBalance.decimals
@@ -7040,9 +7115,9 @@ const showSwapAmountSelection = async (
 
   const keyboard = new InlineKeyboard();
 
-  if (parseFloat(balance) > 0) {
+  if (balanceDecimal > 0) {
     // Quick amounts based on balance
-    const maxBalance = parseFloat(balance);
+    const maxBalance = balanceDecimal;
     if (maxBalance >= 100) {
       keyboard
         .text("10", `swap_amount_${fromToken}_${toToken}_10`)
@@ -7097,15 +7172,6 @@ const showSwapQuoteAndConfirmation = async (
 ) => {
   const userId = telegramId || (BigInt(ctx.from?.id || 0) as bigint);
 
-  // Update message to show loading
-  await ctx.editMessageText(
-    `🔄 <b>GETTING QUOTE</b>\n\n${amount} ${fromToken} → ${toToken}\n\n<i>Please wait...</i>`,
-    {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard(),
-    }
-  );
-
   try {
     // Get real quote from swapManager
     const tokenMints: { [key: string]: string } = {
@@ -7122,38 +7188,73 @@ const showSwapQuoteAndConfirmation = async (
       throw new Error(`Unsupported token pair: ${fromToken} → ${toToken}`);
     }
 
-    // Handle max amount
-    let actualAmount = amount;
-    if (amount === "max") {
-      const { solBalance, tokenBalances } = await getCachedWalletData(userId);
-      if (fromToken === "SOL") {
-        actualAmount = (solBalance - 0.01).toString(); // Leave 0.01 SOL for fees
-      } else {
-        const tokenBalance = tokenBalances.find((t) => t.ticker === fromToken);
-        if (!tokenBalance) {
-          throw new Error(`No ${fromToken} balance found`);
-        }
-        actualAmount = tokenBalance.balance.toString();
-      }
-    }
-
-    // Get user keypair for quote request
     const keypair = wallet.getKeyPair(userId);
+    const { solBalance, tokenBalances } = await getCachedWalletData(userId);
+    const tokenBalance = tokenBalances.find((t) => t.ticker === fromToken);
 
-    // Get token metadata for decimals
     const inputDecimals =
       fromToken === "SOL"
         ? 9
-        : await wallet.getTokenMetadata(inputMint).then((m) => m.decimals);
+        : tokenBalance?.decimals ?? (await wallet.getTokenMetadata(inputMint)).decimals;
     const outputDecimals =
       toToken === "SOL"
         ? 9
         : await wallet.getTokenMetadata(outputMint).then((m) => m.decimals);
 
-    // Convert amount to base units (lamports/smallest unit)
-    const baseAmount = Math.floor(
-      parseFloat(actualAmount) * Math.pow(10, inputDecimals)
-    ).toString();
+    let rawAmount: number;
+    let displayAmount: string;
+
+    if (amount === "max") {
+      if (fromToken === "SOL") {
+        rawAmount = clampLamportsForFees(solBalance);
+        if (rawAmount <= 0) {
+          throw new Error("Not enough SOL to cover swap and network fees");
+        }
+        displayAmount = wallet.formatSolBalance(rawAmount);
+      } else {
+        if (!tokenBalance) {
+          throw new Error(`No ${fromToken} balance found`);
+        }
+        rawAmount = Math.floor(tokenBalance.balance);
+        if (rawAmount <= 0) {
+          throw new Error(`No ${fromToken} balance found`);
+        }
+        displayAmount = wallet.formatTokenBalance(
+          rawAmount,
+          tokenBalance.decimals
+        );
+      }
+    } else {
+      rawAmount = toRawAmount(amount, inputDecimals);
+
+      if (fromToken === "SOL") {
+        if (rawAmount + SOL_FEE_BUFFER_LAMPORTS > solBalance) {
+          throw new Error("Insufficient SOL balance for swap");
+        }
+        displayAmount = wallet.formatSolBalance(rawAmount);
+      } else {
+        if (!tokenBalance) {
+          throw new Error(`No ${fromToken} balance found`);
+        }
+        if (rawAmount > tokenBalance.balance) {
+          throw new Error("Insufficient token balance for swap");
+        }
+        displayAmount = wallet.formatTokenBalance(
+          rawAmount,
+          inputDecimals
+        );
+      }
+    }
+
+    const baseAmount = rawAmount.toString();
+
+    await ctx.editMessageText(
+      `🔄 <b>GETTING QUOTE</b>\n\n${displayAmount} ${fromToken} → ${toToken}\n\n<i>Please wait...</i>`,
+      {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard(),
+      }
+    );
 
     // Use the same structure as the original implementation
     const quote = await swapManager.getQuote({
@@ -7177,7 +7278,9 @@ const showSwapQuoteAndConfirmation = async (
       toToken.toUpperCase()
     );
 
-    const response = quoteMessage + "\n\n⚠️ <b>Confirm this swap?</b>";
+    const response =
+      `${quoteMessage}\n\n<b>Amount:</b> ${displayAmount} ${fromToken}` +
+      "\n\n⚠️ <b>Confirm this swap?</b>";
 
     // Generate transaction ID for confirmation
     const txId = generateTransactionId();
@@ -7185,7 +7288,7 @@ const showSwapQuoteAndConfirmation = async (
       type: "swap",
       fromToken,
       toToken,
-      amount: actualAmount,
+      amount: displayAmount,
       userId: userId.toString(),
       quote: quote, // Store the quote for execution
     });
@@ -7232,16 +7335,17 @@ const showBuyAmountSelection = async (
   // Get balance for the payment token
   const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
 
-  let balance = "0";
+  let balanceDecimal = 0;
   let formattedBalance = "0";
 
   if (paymentToken === "SOL") {
-    balance = solBalance.toString();
+    balanceDecimal = solBalance / LAMPORTS_PER_SOL;
     formattedBalance = wallet.formatSolBalance(solBalance);
   } else {
     const tokenBalance = tokenBalances.find((t) => t.ticker === paymentToken);
     if (tokenBalance) {
-      balance = tokenBalance.balance.toString();
+      balanceDecimal =
+        tokenBalance.balance / Math.pow(10, tokenBalance.decimals);
       formattedBalance = wallet.formatTokenBalance(
         tokenBalance.balance,
         tokenBalance.decimals
@@ -7260,10 +7364,10 @@ const showBuyAmountSelection = async (
 
   const keyboard = new InlineKeyboard();
 
-  if (parseFloat(balance) > 0.01) {
+  if (balanceDecimal > 0.01) {
     // Need minimum for fees
     // Quick amounts based on balance
-    const maxBalance = parseFloat(balance);
+    const maxBalance = balanceDecimal;
     if (maxBalance >= 10) {
       keyboard
         .text("1", `buy_amount_${paymentToken}_${targetToken}_1`)
@@ -7428,41 +7532,66 @@ const showBuyQuoteAndConfirmation = async (
       throw new Error(`Token not found: ${targetToken}`);
     }
 
-    // Handle max amount
-    let actualAmount = amount;
-    if (amount === "max") {
-      const { solBalance, tokenBalances } = await getCachedWalletData(
-        telegramId
-      );
-      if (paymentToken === "SOL") {
-        actualAmount = (solBalance - 0.01).toString(); // Leave 0.01 SOL for fees
-      } else {
-        const tokenBalance = tokenBalances.find(
-          (t) => t.ticker === paymentToken
-        );
-        if (!tokenBalance) {
-          throw new Error(`No ${paymentToken} balance found`);
-        }
-        actualAmount = tokenBalance.balance.toString();
-      }
-    }
-
-    // Get user keypair for quote request
     const keypair = wallet.getKeyPair(telegramId);
+    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
+    const tokenBalance = tokenBalances.find(
+      (t) => t.ticker === paymentToken
+    );
 
-    // Get token metadata for decimals
     const inputDecimals =
       paymentToken === "SOL"
         ? 9
-        : await wallet.getTokenMetadata(inputMint).then((m) => m.decimals);
+        : tokenBalance?.decimals ?? (await wallet.getTokenMetadata(inputMint)).decimals;
     const outputDecimals = contractAddress
       ? await wallet.getTokenMetadata(outputMint).then((m) => m.decimals)
       : 9;
 
-    // Convert amount to base units
-    const baseAmount = Math.floor(
-      parseFloat(actualAmount) * Math.pow(10, inputDecimals)
-    ).toString();
+    let rawAmount: number;
+    let displayAmount: string;
+
+    if (amount === "max") {
+      if (paymentToken === "SOL") {
+        rawAmount = clampLamportsForFees(solBalance);
+        if (rawAmount <= 0) {
+          throw new Error("Not enough SOL to cover purchase and fees");
+        }
+        displayAmount = wallet.formatSolBalance(rawAmount);
+      } else {
+        if (!tokenBalance) {
+          throw new Error(`No ${paymentToken} balance found`);
+        }
+        rawAmount = Math.floor(tokenBalance.balance);
+        if (rawAmount <= 0) {
+          throw new Error(`No ${paymentToken} balance found`);
+        }
+        displayAmount = wallet.formatTokenBalance(
+          rawAmount,
+          tokenBalance.decimals
+        );
+      }
+    } else {
+      rawAmount = toRawAmount(amount, inputDecimals);
+
+      if (paymentToken === "SOL") {
+        if (rawAmount + SOL_FEE_BUFFER_LAMPORTS > solBalance) {
+          throw new Error("Insufficient SOL balance for this purchase");
+        }
+        displayAmount = wallet.formatSolBalance(rawAmount);
+      } else {
+        if (!tokenBalance) {
+          throw new Error(`No ${paymentToken} balance found`);
+        }
+        if (rawAmount > tokenBalance.balance) {
+          throw new Error("Insufficient token balance for this purchase");
+        }
+        displayAmount = wallet.formatTokenBalance(
+          rawAmount,
+          inputDecimals
+        );
+      }
+    }
+
+    const baseAmount = rawAmount.toString();
 
     // Get quote using existing swap manager
     const quote = await swapManager.getQuote({
@@ -7485,7 +7614,7 @@ const showBuyQuoteAndConfirmation = async (
 
 BUY CONFIRMATION
 
-You Pay: ${actualAmount} ${paymentToken}
+You Pay: ${displayAmount} ${paymentToken}
 You Receive: ~${quote.outputAmount} ${targetToken}
 
 Rate: ${quote.estimatedRate.toFixed(6)} ${targetToken}/${paymentToken}
@@ -7506,7 +7635,7 @@ ${outputMint}</pre>`,
       type: "swap", // Reuse swap logic internally
       fromToken: paymentToken,
       toToken: targetToken,
-      amount: actualAmount,
+      amount: displayAmount,
       userId: telegramId.toString(),
       quote: quote,
     });
@@ -7829,14 +7958,26 @@ const handleSwapCustomAmountInput = async (
     let balance = 0;
     if (fromToken === "SOL") {
       balance = solBalance;
+      const lamportsPortion = Math.floor(balance * (percentage / 100));
+      if (lamportsPortion <= 0) {
+        throw new Error("Percentage results in zero amount");
+      }
+      actualAmount = wallet.formatSolBalance(lamportsPortion);
     } else {
       const tokenBalance = tokenBalances.find((t) => t.ticker === fromToken);
-      if (tokenBalance) {
-        balance = tokenBalance.balance;
+      if (!tokenBalance) {
+        throw new Error(`Token ${fromToken} not found in wallet`);
       }
+      balance = tokenBalance.balance;
+      const tokenPortion = Math.floor(balance * (percentage / 100));
+      if (tokenPortion <= 0) {
+        throw new Error("Percentage results in zero amount");
+      }
+      actualAmount = wallet.formatTokenBalance(
+        tokenPortion,
+        tokenBalance.decimals
+      );
     }
-
-    actualAmount = (balance * (percentage / 100)).toString();
   } else if (amount.toLowerCase() === "max") {
     actualAmount = "max";
   } else {
@@ -8281,16 +8422,28 @@ const handleBuyCustomAmountInput = async (
       let balance = 0;
       if (paymentToken === "SOL") {
         balance = solBalance;
+        const lamportsPortion = Math.floor(balance * (percentage / 100));
+        if (lamportsPortion <= 0) {
+          throw new Error("Percentage results in zero amount");
+        }
+        actualAmount = wallet.formatSolBalance(lamportsPortion);
       } else {
         const tokenBalance = tokenBalances.find(
           (t) => t.ticker === paymentToken
         );
-        if (tokenBalance) {
-          balance = tokenBalance.balance;
+        if (!tokenBalance) {
+          throw new Error(`Token ${paymentToken} not found in wallet`);
         }
+        balance = tokenBalance.balance;
+        const tokenPortion = Math.floor(balance * (percentage / 100));
+        if (tokenPortion <= 0) {
+          throw new Error("Percentage results in zero amount");
+        }
+        actualAmount = wallet.formatTokenBalance(
+          tokenPortion,
+          tokenBalance.decimals
+        );
       }
-
-      actualAmount = (balance * (percentage / 100)).toString();
     } else if (amount.toLowerCase() === "max") {
       actualAmount = "max";
     } else {
@@ -8398,9 +8551,16 @@ const handleSellCustomAmountInput = async (
         throw new Error(`Token ${tokenToSell} not found in wallet`);
       }
 
-      const decimalBalance =
-        tokenBalance.balance / Math.pow(10, tokenBalance.decimals);
-      actualAmount = (decimalBalance * (percentage / 100)).toString();
+      const tokenPortion = Math.floor(
+        tokenBalance.balance * (percentage / 100)
+      );
+      if (tokenPortion <= 0) {
+        throw new Error("Percentage results in zero amount");
+      }
+      actualAmount = wallet.formatTokenBalance(
+        tokenPortion,
+        tokenBalance.decimals
+      );
     } else if (amount.toLowerCase() === "max") {
       actualAmount = "max";
     } else {
@@ -8536,15 +8696,6 @@ const showSellQuoteAndConfirmation = async (
   amount: string,
   telegramId: bigint
 ) => {
-  // Update message to show loading
-  await ctx.editMessageText(
-    `🔄 <b>GETTING SELL QUOTE</b>\n\nSell ${amount} ${tokenToSell} for SOL\n\n<i>Finding best price...</i>`,
-    {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard(),
-    }
-  );
-
   try {
     // Get token info for the token being sold
     const { tokenBalances } = await getCachedWalletData(telegramId);
@@ -8581,60 +8732,40 @@ const showSellQuoteAndConfirmation = async (
       );
     }
 
-    // Calculate actual amount to sell (convert from raw balance to decimal amount)
-    const decimalBalance =
-      tokenBalance.balance / Math.pow(10, tokenBalance.decimals);
-    console.log(
-      `💰 Token balance: ${tokenBalance.balance} raw = ${decimalBalance} decimal`
-    );
+    const balanceRaw = Math.floor(tokenBalance.balance);
+    const sellDecimals = tokenInfo.decimals ?? tokenBalance.decimals;
 
-    let actualAmount = amount;
-    if (amount.includes("%")) {
+    let rawAmount: number;
+    let displayAmount = amount;
+
+    if (amount.toLowerCase() === "max") {
+      rawAmount = balanceRaw;
+      displayAmount = wallet.formatTokenBalance(balanceRaw, sellDecimals);
+    } else if (amount.includes("%")) {
       const percentage = parseFloat(amount.replace("%", ""));
-      actualAmount = (decimalBalance * (percentage / 100)).toString();
-    } else if (amount.toLowerCase() === "max") {
-      actualAmount = decimalBalance.toString();
+      if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
+        throw new Error("Invalid percentage format");
+      }
+      rawAmount = Math.floor(balanceRaw * (percentage / 100));
+      if (rawAmount <= 0) {
+        throw new Error("Percentage results in zero amount");
+      }
+      displayAmount = wallet.formatTokenBalance(rawAmount, sellDecimals);
+    } else {
+      rawAmount = toRawAmount(amount, sellDecimals);
+      if (rawAmount > balanceRaw) {
+        throw new Error(
+          `Cannot sell ${amount} ${tokenToSell}. You only have ${wallet.formatTokenBalance(
+            balanceRaw,
+            sellDecimals
+          )} ${tokenToSell}`
+        );
+      }
+      displayAmount = wallet.formatTokenBalance(rawAmount, sellDecimals);
     }
 
-    // Validate that actualAmount is not greater than available balance
-    const actualAmountFloat = parseFloat(actualAmount);
-    if (actualAmountFloat > decimalBalance) {
-      throw new Error(
-        `Cannot sell ${actualAmountFloat} ${tokenToSell}. You only have ${decimalBalance} ${tokenToSell}`
-      );
-    }
-
-    console.log(
-      `🔢 Sell calculation: ${amount} → ${actualAmount} (max: ${decimalBalance})`
-    );
-
-    // Convert decimal amount to raw amount using BigInt for precision
-    const decimalAmount = parseFloat(actualAmount);
-
-    // Use string multiplication to avoid floating point precision issues
-    const decimalParts = decimalAmount.toString().split(".");
-    const integerPart = decimalParts[0] || "0";
-    const decimalPart = (decimalParts[1] || "")
-      .padEnd(tokenInfo.decimals, "0")
-      .slice(0, tokenInfo.decimals);
-
-    // Combine integer and decimal parts
-    const rawAmountStr = integerPart + decimalPart;
-    const rawAmount = BigInt(rawAmountStr);
-
-    console.log(`🔄 Converting ${actualAmount} to raw amount:`);
-    console.log(`   Decimal amount: ${decimalAmount}`);
-    console.log(`   Token decimals: ${tokenInfo.decimals}`);
-    console.log(`   Integer part: "${integerPart}"`);
-    console.log(`   Decimal part: "${decimalPart}"`);
-    console.log(`   Raw amount string: "${rawAmountStr}"`);
-    console.log(`   Final raw amount: ${rawAmount.toString()}`);
-
-    // Validate that rawAmount is positive
-    if (rawAmount <= 0n) {
-      throw new Error(
-        `Invalid amount: ${rawAmount.toString()} (from ${actualAmount})`
-      );
+    if (rawAmount <= 0) {
+      throw new Error("Amount must be greater than zero");
     }
 
     // For SELL, we typically sell tokens for SOL
@@ -8646,13 +8777,21 @@ const showSellQuoteAndConfirmation = async (
 
     // Use the existing global swapManager instance
 
+    await ctx.editMessageText(
+      `🔄 <b>GETTING SELL QUOTE</b>\n\n${displayAmount} ${tokenToSell} → ${toToken}\n\n<i>Finding best price...</i>`,
+      {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard(),
+      }
+    );
+
     const quote = await swapManager.getQuote({
       inputMint: tokenInfo.token_mint, // Use tokenInfo instead of tokenBalance
       outputMint: toTokenInfo.token_mint,
-      amount: rawAmount.toString(), // Use BigInt raw amount as string
+      amount: rawAmount.toString(),
       slippageBps: 200, // Use same 2% slippage as successful BUY/SWAP
       userKeypair: wallet.getKeyPair(telegramId),
-      inputDecimals: tokenInfo.decimals || 6, // Use tokenInfo decimals
+      inputDecimals: sellDecimals || 6,
       outputDecimals: toTokenInfo.decimals || 9,
       inputTicker: tokenToSell.toUpperCase(),
       outputTicker: "SOL",
@@ -8662,6 +8801,14 @@ const showSellQuoteAndConfirmation = async (
       throw new Error(`Cannot get quote for selling ${tokenToSell}`);
     }
 
+    const quoteMessage = swapManager.formatQuoteForDisplay(
+      quote,
+      sellDecimals,
+      toTokenInfo.decimals,
+      tokenToSell.toUpperCase(),
+      toToken.toUpperCase()
+    );
+
     // Create transaction ID for caching
     const txId = Math.random().toString(36).substring(2, 15);
 
@@ -8669,36 +8816,22 @@ const showSellQuoteAndConfirmation = async (
     transactionCache.set(txId, {
       fromToken: tokenToSell,
       toToken: toToken,
-      amount: actualAmount, // Keep decimal for display and pump.fun
+      amount: displayAmount,
       rawAmount: rawAmount.toString(), // Add raw amount for Jupiter
       fromTokenInfo: {
         token_mint: tokenInfo.token_mint,
-        decimals: tokenInfo.decimals,
+        decimals: sellDecimals,
       },
       toTokenInfo: toTokenInfo,
       quote: quote,
       userKeypair: wallet.getKeyPair(telegramId),
     });
 
-    // Format for SELL terminology
-    const expectedOutput = wallet.formatTokenBalance(
-      parseInt(quote.outputAmount),
-      toTokenInfo.decimals
-    );
+    const response =
+      `${quoteMessage}\n\n<b>Amount:</b> ${displayAmount} ${tokenToSell}` +
+      "\n\n⚠️ <b>Confirm this sale?</b>";
 
-    const response = [
-      `🔴 <b>SELL CONFIRMATION</b>`,
-      "",
-      `<b>You Sell:</b> ${actualAmount} ${tokenToSell}`,
-      `<b>You Get:</b> ~${expectedOutput} ${toToken}`,
-      "",
-      `<b>Provider:</b> ${quote.provider?.toUpperCase() || "Auto"}`,
-      `<b>Slippage:</b> 1.0%`,
-      "",
-      `⚠️ <i>Price may change before execution</i>`,
-    ];
-
-    await ctx.editMessageText(response.join("\n"), {
+    await ctx.editMessageText(response, {
       parse_mode: "HTML",
       reply_markup: createConfirmSellKeyboard(txId),
     });

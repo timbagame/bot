@@ -14,6 +14,7 @@ import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
   createTransferCheckedInstruction,
+  createSyncNativeInstruction,
   TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
 } from "@solana/spl-token";
@@ -991,5 +992,38 @@ export class WalletManager {
   public formatTokenBalance(amount: number, decimals: number): string {
     // Use shared formatter for consistent rounding and trimming
     return formatAmount(amount, decimals, { maxFractionDigits: 6, trim: true });
+  }
+
+  public async wrapSol(
+    telegramId: bigint,
+    amountLamports: number
+  ): Promise<string> {
+    if (amountLamports <= 0) {
+      throw new Error("Wrap amount must be greater than zero");
+    }
+
+    const userKeypair = this.getKeyPair(telegramId);
+    const wsolMint = new PublicKey(
+      "So11111111111111111111111111111111111111112"
+    );
+
+    const { address: wsolAta, instructions } =
+      await this.findOrCreateAssociatedTokenAccount(
+        userKeypair.publicKey,
+        wsolMint,
+        userKeypair,
+        TOKEN_PROGRAM_ID
+      );
+
+    const transferIx = SystemProgram.transfer({
+      fromPubkey: userKeypair.publicKey,
+      toPubkey: wsolAta,
+      lamports: amountLamports,
+    });
+
+    const syncIx = createSyncNativeInstruction(wsolAta);
+
+    const allInstructions = [...instructions, transferIx, syncIx];
+    return await this.sendTransaction(allInstructions, [userKeypair]);
   }
 }
