@@ -278,7 +278,11 @@ export function formatTransactionForDisplay(tx: TransactionRecord): string {
     amountText += ` → ${tx.amount_out} ${tx.to_token}`;
   }
 
-  return `${statusIcon}${typeIcon} ${amountText}\n<code>${date}</code> • <a href="https://solscan.io/tx/${tx.signature}">View</a>`;
+  const network = tx.network?.toLowerCase();
+  const clusterQuery = network && network !== "mainnet" ? `?cluster=${encodeURIComponent(network)}` : "";
+  const explorerUrl = `https://solscan.io/tx/${tx.signature}${clusterQuery}`;
+
+  return `${statusIcon}${typeIcon} ${amountText}\n<code>${date}</code> • <a href="${explorerUrl}">View</a>`;
 }
 
 function getTransactionTypeIcon(
