@@ -29,6 +29,53 @@ test("formatTransactionForDisplay shows icons, link, and amounts", () => {
   expect(s).toContain("<code>"); // date wrapper
 });
 
+test("formatTransactionForDisplay adds cluster for non-mainnet networks", () => {
+  const devnetTx = createTransactionRecord(
+    "userDev",
+    "SWAP",
+    "sig-dev",
+    "SOL",
+    "USDC",
+    "1",
+    "25",
+    "SUCCESS"
+  );
+  devnetTx.network = "devnet";
+
+  const testnetTx = createTransactionRecord(
+    "userTest",
+    "BUY",
+    "sig-test",
+    "SOL",
+    "BONK",
+    "3",
+    "9000",
+    "SUCCESS"
+  );
+  testnetTx.network = "testnet";
+
+  const mainnetTx = createTransactionRecord(
+    "userMain",
+    "SELL",
+    "sig-main",
+    "USDC",
+    "SOL",
+    "100",
+    "4",
+    "SUCCESS"
+  );
+  mainnetTx.network = "mainnet";
+
+  const devnetDisplay = formatTransactionForDisplay(devnetTx);
+  const testnetDisplay = formatTransactionForDisplay(testnetTx);
+  const mainnetDisplay = formatTransactionForDisplay(mainnetTx);
+
+  expect(devnetDisplay).toContain("https://solscan.io/tx/sig-dev?cluster=devnet");
+  expect(testnetDisplay).toContain("https://solscan.io/tx/sig-test?cluster=testnet");
+  expect(mainnetDisplay).toContain("https://solscan.io/tx/sig-main");
+  expect(mainnetDisplay).not.toContain("?cluster=");
+});
+
 test("TransactionHistory add + display roundtrip smoke", () => {
   const db = new TransactionHistory();
   const rec = createTransactionRecord("u1", "DEPOSIT", "sig-x", "SOL", "SOL", "1.0", undefined, "PENDING");
