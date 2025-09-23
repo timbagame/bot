@@ -56,7 +56,10 @@ test("BaseDatabase surfaces initialization errors", () => {
   try {
     expect(() => new FailingDatabase()).toThrow();
     expect(errors.length).toBeGreaterThan(0);
-    expect(String(errors[0][0])).toContain("Error initializing FailingDatabase database");
+    const firstError = errors[0];
+    expect(firstError).toBeDefined();
+    const message = String(firstError?.[0] ?? "");
+    expect(message).toContain("Error initializing FailingDatabase database");
   } finally {
     console.error = originalError;
   }
