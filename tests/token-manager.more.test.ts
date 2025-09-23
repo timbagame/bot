@@ -37,3 +37,10 @@ test("addToken registers token and appears in approved tokens list", async () =>
   expect(list[0]!.token_ticker).toBe("USDC");
 });
 
+test("getAllChatTokenConfigs returns stored chat defaults", () => {
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  tm.setChatDefaultToken(123, "MINT", "TOK", "setter");
+  const configs = tm.getAllChatTokenConfigs();
+  expect(configs.some((cfg) => cfg.chat_id === 123 && cfg.token_ticker === "TOK")).toBe(true);
+});
+

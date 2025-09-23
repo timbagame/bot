@@ -141,6 +141,14 @@ describe("keyboards: amount selection", () => {
     expect(amounts.length).toBeGreaterThanOrEqual(1);
   });
 
+  test("sub-unit balances still show at least one affordable option", () => {
+    const kb = createAmountSelectionKeyboard("coinflip", 1.2);
+    const amounts = extractCallbacks(kb)
+      .filter((s) => s.startsWith("amount_coinflip_"))
+      .map((s) => Number(s.split("_")[2]));
+    expect(amounts).toEqual([1]);
+  });
+
   test("balance under 50 starts from recommended minimum", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 40);
     const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));

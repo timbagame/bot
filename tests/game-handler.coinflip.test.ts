@@ -45,6 +45,19 @@ describe("game handler: coinflip command", () => {
     expect(String(ctx.__calls[0][1])).toContain("Please provide a valid amount");
   });
 
+  test("invalid amount falls back to usage guidance", async () => {
+    const ctx: any = makeCtx("/cf 0", "group");
+    const deps: any = {
+      isGroupChat: () => true,
+      parseAmount: async () => ({ success: false, error: "invalid_amount" }),
+      inferMaxPlayers: () => ({ ok: true, value: 2 }),
+      wallet: { getTokenBalance: async () => 0, getTokenMetadata: async () => ({ decimals: 6 }), formatTokenBalance: () => "0" },
+      gameManager: { createGame: async () => ({ success: false, error: "x" }), createGameMessage: async () => 0 },
+    };
+    await handleCoinflipCommand(ctx, deps);
+    expect(String(ctx.__calls[0][1])).toContain("Please provide a valid amount");
+  });
+
   test("unknown token error maps to user message", async () => {
     const ctx: any = makeCtx("/cf 10 FOO", "group");
     const deps: any = {

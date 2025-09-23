@@ -56,5 +56,47 @@ describe("wallet handlers", () => {
     expect(calls[1][0]).toBe("reply");
     expect(calls[2][0]).toBe("answer");
   });
+
+  test("onMainWallet reports errors and answers callback", async () => {
+    const ctx: any = makeCtx();
+    const deps = {
+      showWalletUI: async () => {
+        throw new Error("boom");
+      },
+      clearWalletCache: (_: any) => {},
+      createSettingsKeyboard: () => ({ rows: [] } as any),
+    };
+    await onMainWallet(ctx, deps);
+    const answer = ctx.__calls.find((c: any[]) => c[0] === "answer");
+    expect(String(answer[1])).toContain("Error loading wallet menu");
+  });
+
+  test("onWalletRefresh catches errors and responds", async () => {
+    const ctx: any = makeCtx();
+    const deps = {
+      showWalletUI: async () => {
+        throw new Error("refresh-fail");
+      },
+      clearWalletCache: (_: any) => {},
+      createSettingsKeyboard: () => ({ rows: [] } as any),
+    };
+    await onWalletRefresh(ctx, deps);
+    const answer = ctx.__calls.find((c: any[]) => c[0] === "answer");
+    expect(String(answer[1])).toContain("Error refreshing wallet");
+  });
+
+  test("onWalletSettings surfaces keyboard creation errors", async () => {
+    const ctx: any = makeCtx();
+    const deps = {
+      showWalletUI: async () => {},
+      clearWalletCache: (_: any) => {},
+      createSettingsKeyboard: () => {
+        throw new Error("keyboard fail");
+      },
+    };
+    await onWalletSettings(ctx, deps);
+    const answer = ctx.__calls.find((c: any[]) => c[0] === "answer");
+    expect(String(answer[1])).toContain("Error loading settings");
+  });
 });
 

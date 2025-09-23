@@ -28,5 +28,20 @@ describe("errors extras", () => {
     expect(msg).toContain("Transaction failed");
     expect(msg).toContain("insufficient SOL");
   });
+
+  test("quote unavailable maps to friendly retry guidance", () => {
+    const msg = parseTransactionError(new Error("Jupiter quote failed: quote failed"));
+    expect(msg).toContain("Quote unavailable");
+  });
+
+  test("token not tradable surfaces actionable message", () => {
+    const msg = parseTransactionError(new Error("token_not_tradable on Jupiter"));
+    expect(msg).toContain("Token not tradable");
+  });
+
+  test("same token swap error explains restriction", () => {
+    const msg = parseTransactionError(new Error("Jupiter: input and output mints are not allowed to be equal"));
+    expect(msg).toContain("Cannot swap same token");
+  });
 });
 

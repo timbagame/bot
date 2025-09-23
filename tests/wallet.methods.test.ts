@@ -32,3 +32,33 @@ test("findOrCreateAssociatedTokenAccount returns create instruction when missing
   const res = await wm.findOrCreateAssociatedTokenAccount(owner.publicKey, mint, payer);
   expect(res.instructions.length).toBe(1);
 });
+
+test("wrapSol builds instructions and forwards to sendTransaction", async () => {
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+  const ata = Keypair.generate().publicKey;
+  const sendCalls: any[] = [];
+  (wm as any).findOrCreateAssociatedTokenAccount = async () => ({
+    address: ata,
+    instructions: ["ix1"],
+  });
+  (wm as any).sendTransaction = async (ixs: any[], signers: any[]) => {
+    sendCalls.push({ ixs, signers });
+    return "WRAP123";
+  };
+
+  const sig = await wm.wrapSol(1n, 500_000_000);
+  expect(sig).toBe("WRAP123");
+  expect(sendCalls[0]!.ixs.length).toBe(3);
+  expect(sendCalls[0]!.signers[0]).toBeDefined();
+});
+
+test("wrapSol rejects non-positive amounts", async () => {
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+  await expect(wm.wrapSol(1n, 0)).rejects.toThrow(/greater than zero/);
+});
