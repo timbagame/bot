@@ -53,3 +53,39 @@ test("patchReplyBehavior also patches replyWithVideo similarly", async () => {
   expect(calls[0][2].reply_to_message_id).toBe(99);
   expect(calls[1][2].reply_to_message_id).toBeUndefined();
 });
+
+test("retry removes reply_to_message_id before delegating", async () => {
+  const attempts: any[] = [];
+  const err: any = new Error("message to be replied not found");
+  err.description = "message to be replied not found";
+  const ctx: any = {
+    message: { message_id: 55 },
+    reply: async (_text: string, opts?: any) => {
+      attempts.push(opts ?? {});
+      if (opts?.reply_to_message_id) {
+        throw err;
+      }
+      return { ok: true };
+    },
+  };
+
+  patchReplyBehavior(ctx);
+  await ctx.reply("hi there");
+  expect(attempts.length).toBe(2);
+  expect(attempts[0]?.reply_to_message_id).toBe(55);
+  expect(attempts[1]?.reply_to_message_id).toBeUndefined();
+});
+
+test("does not override provided reply_to_message_id", async () => {
+  const ctx: any = makeCtx(321);
+  patchReplyBehavior(ctx as any);
+  await ctx.reply("explicit", { reply_to_message_id: 777 });
+  expect(ctx.__calls[0][2].reply_to_message_id).toBe(777);
+});
+
+test("treats null reply_to_message_id as needing default", async () => {
+  const ctx: any = makeCtx(654);
+  patchReplyBehavior(ctx as any);
+  await ctx.reply("nullish", { reply_to_message_id: null });
+  expect(ctx.__calls[0][2].reply_to_message_id).toBe(654);
+});

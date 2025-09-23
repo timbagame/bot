@@ -87,3 +87,19 @@ test("GameDatabase: CRUD for games, mappings, participants, and slot updates", (
   db.removeGameParticipant("gameA", "tg_p2");
   expect(db.getGameParticipants("gameA")).toEqual(["tg_creator"]);
 });
+
+test("GameDatabase read helpers return safe defaults on errors", () => {
+  const db = GameDatabase.getInstance();
+  const sqlite: any = (db as any).db;
+  const originalPrepare = sqlite.prepare.bind(sqlite);
+
+  sqlite.prepare = () => {
+    throw new Error("boom");
+  };
+
+  expect(db.getGamesByCreator(123n)).toEqual([]);
+  expect(db.getGamesByPlayer(456n)).toEqual([]);
+  expect(db.getPlayer("789")).toBeNull();
+
+  sqlite.prepare = originalPrepare;
+});

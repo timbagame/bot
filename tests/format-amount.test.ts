@@ -28,3 +28,15 @@ test("formatAmount rounds when no fractional digits requested", () => {
 test("formatAmount parses string inputs with whitespace", () => {
   expect(formatAmount(" -00123", 2)).toBe("-1.23");
 });
+
+test("formatAmount handles explicit plus sign prefix", () => {
+  expect(formatAmount("+00045", 2)).toBe("0.45");
+});
+
+test("formatAmount falls back to numeric parsing when string has decimals", () => {
+  expect(formatAmount("12.34", 2)).toBe("0.12");
+});
+
+test("formatAmount rounds fractional carry when integer part is empty", () => {
+  expect(formatAmount(5, 3, { maxFractionDigits: 2 })).toBe("0.01");
+});

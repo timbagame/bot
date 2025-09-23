@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import { WalletManager } from "../src/utils/wallet";
 
 const mnemonic =
@@ -42,4 +45,52 @@ test("formatTokenBalance caps precision for large amounts", () => {
   resetInstance();
   const manager = WalletManager.getInstance(mnemonic);
   expect(manager.formatTokenBalance(1234567890, 9)).toBe("1.234568");
+});
+
+test("getAdminKeypair throws when file missing", () => {
+  resetInstance();
+  const originalCwd = process.cwd();
+  const tmpDir = mkdtempSync(join(tmpdir(), "wallet-test-"));
+  try {
+    process.chdir(tmpDir);
+    const manager = WalletManager.createForTest(mnemonic, {
+      connection: { } as any,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+    expect(() => manager.getAdminKeypair()).toThrow(/Admin keypair file not found/);
+  } finally {
+    process.chdir(originalCwd);
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("getAdminKeypair surfaces parse failures", () => {
+  resetInstance();
+  const originalCwd = process.cwd();
+  const tmpDir = mkdtempSync(join(tmpdir(), "wallet-test-"));
+  try {
+    process.chdir(tmpDir);
+    writeFileSync(join(tmpDir, "admin-keypair.json"), "not-json", "utf-8");
+    const manager = WalletManager.createForTest(mnemonic, {
+      connection: { } as any,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+    expect(() => manager.getAdminKeypair()).toThrow(/Failed to load admin keypair/);
+  } finally {
+    process.chdir(originalCwd);
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("getConnection returns injected connection", () => {
+  resetInstance();
+  const conn = { id: "connection" } as any;
+  const manager = WalletManager.createForTest(mnemonic, {
+    connection: conn,
+    fetch: globalThis.fetch as any,
+    timeNow: () => Date.now(),
+  });
+  expect(manager.getConnection()).toBe(conn);
 });
