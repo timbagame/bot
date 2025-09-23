@@ -63,6 +63,31 @@ test("parseAmount uses chat default token when none specified", async () => {
   expect(d.tokenTicker).toBe("CHAT");
 });
 
+test("parseAmount accepts token mint addresses when provided", async () => {
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+  expect(await tm.addToken(usdcMint, "USDC")).toBe(true);
+
+  const res = await tm.parseAmount(["/cf", "3", usdcMint], 1, 123, "game");
+  expect(res.success).toBe(true);
+  const data = res.data!;
+  expect(data.tokenMint).toBe(usdcMint);
+  expect(data.tokenTicker).toBe("USDC");
+  expect(data.tokenWasSpecified).toBe(true);
+});
+
+test("parseAmount treats valid mint strings as explicit tokens even when unknown", async () => {
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const mint = "BPFLoader1111111111111111111111111111111111";
+
+  const res = await tm.parseAmount(["/cf", "4", mint], 1, 321, "game");
+  expect(res.success).toBe(true);
+  const data = res.data!;
+  expect(data.tokenMint).toBe(mint);
+  expect(data.tokenTicker).toBe(mint);
+  expect(data.tokenWasSpecified).toBe(true);
+});
+
 test("validateTokenMint validates base58 and metadata path", async () => {
   const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
   // Valid base58 (USDC) should pass
