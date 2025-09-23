@@ -30,14 +30,26 @@ function dbStub(overrides: Partial<any> = {}) {
   } as any;
 }
 
-function ctxStub() {
+function ctxStub(options: { failMedia?: any; failCaption?: any } = {}) {
   const calls: any[] = [];
   const ctx: any = {
     chat: { id: 1, type: "private" },
     api: {
       getChatMember: async (_chat: number, id: number) => ({ user: { username: `user${id}` } }),
-      editMessageCaption: async (...args: any[]) => { calls.push(["caption", ...args]); return { message_id: 99 }; },
-      editMessageMedia: async (...args: any[]) => { calls.push(["media", ...args]); return { message_id: 99 }; },
+      editMessageCaption: async (...args: any[]) => {
+        calls.push(["caption", ...args]);
+        if (options.failCaption) {
+          throw options.failCaption;
+        }
+        return { message_id: 99 };
+      },
+      editMessageMedia: async (...args: any[]) => {
+        calls.push(["media", ...args]);
+        if (options.failMedia) {
+          throw options.failMedia;
+        }
+        return { message_id: 99 };
+      },
       editMessageText: async (...args: any[]) => { calls.push(["text", ...args]); return { message_id: 99 }; },
     },
     __calls: calls,
@@ -61,7 +73,7 @@ describe("GameManager.updateGameMessage routing", () => {
     const ctx = ctxStub();
     const addr = new PublicKey("11111111111111111111111111111111").toBase58();
     // seed active message
-    (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 42 });
+    (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 42, usesVideo: true });
     await gm.updateGameMessage(
       ctx as any,
       addr,
@@ -89,7 +101,7 @@ describe("GameManager.updateGameMessage routing", () => {
     const gm = GameManager.getInstance(programStub(gameAcc), walletStub(), dbStub({ game_type: "coinflip" }));
     const ctx = ctxStub();
     const addr = new PublicKey("11111111111111111111111111111112").toBase58();
-    (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 43 });
+    (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 43, usesVideo: true });
     await gm.updateGameMessage(
       ctx as any,
       addr,
@@ -118,7 +130,7 @@ describe("GameManager.updateGameMessage routing", () => {
     const gm = GameManager.getInstance(programStub(gameAcc), walletStub(), dbStub({ game_type: "giveaway" }));
     const ctx = ctxStub();
     const addr = new PublicKey("11111111111111111111111111111113").toBase58();
-    (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 44 });
+    (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 44, usesVideo: false });
     await gm.updateGameMessage(
       ctx as any,
       addr,
@@ -130,5 +142,65 @@ describe("GameManager.updateGameMessage routing", () => {
     );
     const calls = (ctx as any).__calls;
     expect(calls[0][0]).toBe("text");
+  });
+
+  test("coinflip active without video support edits text", async () => {
+    resetGM();
+    const gameAcc = {
+      ticketsCount: 1,
+      maxTickets: 2,
+      minTickets: 1,
+      totalAmount: 0,
+      createdAt: 1_000_000,
+      timeout: 60,
+      gameType: { coinflip: {} },
+    };
+    const gm = GameManager.getInstance(programStub(gameAcc), walletStub(), dbStub());
+    const ctx = ctxStub();
+    const addr = new PublicKey("11111111111111111111111111111114").toBase58();
+    (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 45, usesVideo: false });
+    await gm.updateGameMessage(
+      ctx as any,
+      addr,
+      "coinflip",
+      1_000_000_000,
+      "@creator",
+      "Active",
+      "TOK"
+    );
+    const calls = (ctx as any).__calls;
+    expect(calls[0][0]).toBe("text");
+  });
+
+  test("coinflip completed falls back to text when media update fails", async () => {
+    resetGM();
+    const gameAcc = {
+      ticketsCount: 2,
+      maxTickets: 2,
+      minTickets: 1,
+      totalAmount: 0,
+      createdAt: 1_000_000,
+      timeout: 60,
+      gameType: { coinflip: {} },
+    };
+    const gm = GameManager.getInstance(programStub(gameAcc), walletStub(), dbStub({ game_type: "coinflip" }));
+    const ctx = ctxStub({ failMedia: { description: "Bad Request: wrong file identifier/HTTP URL specified" } });
+    const addr = new PublicKey("11111111111111111111111111111115").toBase58();
+    (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 46, usesVideo: true });
+    await gm.updateGameMessage(
+      ctx as any,
+      addr,
+      "coinflip",
+      1_000_000_000,
+      "@creator",
+      "Completed",
+      "TOK",
+      "SomeWinner"
+    );
+    const calls = (ctx as any).__calls;
+    expect(calls[0][0]).toBe("media");
+    expect(calls[1][0]).toBe("text");
+    const active = gm.getActiveGameMessage(addr);
+    expect(active?.usesVideo).toBe(false);
   });
 });

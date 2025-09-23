@@ -7,12 +7,15 @@ function resetGM() {
   GameManager["instance"] = undefined;
 }
 
-function ctxStub() {
+function ctxStub(options: { videoError?: any } = {}) {
   const calls: any[] = [];
   const ctx: any = {
     message: { message_id: 9 },
     replyWithVideo: async (_vid: string, opts: any) => {
       calls.push(["video", opts]);
+      if (options.videoError) {
+        throw options.videoError;
+      }
       return { message_id: 333, chat: { id: 3 } };
     },
     reply: async (text: string, opts: any) => {
@@ -36,7 +39,9 @@ describe("GameManager.createGameMessage", () => {
     const id = await gm.createGameMessage(ctx as any, addr, "coinflip", 1_000_000_000, "@creator", "Active", "TOK");
     expect(id).toBe(333);
     expect((ctx as any).__calls[0][0]).toBe("video");
-    expect(gm.getActiveGameMessage(addr)?.messageId).toBe(333);
+    const active = gm.getActiveGameMessage(addr);
+    expect(active?.messageId).toBe(333);
+    expect(active?.usesVideo).toBe(true);
   });
 
   test("sends text for giveaway and stores active message", async () => {
@@ -50,6 +55,27 @@ describe("GameManager.createGameMessage", () => {
     const id = await gm.createGameMessage(ctx as any, addr, "giveaway", 1_000_000_000, "@creator", "Active", "TOK");
     expect(id).toBe(444);
     expect((ctx as any).__calls[0][0]).toBe("text");
-    expect(gm.getActiveGameMessage(addr)?.messageId).toBe(444);
+    const active = gm.getActiveGameMessage(addr);
+    expect(active?.messageId).toBe(444);
+    expect(active?.usesVideo).toBe(false);
+  });
+
+  test("falls back to text when coinflip video cannot be sent", async () => {
+    resetGM();
+    const program = { account: { game: { fetch: async () => ({ ticketsCount: 0, maxTickets: 2, minTickets: 2, createdAt: 1_000_000, timeout: 60, gameType: { coinflip: {} } }) } } } as any;
+    const gm = GameManager.getInstance(program, { formatTokenBalance: (n: number) => String(n), getBlockchainTime: async () => Math.floor(Date.now()/1000) } as any, {
+      saveGameMessage: (_addr: string, _msg: number, _chat: number) => {},
+    } as any);
+    const ctx = ctxStub({
+      videoError: { description: "Bad Request: wrong file identifier/HTTP URL specified" },
+    });
+    const addr = new PublicKey("BPFLoader3111111111111111111111111111111111").toBase58();
+    const id = await gm.createGameMessage(ctx as any, addr, "coinflip", 1_000_000_000, "@creator", "Active", "TOK");
+    expect(id).toBe(444);
+    const calls = (ctx as any).__calls;
+    expect(calls[0][0]).toBe("video");
+    expect(calls[1][0]).toBe("text");
+    const active = gm.getActiveGameMessage(addr);
+    expect(active?.usesVideo).toBe(false);
   });
 });
