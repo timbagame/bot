@@ -46,6 +46,25 @@ const logAndFormatError = (
     : error.message;
 };
 
+const isRecoverableMediaError = (error: any): boolean => {
+  if (!error) return false;
+  const description = error.description ?? error.message;
+  if (typeof description !== "string") return false;
+  const normalized = description.toLowerCase();
+
+  if (normalized.includes("message is not modified")) {
+    return false;
+  }
+
+  return (
+    normalized.includes("wrong file identifier") ||
+    normalized.includes("wrong file id") ||
+    normalized.includes("http url specified") ||
+    normalized.includes("file reference") ||
+    normalized.includes("message is not a media message")
+  );
+};
+
 const formatGameTypeWithEmoji = (gameType: string): string => {
   switch (gameType.toLowerCase()) {
     case "coinflip":
@@ -402,17 +421,39 @@ export class GameManager {
       ctx, gamePda, gameType, amount, creatorUsername, status, tokenTicker, winnerAddress, providedTotalPot
     );
     
-    // Use video for coinflip games, text for others
-    const message = gameType.toLowerCase() === "coinflip" 
-      ? await ctx.replyWithVideo(COINFLIP_START_VIDEO_ID, {
+    const isCoinflip = gameType.toLowerCase() === "coinflip";
+    const replyMarkup = { inline_keyboard: formatted.keyboard };
+    let message: any;
+    let usesVideo = false;
+
+    if (isCoinflip) {
+      try {
+        message = await ctx.replyWithVideo(COINFLIP_START_VIDEO_ID, {
           caption: formatted.messageText,
           parse_mode: "HTML",
-          reply_markup: { inline_keyboard: formatted.keyboard },
-        })
-      : await ctx.reply(formatted.messageText, {
-          parse_mode: "HTML",
-          reply_markup: { inline_keyboard: formatted.keyboard },
+          reply_markup: replyMarkup,
         });
+        usesVideo = true;
+      } catch (error) {
+        if (isRecoverableMediaError(error)) {
+          console.warn(
+            "Falling back to text announcement after video send failure:",
+            error
+          );
+          message = await ctx.reply(formatted.messageText, {
+            parse_mode: "HTML",
+            reply_markup: replyMarkup,
+          });
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      message = await ctx.reply(formatted.messageText, {
+        parse_mode: "HTML",
+        reply_markup: replyMarkup,
+      });
+    }
 
     // Save the game message to database and activeGameMessages for future updates
     this.gameDb.saveGameMessage(
@@ -423,6 +464,7 @@ export class GameManager {
     this.activeGameMessages.set(gameAddress, {
       messageId: message.message_id,
       chatId: message.chat.id,
+      usesVideo,
     });
 
     return message;
@@ -527,20 +569,43 @@ export class GameManager {
       undefined
     );
 
-    // Use video for coinflip games, text for others
     const replyTo = replyToMessageId ?? (ctx as any).message?.message_id;
-    const message = gameType.toLowerCase() === "coinflip" 
-      ? await ctx.replyWithVideo(COINFLIP_START_VIDEO_ID, {
+    const isCoinflip = gameType.toLowerCase() === "coinflip";
+    const replyMarkup = { inline_keyboard: keyboard };
+    let message: any;
+    let usesVideo = false;
+
+    if (isCoinflip) {
+      try {
+        message = await ctx.replyWithVideo(COINFLIP_START_VIDEO_ID, {
           caption: messageText,
           parse_mode: "HTML",
-          reply_markup: { inline_keyboard: keyboard },
-          reply_to_message_id: replyTo,
-        })
-      : await ctx.reply(messageText, {
-          parse_mode: "HTML",
-          reply_markup: { inline_keyboard: keyboard },
+          reply_markup: replyMarkup,
           reply_to_message_id: replyTo,
         });
+        usesVideo = true;
+      } catch (error) {
+        if (isRecoverableMediaError(error)) {
+          console.warn(
+            "Falling back to text announcement after video send failure:",
+            error
+          );
+          message = await ctx.reply(messageText, {
+            parse_mode: "HTML",
+            reply_markup: replyMarkup,
+            reply_to_message_id: replyTo,
+          });
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      message = await ctx.reply(messageText, {
+        parse_mode: "HTML",
+        reply_markup: replyMarkup,
+        reply_to_message_id: replyTo,
+      });
+    }
 
     this.gameDb.saveGameMessage(
       gameAddress,
@@ -550,6 +615,7 @@ export class GameManager {
     this.activeGameMessages.set(gameAddress, {
       messageId: message.message_id,
       chatId: message.chat.id,
+      usesVideo,
     });
 
     return message.message_id;
@@ -582,57 +648,79 @@ export class GameManager {
         totalPot
       );
 
-      try {
-        // For coinflip games, only switch media when moving to winner video;
-        // otherwise update caption to reduce media edits.
-        if (gameType.toLowerCase() === "coinflip") {
-          const isCompleted = status.toLowerCase() === "completed";
+      const inlineKeyboard =
+        keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined;
+      const lowerGameType = gameType.toLowerCase();
+      const lowerStatus = status.toLowerCase();
+      const supportsVideo = gameMessage.usesVideo !== false;
+
+      const editAsText = async () => {
+        await ctx.api.editMessageText(
+          gameMessage.chatId,
+          gameMessage.messageId,
+          messageText,
+          {
+            parse_mode: "HTML",
+            reply_markup: inlineKeyboard,
+          }
+        );
+      };
+
+      if (lowerGameType === "coinflip" && supportsVideo) {
+        const isCompleted = lowerStatus === "completed";
+        try {
           if (isCompleted) {
-            const videoId = WINNER_VIDEO_ID;
             await ctx.api.editMessageMedia(
               gameMessage.chatId,
               gameMessage.messageId,
               {
                 type: "video",
-                media: videoId,
+                media: WINNER_VIDEO_ID,
                 caption: messageText,
                 parse_mode: "HTML",
               },
-              {
-                reply_markup:
-                  keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined,
-              }
+              { reply_markup: inlineKeyboard }
             );
           } else {
-            // Caption-only update for active coinflip to avoid media churn
             await ctx.api.editMessageCaption(
               gameMessage.chatId,
               gameMessage.messageId,
               {
                 caption: messageText,
                 parse_mode: "HTML",
-                reply_markup:
-                  keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined,
+                reply_markup: inlineKeyboard,
               }
             );
           }
-        } else {
-          await ctx.api.editMessageText(
-            gameMessage.chatId,
-            gameMessage.messageId,
-            messageText,
-            {
-              parse_mode: "HTML",
-              reply_markup:
-                keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined,
-            }
-          );
+        } catch (error: any) {
+          if (error.description?.includes("message is not modified")) {
+            return;
+          }
+
+          if (isRecoverableMediaError(error)) {
+            console.warn(
+              "Falling back to text update after media edit failure:",
+              error
+            );
+            await editAsText();
+            this.activeGameMessages.set(gameAddress, {
+              ...gameMessage,
+              usesVideo: false,
+            });
+            return;
+          }
+
+          console.error("Error updating game message:", error);
         }
-      } catch (error: any) {
-        if (error.description?.includes("message is not modified")) {
-          return;
+      } else {
+        try {
+          await editAsText();
+        } catch (error: any) {
+          if (error.description?.includes("message is not modified")) {
+            return;
+          }
+          console.error("Error updating game message:", error);
         }
-        console.error("Error updating game message:", error);
       }
     } catch (error) {
       console.error("Error in updateGameMessage:", error);

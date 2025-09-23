@@ -79,6 +79,7 @@ export type GameStatus = "Active" | "Completed" | "Cancelled";
 export interface GameMessage {
   messageId: number;
   chatId: number;
+  usesVideo?: boolean;
 }
 
 export type GameCancellationResult =
