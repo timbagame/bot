@@ -71,7 +71,7 @@ export class TokenManager {
     }
 
     // Check if the argument after amount is a token ticker
-    const tokenArg = args[argIndex + 1];
+    const tokenArg = args[argIndex + 1]?.trim();
 
     let resolvedTokenMint = tokenMint;
     let resolvedTokenTicker = tokenTicker;
@@ -79,7 +79,9 @@ export class TokenManager {
     let tokenWasSpecified = false;
 
     if (tokenArg) {
-      if (tokenArg.toUpperCase() === "SOL") {
+      const upperTokenArg = tokenArg.toUpperCase();
+
+      if (upperTokenArg === "SOL") {
         if (context === "game") {
           // Return error for SOL games
           return {
@@ -107,23 +109,34 @@ export class TokenManager {
           resolvedTokenTicker = knownToken.token_ticker;
           tokenWasSpecified = true;
         } else {
-          // Check if it looks like a token ticker but isn't a number
-          const upperTokenArg = tokenArg.toUpperCase();
-          const isLikelyToken = isNaN(parseInt(tokenArg)) && 
-                               tokenArg.length >= 2 && 
-                               tokenArg.length <= 12 &&
-                               /^[A-Za-z]+$/.test(tokenArg); // Letters only (case insensitive)
-          
-          if (isLikelyToken) {
-            // It looks like a token ticker but we don't recognize it
-            return { 
-              success: false, 
-              error: "unknown_token", 
-              unknownToken: upperTokenArg 
-            };
+          // Check if it's a valid token mint address
+          try {
+            const mintKey = new PublicKey(tokenArg);
+            const mintAddress = mintKey.toBase58();
+            const knownMint = this.tokenDb.getKnownTokenByMint(mintAddress);
+
+            resolvedTokenMint = mintAddress;
+            resolvedTokenTicker = knownMint?.token_ticker ?? tokenArg;
+            tokenWasSpecified = true;
+          } catch {
+            // Check if it looks like a token ticker but isn't a number
+            const isLikelyToken =
+              isNaN(parseInt(tokenArg, 10)) &&
+              tokenArg.length >= 2 &&
+              tokenArg.length <= 12 &&
+              /^[A-Za-z]+$/.test(tokenArg); // Letters only (case insensitive)
+
+            if (isLikelyToken) {
+              // It looks like a token ticker but we don't recognize it
+              return {
+                success: false,
+                error: "unknown_token",
+                unknownToken: upperTokenArg,
+              };
+            }
+            // If it doesn't look like a token (e.g., number for maxPlayers), use default token
+            tokenWasSpecified = false;
           }
-          // If it doesn't look like a token (e.g., number for maxPlayers), use default token
-          tokenWasSpecified = false;
         }
       }
     }
