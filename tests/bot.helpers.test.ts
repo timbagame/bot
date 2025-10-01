@@ -133,12 +133,20 @@ describe("Bot helper utilities", () => {
     await botModule.__test_showBotInfoScreen(ctx);
 
     expect(replies.length).toBe(1);
-    const [{ text, options }] = replies;
+    const firstReply = replies[0];
+    expect(firstReply).toBeDefined();
+
+    const { text, options } = firstReply!;
     expect(text.split("\n")[0]).toBe("🤖 <b>TIMBA BOT</b>");
-    expect(options.parse_mode).toBe("HTML");
-    expect(options.reply_markup).toBeInstanceOf(InlineKeyboard);
-    const keyboard = options.reply_markup as InlineKeyboard;
-    expect(keyboard.inline_keyboard[0][0].text).toBe("🚀 GET STARTED");
+    expect(options).toBeDefined();
+    expect(options?.parse_mode).toBe("HTML");
+    expect(options?.reply_markup).toBeInstanceOf(InlineKeyboard);
+
+    const keyboard = options!.reply_markup as InlineKeyboard;
+    expect(keyboard).toBeDefined();
+    const button = keyboard.inline_keyboard?.[0]?.[0];
+    expect(button).toBeDefined();
+    expect(button!.text).toBe("🚀 GET STARTED");
     expect(botModule.__test_getInitiatedChats().size).toBe(0);
   });
 });
