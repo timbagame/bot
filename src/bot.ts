@@ -226,6 +226,7 @@ const showBotInfoScreen = async (ctx: Context) => {
   });
 };
 
+
 // Auto-show bot info when user starts private chat (my_chat_member event)
 bot.on("my_chat_member", async (ctx) => {
   try {
@@ -330,6 +331,16 @@ const safeAnswerCallbackQuery = async (
     }
   }
 };
+
+// Test helpers to exercise internal utilities
+export const __test_toRawAmount = toRawAmount;
+export const __test_clampLamportsForFees = clampLamportsForFees;
+export const __test_isPrivateChat = isPrivateChat;
+export const __test_createApiContext = createApiContext;
+export const __test_validateGameTokenData = validateGameTokenData;
+export const __test_showBotInfoScreen = showBotInfoScreen;
+export const __test_resetInitiatedChats = () => initiatedChats.clear();
+export const __test_getInitiatedChats = () => new Set(initiatedChats);
 
 /**
  * Update game message with proper error handling using simplified interface
