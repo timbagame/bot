@@ -1,3 +1,5 @@
+import { escapeHtml } from "./format-amount";
+
 export type TokenDisplayLine = { ticker: string; formatted: string };
 
 /**
@@ -11,14 +13,14 @@ export function buildWalletCaption(
   walletAddress: string
 ): string {
   const lines: string[] = [];
-  lines.push(`SOL: ${solFormatted}`);
+  lines.push(`SOL: ${escapeHtml(solFormatted)}`);
   for (const t of tokens) {
-    lines.push(`${t.ticker}: ${t.formatted}`);
+    lines.push(`${escapeHtml(t.ticker)}: ${escapeHtml(t.formatted)}`);
   }
   lines.push("");
-  lines.push(`TOTAL USD: $${totalUsd.toFixed(2)}`);
+  lines.push(`TOTAL USD: $${escapeHtml(totalUsd.toFixed(2))}`);
   lines.push("");
-  lines.push(`<code>${walletAddress}</code>`);
+  lines.push(`<code>${escapeHtml(walletAddress)}</code>`);
   return lines.join("\n");
 }
 

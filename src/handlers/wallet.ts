@@ -1,4 +1,5 @@
 import type { InlineKeyboard } from "grammy";
+import { escapeHtml } from "../utils/format-amount";
 
 export type ShowWalletUIDeps = {
   wallet: {
@@ -44,7 +45,12 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
       totalUSD += tokenDecimalBalance * tokenPriceUSD;
     }
 
-    const caption = buildWalletCaption(formattedSolBalance, tokenLines, totalUSD, walletAddress);
+    const caption = buildWalletCaption(
+      formattedSolBalance,
+      tokenLines,
+      totalUSD,
+      walletAddress
+    );
 
     try {
       await ctx.editMessageMedia({ type: "video", media: walletVideoFileId, caption, parse_mode: "HTML" }, { reply_markup: createWalletKeyboard() });
@@ -56,7 +62,7 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
     const errorResponse = [
       `💳 <b>Wallet</b>`,
       "",
-      `<code>${shortAddress}</code>`,
+      `<code>${escapeHtml(shortAddress)}</code>`,
       "",
       "❌ <i>Error loading balances</i>",
       "<i>Tap Refresh to try again</i>",
@@ -175,17 +181,21 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     const displayName = ctx.from?.username ? `@${ctx.from.username}` : ctx.from?.first_name || "User";
     const walletAddress = playerData.keypair.publicKey.toBase58();
 
+    const safeDisplayName = escapeHtml(displayName);
+    const safeWalletAddress = escapeHtml(walletAddress);
     const response = [
-      `<b>${displayName}</b>`,
-      `<code>${walletAddress}</code>`,
+      `<b>${safeDisplayName}</b>`,
+      `<code>${safeWalletAddress}</code>`,
       "",
-      `${wallet.formatSolBalance(solDisplayLamports)} SOL`,
+      `${escapeHtml(wallet.formatSolBalance(solDisplayLamports))} SOL`,
     ];
 
     if (tokenBalancesToShow.length > 0) {
       for (const token of tokenBalancesToShow.slice(0, 4)) {
         const balance = wallet.formatTokenBalance(token.balance, token.decimals);
-        response.push(`${balance} ${token.ticker}`);
+        response.push(
+          `${escapeHtml(balance)} ${escapeHtml(token.ticker)}`
+        );
       }
       if (tokenBalancesToShow.length > 4) {
         response.push(`<i>+${tokenBalancesToShow.length - 4} more tokens</i>`);

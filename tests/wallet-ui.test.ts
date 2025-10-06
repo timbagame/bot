@@ -18,3 +18,19 @@ test("buildWalletCaption formats lines and total with address", () => {
   expect(caption).toContain("TOTAL USD: $123.45");
   expect(caption).toContain("<code>AbCdEf</code>");
 });
+
+test("buildWalletCaption escapes HTML-sensitive ticker and address", () => {
+  const caption = buildWalletCaption(
+    "<1>",
+    [
+      { ticker: 'BAD<&"', formatted: '5 & rising' },
+    ],
+    42.42,
+    'ADDR<&"'
+  );
+
+  expect(caption).toContain("SOL: &lt;1&gt;");
+  expect(caption).toContain("BAD&lt;&amp;&quot;: 5 &amp; rising");
+  expect(caption).toContain("TOTAL USD: $42.42");
+  expect(caption).toContain('<code>ADDR&lt;&amp;&quot;');
+});
