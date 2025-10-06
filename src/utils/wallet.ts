@@ -15,8 +15,11 @@ import {
   createAssociatedTokenAccountInstruction,
   createTransferCheckedInstruction,
   createSyncNativeInstruction,
+  getAccount,
   TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
+  TokenAccountNotFoundError,
+  TokenInvalidAccountOwnerError,
 } from "@solana/spl-token";
 import * as fs from "fs";
 import * as path from "path";
@@ -192,23 +195,32 @@ export class WalletManager {
   ): Promise<number> {
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
+    const mintPubkey = new PublicKey(tokenMint);
+    const isToken2022Mint = await this.isToken2022(tokenMint);
+    const programId = isToken2022Mint
+      ? TOKEN_2022_PROGRAM_ID
+      : TOKEN_PROGRAM_ID;
     const ata = await getAssociatedTokenAddress(
-      new PublicKey(tokenMint),
-      pubkey
+      mintPubkey,
+      pubkey,
+      false,
+      programId
     );
 
     try {
-      const account = await this.connection.getTokenAccountBalance(
+      const account = await getAccount(
+        this.connection,
         ata,
-        "confirmed"
+        "confirmed",
+        programId
       );
-      return account.value.uiAmount
-        ? account.value.uiAmount * Math.pow(10, account.value.decimals)
-        : 0;
+      return Number(account.amount);
     } catch (error: any) {
       if (
-        error instanceof SolanaJSONRPCError &&
-        error.message.includes("could not find account")
+        error instanceof TokenAccountNotFoundError ||
+        error instanceof TokenInvalidAccountOwnerError ||
+        (error instanceof SolanaJSONRPCError &&
+          error.message.includes("could not find account"))
       ) {
         console.log(
           `Token account ${ata.toBase58()} not found for user ${pubkey.toBase58()}`

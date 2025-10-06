@@ -104,3 +104,33 @@ test("onBalance merges WSOL and lists extra token count", async () => {
   expect(message).toContain("1.500000 SOL");
   expect(message).toContain("+1 more tokens");
 });
+
+test("onBalance escapes HTML-sensitive values", async () => {
+  const ctx: any = makeCtx(false);
+  ctx.from.first_name = "<User>";
+  await onBalance(ctx, {
+    isPrivateChat: () => false,
+    clearWalletCache: (_: any) => {},
+    showWalletUI: async () => {},
+    getPlayerData: async () => ({
+      keypair: { publicKey: { toBase58: () => 'ADDR<&"' } },
+      solBalance: 1_000_000_000,
+    }),
+    getApprovedTokens: () => [{ token_mint: "mint", token_ticker: '<T&"', decimals: 6 }],
+    buildTokenBalances: async () => [
+      { mint: "mint", ticker: '<T&"', balance: 2_000_000, decimals: 6 },
+    ],
+    TOKENS_LIST: [],
+    wallet: {
+      formatTokenBalance: () => '2 & change',
+      formatSolBalance: () => '<1 & more>',
+    },
+    handleCommandError: async () => {},
+  });
+
+  const output = String(ctx.__calls[0][1]);
+  expect(output).toContain("&lt;User&gt;");
+  expect(output).toContain('<code>ADDR&lt;&amp;&quot;');
+  expect(output).toContain("&lt;1 &amp; more&gt; SOL");
+  expect(output).toContain("2 &amp; change &lt;T&amp;&quot;");
+});

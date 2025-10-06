@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
-import { Connection, Keypair } from "@solana/web3.js";
+import { Connection, Keypair, PublicKey } from "@solana/web3.js";
+import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { WalletManager } from "../src/utils/wallet";
 
 const MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -83,16 +84,26 @@ describe("WalletManager confirmTransaction and sendTransaction", () => {
   });
 
   test("getTokenBalance returns 0 on generic error", async () => {
+    const mint = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
     const conn: any = {
-      getTokenAccountBalance: async () => { throw new Error("unexpected"); },
-      getParsedAccountInfo: async (_pk: any) => ({ value: { data: { parsed: { info: { decimals: 6 } } } } }),
+      getAccountInfo: async (pk: PublicKey) => {
+        if (pk.equals(mint)) {
+          return {
+            owner: TOKEN_PROGRAM_ID,
+            data: Buffer.alloc(0),
+            executable: false,
+            lamports: 0,
+          } as any;
+        }
+        throw new Error("unexpected");
+      },
     };
     const wm = WalletManager.createForTest(MNEMONIC, {
       connection: conn,
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
-    const val = await wm.getTokenBalance(1n, "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+    const val = await wm.getTokenBalance(1n, mint.toBase58());
     expect(val).toBe(0);
   });
 });

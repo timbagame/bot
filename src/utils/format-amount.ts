@@ -3,6 +3,21 @@ export type FormatOptions = {
   trim?: boolean;
 };
 
+const HTML_ESCAPE_LOOKUP: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+};
+
+export function escapeHtml(value: unknown): string {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  const str = String(value);
+  return str.replace(/[&<>"]/g, (char) => HTML_ESCAPE_LOOKUP[char] ?? char);
+}
+
 function toBigIntString(value: number | string | bigint): { sign: string; digits: string } {
   if (typeof value === "bigint") {
     const sign = value < 0n ? "-" : "";
