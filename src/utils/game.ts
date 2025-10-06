@@ -22,7 +22,7 @@ import type {
   GameCategory,
   GameType,
 } from "../types";
-import type { Coinflip } from "../../idl/idlType";
+import type { Timba } from "../../idl/idlType";
 import {
   buildGameStatus,
   buildGameHeader,
@@ -133,14 +133,14 @@ export class GameManager {
   private activeGameMessages = new Map<string, GameMessage>();
 
   private constructor(
-    private program: anchor.Program<Coinflip>,
+    private program: anchor.Program<Timba>,
     private wallet: WalletManager,
     private gameDb: GameDatabase,
     private oracleClient: OracleClient
   ) {}
 
   public static getInstance(
-    program: anchor.Program<Coinflip>,
+    program: anchor.Program<Timba>,
     wallet: WalletManager,
     gameDb: GameDatabase
   ): GameManager {

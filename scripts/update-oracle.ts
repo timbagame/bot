@@ -1,7 +1,7 @@
 import * as anchor from "@coral-xyz/anchor";
 import { WalletManager } from "../src/utils/wallet";
 import { PDAManager } from "../src/utils/pda";
-import type { Coinflip } from "../idl/idlType";
+import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
 
 // Initialize wallet manager
@@ -32,9 +32,9 @@ const updateOracle = async () => {
 
     // Initialize program
     const program = new anchor.Program(
-      idl as Coinflip,
+      idl as Timba,
       provider
-    ) as anchor.Program<Coinflip>;
+    ) as anchor.Program<Timba>;
     console.log(`Program ID: ${program.programId}`);
 
     // Get Oracle PDA
@@ -80,7 +80,7 @@ const updateOracle = async () => {
       // u64 fields must be BN
       oracleBufferTime: new anchor.BN(300),
       // u32
-      maxTickets: 50000, // 50,000 max tickets
+      maxTickets: 100, // 100 max tickets
       // u64 fields must be BN
       maxTimeout: new anchor.BN(86400), // 24 hours
       minTimeout: new anchor.BN(60), // 1 minute

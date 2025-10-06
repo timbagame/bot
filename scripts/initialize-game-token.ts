@@ -12,7 +12,7 @@ import {
 import * as anchor from "@coral-xyz/anchor";
 import * as fs from "fs";
 import * as path from "path";
-import type { Coinflip } from "../idl/idlType";
+import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
 import { WalletManager } from "../src/utils/wallet";
 
@@ -72,7 +72,7 @@ const checkBalance = async (
 // ================================
 
 async function initializeToken(
-  program: anchor.Program<Coinflip>,
+  program: anchor.Program<Timba>,
   connection: Connection,
   adminKeypair: Keypair,
   wallet: WalletManager,
@@ -296,9 +296,9 @@ async function initializeGameToken() {
 
   // Initialize program
   const program = new anchor.Program(
-    idl as Coinflip,
+    idl as Timba,
     provider
-  ) as anchor.Program<Coinflip>;
+  ) as anchor.Program<Timba>;
   console.log(`📋 Program ID: ${program.programId.toBase58()}`);
 
   // Create wallet manager for transaction sending

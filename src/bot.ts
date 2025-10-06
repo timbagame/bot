@@ -5,7 +5,7 @@ import { TokenManager } from "./utils/token-manager";
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { createSyncNativeInstruction, getAssociatedTokenAddress } from "@solana/spl-token";
-import type { Coinflip } from "../idl/idlType";
+import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
 import { GameDatabase } from "./utils/game-database";
 import { GameManager } from "./utils/game";
@@ -279,7 +279,7 @@ bot.use(async (ctx, next) => {
 
 // These will be initialized in setupAnchor
 export let gameManager: GameManager;
-export let program: anchor.Program<Coinflip>;
+export let program: anchor.Program<Timba>;
 const tokenDb = TokenDatabase.getInstance();
 let tokenManager: TokenManager;
 let swapManager: SwapManager;
@@ -663,9 +663,9 @@ const initializeAnchorProvider = async () => {
 
   anchor.setProvider(provider);
   return new anchor.Program(
-    idl as Coinflip,
+    idl as Timba,
     provider
-  ) as anchor.Program<Coinflip>;
+  ) as anchor.Program<Timba>;
 };
 
 const setupAnchor = async () => {

@@ -1,7 +1,7 @@
 import { WalletManager } from "../src/utils/wallet";
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
-import type { Coinflip } from "../idl/idlType";
+import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
 
 // Initialize wallet manager
@@ -28,13 +28,13 @@ const initializeAnchorProvider = async () => {
   anchor.setProvider(provider);
 
   return new anchor.Program(
-    idl as Coinflip,
+    idl as Timba,
     provider
-  ) as anchor.Program<Coinflip>;
+  ) as anchor.Program<Timba>;
 };
 
 // Initialize Oracle if it doesn't exist
-const initializeOracle = async (program: anchor.Program<Coinflip>) => {
+const initializeOracle = async (program: anchor.Program<Timba>) => {
   try {
     // Get Oracle PDA
     const [oraclePda] = PublicKey.findProgramAddressSync(
@@ -63,7 +63,7 @@ const initializeOracle = async (program: anchor.Program<Coinflip>) => {
       // u64 fields must be BN
       oracleBufferTime: new anchor.BN(300), // 5 minute buffer before cancellation
       // u32
-      maxTickets: 50000, // 50,000 max tickets
+      maxTickets: 100, // 100 max tickets
       // u64 fields must be BN
       maxTimeout: new anchor.BN(86400), // 24 hours max timeout
       minTimeout: new anchor.BN(60), // 1 minute min timeout
