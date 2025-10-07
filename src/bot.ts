@@ -23,7 +23,7 @@ import {
   DEFAULT_TOKEN_MINT,
   DEFAULT_TOKEN_TICKER,
   TOKENS_LIST,
-  WINNER_VIDEO_ID,
+  getStartVideoId,
   JUPITER_BASE_URL,
 } from "./utils/constants";
 import { trySendVideoWithFallback } from "./utils/media";
@@ -184,99 +184,8 @@ const isPrivateChat = (ctx: Context): boolean => {
  */
 const initiatedChats = new Set<number>();
 
-/**
- * Show bot info screen for first message in chat
- */
-const showBotInfoScreen = async (ctx: Context) => {
-  const botInfoScreen = [
-    "🤖 <b>TIMBA BOT</b>",
-    "",
-    "<b>Your Gateway to Solana</b>",
-    "",
-    "🚀 <b>What is TIMBA?</b>",
-    "A powerful Solana trading and gaming bot that gives you:",
-    "",
-    "💳 <b>Personal Wallet</b>",
-    "• Secure, auto-generated Solana wallet",
-    "• Send, receive, and manage tokens",
-    "• View transaction history",
-    "",
-    "🔄 <b>Token Trading</b>",
-    "• Swap tokens instantly via Jupiter",
-    "• Support for all major Solana tokens",
-    "• Real-time price quotes",
-    "",
-    "🎮 <b>Gaming Platform</b>",
-    "• Coinflip games with friends",
-    "• Token giveaways and contests",
-    "• Fair and transparent results",
-    "",
-    "⚡ <b>Fast & Secure</b>",
-    "• Built on Solana blockchain",
-    "• Your keys, your crypto",
-    "• Lightning-fast transactions",
-    "",
-    "Ready to start trading and gaming on Solana?",
-  ];
-
-  await ctx.reply(botInfoScreen.join("\n"), {
-    parse_mode: "HTML",
-    reply_markup: new InlineKeyboard()
-      .text("🚀 GET STARTED", "start_bot")
-      .row(),
-  });
-};
 
 
-// Auto-show bot info when user starts private chat (my_chat_member event)
-bot.on("my_chat_member", async (ctx) => {
-  try {
-    const chatMember = ctx.myChatMember;
-    const chat = ctx.chat;
-
-    // Only for private chats when bot is added/unblocked
-    if (
-      chat?.type === "private" &&
-      chatMember?.old_chat_member?.status === "kicked" &&
-      chatMember?.new_chat_member?.status === "member"
-    ) {
-      console.log(
-        `🔄 User ${
-          ctx.from?.username || ctx.from?.first_name
-        } started private chat with bot`
-      );
-
-      // Show bot info screen automatically
-      await showBotInfoScreen(ctx);
-      return;
-    }
-  } catch (error) {
-    console.error("Error in my_chat_member handler:", error);
-  }
-});
-
-// Fallback: Auto-show bot info screen for first message in private chat
-bot.use(async (ctx, next) => {
-  // Only for private chats and text messages
-  if (ctx.chat?.type === "private" && ctx.message?.text && ctx.chat?.id) {
-    const chatId = ctx.chat.id;
-
-    // If this is the first interaction in this chat and not a command
-    if (!initiatedChats.has(chatId) && !ctx.message.text.startsWith("/")) {
-      initiatedChats.add(chatId);
-
-      // Show bot info screen instead of processing the message
-      await showBotInfoScreen(ctx);
-      return; // Don't continue to next handlers
-    }
-
-    // Mark chat as initiated if it's not already
-    initiatedChats.add(chatId);
-  }
-
-  // Continue to other handlers
-  await next();
-});
 
 // These will be initialized in setupAnchor
 export let gameManager: GameManager;
@@ -339,7 +248,6 @@ export const __test_clampLamportsForFees = clampLamportsForFees;
 export const __test_isPrivateChat = isPrivateChat;
 export const __test_createApiContext = createApiContext;
 export const __test_validateGameTokenData = validateGameTokenData;
-export const __test_showBotInfoScreen = showBotInfoScreen;
 export const __test_resetInitiatedChats = () => initiatedChats.clear();
 export const __test_getInitiatedChats = () => new Set(initiatedChats);
 
@@ -465,7 +373,7 @@ const showWalletUI = async (ctx: any) => {
     getPriceUSD,
     buildWalletCaption,
     createWalletKeyboard,
-    WINNER_VIDEO_ID,
+    WINNER_VIDEO_ID: getStartVideoId(),
     LAMPORTS_PER_SOL,
   });
 };
@@ -956,116 +864,12 @@ const buildTokenBalances = async (
   return tokenBalancesToShow;
 };
 
-bot.command("start", async (ctx: Context) => {
-  // Check if it's a private chat
-  if (!isPrivateChat(ctx)) {
-    return ctx.reply("❌ The /start command can only be used in private chat. Please message me directly!");
-  }
-
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
-
-  try {
-    // Check if this is first interaction in private chat
-    if (
-      isPrivateChat(ctx) &&
-      ctx.chat?.id &&
-      !initiatedChats.has(ctx.chat.id)
-    ) {
-      // First time user - show bot info screen instead of main menu
-      console.log(
-        `🆕 First time user: ${
-          ctx.from?.username || ctx.from?.first_name
-        } started with /start`
-      );
-      await showBotInfoScreen(ctx);
-      return;
-    }
-
-    const keypair = wallet.getKeyPair(telegramId);
-    const displayName = ctx.from?.username
-      ? `@${ctx.from.username}`
-      : ctx.from?.first_name || "User";
-    const walletAddress = keypair.publicKey.toBase58();
-    const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(
-      -6
-    )}`;
-
-    // Calculate total USD balance for private chats
-    let totalUSDBalance = 0;
-    if (isPrivateChat(ctx)) {
-      try {
-        const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-        
-        // Calculate SOL value in USD
-        const solPriceUSD = await getPriceUSD("SOL");
-        const solDecimalBalance = solBalance / LAMPORTS_PER_SOL;
-        totalUSDBalance += solDecimalBalance * solPriceUSD;
-
-        // Calculate token values in USD
-        for (const token of tokenBalances) {
-          const tokenPriceUSD = await getPriceUSD(token.mint);
-          const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
-          totalUSDBalance += tokenDecimalBalance * tokenPriceUSD;
-        }
-      } catch (error) {
-        console.warn("Error calculating USD balance for /start:", error);
-        totalUSDBalance = 0;
-      }
-    }
-
-    // Build welcome message
-    const welcomeMessage = [
-      `<b>Welcome ${displayName}</b>`,
-      "",
-      `<code>${walletAddress}</code>`,
-    ];
-
-    // Add USD balance for private chats
-    if (isPrivateChat(ctx) && totalUSDBalance > 0) {
-      welcomeMessage.push("", `💰 <b>$${totalUSDBalance.toFixed(2)} USD</b>`);
-    }
-
-    // Send response with menu for private chats
-    if (isPrivateChat(ctx)) {
-      // Mark this chat as initiated
+bot.command(["start", "balance"], async (ctx: Context) => {
+  // Mark chat as initiated if it's not already
       if (ctx.chat?.id) {
         initiatedChats.add(ctx.chat.id);
       }
 
-      const mainMenuKeyboard = createMainMenuKeyboard();
-      await trySendVideoWithFallback(
-        () =>
-          ctx.replyWithVideo(WINNER_VIDEO_ID, {
-            caption: welcomeMessage.join("\n"),
-            parse_mode: "HTML",
-            reply_markup: mainMenuKeyboard,
-          }),
-        () =>
-          ctx.reply(welcomeMessage.join("\n"), {
-            parse_mode: "HTML",
-            reply_markup: mainMenuKeyboard,
-          })
-      );
-    } else {
-      // Simple group chat response
-    const groupResponse = [
-      "💰 <b>TIMBA BOT</b>",
-      "",
-      `Wallet: <code>${shortAddress}</code>`,
-      "",
-      "Use /balance to check your balances",
-    ];
-
-      await ctx.reply(groupResponse.join("\n"), {
-        parse_mode: "HTML",
-      });
-    }
-  } catch (error) {
-    await handleCommandError(ctx, error, "start");
-  }
-});
-
-bot.command("balance", async (ctx: Context) => {
   await onBalance(ctx as any, {
     isPrivateChat,
     clearWalletCache,
@@ -1214,7 +1018,7 @@ bot.command(["coinflip", "cf"], async (ctx) => {
     
     // Get contract minimum for keyboard suggestions
     const contractMin = await getContractMinimumAmount();
-
+    
     coinflipMessage += "\n• Winner takes all the stakes\n";
     coinflipMessage += "• Fair and transparent results\n\n";
     coinflipMessage += "Select amount:";
@@ -2463,49 +2267,6 @@ bot.command("addtoken", async (ctx) => {
   }
 });
 
-// Command to refresh wallet cache
-bot.command("refresh", async (ctx) => {
-  if (!ctx.chat?.type || ctx.chat.type !== "private") {
-    return; // Only works in private chats
-  }
-
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
-
-  try {
-    // Clear cache and reload wallet
-    clearWalletCache(telegramId);
-    await ctx.reply("🔄 Refreshing wallet data...");
-
-    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-
-    const report = [
-      "🔄 **Wallet Refreshed**",
-      "",
-      `💰 **SOL Balance:** ${wallet.formatSolBalance(solBalance)}`,
-      `🪙 **Tokens Found:** ${tokenBalances.length}`,
-      "",
-      "**Token Balances:**",
-    ];
-
-    for (const token of tokenBalances.slice(0, 10)) {
-      const formatted = wallet.formatTokenBalance(
-        token.balance,
-        token.decimals
-      );
-      report.push(`• ${token.ticker}: ${formatted}`);
-    }
-
-    if (tokenBalances.length > 10) {
-      report.push(`• ... and ${tokenBalances.length - 10} more`);
-    }
-
-    await ctx.reply(report.join("\n"), { parse_mode: "Markdown" });
-  } catch (error) {
-    console.error("Error refreshing wallet:", error);
-    await ctx.reply("❌ Error refreshing wallet data. Please try again.");
-  }
-});
-
 bot.command("help", async (ctx: Context) => {
   const helpSections = [
     "<b>📝 Available Commands:</b>",
@@ -2528,6 +2289,7 @@ bot.command("help", async (ctx: Context) => {
 
     "/active - Show your active games",
     "/games - Show your recent games",
+    "/leaderboard - Show top 10 players in this group (groups only)",
     "",
     "<b>🪙 Token Management:</b>",
     "/default [TOKEN] - Show/set default token for this chat (admin only to set)",
@@ -2705,6 +2467,102 @@ bot.command("games", async (ctx: Context) => {
     });
   } catch (error) {
     await handleCommandError(ctx, error, "games");
+  }
+});
+
+bot.command(["leaderboard", "lb"], async (ctx: Context) => {
+  // Check if it's a group/supergroup chat
+  if (ctx.chat?.type !== "group" && ctx.chat?.type !== "supergroup") {
+    return ctx.reply("❌ Leaderboard can only be used in groups!");
+  }
+
+  const chatId = ctx.chat?.id;
+  if (!chatId) {
+    return ctx.reply("❌ Could not get chat information.");
+  }
+
+  try {
+    console.log(`🏆 Generating leaderboard for chat ${chatId}`);
+    
+    // Get leaderboard stats for this chat
+    const leaderboardStats = gameDb.getLeaderboardStats(chatId, 10);
+    
+    if (leaderboardStats.length === 0) {
+      return ctx.reply(
+        "⚔️ <b>HALL OF LEGENDS</b> ⚔️\n\n" +
+        "No statistics available for this group yet.\n" +
+        "Play some coinflips to appear on the leaderboard!\n\n" +
+        "🎮 <i>Be the first to claim your throne!</i>",
+        { parse_mode: "HTML", reply_to_message_id: ctx.message?.message_id }
+      );
+    }
+
+    // Build competitive leaderboard message
+    let leaderboardText = "⚔️ <b>HALL OF LEGENDS</b> ⚔️\n\n";
+    
+    for (let i = 0; i < leaderboardStats.length; i++) {
+      const stats = leaderboardStats[i];
+      const rank = i + 1;
+      
+      // Try to get username, fallback to telegram ID
+      let displayName: string;
+      try {
+        // Get username from context if available
+        const username = await gameManager.getUsernameFromTelegramId(ctx, stats.telegram_id);
+        displayName = username ? `@${username}` : `Usuario ${stats.telegram_id}`;
+      } catch (error) {
+        console.warn(`Could not get username for ${stats.telegram_id}:`, error);
+        displayName = `Usuario ${stats.telegram_id}`;
+      }
+      
+      // Format volume (assuming TIMBA tokens with appropriate decimals)
+      const volumeFormatted = formatAmount(stats.total_volume, 9); // Using 9 decimals for TIMBA
+      
+      // Competitive ranking with tier system
+      let tierEmoji = "";
+      let rankDisplay = "";
+      
+      if (rank === 1) {
+        tierEmoji = "👑";
+        rankDisplay = `${tierEmoji} <b>LEGEND</b>`;
+      } else if (rank === 2) {
+        tierEmoji = "🥇";
+        rankDisplay = `${tierEmoji} <b>CHAMPION</b>`;
+      } else if (rank === 3) {
+        tierEmoji = "🥈";
+        rankDisplay = `${tierEmoji} <b>MASTER</b>`;
+      } else if (rank <= 5) {
+        tierEmoji = "🥉";
+        rankDisplay = `${tierEmoji} <b>EXPERT</b> #${rank}`;
+      } else if (rank <= 10) {
+        tierEmoji = "⚡";
+        rankDisplay = `${tierEmoji} <b>WARRIOR</b> #${rank}`;
+      } else {
+        tierEmoji = "🔥";
+        rankDisplay = `${tierEmoji} <b>FIGHTER</b> #${rank}`;
+      }
+      
+      // Win streak indicator
+      const winStreakEmoji = stats.win_rate >= 80 ? "🔥🔥🔥" : 
+                             stats.win_rate >= 60 ? "🔥🔥" : 
+                             stats.win_rate >= 40 ? "🔥" : "💀";
+      
+      leaderboardText += `${rankDisplay}\n`;
+      leaderboardText += `<b>${displayName}</b> ${winStreakEmoji}\n`;
+      leaderboardText += `💯 <b>${stats.games_won}W</b> | 📊 ${stats.win_rate}% | 💰 ${volumeFormatted}\n`;
+      leaderboardText += `🎮 ${stats.total_games} battles\n\n`;
+    }
+    
+
+    await ctx.reply(leaderboardText, {
+      parse_mode: "HTML",
+      reply_to_message_id: ctx.message?.message_id,
+    });
+    
+    console.log(`✅ Leaderboard generated for chat ${chatId} with ${leaderboardStats.length} players`);
+  } catch (error) {
+    console.error("Error generating leaderboard:", error);
+    await handleCommandError(ctx, error, "leaderboard");
   }
 });
 
@@ -5247,19 +5105,26 @@ bot.callbackQuery("start_bot", async (ctx) => {
     }
 
     const mainMenuKeyboard = createMainMenuKeyboard();
-    await trySendVideoWithFallback(
-      () =>
-        ctx.replyWithVideo(WINNER_VIDEO_ID, {
-          caption: welcomeMessage.join("\n"),
-          parse_mode: "HTML",
-          reply_markup: mainMenuKeyboard,
-        }),
-      () =>
-        ctx.reply(welcomeMessage.join("\n"), {
-          parse_mode: "HTML",
-          reply_markup: mainMenuKeyboard,
-        })
-    );
+    const startVideoId = getStartVideoId();
+    const sendWelcomeText = () =>
+      ctx.reply(welcomeMessage.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: mainMenuKeyboard,
+      });
+
+    if (startVideoId) {
+      await trySendVideoWithFallback(
+        () =>
+          ctx.replyWithVideo(startVideoId, {
+            caption: welcomeMessage.join("\n"),
+            parse_mode: "HTML",
+            reply_markup: mainMenuKeyboard,
+          }),
+        sendWelcomeText
+      );
+    } else {
+      await sendWelcomeText();
+    }
 
     await ctx.answerCallbackQuery("🚀 Welcome to TIMBA!");
   } catch (error) {
@@ -5314,19 +5179,26 @@ bot.callbackQuery("back_main", async (ctx) => {
 
     // Use same video as /start
     const mainMenuKeyboard = createMainMenuKeyboard();
-    await trySendVideoWithFallback(
-      () =>
-        ctx.replyWithVideo(WINNER_VIDEO_ID, {
-          caption: welcomeMessage.join("\n"),
-          parse_mode: "HTML",
-          reply_markup: mainMenuKeyboard,
-        }),
-      () =>
-        ctx.reply(welcomeMessage.join("\n"), {
-          parse_mode: "HTML",
-          reply_markup: mainMenuKeyboard,
-        })
-    );
+    const startVideoId = getStartVideoId();
+    const sendMainMenuText = () =>
+      ctx.reply(welcomeMessage.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: mainMenuKeyboard,
+      });
+
+    if (startVideoId) {
+      await trySendVideoWithFallback(
+        () =>
+          ctx.replyWithVideo(startVideoId, {
+            caption: welcomeMessage.join("\n"),
+            parse_mode: "HTML",
+            reply_markup: mainMenuKeyboard,
+          }),
+        sendMainMenuText
+      );
+    } else {
+      await sendMainMenuText();
+    }
     await ctx.answerCallbackQuery("🏠 Main menu");
   } catch (error) {
     console.error("Error in back_main:", error);
@@ -5410,7 +5282,8 @@ bot.callbackQuery("help_games", async (ctx) => {
         "<code>/coinflip &lt;amount&gt; [TOKEN] &lt;players&gt;</code> - Create coinflip\n" +
         "<code>/giveaway &lt;amount&gt; [TOKEN] &lt;players&gt;</code> - Create giveaway\n" +
         "<code>/active</code> - Show active games\n" +
-        "<code>/games</code> - Show your game history\n\n" +
+        "<code>/games</code> - Show your game history\n" +
+        "<code>/leaderboard</code> - Show top 10 players (groups only)\n\n" +
         "🪙 <b>Game Types:</b>\n" +
         "• <b>Coinflip:</b> Players pay to join, winner takes all\n" +
         "• <b>Giveaway:</b> Free to join, you fund the prize\n\n" +
@@ -9389,13 +9262,13 @@ setupAnchor()
         const width = ctx.message.video.width || 0;
         const height = ctx.message.video.height || 0;
         
-        await ctx.reply(
-          `🎥 <b>Video ID</b>\n\n` +
-          `<code>${fileId}</code>\n\n` +
-          `📄 Name: ${fileName}\n` +
-          `⏱ Duration: ${duration}s\n` +
-          `📏 Size: ${width}x${height}`,
-          { parse_mode: "HTML" }
+        // Only log to console, don't reply to user
+        console.log(
+          `🎥 Video received:\n` +
+          `   File ID: ${fileId}\n` +
+          `   Name: ${fileName}\n` +
+          `   Duration: ${duration}s\n` +
+          `   Size: ${width}x${height}`
         );
       }
     });
@@ -9408,13 +9281,13 @@ setupAnchor()
         const width = ctx.message.animation.width || 0;
         const height = ctx.message.animation.height || 0;
         
-        await ctx.reply(
-          `🎭 <b>GIF/Animation ID</b>\n\n` +
-          `<code>${fileId}</code>\n\n` +
-          `📄 Name: ${fileName}\n` +
-          `⏱ Duration: ${duration}s\n` +
-          `📏 Size: ${width}x${height}`,
-          { parse_mode: "HTML" }
+        // Only log to console, don't reply to user
+        console.log(
+          `🎭 GIF/Animation received:\n` +
+          `   File ID: ${fileId}\n` +
+          `   Name: ${fileName}\n` +
+          `   Duration: ${duration}s\n` +
+          `   Size: ${width}x${height}`
         );
       }
     });

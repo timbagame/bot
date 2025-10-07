@@ -488,4 +488,49 @@ export class GameDatabase extends BaseDatabase {
       return null;
     }
   }
+
+  /**
+   * Get leaderboard statistics for players in a specific chat
+   */
+  public getLeaderboardStats(chatId: number, limit: number = 10): any[] {
+    try {
+      const stmt = this.db.prepare(`
+        WITH player_stats AS (
+          SELECT 
+            pm.telegram_id,
+            COUNT(DISTINCT CASE WHEN g.status = 'completed' THEN g.game_address END) as total_games,
+            COUNT(DISTINCT CASE WHEN g.status = 'completed' AND g.winner_address = pm.public_key THEN g.game_address END) as games_won,
+            COUNT(DISTINCT CASE WHEN g.creator_telegram_id = pm.telegram_id AND g.status = 'completed' THEN g.game_address END) as games_created,
+            COUNT(DISTINCT CASE WHEN gp.telegram_id = pm.telegram_id AND g.status = 'completed' THEN g.game_address END) as games_joined,
+            COALESCE(SUM(DISTINCT CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.amount ELSE 0 END), 0) as total_volume,
+            CASE 
+              WHEN COUNT(DISTINCT CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.game_address END) > 0 
+              THEN (COUNT(DISTINCT CASE WHEN g.status = 'completed' AND g.winner_address = pm.public_key THEN g.game_address END) * 100.0) / COUNT(DISTINCT CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.game_address END)
+              ELSE 0 
+            END as win_rate
+          FROM player_mappings pm
+          LEFT JOIN games g ON (g.creator_telegram_id = pm.telegram_id OR g.winner_address = pm.public_key) AND g.chat_id = ?
+          LEFT JOIN game_participants gp ON gp.telegram_id = pm.telegram_id AND gp.game_address = g.game_address
+          WHERE g.chat_id = ? OR g.game_address IS NULL
+          GROUP BY pm.telegram_id
+          HAVING total_games > 0
+        )
+        SELECT 
+          telegram_id,
+          total_games,
+          games_won,
+          games_created,
+          games_joined,
+          total_volume,
+          ROUND(win_rate, 1) as win_rate
+        FROM player_stats
+        ORDER BY games_won DESC, win_rate DESC, total_volume DESC
+        LIMIT ?
+      `);
+      return stmt.all(chatId, chatId, limit) as any[];
+    } catch (error) {
+      console.error("Error getting leaderboard stats:", error);
+      return [];
+    }
+  }
 }

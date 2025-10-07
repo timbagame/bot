@@ -12,8 +12,8 @@ import {
   ADDRESS_DISPLAY_LENGTH,
   GAME_INFO_LIMIT,
   GAME_EXPIRATION_BUFFER_TIME,
-  COINFLIP_START_VIDEO_ID,
-  WINNER_VIDEO_ID,
+  getCoinflipVideoId,
+  getStartVideoId,
 } from "./constants";
 import { isRecoverableMediaError } from "./media";
 import type {
@@ -409,26 +409,34 @@ export class GameManager {
     let usesVideo = false;
 
     if (isCoinflip) {
-      try {
-        message = await ctx.replyWithVideo(COINFLIP_START_VIDEO_ID, {
-          caption: formatted.messageText,
-          parse_mode: "HTML",
-          reply_markup: replyMarkup,
-        });
-        usesVideo = true;
-      } catch (error) {
-        if (isRecoverableMediaError(error)) {
-          console.warn(
-            "Falling back to text announcement after video send failure:",
-            error
-          );
-          message = await ctx.reply(formatted.messageText, {
+      const coinflipVideoId = getCoinflipVideoId();
+      if (coinflipVideoId) {
+        try {
+          message = await ctx.replyWithVideo(coinflipVideoId, {
+            caption: formatted.messageText,
             parse_mode: "HTML",
             reply_markup: replyMarkup,
           });
-        } else {
-          throw error;
+          usesVideo = true;
+        } catch (error) {
+          if (isRecoverableMediaError(error)) {
+            console.warn(
+              "Falling back to text announcement after video send failure:",
+              error
+            );
+            message = await ctx.reply(formatted.messageText, {
+              parse_mode: "HTML",
+              reply_markup: replyMarkup,
+            });
+          } else {
+            throw error;
+          }
         }
+      } else {
+        message = await ctx.reply(formatted.messageText, {
+          parse_mode: "HTML",
+          reply_markup: replyMarkup,
+        });
       }
     } else {
       message = await ctx.reply(formatted.messageText, {
@@ -564,28 +572,37 @@ export class GameManager {
     let usesVideo = false;
 
     if (isCoinflip) {
-      try {
-        message = await ctx.replyWithVideo(COINFLIP_START_VIDEO_ID, {
-          caption: messageText,
-          parse_mode: "HTML",
-          reply_markup: replyMarkup,
-          reply_to_message_id: replyTo,
-        });
-        usesVideo = true;
-      } catch (error) {
-        if (isRecoverableMediaError(error)) {
-          console.warn(
-            "Falling back to text announcement after video send failure:",
-            error
-          );
-          message = await ctx.reply(messageText, {
+      const coinflipVideoId = getCoinflipVideoId();
+      if (coinflipVideoId) {
+        try {
+          message = await ctx.replyWithVideo(coinflipVideoId, {
+            caption: messageText,
             parse_mode: "HTML",
             reply_markup: replyMarkup,
             reply_to_message_id: replyTo,
           });
-        } else {
-          throw error;
+          usesVideo = true;
+        } catch (error) {
+          if (isRecoverableMediaError(error)) {
+            console.warn(
+              "Falling back to text announcement after video send failure:",
+              error
+            );
+            message = await ctx.reply(messageText, {
+              parse_mode: "HTML",
+              reply_markup: replyMarkup,
+              reply_to_message_id: replyTo,
+            });
+          } else {
+            throw error;
+          }
         }
+      } else {
+        message = await ctx.reply(messageText, {
+          parse_mode: "HTML",
+          reply_markup: replyMarkup,
+          reply_to_message_id: replyTo,
+        });
       }
     } else {
       message = await ctx.reply(messageText, {
@@ -641,6 +658,7 @@ export class GameManager {
       const lowerGameType = gameType.toLowerCase();
       const lowerStatus = status.toLowerCase();
       const supportsVideo = gameMessage.usesVideo !== false;
+      const winnerVideoId = getStartVideoId();
 
       const editAsText = async () => {
         await ctx.api.editMessageText(
@@ -654,7 +672,7 @@ export class GameManager {
         );
       };
 
-      if (lowerGameType === "coinflip" && supportsVideo) {
+      if (lowerGameType === "coinflip" && supportsVideo && winnerVideoId) {
         const isCompleted = lowerStatus === "completed";
         try {
           if (isCompleted) {
@@ -663,7 +681,7 @@ export class GameManager {
               gameMessage.messageId,
               {
                 type: "video",
-                media: WINNER_VIDEO_ID,
+                media: winnerVideoId,
                 caption: messageText,
                 parse_mode: "HTML",
               },

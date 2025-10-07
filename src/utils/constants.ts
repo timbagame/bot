@@ -49,7 +49,6 @@ export const DEFAULT_TOKEN_TICKER = "TIMBA";
 export const TOKENS_LIST = [
   { mint: "So11111111111111111111111111111111111111112", ticker: "WSOL" },
   { mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", ticker: "USDC" },
-  { mint: "FPyD25czYkvztSsgyCP7bxd2xnvDAp1LVjyiJhQidaos", ticker: "DAOS" },
   { mint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump", ticker: "TIMBA" }, // TIMBA mainnet
 ];
 
@@ -88,8 +87,16 @@ export const PRICES_TIMEOUT_MS = Number(process.env["PRICES_TIMEOUT_MS"] ?? 3_00
 // MEDIA FILE IDs 
 // ================================
 
-// General/Winner video - for /start, wallet, and winner announcements
-export const WINNER_VIDEO_ID = "BAACAgEAAxkBAAIE1WivzsUV7cps9-rSyWoah847uOl7AAKqBQACEHGART3oJ4oxnXoCNgQ";
+// Start/Wallet video - for /start command and wallet UI
+// Use getter function to allow dynamic changes
+export const getStartVideoId = () => 
+  process.env["START_VIDEO_ID"];
 
-// Coinflip start video - for when coinflip rounds begin
-export const COINFLIP_START_VIDEO_ID = "BAACAgEAAxkBAAIE12ivzwbUNAQX5PGPk5H8K9PEOmKYAAKrBQACEHGARfHRJ8fc8kH3NgQ";
+// Coinflip start video - for when coinflip rounds begin  
+// Use getter function to allow dynamic changes
+export const getCoinflipVideoId = () =>
+  process.env["COINFLIP_START_VIDEO_ID"];
+
+// Backwards compatibility - deprecated, use getters instead
+export const START_VIDEO_ID = getStartVideoId();
+export const COINFLIP_START_VIDEO_ID = getCoinflipVideoId();

@@ -2,6 +2,24 @@ import type { InlineKeyboard } from "grammy";
 import { escapeHtml } from "../utils/format-amount";
 import { isRecoverableMediaError, trySendVideoWithFallback } from "../utils/media";
 
+const getTelegramErrorDescription = (error: unknown): string => {
+  if (!error || typeof error !== "object") return "";
+  const knownError = error as { description?: string; message?: string };
+  return (knownError.description || knownError.message || "").toLowerCase();
+};
+
+const isDirectMessageInitiationError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") return false;
+  const telegramError = error as { error_code?: number };
+  if (telegramError.error_code !== 403) return false;
+  const description = getTelegramErrorDescription(error);
+  return (
+    description.includes("bot can't initiate") ||
+    description.includes("bot was blocked by the user") ||
+    description.includes("user is deactivated")
+  );
+};
+
 export type ShowWalletUIDeps = {
   wallet: {
     getKeyPair: (id: bigint) => any;
@@ -12,7 +30,7 @@ export type ShowWalletUIDeps = {
   getPriceUSD: (mint: string) => Promise<number>;
   buildWalletCaption: (solBalanceStr: string, tokenLines: Array<{ ticker: string; formatted: string }>, totalUSD: number, walletAddress: string) => string;
   createWalletKeyboard: () => InlineKeyboard;
-  WINNER_VIDEO_ID: string;
+  WINNER_VIDEO_ID?: string | null;
   LAMPORTS_PER_SOL: number;
 };
 
@@ -23,10 +41,43 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
   const keypair = wallet.getKeyPair(telegramId);
   const walletAddress = keypair.publicKey.toBase58();
   const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
-  const walletVideoFileId = WINNER_VIDEO_ID;
+  const walletVideoFileId = WINNER_VIDEO_ID ?? null;
   const getWalletKeyboard = () => createWalletKeyboard();
 
   const sendWalletContent = async (caption: string) => {
+    const editAsText = async (): Promise<boolean> => {
+      try {
+        await ctx.editMessageText(caption, {
+          parse_mode: "HTML",
+          reply_markup: getWalletKeyboard(),
+        });
+        return true;
+      } catch (textError: any) {
+        const textDesc: string =
+          textError?.description || textError?.message || "";
+        if (textDesc.includes("message is not modified")) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const sendAsText = async () => {
+      await ctx.reply(caption, {
+        parse_mode: "HTML",
+        reply_markup: getWalletKeyboard(),
+        reply_to_message_id: ctx.message?.message_id,
+      });
+    };
+
+    if (!walletVideoFileId) {
+      const edited = await editAsText();
+      if (!edited) {
+        await sendAsText();
+      }
+      return;
+    }
+
     try {
       await ctx.editMessageMedia(
         { type: "video", media: walletVideoFileId, caption, parse_mode: "HTML" },
@@ -40,17 +91,9 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
       }
       if (isRecoverableMediaError(editError)) {
         console.warn("Falling back to text wallet edit:", editError);
-        try {
-          await ctx.editMessageText(caption, {
-            parse_mode: "HTML",
-            reply_markup: getWalletKeyboard(),
-          });
+        const edited = await editAsText();
+        if (edited) {
           return;
-        } catch (textError: any) {
-          const textDesc: string = textError?.description || textError?.message || "";
-          if (textDesc.includes("message is not modified")) {
-            return;
-          }
         }
       }
     }
@@ -63,12 +106,7 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
           reply_markup: getWalletKeyboard(),
           reply_to_message_id: ctx.message?.message_id,
         }),
-      () =>
-        ctx.reply(caption, {
-          parse_mode: "HTML",
-          reply_markup: getWalletKeyboard(),
-          reply_to_message_id: ctx.message?.message_id,
-        })
+      () => sendAsText()
     );
   };
 
@@ -205,6 +243,8 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     return;
   }
 
+  // If it's not a private chat, send balance privately to the user
+  let response: string[] = [];
   try {
     const playerData = await getPlayerData(telegramId);
     const approvedTokens = getApprovedTokens();
@@ -223,7 +263,7 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
 
     const safeDisplayName = escapeHtml(displayName);
     const safeWalletAddress = escapeHtml(walletAddress);
-    const response = [
+    response = [
       `<b>${safeDisplayName}</b>`,
       `<code>${safeWalletAddress}</code>`,
       "",
@@ -233,17 +273,27 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     if (tokenBalancesToShow.length > 0) {
       for (const token of tokenBalancesToShow.slice(0, 4)) {
         const balance = wallet.formatTokenBalance(token.balance, token.decimals);
-        response.push(
-          `${escapeHtml(balance)} ${escapeHtml(token.ticker)}`
-        );
+        response.push(`${escapeHtml(balance)} ${escapeHtml(token.ticker)}`);
       }
       if (tokenBalancesToShow.length > 4) {
         response.push(`<i>+${tokenBalancesToShow.length - 4} more tokens</i>`);
       }
     }
-
-    await ctx.reply(response.join("\n"), { parse_mode: "HTML", reply_to_message_id: ctx.message?.message_id });
   } catch (error) {
+    console.error("Error preparing private balance response:", error);
+    await handleCommandError(ctx, error, "balance");
+    return;
+  }
+
+  try {
+    // Send privately to the user instead of replying in group
+    await ctx.api.sendMessage(ctx.from!.id, response.join("\n"), { parse_mode: "HTML" });
+  } catch (error) {
+    if (isDirectMessageInitiationError(error)) {
+      console.warn("Unable to DM balance because user hasn't started the bot:", error);
+      return;
+    }
+    console.error("Error sending private balance message:", error);
     await handleCommandError(ctx, error, "balance");
   }
 }

@@ -2,6 +2,9 @@ import { describe, test, expect } from "bun:test";
 import { GameManager } from "../src/utils/game";
 import { PublicKey } from "@solana/web3.js";
 
+process.env["COINFLIP_START_VIDEO_ID"] ??= "test-coinflip-video-id";
+process.env["START_VIDEO_ID"] ??= "test-start-video-id";
+
 function resetGM() {
   // @ts-ignore
   GameManager["instance"] = undefined;
