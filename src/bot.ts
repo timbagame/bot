@@ -1103,15 +1103,9 @@ bot.command(["coinflip", "cf"], async (ctx) => {
     coinflipMessage += "Choose the amount each player will stake:\n";
     coinflipMessage += balanceText;
     
-    // Get contract minimum for warnings and UX
+    // Get contract minimum for keyboard suggestions
     const contractMin = await getContractMinimumAmount();
-    
-    // Add fee warning for low balance  
-    if (userBalance < contractMin) {
-      coinflipMessage += `\n⚠️ <b>Fee Warning:</b> Oracle fees (~5-10%) are significant with small bets.\n`;
-      coinflipMessage += `Contract minimum: ${contractMin} TIMBA for better value.\n`;
-    }
-    
+
     coinflipMessage += "\n• Winner takes all the stakes\n";
     coinflipMessage += "• Fair and transparent results\n\n";
     coinflipMessage += "Select amount:";
