@@ -498,7 +498,6 @@ export class GameDatabase extends BaseDatabase {
         WITH player_stats AS (
           SELECT 
             pm.telegram_id,
-            pm.public_key,
             COUNT(CASE WHEN g.status = 'completed' THEN 1 END) as total_games,
             COUNT(CASE WHEN g.status = 'completed' AND g.winner_address = pm.public_key THEN 1 END) as games_won,
             COUNT(CASE WHEN g.creator_telegram_id = pm.telegram_id AND g.status = 'completed' THEN 1 END) as games_created,
@@ -513,12 +512,11 @@ export class GameDatabase extends BaseDatabase {
           LEFT JOIN games g ON (g.creator_telegram_id = pm.telegram_id OR g.winner_address = pm.public_key) AND g.chat_id = ?
           LEFT JOIN game_participants gp ON gp.telegram_id = pm.telegram_id AND gp.game_address = g.game_address
           WHERE g.chat_id = ? OR g.game_address IS NULL
-          GROUP BY pm.telegram_id, pm.public_key
+          GROUP BY pm.telegram_id
           HAVING total_games > 0
         )
         SELECT 
           telegram_id,
-          public_key,
           total_games,
           games_won,
           games_created,

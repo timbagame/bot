@@ -12,8 +12,8 @@ import {
   ADDRESS_DISPLAY_LENGTH,
   GAME_INFO_LIMIT,
   GAME_EXPIRATION_BUFFER_TIME,
-  COINFLIP_START_VIDEO_ID,
-  WINNER_VIDEO_ID,
+  getCoinflipVideoId,
+  getStartVideoId,
 } from "./constants";
 import { isRecoverableMediaError } from "./media";
 import type {
@@ -410,7 +410,7 @@ export class GameManager {
 
     if (isCoinflip) {
       try {
-        message = await ctx.replyWithVideo(COINFLIP_START_VIDEO_ID, {
+        message = await ctx.replyWithVideo(getCoinflipVideoId() || "", {
           caption: formatted.messageText,
           parse_mode: "HTML",
           reply_markup: replyMarkup,
@@ -565,7 +565,7 @@ export class GameManager {
 
     if (isCoinflip) {
       try {
-        message = await ctx.replyWithVideo(COINFLIP_START_VIDEO_ID, {
+        message = await ctx.replyWithVideo(getCoinflipVideoId() || "", {
           caption: messageText,
           parse_mode: "HTML",
           reply_markup: replyMarkup,
@@ -663,7 +663,7 @@ export class GameManager {
               gameMessage.messageId,
               {
                 type: "video",
-                media: WINNER_VIDEO_ID,
+                media: getStartVideoId() || "",
                 caption: messageText,
                 parse_mode: "HTML",
               },

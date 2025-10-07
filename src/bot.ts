@@ -23,7 +23,7 @@ import {
   DEFAULT_TOKEN_MINT,
   DEFAULT_TOKEN_TICKER,
   TOKENS_LIST,
-  WINNER_VIDEO_ID,
+  getStartVideoId,
   JUPITER_BASE_URL,
 } from "./utils/constants";
 import { trySendVideoWithFallback } from "./utils/media";
@@ -373,7 +373,7 @@ const showWalletUI = async (ctx: any) => {
     getPriceUSD,
     buildWalletCaption,
     createWalletKeyboard,
-    WINNER_VIDEO_ID,
+    WINNER_VIDEO_ID: getStartVideoId() || "",
     LAMPORTS_PER_SOL,
   });
 };
@@ -866,9 +866,9 @@ const buildTokenBalances = async (
 
 bot.command(["start", "balance"], async (ctx: Context) => {
   // Mark chat as initiated if it's not already
-  if (ctx.chat?.id) {
-    initiatedChats.add(ctx.chat.id);
-  }
+      if (ctx.chat?.id) {
+        initiatedChats.add(ctx.chat.id);
+      }
 
   await onBalance(ctx as any, {
     isPrivateChat,
@@ -1018,7 +1018,7 @@ bot.command(["coinflip", "cf"], async (ctx) => {
     
     // Get contract minimum for keyboard suggestions
     const contractMin = await getContractMinimumAmount();
-
+    
     coinflipMessage += "\n• Winner takes all the stakes\n";
     coinflipMessage += "• Fair and transparent results\n\n";
     coinflipMessage += "Select amount:";
@@ -2473,12 +2473,12 @@ bot.command("games", async (ctx: Context) => {
 bot.command("leaderboard", async (ctx: Context) => {
   // Check if it's a group/supergroup chat
   if (ctx.chat?.type !== "group" && ctx.chat?.type !== "supergroup") {
-    return ctx.reply("❌ El leaderboard solo puede ser usado en grupos!");
+    return ctx.reply("❌ Leaderboard can only be used in groups!");
   }
 
   const chatId = ctx.chat?.id;
   if (!chatId) {
-    return ctx.reply("❌ No se pudo obtener la información del chat.");
+    return ctx.reply("❌ Could not get chat information.");
   }
 
   try {
@@ -2489,21 +2489,20 @@ bot.command("leaderboard", async (ctx: Context) => {
     
     if (leaderboardStats.length === 0) {
       return ctx.reply(
-        "🏆 <b>Leaderboard - Top 10 Jugadores</b>\n\n" +
-        "No hay estadísticas disponibles para este grupo aún.\n" +
-        "¡Juega algunos coinflips para aparecer en el leaderboard!",
+        "⚔️ <b>HALL OF LEGENDS</b> ⚔️\n\n" +
+        "No statistics available for this group yet.\n" +
+        "Play some coinflips to appear on the leaderboard!\n\n" +
+        "🎮 <i>Be the first to claim your throne!</i>",
         { parse_mode: "HTML", reply_to_message_id: ctx.message?.message_id }
       );
     }
 
-    // Build leaderboard message
-    let leaderboardText = "🏆 <b>Leaderboard - Top 10 Jugadores</b>\n\n";
+    // Build competitive leaderboard message
+    let leaderboardText = "⚔️ <b>HALL OF LEGENDS</b> ⚔️\n\n";
     
     for (let i = 0; i < leaderboardStats.length; i++) {
       const stats = leaderboardStats[i];
       const rank = i + 1;
-      const medals = ["🥇", "🥈", "🥉"];
-      const rankEmoji = rank <= 3 ? medals[rank - 1] : `${rank}.`;
       
       // Try to get username, fallback to telegram ID
       let displayName: string;
@@ -2519,12 +2518,44 @@ bot.command("leaderboard", async (ctx: Context) => {
       // Format volume (assuming TIMBA tokens with appropriate decimals)
       const volumeFormatted = formatAmount(stats.total_volume, 9); // Using 9 decimals for TIMBA
       
-      leaderboardText += `${rankEmoji} <b>${displayName}</b>\n`;
-      leaderboardText += `   🎯 Victorias: ${stats.games_won} | Win Rate: ${stats.win_rate}%\n`;
-      leaderboardText += `   🎮 Juegos: ${stats.total_games} | Vol: ${volumeFormatted} TIMBA\n\n`;
+      // Competitive ranking with tier system
+      let tierEmoji = "";
+      let rankDisplay = "";
+      
+      if (rank === 1) {
+        tierEmoji = "👑";
+        rankDisplay = `${tierEmoji} <b>LEGEND</b>`;
+      } else if (rank === 2) {
+        tierEmoji = "🥇";
+        rankDisplay = `${tierEmoji} <b>CHAMPION</b>`;
+      } else if (rank === 3) {
+        tierEmoji = "🥈";
+        rankDisplay = `${tierEmoji} <b>MASTER</b>`;
+      } else if (rank <= 5) {
+        tierEmoji = "🥉";
+        rankDisplay = `${tierEmoji} <b>EXPERT</b> #${rank}`;
+      } else if (rank <= 10) {
+        tierEmoji = "⚡";
+        rankDisplay = `${tierEmoji} <b>WARRIOR</b> #${rank}`;
+      } else {
+        tierEmoji = "🔥";
+        rankDisplay = `${tierEmoji} <b>FIGHTER</b> #${rank}`;
+      }
+      
+      // Win streak indicator
+      const winStreakEmoji = stats.win_rate >= 80 ? "🔥🔥🔥" : 
+                             stats.win_rate >= 60 ? "🔥🔥" : 
+                             stats.win_rate >= 40 ? "🔥" : "💀";
+      
+      leaderboardText += `${rankDisplay}\n`;
+      leaderboardText += `<b>${displayName}</b> ${winStreakEmoji}\n`;
+      leaderboardText += `💯 <b>${stats.games_won}W</b> | 📊 ${stats.win_rate}% | 💰 ${volumeFormatted}\n`;
+      leaderboardText += `🎮 ${stats.total_games} battles\n\n`;
     }
     
-    leaderboardText += "<i>📊 Ranking basado en victorias, win rate y volumen</i>";
+    leaderboardText += "🎯 <i>Do you have what it takes to reach LEGEND status?</i>\n";
+    leaderboardText += "⚔️ <i>Play more coinflips to climb the ranks!</i>\n";
+    leaderboardText += "🏆 <i>Only the strongest survive in the arena!</i>";
 
     await ctx.reply(leaderboardText, {
       parse_mode: "HTML",
@@ -5079,7 +5110,7 @@ bot.callbackQuery("start_bot", async (ctx) => {
     const mainMenuKeyboard = createMainMenuKeyboard();
     await trySendVideoWithFallback(
       () =>
-        ctx.replyWithVideo(WINNER_VIDEO_ID, {
+        ctx.replyWithVideo(getStartVideoId() || "", {
           caption: welcomeMessage.join("\n"),
           parse_mode: "HTML",
           reply_markup: mainMenuKeyboard,
@@ -5146,7 +5177,7 @@ bot.callbackQuery("back_main", async (ctx) => {
     const mainMenuKeyboard = createMainMenuKeyboard();
     await trySendVideoWithFallback(
       () =>
-        ctx.replyWithVideo(WINNER_VIDEO_ID, {
+        ctx.replyWithVideo(getStartVideoId() || "", {
           caption: welcomeMessage.join("\n"),
           parse_mode: "HTML",
           reply_markup: mainMenuKeyboard,
