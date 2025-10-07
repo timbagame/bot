@@ -511,7 +511,7 @@ export class GameManager {
     messageText += prize;
 
     // Add list of players if any have joined
-    if (currentTickets > 0 && status.toLowerCase() !== "completed") {
+    if (currentTickets > 0) {
       try {
         const participants = this.getGamePlayers(gamePda.toBase58());
         if (participants.length > 0) {
@@ -522,13 +522,19 @@ export class GameManager {
                   ctx,
                   telegramId
                 );
-                return `@${username}`;
+                return username ? `@${username}` : `Player ${telegramId.slice(0, 6)}...`;
               } catch (error) {
                 return `Player ${telegramId.slice(0, 6)}...`;
               }
             })
           );
-          messageText += buildParticipantsList(playerNames);
+          const participantsList = buildParticipantsList(playerNames);
+          if (participantsList) {
+            messageText += participantsList;
+            if (isCompleted && messageText.endsWith("\n")) {
+              messageText = messageText.slice(0, -1);
+            }
+          }
         }
       } catch (error) {
         console.error("Error getting player list:", error);
@@ -536,7 +542,7 @@ export class GameManager {
     }
 
     // Add status and expiration info for active games
-    if (status.toLowerCase() !== "completed") {
+    if (!isCompleted) {
       const statusText = buildGameStatus(currentTickets, minTickets, maxTickets);
       messageText += `\nStatus: ${statusText}${expirationInfo}`;
     }
@@ -865,18 +871,48 @@ export class GameManager {
         winnerLine = `Winner: @${winnerUsername}`;
       }
 
-      const lines = [
+      let message =
         `${gameTypeText} • ${this.wallet.formatTokenBalance(amount, 9)} ${
           gameData.token_ticker || "WSOL"
-        }`,
-        `👤 Creator: @${creatorUsername} • ${playerCount} tickets`,
-      ];
+        }` +
+        `\n👤 Creator: @${creatorUsername} • ${playerCount} tickets`;
 
-      if (winnerLine) {
-        lines.push(winnerLine);
+      try {
+        const participantIds = this.gameDb.getGameParticipants(
+          gameData.game_address
+        );
+        if (participantIds.length > 0) {
+          const participantNames = await Promise.all(
+            participantIds.map(async (telegramId) => {
+              const username = await this.getUsernameFromTelegramId(
+                ctx,
+                telegramId
+              );
+              return username
+                ? `@${username}`
+                : `Player ${telegramId.slice(0, 6)}...`;
+            })
+          );
+          const participantsList = buildParticipantsList(participantNames);
+          if (participantsList) {
+            message += participantsList;
+            if (message.endsWith("\n")) {
+              message = message.slice(0, -1);
+            }
+          }
+        }
+      } catch (participantError) {
+        console.error(
+          "Error retrieving participants for completed game:",
+          participantError
+        );
       }
 
-      return lines.join("\n");
+      if (winnerLine) {
+        message += `\n${winnerLine}`;
+      }
+
+      return message;
     } catch (error) {
       console.error("Error formatting completed game info:", error);
       return "❌ Error loading game details";
