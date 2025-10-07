@@ -89,7 +89,7 @@ export const PRICES_TIMEOUT_MS = Number(process.env["PRICES_TIMEOUT_MS"] ?? 3_00
 // ================================
 
 // General/Winner video - for /start, wallet, and winner announcements
-export const WINNER_VIDEO_ID = "BAACAgEAAxkBAAIE1WivzsUV7cps9-rSyWoah847uOl7AAKqBQACEHGART3oJ4oxnXoCNgQ";
+export const WINNER_VIDEO_ID = "BAACAgEAAx0Ce_D3oQACXmho5TdI4JsNHigDTJ_wP2JkHRJuGgACqgUAAhBxgEU0LG9kSZAoKTYE";
 
 // Coinflip start video - for when coinflip rounds begin
-export const COINFLIP_START_VIDEO_ID = "BAACAgEAAxkBAAIE12ivzwbUNAQX5PGPk5H8K9PEOmKYAAKrBQACEHGARfHRJ8fc8kH3NgQ";
+export const COINFLIP_START_VIDEO_ID = "BAACAgEAAx0Ce_D3oQACXmdo5TdIxIyPM3bU6M4P95SiHGaAJgACqwUAAhBxgEXdjHLQI-pVQDYE";
