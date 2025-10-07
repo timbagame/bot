@@ -48,8 +48,17 @@ test("onBalance private chat errors call handler", async () => {
   expect(handled).toBe(1);
 });
 
-test("onBalance in group replies summary with SOL and tokens", async () => {
+test("onBalance in group sends balance privately to user", async () => {
   const ctx: any = makeCtx(false);
+  // Mock api.sendMessage to track calls
+  const sendMessageCalls: any[] = [];
+  ctx.api = {
+    sendMessage: (chatId: any, text: any, options: any) => {
+      sendMessageCalls.push({ chatId, text, options });
+      return Promise.resolve();
+    }
+  };
+  
   await onBalance(ctx, {
     isPrivateChat: () => false,
     clearWalletCache: (_: any) => {},
@@ -61,17 +70,33 @@ test("onBalance in group replies summary with SOL and tokens", async () => {
     wallet: { formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toFixed(0), formatSolBalance: (n: number) => (n / 1_000_000_000).toFixed(6) },
     handleCommandError: async () => {},
   });
+  
+  // Should not reply in group
   const calls = ctx.__calls;
-  expect(calls[0][0]).toBe("reply");
-  const text = calls[0][1];
-  expect(String(text)).toContain("WALLETADDR");
-  expect(String(text)).toContain("1.000000 SOL");
-  expect(String(text)).toContain("1 USDC");
+  expect(calls.length).toBe(0);
+  
+  // Should send privately to user
+  expect(sendMessageCalls.length).toBe(1);
+  expect(sendMessageCalls[0].chatId).toBe(1); // user ID from makeCtx
+  const text = String(sendMessageCalls[0].text);
+  expect(text).toContain("WALLETADDR");
+  expect(text).toContain("1.000000 SOL");
+  expect(text).toContain("1 USDC");
+  expect(sendMessageCalls[0].options.parse_mode).toBe("HTML");
 });
 
-test("onBalance merges WSOL and lists extra token count", async () => {
+test("onBalance merges WSOL and sends privately to user", async () => {
   const ctx: any = makeCtx(false);
   ctx.from.username = "alice";
+  
+  // Mock api.sendMessage to track calls
+  const sendMessageCalls: any[] = [];
+  ctx.api = {
+    sendMessage: (chatId: any, text: any, options: any) => {
+      sendMessageCalls.push({ chatId, text, options });
+      return Promise.resolve();
+    }
+  };
   const tokens = [
     { mint: "So11111111111111111111111111111111111111112", ticker: "WSOL", balance: 500_000_000, decimals: 9 },
     { mint: "mint1", ticker: "AAA", balance: 1_000_000, decimals: 6 },
@@ -99,15 +124,32 @@ test("onBalance merges WSOL and lists extra token count", async () => {
     handleCommandError: async () => {},
   });
 
-  const message = String(ctx.__calls[0][1]);
-  expect(message).toContain("ADDR123");
-  expect(message).toContain("1.500000 SOL");
-  expect(message).toContain("+1 more tokens");
+  // Should not reply in group
+  const calls = ctx.__calls;
+  expect(calls.length).toBe(0);
+  
+  // Should send privately to user
+  expect(sendMessageCalls.length).toBe(1);
+  expect(sendMessageCalls[0].chatId).toBe(1); // user ID
+  const message = String(sendMessageCalls[0].text);
+  expect(message).toContain("@alice");
+  expect(message).toContain("1.500000 SOL"); // 1 SOL + 0.5 WSOL
+  expect(message).toContain("1.00 AAA");
+  expect(message).toContain("+1 more tokens"); // 5 remaining after WSOL merge, showing 4, so +1 more
 });
 
-test("onBalance escapes HTML-sensitive values", async () => {
+test("onBalance escapes HTML-sensitive values when sending privately", async () => {
   const ctx: any = makeCtx(false);
   ctx.from.first_name = "<User>";
+  
+  // Mock api.sendMessage to track calls
+  const sendMessageCalls: any[] = [];
+  ctx.api = {
+    sendMessage: (chatId: any, text: any, options: any) => {
+      sendMessageCalls.push({ chatId, text, options });
+      return Promise.resolve();
+    }
+  };
   await onBalance(ctx, {
     isPrivateChat: () => false,
     clearWalletCache: (_: any) => {},
@@ -128,7 +170,14 @@ test("onBalance escapes HTML-sensitive values", async () => {
     handleCommandError: async () => {},
   });
 
-  const output = String(ctx.__calls[0][1]);
+  // Should not reply in group
+  const calls = ctx.__calls;
+  expect(calls.length).toBe(0);
+  
+  // Should send privately to user with HTML escaped
+  expect(sendMessageCalls.length).toBe(1);
+  expect(sendMessageCalls[0].chatId).toBe(1); // user ID
+  const output = String(sendMessageCalls[0].text);
   expect(output).toContain("&lt;User&gt;");
   expect(output).toContain('<code>ADDR&lt;&amp;&quot;');
   expect(output).toContain("&lt;1 &amp; more&gt; SOL");

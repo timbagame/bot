@@ -185,6 +185,11 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     isPrivateChat,
     clearWalletCache,
     showWalletUI,
+    getPlayerData,
+    getApprovedTokens,
+    buildTokenBalances,
+    TOKENS_LIST,
+    wallet,
     handleCommandError,
   } = deps;
 
@@ -200,52 +205,48 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     return;
   }
 
-  // If it's not a private chat, create a COMPLETE private context that redirects everything
+  // If it's not a private chat, send balance privately to the user
   try {
-    clearWalletCache(telegramId);
-    
-    // Create a proxy context that redirects ALL methods to user's private chat
-    // Remove problematic fields like reply_to_message_id
-    const privateCtx = {
-      ...ctx,
-      chat: { id: ctx.from!.id, type: "private" },
-      message: null, // Clear message reference to avoid reply_to issues
-      callbackQuery: null, // Clear callback query reference
-      reply: (text: any, options?: any) => {
-        // Remove reply_to_message_id and other problematic fields
-        const cleanOptions = options ? { ...options } : {};
-        delete cleanOptions.reply_to_message_id;
-        return ctx.api.sendMessage(ctx.from!.id, text, cleanOptions);
-      },
-      replyWithVideo: (video: any, options?: any) => {
-        // Remove reply_to_message_id and other problematic fields
-        const cleanOptions = options ? { ...options } : {};
-        delete cleanOptions.reply_to_message_id;
-        return ctx.api.sendVideo(ctx.from!.id, video, cleanOptions);
-      },
-      editMessageMedia: (media: any, options?: any) => {
-        // For edit operations, we can't use them in private context, so just send new message
-        return ctx.api.sendVideo(ctx.from!.id, media.media, { 
-          caption: media.caption, 
-          parse_mode: media.parse_mode || options?.parse_mode,
-          reply_markup: options?.reply_markup 
-        });
-      },
-      editMessageText: (text: any, options?: any) => {
-        // For edit operations, we can't use them in private context, so just send new message
-        const cleanOptions = options ? { ...options } : {};
-        delete cleanOptions.reply_to_message_id;
-        return ctx.api.sendMessage(ctx.from!.id, text, cleanOptions);
-      },
-      answerCallbackQuery: () => Promise.resolve(),
-      from: ctx.from
-    };
-    
-    // Now use the FULL showWalletUI with the redirected context
-    await showWalletUI(privateCtx);
-    
+    const playerData = await getPlayerData(telegramId);
+    const approvedTokens = getApprovedTokens();
+    const tokenBalancesToShow = await buildTokenBalances(telegramId, approvedTokens);
+
+    const WSOL_MINT = (TOKENS_LIST.find((t) => t.ticker === "WSOL")?.mint as string) || "So11111111111111111111111111111111111111112";
+    let solDisplayLamports = playerData.solBalance;
+    const wsolIndex = tokenBalancesToShow.findIndex((t) => t.mint === WSOL_MINT);
+    if (wsolIndex !== -1) {
+      solDisplayLamports += tokenBalancesToShow[wsolIndex]!.balance;
+      tokenBalancesToShow.splice(wsolIndex, 1);
+    }
+
+    const displayName = ctx.from?.username ? `@${ctx.from.username}` : ctx.from?.first_name || "User";
+    const walletAddress = playerData.keypair.publicKey.toBase58();
+
+    const safeDisplayName = escapeHtml(displayName);
+    const safeWalletAddress = escapeHtml(walletAddress);
+    const response = [
+      `<b>${safeDisplayName}</b>`,
+      `<code>${safeWalletAddress}</code>`,
+      "",
+      `${escapeHtml(wallet.formatSolBalance(solDisplayLamports))} SOL`,
+    ];
+
+    if (tokenBalancesToShow.length > 0) {
+      for (const token of tokenBalancesToShow.slice(0, 4)) {
+        const balance = wallet.formatTokenBalance(token.balance, token.decimals);
+        response.push(
+          `${escapeHtml(balance)} ${escapeHtml(token.ticker)}`
+        );
+      }
+      if (tokenBalancesToShow.length > 4) {
+        response.push(`<i>+${tokenBalancesToShow.length - 4} more tokens</i>`);
+      }
+    }
+
+    // Send privately to the user instead of replying in group
+    await ctx.api.sendMessage(ctx.from!.id, response.join("\n"), { parse_mode: "HTML" });
   } catch (error) {
-    // If we can't send privately, just ignore silently
-    console.warn("Could not send full wallet UI privately:", error);
+    // If we can't send privately (user hasn't started bot), just silently ignore
+    // Don't call handleCommandError as that would reply in the group
   }
 }
