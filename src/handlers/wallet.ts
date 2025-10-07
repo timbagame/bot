@@ -185,11 +185,6 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     isPrivateChat,
     clearWalletCache,
     showWalletUI,
-    getPlayerData,
-    getApprovedTokens,
-    buildTokenBalances,
-    TOKENS_LIST,
-    wallet,
     handleCommandError,
   } = deps;
 

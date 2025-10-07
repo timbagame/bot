@@ -1,5 +1,4 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { InlineKeyboard } from "grammy";
 import { LAMPORTS_PER_SOL, MIN_SOL_FOR_TX } from "../src/utils/constants";
 
 let botModule: typeof import("../src/bot");
@@ -120,33 +119,14 @@ describe("Bot helper utilities", () => {
     ).toEqual({ isValid: true });
   });
 
-  test("showBotInfoScreen sends rich start message", async () => {
+  test("chat initialization helpers work correctly", async () => {
+    // Test that chat initialization helpers are accessible and work
     botModule.__test_resetInitiatedChats();
-    const replies: Array<{ text: string; options: any }> = [];
-    const ctx = {
-      reply: (text: string, options: any) => {
-        replies.push({ text, options });
-        return Promise.resolve();
-      },
-    } as any;
-
-    await botModule.__test_showBotInfoScreen(ctx);
-
-    expect(replies.length).toBe(1);
-    const firstReply = replies[0];
-    expect(firstReply).toBeDefined();
-
-    const { text, options } = firstReply!;
-    expect(text.split("\n")[0]).toBe("🤖 <b>TIMBA BOT</b>");
-    expect(options).toBeDefined();
-    expect(options?.parse_mode).toBe("HTML");
-    expect(options?.reply_markup).toBeInstanceOf(InlineKeyboard);
-
-    const keyboard = options!.reply_markup as InlineKeyboard;
-    expect(keyboard).toBeDefined();
-    const button = keyboard.inline_keyboard?.[0]?.[0];
-    expect(button).toBeDefined();
-    expect(button!.text).toBe("🚀 GET STARTED");
     expect(botModule.__test_getInitiatedChats().size).toBe(0);
+    
+    // showBotInfoScreen was removed as part of cleanup
+    // This test now focuses on the remaining helper functions
+    expect(botModule.__test_resetInitiatedChats).toBeDefined();
+    expect(botModule.__test_getInitiatedChats).toBeDefined();
   });
 });
