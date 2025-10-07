@@ -26,6 +26,7 @@ import {
   WINNER_VIDEO_ID,
   JUPITER_BASE_URL,
 } from "./utils/constants";
+import { trySendVideoWithFallback } from "./utils/media";
 import { mergeWsolIntoSol } from "./utils/balance";
 import { setUserState, getUserState, storePendingTransaction, getPendingTransaction } from "./utils/user-state";
 // import { createDmMessageAdapter } from "./utils/ctx-adapter";
@@ -916,12 +917,20 @@ bot.command("start", async (ctx: Context) => {
         initiatedChats.add(ctx.chat.id);
       }
 
-      // Send welcome video
-      await ctx.replyWithVideo(WINNER_VIDEO_ID, {
-        caption: welcomeMessage.join("\n"),
-        parse_mode: "HTML",
-        reply_markup: createMainMenuKeyboard(),
-      });
+      const mainMenuKeyboard = createMainMenuKeyboard();
+      await trySendVideoWithFallback(
+        () =>
+          ctx.replyWithVideo(WINNER_VIDEO_ID, {
+            caption: welcomeMessage.join("\n"),
+            parse_mode: "HTML",
+            reply_markup: mainMenuKeyboard,
+          }),
+        () =>
+          ctx.reply(welcomeMessage.join("\n"), {
+            parse_mode: "HTML",
+            reply_markup: mainMenuKeyboard,
+          })
+      );
     } else {
       // Simple group chat response
     const groupResponse = [
@@ -5077,11 +5086,20 @@ bot.callbackQuery("start_bot", async (ctx) => {
       initiatedChats.add(ctx.chat.id);
     }
 
-    await ctx.replyWithVideo(WINNER_VIDEO_ID, {
-      caption: welcomeMessage.join("\n"),
-      parse_mode: "HTML",
-      reply_markup: createMainMenuKeyboard(),
-    });
+    const mainMenuKeyboard = createMainMenuKeyboard();
+    await trySendVideoWithFallback(
+      () =>
+        ctx.replyWithVideo(WINNER_VIDEO_ID, {
+          caption: welcomeMessage.join("\n"),
+          parse_mode: "HTML",
+          reply_markup: mainMenuKeyboard,
+        }),
+      () =>
+        ctx.reply(welcomeMessage.join("\n"), {
+          parse_mode: "HTML",
+          reply_markup: mainMenuKeyboard,
+        })
+    );
 
     await ctx.answerCallbackQuery("🚀 Welcome to TIMBA!");
   } catch (error) {
@@ -5135,11 +5153,20 @@ bot.callbackQuery("back_main", async (ctx) => {
     }
 
     // Use same video as /start
-    await ctx.replyWithVideo(WINNER_VIDEO_ID, {
-      caption: welcomeMessage.join("\n"),
-      parse_mode: "HTML",
-      reply_markup: createMainMenuKeyboard(),
-    });
+    const mainMenuKeyboard = createMainMenuKeyboard();
+    await trySendVideoWithFallback(
+      () =>
+        ctx.replyWithVideo(WINNER_VIDEO_ID, {
+          caption: welcomeMessage.join("\n"),
+          parse_mode: "HTML",
+          reply_markup: mainMenuKeyboard,
+        }),
+      () =>
+        ctx.reply(welcomeMessage.join("\n"), {
+          parse_mode: "HTML",
+          reply_markup: mainMenuKeyboard,
+        })
+    );
     await ctx.answerCallbackQuery("🏠 Main menu");
   } catch (error) {
     console.error("Error in back_main:", error);

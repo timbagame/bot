@@ -1,5 +1,6 @@
 import type { InlineKeyboard } from "grammy";
 import { escapeHtml } from "../utils/format-amount";
+import { isRecoverableMediaError, trySendVideoWithFallback } from "../utils/media";
 
 export type ShowWalletUIDeps = {
   wallet: {
@@ -23,6 +24,53 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
   const walletAddress = keypair.publicKey.toBase58();
   const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
   const walletVideoFileId = WINNER_VIDEO_ID;
+  const getWalletKeyboard = () => createWalletKeyboard();
+
+  const sendWalletContent = async (caption: string) => {
+    try {
+      await ctx.editMessageMedia(
+        { type: "video", media: walletVideoFileId, caption, parse_mode: "HTML" },
+        { reply_markup: getWalletKeyboard() }
+      );
+      return;
+    } catch (editError: any) {
+      const description: string = editError?.description || editError?.message || "";
+      if (description.includes("message is not modified")) {
+        return;
+      }
+      if (isRecoverableMediaError(editError)) {
+        console.warn("Falling back to text wallet edit:", editError);
+        try {
+          await ctx.editMessageText(caption, {
+            parse_mode: "HTML",
+            reply_markup: getWalletKeyboard(),
+          });
+          return;
+        } catch (textError: any) {
+          const textDesc: string = textError?.description || textError?.message || "";
+          if (textDesc.includes("message is not modified")) {
+            return;
+          }
+        }
+      }
+    }
+
+    await trySendVideoWithFallback(
+      () =>
+        ctx.replyWithVideo(walletVideoFileId, {
+          caption,
+          parse_mode: "HTML",
+          reply_markup: getWalletKeyboard(),
+          reply_to_message_id: ctx.message?.message_id,
+        }),
+      () =>
+        ctx.reply(caption, {
+          parse_mode: "HTML",
+          reply_markup: getWalletKeyboard(),
+          reply_to_message_id: ctx.message?.message_id,
+        })
+    );
+  };
 
   try {
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
@@ -52,11 +100,7 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
       walletAddress
     );
 
-    try {
-      await ctx.editMessageMedia({ type: "video", media: walletVideoFileId, caption, parse_mode: "HTML" }, { reply_markup: createWalletKeyboard() });
-    } catch {
-      await ctx.replyWithVideo(walletVideoFileId, { caption, parse_mode: "HTML", reply_markup: createWalletKeyboard(), reply_to_message_id: ctx.message?.message_id });
-    }
+    await sendWalletContent(caption);
   } catch (error) {
     console.error("Error loading balances:", error);
     const errorResponse = [
@@ -67,11 +111,7 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
       "❌ <i>Error loading balances</i>",
       "<i>Tap Refresh to try again</i>",
     ];
-    try {
-      await ctx.editMessageMedia({ type: "video", media: walletVideoFileId, caption: errorResponse.join("\n"), parse_mode: "HTML" }, { reply_markup: createWalletKeyboard() });
-    } catch {
-      await ctx.replyWithVideo(walletVideoFileId, { caption: errorResponse.join("\n"), parse_mode: "HTML", reply_markup: createWalletKeyboard(), reply_to_message_id: ctx.message?.message_id });
-    }
+    await sendWalletContent(errorResponse.join("\n"));
   }
 }
 

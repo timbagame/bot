@@ -15,6 +15,7 @@ import {
   COINFLIP_START_VIDEO_ID,
   WINNER_VIDEO_ID,
 } from "./constants";
+import { isRecoverableMediaError } from "./media";
 import type {
   GameMessage,
   GameCancellationResult,
@@ -44,25 +45,6 @@ const logAndFormatError = (
   return walletManager
     ? formatUserFriendlyError(error, walletManager)
     : error.message;
-};
-
-const isRecoverableMediaError = (error: any): boolean => {
-  if (!error) return false;
-  const description = error.description ?? error.message;
-  if (typeof description !== "string") return false;
-  const normalized = description.toLowerCase();
-
-  if (normalized.includes("message is not modified")) {
-    return false;
-  }
-
-  return (
-    normalized.includes("wrong file identifier") ||
-    normalized.includes("wrong file id") ||
-    normalized.includes("http url specified") ||
-    normalized.includes("file reference") ||
-    normalized.includes("message is not a media message")
-  );
 };
 
 const formatGameTypeWithEmoji = (gameType: string): string => {
