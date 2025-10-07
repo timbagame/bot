@@ -2470,7 +2470,7 @@ bot.command("games", async (ctx: Context) => {
   }
 });
 
-bot.command("leaderboard", async (ctx: Context) => {
+bot.command(["leaderboard", "lb"], async (ctx: Context) => {
   // Check if it's a group/supergroup chat
   if (ctx.chat?.type !== "group" && ctx.chat?.type !== "supergroup") {
     return ctx.reply("❌ Leaderboard can only be used in groups!");
@@ -2553,9 +2553,6 @@ bot.command("leaderboard", async (ctx: Context) => {
       leaderboardText += `🎮 ${stats.total_games} battles\n\n`;
     }
     
-    leaderboardText += "🎯 <i>Do you have what it takes to reach LEGEND status?</i>\n";
-    leaderboardText += "⚔️ <i>Play more coinflips to climb the ranks!</i>\n";
-    leaderboardText += "🏆 <i>Only the strongest survive in the arena!</i>";
 
     await ctx.reply(leaderboardText, {
       parse_mode: "HTML",
