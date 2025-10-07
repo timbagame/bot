@@ -369,6 +369,91 @@ const updateGameMessageSafely = async (
   }
 };
 
+type GameMessageTarget = {
+  chatId: number;
+  messageId: number;
+};
+
+const getGameMessageTarget = (gameAddress: string): GameMessageTarget | null => {
+  let chatId: number | undefined;
+  let messageId: number | undefined;
+
+  try {
+    const activeMessage = gameManager.getActiveGameMessage(gameAddress);
+    if (activeMessage) {
+      chatId = activeMessage.chatId;
+      messageId = activeMessage.messageId;
+    }
+  } catch (error) {
+    // gameManager might not be initialized yet; fall back to database record
+    console.warn(
+      `Game manager not ready when resolving message target for ${gameAddress.slice(
+        0,
+        8
+      )}...`
+    );
+  }
+
+  if (chatId === undefined || messageId === undefined) {
+    const gameRecord = gameDb.getGame(gameAddress);
+    if (gameRecord) {
+      if (chatId === undefined) {
+        const rawChatId = gameRecord.chat_id;
+        if (typeof rawChatId === "number") {
+          chatId = rawChatId;
+        } else if (typeof rawChatId === "string") {
+          const parsedChatId = Number(rawChatId);
+          if (!Number.isNaN(parsedChatId)) {
+            chatId = parsedChatId;
+          }
+        }
+      }
+      if (messageId === undefined) {
+        const rawMessageId = gameRecord.message_id;
+        if (typeof rawMessageId === "number") {
+          messageId = rawMessageId;
+        } else if (typeof rawMessageId === "string") {
+          const parsedMessageId = Number(rawMessageId);
+          if (!Number.isNaN(parsedMessageId)) {
+            messageId = parsedMessageId;
+          }
+        }
+      }
+    }
+  }
+
+  if (
+    typeof chatId !== "number" ||
+    typeof messageId !== "number" ||
+    Number.isNaN(chatId) ||
+    Number.isNaN(messageId)
+  ) {
+    console.warn(
+      `Cannot find chat/message reference for game ${gameAddress.slice(
+        0,
+        8
+      )}...`
+    );
+    return null;
+  }
+
+  return { chatId, messageId };
+};
+
+const sendReplyToGameMessage = async (
+  target: GameMessageTarget,
+  text: string
+): Promise<void> => {
+  try {
+    await bot.api.sendMessage(target.chatId, text, {
+      parse_mode: "HTML",
+      reply_to_message_id: target.messageId,
+    });
+  } catch (error) {
+    console.error("Error sending reply to game message:", error);
+  }
+};
+
 /**
  * Dynamic wallet UI that loads balances automatically
  */
@@ -406,6 +491,30 @@ const processGameCompletion = async (
     winnerAddress,
     totalPot
   );
+
+  if (
+    winnerAddress &&
+    winnerAddress !== "cancelled" &&
+    winnerAddress !== DEFAULT_NULL_ADDRESS
+  ) {
+    const target = getGameMessageTarget(gameAddress);
+    if (target) {
+      try {
+        const apiCtx = createApiContext(target.chatId, bot.api);
+        const winnerDisplay = await gameManager.getPlayerUsername(
+          apiCtx,
+          winnerAddress
+        );
+        const announcement = `🏆 <b>${winnerDisplay}</b> won the game!`;
+        await sendReplyToGameMessage(target, announcement);
+      } catch (winnerAnnouncementError) {
+        console.error(
+          `Error announcing winner for game ${gameAddress}:`,
+          winnerAnnouncementError
+        );
+      }
+    }
+  }
 
   console.log(`✅ Processed game completion: ${gameAddress} with prize: ${totalPot}`);
 };
@@ -2786,9 +2895,12 @@ const handlePlayerEvent = async (
 
     if (slotWasUpdated) {
       const gameData = gameDb.getGame(gameAddress);
-      if (gameData?.chat_id) {
+      const target = getGameMessageTarget(gameAddress);
+      const chatId = target?.chatId ?? gameData?.chat_id;
+
+      if (chatId) {
         try {
-          const apiCtx = createApiContext(gameData.chat_id, bot.api);
+          const apiCtx = createApiContext(chatId, bot.api);
           await gameManager.updateGameMessageFromData(
             apiCtx,
             gameAddress,
@@ -2797,11 +2909,27 @@ const handlePlayerEvent = async (
             totalPot
           );
 
+          if (eventName === "PlayerJoined" && target) {
+            try {
+              const displayName = await gameManager.getPlayerUsername(
+                apiCtx,
+                event.player.toString()
+              );
+              const announcement = `👤 <b>${displayName}</b> joined the game!`;
+              await sendReplyToGameMessage(target, announcement);
+            } catch (announcementError) {
+              console.error(
+                `Error announcing player join for game ${gameAddress}:`,
+                announcementError
+              );
+            }
+          }
+
           // Game completion is handled autonomously by the oracle
           // The bot only processes GameCompleted events from Solana
         } catch (contextError) {
           console.error(
-            `Error creating context for chat ${gameData.chat_id}:`,
+            `Error creating context for chat ${chatId}:`,
             contextError
           );
         }
