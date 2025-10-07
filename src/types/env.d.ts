@@ -8,6 +8,8 @@ declare global {
       MNEMONIC: string;
       DEFAULT_TOKEN_MINT?: string;
       DEFAULT_TOKEN_TICKER?: string;
+      ORACLE_OPERATOR_KEYPAIR_PATH?: string;
+      NEW_ORACLE_OPERATOR_KEYPAIR_PATH?: string;
     }
   }
 }

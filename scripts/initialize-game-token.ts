@@ -16,6 +16,8 @@ import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
 import { WalletManager } from "../src/utils/wallet";
 
+const ORACLE_OPERATOR_KEYPAIR_ENV = "ORACLE_OPERATOR_KEYPAIR_PATH";
+
 // ================================
 // CONFIGURATION
 // ================================
@@ -50,6 +52,45 @@ const loadKeypair = (filepath: string): Keypair => {
   }
 };
 
+const resolveOracleOperatorKeypair = (adminKeypair: Keypair): Keypair => {
+  const configuredPath = process.env[ORACLE_OPERATOR_KEYPAIR_ENV]?.trim();
+  if (!configuredPath) {
+    console.log(
+      "ORACLE_OPERATOR_KEYPAIR_PATH not set; using admin keypair for oracle operations."
+    );
+    return adminKeypair;
+  }
+
+  const resolvedPath = path.isAbsolute(configuredPath)
+    ? configuredPath
+    : path.join(process.cwd(), configuredPath);
+
+  try {
+    const keypair = loadKeypair(resolvedPath);
+    console.log(
+      `Oracle operator keypair loaded from ${resolvedPath}: ${keypair.publicKey.toBase58()}`
+    );
+    return keypair;
+  } catch (error) {
+    throw new Error(
+      `Failed to load oracle operator keypair from ${resolvedPath}: ${error}`
+    );
+  }
+};
+
+const uniqueSigners = (...signers: Keypair[]): Keypair[] => {
+  const seen = new Set<string>();
+  const deduped: Keypair[] = [];
+  for (const signer of signers) {
+    if (!signer) continue;
+    const key = signer.publicKey.toBase58();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(signer);
+  }
+  return deduped;
+};
+
 const checkBalance = async (
   connection: Connection,
   keypair: Keypair,
@@ -76,6 +117,7 @@ async function initializeToken(
   connection: Connection,
   adminKeypair: Keypair,
   wallet: WalletManager,
+  oracleOperatorKeypair: Keypair,
   tokenMint: string,
   tokenTicker: string
 ) {
@@ -206,11 +248,14 @@ async function initializeToken(
     })
     .accounts({
       tokenMint: mint,
-      oracleOperator: adminKeypair.publicKey,
+      oracleOperator: oracleOperatorKeypair.publicKey,
     })
     .instruction();
 
-  const tx = await wallet.sendTransaction([tokenInstruction], [adminKeypair]);
+  const tx = await wallet.sendTransaction(
+    [tokenInstruction],
+    uniqueSigners(adminKeypair, oracleOperatorKeypair)
+  );
   console.log(`✅ ${tokenTicker} game token initialized successfully!`);
 
   // Verify initialization
@@ -278,6 +323,8 @@ async function initializeGameToken() {
   const adminKeypair = loadKeypair(CONFIG.ADMIN_KEYPAIR_PATH);
   console.log(`🔑 Admin keypair loaded: ${adminKeypair.publicKey.toBase58()}`);
 
+  const oracleOperatorKeypair = resolveOracleOperatorKeypair(adminKeypair);
+
   // Check balance
   await checkBalance(connection, adminKeypair, 0.2); // Need more SOL for multiple token initializations
 
@@ -317,6 +364,7 @@ async function initializeGameToken() {
       connection,
       adminKeypair,
       wallet,
+      oracleOperatorKeypair,
       CONFIG.TIMBA_MINT,
       CONFIG.TIMBA_TICKER
     );
@@ -332,6 +380,7 @@ async function initializeGameToken() {
       connection,
       adminKeypair,
       wallet,
+      oracleOperatorKeypair,
       CONFIG.WSOL_MINT,
       CONFIG.WSOL_TICKER
     );

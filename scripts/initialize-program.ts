@@ -1,8 +1,59 @@
-import { WalletManager } from "../src/utils/wallet";
 import * as anchor from "@coral-xyz/anchor";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, Keypair } from "@solana/web3.js";
 import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
+import * as fs from "fs";
+import * as path from "path";
+import { WalletManager } from "../src/utils/wallet";
+
+const ORACLE_OPERATOR_KEYPAIR_ENV = "ORACLE_OPERATOR_KEYPAIR_PATH";
+
+const loadKeypairFromPath = (filePath: string): Keypair => {
+  const resolved = path.isAbsolute(filePath)
+    ? filePath
+    : path.join(process.cwd(), filePath);
+  const secret = JSON.parse(fs.readFileSync(resolved, "utf-8"));
+  return Keypair.fromSecretKey(Uint8Array.from(secret));
+};
+
+const resolveOracleOperatorKeypair = (
+  fallbackKeypair: Keypair
+): Keypair => {
+  const operatorPath = process.env[ORACLE_OPERATOR_KEYPAIR_ENV]?.trim();
+  if (!operatorPath) {
+    console.log(
+      "ORACLE_OPERATOR_KEYPAIR_PATH not set; falling back to admin keypair for oracle operations."
+    );
+    return fallbackKeypair;
+  }
+
+  try {
+    const operatorKeypair = loadKeypairFromPath(operatorPath);
+    console.log(
+      `Loaded oracle operator keypair from ${operatorPath}: ${operatorKeypair.publicKey.toBase58()}`
+    );
+    return operatorKeypair;
+  } catch (error) {
+    console.error(
+      `Failed to load oracle operator keypair from ${operatorPath}:`,
+      error
+    );
+    throw error;
+  }
+};
+
+const uniqueSigners = (...signers: Keypair[]): Keypair[] => {
+  const seen = new Set<string>();
+  const deduped: Keypair[] = [];
+  for (const signer of signers) {
+    if (!signer) continue;
+    const key = signer.publicKey.toBase58();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(signer);
+  }
+  return deduped;
+};
 
 // Initialize wallet manager
 const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
@@ -55,6 +106,7 @@ const initializeOracle = async (program: anchor.Program<Timba>) => {
 
     // Get admin keypair from JSON file
     const adminKeypair = wallet.getAdminKeypair();
+    const oracleOperatorKeypair = resolveOracleOperatorKeypair(adminKeypair);
 
     // Initialize Oracle
     const oracleConfig = {
@@ -72,13 +124,13 @@ const initializeOracle = async (program: anchor.Program<Timba>) => {
     const oracleInstruction = await program.methods
       .initializeOracle(oracleConfig)
       .accounts({
-        oracleOperator: adminKeypair.publicKey,
+        oracleOperator: oracleOperatorKeypair.publicKey,
       })
       .instruction();
 
     const tx = await wallet.sendTransaction(
       [oracleInstruction],
-      [adminKeypair]
+      uniqueSigners(adminKeypair, oracleOperatorKeypair)
     );
     console.log(`Oracle initialized! Transaction: ${tx}`);
     return oraclePda;
