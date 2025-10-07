@@ -10,6 +10,12 @@ declare global {
       DEFAULT_TOKEN_TICKER?: string;
       ORACLE_OPERATOR_KEYPAIR_PATH?: string;
       NEW_ORACLE_OPERATOR_KEYPAIR_PATH?: string;
+      MIN_COMPLETION_FEE_LAMPORTS?: string;
+      TIMBA_MIN_COMPLETION_FEE_LAMPORTS?: string;
+      WSOL_MIN_COMPLETION_FEE_LAMPORTS?: string;
+      MIN_BET_MARGIN_MULTIPLIER?: string;
+      COMPLETION_COMPUTE_UNITS?: string;
+      COMPLETION_SIGNATURES?: string;
     }
   }
 }
