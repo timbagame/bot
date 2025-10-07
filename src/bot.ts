@@ -474,7 +474,13 @@ const getPlayerData = async (
   const effectiveTokenMint = tokenMint || DEFAULT_TOKEN_MINT;
 
   const [tokenBalance, solBalance] = await Promise.all([
-    wallet.getTokenBalance(telegramId, effectiveTokenMint),
+    wallet.getTokenBalance(
+      telegramId,
+      effectiveTokenMint,
+      effectiveTokenMint === DEFAULT_TOKEN_MINT
+        ? { createIfMissing: true }
+        : undefined
+    ),
     wallet.getBalance(telegramId),
   ]);
 
@@ -1007,7 +1013,11 @@ bot.command(["coinflip", "cf"], async (ctx) => {
         const maxPlayers = inferredCf.value;
 
         // Check user has enough balance
-        const userBalance = await wallet.getTokenBalance(telegramId, parsed.data!.tokenMint);
+        const userBalance = await wallet.getTokenBalance(
+          telegramId,
+          parsed.data!.tokenMint,
+          { createIfMissing: true }
+        );
         const tokenMetadata = await wallet.getTokenMetadata(parsed.data!.tokenMint);
         const requiredAmount = parsed.data!.amount;
         
@@ -1074,7 +1084,11 @@ bot.command(["coinflip", "cf"], async (ctx) => {
     let userBalance = 0;
     
     try {
-      const timbaBalance = await wallet.getTokenBalance(telegramId, DEFAULT_TOKEN_MINT);
+      const timbaBalance = await wallet.getTokenBalance(
+        telegramId,
+        DEFAULT_TOKEN_MINT,
+        { createIfMissing: true }
+      );
       const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
       const formattedBalance = wallet.formatTokenBalance(timbaBalance, metadata.decimals);
       userBalance = timbaBalance / Math.pow(10, metadata.decimals);
@@ -1155,7 +1169,11 @@ bot.command(["giveaway", "ga"], async (ctx) => {
         const maxPlayers = inferredGa.value;
 
         // Check user has enough balance
-        const userBalance = await wallet.getTokenBalance(telegramId, parsed.data!.tokenMint);
+        const userBalance = await wallet.getTokenBalance(
+          telegramId,
+          parsed.data!.tokenMint,
+          { createIfMissing: true }
+        );
         const tokenMetadata = await wallet.getTokenMetadata(parsed.data!.tokenMint);
         const requiredAmount = parsed.data!.amount; // This is already in raw format from parseAmount
         
@@ -1217,7 +1235,11 @@ bot.command(["giveaway", "ga"], async (ctx) => {
     let userBalance = 0;
     
     try {
-      const timbaBalance = await wallet.getTokenBalance(telegramId, DEFAULT_TOKEN_MINT);
+    const timbaBalance = await wallet.getTokenBalance(
+      telegramId,
+      DEFAULT_TOKEN_MINT,
+      { createIfMissing: true }
+    );
       const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
       const formattedBalance = wallet.formatTokenBalance(timbaBalance, metadata.decimals);
       userBalance = timbaBalance / Math.pow(10, metadata.decimals);
@@ -3228,7 +3250,11 @@ bot.callbackQuery(/^custom_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
     // Get user's balance for max limit
     let userBalance = 1000;
     try {
-      const timbaBalance = await wallet.getTokenBalance(telegramId, DEFAULT_TOKEN_MINT);
+    const timbaBalance = await wallet.getTokenBalance(
+      telegramId,
+      DEFAULT_TOKEN_MINT,
+      { createIfMissing: true }
+    );
       const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
       userBalance = timbaBalance / Math.pow(10, metadata.decimals);
     } catch (error) {
@@ -3276,7 +3302,11 @@ bot.callbackQuery(/^slider_(coinflip|giveaway)_(\d+)_(\d+)$/, async (ctx) => {
     // Get user's balance for validation
     let userBalance = 1000; // Default fallback
     try {
-      const timbaBalance = await wallet.getTokenBalance(telegramId, DEFAULT_TOKEN_MINT);
+      const timbaBalance = await wallet.getTokenBalance(
+        telegramId,
+        DEFAULT_TOKEN_MINT,
+        { createIfMissing: true }
+      );
       const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
       userBalance = timbaBalance / Math.pow(10, metadata.decimals);
     } catch (error) {
@@ -3323,7 +3353,11 @@ bot.callbackQuery(/^back_to_amounts_(coinflip|giveaway)_(\d+)$/, async (ctx) => 
     // Get user balance
     let userBalance = 1000;
     try {
-      const timbaBalance = await wallet.getTokenBalance(telegramId, DEFAULT_TOKEN_MINT);
+      const timbaBalance = await wallet.getTokenBalance(
+        telegramId,
+        DEFAULT_TOKEN_MINT,
+        { createIfMissing: true }
+      );
       const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
       userBalance = timbaBalance / Math.pow(10, metadata.decimals);
     } catch (error) {
@@ -3373,7 +3407,11 @@ bot.callbackQuery(/^type_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
     // Get user balance for validation
     let userBalance = 1000;
     try {
-      const timbaBalance = await wallet.getTokenBalance(telegramId, DEFAULT_TOKEN_MINT);
+      const timbaBalance = await wallet.getTokenBalance(
+        telegramId,
+        DEFAULT_TOKEN_MINT,
+        { createIfMissing: true }
+      );
       const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
       userBalance = timbaBalance / Math.pow(10, metadata.decimals);
     } catch (error) {

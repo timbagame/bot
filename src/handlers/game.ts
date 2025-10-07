@@ -15,7 +15,11 @@ export type CoinflipDeps = {
     max: number
   ) => { ok: true; value: number } | { ok: false; error: string };
   wallet: {
-    getTokenBalance: (telegramId: bigint, mint: string) => Promise<number>;
+    getTokenBalance: (
+      telegramId: bigint,
+      mint: string,
+      options?: { createIfMissing?: boolean }
+    ) => Promise<number>;
     getTokenMetadata: (mint: string) => Promise<{ decimals: number }>;
     formatTokenBalance: (amount: number, decimals: number) => string;
   };
@@ -72,7 +76,7 @@ export async function handleCoinflipCommand(ctx: Context & { message?: any }, de
     const maxPlayers = inferred.value;
 
     // Balance check
-    const userBalance = await deps.wallet.getTokenBalance(telegramId, parsed.data.tokenMint);
+    const userBalance = await deps.wallet.getTokenBalance(telegramId, parsed.data.tokenMint, { createIfMissing: true });
     const tokenMetadata = await deps.wallet.getTokenMetadata(parsed.data.tokenMint);
     if (userBalance < parsed.data.amount) {
       const formatted = deps.wallet.formatTokenBalance(userBalance, tokenMetadata.decimals);
@@ -116,4 +120,3 @@ export async function handleCoinflipCommand(ctx: Context & { message?: any }, de
     return ctx.reply("❌ Failed to create game");
   }
 }
-

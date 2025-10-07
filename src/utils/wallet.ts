@@ -191,7 +191,8 @@ export class WalletManager {
 
   public async getTokenBalance(
     telegramId: bigint,
-    tokenMint: string
+    tokenMint: string,
+    options: { createIfMissing?: boolean } = {}
   ): Promise<number> {
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
@@ -216,15 +217,62 @@ export class WalletManager {
       );
       return Number(account.amount);
     } catch (error: any) {
-      if (
+      const isMissingAccount =
         error instanceof TokenAccountNotFoundError ||
         error instanceof TokenInvalidAccountOwnerError ||
         (error instanceof SolanaJSONRPCError &&
-          error.message.includes("could not find account"))
-      ) {
+          error.message.includes("could not find account"));
+
+      if (isMissingAccount) {
         console.log(
           `Token account ${ata.toBase58()} not found for user ${pubkey.toBase58()}`
         );
+
+        if (options.createIfMissing) {
+          console.log(
+            `Attempting to create token account ${ata.toBase58()} automatically...`
+          );
+
+          const payer = this.getKeyPair(telegramId);
+
+          try {
+            const { instructions } =
+              await this.findOrCreateAssociatedTokenAccount(
+                pubkey,
+                mintPubkey,
+                payer,
+                programId
+              );
+
+            if (instructions.length === 0) {
+              const refreshed = await getAccount(
+                this.connection,
+                ata,
+                "confirmed",
+                programId
+              );
+              return Number(refreshed.amount);
+            }
+
+            console.log(
+              `🆕 Creating token account ${ata.toBase58()} for user ${pubkey.toBase58()}`
+            );
+            await this.sendTransaction(instructions, [payer]);
+
+            const createdAccount = await getAccount(
+              this.connection,
+              ata,
+              "confirmed",
+              programId
+            );
+            return Number(createdAccount.amount);
+          } catch (creationError) {
+            console.error(
+              `Error creating token account ${ata.toBase58()} for user ${pubkey.toBase58()}:`,
+              creationError
+            );
+          }
+        }
       } else {
         console.error(
           `Error getting token balance for ${pubkey.toBase58()}: ${error}`

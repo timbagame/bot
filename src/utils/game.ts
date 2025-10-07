@@ -994,7 +994,8 @@ export class GameManager {
       const playerKp = this.wallet.getKeyPair(telegramId);
       const tokenBalance = await this.wallet.getTokenBalance(
         telegramId,
-        tokenMint
+        tokenMint,
+        { createIfMissing: true }
       );
       const totalBalance = tokenBalance;
       if (totalBalance < amount) {
@@ -1378,7 +1379,8 @@ export class GameManager {
         const gameAmount = Number(gameAccount.ticketAmount);
         const tokenBalance = await this.wallet.getTokenBalance(
           telegramId,
-          gameData.token_mint
+          gameData.token_mint,
+          { createIfMissing: true }
         );
         const totalBalance = tokenBalance;
         if (totalBalance < gameAmount) {
