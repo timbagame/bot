@@ -1,3 +1,5 @@
+import { NetworkDetector, type SolanaNetwork } from "./network-detector";
+
 // ================================
 // SOLANA CONSTANTS
 // ================================
@@ -43,14 +45,75 @@ export const ADDRESS_DISPLAY_LENGTH = 8;
 // ================================
 
 export const DEFAULT_NULL_ADDRESS = "11111111111111111111111111111111";
-export const DEFAULT_TOKEN_MINT =
-  "BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4"; // TIMBA devnet (for development)
-export const DEFAULT_TOKEN_TICKER = "TIMBA";
-export const TOKENS_LIST = [
-  { mint: "So11111111111111111111111111111111111111112", ticker: "WSOL" },
-  { mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", ticker: "USDC" },
-  { mint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump", ticker: "TIMBA" }, // TIMBA mainnet
-];
+
+type TokenConfig = { mint: string; ticker: string };
+
+const TIMBA_MAINNET_TOKEN: TokenConfig = {
+  mint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
+  ticker: "TIMBA",
+};
+
+const TIMBA_DEVNET_TOKEN: TokenConfig = {
+  mint: "BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4",
+  ticker: "TIMBA",
+};
+
+const NETWORK_DEFAULT_TOKENS: Partial<Record<SolanaNetwork, TokenConfig>> = {
+  mainnet: TIMBA_MAINNET_TOKEN,
+  devnet: TIMBA_DEVNET_TOKEN,
+};
+
+function resolveDefaultToken(): TokenConfig {
+  const mintOverride = process.env["DEFAULT_TOKEN_MINT"]?.trim();
+  const tickerOverride = process.env["DEFAULT_TOKEN_TICKER"]?.trim();
+
+  if (mintOverride && mintOverride.length > 0) {
+    return {
+      mint: mintOverride,
+      ticker: tickerOverride && tickerOverride.length > 0 ? tickerOverride : "TOKEN",
+    };
+  }
+
+  const network = NetworkDetector.getCurrentNetwork();
+  return (
+    NETWORK_DEFAULT_TOKENS[network] ??
+    NETWORK_DEFAULT_TOKENS.mainnet ??
+    TIMBA_MAINNET_TOKEN
+  );
+}
+
+const DEFAULT_TOKEN = resolveDefaultToken();
+
+export const DEFAULT_TOKEN_MINT = DEFAULT_TOKEN.mint;
+export const DEFAULT_TOKEN_TICKER = DEFAULT_TOKEN.ticker;
+
+function buildTokenList(defaultToken: TokenConfig): TokenConfig[] {
+  const baseTokens: TokenConfig[] = [
+    { mint: "So11111111111111111111111111111111111111112", ticker: "WSOL" },
+    { mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", ticker: "USDC" },
+  ];
+
+  const network = NetworkDetector.getCurrentNetwork();
+  const networkSpecific = NETWORK_DEFAULT_TOKENS[network];
+
+  const tokens = [...baseTokens];
+
+  if (networkSpecific) {
+    tokens.push(networkSpecific);
+  }
+
+  // Ensure the resolved default token is always present
+  tokens.push(defaultToken);
+
+  const seen = new Set<string>();
+  return tokens.filter(({ mint }) => {
+    if (seen.has(mint)) return false;
+    seen.add(mint);
+    return true;
+  });
+}
+
+export const TOKENS_LIST = buildTokenList(DEFAULT_TOKEN);
 
 // ================================
 // GAME BUFFER AND TIMING

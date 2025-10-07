@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Telegram bot for creating and playing coinflip and giveaway games on Solana using Anchor smart contracts. The bot manages wallet operations, token transfers, and game lifecycle through a Solana program at address `GLAicVgkhvVtAbcf9aF4iLqAXZ9GSrsfexoDUN2fBPCG`.
+This is a Telegram bot for creating and playing coinflip and giveaway games on Solana using Anchor smart contracts. The bot manages wallet operations, token transfers, and game lifecycle through a Solana program at address `BpdzqWdNJfgeVCsFHppS4WgeRZSRxt5iSj6xH4QdeR7t`.
 
 ## Development Commands
 
@@ -65,19 +65,20 @@ This is a Telegram bot for creating and playing coinflip and giveaway games on S
 
 - `TELEGRAM_TOKEN` - Bot token from BotFather
 - `MNEMONIC` - Wallet seed phrase for Solana operations
-- `RPC_URL` - Solana RPC endpoint
-- `ORACLE_BASE_URL` - Oracle service endpoint
+- `SOLANA_NETWORK` - Solana RPC endpoint (defaults to mainnet-beta)
+- `ORACLE_API_URL` - Oracle service endpoint
+- `DEFAULT_TOKEN_MINT` / `DEFAULT_TOKEN_TICKER` - Optional overrides for the default staking token
 
 ### Smart Contract Integration
 
 - Uses Anchor framework with IDL types in `idl/idlType.ts`
-- Program address: `GLAicVgkhvVtAbcf9aF4iLqAXZ9GSrsfexoDUN2fBPCG`
+- Program address: `BpdzqWdNJfgeVCsFHppS4WgeRZSRxt5iSj6xH4QdeR7t`
 - Key instructions: `createGame`, `joinGame`, `completeGame`, `cleanPlayerParticipation`
 - PDA management in `src/utils/pda.ts` for game and player accounts
 
 ### Token Support
 
-- Default token: TIMBA (`BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4`)
+- Default token auto-detected per network (mainnet: `F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump`, devnet: `BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4`)
 - WSOL support for native SOL wrapping
 - Dynamic token support via database configuration
 - Per-chat token settings with admin controls

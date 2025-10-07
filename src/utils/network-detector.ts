@@ -55,7 +55,7 @@ export class NetworkDetector {
    */
   static getCurrentNetwork(): SolanaNetwork {
     const rpcUrl =
-      process.env.SOLANA_NETWORK || "https://api.devnet.solana.com";
+      process.env.SOLANA_NETWORK || "https://api.mainnet-beta.solana.com";
     return this.detectNetwork(rpcUrl);
   }
 }
