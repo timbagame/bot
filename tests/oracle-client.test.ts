@@ -1,4 +1,5 @@
 import { beforeEach, afterAll, describe, expect, test } from "bun:test";
+import { rmSync } from "fs";
 import { OracleClient } from "../src/utils/oracle";
 import { GameDatabase } from "../src/utils/game-database";
 import { PublicKey } from "@solana/web3.js";
@@ -10,6 +11,13 @@ describe("OracleClient", () => {
   beforeEach(() => {
     // Ensure predictable env
     process.env['ORACLE_API_URL'] = ORACLE_URL;
+    try {
+      rmSync("games.sqlite", { force: true });
+    } catch {
+      // ignore
+    }
+    // @ts-ignore reset singleton between tests to avoid cross-suite state
+    GameDatabase["instance"] = undefined;
   });
 
   test("isHealthy returns true when health endpoint is ok", async () => {

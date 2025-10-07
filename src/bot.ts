@@ -373,7 +373,7 @@ const showWalletUI = async (ctx: any) => {
     getPriceUSD,
     buildWalletCaption,
     createWalletKeyboard,
-    WINNER_VIDEO_ID: getStartVideoId() || "",
+    WINNER_VIDEO_ID: getStartVideoId(),
     LAMPORTS_PER_SOL,
   });
 };
@@ -5105,19 +5105,26 @@ bot.callbackQuery("start_bot", async (ctx) => {
     }
 
     const mainMenuKeyboard = createMainMenuKeyboard();
-    await trySendVideoWithFallback(
-      () =>
-        ctx.replyWithVideo(getStartVideoId() || "", {
-          caption: welcomeMessage.join("\n"),
-          parse_mode: "HTML",
-          reply_markup: mainMenuKeyboard,
-        }),
-      () =>
-        ctx.reply(welcomeMessage.join("\n"), {
-          parse_mode: "HTML",
-          reply_markup: mainMenuKeyboard,
-        })
-    );
+    const startVideoId = getStartVideoId();
+    const sendWelcomeText = () =>
+      ctx.reply(welcomeMessage.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: mainMenuKeyboard,
+      });
+
+    if (startVideoId) {
+      await trySendVideoWithFallback(
+        () =>
+          ctx.replyWithVideo(startVideoId, {
+            caption: welcomeMessage.join("\n"),
+            parse_mode: "HTML",
+            reply_markup: mainMenuKeyboard,
+          }),
+        sendWelcomeText
+      );
+    } else {
+      await sendWelcomeText();
+    }
 
     await ctx.answerCallbackQuery("🚀 Welcome to TIMBA!");
   } catch (error) {
@@ -5172,19 +5179,26 @@ bot.callbackQuery("back_main", async (ctx) => {
 
     // Use same video as /start
     const mainMenuKeyboard = createMainMenuKeyboard();
-    await trySendVideoWithFallback(
-      () =>
-        ctx.replyWithVideo(getStartVideoId() || "", {
-          caption: welcomeMessage.join("\n"),
-          parse_mode: "HTML",
-          reply_markup: mainMenuKeyboard,
-        }),
-      () =>
-        ctx.reply(welcomeMessage.join("\n"), {
-          parse_mode: "HTML",
-          reply_markup: mainMenuKeyboard,
-        })
-    );
+    const startVideoId = getStartVideoId();
+    const sendMainMenuText = () =>
+      ctx.reply(welcomeMessage.join("\n"), {
+        parse_mode: "HTML",
+        reply_markup: mainMenuKeyboard,
+      });
+
+    if (startVideoId) {
+      await trySendVideoWithFallback(
+        () =>
+          ctx.replyWithVideo(startVideoId, {
+            caption: welcomeMessage.join("\n"),
+            parse_mode: "HTML",
+            reply_markup: mainMenuKeyboard,
+          }),
+        sendMainMenuText
+      );
+    } else {
+      await sendMainMenuText();
+    }
     await ctx.answerCallbackQuery("🏠 Main menu");
   } catch (error) {
     console.error("Error in back_main:", error);
