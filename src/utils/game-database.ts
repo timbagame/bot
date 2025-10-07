@@ -498,14 +498,14 @@ export class GameDatabase extends BaseDatabase {
         WITH player_stats AS (
           SELECT 
             pm.telegram_id,
-            COUNT(CASE WHEN g.status = 'completed' THEN 1 END) as total_games,
-            COUNT(CASE WHEN g.status = 'completed' AND g.winner_address = pm.public_key THEN 1 END) as games_won,
-            COUNT(CASE WHEN g.creator_telegram_id = pm.telegram_id AND g.status = 'completed' THEN 1 END) as games_created,
-            COUNT(CASE WHEN gp.telegram_id = pm.telegram_id AND g.status = 'completed' THEN 1 END) as games_joined,
-            COALESCE(SUM(CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.amount ELSE 0 END), 0) as total_volume,
+            COUNT(DISTINCT CASE WHEN g.status = 'completed' THEN g.game_address END) as total_games,
+            COUNT(DISTINCT CASE WHEN g.status = 'completed' AND g.winner_address = pm.public_key THEN g.game_address END) as games_won,
+            COUNT(DISTINCT CASE WHEN g.creator_telegram_id = pm.telegram_id AND g.status = 'completed' THEN g.game_address END) as games_created,
+            COUNT(DISTINCT CASE WHEN gp.telegram_id = pm.telegram_id AND g.status = 'completed' THEN g.game_address END) as games_joined,
+            COALESCE(SUM(DISTINCT CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.amount ELSE 0 END), 0) as total_volume,
             CASE 
-              WHEN COUNT(CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN 1 END) > 0 
-              THEN (COUNT(CASE WHEN g.status = 'completed' AND g.winner_address = pm.public_key THEN 1 END) * 100.0) / COUNT(CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN 1 END)
+              WHEN COUNT(DISTINCT CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.game_address END) > 0 
+              THEN (COUNT(DISTINCT CASE WHEN g.status = 'completed' AND g.winner_address = pm.public_key THEN g.game_address END) * 100.0) / COUNT(DISTINCT CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.game_address END)
               ELSE 0 
             END as win_rate
           FROM player_mappings pm
