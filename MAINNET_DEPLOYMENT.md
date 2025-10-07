@@ -59,6 +59,13 @@ bun run scripts/update-token-min-bets.ts
 
 Override per-token thresholds with `TIMBA_MIN_COMPLETION_FEE_LAMPORTS`, `WSOL_MIN_COMPLETION_FEE_LAMPORTS`, etc., as needed. Values are expressed in raw token units (e.g., lamports for 9-decimal tokens).
 
+Collect any accrued protocol fees to the oracle operator wallet when needed:
+
+```bash
+ORACLE_OPERATOR_KEYPAIR_PATH=/path/to/oracle-operator.json \\
+bun run scripts/withdraw-token-fees.ts
+```
+
 These scripts reuse the admin wallet for signing and honour `ORACLE_OPERATOR_KEYPAIR_PATH`.
 
 ## 4. Run the Bot
