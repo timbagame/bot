@@ -22,33 +22,108 @@ const ORACLE_OPERATOR_KEYPAIR_ENV = "ORACLE_OPERATOR_KEYPAIR_PATH";
 // CONFIGURATION
 // ================================
 
+type SolanaCluster = "mainnet" | "devnet" | "testnet";
+
+const DEFAULT_RPC_URL = "https://api.mainnet-beta.solana.com";
+
+const normalizeCluster = (value?: string): SolanaCluster | null => {
+  if (!value) return null;
+  const normalized = value.toLowerCase();
+  if (normalized === "mainnet" || normalized === "mainnet-beta") return "mainnet";
+  if (normalized === "devnet") return "devnet";
+  if (normalized === "testnet") return "testnet";
+  return null;
+};
+
+const deriveClusterFromRpc = (rpcUrl: string): SolanaCluster => {
+  const lowerUrl = rpcUrl.toLowerCase();
+  if (lowerUrl.includes("devnet")) return "devnet";
+  if (lowerUrl.includes("testnet")) return "testnet";
+  return "mainnet";
+};
+
+const resolveEnvPath = (envVar?: string, fallback?: string): string => {
+  const trimmed = envVar?.trim();
+  if (trimmed && trimmed.length > 0) return trimmed;
+  return fallback ?? "";
+};
+
+const RPC_URL = resolveEnvPath(process.env["SOLANA_NETWORK"], DEFAULT_RPC_URL);
+const NETWORK =
+  normalizeCluster(process.env["SOLANA_CLUSTER"]) ??
+  deriveClusterFromRpc(RPC_URL);
+
 const CONFIG = {
   // Network configuration
-  RPC_URL: process.env.SOLANA_NETWORK || "https://api.devnet.solana.com",
-  NETWORK: "devnet" as const,
+  RPC_URL,
+  NETWORK,
 
   // Token configuration
-  TIMBA_MINT: "BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4",
-  TIMBA_TICKER: "TIMBA",
+  TIMBA_MINT: resolveEnvPath(
+    process.env["TIMBA_MINT"],
+    "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump"
+  ),
+  TIMBA_TICKER: resolveEnvPath(process.env["TIMBA_TICKER"], "TIMBA"),
 
   // WSOL configuration (Wrapped SOL)
-  WSOL_MINT: "So11111111111111111111111111111111111111112",
-  WSOL_TICKER: "WSOL",
+  WSOL_MINT: resolveEnvPath(
+    process.env["WSOL_MINT"],
+    "So11111111111111111111111111111111111111112"
+  ),
+  WSOL_TICKER: resolveEnvPath(process.env["WSOL_TICKER"], "WSOL"),
 
   // Program configuration
-  ADMIN_KEYPAIR_PATH: "./admin-keypair.json",
+  ADMIN_KEYPAIR_PATH: resolveEnvPath(
+    process.env["ADMIN_KEYPAIR_PATH"],
+    "./admin-keypair.json"
+  ),
+} as const;
+
+const buildExplorerUrl = (resource: "tx" | "token" | "account", value: string) => {
+  const basePath = `${resource}/${value}`;
+  if (CONFIG.NETWORK === "mainnet") {
+    return `https://solscan.io/${basePath}`;
+  }
+  return `https://solscan.io/${basePath}?cluster=${CONFIG.NETWORK}`;
 };
+
+type BaseTokenInitializationResult = {
+  tokenMint: string;
+  tokenTicker: string;
+  gameTokenPda: string;
+  gameVaultPda: string;
+};
+
+type ExistingTokenInitializationResult = BaseTokenInitializationResult & {
+  alreadyExists: true;
+};
+
+type NewTokenInitializationResult = BaseTokenInitializationResult & {
+  alreadyExists: false;
+  gameTokenAccount: string;
+  minAmount: string;
+  feeAmount: string;
+  enabled: boolean;
+  transaction: string;
+};
+
+type TokenInitializationResult =
+  | ExistingTokenInitializationResult
+  | NewTokenInitializationResult;
 
 // ================================
 // UTILITY FUNCTIONS
 // ================================
 
 const loadKeypair = (filepath: string): Keypair => {
+  const resolvedPath = path.isAbsolute(filepath)
+    ? filepath
+    : path.resolve(process.cwd(), filepath);
   try {
-    const keypairData = JSON.parse(fs.readFileSync(filepath, "utf-8"));
+    const keypairData = JSON.parse(fs.readFileSync(resolvedPath, "utf-8"));
     return Keypair.fromSecretKey(new Uint8Array(keypairData));
   } catch (error) {
-    throw new Error(`Failed to load keypair from ${filepath}: ${error}`);
+    throw new Error(`Failed to load keypair from ${resolvedPath}: ${error}`);
   }
 };
 
@@ -120,7 +195,7 @@ async function initializeToken(
   oracleOperatorKeypair: Keypair,
   tokenMint: string,
   tokenTicker: string
-) {
+): Promise<TokenInitializationResult> {
   console.log(`\n🔄 Initializing ${tokenTicker} Game Token...`);
 
   // Validate token mint
@@ -349,10 +424,19 @@ async function initializeGameToken() {
   console.log(`📋 Program ID: ${program.programId.toBase58()}`);
 
   // Create wallet manager for transaction sending
-  const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
+  const mnemonic = process.env["MNEMONIC"]?.trim();
+  if (!mnemonic) {
+    throw new Error("MNEMONIC env var must be set to initialize the wallet manager.");
+  }
+
+  if (!process.env["SOLANA_NETWORK"]) {
+    process.env["SOLANA_NETWORK"] = CONFIG.RPC_URL;
+  }
+
+  const wallet = WalletManager.getInstance(mnemonic);
 
   try {
-    const results = [];
+    const results: TokenInitializationResult[] = [];
 
     // Initialize TIMBA token
     console.log("\n" + "=".repeat(50));
@@ -414,17 +498,13 @@ async function initializeGameToken() {
     results.forEach((result) => {
       if (!result.alreadyExists) {
         console.log(`\n${result.tokenTicker}:`);
+        console.log(`• Transaction: ${buildExplorerUrl("tx", result.transaction)}`);
+        console.log(`• Token Mint: ${buildExplorerUrl("token", result.tokenMint)}`);
         console.log(
-          `• Transaction: https://solscan.io/tx/${result.transaction}?cluster=${CONFIG.NETWORK}`
+          `• Game Token PDA: ${buildExplorerUrl("account", result.gameTokenPda)}`
         );
         console.log(
-          `• Token Mint: https://solscan.io/token/${result.tokenMint}?cluster=${CONFIG.NETWORK}`
-        );
-        console.log(
-          `• Game Token PDA: https://solscan.io/account/${result.gameTokenPda}?cluster=${CONFIG.NETWORK}`
-        );
-        console.log(
-          `• Game Token Account: https://solscan.io/account/${result.gameTokenAccount}?cluster=${CONFIG.NETWORK}`
+          `• Game Token Account: ${buildExplorerUrl("account", result.gameTokenAccount)}`
         );
       }
     });
