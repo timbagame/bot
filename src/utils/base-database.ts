@@ -1,4 +1,25 @@
 import { Database } from "bun:sqlite";
+import { mkdirSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+
+export function resolveDatabaseFilename(filename: string): string {
+  if (!filename || filename === ":memory:" || filename.startsWith("file:")) {
+    return filename;
+  }
+
+  if (isAbsolute(filename)) {
+    mkdirSync(dirname(filename), { recursive: true });
+    return filename;
+  }
+
+  const configuredBaseDir = process.env["BOT_DB_DIR"];
+  const baseDir = configuredBaseDir
+    ? resolve(configuredBaseDir)
+    : resolve(process.cwd());
+  const fullPath = join(baseDir, filename);
+  mkdirSync(dirname(fullPath), { recursive: true });
+  return fullPath;
+}
 
 /**
  * Shared SQLite database base class
@@ -11,7 +32,8 @@ export abstract class BaseDatabase {
     initStatements: string[],
     name: string
   ) {
-    this.db = new Database(filename, { create: true });
+    const resolvedFilename = resolveDatabaseFilename(filename);
+    this.db = new Database(resolvedFilename, { create: true });
 
     try {
       for (const stmt of initStatements) {

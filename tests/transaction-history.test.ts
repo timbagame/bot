@@ -1,23 +1,19 @@
 import { describe, it, expect, beforeAll } from "bun:test";
 import { Database } from "bun:sqlite";
-import path from "path";
-import fs from "fs";
 import {
   TransactionHistory,
   createTransactionRecord,
   type TransactionRecord,
 } from "../src/utils/transaction-history";
+import { getTestDatabasePath, resetTestDatabase } from "./helpers/database";
 
-const dbPath = path.join(process.cwd(), "transaction-history.sqlite");
+const dbPath = getTestDatabasePath("transaction-history.sqlite");
 
 describe("TransactionHistory", () => {
   beforeAll(() => {
-    // Start from a clean DB file for predictable tests
-    try {
-      if (fs.existsSync(dbPath)) fs.rmSync(dbPath);
-    } catch {
-      // ignore if cannot delete; schema migration handles missing columns
-    }
+    resetTestDatabase("transaction-history.sqlite");
+    // @ts-ignore - ensure singleton reinitializes against the fresh DB path
+    TransactionHistory["instance"] = null;
   });
 
   it("initializes schema with updated_at column", () => {

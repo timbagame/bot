@@ -1,13 +1,9 @@
 import { expect, test, beforeEach } from "bun:test";
-import { rmSync } from "fs";
 import { GameDatabase } from "../src/utils/game-database";
+import { resetTestDatabase } from "./helpers/database";
 
 beforeEach(() => {
-  try {
-    rmSync("games.sqlite", { force: true });
-  } catch (error) {
-    // Ignore if file is locked or doesn't exist
-  }
+  resetTestDatabase("games.sqlite");
   // @ts-ignore reset singleton
   GameDatabase["instance"] = undefined;
 });

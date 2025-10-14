@@ -2,11 +2,12 @@ import { beforeEach, expect, test } from "bun:test";
 import { TokenManager } from "../src/utils/token-manager";
 import { ChatDatabase } from "../src/utils/chat-database";
 import { TokenDatabase } from "../src/utils/token-database";
+import { resetTestDatabase } from "./helpers/database";
 
 // Clean DBs and singletons before each test
 beforeEach(() => {
-  try { require("fs").rmSync("chat-settings.sqlite", { force: true }); } catch {}
-  try { require("fs").rmSync("tokens.sqlite", { force: true }); } catch {}
+  resetTestDatabase("chat-settings.sqlite");
+  resetTestDatabase("tokens.sqlite");
   // @ts-ignore
   ChatDatabase["instance"] = undefined;
   // @ts-ignore

@@ -1,9 +1,9 @@
 import { expect, test, beforeEach } from "bun:test";
-import { rmSync } from "fs";
 import { TransactionHistory, createTransactionRecord, formatTransactionForDisplay } from "../src/utils/transaction-history";
+import { resetTestDatabase } from "./helpers/database";
 
 beforeEach(() => {
-  rmSync("transaction-history.sqlite", { force: true });
+  resetTestDatabase("transaction-history.sqlite");
 });
 
 test("formatTransactionForDisplay shows icons, link, and amounts", () => {
