@@ -38,3 +38,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # local AI tool configs
 .claude/
+
+# oracle key
+admin-keypair.json
