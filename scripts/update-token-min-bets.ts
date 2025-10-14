@@ -104,13 +104,21 @@ async function estimateCompletionCostLamports(
   let lamportsPerSignature = 5000n;
   try {
     const { blockhash } = await connection.getLatestBlockhash();
-    const feeCalc = await connection.getFeeCalculatorForBlockhash(blockhash);
-    const maybeFee = feeCalc?.value?.lamportsPerSignature;
-    if (typeof maybeFee === "number") {
-      lamportsPerSignature = BigInt(maybeFee);
+    const feeForMessage = await connection.getFeeForMessage(
+      new anchor.web3.TransactionMessage({
+        payerKey: Web3Keypair.generate().publicKey,
+        recentBlockhash: blockhash,
+        instructions: [],
+      }).compileToLegacyMessage()
+    );
+    if (typeof feeForMessage === "number" && feeForMessage > 0) {
+      lamportsPerSignature = BigInt(feeForMessage);
     }
   } catch (error) {
-    console.warn("⚠️  Failed to fetch base fee; using default 5000 lamports.", error);
+    console.warn(
+      "⚠️  Failed to fetch base fee via getFeeForMessage; using default 5000 lamports.",
+      error
+    );
   }
 
   let priorityFeeLamports = 0n;
@@ -312,7 +320,18 @@ async function main() {
     const formatter = (amount: bigint, decimals: number) =>
       wallet.formatTokenBalance(Number(amount), decimals);
     console.log(`\nToken ${proposal.ticker} (${proposal.mint})`);
-    console.log(`   Token price: $${proposal.tokenPriceUSD.toFixed(4)}`);
+    const price = proposal.tokenPriceUSD;
+    const priceDisplay =
+      price === 0
+        ? "0.0000000000"
+        : price >= 1
+          ? price.toFixed(4)
+          : price.toLocaleString("en-US", {
+              minimumFractionDigits: 10,
+              maximumFractionDigits: 10,
+              useGrouping: false,
+            });
+    console.log(`   Token price: $${priceDisplay}`);
     console.log(
       `   Current min: ${proposal.currentMinAmount} raw (~${formatter(
         proposal.currentMinAmount,
