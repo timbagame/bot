@@ -8,6 +8,8 @@ import {
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
+  getAccountLenForMint,
+  unpackMint,
 } from "@solana/spl-token";
 import * as anchor from "@coral-xyz/anchor";
 import * as fs from "fs";
@@ -78,6 +80,38 @@ const CONFIG = {
     "./admin-keypair.json"
   ),
 } as const;
+
+const GAME_TOKEN_ACCOUNT_SIZE = 8 + 32 + 1 + 8 + 8 + 1; // Mirror on-chain GAME_TOKEN_SIZE
+const BALANCE_BUFFER_SOL = 0.01; // Keep a small buffer to absorb fee variance
+
+type TokenInitTarget = {
+  tokenMint: string;
+  tokenTicker: string;
+};
+
+type TokenCostBreakdown =
+  | {
+      tokenTicker: string;
+      status: "already-initialized";
+      rentLamports: bigint;
+      feeLamports: bigint;
+      needsVaultAta: false;
+    }
+  | {
+      tokenTicker: string;
+      status: "needs-initialization";
+      rentLamports: bigint;
+      feeLamports: bigint;
+      needsVaultAta: boolean;
+    };
+
+type InitializationCostEstimate = {
+  totalLamports: bigint;
+  bufferLamports: bigint;
+  breakdown: TokenCostBreakdown[];
+};
+
+type FeeResponse = Awaited<ReturnType<Connection["getFeeForMessage"]>>;
 
 const buildExplorerUrl = (resource: "tx" | "token" | "account", value: string) => {
   const basePath = `${resource}/${value}`;
@@ -166,19 +200,201 @@ const uniqueSigners = (...signers: Keypair[]): Keypair[] => {
   return deduped;
 };
 
-const checkBalance = async (
+const lamportsToSol = (lamports: bigint): number =>
+  Number(lamports) / LAMPORTS_PER_SOL;
+
+const formatLamports = (lamports: bigint): string =>
+  lamportsToSol(lamports).toFixed(6);
+
+const toLamportsBigInt = (value: number | null | undefined): bigint => {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return 0n;
+  }
+  return BigInt(Math.ceil(value));
+};
+
+const extractFeeValue = (response: FeeResponse): number => {
+  if (typeof response === "number") {
+    return response;
+  }
+  return response?.value ?? 0;
+};
+
+const estimateInitializationCosts = async (
+  connection: Connection,
+  program: anchor.Program<Timba>,
+  adminKeypair: Keypair,
+  oracleOperatorKeypair: Keypair,
+  tokens: TokenInitTarget[]
+): Promise<InitializationCostEstimate> => {
+  const breakdown: TokenCostBreakdown[] = [];
+  let requiredLamports = 0n;
+  const { blockhash } = await connection.getLatestBlockhash("confirmed");
+
+  for (const { tokenMint, tokenTicker } of tokens) {
+    const mint = new PublicKey(tokenMint);
+
+    const [gameTokenPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("game_token"), mint.toBuffer()],
+      program.programId
+    );
+    const existingGameToken = await program.account.gameToken.fetchNullable(
+      gameTokenPda
+    );
+
+    if (existingGameToken) {
+      breakdown.push({
+        tokenTicker,
+        status: "already-initialized",
+        rentLamports: 0n,
+        feeLamports: 0n,
+        needsVaultAta: false,
+      });
+      continue;
+    }
+
+    const rawGameTokenAccount = await connection.getAccountInfo(gameTokenPda);
+    if (rawGameTokenAccount) {
+      throw new Error(
+        `${tokenTicker} GameToken account exists with incompatible structure`
+      );
+    }
+
+    const mintAccount = await connection.getAccountInfo(mint);
+    if (!mintAccount) {
+      throw new Error(
+        `❌ Token mint ${tokenMint} does not exist on ${CONFIG.NETWORK}`
+      );
+    }
+
+    const rentLamportsParts: bigint[] = [];
+    const feeLamportsParts: bigint[] = [];
+
+    const gameTokenRent = await connection.getMinimumBalanceForRentExemption(
+      GAME_TOKEN_ACCOUNT_SIZE
+    );
+    rentLamportsParts.push(BigInt(gameTokenRent));
+
+    const [gameVaultPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("game_vault"), mint.toBuffer()],
+      program.programId
+    );
+
+    const gameTokenAccount = await getAssociatedTokenAddress(
+      mint,
+      gameVaultPda,
+      true
+    );
+
+    let needsVaultAta = false;
+    const gameTokenAccountInfo = await connection.getAccountInfo(
+      gameTokenAccount
+    );
+    if (!gameTokenAccountInfo) {
+      needsVaultAta = true;
+      const mintProgramId = mintAccount.owner;
+      const mintState = unpackMint(mint, mintAccount, mintProgramId);
+      const ataSpace = getAccountLenForMint(mintState);
+      const ataRent =
+        await connection.getMinimumBalanceForRentExemption(ataSpace);
+      rentLamportsParts.push(BigInt(ataRent));
+
+      const createAtaIx = createAssociatedTokenAccountInstruction(
+        adminKeypair.publicKey,
+        gameTokenAccount,
+        gameVaultPda,
+        mint
+      );
+      const createAtaTx = new Transaction({
+        feePayer: adminKeypair.publicKey,
+        recentBlockhash: blockhash,
+      }).add(createAtaIx);
+      const ataFeeResponse = await connection.getFeeForMessage(
+        createAtaTx.compileMessage()
+      );
+      feeLamportsParts.push(toLamportsBigInt(extractFeeValue(ataFeeResponse)));
+    }
+
+    const tokenInstruction = await program.methods
+      .initializeToken({
+        minAmount: new anchor.BN(
+          tokenTicker === "WSOL" ? 10_000_000 : 1_000
+        ),
+        enabled: true,
+      })
+      .accounts({
+        tokenMint: mint,
+        oracleOperator: oracleOperatorKeypair.publicKey,
+      })
+      .instruction();
+
+    const initializeTx = new Transaction({
+      feePayer: adminKeypair.publicKey,
+      recentBlockhash: blockhash,
+    }).add(tokenInstruction);
+    const initializeFeeResponse = await connection.getFeeForMessage(
+      initializeTx.compileMessage()
+    );
+    feeLamportsParts.push(
+      toLamportsBigInt(extractFeeValue(initializeFeeResponse))
+    );
+
+    const rentLamports = rentLamportsParts.reduce(
+      (acc, value) => acc + value,
+      0n
+    );
+    const feeLamports = feeLamportsParts.reduce(
+      (acc, value) => acc + value,
+      0n
+    );
+
+    requiredLamports += rentLamports + feeLamports;
+    breakdown.push({
+      tokenTicker,
+      status: "needs-initialization",
+      rentLamports,
+      feeLamports,
+      needsVaultAta,
+    });
+  }
+
+  const requiresInitialization = breakdown.some(
+    (entry) => entry.status === "needs-initialization"
+  );
+  const bufferLamports = requiresInitialization
+    ? BigInt(Math.ceil(BALANCE_BUFFER_SOL * LAMPORTS_PER_SOL))
+    : 0n;
+
+  return {
+    totalLamports: requiredLamports + bufferLamports,
+    bufferLamports,
+    breakdown,
+  };
+};
+
+const ensureSufficientBalance = async (
   connection: Connection,
   keypair: Keypair,
-  minBalance: number = 0.1
+  requiredLamports: bigint
 ): Promise<void> => {
-  const balance = await connection.getBalance(keypair.publicKey);
-  const solBalance = balance / LAMPORTS_PER_SOL;
-
+  const balanceLamports = BigInt(
+    await connection.getBalance(keypair.publicKey)
+  );
+  const solBalance = lamportsToSol(balanceLamports);
   console.log(`💰 Admin balance: ${solBalance.toFixed(6)} SOL`);
 
-  if (solBalance < minBalance) {
+  if (requiredLamports === 0n) {
+    return;
+  }
+
+  if (balanceLamports < requiredLamports) {
+    const shortfall = requiredLamports - balanceLamports;
     throw new Error(
-      `❌ Insufficient balance. Need at least ${minBalance} SOL for transactions.`
+      `❌ Insufficient balance. Need at least ${formatLamports(
+        requiredLamports
+      )} SOL (shortfall ${formatLamports(
+        shortfall
+      )} SOL) to initialize pending tokens.`
     );
   }
 };
@@ -400,9 +616,6 @@ async function initializeGameToken() {
 
   const oracleOperatorKeypair = resolveOracleOperatorKeypair(adminKeypair);
 
-  // Check balance
-  await checkBalance(connection, adminKeypair, 0.2); // Need more SOL for multiple token initializations
-
   // Setup Anchor provider
   const adminWallet = new anchor.Wallet(
     adminKeypair as unknown as anchor.web3.Keypair
@@ -422,6 +635,63 @@ async function initializeGameToken() {
     provider
   ) as anchor.Program<Timba>;
   console.log(`📋 Program ID: ${program.programId.toBase58()}`);
+
+  const tokensToInitialize: TokenInitTarget[] = [
+    { tokenMint: CONFIG.TIMBA_MINT, tokenTicker: CONFIG.TIMBA_TICKER },
+    { tokenMint: CONFIG.WSOL_MINT, tokenTicker: CONFIG.WSOL_TICKER },
+  ];
+
+  const costEstimate = await estimateInitializationCosts(
+    connection,
+    program,
+    adminKeypair,
+    oracleOperatorKeypair,
+    tokensToInitialize
+  );
+
+  const needsInitialization = costEstimate.breakdown.filter(
+    (entry) => entry.status === "needs-initialization"
+  );
+
+  if (needsInitialization.length > 0) {
+    console.log("\n🧮 Estimated costs for pending token initialization:");
+    for (const entry of costEstimate.breakdown) {
+      if (entry.status === "already-initialized") {
+        console.log(
+          `   • ${entry.tokenTicker}: already initialized, no additional SOL required`
+        );
+        continue;
+      }
+      console.log(
+        `   • ${entry.tokenTicker}: rent ${formatLamports(
+          entry.rentLamports
+        )} SOL, fees ${formatLamports(entry.feeLamports)} SOL${
+          entry.needsVaultAta ? " (includes ATA creation)" : ""
+        }`
+      );
+    }
+    if (costEstimate.bufferLamports > 0n) {
+      console.log(
+        `   • Buffer: ${formatLamports(
+          costEstimate.bufferLamports
+        )} SOL to cover fee variance`
+      );
+    }
+    console.log(
+      `   → Total required: ${formatLamports(
+        costEstimate.totalLamports
+      )} SOL\n`
+    );
+  } else {
+    console.log("✅ All configured tokens are already initialized.");
+  }
+
+  // Ensure admin wallet has enough SOL before proceeding
+  await ensureSufficientBalance(
+    connection,
+    adminKeypair,
+    costEstimate.totalLamports
+  );
 
   // Create wallet manager for transaction sending
   const mnemonic = process.env["MNEMONIC"]?.trim();
