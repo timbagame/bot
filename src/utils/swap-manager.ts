@@ -339,6 +339,8 @@ export class SwapManager {
       logContext = "game",
     } = options;
 
+    let sponsoredLamportsOutstanding = 0;
+
     try {
       const currentLamports = await this.connection.getBalance(
         userKeypair.publicKey
@@ -407,12 +409,21 @@ export class SwapManager {
         );
         if (sponsorLamports > 0) {
           await this.sponsorSwapFees(userKeypair, sponsorLamports);
+          sponsoredLamportsOutstanding = sponsorLamports;
         }
 
         const signature = await this.executeJupiterTransaction(
           swapResponse.swapTransaction,
           userKeypair
         );
+
+        if (sponsoredLamportsOutstanding > 0) {
+          await this.refundSponsoredFees(
+            userKeypair,
+            sponsoredLamportsOutstanding
+          );
+          sponsoredLamportsOutstanding = 0;
+        }
 
         return {
           swapped: true,
@@ -502,6 +513,19 @@ export class SwapManager {
         lamportsReceived: selectedQuote.lamportsOut,
       };
     } catch (error: any) {
+      if (sponsoredLamportsOutstanding > 0) {
+        try {
+          await this.refundSponsoredFees(
+            userKeypair,
+            sponsoredLamportsOutstanding
+          );
+        } catch (refundError) {
+          console.error(
+            "Failed to refund sponsored swap fees:",
+            refundError
+          );
+        }
+      }
       console.error("Just-in-time SOL swap failed:", error);
       return {
         swapped: false,
@@ -553,6 +577,27 @@ export class SwapManager {
 
     const signature = await this.wallet.sendTransaction([transferIx], [
       adminKeypair,
+    ]);
+    await this.wallet.confirmTransaction(signature);
+  }
+
+  private async refundSponsoredFees(
+    userKeypair: Keypair,
+    lamports: number
+  ): Promise<void> {
+    if (lamports <= 0) {
+      return;
+    }
+
+    const adminKeypair = this.wallet.getAdminKeypair();
+    const transferIx = SystemProgram.transfer({
+      fromPubkey: userKeypair.publicKey,
+      toPubkey: adminKeypair.publicKey,
+      lamports,
+    });
+
+    const signature = await this.wallet.sendTransaction([transferIx], [
+      userKeypair,
     ]);
     await this.wallet.confirmTransaction(signature);
   }
