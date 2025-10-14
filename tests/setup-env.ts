@@ -29,8 +29,8 @@ for (const [key, value] of Object.entries(DEFAULTS)) {
   }
 }
 
-if (!process.env.BOT_DB_DIR) {
-  process.env.BOT_DB_DIR = mkdtempSync(join(tmpdir(), "bot-tests-"));
+if (!process.env["BOT_DB_DIR"]) {
+  process.env["BOT_DB_DIR"] = mkdtempSync(join(tmpdir(), "bot-tests-"));
 }
 
 const originalFetch = globalThis.fetch?.bind(globalThis);
@@ -41,9 +41,20 @@ const originalFetch = globalThis.fetch?.bind(globalThis);
 }) as any);
 
 // Disable outbound requests by default. Tests must stub fetch explicitly.
+const disabledFetch = Object.assign(
+  async function disabledFetch(..._args: Parameters<typeof fetch>) {
+    throw new Error(
+      "Network access is disabled in tests. Provide a mock for globalThis.fetch."
+    );
+  },
+  {
+    preconnect: async (..._args: Parameters<typeof fetch.preconnect>) => {
+      throw new Error(
+        "Network access is disabled in tests. Provide a mock for fetch.preconnect."
+      );
+    },
+  }
+) as typeof fetch;
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-(globalThis as any).fetch = (async function disabledFetch() {
-  throw new Error(
-    "Network access is disabled in tests. Provide a mock for globalThis.fetch."
-  );
-}) as typeof fetch;
+(globalThis as any).fetch = disabledFetch;
