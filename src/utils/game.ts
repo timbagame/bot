@@ -1625,13 +1625,28 @@ export class GameManager {
           };
         }
 
+        const reservedTicketAmount = gameAmount;
+        const swapAllowanceRaw = Math.max(tokenBalance - reservedTicketAmount, 0);
+
         const lamportsBalance = await this.wallet.getBalance(telegramId);
         if (lamportsBalance < MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
+          if (swapAllowanceRaw <= 0) {
+            const formattedStake = this.wallet.formatTokenBalance(
+              reservedTicketAmount,
+              metadata.decimals
+            );
+
+            return {
+              success: false,
+              error: `You have exactly ${formattedStake} ${gameData.token_ticker} for the ticket but no spare tokens to cover SOL fees. Add SOL manually or deposit more ${gameData.token_ticker} before trying again.`,
+            };
+          }
+
           const jitResult = await this.swapManager.performJustInTimeSolSwap({
             userKeypair: playerKp,
             tokenMint: gameData.token_mint,
             tokenDecimals: metadata.decimals,
-            availableTokenAmountRaw: tokenBalance,
+            availableTokenAmountRaw: swapAllowanceRaw,
             desiredLamports: MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
             slippageBps: 300,
             tokenTicker: gameData.token_ticker,
