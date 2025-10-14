@@ -1,0 +1,32 @@
+{
+  "network": "mainnet",
+  "programId": "9MmCPEForkbt1L4Dk5BCd9ttErJiehwtdD4mM5J8YbFd",
+  "authority": "4oRdwjBqMGjhh5octi4BLvtNGCgWdJDMv3bBr9Jpi5V8",
+  "initializedAt": "2025-10-14T02:49:53.306Z",
+  "tokens": [
+    {
+      "ticker": "TIMBA",
+      "mint": "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
+      "gameTokenPda": "EmaTLvGMwU8XS3fphccF85mTcognHwFX12rfHWDeJq1E",
+      "gameVaultPda": "D56aALwaZ7PKVXQ2F4sQK7MGy9dguBK5x93DkoSEE8nb",
+      "gameTokenAccount": "BMLdPKuLriHHBJeZiHoQxA5s18DLWLAmgPLiscfjL5xw",
+      "minAmount": "1000",
+      "feeAmount": "0",
+      "enabled": true,
+      "transaction": "qw34JcQNPf58NhFvaJ5fAUU2bt6vhWpiNZrRkSYg5yVjb53KwDSgFrdWNU6SEzcDTVuLHh4vWwwYAWgxdB9Tohi",
+      "status": "newly_initialized"
+    },
+    {
+      "ticker": "WSOL",
+      "mint": "So11111111111111111111111111111111111111112",
+      "gameTokenPda": "DxtPugoiyrKqXHS2448Ng5XDCB2f1gQySeX4cocgkjdP",
+      "gameVaultPda": "5kEjjnM11GEu2MWVNr5SxDxvnWeCuG6iaA7RpgGxj8L2",
+      "gameTokenAccount": "A3FpJCRLqV7XQMjLvJ1XJM1rjTowvdLs1Xrmfd9bDs79",
+      "minAmount": "10000000",
+      "feeAmount": "0",
+      "enabled": true,
+      "transaction": "4ev73hXWkPtsPSXVn8scX9MTKzDqqXunCFyNm2KL3o7ZbpTBxuW3iYCoN96mswQygRLaVrN1NScueUtdbmVJzM8d",
+      "status": "newly_initialized"
+    }
+  ]
+}

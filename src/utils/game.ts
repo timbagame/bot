@@ -160,6 +160,81 @@ export class GameManager {
     return this.gameDb.getGameParticipants(gameAddress);
   }
 
+  private async resolveTokenFormattingInfo(
+    gamePda: PublicKey,
+    tokenTicker: string,
+    tokenMintHint?: string | null
+  ): Promise<{
+    formatBalance: (value: number) => string;
+    decimals: number;
+    tokenMint?: string;
+    isSol: boolean;
+  }> {
+    const normalizedTicker =
+      typeof tokenTicker === "string" ? tokenTicker.toUpperCase() : "";
+    const gameAddress = gamePda.toBase58();
+    const storedGame = this.gameDb.getGame(gameAddress);
+    let tokenMint = tokenMintHint ?? storedGame?.token_mint ?? undefined;
+
+    let isSolToken = normalizedTicker === "SOL" || tokenMint === "SOL";
+
+    if (!tokenMint && !isSolToken) {
+      try {
+        const gameAccount = await this.program.account.game.fetch(gamePda);
+        const mint = (gameAccount as any)?.tokenMint as
+          | PublicKey
+          | undefined;
+        if (mint) {
+          tokenMint = mint.toBase58();
+          isSolToken = tokenMint === "SOL";
+        }
+      } catch (error) {
+        console.warn(
+          `Unable to fetch game account ${gameAddress} for token info:`,
+          error
+        );
+      }
+    }
+
+    if (isSolToken) {
+      return {
+        formatBalance: (value: number) => this.wallet.formatSolBalance(value),
+        decimals: 9,
+        tokenMint,
+        isSol: true,
+      };
+    }
+
+    if (tokenMint) {
+      try {
+        const metadata = await this.wallet.getTokenMetadata(tokenMint);
+        const decimals =
+          typeof metadata?.decimals === "number" ? metadata.decimals : 6;
+        return {
+          formatBalance: (value: number) =>
+            this.wallet.formatTokenBalance(value, decimals),
+          decimals,
+          tokenMint,
+          isSol: false,
+        };
+      } catch (error) {
+        console.warn(
+          `Unable to load metadata for token ${tokenMint}, using fallback decimals`,
+          error
+        );
+      }
+    }
+
+    const fallbackDecimals = 6;
+    return {
+      formatBalance: (value: number) =>
+        this.wallet.formatTokenBalance(value, fallbackDecimals),
+      decimals: fallbackDecimals,
+      tokenMint,
+      isSol: false,
+    };
+  }
+
   // ================================
   // USERNAME UTILITIES
   // ================================
@@ -301,6 +376,10 @@ export class GameManager {
         this.wallet,
         "\n⏰ "
       );
+      const tokenMint = ((gameAccount as any)?.tokenMint as
+        | PublicKey
+        | undefined)
+        ?.toBase58();
 
       return {
         currentTickets,
@@ -308,6 +387,7 @@ export class GameManager {
         minTickets,
         totalPot,
         expirationInfo,
+        tokenMint,
       };
     } catch (error) {
       console.warn(
@@ -320,6 +400,7 @@ export class GameManager {
         minTickets: 0,
         totalPot: amount,
         expirationInfo: "",
+        tokenMint: undefined,
       };
     }
   }
@@ -329,13 +410,14 @@ export class GameManager {
     amount: number,
     providedTotalPot?: number
   ) {
-    const participants = this.getGamePlayers(gamePda.toBase58());
+    const gameAddress = gamePda.toBase58();
+    const gameData = this.gameDb.getGame(gameAddress);
+    const participants = this.getGamePlayers(gameAddress);
     const currentTickets = participants.length;
     
     // Get game type from database to calculate totalPot correctly
     let totalPot = providedTotalPot;
     if (!totalPot) {
-      const gameData = this.gameDb.getGame(gamePda.toBase58());
       const gameType = gameData?.game_type || "coinflip"; // default to coinflip if not found
       
       if (gameType === "giveaway") {
@@ -353,6 +435,7 @@ export class GameManager {
       minTickets: currentTickets,
       totalPot,
       expirationInfo: "",
+      tokenMint: gameData?.token_mint || undefined,
     };
   }
 
@@ -477,14 +560,28 @@ export class GameManager {
       ? await this.getCompletedGameStats(gamePda, amount, providedTotalPot)
       : await this.getActiveGameStats(gamePda, amount, providedTotalPot);
 
-    const { currentTickets, maxTickets, minTickets, totalPot, expirationInfo } =
-      gameStats;
+    const {
+      currentTickets,
+      maxTickets,
+      minTickets,
+      totalPot,
+      expirationInfo,
+    } = gameStats as any;
+    const tokenMintHint = (gameStats as { tokenMint?: string | null })
+      .tokenMint;
+
+    const { formatBalance: formatBalanceForDisplay } =
+      await this.resolveTokenFormattingInfo(
+        gamePda,
+        tokenTicker,
+        tokenMintHint
+      );
 
     const winnerInfo = await this.getWinnerInfo(ctx, status, winnerAddress);
 
     const header = buildGameHeader(
       formatGameTypeWithEmoji(gameType),
-      this.wallet.formatTokenBalance(amount, 9),
+      formatBalanceForDisplay(amount),
       tokenTicker,
       creatorUsername,
       currentTickets,
@@ -495,7 +592,7 @@ export class GameManager {
     // Show current prize if different from base amount
     const prize = buildPrizeLine(
       currentTickets > 0 || totalPot !== amount,
-      this.wallet.formatTokenBalance(totalPot, 9),
+      formatBalanceForDisplay(totalPot),
       tokenTicker
     );
     messageText += prize;
@@ -855,6 +952,16 @@ export class GameManager {
       const amount = Number(gameData.amount);
       const playerCount = gameData.max_players || 2;
       const gameTypeText = formatGameTypeWithEmoji(gameData.game_type);
+      const tokenTicker = gameData.token_ticker || "WSOL";
+      const { formatBalance: formatBalanceForDisplay } =
+        await this.resolveTokenFormattingInfo(
+          new PublicKey(gameData.game_address),
+          tokenTicker,
+          gameData.token_mint
+        );
+      const creatorLabel = creatorUsername
+        ? `@${creatorUsername}`
+        : `Player ${String(gameData.creator_telegram_id).slice(0, 6)}...`;
 
       // Handle different winner states
       let winnerLine = "";
@@ -872,10 +979,8 @@ export class GameManager {
       }
 
       let message =
-        `${gameTypeText} • ${this.wallet.formatTokenBalance(amount, 9)} ${
-          gameData.token_ticker || "WSOL"
-        }` +
-        `\n👤 Creator: @${creatorUsername} • ${playerCount} tickets`;
+        `${gameTypeText} • ${formatBalanceForDisplay(amount)} ${tokenTicker}` +
+        `\n👤 Creator: ${creatorLabel} • ${playerCount} tickets`;
 
       try {
         const participantIds = this.gameDb.getGameParticipants(
