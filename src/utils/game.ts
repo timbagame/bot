@@ -175,7 +175,10 @@ export class GameManager {
     const normalizedTicker =
       typeof tokenTicker === "string" ? tokenTicker.toUpperCase() : "";
     const gameAddress = gamePda.toBase58();
-    const storedGame = this.gameDb.getGame(gameAddress);
+    const storedGame =
+      typeof this.gameDb.getGame === "function"
+        ? this.gameDb.getGame(gameAddress)
+        : undefined;
     let tokenMint = tokenMintHint ?? storedGame?.token_mint ?? undefined;
 
     let isSolToken = normalizedTicker === "SOL" || tokenMint === "SOL";
@@ -1026,12 +1029,23 @@ export class GameManager {
       const playerCount = gameData.max_players || 2;
       const gameTypeText = formatGameTypeWithEmoji(gameData.game_type);
       const tokenTicker = gameData.token_ticker || "WSOL";
-      const { formatBalance: formatBalanceForDisplay } =
-        await this.resolveTokenFormattingInfo(
-          new PublicKey(gameData.game_address),
-          tokenTicker,
-          gameData.token_mint
-        );
+      let formatBalanceForDisplay = (value: number) =>
+        this.wallet.formatTokenBalance(value, 6);
+      if (gameData.game_address) {
+        try {
+          const resolver = await this.resolveTokenFormattingInfo(
+            new PublicKey(gameData.game_address),
+            tokenTicker,
+            gameData.token_mint
+          );
+          formatBalanceForDisplay = resolver.formatBalance;
+        } catch (resolveError) {
+          console.error(
+            "Error resolving token formatting for completed game:",
+            resolveError
+          );
+        }
+      }
       const creatorLabel = creatorUsername
         ? `@${creatorUsername}`
         : `Player ${String(gameData.creator_telegram_id).slice(0, 6)}...`;
