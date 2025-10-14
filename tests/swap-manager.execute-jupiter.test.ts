@@ -53,6 +53,16 @@ describe("SwapManager.executeJupiterSwap", () => {
       provider: "jupiter" as const,
     };
 
+    (sm as any).jupiterClient.getQuote = async () => ({
+      inputMint: req.inputMint,
+      outputMint: req.outputMint,
+      inputAmount: req.amount,
+      outputAmount: quote.outputAmount,
+      slippage: quote.slippage,
+      estimatedRate: quote.estimatedRate,
+      otherAmountThreshold: "0",
+    });
+
     const sig = await sm.executeJupiterSwap(req, quote);
     expect(sig).toBe("SIG_JUP_123");
   });

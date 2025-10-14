@@ -1,13 +1,11 @@
 import { expect, test, beforeEach, afterEach } from "bun:test";
 import { ChatDatabase } from "../src/utils/chat-database";
-import { rmSync } from "fs";
+import { resetTestDatabase } from "./helpers/database";
 
 let db: ChatDatabase;
 
 beforeEach(() => {
-  try {
-    rmSync("chat-settings.sqlite", { force: true });
-  } catch {}
+  resetTestDatabase("chat-settings.sqlite");
   // @ts-ignore - reset singleton for clean test
   ChatDatabase["instance"] = undefined;
 });
@@ -21,9 +19,7 @@ afterEach(() => {
   // Reset singleton so other tests get a fresh connection
   // @ts-ignore
   ChatDatabase["instance"] = undefined;
-  try {
-    rmSync("chat-settings.sqlite", { force: true });
-  } catch {}
+  resetTestDatabase("chat-settings.sqlite");
 });
 
 test("ChatDatabase manages chat token configs", () => {

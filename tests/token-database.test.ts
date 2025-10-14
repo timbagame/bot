@@ -1,13 +1,9 @@
 import { expect, test } from "bun:test";
 import { TokenDatabase } from "../src/utils/token-database";
-import { rmSync } from "fs";
+import { resetTestDatabase } from "./helpers/database";
 
 test("TokenDatabase stores and retrieves known tokens", () => {
-  try {
-    rmSync("tokens.sqlite", { force: true });
-  } catch (error) {
-    // Ignore if file is locked or doesn't exist
-  }
+  resetTestDatabase("tokens.sqlite");
   // @ts-ignore - reset singleton for clean test
   TokenDatabase["instance"] = undefined;
 

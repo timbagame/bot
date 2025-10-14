@@ -1,13 +1,9 @@
 import { expect, test, beforeEach } from "bun:test";
-import { rmSync } from "fs";
 import { ChatDatabase } from "../src/utils/chat-database";
+import { resetTestDatabase } from "./helpers/database";
 
 beforeEach(() => {
-  try {
-    rmSync("chat-settings.sqlite", { force: true });
-  } catch (error) {
-    // Ignore if file is locked or doesn't exist
-  }
+  resetTestDatabase("chat-settings.sqlite");
   // @ts-ignore reset singleton
   ChatDatabase["instance"] = undefined;
 });

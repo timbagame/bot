@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import path from "path";
+import { resolveDatabaseFilename } from "./base-database";
 
 // ================================
 // TRANSACTION HISTORY TYPES
@@ -31,7 +31,7 @@ export class TransactionHistory {
   private static instance: TransactionHistory | null = null;
 
   constructor() {
-    const dbPath = path.join(process.cwd(), "transaction-history.sqlite");
+    const dbPath = resolveDatabaseFilename("transaction-history.sqlite");
     this.db = new Database(dbPath, { create: true });
     this.initializeTables();
     console.log("📊 TransactionHistory database initialized");
