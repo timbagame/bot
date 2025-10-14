@@ -4,6 +4,7 @@ import {
   Keypair,
   TransactionInstruction,
   VersionedTransaction,
+  SystemProgram,
 } from "@solana/web3.js";
 import {
   getAssociatedTokenAddress,
@@ -16,6 +17,10 @@ import { PumpFunClient, validatePumpFunSwap } from "./pump-fun";
 import { NetworkDetector } from "./network-detector";
 import type { SolanaNetwork } from "./network-detector";
 import { WalletManager } from "./wallet";
+import {
+  JIT_SWAP_FEE_BUFFER_LAMPORTS,
+  MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
+} from "./constants";
 
 // ================================
 // UNIFIED SWAP MANAGER
@@ -43,6 +48,17 @@ export interface SwapRequest {
   outputDecimals: number;
   inputTicker: string;
   outputTicker: string;
+}
+
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+const SOL_DECIMALS = 9;
+
+export interface JustInTimeSwapResult {
+  swapped: boolean;
+  provider?: "jupiter" | "pump-fun";
+  signature?: string;
+  lamportsReceived?: number;
+  error?: string;
 }
 
 export class SwapManager {
@@ -300,6 +316,290 @@ export class SwapManager {
       provider: "jupiter",
       priceImpact: jupiterQuote.priceImpactPct,
     };
+  }
+
+  async performJustInTimeSolSwap(options: {
+    userKeypair: Keypair;
+    tokenMint: string;
+    tokenDecimals: number;
+    availableTokenAmountRaw: number;
+    desiredLamports?: number;
+    slippageBps?: number;
+    tokenTicker?: string;
+    logContext?: string;
+  }): Promise<JustInTimeSwapResult> {
+    const {
+      userKeypair,
+      tokenMint,
+      tokenDecimals,
+      availableTokenAmountRaw,
+      desiredLamports = MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
+      slippageBps = 250,
+      tokenTicker = "token",
+      logContext = "game",
+    } = options;
+
+    let sponsoredLamportsOutstanding = 0;
+
+    try {
+      const currentLamports = await this.connection.getBalance(
+        userKeypair.publicKey
+      );
+      const targetLamports = Math.max(
+        desiredLamports,
+        MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS
+      );
+
+      if (currentLamports >= targetLamports) {
+        console.log(
+          `💤 No just-in-time SOL swap needed for ${logContext}. Current balance ${currentLamports} ≥ target ${targetLamports}.`
+        );
+        return { swapped: false };
+      }
+
+      const availableRaw = Math.max(Math.floor(availableTokenAmountRaw), 0);
+      if (availableRaw <= 0) {
+        return {
+          swapped: false,
+          error:
+            `Not enough ${tokenTicker.toUpperCase()} available to convert into SOL for fees. Add SOL manually or deposit additional tokens.`,
+        };
+      }
+
+      const provider = await this.getBestProvider(tokenMint, SOL_MINT);
+      const lamportsShortfall = targetLamports - currentLamports;
+      const swapTarget = lamportsShortfall + JIT_SWAP_FEE_BUFFER_LAMPORTS;
+
+      console.log(
+        `⚡ Executing just-in-time SOL swap for ${logContext} via ${provider}. Need ${lamportsShortfall} lamports (target ${swapTarget}).`
+      );
+
+      if (provider === "jupiter") {
+        const quote = await this.jupiterClient.getQuote({
+          inputMint: tokenMint,
+          outputMint: SOL_MINT,
+          amount: swapTarget.toString(),
+          slippageBps,
+          swapMode: "ExactOut",
+        });
+
+        const requiredInput = BigInt(quote.inAmount);
+        const availableInput = BigInt(availableRaw);
+
+        if (requiredInput > availableInput) {
+          const needed = this.describeTokenAmount(requiredInput, tokenDecimals);
+          const available = this.describeTokenAmount(availableInput, tokenDecimals);
+          return {
+            swapped: false,
+            error: `Need ${needed} ${tokenTicker.toUpperCase()} available for swap but only ${available}. Top up your balance or add SOL manually.`,
+          };
+        }
+
+        const swapResponse = await this.jupiterClient.getSwapTransaction({
+          userPublicKey: userKeypair.publicKey.toBase58(),
+          quoteResponse: quote,
+          wrapAndUnwrapSol: true,
+          useSharedAccounts: true,
+          dynamicComputeUnitLimit: true,
+        });
+
+        const sponsorLamports = Math.max(
+          JIT_SWAP_FEE_BUFFER_LAMPORTS - currentLamports,
+          0
+        );
+        if (sponsorLamports > 0) {
+          await this.sponsorSwapFees(userKeypair, sponsorLamports);
+          sponsoredLamportsOutstanding = sponsorLamports;
+        }
+
+        const signature = await this.executeJupiterTransaction(
+          swapResponse.swapTransaction,
+          userKeypair
+        );
+
+        if (sponsoredLamportsOutstanding > 0) {
+          await this.refundSponsoredFees(
+            userKeypair,
+            sponsoredLamportsOutstanding
+          );
+          sponsoredLamportsOutstanding = 0;
+        }
+
+        return {
+          swapped: true,
+          provider: "jupiter",
+          signature,
+          lamportsReceived: swapTarget,
+        };
+      }
+
+      // Pump.fun branch (sell tokens for SOL)
+      const availableDecimal =
+        availableRaw / Math.pow(10, Math.max(tokenDecimals, 0));
+      if (availableDecimal <= 0) {
+        return {
+          swapped: false,
+          error:
+            `Not enough ${tokenTicker.toUpperCase()} available to swap for SOL fees. Deposit additional tokens or SOL.`,
+        };
+      }
+
+      let attemptDecimal = Math.min(
+        availableDecimal,
+        Math.max(
+          availableDecimal * 0.05,
+          1 / Math.pow(10, Math.min(tokenDecimals, 6))
+        )
+      );
+      let selectedQuote:
+        | { amountStr: string; lamportsOut: number }
+        | null = null;
+
+      for (let i = 0; i < 6; i++) {
+        const amountStr = this.formatDecimalAmount(attemptDecimal, tokenDecimals);
+        const quote = await this.pumpFunClient.getQuote(
+          tokenMint,
+          SOL_MINT,
+          amountStr,
+          tokenDecimals,
+          SOL_DECIMALS,
+          slippageBps
+        );
+        const lamportsOut = Number(quote.outputAmount);
+
+        if (lamportsOut >= swapTarget) {
+          selectedQuote = { amountStr, lamportsOut };
+          break;
+        }
+
+        if (attemptDecimal >= availableDecimal) {
+          break;
+        }
+
+        const nextAttempt = Math.min(attemptDecimal * 2, availableDecimal);
+        if (nextAttempt === attemptDecimal) {
+          break;
+        }
+        attemptDecimal = nextAttempt;
+      }
+
+      if (!selectedQuote) {
+        return {
+          swapped: false,
+          error:
+            `Unable to convert enough ${tokenTicker.toUpperCase()} into SOL for fees. Liquidity may be too low—try a manual top up.`,
+        };
+      }
+
+      const swapInstructions = await this.pumpFunClient.createSwapTransaction({
+        inputMint: tokenMint,
+        outputMint: SOL_MINT,
+        amount: selectedQuote.amountStr,
+        slippageBps,
+        userKeypair,
+      });
+
+      const adminKeypair = this.wallet.getAdminKeypair();
+      const signature = await this.wallet.sendTransaction(swapInstructions, [
+        adminKeypair,
+        userKeypair,
+      ]);
+      await this.wallet.confirmTransaction(signature);
+
+      return {
+        swapped: true,
+        provider: "pump-fun",
+        signature,
+        lamportsReceived: selectedQuote.lamportsOut,
+      };
+    } catch (error: any) {
+      if (sponsoredLamportsOutstanding > 0) {
+        try {
+          await this.refundSponsoredFees(
+            userKeypair,
+            sponsoredLamportsOutstanding
+          );
+        } catch (refundError) {
+          console.error(
+            "Failed to refund sponsored swap fees:",
+            refundError
+          );
+        }
+      }
+      console.error("Just-in-time SOL swap failed:", error);
+      return {
+        swapped: false,
+        error: error.message || "Failed to perform SOL sponsorship swap",
+      };
+    }
+  }
+
+  private formatDecimalAmount(amount: number, decimals: number): string {
+    const precision = Math.min(Math.max(decimals, 0), 9);
+    if (precision === 0) {
+      return Math.round(amount).toString();
+    }
+
+    const formatted = amount.toFixed(precision).replace(/0+$/, "");
+    return formatted.endsWith(".") ? formatted.slice(0, -1) : formatted;
+  }
+
+  private describeTokenAmount(amount: bigint, decimals: number): string {
+    const decimalsClamped = Math.max(decimals, 0);
+    const raw = amount.toString();
+    if (decimalsClamped === 0) {
+      return raw;
+    }
+
+    const padded = raw.padStart(decimalsClamped + 1, "0");
+    const integerPart = padded.slice(0, padded.length - decimalsClamped);
+    const fractionalRaw = padded.slice(padded.length - decimalsClamped);
+    const fractionalPart = fractionalRaw.replace(/0+$/, "");
+    return fractionalPart.length > 0
+      ? `${integerPart}.${fractionalPart}`
+      : integerPart;
+  }
+
+  private async sponsorSwapFees(
+    userKeypair: Keypair,
+    lamports: number
+  ): Promise<void> {
+    if (lamports <= 0) {
+      return;
+    }
+
+    const adminKeypair = this.wallet.getAdminKeypair();
+    const transferIx = SystemProgram.transfer({
+      fromPubkey: adminKeypair.publicKey,
+      toPubkey: userKeypair.publicKey,
+      lamports,
+    });
+
+    const signature = await this.wallet.sendTransaction([transferIx], [
+      adminKeypair,
+    ]);
+    await this.wallet.confirmTransaction(signature);
+  }
+
+  private async refundSponsoredFees(
+    userKeypair: Keypair,
+    lamports: number
+  ): Promise<void> {
+    if (lamports <= 0) {
+      return;
+    }
+
+    const adminKeypair = this.wallet.getAdminKeypair();
+    const transferIx = SystemProgram.transfer({
+      fromPubkey: userKeypair.publicKey,
+      toPubkey: adminKeypair.publicKey,
+      lamports,
+    });
+
+    const signature = await this.wallet.sendTransaction([transferIx], [
+      userKeypair,
+    ]);
+    await this.wallet.confirmTransaction(signature);
   }
 
   /**

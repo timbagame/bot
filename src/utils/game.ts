@@ -1,4 +1,4 @@
-import { PublicKey, Keypair } from "@solana/web3.js";
+import { PublicKey, Keypair, Connection } from "@solana/web3.js";
 import { Context } from "grammy";
 import * as anchor from "@coral-xyz/anchor";
 
@@ -12,6 +12,7 @@ import {
   ADDRESS_DISPLAY_LENGTH,
   GAME_INFO_LIMIT,
   GAME_EXPIRATION_BUFFER_TIME,
+  MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
   getCoinflipVideoId,
   getStartVideoId,
 } from "./constants";
@@ -33,6 +34,7 @@ import {
 } from "./game-ui";
 import { getPriceUSD } from "./prices";
 import { NetworkDetector } from "./network-detector";
+import { SwapManager } from "./swap-manager";
 
 // ================================
 // UTILITY FUNCTIONS
@@ -120,7 +122,8 @@ export class GameManager {
     private program: anchor.Program<Timba>,
     private wallet: WalletManager,
     private gameDb: GameDatabase,
-    private oracleClient: OracleClient
+    private oracleClient: OracleClient,
+    private swapManager: SwapManager
   ) {}
 
   public static getInstance(
@@ -130,11 +133,22 @@ export class GameManager {
   ): GameManager {
     if (!GameManager.instance) {
       const oracleClient = OracleClient.getInstance(wallet);
+      const maybeGetConnection = (wallet as any).getConnection;
+      const connection =
+        typeof maybeGetConnection === "function"
+          ? maybeGetConnection.call(wallet)
+          : (wallet as any).connection ??
+            new Connection(
+              process.env.SOLANA_NETWORK || "https://api.mainnet-beta.solana.com",
+              "confirmed"
+            );
+      const swapManager = new SwapManager(connection, wallet);
       GameManager.instance = new GameManager(
         program,
         wallet,
         gameDb,
-        oracleClient
+        oracleClient,
+        swapManager
       );
     }
     return GameManager.instance;
@@ -1587,20 +1601,20 @@ export class GameManager {
       const currentGameType = Object.keys(gameAccount.gameType)[0];
       if (currentGameType === "coinflip") {
         const gameAmount = Number(gameAccount.ticketAmount);
-        const tokenBalance = await this.wallet.getTokenBalance(
+        const metadata = await this.wallet.getTokenMetadata(
+          gameData.token_mint
+        );
+        let tokenBalance = await this.wallet.getTokenBalance(
           telegramId,
           gameData.token_mint,
           { createIfMissing: true }
         );
-        const totalBalance = tokenBalance;
-        if (totalBalance < gameAmount) {
-          const metadata = await this.wallet.getTokenMetadata(
-            gameData.token_mint
-          );
+
+        if (tokenBalance < gameAmount) {
           return {
             success: false,
             error: `Insufficient balance. You have ${this.wallet.formatTokenBalance(
-              totalBalance,
+              tokenBalance,
               metadata.decimals
             )} ${
               gameData.token_ticker
@@ -1609,6 +1623,69 @@ export class GameManager {
               metadata.decimals
             )} ${gameData.token_ticker}`,
           };
+        }
+
+        const reservedTicketAmount = gameAmount;
+        const swapAllowanceRaw = Math.max(tokenBalance - reservedTicketAmount, 0);
+
+        const lamportsBalance = await this.wallet.getBalance(telegramId);
+        if (lamportsBalance < MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
+          if (swapAllowanceRaw <= 0) {
+            const formattedStake = this.wallet.formatTokenBalance(
+              reservedTicketAmount,
+              metadata.decimals
+            );
+
+            return {
+              success: false,
+              error: `You have exactly ${formattedStake} ${gameData.token_ticker} for the ticket but no spare tokens to cover SOL fees. Add SOL manually or deposit more ${gameData.token_ticker} before trying again.`,
+            };
+          }
+
+          const jitResult = await this.swapManager.performJustInTimeSolSwap({
+            userKeypair: playerKp,
+            tokenMint: gameData.token_mint,
+            tokenDecimals: metadata.decimals,
+            availableTokenAmountRaw: swapAllowanceRaw,
+            desiredLamports: MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
+            slippageBps: 300,
+            tokenTicker: gameData.token_ticker,
+            logContext: `join ${gameAddress}`,
+          });
+
+          if (!jitResult.swapped && jitResult.error) {
+            return { success: false, error: jitResult.error };
+          }
+
+          if (jitResult.swapped) {
+            tokenBalance = await this.wallet.getTokenBalance(
+              telegramId,
+              gameData.token_mint,
+              { createIfMissing: true }
+            );
+
+            if (tokenBalance < gameAmount) {
+              return {
+                success: false,
+                error: `Swap completed but only ${this.wallet.formatTokenBalance(
+                  tokenBalance,
+                  metadata.decimals
+                )} ${gameData.token_ticker} remain, which is below the required ${this.wallet.formatTokenBalance(
+                  gameAmount,
+                  metadata.decimals
+                )}. Please top up your tokens and try again.`,
+              };
+            }
+
+            const refreshedLamports = await this.wallet.getBalance(telegramId);
+            if (refreshedLamports < MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
+              return {
+                success: false,
+                error:
+                  "Swap executed but SOL balance is still below the safety buffer. Add SOL manually and try again.",
+              };
+            }
+          }
         }
       }
 

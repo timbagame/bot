@@ -12,6 +12,7 @@ export interface JupiterQuoteRequest {
   platformFeeBps?: number;
   maxAccounts?: number;
   onlyDirectRoutes?: boolean;
+  swapMode?: "ExactIn" | "ExactOut";
 }
 
 export interface JupiterQuoteResponse {
@@ -51,6 +52,7 @@ export interface JupiterSwapRequest {
   useSharedAccounts?: boolean;
   dynamicComputeUnitLimit?: boolean;
   skipUserAccountsRpcCalls?: boolean;
+  wrapAndUnwrapSol?: boolean;
 }
 
 export interface JupiterSwapResponse {
@@ -98,6 +100,10 @@ export class JupiterClient {
 
     if (request.onlyDirectRoutes !== undefined) {
       params.append("onlyDirectRoutes", request.onlyDirectRoutes.toString());
+    }
+
+    if (request.swapMode) {
+      params.append("swapMode", request.swapMode);
     }
 
     const url = `${this.baseUrl}/v6/quote?${params.toString()}`;
