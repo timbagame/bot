@@ -31,6 +31,8 @@ import {
   buildParticipantsList,
   buildExpirationText,
 } from "./game-ui";
+import { getPriceUSD } from "./prices";
+import { NetworkDetector } from "./network-detector";
 
 // ================================
 // UTILITY FUNCTIONS
@@ -233,6 +235,40 @@ export class GameManager {
       tokenMint,
       isSol: false,
     };
+  }
+
+  private async getUsdApproximation(
+    amount: number,
+    decimals: number,
+    tokenMint?: string,
+    tokenTicker?: string,
+    isSol?: boolean
+  ): Promise<string | null> {
+    const reference = isSol ? "SOL" : tokenMint || tokenTicker;
+    if (!reference) return null;
+    if (amount <= 0) return null;
+    if (process.env.NODE_ENV === "test") return null;
+
+    try {
+      const price = await getPriceUSD(reference);
+      if (!price || !isFinite(price) || price <= 0) {
+        return null;
+      }
+
+      const normalizedAmount = amount / Math.pow(10, decimals);
+      const usdValue = normalizedAmount * price;
+      if (!isFinite(usdValue) || usdValue <= 0) {
+        return null;
+      }
+
+      return `≈ $${usdValue.toFixed(2)}`;
+    } catch (error) {
+      console.warn(
+        `Failed to compute USD pricing for ${reference}:`,
+        error
+      );
+      return null;
+    }
   }
 
   // ================================
@@ -442,7 +478,8 @@ export class GameManager {
   private async getWinnerInfo(
     ctx: Context,
     status: string,
-    winnerAddress?: string
+    winnerAddress?: string,
+    winnerSignature?: string
   ): Promise<string> {
     if (status.toLowerCase() !== "completed" || !winnerAddress) return "";
 
@@ -454,7 +491,11 @@ export class GameManager {
     }
 
     const winnerUsername = await this.getPlayerUsername(ctx, winnerAddress);
-    return `\nWinner: ${winnerUsername}`;
+    const solscanUrl = NetworkDetector.buildSolscanTxUrl(winnerSignature);
+    const linkLine = solscanUrl
+      ? `\n🔗 <a href="${solscanUrl}">View transaction</a>`
+      : "";
+    return `\nWinner: ${winnerUsername}${linkLine}`;
   }
 
   private generateGameKeyboard(status: string, gamePda: PublicKey) {
@@ -479,11 +520,21 @@ export class GameManager {
     status: string,
     tokenTicker: string,
     winnerAddress?: string,
-    providedTotalPot?: number
+    providedTotalPot?: number,
+    winnerSignature?: string
   ): Promise<any> {
     const gameAddress = gamePda.toBase58();
     const formatted = await this.formatGameMessage(
-      ctx, gamePda, gameType, amount, creatorUsername, status, tokenTicker, winnerAddress, providedTotalPot
+      ctx,
+      gamePda,
+      gameType,
+      amount,
+      creatorUsername,
+      status,
+      tokenTicker,
+      winnerAddress,
+      providedTotalPot,
+      winnerSignature
     );
     
     const isCoinflip = gameType.toLowerCase() === "coinflip";
@@ -552,7 +603,8 @@ export class GameManager {
     status: string,
     tokenTicker: string,
     winnerAddress?: string,
-    providedTotalPot?: number
+    providedTotalPot?: number,
+    winnerSignature?: string
   ): Promise<GameMessageFormat> {
     const isCompleted = status.toLowerCase() === "completed";
 
@@ -570,14 +622,31 @@ export class GameManager {
     const tokenMintHint = (gameStats as { tokenMint?: string | null })
       .tokenMint;
 
-    const { formatBalance: formatBalanceForDisplay } =
-      await this.resolveTokenFormattingInfo(
-        gamePda,
-        tokenTicker,
-        tokenMintHint
-      );
+    const {
+      formatBalance: formatBalanceForDisplay,
+      decimals,
+      tokenMint,
+      isSol,
+    } = await this.resolveTokenFormattingInfo(
+      gamePda,
+      tokenTicker,
+      tokenMintHint
+    );
 
-    const winnerInfo = await this.getWinnerInfo(ctx, status, winnerAddress);
+    const usdApproximation = await this.getUsdApproximation(
+      amount,
+      decimals,
+      tokenMint,
+      tokenTicker,
+      isSol
+    );
+
+    const winnerInfo = await this.getWinnerInfo(
+      ctx,
+      status,
+      winnerAddress,
+      winnerSignature
+    );
 
     const header = buildGameHeader(
       formatGameTypeWithEmoji(gameType),
@@ -585,7 +654,8 @@ export class GameManager {
       tokenTicker,
       creatorUsername,
       currentTickets,
-      maxTickets
+      maxTickets,
+      usdApproximation
     );
     let messageText = header;
 
@@ -658,8 +728,7 @@ export class GameManager {
       amount,
       creatorUsername,
       status,
-      tokenTicker,
-      undefined
+      tokenTicker
     );
 
     const replyTo = replyToMessageId ?? (ctx as any).message?.message_id;
@@ -732,7 +801,8 @@ export class GameManager {
     status: string,
     tokenTicker: string,
     winnerAddress?: string,
-    totalPot?: number
+    totalPot?: number,
+    winnerSignature?: string
   ): Promise<void> {
     const gameMessage = this.activeGameMessages.get(gameAddress);
     if (!gameMessage) return;
@@ -747,7 +817,8 @@ export class GameManager {
         status,
         tokenTicker,
         winnerAddress,
-        totalPot
+        totalPot,
+        winnerSignature
       );
 
       const inlineKeyboard =
@@ -839,7 +910,8 @@ export class GameManager {
     gameAddress: string,
     status: string = "Active",
     winnerAddress?: string,
-    totalPot?: number
+    totalPot?: number,
+    winnerSignature?: string
   ): Promise<void> {
     try {
       const gameData = this.gameDb.getGame(gameAddress);
@@ -866,7 +938,8 @@ export class GameManager {
         status,
         gameData.token_ticker || "",
         winnerAddress,
-        totalPot
+        totalPot,
+        winnerSignature
       );
     } catch (error) {
       console.error(`Error updating game message for ${gameAddress}:`, error);

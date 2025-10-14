@@ -37,5 +37,20 @@ describe("GameManager.getWinnerInfo", () => {
     expect(line).toContain("Winner:");
     expect(line).toContain("@champ");
   });
-});
 
+  test("adds Solscan link when transaction signature provided", async () => {
+    resetGM();
+    const gm = GameManager.getInstance(programStub(), walletStub(), dbStub());
+    (gm as any).getPlayerUsername = async () => "@champ";
+    const ctx = { chat: { id: 1, type: "private" } } as any;
+    const line = await (gm as any).getWinnerInfo(
+      ctx,
+      "Completed",
+      "SomePubkey",
+      "sig123"
+    );
+    expect(line).toContain("Winner:");
+    expect(line).toContain("@champ");
+    expect(line).toContain("https://solscan.io/tx/sig123");
+  });
+});

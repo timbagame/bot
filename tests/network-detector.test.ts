@@ -43,3 +43,32 @@ test("getCurrentNetwork reads from environment", () => {
   expect(NetworkDetector.getCurrentNetwork()).toBe("testnet");
   process.env.SOLANA_NETWORK = original;
 });
+
+test("buildSolscanTxUrl builds mainnet URL", () => {
+  const original = process.env.SOLANA_NETWORK;
+  process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
+  expect(NetworkDetector.buildSolscanTxUrl("sig")).toBe(
+    "https://solscan.io/tx/sig"
+  );
+  process.env.SOLANA_NETWORK = original;
+});
+
+test("buildSolscanTxUrl appends cluster for devnet/testnet", () => {
+  const original = process.env.SOLANA_NETWORK;
+  process.env.SOLANA_NETWORK = "https://api.devnet.solana.com";
+  expect(NetworkDetector.buildSolscanTxUrl("sig")).toBe(
+    "https://solscan.io/tx/sig?cluster=devnet"
+  );
+  process.env.SOLANA_NETWORK = "https://api.testnet.solana.com";
+  expect(NetworkDetector.buildSolscanTxUrl("sig")).toBe(
+    "https://solscan.io/tx/sig?cluster=testnet"
+  );
+  process.env.SOLANA_NETWORK = original;
+});
+
+test("buildSolscanTxUrl returns null for localnet", () => {
+  const original = process.env.SOLANA_NETWORK;
+  process.env.SOLANA_NETWORK = "http://localhost:8899";
+  expect(NetworkDetector.buildSolscanTxUrl("sig")).toBeNull();
+  process.env.SOLANA_NETWORK = original;
+});

@@ -63,6 +63,7 @@ import { checkServiceHealth } from "./utils/service-health";
 import { getPriceUSD } from "./utils/prices";
 import { patchReplyBehavior } from "./utils/reply-patch";
 import { getNetworkFromRPC } from "./utils/network-display";
+import { NetworkDetector } from "./utils/network-detector";
 
 // ================================
 // GLOBAL INSTANCES
@@ -259,7 +260,8 @@ const updateGameMessageSafely = async (
   gameData: any,
   status: string = "Completed",
   winnerAddress?: string,
-  totalPot?: number
+  totalPot?: number,
+  winnerSignature?: string
 ): Promise<void> => {
   if (!gameData?.chat_id || !gameData?.message_id) return;
 
@@ -270,7 +272,8 @@ const updateGameMessageSafely = async (
       gameAddress,
       status,
       winnerAddress,
-      totalPot
+      totalPot,
+      winnerSignature
     );
   } catch (error) {
     console.warn(`Could not update message for game ${gameAddress}:`, error);
@@ -356,6 +359,7 @@ const sendReplyToGameMessage = async (
     await bot.api.sendMessage(target.chatId, text, {
       parse_mode: "HTML",
       reply_to_message_id: target.messageId,
+      link_preview_options: { is_disabled: true },
     });
   } catch (error) {
     console.error("Error sending reply to game message:", error);
@@ -384,7 +388,8 @@ const showWalletUI = async (ctx: any) => {
 const processGameCompletion = async (
   gameAddress: string,
   winnerAddress: string,
-  totalPot?: number
+  totalPot?: number,
+  winnerTxSignature?: string
 ): Promise<void> => {
   // Update database
   const blockTime = await wallet.getBlockchainTime();
@@ -397,7 +402,8 @@ const processGameCompletion = async (
     gameData,
     "Completed",
     winnerAddress,
-    totalPot
+    totalPot,
+    winnerTxSignature
   );
 
   if (
@@ -413,7 +419,13 @@ const processGameCompletion = async (
           apiCtx,
           winnerAddress
         );
-        const announcement = `🏆 <b>${winnerDisplay}</b> won the game!`;
+        let announcement = `🏆 <b>${winnerDisplay}</b> won the game!`;
+        const solscanUrl = NetworkDetector.buildSolscanTxUrl(
+          winnerTxSignature
+        );
+        if (solscanUrl) {
+          announcement += `\n<a href="${solscanUrl}">View transaction</a>`;
+        }
         await sendReplyToGameMessage(target, announcement);
       } catch (winnerAnnouncementError) {
         console.error(
@@ -9102,7 +9114,11 @@ setupAnchor()
     console.log("Setting up GameCompleted event listener...");
     program.addEventListener(
       "gameCompleted",
-      async (event: GameCompletedEvent) => {
+      async (
+        event: GameCompletedEvent,
+        _slot: number,
+        signature?: string
+      ) => {
         try {
           const gameAddress = event.gameKey.toString();
           const winnerAddress = event.winner.toString();
@@ -9110,10 +9126,18 @@ setupAnchor()
           console.log(
             `🎉 GameCompleted event received for game: ${gameAddress}`
           );
+          if (signature) {
+            console.log(`🔗 Completion signature: ${signature}`);
+          }
 
           // Process game completion with total pot from event
           const totalPot = Number(event.winnerAmount);
-          await processGameCompletion(gameAddress, winnerAddress, totalPot);
+          await processGameCompletion(
+            gameAddress,
+            winnerAddress,
+            totalPot,
+            signature
+          );
 
           console.log(
             `✅ Successfully processed GameCompleted event for game ${gameAddress}`

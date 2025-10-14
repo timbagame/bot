@@ -18,6 +18,19 @@ test("buildGameHeader formats header line", () => {
   expect(header).toContain("Creator: @user • 1/2 tickets");
 });
 
+test("buildGameHeader includes USD approximation when provided", () => {
+  const header = buildGameHeader(
+    "🪙 Coinflip",
+    "10.000000",
+    "TIMBA",
+    "@user",
+    1,
+    2,
+    "≈ $12.34"
+  );
+  expect(header).toContain("(≈ $12.34)");
+});
+
 test("buildPrizeLine shows only when flag true", () => {
   const shown = buildPrizeLine(true, "20.000000", "TIMBA");
   const hidden = buildPrizeLine(false, "20.000000", "TIMBA");

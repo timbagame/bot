@@ -58,4 +58,23 @@ export class NetworkDetector {
       process.env.SOLANA_NETWORK || "https://api.mainnet-beta.solana.com";
     return this.detectNetwork(rpcUrl);
   }
+
+  /**
+   * Build a Solscan transaction URL respecting the configured network.
+   * Returns null when Solscan cannot display the network (e.g. localnet).
+   */
+  static buildSolscanTxUrl(signature: string | undefined | null): string | null {
+    if (!signature) return null;
+    const network = this.getCurrentNetwork();
+    if (network === "localnet") return null;
+
+    const baseUrl = `https://solscan.io/tx/${signature}`;
+    if (network === "mainnet") return baseUrl;
+
+    if (network === "devnet" || network === "testnet") {
+      return `${baseUrl}?cluster=${network}`;
+    }
+
+    return baseUrl;
+  }
 }

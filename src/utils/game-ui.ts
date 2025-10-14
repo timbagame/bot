@@ -1,3 +1,5 @@
+import { escapeHtml } from "./format-amount";
+
 /**
  * Build the status text line for a game based on tickets.
  * Returns a concise human-readable status.
@@ -27,10 +29,14 @@ export function buildGameHeader(
   tokenTicker: string,
   creatorUsername: string,
   currentTickets: number,
-  maxTickets: number
+  maxTickets: number,
+  usdApproximation?: string | null
 ): string {
+  const usdSegment = usdApproximation
+    ? ` (${escapeHtml(usdApproximation)})`
+    : "";
   return (
-    `<b>${gameTypeLabel} • ${amountFormatted} ${tokenTicker}</b>\n` +
+    `<b>${gameTypeLabel} • ${amountFormatted} ${tokenTicker}${usdSegment}</b>\n` +
     `Creator: ${creatorUsername} • ${currentTickets}/${maxTickets} tickets`
   );
 }
