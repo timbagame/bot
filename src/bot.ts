@@ -1168,7 +1168,7 @@ bot.command(["coinflip", "cf"], async (ctx) => {
       tokenInfo.decimals
     );
     
-    coinflipMessage += "\nSelect amount in <b>${tokenInfo.tokenTicker}</b>:";
+    coinflipMessage += `\nSelect amount in <b>${tokenInfo.tokenTicker}</b>:`;
     
     const setupMessage = await ctx.reply(coinflipMessage, {
       parse_mode: "HTML",
