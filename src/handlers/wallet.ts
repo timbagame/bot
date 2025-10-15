@@ -27,7 +27,6 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
     Number.isFinite(value) ? value.toFixed(2) : "0.00";
   const keypair = wallet.getKeyPair(telegramId);
   const walletAddress = keypair.publicKey.toBase58();
-  const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
   const walletVideoFileId = WINNER_VIDEO_ID ?? null;
   const getWalletKeyboard = () => createWalletKeyboard();
 
@@ -143,7 +142,7 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
     const errorResponse = [
       `💳 <b>Wallet</b>`,
       "",
-      `<code>${escapeHtml(shortAddress)}</code>`,
+      `<code>${escapeHtml(walletAddress)}</code>`,
       "",
       "❌ <i>Error loading balances</i>",
       "<i>Tap Refresh to try again</i>",
