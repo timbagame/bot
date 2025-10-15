@@ -196,11 +196,24 @@ export const parseTransactionError = (
     return `🏗️ Account setup required!\n\nEnsure you have at least ${MIN_SOL_FOR_TX} SOL for fees.\nUse /balance to check your balance.`;
   }
 
+  if (lowerMessage.includes("instruction does not support non-native tokens")) {
+    return (
+      `🪙 Wrap failed.\n\n` +
+      `We couldn't convert SOL to WSOL.\n\n` +
+      `Try using /unwrap to reset your WSOL account, then wrap again.\n` +
+      `If it keeps failing, reach out to an admin.`
+    );
+  }
+
   if (
     lowerMessage.includes("simulation failed") ||
     lowerMessage.includes("custom program error")
   ) {
-    return `❌ Transaction failed!\n\nUsually means insufficient SOL for fees.\nEnsure you have at least ${MIN_SOL_FOR_TX} SOL.\nUse /balance to check your balance.`;
+    return (
+      `❌ Transaction failed.\n\n` +
+      `The network couldn't process this transaction.\n\n` +
+      `Try again in a moment or contact an admin if the issue persists.`
+    );
   }
 
   // Handle Jupiter API errors

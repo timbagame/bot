@@ -23,6 +23,7 @@ import {
   DEFAULT_TOKEN_MINT,
   DEFAULT_TOKEN_TICKER,
   TOKENS_LIST,
+  WSOL_MINT,
   getStartVideoId,
 } from "./utils/constants";
 import { trySendVideoWithFallback } from "./utils/media";
@@ -763,6 +764,9 @@ const validateAndProcessTransaction = async (
       userFriendlyError,
       { parse_mode: "HTML" }
     );
+    if (error && typeof error === "object") {
+      (error as any).__alreadyNotified = true;
+    }
     throw error;
   }
 };
@@ -777,6 +781,9 @@ const handleCommandError = async (
   commandName: string
 ): Promise<void> => {
   console.error(`Error in ${commandName} command:`, error);
+  if (error && typeof error === "object" && (error as any).__alreadyNotified) {
+    return;
+  }
   const userFriendlyError = formatUserFriendlyError(error, wallet);
   await replyToMessage(ctx, userFriendlyError);
 };
@@ -1652,7 +1659,7 @@ bot.command("wrap", async (ctx: Context) => {
       true, // isSol
       `Wrapping ${wallet.formatSolBalance(amount)} SOL to WSOL`,
       async (playerData) => {
-        const wsolMint = new PublicKey(DEFAULT_TOKEN_MINT);
+        const wsolMint = new PublicKey(WSOL_MINT);
         const { address: wsolAccount, instructions: createAtaIx } =
           await wallet.findOrCreateAssociatedTokenAccount(
             playerData.keypair.publicKey,
