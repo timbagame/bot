@@ -30,20 +30,61 @@ type TokenTarget = {
   minCompletionFeeLamports?: bigint;
 };
 
+const optionalBigIntEnv = (key: string): bigint | undefined => {
+  const rawValue = process.env[key]?.trim();
+  if (!rawValue) return undefined;
+
+  try {
+    return BigInt(rawValue);
+  } catch (error) {
+    throw new Error(
+      `${key} must be a valid integer value, received ${rawValue}: ${error}`
+    );
+  }
+};
+
 const TARGET_TOKENS: TokenTarget[] = [
   {
     mint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump", // TIMBA mainnet
     ticker: "TIMBA",
-    minCompletionFeeLamports: process.env["TIMBA_MIN_COMPLETION_FEE_LAMPORTS"]
-      ? BigInt(process.env["TIMBA_MIN_COMPLETION_FEE_LAMPORTS"]!)
-      : undefined,
+    minCompletionFeeLamports: optionalBigIntEnv(
+      "TIMBA_MIN_COMPLETION_FEE_LAMPORTS"
+    ),
+  },
+  {
+    mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC mainnet
+    ticker: "USDC",
+    minCompletionFeeLamports: optionalBigIntEnv(
+      "USDC_MIN_COMPLETION_FEE_LAMPORTS"
+    ),
+  },
+  {
+    mint: "A6rSPi9JmJgVkW6BatsA6MjFYLseizPM2Fnt92coFjf4", // MAGAIBA mainnet
+    ticker: "MAGAIBA",
+    minCompletionFeeLamports: optionalBigIntEnv(
+      "MAGAIBA_MIN_COMPLETION_FEE_LAMPORTS"
+    ),
   },
   {
     mint: "So11111111111111111111111111111111111111112", // WSOL
     ticker: "WSOL",
-    minCompletionFeeLamports: process.env["WSOL_MIN_COMPLETION_FEE_LAMPORTS"]
-      ? BigInt(process.env["WSOL_MIN_COMPLETION_FEE_LAMPORTS"]!)
-      : undefined,
+    minCompletionFeeLamports: optionalBigIntEnv(
+      "WSOL_MIN_COMPLETION_FEE_LAMPORTS"
+    ),
+  },
+  {
+    mint: "FkBF9u1upwEMUPxnXjcydxxVSxgr8f3k1YXbz7G7bmtA", // GLORP mainnet
+    ticker: "GLORP",
+    minCompletionFeeLamports: optionalBigIntEnv(
+      "GLORP_MIN_COMPLETION_FEE_LAMPORTS"
+    ),
+  },
+  {
+    mint: "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC", // AI16Z mainnet
+    ticker: "AI16Z",
+    minCompletionFeeLamports: optionalBigIntEnv(
+      "AI16Z_MIN_COMPLETION_FEE_LAMPORTS"
+    ),
   },
 ];
 

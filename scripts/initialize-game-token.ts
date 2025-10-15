@@ -55,6 +55,25 @@ const NETWORK =
   normalizeCluster(process.env["SOLANA_CLUSTER"]) ??
   deriveClusterFromRpc(RPC_URL);
 
+const resolveMinAmount = (envKey: string, fallback: bigint): bigint => {
+  const rawValue = process.env[envKey]?.trim();
+  if (!rawValue) return fallback;
+
+  try {
+    const parsed = BigInt(rawValue);
+    if (parsed < 0n) {
+      throw new Error(
+        `${envKey} must be a non-negative integer, received ${rawValue}`
+      );
+    }
+    return parsed;
+  } catch (error) {
+    throw new Error(
+      `${envKey} must be a valid integer value, received ${rawValue}: ${error}`
+    );
+  }
+};
+
 const CONFIG = {
   // Network configuration
   RPC_URL,
@@ -66,6 +85,21 @@ const CONFIG = {
     "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump"
   ),
   TIMBA_TICKER: resolveEnvPath(process.env["TIMBA_TICKER"], "TIMBA"),
+  TIMBA_MIN_AMOUNT: resolveMinAmount("TIMBA_DEFAULT_MIN_AMOUNT", 1_000n),
+
+  USDC_MINT: resolveEnvPath(
+    process.env["USDC_MINT"],
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+  ),
+  USDC_TICKER: resolveEnvPath(process.env["USDC_TICKER"], "USDC"),
+  USDC_MIN_AMOUNT: resolveMinAmount("USDC_DEFAULT_MIN_AMOUNT", 1_000n),
+
+  MAGAIBA_MINT: resolveEnvPath(
+    process.env["MAGAIBA_MINT"],
+    "A6rSPi9JmJgVkW6BatsA6MjFYLseizPM2Fnt92coFjf4"
+  ),
+  MAGAIBA_TICKER: resolveEnvPath(process.env["MAGAIBA_TICKER"], "MAGAIBA"),
+  MAGAIBA_MIN_AMOUNT: resolveMinAmount("MAGAIBA_DEFAULT_MIN_AMOUNT", 1_000n),
 
   // WSOL configuration (Wrapped SOL)
   WSOL_MINT: resolveEnvPath(
@@ -73,6 +107,21 @@ const CONFIG = {
     "So11111111111111111111111111111111111111112"
   ),
   WSOL_TICKER: resolveEnvPath(process.env["WSOL_TICKER"], "WSOL"),
+  WSOL_MIN_AMOUNT: resolveMinAmount("WSOL_DEFAULT_MIN_AMOUNT", 10_000_000n),
+
+  GLORP_MINT: resolveEnvPath(
+    process.env["GLORP_MINT"],
+    "FkBF9u1upwEMUPxnXjcydxxVSxgr8f3k1YXbz7G7bmtA"
+  ),
+  GLORP_TICKER: resolveEnvPath(process.env["GLORP_TICKER"], "GLORP"),
+  GLORP_MIN_AMOUNT: resolveMinAmount("GLORP_DEFAULT_MIN_AMOUNT", 1_000n),
+
+  AI16Z_MINT: resolveEnvPath(
+    process.env["AI16Z_MINT"],
+    "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC"
+  ),
+  AI16Z_TICKER: resolveEnvPath(process.env["AI16Z_TICKER"], "AI16Z"),
+  AI16Z_MIN_AMOUNT: resolveMinAmount("AI16Z_DEFAULT_MIN_AMOUNT", 1_000n),
 
   // Program configuration
   ADMIN_KEYPAIR_PATH: resolveEnvPath(
@@ -81,13 +130,47 @@ const CONFIG = {
   ),
 } as const;
 
-const GAME_TOKEN_ACCOUNT_SIZE = 8 + 32 + 1 + 8 + 8 + 1; // Mirror on-chain GAME_TOKEN_SIZE
-const BALANCE_BUFFER_SOL = 0.01; // Keep a small buffer to absorb fee variance
-
 type TokenInitTarget = {
   tokenMint: string;
   tokenTicker: string;
+  defaultMinAmount: bigint;
 };
+
+const TOKEN_CONFIGS: TokenInitTarget[] = [
+  {
+    tokenMint: CONFIG.TIMBA_MINT,
+    tokenTicker: CONFIG.TIMBA_TICKER,
+    defaultMinAmount: CONFIG.TIMBA_MIN_AMOUNT,
+  },
+  {
+    tokenMint: CONFIG.USDC_MINT,
+    tokenTicker: CONFIG.USDC_TICKER,
+    defaultMinAmount: CONFIG.USDC_MIN_AMOUNT,
+  },
+  {
+    tokenMint: CONFIG.MAGAIBA_MINT,
+    tokenTicker: CONFIG.MAGAIBA_TICKER,
+    defaultMinAmount: CONFIG.MAGAIBA_MIN_AMOUNT,
+  },
+  {
+    tokenMint: CONFIG.WSOL_MINT,
+    tokenTicker: CONFIG.WSOL_TICKER,
+    defaultMinAmount: CONFIG.WSOL_MIN_AMOUNT,
+  },
+  {
+    tokenMint: CONFIG.GLORP_MINT,
+    tokenTicker: CONFIG.GLORP_TICKER,
+    defaultMinAmount: CONFIG.GLORP_MIN_AMOUNT,
+  },
+  {
+    tokenMint: CONFIG.AI16Z_MINT,
+    tokenTicker: CONFIG.AI16Z_TICKER,
+    defaultMinAmount: CONFIG.AI16Z_MIN_AMOUNT,
+  },
+];
+
+const GAME_TOKEN_ACCOUNT_SIZE = 8 + 32 + 1 + 8 + 8 + 1; // Mirror on-chain GAME_TOKEN_SIZE
+const BALANCE_BUFFER_SOL = 0.01; // Keep a small buffer to absorb fee variance
 
 type TokenCostBreakdown =
   | {
@@ -231,7 +314,7 @@ const estimateInitializationCosts = async (
   let requiredLamports = 0n;
   const { blockhash } = await connection.getLatestBlockhash("confirmed");
 
-  for (const { tokenMint, tokenTicker } of tokens) {
+  for (const { tokenMint, tokenTicker, defaultMinAmount } of tokens) {
     const mint = new PublicKey(tokenMint);
 
     const [gameTokenPda] = PublicKey.findProgramAddressSync(
@@ -317,9 +400,7 @@ const estimateInitializationCosts = async (
 
     const tokenInstruction = await program.methods
       .initializeToken({
-        minAmount: new anchor.BN(
-          tokenTicker === "WSOL" ? 10_000_000 : 1_000
-        ),
+        minAmount: new anchor.BN(defaultMinAmount.toString()),
         enabled: true,
       })
       .accounts({
@@ -410,7 +491,8 @@ async function initializeToken(
   wallet: WalletManager,
   oracleOperatorKeypair: Keypair,
   tokenMint: string,
-  tokenTicker: string
+  tokenTicker: string,
+  defaultMinAmount: bigint
 ): Promise<TokenInitializationResult> {
   console.log(`\n🔄 Initializing ${tokenTicker} Game Token...`);
 
@@ -534,7 +616,7 @@ async function initializeToken(
   console.log(`\n🔄 Initializing ${tokenTicker} game token...`);
   const tokenInstruction = await program.methods
     .initializeToken({
-      minAmount: new anchor.BN(tokenTicker === "WSOL" ? 10_000_000 : 1_000), // 0.01 SOL for WSOL, 1000 lamports for others
+      minAmount: new anchor.BN(defaultMinAmount.toString()),
       enabled: true,
     })
     .accounts({
@@ -604,7 +686,8 @@ async function initializeToken(
 // ================================
 
 async function initializeGameToken() {
-  console.log("🚀 Initializing Game Tokens (TIMBA + WSOL)...\n");
+  const tokenSummary = TOKEN_CONFIGS.map((token) => token.tokenTicker).join(", ");
+  console.log(`🚀 Initializing Game Tokens (${tokenSummary})...\n`);
 
   // Connect to network
   const connection = new Connection(CONFIG.RPC_URL, "confirmed");
@@ -636,10 +719,7 @@ async function initializeGameToken() {
   ) as anchor.Program<Timba>;
   console.log(`📋 Program ID: ${program.programId.toBase58()}`);
 
-  const tokensToInitialize: TokenInitTarget[] = [
-    { tokenMint: CONFIG.TIMBA_MINT, tokenTicker: CONFIG.TIMBA_TICKER },
-    { tokenMint: CONFIG.WSOL_MINT, tokenTicker: CONFIG.WSOL_TICKER },
-  ];
+  const tokensToInitialize: TokenInitTarget[] = TOKEN_CONFIGS;
 
   const costEstimate = await estimateInitializationCosts(
     connection,
@@ -708,37 +788,23 @@ async function initializeGameToken() {
   try {
     const results: TokenInitializationResult[] = [];
 
-    // Initialize TIMBA token
-    console.log("\n" + "=".repeat(50));
-    console.log("🟡 INITIALIZING TIMBA TOKEN");
-    console.log("=".repeat(50));
+    for (const tokenConfig of TOKEN_CONFIGS) {
+      console.log("\n" + "=".repeat(50));
+      console.log(`🎯 INITIALIZING ${tokenConfig.tokenTicker} TOKEN`);
+      console.log("=".repeat(50));
 
-    const timbaResult = await initializeToken(
-      program,
-      connection,
-      adminKeypair,
-      wallet,
-      oracleOperatorKeypair,
-      CONFIG.TIMBA_MINT,
-      CONFIG.TIMBA_TICKER
-    );
-    results.push(timbaResult);
-
-    // Initialize WSOL token
-    console.log("\n" + "=".repeat(50));
-    console.log("🔵 INITIALIZING WSOL TOKEN");
-    console.log("=".repeat(50));
-
-    const wsolResult = await initializeToken(
-      program,
-      connection,
-      adminKeypair,
-      wallet,
-      oracleOperatorKeypair,
-      CONFIG.WSOL_MINT,
-      CONFIG.WSOL_TICKER
-    );
-    results.push(wsolResult);
+      const result = await initializeToken(
+        program,
+        connection,
+        adminKeypair,
+        wallet,
+        oracleOperatorKeypair,
+        tokenConfig.tokenMint,
+        tokenConfig.tokenTicker,
+        tokenConfig.defaultMinAmount
+      );
+      results.push(result);
+    }
 
     // Display comprehensive summary
     console.log("\n" + "=".repeat(60));
