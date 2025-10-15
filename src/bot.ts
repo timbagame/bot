@@ -59,6 +59,11 @@ import { recentUpdateGuard } from "./utils/recent-update";
 import { getPriceUSD } from "./utils/prices";
 import { patchReplyBehavior } from "./utils/reply-patch";
 import { getNetworkFromRPC } from "./utils/network-display";
+import {
+  buildBuyMenuUI,
+  buildSellMenuUI,
+  SELL_NOOP_CALLBACK,
+} from "./utils/trade-ui";
 
 // ================================
 // GLOBAL INSTANCES
@@ -5634,38 +5639,14 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
     const solDecimalBalance = solBalance / 1000000000; // LAMPORTS_PER_SOL
     const totalUSD = solDecimalBalance * solPriceUSD;
 
+    const hasTokenBalances = tokenBalances.some(
+      (token) => parseFloat(token.rawBalance) > 0
+    );
     const ownedTokens = tokenBalances
       .filter((token) => parseFloat(token.rawBalance) > 0)
       .slice(0, 6);
 
-    const response = [
-      `<b>Buy tokens</b>`,
-      "",
-      `<b>Supported Platforms:</b>`,
-      "• Pump.fun tokens",
-      "• DAOS.fun tokens",
-      "• Any token on Jupiter DEX",
-      "",
-      `<b>Wallet:</b> <code>${walletAddress}</code>`,
-      `<b>SOL Balance:</b> ${formattedSolBalance} ($${totalUSD.toFixed(2)})`,
-      "",
-    ];
-
-    if (ownedTokens.length > 0) {
-      response.push(
-        `<b>Select token to buy:</b>`,
-        `<i>Tap a token you already hold or start with SOL below.</i>`
-      );
-    } else {
-      response.push(
-        `<b>Select token to buy:</b>`,
-        `<i>No tokens yet? Start by choosing a payment method below.</i>`
-      );
-    }
-
-    const keyboard = new InlineKeyboard();
-
-    for (const token of ownedTokens) {
+    const ownedTokenButtons = ownedTokens.map((token) => {
       const formattedBalance = wallet.formatTokenBalance(
         token.balance,
         token.decimals
@@ -5677,35 +5658,25 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
         paymentToken: "SOL",
       });
       setTimeout(() => transactionCache.delete(tokenTxId), 5 * 60 * 1000);
-      keyboard
-        .text(
-          `${token.ticker} (${formattedBalance})`,
-          `buy_dynamic_SOL_${tokenTxId}`
-        )
-        .row();
-    }
+      return {
+        label: `${token.ticker} (${formattedBalance})`,
+        callbackData: `buy_dynamic_SOL_${tokenTxId}`,
+      };
+    });
 
-    keyboard
-      .text("💰 Buy with SOL", "buy_with_SOL")
-      .row();
-
-    if (tokenBalances.some((token) => parseFloat(token.rawBalance) > 0)) {
-      keyboard.text("💱 Use Another Token", "buy_with_other_tokens").row();
-    }
-
-    keyboard
-      .text("📋 Paste Contract Address", "buy_contract_SOL")
-      .row()
-      .text("🔎 Search by Symbol", "buy_search_SOL")
-      .row()
-      .text("❌ Cancel", "main_wallet")
-      .row();
-
-    const messageText = response.join("\n");
+    const shortWallet = `${walletAddress.slice(0, 6)}…${walletAddress.slice(-6)}`;
+    const { message, keyboard } = buildBuyMenuUI({
+      walletAddress: shortWallet,
+      formattedSolBalance,
+      totalUsd: totalUSD,
+      ownedTokenButtons,
+      allowTokenPayments: hasTokenBalances,
+      hasAnyTokens: hasTokenBalances,
+    });
 
     // Try to edit as text, if fails (because current message has media), delete and send new
     try {
-      await ctx.editMessageText(messageText, {
+      await ctx.editMessageText(message, {
         parse_mode: "HTML",
         reply_markup: keyboard,
       });
@@ -5715,13 +5686,13 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
         await ctx.deleteMessage();
       } catch {}
 
-      await ctx.reply(messageText, {
+      await ctx.reply(message, {
         parse_mode: "HTML",
         reply_markup: keyboard,
       });
     }
 
-    await ctx.answerCallbackQuery("Select token to buy");
+    await ctx.answerCallbackQuery("Select how you want to buy");
   } catch (error) {
     console.error("Error in cmd_buy:", error);
     await ctx.answerCallbackQuery("❌ Error loading buy interface");
@@ -5737,24 +5708,7 @@ bot.callbackQuery("cmd_sell", async (ctx) => {
     // Use cached wallet data
     const { tokenBalances } = await getCachedWalletData(telegramId);
 
-    const response = [
-      `<b>Sell tokens</b>`,
-      "",
-      `<b>Supported Platforms:</b>`,
-      "• Pump.fun tokens",
-      "• DAOS.fun tokens",
-      "• Any token on Jupiter DEX",
-      "",
-      `<b>From Wallet:</b> <code>${walletAddress}</code>`,
-      "",
-      `<b>Select token to sell:</b>`,
-      `<i>Choose a percentage below or enter a custom amount after selecting a token.</i>`,
-    ];
-
-    const keyboard = new InlineKeyboard();
-
-    // Add tokens that user owns (can sell)
-    let hasTokens = false;
+    const sellTokenButtons: { label: string; callbackData: string }[] = [];
     for (const token of tokenBalances.slice(0, 6)) {
       if (parseFloat(token.rawBalance) > 0) {
         const formatted = wallet.formatTokenBalance(
@@ -5807,39 +5761,40 @@ bot.callbackQuery("cmd_sell", async (ctx) => {
           );
         }
 
-        keyboard
-          .text(
-            `${token.ticker} (${formatted}${solEstimate})`,
-            `sell_token_${token.ticker}`
-          )
-          .row();
-        hasTokens = true;
+        sellTokenButtons.push({
+          label: `${token.ticker} (${formatted}${solEstimate})`,
+          callbackData: `sell_token_${token.ticker}`,
+        });
       }
     }
 
-    if (!hasTokens) {
-      keyboard.text("❌ No tokens available to sell").row();
-    }
-
-    keyboard.text("← Back to Wallet", "main_wallet").row();
+    const shortWallet = `${walletAddress.slice(0, 6)}…${walletAddress.slice(-6)}`;
+    const { message, keyboard } = buildSellMenuUI({
+      walletAddress: shortWallet,
+      tokenButtons: sellTokenButtons,
+    });
 
     // Try to edit as text, if fails (because current message has media), delete and send new
     try {
-      await ctx.editMessageText(response.join("\n"), {
+      await ctx.editMessageText(message, {
         parse_mode: "HTML",
         reply_markup: keyboard,
       });
     } catch (error) {
-      await ctx.reply(response.join("\n"), {
+      await ctx.reply(message, {
         parse_mode: "HTML",
         reply_markup: keyboard,
       });
     }
-    await ctx.answerCallbackQuery("🔴 Select token to sell");
+    await ctx.answerCallbackQuery("Select what you want to sell");
   } catch (error) {
     console.error("Error in cmd_sell:", error);
     await ctx.answerCallbackQuery("❌ Error loading sell interface");
   }
+});
+
+bot.callbackQuery(SELL_NOOP_CALLBACK, async (ctx) => {
+  await ctx.answerCallbackQuery("No tokens available to sell");
 });
 
 // Handle SELL token selection

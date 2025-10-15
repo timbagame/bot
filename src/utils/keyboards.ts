@@ -11,11 +11,10 @@ export const createMainMenuKeyboard = (): InlineKeyboard => {
 
 export const createWalletKeyboard = (): InlineKeyboard => {
   return new InlineKeyboard()
-    .text("💸 Withdraw", "cmd_withdraw")
-    .row()
     .text("🟢 Buy", "cmd_buy")
     .text("🔴 Sell", "cmd_sell")
     .row()
+    .text("💸 Withdraw", "cmd_withdraw")
     .text("🔄 Refresh", "wallet_refresh")
     .row()
     .text("⚙️ Settings", "wallet_settings")
