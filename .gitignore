@@ -35,6 +35,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # database files
 *.sqlite
+*.sqlite-wal
+*.sqlite-shm
 
 # local AI tool configs
 .claude/
