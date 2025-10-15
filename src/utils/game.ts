@@ -510,9 +510,9 @@ export class GameManager {
     const winnerUsername = await this.getPlayerUsername(ctx, winnerAddress);
     const solscanUrl = NetworkDetector.buildSolscanTxUrl(winnerSignature);
     const linkLine = solscanUrl
-      ? `\n🔗 <a href="${solscanUrl}">View transaction</a>`
+      ? `\n\n🔗 <a href="${solscanUrl}">View transaction</a>`
       : "";
-    return `\nWinner: ${winnerUsername}${linkLine}`;
+    return `\n\nWinner: ${winnerUsername}${linkLine}`;
   }
 
   private generateGameKeyboard(status: string, gamePda: PublicKey) {
@@ -1014,7 +1014,7 @@ export class GameManager {
           ctx,
           gameData.winner_address
         );
-        winnerInfo = `\nWinner: @${winnerUsername}`;
+        winnerInfo = `\n\nWinner: @${winnerUsername}`;
       }
 
       return (
@@ -1115,7 +1115,7 @@ export class GameManager {
       }
 
       if (winnerLine) {
-        message += `\n${winnerLine}`;
+        message += `\n\n${winnerLine}`;
       }
 
       return message;
