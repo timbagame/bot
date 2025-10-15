@@ -385,7 +385,6 @@ const showWalletUI = async (ctx: any) => {
     buildWalletCaption,
     createWalletKeyboard,
     WINNER_VIDEO_ID: getStartVideoId(),
-    LAMPORTS_PER_SOL,
   });
 };
 
@@ -5197,9 +5196,6 @@ const getCachedWalletData = async (telegramId: bigint) => {
     );
 
     // Merge WSOL into SOL using util
-    const WSOL_MINT =
-      (TOKENS_LIST.find((t) => t.ticker === "WSOL")?.mint as string) ||
-      "So11111111111111111111111111111111111111112";
     const merged = mergeWsolIntoSol(solBalance, tokenBalances, WSOL_MINT);
     solBalance = merged.solLamports;
     tokenBalances = merged.tokenBalances;
