@@ -254,16 +254,33 @@ export class GameManager {
     };
   }
 
+  private formatUsdValue(
+    amount: number,
+    decimals: number,
+    price: number
+  ): string | null {
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    if (!Number.isFinite(price) || price <= 0) return null;
+
+    const normalizedAmount = amount / Math.pow(10, decimals);
+    const usdValue = normalizedAmount * price;
+    if (!Number.isFinite(usdValue) || usdValue <= 0) {
+      return null;
+    }
+
+    return `≈ $${usdValue.toFixed(2)}`;
+  }
+
   private async getUsdApproximation(
     amount: number,
     decimals: number,
     tokenMint?: string,
     tokenTicker?: string,
     isSol?: boolean
-  ): Promise<string | null> {
+  ): Promise<{ text: string; price: number } | null> {
     const reference = isSol ? "SOL" : tokenMint || tokenTicker;
     if (!reference) return null;
-    if (amount <= 0) return null;
+    if (!Number.isFinite(amount) || amount <= 0) return null;
     if (process.env.NODE_ENV === "test") return null;
 
     try {
@@ -272,13 +289,12 @@ export class GameManager {
         return null;
       }
 
-      const normalizedAmount = amount / Math.pow(10, decimals);
-      const usdValue = normalizedAmount * price;
-      if (!isFinite(usdValue) || usdValue <= 0) {
+      const usdText = this.formatUsdValue(amount, decimals, price);
+      if (!usdText) {
         return null;
       }
 
-      return `≈ $${usdValue.toFixed(2)}`;
+      return { text: usdText, price };
     } catch (error) {
       console.warn(
         `Failed to compute USD pricing for ${reference}:`,
@@ -672,15 +688,34 @@ export class GameManager {
       creatorUsername,
       currentTickets,
       maxTickets,
-      usdApproximation
+      usdApproximation?.text
     );
     let messageText = header;
 
     // Show current prize if different from base amount
+    let prizeUsdApproximation: string | null = null;
+    if (usdApproximation) {
+      prizeUsdApproximation = this.formatUsdValue(
+        totalPot,
+        decimals,
+        usdApproximation.price
+      );
+    } else if (currentTickets > 0 || totalPot !== amount) {
+      const computedPrizeUsd = await this.getUsdApproximation(
+        totalPot,
+        decimals,
+        tokenMint,
+        tokenTicker,
+        isSol
+      );
+      prizeUsdApproximation = computedPrizeUsd?.text ?? null;
+    }
+
     const prize = buildPrizeLine(
       currentTickets > 0 || totalPot !== amount,
       formatBalanceForDisplay(totalPot),
-      tokenTicker
+      tokenTicker,
+      prizeUsdApproximation
     );
     messageText += prize;
 
@@ -726,6 +761,64 @@ export class GameManager {
     const keyboard = this.generateGameKeyboard(status, gamePda);
 
     return { messageText, keyboard };
+  }
+
+  public async getPrizeDisplay(
+    gameAddress: string,
+    totalPot: number,
+    tokenTickerHint?: string | null,
+    tokenMintHint?: string | null
+  ): Promise<
+    | {
+        formattedAmount: string;
+        tokenTicker: string;
+        usdApproximation: string | null;
+      }
+    | null
+  > {
+    if (!Number.isFinite(totalPot) || totalPot <= 0) {
+      return null;
+    }
+
+    try {
+      const gamePda = new PublicKey(gameAddress);
+      const storedGame = this.gameDb.getGame(gameAddress);
+      const resolvedTicker =
+        tokenTickerHint ??
+        storedGame?.token_ticker ??
+        (storedGame?.token_mint === "SOL" ? "SOL" : "");
+      const resolvedMint = tokenMintHint ?? storedGame?.token_mint ?? undefined;
+
+      const { formatBalance, decimals, tokenMint, isSol } =
+        await this.resolveTokenFormattingInfo(
+          gamePda,
+          resolvedTicker || "",
+          resolvedMint
+        );
+
+      const formattedAmount = formatBalance(totalPot);
+      const usdApproximation = await this.getUsdApproximation(
+        totalPot,
+        decimals,
+        tokenMint,
+        resolvedTicker,
+        isSol
+      );
+
+      const displayTicker = resolvedTicker || (isSol ? "SOL" : "");
+
+      return {
+        formattedAmount,
+        tokenTicker: displayTicker,
+        usdApproximation: usdApproximation?.text ?? null,
+      };
+    } catch (error) {
+      console.warn(
+        `Failed to compute prize display for ${gameAddress}:`,
+        error
+      );
+      return null;
+    }
   }
 
   public async createGameMessage(

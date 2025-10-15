@@ -47,10 +47,14 @@ export function buildGameHeader(
 export function buildPrizeLine(
   show: boolean,
   totalFormatted: string,
-  tokenTicker: string
+  tokenTicker: string,
+  usdApproximation?: string | null
 ): string {
   if (!show) return "";
-  return `\nCurrent Prize: ${totalFormatted} ${tokenTicker}\n`;
+  const usdSegment = usdApproximation
+    ? ` (${escapeHtml(usdApproximation)})`
+    : "";
+  return `\nCurrent Prize: ${totalFormatted} ${tokenTicker}${usdSegment}\n`;
 }
 
 /**
