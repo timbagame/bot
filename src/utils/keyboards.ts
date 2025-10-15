@@ -1,4 +1,5 @@
 import { InlineKeyboard } from "grammy";
+import { DEFAULT_TOKEN_TICKER } from "./constants";
 
 export const createMainMenuKeyboard = (): InlineKeyboard => {
   return new InlineKeyboard()
@@ -131,7 +132,7 @@ export const getFeeWarningMessage = (
   gameType: string,
   balance: number,
   contractMinimum: number = 20,
-  tokenTicker: string = "TOKEN"
+  tokenTicker: string = DEFAULT_TOKEN_TICKER
 ): string => {
   let message = `💰 <b>SELECT AMOUNT - ${gameType.toUpperCase()}</b>\n\n`;
   
@@ -152,129 +153,73 @@ export const createAmountSelectionKeyboard = (
   userBalance?: number,
   creatorId?: string,
   contractMinimum: number = 20,
-  tokenTicker: string = "TOKEN"
+  tokenTicker: string = DEFAULT_TOKEN_TICKER
 ): InlineKeyboard => {
-  let amounts: number[] = [];
   const balance =
     typeof userBalance === "number" && Number.isFinite(userBalance)
       ? Math.max(userBalance, 0)
-      : 0;
-  const minStake = calculateMinimumRecommendedBet(balance, contractMinimum);
-  const basePrecision = getDecimalPrecision(minStake);
-  const precision =
-    minStake < 1
-      ? Math.max(basePrecision, 3)
-      : basePrecision;
-  const tolerance = precision > 0 ? 1 / Math.pow(10, precision) : 0;
-  const roundAmount = (value: number): number =>
-    roundToPrecision(value, precision);
-  const seen = new Set<string>();
-  const registerAmount = (
-    value: number,
-    { allowAboveBalance = false }: { allowAboveBalance?: boolean } = {}
-  ) => {
-    if (!Number.isFinite(value)) return;
-    const rounded = roundAmount(value);
-    if (rounded <= 0) return;
+      : undefined;
+  const minStake = calculateMinimumRecommendedBet(
+    balance ?? 0,
+    contractMinimum
+  );
+  const displayPrecision = 0;
 
-    if (!allowAboveBalance && balance > 0 && rounded - balance > tolerance) {
-      return;
-    }
+  let amounts: number[];
 
-    const key = rounded.toFixed(precision);
-    if (seen.has(key)) return;
-
-    seen.add(key);
-    amounts.push(rounded);
-  };
-
-  if (balance > 0 && minStake > 0) {
-    const ratio = balance / minStake;
-
-    if (balance < minStake) {
-      registerAmount(minStake, { allowAboveBalance: true });
-    } else {
-      registerAmount(minStake);
-
-      const floorMultiplier = Math.max(1, Math.floor(ratio));
-      registerAmount(minStake * floorMultiplier);
-
-      const strategicMultipliers = [1.5, 2, 3, 5, 10, 25, 50, 100, 150, 200];
-      for (const multiplier of strategicMultipliers) {
-        if (multiplier > ratio) break;
-        registerAmount(minStake * multiplier);
-      }
-
-      registerAmount(balance);
-    }
-
-    amounts = amounts
-      .filter((value, index, self) => self.indexOf(value) === index)
+  if (balance === undefined || balance === 0) {
+    amounts = [10, 25, 50];
+  } else if (balance < minStake) {
+    const floored = Math.max(1, Math.floor(balance));
+    const half = Math.max(1, Math.floor(floored / 2));
+    const base = new Set<number>([1, half, floored]);
+    amounts = Array.from(base)
+      .filter((value) => value > 0 && value <= floored)
       .sort((a, b) => a - b);
-
-    if (amounts.length > 3) {
-      const first = amounts[0]!;
-      const mid = amounts[Math.floor((amounts.length - 1) / 2)]!;
-      const last = amounts[amounts.length - 1]!;
-      amounts = [first, mid, last].filter(
-        (value, index, self) => self.indexOf(value) === index
-      );
-    } else if (amounts.length === 2) {
-      const average = roundAmount((amounts[0]! + amounts[1]!) / 2);
-      if (
-        average > amounts[0]! &&
-        average < amounts[1]! &&
-        (average <= balance + tolerance || balance < minStake)
-      ) {
-        amounts.splice(1, 0, average);
-      }
-    } else if (amounts.length === 1 && balance >= minStake) {
-      const doubleStake = roundAmount(minStake * Math.min(2, ratio));
-      if (doubleStake > amounts[0]! && doubleStake <= balance + tolerance) {
-        amounts.push(doubleStake);
-      }
-    }
-
     if (amounts.length === 0) {
-      registerAmount(minStake, { allowAboveBalance: balance < minStake });
+      amounts = [1];
     }
-
-    const warningNote =
-      balance < minStake
-        ? " (⚠️ Balance below contract minimum)"
-        : "";
-
-    const formattedBalance = formatAmountDisplay(balance, precision);
-    const formattedAmounts = amounts.map((amount) =>
-      formatAmountDisplay(amount, precision)
-    );
-
-    console.log(
-      `✅ Contract-based amounts for balance ${formattedBalance} ${tokenTicker}: ${formattedAmounts.join(
-        ", "
-      )}${warningNote}`
-    );
+  } else if (balance < 50) {
+    const floored = Math.max(contractMinimum, Math.floor(balance));
+    const optionA = Math.max(contractMinimum, 1);
+    const optionB = Math.min(floored, optionA + 10);
+    const optionC = Math.min(floored, optionA * 2);
+    const base = [optionA, optionB, optionC];
+    amounts = Array.from(new Set(base))
+      .filter((value) => value > 0)
+      .sort((a, b) => a - b);
+  } else if (balance < 200) {
+    amounts = [25, 50, 100];
+  } else if (balance < 1000) {
+    amounts = [50, 150, 300];
   } else {
-    const fallbackBase = roundAmount(Math.max(minStake, 1));
-    registerAmount(fallbackBase, { allowAboveBalance: true });
-    registerAmount(fallbackBase * 2, { allowAboveBalance: true });
-    registerAmount(fallbackBase * 3, { allowAboveBalance: true });
-
-    amounts = amounts
-      .filter((value, index, self) => self.indexOf(value) === index)
-      .sort((a, b) => a - b)
-      .slice(0, 3);
-
-    const formattedAmounts = amounts.map((amount) =>
-      formatAmountDisplay(amount, precision)
-    );
-    console.log(
-      `🔍 No balance provided, using default amounts: ${formattedAmounts.join(
-        ", "
-      )} ${tokenTicker}`
-    );
+    amounts = [100, 500, 1000];
   }
-  
+
+  const balanceCap = balance !== undefined ? Math.max(1, Math.floor(balance)) : undefined;
+  if (balanceCap !== undefined) {
+    amounts = amounts.map((value, index) => {
+      if (value <= balanceCap) return value;
+      if (index === amounts.length - 1) {
+        return balanceCap;
+      }
+      return value;
+    });
+    amounts = amounts.filter((value) => value > 0 && value <= balanceCap);
+  }
+
+  amounts = Array.from(new Set(amounts)).filter((value) => value > 0);
+  amounts.sort((a, b) => a - b);
+
+  if (amounts.length === 0) {
+    const fallback = balanceCap ?? Math.max(1, Math.floor(minStake));
+    amounts = [fallback || 1];
+  }
+
+  if (amounts.length > 3) {
+    amounts = amounts.slice(0, 3);
+  }
+
   const keyboard = new InlineKeyboard();
   
   // Add all 3 amount buttons in one row
@@ -282,7 +227,7 @@ export const createAmountSelectionKeyboard = (
     const callbackData = creatorId
       ? `amount_${gameType}_${amount}_${creatorId}`
       : `amount_${gameType}_${amount}`;
-    const display = formatAmountDisplay(amount, precision);
+    const display = formatAmountDisplay(amount, displayPrecision);
     keyboard.text(`💰 ${display} ${tokenTicker}`, callbackData);
   });
   keyboard.row();
@@ -353,7 +298,7 @@ export const createSliderAmountKeyboard = (
   currentAmount: number,
   userBalance: number,
   creatorId?: string,
-  tokenTicker: string = "TOKEN",
+  tokenTicker: string = DEFAULT_TOKEN_TICKER,
   precision: number = 0
 ): InlineKeyboard => {
   const minUnit = precision > 0 ? Math.pow(10, -precision) : 1;
@@ -379,7 +324,11 @@ export const createSliderAmountKeyboard = (
     roundToPrecision(value, precision);
   const amountForCallback = roundForSlider(currentAmount);
   const toDisplay = (value: number): string =>
-    formatAmountDisplay(value, precision);
+    value.toLocaleString("en-US", {
+      minimumFractionDigits: precision > 0 ? precision : 0,
+      maximumFractionDigits: precision > 0 ? precision : 0,
+      useGrouping: false,
+    });
 
   const clamp = (value: number) =>
     Math.max(minAmount, Math.min(maxAmount, value));
