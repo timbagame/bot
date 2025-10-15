@@ -2809,8 +2809,51 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
         displayName = `Usuario ${stats.telegram_id}`;
       }
       
-      // Format volume (assuming TIMBA tokens with appropriate decimals)
-      const volumeFormatted = formatAmount(stats.total_volume, 9); // Using 9 decimals for TIMBA
+      // Format volume with token breakdown (limit to top 5 tokens to avoid huge messages)
+      let volumeFormatted = "";
+      if (stats.token_volumes) {
+        const tokenVolumes = stats.token_volumes.split('|').filter((vol: string) => Boolean(vol));
+        
+        // Parse tokens and prioritize TIMBA
+        const tokenData: Array<{ticker: string, volume: number, formatted: string}> = [];
+        
+        for (const tokenVol of tokenVolumes) {
+          const [ticker, volume] = tokenVol.split(':');
+          if (!ticker || !volume) continue;
+          
+          const decimals = ticker === 'WSOL' ? 9 : 
+                          ticker === 'USDC' ? 6 : 
+                          ticker === 'USDT' ? 6 : 
+                          ticker === 'TIMBA' ? 6 : 9; // TIMBA has 6 decimals
+          
+          tokenData.push({
+            ticker: ticker || 'UNKNOWN',
+            volume: parseInt(volume),
+            formatted: `${formatAmount(parseInt(volume), decimals)} ${ticker || 'UNKNOWN'}`
+          });
+        }
+        
+        // Prioritize TIMBA first, then sort others by volume (descending)
+        const timbaToken = tokenData.find(t => t.ticker === 'TIMBA');
+        const otherTokens = tokenData.filter(t => t.ticker !== 'TIMBA');
+        otherTokens.sort((a, b) => b.volume - a.volume);
+        
+        // Combine: TIMBA first, then top 4 other tokens
+        const topTokens = [];
+        if (timbaToken) topTokens.push(timbaToken);
+        topTokens.push(...otherTokens.slice(0, 4));
+        
+        if (topTokens.length > 0) {
+          volumeFormatted = topTokens.map(t => t.formatted).join(' + ');
+          // Add indicator if there are more tokens
+          if (tokenData.length > 5) {
+            volumeFormatted += ` + ${tokenData.length - 5} more`;
+          }
+        }
+      } else {
+        // Fallback to old format if no token breakdown (assume TIMBA with 6 decimals)
+        volumeFormatted = formatAmount(stats.total_volume, 6);
+      }
       
       // Competitive ranking with tier system
       let tierEmoji = "";

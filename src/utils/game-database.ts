@@ -490,7 +490,7 @@ export class GameDatabase extends BaseDatabase {
   }
 
   /**
-   * Get leaderboard statistics for players in a specific chat
+   * Get leaderboard statistics for players in a specific chat with token breakdown
    */
   public getLeaderboardStats(chatId: number, limit: number = 10): any[] {
     try {
@@ -502,29 +502,50 @@ export class GameDatabase extends BaseDatabase {
             COUNT(DISTINCT CASE WHEN g.status = 'completed' AND g.winner_address = pm.public_key THEN g.game_address END) as games_won,
             COUNT(DISTINCT CASE WHEN g.creator_telegram_id = pm.telegram_id AND g.status = 'completed' THEN g.game_address END) as games_created,
             COUNT(DISTINCT CASE WHEN gp.telegram_id = pm.telegram_id AND g.status = 'completed' THEN g.game_address END) as games_joined,
-            COALESCE(SUM(DISTINCT CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.amount ELSE 0 END), 0) as total_volume,
+            COALESCE(SUM(CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.amount ELSE 0 END), 0) as total_volume,
             CASE 
               WHEN COUNT(DISTINCT CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.game_address END) > 0 
               THEN (COUNT(DISTINCT CASE WHEN g.status = 'completed' AND g.winner_address = pm.public_key THEN g.game_address END) * 100.0) / COUNT(DISTINCT CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.game_address END)
               ELSE 0 
             END as win_rate
           FROM player_mappings pm
-          LEFT JOIN games g ON (g.creator_telegram_id = pm.telegram_id OR g.winner_address = pm.public_key) AND g.chat_id = ?
+          LEFT JOIN games g ON g.chat_id = ?
           LEFT JOIN game_participants gp ON gp.telegram_id = pm.telegram_id AND gp.game_address = g.game_address
-          WHERE g.chat_id = ? OR g.game_address IS NULL
+          WHERE (g.creator_telegram_id = pm.telegram_id OR g.winner_address = pm.public_key OR gp.telegram_id = pm.telegram_id) OR g.game_address IS NULL
           GROUP BY pm.telegram_id
           HAVING total_games > 0
+        ),
+        token_volumes AS (
+          SELECT 
+            pm.telegram_id,
+            g.token_ticker,
+            g.token_mint,
+            COALESCE(SUM(CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.amount ELSE 0 END), 0) as token_volume
+          FROM player_mappings pm
+          LEFT JOIN games g ON g.chat_id = ?
+          LEFT JOIN game_participants gp ON gp.telegram_id = pm.telegram_id AND gp.game_address = g.game_address
+          WHERE (g.creator_telegram_id = pm.telegram_id OR g.winner_address = pm.public_key OR gp.telegram_id = pm.telegram_id) AND g.status = 'completed'
+          GROUP BY pm.telegram_id, g.token_ticker, g.token_mint
         )
         SELECT 
-          telegram_id,
-          total_games,
-          games_won,
-          games_created,
-          games_joined,
-          total_volume,
-          ROUND(win_rate, 1) as win_rate
-        FROM player_stats
-        ORDER BY games_won DESC, win_rate DESC, total_volume DESC
+          ps.telegram_id,
+          ps.total_games,
+          ps.games_won,
+          ps.games_created,
+          ps.games_joined,
+          ps.total_volume,
+          ROUND(ps.win_rate, 1) as win_rate,
+          GROUP_CONCAT(
+            CASE 
+              WHEN tv.token_volume > 0 
+              THEN tv.token_ticker || ':' || tv.token_volume 
+              ELSE NULL 
+            END, '|'
+          ) as token_volumes
+        FROM player_stats ps
+        LEFT JOIN token_volumes tv ON ps.telegram_id = tv.telegram_id
+        GROUP BY ps.telegram_id, ps.total_games, ps.games_won, ps.games_created, ps.games_joined, ps.total_volume, ps.win_rate
+        ORDER BY ps.games_won DESC, ps.win_rate DESC, ps.total_volume DESC
         LIMIT ?
       `);
       return stmt.all(chatId, chatId, limit) as any[];
