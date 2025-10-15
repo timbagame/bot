@@ -38,6 +38,16 @@ test("buildPrizeLine shows only when flag true", () => {
   expect(hidden).toBe("");
 });
 
+test("buildPrizeLine appends USD approximation when provided", () => {
+  const shown = buildPrizeLine(
+    true,
+    "20.000000",
+    "TIMBA",
+    "≈ $5.00"
+  );
+  expect(shown).toContain("Current Prize: 20.000000 TIMBA (≈ $5.00)");
+});
+
 test("buildParticipantsList formats numbered list", () => {
   const list = buildParticipantsList(["@a", "@b"]);
   expect(list).toContain("1. @a");

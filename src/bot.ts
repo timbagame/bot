@@ -43,7 +43,7 @@ import {
   getSuggestedStakeAmounts,
 } from "./utils/keyboards";
 import { buildWalletCaption } from "./utils/wallet-ui";
-import { formatAmount } from "./utils/format-amount";
+import { formatAmount, escapeHtml } from "./utils/format-amount";
 import { showWalletUI as showWalletUIHandler, onMainWallet, onWalletRefresh, onWalletSettings, onBalance } from "./handlers/wallet";
 import { inferMaxPlayers } from "./utils/arg-parsing";
 import type {
@@ -420,9 +420,36 @@ const processGameCompletion = async (
           apiCtx,
           winnerAddress
         );
+        let prizeDetails = "";
+        const prizePot =
+          typeof totalPot === "number"
+            ? totalPot
+            : typeof gameData?.amount === "number"
+            ? gameData.amount
+            : null;
+        if (typeof prizePot === "number" && prizePot > 0) {
+          const prizeInfo = await gameManager.getPrizeDisplay(
+            gameAddress,
+            prizePot,
+            gameData?.token_ticker,
+            gameData?.token_mint ?? undefined
+          );
+          if (prizeInfo) {
+            const tickerSegment = prizeInfo.tokenTicker
+              ? ` ${prizeInfo.tokenTicker}`
+              : "";
+            const usdSegment = prizeInfo.usdApproximation
+              ? ` (${prizeInfo.usdApproximation})`
+              : "";
+            prizeDetails =
+              ` Prize: ${escapeHtml(prizeInfo.formattedAmount)}` +
+              `${escapeHtml(tickerSegment)}` +
+              `${escapeHtml(usdSegment)}`;
+          }
+        }
         await sendReplyToGameMessage(
           target,
-          `🏆 <b>${winnerDisplay}</b> won the game!`
+          `🏆 <b>${winnerDisplay}</b> won the game!${prizeDetails}`
         );
       } catch (winnerAnnouncementError) {
         console.error(
