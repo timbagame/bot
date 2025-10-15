@@ -14,7 +14,7 @@ import {
   GAME_EXPIRATION_BUFFER_TIME,
   MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
   getCoinflipVideoId,
-  getStartVideoId,
+  getGiveawayVideoId,
 } from "./constants";
 import { isRecoverableMediaError } from "./media";
 import type {
@@ -35,6 +35,19 @@ import {
 import { getPriceUSD } from "./prices";
 import { NetworkDetector } from "./network-detector";
 import { SwapManager } from "./swap-manager";
+
+const resolveGameVideoId = (gameType: string): string | undefined => {
+  const lower = gameType.toLowerCase();
+  if (lower === "coinflip") {
+    const id = getCoinflipVideoId();
+    return id && id.length > 0 ? id : undefined;
+  }
+  if (lower === "giveaway") {
+    const id = getGiveawayVideoId();
+    return id && id.length > 0 ? id : undefined;
+  }
+  return undefined;
+};
 
 // ================================
 // UTILITY FUNCTIONS
@@ -570,46 +583,38 @@ export class GameManager {
       winnerSignature
     );
     
-    const isCoinflip = gameType.toLowerCase() === "coinflip";
+    const videoId = resolveGameVideoId(gameType);
     const replyMarkup = { inline_keyboard: formatted.keyboard };
     let message: any;
     let usesVideo = false;
 
-    if (isCoinflip) {
-      const coinflipVideoId = getCoinflipVideoId();
-      if (coinflipVideoId) {
-        try {
-          message = await ctx.replyWithVideo(coinflipVideoId, {
-            caption: formatted.messageText,
-            parse_mode: "HTML",
-            reply_markup: replyMarkup,
-          });
-          usesVideo = true;
-        } catch (error) {
-          if (isRecoverableMediaError(error)) {
-            console.warn(
-              "Falling back to text announcement after video send failure:",
-              error
-            );
-            message = await ctx.reply(formatted.messageText, {
-              parse_mode: "HTML",
-              reply_markup: replyMarkup,
-            });
-          } else {
-            throw error;
-          }
-        }
-      } else {
-        message = await ctx.reply(formatted.messageText, {
-          parse_mode: "HTML",
-          reply_markup: replyMarkup,
-        });
-      }
-    } else {
-      message = await ctx.reply(formatted.messageText, {
+    const sendText = async () =>
+      ctx.reply(formatted.messageText, {
         parse_mode: "HTML",
         reply_markup: replyMarkup,
       });
+
+    if (videoId) {
+      try {
+        message = await ctx.replyWithVideo(videoId, {
+          caption: formatted.messageText,
+          parse_mode: "HTML",
+          reply_markup: replyMarkup,
+        });
+        usesVideo = true;
+      } catch (error) {
+        if (isRecoverableMediaError(error)) {
+          console.warn(
+            "Falling back to text announcement after video send failure:",
+            error
+          );
+          message = await sendText();
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      message = await sendText();
     }
 
     // Save the game message to database and activeGameMessages for future updates
@@ -842,50 +847,40 @@ export class GameManager {
     );
 
     const replyTo = replyToMessageId ?? (ctx as any).message?.message_id;
-    const isCoinflip = gameType.toLowerCase() === "coinflip";
+    const videoId = resolveGameVideoId(gameType);
     const replyMarkup = { inline_keyboard: keyboard };
     let message: any;
     let usesVideo = false;
 
-    if (isCoinflip) {
-      const coinflipVideoId = getCoinflipVideoId();
-      if (coinflipVideoId) {
-        try {
-          message = await ctx.replyWithVideo(coinflipVideoId, {
-            caption: messageText,
-            parse_mode: "HTML",
-            reply_markup: replyMarkup,
-            reply_to_message_id: replyTo,
-          });
-          usesVideo = true;
-        } catch (error) {
-          if (isRecoverableMediaError(error)) {
-            console.warn(
-              "Falling back to text announcement after video send failure:",
-              error
-            );
-            message = await ctx.reply(messageText, {
-              parse_mode: "HTML",
-              reply_markup: replyMarkup,
-              reply_to_message_id: replyTo,
-            });
-          } else {
-            throw error;
-          }
-        }
-      } else {
-        message = await ctx.reply(messageText, {
-          parse_mode: "HTML",
-          reply_markup: replyMarkup,
-          reply_to_message_id: replyTo,
-        });
-      }
-    } else {
-      message = await ctx.reply(messageText, {
+    const sendText = async () =>
+      ctx.reply(messageText, {
         parse_mode: "HTML",
         reply_markup: replyMarkup,
         reply_to_message_id: replyTo,
       });
+
+    if (videoId) {
+      try {
+        message = await ctx.replyWithVideo(videoId, {
+          caption: messageText,
+          parse_mode: "HTML",
+          reply_markup: replyMarkup,
+          reply_to_message_id: replyTo,
+        });
+        usesVideo = true;
+      } catch (error) {
+        if (isRecoverableMediaError(error)) {
+          console.warn(
+            "Falling back to text announcement after video send failure:",
+            error
+          );
+          message = await sendText();
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      message = await sendText();
     }
 
     this.gameDb.saveGameMessage(
@@ -933,10 +928,9 @@ export class GameManager {
 
       const inlineKeyboard =
         keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined;
-      const lowerGameType = gameType.toLowerCase();
       const lowerStatus = status.toLowerCase();
       const supportsVideo = gameMessage.usesVideo !== false;
-      const winnerVideoId = getStartVideoId();
+      const winnerVideoId = resolveGameVideoId(gameType);
 
       const editAsText = async () => {
         await ctx.api.editMessageText(
@@ -950,7 +944,7 @@ export class GameManager {
         );
       };
 
-      if (lowerGameType === "coinflip" && supportsVideo && winnerVideoId) {
+      if (winnerVideoId && supportsVideo) {
         const isCompleted = lowerStatus === "completed";
         try {
           if (isCompleted) {

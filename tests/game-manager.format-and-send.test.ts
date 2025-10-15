@@ -2,9 +2,6 @@ import { describe, test, expect } from "bun:test";
 import { GameManager } from "../src/utils/game";
 import { PublicKey } from "@solana/web3.js";
 
-process.env["COINFLIP_START_VIDEO_ID"] ??= "test-coinflip-video-id";
-process.env["START_VIDEO_ID"] ??= "test-start-video-id";
-
 function resetGM() {
   // @ts-ignore
   GameManager["instance"] = undefined;
@@ -46,7 +43,7 @@ describe("GameManager.formatAndSendGameMessage", () => {
     expect(saved?.usesVideo).toBe(true);
   });
 
-  test("uses text for non-coinflip and sets active message", async () => {
+  test("uses video for giveaway when configured and sets active message", async () => {
     resetGM();
     const program = { account: { game: { fetch: async () => ({ ticketsCount: 0, maxTickets: 2, minTickets: 2, createdAt: 1_000_000, timeout: 60, gameType: { giveaway: {} } }) } } } as any;
     const gm = GameManager.getInstance(program, { formatTokenBalance: (n: number) => String(n) } as any, {
@@ -55,10 +52,10 @@ describe("GameManager.formatAndSendGameMessage", () => {
     const ctx = ctxStub();
     const pda = new PublicKey("BPFLoader2111111111111111111111111111111111");
     await gm.formatAndSendGameMessage(ctx as any, pda, "giveaway", 1_000_000_000, "@creator", "Active", "TOK");
-    expect((ctx as any).__calls[0][0]).toBe("text");
+    expect((ctx as any).__calls[0][0]).toBe("video");
     const saved = gm.getActiveGameMessage(pda.toBase58());
-    expect(saved?.messageId).toBe(202);
-    expect(saved?.usesVideo).toBe(false);
+    expect(saved?.messageId).toBe(101);
+    expect(saved?.usesVideo).toBe(true);
   });
 
   test("falls back to text when coinflip video send fails", async () => {
