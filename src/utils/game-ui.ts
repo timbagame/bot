@@ -50,7 +50,7 @@ export function buildPrizeLine(
   tokenTicker: string
 ): string {
   if (!show) return "";
-  return `\nCurrent Prize: ${totalFormatted} ${tokenTicker}`;
+  return `\nCurrent Prize: ${totalFormatted} ${tokenTicker}\n`;
 }
 
 /**
