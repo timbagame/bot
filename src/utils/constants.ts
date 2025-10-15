@@ -86,12 +86,13 @@ function resolveDefaultToken(): TokenConfig {
 
 const DEFAULT_TOKEN = resolveDefaultToken();
 
+export const WSOL_MINT = "So11111111111111111111111111111111111111112";
 export const DEFAULT_TOKEN_MINT = DEFAULT_TOKEN.mint;
 export const DEFAULT_TOKEN_TICKER = DEFAULT_TOKEN.ticker;
 
 function buildTokenList(defaultToken: TokenConfig): TokenConfig[] {
   const baseTokens: TokenConfig[] = [
-    { mint: "So11111111111111111111111111111111111111112", ticker: "WSOL" },
+    { mint: WSOL_MINT, ticker: "WSOL" },
     { mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", ticker: "USDC" },
   ];
 

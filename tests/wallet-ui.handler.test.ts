@@ -27,7 +27,6 @@ describe("wallet handler showWalletUI", () => {
       buildWalletCaption: () => "CAPTION",
       createWalletKeyboard: () => ({ rows: [] } as any),
       WINNER_VIDEO_ID: "VID",
-      LAMPORTS_PER_SOL: 1_000_000_000,
     };
     await showWalletUI(ctx, deps);
     const calls = ctx.__calls;
@@ -47,7 +46,6 @@ describe("wallet handler showWalletUI", () => {
       buildWalletCaption: () => "CAPTION",
       createWalletKeyboard: () => ({ rows: [] } as any),
       WINNER_VIDEO_ID: "VID",
-      LAMPORTS_PER_SOL: 1_000_000_000,
     };
     await showWalletUI(ctx, deps);
     const calls = ctx.__calls;

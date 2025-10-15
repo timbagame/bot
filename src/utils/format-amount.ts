@@ -112,3 +112,30 @@ export function formatAmount(
   const signed = sign + intOut + (fractionalOut ? "." + fractionalOut : "");
   return signed;
 }
+
+export function formatRate(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0";
+  }
+
+  let formatted: string;
+  if (value >= 1) {
+    formatted = value.toFixed(4);
+  } else if (value >= 0.01) {
+    formatted = value.toFixed(4);
+  } else if (value >= 0.0001) {
+    formatted = value.toFixed(6);
+  } else if (value >= 0.000001) {
+    formatted = value.toFixed(8);
+  } else if (value >= 0.00000001) {
+    formatted = value.toFixed(10);
+  } else {
+    formatted = value.toExponential(2);
+  }
+
+  if (formatted.includes("e")) {
+    return formatted;
+  }
+
+  return formatted.replace(/0+$/, "").replace(/\.$/, "");
+}

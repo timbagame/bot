@@ -26,17 +26,18 @@ describe("errors extras", () => {
   test("simulation failure maps to fee guidance", () => {
     const msg = parseTransactionError(new Error("simulation failed: custom program error: 0x1"));
     expect(msg).toContain("Transaction failed");
-    expect(msg).toContain("insufficient SOL");
+    expect(msg).toContain("network couldn't process");
   });
 
   test("quote unavailable maps to friendly retry guidance", () => {
     const msg = parseTransactionError(new Error("Jupiter quote failed: quote failed"));
-    expect(msg).toContain("Quote unavailable");
+    expect(msg).toContain("Quote unavailable right now");
   });
 
   test("token not tradable surfaces actionable message", () => {
     const msg = parseTransactionError(new Error("token_not_tradable on Jupiter"));
     expect(msg).toContain("Token not tradable");
+    expect(msg).toContain("liquidity");
   });
 
   test("same token swap error explains restriction", () => {
@@ -44,4 +45,3 @@ describe("errors extras", () => {
     expect(msg).toContain("Cannot swap same token");
   });
 });
-

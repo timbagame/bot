@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
 import { onBalance } from "../src/handlers/wallet";
+import { buildWalletCaption } from "../src/utils/wallet-ui";
 
 function makeCtx(privateChat: boolean) {
   const calls: any[] = [];
@@ -27,8 +28,7 @@ test("onBalance in private chat clears cache and calls showWalletUI", async () =
     wallet: { formatTokenBalance: (_n: number, _d: number) => "0", formatSolBalance: (n: number) => String(n) },
     handleCommandError: async () => {},
     getPriceUSD: async () => 100,
-    buildWalletCaption: (sol: string, _tokens: any[], addr: string, solPrice?: number, _timbaPrice?: number) => 
-      `Solana Address · 🅴\n\n<code>${addr}</code>\n\nFee balance: ${sol} SOL ($${solPrice || 0})\nTimba balance: 0 TIMBA ($0.00)`,
+    buildWalletCaption,
     createWalletKeyboard: () => ({} as any),
     WINNER_VIDEO_ID: null,
   });
@@ -50,8 +50,7 @@ test("onBalance private chat errors call handler", async () => {
     wallet: { formatTokenBalance: () => "0", formatSolBalance: (n: number) => String(n) },
     handleCommandError: async () => { handled++; },
     getPriceUSD: async () => 100,
-    buildWalletCaption: (sol: string, _tokens: any[], addr: string, solPrice?: number, _timbaPrice?: number) => 
-      `Solana Address · 🅴\n\n<code>${addr}</code>\n\nFee balance: ${sol} SOL ($${solPrice || 0})\nTimba balance: 0 TIMBA ($0.00)`,
+    buildWalletCaption,
     createWalletKeyboard: () => ({} as any),
     WINNER_VIDEO_ID: null,
   });
@@ -85,17 +84,7 @@ test("onBalance in group sends balance privately to user", async () => {
     wallet: { formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toFixed(0), formatSolBalance: (n: number) => (n / 1_000_000_000).toFixed(6) },
     handleCommandError: async () => {},
     getPriceUSD: async () => 100,
-    buildWalletCaption: (sol: string, _tokens: any[], addr: string, solPrice?: number, _timbaPrice?: number) => {
-      // Simple HTML escaping for test
-      const escapeHtml = (str: string) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-      let result = `Solana Address · 🅴\n\n<code>${escapeHtml(addr)}</code>\n\nFee balance: ${escapeHtml(sol)} SOL ($${solPrice || 0})\nTimba balance: 0 TIMBA ($0.00)`;
-      for (const token of _tokens) {
-        if (token.ticker !== "TIMBA") {
-          result += `\n${escapeHtml(token.ticker)} balance: ${escapeHtml(token.formatted)} ${escapeHtml(token.ticker)}`;
-        }
-      }
-      return result;
-    },
+    buildWalletCaption,
     createWalletKeyboard: () => ({} as any),
     WINNER_VIDEO_ID: null,
   });
@@ -112,15 +101,15 @@ test("onBalance in group sends balance privately to user", async () => {
     expect(sendMessageCalls[0].chatId).toBe(1); // user ID from makeCtx
     const text = String(sendMessageCalls[0].text);
     expect(text).toContain("WALLETADDR");
-    expect(text).toContain("1.000000 SOL");
-    expect(text).toContain("1 USDC");
+    expect(text).toContain("SOL: 1.000000 SOL ($100.00)");
+    expect(text).toContain("USDC: 1 ($100.00)");
     expect(sendMessageCalls[0].options.parse_mode).toBe("HTML");
   } else if (sendVideoCalls.length > 0) {
     expect(sendVideoCalls[0].chatId).toBe(1); // user ID from makeCtx
     const text = String(sendVideoCalls[0].options.caption);
     expect(text).toContain("WALLETADDR");
-    expect(text).toContain("1.000000 SOL");
-    expect(text).toContain("1 USDC");
+    expect(text).toContain("SOL: 1.000000 SOL ($100.00)");
+    expect(text).toContain("USDC: 1 ($100.00)");
     expect(sendVideoCalls[0].options.parse_mode).toBe("HTML");
   }
 });
@@ -168,17 +157,7 @@ test("onBalance merges WSOL and sends privately to user", async () => {
     },
     handleCommandError: async () => {},
     getPriceUSD: async () => 100,
-    buildWalletCaption: (sol: string, _tokens: any[], addr: string, solPrice?: number, _timbaPrice?: number) => {
-      // Simple HTML escaping for test
-      const escapeHtml = (str: string) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-      let result = `Solana Address · 🅴\n\n<code>${escapeHtml(addr)}</code>\n\nFee balance: ${escapeHtml(sol)} SOL ($${solPrice || 0})\nTimba balance: 0 TIMBA ($0.00)`;
-      for (const token of _tokens) {
-        if (token.ticker !== "TIMBA") {
-          result += `\n${escapeHtml(token.ticker)} balance: ${escapeHtml(token.formatted)} ${escapeHtml(token.ticker)}`;
-        }
-      }
-      return result;
-    },
+    buildWalletCaption,
     createWalletKeyboard: () => ({} as any),
     WINNER_VIDEO_ID: null,
   });
@@ -195,22 +174,22 @@ test("onBalance merges WSOL and sends privately to user", async () => {
     expect(sendMessageCalls[0].chatId).toBe(1); // user ID
     const message = String(sendMessageCalls[0].text);
     expect(message).toContain("ADDR123");
-    expect(message).toContain("1.500000 SOL"); // 1 SOL + 0.5 WSOL
-    expect(message).toContain("1.00 AAA");
-    expect(message).toContain("2.00 BBB");
-    expect(message).toContain("3.00 CCC");
-    expect(message).toContain("4.00 DDD");
-    expect(message).toContain("5.00 EEE");
+    expect(message).toContain("SOL: 1.500000 SOL ($150.00)");
+    expect(message).toContain("AAA: 1.00 ($100.00)");
+    expect(message).toContain("BBB: 2.00 ($200.00)");
+    expect(message).toContain("CCC: 3.00 ($300.00)");
+    expect(message).toContain("DDD: 4.00 ($400.00)");
+    expect(message).toContain("EEE: 5.00 ($500.00)");
   } else if (sendVideoCalls.length > 0) {
     expect(sendVideoCalls[0].chatId).toBe(1); // user ID
     const message = String(sendVideoCalls[0].options.caption);
     expect(message).toContain("ADDR123");
-    expect(message).toContain("1.500000 SOL"); // 1 SOL + 0.5 WSOL
-    expect(message).toContain("1.00 AAA");
-    expect(message).toContain("2.00 BBB");
-    expect(message).toContain("3.00 CCC");
-    expect(message).toContain("4.00 DDD");
-    expect(message).toContain("5.00 EEE");
+    expect(message).toContain("SOL: 1.500000 SOL ($150.00)");
+    expect(message).toContain("AAA: 1.00 ($100.00)");
+    expect(message).toContain("BBB: 2.00 ($200.00)");
+    expect(message).toContain("CCC: 3.00 ($300.00)");
+    expect(message).toContain("DDD: 4.00 ($400.00)");
+    expect(message).toContain("EEE: 5.00 ($500.00)");
   }
 });
 
@@ -250,17 +229,7 @@ test("onBalance escapes HTML-sensitive values when sending privately", async () 
     },
     handleCommandError: async () => {},
     getPriceUSD: async () => 100,
-    buildWalletCaption: (sol: string, _tokens: any[], addr: string, solPrice?: number, _timbaPrice?: number) => {
-      // Simple HTML escaping for test
-      const escapeHtml = (str: string) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-      let result = `Solana Address · 🅴\n\n<code>${escapeHtml(addr)}</code>\n\nFee balance: ${escapeHtml(sol)} SOL ($${solPrice || 0})\nTimba balance: 0 TIMBA ($0.00)`;
-      for (const token of _tokens) {
-        if (token.ticker !== "TIMBA") {
-          result += `\n${escapeHtml(token.ticker)} balance: ${escapeHtml(token.formatted)} ${escapeHtml(token.ticker)}`;
-        }
-      }
-      return result;
-    },
+    buildWalletCaption,
     createWalletKeyboard: () => ({} as any),
     WINNER_VIDEO_ID: null,
   });
@@ -277,13 +246,13 @@ test("onBalance escapes HTML-sensitive values when sending privately", async () 
     expect(sendMessageCalls[0].chatId).toBe(1); // user ID
     const output = String(sendMessageCalls[0].text);
     expect(output).toContain('<code>ADDR&lt;&amp;&quot;</code>');
-    expect(output).toContain("&lt;1 &amp; more&gt; SOL");
-    expect(output).toContain("2 &amp; change &lt;T&amp;&quot;");
+    expect(output).toContain('SOL: &lt;1 &amp; more&gt; SOL ($100.00)');
+    expect(output).toContain('&lt;T&amp;&quot;: 2 &amp; change ($200.00)');
   } else if (sendVideoCalls.length > 0) {
     expect(sendVideoCalls[0].chatId).toBe(1); // user ID
     const output = String(sendVideoCalls[0].options.caption);
     expect(output).toContain('<code>ADDR&lt;&amp;&quot;</code>');
-    expect(output).toContain("&lt;1 &amp; more&gt; SOL");
-    expect(output).toContain("2 &amp; change &lt;T&amp;&quot;");
+    expect(output).toContain('SOL: &lt;1 &amp; more&gt; SOL ($100.00)');
+    expect(output).toContain('&lt;T&amp;&quot;: 2 &amp; change ($200.00)');
   }
 });

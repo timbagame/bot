@@ -15,6 +15,7 @@ import {
   createAssociatedTokenAccountInstruction,
   createTransferCheckedInstruction,
   createSyncNativeInstruction,
+  createCloseAccountInstruction,
   getAccount,
   TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
@@ -28,6 +29,7 @@ import {
   BLOCKHASH_CACHE_DURATION,
   MAX_RETRIES,
   CONFIRMATION_TIMEOUT_MS,
+  WSOL_MINT,
 } from "./constants";
 import { formatAmount } from "./format-amount";
 
@@ -824,12 +826,7 @@ export class WalletManager {
     const timeout = CONFIRMATION_TIMEOUT_MS;
     const pollInterval = 1000;
 
-    console.log(
-      `🔍 Confirming transaction ${signature.slice(
-        0,
-        8
-      )}... (timeout: ${timeout}ms)`
-    );
+    console.log(`🔍 Confirming transaction ${signature} (timeout: ${timeout}ms)`);
 
     while (Date.now() - startTime < timeout) {
       try {
@@ -838,7 +835,7 @@ export class WalletManager {
         if (result?.value) {
           if (result.value.err) {
             console.error(
-              `❌ Transaction ${signature.slice(0, 8)}... failed:`,
+              `❌ Transaction ${signature} failed:`,
               result.value.err
             );
             throw new Error(
@@ -851,7 +848,7 @@ export class WalletManager {
             result.value.confirmationStatus === "finalized"
           ) {
             console.log(
-              `✅ Transaction ${signature.slice(0, 8)}... confirmed in ${
+              `✅ Transaction ${signature} confirmed in ${
                 Date.now() - startTime
               }ms`
             );
@@ -860,7 +857,7 @@ export class WalletManager {
 
           if (result.value.confirmationStatus) {
             console.log(
-              `⏳ Transaction ${signature.slice(0, 8)}... status: ${
+              `⏳ Transaction ${signature} status: ${
                 result.value.confirmationStatus
               }`
             );
@@ -874,16 +871,13 @@ export class WalletManager {
           error.message?.includes("timeout")
         ) {
           console.warn(
-            `⚠️ Network issue checking ${signature.slice(0, 8)}..., retrying`
+            `⚠️ Network issue checking ${signature}, retrying`
           );
           await new Promise((resolve) => setTimeout(resolve, pollInterval * 2));
           continue;
         }
         console.error(
-          `❌ Error checking transaction status for ${signature.slice(
-            0,
-            8
-          )}...:`,
+          `❌ Error checking transaction status for ${signature}:`,
           error.message
         );
         throw error;
@@ -898,22 +892,19 @@ export class WalletManager {
         finalResult?.value?.confirmationStatus === "finalized"
       ) {
         console.log(
-          `✅ Transaction ${signature.slice(0, 8)}... confirmed on final check`
+          `✅ Transaction ${signature} confirmed on final check`
         );
         return;
       }
     } catch (error) {
       console.warn(
-        `⚠️ Error on final check for ${signature.slice(0, 8)}...:`,
+        `⚠️ Error on final check for ${signature}:`,
         error
       );
     }
 
     console.error(
-      `⏰ Transaction confirmation timeout for ${signature.slice(
-        0,
-        8
-      )}... after ${timeout}ms`
+      `⏰ Transaction confirmation timeout for ${signature} after ${timeout}ms`
     );
     throw new Error(
       `Transaction confirmation timeout after ${timeout}ms. Transaction may still succeed - check signature ${signature}`
@@ -953,7 +944,7 @@ export class WalletManager {
       });
     });
 
-    console.log(`📤 Transaction sent: ${signature.slice(0, 8)}...`);
+    console.log(`📤 Transaction sent: ${signature}`);
     return signature;
   }
 
@@ -984,7 +975,7 @@ export class WalletManager {
       });
 
       console.log(
-        `📤 Serialized transaction sent: ${signature.slice(0, 8)}...`
+        `📤 Serialized transaction sent: ${signature}`
       );
       return signature;
     } catch (error: any) {
@@ -1063,9 +1054,7 @@ export class WalletManager {
     }
 
     const userKeypair = this.getKeyPair(telegramId);
-    const wsolMint = new PublicKey(
-      "So11111111111111111111111111111111111111112"
-    );
+    const wsolMint = new PublicKey(WSOL_MINT);
 
     const { address: wsolAta, instructions } =
       await this.findOrCreateAssociatedTokenAccount(
@@ -1085,5 +1074,51 @@ export class WalletManager {
 
     const allInstructions = [...instructions, transferIx, syncIx];
     return await this.sendTransaction(allInstructions, [userKeypair]);
+  }
+
+  public async unwrapSol(
+    telegramId: bigint
+  ): Promise<{ signature: string; amountLamports: number }> {
+    const userKeypair = this.getKeyPair(telegramId);
+    const wsolMint = new PublicKey(WSOL_MINT);
+
+    const wsolAta = await getAssociatedTokenAddress(
+      wsolMint,
+      userKeypair.publicKey,
+      false,
+      TOKEN_PROGRAM_ID
+    );
+
+    await this.throttle();
+    let accountInfo;
+    try {
+      accountInfo = await getAccount(this.connection, wsolAta, "confirmed");
+    } catch (error) {
+      throw new Error("No WSOL account found to unwrap.");
+    }
+
+    const amountLamports = Number(accountInfo.amount);
+    if (!Number.isFinite(amountLamports) || amountLamports <= 0) {
+      throw new Error("Your WSOL account is already empty.");
+    }
+    if (!Number.isSafeInteger(amountLamports)) {
+      throw new Error(
+        "WSOL balance is too large to unwrap in a single transaction."
+      );
+    }
+
+    const syncIx = createSyncNativeInstruction(wsolAta);
+    const closeIx = createCloseAccountInstruction(
+      wsolAta,
+      userKeypair.publicKey,
+      userKeypair.publicKey
+    );
+
+    const signature = await this.sendTransaction(
+      [syncIx, closeIx],
+      [userKeypair]
+    );
+
+    return { signature, amountLamports };
   }
 }
