@@ -23,6 +23,8 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
   const { wallet, getCachedWalletData, getPriceUSD, buildWalletCaption, createWalletKeyboard, WINNER_VIDEO_ID } = deps;
 
   const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const formatUsdValue = (value: number) =>
+    Number.isFinite(value) ? value.toFixed(2) : "0.00";
   const keypair = wallet.getKeyPair(telegramId);
   const walletAddress = keypair.publicKey.toBase58();
   const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-6)}`;
@@ -97,8 +99,6 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
 
   try {
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-    const formattedSolBalance = wallet.formatSolBalance(solBalance);
-
     const solPriceUSD = await getPriceUSD("SOL");
     const solDecimalBalance = solBalance / LAMPORTS_PER_SOL;
     const solFormattedBalance = wallet.formatSolBalance(solBalance);
@@ -106,7 +106,7 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
       {
         ticker: "SOL",
         amount: solFormattedBalance,
-        usdValue: (solDecimalBalance * solPriceUSD).toFixed(2),
+        usdValue: formatUsdValue(solDecimalBalance * solPriceUSD),
         unit: "SOL",
       },
     ];
@@ -131,7 +131,7 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
       tokenLines.push({
         ticker: token.ticker,
         amount: formatted,
-        usdValue: (tokenDecimalBalance * tokenPriceUSD).toFixed(2),
+        usdValue: formatUsdValue(tokenDecimalBalance * tokenPriceUSD),
       });
     }
 
@@ -255,6 +255,8 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     try { clearWalletCache(telegramId); } catch {}
 
     // Get the same data as private chat using the existing logic
+    const formatUsdValue = (value: number) =>
+      Number.isFinite(value) ? value.toFixed(2) : "0.00";
     const playerData = await getPlayerData(telegramId);
     const approvedTokens = getApprovedTokens();
     const tokenBalancesToShow = await buildTokenBalances(telegramId, approvedTokens);
@@ -276,7 +278,7 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
       {
         ticker: "SOL",
         amount: formattedSolBalance,
-        usdValue: (solDecimalBalance * solPriceUSD).toFixed(2),
+        usdValue: formatUsdValue(solDecimalBalance * solPriceUSD),
         unit: "SOL",
       },
     ];
@@ -296,7 +298,7 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
       tokenLines.push({
         ticker: token.ticker,
         amount: formattedTokenBalance,
-        usdValue: (tokenDecimalBalance * tokenPriceUSD).toFixed(2),
+        usdValue: formatUsdValue(tokenDecimalBalance * tokenPriceUSD),
       });
     }
 
