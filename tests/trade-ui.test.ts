@@ -34,7 +34,7 @@ function extractTexts(kb: any): string[] {
 describe("trade ui helpers", () => {
   test("buy menu highlights owned tokens and payment actions", () => {
     const { message, keyboard } = buildBuyMenuUI({
-      walletAddress: "123456…ABCDEF",
+      walletAddress: "1234567890ABCDEF",
       formattedSolBalance: "1.000",
       totalUsd: 123.45,
       ownedTokenButtons: [
@@ -46,7 +46,7 @@ describe("trade ui helpers", () => {
     });
 
     expect(message).toContain("BUY TOKENS");
-    expect(message).toContain("123456…ABCDEF");
+    expect(message).toContain("1234567890ABCDEF");
     expect(message).toContain("$123.45");
     expect(message).toContain("Select a token below");
 
@@ -64,7 +64,7 @@ describe("trade ui helpers", () => {
 
   test("buy menu omits token payment option when no balances", () => {
     const { message, keyboard } = buildBuyMenuUI({
-      walletAddress: "ABC…XYZ",
+      walletAddress: "ABCXYZ123456",
       formattedSolBalance: "0.000",
       totalUsd: 0,
       ownedTokenButtons: [],
@@ -81,7 +81,7 @@ describe("trade ui helpers", () => {
 
   test("sell menu lists tokens or fallback button", () => {
     const withTokens = buildSellMenuUI({
-      walletAddress: "123…XYZ",
+      walletAddress: "123XYZ567890",
       tokenButtons: [
         { label: "TIMBA (25)", callbackData: "sell_token_TIMBA" },
         { label: "USDC (5)", callbackData: "sell_token_USDC" },
@@ -100,7 +100,7 @@ describe("trade ui helpers", () => {
     expect(callbacksWithTokens).toContain("main_wallet");
 
     const withoutTokens = buildSellMenuUI({
-      walletAddress: "123…XYZ",
+      walletAddress: "123XYZ567890",
       tokenButtons: [],
     });
 

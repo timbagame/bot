@@ -5664,9 +5664,8 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
       };
     });
 
-    const shortWallet = `${walletAddress.slice(0, 6)}…${walletAddress.slice(-6)}`;
     const { message, keyboard } = buildBuyMenuUI({
-      walletAddress: shortWallet,
+      walletAddress,
       formattedSolBalance,
       totalUsd: totalUSD,
       ownedTokenButtons,
@@ -5768,9 +5767,8 @@ bot.callbackQuery("cmd_sell", async (ctx) => {
       }
     }
 
-    const shortWallet = `${walletAddress.slice(0, 6)}…${walletAddress.slice(-6)}`;
     const { message, keyboard } = buildSellMenuUI({
-      walletAddress: shortWallet,
+      walletAddress,
       tokenButtons: sellTokenButtons,
     });
 
