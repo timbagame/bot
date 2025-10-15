@@ -13,6 +13,7 @@ import {
   GAME_INFO_LIMIT,
   GAME_EXPIRATION_BUFFER_TIME,
   MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
+  WSOL_MINT,
   getCoinflipVideoId,
   getGiveawayVideoId,
 } from "./constants";
@@ -48,6 +49,8 @@ const resolveGameVideoId = (gameType: string): string | undefined => {
   }
   return undefined;
 };
+
+const WRAP_SOL_FEE_BUFFER_LAMPORTS = 15_000; // ~0.000015 SOL buffer to cover wrap transaction fees
 
 // ================================
 // UTILITY FUNCTIONS
@@ -315,6 +318,106 @@ export class GameManager {
       );
       return null;
     }
+  }
+
+  private async ensureWrappedSolBalance(
+    telegramId: bigint,
+    requiredLamports: number,
+    currentTokenBalance: number,
+    currentSolBalance: number,
+    context: "create" | "join",
+    tokenTicker: string
+  ): Promise<
+    | { success: true; tokenBalance: number; solBalance: number }
+    | { success: false; error: string }
+  > {
+    if (currentTokenBalance >= requiredLamports) {
+      return {
+        success: true,
+        tokenBalance: currentTokenBalance,
+        solBalance: currentSolBalance,
+      };
+    }
+
+    const deficit = requiredLamports - currentTokenBalance;
+    if (deficit <= 0) {
+      return {
+        success: true,
+        tokenBalance: currentTokenBalance,
+        solBalance: currentSolBalance,
+      };
+    }
+
+    const projectedRemaining =
+      currentSolBalance - deficit - WRAP_SOL_FEE_BUFFER_LAMPORTS;
+    if (projectedRemaining < MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
+      const formattedDeficit = this.wallet.formatSolBalance(deficit);
+      const formattedBuffer = this.wallet.formatSolBalance(
+        MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS
+      );
+      return {
+        success: false,
+        error: `Not enough SOL to wrap ${formattedDeficit} SOL automatically.\n\nKeep at least ${formattedBuffer} SOL for fees before attempting to ${
+          context === "create" ? "create" : "join"
+        } a ${tokenTicker} game.`,
+      };
+    }
+
+    console.log(
+      `🔄 Wrapping ${this.wallet.formatSolBalance(
+        deficit
+      )} SOL into WSOL for game ${context}...`
+    );
+
+    try {
+      await this.wallet.wrapSol(telegramId, deficit);
+    } catch (error) {
+      const friendly = formatUserFriendlyError(error, this.wallet);
+      return {
+        success: false,
+        error:
+          `Failed to wrap SOL automatically before game ${
+            context === "create" ? "creation" : "join"
+          }.\n${friendly}`,
+      };
+    }
+
+    const [updatedTokenBalance, updatedSolBalance] = await Promise.all([
+      this.wallet.getTokenBalance(telegramId, WSOL_MINT, {
+        createIfMissing: true,
+      }),
+      this.wallet.getBalance(telegramId),
+    ]);
+
+    if (updatedTokenBalance < requiredLamports) {
+      return {
+        success: false,
+        error:
+          "Wrap completed but WSOL balance is still below the required stake. Top up SOL and try again.",
+      };
+    }
+
+    if (updatedSolBalance < MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
+      const formattedBuffer = this.wallet.formatSolBalance(
+        MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS
+      );
+      return {
+        success: false,
+        error: `Wrap completed but SOL balance fell below the safety buffer (${formattedBuffer} SOL). Add SOL for fees and try again.`,
+      };
+    }
+
+    console.log(
+      `✅ Wrapped SOL. New WSOL balance: ${this.wallet.formatSolBalance(
+        updatedTokenBalance
+      )}, remaining SOL: ${this.wallet.formatSolBalance(updatedSolBalance)}`
+    );
+
+    return {
+      success: true,
+      tokenBalance: updatedTokenBalance,
+      solBalance: updatedSolBalance,
+    };
   }
 
   // ================================
@@ -1272,6 +1375,7 @@ export class GameManager {
       tokenMint: string;
       tokenTicker: string;
       isSol: boolean;
+      requestedNativeSol?: boolean;
     },
     maxTickets: number,
     minTickets: number,
@@ -1284,30 +1388,46 @@ export class GameManager {
     gameAddress?: string;
     autoJoinResult?: { success: boolean; error?: string };
   }> {
-    // Validate that SOL is not used for games
-    if (parsedAmount.isSol) {
+    if (parsedAmount.isSol && !parsedAmount.requestedNativeSol) {
       return {
         success: false,
         error:
-          `❌ Native SOL games are not supported!\n\n` +
-          `💡 Supported tokens for games:\n` +
-          `• Use approved SPL tokens (check with /balance)\n` +
-          `• For SOL-based games, use WSOL instead\n` +
-          `• You can wrap SOL to WSOL using /wrap command\n\n` +
-          `Example: /cf 1000 WSOL 2`,
+          `❌ Native SOL games must be routed through WSOL.\n` +
+          `Please retry using SOL (auto-wrapped) or another SPL token.`,
       };
     }
 
     const { tokenMint, tokenTicker, amount } = parsedAmount;
+    const requestedSol = parsedAmount.requestedNativeSol === true;
 
     try {
       const metadata = await this.wallet.getTokenMetadata(tokenMint);
       const playerKp = this.wallet.getKeyPair(telegramId);
-      let tokenBalance = await this.wallet.getTokenBalance(
-        telegramId,
-        tokenMint,
-        { createIfMissing: true }
-      );
+      let [tokenBalance, solBalance] = await Promise.all([
+        this.wallet.getTokenBalance(telegramId, tokenMint, {
+          createIfMissing: true,
+        }),
+        this.wallet.getBalance(telegramId),
+      ]);
+
+      if (requestedSol) {
+        const ensured = await this.ensureWrappedSolBalance(
+          telegramId,
+          amount,
+          tokenBalance,
+          solBalance,
+          "create",
+          tokenTicker
+        );
+
+        if (!ensured.success) {
+          return { success: false, error: ensured.error };
+        }
+
+        tokenBalance = ensured.tokenBalance;
+        solBalance = ensured.solBalance;
+      }
+
       if (tokenBalance < amount) {
         return {
           success: false,
@@ -1324,7 +1444,7 @@ export class GameManager {
       const reservedTicketAmount = amount;
       const swapAllowanceRaw = Math.max(tokenBalance - reservedTicketAmount, 0);
 
-      let lamportsBalance = await this.wallet.getBalance(telegramId);
+      let lamportsBalance = solBalance;
       if (lamportsBalance < MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
         if (swapAllowanceRaw <= 0) {
           const formattedStake = this.wallet.formatTokenBalance(
@@ -1759,11 +1879,36 @@ export class GameManager {
         const metadata = await this.wallet.getTokenMetadata(
           gameData.token_mint
         );
-        let tokenBalance = await this.wallet.getTokenBalance(
-          telegramId,
-          gameData.token_mint,
-          { createIfMissing: true }
-        );
+        let [tokenBalance, solBalance] = await Promise.all([
+          this.wallet.getTokenBalance(telegramId, gameData.token_mint, {
+            createIfMissing: true,
+          }),
+          this.wallet.getBalance(telegramId),
+        ]);
+
+        const normalizedTicker =
+          gameData.token_ticker?.toUpperCase?.() ?? "";
+        const isSolBackedGame =
+          gameData.token_mint === WSOL_MINT &&
+          (normalizedTicker === "SOL" || normalizedTicker === "WSOL");
+
+        if (isSolBackedGame) {
+          const ensured = await this.ensureWrappedSolBalance(
+            telegramId,
+            gameAmount,
+            tokenBalance,
+            solBalance,
+            "join",
+            gameData.token_ticker || "SOL"
+          );
+
+          if (!ensured.success) {
+            return { success: false, error: ensured.error };
+          }
+
+          tokenBalance = ensured.tokenBalance;
+          solBalance = ensured.solBalance;
+        }
 
         if (tokenBalance < gameAmount) {
           return {
@@ -1783,7 +1928,7 @@ export class GameManager {
         const reservedTicketAmount = gameAmount;
         const swapAllowanceRaw = Math.max(tokenBalance - reservedTicketAmount, 0);
 
-        const lamportsBalance = await this.wallet.getBalance(telegramId);
+        let lamportsBalance = solBalance;
         if (lamportsBalance < MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
           if (swapAllowanceRaw <= 0) {
             const formattedStake = this.wallet.formatTokenBalance(

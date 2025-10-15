@@ -21,7 +21,7 @@ test("onBalance in private chat clears cache and calls showWalletUI", async () =
     isPrivateChat: (c: any) => c.chat.type === "private",
     clearWalletCache: (id: bigint) => { cleared = id; },
     showWalletUI: async () => { shown++; },
-    getPlayerData: async () => ({ keypair: { publicKey: { toBase58: () => "addr" } }, solBalance: 0 }),
+    getPlayerData: async () => ({ keypair: { publicKey: { toBase58: () => "addr" } }, solBalance: 0, wsolBalance: 0 }),
     getApprovedTokens: () => [],
     buildTokenBalances: async () => [],
     TOKENS_LIST: [],
@@ -43,7 +43,7 @@ test("onBalance private chat errors call handler", async () => {
     isPrivateChat: () => true,
     clearWalletCache: (_: bigint) => { throw new Error("cache-fail"); },
     showWalletUI: async () => { throw new Error("ui-fail"); },
-    getPlayerData: async () => ({ keypair: { publicKey: { toBase58: () => "addr" } }, solBalance: 0 }),
+    getPlayerData: async () => ({ keypair: { publicKey: { toBase58: () => "addr" } }, solBalance: 0, wsolBalance: 0 }),
     getApprovedTokens: () => [],
     buildTokenBalances: async () => [],
     TOKENS_LIST: [],
@@ -77,7 +77,7 @@ test("onBalance in group sends balance privately to user", async () => {
     isPrivateChat: () => false,
     clearWalletCache: (_: any) => {},
     showWalletUI: async () => {},
-    getPlayerData: async () => ({ keypair: { publicKey: { toBase58: () => "WALLETADDR" } }, solBalance: 1000000000 }),
+    getPlayerData: async () => ({ keypair: { publicKey: { toBase58: () => "WALLETADDR" } }, solBalance: 1000000000, wsolBalance: 0 }),
     getApprovedTokens: () => [{ token_mint: "USDC", token_ticker: "USDC", decimals: 6 }],
     buildTokenBalances: async () => [{ mint: "USDC", ticker: "USDC", balance: 1000000, decimals: 6 }],
     TOKENS_LIST: [{ mint: "So11111111111111111111111111111111111111112", ticker: "WSOL" }],
@@ -147,6 +147,7 @@ test("onBalance merges WSOL and sends privately to user", async () => {
     getPlayerData: async () => ({
       keypair: { publicKey: { toBase58: () => "ADDR123" } },
       solBalance: 1_000_000_000,
+      wsolBalance: 0,
     }),
     getApprovedTokens: () => tokens.map(({ mint, ticker, decimals }) => ({ token_mint: mint, token_ticker: ticker, decimals })),
     buildTokenBalances: async () => tokens,
@@ -217,6 +218,7 @@ test("onBalance escapes HTML-sensitive values when sending privately", async () 
     getPlayerData: async () => ({
       keypair: { publicKey: { toBase58: () => 'ADDR<&"' } },
       solBalance: 1_000_000_000,
+      wsolBalance: 0,
     }),
     getApprovedTokens: () => [{ token_mint: "mint", token_ticker: '<T&"', decimals: 6 }],
     buildTokenBalances: async () => [

@@ -631,12 +631,14 @@ const determineFractionDigits = (
 
 const getPlayerData = async (
   telegramId: bigint,
-  tokenMint?: string
+  tokenMint?: string,
+  options: { includeWsol?: boolean } = {}
 ): Promise<PlayerData> => {
   const keypair = wallet.getKeyPair(telegramId);
   const effectiveTokenMint = tokenMint || DEFAULT_TOKEN_MINT;
+  const includeWsol = options.includeWsol === true;
 
-  const [tokenBalance, solBalance] = await Promise.all([
+  const balancePromises: Array<Promise<number>> = [
     wallet.getTokenBalance(
       telegramId,
       effectiveTokenMint,
@@ -645,12 +647,21 @@ const getPlayerData = async (
         : undefined
     ),
     wallet.getBalance(telegramId),
-  ]);
+  ];
+
+  if (includeWsol) {
+    balancePromises.push(wallet.getTokenBalance(telegramId, WSOL_MINT));
+  }
+
+  const results = await Promise.all(balancePromises);
+  const tokenBalance = results[0]!;
+  const solBalance = results[1]!;
+  const wsolBalance = includeWsol ? results[2]! : 0;
 
   // Funds are handled per-game; no separate aggregate player balance account
   const gameBalance = 0;
 
-  return { keypair, tokenBalance, solBalance, gameBalance };
+  return { keypair, tokenBalance, solBalance, wsolBalance, gameBalance };
 };
 
 const isUserGroupAdmin = async (
@@ -677,19 +688,25 @@ const validateAndProcessTransaction = async (
   amount: number,
   isSol: boolean,
   description: string,
-  transactionFn: (playerData: PlayerData) => Promise<string>,
+  transactionFn: (
+    playerData: PlayerData
+  ) => Promise<string | { signature: string; message?: string }>,
   showSolscanLink: boolean = false
 ): Promise<void> => {
-  const playerData = await getPlayerData(telegramId);
+  const playerData = await getPlayerData(telegramId, undefined, {
+    includeWsol: isSol,
+  });
   const metadata = await getDefaultTokenMetadata();
 
   // Validate balance
   const totalBalance = isSol
-    ? playerData.solBalance
+    ? playerData.solBalance + playerData.wsolBalance
     : playerData.tokenBalance + playerData.gameBalance;
   if (totalBalance < amount) {
     const balanceStr = isSol
-      ? `${wallet.formatSolBalance(totalBalance)} SOL`
+      ? `${wallet.formatSolBalance(
+          playerData.solBalance + playerData.wsolBalance
+        )} SOL`
       : `${wallet.formatTokenBalance(
           totalBalance,
           metadata.decimals
@@ -710,23 +727,54 @@ const validateAndProcessTransaction = async (
     return;
   }
 
+  if (
+    isSol &&
+    playerData.solBalance < amount &&
+    playerData.solBalance + playerData.wsolBalance >= amount
+  ) {
+    await ctx.reply(
+      "You have enough WSOL to cover this amount. Use `/withdraw ADDRESS all` to withdraw everything at once, or unwrap WSOL with /unwrap before sending a partial SOL amount.",
+      {
+        reply_to_message_id: ctx.message?.message_id,
+      }
+    );
+    return;
+  }
+
   // Process transaction with loading state
   const processingMsg = await ctx.reply(`Processing ${description}...`, {
     reply_to_message_id: ctx.message?.message_id,
   });
 
   try {
-    const tx = await transactionFn(playerData);
-    const txString = tx ? tx.toString().trim() : "";
+    const txResult = await transactionFn(playerData);
+    let txString = "";
+    let overrideMessage: string | undefined;
+
+    if (typeof txResult === "string") {
+      txString = txResult.toString().trim();
+    } else if (
+      txResult &&
+      typeof txResult === "object" &&
+      typeof txResult.signature === "string"
+    ) {
+      txString = txResult.signature.trim();
+      overrideMessage = txResult.message;
+    }
 
     // Debug: Log transaction details when creating Solscan link
     if (showSolscanLink) {
       console.log(`🔗 Solscan link requested. txString: "${txString}", length: ${txString?.length || 0}`);
     }
 
-    let successMessage = txString
-      ? `${description} successful! 💸\n\n<code>${txString}</code>`
-      : `${description} successful! 💸`;
+    let successMessage: string;
+    if (overrideMessage) {
+      successMessage = overrideMessage;
+    } else {
+      successMessage = txString
+        ? `${description} successful! 💸\n\n<code>${txString}</code>`
+        : `${description} successful! 💸`;
+    }
 
     // Add Solscan link if requested and we have a transaction signature
     if (showSolscanLink && txString) {
@@ -1522,6 +1570,76 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
       ctx,
       "Invalid wallet address. Please provide a valid Solana address."
     );
+  }
+
+  const amountArgRaw = args[2]?.trim();
+  const tokenArgRaw = args[3]?.trim();
+  const isAllRequest =
+    amountArgRaw &&
+    ["all", "max"].includes(amountArgRaw.toLowerCase());
+
+  if (isAllRequest) {
+    const wantsSol =
+      !tokenArgRaw || tokenArgRaw.toUpperCase() === "SOL";
+    if (!wantsSol) {
+      return replyToMessage(
+        ctx,
+        "Use a numeric amount when withdrawing SPL tokens. `all` is only supported for SOL."
+      );
+    }
+
+    try {
+      const [nativeLamports, wsolLamports] = await Promise.all([
+        wallet.getBalance(telegramId),
+        wallet.getTokenBalance(telegramId, WSOL_MINT),
+      ]);
+      const totalLamports = nativeLamports + wsolLamports;
+
+      if (totalLamports <= 0) {
+        return replyToMessage(
+          ctx,
+          "Your wallet has no SOL or WSOL available to withdraw."
+        );
+      }
+
+      await validateAndProcessTransaction(
+        ctx,
+        telegramId,
+        totalLamports,
+        true,
+        "SOL withdrawal",
+        async () => {
+          const result = await wallet.withdrawAllSol(
+            telegramId,
+            toAddress
+          );
+
+          const totalText = wallet.formatSolBalance(
+            result.totalLamportsSent
+          );
+          const nativeText =
+            result.nativeLamportsSent > 0
+              ? `\n• Native SOL: ${wallet.formatSolBalance(
+                  result.nativeLamportsSent
+                )} SOL`
+              : "";
+          const wsolText =
+            result.wsolLamportsSent > 0
+              ? `\n• WSOL (auto-unwrapped): ${wallet.formatSolBalance(
+                  result.wsolLamportsSent
+                )} SOL`
+              : "";
+
+          const message =
+            `<b>Withdrawal completed</b> 💸\n\nSent ${totalText} SOL${nativeText}${wsolText}\n\n<code>${result.signature}</code>`;
+
+          return { signature: result.signature, message };
+        }
+      );
+    } catch (error: any) {
+      await handleCommandError(ctx, error, "withdraw");
+    }
+    return;
   }
 
   // Allow SOL withdrawals by parsing in a non-game context

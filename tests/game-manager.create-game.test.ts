@@ -2,6 +2,7 @@ import { describe, test, expect } from "bun:test";
 import { GameManager } from "../src/utils/game";
 import { PublicKey, Keypair } from "@solana/web3.js";
 import { PDAManager } from "../src/utils/pda";
+import { WSOL_MINT } from "../src/utils/constants";
 
 function resetGM() {
   // @ts-ignore
@@ -25,12 +26,36 @@ function makeProgram() {
 }
 
 describe("GameManager.createGame", () => {
-  test("rejects native SOL games", async () => {
+  test("surface helpful error when SOL auto-wrap cannot proceed", async () => {
     resetGM();
-    const gm = GameManager.getInstance(makeProgram(), {} as any, {} as any);
-    const res = await gm.createGame("coinflip", { amount: 1, tokenMint: "M", tokenTicker: "TOK", isSol: true }, 2, 2, 60, 1n);
+    const wallet = {
+      getTokenMetadata: async () => ({ decimals: 9 }),
+      getKeyPair: (_: bigint) => Keypair.generate(),
+      getTokenBalance: async () => 0,
+      getBalance: async () => 2_000_000,
+      wrapSol: async () => {
+        throw new Error("should not wrap");
+      },
+      formatSolBalance: (lamports: number) => (lamports / 1_000_000_000).toFixed(6),
+      formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toString(),
+    } as any;
+    const gm = GameManager.getInstance(makeProgram(), wallet, { savePlayerMapping: () => {} } as any);
+    const res = await gm.createGame(
+      "coinflip",
+      {
+        amount: 1_000_000,
+        tokenMint: WSOL_MINT,
+        tokenTicker: "SOL",
+        isSol: false,
+        requestedNativeSol: true,
+      },
+      2,
+      2,
+      60,
+      1n
+    );
     expect(res.success).toBe(false);
-    expect(String(res.error)).toContain("SOL games are not supported");
+    expect(String(res.error)).toContain("Not enough SOL");
   });
 
   test("errors on insufficient balance with formatted message", async () => {
