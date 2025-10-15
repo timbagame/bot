@@ -27,8 +27,24 @@ const TOKENS: TokenConfig[] = [
     ticker: "TIMBA",
   },
   {
+    mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    ticker: "USDC",
+  },
+  {
+    mint: "A6rSPi9JmJgVkW6BatsA6MjFYLseizPM2Fnt92coFjf4",
+    ticker: "MAGAIBA",
+  },
+  {
     mint: "So11111111111111111111111111111111111111112",
     ticker: "WSOL",
+  },
+  {
+    mint: "FkBF9u1upwEMUPxnXjcydxxVSxgr8f3k1YXbz7G7bmtA",
+    ticker: "GLORP",
+  },
+  {
+    mint: "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC",
+    ticker: "AI16Z",
   },
 ];
 
