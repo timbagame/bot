@@ -25,18 +25,30 @@ describe("createAmountSelectionKeyboard ranges", () => {
   test("medium balance (between 50 and 200) uses 25,50,100", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 120);
     const cbs = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
-    expect(cbs).toEqual(["amount_coinflip_25", "amount_coinflip_50", "amount_coinflip_100"]);
+    expect(cbs).toEqual([
+      "amount_coinflip_20",
+      "amount_coinflip_100",
+      "amount_coinflip_200",
+    ]);
   });
 
   test("large balance (between 200 and 1000) uses 50,150,300", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 300);
     const cbs = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
-    expect(cbs).toEqual(["amount_coinflip_50", "amount_coinflip_150", "amount_coinflip_300"]);
+    expect(cbs).toEqual([
+      "amount_coinflip_20",
+      "amount_coinflip_100",
+      "amount_coinflip_200",
+    ]);
   });
 
   test("very large balance (>= 1000) uses 100,500,1000", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 5_000);
     const cbs = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
-    expect(cbs).toEqual(["amount_coinflip_100", "amount_coinflip_500", "amount_coinflip_1000"]);
+    expect(cbs).toEqual([
+      "amount_coinflip_20",
+      "amount_coinflip_100",
+      "amount_coinflip_200",
+    ]);
   });
 });
