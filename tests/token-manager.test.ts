@@ -3,6 +3,7 @@ import { TokenManager } from "../src/utils/token-manager";
 import { ChatDatabase } from "../src/utils/chat-database";
 import { TokenDatabase } from "../src/utils/token-database";
 import { resetTestDatabase } from "./helpers/database";
+import { WSOL_MINT } from "../src/utils/constants";
 
 // Clean DBs and singletons before each test
 beforeEach(() => {
@@ -27,12 +28,15 @@ function makeWalletStub() {
   } as any;
 }
 
-test("parseAmount rejects SOL for game context with helpful message", async () => {
+test("parseAmount maps SOL to WSOL for game context", async () => {
   const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
   const res = await tm.parseAmount(["/cf", "1", "SOL"], 1, 123, "game");
-  expect(res.success).toBe(false);
-  expect(res.error).toBe("sol_not_supported");
-  expect(res.solError?.toLowerCase()).toContain("wrap sol");
+  expect(res.success).toBe(true);
+  const data = res.data!;
+  expect(data.isSol).toBe(false);
+  expect(data.requestedNativeSol).toBe(true);
+  expect(data.tokenMint).toBe(WSOL_MINT);
+  expect(data.tokenTicker).toBe("SOL");
 });
 
 test("parseAmount accepts SOL for tips and formats as SOL", async () => {
@@ -43,6 +47,7 @@ test("parseAmount accepts SOL for tips and formats as SOL", async () => {
   expect(d.isSol).toBe(true);
   expect(d.tokenTicker).toBe("SOL");
   expect(d.formattedAmount).toContain("SOL");
+  expect(d.requestedNativeSol).toBe(true);
 });
 
 test("parseAmount reports unknown token tickers distinctly", async () => {

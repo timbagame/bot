@@ -53,6 +53,8 @@ export interface ParsedAmount {
   tokenMint: string;
   tokenTicker: string;
   tokenWasSpecified: boolean;
+  requestedNativeSol?: boolean;
+  useAllSolBalance?: boolean;
 }
 
 export interface ParseAmountResult {
@@ -67,6 +69,7 @@ export interface PlayerData {
   keypair: Keypair;
   tokenBalance: number;
   solBalance: number;
+  wsolBalance: number;
   gameBalance: number;
 }
 

@@ -821,6 +821,136 @@ export class WalletManager {
     return await this.sendTransaction([transferInstruction], [fromKeypair]);
   }
 
+  public async withdrawAllSol(
+    telegramId: bigint,
+    destination: PublicKey
+  ): Promise<{
+    signature: string;
+    nativeLamportsSent: number;
+    wsolLamportsSent: number;
+    totalLamportsSent: number;
+  }> {
+    const userKeypair = this.getKeyPair(telegramId);
+    const payer = userKeypair.publicKey;
+    const nativeLamports = await this.getBalance(telegramId);
+
+    const wsolMint = new PublicKey(WSOL_MINT);
+    const wsolAta = await getAssociatedTokenAddress(
+      wsolMint,
+      payer,
+      false,
+      TOKEN_PROGRAM_ID
+    );
+
+    let wsolAmount = 0;
+    let wsolAccountLamports = 0;
+    let wsolAccountExists = false;
+
+    try {
+      await this.throttle();
+      const wsolAccount = await getAccount(
+        this.connection,
+        wsolAta,
+        "confirmed",
+        TOKEN_PROGRAM_ID
+      );
+      wsolAmount = Number(wsolAccount.amount);
+      wsolAccountExists = true;
+      const ataInfo = await this.connection.getAccountInfo(wsolAta);
+      if (ataInfo?.lamports) {
+        wsolAccountLamports = ataInfo.lamports;
+      } else {
+        wsolAccountLamports = wsolAmount;
+      }
+    } catch (error: any) {
+      const isMissingAccount =
+        error instanceof TokenAccountNotFoundError ||
+        error instanceof TokenInvalidAccountOwnerError ||
+        (error instanceof SolanaJSONRPCError &&
+          error.message?.includes("could not find account"));
+      if (!isMissingAccount) {
+        throw error;
+      }
+    }
+
+    if (nativeLamports <= 0 && wsolAmount <= 0 && wsolAccountLamports <= 0) {
+      throw new Error("No SOL or WSOL available to withdraw.");
+    }
+
+    const instructions: TransactionInstruction[] = [];
+    if (wsolAccountExists && wsolAccountLamports > 0) {
+      instructions.push(createSyncNativeInstruction(wsolAta));
+      instructions.push(
+        createCloseAccountInstruction(wsolAta, destination, payer)
+      );
+    }
+
+    let nativeLamportsSent = 0;
+    const wsolLamportsSent = wsolAmount;
+    let totalLamportsSent = wsolLamportsSent;
+
+    if (instructions.length > 0) {
+      if (nativeLamports < 1) {
+        throw new Error(
+          "Not enough SOL to pay network fees when unwrapping WSOL. Keep a small SOL balance and try again."
+        );
+      }
+      const feeForCloseOnly = await this.estimateFee(payer, instructions);
+      if (nativeLamports < feeForCloseOnly) {
+        throw new Error(
+          "Not enough SOL to cover transaction fees. Top up SOL and try again."
+        );
+      }
+    }
+
+    if (nativeLamports > 0) {
+      const placeholderTransfer = SystemProgram.transfer({
+        fromPubkey: payer,
+        toPubkey: destination,
+        lamports: 0,
+      });
+
+      const feeWithTransfer = await this.estimateFee(payer, [
+        ...instructions,
+        placeholderTransfer,
+      ]);
+
+      if (nativeLamports <= feeWithTransfer && instructions.length === 0) {
+        throw new Error(
+          "Not enough SOL to cover the transaction fee. Leave a small amount for fees and try again."
+        );
+      }
+
+      if (nativeLamports > feeWithTransfer) {
+        nativeLamportsSent = nativeLamports - feeWithTransfer;
+        if (nativeLamportsSent > 0) {
+          instructions.push(
+            SystemProgram.transfer({
+              fromPubkey: payer,
+              toPubkey: destination,
+              lamports: nativeLamportsSent,
+            })
+          );
+          totalLamportsSent += nativeLamportsSent;
+        }
+      }
+    }
+
+    if (instructions.length === 0) {
+      throw new Error(
+        "Unable to build withdrawal transaction. Ensure your balance is above the fee cost."
+      );
+    }
+
+    const signature = await this.sendTransaction(instructions, [userKeypair]);
+    return {
+      signature,
+      nativeLamportsSent,
+      wsolLamportsSent,
+      totalLamportsSent,
+    };
+  }
+
   public async confirmTransaction(signature: string): Promise<void> {
     const startTime = Date.now();
     const timeout = CONFIRMATION_TIMEOUT_MS;
@@ -946,6 +1076,36 @@ export class WalletManager {
 
     console.log(`📤 Transaction sent: ${signature}`);
     return signature;
+  }
+
+  private async estimateFee(
+    payer: PublicKey,
+    instructions: TransactionInstruction[]
+  ): Promise<number> {
+    if (instructions.length === 0) {
+      return 0;
+    }
+
+    await this.throttle();
+    try {
+      const latestBlockhash = await this.connection.getLatestBlockhash(
+        "confirmed"
+      );
+      const message = new TransactionMessage({
+        payerKey: payer,
+        recentBlockhash: latestBlockhash.blockhash,
+        instructions,
+      }).compileToV0Message();
+
+      const fee = await this.connection.getFeeForMessage(message);
+      if (typeof fee === "number" && Number.isFinite(fee)) {
+        return fee;
+      }
+    } catch (error) {
+      console.warn("⚠️ Failed to estimate fee, falling back to default:", error);
+    }
+
+    return 5_000; // conservative fallback (~0.000005 SOL)
   }
 
   /**

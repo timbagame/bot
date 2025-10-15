@@ -4,6 +4,7 @@ import { TokenDatabase } from "./token-database";
 import { WalletManager } from "./wallet";
 import { PumpFunClient, isPotentialPumpFunToken } from "./pump-fun";
 import type { ParseAmountResult, ChatTokenConfig, KnownToken } from "../types";
+import { WSOL_MINT } from "./constants";
 
 // ================================
 // MULTI-TOKEN MANAGER
@@ -77,29 +78,26 @@ export class TokenManager {
     let resolvedTokenTicker = tokenTicker;
     let isSol = false;
     let tokenWasSpecified = false;
+    let requestedNativeSol = false;
 
     if (tokenArg) {
       const upperTokenArg = tokenArg.toUpperCase();
 
       if (upperTokenArg === "SOL") {
         if (context === "game") {
-          // Return error for SOL games
-          return {
-            success: false,
-            error: "sol_not_supported",
-            solError: "❌ Native SOL games are not supported!\n\n" +
-                     "💡 Supported tokens for games:\n" +
-                     "• Use approved SPL tokens (check with /balance)\n" +
-                     "• For SOL-based games, use WSOL instead\n" +
-                     "• You can wrap SOL to WSOL using /wrap command\n\n" +
-                     "Example: /cf 1000 WSOL 2"
-          };
+          // Allow SOL for games by mapping to WSOL mint under the hood
+          resolvedTokenMint = WSOL_MINT;
+          resolvedTokenTicker = "SOL";
+          requestedNativeSol = true;
+          tokenWasSpecified = true;
+          isSol = false;
         } else {
           // Allow SOL for tips - set special values
           resolvedTokenMint = "SOL";
           resolvedTokenTicker = "SOL";
           isSol = true;
           tokenWasSpecified = true;
+          requestedNativeSol = true;
         }
       } else {
         // Check if it's a known token ticker
@@ -149,7 +147,7 @@ export class TokenManager {
     let amount: number;
     let formattedAmount: string;
 
-    if (isSol) {
+    if (isSol || requestedNativeSol) {
       amount = rawAmount * 1_000_000_000; // LAMPORTS_PER_SOL
       formattedAmount = this.wallet.formatSolBalance(amount) + " SOL";
     } else {
@@ -167,6 +165,7 @@ export class TokenManager {
         tokenMint: isSol ? "SOL" : resolvedTokenMint,
         tokenTicker: isSol ? "SOL" : resolvedTokenTicker,
         tokenWasSpecified,
+        requestedNativeSol,
       },
     };
   }

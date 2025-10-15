@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { handleCoinflipCommand } from "../src/handlers/game";
+import { WSOL_MINT } from "../src/utils/constants";
 
 function makeCtx(text: string, chatType: "private" | "group" | "supergroup" = "group") {
   const calls: any[] = [];
@@ -71,17 +72,35 @@ describe("game handler: coinflip command", () => {
     expect(String(ctx.__calls[0][1])).toContain('Unknown token "FOO"');
   });
 
-  test("SOL not supported error uses provided message", async () => {
+  test("SOL requests surface game manager errors", async () => {
     const ctx: any = makeCtx("/cf 0.1 SOL", "group");
     const deps: any = {
       isGroupChat: () => true,
-      parseAmount: async () => ({ success: false, error: "sol_not_supported", solError: "No SOL please" }),
+      parseAmount: async () => ({
+        success: true,
+        data: {
+          amount: 100_000_000,
+          tokenMint: WSOL_MINT,
+          tokenTicker: "SOL",
+          isSol: false,
+          formattedAmount: "0.1 SOL",
+          tokenWasSpecified: true,
+          requestedNativeSol: true,
+        },
+      }),
       inferMaxPlayers: () => ({ ok: true, value: 2 }),
-      wallet: { getTokenBalance: async () => 0, getTokenMetadata: async () => ({ decimals: 9 }), formatTokenBalance: () => "0" },
-      gameManager: { createGame: async () => ({ success: false, error: "x" }), createGameMessage: async () => 0 },
+      wallet: {
+        getTokenBalance: async () => 200_000_000,
+        getTokenMetadata: async () => ({ decimals: 9 }),
+        formatTokenBalance: () => "0.1",
+      },
+      gameManager: {
+        createGame: async () => ({ success: false, error: "Auto-wrap failed" }),
+        createGameMessage: async () => 0,
+      },
     };
     await handleCoinflipCommand(ctx, deps);
-    expect(String(ctx.__calls[0][1])).toContain("No SOL please");
+    expect(String(ctx.__calls[0][1])).toContain("Auto-wrap failed");
   });
 
   test("infer players error is surfaced", async () => {
@@ -222,4 +241,3 @@ describe("game handler: coinflip command", () => {
     expect(String(ctx.__calls[0][1])).toContain("Failed to create game");
   });
 });
-
