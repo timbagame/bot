@@ -57,11 +57,10 @@ describe("keyboards: main and wallet", () => {
     const kb = createMainMenuKeyboard();
     const callbacks = extractCallbacks(kb);
     expect(callbacks).toContain("main_wallet");
-    expect(callbacks).toContain("main_settings");
     expect(callbacks).toContain("cmd_help");
   });
 
-  test("wallet keyboard contains buy/sell/refresh/history and back", () => {
+  test("wallet keyboard contains buy/sell/refresh and settings", () => {
     const kb = createWalletKeyboard();
     const callbacks = extractCallbacks(kb);
     expect(callbacks).toContain("cmd_withdraw");
