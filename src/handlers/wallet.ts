@@ -186,7 +186,7 @@ export async function onWalletRefresh(ctx: any, deps: WalletHandlersDeps) {
 export async function onWalletSettings(ctx: any, deps: WalletHandlersDeps) {
   try {
     const settingsContent = `T I M B A\n\n⚙️ Settings\n\nChoose an option:`;
-    const response = [`<pre>${settingsContent}</pre>`];
+    const response = [settingsContent];
     const keyboard = deps.createSettingsKeyboard();
     try {
       await ctx.editMessageText(response.join("\n"), { parse_mode: "HTML", reply_markup: keyboard });
