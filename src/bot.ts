@@ -63,7 +63,6 @@ import { checkServiceHealth } from "./utils/service-health";
 import { getPriceUSD } from "./utils/prices";
 import { patchReplyBehavior } from "./utils/reply-patch";
 import { getNetworkFromRPC } from "./utils/network-display";
-import { NetworkDetector } from "./utils/network-detector";
 
 // ================================
 // GLOBAL INSTANCES
@@ -419,14 +418,10 @@ const processGameCompletion = async (
           apiCtx,
           winnerAddress
         );
-        let announcement = `🏆 <b>${winnerDisplay}</b> won the game!`;
-        const solscanUrl = NetworkDetector.buildSolscanTxUrl(
-          winnerTxSignature
+        await sendReplyToGameMessage(
+          target,
+          `🏆 <b>${winnerDisplay}</b> won the game!`
         );
-        if (solscanUrl) {
-          announcement += `\n<a href="${solscanUrl}">View transaction</a>`;
-        }
-        await sendReplyToGameMessage(target, announcement);
       } catch (winnerAnnouncementError) {
         console.error(
           `Error announcing winner for game ${gameAddress}:`,
