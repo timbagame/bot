@@ -362,11 +362,13 @@ const estimateInitializationCosts = async (
       [Buffer.from("game_vault"), mint.toBuffer()],
       program.programId
     );
+    const mintProgramId = mintAccount.owner;
 
     const gameTokenAccount = await getAssociatedTokenAddress(
       mint,
       gameVaultPda,
-      true
+      true,
+      mintProgramId
     );
 
     let needsVaultAta = false;
@@ -375,7 +377,6 @@ const estimateInitializationCosts = async (
     );
     if (!gameTokenAccountInfo) {
       needsVaultAta = true;
-      const mintProgramId = mintAccount.owner;
       const mintState = unpackMint(mint, mintAccount, mintProgramId);
       const ataSpace = getAccountLenForMint(mintState);
       const ataRent =
@@ -386,7 +387,8 @@ const estimateInitializationCosts = async (
         adminKeypair.publicKey,
         gameTokenAccount,
         gameVaultPda,
-        mint
+        mint,
+        mintProgramId
       );
       const createAtaTx = new Transaction({
         feePayer: adminKeypair.publicKey,
@@ -508,6 +510,7 @@ async function initializeToken(
     );
   }
   console.log(`✅ ${tokenTicker} mint verified`);
+  const mintProgramId = mintAccount.owner;
 
   // Derive game token PDA
   const [gameTokenPda] = PublicKey.findProgramAddressSync(
@@ -567,7 +570,8 @@ async function initializeToken(
   const gameTokenAccount = await getAssociatedTokenAddress(
     mint,
     gameVaultPda,
-    true // allowOwnerOffCurve
+    true, // allowOwnerOffCurve
+    mintProgramId
   );
   console.log(
     `🏪 ${tokenTicker} Game Token Account (ATA): ${gameTokenAccount.toBase58()}`
@@ -586,7 +590,8 @@ async function initializeToken(
         adminKeypair.publicKey, // payer
         gameTokenAccount, // ata
         gameVaultPda, // owner
-        mint // mint
+        mint, // mint
+        mintProgramId
       );
 
       // Send the ATA creation transaction
