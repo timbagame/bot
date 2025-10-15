@@ -22,7 +22,7 @@ test("buildWalletCaption formats lines and total with address", () => {
 
 test("buildWalletCaption escapes HTML-sensitive ticker and address", () => {
   const caption = buildWalletCaption(
-    "<1>",
+    "1.0", // Use valid SOL balance
     [
       { ticker: 'BAD<&"', formatted: '5 & rising' },
     ],
@@ -31,8 +31,8 @@ test("buildWalletCaption escapes HTML-sensitive ticker and address", () => {
     50   // TIMBA price
   );
 
-  expect(caption).toContain("Solana Address · <a href=\"https://solscan.io/account/ADDR&lt;&amp;&quot;\">🅴</a>");
+  expect(caption).toContain("Solana Address · <a href=\"https://solscan.io/account/ADDR%3C%26%22\">🅴</a>");
   expect(caption).toContain("<code>ADDR&lt;&amp;&quot;</code> (Tap to copy)");
-  expect(caption).toContain("Fee balance: &lt;1&gt; SOL ($100.00)");
+  expect(caption).toContain("Fee balance: 1.0 SOL ($100.00)");
   expect(caption).toContain("BAD&lt;&amp;&quot; balance: 5 &amp; rising BAD&lt;&amp;&quot;");
 });

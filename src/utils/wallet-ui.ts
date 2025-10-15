@@ -16,7 +16,7 @@ export function buildWalletCaption(
   const lines: string[] = [];
   
   // Solana Address with clickable link to Solscan
-  lines.push(`Solana Address · <a href="https://solscan.io/account/${walletAddress}">🅴</a>`);
+  lines.push(`Solana Address · <a href="https://solscan.io/account/${encodeURIComponent(walletAddress)}">🅴</a>`);
   lines.push("");
   lines.push(`<code>${escapeHtml(walletAddress)}</code> (Tap to copy)`);
   lines.push("");
