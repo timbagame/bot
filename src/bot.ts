@@ -40,6 +40,7 @@ import {
   createGameConfirmKeyboard,
   createSliderAmountKeyboard,
   getFeeWarningMessage,
+  getSuggestedStakeAmounts,
 } from "./utils/keyboards";
 import { buildWalletCaption } from "./utils/wallet-ui";
 import { formatAmount } from "./utils/format-amount";
@@ -533,6 +534,23 @@ const resolveChatTokenInfo = async (
     );
     return fallback;
   }
+};
+
+const formatTokenAmount = (amount: number, decimals: number): string => {
+  const precision = Math.min(Math.max(decimals, 0), 6);
+  const minimumFractionDigits = Number.isInteger(amount) ? 0 : Math.min(precision, 6);
+
+  return amount.toLocaleString("en-US", {
+    minimumFractionDigits,
+    maximumFractionDigits: Math.min(precision, 6),
+  });
+};
+
+const formatUsdValue = (value: number): string => {
+  return value.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 };
 
 type TokenContext = {
@@ -1159,15 +1177,37 @@ bot.command(["coinflip", "cf"], async (ctx) => {
     coinflipMessage += `Token: <b>${tokenInfo.tokenTicker}</b>\n`;
     coinflipMessage += "Choose the amount each player will stake:\n";
     coinflipMessage += balanceText;
-    
+
     // Get contract minimum for keyboard suggestions
     const { formatted: contractMin } = await getContractMinimumAmount(
       tokenInfo.tokenMint,
       tokenInfo.decimals
     );
-    
+
+    let tokenPriceUSD = await getPriceUSD(tokenInfo.tokenMint);
+    if (!tokenPriceUSD) {
+      tokenPriceUSD = await getPriceUSD(tokenInfo.tokenTicker);
+    }
+
+    const suggestedAmounts = getSuggestedStakeAmounts(
+      contractMin,
+      userBalance
+    );
+
     coinflipMessage += `\nSelect amount in <b>${tokenInfo.tokenTicker}</b>:`;
-    
+
+    if (suggestedAmounts.length > 0) {
+      coinflipMessage += "\n\nSuggested stakes:\n";
+      for (const amount of suggestedAmounts) {
+        const amountDisplay = formatTokenAmount(amount, tokenInfo.decimals);
+        coinflipMessage += `• ${amountDisplay} ${tokenInfo.tokenTicker}`;
+        if (tokenPriceUSD) {
+          coinflipMessage += ` (~$${formatUsdValue(amount * tokenPriceUSD)})`;
+        }
+        coinflipMessage += "\n";
+      }
+    }
+
     const setupMessage = await ctx.reply(coinflipMessage, {
       parse_mode: "HTML",
       reply_markup: createAmountSelectionKeyboard(
@@ -1175,7 +1215,11 @@ bot.command(["coinflip", "cf"], async (ctx) => {
         userBalance,
         ctx.from?.id.toString(),
         contractMin,
-        tokenInfo.tokenTicker
+        tokenInfo.tokenTicker,
+        {
+          decimals: tokenInfo.decimals,
+          tokenPriceUSD: tokenPriceUSD ?? undefined,
+        }
       ),
       reply_to_message_id: ctx.message?.message_id
     });
@@ -1325,32 +1369,55 @@ bot.command(["giveaway", "ga"], async (ctx) => {
       balanceText = `\n⚠️ Could not load ${tokenInfo.tokenTicker} balance\n`;
     }
 
-    // Create enhanced message with fee warnings  
+    // Create enhanced message with fee warnings
     let giveawayMessage = "🎁 <b>CREATE GIVEAWAY</b>\n\n";
     giveawayMessage += `Token: <b>${tokenInfo.tokenTicker}</b>\n`;
     giveawayMessage += "Choose the prize amount you want to give away:\n";
     giveawayMessage += balanceText;
-    
-    // Get contract minimum for warnings and UX
+
     const { formatted: contractMin } = await getContractMinimumAmount(
       tokenInfo.tokenMint,
       tokenInfo.decimals
     );
-    
+
+    let tokenPriceUSD = await getPriceUSD(tokenInfo.tokenMint);
+    if (!tokenPriceUSD) {
+      tokenPriceUSD = await getPriceUSD(tokenInfo.tokenTicker);
+    }
+
     // Add fee warning for low balance
     if (userBalance < contractMin) {
       giveawayMessage += `\n⚠️ <b>Fee Warning:</b> Oracle fees (~5-10%) reduce the actual prize.\n`;
-      giveawayMessage += `With ${userBalance.toFixed(
-        0
-      )} ${tokenInfo.tokenTicker} prize, winner gets ~${(
-        userBalance * 0.9
-      ).toFixed(0)} ${tokenInfo.tokenTicker} after fees.\n`;
+      giveawayMessage += `With ${formatTokenAmount(
+        userBalance,
+        tokenInfo.decimals
+      )} ${tokenInfo.tokenTicker} prize, winner gets ~${formatTokenAmount(
+        userBalance * 0.9,
+        tokenInfo.decimals
+      )} ${tokenInfo.tokenTicker} after fees.\n`;
     }
-    
+
+    const suggestedAmounts = getSuggestedStakeAmounts(
+      contractMin,
+      userBalance
+    );
+
     giveawayMessage += "\n• Free to join for all players\n";
     giveawayMessage += "• One lucky winner gets the prize\n";
     giveawayMessage += "• Fair and transparent results\n\n";
     giveawayMessage += `Select prize amount in <b>${tokenInfo.tokenTicker}</b>:`;
+
+    if (suggestedAmounts.length > 0) {
+      giveawayMessage += "\n\nSuggested prizes:\n";
+      for (const amount of suggestedAmounts) {
+        const amountDisplay = formatTokenAmount(amount, tokenInfo.decimals);
+        giveawayMessage += `• ${amountDisplay} ${tokenInfo.tokenTicker}`;
+        if (tokenPriceUSD) {
+          giveawayMessage += ` (~$${formatUsdValue(amount * tokenPriceUSD)})`;
+        }
+        giveawayMessage += "\n";
+      }
+    }
 
     const setupMessage = await ctx.reply(giveawayMessage, {
       parse_mode: "HTML",
@@ -1359,7 +1426,11 @@ bot.command(["giveaway", "ga"], async (ctx) => {
         userBalance,
         ctx.from?.id.toString(),
         contractMin,
-        tokenInfo.tokenTicker
+        tokenInfo.tokenTicker,
+        {
+          decimals: tokenInfo.decimals,
+          tokenPriceUSD: tokenPriceUSD ?? undefined,
+        }
       ),
       reply_to_message_id: ctx.message?.message_id
     });
@@ -3817,28 +3888,56 @@ bot.callbackQuery(/^back_to_amounts_(coinflip|giveaway)_(\d+)$/, async (ctx) => 
             tokenContext.tokenMint,
             tokenContext.tokenDecimals
           );
-    
+
+    let tokenPriceUSD = await getPriceUSD(tokenContext.tokenMint);
+    if (!tokenPriceUSD) {
+      tokenPriceUSD = await getPriceUSD(tokenContext.tokenTicker);
+    }
+
+    const suggestedAmounts = getSuggestedStakeAmounts(
+      contractMin,
+      userBalance
+    );
+
     // Clear any pending typed-input session for this user when navigating back
     userSessions.delete(ctx.from?.id || 0);
 
-    await ctx.editMessageText(
-      getFeeWarningMessage(
+    let warningMessage = getFeeWarningMessage(
+      gameType,
+      userBalance,
+      contractMin,
+      tokenContext.tokenTicker
+    );
+
+    if (suggestedAmounts.length > 0) {
+      warningMessage += "\n\nSuggested stakes:\n";
+      for (const amount of suggestedAmounts) {
+        const amountDisplay = formatTokenAmount(
+          amount,
+          tokenContext.tokenDecimals
+        );
+        warningMessage += `• ${amountDisplay} ${tokenContext.tokenTicker}`;
+        if (tokenPriceUSD) {
+          warningMessage += ` (~$${formatUsdValue(amount * tokenPriceUSD)})`;
+        }
+        warningMessage += "\n";
+      }
+    }
+
+    await ctx.editMessageText(warningMessage, {
+      parse_mode: "HTML",
+      reply_markup: createAmountSelectionKeyboard(
         gameType,
         userBalance,
+        creatorId,
         contractMin,
-        tokenContext.tokenTicker
+        tokenContext.tokenTicker,
+        {
+          decimals: tokenContext.tokenDecimals,
+          tokenPriceUSD: tokenPriceUSD ?? undefined,
+        }
       ),
-      {
-        parse_mode: "HTML",
-        reply_markup: createAmountSelectionKeyboard(
-          gameType,
-          userBalance,
-          creatorId,
-          contractMin,
-          tokenContext.tokenTicker
-        )
-      }
-    );
+    });
     
     userSessions.set(userId, {
       waitingFor: "setup",

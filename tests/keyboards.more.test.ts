@@ -98,19 +98,20 @@ describe("keyboards: amount selection", () => {
   test("defaults to 3 simple amounts when no balance", () => {
     const kb = createAmountSelectionKeyboard("coinflip");
     const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
-    expect(callbacks).toContain("amount_coinflip_10");
-    expect(callbacks).toContain("amount_coinflip_25");
-    expect(callbacks).toContain("amount_coinflip_50");
+    expect(callbacks).toEqual([
+      "amount_coinflip_20",
+      "amount_coinflip_100",
+      "amount_coinflip_200",
+    ]);
   });
 
   test("very small balance yields <= balance amounts without duplicates", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 3);
     const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
-    // Should not exceed balance and contains unique values
     const amounts = callbacks.map((s) => Number(s.split("_")[2]));
-    expect(amounts.every((v, i, a) => v > 0 && v <= 3 && a.indexOf(v) === i)).toBe(true);
-    // We expect at least one button even if < 3 amounts
-    expect(amounts.length).toBeGreaterThanOrEqual(1);
+    expect(amounts).toContain(20);
+    expect(amounts).toContain(3);
+    expect(new Set(amounts).size).toBe(amounts.length);
   });
 
   test("sub-unit balances still show at least one affordable option", () => {
@@ -118,13 +119,19 @@ describe("keyboards: amount selection", () => {
     const amounts = extractCallbacks(kb)
       .filter((s) => s.startsWith("amount_coinflip_"))
       .map((s) => Number(s.split("_")[2]));
-    expect(amounts).toEqual([1]);
+    expect(amounts[0]).toBe(20);
+    expect(amounts).toContain(1.2);
+    expect(new Set(amounts).size).toBe(amounts.length);
   });
 
   test("balance under 50 starts from recommended minimum", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 40);
     const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
-    expect(callbacks).toEqual(["amount_coinflip_20", "amount_coinflip_30", "amount_coinflip_40"]);
+    expect(callbacks).toEqual([
+      "amount_coinflip_20",
+      "amount_coinflip_100",
+      "amount_coinflip_200",
+    ]);
   });
 
   test("creatorId is appended to callbacks when provided", () => {
@@ -186,7 +193,8 @@ describe("keyboards: slider amount", () => {
       const texts = extractTexts(kb);
       expect(texts).toContain(`-${step}`);
       expect(texts).toContain(`+${step}`);
-      expect(texts).toContain(`✅ Use ${amt} TIMBA`);
+      const expectedLabel = `✅ Use ${amt.toLocaleString("en-US")} TIMBA`;
+      expect(texts).toContain(expectedLabel);
     }
   });
 

@@ -53,22 +53,6 @@ export const createConfirmSellKeyboard = (txId: string): InlineKeyboard => {
 // GAME SETUP KEYBOARDS
 // ================================
 
-
-/**
- * Calculate minimum recommended bet to avoid excessive fees
- * Uses provided minimum when available, otherwise falls back to a safe baseline.
- */
-const calculateMinimumRecommendedBet = (
-  balance: number,
-  contractMinimum: number = 20
-): number => {
-  if (!Number.isFinite(contractMinimum) || contractMinimum <= 0) {
-    return Math.max(1, Math.floor(balance) || 1);
-  }
-
-  return contractMinimum;
-};
-
 const getDecimalPrecision = (value: number): number => {
   if (!Number.isFinite(value)) return 0;
   const [, fractional] = value.toString().split(".");
@@ -84,16 +68,18 @@ const roundToPrecision = (value: number, precision: number): number => {
   return Math.round(value * factor) / factor;
 };
 
-const formatAmountDisplay = (value: number, precision: number): string => {
-  const fractionalDigits = getDecimalPrecision(value);
-  const maxFractionDigits =
-    precision > 0
-      ? Math.min(6, Math.max(precision, value < 1 ? 6 : precision))
-      : Math.min(6, Math.max(fractionalDigits, value < 1 ? 4 : fractionalDigits));
+const formatStakeDisplay = (
+  value: number,
+  decimals: number | undefined
+): string => {
+  const precision =
+    typeof decimals === "number" && decimals > 0
+      ? Math.min(decimals, 6)
+      : Math.min(getDecimalPrecision(value), 6);
 
   return value.toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: maxFractionDigits,
+    minimumFractionDigits: Number.isInteger(value) ? 0 : Math.min(precision, 6),
+    maximumFractionDigits: Math.min(precision, 6),
   });
 };
 
@@ -107,17 +93,46 @@ export const getFeeWarningMessage = (
   tokenTicker: string = DEFAULT_TOKEN_TICKER
 ): string => {
   let message = `💰 <b>SELECT AMOUNT - ${gameType.toUpperCase()}</b>\n\n`;
-  
+
   if (balance < contractMinimum) {
     message += `⚠️ <b>Low Balance Warning</b>\n`;
     message += `Your balance: ${balance.toFixed(0)} ${tokenTicker}\n`;
     message += `Contract minimum: ${contractMinimum} ${tokenTicker}\n\n`;
     message += `<i>Oracle fees (~5-10%) will reduce winnings significantly with small bets.</i>\n\n`;
   }
-  
+
   message += `Choose how much you want to play with:`;
-  
+
   return message;
+};
+
+const SUGGESTION_MULTIPLIERS = [1, 5, 10] as const;
+
+export const getSuggestedStakeAmounts = (
+  contractMinimum: number,
+  balance?: number
+): number[] => {
+  const min = Math.max(contractMinimum, 0);
+
+  const suggestions = SUGGESTION_MULTIPLIERS.map(
+    (multiplier) => min * multiplier
+  );
+
+  if (balance !== undefined && balance > 0 && balance < min) {
+    suggestions.push(balance);
+  }
+
+  const unique: number[] = [];
+  const eps = 1e-6;
+  for (const value of suggestions) {
+    if (value <= 0) continue;
+    const exists = unique.some((item) => Math.abs(item - value) < eps);
+    if (!exists) {
+      unique.push(Number(value.toFixed(6)));
+    }
+  }
+
+  return unique.length > 0 ? unique : [min];
 };
 
 export const createAmountSelectionKeyboard = (
@@ -125,92 +140,60 @@ export const createAmountSelectionKeyboard = (
   userBalance?: number,
   creatorId?: string,
   contractMinimum: number = 20,
-  tokenTicker: string = DEFAULT_TOKEN_TICKER
+  tokenTicker: string = DEFAULT_TOKEN_TICKER,
+  options?: {
+    decimals?: number;
+    tokenPriceUSD?: number;
+  }
 ): InlineKeyboard => {
   const balance =
     typeof userBalance === "number" && Number.isFinite(userBalance)
       ? Math.max(userBalance, 0)
       : undefined;
-  const minStake = calculateMinimumRecommendedBet(
-    balance ?? 0,
-    contractMinimum
-  );
-  const displayPrecision = 0;
+  const decimals =
+    typeof options?.decimals === "number"
+      ? Math.max(0, Math.min(options.decimals, 6))
+      : undefined;
+  const tokenPriceUSD =
+    typeof options?.tokenPriceUSD === "number" &&
+    Number.isFinite(options.tokenPriceUSD) &&
+    options.tokenPriceUSD > 0
+      ? options.tokenPriceUSD
+      : undefined;
 
-  let amounts: number[];
-
-  if (balance === undefined || balance === 0) {
-    amounts = [10, 25, 50];
-  } else if (balance < minStake) {
-    const floored = Math.max(1, Math.floor(balance));
-    const half = Math.max(1, Math.floor(floored / 2));
-    const base = new Set<number>([1, half, floored]);
-    amounts = Array.from(base)
-      .filter((value) => value > 0 && value <= floored)
-      .sort((a, b) => a - b);
-    if (amounts.length === 0) {
-      amounts = [1];
-    }
-  } else if (balance < 50) {
-    const floored = Math.max(contractMinimum, Math.floor(balance));
-    const optionA = Math.max(contractMinimum, 1);
-    const optionB = Math.min(floored, optionA + 10);
-    const optionC = Math.min(floored, optionA * 2);
-    const base = [optionA, optionB, optionC];
-    amounts = Array.from(new Set(base))
-      .filter((value) => value > 0)
-      .sort((a, b) => a - b);
-  } else if (balance < 200) {
-    amounts = [25, 50, 100];
-  } else if (balance < 1000) {
-    amounts = [50, 150, 300];
-  } else {
-    amounts = [100, 500, 1000];
-  }
-
-  const balanceCap = balance !== undefined ? Math.max(1, Math.floor(balance)) : undefined;
-  if (balanceCap !== undefined) {
-    amounts = amounts.map((value, index) => {
-      if (value <= balanceCap) return value;
-      if (index === amounts.length - 1) {
-        return balanceCap;
-      }
-      return value;
-    });
-    amounts = amounts.filter((value) => value > 0 && value <= balanceCap);
-  }
-
-  amounts = Array.from(new Set(amounts)).filter((value) => value > 0);
-  amounts.sort((a, b) => a - b);
-
-  if (amounts.length === 0) {
-    const fallback = balanceCap ?? Math.max(1, Math.floor(minStake));
-    amounts = [fallback || 1];
-  }
-
-  if (amounts.length > 3) {
-    amounts = amounts.slice(0, 3);
-  }
+  const amounts = getSuggestedStakeAmounts(contractMinimum, balance);
 
   const keyboard = new InlineKeyboard();
-  
-  // Add all 3 amount buttons in one row
-  amounts.forEach(amount => {
+
+  amounts.forEach((amount) => {
     const callbackData = creatorId
       ? `amount_${gameType}_${amount}_${creatorId}`
       : `amount_${gameType}_${amount}`;
-    const display = formatAmountDisplay(amount, displayPrecision);
-    keyboard.text(`💰 ${display} ${tokenTicker}`, callbackData);
+    const display = formatStakeDisplay(amount, decimals);
+    const usdText =
+      tokenPriceUSD !== undefined
+        ? ` (~$${(amount * tokenPriceUSD).toLocaleString("en-US", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })})`
+        : "";
+    keyboard.text(`💰 ${display} ${tokenTicker}${usdText}`, callbackData);
   });
+
   keyboard.row();
-  
-  // Custom amount and cancel buttons
+
   keyboard
-    .text("📊 Custom Amount", creatorId ? `custom_amount_${gameType}_${creatorId}` : `custom_amount_${gameType}`)
+    .text(
+      "📊 Custom Amount",
+      creatorId ? `custom_amount_${gameType}_${creatorId}` : `custom_amount_${gameType}`
+    )
     .row()
-    .text("❌ Cancel", creatorId ? `cancel_game_setup_${creatorId}` : `cancel_game_setup`)
+    .text(
+      "❌ Cancel",
+      creatorId ? `cancel_game_setup_${creatorId}` : `cancel_game_setup`
+    )
     .row();
-  
+
   return keyboard;
 };
 
@@ -296,11 +279,7 @@ export const createSliderAmountKeyboard = (
     roundToPrecision(value, precision);
   const amountForCallback = roundForSlider(currentAmount);
   const toDisplay = (value: number): string =>
-    value.toLocaleString("en-US", {
-      minimumFractionDigits: precision > 0 ? precision : 0,
-      maximumFractionDigits: precision > 0 ? precision : 0,
-      useGrouping: false,
-    });
+    formatStakeDisplay(value, precision > 0 ? precision : undefined);
 
   const clamp = (value: number) =>
     Math.max(minAmount, Math.min(maxAmount, value));
