@@ -14,7 +14,7 @@ import {
   GAME_EXPIRATION_BUFFER_TIME,
   MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
   getCoinflipVideoId,
-  getStartVideoId,
+  getGiveawayVideoId,
 } from "./constants";
 import { isRecoverableMediaError } from "./media";
 import type {
@@ -35,6 +35,19 @@ import {
 import { getPriceUSD } from "./prices";
 import { NetworkDetector } from "./network-detector";
 import { SwapManager } from "./swap-manager";
+
+const resolveGameVideoId = (gameType: string): string | undefined => {
+  const lower = gameType.toLowerCase();
+  if (lower === "coinflip") {
+    const id = getCoinflipVideoId();
+    return id && id.length > 0 ? id : undefined;
+  }
+  if (lower === "giveaway") {
+    const id = getGiveawayVideoId();
+    return id && id.length > 0 ? id : undefined;
+  }
+  return undefined;
+};
 
 // ================================
 // UTILITY FUNCTIONS
@@ -254,16 +267,33 @@ export class GameManager {
     };
   }
 
+  private formatUsdValue(
+    amount: number,
+    decimals: number,
+    price: number
+  ): string | null {
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    if (!Number.isFinite(price) || price <= 0) return null;
+
+    const normalizedAmount = amount / Math.pow(10, decimals);
+    const usdValue = normalizedAmount * price;
+    if (!Number.isFinite(usdValue) || usdValue <= 0) {
+      return null;
+    }
+
+    return `≈ $${usdValue.toFixed(2)}`;
+  }
+
   private async getUsdApproximation(
     amount: number,
     decimals: number,
     tokenMint?: string,
     tokenTicker?: string,
     isSol?: boolean
-  ): Promise<string | null> {
+  ): Promise<{ text: string; price: number } | null> {
     const reference = isSol ? "SOL" : tokenMint || tokenTicker;
     if (!reference) return null;
-    if (amount <= 0) return null;
+    if (!Number.isFinite(amount) || amount <= 0) return null;
     if (process.env.NODE_ENV === "test") return null;
 
     try {
@@ -272,13 +302,12 @@ export class GameManager {
         return null;
       }
 
-      const normalizedAmount = amount / Math.pow(10, decimals);
-      const usdValue = normalizedAmount * price;
-      if (!isFinite(usdValue) || usdValue <= 0) {
+      const usdText = this.formatUsdValue(amount, decimals, price);
+      if (!usdText) {
         return null;
       }
 
-      return `≈ $${usdValue.toFixed(2)}`;
+      return { text: usdText, price };
     } catch (error) {
       console.warn(
         `Failed to compute USD pricing for ${reference}:`,
@@ -554,46 +583,38 @@ export class GameManager {
       winnerSignature
     );
     
-    const isCoinflip = gameType.toLowerCase() === "coinflip";
+    const videoId = resolveGameVideoId(gameType);
     const replyMarkup = { inline_keyboard: formatted.keyboard };
     let message: any;
     let usesVideo = false;
 
-    if (isCoinflip) {
-      const coinflipVideoId = getCoinflipVideoId();
-      if (coinflipVideoId) {
-        try {
-          message = await ctx.replyWithVideo(coinflipVideoId, {
-            caption: formatted.messageText,
-            parse_mode: "HTML",
-            reply_markup: replyMarkup,
-          });
-          usesVideo = true;
-        } catch (error) {
-          if (isRecoverableMediaError(error)) {
-            console.warn(
-              "Falling back to text announcement after video send failure:",
-              error
-            );
-            message = await ctx.reply(formatted.messageText, {
-              parse_mode: "HTML",
-              reply_markup: replyMarkup,
-            });
-          } else {
-            throw error;
-          }
-        }
-      } else {
-        message = await ctx.reply(formatted.messageText, {
-          parse_mode: "HTML",
-          reply_markup: replyMarkup,
-        });
-      }
-    } else {
-      message = await ctx.reply(formatted.messageText, {
+    const sendText = async () =>
+      ctx.reply(formatted.messageText, {
         parse_mode: "HTML",
         reply_markup: replyMarkup,
       });
+
+    if (videoId) {
+      try {
+        message = await ctx.replyWithVideo(videoId, {
+          caption: formatted.messageText,
+          parse_mode: "HTML",
+          reply_markup: replyMarkup,
+        });
+        usesVideo = true;
+      } catch (error) {
+        if (isRecoverableMediaError(error)) {
+          console.warn(
+            "Falling back to text announcement after video send failure:",
+            error
+          );
+          message = await sendText();
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      message = await sendText();
     }
 
     // Save the game message to database and activeGameMessages for future updates
@@ -672,15 +693,34 @@ export class GameManager {
       creatorUsername,
       currentTickets,
       maxTickets,
-      usdApproximation
+      usdApproximation?.text
     );
     let messageText = header;
 
     // Show current prize if different from base amount
+    let prizeUsdApproximation: string | null = null;
+    if (usdApproximation) {
+      prizeUsdApproximation = this.formatUsdValue(
+        totalPot,
+        decimals,
+        usdApproximation.price
+      );
+    } else if (currentTickets > 0 || totalPot !== amount) {
+      const computedPrizeUsd = await this.getUsdApproximation(
+        totalPot,
+        decimals,
+        tokenMint,
+        tokenTicker,
+        isSol
+      );
+      prizeUsdApproximation = computedPrizeUsd?.text ?? null;
+    }
+
     const prize = buildPrizeLine(
       currentTickets > 0 || totalPot !== amount,
       formatBalanceForDisplay(totalPot),
-      tokenTicker
+      tokenTicker,
+      prizeUsdApproximation
     );
     messageText += prize;
 
@@ -728,6 +768,64 @@ export class GameManager {
     return { messageText, keyboard };
   }
 
+  public async getPrizeDisplay(
+    gameAddress: string,
+    totalPot: number,
+    tokenTickerHint?: string | null,
+    tokenMintHint?: string | null
+  ): Promise<
+    | {
+        formattedAmount: string;
+        tokenTicker: string;
+        usdApproximation: string | null;
+      }
+    | null
+  > {
+    if (!Number.isFinite(totalPot) || totalPot <= 0) {
+      return null;
+    }
+
+    try {
+      const gamePda = new PublicKey(gameAddress);
+      const storedGame = this.gameDb.getGame(gameAddress);
+      const resolvedTicker =
+        tokenTickerHint ??
+        storedGame?.token_ticker ??
+        (storedGame?.token_mint === "SOL" ? "SOL" : "");
+      const resolvedMint = tokenMintHint ?? storedGame?.token_mint ?? undefined;
+
+      const { formatBalance, decimals, tokenMint, isSol } =
+        await this.resolveTokenFormattingInfo(
+          gamePda,
+          resolvedTicker || "",
+          resolvedMint
+        );
+
+      const formattedAmount = formatBalance(totalPot);
+      const usdApproximation = await this.getUsdApproximation(
+        totalPot,
+        decimals,
+        tokenMint,
+        resolvedTicker,
+        isSol
+      );
+
+      const displayTicker = resolvedTicker || (isSol ? "SOL" : "");
+
+      return {
+        formattedAmount,
+        tokenTicker: displayTicker,
+        usdApproximation: usdApproximation?.text ?? null,
+      };
+    } catch (error) {
+      console.warn(
+        `Failed to compute prize display for ${gameAddress}:`,
+        error
+      );
+      return null;
+    }
+  }
+
   public async createGameMessage(
     ctx: Context,
     gameAddress: string,
@@ -749,50 +847,40 @@ export class GameManager {
     );
 
     const replyTo = replyToMessageId ?? (ctx as any).message?.message_id;
-    const isCoinflip = gameType.toLowerCase() === "coinflip";
+    const videoId = resolveGameVideoId(gameType);
     const replyMarkup = { inline_keyboard: keyboard };
     let message: any;
     let usesVideo = false;
 
-    if (isCoinflip) {
-      const coinflipVideoId = getCoinflipVideoId();
-      if (coinflipVideoId) {
-        try {
-          message = await ctx.replyWithVideo(coinflipVideoId, {
-            caption: messageText,
-            parse_mode: "HTML",
-            reply_markup: replyMarkup,
-            reply_to_message_id: replyTo,
-          });
-          usesVideo = true;
-        } catch (error) {
-          if (isRecoverableMediaError(error)) {
-            console.warn(
-              "Falling back to text announcement after video send failure:",
-              error
-            );
-            message = await ctx.reply(messageText, {
-              parse_mode: "HTML",
-              reply_markup: replyMarkup,
-              reply_to_message_id: replyTo,
-            });
-          } else {
-            throw error;
-          }
-        }
-      } else {
-        message = await ctx.reply(messageText, {
-          parse_mode: "HTML",
-          reply_markup: replyMarkup,
-          reply_to_message_id: replyTo,
-        });
-      }
-    } else {
-      message = await ctx.reply(messageText, {
+    const sendText = async () =>
+      ctx.reply(messageText, {
         parse_mode: "HTML",
         reply_markup: replyMarkup,
         reply_to_message_id: replyTo,
       });
+
+    if (videoId) {
+      try {
+        message = await ctx.replyWithVideo(videoId, {
+          caption: messageText,
+          parse_mode: "HTML",
+          reply_markup: replyMarkup,
+          reply_to_message_id: replyTo,
+        });
+        usesVideo = true;
+      } catch (error) {
+        if (isRecoverableMediaError(error)) {
+          console.warn(
+            "Falling back to text announcement after video send failure:",
+            error
+          );
+          message = await sendText();
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      message = await sendText();
     }
 
     this.gameDb.saveGameMessage(
@@ -840,10 +928,9 @@ export class GameManager {
 
       const inlineKeyboard =
         keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined;
-      const lowerGameType = gameType.toLowerCase();
       const lowerStatus = status.toLowerCase();
       const supportsVideo = gameMessage.usesVideo !== false;
-      const winnerVideoId = getStartVideoId();
+      const winnerVideoId = resolveGameVideoId(gameType);
 
       const editAsText = async () => {
         await ctx.api.editMessageText(
@@ -857,7 +944,7 @@ export class GameManager {
         );
       };
 
-      if (lowerGameType === "coinflip" && supportsVideo && winnerVideoId) {
+      if (winnerVideoId && supportsVideo) {
         const isCompleted = lowerStatus === "completed";
         try {
           if (isCompleted) {
