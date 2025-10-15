@@ -60,6 +60,15 @@ test("parseTransactionError handles price impact errors", () => {
   expect(message).toContain("Price impact too high");
 });
 
+test("parseTransactionError handles Jupiter connectivity errors", () => {
+  const error = new Error(
+    "Failed to get swap quote: Unable to connect. Is the computer able to access the url?"
+  );
+  const message = parseTransactionError(error);
+  expect(message).toContain("Jupiter is temporarily unavailable");
+  expect(message).toContain("Try again in a moment");
+});
+
 test("parseTransactionError returns default message for unknown errors", () => {
   const error = new Error("some random error");
   const message = parseTransactionError(error);

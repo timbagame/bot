@@ -220,6 +220,26 @@ export const parseTransactionError = (
       return `💹 Price impact too high!\n\nThis swap would significantly affect the token price.\nTry:\n• Smaller swap amount\n• Split into multiple smaller swaps`;
     }
 
+    const connectionErrorPatterns = [
+      "unable to connect",
+      "connectionrefused",
+      "network request failed",
+      "fetch failed",
+    ];
+
+    if (
+      connectionErrorPatterns.some((pattern) =>
+        lowerMessage.includes(pattern)
+      )
+    ) {
+      return (
+        `🌐 Jupiter is temporarily unavailable.\n\n` +
+        `We couldn't reach the quote service right now.\n\n` +
+        `Try again in a moment or pick another token pair.\n` +
+        `If it keeps failing, reach out to an admin so we can take a look.`
+      );
+    }
+
     if (
       lowerMessage.includes("quote failed") ||
       lowerMessage.includes("failed to get swap quote")

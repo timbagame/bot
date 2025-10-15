@@ -7378,10 +7378,9 @@ const showSwapQuoteAndConfirmation = async (
     });
   } catch (error) {
     console.error("Error getting swap quote:", error);
+    const userFriendlyError = formatUserFriendlyError(error, wallet);
     await ctx.editMessageText(
-      `❌ <b>QUOTE ERROR</b>\n\n${
-        (error as Error).message
-      }\n\nPlease try again.`,
+      `❌ <b>QUOTE ERROR</b>\n\n${userFriendlyError}`,
       {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
