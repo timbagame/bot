@@ -97,15 +97,21 @@ const pendingGameCreations = new Set<string>();
 // Helper moved to utils/service-health.ts as checkServiceHealth
 
 // User sessions for text input handling
-const userSessions = new Map<number, { 
-  waitingFor: string; 
-  gameType: string; 
+type GameSetupSession = {
+  waitingFor: string;
+  gameType: string;
   userBalance: number;
   messageId?: number;
   chatId?: number;
   amount?: string;
   creatorId?: string;
-}>();
+  tokenMint?: string;
+  tokenTicker?: string;
+  tokenDecimals?: number;
+  contractMinimum?: number;
+};
+
+const userSessions = new Map<number, GameSetupSession>();
 
 // Test-only accessor for verifying session behavior in unit tests
 export const __testSessions = userSessions;
@@ -491,6 +497,94 @@ const getDefaultTokenMetadata = async () => {
   return await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
 };
 
+type ChatTokenInfo = {
+  tokenMint: string;
+  tokenTicker: string;
+  decimals: number;
+};
+
+const resolveChatTokenInfo = async (
+  chatId?: number
+): Promise<ChatTokenInfo> => {
+  const defaultMetadata = await getDefaultTokenMetadata();
+  const fallback: ChatTokenInfo = {
+    tokenMint: DEFAULT_TOKEN_MINT,
+    tokenTicker: DEFAULT_TOKEN_TICKER,
+    decimals: defaultMetadata.decimals,
+  };
+
+  try {
+    const { tokenMint, tokenTicker } = await tokenManager.resolveTokenForChat(
+      chatId
+    );
+
+    try {
+      const metadata = await wallet.getTokenMetadata(tokenMint);
+      return {
+        tokenMint,
+        tokenTicker,
+        decimals: metadata.decimals,
+      };
+    } catch (metadataError) {
+      console.warn(
+        `⚠️ Failed to load metadata for chat token ${tokenTicker} (${tokenMint}), falling back to default token`,
+        metadataError
+      );
+      return fallback;
+    }
+  } catch (error) {
+    console.warn(
+      "⚠️ Could not resolve chat token configuration, using default token",
+      error
+    );
+    return fallback;
+  }
+};
+
+type TokenContext = {
+  tokenMint: string;
+  tokenTicker: string;
+  tokenDecimals: number;
+  contractMinimum?: number;
+};
+
+const buildTokenContext = async (
+  session: GameSetupSession | undefined,
+  chatId?: number
+): Promise<TokenContext> => {
+  if (session?.tokenMint) {
+    const decimals =
+      typeof session.tokenDecimals === "number"
+        ? session.tokenDecimals
+        : (await getDefaultTokenMetadata()).decimals;
+    return {
+      tokenMint: session.tokenMint,
+      tokenTicker: session.tokenTicker ?? DEFAULT_TOKEN_TICKER,
+      tokenDecimals: decimals,
+      contractMinimum: session.contractMinimum,
+    };
+  }
+
+  const resolved = await resolveChatTokenInfo(chatId);
+  return {
+    tokenMint: resolved.tokenMint,
+    tokenTicker: resolved.tokenTicker,
+    tokenDecimals: resolved.decimals,
+  };
+};
+
+const determineFractionDigits = (
+  value: string,
+  maxDecimals: number
+): number => {
+  const parts = value.split(".");
+  const fraction = parts[1] ?? "";
+  if (!fraction) {
+    return Math.min(6, maxDecimals);
+  }
+  return Math.min(fraction.length, maxDecimals, 6);
+};
+
 const getPlayerData = async (
   telegramId: bigint,
   tokenMint?: string
@@ -768,24 +862,62 @@ const checkOracleStatus = async () => {
 };
 
 /**
- * Get the actual minimum amount from smart contract
+ * Get the actual minimum amount from the smart contract for a specific token.
  */
-export const getContractMinimumAmount = async (): Promise<number> => {
+export const getContractMinimumAmount = async (
+  tokenMint: string = DEFAULT_TOKEN_MINT,
+  decimalsHint?: number
+): Promise<{ formatted: number; raw: number; decimals: number }> => {
+  let resolvedMint = tokenMint;
+  let decimals =
+    typeof decimalsHint === "number" ? decimalsHint : undefined;
+
+  if (decimals === undefined) {
+    try {
+      const metadata = await wallet.getTokenMetadata(resolvedMint);
+      decimals = metadata.decimals;
+    } catch (metadataError) {
+      console.warn(
+        `⚠️ Could not fetch metadata for ${resolvedMint}, falling back to default token metadata`,
+        metadataError
+      );
+      const fallbackMetadata = await getDefaultTokenMetadata();
+      decimals = fallbackMetadata.decimals;
+      resolvedMint = DEFAULT_TOKEN_MINT;
+    }
+  }
+
   try {
     const gameTokenPda = PDAManager.getGameTokenPDA(
-      new PublicKey(DEFAULT_TOKEN_MINT),
+      new PublicKey(resolvedMint),
       program.programId
     );
-    const gameTokenAccount = await program.account.gameToken.fetch(gameTokenPda);
+    const gameTokenAccount = await program.account.gameToken.fetch(
+      gameTokenPda
+    );
 
-    const metadata = await getDefaultTokenMetadata();
-    const minAmountFormatted = Number(gameTokenAccount.minAmount) / Math.pow(10, metadata.decimals);
-    
-    console.log(`✅ Contract minimum: ${minAmountFormatted} ${DEFAULT_TOKEN_TICKER}`);
-    return minAmountFormatted;
+    const minAmountRaw = Number(gameTokenAccount.minAmount);
+    const minAmountFormatted = minAmountRaw / Math.pow(10, decimals!);
+
+    console.log(
+      `✅ Contract minimum for ${resolvedMint}: ${minAmountFormatted}`
+    );
+    return {
+      formatted: minAmountFormatted,
+      raw: minAmountRaw,
+      decimals: decimals!,
+    };
   } catch (error) {
-    console.warn("⚠️ Could not fetch minimum from contract, using fallback:", error);
-    return 20; // Fallback
+    console.warn(
+      `⚠️ Could not fetch minimum from contract for ${resolvedMint}, using fallback`,
+      error
+    );
+    const fallbackRaw = Math.round(20 * Math.pow(10, decimals!));
+    return {
+      formatted: 20,
+      raw: fallbackRaw,
+      decimals: decimals!,
+    };
   }
 };
 
@@ -1000,41 +1132,67 @@ bot.command(["coinflip", "cf"], async (ctx) => {
     // No arguments - show UI (new functionality)
     console.log("🎮 UI-based coinflip creation");
     
-    // Get user's TIMBA balance
+    // Resolve chat-specific token configuration
+    const tokenInfo = await resolveChatTokenInfo(ctx.chat?.id);
+
+    // Get user's balance for the active token
     let balanceText = "";
     let userBalance = 0;
     
     try {
-      const timbaBalance = await wallet.getTokenBalance(
+      const tokenBalance = await wallet.getTokenBalance(
         telegramId,
-        DEFAULT_TOKEN_MINT,
+        tokenInfo.tokenMint,
         { createIfMissing: true }
       );
-      const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
-      const formattedBalance = wallet.formatTokenBalance(timbaBalance, metadata.decimals);
-      userBalance = timbaBalance / Math.pow(10, metadata.decimals);
-      balanceText = `\n💰 Your balance: <b>${formattedBalance} TIMBA</b>\n`;
+      const formattedBalance = wallet.formatTokenBalance(
+        tokenBalance,
+        tokenInfo.decimals
+      );
+      userBalance = tokenBalance / Math.pow(10, tokenInfo.decimals);
+      balanceText = `\n💰 Your balance: <b>${formattedBalance} ${tokenInfo.tokenTicker}</b>\n`;
     } catch (error) {
-      console.error("Error getting balance:", error);
-      balanceText = "\n⚠️ Could not load balance\n";
+      console.error("Error getting token balance:", error);
+      balanceText = `\n⚠️ Could not load ${tokenInfo.tokenTicker} balance\n`;
     }
 
     // Create enhanced message with fee warnings
     let coinflipMessage = "🪙 <b>CREATE COINFLIP</b>\n\n";
+    coinflipMessage += `Token: <b>${tokenInfo.tokenTicker}</b>\n`;
     coinflipMessage += "Choose the amount each player will stake:\n";
     coinflipMessage += balanceText;
     
     // Get contract minimum for keyboard suggestions
-    const contractMin = await getContractMinimumAmount();
+    const { formatted: contractMin } = await getContractMinimumAmount(
+      tokenInfo.tokenMint,
+      tokenInfo.decimals
+    );
     
-    coinflipMessage += "\n• Winner takes all the stakes\n";
-    coinflipMessage += "• Fair and transparent results\n\n";
-    coinflipMessage += "Select amount:";
+    coinflipMessage += "\nSelect amount in <b>${tokenInfo.tokenTicker}</b>:";
     
-    await ctx.reply(coinflipMessage, {
+    const setupMessage = await ctx.reply(coinflipMessage, {
       parse_mode: "HTML",
-      reply_markup: createAmountSelectionKeyboard("coinflip", userBalance, ctx.from?.id.toString(), contractMin),
+      reply_markup: createAmountSelectionKeyboard(
+        "coinflip",
+        userBalance,
+        ctx.from?.id.toString(),
+        contractMin,
+        tokenInfo.tokenTicker
+      ),
       reply_to_message_id: ctx.message?.message_id
+    });
+
+    userSessions.set(ctx.from?.id || 0, {
+      waitingFor: "setup",
+      gameType: "coinflip",
+      userBalance,
+      messageId: setupMessage.message_id,
+      chatId: ctx.chat?.id || 0,
+      creatorId: ctx.from?.id?.toString(),
+      tokenMint: tokenInfo.tokenMint,
+      tokenTicker: tokenInfo.tokenTicker,
+      tokenDecimals: tokenInfo.decimals,
+      contractMinimum: contractMin,
     });
   } catch (error) {
     console.error("Error in coinflip command:", error);
@@ -1145,48 +1303,80 @@ bot.command(["giveaway", "ga"], async (ctx) => {
     // No arguments - show UI (new functionality)
     console.log("🎁 UI-based giveaway creation");
     
-    // Get user's TIMBA balance
+    // Resolve chat token config
+    const tokenInfo = await resolveChatTokenInfo(ctx.chat?.id);
+
+    // Get user's balance for chosen token
     let balanceText = "";
     let userBalance = 0;
     
     try {
-    const timbaBalance = await wallet.getTokenBalance(
-      telegramId,
-      DEFAULT_TOKEN_MINT,
-      { createIfMissing: true }
-    );
-      const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
-      const formattedBalance = wallet.formatTokenBalance(timbaBalance, metadata.decimals);
-      userBalance = timbaBalance / Math.pow(10, metadata.decimals);
-      balanceText = `\n💰 Your balance: <b>${formattedBalance} TIMBA</b>\n`;
+      const tokenBalance = await wallet.getTokenBalance(
+        telegramId,
+        tokenInfo.tokenMint,
+        { createIfMissing: true }
+      );
+      const formattedBalance = wallet.formatTokenBalance(
+        tokenBalance,
+        tokenInfo.decimals
+      );
+      userBalance = tokenBalance / Math.pow(10, tokenInfo.decimals);
+      balanceText = `\n💰 Your balance: <b>${formattedBalance} ${tokenInfo.tokenTicker}</b>\n`;
     } catch (error) {
-      console.error("Error getting balance:", error);
-      balanceText = "\n⚠️ Could not load balance\n";
+      console.error("Error getting token balance:", error);
+      balanceText = `\n⚠️ Could not load ${tokenInfo.tokenTicker} balance\n`;
     }
 
     // Create enhanced message with fee warnings  
     let giveawayMessage = "🎁 <b>CREATE GIVEAWAY</b>\n\n";
+    giveawayMessage += `Token: <b>${tokenInfo.tokenTicker}</b>\n`;
     giveawayMessage += "Choose the prize amount you want to give away:\n";
     giveawayMessage += balanceText;
     
     // Get contract minimum for warnings and UX
-    const contractMin = await getContractMinimumAmount();
+    const { formatted: contractMin } = await getContractMinimumAmount(
+      tokenInfo.tokenMint,
+      tokenInfo.decimals
+    );
     
     // Add fee warning for low balance
     if (userBalance < contractMin) {
       giveawayMessage += `\n⚠️ <b>Fee Warning:</b> Oracle fees (~5-10%) reduce the actual prize.\n`;
-      giveawayMessage += `With ${userBalance.toFixed(0)} TIMBA prize, winner gets ~${(userBalance * 0.9).toFixed(0)} TIMBA after fees.\n`;
+      giveawayMessage += `With ${userBalance.toFixed(
+        0
+      )} ${tokenInfo.tokenTicker} prize, winner gets ~${(
+        userBalance * 0.9
+      ).toFixed(0)} ${tokenInfo.tokenTicker} after fees.\n`;
     }
     
     giveawayMessage += "\n• Free to join for all players\n";
     giveawayMessage += "• One lucky winner gets the prize\n";
     giveawayMessage += "• Fair and transparent results\n\n";
-    giveawayMessage += "Select prize amount:";
+    giveawayMessage += `Select prize amount in <b>${tokenInfo.tokenTicker}</b>:`;
 
-    await ctx.reply(giveawayMessage, {
+    const setupMessage = await ctx.reply(giveawayMessage, {
       parse_mode: "HTML",
-      reply_markup: createAmountSelectionKeyboard("giveaway", userBalance, ctx.from?.id.toString(), contractMin),
+      reply_markup: createAmountSelectionKeyboard(
+        "giveaway",
+        userBalance,
+        ctx.from?.id.toString(),
+        contractMin,
+        tokenInfo.tokenTicker
+      ),
       reply_to_message_id: ctx.message?.message_id
+    });
+
+    userSessions.set(ctx.from?.id || 0, {
+      waitingFor: "setup",
+      gameType: "giveaway",
+      userBalance,
+      messageId: setupMessage.message_id,
+      chatId: ctx.chat?.id || 0,
+      creatorId: ctx.from?.id?.toString(),
+      tokenMint: tokenInfo.tokenMint,
+      tokenTicker: tokenInfo.tokenTicker,
+      tokenDecimals: tokenInfo.decimals,
+      contractMinimum: contractMin,
     });
   } catch (error) {
     console.error("Error in giveaway command:", error);
@@ -3008,44 +3198,84 @@ const handleJoinGame = async (
 
 
 // Amount selection callbacks (new format with creatorId)
-bot.callbackQuery(/^amount_(coinflip|giveaway)_(\d+)_(\d+)$/, async (ctx) => {
-  try {
-    console.log("🔔 Amount callback triggered:", ctx.callbackQuery?.data);
-    const gameType = ctx.match![1] as string;
-    const amount = ctx.match![2] as string;
-    const creatorId = ctx.match![3] as string;
-    
-    // Check if the user pressing the button is the creator
-    if (ctx.from?.id.toString() !== creatorId) {
-      await ctx.answerCallbackQuery("🚫 Only the game creator can modify this game setup!");
-      return;
-    }
-    
-    const playerMessage = [
-      `<b>${gameType.toUpperCase()} - CHOOSE PLAYERS</b>`,
-      "",
-      `Amount: <b>${amount} TIMBA</b>`,
-      "",
-      "Select the number of players:",
-      "",
-      gameType === "coinflip" 
-        ? "• All players compete for the total stakes"
-        : "• More players = higher chance for everyone",
-      "",
-      "Choose number of players:"
-    ].join("\n");
+bot.callbackQuery(
+  /^amount_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)$/,
+  async (ctx) => {
+    try {
+      console.log("🔔 Amount callback triggered:", ctx.callbackQuery?.data);
+      const gameType = ctx.match![1] as string;
+      const amount = ctx.match![2] as string;
+      const creatorId = ctx.match![3] as string;
 
-    await ctx.editMessageText(playerMessage, {
-      parse_mode: "HTML",
-      reply_markup: createPlayerSelectionKeyboard(gameType, amount, creatorId)
-    });
-    
-    await ctx.answerCallbackQuery();
-  } catch (error) {
-    console.error("Error in amount callback:", error);
-    await ctx.answerCallbackQuery("❌ Error selecting amount");
+      // Check if the user pressing the button is the creator
+      if (ctx.from?.id.toString() !== creatorId) {
+        await ctx.answerCallbackQuery(
+          "🚫 Only the game creator can modify this game setup!"
+        );
+        return;
+      }
+
+      const userId = ctx.from.id || 0;
+      const existingSession = userSessions.get(userId);
+      const tokenContext = await buildTokenContext(
+        existingSession,
+        ctx.chat?.id
+      );
+
+      const amountNumber = Number(amount);
+      const formattedAmount = amountNumber.toLocaleString("en-US", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: determineFractionDigits(
+          amount,
+          tokenContext.tokenDecimals
+        ),
+      });
+
+      const playerMessage = [
+        `<b>${gameType.toUpperCase()} - CHOOSE PLAYERS</b>`,
+        "",
+        `Amount: <b>${formattedAmount} ${tokenContext.tokenTicker}</b>`,
+        "",
+        "Select the number of players:",
+        "",
+        gameType === "coinflip"
+          ? "• All players compete for the total stakes"
+          : "• More players = higher chance for everyone",
+        "",
+        "Choose number of players:",
+      ].join("\n");
+
+      await ctx.editMessageText(playerMessage, {
+        parse_mode: "HTML",
+        reply_markup: createPlayerSelectionKeyboard(
+          gameType,
+          amount,
+          creatorId
+        ),
+      });
+
+      userSessions.set(userId, {
+        waitingFor: "setup",
+        gameType,
+        userBalance: existingSession?.userBalance ?? 0,
+        messageId:
+          ctx.callbackQuery?.message?.message_id ?? existingSession?.messageId,
+        chatId: ctx.chat?.id ?? existingSession?.chatId ?? 0,
+        amount,
+        creatorId,
+        tokenMint: tokenContext.tokenMint,
+        tokenTicker: tokenContext.tokenTicker,
+        tokenDecimals: tokenContext.tokenDecimals,
+        contractMinimum: tokenContext.contractMinimum,
+      });
+
+      await ctx.answerCallbackQuery();
+    } catch (error) {
+      console.error("Error in amount callback:", error);
+      await ctx.answerCallbackQuery("❌ Error selecting amount");
+    }
   }
-});
+);
 
 
 // Player selection callbacks (new format with creatorId)
@@ -3062,18 +3292,42 @@ bot.callbackQuery(/^players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+
       await ctx.answerCallbackQuery("🚫 Only the game creator can modify this game setup!");
       return;
     }
-    
+    const userId = ctx.from.id || 0;
+    const existingSession = userSessions.get(userId);
+    const tokenContext = await buildTokenContext(
+      existingSession,
+      ctx.chat?.id
+    );
+
+    const amountNumber = Number(amount);
+    const amountFormatted = amountNumber.toLocaleString("en-US", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: determineFractionDigits(
+        amount,
+        tokenContext.tokenDecimals
+      ),
+    });
+    const playersCount = parseInt(players, 10);
+    const totalPot = amountNumber * playersCount;
+    const totalPotFormatted = totalPot.toLocaleString("en-US", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: Math.min(
+        tokenContext.tokenDecimals,
+        6
+      ),
+    });
+
     const confirmMessage = [
       `<b>CONFIRM ${gameType.toUpperCase()}</b>`,
       "",
-      `Amount: <b>${amount} TIMBA</b>`,
+      `Amount: <b>${amountFormatted} ${tokenContext.tokenTicker}</b>`,
       `Players: <b>${players}</b>`,
       "",
       gameType === "coinflip" 
-        ? `• Total prize pool: <b>${parseFloat(amount) * parseInt(players)} TIMBA</b>`
-        : `• Prize for winner: <b>${amount} TIMBA</b>`,
+        ? `• Total prize pool: <b>${totalPotFormatted} ${tokenContext.tokenTicker}</b>`
+        : `• Prize for winner: <b>${amountFormatted} ${tokenContext.tokenTicker}</b>`,
       "",
-      "⚠️ Make sure you have enough TIMBA in your wallet!",
+      `⚠️ Make sure you have enough ${tokenContext.tokenTicker} in your wallet!`,
       "",
       "Ready to create this game?"
     ].join("\n");
@@ -3081,6 +3335,21 @@ bot.callbackQuery(/^players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+
     await ctx.editMessageText(confirmMessage, {
       parse_mode: "HTML",
       reply_markup: createGameConfirmKeyboard(gameType, amount, players, creatorId)
+    });
+
+    userSessions.set(userId, {
+      waitingFor: "setup",
+      gameType,
+      userBalance: existingSession?.userBalance ?? 0,
+      messageId:
+        ctx.callbackQuery?.message?.message_id ?? existingSession?.messageId,
+      chatId: ctx.chat?.id ?? existingSession?.chatId ?? 0,
+      amount,
+      creatorId,
+      tokenMint: tokenContext.tokenMint,
+      tokenTicker: tokenContext.tokenTicker,
+      tokenDecimals: tokenContext.tokenDecimals,
+      contractMinimum: existingSession?.contractMinimum,
     });
     
     await ctx.answerCallbackQuery();
@@ -3140,6 +3409,13 @@ bot.callbackQuery(
       pendingGameCreations.add(creationKey);
 
       try {
+        const userId = ctx.from.id || 0;
+        const existingSession = userSessions.get(userId);
+        const tokenContext = await buildTokenContext(
+          existingSession,
+          ctx.chat?.id
+        );
+
         if (chatId && messageId) {
           try {
             await ctx.api.editMessageReplyMarkup(chatId, messageId);
@@ -3151,9 +3427,14 @@ bot.callbackQuery(
           }
 
           try {
-            await ctx.api.editMessageText(chatId, messageId, "⏳ Creating game…", {
-              parse_mode: "HTML",
-            });
+            await ctx.api.editMessageText(
+              chatId,
+              messageId,
+              "⏳ Creating game…",
+              {
+                parse_mode: "HTML",
+              }
+            );
           } catch (textError) {
             console.warn(
               "Failed to set progress text before game creation:",
@@ -3164,15 +3445,15 @@ bot.callbackQuery(
 
         await ctx.answerCallbackQuery("Creating game...");
 
-        const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
-
+        const decimals = tokenContext.tokenDecimals;
+        const amountRaw = Math.round(amount * Math.pow(10, decimals));
         const gameData = {
-          amount: Math.round(amount * Math.pow(10, metadata.decimals)),
+          amount: amountRaw,
           isSol: false,
           formattedAmount: amount.toString(),
-          tokenMint: DEFAULT_TOKEN_MINT,
-          tokenTicker: DEFAULT_TOKEN_TICKER,
-          tokenWasSpecified: false,
+          tokenMint: tokenContext.tokenMint,
+          tokenTicker: tokenContext.tokenTicker,
+          tokenWasSpecified: tokenContext.tokenMint !== DEFAULT_TOKEN_MINT,
         };
 
         const result = await gameManager.createGame(
@@ -3243,6 +3524,8 @@ bot.callbackQuery(
           replyToUserMessageId
         );
 
+        userSessions.delete(userId);
+
         if (result.autoJoinResult?.success) {
           try {
             await gameManager.updateGameMessageFromData(
@@ -3311,32 +3594,81 @@ bot.callbackQuery(/^custom_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
       return;
     }
     
+    const userId = ctx.from?.id || 0;
+    const session = userSessions.get(userId);
+    const tokenContext = await buildTokenContext(session, ctx.chat?.id);
+
     const telegramId = BigInt(ctx.from?.id || 0);
-    
-    // Get user's balance for max limit
-    let userBalance = 1000;
-    try {
-    const timbaBalance = await wallet.getTokenBalance(
-      telegramId,
-      DEFAULT_TOKEN_MINT,
-      { createIfMissing: true }
-    );
-      const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
-      userBalance = timbaBalance / Math.pow(10, metadata.decimals);
-    } catch (error) {
-      console.error("Error getting balance for slider:", error);
+
+    let userBalance =
+      session?.userBalance && session.userBalance > 0
+        ? session.userBalance
+        : 0;
+    if (userBalance <= 0) {
+      try {
+        const tokenBalance = await wallet.getTokenBalance(
+          telegramId,
+          tokenContext.tokenMint,
+          { createIfMissing: true }
+        );
+        userBalance =
+          tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
+      } catch (error) {
+        console.error("Error getting balance for slider:", error);
+      }
     }
-    
-    // Start with a reasonable amount
-    const startAmount = Math.min(50, Math.floor(userBalance * 0.1));
-    
+
+    const { formatted: contractMin } =
+      tokenContext.contractMinimum !== undefined
+        ? { formatted: tokenContext.contractMinimum }
+        : await getContractMinimumAmount(
+            tokenContext.tokenMint,
+            tokenContext.tokenDecimals
+          );
+
+    const precisionFactor = Math.pow(10, tokenContext.tokenDecimals);
+    const roundValue = (value: number) =>
+      Math.round(value * precisionFactor) / precisionFactor;
+
+    const defaultStart =
+      userBalance > 0
+        ? Math.min(
+            userBalance,
+            Math.max(contractMin, userBalance * 0.1)
+          )
+        : contractMin;
+    const startAmount = roundValue(Math.max(contractMin, defaultStart));
+
     await ctx.editMessageText(
-      `🎯 <b>CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>\n\n💰 Balance: <b>${userBalance.toFixed(2)} TIMBA</b>\n\nAdjust the amount using the controls below:`,
+      `🎯 <b>CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>\n\n💰 Balance: <b>${userBalance.toFixed(
+        Math.min(4, tokenContext.tokenDecimals)
+      )} ${tokenContext.tokenTicker}</b>\n\nAdjust the amount using the controls below:`,
       {
         parse_mode: "HTML",
-        reply_markup: createSliderAmountKeyboard(gameType, startAmount, userBalance, creatorId)
+        reply_markup: createSliderAmountKeyboard(
+          gameType,
+          startAmount,
+          userBalance,
+          creatorId,
+          tokenContext.tokenTicker,
+          tokenContext.tokenDecimals
+        ),
       }
     );
+
+    userSessions.set(userId, {
+      waitingFor: "setup",
+      gameType,
+      userBalance,
+      messageId: session?.messageId ?? ctx.callbackQuery?.message?.message_id,
+      chatId: session?.chatId ?? ctx.chat?.id ?? 0,
+      creatorId,
+      tokenMint: tokenContext.tokenMint,
+      tokenTicker: tokenContext.tokenTicker,
+      tokenDecimals: tokenContext.tokenDecimals,
+      contractMinimum: contractMin,
+      amount: session?.amount,
+    });
     
     await ctx.answerCallbackQuery();
   } catch (error) {
@@ -3347,10 +3679,12 @@ bot.callbackQuery(/^custom_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
 
 
 // Slider controls callback (new format with creator ID)
-bot.callbackQuery(/^slider_(coinflip|giveaway)_(\d+)_(\d+)$/, async (ctx) => {
+bot.callbackQuery(
+  /^slider_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)$/,
+  async (ctx) => {
   try {
     const gameType = ctx.match![1] as string;
-    const newAmount = parseInt(ctx.match![2] as string);
+    const newAmount = parseFloat(ctx.match![2] as string);
     const creatorId = ctx.match![3] as string;
     const currentUserId = ctx.from?.id?.toString();
     
@@ -3362,33 +3696,80 @@ bot.callbackQuery(/^slider_(coinflip|giveaway)_(\d+)_(\d+)$/, async (ctx) => {
       await ctx.answerCallbackQuery("❌ Only the game creator can modify this setup!");
       return;
     }
-    
+    const userId = ctx.from?.id || 0;
+    const session = userSessions.get(userId);
+    const tokenContext = await buildTokenContext(session, ctx.chat?.id);
+
     const telegramId = BigInt(ctx.from?.id || 0);
-    
-    // Get user's balance for validation
-    let userBalance = 1000; // Default fallback
-    try {
-      const timbaBalance = await wallet.getTokenBalance(
-        telegramId,
-        DEFAULT_TOKEN_MINT,
-        { createIfMissing: true }
-      );
-      const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
-      userBalance = timbaBalance / Math.pow(10, metadata.decimals);
-    } catch (error) {
-      console.error("Error getting balance for slider:", error);
+
+    let userBalance =
+      session?.userBalance && session.userBalance > 0
+        ? session.userBalance
+        : 0;
+    if (userBalance <= 0) {
+      try {
+        const tokenBalance = await wallet.getTokenBalance(
+          telegramId,
+          tokenContext.tokenMint,
+          { createIfMissing: true }
+        );
+        userBalance =
+          tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
+      } catch (error) {
+        console.error("Error getting balance for slider:", error);
+      }
     }
-    
-    // Validate amount
-    const validAmount = Math.max(1, Math.min(Math.floor(userBalance), newAmount));
-    
+
+    const precisionFactor = Math.pow(10, tokenContext.tokenDecimals);
+    const roundValue = (value: number) =>
+      Math.round(value * precisionFactor) / precisionFactor;
+    const minValue =
+      tokenContext.contractMinimum !== undefined
+        ? tokenContext.contractMinimum
+        : (await getContractMinimumAmount(
+            tokenContext.tokenMint,
+            tokenContext.tokenDecimals
+          )).formatted;
+    const validAmount = roundValue(
+      Math.max(
+        minValue,
+        Math.min(
+          userBalance > 0 ? userBalance : newAmount,
+          newAmount
+        )
+      )
+    );
+
     await ctx.editMessageText(
-      `🎯 <b>CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>\n\n💰 Balance: <b>${userBalance.toFixed(2)} TIMBA</b>\n\nAdjust the amount using the controls below:`,
+      `🎯 <b>CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>\n\n💰 Balance: <b>${userBalance.toFixed(
+        Math.min(4, tokenContext.tokenDecimals)
+      )} ${tokenContext.tokenTicker}</b>\n\nAdjust the amount using the controls below:`,
       {
         parse_mode: "HTML",
-        reply_markup: createSliderAmountKeyboard(gameType, validAmount, userBalance, creatorId)
+        reply_markup: createSliderAmountKeyboard(
+          gameType,
+          validAmount,
+          userBalance,
+          creatorId,
+          tokenContext.tokenTicker,
+          tokenContext.tokenDecimals
+        ),
       }
     );
+
+    userSessions.set(userId, {
+      waitingFor: "setup",
+      gameType,
+      userBalance,
+      messageId: session?.messageId ?? ctx.callbackQuery?.message?.message_id,
+      chatId: session?.chatId ?? ctx.chat?.id ?? 0,
+      amount: validAmount.toString(),
+      creatorId,
+      tokenMint: tokenContext.tokenMint,
+      tokenTicker: tokenContext.tokenTicker,
+      tokenDecimals: tokenContext.tokenDecimals,
+      contractMinimum: minValue,
+    });
     
     await ctx.answerCallbackQuery();
   } catch (error) {
@@ -3414,35 +3795,72 @@ bot.callbackQuery(/^back_to_amounts_(coinflip|giveaway)_(\d+)$/, async (ctx) => 
       return;
     }
     
+    const userId = ctx.from?.id || 0;
+    const session = userSessions.get(userId);
+    const tokenContext = await buildTokenContext(session, ctx.chat?.id);
+
     const telegramId = BigInt(ctx.from?.id || 0);
-    
-    // Get user balance
-    let userBalance = 1000;
-    try {
-      const timbaBalance = await wallet.getTokenBalance(
-        telegramId,
-        DEFAULT_TOKEN_MINT,
-        { createIfMissing: true }
-      );
-      const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
-      userBalance = timbaBalance / Math.pow(10, metadata.decimals);
-    } catch (error) {
-      console.error("Error getting balance:", error);
+
+    let userBalance =
+      session?.userBalance && session.userBalance > 0
+        ? session.userBalance
+        : 0;
+    if (userBalance <= 0) {
+      try {
+        const tokenBalance = await wallet.getTokenBalance(
+          telegramId,
+          tokenContext.tokenMint,
+          { createIfMissing: true }
+        );
+        userBalance =
+          tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
+      } catch (error) {
+        console.error("Error getting balance:", error);
+      }
     }
-    
-    // Get contract minimum for accurate warnings and UX
-    const contractMin = await getContractMinimumAmount();
+
+    const { formatted: contractMin } =
+      tokenContext.contractMinimum !== undefined
+        ? { formatted: tokenContext.contractMinimum }
+        : await getContractMinimumAmount(
+            tokenContext.tokenMint,
+            tokenContext.tokenDecimals
+          );
     
     // Clear any pending typed-input session for this user when navigating back
     userSessions.delete(ctx.from?.id || 0);
 
     await ctx.editMessageText(
-      getFeeWarningMessage(gameType, userBalance, contractMin),
+      getFeeWarningMessage(
+        gameType,
+        userBalance,
+        contractMin,
+        tokenContext.tokenTicker
+      ),
       {
         parse_mode: "HTML",
-        reply_markup: createAmountSelectionKeyboard(gameType, userBalance, creatorId, contractMin)
+        reply_markup: createAmountSelectionKeyboard(
+          gameType,
+          userBalance,
+          creatorId,
+          contractMin,
+          tokenContext.tokenTicker
+        )
       }
     );
+    
+    userSessions.set(userId, {
+      waitingFor: "setup",
+      gameType,
+      userBalance,
+      messageId: ctx.callbackQuery?.message?.message_id ?? 0,
+      chatId: ctx.chat?.id ?? 0,
+      creatorId,
+      tokenMint: tokenContext.tokenMint,
+      tokenTicker: tokenContext.tokenTicker,
+      tokenDecimals: tokenContext.tokenDecimals,
+      contractMinimum: contractMin,
+    });
     
     await ctx.answerCallbackQuery();
   } catch (error) {
@@ -3467,35 +3885,54 @@ bot.callbackQuery(/^type_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
       await ctx.answerCallbackQuery("❌ Only the game creator can modify this setup!");
       return;
     }
-    
+    const userId = ctx.from?.id || 0;
+    const session = userSessions.get(userId);
+    const tokenContext = await buildTokenContext(session, ctx.chat?.id);
+
     const telegramId = BigInt(ctx.from?.id || 0);
-    
-    // Get user balance for validation
-    let userBalance = 1000;
-    try {
-      const timbaBalance = await wallet.getTokenBalance(
-        telegramId,
-        DEFAULT_TOKEN_MINT,
-        { createIfMissing: true }
-      );
-      const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
-      userBalance = timbaBalance / Math.pow(10, metadata.decimals);
-    } catch (error) {
-      console.error("Error getting balance:", error);
+
+    let userBalance =
+      session?.userBalance && session.userBalance > 0
+        ? session.userBalance
+        : 0;
+    if (userBalance <= 0) {
+      try {
+        const tokenBalance = await wallet.getTokenBalance(
+          telegramId,
+          tokenContext.tokenMint,
+          { createIfMissing: true }
+        );
+        userBalance =
+          tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
+      } catch (error) {
+        console.error("Error getting balance:", error);
+      }
     }
-    
+
+    const { formatted: contractMin } =
+      tokenContext.contractMinimum !== undefined
+        ? { formatted: tokenContext.contractMinimum }
+        : await getContractMinimumAmount(
+            tokenContext.tokenMint,
+            tokenContext.tokenDecimals
+          );
+
     const typeMessage = [
       `✏️ <b>TYPE CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>`,
       "",
-      `💰 Your balance: <b>${userBalance.toFixed(2)} TIMBA</b>`,
+      `💰 Your balance: <b>${userBalance.toFixed(
+        Math.min(4, tokenContext.tokenDecimals)
+      )} ${tokenContext.tokenTicker}</b>`,
       "",
       "Please type the amount you want to use.",
       "",
       "<b>Example:</b>",
-      "• Type: <code>75</code> for 75 TIMBA",
-      "• Type: <code>150.5</code> for 150.5 TIMBA",
+      `• Type: <code>75</code> for 75 ${tokenContext.tokenTicker}`,
+      `• Type: <code>150.5</code> for 150.5 ${tokenContext.tokenTicker}`,
       "",
-      `Min: 1 TIMBA • Max: ${Math.floor(userBalance)} TIMBA`
+      `Min: ${contractMin} ${tokenContext.tokenTicker} • Max: ${userBalance.toFixed(
+        Math.min(2, tokenContext.tokenDecimals)
+      )} ${tokenContext.tokenTicker}`
     ].join("\n");
 
     await ctx.editMessageText(typeMessage, {
@@ -3508,13 +3945,18 @@ bot.callbackQuery(/^type_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
     await ctx.answerCallbackQuery("Type your amount...");
     
     // Store the game type and message ID in user session for the text handler
-    userSessions.set(ctx.from?.id || 0, { 
+    userSessions.set(userId, { 
       waitingFor: "amount_input",
-      gameType: gameType,
-      userBalance: userBalance,
+      gameType,
+      userBalance,
       messageId: ctx.callbackQuery?.message?.message_id || 0,
       chatId: ctx.chat?.id || 0,
-      creatorId: creatorId
+      creatorId,
+      tokenMint: tokenContext.tokenMint,
+      tokenTicker: tokenContext.tokenTicker,
+      tokenDecimals: tokenContext.tokenDecimals,
+      contractMinimum: contractMin,
+      amount: session?.amount,
     });
     
   } catch (error) {
@@ -3540,11 +3982,23 @@ bot.callbackQuery(/^custom_players_(coinflip|giveaway)_(.+)_(\d+)$/, async (ctx)
       await ctx.answerCallbackQuery("❌ Only the game creator can modify this setup!");
       return;
     }
-    
+    const userId = ctx.from?.id || 0;
+    const session = userSessions.get(userId);
+    const tokenContext = await buildTokenContext(session, ctx.chat?.id);
+
+    const amountNumber = Number(amount);
+    const formattedAmount = amountNumber.toLocaleString("en-US", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: determineFractionDigits(
+        amount,
+        tokenContext.tokenDecimals
+      ),
+    });
+
     const playersMessage = [
       `👥 <b>TYPE CUSTOM PLAYERS - ${gameType.toUpperCase()}</b>`,
       "",
-      `Amount: <b>${amount} TIMBA</b>`,
+      `Amount: <b>${formattedAmount} ${tokenContext.tokenTicker}</b>`,
       "",
       "Please type the number of players for this game.",
       "",
@@ -3565,14 +4019,18 @@ bot.callbackQuery(/^custom_players_(coinflip|giveaway)_(.+)_(\d+)$/, async (ctx)
     await ctx.answerCallbackQuery("Type the number of players...");
     
     // Store data for text input handler
-    userSessions.set(ctx.from?.id || 0, { 
+    userSessions.set(userId, { 
       waitingFor: "players_input",
-      gameType: gameType,
+      gameType,
       userBalance: 0, // Add required field
-      amount: amount,
+      amount,
       messageId: ctx.callbackQuery?.message?.message_id || 0,
       chatId: ctx.chat?.id || 0,
-      creatorId: creatorId
+      creatorId,
+      tokenMint: tokenContext.tokenMint,
+      tokenTicker: tokenContext.tokenTicker,
+      tokenDecimals: tokenContext.tokenDecimals,
+      contractMinimum: session?.contractMinimum,
     });
     
   } catch (error) {
@@ -3634,9 +4092,23 @@ bot.on("message:text", async (ctx, next) => {
     
     // Clear the session
     userSessions.delete(ctx.from?.id || 0);
-    
+
+    const defaultMetadata = await getDefaultTokenMetadata();
+    const tokenTicker =
+      userSession.tokenTicker ?? DEFAULT_TOKEN_TICKER;
+    const tokenDecimals =
+      userSession.tokenDecimals ?? defaultMetadata.decimals;
+    const minAllowed =
+      userSession.contractMinimum ??
+      (
+        await getContractMinimumAmount(
+          userSession.tokenMint ?? DEFAULT_TOKEN_MINT,
+          tokenDecimals
+        )
+      ).formatted;
+
     const inputText = ctx.message.text.trim();
-    
+
     // Handle players input
     if (userSession.waitingFor === "players_input") {
       const players = parseInt(inputText);
@@ -3662,15 +4134,29 @@ bot.on("message:text", async (ctx, next) => {
       }
       
       // Show confirmation with custom players
+      const amountNumber = Number(userSession.amount ?? "0");
+      const amountFormatted = amountNumber.toLocaleString("en-US", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: determineFractionDigits(
+          userSession.amount ?? amountNumber.toString(),
+          tokenDecimals
+        ),
+      });
+      const totalPot = amountNumber * players;
+      const totalPotFormatted = totalPot.toLocaleString("en-US", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: Math.min(tokenDecimals, 6),
+      });
+
       const confirmMessage = [
         `<b>CONFIRM ${userSession.gameType.toUpperCase()}</b>`,
         "",
-        `Amount: <b>${userSession.amount!} TIMBA</b>`,
+        `Amount: <b>${amountFormatted} ${tokenTicker}</b>`,
         `Players: <b>${players}</b>`,
         "",
         userSession.gameType === "coinflip" 
-          ? "• All players compete for the total stakes"
-          : "• More players = higher chance for everyone",
+          ? `• Total prize pool: <b>${totalPotFormatted} ${tokenTicker}</b>`
+          : `• Prize for winner: <b>${amountFormatted} ${tokenTicker}</b>`,
         "",
         "Ready to create the game?"
       ].join("\n");
@@ -3692,6 +4178,20 @@ bot.on("message:text", async (ctx, next) => {
         });
       }
       
+      userSessions.set(ctx.from?.id || 0, {
+        waitingFor: "setup",
+        gameType: userSession.gameType,
+        userBalance: userSession.userBalance,
+        messageId: userSession.messageId,
+        chatId: userSession.chatId,
+        amount: userSession.amount,
+        creatorId: userSession.creatorId,
+        tokenMint: userSession.tokenMint,
+        tokenTicker,
+        tokenDecimals,
+        contractMinimum: minAllowed,
+      });
+
       return;
     }
     
@@ -3722,22 +4222,45 @@ bot.on("message:text", async (ctx, next) => {
         await ctx.api.editMessageText(
           userSession.chatId!, 
           userSession.messageId!,
-          `❌ Amount too high. Your balance is ${userSession.userBalance.toFixed(2)} TIMBA. Please use /coinflip or /giveaway to try again.`,
+          `❌ Amount too high. Your balance is ${userSession.userBalance.toFixed(2)} ${tokenTicker}. Please use /coinflip or /giveaway to try again.`,
           { parse_mode: "HTML" }
         );
       } catch (error) {
-        await ctx.reply(`❌ Amount too high. Your balance is ${userSession.userBalance.toFixed(2)} TIMBA. Please try again.`, {
+        await ctx.reply(`❌ Amount too high. Your balance is ${userSession.userBalance.toFixed(2)} ${tokenTicker}. Please try again.`, {
           parse_mode: "HTML"
         });
       }
       return;
     }
+
+    if (amount < minAllowed) {
+      const errorMessage = `❌ Amount below contract minimum of ${minAllowed} ${tokenTicker}.`;
+      try {
+        await ctx.api.editMessageText(
+          userSession.chatId!,
+          userSession.messageId!,
+          errorMessage,
+          { parse_mode: "HTML" }
+        );
+      } catch (error) {
+        await ctx.reply(errorMessage, { parse_mode: "HTML" });
+      }
+      return;
+    }
     
     // Proceed to player selection with the custom amount
+    const amountFormatted = amount.toLocaleString("en-US", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: determineFractionDigits(
+        inputText,
+        tokenDecimals
+      ),
+    });
+
     const playerMessage = [
       `<b>${userSession.gameType.toUpperCase()} - CHOOSE PLAYERS</b>`,
       "",
-      `Amount: <b>${amount} TIMBA</b>`,
+      `Amount: <b>${amountFormatted} ${tokenTicker}</b>`,
       "",
       "Select the number of players:",
       "",
@@ -3766,6 +4289,20 @@ bot.on("message:text", async (ctx, next) => {
         reply_markup: createPlayerSelectionKeyboard(userSession.gameType, amount.toString(), userSession.creatorId)
       });
     }
+
+    userSessions.set(ctx.from?.id || 0, {
+      waitingFor: "setup",
+      gameType: userSession.gameType,
+      userBalance: userSession.userBalance,
+      messageId: userSession.messageId,
+      chatId: userSession.chatId,
+      amount: amount.toString(),
+      creatorId: userSession.creatorId,
+      tokenMint: userSession.tokenMint,
+      tokenTicker,
+      tokenDecimals,
+      contractMinimum: minAllowed,
+    });
     
   } catch (error) {
     console.error("Error in text input handler:", error);
