@@ -9,7 +9,6 @@ export type TokenDisplayLine = { ticker: string; formatted: string };
 export function buildWalletCaption(
   solFormatted: string,
   tokens: TokenDisplayLine[],
-  totalUsd: number,
   walletAddress: string,
   solUsdPrice?: number,
   timbaUsdPrice?: number

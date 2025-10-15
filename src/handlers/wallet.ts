@@ -8,17 +8,6 @@ const getTelegramErrorDescription = (error: unknown): string => {
   return (knownError.description || knownError.message || "").toLowerCase();
 };
 
-const isDirectMessageInitiationError = (error: unknown): boolean => {
-  if (!error || typeof error !== "object") return false;
-  const telegramError = error as { error_code?: number };
-  if (telegramError.error_code !== 403) return false;
-  const description = getTelegramErrorDescription(error);
-  return (
-    description.includes("bot can't initiate") ||
-    description.includes("bot was blocked by the user") ||
-    description.includes("user is deactivated")
-  );
-};
 
 export type ShowWalletUIDeps = {
   wallet: {
@@ -28,7 +17,7 @@ export type ShowWalletUIDeps = {
   };
   getCachedWalletData: (telegramId: bigint) => Promise<{ solBalance: number; tokenBalances: Array<{ mint: string; ticker: string; balance: number; decimals: number }> }>;
   getPriceUSD: (mint: string) => Promise<number>;
-  buildWalletCaption: (solBalanceStr: string, tokenLines: Array<{ ticker: string; formatted: string }>, totalUSD: number, walletAddress: string) => string;
+  buildWalletCaption: (solBalanceStr: string, tokenLines: Array<{ ticker: string; formatted: string }>, walletAddress: string, solUsdPrice?: number, timbaUsdPrice?: number) => string;
   createWalletKeyboard: () => InlineKeyboard;
   WINNER_VIDEO_ID?: string | null;
   LAMPORTS_PER_SOL: number;
@@ -147,7 +136,6 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
     const caption = buildWalletCaption(
       formattedSolBalance,
       tokenLines,
-      totalUSD,
       walletAddress,
       solUsdPrice,
       timbaUsdPrice
@@ -232,7 +220,7 @@ export type BalanceDeps = {
   wallet: { formatTokenBalance: (n: number, d: number) => string; formatSolBalance: (n: number) => string };
   handleCommandError: (ctx: any, error: any, name: string) => Promise<void>;
   getPriceUSD: (mint: string) => Promise<number>;
-  buildWalletCaption: (solBalanceStr: string, tokenLines: Array<{ ticker: string; formatted: string }>, totalUSD: number, walletAddress: string, solUsdPrice?: number, timbaUsdPrice?: number) => string;
+  buildWalletCaption: (solBalanceStr: string, tokenLines: Array<{ ticker: string; formatted: string }>, walletAddress: string, solUsdPrice?: number, timbaUsdPrice?: number) => string;
   createWalletKeyboard: () => InlineKeyboard;
   WINNER_VIDEO_ID?: string | null;
 };
