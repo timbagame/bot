@@ -125,6 +125,6 @@ describe("GameManager.createGame", () => {
     const gm = GameManager.getInstance(makeProgram(), wallet, { savePlayerMapping: () => {} } as any);
     const res = await gm.createGame("coinflip", { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false }, 2, 2, 60, 1n);
     expect(res.success).toBe(false);
-    expect(String(res.error)).toMatch(/fail|Error/i);
+    expect(String(res.error)).toContain("Something went wrong");
   });
 });
