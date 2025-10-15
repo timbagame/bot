@@ -155,12 +155,12 @@ export const PRICES_TIMEOUT_MS = Number(process.env["PRICES_TIMEOUT_MS"] ?? 3_00
 // Start/Wallet video - for /start command and wallet UI
 // Use getter function to allow dynamic changes
 export const getStartVideoId = () => 
-  process.env["START_VIDEO_ID"];
+  "BAACAgEAAx0Ce_D3oQACXmho5TdI4JsNHigDTJ_wP2JkHRJuGgACqgUAAhBxgEU0LG9kSZAoKTYE"
 
 // Coinflip start video - for when coinflip rounds begin  
 // Use getter function to allow dynamic changes
 export const getCoinflipVideoId = () =>
-  process.env["COINFLIP_START_VIDEO_ID"];
+  "BAACAgEAAx0Ce_D3oQACXmdo5TdIxIyPM3bU6M4P95SiHGaAJgACqwUAAhBxgEXdjHLQI-pVQDYE"
 
 // Backwards compatibility - deprecated, use getters instead
 export const START_VIDEO_ID = getStartVideoId();

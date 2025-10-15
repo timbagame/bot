@@ -120,22 +120,37 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
     totalUSD += solDecimalBalance * solPriceUSD;
 
     const tokenLines: Array<{ ticker: string; formatted: string }> = [];
+    let solUsdPrice = 0;
+    let timbaUsdPrice = 0;
+    
     for (const token of tokenBalances) {
       const formatted = wallet.formatTokenBalance
         ? (wallet as any).formatTokenBalance(token.balance, token.decimals)
         : String(token.balance / Math.pow(10, token.decimals));
       tokenLines.push({ ticker: token.ticker, formatted });
 
-      const tokenPriceUSD = await getPriceUSD(token.mint);
+      // Use the same robust logic as coinflip for price fetching
+      const reference = token.ticker === "SOL" ? "SOL" : token.mint || token.ticker;
+      const tokenPriceUSD = await getPriceUSD(reference);
       const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
       totalUSD += tokenDecimalBalance * tokenPriceUSD;
+      
+      // Store specific prices for display
+      if (token.ticker === "TIMBA") {
+        timbaUsdPrice = tokenPriceUSD;
+      }
     }
+    
+    // Get SOL price
+    solUsdPrice = await getPriceUSD("SOL");
 
     const caption = buildWalletCaption(
       formattedSolBalance,
       tokenLines,
       totalUSD,
-      walletAddress
+      walletAddress,
+      solUsdPrice,
+      timbaUsdPrice
     );
 
     await sendWalletContent(caption);
@@ -216,6 +231,10 @@ export type BalanceDeps = {
   TOKENS_LIST: Array<{ mint: string; ticker: string }>;
   wallet: { formatTokenBalance: (n: number, d: number) => string; formatSolBalance: (n: number) => string };
   handleCommandError: (ctx: any, error: any, name: string) => Promise<void>;
+  getPriceUSD: (mint: string) => Promise<number>;
+  buildWalletCaption: (solBalanceStr: string, tokenLines: Array<{ ticker: string; formatted: string }>, totalUSD: number, walletAddress: string, solUsdPrice?: number, timbaUsdPrice?: number) => string;
+  createWalletKeyboard: () => InlineKeyboard;
+  WINNER_VIDEO_ID?: string | null;
 };
 
 export async function onBalance(ctx: any, deps: BalanceDeps) {
@@ -229,6 +248,10 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     TOKENS_LIST,
     wallet,
     handleCommandError,
+    getPriceUSD,
+    buildWalletCaption,
+    createWalletKeyboard,
+    WINNER_VIDEO_ID,
   } = deps;
 
   const telegramId = BigInt(ctx.from?.id || 0) as bigint;
@@ -243,9 +266,11 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     return;
   }
 
-  // If it's not a private chat, send balance privately to the user
-  let response: string[] = [];
+  // If it's not a private chat, send the same wallet UI privately to the user
   try {
+    try { clearWalletCache(telegramId); } catch {}
+    
+    // Get the same data as private chat using the existing logic
     const playerData = await getPlayerData(telegramId);
     const approvedTokens = getApprovedTokens();
     const tokenBalancesToShow = await buildTokenBalances(telegramId, approvedTokens);
@@ -258,42 +283,70 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
       tokenBalancesToShow.splice(wsolIndex, 1);
     }
 
-    const displayName = ctx.from?.username ? `@${ctx.from.username}` : ctx.from?.first_name || "User";
     const walletAddress = playerData.keypair.publicKey.toBase58();
+    const formattedSolBalance = wallet.formatSolBalance(solDisplayLamports);
 
-    const safeDisplayName = escapeHtml(displayName);
-    const safeWalletAddress = escapeHtml(walletAddress);
-    response = [
-      `<b>${safeDisplayName}</b>`,
-      `<code>${safeWalletAddress}</code>`,
-      "",
-      `${escapeHtml(wallet.formatSolBalance(solDisplayLamports))} SOL`,
-    ];
+    // Build token lines with prices
+    const tokenLines: Array<{ ticker: string; formatted: string }> = [];
+    let solUsdPrice = 0;
+    let timbaUsdPrice = 0;
+    
+    for (const token of tokenBalancesToShow) {
+      const formatted = wallet.formatTokenBalance(token.balance, token.decimals);
+      tokenLines.push({ ticker: token.ticker, formatted });
 
-    if (tokenBalancesToShow.length > 0) {
-      for (const token of tokenBalancesToShow.slice(0, 4)) {
-        const balance = wallet.formatTokenBalance(token.balance, token.decimals);
-        response.push(`${escapeHtml(balance)} ${escapeHtml(token.ticker)}`);
-      }
-      if (tokenBalancesToShow.length > 4) {
-        response.push(`<i>+${tokenBalancesToShow.length - 4} more tokens</i>`);
+      // Use the same robust logic as coinflip for price fetching
+      const reference = token.ticker === "SOL" ? "SOL" : token.mint || token.ticker;
+      const tokenPriceUSD = await getPriceUSD(reference);
+      
+      // Store specific prices for display
+      if (token.ticker === "TIMBA") {
+        timbaUsdPrice = tokenPriceUSD;
       }
     }
-  } catch (error) {
-    console.error("Error preparing private balance response:", error);
-    await handleCommandError(ctx, error, "balance");
-    return;
-  }
+    
+    // Get SOL price
+    solUsdPrice = await getPriceUSD("SOL");
 
-  try {
-    // Send privately to the user instead of replying in group
-    await ctx.api.sendMessage(ctx.from!.id, response.join("\n"), { parse_mode: "HTML" });
+    const caption = buildWalletCaption(
+      formattedSolBalance,
+      tokenLines,
+      0, // totalUSD not needed for display
+      walletAddress,
+      solUsdPrice,
+      timbaUsdPrice
+    );
+
+    // Send privately to the user with video support
+    const sendPrivateWalletContent = async (caption: string) => {
+      const sendAsText = async () => {
+        await ctx.api.sendMessage(ctx.from!.id, caption, { 
+          parse_mode: "HTML",
+          reply_markup: createWalletKeyboard(),
+          link_preview_options: { is_disabled: true }
+        });
+      };
+
+      if (!WINNER_VIDEO_ID) {
+        await sendAsText();
+        return;
+      }
+
+      try {
+        await ctx.api.sendVideo(ctx.from!.id, WINNER_VIDEO_ID, {
+          caption,
+          parse_mode: "HTML",
+          reply_markup: createWalletKeyboard(),
+        });
+      } catch (videoError) {
+        console.warn("Failed to send video, falling back to text:", videoError);
+        await sendAsText();
+      }
+    };
+
+    await sendPrivateWalletContent(caption);
+    
   } catch (error) {
-    if (isDirectMessageInitiationError(error)) {
-      console.warn("Unable to DM balance because user hasn't started the bot:", error);
-      return;
-    }
-    console.error("Error sending private balance message:", error);
     await handleCommandError(ctx, error, "balance");
   }
 }
