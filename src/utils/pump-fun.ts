@@ -631,12 +631,23 @@ export class PumpFunClient {
     inputTicker: string,
     outputTicker: string
   ): string {
-    // Convert decimal strings to raw smallest units for consistent formatting
-    const inputRaw = Math.round(
-      parseFloat(quote.inputAmount) * Math.pow(10, inputDecimals)
-    );
-    const outputRaw = Math.round(
-      parseFloat(quote.outputAmount) * Math.pow(10, outputDecimals)
+    const toRaw = (amount: string, decimals: number): bigint => {
+      const trimmed = amount.trim();
+      if (trimmed.length === 0) {
+        return 0n;
+      }
+
+      if (/^\d+$/.test(trimmed)) {
+        return BigInt(trimmed);
+      }
+
+      return this.toRawAmount(trimmed, decimals);
+    };
+
+    const inputRaw = toRaw(quote.inputAmount ?? "0", Math.max(inputDecimals, 0));
+    const outputRaw = toRaw(
+      quote.outputAmount ?? "0",
+      Math.max(outputDecimals, 0)
     );
 
     const inputAmountStr = formatAmount(inputRaw, inputDecimals, {
