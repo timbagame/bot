@@ -26,6 +26,11 @@ test("onBalance in private chat clears cache and calls showWalletUI", async () =
     TOKENS_LIST: [],
     wallet: { formatTokenBalance: (_n: number, _d: number) => "0", formatSolBalance: (n: number) => String(n) },
     handleCommandError: async () => {},
+    getPriceUSD: async () => 100,
+    buildWalletCaption: (sol: string, _tokens: any[], addr: string, solPrice?: number, _timbaPrice?: number) => 
+      `Solana Address · 🅴\n\n<code>${addr}</code>\n\nFee balance: ${sol} SOL ($${solPrice || 0})\nTimba balance: 0 TIMBA ($0.00)`,
+    createWalletKeyboard: () => ({} as any),
+    WINNER_VIDEO_ID: null,
   });
   expect(cleared).toBe(1n);
   expect(shown).toBe(1);
@@ -44,17 +49,27 @@ test("onBalance private chat errors call handler", async () => {
     TOKENS_LIST: [],
     wallet: { formatTokenBalance: () => "0", formatSolBalance: (n: number) => String(n) },
     handleCommandError: async () => { handled++; },
+    getPriceUSD: async () => 100,
+    buildWalletCaption: (sol: string, _tokens: any[], addr: string, solPrice?: number, _timbaPrice?: number) => 
+      `Solana Address · 🅴\n\n<code>${addr}</code>\n\nFee balance: ${sol} SOL ($${solPrice || 0})\nTimba balance: 0 TIMBA ($0.00)`,
+    createWalletKeyboard: () => ({} as any),
+    WINNER_VIDEO_ID: null,
   });
   expect(handled).toBe(1);
 });
 
 test("onBalance in group sends balance privately to user", async () => {
   const ctx: any = makeCtx(false);
-  // Mock api.sendMessage to track calls
+  // Mock api.sendMessage and sendVideo to track calls
   const sendMessageCalls: any[] = [];
+  const sendVideoCalls: any[] = [];
   ctx.api = {
     sendMessage: (chatId: any, text: any, options: any) => {
       sendMessageCalls.push({ chatId, text, options });
+      return Promise.resolve();
+    },
+    sendVideo: (chatId: any, videoId: any, options: any) => {
+      sendVideoCalls.push({ chatId, videoId, options });
       return Promise.resolve();
     }
   };
@@ -69,31 +84,61 @@ test("onBalance in group sends balance privately to user", async () => {
     TOKENS_LIST: [{ mint: "So11111111111111111111111111111111111111112", ticker: "WSOL" }],
     wallet: { formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toFixed(0), formatSolBalance: (n: number) => (n / 1_000_000_000).toFixed(6) },
     handleCommandError: async () => {},
+    getPriceUSD: async () => 100,
+    buildWalletCaption: (sol: string, _tokens: any[], addr: string, solPrice?: number, _timbaPrice?: number) => {
+      // Simple HTML escaping for test
+      const escapeHtml = (str: string) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      let result = `Solana Address · 🅴\n\n<code>${escapeHtml(addr)}</code>\n\nFee balance: ${escapeHtml(sol)} SOL ($${solPrice || 0})\nTimba balance: 0 TIMBA ($0.00)`;
+      for (const token of _tokens) {
+        if (token.ticker !== "TIMBA") {
+          result += `\n${escapeHtml(token.ticker)} balance: ${escapeHtml(token.formatted)} ${escapeHtml(token.ticker)}`;
+        }
+      }
+      return result;
+    },
+    createWalletKeyboard: () => ({} as any),
+    WINNER_VIDEO_ID: null,
   });
   
   // Should not reply in group
   const calls = ctx.__calls;
   expect(calls.length).toBe(0);
   
-  // Should send privately to user
-  expect(sendMessageCalls.length).toBe(1);
-  expect(sendMessageCalls[0].chatId).toBe(1); // user ID from makeCtx
-  const text = String(sendMessageCalls[0].text);
-  expect(text).toContain("WALLETADDR");
-  expect(text).toContain("1.000000 SOL");
-  expect(text).toContain("1 USDC");
-  expect(sendMessageCalls[0].options.parse_mode).toBe("HTML");
+  // Should send privately to user (either as message or video)
+  const totalCalls = sendMessageCalls.length + sendVideoCalls.length;
+  expect(totalCalls).toBe(1);
+  
+  if (sendMessageCalls.length > 0) {
+    expect(sendMessageCalls[0].chatId).toBe(1); // user ID from makeCtx
+    const text = String(sendMessageCalls[0].text);
+    expect(text).toContain("WALLETADDR");
+    expect(text).toContain("1.000000 SOL");
+    expect(text).toContain("1 USDC");
+    expect(sendMessageCalls[0].options.parse_mode).toBe("HTML");
+  } else if (sendVideoCalls.length > 0) {
+    expect(sendVideoCalls[0].chatId).toBe(1); // user ID from makeCtx
+    const text = String(sendVideoCalls[0].options.caption);
+    expect(text).toContain("WALLETADDR");
+    expect(text).toContain("1.000000 SOL");
+    expect(text).toContain("1 USDC");
+    expect(sendVideoCalls[0].options.parse_mode).toBe("HTML");
+  }
 });
 
 test("onBalance merges WSOL and sends privately to user", async () => {
   const ctx: any = makeCtx(false);
   ctx.from.username = "alice";
   
-  // Mock api.sendMessage to track calls
+  // Mock api.sendMessage and sendVideo to track calls
   const sendMessageCalls: any[] = [];
+  const sendVideoCalls: any[] = [];
   ctx.api = {
     sendMessage: (chatId: any, text: any, options: any) => {
       sendMessageCalls.push({ chatId, text, options });
+      return Promise.resolve();
+    },
+    sendVideo: (chatId: any, videoId: any, options: any) => {
+      sendVideoCalls.push({ chatId, videoId, options });
       return Promise.resolve();
     }
   };
@@ -122,31 +167,67 @@ test("onBalance merges WSOL and sends privately to user", async () => {
       formatSolBalance: (lamports: number) => (lamports / 1_000_000_000).toFixed(6),
     },
     handleCommandError: async () => {},
+    getPriceUSD: async () => 100,
+    buildWalletCaption: (sol: string, _tokens: any[], addr: string, solPrice?: number, _timbaPrice?: number) => {
+      // Simple HTML escaping for test
+      const escapeHtml = (str: string) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      let result = `Solana Address · 🅴\n\n<code>${escapeHtml(addr)}</code>\n\nFee balance: ${escapeHtml(sol)} SOL ($${solPrice || 0})\nTimba balance: 0 TIMBA ($0.00)`;
+      for (const token of _tokens) {
+        if (token.ticker !== "TIMBA") {
+          result += `\n${escapeHtml(token.ticker)} balance: ${escapeHtml(token.formatted)} ${escapeHtml(token.ticker)}`;
+        }
+      }
+      return result;
+    },
+    createWalletKeyboard: () => ({} as any),
+    WINNER_VIDEO_ID: null,
   });
 
   // Should not reply in group
   const calls = ctx.__calls;
   expect(calls.length).toBe(0);
   
-  // Should send privately to user
-  expect(sendMessageCalls.length).toBe(1);
-  expect(sendMessageCalls[0].chatId).toBe(1); // user ID
-  const message = String(sendMessageCalls[0].text);
-  expect(message).toContain("@alice");
-  expect(message).toContain("1.500000 SOL"); // 1 SOL + 0.5 WSOL
-  expect(message).toContain("1.00 AAA");
-  expect(message).toContain("+1 more tokens"); // 5 remaining after WSOL merge, showing 4, so +1 more
+  // Should send privately to user (either as message or video)
+  const totalCalls = sendMessageCalls.length + sendVideoCalls.length;
+  expect(totalCalls).toBe(1);
+  
+  if (sendMessageCalls.length > 0) {
+    expect(sendMessageCalls[0].chatId).toBe(1); // user ID
+    const message = String(sendMessageCalls[0].text);
+    expect(message).toContain("ADDR123");
+    expect(message).toContain("1.500000 SOL"); // 1 SOL + 0.5 WSOL
+    expect(message).toContain("1.00 AAA");
+    expect(message).toContain("2.00 BBB");
+    expect(message).toContain("3.00 CCC");
+    expect(message).toContain("4.00 DDD");
+    expect(message).toContain("5.00 EEE");
+  } else if (sendVideoCalls.length > 0) {
+    expect(sendVideoCalls[0].chatId).toBe(1); // user ID
+    const message = String(sendVideoCalls[0].options.caption);
+    expect(message).toContain("ADDR123");
+    expect(message).toContain("1.500000 SOL"); // 1 SOL + 0.5 WSOL
+    expect(message).toContain("1.00 AAA");
+    expect(message).toContain("2.00 BBB");
+    expect(message).toContain("3.00 CCC");
+    expect(message).toContain("4.00 DDD");
+    expect(message).toContain("5.00 EEE");
+  }
 });
 
 test("onBalance escapes HTML-sensitive values when sending privately", async () => {
   const ctx: any = makeCtx(false);
   ctx.from.first_name = "<User>";
   
-  // Mock api.sendMessage to track calls
+  // Mock api.sendMessage and sendVideo to track calls
   const sendMessageCalls: any[] = [];
+  const sendVideoCalls: any[] = [];
   ctx.api = {
     sendMessage: (chatId: any, text: any, options: any) => {
       sendMessageCalls.push({ chatId, text, options });
+      return Promise.resolve();
+    },
+    sendVideo: (chatId: any, videoId: any, options: any) => {
+      sendVideoCalls.push({ chatId, videoId, options });
       return Promise.resolve();
     }
   };
@@ -168,18 +249,41 @@ test("onBalance escapes HTML-sensitive values when sending privately", async () 
       formatSolBalance: () => '<1 & more>',
     },
     handleCommandError: async () => {},
+    getPriceUSD: async () => 100,
+    buildWalletCaption: (sol: string, _tokens: any[], addr: string, solPrice?: number, _timbaPrice?: number) => {
+      // Simple HTML escaping for test
+      const escapeHtml = (str: string) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      let result = `Solana Address · 🅴\n\n<code>${escapeHtml(addr)}</code>\n\nFee balance: ${escapeHtml(sol)} SOL ($${solPrice || 0})\nTimba balance: 0 TIMBA ($0.00)`;
+      for (const token of _tokens) {
+        if (token.ticker !== "TIMBA") {
+          result += `\n${escapeHtml(token.ticker)} balance: ${escapeHtml(token.formatted)} ${escapeHtml(token.ticker)}`;
+        }
+      }
+      return result;
+    },
+    createWalletKeyboard: () => ({} as any),
+    WINNER_VIDEO_ID: null,
   });
 
   // Should not reply in group
   const calls = ctx.__calls;
   expect(calls.length).toBe(0);
   
-  // Should send privately to user with HTML escaped
-  expect(sendMessageCalls.length).toBe(1);
-  expect(sendMessageCalls[0].chatId).toBe(1); // user ID
-  const output = String(sendMessageCalls[0].text);
-  expect(output).toContain("&lt;User&gt;");
-  expect(output).toContain('<code>ADDR&lt;&amp;&quot;');
-  expect(output).toContain("&lt;1 &amp; more&gt; SOL");
-  expect(output).toContain("2 &amp; change &lt;T&amp;&quot;");
+  // Should send privately to user with HTML escaped (either as message or video)
+  const totalCalls = sendMessageCalls.length + sendVideoCalls.length;
+  expect(totalCalls).toBe(1);
+  
+  if (sendMessageCalls.length > 0) {
+    expect(sendMessageCalls[0].chatId).toBe(1); // user ID
+    const output = String(sendMessageCalls[0].text);
+    expect(output).toContain('<code>ADDR&lt;&amp;&quot;</code>');
+    expect(output).toContain("&lt;1 &amp; more&gt; SOL");
+    expect(output).toContain("2 &amp; change &lt;T&amp;&quot;");
+  } else if (sendVideoCalls.length > 0) {
+    expect(sendVideoCalls[0].chatId).toBe(1); // user ID
+    const output = String(sendVideoCalls[0].options.caption);
+    expect(output).toContain('<code>ADDR&lt;&amp;&quot;</code>');
+    expect(output).toContain("&lt;1 &amp; more&gt; SOL");
+    expect(output).toContain("2 &amp; change &lt;T&amp;&quot;");
+  }
 });

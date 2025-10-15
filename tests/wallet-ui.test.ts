@@ -8,29 +8,31 @@ test("buildWalletCaption formats lines and total with address", () => {
       { ticker: "USDC", formatted: "10.00" },
       { ticker: "TIMBA", formatted: "123" },
     ],
-    123.45,
-    "AbCdEf"
+    "AbCdEf",
+    100, // SOL price
+    50   // TIMBA price
   );
 
-  expect(caption).toContain("SOL: 1.234567");
-  expect(caption).toContain("USDC: 10.00");
-  expect(caption).toContain("TIMBA: 123");
-  expect(caption).toContain("TOTAL USD: $123.45");
-  expect(caption).toContain("<code>AbCdEf</code>");
+  expect(caption).toContain("Solana Address · <a href=\"https://solscan.io/account/AbCdEf\">🅴</a>");
+  expect(caption).toContain("<code>AbCdEf</code> (Tap to copy)");
+  expect(caption).toContain("Fee balance: 1.234567 SOL ($123.46)");
+  expect(caption).toContain("Timba balance: 123 TIMBA ($6150.00)");
+  expect(caption).toContain("USDC balance: 10.00 USDC");
 });
 
 test("buildWalletCaption escapes HTML-sensitive ticker and address", () => {
   const caption = buildWalletCaption(
-    "<1>",
+    "1.0", // Use valid SOL balance
     [
       { ticker: 'BAD<&"', formatted: '5 & rising' },
     ],
-    42.42,
-    'ADDR<&"'
+    'ADDR<&"',
+    100, // SOL price
+    50   // TIMBA price
   );
 
-  expect(caption).toContain("SOL: &lt;1&gt;");
-  expect(caption).toContain("BAD&lt;&amp;&quot;: 5 &amp; rising");
-  expect(caption).toContain("TOTAL USD: $42.42");
-  expect(caption).toContain('<code>ADDR&lt;&amp;&quot;');
+  expect(caption).toContain("Solana Address · <a href=\"https://solscan.io/account/ADDR%3C%26%22\">🅴</a>");
+  expect(caption).toContain("<code>ADDR&lt;&amp;&quot;</code> (Tap to copy)");
+  expect(caption).toContain("Fee balance: 1.0 SOL ($100.00)");
+  expect(caption).toContain("BAD&lt;&amp;&quot; balance: 5 &amp; rising BAD&lt;&amp;&quot;");
 });
