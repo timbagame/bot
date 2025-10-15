@@ -534,7 +534,7 @@ export class GameDatabase extends BaseDatabase {
           ps.games_created,
           ps.games_joined,
           ps.total_volume,
-          ps.win_rate,
+          ROUND(ps.win_rate, 1) as win_rate,
           GROUP_CONCAT(
             CASE 
               WHEN tv.token_volume > 0 
