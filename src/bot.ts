@@ -2572,7 +2572,6 @@ bot.command("help", async (ctx: Context) => {
     "/withdraw &lt;address&gt; &lt;amount&gt; [TOKEN] - Withdraw tokens to external wallet",
     "/wh &lt;address&gt; &lt;amount&gt; [TOKEN] - Shorthand for withdraw command",
     "/tip &lt;amount&gt; [TOKEN] - Reply to a user's message to send them tokens",
-    "/privatekey, /pk - Get your wallet private key (private chat only)",
     "",
     "<b>🎮 Game Commands:</b>",
     "/coinflip &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Create a new coinflip game",
@@ -2906,51 +2905,6 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
 // ================================
 // SECURE COMMANDS
 // ================================
-
-bot.command(["privatekey", "pk"], async (ctx: Context) => {
-  if (ctx.chat?.type !== "private") {
-    return ctx.reply(
-      "🔒 This command can only be used in private messages for security reasons. Please message me directly.",
-      {
-        reply_to_message_id: ctx.message?.message_id,
-      }
-    );
-  }
-
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
-
-  try {
-    const playerData = await getPlayerData(telegramId);
-    const privateKeyArray = Array.from(playerData.keypair.secretKey);
-    const privateKeyString = `[${privateKeyArray.join(",")}]`;
-
-    const response = [
-      "🔐 <b>Your Private Key</b>",
-      "",
-      "⚠️ <b>SECURITY WARNING:</b>",
-      "• Never share your private key with anyone",
-      "• Store it securely offline",
-      "• Anyone with this key has full access to your wallet",
-      "",
-      `Wallet Address: <code>${playerData.keypair.publicKey.toBase58()}</code>`,
-      "",
-      `Private Key (Array Format):\n<code>${privateKeyString}</code>`,
-      "",
-      `Private Key (Base64 Format):\n<code>${Buffer.from(
-        playerData.keypair.secretKey
-      ).toString("base64")}</code>`,
-      "",
-      "💡 You can import this key into Phantom, Solflare, or other Solana wallets.",
-    ].join("\n");
-
-    await ctx.reply(response, {
-      parse_mode: "HTML",
-      reply_to_message_id: ctx.message?.message_id,
-    });
-  } catch (error) {
-    await handleCommandError(ctx, error, "privatekey");
-  }
-});
 
 bot.command("oracle", async (ctx: Context) => {
   try {
@@ -4591,16 +4545,19 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
 
     const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
-    const privateKeyArray = Array.from(keypair.secretKey);
-    const privateKeyString = `[${privateKeyArray.join(",")}]`;
+    const privateKeyBase64 = Buffer.from(keypair.secretKey).toString("base64");
 
     const response = [
       `🔐 <b>Private Key</b>`,
       "",
       `⚠️ <b>Keep This Secret!</b>`,
       `Never share your private key with anyone.`,
+      `Store it securely offline.`,
       "",
-      `<span class="tg-spoiler">${privateKeyString}</span>`,
+      `Wallet Address: <code>${escapeHtml(keypair.publicKey.toBase58())}</code>`,
+      "",
+      `<b>Secret Key (Base64):</b>`,
+      `<span class="tg-spoiler"><code>${escapeHtml(privateKeyBase64)}</code></span>`,
       "",
       `You can import this key into Phantom, Solflare, or other Solana wallets.`,
     ];
@@ -5525,8 +5482,7 @@ bot.callbackQuery("help_wallet", async (ctx) => {
         "<code>/wrap &lt;amount&gt;</code> - Convert SOL to WSOL\n" +
         "<code>/swap &lt;amount&gt; &lt;FROM&gt; &lt;TO&gt;</code> - Swap tokens\n" +
         "<code>/withdraw &lt;address&gt; &lt;amount&gt;</code> - Send tokens\n" +
-        "<code>/tip &lt;amount&gt;</code> - Tip a user (reply to their message)\n" +
-        "<code>/privatekey</code> - Get wallet private key (private only)\n\n" +
+        "<code>/tip &lt;amount&gt;</code> - Tip a user (reply to their message)\n\n" +
         "💡 <i>All wallet commands work with different tokens</i>",
       {
         parse_mode: "HTML",
@@ -7276,7 +7232,7 @@ const showSwapAmountSelection = async (
     }
 
     keyboard
-      .text("MAX", `swap_amount_${fromToken}_${toToken}_max`)
+      .text("100%", `swap_amount_${fromToken}_${toToken}_100%`)
       .text("✏️ Custom", `swap_amount_${fromToken}_${toToken}_CUSTOM`)
       .row();
   } else {
@@ -7335,7 +7291,37 @@ const showSwapQuoteAndConfirmation = async (
     let rawAmount: number;
     let displayAmount: string;
 
-    if (amount === "max") {
+    if (amount.includes("%")) {
+      const percentage = parseFloat(amount.replace("%", ""));
+      if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
+        throw new Error("Invalid percentage format");
+      }
+
+      if (fromToken === "SOL") {
+        const availableLamports = clampLamportsForFees(solBalance);
+        if (availableLamports <= 0) {
+          throw new Error("Not enough SOL to cover swap and network fees");
+        }
+
+        rawAmount = Math.floor(availableLamports * (percentage / 100));
+        if (rawAmount <= 0) {
+          throw new Error("Percentage results in zero amount");
+        }
+        displayAmount = wallet.formatSolBalance(rawAmount);
+      } else {
+        if (!tokenBalance) {
+          throw new Error(`No ${fromToken} balance found`);
+        }
+        rawAmount = Math.floor(tokenBalance.balance * (percentage / 100));
+        if (rawAmount <= 0) {
+          throw new Error("Percentage results in zero amount");
+        }
+        displayAmount = wallet.formatTokenBalance(
+          rawAmount,
+          tokenBalance.decimals
+        );
+      }
+    } else if (amount === "max") {
       if (fromToken === "SOL") {
         rawAmount = clampLamportsForFees(solBalance);
         if (rawAmount <= 0) {
