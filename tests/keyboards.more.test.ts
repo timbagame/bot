@@ -2,9 +2,6 @@ import { expect, test, describe } from "bun:test";
 import {
   createMainMenuKeyboard,
   createWalletKeyboard,
-  createBackToInfoMainKeyboard,
-  createScanPromptKeyboard,
-  createScanResultKeyboard,
   createConfirmWrapKeyboard,
   createConfirmBuyKeyboard,
   createConfirmSellKeyboard,
@@ -60,46 +57,21 @@ describe("keyboards: main and wallet", () => {
     const kb = createMainMenuKeyboard();
     const callbacks = extractCallbacks(kb);
     expect(callbacks).toContain("main_wallet");
-    expect(callbacks).toContain("main_settings");
     expect(callbacks).toContain("cmd_help");
   });
 
-  test("wallet keyboard contains buy/sell/refresh/history and back", () => {
+  test("wallet keyboard contains buy/sell/refresh and settings", () => {
     const kb = createWalletKeyboard();
     const callbacks = extractCallbacks(kb);
     expect(callbacks).toContain("cmd_withdraw");
     expect(callbacks).toContain("cmd_buy");
     expect(callbacks).toContain("cmd_sell");
     expect(callbacks).toContain("wallet_refresh");
-    expect(callbacks).toContain("cmd_history");
     expect(callbacks).toContain("wallet_settings");
-    expect(callbacks).toContain("back_main");
   });
 });
 
 describe("keyboards: misc menus", () => {
-  test("back to info keyboard provides navigation callbacks", () => {
-    const kb = createBackToInfoMainKeyboard();
-    const callbacks = extractCallbacks(kb);
-    expect(callbacks).toEqual(["main_settings", "back_main"]);
-  });
-
-  test("scan prompt keyboard includes confirm and navigation", () => {
-    const kb = createScanPromptKeyboard();
-    const callbacks = extractCallbacks(kb);
-    expect(callbacks).toContain("scan_confirm");
-    expect(callbacks).toContain("main_settings");
-    expect(callbacks).toContain("back_main");
-  });
-
-  test("scan result keyboard includes rescan and navigation", () => {
-    const kb = createScanResultKeyboard();
-    const callbacks = extractCallbacks(kb);
-    expect(callbacks).toContain("scan_confirm");
-    expect(callbacks).toContain("main_settings");
-    expect(callbacks).toContain("back_main");
-  });
-
   test("confirm wrap keyboard embeds amount and cancel", () => {
     const kb = createConfirmWrapKeyboard(42);
     const callbacks = extractCallbacks(kb);

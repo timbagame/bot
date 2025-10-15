@@ -5,7 +5,6 @@ export const createMainMenuKeyboard = (): InlineKeyboard => {
   return new InlineKeyboard()
     .text("💳 Wallet", "main_wallet")
     .row()
-    .text("⚙️ Settings", "main_settings")
     .text("❓ Help", "cmd_help")
     .row();
 };
@@ -18,38 +17,11 @@ export const createWalletKeyboard = (): InlineKeyboard => {
     .text("🔴 Sell", "cmd_sell")
     .row()
     .text("🔄 Refresh", "wallet_refresh")
-    .text("📋 History", "cmd_history")
     .row()
     .text("⚙️ Settings", "wallet_settings")
-    .row()
-    .text("← Back", "back_main")
     .row();
 };
 
-export const createBackToInfoMainKeyboard = (): InlineKeyboard => {
-  return new InlineKeyboard()
-    .text("⬅️ Back to Info", "main_settings")
-    .text("🏠 Main", "back_main")
-    .row();
-};
-
-export const createScanPromptKeyboard = (): InlineKeyboard => {
-  return new InlineKeyboard()
-    .text("🔍 Start Scan", "scan_confirm")
-    .row()
-    .text("⬅️ Back to Info", "main_settings")
-    .text("🏠 Main", "back_main")
-    .row();
-};
-
-export const createScanResultKeyboard = (): InlineKeyboard => {
-  return new InlineKeyboard()
-    .text("🔄 Scan Again", "scan_confirm")
-    .row()
-    .text("⬅️ Back to Info", "main_settings")
-    .text("🏠 Main", "back_main")
-    .row();
-};
 
 export const createConfirmWrapKeyboard = (
   amount: number | string

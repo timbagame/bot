@@ -11,7 +11,6 @@ import idl from "../idl/idl.json";
 import { GameDatabase } from "./utils/game-database";
 import { GameManager } from "./utils/game";
 import { PDAManager } from "./utils/pda";
-import { OracleClient } from "./utils/oracle";
 import { formatUserFriendlyError } from "./utils/errors";
 import { SwapManager } from "./utils/swap-manager";
 import {
@@ -25,7 +24,6 @@ import {
   DEFAULT_TOKEN_TICKER,
   TOKENS_LIST,
   getStartVideoId,
-  JUPITER_BASE_URL,
 } from "./utils/constants";
 import { trySendVideoWithFallback } from "./utils/media";
 import { mergeWsolIntoSol } from "./utils/balance";
@@ -34,9 +32,6 @@ import { setUserState, getUserState, storePendingTransaction, getPendingTransact
 import {
   createMainMenuKeyboard,
   createWalletKeyboard,
-  createScanPromptKeyboard,
-  createBackToInfoMainKeyboard,
-  createScanResultKeyboard,
   createConfirmWrapKeyboard,
   createConfirmBuyKeyboard,
   createConfirmSellKeyboard,
@@ -60,7 +55,6 @@ import type {
 import { TokenDatabase } from "./utils/token-database";
 import { handleCallbackErrorSafe } from "./utils/context-helpers";
 import { recentUpdateGuard } from "./utils/recent-update";
-import { checkServiceHealth } from "./utils/service-health";
 import { getPriceUSD } from "./utils/prices";
 import { patchReplyBehavior } from "./utils/reply-patch";
 import { getNetworkFromRPC } from "./utils/network-display";
@@ -89,7 +83,6 @@ bot.use(async (ctx, next) => {
   await next();
 });
 export const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
-const startTime = Date.now();
 const gameDb = GameDatabase.getInstance();
 const pendingGameCreations = new Set<string>();
 
@@ -1021,6 +1014,10 @@ bot.command(["start", "balance"], async (ctx: Context) => {
     TOKENS_LIST,
     wallet,
     handleCommandError,
+    getPriceUSD,
+    buildWalletCaption,
+    createWalletKeyboard,
+    WINNER_VIDEO_ID: getStartVideoId(),
   });
 });
 
@@ -3008,26 +3005,19 @@ bot.on("callback_query", async (ctx, next) => {
     "main_wallet",
     "wallet_refresh",
     "wallet_settings",
-    "main_settings",
-    "back_main",
     "cmd_help",
     "cmd_balance",
     "cmd_withdraw",
     "cmd_swap",
     "cmd_wrap",
     "cmd_privatekey",
-    "cmd_oracle",
-    "cmd_scan",
     "scan_confirm",
-    "info_stats",
-    "info_system",
     "help_wallet",
     "help_games",
     "help_utility",
     "help_examples",
     "cmd_buy",
     "cmd_sell",
-    "cmd_history",
   ];
 
   // Also skip send/swap/wrap/game-setup interface callbacks
@@ -4459,183 +4449,6 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
   }
 });
 
-bot.callbackQuery("cmd_history", async (ctx) => {
-  try {
-    await ctx.answerCallbackQuery("🔍 Loading transaction history...");
-
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
-
-    // Get user's wallet address
-    const userKeypair = wallet.getKeyPair(telegramId);
-    const walletAddress = userKeypair.publicKey.toBase58();
-
-    console.log(`📋 Fetching transaction history for wallet: ${walletAddress}`);
-
-    // Fetch transactions using Solana RPC (always works, no API key needed)
-    const connection = wallet.getConnection();
-    const pubkey = new PublicKey(walletAddress);
-
-    const signatures = await connection.getSignaturesForAddress(pubkey, {
-      limit: 15,
-    });
-    console.log(`📊 Found ${signatures.length} transaction signatures`);
-
-    // Use signature info directly to avoid rate limits (much faster)
-    const transactions = signatures.slice(0, 10).map((sig) => ({
-      signature: sig.signature,
-      blockTime: sig.blockTime,
-      slot: sig.slot,
-      err: sig.err,
-      status: sig.err ? "Failed" : "Success",
-      // Use confirmation status and memo for basic info
-      confirmationStatus: sig.confirmationStatus || "unknown",
-    }));
-
-    if (transactions.length === 0) {
-      const noTxResponse = [
-        "📋 <b>TRANSACTION HISTORY</b>",
-        "",
-        "🔍 No transactions found for this wallet.",
-        "",
-        `💳 <b>Wallet:</b> <code>${walletAddress.slice(
-          0,
-          8
-        )}...${walletAddress.slice(-8)}</code>`,
-        "",
-        "Start trading to see your transaction history here!",
-      ].join("\n");
-
-      // Try to edit as text; if it fails (e.g., media message), send a new one without deleting
-      try {
-        await ctx.editMessageText(noTxResponse, {
-          parse_mode: "HTML",
-          reply_markup: new InlineKeyboard()
-          .text("🟢 Buy", "cmd_buy")
-          .text("🔴 Sell", "cmd_sell")
-            .row()
-            .text("← Back to Wallet", "main_wallet")
-            .row(),
-        });
-      } catch (error) {
-        await ctx.reply(noTxResponse, {
-          parse_mode: "HTML",
-          reply_markup: new InlineKeyboard()
-          .text("🟢 Buy", "cmd_buy")
-          .text("🔴 Sell", "cmd_sell")
-            .row()
-            .text("← Back to Wallet", "main_wallet")
-            .row(),
-        });
-      }
-      return;
-    }
-
-    // Format transactions for display (simple version to avoid rate limits)
-    const formattedTxs = transactions.map((tx: any) => {
-      const date = tx.blockTime
-        ? new Date(tx.blockTime * 1000).toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          })
-        : "Unknown date";
-
-      const statusIcon = tx.status === "Success" ? "✅" : "❌";
-      const signature = tx.signature;
-
-      // Simple generic transaction display
-      const typeIcon = "📊";
-      const description = "Transaction";
-
-      return `${statusIcon}${typeIcon} ${description} • <code>${date}</code>\n🔗 <a href="https://solscan.io/tx/${signature}">View Details</a>`;
-    });
-
-    const historyMessage = [
-      "📋 <b>TRANSACTION HISTORY</b>",
-      "",
-      `💳 <b>Wallet:</b> <code>${walletAddress.slice(
-        0,
-        8
-      )}...${walletAddress.slice(-8)}</code>`,
-      `📊 <b>Total Found:</b> ${transactions.length} transactions`,
-      `📄 <b>Showing:</b> Last ${Math.min(transactions.length, 10)}`,
-      "",
-      ...formattedTxs,
-    ];
-
-    if (transactions.length > 10) {
-      historyMessage.push("");
-      historyMessage.push(
-        `... and ${transactions.length - 10} more on Solscan`
-      );
-    }
-
-    // Try to edit as text; if it fails (e.g., media message), send a new message without deleting the original
-    try {
-      await ctx.editMessageText(historyMessage.join("\n"), {
-        parse_mode: "HTML",
-        link_preview_options: { is_disabled: true },
-        reply_markup: new InlineKeyboard()
-          .text("🔄 Refresh", "cmd_history")
-          .webApp(
-            "🔍 FULL HISTORY",
-            `https://solscan.io/account/${walletAddress}#transactions`
-          )
-          .row()
-          .text("← Back to Wallet", "main_wallet")
-          .row(),
-      });
-    } catch (error) {
-      await ctx.reply(historyMessage.join("\n"), {
-        parse_mode: "HTML",
-        link_preview_options: { is_disabled: true },
-        reply_markup: new InlineKeyboard()
-          .text("🔄 Refresh", "cmd_history")
-          .webApp(
-            "🔍 FULL HISTORY",
-            `https://solscan.io/account/${walletAddress}#transactions`
-          )
-          .row()
-          .text("← Back to Wallet", "main_wallet")
-          .row(),
-      });
-    }
-  } catch (error) {
-    console.error("Error fetching transaction history:", error);
-
-    const errorResponse = [
-      "📋 <b>TRANSACTION HISTORY</b>",
-      "",
-      "❌ Unable to load transaction history.",
-      "",
-      `<b>Error:</b> ${(error as Error).message || "Unknown error"}`,
-      "",
-      "Please try again or check your internet connection.",
-    ].join("\n");
-
-    // Try to edit as text; if it fails (e.g., media message), send a new one without deleting
-    try {
-      await ctx.editMessageText(errorResponse, {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("🔄 Try Again", "cmd_history")
-          .text("← Back to Wallet", "main_wallet")
-          .row(),
-      });
-    } catch (error) {
-      await ctx.reply(errorResponse, {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("🔄 Try Again", "cmd_history")
-          .text("← Back to Wallet", "main_wallet")
-          .row(),
-      });
-    }
-
-    await ctx.answerCallbackQuery("❌ Error loading history");
-  }
-});
 
 bot.callbackQuery("cmd_wrap", async (ctx) => {
   try {
@@ -5440,268 +5253,8 @@ bot.on("callback_query", async (ctx, next) => {
   }
 });
 
-bot.callbackQuery("main_settings", async (ctx) => {
-  try {
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
-    const keypair = wallet.getKeyPair(telegramId);
-    const walletAddress = keypair.publicKey.toBase58();
-    const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(
-      -6
-    )}`;
 
-    const settingsContent = [
-      `<pre>T I M B A - S E T T I N G S
 
-System Overview:
-• Solana blockchain integration  
-• Real-time token swapping
-• Secure wallet management
-• Multi-platform gaming system</pre>`,
-      "",
-      `<b>Your Wallet:</b> <code>${shortAddress}</code>`,
-      `<b>Network:</b> Solana ${getNetworkFromRPC(process.env.SOLANA_NETWORK || wallet.getConnection().rpcEndpoint)}`,
-      "",
-      `<b>Available Tools:</b>`,
-      `• Oracle status monitoring`,
-      `• Blockchain scanning`,
-      `• Personal wallet statistics`,
-    ];
-
-    // Try to edit as text; if it fails (e.g., media message), send a new one without deleting
-    try {
-      await ctx.editMessageText(settingsContent.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("📊 Oracle Status", "cmd_oracle")
-          .text("🔍 Blockchain Scan", "cmd_scan")
-          .row()
-          .text("📈 Wallet Statistics", "info_stats")
-          .text("🖥️ System Status", "info_system")
-          .row()
-          .text("← Back", "back_main")
-          .row(),
-      });
-    } catch (error) {
-      // If edit fails because message has media, delete and send new text message
-      
-
-      await ctx.reply(settingsContent.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("📊 Oracle Status", "cmd_oracle")
-          .text("🔍 Blockchain Scan", "cmd_scan")
-          .row()
-          .text("📈 Wallet Statistics", "info_stats")
-          .text("🖥️ System Status", "info_system")
-          .row()
-          .text("← Back", "back_main")
-          .row(),
-      });
-    }
-    await ctx.answerCallbackQuery("⚙️ Settings loaded");
-  } catch (error) {
-    console.error("Error in main_settings:", error);
-    await ctx.answerCallbackQuery("❌ Error loading info menu");
-  }
-});
-
-// INFO Statistics handler
-bot.callbackQuery("info_stats", async (ctx) => {
-  try {
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
-    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-    const formattedSolBalance = wallet.formatSolBalance(solBalance);
-
-    // Calculate total tokens and USD value
-    const solPriceUSD = await getPriceUSD("SOL");
-    const solDecimalBalance = solBalance / 1000000000; // LAMPORTS_PER_SOL
-    const totalUSD = solDecimalBalance * solPriceUSD;
-
-    // Get user's game statistics (use DB fields)
-    const userId = ctx.from?.id;
-    let gameStats = "";
-    try {
-      if (userId) {
-        const gameDatabase = GameDatabase.getInstance();
-        const gamesCreated = await gameDatabase.getGamesByCreator(BigInt(userId));
-        const gamesJoined = await gameDatabase.getGamesByPlayer(BigInt(userId));
-        const playerPubkey = gameDatabase.getPlayerPublicKey(String(userId));
-        const completedGames = gamesJoined.filter((g: any) => g.status === 'completed');
-        const wonGames = completedGames.filter((g: any) => playerPubkey && g.winner_address === playerPubkey);
-
-        gameStats = `
-Game Statistics:
-• Games Created: ${gamesCreated.length}
-• Games Joined: ${gamesJoined.length}
-• Games Won: ${wonGames.length}
-• Win Rate: ${gamesJoined.length > 0 ? ((wonGames.length / gamesJoined.length) * 100).toFixed(1) : '0.0'}%`;
-      }
-    } catch (error) {
-      console.error("Error fetching game stats:", error);
-      gameStats = `
-Game Statistics:
-• Unable to load game data`;
-    }
-
-    const statsContent = [
-      `<pre>W A L L E T  S T A T I S T I C S
-
-Balance Overview:
-• SOL Balance: ${formattedSolBalance}
-• USD Value: $${totalUSD.toFixed(2)}
-• Total Tokens: ${tokenBalances.length} types
-• Active Tokens: ${tokenBalances.filter((t) => parseFloat(t.rawBalance) > 0).length}${gameStats}</pre>`,
-    ];
-
-    // Try to edit as text, if fails (because current message has media), delete and send new
-    try {
-      await ctx.editMessageText(statsContent.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("🔄 Refresh Stats", "info_stats")
-          .text("📊 Oracle Status", "cmd_oracle")
-          .row()
-          .text("← Back to Info", "main_settings")
-          .text("🏠 Main", "back_main")
-          .row(),
-      });
-    } catch (error) {
-      // If edit fails because message has media, delete and send new text message
-      
-
-      await ctx.reply(statsContent.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("🔄 Refresh Stats", "info_stats")
-          .text("📊 Oracle Status", "cmd_oracle")
-          .row()
-          .text("← Back to Info", "main_settings")
-          .text("🏠 Main", "back_main")
-          .row(),
-      });
-    }
-    await ctx.answerCallbackQuery("📈 Statistics updated");
-  } catch (error) {
-    console.error("Error in info_stats:", error);
-    await ctx.answerCallbackQuery("❌ Error loading statistics");
-  }
-});
-
-// INFO System Status handler
-bot.callbackQuery("info_system", async (ctx) => {
-  try {
-    // Get real system data
-    const now = Date.now();
-    const uptimeMs = now - startTime;
-    const uptimeSeconds = Math.floor(uptimeMs / 1000);
-    const uptimeMinutes = Math.floor(uptimeSeconds / 60);
-    const uptimeHours = Math.floor(uptimeMinutes / 60);
-    
-    // Get database stats
-    const activeGames = gameDb.getAllGames().filter(g => g.status === 'active').length;
-    const completedGames = gameDb.getAllGames().filter(g => g.status === 'completed').length;
-    
-    // Memory usage
-    const memUsage = process.memoryUsage();
-    const memUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
-    
-    // Detect network dynamically
-    const currentNetwork = getNetworkFromRPC(process.env.SOLANA_NETWORK || wallet.getConnection().rpcEndpoint);
-    
-    // Check oracle connectivity
-    let oracleStatus = "🔴 Offline";
-    try {
-      const oraclePda = PDAManager.getOraclePDA(program.programId);
-      const oracleAccount = await program.account.oracle.fetch(oraclePda);
-      if (oracleAccount.operator) {
-        oracleStatus = "🟢 Online";
-      }
-    } catch (error) {
-      oracleStatus = "🔴 Offline";
-    }
-    
-    // Check RPC connection
-    let rpcStatus = "🔴 Offline";
-    try {
-      const slot = await wallet.getConnection().getSlot();
-      if (slot > 0) {
-        rpcStatus = "🟢 Online";
-      }
-    } catch (error) {
-      rpcStatus = "🔴 Offline";
-    }
-    
-    // Check Jupiter/Swap services
-    let swapStatus = "🔴 Offline";
-    try {
-      const jupiterBaseUrl = process.env['JUPITER_BASE_URL'] || JUPITER_BASE_URL;
-      const jupiterHealthy = await checkServiceHealth(jupiterBaseUrl);
-      swapStatus = jupiterHealthy ? "🟢 Online" : "🔴 Offline";
-    } catch (error) {
-      swapStatus = "🔴 Offline";
-    }
-    
-    // Database is always operational if we got this far
-    const dbStatus = "🟢 Online";
-    
-    const systemContent = [
-      `<pre>S Y S T E M  S T A T U S
-
-Network Information:
-• Network: ${currentNetwork}
-• RPC Endpoint: ${wallet.getConnection().rpcEndpoint}
-
-Runtime Information:
-• Uptime: ${uptimeHours}h ${uptimeMinutes % 60}m
-• Memory Usage: ${memUsedMB}MB
-• Node Version: ${process.version}
-• Platform: ${process.platform}
-
-Game Statistics:
-• Active Games: ${activeGames}
-• Completed Games: ${completedGames}
-• Total Games: ${activeGames + completedGames}
-
-Service Health:
-• Oracle: ${oracleStatus}
-• Swap Services: ${swapStatus}
-• Database: ${dbStatus}
-• RPC Connection: ${rpcStatus}</pre>`,
-    ];
-
-    // Try to edit as text, if fails (because current message has media), delete and send new
-    try {
-      await ctx.editMessageText(systemContent.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("🔄 Refresh System", "info_system")
-          .text("📊 Oracle Status", "cmd_oracle")
-          .row()
-          .text("← Back to Settings", "main_settings")
-          .text("🏠 Main", "back_main")
-          .row(),
-      });
-    } catch (error) {
-      // If edit fails because message has media, delete and send new text message
-      
-
-      await ctx.reply(systemContent.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("🔄 Refresh System", "info_system")
-          .text("📊 Oracle Status", "cmd_oracle")
-          .row()
-          .text("← Back to Settings", "main_settings")
-          .text("🏠 Main", "back_main")
-          .row(),
-      });
-    }
-    await ctx.answerCallbackQuery("🖥️ System status updated");
-  } catch (error) {
-    console.error("Error in info_system:", error);
-    await ctx.answerCallbackQuery("❌ Error loading system status");
-  }
-});
 
 // Handle "GET STARTED" button from bot info screen - triggers /start
 bot.callbackQuery("start_bot", async (ctx) => {
@@ -5757,78 +5310,6 @@ bot.callbackQuery("start_bot", async (ctx) => {
   }
 });
 
-bot.callbackQuery("back_main", async (ctx) => {
-  try {
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
-    const keypair = wallet.getKeyPair(telegramId);
-    const displayName = ctx.from?.username
-      ? `@${ctx.from.username}`
-      : ctx.from?.first_name || "User";
-    const walletAddress = keypair.publicKey.toBase58();
-
-    // Calculate total USD balance for private chats
-    let totalUSDBalance = 0;
-    if (isPrivateChat(ctx)) {
-      try {
-        const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-        
-        // Calculate SOL value in USD
-        const solPriceUSD = await getPriceUSD("SOL");
-        const solDecimalBalance = solBalance / LAMPORTS_PER_SOL;
-        totalUSDBalance += solDecimalBalance * solPriceUSD;
-
-        // Calculate token values in USD
-        for (const token of tokenBalances) {
-          const tokenPriceUSD = await getPriceUSD(token.mint);
-          const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
-          totalUSDBalance += tokenDecimalBalance * tokenPriceUSD;
-        }
-      } catch (error) {
-        console.warn("Error calculating USD balance for back_main:", error);
-        totalUSDBalance = 0;
-      }
-    }
-
-    // Build main menu with same format as /start
-    const welcomeMessage = [
-      `<b>Welcome ${displayName}</b>`,
-      "",
-      `<code>${walletAddress}</code>`,
-    ];
-
-    // Add USD balance for private chats
-    if (isPrivateChat(ctx) && totalUSDBalance > 0) {
-      welcomeMessage.push("", `💰 <b>$${totalUSDBalance.toFixed(2)} USD</b>`);
-    }
-
-    // Use same video as /start
-    const mainMenuKeyboard = createMainMenuKeyboard();
-    const startVideoId = getStartVideoId();
-    const sendMainMenuText = () =>
-      ctx.reply(welcomeMessage.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: mainMenuKeyboard,
-      });
-
-    if (startVideoId) {
-      await trySendVideoWithFallback(
-        () =>
-          ctx.replyWithVideo(startVideoId, {
-            caption: welcomeMessage.join("\n"),
-            parse_mode: "HTML",
-            reply_markup: mainMenuKeyboard,
-          }),
-        sendMainMenuText
-      );
-    } else {
-      await sendMainMenuText();
-    }
-    await ctx.answerCallbackQuery("🏠 Main menu");
-  } catch (error) {
-    console.error("Error in back_main:", error);
-    await ctx.answerCallbackQuery("❌ Error loading main menu");
-  }
-});
 
 // ================================
 // HELP MENU CALLBACKS
@@ -5845,8 +5326,7 @@ bot.callbackQuery("cmd_help", async (ctx) => {
       .text("🔧 Utility Commands", "help_utility")
       .row()
       .text("📋 Examples", "help_examples")
-      .row()
-      .text("⬅️ Back to Main", "back_main");
+      .row();
 
     // Try to edit as text, if fails (because current message has media), delete and send new
     try {
@@ -5888,7 +5368,6 @@ bot.callbackQuery("help_wallet", async (ctx) => {
           .text("📋 Examples", "help_examples")
           .row()
           .text("⬅️ Help Menu", "cmd_help")
-          .text("🏠 Main", "back_main")
           .row(),
       }
     );
@@ -5921,7 +5400,6 @@ bot.callbackQuery("help_games", async (ctx) => {
           .text("📋 Examples", "help_examples")
           .row()
           .text("⬅️ Help Menu", "cmd_help")
-          .text("🏠 Main", "back_main")
           .row(),
       }
     );
@@ -5954,7 +5432,6 @@ bot.callbackQuery("help_utility", async (ctx) => {
           .text("📋 Examples", "help_examples")
           .row()
           .text("⬅️ Help Menu", "cmd_help")
-          .text("🏠 Main", "back_main")
           .row(),
       }
     );
@@ -5988,7 +5465,6 @@ bot.callbackQuery("help_examples", async (ctx) => {
           .text("🔧 Utility", "help_utility")
           .row()
           .text("⬅️ Help Menu", "cmd_help")
-          .text("🏠 Main", "back_main")
           .row(),
       }
     );
@@ -5999,271 +5475,14 @@ bot.callbackQuery("help_examples", async (ctx) => {
   }
 });
 
-// ================================
-// INFO MENU CALLBACKS
-// ================================
 
-bot.callbackQuery("cmd_oracle", async (ctx) => {
-  try {
-    await ctx.answerCallbackQuery("📊 Checking oracle status...");
-
-    // Check Oracle API health first
-    const oracleClient = OracleClient.getInstance();
-    const isApiHealthy = await oracleClient.isHealthy();
-    const oracleUrl = oracleClient.getOracleUrl();
-
-    try {
-      const oraclePda = PDAManager.getOraclePDA(program.programId);
-      const oracleAccount = await program.account.oracle.fetch(oraclePda);
-
-      const healthStatus = isApiHealthy ? "✅ Healthy" : "❌ Unhealthy (Timeout)";
-      const apiStatus = isApiHealthy ? "🟢 API Online" : "🔴 API Offline";
-
-      await ctx.editMessageText(
-        "📊 <b>ORACLE STATUS</b>\n\n" +
-          `🔑 <b>Operator:</b> <code>${oracleAccount.operator.toBase58()}</code>\n` +
-          `🎰 <b>Fee Percentage:</b> ${oracleAccount.feePercentage}%\n` +
-          `⚡ <b>Blockchain:</b> Online and operational\n\n` +
-          `🌐 <b>API Health:</b> ${healthStatus}\n` +
-          `📍 <b>API URL:</b> <code>${oracleUrl}</code>\n` +
-          `${apiStatus}\n\n` +
-          (isApiHealthy 
-            ? "✅ Oracle is ready for game creation" 
-            : "⚠️ Games will use fallback randomness"),
-        {
-          parse_mode: "HTML",
-          reply_markup: new InlineKeyboard()
-            .text("🔍 Scan Blockchain", "cmd_scan")
-            .row()
-            .text("⬅️ Back to Info", "main_settings")
-            .text("🏠 Main", "back_main")
-            .row(),
-        }
-      );
-    } catch (error) {
-      const healthStatus = isApiHealthy ? "✅ Healthy" : "❌ Unhealthy (Timeout)";
-      const apiStatus = isApiHealthy ? "🟢 API Online" : "🔴 API Offline";
-
-      await ctx.editMessageText(
-        "📊 <b>ORACLE STATUS</b>\n\n" +
-          "❌ <b>Blockchain:</b> Oracle not found or not initialized\n\n" +
-          `🌐 <b>API Health:</b> ${healthStatus}\n` +
-          `📍 <b>API URL:</b> <code>${oracleUrl}</code>\n` +
-          `${apiStatus}\n\n` +
-          "⚠️ Oracle needs to be set up by an administrator.\n" +
-          (isApiHealthy 
-            ? "API is available but blockchain oracle is missing." 
-            : "Both API and blockchain oracle are unavailable."),
-        {
-          parse_mode: "HTML",
-          reply_markup: new InlineKeyboard()
-            .text("🔍 Scan Blockchain", "cmd_scan")
-            .row()
-            .text("⬅️ Back to Info", "main_settings")
-            .text("🏠 Main", "back_main")
-            .row(),
-        }
-      );
-    }
-  } catch (error) {
-    console.error("Error in cmd_oracle:", error);
-    await ctx.answerCallbackQuery("❌ Error checking oracle status");
-  }
-});
-
-bot.callbackQuery("cmd_scan", async (ctx) => {
-  try {
-    if (ctx.chat?.type !== "private") {
-      await ctx.answerCallbackQuery(
-        "🔒 This feature is only available in private chats"
-      );
-      return;
-    }
-
-    await ctx.editMessageText(
-      "🔍 <b>BLOCKCHAIN SCANNER</b>\n\n" +
-        "This tool scans the blockchain for:\n" +
-        "• Orphaned games that need cleanup\n" +
-        "• Incomplete transactions\n" +
-        "• System inconsistencies\n\n" +
-        "⚠️ <b>Warning:</b> This is an admin tool that can take time to complete.\n\n" +
-        "Do you want to start the scan?",
-      {
-        parse_mode: "HTML",
-        reply_markup: createScanPromptKeyboard(),
-      }
-    );
-    await ctx.answerCallbackQuery("🔍 Blockchain Scanner");
-  } catch (error) {
-    console.error("Error in cmd_scan:", error);
-    await ctx.answerCallbackQuery("❌ Error loading scanner");
-  }
-});
-
-bot.callbackQuery("scan_confirm", async (ctx) => {
-  try {
-    await ctx.editMessageText(
-      "🔍 <b>BLOCKCHAIN SCAN STARTED</b>\n\n" +
-        "⏳ Scanning blockchain for issues...\n" +
-        "📊 This may take a few minutes\n\n" +
-        "Please wait...",
-      {
-        parse_mode: "HTML",
-        reply_markup: createBackToInfoMainKeyboard(),
-      }
-    );
-
-    await ctx.answerCallbackQuery("🔍 Scan started...");
-
-    // Simulate the /scan command execution
-    try {
-      // This would normally execute the scan logic - for now just show completion
-      setTimeout(async () => {
-        try {
-          await ctx.editMessageText(
-            "🔍 <b>BLOCKCHAIN SCAN COMPLETED</b>\n\n" +
-              "✅ Scan finished successfully\n" +
-              "📊 No issues found\n\n" +
-              "All games and transactions are properly synchronized.",
-            {
-              parse_mode: "HTML",
-              reply_markup: createScanResultKeyboard(),
-            }
-          );
-        } catch (e) {
-          console.error("Error updating scan result:", e);
-        }
-      }, 3000);
-    } catch (error) {
-      console.error("Error during scan:", error);
-    }
-  } catch (error) {
-    console.error("Error in scan_confirm:", error);
-    await ctx.answerCallbackQuery("❌ Error starting scan");
-  }
-});
 
 // ================================
 // ADMIN MENU CALLBACKS
 // ================================
 
 
-bot.callbackQuery("admin_tokens", async (ctx) => {
-  try {
-    await ctx.editMessageText(
-      "🪙 <b>TOKEN MANAGEMENT</b>\n\n" +
-        "Manage supported tokens and settings:\n\n" +
-        "• Add new SPL tokens\n" +
-        "• Remove unsupported tokens\n" +
-        "• Set default tokens for chats\n" +
-        "• View token statistics",
-      {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("⬅️ Back to Settings", "main_settings")
-          .text("🏠 Main", "back_main")
-          .row(),
-      }
-    );
-    await ctx.answerCallbackQuery("🪙 Token Management");
-  } catch (error) {
-    console.error("Error in admin_tokens:", error);
-    await ctx.answerCallbackQuery("❌ Error loading token management");
-  }
-});
 
-bot.callbackQuery("admin_games", async (ctx) => {
-  try {
-    await ctx.editMessageText(
-      "🎮 <b>GAME MANAGEMENT</b>\n\n" +
-        "Monitor and manage game system:\n\n" +
-        "• View active games\n" +
-        "• Force complete stuck games\n" +
-        "• Game statistics\n" +
-        "• Clean up expired games",
-      {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("⬅️ Back to Settings", "main_settings")
-          .text("🏠 Main", "back_main")
-          .row(),
-      }
-    );
-    await ctx.answerCallbackQuery("🎮 Game Management");
-  } catch (error) {
-    console.error("Error in admin_games:", error);
-    await ctx.answerCallbackQuery("❌ Error loading game management");
-  }
-});
-
-bot.callbackQuery("admin_system", async (ctx) => {
-  try {
-    // Get real system data dynamically
-    const now = Date.now();
-    const uptimeMs = now - startTime;
-    const uptimeSeconds = Math.floor(uptimeMs / 1000);
-    const uptimeMinutes = Math.floor(uptimeSeconds / 60);
-    const uptimeHours = Math.floor(uptimeMinutes / 60);
-    
-    // Memory usage
-    const memUsage = process.memoryUsage();
-    const memUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
-    
-    // Check RPC connection
-    let rpcStatus = "🔴 Offline";
-    try {
-      const slot = await wallet.getConnection().getSlot();
-      if (slot > 0) {
-        rpcStatus = "🟢 Online";
-      }
-    } catch (error) {
-      rpcStatus = "🔴 Offline";
-    }
-    
-    // Check oracle connectivity
-    let oracleStatus = "🔴 Offline";
-    try {
-      const oraclePda = PDAManager.getOraclePDA(program.programId);
-      const oracleAccount = await program.account.oracle.fetch(oraclePda);
-      if (oracleAccount.operator) {
-        oracleStatus = "🟢 Online";
-      }
-    } catch (error) {
-      oracleStatus = "🔴 Offline";
-    }
-    
-    // Database is online if we got this far
-    const dbStatus = "🟢 Online";
-    const botStatus = "🟢 Online";
-    
-    const currentNetwork = getNetworkFromRPC(process.env.SOLANA_NETWORK || wallet.getConnection().rpcEndpoint);
-    
-    await ctx.editMessageText(
-      `📊 <b>SYSTEM STATUS</b>\n\n` +
-        `${botStatus} <b>Bot Status:</b> Running\n` +
-        `${dbStatus} <b>Database:</b> Connected\n` +
-        `${rpcStatus} <b>Solana RPC:</b> ${currentNetwork}\n` +
-        `${oracleStatus} <b>Oracle:</b> Service Status\n\n` +
-        `⚡ <b>Performance:</b>\n` +
-        `• Uptime: ${uptimeHours}h ${uptimeMinutes % 60}m\n` +
-        `• Memory usage: ${memUsedMB}MB\n` +
-        `• Platform: ${process.platform}`,
-      {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("🔄 Refresh Status", "admin_system")
-          .row()
-          .text("⬅️ Back to Settings", "main_settings")
-          .text("🏠 Main", "back_main")
-          .row(),
-      }
-    );
-    await ctx.answerCallbackQuery("📊 System Status");
-  } catch (error) {
-    console.error("Error in admin_system:", error);
-    await ctx.answerCallbackQuery("❌ Error loading system status");
-  }
-});
 
 // (Removed admin placeholder handlers)
 
