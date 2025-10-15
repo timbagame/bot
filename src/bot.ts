@@ -1686,6 +1686,41 @@ bot.command("wrap", async (ctx: Context) => {
   }
 });
 
+bot.command("unwrap", async (ctx: Context) => {
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+
+  const processingMsg = await ctx.reply("Processing unwrap...", {
+    reply_to_message_id: ctx.message?.message_id,
+  });
+
+  try {
+    const { signature, amountLamports } = await wallet.unwrapSol(telegramId);
+    await wallet.confirmTransaction(signature);
+    clearWalletCache(telegramId);
+
+    const formattedAmount = wallet.formatSolBalance(amountLamports);
+    const solscanUrl = `https://solscan.io/tx/${signature}`;
+
+    await ctx.api.editMessageText(
+      ctx.chat!.id,
+      processingMsg.message_id,
+      `✅ <b>UNWRAP COMPLETED</b>\n\nUnwrapped ${formattedAmount} WSOL to SOL\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`,
+      {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+      }
+    );
+  } catch (error) {
+    const userFriendlyError = formatUserFriendlyError(error, wallet);
+    await ctx.api.editMessageText(
+      ctx.chat!.id,
+      processingMsg.message_id,
+      userFriendlyError,
+      { parse_mode: "HTML" }
+    );
+  }
+});
+
 // ================================
 // SWAP COMMAND
 // ================================
@@ -2580,6 +2615,7 @@ bot.command("help", async (ctx: Context) => {
     "<b>💰 Wallet Commands:</b>",
     "/start, /balance - Show your wallet address and balances",
     "/wrap &lt;amount&gt; - Convert SOL to WSOL",
+    "/unwrap - Convert your entire WSOL balance back to SOL",
     "/swap &lt;amount&gt; &lt;FROM&gt; &lt;TO&gt; [slippage%] - Swap tokens via Jupiter",
     "/withdraw &lt;address&gt; &lt;amount&gt; [TOKEN] - Withdraw tokens to external wallet",
     "/wh &lt;address&gt; &lt;amount&gt; [TOKEN] - Shorthand for withdraw command",
@@ -5492,6 +5528,7 @@ bot.callbackQuery("help_wallet", async (ctx) => {
         "<code>/start</code> - Show your wallet info\n" +
         "<code>/balance</code> - Show detailed balances\n" +
         "<code>/wrap &lt;amount&gt;</code> - Convert SOL to WSOL\n" +
+        "<code>/unwrap</code> - Convert WSOL back to SOL\n" +
         "<code>/swap &lt;amount&gt; &lt;FROM&gt; &lt;TO&gt;</code> - Swap tokens\n" +
         "<code>/withdraw &lt;address&gt; &lt;amount&gt;</code> - Send tokens\n" +
         "<code>/tip &lt;amount&gt;</code> - Tip a user (reply to their message)\n\n" +
@@ -5587,6 +5624,7 @@ bot.callbackQuery("help_examples", async (ctx) => {
         "<code>/swap 100 USDC SOL</code>\n" +
         "<code>/withdraw [address] 50 TIMBA</code>\n" +
         "<code>/wrap 1</code> (converts 1 SOL to WSOL)\n\n" +
+        "<code>/unwrap</code> (convert your entire WSOL balance back to SOL)\n\n" +
         "<b>🎮 Game Examples:</b>\n" +
         "<code>/coinflip 100 TIMBA 2</code> (2-player, 100 TIMBA each)\n" +
         "<code>/giveaway 500 TIMBA 5</code> (5 players, 500 TIMBA prize)\n\n" +

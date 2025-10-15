@@ -2504,7 +2504,7 @@ export class GameManager {
         console.log(
           `➡️ Unjoined ${
             player.isCreator ? "creator" : "player"
-          } ${player.pubkey.toBase58().slice(0, 8)}...`
+          } ${player.pubkey.toBase58()}`
         );
         unjoinedCount++;
       } catch (error) {

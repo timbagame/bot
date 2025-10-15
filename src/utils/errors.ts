@@ -200,8 +200,7 @@ export const parseTransactionError = (
     return (
       `🪙 Wrap failed.\n\n` +
       `We couldn't convert SOL to WSOL.\n\n` +
-      `Try using /unwrap to reset your WSOL account, then wrap again.\n` +
-      `If it keeps failing, reach out to an admin.`
+      `Your WSOL account may be stuck from a previous wrap. Unwrap any existing WSOL and try again, or contact an admin if it keeps happening.`
     );
   }
 
