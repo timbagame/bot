@@ -39,6 +39,7 @@ describe("GameManager.createGame", () => {
       getTokenMetadata: async () => ({ decimals: 6 }),
       getKeyPair: (_: bigint) => Keypair.generate(),
       getTokenBalance: async () => 500_000,
+      getBalance: async () => 5_000_000,
       formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toString(),
     } as any;
     const gm = GameManager.getInstance(makeProgram(), wallet, { savePlayerMapping: () => {} } as any);
@@ -54,6 +55,7 @@ describe("GameManager.createGame", () => {
       getTokenMetadata: async () => ({ decimals: 6 }),
       getKeyPair: (_: bigint) => Keypair.generate(),
       getTokenBalance: async () => 2_000_000,
+      getBalance: async () => 3_000_000,
       formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toString(),
     } as any;
     const db = { savePlayerMapping: () => {} } as any;
@@ -71,6 +73,7 @@ describe("GameManager.createGame", () => {
       getTokenMetadata: async () => ({ decimals: 6 }),
       getKeyPair: (_: bigint) => Keypair.generate(),
       getTokenBalance: async () => 2_000_000,
+      getBalance: async () => 3_000_000,
       formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toString(),
       sendTransaction: async () => "SIG",
     } as any;
@@ -116,6 +119,7 @@ describe("GameManager.createGame", () => {
       getTokenMetadata: async () => { throw new Error("metadata fail"); },
       getKeyPair: (_: bigint) => Keypair.generate(),
       getTokenBalance: async () => 2_000_000,
+      getBalance: async () => 3_000_000,
       formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toString(),
     } as any;
     const gm = GameManager.getInstance(makeProgram(), wallet, { savePlayerMapping: () => {} } as any);

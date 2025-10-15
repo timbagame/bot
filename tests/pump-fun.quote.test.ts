@@ -23,7 +23,7 @@ describe("PumpFunClient quotes (SDK stubbed)", () => {
     const res = await pfc.getQuote(
       "So11111111111111111111111111111111111111112",
       pumpMint,
-      "1000000",
+      "0.001",
       9,
       6,
       100
@@ -48,7 +48,7 @@ describe("PumpFunClient quotes (SDK stubbed)", () => {
     const res = await pfc.getQuote(
       pumpMint,
       "So11111111111111111111111111111111111111112",
-      "2000",
+      "0.002",
       6,
       9,
       100

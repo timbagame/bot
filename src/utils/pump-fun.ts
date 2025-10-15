@@ -47,6 +47,63 @@ export class PumpFunClient {
     this.onlineSdk = new OnlinePumpSdk(connection);
   }
 
+  private toRawAmount(amount: string, decimals: number): bigint {
+    const normalized = amount.trim();
+    if (normalized.length === 0) {
+      return 0n;
+    }
+
+    const scale = BigInt(10) ** BigInt(Math.max(decimals, 0));
+
+    if (normalized.includes("e") || normalized.includes("E")) {
+      const numeric = Number(normalized);
+      if (!Number.isFinite(numeric)) {
+        throw new Error(`Invalid amount: ${amount}`);
+      }
+      return BigInt(Math.floor(numeric * Math.pow(10, decimals)));
+    }
+
+    if (normalized.startsWith("-")) {
+      throw new Error("Amount cannot be negative");
+    }
+
+    const [wholeRaw = "0", fractionRaw = ""] = normalized.split(".");
+    const wholeDigits = wholeRaw.replace(/\D/g, "") || "0";
+    const fractionDigits = fractionRaw.replace(/\D/g, "");
+    const fractionPadded = (fractionDigits + "0".repeat(decimals)).slice(
+      0,
+      decimals
+    );
+
+    const whole = BigInt(wholeDigits);
+    const fraction = fractionPadded.length > 0 ? BigInt(fractionPadded) : 0n;
+
+    return whole * scale + fraction;
+  }
+
+  private async getMintDecimals(mint: PublicKey): Promise<number> {
+    try {
+      const info = await this.connection.getParsedAccountInfo(mint);
+      if (info.value && "parsed" in info.value.data) {
+        const parsed: any = info.value.data.parsed;
+        const decimals = parsed.info?.decimals;
+        if (typeof decimals === "number" && Number.isFinite(decimals)) {
+          return decimals;
+        }
+      }
+    } catch (error) {
+      console.log(`Failed to fetch mint decimals for ${mint.toBase58()}:`, error);
+    }
+    return 6;
+  }
+
+  private toSafeNumber(value: bigint, label: string): number {
+    if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error(`${label} exceeds supported range`);
+    }
+    return Number(value);
+  }
+
   /**
    * Get token metadata from pump.fun
    */
@@ -294,9 +351,18 @@ export class PumpFunClient {
       let outputAmount: string;
       let estimatedRate: number;
 
+      const inputDecimalsSafe = isSolInput
+        ? 9
+        : Math.max(_inputDecimals ?? 6, 0);
+
+      const amountRaw = this.toRawAmount(amount, inputDecimalsSafe);
+
       if (isBuy) {
         // Calculate how many tokens we get for the SOL amount
-        const solAmountLamports = parseInt(amount);
+        const solAmountLamports = this.toSafeNumber(
+          amountRaw,
+          "SOL amount"
+        );
         const tokenAmount = this.calculateBuyAmount(
           bondingCurve,
           solAmountLamports
@@ -315,7 +381,10 @@ export class PumpFunClient {
         };
       } else {
         // Calculate how much SOL we get for the token amount
-        const tokenAmount = parseInt(amount);
+        const tokenAmount = this.toSafeNumber(
+          amountRaw,
+          "Token amount"
+        );
         const solAmountLamports = this.calculateSellAmount(
           bondingCurve,
           tokenAmount
@@ -370,20 +439,15 @@ export class PumpFunClient {
         // Buying pump.fun token with SOL
         pumpMint = new PublicKey(outputMint);
         isBuy = true;
-        // Convert SOL amount to lamports (SOL has 9 decimals)
-        const solAmount = parseFloat(amount);
-        amountLamports = BigInt(Math.floor(solAmount * 1_000_000_000));
+        amountLamports = this.toRawAmount(amount, 9);
       } else if (!isSolInput && isSolOutput) {
         // Selling pump.fun token for SOL
         pumpMint = new PublicKey(inputMint);
         isBuy = false;
-        // For selling tokens, convert decimal amount to raw token amount
-        // Pump.fun tokens typically have 6 decimals
-        const decimalAmount = parseFloat(amount);
-        const rawTokenAmount = Math.floor(decimalAmount * Math.pow(10, 6));
-        amountLamports = BigInt(rawTokenAmount);
+        const tokenDecimals = await this.getMintDecimals(pumpMint);
+        amountLamports = this.toRawAmount(amount, tokenDecimals);
         console.log(
-          `🔢 SELL conversion: ${amount} → ${decimalAmount} → ${rawTokenAmount} raw tokens`
+          `🔢 SELL conversion: ${amount} → raw=${amountLamports.toString()} (decimals=${tokenDecimals})`
         );
       } else {
         throw new Error("Pump.fun swaps must involve SOL and a pump.fun token");
@@ -394,7 +458,10 @@ export class PumpFunClient {
 
       if (isBuy) {
         // For buying: amount is in SOL lamports
-        const solAmount = amountLamports;
+        const solAmount = this.toSafeNumber(
+          amountLamports,
+          "SOL amount"
+        );
 
         // First fetch required data using the SDK's fetch methods
         const global = await this.onlineSdk.fetchGlobal();
@@ -455,7 +522,7 @@ export class PumpFunClient {
         // Calculate SOL amount we'll receive for the token amount
         const expectedSolAmount = this.calculateSellAmount(
           sellState.bondingCurve,
-          Number(tokenAmount)
+          this.toSafeNumber(tokenAmount, "Token amount")
         );
         const minSolOut = Math.floor(
           expectedSolAmount * (1 - slippageBps / 10000)

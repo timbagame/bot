@@ -4,6 +4,7 @@ import {
   MIN_SOL_FOR_TX,
   CALLBACK_MESSAGE_MAX_LENGTH,
   SOL_BALANCE_PRECISION,
+  MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
 } from "./constants";
 
 // ================================
@@ -12,6 +13,11 @@ import {
 
 const INSUFFICIENT_LAMPORTS_PATTERN =
   /insufficient lamports (\d+), need (\d+)/i;
+
+const RENT_INSUFFICIENT_FUNDS_PATTERNS = [
+  "insufficient funds for rent",
+  "rent-exempt",
+];
 
 const TRANSACTION_TIMEOUT_PATTERNS = [
   "transaction confirmation timeout",
@@ -31,6 +37,64 @@ const extractLamportsInfo = (
   const match = errorMessage.match(INSUFFICIENT_LAMPORTS_PATTERN);
   if (!match || !match[1] || !match[2]) return null;
   return { current: parseInt(match[1]), needed: parseInt(match[2]) };
+};
+
+const collectErrorLogs = (
+  error: unknown,
+  visited: Set<any> = new Set()
+): string[] => {
+  if (!error || typeof error !== "object") return [];
+  if (visited.has(error)) return [];
+  visited.add(error);
+
+  const candidate = error as any;
+  const logs: string[] = [];
+  const pushLogs = (maybeLogs: unknown) => {
+    if (Array.isArray(maybeLogs)) {
+      for (const entry of maybeLogs) {
+        if (typeof entry === "string") {
+          logs.push(entry);
+        }
+      }
+    }
+  };
+
+  pushLogs(candidate.logs);
+  pushLogs(candidate.logMessages);
+  pushLogs(candidate.transactionLogs);
+  if (typeof candidate.getLogs === "function") {
+    try {
+      const extracted = candidate.getLogs();
+      pushLogs(extracted);
+    } catch (logError) {
+      console.debug("Failed to extract logs from error", logError);
+    }
+  }
+
+  if (candidate.data) {
+    logs.push(...collectErrorLogs(candidate.data, visited));
+  }
+  if (candidate.error) {
+    logs.push(...collectErrorLogs(candidate.error, visited));
+  }
+  if (candidate.cause) {
+    logs.push(...collectErrorLogs(candidate.cause, visited));
+  }
+
+  return logs;
+};
+
+const extractLamportsInfoFromError = (
+  error: unknown
+): { current: number; needed: number } | null => {
+  const logs = collectErrorLogs(error);
+  for (const log of logs) {
+    const info = extractLamportsInfo(log);
+    if (info) {
+      return info;
+    }
+  }
+  return null;
 };
 
 const isTransactionTimeoutError = (message: string): boolean =>
@@ -92,7 +156,8 @@ export const parseTransactionError = (
   }
 
   // Check for specific lamports info
-  const lamportsInfo = extractLamportsInfo(errorMessage);
+  const lamportsInfo =
+    extractLamportsInfo(errorMessage) || extractLamportsInfoFromError(error);
   if (lamportsInfo) {
     return formatInsufficientFundsError(
       lamportsInfo.current,
@@ -102,6 +167,24 @@ export const parseTransactionError = (
   }
 
   // Handle common error patterns
+  if (
+    RENT_INSUFFICIENT_FUNDS_PATTERNS.some((pattern) =>
+      lowerMessage.includes(pattern)
+    )
+  ) {
+    const recommendedMinimum = walletManager
+      ? walletManager.formatSolBalance(MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS)
+      : (MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS / LAMPORTS_PER_SOL).toFixed(
+          SOL_BALANCE_PRECISION
+        );
+
+    return (
+      `💰 Insufficient SOL!\n\n` +
+      `Rent-exempt account creation requires additional SOL.\n\n` +
+      `Please top up to at least ${recommendedMinimum} SOL and try again.`
+    );
+  }
+
   if (lowerMessage.includes("insufficient")) {
     return `💰 Insufficient funds!\n\nEnsure you have at least ${MIN_SOL_FOR_TX} SOL for fees.\nUse /balance to check your current balance.`;
   }

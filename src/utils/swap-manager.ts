@@ -340,6 +340,7 @@ export class SwapManager {
     } = options;
 
     let sponsoredLamportsOutstanding = 0;
+    let lastJupiterError: string | null = null;
 
     try {
       const currentLamports = await this.connection.getBalance(
@@ -358,6 +359,95 @@ export class SwapManager {
       }
 
       const availableRaw = Math.max(Math.floor(availableTokenAmountRaw), 0);
+      const attemptJupiterSwap = async (
+        target: number
+      ): Promise<JustInTimeSwapResult | null> => {
+        try {
+          const quote = await this.jupiterClient.getQuote({
+            inputMint: tokenMint,
+            outputMint: SOL_MINT,
+            amount: target.toString(),
+            slippageBps,
+            swapMode: "ExactOut",
+          });
+
+          const requiredInput = BigInt(quote.inAmount);
+          const availableInput = BigInt(availableRaw);
+
+          if (requiredInput > availableInput) {
+            const needed = this.describeTokenAmount(requiredInput, tokenDecimals);
+            const available = this.describeTokenAmount(
+              availableInput,
+              tokenDecimals
+            );
+            lastJupiterError = `Need ${needed} ${tokenTicker.toUpperCase()} available for swap but only ${available}. Top up your balance or add SOL manually.`;
+            console.log(
+              `⚠️ Jupiter route requires ${needed} ${tokenTicker.toUpperCase()} but only ${available} available.`
+            );
+            return null;
+          }
+
+          const swapResponse = await this.jupiterClient.getSwapTransaction({
+            userPublicKey: userKeypair.publicKey.toBase58(),
+            quoteResponse: quote,
+            wrapAndUnwrapSol: true,
+            useSharedAccounts: true,
+            dynamicComputeUnitLimit: true,
+          });
+
+          const sponsorLamports = Math.max(
+            JIT_SWAP_FEE_BUFFER_LAMPORTS - currentLamports,
+            0
+          );
+          if (sponsorLamports > 0) {
+            await this.sponsorSwapFees(userKeypair, sponsorLamports);
+            sponsoredLamportsOutstanding += sponsorLamports;
+          }
+
+          const signature = await this.executeJupiterTransaction(
+            swapResponse.swapTransaction,
+            userKeypair
+          );
+
+          if (sponsoredLamportsOutstanding > 0) {
+            await this.refundSponsoredFees(
+              userKeypair,
+              sponsoredLamportsOutstanding
+            );
+            sponsoredLamportsOutstanding = 0;
+          }
+
+          lastJupiterError = null;
+          return {
+            swapped: true,
+            provider: "jupiter",
+            signature,
+            lamportsReceived: target,
+          };
+        } catch (attemptError: any) {
+          if (sponsoredLamportsOutstanding > 0) {
+            try {
+              await this.refundSponsoredFees(
+                userKeypair,
+                sponsoredLamportsOutstanding
+              );
+            } catch (refundError) {
+              console.error(
+                "Failed to refund sponsored swap fees after Jupiter attempt:",
+                refundError
+              );
+            } finally {
+              sponsoredLamportsOutstanding = 0;
+            }
+          }
+
+          const message = attemptError?.message || String(attemptError);
+          lastJupiterError =
+            message || "Jupiter route unavailable. Try again or add SOL manually.";
+          console.log("⚠️ Jupiter swap attempt failed:", message);
+          return null;
+        }
+      };
       if (availableRaw <= 0) {
         return {
           swapped: false,
@@ -375,61 +465,21 @@ export class SwapManager {
       );
 
       if (provider === "jupiter") {
-        const quote = await this.jupiterClient.getQuote({
-          inputMint: tokenMint,
-          outputMint: SOL_MINT,
-          amount: swapTarget.toString(),
-          slippageBps,
-          swapMode: "ExactOut",
-        });
+        const jupiterSwap =
+          (await attemptJupiterSwap(swapTarget)) ||
+          (lamportsShortfall > 0
+            ? await attemptJupiterSwap(lamportsShortfall)
+            : null);
 
-        const requiredInput = BigInt(quote.inAmount);
-        const availableInput = BigInt(availableRaw);
-
-        if (requiredInput > availableInput) {
-          const needed = this.describeTokenAmount(requiredInput, tokenDecimals);
-          const available = this.describeTokenAmount(availableInput, tokenDecimals);
-          return {
-            swapped: false,
-            error: `Need ${needed} ${tokenTicker.toUpperCase()} available for swap but only ${available}. Top up your balance or add SOL manually.`,
-          };
-        }
-
-        const swapResponse = await this.jupiterClient.getSwapTransaction({
-          userPublicKey: userKeypair.publicKey.toBase58(),
-          quoteResponse: quote,
-          wrapAndUnwrapSol: true,
-          useSharedAccounts: true,
-          dynamicComputeUnitLimit: true,
-        });
-
-        const sponsorLamports = Math.max(
-          JIT_SWAP_FEE_BUFFER_LAMPORTS - currentLamports,
-          0
-        );
-        if (sponsorLamports > 0) {
-          await this.sponsorSwapFees(userKeypair, sponsorLamports);
-          sponsoredLamportsOutstanding = sponsorLamports;
-        }
-
-        const signature = await this.executeJupiterTransaction(
-          swapResponse.swapTransaction,
-          userKeypair
-        );
-
-        if (sponsoredLamportsOutstanding > 0) {
-          await this.refundSponsoredFees(
-            userKeypair,
-            sponsoredLamportsOutstanding
-          );
-          sponsoredLamportsOutstanding = 0;
+        if (jupiterSwap) {
+          return jupiterSwap;
         }
 
         return {
-          swapped: true,
-          provider: "jupiter",
-          signature,
-          lamportsReceived: swapTarget,
+          swapped: false,
+          error:
+            lastJupiterError ||
+            "Unable to route swap on Jupiter. Add SOL manually and try again.",
         };
       }
 
@@ -444,50 +494,101 @@ export class SwapManager {
         };
       }
 
-      let attemptDecimal = Math.min(
-        availableDecimal,
-        Math.max(
-          availableDecimal * 0.05,
-          1 / Math.pow(10, Math.min(tokenDecimals, 6))
-        )
+      console.log(
+        `🔍 Pump.fun JIT context for ${logContext}: availableRaw=${availableRaw}, availableDecimal=${availableDecimal}, decimals=${tokenDecimals}, shortfall=${lamportsShortfall}, target=${swapTarget}, slippage=${slippageBps}bps`
       );
+
+      const tryPumpFunQuote = async (
+        targetLamports: number
+      ): Promise<{ amountStr: string; lamportsOut: number } | null> => {
+        let attemptDecimal = Math.min(
+          availableDecimal,
+          Math.max(
+            availableDecimal * 0.05,
+            1 / Math.pow(10, Math.min(tokenDecimals, 6))
+          )
+        );
+
+        let attemptCount = 0;
+        let lastLamportsOut = 0;
+
+        for (let i = 0; i < 6; i++) {
+          attemptCount = i + 1;
+          const amountStr = this.formatDecimalAmount(
+            attemptDecimal,
+            tokenDecimals
+          );
+          const quote = await this.pumpFunClient.getQuote(
+            tokenMint,
+            SOL_MINT,
+            amountStr,
+            tokenDecimals,
+            SOL_DECIMALS,
+            slippageBps
+          );
+          const lamportsOut = Number(quote.outputAmount);
+          lastLamportsOut = lamportsOut;
+
+          console.log(
+            `   🔁 Pump.fun attempt ${attemptCount}: amount=${amountStr} (${attemptDecimal}) → lamports=${lamportsOut} (target ${targetLamports})`
+          );
+
+          if (lamportsOut >= targetLamports) {
+            console.log(
+              `   ✅ Pump.fun quote met target with ${lamportsOut} lamports using amount ${amountStr}`
+            );
+            return { amountStr, lamportsOut };
+          }
+
+          if (attemptDecimal >= availableDecimal) {
+            console.log(
+              "   ⛔️ Reached available token ceiling; cannot increase pump.fun amount further."
+            );
+            break;
+          }
+
+          const nextAttempt = Math.min(attemptDecimal * 2, availableDecimal);
+          if (nextAttempt === attemptDecimal) {
+            console.log(
+              "   ⛔️ Next pump.fun attempt would not change amount; stopping."
+            );
+            break;
+          }
+          attemptDecimal = nextAttempt;
+        }
+
+        console.log(
+          `   ❌ Exhausted pump.fun attempts (${attemptCount}) without reaching target. Last lamportsOut=${lastLamportsOut}.`
+        );
+        return null;
+      };
+
       let selectedQuote:
         | { amountStr: string; lamportsOut: number }
-        | null = null;
+        | null = await tryPumpFunQuote(swapTarget);
 
-      for (let i = 0; i < 6; i++) {
-        const amountStr = this.formatDecimalAmount(attemptDecimal, tokenDecimals);
-        const quote = await this.pumpFunClient.getQuote(
-          tokenMint,
-          SOL_MINT,
-          amountStr,
-          tokenDecimals,
-          SOL_DECIMALS,
-          slippageBps
-        );
-        const lamportsOut = Number(quote.outputAmount);
-
-        if (lamportsOut >= swapTarget) {
-          selectedQuote = { amountStr, lamportsOut };
-          break;
+      if (!selectedQuote && lamportsShortfall > 0) {
+        const fallbackTarget = Math.max(lamportsShortfall, 1);
+        if (fallbackTarget < swapTarget) {
+          console.log(
+            `⚠️ Pump.fun liquidity could not cover target ${swapTarget} lamports. Retrying without buffer (target ${fallbackTarget}).`
+          );
+          selectedQuote = await tryPumpFunQuote(fallbackTarget);
         }
-
-        if (attemptDecimal >= availableDecimal) {
-          break;
-        }
-
-        const nextAttempt = Math.min(attemptDecimal * 2, availableDecimal);
-        if (nextAttempt === attemptDecimal) {
-          break;
-        }
-        attemptDecimal = nextAttempt;
       }
 
       if (!selectedQuote) {
+        console.log(
+          `⚠️ Pump.fun swap did not yield the ${swapTarget} lamports needed for ${logContext}. availableDecimal=${availableDecimal}, remainingShortfall=${targetLamports - currentLamports}`
+        );
+        const missingSol = this.wallet.formatSolBalance(
+          Math.max(targetLamports - currentLamports, 0)
+        );
+
         return {
           swapped: false,
           error:
-            `Unable to convert enough ${tokenTicker.toUpperCase()} into SOL for fees. Liquidity may be too low—try a manual top up.`,
+            `Unable to convert enough ${tokenTicker.toUpperCase()} into SOL for fees. Liquidity may be too low—add at least ${missingSol} SOL manually and try again.`,
         };
       }
 

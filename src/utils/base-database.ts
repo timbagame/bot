@@ -34,6 +34,12 @@ export abstract class BaseDatabase {
   ) {
     const resolvedFilename = resolveDatabaseFilename(filename);
     this.db = new Database(resolvedFilename, { create: true });
+    try {
+      this.db.exec("PRAGMA journal_mode = WAL;");
+      this.db.exec("PRAGMA busy_timeout = 5000;");
+    } catch (pragmaError) {
+      console.warn("Unable to apply SQLite pragmas:", pragmaError);
+    }
 
     try {
       for (const stmt of initStatements) {

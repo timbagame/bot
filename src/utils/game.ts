@@ -1216,23 +1216,91 @@ export class GameManager {
     try {
       const metadata = await this.wallet.getTokenMetadata(tokenMint);
       const playerKp = this.wallet.getKeyPair(telegramId);
-      const tokenBalance = await this.wallet.getTokenBalance(
+      let tokenBalance = await this.wallet.getTokenBalance(
         telegramId,
         tokenMint,
         { createIfMissing: true }
       );
-      const totalBalance = tokenBalance;
-      if (totalBalance < amount) {
+      if (tokenBalance < amount) {
         return {
           success: false,
           error: `Insufficient balance. You have ${this.wallet.formatTokenBalance(
-            totalBalance,
+            tokenBalance,
             metadata.decimals
           )} ${tokenTicker} but need ${this.wallet.formatTokenBalance(
             amount,
             metadata.decimals
           )} ${tokenTicker}`,
         };
+      }
+
+      const reservedTicketAmount = amount;
+      const swapAllowanceRaw = Math.max(tokenBalance - reservedTicketAmount, 0);
+
+      let lamportsBalance = await this.wallet.getBalance(telegramId);
+      if (lamportsBalance < MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
+        if (swapAllowanceRaw <= 0) {
+          const formattedStake = this.wallet.formatTokenBalance(
+            reservedTicketAmount,
+            metadata.decimals
+          );
+
+          return {
+            success: false,
+            error: `You have exactly ${formattedStake} ${tokenTicker} reserved for the ticket but no spare tokens to cover SOL fees. Add SOL manually or deposit more ${tokenTicker} before trying again.`,
+          };
+        }
+
+        const jitResult = await this.swapManager.performJustInTimeSolSwap({
+          userKeypair: playerKp,
+          tokenMint,
+          tokenDecimals: metadata.decimals,
+          availableTokenAmountRaw: swapAllowanceRaw,
+          desiredLamports: MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
+          slippageBps: 300,
+          tokenTicker,
+          logContext: `create ${gameType} game`,
+        });
+
+        if (!jitResult.swapped) {
+          if (jitResult.error) {
+            return { success: false, error: jitResult.error };
+          }
+
+          return {
+            success: false,
+            error:
+              "Unable to top up SOL balance automatically. Add SOL manually and try again.",
+          };
+        }
+
+        tokenBalance = await this.wallet.getTokenBalance(
+          telegramId,
+          tokenMint,
+          { createIfMissing: true }
+        );
+
+        if (tokenBalance < amount) {
+          return {
+            success: false,
+            error: `Swap completed but only ${this.wallet.formatTokenBalance(
+              tokenBalance,
+              metadata.decimals
+            )} ${tokenTicker} remain, which is below the required ${this.wallet.formatTokenBalance(
+              amount,
+              metadata.decimals
+            )}. Please top up your tokens and try again.`,
+          };
+        }
+
+        lamportsBalance = await this.wallet.getBalance(telegramId);
+        if (lamportsBalance < MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
+          return {
+            success: false,
+            error:
+              "Swap executed but SOL balance is still below the safety buffer. Add SOL manually and try again.",
+          };
+        }
       }
 
       const creatorPubkey = playerKp.publicKey.toBase58();
