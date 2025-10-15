@@ -27,7 +27,7 @@ test("onBalance in private chat clears cache and calls showWalletUI", async () =
     wallet: { formatTokenBalance: (_n: number, _d: number) => "0", formatSolBalance: (n: number) => String(n) },
     handleCommandError: async () => {},
     getPriceUSD: async () => 100,
-    buildWalletCaption: (sol: string, tokens: any[], addr: string, solPrice?: number, timbaPrice?: number) => 
+    buildWalletCaption: (sol: string, _tokens: any[], addr: string, solPrice?: number, _timbaPrice?: number) => 
       `Solana Address · 🅴\n\n<code>${addr}</code>\n\nFee balance: ${sol} SOL ($${solPrice || 0})\nTimba balance: 0 TIMBA ($0.00)`,
     createWalletKeyboard: () => ({} as any),
     WINNER_VIDEO_ID: null,
@@ -49,6 +49,11 @@ test("onBalance private chat errors call handler", async () => {
     TOKENS_LIST: [],
     wallet: { formatTokenBalance: () => "0", formatSolBalance: (n: number) => String(n) },
     handleCommandError: async () => { handled++; },
+    getPriceUSD: async () => 100,
+    buildWalletCaption: (sol: string, _tokens: any[], addr: string, solPrice?: number, _timbaPrice?: number) => 
+      `Solana Address · 🅴\n\n<code>${addr}</code>\n\nFee balance: ${sol} SOL ($${solPrice || 0})\nTimba balance: 0 TIMBA ($0.00)`,
+    createWalletKeyboard: () => ({} as any),
+    WINNER_VIDEO_ID: null,
   });
   expect(handled).toBe(1);
 });
@@ -80,11 +85,11 @@ test("onBalance in group sends balance privately to user", async () => {
     wallet: { formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toFixed(0), formatSolBalance: (n: number) => (n / 1_000_000_000).toFixed(6) },
     handleCommandError: async () => {},
     getPriceUSD: async () => 100,
-    buildWalletCaption: (sol: string, tokens: any[], addr: string, solPrice?: number, timbaPrice?: number) => {
+    buildWalletCaption: (sol: string, _tokens: any[], addr: string, solPrice?: number, _timbaPrice?: number) => {
       // Simple HTML escaping for test
       const escapeHtml = (str: string) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
       let result = `Solana Address · 🅴\n\n<code>${escapeHtml(addr)}</code>\n\nFee balance: ${escapeHtml(sol)} SOL ($${solPrice || 0})\nTimba balance: 0 TIMBA ($0.00)`;
-      for (const token of tokens) {
+      for (const token of _tokens) {
         if (token.ticker !== "TIMBA") {
           result += `\n${escapeHtml(token.ticker)} balance: ${escapeHtml(token.formatted)} ${escapeHtml(token.ticker)}`;
         }
@@ -163,11 +168,11 @@ test("onBalance merges WSOL and sends privately to user", async () => {
     },
     handleCommandError: async () => {},
     getPriceUSD: async () => 100,
-    buildWalletCaption: (sol: string, tokens: any[], addr: string, solPrice?: number, timbaPrice?: number) => {
+    buildWalletCaption: (sol: string, _tokens: any[], addr: string, solPrice?: number, _timbaPrice?: number) => {
       // Simple HTML escaping for test
       const escapeHtml = (str: string) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
       let result = `Solana Address · 🅴\n\n<code>${escapeHtml(addr)}</code>\n\nFee balance: ${escapeHtml(sol)} SOL ($${solPrice || 0})\nTimba balance: 0 TIMBA ($0.00)`;
-      for (const token of tokens) {
+      for (const token of _tokens) {
         if (token.ticker !== "TIMBA") {
           result += `\n${escapeHtml(token.ticker)} balance: ${escapeHtml(token.formatted)} ${escapeHtml(token.ticker)}`;
         }
@@ -245,11 +250,11 @@ test("onBalance escapes HTML-sensitive values when sending privately", async () 
     },
     handleCommandError: async () => {},
     getPriceUSD: async () => 100,
-    buildWalletCaption: (sol: string, tokens: any[], addr: string, solPrice?: number, timbaPrice?: number) => {
+    buildWalletCaption: (sol: string, _tokens: any[], addr: string, solPrice?: number, _timbaPrice?: number) => {
       // Simple HTML escaping for test
       const escapeHtml = (str: string) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
       let result = `Solana Address · 🅴\n\n<code>${escapeHtml(addr)}</code>\n\nFee balance: ${escapeHtml(sol)} SOL ($${solPrice || 0})\nTimba balance: 0 TIMBA ($0.00)`;
-      for (const token of tokens) {
+      for (const token of _tokens) {
         if (token.ticker !== "TIMBA") {
           result += `\n${escapeHtml(token.ticker)} balance: ${escapeHtml(token.formatted)} ${escapeHtml(token.ticker)}`;
         }

@@ -2,11 +2,6 @@ import type { InlineKeyboard } from "grammy";
 import { escapeHtml } from "../utils/format-amount";
 import { isRecoverableMediaError, trySendVideoWithFallback } from "../utils/media";
 
-const getTelegramErrorDescription = (error: unknown): string => {
-  if (!error || typeof error !== "object") return "";
-  const knownError = error as { description?: string; message?: string };
-  return (knownError.description || knownError.message || "").toLowerCase();
-};
 
 
 export type ShowWalletUIDeps = {
@@ -299,7 +294,6 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     const caption = buildWalletCaption(
       formattedSolBalance,
       tokenLines,
-      0, // totalUSD not needed for display
       walletAddress,
       solUsdPrice,
       timbaUsdPrice
