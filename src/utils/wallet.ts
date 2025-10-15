@@ -640,6 +640,9 @@ export class WalletManager {
       Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: 6, // USDT
       BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4: 9, // TIMBA devnet
       F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump: 6, // TIMBA mainnet
+      A6rSPi9JmJgVkW6BatsA6MjFYLseizPM2Fnt92coFjf4: 6, // MAGAIBA
+      FkBF9u1upwEMUPxnXjcydxxVSxgr8f3k1YXbz7G7bmtA: 6, // GLORP
+      HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC: 6, // AI16Z
       FPyD25czYkvztSsgyCP7bxd2xnvDAp1LVjyiJhQidaos: 9, // DAOS
     };
 
