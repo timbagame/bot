@@ -106,7 +106,7 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
     const tokenLines: Array<{ ticker: string; formatted: string }> = [];
     let solUsdPrice = 0;
     let timbaUsdPrice = 0;
-    
+
     for (const token of tokenBalances) {
       const formatted = wallet.formatTokenBalance
         ? (wallet as any).formatTokenBalance(token.balance, token.decimals)
@@ -118,13 +118,13 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
       const tokenPriceUSD = await getPriceUSD(reference);
       const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
       totalUSD += tokenDecimalBalance * tokenPriceUSD;
-      
+
       // Store specific prices for display
       if (token.ticker === "TIMBA") {
         timbaUsdPrice = tokenPriceUSD;
       }
     }
-    
+
     // Get SOL price
     solUsdPrice = await getPriceUSD("SOL");
 
@@ -185,7 +185,7 @@ export async function onWalletRefresh(ctx: any, deps: WalletHandlersDeps) {
 
 export async function onWalletSettings(ctx: any, deps: WalletHandlersDeps) {
   try {
-    const settingsContent = `T I M B A\n\n⚙️ Settings\n\nChoose an option:`;
+    const settingsContent = `⚙️ Settings\n\nChoose an option:`;
     const response = [settingsContent];
     const keyboard = deps.createSettingsKeyboard();
     try {
@@ -252,7 +252,7 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
   // If it's not a private chat, send the same wallet UI privately to the user
   try {
     try { clearWalletCache(telegramId); } catch {}
-    
+
     // Get the same data as private chat using the existing logic
     const playerData = await getPlayerData(telegramId);
     const approvedTokens = getApprovedTokens();
@@ -273,7 +273,7 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     const tokenLines: Array<{ ticker: string; formatted: string }> = [];
     let solUsdPrice = 0;
     let timbaUsdPrice = 0;
-    
+
     for (const token of tokenBalancesToShow) {
       const formatted = wallet.formatTokenBalance(token.balance, token.decimals);
       tokenLines.push({ ticker: token.ticker, formatted });
@@ -281,13 +281,13 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
       // Use the same robust logic as coinflip for price fetching
       const reference = token.ticker === "SOL" ? "SOL" : token.mint || token.ticker;
       const tokenPriceUSD = await getPriceUSD(reference);
-      
+
       // Store specific prices for display
       if (token.ticker === "TIMBA") {
         timbaUsdPrice = tokenPriceUSD;
       }
     }
-    
+
     // Get SOL price
     solUsdPrice = await getPriceUSD("SOL");
 
@@ -302,7 +302,7 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     // Send privately to the user with video support
     const sendPrivateWalletContent = async (caption: string) => {
       const sendAsText = async () => {
-        await ctx.api.sendMessage(ctx.from!.id, caption, { 
+        await ctx.api.sendMessage(ctx.from!.id, caption, {
           parse_mode: "HTML",
           reply_markup: createWalletKeyboard(),
           link_preview_options: { is_disabled: true }
@@ -327,7 +327,7 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     };
 
     await sendPrivateWalletContent(caption);
-    
+
   } catch (error) {
     await handleCommandError(ctx, error, "balance");
   }

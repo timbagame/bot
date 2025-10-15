@@ -713,12 +713,12 @@ const validateAndProcessTransaction = async (
   try {
     const tx = await transactionFn(playerData);
     const txString = tx ? tx.toString().trim() : "";
-    
+
     // Debug: Log transaction details when creating Solscan link
     if (showSolscanLink) {
       console.log(`🔗 Solscan link requested. txString: "${txString}", length: ${txString?.length || 0}`);
     }
-    
+
     let successMessage = txString
       ? `${description} successful! 💸\n\n<code>${txString}</code>`
       : `${description} successful! 💸`;
@@ -729,14 +729,14 @@ const validateAndProcessTransaction = async (
       const rpcUrl = process.env['RPC_URL'] || "";
       const isDevnet = rpcUrl.includes("devnet") || rpcUrl.includes("dev") || rpcUrl.includes("localhost");
       const isTestnet = rpcUrl.includes("testnet") || rpcUrl.includes("test");
-      
+
       let solscanUrl = `https://solscan.io/tx/${txString}`;
       if (isDevnet) {
         solscanUrl = `https://solscan.io/tx/${txString}?cluster=devnet`;
       } else if (isTestnet) {
         solscanUrl = `https://solscan.io/tx/${txString}?cluster=testnet`;
       }
-      
+
       console.log(`🔗 Generated Solscan URL: ${solscanUrl} (isDevnet: ${isDevnet}, isTestnet: ${isTestnet})`);
       successMessage += `\n\n<a href="${solscanUrl}">View in Blockchain</a>`;
     }
@@ -745,7 +745,7 @@ const validateAndProcessTransaction = async (
       ctx.chat!.id,
       processingMsg.message_id,
       successMessage,
-      { 
+      {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: showSolscanLink && !!txString }
       }
@@ -1080,9 +1080,9 @@ bot.command(["coinflip", "cf"], async (ctx) => {
     // If arguments provided, use command-based creation (original functionality)
     if (args && args.length >= 2) {
       console.log("🎮 Command-based coinflip creation:", args);
-      
+
       // No creating placeholder message; proceed directly
-      
+
       try {
         // Parse arguments: /cf <amount> [TOKEN] [maxPlayers]
         const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id);
@@ -1116,7 +1116,7 @@ bot.command(["coinflip", "cf"], async (ctx) => {
         );
         const tokenMetadata = await wallet.getTokenMetadata(parsed.data!.tokenMint);
         const requiredAmount = parsed.data!.amount;
-        
+
         if (userBalance < requiredAmount) {
           const formatted = wallet.formatTokenBalance(userBalance, tokenMetadata.decimals);
           return ctx.reply(`❌ Insufficient balance. You have ${formatted} ${parsed.data!.tokenTicker}, need ${parsed.data!.formattedAmount}.`);
@@ -1150,8 +1150,8 @@ bot.command(["coinflip", "cf"], async (ctx) => {
         }
 
         // Use the same method as UI creation to ensure consistency
-        const creatorUsername = ctx.from?.username 
-          ? `@${ctx.from.username}` 
+        const creatorUsername = ctx.from?.username
+          ? `@${ctx.from.username}`
           : ctx.from?.first_name || "Unknown";
         await gameManager.createGameMessage(
           ctx,
@@ -1174,14 +1174,14 @@ bot.command(["coinflip", "cf"], async (ctx) => {
 
     // No arguments - show UI (new functionality)
     console.log("🎮 UI-based coinflip creation");
-    
+
     // Resolve chat-specific token configuration
     const tokenInfo = await resolveChatTokenInfo(ctx.chat?.id);
 
     // Get user's balance for the active token
     let balanceText = "";
     let userBalance = 0;
-    
+
     try {
       const tokenBalance = await wallet.getTokenBalance(
         telegramId,
@@ -1282,9 +1282,9 @@ bot.command(["giveaway", "ga"], async (ctx) => {
     // If arguments provided, use command-based creation (original functionality)
     if (args && args.length >= 2) {
       console.log("🎁 Command-based giveaway creation:", args);
-      
+
       // No creating placeholder message; proceed directly
-      
+
       try {
         // Parse arguments: /ga <amount> [TOKEN] [maxPlayers]
         const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id);
@@ -1318,7 +1318,7 @@ bot.command(["giveaway", "ga"], async (ctx) => {
         );
         const tokenMetadata = await wallet.getTokenMetadata(parsed.data!.tokenMint);
         const requiredAmount = parsed.data!.amount; // This is already in raw format from parseAmount
-        
+
         if (userBalance < requiredAmount) {
           const formatted = wallet.formatTokenBalance(userBalance, tokenMetadata.decimals);
           return ctx.reply(`❌ Insufficient balance. You have ${formatted} ${parsed.data!.tokenTicker}, need ${parsed.data!.formattedAmount}.`);
@@ -1347,8 +1347,8 @@ bot.command(["giveaway", "ga"], async (ctx) => {
         }
 
         // Use the same method as UI creation to ensure consistency
-        const creatorUsername = ctx.from?.username 
-          ? `@${ctx.from.username}` 
+        const creatorUsername = ctx.from?.username
+          ? `@${ctx.from.username}`
           : ctx.from?.first_name || "Unknown";
         await gameManager.createGameMessage(
           ctx,
@@ -1371,14 +1371,14 @@ bot.command(["giveaway", "ga"], async (ctx) => {
 
     // No arguments - show UI (new functionality)
     console.log("🎁 UI-based giveaway creation");
-    
+
     // Resolve chat token config
     const tokenInfo = await resolveChatTokenInfo(ctx.chat?.id);
 
     // Get user's balance for chosen token
     let balanceText = "";
     let userBalance = 0;
-    
+
     try {
       const tokenBalance = await wallet.getTokenBalance(
         telegramId,
@@ -2776,10 +2776,10 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
 
   try {
     console.log(`🏆 Generating leaderboard for chat ${chatId}`);
-    
+
     // Get leaderboard stats for this chat
     const leaderboardStats = gameDb.getLeaderboardStats(chatId, 10);
-    
+
     if (leaderboardStats.length === 0) {
       return ctx.reply(
         "⚔️ <b>HALL OF LEGENDS</b> ⚔️\n\n" +
@@ -2792,11 +2792,11 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
 
     // Build competitive leaderboard message
     let leaderboardText = "⚔️ <b>HALL OF LEGENDS</b> ⚔️\n\n";
-    
+
     for (let i = 0; i < leaderboardStats.length; i++) {
       const stats = leaderboardStats[i];
       const rank = i + 1;
-      
+
       // Try to get username, fallback to telegram ID
       let displayName: string;
       try {
@@ -2807,41 +2807,41 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
         console.warn(`Could not get username for ${stats.telegram_id}:`, error);
         displayName = `Usuario ${stats.telegram_id}`;
       }
-      
+
       // Format volume with token breakdown (limit to top 5 tokens to avoid huge messages)
       let volumeFormatted = "";
       if (stats.token_volumes) {
         const tokenVolumes = stats.token_volumes.split('|').filter((vol: string) => Boolean(vol));
-        
+
         // Parse tokens and prioritize TIMBA
         const tokenData: Array<{ticker: string, volume: number, formatted: string}> = [];
-        
+
         for (const tokenVol of tokenVolumes) {
           const [ticker, volume] = tokenVol.split(':');
           if (!ticker || !volume) continue;
-          
-          const decimals = ticker === 'WSOL' ? 9 : 
-                          ticker === 'USDC' ? 6 : 
-                          ticker === 'USDT' ? 6 : 
+
+          const decimals = ticker === 'WSOL' ? 9 :
+                          ticker === 'USDC' ? 6 :
+                          ticker === 'USDT' ? 6 :
                           ticker === 'TIMBA' ? 6 : 9; // TIMBA has 6 decimals
-          
+
           tokenData.push({
             ticker: ticker || 'UNKNOWN',
             volume: parseInt(volume),
             formatted: `${formatAmount(parseInt(volume), decimals)} ${ticker || 'UNKNOWN'}`
           });
         }
-        
+
         // Prioritize TIMBA first, then sort others by volume (descending)
         const timbaToken = tokenData.find(t => t.ticker === 'TIMBA');
         const otherTokens = tokenData.filter(t => t.ticker !== 'TIMBA');
         otherTokens.sort((a, b) => b.volume - a.volume);
-        
+
         // Combine: TIMBA first, then top 4 other tokens
         const topTokens = [];
         if (timbaToken) topTokens.push(timbaToken);
         topTokens.push(...otherTokens.slice(0, 4));
-        
+
         if (topTokens.length > 0) {
           volumeFormatted = topTokens.map(t => t.formatted).join(' + ');
           // Add indicator if there are more tokens
@@ -2853,11 +2853,11 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
         // Fallback to old format if no token breakdown (assume TIMBA with 6 decimals)
         volumeFormatted = formatAmount(stats.total_volume, 6);
       }
-      
+
       // Competitive ranking with tier system
       let tierEmoji = "";
       let rankDisplay = "";
-      
+
       if (rank === 1) {
         tierEmoji = "👑";
         rankDisplay = `${tierEmoji} <b>LEGEND</b>`;
@@ -2877,24 +2877,24 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
         tierEmoji = "🔥";
         rankDisplay = `${tierEmoji} <b>FIGHTER</b> #${rank}`;
       }
-      
+
       // Win streak indicator
-      const winStreakEmoji = stats.win_rate >= 80 ? "🔥🔥🔥" : 
-                             stats.win_rate >= 60 ? "🔥🔥" : 
+      const winStreakEmoji = stats.win_rate >= 80 ? "🔥🔥🔥" :
+                             stats.win_rate >= 60 ? "🔥🔥" :
                              stats.win_rate >= 40 ? "🔥" : "💀";
-      
+
       leaderboardText += `${rankDisplay}\n`;
       leaderboardText += `<b>${displayName}</b> ${winStreakEmoji}\n`;
       leaderboardText += `💯 <b>${stats.games_won}W</b> | 📊 ${stats.win_rate}% | 💰 ${volumeFormatted}\n`;
       leaderboardText += `🎮 ${stats.total_games} battles\n\n`;
     }
-    
+
 
     await ctx.reply(leaderboardText, {
       parse_mode: "HTML",
       reply_to_message_id: ctx.message?.message_id,
     });
-    
+
     console.log(`✅ Leaderboard generated for chat ${chatId} with ${leaderboardStats.length} players`);
   } catch (error) {
     console.error("Error generating leaderboard:", error);
@@ -3372,7 +3372,7 @@ bot.callbackQuery(/^players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+
     const amount = ctx.match![2] as string;
     const players = ctx.match![3] as string;
     const creatorId = ctx.match![4] as string;
-    
+
     // Check if the user pressing the button is the creator
     if (ctx.from?.id.toString() !== creatorId) {
       await ctx.answerCallbackQuery("🚫 Only the game creator can modify this game setup!");
@@ -3409,7 +3409,7 @@ bot.callbackQuery(/^players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+
       `Amount: <b>${amountFormatted} ${tokenContext.tokenTicker}</b>`,
       `Players: <b>${players}</b>`,
       "",
-      gameType === "coinflip" 
+      gameType === "coinflip"
         ? `• Total prize pool: <b>${totalPotFormatted} ${tokenContext.tokenTicker}</b>`
         : `• Prize for winner: <b>${amountFormatted} ${tokenContext.tokenTicker}</b>`,
       "",
@@ -3437,7 +3437,7 @@ bot.callbackQuery(/^players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+
       tokenDecimals: tokenContext.tokenDecimals,
       contractMinimum: existingSession?.contractMinimum,
     });
-    
+
     await ctx.answerCallbackQuery();
   } catch (error) {
     console.error("Error in players callback:", error);
@@ -3670,16 +3670,16 @@ bot.callbackQuery(/^custom_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
     const gameType = ctx.match![1] as string;
     const creatorId = ctx.match![2] as string;
     const currentUserId = ctx.from?.id?.toString();
-    
+
     console.log("🔔 Creator-protected custom_amount callback triggered:", ctx.callbackQuery?.data);
     console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
-    
+
     // Check if the user pressing the button is the creator
     if (currentUserId !== creatorId) {
       await ctx.answerCallbackQuery("❌ Only the game creator can modify this setup!");
       return;
     }
-    
+
     const userId = ctx.from?.id || 0;
     const session = userSessions.get(userId);
     const tokenContext = await buildTokenContext(session, ctx.chat?.id);
@@ -3755,7 +3755,7 @@ bot.callbackQuery(/^custom_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
       contractMinimum: contractMin,
       amount: session?.amount,
     });
-    
+
     await ctx.answerCallbackQuery();
   } catch (error) {
     console.error("Error in creator-protected custom_amount callback:", error);
@@ -3773,10 +3773,10 @@ bot.callbackQuery(
     const newAmount = parseFloat(ctx.match![2] as string);
     const creatorId = ctx.match![3] as string;
     const currentUserId = ctx.from?.id?.toString();
-    
+
     console.log("🔔 Creator-protected slider callback triggered:", ctx.callbackQuery?.data);
     console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
-    
+
     // Check if the user pressing the button is the creator
     if (currentUserId !== creatorId) {
       await ctx.answerCallbackQuery("❌ Only the game creator can modify this setup!");
@@ -3856,7 +3856,7 @@ bot.callbackQuery(
       tokenDecimals: tokenContext.tokenDecimals,
       contractMinimum: minValue,
     });
-    
+
     await ctx.answerCallbackQuery();
   } catch (error) {
     console.error("Error in creator-protected slider callback:", error);
@@ -3871,16 +3871,16 @@ bot.callbackQuery(/^back_to_amounts_(coinflip|giveaway)_(\d+)$/, async (ctx) => 
     const gameType = ctx.match![1] as string;
     const creatorId = ctx.match![2] as string;
     const currentUserId = ctx.from?.id?.toString();
-    
+
     console.log("🔔 Creator-protected back_to_amounts callback triggered:", ctx.callbackQuery?.data);
     console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
-    
+
     // Check if the user pressing the button is the creator
     if (currentUserId !== creatorId) {
       await ctx.answerCallbackQuery("❌ Only the game creator can modify this setup!");
       return;
     }
-    
+
     const userId = ctx.from?.id || 0;
     const session = userSessions.get(userId);
     const tokenContext = await buildTokenContext(session, ctx.chat?.id);
@@ -3962,7 +3962,7 @@ bot.callbackQuery(/^back_to_amounts_(coinflip|giveaway)_(\d+)$/, async (ctx) => 
         }
       ),
     });
-    
+
     userSessions.set(userId, {
       waitingFor: "setup",
       gameType,
@@ -3975,7 +3975,7 @@ bot.callbackQuery(/^back_to_amounts_(coinflip|giveaway)_(\d+)$/, async (ctx) => 
       tokenDecimals: tokenContext.tokenDecimals,
       contractMinimum: contractMin,
     });
-    
+
     await ctx.answerCallbackQuery();
   } catch (error) {
     console.error("Error in creator-protected back_to_amounts callback:", error);
@@ -3990,10 +3990,10 @@ bot.callbackQuery(/^type_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
     const gameType = ctx.match![1] as string;
     const creatorId = ctx.match![2] as string;
     const currentUserId = ctx.from?.id?.toString();
-    
+
     console.log("🔔 Creator-protected type_amount callback triggered:", ctx.callbackQuery?.data);
     console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
-    
+
     // Check if the user pressing the button is the creator
     if (currentUserId !== creatorId) {
       await ctx.answerCallbackQuery("❌ Only the game creator can modify this setup!");
@@ -4055,11 +4055,11 @@ bot.callbackQuery(/^type_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
         .text("❌ Cancel", `cancel_game_setup_${creatorId}`)
         .row()
     });
-    
+
     await ctx.answerCallbackQuery("Type your amount...");
-    
+
     // Store the game type and message ID in user session for the text handler
-    userSessions.set(userId, { 
+    userSessions.set(userId, {
       waitingFor: "amount_input",
       gameType,
       userBalance,
@@ -4072,7 +4072,7 @@ bot.callbackQuery(/^type_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
       contractMinimum: contractMin,
       amount: session?.amount,
     });
-    
+
   } catch (error) {
     console.error("Error in creator-protected type_amount callback:", error);
     await ctx.answerCallbackQuery("❌ Error setting up text input");
@@ -4087,10 +4087,10 @@ bot.callbackQuery(/^custom_players_(coinflip|giveaway)_(.+)_(\d+)$/, async (ctx)
     const amount = ctx.match![2] as string;
     const creatorId = ctx.match![3] as string;
     const currentUserId = ctx.from?.id?.toString();
-    
+
     console.log("🔔 Creator-protected custom_players callback triggered:", ctx.callbackQuery?.data);
     console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
-    
+
     // Check if the user pressing the button is the creator
     if (currentUserId !== creatorId) {
       await ctx.answerCallbackQuery("❌ Only the game creator can modify this setup!");
@@ -4129,11 +4129,11 @@ bot.callbackQuery(/^custom_players_(coinflip|giveaway)_(.+)_(\d+)$/, async (ctx)
         .text("❌ Cancel", `cancel_game_setup_${creatorId}`)
         .row()
     });
-    
+
     await ctx.answerCallbackQuery("Type the number of players...");
-    
+
     // Store data for text input handler
-    userSessions.set(userId, { 
+    userSessions.set(userId, {
       waitingFor: "players_input",
       gameType,
       userBalance: 0, // Add required field
@@ -4146,7 +4146,7 @@ bot.callbackQuery(/^custom_players_(coinflip|giveaway)_(.+)_(\d+)$/, async (ctx)
       tokenDecimals: tokenContext.tokenDecimals,
       contractMinimum: session?.contractMinimum,
     });
-    
+
   } catch (error) {
     console.error("Error in creator-protected custom_players callback:", error);
     await ctx.answerCallbackQuery("❌ Error setting up players input");
@@ -4164,16 +4164,16 @@ bot.callbackQuery(/^cancel_game_setup_(\d+)$/, async (ctx) => {
   try {
     const creatorId = ctx.match![1] as string;
     const currentUserId = ctx.from?.id?.toString();
-    
+
     console.log("🔔 Creator-protected cancel callback triggered:", ctx.callbackQuery?.data);
     console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
-    
+
     // Check if the user pressing the button is the creator
     if (currentUserId !== creatorId) {
       await ctx.answerCallbackQuery("❌ Only the game creator can cancel this setup!");
       return;
     }
-    
+
     // Clear any pending typed-input session for this user to avoid hijacking
     userSessions.delete(ctx.from?.id || 0);
 
@@ -4192,7 +4192,7 @@ bot.on("message:text", async (ctx, next) => {
   try {
     // Check if user is in a session waiting for input
     const userSession = userSessions.get(ctx.from?.id || 0);
-    
+
     if (!userSession || (userSession.waitingFor !== "amount_input" && userSession.waitingFor !== "players_input")) {
       return await next(); // Not waiting for input, pass to other handlers
     }
@@ -4201,9 +4201,9 @@ bot.on("message:text", async (ctx, next) => {
     if (userSession.chatId && ctx.chat?.id !== userSession.chatId) {
       return await next();
     }
-    
+
     // Keep user's message (avoid deleting to preserve reply chain)
-    
+
     // Clear the session
     userSessions.delete(ctx.from?.id || 0);
 
@@ -4228,16 +4228,16 @@ bot.on("message:text", async (ctx, next) => {
       const players = parseInt(inputText);
       const maxPlayers = 100;
       const minPlayers = 2;
-      
+
       console.log(`🔍 Custom players input: "${inputText}" -> ${players} (gameType: ${userSession.gameType}, min: ${minPlayers}, max: ${maxPlayers})`);
-      
+
       // Validate players input
       if (isNaN(players) || players < minPlayers || players > maxPlayers) {
         const errorMessage = `❌ Invalid number of players. Please enter a number between ${minPlayers} and ${maxPlayers}.`;
         try {
           await ctx.api.editMessageText(
-            userSession.chatId!, 
-            userSession.messageId!, 
+            userSession.chatId!,
+            userSession.messageId!,
             errorMessage,
             { parse_mode: "HTML" }
           );
@@ -4246,7 +4246,7 @@ bot.on("message:text", async (ctx, next) => {
         }
         return;
       }
-      
+
       // Show confirmation with custom players
       const amountNumber = Number(userSession.amount ?? "0");
       const amountFormatted = amountNumber.toLocaleString("en-US", {
@@ -4268,7 +4268,7 @@ bot.on("message:text", async (ctx, next) => {
         `Amount: <b>${amountFormatted} ${tokenTicker}</b>`,
         `Players: <b>${players}</b>`,
         "",
-        userSession.gameType === "coinflip" 
+        userSession.gameType === "coinflip"
           ? `• Total prize pool: <b>${totalPotFormatted} ${tokenTicker}</b>`
           : `• Prize for winner: <b>${amountFormatted} ${tokenTicker}</b>`,
         "",
@@ -4291,7 +4291,7 @@ bot.on("message:text", async (ctx, next) => {
           reply_markup: createGameConfirmKeyboard(userSession.gameType, userSession.amount!, players.toString(), userSession.creatorId)
         });
       }
-      
+
       userSessions.set(ctx.from?.id || 0, {
         waitingFor: "setup",
         gameType: userSession.gameType,
@@ -4308,17 +4308,17 @@ bot.on("message:text", async (ctx, next) => {
 
       return;
     }
-    
+
     // Handle amount input
     const amount = parseFloat(inputText);
-    
+
     // Validate the input
     if (isNaN(amount) || amount <= 0) {
       // Update the original message with error
       try {
         await ctx.api.editMessageText(
-          userSession.chatId!, 
-          userSession.messageId!, 
+          userSession.chatId!,
+          userSession.messageId!,
           "❌ Invalid amount. Please use /coinflip or /giveaway to try again.",
           { parse_mode: "HTML" }
         );
@@ -4329,12 +4329,12 @@ bot.on("message:text", async (ctx, next) => {
       }
       return;
     }
-    
+
     if (amount > userSession.userBalance) {
       // Update the original message with error
       try {
         await ctx.api.editMessageText(
-          userSession.chatId!, 
+          userSession.chatId!,
           userSession.messageId!,
           `❌ Amount too high. Your balance is ${userSession.userBalance.toFixed(2)} ${tokenTicker}. Please use /coinflip or /giveaway to try again.`,
           { parse_mode: "HTML" }
@@ -4361,7 +4361,7 @@ bot.on("message:text", async (ctx, next) => {
       }
       return;
     }
-    
+
     // Proceed to player selection with the custom amount
     const amountFormatted = amount.toLocaleString("en-US", {
       minimumFractionDigits: 0,
@@ -4378,7 +4378,7 @@ bot.on("message:text", async (ctx, next) => {
       "",
       "Select the number of players:",
       "",
-      userSession.gameType === "coinflip" 
+      userSession.gameType === "coinflip"
         ? "• All players compete for the total stakes"
         : "• More players = higher chance for everyone",
       "",
@@ -4417,7 +4417,7 @@ bot.on("message:text", async (ctx, next) => {
       tokenDecimals,
       contractMinimum: minAllowed,
     });
-    
+
   } catch (error) {
     console.error("Error in text input handler:", error);
     await next();
@@ -5386,7 +5386,7 @@ bot.on("callback_query", async (ctx, next) => {
 bot.callbackQuery("start_bot", async (ctx) => {
   try {
     // Delete the info message
-      
+
 
     // Manually trigger start command logic
     const telegramId = BigInt(ctx.from?.id || 0) as bigint;
@@ -5639,7 +5639,7 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
       .slice(0, 6);
 
     const response = [
-      `<b>T I M B A - B U Y  T O K E N S</b>`,
+      `<b>Buy tokens</b>`,
       "",
       `<b>Supported Platforms:</b>`,
       "• Pump.fun tokens",
@@ -5738,7 +5738,7 @@ bot.callbackQuery("cmd_sell", async (ctx) => {
     const { tokenBalances } = await getCachedWalletData(telegramId);
 
     const response = [
-      `<b>T I M B A - S E L L  T O K E N S</b>`,
+      `<b>Sell tokens</b>`,
       "",
       `<b>Supported Platforms:</b>`,
       "• Pump.fun tokens",
@@ -7849,7 +7849,7 @@ bot.on("message:text", async (ctx, next) => {
     } else if (userState.type === "buy_custom_slippage") {
       await handleBuyCustomSlippageInput(ctx, userState, userMessage);
     }
-    
+
     // Clear state after successful processing
     getUserState(userId, true);
   } catch (error) {
@@ -8826,7 +8826,7 @@ const showSellQuoteAndConfirmation = async (
 
     // Get the actual token info - prioritize matching the exact mint from wallet balance
     const approvedTokens = tokenManager.getAllApprovedTokensWithMetadata();
-    let tokenInfo = approvedTokens.find((t) => 
+    let tokenInfo = approvedTokens.find((t) =>
       t.token_ticker === tokenToSell && t.token_mint === tokenBalance.mint
     );
 
@@ -9271,7 +9271,7 @@ setupAnchor()
               await cleanupOrphanedGame(game.game_address);
               continue;
             }
-            
+
             let gamePda: PublicKey;
             try {
               gamePda = new PublicKey(game.game_address);
@@ -9322,7 +9322,7 @@ setupAnchor()
         const duration = ctx.message.video.duration || 0;
         const width = ctx.message.video.width || 0;
         const height = ctx.message.video.height || 0;
-        
+
         // Only log to console, don't reply to user
         console.log(
           `🎥 Video received:\n` +
@@ -9341,7 +9341,7 @@ setupAnchor()
         const duration = ctx.message.animation.duration || 0;
         const width = ctx.message.animation.width || 0;
         const height = ctx.message.animation.height || 0;
-        
+
         // Only log to console, don't reply to user
         console.log(
           `🎭 GIF/Animation received:\n` +
