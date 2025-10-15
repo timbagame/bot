@@ -5623,8 +5623,11 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
 
     if (!userId) return;
 
-    // Use cached wallet data to check SOL balance
-    const { solBalance } = await getCachedWalletData(telegramId);
+    const keypair = wallet.getKeyPair(telegramId);
+    const walletAddress = keypair.publicKey.toBase58();
+
+    // Use cached wallet data to check SOL balance and owned tokens
+    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
     const formattedSolBalance = wallet.formatSolBalance(solBalance);
 
     // Calculate USD value
@@ -5632,26 +5635,80 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
     const solDecimalBalance = solBalance / 1000000000; // LAMPORTS_PER_SOL
     const totalUSD = solDecimalBalance * solPriceUSD;
 
-    const response = [
-      `<pre>T I M B A - B U Y  T O K E N S
+    const ownedTokens = tokenBalances
+      .filter((token) => parseFloat(token.rawBalance) > 0)
+      .slice(0, 6);
 
-Supported Platforms:
-• Pump.fun tokens
-• DAOS.fun tokens
-• Any token on Jupiter DEX</pre>`,
+    const response = [
+      `<b>T I M B A - B U Y  T O K E N S</b>`,
       "",
-      `SOL: ${formattedSolBalance} ($${totalUSD.toFixed(2)})`,
+      `<b>Supported Platforms:</b>`,
+      "• Pump.fun tokens",
+      "• DAOS.fun tokens",
+      "• Any token on Jupiter DEX",
       "",
-      `Send the contract address as a message`,
+      `<b>Wallet:</b> <code>${walletAddress}</code>`,
+      `<b>SOL Balance:</b> ${formattedSolBalance} ($${totalUSD.toFixed(2)})`,
+      "",
     ];
+
+    if (ownedTokens.length > 0) {
+      response.push(
+        `<b>Select token to buy:</b>`,
+        `<i>Tap a token you already hold or start with SOL below.</i>`
+      );
+    } else {
+      response.push(
+        `<b>Select token to buy:</b>`,
+        `<i>No tokens yet? Start by choosing a payment method below.</i>`
+      );
+    }
+
+    const keyboard = new InlineKeyboard();
+
+    for (const token of ownedTokens) {
+      const formattedBalance = wallet.formatTokenBalance(
+        token.balance,
+        token.decimals
+      );
+      const tokenTxId = Math.random().toString(36).substring(2, 15);
+      transactionCache.set(tokenTxId, {
+        targetToken: token.ticker,
+        targetTokenAddress: token.mint,
+        paymentToken: "SOL",
+      });
+      setTimeout(() => transactionCache.delete(tokenTxId), 5 * 60 * 1000);
+      keyboard
+        .text(
+          `${token.ticker} (${formattedBalance})`,
+          `buy_dynamic_SOL_${tokenTxId}`
+        )
+        .row();
+    }
+
+    keyboard
+      .text("💰 Buy with SOL", "buy_with_SOL")
+      .row();
+
+    if (tokenBalances.some((token) => parseFloat(token.rawBalance) > 0)) {
+      keyboard.text("💱 Use Another Token", "buy_with_other_tokens").row();
+    }
+
+    keyboard
+      .text("📋 Paste Contract Address", "buy_contract_SOL")
+      .row()
+      .text("🔎 Search by Symbol", "buy_search_SOL")
+      .row()
+      .text("❌ Cancel", "main_wallet")
+      .row();
+
+    const messageText = response.join("\n");
 
     // Try to edit as text, if fails (because current message has media), delete and send new
     try {
-      await ctx.editMessageText(response.join("\n"), {
+      await ctx.editMessageText(messageText, {
         parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("❌ Cancel", "main_wallet")
-          .row(),
+        reply_markup: keyboard,
       });
     } catch (error) {
       // If edit fails because message has media, delete and send new text message
@@ -5659,23 +5716,13 @@ Supported Platforms:
         await ctx.deleteMessage();
       } catch {}
 
-      await ctx.reply(response.join("\n"), {
+      await ctx.reply(messageText, {
         parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("❌ Cancel", "main_wallet")
-          .row(),
+        reply_markup: keyboard,
       });
     }
 
-    // Set user state for contract address input
-    setUserState(userId, {
-      type: "buy_contract_address",
-      fromToken: "SOL", // Use fromToken to match existing code
-      messageId: ctx.callbackQuery?.message?.message_id,
-      chatId: ctx.chat?.id,
-    });
-
-    await ctx.answerCallbackQuery("Send contract address as message");
+    await ctx.answerCallbackQuery("Select token to buy");
   } catch (error) {
     console.error("Error in cmd_buy:", error);
     await ctx.answerCallbackQuery("❌ Error loading buy interface");
@@ -5686,24 +5733,23 @@ bot.callbackQuery("cmd_sell", async (ctx) => {
   try {
     const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
-    const shortAddress = `${keypair.publicKey
-      .toBase58()
-      .slice(0, 6)}...${keypair.publicKey.toBase58().slice(-6)}`;
+    const walletAddress = keypair.publicKey.toBase58();
 
     // Use cached wallet data
     const { tokenBalances } = await getCachedWalletData(telegramId);
 
     const response = [
-      `<pre>T I M B A - S E L L  T O K E N S
-
-Supported Platforms:
-• Pump.fun tokens
-• DAOS.fun tokens
-• Any token on Jupiter DEX</pre>`,
+      `<b>T I M B A - S E L L  T O K E N S</b>`,
       "",
-      `<b>From Wallet:</b> <code>${shortAddress}</code>`,
+      `<b>Supported Platforms:</b>`,
+      "• Pump.fun tokens",
+      "• DAOS.fun tokens",
+      "• Any token on Jupiter DEX",
+      "",
+      `<b>From Wallet:</b> <code>${walletAddress}</code>`,
       "",
       `<b>Select token to sell:</b>`,
+      `<i>Choose a percentage below or enter a custom amount after selecting a token.</i>`,
     ];
 
     const keyboard = new InlineKeyboard();
@@ -7651,25 +7697,29 @@ const showBuyQuoteAndConfirmation = async (
       outputTicker: targetToken.toUpperCase(),
     });
 
+    const providerLabel =
+      quote.provider === "pump-fun"
+        ? "pump-fun (ungraduated)"
+        : `${quote.provider} (graduated)`;
+    const slippageText = quote.slippage
+      ? `${quote.slippage.toFixed(1)}%`
+      : "1.0%";
+    const estimatedRate = Number.isFinite(quote.estimatedRate)
+      ? quote.estimatedRate.toFixed(6)
+      : "N/A";
+
     // Format for BUY terminology
     const response = [
-      `<pre>╔╦╗╦╔╦╗╔╗ ╔═╗
- ║ ║║║║╠╩╗╠═╣
- ╩ ╩╩ ╩╚═╝╩ ╩
-
-BUY CONFIRMATION
-
-You Pay: ${displayAmount} ${paymentToken}
-You Receive: ~${quote.outputAmount} ${targetToken}
-
-Rate: ${quote.estimatedRate.toFixed(6)} ${targetToken}/${paymentToken}
-Provider: ${quote.provider} ${
-        quote.provider === "pump-fun" ? "(ungraduated)" : "(graduated)"
-      }
-Slippage: ${quote.slippage ? quote.slippage.toFixed(1) + "%" : "1.0%"}
-
-Address:
-${outputMint}</pre>`,
+      `🛒 <b>Buy Confirmation</b>`,
+      "",
+      `<b>You Pay:</b> ${displayAmount} ${paymentToken}`,
+      `<b>You Receive:</b> ~${quote.outputAmount} ${targetToken}`,
+      "",
+      `<b>Rate:</b> ${estimatedRate} ${targetToken}/${paymentToken}`,
+      `<b>Provider:</b> ${providerLabel}`,
+      `<b>Slippage:</b> ${slippageText}`,
+      "",
+      `🔗 <b>Contract:</b> <code>${outputMint}</code>`,
       "",
       `⚠️ <b>Confirm this purchase?</b>`,
     ].join("\n");
@@ -8137,17 +8187,14 @@ const handleBuyContractAddressInput = async (
 
     // Show token identification and go directly to buy options
     const response = [
-      `<pre>T I M B A
-
-TOKEN IDENTIFIED
-
-Buying: ${tokenInfo.symbol}
-Name: ${tokenInfo.name}
-Paying with: ${paymentToken}
-${tokenInfo.verified ? "Status: Verified" : "Status: Unverified"}
-
-Address:
-${contractAddress}</pre>`,
+      `✅ <b>TOKEN IDENTIFIED</b>`,
+      "",
+      `🏷️ <b>Ticker:</b> ${tokenInfo.symbol}`,
+      `📝 <b>Name:</b> ${tokenInfo.name}`,
+      `💰 <b>Paying with:</b> ${paymentToken}`,
+      `${tokenInfo.verified ? "✅ <b>Status:</b> Verified" : "⚠️ <b>Status:</b> Unverified"}`,
+      "",
+      `🔗 <b>Contract:</b> <code>${contractAddress}</code>`,
       "",
       `<b>Select amount to buy:</b>`,
     ];
@@ -8705,6 +8752,7 @@ const showSellAmountSelection = async (ctx: any, tokenToSell: string) => {
     `<b>Available:</b> ${formattedBalance} ${tokenToSell}`,
     "",
     `<b>Select amount to sell:</b>`,
+    `<i>Use a quick percentage or enter a custom amount.</i>`,
   ];
 
   const keyboard = new InlineKeyboard();
@@ -8715,11 +8763,11 @@ const showSellAmountSelection = async (ctx: any, tokenToSell: string) => {
     .text("50%", `sell_amount_${tokenToSell}_50%`)
     .row()
     .text("75%", `sell_amount_${tokenToSell}_75%`)
+    .text("100%", `sell_amount_${tokenToSell}_100%`)
+    .row()
     .text("MAX", `sell_amount_${tokenToSell}_max`)
+    .text("✏️ Custom", `sell_amount_${tokenToSell}_CUSTOM`)
     .row();
-
-  // Add custom amount option
-  keyboard.text("✏️ Custom", `sell_amount_${tokenToSell}_CUSTOM`).row();
 
   keyboard.text("← Back", "cmd_sell").row();
 
@@ -9007,25 +9055,28 @@ const regenerateBuyQuoteWithSlippage = async (
       transactionCache.set(txId, buyData);
     }
 
-    const response = `<pre>T I M B A
+    const providerLabel =
+      quote.provider === "pump-fun"
+        ? "pump-fun (ungraduated)"
+        : `${quote.provider} (graduated)`;
+    const estimatedRate = quote.estimatedRate
+      ? quote.estimatedRate.toFixed(6)
+      : "N/A";
 
-BUY CONFIRMATION
-
-You Pay: ${buyData.amount} ${buyData.fromToken}
-You Receive: ~${quote.outputAmount} ${buyData.toToken}
-
-Rate: ${quote.estimatedRate?.toFixed(6) || "N/A"} ${buyData.toToken}/${
-      buyData.fromToken
-    }
-Provider: ${quote.provider} ${
-      quote.provider === "pump-fun" ? "(ungraduated)" : "(graduated)"
-    }
-Slippage: ${slippage.toFixed(1)}%
-
-Contract: ${buyData.contractAddress || "N/A"}
-</pre>
-
-⚠️ <b>Confirm this purchase?</b>`;
+    const response = [
+      `🛒 <b>Buy Confirmation</b>`,
+      "",
+      `<b>You Pay:</b> ${buyData.amount} ${buyData.fromToken}`,
+      `<b>You Receive:</b> ~${quote.outputAmount} ${buyData.toToken}`,
+      "",
+      `<b>Rate:</b> ${estimatedRate} ${buyData.toToken}/${buyData.fromToken}`,
+      `<b>Provider:</b> ${providerLabel}`,
+      `<b>Slippage:</b> ${slippage.toFixed(1)}%`,
+      "",
+      `🔗 <b>Contract:</b> <code>${buyData.contractAddress || "N/A"}</code>`,
+      "",
+      `⚠️ <b>Confirm this purchase?</b>`,
+    ].join("\n");
 
     await ctx.editMessageText(response, {
       parse_mode: "HTML",
