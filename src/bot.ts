@@ -1,3 +1,4 @@
+import "./utils/logging";
 import { Bot, Context, InlineKeyboard } from "grammy";
 import { run, sequentialize } from "@grammyjs/runner";
 import { WalletManager } from "./utils/wallet";
