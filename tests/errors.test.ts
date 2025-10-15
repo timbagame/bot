@@ -45,7 +45,7 @@ test("parseTransactionError handles address lookup table errors", () => {
     "Jupiter: address table account not found in AddressTableLookup"
   );
   const message = parseTransactionError(error);
-  expect(message).toContain("Address lookup table error");
+  expect(message).toContain("Swap route unavailable");
 });
 
 test("parseTransactionError handles slippage errors", () => {
@@ -72,6 +72,6 @@ test("parseTransactionError handles Jupiter connectivity errors", () => {
 test("parseTransactionError returns default message for unknown errors", () => {
   const error = new Error("some random error");
   const message = parseTransactionError(error);
-  expect(message).toContain("Transaction failed");
-  expect(message).toContain("some random error");
+  expect(message).toContain("Something went wrong");
+  expect(message).toContain("Please try again");
 });

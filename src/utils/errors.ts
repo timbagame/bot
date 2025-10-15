@@ -244,14 +244,23 @@ export const parseTransactionError = (
       lowerMessage.includes("quote failed") ||
       lowerMessage.includes("failed to get swap quote")
     ) {
-      return `📋 Quote unavailable!\n\nCouldn't get pricing for this swap.\nTry:\n• Check token symbols are correct\n• Wait a moment and retry\n• Ensure both tokens are supported`;
+      return (
+        `📋 Quote unavailable right now.\n\n` +
+        `We couldn't price this swap.\n\n` +
+        `Try again shortly or choose a different token pair.\n` +
+        `New or illiquid tokens might take a bit to show routes.`
+      );
     }
 
     if (
       lowerMessage.includes("token_not_tradable") ||
       lowerMessage.includes("is not tradable")
     ) {
-      return `🚫 Token not tradable!\n\nThis token is not available for trading on Jupiter.\nTry swapping between:\n• SOL ↔ WSOL\n• SOL ↔ USDC\n• WSOL ↔ USDC\n\nUse tokens with higher liquidity for better swap routes.`;
+      return (
+        `🚫 Token not tradable.\n\n` +
+        `Jupiter doesn't have enough liquidity for this token yet.\n\n` +
+        `Try a more liquid pair like SOL, WSOL, or USDC.`
+      );
     }
 
     if (
@@ -268,12 +277,20 @@ export const parseTransactionError = (
       lowerMessage.includes("lookup table") ||
       lowerMessage.includes("addresstablelookup")
     ) {
-      return `🔗 Address lookup table error!\n\nJupiter transaction uses advanced features not supported.\nTry:\n• Smaller swap amount\n• Wait a few minutes and retry\n• Use simpler token pairs`;
+      return (
+        `🔗 Swap route unavailable.\n\n` +
+        `This trade needs a complex route that's not supported here.\n\n` +
+        `Try a smaller amount or a different token pair.`
+      );
     }
   }
 
   // Default error message
-  return `❌ Transaction failed!\n\n${errorMessage}\n\n💡 Try:\n• Check your SOL balance (min ${MIN_SOL_FOR_TX})\n• Wait a moment and retry\n• Use /balance to check balances`;
+  return (
+    `❌ Something went wrong.\n\n` +
+    `We couldn't complete that action. Please try again in a moment.\n\n` +
+    `If this keeps happening, reach out to an admin for help.`
+  );
 };
 
 export const formatUserFriendlyError = (
