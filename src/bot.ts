@@ -90,6 +90,7 @@ bot.use(async (ctx, next) => {
 export const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
 const startTime = Date.now();
 const gameDb = GameDatabase.getInstance();
+const pendingGameCreations = new Set<string>();
 
 // See utils/network-display.ts for getNetworkFromRPC
 
@@ -3091,129 +3092,207 @@ bot.callbackQuery(/^players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+
 
 
 // Game creation confirmation (new format with creatorId)
-bot.callbackQuery(/^confirm_game_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/, async (ctx) => {
-  try {
-    console.log("🔔 Confirm game callback triggered:", ctx.callbackQuery?.data);
-    const gameType = ctx.match![1] as "coinflip" | "giveaway";
-    const amount = parseFloat(ctx.match![2] as string);
-    const maxPlayers = parseInt(ctx.match![3] as string);
-    const minPlayers = gameType === "coinflip" ? 2 : 1;
-    if (isNaN(maxPlayers) || maxPlayers < minPlayers || maxPlayers > 100) {
-      await ctx.answerCallbackQuery(`❌ Players must be between ${minPlayers} and 100`);
-      return;
-    }
-    const creatorId = ctx.match![4] as string;
-    
-    // Check if the user pressing the button is the creator
-    if (ctx.from?.id.toString() !== creatorId) {
-      await ctx.answerCallbackQuery("🚫 Only the game creator can create this game!");
-      return;
-    }
-    
-    if (!ctx.from?.id) {
-      await ctx.answerCallbackQuery("❌ Unable to identify user");
-      return;
-    }
+bot.callbackQuery(
+  /^confirm_game_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/,
+  async (ctx) => {
+    const callbackData = ctx.callbackQuery?.data;
 
-    // Avoid showing a placeholder; just acknowledge via callback
-    await ctx.answerCallbackQuery("Creating game...");
-    
-    // Get correct decimals for TIMBA token
-    const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
-    
-    // Prepare game data like tokenManager.parseAmount would
-    const gameData = {
-      amount: Math.round(amount * Math.pow(10, metadata.decimals)), // Convert to raw amount with correct decimals
-      isSol: false,
-      formattedAmount: amount.toString(),
-      tokenMint: DEFAULT_TOKEN_MINT,
-      tokenTicker: DEFAULT_TOKEN_TICKER,
-      tokenWasSpecified: false,
-    };
-
-    // Create game directly using gameManager
-    const result = await gameManager.createGame(
-      gameType,
-      gameData,
-      maxPlayers,
-      gameType === "coinflip" ? 2 : 1, // minTickets
-      GAME_TIMEOUT,
-      BigInt(ctx.from.id),
-      ctx.chat?.id
-    );
-
-    if (!result.success) {
-      await ctx.editMessageText(`❌ ${result.error || "Failed to create game"}`, {
-        parse_mode: "HTML"
-      });
-      return;
-    }
-
-    if (!result.gameAddress) {
-      await ctx.editMessageText("❌ Game created but address not returned", {
-        parse_mode: "HTML"
-      });
-      return;
-    }
-
-    // Get creator username
-    const creatorUsername = ctx.from?.username
-      ? `@${ctx.from.username}`
-      : "Unknown";
-
-    // Determine the user's original message ID to reply to (if UI message was a reply)
-    const replyToUserMessageId = (ctx.callbackQuery as any)?.message?.reply_to_message?.message_id as number | undefined;
-
-    // Delete the confirmation message to keep chat clean
     try {
-      if (ctx.chat?.id && ctx.callbackQuery?.message?.message_id) {
-        await ctx.api.deleteMessage(ctx.chat.id, ctx.callbackQuery.message.message_id);
+      console.log("🔔 Confirm game callback triggered:", callbackData);
+      const gameType = ctx.match![1] as "coinflip" | "giveaway";
+      const amount = parseFloat(ctx.match![2] as string);
+      const maxPlayers = parseInt(ctx.match![3] as string);
+      const minPlayers = gameType === "coinflip" ? 2 : 1;
+      if (isNaN(maxPlayers) || maxPlayers < minPlayers || maxPlayers > 100) {
+        await ctx.answerCallbackQuery(
+          `❌ Players must be between ${minPlayers} and 100`
+        );
+        return;
       }
-    } catch (e) {
-      console.warn("Could not delete confirmation message:", e);
-    }
 
-    // Create game message, replying to the user's original command if available
-    await gameManager.createGameMessage(
-      ctx,
-      result.gameAddress,
-      gameType.charAt(0).toUpperCase() + gameType.slice(1),
-      gameData.amount,
-      creatorUsername,
-      gameData.tokenTicker,
-      "Active",
-      replyToUserMessageId
-    );
+      const creatorId = ctx.match![4] as string;
 
+      if (ctx.from?.id.toString() !== creatorId) {
+        await ctx.answerCallbackQuery(
+          "🚫 Only the game creator can create this game!"
+        );
+        return;
+      }
 
-    // Update game message if auto-join was successful
-    if (result.autoJoinResult?.success) {
+      if (!ctx.from?.id) {
+        await ctx.answerCallbackQuery("❌ Unable to identify user");
+        return;
+      }
+
+      const confirmMessage = ctx.callbackQuery?.message;
+      const chatId = confirmMessage?.chat?.id;
+      const messageId = confirmMessage?.message_id;
+      const creationKey =
+        chatId && messageId
+          ? `${chatId}:${messageId}`
+          : `${ctx.from.id}:${gameType}:${amount}:${maxPlayers}`;
+
+      if (pendingGameCreations.has(creationKey)) {
+        await ctx.answerCallbackQuery("⏳ Already creating this game...");
+        return;
+      }
+
+      pendingGameCreations.add(creationKey);
+
       try {
-        await gameManager.updateGameMessageFromData(
+        if (chatId && messageId) {
+          try {
+            await ctx.api.editMessageReplyMarkup(chatId, messageId);
+          } catch (markError) {
+            console.warn(
+              "Failed to clear confirm keyboard before game creation:",
+              markError
+            );
+          }
+
+          try {
+            await ctx.api.editMessageText(chatId, messageId, "⏳ Creating game…", {
+              parse_mode: "HTML",
+            });
+          } catch (textError) {
+            console.warn(
+              "Failed to set progress text before game creation:",
+              textError
+            );
+          }
+        }
+
+        await ctx.answerCallbackQuery("Creating game...");
+
+        const metadata = await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
+
+        const gameData = {
+          amount: Math.round(amount * Math.pow(10, metadata.decimals)),
+          isSol: false,
+          formattedAmount: amount.toString(),
+          tokenMint: DEFAULT_TOKEN_MINT,
+          tokenTicker: DEFAULT_TOKEN_TICKER,
+          tokenWasSpecified: false,
+        };
+
+        const result = await gameManager.createGame(
+          gameType,
+          gameData,
+          maxPlayers,
+          gameType === "coinflip" ? 2 : 1,
+          GAME_TIMEOUT,
+          BigInt(ctx.from.id),
+          ctx.chat?.id
+        );
+
+        if (!result.success) {
+          await ctx.editMessageText(
+            `❌ ${result.error || "Failed to create game"}`,
+            {
+              parse_mode: "HTML",
+            }
+          );
+          return;
+        }
+
+        if (!result.gameAddress) {
+          await ctx.editMessageText("❌ Game created but address not returned", {
+            parse_mode: "HTML",
+          });
+          return;
+        }
+
+        const creatorUsername = ctx.from?.username
+          ? `@${ctx.from.username}`
+          : "Unknown";
+
+        const replyToUserMessageId = (ctx.callbackQuery as any)?.message
+          ?.reply_to_message?.message_id as number | undefined;
+
+        if (chatId && messageId) {
+          try {
+            await ctx.api.deleteMessage(chatId, messageId);
+          } catch (e) {
+            console.warn("Could not delete confirmation message:", e);
+            try {
+              await ctx.api.editMessageText(
+                chatId,
+                messageId,
+                `✅ Game created!\n\n<code>${result.gameAddress}</code>`,
+                {
+                  parse_mode: "HTML",
+                }
+              );
+            } catch (fallbackError) {
+              console.warn(
+                "Failed to mark confirmation message as processed:",
+                fallbackError
+              );
+            }
+          }
+        }
+
+        await gameManager.createGameMessage(
           ctx,
           result.gameAddress,
-          "Active"
+          gameType.charAt(0).toUpperCase() + gameType.slice(1),
+          gameData.amount,
+          creatorUsername,
+          gameData.tokenTicker,
+          "Active",
+          replyToUserMessageId
         );
-      } catch (error) {
-        console.error("Failed to update game message after auto-join:", error);
+
+        if (result.autoJoinResult?.success) {
+          try {
+            await gameManager.updateGameMessageFromData(
+              ctx,
+              result.gameAddress,
+              "Active"
+            );
+          } catch (error) {
+            console.error(
+              "Failed to update game message after auto-join:",
+              error
+            );
+          }
+        }
+
+        if (result.autoJoinResult && !result.autoJoinResult.success) {
+          await ctx.reply(
+            result.autoJoinResult.error || "Failed to auto-join game",
+            {
+              parse_mode: "HTML",
+            }
+          );
+        }
+      } finally {
+        pendingGameCreations.delete(creationKey);
+      }
+    } catch (error) {
+      console.error("Error in confirm_game callback:", error);
+      try {
+        await ctx.answerCallbackQuery("❌ Error creating game");
+      } catch (answerError) {
+        console.error("Failed to answer callback after error:", answerError);
+      }
+
+      try {
+        await ctx.editMessageText(
+          "❌ Failed to create game. Please try again.",
+          {
+            parse_mode: "HTML",
+          }
+        );
+      } catch (editError) {
+        console.error(
+          "Failed to update confirmation message after error:",
+          editError
+        );
       }
     }
-
-    // Handle auto-join result if present
-    if (result.autoJoinResult && !result.autoJoinResult.success) {
-      await ctx.reply(result.autoJoinResult.error || "Failed to auto-join game", {
-        parse_mode: "HTML"
-      });
-    }
-    
-  } catch (error) {
-    console.error("Error in confirm_game callback:", error);
-    await ctx.answerCallbackQuery("❌ Error creating game");
-    await ctx.editMessageText("❌ Failed to create game. Please try again.", {
-      parse_mode: "HTML"
-    });
   }
-});
+);
 
 
 // Custom amount callback - shows slider interface (new format with creator ID)
