@@ -176,6 +176,7 @@ async function buildProposal(
 
   const gameToken = await program.account.gameToken.fetch(gameTokenPda);
   const metadata = await wallet.getTokenMetadata(target.mint);
+  const scale = 10n ** BigInt(metadata.decimals);
   const tokenPriceUSD =
     (await getPriceUSD(target.mint)) || (await getPriceUSD(target.ticker));
 
@@ -200,7 +201,6 @@ async function buildProposal(
     costInTokenRaw = BigInt(raw);
   } else {
     // fallback: use completion cost in lamports converted by decimals ratio
-    const scale = 10n ** BigInt(metadata.decimals);
     const ratio =
       (scale * tokenCompletionCostLamports) /
       BigInt(SOL_LAMPORTS);
@@ -214,7 +214,14 @@ async function buildProposal(
   const requiredMinNumber = Math.ceil(
     (marginAdjustedCostNumber * 100) / Number(oracleFeePercentage || 1n)
   );
-  const requiredMinAmount = BigInt(requiredMinNumber);
+  let requiredMinAmount = BigInt(requiredMinNumber);
+
+  if (requiredMinAmount >= scale && scale > 0n) {
+    const remainder = requiredMinAmount % scale;
+    if (remainder !== 0n) {
+      requiredMinAmount += scale - remainder;
+    }
+  }
 
   const proposedMinAmount =
     requiredMinAmount > currentMinAmount
