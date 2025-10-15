@@ -5686,24 +5686,23 @@ bot.callbackQuery("cmd_sell", async (ctx) => {
   try {
     const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
-    const shortAddress = `${keypair.publicKey
-      .toBase58()
-      .slice(0, 6)}...${keypair.publicKey.toBase58().slice(-6)}`;
+    const walletAddress = keypair.publicKey.toBase58();
 
     // Use cached wallet data
     const { tokenBalances } = await getCachedWalletData(telegramId);
 
     const response = [
-      `<pre>T I M B A - S E L L  T O K E N S
-
-Supported Platforms:
-• Pump.fun tokens
-• DAOS.fun tokens
-• Any token on Jupiter DEX</pre>`,
+      `<b>T I M B A - S E L L  T O K E N S</b>`,
       "",
-      `<b>From Wallet:</b> <code>${shortAddress}</code>`,
+      `<b>Supported Platforms:</b>`,
+      "• Pump.fun tokens",
+      "• DAOS.fun tokens",
+      "• Any token on Jupiter DEX",
+      "",
+      `<b>From Wallet:</b> <code>${walletAddress}</code>`,
       "",
       `<b>Select token to sell:</b>`,
+      `<i>Choose a percentage below or enter a custom amount after selecting a token.</i>`,
     ];
 
     const keyboard = new InlineKeyboard();
@@ -8705,6 +8704,7 @@ const showSellAmountSelection = async (ctx: any, tokenToSell: string) => {
     `<b>Available:</b> ${formattedBalance} ${tokenToSell}`,
     "",
     `<b>Select amount to sell:</b>`,
+    `<i>Use a quick percentage or enter a custom amount.</i>`,
   ];
 
   const keyboard = new InlineKeyboard();
@@ -8715,11 +8715,11 @@ const showSellAmountSelection = async (ctx: any, tokenToSell: string) => {
     .text("50%", `sell_amount_${tokenToSell}_50%`)
     .row()
     .text("75%", `sell_amount_${tokenToSell}_75%`)
+    .text("100%", `sell_amount_${tokenToSell}_100%`)
+    .row()
     .text("MAX", `sell_amount_${tokenToSell}_max`)
+    .text("✏️ Custom", `sell_amount_${tokenToSell}_CUSTOM`)
     .row();
-
-  // Add custom amount option
-  keyboard.text("✏️ Custom", `sell_amount_${tokenToSell}_CUSTOM`).row();
 
   keyboard.text("← Back", "cmd_sell").row();
 
