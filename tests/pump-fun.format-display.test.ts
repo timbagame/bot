@@ -18,9 +18,9 @@ test("PumpFunClient.formatQuoteForDisplay shows amounts and rate", async () => {
     "WSOL",
     "PUMP"
   );
-  expect(msg).toContain("Pump.fun Swap Preview");
-  expect(msg).toContain("1 WSOL");
-  expect(msg).toContain("2000000 PUMP");
+  expect(msg).toContain("<b>Pump.fun Swap Preview</b>");
+  expect(msg).toContain("<b>You pay:</b> 1 WSOL");
+  expect(msg).toContain("<b>You receive:</b> 2000000 PUMP");
 });
 
 test("PumpFunClient.formatQuoteForDisplay handles raw integer outputs", async () => {
@@ -44,5 +44,5 @@ test("PumpFunClient.formatQuoteForDisplay handles raw integer outputs", async ()
 
   expect(msg).toContain("211569.098447 TIMBA");
   expect(msg).toContain("10.116176 SOL");
-  expect(msg).toContain("💹 **Rate:** 1 TIMBA = 0.000048 SOL");
+  expect(msg).toMatch(/<b>Rate:<\/b> 1 TIMBA = 0\.0000478\d* SOL/);
 });

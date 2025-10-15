@@ -7,7 +7,7 @@ import {
 import { PumpSdk, OnlinePumpSdk } from "@pump-fun/pump-sdk";
 import { deserializeMetadata } from "@metaplex-foundation/mpl-token-metadata";
 import { NetworkDetector } from "./network-detector";
-import { formatAmount } from "./format-amount";
+import { escapeHtml, formatAmount, formatRate } from "./format-amount";
 import BN from "bn.js";
 
 // ================================
@@ -631,6 +631,9 @@ export class PumpFunClient {
     inputTicker: string,
     outputTicker: string
   ): string {
+    const safeInputTicker = escapeHtml(inputTicker);
+    const safeOutputTicker = escapeHtml(outputTicker);
+
     const toRaw = (amount: string, decimals: number): bigint => {
       const trimmed = amount.trim();
       if (trimmed.length === 0) {
@@ -659,15 +662,15 @@ export class PumpFunClient {
       trim: true,
     });
 
-    let message = `🚀 **Pump.fun Swap Preview**\n\n`;
-    message += `📥 **You pay:** ${inputAmountStr} ${inputTicker}\n`;
-    message += `📤 **You receive:** ${outputAmountStr} ${outputTicker}\n`;
+    let message = `🚀 <b>Pump.fun Swap Preview</b>\n\n`;
+    message += `📥 <b>You pay:</b> ${inputAmountStr} ${safeInputTicker}\n`;
+    message += `📤 <b>You receive:</b> ${outputAmountStr} ${safeOutputTicker}\n`;
     const inputDec = parseFloat(inputAmountStr || "0");
     const outputDec = parseFloat(outputAmountStr || "0");
-    const rate = inputDec > 0 ? (outputDec / inputDec).toFixed(6) : "0";
-    message += `💹 **Rate:** 1 ${inputTicker} = ${rate} ${outputTicker}\n`;
-    message += `🎯 **Slippage:** ${quote.slippage}%\n`;
-    message += `🔥 **Pump.fun Token** (Not graduated)\n`;
+    const rate = inputDec > 0 ? formatRate(outputDec / inputDec) : "0";
+    message += `💹 <b>Rate:</b> 1 ${safeInputTicker} = ${rate} ${safeOutputTicker}\n`;
+    message += `🎯 <b>Slippage:</b> ${quote.slippage}%\n`;
+    message += `🔥 <b>Pump.fun Token</b> (Not graduated)\n`;
 
     return message;
   }

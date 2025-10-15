@@ -69,9 +69,9 @@ describe("JupiterClient helpers", () => {
     };
 
     const msg = jc.formatQuoteForDisplay(quote, 9, 6, "SOL", "USDC");
-    expect(msg).toContain("Swap Preview");
-    expect(msg).toContain("1.000000 SOL");
-    expect(msg).toContain("1.000000 USDC");
-    expect(msg).toContain("JupiterAMM");
+    expect(msg).toContain("<b>Swap Preview</b>");
+    expect(msg).toContain("<b>You pay:</b> 1.000000 SOL");
+    expect(msg).toContain("<b>You receive:</b> 1.000000 USDC");
+    expect(msg).toContain("<b>Route:</b> JupiterAMM");
   });
 });

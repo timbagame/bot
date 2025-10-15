@@ -1,4 +1,5 @@
 import { PublicKey } from "@solana/web3.js";
+import { escapeHtml, formatRate } from "./format-amount";
 
 // ================================
 // JUPITER TYPES
@@ -180,35 +181,32 @@ export class JupiterClient {
       parseFloat(quote.outAmount) / Math.pow(10, outputDecimals);
     const priceImpact = parseFloat(quote.priceImpactPct);
     const slippage = quote.slippageBps / 100;
+    const rate = inputAmount > 0 ? formatRate(outputAmount / inputAmount) : "0";
+    const safeInputTicker = escapeHtml(inputTicker);
+    const safeOutputTicker = escapeHtml(outputTicker);
 
-    let message = `🔄 **Swap Preview**\n\n`;
-    message += `📥 **You pay:** ${inputAmount.toFixed(6)} ${inputTicker}\n`;
-    message += `📤 **You receive:** ${outputAmount.toFixed(
-      6
-    )} ${outputTicker}\n`;
-    message += `💹 **Rate:** 1 ${inputTicker} = ${(
-      outputAmount / inputAmount
-    ).toFixed(6)} ${outputTicker}\n`;
-    message += `📊 **Price Impact:** ${priceImpact.toFixed(2)}%\n`;
-    message += `🎯 **Slippage:** ${slippage}%\n`;
+    let message = `🔄 <b>Swap Preview</b>\n\n`;
+    message += `📥 <b>You pay:</b> ${inputAmount.toFixed(6)} ${safeInputTicker}\n`;
+    message += `📤 <b>You receive:</b> ${outputAmount.toFixed(6)} ${safeOutputTicker}\n`;
+    message += `💹 <b>Rate:</b> 1 ${safeInputTicker} = ${rate} ${safeOutputTicker}\n`;
+    message += `📊 <b>Price Impact:</b> ${priceImpact.toFixed(2)}%\n`;
+    message += `🎯 <b>Slippage:</b> ${slippage}%\n`;
 
     if (quote.platformFee) {
       const feeAmount =
         parseFloat(quote.platformFee.amount) / Math.pow(10, inputDecimals);
-      message += `💰 **Platform Fee:** ${feeAmount.toFixed(
-        6
-      )} ${inputTicker}\n`;
+      message += `💰 <b>Platform Fee:</b> ${feeAmount.toFixed(6)} ${safeInputTicker}\n`;
     }
 
     // Add route information
     if (quote.routePlan.length > 0) {
       const mainRoute = quote.routePlan[0];
       if (mainRoute && mainRoute.swapInfo) {
-        message += `🛣️ **Route:** ${mainRoute.swapInfo.label}\n`;
+        message += `🛣️ <b>Route:</b> ${escapeHtml(mainRoute.swapInfo.label || "Unknown")}\n`;
       }
     }
 
-    message += `\n⏱️ **Time taken:** ${quote.timeTaken}ms`;
+    message += `\n⏱️ <b>Time taken:</b> ${quote.timeTaken}ms`;
 
     return message;
   }
