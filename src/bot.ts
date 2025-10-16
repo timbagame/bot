@@ -3195,17 +3195,13 @@ const handlePlayerEvent = async (
 ): Promise<void> => {
   try {
     const gameAddress = event.gameKey.toString();
+    const playerAddress = event.player.toString();
     const lastSlot = event.lastSlot.toString();
     const totalPot = Number(event.totalAmount);
     const timestamp = Number(event.timestamp);
 
     console.log(
-      `${emoji} ${eventName} event: ${event.player
-        .toString()
-        .slice(0, 8)}... ${action} game ${gameAddress.slice(
-        0,
-        8
-      )}... (lastSlot: ${lastSlot}, totalPot: ${totalPot}, timestamp: ${timestamp})`
+      `${emoji} ${eventName} event: ${playerAddress} ${action} game ${gameAddress} (lastSlot: ${lastSlot}, totalPot: ${totalPot}, timestamp: ${timestamp})`
     );
 
     const slotWasUpdated = gameDb.updateGameLastSlotWithTimestamp(
