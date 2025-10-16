@@ -374,3 +374,23 @@ export class TokenManager {
     }
   }
 }
+
+export function formatParseAmountError(
+  result: ParseAmountResult,
+  fallbackMessage: string
+): string {
+  if (result.success) {
+    return fallbackMessage;
+  }
+
+  switch (result.error) {
+    case "unknown_token":
+      return result.unknownToken
+        ? `❌ Unknown token "${result.unknownToken}"`
+        : fallbackMessage;
+    case "sol_not_supported":
+      return result.solError || "❌ SOL games are not supported";
+    default:
+      return fallbackMessage;
+  }
+}

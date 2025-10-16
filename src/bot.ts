@@ -2,7 +2,7 @@ import "./utils/logging";
 import { Bot, Context, InlineKeyboard } from "grammy";
 import { run, sequentialize } from "@grammyjs/runner";
 import { WalletManager } from "./utils/wallet";
-import { TokenManager } from "./utils/token-manager";
+import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { createSyncNativeInstruction, getAssociatedTokenAddress } from "@solana/spl-token";
@@ -1146,13 +1146,12 @@ bot.command(["coinflip", "cf"], async (ctx) => {
         // Parse arguments: /cf <amount> [TOKEN] [maxPlayers]
         const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id);
         if (!parsed.success) {
-          if (parsed.error === "unknown_token") {
-            return ctx.reply(`❌ Unknown token "${parsed.unknownToken}"`);
-          }
-          if (parsed.error === "sol_not_supported") {
-            return ctx.reply(parsed.solError || "❌ SOL games are not supported");
-          }
-          return ctx.reply("❌ Please provide a valid amount greater than 0.\n\nUsage: `/cf <amount>` or `/cf <amount> <maxPlayers>`");
+          return ctx.reply(
+            formatParseAmountError(
+              parsed,
+              "❌ Please provide a valid amount greater than 0.\n\nUsage: `/cf <amount>` or `/cf <amount> <maxPlayers>`"
+            )
+          );
         }
 
         // Get maxPlayers from arguments using robust index-based parsing
@@ -1348,13 +1347,12 @@ bot.command(["giveaway", "ga"], async (ctx) => {
         // Parse arguments: /ga <amount> [TOKEN] [maxPlayers]
         const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id);
         if (!parsed.success) {
-          if (parsed.error === "unknown_token") {
-            return ctx.reply(`❌ Unknown token "${parsed.unknownToken}"`);
-          }
-          if (parsed.error === "sol_not_supported") {
-            return ctx.reply(parsed.solError || "❌ SOL games are not supported");
-          }
-          return ctx.reply("❌ Please provide a valid amount greater than 0.\n\nUsage: `/ga <amount>` or `/ga <amount> <maxPlayers>`");
+          return ctx.reply(
+            formatParseAmountError(
+              parsed,
+              "❌ Please provide a valid amount greater than 0.\n\nUsage: `/ga <amount>` or `/ga <amount> <maxPlayers>`"
+            )
+          );
         }
 
         // Get maxPlayers from arguments using robust index-based parsing
@@ -1645,10 +1643,10 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
   // Allow SOL withdrawals by parsing in a non-game context
   const parsed = await tokenManager.parseAmount(args, 2, ctx.chat?.id, "tip");
   if (!parsed.success) {
-    if (parsed.error === "unknown_token") {
-      return replyToMessage(ctx, `❌ Unknown token "${parsed.unknownToken}"`);
-    }
-    return replyToMessage(ctx, "Please provide a valid amount greater than 0.");
+    return replyToMessage(
+      ctx,
+      formatParseAmountError(parsed, "Please provide a valid amount greater than 0.")
+    );
   }
 
   try {
@@ -1707,11 +1705,10 @@ bot.command("tip", async (ctx: Context) => {
 
   const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id, "tip");
   if (!parsed.success) {
-    if (parsed.error === "unknown_token") {
-      return replyToMessage(ctx, `❌ Unknown token "${parsed.unknownToken}"`);
-    }
-    // Note: sol_not_supported won't occur for tips since SOL is allowed
-    return replyToMessage(ctx, "Please provide a valid amount greater than 0.");
+    return replyToMessage(
+      ctx,
+      formatParseAmountError(parsed, "Please provide a valid amount greater than 0.")
+    );
   }
 
   try {
