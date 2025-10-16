@@ -1153,12 +1153,13 @@ bot.command(["coinflip", "cf"], async (ctx) => {
             )
           );
         }
+        const parsedAmount = parsed.data;
 
         // Get maxPlayers from arguments using robust index-based parsing
         const inferredCf = inferMaxPlayers(
           args,
           1 /* amountArgIndex */,
-          !!parsed.data!.tokenWasSpecified,
+          parsedAmount.tokenWasSpecified,
           2 /* default */, 2 /* min */, 100 /* max */
         );
         if (!inferredCf.ok) {
@@ -1169,25 +1170,27 @@ bot.command(["coinflip", "cf"], async (ctx) => {
         // Check user has enough balance
         const userBalance = await wallet.getTokenBalance(
           telegramId,
-          parsed.data!.tokenMint,
+          parsedAmount.tokenMint,
           { createIfMissing: true }
         );
-        const tokenMetadata = await wallet.getTokenMetadata(parsed.data!.tokenMint);
-        const requiredAmount = parsed.data!.amount;
+        const tokenMetadata = await wallet.getTokenMetadata(parsedAmount.tokenMint);
+        const requiredAmount = parsedAmount.amount;
 
         if (userBalance < requiredAmount) {
           const formatted = wallet.formatTokenBalance(userBalance, tokenMetadata.decimals);
-          return ctx.reply(`❌ Insufficient balance. You have ${formatted} ${parsed.data!.tokenTicker}, need ${parsed.data!.formattedAmount}.`);
+          return ctx.reply(
+            `❌ Insufficient balance. You have ${formatted} ${parsedAmount.tokenTicker}, need ${parsedAmount.formattedAmount}.`
+          );
         }
 
         // Create game directly using GameManager
         const gameResult = await gameManager.createGame(
           "coinflip",
           {
-            amount: parsed.data!.amount,
-            tokenMint: parsed.data!.tokenMint,
-            tokenTicker: parsed.data!.tokenTicker,
-            isSol: parsed.data!.isSol
+            amount: parsedAmount.amount,
+            tokenMint: parsedAmount.tokenMint,
+            tokenTicker: parsedAmount.tokenTicker,
+            isSol: parsedAmount.isSol,
           },
           maxPlayers, // maxTickets
           2, // minTickets (coinflip always needs 2)
@@ -1215,9 +1218,9 @@ bot.command(["coinflip", "cf"], async (ctx) => {
           ctx,
           gameResult.gameAddress!,
           "Coinflip",
-          parsed.data!.amount,
+          parsedAmount.amount,
           creatorUsername,
-          parsed.data!.tokenTicker,
+          parsedAmount.tokenTicker,
           "Active"
         );
 
@@ -1354,12 +1357,13 @@ bot.command(["giveaway", "ga"], async (ctx) => {
             )
           );
         }
+        const parsedAmount = parsed.data;
 
         // Get maxPlayers from arguments using robust index-based parsing
         const inferredGa = inferMaxPlayers(
           args,
           1 /* amountArgIndex */,
-          !!parsed.data!.tokenWasSpecified,
+          parsedAmount.tokenWasSpecified,
           10 /* default */, 2 /* min */, 100 /* max */
         );
         if (!inferredGa.ok) {
@@ -1370,21 +1374,23 @@ bot.command(["giveaway", "ga"], async (ctx) => {
         // Check user has enough balance
         const userBalance = await wallet.getTokenBalance(
           telegramId,
-          parsed.data!.tokenMint,
+          parsedAmount.tokenMint,
           { createIfMissing: true }
         );
-        const tokenMetadata = await wallet.getTokenMetadata(parsed.data!.tokenMint);
-        const requiredAmount = parsed.data!.amount; // This is already in raw format from parseAmount
+        const tokenMetadata = await wallet.getTokenMetadata(parsedAmount.tokenMint);
+        const requiredAmount = parsedAmount.amount; // This is already in raw format from parseAmount
 
         if (userBalance < requiredAmount) {
           const formatted = wallet.formatTokenBalance(userBalance, tokenMetadata.decimals);
-          return ctx.reply(`❌ Insufficient balance. You have ${formatted} ${parsed.data!.tokenTicker}, need ${parsed.data!.formattedAmount}.`);
+          return ctx.reply(
+            `❌ Insufficient balance. You have ${formatted} ${parsedAmount.tokenTicker}, need ${parsedAmount.formattedAmount}.`
+          );
         }
 
         // Create game directly using GameManager
         const gameResult = await gameManager.createGame(
           "giveaway",
-          parsed.data!,
+          parsedAmount,
           maxPlayers,
           1, // minPlayers for giveaway
           3600, // 1 hour timeout
@@ -1649,19 +1655,21 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
     );
   }
 
+  const parsedAmount = parsed.data;
+
   try {
     await validateAndProcessTransaction(
       ctx,
       telegramId,
-      parsed.data!.amount,
-      parsed.data!.isSol,
-      `Withdrawal of ${parsed.data!.formattedAmount}`,
+      parsedAmount.amount,
+      parsedAmount.isSol,
+      `Withdrawal of ${parsedAmount.formattedAmount}`,
       async (playerData) => {
-        if (parsed.data!.isSol) {
+        if (parsedAmount.isSol) {
           const transferSolIx = SystemProgram.transfer({
             fromPubkey: playerData.keypair.publicKey,
             toPubkey: toAddress,
-            lamports: parsed.data!.amount,
+            lamports: parsedAmount.amount,
           });
           return await wallet.sendTransaction(
             [transferSolIx],
@@ -1671,8 +1679,8 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
           return await wallet.transferToken(
             telegramId,
             toAddress,
-            parsed.data!.amount,
-            parsed.data!.tokenMint
+            parsedAmount.amount,
+            parsedAmount.tokenMint
           );
         }
       }
@@ -1711,6 +1719,8 @@ bot.command("tip", async (ctx: Context) => {
     );
   }
 
+  const parsedAmount = parsed.data;
+
   try {
     const recipientPubKey = wallet.getPublicKey(recipientTelegramId);
     const recipientName = repliedMessage.from.username
@@ -1720,15 +1730,15 @@ bot.command("tip", async (ctx: Context) => {
     await validateAndProcessTransaction(
       ctx,
       telegramId,
-      parsed.data!.amount,
-      parsed.data!.isSol,
-      `Tip of ${parsed.data!.formattedAmount} to ${recipientName}`,
+      parsedAmount.amount,
+      parsedAmount.isSol,
+      `Tip of ${parsedAmount.formattedAmount} to ${recipientName}`,
       async (playerData) => {
-        if (parsed.data!.isSol) {
+        if (parsedAmount.isSol) {
           const transferSolIx = SystemProgram.transfer({
             fromPubkey: playerData.keypair.publicKey,
             toPubkey: recipientPubKey,
-            lamports: parsed.data!.amount,
+            lamports: parsedAmount.amount,
           });
           return await wallet.sendTransaction(
             [transferSolIx],
@@ -1738,8 +1748,8 @@ bot.command("tip", async (ctx: Context) => {
           return await wallet.transferToken(
             telegramId,
             recipientPubKey,
-            parsed.data!.amount,
-            parsed.data!.tokenMint
+            parsedAmount.amount,
+            parsedAmount.tokenMint
           );
         }
       },

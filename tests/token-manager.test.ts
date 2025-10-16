@@ -31,8 +31,10 @@ function makeWalletStub() {
 test("parseAmount maps SOL to WSOL for game context", async () => {
   const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
   const res = await tm.parseAmount(["/cf", "1", "SOL"], 1, 123, "game");
-  expect(res.success).toBe(true);
-  const data = res.data!;
+  if (!res.success) {
+    throw new Error(`expected success, got ${res.error}`);
+  }
+  const data = res.data;
   expect(data.isSol).toBe(false);
   expect(data.requestedNativeSol).toBe(true);
   expect(data.tokenMint).toBe(WSOL_MINT);
@@ -42,8 +44,10 @@ test("parseAmount maps SOL to WSOL for game context", async () => {
 test("parseAmount accepts SOL for tips and formats as SOL", async () => {
   const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
   const res = await tm.parseAmount(["/tip", "1.5", "SOL"], 1, 42, "tip");
-  expect(res.success).toBe(true);
-  const d = res.data!;
+  if (!res.success) {
+    throw new Error(`expected success, got ${res.error}`);
+  }
+  const d = res.data;
   expect(d.isSol).toBe(true);
   expect(d.tokenTicker).toBe("SOL");
   expect(d.formattedAmount).toContain("SOL");
@@ -53,7 +57,9 @@ test("parseAmount accepts SOL for tips and formats as SOL", async () => {
 test("parseAmount reports unknown token tickers distinctly", async () => {
   const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
   const res = await tm.parseAmount(["/cf", "10", "UNKN"], 1, 1, "game");
-  expect(res.success).toBe(false);
+  if (res.success) {
+    throw new Error("expected unknown token failure");
+  }
   expect(res.error).toBe("unknown_token");
   expect(res.unknownToken).toBe("UNKN");
 });
@@ -63,8 +69,10 @@ test("parseAmount uses chat default token when none specified", async () => {
   // set chat default token to override
   tm.setChatDefaultToken(7, "CHAT_MINT", "CHAT", "userZ");
   const res = await tm.parseAmount(["/cf", "2"], 1, 7, "game");
-  expect(res.success).toBe(true);
-  const d = res.data!;
+  if (!res.success) {
+    throw new Error(`expected success, got ${res.error}`);
+  }
+  const d = res.data;
   expect(d.tokenMint).toBe("CHAT_MINT");
   expect(d.tokenTicker).toBe("CHAT");
 });
@@ -75,8 +83,10 @@ test("parseAmount accepts token mint addresses when provided", async () => {
   expect(await tm.addToken(usdcMint, "USDC")).toBe(true);
 
   const res = await tm.parseAmount(["/cf", "3", usdcMint], 1, 123, "game");
-  expect(res.success).toBe(true);
-  const data = res.data!;
+  if (!res.success) {
+    throw new Error(`expected success, got ${res.error}`);
+  }
+  const data = res.data;
   expect(data.tokenMint).toBe(usdcMint);
   expect(data.tokenTicker).toBe("USDC");
   expect(data.tokenWasSpecified).toBe(true);
@@ -87,8 +97,10 @@ test("parseAmount treats valid mint strings as explicit tokens even when unknown
   const mint = "BPFLoader1111111111111111111111111111111111";
 
   const res = await tm.parseAmount(["/cf", "4", mint], 1, 321, "game");
-  expect(res.success).toBe(true);
-  const data = res.data!;
+  if (!res.success) {
+    throw new Error(`expected success, got ${res.error}`);
+  }
+  const data = res.data;
   expect(data.tokenMint).toBe(mint);
   expect(data.tokenTicker).toBe(mint);
   expect(data.tokenWasSpecified).toBe(true);
