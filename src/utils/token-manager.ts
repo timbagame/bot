@@ -388,8 +388,6 @@ export function formatParseAmountError(
       return result.unknownToken
         ? `❌ Unknown token "${result.unknownToken}"`
         : fallbackMessage;
-    case "sol_not_supported":
-      return result.solError || "❌ SOL games are not supported";
     default:
       return fallbackMessage;
   }

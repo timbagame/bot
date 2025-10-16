@@ -60,9 +60,8 @@ export interface ParsedAmount {
 export interface ParseAmountResult {
   success: boolean;
   data?: ParsedAmount;
-  error?: "invalid_amount" | "unknown_token" | "sol_not_supported";
+  error?: "invalid_amount" | "unknown_token";
   unknownToken?: string;
-  solError?: string;
 }
 
 export interface PlayerData {

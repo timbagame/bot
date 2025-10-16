@@ -4,7 +4,7 @@ export type CoinflipDeps = {
   isGroupChat: (ctx: Context) => boolean;
   parseAmount: (args: string[], argIndex: number, chatId?: number) => Promise<
     | { success: true; data: { amount: number; tokenMint: string; tokenTicker: string; isSol: boolean; formattedAmount: string; tokenWasSpecified?: boolean } }
-    | { success: false; error: string; unknownToken?: string; solError?: string }
+    | { success: false; error: string; unknownToken?: string }
   >;
   inferMaxPlayers: (
     args: string[],
@@ -62,9 +62,6 @@ export async function handleCoinflipCommand(ctx: Context & { message?: any }, de
     if (!parsed.success) {
       if (parsed.error === "unknown_token") {
         return ctx.reply(`❌ Unknown token "${parsed.unknownToken}"`);
-      }
-      if (parsed.error === "sol_not_supported") {
-        return ctx.reply(parsed.solError || "❌ SOL games are not supported");
       }
       return ctx.reply("❌ Please provide a valid amount greater than 0.\n\nUsage: `/cf <amount>` or `/cf <amount> <maxPlayers>`");
     }
