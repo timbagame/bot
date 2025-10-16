@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { ReferralManager } from "../src/utils/referral-manager";
 import { ReferralDatabase } from "../src/utils/referral-database";
-import { REFERRAL_CONFIG } from "../src/utils/referral-config";
 
 // ================================
 // REFERRAL SYSTEM UNIT TESTS

@@ -1,5 +1,4 @@
 import { ReferralDatabase } from "./referral-database";
-import { WalletManager } from "./wallet";
 import { REFERRAL_CONFIG } from "./referral-config";
 import { BOT_USERNAME } from "./constants";
 

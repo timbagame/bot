@@ -9669,16 +9669,18 @@ setupAnchor()
     bot.on("message:photo", async (ctx) => {
       if (ctx.chat?.type === "private" && ctx.message.photo.length > 0) {
         const photo = ctx.message.photo[ctx.message.photo.length - 1]; // Get highest quality
-        const fileId = photo.file_id;
-        const width = photo.width;
-        const height = photo.height;
-        const fileSize = photo.file_size || 0;
+        if (photo) {
+          const fileId = photo.file_id;
+          const width = photo.width;
+          const height = photo.height;
+          const fileSize = photo.file_size || 0;
 
-        console.log("📸 PHOTO RECEIVED:");
-        console.log(`File ID: ${fileId}`);
-        console.log(`Dimensions: ${width}x${height}`);
-        console.log(`File Size: ${fileSize} bytes`);
-        console.log("================================");
+          console.log("📸 PHOTO RECEIVED:");
+          console.log(`File ID: ${fileId}`);
+          console.log(`Dimensions: ${width}x${height}`);
+          console.log(`File Size: ${fileSize} bytes`);
+          console.log("================================");
+        }
       }
     });
 
