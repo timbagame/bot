@@ -47,6 +47,7 @@ import { buildWalletCaption } from "./utils/wallet-ui";
 import { formatAmount, escapeHtml } from "./utils/format-amount";
 import { showWalletUI as showWalletUIHandler, onMainWallet, onWalletRefresh, onWalletSettings, onBalance } from "./handlers/wallet";
 import { inferMaxPlayers } from "./utils/arg-parsing";
+import { ReferralManager } from "./utils/referral-manager";
 import type {
   PlayerData,
   GameCompletedEvent,
@@ -401,8 +402,35 @@ const processGameCompletion = async (
   const blockTime = await wallet.getBlockchainTime();
   gameDb.completeGame(gameAddress, winnerAddress, blockTime * 1000);
 
-  // Update game message
+  // Get game data for processing
   const gameData = gameDb.getGame(gameAddress);
+
+  // Track referral commissions for all participants
+  try {
+    const referralManager = ReferralManager.getInstance();
+    
+    if (gameData) {
+      const participants = gameDb.getGameParticipants(gameAddress);
+      
+      // Record commission for each participant (except the winner gets the pot)
+      for (const participant of participants) {
+        const participantTelegramId = gameDb.getPlayerTelegramId(participant);
+        if (participantTelegramId) {
+          await referralManager.recordGameCommission(
+            gameAddress,
+            gameData.amount,
+            gameData.token_mint || DEFAULT_TOKEN_MINT,
+            gameData.token_ticker || DEFAULT_TOKEN_TICKER,
+            participantTelegramId
+          );
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Error tracking referral commissions:", error);
+  }
+
+  // Update game message
   await updateGameMessageSafely(
     gameAddress,
     gameData,
@@ -1106,6 +1134,27 @@ bot.command(["start", "balance"], async (ctx: Context) => {
   // Mark chat as initiated if it's not already
       if (ctx.chat?.id) {
         initiatedChats.add(ctx.chat.id);
+      }
+
+  // Procesar código de referido si existe
+  const referralManager = ReferralManager.getInstance();
+  const startParam = ctx.message?.text?.split(" ")[1]; // Obtener parámetro después de /start
+  
+      if (startParam) {
+        const telegramId = ctx.from?.id?.toString();
+        const username = ctx.from?.username;
+        
+        if (telegramId) {
+          const referralResult = referralManager.processStartCommand(telegramId, username, startParam);
+          
+          if (referralResult.success && referralResult.referrerCode) {
+            // Usuario fue referido exitosamente - sin mensaje adicional
+          } else if (referralResult.success) {
+            // Usuario tiene su propio código de referido - sin mensaje adicional
+          } else {
+            // Error en el código de referido - sin mensaje adicional
+          }
+        }
       }
 
   await onBalance(ctx as any, {
@@ -3278,6 +3327,9 @@ bot.on("callback_query", async (ctx, next) => {
     "help_examples",
     "cmd_buy",
     "cmd_sell",
+    // Referral system callbacks (simplified)
+    "cmd_rewards",
+    "referral_stats",
   ];
 
   // Also skip send/swap/wrap/game-setup interface callbacks
@@ -4635,6 +4687,193 @@ bot.callbackQuery("wallet_settings", async (ctx) => {
   };
   await onWalletSettings(ctx as any, deps);
 });
+
+// ================================
+// REFERRAL SYSTEM CALLBACKS
+// ================================
+
+bot.callbackQuery("cmd_rewards", async (ctx) => {
+  try {
+    const telegramId = ctx.from?.id?.toString();
+    const username = ctx.from?.username;
+    if (!telegramId) return;
+
+    // Asegurar que el usuario tenga un código de referido
+    const referralManager = ReferralManager.getInstance();
+    const referralCode = referralManager.getReferralCode(telegramId);
+    
+    if (!referralCode) {
+      // Crear código de referido automáticamente
+      referralManager.processStartCommand(telegramId, username);
+    }
+
+    // Obtener estadísticas completas
+    const stats = referralManager.getReferralStats(telegramId);
+    const { createRewardsKeyboard } = await import("./utils/keyboards");
+    const { REFERRAL_IMAGE_ID } = await import("./utils/constants");
+
+    // Obtener el token más común de las comisiones
+    const { DEFAULT_TOKEN_TICKER } = await import("./utils/constants");
+    const tokenTicker = DEFAULT_TOKEN_TICKER; // Por ahora usar el token por defecto
+
+    const message = `REWARDS & REFERRALS\n\n` +
+      `Total Earned: ${(stats.stats.totalEarned / Math.pow(10, 9)).toFixed(6)} ${tokenTicker}\n` +
+      `Pending Payout: ${(stats.stats.pendingPayout / Math.pow(10, 9)).toFixed(6)} ${tokenTicker}\n\n` +
+      `Your Stats:\n` +
+      `• Referrals: ${stats.stats.totalReferrals} users\n` +
+      `• Games generated: ${stats.stats.totalGames} coinflips\n` +
+      `• Commission rate: 30%\n\n` +
+      `Your Referral Link:\n` +
+      `${stats.referralLink}\n\n` +
+      `Share this link to earn 30% commission on your friends' games!`;
+
+    // Siempre intentar editar el mensaje existente
+    const currentMessage = ctx.callbackQuery.message;
+    
+    try {
+      if (currentMessage && 'text' in currentMessage) {
+        // Si es mensaje de texto, editar
+        await ctx.editMessageText(message, {
+          parse_mode: "HTML",
+          reply_markup: createRewardsKeyboard(),
+        });
+      } else if (currentMessage && 'photo' in currentMessage) {
+        // Si es mensaje con foto, editar caption
+        await ctx.editMessageCaption({
+          caption: message,
+          reply_markup: createRewardsKeyboard(),
+        });
+      } else if (currentMessage && 'video' in currentMessage) {
+        // Si es mensaje con video, eliminar y enviar nuevo con imagen
+        await ctx.deleteMessage();
+        await ctx.replyWithPhoto(REFERRAL_IMAGE_ID, {
+          caption: message,
+          parse_mode: "HTML",
+          reply_markup: createRewardsKeyboard(),
+        });
+      } else {
+        // Solo si no hay mensaje actual, enviar nuevo
+        await ctx.replyWithPhoto(REFERRAL_IMAGE_ID, {
+          caption: message,
+          parse_mode: "HTML",
+          reply_markup: createRewardsKeyboard(),
+        });
+      }
+    } catch (editError: any) {
+      // Si falla la edición (ej: "message is not modified"), solo responder con callback
+      if (editError.description?.includes("message is not modified")) {
+        await ctx.answerCallbackQuery("✅ Updated");
+      } else {
+        console.error("Error editing message:", editError);
+        await ctx.answerCallbackQuery("❌ Error updating");
+      }
+    }
+  } catch (error) {
+    console.error("Error in rewards callback:", error);
+    await ctx.answerCallbackQuery("❌ Error loading rewards");
+  }
+});
+
+bot.callbackQuery("referral_stats", async (ctx) => {
+  try {
+    const telegramId = ctx.from?.id?.toString();
+    const username = ctx.from?.username;
+    if (!telegramId) return;
+
+    // Asegurar que el usuario tenga un código de referido
+    const referralManager = ReferralManager.getInstance();
+    const referralCode = referralManager.getReferralCode(telegramId);
+    
+    if (!referralCode) {
+      // Crear código de referido automáticamente
+      referralManager.processStartCommand(telegramId, username);
+    }
+
+    // Obtener estadísticas completas
+    const stats = referralManager.getReferralStats(telegramId);
+    const { createRewardsKeyboard } = await import("./utils/keyboards");
+    const { REFERRAL_IMAGE_ID } = await import("./utils/constants");
+
+    // Obtener el token más común de las comisiones
+    const { DEFAULT_TOKEN_TICKER } = await import("./utils/constants");
+    const tokenTicker = DEFAULT_TOKEN_TICKER; // Por ahora usar el token por defecto
+
+    const message = `REWARDS & REFERRALS\n\n` +
+      `Total Earned: ${(stats.stats.totalEarned / Math.pow(10, 9)).toFixed(6)} ${tokenTicker}\n` +
+      `Pending Payout: ${(stats.stats.pendingPayout / Math.pow(10, 9)).toFixed(6)} ${tokenTicker}\n\n` +
+      `Your Stats:\n` +
+      `• Referrals: ${stats.stats.totalReferrals} users\n` +
+      `• Games generated: ${stats.stats.totalGames} coinflips\n` +
+      `• Commission rate: 30%\n\n` +
+      `Your Referral Link:\n` +
+      `${stats.referralLink}\n\n` +
+      `Share this link to earn 30% commission on your friends' games!`;
+
+    // Siempre intentar editar el mensaje existente
+    const currentMessage = ctx.callbackQuery.message;
+    
+    try {
+      if (currentMessage && 'text' in currentMessage) {
+        // Si es mensaje de texto, editar
+        await ctx.editMessageText(message, {
+          parse_mode: "HTML",
+          reply_markup: createRewardsKeyboard(),
+        });
+      } else if (currentMessage && 'photo' in currentMessage) {
+        // Si es mensaje con foto, editar caption
+        await ctx.editMessageCaption({
+          caption: message,
+          reply_markup: createRewardsKeyboard(),
+        });
+      } else if (currentMessage && 'video' in currentMessage) {
+        // Si es mensaje con video, eliminar y enviar nuevo con imagen
+        await ctx.deleteMessage();
+        await ctx.replyWithPhoto(REFERRAL_IMAGE_ID, {
+          caption: message,
+          parse_mode: "HTML",
+          reply_markup: createRewardsKeyboard(),
+        });
+      } else {
+        // Solo si no hay mensaje actual, enviar nuevo
+        await ctx.replyWithPhoto(REFERRAL_IMAGE_ID, {
+          caption: message,
+          parse_mode: "HTML",
+          reply_markup: createRewardsKeyboard(),
+        });
+      }
+    } catch (editError: any) {
+      // Si falla la edición (ej: "message is not modified"), solo responder con callback
+      if (editError.description?.includes("message is not modified")) {
+        await ctx.answerCallbackQuery("✅ Updated");
+      } else {
+        console.error("Error editing message:", editError);
+        await ctx.answerCallbackQuery("❌ Error updating");
+      }
+    }
+  } catch (error) {
+    console.error("Error in referral stats callback:", error);
+    await ctx.answerCallbackQuery("❌ Error loading stats");
+  }
+});
+
+// Callback para volver al wallet original
+bot.callbackQuery("main_wallet", async (ctx) => {
+  try {
+    const { WALLET_VIDEO_ID } = await import("./utils/constants");
+    const { createWalletKeyboard } = await import("./utils/keyboards");
+    
+    // Eliminar mensaje actual y enviar video original
+    await ctx.deleteMessage();
+    await ctx.replyWithVideo(WALLET_VIDEO_ID, {
+      reply_markup: createWalletKeyboard(),
+    });
+  } catch (error) {
+    console.error("Error returning to wallet:", error);
+    await ctx.answerCallbackQuery("❌ Error returning to wallet");
+  }
+});
+
+// Callbacks innecesarios eliminados - toda la información está en un solo lugar
 
 // ================================
 // WALLET ACTION HANDLERS
@@ -9424,8 +9663,25 @@ setupAnchor()
     });
 
     // ================================
-    // TEMPORARY: VIDEO/GIF ID GETTER (Private chats only)
+    // TEMPORARY: VIDEO/GIF/PHOTO ID GETTER (Private chats only)
     // ================================
+    
+    bot.on("message:photo", async (ctx) => {
+      if (ctx.chat?.type === "private" && ctx.message.photo.length > 0) {
+        const photo = ctx.message.photo[ctx.message.photo.length - 1]; // Get highest quality
+        const fileId = photo.file_id;
+        const width = photo.width;
+        const height = photo.height;
+        const fileSize = photo.file_size || 0;
+
+        console.log("📸 PHOTO RECEIVED:");
+        console.log(`File ID: ${fileId}`);
+        console.log(`Dimensions: ${width}x${height}`);
+        console.log(`File Size: ${fileSize} bytes`);
+        console.log("================================");
+      }
+    });
+
     bot.on("message:video", async (ctx) => {
       if (ctx.chat?.type === "private") {
         const fileId = ctx.message.video.file_id;

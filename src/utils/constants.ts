@@ -1,6 +1,18 @@
 import { NetworkDetector, type SolanaNetwork } from "./network-detector";
 
 // ================================
+// BOT CONFIGURATION
+// ================================
+
+export const BOT_USERNAME = "coinflipsolbot";
+
+// Referral system image ID
+export const REFERRAL_IMAGE_ID = "AgACAgEAAxkBAAJWQmjwMzoUqm1YYAJRwzY9MHt3gObzAAJHC2sbZhuAR20iVt4gIIhKAQADAgADeQADNgQ";
+
+// Original wallet video ID (for back button)
+export const WALLET_VIDEO_ID = "BAACAgEAAxkBAAIFdWjv1Ftg_7gnOFxENLIP8JMYM7NDAAKqBQACEHGARZs4P2UQ6MpENgQ";
+
+// ================================
 // SOLANA CONSTANTS
 // ================================
 

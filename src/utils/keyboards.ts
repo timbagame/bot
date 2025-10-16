@@ -17,7 +17,30 @@ export const createWalletKeyboard = (): InlineKeyboard => {
     .text("💸 Withdraw", "cmd_withdraw")
     .text("🔄 Refresh", "wallet_refresh")
     .row()
+    .text("🎁 Rewards", "cmd_rewards")
     .text("⚙️ Settings", "wallet_settings")
+    .row();
+};
+
+// ================================
+// REFERRAL SYSTEM KEYBOARDS
+// ================================
+
+export const createRewardsKeyboard = (): InlineKeyboard => {
+  return new InlineKeyboard()
+    .text("🔄 Refresh", "referral_stats")
+    .row()
+    .text("← Back to Wallet", "main_wallet")
+    .row();
+};
+
+export const createReferralShareKeyboard = (referralLink: string): InlineKeyboard => {
+  return new InlineKeyboard()
+    .text("📋 Copy Link", `copy_link_${referralLink}`)
+    .row()
+    .text("📤 Share", `share_link_${referralLink}`)
+    .row()
+    .text("← Back to Rewards", "cmd_rewards")
     .row();
 };
 
