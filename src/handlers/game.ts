@@ -1,11 +1,14 @@
 import type { Context } from "grammy";
+import type { ParseAmountResult } from "../types";
+import { formatParseAmountError } from "../utils/token-manager";
 
 export type CoinflipDeps = {
   isGroupChat: (ctx: Context) => boolean;
-  parseAmount: (args: string[], argIndex: number, chatId?: number) => Promise<
-    | { success: true; data: { amount: number; tokenMint: string; tokenTicker: string; isSol: boolean; formattedAmount: string; tokenWasSpecified?: boolean } }
-    | { success: false; error: string; unknownToken?: string; solError?: string }
-  >;
+  parseAmount: (
+    args: string[],
+    argIndex: number,
+    chatId?: number
+  ) => Promise<ParseAmountResult>;
   inferMaxPlayers: (
     args: string[],
     amountArgIndex: number,
@@ -54,42 +57,51 @@ export async function handleCoinflipCommand(ctx: Context & { message?: any }, de
     const telegramId = BigInt(ctx.from?.id || 0);
     const args = ctx.message?.text?.split(" ");
 
+    const usageMessage =
+      "❌ Please provide a valid amount greater than 0.\n\nUsage: `/cf <amount>` or `/cf <amount> <maxPlayers>`";
+
     if (!args || args.length < 2) {
-      return ctx.reply("❌ Please provide a valid amount greater than 0.\n\nUsage: `/cf <amount>` or `/cf <amount> <maxPlayers>`");
+      return ctx.reply(usageMessage);
     }
 
     const parsed = await deps.parseAmount(args, 1, ctx.chat?.id);
     if (!parsed.success) {
-      if (parsed.error === "unknown_token") {
-        return ctx.reply(`❌ Unknown token "${parsed.unknownToken}"`);
-      }
-      if (parsed.error === "sol_not_supported") {
-        return ctx.reply(parsed.solError || "❌ SOL games are not supported");
-      }
-      return ctx.reply("❌ Please provide a valid amount greater than 0.\n\nUsage: `/cf <amount>` or `/cf <amount> <maxPlayers>`");
+      return ctx.reply(formatParseAmountError(parsed, usageMessage));
     }
 
-    const inferred = deps.inferMaxPlayers(args, 1, !!parsed.data.tokenWasSpecified, 2, 2, 100);
+    const parsedAmount = parsed.data;
+    const inferred = deps.inferMaxPlayers(
+      args,
+      1,
+      parsedAmount.tokenWasSpecified,
+      2,
+      2,
+      100
+    );
     if (!inferred.ok) {
       return ctx.reply(`❌ Coinflip ${inferred.error}`);
     }
     const maxPlayers = inferred.value;
 
     // Balance check
-    const userBalance = await deps.wallet.getTokenBalance(telegramId, parsed.data.tokenMint, { createIfMissing: true });
-    const tokenMetadata = await deps.wallet.getTokenMetadata(parsed.data.tokenMint);
-    if (userBalance < parsed.data.amount) {
+    const userBalance = await deps.wallet.getTokenBalance(telegramId, parsedAmount.tokenMint, {
+      createIfMissing: true,
+    });
+    const tokenMetadata = await deps.wallet.getTokenMetadata(parsedAmount.tokenMint);
+    if (userBalance < parsedAmount.amount) {
       const formatted = deps.wallet.formatTokenBalance(userBalance, tokenMetadata.decimals);
-      return ctx.reply(`❌ Insufficient balance. You have ${formatted} ${parsed.data.tokenTicker}, need ${parsed.data.formattedAmount}.`);
+      return ctx.reply(
+        `❌ Insufficient balance. You have ${formatted} ${parsedAmount.tokenTicker}, need ${parsedAmount.formattedAmount}.`
+      );
     }
 
     const gameResult = await deps.gameManager.createGame(
       "coinflip",
       {
-        amount: parsed.data.amount,
-        tokenMint: parsed.data.tokenMint,
-        tokenTicker: parsed.data.tokenTicker,
-        isSol: parsed.data.isSol,
+        amount: parsedAmount.amount,
+        tokenMint: parsedAmount.tokenMint,
+        tokenTicker: parsedAmount.tokenTicker,
+        isSol: parsedAmount.isSol,
       },
       maxPlayers,
       2,
@@ -111,9 +123,9 @@ export async function handleCoinflipCommand(ctx: Context & { message?: any }, de
       ctx,
       gameResult.gameAddress!,
       "Coinflip",
-      parsed.data.amount,
+      parsedAmount.amount,
       creatorUsername,
-      parsed.data.tokenTicker,
+      parsedAmount.tokenTicker,
       "Active"
     );
   } catch (error) {

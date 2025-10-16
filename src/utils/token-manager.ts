@@ -374,3 +374,21 @@ export class TokenManager {
     }
   }
 }
+
+export function formatParseAmountError(
+  result: ParseAmountResult,
+  fallbackMessage: string
+): string {
+  if (result.success) {
+    return fallbackMessage;
+  }
+
+  switch (result.error) {
+    case "unknown_token":
+      return result.unknownToken
+        ? `❌ Unknown token "${result.unknownToken}"`
+        : fallbackMessage;
+    default:
+      return fallbackMessage;
+  }
+}
