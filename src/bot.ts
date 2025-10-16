@@ -4884,9 +4884,7 @@ bot.callbackQuery("cmd_withdraw", async (ctx) => {
     const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
     const walletAddress = keypair.publicKey.toBase58();
-    const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(
-      -6
-    )}`;
+    const walletAddressHtml = escapeHtml(walletAddress);
 
     // Use cached wallet data
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
@@ -4894,7 +4892,7 @@ bot.callbackQuery("cmd_withdraw", async (ctx) => {
     const response = [
       `💸 <b>WITHDRAW</b>`,
       "",
-      `<b>From:</b> <code>${shortAddress}</code>`,
+      `<b>From:</b> <code>${walletAddressHtml}</code>`,
       "",
       `<b>Select token to withdraw:</b>`,
     ];
@@ -5437,9 +5435,8 @@ bot.callbackQuery("cmd_swap", async (ctx) => {
   try {
     const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
-    const shortAddress = `${keypair.publicKey
-      .toBase58()
-      .slice(0, 6)}...${keypair.publicKey.toBase58().slice(-6)}`;
+    const walletAddress = keypair.publicKey.toBase58();
+    const walletAddressHtml = escapeHtml(walletAddress);
 
     // Use cached wallet data
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
@@ -5447,7 +5444,7 @@ bot.callbackQuery("cmd_swap", async (ctx) => {
     const response = [
       `💱 <b>SWAP TOKENS</b>`,
       "",
-      `<b>From Wallet:</b> <code>${shortAddress}</code>`,
+      `<b>From Wallet:</b> <code>${walletAddressHtml}</code>`,
       "",
       `<b>Select token to swap FROM:</b>`,
     ];
@@ -5605,9 +5602,8 @@ bot.on("callback_query", async (ctx, next) => {
   try {
     const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
-    const shortAddress = `${keypair.publicKey
-      .toBase58()
-      .slice(0, 6)}...${keypair.publicKey.toBase58().slice(-6)}`;
+    const walletAddress = keypair.publicKey.toBase58();
+    const walletAddressHtml = escapeHtml(walletAddress);
 
     // Use cached wallet data
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
@@ -5630,7 +5626,7 @@ bot.on("callback_query", async (ctx, next) => {
     const response = [
       `📤 <b>SEND ${token}</b>`,
       "",
-      `<b>From:</b> <code>${shortAddress}</code>`,
+      `<b>From:</b> <code>${walletAddressHtml}</code>`,
       `<b>Balance:</b> ${balance} ${token}`,
       "",
       `<b>Quick Send Amounts:</b>`,
@@ -6471,9 +6467,8 @@ bot.on("callback_query", async (ctx, next) => {
   try {
     const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
-    const shortAddress = `${keypair.publicKey
-      .toBase58()
-      .slice(0, 6)}...${keypair.publicKey.toBase58().slice(-6)}`;
+    const walletAddress = keypair.publicKey.toBase58();
+    const walletAddressHtml = escapeHtml(walletAddress);
 
     // Handle "other_tokens" case - show available tokens
     if (paymentToken === "other_tokens") {
@@ -6482,7 +6477,7 @@ bot.on("callback_query", async (ctx, next) => {
       const response = [
         `🟢 <b>BUY TOKENS</b>`,
         "",
-        `<b>From:</b> <code>${shortAddress}</code>`,
+        `<b>From:</b> <code>${walletAddressHtml}</code>`,
         "",
         `<b>Choose token to pay with:</b>`,
       ];
@@ -6516,7 +6511,7 @@ bot.on("callback_query", async (ctx, next) => {
       `🟢 <b>BUY TOKENS</b>`,
       "",
       `<b>Paying with:</b> ${paymentToken}`,
-      `<b>From:</b> <code>${shortAddress}</code>`,
+      `<b>From:</b> <code>${walletAddressHtml}</code>`,
       "",
       `<b>What do you want to buy?</b>`,
     ];
@@ -7326,9 +7321,8 @@ bot.on("callback_query", async (ctx, next) => {
   try {
     const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
-    const shortAddress = `${keypair.publicKey
-      .toBase58()
-      .slice(0, 6)}...${keypair.publicKey.toBase58().slice(-6)}`;
+    const walletAddress = keypair.publicKey.toBase58();
+    const walletAddressHtml = escapeHtml(walletAddress);
 
     // Get available tokens to swap TO (exclude the FROM token)
     await getCachedWalletData(telegramId);
@@ -7336,7 +7330,7 @@ bot.on("callback_query", async (ctx, next) => {
     const response = [
       `💱 <b>SWAP ${fromToken}</b>`,
       "",
-      `<b>From:</b> <code>${shortAddress}</code>`,
+      `<b>From:</b> <code>${walletAddressHtml}</code>`,
       "",
       `<b>Select token to swap TO:</b>`,
     ];
@@ -8297,9 +8291,7 @@ const handleAddressInput = async (
     throw new Error("Invalid wallet address format");
   }
 
-  console.log(
-    `📍 Address received for ${amount} ${token}: ${address.slice(0, 8)}...`
-  );
+  console.log(`📍 Address received for ${amount} ${token}: ${address}`);
 
   // Generate unique transaction ID and store transaction details
   const txId = generateTransactionId();
@@ -8315,7 +8307,7 @@ const handleAddressInput = async (
     `✅ <b>SEND CONFIRMATION</b>`,
     "",
     `<b>Amount:</b> ${amount === "max" ? "MAX" : amount} ${token}`,
-    `<b>To:</b> <code>${address.slice(0, 8)}...${address.slice(-8)}</code>`,
+    `<b>To:</b> <code>${escapeHtml(address)}</code>`,
     "",
     `⚠️ <b>Please confirm this transaction</b>`,
     `This action cannot be undone.`,
@@ -8738,10 +8730,7 @@ const handleBuyTokenSymbolInput = async (
       "",
       `🏷️ <b>Ticker:</b> ${tokenInfo.symbol}`,
       `📝 <b>Name:</b> ${tokenInfo.name}`,
-      `🔗 <b>Address:</b> <code>${tokenInfo.address.slice(
-        0,
-        6
-      )}...${tokenInfo.address.slice(-6)}</code>`,
+      `🔗 <b>Address:</b> <code>${escapeHtml(tokenInfo.address)}</code>`,
       `${tokenInfo.verified ? "✅ <b>Verified</b>" : "⚠️ <b>Unverified</b>"}`,
       "",
       `<b>💰 Select payment method to buy ${tokenInfo.symbol}:</b>`,
