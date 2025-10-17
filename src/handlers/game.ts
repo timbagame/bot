@@ -26,6 +26,10 @@ export type CoinflipDeps = {
     getTokenMetadata: (mint: string) => Promise<{ decimals: number }>;
     formatTokenBalance: (amount: number, decimals: number) => string;
   };
+  getContractMinimumAmount: (
+    mint: string,
+    decimalsHint?: number
+  ) => Promise<{ raw: number; formatted: number; decimals: number }>;
   gameManager: {
     createGame: (
       type: "coinflip",
@@ -88,6 +92,22 @@ export async function handleCoinflipCommand(ctx: Context & { message?: any }, de
       createIfMissing: true,
     });
     const tokenMetadata = await deps.wallet.getTokenMetadata(parsedAmount.tokenMint);
+
+    const contractMinimum = await deps.getContractMinimumAmount(
+      parsedAmount.tokenMint,
+      tokenMetadata.decimals
+    );
+
+    if (parsedAmount.amount < contractMinimum.raw) {
+      const formattedMinimum = deps.wallet.formatTokenBalance(
+        contractMinimum.raw,
+        tokenMetadata.decimals
+      );
+      return ctx.reply(
+        `❌ Amount below contract minimum of ${formattedMinimum} ${parsedAmount.tokenTicker}.`
+      );
+    }
+
     if (userBalance < parsedAmount.amount) {
       const formatted = deps.wallet.formatTokenBalance(userBalance, tokenMetadata.decimals);
       return ctx.reply(

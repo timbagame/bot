@@ -17,6 +17,12 @@ function makeCtx(text: string, chatType: "private" | "group" | "supergroup" = "g
   return ctx;
 }
 
+const minimumStub = async (_mint: string, decimalsHint?: number) => ({
+  raw: 1,
+  formatted: 1 / Math.pow(10, decimalsHint ?? 6),
+  decimals: decimalsHint ?? 6,
+});
+
 describe("game handler: coinflip command", () => {
   test("rejects in private chat", async () => {
     const ctx: any = makeCtx("/cf 10", "private");
@@ -25,6 +31,7 @@ describe("game handler: coinflip command", () => {
       parseAmount: async () => ({ success: false, error: "unknown_token" }),
       inferMaxPlayers: () => ({ ok: false, error: "noop" }),
       wallet: { getTokenBalance: async () => 0, getTokenMetadata: async () => ({ decimals: 6 }), formatTokenBalance: () => "0" },
+      getContractMinimumAmount: minimumStub,
       gameManager: { createGame: async () => ({ success: false, error: "x" }), createGameMessage: async () => 0 },
     };
     await handleCoinflipCommand(ctx, deps);
@@ -40,6 +47,7 @@ describe("game handler: coinflip command", () => {
       parseAmount: async () => ({ success: false, error: "noop" }),
       inferMaxPlayers: () => ({ ok: false, error: "noop" }),
       wallet: { getTokenBalance: async () => 0, getTokenMetadata: async () => ({ decimals: 6 }), formatTokenBalance: () => "0" },
+      getContractMinimumAmount: minimumStub,
       gameManager: { createGame: async () => ({ success: false, error: "x" }), createGameMessage: async () => 0 },
     };
     await handleCoinflipCommand(ctx, deps);
@@ -53,6 +61,7 @@ describe("game handler: coinflip command", () => {
       parseAmount: async () => ({ success: false, error: "invalid_amount" }),
       inferMaxPlayers: () => ({ ok: true, value: 2 }),
       wallet: { getTokenBalance: async () => 0, getTokenMetadata: async () => ({ decimals: 6 }), formatTokenBalance: () => "0" },
+      getContractMinimumAmount: minimumStub,
       gameManager: { createGame: async () => ({ success: false, error: "x" }), createGameMessage: async () => 0 },
     };
     await handleCoinflipCommand(ctx, deps);
@@ -66,6 +75,7 @@ describe("game handler: coinflip command", () => {
       parseAmount: async () => ({ success: false, error: "unknown_token", unknownToken: "FOO" }),
       inferMaxPlayers: () => ({ ok: true, value: 2 }),
       wallet: { getTokenBalance: async () => 0, getTokenMetadata: async () => ({ decimals: 6 }), formatTokenBalance: () => "0" },
+      getContractMinimumAmount: minimumStub,
       gameManager: { createGame: async () => ({ success: false, error: "x" }), createGameMessage: async () => 0 },
     };
     await handleCoinflipCommand(ctx, deps);
@@ -94,6 +104,7 @@ describe("game handler: coinflip command", () => {
         getTokenMetadata: async () => ({ decimals: 9 }),
         formatTokenBalance: () => "0.1",
       },
+      getContractMinimumAmount: minimumStub,
       gameManager: {
         createGame: async () => ({ success: false, error: "Auto-wrap failed" }),
         createGameMessage: async () => 0,
@@ -120,6 +131,7 @@ describe("game handler: coinflip command", () => {
       }),
       inferMaxPlayers: () => ({ ok: false, error: "players must be between 2-100" }),
       wallet: { getTokenBalance: async () => 0, getTokenMetadata: async () => ({ decimals: 6 }), formatTokenBalance: () => "0" },
+      getContractMinimumAmount: minimumStub,
       gameManager: { createGame: async () => ({ success: false, error: "x" }), createGameMessage: async () => 0 },
     };
     await handleCoinflipCommand(ctx, deps);
@@ -147,12 +159,47 @@ describe("game handler: coinflip command", () => {
         getTokenMetadata: async () => ({ decimals: 6 }),
         formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toString(),
       },
+      getContractMinimumAmount: minimumStub,
       gameManager: { createGame: async () => ({ success: false, error: "x" }), createGameMessage: async () => 0 },
     };
     await handleCoinflipCommand(ctx, deps);
     const msg = String(ctx.__calls[0][1]);
     expect(msg).toContain("Insufficient balance");
     expect(msg).toContain("You have 0.5 TOK, need 1 TOK");
+  });
+
+  test("amount below contract minimum is rejected early", async () => {
+    const ctx: any = makeCtx("/cf 1 TIMBA", "group");
+    const deps: any = {
+      isGroupChat: () => true,
+      parseAmount: async () => ({
+        success: true,
+        data: {
+          amount: 1_000_000,
+          tokenMint: "T",
+          tokenTicker: "TIMBA",
+          isSol: false,
+          formattedAmount: "1 TIMBA",
+          tokenWasSpecified: true,
+        },
+      }),
+      inferMaxPlayers: () => ({ ok: true, value: 2 }),
+      wallet: {
+        getTokenBalance: async () => 5_000_000,
+        getTokenMetadata: async () => ({ decimals: 6 }),
+        formatTokenBalance: () => "2",
+      },
+      getContractMinimumAmount: async () => ({ raw: 2_000_000, formatted: 2, decimals: 6 }),
+      gameManager: {
+        createGame: async () => ({ success: true, gameAddress: "GADDR", autoJoinResult: { success: true } }),
+        createGameMessage: async () => 0,
+      },
+    };
+
+    await handleCoinflipCommand(ctx, deps);
+    expect(String(ctx.__calls[0][1])).toContain(
+      "❌ Amount below contract minimum of 2 TIMBA."
+    );
   });
 
   test("success path calls createGameMessage with expected args", async () => {
@@ -178,6 +225,7 @@ describe("game handler: coinflip command", () => {
         getTokenMetadata: async () => ({ decimals: 6 }),
         formatTokenBalance: (_: number, __: number) => "2",
       },
+      getContractMinimumAmount: minimumStub,
       gameManager: {
         createGame: async () => ({ success: true, gameAddress: "GADDR", autoJoinResult: { success: true } }),
         createGameMessage: async (...args: any[]) => { created++; calls.push(["create", ...args]); return 42; },
@@ -210,6 +258,7 @@ describe("game handler: coinflip command", () => {
         getTokenMetadata: async () => ({ decimals: 6 }),
         formatTokenBalance: (_: number, __: number) => "2",
       },
+      getContractMinimumAmount: minimumStub,
       gameManager: {
         createGame: async () => ({ success: true, gameAddress: "GADDR", autoJoinResult: { success: false, error: "Autojoin failed." } }),
         createGameMessage: async () => { created++; return 1; },
@@ -232,6 +281,7 @@ describe("game handler: coinflip command", () => {
         getTokenMetadata: async () => ({ decimals: 6 }),
         formatTokenBalance: () => "0",
       },
+      getContractMinimumAmount: minimumStub,
       gameManager: {
         createGame: async () => ({ success: false, error: "x" }),
         createGameMessage: async () => 0,
