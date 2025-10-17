@@ -9,6 +9,7 @@ import {
   LAMPORTS_PER_SOL,
   SolanaJSONRPCError,
   SystemProgram,
+  SendTransactionError,
 } from "@solana/web3.js";
 import {
   getAssociatedTokenAddress,
@@ -30,6 +31,7 @@ import {
   MAX_RETRIES,
   CONFIRMATION_TIMEOUT_MS,
   WSOL_MINT,
+  MIN_SOL_FOR_TX,
 } from "./constants";
 import { formatAmount } from "./format-amount";
 import { fetchJupiterTokenMetadata } from "./jupiter";
@@ -788,6 +790,7 @@ export class WalletManager {
     const userKeypair = this.getKeyPair(telegramId);
     const payer = userKeypair.publicKey;
     const nativeLamports = await this.getBalance(telegramId);
+    const bufferLamports = Math.ceil(MIN_SOL_FOR_TX * LAMPORTS_PER_SOL);
 
     const wsolMint = new PublicKey(WSOL_MINT);
     const wsolAta = await getAssociatedTokenAddress(
@@ -833,16 +836,19 @@ export class WalletManager {
     }
 
     const instructions: TransactionInstruction[] = [];
+    let wsolLamportsSent = 0;
+    let totalLamportsSent = 0;
+
     if (wsolAccountExists && wsolAccountLamports > 0) {
       instructions.push(createSyncNativeInstruction(wsolAta));
       instructions.push(
         createCloseAccountInstruction(wsolAta, destination, payer)
       );
+      wsolLamportsSent = wsolAccountLamports;
+      totalLamportsSent += wsolLamportsSent;
     }
 
     let nativeLamportsSent = 0;
-    const wsolLamportsSent = wsolAmount;
-    let totalLamportsSent = wsolLamportsSent;
 
     if (instructions.length > 0) {
       if (nativeLamports < 1) {
@@ -870,24 +876,34 @@ export class WalletManager {
         placeholderTransfer,
       ]);
 
-      if (nativeLamports <= feeWithTransfer && instructions.length === 0) {
+      if (
+        nativeLamports <= feeWithTransfer &&
+        instructions.length === 0
+      ) {
         throw new Error(
           "Not enough SOL to cover the transaction fee. Leave a small amount for fees and try again."
         );
       }
 
-      if (nativeLamports > feeWithTransfer) {
-        nativeLamportsSent = nativeLamports - feeWithTransfer;
-        if (nativeLamportsSent > 0) {
-          instructions.push(
-            SystemProgram.transfer({
-              fromPubkey: payer,
-              toPubkey: destination,
-              lamports: nativeLamportsSent,
-            })
-          );
-          totalLamportsSent += nativeLamportsSent;
-        }
+      const spendableLamports = Math.max(
+        0,
+        nativeLamports - feeWithTransfer - bufferLamports
+      );
+
+      if (spendableLamports > 0) {
+        nativeLamportsSent = spendableLamports;
+        instructions.push(
+          SystemProgram.transfer({
+            fromPubkey: payer,
+            toPubkey: destination,
+            lamports: nativeLamportsSent,
+          })
+        );
+        totalLamportsSent += nativeLamportsSent;
+      } else if (instructions.length === 0) {
+        throw new Error(
+          "Not enough SOL to cover network fees while keeping a small reserve. Top up SOL and try again."
+        );
       }
     }
 
@@ -1021,13 +1037,28 @@ export class WalletManager {
     const tx = new VersionedTransaction(message);
     tx.sign(signers);
 
-    const signature = await retryWithBackoff(async () => {
-      return await this.connection.sendTransaction(tx, {
-        skipPreflight: false,
-        preflightCommitment: "confirmed",
-        maxRetries: 3,
+    let signature: string;
+    try {
+      signature = await retryWithBackoff(async () => {
+        return await this.connection.sendTransaction(tx, {
+          skipPreflight: false,
+          preflightCommitment: "confirmed",
+          maxRetries: 3,
+        });
       });
-    });
+    } catch (error: any) {
+      if (error instanceof SendTransactionError) {
+        try {
+          const logs = await error.getLogs(this.connection);
+          if (logs && logs.length > 0) {
+            console.error("Transaction simulation logs:", logs.join("\n"));
+          }
+        } catch (logError) {
+          console.error("Failed to fetch transaction logs:", logError);
+        }
+      }
+      throw error;
+    }
 
     console.log(`📤 Transaction sent: ${signature}`);
     return signature;
