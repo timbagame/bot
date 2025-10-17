@@ -31,7 +31,7 @@ async function withTimeout<T>(p: Promise<T>, timeoutMs: number): Promise<T> {
 
 function toMintOrId(mintOrTicker: string): { jupId: string; forDex: string } {
   const key = normalizeKey(mintOrTicker);
-  if (key === "SOL") return { jupId: "SOL", forDex: WSOL_MINT };
+  if (key === "SOL") return { jupId: WSOL_MINT, forDex: WSOL_MINT };
   return { jupId: mintOrTicker, forDex: mintOrTicker };
 }
 
@@ -42,11 +42,20 @@ async function fetchFromJupiter(id: string, fetchImpl: PriceFetch, timeoutMs: nu
     const res = await withTimeout(fetchImpl(url.toString(), { method: "GET" }), timeoutMs);
     if (!res.ok) return null;
     const data = (await res.json()) as any;
-    // Jupiter returns { data: { [id]: { price: number } } }
-    const entry = data?.data?.[id];
-    const price = typeof entry?.price === "number" ? entry.price : Number(entry?.price);
-    if (!price || !isFinite(price)) return null;
-    return price;
+    const entry = data?.data?.[id] ?? data?.[id];
+    if (!entry) return null;
+    const priceCandidates = [
+      entry?.price,
+      entry?.usdPrice,
+      entry?.usd_price,
+    ];
+    for (const candidate of priceCandidates) {
+      const price = typeof candidate === "number" ? candidate : Number(candidate);
+      if (price && isFinite(price) && price > 0) {
+        return price;
+      }
+    }
+    return null;
   } catch {
     return null;
   }
