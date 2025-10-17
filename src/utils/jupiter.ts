@@ -1,6 +1,8 @@
 import { PublicKey } from "@solana/web3.js";
 import { escapeHtml, formatRate } from "./format-amount";
 
+type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
 // ================================
 // JUPITER TYPES
 // ================================
@@ -24,11 +26,8 @@ export interface JupiterQuoteResponse {
   otherAmountThreshold: string;
   swapMode: string;
   slippageBps: number;
-  platformFee?: {
-    amount: string;
-    feeBps: number;
-  };
   priceImpactPct: string;
+  priceImpact?: number;
   routePlan: Array<{
     swapInfo: {
       ammKey: string;
@@ -41,29 +40,77 @@ export interface JupiterQuoteResponse {
       feeMint: string;
     };
     percent: number;
+    bps?: number;
   }>;
-  contextSlot: number;
-  timeTaken: number;
+  feeMint?: string;
+  feeBps?: number;
+  router?: string;
+  requestId?: string;
+  quoteId?: string;
+  totalTime?: number;
+  inUsdValue?: number;
+  outUsdValue?: number;
+  platformFee?: {
+    amount: string;
+    feeBps: number;
+  } | null;
 }
 
 export interface JupiterSwapRequest {
   userPublicKey: string;
   quoteResponse: JupiterQuoteResponse;
-  prioritizationFeeLamports?: number;
-  useSharedAccounts?: boolean;
-  dynamicComputeUnitLimit?: boolean;
-  skipUserAccountsRpcCalls?: boolean;
-  wrapAndUnwrapSol?: boolean;
+  amountOverride?: string;
+  slippageBpsOverride?: number;
 }
 
 export interface JupiterSwapResponse {
   swapTransaction: string; // Base64 encoded transaction
-  lastValidBlockHeight: number;
-  prioritizationFeeLamports: number;
-  computeUnitLimit: number;
-  prioritizationFeeInstructions: any[];
-  addressLookupTableAddresses: string[];
-  dynamicSlippageReport?: any;
+  requestId?: string;
+  quoteId?: string;
+  router?: string;
+  expireAt?: string;
+  priceImpactPct?: string;
+  priceImpact?: number;
+  routePlan?: JupiterQuoteResponse["routePlan"];
+}
+
+interface JupiterOrderParams {
+  inputMint: string;
+  outputMint: string;
+  amount: string;
+  slippageBps?: number;
+  swapMode?: "ExactIn" | "ExactOut";
+  taker?: string;
+}
+
+interface JupiterUltraOrderResponse {
+  mode: string;
+  inputMint: string;
+  outputMint: string;
+  inAmount: string;
+  outAmount: string;
+  otherAmountThreshold: string;
+  swapMode: string;
+  slippageBps: number;
+  priceImpactPct?: string;
+  priceImpact?: number;
+  routePlan: JupiterQuoteResponse["routePlan"];
+  feeMint?: string;
+  feeBps?: number;
+  inUsdValue?: number;
+  outUsdValue?: number;
+  platformFee?: {
+    amount: string;
+    feeBps: number;
+  } | null;
+  router?: string;
+  transaction?: string | null;
+  gasless?: boolean;
+  requestId?: string;
+  quoteId?: string;
+  maker?: string;
+  expireAt?: string;
+  totalTime?: number;
 }
 
 // ================================
@@ -72,45 +119,70 @@ export interface JupiterSwapResponse {
 
 export class JupiterClient {
   private baseUrl: string;
+  private fetchFn: FetchLike;
 
-  constructor(baseUrl: string = "https://quote-api.jup.ag") {
-    this.baseUrl = baseUrl;
+  constructor(baseUrl: string = "https://lite-api.jup.ag", fetchFn?: FetchLike) {
+    this.baseUrl = baseUrl.replace(/\/$/, "");
+    this.fetchFn = fetchFn ?? ((globalThis.fetch as unknown) as FetchLike);
   }
 
-  /**
-   * Get a quote for a token swap
-   */
-  async getQuote(request: JupiterQuoteRequest): Promise<JupiterQuoteResponse> {
-    const params = new URLSearchParams({
-      inputMint: request.inputMint,
-      outputMint: request.outputMint,
-      amount: request.amount,
-    });
+  private getOrderUrl(): string {
+    return `${this.baseUrl}/ultra/v1/order`;
+  }
 
-    if (request.slippageBps !== undefined) {
-      params.append("slippageBps", request.slippageBps.toString());
+  private normalizeQuote(data: JupiterUltraOrderResponse): JupiterQuoteResponse {
+    const priceImpactPct =
+      typeof data.priceImpactPct === "string"
+        ? data.priceImpactPct
+        : typeof data.priceImpact === "number"
+        ? data.priceImpact.toString()
+        : "0";
+
+    return {
+      inputMint: data.inputMint,
+      inAmount: data.inAmount,
+      outputMint: data.outputMint,
+      outAmount: data.outAmount,
+      otherAmountThreshold: data.otherAmountThreshold,
+      swapMode: data.swapMode,
+      slippageBps: data.slippageBps,
+      priceImpactPct,
+      priceImpact: data.priceImpact,
+      routePlan: data.routePlan ?? [],
+      feeMint: data.feeMint,
+      feeBps: data.feeBps,
+      router: data.router,
+      requestId: data.requestId,
+      quoteId: data.quoteId,
+      totalTime: data.totalTime,
+      inUsdValue: data.inUsdValue,
+      outUsdValue: data.outUsdValue,
+      platformFee: data.platformFee ?? null,
+    };
+  }
+
+  private buildOrderParams(params: JupiterOrderParams): URL {
+    const url = new URL(this.getOrderUrl());
+    url.searchParams.set("inputMint", params.inputMint);
+    url.searchParams.set("outputMint", params.outputMint);
+    url.searchParams.set("amount", params.amount);
+    if (params.slippageBps !== undefined) {
+      url.searchParams.set("slippageBps", params.slippageBps.toString());
     }
-
-    if (request.platformFeeBps !== undefined) {
-      params.append("platformFeeBps", request.platformFeeBps.toString());
+    if (params.swapMode) {
+      url.searchParams.set("swapMode", params.swapMode);
     }
-
-    if (request.maxAccounts !== undefined) {
-      params.append("maxAccounts", request.maxAccounts.toString());
+    if (params.taker) {
+      url.searchParams.set("taker", params.taker);
     }
+    return url;
+  }
 
-    if (request.onlyDirectRoutes !== undefined) {
-      params.append("onlyDirectRoutes", request.onlyDirectRoutes.toString());
-    }
-
-    if (request.swapMode) {
-      params.append("swapMode", request.swapMode);
-    }
-
-    const url = `${this.baseUrl}/v6/quote?${params.toString()}`;
+  private async requestOrder(params: JupiterOrderParams): Promise<JupiterUltraOrderResponse> {
+    const url = this.buildOrderParams(params);
 
     try {
-      const response = await fetch(url, {
+      const response = await this.fetchFn(url.toString(), {
         method: "GET",
         headers: {
           Accept: "application/json",
@@ -120,16 +192,30 @@ export class JupiterClient {
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(
-          `Jupiter quote failed: ${response.status} ${response.statusText} - ${errorText}`
+          `Jupiter order failed: ${response.status} ${response.statusText} - ${errorText}`
         );
       }
 
-      const data = await response.json();
-      return data as JupiterQuoteResponse;
+      const data = (await response.json()) as JupiterUltraOrderResponse;
+      return data;
     } catch (error: any) {
-      console.error("Error getting Jupiter quote:", error);
-      throw new Error(`Failed to get swap quote: ${error.message}`);
+      console.error("Error requesting Jupiter order:", error);
+      throw new Error(`Failed to request Jupiter order: ${error.message}`);
     }
+  }
+
+  /**
+   * Get a quote for a token swap
+   */
+  async getQuote(request: JupiterQuoteRequest): Promise<JupiterQuoteResponse> {
+    const order = await this.requestOrder({
+      inputMint: request.inputMint,
+      outputMint: request.outputMint,
+      amount: request.amount,
+      slippageBps: request.slippageBps,
+      swapMode: request.swapMode,
+    });
+    return this.normalizeQuote(order);
   }
 
   /**
@@ -138,31 +224,41 @@ export class JupiterClient {
   async getSwapTransaction(
     request: JupiterSwapRequest
   ): Promise<JupiterSwapResponse> {
-    const url = `${this.baseUrl}/v6/swap`;
+    const { quoteResponse, userPublicKey } = request;
+    const amount =
+      request.amountOverride ??
+      (quoteResponse.swapMode === "ExactOut"
+        ? quoteResponse.outAmount
+        : quoteResponse.inAmount);
+    const slippageBps =
+      request.slippageBpsOverride ?? quoteResponse.slippageBps;
 
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify(request),
-      });
+    const order = await this.requestOrder({
+      inputMint: quoteResponse.inputMint,
+      outputMint: quoteResponse.outputMint,
+      amount,
+      slippageBps,
+      swapMode: (quoteResponse.swapMode as "ExactIn" | "ExactOut") ?? "ExactIn",
+      taker: userPublicKey,
+    });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          `Jupiter swap failed: ${response.status} ${response.statusText} - ${errorText}`
-        );
-      }
-
-      const data = await response.json();
-      return data as JupiterSwapResponse;
-    } catch (error: any) {
-      console.error("Error getting Jupiter swap transaction:", error);
-      throw new Error(`Failed to get swap transaction: ${error.message}`);
+    if (!order.transaction) {
+      throw new Error("Jupiter order did not return a swap transaction");
     }
+
+    return {
+      swapTransaction: order.transaction,
+      requestId: order.requestId,
+      quoteId: order.quoteId,
+      router: order.router,
+      expireAt: order.expireAt,
+      priceImpactPct:
+        typeof order.priceImpactPct === "string"
+          ? order.priceImpactPct
+          : undefined,
+      priceImpact: order.priceImpact,
+      routePlan: order.routePlan,
+    };
   }
 
   /**
@@ -199,14 +295,17 @@ export class JupiterClient {
     }
 
     // Add route information
-    if (quote.routePlan.length > 0) {
+    if (quote.routePlan && quote.routePlan.length > 0) {
       const mainRoute = quote.routePlan[0];
       if (mainRoute && mainRoute.swapInfo) {
         message += `🛣️ <b>Route:</b> ${escapeHtml(mainRoute.swapInfo.label || "Unknown")}\n`;
       }
     }
 
-    message += `\n⏱️ <b>Time taken:</b> ${quote.timeTaken}ms`;
+    const totalTime = quote.totalTime ?? 0;
+    if (Number.isFinite(totalTime) && totalTime > 0) {
+      message += `\n⏱️ <b>Time taken:</b> ${totalTime}ms`;
+    }
 
     return message;
   }
@@ -309,4 +408,79 @@ export function validateSlippage(slippageBps: number): {
   }
 
   return { valid: true };
+}
+
+// ================================
+// METADATA HELPERS
+// ================================
+
+export interface JupiterTokenMetadata {
+  id: string;
+  symbol: string;
+  name?: string;
+  icon?: string;
+  decimals: number;
+}
+
+export async function fetchJupiterTokenMetadata(
+  query: string,
+  fetchImpl: FetchLike = (globalThis.fetch as unknown) as FetchLike
+): Promise<JupiterTokenMetadata | null> {
+  if (!query || !query.trim()) {
+    return null;
+  }
+
+  try {
+    const url = new URL("https://lite-api.jup.ag/tokens/v2/search");
+    url.searchParams.set("query", query.trim());
+    const response = await fetchImpl(url.toString(), {
+      method: "GET",
+      headers: { Accept: "application/json" },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = (await response.json()) as any;
+    if (!Array.isArray(data) || data.length === 0) {
+      return null;
+    }
+
+    const normalizedQuery = query.trim().toLowerCase();
+    const entries = data.filter((item) => item && typeof item === "object");
+
+    const exactId = entries.find(
+      (item) =>
+        typeof item.id === "string" &&
+        item.id.trim().toLowerCase() === normalizedQuery
+    );
+
+    const exactSymbol = entries.find(
+      (item) =>
+        typeof item.symbol === "string" &&
+        item.symbol.trim().toLowerCase() === normalizedQuery
+    );
+
+    const candidate = exactId ?? exactSymbol ?? entries[0];
+    if (!candidate || typeof candidate.symbol !== "string") {
+      return null;
+    }
+
+    const decimals =
+      typeof candidate.decimals === "number" && Number.isFinite(candidate.decimals)
+        ? candidate.decimals
+        : 6;
+
+    return {
+      id: typeof candidate.id === "string" ? candidate.id : query.trim(),
+      symbol: candidate.symbol,
+      name: typeof candidate.name === "string" ? candidate.name : undefined,
+      icon: typeof candidate.icon === "string" ? candidate.icon : undefined,
+      decimals,
+    };
+  } catch (error) {
+    console.error("Failed to fetch Jupiter token metadata:", error);
+    return null;
+  }
 }

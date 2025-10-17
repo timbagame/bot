@@ -65,8 +65,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       slippageBps: 100,
       priceImpactPct: "0",
       routePlan: [],
-      contextSlot: 0,
-      timeTaken: 0,
+      totalTime: 0,
     });
 
     const user = Keypair.generate();
@@ -156,7 +155,16 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     };
     (swapManager as any).getBestProvider = async () => "jupiter";
     (swapManager as any).jupiterClient.getQuote = async () => ({
+      inputMint: "TokenMint",
+      outputMint: "So11111111111111111111111111111111111111112",
       inAmount: "1000000",
+      outAmount: "500000",
+      otherAmountThreshold: "0",
+      swapMode: "ExactIn",
+      slippageBps: 100,
+      priceImpactPct: "0",
+      routePlan: [],
+      totalTime: 0,
     });
     (swapManager as any).jupiterClient.getSwapTransaction = async () => ({
       swapTransaction: "BASE64",

@@ -47,7 +47,23 @@ function toMintOrId(mintOrTicker: string): { jupId: string; forDex: string } {
   return { jupId: mintOrTicker, forDex: mintOrTicker };
 }
 
-async function fetchFromJupiter(id: string, fetchImpl: PriceFetch, timeoutMs: number): Promise<number | null> {
+function pickValidPrice(
+  candidates: Array<number | string | null | undefined>
+): number | null {
+  for (const candidate of candidates) {
+    const price = typeof candidate === "number" ? candidate : Number(candidate);
+    if (price && Number.isFinite(price) && price > 0) {
+      return price;
+    }
+  }
+  return null;
+}
+
+async function fetchFromJupiter(
+  id: string,
+  fetchImpl: PriceFetch,
+  timeoutMs: number
+): Promise<number | null> {
   try {
     const url = new URL(JUPITER_PRICE_URL);
     url.searchParams.set("ids", id);
@@ -56,18 +72,7 @@ async function fetchFromJupiter(id: string, fetchImpl: PriceFetch, timeoutMs: nu
     const data = (await res.json()) as any;
     const entry = data?.data?.[id] ?? data?.[id];
     if (!entry) return null;
-    const priceCandidates = [
-      entry?.price,
-      entry?.usdPrice,
-      entry?.usd_price,
-    ];
-    for (const candidate of priceCandidates) {
-      const price = typeof candidate === "number" ? candidate : Number(candidate);
-      if (price && isFinite(price) && price > 0) {
-        return price;
-      }
-    }
-    return null;
+    return pickValidPrice([entry?.price, entry?.usdPrice, entry?.usd_price]);
   } catch {
     return null;
   }
@@ -92,22 +97,20 @@ async function fetchFromPumpFun(
     );
     if (!res.ok) return null;
     const data = (await res.json()) as any;
-    const priceCandidates = [
+    return pickValidPrice([
       data?.usdPrice,
       data?.usd_price,
       data?.usdValue,
       data?.priceUsd,
       data?.price_usd,
-      data?.usd_market_cap ? Number(data?.usd_market_cap) / Number(data?.supply ?? data?.supplyInTokens ?? 0) : undefined,
-      data?.priceInSol && data?.solPrice ? Number(data?.priceInSol) * Number(data?.solPrice) : undefined,
-    ];
-    for (const candidate of priceCandidates) {
-      const price = typeof candidate === "number" ? candidate : Number(candidate);
-      if (price && isFinite(price) && price > 0) {
-        return price;
-      }
-    }
-    return null;
+      data?.usd_market_cap
+        ? Number(data?.usd_market_cap) /
+          Number(data?.supply ?? data?.supplyInTokens ?? 0)
+        : undefined,
+      data?.priceInSol && data?.solPrice
+        ? Number(data?.priceInSol) * Number(data?.solPrice)
+        : undefined,
+    ]);
   } catch {
     return null;
   }

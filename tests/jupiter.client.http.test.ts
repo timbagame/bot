@@ -9,8 +9,6 @@ afterEach(() => {
 
 describe("JupiterClient HTTP", () => {
   test("getQuote throws with non-ok response and includes status", async () => {
-    const jc = new JupiterClient("https://example.invalid");
-
     // Mock fetch to return non-ok
     globalThis.fetch = (async () => ({
       ok: false,
@@ -19,6 +17,8 @@ describe("JupiterClient HTTP", () => {
       text: async () => "no route",
     })) as any;
 
+    const jc = new JupiterClient("https://example.invalid", globalThis.fetch as any);
+
     const req: JupiterQuoteRequest = {
       inputMint: "So11111111111111111111111111111111111111112",
       outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
@@ -26,11 +26,12 @@ describe("JupiterClient HTTP", () => {
       slippageBps: 100,
     };
 
-    await expect(jc.getQuote(req)).rejects.toThrow(/Jupiter quote failed: 404/);
+    await expect(jc.getQuote(req)).rejects.toThrow(
+      /Failed to request Jupiter order: Jupiter order failed: 404/
+    );
   });
 
   test("getQuote returns parsed JSON on success", async () => {
-    const jc = new JupiterClient("https://example.invalid");
     const fake = {
       inputMint: "A",
       outputMint: "B",
@@ -41,13 +42,14 @@ describe("JupiterClient HTTP", () => {
       slippageBps: 100,
       priceImpactPct: "0.10",
       routePlan: [],
-      contextSlot: 0,
-      timeTaken: 1,
+      totalTime: 1,
     };
     globalThis.fetch = (async () => ({
       ok: true,
       json: async () => fake,
     })) as any;
+
+    const jc = new JupiterClient("https://example.invalid", globalThis.fetch as any);
 
     const res = await jc.getQuote({
       inputMint: "A",
@@ -59,14 +61,14 @@ describe("JupiterClient HTTP", () => {
   });
 
   test("getSwapTransaction throws with non-ok response and includes status", async () => {
-    const jc = new JupiterClient("https://example.invalid");
-
     globalThis.fetch = (async () => ({
       ok: false,
       status: 500,
       statusText: "Server Error",
       text: async () => "boom",
     })) as any;
+
+    const jc = new JupiterClient("https://example.invalid", globalThis.fetch as any);
 
     const req: JupiterSwapRequest = {
       userPublicKey: "user",
@@ -80,12 +82,13 @@ describe("JupiterClient HTTP", () => {
         slippageBps: 100,
         priceImpactPct: "0.10",
         routePlan: [],
-        contextSlot: 0,
-        timeTaken: 1,
+        totalTime: 1,
       },
     };
 
-    await expect(jc.getSwapTransaction(req)).rejects.toThrow(/Jupiter swap failed: 500/);
+    await expect(jc.getSwapTransaction(req)).rejects.toThrow(
+      /Failed to request Jupiter order: Jupiter order failed: 500/
+    );
   });
 });
 

@@ -8,6 +8,7 @@ import { PumpSdk, OnlinePumpSdk } from "@pump-fun/pump-sdk";
 import { deserializeMetadata } from "@metaplex-foundation/mpl-token-metadata";
 import { NetworkDetector } from "./network-detector";
 import { escapeHtml, formatAmount, formatRate } from "./format-amount";
+import { fetchJupiterTokenMetadata } from "./jupiter";
 import BN from "bn.js";
 
 // ================================
@@ -191,48 +192,24 @@ export class PumpFunClient {
         console.log("💥 Pump.fun API error:", apiError);
       }
 
-      // Method 3: Try DexScreener API
+      // Method 3: Try Jupiter token search API
       try {
         console.log(
-          `🔍 Fetching from DexScreener API: https://api.dexscreener.com/latest/dex/tokens/${mintAddress}`
+          `🔍 Fetching from Jupiter token search: https://lite-api.jup.ag/tokens/v2/search?query=${mintAddress}`
         );
-        const response = await fetch(
-          `https://api.dexscreener.com/latest/dex/tokens/${mintAddress}`
-        );
-        console.log(`📡 DexScreener API response status: ${response.status}`);
-
-        if (response.ok) {
-          const data = (await response.json()) as any;
-          console.log(
-            "🎯 DexScreener API data:",
-            JSON.stringify(data, null, 2)
-          );
-
-          if (data && data.pairs && data.pairs.length > 0) {
-            const pair = data.pairs[0];
-            console.log("🔗 First pair data:", pair);
-
-            if (pair.baseToken && pair.baseToken.symbol) {
-              const result = {
-                symbol: pair.baseToken.symbol.toUpperCase(),
-                name: pair.baseToken.name || "Token",
-                decimals: 6,
-              };
-              console.log("✅ Returning DexScreener metadata:", result);
-              return result;
-            } else {
-              console.log("❌ DexScreener pair missing baseToken symbol");
-            }
-          } else {
-            console.log("❌ DexScreener no pairs found");
-          }
-        } else {
-          console.log(
-            `❌ DexScreener API failed with status: ${response.status}`
-          );
+        const metadata = await fetchJupiterTokenMetadata(mintAddress);
+        if (metadata) {
+          const result = {
+            symbol: metadata.symbol.toUpperCase(),
+            name: metadata.name || metadata.symbol || "Pump.fun Token",
+            decimals: metadata.decimals ?? 6,
+          };
+          console.log("✅ Returning Jupiter metadata:", result);
+          return result;
         }
-      } catch (dexError) {
-        console.log("💥 DexScreener API error:", dexError);
+        console.log("❌ Jupiter metadata search returned no result");
+      } catch (jupiterError) {
+        console.log("💥 Jupiter metadata search error:", jupiterError);
       }
 
       // Method 4: Check if it's a pump.fun token at all

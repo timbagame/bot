@@ -64,8 +64,7 @@ describe("JupiterClient helpers", () => {
       routePlan: [
         { swapInfo: { ammKey: "AMM", label: "JupiterAMM", inputMint: "", outputMint: "", inAmount: "0", outAmount: "0", feeAmount: "0", feeMint: "" }, percent: 100 }
       ],
-      contextSlot: 0,
-      timeTaken: 123,
+      totalTime: 123,
     };
 
     const msg = jc.formatQuoteForDisplay(quote, 9, 6, "SOL", "USDC");

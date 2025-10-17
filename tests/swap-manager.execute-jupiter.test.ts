@@ -21,11 +21,6 @@ describe("SwapManager.executeJupiterSwap", () => {
     // Stub Jupiter swap endpoint response
     (sm as any).jupiterClient.getSwapTransaction = async () => ({
       swapTransaction: Buffer.from("fake").toString("base64"),
-      lastValidBlockHeight: 0,
-      prioritizationFeeLamports: 0,
-      computeUnitLimit: 0,
-      prioritizationFeeInstructions: [],
-      addressLookupTableAddresses: [],
     });
     // Short-circuit the internal executor to avoid deserialization
     (sm as any).executeJupiterTransaction = async () => "SIG_JUP_123";
@@ -56,11 +51,13 @@ describe("SwapManager.executeJupiterSwap", () => {
     (sm as any).jupiterClient.getQuote = async () => ({
       inputMint: req.inputMint,
       outputMint: req.outputMint,
-      inputAmount: req.amount,
-      outputAmount: quote.outputAmount,
-      slippage: quote.slippage,
-      estimatedRate: quote.estimatedRate,
+      inAmount: req.amount,
+      outAmount: quote.outputAmount,
       otherAmountThreshold: "0",
+      swapMode: "ExactIn",
+      slippageBps: req.slippageBps,
+      priceImpactPct: "0",
+      routePlan: [],
     });
 
     const sig = await sm.executeJupiterSwap(req, quote);

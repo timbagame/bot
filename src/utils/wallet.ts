@@ -32,6 +32,7 @@ import {
   WSOL_MINT,
 } from "./constants";
 import { formatAmount } from "./format-amount";
+import { fetchJupiterTokenMetadata } from "./jupiter";
 
 // Lightweight dependency handles for testability
 type HttpFetch = (input: string, init?: any) => Promise<{
@@ -542,78 +543,29 @@ export class WalletManager {
     // Try external APIs as fallback
     console.log(`🌐 Trying external APIs for token: ${tokenMint}`);
 
-    // Try SolanaFM API first (good for old tokens)
     try {
-      const response = await this.fetchFn(
-        `https://api.solana.fm/v0/tokens/${tokenMint}`
+      const metadata = await fetchJupiterTokenMetadata(
+        tokenMint,
+        async (input, init) =>
+          (await this.fetchFn(
+            typeof input === "string" ? input : input.toString(),
+            init
+          )) as any
       );
-      console.log(`📡 SolanaFM API response status: ${response.status}`);
-      if (response.ok) {
-        const data = (await response.json()) as any;
-        console.log(`📋 SolanaFM API data:`, data);
-        if (data && data.tokenInfo && data.tokenInfo.symbol) {
-          const basicMetadata = await this.getTokenMetadata(tokenMint);
-          console.log(
-            `✅ Got symbol from SolanaFM API: ${data.tokenInfo.symbol}`
-          );
-          return {
-            decimals: basicMetadata.decimals,
-            symbol: data.tokenInfo.symbol,
-            name: data.tokenInfo.name || data.tokenInfo.symbol,
-          };
-        }
-      }
-    } catch (error) {
-      console.log("SolanaFM API not available for", tokenMint, error);
-    }
 
-    try {
-      // Try Jupiter token list API
-      const response = await this.fetchFn(`https://tokens.jup.ag/token/${tokenMint}`);
-      console.log(`📡 Jupiter API response status: ${response.status}`);
-      if (response.ok) {
-        const data = (await response.json()) as any;
-        console.log(`📋 Jupiter API data:`, data);
-        if (data && data.symbol) {
-          const basicMetadata = await this.getTokenMetadata(tokenMint);
-          console.log(`✅ Got symbol from Jupiter API: ${data.symbol}`);
-          return {
-            decimals: basicMetadata.decimals,
-            symbol: data.symbol,
-            name: data.name || data.symbol,
-          };
-        }
+      if (metadata) {
+        const basicMetadata = await this.getTokenMetadata(tokenMint);
+        console.log(
+          `✅ Got symbol from Jupiter token search: ${metadata.symbol}`
+        );
+        return {
+          decimals: metadata.decimals ?? basicMetadata.decimals,
+          symbol: metadata.symbol,
+          name: metadata.name || metadata.symbol,
+        };
       }
     } catch (error) {
-      console.log("Jupiter API not available for", tokenMint, error);
-    }
-
-    // Try DexScreener API as fallback
-    try {
-      const response = await this.fetchFn(
-        `https://api.dexscreener.com/latest/dex/tokens/${tokenMint}`
-      );
-      console.log(`📡 DexScreener API response status: ${response.status}`);
-      if (response.ok) {
-        const data = (await response.json()) as any;
-        console.log(`📋 DexScreener API data:`, data);
-        if (data.pairs && data.pairs.length > 0) {
-          const pair = data.pairs[0];
-          if (pair.baseToken && pair.baseToken.symbol) {
-            const basicMetadata = await this.getTokenMetadata(tokenMint);
-            console.log(
-              `✅ Got symbol from DexScreener: ${pair.baseToken.symbol}`
-            );
-            return {
-              decimals: basicMetadata.decimals,
-              symbol: pair.baseToken.symbol,
-              name: pair.baseToken.name || pair.baseToken.symbol,
-            };
-          }
-        }
-      }
-    } catch (error) {
-      console.log("DexScreener API not available for", tokenMint, error);
+      console.log("Jupiter token search not available for", tokenMint, error);
     }
 
     // Fallback to basic metadata
