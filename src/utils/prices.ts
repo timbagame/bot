@@ -1,4 +1,4 @@
-import { JUPITER_PRICE_URL, PRICES_CACHE_TTL_MS, PRICES_TIMEOUT_MS, PRICES_ENABLED } from "./constants";
+import { JUPITER_PRICE_URL, PRICES_CACHE_TTL_MS, PRICES_TIMEOUT_MS } from "./constants";
 
 export type PriceFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -6,6 +6,18 @@ const cache = new Map<string, { price: number; ts: number }>();
 const inflight = new Map<string, Promise<number>>();
 
 const WSOL_MINT = "So11111111111111111111111111111111111111112";
+const PRICES_ENV_KEY = "PRICES_ENABLED";
+
+function isPricesEnabled(): boolean {
+  if (typeof process !== "undefined" && process?.env) {
+    const override = process.env[PRICES_ENV_KEY];
+    if (override !== undefined) {
+      return override.toLowerCase() !== "false";
+    }
+  }
+
+  return true;
+}
 
 function normalizeKey(id: string): string {
   return id.trim().toUpperCase();
@@ -105,7 +117,7 @@ export async function getPriceUSD(
   mintOrTicker: string,
   fetchImpl: PriceFetch = (globalThis.fetch as any)
 ): Promise<number> {
-  if (!PRICES_ENABLED) return 0;
+  if (!isPricesEnabled()) return 0;
   const key = normalizeKey(mintOrTicker);
 
   const c = cache.get(key);

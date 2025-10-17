@@ -2523,255 +2523,6 @@ bot.command("default", async (ctx: Context) => {
 // INFORMATION COMMANDS
 // ================================
 
-// Admin command to debug token metadata
-bot.command("debugtoken", async (ctx) => {
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
-
-  if (!ctx.chat?.type || ctx.chat.type !== "private") {
-    await ctx.reply("❌ This command only works in private chats");
-    return;
-  }
-
-  // Simple admin check - you can replace this with your admin system
-  const keypair = wallet.getKeyPair(telegramId);
-  const walletAddress = keypair.publicKey.toBase58();
-  const isUserAdmin =
-    walletAddress === process.env["ADMIN_WALLET"] ||
-    telegramId.toString() === "73785873"; // Your telegram ID
-
-  if (!isUserAdmin) {
-    await ctx.reply("❌ You don't have permission to use this command");
-    return;
-  }
-
-  const args = ctx.message?.text?.split(" ").slice(1) || [];
-  if (args.length < 1) {
-    await ctx.reply(
-      "❌ Usage: /debugtoken <mint_address>\n\nExample: /debugtoken CvuZk1iAPQsWdTy777a4dY78ue8z6HsRbk8UZCXvMSmB"
-    );
-    return;
-  }
-
-  const mintAddress = args[0];
-  if (!mintAddress) {
-    await ctx.reply("❌ Please provide a mint address");
-    return;
-  }
-
-  await ctx.reply("🔍 Investigating token metadata...");
-
-  try {
-    console.log(`🕵️ DEBUG: Starting investigation for token: ${mintAddress}`);
-
-    // 1. Check basic token metadata
-    console.log(`📋 Step 1: Getting basic token metadata`);
-    const basicMetadata = await wallet.getTokenMetadata(mintAddress);
-    console.log(`📋 Basic metadata:`, basicMetadata);
-
-    // 2. Check full token metadata (Metaplex + APIs)
-    console.log(`📋 Step 2: Getting full token metadata`);
-    const fullMetadata = await wallet.getFullTokenMetadata(mintAddress);
-    console.log(`📋 Full metadata:`, fullMetadata);
-
-    // 3. Check if it's a pump.fun token
-    console.log(`📋 Step 3: Checking if it's pump.fun token`);
-    const pumpInfo = await swapManager.pumpFunClient.isPumpFunToken(
-      mintAddress
-    );
-    console.log(`📋 Pump.fun info:`, pumpInfo);
-
-    // 4. Try to get pump.fun metadata
-    if (pumpInfo.isPumpFun) {
-      console.log(`📋 Step 4: Getting pump.fun metadata`);
-      try {
-        const pumpMetadata = await swapManager.pumpFunClient.getTokenMetadata(
-          mintAddress
-        );
-        console.log(`📋 Pump.fun metadata:`, pumpMetadata);
-      } catch (error) {
-        console.log(`❌ Pump.fun metadata error:`, error);
-      }
-    }
-
-    // 5. Check if token is already registered
-    console.log(`📋 Step 5: Checking if token is already registered`);
-    const existingToken = tokenManager.getKnownTokenByMint(mintAddress);
-    console.log(`📋 Existing token:`, existingToken);
-
-    // 6. Try SolanaFM API (good for old tokens)
-    console.log(`📋 Step 6: Checking SolanaFM`);
-    let solanaFmData = null;
-    try {
-      const solanaFmResponse = await fetch(
-        `https://api.solana.fm/v0/tokens/${mintAddress}`
-      );
-      solanaFmData = await solanaFmResponse.json();
-      console.log(`📋 SolanaFM data:`, solanaFmData);
-    } catch (error) {
-      console.log(`❌ SolanaFM API error:`, error);
-    }
-
-    // 7. Try to fetch from Jupiter token list
-    console.log(`📋 Step 7: Checking Jupiter token list`);
-    let jupiterData = null;
-    try {
-      const jupiterResponse = await fetch(
-        `https://tokens.jup.ag/token/${mintAddress}`
-      );
-      jupiterData = await jupiterResponse.json();
-      console.log(`📋 Jupiter data:`, jupiterData);
-    } catch (error) {
-      console.log(`❌ Jupiter API error:`, error);
-    }
-
-    // 8. Try DexScreener
-    console.log(`📋 Step 8: Checking DexScreener`);
-    let dexData = null;
-    try {
-      const dexResponse = await fetch(
-        `https://api.dexscreener.com/latest/dex/tokens/${mintAddress}`
-      );
-      dexData = await dexResponse.json();
-      console.log(`📋 DexScreener data:`, dexData);
-    } catch (error) {
-      console.log(`❌ DexScreener API error:`, error);
-    }
-
-    // Determine best symbol from all sources
-    const bestSymbol =
-      fullMetadata.symbol ||
-      (solanaFmData as any)?.tokenInfo?.symbol ||
-      (jupiterData as any)?.symbol ||
-      (dexData as any)?.pairs?.[0]?.baseToken?.symbol ||
-      null;
-
-    const bestName =
-      fullMetadata.name ||
-      (solanaFmData as any)?.tokenInfo?.name ||
-      (jupiterData as any)?.name ||
-      (dexData as any)?.pairs?.[0]?.baseToken?.name ||
-      null;
-
-    // Build comprehensive report
-    const report = [
-      "🕵️ **Token Investigation Report**",
-      "",
-      `**Address:** \`${mintAddress}\``,
-      "",
-      "**📋 Basic Metadata:**",
-      `• Decimals: ${basicMetadata.decimals}`,
-      `• Symbol: ${(basicMetadata as any).symbol || "N/A"}`,
-      `• Name: ${(basicMetadata as any).name || "N/A"}`,
-      "",
-      "**🔍 Full Metadata (Metaplex):**",
-      `• Symbol: ${fullMetadata.symbol || "N/A"}`,
-      `• Name: ${fullMetadata.name || "N/A"}`,
-      "",
-      "**🌐 SolanaFM API:**",
-      `• Symbol: ${(solanaFmData as any)?.tokenInfo?.symbol || "N/A"}`,
-      `• Name: ${(solanaFmData as any)?.tokenInfo?.name || "N/A"}`,
-      "",
-      "**🪐 Jupiter API:**",
-      `• Symbol: ${(jupiterData as any)?.symbol || "N/A"}`,
-      `• Name: ${(jupiterData as any)?.name || "N/A"}`,
-      "",
-      "**📊 DexScreener API:**",
-      `• Symbol: ${(dexData as any)?.pairs?.[0]?.baseToken?.symbol || "N/A"}`,
-      `• Name: ${(dexData as any)?.pairs?.[0]?.baseToken?.name || "N/A"}`,
-      "",
-      "**🚀 Pump.fun Status:**",
-      `• Is Pump.fun: ${pumpInfo.isPumpFun ? "Yes" : "No"}`,
-      `• Is Graduated: ${pumpInfo.isGraduated ? "Yes" : "No"}`,
-      "",
-      "**📝 Registration Status:**",
-      `• Already registered: ${existingToken ? "Yes" : "No"}`,
-      existingToken ? `• Current ticker: ${existingToken.token_ticker}` : "",
-      "",
-      "**💡 Best Available Symbol:**",
-      bestSymbol ? `**${bestSymbol}**` : "❌ No symbol found",
-      bestName ? `Name: ${bestName}` : "",
-      "",
-      "**🔧 Recommendation:**",
-      bestSymbol
-        ? `Add with: \`/addtoken ${mintAddress} ${bestSymbol}\``
-        : "❌ Cannot auto-detect symbol - might be old/unsupported token format",
-    ].filter((line) => line !== "");
-
-    await ctx.reply(report.join("\n"), { parse_mode: "Markdown" });
-  } catch (error) {
-    console.error(`❌ Error in token debug:`, error);
-    await ctx.reply(
-      `❌ Error investigating token: ${(error as Error).message}`
-    );
-  }
-});
-
-// Admin command to manually add tokens
-bot.command("addtoken", async (ctx) => {
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
-
-  if (!ctx.chat?.type || ctx.chat.type !== "private") {
-    await ctx.reply("❌ This command only works in private chats");
-    return;
-  }
-
-  // Simple admin check - you can replace this with your admin system
-  const keypair = wallet.getKeyPair(telegramId);
-  const walletAddress = keypair.publicKey.toBase58();
-  const isUserAdmin =
-    walletAddress === process.env["ADMIN_WALLET"] ||
-    telegramId.toString() === "73785873"; // Your telegram ID
-
-  if (!isUserAdmin) {
-    await ctx.reply("❌ You don't have permission to use this command");
-    return;
-  }
-
-  const args = ctx.message?.text?.split(" ").slice(1) || [];
-  if (args.length < 2) {
-    await ctx.reply(
-      "❌ Usage: /addtoken <mint_address> <ticker>\n\nExample: /addtoken CvuZk1iAPQsWdTy777a4dY78ue8z6HsRbk8UZCXvMSmB AISU"
-    );
-    return;
-  }
-
-  const [mintAddress, ticker] = args;
-  if (!mintAddress || !ticker) {
-    await ctx.reply("❌ Please provide both mint address and ticker");
-    return;
-  }
-
-  try {
-    console.log(`🔄 Admin adding token: ${ticker} (${mintAddress})`);
-    const registered = await tokenManager.addToken(
-      mintAddress,
-      ticker.toUpperCase()
-    );
-
-    if (registered) {
-      await ctx.reply(
-        `✅ Successfully added token: ${ticker.toUpperCase()}\n\nAddress: \`${mintAddress}\`\n\nThis token will now appear in wallet balances if you hold any.`,
-        {
-          parse_mode: "Markdown",
-        }
-      );
-      console.log(
-        `✅ Admin successfully added token: ${ticker.toUpperCase()} (${mintAddress})`
-      );
-    } else {
-      await ctx.reply(
-        `❌ Failed to add token: ${ticker.toUpperCase()}\n\nThe token might already exist or the address might be invalid.`
-      );
-      console.log(
-        `❌ Admin failed to add token: ${ticker.toUpperCase()} (${mintAddress})`
-      );
-    }
-  } catch (error) {
-    console.error(`❌ Error in admin addtoken:`, error);
-    await ctx.reply(`❌ Error adding token: ${(error as Error).message}`);
-  }
-});
-
 bot.command("help", async (ctx: Context) => {
   const helpSections = [
     "<b>📝 Available Commands:</b>",
@@ -2803,7 +2554,6 @@ bot.command("help", async (ctx: Context) => {
     "/debug - Show detailed wallet debug info (reply to user for their info too)",
     "/checktx &lt;signature&gt; - Check transaction details and status",
     "/oracle - Check Oracle configuration",
-    "/scan - Scan blockchain for orphaned games (private chat only)",
     "",
     "<b>ℹ️ Important:</b> ",
     "• Your player balance account will be automatically initialized when needed",
@@ -3151,43 +2901,6 @@ bot.command("oracle", async (ctx: Context) => {
   }
 });
 
-bot.command("scan", async (ctx: Context) => {
-  if (ctx.chat?.type !== "private") {
-    return ctx.reply(
-      "🔒 This command can only be used in private messages for security reasons.",
-      {
-        reply_to_message_id: ctx.message?.message_id,
-      }
-    );
-  }
-
-  try {
-    const processingMsg = await ctx.reply(
-      "🔍 Starting blockchain scan for orphaned games...",
-      {
-        reply_to_message_id: ctx.message?.message_id,
-      }
-    );
-
-    await gameManager.scanBlockchainForOrphanedGames();
-
-    const response = [
-      "✅ Blockchain scan completed successfully!",
-      "",
-      "Check console logs for detailed information.",
-    ].join("\n");
-
-    await ctx.api.editMessageText(
-      ctx.chat!.id,
-      processingMsg.message_id,
-      response,
-      { parse_mode: "HTML" }
-    );
-  } catch (error) {
-    await handleCommandError(ctx, error, "scan");
-  }
-});
-
 // ================================
 // CALLBACK QUERY HANDLING
 // ================================
@@ -3314,7 +3027,6 @@ bot.on("callback_query", async (ctx, next) => {
     "cmd_swap",
     "cmd_wrap",
     "cmd_privatekey",
-    "scan_confirm",
     "help_wallet",
     "help_games",
     "help_utility",
@@ -5744,7 +5456,6 @@ bot.callbackQuery("help_utility", async (ctx) => {
         "<code>/debug</code> - Show wallet debug info\n" +
         "<code>/checktx &lt;signature&gt;</code> - Check transaction status\n" +
         "<code>/oracle</code> - Check oracle status\n" +
-        "<code>/scan</code> - Scan blockchain (private only)\n" +
         "<code>/default [TOKEN]</code> - Show/set chat default token\n\n" +
         "🔐 <b>Security:</b>\n" +
         "• Some commands are private-chat only\n" +
