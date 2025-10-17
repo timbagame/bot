@@ -23,18 +23,29 @@ describe("PumpFunClient.getTokenMetadata fallbacks", () => {
     expect(meta?.decimals).toBe(6);
   });
 
-  test("falls back to DexScreener when pump.fun unavailable", async () => {
+  test("falls back to Jupiter metadata search when pump.fun unavailable", async () => {
     const pfc = new PumpFunClient(new ConnNoMeta() as any);
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = (typeof input === "string" ? input : input.toString());
       if (url.includes("frontend-api.pump.fun")) return new Response("oops", { status: 500 });
-      if (url.includes("dexscreener.com")) {
-        return new Response(JSON.stringify({ pairs: [{ baseToken: { symbol: "DSYM", name: "Dex Name" } }] }), { status: 200 });
+      if (url.includes("lite-api.jup.ag/tokens/v2/search")) {
+        return new Response(
+          JSON.stringify([
+            {
+              id: "MintDex111111111111111111111111111111111111",
+              symbol: "JUPSYM",
+              name: "Jupiter Name",
+              decimals: 4,
+            },
+          ]),
+          { status: 200 }
+        );
       }
       return new Response("not used", { status: 404 });
     }) as any;
     const meta = await pfc.getTokenMetadata("MintDex111111111111111111111111111111111111");
-    expect(meta?.symbol).toBe("DSYM");
+    expect(meta?.symbol).toBe("JUPSYM");
+    expect(meta?.decimals).toBe(4);
   });
 });
 

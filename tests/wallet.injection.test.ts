@@ -12,8 +12,15 @@ const makeResponse = (ok: boolean, status: number, body: any) => ({
 function makeMockFetch() {
   return async (input: string) => {
     const url = String(input);
-    if (url.includes("tokens.jup.ag/token/")) {
-      return makeResponse(true, 200, { symbol: "JUPSYM", name: "Jupiter Token" });
+    if (url.includes("lite-api.jup.ag/tokens/v2/search")) {
+      return makeResponse(true, 200, [
+        {
+          id: "11111111111111111111111111111111",
+          symbol: "JUPSYM",
+          name: "Jupiter Token",
+          decimals: 9,
+        },
+      ]);
     }
     return makeResponse(false, 404, {});
   };

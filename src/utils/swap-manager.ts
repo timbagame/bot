@@ -390,9 +390,6 @@ export class SwapManager {
           const swapResponse = await this.jupiterClient.getSwapTransaction({
             userPublicKey: userKeypair.publicKey.toBase58(),
             quoteResponse: quote,
-            wrapAndUnwrapSol: true,
-            useSharedAccounts: true,
-            dynamicComputeUnitLimit: true,
           });
 
           const sponsorLamports = Math.max(
@@ -837,9 +834,8 @@ export class SwapManager {
             slippageBps: quote.slippage * 100,
             priceImpactPct: quote.priceImpact || "0",
             routePlan: [],
-            contextSlot: 0,
-            timeTaken: 0,
-            platformFee: quote.platformFee,
+            totalTime: 0,
+            platformFee: quote.platformFee ?? null,
           },
           inputDecimals,
           outputDecimals,
