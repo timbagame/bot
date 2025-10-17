@@ -54,7 +54,6 @@ src/
 - `/privatekey` - Get wallet private key (private chat only)
 - `/debug` - Show detailed wallet information
 - `/oracle` - Check oracle configuration
-- `/scan` - Scan blockchain for orphaned games
 
 ## 🏗️ Architecture
 

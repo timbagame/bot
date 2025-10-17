@@ -1,4 +1,4 @@
-import { expect, test, beforeAll } from "bun:test";
+import { expect, test, beforeAll, afterAll } from "bun:test";
 
 // Ensure required env vars are set before importing the bot module
 process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
@@ -6,7 +6,17 @@ process.env.MNEMONIC =
   process.env.MNEMONIC ||
   "test walk nut penalty hip pave soap entry language right filter choice";
 process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost";
+const previousPricesEnabled = process.env["PRICES_ENABLED"];
 process.env["PRICES_ENABLED"] = "false";
+
+afterAll(() => {
+  if (previousPricesEnabled === undefined) {
+    process.env["PRICES_ENABLED"] = "true";
+    return;
+  }
+
+  process.env["PRICES_ENABLED"] = previousPricesEnabled;
+});
 
 let bot: any;
 let wallet: any;

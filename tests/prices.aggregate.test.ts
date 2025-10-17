@@ -4,7 +4,7 @@ import { getPricesUSD } from "../src/utils/prices";
 test("getPricesUSD aggregates ids with custom fetch (no cache hit)", async () => {
   const fetchImpl = (async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input.toString();
-    if (url.includes("price.jup.ag")) {
+    if (url.includes("jup.ag/price")) {
       const id = new URL(url).searchParams.get("ids")!;
       return new Response(JSON.stringify({ data: { [id]: { price: id.endsWith("A") ? 10 : 20 } } }), { status: 200 });
     }
