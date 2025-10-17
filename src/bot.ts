@@ -1167,17 +1167,37 @@ bot.command(["coinflip", "cf"], async (ctx) => {
         }
         const maxPlayers = inferredCf.value;
 
+        const tokenMetadata = await wallet.getTokenMetadata(
+          parsedAmount.tokenMint
+        );
+        const { raw: minAmountRaw } = await getContractMinimumAmount(
+          parsedAmount.tokenMint,
+          tokenMetadata.decimals
+        );
+
+        if (parsedAmount.amount < minAmountRaw) {
+          const formattedMinimum = wallet.formatTokenBalance(
+            minAmountRaw,
+            tokenMetadata.decimals
+          );
+          return ctx.reply(
+            `❌ Amount below contract minimum of ${formattedMinimum} ${parsedAmount.tokenTicker}.`
+          );
+        }
+
         // Check user has enough balance
         const userBalance = await wallet.getTokenBalance(
           telegramId,
           parsedAmount.tokenMint,
           { createIfMissing: true }
         );
-        const tokenMetadata = await wallet.getTokenMetadata(parsedAmount.tokenMint);
         const requiredAmount = parsedAmount.amount;
 
         if (userBalance < requiredAmount) {
-          const formatted = wallet.formatTokenBalance(userBalance, tokenMetadata.decimals);
+          const formatted = wallet.formatTokenBalance(
+            userBalance,
+            tokenMetadata.decimals
+          );
           return ctx.reply(
             `❌ Insufficient balance. You have ${formatted} ${parsedAmount.tokenTicker}, need ${parsedAmount.formattedAmount}.`
           );
@@ -1371,17 +1391,37 @@ bot.command(["giveaway", "ga"], async (ctx) => {
         }
         const maxPlayers = inferredGa.value;
 
+        const tokenMetadata = await wallet.getTokenMetadata(
+          parsedAmount.tokenMint
+        );
+        const { raw: minAmountRaw } = await getContractMinimumAmount(
+          parsedAmount.tokenMint,
+          tokenMetadata.decimals
+        );
+
+        if (parsedAmount.amount < minAmountRaw) {
+          const formattedMinimum = wallet.formatTokenBalance(
+            minAmountRaw,
+            tokenMetadata.decimals
+          );
+          return ctx.reply(
+            `❌ Amount below contract minimum of ${formattedMinimum} ${parsedAmount.tokenTicker}.`
+          );
+        }
+
         // Check user has enough balance
         const userBalance = await wallet.getTokenBalance(
           telegramId,
           parsedAmount.tokenMint,
           { createIfMissing: true }
         );
-        const tokenMetadata = await wallet.getTokenMetadata(parsedAmount.tokenMint);
         const requiredAmount = parsedAmount.amount; // This is already in raw format from parseAmount
 
         if (userBalance < requiredAmount) {
-          const formatted = wallet.formatTokenBalance(userBalance, tokenMetadata.decimals);
+          const formatted = wallet.formatTokenBalance(
+            userBalance,
+            tokenMetadata.decimals
+          );
           return ctx.reply(
             `❌ Insufficient balance. You have ${formatted} ${parsedAmount.tokenTicker}, need ${parsedAmount.formattedAmount}.`
           );
