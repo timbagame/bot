@@ -4658,34 +4658,43 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
       const telegramId = BigInt(transaction.userId);
       let txSignature: string;
       let formattedAmount: string;
+      let withdrawAllResult:
+        | Awaited<ReturnType<typeof wallet.withdrawAllSol>>
+        | null = null;
 
       if (transaction.token === "SOL") {
         const balanceLamports = await wallet.getBalance(telegramId);
-        let lamportsToSend: number;
-
         if (transaction.amount === "max") {
-          lamportsToSend = clampLamportsForFees(balanceLamports);
-          if (lamportsToSend <= 0) {
+          withdrawAllResult = await wallet.withdrawAllSol(
+            telegramId,
+            toPublicKey
+          );
+
+          if (withdrawAllResult.totalLamportsSent <= 0) {
             throw new Error(
-              "Not enough SOL to cover fees. Keep a small amount for transaction costs."
+              "Unable to withdraw SOL. Ensure you have enough balance to cover fees."
             );
           }
-          formattedAmount = wallet.formatSolBalance(lamportsToSend);
+
+          txSignature = withdrawAllResult.signature;
+          formattedAmount = wallet.formatSolBalance(
+            withdrawAllResult.totalLamportsSent
+          );
         } else {
-          lamportsToSend = toRawAmount(transaction.amount, 9);
+          const lamportsToSend = toRawAmount(transaction.amount, 9);
           if (lamportsToSend + SOL_FEE_BUFFER_LAMPORTS > balanceLamports) {
             throw new Error("Insufficient SOL balance for this transfer");
           }
           formattedAmount = transaction.amount;
+
+          const solAmount = lamportsToSend / LAMPORTS_PER_SOL;
+
+          txSignature = await wallet.transferSol(
+            telegramId,
+            toPublicKey,
+            solAmount
+          );
         }
-
-        const solAmount = lamportsToSend / LAMPORTS_PER_SOL;
-
-        txSignature = await wallet.transferSol(
-          telegramId,
-          toPublicKey,
-          solAmount
-        );
       } else {
         if (!transaction.token) {
           throw new Error("Token not specified in transaction");
@@ -4740,16 +4749,55 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
       clearWalletCache(telegramId);
 
       const solscanUrl = `https://solscan.io/tx/${txSignature}`;
-      await ctx.editMessageText(
-        `✅ <b>TRANSACTION COMPLETED</b>\n\nSent ${formattedAmount} ${transaction.token}\nTo: <code>${transaction.address}</code>\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`,
-        {
-          parse_mode: "HTML",
-          link_preview_options: { is_disabled: true },
-          reply_markup: new InlineKeyboard()
-            .text("← Back to Wallet", "main_wallet")
-            .row(),
+
+      const successMessage = (() => {
+        if (
+          withdrawAllResult &&
+          transaction.token === "SOL" &&
+          transaction.amount === "max"
+        ) {
+          const details: string[] = [
+            `✅ <b>TRANSACTION COMPLETED</b>`,
+            "",
+            `Sent ${formattedAmount} SOL`,
+          ];
+
+          if (withdrawAllResult.nativeLamportsSent > 0) {
+            details.push(
+              `• Native SOL: ${wallet.formatSolBalance(
+                withdrawAllResult.nativeLamportsSent
+              )} SOL`
+            );
+          }
+
+          if (withdrawAllResult.wsolLamportsSent > 0) {
+            details.push(
+              `• WSOL (unwrapped): ${wallet.formatSolBalance(
+                withdrawAllResult.wsolLamportsSent
+              )} SOL`
+            );
+          }
+
+          details.push(
+            "",
+            `To: <code>${transaction.address}</code>`,
+            "",
+            `🔗 <a href="${solscanUrl}">View on Solscan</a>`
+          );
+
+          return details.join("\n");
         }
-      );
+
+        return `✅ <b>TRANSACTION COMPLETED</b>\n\nSent ${formattedAmount} ${transaction.token}\nTo: <code>${transaction.address}</code>\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`;
+      })();
+
+      await ctx.editMessageText(successMessage, {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+        reply_markup: new InlineKeyboard()
+          .text("← Back to Wallet", "main_wallet")
+          .row(),
+      });
     } catch (txError) {
       console.error("Transaction failed:", txError);
       await ctx.editMessageText(
