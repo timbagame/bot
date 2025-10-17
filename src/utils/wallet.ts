@@ -97,6 +97,7 @@ export class WalletManager {
     lastValidBlockHeight: number;
     timestamp: number;
   } | null = null;
+  private rentExemptMinimumLamports: number | null = null;
 
   private constructor(mnemonic: string, deps?: WalletDeps) {
     this.mnemonic = mnemonic;
@@ -790,7 +791,13 @@ export class WalletManager {
     const userKeypair = this.getKeyPair(telegramId);
     const payer = userKeypair.publicKey;
     const nativeLamports = await this.getBalance(telegramId);
-    const bufferLamports = Math.ceil(MIN_SOL_FOR_TX * LAMPORTS_PER_SOL);
+    const fallbackBufferLamports = Math.ceil(MIN_SOL_FOR_TX * LAMPORTS_PER_SOL);
+    const rentExemptMinimumLamports =
+      await this.getRentExemptMinimumLamports();
+    const bufferLamports = Math.max(
+      fallbackBufferLamports,
+      rentExemptMinimumLamports
+    );
 
     const debugPrefix = "[Withdraw SOL]";
     const formatLamports = (lamports: number) =>
@@ -851,7 +858,11 @@ export class WalletManager {
         wsolAmount
       )}, WSOL account lamports ${formatLamports(
         wsolAccountLamports
-      )}, buffer ${formatLamports(bufferLamports)}`
+      )}, rent exempt minimum ${formatLamports(
+        rentExemptMinimumLamports
+      )}, buffer ${formatLamports(bufferLamports)} (fallback ${formatLamports(
+        fallbackBufferLamports
+      )})`
     );
 
     if (nativeLamports <= 0 && wsolAmount <= 0 && wsolAccountLamports <= 0) {
@@ -1372,5 +1383,32 @@ export class WalletManager {
     );
 
     return { signature, amountLamports };
+  }
+
+  private async getRentExemptMinimumLamports(): Promise<number> {
+    if (this.rentExemptMinimumLamports !== null) {
+      return this.rentExemptMinimumLamports;
+    }
+
+    try {
+      const rentExempt = await this.connection.getMinimumBalanceForRentExemption(
+        0,
+        "confirmed"
+      );
+
+      if (rentExempt > 0) {
+        this.rentExemptMinimumLamports = rentExempt;
+        return rentExempt;
+      }
+    } catch (error) {
+      console.warn(
+        "[Withdraw SOL] Failed to fetch rent-exempt minimum, using fallback:",
+        error
+      );
+    }
+
+    const fallback = Math.ceil(MIN_SOL_FOR_TX * LAMPORTS_PER_SOL);
+    this.rentExemptMinimumLamports = fallback;
+    return fallback;
   }
 }
