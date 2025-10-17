@@ -9,6 +9,7 @@ import {
   LAMPORTS_PER_SOL,
   SolanaJSONRPCError,
   SystemProgram,
+  SendTransactionError,
 } from "@solana/web3.js";
 import {
   getAssociatedTokenAddress,
@@ -30,6 +31,7 @@ import {
   MAX_RETRIES,
   CONFIRMATION_TIMEOUT_MS,
   WSOL_MINT,
+  MIN_SOL_FOR_TX,
 } from "./constants";
 import { formatAmount } from "./format-amount";
 import { fetchJupiterTokenMetadata } from "./jupiter";
@@ -95,6 +97,7 @@ export class WalletManager {
     lastValidBlockHeight: number;
     timestamp: number;
   } | null = null;
+  private rentExemptMinimumLamports: number | null = null;
 
   private constructor(mnemonic: string, deps?: WalletDeps) {
     this.mnemonic = mnemonic;
@@ -788,6 +791,18 @@ export class WalletManager {
     const userKeypair = this.getKeyPair(telegramId);
     const payer = userKeypair.publicKey;
     const nativeLamports = await this.getBalance(telegramId);
+    const fallbackBufferLamports = Math.ceil(MIN_SOL_FOR_TX * LAMPORTS_PER_SOL);
+    const rentExemptMinimumLamports =
+      await this.getRentExemptMinimumLamports();
+    const bufferLamports = Math.max(
+      fallbackBufferLamports,
+      rentExemptMinimumLamports
+    );
+    const targetReserveLamports = 0;
+
+    const debugPrefix = "[Withdraw SOL]";
+    const formatLamports = (lamports: number) =>
+      `${lamports} lamports (${(lamports / LAMPORTS_PER_SOL).toFixed(9)} SOL)`;
 
     const wsolMint = new PublicKey(WSOL_MINT);
     const wsolAta = await getAssociatedTokenAddress(
@@ -817,6 +832,11 @@ export class WalletManager {
       } else {
         wsolAccountLamports = wsolAmount;
       }
+      console.log(
+        `${debugPrefix} Found WSOL account ${wsolAta.toBase58()} with token balance ${formatLamports(
+          wsolAmount
+        )} and rent ${formatLamports(wsolAccountLamports)}`
+      );
     } catch (error: any) {
       const isMissingAccount =
         error instanceof TokenAccountNotFoundError ||
@@ -824,33 +844,73 @@ export class WalletManager {
         (error instanceof SolanaJSONRPCError &&
           error.message?.includes("could not find account"));
       if (!isMissingAccount) {
+        console.error(`${debugPrefix} Failed to load WSOL account:`, error);
         throw error;
       }
+      console.log(
+        `${debugPrefix} No WSOL account found for ${payer.toBase58()}`
+      );
     }
+
+    console.log(
+      `${debugPrefix} Native balance ${formatLamports(
+        nativeLamports
+      )}, WSOL tokens ${formatLamports(
+        wsolAmount
+      )}, WSOL account lamports ${formatLamports(
+        wsolAccountLamports
+      )}, rent exempt minimum ${formatLamports(
+        rentExemptMinimumLamports
+      )}, buffer ${formatLamports(bufferLamports)} (fallback ${formatLamports(
+        fallbackBufferLamports
+      )}), target reserve ${formatLamports(targetReserveLamports)}`
+    );
 
     if (nativeLamports <= 0 && wsolAmount <= 0 && wsolAccountLamports <= 0) {
       throw new Error("No SOL or WSOL available to withdraw.");
     }
 
     const instructions: TransactionInstruction[] = [];
+    let wsolLamportsSent = 0;
+    let totalLamportsSent = 0;
+
     if (wsolAccountExists && wsolAccountLamports > 0) {
-      instructions.push(createSyncNativeInstruction(wsolAta));
+      if (wsolAmount > 0) {
+        instructions.push(createSyncNativeInstruction(wsolAta));
+        console.log(
+          `${debugPrefix} Added sync instruction for WSOL account ${wsolAta.toBase58()}`
+        );
+      }
       instructions.push(
-        createCloseAccountInstruction(wsolAta, destination, payer)
+        createCloseAccountInstruction(wsolAta, payer, payer)
+      );
+      wsolLamportsSent = wsolAccountLamports;
+      console.log(
+        `${debugPrefix} Added close instruction for WSOL account ${wsolAta.toBase58()} returning ${formatLamports(
+          wsolLamportsSent
+        )}`
       );
     }
 
     let nativeLamportsSent = 0;
-    const wsolLamportsSent = wsolAmount;
-    let totalLamportsSent = wsolLamportsSent;
 
     if (instructions.length > 0) {
       if (nativeLamports < 1) {
+        console.warn(
+          `${debugPrefix} Cannot unwrap WSOL because native balance ${formatLamports(
+            nativeLamports
+          )} is below minimum fee`
+        );
         throw new Error(
           "Not enough SOL to pay network fees when unwrapping WSOL. Keep a small SOL balance and try again."
         );
       }
       const feeForCloseOnly = await this.estimateFee(payer, instructions);
+      console.log(
+        `${debugPrefix} Estimated fee for close-only transaction: ${formatLamports(
+          feeForCloseOnly
+        )}`
+      );
       if (nativeLamports < feeForCloseOnly) {
         throw new Error(
           "Not enough SOL to cover transaction fees. Top up SOL and try again."
@@ -858,7 +918,15 @@ export class WalletManager {
       }
     }
 
-    if (nativeLamports > 0) {
+    const totalAvailableLamports = nativeLamports + wsolLamportsSent;
+
+    console.log(
+      `${debugPrefix} Total available lamports after WSOL close: ${formatLamports(
+        totalAvailableLamports
+      )}`
+    );
+
+    if (totalAvailableLamports > 0) {
       const placeholderTransfer = SystemProgram.transfer({
         fromPubkey: payer,
         toPubkey: destination,
@@ -870,34 +938,109 @@ export class WalletManager {
         placeholderTransfer,
       ]);
 
-      if (nativeLamports <= feeWithTransfer && instructions.length === 0) {
+      console.log(
+        `${debugPrefix} Estimated fee with transfer: ${formatLamports(
+          feeWithTransfer
+        )}`
+      );
+
+      if (nativeLamports <= feeWithTransfer) {
+        if (instructions.length === 0) {
+          throw new Error(
+            "Not enough SOL to cover the transaction fee. Leave a small amount for fees and try again."
+          );
+        }
+
         throw new Error(
-          "Not enough SOL to cover the transaction fee. Leave a small amount for fees and try again."
+          "Not enough SOL to cover transaction fees before unwrapping WSOL. Top up SOL and try again."
         );
       }
 
-      if (nativeLamports > feeWithTransfer) {
-        nativeLamportsSent = nativeLamports - feeWithTransfer;
-        if (nativeLamportsSent > 0) {
-          instructions.push(
-            SystemProgram.transfer({
-              fromPubkey: payer,
-              toPubkey: destination,
-              lamports: nativeLamportsSent,
-            })
-          );
-          totalLamportsSent += nativeLamportsSent;
-        }
+      const maxTransferLamports =
+        totalAvailableLamports - feeWithTransfer - targetReserveLamports;
+
+      console.log(
+        `${debugPrefix} Lamports available to transfer after reserving fees ${formatLamports(
+          maxTransferLamports
+        )} (fee ${formatLamports(feeWithTransfer)}, reserve ${formatLamports(
+          targetReserveLamports
+        )})`
+      );
+
+      if (maxTransferLamports <= 0) {
+        throw new Error(
+          "Not enough SOL or WSOL to withdraw after paying transaction fees."
+        );
       }
+
+      const transferLamports = Math.min(
+        maxTransferLamports,
+        totalAvailableLamports
+      );
+
+      const nativeAvailableForTransfer = Math.max(
+        nativeLamports - feeWithTransfer,
+        0
+      );
+
+      nativeLamportsSent = Math.min(
+        nativeAvailableForTransfer,
+        transferLamports
+      );
+
+      const wsolContribution = Math.min(
+        wsolLamportsSent,
+        Math.max(transferLamports - nativeLamportsSent, 0)
+      );
+
+      wsolLamportsSent = wsolContribution;
+      totalLamportsSent = nativeLamportsSent + wsolLamportsSent;
+
+      const finalReserveLamports =
+        totalAvailableLamports - transferLamports - feeWithTransfer;
+
+      console.log(
+        `${debugPrefix} Transfer plan: native ${formatLamports(
+          nativeLamportsSent
+        )}, WSOL contribution ${formatLamports(
+          wsolLamportsSent
+        )}, total ${formatLamports(
+          totalLamportsSent
+        )}, final reserve ${formatLamports(finalReserveLamports)}`
+      );
+
+      instructions.push(
+        SystemProgram.transfer({
+          fromPubkey: payer,
+          toPubkey: destination,
+          lamports: transferLamports,
+        })
+      );
+      console.log(
+        `${debugPrefix} Added system transfer of ${formatLamports(
+          transferLamports
+        )} to ${destination.toBase58()}`
+      );
     }
 
     if (instructions.length === 0) {
+      console.error(
+        `${debugPrefix} No instructions generated despite available balances. Native ${formatLamports(
+          nativeLamports
+        )}, WSOL lamports ${formatLamports(wsolLamportsSent)}`
+      );
       throw new Error(
         "Unable to build withdrawal transaction. Ensure your balance is above the fee cost."
       );
     }
 
+    console.log(
+      `${debugPrefix} Final instruction count: ${instructions.length}`
+    );
     const signature = await this.sendTransaction(instructions, [userKeypair]);
+    console.log(
+      `${debugPrefix} Sent withdraw-all transaction ${signature}`
+    );
     return {
       signature,
       nativeLamportsSent,
@@ -1021,13 +1164,28 @@ export class WalletManager {
     const tx = new VersionedTransaction(message);
     tx.sign(signers);
 
-    const signature = await retryWithBackoff(async () => {
-      return await this.connection.sendTransaction(tx, {
-        skipPreflight: false,
-        preflightCommitment: "confirmed",
-        maxRetries: 3,
+    let signature: string;
+    try {
+      signature = await retryWithBackoff(async () => {
+        return await this.connection.sendTransaction(tx, {
+          skipPreflight: false,
+          preflightCommitment: "confirmed",
+          maxRetries: 3,
+        });
       });
-    });
+    } catch (error: any) {
+      if (error instanceof SendTransactionError) {
+        try {
+          const logs = await error.getLogs(this.connection);
+          if (logs && logs.length > 0) {
+            console.error("Transaction simulation logs:", logs.join("\n"));
+          }
+        } catch (logError) {
+          console.error("Failed to fetch transaction logs:", logError);
+        }
+      }
+      throw error;
+    }
 
     console.log(`📤 Transaction sent: ${signature}`);
     return signature;
@@ -1235,5 +1393,32 @@ export class WalletManager {
     );
 
     return { signature, amountLamports };
+  }
+
+  private async getRentExemptMinimumLamports(): Promise<number> {
+    if (this.rentExemptMinimumLamports !== null) {
+      return this.rentExemptMinimumLamports;
+    }
+
+    try {
+      const rentExempt = await this.connection.getMinimumBalanceForRentExemption(
+        0,
+        "confirmed"
+      );
+
+      if (rentExempt > 0) {
+        this.rentExemptMinimumLamports = rentExempt;
+        return rentExempt;
+      }
+    } catch (error) {
+      console.warn(
+        "[Withdraw SOL] Failed to fetch rent-exempt minimum, using fallback:",
+        error
+      );
+    }
+
+    const fallback = Math.ceil(MIN_SOL_FOR_TX * LAMPORTS_PER_SOL);
+    this.rentExemptMinimumLamports = fallback;
+    return fallback;
   }
 }

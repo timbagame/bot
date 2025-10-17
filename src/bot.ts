@@ -4635,13 +4635,21 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
       return;
     }
 
+    const amountSummary =
+      transaction.amountDisplay ??
+      (transaction.amount === "max"
+        ? `MAX ${transaction.token}`
+        : `${transaction.amount} ${transaction.token}`);
+
     console.log(
-      `✅ Confirmed send: ${transaction.amount} ${transaction.token} to ${transaction.address}`
+      `✅ Confirmed send: ${amountSummary} to ${transaction.address}`
     );
 
     // Update message to show processing state
     await ctx.editMessageText(
-      `🔄 <b>PROCESSING TRANSACTION</b>\n\nSending ${transaction.amount} ${transaction.token}...\n\n<i>Please wait...</i>`,
+      `🔄 <b>PROCESSING TRANSACTION</b>\n\nSending ${escapeHtml(
+        amountSummary
+      )}...\n\n<i>Please wait...</i>`,
       {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard(),
@@ -4658,34 +4666,43 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
       const telegramId = BigInt(transaction.userId);
       let txSignature: string;
       let formattedAmount: string;
+      let withdrawAllResult:
+        | Awaited<ReturnType<typeof wallet.withdrawAllSol>>
+        | null = null;
 
       if (transaction.token === "SOL") {
         const balanceLamports = await wallet.getBalance(telegramId);
-        let lamportsToSend: number;
-
         if (transaction.amount === "max") {
-          lamportsToSend = clampLamportsForFees(balanceLamports);
-          if (lamportsToSend <= 0) {
+          withdrawAllResult = await wallet.withdrawAllSol(
+            telegramId,
+            toPublicKey
+          );
+
+          if (withdrawAllResult.totalLamportsSent <= 0) {
             throw new Error(
-              "Not enough SOL to cover fees. Keep a small amount for transaction costs."
+              "Unable to withdraw SOL. Ensure you have enough balance to cover fees."
             );
           }
-          formattedAmount = wallet.formatSolBalance(lamportsToSend);
+
+          txSignature = withdrawAllResult.signature;
+          formattedAmount = wallet.formatSolBalance(
+            withdrawAllResult.totalLamportsSent
+          );
         } else {
-          lamportsToSend = toRawAmount(transaction.amount, 9);
+          const lamportsToSend = toRawAmount(transaction.amount, 9);
           if (lamportsToSend + SOL_FEE_BUFFER_LAMPORTS > balanceLamports) {
             throw new Error("Insufficient SOL balance for this transfer");
           }
           formattedAmount = transaction.amount;
+
+          const solAmount = lamportsToSend / LAMPORTS_PER_SOL;
+
+          txSignature = await wallet.transferSol(
+            telegramId,
+            toPublicKey,
+            solAmount
+          );
         }
-
-        const solAmount = lamportsToSend / LAMPORTS_PER_SOL;
-
-        txSignature = await wallet.transferSol(
-          telegramId,
-          toPublicKey,
-          solAmount
-        );
       } else {
         if (!transaction.token) {
           throw new Error("Token not specified in transaction");
@@ -4740,16 +4757,55 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
       clearWalletCache(telegramId);
 
       const solscanUrl = `https://solscan.io/tx/${txSignature}`;
-      await ctx.editMessageText(
-        `✅ <b>TRANSACTION COMPLETED</b>\n\nSent ${formattedAmount} ${transaction.token}\nTo: <code>${transaction.address}</code>\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`,
-        {
-          parse_mode: "HTML",
-          link_preview_options: { is_disabled: true },
-          reply_markup: new InlineKeyboard()
-            .text("← Back to Wallet", "main_wallet")
-            .row(),
+
+      const successMessage = (() => {
+        if (
+          withdrawAllResult &&
+          transaction.token === "SOL" &&
+          transaction.amount === "max"
+        ) {
+          const details: string[] = [
+            `✅ <b>TRANSACTION COMPLETED</b>`,
+            "",
+            `Sent ${formattedAmount} SOL`,
+          ];
+
+          if (withdrawAllResult.nativeLamportsSent > 0) {
+            details.push(
+              `• Native SOL: ${wallet.formatSolBalance(
+                withdrawAllResult.nativeLamportsSent
+              )} SOL`
+            );
+          }
+
+          if (withdrawAllResult.wsolLamportsSent > 0) {
+            details.push(
+              `• WSOL (unwrapped): ${wallet.formatSolBalance(
+                withdrawAllResult.wsolLamportsSent
+              )} SOL`
+            );
+          }
+
+          details.push(
+            "",
+            `To: <code>${transaction.address}</code>`,
+            "",
+            `🔗 <a href="${solscanUrl}">View on Solscan</a>`
+          );
+
+          return details.join("\n");
         }
-      );
+
+        return `✅ <b>TRANSACTION COMPLETED</b>\n\nSent ${formattedAmount} ${transaction.token}\nTo: <code>${transaction.address}</code>\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`;
+      })();
+
+      await ctx.editMessageText(successMessage, {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+        reply_markup: new InlineKeyboard()
+          .text("← Back to Wallet", "main_wallet")
+          .row(),
+      });
     } catch (txError) {
       console.error("Transaction failed:", txError);
       await ctx.editMessageText(
@@ -5150,27 +5206,13 @@ bot.on("callback_query", async (ctx, next) => {
 
     const keyboard = new InlineKeyboard();
 
-    // Add quick amount buttons based on token type
-    if (token === "SOL") {
-      keyboard
-        .text("0.01 SOL", `send_amount_${token}_0.01`)
-        .text("0.1 SOL", `send_amount_${token}_0.1`)
-        .row()
-        .text("0.5 SOL", `send_amount_${token}_0.5`)
-        .text("1 SOL", `send_amount_${token}_1`)
-        .row()
-        .text("Max", `send_amount_${token}_max`)
-        .row();
-    } else {
-      // For tokens, use different amounts
-      keyboard
-        .text("10", `send_amount_${token}_10`)
-        .text("100", `send_amount_${token}_100`)
-        .row()
-        .text("1000", `send_amount_${token}_1000`)
-        .text("Max", `send_amount_${token}_max`)
-        .row();
-    }
+    keyboard
+      .text("25%", `send_amount_${token}_pct25`)
+      .text("50%", `send_amount_${token}_pct50`)
+      .row()
+      .text("75%", `send_amount_${token}_pct75`)
+      .text("100%", `send_amount_${token}_pct100`)
+      .row();
 
     keyboard
       .text("✏️ Custom Amount", `send_custom_${token}`)
@@ -5197,16 +5239,114 @@ bot.on("callback_query", async (ctx, next) => {
   }
 
   try {
-    const parts = callbackData.replace("send_amount_", "").split("_");
-    const token = parts[0];
-    const amount = parts[1];
+    const segments = callbackData.replace("send_amount_", "").split("_");
+    const token = segments.shift() ?? "";
+    const selectionKey = segments.join("_");
+    if (!token || !selectionKey) {
+      throw new Error("Invalid amount selection");
+    }
+
     const userId = ctx.from?.id?.toString();
     if (!userId) return;
 
-    console.log(`🔔 Amount selected: ${amount} ${token}`);
+    let resolvedAmount = selectionKey;
+    let amountDisplayLabel = selectionKey;
+    let logLabel = selectionKey;
+
+    const formatForStorage = (raw: number, decimals: number) =>
+      formatAmount(raw, decimals, { maxFractionDigits: decimals, trim: true });
+    const formatForDisplay = (raw: number, decimals: number) => {
+      if (raw <= 0) {
+        return "0";
+      }
+      const preferredDigits = Math.min(decimals, 6);
+      const short = formatAmount(raw, decimals, {
+        maxFractionDigits: preferredDigits,
+        trim: true,
+      });
+      if (short !== "0") {
+        return short;
+      }
+      return formatAmount(raw, decimals, {
+        maxFractionDigits: Math.min(decimals, 9),
+        trim: true,
+      });
+    };
+
+    if (selectionKey === "max") {
+      resolvedAmount = "max";
+      amountDisplayLabel = `100% (~all ${token})`;
+      logLabel = "100%";
+    } else if (selectionKey.startsWith("pct")) {
+      const percentageRaw = Number(selectionKey.replace("pct", ""));
+      if (!Number.isFinite(percentageRaw) || percentageRaw <= 0) {
+        throw new Error("Invalid percentage selection");
+      }
+
+      const percentage = Math.min(Math.max(Math.trunc(percentageRaw), 1), 100);
+      const telegramId = BigInt(ctx.from?.id || 0);
+      const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
+
+      if (token === "SOL") {
+        const totalLamports = solBalance;
+        if (totalLamports <= 0) {
+          throw new Error("No SOL balance available");
+        }
+
+        if (percentage === 100) {
+          resolvedAmount = "max";
+          const approx = formatForDisplay(totalLamports, 9);
+          amountDisplayLabel = `100% (~${approx} SOL)`;
+          logLabel = "100%";
+        } else {
+          const lamports = Math.floor((totalLamports * percentage) / 100);
+          if (lamports <= 0) {
+            throw new Error("Selected percentage results in zero SOL");
+          }
+          resolvedAmount = formatForStorage(lamports, 9);
+          const approx = formatForDisplay(lamports, 9);
+          amountDisplayLabel = `${percentage}% (~${approx} SOL)`;
+          logLabel = `${percentage}%`;
+        }
+      } else {
+        const selectedToken = tokenBalances.find((t) => t.ticker === token);
+        if (!selectedToken) {
+          throw new Error(`Token ${token} not found in wallet`);
+        }
+
+        const totalRaw = Math.floor(selectedToken.balance);
+        if (totalRaw <= 0) {
+          throw new Error(`No ${token} balance available`);
+        }
+
+        if (percentage === 100) {
+          resolvedAmount = "max";
+          const approx = formatForDisplay(totalRaw, selectedToken.decimals);
+          amountDisplayLabel = `100% (~${approx} ${token})`;
+          logLabel = "100%";
+        } else {
+          const rawAmount = Math.floor((selectedToken.balance * percentage) / 100);
+          if (rawAmount <= 0) {
+            throw new Error("Selected percentage results in zero amount");
+          }
+          resolvedAmount = formatForStorage(rawAmount, selectedToken.decimals);
+          const approx = formatForDisplay(rawAmount, selectedToken.decimals);
+          amountDisplayLabel = `${percentage}% (~${approx} ${token})`;
+          logLabel = `${percentage}%`;
+        }
+      }
+    } else {
+      resolvedAmount = selectionKey;
+      amountDisplayLabel = `${selectionKey} ${token}`;
+      logLabel = selectionKey;
+    }
+
+    console.log(
+      `🔔 Amount selected: ${logLabel} ${token} (resolved: ${resolvedAmount})`
+    );
 
     const response = [
-      `📤 <b>SEND ${amount === "max" ? "MAX" : amount} ${token}</b>`,
+      `📤 <b>SEND ${escapeHtml(amountDisplayLabel)}</b>`,
       "",
       `<b>Step 2:</b> Enter destination address`,
       "",
@@ -5231,12 +5371,13 @@ bot.on("callback_query", async (ctx, next) => {
     setUserState(userId, {
       type: "send_address",
       token: token,
-      amount: amount,
+      amount: resolvedAmount,
+      amountDisplay: amountDisplayLabel,
       messageId: ctx.callbackQuery?.message?.message_id,
       chatId: ctx.chat?.id,
     });
 
-    await ctx.answerCallbackQuery("Send the wallet address as a message");
+    await ctx.answerCallbackQuery(`Selected ${amountDisplayLabel}`);
   } catch (error) {
     console.error("Error in send amount selection:", error);
     await ctx.answerCallbackQuery("❌ Error processing amount");
@@ -7785,6 +7926,7 @@ const handleCustomAmountInput = async (
     type: "send_address",
     token: token,
     amount: amount,
+    amountDisplay: `${amount} ${token}`,
     messageId: userState.messageId,
     chatId: ctx.chat?.id,
   });
@@ -7800,13 +7942,16 @@ const handleAddressInput = async (
 ) => {
   const token = userState.token;
   const amount = userState.amount;
+  const amountDisplay =
+    userState.amountDisplay ??
+    (amount === "max" ? `MAX ${token}` : `${amount} ${token}`);
 
   // Basic Solana address validation (should be ~44 characters)
   if (address.length < 30 || address.length > 50) {
     throw new Error("Invalid wallet address format");
   }
 
-  console.log(`📍 Address received for ${amount} ${token}: ${address}`);
+  console.log(`📍 Address received for ${amountDisplay}: ${address}`);
 
   // Generate unique transaction ID and store transaction details
   const txId = generateTransactionId();
@@ -7816,12 +7961,13 @@ const handleAddressInput = async (
     amount: amount,
     address: address,
     userId: ctx.from.id.toString(),
+    amountDisplay,
   });
 
   const response = [
     `✅ <b>SEND CONFIRMATION</b>`,
     "",
-    `<b>Amount:</b> ${amount === "max" ? "MAX" : amount} ${token}`,
+    `<b>Amount:</b> ${escapeHtml(amountDisplay)}`,
     `<b>To:</b> <code>${escapeHtml(address)}</code>`,
     "",
     `⚠️ <b>Please confirm this transaction</b>`,

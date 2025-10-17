@@ -5,7 +5,7 @@ import { NetworkDetector, type SolanaNetwork } from "./network-detector";
 // ================================
 
 export const LAMPORTS_PER_SOL = 1_000_000_000;
-export const MIN_SOL_FOR_TX = 0.005;
+export const MIN_SOL_FOR_TX = 0.001;
 export const SOL_BALANCE_PRECISION = 6;
 export const TOKEN_BALANCE_MAX_PRECISION = 6;
 export const MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS = 2_500_000; // ~0.0025 SOL buffer
