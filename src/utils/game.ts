@@ -4,9 +4,13 @@ import {
   Connection,
   SystemProgram,
 } from "@solana/web3.js";
-import { getAssociatedTokenAddress, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import {
+  getAssociatedTokenAddress,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 import { Context } from "grammy";
 import * as anchor from "@coral-xyz/anchor";
+import { createHash } from "crypto";
 
 import { WalletManager } from "./wallet";
 import { GameDatabase } from "./game-database";
@@ -317,6 +321,17 @@ export class GameManager {
     return accounts;
   }
 
+  private async buildUnjoinAccounts(
+    gamePda: PublicKey,
+    gameAccount: any,
+    player: PublicKey,
+    authority: PublicKey
+  ): Promise<Record<string, PublicKey>> {
+    const accounts = await this.buildJoinAccounts(gamePda, gameAccount, player);
+    accounts["authority"] = authority;
+    return accounts;
+  }
+
   private async buildCloseGameAccounts(
     gamePda: PublicKey,
     gameAccount: any
@@ -366,6 +381,143 @@ export class GameManager {
   /** Get all players in a game from the database */
   private getGamePlayers(gameAddress: string): string[] {
     return this.gameDb.getGameParticipants(gameAddress);
+  }
+
+  private computeParticipantHash(
+    gamePda: PublicKey,
+    participant: PublicKey
+  ): string {
+    const digest = createHash("sha256")
+      .update(Buffer.from("timba:part:v1"))
+      .update(gamePda.toBuffer())
+      .update(participant.toBuffer())
+      .digest();
+
+    const value = digest.subarray(0, 8).readBigUInt64LE(0);
+    return value.toString();
+  }
+
+  private recoverParticipantsFromHashes(
+    gamePda: PublicKey,
+    gameAccount: any,
+    knownTelegramIds: Set<string>
+  ): Array<{ telegramId: string; publicKey: string }> {
+    const rawHashes = gameAccount.participantHashes;
+    if (!Array.isArray(rawHashes) || rawHashes.length === 0) {
+      return [];
+    }
+
+    const participantHashes = rawHashes
+      .map((hash: any) => {
+        try {
+          if (typeof hash === "bigint") {
+            return hash;
+          }
+          if (typeof hash === "number") {
+            return BigInt(hash);
+          }
+          if (hash && typeof hash.toString === "function") {
+            return BigInt(hash.toString());
+          }
+        } catch (_) {
+          return null;
+        }
+        return null;
+      })
+      .filter((value): value is bigint => value !== null);
+
+    if (participantHashes.length === 0) {
+      return [];
+    }
+
+    const unmatchedHashes = new Set(
+      participantHashes.map((value) => value.toString())
+    );
+
+    for (const telegramId of knownTelegramIds) {
+      const publicKey = this.gameDb.getPlayerPublicKey(telegramId);
+      if (!publicKey) {
+        continue;
+      }
+
+      try {
+        const computed = this.computeParticipantHash(
+          gamePda,
+          new PublicKey(publicKey)
+        );
+        unmatchedHashes.delete(computed);
+      } catch (_) {
+        // Ignore malformed public keys
+      }
+    }
+
+    const initialUnmatched = unmatchedHashes.size;
+    if (initialUnmatched === 0) {
+      return [];
+    }
+
+    const recovered: Array<{ telegramId: string; publicKey: string }> = [];
+    const allMappings = (this.gameDb.getAllPlayerMappings?.() ?? []) as any[];
+
+    for (const mapping of allMappings) {
+      const telegramId = mapping?.telegram_id ?? mapping?.telegramId;
+      const publicKey = mapping?.public_key ?? mapping?.publicKey;
+      if (!telegramId || !publicKey || knownTelegramIds.has(telegramId)) {
+        continue;
+      }
+
+      try {
+        const computed = this.computeParticipantHash(
+          gamePda,
+          new PublicKey(publicKey)
+        );
+
+        if (unmatchedHashes.has(computed)) {
+          recovered.push({ telegramId, publicKey });
+          unmatchedHashes.delete(computed);
+        }
+      } catch (_) {
+        // Ignore invalid public keys
+      }
+
+      if (unmatchedHashes.size === 0) {
+        break;
+      }
+    }
+
+    for (const participant of recovered) {
+      try {
+        this.gameDb.saveGameParticipant?.(
+          gamePda.toBase58(),
+          participant.telegramId,
+          participant.publicKey
+        );
+        knownTelegramIds.add(participant.telegramId);
+      } catch (error) {
+        console.warn(
+          `⚠️ Failed to persist recovered participant ${participant.telegramId} for ${gamePda.toBase58()}:`,
+          error
+        );
+      }
+    }
+
+    if (recovered.length > 0) {
+      console.log(
+        `🔄 Recovered ${recovered.length} participant(s) for ${gamePda.toBase58()} from on-chain hashes`
+      );
+    }
+
+    if (unmatchedHashes.size > 0 && initialUnmatched === unmatchedHashes.size) {
+      console.warn(
+        `⚠️ Unable to match any on-chain participant hashes for ${gamePda.toBase58()}`
+      );
+    } else if (unmatchedHashes.size > 0) {
+      console.warn(
+        `⚠️ Unable to map ${unmatchedHashes.size} participant hash(es) for ${gamePda.toBase58()}`
+      );
+    }
+
+    return recovered;
   }
 
   private async resolveTokenFormattingInfo(
@@ -2328,7 +2480,7 @@ export class GameManager {
 
   private async unjoinPlayerFromGame(
     gamePda: PublicKey,
-    playerKp: any,
+    authorityKp: Keypair,
     playerPubkey: PublicKey
   ): Promise<void> {
     // Get the last player from game participants in database
@@ -2348,10 +2500,11 @@ export class GameManager {
     }
 
     const gameAccount = await this.program.account.game.fetch(gamePda);
-    const unjoinAccounts = await this.buildJoinAccounts(
+    const unjoinAccounts = await this.buildUnjoinAccounts(
       gamePda,
       gameAccount,
-      playerPubkey
+      playerPubkey,
+      authorityKp.publicKey
     );
     const unjoinInstruction = await this.program.methods
       .unjoinGame()
@@ -2360,7 +2513,7 @@ export class GameManager {
 
     const tx = await this.wallet.sendTransaction(
       [unjoinInstruction],
-      [playerKp]
+      [authorityKp]
     );
     await this.wallet.confirmTransaction(tx);
 
@@ -2721,7 +2874,7 @@ export class GameManager {
     gameAccount: any,
     address: string
   ): Promise<boolean> {
-    const playerKeyInfo = this.analyzePlayerKeys(gameAccount, address);
+    const playerKeyInfo = this.analyzePlayerKeys(gamePda, gameAccount, address);
     console.log(
       `🪙 Coinflip ${address}: ${playerKeyInfo.available.length}/${playerKeyInfo.total} player keys available`
     );
@@ -2740,10 +2893,25 @@ export class GameManager {
     return await this.executePartialCleanup(gamePda, playerKeyInfo, address);
   }
 
-  private analyzePlayerKeys(gameAccount: any, gameAddress: string) {
+  private analyzePlayerKeys(
+    gamePda: PublicKey,
+    gameAccount: any,
+    gameAddress: string
+  ) {
     // Get players from database since contract no longer stores players array
-    const participantTelegramIds = this.getGamePlayers(gameAddress);
-    const creatorPubkey = gameAccount.creator;
+    const participantTelegramIds = new Set(this.getGamePlayers(gameAddress));
+    this.recoverParticipantsFromHashes(gamePda, gameAccount, participantTelegramIds);
+
+    let creatorPubkey: PublicKey | null = null;
+    try {
+      creatorPubkey =
+        gameAccount.creator instanceof PublicKey
+          ? gameAccount.creator
+          : new PublicKey(gameAccount.creator);
+    } catch (_) {
+      creatorPubkey = null;
+    }
+
     const available: Array<{
       pubkey: PublicKey;
       telegramId: string;
@@ -2754,16 +2922,20 @@ export class GameManager {
     for (const telegramId of participantTelegramIds) {
       try {
         const playerPubkeyStr = this.gameDb.getPlayerPublicKey(telegramId);
-        if (playerPubkeyStr) {
-          const playerPubkey = new PublicKey(playerPubkeyStr);
-          available.push({
-            pubkey: playerPubkey,
-            telegramId,
-            isCreator: playerPubkey.equals(creatorPubkey),
-          });
-        } else {
+        if (!playerPubkeyStr) {
           unavailable.push(telegramId);
+          continue;
         }
+
+        const playerPubkey = new PublicKey(playerPubkeyStr);
+        const isCreator =
+          !!creatorPubkey && playerPubkey.equals(creatorPubkey);
+
+        available.push({
+          pubkey: playerPubkey,
+          telegramId,
+          isCreator,
+        });
       } catch (error) {
         unavailable.push(telegramId);
       }
@@ -2780,7 +2952,7 @@ export class GameManager {
       nonCreators,
       creator,
       canCompleteCleanup,
-      total: participantTelegramIds.length,
+      total: participantTelegramIds.size,
     };
   }
 
@@ -2797,7 +2969,8 @@ export class GameManager {
     // Unjoin ALL players including creator for coinflip games
     const unjoinedCount = await this.unjoinPlayers(
       gamePda,
-      playerKeyInfo.available
+      playerKeyInfo.available,
+      playerKeyInfo.creator?.telegramId
     );
 
     // Only proceed if all players were successfully unjoined
@@ -2829,7 +3002,8 @@ export class GameManager {
 
     const unjoinedCount = await this.unjoinPlayers(
       gamePda,
-      playerKeyInfo.available
+      playerKeyInfo.available,
+      playerKeyInfo.creator?.telegramId
     );
     console.log(
       `📊 Unjoined ${unjoinedCount}/${playerKeyInfo.available.length} players from coinflip ${address}`
@@ -2844,18 +3018,49 @@ export class GameManager {
       pubkey: PublicKey;
       telegramId: string;
       isCreator: boolean;
-    }>
+    }>,
+    creatorTelegramId?: string
   ): Promise<number> {
     let unjoinedCount = 0;
 
-    for (const player of players) {
+    const tryGetKeyPair = (telegramId?: string): Keypair | null => {
+      if (!telegramId) {
+        return null;
+      }
+
       try {
-        const playerKp = this.wallet.getKeyPair(BigInt(player.telegramId));
-        await this.unjoinPlayerFromGame(gamePda, playerKp, player.pubkey);
+        return this.wallet.getKeyPair(BigInt(telegramId));
+      } catch (_) {
+        return null;
+      }
+    };
+
+    const creatorAuthority = tryGetKeyPair(creatorTelegramId);
+
+    for (const player of players) {
+      let authorityKp = tryGetKeyPair(player.telegramId);
+      let usedCreatorFallback = false;
+
+      if (!authorityKp && creatorAuthority) {
+        authorityKp = creatorAuthority;
+        usedCreatorFallback = !player.isCreator;
+      }
+
+      if (!authorityKp) {
+        console.error(
+          `Failed to unjoin ${player.pubkey.toBase58()}: missing signing authority`
+        );
+        continue;
+      }
+
+      try {
+        await this.unjoinPlayerFromGame(gamePda, authorityKp, player.pubkey);
         console.log(
           `➡️ Unjoined ${
             player.isCreator ? "creator" : "player"
-          } ${player.pubkey.toBase58()}`
+          } ${player.pubkey.toBase58()}${
+            usedCreatorFallback ? " using creator authority" : ""
+          }`
         );
         unjoinedCount++;
       } catch (error) {

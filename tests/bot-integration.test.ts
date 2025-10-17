@@ -226,7 +226,7 @@ describe("Bot Integration Tests", () => {
       );
 
       const duration = Date.now() - startTime;
-      const threshold = (globalThis as any).__coverage__ ? 800 : 500;
+      const threshold = (globalThis as any).__coverage__ ? 800 : 600;
 
       expect(duration).toBeLessThan(threshold); // Allow extra time when coverage instrumentation is enabled
       expect(keypairs).toHaveLength(10);

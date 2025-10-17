@@ -17,7 +17,13 @@ test("analyzePlayerKeys classifies available/unavailable and creator", () => {
     getPlayerPublicKey: (id: string) => (id === "777" ? creator.toBase58() : null),
   } as any;
   const gm = GameManager.getInstance(program, wallet, db);
-  const info = (gm as any).analyzePlayerKeys({ creator }, "GAMEADDR");
+  const gameAddress = "BPFLoader9999999999999999999999999999999999";
+  const gamePda = new PublicKey(gameAddress);
+  const info = (gm as any).analyzePlayerKeys(
+    gamePda,
+    { creator, participantHashes: [] },
+    gameAddress
+  );
   expect(info.available.length).toBe(1);
   expect(info.unavailable.length).toBe(1);
   expect(info.creator).toBeDefined();
