@@ -1,6 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { GameManager } from "../src/utils/game";
 import { PublicKey, Keypair } from "@solana/web3.js";
+import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { PDAManager } from "../src/utils/pda";
 import { WSOL_MINT } from "../src/utils/constants";
 
@@ -9,10 +10,21 @@ function resetGM() {
   GameManager["instance"] = undefined;
 }
 
-function makeProgram() {
+function createConnectionStub(owner: PublicKey = TOKEN_PROGRAM_ID) {
+  return {
+    getAccountInfo: async () => ({ owner }),
+    getAccountInfoAndContext: async () => ({ value: null }),
+    getParsedAccountInfo: async () => ({
+      value: { data: { parsed: { info: { decimals: 6 } } } },
+    }),
+  } as any;
+}
+
+function makeProgram(connection = createConnectionStub()) {
   const programId = new PublicKey("BPFLoader1111111111111111111111111111111111");
   return {
     programId,
+    provider: { connection },
     methods: {
       initializeGame: (_cfg: any, _hash: any) => ({
         accounts: (_: any) => ({ instruction: async () => ({}) }),
@@ -25,21 +37,40 @@ function makeProgram() {
   } as any;
 }
 
+function makeWallet(overrides: Record<string, any>) {
+  const { connection: providedConnection, ...rest } = overrides;
+  const connection = providedConnection ?? createConnectionStub();
+  const wallet: any = {
+    connection,
+    getConnection: () => connection,
+    getKeyPair: (_: bigint) => Keypair.generate(),
+    formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toString(),
+    ...rest,
+  };
+
+  wallet.connection = connection;
+  if (!wallet.getConnection) {
+    wallet.getConnection = () => connection;
+  }
+
+  return wallet;
+}
+
 describe("GameManager.createGame", () => {
   test("surface helpful error when SOL auto-wrap cannot proceed", async () => {
     resetGM();
-    const wallet = {
+    const wallet = makeWallet({
       getTokenMetadata: async () => ({ decimals: 9 }),
-      getKeyPair: (_: bigint) => Keypair.generate(),
       getTokenBalance: async () => 0,
       getBalance: async () => 2_000_000,
       wrapSol: async () => {
         throw new Error("should not wrap");
       },
       formatSolBalance: (lamports: number) => (lamports / 1_000_000_000).toFixed(6),
-      formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toString(),
-    } as any;
-    const gm = GameManager.getInstance(makeProgram(), wallet, { savePlayerMapping: () => {} } as any);
+    });
+    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, {
+      savePlayerMapping: () => {},
+    } as any);
     const res = await gm.createGame(
       "coinflip",
       {
@@ -60,14 +91,14 @@ describe("GameManager.createGame", () => {
 
   test("errors on insufficient balance with formatted message", async () => {
     resetGM();
-    const wallet = {
+    const wallet = makeWallet({
       getTokenMetadata: async () => ({ decimals: 6 }),
-      getKeyPair: (_: bigint) => Keypair.generate(),
       getTokenBalance: async () => 500_000,
       getBalance: async () => 5_000_000,
-      formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toString(),
-    } as any;
-    const gm = GameManager.getInstance(makeProgram(), wallet, { savePlayerMapping: () => {} } as any);
+    });
+    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, {
+      savePlayerMapping: () => {},
+    } as any);
     const res = await gm.createGame("coinflip", { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false }, 2, 2, 60, 1n);
     expect(res.success).toBe(false);
     expect(String(res.error)).toContain("Insufficient balance");
@@ -76,15 +107,13 @@ describe("GameManager.createGame", () => {
 
   test("returns oracle unavailable when unhealthy", async () => {
     resetGM();
-    const wallet = {
+    const wallet = makeWallet({
       getTokenMetadata: async () => ({ decimals: 6 }),
-      getKeyPair: (_: bigint) => Keypair.generate(),
       getTokenBalance: async () => 2_000_000,
       getBalance: async () => 3_000_000,
-      formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toString(),
-    } as any;
+    });
     const db = { savePlayerMapping: () => {} } as any;
-    const gm = GameManager.getInstance(makeProgram(), wallet, db);
+    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, db);
     // Patch oracle client on the instance
     (gm as any).oracleClient = { isHealthy: async () => false };
     const res = await gm.createGame("coinflip", { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false }, 2, 2, 60, 1n);
@@ -94,26 +123,34 @@ describe("GameManager.createGame", () => {
 
   test("happy path saves game and auto-joins creator", async () => {
     resetGM();
-    const wallet = {
+    const wallet = makeWallet({
       getTokenMetadata: async () => ({ decimals: 6 }),
-      getKeyPair: (_: bigint) => Keypair.generate(),
       getTokenBalance: async () => 2_000_000,
       getBalance: async () => 3_000_000,
-      formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toString(),
       sendTransaction: async () => "SIG",
-    } as any;
+    });
     const saved: any[] = [];
     const db = {
       savePlayerMapping: () => {},
       saveGame: (...args: any[]) => { saved.push(args); },
     } as any;
-    const program = makeProgram();
+    const program = makeProgram(wallet.connection);
     const gm = GameManager.getInstance(program, wallet, db);
     (gm as any).oracleClient = {
       isHealthy: async () => true,
       generateGameSecrets: async () => ({ randomHash: "deadbeef" }),
       hexToBuffer: (_: string) => Buffer.from("deadbeef", "hex"),
     };
+    const gameToken = Keypair.generate().publicKey;
+    const gameVault = Keypair.generate().publicKey;
+    const gameTokenAccount = Keypair.generate().publicKey;
+    (gm as any).resolveGameTokenAccounts = async () => ({
+      tokenProgram: TOKEN_PROGRAM_ID,
+      gameToken,
+      gameVault,
+      gameTokenAccount,
+    });
+    (gm as any).deriveAta = async () => Keypair.generate().publicKey;
     // Derivation + confirmation + auto-join patched
     const pda = new PublicKey("11111111111111111111111111111111");
     const original = (PDAManager as any).getGamePDA;
@@ -140,14 +177,16 @@ describe("GameManager.createGame", () => {
 
   test("errors are formatted via logAndFormatError when thrown", async () => {
     resetGM();
-    const wallet = {
-      getTokenMetadata: async () => { throw new Error("metadata fail"); },
-      getKeyPair: (_: bigint) => Keypair.generate(),
+    const wallet = makeWallet({
+      getTokenMetadata: async () => {
+        throw new Error("metadata fail");
+      },
       getTokenBalance: async () => 2_000_000,
       getBalance: async () => 3_000_000,
-      formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toString(),
-    } as any;
-    const gm = GameManager.getInstance(makeProgram(), wallet, { savePlayerMapping: () => {} } as any);
+    });
+    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, {
+      savePlayerMapping: () => {},
+    } as any);
     const res = await gm.createGame("coinflip", { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false }, 2, 2, 60, 1n);
     expect(res.success).toBe(false);
     expect(String(res.error)).toContain("Something went wrong");
