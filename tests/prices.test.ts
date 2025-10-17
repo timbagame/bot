@@ -13,14 +13,14 @@ const jupOkFetch = (price: number) => async (input: RequestInfo | URL) => {
   return new Response("not used", { status: 404 });
 };
 
-const jupFailDexOkFetch = (dexPrice: number) => async (input: RequestInfo | URL) => {
+const jupFailPumpOkFetch = (pumpPrice: number) => async (input: RequestInfo | URL) => {
   const url = typeof input === "string" ? input : input.toString();
   if (url.includes("price.jup.ag")) {
     return new Response("oops", { status: 500 });
   }
-  if (url.includes("dexscreener.com")) {
+  if (url.includes("frontend-api.pump.fun")) {
     return new Response(
-      JSON.stringify({ pairs: [{ priceUsd: String(dexPrice) }] }),
+      JSON.stringify({ priceUsd: String(pumpPrice) }),
       { status: 200, headers: { "content-type": "application/json" } }
     );
   }
@@ -33,8 +33,8 @@ describe("prices util", () => {
     expect(price).toBe(123.45);
   });
 
-  test("falls back to DexScreener when Jupiter fails", async () => {
-    const price = await getPriceUSD("So11111111111111111111111111111111111111112", jupFailDexOkFetch(5.67) as any);
+  test("falls back to pump.fun when Jupiter fails", async () => {
+    const price = await getPriceUSD("So11111111111111111111111111111111111111112", jupFailPumpOkFetch(5.67) as any);
     expect(price).toBe(5.67);
   });
 
