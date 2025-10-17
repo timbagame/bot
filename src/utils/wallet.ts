@@ -798,6 +798,7 @@ export class WalletManager {
       fallbackBufferLamports,
       rentExemptMinimumLamports
     );
+    const targetReserveLamports = 0;
 
     const debugPrefix = "[Withdraw SOL]";
     const formatLamports = (lamports: number) =>
@@ -862,7 +863,7 @@ export class WalletManager {
         rentExemptMinimumLamports
       )}, buffer ${formatLamports(bufferLamports)} (fallback ${formatLamports(
         fallbackBufferLamports
-      )})`
+      )}), target reserve ${formatLamports(targetReserveLamports)}`
     );
 
     if (nativeLamports <= 0 && wsolAmount <= 0 && wsolAccountLamports <= 0) {
@@ -955,62 +956,71 @@ export class WalletManager {
         );
       }
 
-      const spendableLamports = Math.max(
-        0,
-        totalAvailableLamports - feeWithTransfer - bufferLamports
-      );
+      const maxTransferLamports =
+        totalAvailableLamports - feeWithTransfer - targetReserveLamports;
 
       console.log(
-        `${debugPrefix} Spendable lamports after fees & buffer: ${formatLamports(
-          spendableLamports
-        )}`
+        `${debugPrefix} Lamports available to transfer after reserving fees ${formatLamports(
+          maxTransferLamports
+        )} (fee ${formatLamports(feeWithTransfer)}, reserve ${formatLamports(
+          targetReserveLamports
+        )})`
       );
 
-      if (spendableLamports > 0) {
-        const transferLamports = Math.min(
-          spendableLamports,
-          totalAvailableLamports
-        );
-
-        nativeLamportsSent = Math.min(nativeLamports, transferLamports);
-        const wsolContribution = Math.min(
-          wsolLamportsSent,
-          Math.max(transferLamports - nativeLamportsSent, 0)
-        );
-
-        wsolLamportsSent = wsolContribution;
-        totalLamportsSent = nativeLamportsSent + wsolLamportsSent;
-
-        console.log(
-          `${debugPrefix} Transfer plan: native ${formatLamports(
-            nativeLamportsSent
-          )}, WSOL contribution ${formatLamports(
-            wsolLamportsSent
-          )}, total ${formatLamports(totalLamportsSent)}`
-        );
-
-        instructions.push(
-          SystemProgram.transfer({
-            fromPubkey: payer,
-            toPubkey: destination,
-            lamports: transferLamports,
-          })
-        );
-        console.log(
-          `${debugPrefix} Added system transfer of ${formatLamports(
-            transferLamports
-          )} to ${destination.toBase58()}`
-        );
-      } else {
-        console.warn(
-          `${debugPrefix} Spendable lamports ${formatLamports(
-            spendableLamports
-          )} not sufficient after reserving buffer ${formatLamports(bufferLamports)}`
-        );
+      if (maxTransferLamports <= 0) {
         throw new Error(
-          "Not enough SOL to cover network fees while keeping a small reserve. Top up SOL and try again."
+          "Not enough SOL or WSOL to withdraw after paying transaction fees."
         );
       }
+
+      const transferLamports = Math.min(
+        maxTransferLamports,
+        totalAvailableLamports
+      );
+
+      const nativeAvailableForTransfer = Math.max(
+        nativeLamports - feeWithTransfer,
+        0
+      );
+
+      nativeLamportsSent = Math.min(
+        nativeAvailableForTransfer,
+        transferLamports
+      );
+
+      const wsolContribution = Math.min(
+        wsolLamportsSent,
+        Math.max(transferLamports - nativeLamportsSent, 0)
+      );
+
+      wsolLamportsSent = wsolContribution;
+      totalLamportsSent = nativeLamportsSent + wsolLamportsSent;
+
+      const finalReserveLamports =
+        totalAvailableLamports - transferLamports - feeWithTransfer;
+
+      console.log(
+        `${debugPrefix} Transfer plan: native ${formatLamports(
+          nativeLamportsSent
+        )}, WSOL contribution ${formatLamports(
+          wsolLamportsSent
+        )}, total ${formatLamports(
+          totalLamportsSent
+        )}, final reserve ${formatLamports(finalReserveLamports)}`
+      );
+
+      instructions.push(
+        SystemProgram.transfer({
+          fromPubkey: payer,
+          toPubkey: destination,
+          lamports: transferLamports,
+        })
+      );
+      console.log(
+        `${debugPrefix} Added system transfer of ${formatLamports(
+          transferLamports
+        )} to ${destination.toBase58()}`
+      );
     }
 
     if (instructions.length === 0) {
