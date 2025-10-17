@@ -3,6 +3,7 @@ import {
   Keypair,
   PublicKey,
   LAMPORTS_PER_SOL,
+  SystemProgram,
   Transaction,
 } from "@solana/web3.js";
 import {
@@ -10,6 +11,7 @@ import {
   createAssociatedTokenAccountInstruction,
   getAccountLenForMint,
   unpackMint,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import * as anchor from "@coral-xyz/anchor";
 import * as fs from "fs";
@@ -313,6 +315,10 @@ const estimateInitializationCosts = async (
   const breakdown: TokenCostBreakdown[] = [];
   let requiredLamports = 0n;
   const { blockhash } = await connection.getLatestBlockhash("confirmed");
+  const [oraclePda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("oracle")],
+    program.programId
+  );
 
   for (const { tokenMint, tokenTicker, defaultMinAmount } of tokens) {
     const mint = new PublicKey(tokenMint);
@@ -405,10 +411,19 @@ const estimateInitializationCosts = async (
         minAmount: new anchor.BN(defaultMinAmount.toString()),
         enabled: true,
       })
-      .accounts({
-        tokenMint: mint,
-        oracleOperator: oracleOperatorKeypair.publicKey,
-      })
+      .accounts(
+        {
+          gameToken: gameTokenPda,
+          tokenMint: mint,
+          gameVault: gameVaultPda,
+          gameTokenAccount,
+          oracle: oraclePda,
+          oracleOperator: oracleOperatorKeypair.publicKey,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: mintProgramId,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        } as any
+      )
       .instruction();
 
     const initializeTx = new Transaction({
@@ -526,6 +541,11 @@ async function initializeToken(
   );
   console.log(`🏦 ${tokenTicker} Game Vault PDA: ${gameVaultPda.toBase58()}`);
 
+  const [oraclePda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("oracle")],
+    program.programId
+  );
+
   // Check if game token already exists
   try {
     const existingGameToken = await program.account.gameToken.fetch(
@@ -624,10 +644,19 @@ async function initializeToken(
       minAmount: new anchor.BN(defaultMinAmount.toString()),
       enabled: true,
     })
-    .accounts({
-      tokenMint: mint,
-      oracleOperator: oracleOperatorKeypair.publicKey,
-    })
+    .accounts(
+      {
+        gameToken: gameTokenPda,
+        tokenMint: mint,
+        gameVault: gameVaultPda,
+        gameTokenAccount,
+        oracle: oraclePda,
+        oracleOperator: oracleOperatorKeypair.publicKey,
+        systemProgram: SystemProgram.programId,
+        tokenProgram: mintProgramId,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      } as any
+    )
     .instruction();
 
   const tx = await wallet.sendTransaction(

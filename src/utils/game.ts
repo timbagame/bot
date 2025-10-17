@@ -1,4 +1,10 @@
-import { PublicKey, Keypair, Connection } from "@solana/web3.js";
+import {
+  PublicKey,
+  Keypair,
+  Connection,
+  SystemProgram,
+} from "@solana/web3.js";
+import { getAssociatedTokenAddress, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { Context } from "grammy";
 import * as anchor from "@coral-xyz/anchor";
 
@@ -133,6 +139,8 @@ const categorizeGame = (
 export class GameManager {
   private static instance: GameManager;
   private activeGameMessages = new Map<string, GameMessage>();
+  private cachedConnection?: Connection;
+  private tokenProgramCache = new Map<string, PublicKey>();
 
   private constructor(
     private program: anchor.Program<Timba>,
@@ -166,8 +174,176 @@ export class GameManager {
         oracleClient,
         swapManager
       );
+      GameManager.instance.cachedConnection = connection;
     }
     return GameManager.instance;
+  }
+
+  private getConnection(): Connection {
+    if (this.cachedConnection) {
+      return this.cachedConnection;
+    }
+
+    const providerConnection = (this.program.provider as any)?.connection as
+      | Connection
+      | undefined;
+    if (providerConnection) {
+      this.cachedConnection = providerConnection;
+      return providerConnection;
+    }
+
+    const maybeGetConnection = (this.wallet as any).getConnection;
+    if (typeof maybeGetConnection === "function") {
+      const resolved = maybeGetConnection.call(this.wallet);
+      if (resolved) {
+        this.cachedConnection = resolved as Connection;
+        return this.cachedConnection;
+      }
+    }
+
+    const fallback = (this.wallet as any).connection as
+      | Connection
+      | undefined;
+    if (fallback) {
+      this.cachedConnection = fallback;
+      return fallback;
+    }
+
+    throw new Error("Unable to resolve Solana connection");
+  }
+
+  private getOraclePda(): PublicKey {
+    return PDAManager.getOraclePDA(this.program.programId);
+  }
+
+  private getGameVaultPda(tokenMint: PublicKey): PublicKey {
+    const [gameVaultPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("game_vault"), tokenMint.toBuffer()],
+      this.program.programId
+    );
+    return gameVaultPda;
+  }
+
+  private async resolveTokenProgramId(tokenMint: PublicKey): Promise<PublicKey> {
+    const cacheKey = tokenMint.toBase58();
+    const cached = this.tokenProgramCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const accountInfo = await this.getConnection().getAccountInfo(tokenMint);
+    if (!accountInfo) {
+      throw new Error(`Token mint ${cacheKey} not found`);
+    }
+
+    this.tokenProgramCache.set(cacheKey, accountInfo.owner);
+    return accountInfo.owner;
+  }
+
+  private async deriveAta(
+    tokenMint: PublicKey,
+    owner: PublicKey,
+    tokenProgram: PublicKey,
+    allowOwnerOffCurve = false
+  ): Promise<PublicKey> {
+    return getAssociatedTokenAddress(
+      tokenMint,
+      owner,
+      allowOwnerOffCurve,
+      tokenProgram
+    );
+  }
+
+  private async resolveGameTokenAccounts(tokenMint: PublicKey): Promise<{
+    tokenProgram: PublicKey;
+    gameToken: PublicKey;
+    gameVault: PublicKey;
+    gameTokenAccount: PublicKey;
+  }> {
+    const tokenProgram = await this.resolveTokenProgramId(tokenMint);
+    const gameToken = PDAManager.getGameTokenPDA(
+      tokenMint,
+      this.program.programId
+    );
+    const gameVault = this.getGameVaultPda(tokenMint);
+    const gameTokenAccount = await this.deriveAta(
+      tokenMint,
+      gameVault,
+      tokenProgram,
+      true
+    );
+
+    return {
+      tokenProgram,
+      gameToken,
+      gameVault,
+      gameTokenAccount,
+    };
+  }
+
+  private async buildJoinAccounts(
+    gamePda: PublicKey,
+    gameAccount: any,
+    player: PublicKey,
+    oracleOperator?: PublicKey
+  ): Promise<Record<string, PublicKey>> {
+    const tokenMint = new PublicKey(gameAccount.tokenMint);
+    const { tokenProgram, gameToken, gameVault, gameTokenAccount } =
+      await this.resolveGameTokenAccounts(tokenMint);
+    const playerTokenAccount = await this.deriveAta(
+      tokenMint,
+      player,
+      tokenProgram
+    );
+
+    const accounts: Record<string, PublicKey> = {
+      game: gamePda,
+      player,
+      tokenMint,
+      gameToken,
+      gameVault,
+      playerTokenAccount,
+      gameTokenAccount,
+      oracle: this.getOraclePda(),
+      systemProgram: SystemProgram.programId,
+      tokenProgram,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+    };
+
+    if (oracleOperator) {
+      accounts["oracleOperator"] = oracleOperator;
+    }
+
+    return accounts;
+  }
+
+  private async buildCloseGameAccounts(
+    gamePda: PublicKey,
+    gameAccount: any
+  ): Promise<Record<string, PublicKey>> {
+    const tokenMint = new PublicKey(gameAccount.tokenMint);
+    const { tokenProgram, gameToken, gameVault, gameTokenAccount } =
+      await this.resolveGameTokenAccounts(tokenMint);
+    const creatorPubkey = new PublicKey(gameAccount.creator);
+    const creatorTokenAccount = await this.deriveAta(
+      tokenMint,
+      creatorPubkey,
+      tokenProgram
+    );
+
+    return {
+      game: gamePda,
+      creator: creatorPubkey,
+      tokenMint,
+      oracle: this.getOraclePda(),
+      gameToken,
+      gameVault,
+      creatorTokenAccount,
+      gameTokenAccount,
+      systemProgram: SystemProgram.programId,
+      tokenProgram,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+    };
   }
 
   // ================================
@@ -1545,23 +1721,42 @@ export class GameManager {
         isPrivate: true,
       };
 
+      const tokenMintPubkey = new PublicKey(tokenMint);
+      const gamePda = PDAManager.getGamePDA(
+        randomHashBuffer,
+        this.program.programId
+      );
+      const { tokenProgram, gameToken, gameVault, gameTokenAccount } =
+        await this.resolveGameTokenAccounts(tokenMintPubkey);
+      const creatorTokenAccount = await this.deriveAta(
+        tokenMintPubkey,
+        playerKp.publicKey,
+        tokenProgram
+      );
+      const oraclePda = this.getOraclePda();
+
       const gameInstruction = await this.program.methods
         .initializeGame(gameConfig, Array.from(randomHashBuffer))
-        .accounts({
-          creator: playerKp.publicKey,
-          tokenMint: new PublicKey(tokenMint),
-        })
+        .accounts(
+          {
+            game: gamePda,
+            creator: playerKp.publicKey,
+            oracle: oraclePda,
+            tokenMint: tokenMintPubkey,
+            gameToken,
+            gameVault,
+            creatorTokenAccount,
+            gameTokenAccount,
+            systemProgram: SystemProgram.programId,
+            tokenProgram,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          } as any
+        )
         .instruction();
 
       const tx = await this.wallet.sendTransaction(
         [gameInstruction],
         [playerKp]
-      );
-
-      // Game PDA is now derived directly from random hash (no nonce needed)
-      const gamePda = PDAManager.getGamePDA(
-        randomHashBuffer,
-        this.program.programId
       );
 
       console.log(`📍 Game address: ${gamePda.toBase58()}`);
@@ -1661,12 +1856,14 @@ export class GameManager {
         joinTx = result.tx!;
       } else {
         console.log(`🌐 Game is public, using regular join...`);
+        const joinAccounts = await this.buildJoinAccounts(
+          gamePda,
+          gameAccount,
+          playerKp.publicKey
+        );
         const joinInstruction = await this.program.methods
           .joinGame()
-          .accounts({
-            game: gamePda,
-            player: playerKp.publicKey,
-          })
+          .accounts(joinAccounts as any)
           .instruction();
         joinTx = await this.wallet.sendTransaction(
           [joinInstruction],
@@ -2004,12 +2201,14 @@ export class GameManager {
           };
         }
       } else {
+        const joinAccounts = await this.buildJoinAccounts(
+          gamePda,
+          gameAccount,
+          playerKp.publicKey
+        );
         const joinInstruction = await this.program.methods
           .joinGame()
-          .accounts({
-            game: gamePda,
-            player: playerKp.publicKey,
-          })
+          .accounts(joinAccounts as any)
           .instruction();
 
         const tx = await this.wallet.sendTransaction(
@@ -2099,12 +2298,13 @@ export class GameManager {
 
       const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
 
+      const closeAccounts = await this.buildCloseGameAccounts(
+        gamePda,
+        gameAccount
+      );
       const closeInstruction = await this.program.methods
         .closeGame()
-        .accounts({
-          game: gamePda,
-          creator: gameAccount.creator,
-        })
+        .accounts(closeAccounts as any)
         .instruction();
 
       const tx = await this.wallet.sendTransaction(
@@ -2147,12 +2347,15 @@ export class GameManager {
       throw new Error("Player not found in game participants");
     }
 
+    const gameAccount = await this.program.account.game.fetch(gamePda);
+    const unjoinAccounts = await this.buildJoinAccounts(
+      gamePda,
+      gameAccount,
+      playerPubkey
+    );
     const unjoinInstruction = await this.program.methods
       .unjoinGame()
-      .accounts({
-        game: gamePda,
-        player: playerPubkey,
-      })
+      .accounts(unjoinAccounts as any)
       .instruction();
 
     const tx = await this.wallet.sendTransaction(
@@ -2205,14 +2408,17 @@ export class GameManager {
       }
 
       const adminKp = authResult.adminKeypair!;
+      const gameAccount = await this.program.account.game.fetch(gamePda);
+      const joinAccounts = await this.buildJoinAccounts(
+        gamePda,
+        gameAccount,
+        playerKp.publicKey,
+        adminKp.publicKey
+      );
 
       const joinInstruction = await this.program.methods
         .joinGame()
-        .accounts({
-          game: gamePda,
-          player: playerKp.publicKey,
-          oracleOperator: adminKp.publicKey,
-        })
+        .accounts(joinAccounts as any)
         .instruction();
 
       const tx = await this.wallet.sendTransaction(
@@ -2673,12 +2879,13 @@ export class GameManager {
       // Step 2: Close the game
       const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
 
+      const closeAccounts = await this.buildCloseGameAccounts(
+        gamePda,
+        gameAccount
+      );
       const closeInstruction = await this.program.methods
         .closeGame()
-        .accounts({
-          game: gamePda,
-          creator: gameAccount.creator,
-        })
+        .accounts(closeAccounts as any)
         .instruction();
 
       const tx = await this.wallet.sendTransaction(
