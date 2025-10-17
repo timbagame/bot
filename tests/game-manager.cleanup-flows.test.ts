@@ -52,5 +52,48 @@ describe("GameManager cleanup flows", () => {
     expect(a).toBe(false);
     expect(b).toBe(true);
   });
+
+  test("handleExpiredGiveaway unjoins non-creator players before closing", async () => {
+    resetGM();
+    const gm = GameManager.getInstance({} as any, {} as any, { getGameParticipants: () => [] } as any);
+
+    const creator = {
+      telegramId: "2",
+      pubkey: new PublicKey("BPFLoader4111111111111111111111111111111111"),
+      isCreator: true,
+    };
+    const participant = {
+      telegramId: "1",
+      pubkey: new PublicKey("BPFLoader5111111111111111111111111111111111"),
+      isCreator: false,
+    };
+
+    (gm as any).isGameExpiredWithBuffer = () => true;
+    (gm as any).analyzePlayerKeys = () => ({ available: [participant, creator] });
+
+    let capturedPlayers: any[] | undefined;
+    (gm as any).unjoinPlayers = async (_p: any, players: any[]) => {
+      capturedPlayers = players;
+      return players.length;
+    };
+
+    let cancelled = false;
+    (gm as any).cancelGameWithPlayerKeys = async () => {
+      cancelled = true;
+      return { success: true };
+    };
+
+    const ok = await (gm as any).handleExpiredGiveaway(
+      new PublicKey("BPFLoader6111111111111111111111111111111111"),
+      { gameType: { giveaway: {} }, ticketsCount: 1, maxTickets: 2 },
+      "ADDR"
+    );
+
+    expect(ok).toBe(true);
+    expect(cancelled).toBe(true);
+    expect(capturedPlayers).toBeDefined();
+    expect(capturedPlayers?.length).toBe(1);
+    expect(capturedPlayers?.[0].telegramId).toBe(participant.telegramId);
+  });
 });
 

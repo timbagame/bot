@@ -2497,16 +2497,37 @@ export class GameManager {
   ): Promise<boolean> {
     const gameType = this.getGameType(gameAccount);
 
-    if (this.isGameExpiredWithBuffer(gameAccount)) {
+    if (!this.isGameExpiredWithBuffer(gameAccount)) {
+      return false;
+    }
+
+    console.log(
+      `🔄 Processing expired ${gameType} game ${address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`
+    );
+
+    const playerKeyInfo = this.analyzePlayerKeys(gamePda, gameAccount, address);
+    const giveawayPlayers = playerKeyInfo.available.filter((p) => !p.isCreator);
+
+    if (giveawayPlayers.length > 0) {
       console.log(
-        `🔄 Processing expired ${gameType} game ${address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`
+        `🎯 Unjoining ${giveawayPlayers.length} participant(s) before closing giveaway ${address}`
+      );
+      const unjoinedCount = await this.unjoinPlayers(gamePda, giveawayPlayers);
+      console.log(
+        `📊 Unjoined ${unjoinedCount}/${giveawayPlayers.length} participants from giveaway ${address}`
       );
 
-      const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
-      if (result.success) {
-        console.log(`✅ Successfully handled expired giveaway: ${address}`);
-        return true;
+      if (unjoinedCount !== giveawayPlayers.length) {
+        console.warn(
+          `⚠️ Could not unjoin all participants from giveaway ${address}`
+        );
       }
+    }
+
+    const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
+    if (result.success) {
+      console.log(`✅ Successfully handled expired giveaway: ${address}`);
+      return true;
     }
 
     return false;
