@@ -792,6 +792,10 @@ export class WalletManager {
     const nativeLamports = await this.getBalance(telegramId);
     const bufferLamports = Math.ceil(MIN_SOL_FOR_TX * LAMPORTS_PER_SOL);
 
+    const debugPrefix = "[Withdraw SOL]";
+    const formatLamports = (lamports: number) =>
+      `${lamports} lamports (${(lamports / LAMPORTS_PER_SOL).toFixed(9)} SOL)`;
+
     const wsolMint = new PublicKey(WSOL_MINT);
     const wsolAta = await getAssociatedTokenAddress(
       wsolMint,
@@ -820,6 +824,11 @@ export class WalletManager {
       } else {
         wsolAccountLamports = wsolAmount;
       }
+      console.log(
+        `${debugPrefix} Found WSOL account ${wsolAta.toBase58()} with token balance ${formatLamports(
+          wsolAmount
+        )} and rent ${formatLamports(wsolAccountLamports)}`
+      );
     } catch (error: any) {
       const isMissingAccount =
         error instanceof TokenAccountNotFoundError ||
@@ -827,9 +836,23 @@ export class WalletManager {
         (error instanceof SolanaJSONRPCError &&
           error.message?.includes("could not find account"));
       if (!isMissingAccount) {
+        console.error(`${debugPrefix} Failed to load WSOL account:`, error);
         throw error;
       }
+      console.log(
+        `${debugPrefix} No WSOL account found for ${payer.toBase58()}`
+      );
     }
+
+    console.log(
+      `${debugPrefix} Native balance ${formatLamports(
+        nativeLamports
+      )}, WSOL tokens ${formatLamports(
+        wsolAmount
+      )}, WSOL account lamports ${formatLamports(
+        wsolAccountLamports
+      )}, buffer ${formatLamports(bufferLamports)}`
+    );
 
     if (nativeLamports <= 0 && wsolAmount <= 0 && wsolAccountLamports <= 0) {
       throw new Error("No SOL or WSOL available to withdraw.");
@@ -842,22 +865,40 @@ export class WalletManager {
     if (wsolAccountExists && wsolAccountLamports > 0) {
       if (wsolAmount > 0) {
         instructions.push(createSyncNativeInstruction(wsolAta));
+        console.log(
+          `${debugPrefix} Added sync instruction for WSOL account ${wsolAta.toBase58()}`
+        );
       }
       instructions.push(
         createCloseAccountInstruction(wsolAta, payer, payer)
       );
       wsolLamportsSent = wsolAccountLamports;
+      console.log(
+        `${debugPrefix} Added close instruction for WSOL account ${wsolAta.toBase58()} returning ${formatLamports(
+          wsolLamportsSent
+        )}`
+      );
     }
 
     let nativeLamportsSent = 0;
 
     if (instructions.length > 0) {
       if (nativeLamports < 1) {
+        console.warn(
+          `${debugPrefix} Cannot unwrap WSOL because native balance ${formatLamports(
+            nativeLamports
+          )} is below minimum fee`
+        );
         throw new Error(
           "Not enough SOL to pay network fees when unwrapping WSOL. Keep a small SOL balance and try again."
         );
       }
       const feeForCloseOnly = await this.estimateFee(payer, instructions);
+      console.log(
+        `${debugPrefix} Estimated fee for close-only transaction: ${formatLamports(
+          feeForCloseOnly
+        )}`
+      );
       if (nativeLamports < feeForCloseOnly) {
         throw new Error(
           "Not enough SOL to cover transaction fees. Top up SOL and try again."
@@ -866,6 +907,12 @@ export class WalletManager {
     }
 
     const totalAvailableLamports = nativeLamports + wsolLamportsSent;
+
+    console.log(
+      `${debugPrefix} Total available lamports after WSOL close: ${formatLamports(
+        totalAvailableLamports
+      )}`
+    );
 
     if (totalAvailableLamports > 0) {
       const placeholderTransfer = SystemProgram.transfer({
@@ -878,6 +925,12 @@ export class WalletManager {
         ...instructions,
         placeholderTransfer,
       ]);
+
+      console.log(
+        `${debugPrefix} Estimated fee with transfer: ${formatLamports(
+          feeWithTransfer
+        )}`
+      );
 
       if (nativeLamports <= feeWithTransfer) {
         if (instructions.length === 0) {
@@ -896,6 +949,12 @@ export class WalletManager {
         totalAvailableLamports - feeWithTransfer - bufferLamports
       );
 
+      console.log(
+        `${debugPrefix} Spendable lamports after fees & buffer: ${formatLamports(
+          spendableLamports
+        )}`
+      );
+
       if (spendableLamports > 0) {
         const transferLamports = Math.min(
           spendableLamports,
@@ -911,6 +970,14 @@ export class WalletManager {
         wsolLamportsSent = wsolContribution;
         totalLamportsSent = nativeLamportsSent + wsolLamportsSent;
 
+        console.log(
+          `${debugPrefix} Transfer plan: native ${formatLamports(
+            nativeLamportsSent
+          )}, WSOL contribution ${formatLamports(
+            wsolLamportsSent
+          )}, total ${formatLamports(totalLamportsSent)}`
+        );
+
         instructions.push(
           SystemProgram.transfer({
             fromPubkey: payer,
@@ -918,7 +985,17 @@ export class WalletManager {
             lamports: transferLamports,
           })
         );
+        console.log(
+          `${debugPrefix} Added system transfer of ${formatLamports(
+            transferLamports
+          )} to ${destination.toBase58()}`
+        );
       } else {
+        console.warn(
+          `${debugPrefix} Spendable lamports ${formatLamports(
+            spendableLamports
+          )} not sufficient after reserving buffer ${formatLamports(bufferLamports)}`
+        );
         throw new Error(
           "Not enough SOL to cover network fees while keeping a small reserve. Top up SOL and try again."
         );
@@ -926,12 +1003,23 @@ export class WalletManager {
     }
 
     if (instructions.length === 0) {
+      console.error(
+        `${debugPrefix} No instructions generated despite available balances. Native ${formatLamports(
+          nativeLamports
+        )}, WSOL lamports ${formatLamports(wsolLamportsSent)}`
+      );
       throw new Error(
         "Unable to build withdrawal transaction. Ensure your balance is above the fee cost."
       );
     }
 
+    console.log(
+      `${debugPrefix} Final instruction count: ${instructions.length}`
+    );
     const signature = await this.sendTransaction(instructions, [userKeypair]);
+    console.log(
+      `${debugPrefix} Sent withdraw-all transaction ${signature}`
+    );
     return {
       signature,
       nativeLamportsSent,
