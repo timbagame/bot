@@ -1,6 +1,7 @@
 import { PublicKey, Keypair, Connection } from "@solana/web3.js";
 import { Context } from "grammy";
 import * as anchor from "@coral-xyz/anchor";
+import { createHash } from "crypto";
 
 import { WalletManager } from "./wallet";
 import { GameDatabase } from "./game-database";
@@ -2515,7 +2516,7 @@ export class GameManager {
     gameAccount: any,
     address: string
   ): Promise<boolean> {
-    const playerKeyInfo = this.analyzePlayerKeys(gameAccount, address);
+    const playerKeyInfo = this.analyzePlayerKeys(gamePda, gameAccount, address);
     console.log(
       `🪙 Coinflip ${address}: ${playerKeyInfo.available.length}/${playerKeyInfo.total} player keys available`
     );
@@ -2534,9 +2535,19 @@ export class GameManager {
     return await this.executePartialCleanup(gamePda, playerKeyInfo, address);
   }
 
-  private analyzePlayerKeys(gameAccount: any, gameAddress: string) {
+  private analyzePlayerKeys(
+    gamePda: PublicKey,
+    gameAccount: any,
+    gameAddress: string
+  ) {
     // Get players from database since contract no longer stores players array
-    const participantTelegramIds = this.getGamePlayers(gameAddress);
+    const knownTelegramIds = new Set(this.getGamePlayers(gameAddress));
+    const recoveredParticipants = this.recoverParticipantsFromHashes(
+      gamePda,
+      gameAccount,
+      knownTelegramIds
+    );
+    const participantTelegramIds = Array.from(knownTelegramIds);
     const creatorPubkey = gameAccount.creator;
     const available: Array<{
       pubkey: PublicKey;
@@ -2568,6 +2579,12 @@ export class GameManager {
     const canCompleteCleanup =
       unavailable.length === 0 && creator !== undefined;
 
+    if (recoveredParticipants.length > 0) {
+      console.log(
+        `🔄 Added ${recoveredParticipants.length} participant(s) to ${gameAddress} from on-chain hashes`
+      );
+    }
+
     return {
       available,
       unavailable,
@@ -2576,6 +2593,143 @@ export class GameManager {
       canCompleteCleanup,
       total: participantTelegramIds.length,
     };
+  }
+
+  private computeParticipantHash(
+    gamePda: PublicKey,
+    participant: PublicKey
+  ): string {
+    const digest = createHash("sha256")
+      .update(Buffer.from("timba:part:v1"))
+      .update(gamePda.toBuffer())
+      .update(participant.toBuffer())
+      .digest();
+
+    const value = digest.subarray(0, 8).readBigUInt64LE(0);
+    return value.toString();
+  }
+
+  private recoverParticipantsFromHashes(
+    gamePda: PublicKey,
+    gameAccount: any,
+    knownTelegramIds: Set<string>
+  ): Array<{ telegramId: string; publicKey: string }> {
+    const rawHashes = gameAccount?.participantHashes;
+    if (!Array.isArray(rawHashes) || rawHashes.length === 0) {
+      return [];
+    }
+
+    const participantHashes = rawHashes
+      .map((hash: any) => {
+        try {
+          if (typeof hash === "bigint") {
+            return hash;
+          }
+          if (typeof hash === "number") {
+            return BigInt(hash);
+          }
+          if (hash && typeof hash.toString === "function") {
+            return BigInt(hash.toString());
+          }
+        } catch (_) {
+          return null;
+        }
+        return null;
+      })
+      .filter((value): value is bigint => value !== null);
+
+    if (participantHashes.length === 0) {
+      return [];
+    }
+
+    const unmatchedHashes = new Set(
+      participantHashes.map((value) => value.toString())
+    );
+
+    for (const telegramId of knownTelegramIds) {
+      const publicKey = this.gameDb.getPlayerPublicKey(telegramId);
+      if (!publicKey) {
+        continue;
+      }
+
+      try {
+        const computed = this.computeParticipantHash(
+          gamePda,
+          new PublicKey(publicKey)
+        );
+        unmatchedHashes.delete(computed);
+      } catch (_) {
+        // Ignore malformed public keys
+      }
+    }
+
+    const initialUnmatched = unmatchedHashes.size;
+    if (initialUnmatched === 0) {
+      return [];
+    }
+
+    const recovered: Array<{ telegramId: string; publicKey: string }> = [];
+    const allMappings = this.gameDb.getAllPlayerMappings();
+
+    for (const mapping of allMappings) {
+      const telegramId = (mapping as any)?.telegram_id ?? mapping?.telegramId;
+      const publicKey = (mapping as any)?.public_key ?? mapping?.publicKey;
+      if (!telegramId || !publicKey || knownTelegramIds.has(telegramId)) {
+        continue;
+      }
+
+      try {
+        const computed = this.computeParticipantHash(
+          gamePda,
+          new PublicKey(publicKey)
+        );
+
+        if (unmatchedHashes.has(computed)) {
+          recovered.push({ telegramId, publicKey });
+          unmatchedHashes.delete(computed);
+        }
+      } catch (_) {
+        // Ignore invalid public keys
+      }
+
+      if (unmatchedHashes.size === 0) {
+        break;
+      }
+    }
+
+    for (const participant of recovered) {
+      try {
+        this.gameDb.saveGameParticipant(
+          gamePda.toBase58(),
+          participant.telegramId,
+          participant.publicKey
+        );
+        knownTelegramIds.add(participant.telegramId);
+      } catch (error) {
+        console.warn(
+          `⚠️ Failed to persist recovered participant ${participant.telegramId} for ${gamePda.toBase58()}:`,
+          error
+        );
+      }
+    }
+
+    if (recovered.length > 0) {
+      console.log(
+        `🔄 Recovered ${recovered.length} participant(s) for ${gamePda.toBase58()} from on-chain hashes`
+      );
+    }
+
+    if (unmatchedHashes.size > 0 && initialUnmatched === unmatchedHashes.size) {
+      console.warn(
+        `⚠️ Unable to match any on-chain participant hashes for ${gamePda.toBase58()}`
+      );
+    } else if (unmatchedHashes.size > 0) {
+      console.warn(
+        `⚠️ Unable to map ${unmatchedHashes.size} participant hash(es) for ${gamePda.toBase58()}`
+      );
+    }
+
+    return recovered;
   }
 
   private async executeCompleteCleanup(

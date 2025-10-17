@@ -31,9 +31,14 @@ describe("GameManager expired coinflip handler", () => {
     const cleanupCalls: any[] = [];
     let partialCalled = false;
 
-    (gm as any).analyzePlayerKeys = (account: any, address: string) => {
+    (gm as any).analyzePlayerKeys = (
+      pda: PublicKey,
+      account: any,
+      address: string
+    ) => {
       expect(address).toBe("ADDR1");
       expect(account).toEqual({ creator: "CREATOR" });
+      expect(pda).toBeInstanceOf(PublicKey);
       return analyzeInfo;
     };
     (gm as any).executeCompleteCleanup = async (...args: any[]) => {
@@ -75,7 +80,10 @@ describe("GameManager expired coinflip handler", () => {
     let completeCalled = false;
     const partialCalls: any[] = [];
 
-    (gm as any).analyzePlayerKeys = () => analyzeInfo;
+    (gm as any).analyzePlayerKeys = (pda: PublicKey) => {
+      expect(pda).toBeInstanceOf(PublicKey);
+      return analyzeInfo;
+    };
     (gm as any).executeCompleteCleanup = async () => {
       completeCalled = true;
       return true;
