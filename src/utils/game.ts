@@ -25,6 +25,7 @@ import type {
   GameMessageFormat,
   GameCategory,
   GameType,
+  PlayerMapping,
 } from "../types";
 import type { Timba } from "../../idl/idlType";
 import {
@@ -2669,11 +2670,17 @@ export class GameManager {
     }
 
     const recovered: Array<{ telegramId: string; publicKey: string }> = [];
-    const allMappings = this.gameDb.getAllPlayerMappings();
+    const allMappings =
+      (this.gameDb.getAllPlayerMappings?.() ?? []) as Array<
+        PlayerMapping & {
+          telegramId?: string;
+          publicKey?: string;
+        }
+      >;
 
     for (const mapping of allMappings) {
-      const telegramId = (mapping as any)?.telegram_id ?? mapping?.telegramId;
-      const publicKey = (mapping as any)?.public_key ?? mapping?.publicKey;
+      const telegramId = mapping.telegram_id ?? mapping.telegramId;
+      const publicKey = mapping.public_key ?? mapping.publicKey;
       if (!telegramId || !publicKey || knownTelegramIds.has(telegramId)) {
         continue;
       }

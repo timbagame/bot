@@ -39,7 +39,7 @@ test("analyzePlayerKeys recovers missing participants from hashes", () => {
   const gamePda = new PublicKey("BPFLoader3111111111111111111111111111111111");
   const creatorKey = new PublicKey("BPFLoader4111111111111111111111111111111111");
   const recoveredKey = new PublicKey("BPFLoader5111111111111111111111111111111111");
-  const participants = new Set(["creator" as const]);
+  const participants = new Set<"creator" | "missing">(["creator"]);
   const saved: Array<{ telegramId: string; publicKey: string }> = [];
 
   const db = {
