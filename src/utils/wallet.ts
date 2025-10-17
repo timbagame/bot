@@ -840,12 +840,13 @@ export class WalletManager {
     let totalLamportsSent = 0;
 
     if (wsolAccountExists && wsolAccountLamports > 0) {
-      instructions.push(createSyncNativeInstruction(wsolAta));
+      if (wsolAmount > 0) {
+        instructions.push(createSyncNativeInstruction(wsolAta));
+      }
       instructions.push(
-        createCloseAccountInstruction(wsolAta, destination, payer)
+        createCloseAccountInstruction(wsolAta, payer, payer)
       );
       wsolLamportsSent = wsolAccountLamports;
-      totalLamportsSent += wsolLamportsSent;
     }
 
     let nativeLamportsSent = 0;
@@ -864,7 +865,9 @@ export class WalletManager {
       }
     }
 
-    if (nativeLamports > 0) {
+    const totalAvailableLamports = nativeLamports + wsolLamportsSent;
+
+    if (totalAvailableLamports > 0) {
       const placeholderTransfer = SystemProgram.transfer({
         fromPubkey: payer,
         toPubkey: destination,
@@ -876,31 +879,46 @@ export class WalletManager {
         placeholderTransfer,
       ]);
 
-      if (
-        nativeLamports <= feeWithTransfer &&
-        instructions.length === 0
-      ) {
+      if (nativeLamports <= feeWithTransfer) {
+        if (instructions.length === 0) {
+          throw new Error(
+            "Not enough SOL to cover the transaction fee. Leave a small amount for fees and try again."
+          );
+        }
+
         throw new Error(
-          "Not enough SOL to cover the transaction fee. Leave a small amount for fees and try again."
+          "Not enough SOL to cover transaction fees before unwrapping WSOL. Top up SOL and try again."
         );
       }
 
       const spendableLamports = Math.max(
         0,
-        nativeLamports - feeWithTransfer - bufferLamports
+        totalAvailableLamports - feeWithTransfer - bufferLamports
       );
 
       if (spendableLamports > 0) {
-        nativeLamportsSent = spendableLamports;
+        const transferLamports = Math.min(
+          spendableLamports,
+          totalAvailableLamports
+        );
+
+        nativeLamportsSent = Math.min(nativeLamports, transferLamports);
+        const wsolContribution = Math.min(
+          wsolLamportsSent,
+          Math.max(transferLamports - nativeLamportsSent, 0)
+        );
+
+        wsolLamportsSent = wsolContribution;
+        totalLamportsSent = nativeLamportsSent + wsolLamportsSent;
+
         instructions.push(
           SystemProgram.transfer({
             fromPubkey: payer,
             toPubkey: destination,
-            lamports: nativeLamportsSent,
+            lamports: transferLamports,
           })
         );
-        totalLamportsSent += nativeLamportsSent;
-      } else if (instructions.length === 0) {
+      } else {
         throw new Error(
           "Not enough SOL to cover network fees while keeping a small reserve. Top up SOL and try again."
         );
