@@ -144,7 +144,7 @@ export const JUPITER_PLATFORM_FEE_BPS = 0; // No platform fee by default
 // ================================
 
 // Jupiter Price API base
-export const JUPITER_PRICE_URL = "https://price.jup.ag/v6/price";
+export const JUPITER_PRICE_URL = "https://lite-api.jup.ag/price/v3";
 // Toggle price fetching (disable to avoid network)
 export const PRICES_ENABLED = (process.env["PRICES_ENABLED"] ?? "true").toLowerCase() !== "false";
 // Cache TTL (ms) for token prices

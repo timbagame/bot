@@ -31,7 +31,7 @@ async function withTimeout<T>(p: Promise<T>, timeoutMs: number): Promise<T> {
 
 function toMintOrId(mintOrTicker: string): { jupId: string; forDex: string } {
   const key = normalizeKey(mintOrTicker);
-  if (key === "SOL") return { jupId: "SOL", forDex: WSOL_MINT };
+  if (key === "SOL") return { jupId: WSOL_MINT, forDex: WSOL_MINT };
   return { jupId: mintOrTicker, forDex: mintOrTicker };
 }
 
@@ -42,26 +42,60 @@ async function fetchFromJupiter(id: string, fetchImpl: PriceFetch, timeoutMs: nu
     const res = await withTimeout(fetchImpl(url.toString(), { method: "GET" }), timeoutMs);
     if (!res.ok) return null;
     const data = (await res.json()) as any;
-    // Jupiter returns { data: { [id]: { price: number } } }
-    const entry = data?.data?.[id];
-    const price = typeof entry?.price === "number" ? entry.price : Number(entry?.price);
-    if (!price || !isFinite(price)) return null;
-    return price;
+    const entry = data?.data?.[id] ?? data?.[id];
+    if (!entry) return null;
+    const priceCandidates = [
+      entry?.price,
+      entry?.usdPrice,
+      entry?.usd_price,
+    ];
+    for (const candidate of priceCandidates) {
+      const price = typeof candidate === "number" ? candidate : Number(candidate);
+      if (price && isFinite(price) && price > 0) {
+        return price;
+      }
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
-async function fetchFromDexScreener(addr: string, fetchImpl: PriceFetch, timeoutMs: number): Promise<number | null> {
+async function fetchFromPumpFun(
+  addr: string,
+  fetchImpl: PriceFetch,
+  timeoutMs: number
+): Promise<number | null> {
   try {
-    const url = `https://api.dexscreener.com/latest/dex/tokens/${addr}`;
-    const res = await withTimeout(fetchImpl(url, { method: "GET" }), timeoutMs);
+    const url = `https://frontend-api.pump.fun/coins/${addr}`;
+    const res = await withTimeout(
+      fetchImpl(url, {
+        method: "GET",
+        headers: {
+          accept: "application/json",
+          "user-agent": "timba-bot/1.0 (+https://timba.ai)",
+        },
+      }),
+      timeoutMs
+    );
     if (!res.ok) return null;
     const data = (await res.json()) as any;
-    const priceStr = data?.pairs?.[0]?.priceUsd;
-    const price = typeof priceStr === "string" ? Number(priceStr) : Number(priceStr);
-    if (!price || !isFinite(price)) return null;
-    return price;
+    const priceCandidates = [
+      data?.usdPrice,
+      data?.usd_price,
+      data?.usdValue,
+      data?.priceUsd,
+      data?.price_usd,
+      data?.usd_market_cap ? Number(data?.usd_market_cap) / Number(data?.supply ?? data?.supplyInTokens ?? 0) : undefined,
+      data?.priceInSol && data?.solPrice ? Number(data?.priceInSol) * Number(data?.solPrice) : undefined,
+    ];
+    for (const candidate of priceCandidates) {
+      const price = typeof candidate === "number" ? candidate : Number(candidate);
+      if (price && isFinite(price) && price > 0) {
+        return price;
+      }
+    }
+    return null;
   } catch {
     return null;
   }
@@ -92,11 +126,11 @@ export async function getPriceUSD(
         return fromJup;
       }
 
-      // 2) DexScreener fallback (requires address)
-      const fromDex = await fetchFromDexScreener(forDex, fetchImpl, PRICES_TIMEOUT_MS);
-      if (fromDex && fromDex > 0) {
-        cache.set(key, { price: fromDex, ts: now() });
-        return fromDex;
+      // 2) Pump.fun fallback (requires address)
+      const fromPump = await fetchFromPumpFun(forDex, fetchImpl, PRICES_TIMEOUT_MS);
+      if (fromPump && fromPump > 0) {
+        cache.set(key, { price: fromPump, ts: now() });
+        return fromPump;
       }
 
       // 3) Give up
