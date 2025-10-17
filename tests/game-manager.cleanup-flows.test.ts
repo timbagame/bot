@@ -52,5 +52,51 @@ describe("GameManager cleanup flows", () => {
     expect(a).toBe(false);
     expect(b).toBe(true);
   });
+
+  test("unjoinPlayers falls back to creator authority when player key missing", async () => {
+    resetGM();
+    const creatorKp = Keypair.generate();
+    const missingPlayerPubkey = new PublicKey("BPFLoader4111111111111111111111111111111111");
+
+    const walletStub = {
+      getKeyPair: (id: bigint) => {
+        if (id === BigInt(1)) {
+          return creatorKp;
+        }
+        throw new Error("missing");
+      },
+    } as any;
+
+    const gm = GameManager.getInstance({} as any, walletStub, {
+      getGameParticipants: () => [],
+      getPlayerPublicKey: () => null,
+    } as any);
+
+    let usedCreator = false;
+    (gm as any).unjoinPlayerFromGame = async (
+      _pda: PublicKey,
+      authority: Keypair,
+      target: PublicKey
+    ) => {
+      expect(target.equals(missingPlayerPubkey)).toBe(true);
+      expect(authority).toBe(creatorKp);
+      usedCreator = true;
+    };
+
+    const count = await (gm as any).unjoinPlayers(
+      gamePda,
+      [
+        {
+          telegramId: "404",
+          pubkey: missingPlayerPubkey,
+          isCreator: false,
+        },
+      ],
+      "1"
+    );
+
+    expect(count).toBe(1);
+    expect(usedCreator).toBe(true);
+  });
 });
 

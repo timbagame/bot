@@ -1,6 +1,16 @@
-import { PublicKey, Keypair, Connection } from "@solana/web3.js";
+import {
+  PublicKey,
+  Keypair,
+  Connection,
+  SystemProgram,
+} from "@solana/web3.js";
+import {
+  getAssociatedTokenAddress,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 import { Context } from "grammy";
 import * as anchor from "@coral-xyz/anchor";
+import { createHash } from "crypto";
 
 import { WalletManager } from "./wallet";
 import { GameDatabase } from "./game-database";
@@ -133,6 +143,8 @@ const categorizeGame = (
 export class GameManager {
   private static instance: GameManager;
   private activeGameMessages = new Map<string, GameMessage>();
+  private cachedConnection?: Connection;
+  private tokenProgramCache = new Map<string, PublicKey>();
 
   private constructor(
     private program: anchor.Program<Timba>,
@@ -166,8 +178,187 @@ export class GameManager {
         oracleClient,
         swapManager
       );
+      GameManager.instance.cachedConnection = connection;
     }
     return GameManager.instance;
+  }
+
+  private getConnection(): Connection {
+    if (this.cachedConnection) {
+      return this.cachedConnection;
+    }
+
+    const providerConnection = (this.program.provider as any)?.connection as
+      | Connection
+      | undefined;
+    if (providerConnection) {
+      this.cachedConnection = providerConnection;
+      return providerConnection;
+    }
+
+    const maybeGetConnection = (this.wallet as any).getConnection;
+    if (typeof maybeGetConnection === "function") {
+      const resolved = maybeGetConnection.call(this.wallet);
+      if (resolved) {
+        this.cachedConnection = resolved as Connection;
+        return this.cachedConnection;
+      }
+    }
+
+    const fallback = (this.wallet as any).connection as
+      | Connection
+      | undefined;
+    if (fallback) {
+      this.cachedConnection = fallback;
+      return fallback;
+    }
+
+    throw new Error("Unable to resolve Solana connection");
+  }
+
+  private getOraclePda(): PublicKey {
+    return PDAManager.getOraclePDA(this.program.programId);
+  }
+
+  private getGameVaultPda(tokenMint: PublicKey): PublicKey {
+    const [gameVaultPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("game_vault"), tokenMint.toBuffer()],
+      this.program.programId
+    );
+    return gameVaultPda;
+  }
+
+  private async resolveTokenProgramId(tokenMint: PublicKey): Promise<PublicKey> {
+    const cacheKey = tokenMint.toBase58();
+    const cached = this.tokenProgramCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const accountInfo = await this.getConnection().getAccountInfo(tokenMint);
+    if (!accountInfo) {
+      throw new Error(`Token mint ${cacheKey} not found`);
+    }
+
+    this.tokenProgramCache.set(cacheKey, accountInfo.owner);
+    return accountInfo.owner;
+  }
+
+  private async deriveAta(
+    tokenMint: PublicKey,
+    owner: PublicKey,
+    tokenProgram: PublicKey,
+    allowOwnerOffCurve = false
+  ): Promise<PublicKey> {
+    return getAssociatedTokenAddress(
+      tokenMint,
+      owner,
+      allowOwnerOffCurve,
+      tokenProgram
+    );
+  }
+
+  private async resolveGameTokenAccounts(tokenMint: PublicKey): Promise<{
+    tokenProgram: PublicKey;
+    gameToken: PublicKey;
+    gameVault: PublicKey;
+    gameTokenAccount: PublicKey;
+  }> {
+    const tokenProgram = await this.resolveTokenProgramId(tokenMint);
+    const gameToken = PDAManager.getGameTokenPDA(
+      tokenMint,
+      this.program.programId
+    );
+    const gameVault = this.getGameVaultPda(tokenMint);
+    const gameTokenAccount = await this.deriveAta(
+      tokenMint,
+      gameVault,
+      tokenProgram,
+      true
+    );
+
+    return {
+      tokenProgram,
+      gameToken,
+      gameVault,
+      gameTokenAccount,
+    };
+  }
+
+  private async buildJoinAccounts(
+    gamePda: PublicKey,
+    gameAccount: any,
+    player: PublicKey,
+    oracleOperator?: PublicKey
+  ): Promise<Record<string, PublicKey>> {
+    const tokenMint = new PublicKey(gameAccount.tokenMint);
+    const { tokenProgram, gameToken, gameVault, gameTokenAccount } =
+      await this.resolveGameTokenAccounts(tokenMint);
+    const playerTokenAccount = await this.deriveAta(
+      tokenMint,
+      player,
+      tokenProgram
+    );
+
+    const accounts: Record<string, PublicKey> = {
+      game: gamePda,
+      player,
+      tokenMint,
+      gameToken,
+      gameVault,
+      playerTokenAccount,
+      gameTokenAccount,
+      oracle: this.getOraclePda(),
+      systemProgram: SystemProgram.programId,
+      tokenProgram,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+    };
+
+    if (oracleOperator) {
+      accounts["oracleOperator"] = oracleOperator;
+    }
+
+    return accounts;
+  }
+
+  private async buildUnjoinAccounts(
+    gamePda: PublicKey,
+    gameAccount: any,
+    player: PublicKey,
+    authority: PublicKey
+  ): Promise<Record<string, PublicKey>> {
+    const accounts = await this.buildJoinAccounts(gamePda, gameAccount, player);
+    accounts["authority"] = authority;
+    return accounts;
+  }
+
+  private async buildCloseGameAccounts(
+    gamePda: PublicKey,
+    gameAccount: any
+  ): Promise<Record<string, PublicKey>> {
+    const tokenMint = new PublicKey(gameAccount.tokenMint);
+    const { tokenProgram, gameToken, gameVault, gameTokenAccount } =
+      await this.resolveGameTokenAccounts(tokenMint);
+    const creatorPubkey = new PublicKey(gameAccount.creator);
+    const creatorTokenAccount = await this.deriveAta(
+      tokenMint,
+      creatorPubkey,
+      tokenProgram
+    );
+
+    return {
+      game: gamePda,
+      creator: creatorPubkey,
+      tokenMint,
+      oracle: this.getOraclePda(),
+      gameToken,
+      gameVault,
+      creatorTokenAccount,
+      gameTokenAccount,
+      systemProgram: SystemProgram.programId,
+      tokenProgram,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+    };
   }
 
   // ================================
@@ -190,6 +381,143 @@ export class GameManager {
   /** Get all players in a game from the database */
   private getGamePlayers(gameAddress: string): string[] {
     return this.gameDb.getGameParticipants(gameAddress);
+  }
+
+  private computeParticipantHash(
+    gamePda: PublicKey,
+    participant: PublicKey
+  ): string {
+    const digest = createHash("sha256")
+      .update(Buffer.from("timba:part:v1"))
+      .update(gamePda.toBuffer())
+      .update(participant.toBuffer())
+      .digest();
+
+    const value = digest.subarray(0, 8).readBigUInt64LE(0);
+    return value.toString();
+  }
+
+  private recoverParticipantsFromHashes(
+    gamePda: PublicKey,
+    gameAccount: any,
+    knownTelegramIds: Set<string>
+  ): Array<{ telegramId: string; publicKey: string }> {
+    const rawHashes = gameAccount.participantHashes;
+    if (!Array.isArray(rawHashes) || rawHashes.length === 0) {
+      return [];
+    }
+
+    const participantHashes = rawHashes
+      .map((hash: any) => {
+        try {
+          if (typeof hash === "bigint") {
+            return hash;
+          }
+          if (typeof hash === "number") {
+            return BigInt(hash);
+          }
+          if (hash && typeof hash.toString === "function") {
+            return BigInt(hash.toString());
+          }
+        } catch (_) {
+          return null;
+        }
+        return null;
+      })
+      .filter((value): value is bigint => value !== null);
+
+    if (participantHashes.length === 0) {
+      return [];
+    }
+
+    const unmatchedHashes = new Set(
+      participantHashes.map((value) => value.toString())
+    );
+
+    for (const telegramId of knownTelegramIds) {
+      const publicKey = this.gameDb.getPlayerPublicKey(telegramId);
+      if (!publicKey) {
+        continue;
+      }
+
+      try {
+        const computed = this.computeParticipantHash(
+          gamePda,
+          new PublicKey(publicKey)
+        );
+        unmatchedHashes.delete(computed);
+      } catch (_) {
+        // Ignore malformed public keys
+      }
+    }
+
+    const initialUnmatched = unmatchedHashes.size;
+    if (initialUnmatched === 0) {
+      return [];
+    }
+
+    const recovered: Array<{ telegramId: string; publicKey: string }> = [];
+    const allMappings = (this.gameDb.getAllPlayerMappings?.() ?? []) as any[];
+
+    for (const mapping of allMappings) {
+      const telegramId = mapping?.telegram_id ?? mapping?.telegramId;
+      const publicKey = mapping?.public_key ?? mapping?.publicKey;
+      if (!telegramId || !publicKey || knownTelegramIds.has(telegramId)) {
+        continue;
+      }
+
+      try {
+        const computed = this.computeParticipantHash(
+          gamePda,
+          new PublicKey(publicKey)
+        );
+
+        if (unmatchedHashes.has(computed)) {
+          recovered.push({ telegramId, publicKey });
+          unmatchedHashes.delete(computed);
+        }
+      } catch (_) {
+        // Ignore invalid public keys
+      }
+
+      if (unmatchedHashes.size === 0) {
+        break;
+      }
+    }
+
+    for (const participant of recovered) {
+      try {
+        this.gameDb.saveGameParticipant?.(
+          gamePda.toBase58(),
+          participant.telegramId,
+          participant.publicKey
+        );
+        knownTelegramIds.add(participant.telegramId);
+      } catch (error) {
+        console.warn(
+          `⚠️ Failed to persist recovered participant ${participant.telegramId} for ${gamePda.toBase58()}:`,
+          error
+        );
+      }
+    }
+
+    if (recovered.length > 0) {
+      console.log(
+        `🔄 Recovered ${recovered.length} participant(s) for ${gamePda.toBase58()} from on-chain hashes`
+      );
+    }
+
+    if (unmatchedHashes.size > 0 && initialUnmatched === unmatchedHashes.size) {
+      console.warn(
+        `⚠️ Unable to match any on-chain participant hashes for ${gamePda.toBase58()}`
+      );
+    } else if (unmatchedHashes.size > 0) {
+      console.warn(
+        `⚠️ Unable to map ${unmatchedHashes.size} participant hash(es) for ${gamePda.toBase58()}`
+      );
+    }
+
+    return recovered;
   }
 
   private async resolveTokenFormattingInfo(
@@ -1545,23 +1873,42 @@ export class GameManager {
         isPrivate: true,
       };
 
+      const tokenMintPubkey = new PublicKey(tokenMint);
+      const gamePda = PDAManager.getGamePDA(
+        randomHashBuffer,
+        this.program.programId
+      );
+      const { tokenProgram, gameToken, gameVault, gameTokenAccount } =
+        await this.resolveGameTokenAccounts(tokenMintPubkey);
+      const creatorTokenAccount = await this.deriveAta(
+        tokenMintPubkey,
+        playerKp.publicKey,
+        tokenProgram
+      );
+      const oraclePda = this.getOraclePda();
+
       const gameInstruction = await this.program.methods
         .initializeGame(gameConfig, Array.from(randomHashBuffer))
-        .accounts({
-          creator: playerKp.publicKey,
-          tokenMint: new PublicKey(tokenMint),
-        })
+        .accounts(
+          {
+            game: gamePda,
+            creator: playerKp.publicKey,
+            oracle: oraclePda,
+            tokenMint: tokenMintPubkey,
+            gameToken,
+            gameVault,
+            creatorTokenAccount,
+            gameTokenAccount,
+            systemProgram: SystemProgram.programId,
+            tokenProgram,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          } as any
+        )
         .instruction();
 
       const tx = await this.wallet.sendTransaction(
         [gameInstruction],
         [playerKp]
-      );
-
-      // Game PDA is now derived directly from random hash (no nonce needed)
-      const gamePda = PDAManager.getGamePDA(
-        randomHashBuffer,
-        this.program.programId
       );
 
       console.log(`📍 Game address: ${gamePda.toBase58()}`);
@@ -1661,12 +2008,14 @@ export class GameManager {
         joinTx = result.tx!;
       } else {
         console.log(`🌐 Game is public, using regular join...`);
+        const joinAccounts = await this.buildJoinAccounts(
+          gamePda,
+          gameAccount,
+          playerKp.publicKey
+        );
         const joinInstruction = await this.program.methods
           .joinGame()
-          .accounts({
-            game: gamePda,
-            player: playerKp.publicKey,
-          })
+          .accounts(joinAccounts as any)
           .instruction();
         joinTx = await this.wallet.sendTransaction(
           [joinInstruction],
@@ -2004,12 +2353,14 @@ export class GameManager {
           };
         }
       } else {
+        const joinAccounts = await this.buildJoinAccounts(
+          gamePda,
+          gameAccount,
+          playerKp.publicKey
+        );
         const joinInstruction = await this.program.methods
           .joinGame()
-          .accounts({
-            game: gamePda,
-            player: playerKp.publicKey,
-          })
+          .accounts(joinAccounts as any)
           .instruction();
 
         const tx = await this.wallet.sendTransaction(
@@ -2099,12 +2450,13 @@ export class GameManager {
 
       const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
 
+      const closeAccounts = await this.buildCloseGameAccounts(
+        gamePda,
+        gameAccount
+      );
       const closeInstruction = await this.program.methods
         .closeGame()
-        .accounts({
-          game: gamePda,
-          creator: gameAccount.creator,
-        })
+        .accounts(closeAccounts as any)
         .instruction();
 
       const tx = await this.wallet.sendTransaction(
@@ -2128,7 +2480,7 @@ export class GameManager {
 
   private async unjoinPlayerFromGame(
     gamePda: PublicKey,
-    playerKp: any,
+    authorityKp: Keypair,
     playerPubkey: PublicKey
   ): Promise<void> {
     // Get the last player from game participants in database
@@ -2147,17 +2499,21 @@ export class GameManager {
       throw new Error("Player not found in game participants");
     }
 
+    const gameAccount = await this.program.account.game.fetch(gamePda);
+    const unjoinAccounts = await this.buildUnjoinAccounts(
+      gamePda,
+      gameAccount,
+      playerPubkey,
+      authorityKp.publicKey
+    );
     const unjoinInstruction = await this.program.methods
       .unjoinGame()
-      .accounts({
-        game: gamePda,
-        player: playerPubkey,
-      })
+      .accounts(unjoinAccounts as any)
       .instruction();
 
     const tx = await this.wallet.sendTransaction(
       [unjoinInstruction],
-      [playerKp]
+      [authorityKp]
     );
     await this.wallet.confirmTransaction(tx);
 
@@ -2205,14 +2561,17 @@ export class GameManager {
       }
 
       const adminKp = authResult.adminKeypair!;
+      const gameAccount = await this.program.account.game.fetch(gamePda);
+      const joinAccounts = await this.buildJoinAccounts(
+        gamePda,
+        gameAccount,
+        playerKp.publicKey,
+        adminKp.publicKey
+      );
 
       const joinInstruction = await this.program.methods
         .joinGame()
-        .accounts({
-          game: gamePda,
-          player: playerKp.publicKey,
-          oracleOperator: adminKp.publicKey,
-        })
+        .accounts(joinAccounts as any)
         .instruction();
 
       const tx = await this.wallet.sendTransaction(
@@ -2515,7 +2874,7 @@ export class GameManager {
     gameAccount: any,
     address: string
   ): Promise<boolean> {
-    const playerKeyInfo = this.analyzePlayerKeys(gameAccount, address);
+    const playerKeyInfo = this.analyzePlayerKeys(gamePda, gameAccount, address);
     console.log(
       `🪙 Coinflip ${address}: ${playerKeyInfo.available.length}/${playerKeyInfo.total} player keys available`
     );
@@ -2534,10 +2893,25 @@ export class GameManager {
     return await this.executePartialCleanup(gamePda, playerKeyInfo, address);
   }
 
-  private analyzePlayerKeys(gameAccount: any, gameAddress: string) {
+  private analyzePlayerKeys(
+    gamePda: PublicKey,
+    gameAccount: any,
+    gameAddress: string
+  ) {
     // Get players from database since contract no longer stores players array
-    const participantTelegramIds = this.getGamePlayers(gameAddress);
-    const creatorPubkey = gameAccount.creator;
+    const participantTelegramIds = new Set(this.getGamePlayers(gameAddress));
+    this.recoverParticipantsFromHashes(gamePda, gameAccount, participantTelegramIds);
+
+    let creatorPubkey: PublicKey | null = null;
+    try {
+      creatorPubkey =
+        gameAccount.creator instanceof PublicKey
+          ? gameAccount.creator
+          : new PublicKey(gameAccount.creator);
+    } catch (_) {
+      creatorPubkey = null;
+    }
+
     const available: Array<{
       pubkey: PublicKey;
       telegramId: string;
@@ -2548,16 +2922,20 @@ export class GameManager {
     for (const telegramId of participantTelegramIds) {
       try {
         const playerPubkeyStr = this.gameDb.getPlayerPublicKey(telegramId);
-        if (playerPubkeyStr) {
-          const playerPubkey = new PublicKey(playerPubkeyStr);
-          available.push({
-            pubkey: playerPubkey,
-            telegramId,
-            isCreator: playerPubkey.equals(creatorPubkey),
-          });
-        } else {
+        if (!playerPubkeyStr) {
           unavailable.push(telegramId);
+          continue;
         }
+
+        const playerPubkey = new PublicKey(playerPubkeyStr);
+        const isCreator =
+          !!creatorPubkey && playerPubkey.equals(creatorPubkey);
+
+        available.push({
+          pubkey: playerPubkey,
+          telegramId,
+          isCreator,
+        });
       } catch (error) {
         unavailable.push(telegramId);
       }
@@ -2574,7 +2952,7 @@ export class GameManager {
       nonCreators,
       creator,
       canCompleteCleanup,
-      total: participantTelegramIds.length,
+      total: participantTelegramIds.size,
     };
   }
 
@@ -2591,7 +2969,8 @@ export class GameManager {
     // Unjoin ALL players including creator for coinflip games
     const unjoinedCount = await this.unjoinPlayers(
       gamePda,
-      playerKeyInfo.available
+      playerKeyInfo.available,
+      playerKeyInfo.creator?.telegramId
     );
 
     // Only proceed if all players were successfully unjoined
@@ -2623,7 +3002,8 @@ export class GameManager {
 
     const unjoinedCount = await this.unjoinPlayers(
       gamePda,
-      playerKeyInfo.available
+      playerKeyInfo.available,
+      playerKeyInfo.creator?.telegramId
     );
     console.log(
       `📊 Unjoined ${unjoinedCount}/${playerKeyInfo.available.length} players from coinflip ${address}`
@@ -2638,18 +3018,49 @@ export class GameManager {
       pubkey: PublicKey;
       telegramId: string;
       isCreator: boolean;
-    }>
+    }>,
+    creatorTelegramId?: string
   ): Promise<number> {
     let unjoinedCount = 0;
 
-    for (const player of players) {
+    const tryGetKeyPair = (telegramId?: string): Keypair | null => {
+      if (!telegramId) {
+        return null;
+      }
+
       try {
-        const playerKp = this.wallet.getKeyPair(BigInt(player.telegramId));
-        await this.unjoinPlayerFromGame(gamePda, playerKp, player.pubkey);
+        return this.wallet.getKeyPair(BigInt(telegramId));
+      } catch (_) {
+        return null;
+      }
+    };
+
+    const creatorAuthority = tryGetKeyPair(creatorTelegramId);
+
+    for (const player of players) {
+      let authorityKp = tryGetKeyPair(player.telegramId);
+      let usedCreatorFallback = false;
+
+      if (!authorityKp && creatorAuthority) {
+        authorityKp = creatorAuthority;
+        usedCreatorFallback = !player.isCreator;
+      }
+
+      if (!authorityKp) {
+        console.error(
+          `Failed to unjoin ${player.pubkey.toBase58()}: missing signing authority`
+        );
+        continue;
+      }
+
+      try {
+        await this.unjoinPlayerFromGame(gamePda, authorityKp, player.pubkey);
         console.log(
           `➡️ Unjoined ${
             player.isCreator ? "creator" : "player"
-          } ${player.pubkey.toBase58()}`
+          } ${player.pubkey.toBase58()}${
+            usedCreatorFallback ? " using creator authority" : ""
+          }`
         );
         unjoinedCount++;
       } catch (error) {
@@ -2673,12 +3084,13 @@ export class GameManager {
       // Step 2: Close the game
       const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
 
+      const closeAccounts = await this.buildCloseGameAccounts(
+        gamePda,
+        gameAccount
+      );
       const closeInstruction = await this.program.methods
         .closeGame()
-        .accounts({
-          game: gamePda,
-          creator: gameAccount.creator,
-        })
+        .accounts(closeAccounts as any)
         .instruction();
 
       const tx = await this.wallet.sendTransaction(
