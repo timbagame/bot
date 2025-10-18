@@ -12,42 +12,16 @@ import * as path from "path";
 import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
 import { WalletManager } from "../src/utils/wallet";
+import {
+  getSupportedTokens,
+  type TokenConfig,
+} from "../src/utils/token-registry";
 
 const ORACLE_OPERATOR_KEYPAIR_ENV = "ORACLE_OPERATOR_KEYPAIR_PATH";
 const RPC_URL =
   process.env["SOLANA_NETWORK"] || "https://api.mainnet-beta.solana.com";
 
-type TokenConfig = {
-  mint: string;
-  ticker: string;
-};
-
-const TOKENS: TokenConfig[] = [
-  {
-    mint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
-    ticker: "TIMBA",
-  },
-  {
-    mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-    ticker: "USDC",
-  },
-  {
-    mint: "A6rSPi9JmJgVkW6BatsA6MjFYLseizPM2Fnt92coFjf4",
-    ticker: "MAGAIBA",
-  },
-  {
-    mint: "So11111111111111111111111111111111111111112",
-    ticker: "WSOL",
-  },
-  {
-    mint: "FkBF9u1upwEMUPxnXjcydxxVSxgr8f3k1YXbz7G7bmtA",
-    ticker: "GLORP",
-  },
-  {
-    mint: "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC",
-    ticker: "AI16Z",
-  },
-];
+const TOKENS: TokenConfig[] = getSupportedTokens();
 
 type KeypairBundle = {
   root: Web3Keypair;

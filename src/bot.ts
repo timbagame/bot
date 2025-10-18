@@ -93,6 +93,42 @@ export const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
 const gameDb = GameDatabase.getInstance();
 const pendingGameCreations = new Set<string>();
 
+const ADDITIONAL_TOKEN_MINTS: Record<string, string> = {
+  BONK: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+};
+
+const TOKEN_MINT_MAP: Record<string, string> = (() => {
+  const map: Record<string, string> = {
+    SOL: WSOL_MINT,
+    WSOL: WSOL_MINT,
+  };
+
+  for (const token of TOKENS_LIST) {
+    map[token.ticker.toUpperCase()] = token.mint;
+  }
+
+  for (const [ticker, mint] of Object.entries(ADDITIONAL_TOKEN_MINTS)) {
+    map[ticker.toUpperCase()] = mint;
+  }
+
+  return map;
+})();
+
+const resolveTokenMint = (ticker: string): string | undefined =>
+  TOKEN_MINT_MAP[ticker.toUpperCase()];
+
+const CONTRACT_EXAMPLE_LINES = (() => {
+  const uniqueMints = new Set<string>([
+    ...TOKENS_LIST.map((token) => token.mint),
+    DEFAULT_TOKEN_MINT,
+    WSOL_MINT,
+  ]);
+
+  return Array.from(uniqueMints)
+    .slice(0, 2)
+    .map((mint) => `• <code>${mint}</code>`);
+})();
+
 // See utils/network-display.ts for getNetworkFromRPC
 
 // Helper moved to utils/service-health.ts as checkServiceHealth
@@ -6320,8 +6356,7 @@ bot.on("callback_query", async (ctx, next) => {
       `Please send a message with the contract address (CA) of the token you want to buy.`,
       "",
       `<b>Examples:</b>`,
-      `• <code>EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v</code>`,
-      `• <code>BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4</code>`,
+      ...CONTRACT_EXAMPLE_LINES,
       "",
       `<b>Format:</b> 44 characters (Solana address)`,
       "",
@@ -7262,15 +7297,8 @@ const showSwapQuoteAndConfirmation = async (
 
   try {
     // Get real quote from swapManager
-    const tokenMints: { [key: string]: string } = {
-      SOL: "So11111111111111111111111111111111111111112",
-      TIMBA: "BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4",
-      WSOL: "So11111111111111111111111111111111111111112",
-      USDC: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-    };
-
-    const inputMint = tokenMints[fromToken];
-    const outputMint = tokenMints[toToken];
+    const inputMint = resolveTokenMint(fromToken);
+    const outputMint = resolveTokenMint(toToken);
 
     if (!inputMint || !outputMint) {
       throw new Error(`Unsupported token pair: ${fromToken} → ${toToken}`);
@@ -7633,16 +7661,8 @@ const showBuyQuoteAndConfirmation = async (
 
   try {
     // Use existing swap logic but with BUY terminology
-    const tokenMints: { [key: string]: string } = {
-      SOL: "So11111111111111111111111111111111111111112",
-      TIMBA: "BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4",
-      WSOL: "So11111111111111111111111111111111111111112",
-      USDC: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-      BONK: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
-    };
-
-    const inputMint = tokenMints[paymentToken];
-    const outputMint = contractAddress || tokenMints[targetToken];
+    const inputMint = resolveTokenMint(paymentToken);
+    const outputMint = contractAddress || resolveTokenMint(targetToken);
 
     if (!inputMint) {
       throw new Error(`Unsupported payment token: ${paymentToken}`);

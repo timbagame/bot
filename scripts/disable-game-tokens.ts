@@ -5,20 +5,11 @@ import * as path from "path";
 import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
 import { WalletManager } from "../src/utils/wallet";
+import { getSupportedTokens } from "../src/utils/token-registry";
 
 const ORACLE_OPERATOR_KEYPAIR_ENV = "ORACLE_OPERATOR_KEYPAIR_PATH";
 
-// Tokens to disable by default (mainnet TIMBA + WSOL)
-const TOKENS_TO_DISABLE = [
-  {
-    mint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
-    ticker: "TIMBA",
-  },
-  {
-    mint: "So11111111111111111111111111111111111111112",
-    ticker: "WSOL",
-  },
-];
+const TOKENS_TO_DISABLE = getSupportedTokens();
 
 const RPC_URL =
   process.env.SOLANA_NETWORK || "https://api.mainnet-beta.solana.com";

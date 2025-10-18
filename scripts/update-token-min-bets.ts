@@ -8,6 +8,10 @@ import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
 import { WalletManager } from "../src/utils/wallet";
 import { getPriceUSD } from "../src/utils/prices";
+import {
+  getSupportedTokens,
+  type TokenConfig,
+} from "../src/utils/token-registry";
 
 const ORACLE_OPERATOR_KEYPAIR_ENV = "ORACLE_OPERATOR_KEYPAIR_PATH";
 
@@ -24,9 +28,7 @@ const DEFAULT_MARGIN_MULTIPLIER = Number(
   process.env["MIN_BET_MARGIN_MULTIPLIER"] ?? "1.2"
 );
 
-type TokenTarget = {
-  mint: string;
-  ticker: string;
+type TokenTarget = TokenConfig & {
   minCompletionFeeLamports?: bigint;
 };
 
@@ -43,50 +45,15 @@ const optionalBigIntEnv = (key: string): bigint | undefined => {
   }
 };
 
-const TARGET_TOKENS: TokenTarget[] = [
-  {
-    mint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump", // TIMBA mainnet
-    ticker: "TIMBA",
-    minCompletionFeeLamports: optionalBigIntEnv(
-      "TIMBA_MIN_COMPLETION_FEE_LAMPORTS"
-    ),
-  },
-  {
-    mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC mainnet
-    ticker: "USDC",
-    minCompletionFeeLamports: optionalBigIntEnv(
-      "USDC_MIN_COMPLETION_FEE_LAMPORTS"
-    ),
-  },
-  {
-    mint: "A6rSPi9JmJgVkW6BatsA6MjFYLseizPM2Fnt92coFjf4", // MAGAIBA mainnet
-    ticker: "MAGAIBA",
-    minCompletionFeeLamports: optionalBigIntEnv(
-      "MAGAIBA_MIN_COMPLETION_FEE_LAMPORTS"
-    ),
-  },
-  {
-    mint: "So11111111111111111111111111111111111111112", // WSOL
-    ticker: "WSOL",
-    minCompletionFeeLamports: optionalBigIntEnv(
-      "WSOL_MIN_COMPLETION_FEE_LAMPORTS"
-    ),
-  },
-  {
-    mint: "FkBF9u1upwEMUPxnXjcydxxVSxgr8f3k1YXbz7G7bmtA", // GLORP mainnet
-    ticker: "GLORP",
-    minCompletionFeeLamports: optionalBigIntEnv(
-      "GLORP_MIN_COMPLETION_FEE_LAMPORTS"
-    ),
-  },
-  {
-    mint: "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC", // AI16Z mainnet
-    ticker: "AI16Z",
-    minCompletionFeeLamports: optionalBigIntEnv(
-      "AI16Z_MIN_COMPLETION_FEE_LAMPORTS"
-    ),
-  },
-];
+const buildCompletionFeeEnvKey = (ticker: string): string =>
+  `${ticker.toUpperCase()}_MIN_COMPLETION_FEE_LAMPORTS`;
+
+const TARGET_TOKENS: TokenTarget[] = getSupportedTokens().map((token) => ({
+  ...token,
+  minCompletionFeeLamports: optionalBigIntEnv(
+    buildCompletionFeeEnvKey(token.ticker)
+  ),
+}));
 
 type KeypairBundle = {
   root: Web3Keypair;
