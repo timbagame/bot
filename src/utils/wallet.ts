@@ -22,6 +22,7 @@ import {
   TOKEN_2022_PROGRAM_ID,
   TokenAccountNotFoundError,
   TokenInvalidAccountOwnerError,
+  unpackMint,
 } from "@solana/spl-token";
 import * as fs from "fs";
 import * as path from "path";
@@ -588,46 +589,22 @@ export class WalletManager {
       return { decimals: cached.decimals };
     }
 
-    // Handle known tokens with hardcoded decimals
-    const knownTokens: { [key: string]: number } = {
-      So11111111111111111111111111111111111111112: 9, // WSOL
-      EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: 6, // USDC
-      Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: 6, // USDT
-      BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4: 9, // TIMBA devnet
-      F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump: 6, // TIMBA mainnet
-      A6rSPi9JmJgVkW6BatsA6MjFYLseizPM2Fnt92coFjf4: 6, // MAGAIBA
-      FkBF9u1upwEMUPxnXjcydxxVSxgr8f3k1YXbz7G7bmtA: 6, // GLORP
-      HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC: 6, // AI16Z
-      FPyD25czYkvztSsgyCP7bxd2xnvDAp1LVjyiJhQidaos: 9, // DAOS
-    };
-
-    if (knownTokens[tokenMint]) {
-      const decimals = knownTokens[tokenMint];
-      this.tokenMetadataCache.set(tokenMint, { decimals, timestamp: now });
-      return { decimals };
-    }
-
     await this.throttle();
     try {
-      const account = await this.connection.getParsedAccountInfo(
-        new PublicKey(tokenMint)
-      );
-      if (!account.value || !account.value.data) {
+      const mintPublicKey = new PublicKey(tokenMint);
+      const accountInfo = await this.connection.getAccountInfo(mintPublicKey);
+      if (!accountInfo) {
         throw new Error("Token mint account not found or has no data");
       }
 
-      const parsedData = account.value.data as any;
-      if (
-        parsedData.parsed &&
-        parsedData.parsed.info &&
-        parsedData.parsed.info.decimals !== undefined
-      ) {
-        const decimals = parsedData.parsed.info.decimals;
-        this.tokenMetadataCache.set(tokenMint, { decimals, timestamp: now });
-        return { decimals };
-      } else {
-        throw new Error("Unable to parse token decimals from account data");
-      }
+      const programId = accountInfo.owner.equals(TOKEN_2022_PROGRAM_ID)
+        ? TOKEN_2022_PROGRAM_ID
+        : TOKEN_PROGRAM_ID;
+
+      const mint = unpackMint(mintPublicKey, accountInfo, programId);
+      const decimals = mint.decimals;
+      this.tokenMetadataCache.set(tokenMint, { decimals, timestamp: now });
+      return { decimals };
     } catch (error) {
       console.error(`Error getting token metadata for ${tokenMint}:`, error);
       throw new Error(
