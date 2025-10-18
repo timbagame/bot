@@ -1,11 +1,15 @@
-import { JUPITER_PRICE_URL, PRICES_CACHE_TTL_MS, PRICES_TIMEOUT_MS } from "./constants";
+import {
+  JUPITER_PRICE_URL,
+  PRICES_CACHE_TTL_MS,
+  PRICES_TIMEOUT_MS,
+} from "./constants";
+import { WSOL_MINT } from "./token-registry";
 
 export type PriceFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 const cache = new Map<string, { price: number; ts: number }>();
 const inflight = new Map<string, Promise<number>>();
 
-const WSOL_MINT = "So11111111111111111111111111111111111111112";
 const PRICES_ENV_KEY = "PRICES_ENABLED";
 
 function isPricesEnabled(): boolean {
