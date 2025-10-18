@@ -22,6 +22,7 @@ import {
   TOKEN_2022_PROGRAM_ID,
   TokenAccountNotFoundError,
   TokenInvalidAccountOwnerError,
+  unpackMint,
 } from "@solana/spl-token";
 import * as fs from "fs";
 import * as path from "path";
@@ -47,6 +48,9 @@ type WalletDeps = {
   connection?: Connection;
   fetch?: HttpFetch;
   timeNow?: () => number;
+  tokenMetadataResolver?: (
+    mint: string
+  ) => Promise<{ decimals: number } | null> | { decimals: number } | null;
 };
 
 // ================================
@@ -83,6 +87,9 @@ export class WalletManager {
   private connection: Connection;
   private fetchFn: HttpFetch;
   private timeNow?: () => number;
+  private tokenMetadataResolver?: (
+    mint: string
+  ) => Promise<{ decimals: number } | null> | { decimals: number } | null;
   private adminKeypair: Keypair | null = null;
   private lastCallTime: number = 0;
 
@@ -105,11 +112,16 @@ export class WalletManager {
       deps?.connection ?? new Connection(process.env.SOLANA_NETWORK!, "confirmed");
     this.fetchFn = deps?.fetch ?? (globalThis.fetch as any);
     this.timeNow = deps?.timeNow;
+    this.tokenMetadataResolver = deps?.tokenMetadataResolver;
     this.loadAdminKeypair();
   }
 
-  public static getInstance(mnemonic: string): WalletManager {
-    if (!this.instance) this.instance = new WalletManager(mnemonic);
+  public static getInstance(mnemonic: string, deps?: WalletDeps): WalletManager {
+    if (!this.instance) {
+      this.instance = new WalletManager(mnemonic, deps);
+    } else if (deps?.tokenMetadataResolver) {
+      this.instance.tokenMetadataResolver = deps.tokenMetadataResolver;
+    }
     return this.instance;
   }
 
@@ -588,48 +600,98 @@ export class WalletManager {
       return { decimals: cached.decimals };
     }
 
-    // Handle known tokens with hardcoded decimals
-    const knownTokens: { [key: string]: number } = {
-      So11111111111111111111111111111111111111112: 9, // WSOL
-      EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: 6, // USDC
-      Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: 6, // USDT
-      BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4: 9, // TIMBA devnet
-      F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump: 6, // TIMBA mainnet
-      A6rSPi9JmJgVkW6BatsA6MjFYLseizPM2Fnt92coFjf4: 6, // MAGAIBA
-      FkBF9u1upwEMUPxnXjcydxxVSxgr8f3k1YXbz7G7bmtA: 6, // GLORP
-      HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC: 6, // AI16Z
-      FPyD25czYkvztSsgyCP7bxd2xnvDAp1LVjyiJhQidaos: 9, // DAOS
+    const resolveLocally = async (): Promise<number | null> => {
+      if (!this.tokenMetadataResolver) {
+        return null;
+      }
+      try {
+        const result = await this.tokenMetadataResolver(tokenMint);
+        if (result && typeof result.decimals === "number") {
+          this.tokenMetadataCache.set(tokenMint, {
+            decimals: result.decimals,
+            timestamp: now,
+          });
+          return result.decimals;
+        }
+      } catch (resolverError) {
+        console.warn(
+          `Token metadata resolver failed for ${tokenMint}:`,
+          resolverError
+        );
+      }
+      return null;
     };
 
-    if (knownTokens[tokenMint]) {
-      const decimals = knownTokens[tokenMint];
-      this.tokenMetadataCache.set(tokenMint, { decimals, timestamp: now });
-      return { decimals };
+    const locallyResolved = await resolveLocally();
+    if (locallyResolved !== null) {
+      return { decimals: locallyResolved };
     }
 
     await this.throttle();
     try {
-      const account = await this.connection.getParsedAccountInfo(
-        new PublicKey(tokenMint)
-      );
-      if (!account.value || !account.value.data) {
-        throw new Error("Token mint account not found or has no data");
+      const mintPublicKey = new PublicKey(tokenMint);
+      let decimals: number | null = null;
+
+      const getParsedAccountInfo =
+        (this.connection as any).getParsedAccountInfo?.bind(this.connection);
+
+      if (typeof getParsedAccountInfo === "function") {
+        try {
+          const parsedInfo = await getParsedAccountInfo(mintPublicKey);
+          const parsedDecimals =
+            parsedInfo?.value?.data?.parsed?.info?.decimals ?? null;
+          if (typeof parsedDecimals === "number") {
+            decimals = parsedDecimals;
+          }
+        } catch (parsedError) {
+          console.warn(
+            `Parsed account metadata unavailable for ${tokenMint}:`,
+            parsedError
+          );
+        }
       }
 
-      const parsedData = account.value.data as any;
-      if (
-        parsedData.parsed &&
-        parsedData.parsed.info &&
-        parsedData.parsed.info.decimals !== undefined
-      ) {
-        const decimals = parsedData.parsed.info.decimals;
-        this.tokenMetadataCache.set(tokenMint, { decimals, timestamp: now });
-        return { decimals };
-      } else {
-        throw new Error("Unable to parse token decimals from account data");
+      if (decimals === null) {
+        const getAccountInfo = this.connection.getAccountInfo?.bind(
+          this.connection
+        );
+        if (typeof getAccountInfo !== "function") {
+          throw new Error(
+            "RPC connection does not support getAccountInfo for mint metadata"
+          );
+        }
+
+        const accountInfo = await getAccountInfo(mintPublicKey);
+        if (!accountInfo) {
+          throw new Error("Token mint account not found or has no data");
+        }
+
+        const owner = (accountInfo as any).owner;
+        const isToken2022 = Boolean(
+          owner && typeof owner.equals === "function" && owner.equals(TOKEN_2022_PROGRAM_ID)
+        );
+        const programId = isToken2022
+          ? TOKEN_2022_PROGRAM_ID
+          : TOKEN_PROGRAM_ID;
+
+        const mint = unpackMint(mintPublicKey, accountInfo, programId);
+        decimals = mint.decimals;
       }
+
+      if (decimals === null) {
+        throw new Error("Unable to determine mint decimals");
+      }
+
+      this.tokenMetadataCache.set(tokenMint, { decimals, timestamp: now });
+      return { decimals };
     } catch (error) {
       console.error(`Error getting token metadata for ${tokenMint}:`, error);
+
+      const fallbackDecimals = await resolveLocally();
+      if (fallbackDecimals !== null) {
+        return { decimals: fallbackDecimals };
+      }
+
       throw new Error(
         `Failed to get token metadata: ${
           error instanceof Error ? error.message : "Unknown error"

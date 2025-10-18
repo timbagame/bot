@@ -3,7 +3,11 @@ import { WalletManager } from "../src/utils/wallet";
 import { GameDatabase } from "../src/utils/game-database";
 import { ChatDatabase } from "../src/utils/chat-database";
 import { TokenManager } from "../src/utils/token-manager";
-import { DEFAULT_TOKEN_MINT, DEFAULT_TOKEN_TICKER } from "../src/utils/constants";
+import {
+  DEFAULT_TOKEN_MINT,
+  DEFAULT_TOKEN_TICKER,
+  WSOL_MINT,
+} from "../src/utils/constants";
 
 describe("Bot Integration Tests", () => {
   let wallet: WalletManager;
@@ -17,8 +21,19 @@ describe("Bot Integration Tests", () => {
     process.env.MNEMONIC =
       "test test test test test test test test test test test junk";
 
+    const decimalsMap: Record<string, number> = {
+      [DEFAULT_TOKEN_MINT]: 6,
+      [WSOL_MINT]: 9,
+      "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": 6,
+    };
+
     // Initialize components
-    wallet = WalletManager.getInstance(process.env.MNEMONIC);
+    wallet = WalletManager.getInstance(process.env.MNEMONIC!, {
+      tokenMetadataResolver: (mint) => {
+        const decimals = decimalsMap[mint];
+        return typeof decimals === "number" ? { decimals } : null;
+      },
+    });
     gameDb = GameDatabase.getInstance();
     chatDb = ChatDatabase.getInstance();
     tokenManager = TokenManager.getInstance(

@@ -20,6 +20,10 @@ describe("WalletManager.transferToken", () => {
       connection: conn as any,
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
+      tokenMetadataResolver: async (mint) =>
+        mint === "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+          ? { decimals: 6 }
+          : null,
     });
 
     // Stub sendTransaction to avoid real network
@@ -48,6 +52,8 @@ describe("WalletManager.transferToken", () => {
       connection: conn,
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
+      tokenMetadataResolver: async (mint) =>
+        mint === mint2022.toBase58() ? { decimals: 7 } : null,
     });
     (wm as any).sendTransaction = async () => "SIG_2022";
 
