@@ -6206,6 +6206,7 @@ bot.on("callback_query", async (ctx, next) => {
       `<b>From:</b> <code>${walletAddressHtml}</code>`,
       "",
       `<b>What do you want to buy?</b>`,
+      `<i>Reply with a contract address or ticker to search manually.</i>`,
     ];
 
     const keyboard = new InlineKeyboard();
@@ -6225,17 +6226,21 @@ bot.on("callback_query", async (ctx, next) => {
       }
     }
 
-    // Custom options
-    keyboard
-      .text("📋 Paste Contract Address", `buy_contract_${paymentToken}`)
-      .row();
-
     keyboard.text("← Back", "cmd_buy").row();
 
     await ctx.editMessageText(response.join("\n"), {
       parse_mode: "HTML",
       reply_markup: keyboard,
     });
+    const userId = ctx.from?.id?.toString();
+    if (userId) {
+      setUserState(userId, {
+        type: "buy_manual_input",
+        fromToken: paymentToken,
+        messageId: ctx.callbackQuery?.message?.message_id,
+        chatId: ctx.chat?.id,
+      });
+    }
     await ctx.answerCallbackQuery("Select token to buy");
   } catch (error) {
     console.error("Error in buy_with selection:", error);
@@ -7858,6 +7863,8 @@ bot.on("message:text", async (ctx, next) => {
       await handleSwapToTokenInput(ctx, userState, userMessage);
     } else if (userState.type === "swap_custom_amount") {
       await handleSwapCustomAmountInput(ctx, userState, userMessage);
+    } else if (userState.type === "buy_manual_input") {
+      await handleBuyManualInput(ctx, userState, userMessage);
     } else if (userState.type === "buy_contract_address") {
       await handleBuyContractAddressInput(ctx, userState, userMessage);
     } else if (userState.type === "buy_token_symbol") {
@@ -8158,6 +8165,34 @@ const handleSwapCustomAmountInput = async (
     actualAmount,
     telegramId
   );
+};
+
+const isLikelySolanaAddress = (input: string): boolean => {
+  if (input.length < 30 || input.length > 50) {
+    return false;
+  }
+
+  return /^[1-9A-HJ-NP-Za-km-z]+$/.test(input);
+};
+
+const handleBuyManualInput = async (
+  ctx: any,
+  userState: any,
+  userMessage: string
+) => {
+  const trimmed = userMessage.trim();
+
+  if (!trimmed) {
+    await handleBuyTokenSymbolInput(ctx, userState, trimmed);
+    return;
+  }
+
+  if (isLikelySolanaAddress(trimmed)) {
+    await handleBuyContractAddressInput(ctx, userState, trimmed);
+    return;
+  }
+
+  await handleBuyTokenSymbolInput(ctx, userState, trimmed);
 };
 
 /**

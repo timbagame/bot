@@ -57,9 +57,10 @@ describe("trade ui helpers", () => {
     ]);
     expect(callbacks).toContain("buy_with_SOL");
     expect(callbacks).toContain("buy_with_other_tokens");
-    expect(callbacks).toContain("buy_contract_SOL");
-    expect(callbacks).toContain("buy_search_SOL");
+    expect(callbacks).not.toContain("buy_contract_SOL");
+    expect(callbacks).not.toContain("buy_search_SOL");
     expect(callbacks).toContain("main_wallet");
+    expect(message).toContain("Reply with a contract address or token ticker");
   });
 
   test("buy menu omits token payment option when no balances", () => {

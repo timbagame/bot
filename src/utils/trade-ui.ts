@@ -35,14 +35,20 @@ export const buildBuyMenuUI = (params: BuyMenuParams) => {
     ? params.totalUsd
     : 0;
 
-  const message = [
+  const messageLines = [
     "🟢 <b>BUY TOKENS</b>",
     "",
     `<b>Wallet:</b> <code>${params.walletAddress}</code>`,
     `<b>SOL:</b> ${params.formattedSolBalance} ($${usdValue.toFixed(2)})`,
     "",
     summaryLine,
-  ].join("\n");
+  ];
+
+  messageLines.push(
+    "<i>Reply with a contract address or token ticker for more options.</i>"
+  );
+
+  const message = messageLines.join("\n");
 
   const keyboard = new InlineKeyboard();
 
@@ -54,10 +60,6 @@ export const buildBuyMenuUI = (params: BuyMenuParams) => {
   if (params.allowTokenPayments) {
     keyboard.text("💱 Pay with Token", "buy_with_other_tokens");
   }
-  keyboard.row();
-
-  keyboard.text("📋 Paste Address", "buy_contract_SOL");
-  keyboard.text("🔎 Search Token", "buy_search_SOL");
   keyboard.row();
 
   keyboard.text("↩️ Wallet", "main_wallet").row();
