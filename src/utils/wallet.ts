@@ -48,6 +48,9 @@ type WalletDeps = {
   connection?: Connection;
   fetch?: HttpFetch;
   timeNow?: () => number;
+  tokenMetadataResolver?: (
+    mint: string
+  ) => Promise<{ decimals: number } | null> | { decimals: number } | null;
 };
 
 // ================================
@@ -84,6 +87,9 @@ export class WalletManager {
   private connection: Connection;
   private fetchFn: HttpFetch;
   private timeNow?: () => number;
+  private tokenMetadataResolver?: (
+    mint: string
+  ) => Promise<{ decimals: number } | null> | { decimals: number } | null;
   private adminKeypair: Keypair | null = null;
   private lastCallTime: number = 0;
 
@@ -106,11 +112,16 @@ export class WalletManager {
       deps?.connection ?? new Connection(process.env.SOLANA_NETWORK!, "confirmed");
     this.fetchFn = deps?.fetch ?? (globalThis.fetch as any);
     this.timeNow = deps?.timeNow;
+    this.tokenMetadataResolver = deps?.tokenMetadataResolver;
     this.loadAdminKeypair();
   }
 
-  public static getInstance(mnemonic: string): WalletManager {
-    if (!this.instance) this.instance = new WalletManager(mnemonic);
+  public static getInstance(mnemonic: string, deps?: WalletDeps): WalletManager {
+    if (!this.instance) {
+      this.instance = new WalletManager(mnemonic, deps);
+    } else if (deps?.tokenMetadataResolver) {
+      this.instance.tokenMetadataResolver = deps.tokenMetadataResolver;
+    }
     return this.instance;
   }
 
@@ -589,24 +600,98 @@ export class WalletManager {
       return { decimals: cached.decimals };
     }
 
+    const resolveLocally = async (): Promise<number | null> => {
+      if (!this.tokenMetadataResolver) {
+        return null;
+      }
+      try {
+        const result = await this.tokenMetadataResolver(tokenMint);
+        if (result && typeof result.decimals === "number") {
+          this.tokenMetadataCache.set(tokenMint, {
+            decimals: result.decimals,
+            timestamp: now,
+          });
+          return result.decimals;
+        }
+      } catch (resolverError) {
+        console.warn(
+          `Token metadata resolver failed for ${tokenMint}:`,
+          resolverError
+        );
+      }
+      return null;
+    };
+
+    const locallyResolved = await resolveLocally();
+    if (locallyResolved !== null) {
+      return { decimals: locallyResolved };
+    }
+
     await this.throttle();
     try {
       const mintPublicKey = new PublicKey(tokenMint);
-      const accountInfo = await this.connection.getAccountInfo(mintPublicKey);
-      if (!accountInfo) {
-        throw new Error("Token mint account not found or has no data");
+      let decimals: number | null = null;
+
+      const getParsedAccountInfo =
+        (this.connection as any).getParsedAccountInfo?.bind(this.connection);
+
+      if (typeof getParsedAccountInfo === "function") {
+        try {
+          const parsedInfo = await getParsedAccountInfo(mintPublicKey);
+          const parsedDecimals =
+            parsedInfo?.value?.data?.parsed?.info?.decimals ?? null;
+          if (typeof parsedDecimals === "number") {
+            decimals = parsedDecimals;
+          }
+        } catch (parsedError) {
+          console.warn(
+            `Parsed account metadata unavailable for ${tokenMint}:`,
+            parsedError
+          );
+        }
       }
 
-      const programId = accountInfo.owner.equals(TOKEN_2022_PROGRAM_ID)
-        ? TOKEN_2022_PROGRAM_ID
-        : TOKEN_PROGRAM_ID;
+      if (decimals === null) {
+        const getAccountInfo = this.connection.getAccountInfo?.bind(
+          this.connection
+        );
+        if (typeof getAccountInfo !== "function") {
+          throw new Error(
+            "RPC connection does not support getAccountInfo for mint metadata"
+          );
+        }
 
-      const mint = unpackMint(mintPublicKey, accountInfo, programId);
-      const decimals = mint.decimals;
+        const accountInfo = await getAccountInfo(mintPublicKey);
+        if (!accountInfo) {
+          throw new Error("Token mint account not found or has no data");
+        }
+
+        const owner = (accountInfo as any).owner;
+        const isToken2022 = Boolean(
+          owner && typeof owner.equals === "function" && owner.equals(TOKEN_2022_PROGRAM_ID)
+        );
+        const programId = isToken2022
+          ? TOKEN_2022_PROGRAM_ID
+          : TOKEN_PROGRAM_ID;
+
+        const mint = unpackMint(mintPublicKey, accountInfo, programId);
+        decimals = mint.decimals;
+      }
+
+      if (decimals === null) {
+        throw new Error("Unable to determine mint decimals");
+      }
+
       this.tokenMetadataCache.set(tokenMint, { decimals, timestamp: now });
       return { decimals };
     } catch (error) {
       console.error(`Error getting token metadata for ${tokenMint}:`, error);
+
+      const fallbackDecimals = await resolveLocally();
+      if (fallbackDecimals !== null) {
+        return { decimals: fallbackDecimals };
+      }
+
       throw new Error(
         `Failed to get token metadata: ${
           error instanceof Error ? error.message : "Unknown error"

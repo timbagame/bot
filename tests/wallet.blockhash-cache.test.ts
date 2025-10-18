@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { Connection } from "@solana/web3.js";
 import { WalletManager } from "../src/utils/wallet";
+import { WSOL_MINT } from "../src/utils/constants";
 
 const mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
@@ -44,6 +45,8 @@ test("getTokenMetadata uses known token shortcuts", async () => {
     connection: conn,
     fetch: globalThis.fetch as any,
     timeNow: () => Date.now(),
+    tokenMetadataResolver: (mint) =>
+      mint === WSOL_MINT ? { decimals: 9 } : null,
   });
   const wsol = await wm.getTokenMetadata("So11111111111111111111111111111111111111112");
   expect(wsol.decimals).toBe(9);
