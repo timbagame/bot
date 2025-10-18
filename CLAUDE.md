@@ -78,7 +78,7 @@ This is a Telegram bot for creating and playing coinflip and giveaway games on S
 
 ### Token Support
 
-- Default token auto-detected per network (mainnet: `F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump`, devnet: `BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4`)
+- Default token auto-detected per configured network (mainnet mint: `F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump`)
 - WSOL support for native SOL wrapping
 - Dynamic token support via database configuration
 - Per-chat token settings with admin controls

@@ -19,7 +19,7 @@ import * as path from "path";
 import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
 import { WalletManager } from "../src/utils/wallet";
-import { requireTokenByTicker } from "../src/utils/token-registry";
+import { getSupportedTokens } from "../src/utils/token-registry";
 
 const ORACLE_OPERATOR_KEYPAIR_ENV = "ORACLE_OPERATOR_KEYPAIR_PATH";
 
@@ -58,13 +58,6 @@ const NETWORK =
   normalizeCluster(process.env["SOLANA_CLUSTER"]) ??
   deriveClusterFromRpc(RPC_URL);
 
-const TIMBA_TOKEN = requireTokenByTicker("TIMBA");
-const USDC_TOKEN = requireTokenByTicker("USDC");
-const MAGAIBA_TOKEN = requireTokenByTicker("MAGAIBA");
-const WSOL_TOKEN = requireTokenByTicker("WSOL");
-const GLORP_TOKEN = requireTokenByTicker("GLORP");
-const AI16Z_TOKEN = requireTokenByTicker("AI16Z");
-
 const resolveMinAmount = (envKey: string, fallback: bigint): bigint => {
   const rawValue = process.env[envKey]?.trim();
   if (!rawValue) return fallback;
@@ -85,49 +78,8 @@ const resolveMinAmount = (envKey: string, fallback: bigint): bigint => {
 };
 
 const CONFIG = {
-  // Network configuration
   RPC_URL,
   NETWORK,
-
-  // Token configuration
-  TIMBA_MINT: resolveEnvPath(process.env["TIMBA_MINT"], TIMBA_TOKEN.mint),
-  TIMBA_TICKER: resolveEnvPath(process.env["TIMBA_TICKER"], TIMBA_TOKEN.ticker),
-  TIMBA_MIN_AMOUNT: resolveMinAmount("TIMBA_DEFAULT_MIN_AMOUNT", 1_000n),
-
-  USDC_MINT: resolveEnvPath(process.env["USDC_MINT"], USDC_TOKEN.mint),
-  USDC_TICKER: resolveEnvPath(process.env["USDC_TICKER"], USDC_TOKEN.ticker),
-  USDC_MIN_AMOUNT: resolveMinAmount("USDC_DEFAULT_MIN_AMOUNT", 1_000n),
-
-  MAGAIBA_MINT: resolveEnvPath(
-    process.env["MAGAIBA_MINT"],
-    MAGAIBA_TOKEN.mint
-  ),
-  MAGAIBA_TICKER: resolveEnvPath(
-    process.env["MAGAIBA_TICKER"],
-    MAGAIBA_TOKEN.ticker
-  ),
-  MAGAIBA_MIN_AMOUNT: resolveMinAmount("MAGAIBA_DEFAULT_MIN_AMOUNT", 1_000n),
-
-  // WSOL configuration (Wrapped SOL)
-  WSOL_MINT: resolveEnvPath(process.env["WSOL_MINT"], WSOL_TOKEN.mint),
-  WSOL_TICKER: resolveEnvPath(process.env["WSOL_TICKER"], WSOL_TOKEN.ticker),
-  WSOL_MIN_AMOUNT: resolveMinAmount("WSOL_DEFAULT_MIN_AMOUNT", 10_000_000n),
-
-  GLORP_MINT: resolveEnvPath(process.env["GLORP_MINT"], GLORP_TOKEN.mint),
-  GLORP_TICKER: resolveEnvPath(
-    process.env["GLORP_TICKER"],
-    GLORP_TOKEN.ticker
-  ),
-  GLORP_MIN_AMOUNT: resolveMinAmount("GLORP_DEFAULT_MIN_AMOUNT", 1_000n),
-
-  AI16Z_MINT: resolveEnvPath(
-    process.env["AI16Z_MINT"],
-    AI16Z_TOKEN.mint
-  ),
-  AI16Z_TICKER: resolveEnvPath(process.env["AI16Z_TICKER"], AI16Z_TOKEN.ticker),
-  AI16Z_MIN_AMOUNT: resolveMinAmount("AI16Z_DEFAULT_MIN_AMOUNT", 1_000n),
-
-  // Program configuration
   ADMIN_KEYPAIR_PATH: resolveEnvPath(
     process.env["ADMIN_KEYPAIR_PATH"],
     "./admin-keypair.json"
@@ -140,38 +92,24 @@ type TokenInitTarget = {
   defaultMinAmount: bigint;
 };
 
-const TOKEN_CONFIGS: TokenInitTarget[] = [
-  {
-    tokenMint: CONFIG.TIMBA_MINT,
-    tokenTicker: CONFIG.TIMBA_TICKER,
-    defaultMinAmount: CONFIG.TIMBA_MIN_AMOUNT,
-  },
-  {
-    tokenMint: CONFIG.USDC_MINT,
-    tokenTicker: CONFIG.USDC_TICKER,
-    defaultMinAmount: CONFIG.USDC_MIN_AMOUNT,
-  },
-  {
-    tokenMint: CONFIG.MAGAIBA_MINT,
-    tokenTicker: CONFIG.MAGAIBA_TICKER,
-    defaultMinAmount: CONFIG.MAGAIBA_MIN_AMOUNT,
-  },
-  {
-    tokenMint: CONFIG.WSOL_MINT,
-    tokenTicker: CONFIG.WSOL_TICKER,
-    defaultMinAmount: CONFIG.WSOL_MIN_AMOUNT,
-  },
-  {
-    tokenMint: CONFIG.GLORP_MINT,
-    tokenTicker: CONFIG.GLORP_TICKER,
-    defaultMinAmount: CONFIG.GLORP_MIN_AMOUNT,
-  },
-  {
-    tokenMint: CONFIG.AI16Z_MINT,
-    tokenTicker: CONFIG.AI16Z_TICKER,
-    defaultMinAmount: CONFIG.AI16Z_MIN_AMOUNT,
-  },
-];
+const defaultMinAmountForTicker = (ticker: string): bigint =>
+  ticker.toUpperCase() === "WSOL" ? 10_000_000n : 1_000n;
+
+const TOKEN_CONFIGS: TokenInitTarget[] = getSupportedTokens().map((token) => {
+  const tickerUpper = token.ticker.toUpperCase();
+  const mintEnvKey = `${tickerUpper}_MINT`;
+  const tickerEnvKey = `${tickerUpper}_TICKER`;
+  const minAmountEnvKey = `${tickerUpper}_DEFAULT_MIN_AMOUNT`;
+
+  return {
+    tokenMint: resolveEnvPath(process.env[mintEnvKey], token.mint),
+    tokenTicker: resolveEnvPath(process.env[tickerEnvKey], token.ticker),
+    defaultMinAmount: resolveMinAmount(
+      minAmountEnvKey,
+      defaultMinAmountForTicker(tickerUpper)
+    ),
+  };
+});
 
 const GAME_TOKEN_ACCOUNT_SIZE = 8 + 32 + 1 + 8 + 8 + 1; // Mirror on-chain GAME_TOKEN_SIZE
 const BALANCE_BUFFER_SOL = 0.01; // Keep a small buffer to absorb fee variance

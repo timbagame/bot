@@ -9,7 +9,7 @@ import idl from "../idl/idl.json";
 import { WalletManager } from "../src/utils/wallet";
 import { getPriceUSD } from "../src/utils/prices";
 import {
-  requireTokenByTicker,
+  getSupportedTokens,
   type TokenConfig,
 } from "../src/utils/token-registry";
 
@@ -45,34 +45,14 @@ const optionalBigIntEnv = (key: string): bigint | undefined => {
   }
 };
 
-const TARGET_TOKENS: TokenTarget[] = [
-  {
-    ticker: "TIMBA",
-    envKey: "TIMBA_MIN_COMPLETION_FEE_LAMPORTS",
-  },
-  {
-    ticker: "USDC",
-    envKey: "USDC_MIN_COMPLETION_FEE_LAMPORTS",
-  },
-  {
-    ticker: "MAGAIBA",
-    envKey: "MAGAIBA_MIN_COMPLETION_FEE_LAMPORTS",
-  },
-  {
-    ticker: "WSOL",
-    envKey: "WSOL_MIN_COMPLETION_FEE_LAMPORTS",
-  },
-  {
-    ticker: "GLORP",
-    envKey: "GLORP_MIN_COMPLETION_FEE_LAMPORTS",
-  },
-  {
-    ticker: "AI16Z",
-    envKey: "AI16Z_MIN_COMPLETION_FEE_LAMPORTS",
-  },
-].map(({ ticker, envKey }) => ({
-  ...requireTokenByTicker(ticker),
-  minCompletionFeeLamports: optionalBigIntEnv(envKey),
+const buildCompletionFeeEnvKey = (ticker: string): string =>
+  `${ticker.toUpperCase()}_MIN_COMPLETION_FEE_LAMPORTS`;
+
+const TARGET_TOKENS: TokenTarget[] = getSupportedTokens().map((token) => ({
+  ...token,
+  minCompletionFeeLamports: optionalBigIntEnv(
+    buildCompletionFeeEnvKey(token.ticker)
+  ),
 }));
 
 type KeypairBundle = {

@@ -9,12 +9,8 @@ const TIMBA_MAINNET_TOKEN: TokenConfig = {
   ticker: "TIMBA",
 };
 
-const TIMBA_DEVNET_TOKEN: TokenConfig = {
-  mint: "BLdSbJzuq2cW8MhB8VtFbG4JSsWdYFff8Ufd2zdc4Yi4",
-  ticker: "TIMBA",
-};
-
-const BASE_TOKENS: TokenConfig[] = [
+const REGISTERED_TOKENS: TokenConfig[] = [
+  TIMBA_MAINNET_TOKEN,
   { mint: WSOL_MINT, ticker: "WSOL" },
   { mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", ticker: "USDC" },
   { mint: "A6rSPi9JmJgVkW6BatsA6MjFYLseizPM2Fnt92coFjf4", ticker: "MAGAIBA" },
@@ -22,9 +18,8 @@ const BASE_TOKENS: TokenConfig[] = [
   { mint: "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC", ticker: "AI16Z" },
 ];
 
-const NETWORK_DEFAULT_TOKENS: Partial<Record<SolanaNetwork, TokenConfig>> = {
-  mainnet: TIMBA_MAINNET_TOKEN,
-  devnet: TIMBA_DEVNET_TOKEN,
+const NETWORK_DEFAULT_TICKERS: Partial<Record<SolanaNetwork, string>> = {
+  mainnet: TIMBA_MAINNET_TOKEN.ticker,
 };
 
 export type TokenRegistryOptions = {
@@ -58,15 +53,20 @@ export function resolveDefaultToken(options?: {
   }
 
   const network = options?.network ?? NetworkDetector.getCurrentNetwork();
+  const defaultTicker =
+    NETWORK_DEFAULT_TICKERS[network] ??
+    NETWORK_DEFAULT_TICKERS.mainnet ??
+    TIMBA_MAINNET_TOKEN.ticker;
+
   return (
-    NETWORK_DEFAULT_TOKENS[network] ??
-    NETWORK_DEFAULT_TOKENS.mainnet ??
-    TIMBA_MAINNET_TOKEN
+    REGISTERED_TOKENS.find(
+      (token) => normalizeTicker(token.ticker) === normalizeTicker(defaultTicker)
+    ) ?? TIMBA_MAINNET_TOKEN
   );
 }
 
 export function getBaseTokens(): TokenConfig[] {
-  return [...BASE_TOKENS];
+  return [...REGISTERED_TOKENS];
 }
 
 export function buildTokenList(options: TokenRegistryOptions = {}): TokenConfig[] {
@@ -76,12 +76,7 @@ export function buildTokenList(options: TokenRegistryOptions = {}): TokenConfig[
     ? options.defaultToken ?? resolveDefaultToken({ network })
     : null;
 
-  const tokens = [...BASE_TOKENS];
-  const networkSpecific = NETWORK_DEFAULT_TOKENS[network];
-
-  if (networkSpecific) {
-    tokens.push(networkSpecific);
-  }
+  const tokens = [...REGISTERED_TOKENS];
 
   if (defaultToken) {
     tokens.push(defaultToken);

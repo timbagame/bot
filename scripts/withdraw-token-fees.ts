@@ -13,7 +13,7 @@ import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
 import { WalletManager } from "../src/utils/wallet";
 import {
-  requireTokenByTicker,
+  getSupportedTokens,
   type TokenConfig,
 } from "../src/utils/token-registry";
 
@@ -21,14 +21,7 @@ const ORACLE_OPERATOR_KEYPAIR_ENV = "ORACLE_OPERATOR_KEYPAIR_PATH";
 const RPC_URL =
   process.env["SOLANA_NETWORK"] || "https://api.mainnet-beta.solana.com";
 
-const TOKENS: TokenConfig[] = [
-  "TIMBA",
-  "USDC",
-  "MAGAIBA",
-  "WSOL",
-  "GLORP",
-  "AI16Z",
-].map((ticker) => requireTokenByTicker(ticker));
+const TOKENS: TokenConfig[] = getSupportedTokens();
 
 type KeypairBundle = {
   root: Web3Keypair;
