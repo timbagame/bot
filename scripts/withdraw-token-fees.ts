@@ -3,6 +3,7 @@ import {
   getAssociatedTokenAddressSync,
   createAssociatedTokenAccountInstruction,
   TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import { Keypair as Web3Keypair, SystemProgram } from "@solana/web3.js";
@@ -103,17 +104,53 @@ async function ensureAtaInstruction(
   connection: anchor.web3.Connection,
   payer: anchor.web3.PublicKey,
   owner: anchor.web3.PublicKey,
-  mint: anchor.web3.PublicKey
+  mint: anchor.web3.PublicKey,
+  tokenProgramId: anchor.web3.PublicKey
 ): Promise<anchor.web3.TransactionInstruction | null> {
-  const ata = getAssociatedTokenAddressSync(mint, owner, true);
+  const ata = getAssociatedTokenAddressSync(
+    mint,
+    owner,
+    true,
+    tokenProgramId,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  );
   const accountInfo = await connection.getAccountInfo(ata);
   if (accountInfo) return null;
   return createAssociatedTokenAccountInstruction(
     payer,
     ata,
     owner,
-    mint
+    mint,
+    tokenProgramId,
+    ASSOCIATED_TOKEN_PROGRAM_ID
   );
+}
+
+const tokenProgramCache = new Map<string, anchor.web3.PublicKey>();
+
+async function resolveTokenProgramId(
+  connection: anchor.web3.Connection,
+  mint: anchor.web3.PublicKey
+): Promise<anchor.web3.PublicKey> {
+  const cacheKey = mint.toBase58();
+  const cached = tokenProgramCache.get(cacheKey);
+  if (cached) return cached;
+
+  const accountInfo = await connection.getAccountInfo(mint);
+  if (!accountInfo) {
+    console.warn(
+      `⚠️  Unable to fetch mint account info for ${cacheKey}; defaulting to SPL Token program.`
+    );
+    tokenProgramCache.set(cacheKey, TOKEN_PROGRAM_ID);
+    return TOKEN_PROGRAM_ID;
+  }
+
+  const programId = accountInfo.owner.equals(TOKEN_2022_PROGRAM_ID)
+    ? TOKEN_2022_PROGRAM_ID
+    : TOKEN_PROGRAM_ID;
+
+  tokenProgramCache.set(cacheKey, programId);
+  return programId;
 }
 
 async function withdrawTokenFee(
@@ -137,6 +174,8 @@ async function withdrawTokenFee(
     [Buffer.from("game_vault"), mint.toBuffer()],
     program.programId
   );
+
+  const tokenProgramId = await resolveTokenProgramId(connection, mint);
 
   const gameTokenInfo = await connection.getAccountInfo(gameTokenPda);
   if (!gameTokenInfo) {
@@ -162,19 +201,24 @@ async function withdrawTokenFee(
   const operatorAta = getAssociatedTokenAddressSync(
     mint,
     operatorBundle.anchor.publicKey,
-    false
+    false,
+    tokenProgramId,
+    ASSOCIATED_TOKEN_PROGRAM_ID
   );
   const gameVaultAta = getAssociatedTokenAddressSync(
     mint,
     gameVaultPda,
-    true
+    true,
+    tokenProgramId,
+    ASSOCIATED_TOKEN_PROGRAM_ID
   );
 
   const ataIx = await ensureAtaInstruction(
     connection,
     adminBundle.anchor.publicKey,
     operatorBundle.anchor.publicKey,
-    mint
+    mint,
+    tokenProgramId
   );
 
   console.log(
@@ -192,7 +236,7 @@ async function withdrawTokenFee(
       oracleOperatorTokenAccount: operatorAta,
       gameTokenAccount: gameVaultAta,
       systemProgram: SystemProgram.programId,
-      tokenProgram: TOKEN_PROGRAM_ID,
+      tokenProgram: tokenProgramId,
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
     } as any)
     .instruction();
