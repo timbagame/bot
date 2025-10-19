@@ -8175,6 +8175,60 @@ const isLikelySolanaAddress = (input: string): boolean => {
   return /^[1-9A-HJ-NP-Za-km-z]+$/.test(input);
 };
 
+const updateBuyInputMessage = async (
+  ctx: any,
+  userState: any,
+  message: string,
+  options: any
+) => {
+  const userId = ctx.from?.id?.toString();
+  const existingChatId = userState?.chatId ?? ctx.chat?.id;
+  const existingMessageId = userState?.messageId;
+
+  const refreshState = (nextMessageId: number, nextChatId?: number) => {
+    if (!userId || !userState) return;
+    const rest = { ...userState };
+    delete rest.timestamp;
+    setUserState(userId, {
+      ...rest,
+      messageId: nextMessageId,
+      chatId: nextChatId ?? existingChatId ?? ctx.chat?.id,
+    });
+  };
+
+  if (existingChatId && existingMessageId) {
+    try {
+      await ctx.api.editMessageText(existingChatId, existingMessageId, message, options);
+      refreshState(existingMessageId, existingChatId);
+      return { chatId: existingChatId, messageId: existingMessageId };
+    } catch (error: any) {
+      const description = error?.description || error?.message || "";
+      const isKnownEditFailure =
+        description.includes("message to edit not found") ||
+        description.includes("message can't be edited");
+
+      if (!isKnownEditFailure) {
+        throw error;
+      }
+    }
+  }
+
+  const deletionChatId = ctx.chat?.id ?? existingChatId;
+  const deletionMessageId =
+    ctx.message?.message_id ?? ctx.callbackQuery?.message?.message_id;
+
+  if (deletionChatId && deletionMessageId) {
+    try {
+      await ctx.api.deleteMessage(deletionChatId, deletionMessageId);
+    } catch {}
+  }
+
+  const newMessage = await ctx.reply(message, options);
+  refreshState(newMessage.message_id, newMessage.chat?.id);
+
+  return { chatId: newMessage.chat?.id, messageId: newMessage.message_id };
+};
+
 const handleBuyManualInput = async (
   ctx: any,
   userState: any,
@@ -8223,25 +8277,10 @@ const handleBuyContractAddressInput = async (
       "🔄 <i>Please wait while we validate and fetch token metadata...</i>",
     ].join("\n");
 
-    try {
-      await ctx.editMessageText(loadingMessage, {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
-      });
-    } catch (error) {
-      // If edit fails because message has media or doesn't exist, delete and send new
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
-      const newMsg = await ctx.reply(loadingMessage, {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
-      });
-
-      // Update the message ID in user state
-      userState.messageId = newMsg.message_id;
-    }
+    await updateBuyInputMessage(ctx, userState, loadingMessage, {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
+    });
 
     // Try to fetch token metadata
     const tokenInfo = await fetchTokenMetadata(contractAddress, telegramId);
@@ -8307,22 +8346,10 @@ const handleBuyContractAddressInput = async (
 
       keyboard.text("← Back", "cmd_buy").row();
 
-    try {
-      await ctx.editMessageText(response.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: keyboard,
-      });
-    } catch (error) {
-      // If edit fails because message has media or doesn't exist, delete and send new
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
-      await ctx.reply(response.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: keyboard,
-      });
-    }
+    await updateBuyInputMessage(ctx, userState, response.join("\n"), {
+      parse_mode: "HTML",
+      reply_markup: keyboard,
+    });
 
     // Clear user state since we now have direct buy buttons with contract address in callback
     getUserState(ctx.from.id.toString(), true);
@@ -8344,31 +8371,24 @@ const handleBuyContractAddressInput = async (
       `⏱️ <i>This will timeout in 5 minutes</i>`,
     ];
 
-    try {
-      await ctx.editMessageText(errorMessage.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
-      });
-    } catch (error) {
-      // If edit fails because message has media or doesn't exist, delete and send new
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
-      const newMsg = await ctx.reply(errorMessage.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
-      });
-
-      // Update the message ID in user state
-      userState.messageId = newMsg.message_id;
-    }
+    await updateBuyInputMessage(ctx, userState, errorMessage.join("\n"), {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
+    });
 
     // Keep the same state for retry
-    setUserState(ctx.from.id.toString(), {
-      type: "buy_contract_address",
-      messageId: userState.messageId,
-    });
+    const userId = ctx.from?.id?.toString();
+    if (userId) {
+      const rest = { ...(userState ?? {}) } as any;
+      delete rest.timestamp;
+      setUserState(userId, {
+        ...rest,
+        type: "buy_contract_address",
+        fromToken: rest?.fromToken ?? userState?.fromToken,
+        chatId: rest?.chatId ?? ctx.chat?.id,
+        messageId: rest?.messageId ?? userState?.messageId,
+      });
+    }
   }
 };
 
@@ -8401,25 +8421,10 @@ const handleBuyTokenSymbolInput = async (
       "🔄 <i>Please wait while we search for tokens matching this symbol...</i>",
     ].join("\n");
 
-    try {
-      await ctx.editMessageText(loadingMessage, {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
-      });
-    } catch (error) {
-      // If edit fails because message has media or doesn't exist, delete and send new
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
-      const newMsg = await ctx.reply(loadingMessage, {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
-      });
-
-      // Update the message ID in user state
-      userState.messageId = newMsg.message_id;
-    }
+    await updateBuyInputMessage(ctx, userState, loadingMessage, {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
+    });
 
     // Try to find token by symbol in our known tokens first
     let tokenInfo = null;
@@ -8490,24 +8495,12 @@ const handleBuyTokenSymbolInput = async (
       }
     }
 
-  keyboard.text("← Back", "cmd_buy").row();
+    keyboard.text("← Back", "cmd_buy").row();
 
-    try {
-      await ctx.editMessageText(response.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: keyboard,
-      });
-    } catch (error) {
-      // If edit fails because message has media or doesn't exist, delete and send new
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
-      await ctx.reply(response.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: keyboard,
-      });
-    }
+    await updateBuyInputMessage(ctx, userState, response.join("\n"), {
+      parse_mode: "HTML",
+      reply_markup: keyboard,
+    });
   } catch (error: any) {
     console.error("Error searching for token:", error);
 
@@ -8526,37 +8519,27 @@ const handleBuyTokenSymbolInput = async (
       `⏱️ <i>This will timeout in 5 minutes</i>`,
     ];
 
-    try {
-      await ctx.editMessageText(errorMessage.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("🔗 Use Contract Address", "buy_contract_")
-          .text("❌ Cancel", "cmd_buy")
-          .row(),
-      });
-    } catch (error) {
-      // If edit fails because message has media or doesn't exist, delete and send new
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
-      const newMsg = await ctx.reply(errorMessage.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("🔗 Use Contract Address", "buy_contract_")
-          .text("❌ Cancel", "cmd_buy")
-          .row(),
-      });
-
-      // Update the message ID in user state
-      userState.messageId = newMsg.message_id;
-    }
+    await updateBuyInputMessage(ctx, userState, errorMessage.join("\n"), {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard()
+        .text("🔗 Use Contract Address", "buy_contract_")
+        .text("❌ Cancel", "cmd_buy")
+        .row(),
+    });
 
     // Keep the same state for retry
-    setUserState(ctx.from.id.toString(), {
-      type: "buy_token_symbol",
-      messageId: userState.messageId,
-    });
+    const userId = ctx.from?.id?.toString();
+    if (userId) {
+      const rest = { ...(userState ?? {}) } as any;
+      delete rest.timestamp;
+      setUserState(userId, {
+        ...rest,
+        type: "buy_token_symbol",
+        fromToken: rest?.fromToken ?? userState?.fromToken,
+        chatId: rest?.chatId ?? ctx.chat?.id,
+        messageId: rest?.messageId ?? userState?.messageId,
+      });
+    }
   }
 };
 
