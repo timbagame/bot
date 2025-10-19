@@ -906,6 +906,8 @@ const respondWithMenu = async (
   options: MenuResponseOptions = {}
 ): Promise<void> => {
   const parseMode = options.parseMode ?? "HTML";
+  let replyToMessageId = ctx.message?.message_id;
+  let sourceMessageDeleted = false;
 
   if (ctx.callbackQuery) {
     try {
@@ -924,6 +926,7 @@ const respondWithMenu = async (
       if (options.deleteIfFailed) {
         try {
           await ctx.deleteMessage();
+          sourceMessageDeleted = true;
         } catch {}
       }
     }
@@ -932,7 +935,7 @@ const respondWithMenu = async (
   await ctx.reply(message, {
     parse_mode: parseMode,
     reply_markup: keyboard,
-    reply_to_message_id: ctx.message?.message_id,
+    reply_to_message_id: sourceMessageDeleted ? undefined : replyToMessageId,
     link_preview_options: { is_disabled: true },
   });
 };
