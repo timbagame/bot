@@ -5847,10 +5847,7 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
 
     const tokenButtons: { label: string; callbackData: string }[] = [];
 
-    const featuredTokens = [
-      { ticker: "TIMBA", label: "🎲 TIMBA" },
-      { ticker: "USDC", label: "💵 USDC" },
-    ];
+    const featuredTokens = [{ ticker: "TIMBA", label: "🎲 TIMBA" }];
 
     for (const featured of featuredTokens) {
       if (!ownedTickers.has(featured.ticker)) {
