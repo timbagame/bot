@@ -1,6 +1,6 @@
 import { InlineKeyboard } from "grammy";
 
-export type OwnedTokenButton = {
+export type BuyTokenButton = {
   label: string;
   callbackData: string;
 };
@@ -9,9 +9,7 @@ export type BuyMenuParams = {
   walletAddress: string;
   formattedSolBalance: string;
   totalUsd: number;
-  ownedTokenButtons: OwnedTokenButton[];
-  allowTokenPayments: boolean;
-  hasAnyTokens: boolean;
+  tokenButtons: BuyTokenButton[];
 };
 
 export type SellTokenButton = {
@@ -27,9 +25,10 @@ export type SellMenuParams = {
 export const SELL_NOOP_CALLBACK = "sell_none";
 
 export const buildBuyMenuUI = (params: BuyMenuParams) => {
-  const summaryLine = params.hasAnyTokens
-    ? "<b>Select a token below or choose how to pay.</b>"
-    : "<b>Select how you'd like to buy:</b>";
+  const hasButtons = params.tokenButtons.length > 0;
+  const summaryLine = hasButtons
+    ? "<b>Select a token to buy:</b>"
+    : "<b>Paste a token contract address to get started.</b>";
 
   const usdValue = Number.isFinite(params.totalUsd)
     ? params.totalUsd
@@ -42,19 +41,16 @@ export const buildBuyMenuUI = (params: BuyMenuParams) => {
     `<b>SOL:</b> ${params.formattedSolBalance} ($${usdValue.toFixed(2)})`,
     "",
     summaryLine,
-  ].join("\n");
+    hasButtons
+      ? "<i>Paste a contract address if you don't see your token.</i>"
+      : "",
+  ].filter(Boolean).join("\n");
 
   const keyboard = new InlineKeyboard();
 
-  for (const button of params.ownedTokenButtons) {
+  for (const button of params.tokenButtons) {
     keyboard.text(button.label, button.callbackData).row();
   }
-
-  keyboard.text("💰 Buy with SOL", "buy_with_SOL");
-  if (params.allowTokenPayments) {
-    keyboard.text("💱 Pay with Token", "buy_with_other_tokens");
-  }
-  keyboard.row();
 
   keyboard.text("📋 Paste Address", "buy_contract_SOL");
   keyboard.text("🔎 Search Token", "buy_search_SOL");

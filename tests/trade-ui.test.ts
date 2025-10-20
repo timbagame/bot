@@ -32,51 +32,49 @@ function extractTexts(kb: any): string[] {
 }
 
 describe("trade ui helpers", () => {
-  test("buy menu highlights owned tokens and payment actions", () => {
+  test("buy menu lists token choices and quick actions", () => {
     const { message, keyboard } = buildBuyMenuUI({
       walletAddress: "1234567890ABCDEF",
       formattedSolBalance: "1.000",
       totalUsd: 123.45,
-      ownedTokenButtons: [
+      tokenButtons: [
         { label: "TIMBA (10.0)", callbackData: "buy_dynamic_SOL_1" },
         { label: "USDC (50)", callbackData: "buy_dynamic_SOL_2" },
       ],
-      allowTokenPayments: true,
-      hasAnyTokens: true,
     });
 
     expect(message).toContain("BUY TOKENS");
     expect(message).toContain("1234567890ABCDEF");
     expect(message).toContain("$123.45");
-    expect(message).toContain("Select a token below");
+    expect(message).toContain("Select a token to buy");
+    expect(message).toContain("Paste a contract address");
 
     const callbacks = extractCallbacks(keyboard);
     expect(callbacks.slice(0, 2)).toEqual([
       "buy_dynamic_SOL_1",
       "buy_dynamic_SOL_2",
     ]);
-    expect(callbacks).toContain("buy_with_SOL");
-    expect(callbacks).toContain("buy_with_other_tokens");
     expect(callbacks).toContain("buy_contract_SOL");
     expect(callbacks).toContain("buy_search_SOL");
     expect(callbacks).toContain("main_wallet");
+    expect(callbacks).not.toContain("buy_with_SOL");
+    expect(callbacks).not.toContain("buy_with_other_tokens");
   });
 
-  test("buy menu omits token payment option when no balances", () => {
+  test("buy menu prompts for address when no tokens listed", () => {
     const { message, keyboard } = buildBuyMenuUI({
       walletAddress: "ABCXYZ123456",
       formattedSolBalance: "0.000",
       totalUsd: 0,
-      ownedTokenButtons: [],
-      allowTokenPayments: false,
-      hasAnyTokens: false,
+      tokenButtons: [],
     });
 
-    expect(message).toContain("Select how you'd like to buy");
+    expect(message).toContain("Paste a token contract address to get started");
     const callbacks = extractCallbacks(keyboard);
-    expect(callbacks).toContain("buy_with_SOL");
-    expect(callbacks).not.toContain("buy_with_other_tokens");
     expect(callbacks).toContain("main_wallet");
+    expect(callbacks).toContain("buy_contract_SOL");
+    expect(callbacks).toContain("buy_search_SOL");
+    expect(callbacks).not.toContain("buy_with_SOL");
   });
 
   test("sell menu lists tokens or fallback button", () => {

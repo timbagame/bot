@@ -5671,7 +5671,27 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
 
     const telegramId = BigInt(ctx.from.id || 0) as bigint;
     const overview = await getWalletOverview(telegramId);
-    const hasTokenBalances = overview.ownedTokens.length > 0;
+    const ownedTickers = new Set(
+      overview.ownedTokens
+        .map((token) => token.ticker?.toUpperCase())
+        .filter((ticker): ticker is string => Boolean(ticker))
+    );
+
+    const tokenButtons: { label: string; callbackData: string }[] = [];
+
+    const featuredTokens = [
+      { ticker: "TIMBA", label: "🎲 TIMBA" },
+      { ticker: "USDC", label: "💵 USDC" },
+    ];
+
+    for (const featured of featuredTokens) {
+      if (!ownedTickers.has(featured.ticker)) {
+        tokenButtons.push({
+          label: featured.label,
+          callbackData: `buy_popular_SOL_${featured.ticker}`,
+        });
+      }
+    }
 
     const ownedTokenButtons = overview.ownedTokens.slice(0, 6).map((token) => {
       const formattedBalance = wallet.formatTokenBalance(
@@ -5690,19 +5710,18 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
         callbackData: `buy_dynamic_SOL_${tokenTxId}`,
       };
     });
+    tokenButtons.push(...ownedTokenButtons);
 
     const { message, keyboard } = buildBuyMenuUI({
       walletAddress: overview.walletAddress,
       formattedSolBalance: overview.formattedSolBalance,
       totalUsd: overview.totalUsd,
-      ownedTokenButtons,
-      allowTokenPayments: hasTokenBalances,
-      hasAnyTokens: hasTokenBalances,
+      tokenButtons,
     });
 
     await respondWithMenu(ctx, { text: message, keyboard });
 
-    await ctx.answerCallbackQuery("Select how you want to buy");
+    await ctx.answerCallbackQuery("Select a token to buy");
   } catch (error) {
     console.error("Error in cmd_buy:", error);
     await ctx.answerCallbackQuery("❌ Error loading buy interface");
@@ -6052,103 +6071,6 @@ bot.on("callback_query", async (ctx, next) => {
   }
 });
 
-// Handle "buy with" payment method selection
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("buy_with_")) {
-    return await next();
-  }
-
-  const paymentToken = callbackData.replace("buy_with_", "");
-  console.log(`🟢 Buy with payment method selected: ${paymentToken}`);
-
-  try {
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
-    const keypair = wallet.getKeyPair(telegramId);
-    const walletAddress = keypair.publicKey.toBase58();
-    const walletAddressHtml = escapeHtml(walletAddress);
-
-    // Handle "other_tokens" case - show available tokens
-    if (paymentToken === "other_tokens") {
-      const { tokenBalances } = await getCachedWalletData(telegramId);
-
-      const response = [
-        `🟢 <b>BUY TOKENS</b>`,
-        "",
-        `<b>From:</b> <code>${walletAddressHtml}</code>`,
-        "",
-        `<b>Choose token to pay with:</b>`,
-      ];
-
-      const keyboard = new InlineKeyboard();
-
-      // Show available tokens
-      for (const token of tokenBalances.slice(0, 6)) {
-        if (parseFloat(token.rawBalance) > 0) {
-          const formatted = wallet.formatTokenBalance(
-            token.balance,
-            token.decimals
-          );
-          keyboard
-            .text(`${token.ticker} (${formatted})`, `buy_with_${token.ticker}`)
-            .row();
-        }
-      }
-
-      keyboard.text("← Back", "cmd_buy").row();
-
-      await respondWithMenu(ctx, {
-        text: response.join("\n"),
-        keyboard,
-      });
-      await ctx.answerCallbackQuery("Select payment token");
-      return;
-    }
-
-    const response = [
-      `🟢 <b>BUY TOKENS</b>`,
-      "",
-      `<b>Paying with:</b> ${paymentToken}`,
-      `<b>From:</b> <code>${walletAddressHtml}</code>`,
-      "",
-      `<b>What do you want to buy?</b>`,
-    ];
-
-    const keyboard = new InlineKeyboard();
-
-    // Popular tokens section - only TIMBA and USDC
-    const popularTokens = [
-      { symbol: "TIMBA", name: "🎲 TIMBA" },
-      { symbol: "USDC", name: "💵 USDC" },
-    ];
-
-    for (const token of popularTokens) {
-      if (token.symbol !== paymentToken) {
-        // Don't show same token
-        keyboard
-          .text(token.name, `buy_popular_${paymentToken}_${token.symbol}`)
-          .row();
-      }
-    }
-
-    // Custom options
-    keyboard
-      .text("📋 Paste Contract Address", `buy_contract_${paymentToken}`)
-      .row();
-
-    keyboard.text("← Back", "cmd_buy").row();
-
-    await respondWithMenu(ctx, {
-      text: response.join("\n"),
-      keyboard,
-    });
-    await ctx.answerCallbackQuery("Select token to buy");
-  } catch (error) {
-    console.error("Error in buy_with selection:", error);
-    await ctx.answerCallbackQuery("❌ Error processing payment method");
-  }
-});
-
 // Handle popular token selection for buy
 bot.on("callback_query", async (ctx, next) => {
   const callbackData = ctx.callbackQuery?.data;
@@ -6229,7 +6151,8 @@ bot.on("callback_query", async (ctx, next) => {
       ctx,
       paymentToken,
       targetToken,
-      contractAddress
+      contractAddress,
+      tokenTxId
     );
     await ctx.answerCallbackQuery(`Buy ${targetToken} with ${paymentToken}`);
   } catch (error) {
@@ -6271,9 +6194,7 @@ bot.on("callback_query", async (ctx, next) => {
 
     await respondWithMenu(ctx, {
       text: response.join("\n"),
-      keyboard: new InlineKeyboard()
-        .text("❌ Cancel", `buy_with_${paymentToken}`)
-        .row(),
+      keyboard: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
     });
 
     setUserState(userId, {
@@ -6321,9 +6242,7 @@ bot.on("callback_query", async (ctx, next) => {
 
     await respondWithMenu(ctx, {
       text: response.join("\n"),
-      keyboard: new InlineKeyboard()
-        .text("❌ Cancel", `buy_with_${paymentToken}`)
-        .row(),
+      keyboard: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
     });
 
     setUserState(userId, {
@@ -6415,9 +6334,7 @@ bot.on("callback_query", async (ctx, next) => {
 
       await respondWithMenu(ctx, {
         text: response.join("\n"),
-        keyboard: new InlineKeyboard()
-          .text("❌ Cancel", `buy_with_${paymentToken}`)
-          .row(),
+        keyboard: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
       });
 
       setUserState(userId, {
@@ -6453,9 +6370,7 @@ bot.on("callback_query", async (ctx, next) => {
 
     await respondWithMenu(ctx, {
       text: errorMessage.join("\n"),
-      keyboard: new InlineKeyboard()
-        .text("← Try Again", `buy_with_${paymentToken}`)
-        .row(),
+      keyboard: new InlineKeyboard().text("← Try Again", "cmd_buy").row(),
     });
 
     await ctx.answerCallbackQuery("❌ Error processing buy request");
@@ -7374,15 +7289,13 @@ const showSwapQuoteAndConfirmation = async (
 /**
  * Show buy amount selection interface
  */
-const showBuyAmountSelection = async (
-  ctx: any,
+const buildBuyAmountSelectionUI = async (
+  telegramId: bigint,
   paymentToken: string,
   targetToken: string,
-  _contractAddress?: string
+  contractAddress?: string,
+  tokenTxId?: string
 ) => {
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
-
-  // Get balance for the payment token
   const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
 
   let balanceDecimal = 0;
@@ -7408,30 +7321,57 @@ const showBuyAmountSelection = async (
     "",
     `<b>Paying with:</b> ${paymentToken} (${formattedBalance})`,
     `<b>Target:</b> ${targetToken}`,
-    "",
-    `<b>How much ${paymentToken} to spend?</b>`,
   ];
 
+  if (contractAddress) {
+    response.push(`<b>Contract:</b> <code>${contractAddress}</code>`);
+  }
+
+  response.push("", `<b>How much ${paymentToken} to spend?</b>`);
+
   const keyboard = new InlineKeyboard();
+  const callbackToken = tokenTxId ?? targetToken;
 
   if (balanceDecimal > 0.01) {
     keyboard
-      .text("25%", `buy_amount_${paymentToken}_${targetToken}_25%`)
-      .text("50%", `buy_amount_${paymentToken}_${targetToken}_50%`)
+      .text("25%", `buy_amount_${paymentToken}_${callbackToken}_25%`)
+      .text("50%", `buy_amount_${paymentToken}_${callbackToken}_50%`)
       .row()
-      .text("75%", `buy_amount_${paymentToken}_${targetToken}_75%`)
-      .text("100%", `buy_amount_${paymentToken}_${targetToken}_100%`)
+      .text("75%", `buy_amount_${paymentToken}_${callbackToken}_75%`)
+      .text("100%", `buy_amount_${paymentToken}_${callbackToken}_100%`)
       .row()
-      .text("✏️ Custom", `buy_amount_${paymentToken}_${targetToken}_CUSTOM`)
+      .text("✏️ Custom", `buy_amount_${paymentToken}_${callbackToken}_CUSTOM`)
       .row();
   } else {
     keyboard.text("❌ Insufficient balance").row();
   }
 
-  keyboard.text("← Back", `buy_with_${paymentToken}`).row();
+  keyboard.text("← Back", "cmd_buy").row();
+
+  return {
+    message: response.join("\n"),
+    keyboard,
+  };
+};
+
+const showBuyAmountSelection = async (
+  ctx: any,
+  paymentToken: string,
+  targetToken: string,
+  contractAddress?: string,
+  tokenTxId?: string
+) => {
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const { message, keyboard } = await buildBuyAmountSelectionUI(
+    telegramId,
+    paymentToken,
+    targetToken,
+    contractAddress,
+    tokenTxId
+  );
 
   await respondWithMenu(ctx, {
-    text: response.join("\n"),
+    text: message,
     keyboard,
   });
 };
@@ -7673,7 +7613,7 @@ const showBuyQuoteAndConfirmation = async (
         .text("5%", `buy_slip_${txId}_5.0`)
         .text("✏️", `buy_slip_${txId}_custom`)
         .row()
-        .text("❌ Cancel", `buy_with_${paymentToken}`)
+        .text("❌ Cancel", "cmd_buy")
         .row(),
     });
   } catch (error) {
@@ -7682,9 +7622,7 @@ const showBuyQuoteAndConfirmation = async (
       text: `❌ <b>QUOTE ERROR</b>\n\n${
         (error as Error).message
       }\n\nPlease try again.`,
-      keyboard: new InlineKeyboard()
-        .text("← Try Again", `buy_with_${paymentToken}`)
-        .row(),
+      keyboard: new InlineKeyboard().text("← Try Again", "cmd_buy").row(),
     });
   }
 };
@@ -8277,74 +8215,48 @@ const handleBuyTokenSymbolInput = async (
 
     console.log(`✅ Token found: ${tokenInfo.symbol} (${tokenInfo.address})`);
 
-    // Show payment method selection for this token
-    const response = [
-      `✅ <b>TOKEN IDENTIFIED</b>`,
-      "",
-      `🏷️ <b>Ticker:</b> ${tokenInfo.symbol}`,
-      `📝 <b>Name:</b> ${tokenInfo.name}`,
-      `🔗 <b>Address:</b> <code>${escapeHtml(tokenInfo.address)}</code>`,
-      `${tokenInfo.verified ? "✅ <b>Verified</b>" : "⚠️ <b>Unverified</b>"}`,
-      "",
-      `<b>💰 Select payment method to buy ${tokenInfo.symbol}:</b>`,
-    ];
-
-    // Get user balances to show available payment options
-    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-    const keyboard = new InlineKeyboard();
-
-    // Create a shorter transaction ID for the callback data
+    const paymentToken = "SOL";
     const tokenTxId = Math.random().toString(36).substring(2, 15);
 
-    // Cache the token info with the transaction ID
     transactionCache.set(tokenTxId, {
       targetToken: tokenInfo.symbol,
       targetTokenAddress: tokenInfo.address,
       tokenMetadata: tokenInfo,
+      paymentToken,
     });
+    setTimeout(() => transactionCache.delete(tokenTxId), 5 * 60 * 1000);
 
-    // Add SOL if available
-    if (solBalance > 0.001) {
-      const formattedSolBalance = wallet.formatSolBalance(solBalance);
-      keyboard
-        .text(`SOL (${formattedSolBalance})`, `buy_dynamic_SOL_${tokenTxId}`)
-        .row();
-    }
+    const { message, keyboard } = await buildBuyAmountSelectionUI(
+      telegramId,
+      paymentToken,
+      tokenInfo.symbol,
+      tokenInfo.address,
+      tokenTxId
+    );
 
-    // Add token balances if available
-    for (const token of tokenBalances) {
-      if (token.balance > 0 && token.ticker !== tokenInfo.symbol) {
-        const formatted = wallet.formatTokenBalance(
-          token.balance,
-          token.decimals
-        );
-        keyboard
-          .text(
-            `${token.ticker} (${formatted})`,
-            `buy_dynamic_${token.ticker}_${tokenTxId}`
-          )
-          .row();
+    const chatId = ctx.chat?.id;
+    const messageId = userState.messageId ?? ctx.message?.message_id;
+
+    if (chatId && messageId) {
+      try {
+        await ctx.api.editMessageText(chatId, messageId, message, {
+          parse_mode: "HTML",
+          reply_markup: keyboard,
+        });
+        return;
+      } catch (error) {
+        console.warn("Failed to edit token search message, sending new one.", error);
+        try {
+          await ctx.api.deleteMessage(chatId, messageId);
+        } catch {}
       }
     }
 
-  keyboard.text("← Back", "cmd_buy").row();
-
-    try {
-      await ctx.editMessageText(response.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: keyboard,
-      });
-    } catch (error) {
-      // If edit fails because message has media or doesn't exist, delete and send new
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
-      await ctx.reply(response.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: keyboard,
-      });
-    }
+    await ctx.reply(message, {
+      parse_mode: "HTML",
+      reply_markup: keyboard,
+      link_preview_options: { is_disabled: true },
+    });
   } catch (error: any) {
     console.error("Error searching for token:", error);
 
@@ -8367,7 +8279,7 @@ const handleBuyTokenSymbolInput = async (
       await ctx.editMessageText(errorMessage.join("\n"), {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("🔗 Use Contract Address", "buy_contract_")
+          .text("🔗 Use Contract Address", "buy_contract_SOL")
           .text("❌ Cancel", "cmd_buy")
           .row(),
       });
@@ -8380,7 +8292,7 @@ const handleBuyTokenSymbolInput = async (
       const newMsg = await ctx.reply(errorMessage.join("\n"), {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("🔗 Use Contract Address", "buy_contract_")
+          .text("🔗 Use Contract Address", "buy_contract_SOL")
           .text("❌ Cancel", "cmd_buy")
           .row(),
       });
@@ -8519,7 +8431,7 @@ const handleBuyCustomAmountInput = async (
       {
         parse_mode: "HTML",
         reply_markup: new InlineKeyboard()
-          .text("❌ Cancel", `buy_with_${paymentToken}`)
+          .text("❌ Cancel", "cmd_buy")
           .row(),
       }
     );
@@ -9007,7 +8919,7 @@ const regenerateBuyQuoteWithSlippage = async (
       .text("5%", `buy_slip_${txId}_5.0`)
       .text("✏️", `buy_slip_${txId}_custom`)
       .row()
-      .text("❌ Cancel", `buy_with_${buyData.fromToken}`)
+      .text("❌ Cancel", "cmd_buy")
       .row();
 
     await respondWithMenu(ctx, {
