@@ -3,6 +3,7 @@ import { escapeHtml } from "../utils/format-amount";
 import { LAMPORTS_PER_SOL } from "../utils/constants";
 import type { TokenDisplayLine } from "../utils/wallet-ui";
 import { isRecoverableMediaError, trySendVideoWithFallback } from "../utils/media";
+import { respondWithMenu } from "../utils/menu-response";
 
 
 
@@ -31,36 +32,15 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
   const getWalletKeyboard = () => createWalletKeyboard();
 
   const sendWalletContent = async (caption: string) => {
-    const editAsText = async (): Promise<boolean> => {
-      try {
-        await ctx.editMessageText(caption, {
-          parse_mode: "HTML",
-          reply_markup: getWalletKeyboard(),
-        });
-        return true;
-      } catch (textError: any) {
-        const textDesc: string =
-          textError?.description || textError?.message || "";
-        if (textDesc.includes("message is not modified")) {
-          return true;
-        }
-      }
-      return false;
-    };
-
-    const sendAsText = async () => {
-      await ctx.reply(caption, {
-        parse_mode: "HTML",
-        reply_markup: getWalletKeyboard(),
-        reply_to_message_id: ctx.message?.message_id,
+    const respondWithText = async () => {
+      await respondWithMenu(ctx, {
+        text: caption,
+        keyboard: getWalletKeyboard(),
       });
     };
 
     if (!walletVideoFileId) {
-      const edited = await editAsText();
-      if (!edited) {
-        await sendAsText();
-      }
+      await respondWithText();
       return;
     }
 
@@ -77,10 +57,8 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
       }
       if (isRecoverableMediaError(editError)) {
         console.warn("Falling back to text wallet edit:", editError);
-        const edited = await editAsText();
-        if (edited) {
-          return;
-        }
+        await respondWithText();
+        return;
       }
     }
 
@@ -92,7 +70,7 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
           reply_markup: getWalletKeyboard(),
           reply_to_message_id: ctx.message?.message_id,
         }),
-      () => sendAsText()
+      () => respondWithText()
     );
   };
 
@@ -188,11 +166,10 @@ export async function onWalletSettings(ctx: any, deps: WalletHandlersDeps) {
     const settingsContent = `⚙️ Settings\n\nChoose an option:`;
     const response = [settingsContent];
     const keyboard = deps.createSettingsKeyboard();
-    try {
-      await ctx.editMessageText(response.join("\n"), { parse_mode: "HTML", reply_markup: keyboard });
-    } catch {
-      await ctx.reply(response.join("\n"), { parse_mode: "HTML", reply_markup: keyboard });
-    }
+    await respondWithMenu(ctx, {
+      text: response.join("\n"),
+      keyboard,
+    });
     await ctx.answerCallbackQuery("⚙️ Settings");
   } catch (error) {
     console.error("Error in wallet_settings:", error);

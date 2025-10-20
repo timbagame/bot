@@ -70,6 +70,7 @@ import {
   buildSellMenuUI,
   SELL_NOOP_CALLBACK,
 } from "./utils/trade-ui";
+import { respondWithMenu } from "./utils/menu-response";
 
 // ================================
 // GLOBAL INSTANCES
@@ -892,52 +893,6 @@ const replyUsageError = async (
   message: string
 ): Promise<void> => {
   return replyToMessage(ctx, message);
-};
-
-type MenuResponseOptions = {
-  parseMode?: "HTML" | "MarkdownV2";
-  deleteIfFailed?: boolean;
-};
-
-const respondWithMenu = async (
-  ctx: Context,
-  message: string,
-  keyboard: InlineKeyboard,
-  options: MenuResponseOptions = {}
-): Promise<void> => {
-  const parseMode = options.parseMode ?? "HTML";
-  let replyToMessageId = ctx.message?.message_id;
-  let sourceMessageDeleted = false;
-
-  if (ctx.callbackQuery) {
-    try {
-      await ctx.editMessageText(message, {
-        parse_mode: parseMode,
-        reply_markup: keyboard,
-        link_preview_options: { is_disabled: true },
-      });
-      return;
-    } catch (error: any) {
-      const description: string = error?.description || error?.message || "";
-      if (description.includes("message is not modified")) {
-        return;
-      }
-
-      if (options.deleteIfFailed) {
-        try {
-          await ctx.deleteMessage();
-          sourceMessageDeleted = true;
-        } catch {}
-      }
-    }
-  }
-
-  await ctx.reply(message, {
-    parse_mode: parseMode,
-    reply_markup: keyboard,
-    reply_to_message_id: sourceMessageDeleted ? undefined : replyToMessageId,
-    link_preview_options: { is_disabled: true },
-  });
 };
 
 const handleCallbackError = async (
@@ -2240,21 +2195,21 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
 
   if (action === "cancel") {
     swapDataCache.delete(userId);
-    await ctx.editMessageText("❌ Swap cancelled");
+    await respondWithMenu(ctx, { text: "❌ Swap cancelled" });
     return safeAnswerCallbackQuery(ctx, "Swap cancelled");
   }
 
   // Handle confirmation
   const swapData = swapDataCache.get(userId);
   if (!swapData) {
-    await ctx.editMessageText("❌ Swap expired. Please try again.");
+    await respondWithMenu(ctx, { text: "❌ Swap expired. Please try again." });
     return safeAnswerCallbackQuery(ctx, "Swap expired");
   }
 
   try {
-    await ctx.editMessageText(
-      `🔄 Executing swap via ${swapData.quote.provider}...`
-    );
+    await respondWithMenu(ctx, {
+      text: `🔄 Executing swap via ${swapData.quote.provider}...`,
+    });
 
     let signature: string;
 
@@ -2447,7 +2402,7 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
         : `✅ **${getNetworkFromRPC(process.env.SOLANA_NETWORK || wallet.getConnection().rpcEndpoint)} Transaction** - Tokens transferred successfully`,
     ].join("\n");
 
-    await ctx.editMessageText(successMessage, { parse_mode: "Markdown" });
+    await respondWithMenu(ctx, { text: successMessage, parseMode: "Markdown" });
     await safeAnswerCallbackQuery(ctx, "Swap completed!");
 
     swapDataCache.delete(userId);
@@ -2483,14 +2438,14 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
         .filter(Boolean)
         .join("\n");
 
-      await ctx.editMessageText(timeoutMessage, { parse_mode: "Markdown" });
+      await respondWithMenu(ctx, { text: timeoutMessage, parseMode: "Markdown" });
       await safeAnswerCallbackQuery(
         ctx,
         "Transaction timeout - may still succeed"
       );
     } else {
       const errorMessage = `❌ Swap failed: ${formatUserFriendlyError(error)}`;
-      await ctx.editMessageText(errorMessage);
+      await respondWithMenu(ctx, { text: errorMessage });
       await safeAnswerCallbackQuery(ctx, "Swap failed");
     }
 
@@ -3339,13 +3294,10 @@ bot.callbackQuery(
         "Choose number of players:",
       ].join("\n");
 
-      await ctx.editMessageText(playerMessage, {
-        parse_mode: "HTML",
-        reply_markup: createPlayerSelectionKeyboard(
-          gameType,
-          amount,
-          creatorId
-        ),
+      await respondWithMenu(ctx, {
+        text: playerMessage,
+        parseMode: "HTML",
+        keyboard: createPlayerSelectionKeyboard(gameType, amount, creatorId),
       });
 
       userSessions.set(userId, {
@@ -3426,9 +3378,10 @@ bot.callbackQuery(/^players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+
       "Ready to create this game?"
     ].join("\n");
 
-    await ctx.editMessageText(confirmMessage, {
-      parse_mode: "HTML",
-      reply_markup: createGameConfirmKeyboard(gameType, amount, players, creatorId)
+    await respondWithMenu(ctx, {
+      text: confirmMessage,
+      parseMode: "HTML",
+      keyboard: createGameConfirmKeyboard(gameType, amount, players, creatorId),
     });
 
     userSessions.set(userId, {
@@ -3561,18 +3514,17 @@ bot.callbackQuery(
         );
 
         if (!result.success) {
-          await ctx.editMessageText(
-            `❌ ${result.error || "Failed to create game"}`,
-            {
-              parse_mode: "HTML",
-            }
-          );
+          await respondWithMenu(ctx, {
+            text: `❌ ${result.error || "Failed to create game"}`,
+            parseMode: "HTML",
+          });
           return;
         }
 
         if (!result.gameAddress) {
-          await ctx.editMessageText("❌ Game created but address not returned", {
-            parse_mode: "HTML",
+          await respondWithMenu(ctx, {
+            text: "❌ Game created but address not returned",
+            parseMode: "HTML",
           });
           return;
         }
@@ -3655,12 +3607,10 @@ bot.callbackQuery(
       }
 
       try {
-        await ctx.editMessageText(
-          "❌ Failed to create game. Please try again.",
-          {
-            parse_mode: "HTML",
-          }
-        );
+        await respondWithMenu(ctx, {
+          text: "❌ Failed to create game. Please try again.",
+          parseMode: "HTML",
+        });
       } catch (editError) {
         console.error(
           "Failed to update confirmation message after error:",
@@ -3733,22 +3683,20 @@ bot.callbackQuery(/^custom_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
         : contractMin;
     const startAmount = roundValue(Math.max(contractMin, defaultStart));
 
-    await ctx.editMessageText(
-      `🎯 <b>CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>\n\n💰 Balance: <b>${userBalance.toFixed(
+    await respondWithMenu(ctx, {
+      text: `🎯 <b>CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>\n\n💰 Balance: <b>${userBalance.toFixed(
         Math.min(4, tokenContext.tokenDecimals)
       )} ${tokenContext.tokenTicker}</b>\n\nAdjust the amount using the controls below:`,
-      {
-        parse_mode: "HTML",
-        reply_markup: createSliderAmountKeyboard(
-          gameType,
-          startAmount,
-          userBalance,
-          creatorId,
-          tokenContext.tokenTicker,
-          tokenContext.tokenDecimals
-        ),
-      }
-    );
+      parseMode: "HTML",
+      keyboard: createSliderAmountKeyboard(
+        gameType,
+        startAmount,
+        userBalance,
+        creatorId,
+        tokenContext.tokenTicker,
+        tokenContext.tokenDecimals
+      ),
+    });
 
     userSessions.set(userId, {
       waitingFor: "setup",
@@ -3834,22 +3782,20 @@ bot.callbackQuery(
       )
     );
 
-    await ctx.editMessageText(
-      `🎯 <b>CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>\n\n💰 Balance: <b>${userBalance.toFixed(
+    await respondWithMenu(ctx, {
+      text: `🎯 <b>CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>\n\n💰 Balance: <b>${userBalance.toFixed(
         Math.min(4, tokenContext.tokenDecimals)
       )} ${tokenContext.tokenTicker}</b>\n\nAdjust the amount using the controls below:`,
-      {
-        parse_mode: "HTML",
-        reply_markup: createSliderAmountKeyboard(
-          gameType,
-          validAmount,
-          userBalance,
-          creatorId,
-          tokenContext.tokenTicker,
-          tokenContext.tokenDecimals
-        ),
-      }
-    );
+      parseMode: "HTML",
+      keyboard: createSliderAmountKeyboard(
+        gameType,
+        validAmount,
+        userBalance,
+        creatorId,
+        tokenContext.tokenTicker,
+        tokenContext.tokenDecimals
+      ),
+    });
 
     userSessions.set(userId, {
       waitingFor: "setup",
@@ -3956,9 +3902,10 @@ bot.callbackQuery(/^back_to_amounts_(coinflip|giveaway)_(\d+)$/, async (ctx) => 
       }
     }
 
-    await ctx.editMessageText(warningMessage, {
-      parse_mode: "HTML",
-      reply_markup: createAmountSelectionKeyboard(
+    await respondWithMenu(ctx, {
+      text: warningMessage,
+      parseMode: "HTML",
+      keyboard: createAmountSelectionKeyboard(
         gameType,
         userBalance,
         creatorId,
@@ -4057,11 +4004,12 @@ bot.callbackQuery(/^type_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
       )} ${tokenContext.tokenTicker}`
     ].join("\n");
 
-    await ctx.editMessageText(typeMessage, {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
+    await respondWithMenu(ctx, {
+      text: typeMessage,
+      parseMode: "HTML",
+      keyboard: new InlineKeyboard()
         .text("❌ Cancel", `cancel_game_setup_${creatorId}`)
-        .row()
+        .row(),
     });
 
     await ctx.answerCallbackQuery("Type your amount...");
@@ -4131,11 +4079,12 @@ bot.callbackQuery(/^custom_players_(coinflip|giveaway)_(.+)_(\d+)$/, async (ctx)
       `Range: 2-${gameType === "coinflip" ? "8" : "20"} players`
     ].join("\n");
 
-    await ctx.editMessageText(playersMessage, {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
+    await respondWithMenu(ctx, {
+      text: playersMessage,
+      parseMode: "HTML",
+      keyboard: new InlineKeyboard()
         .text("❌ Cancel", `cancel_game_setup_${creatorId}`)
-        .row()
+        .row(),
     });
 
     await ctx.answerCallbackQuery("Type the number of players...");
@@ -4185,8 +4134,9 @@ bot.callbackQuery(/^cancel_game_setup_(\d+)$/, async (ctx) => {
     // Clear any pending typed-input session for this user to avoid hijacking
     userSessions.delete(ctx.from?.id || 0);
 
-    await ctx.editMessageText("❌ Game creation cancelled.", {
-      parse_mode: "HTML"
+    await respondWithMenu(ctx, {
+      text: "❌ Game creation cancelled.",
+      parseMode: "HTML",
     });
     await ctx.answerCallbackQuery("Cancelled");
   } catch (error) {
@@ -4520,18 +4470,10 @@ bot.callbackQuery("cmd_withdraw", async (ctx) => {
 
     keyboard.text("← Back to Wallet", "main_wallet").row();
 
-    // Try to edit as text; if it fails (e.g., media message), send a new message without deleting the original
-    try {
-      await ctx.editMessageText(response.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: keyboard,
-      });
-    } catch (error) {
-      await ctx.reply(response.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: keyboard,
-      });
-    }
+    await respondWithMenu(ctx, {
+      text: response.join("\n"),
+      keyboard,
+    });
     await ctx.answerCallbackQuery("💸 Select Token to Withdraw");
   } catch (error) {
     console.error("Error in cmd_withdraw:", error);
@@ -4568,9 +4510,9 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
       `You can import this key into Phantom, Solflare, or other Solana wallets.`,
     ];
 
-    await ctx.editMessageText(response.join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
+    await respondWithMenu(ctx, {
+      text: response.join("\n"),
+      keyboard: new InlineKeyboard()
         .text("← Back to Wallet", "main_wallet")
         .row(),
     });
@@ -4617,9 +4559,9 @@ bot.callbackQuery("cmd_wrap", async (ctx) => {
 
     keyboard.text("← Back to Wallet", "main_wallet").row();
 
-    await ctx.editMessageText(response.join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: keyboard,
+    await respondWithMenu(ctx, {
+      text: response.join("\n"),
+      keyboard,
     });
     await ctx.answerCallbackQuery("🔧 Select wrap amount");
   } catch (error) {
@@ -4653,9 +4595,9 @@ bot.on("callback_query", async (ctx, next) => {
       `⏱️ <i>This will timeout in 5 minutes</i>`,
     ];
 
-    await ctx.editMessageText(response.join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_wrap").row(),
+    await respondWithMenu(ctx, {
+      text: response.join("\n"),
+      keyboard: new InlineKeyboard().text("❌ Cancel", "cmd_wrap").row(),
     });
 
     // Set user state to expect custom wrap amount
@@ -4692,9 +4634,9 @@ bot.on("callback_query", async (ctx, next) => {
       `This will convert ${amount} SOL to ${amount} WSOL.`,
     ];
 
-    await ctx.editMessageText(response.join("\n"), {
-      parse_mode: "HTML",
-        reply_markup: createConfirmWrapKeyboard(amount),
+    await respondWithMenu(ctx, {
+      text: response.join("\n"),
+      keyboard: createConfirmWrapKeyboard(amount),
     });
 
     await ctx.answerCallbackQuery("Confirm wrap transaction");
@@ -4734,15 +4676,12 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
     );
 
     // Update message to show processing state
-    await ctx.editMessageText(
-      `🔄 <b>PROCESSING TRANSACTION</b>\n\nSending ${escapeHtml(
+    await respondWithMenu(ctx, {
+      text: `🔄 <b>PROCESSING TRANSACTION</b>\n\nSending ${escapeHtml(
         amountSummary
       )}...\n\n<i>Please wait...</i>`,
-      {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard(),
-      }
-    );
+      keyboard: new InlineKeyboard(),
+    });
 
     // Execute actual transaction
     try {
@@ -4887,26 +4826,22 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
         return `✅ <b>TRANSACTION COMPLETED</b>\n\nSent ${formattedAmount} ${transaction.token}\nTo: <code>${transaction.address}</code>\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`;
       })();
 
-      await ctx.editMessageText(successMessage, {
-        parse_mode: "HTML",
-        link_preview_options: { is_disabled: true },
-        reply_markup: new InlineKeyboard()
+      await respondWithMenu(ctx, {
+        text: successMessage,
+        keyboard: new InlineKeyboard()
           .text("← Back to Wallet", "main_wallet")
           .row(),
       });
     } catch (txError) {
       console.error("Transaction failed:", txError);
-      await ctx.editMessageText(
-        `❌ <b>TRANSACTION FAILED</b>\n\n${
+      await respondWithMenu(ctx, {
+        text: `❌ <b>TRANSACTION FAILED</b>\n\n${
           (txError as Error).message
         }\n\nPlease try again.`,
-        {
-          parse_mode: "HTML",
-          reply_markup: new InlineKeyboard()
-            .text("← Back to Wallet", "main_wallet")
-            .row(),
-        }
-      );
+        keyboard: new InlineKeyboard()
+          .text("← Back to Wallet", "main_wallet")
+          .row(),
+      });
     }
 
     await ctx.answerCallbackQuery("✅ Transaction submitted");
@@ -4929,25 +4864,21 @@ bot.callbackQuery(/^confirm_wrap_/, async (ctx) => {
 
     if (lamportsToWrap + SOL_FEE_BUFFER_LAMPORTS > balanceLamports) {
       await ctx.answerCallbackQuery("❌ Insufficient SOL for wrap");
-      await ctx.editMessageText(
-        `❌ <b>WRAP FAILED</b>\n\nNot enough SOL to wrap ${amount}.\nKeep at least ${MIN_SOL_FOR_TX} SOL for fees and try again.`,
-        {
-          parse_mode: "HTML",
-          reply_markup: new InlineKeyboard()
-            .text("← Back to Wallet", "main_wallet")
-            .row(),
-        }
-      );
+      await respondWithMenu(ctx, {
+        text: `❌ <b>WRAP FAILED</b>\n\nNot enough SOL to wrap ${amount}.\nKeep at least ${MIN_SOL_FOR_TX} SOL for fees and try again.`,
+        keyboard: new InlineKeyboard()
+          .text("← Back to Wallet", "main_wallet")
+          .row(),
+      });
       return;
     }
 
-    await ctx.editMessageText(
-      `🔄 <b>PROCESSING WRAP</b>\n\nWrapping ${wallet.formatSolBalance(lamportsToWrap)} SOL to WSOL...\n\n<i>Please wait...</i>`,
-      {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard(),
-      }
-    );
+    await respondWithMenu(ctx, {
+      text: `🔄 <b>PROCESSING WRAP</b>\n\nWrapping ${wallet.formatSolBalance(
+        lamportsToWrap
+      )} SOL to WSOL...\n\n<i>Please wait...</i>`,
+      keyboard: new InlineKeyboard(),
+    });
 
     const signature = await wallet.wrapSol(telegramId, lamportsToWrap);
     await wallet.confirmTransaction(signature);
@@ -4956,16 +4887,12 @@ bot.callbackQuery(/^confirm_wrap_/, async (ctx) => {
     const formattedAmount = wallet.formatSolBalance(lamportsToWrap);
     const solscanUrl = `https://solscan.io/tx/${signature}`;
 
-    await ctx.editMessageText(
-      `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${formattedAmount} SOL to WSOL\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`,
-      {
-        parse_mode: "HTML",
-        link_preview_options: { is_disabled: true },
-        reply_markup: new InlineKeyboard()
-          .text("← Back to Wallet", "main_wallet")
-          .row(),
-      }
-    );
+    await respondWithMenu(ctx, {
+      text: `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${formattedAmount} SOL to WSOL\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`,
+      keyboard: new InlineKeyboard()
+        .text("← Back to Wallet", "main_wallet")
+        .row(),
+    });
 
     await ctx.answerCallbackQuery("✅ Wrap transaction submitted");
   } catch (error) {
@@ -4998,13 +4925,11 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
     );
 
     // Update message to show processing state
-    await ctx.editMessageText(
-      `🔄 <b>PROCESSING SWAP</b>\n\nSwapping ${transaction.amount} ${transaction.fromToken} → ${transaction.toToken}...\n\n<i>Please wait...</i>`,
-      {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard(),
-      }
-    );
+    await respondWithMenu(ctx, {
+      text: `🔄 <b>PROCESSING SWAP</b>\n\nSwapping ${transaction.amount} ${transaction.fromToken} → ${transaction.toToken}...\n\n<i>Please wait...</i>`,
+      parseMode: "HTML",
+      keyboard: new InlineKeyboard(),
+    });
 
     // Execute actual swap transaction
     try {
@@ -5059,29 +4984,20 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
 
       // Show success with real Solscan link
       const solscanUrl = `https://solscan.io/tx/${txSignature}`;
-      await ctx.editMessageText(
-        `✅ <b>SWAP COMPLETED</b>\n\nSwapped ${transaction.amount} ${transaction.fromToken}\nReceived ~${quote.outputAmount} ${transaction.toToken}\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`,
-        {
-          parse_mode: "HTML",
-          link_preview_options: { is_disabled: true },
-          reply_markup: new InlineKeyboard()
-            .text("← Back to Wallet", "main_wallet")
-            .row(),
-        }
-      );
+      await respondWithMenu(ctx, {
+        text: `✅ <b>SWAP COMPLETED</b>\n\nSwapped ${transaction.amount} ${transaction.fromToken}\nReceived ~${quote.outputAmount} ${transaction.toToken}\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`,
+        parseMode: "HTML",
+        keyboard: new InlineKeyboard().text("← Back to Wallet", "main_wallet").row(),
+      });
     } catch (swapError) {
       console.error("Swap transaction failed:", swapError);
-      await ctx.editMessageText(
-        `❌ <b>SWAP FAILED</b>\n\n${
+      await respondWithMenu(ctx, {
+        text: `❌ <b>SWAP FAILED</b>\n\n${
           (swapError as Error).message
         }\n\nPlease try again.`,
-        {
-          parse_mode: "HTML",
-          reply_markup: new InlineKeyboard()
-            .text("← Back to Wallet", "main_wallet")
-            .row(),
-        }
-      );
+        parseMode: "HTML",
+        keyboard: new InlineKeyboard().text("← Back to Wallet", "main_wallet").row(),
+      });
     }
 
     await ctx.answerCallbackQuery("✅ Swap submitted");
@@ -5136,9 +5052,9 @@ bot.callbackQuery("cmd_swap", async (ctx) => {
 
     keyboard.text("← Back to Wallet", "main_wallet").row();
 
-    await ctx.editMessageText(response.join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: keyboard,
+    await respondWithMenu(ctx, {
+      text: response.join("\n"),
+      keyboard,
     });
     await ctx.answerCallbackQuery("💱 Select token to swap from");
   } catch (error) {
@@ -5352,9 +5268,9 @@ bot.on("callback_query", async (ctx, next) => {
       .text("← Back", "cmd_withdraw")
       .row();
 
-    await ctx.editMessageText(response.join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: keyboard,
+    await respondWithMenu(ctx, {
+      text: response.join("\n"),
+      keyboard,
     });
     await ctx.answerCallbackQuery(`Selected ${token}`);
   } catch (error) {
@@ -5494,9 +5410,9 @@ bot.on("callback_query", async (ctx, next) => {
       .text("❌ Cancel", `send_select_${token}`)
       .row();
 
-    await ctx.editMessageText(response.join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: keyboard,
+    await respondWithMenu(ctx, {
+      text: response.join("\n"),
+      keyboard,
     });
 
     // Set user state to expect wallet address
@@ -5543,9 +5459,9 @@ bot.on("callback_query", async (ctx, next) => {
     ];
 
     // Update the message to show input prompt
-    await ctx.editMessageText(response.join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
+    await respondWithMenu(ctx, {
+      text: response.join("\n"),
+      keyboard: new InlineKeyboard()
         .text("❌ Cancel", `send_select_${token}`)
         .row(),
     });
@@ -5601,18 +5517,10 @@ bot.callbackQuery("cmd_help", async (ctx) => {
       .text("📋 Examples", "help_examples")
       .row();
 
-    // Try to edit as text, if fails (because current message has media), delete and send new
-    try {
-      await ctx.editMessageText(helpContent, {
-        parse_mode: "HTML",
-        reply_markup: helpKeyboard,
-      });
-    } catch (error) {
-      await ctx.reply(helpContent, {
-        parse_mode: "HTML",
-        reply_markup: helpKeyboard,
-      });
-    }
+    await respondWithMenu(ctx, {
+      text: helpContent,
+      keyboard: helpKeyboard,
+    });
     await ctx.answerCallbackQuery("❓ Help Center");
   } catch (error) {
     console.error("Error in cmd_help:", error);
@@ -5622,8 +5530,9 @@ bot.callbackQuery("cmd_help", async (ctx) => {
 
 bot.callbackQuery("help_wallet", async (ctx) => {
   try {
-    await ctx.editMessageText(
-      "💰 <b>Wallet Commands</b>\n\n" +
+    await respondWithMenu(ctx, {
+      text:
+        "💰 <b>Wallet Commands</b>\n\n" +
         "<code>/start</code> - Show your wallet info\n" +
         "<code>/balance</code> - Show detailed balances\n" +
         "<code>/wrap &lt;amount&gt;</code> - Convert SOL to WSOL\n" +
@@ -5632,18 +5541,15 @@ bot.callbackQuery("help_wallet", async (ctx) => {
         "<code>/withdraw &lt;address&gt; &lt;amount&gt;</code> - Send tokens\n" +
         "<code>/tip &lt;amount&gt;</code> - Tip a user (reply to their message)\n\n" +
         "💡 <i>All wallet commands work with different tokens</i>",
-      {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("🎮 Games", "help_games")
-          .text("🔧 Utility", "help_utility")
-          .row()
-          .text("📋 Examples", "help_examples")
-          .row()
-          .text("⬅️ Help Menu", "cmd_help")
-          .row(),
-      }
-    );
+      keyboard: new InlineKeyboard()
+        .text("🎮 Games", "help_games")
+        .text("🔧 Utility", "help_utility")
+        .row()
+        .text("📋 Examples", "help_examples")
+        .row()
+        .text("⬅️ Help Menu", "cmd_help")
+        .row(),
+    });
     await ctx.answerCallbackQuery("💰 Wallet Commands");
   } catch (error) {
     console.error("Error in help_wallet:", error);
@@ -5653,8 +5559,9 @@ bot.callbackQuery("help_wallet", async (ctx) => {
 
 bot.callbackQuery("help_games", async (ctx) => {
   try {
-    await ctx.editMessageText(
-      "🎮 <b>Game Commands</b>\n\n" +
+    await respondWithMenu(ctx, {
+      text:
+        "🎮 <b>Game Commands</b>\n\n" +
         "<code>/coinflip &lt;amount&gt; [TOKEN] &lt;players&gt;</code> - Create coinflip\n" +
         "<code>/giveaway &lt;amount&gt; [TOKEN] &lt;players&gt;</code> - Create giveaway\n" +
         "<code>/active</code> - Show active games\n" +
@@ -5664,18 +5571,15 @@ bot.callbackQuery("help_games", async (ctx) => {
         "• <b>Coinflip:</b> Players pay to join, winner takes all\n" +
         "• <b>Giveaway:</b> Free to join, you fund the prize\n\n" +
         "⏱️ <i>Games expire after 1 hour if not filled</i>",
-      {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("💰 Wallet", "help_wallet")
-          .text("🔧 Utility", "help_utility")
-          .row()
-          .text("📋 Examples", "help_examples")
-          .row()
-          .text("⬅️ Help Menu", "cmd_help")
-          .row(),
-      }
-    );
+      keyboard: new InlineKeyboard()
+        .text("💰 Wallet", "help_wallet")
+        .text("🔧 Utility", "help_utility")
+        .row()
+        .text("📋 Examples", "help_examples")
+        .row()
+        .text("⬅️ Help Menu", "cmd_help")
+        .row(),
+    });
     await ctx.answerCallbackQuery("🎮 Game Commands");
   } catch (error) {
     console.error("Error in help_games:", error);
@@ -5685,8 +5589,9 @@ bot.callbackQuery("help_games", async (ctx) => {
 
 bot.callbackQuery("help_utility", async (ctx) => {
   try {
-    await ctx.editMessageText(
-      "🔧 <b>Utility Commands</b>\n\n" +
+    await respondWithMenu(ctx, {
+      text:
+        "🔧 <b>Utility Commands</b>\n\n" +
         "<code>/debug</code> - Show wallet debug info\n" +
         "<code>/checktx &lt;signature&gt;</code> - Check transaction status\n" +
         "<code>/oracle</code> - Check oracle status\n" +
@@ -5695,18 +5600,15 @@ bot.callbackQuery("help_utility", async (ctx) => {
         "• Some commands are private-chat only\n" +
         "• Admin commands require permissions\n" +
         "• Your keys never leave your wallet",
-      {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("💰 Wallet", "help_wallet")
-          .text("🎮 Games", "help_games")
-          .row()
-          .text("📋 Examples", "help_examples")
-          .row()
-          .text("⬅️ Help Menu", "cmd_help")
-          .row(),
-      }
-    );
+      keyboard: new InlineKeyboard()
+        .text("💰 Wallet", "help_wallet")
+        .text("🎮 Games", "help_games")
+        .row()
+        .text("📋 Examples", "help_examples")
+        .row()
+        .text("⬅️ Help Menu", "cmd_help")
+        .row(),
+    });
     await ctx.answerCallbackQuery("🔧 Utility Commands");
   } catch (error) {
     console.error("Error in help_utility:", error);
@@ -5716,8 +5618,9 @@ bot.callbackQuery("help_utility", async (ctx) => {
 
 bot.callbackQuery("help_examples", async (ctx) => {
   try {
-    await ctx.editMessageText(
-      "📋 <b>Command Examples</b>\n\n" +
+    await respondWithMenu(ctx, {
+      text:
+        "📋 <b>Command Examples</b>\n\n" +
         "<b>💰 Wallet Examples:</b>\n" +
         "<code>/swap 100 USDC SOL</code>\n" +
         "<code>/withdraw [address] 50 TIMBA</code>\n" +
@@ -5729,18 +5632,15 @@ bot.callbackQuery("help_examples", async (ctx) => {
         "<b>🔧 Utility Examples:</b>\n" +
         "<code>/checktx 3x7k2m...</code> (check transaction)\n" +
         "<code>/default USDC</code> (set chat default token)",
-      {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("💰 Wallet", "help_wallet")
-          .text("🎮 Games", "help_games")
-          .row()
-          .text("🔧 Utility", "help_utility")
-          .row()
-          .text("⬅️ Help Menu", "cmd_help")
-          .row(),
-      }
-    );
+      keyboard: new InlineKeyboard()
+        .text("💰 Wallet", "help_wallet")
+        .text("🎮 Games", "help_games")
+        .row()
+        .text("🔧 Utility", "help_utility")
+        .row()
+        .text("⬅️ Help Menu", "cmd_help")
+        .row(),
+    });
     await ctx.answerCallbackQuery("📋 Command Examples");
   } catch (error) {
     console.error("Error in help_examples:", error);
@@ -5800,7 +5700,7 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
       hasAnyTokens: hasTokenBalances,
     });
 
-    await respondWithMenu(ctx, message, keyboard, { deleteIfFailed: true });
+    await respondWithMenu(ctx, { text: message, keyboard });
 
     await ctx.answerCallbackQuery("Select how you want to buy");
   } catch (error) {
@@ -5877,7 +5777,7 @@ bot.callbackQuery("cmd_sell", async (ctx) => {
       tokenButtons: sellTokenButtons,
     });
 
-    await respondWithMenu(ctx, message, keyboard);
+    await respondWithMenu(ctx, { text: message, keyboard });
     await ctx.answerCallbackQuery("Select what you want to sell");
   } catch (error) {
     console.error("Error in cmd_sell:", error);
@@ -5953,9 +5853,9 @@ bot.on("callback_query", async (ctx, next) => {
         `⏱️ <i>This will timeout in 5 minutes</i>`,
       ];
 
-      await ctx.editMessageText(response.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_sell").row(),
+      await respondWithMenu(ctx, {
+        text: response.join("\n"),
+        keyboard: new InlineKeyboard().text("❌ Cancel", "cmd_sell").row(),
       });
 
       setUserState(userId, {
@@ -5982,9 +5882,9 @@ bot.on("callback_query", async (ctx, next) => {
       "Please try again or contact support if the issue persists.",
     ];
 
-    await ctx.editMessageText(errorMessage.join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard().text("← Try Again", "cmd_sell").row(),
+    await respondWithMenu(ctx, {
+      text: errorMessage.join("\n"),
+      keyboard: new InlineKeyboard().text("← Try Again", "cmd_sell").row(),
     });
 
     await ctx.answerCallbackQuery("❌ Error processing sell request");
@@ -6012,16 +5912,15 @@ bot.on("callback_query", async (ctx, next) => {
 
   try {
     // Show processing state
-    await ctx.editMessageText(
-      [
+    await respondWithMenu(ctx, {
+      text: [
         "⏳ <b>Processing Sell Transaction...</b>",
         "",
         `🔄 <i>Executing ${sellData.amount} ${sellData.fromToken} → ${sellData.toToken}</i>`,
         "",
         "Please wait, this may take a few moments...",
       ].join("\n"),
-      { parse_mode: "HTML" }
-    );
+    });
 
     await safeAnswerCallbackQuery(ctx, "Processing sell...");
 
@@ -6110,10 +6009,9 @@ bot.on("callback_query", async (ctx, next) => {
       "🎉 <b>Sale successful!</b>",
     ].join("\n");
 
-    await ctx.editMessageText(successMessage, {
-      parse_mode: "HTML",
-      link_preview_options: { is_disabled: true },
-      reply_markup: new InlineKeyboard()
+    await respondWithMenu(ctx, {
+      text: successMessage,
+      keyboard: new InlineKeyboard()
         .webApp("🔍 VIEW TX", `https://solscan.io/tx/${signature}`)
         .row()
         .text("💰 Wallet", "main_wallet")
@@ -6141,10 +6039,10 @@ bot.on("callback_query", async (ctx, next) => {
       "The transaction could not be completed. Please check your balance and try again.",
     ].join("\n");
 
-    await ctx.editMessageText(errorMessage, {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
-      .text("← Try Again", "cmd_sell")
+    await respondWithMenu(ctx, {
+      text: errorMessage,
+      keyboard: new InlineKeyboard()
+        .text("← Try Again", "cmd_sell")
         .text("💰 Wallet", "main_wallet")
         .row(),
     });
@@ -6199,9 +6097,9 @@ bot.on("callback_query", async (ctx, next) => {
 
       keyboard.text("← Back", "cmd_buy").row();
 
-      await ctx.editMessageText(response.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: keyboard,
+      await respondWithMenu(ctx, {
+        text: response.join("\n"),
+        keyboard,
       });
       await ctx.answerCallbackQuery("Select payment token");
       return;
@@ -6240,9 +6138,9 @@ bot.on("callback_query", async (ctx, next) => {
 
     keyboard.text("← Back", "cmd_buy").row();
 
-    await ctx.editMessageText(response.join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: keyboard,
+    await respondWithMenu(ctx, {
+      text: response.join("\n"),
+      keyboard,
     });
     await ctx.answerCallbackQuery("Select token to buy");
   } catch (error) {
@@ -6371,9 +6269,9 @@ bot.on("callback_query", async (ctx, next) => {
       `⏱️ <i>This will timeout in 5 minutes</i>`,
     ];
 
-    await ctx.editMessageText(response.join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
+    await respondWithMenu(ctx, {
+      text: response.join("\n"),
+      keyboard: new InlineKeyboard()
         .text("❌ Cancel", `buy_with_${paymentToken}`)
         .row(),
     });
@@ -6421,9 +6319,9 @@ bot.on("callback_query", async (ctx, next) => {
       `⏱️ <i>This will timeout in 5 minutes</i>`,
     ];
 
-    await ctx.editMessageText(response.join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
+    await respondWithMenu(ctx, {
+      text: response.join("\n"),
+      keyboard: new InlineKeyboard()
         .text("❌ Cancel", `buy_with_${paymentToken}`)
         .row(),
     });
@@ -6515,9 +6413,9 @@ bot.on("callback_query", async (ctx, next) => {
         `⏱️ <i>This will timeout in 5 minutes</i>`,
       ];
 
-      await ctx.editMessageText(response.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
+      await respondWithMenu(ctx, {
+        text: response.join("\n"),
+        keyboard: new InlineKeyboard()
           .text("❌ Cancel", `buy_with_${paymentToken}`)
           .row(),
       });
@@ -6553,9 +6451,9 @@ bot.on("callback_query", async (ctx, next) => {
       "Please try again or contact support if the issue persists.",
     ];
 
-    await ctx.editMessageText(errorMessage.join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
+    await respondWithMenu(ctx, {
+      text: errorMessage.join("\n"),
+      keyboard: new InlineKeyboard()
         .text("← Try Again", `buy_with_${paymentToken}`)
         .row(),
     });
@@ -6586,16 +6484,15 @@ bot.on("callback_query", async (ctx, next) => {
 
   try {
     // Show processing state
-    await ctx.editMessageText(
-      [
+    await respondWithMenu(ctx, {
+      text: [
         "⏳ <b>Processing Buy Transaction...</b>",
         "",
         `🔄 <i>Executing ${buyData.amount} ${buyData.fromToken} → ${buyData.toToken}</i>`,
         "",
         "Please wait, this may take a few moments...",
       ].join("\n"),
-      { parse_mode: "HTML" }
-    );
+    });
 
     await safeAnswerCallbackQuery(ctx, "Processing buy...");
 
@@ -6678,10 +6575,9 @@ bot.on("callback_query", async (ctx, next) => {
       "🎉 <b>Purchase successful!</b>",
     ].join("\n");
 
-    await ctx.editMessageText(successMessage, {
-      parse_mode: "HTML",
-      link_preview_options: { is_disabled: true },
-      reply_markup: new InlineKeyboard()
+    await respondWithMenu(ctx, {
+      text: successMessage,
+      keyboard: new InlineKeyboard()
         .webApp("🔍 VIEW TX", `https://solscan.io/tx/${signature}`)
         .row()
         .text("💰 Wallet", "main_wallet")
@@ -6830,9 +6726,9 @@ bot.on("callback_query", async (ctx, next) => {
         .row();
     }
 
-    await ctx.editMessageText(errorMessage, {
-      parse_mode: "HTML",
-      reply_markup: keyboard,
+    await respondWithMenu(ctx, {
+      text: errorMessage,
+      keyboard,
     });
 
     await safeAnswerCallbackQuery(ctx, "❌ Buy failed");
@@ -6874,8 +6770,8 @@ bot.on("callback_query", async (ctx, next) => {
     }
 
     // Show updated confirmation with new amount
-    await ctx.editMessageText(
-      [
+    await respondWithMenu(ctx, {
+      text: [
         "💡 <b>Using Exact Amount Needed</b>",
         "",
         `📈 <b>Original:</b> ${buyData.amount} ${buyData.fromToken}`,
@@ -6884,11 +6780,8 @@ bot.on("callback_query", async (ctx, next) => {
         "",
         "This matches the current price. Ready to proceed?",
       ].join("\n"),
-      {
-        parse_mode: "HTML",
-        reply_markup: createConfirmBuyKeyboard(txId),
-      }
-    );
+      keyboard: createConfirmBuyKeyboard(txId),
+    });
 
     await ctx.answerCallbackQuery("💡 Amount increased slightly");
   } catch (error) {
@@ -6946,9 +6839,10 @@ bot.on("callback_query", async (ctx, next) => {
         `⏱️ <i>This will timeout in 5 minutes</i>`,
       ];
 
-      await ctx.editMessageText(response.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
+      await respondWithMenu(ctx, {
+        text: response.join("\n"),
+        parseMode: "HTML",
+        keyboard: new InlineKeyboard()
           .text("❌ Cancel", `buy_slip_back_${txId}`)
           .row(),
       });
@@ -7053,9 +6947,10 @@ bot.on("callback_query", async (ctx, next) => {
     keyboard.text("🔍 Other Token", `swap_to_${fromToken}_OTHER`).row();
     keyboard.text("← Back to Swap", "cmd_swap").row();
 
-    await ctx.editMessageText(response.join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: keyboard,
+    await respondWithMenu(ctx, {
+      text: response.join("\n"),
+      parseMode: "HTML",
+      keyboard,
     });
     await ctx.answerCallbackQuery(`Select token to receive`);
   } catch (error) {
@@ -7103,9 +6998,10 @@ bot.on("callback_query", async (ctx, next) => {
         `⏱️ <i>This will timeout in 5 minutes</i>`,
       ];
 
-      await ctx.editMessageText(response.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_swap").row(),
+      await respondWithMenu(ctx, {
+        text: response.join("\n"),
+        parseMode: "HTML",
+        keyboard: new InlineKeyboard().text("❌ Cancel", "cmd_swap").row(),
       });
 
       setUserState(userId, {
@@ -7169,9 +7065,10 @@ bot.on("callback_query", async (ctx, next) => {
         `⏱️ <i>This will timeout in 5 minutes</i>`,
       ];
 
-      await ctx.editMessageText(response.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
+      await respondWithMenu(ctx, {
+        text: response.join("\n"),
+        parseMode: "HTML",
+        keyboard: new InlineKeyboard()
           .text("❌ Cancel", `swap_to_${fromToken}_${toToken}`)
           .row(),
       });
@@ -7285,9 +7182,9 @@ const showSwapAmountSelection = async (
 
   keyboard.text("← Back", `swap_to_${fromToken}_${toToken}`).row();
 
-  await ctx.editMessageText(response.join("\n"), {
-    parse_mode: "HTML",
-    reply_markup: keyboard,
+  await respondWithMenu(ctx, {
+    text: response.join("\n"),
+    keyboard,
   });
 };
 
@@ -7402,13 +7299,11 @@ const showSwapQuoteAndConfirmation = async (
 
     const baseAmount = rawAmount.toString();
 
-    await ctx.editMessageText(
-      `🔄 <b>GETTING QUOTE</b>\n\n${displayAmount} ${fromToken} → ${toToken}\n\n<i>Please wait...</i>`,
-      {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard(),
-      }
-    );
+    await respondWithMenu(ctx, {
+      text: `🔄 <b>GETTING QUOTE</b>\n\n${displayAmount} ${fromToken} → ${toToken}\n\n<i>Please wait...</i>`,
+      parseMode: "HTML",
+      keyboard: new InlineKeyboard(),
+    });
 
     // Use the same structure as the original implementation
     const quote = await swapManager.getQuote({
@@ -7450,9 +7345,10 @@ const showSwapQuoteAndConfirmation = async (
       quote: quote, // Store the quote for execution
     });
 
-    await ctx.editMessageText(response, {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
+    await respondWithMenu(ctx, {
+      text: response,
+      parseMode: "HTML",
+      keyboard: new InlineKeyboard()
         .text("✅ Confirm Swap", `confirm_swap_${txId}`)
         .row()
         .text("❌ Cancel", `swap_to_${fromToken}_${toToken}`)
@@ -7461,15 +7357,13 @@ const showSwapQuoteAndConfirmation = async (
   } catch (error) {
     console.error("Error getting swap quote:", error);
     const userFriendlyError = formatUserFriendlyError(error, wallet);
-    await ctx.editMessageText(
-      `❌ <b>QUOTE ERROR</b>\n\n${userFriendlyError}`,
-      {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("← Try Again", `swap_to_${fromToken}_${toToken}`)
-          .row(),
-      }
-    );
+    await respondWithMenu(ctx, {
+      text: `❌ <b>QUOTE ERROR</b>\n\n${userFriendlyError}`,
+      parseMode: "HTML",
+      keyboard: new InlineKeyboard()
+        .text("← Try Again", `swap_to_${fromToken}_${toToken}`)
+        .row(),
+    });
   }
 };
 
@@ -7521,37 +7415,13 @@ const showBuyAmountSelection = async (
   const keyboard = new InlineKeyboard();
 
   if (balanceDecimal > 0.01) {
-    // Need minimum for fees
-    // Quick amounts based on balance
-    const maxBalance = balanceDecimal;
-    if (maxBalance >= 10) {
-      keyboard
-        .text("1", `buy_amount_${paymentToken}_${targetToken}_1`)
-        .text("5", `buy_amount_${paymentToken}_${targetToken}_5`)
-        .row()
-        .text("10", `buy_amount_${paymentToken}_${targetToken}_10`)
-        .text("25%", `buy_amount_${paymentToken}_${targetToken}_25%`)
-        .row();
-    } else if (maxBalance >= 1) {
-      keyboard
-        .text("0.1", `buy_amount_${paymentToken}_${targetToken}_0.1`)
-        .text("0.5", `buy_amount_${paymentToken}_${targetToken}_0.5`)
-        .row()
-        .text("1", `buy_amount_${paymentToken}_${targetToken}_1`)
-        .text("50%", `buy_amount_${paymentToken}_${targetToken}_50%`)
-        .row();
-    } else {
-      keyboard
-        .text("0.01", `buy_amount_${paymentToken}_${targetToken}_0.01`)
-        .text("0.05", `buy_amount_${paymentToken}_${targetToken}_0.05`)
-        .row()
-        .text("0.1", `buy_amount_${paymentToken}_${targetToken}_0.1`)
-        .text("75%", `buy_amount_${paymentToken}_${targetToken}_75%`)
-        .row();
-    }
-
     keyboard
-      .text("MAX", `buy_amount_${paymentToken}_${targetToken}_max`)
+      .text("25%", `buy_amount_${paymentToken}_${targetToken}_25%`)
+      .text("50%", `buy_amount_${paymentToken}_${targetToken}_50%`)
+      .row()
+      .text("75%", `buy_amount_${paymentToken}_${targetToken}_75%`)
+      .text("100%", `buy_amount_${paymentToken}_${targetToken}_100%`)
+      .row()
       .text("✏️ Custom", `buy_amount_${paymentToken}_${targetToken}_CUSTOM`)
       .row();
   } else {
@@ -7560,9 +7430,9 @@ const showBuyAmountSelection = async (
 
   keyboard.text("← Back", `buy_with_${paymentToken}`).row();
 
-  await ctx.editMessageText(response.join("\n"), {
-    parse_mode: "HTML",
-    reply_markup: keyboard,
+  await respondWithMenu(ctx, {
+    text: response.join("\n"),
+    keyboard,
   });
 };
 
@@ -7659,13 +7529,10 @@ const showBuyQuoteAndConfirmation = async (
   const telegramId = BigInt(ctx.from?.id || 0) as bigint;
 
   // Update message to show loading
-  await ctx.editMessageText(
-    `🔄 <b>GETTING QUOTE</b>\n\nBuy ${targetToken} with ${amount} ${paymentToken}\n\n<i>Detecting best provider...</i>`,
-    {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard(),
-    }
-  );
+  await respondWithMenu(ctx, {
+    text: `🔄 <b>GETTING QUOTE</b>\n\nBuy ${targetToken} with ${amount} ${paymentToken}\n\n<i>Detecting best provider...</i>`,
+    keyboard: new InlineKeyboard(),
+  });
 
   try {
     // Use existing swap logic but with BUY terminology
@@ -7792,9 +7659,9 @@ const showBuyQuoteAndConfirmation = async (
       quote: quote,
     });
 
-    await ctx.editMessageText(response, {
-      parse_mode: "HTML",
-      reply_markup: createConfirmBuyKeyboard(txId)
+    await respondWithMenu(ctx, {
+      text: response,
+      keyboard: createConfirmBuyKeyboard(txId)
         .row()
         .text("⚙️ Slippage", `buy_slippage_${txId}`)
         .row()
@@ -7811,17 +7678,14 @@ const showBuyQuoteAndConfirmation = async (
     });
   } catch (error) {
     console.error("Error getting buy quote:", error);
-    await ctx.editMessageText(
-      `❌ <b>QUOTE ERROR</b>\n\n${
+    await respondWithMenu(ctx, {
+      text: `❌ <b>QUOTE ERROR</b>\n\n${
         (error as Error).message
       }\n\nPlease try again.`,
-      {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("← Try Again", `buy_with_${paymentToken}`)
-          .row(),
-      }
-    );
+      keyboard: new InlineKeyboard()
+        .text("← Try Again", `buy_with_${paymentToken}`)
+        .row(),
+    });
   }
 };
 
@@ -8827,9 +8691,9 @@ const showSellAmountSelection = async (ctx: any, tokenToSell: string) => {
 
   keyboard.text("← Back", "cmd_sell").row();
 
-  await ctx.editMessageText(response.join("\n"), {
-    parse_mode: "HTML",
-    reply_markup: keyboard,
+  await respondWithMenu(ctx, {
+    text: response.join("\n"),
+    keyboard,
   });
 };
 
@@ -8923,13 +8787,10 @@ const showSellQuoteAndConfirmation = async (
 
     // Use the existing global swapManager instance
 
-    await ctx.editMessageText(
-      `🔄 <b>GETTING SELL QUOTE</b>\n\n${displayAmount} ${tokenToSell} → ${toToken}\n\n<i>Finding best price...</i>`,
-      {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard(),
-      }
-    );
+    await respondWithMenu(ctx, {
+      text: `🔄 <b>GETTING SELL QUOTE</b>\n\n${displayAmount} ${tokenToSell} → ${toToken}\n\n<i>Finding best price...</i>`,
+      keyboard: new InlineKeyboard(),
+    });
 
     const quote = await swapManager.getQuote({
       inputMint: tokenInfo.token_mint, // Use tokenInfo instead of tokenBalance
@@ -8977,9 +8838,9 @@ const showSellQuoteAndConfirmation = async (
       `${quoteMessage}\n\n<b>Amount:</b> ${displayAmount} ${tokenToSell}` +
       "\n\n⚠️ <b>Confirm this sale?</b>";
 
-    await ctx.editMessageText(response, {
-      parse_mode: "HTML",
-      reply_markup: createConfirmSellKeyboard(txId),
+    await respondWithMenu(ctx, {
+      text: response,
+      keyboard: createConfirmSellKeyboard(txId),
     });
   } catch (error: any) {
     console.error("Error getting sell quote:", error);
@@ -8998,9 +8859,9 @@ const showSellQuoteAndConfirmation = async (
       "• Token is not tradable",
     ];
 
-    await ctx.editMessageText(errorResponse.join("\n"), {
-      parse_mode: "HTML",
-      reply_markup: new InlineKeyboard().text("← Try Again", "cmd_sell").row(),
+    await respondWithMenu(ctx, {
+      text: errorResponse.join("\n"),
+      keyboard: new InlineKeyboard().text("← Try Again", "cmd_sell").row(),
     });
   }
 };
@@ -9134,32 +8995,31 @@ const regenerateBuyQuoteWithSlippage = async (
       `⚠️ <b>Confirm this purchase?</b>`,
     ].join("\n");
 
-    await ctx.editMessageText(response, {
-      parse_mode: "HTML",
-      reply_markup: createConfirmBuyKeyboard(txId)
-        .row()
-        .text("⚙️ Slippage", `buy_slippage_${txId}`)
-        .row()
-        .text("0.5%", `buy_slip_${txId}_0.5`)
-        .text("1%", `buy_slip_${txId}_1.0`)
-        .text("2%", `buy_slip_${txId}_2.0`)
-        .row()
-        .text("3%", `buy_slip_${txId}_3.0`)
-        .text("5%", `buy_slip_${txId}_5.0`)
-        .text("✏️", `buy_slip_${txId}_custom`)
-        .row()
-        .text("❌ Cancel", `buy_with_${buyData.fromToken}`)
-        .row(),
+    const keyboard = createConfirmBuyKeyboard(txId)
+      .row()
+      .text("⚙️ Slippage", `buy_slippage_${txId}`)
+      .row()
+      .text("0.5%", `buy_slip_${txId}_0.5`)
+      .text("1%", `buy_slip_${txId}_1.0`)
+      .text("2%", `buy_slip_${txId}_2.0`)
+      .row()
+      .text("3%", `buy_slip_${txId}_3.0`)
+      .text("5%", `buy_slip_${txId}_5.0`)
+      .text("✏️", `buy_slip_${txId}_custom`)
+      .row()
+      .text("❌ Cancel", `buy_with_${buyData.fromToken}`)
+      .row();
+
+    await respondWithMenu(ctx, {
+      text: response,
+      keyboard,
     });
   } catch (error: any) {
     console.error("Error regenerating buy quote:", error);
-    await ctx.editMessageText(
-      `❌ <b>Error</b>\n\n${(error as Error).message}\n\nPlease try again.`,
-      {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("← Try Again", "cmd_buy").row(),
-      }
-    );
+    await respondWithMenu(ctx, {
+      text: `❌ <b>Error</b>\n\n${(error as Error).message}\n\nPlease try again.`,
+      keyboard: new InlineKeyboard().text("← Try Again", "cmd_buy").row(),
+    });
   }
 };
 

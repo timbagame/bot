@@ -44,6 +44,7 @@ describe("wallet handlers", () => {
 
   test("onWalletSettings edits or replies and answers callback", async () => {
     const ctx: any = makeCtx();
+    ctx.callbackQuery = { message: { message_id: 99, chat: { id: 1 } } };
     const deps = {
       showWalletUI: async () => {},
       clearWalletCache: (_: any) => {},
@@ -99,4 +100,3 @@ describe("wallet handlers", () => {
     expect(String(answer[1])).toContain("Error loading settings");
   });
 });
-
