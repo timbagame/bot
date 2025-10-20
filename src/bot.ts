@@ -12,7 +12,7 @@ import { GameDatabase } from "./utils/game-database";
 import { GameManager } from "./utils/game";
 import { PDAManager } from "./utils/pda";
 import { formatUserFriendlyError } from "./utils/errors";
-import { SwapManager } from "./utils/swap-manager";
+import { SwapManager, type SwapQuote } from "./utils/swap-manager";
 import {
   LAMPORTS_PER_SOL,
   MIN_SOL_FOR_TX,
@@ -42,7 +42,7 @@ import {
   getSuggestedStakeAmounts,
 } from "./utils/keyboards";
 import { buildWalletCaption } from "./utils/wallet-ui";
-import { formatAmount, escapeHtml } from "./utils/format-amount";
+import { formatAmount, escapeHtml, formatRate } from "./utils/format-amount";
 import {
   showWalletUI as showWalletUIHandler,
   onMainWallet,
@@ -222,6 +222,172 @@ const toRawAmount = (value: string, decimals: number): number => {
 const clampLamportsForFees = (lamports: number): number =>
   Math.max(0, lamports - SOL_FEE_BUFFER_LAMPORTS);
 
+type TokenBalanceLike = {
+  balance: number;
+  decimals: number;
+};
+
+type CalculateBuySpendParams = {
+  amount: string;
+  paymentToken: string;
+  inputDecimals: number;
+  solBalance: number;
+  tokenBalance?: TokenBalanceLike;
+  formatSol: (lamports: number) => string;
+  formatToken: (amount: number, decimals: number) => string;
+};
+
+const calculateBuySpend = ({
+  amount,
+  paymentToken,
+  inputDecimals,
+  solBalance,
+  tokenBalance,
+  formatSol,
+  formatToken,
+}: CalculateBuySpendParams) => {
+  let rawAmount: number;
+  let displayAmount: string;
+
+  if (amount.includes("%")) {
+    const percentage = parseFloat(amount.replace("%", ""));
+    if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
+      throw new Error("Invalid percentage format");
+    }
+
+    if (paymentToken === "SOL") {
+      const spendableLamports = clampLamportsForFees(solBalance);
+      if (spendableLamports <= 0) {
+        throw new Error("Not enough SOL to cover purchase and fees");
+      }
+
+      rawAmount = Math.floor(spendableLamports * (percentage / 100));
+      if (rawAmount <= 0) {
+        throw new Error("Percentage results in zero amount");
+      }
+      displayAmount = formatSol(rawAmount);
+    } else {
+      if (!tokenBalance) {
+        throw new Error(`No ${paymentToken} balance found`);
+      }
+      rawAmount = Math.floor(tokenBalance.balance * (percentage / 100));
+      if (rawAmount <= 0) {
+        throw new Error("Percentage results in zero amount");
+      }
+      displayAmount = formatToken(rawAmount, tokenBalance.decimals);
+    }
+  } else if (amount === "max") {
+    if (paymentToken === "SOL") {
+      rawAmount = clampLamportsForFees(solBalance);
+      if (rawAmount <= 0) {
+        throw new Error("Not enough SOL to cover purchase and fees");
+      }
+      displayAmount = formatSol(rawAmount);
+    } else {
+      if (!tokenBalance) {
+        throw new Error(`No ${paymentToken} balance found`);
+      }
+      rawAmount = Math.floor(tokenBalance.balance);
+      if (rawAmount <= 0) {
+        throw new Error(`No ${paymentToken} balance found`);
+      }
+      displayAmount = formatToken(rawAmount, tokenBalance.decimals);
+    }
+  } else {
+    rawAmount = toRawAmount(amount, inputDecimals);
+
+    if (paymentToken === "SOL") {
+      if (rawAmount + SOL_FEE_BUFFER_LAMPORTS > solBalance) {
+        throw new Error("Insufficient SOL balance for this purchase");
+      }
+      displayAmount = formatSol(rawAmount);
+    } else {
+      if (!tokenBalance) {
+        throw new Error(`No ${paymentToken} balance found`);
+      }
+      if (rawAmount > tokenBalance.balance) {
+        throw new Error("Insufficient token balance for this purchase");
+      }
+      displayAmount = formatToken(rawAmount, inputDecimals);
+    }
+  }
+
+  return { rawAmount, displayAmount };
+};
+
+type BuyQuoteSummaryParams = {
+  paymentToken: string;
+  targetToken: string;
+  displayAmount: string;
+  rawAmount: number;
+  inputDecimals: number;
+  outputDecimals: number;
+  quote: SwapQuote;
+  outputMint: string;
+};
+
+const formatBuyQuoteSummary = ({
+  paymentToken,
+  targetToken,
+  displayAmount,
+  rawAmount,
+  inputDecimals,
+  outputDecimals,
+  quote,
+  outputMint,
+}: BuyQuoteSummaryParams) => {
+  const formattedReceiveAmount = formatAmount(
+    quote.outputAmount ?? "0",
+    outputDecimals,
+    { maxFractionDigits: 6, trim: true }
+  );
+
+  const inputAmountDecimal =
+    rawAmount > 0 ? rawAmount / Math.pow(10, inputDecimals) : 0;
+  const outputAmountDecimal =
+    Number(quote.outputAmount ?? "0") / Math.pow(10, outputDecimals);
+  const computedRate =
+    inputAmountDecimal > 0
+      ? outputAmountDecimal / inputAmountDecimal
+      : Number.isFinite(quote.estimatedRate)
+      ? quote.estimatedRate
+      : 0;
+  const rateDisplay = formatRate(
+    Number.isFinite(computedRate) ? computedRate : 0
+  );
+
+  const providerLabel =
+    quote.provider === "pump-fun"
+      ? "pump-fun (ungraduated)"
+      : `${quote.provider} (graduated)`;
+  const slippageText = quote.slippage
+    ? `${quote.slippage.toFixed(1)}%`
+    : "1.0%";
+
+  const message = [
+    `🛒 <b>Buy Confirmation</b>`,
+    "",
+    `<b>You Pay:</b> ${displayAmount} ${paymentToken}`,
+    `<b>You Receive:</b> ~${formattedReceiveAmount} ${targetToken}`,
+    "",
+    `<b>Rate:</b> ${rateDisplay} ${targetToken}/${paymentToken}`,
+    `<b>Provider:</b> ${providerLabel}`,
+    `<b>Slippage:</b> ${slippageText}`,
+    "",
+    `🔗 <b>Contract:</b> <code>${outputMint}</code>`,
+    "",
+    `⚠️ <b>Confirm this purchase?</b>`,
+  ].join("\n");
+
+  return {
+    message,
+    formattedReceiveAmount,
+    rateDisplay,
+    providerLabel,
+    slippageText,
+  };
+};
+
 /**
  * Check if the context is a private chat
  */
@@ -300,6 +466,8 @@ export const __test_createApiContext = createApiContext;
 export const __test_validateGameTokenData = validateGameTokenData;
 export const __test_resetInitiatedChats = () => initiatedChats.clear();
 export const __test_getInitiatedChats = () => new Set(initiatedChats);
+export const __test_calculateBuySpend = calculateBuySpend;
+export const __test_formatBuyQuoteSummary = formatBuyQuoteSummary;
 
 /**
  * Update game message with proper error handling using simplified interface
@@ -7501,50 +7669,16 @@ const showBuyQuoteAndConfirmation = async (
       ? await wallet.getTokenMetadata(outputMint).then((m) => m.decimals)
       : 9;
 
-    let rawAmount: number;
-    let displayAmount: string;
-
-    if (amount === "max") {
-      if (paymentToken === "SOL") {
-        rawAmount = clampLamportsForFees(solBalance);
-        if (rawAmount <= 0) {
-          throw new Error("Not enough SOL to cover purchase and fees");
-        }
-        displayAmount = wallet.formatSolBalance(rawAmount);
-      } else {
-        if (!tokenBalance) {
-          throw new Error(`No ${paymentToken} balance found`);
-        }
-        rawAmount = Math.floor(tokenBalance.balance);
-        if (rawAmount <= 0) {
-          throw new Error(`No ${paymentToken} balance found`);
-        }
-        displayAmount = wallet.formatTokenBalance(
-          rawAmount,
-          tokenBalance.decimals
-        );
-      }
-    } else {
-      rawAmount = toRawAmount(amount, inputDecimals);
-
-      if (paymentToken === "SOL") {
-        if (rawAmount + SOL_FEE_BUFFER_LAMPORTS > solBalance) {
-          throw new Error("Insufficient SOL balance for this purchase");
-        }
-        displayAmount = wallet.formatSolBalance(rawAmount);
-      } else {
-        if (!tokenBalance) {
-          throw new Error(`No ${paymentToken} balance found`);
-        }
-        if (rawAmount > tokenBalance.balance) {
-          throw new Error("Insufficient token balance for this purchase");
-        }
-        displayAmount = wallet.formatTokenBalance(
-          rawAmount,
-          inputDecimals
-        );
-      }
-    }
+    const { rawAmount, displayAmount } = calculateBuySpend({
+      amount,
+      paymentToken,
+      inputDecimals,
+      solBalance,
+      tokenBalance,
+      formatSol: (lamports) => wallet.formatSolBalance(lamports),
+      formatToken: (value, decimals) =>
+        wallet.formatTokenBalance(value, decimals),
+    });
 
     const baseAmount = rawAmount.toString();
 
@@ -7561,32 +7695,16 @@ const showBuyQuoteAndConfirmation = async (
       outputTicker: targetToken.toUpperCase(),
     });
 
-    const providerLabel =
-      quote.provider === "pump-fun"
-        ? "pump-fun (ungraduated)"
-        : `${quote.provider} (graduated)`;
-    const slippageText = quote.slippage
-      ? `${quote.slippage.toFixed(1)}%`
-      : "1.0%";
-    const estimatedRate = Number.isFinite(quote.estimatedRate)
-      ? quote.estimatedRate.toFixed(6)
-      : "N/A";
-
-    // Format for BUY terminology
-    const response = [
-      `🛒 <b>Buy Confirmation</b>`,
-      "",
-      `<b>You Pay:</b> ${displayAmount} ${paymentToken}`,
-      `<b>You Receive:</b> ~${quote.outputAmount} ${targetToken}`,
-      "",
-      `<b>Rate:</b> ${estimatedRate} ${targetToken}/${paymentToken}`,
-      `<b>Provider:</b> ${providerLabel}`,
-      `<b>Slippage:</b> ${slippageText}`,
-      "",
-      `🔗 <b>Contract:</b> <code>${outputMint}</code>`,
-      "",
-      `⚠️ <b>Confirm this purchase?</b>`,
-    ].join("\n");
+    const summary = formatBuyQuoteSummary({
+      paymentToken,
+      targetToken,
+      displayAmount,
+      rawAmount,
+      inputDecimals,
+      outputDecimals,
+      quote,
+      outputMint,
+    });
 
     // Generate transaction ID for confirmation
     const txId = generateTransactionId();
@@ -7600,7 +7718,7 @@ const showBuyQuoteAndConfirmation = async (
     });
 
     await respondWithMenu(ctx, {
-      text: response,
+      text: summary.message,
       keyboard: createConfirmBuyKeyboard(txId)
         .row()
         .text("⚙️ Slippage", `buy_slippage_${txId}`)
