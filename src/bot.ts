@@ -8822,7 +8822,6 @@ const showSellAmountSelection = async (ctx: any, tokenToSell: string) => {
     .text("75%", `sell_amount_${tokenToSell}_75%`)
     .text("100%", `sell_amount_${tokenToSell}_100%`)
     .row()
-    .text("MAX", `sell_amount_${tokenToSell}_max`)
     .text("✏️ Custom", `sell_amount_${tokenToSell}_CUSTOM`)
     .row();
 
