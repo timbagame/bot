@@ -26,12 +26,10 @@ import {
   WSOL_MINT,
   getStartVideoId,
 } from "./utils/constants";
-import { trySendVideoWithFallback } from "./utils/media";
 import { mergeWsolIntoSol } from "./utils/balance";
 import { setUserState, getUserState, storePendingTransaction, getPendingTransaction } from "./utils/user-state";
 // import { createDmMessageAdapter } from "./utils/ctx-adapter";
 import {
-  createMainMenuKeyboard,
   createWalletKeyboard,
   createConfirmWrapKeyboard,
   createConfirmBuyKeyboard,
@@ -45,7 +43,14 @@ import {
 } from "./utils/keyboards";
 import { buildWalletCaption } from "./utils/wallet-ui";
 import { formatAmount, escapeHtml } from "./utils/format-amount";
-import { showWalletUI as showWalletUIHandler, onMainWallet, onWalletRefresh, onWalletSettings, onBalance } from "./handlers/wallet";
+import {
+  showWalletUI as showWalletUIHandler,
+  onMainWallet,
+  onWalletRefresh,
+  onWalletSettings,
+  onBalance,
+  type BalanceDeps,
+} from "./handlers/wallet";
 import { inferMaxPlayers } from "./utils/arg-parsing";
 import type {
   PlayerData,
@@ -889,6 +894,52 @@ const replyUsageError = async (
   return replyToMessage(ctx, message);
 };
 
+type MenuResponseOptions = {
+  parseMode?: "HTML" | "MarkdownV2";
+  deleteIfFailed?: boolean;
+};
+
+const respondWithMenu = async (
+  ctx: Context,
+  message: string,
+  keyboard: InlineKeyboard,
+  options: MenuResponseOptions = {}
+): Promise<void> => {
+  const parseMode = options.parseMode ?? "HTML";
+  let replyToMessageId = ctx.message?.message_id;
+  let sourceMessageDeleted = false;
+
+  if (ctx.callbackQuery) {
+    try {
+      await ctx.editMessageText(message, {
+        parse_mode: parseMode,
+        reply_markup: keyboard,
+        link_preview_options: { is_disabled: true },
+      });
+      return;
+    } catch (error: any) {
+      const description: string = error?.description || error?.message || "";
+      if (description.includes("message is not modified")) {
+        return;
+      }
+
+      if (options.deleteIfFailed) {
+        try {
+          await ctx.deleteMessage();
+          sourceMessageDeleted = true;
+        } catch {}
+      }
+    }
+  }
+
+  await ctx.reply(message, {
+    parse_mode: parseMode,
+    reply_markup: keyboard,
+    reply_to_message_id: sourceMessageDeleted ? undefined : replyToMessageId,
+    link_preview_options: { is_disabled: true },
+  });
+};
+
 const handleCallbackError = async (
   ctx: any,
   error: any,
@@ -1138,27 +1189,28 @@ const buildTokenBalances = async (
   return tokenBalancesToShow;
 };
 
-bot.command(["start", "balance"], async (ctx: Context) => {
-  // Mark chat as initiated if it's not already
-      if (ctx.chat?.id) {
-        initiatedChats.add(ctx.chat.id);
-      }
+const createBalanceDeps = (): BalanceDeps => ({
+  isPrivateChat,
+  clearWalletCache,
+  showWalletUI,
+  getPlayerData,
+  getApprovedTokens: () => tokenManager.getAllApprovedTokensWithMetadata(),
+  buildTokenBalances,
+  TOKENS_LIST,
+  wallet,
+  handleCommandError,
+  getPriceUSD,
+  buildWalletCaption,
+  createWalletKeyboard,
+  WINNER_VIDEO_ID: getStartVideoId(),
+});
 
-  await onBalance(ctx as any, {
-    isPrivateChat,
-    clearWalletCache,
-    showWalletUI: (c: any) => showWalletUI(c),
-    getPlayerData,
-    getApprovedTokens: () => tokenManager.getAllApprovedTokensWithMetadata(),
-    buildTokenBalances,
-    TOKENS_LIST,
-    wallet,
-    handleCommandError,
-    getPriceUSD,
-    buildWalletCaption,
-    createWalletKeyboard,
-    WINNER_VIDEO_ID: getStartVideoId(),
-  });
+bot.command(["start", "balance"], async (ctx: Context) => {
+  if (ctx.chat?.id) {
+    initiatedChats.add(ctx.chat.id);
+  }
+
+  await onBalance(ctx as any, createBalanceDeps());
 });
 
 
@@ -5193,6 +5245,50 @@ const clearWalletCache = (telegramId: bigint) => {
   console.log(`🗑️ Cleared wallet cache for user: ${telegramId}`);
 };
 
+type WalletOverview = {
+  walletAddress: string;
+  solBalance: number;
+  formattedSolBalance: string;
+  totalUsd: number;
+  tokenBalances: Array<{
+    mint: string;
+    ticker: string;
+    balance: number;
+    decimals: number;
+    rawBalance: string;
+  }>;
+  ownedTokens: Array<{
+    mint: string;
+    ticker: string;
+    balance: number;
+    decimals: number;
+    rawBalance: string;
+  }>;
+};
+
+const getWalletOverview = async (telegramId: bigint): Promise<WalletOverview> => {
+  const keypair = wallet.getKeyPair(telegramId);
+  const walletAddress = keypair.publicKey.toBase58();
+  const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
+  const formattedSolBalance = wallet.formatSolBalance(solBalance);
+  const solPriceUSD = await getPriceUSD("SOL");
+  const solDecimalBalance = solBalance / LAMPORTS_PER_SOL;
+  const totalUsd = solDecimalBalance * solPriceUSD;
+  const ownedTokens = tokenBalances.filter((token) => {
+    const raw = Number.parseFloat(token.rawBalance);
+    return Number.isFinite(raw) && raw > 0;
+  });
+
+  return {
+    walletAddress,
+    solBalance,
+    formattedSolBalance,
+    totalUsd,
+    tokenBalances,
+    ownedTokens,
+  };
+};
+
 // ================================
 // SEND TOKEN INTERFACE HANDLERS
 // ================================
@@ -5475,50 +5571,11 @@ bot.on("callback_query", async (ctx, next) => {
 // Handle "GET STARTED" button from bot info screen - triggers /start
 bot.callbackQuery("start_bot", async (ctx) => {
   try {
-    // Delete the info message
-
-
-    // Manually trigger start command logic
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
-    const keypair = wallet.getKeyPair(telegramId);
-    const displayName = ctx.from?.username
-      ? `@${ctx.from.username}`
-      : ctx.from?.first_name || "User";
-    const walletAddress = keypair.publicKey.toBase58();
-
-    const welcomeMessage = [
-      `<b>Welcome ${displayName}</b>`,
-      "",
-      `<code>${walletAddress}</code>`,
-    ];
-
-    // Mark chat as initiated
     if (ctx.chat?.id) {
       initiatedChats.add(ctx.chat.id);
     }
 
-    const mainMenuKeyboard = createMainMenuKeyboard();
-    const startVideoId = getStartVideoId();
-    const sendWelcomeText = () =>
-      ctx.reply(welcomeMessage.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: mainMenuKeyboard,
-      });
-
-    if (startVideoId) {
-      await trySendVideoWithFallback(
-        () =>
-          ctx.replyWithVideo(startVideoId, {
-            caption: welcomeMessage.join("\n"),
-            parse_mode: "HTML",
-            reply_markup: mainMenuKeyboard,
-          }),
-        sendWelcomeText
-      );
-    } else {
-      await sendWelcomeText();
-    }
-
+    await onBalance(ctx as any, createBalanceDeps());
     await ctx.answerCallbackQuery("🚀 Welcome to TIMBA!");
   } catch (error) {
     console.error("Error in start_bot:", error);
@@ -5708,31 +5765,15 @@ bot.callbackQuery("help_examples", async (ctx) => {
 
 bot.callbackQuery("cmd_buy", async (ctx) => {
   try {
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
-    const userId = ctx.from?.id?.toString();
+    if (!ctx.from?.id) {
+      return;
+    }
 
-    if (!userId) return;
+    const telegramId = BigInt(ctx.from.id || 0) as bigint;
+    const overview = await getWalletOverview(telegramId);
+    const hasTokenBalances = overview.ownedTokens.length > 0;
 
-    const keypair = wallet.getKeyPair(telegramId);
-    const walletAddress = keypair.publicKey.toBase58();
-
-    // Use cached wallet data to check SOL balance and owned tokens
-    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-    const formattedSolBalance = wallet.formatSolBalance(solBalance);
-
-    // Calculate USD value
-    const solPriceUSD = await getPriceUSD("SOL");
-    const solDecimalBalance = solBalance / 1000000000; // LAMPORTS_PER_SOL
-    const totalUSD = solDecimalBalance * solPriceUSD;
-
-    const hasTokenBalances = tokenBalances.some(
-      (token) => parseFloat(token.rawBalance) > 0
-    );
-    const ownedTokens = tokenBalances
-      .filter((token) => parseFloat(token.rawBalance) > 0)
-      .slice(0, 6);
-
-    const ownedTokenButtons = ownedTokens.map((token) => {
+    const ownedTokenButtons = overview.ownedTokens.slice(0, 6).map((token) => {
       const formattedBalance = wallet.formatTokenBalance(
         token.balance,
         token.decimals
@@ -5751,31 +5792,15 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
     });
 
     const { message, keyboard } = buildBuyMenuUI({
-      walletAddress,
-      formattedSolBalance,
-      totalUsd: totalUSD,
+      walletAddress: overview.walletAddress,
+      formattedSolBalance: overview.formattedSolBalance,
+      totalUsd: overview.totalUsd,
       ownedTokenButtons,
       allowTokenPayments: hasTokenBalances,
       hasAnyTokens: hasTokenBalances,
     });
 
-    // Try to edit as text, if fails (because current message has media), delete and send new
-    try {
-      await ctx.editMessageText(message, {
-        parse_mode: "HTML",
-        reply_markup: keyboard,
-      });
-    } catch (error) {
-      // If edit fails because message has media, delete and send new text message
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
-      await ctx.reply(message, {
-        parse_mode: "HTML",
-        reply_markup: keyboard,
-      });
-    }
+    await respondWithMenu(ctx, message, keyboard, { deleteIfFailed: true });
 
     await ctx.answerCallbackQuery("Select how you want to buy");
   } catch (error) {
@@ -5786,90 +5811,73 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
 
 bot.callbackQuery("cmd_sell", async (ctx) => {
   try {
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
-    const keypair = wallet.getKeyPair(telegramId);
-    const walletAddress = keypair.publicKey.toBase58();
+    if (!ctx.from?.id) {
+      return;
+    }
 
-    // Use cached wallet data
-    const { tokenBalances } = await getCachedWalletData(telegramId);
+    const telegramId = BigInt(ctx.from.id || 0) as bigint;
+    const overview = await getWalletOverview(telegramId);
+    const userKeypair = wallet.getKeyPair(telegramId);
 
     const sellTokenButtons: { label: string; callbackData: string }[] = [];
-    for (const token of tokenBalances.slice(0, 6)) {
-      if (parseFloat(token.rawBalance) > 0) {
-        const formatted = wallet.formatTokenBalance(
-          token.balance,
-          token.decimals
-        );
+    for (const token of overview.ownedTokens.slice(0, 6)) {
+      const formatted = wallet.formatTokenBalance(
+        token.balance,
+        token.decimals
+      );
 
-        // Try to get estimated SOL value for this token
-        let solEstimate = "";
-        try {
-          // Only get quote if we have valid token data and the token is not SOL itself
-          if (
-            token.mint &&
-            token.mint !== "undefined" &&
-            token.mint !== "So11111111111111111111111111111111111111112" &&
-            token.ticker &&
-            token.ticker !== "undefined" &&
-            typeof token.mint === "string" &&
-            token.mint.length > 30 &&
-            token.rawBalance &&
-            token.decimals !== undefined
-          ) {
-            // Get a quote for selling this token amount to SOL
-            const quote = await swapManager.getQuote({
-              inputMint: token.mint, // input (token to sell)
-              outputMint: "So11111111111111111111111111111111111111112", // output (SOL)
-              amount: token.rawBalance, // amount to sell
-              slippageBps: 500, // 5% slippage
-              userKeypair: wallet.getKeyPair(telegramId),
-              inputDecimals: token.decimals,
-              outputDecimals: 9,
-              inputTicker: token.ticker.toUpperCase(),
-              outputTicker: "SOL",
-            });
+      let solEstimate = "";
+      try {
+        if (
+          token.mint &&
+          token.mint !== "undefined" &&
+          token.mint !== "So11111111111111111111111111111111111111112" &&
+          token.ticker &&
+          token.ticker !== "undefined" &&
+          typeof token.mint === "string" &&
+          token.mint.length > 30 &&
+          token.rawBalance &&
+          token.decimals !== undefined
+        ) {
+          const quote = await swapManager.getQuote({
+            inputMint: token.mint,
+            outputMint: "So11111111111111111111111111111111111111112",
+            amount: token.rawBalance,
+            slippageBps: 500,
+            userKeypair,
+            inputDecimals: token.decimals,
+            outputDecimals: 9,
+            inputTicker: token.ticker.toUpperCase(),
+            outputTicker: "SOL",
+          });
 
-            // Format the SOL amount we'd receive
-            const solAmount = parseFloat(quote.outputAmount) / 1000000000; // Convert lamports to SOL
-            if (solAmount > 0.001) {
-              solEstimate = ` → ${solAmount.toFixed(4)} SOL`;
-            } else if (solAmount > 0) {
-              solEstimate = ` → ${solAmount.toFixed(6)} SOL`;
-            }
+          const solAmount = parseFloat(quote.outputAmount) / LAMPORTS_PER_SOL;
+          if (solAmount > 0.001) {
+            solEstimate = ` → ${solAmount.toFixed(4)} SOL`;
+          } else if (solAmount > 0) {
+            solEstimate = ` → ${solAmount.toFixed(6)} SOL`;
           }
-        } catch (error) {
-          // If quote fails, just show token balance without SOL estimate
-          console.log(
-            `Could not get quote for ${token.ticker || "unknown token"}: ${
-              (error as Error).message
-            }`
-          );
         }
-
-        sellTokenButtons.push({
-          label: `${token.ticker} (${formatted}${solEstimate})`,
-          callbackData: `sell_token_${token.ticker}`,
-        });
+      } catch (error) {
+        console.log(
+          `Could not get quote for ${token.ticker || "unknown token"}: ${
+            (error as Error).message
+          }`
+        );
       }
+
+      sellTokenButtons.push({
+        label: `${token.ticker} (${formatted}${solEstimate})`,
+        callbackData: `sell_token_${token.ticker}`,
+      });
     }
 
     const { message, keyboard } = buildSellMenuUI({
-      walletAddress,
+      walletAddress: overview.walletAddress,
       tokenButtons: sellTokenButtons,
     });
 
-    // Try to edit as text, if fails (because current message has media), delete and send new
-    try {
-      await ctx.editMessageText(message, {
-        parse_mode: "HTML",
-        reply_markup: keyboard,
-      });
-    } catch (error) {
-      await ctx.reply(message, {
-        parse_mode: "HTML",
-        reply_markup: keyboard,
-      });
-    }
+    await respondWithMenu(ctx, message, keyboard);
     await ctx.answerCallbackQuery("Select what you want to sell");
   } catch (error) {
     console.error("Error in cmd_sell:", error);
