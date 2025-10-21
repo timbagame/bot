@@ -11,6 +11,11 @@ import BN from "bn.js";
 import { resolveTokenMetadata } from "./token-metadata";
 import { parseDecimalAmount } from "./amount";
 
+const SOL_MINTS = new Set<string>([
+  "So11111111111111111111111111111111111111112",
+  "SOL",
+]);
+
 // ================================
 // PUMP.FUN TYPES
 // ================================
@@ -56,14 +61,6 @@ export class PumpFunClient {
     const trimmed = amount.trim();
     if (trimmed.length === 0) {
       return 0n;
-    }
-
-    if (/^\d+$/.test(trimmed)) {
-      const raw = BigInt(trimmed);
-      if (!allowZero && raw === 0n) {
-        throw new Error("Amount must be greater than zero");
-      }
-      return raw;
     }
 
     return parseDecimalAmount(trimmed, Math.max(decimals, 0), {
@@ -564,13 +561,34 @@ export class PumpFunClient {
     const safeInputTicker = escapeHtml(inputTicker);
     const safeOutputTicker = escapeHtml(outputTicker);
 
-    const inputRaw = this.parseAmountLamports(quote.inputAmount ?? "0", Math.max(inputDecimals, 0), {
-      allowZero: true,
-    });
-    const outputRaw = this.parseAmountLamports(
-      quote.outputAmount ?? "0",
-      Math.max(outputDecimals, 0),
-      { allowZero: true }
+    const parseQuoteAmount = (
+      rawValue: string | undefined | null,
+      decimals: number,
+      mint: string
+    ): bigint => {
+      const trimmed = (rawValue ?? "0").trim();
+      if (trimmed.length === 0) {
+        return 0n;
+      }
+
+      if (SOL_MINTS.has(mint) && /^\d+$/.test(trimmed)) {
+        return BigInt(trimmed);
+      }
+
+      return this.parseAmountLamports(trimmed, Math.max(decimals, 0), {
+        allowZero: true,
+      });
+    };
+
+    const inputRaw = parseQuoteAmount(
+      quote.inputAmount,
+      inputDecimals,
+      quote.inputMint
+    );
+    const outputRaw = parseQuoteAmount(
+      quote.outputAmount,
+      outputDecimals,
+      quote.outputMint
     );
 
     const inputAmountStr = formatAmount(inputRaw, inputDecimals, {
@@ -632,8 +650,7 @@ export function validatePumpFunSwap(
   amount: string
 ): { valid: boolean; error?: string } {
   // One token must be SOL/WSOL
-  const solMints = ["SOL", "So11111111111111111111111111111111111111112"];
-  const hasSol = solMints.includes(inputMint) || solMints.includes(outputMint);
+  const hasSol = SOL_MINTS.has(inputMint) || SOL_MINTS.has(outputMint);
 
   if (!hasSol) {
     return { valid: false, error: "Pump.fun swaps must involve SOL" };
