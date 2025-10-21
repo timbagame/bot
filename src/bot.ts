@@ -32,6 +32,8 @@ import { setUserState, getUserState, storePendingTransaction, getPendingTransact
 import {
   createWalletKeyboard,
   createWalletSettingsKeyboard,
+  createBackToWalletKeyboard,
+  appendBackToWalletButton,
   createConfirmWrapKeyboard,
   createTradeConfirmKeyboard,
   createAmountSelectionKeyboard,
@@ -4864,7 +4866,7 @@ bot.callbackQuery("cmd_withdraw", async (ctx) => {
         .row();
     }
 
-    keyboard.text("← Back to Wallet", "main_wallet").row();
+    appendBackToWalletButton(keyboard);
 
     await respondWithMenu(ctx, {
       text: response.join("\n"),
@@ -4908,9 +4910,7 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
 
     await respondWithMenu(ctx, {
       text: response.join("\n"),
-      keyboard: new InlineKeyboard()
-        .text("← Back to Wallet", "main_wallet")
-        .row(),
+      keyboard: createBackToWalletKeyboard(),
     });
     await ctx.answerCallbackQuery("🔐 Private key shown");
   } catch (error) {
@@ -4953,7 +4953,7 @@ bot.callbackQuery("cmd_wrap", async (ctx) => {
       keyboard.text("❌ Insufficient SOL balance").row();
     }
 
-    keyboard.text("← Back to Wallet", "main_wallet").row();
+    appendBackToWalletButton(keyboard);
 
     await respondWithMenu(ctx, {
       text: response.join("\n"),
@@ -5224,9 +5224,7 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
 
       await respondWithMenu(ctx, {
         text: successMessage,
-        keyboard: new InlineKeyboard()
-          .text("← Back to Wallet", "main_wallet")
-          .row(),
+        keyboard: createBackToWalletKeyboard(),
       });
     } catch (txError) {
       console.error("Transaction failed:", txError);
@@ -5234,9 +5232,7 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
         text: `❌ <b>TRANSACTION FAILED</b>\n\n${
           (txError as Error).message
         }\n\nPlease try again.`,
-        keyboard: new InlineKeyboard()
-          .text("← Back to Wallet", "main_wallet")
-          .row(),
+        keyboard: createBackToWalletKeyboard(),
       });
     }
 
@@ -5262,9 +5258,7 @@ bot.callbackQuery(/^confirm_wrap_/, async (ctx) => {
       await ctx.answerCallbackQuery("❌ Insufficient SOL for wrap");
       await respondWithMenu(ctx, {
         text: `❌ <b>WRAP FAILED</b>\n\nNot enough SOL to wrap ${amount}.\nKeep at least ${MIN_SOL_FOR_TX} SOL for fees and try again.`,
-        keyboard: new InlineKeyboard()
-          .text("← Back to Wallet", "main_wallet")
-          .row(),
+        keyboard: createBackToWalletKeyboard(),
       });
       return;
     }
@@ -5285,9 +5279,7 @@ bot.callbackQuery(/^confirm_wrap_/, async (ctx) => {
 
     await respondWithMenu(ctx, {
       text: `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${formattedAmount} SOL to WSOL\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`,
-      keyboard: new InlineKeyboard()
-        .text("← Back to Wallet", "main_wallet")
-        .row(),
+      keyboard: createBackToWalletKeyboard(),
     });
 
     await ctx.answerCallbackQuery("✅ Wrap transaction submitted");
@@ -5383,7 +5375,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
       await respondWithMenu(ctx, {
         text: `✅ <b>SWAP COMPLETED</b>\n\nSwapped ${transaction.amount} ${transaction.fromToken}\nReceived ~${quote.outputAmount} ${transaction.toToken}\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`,
         parseMode: "HTML",
-        keyboard: new InlineKeyboard().text("← Back to Wallet", "main_wallet").row(),
+        keyboard: createBackToWalletKeyboard(),
       });
     } catch (swapError) {
       console.error("Swap transaction failed:", swapError);
@@ -5392,7 +5384,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
           (swapError as Error).message
         }\n\nPlease try again.`,
         parseMode: "HTML",
-        keyboard: new InlineKeyboard().text("← Back to Wallet", "main_wallet").row(),
+        keyboard: createBackToWalletKeyboard(),
       });
     }
 
@@ -5446,7 +5438,7 @@ bot.callbackQuery("cmd_swap", async (ctx) => {
       keyboard.text("❌ No tokens available to swap").row();
     }
 
-    keyboard.text("← Back to Wallet", "main_wallet").row();
+    appendBackToWalletButton(keyboard);
 
     await respondWithMenu(ctx, {
       text: response.join("\n"),
@@ -7985,17 +7977,13 @@ bot.on("message:text", async (ctx, next) => {
         "❌ <b>Error processing input</b>\n\nPlease try again.",
         {
           parse_mode: "HTML",
-          reply_markup: new InlineKeyboard()
-            .text("← Back to Wallet", "main_wallet")
-            .row(),
+          reply_markup: createBackToWalletKeyboard(),
         }
       );
     } catch (editError) {
       await ctx.reply("❌ <b>Error processing input</b>\n\nPlease try again.", {
         parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("← Back to Wallet", "main_wallet")
-          .row(),
+        reply_markup: createBackToWalletKeyboard(),
       });
     }
   }
