@@ -1,5 +1,6 @@
 import type { Context, InlineKeyboard } from "grammy";
 import { awaitTelegramRetry } from "./media";
+import { isMessageNotModified, shouldFallbackToReply } from "./telegram-errors";
 
 export type MenuPayload = {
   text: string;
@@ -9,27 +10,8 @@ export type MenuPayload = {
 
 export type MenuResponseOptions = {
   replyToMessageId?: number | null;
+  skipEdit?: boolean;
 };
-
-const getErrorDescription = (error: unknown): string => {
-  if (!error || typeof error !== "object") {
-    return "";
-  }
-  const maybeDescription = (error as any).description ?? (error as any).message;
-  return typeof maybeDescription === "string" ? maybeDescription : "";
-};
-
-const isMessageNotModified = (description: string): boolean =>
-  description.includes("message is not modified");
-
-const shouldFallbackToCaptionOrReply = (description: string): boolean =>
-  description.includes("message to edit not found") ||
-  description.includes("message can't be edited") ||
-  description.includes("have no access to the chat") ||
-  description.includes("bot was blocked by the user") ||
-  description.includes("message with the same content already exists") ||
-  description.includes("there is no text in the message to edit") ||
-  description.includes("there is no caption in the message to edit");
 
 const messageSupportsCaption = (message: any): boolean =>
   Boolean(
@@ -49,11 +31,10 @@ const attemptEdit = async (
     await performEdit();
     return true;
   } catch (error) {
-    const description = getErrorDescription(error);
-    if (isMessageNotModified(description)) {
+    if (isMessageNotModified(error)) {
       return true;
     }
-    if (shouldFallbackToCaptionOrReply(description)) {
+    if (shouldFallbackToReply(error)) {
       return false;
     }
     throw error;
@@ -91,7 +72,7 @@ export const respondWithMenu = async (
 ): Promise<void> => {
   const message = ctx.callbackQuery?.message;
 
-  if (ctx.callbackQuery && message) {
+  if (!options.skipEdit && ctx.callbackQuery && message) {
     const supportsCaption = messageSupportsCaption(message);
 
     if (supportsCaption) {

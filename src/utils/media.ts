@@ -2,11 +2,7 @@
  * Utility helpers for dealing with Telegram media operations.
  */
 
-const getErrorDescription = (error: any): string => {
-  if (!error) return "";
-  const description = error?.description ?? error?.message;
-  return typeof description === "string" ? description : "";
-};
+import { getErrorDescription, isMessageNotModified } from "./telegram-errors";
 
 const isTooManyRequestsError = (error: any): boolean => {
   if (!error || typeof error !== "object") return false;
@@ -95,13 +91,6 @@ export const isRecoverableMediaError = (error: any): boolean => {
   );
 };
 
-export const isMessageNotModifiedError = (error: any): boolean => {
-  if (!error) return false;
-  const description = getErrorDescription(error);
-  if (!description) return false;
-  return description.toLowerCase().includes("message is not modified");
-};
-
 export type MediaSendResult<Primary, Fallback = Primary> = {
   result: Primary | Fallback;
   usedFallback: boolean;
@@ -153,7 +142,7 @@ export async function editMediaWithFallback<Primary, Fallback = Primary>({
     const result = await awaitTelegramRetry(edit, { maxAttempts });
     return { result, usedFallback: false, skipped: false };
   } catch (error) {
-    if (isMessageNotModifiedError(error)) {
+    if (isMessageNotModified(error)) {
       return { result: null, usedFallback: false, skipped: true };
     }
 

@@ -82,9 +82,9 @@ import {
   SELL_NOOP_CALLBACK,
 } from "./utils/trade-ui";
 import { respondWithMenu } from "./utils/menu-response";
-import { awaitTelegramRetry } from "./utils/media";
 import { parseDecimalAmount } from "./utils/amount";
 import { handleCoinflipCommand, type CoinflipDeps } from "./handlers/game";
+import { isMessageMissing } from "./utils/telegram-errors";
 
 // ================================
 // GLOBAL INSTANCES
@@ -218,45 +218,35 @@ const ensureCreator = (
   return true;
 };
 
-const getTelegramErrorDescription = (error: unknown): string => {
-  if (!error || typeof error !== "object") {
-    return "";
-  }
-
-  const description = (error as any).description ?? (error as any).message;
-  return typeof description === "string" ? description : "";
-};
-
-const isMessageMissingError = (error: unknown): boolean => {
-  const description = getTelegramErrorDescription(error).toLowerCase();
-  if (!description) {
-    return false;
-  }
-
-  return (
-    description.includes("message to edit not found") ||
-    description.includes("message to delete not found")
-  );
-};
-
 const notifyConfirmUser = async (
   ctx: Context,
   message: string,
   confirmMessageMissing: boolean
 ): Promise<void> => {
-  if (confirmMessageMissing) {
-    await awaitTelegramRetry(() =>
-      ctx.reply(message, {
-        parse_mode: "HTML",
-        link_preview_options: { is_disabled: true },
-      })
-    );
-    return;
+  const payload = {
+    text: message,
+    parseMode: "HTML" as const,
+  };
+
+  if (!confirmMessageMissing) {
+    try {
+      await respondWithMenu(ctx, payload);
+      return;
+    } catch (error) {
+      if (!isMessageMissing(error)) {
+        throw error;
+      }
+    }
   }
 
-  await respondWithMenu(ctx, {
-    text: message,
-    parseMode: "HTML",
+  const replyToId =
+    ctx.callbackQuery?.message?.reply_to_message?.message_id ??
+    ctx.message?.message_id ??
+    null;
+
+  await respondWithMenu(ctx, payload, {
+    replyToMessageId: replyToId,
+    skipEdit: true,
   });
 };
 
@@ -3882,7 +3872,7 @@ bot.callbackQuery(
               "Failed to clear confirm keyboard before game creation:",
               markError
             );
-            if (isMessageMissingError(markError)) {
+            if (isMessageMissing(markError)) {
               confirmMessageMissing = true;
             }
           }
@@ -3902,7 +3892,7 @@ bot.callbackQuery(
                 "Failed to set progress text before game creation:",
                 textError
               );
-              if (isMessageMissingError(textError)) {
+              if (isMessageMissing(textError)) {
                 confirmMessageMissing = true;
               }
             }
@@ -3962,7 +3952,7 @@ bot.callbackQuery(
             await ctx.api.deleteMessage(chatId, messageId);
           } catch (e) {
             console.warn("Could not delete confirmation message:", e);
-            if (isMessageMissingError(e)) {
+            if (isMessageMissing(e)) {
               confirmMessageMissing = true;
             } else {
               try {
@@ -3979,7 +3969,7 @@ bot.callbackQuery(
                   "Failed to mark confirmation message as processed:",
                   fallbackError
                 );
-                if (isMessageMissingError(fallbackError)) {
+                if (isMessageMissing(fallbackError)) {
                   confirmMessageMissing = true;
                 }
               }
