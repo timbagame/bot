@@ -1,7 +1,7 @@
 import type { InlineKeyboard } from "grammy";
 import { escapeHtml } from "../utils/format-amount";
 import { buildWalletTokenLines, type TokenDisplayLine } from "../utils/wallet-ui";
-import { isRecoverableMediaError, trySendVideoWithFallback } from "../utils/media";
+import { editMediaWithFallback, trySendVideoWithFallback } from "../utils/media";
 import { respondWithMenu } from "../utils/menu-response";
 
 
@@ -41,22 +41,29 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
       return;
     }
 
+    let editFailed = false;
+
     try {
-      await ctx.editMessageMedia(
-        { type: "video", media: walletVideoFileId, caption, parse_mode: "HTML" },
-        { reply_markup: getWalletKeyboard() }
-      );
+      const { skipped, usedFallback } = await editMediaWithFallback({
+        edit: () =>
+          ctx.editMessageMedia(
+            { type: "video", media: walletVideoFileId, caption, parse_mode: "HTML" },
+            { reply_markup: getWalletKeyboard() }
+          ),
+        fallback: respondWithText,
+        logLabel: "wallet media edit",
+      });
+
+      if (skipped || usedFallback) {
+        return;
+      }
+    } catch (error) {
+      editFailed = true;
+      console.warn("wallet media edit failed, sending new video", error);
+    }
+
+    if (!editFailed) {
       return;
-    } catch (editError: any) {
-      const description: string = editError?.description || editError?.message || "";
-      if (description.includes("message is not modified")) {
-        return;
-      }
-      if (isRecoverableMediaError(editError)) {
-        console.warn("Falling back to text wallet edit:", editError);
-        await respondWithText();
-        return;
-      }
     }
 
     await trySendVideoWithFallback(
@@ -67,7 +74,8 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
           reply_markup: getWalletKeyboard(),
           reply_to_message_id: ctx.message?.message_id,
         }),
-      () => respondWithText()
+      () => respondWithText(),
+      { logLabel: "wallet video send" }
     );
   };
 
