@@ -37,9 +37,12 @@ const parseRetryAfterSeconds = (error: any): number => {
   const description = getErrorDescription(error);
   const match = description.match(/retry after (\d+)/i);
   if (match) {
-    const parsed = Number.parseInt(match[1], 10);
-    if (!Number.isNaN(parsed)) {
-      return Math.max(0, parsed);
+    const [, retryAfterDigits] = match;
+    if (retryAfterDigits) {
+      const parsed = Number.parseInt(retryAfterDigits, 10);
+      if (!Number.isNaN(parsed)) {
+        return Math.max(0, parsed);
+      }
     }
   }
 
