@@ -152,6 +152,61 @@ describe("Bot helper utilities", () => {
     expect(displayAmount).toBe(botModule.wallet.formatSolBalance(expectedRaw));
   });
 
+  test("calculateBuySpend handles token percentage and max paths", () => {
+    const tokenBalance = { balance: 1_500_000_000, decimals: 6 };
+    const solBalance = 10 * LAMPORTS_PER_SOL;
+
+    const percentResult = botModule.__test_calculateBuySpend({
+      amount: "50%",
+      paymentToken: "TIMBA",
+      inputDecimals: 6,
+      solBalance,
+      tokenBalance,
+      formatSol: (lamports: number) => botModule.wallet.formatSolBalance(lamports),
+      formatToken: (value: number, decimals: number) =>
+        botModule.wallet.formatTokenBalance(value, decimals),
+    });
+
+    expect(percentResult.rawAmount).toBe(750_000_000);
+    expect(percentResult.displayAmount).toBe(
+      botModule.wallet.formatTokenBalance(750_000_000, 6)
+    );
+
+    const maxResult = botModule.__test_calculateBuySpend({
+      amount: "max",
+      paymentToken: "TIMBA",
+      inputDecimals: 6,
+      solBalance,
+      tokenBalance,
+      formatSol: (lamports: number) => botModule.wallet.formatSolBalance(lamports),
+      formatToken: (value: number, decimals: number) =>
+        botModule.wallet.formatTokenBalance(value, decimals),
+    });
+
+    expect(maxResult.rawAmount).toBe(1_500_000_000);
+    expect(maxResult.displayAmount).toBe(
+      botModule.wallet.formatTokenBalance(1_500_000_000, 6)
+    );
+  });
+
+  test("calculateBuySpend throws when requested amount exceeds balance", () => {
+    const tokenBalance = { balance: 1_000_000, decimals: 6 };
+    const solBalance = 2 * LAMPORTS_PER_SOL;
+
+    expect(() =>
+      botModule.__test_calculateBuySpend({
+        amount: "2",
+        paymentToken: "TIMBA",
+        inputDecimals: 6,
+        solBalance,
+        tokenBalance,
+        formatSol: (lamports: number) => botModule.wallet.formatSolBalance(lamports),
+        formatToken: (value: number, decimals: number) =>
+          botModule.wallet.formatTokenBalance(value, decimals),
+      })
+    ).toThrow("Insufficient token balance for this purchase");
+  });
+
   test("formatBuyQuoteSummary renders pump.fun output with token decimals", () => {
     const rawAmount = 21_713_000; // 0.021713 SOL
     const quote = {
@@ -182,5 +237,34 @@ describe("Bot helper utilities", () => {
     expect(summary.message).toContain("455090.146672 TIMBA");
     expect(summary.message).toContain("Rate:");
     expect(summary.message).toContain(quote.outputMint);
+  });
+
+  test("formatBuyQuoteSummary labels Jupiter routes and defaults slippage", () => {
+    const rawAmount = 500_000_000; // 0.5 SOL
+    const quote = {
+      inputMint: "So11111111111111111111111111111111111111112",
+      outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      inputAmount: rawAmount.toString(),
+      outputAmount: "45",
+      estimatedRate: 90,
+      slippage: undefined as any,
+      provider: "jupiter" as const,
+    };
+
+    const summary = botModule.__test_formatBuyQuoteSummary({
+      paymentToken: "SOL",
+      targetToken: "USDC",
+      displayAmount: botModule.wallet.formatSolBalance(rawAmount),
+      rawAmount,
+      inputDecimals: 9,
+      outputDecimals: 6,
+      quote,
+      outputMint: quote.outputMint,
+    });
+
+    expect(summary.providerLabel).toBe("jupiter (graduated)");
+    expect(summary.slippageText).toBe("1.0%");
+    expect(summary.rateDisplay).toBe("0.00009");
+    expect(summary.message).toContain("jupiter (graduated)");
   });
 });
