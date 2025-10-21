@@ -4,14 +4,14 @@ import { buildWalletCaption } from "../src/utils/wallet-ui";
 test("buildWalletCaption formats address and token lines", () => {
   const caption = buildWalletCaption("AbCdEf", [
     { ticker: "SOL", amount: "1.234567", usdValue: "123.46", unit: "SOL" },
-    { ticker: "TIMBA", amount: "123", usdValue: "6150.00" },
+    { ticker: "TIMBA", amount: "123", usdValue: "6,150.00" },
     { ticker: "USDC", amount: "10.00", usdValue: "10.00" },
   ]);
 
   expect(caption).toContain("Solana Address · <a href=\"https://solscan.io/account/AbCdEf\">🅴</a>");
   expect(caption).toContain("<code>AbCdEf</code> (Tap to copy)");
   expect(caption).toContain("SOL: 1.234567 SOL ($123.46)");
-  expect(caption).toContain("TIMBA: 123 ($6150.00)");
+  expect(caption).toContain("TIMBA: 123 ($6,150.00)");
   expect(caption).toContain("USDC: 10.00 ($10.00)");
 });
 

@@ -3,6 +3,13 @@ export type FormatOptions = {
   trim?: boolean;
 };
 
+export type FormatUsdValueOptions = {
+  approximate?: boolean;
+  minimumFractionDigits?: number;
+  maximumFractionDigits?: number;
+  fallback?: string;
+};
+
 const HTML_ESCAPE_LOOKUP: Record<string, string> = {
   "&": "&amp;",
   "<": "&lt;",
@@ -111,6 +118,32 @@ export function formatAmount(
   const intOut = integerPart === "" ? "0" : integerPart;
   const signed = sign + intOut + (fractionalOut ? "." + fractionalOut : "");
   return signed;
+}
+
+export function formatUsdValue(
+  value: number,
+  options: FormatUsdValueOptions = {}
+): string {
+  const {
+    approximate = false,
+    minimumFractionDigits = 2,
+    maximumFractionDigits = 2,
+    fallback,
+  } = options;
+
+  const resolvedFallback =
+    fallback ?? (approximate ? "≈ $0.00" : "0.00");
+
+  if (!Number.isFinite(value)) {
+    return resolvedFallback;
+  }
+
+  const formatted = value.toLocaleString("en-US", {
+    minimumFractionDigits,
+    maximumFractionDigits,
+  });
+
+  return approximate ? `≈ $${formatted}` : formatted;
 }
 
 export function formatRate(value: number): string {
