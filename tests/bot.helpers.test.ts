@@ -397,7 +397,7 @@ describe("createGameViaCommand helper", () => {
   ): CreateGameViaCommandDeps => {
     const base: CreateGameViaCommandDeps = {
       parseAmount: async () => ({ success: true, data: baseParsedAmount }),
-      inferMaxPlayers: () => ({ ok: true, value: 3 }),
+      inferMaxPlayers: () => ({ ok: true, value: 3, source: "default" }),
       wallet: {
         getTokenBalance: async () => 2_000_000,
         getTokenMetadata: async () => ({ decimals: 6 }),
