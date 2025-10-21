@@ -19,7 +19,6 @@ import {
   createCloseAccountInstruction,
   getAccount,
   TOKEN_PROGRAM_ID,
-  TOKEN_2022_PROGRAM_ID,
   TokenAccountNotFoundError,
   TokenInvalidAccountOwnerError,
   unpackMint,
@@ -36,6 +35,7 @@ import {
 } from "./constants";
 import { formatAmount } from "./format-amount";
 import { fetchJupiterTokenMetadata } from "./jupiter";
+import { detectTokenProgram } from "./token-programs";
 
 // Lightweight dependency handles for testability
 type HttpFetch = (input: string, init?: any) => Promise<{
@@ -215,10 +215,7 @@ export class WalletManager {
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
     const mintPubkey = new PublicKey(tokenMint);
-    const isToken2022Mint = await this.isToken2022(tokenMint);
-    const programId = isToken2022Mint
-      ? TOKEN_2022_PROGRAM_ID
-      : TOKEN_PROGRAM_ID;
+    const { programId } = await detectTokenProgram(this.connection, mintPubkey);
     const ata = await getAssociatedTokenAddress(
       mintPubkey,
       pubkey,
@@ -666,13 +663,11 @@ export class WalletManager {
           throw new Error("Token mint account not found or has no data");
         }
 
-        const owner = (accountInfo as any).owner;
-        const isToken2022 = Boolean(
-          owner && typeof owner.equals === "function" && owner.equals(TOKEN_2022_PROGRAM_ID)
+        const { programId } = await detectTokenProgram(
+          this.connection,
+          mintPublicKey,
+          accountInfo as any
         );
-        const programId = isToken2022
-          ? TOKEN_2022_PROGRAM_ID
-          : TOKEN_PROGRAM_ID;
 
         const mint = unpackMint(mintPublicKey, accountInfo, programId);
         decimals = mint.decimals;
@@ -752,26 +747,6 @@ export class WalletManager {
     return { address: associatedTokenAddress, instructions };
   }
 
-  /**
-   * Check if a token uses Token-2022 program
-   */
-  private async isToken2022(mintAddress: string): Promise<boolean> {
-    try {
-      const mintPubkey = new PublicKey(mintAddress);
-      const mintInfo = await this.connection.getAccountInfo(mintPubkey);
-      
-      if (!mintInfo) {
-        return false;
-      }
-
-      // Check if the owner is Token-2022 program
-      return mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID);
-    } catch (error) {
-      console.log(`Error checking token program for ${mintAddress}:`, error);
-      return false;
-    }
-  }
-
   public async transferToken(
     fromTelegramId: bigint,
     toAddress: PublicKey,
@@ -783,9 +758,13 @@ export class WalletManager {
     const { decimals } = await this.getTokenMetadata(tokenMint);
 
     // Detect if this is a Token-2022 token
-    const isToken2022 = await this.isToken2022(tokenMint);
-    const programId = isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
-    console.log(`🔍 Token ${tokenMint} is ${isToken2022 ? 'Token-2022' : 'SPL Token'}, using program ${programId.toBase58()}`);
+    const { isToken2022, programId } = await detectTokenProgram(
+      this.connection,
+      tokenMintPubkey
+    );
+    console.log(
+      `🔍 Token ${tokenMint} is ${isToken2022 ? "Token-2022" : "SPL Token"}, using program ${programId.toBase58()}`
+    );
 
     const [
       { address: fromTokenAccount, instructions: fromInstructions },

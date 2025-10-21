@@ -9,8 +9,6 @@ import {
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
-  TOKEN_PROGRAM_ID,
-  TOKEN_2022_PROGRAM_ID,
 } from "@solana/spl-token";
 import { JupiterClient } from "./jupiter";
 import { PumpFunClient, validatePumpFunSwap } from "./pump-fun";
@@ -21,6 +19,7 @@ import {
   JIT_SWAP_FEE_BUFFER_LAMPORTS,
   MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
 } from "./constants";
+import { detectTokenProgram } from "./token-programs";
 
 // ================================
 // UNIFIED SWAP MANAGER
@@ -911,26 +910,6 @@ export class SwapManager {
   }
 
   /**
-   * Detect if a token uses Token-2022 program
-   */
-  private async isToken2022(mintAddress: string): Promise<boolean> {
-    try {
-      const mintPubkey = new PublicKey(mintAddress);
-      const mintInfo = await this.connection.getAccountInfo(mintPubkey);
-
-      if (!mintInfo) {
-        return false;
-      }
-
-      // Check if the owner is Token-2022 program
-      return mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID);
-    } catch (error) {
-      console.log(`Error checking token program for ${mintAddress}:`, error);
-      return false;
-    }
-  }
-
-  /**
    * Create token accounts if they don't exist
    */
   private async createTokenAccountsIfNeeded(
@@ -945,14 +924,15 @@ export class SwapManager {
       inputMint !== "So11111111111111111111111111111111111111112" &&
       inputMint !== "SOL"
     ) {
-      const isInput2022 = await this.isToken2022(inputMint);
       const mintPubkey = new PublicKey(inputMint);
+      const { isToken2022: isInput2022, programId: inputProgramId } =
+        await detectTokenProgram(this.connection, mintPubkey);
 
       const inputTokenAccount = await getAssociatedTokenAddress(
         mintPubkey,
         userKeypair.publicKey,
         false,
-        isInput2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
+        inputProgramId
       );
 
       const inputAccountInfo = await this.connection.getAccountInfo(
@@ -972,7 +952,7 @@ export class SwapManager {
             inputTokenAccount, // ata
             userKeypair.publicKey, // owner
             mintPubkey, // mint
-            isInput2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
+            inputProgramId
           )
         );
       }
@@ -983,14 +963,15 @@ export class SwapManager {
       outputMint !== "So11111111111111111111111111111111111111112" &&
       outputMint !== "SOL"
     ) {
-      const isOutput2022 = await this.isToken2022(outputMint);
       const mintPubkey = new PublicKey(outputMint);
+      const { isToken2022: isOutput2022, programId: outputProgramId } =
+        await detectTokenProgram(this.connection, mintPubkey);
 
       const outputTokenAccount = await getAssociatedTokenAddress(
         mintPubkey,
         userKeypair.publicKey,
         false,
-        isOutput2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
+        outputProgramId
       );
 
       const outputAccountInfo = await this.connection.getAccountInfo(
@@ -1010,7 +991,7 @@ export class SwapManager {
             outputTokenAccount, // ata
             userKeypair.publicKey, // owner
             mintPubkey, // mint
-            isOutput2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
+            outputProgramId
           )
         );
       }
