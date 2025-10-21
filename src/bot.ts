@@ -249,7 +249,9 @@ const calculateBuySpend = ({
   let rawAmount: number;
   let displayAmount: string;
 
-  if (amount.toLowerCase() === "max") {
+  const normalizedAmount = amount.toLowerCase();
+
+  if (paymentToken === "SOL" && normalizedAmount === "max") {
     const spendableLamports = clampLamportsForFees(solBalance);
     if (spendableLamports <= 0) {
       throw new Error("Not enough SOL to cover purchase and fees");
@@ -257,6 +259,17 @@ const calculateBuySpend = ({
 
     rawAmount = spendableLamports;
     displayAmount = formatSol(spendableLamports);
+  } else if (normalizedAmount === "max") {
+    if (!tokenBalance) {
+      throw new Error(`No ${paymentToken} balance found`);
+    }
+
+    rawAmount = Math.floor(tokenBalance.balance);
+    if (rawAmount <= 0) {
+      throw new Error(`No ${paymentToken} balance found`);
+    }
+
+    displayAmount = formatToken(rawAmount, tokenBalance.decimals);
   } else if (amount.includes("%")) {
     const percentage = parseFloat(amount.replace("%", ""));
     if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
