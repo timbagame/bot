@@ -21,6 +21,15 @@ export const createWalletKeyboard = (): InlineKeyboard => {
     .row();
 };
 
+export const createWalletSettingsKeyboard = (): InlineKeyboard => {
+  return new InlineKeyboard()
+    .text("🔧 Wrap SOL", "cmd_wrap")
+    .text("🔐 Private Key", "cmd_privatekey")
+    .row()
+    .text("← Back to Wallet", "main_wallet")
+    .row();
+};
+
 
 export const createConfirmWrapKeyboard = (
   amount: number | string

@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { onMainWallet, onWalletRefresh, onWalletSettings } from "../src/handlers/wallet";
+import { createWalletSettingsKeyboard } from "../src/utils/keyboards";
 
 function makeCtx() {
   const calls: any[] = [];
@@ -20,7 +21,7 @@ describe("wallet handlers", () => {
     const deps = {
       showWalletUI: async () => { shown++; },
       clearWalletCache: (_: any) => {},
-      createSettingsKeyboard: () => ({ rows: [] } as any),
+      createSettingsKeyboard: () => createWalletSettingsKeyboard(),
     };
     await onMainWallet(ctx, deps);
     const calls = ctx.__calls;
@@ -35,7 +36,7 @@ describe("wallet handlers", () => {
     const deps = {
       showWalletUI: async () => { shown++; },
       clearWalletCache: (id: any) => { cleared = id; },
-      createSettingsKeyboard: () => ({ rows: [] } as any),
+      createSettingsKeyboard: () => createWalletSettingsKeyboard(),
     };
     await onWalletRefresh(ctx, deps);
     expect(cleared).toBe(1n);
@@ -48,7 +49,7 @@ describe("wallet handlers", () => {
     const deps = {
       showWalletUI: async () => {},
       clearWalletCache: (_: any) => {},
-      createSettingsKeyboard: () => ({ rows: [] } as any),
+      createSettingsKeyboard: () => createWalletSettingsKeyboard(),
     };
     await onWalletSettings(ctx, deps);
     const calls = ctx.__calls;
@@ -65,7 +66,7 @@ describe("wallet handlers", () => {
         throw new Error("boom");
       },
       clearWalletCache: (_: any) => {},
-      createSettingsKeyboard: () => ({ rows: [] } as any),
+      createSettingsKeyboard: () => createWalletSettingsKeyboard(),
     };
     await onMainWallet(ctx, deps);
     const answer = ctx.__calls.find((c: any[]) => c[0] === "answer");
@@ -79,7 +80,7 @@ describe("wallet handlers", () => {
         throw new Error("refresh-fail");
       },
       clearWalletCache: (_: any) => {},
-      createSettingsKeyboard: () => ({ rows: [] } as any),
+      createSettingsKeyboard: () => createWalletSettingsKeyboard(),
     };
     await onWalletRefresh(ctx, deps);
     const answer = ctx.__calls.find((c: any[]) => c[0] === "answer");

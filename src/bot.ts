@@ -31,6 +31,7 @@ import { setUserState, getUserState, storePendingTransaction, getPendingTransact
 // import { createDmMessageAdapter } from "./utils/ctx-adapter";
 import {
   createWalletKeyboard,
+  createWalletSettingsKeyboard,
   createConfirmWrapKeyboard,
   createTradeConfirmKeyboard,
   createAmountSelectionKeyboard,
@@ -4801,12 +4802,7 @@ bot.callbackQuery("main_wallet", async (ctx) => {
   const deps = {
     showWalletUI: (c: any) => showWalletUI(c),
     clearWalletCache: (id: bigint | string | number) => clearWalletCache(BigInt(id as any)),
-    createSettingsKeyboard: () => new InlineKeyboard()
-      .text("🔧 Wrap SOL", "cmd_wrap")
-      .text("🔐 Private Key", "cmd_privatekey")
-      .row()
-      .text("← Back to Wallet", "main_wallet")
-      .row(),
+    createSettingsKeyboard: () => createWalletSettingsKeyboard(),
   };
   await onMainWallet(ctx as any, deps);
 });
@@ -4815,12 +4811,7 @@ bot.callbackQuery("wallet_refresh", async (ctx) => {
   const deps = {
     showWalletUI: (c: any) => showWalletUI(c),
     clearWalletCache: (id: bigint | string | number) => clearWalletCache(BigInt(id as any)),
-    createSettingsKeyboard: () => new InlineKeyboard()
-      .text("🔧 Wrap SOL", "cmd_wrap")
-      .text("🔐 Private Key", "cmd_privatekey")
-      .row()
-      .text("← Back to Wallet", "main_wallet")
-      .row(),
+    createSettingsKeyboard: () => createWalletSettingsKeyboard(),
   };
   await onWalletRefresh(ctx as any, deps);
 });
@@ -4829,12 +4820,7 @@ bot.callbackQuery("wallet_settings", async (ctx) => {
   const deps = {
     showWalletUI: (c: any) => showWalletUI(c),
     clearWalletCache: (id: bigint | string | number) => clearWalletCache(BigInt(id as any)),
-    createSettingsKeyboard: () => new InlineKeyboard()
-      .text("🔧 Wrap SOL", "cmd_wrap")
-      .text("🔐 Private Key", "cmd_privatekey")
-      .row()
-      .text("← Back to Wallet", "main_wallet")
-      .row(),
+    createSettingsKeyboard: () => createWalletSettingsKeyboard(),
   };
   await onWalletSettings(ctx as any, deps);
 });
