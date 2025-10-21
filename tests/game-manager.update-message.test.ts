@@ -85,6 +85,8 @@ describe("GameManager.updateGameMessage routing", () => {
     );
     const calls = (ctx as any).__calls;
     expect(calls[0][0]).toBe("caption");
+    const active = gm.getActiveGameMessage(addr);
+    expect(active?.usesVideo).toBe(true);
   });
 
   test("coinflip completed -> edits media with winner video", async () => {
@@ -114,6 +116,8 @@ describe("GameManager.updateGameMessage routing", () => {
     );
     const calls = (ctx as any).__calls;
     expect(calls[0][0]).toBe("media");
+    const active = gm.getActiveGameMessage(addr);
+    expect(active?.usesVideo).toBe(true);
   });
 
   test("non-coinflip -> edits text", async () => {
@@ -170,6 +174,8 @@ describe("GameManager.updateGameMessage routing", () => {
     );
     const calls = (ctx as any).__calls;
     expect(calls[0][0]).toBe("text");
+    const active = gm.getActiveGameMessage(addr);
+    expect(active?.usesVideo).toBe(false);
   });
 
   test("coinflip completed falls back to text when media update fails", async () => {
