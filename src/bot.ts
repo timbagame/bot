@@ -1460,6 +1460,185 @@ const checkGameTokenStatus = async () => {
 // BOT COMMANDS
 // ================================
 
+export type CreateGameViaCommandOptions = {
+  gameType: "coinflip" | "giveaway";
+  usageMessage: string;
+  defaultMaxPlayers: number;
+  minPlayers: number;
+  maxPlayers: number;
+  timeoutSeconds: number;
+  gameLabel: string;
+  inferErrorLabel: string;
+  logPrefix: string;
+  errorMessage: string;
+};
+
+type CreateGameViaCommandDeps = {
+  parseAmount: (
+    args: string[],
+    amountArgIndex: number,
+    chatId?: number
+  ) => Promise<import("./types").ParseAmountResult>;
+  inferMaxPlayers: typeof inferMaxPlayers;
+  wallet: {
+    getTokenBalance: (
+      telegramId: bigint,
+      mint: string,
+      options?: { createIfMissing?: boolean }
+    ) => Promise<number>;
+    getTokenMetadata: (
+      mint: string
+    ) => Promise<{ decimals: number }>;
+    formatTokenBalance: (amount: number, decimals: number) => string;
+  };
+  getContractMinimumAmount: typeof getContractMinimumAmount;
+  gameManager: {
+    createGame: (
+      ...args: Parameters<GameManager["createGame"]>
+    ) => ReturnType<GameManager["createGame"]>;
+    createGameMessage: (
+      ...args: Parameters<GameManager["createGameMessage"]>
+    ) => ReturnType<GameManager["createGameMessage"]>;
+  };
+};
+
+const defaultCreateGameViaCommandDeps = (): CreateGameViaCommandDeps => ({
+  parseAmount: (args, index, chatId) =>
+    tokenManager.parseAmount(args, index, chatId),
+  inferMaxPlayers,
+  wallet: {
+    getTokenBalance: (telegramId, mint, options) =>
+      wallet.getTokenBalance(telegramId, mint, options),
+    getTokenMetadata: (mint) => wallet.getTokenMetadata(mint),
+    formatTokenBalance: (amount, decimals) =>
+      wallet.formatTokenBalance(amount, decimals),
+  },
+  getContractMinimumAmount,
+  gameManager: {
+    createGame: (...args) => gameManager.createGame(...args),
+    createGameMessage: (...args) => gameManager.createGameMessage(...args),
+  },
+});
+
+const createGameViaCommand = async (
+  ctx: Context & { message?: any },
+  args: string[],
+  telegramId: bigint,
+  options: CreateGameViaCommandOptions,
+  deps: CreateGameViaCommandDeps = defaultCreateGameViaCommandDeps()
+): Promise<void> => {
+  console.log(`${options.logPrefix} Command-based ${options.gameType} creation:`, args);
+
+  try {
+    const parsed = await deps.parseAmount(args, 1, ctx.chat?.id);
+    if (!parsed.success) {
+      await ctx.reply(
+        formatParseAmountError(parsed, options.usageMessage)
+      );
+      return;
+    }
+
+    const parsedAmount = parsed.data;
+    const inferred = deps.inferMaxPlayers(
+      args,
+      1,
+      parsedAmount.tokenWasSpecified,
+      options.defaultMaxPlayers,
+      options.minPlayers,
+      options.maxPlayers
+    );
+
+    if (!inferred.ok) {
+      await ctx.reply(`❌ ${options.inferErrorLabel} ${inferred.error}`);
+      return;
+    }
+
+    const maxPlayers = inferred.value;
+    const tokenMetadata = await deps.wallet.getTokenMetadata(
+      parsedAmount.tokenMint
+    );
+    const { raw: minAmountRaw } = await deps.getContractMinimumAmount(
+      parsedAmount.tokenMint,
+      tokenMetadata.decimals
+    );
+
+    if (parsedAmount.amount < minAmountRaw) {
+      const formattedMinimum = deps.wallet.formatTokenBalance(
+        minAmountRaw,
+        tokenMetadata.decimals
+      );
+      await ctx.reply(
+        `❌ Amount below contract minimum of ${formattedMinimum} ${parsedAmount.tokenTicker}.`
+      );
+      return;
+    }
+
+    const userBalance = await deps.wallet.getTokenBalance(
+      telegramId,
+      parsedAmount.tokenMint,
+      { createIfMissing: true }
+    );
+
+    if (userBalance < parsedAmount.amount) {
+      const formatted = deps.wallet.formatTokenBalance(
+        userBalance,
+        tokenMetadata.decimals
+      );
+      await ctx.reply(
+        `❌ Insufficient balance. You have ${formatted} ${parsedAmount.tokenTicker}, need ${parsedAmount.formattedAmount}.`
+      );
+      return;
+    }
+
+    const gameResult = await deps.gameManager.createGame(
+      options.gameType,
+      {
+        amount: parsedAmount.amount,
+        tokenMint: parsedAmount.tokenMint,
+        tokenTicker: parsedAmount.tokenTicker,
+        isSol: parsedAmount.isSol,
+        requestedNativeSol: parsedAmount.requestedNativeSol,
+      },
+      maxPlayers,
+      options.minPlayers,
+      options.timeoutSeconds,
+      telegramId,
+      ctx.chat?.id || 0
+    );
+
+    if (!gameResult.success) {
+      await ctx.reply(`❌ Failed to create game: ${gameResult.error}`);
+      return;
+    }
+
+    if (gameResult.autoJoinResult && !gameResult.autoJoinResult.success) {
+      await ctx.reply(
+        gameResult.autoJoinResult.error || "Failed to auto-join game",
+        { parse_mode: "HTML" }
+      );
+    }
+
+    const creatorUsername = ctx.from?.username
+      ? `@${ctx.from.username}`
+      : ctx.from?.first_name || "Unknown";
+
+    await deps.gameManager.createGameMessage(
+      ctx,
+      gameResult.gameAddress!,
+      options.gameLabel,
+      parsedAmount.amount,
+      creatorUsername,
+      parsedAmount.tokenTicker,
+      "Active"
+    );
+  } catch (error) {
+    console.error(`Error in command-based ${options.gameType}:`, error);
+    await ctx.reply(options.errorMessage);
+  }
+};
+
+export const __test_createGameViaCommand = createGameViaCommand;
+
 /**
  * Build token balances for display, including game balances
  */
@@ -1552,119 +1731,25 @@ bot.command(["coinflip", "cf"], async (ctx) => {
 
     // If arguments provided, use command-based creation (original functionality)
     if (args && args.length >= 2) {
-      console.log("🎮 Command-based coinflip creation:", args);
-
-      // No creating placeholder message; proceed directly
-
-      try {
-        // Parse arguments: /cf <amount> [TOKEN] [maxPlayers]
-        const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id);
-        if (!parsed.success) {
-          return ctx.reply(
-            formatParseAmountError(
-              parsed,
-              "❌ Please provide a valid amount greater than 0.\n\nUsage: `/cf <amount>` or `/cf <amount> <maxPlayers>`"
-            )
-          );
+      await createGameViaCommand(
+        ctx as Context & { message?: any },
+        args,
+        telegramId,
+        {
+          gameType: "coinflip",
+          usageMessage:
+            "❌ Please provide a valid amount greater than 0.\n\nUsage: `/cf <amount>` or `/cf <amount> <maxPlayers>`",
+          defaultMaxPlayers: 2,
+          minPlayers: 2,
+          maxPlayers: 100,
+          timeoutSeconds: 60 * 60,
+          gameLabel: "Coinflip",
+          inferErrorLabel: "Coinflip",
+          logPrefix: "🎮",
+          errorMessage: "❌ Error creating coinflip game. Please try again.",
         }
-        const parsedAmount = parsed.data;
-
-        // Get maxPlayers from arguments using robust index-based parsing
-        const inferredCf = inferMaxPlayers(
-          args,
-          1 /* amountArgIndex */,
-          parsedAmount.tokenWasSpecified,
-          2 /* default */, 2 /* min */, 100 /* max */
-        );
-        if (!inferredCf.ok) {
-          return ctx.reply(`❌ Coinflip ${inferredCf.error}`);
-        }
-        const maxPlayers = inferredCf.value;
-
-        const tokenMetadata = await wallet.getTokenMetadata(
-          parsedAmount.tokenMint
-        );
-        const { raw: minAmountRaw } = await getContractMinimumAmount(
-          parsedAmount.tokenMint,
-          tokenMetadata.decimals
-        );
-
-        if (parsedAmount.amount < minAmountRaw) {
-          const formattedMinimum = wallet.formatTokenBalance(
-            minAmountRaw,
-            tokenMetadata.decimals
-          );
-          return ctx.reply(
-            `❌ Amount below contract minimum of ${formattedMinimum} ${parsedAmount.tokenTicker}.`
-          );
-        }
-
-        // Check user has enough balance
-        const userBalance = await wallet.getTokenBalance(
-          telegramId,
-          parsedAmount.tokenMint,
-          { createIfMissing: true }
-        );
-        const requiredAmount = parsedAmount.amount;
-
-        if (userBalance < requiredAmount) {
-          const formatted = wallet.formatTokenBalance(
-            userBalance,
-            tokenMetadata.decimals
-          );
-          return ctx.reply(
-            `❌ Insufficient balance. You have ${formatted} ${parsedAmount.tokenTicker}, need ${parsedAmount.formattedAmount}.`
-          );
-        }
-
-        // Create game directly using GameManager
-        const gameResult = await gameManager.createGame(
-          "coinflip",
-          {
-            amount: parsedAmount.amount,
-            tokenMint: parsedAmount.tokenMint,
-            tokenTicker: parsedAmount.tokenTicker,
-            isSol: parsedAmount.isSol,
-          },
-          maxPlayers, // maxTickets
-          2, // minTickets (coinflip always needs 2)
-          60 * 60, // timeout (1 hour)
-          telegramId,
-          ctx.chat?.id || 0
-        );
-
-        if (!gameResult.success) {
-          return ctx.reply(`❌ Failed to create game: ${gameResult.error}`);
-        }
-
-        // Handle auto-join result if present
-        if (gameResult.autoJoinResult && !gameResult.autoJoinResult.success) {
-          await ctx.reply(gameResult.autoJoinResult.error || "Failed to auto-join game", {
-            parse_mode: "HTML",
-          });
-        }
-
-        // Use the same method as UI creation to ensure consistency
-        const creatorUsername = ctx.from?.username
-          ? `@${ctx.from.username}`
-          : ctx.from?.first_name || "Unknown";
-        await gameManager.createGameMessage(
-          ctx,
-          gameResult.gameAddress!,
-          "Coinflip",
-          parsedAmount.amount,
-          creatorUsername,
-          parsedAmount.tokenTicker,
-          "Active"
-        );
-
-        // No temporary message to delete
-
-        return;
-      } catch (error) {
-        console.error("Error in command-based coinflip:", error);
-        return ctx.reply("❌ Error creating coinflip game. Please try again.");
-      }
+      );
+      return;
     }
 
     // No arguments - show UI (new functionality)
@@ -1776,114 +1861,25 @@ bot.command(["giveaway", "ga"], async (ctx) => {
 
     // If arguments provided, use command-based creation (original functionality)
     if (args && args.length >= 2) {
-      console.log("🎁 Command-based giveaway creation:", args);
-
-      // No creating placeholder message; proceed directly
-
-      try {
-        // Parse arguments: /ga <amount> [TOKEN] [maxPlayers]
-        const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id);
-        if (!parsed.success) {
-          return ctx.reply(
-            formatParseAmountError(
-              parsed,
-              "❌ Please provide a valid amount greater than 0.\n\nUsage: `/ga <amount>` or `/ga <amount> <maxPlayers>`"
-            )
-          );
+      await createGameViaCommand(
+        ctx as Context & { message?: any },
+        args,
+        telegramId,
+        {
+          gameType: "giveaway",
+          usageMessage:
+            "❌ Please provide a valid amount greater than 0.\n\nUsage: `/ga <amount>` or `/ga <amount> <maxPlayers>`",
+          defaultMaxPlayers: 10,
+          minPlayers: 1,
+          maxPlayers: 100,
+          timeoutSeconds: 60 * 60,
+          gameLabel: "Giveaway",
+          inferErrorLabel: "Giveaway",
+          logPrefix: "🎁",
+          errorMessage: "❌ Error creating giveaway game. Please try again.",
         }
-        const parsedAmount = parsed.data;
-
-        // Get maxPlayers from arguments using robust index-based parsing
-        const inferredGa = inferMaxPlayers(
-          args,
-          1 /* amountArgIndex */,
-          parsedAmount.tokenWasSpecified,
-          10 /* default */, 2 /* min */, 100 /* max */
-        );
-        if (!inferredGa.ok) {
-          return ctx.reply(`❌ Giveaway ${inferredGa.error}`);
-        }
-        const maxPlayers = inferredGa.value;
-
-        const tokenMetadata = await wallet.getTokenMetadata(
-          parsedAmount.tokenMint
-        );
-        const { raw: minAmountRaw } = await getContractMinimumAmount(
-          parsedAmount.tokenMint,
-          tokenMetadata.decimals
-        );
-
-        if (parsedAmount.amount < minAmountRaw) {
-          const formattedMinimum = wallet.formatTokenBalance(
-            minAmountRaw,
-            tokenMetadata.decimals
-          );
-          return ctx.reply(
-            `❌ Amount below contract minimum of ${formattedMinimum} ${parsedAmount.tokenTicker}.`
-          );
-        }
-
-        // Check user has enough balance
-        const userBalance = await wallet.getTokenBalance(
-          telegramId,
-          parsedAmount.tokenMint,
-          { createIfMissing: true }
-        );
-        const requiredAmount = parsedAmount.amount; // This is already in raw format from parseAmount
-
-        if (userBalance < requiredAmount) {
-          const formatted = wallet.formatTokenBalance(
-            userBalance,
-            tokenMetadata.decimals
-          );
-          return ctx.reply(
-            `❌ Insufficient balance. You have ${formatted} ${parsedAmount.tokenTicker}, need ${parsedAmount.formattedAmount}.`
-          );
-        }
-
-        // Create game directly using GameManager
-        const gameResult = await gameManager.createGame(
-          "giveaway",
-          parsedAmount,
-          maxPlayers,
-          1, // minPlayers for giveaway
-          3600, // 1 hour timeout
-          telegramId,
-          ctx.chat?.id || 0
-        );
-
-        if (!gameResult.success) {
-          return ctx.reply(`❌ Failed to create game: ${gameResult.error}`);
-        }
-
-        // Handle auto-join result if present
-        if (gameResult.autoJoinResult && !gameResult.autoJoinResult.success) {
-          await ctx.reply(gameResult.autoJoinResult.error || "Failed to auto-join game", {
-            parse_mode: "HTML",
-          });
-        }
-
-        // Use the same method as UI creation to ensure consistency
-        const creatorUsername = ctx.from?.username
-          ? `@${ctx.from.username}`
-          : ctx.from?.first_name || "Unknown";
-        await gameManager.createGameMessage(
-          ctx,
-          gameResult.gameAddress!,
-          "Giveaway",
-          parsed.data!.amount,
-          creatorUsername,
-          parsed.data!.tokenTicker,
-          "Active"
-        );
-
-        // No temporary message to delete
-
-        return;
-      } catch (error) {
-        console.error("Error in command-based giveaway:", error);
-        return ctx.reply("❌ Error creating giveaway game. Please try again.");
-      }
+      );
+      return;
     }
 
     // No arguments - show UI (new functionality)

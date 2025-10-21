@@ -2,7 +2,15 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { LAMPORTS_PER_SOL, MIN_SOL_FOR_TX } from "../src/utils/constants";
 import { parseDecimalAmount } from "../src/utils/amount";
 
-let botModule: typeof import("../src/bot");
+type BotModule = typeof import("../src/bot");
+type CreateGameViaCommandOptions = Parameters<
+  BotModule["__test_createGameViaCommand"]
+>[3];
+type CreateGameViaCommandDeps = NonNullable<
+  Parameters<BotModule["__test_createGameViaCommand"]>[4]
+>;
+
+let botModule: BotModule;
 const originalEnv = {
   NODE_ENV: process.env.NODE_ENV,
   TELEGRAM_TOKEN: process.env.TELEGRAM_TOKEN,
@@ -353,5 +361,170 @@ describe("Bot helper utilities", () => {
       rateDisplay: "0.00055",
       slippageText: "2.0%",
     });
+  });
+});
+
+describe("createGameViaCommand helper", () => {
+  const coinflipOptions: CreateGameViaCommandOptions = {
+    gameType: "coinflip",
+    usageMessage:
+      "❌ Please provide a valid amount greater than 0.\n\nUsage: `/cf <amount>` or `/cf <amount> <maxPlayers>`",
+    defaultMaxPlayers: 2,
+    minPlayers: 2,
+    maxPlayers: 100,
+    timeoutSeconds: 60 * 60,
+    gameLabel: "Coinflip",
+    inferErrorLabel: "Coinflip",
+    logPrefix: "🎮",
+    errorMessage: "❌ Error creating coinflip game. Please try again.",
+  };
+
+  const baseParsedAmount = {
+    amount: 1_000_000,
+    tokenMint: "mint",
+    tokenTicker: "TOK",
+    isSol: false,
+    formattedAmount: "1 TOK",
+    tokenWasSpecified: true,
+    requestedNativeSol: false,
+  };
+
+  const makeDeps = (
+    overrides: Partial<CreateGameViaCommandDeps> & {
+      wallet?: Partial<CreateGameViaCommandDeps["wallet"]>;
+      gameManager?: Partial<CreateGameViaCommandDeps["gameManager"]>;
+    } = {}
+  ): CreateGameViaCommandDeps => {
+    const base: CreateGameViaCommandDeps = {
+      parseAmount: async () => ({ success: true, data: baseParsedAmount }),
+      inferMaxPlayers: () => ({ ok: true, value: 3, source: "default" }),
+      wallet: {
+        getTokenBalance: async () => 2_000_000,
+        getTokenMetadata: async () => ({ decimals: 6 }),
+        formatTokenBalance: (amount, decimals) =>
+          (amount / Math.pow(10, decimals)).toString(),
+      },
+      getContractMinimumAmount: async () => ({
+        raw: 500_000,
+        formatted: 0.5,
+        decimals: 6,
+      }),
+      gameManager: {
+        createGame: async () => ({
+          success: true,
+          gameAddress: "ADDR",
+          autoJoinResult: { success: true },
+        }),
+        createGameMessage: async () => 0,
+      },
+    };
+
+    return {
+      ...base,
+      ...overrides,
+      wallet: { ...base.wallet, ...overrides.wallet },
+      gameManager: { ...base.gameManager, ...overrides.gameManager },
+    };
+  };
+
+  const makeCtx = () => {
+    const calls: any[] = [];
+    return {
+      chat: { id: 42, type: "group" },
+      from: { id: 1, username: "alice", first_name: "Alice" },
+      reply: async (text: string) => {
+        calls.push(text);
+        return { ok: true };
+      },
+      __calls: calls,
+    };
+  };
+
+  test("returns usage guidance when amount parsing fails", async () => {
+    const ctx: any = makeCtx();
+    const deps = makeDeps({
+      parseAmount: async () => ({ success: false, error: "invalid_amount" }),
+    });
+
+    await botModule.__test_createGameViaCommand(
+      ctx,
+      ["/cf", "oops"],
+      1n,
+      coinflipOptions,
+      deps
+    );
+
+    expect(ctx.__calls.length).toBe(1);
+    expect(String(ctx.__calls[0])).toContain("Usage");
+  });
+
+  test("surfaces player count validation failures", async () => {
+    const ctx: any = makeCtx();
+    const deps = makeDeps({
+      inferMaxPlayers: () => ({ ok: false, error: "players must be between 2-100" }),
+    });
+
+    await botModule.__test_createGameViaCommand(
+      ctx,
+      ["/cf", "5"],
+      1n,
+      coinflipOptions,
+      deps
+    );
+
+    expect(ctx.__calls.length).toBe(1);
+    expect(String(ctx.__calls[0])).toContain("Coinflip players must be between 2-100");
+  });
+
+  test("creates a game and message when inputs are valid", async () => {
+    const ctx: any = makeCtx();
+    const createCalls: any[] = [];
+    const messageCalls: any[] = [];
+
+    const deps = makeDeps({
+      gameManager: {
+        createGame: async (...args) => {
+          createCalls.push(args);
+          return { success: true, gameAddress: "ADDR", autoJoinResult: { success: true } };
+        },
+        createGameMessage: async (...args) => {
+          messageCalls.push(args);
+          return 99;
+        },
+      },
+    });
+
+    await botModule.__test_createGameViaCommand(
+      ctx,
+      ["/cf", "5"],
+      1n,
+      coinflipOptions,
+      deps
+    );
+
+    expect(ctx.__calls.length).toBe(0);
+    expect(createCalls.length).toBe(1);
+
+    const [gameType, gameData, maxPlayers, minPlayers, timeout, telegramId, chatId] =
+      createCalls[0];
+    expect(gameType).toBe("coinflip");
+    expect(gameData).toEqual({
+      amount: baseParsedAmount.amount,
+      tokenMint: baseParsedAmount.tokenMint,
+      tokenTicker: baseParsedAmount.tokenTicker,
+      isSol: baseParsedAmount.isSol,
+      requestedNativeSol: baseParsedAmount.requestedNativeSol,
+    });
+    expect(maxPlayers).toBe(3);
+    expect(minPlayers).toBe(coinflipOptions.minPlayers);
+    expect(timeout).toBe(coinflipOptions.timeoutSeconds);
+    expect(telegramId).toBe(1n);
+    expect(chatId).toBe(ctx.chat.id);
+
+    expect(messageCalls.length).toBe(1);
+    const messageArgs = messageCalls[0];
+    expect(messageArgs[2]).toBe(coinflipOptions.gameLabel);
+    expect(messageArgs[3]).toBe(baseParsedAmount.amount);
+    expect(messageArgs[5]).toBe(baseParsedAmount.tokenTicker);
   });
 });
