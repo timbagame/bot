@@ -5886,6 +5886,14 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
 
     await respondWithMenu(ctx, { text: message, keyboard });
 
+    const userId = ctx.from.id.toString();
+    setUserState(userId, {
+      type: "buy_menu_idle",
+      paymentToken: "SOL",
+      chatId: ctx.chat?.id,
+      messageId: ctx.callbackQuery?.message?.message_id,
+    });
+
     await ctx.answerCallbackQuery("Select a token to buy");
   } catch (error) {
     console.error("Error in cmd_buy:", error);
@@ -6323,104 +6331,6 @@ bot.on("callback_query", async (ctx, next) => {
   } catch (error) {
     console.error("Error in dynamic token selection:", error);
     await ctx.answerCallbackQuery("❌ Error processing token selection");
-  }
-});
-
-// Handle contract address input for buy
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("buy_contract_")) {
-    return await next();
-  }
-
-  const paymentToken = callbackData.replace("buy_contract_", "");
-  console.log(
-    `🔔 Contract address input requested for payment: ${paymentToken}`
-  );
-
-  try {
-    const userId = ctx.from?.id?.toString();
-    if (!userId) return;
-
-    const response = [
-      `📋 <b>CONTRACT ADDRESS</b>`,
-      "",
-      `<b>Paying with:</b> ${paymentToken}`,
-      "",
-      `Please send a message with the contract address (CA) of the token you want to buy.`,
-      "",
-      `<b>Examples:</b>`,
-      ...CONTRACT_EXAMPLE_LINES,
-      "",
-      `<b>Format:</b> 44 characters (Solana address)`,
-      "",
-      `⏱️ <i>This will timeout in 5 minutes</i>`,
-    ];
-
-    await respondWithMenu(ctx, {
-      text: response.join("\n"),
-      keyboard: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
-    });
-
-    setUserState(userId, {
-      type: "buy_contract_address",
-      fromToken: paymentToken,
-      messageId: ctx.callbackQuery?.message?.message_id,
-      chatId: ctx.chat?.id,
-    });
-
-    await ctx.answerCallbackQuery("Send contract address as message");
-  } catch (error) {
-    console.error("Error in buy_contract:", error);
-    await ctx.answerCallbackQuery("❌ Error processing contract input");
-  }
-});
-
-// Handle symbol search input for buy
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("buy_search_")) {
-    return await next();
-  }
-
-  const paymentToken = callbackData.replace("buy_search_", "");
-  console.log(`🔔 Symbol search requested for payment: ${paymentToken}`);
-
-  try {
-    const userId = ctx.from?.id?.toString();
-    if (!userId) return;
-
-    const response = [
-      `🔍 <b>SEARCH BY SYMBOL</b>`,
-      "",
-      `<b>Paying with:</b> ${paymentToken}`,
-      "",
-      `Please send a message with the token symbol you want to buy.`,
-      "",
-      `<b>Examples:</b>`,
-      `• <code>BONK</code>`,
-      `• <code>PEPE</code>`,
-      `• <code>WIF</code>`,
-      "",
-      `⏱️ <i>This will timeout in 5 minutes</i>`,
-    ];
-
-    await respondWithMenu(ctx, {
-      text: response.join("\n"),
-      keyboard: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
-    });
-
-    setUserState(userId, {
-      type: "buy_token_symbol",
-      fromToken: paymentToken,
-      messageId: ctx.callbackQuery?.message?.message_id,
-      chatId: ctx.chat?.id,
-    });
-
-    await ctx.answerCallbackQuery("Send token symbol as message");
-  } catch (error) {
-    console.error("Error in buy_search:", error);
-    await ctx.answerCallbackQuery("❌ Error processing symbol search");
   }
 });
 
@@ -7787,6 +7697,52 @@ bot.on("message:text", async (ctx, next) => {
       await handleBuyContractAddressInput(ctx, userState, userMessage);
     } else if (userState.type === "buy_token_symbol") {
       await handleBuyTokenSymbolInput(ctx, userState, userMessage);
+    } else if (userState.type === "buy_menu_idle") {
+      const trimmed = userMessage.trim();
+      const userIdStr = ctx.from.id.toString();
+      const isContractLike = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trimmed);
+
+      if (isContractLike) {
+        const contractState = {
+          type: "buy_contract_address",
+          fromToken: userState.paymentToken ?? "SOL",
+          messageId: userState.messageId,
+          chatId: userState.chatId,
+        };
+        setUserState(userIdStr, contractState);
+        await handleBuyContractAddressInput(ctx, contractState, trimmed);
+        getUserState(userIdStr, true);
+      } else if (/^[a-z0-9]{1,10}$/i.test(trimmed)) {
+        const symbolState = {
+          type: "buy_token_symbol",
+          messageId: userState.messageId,
+          chatId: userState.chatId,
+        };
+        setUserState(userIdStr, symbolState);
+        await handleBuyTokenSymbolInput(ctx, symbolState, trimmed);
+        getUserState(userIdStr, true);
+      } else {
+        setUserState(userIdStr, {
+          type: "buy_menu_idle",
+          paymentToken: userState.paymentToken ?? "SOL",
+          chatId: userState.chatId,
+          messageId: userState.messageId,
+        });
+
+        await ctx.reply(
+          [
+            "❔ <b>Unrecognized Input</b>",
+            "",
+            "Send a token ticker (e.g. <code>TIMBA</code>) or paste the contract address.",
+            "",
+            `<b>Contract format:</b>\n${CONTRACT_EXAMPLE_LINES.join("\n")}`,
+          ].join("\n"),
+          { parse_mode: "HTML" }
+        );
+        return;
+      }
+
+      return;
     } else if (userState.type === "buy_custom_amount") {
       await handleBuyCustomAmountInput(ctx, userState, userMessage);
     } else if (userState.type === "sell_custom_amount") {
@@ -8393,10 +8349,7 @@ const handleBuyTokenSymbolInput = async (
     try {
       await ctx.editMessageText(errorMessage.join("\n"), {
         parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("🔗 Use Contract Address", "buy_contract_SOL")
-          .text("❌ Cancel", "cmd_buy")
-          .row(),
+        reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
       });
     } catch (error) {
       // If edit fails because message has media or doesn't exist, delete and send new
@@ -8406,10 +8359,7 @@ const handleBuyTokenSymbolInput = async (
 
       const newMsg = await ctx.reply(errorMessage.join("\n"), {
         parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("🔗 Use Contract Address", "buy_contract_SOL")
-          .text("❌ Cancel", "cmd_buy")
-          .row(),
+        reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
       });
 
       // Update the message ID in user state

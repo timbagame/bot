@@ -54,11 +54,11 @@ describe("trade ui helpers", () => {
       "buy_dynamic_SOL_1",
       "buy_dynamic_SOL_2",
     ]);
-    expect(callbacks).toContain("buy_contract_SOL");
-    expect(callbacks).toContain("buy_search_SOL");
     expect(callbacks).toContain("main_wallet");
     expect(callbacks).not.toContain("buy_with_SOL");
     expect(callbacks).not.toContain("buy_with_other_tokens");
+    expect(callbacks).not.toContain("buy_contract_SOL");
+    expect(callbacks).not.toContain("buy_search_SOL");
   });
 
   test("buy menu prompts for address when no tokens listed", () => {
@@ -72,8 +72,8 @@ describe("trade ui helpers", () => {
     expect(message).toContain("Paste a token contract address to get started");
     const callbacks = extractCallbacks(keyboard);
     expect(callbacks).toContain("main_wallet");
-    expect(callbacks).toContain("buy_contract_SOL");
-    expect(callbacks).toContain("buy_search_SOL");
+    expect(callbacks).not.toContain("buy_contract_SOL");
+    expect(callbacks).not.toContain("buy_search_SOL");
     expect(callbacks).not.toContain("buy_with_SOL");
   });
 

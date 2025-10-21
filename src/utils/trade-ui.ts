@@ -52,10 +52,6 @@ export const buildBuyMenuUI = (params: BuyMenuParams) => {
     keyboard.text(button.label, button.callbackData).row();
   }
 
-  keyboard.text("📋 Paste Address", "buy_contract_SOL");
-  keyboard.text("🔎 Search Token", "buy_search_SOL");
-  keyboard.row();
-
   keyboard.text("↩️ Wallet", "main_wallet").row();
 
   return { message, keyboard };
