@@ -32,8 +32,7 @@ import { setUserState, getUserState, storePendingTransaction, getPendingTransact
 import {
   createWalletKeyboard,
   createConfirmWrapKeyboard,
-  createConfirmBuyKeyboard,
-  createConfirmSellKeyboard,
+  createTradeConfirmKeyboard,
   createAmountSelectionKeyboard,
   createPlayerSelectionKeyboard,
   createGameConfirmKeyboard,
@@ -332,6 +331,61 @@ const resolveSpendAmount = ({
   }
 
   return { rawAmount, displayAmount };
+};
+
+type QuickAmountButton = {
+  label: string;
+  value: string;
+};
+
+type QuickAmountOptions = {
+  baseCallback: (value: string) => string;
+  percentages?: string[];
+  includeCustom?: boolean;
+  customLabel?: string;
+  extraRows?: QuickAmountButton[][];
+};
+
+const appendQuickAmountRows = (
+  keyboard: InlineKeyboard,
+  {
+    baseCallback,
+    percentages = ["25%", "50%", "75%", "MAX"],
+    includeCustom = true,
+    customLabel = "✏️ Custom",
+    extraRows = [],
+  }: QuickAmountOptions
+) => {
+  const addRow = (buttons: QuickAmountButton[]) => {
+    if (buttons.length === 0) return;
+    for (const button of buttons) {
+      keyboard.text(button.label, baseCallback(button.value));
+    }
+    keyboard.row();
+  };
+
+  for (const row of extraRows) {
+    addRow(row);
+  }
+
+  if (percentages.length > 0) {
+    for (let i = 0; i < percentages.length; i += 2) {
+      const left = percentages[i];
+      if (!left) continue;
+      const rowButtons: QuickAmountButton[] = [{ label: left, value: left }];
+      const right = percentages[i + 1];
+      if (right) {
+        rowButtons.push({ label: right, value: right });
+      }
+      addRow(rowButtons);
+    }
+  }
+
+  if (includeCustom) {
+    keyboard.text(customLabel, baseCallback("CUSTOM")).row();
+  }
+
+  return keyboard;
 };
 
 type TradeKind = "buy" | "sell";
@@ -5493,112 +5547,87 @@ bot.on("callback_query", async (ctx, next) => {
   try {
     const segments = callbackData.replace("send_amount_", "").split("_");
     const token = segments.shift() ?? "";
-    const selectionKey = segments.join("_");
-    if (!token || !selectionKey) {
+    const amountChoice = segments.join("_");
+    if (!token || !amountChoice) {
       throw new Error("Invalid amount selection");
     }
 
     const userId = ctx.from?.id?.toString();
     if (!userId) return;
 
-    let resolvedAmount = selectionKey;
-    let amountDisplayLabel = selectionKey;
-    let logLabel = selectionKey;
+    if (amountChoice === "CUSTOM") {
+      const response = [
+        `✏️ <b>CUSTOM AMOUNT - ${token}</b>`,
+        "",
+        `Please send a message with the amount you want to send.`,
+        "",
+        `<b>Examples:</b>`,
+        token === "SOL" ? `• <code>0.5</code>` : `• <code>1000</code>`,
+        token === "SOL" ? `• <code>1.25</code>` : `• <code>250.5</code>`,
+        "",
+        `⏱️ <i>This will timeout in 5 minutes</i>`,
+      ];
 
-    const formatForStorage = (raw: number, decimals: number) =>
-      formatAmount(raw, decimals, { maxFractionDigits: decimals, trim: true });
-    const formatForDisplay = (raw: number, decimals: number) => {
-      if (raw <= 0) {
-        return "0";
-      }
-      const preferredDigits = Math.min(decimals, 6);
-      const short = formatAmount(raw, decimals, {
-        maxFractionDigits: preferredDigits,
-        trim: true,
+      await respondWithMenu(ctx, {
+        text: response.join("\n"),
+        keyboard: new InlineKeyboard()
+          .text("❌ Cancel", `send_select_${token}`)
+          .row(),
       });
-      if (short !== "0") {
-        return short;
-      }
-      return formatAmount(raw, decimals, {
-        maxFractionDigits: Math.min(decimals, 9),
-        trim: true,
+
+      setUserState(userId, {
+        type: "send_custom_amount",
+        token,
+        messageId: ctx.callbackQuery?.message?.message_id,
+        chatId: ctx.chat?.id,
       });
-    };
 
-    if (selectionKey === "max" || selectionKey === "pctMAX") {
-      resolvedAmount = "max";
-      amountDisplayLabel = `MAX (~all ${token})`;
-      logLabel = "MAX";
-    } else if (selectionKey.startsWith("pct")) {
-      const percentageRaw = Number(selectionKey.replace("pct", ""));
-      if (!Number.isFinite(percentageRaw) || percentageRaw <= 0) {
-        throw new Error("Invalid percentage selection");
-      }
-
-      const percentage = Math.min(Math.max(Math.trunc(percentageRaw), 1), 100);
-      const telegramId = BigInt(ctx.from?.id || 0);
-      const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-
-      if (token === "SOL") {
-        const totalLamports = solBalance;
-        if (totalLamports <= 0) {
-          throw new Error("No SOL balance available");
-        }
-
-        if (percentage === 100) {
-          resolvedAmount = "max";
-          const approx = formatForDisplay(totalLamports, 9);
-          amountDisplayLabel = `MAX (~${approx} SOL)`;
-          logLabel = "MAX";
-        } else {
-          const lamports = Math.floor((totalLamports * percentage) / 100);
-          if (lamports <= 0) {
-            throw new Error("Selected percentage results in zero SOL");
-          }
-          resolvedAmount = formatForStorage(lamports, 9);
-          const approx = formatForDisplay(lamports, 9);
-          amountDisplayLabel = `${percentage}% (~${approx} SOL)`;
-          logLabel = `${percentage}%`;
-        }
-      } else {
-        const selectedToken = tokenBalances.find((t) => t.ticker === token);
-        if (!selectedToken) {
-          throw new Error(`Token ${token} not found in wallet`);
-        }
-
-        const totalRaw = Math.floor(selectedToken.balance);
-        if (totalRaw <= 0) {
-          throw new Error(`No ${token} balance available`);
-        }
-
-        if (percentage === 100) {
-          resolvedAmount = "max";
-          const approx = formatForDisplay(totalRaw, selectedToken.decimals);
-          amountDisplayLabel = `MAX (~${approx} ${token})`;
-          logLabel = "MAX";
-        } else {
-          const rawAmount = Math.floor((selectedToken.balance * percentage) / 100);
-          if (rawAmount <= 0) {
-            throw new Error("Selected percentage results in zero amount");
-          }
-          resolvedAmount = formatForStorage(rawAmount, selectedToken.decimals);
-          const approx = formatForDisplay(rawAmount, selectedToken.decimals);
-          amountDisplayLabel = `${percentage}% (~${approx} ${token})`;
-          logLabel = `${percentage}%`;
-        }
-      }
-    } else {
-      resolvedAmount = selectionKey;
-      amountDisplayLabel = `${selectionKey} ${token}`;
-      logLabel = selectionKey;
+      await ctx.answerCallbackQuery("Send the amount as a message");
+      return;
     }
 
-    console.log(
-      `🔔 Amount selected: ${logLabel} ${token} (resolved: ${resolvedAmount})`
-    );
+    const telegramId = BigInt(ctx.from?.id || 0);
+    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
+
+    const isSol = token === "SOL";
+    const selectedToken = !isSol
+      ? tokenBalances.find((t) => t.ticker === token)
+      : undefined;
+
+    if (!isSol && !selectedToken) {
+      throw new Error(`Token ${token} not found in wallet`);
+    }
+
+    const spend = resolveSpendAmount({
+      amount: amountChoice,
+      assetTicker: token,
+      inputDecimals: isSol ? 9 : selectedToken!.decimals,
+      solBalance,
+      tokenBalance: selectedToken
+        ? { balance: selectedToken.balance, decimals: selectedToken.decimals }
+        : undefined,
+      formatSol: (lamports) => wallet.formatSolBalance(lamports),
+      formatToken: (value, decimals) => wallet.formatTokenBalance(value, decimals),
+      applySolFeeBuffer: true,
+    });
+
+    const displayLabel = (() => {
+      const lower = amountChoice.toLowerCase();
+      if (lower === "max") {
+        return `MAX (~${spend.displayAmount} ${token})`;
+      }
+      if (amountChoice.endsWith("%")) {
+        return `${amountChoice} (~${spend.displayAmount} ${token})`;
+      }
+      return `${spend.displayAmount} ${token}`;
+    })();
+
+    const storedAmount = amountChoice.toLowerCase() === "max"
+      ? "max"
+      : spend.displayAmount;
 
     const response = [
-      `📤 <b>SEND ${escapeHtml(amountDisplayLabel)}</b>`,
+      `📤 <b>SEND ${escapeHtml(displayLabel)}</b>`,
       "",
       `<b>Step 2:</b> Enter destination address`,
       "",
@@ -5610,59 +5639,6 @@ bot.on("callback_query", async (ctx, next) => {
       `⏱️ <i>This will timeout in 5 minutes</i>`,
     ];
 
-    const keyboard = new InlineKeyboard()
-      .text("❌ Cancel", `send_select_${token}`)
-      .row();
-
-    await respondWithMenu(ctx, {
-      text: response.join("\n"),
-      keyboard,
-    });
-
-    // Set user state to expect wallet address
-    setUserState(userId, {
-      type: "send_address",
-      token: token,
-      amount: resolvedAmount,
-      amountDisplay: amountDisplayLabel,
-      messageId: ctx.callbackQuery?.message?.message_id,
-      chatId: ctx.chat?.id,
-    });
-
-    await ctx.answerCallbackQuery(`Selected ${amountDisplayLabel}`);
-  } catch (error) {
-    console.error("Error in send amount selection:", error);
-    await ctx.answerCallbackQuery("❌ Error processing amount");
-  }
-});
-
-// Handle custom amount input for send
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("send_custom_")) {
-    return await next();
-  }
-
-  try {
-    const token = callbackData.replace("send_custom_", "");
-    const userId = ctx.from?.id?.toString();
-    if (!userId) return;
-
-    console.log(`🔔 Custom amount requested for ${token}`);
-
-    const response = [
-      `✏️ <b>CUSTOM AMOUNT - ${token}</b>`,
-      "",
-      `Please send a message with the amount you want to send.`,
-      "",
-      `<b>Examples:</b>`,
-      token === "SOL" ? `• <code>0.5</code>` : `• <code>1000</code>`,
-      token === "SOL" ? `• <code>1.25</code>` : `• <code>250.5</code>`,
-      "",
-      `⏱️ <i>This will timeout in 5 minutes</i>`,
-    ];
-
-    // Update the message to show input prompt
     await respondWithMenu(ctx, {
       text: response.join("\n"),
       keyboard: new InlineKeyboard()
@@ -5670,18 +5646,19 @@ bot.on("callback_query", async (ctx, next) => {
         .row(),
     });
 
-    // Set user state to expect custom amount
     setUserState(userId, {
-      type: "send_custom_amount",
-      token: token,
+      type: "send_address",
+      token,
+      amount: storedAmount,
+      amountDisplay: displayLabel,
       messageId: ctx.callbackQuery?.message?.message_id,
       chatId: ctx.chat?.id,
     });
 
-    await ctx.answerCallbackQuery("Send the amount as a message");
+    await ctx.answerCallbackQuery(`Selected ${displayLabel}`);
   } catch (error) {
-    console.error("Error in send_custom:", error);
-    await ctx.answerCallbackQuery("❌ Error processing custom amount");
+    console.error("Error in send amount selection:", error);
+    await ctx.answerCallbackQuery("❌ Error processing amount");
   }
 });
 
@@ -6796,6 +6773,13 @@ bot.on("callback_query", async (ctx, next) => {
     }
 
     // Show updated confirmation with new amount
+    const confirmKeyboard = createTradeConfirmKeyboard({
+      confirmLabel: "✅ Confirm Buy",
+      confirmCallback: `confirm_buy_${txId}`,
+      cancelLabel: "← Back to Buy",
+      cancelCallback: "cmd_buy",
+    });
+
     await respondWithMenu(ctx, {
       text: [
         "💡 <b>Using Exact Amount Needed</b>",
@@ -6806,7 +6790,7 @@ bot.on("callback_query", async (ctx, next) => {
         "",
         "This matches the current price. Ready to proceed?",
       ].join("\n"),
-      keyboard: createConfirmBuyKeyboard(txId),
+      keyboard: confirmKeyboard,
     });
 
     await ctx.answerCallbackQuery("💡 Amount increased slightly");
@@ -7170,38 +7154,46 @@ const showSwapAmountSelection = async (
   const keyboard = new InlineKeyboard();
 
   if (balanceDecimal > 0) {
-    // Quick amounts based on balance
     const maxBalance = balanceDecimal;
+    const extraRows: QuickAmountButton[][] = [];
+
     if (maxBalance >= 100) {
-      keyboard
-        .text("10", `swap_amount_${fromToken}_${toToken}_10`)
-        .text("50", `swap_amount_${fromToken}_${toToken}_50`)
-        .row()
-        .text("100", `swap_amount_${fromToken}_${toToken}_100`)
-        .text("25%", `swap_amount_${fromToken}_${toToken}_25%`)
-        .row();
+      extraRows.push(
+        [
+          { label: "10", value: "10" },
+          { label: "50", value: "50" },
+        ],
+        [
+          { label: "100", value: "100" },
+        ]
+      );
     } else if (maxBalance >= 10) {
-      keyboard
-        .text("1", `swap_amount_${fromToken}_${toToken}_1`)
-        .text("5", `swap_amount_${fromToken}_${toToken}_5`)
-        .row()
-        .text("10", `swap_amount_${fromToken}_${toToken}_10`)
-        .text("50%", `swap_amount_${fromToken}_${toToken}_50%`)
-        .row();
+      extraRows.push(
+        [
+          { label: "1", value: "1" },
+          { label: "5", value: "5" },
+        ],
+        [
+          { label: "10", value: "10" },
+        ]
+      );
     } else {
-      keyboard
-        .text("0.1", `swap_amount_${fromToken}_${toToken}_0.1`)
-        .text("0.5", `swap_amount_${fromToken}_${toToken}_0.5`)
-        .row()
-        .text("1", `swap_amount_${fromToken}_${toToken}_1`)
-        .text("75%", `swap_amount_${fromToken}_${toToken}_75%`)
-        .row();
+      extraRows.push(
+        [
+          { label: "0.1", value: "0.1" },
+          { label: "0.5", value: "0.5" },
+        ],
+        [
+          { label: "1", value: "1" },
+        ]
+      );
     }
 
-    keyboard
-      .text("MAX", `swap_amount_${fromToken}_${toToken}_MAX`)
-      .text("✏️ Custom", `swap_amount_${fromToken}_${toToken}_CUSTOM`)
-      .row();
+    appendQuickAmountRows(keyboard, {
+      baseCallback: (value) => `swap_amount_${fromToken}_${toToken}_${value}`,
+      percentages: ["25%", "50%", "75%", "MAX"],
+      extraRows,
+    });
   } else {
     keyboard.text("❌ Insufficient balance").row();
   }
@@ -7307,14 +7299,17 @@ const showSwapQuoteAndConfirmation = async (
       quote: quote, // Store the quote for execution
     });
 
+    const confirmKeyboard = createTradeConfirmKeyboard({
+      confirmLabel: "✅ Confirm Swap",
+      confirmCallback: `confirm_swap_${txId}`,
+      cancelLabel: "❌ Cancel",
+      cancelCallback: `swap_to_${fromToken}_${toToken}`,
+    });
+
     await respondWithMenu(ctx, {
       text: summary.message,
       parseMode: "HTML",
-      keyboard: new InlineKeyboard()
-        .text("✅ Confirm Swap", `confirm_swap_${txId}`)
-        .row()
-        .text("❌ Cancel", `swap_to_${fromToken}_${toToken}`)
-        .row(),
+      keyboard: confirmKeyboard,
     });
   } catch (error) {
     console.error("Error getting swap quote:", error);
@@ -7380,15 +7375,9 @@ const buildBuyAmountSelectionUI = async (
   const callbackToken = tokenTxId ?? targetToken;
 
   if (balanceDecimal > 0.01) {
-    keyboard
-      .text("25%", `buy_amount_${paymentToken}_${callbackToken}_25%`)
-      .text("50%", `buy_amount_${paymentToken}_${callbackToken}_50%`)
-      .row()
-      .text("75%", `buy_amount_${paymentToken}_${callbackToken}_75%`)
-      .text("MAX", `buy_amount_${paymentToken}_${callbackToken}_MAX`)
-      .row()
-      .text("✏️ Custom", `buy_amount_${paymentToken}_${callbackToken}_CUSTOM`)
-      .row();
+    appendQuickAmountRows(keyboard, {
+      baseCallback: (value) => `buy_amount_${paymentToken}_${callbackToken}_${value}`,
+    });
   } else {
     keyboard.text("❌ Insufficient balance").row();
   }
@@ -7597,22 +7586,27 @@ const showBuyQuoteAndConfirmation = async (
       quote: quote,
     });
 
+    const confirmKeyboard = createTradeConfirmKeyboard({
+      confirmLabel: "✅ Confirm Buy",
+      confirmCallback: `confirm_buy_${txId}`,
+      cancelLabel: "← Back to Buy",
+      cancelCallback: "cmd_buy",
+    })
+      .row()
+      .text("⚙️ Slippage", `buy_slippage_${txId}`)
+      .row()
+      .text("0.5%", `buy_slip_${txId}_0.5`)
+      .text("1%", `buy_slip_${txId}_1.0`)
+      .text("2%", `buy_slip_${txId}_2.0`)
+      .row()
+      .text("3%", `buy_slip_${txId}_3.0`)
+      .text("5%", `buy_slip_${txId}_5.0`)
+      .text("✏️", `buy_slip_${txId}_custom`)
+      .row();
+
     await respondWithMenu(ctx, {
       text: summary.message,
-      keyboard: createConfirmBuyKeyboard(txId)
-        .row()
-        .text("⚙️ Slippage", `buy_slippage_${txId}`)
-        .row()
-        .text("0.5%", `buy_slip_${txId}_0.5`)
-        .text("1%", `buy_slip_${txId}_1.0`)
-        .text("2%", `buy_slip_${txId}_2.0`)
-        .row()
-        .text("3%", `buy_slip_${txId}_3.0`)
-        .text("5%", `buy_slip_${txId}_5.0`)
-        .text("✏️", `buy_slip_${txId}_custom`)
-        .row()
-        .text("❌ Cancel", "cmd_buy")
-        .row(),
+      keyboard: confirmKeyboard,
     });
   } catch (error) {
     console.error("Error getting buy quote:", error);
@@ -8626,18 +8620,9 @@ const showSellAmountSelection = async (ctx: any, tokenToSell: string) => {
     `<i>Use a quick percentage or enter a custom amount.</i>`,
   ];
 
-  const keyboard = new InlineKeyboard();
-
-  // Add percentage options for selling
-  keyboard
-    .text("25%", `sell_amount_${tokenToSell}_25%`)
-    .text("50%", `sell_amount_${tokenToSell}_50%`)
-    .row()
-    .text("75%", `sell_amount_${tokenToSell}_75%`)
-    .text("MAX", `sell_amount_${tokenToSell}_MAX`)
-    .row()
-    .text("✏️ Custom", `sell_amount_${tokenToSell}_CUSTOM`)
-    .row();
+  const keyboard = appendQuickAmountRows(new InlineKeyboard(), {
+    baseCallback: (value) => `sell_amount_${tokenToSell}_${value}`,
+  });
 
   keyboard.text("← Back", "cmd_sell").row();
 
@@ -8788,9 +8773,16 @@ const showSellQuoteAndConfirmation = async (
       contractAddress: tokenInfo.token_mint,
     });
 
+    const confirmKeyboard = createTradeConfirmKeyboard({
+      confirmLabel: "✅ Confirm Sell",
+      confirmCallback: `confirm_sell_${txId}`,
+      cancelLabel: "❌ Cancel",
+      cancelCallback: "cmd_sell",
+    });
+
     await respondWithMenu(ctx, {
       text: summary.message,
-      keyboard: createConfirmSellKeyboard(txId),
+      keyboard: confirmKeyboard,
     });
   } catch (error: any) {
     console.error("Error getting sell quote:", error);
@@ -8914,7 +8906,6 @@ const regenerateBuyQuoteWithSlippage = async (
     }
 
     const quote = buyData.quote;
-    const slippage = newSlippage || quote.slippage || 1.0;
 
     // Update slippage in quote if provided
     if (newSlippage) {
@@ -8922,30 +8913,24 @@ const regenerateBuyQuoteWithSlippage = async (
       transactionCache.set(txId, buyData);
     }
 
-    const providerLabel =
-      quote.provider === "pump-fun"
-        ? "pump-fun (ungraduated)"
-        : `${quote.provider} (graduated)`;
-    const estimatedRate = quote.estimatedRate
-      ? quote.estimatedRate.toFixed(6)
-      : "N/A";
+    const summary = formatTradeConfirmationSummary({
+      kind: "buy",
+      payToken: buyData.fromToken,
+      payDisplay: buyData.amount,
+      payRawAmount: Number(buyData.rawAmount ?? 0),
+      payDecimals: buyData.inputDecimals ?? (buyData.fromToken === "SOL" ? 9 : 0),
+      receiveToken: buyData.toToken,
+      receiveDecimals: buyData.outputDecimals ?? 6,
+      quote,
+      contractAddress: buyData.contractAddress,
+    });
 
-    const response = [
-      `🛒 <b>Buy Confirmation</b>`,
-      "",
-      `<b>You Pay:</b> ${buyData.amount} ${buyData.fromToken}`,
-      `<b>You Receive:</b> ~${quote.outputAmount} ${buyData.toToken}`,
-      "",
-      `<b>Rate:</b> ${estimatedRate} ${buyData.toToken}/${buyData.fromToken}`,
-      `<b>Provider:</b> ${providerLabel}`,
-      `<b>Slippage:</b> ${slippage.toFixed(1)}%`,
-      "",
-      `🔗 <b>Contract:</b> <code>${buyData.contractAddress || "N/A"}</code>`,
-      "",
-      `⚠️ <b>Confirm this purchase?</b>`,
-    ].join("\n");
-
-    const keyboard = createConfirmBuyKeyboard(txId)
+    const keyboard = createTradeConfirmKeyboard({
+      confirmLabel: "✅ Confirm Buy",
+      confirmCallback: `confirm_buy_${txId}`,
+      cancelLabel: "← Back to Buy",
+      cancelCallback: "cmd_buy",
+    })
       .row()
       .text("⚙️ Slippage", `buy_slippage_${txId}`)
       .row()
@@ -8956,12 +8941,10 @@ const regenerateBuyQuoteWithSlippage = async (
       .text("3%", `buy_slip_${txId}_3.0`)
       .text("5%", `buy_slip_${txId}_5.0`)
       .text("✏️", `buy_slip_${txId}_custom`)
-      .row()
-      .text("❌ Cancel", "cmd_buy")
       .row();
 
     await respondWithMenu(ctx, {
-      text: response,
+      text: summary.message,
       keyboard,
     });
   } catch (error: any) {

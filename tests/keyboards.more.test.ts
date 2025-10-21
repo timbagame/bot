@@ -3,8 +3,7 @@ import {
   createMainMenuKeyboard,
   createWalletKeyboard,
   createConfirmWrapKeyboard,
-  createConfirmBuyKeyboard,
-  createConfirmSellKeyboard,
+  createTradeConfirmKeyboard,
   createAmountSelectionKeyboard,
   createPlayerSelectionKeyboard,
   createGameConfirmKeyboard,
@@ -79,18 +78,19 @@ describe("keyboards: misc menus", () => {
     expect(callbacks).toContain("cmd_wrap");
   });
 
-  test("confirm buy keyboard embeds tx id and back to buy", () => {
-    const kb = createConfirmBuyKeyboard("abc123");
+  test("trade confirm keyboard renders custom confirm/cancel buttons", () => {
+    const kb = createTradeConfirmKeyboard({
+      confirmLabel: "✅ Confirm",
+      confirmCallback: "confirm_test",
+      cancelLabel: "❌ Back",
+      cancelCallback: "cmd_back",
+    });
     const callbacks = extractCallbacks(kb);
-    expect(callbacks).toContain("confirm_buy_abc123");
-    expect(callbacks).toContain("cmd_buy");
-  });
-
-  test("confirm sell keyboard embeds tx id and cancel", () => {
-    const kb = createConfirmSellKeyboard("tx789");
-    const callbacks = extractCallbacks(kb);
-    expect(callbacks).toContain("confirm_sell_tx789");
-    expect(callbacks).toContain("cmd_sell");
+    const texts = extractTexts(kb);
+    expect(callbacks).toContain("confirm_test");
+    expect(callbacks).toContain("cmd_back");
+    expect(texts).toContain("✅ Confirm");
+    expect(texts).toContain("❌ Back");
   });
 });
 

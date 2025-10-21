@@ -32,19 +32,21 @@ export const createConfirmWrapKeyboard = (
     .row();
 };
 
-export const createConfirmBuyKeyboard = (txId: string): InlineKeyboard => {
+export const createTradeConfirmKeyboard = ({
+  confirmLabel,
+  confirmCallback,
+  cancelLabel,
+  cancelCallback,
+}: {
+  confirmLabel: string;
+  confirmCallback: string;
+  cancelLabel: string;
+  cancelCallback: string;
+}): InlineKeyboard => {
   return new InlineKeyboard()
-    .text("✅ Confirm Buy", `confirm_buy_${txId}`)
+    .text(confirmLabel, confirmCallback)
     .row()
-    .text("← Back to Buy", "cmd_buy")
-    .row();
-};
-
-export const createConfirmSellKeyboard = (txId: string): InlineKeyboard => {
-  return new InlineKeyboard()
-    .text("✅ Confirm Sell", `confirm_sell_${txId}`)
-    .row()
-    .text("❌ Cancel", "cmd_sell")
+    .text(cancelLabel, cancelCallback)
     .row();
 };
 
