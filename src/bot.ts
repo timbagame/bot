@@ -82,6 +82,7 @@ import {
 } from "./utils/trade-ui";
 import { respondWithMenu } from "./utils/menu-response";
 import { parseDecimalAmount } from "./utils/amount";
+import { handleCoinflipCommand, type CoinflipDeps } from "./handlers/game";
 
 // ================================
 // GLOBAL INSTANCES
@@ -626,6 +627,13 @@ const prepareTradeQuote = async ({
  */
 const isPrivateChat = (ctx: Context): boolean => {
   return ctx.chat?.type === "private";
+};
+
+/**
+ * Check if the context is a group or supergroup chat
+ */
+const isGroupChat = (ctx: Context): boolean => {
+  return ctx.chat?.type === "group" || ctx.chat?.type === "supergroup";
 };
 
 /**
@@ -1710,6 +1718,60 @@ const createBalanceDeps = (): BalanceDeps => ({
   WINNER_VIDEO_ID: getStartVideoId(),
 });
 
+const createCoinflipDeps = (): CoinflipDeps => ({
+  isGroupChat,
+  parseAmount: (args, index, chatId) =>
+    tokenManager.parseAmount(args, index, chatId),
+  inferMaxPlayers,
+  wallet: {
+    getTokenBalance: (telegramId, mint, options) =>
+      wallet.getTokenBalance(telegramId, mint, options),
+    getTokenMetadata: (mint) => wallet.getTokenMetadata(mint),
+    formatTokenBalance: (amount, decimals) =>
+      wallet.formatTokenBalance(amount, decimals),
+  },
+  getContractMinimumAmount: (mint, decimalsHint) =>
+    getContractMinimumAmount(mint, decimalsHint),
+  gameManager: {
+    createGame: (
+      type,
+      parsedAmount,
+      maxTickets,
+      minTickets,
+      timeout,
+      telegramId,
+      chatId
+    ) =>
+      gameManager.createGame(
+        type,
+        parsedAmount,
+        maxTickets,
+        minTickets,
+        timeout,
+        telegramId,
+        chatId
+      ),
+    createGameMessage: (
+      ctx,
+      gameAddress,
+      gameTypeText,
+      amount,
+      creatorUsername,
+      tokenTicker,
+      status
+    ) =>
+      gameManager.createGameMessage(
+        ctx,
+        gameAddress,
+        gameTypeText,
+        amount,
+        creatorUsername,
+        tokenTicker,
+        status
+      ),
+  },
+});
+
 bot.command(["start", "balance"], async (ctx: Context) => {
   if (ctx.chat?.id) {
     initiatedChats.add(ctx.chat.id);
@@ -1720,133 +1782,7 @@ bot.command(["start", "balance"], async (ctx: Context) => {
 
 
 bot.command(["coinflip", "cf"], async (ctx) => {
-  try {
-    // Check if it's a group/supergroup chat
-    if (ctx.chat?.type !== "group" && ctx.chat?.type !== "supergroup") {
-      return ctx.reply("❌ Coinflip games can only be created in groups!");
-    }
-
-    const telegramId = BigInt(ctx.from?.id || 0);
-    const args = ctx.message?.text?.split(" ");
-
-    // If arguments provided, use command-based creation (original functionality)
-    if (args && args.length >= 2) {
-      await createGameViaCommand(
-        ctx as Context & { message?: any },
-        args,
-        telegramId,
-        {
-          gameType: "coinflip",
-          usageMessage:
-            "❌ Please provide a valid amount greater than 0.\n\nUsage: `/cf <amount>` or `/cf <amount> <maxPlayers>`",
-          defaultMaxPlayers: 2,
-          minPlayers: 2,
-          maxPlayers: 100,
-          timeoutSeconds: 60 * 60,
-          gameLabel: "Coinflip",
-          inferErrorLabel: "Coinflip",
-          logPrefix: "🎮",
-          errorMessage: "❌ Error creating coinflip game. Please try again.",
-        }
-      );
-      return;
-    }
-
-    // No arguments - show UI (new functionality)
-    console.log("🎮 UI-based coinflip creation");
-
-    // Resolve chat-specific token configuration
-    const tokenInfo = await resolveChatTokenInfo(ctx.chat?.id);
-
-    // Get user's balance for the active token
-    let balanceText = "";
-    let userBalance = 0;
-
-    try {
-      const tokenBalance = await wallet.getTokenBalance(
-        telegramId,
-        tokenInfo.tokenMint,
-        { createIfMissing: true }
-      );
-      const formattedBalance = wallet.formatTokenBalance(
-        tokenBalance,
-        tokenInfo.decimals
-      );
-      userBalance = tokenBalance / Math.pow(10, tokenInfo.decimals);
-      balanceText = `\n💰 Your balance: <b>${formattedBalance} ${tokenInfo.tokenTicker}</b>\n`;
-    } catch (error) {
-      console.error("Error getting token balance:", error);
-      balanceText = `\n⚠️ Could not load ${tokenInfo.tokenTicker} balance\n`;
-    }
-
-    // Create enhanced message with fee warnings
-    let coinflipMessage = "🪙 <b>CREATE COINFLIP</b>\n\n";
-    coinflipMessage += `Token: <b>${tokenInfo.tokenTicker}</b>\n`;
-    coinflipMessage += "Choose the amount each player will stake:\n";
-    coinflipMessage += balanceText;
-
-    // Get contract minimum for keyboard suggestions
-    const { formatted: contractMin } = await getContractMinimumAmount(
-      tokenInfo.tokenMint,
-      tokenInfo.decimals
-    );
-
-    let tokenPriceUSD = await getPriceUSD(tokenInfo.tokenMint);
-    if (!tokenPriceUSD) {
-      tokenPriceUSD = await getPriceUSD(tokenInfo.tokenTicker);
-    }
-
-    const suggestedAmounts = getSuggestedStakeAmounts(
-      contractMin,
-      userBalance
-    );
-
-    coinflipMessage += `\nSelect amount in <b>${tokenInfo.tokenTicker}</b>:`;
-
-    if (suggestedAmounts.length > 0) {
-      coinflipMessage += "\n\nSuggested stakes:\n";
-      for (const amount of suggestedAmounts) {
-        const amountDisplay = formatTokenAmount(amount, tokenInfo.decimals);
-        coinflipMessage += `• ${amountDisplay} ${tokenInfo.tokenTicker}`;
-        if (tokenPriceUSD) {
-          coinflipMessage += ` (~$${formatUsdValue(amount * tokenPriceUSD)})`;
-        }
-        coinflipMessage += "\n";
-      }
-    }
-
-    const setupMessage = await ctx.reply(coinflipMessage, {
-      parse_mode: "HTML",
-      reply_markup: createAmountSelectionKeyboard(
-        "coinflip",
-        userBalance,
-        ctx.from?.id.toString(),
-        contractMin,
-        tokenInfo.tokenTicker,
-        {
-          decimals: tokenInfo.decimals,
-          tokenPriceUSD: tokenPriceUSD ?? undefined,
-        }
-      ),
-      reply_to_message_id: ctx.message?.message_id
-    });
-
-    userSessions.set(ctx.from?.id || 0, {
-      waitingFor: "setup",
-      gameType: "coinflip",
-      userBalance,
-      messageId: setupMessage.message_id,
-      chatId: ctx.chat?.id || 0,
-      creatorId: ctx.from?.id?.toString(),
-      tokenMint: tokenInfo.tokenMint,
-      tokenTicker: tokenInfo.tokenTicker,
-      tokenDecimals: tokenInfo.decimals,
-      contractMinimum: contractMin,
-    });
-  } catch (error) {
-    console.error("Error in coinflip command:", error);
-    await ctx.reply("❌ Error setting up coinflip game. Please try again.");
-  }
+  await handleCoinflipCommand(ctx as Context & { message?: any }, createCoinflipDeps());
 });
 
 bot.command(["giveaway", "ga"], async (ctx) => {
