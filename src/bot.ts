@@ -81,6 +81,7 @@ import {
   SELL_NOOP_CALLBACK,
 } from "./utils/trade-ui";
 import { respondWithMenu } from "./utils/menu-response";
+import { parseDecimalAmount } from "./utils/amount";
 
 // ================================
 // GLOBAL INSTANCES
@@ -203,31 +204,8 @@ export const __test_clearUserState = (userId: string) => { getUserState(userId, 
 // Main menu keyboard moved to utils/keyboards.ts
 
 const SOL_FEE_BUFFER_LAMPORTS = Math.ceil(MIN_SOL_FOR_TX * LAMPORTS_PER_SOL);
-const decimalAmountPattern = /^(?:\d+\.?\d*|\.\d+)$/;
-
-const toRawAmount = (value: string, decimals: number): number => {
-  const normalized = value.trim();
-  if (!decimalAmountPattern.test(normalized)) {
-    throw new Error("Invalid amount format");
-  }
-  const [intPartRaw = "0", fracPartRaw = ""] = normalized.split(".");
-  const intPart = intPartRaw === "" ? "0" : intPartRaw;
-  const paddedFraction = (fracPartRaw + "0".repeat(decimals)).slice(
-    0,
-    decimals
-  );
-  const rawBigInt =
-    BigInt(intPart) * 10n ** BigInt(decimals) +
-    (paddedFraction.length > 0 ? BigInt(paddedFraction) : 0n);
-
-  if (rawBigInt === 0n) {
-    throw new Error("Amount must be greater than zero");
-  }
-  if (rawBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw new Error("Amount is too large");
-  }
-  return Number(rawBigInt);
-};
+const toRawAmount = (value: string, decimals: number): number =>
+  parseDecimalAmount(value, decimals, { returnType: "number" });
 
 const clampLamportsForFees = (lamports: number): number =>
   Math.max(0, lamports - SOL_FEE_BUFFER_LAMPORTS);
@@ -692,7 +670,6 @@ const validateGameTokenData = (
 };
 
 // Test helpers to exercise internal utilities
-export const __test_toRawAmount = toRawAmount;
 export const __test_clampLamportsForFees = clampLamportsForFees;
 export const __test_isPrivateChat = isPrivateChat;
 export const __test_createApiContext = createApiContext;

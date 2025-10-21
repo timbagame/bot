@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { isPotentialPumpFunToken, validatePumpFunSwap } from "../src/utils/pump-fun";
+import { parseDecimalAmount } from "../src/utils/amount";
 
 describe("pump-fun utils", () => {
 
@@ -22,6 +23,21 @@ describe("pump-fun utils", () => {
     // invalid: non-positive
     const badAmt = validatePumpFunSwap("SOL", "MINT", "0");
     expect(badAmt.valid).toBe(false);
+    const exponent = validatePumpFunSwap("SOL", "MINT", "1e-3");
+    expect(exponent.valid).toBe(false);
+    expect(exponent.error).toMatch(/invalid amount/i);
+  });
+
+  test("parseDecimalAmount returns bigint lamports for pump.fun usage", () => {
+    const lamports = parseDecimalAmount("0.000001", 9, { returnType: "bigint" });
+    expect(lamports).toBe(1000n);
+
+    const zeroAllowed = parseDecimalAmount("0", 9, {
+      returnType: "bigint",
+      allowZero: true,
+    });
+    expect(zeroAllowed).toBe(0n);
+    expect(() => parseDecimalAmount("1e-6", 9, { returnType: "bigint" })).toThrow("Invalid amount format");
   });
 
   test("validatePumpFunSwap blocks non-mainnet networks", () => {

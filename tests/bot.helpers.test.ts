@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { LAMPORTS_PER_SOL, MIN_SOL_FOR_TX } from "../src/utils/constants";
+import { parseDecimalAmount } from "../src/utils/amount";
 
 let botModule: typeof import("../src/bot");
 const originalEnv = {
@@ -97,21 +98,22 @@ describe("Bot helper utilities", () => {
     }
   };
 
-  test("toRawAmount converts valid inputs", () => {
-    const fromInteger = botModule.__test_toRawAmount("15", 2);
-    const fromDecimal = botModule.__test_toRawAmount("0.5", 9);
-    const fromLeadingDecimal = botModule.__test_toRawAmount(".75", 4);
+  test("parseDecimalAmount returns raw lamports for valid bot inputs", () => {
+    const fromInteger = parseDecimalAmount("15", 2);
+    const fromDecimal = parseDecimalAmount("0.5", 9);
+    const fromLeadingDecimal = parseDecimalAmount(".75", 4);
 
     expect(fromInteger).toBe(1500);
     expect(fromDecimal).toBe(500_000_000);
     expect(fromLeadingDecimal).toBe(7500);
   });
 
-  test("toRawAmount rejects invalid or unsafe values", () => {
-    expect(() => botModule.__test_toRawAmount("abc", 2)).toThrow("Invalid amount format");
-    expect(() => botModule.__test_toRawAmount("0", 2)).toThrow("greater than zero");
-    expect(() => botModule.__test_toRawAmount("0.000", 3)).toThrow("greater than zero");
-    expect(() => botModule.__test_toRawAmount("9007199254740993", 0)).toThrow("too large");
+  test("parseDecimalAmount rejects invalid or unsafe values", () => {
+    expect(() => parseDecimalAmount("abc", 2)).toThrow("Invalid amount format");
+    expect(() => parseDecimalAmount("0", 2)).toThrow("greater than zero");
+    expect(() => parseDecimalAmount("0.000", 3)).toThrow("greater than zero");
+    expect(() => parseDecimalAmount("9007199254740993", 0)).toThrow("too large");
+    expect(() => parseDecimalAmount("1e3", 9)).toThrow("Invalid amount format");
   });
 
   test("clampLamportsForFees subtracts buffered lamports without going negative", () => {
