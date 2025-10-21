@@ -26,6 +26,16 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
   const walletAddress = keypair.publicKey.toBase58();
   const walletVideoFileId = WINNER_VIDEO_ID ?? null;
   const getWalletKeyboard = () => createWalletKeyboard();
+  const callbackMessage = ctx?.callbackQuery?.message;
+  const botId = ctx?.me?.id;
+  const messageAuthorId = callbackMessage?.from?.id;
+  const authoredByBot = Boolean(
+    callbackMessage?.from?.is_bot ||
+      (botId != null && messageAuthorId != null && String(messageAuthorId) === String(botId))
+  );
+  const canEditBotMessage = Boolean(
+    typeof ctx?.editMessageMedia === "function" && callbackMessage && authoredByBot
+  );
 
   const sendWalletContent = async (caption: string) => {
     const respondWithText = async () => {
@@ -37,6 +47,21 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
 
     if (!walletVideoFileId) {
       await respondWithText();
+      return;
+    }
+
+    if (!canEditBotMessage) {
+      await trySendVideoWithFallback(
+        () =>
+          ctx.replyWithVideo(walletVideoFileId, {
+            caption,
+            parse_mode: "HTML",
+            reply_markup: getWalletKeyboard(),
+            reply_to_message_id: ctx.message?.message_id,
+          }),
+        () => respondWithText(),
+        { logLabel: "wallet video send" }
+      );
       return;
     }
 
