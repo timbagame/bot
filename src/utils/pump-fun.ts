@@ -9,6 +9,7 @@ import { NetworkDetector } from "./network-detector";
 import { escapeHtml, formatAmount, formatRate } from "./format-amount";
 import BN from "bn.js";
 import { resolveTokenMetadata } from "./token-metadata";
+import { parseDecimalAmount } from "./amount";
 
 // ================================
 // PUMP.FUN TYPES
@@ -47,38 +48,28 @@ export class PumpFunClient {
     this.onlineSdk = new OnlinePumpSdk(connection);
   }
 
-  private toRawAmount(amount: string, decimals: number): bigint {
-    const normalized = amount.trim();
-    if (normalized.length === 0) {
+  private parseAmountLamports(
+    amount: string,
+    decimals: number,
+    { allowZero = false }: { allowZero?: boolean } = {}
+  ): bigint {
+    const trimmed = amount.trim();
+    if (trimmed.length === 0) {
       return 0n;
     }
 
-    const scale = BigInt(10) ** BigInt(Math.max(decimals, 0));
-
-    if (normalized.includes("e") || normalized.includes("E")) {
-      const numeric = Number(normalized);
-      if (!Number.isFinite(numeric)) {
-        throw new Error(`Invalid amount: ${amount}`);
+    if (/^\d+$/.test(trimmed)) {
+      const raw = BigInt(trimmed);
+      if (!allowZero && raw === 0n) {
+        throw new Error("Amount must be greater than zero");
       }
-      return BigInt(Math.floor(numeric * Math.pow(10, decimals)));
+      return raw;
     }
 
-    if (normalized.startsWith("-")) {
-      throw new Error("Amount cannot be negative");
-    }
-
-    const [wholeRaw = "0", fractionRaw = ""] = normalized.split(".");
-    const wholeDigits = wholeRaw.replace(/\D/g, "") || "0";
-    const fractionDigits = fractionRaw.replace(/\D/g, "");
-    const fractionPadded = (fractionDigits + "0".repeat(decimals)).slice(
-      0,
-      decimals
-    );
-
-    const whole = BigInt(wholeDigits);
-    const fraction = fractionPadded.length > 0 ? BigInt(fractionPadded) : 0n;
-
-    return whole * scale + fraction;
+    return parseDecimalAmount(trimmed, Math.max(decimals, 0), {
+      returnType: "bigint",
+      allowZero,
+    });
   }
 
   private async getMintDecimals(mint: PublicKey): Promise<number> {
@@ -294,7 +285,7 @@ export class PumpFunClient {
         ? 9
         : Math.max(_inputDecimals ?? 6, 0);
 
-      const amountRaw = this.toRawAmount(amount, inputDecimalsSafe);
+      const amountRaw = this.parseAmountLamports(amount, inputDecimalsSafe);
 
       if (isBuy) {
         // Calculate how many tokens we get for the SOL amount
@@ -378,13 +369,13 @@ export class PumpFunClient {
         // Buying pump.fun token with SOL
         pumpMint = new PublicKey(outputMint);
         isBuy = true;
-        amountLamports = this.toRawAmount(amount, 9);
+        amountLamports = this.parseAmountLamports(amount, 9);
       } else if (!isSolInput && isSolOutput) {
         // Selling pump.fun token for SOL
         pumpMint = new PublicKey(inputMint);
         isBuy = false;
         const tokenDecimals = await this.getMintDecimals(pumpMint);
-        amountLamports = this.toRawAmount(amount, tokenDecimals);
+        amountLamports = this.parseAmountLamports(amount, tokenDecimals);
         console.log(
           `🔢 SELL conversion: ${amount} → raw=${amountLamports.toString()} (decimals=${tokenDecimals})`
         );
@@ -573,23 +564,13 @@ export class PumpFunClient {
     const safeInputTicker = escapeHtml(inputTicker);
     const safeOutputTicker = escapeHtml(outputTicker);
 
-    const toRaw = (amount: string, decimals: number): bigint => {
-      const trimmed = amount.trim();
-      if (trimmed.length === 0) {
-        return 0n;
-      }
-
-      if (/^\d+$/.test(trimmed)) {
-        return BigInt(trimmed);
-      }
-
-      return this.toRawAmount(trimmed, decimals);
-    };
-
-    const inputRaw = toRaw(quote.inputAmount ?? "0", Math.max(inputDecimals, 0));
-    const outputRaw = toRaw(
+    const inputRaw = this.parseAmountLamports(quote.inputAmount ?? "0", Math.max(inputDecimals, 0), {
+      allowZero: true,
+    });
+    const outputRaw = this.parseAmountLamports(
       quote.outputAmount ?? "0",
-      Math.max(outputDecimals, 0)
+      Math.max(outputDecimals, 0),
+      { allowZero: true }
     );
 
     const inputAmountStr = formatAmount(inputRaw, inputDecimals, {
@@ -659,8 +640,9 @@ export function validatePumpFunSwap(
   }
 
   // Validate amount
-  const numAmount = parseFloat(amount);
-  if (isNaN(numAmount) || numAmount <= 0) {
+  try {
+    parseDecimalAmount(amount, 9, { returnType: "bigint" });
+  } catch {
     return { valid: false, error: "Invalid amount" };
   }
 
