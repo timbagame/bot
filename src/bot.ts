@@ -3819,6 +3819,7 @@ bot.callbackQuery(
   /^confirm_game_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/,
   async (ctx) => {
     const callbackData = ctx.callbackQuery?.data;
+    let confirmMessageMissing = false;
 
     try {
       console.log("🔔 Confirm game callback triggered:", callbackData);
@@ -3857,7 +3858,6 @@ bot.callbackQuery(
         chatId && messageId
           ? `${chatId}:${messageId}`
           : `${ctx.from.id}:${gameType}:${amount}:${maxPlayers}`;
-      let confirmMessageMissing = false;
 
       if (pendingGameCreations.has(creationKey)) {
         await ctx.answerCallbackQuery("⏳ Already creating this game...");

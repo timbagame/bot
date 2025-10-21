@@ -30,8 +30,16 @@ beforeAll(async () => {
   };
 
   const okJson = async () => ({ ok: true, result: true } as any);
-  globalThis.fetch = async () =>
-    ({ ok: true, status: 200, json: okJson } as any);
+  const fetchMock = Object.assign(
+    async () => ({ ok: true, status: 200, json: okJson } as any),
+    {
+      preconnect: async (
+        _url: string | URL,
+        _options?: Parameters<typeof fetch.preconnect>[1]
+      ) => {},
+    }
+  );
+  globalThis.fetch = fetchMock as typeof fetch;
 
   if (!interceptorInstalled) {
     (bot.api.config.use as any)(
@@ -64,12 +72,15 @@ beforeEach(() => {
   for (const key of Object.keys(apiHandlers)) {
     delete apiHandlers[key];
   }
-  apiHandlers.answerCallbackQuery = async () => ({ ok: true, result: true });
-  apiHandlers.editMessageReplyMarkup = async () => ({
+  apiHandlers["answerCallbackQuery"] = async () => ({
     ok: true,
     result: true,
   });
-  apiHandlers.editMessageCaption = async () => ({ ok: true, result: true });
+  apiHandlers["editMessageReplyMarkup"] = async () => ({
+    ok: true,
+    result: true,
+  });
+  apiHandlers["editMessageCaption"] = async () => ({ ok: true, result: true });
 });
 
 afterEach(() => {
@@ -102,12 +113,12 @@ test(
     const deleteCalls: any[] = [];
     const sendCalls: any[] = [];
 
-    apiHandlers.editMessageText = async (payload: any) => {
+    apiHandlers["editMessageText"] = async (payload: any) => {
       editCalls.push(payload);
       return { ok: true, result: true };
     };
 
-    apiHandlers.deleteMessage = async (payload: any) => {
+    apiHandlers["deleteMessage"] = async (payload: any) => {
       deleteCalls.push(payload);
       return {
         ok: false,
@@ -116,7 +127,7 @@ test(
       };
     };
 
-    apiHandlers.sendMessage = async (payload: any) => {
+    apiHandlers["sendMessage"] = async (payload: any) => {
       sendCalls.push(payload);
       return { ok: true, result: { message_id: 999, ...payload } };
     };
@@ -175,17 +186,17 @@ test(
     const editError = new Error("Bad Request: message to edit not found");
     (editError as any).description = "Bad Request: message to edit not found";
 
-    apiHandlers.editMessageText = async (payload: any) => {
+    apiHandlers["editMessageText"] = async (payload: any) => {
       editCalls.push(payload);
       throw editError;
     };
 
-    apiHandlers.deleteMessage = async (payload: any) => {
+    apiHandlers["deleteMessage"] = async (payload: any) => {
       deleteCalls.push(payload);
       return { ok: true, result: true };
     };
 
-    apiHandlers.sendMessage = async (payload: any) => {
+    apiHandlers["sendMessage"] = async (payload: any) => {
       sendCalls.push(payload);
       return { ok: true, result: { message_id: 1000, ...payload } };
     };
