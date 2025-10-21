@@ -6,9 +6,7 @@ import {
   TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
-import { Keypair as Web3Keypair, SystemProgram } from "@solana/web3.js";
-import * as fs from "fs";
-import * as path from "path";
+import { SystemProgram } from "@solana/web3.js";
 import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
 import { WalletManager } from "../src/utils/wallet";
@@ -16,63 +14,17 @@ import {
   getSupportedTokens,
   type TokenConfig,
 } from "../src/utils/token-registry";
+import type { KeypairBundle } from "./utils/keypairs";
+import {
+  bundleFromKeypair,
+  resolveOracleOperatorBundle,
+  uniqueSigners,
+} from "./utils/keypairs";
 
-const ORACLE_OPERATOR_KEYPAIR_ENV = "ORACLE_OPERATOR_KEYPAIR_PATH";
 const RPC_URL =
   process.env["SOLANA_NETWORK"] || "https://api.mainnet-beta.solana.com";
 
 const TOKENS: TokenConfig[] = getSupportedTokens();
-
-type KeypairBundle = {
-  root: Web3Keypair;
-  anchor: anchor.web3.Keypair;
-};
-
-const bundleFromSecret = (secret: Uint8Array): KeypairBundle => ({
-  root: Web3Keypair.fromSecretKey(secret),
-  anchor: anchor.web3.Keypair.fromSecretKey(secret),
-});
-
-const bundleFromRoot = (root: Web3Keypair): KeypairBundle =>
-  bundleFromSecret(root.secretKey);
-
-const loadKeypairBundle = (filePath: string): KeypairBundle => {
-  const resolved = path.isAbsolute(filePath)
-    ? filePath
-    : path.join(process.cwd(), filePath);
-  const secret = JSON.parse(fs.readFileSync(resolved, "utf-8"));
-  return bundleFromSecret(new Uint8Array(secret));
-};
-
-const resolveOracleOperatorBundle = (
-  fallback: Web3Keypair
-): KeypairBundle => {
-  const configured = process.env[ORACLE_OPERATOR_KEYPAIR_ENV]?.trim();
-  if (!configured) {
-    console.log(
-      "ORACLE_OPERATOR_KEYPAIR_PATH not set; using admin keypair as oracle operator."
-    );
-    return bundleFromRoot(fallback);
-  }
-
-  const bundle = loadKeypairBundle(configured);
-  console.log(
-    `Oracle operator signer loaded from ${configured}: ${bundle.root.publicKey.toBase58()}`
-  );
-  return bundle;
-};
-
-const uniqueSigners = (...signers: Web3Keypair[]): Web3Keypair[] => {
-  const seen = new Set<string>();
-  const deduped: Web3Keypair[] = [];
-  for (const signer of signers) {
-    const key = signer.publicKey.toBase58();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(signer);
-  }
-  return deduped;
-};
 
 async function ensureAtaInstruction(
   connection: anchor.web3.Connection,
@@ -230,7 +182,7 @@ async function main() {
 
   const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
   const adminRoot = wallet.getAdminKeypair();
-  const adminBundle = bundleFromRoot(adminRoot);
+  const adminBundle = bundleFromKeypair(adminRoot);
   const operatorBundle = resolveOracleOperatorBundle(adminRoot);
 
   const connection = new anchor.web3.Connection(RPC_URL, "confirmed");
