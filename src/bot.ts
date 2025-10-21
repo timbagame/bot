@@ -197,6 +197,21 @@ export const __test_setWalletCache = (
   });
 };
 
+const ensureCreator = (
+  ctx: Context,
+  creatorId: string,
+  failureText = "🚫 Only the game creator can modify this setup!"
+): boolean => {
+  const currentUserId = ctx.from?.id?.toString();
+
+  if (currentUserId !== creatorId) {
+    void safeAnswerCallbackQuery(ctx, failureText);
+    return false;
+  }
+
+  return true;
+};
+
 // Test-only proxies for user-state helpers
 export const __test_setUserState = (userId: string, state: any) => setUserState(userId, state);
 export const __test_getUserState = (userId: string) => getUserState(userId, false);
@@ -3562,10 +3577,13 @@ bot.callbackQuery(
       const creatorId = ctx.match![3] as string;
 
       // Check if the user pressing the button is the creator
-      if (ctx.from?.id.toString() !== creatorId) {
-        await ctx.answerCallbackQuery(
+      if (
+        !ensureCreator(
+          ctx,
+          creatorId,
           "🚫 Only the game creator can modify this game setup!"
-        );
+        )
+      ) {
         return;
       }
 
@@ -3639,8 +3657,13 @@ bot.callbackQuery(/^players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+
     const creatorId = ctx.match![4] as string;
 
     // Check if the user pressing the button is the creator
-    if (ctx.from?.id.toString() !== creatorId) {
-      await ctx.answerCallbackQuery("🚫 Only the game creator can modify this game setup!");
+    if (
+      !ensureCreator(
+        ctx,
+        creatorId,
+        "🚫 Only the game creator can modify this game setup!"
+      )
+    ) {
       return;
     }
     const userId = ctx.from.id || 0;
@@ -3733,10 +3756,13 @@ bot.callbackQuery(
 
       const creatorId = ctx.match![4] as string;
 
-      if (ctx.from?.id.toString() !== creatorId) {
-        await ctx.answerCallbackQuery(
+      if (
+        !ensureCreator(
+          ctx,
+          creatorId,
           "🚫 Only the game creator can create this game!"
-        );
+        )
+      ) {
         return;
       }
 
@@ -3938,8 +3964,13 @@ bot.callbackQuery(/^custom_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
     console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
 
     // Check if the user pressing the button is the creator
-    if (currentUserId !== creatorId) {
-      await ctx.answerCallbackQuery("❌ Only the game creator can modify this setup!");
+    if (
+      !ensureCreator(
+        ctx,
+        creatorId,
+        "❌ Only the game creator can modify this setup!"
+      )
+    ) {
       return;
     }
 
@@ -4039,8 +4070,13 @@ bot.callbackQuery(
     console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
 
     // Check if the user pressing the button is the creator
-    if (currentUserId !== creatorId) {
-      await ctx.answerCallbackQuery("❌ Only the game creator can modify this setup!");
+    if (
+      !ensureCreator(
+        ctx,
+        creatorId,
+        "❌ Only the game creator can modify this setup!"
+      )
+    ) {
       return;
     }
     const userId = ctx.from?.id || 0;
@@ -4135,8 +4171,13 @@ bot.callbackQuery(/^back_to_amounts_(coinflip|giveaway)_(\d+)$/, async (ctx) => 
     console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
 
     // Check if the user pressing the button is the creator
-    if (currentUserId !== creatorId) {
-      await ctx.answerCallbackQuery("❌ Only the game creator can modify this setup!");
+    if (
+      !ensureCreator(
+        ctx,
+        creatorId,
+        "❌ Only the game creator can modify this setup!"
+      )
+    ) {
       return;
     }
 
@@ -4255,8 +4296,13 @@ bot.callbackQuery(/^type_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
     console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
 
     // Check if the user pressing the button is the creator
-    if (currentUserId !== creatorId) {
-      await ctx.answerCallbackQuery("❌ Only the game creator can modify this setup!");
+    if (
+      !ensureCreator(
+        ctx,
+        creatorId,
+        "❌ Only the game creator can modify this setup!"
+      )
+    ) {
       return;
     }
     const userId = ctx.from?.id || 0;
@@ -4353,8 +4399,13 @@ bot.callbackQuery(/^custom_players_(coinflip|giveaway)_(.+)_(\d+)$/, async (ctx)
     console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
 
     // Check if the user pressing the button is the creator
-    if (currentUserId !== creatorId) {
-      await ctx.answerCallbackQuery("❌ Only the game creator can modify this setup!");
+    if (
+      !ensureCreator(
+        ctx,
+        creatorId,
+        "❌ Only the game creator can modify this setup!"
+      )
+    ) {
       return;
     }
     const userId = ctx.from?.id || 0;
@@ -4431,8 +4482,13 @@ bot.callbackQuery(/^cancel_game_setup_(\d+)$/, async (ctx) => {
     console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
 
     // Check if the user pressing the button is the creator
-    if (currentUserId !== creatorId) {
-      await ctx.answerCallbackQuery("❌ Only the game creator can cancel this setup!");
+    if (
+      !ensureCreator(
+        ctx,
+        creatorId,
+        "❌ Only the game creator can cancel this setup!"
+      )
+    ) {
       return;
     }
 
