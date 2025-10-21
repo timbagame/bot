@@ -4,8 +4,7 @@ import { resetTestDatabase } from "./helpers/database";
 
 test("TokenDatabase stores and retrieves known tokens", () => {
   resetTestDatabase("tokens.sqlite");
-  // @ts-ignore - reset singleton for clean test
-  TokenDatabase["instance"] = undefined;
+  TokenDatabase.resetForTesting();
 
   const db = TokenDatabase.getInstance();
   db.addKnownToken("mint1", "AAA", 6);

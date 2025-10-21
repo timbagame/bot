@@ -4,8 +4,7 @@ import { resetTestDatabase } from "./helpers/database";
 
 beforeEach(() => {
   resetTestDatabase("tokens.sqlite");
-  // @ts-ignore reset singleton
-  TokenDatabase["instance"] = undefined;
+  TokenDatabase.resetForTesting();
 });
 
 test("TokenDatabase: metadata CRUD and cleanup", () => {

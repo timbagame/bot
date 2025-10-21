@@ -1,11 +1,14 @@
 import type { KnownToken } from "../types";
 import { BaseDatabase } from "./base-database";
+import { createSingleton } from "./singleton";
 
 /**
  * Database service for storing token-related data
  */
 export class TokenDatabase extends BaseDatabase {
-  private static instance: TokenDatabase;
+  private static readonly singleton = createSingleton(
+    () => new TokenDatabase()
+  );
 
   private constructor() {
     super(
@@ -31,10 +34,11 @@ export class TokenDatabase extends BaseDatabase {
   }
 
   public static getInstance(): TokenDatabase {
-    if (!TokenDatabase.instance) {
-      TokenDatabase.instance = new TokenDatabase();
-    }
-    return TokenDatabase.instance;
+    return TokenDatabase.singleton.getInstance();
+  }
+
+  public static resetForTesting(): void {
+    TokenDatabase.singleton.reset();
   }
 
   // ================================

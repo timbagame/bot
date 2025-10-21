@@ -12,8 +12,7 @@ describe("OracleClient", () => {
     // Ensure predictable env
     process.env['ORACLE_API_URL'] = ORACLE_URL;
     resetTestDatabase("games.sqlite");
-    // @ts-ignore reset singleton between tests to avoid cross-suite state
-    GameDatabase["instance"] = undefined;
+    GameDatabase.resetForTesting();
   });
 
   test("isHealthy returns true when health endpoint is ok", async () => {
