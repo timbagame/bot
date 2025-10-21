@@ -1021,6 +1021,166 @@ const formatTokenAmount = (amount: number, decimals: number): string => {
   });
 };
 
+type GameSetupCopy = {
+  gameType: "coinflip" | "giveaway";
+  heading: string;
+  introLines: string[];
+  bulletPoints: string[];
+  amountPrompt: string;
+  suggestionLabel: string;
+  lowBalanceCopy?: {
+    object: string;
+    exampleIntro: string;
+    exampleResult: string;
+  };
+  logPrefix: string;
+};
+
+const GAME_SETUP_COPY: Record<"coinflip" | "giveaway", GameSetupCopy> = {
+  coinflip: {
+    gameType: "coinflip",
+    heading: "🪙 <b>CREATE COINFLIP</b>",
+    introLines: ["Choose how much each player should stake:"],
+    bulletPoints: [
+      "• Two or more players enter with the same stake",
+      "• Winner takes the full pot",
+      "• Fair and transparent results",
+    ],
+    amountPrompt: "Select stake per player in <b>{TOKEN}</b>:",
+    suggestionLabel: "Suggested stakes",
+    lowBalanceCopy: {
+      object: "the take-home pot",
+      exampleIntro: "With the minimum stake of",
+      exampleResult: "the winner receives about",
+    },
+    logPrefix: "🪙",
+  },
+  giveaway: {
+    gameType: "giveaway",
+    heading: "🎁 <b>CREATE GIVEAWAY</b>",
+    introLines: ["Choose the prize amount you want to give away:"],
+    bulletPoints: [
+      "• Free to join for all players",
+      "• One lucky winner gets the prize",
+      "• Fair and transparent results",
+    ],
+    amountPrompt: "Select prize amount in <b>{TOKEN}</b>:",
+    suggestionLabel: "Suggested prizes",
+    lowBalanceCopy: {
+      object: "the actual prize",
+      exampleIntro: "With the minimum prize of",
+      exampleResult: "the winner receives about",
+    },
+    logPrefix: "🎁",
+  },
+};
+
+const startInteractiveGameSetup = async (
+  ctx: Context & { message?: any },
+  telegramId: bigint,
+  copy: GameSetupCopy
+): Promise<void> => {
+  console.log(`${copy.logPrefix} UI-based ${copy.gameType} creation`);
+
+  const tokenInfo = await resolveChatTokenInfo(ctx.chat?.id);
+
+  let balanceText = "";
+  let userBalance = 0;
+
+  try {
+    const tokenBalance = await wallet.getTokenBalance(telegramId, tokenInfo.tokenMint, {
+      createIfMissing: true,
+    });
+    const formattedBalance = wallet.formatTokenBalance(
+      tokenBalance,
+      tokenInfo.decimals
+    );
+    userBalance = tokenBalance / Math.pow(10, tokenInfo.decimals);
+    balanceText = `\n💰 Your balance: <b>${formattedBalance} ${tokenInfo.tokenTicker}</b>\n`;
+  } catch (error) {
+    console.error("Error getting token balance:", error);
+    balanceText = `\n⚠️ Could not load ${tokenInfo.tokenTicker} balance\n`;
+  }
+
+  const { formatted: contractMin } = await getContractMinimumAmount(
+    tokenInfo.tokenMint,
+    tokenInfo.decimals
+  );
+
+  let tokenPriceUSD = await getPriceUSD(tokenInfo.tokenMint);
+  if (!tokenPriceUSD) {
+    tokenPriceUSD = await getPriceUSD(tokenInfo.tokenTicker);
+  }
+
+  const suggestedAmounts = getSuggestedStakeAmounts(contractMin, userBalance);
+
+  let message = `${copy.heading}\n\n`;
+  message += `Token: <b>${tokenInfo.tokenTicker}</b>\n`;
+  for (const line of copy.introLines) {
+    message += line ? `${line}\n` : "\n";
+  }
+  message += balanceText;
+
+  if (copy.lowBalanceCopy && userBalance < contractMin) {
+    const { object, exampleIntro, exampleResult } = copy.lowBalanceCopy;
+    const minDisplay = formatTokenAmount(contractMin, tokenInfo.decimals);
+    const afterFeesDisplay = formatTokenAmount(contractMin * 0.9, tokenInfo.decimals);
+    message += `\n⚠️ <b>Fee Warning:</b> Oracle fees (~5-10%) reduce ${object}.\n`;
+    message += `${exampleIntro} ${minDisplay} ${tokenInfo.tokenTicker}, ${exampleResult} ${afterFeesDisplay} ${tokenInfo.tokenTicker} after fees.\n`;
+  }
+
+  if (copy.bulletPoints.length > 0) {
+    message += "\n";
+    for (const bullet of copy.bulletPoints) {
+      message += `${bullet}\n`;
+    }
+    message += "\n";
+  }
+
+  message += copy.amountPrompt.replace("{TOKEN}", tokenInfo.tokenTicker);
+
+  if (suggestedAmounts.length > 0) {
+    message += `\n\n${copy.suggestionLabel}:\n`;
+    for (const amount of suggestedAmounts) {
+      const amountDisplay = formatTokenAmount(amount, tokenInfo.decimals);
+      message += `• ${amountDisplay} ${tokenInfo.tokenTicker}`;
+      if (tokenPriceUSD) {
+        message += ` (~$${formatUsdValue(amount * tokenPriceUSD)})`;
+      }
+      message += "\n";
+    }
+  }
+
+  const setupMessage = await ctx.reply(message, {
+    parse_mode: "HTML",
+    reply_markup: createAmountSelectionKeyboard(
+      copy.gameType,
+      userBalance,
+      ctx.from?.id?.toString(),
+      contractMin,
+      tokenInfo.tokenTicker,
+      {
+        decimals: tokenInfo.decimals,
+        tokenPriceUSD: tokenPriceUSD ?? undefined,
+      }
+    ),
+    reply_to_message_id: ctx.message?.message_id,
+  });
+
+  userSessions.set(ctx.from?.id || 0, {
+    waitingFor: "setup",
+    gameType: copy.gameType,
+    userBalance,
+    messageId: setupMessage.message_id,
+    chatId: ctx.chat?.id || 0,
+    creatorId: ctx.from?.id?.toString(),
+    tokenMint: tokenInfo.tokenMint,
+    tokenTicker: tokenInfo.tokenTicker,
+    tokenDecimals: tokenInfo.decimals,
+    contractMinimum: contractMin,
+  });
+};
+
 type TokenContext = {
   tokenMint: string;
   tokenTicker: string;
@@ -1496,6 +1656,34 @@ export type CreateGameViaCommandOptions = {
   errorMessage: string;
 };
 
+const COINFLIP_COMMAND_OPTIONS: CreateGameViaCommandOptions = {
+  gameType: "coinflip",
+  usageMessage:
+    "❌ Please provide a valid amount greater than 0.\n\nUsage: `/cf <amount>` or `/cf <amount> <maxPlayers>`",
+  defaultMaxPlayers: 2,
+  minPlayers: 2,
+  maxPlayers: 100,
+  timeoutSeconds: 60 * 60,
+  gameLabel: "Coinflip",
+  inferErrorLabel: "Coinflip",
+  logPrefix: "🪙",
+  errorMessage: "❌ Error creating coinflip game. Please try again.",
+};
+
+const GIVEAWAY_COMMAND_OPTIONS: CreateGameViaCommandOptions = {
+  gameType: "giveaway",
+  usageMessage:
+    "❌ Please provide a valid amount greater than 0.\n\nUsage: `/ga <amount>` or `/ga <amount> <maxPlayers>`",
+  defaultMaxPlayers: 10,
+  minPlayers: 1,
+  maxPlayers: 100,
+  timeoutSeconds: 60 * 60,
+  gameLabel: "Giveaway",
+  inferErrorLabel: "Giveaway",
+  logPrefix: "🎁",
+  errorMessage: "❌ Error creating giveaway game. Please try again.",
+};
+
 type CreateGameViaCommandDeps = {
   parseAmount: (
     args: string[],
@@ -1735,56 +1923,19 @@ const createBalanceDeps = (): BalanceDeps => ({
 
 const createCoinflipDeps = (): CoinflipDeps => ({
   isGroupChat,
-  parseAmount: (args, index, chatId) =>
-    tokenManager.parseAmount(args, index, chatId),
-  inferMaxPlayers,
-  wallet: {
-    getTokenBalance: (telegramId, mint, options) =>
-      wallet.getTokenBalance(telegramId, mint, options),
-    getTokenMetadata: (mint) => wallet.getTokenMetadata(mint),
-    formatTokenBalance: (amount, decimals) =>
-      wallet.formatTokenBalance(amount, decimals),
-  },
-  getContractMinimumAmount: (mint, decimalsHint) =>
-    getContractMinimumAmount(mint, decimalsHint),
-  gameManager: {
-    createGame: (
-      type,
-      parsedAmount,
-      maxTickets,
-      minTickets,
-      timeout,
+  showInteractiveSetup: (ctxWithMessage, telegramId) =>
+    startInteractiveGameSetup(
+      ctxWithMessage,
       telegramId,
-      chatId
-    ) =>
-      gameManager.createGame(
-        type,
-        parsedAmount,
-        maxTickets,
-        minTickets,
-        timeout,
-        telegramId,
-        chatId
-      ),
-    createGameMessage: (
-      ctx,
-      gameAddress,
-      gameTypeText,
-      amount,
-      creatorUsername,
-      tokenTicker,
-      status
-    ) =>
-      gameManager.createGameMessage(
-        ctx,
-        gameAddress,
-        gameTypeText,
-        amount,
-        creatorUsername,
-        tokenTicker,
-        status
-      ),
-  },
+      GAME_SETUP_COPY.coinflip
+    ),
+  createGameViaCommand: (ctxWithMessage, args, telegramId) =>
+    createGameViaCommand(
+      ctxWithMessage,
+      args,
+      telegramId,
+      COINFLIP_COMMAND_OPTIONS
+    ),
 });
 
 bot.command(["start", "balance"], async (ctx: Context) => {
@@ -1797,12 +1948,19 @@ bot.command(["start", "balance"], async (ctx: Context) => {
 
 
 bot.command(["coinflip", "cf"], async (ctx) => {
-  await handleCoinflipCommand(ctx as Context & { message?: any }, createCoinflipDeps());
+  try {
+    await handleCoinflipCommand(
+      ctx as Context & { message?: any },
+      createCoinflipDeps()
+    );
+  } catch (error) {
+    console.error("Error in coinflip command:", error);
+    await ctx.reply("❌ Error setting up coinflip game. Please try again.");
+  }
 });
 
 bot.command(["giveaway", "ga"], async (ctx) => {
   try {
-    // Check if it's a group/supergroup chat
     if (ctx.chat?.type !== "group" && ctx.chat?.type !== "supergroup") {
       return ctx.reply("❌ Giveaway games can only be created in groups!");
     }
@@ -1810,134 +1968,21 @@ bot.command(["giveaway", "ga"], async (ctx) => {
     const telegramId = BigInt(ctx.from?.id || 0);
     const args = ctx.message?.text?.split(" ");
 
-    // If arguments provided, use command-based creation (original functionality)
     if (args && args.length >= 2) {
       await createGameViaCommand(
         ctx as Context & { message?: any },
         args,
         telegramId,
-        {
-          gameType: "giveaway",
-          usageMessage:
-            "❌ Please provide a valid amount greater than 0.\n\nUsage: `/ga <amount>` or `/ga <amount> <maxPlayers>`",
-          defaultMaxPlayers: 10,
-          minPlayers: 1,
-          maxPlayers: 100,
-          timeoutSeconds: 60 * 60,
-          gameLabel: "Giveaway",
-          inferErrorLabel: "Giveaway",
-          logPrefix: "🎁",
-          errorMessage: "❌ Error creating giveaway game. Please try again.",
-        }
+        GIVEAWAY_COMMAND_OPTIONS
       );
       return;
     }
 
-    // No arguments - show UI (new functionality)
-    console.log("🎁 UI-based giveaway creation");
-
-    // Resolve chat token config
-    const tokenInfo = await resolveChatTokenInfo(ctx.chat?.id);
-
-    // Get user's balance for chosen token
-    let balanceText = "";
-    let userBalance = 0;
-
-    try {
-      const tokenBalance = await wallet.getTokenBalance(
-        telegramId,
-        tokenInfo.tokenMint,
-        { createIfMissing: true }
-      );
-      const formattedBalance = wallet.formatTokenBalance(
-        tokenBalance,
-        tokenInfo.decimals
-      );
-      userBalance = tokenBalance / Math.pow(10, tokenInfo.decimals);
-      balanceText = `\n💰 Your balance: <b>${formattedBalance} ${tokenInfo.tokenTicker}</b>\n`;
-    } catch (error) {
-      console.error("Error getting token balance:", error);
-      balanceText = `\n⚠️ Could not load ${tokenInfo.tokenTicker} balance\n`;
-    }
-
-    // Create enhanced message with fee warnings
-    let giveawayMessage = "🎁 <b>CREATE GIVEAWAY</b>\n\n";
-    giveawayMessage += `Token: <b>${tokenInfo.tokenTicker}</b>\n`;
-    giveawayMessage += "Choose the prize amount you want to give away:\n";
-    giveawayMessage += balanceText;
-
-    const { formatted: contractMin } = await getContractMinimumAmount(
-      tokenInfo.tokenMint,
-      tokenInfo.decimals
+    await startInteractiveGameSetup(
+      ctx as Context & { message?: any },
+      telegramId,
+      GAME_SETUP_COPY.giveaway
     );
-
-    let tokenPriceUSD = await getPriceUSD(tokenInfo.tokenMint);
-    if (!tokenPriceUSD) {
-      tokenPriceUSD = await getPriceUSD(tokenInfo.tokenTicker);
-    }
-
-    // Add fee warning for low balance
-    if (userBalance < contractMin) {
-      giveawayMessage += `\n⚠️ <b>Fee Warning:</b> Oracle fees (~5-10%) reduce the actual prize.\n`;
-      giveawayMessage += `With ${formatTokenAmount(
-        userBalance,
-        tokenInfo.decimals
-      )} ${tokenInfo.tokenTicker} prize, winner gets ~${formatTokenAmount(
-        userBalance * 0.9,
-        tokenInfo.decimals
-      )} ${tokenInfo.tokenTicker} after fees.\n`;
-    }
-
-    const suggestedAmounts = getSuggestedStakeAmounts(
-      contractMin,
-      userBalance
-    );
-
-    giveawayMessage += "\n• Free to join for all players\n";
-    giveawayMessage += "• One lucky winner gets the prize\n";
-    giveawayMessage += "• Fair and transparent results\n\n";
-    giveawayMessage += `Select prize amount in <b>${tokenInfo.tokenTicker}</b>:`;
-
-    if (suggestedAmounts.length > 0) {
-      giveawayMessage += "\n\nSuggested prizes:\n";
-      for (const amount of suggestedAmounts) {
-        const amountDisplay = formatTokenAmount(amount, tokenInfo.decimals);
-        giveawayMessage += `• ${amountDisplay} ${tokenInfo.tokenTicker}`;
-        if (tokenPriceUSD) {
-          giveawayMessage += ` (~$${formatUsdValue(amount * tokenPriceUSD)})`;
-        }
-        giveawayMessage += "\n";
-      }
-    }
-
-    const setupMessage = await ctx.reply(giveawayMessage, {
-      parse_mode: "HTML",
-      reply_markup: createAmountSelectionKeyboard(
-        "giveaway",
-        userBalance,
-        ctx.from?.id.toString(),
-        contractMin,
-        tokenInfo.tokenTicker,
-        {
-          decimals: tokenInfo.decimals,
-          tokenPriceUSD: tokenPriceUSD ?? undefined,
-        }
-      ),
-      reply_to_message_id: ctx.message?.message_id
-    });
-
-    userSessions.set(ctx.from?.id || 0, {
-      waitingFor: "setup",
-      gameType: "giveaway",
-      userBalance,
-      messageId: setupMessage.message_id,
-      chatId: ctx.chat?.id || 0,
-      creatorId: ctx.from?.id?.toString(),
-      tokenMint: tokenInfo.tokenMint,
-      tokenTicker: tokenInfo.tokenTicker,
-      tokenDecimals: tokenInfo.decimals,
-      contractMinimum: contractMin,
-    });
   } catch (error) {
     console.error("Error in giveaway command:", error);
     await ctx.reply("❌ Error setting up giveaway game. Please try again.");
