@@ -28,7 +28,11 @@ import {
   getCoinflipVideoId,
   getGiveawayVideoId,
 } from "./constants";
-import { isRecoverableMediaError } from "./media";
+import {
+  editMediaWithFallback,
+  isRecoverableMediaError,
+  trySendVideoWithFallback,
+} from "./media";
 import type {
   GameMessage,
   GameCancellationResult,
@@ -1292,25 +1296,19 @@ export class GameManager {
       });
 
     if (videoId) {
-      try {
-        message = await ctx.replyWithVideo(videoId, {
-          caption: messageText,
-          parse_mode: "HTML",
-          reply_markup: replyMarkup,
-          reply_to_message_id: replyTo,
-        });
-        usesVideo = true;
-      } catch (error) {
-        if (isRecoverableMediaError(error)) {
-          console.warn(
-            "Falling back to text announcement after video send failure:",
-            error
-          );
-          message = await sendText();
-        } else {
-          throw error;
-        }
-      }
+      const { result, usedFallback } = await trySendVideoWithFallback(
+        () =>
+          ctx.replyWithVideo(videoId, {
+            caption: messageText,
+            parse_mode: "HTML",
+            reply_markup: replyMarkup,
+            reply_to_message_id: replyTo,
+          }),
+        () => sendText(),
+        { logLabel: "game video send" }
+      );
+      message = result;
+      usesVideo = !usedFallback;
     } else {
       message = await sendText();
     }
@@ -1364,8 +1362,8 @@ export class GameManager {
       const supportsVideo = gameMessage.usesVideo !== false;
       const winnerVideoId = resolveGameVideoId(gameType);
 
-      const editAsText = async () => {
-        await ctx.api.editMessageText(
+      const editAsText = () =>
+        ctx.api.editMessageText(
           gameMessage.chatId,
           gameMessage.messageId,
           messageText,
@@ -1374,63 +1372,63 @@ export class GameManager {
             reply_markup: inlineKeyboard,
           }
         );
-      };
 
       if (winnerVideoId && supportsVideo) {
         const isCompleted = lowerStatus === "completed";
-        try {
-          if (isCompleted) {
-            await ctx.api.editMessageMedia(
-              gameMessage.chatId,
-              gameMessage.messageId,
-              {
-                type: "video",
-                media: winnerVideoId,
-                caption: messageText,
-                parse_mode: "HTML",
-              },
-              { reply_markup: inlineKeyboard }
-            );
-          } else {
-            await ctx.api.editMessageCaption(
-              gameMessage.chatId,
-              gameMessage.messageId,
-              {
-                caption: messageText,
-                parse_mode: "HTML",
-                reply_markup: inlineKeyboard,
-              }
-            );
-          }
-        } catch (error: any) {
-          if (error.description?.includes("message is not modified")) {
-            return;
-          }
-
-          if (isRecoverableMediaError(error)) {
-            console.warn(
-              "Falling back to text update after media edit failure:",
-              error
-            );
-            await editAsText();
+        const { usedFallback, skipped } = await editMediaWithFallback({
+          edit: () =>
+            isCompleted
+              ? ctx.api.editMessageMedia(
+                  gameMessage.chatId,
+                  gameMessage.messageId,
+                  {
+                    type: "video",
+                    media: winnerVideoId,
+                    caption: messageText,
+                    parse_mode: "HTML",
+                  },
+                  { reply_markup: inlineKeyboard }
+                )
+              : ctx.api.editMessageCaption(
+                  gameMessage.chatId,
+                  gameMessage.messageId,
+                  {
+                    caption: messageText,
+                    parse_mode: "HTML",
+                    reply_markup: inlineKeyboard,
+                  }
+                ),
+          fallback: () => editAsText(),
+          logLabel: "game media update",
+          onFallback: () => {
             this.activeGameMessages.set(gameAddress, {
               ...gameMessage,
               usesVideo: false,
             });
-            return;
-          }
+          },
+        });
 
-          console.error("Error updating game message:", error);
+        if (skipped) {
+          return;
         }
-      } else {
-        try {
-          await editAsText();
-        } catch (error: any) {
-          if (error.description?.includes("message is not modified")) {
-            return;
-          }
-          console.error("Error updating game message:", error);
+
+        if (!usedFallback) {
+          this.activeGameMessages.set(gameAddress, {
+            ...gameMessage,
+            usesVideo: true,
+          });
         }
+
+        return;
+      }
+
+      const { skipped } = await editMediaWithFallback({
+        edit: () => editAsText(),
+        logLabel: "game text update",
+      });
+
+      if (skipped) {
+        return;
       }
     } catch (error) {
       console.error("Error in updateGameMessage:", error);
