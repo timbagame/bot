@@ -1,63 +1,15 @@
 import * as anchor from "@coral-xyz/anchor";
-import { Keypair } from "@solana/web3.js";
-import * as fs from "fs";
-import * as path from "path";
 import { WalletManager } from "../src/utils/wallet";
 import { PDAManager } from "../src/utils/pda";
 import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
+import {
+  resolveKeypairFromEnv,
+  resolveOracleOperatorKeypair,
+  uniqueSigners,
+} from "./utils/keypairs";
 
-const ORACLE_OPERATOR_KEYPAIR_ENV = "ORACLE_OPERATOR_KEYPAIR_PATH";
 const NEW_ORACLE_OPERATOR_KEYPAIR_ENV = "NEW_ORACLE_OPERATOR_KEYPAIR_PATH";
-
-const loadKeypairFromPath = (filePath: string): Keypair => {
-  const resolved = path.isAbsolute(filePath)
-    ? filePath
-    : path.join(process.cwd(), filePath);
-  const secret = JSON.parse(fs.readFileSync(resolved, "utf-8"));
-  return Keypair.fromSecretKey(Uint8Array.from(secret));
-};
-
-const loadOperatorKeypair = (
-  envVarName: string,
-  defaultKeypair: Keypair,
-  role: string
-): Keypair => {
-  const configuredPath = process.env[envVarName]?.trim();
-  if (!configuredPath) {
-    console.log(
-      `${role}: using default keypair ${defaultKeypair.publicKey.toBase58()}`
-    );
-    return defaultKeypair;
-  }
-
-  try {
-    const keypair = loadKeypairFromPath(configuredPath);
-    console.log(
-      `${role}: loaded ${keypair.publicKey.toBase58()} from ${configuredPath}`
-    );
-    return keypair;
-  } catch (error) {
-    console.error(
-      `${role}: failed to load keypair from ${configuredPath}:`,
-      error
-    );
-    throw error;
-  }
-};
-
-const uniqueSigners = (...signers: Keypair[]): Keypair[] => {
-  const seen = new Set<string>();
-  const deduped: Keypair[] = [];
-  for (const signer of signers) {
-    if (!signer) continue;
-    const key = signer.publicKey.toBase58();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(signer);
-  }
-  return deduped;
-};
 
 // Initialize wallet manager
 const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
@@ -70,16 +22,15 @@ const updateOracle = async () => {
     const adminKeypair = wallet.getAdminKeypair();
     console.log(`Admin public key: ${adminKeypair.publicKey.toString()}`);
 
-    const currentOracleOperatorKeypair = loadOperatorKeypair(
-      ORACLE_OPERATOR_KEYPAIR_ENV,
+    const currentOracleOperatorKeypair = resolveOracleOperatorKeypair(
       adminKeypair,
-      "Current oracle operator"
+      { description: "Current oracle operator keypair" }
     );
 
-    const newOracleOperatorKeypair = loadOperatorKeypair(
+    const newOracleOperatorKeypair = resolveKeypairFromEnv(
       NEW_ORACLE_OPERATOR_KEYPAIR_ENV,
       currentOracleOperatorKeypair,
-      "New oracle operator"
+      "New oracle operator keypair"
     );
 
     // Create wallet adapter for Anchor

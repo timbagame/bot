@@ -1,69 +1,19 @@
 import * as anchor from "@coral-xyz/anchor";
-import { Keypair as Web3Keypair } from "@solana/web3.js";
-import * as fs from "fs";
-import * as path from "path";
 import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
 import { WalletManager } from "../src/utils/wallet";
 import { getSupportedTokens } from "../src/utils/token-registry";
-
-const ORACLE_OPERATOR_KEYPAIR_ENV = "ORACLE_OPERATOR_KEYPAIR_PATH";
+import type { KeypairBundle } from "./utils/keypairs";
+import {
+  bundleFromKeypair,
+  resolveOracleOperatorBundle,
+  uniqueSigners,
+} from "./utils/keypairs";
 
 const TOKENS_TO_DISABLE = getSupportedTokens();
 
 const RPC_URL =
   process.env.SOLANA_NETWORK || "https://api.mainnet-beta.solana.com";
-
-type KeypairBundle = {
-  root: Web3Keypair;
-  anchor: anchor.web3.Keypair;
-};
-
-const bundleFromSecret = (secret: Uint8Array): KeypairBundle => ({
-  root: Web3Keypair.fromSecretKey(secret),
-  anchor: anchor.web3.Keypair.fromSecretKey(secret),
-});
-
-const bundleFromRoot = (keypair: Web3Keypair): KeypairBundle =>
-  bundleFromSecret(keypair.secretKey);
-
-const loadKeypairBundle = (filePath: string): KeypairBundle => {
-  const resolved = path.isAbsolute(filePath)
-    ? filePath
-    : path.join(process.cwd(), filePath);
-  const raw = JSON.parse(fs.readFileSync(resolved, "utf-8"));
-  return bundleFromSecret(new Uint8Array(raw));
-};
-
-const resolveOracleOperatorKeypair = (
-  fallback: Web3Keypair
-): KeypairBundle => {
-  const configuredPath = process.env[ORACLE_OPERATOR_KEYPAIR_ENV]?.trim();
-  if (!configuredPath) {
-    console.log(
-      "ORACLE_OPERATOR_KEYPAIR_PATH not set; using admin keypair as oracle operator."
-    );
-    return bundleFromRoot(fallback);
-  }
-
-  const bundle = loadKeypairBundle(configuredPath);
-  console.log(
-    `Oracle operator signer loaded from ${configuredPath}: ${bundle.root.publicKey.toBase58()}`
-  );
-  return bundle;
-};
-
-const uniqueSigners = (...signers: Web3Keypair[]): Web3Keypair[] => {
-  const seen = new Set<string>();
-  const deduped: Web3Keypair[] = [];
-  for (const signer of signers) {
-    const key = signer.publicKey.toBase58();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(signer);
-  }
-  return deduped;
-};
 
 async function disableToken(
   program: anchor.Program<Timba>,
@@ -133,10 +83,9 @@ async function main() {
   // Load admin/bot keypair via wallet manager
   const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
   const adminKeypairRoot = wallet.getAdminKeypair();
-  const adminBundle = bundleFromRoot(adminKeypairRoot);
+  const adminBundle = bundleFromKeypair(adminKeypairRoot);
 
-  const oracleOperatorBundle =
-    resolveOracleOperatorKeypair(adminKeypairRoot);
+  const oracleOperatorBundle = resolveOracleOperatorBundle(adminKeypairRoot);
 
   const connection = new anchor.web3.Connection(RPC_URL, "confirmed");
   const balanceLamports = await connection.getBalance(
