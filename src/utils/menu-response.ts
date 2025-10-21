@@ -10,6 +10,7 @@ export type MenuPayload = {
 
 export type MenuResponseOptions = {
   replyToMessageId?: number | null;
+  skipEdit?: boolean;
 };
 
 const messageSupportsCaption = (message: any): boolean =>
@@ -71,7 +72,7 @@ export const respondWithMenu = async (
 ): Promise<void> => {
   const message = ctx.callbackQuery?.message;
 
-  if (ctx.callbackQuery && message) {
+  if (!options.skipEdit && ctx.callbackQuery && message) {
     const supportsCaption = messageSupportsCaption(message);
 
     if (supportsCaption) {

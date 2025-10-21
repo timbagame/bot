@@ -244,7 +244,10 @@ const notifyConfirmUser = async (
     ctx.message?.message_id ??
     null;
 
-  await respondWithMenu(ctx, payload, { replyToMessageId: replyToId });
+  await respondWithMenu(ctx, payload, {
+    replyToMessageId: replyToId,
+    skipEdit: true,
+  });
 };
 
 // Test-only proxies for user-state helpers
