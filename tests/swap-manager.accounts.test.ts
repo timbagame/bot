@@ -34,6 +34,22 @@ describe("SwapManager token account setup", () => {
       "test walk nut penalty hip pave soap entry language right filter choice",
       { connection: conn, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
     );
+
+    const ensureCalls: Array<{
+      mint: PublicKey;
+      result: Awaited<ReturnType<WalletManager["ensureAssociatedTokenAccount"]>>;
+    }> = [];
+    const originalEnsure = wm.ensureAssociatedTokenAccount.bind(wm);
+    wm.ensureAssociatedTokenAccount = (async (
+      owner: PublicKey,
+      mint: PublicKey,
+      payer: Keypair
+    ) => {
+      const result = await originalEnsure(owner, mint, payer);
+      ensureCalls.push({ mint, result });
+      return result;
+    }) as WalletManager["ensureAssociatedTokenAccount"];
+
     const sm = new SwapManager(conn, wm);
 
     // Stub pump fun path to avoid network
@@ -62,7 +78,28 @@ describe("SwapManager token account setup", () => {
     };
 
     const ix = await sm.createSwapTransaction(req, quote);
-    // Expect at least two setup instructions for input/output ATAs
-    expect(ix.length).toBeGreaterThanOrEqual(2);
+
+    expect(ensureCalls).toHaveLength(2);
+    const mintCalls = ensureCalls.map((c) => c.mint.toBase58());
+    expect(mintCalls).toEqual(
+      expect.arrayContaining([quote.inputMint, quote.outputMint])
+    );
+
+    const inputCall = ensureCalls.find((c) => c.mint.equals(t22Mint));
+    expect(inputCall).toBeDefined();
+    expect(inputCall!.result.isToken2022).toBe(true);
+    expect(
+      inputCall!.result.programId.equals(TOKEN_2022_PROGRAM_ID)
+    ).toBe(true);
+    expect(inputCall!.result.created).toBe(true);
+
+    const outputCall = ensureCalls.find((c) => c.mint.equals(splMint));
+    expect(outputCall).toBeDefined();
+    expect(outputCall!.result.isToken2022).toBe(false);
+    expect(outputCall!.result.programId.equals(TOKEN_PROGRAM_ID)).toBe(true);
+    expect(outputCall!.result.created).toBe(true);
+
+    const creationIxs = ensureCalls.flatMap((c) => c.result.instructions);
+    expect(ix).toEqual(creationIxs);
   });
 });

@@ -703,6 +703,39 @@ export class WalletManager {
     return { address: associatedTokenAddress, instructions };
   }
 
+  public async ensureAssociatedTokenAccount(
+    owner: PublicKey,
+    tokenMint: PublicKey,
+    payer: Keypair
+  ): Promise<{
+    address: PublicKey;
+    instructions: TransactionInstruction[];
+    programId: PublicKey;
+    isToken2022: boolean;
+    created: boolean;
+  }> {
+    const { programId, isToken2022 } = await detectTokenProgram(
+      this.connection,
+      tokenMint
+    );
+
+    const { address, instructions } =
+      await this.findOrCreateAssociatedTokenAccount(
+        owner,
+        tokenMint,
+        payer,
+        programId
+      );
+
+    return {
+      address,
+      instructions,
+      programId,
+      isToken2022,
+      created: instructions.length > 0,
+    };
+  }
+
   public async transferToken(
     fromTelegramId: bigint,
     toAddress: PublicKey,
