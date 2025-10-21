@@ -1,3 +1,4 @@
+import type { Changes, SQLQueryBindings } from "bun:sqlite";
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -26,6 +27,7 @@ export function resolveDatabaseFilename(filename: string): string {
  */
 export abstract class BaseDatabase {
   protected db: Database;
+  private readonly name: string;
 
   protected constructor(
     filename: string,
@@ -33,6 +35,7 @@ export abstract class BaseDatabase {
     name: string
   ) {
     const resolvedFilename = resolveDatabaseFilename(filename);
+    this.name = name;
     this.db = new Database(resolvedFilename, { create: true });
 
     try {
@@ -41,8 +44,65 @@ export abstract class BaseDatabase {
       }
       console.log(`${name} database initialized`);
     } catch (error) {
-      console.error(`Error initializing ${name} database:`, error);
-      throw error;
+      this.handleError(`initializing ${name} database`, error);
     }
+  }
+
+  protected run(
+    sql: string,
+    params: SQLQueryBindings | SQLQueryBindings[] = [],
+    operation: string = "running statement"
+  ): Changes {
+    try {
+      const stmt = this.db.prepare(sql);
+      const normalizedParams = this.normalizeParams(params);
+      return stmt.run(...(normalizedParams as any));
+    } catch (error) {
+      return this.handleError(`during ${operation}`, error);
+    }
+  }
+
+  protected get<T>(
+    sql: string,
+    params: SQLQueryBindings | SQLQueryBindings[] = [],
+    operation: string = "executing query"
+  ): T | null {
+    try {
+      const stmt = this.db.prepare(sql);
+      const normalizedParams = this.normalizeParams(params);
+      const result = stmt.get(...(normalizedParams as any)) as T | undefined;
+      return result ?? null;
+    } catch (error) {
+      return this.handleError(`during ${operation}`, error);
+    }
+  }
+
+  protected all<T>(
+    sql: string,
+    params: SQLQueryBindings | SQLQueryBindings[] = [],
+    operation: string = "executing query"
+  ): T[] {
+    try {
+      const stmt = this.db.prepare(sql);
+      const normalizedParams = this.normalizeParams(params);
+      return stmt.all(...(normalizedParams as any)) as T[];
+    } catch (error) {
+      return this.handleError(`during ${operation}`, error);
+    }
+  }
+
+  private normalizeParams(
+    params: SQLQueryBindings | SQLQueryBindings[] | undefined
+  ): SQLQueryBindings[] {
+    if (params === undefined) {
+      return [];
+    }
+
+    return Array.isArray(params) ? params : [params];
+  }
+
+  private handleError(operation: string, error: unknown): never {
+    console.error(`[${this.name} DB] Error ${operation}:`, error);
+    throw error instanceof Error ? error : new Error(String(error));
   }
 }
