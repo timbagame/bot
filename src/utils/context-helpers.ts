@@ -60,6 +60,37 @@ export const categorizeError = (error: any): CallbackError => {
 };
 
 /**
+ * Safe callback query answering with fallback
+ */
+export const safeAnswerCallbackQuery = async (
+  ctx: any,
+  text: string
+): Promise<void> => {
+  try {
+    if (ctx?.answerCallbackQuery) {
+      await ctx.answerCallbackQuery(text);
+    } else if (ctx?.api && ctx?.callbackQuery?.id) {
+      await ctx.api.answerCallbackQuery(ctx.callbackQuery.id, { text });
+    } else {
+      console.warn("Unable to answer callback query - invalid context");
+    }
+  } catch (error: any) {
+    const description = String(error?.description ?? "");
+    if (
+      description.includes("query is too old") ||
+      description.includes("query ID is invalid") ||
+      error?.error_code === 400
+    ) {
+      const preview = text.length > 50 ? `${text.substring(0, 50)}...` : text;
+      console.warn(`⚠️ Callback query timeout: ${preview}`);
+      return;
+    }
+
+    console.error("Failed to answer callback query:", error);
+  }
+};
+
+/**
  * Enhanced error handler for callback queries
  */
 export const handleCallbackErrorSafe = async (
@@ -82,24 +113,4 @@ export const handleCallbackErrorSafe = async (
 
   const truncatedMessage = truncateErrorMessage(errorMessage, options);
   await safeAnswerCallbackQuery(ctx, truncatedMessage);
-};
-
-/**
- * Safe callback query answering with fallback
- */
-const safeAnswerCallbackQuery = async (
-  ctx: any,
-  text: string
-): Promise<void> => {
-  try {
-    if (ctx?.answerCallbackQuery) {
-      await ctx.answerCallbackQuery(text);
-    } else if (ctx?.api && ctx?.callbackQuery?.id) {
-      await ctx.api.answerCallbackQuery(ctx.callbackQuery.id, { text });
-    } else {
-      console.warn("Unable to answer callback query - invalid context");
-    }
-  } catch (error) {
-    console.error("Failed to answer callback query:", error);
-  }
 };
