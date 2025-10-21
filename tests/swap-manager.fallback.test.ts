@@ -3,6 +3,8 @@ import { Connection, Keypair } from "@solana/web3.js";
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
 
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+
 describe("SwapManager Jupiter fallback", () => {
   beforeAll(() => {
     process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com"; // ensure mainnet paths
@@ -65,6 +67,92 @@ describe("SwapManager Jupiter fallback", () => {
     });
 
     expect(quote.provider).toBe("pump-fun");
+    expect(quote.outputAmount).toBe("2000000");
+  });
+
+  test("prefers pump.fun path for non-graduated tokens and normalizes raw amount", async () => {
+    const sm = new SwapManager(connection, wallet);
+
+    (sm.pumpFunClient as any).isPumpFunToken = async (mint: string) => ({
+      isPumpFun: mint !== SOL_MINT,
+      isGraduated: false,
+    });
+
+    let receivedAmount = "";
+    (sm.pumpFunClient as any).getQuote = async (
+      _inputMint: string,
+      _outputMint: string,
+      amountStr: string
+    ) => {
+      receivedAmount = amountStr;
+      return {
+        inputMint: SOL_MINT,
+        outputMint: "PumpMint111111111111111111111111111111111111",
+        inputAmount: amountStr,
+        outputAmount: "2000000",
+        estimatedRate: 2,
+        slippage: 5,
+        isGraduated: false,
+      };
+    };
+
+    (sm as any).jupiterClient.getQuote = async () => {
+      throw new Error("should not reach jupiter");
+    };
+
+    const quote = await sm.getQuote({
+      inputMint: SOL_MINT,
+      outputMint: "PumpMint111111111111111111111111111111111111",
+      amount: "1000000000",
+      inputDecimals: 9,
+      outputDecimals: 6,
+      userKeypair: Keypair.generate(),
+      inputTicker: "WSOL",
+      outputTicker: "PUMP",
+    });
+
+    expect(quote.provider).toBe("pump-fun");
+    expect(receivedAmount).toBe("1");
+  });
+
+  test("uses Jupiter when no pump.fun tokens detected", async () => {
+    const sm = new SwapManager(connection, wallet);
+
+    (sm.pumpFunClient as any).isPumpFunToken = async () => ({
+      isPumpFun: false,
+      isGraduated: false,
+    });
+
+    (sm.pumpFunClient as any).getQuote = async () => {
+      throw new Error("should not reach pump.fun");
+    };
+
+    (sm as any).jupiterClient.getQuote = async () => ({
+      inputMint: SOL_MINT,
+      outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      inAmount: "1000000",
+      outAmount: "2000000",
+      otherAmountThreshold: "0",
+      swapMode: "ExactIn",
+      slippageBps: 50,
+      priceImpactPct: "0.1",
+      routePlan: [],
+      totalTime: 0,
+      platformFee: null,
+    });
+
+    const quote = await sm.getQuote({
+      inputMint: SOL_MINT,
+      outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      amount: "1000000",
+      inputDecimals: 9,
+      outputDecimals: 6,
+      userKeypair: Keypair.generate(),
+      inputTicker: "WSOL",
+      outputTicker: "USDC",
+    });
+
+    expect(quote.provider).toBe("jupiter");
     expect(quote.outputAmount).toBe("2000000");
   });
 });
