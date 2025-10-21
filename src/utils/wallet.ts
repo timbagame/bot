@@ -34,7 +34,7 @@ import {
   MIN_SOL_FOR_TX,
 } from "./constants";
 import { formatAmount } from "./format-amount";
-import { fetchJupiterTokenMetadata } from "./jupiter";
+import { resolveTokenMetadata } from "./token-metadata";
 import { detectTokenProgram } from "./token-programs";
 
 // Lightweight dependency handles for testability
@@ -514,75 +514,31 @@ export class WalletManager {
   public async getFullTokenMetadata(
     tokenMint: string
   ): Promise<{ decimals: number; symbol?: string; name?: string }> {
-    try {
-      // Try to get metadata from Metaplex first
-      const metadataPDA = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("metadata"),
-          new PublicKey(
-            "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
-          ).toBuffer(),
-          new PublicKey(tokenMint).toBuffer(),
-        ],
-        new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s")
-      )[0];
-
-      const metadataAccount = await this.connection.getAccountInfo(metadataPDA);
-
-      if (metadataAccount && metadataAccount.data) {
-        // Import deserializeMetadata dynamically
-        const { deserializeMetadata } = await import(
-          "@metaplex-foundation/mpl-token-metadata"
-        );
-        const metadata = deserializeMetadata(metadataAccount as any);
-
-        const symbol = metadata.symbol?.trim() || "";
-        const name = metadata.name?.trim() || "";
-
-        if (symbol && symbol !== "" && symbol !== "UNKNOWN") {
-          const basicMetadata = await this.getTokenMetadata(tokenMint);
-          return {
-            decimals: basicMetadata.decimals,
-            symbol: symbol,
-            name: name || "Token",
-          };
-        }
+    let decimalsCache: number | null = null;
+    const getDecimals = async (): Promise<number | null> => {
+      if (decimalsCache !== null) {
+        return decimalsCache;
       }
-    } catch (error) {
-      console.log("Metaplex metadata not available for", tokenMint);
-    }
+      const basic = await this.getTokenMetadata(tokenMint);
+      decimalsCache = basic.decimals;
+      return decimalsCache;
+    };
 
-    // Try external APIs as fallback
-    console.log(`🌐 Trying external APIs for token: ${tokenMint}`);
-
-    try {
-      const metadata = await fetchJupiterTokenMetadata(
-        tokenMint,
-        async (input, init) =>
+    const fetchImpl = this.fetchFn
+      ? async (input: RequestInfo | URL, init?: RequestInit) =>
           (await this.fetchFn(
             typeof input === "string" ? input : input.toString(),
             init
-          )) as any
-      );
+          )) as unknown as Response
+      : undefined;
 
-      if (metadata) {
-        const basicMetadata = await this.getTokenMetadata(tokenMint);
-        console.log(
-          `✅ Got symbol from Jupiter token search: ${metadata.symbol}`
-        );
-        return {
-          decimals: metadata.decimals ?? basicMetadata.decimals,
-          symbol: metadata.symbol,
-          name: metadata.name || metadata.symbol,
-        };
-      }
-    } catch (error) {
-      console.log("Jupiter token search not available for", tokenMint, error);
-    }
-
-    // Fallback to basic metadata
-    const basicMetadata = await this.getTokenMetadata(tokenMint);
-    return { decimals: basicMetadata.decimals };
+    return await resolveTokenMetadata({
+      connection: this.connection,
+      mintAddress: tokenMint,
+      fetch: fetchImpl,
+      getDecimals,
+      defaultDecimals: 0,
+    });
   }
 
   public async getTokenMetadata(

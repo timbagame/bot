@@ -5,11 +5,10 @@ import {
   TransactionInstruction,
 } from "@solana/web3.js";
 import { PumpSdk, OnlinePumpSdk } from "@pump-fun/pump-sdk";
-import { deserializeMetadata } from "@metaplex-foundation/mpl-token-metadata";
 import { NetworkDetector } from "./network-detector";
 import { escapeHtml, formatAmount, formatRate } from "./format-amount";
-import { fetchJupiterTokenMetadata } from "./jupiter";
 import BN from "bn.js";
+import { resolveTokenMetadata } from "./token-metadata";
 
 // ================================
 // PUMP.FUN TYPES
@@ -114,105 +113,68 @@ export class PumpFunClient {
     try {
       const mint = new PublicKey(mintAddress);
 
-      // Try multiple methods to get the real token metadata
+      const fetchImpl = (globalThis.fetch as unknown) as (
+        input: RequestInfo | URL,
+        init?: RequestInit
+      ) => Promise<Response>;
 
-      // Method 1: Try to get metadata from Metaplex
-      try {
-        const metadataPDA = PublicKey.findProgramAddressSync(
-          [
-            Buffer.from("metadata"),
-            new PublicKey(
-              "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
-            ).toBuffer(),
-            mint.toBuffer(),
-          ],
-          new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s")
-        )[0];
+      const metadata = await resolveTokenMetadata({
+        connection: this.connection,
+        mintAddress,
+        fetch: fetchImpl,
+        getDecimals: () => this.getMintDecimals(mint),
+        defaultDecimals: 6,
+        hooks: [
+          async ({ fetch, ensureDecimals }) => {
+            try {
+              console.log(
+                `🔍 Fetching from pump.fun API: https://frontend-api.pump.fun/coins/${mintAddress}`
+              );
+              const response = await fetch(
+                `https://frontend-api.pump.fun/coins/${mintAddress}`
+              );
+              console.log(`📡 Pump.fun API response status: ${response.status}`);
 
-        const metadataAccount = await this.connection.getAccountInfo(
-          metadataPDA
-        );
-        if (metadataAccount) {
-          try {
-            const metadata = deserializeMetadata(metadataAccount as any);
-            const symbol = (metadata as any).symbol.replace(/\0/g, "").trim();
-            const name = (metadata as any).name.replace(/\0/g, "").trim();
-
-            if (symbol && symbol !== "" && symbol !== "UNKNOWN") {
-              // Get decimals from mint
-              const mintInfo = await this.connection.getParsedAccountInfo(mint);
-              let decimals = 6; // Default for pump.fun
-              if (mintInfo.value && "parsed" in mintInfo.value.data) {
-                decimals = mintInfo.value.data.parsed.info.decimals || 6;
+              if (!response.ok) {
+                return null;
               }
 
+              const data = (await response.json()) as any;
+              console.log("🎯 Pump.fun API data:", data);
+
+              if (!data?.symbol) {
+                console.log("❌ Pump.fun API data missing symbol:", data);
+                return null;
+              }
+
+              const symbol = String(data.symbol).toUpperCase();
+              const name = data.name ? String(data.name) : "Pump.fun Token";
+              console.log("✅ Returning pump.fun API metadata:", {
+                symbol,
+                name,
+              });
               return {
-                symbol: symbol,
-                name: name || "Pump.fun Token",
-                decimals,
+                symbol,
+                name,
+                decimals: await ensureDecimals(),
               };
+            } catch (error) {
+              console.log("💥 Pump.fun API error:", error);
+              return null;
             }
-          } catch (deserializeError) {
-            console.log("Error deserializing metadata:", deserializeError);
-          }
-        }
-      } catch (metaplexError) {
-        console.log("Metaplex metadata not available, trying pump.fun API");
+          },
+        ],
+      });
+
+      if (metadata.symbol) {
+        return {
+          symbol: metadata.symbol.toUpperCase(),
+          name: metadata.name || metadata.symbol,
+          decimals: metadata.decimals,
+        };
       }
 
-      // Method 2: Try pump.fun API
-      try {
-        console.log(
-          `🔍 Fetching from pump.fun API: https://frontend-api.pump.fun/coins/${mintAddress}`
-        );
-        const response = await fetch(
-          `https://frontend-api.pump.fun/coins/${mintAddress}`
-        );
-        console.log(`📡 Pump.fun API response status: ${response.status}`);
-
-        if (response.ok) {
-          const data = (await response.json()) as any;
-          console.log("🎯 Pump.fun API data:", data);
-
-          if (data && data.symbol) {
-            const result = {
-              symbol: data.symbol.toUpperCase(),
-              name: data.name || "Pump.fun Token",
-              decimals: 6,
-            };
-            console.log("✅ Returning pump.fun API metadata:", result);
-            return result;
-          } else {
-            console.log("❌ Pump.fun API data missing symbol:", data);
-          }
-        } else {
-          console.log(`❌ Pump.fun API failed with status: ${response.status}`);
-        }
-      } catch (apiError) {
-        console.log("💥 Pump.fun API error:", apiError);
-      }
-
-      // Method 3: Try Jupiter token search API
-      try {
-        console.log(
-          `🔍 Fetching from Jupiter token search: https://lite-api.jup.ag/tokens/v2/search?query=${mintAddress}`
-        );
-        const metadata = await fetchJupiterTokenMetadata(mintAddress);
-        if (metadata) {
-          const result = {
-            symbol: metadata.symbol.toUpperCase(),
-            name: metadata.name || metadata.symbol || "Pump.fun Token",
-            decimals: metadata.decimals ?? 6,
-          };
-          console.log("✅ Returning Jupiter metadata:", result);
-          return result;
-        }
-        console.log("❌ Jupiter metadata search returned no result");
-      } catch (jupiterError) {
-        console.log("💥 Jupiter metadata search error:", jupiterError);
-      }
-
-      // Method 4: Check if it's a pump.fun token at all
+      // If metadata resolution failed, verify the token via the pump.fun bonding curve
       const bondingCurve = await this.onlineSdk.fetchBondingCurve(mint);
       if (!bondingCurve) {
         return null;
@@ -225,7 +187,7 @@ export class PumpFunClient {
       return {
         symbol: ticker,
         name: "Pump.fun Token",
-        decimals: 6,
+        decimals: metadata.decimals ?? 6,
       };
     } catch (error) {
       console.error(`Error getting metadata for ${mintAddress}:`, error);
