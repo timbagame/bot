@@ -3,6 +3,10 @@ export type FormatOptions = {
   trim?: boolean;
 };
 
+export type FormatTokenDisplayOptions = {
+  decimals?: number;
+};
+
 export type FormatUsdValueOptions = {
   approximate?: boolean;
   minimumFractionDigits?: number;
@@ -118,6 +122,39 @@ export function formatAmount(
   const intOut = integerPart === "" ? "0" : integerPart;
   const signed = sign + intOut + (fractionalOut ? "." + fractionalOut : "");
   return signed;
+}
+
+export function formatTokenDisplay(
+  value: number,
+  options: FormatTokenDisplayOptions = {}
+): string {
+  if (!Number.isFinite(value)) {
+    return "0";
+  }
+
+  const decimals =
+    typeof options.decimals === "number" && Number.isFinite(options.decimals)
+      ? Math.max(0, Math.min(Math.trunc(options.decimals), 6))
+      : undefined;
+
+  let precision: number;
+  if (decimals !== undefined) {
+    precision = decimals;
+  } else {
+    const [, fractional = ""] = value.toString().split(".");
+    const trimmed = fractional.replace(/0+$/, "");
+    precision = Math.min(trimmed.length, 6);
+  }
+
+  const maximumFractionDigits = precision;
+  const minimumFractionDigits = Number.isInteger(value)
+    ? 0
+    : Math.min(maximumFractionDigits, 6);
+
+  return value.toLocaleString("en-US", {
+    minimumFractionDigits,
+    maximumFractionDigits,
+  });
 }
 
 export function formatUsdValue(

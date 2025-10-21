@@ -1,5 +1,6 @@
 import { InlineKeyboard } from "grammy";
 import { DEFAULT_TOKEN_TICKER } from "./constants";
+import { formatTokenDisplay } from "./format-amount";
 
 export const createMainMenuKeyboard = (): InlineKeyboard => {
   return new InlineKeyboard()
@@ -73,34 +74,12 @@ export const createTradeConfirmKeyboard = ({
 // GAME SETUP KEYBOARDS
 // ================================
 
-const getDecimalPrecision = (value: number): number => {
-  if (!Number.isFinite(value)) return 0;
-  const [, fractional] = value.toString().split(".");
-  if (!fractional) return 0;
-  return Math.min(6, fractional.replace(/0+$/, "").length);
-};
-
 const roundToPrecision = (value: number, precision: number): number => {
   if (!Number.isFinite(value)) return 0;
   if (precision <= 0) return Math.round(value);
 
   const factor = Math.pow(10, precision);
   return Math.round(value * factor) / factor;
-};
-
-const formatStakeDisplay = (
-  value: number,
-  decimals: number | undefined
-): string => {
-  const precision =
-    typeof decimals === "number" && decimals > 0
-      ? Math.min(decimals, 6)
-      : Math.min(getDecimalPrecision(value), 6);
-
-  return value.toLocaleString("en-US", {
-    minimumFractionDigits: Number.isInteger(value) ? 0 : Math.min(precision, 6),
-    maximumFractionDigits: Math.min(precision, 6),
-  });
 };
 
 /**
@@ -171,8 +150,8 @@ export const createAmountSelectionKeyboard = (
       ? Math.max(userBalance, 0)
       : undefined;
   const decimals =
-    typeof options?.decimals === "number"
-      ? Math.max(0, Math.min(options.decimals, 6))
+    typeof options?.decimals === "number" && Number.isFinite(options.decimals)
+      ? options.decimals
       : undefined;
   const tokenPriceUSD =
     typeof options?.tokenPriceUSD === "number" &&
@@ -189,7 +168,7 @@ export const createAmountSelectionKeyboard = (
     const callbackData = creatorId
       ? `amount_${gameType}_${amount}_${creatorId}`
       : `amount_${gameType}_${amount}`;
-    const display = formatStakeDisplay(amount, decimals);
+    const display = formatTokenDisplay(amount, { decimals });
     const usdText =
       tokenPriceUSD !== undefined
         ? ` (~$${(amount * tokenPriceUSD).toLocaleString("en-US", {
@@ -299,7 +278,9 @@ export const createSliderAmountKeyboard = (
     roundToPrecision(value, precision);
   const amountForCallback = roundForSlider(currentAmount);
   const toDisplay = (value: number): string =>
-    formatStakeDisplay(value, precision > 0 ? precision : undefined);
+    formatTokenDisplay(value, {
+      decimals: precision > 0 ? precision : undefined,
+    });
 
   const clamp = (value: number) =>
     Math.max(minAmount, Math.min(maxAmount, value));

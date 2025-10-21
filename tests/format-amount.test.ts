@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { formatAmount } from "../src/utils/format-amount";
+import { formatAmount, formatTokenDisplay } from "../src/utils/format-amount";
 
 test("formatAmount formats basic integer", () => {
   expect(formatAmount(123456, 5)).toBe("1.23456");
@@ -39,4 +39,28 @@ test("formatAmount falls back to numeric parsing when string has decimals", () =
 
 test("formatAmount rounds fractional carry when integer part is empty", () => {
   expect(formatAmount(5, 3, { maxFractionDigits: 2 })).toBe("0.01");
+});
+
+test("formatTokenDisplay respects provided decimals", () => {
+  expect(
+    formatTokenDisplay(1.2, {
+      decimals: 4,
+    })
+  ).toBe("1.2000");
+});
+
+test("formatTokenDisplay infers precision when decimals are omitted", () => {
+  expect(formatTokenDisplay(1234.567)).toBe("1,234.567");
+});
+
+test("formatTokenDisplay clamps to six fractional digits", () => {
+  expect(
+    formatTokenDisplay(0.123456789, {
+      decimals: 9,
+    })
+  ).toBe("0.123457");
+});
+
+test("formatTokenDisplay handles non-finite values", () => {
+  expect(formatTokenDisplay(Number.NaN)).toBe("0");
 });
