@@ -227,57 +227,67 @@ type TokenBalanceLike = {
   decimals: number;
 };
 
-type CalculateBuySpendParams = {
+type ResolveSpendAmountParams = {
   amount: string;
-  paymentToken: string;
+  assetTicker: string;
   inputDecimals: number;
   solBalance: number;
   tokenBalance?: TokenBalanceLike;
   formatSol: (lamports: number) => string;
   formatToken: (amount: number, decimals: number) => string;
+  applySolFeeBuffer?: boolean;
 };
 
-const calculateBuySpend = ({
+const resolveSpendAmount = ({
   amount,
-  paymentToken,
+  assetTicker,
   inputDecimals,
   solBalance,
   tokenBalance,
   formatSol,
   formatToken,
-}: CalculateBuySpendParams) => {
+  applySolFeeBuffer = true,
+}: ResolveSpendAmountParams) => {
   let rawAmount: number;
   let displayAmount: string;
 
-  const normalizedAmount = amount.toLowerCase();
+  const normalized = amount.trim();
+  const lower = normalized.toLowerCase();
+  const isSolAsset = assetTicker === "SOL";
 
-  if (paymentToken === "SOL" && normalizedAmount === "max") {
-    const spendableLamports = clampLamportsForFees(solBalance);
-    if (spendableLamports <= 0) {
-      throw new Error("Not enough SOL to cover purchase and fees");
+  if (lower === "max") {
+    if (isSolAsset) {
+      const spendableLamports = applySolFeeBuffer
+        ? clampLamportsForFees(solBalance)
+        : solBalance;
+      if (spendableLamports <= 0) {
+        throw new Error("Not enough SOL to cover purchase and fees");
+      }
+
+      rawAmount = spendableLamports;
+      displayAmount = formatSol(spendableLamports);
+    } else {
+      if (!tokenBalance) {
+        throw new Error(`No ${assetTicker} balance found`);
+      }
+
+      rawAmount = Math.floor(tokenBalance.balance);
+      if (rawAmount <= 0) {
+        throw new Error(`No ${assetTicker} balance found`);
+      }
+
+      displayAmount = formatToken(rawAmount, tokenBalance.decimals);
     }
-
-    rawAmount = spendableLamports;
-    displayAmount = formatSol(spendableLamports);
-  } else if (normalizedAmount === "max") {
-    if (!tokenBalance) {
-      throw new Error(`No ${paymentToken} balance found`);
-    }
-
-    rawAmount = Math.floor(tokenBalance.balance);
-    if (rawAmount <= 0) {
-      throw new Error(`No ${paymentToken} balance found`);
-    }
-
-    displayAmount = formatToken(rawAmount, tokenBalance.decimals);
-  } else if (amount.includes("%")) {
-    const percentage = parseFloat(amount.replace("%", ""));
+  } else if (normalized.includes("%")) {
+    const percentage = parseFloat(normalized.replace("%", ""));
     if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
       throw new Error("Invalid percentage format");
     }
 
-    if (paymentToken === "SOL") {
-      const spendableLamports = clampLamportsForFees(solBalance);
+    if (isSolAsset) {
+      const spendableLamports = applySolFeeBuffer
+        ? clampLamportsForFees(solBalance)
+        : solBalance;
       if (spendableLamports <= 0) {
         throw new Error("Not enough SOL to cover purchase and fees");
       }
@@ -289,7 +299,7 @@ const calculateBuySpend = ({
       displayAmount = formatSol(rawAmount);
     } else {
       if (!tokenBalance) {
-        throw new Error(`No ${paymentToken} balance found`);
+        throw new Error(`No ${assetTicker} balance found`);
       }
       rawAmount = Math.floor(tokenBalance.balance * (percentage / 100));
       if (rawAmount <= 0) {
@@ -297,37 +307,25 @@ const calculateBuySpend = ({
       }
       displayAmount = formatToken(rawAmount, tokenBalance.decimals);
     }
-  } else if (amount === "max") {
-    if (paymentToken === "SOL") {
-      rawAmount = clampLamportsForFees(solBalance);
-      if (rawAmount <= 0) {
-        throw new Error("Not enough SOL to cover purchase and fees");
-      }
-      displayAmount = formatSol(rawAmount);
-    } else {
-      if (!tokenBalance) {
-        throw new Error(`No ${paymentToken} balance found`);
-      }
-      rawAmount = Math.floor(tokenBalance.balance);
-      if (rawAmount <= 0) {
-        throw new Error(`No ${paymentToken} balance found`);
-      }
-      displayAmount = formatToken(rawAmount, tokenBalance.decimals);
-    }
   } else {
-    rawAmount = toRawAmount(amount, inputDecimals);
+    rawAmount = toRawAmount(normalized, inputDecimals);
 
-    if (paymentToken === "SOL") {
-      if (rawAmount + SOL_FEE_BUFFER_LAMPORTS > solBalance) {
-        throw new Error("Insufficient SOL balance for this purchase");
+    if (isSolAsset) {
+      const feeBuffer = applySolFeeBuffer ? SOL_FEE_BUFFER_LAMPORTS : 0;
+      if (rawAmount + feeBuffer > solBalance) {
+        throw new Error(
+          applySolFeeBuffer
+            ? "Insufficient SOL balance for this purchase"
+            : "Insufficient SOL balance"
+        );
       }
       displayAmount = formatSol(rawAmount);
     } else {
       if (!tokenBalance) {
-        throw new Error(`No ${paymentToken} balance found`);
+        throw new Error(`No ${assetTicker} balance found`);
       }
       if (rawAmount > tokenBalance.balance) {
-        throw new Error("Insufficient token balance for this purchase");
+        throw new Error("Insufficient token balance");
       }
       displayAmount = formatToken(rawAmount, inputDecimals);
     }
@@ -487,7 +485,7 @@ export const __test_createApiContext = createApiContext;
 export const __test_validateGameTokenData = validateGameTokenData;
 export const __test_resetInitiatedChats = () => initiatedChats.clear();
 export const __test_getInitiatedChats = () => new Set(initiatedChats);
-export const __test_calculateBuySpend = calculateBuySpend;
+export const __test_resolveSpendAmount = resolveSpendAmount;
 export const __test_formatBuyQuoteSummary = formatBuyQuoteSummary;
 
 /**
@@ -7233,80 +7231,18 @@ const showSwapQuoteAndConfirmation = async (
         ? 9
         : await wallet.getTokenMetadata(outputMint).then((m) => m.decimals);
 
-    let rawAmount: number;
-    let displayAmount: string;
-
-    if (amount.includes("%")) {
-      const percentage = parseFloat(amount.replace("%", ""));
-      if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
-        throw new Error("Invalid percentage format");
-      }
-
-      if (fromToken === "SOL") {
-        const availableLamports = clampLamportsForFees(solBalance);
-        if (availableLamports <= 0) {
-          throw new Error("Not enough SOL to cover swap and network fees");
-        }
-
-        rawAmount = Math.floor(availableLamports * (percentage / 100));
-        if (rawAmount <= 0) {
-          throw new Error("Percentage results in zero amount");
-        }
-        displayAmount = wallet.formatSolBalance(rawAmount);
-      } else {
-        if (!tokenBalance) {
-          throw new Error(`No ${fromToken} balance found`);
-        }
-        rawAmount = Math.floor(tokenBalance.balance * (percentage / 100));
-        if (rawAmount <= 0) {
-          throw new Error("Percentage results in zero amount");
-        }
-        displayAmount = wallet.formatTokenBalance(
-          rawAmount,
-          tokenBalance.decimals
-        );
-      }
-    } else if (amount === "max") {
-      if (fromToken === "SOL") {
-        rawAmount = clampLamportsForFees(solBalance);
-        if (rawAmount <= 0) {
-          throw new Error("Not enough SOL to cover swap and network fees");
-        }
-        displayAmount = wallet.formatSolBalance(rawAmount);
-      } else {
-        if (!tokenBalance) {
-          throw new Error(`No ${fromToken} balance found`);
-        }
-        rawAmount = Math.floor(tokenBalance.balance);
-        if (rawAmount <= 0) {
-          throw new Error(`No ${fromToken} balance found`);
-        }
-        displayAmount = wallet.formatTokenBalance(
-          rawAmount,
-          tokenBalance.decimals
-        );
-      }
-    } else {
-      rawAmount = toRawAmount(amount, inputDecimals);
-
-      if (fromToken === "SOL") {
-        if (rawAmount + SOL_FEE_BUFFER_LAMPORTS > solBalance) {
-          throw new Error("Insufficient SOL balance for swap");
-        }
-        displayAmount = wallet.formatSolBalance(rawAmount);
-      } else {
-        if (!tokenBalance) {
-          throw new Error(`No ${fromToken} balance found`);
-        }
-        if (rawAmount > tokenBalance.balance) {
-          throw new Error("Insufficient token balance for swap");
-        }
-        displayAmount = wallet.formatTokenBalance(
-          rawAmount,
-          inputDecimals
-        );
-      }
-    }
+    const { rawAmount, displayAmount } = resolveSpendAmount({
+      amount,
+      assetTicker: fromToken,
+      inputDecimals,
+      solBalance,
+      tokenBalance: tokenBalance
+        ? { balance: tokenBalance.balance, decimals: tokenBalance.decimals }
+        : undefined,
+      formatSol: (lamports) => wallet.formatSolBalance(lamports),
+      formatToken: (value, decimals) =>
+        wallet.formatTokenBalance(value, decimals),
+    });
 
     const baseAmount = rawAmount.toString();
 
@@ -7597,9 +7533,9 @@ const showBuyQuoteAndConfirmation = async (
       ? await wallet.getTokenMetadata(outputMint).then((m) => m.decimals)
       : 9;
 
-    const { rawAmount, displayAmount } = calculateBuySpend({
+    const { rawAmount, displayAmount } = resolveSpendAmount({
       amount,
-      paymentToken,
+      assetTicker: paymentToken,
       inputDecimals,
       solBalance,
       tokenBalance,
@@ -8744,32 +8680,32 @@ const showSellQuoteAndConfirmation = async (
     const sellDecimals = tokenInfo.decimals ?? tokenBalance.decimals;
 
     let rawAmount: number;
-    let displayAmount = amount;
-
-    if (amount.toLowerCase() === "max") {
-      rawAmount = balanceRaw;
-      displayAmount = wallet.formatTokenBalance(balanceRaw, sellDecimals);
-    } else if (amount.includes("%")) {
-      const percentage = parseFloat(amount.replace("%", ""));
-      if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
-        throw new Error("Invalid percentage format");
-      }
-      rawAmount = Math.floor(balanceRaw * (percentage / 100));
-      if (rawAmount <= 0) {
-        throw new Error("Percentage results in zero amount");
-      }
-      displayAmount = wallet.formatTokenBalance(rawAmount, sellDecimals);
-    } else {
-      rawAmount = toRawAmount(amount, sellDecimals);
-      if (rawAmount > balanceRaw) {
+    let displayAmount: string;
+    try {
+      const resolved = resolveSpendAmount({
+        amount,
+        assetTicker: tokenToSell,
+        inputDecimals: sellDecimals,
+        solBalance: 0,
+        tokenBalance: { balance: balanceRaw, decimals: sellDecimals },
+        formatSol: (lamports) => wallet.formatSolBalance(lamports),
+        formatToken: (value, decimals) =>
+          wallet.formatTokenBalance(value, decimals),
+        applySolFeeBuffer: false,
+      });
+      rawAmount = resolved.rawAmount;
+      displayAmount = resolved.displayAmount;
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === "Insufficient token balance"
+      ) {
+        const available = wallet.formatTokenBalance(balanceRaw, sellDecimals);
         throw new Error(
-          `Cannot sell ${amount} ${tokenToSell}. You only have ${wallet.formatTokenBalance(
-            balanceRaw,
-            sellDecimals
-          )} ${tokenToSell}`
+          `Cannot sell ${amount} ${tokenToSell}. You only have ${available} ${tokenToSell}`
         );
       }
-      displayAmount = wallet.formatTokenBalance(rawAmount, sellDecimals);
+      throw error;
     }
 
     if (rawAmount <= 0) {
