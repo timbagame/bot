@@ -40,19 +40,12 @@ const messageSupportsCaption = (message: any): boolean =>
       message?.caption !== undefined
   );
 
-const tryEditText = async (
-  ctx: Context,
-  payload: MenuPayload
+const attemptEdit = async (
+  _kind: "text" | "caption",
+  performEdit: () => Promise<unknown>
 ): Promise<boolean> => {
   try {
-    await ctx.editMessageText(
-      payload.text,
-      {
-        parse_mode: payload.parseMode ?? "HTML",
-        reply_markup: payload.keyboard,
-        link_preview_options: { is_disabled: true },
-      }
-    );
+    await performEdit();
     return true;
   } catch (error) {
     const description = getErrorDescription(error);
@@ -66,28 +59,29 @@ const tryEditText = async (
   }
 };
 
+const tryEditText = async (
+  ctx: Context,
+  payload: MenuPayload
+): Promise<boolean> =>
+  attemptEdit("text", async () => {
+    await ctx.editMessageText(payload.text, {
+      parse_mode: payload.parseMode ?? "HTML",
+      reply_markup: payload.keyboard,
+      link_preview_options: { is_disabled: true },
+    });
+  });
+
 const tryEditCaption = async (
   ctx: Context,
   payload: MenuPayload
-): Promise<boolean> => {
-  try {
+): Promise<boolean> =>
+  attemptEdit("caption", async () => {
     await ctx.editMessageCaption({
       caption: payload.text,
       parse_mode: payload.parseMode ?? "HTML",
       reply_markup: payload.keyboard,
     });
-    return true;
-  } catch (error) {
-    const description = getErrorDescription(error);
-    if (isMessageNotModified(description)) {
-      return true;
-    }
-    if (shouldFallbackToCaptionOrReply(description)) {
-      return false;
-    }
-    throw error;
-  }
-};
+  });
 
 export const respondWithMenu = async (
   ctx: Context,
