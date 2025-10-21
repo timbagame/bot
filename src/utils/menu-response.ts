@@ -1,4 +1,5 @@
 import type { Context, InlineKeyboard } from "grammy";
+import { awaitTelegramRetry } from "./media";
 
 export type MenuPayload = {
   text: string;
@@ -132,10 +133,12 @@ export const respondWithMenu = async (
     ctx.message?.message_id ??
     ctx.callbackQuery?.message?.message_id;
 
-  await ctx.reply(payload.text, {
-    parse_mode: payload.parseMode ?? "HTML",
-    reply_markup: payload.keyboard,
-    reply_to_message_id: replyToId ?? undefined,
-    link_preview_options: { is_disabled: true },
-  });
+  await awaitTelegramRetry(() =>
+    ctx.reply(payload.text, {
+      parse_mode: payload.parseMode ?? "HTML",
+      reply_markup: payload.keyboard,
+      reply_to_message_id: replyToId ?? undefined,
+      link_preview_options: { is_disabled: true },
+    })
+  );
 };
