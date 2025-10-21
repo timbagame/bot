@@ -46,6 +46,14 @@ export interface SwapRequest {
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const SOL_DECIMALS = 9;
+const KNOWN_MAJOR_TOKENS = new Set([
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
+  "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
+  "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So", // mSOL
+  "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", // Bonk
+  "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", // ETH
+  "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E", // BTC
+]);
 
 export interface JustInTimeSwapResult {
   swapped: boolean;
@@ -71,6 +79,121 @@ export class SwapManager {
     this.pumpFunClient = new PumpFunClient(connection);
   }
 
+  private isSolMint(mint: string): boolean {
+    return mint === SOL_MINT || mint === "SOL";
+  }
+
+  private isKnownMajorToken(mint: string): boolean {
+    return KNOWN_MAJOR_TOKENS.has(mint);
+  }
+
+  private async detectPumpFunContext(
+    inputMint: string,
+    outputMint: string,
+    options?: { log?: boolean }
+  ): Promise<{
+    inputPumpInfo: { isPumpFun: boolean; isGraduated: boolean };
+    outputPumpInfo: { isPumpFun: boolean; isGraduated: boolean };
+    hasPumpFunToken: boolean;
+    hasNonGraduatedPumpFun: boolean;
+  }> {
+    const log = options?.log ?? false;
+
+    const emptyInfo = { isPumpFun: false, isGraduated: false };
+
+    if (this.network !== "mainnet") {
+      return {
+        inputPumpInfo: emptyInfo,
+        outputPumpInfo: emptyInfo,
+        hasPumpFunToken: false,
+        hasNonGraduatedPumpFun: false,
+      };
+    }
+
+    const checkToken = async (
+      mint: string,
+      role: "input" | "output"
+    ): Promise<{ isPumpFun: boolean; isGraduated: boolean }> => {
+      const label = role === "input" ? "Input" : "Output";
+
+      if (this.isSolMint(mint) || this.isKnownMajorToken(mint)) {
+        if (log) {
+          console.log(
+            `   ${label} token ${mint} skipped for pump.fun detection (SOL/major token)`
+          );
+        }
+        return emptyInfo;
+      }
+
+      try {
+        if (log) {
+          console.log(`   Checking if ${role} token ${mint} is pump.fun...`);
+        }
+        const info = await this.pumpFunClient.isPumpFunToken(mint);
+        if (log) {
+          console.log(
+            `   ${label} pump.fun result: isPumpFun=${info.isPumpFun}, isGraduated=${info.isGraduated}`
+          );
+        }
+        return info;
+      } catch (error) {
+        if (log) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.log(
+            `   ${label} token ${mint} is not a pump.fun token: ${message}`
+          );
+        }
+        return emptyInfo;
+      }
+    };
+
+    const [inputPumpInfo, outputPumpInfo] = await Promise.all([
+      checkToken(inputMint, "input"),
+      checkToken(outputMint, "output"),
+    ]);
+
+    const hasPumpFunToken =
+      inputPumpInfo.isPumpFun || outputPumpInfo.isPumpFun;
+    const hasNonGraduatedPumpFun =
+      (inputPumpInfo.isPumpFun && !inputPumpInfo.isGraduated) ||
+      (outputPumpInfo.isPumpFun && !outputPumpInfo.isGraduated);
+
+    if (log) {
+      console.log(
+        `   Detection results: hasPumpFunToken=${hasPumpFunToken}, hasNonGraduatedPumpFun=${hasNonGraduatedPumpFun}`
+      );
+    }
+
+    return {
+      inputPumpInfo,
+      outputPumpInfo,
+      hasPumpFunToken,
+      hasNonGraduatedPumpFun,
+    };
+  }
+
+  private normalizePumpFunAmount(amount: string, decimals: number): {
+    decimalAmount: string;
+    probablyRawAmount: boolean;
+  } {
+    const amountFloat = parseFloat(amount);
+    if (!Number.isFinite(amountFloat)) {
+      return { decimalAmount: amount, probablyRawAmount: false };
+    }
+
+    const probablyRawAmount =
+      amountFloat > 1_000_000 && Number.isInteger(amountFloat);
+
+    if (!probablyRawAmount || decimals <= 0) {
+      return { decimalAmount: amount, probablyRawAmount };
+    }
+
+    const divisor = Math.pow(10, Math.max(decimals, 0));
+    const decimalAmount = (amountFloat / divisor).toString();
+
+    return { decimalAmount, probablyRawAmount };
+  }
+
   /**
    * Get the best quote for a token swap across all providers
    */
@@ -92,71 +215,8 @@ export class SwapManager {
     console.log(`   Amount: ${amount}`);
     console.log(`   Network: ${this.network}`);
 
-    // First check if this involves a pump.fun token (skip SOL/WSOL and known major tokens)
-    const isSolInput =
-      inputMint === "So11111111111111111111111111111111111111112" ||
-      inputMint === "SOL";
-    const isSolOutput =
-      outputMint === "So11111111111111111111111111111111111111112" ||
-      outputMint === "SOL";
-
-    // Skip pump.fun check for known major tokens
-    const isKnownMajorToken = (mint: string) => {
-      const majorTokens = [
-        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
-        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
-        "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So", // mSOL
-        "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", // Bonk
-        "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", // ETH
-        "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E", // BTC
-      ];
-      return majorTokens.includes(mint);
-    };
-
-    // Only check pump.fun for tokens that could potentially be pump.fun tokens
-    let inputPumpInfo = { isPumpFun: false, isGraduated: false };
-    let outputPumpInfo = { isPumpFun: false, isGraduated: false };
-
-    if (!isSolInput && !isKnownMajorToken(inputMint)) {
-      try {
-        console.log(`   Checking if input token ${inputMint} is pump.fun...`);
-        inputPumpInfo = await this.pumpFunClient.isPumpFunToken(inputMint);
-        console.log(
-          `   Input pump.fun result: isPumpFun=${inputPumpInfo.isPumpFun}, isGraduated=${inputPumpInfo.isGraduated}`
-        );
-      } catch (error) {
-        console.log(
-          `   Input token ${inputMint} is not a pump.fun token: ${
-            (error as Error).message
-          }`
-        );
-      }
-    }
-
-    if (!isSolOutput && !isKnownMajorToken(outputMint)) {
-      try {
-        console.log(`   Checking if output token ${outputMint} is pump.fun...`);
-        outputPumpInfo = await this.pumpFunClient.isPumpFunToken(outputMint);
-        console.log(
-          `   Output pump.fun result: isPumpFun=${outputPumpInfo.isPumpFun}, isGraduated=${outputPumpInfo.isGraduated}`
-        );
-      } catch (error) {
-        console.log(
-          `   Output token ${outputMint} is not a pump.fun token: ${
-            (error as Error).message
-          }`
-        );
-      }
-    }
-
-    const hasPumpFunToken = inputPumpInfo.isPumpFun || outputPumpInfo.isPumpFun;
-    const hasNonGraduatedPumpFun =
-      (inputPumpInfo.isPumpFun && !inputPumpInfo.isGraduated) ||
-      (outputPumpInfo.isPumpFun && !outputPumpInfo.isGraduated);
-
-    console.log(
-      `   Detection results: hasPumpFunToken=${hasPumpFunToken}, hasNonGraduatedPumpFun=${hasNonGraduatedPumpFun}`
-    );
+    const { hasPumpFunToken, hasNonGraduatedPumpFun } =
+      await this.detectPumpFunContext(inputMint, outputMint, { log: true });
 
     // If we have a non-graduated pump.fun token, use pump.fun
     if (hasNonGraduatedPumpFun && this.network === "mainnet") {
@@ -166,14 +226,8 @@ export class SwapManager {
         throw new Error(validation.error);
       }
 
-      // Pump.fun expects decimal amounts, but we might receive raw amounts
-      // If amount is a large integer (raw), convert it back to decimal
-      const amountFloat = parseFloat(amount);
-      const probablyRawAmount =
-        amountFloat > 1000000 && Number.isInteger(amountFloat);
-      const decimalAmount = probablyRawAmount
-        ? (amountFloat / Math.pow(10, inputDecimals)).toString()
-        : amount;
+      const { decimalAmount, probablyRawAmount } =
+        this.normalizePumpFunAmount(amount, inputDecimals);
 
       console.log(
         `   🔄 Amount conversion for pump.fun: ${amount} → ${decimalAmount} (probablyRaw: ${probablyRawAmount})`
@@ -236,13 +290,8 @@ export class SwapManager {
           if (validation.valid) {
             console.log(`   ✅ Pump.fun validation passed, getting quote...`);
 
-            // Same decimal conversion as above
-            const amountFloat = parseFloat(amount);
-            const probablyRawAmount =
-              amountFloat > 1000000 && Number.isInteger(amountFloat);
-            const decimalAmount = probablyRawAmount
-              ? (amountFloat / Math.pow(10, inputDecimals)).toString()
-              : amount;
+            const { decimalAmount, probablyRawAmount } =
+              this.normalizePumpFunAmount(amount, inputDecimals);
 
             console.log(
               `   🔄 Amount conversion for pump.fun fallback: ${amount} → ${decimalAmount} (probablyRaw: ${probablyRawAmount})`
@@ -849,56 +898,13 @@ export class SwapManager {
     inputMint: string,
     outputMint: string
   ): Promise<"jupiter" | "pump-fun"> {
-    // Check for pump.fun tokens first (skip SOL/WSOL and known major tokens)
-    if (this.network === "mainnet") {
-      const isSolInput =
-        inputMint === "So11111111111111111111111111111111111111112" ||
-        inputMint === "SOL";
-      const isSolOutput =
-        outputMint === "So11111111111111111111111111111111111111112" ||
-        outputMint === "SOL";
+    const { hasNonGraduatedPumpFun } = await this.detectPumpFunContext(
+      inputMint,
+      outputMint
+    );
 
-      // Skip pump.fun check for known major tokens
-      const isKnownMajorToken = (mint: string) => {
-        const majorTokens = [
-          "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
-          "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
-          "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So", // mSOL
-          "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", // Bonk
-          "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", // ETH
-          "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E", // BTC
-        ];
-        return majorTokens.includes(mint);
-      };
-
-      let inputPumpInfo = { isPumpFun: false, isGraduated: false };
-      let outputPumpInfo = { isPumpFun: false, isGraduated: false };
-
-      if (!isSolInput && !isKnownMajorToken(inputMint)) {
-        try {
-          inputPumpInfo = await this.pumpFunClient.isPumpFunToken(inputMint);
-        } catch (error) {
-          console.log(`Input token ${inputMint} is not a pump.fun token`);
-        }
-      }
-
-      if (!isSolOutput && !isKnownMajorToken(outputMint)) {
-        try {
-          outputPumpInfo = await this.pumpFunClient.isPumpFunToken(outputMint);
-        } catch (error) {
-          console.log(`Output token ${outputMint} is not a pump.fun token`);
-        }
-      }
-
-      const hasNonGraduatedPumpFun =
-        (inputPumpInfo.isPumpFun && !inputPumpInfo.isGraduated) ||
-        (outputPumpInfo.isPumpFun && !outputPumpInfo.isGraduated);
-
-      if (hasNonGraduatedPumpFun) {
-        return "pump-fun";
-      }
-
-      return "jupiter";
+    if (this.network === "mainnet" && hasNonGraduatedPumpFun) {
+      return "pump-fun";
     }
 
     return "jupiter";
