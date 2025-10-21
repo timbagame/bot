@@ -1,5 +1,6 @@
 import type { Context, InlineKeyboard } from "grammy";
-import { awaitTelegramRetry } from "./media";
+import { awaitTelegramRetry, getTelegramErrorDescription } from "./media";
+import { isMessageNotModifiedError } from "./telegram-errors";
 
 export type MenuPayload = {
   text: string;
@@ -11,25 +12,18 @@ export type MenuResponseOptions = {
   replyToMessageId?: number | null;
 };
 
-const getErrorDescription = (error: unknown): string => {
-  if (!error || typeof error !== "object") {
-    return "";
-  }
-  const maybeDescription = (error as any).description ?? (error as any).message;
-  return typeof maybeDescription === "string" ? maybeDescription : "";
+const shouldFallbackToCaptionOrReply = (description: string): boolean => {
+  const normalized = description.toLowerCase();
+  return (
+    normalized.includes("message to edit not found") ||
+    normalized.includes("message can't be edited") ||
+    normalized.includes("have no access to the chat") ||
+    normalized.includes("bot was blocked by the user") ||
+    normalized.includes("message with the same content already exists") ||
+    normalized.includes("there is no text in the message to edit") ||
+    normalized.includes("there is no caption in the message to edit")
+  );
 };
-
-const isMessageNotModified = (description: string): boolean =>
-  description.includes("message is not modified");
-
-const shouldFallbackToCaptionOrReply = (description: string): boolean =>
-  description.includes("message to edit not found") ||
-  description.includes("message can't be edited") ||
-  description.includes("have no access to the chat") ||
-  description.includes("bot was blocked by the user") ||
-  description.includes("message with the same content already exists") ||
-  description.includes("there is no text in the message to edit") ||
-  description.includes("there is no caption in the message to edit");
 
 const messageSupportsCaption = (message: any): boolean =>
   Boolean(
@@ -49,8 +43,8 @@ const attemptEdit = async (
     await performEdit();
     return true;
   } catch (error) {
-    const description = getErrorDescription(error);
-    if (isMessageNotModified(description)) {
+    const description = getTelegramErrorDescription(error);
+    if (isMessageNotModifiedError(error)) {
       return true;
     }
     if (shouldFallbackToCaptionOrReply(description)) {

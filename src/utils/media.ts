@@ -2,52 +2,12 @@
  * Utility helpers for dealing with Telegram media operations.
  */
 
-const getErrorDescription = (error: any): string => {
-  if (!error) return "";
-  const description = error?.description ?? error?.message;
-  return typeof description === "string" ? description : "";
-};
-
-const isTooManyRequestsError = (error: any): boolean => {
-  if (!error || typeof error !== "object") return false;
-  if ((error as any).error_code === 429) {
-    return true;
-  }
-
-  const description = getErrorDescription(error);
-  return description.toLowerCase().includes("too many requests");
-};
-
-const parseRetryAfterSeconds = (error: any): number => {
-  if (!error || typeof error !== "object") return 1;
-
-  const parameters = (error as any).parameters;
-  const retryAfter =
-    (parameters && typeof parameters.retry_after === "number"
-      ? parameters.retry_after
-      : undefined) ??
-    (typeof (error as any).retry_after === "number"
-      ? (error as any).retry_after
-      : undefined);
-
-  if (typeof retryAfter === "number" && Number.isFinite(retryAfter)) {
-    return Math.max(0, retryAfter);
-  }
-
-  const description = getErrorDescription(error);
-  const match = description.match(/retry after (\d+)/i);
-  if (match) {
-    const [, retryAfterDigits] = match;
-    if (retryAfterDigits) {
-      const parsed = Number.parseInt(retryAfterDigits, 10);
-      if (!Number.isNaN(parsed)) {
-        return Math.max(0, parsed);
-      }
-    }
-  }
-
-  return 1;
-};
+import {
+  getTelegramErrorDescription,
+  isMessageNotModifiedError,
+  isTooManyRequestsError,
+  parseRetryAfterSeconds,
+} from "./telegram-errors";
 
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, ms)));
@@ -78,7 +38,7 @@ export const awaitTelegramRetry = async <T>(
 
 export const isRecoverableMediaError = (error: any): boolean => {
   if (!error) return false;
-  const description = getErrorDescription(error);
+  const description = getTelegramErrorDescription(error);
   if (!description) return false;
   const normalized = description.toLowerCase();
 
@@ -93,13 +53,6 @@ export const isRecoverableMediaError = (error: any): boolean => {
     normalized.includes("file reference") ||
     normalized.includes("message is not a media message")
   );
-};
-
-export const isMessageNotModifiedError = (error: any): boolean => {
-  if (!error) return false;
-  const description = getErrorDescription(error);
-  if (!description) return false;
-  return description.toLowerCase().includes("message is not modified");
 };
 
 export type MediaSendResult<Primary, Fallback = Primary> = {
@@ -167,3 +120,10 @@ export async function editMediaWithFallback<Primary, Fallback = Primary>({
     throw error;
   }
 }
+
+export {
+  getTelegramErrorDescription,
+  isMessageNotModifiedError,
+  isTooManyRequestsError,
+  parseRetryAfterSeconds,
+} from "./telegram-errors";

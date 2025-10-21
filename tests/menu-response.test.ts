@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { InlineKeyboard } from "grammy";
 import { respondWithMenu } from "../src/utils/menu-response";
+import { isMessageNotModifiedError } from "../src/utils/media";
 
 const basePayload = {
   text: "<b>Hello</b>",
@@ -113,6 +114,28 @@ describe("respondWithMenu", () => {
     expect(delays).toEqual([1000]);
     const replies = ctx.__calls.filter((c: any) => c.type === "reply");
     expect(replies.length).toBe(1);
+  });
+
+  test("treats message not modified errors as success", async () => {
+    const ctx = makeCtx();
+    ctx.callbackQuery.message.photo = [{ file_id: "abc" }];
+    ctx.callbackQuery.message.caption = "unchanged";
+
+    ctx.editMessageCaption = async () => {
+      const err: any = new Error("not modified");
+      err.description = "Bad Request: message is not modified";
+      expect(isMessageNotModifiedError(err)).toBe(true);
+      throw err;
+    };
+
+    ctx.editMessageText = async () => {
+      throw new Error("should not edit text when caption unchanged");
+    };
+
+    await respondWithMenu(ctx as any, basePayload);
+
+    const replies = ctx.__calls.filter((c: any) => c.type === "reply");
+    expect(replies.length).toBe(0);
   });
 });
 
