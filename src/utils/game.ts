@@ -17,6 +17,7 @@ import { GameDatabase } from "./game-database";
 import { OracleClient } from "./oracle";
 import { PDAManager } from "./pda";
 import { formatUserFriendlyError } from "./errors";
+import { formatUsdValue as formatUsdValueText } from "./format-amount";
 import {
   DEFAULT_NULL_ADDRESS,
   ADDRESS_DISPLAY_LENGTH,
@@ -612,7 +613,7 @@ export class GameManager {
       return null;
     }
 
-    return `≈ $${usdValue.toFixed(2)}`;
+    return formatUsdValueText(usdValue, { approximate: true });
   }
 
   private async getUsdApproximation(

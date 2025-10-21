@@ -1,5 +1,5 @@
 import type { InlineKeyboard } from "grammy";
-import { escapeHtml } from "../utils/format-amount";
+import { escapeHtml, formatUsdValue } from "../utils/format-amount";
 import { LAMPORTS_PER_SOL } from "../utils/constants";
 import type { TokenDisplayLine } from "../utils/wallet-ui";
 import { isRecoverableMediaError, trySendVideoWithFallback } from "../utils/media";
@@ -24,8 +24,6 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
   const { wallet, getCachedWalletData, getPriceUSD, buildWalletCaption, createWalletKeyboard, WINNER_VIDEO_ID } = deps;
 
   const telegramId = BigInt(ctx.from?.id || 0) as bigint;
-  const formatUsdValue = (value: number) =>
-    Number.isFinite(value) ? value.toFixed(2) : "0.00";
   const keypair = wallet.getKeyPair(telegramId);
   const walletAddress = keypair.publicKey.toBase58();
   const walletVideoFileId = WINNER_VIDEO_ID ?? null;
@@ -231,8 +229,6 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     try { clearWalletCache(telegramId); } catch {}
 
     // Get the same data as private chat using the existing logic
-    const formatUsdValue = (value: number) =>
-      Number.isFinite(value) ? value.toFixed(2) : "0.00";
     const playerData = await getPlayerData(telegramId);
     const approvedTokens = getApprovedTokens();
     const tokenBalancesToShow = await buildTokenBalances(telegramId, approvedTokens);

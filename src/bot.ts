@@ -41,7 +41,12 @@ import {
   getSuggestedStakeAmounts,
 } from "./utils/keyboards";
 import { buildWalletCaption } from "./utils/wallet-ui";
-import { formatAmount, escapeHtml, formatRate } from "./utils/format-amount";
+import {
+  formatAmount,
+  escapeHtml,
+  formatRate,
+  formatUsdValue,
+} from "./utils/format-amount";
 import {
   showWalletUI as showWalletUIHandler,
   onMainWallet,
@@ -1029,13 +1034,6 @@ const formatTokenAmount = (amount: number, decimals: number): string => {
   return amount.toLocaleString("en-US", {
     minimumFractionDigits,
     maximumFractionDigits: Math.min(precision, 6),
-  });
-};
-
-const formatUsdValue = (value: number): string => {
-  return value.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
   });
 };
 
