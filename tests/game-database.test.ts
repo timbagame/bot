@@ -4,8 +4,7 @@ import { resetTestDatabase } from "./helpers/database";
 
 beforeEach(() => {
   resetTestDatabase("games.sqlite");
-  // @ts-ignore reset singleton
-  GameDatabase["instance"] = undefined;
+  GameDatabase.resetForTesting();
 });
 
 test("GameDatabase: CRUD for games, mappings, participants, and slot updates", () => {

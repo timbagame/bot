@@ -9,12 +9,9 @@ import { WSOL_MINT } from "../src/utils/constants";
 beforeEach(() => {
   resetTestDatabase("chat-settings.sqlite");
   resetTestDatabase("tokens.sqlite");
-  // @ts-ignore
-  ChatDatabase["instance"] = undefined;
-  // @ts-ignore
-  TokenDatabase["instance"] = undefined;
-  // @ts-ignore
-  TokenManager["instance"] = undefined;
+  ChatDatabase.resetForTesting();
+  TokenDatabase.resetForTesting();
+  TokenManager.resetForTesting();
 });
 
 function makeWalletStub() {

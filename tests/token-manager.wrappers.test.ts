@@ -7,13 +7,9 @@ import { resetTestDatabase } from "./helpers/database";
 beforeEach(() => {
   resetTestDatabase("chat-settings.sqlite");
   resetTestDatabase("tokens.sqlite");
-  // reset singletons
-  // @ts-ignore
-  ChatDatabase["instance"] = undefined;
-  // @ts-ignore
-  TokenDatabase["instance"] = undefined;
-  // @ts-ignore
-  TokenManager["instance"] = undefined;
+  ChatDatabase.resetForTesting();
+  TokenDatabase.resetForTesting();
+  TokenManager.resetForTesting();
 });
 
 function makeWallet() {

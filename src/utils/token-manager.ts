@@ -5,13 +5,20 @@ import { WalletManager } from "./wallet";
 import { PumpFunClient, isPotentialPumpFunToken } from "./pump-fun";
 import type { ParseAmountResult, ChatTokenConfig, KnownToken } from "../types";
 import { WSOL_MINT } from "./constants";
+import { createSingleton } from "./singleton";
 
 // ================================
 // MULTI-TOKEN MANAGER
 // ================================
 
 export class TokenManager {
-  private static instance: TokenManager;
+  private static readonly singleton = createSingleton(
+    (
+      wallet: WalletManager,
+      defaultTokenMint: string,
+      defaultTokenTicker: string
+    ) => new TokenManager(wallet, defaultTokenMint, defaultTokenTicker)
+  );
   private chatDb: ChatDatabase;
   private tokenDb: TokenDatabase;
   private wallet: WalletManager;
@@ -35,19 +42,26 @@ export class TokenManager {
     defaultTokenMint?: string,
     defaultTokenTicker?: string
   ): TokenManager {
-    if (!TokenManager.instance) {
-      if (!wallet || !defaultTokenMint || !defaultTokenTicker) {
-        throw new Error(
-          "TokenManager first initialization requires wallet and default token info"
-        );
-      }
-      TokenManager.instance = new TokenManager(
-        wallet,
-        defaultTokenMint,
-        defaultTokenTicker
+    const existing = TokenManager.singleton.peek();
+    if (existing) {
+      return existing;
+    }
+
+    if (!wallet || !defaultTokenMint || !defaultTokenTicker) {
+      throw new Error(
+        "TokenManager first initialization requires wallet and default token info"
       );
     }
-    return TokenManager.instance;
+
+    return TokenManager.singleton.getInstance(
+      wallet,
+      defaultTokenMint,
+      defaultTokenTicker
+    );
+  }
+
+  public static resetForTesting(): void {
+    TokenManager.singleton.reset();
   }
 
   // ================================

@@ -4,8 +4,7 @@ import { resetTestDatabase } from "./helpers/database";
 
 beforeEach(() => {
   resetTestDatabase("chat-settings.sqlite");
-  // @ts-ignore reset singleton
-  ChatDatabase["instance"] = undefined;
+  ChatDatabase.resetForTesting();
 });
 
 test("ChatDatabase: chat info save/get and counts", () => {

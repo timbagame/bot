@@ -6,8 +6,7 @@ let db: ChatDatabase;
 
 beforeEach(() => {
   resetTestDatabase("chat-settings.sqlite");
-  // @ts-ignore - reset singleton for clean test
-  ChatDatabase["instance"] = undefined;
+  ChatDatabase.resetForTesting();
 });
 
 afterEach(() => {
@@ -17,8 +16,7 @@ afterEach(() => {
     } catch {}
   }
   // Reset singleton so other tests get a fresh connection
-  // @ts-ignore
-  ChatDatabase["instance"] = undefined;
+  ChatDatabase.resetForTesting();
   resetTestDatabase("chat-settings.sqlite");
 });
 
