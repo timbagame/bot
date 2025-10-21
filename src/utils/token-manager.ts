@@ -24,6 +24,8 @@ export class TokenManager {
   private wallet: WalletManager;
   private defaultTokenMint: string;
   private defaultTokenTicker: string;
+  private pumpFunClient?: PumpFunClient;
+  private static pumpFunClientFactory?: () => PumpFunClient;
 
   private constructor(
     wallet: WalletManager,
@@ -62,6 +64,29 @@ export class TokenManager {
 
   public static resetForTesting(): void {
     TokenManager.singleton.reset();
+    TokenManager.pumpFunClientFactory = undefined;
+  }
+
+  public static setPumpFunClientFactoryForTesting(
+    factory?: () => PumpFunClient
+  ): void {
+    TokenManager.pumpFunClientFactory = factory;
+    const existing = TokenManager.singleton.peek();
+    if (existing) {
+      existing.pumpFunClient = undefined;
+    }
+  }
+
+  private getPumpFunClient(): PumpFunClient {
+    if (!this.pumpFunClient) {
+      if (TokenManager.pumpFunClientFactory) {
+        this.pumpFunClient = TokenManager.pumpFunClientFactory();
+      } else {
+        this.pumpFunClient = new PumpFunClient(this.wallet.getConnection());
+      }
+    }
+
+    return this.pumpFunClient;
   }
 
   // ================================
@@ -349,8 +374,7 @@ export class TokenManager {
       // Check if it's a pump.fun token
       let isPumpFun = false;
       if (isPotentialPumpFunToken(tokenMint)) {
-        const pumpFunClient = new PumpFunClient(this.wallet.getConnection());
-        const pumpInfo = await pumpFunClient.isPumpFunToken(tokenMint);
+        const pumpInfo = await this.getPumpFunClient().isPumpFunToken(tokenMint);
         isPumpFun = pumpInfo.isPumpFun && !pumpInfo.isGraduated;
       }
 
@@ -381,8 +405,7 @@ export class TokenManager {
     }
 
     try {
-      const pumpFunClient = new PumpFunClient(this.wallet.getConnection());
-      return await pumpFunClient.isPumpFunToken(tokenMint);
+      return await this.getPumpFunClient().isPumpFunToken(tokenMint);
     } catch {
       return { isPumpFun: false, isGraduated: false };
     }
