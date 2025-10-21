@@ -94,13 +94,6 @@ const formatGameTypeWithEmoji = (gameType: string): string => {
   }
 };
 
-const formatGameType = (gameType: Record<string, any>): string => {
-  const keys = Object.keys(gameType);
-  const firstKey = keys[0];
-  if (!firstKey) return "Unknown";
-  return formatGameTypeWithEmoji(firstKey);
-};
-
 const formatDate = (timestamp: number): string => {
   return new Date(timestamp).toLocaleString("en-GB", {
     day: "2-digit",
@@ -1488,7 +1481,6 @@ export class GameManager {
     try {
       const gameAccount = await this.program.account.game.fetch(gamePda);
       const amount = Number(gameAccount.ticketAmount);
-      const currentTickets = gameAccount.ticketsCount;
 
       // Get token info from database
       const gameData = this.gameDb.getGame(gamePda.toBase58());
@@ -1496,14 +1488,9 @@ export class GameManager {
         return `Error: Game token information not found`;
       }
 
-      const tokenMint = gameData.token_mint;
       const tokenTicker = gameData.token_ticker;
-
-      const metadata = await this.wallet.getTokenMetadata(tokenMint);
-
-      const maxTickets = gameAccount.maxTickets;
       const creatorPubkey = gameAccount.creator.toString();
-      const gameType = formatGameType(gameAccount.gameType);
+      const rawGameType = this.getGameType(gameAccount);
 
       const creatorUsername = await this.getGameCreatorUsername(
         ctx,
@@ -1514,33 +1501,20 @@ export class GameManager {
           ? creatorUsername
           : `<code>${creatorPubkey.slice(0, ADDRESS_DISPLAY_LENGTH)}...</code>`;
 
-      // Add expiration info
-      const expiresAt =
-        Number(gameAccount.createdAt) + Number(gameAccount.timeout);
-      const expirationInfo =
-        "\n" + (await formatExpirationTime(expiresAt, this.wallet));
-
-      let winnerInfo = "";
-      if (
-        gameData &&
-        gameData.winner_address &&
-        gameData.winner_address !== "cancelled" &&
-        gameData.winner_address !== DEFAULT_NULL_ADDRESS
-      ) {
-        const winnerUsername = await this.getPlayerUsername(
-          ctx,
-          gameData.winner_address
-        );
-        winnerInfo = `\n\nWinner: @${winnerUsername}`;
-      }
-
-      return (
-        `${gameType} • ${this.wallet.formatTokenBalance(
-          amount,
-          metadata.decimals
-        )} ${tokenTicker}\n` +
-        `👤 Creator: ${creatorInfo} • ${currentTickets}/${maxTickets} tickets${expirationInfo}${winnerInfo}`
+      const status = gameData?.status ?? "active";
+      const { messageText } = await this.formatGameMessage(
+        ctx,
+        gamePda,
+        rawGameType,
+        amount,
+        creatorInfo,
+        status,
+        tokenTicker,
+        gameData?.winner_address,
+        Number(gameAccount.totalAmount) || undefined
       );
+
+      return messageText;
     } catch (error: any) {
       return `Error fetching game: ${error.message}`;
     }
