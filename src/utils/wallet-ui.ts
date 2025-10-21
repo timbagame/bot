@@ -284,7 +284,11 @@ const buildWrapKeyboard = (
 
 const trimTrailingEmptyRows = (keyboard: InlineKeyboard): InlineKeyboard => {
   const rows = keyboard.inline_keyboard;
-  while (rows.length > 0 && rows[rows.length - 1].length === 0) {
+  if (!rows) {
+    return keyboard;
+  }
+
+  while (rows.length > 0 && (rows[rows.length - 1]?.length ?? 0) === 0) {
     rows.pop();
   }
   return keyboard;

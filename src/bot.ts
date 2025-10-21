@@ -33,7 +33,6 @@ import {
   createWalletKeyboard,
   createWalletSettingsKeyboard,
   createBackToWalletKeyboard,
-  appendBackToWalletButton,
   createConfirmWrapKeyboard,
   createTradeConfirmKeyboard,
   createAmountSelectionKeyboard,
