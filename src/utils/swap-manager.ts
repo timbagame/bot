@@ -9,8 +9,6 @@ import {
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
-  TOKEN_PROGRAM_ID,
-  TOKEN_2022_PROGRAM_ID,
 } from "@solana/spl-token";
 import { JupiterClient } from "./jupiter";
 import { PumpFunClient, validatePumpFunSwap } from "./pump-fun";

@@ -19,7 +19,6 @@ import {
   createCloseAccountInstruction,
   getAccount,
   TOKEN_PROGRAM_ID,
-  TOKEN_2022_PROGRAM_ID,
   TokenAccountNotFoundError,
   TokenInvalidAccountOwnerError,
   unpackMint,
@@ -216,10 +215,7 @@ export class WalletManager {
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
     const mintPubkey = new PublicKey(tokenMint);
-    const isToken2022Mint = await this.isToken2022(tokenMint);
-    const programId = isToken2022Mint
-      ? TOKEN_2022_PROGRAM_ID
-      : TOKEN_PROGRAM_ID;
+    const { programId } = await detectTokenProgram(this.connection, mintPubkey);
     const ata = await getAssociatedTokenAddress(
       mintPubkey,
       pubkey,
