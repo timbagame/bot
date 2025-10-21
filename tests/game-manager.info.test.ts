@@ -27,6 +27,7 @@ function dbStub(overrides: Partial<any> = {}) {
   return {
     getGame: (_addr: string) => ({ token_mint: "MINT", token_ticker: "TOK", ...overrides }),
     getCreatorInfo: (_addr: string) => ({ telegramId: "777" }),
+    getGameParticipants: () => [],
     getPlayerTelegramId: (pk: string) => ({
       WINNER111: "999",
     } as Record<string, string>)[pk] || null,
@@ -58,10 +59,11 @@ describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
     };
     const gm = GameManager.getInstance(programStub(gameAcc), walletStub({ blockTime: createdAt + 30 }), dbStub());
     const info = await gm.getGameInfo(ctxStub(), new PublicKey("11111111111111111111111111111111"));
-    expect(info).toContain("Coinflip");
-    expect(info).toContain("TOK");
+    expect(info).toContain("<b>Coinflip • 1 TOK</b>");
     expect(info).toContain("Creator: @user777");
-    expect(info).toContain("/2 tickets");
+    expect(info).toContain("1/2 tickets");
+    expect(info).toContain("Status:");
+    expect(info).toContain("⏰ Expires in:");
   });
 
   test("getCompletedGameInfo shows winner line", async () => {
