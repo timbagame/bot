@@ -56,6 +56,47 @@ describe("Bot helper utilities", () => {
     }
   });
 
+  const expectTradeSummaryBasics = (
+    summary: ReturnType<
+      typeof botModule.__test_formatTradeConfirmationSummary
+    >,
+    {
+      payDisplay,
+      payToken,
+      receiveDisplay,
+      receiveToken,
+      providerLabel,
+      rateDisplay,
+      slippageText,
+      contractAddress,
+    }: {
+      payDisplay: string;
+      payToken: string;
+      receiveDisplay: string;
+      receiveToken: string;
+      providerLabel: string;
+      rateDisplay: string;
+      slippageText: string;
+      contractAddress?: string;
+    }
+  ) => {
+    expect(summary.receiveDisplay).toBe(receiveDisplay);
+    expect(summary.rateDisplay).toBe(rateDisplay);
+    expect(summary.providerLabel).toBe(providerLabel);
+    expect(summary.slippageText).toBe(slippageText);
+
+    expect(summary.message).toContain(
+      `<b>You Pay:</b> ${payDisplay} ${payToken}`
+    );
+    expect(summary.message).toContain(
+      `<b>You Receive:</b> ~${receiveDisplay} ${receiveToken}`
+    );
+    expect(summary.message).toContain(providerLabel);
+    if (contractAddress) {
+      expect(summary.message).toContain(contractAddress);
+    }
+  };
+
   test("toRawAmount converts valid inputs", () => {
     const fromInteger = botModule.__test_toRawAmount("15", 2);
     const fromDecimal = botModule.__test_toRawAmount("0.5", 9);
@@ -231,14 +272,17 @@ describe("Bot helper utilities", () => {
       contractAddress: quote.outputMint,
     });
 
-    expect(summary.receiveDisplay).toBe("455090.146672");
-    expect(summary.rateDisplay).toBe("20959339.8734");
-    expect(summary.providerLabel).toBe("pump-fun (ungraduated)");
-    expect(summary.slippageText).toBe("1.0%");
-    expect(summary.message).toContain("You Pay:");
-    expect(summary.message).toContain("455090.146672 TIMBA");
+    expectTradeSummaryBasics(summary, {
+      payDisplay: botModule.wallet.formatSolBalance(rawAmount),
+      payToken: "SOL",
+      receiveDisplay: "455090.146672",
+      receiveToken: "TIMBA",
+      providerLabel: "pump-fun (ungraduated)",
+      rateDisplay: "20959339.8734",
+      slippageText: "1.0%",
+      contractAddress: quote.outputMint,
+    });
     expect(summary.message).toContain("Pump.fun Token");
-    expect(summary.message).toContain(quote.outputMint);
   });
 
   test("formatTradeConfirmationSummary labels Jupiter routes and defaults slippage", () => {
@@ -264,9 +308,48 @@ describe("Bot helper utilities", () => {
       quote,
     });
 
-    expect(summary.providerLabel).toBe("jupiter (graduated)");
-    expect(summary.slippageText).toBe("1.0%");
-    expect(summary.rateDisplay).toBe("0.00009");
-    expect(summary.message).toContain("jupiter (graduated)");
+    expectTradeSummaryBasics(summary, {
+      payDisplay: botModule.wallet.formatSolBalance(rawAmount),
+      payToken: "SOL",
+      receiveDisplay: "0.000045",
+      receiveToken: "USDC",
+      providerLabel: "jupiter (graduated)",
+      rateDisplay: "0.00009",
+      slippageText: "1.0%",
+    });
+  });
+
+  test("formatTradeConfirmationSummary handles sell paths", () => {
+    const rawAmount = 250_000; // 0.25 tokens with 6 decimals
+    const quote = {
+      inputMint: "TokenMint",
+      outputMint: "So11111111111111111111111111111111111111112",
+      inputAmount: rawAmount.toString(),
+      outputAmount: "137500", // assume 0.1375 SOL (5 decimals?)
+      estimatedRate: 0.55,
+      slippage: 2,
+      provider: "jupiter" as const,
+    };
+
+    const summary = botModule.__test_formatTradeConfirmationSummary({
+      kind: "sell",
+      payToken: "FOO",
+      payDisplay: botModule.wallet.formatTokenBalance(rawAmount, 6),
+      payRawAmount: rawAmount,
+      payDecimals: 6,
+      receiveToken: "SOL",
+      receiveDecimals: 9,
+      quote,
+    });
+
+    expectTradeSummaryBasics(summary, {
+      payDisplay: botModule.wallet.formatTokenBalance(rawAmount, 6),
+      payToken: "FOO",
+      receiveDisplay: botModule.wallet.formatSolBalance(Number(quote.outputAmount)),
+      receiveToken: "SOL",
+      providerLabel: "jupiter (graduated)",
+      rateDisplay: "0.00055",
+      slippageText: "2.0%",
+    });
   });
 });
