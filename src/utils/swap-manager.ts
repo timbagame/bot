@@ -6,10 +6,6 @@ import {
   VersionedTransaction,
   SystemProgram,
 } from "@solana/web3.js";
-import {
-  getAssociatedTokenAddress,
-  createAssociatedTokenAccountInstruction,
-} from "@solana/spl-token";
 import { JupiterClient } from "./jupiter";
 import { PumpFunClient, validatePumpFunSwap } from "./pump-fun";
 import { NetworkDetector } from "./network-detector";
@@ -19,7 +15,6 @@ import {
   JIT_SWAP_FEE_BUFFER_LAMPORTS,
   MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
 } from "./constants";
-import { detectTokenProgram } from "./token-programs";
 
 // ================================
 // UNIFIED SWAP MANAGER
@@ -925,36 +920,19 @@ export class SwapManager {
       inputMint !== "SOL"
     ) {
       const mintPubkey = new PublicKey(inputMint);
-      const { isToken2022: isInput2022, programId: inputProgramId } =
-        await detectTokenProgram(this.connection, mintPubkey);
-
-      const inputTokenAccount = await getAssociatedTokenAddress(
-        mintPubkey,
+      const inputSetup = await this.wallet.ensureAssociatedTokenAccount(
         userKeypair.publicKey,
-        false,
-        inputProgramId
+        mintPubkey,
+        userKeypair
       );
 
-      const inputAccountInfo = await this.connection.getAccountInfo(
-        inputTokenAccount
-      );
-      if (!inputAccountInfo) {
-        // Account doesn't exist, create it
+      if (inputSetup.created) {
         console.log(
           `Creating input token account for ${inputMint} (Token-${
-            isInput2022 ? "2022" : "SPL"
+            inputSetup.isToken2022 ? "2022" : "SPL"
           })`
         );
-
-        instructions.push(
-          createAssociatedTokenAccountInstruction(
-            userKeypair.publicKey, // payer
-            inputTokenAccount, // ata
-            userKeypair.publicKey, // owner
-            mintPubkey, // mint
-            inputProgramId
-          )
-        );
+        instructions.push(...inputSetup.instructions);
       }
     }
 
@@ -964,36 +942,19 @@ export class SwapManager {
       outputMint !== "SOL"
     ) {
       const mintPubkey = new PublicKey(outputMint);
-      const { isToken2022: isOutput2022, programId: outputProgramId } =
-        await detectTokenProgram(this.connection, mintPubkey);
-
-      const outputTokenAccount = await getAssociatedTokenAddress(
-        mintPubkey,
+      const outputSetup = await this.wallet.ensureAssociatedTokenAccount(
         userKeypair.publicKey,
-        false,
-        outputProgramId
+        mintPubkey,
+        userKeypair
       );
 
-      const outputAccountInfo = await this.connection.getAccountInfo(
-        outputTokenAccount
-      );
-      if (!outputAccountInfo) {
-        // Account doesn't exist, create it
+      if (outputSetup.created) {
         console.log(
           `Creating output token account for ${outputMint} (Token-${
-            isOutput2022 ? "2022" : "SPL"
+            outputSetup.isToken2022 ? "2022" : "SPL"
           })`
         );
-
-        instructions.push(
-          createAssociatedTokenAccountInstruction(
-            userKeypair.publicKey, // payer
-            outputTokenAccount, // ata
-            userKeypair.publicKey, // owner
-            mintPubkey, // mint
-            outputProgramId
-          )
-        );
+        instructions.push(...outputSetup.instructions);
       }
     }
 
