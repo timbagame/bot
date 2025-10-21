@@ -82,6 +82,7 @@ import {
   SELL_NOOP_CALLBACK,
 } from "./utils/trade-ui";
 import { respondWithMenu } from "./utils/menu-response";
+import { awaitTelegramRetry } from "./utils/media";
 import { parseDecimalAmount } from "./utils/amount";
 import { handleCoinflipCommand, type CoinflipDeps } from "./handlers/game";
 
@@ -198,6 +199,10 @@ export const __test_setWalletCache = (
   });
 };
 
+export const __test_setGameManager = (manager: GameManager): void => {
+  gameManager = manager;
+};
+
 const ensureCreator = (
   ctx: Context,
   creatorId: string,
@@ -211,6 +216,48 @@ const ensureCreator = (
   }
 
   return true;
+};
+
+const getTelegramErrorDescription = (error: unknown): string => {
+  if (!error || typeof error !== "object") {
+    return "";
+  }
+
+  const description = (error as any).description ?? (error as any).message;
+  return typeof description === "string" ? description : "";
+};
+
+const isMessageMissingError = (error: unknown): boolean => {
+  const description = getTelegramErrorDescription(error).toLowerCase();
+  if (!description) {
+    return false;
+  }
+
+  return (
+    description.includes("message to edit not found") ||
+    description.includes("message to delete not found")
+  );
+};
+
+const notifyConfirmUser = async (
+  ctx: Context,
+  message: string,
+  confirmMessageMissing: boolean
+): Promise<void> => {
+  if (confirmMessageMissing) {
+    await awaitTelegramRetry(() =>
+      ctx.reply(message, {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+      })
+    );
+    return;
+  }
+
+  await respondWithMenu(ctx, {
+    text: message,
+    parseMode: "HTML",
+  });
 };
 
 // Test-only proxies for user-state helpers
@@ -3772,6 +3819,7 @@ bot.callbackQuery(
   /^confirm_game_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/,
   async (ctx) => {
     const callbackData = ctx.callbackQuery?.data;
+    let confirmMessageMissing = false;
 
     try {
       console.log("🔔 Confirm game callback triggered:", callbackData);
@@ -3826,7 +3874,7 @@ bot.callbackQuery(
           ctx.chat?.id
         );
 
-        if (chatId && messageId) {
+        if (chatId && messageId && !confirmMessageMissing) {
           try {
             await ctx.api.editMessageReplyMarkup(chatId, messageId);
           } catch (markError) {
@@ -3834,22 +3882,30 @@ bot.callbackQuery(
               "Failed to clear confirm keyboard before game creation:",
               markError
             );
+            if (isMessageMissingError(markError)) {
+              confirmMessageMissing = true;
+            }
           }
 
-          try {
-            await ctx.api.editMessageText(
-              chatId,
-              messageId,
-              "⏳ Creating game…",
-              {
-                parse_mode: "HTML",
+          if (!confirmMessageMissing) {
+            try {
+              await ctx.api.editMessageText(
+                chatId,
+                messageId,
+                "⏳ Creating game…",
+                {
+                  parse_mode: "HTML",
+                }
+              );
+            } catch (textError) {
+              console.warn(
+                "Failed to set progress text before game creation:",
+                textError
+              );
+              if (isMessageMissingError(textError)) {
+                confirmMessageMissing = true;
               }
-            );
-          } catch (textError) {
-            console.warn(
-              "Failed to set progress text before game creation:",
-              textError
-            );
+            }
           }
         }
 
@@ -3877,18 +3933,20 @@ bot.callbackQuery(
         );
 
         if (!result.success) {
-          await respondWithMenu(ctx, {
-            text: `❌ ${result.error || "Failed to create game"}`,
-            parseMode: "HTML",
-          });
+          await notifyConfirmUser(
+            ctx,
+            `❌ ${result.error || "Failed to create game"}`,
+            confirmMessageMissing
+          );
           return;
         }
 
         if (!result.gameAddress) {
-          await respondWithMenu(ctx, {
-            text: "❌ Game created but address not returned",
-            parseMode: "HTML",
-          });
+          await notifyConfirmUser(
+            ctx,
+            "❌ Game created but address not returned",
+            confirmMessageMissing
+          );
           return;
         }
 
@@ -3899,25 +3957,32 @@ bot.callbackQuery(
         const replyToUserMessageId = (ctx.callbackQuery as any)?.message
           ?.reply_to_message?.message_id as number | undefined;
 
-        if (chatId && messageId) {
+        if (chatId && messageId && !confirmMessageMissing) {
           try {
             await ctx.api.deleteMessage(chatId, messageId);
           } catch (e) {
             console.warn("Could not delete confirmation message:", e);
-            try {
-              await ctx.api.editMessageText(
-                chatId,
-                messageId,
-                `✅ Game created!\n\n<code>${result.gameAddress}</code>`,
-                {
-                  parse_mode: "HTML",
+            if (isMessageMissingError(e)) {
+              confirmMessageMissing = true;
+            } else {
+              try {
+                await ctx.api.editMessageText(
+                  chatId,
+                  messageId,
+                  `✅ Game created!\n\n<code>${result.gameAddress}</code>`,
+                  {
+                    parse_mode: "HTML",
+                  }
+                );
+              } catch (fallbackError) {
+                console.warn(
+                  "Failed to mark confirmation message as processed:",
+                  fallbackError
+                );
+                if (isMessageMissingError(fallbackError)) {
+                  confirmMessageMissing = true;
                 }
-              );
-            } catch (fallbackError) {
-              console.warn(
-                "Failed to mark confirmation message as processed:",
-                fallbackError
-              );
+              }
             }
           }
         }
@@ -3970,14 +4035,15 @@ bot.callbackQuery(
       }
 
       try {
-        await respondWithMenu(ctx, {
-          text: "❌ Failed to create game. Please try again.",
-          parseMode: "HTML",
-        });
-      } catch (editError) {
+        await notifyConfirmUser(
+          ctx,
+          "❌ Failed to create game. Please try again.",
+          confirmMessageMissing
+        );
+      } catch (notifyError) {
         console.error(
           "Failed to update confirmation message after error:",
-          editError
+          notifyError
         );
       }
     }
