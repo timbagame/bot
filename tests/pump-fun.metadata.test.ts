@@ -3,6 +3,9 @@ import { PumpFunClient } from "../src/utils/pump-fun";
 
 class ConnNoMeta {
   async getAccountInfo(_pk: any) { return null as any; }
+  async getParsedAccountInfo(_pk: any) {
+    return { value: { data: { parsed: { info: { decimals: 6 } } } } } as any;
+  }
 }
 
 const realFetch = globalThis.fetch;
