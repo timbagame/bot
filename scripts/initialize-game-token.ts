@@ -19,6 +19,7 @@ import * as path from "path";
 import type { Timba } from "../idl/idlType";
 import { WalletManager } from "../src/utils/wallet";
 import { getSupportedTokens } from "../src/utils/token-registry";
+import { NetworkDetector, type SolanaNetwork } from "../src/utils/network-detector";
 import {
   loadKeypairFromPath,
   resolveOracleOperatorKeypair,
@@ -30,25 +31,7 @@ import { createAnchorContext } from "./utils/anchor-context";
 // CONFIGURATION
 // ================================
 
-type SolanaCluster = "mainnet" | "devnet" | "testnet";
-
 const DEFAULT_RPC_URL = "https://api.mainnet-beta.solana.com";
-
-const normalizeCluster = (value?: string): SolanaCluster | null => {
-  if (!value) return null;
-  const normalized = value.toLowerCase();
-  if (normalized === "mainnet" || normalized === "mainnet-beta") return "mainnet";
-  if (normalized === "devnet") return "devnet";
-  if (normalized === "testnet") return "testnet";
-  return null;
-};
-
-const deriveClusterFromRpc = (rpcUrl: string): SolanaCluster => {
-  const lowerUrl = rpcUrl.toLowerCase();
-  if (lowerUrl.includes("devnet")) return "devnet";
-  if (lowerUrl.includes("testnet")) return "testnet";
-  return "mainnet";
-};
 
 const resolveEnvPath = (envVar?: string, fallback?: string): string => {
   const trimmed = envVar?.trim();
@@ -57,9 +40,21 @@ const resolveEnvPath = (envVar?: string, fallback?: string): string => {
 };
 
 const RPC_URL = resolveEnvPath(process.env["SOLANA_NETWORK"], DEFAULT_RPC_URL);
-const NETWORK =
-  normalizeCluster(process.env["SOLANA_CLUSTER"]) ??
-  deriveClusterFromRpc(RPC_URL);
+
+const resolveNetworkOverride = (value?: string): SolanaNetwork | null => {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "mainnet" || normalized === "mainnet-beta") return "mainnet";
+  if (normalized === "devnet") return "devnet";
+  if (normalized === "testnet") return "testnet";
+  if (normalized === "localnet") return "localnet";
+  return null;
+};
+
+const NETWORK_OVERRIDE = resolveNetworkOverride(process.env["SOLANA_CLUSTER"]);
+const NETWORK: SolanaNetwork =
+  NETWORK_OVERRIDE ?? NetworkDetector.detectNetwork(RPC_URL);
+const NETWORK_DISPLAY_NAME = NetworkDetector.getNetworkDisplayName(NETWORK);
 
 const resolveMinAmount = (envKey: string, fallback: bigint): bigint => {
   const rawValue = process.env[envKey]?.trim();
@@ -83,6 +78,7 @@ const resolveMinAmount = (envKey: string, fallback: bigint): bigint => {
 const CONFIG = {
   RPC_URL,
   NETWORK,
+  NETWORK_DISPLAY_NAME,
   ADMIN_KEYPAIR_PATH: resolveEnvPath(
     process.env["ADMIN_KEYPAIR_PATH"],
     "./admin-keypair.json"
@@ -142,6 +138,10 @@ type InitializationCostEstimate = {
 type FeeResponse = Awaited<ReturnType<Connection["getFeeForMessage"]>>;
 
 const buildExplorerUrl = (resource: "tx" | "token" | "account", value: string) => {
+  if (CONFIG.NETWORK === "localnet") {
+    return `Explorer not available for ${CONFIG.NETWORK_DISPLAY_NAME}`;
+  }
+
   const basePath = `${resource}/${value}`;
   if (CONFIG.NETWORK === "mainnet") {
     return `https://solscan.io/${basePath}`;
@@ -245,7 +245,7 @@ const estimateInitializationCosts = async (
     const mintAccount = await connection.getAccountInfo(mint);
     if (!mintAccount) {
       throw new Error(
-        `❌ Token mint ${tokenMint} does not exist on ${CONFIG.NETWORK}`
+        `❌ Token mint ${tokenMint} does not exist on ${CONFIG.NETWORK_DISPLAY_NAME}`
       );
     }
 
@@ -414,7 +414,7 @@ async function initializeToken(
   const mintAccount = await connection.getAccountInfo(mint);
   if (!mintAccount) {
     throw new Error(
-      `❌ Token mint ${tokenMint} does not exist on ${CONFIG.NETWORK}`
+      `❌ Token mint ${tokenMint} does not exist on ${CONFIG.NETWORK_DISPLAY_NAME}`
     );
   }
   console.log(`✅ ${tokenTicker} mint verified`);
@@ -618,7 +618,9 @@ async function initializeGameToken() {
 
   // Connect to network
   const connection = new Connection(CONFIG.RPC_URL, "confirmed");
-  console.log(`✅ Connected to ${CONFIG.NETWORK}`);
+  console.log(
+    `✅ Connected to ${CONFIG.NETWORK_DISPLAY_NAME} (${CONFIG.NETWORK})`
+  );
 
   // Load admin keypair
   const adminKeypair = loadKeypairFromPath(CONFIG.ADMIN_KEYPAIR_PATH);
