@@ -1645,10 +1645,18 @@ export class GameManager {
 
         try {
           if (operationType === "Game creation") {
-            console.log(
-              `✅ Game account found - transaction ${signature} succeeded despite timeout`
+            const gameAccount = await this.program.account.game.fetchNullable(
+              gamePda
             );
-            return true;
+
+            if (gameAccount) {
+              console.log(
+                `✅ Game account confirmed after timeout - transaction ${signature}`
+              );
+              return true;
+            }
+
+            throw new Error("Game account not found after timeout");
           } else if (operationType === "Player join" && playerPubkey) {
             const isInGame = await this.isPlayerInGame(gamePda, playerPubkey);
             if (isInGame) {
@@ -1662,6 +1670,7 @@ export class GameManager {
           console.error(
             `❌ ${operationType} verification failed, transaction ${signature} likely failed`
           );
+          throw checkError;
         }
       }
 
