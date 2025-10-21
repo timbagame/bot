@@ -9,14 +9,16 @@ import {
 type MakeCtxOptions = {
   editError?: Error;
   editDescription?: string;
+  forceReply?: boolean;
 };
 
 function makeCtx(options: MakeCtxOptions = {}) {
   const calls: any[] = [];
-  const { editError, editDescription } = options;
+  const { editError, editDescription, forceReply = false } = options;
   const ctx: any = {
     from: { id: 1 },
     message: { message_id: 7 },
+    me: { id: 42 },
     editMessageMedia: async (...args: any[]) => {
       calls.push(["edit", ...args]);
       if (editError) {
@@ -25,7 +27,10 @@ function makeCtx(options: MakeCtxOptions = {}) {
         }
         throw editError;
       }
-      throw new Error("force-reply");
+      if (forceReply) {
+        throw new Error("force-reply");
+      }
+      return { ok: true };
     },
     replyWithVideo: async (...args: any[]) => { calls.push(["video", ...args]); return { ok: true }; },
     reply: async (...args: any[]) => { calls.push(["reply", ...args]); return { ok: true }; },
@@ -35,8 +40,14 @@ function makeCtx(options: MakeCtxOptions = {}) {
 }
 
 describe("wallet handler showWalletUI", () => {
-  test("renders caption and falls back to replyWithVideo when edit fails", async () => {
+  test("edits existing wallet media for bot-authored callback messages", async () => {
     const ctx: any = makeCtx();
+    ctx.callbackQuery = {
+      message: {
+        message_id: 11,
+        from: { id: 42, is_bot: true },
+      },
+    };
     let capturedLines: any;
     const deps: any = {
       wallet: {
@@ -55,8 +66,38 @@ describe("wallet handler showWalletUI", () => {
     };
     await showWalletUI(ctx, deps);
     const calls = ctx.__calls;
+    expect(calls).toHaveLength(1);
     expect(calls[0][0]).toBe("edit");
-    expect(calls[1][0]).toBe("video");
+    expect(capturedLines).toEqual([
+      { ticker: "SOL", amount: "0.000000", usdValue: "0.00", unit: "SOL" },
+      { ticker: "USDC", amount: "1", usdValue: "1.00" },
+    ]);
+  });
+
+  test("sends new wallet video when invoked via command context", async () => {
+    const ctx: any = makeCtx();
+    let capturedLines: any;
+    const deps: any = {
+      wallet: {
+        getKeyPair: () => ({ publicKey: { toBase58: () => "WALLETADDR11111111111111111111111111111111" } }),
+        formatSolBalance: (_: number) => "0.000000",
+        formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toFixed(0),
+      },
+      getCachedWalletData: async () => ({ solBalance: 0, tokenBalances: [{ mint: "EPjF...USDC", ticker: "USDC", balance: 1000000, decimals: 6 }] }),
+      getPriceUSD: async (_: string) => 1,
+      buildWalletCaption: (_: string, lines: any) => {
+        capturedLines = lines;
+        return "CAPTION";
+      },
+      createWalletKeyboard: () => ({ rows: [] } as any),
+      WINNER_VIDEO_ID: "VID",
+    };
+
+    await showWalletUI(ctx, deps);
+
+    const calls = ctx.__calls;
+    expect(calls.some((call: any[]) => call[0] === "edit")).toBe(false);
+    expect(calls[0][0]).toBe("video");
     expect(capturedLines).toEqual([
       { ticker: "SOL", amount: "0.000000", usdValue: "0.00", unit: "SOL" },
       { ticker: "USDC", amount: "1", usdValue: "1.00" },
@@ -65,6 +106,12 @@ describe("wallet handler showWalletUI", () => {
 
   test("shows error state when fetching balances fails", async () => {
     const ctx: any = makeCtx();
+    ctx.callbackQuery = {
+      message: {
+        message_id: 12,
+        from: { id: 42, is_bot: true },
+      },
+    };
     const deps: any = {
       wallet: {
         getKeyPair: () => ({ publicKey: { toBase58: () => "WALLETADDR11111111111111111111111111111111" } }),
@@ -78,11 +125,9 @@ describe("wallet handler showWalletUI", () => {
     };
     await showWalletUI(ctx, deps);
     const calls = ctx.__calls;
-    // First tries edit, then falls back to replyWithVideo with error caption
     expect(calls[0][0]).toBe("edit");
-    expect(calls[1][0]).toBe("video");
-    const caption = calls[1][1]?.caption || calls[1][2]?.caption || "";
-    expect(String(caption)).toContain("Error loading balances");
+    const editPayload = calls[0][1];
+    expect(String(editPayload?.caption ?? "")).toContain("Error loading balances");
   });
 
   test("falls back to text when edit fails with recoverable media error", async () => {
@@ -90,6 +135,12 @@ describe("wallet handler showWalletUI", () => {
       editError: new Error("recoverable"),
       editDescription: "Bad Request: wrong file identifier specified",
     });
+    ctx.callbackQuery = {
+      message: {
+        message_id: 13,
+        from: { id: 42, is_bot: true },
+      },
+    };
     const deps: any = {
       wallet: {
         getKeyPair: () => ({ publicKey: { toBase58: () => "WALLETADDR11111111111111111111111111111111" } }),
