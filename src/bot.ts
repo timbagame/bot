@@ -1021,8 +1021,6 @@ type GameSetupCopy = {
   suggestionLabel: string;
   lowBalanceCopy?: {
     object: string;
-    exampleIntro: string;
-    exampleResult: string;
   };
   logPrefix: string;
 };
@@ -1040,9 +1038,7 @@ const GAME_SETUP_COPY: Record<"coinflip" | "giveaway", GameSetupCopy> = {
     amountPrompt: "Select stake per player in <b>{TOKEN}</b>:",
     suggestionLabel: "Suggested stakes",
     lowBalanceCopy: {
-      object: "the take-home pot",
-      exampleIntro: "With the minimum stake of",
-      exampleResult: "the winner receives about",
+      object: "stake per player",
     },
     logPrefix: "🪙",
   },
@@ -1058,9 +1054,7 @@ const GAME_SETUP_COPY: Record<"coinflip" | "giveaway", GameSetupCopy> = {
     amountPrompt: "Select prize amount in <b>{TOKEN}</b>:",
     suggestionLabel: "Suggested prizes",
     lowBalanceCopy: {
-      object: "the actual prize",
-      exampleIntro: "With the minimum prize of",
-      exampleResult: "the winner receives about",
+      object: "prize amount",
     },
     logPrefix: "🎁",
   },
@@ -1113,15 +1107,11 @@ const startInteractiveGameSetup = async (
   message += balanceText;
 
   if (copy.lowBalanceCopy && userBalance < contractMin) {
-    const { object, exampleIntro, exampleResult } = copy.lowBalanceCopy;
+    const { object } = copy.lowBalanceCopy;
     const minDisplay = formatTokenDisplay(contractMin, {
       decimals: tokenInfo.decimals,
     });
-    const afterFeesDisplay = formatTokenDisplay(contractMin * 0.9, {
-      decimals: tokenInfo.decimals,
-    });
-    message += `\n⚠️ <b>Fee Warning:</b> Oracle fees (~5-10%) reduce ${object}.\n`;
-    message += `${exampleIntro} ${minDisplay} ${tokenInfo.tokenTicker}, ${exampleResult} ${afterFeesDisplay} ${tokenInfo.tokenTicker} after fees.\n`;
+    message += `\n⚠️ Minimum ${object}: ${minDisplay} ${tokenInfo.tokenTicker}.\n`;
   }
 
   if (copy.bulletPoints.length > 0) {
