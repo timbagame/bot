@@ -37,6 +37,34 @@ export class NetworkDetector {
   }
 
   /**
+   * Resolve a user-friendly display name directly from an RPC URL.
+   * Returns "Custom Network" when the RPC cannot be associated with
+   * one of the known clusters.
+   */
+  static getDisplayNameFromRpc(rpcUrl: string | undefined | null): string {
+    if (!rpcUrl) {
+      return this.getNetworkDisplayName(this.getCurrentNetwork());
+    }
+
+    const url = rpcUrl.toLowerCase();
+    const network = this.detectNetwork(url);
+
+    const isRecognized =
+      url.includes("devnet") ||
+      url.includes("testnet") ||
+      url.includes("mainnet") ||
+      url.includes("api.solana.com") ||
+      url.includes("localhost") ||
+      url.includes("127.0.0.1");
+
+    if (!isRecognized) {
+      return "Custom Network";
+    }
+
+    return this.getNetworkDisplayName(network);
+  }
+
+  /**
    * Check if network supports Jupiter
    */
   static supportsJupiter(network: SolanaNetwork): boolean {

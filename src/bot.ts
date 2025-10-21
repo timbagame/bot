@@ -74,7 +74,7 @@ import {
 import { recentUpdateGuard } from "./utils/recent-update";
 import { getPriceUSD } from "./utils/prices";
 import { patchReplyBehavior } from "./utils/reply-patch";
-import { getNetworkFromRPC } from "./utils/network-display";
+import { NetworkDetector } from "./utils/network-detector";
 import {
   buildBuyMenuUI,
   buildSellMenuUI,
@@ -145,7 +145,7 @@ const CONTRACT_EXAMPLE_LINES = (() => {
     .map((mint) => `• <code>${mint}</code>`);
 })();
 
-// See utils/network-display.ts for getNetworkFromRPC
+// Network detection helpers available via utils/network-detector.ts
 
 // Helper moved to utils/service-health.ts as checkServiceHealth
 
@@ -2793,7 +2793,9 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
       "",
       swapData.quote.provider === "pump-fun"
         ? "🔥 **Pump.fun Token** - Non-graduated token swap"
-        : `✅ **${getNetworkFromRPC(process.env.SOLANA_NETWORK || wallet.getConnection().rpcEndpoint)} Transaction** - Tokens transferred successfully`,
+        : `✅ **${NetworkDetector.getDisplayNameFromRpc(
+            process.env.SOLANA_NETWORK || wallet.getConnection().rpcEndpoint
+          )} Transaction** - Tokens transferred successfully`,
     ].join("\n");
 
     await respondWithMenu(ctx, { text: successMessage, parseMode: "Markdown" });
