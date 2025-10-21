@@ -1,11 +1,12 @@
 import { describe, test, expect } from "bun:test";
 import { onMainWallet, onWalletRefresh, onWalletSettings } from "../src/handlers/wallet";
 import { createWalletSettingsKeyboard } from "../src/utils/keyboards";
+import { getTelegramId } from "../src/utils/context-helpers";
 
 function makeCtx() {
   const calls: any[] = [];
   const ctx: any = {
-    from: { id: 1 },
+    from: { id: "1" },
     answerCallbackQuery: async (...args: any[]) => { calls.push(["answer", ...args]); return { ok: true }; },
     editMessageText: async (...args: any[]) => { calls.push(["editText", ...args]); throw new Error("fail"); },
     reply: async (...args: any[]) => { calls.push(["reply", ...args]); return { ok: true }; },
@@ -39,7 +40,7 @@ describe("wallet handlers", () => {
       createSettingsKeyboard: () => createWalletSettingsKeyboard(),
     };
     await onWalletRefresh(ctx, deps);
-    expect(cleared).toBe(1n);
+    expect(cleared).toBe(getTelegramId(ctx));
     expect(shown).toBe(1);
   });
 
