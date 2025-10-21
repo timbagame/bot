@@ -50,62 +50,43 @@ export class TokenDatabase extends BaseDatabase {
     tokenTicker: string,
     decimals: number
   ): void {
-    try {
-      const stmt = this.db.prepare(
-        "INSERT OR REPLACE INTO known_tokens (token_mint, token_ticker, decimals, added_at) VALUES (?, ?, ?, ?)"
-      );
-      stmt.run(tokenMint, tokenTicker, decimals, Date.now());
-    } catch (error) {
-      console.error("Error adding known token:", error);
-      throw error;
-    }
+    this.run(
+      "INSERT OR REPLACE INTO known_tokens (token_mint, token_ticker, decimals, added_at) VALUES (?, ?, ?, ?)",
+      [tokenMint, tokenTicker, decimals, Date.now()],
+      "adding known token"
+    );
   }
 
   public getKnownTokenByTicker(ticker: string): KnownToken | null {
-    try {
-      const stmt = this.db.prepare(
-        "SELECT * FROM known_tokens WHERE UPPER(token_ticker) = UPPER(?)"
-      );
-      return (stmt.get(ticker) as KnownToken) || null;
-    } catch (error) {
-      console.error("Error getting known token by ticker:", error);
-      throw error;
-    }
+    return this.get<KnownToken>(
+      "SELECT * FROM known_tokens WHERE UPPER(token_ticker) = UPPER(?)",
+      [ticker],
+      "getting known token by ticker"
+    );
   }
 
   public getKnownTokenByMint(tokenMint: string): KnownToken | null {
-    try {
-      const stmt = this.db.prepare(
-        "SELECT * FROM known_tokens WHERE token_mint = ?"
-      );
-      return (stmt.get(tokenMint) as KnownToken) || null;
-    } catch (error) {
-      console.error("Error getting known token by mint:", error);
-      throw error;
-    }
+    return this.get<KnownToken>(
+      "SELECT * FROM known_tokens WHERE token_mint = ?",
+      [tokenMint],
+      "getting known token by mint"
+    );
   }
 
   public getAllKnownTokens(): KnownToken[] {
-    try {
-      return this.db
-        .query("SELECT * FROM known_tokens ORDER BY token_ticker")
-        .all() as KnownToken[];
-    } catch (error) {
-      console.error("Error getting all known tokens:", error);
-      throw error;
-    }
+    return this.all<KnownToken>(
+      "SELECT * FROM known_tokens ORDER BY token_ticker",
+      [],
+      "getting all known tokens"
+    );
   }
 
   public removeKnownToken(tokenMint: string): void {
-    try {
-      const stmt = this.db.prepare(
-        "DELETE FROM known_tokens WHERE token_mint = ?"
-      );
-      stmt.run(tokenMint);
-    } catch (error) {
-      console.error("Error removing known token:", error);
-      throw error;
-    }
+    this.run(
+      "DELETE FROM known_tokens WHERE token_mint = ?",
+      [tokenMint],
+      "removing known token"
+    );
   }
 
   // ================================
@@ -119,22 +100,18 @@ export class TokenDatabase extends BaseDatabase {
     decimals?: number,
     logoUri?: string
   ): void {
-    try {
-      const stmt = this.db.prepare(
-        "INSERT OR REPLACE INTO token_metadata (token_mint, name, symbol, decimals, logo_uri, last_updated) VALUES (?, ?, ?, ?, ?, ?)"
-      );
-      stmt.run(
+    this.run(
+      "INSERT OR REPLACE INTO token_metadata (token_mint, name, symbol, decimals, logo_uri, last_updated) VALUES (?, ?, ?, ?, ?, ?)",
+      [
         tokenMint,
         name || null,
         symbol || null,
         decimals || null,
         logoUri || null,
-        Date.now()
-      );
-    } catch (error) {
-      console.error("Error saving token metadata:", error);
-      throw error;
-    }
+        Date.now(),
+      ],
+      "saving token metadata"
+    );
   }
 
   public getTokenMetadata(tokenMint: string): {
@@ -145,15 +122,11 @@ export class TokenDatabase extends BaseDatabase {
     logo_uri?: string;
     last_updated: number;
   } | null {
-    try {
-      const stmt = this.db.prepare(
-        "SELECT * FROM token_metadata WHERE token_mint = ?"
-      );
-      return (stmt.get(tokenMint) as any) || null;
-    } catch (error) {
-      console.error("Error getting token metadata:", error);
-      throw error;
-    }
+    return this.get(
+      "SELECT * FROM token_metadata WHERE token_mint = ?",
+      [tokenMint],
+      "getting token metadata"
+    );
   }
 
   // ================================
@@ -162,13 +135,13 @@ export class TokenDatabase extends BaseDatabase {
 
   public getTokenCount(): number {
     try {
-      const stmt = this.db.prepare(
-        "SELECT COUNT(*) as count FROM known_tokens"
+      const result = this.get<{ count: number }>(
+        "SELECT COUNT(*) as count FROM known_tokens",
+        [],
+        "getting token count"
       );
-      const result = stmt.get() as { count: number };
-      return result.count;
-    } catch (error) {
-      console.error("Error getting token count:", error);
+      return result?.count ?? 0;
+    } catch {
       return 0;
     }
   }
@@ -176,13 +149,13 @@ export class TokenDatabase extends BaseDatabase {
   public cleanupOldMetadata(olderThanDays: number = 30): number {
     try {
       const cutoffTime = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
-      const stmt = this.db.prepare(
-        "DELETE FROM token_metadata WHERE last_updated < ?"
+      const result = this.run(
+        "DELETE FROM token_metadata WHERE last_updated < ?",
+        [cutoffTime],
+        "cleaning up old metadata"
       );
-      const result = stmt.run(cutoffTime);
-      return result.changes || 0;
-    } catch (error) {
-      console.error("Error cleaning up old metadata:", error);
+      return (result?.changes as number | undefined) ?? 0;
+    } catch {
       return 0;
     }
   }

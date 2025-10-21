@@ -26,6 +26,7 @@ export function resolveDatabaseFilename(filename: string): string {
  */
 export abstract class BaseDatabase {
   protected db: Database;
+  private readonly name: string;
 
   protected constructor(
     filename: string,
@@ -33,6 +34,7 @@ export abstract class BaseDatabase {
     name: string
   ) {
     const resolvedFilename = resolveDatabaseFilename(filename);
+    this.name = name;
     this.db = new Database(resolvedFilename, { create: true });
 
     try {
@@ -41,8 +43,52 @@ export abstract class BaseDatabase {
       }
       console.log(`${name} database initialized`);
     } catch (error) {
-      console.error(`Error initializing ${name} database:`, error);
-      throw error;
+      this.handleError(`initializing ${name} database`, error);
     }
+  }
+
+  protected run(
+    sql: string,
+    params: unknown[] = [],
+    operation: string = "running statement"
+  ) {
+    try {
+      const stmt = this.db.prepare(sql);
+      return stmt.run(...params);
+    } catch (error) {
+      return this.handleError(`during ${operation}`, error);
+    }
+  }
+
+  protected get<T>(
+    sql: string,
+    params: unknown[] = [],
+    operation: string = "executing query"
+  ): T | null {
+    try {
+      const stmt = this.db.prepare(sql);
+      const result = stmt.get(...params) as T | undefined;
+      return result ?? null;
+    } catch (error) {
+      return this.handleError(`during ${operation}`, error);
+    }
+  }
+
+  protected all<T>(
+    sql: string,
+    params: unknown[] = [],
+    operation: string = "executing query"
+  ): T[] {
+    try {
+      const stmt = this.db.prepare(sql);
+      return stmt.all(...params) as T[];
+    } catch (error) {
+      return this.handleError(`during ${operation}`, error);
+    }
+  }
+
+  private handleError(operation: string, error: unknown): never {
+    console.error(`[${this.name} DB] Error ${operation}:`, error);
+    throw error instanceof Error ? error : new Error(String(error));
   }
 }

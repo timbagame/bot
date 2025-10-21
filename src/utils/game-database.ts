@@ -69,11 +69,9 @@ export class GameDatabase extends BaseDatabase {
     minPlayers?: number,
     chatId?: number
   ): void {
-    try {
-      const stmt = this.db.prepare(
-        "INSERT INTO games (game_address, creator_telegram_id, amount, created_at, game_type, token_mint, token_ticker, max_players, min_players, chat_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-      );
-      stmt.run(
+    this.run(
+      "INSERT INTO games (game_address, creator_telegram_id, amount, created_at, game_type, token_mint, token_ticker, max_players, min_players, chat_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [
         gameAddress,
         creatorTelegramId,
         amount,
@@ -83,24 +81,18 @@ export class GameDatabase extends BaseDatabase {
         tokenTicker || null,
         maxPlayers || null,
         minPlayers || null,
-        chatId || null
-      );
-    } catch (error) {
-      console.error("Error saving game:", error);
-      throw error;
-    }
+        chatId || null,
+      ],
+      "saving game"
+    );
   }
 
   public getGame(gameAddress: string): GameData | null {
-    try {
-      const stmt = this.db.prepare(
-        "SELECT * FROM games WHERE game_address = ?"
-      );
-      return (stmt.get(gameAddress) as GameData) || null;
-    } catch (error) {
-      console.error("Error getting game:", error);
-      throw error;
-    }
+    return this.get<GameData>(
+      "SELECT * FROM games WHERE game_address = ?",
+      [gameAddress],
+      "getting game"
+    );
   }
 
   public completeGame(
@@ -108,79 +100,63 @@ export class GameDatabase extends BaseDatabase {
     winnerAddress: string,
     completedAt?: number
   ): void {
-    try {
-      const timestamp = completedAt || Date.now();
-      const stmt = this.db.prepare(
-        "UPDATE games SET winner_address = ?, completed_at = ?, status = ? WHERE game_address = ?"
-      );
-      stmt.run(winnerAddress, timestamp, "completed", gameAddress);
-    } catch (error) {
-      console.error("Error completing game:", error);
-      throw error;
-    }
+    const timestamp = completedAt || Date.now();
+    this.run(
+      "UPDATE games SET winner_address = ?, completed_at = ?, status = ? WHERE game_address = ?",
+      [winnerAddress, timestamp, "completed", gameAddress],
+      "completing game"
+    );
   }
 
   public getAllGames(): GameData[] {
-    try {
-      return this.db.query("SELECT * FROM games").all() as GameData[];
-    } catch (error) {
-      console.error("Error getting all games:", error);
-      throw error;
-    }
+    return this.all<GameData>("SELECT * FROM games", [], "getting all games");
   }
 
   public getCreatorTelegramId(gameAddress: string): string | null {
-    try {
-      const stmt = this.db.prepare(
-        "SELECT creator_telegram_id FROM games WHERE game_address = ?"
-      );
-      const result = stmt.get(gameAddress) as
-        | { creator_telegram_id: string }
-        | undefined;
-      return result?.creator_telegram_id || null;
-    } catch (error) {
-      console.error("Error getting creator telegram ID:", error);
-      throw error;
-    }
+    const result = this.get<{ creator_telegram_id: string }>(
+      "SELECT creator_telegram_id FROM games WHERE game_address = ?",
+      [gameAddress],
+      "getting creator telegram ID"
+    );
+    return result?.creator_telegram_id ?? null;
   }
 
   public getCreatorInfo(
     gameAddress: string
   ): { telegramId: string | null; publicKey: string | null } | null {
-    try {
-      const stmt = this.db.prepare(`
+    const result = this.get<{
+      creator_telegram_id: string;
+      public_key: string | null;
+    }>(
+      `
         SELECT g.creator_telegram_id, pm.public_key
         FROM games g
         LEFT JOIN player_mappings pm ON g.creator_telegram_id = pm.telegram_id
         WHERE g.game_address = ?
-      `);
-      const result = stmt.get(gameAddress) as
-        | { creator_telegram_id: string; public_key: string | null }
-        | undefined;
+      `,
+      [gameAddress],
+      "getting creator info"
+    );
 
-      if (!result) {
-        return null;
-      }
-
-      return {
-        telegramId: result.creator_telegram_id,
-        publicKey: result.public_key || null,
-      };
-    } catch (error) {
-      console.error("Error getting creator info:", error);
-      throw error;
+    if (!result) {
+      return null;
     }
+
+    return {
+      telegramId: result.creator_telegram_id,
+      publicKey: result.public_key || null,
+    };
   }
 
   public gameExists(gameAddress: string): boolean {
     try {
-      const stmt = this.db.prepare(
-        "SELECT 1 FROM games WHERE game_address = ? LIMIT 1"
+      const result = this.get(
+        "SELECT 1 FROM games WHERE game_address = ? LIMIT 1",
+        [gameAddress],
+        "checking if game exists"
       );
-      const result = stmt.get(gameAddress);
-      return !!result;
-    } catch (error) {
-      console.error("Error checking if game exists:", error);
+      return result !== null;
+    } catch {
       return false;
     }
   }
@@ -190,65 +166,46 @@ export class GameDatabase extends BaseDatabase {
     messageId: number,
     chatId: number
   ): void {
-    try {
-      const stmt = this.db.prepare(
-        "UPDATE games SET message_id = ?, chat_id = ? WHERE game_address = ?"
-      );
-      stmt.run(messageId, chatId, gameAddress);
-    } catch (error) {
-      console.error("Error saving game message:", error);
-      throw error;
-    }
+    this.run(
+      "UPDATE games SET message_id = ?, chat_id = ? WHERE game_address = ?",
+      [messageId, chatId, gameAddress],
+      "saving game message"
+    );
   }
 
   // Player mapping methods
   public savePlayerMapping(publicKey: string, telegramId: string): void {
-    try {
-      const stmt = this.db.prepare(
-        "INSERT OR REPLACE INTO player_mappings (public_key, telegram_id) VALUES (?, ?)"
-      );
-      stmt.run(publicKey, telegramId);
-    } catch (error) {
-      console.error("Error saving player mapping:", error);
-      throw error;
-    }
+    this.run(
+      "INSERT OR REPLACE INTO player_mappings (public_key, telegram_id) VALUES (?, ?)",
+      [publicKey, telegramId],
+      "saving player mapping"
+    );
   }
 
   public getPlayerTelegramId(publicKey: string): string | null {
-    try {
-      const stmt = this.db.prepare(
-        "SELECT telegram_id FROM player_mappings WHERE public_key = ?"
-      );
-      const result = stmt.get(publicKey) as { telegram_id: string } | undefined;
-      return result?.telegram_id || null;
-    } catch (error) {
-      console.error("Error getting player telegram ID:", error);
-      throw error;
-    }
+    const result = this.get<{ telegram_id: string }>(
+      "SELECT telegram_id FROM player_mappings WHERE public_key = ?",
+      [publicKey],
+      "getting player telegram ID"
+    );
+    return result?.telegram_id ?? null;
   }
 
   public getPlayerPublicKey(telegramId: string): string | null {
-    try {
-      const stmt = this.db.prepare(
-        "SELECT public_key FROM player_mappings WHERE telegram_id = ?"
-      );
-      const result = stmt.get(telegramId) as { public_key: string } | undefined;
-      return result?.public_key || null;
-    } catch (error) {
-      console.error("Error getting player public key:", error);
-      throw error;
-    }
+    const result = this.get<{ public_key: string }>(
+      "SELECT public_key FROM player_mappings WHERE telegram_id = ?",
+      [telegramId],
+      "getting player public key"
+    );
+    return result?.public_key ?? null;
   }
 
   public getAllPlayerMappings(): PlayerMapping[] {
-    try {
-      return this.db
-        .query("SELECT * FROM player_mappings")
-        .all() as PlayerMapping[];
-    } catch (error) {
-      console.error("Error getting all player mappings:", error);
-      throw error;
-    }
+    return this.all<PlayerMapping>(
+      "SELECT * FROM player_mappings",
+      [],
+      "getting all player mappings"
+    );
   }
 
   // Game participant methods
@@ -257,102 +214,82 @@ export class GameDatabase extends BaseDatabase {
     telegramId: string,
     publicKey: string
   ): void {
-    try {
-      const stmt = this.db.prepare(
-        "INSERT OR REPLACE INTO game_participants (game_address, telegram_id, public_key, joined_at) VALUES (?, ?, ?, ?)"
-      );
-      stmt.run(gameAddress, telegramId, publicKey, Date.now());
-    } catch (error) {
-      console.error("Error saving game participant:", error);
-      throw error;
-    }
+    this.run(
+      "INSERT OR REPLACE INTO game_participants (game_address, telegram_id, public_key, joined_at) VALUES (?, ?, ?, ?)",
+      [gameAddress, telegramId, publicKey, Date.now()],
+      "saving game participant"
+    );
   }
 
   public getGameParticipants(gameAddress: string): string[] {
-    try {
-      const stmt = this.db.prepare(
-        "SELECT telegram_id FROM game_participants WHERE game_address = ?"
-      );
-      const results = stmt.all(gameAddress) as { telegram_id: string }[];
-      return results.map((r) => r.telegram_id);
-    } catch (error) {
-      console.error("Error getting game participants:", error);
-      throw error;
-    }
+    const results = this.all<{ telegram_id: string }>(
+      "SELECT telegram_id FROM game_participants WHERE game_address = ?",
+      [gameAddress],
+      "getting game participants"
+    );
+    return results.map((r) => r.telegram_id);
   }
 
   public getPlayerParticipatedGames(telegramId: string): string[] {
-    try {
-      const stmt = this.db.prepare(
-        "SELECT game_address FROM game_participants WHERE telegram_id = ?"
-      );
-      const results = stmt.all(telegramId) as { game_address: string }[];
-      return results.map((r) => r.game_address);
-    } catch (error) {
-      console.error("Error getting player participated games:", error);
-      throw error;
-    }
+    const results = this.all<{ game_address: string }>(
+      "SELECT game_address FROM game_participants WHERE telegram_id = ?",
+      [telegramId],
+      "getting player participated games"
+    );
+    return results.map((r) => r.game_address);
   }
 
   public removeGameParticipant(gameAddress: string, telegramId: string): void {
-    try {
-      const stmt = this.db.prepare(
-        "DELETE FROM game_participants WHERE game_address = ? AND telegram_id = ?"
-      );
-      stmt.run(gameAddress, telegramId);
-    } catch (error) {
-      console.error("Error removing game participant:", error);
-      throw error;
-    }
+    this.run(
+      "DELETE FROM game_participants WHERE game_address = ? AND telegram_id = ?",
+      [gameAddress, telegramId],
+      "removing game participant"
+    );
   }
 
   // Get active games for a player
   public getActiveGames(telegramId: string): GameData[] {
-    try {
-      const stmt = this.db.prepare(`
+    return this.all<GameData>(
+      `
         SELECT DISTINCT g.* FROM games g
         LEFT JOIN game_participants gp ON g.game_address = gp.game_address
         WHERE g.status = 'active'
         AND (g.creator_telegram_id = ? OR gp.telegram_id = ?)
-      `);
-      return stmt.all(telegramId, telegramId) as GameData[];
-    } catch (error) {
-      console.error("Error getting active games:", error);
-      throw error;
-    }
+      `,
+      [telegramId, telegramId],
+      "getting active games"
+    );
   }
 
   // Get recent completed games for a player
   public getRecentGames(telegramId: string, limit: number = 10): GameData[] {
-    try {
-      // Get player's public key for winner checking
-      const playerKey = this.getPlayerPublicKey(telegramId);
+    const playerKey = this.getPlayerPublicKey(telegramId);
 
-      if (!playerKey) {
-        // If no player mapping exists, only return games created by this telegram ID
-        const stmt = this.db.prepare(`
+    if (!playerKey) {
+      return this.all<GameData>(
+        `
           SELECT * FROM games
           WHERE status = 'completed' AND creator_telegram_id = ?
           ORDER BY completed_at DESC
           LIMIT ?
-        `);
-        return stmt.all(telegramId, limit) as GameData[];
-      }
+        `,
+        [telegramId, limit],
+        "getting recent games without player mapping"
+      );
+    }
 
-      // Return games where player participated
-      const stmt = this.db.prepare(`
+    return this.all<GameData>(
+      `
         SELECT DISTINCT g.* FROM games g
         LEFT JOIN game_participants gp ON g.game_address = gp.game_address
         WHERE g.status = 'completed'
         AND (g.creator_telegram_id = ? OR g.winner_address = ? OR gp.telegram_id = ?)
         ORDER BY g.completed_at DESC
         LIMIT ?
-      `);
-      return stmt.all(telegramId, playerKey, telegramId, limit) as GameData[];
-    } catch (error) {
-      console.error("Error getting recent games:", error);
-      throw error;
-    }
+      `,
+      [telegramId, playerKey, telegramId, limit],
+      "getting recent games"
+    );
   }
 
   /**
@@ -364,43 +301,37 @@ export class GameDatabase extends BaseDatabase {
     timestamp: number
   ): boolean {
     try {
-      // First check if we should update (only if timestamp is newer)
-      const currentStmt = this.db.prepare(
-        "SELECT last_slot_timestamp FROM games WHERE game_address = ?"
+      const current = this.get<{
+        last_slot_timestamp: number | null;
+      }>(
+        "SELECT last_slot_timestamp FROM games WHERE game_address = ?",
+        [gameAddress],
+        "reading game last slot timestamp"
       );
-      const current = currentStmt.get(gameAddress) as
-        | { last_slot_timestamp: number | null }
-        | undefined;
 
-      // If no current timestamp or the new one is newer, update
-      if (
-        !current?.last_slot_timestamp ||
-        timestamp > current.last_slot_timestamp
-      ) {
-        const updateStmt = this.db.prepare(
-          "UPDATE games SET last_slot = ?, last_slot_timestamp = ? WHERE game_address = ?"
+      if (!current?.last_slot_timestamp || timestamp > current.last_slot_timestamp) {
+        this.run(
+          "UPDATE games SET last_slot = ?, last_slot_timestamp = ? WHERE game_address = ?",
+          [lastSlot, timestamp, gameAddress],
+          "updating game last slot timestamp"
         );
-        updateStmt.run(lastSlot, timestamp, gameAddress);
         console.log(
           `🕐 Updated lastSlot for game ${gameAddress.slice(
             0,
             8
           )}... to ${lastSlot} (timestamp: ${timestamp})`
         );
-        return true; // Updated
-      } else {
-        console.log(
-          `⏰ Skipped outdated slot update for game ${gameAddress.slice(
-            0,
-            8
-          )}... (current: ${
-            current.last_slot_timestamp
-          }, received: ${timestamp})`
-        );
-        return false; // Not updated due to older timestamp
+        return true;
       }
-    } catch (error) {
-      console.error("Error updating game lastSlot with timestamp:", error);
+
+      console.log(
+        `⏰ Skipped outdated slot update for game ${gameAddress.slice(
+          0,
+          8
+        )}... (current: ${current.last_slot_timestamp}, received: ${timestamp})`
+      );
+      return false;
+    } catch {
       return false;
     }
   }
@@ -413,18 +344,19 @@ export class GameDatabase extends BaseDatabase {
     timestamp: number | null;
   } {
     try {
-      const stmt = this.db.prepare(
-        "SELECT last_slot, last_slot_timestamp FROM games WHERE game_address = ?"
+      const result = this.get<{
+        last_slot: string | null;
+        last_slot_timestamp: number | null;
+      }>(
+        "SELECT last_slot, last_slot_timestamp FROM games WHERE game_address = ?",
+        [gameAddress],
+        "getting game last slot with timestamp"
       );
-      const result = stmt.get(gameAddress) as
-        | { last_slot: string | null; last_slot_timestamp: number | null }
-        | undefined;
       return {
-        lastSlot: result?.last_slot || null,
-        timestamp: result?.last_slot_timestamp || null,
+        lastSlot: result?.last_slot ?? null,
+        timestamp: result?.last_slot_timestamp ?? null,
       };
-    } catch (error) {
-      console.error("Error getting game lastSlot with timestamp:", error);
+    } catch {
       return { lastSlot: null, timestamp: null };
     }
   }
@@ -434,13 +366,13 @@ export class GameDatabase extends BaseDatabase {
    */
   public getGameLastSlot(gameAddress: string): string | null {
     try {
-      const stmt = this.db.prepare(
-        "SELECT last_slot FROM games WHERE game_address = ?"
+      const result = this.get<{ last_slot: string }>(
+        "SELECT last_slot FROM games WHERE game_address = ?",
+        [gameAddress],
+        "getting game last slot"
       );
-      const result = stmt.get(gameAddress) as { last_slot: string } | undefined;
-      return result?.last_slot || null;
-    } catch (error) {
-      console.error("Error getting game lastSlot:", error);
+      return result?.last_slot ?? null;
+    } catch {
       return null;
     }
   }
@@ -450,12 +382,12 @@ export class GameDatabase extends BaseDatabase {
    */
   public getGamesByCreator(telegramId: bigint): any[] {
     try {
-      const stmt = this.db.prepare(
-        "SELECT * FROM games WHERE creator_telegram_id = ? ORDER BY created_at DESC"
+      return this.all<any>(
+        "SELECT * FROM games WHERE creator_telegram_id = ? ORDER BY created_at DESC",
+        [telegramId.toString()],
+        "getting games by creator"
       );
-      return stmt.all(telegramId.toString()) as any[];
-    } catch (error) {
-      console.error("Error getting games by creator:", error);
+    } catch {
       return [];
     }
   }
@@ -465,15 +397,17 @@ export class GameDatabase extends BaseDatabase {
    */
   public getGamesByPlayer(telegramId: bigint): any[] {
     try {
-      const stmt = this.db.prepare(`
-        SELECT DISTINCT g.* FROM games g
-        LEFT JOIN game_participants gp ON g.game_address = gp.game_address
-        WHERE gp.telegram_id = ?
-        ORDER BY g.created_at DESC
-      `);
-      return stmt.all(telegramId.toString()) as any[];
-    } catch (error) {
-      console.error("Error getting games by player:", error);
+      return this.all<any>(
+        `
+          SELECT DISTINCT g.* FROM games g
+          LEFT JOIN game_participants gp ON g.game_address = gp.game_address
+          WHERE gp.telegram_id = ?
+          ORDER BY g.created_at DESC
+        `,
+        [telegramId.toString()],
+        "getting games by player"
+      );
+    } catch {
       return [];
     }
   }
@@ -483,12 +417,12 @@ export class GameDatabase extends BaseDatabase {
    */
   public getPlayer(telegramId: string): any {
     try {
-      const stmt = this.db.prepare(
-        "SELECT * FROM player_mappings WHERE telegram_id = ?"
+      return this.get<any>(
+        "SELECT * FROM player_mappings WHERE telegram_id = ?",
+        [telegramId],
+        "getting player"
       );
-      return stmt.get(telegramId) as any;
-    } catch (error) {
-      console.error("Error getting player:", error);
+    } catch {
       return null;
     }
   }
@@ -498,19 +432,20 @@ export class GameDatabase extends BaseDatabase {
    */
   public getLeaderboardStats(chatId: number, limit: number = 10): any[] {
     try {
-      const stmt = this.db.prepare(`
+      return this.all<any>(
+        `
         WITH player_stats AS (
-          SELECT 
+          SELECT
             pm.telegram_id,
             COUNT(DISTINCT CASE WHEN g.status = 'completed' THEN g.game_address END) as total_games,
             COUNT(DISTINCT CASE WHEN g.status = 'completed' AND g.winner_address = pm.public_key THEN g.game_address END) as games_won,
             COUNT(DISTINCT CASE WHEN g.creator_telegram_id = pm.telegram_id AND g.status = 'completed' THEN g.game_address END) as games_created,
             COUNT(DISTINCT CASE WHEN gp.telegram_id = pm.telegram_id AND g.status = 'completed' THEN g.game_address END) as games_joined,
             COALESCE(SUM(CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.amount ELSE 0 END), 0) as total_volume,
-            CASE 
-              WHEN COUNT(DISTINCT CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.game_address END) > 0 
+            CASE
+              WHEN COUNT(DISTINCT CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.game_address END) > 0
               THEN (COUNT(DISTINCT CASE WHEN g.status = 'completed' AND g.winner_address = pm.public_key THEN g.game_address END) * 100.0) / COUNT(DISTINCT CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.game_address END)
-              ELSE 0 
+              ELSE 0
             END as win_rate
           FROM player_mappings pm
           LEFT JOIN games g ON g.chat_id = ?
@@ -520,7 +455,7 @@ export class GameDatabase extends BaseDatabase {
           HAVING total_games > 0
         ),
         token_volumes AS (
-          SELECT 
+          SELECT
             pm.telegram_id,
             g.token_ticker,
             g.token_mint,
@@ -531,7 +466,7 @@ export class GameDatabase extends BaseDatabase {
           WHERE (g.creator_telegram_id = pm.telegram_id OR g.winner_address = pm.public_key OR gp.telegram_id = pm.telegram_id) AND g.status = 'completed'
           GROUP BY pm.telegram_id, g.token_ticker, g.token_mint
         )
-        SELECT 
+        SELECT
           ps.telegram_id,
           ps.total_games,
           ps.games_won,
@@ -540,10 +475,10 @@ export class GameDatabase extends BaseDatabase {
           ps.total_volume,
           ROUND(ps.win_rate, 1) as win_rate,
           GROUP_CONCAT(
-            CASE 
-              WHEN tv.token_volume > 0 
-              THEN tv.token_ticker || ':' || tv.token_volume 
-              ELSE NULL 
+            CASE
+              WHEN tv.token_volume > 0
+              THEN tv.token_ticker || ':' || tv.token_volume
+              ELSE NULL
             END, '|'
           ) as token_volumes
         FROM player_stats ps
@@ -551,10 +486,11 @@ export class GameDatabase extends BaseDatabase {
         GROUP BY ps.telegram_id, ps.total_games, ps.games_won, ps.games_created, ps.games_joined, ps.total_volume, ps.win_rate
         ORDER BY ps.games_won DESC, ps.win_rate DESC, ps.total_volume DESC
         LIMIT ?
-      `);
-      return stmt.all(chatId, chatId, limit) as any[];
-    } catch (error) {
-      console.error("Error getting leaderboard stats:", error);
+      `,
+        [chatId, chatId, limit],
+        "getting leaderboard stats"
+      );
+    } catch {
       return [];
     }
   }
