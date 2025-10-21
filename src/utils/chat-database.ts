@@ -1,14 +1,16 @@
 import type { ChatTokenConfig } from "../types";
-import { BaseDatabase } from "./base-database";
-import { createSingleton } from "./singleton";
+import { BaseDatabase, createDatabaseHandle } from "./base-database";
 
 /**
  * Database service for storing chat-related settings
  */
 export class ChatDatabase extends BaseDatabase {
-  private static readonly singleton = createSingleton(
+  private static readonly handles = createDatabaseHandle(
     () => new ChatDatabase()
   );
+
+  public static readonly getInstance = ChatDatabase.handles.getInstance;
+  public static readonly resetForTesting = ChatDatabase.handles.reset;
 
   private constructor() {
     super(
@@ -31,14 +33,6 @@ export class ChatDatabase extends BaseDatabase {
       ],
       "Chat"
     );
-  }
-
-  public static getInstance(): ChatDatabase {
-    return ChatDatabase.singleton.getInstance();
-  }
-
-  public static resetForTesting(): void {
-    ChatDatabase.singleton.reset();
   }
 
   // ================================

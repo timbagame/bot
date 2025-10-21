@@ -1,14 +1,16 @@
 import type { KnownToken } from "../types";
-import { BaseDatabase } from "./base-database";
-import { createSingleton } from "./singleton";
+import { BaseDatabase, createDatabaseHandle } from "./base-database";
 
 /**
  * Database service for storing token-related data
  */
 export class TokenDatabase extends BaseDatabase {
-  private static readonly singleton = createSingleton(
+  private static readonly handles = createDatabaseHandle(
     () => new TokenDatabase()
   );
+
+  public static readonly getInstance = TokenDatabase.handles.getInstance;
+  public static readonly resetForTesting = TokenDatabase.handles.reset;
 
   private constructor() {
     super(
@@ -31,14 +33,6 @@ export class TokenDatabase extends BaseDatabase {
       ],
       "Token"
     );
-  }
-
-  public static getInstance(): TokenDatabase {
-    return TokenDatabase.singleton.getInstance();
-  }
-
-  public static resetForTesting(): void {
-    TokenDatabase.singleton.reset();
   }
 
   // ================================
