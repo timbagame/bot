@@ -67,6 +67,7 @@ import type {
 } from "./types";
 import { TokenDatabase } from "./utils/token-database";
 import {
+  getTelegramId,
   handleCallbackErrorSafe,
   safeAnswerCallbackQuery,
 } from "./utils/context-helpers";
@@ -1964,7 +1965,7 @@ bot.command(["giveaway", "ga"], async (ctx) => {
       return ctx.reply("❌ Giveaway games can only be created in groups!");
     }
 
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = getTelegramId(ctx);
     const args = ctx.message?.text?.split(" ");
 
     if (args && args.length >= 2) {
@@ -1993,7 +1994,7 @@ bot.command(["giveaway", "ga"], async (ctx) => {
 // ================================
 
 bot.command(["withdraw", "wh"], async (ctx: Context) => {
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
   const args = ctx.message?.text?.split(" ");
 
   if (!args || args.length < 3) {
@@ -2136,7 +2137,7 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
 });
 
 bot.command("tip", async (ctx: Context) => {
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
   const repliedMessage = ctx.message?.reply_to_message;
   const args = ctx.message?.text?.split(" ");
 
@@ -2206,7 +2207,7 @@ bot.command("tip", async (ctx: Context) => {
 });
 
 bot.command("wrap", async (ctx: Context) => {
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
   const args = ctx.message?.text?.split(" ");
 
   if (!args) return;
@@ -2256,7 +2257,7 @@ bot.command("wrap", async (ctx: Context) => {
 });
 
 bot.command("unwrap", async (ctx: Context) => {
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
 
   const processingMsg = await ctx.reply("Processing unwrap...", {
     reply_to_message_id: ctx.message?.message_id,
@@ -2298,7 +2299,7 @@ bot.command(
   "swap",
   sequentialize((ctx) => [String(ctx.from?.id || 0), "swap"]),
   async (ctx: Context) => {
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+    const telegramId = getTelegramId(ctx);
     const args = ctx.message?.text?.split(" ").slice(1);
 
     if (!args || args.length < 3) {
@@ -2549,7 +2550,7 @@ const transactionCache = new Map();
 // Swap confirmation callbacks
 bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
   const [, action, userId] = ctx.match!;
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
 
   if (telegramId.toString() !== userId) {
     return safeAnswerCallbackQuery(ctx, "❌ This swap is not for you");
@@ -2978,7 +2979,7 @@ bot.command("help", async (ctx: Context) => {
 });
 
 bot.command("debug", async (ctx: Context) => {
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
   const replyToMessage = ctx.message?.reply_to_message;
 
   try {
@@ -3100,7 +3101,7 @@ bot.command("checktx", async (ctx: Context) => {
 });
 
 bot.command("active", async (ctx: Context) => {
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
 
   try {
     const { activeGames } = await gameManager.getUserGames(ctx, telegramId);
@@ -3117,7 +3118,7 @@ bot.command("active", async (ctx: Context) => {
 });
 
 bot.command("games", async (ctx: Context) => {
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
 
   try {
     const { recentGames } = await gameManager.getUserGames(ctx, telegramId);
@@ -3494,7 +3495,7 @@ bot.on("callback_query", async (ctx, next) => {
     }
 
     const gamePda = new PublicKey(gameAddress);
-    const telegramId = BigInt(ctx.from.id);
+    const telegramId = getTelegramId(ctx);
     const playerKp = wallet.getKeyPair(telegramId);
 
     switch (action) {
@@ -3884,7 +3885,7 @@ bot.callbackQuery(
           maxPlayers,
           gameType === "coinflip" ? 2 : 1,
           GAME_TIMEOUT,
-          BigInt(ctx.from.id),
+          getTelegramId(ctx),
           ctx.chat?.id
         );
 
@@ -4022,7 +4023,7 @@ bot.callbackQuery(/^custom_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
     const session = userSessions.get(userId);
     const tokenContext = await buildTokenContext(session, ctx.chat?.id);
 
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = getTelegramId(ctx);
 
     let userBalance =
       session?.userBalance && session.userBalance > 0
@@ -4127,7 +4128,7 @@ bot.callbackQuery(
     const session = userSessions.get(userId);
     const tokenContext = await buildTokenContext(session, ctx.chat?.id);
 
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = getTelegramId(ctx);
 
     let userBalance =
       session?.userBalance && session.userBalance > 0
@@ -4229,7 +4230,7 @@ bot.callbackQuery(/^back_to_amounts_(coinflip|giveaway)_(\d+)$/, async (ctx) => 
     const session = userSessions.get(userId);
     const tokenContext = await buildTokenContext(session, ctx.chat?.id);
 
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = getTelegramId(ctx);
 
     let userBalance =
       session?.userBalance && session.userBalance > 0
@@ -4353,7 +4354,7 @@ bot.callbackQuery(/^type_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
     const session = userSessions.get(userId);
     const tokenContext = await buildTokenContext(session, ctx.chat?.id);
 
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = getTelegramId(ctx);
 
     let userBalance =
       session?.userBalance && session.userBalance > 0
@@ -4825,7 +4826,7 @@ bot.callbackQuery("wallet_settings", async (ctx) => {
 
 bot.callbackQuery("cmd_withdraw", async (ctx) => {
   try {
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+    const telegramId = getTelegramId(ctx);
     const keypair = wallet.getKeyPair(telegramId);
     const walletAddress = keypair.publicKey.toBase58();
 
@@ -4875,7 +4876,7 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
       return;
     }
 
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+    const telegramId = getTelegramId(ctx);
     const keypair = wallet.getKeyPair(telegramId);
     const privateKeyBase64 = Buffer.from(keypair.secretKey).toString("base64");
 
@@ -4908,7 +4909,7 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
 
 bot.callbackQuery("cmd_wrap", async (ctx) => {
   try {
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+    const telegramId = getTelegramId(ctx);
     const keypair = wallet.getKeyPair(telegramId);
     const walletAddress = keypair.publicKey.toBase58();
     const solBalance = await wallet.getBalance(telegramId);
@@ -5240,7 +5241,7 @@ bot.callbackQuery(/^confirm_wrap_/, async (ctx) => {
     const amount = callbackData.replace("confirm_wrap_", "");
     console.log(`✅ Confirmed wrap: ${amount} SOL`);
 
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+    const telegramId = getTelegramId(ctx);
     const balanceLamports = await wallet.getBalance(telegramId);
     const lamportsToWrap = toRawAmount(amount, 9);
 
@@ -5387,7 +5388,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
 
 bot.callbackQuery("cmd_swap", async (ctx) => {
   try {
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+    const telegramId = getTelegramId(ctx);
     const keypair = wallet.getKeyPair(telegramId);
     const walletAddress = keypair.publicKey.toBase58();
 
@@ -5596,7 +5597,7 @@ bot.on("callback_query", async (ctx, next) => {
   console.log("🔔 Token selected for send:", token);
 
   try {
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+    const telegramId = getTelegramId(ctx);
     const keypair = wallet.getKeyPair(telegramId);
     const walletAddress = keypair.publicKey.toBase58();
 
@@ -5708,7 +5709,7 @@ bot.on("callback_query", async (ctx, next) => {
       return;
     }
 
-    const telegramId = BigInt(ctx.from?.id || 0);
+    const telegramId = getTelegramId(ctx);
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
 
     const isSol = token === "SOL";
@@ -6008,7 +6009,7 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
       return;
     }
 
-    const telegramId = BigInt(ctx.from.id || 0) as bigint;
+    const telegramId = getTelegramId(ctx);
     const overview = await getWalletOverview(telegramId);
     const ownedTickers = new Set(
       overview.ownedTokens
@@ -6078,7 +6079,7 @@ bot.callbackQuery("cmd_sell", async (ctx) => {
       return;
     }
 
-    const telegramId = BigInt(ctx.from.id || 0) as bigint;
+    const telegramId = getTelegramId(ctx);
     const overview = await getWalletOverview(telegramId);
     const userKeypair = wallet.getKeyPair(telegramId);
 
@@ -6196,7 +6197,7 @@ bot.on("callback_query", async (ctx, next) => {
   console.log(`🔴 SELL amount selected: ${amount} ${tokenToSell}`);
 
   try {
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+    const telegramId = getTelegramId(ctx);
 
     if (amount === "CUSTOM") {
       // Handle custom amount input for SELL
@@ -6292,7 +6293,7 @@ bot.on("callback_query", async (ctx, next) => {
       throw new Error("User ID not found");
     }
 
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+    const telegramId = getTelegramId(ctx);
     const userKeypair = wallet.getKeyPair(telegramId);
 
     // Use the existing global swapManager instance
@@ -6662,7 +6663,7 @@ bot.on("callback_query", async (ctx, next) => {
       throw new Error("User ID not found");
     }
 
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+    const telegramId = getTelegramId(ctx);
     const userKeypair = wallet.getKeyPair(telegramId);
 
     // Use the existing global swapManager instance
@@ -7080,7 +7081,7 @@ bot.on("callback_query", async (ctx, next) => {
   console.log("🔔 Swap FROM token selected:", fromToken);
 
   try {
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+    const telegramId = getTelegramId(ctx);
     const keypair = wallet.getKeyPair(telegramId);
     const walletAddress = keypair.publicKey.toBase58();
     const walletAddressHtml = escapeHtml(walletAddress);
@@ -7254,7 +7255,7 @@ bot.on("callback_query", async (ctx, next) => {
     }
 
     // Get quote and show confirmation
-    const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+    const telegramId = getTelegramId(ctx);
     await showSwapQuoteAndConfirmation(
       ctx,
       fromToken,
@@ -7277,7 +7278,7 @@ const showSwapAmountSelection = async (
   fromToken: string,
   toToken: string
 ) => {
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
 
   // Get balance for the FROM token
   const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
@@ -7374,7 +7375,7 @@ const showSwapQuoteAndConfirmation = async (
   amount: string,
   telegramId?: bigint
 ) => {
-  const userId = telegramId || (BigInt(ctx.from?.id || 0) as bigint);
+  const userId = telegramId || getTelegramId(ctx);
 
   try {
     // Get real quote from swapManager
@@ -7552,7 +7553,7 @@ const showBuyAmountSelection = async (
   contractAddress?: string,
   tokenTxId?: string
 ) => {
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
   const { message, keyboard } = await buildBuyAmountSelectionUI(
     telegramId,
     paymentToken,
@@ -7739,7 +7740,7 @@ const showBuyQuoteAndConfirmation = async (
   amount: string,
   contractAddress?: string
 ) => {
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
 
   try {
     // Use existing swap logic but with BUY terminology
@@ -7994,7 +7995,7 @@ const handleCustomAmountInput = async (
   amount: string
 ) => {
   const token = userState.token;
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
   const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
 
   const isSol = token === "SOL";
@@ -8207,7 +8208,7 @@ const handleSwapCustomAmountInput = async (
 ) => {
   const fromToken = userState.fromToken;
   const toToken = userState.toToken;
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
 
   const normalizedAmount = amount.trim();
 
@@ -8245,7 +8246,7 @@ const handleBuyContractAddressInput = async (
   userState: any,
   contractAddress: string
 ) => {
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
   const paymentToken = userState.fromToken;
   if (!paymentToken) {
     throw new Error("Payment token not found in user state");
@@ -8306,7 +8307,7 @@ const handleBuyTokenSymbolInput = async (
   userState: any,
   tokenSymbol: string
 ) => {
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
   console.log(`🔍 Searching for token: ${tokenSymbol}`);
 
   const cleanSymbol = tokenSymbol.trim().toUpperCase();
@@ -8379,7 +8380,7 @@ const handleBuyCustomAmountInput = async (
   const paymentToken = userState.paymentToken;
   const targetToken = userState.targetToken;
   const contractAddress = userState.contractAddress;
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
 
   console.log(`📝 Custom amount debug:`, {
     amount,
@@ -8514,7 +8515,7 @@ const handleSellCustomAmountInput = async (
   amount: string
 ) => {
   const tokenToSell = userState.tokenToSell;
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
 
   try {
     // Handle percentage amounts
@@ -8623,7 +8624,7 @@ const handleSellCustomAmountInput = async (
  * Show sell amount selection for a specific token
  */
 const showSellAmountSelection = async (ctx: any, tokenToSell: string) => {
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
 
   // Get balance for the token being sold
   const { tokenBalances } = await getCachedWalletData(telegramId);

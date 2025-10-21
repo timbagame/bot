@@ -1,9 +1,71 @@
+import type { Context } from "grammy";
 import type { CallbackError, ErrorHandlingOptions } from "../types";
 import { formatUserFriendlyError } from "./errors";
 
 // ================================
 // ERROR HANDLING UTILITIES
 // ================================
+
+type TelegramContextLike = Pick<Context, "from"> | { from?: { id?: unknown } } | null | undefined;
+
+const DEFAULT_TELEGRAM_ID_FALLBACK = 0n;
+
+/**
+ * Safely extracts a Telegram user identifier from a context-like object.
+ *
+ * The helper tolerates undefined contexts, stringified identifiers, and other
+ * unexpected shapes. When extraction fails it returns the provided fallback
+ * (default `0n`).
+ */
+export const getTelegramId = (
+  ctx: TelegramContextLike,
+  fallback: bigint = DEFAULT_TELEGRAM_ID_FALLBACK
+): bigint => {
+  const rawId = ctx?.from?.id;
+
+  if (typeof rawId === "bigint") {
+    return rawId;
+  }
+
+  if (typeof rawId === "number") {
+    if (!Number.isFinite(rawId)) {
+      return fallback;
+    }
+    try {
+      return BigInt(Math.trunc(rawId));
+    } catch {
+      return fallback;
+    }
+  }
+
+  if (typeof rawId === "string") {
+    const trimmed = rawId.trim();
+    if (!trimmed) {
+      return fallback;
+    }
+
+    const normalized = trimmed.startsWith("+") ? trimmed.slice(1) : trimmed;
+    if (!/^-?\d+$/.test(normalized)) {
+      return fallback;
+    }
+
+    try {
+      return BigInt(trimmed);
+    } catch {
+      return fallback;
+    }
+  }
+
+  if (rawId == null) {
+    return fallback;
+  }
+
+  try {
+    return BigInt(rawId as any);
+  } catch {
+    return fallback;
+  }
+};
 
 /**
  * Safely truncates error messages for callback queries with better context preservation

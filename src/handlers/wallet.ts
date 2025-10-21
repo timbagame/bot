@@ -3,8 +3,7 @@ import { escapeHtml } from "../utils/format-amount";
 import { buildWalletTokenLines, type TokenDisplayLine } from "../utils/wallet-ui";
 import { editMediaWithFallback, trySendVideoWithFallback } from "../utils/media";
 import { respondWithMenu } from "../utils/menu-response";
-
-
+import { getTelegramId } from "../utils/context-helpers";
 
 export type ShowWalletUIDeps = {
   wallet: {
@@ -22,7 +21,7 @@ export type ShowWalletUIDeps = {
 export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
   const { wallet, getCachedWalletData, getPriceUSD, buildWalletCaption, createWalletKeyboard, WINNER_VIDEO_ID } = deps;
 
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
   const keypair = wallet.getKeyPair(telegramId);
   const walletAddress = keypair.publicKey.toBase58();
   const walletVideoFileId = WINNER_VIDEO_ID ?? null;
@@ -130,7 +129,7 @@ export async function onMainWallet(ctx: any, deps: WalletHandlersDeps) {
 
 export async function onWalletRefresh(ctx: any, deps: WalletHandlersDeps) {
   try {
-    const id = BigInt(ctx.from?.id || 0) as bigint;
+    const id = getTelegramId(ctx);
     deps.clearWalletCache(id);
     await deps.showWalletUI(ctx);
     await ctx.answerCallbackQuery();
@@ -193,7 +192,7 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     WINNER_VIDEO_ID,
   } = deps;
 
-  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const telegramId = getTelegramId(ctx);
 
   if (isPrivateChat(ctx)) {
     try {
