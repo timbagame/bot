@@ -21,13 +21,23 @@ export const createWalletKeyboard = (): InlineKeyboard => {
     .row();
 };
 
+export const appendBackToWalletButton = (
+  keyboard: InlineKeyboard
+): InlineKeyboard => {
+  return keyboard.text("← Back to Wallet", "main_wallet").row();
+};
+
+export const createBackToWalletKeyboard = (): InlineKeyboard => {
+  return appendBackToWalletButton(new InlineKeyboard());
+};
+
 export const createWalletSettingsKeyboard = (): InlineKeyboard => {
-  return new InlineKeyboard()
-    .text("🔧 Wrap SOL", "cmd_wrap")
-    .text("🔐 Private Key", "cmd_privatekey")
-    .row()
-    .text("← Back to Wallet", "main_wallet")
-    .row();
+  return appendBackToWalletButton(
+    new InlineKeyboard()
+      .text("🔧 Wrap SOL", "cmd_wrap")
+      .text("🔐 Private Key", "cmd_privatekey")
+      .row()
+  );
 };
 
 
