@@ -2,13 +2,29 @@ import { describe, test, expect } from "bun:test";
 import { showWalletUI } from "../src/handlers/wallet";
 import { buildWalletTokenLines } from "../src/utils/wallet-ui";
 
-function makeCtx() {
+type MakeCtxOptions = {
+  editError?: Error;
+  editDescription?: string;
+};
+
+function makeCtx(options: MakeCtxOptions = {}) {
   const calls: any[] = [];
+  const { editError, editDescription } = options;
   const ctx: any = {
     from: { id: 1 },
     message: { message_id: 7 },
-    editMessageMedia: async (...args: any[]) => { calls.push(["edit", ...args]); throw new Error("force-reply"); },
+    editMessageMedia: async (...args: any[]) => {
+      calls.push(["edit", ...args]);
+      if (editError) {
+        if (editDescription) {
+          (editError as any).description = editDescription;
+        }
+        throw editError;
+      }
+      throw new Error("force-reply");
+    },
     replyWithVideo: async (...args: any[]) => { calls.push(["video", ...args]); return { ok: true }; },
+    reply: async (...args: any[]) => { calls.push(["reply", ...args]); return { ok: true }; },
     __calls: calls,
   };
   return ctx;
@@ -63,6 +79,31 @@ describe("wallet handler showWalletUI", () => {
     expect(calls[1][0]).toBe("video");
     const caption = calls[1][1]?.caption || calls[1][2]?.caption || "";
     expect(String(caption)).toContain("Error loading balances");
+  });
+
+  test("falls back to text when edit fails with recoverable media error", async () => {
+    const ctx: any = makeCtx({
+      editError: new Error("recoverable"),
+      editDescription: "Bad Request: wrong file identifier specified",
+    });
+    const deps: any = {
+      wallet: {
+        getKeyPair: () => ({ publicKey: { toBase58: () => "WALLETADDR11111111111111111111111111111111" } }),
+        formatSolBalance: (_: number) => "0.000000",
+      },
+      getCachedWalletData: async () => ({ solBalance: 0, tokenBalances: [] }),
+      getPriceUSD: async (_: string) => 1,
+      buildWalletCaption: () => "CAPTION",
+      createWalletKeyboard: () => ({ rows: [] } as any),
+      WINNER_VIDEO_ID: "VID",
+    };
+
+    await showWalletUI(ctx, deps);
+
+    const calls = ctx.__calls;
+    expect(calls[0][0]).toBe("edit");
+    expect(calls[1][0]).toBe("reply");
+    expect(calls.some((call: any[]) => call[0] === "video")).toBe(false);
   });
 });
 
