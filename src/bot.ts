@@ -334,78 +334,95 @@ const resolveSpendAmount = ({
   return { rawAmount, displayAmount };
 };
 
-type BuyQuoteSummaryParams = {
-  paymentToken: string;
-  targetToken: string;
-  displayAmount: string;
-  rawAmount: number;
-  inputDecimals: number;
-  outputDecimals: number;
+type TradeKind = "buy" | "sell";
+
+type TradeConfirmationParams = {
+  kind: TradeKind;
+  payToken: string;
+  payDisplay: string;
+  payRawAmount: number;
+  payDecimals: number;
+  receiveToken: string;
+  receiveDecimals: number;
   quote: SwapQuote;
-  outputMint: string;
+  contractAddress?: string;
 };
 
-const formatBuyQuoteSummary = ({
-  paymentToken,
-  targetToken,
-  displayAmount,
-  rawAmount,
-  inputDecimals,
-  outputDecimals,
-  quote,
-  outputMint,
-}: BuyQuoteSummaryParams) => {
-  const formattedReceiveAmount = formatAmount(
-    quote.outputAmount ?? "0",
-    outputDecimals,
-    { maxFractionDigits: 6, trim: true }
-  );
+const TRADE_ICONS: Record<TradeKind, string> = {
+  buy: "🛒",
+  sell: "🧾",
+};
 
-  const inputAmountDecimal =
-    rawAmount > 0 ? rawAmount / Math.pow(10, inputDecimals) : 0;
-  const outputAmountDecimal =
-    Number(quote.outputAmount ?? "0") / Math.pow(10, outputDecimals);
-  const computedRate =
-    inputAmountDecimal > 0
-      ? outputAmountDecimal / inputAmountDecimal
-      : Number.isFinite(quote.estimatedRate)
-      ? quote.estimatedRate
-      : 0;
-  const rateDisplay = formatRate(
-    Number.isFinite(computedRate) ? computedRate : 0
-  );
+const TRADE_TITLES: Record<TradeKind, string> = {
+  buy: "Buy Confirmation",
+  sell: "Sell Confirmation",
+};
+
+const TRADE_ACTION_LABEL: Record<TradeKind, string> = {
+  buy: "purchase",
+  sell: "sale",
+};
+
+const formatTradeConfirmationSummary = ({
+  kind,
+  payToken,
+  payDisplay,
+  payRawAmount,
+  payDecimals,
+  receiveToken,
+  receiveDecimals,
+  quote,
+  contractAddress,
+}: TradeConfirmationParams) => {
+  const receiveDisplay = formatAmount(quote.outputAmount ?? "0", receiveDecimals, {
+    maxFractionDigits: 6,
+    trim: true,
+  });
+
+  const payAmountDecimal = payRawAmount > 0 ? payRawAmount / Math.pow(10, payDecimals) : 0;
+  const receiveAmountDecimal = Number(quote.outputAmount ?? "0") / Math.pow(10, receiveDecimals);
+  const rateValue = payAmountDecimal > 0 ? receiveAmountDecimal / payAmountDecimal : 0;
+  const rateDisplay = formatRate(rateValue);
 
   const providerLabel =
     quote.provider === "pump-fun"
       ? "pump-fun (ungraduated)"
       : `${quote.provider} (graduated)`;
-  const slippageText = quote.slippage
+
+  const slippageText = quote.slippage !== undefined
     ? `${quote.slippage.toFixed(1)}%`
     : "1.0%";
 
-  const message = [
-    `🛒 <b>Buy Confirmation</b>`,
+  const lines = [
+    `${TRADE_ICONS[kind]} <b>${TRADE_TITLES[kind]}</b>`,
     "",
-    `<b>You Pay:</b> ${displayAmount} ${paymentToken}`,
-    `<b>You Receive:</b> ~${formattedReceiveAmount} ${targetToken}`,
+    `<b>You Pay:</b> ${payDisplay} ${payToken}`,
+    `<b>You Receive:</b> ~${receiveDisplay} ${receiveToken}`,
     "",
-    `<b>Rate:</b> ${rateDisplay} ${targetToken}/${paymentToken}`,
+    `<b>Rate:</b> ${rateDisplay} ${receiveToken}/${payToken}`,
     `<b>Provider:</b> ${providerLabel}`,
     `<b>Slippage:</b> ${slippageText}`,
-    "",
-    `🔗 <b>Contract:</b> <code>${outputMint}</code>`,
-    "",
-    `⚠️ <b>Confirm this purchase?</b>`,
-  ].join("\n");
+  ];
+
+  if (quote.provider === "pump-fun") {
+    lines.push("🔥 <b>Pump.fun Token</b> (Not graduated)");
+  }
+
+  if (contractAddress) {
+    lines.push("", `🔗 <b>Contract:</b> <code>${contractAddress}</code>`);
+  }
+
+  lines.push("", `⚠️ <b>Confirm this ${TRADE_ACTION_LABEL[kind]}?</b>`);
 
   return {
-    message,
-    formattedReceiveAmount,
+    message: lines.join("\n"),
     rateDisplay,
     providerLabel,
     slippageText,
+    receiveDisplay,
   };
 };
+
 
 /**
  * Check if the context is a private chat
@@ -486,7 +503,7 @@ export const __test_validateGameTokenData = validateGameTokenData;
 export const __test_resetInitiatedChats = () => initiatedChats.clear();
 export const __test_getInitiatedChats = () => new Set(initiatedChats);
 export const __test_resolveSpendAmount = resolveSpendAmount;
-export const __test_formatBuyQuoteSummary = formatBuyQuoteSummary;
+export const __test_formatTradeConfirmationSummary = formatTradeConfirmationSummary;
 
 /**
  * Update game message with proper error handling using simplified interface
@@ -7265,18 +7282,16 @@ const showSwapQuoteAndConfirmation = async (
       outputTicker: toToken.toUpperCase(),
     });
 
-    // Use the existing formatter like the original implementation
-    const quoteMessage = swapManager.formatQuoteForDisplay(
+    const summary = formatTradeConfirmationSummary({
+      kind: "sell",
+      payToken: fromToken,
+      payDisplay: displayAmount,
+      payRawAmount: rawAmount,
+      payDecimals: inputDecimals,
+      receiveToken: toToken,
+      receiveDecimals: outputDecimals,
       quote,
-      inputDecimals,
-      outputDecimals,
-      fromToken.toUpperCase(),
-      toToken.toUpperCase()
-    );
-
-    const response =
-      `${quoteMessage}\n\n<b>Amount:</b> ${displayAmount} ${fromToken}` +
-      "\n\n⚠️ <b>Confirm this swap?</b>";
+    });
 
     // Generate transaction ID for confirmation
     const txId = generateTransactionId();
@@ -7293,7 +7308,7 @@ const showSwapQuoteAndConfirmation = async (
     });
 
     await respondWithMenu(ctx, {
-      text: response,
+      text: summary.message,
       parseMode: "HTML",
       keyboard: new InlineKeyboard()
         .text("✅ Confirm Swap", `confirm_swap_${txId}`)
@@ -7559,15 +7574,16 @@ const showBuyQuoteAndConfirmation = async (
       outputTicker: targetToken.toUpperCase(),
     });
 
-    const summary = formatBuyQuoteSummary({
-      paymentToken,
-      targetToken,
-      displayAmount,
-      rawAmount,
-      inputDecimals,
-      outputDecimals,
+    const summary = formatTradeConfirmationSummary({
+      kind: "buy",
+      payToken: paymentToken,
+      payDisplay: displayAmount,
+      payRawAmount: rawAmount,
+      payDecimals: inputDecimals,
+      receiveToken: targetToken,
+      receiveDecimals: outputDecimals,
       quote,
-      outputMint,
+      contractAddress: contractAddress ?? outputMint,
     });
 
     // Generate transaction ID for confirmation
@@ -8742,14 +8758,6 @@ const showSellQuoteAndConfirmation = async (
       throw new Error(`Cannot get quote for selling ${tokenToSell}`);
     }
 
-    const quoteMessage = swapManager.formatQuoteForDisplay(
-      quote,
-      sellDecimals,
-      toTokenInfo.decimals,
-      tokenToSell.toUpperCase(),
-      toToken.toUpperCase()
-    );
-
     // Create transaction ID for caching
     const txId = Math.random().toString(36).substring(2, 15);
 
@@ -8768,12 +8776,20 @@ const showSellQuoteAndConfirmation = async (
       userKeypair: wallet.getKeyPair(telegramId),
     });
 
-    const response =
-      `${quoteMessage}\n\n<b>Amount:</b> ${displayAmount} ${tokenToSell}` +
-      "\n\n⚠️ <b>Confirm this sale?</b>";
+    const summary = formatTradeConfirmationSummary({
+      kind: "sell",
+      payToken: tokenToSell,
+      payDisplay: displayAmount,
+      payRawAmount: rawAmount,
+      payDecimals: sellDecimals,
+      receiveToken: toToken,
+      receiveDecimals: toTokenInfo.decimals,
+      quote,
+      contractAddress: tokenInfo.token_mint,
+    });
 
     await respondWithMenu(ctx, {
-      text: response,
+      text: summary.message,
       keyboard: createConfirmSellKeyboard(txId),
     });
   } catch (error: any) {

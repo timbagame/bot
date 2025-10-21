@@ -207,7 +207,7 @@ describe("Bot helper utilities", () => {
     ).toThrow("Insufficient token balance");
   });
 
-  test("formatBuyQuoteSummary renders pump.fun output with token decimals", () => {
+  test("formatTradeConfirmationSummary renders pump.fun output with token decimals", () => {
     const rawAmount = 21_713_000; // 0.021713 SOL
     const quote = {
       inputMint: "So11111111111111111111111111111111111111112",
@@ -219,27 +219,29 @@ describe("Bot helper utilities", () => {
       provider: "pump-fun" as const,
     };
 
-    const summary = botModule.__test_formatBuyQuoteSummary({
-      paymentToken: "SOL",
-      targetToken: "TIMBA",
-      displayAmount: botModule.wallet.formatSolBalance(rawAmount),
-      rawAmount,
-      inputDecimals: 9,
-      outputDecimals: 6,
+    const summary = botModule.__test_formatTradeConfirmationSummary({
+      kind: "buy",
+      payToken: "SOL",
+      payDisplay: botModule.wallet.formatSolBalance(rawAmount),
+      payRawAmount: rawAmount,
+      payDecimals: 9,
+      receiveToken: "TIMBA",
+      receiveDecimals: 6,
       quote,
-      outputMint: quote.outputMint,
+      contractAddress: quote.outputMint,
     });
 
-    expect(summary.formattedReceiveAmount).toBe("455090.146672");
+    expect(summary.receiveDisplay).toBe("455090.146672");
     expect(summary.rateDisplay).toBe("20959339.8734");
     expect(summary.providerLabel).toBe("pump-fun (ungraduated)");
     expect(summary.slippageText).toBe("1.0%");
+    expect(summary.message).toContain("You Pay:");
     expect(summary.message).toContain("455090.146672 TIMBA");
-    expect(summary.message).toContain("Rate:");
+    expect(summary.message).toContain("Pump.fun Token");
     expect(summary.message).toContain(quote.outputMint);
   });
 
-  test("formatBuyQuoteSummary labels Jupiter routes and defaults slippage", () => {
+  test("formatTradeConfirmationSummary labels Jupiter routes and defaults slippage", () => {
     const rawAmount = 500_000_000; // 0.5 SOL
     const quote = {
       inputMint: "So11111111111111111111111111111111111111112",
@@ -251,15 +253,15 @@ describe("Bot helper utilities", () => {
       provider: "jupiter" as const,
     };
 
-    const summary = botModule.__test_formatBuyQuoteSummary({
-      paymentToken: "SOL",
-      targetToken: "USDC",
-      displayAmount: botModule.wallet.formatSolBalance(rawAmount),
-      rawAmount,
-      inputDecimals: 9,
-      outputDecimals: 6,
+    const summary = botModule.__test_formatTradeConfirmationSummary({
+      kind: "buy",
+      payToken: "SOL",
+      payDisplay: botModule.wallet.formatSolBalance(rawAmount),
+      payRawAmount: rawAmount,
+      payDecimals: 9,
+      receiveToken: "USDC",
+      receiveDecimals: 6,
       quote,
-      outputMint: quote.outputMint,
     });
 
     expect(summary.providerLabel).toBe("jupiter (graduated)");
