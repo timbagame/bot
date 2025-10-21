@@ -3,6 +3,8 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
+import { createSingleton } from "./singleton";
+
 export function resolveDatabaseFilename(filename: string): string {
   if (!filename || filename === ":memory:" || filename.startsWith("file:")) {
     return filename;
@@ -105,4 +107,20 @@ export abstract class BaseDatabase {
     console.error(`[${this.name} DB] Error ${operation}:`, error);
     throw error instanceof Error ? error : new Error(String(error));
   }
+}
+
+export interface DatabaseInstanceHandle<T> {
+  getInstance: () => T;
+  reset: () => void;
+}
+
+export function createDatabaseHandle<T>(
+  factory: () => T
+): DatabaseInstanceHandle<T> {
+  const singleton = createSingleton(factory);
+
+  return {
+    getInstance: () => singleton.getInstance(),
+    reset: () => singleton.reset(),
+  };
 }
