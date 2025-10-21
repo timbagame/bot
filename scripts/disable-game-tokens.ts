@@ -1,6 +1,5 @@
 import * as anchor from "@coral-xyz/anchor";
 import type { Timba } from "../idl/idlType";
-import idl from "../idl/idl.json";
 import { WalletManager } from "../src/utils/wallet";
 import { getSupportedTokens } from "../src/utils/token-registry";
 import type { KeypairBundle } from "./utils/keypairs";
@@ -9,6 +8,7 @@ import {
   resolveOracleOperatorBundle,
   uniqueSigners,
 } from "./utils/keypairs";
+import { createAnchorContext } from "./utils/anchor-context";
 
 const TOKENS_TO_DISABLE = getSupportedTokens();
 
@@ -87,25 +87,17 @@ async function main() {
 
   const oracleOperatorBundle = resolveOracleOperatorBundle(adminKeypairRoot);
 
-  const connection = new anchor.web3.Connection(RPC_URL, "confirmed");
+  const { provider, program } = createAnchorContext(adminBundle.root, {
+    rpcUrl: RPC_URL,
+  });
+
+  const connection = provider.connection;
   const balanceLamports = await connection.getBalance(
     adminBundle.anchor.publicKey
   );
   console.log(
     `🔑 Admin signer: ${adminBundle.anchor.publicKey.toBase58()} — balance ${(balanceLamports / anchor.web3.LAMPORTS_PER_SOL).toFixed(4)} SOL`
   );
-
-  const provider = new anchor.AnchorProvider(
-    connection,
-    new anchor.Wallet(adminBundle.anchor),
-    { commitment: "confirmed" }
-  );
-  anchor.setProvider(provider);
-
-  const program = new anchor.Program(
-    idl as Timba,
-    provider
-  ) as anchor.Program<Timba>;
 
   console.log(`📋 Program ID: ${program.programId.toBase58()}`);
 

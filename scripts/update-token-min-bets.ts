@@ -3,7 +3,6 @@ import { Keypair as Web3Keypair } from "@solana/web3.js";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import type { Timba } from "../idl/idlType";
-import idl from "../idl/idl.json";
 import { WalletManager } from "../src/utils/wallet";
 import { getPriceUSD } from "../src/utils/prices";
 import {
@@ -15,6 +14,7 @@ import {
   resolveOracleOperatorBundle,
   uniqueSigners,
 } from "./utils/keypairs";
+import { createAnchorContext } from "./utils/anchor-context";
 
 const RPC_URL =
   process.env["SOLANA_NETWORK"] || "https://api.mainnet-beta.solana.com";
@@ -221,18 +221,10 @@ async function main() {
   const adminBundle = bundleFromKeypair(adminRoot);
   const oracleOperatorBundle = resolveOracleOperatorBundle(adminRoot);
 
-  const connection = new anchor.web3.Connection(RPC_URL, "confirmed");
-  const provider = new anchor.AnchorProvider(
-    connection,
-    new anchor.Wallet(adminBundle.anchor),
-    { commitment: "confirmed" }
-  );
-  anchor.setProvider(provider);
-
-  const program = new anchor.Program(
-    idl as Timba,
-    provider
-  ) as anchor.Program<Timba>;
+  const { provider, program } = createAnchorContext(adminBundle.root, {
+    rpcUrl: RPC_URL,
+  });
+  const connection = provider.connection;
 
   console.log(`Program ID: ${program.programId.toBase58()}`);
   console.log(

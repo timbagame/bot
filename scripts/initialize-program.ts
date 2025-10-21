@@ -1,41 +1,15 @@
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
 import type { Timba } from "../idl/idlType";
-import idl from "../idl/idl.json";
 import { WalletManager } from "../src/utils/wallet";
 import {
   resolveOracleOperatorKeypair,
   uniqueSigners,
 } from "./utils/keypairs";
+import { createAnchorContext } from "./utils/anchor-context";
 
 // Initialize wallet manager
 const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
-
-// Initialize Anchor with a wallet for admin operations
-const initializeAnchorProvider = async () => {
-  // Get admin keypair from JSON file
-  const adminKeypair = wallet.getAdminKeypair();
-
-  // Create a wallet adapter for Anchor
-  const adminWallet = new anchor.Wallet(
-    adminKeypair as unknown as anchor.web3.Keypair
-  );
-
-  // Initialize provider with connection from wallet manager
-  const provider = new anchor.AnchorProvider(
-    wallet.getConnection() as unknown as anchor.web3.Connection,
-    adminWallet,
-    { commitment: "confirmed" }
-  );
-
-  // Set the provider globally
-  anchor.setProvider(provider);
-
-  return new anchor.Program(
-    idl as Timba,
-    provider
-  ) as anchor.Program<Timba>;
-};
 
 // Initialize Oracle if it doesn't exist
 const initializeOracle = async (program: anchor.Program<Timba>) => {
@@ -97,7 +71,10 @@ const initializeOracle = async (program: anchor.Program<Timba>) => {
 const initializeProgram = async () => {
   try {
     console.log("Initializing program...");
-    const program = await initializeAnchorProvider();
+    const adminKeypair = wallet.getAdminKeypair();
+    const { program } = createAnchorContext(adminKeypair, {
+      connection: wallet.getConnection(),
+    });
     console.log(`Program ID: ${program.programId.toBase58()}`);
 
     // Initialize Oracle

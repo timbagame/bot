@@ -1,13 +1,12 @@
 import * as anchor from "@coral-xyz/anchor";
 import { WalletManager } from "../src/utils/wallet";
 import { PDAManager } from "../src/utils/pda";
-import type { Timba } from "../idl/idlType";
-import idl from "../idl/idl.json";
 import {
   resolveKeypairFromEnv,
   resolveOracleOperatorKeypair,
   uniqueSigners,
 } from "./utils/keypairs";
+import { createAnchorContext } from "./utils/anchor-context";
 
 const NEW_ORACLE_OPERATOR_KEYPAIR_ENV = "NEW_ORACLE_OPERATOR_KEYPAIR_PATH";
 
@@ -33,26 +32,10 @@ const updateOracle = async () => {
       "New oracle operator keypair"
     );
 
-    // Create wallet adapter for Anchor
-    const adminWallet = new anchor.Wallet(
-      adminKeypair as unknown as anchor.web3.Keypair
-    );
-
-    // Initialize provider
-    const provider = new anchor.AnchorProvider(
-      wallet.getConnection() as unknown as anchor.web3.Connection,
-      adminWallet,
-      { commitment: "confirmed" }
-    );
-
-    // Set the provider globally
-    anchor.setProvider(provider);
-
-    // Initialize program
-    const program = new anchor.Program(
-      idl as Timba,
-      provider
-    ) as anchor.Program<Timba>;
+    // Initialize shared Anchor context
+    const { program } = createAnchorContext(adminKeypair, {
+      connection: wallet.getConnection(),
+    });
     console.log(`Program ID: ${program.programId}`);
 
     // Get Oracle PDA
