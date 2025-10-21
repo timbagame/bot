@@ -47,6 +47,7 @@ import {
   formatAmount,
   escapeHtml,
   formatRate,
+  formatTokenDisplay,
   formatUsdValue,
 } from "./utils/format-amount";
 import {
@@ -1011,16 +1012,6 @@ const resolveChatTokenInfo = async (
   }
 };
 
-const formatTokenAmount = (amount: number, decimals: number): string => {
-  const precision = Math.min(Math.max(decimals, 0), 6);
-  const minimumFractionDigits = Number.isInteger(amount) ? 0 : Math.min(precision, 6);
-
-  return amount.toLocaleString("en-US", {
-    minimumFractionDigits,
-    maximumFractionDigits: Math.min(precision, 6),
-  });
-};
-
 type GameSetupCopy = {
   gameType: "coinflip" | "giveaway";
   heading: string;
@@ -1123,8 +1114,12 @@ const startInteractiveGameSetup = async (
 
   if (copy.lowBalanceCopy && userBalance < contractMin) {
     const { object, exampleIntro, exampleResult } = copy.lowBalanceCopy;
-    const minDisplay = formatTokenAmount(contractMin, tokenInfo.decimals);
-    const afterFeesDisplay = formatTokenAmount(contractMin * 0.9, tokenInfo.decimals);
+    const minDisplay = formatTokenDisplay(contractMin, {
+      decimals: tokenInfo.decimals,
+    });
+    const afterFeesDisplay = formatTokenDisplay(contractMin * 0.9, {
+      decimals: tokenInfo.decimals,
+    });
     message += `\n⚠️ <b>Fee Warning:</b> Oracle fees (~5-10%) reduce ${object}.\n`;
     message += `${exampleIntro} ${minDisplay} ${tokenInfo.tokenTicker}, ${exampleResult} ${afterFeesDisplay} ${tokenInfo.tokenTicker} after fees.\n`;
   }
@@ -1142,7 +1137,9 @@ const startInteractiveGameSetup = async (
   if (suggestedAmounts.length > 0) {
     message += `\n\n${copy.suggestionLabel}:\n`;
     for (const amount of suggestedAmounts) {
-      const amountDisplay = formatTokenAmount(amount, tokenInfo.decimals);
+      const amountDisplay = formatTokenDisplay(amount, {
+        decimals: tokenInfo.decimals,
+      });
       message += `• ${amountDisplay} ${tokenInfo.tokenTicker}`;
       if (tokenPriceUSD) {
         message += ` (~$${formatUsdValue(amount * tokenPriceUSD)})`;
@@ -4281,10 +4278,9 @@ bot.callbackQuery(/^back_to_amounts_(coinflip|giveaway)_(\d+)$/, async (ctx) => 
     if (suggestedAmounts.length > 0) {
       warningMessage += "\n\nSuggested stakes:\n";
       for (const amount of suggestedAmounts) {
-        const amountDisplay = formatTokenAmount(
-          amount,
-          tokenContext.tokenDecimals
-        );
+        const amountDisplay = formatTokenDisplay(amount, {
+          decimals: tokenContext.tokenDecimals,
+        });
         warningMessage += `• ${amountDisplay} ${tokenContext.tokenTicker}`;
         if (tokenPriceUSD) {
           warningMessage += ` (~$${formatUsdValue(amount * tokenPriceUSD)})`;
