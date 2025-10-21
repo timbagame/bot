@@ -1,4 +1,4 @@
-import type { Database } from "bun:sqlite";
+import type { Changes, Database, SQLQueryBindings } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { BaseDatabase } from "../src/utils/base-database";
 
@@ -75,16 +75,28 @@ class WrapperDatabase extends BaseDatabase {
     this.db = mockDb as Database;
   }
 
-  public runPublic(sql: string, params: unknown[], operation: string) {
-    return this.run(sql, params, operation);
+  public runPublic(
+    sql: string,
+    params: SQLQueryBindings | SQLQueryBindings[] | undefined,
+    operation: string
+  ) {
+    return this.run(sql, params ?? [], operation);
   }
 
-  public getPublic<T>(sql: string, params: unknown[], operation: string) {
-    return this.get<T>(sql, params, operation);
+  public getPublic<T>(
+    sql: string,
+    params: SQLQueryBindings | SQLQueryBindings[] | undefined,
+    operation: string
+  ) {
+    return this.get<T>(sql, params ?? [], operation);
   }
 
-  public allPublic<T>(sql: string, params: unknown[], operation: string) {
-    return this.all<T>(sql, params, operation);
+  public allPublic<T>(
+    sql: string,
+    params: SQLQueryBindings | SQLQueryBindings[] | undefined,
+    operation: string
+  ) {
+    return this.all<T>(sql, params ?? [], operation);
   }
 }
 
@@ -94,20 +106,20 @@ test("BaseDatabase helpers prepare statements and pass parameters", () => {
     prepare: (sql: string) => {
       expect(sql).toBe("TEST SQL");
       return {
-        run: (...args: unknown[]) => {
+        run: (...args: SQLQueryBindings[]) => {
           captured.push(...args);
-          return { changes: 42 };
+          return { changes: 42, lastInsertRowid: 7 } as Changes;
         },
       };
     },
-  } satisfies Partial<Database>;
+  } as unknown as Partial<Database>;
 
   const db = new WrapperDatabase();
   db.setMockDatabase(mockDb);
   const result = db.runPublic("TEST SQL", [1, "two"], "running test");
 
   expect(captured).toEqual([1, "two"]);
-  expect(result).toEqual({ changes: 42 });
+  expect(result).toEqual({ changes: 42, lastInsertRowid: 7 });
 });
 
 test("BaseDatabase helpers log and rethrow errors", () => {
@@ -124,7 +136,7 @@ test("BaseDatabase helpers log and rethrow errors", () => {
         throw error;
       },
     }),
-  } satisfies Partial<Database>;
+  } as unknown as Partial<Database>;
 
   const db = new WrapperDatabase();
   db.setMockDatabase(mockDb);

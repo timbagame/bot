@@ -1,3 +1,4 @@
+import type { Changes, SQLQueryBindings } from "bun:sqlite";
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -49,12 +50,13 @@ export abstract class BaseDatabase {
 
   protected run(
     sql: string,
-    params: unknown[] = [],
+    params: SQLQueryBindings | SQLQueryBindings[] = [],
     operation: string = "running statement"
-  ) {
+  ): Changes {
     try {
       const stmt = this.db.prepare(sql);
-      return stmt.run(...params);
+      const normalizedParams = this.normalizeParams(params);
+      return stmt.run(...(normalizedParams as any));
     } catch (error) {
       return this.handleError(`during ${operation}`, error);
     }
@@ -62,12 +64,13 @@ export abstract class BaseDatabase {
 
   protected get<T>(
     sql: string,
-    params: unknown[] = [],
+    params: SQLQueryBindings | SQLQueryBindings[] = [],
     operation: string = "executing query"
   ): T | null {
     try {
       const stmt = this.db.prepare(sql);
-      const result = stmt.get(...params) as T | undefined;
+      const normalizedParams = this.normalizeParams(params);
+      const result = stmt.get(...(normalizedParams as any)) as T | undefined;
       return result ?? null;
     } catch (error) {
       return this.handleError(`during ${operation}`, error);
@@ -76,15 +79,26 @@ export abstract class BaseDatabase {
 
   protected all<T>(
     sql: string,
-    params: unknown[] = [],
+    params: SQLQueryBindings | SQLQueryBindings[] = [],
     operation: string = "executing query"
   ): T[] {
     try {
       const stmt = this.db.prepare(sql);
-      return stmt.all(...params) as T[];
+      const normalizedParams = this.normalizeParams(params);
+      return stmt.all(...(normalizedParams as any)) as T[];
     } catch (error) {
       return this.handleError(`during ${operation}`, error);
     }
+  }
+
+  private normalizeParams(
+    params: SQLQueryBindings | SQLQueryBindings[] | undefined
+  ): SQLQueryBindings[] {
+    if (params === undefined) {
+      return [];
+    }
+
+    return Array.isArray(params) ? params : [params];
   }
 
   private handleError(operation: string, error: unknown): never {
