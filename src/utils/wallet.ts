@@ -154,6 +154,29 @@ export class WalletManager {
     }
   }
 
+  private isMissingTokenAccountError(error: unknown): boolean {
+    if (
+      error instanceof TokenAccountNotFoundError ||
+      error instanceof TokenInvalidAccountOwnerError
+    ) {
+      return true;
+    }
+
+    if (error instanceof SolanaJSONRPCError) {
+      return (
+        typeof error.message === "string" &&
+        error.message.includes("could not find account")
+      );
+    }
+
+    if (error && typeof error === "object" && "message" in error) {
+      const message = (error as { message?: unknown }).message;
+      return typeof message === "string" && message.includes("could not find account");
+    }
+
+    return false;
+  }
+
   // ================================
   // PUBLIC METHODS
   // ================================
@@ -231,14 +254,8 @@ export class WalletManager {
         programId
       );
       return Number(account.amount);
-    } catch (error: any) {
-      const isMissingAccount =
-        error instanceof TokenAccountNotFoundError ||
-        error instanceof TokenInvalidAccountOwnerError ||
-        (error instanceof SolanaJSONRPCError &&
-          error.message.includes("could not find account"));
-
-      if (isMissingAccount) {
+    } catch (error: unknown) {
+      if (this.isMissingTokenAccountError(error)) {
         console.log(
           `Token account ${ata.toBase58()} not found for user ${pubkey.toBase58()}`
         );
@@ -290,7 +307,8 @@ export class WalletManager {
         }
       } else {
         console.error(
-          `Error getting token balance for ${pubkey.toBase58()}: ${error}`
+          `Error getting token balance for ${pubkey.toBase58()}:`,
+          error
         );
       }
       return 0;
@@ -867,13 +885,8 @@ export class WalletManager {
           wsolAmount
         )} and rent ${formatLamports(wsolAccountLamports)}`
       );
-    } catch (error: any) {
-      const isMissingAccount =
-        error instanceof TokenAccountNotFoundError ||
-        error instanceof TokenInvalidAccountOwnerError ||
-        (error instanceof SolanaJSONRPCError &&
-          error.message?.includes("could not find account"));
-      if (!isMissingAccount) {
+    } catch (error: unknown) {
+      if (!this.isMissingTokenAccountError(error)) {
         console.error(`${debugPrefix} Failed to load WSOL account:`, error);
         throw error;
       }
