@@ -94,13 +94,6 @@ const formatGameTypeWithEmoji = (gameType: string): string => {
   }
 };
 
-const formatGameType = (gameType: Record<string, any>): string => {
-  const keys = Object.keys(gameType);
-  const firstKey = keys[0];
-  if (!firstKey) return "Unknown";
-  return formatGameTypeWithEmoji(firstKey);
-};
-
 const formatDate = (timestamp: number): string => {
   return new Date(timestamp).toLocaleString("en-GB", {
     day: "2-digit",
