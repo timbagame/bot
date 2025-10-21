@@ -215,12 +215,8 @@ export class SwapManager {
     console.log(`   Amount: ${amount}`);
     console.log(`   Network: ${this.network}`);
 
-    const {
-      inputPumpInfo,
-      outputPumpInfo,
-      hasPumpFunToken,
-      hasNonGraduatedPumpFun,
-    } = await this.detectPumpFunContext(inputMint, outputMint, { log: true });
+    const { hasPumpFunToken, hasNonGraduatedPumpFun } =
+      await this.detectPumpFunContext(inputMint, outputMint, { log: true });
 
     // If we have a non-graduated pump.fun token, use pump.fun
     if (hasNonGraduatedPumpFun && this.network === "mainnet") {
