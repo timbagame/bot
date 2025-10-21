@@ -388,6 +388,32 @@ const appendQuickAmountRows = (
   return keyboard;
 };
 
+type QuickAmountKeyboardConfig = QuickAmountOptions & {
+  backCallback: string;
+  backLabel?: string;
+  showQuickRows?: boolean;
+  insufficientLabel?: string;
+};
+
+const buildQuickAmountKeyboard = ({
+  backCallback,
+  backLabel = "← Back",
+  showQuickRows = true,
+  insufficientLabel,
+  ...quickOptions
+}: QuickAmountKeyboardConfig) => {
+  const keyboard = new InlineKeyboard();
+
+  if (showQuickRows) {
+    appendQuickAmountRows(keyboard, quickOptions);
+  } else if (insufficientLabel) {
+    keyboard.text(insufficientLabel).row();
+  }
+
+  keyboard.text(backLabel, backCallback).row();
+  return keyboard;
+};
+
 type TradeKind = "buy" | "sell";
 
 type TradeConfirmationParams = {
@@ -475,6 +501,134 @@ const formatTradeConfirmationSummary = ({
     slippageText,
     receiveDisplay,
   };
+};
+
+type TradeConfirmationSummary = ReturnType<typeof formatTradeConfirmationSummary>;
+
+type TradeQuoteErrorKind = "swap" | TradeKind;
+
+type TradeQuoteErrorParams = {
+  error: unknown;
+  retryCallback: string;
+  amountLabel?: string;
+  fromToken?: string;
+  toToken?: string;
+};
+
+const renderTradeQuoteError = (
+  kind: TradeQuoteErrorKind,
+  { error, retryCallback, amountLabel, fromToken, toToken }: TradeQuoteErrorParams
+) => {
+  const keyboard = new InlineKeyboard().text("← Try Again", retryCallback).row();
+  const asError = error instanceof Error ? error : new Error(String(error));
+
+  if (kind === "swap") {
+    const userFriendly = formatUserFriendlyError(error, wallet);
+    return {
+      text: `❌ <b>QUOTE ERROR</b>\n\n${userFriendly}`,
+      keyboard,
+    };
+  }
+
+  if (kind === "buy") {
+    const lines = [
+      "❌ <b>QUOTE ERROR</b>",
+      "",
+      `<b>Error:</b> ${asError.message}`,
+      "",
+      "Please try again.",
+    ];
+
+    if (fromToken && toToken) {
+      lines.splice(2, 0, `<b>Pair:</b> ${fromToken} → ${toToken}`, "");
+    }
+
+    return {
+      text: lines.join("\n"),
+      keyboard,
+    };
+  }
+
+  const details = [
+    "❌ <b>SELL QUOTE FAILED</b>",
+    "",
+  ];
+
+  if (fromToken) {
+    details.push(`<b>Token:</b> ${fromToken}`);
+  }
+  if (amountLabel) {
+    details.push(`<b>Amount:</b> ${amountLabel}`);
+  }
+  if (fromToken || amountLabel) {
+    details.push("");
+  }
+
+  details.push(`<b>Error:</b> ${asError.message}`, "", "This could happen if:");
+  details.push("• Token has no liquidity", "• Network issues", "• Token is not tradable");
+
+  return {
+    text: details.join("\n"),
+    keyboard,
+  };
+};
+
+type PrepareTradeQuoteParams = {
+  ctx: Context;
+  kind: TradeKind;
+  spinnerText: string;
+  summaryInput: Omit<TradeConfirmationParams, "quote" | "kind">;
+  quoteFetcher: () => Promise<SwapQuote>;
+  cacheQuote: (txId: string, quote: SwapQuote, summary: TradeConfirmationSummary) => void;
+  buildConfirmationKeyboard: (
+    txId: string,
+    summary: TradeConfirmationSummary,
+    quote: SwapQuote
+  ) => InlineKeyboard;
+  onError: (error: unknown) => Promise<void> | void;
+  parseMode?: "HTML" | "Markdown" | "MarkdownV2";
+};
+
+const prepareTradeQuote = async ({
+  ctx,
+  kind,
+  spinnerText,
+  summaryInput,
+  quoteFetcher,
+  cacheQuote,
+  buildConfirmationKeyboard,
+  onError,
+  parseMode = "HTML",
+}: PrepareTradeQuoteParams) => {
+  await respondWithMenu(ctx, {
+    text: spinnerText,
+    parseMode,
+    keyboard: new InlineKeyboard(),
+  });
+
+  try {
+    const quote = await quoteFetcher();
+    const summary = formatTradeConfirmationSummary({
+      kind,
+      ...summaryInput,
+      quote,
+    });
+    const txId = generateTransactionId();
+    cacheQuote(txId, quote, summary);
+    const confirmKeyboard = buildConfirmationKeyboard(txId, summary, quote);
+
+    await respondWithMenu(ctx, {
+      text: summary.message,
+      parseMode,
+      keyboard: confirmKeyboard,
+    });
+
+    return { txId, quote, summary };
+  } catch (error) {
+    console.error(`Error getting ${kind} quote:`, error);
+    await onError(error);
+    return null;
+  }
 };
 
 
@@ -5510,21 +5664,17 @@ bot.on("callback_query", async (ctx, next) => {
       `<b>Quick Send Amounts:</b>`,
     ];
 
-    const keyboard = new InlineKeyboard();
-
-    keyboard
-      .text("25%", `send_amount_${token}_pct25`)
-      .text("50%", `send_amount_${token}_pct50`)
-      .row()
-      .text("75%", `send_amount_${token}_pct75`)
-      .text("MAX", `send_amount_${token}_pctMAX`)
-      .row();
-
-    keyboard
-      .text("✏️ Custom Amount", `send_custom_${token}`)
-      .row()
-      .text("← Back", "cmd_withdraw")
-      .row();
+    const keyboard = buildQuickAmountKeyboard({
+      baseCallback: (value) => {
+        if (value === "CUSTOM") {
+          return `send_custom_${token}`;
+        }
+        const normalized = value.replace("%", "").toUpperCase();
+        return `send_amount_${token}_pct${normalized}`;
+      },
+      customLabel: "✏️ Custom Amount",
+      backCallback: "cmd_withdraw",
+    });
 
     await respondWithMenu(ctx, {
       text: response.join("\n"),
@@ -5709,29 +5859,129 @@ bot.callbackQuery("cmd_help", async (ctx) => {
   }
 });
 
+type HelpSectionKey = "wallet" | "games" | "utility" | "examples";
+
+type HelpSectionConfig = {
+  text: string;
+  ack: string;
+  buttons: Array<Array<{ label: string; callback: string }>>;
+};
+
+const HELP_SECTIONS: Record<HelpSectionKey, HelpSectionConfig> = {
+  wallet: {
+    text:
+      "💰 <b>Wallet Commands</b>\n\n" +
+      "<code>/start</code> - Show your wallet info\n" +
+      "<code>/balance</code> - Show detailed balances\n" +
+      "<code>/wrap &lt;amount&gt;</code> - Convert SOL to WSOL\n" +
+      "<code>/unwrap</code> - Convert WSOL back to SOL\n" +
+      "<code>/swap &lt;amount&gt; &lt;FROM&gt; &lt;TO&gt;</code> - Swap tokens\n" +
+      "<code>/withdraw &lt;address&gt; &lt;amount&gt;</code> - Send tokens\n" +
+      "<code>/tip &lt;amount&gt;</code> - Tip a user (reply to their message)\n\n" +
+      "💡 <i>All wallet commands work with different tokens</i>",
+    ack: "💰 Wallet Commands",
+    buttons: [
+      [
+        { label: "🎮 Games", callback: "help_games" },
+        { label: "🔧 Utility", callback: "help_utility" },
+      ],
+      [{ label: "📋 Examples", callback: "help_examples" }],
+      [{ label: "⬅️ Help Menu", callback: "cmd_help" }],
+    ],
+  },
+  games: {
+    text:
+      "🎮 <b>Game Commands</b>\n\n" +
+      "<code>/coinflip &lt;amount&gt; [TOKEN] &lt;players&gt;</code> - Create coinflip\n" +
+      "<code>/giveaway &lt;amount&gt; [TOKEN] &lt;players&gt;</code> - Create giveaway\n" +
+      "<code>/active</code> - Show active games\n" +
+      "<code>/games</code> - Show your game history\n" +
+      "<code>/leaderboard</code> - Show top 10 players (groups only)\n\n" +
+      "🪙 <b>Game Types:</b>\n" +
+      "• <b>Coinflip:</b> Players pay to join, winner takes all\n" +
+      "• <b>Giveaway:</b> Free to join, you fund the prize\n\n" +
+      "⏱️ <i>Games expire after 1 hour if not filled</i>",
+    ack: "🎮 Game Commands",
+    buttons: [
+      [
+        { label: "💰 Wallet", callback: "help_wallet" },
+        { label: "🔧 Utility", callback: "help_utility" },
+      ],
+      [{ label: "📋 Examples", callback: "help_examples" }],
+      [{ label: "⬅️ Help Menu", callback: "cmd_help" }],
+    ],
+  },
+  utility: {
+    text:
+      "🔧 <b>Utility Commands</b>\n\n" +
+      "<code>/debug</code> - Show wallet debug info\n" +
+      "<code>/checktx &lt;signature&gt;</code> - Check transaction status\n" +
+      "<code>/oracle</code> - Check oracle status\n" +
+      "<code>/default [TOKEN]</code> - Show/set chat default token\n\n" +
+      "🔐 <b>Security:</b>\n" +
+      "• Some commands are private-chat only\n" +
+      "• Admin commands require permissions\n" +
+      "• Your keys never leave your wallet",
+    ack: "🔧 Utility Commands",
+    buttons: [
+      [
+        { label: "💰 Wallet", callback: "help_wallet" },
+        { label: "🎮 Games", callback: "help_games" },
+      ],
+      [{ label: "📋 Examples", callback: "help_examples" }],
+      [{ label: "⬅️ Help Menu", callback: "cmd_help" }],
+    ],
+  },
+  examples: {
+    text:
+      "📋 <b>Command Examples</b>\n\n" +
+      "<b>💰 Wallet Examples:</b>\n" +
+      "<code>/swap 100 USDC SOL</code>\n" +
+      "<code>/withdraw [address] 50 TIMBA</code>\n" +
+      "<code>/wrap 1</code> (converts 1 SOL to WSOL)\n\n" +
+      "<code>/unwrap</code> (convert your entire WSOL balance back to SOL)\n\n" +
+      "<b>🎮 Game Examples:</b>\n" +
+      "<code>/coinflip 100 TIMBA 2</code> (2-player, 100 TIMBA each)\n" +
+      "<code>/giveaway 500 TIMBA 5</code> (5 players, 500 TIMBA prize)\n\n" +
+      "<b>🔧 Utility Examples:</b>\n" +
+      "<code>/checktx 3x7k2m...</code> (check transaction)\n" +
+      "<code>/default USDC</code> (set chat default token)",
+    ack: "📋 Command Examples",
+    buttons: [
+      [
+        { label: "💰 Wallet", callback: "help_wallet" },
+        { label: "🎮 Games", callback: "help_games" },
+      ],
+      [{ label: "🔧 Utility", callback: "help_utility" }],
+      [{ label: "⬅️ Help Menu", callback: "cmd_help" }],
+    ],
+  },
+};
+
+const showHelpSection = async (
+  ctx: any,
+  section: HelpSectionKey
+) => {
+  const config = HELP_SECTIONS[section];
+  const keyboard = new InlineKeyboard();
+  for (const row of config.buttons) {
+    for (const button of row) {
+      keyboard.text(button.label, button.callback);
+    }
+    keyboard.row();
+  }
+
+  await respondWithMenu(ctx, {
+    text: config.text,
+    parseMode: "HTML",
+    keyboard,
+  });
+  await ctx.answerCallbackQuery(config.ack);
+};
+
 bot.callbackQuery("help_wallet", async (ctx) => {
   try {
-    await respondWithMenu(ctx, {
-      text:
-        "💰 <b>Wallet Commands</b>\n\n" +
-        "<code>/start</code> - Show your wallet info\n" +
-        "<code>/balance</code> - Show detailed balances\n" +
-        "<code>/wrap &lt;amount&gt;</code> - Convert SOL to WSOL\n" +
-        "<code>/unwrap</code> - Convert WSOL back to SOL\n" +
-        "<code>/swap &lt;amount&gt; &lt;FROM&gt; &lt;TO&gt;</code> - Swap tokens\n" +
-        "<code>/withdraw &lt;address&gt; &lt;amount&gt;</code> - Send tokens\n" +
-        "<code>/tip &lt;amount&gt;</code> - Tip a user (reply to their message)\n\n" +
-        "💡 <i>All wallet commands work with different tokens</i>",
-      keyboard: new InlineKeyboard()
-        .text("🎮 Games", "help_games")
-        .text("🔧 Utility", "help_utility")
-        .row()
-        .text("📋 Examples", "help_examples")
-        .row()
-        .text("⬅️ Help Menu", "cmd_help")
-        .row(),
-    });
-    await ctx.answerCallbackQuery("💰 Wallet Commands");
+    await showHelpSection(ctx, "wallet");
   } catch (error) {
     console.error("Error in help_wallet:", error);
     await ctx.answerCallbackQuery("❌ Error loading wallet help");
@@ -5740,28 +5990,7 @@ bot.callbackQuery("help_wallet", async (ctx) => {
 
 bot.callbackQuery("help_games", async (ctx) => {
   try {
-    await respondWithMenu(ctx, {
-      text:
-        "🎮 <b>Game Commands</b>\n\n" +
-        "<code>/coinflip &lt;amount&gt; [TOKEN] &lt;players&gt;</code> - Create coinflip\n" +
-        "<code>/giveaway &lt;amount&gt; [TOKEN] &lt;players&gt;</code> - Create giveaway\n" +
-        "<code>/active</code> - Show active games\n" +
-        "<code>/games</code> - Show your game history\n" +
-        "<code>/leaderboard</code> - Show top 10 players (groups only)\n\n" +
-        "🪙 <b>Game Types:</b>\n" +
-        "• <b>Coinflip:</b> Players pay to join, winner takes all\n" +
-        "• <b>Giveaway:</b> Free to join, you fund the prize\n\n" +
-        "⏱️ <i>Games expire after 1 hour if not filled</i>",
-      keyboard: new InlineKeyboard()
-        .text("💰 Wallet", "help_wallet")
-        .text("🔧 Utility", "help_utility")
-        .row()
-        .text("📋 Examples", "help_examples")
-        .row()
-        .text("⬅️ Help Menu", "cmd_help")
-        .row(),
-    });
-    await ctx.answerCallbackQuery("🎮 Game Commands");
+    await showHelpSection(ctx, "games");
   } catch (error) {
     console.error("Error in help_games:", error);
     await ctx.answerCallbackQuery("❌ Error loading games help");
@@ -5770,27 +5999,7 @@ bot.callbackQuery("help_games", async (ctx) => {
 
 bot.callbackQuery("help_utility", async (ctx) => {
   try {
-    await respondWithMenu(ctx, {
-      text:
-        "🔧 <b>Utility Commands</b>\n\n" +
-        "<code>/debug</code> - Show wallet debug info\n" +
-        "<code>/checktx &lt;signature&gt;</code> - Check transaction status\n" +
-        "<code>/oracle</code> - Check oracle status\n" +
-        "<code>/default [TOKEN]</code> - Show/set chat default token\n\n" +
-        "🔐 <b>Security:</b>\n" +
-        "• Some commands are private-chat only\n" +
-        "• Admin commands require permissions\n" +
-        "• Your keys never leave your wallet",
-      keyboard: new InlineKeyboard()
-        .text("💰 Wallet", "help_wallet")
-        .text("🎮 Games", "help_games")
-        .row()
-        .text("📋 Examples", "help_examples")
-        .row()
-        .text("⬅️ Help Menu", "cmd_help")
-        .row(),
-    });
-    await ctx.answerCallbackQuery("🔧 Utility Commands");
+    await showHelpSection(ctx, "utility");
   } catch (error) {
     console.error("Error in help_utility:", error);
     await ctx.answerCallbackQuery("❌ Error loading utility help");
@@ -5799,30 +6008,7 @@ bot.callbackQuery("help_utility", async (ctx) => {
 
 bot.callbackQuery("help_examples", async (ctx) => {
   try {
-    await respondWithMenu(ctx, {
-      text:
-        "📋 <b>Command Examples</b>\n\n" +
-        "<b>💰 Wallet Examples:</b>\n" +
-        "<code>/swap 100 USDC SOL</code>\n" +
-        "<code>/withdraw [address] 50 TIMBA</code>\n" +
-        "<code>/wrap 1</code> (converts 1 SOL to WSOL)\n\n" +
-        "<code>/unwrap</code> (convert your entire WSOL balance back to SOL)\n\n" +
-        "<b>🎮 Game Examples:</b>\n" +
-        "<code>/coinflip 100 TIMBA 2</code> (2-player, 100 TIMBA each)\n" +
-        "<code>/giveaway 500 TIMBA 5</code> (5 players, 500 TIMBA prize)\n\n" +
-        "<b>🔧 Utility Examples:</b>\n" +
-        "<code>/checktx 3x7k2m...</code> (check transaction)\n" +
-        "<code>/default USDC</code> (set chat default token)",
-      keyboard: new InlineKeyboard()
-        .text("💰 Wallet", "help_wallet")
-        .text("🎮 Games", "help_games")
-        .row()
-        .text("🔧 Utility", "help_utility")
-        .row()
-        .text("⬅️ Help Menu", "cmd_help")
-        .row(),
-    });
-    await ctx.answerCallbackQuery("📋 Command Examples");
+    await showHelpSection(ctx, "examples");
   } catch (error) {
     console.error("Error in help_examples:", error);
     await ctx.answerCallbackQuery("❌ Error loading examples");
@@ -7151,11 +7337,12 @@ const showSwapAmountSelection = async (
     `<b>Select amount to swap:</b>`,
   ];
 
-  const keyboard = new InlineKeyboard();
+  const canTrade = balanceDecimal > 0;
+  let extraRows: QuickAmountButton[][] | undefined;
 
-  if (balanceDecimal > 0) {
+  if (canTrade) {
     const maxBalance = balanceDecimal;
-    const extraRows: QuickAmountButton[][] = [];
+    extraRows = [];
 
     if (maxBalance >= 100) {
       extraRows.push(
@@ -7188,17 +7375,16 @@ const showSwapAmountSelection = async (
         ]
       );
     }
-
-    appendQuickAmountRows(keyboard, {
-      baseCallback: (value) => `swap_amount_${fromToken}_${toToken}_${value}`,
-      percentages: ["25%", "50%", "75%", "MAX"],
-      extraRows,
-    });
-  } else {
-    keyboard.text("❌ Insufficient balance").row();
   }
 
-  keyboard.text("← Back", `swap_to_${fromToken}_${toToken}`).row();
+  const keyboard = buildQuickAmountKeyboard({
+    baseCallback: (value) => `swap_amount_${fromToken}_${toToken}_${value}`,
+    percentages: ["25%", "50%", "75%", "MAX"],
+    extraRows,
+    backCallback: `swap_to_${fromToken}_${toToken}`,
+    showQuickRows: canTrade,
+    insufficientLabel: "❌ Insufficient balance",
+  });
 
   await respondWithMenu(ctx, {
     text: response.join("\n"),
@@ -7255,72 +7441,74 @@ const showSwapQuoteAndConfirmation = async (
 
     const baseAmount = rawAmount.toString();
 
-    await respondWithMenu(ctx, {
-      text: `🔄 <b>GETTING QUOTE</b>\n\n${displayAmount} ${fromToken} → ${toToken}\n\n<i>Please wait...</i>`,
-      parseMode: "HTML",
-      keyboard: new InlineKeyboard(),
-    });
-
-    // Use the same structure as the original implementation
-    const quote = await swapManager.getQuote({
-      inputMint,
-      outputMint,
-      amount: baseAmount, // Use base units (same as rawAmount.toString())
-      slippageBps: 100, // 1.0%
-      userKeypair: keypair,
-      inputDecimals,
-      outputDecimals,
-      inputTicker: fromToken.toUpperCase(),
-      outputTicker: toToken.toUpperCase(),
-    });
-
-    const summary = formatTradeConfirmationSummary({
+    await prepareTradeQuote({
+      ctx,
       kind: "sell",
-      payToken: fromToken,
-      payDisplay: displayAmount,
-      payRawAmount: rawAmount,
-      payDecimals: inputDecimals,
-      receiveToken: toToken,
-      receiveDecimals: outputDecimals,
-      quote,
-    });
-
-    // Generate transaction ID for confirmation
-    const txId = generateTransactionId();
-    storePendingTransaction(txId, {
-      type: "swap",
-      fromToken,
-      toToken,
-      amount: displayAmount,
-      rawAmount: baseAmount,
-      inputDecimals,
-      outputDecimals,
-      userId: userId.toString(),
-      quote: quote, // Store the quote for execution
-    });
-
-    const confirmKeyboard = createTradeConfirmKeyboard({
-      confirmLabel: "✅ Confirm Swap",
-      confirmCallback: `confirm_swap_${txId}`,
-      cancelLabel: "❌ Cancel",
-      cancelCallback: `swap_to_${fromToken}_${toToken}`,
-    });
-
-    await respondWithMenu(ctx, {
-      text: summary.message,
-      parseMode: "HTML",
-      keyboard: confirmKeyboard,
+      spinnerText: `🔄 <b>GETTING QUOTE</b>\n\n${displayAmount} ${fromToken} → ${toToken}\n\n<i>Please wait...</i>`,
+      summaryInput: {
+        payToken: fromToken,
+        payDisplay: displayAmount,
+        payRawAmount: rawAmount,
+        payDecimals: inputDecimals,
+        receiveToken: toToken,
+        receiveDecimals: outputDecimals,
+      },
+      quoteFetcher: async () => {
+        const quote = await swapManager.getQuote({
+          inputMint,
+          outputMint,
+          amount: baseAmount,
+          slippageBps: 100,
+          userKeypair: keypair,
+          inputDecimals,
+          outputDecimals,
+          inputTicker: fromToken.toUpperCase(),
+          outputTicker: toToken.toUpperCase(),
+        });
+        if (!quote) {
+          throw new Error(`Cannot get quote for ${fromToken} → ${toToken}`);
+        }
+        return quote;
+      },
+      cacheQuote: (txId, quote) => {
+        storePendingTransaction(txId, {
+          type: "swap",
+          fromToken,
+          toToken,
+          amount: displayAmount,
+          rawAmount: baseAmount,
+          inputDecimals,
+          outputDecimals,
+          userId: userId.toString(),
+          quote,
+        });
+      },
+      buildConfirmationKeyboard: (txId) =>
+        createTradeConfirmKeyboard({
+          confirmLabel: "✅ Confirm Swap",
+          confirmCallback: `confirm_swap_${txId}`,
+          cancelLabel: "❌ Cancel",
+          cancelCallback: `swap_to_${fromToken}_${toToken}`,
+        }),
+      onError: async (error) => {
+        const { text, keyboard } = renderTradeQuoteError("swap", {
+          error,
+          retryCallback: `swap_to_${fromToken}_${toToken}`,
+          fromToken,
+          toToken,
+        });
+        await respondWithMenu(ctx, { text, keyboard });
+      },
     });
   } catch (error) {
     console.error("Error getting swap quote:", error);
-    const userFriendlyError = formatUserFriendlyError(error, wallet);
-    await respondWithMenu(ctx, {
-      text: `❌ <b>QUOTE ERROR</b>\n\n${userFriendlyError}`,
-      parseMode: "HTML",
-      keyboard: new InlineKeyboard()
-        .text("← Try Again", `swap_to_${fromToken}_${toToken}`)
-        .row(),
+    const { text, keyboard } = renderTradeQuoteError("swap", {
+      error,
+      retryCallback: `swap_to_${fromToken}_${toToken}`,
+      fromToken,
+      toToken,
     });
+    await respondWithMenu(ctx, { text, keyboard });
   }
 };
 
@@ -7371,18 +7559,13 @@ const buildBuyAmountSelectionUI = async (
 
   response.push("", `<b>How much ${paymentToken} to spend?</b>`);
 
-  const keyboard = new InlineKeyboard();
   const callbackToken = tokenTxId ?? targetToken;
-
-  if (balanceDecimal > 0.01) {
-    appendQuickAmountRows(keyboard, {
-      baseCallback: (value) => `buy_amount_${paymentToken}_${callbackToken}_${value}`,
-    });
-  } else {
-    keyboard.text("❌ Insufficient balance").row();
-  }
-
-  keyboard.text("← Back", "cmd_buy").row();
+  const keyboard = buildQuickAmountKeyboard({
+    baseCallback: (value) => `buy_amount_${paymentToken}_${callbackToken}_${value}`,
+    backCallback: "cmd_buy",
+    showQuickRows: balanceDecimal > 0.01,
+    insufficientLabel: "❌ Insufficient balance",
+  });
 
   return {
     message: response.join("\n"),
@@ -7492,6 +7675,88 @@ const fetchTokenMetadata = async (
   }
 };
 
+type BuyTokenMetadata = Awaited<ReturnType<typeof fetchTokenMetadata>>;
+
+const createTokenLookupId = (): string =>
+  Math.random().toString(36).substring(2, 15);
+
+type BuyTokenLookupOptions = {
+  ctx: Context;
+  userState: any;
+  telegramId: bigint;
+  paymentToken: string;
+  loadingLines: string[];
+  fetchTokenInfo: () => Promise<BuyTokenMetadata>;
+  retryState: Record<string, unknown> & { type: string };
+  errorLines: (error: Error) => string[];
+  logContext: string;
+};
+
+const handleBuyTokenLookup = async ({
+  ctx,
+  userState,
+  telegramId,
+  paymentToken,
+  loadingLines,
+  fetchTokenInfo,
+  retryState,
+  errorLines,
+  logContext,
+}: BuyTokenLookupOptions) => {
+  const cancelKeyboard = new InlineKeyboard().text("❌ Cancel", "cmd_buy").row();
+
+  try {
+    await respondWithMenu(ctx, {
+      text: loadingLines.join("\n"),
+      keyboard: cancelKeyboard,
+    });
+
+    const tokenInfo = await fetchTokenInfo();
+
+    const tokenTxId = createTokenLookupId();
+
+    transactionCache.set(tokenTxId, {
+      targetToken: tokenInfo.symbol,
+      targetTokenAddress: tokenInfo.address,
+      tokenMetadata: tokenInfo,
+      paymentToken,
+    });
+    setTimeout(() => transactionCache.delete(tokenTxId), 5 * 60 * 1000);
+
+    const { message, keyboard } = await buildBuyAmountSelectionUI(
+      telegramId,
+      paymentToken,
+      tokenInfo.symbol,
+      tokenInfo.address,
+      tokenTxId
+    );
+
+    await respondWithMenu(ctx, {
+      text: message,
+      keyboard,
+    });
+
+    getUserState(ctx.from!.id.toString(), true);
+  } catch (error) {
+    console.error(logContext, error);
+
+    const messageLines = errorLines(
+      error instanceof Error ? error : new Error(String(error))
+    );
+
+    await respondWithMenu(ctx, {
+      text: messageLines.join("\n"),
+      keyboard: cancelKeyboard,
+    });
+
+    setUserState(ctx.from!.id.toString(), {
+      ...retryState,
+      messageId: userState.messageId,
+      chatId: userState.chatId,
+    });
+  }
+};
+
 /**
  * Show buy quote and confirmation with auto-detection
  */
@@ -7503,12 +7768,6 @@ const showBuyQuoteAndConfirmation = async (
   contractAddress?: string
 ) => {
   const telegramId = BigInt(ctx.from?.id || 0) as bigint;
-
-  // Update message to show loading
-  await respondWithMenu(ctx, {
-    text: `🔄 <b>GETTING QUOTE</b>\n\nBuy ${targetToken} with ${amount} ${paymentToken}\n\n<i>Detecting best provider...</i>`,
-    keyboard: new InlineKeyboard(),
-  });
 
   try {
     // Use existing swap logic but with BUY terminology
@@ -7550,72 +7809,83 @@ const showBuyQuoteAndConfirmation = async (
 
     const baseAmount = rawAmount.toString();
 
-    // Get quote using existing swap manager
-    const quote = await swapManager.getQuote({
-      inputMint,
-      outputMint,
-      amount: baseAmount,
-      slippageBps: 100, // 1.0%
-      userKeypair: keypair,
-      inputDecimals,
-      outputDecimals,
-      inputTicker: paymentToken.toUpperCase(),
-      outputTicker: targetToken.toUpperCase(),
-    });
-
-    const summary = formatTradeConfirmationSummary({
+    await prepareTradeQuote({
+      ctx,
       kind: "buy",
-      payToken: paymentToken,
-      payDisplay: displayAmount,
-      payRawAmount: rawAmount,
-      payDecimals: inputDecimals,
-      receiveToken: targetToken,
-      receiveDecimals: outputDecimals,
-      quote,
-      contractAddress: contractAddress ?? outputMint,
-    });
-
-    // Generate transaction ID for confirmation
-    const txId = generateTransactionId();
-    storePendingTransaction(txId, {
-      type: "swap", // Reuse swap logic internally
-      fromToken: paymentToken,
-      toToken: targetToken,
-      amount: displayAmount,
-      userId: telegramId.toString(),
-      quote: quote,
-    });
-
-    const confirmKeyboard = createTradeConfirmKeyboard({
-      confirmLabel: "✅ Confirm Buy",
-      confirmCallback: `confirm_buy_${txId}`,
-      cancelLabel: "← Back to Buy",
-      cancelCallback: "cmd_buy",
-    })
-      .row()
-      .text("⚙️ Slippage", `buy_slippage_${txId}`)
-      .row()
-      .text("0.5%", `buy_slip_${txId}_0.5`)
-      .text("1%", `buy_slip_${txId}_1.0`)
-      .text("2%", `buy_slip_${txId}_2.0`)
-      .row()
-      .text("3%", `buy_slip_${txId}_3.0`)
-      .text("5%", `buy_slip_${txId}_5.0`)
-      .text("✏️", `buy_slip_${txId}_custom`)
-      .row();
-
-    await respondWithMenu(ctx, {
-      text: summary.message,
-      keyboard: confirmKeyboard,
+      spinnerText: `🔄 <b>GETTING QUOTE</b>\n\nBuy ${targetToken} with ${amount} ${paymentToken}\n\n<i>Detecting best provider...</i>`,
+      summaryInput: {
+        payToken: paymentToken,
+        payDisplay: displayAmount,
+        payRawAmount: rawAmount,
+        payDecimals: inputDecimals,
+        receiveToken: targetToken,
+        receiveDecimals: outputDecimals,
+        contractAddress: contractAddress ?? outputMint,
+      },
+      quoteFetcher: async () => {
+        const quote = await swapManager.getQuote({
+          inputMint,
+          outputMint,
+          amount: baseAmount,
+          slippageBps: 100,
+          userKeypair: keypair,
+          inputDecimals,
+          outputDecimals,
+          inputTicker: paymentToken.toUpperCase(),
+          outputTicker: targetToken.toUpperCase(),
+        });
+        if (!quote) {
+          throw new Error(`Cannot get quote for buying ${targetToken}`);
+        }
+        return quote;
+      },
+      cacheQuote: (txId, quote) => {
+        storePendingTransaction(txId, {
+          type: "swap",
+          fromToken: paymentToken,
+          toToken: targetToken,
+          amount: displayAmount,
+          userId: telegramId.toString(),
+          quote,
+        });
+      },
+      buildConfirmationKeyboard: (txId) =>
+        createTradeConfirmKeyboard({
+          confirmLabel: "✅ Confirm Buy",
+          confirmCallback: `confirm_buy_${txId}`,
+          cancelLabel: "← Back to Buy",
+          cancelCallback: "cmd_buy",
+        })
+          .row()
+          .text("⚙️ Slippage", `buy_slippage_${txId}`)
+          .row()
+          .text("0.5%", `buy_slip_${txId}_0.5`)
+          .text("1%", `buy_slip_${txId}_1.0`)
+          .text("2%", `buy_slip_${txId}_2.0`)
+          .row()
+          .text("3%", `buy_slip_${txId}_3.0`)
+          .text("5%", `buy_slip_${txId}_5.0`)
+          .text("✏️", `buy_slip_${txId}_custom`)
+          .row(),
+      onError: async (error) => {
+        const { text, keyboard } = renderTradeQuoteError("buy", {
+          error,
+          retryCallback: "cmd_buy",
+          fromToken: paymentToken,
+          toToken: targetToken,
+        });
+        await respondWithMenu(ctx, { text, keyboard });
+      },
     });
   } catch (error) {
     console.error("Error getting buy quote:", error);
-    await respondWithMenu(ctx, {
-      text: `❌ <b>QUOTE ERROR</b>\n\n${
-        (error as Error).message
-      }\n\nPlease try again.`,
-      keyboard: new InlineKeyboard().text("← Try Again", "cmd_buy").row(),
+    const { text, keyboard } = renderTradeQuoteError("buy", {
+      error,
+      retryCallback: "cmd_buy",
+      fromToken: paymentToken,
+      toToken: targetToken,
     });
+    await respondWithMenu(ctx, { text, keyboard });
   }
 };
 
@@ -7756,16 +8026,49 @@ const handleCustomAmountInput = async (
   amount: string
 ) => {
   const token = userState.token;
-  const numAmount = parseFloat(amount);
+  const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
 
-  if (isNaN(numAmount) || numAmount <= 0) {
-    throw new Error("Invalid amount format");
+  const isSol = token === "SOL";
+  const selectedToken = !isSol
+    ? tokenBalances.find((t) => t.ticker === token)
+    : undefined;
+
+  if (!isSol && !selectedToken) {
+    throw new Error(`Token ${token} not found in wallet`);
   }
 
-  console.log(`💰 Custom amount received: ${amount} ${token}`);
+  const spend = resolveSpendAmount({
+    amount,
+    assetTicker: token,
+    inputDecimals: isSol ? 9 : selectedToken!.decimals,
+    solBalance,
+    tokenBalance: selectedToken
+      ? { balance: selectedToken.balance, decimals: selectedToken.decimals }
+      : undefined,
+    formatSol: (lamports) => wallet.formatSolBalance(lamports),
+    formatToken: (value, decimals) => wallet.formatTokenBalance(value, decimals),
+    applySolFeeBuffer: true,
+  });
+
+  const normalized = amount.trim();
+  const lower = normalized.toLowerCase();
+  const displayLabel = (() => {
+    if (lower === "max") {
+      return `MAX (~${spend.displayAmount} ${token})`;
+    }
+    if (normalized.endsWith("%")) {
+      return `${normalized} (~${spend.displayAmount} ${token})`;
+    }
+    return `${spend.displayAmount} ${token}`;
+  })();
+
+  const storedAmount = lower === "max" ? "max" : spend.displayAmount;
+
+  console.log(`💰 Custom amount received: ${displayLabel}`);
 
   const response = [
-    `📤 <b>SEND ${amount} ${token}</b>`,
+    `📤 <b>SEND ${escapeHtml(displayLabel)}</b>`,
     "",
     `<b>Step 2:</b> Enter destination address`,
     "",
@@ -7789,12 +8092,11 @@ const handleCustomAmountInput = async (
     }
   );
 
-  // Set new state to expect wallet address
   setUserState(ctx.from.id.toString(), {
     type: "send_address",
-    token: token,
-    amount: amount,
-    amountDisplay: `${amount} ${token}`,
+    token,
+    amount: storedAmount,
+    amountDisplay: displayLabel,
     messageId: userState.messageId,
     chatId: ctx.chat?.id,
   });
@@ -7939,51 +8241,10 @@ const handleSwapCustomAmountInput = async (
   const toToken = userState.toToken;
   const telegramId = BigInt(ctx.from?.id || 0) as bigint;
 
-  // Handle percentage amounts
-  let actualAmount = amount;
-  if (amount.includes("%")) {
-    const percentage = parseFloat(amount.replace("%", ""));
-    if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
-      throw new Error("Invalid percentage format");
-    }
-
-    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-
-    if (fromToken === "SOL") {
-      const lamportsPortion = Math.floor(solBalance * (percentage / 100));
-      if (lamportsPortion <= 0) {
-        throw new Error("Percentage results in zero amount");
-      }
-      actualAmount = formatAmount(lamportsPortion, 9, {
-        maxFractionDigits: 9,
-        trim: true,
-      });
-    } else {
-      const tokenBalance = tokenBalances.find((t) => t.ticker === fromToken);
-      if (!tokenBalance) {
-        throw new Error(`Token ${fromToken} not found in wallet`);
-      }
-      const tokenPortion = Math.floor(tokenBalance.balance * (percentage / 100));
-      if (tokenPortion <= 0) {
-        throw new Error("Percentage results in zero amount");
-      }
-      actualAmount = formatAmount(tokenPortion, tokenBalance.decimals, {
-        maxFractionDigits: tokenBalance.decimals,
-        trim: true,
-      });
-    }
-  } else if (amount.toLowerCase() === "max") {
-    actualAmount = "max";
-  } else {
-    const numAmount = parseFloat(amount);
-    if (isNaN(numAmount) || numAmount <= 0) {
-      throw new Error("Invalid amount format");
-    }
-    actualAmount = amount;
-  }
+  const normalizedAmount = amount.trim();
 
   console.log(
-    `💱 Custom swap amount received: ${actualAmount} ${fromToken} → ${toToken}`
+    `💱 Custom swap amount received: ${normalizedAmount} ${fromToken} → ${toToken}`
   );
 
   // Show quote and confirmation
@@ -8003,7 +8264,7 @@ const handleSwapCustomAmountInput = async (
     walletCtx,
     fromToken,
     toToken,
-    actualAmount,
+    normalizedAmount,
     telegramId
   );
 };
@@ -8017,137 +8278,46 @@ const handleBuyContractAddressInput = async (
   contractAddress: string
 ) => {
   const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  const paymentToken = userState.fromToken;
+  if (!paymentToken) {
+    throw new Error("Payment token not found in user state");
+  }
 
-  try {
-    console.log(`🔍 Validating contract address: ${contractAddress}`);
+  console.log(`🔍 Validating contract address: ${contractAddress}`);
 
-    // Basic Solana address validation (should be ~44 characters)
-    if (contractAddress.length < 30 || contractAddress.length > 50) {
-      throw new Error("Invalid Solana contract address format");
-    }
-
-    // Show loading state
-    const loadingMessage = [
+  await handleBuyTokenLookup({
+    ctx,
+    userState,
+    telegramId,
+    paymentToken,
+    loadingLines: [
       "🔍 <b>Fetching Token Information...</b>",
       "",
       `<b>Contract Address:</b>`,
       `<code>${contractAddress}</code>`,
       "",
       "🔄 <i>Please wait while we validate and fetch token metadata...</i>",
-    ].join("\n");
-
-    try {
-      await ctx.editMessageText(loadingMessage, {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
-      });
-    } catch (error) {
-      // If edit fails because message has media or doesn't exist, delete and send new
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
-      const newMsg = await ctx.reply(loadingMessage, {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
-      });
-
-      // Update the message ID in user state
-      userState.messageId = newMsg.message_id;
-    }
-
-    // Try to fetch token metadata
-    const tokenInfo = await fetchTokenMetadata(contractAddress, telegramId);
-
-    if (!tokenInfo) {
-      throw new Error(
-        "Unable to fetch token metadata. Please check the contract address."
-      );
-    }
-
-    console.log(`✅ Token found: ${tokenInfo.symbol} (${contractAddress})`);
-
-    // Use the payment method that was already selected
-    const paymentToken = userState.fromToken;
-
-    if (!paymentToken) {
-      throw new Error("Payment token not found in user state");
-    }
-
-    // Create a shorter transaction ID for the callback data
-    const tokenTxId = Math.random().toString(36).substring(2, 15);
-
-    // Cache the token info with the transaction ID
-    transactionCache.set(tokenTxId, {
-      targetToken: tokenInfo.symbol,
-      targetTokenAddress: contractAddress,
-      tokenMetadata: tokenInfo,
-      paymentToken: paymentToken,
-    });
-
-    // Show token identification and go directly to buy options
-    const response = [
-      `✅ <b>TOKEN IDENTIFIED</b>`,
-      "",
-      `🏷️ <b>Ticker:</b> ${tokenInfo.symbol}`,
-      `📝 <b>Name:</b> ${tokenInfo.name}`,
-      `💰 <b>Paying with:</b> ${paymentToken}`,
-      `${tokenInfo.verified ? "✅ <b>Status:</b> Verified" : "⚠️ <b>Status:</b> Unverified"}`,
-      "",
-      `🔗 <b>Contract:</b> <code>${contractAddress}</code>`,
-      "",
-      `<b>Select amount to buy:</b>`,
-    ];
-
-    const keyboard = new InlineKeyboard();
-
-    // Add amount buttons using transaction ID
-    const amounts = ["0.01", "0.05", "0.1", "0.5", "1"];
-    for (const amount of amounts) {
-      keyboard
-        .text(
-          `${amount} ${paymentToken}`,
-          `buy_amount_${paymentToken}_${tokenTxId}_${amount}`
-        )
-        .row();
-    }
-    keyboard
-      .text(
-        `✏️ CUSTOM AMOUNT`,
-        `buy_amount_${paymentToken}_${tokenTxId}_CUSTOM`
-      )
-      .row();
-
-      keyboard.text("← Back", "cmd_buy").row();
-
-    try {
-      await ctx.editMessageText(response.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: keyboard,
-      });
-    } catch (error) {
-      // If edit fails because message has media or doesn't exist, delete and send new
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
-      await ctx.reply(response.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: keyboard,
-      });
-    }
-
-    // Clear user state since we now have direct buy buttons with contract address in callback
-    getUserState(ctx.from.id.toString(), true);
-  } catch (error: any) {
-    console.error("Error processing contract address:", error);
-
-    const errorMessage = [
+    ],
+    fetchTokenInfo: async () => {
+      if (contractAddress.length < 30 || contractAddress.length > 50) {
+        throw new Error("Invalid Solana contract address format");
+      }
+      const tokenInfo = await fetchTokenMetadata(contractAddress, telegramId);
+      if (!tokenInfo) {
+        throw new Error(
+          "Unable to fetch token metadata. Please check the contract address."
+        );
+      }
+      console.log(`✅ Token found: ${tokenInfo.symbol} (${contractAddress})`);
+      return tokenInfo;
+    },
+    retryState: { type: "buy_contract_address", fromToken: paymentToken },
+    errorLines: (error) => [
       "❌ <b>Invalid Contract Address</b>",
       "",
       `<b>Address:</b> <code>${contractAddress}</code>`,
       "",
-      `<b>Error:</b> ${(error as Error).message}`,
+      `<b>Error:</b> ${error.message}`,
       "",
       "Please enter a valid Solana contract address (SPL Token mint):",
       "",
@@ -8155,34 +8325,9 @@ const handleBuyContractAddressInput = async (
       `<b>Example:</b> <code>So11111111111111111111111111111111111111112</code>`,
       "",
       `⏱️ <i>This will timeout in 5 minutes</i>`,
-    ];
-
-    try {
-      await ctx.editMessageText(errorMessage.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
-      });
-    } catch (error) {
-      // If edit fails because message has media or doesn't exist, delete and send new
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
-      const newMsg = await ctx.reply(errorMessage.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
-      });
-
-      // Update the message ID in user state
-      userState.messageId = newMsg.message_id;
-    }
-
-    // Keep the same state for retry
-    setUserState(ctx.from.id.toString(), {
-      type: "buy_contract_address",
-      messageId: userState.messageId,
-    });
-  }
+    ],
+    logContext: "Error processing contract address:",
+  });
 };
 
 /**
@@ -8194,116 +8339,55 @@ const handleBuyTokenSymbolInput = async (
   tokenSymbol: string
 ) => {
   const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+  console.log(`🔍 Searching for token: ${tokenSymbol}`);
 
-  try {
-    console.log(`🔍 Searching for token: ${tokenSymbol}`);
+  const cleanSymbol = tokenSymbol.trim().toUpperCase();
+  if (cleanSymbol.length === 0 || cleanSymbol.length > 10) {
+    throw new Error("Token symbol must be 1-10 characters");
+  }
 
-    // Clean up the token symbol
-    const cleanSymbol = tokenSymbol.trim().toUpperCase();
-
-    if (cleanSymbol.length === 0 || cleanSymbol.length > 10) {
-      throw new Error("Token symbol must be 1-10 characters");
-    }
-
-    // Show loading state
-    const loadingMessage = [
+  await handleBuyTokenLookup({
+    ctx,
+    userState,
+    telegramId,
+    paymentToken: "SOL",
+    loadingLines: [
       "🔍 <b>Searching for Token...</b>",
       "",
       `<b>Symbol:</b> ${cleanSymbol}`,
       "",
-      "🔄 <i>Please wait while we search for tokens matching this symbol...</i>",
-    ].join("\n");
+      "🔄 <i>Looking up token metadata...</i>",
+    ],
+    fetchTokenInfo: async () => {
+      const knownTokens = tokenManager.getAllKnownTokens();
+      const knownToken = knownTokens.find(
+        (t: any) => t.ticker.toUpperCase() === cleanSymbol
+      );
 
-    try {
-      await ctx.editMessageText(loadingMessage, {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
-      });
-    } catch (error) {
-      // If edit fails because message has media or doesn't exist, delete and send new
-      try {
-        await ctx.deleteMessage();
-      } catch {}
+      if (knownToken) {
+        const tokenInfo = await fetchTokenMetadata(
+          knownToken.token_mint,
+          telegramId
+        );
+        if (tokenInfo) {
+          console.log(
+            `✅ Token found: ${tokenInfo.symbol} (${tokenInfo.address})`
+          );
+          return tokenInfo;
+        }
+      }
 
-      const newMsg = await ctx.reply(loadingMessage, {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
-      });
-
-      // Update the message ID in user state
-      userState.messageId = newMsg.message_id;
-    }
-
-    // Try to find token by symbol in our known tokens first
-    let tokenInfo = null;
-    const knownTokens = tokenManager.getAllKnownTokens();
-    const knownToken = knownTokens.find(
-      (t: any) => t.ticker.toUpperCase() === cleanSymbol
-    );
-
-    if (knownToken) {
-      tokenInfo = await fetchTokenMetadata(knownToken.token_mint);
-    }
-
-    if (!tokenInfo) {
       throw new Error(
         `Token "${cleanSymbol}" not found. Try using the contract address instead.`
       );
-    }
-
-    console.log(`✅ Token found: ${tokenInfo.symbol} (${tokenInfo.address})`);
-
-    const paymentToken = "SOL";
-    const tokenTxId = Math.random().toString(36).substring(2, 15);
-
-    transactionCache.set(tokenTxId, {
-      targetToken: tokenInfo.symbol,
-      targetTokenAddress: tokenInfo.address,
-      tokenMetadata: tokenInfo,
-      paymentToken,
-    });
-    setTimeout(() => transactionCache.delete(tokenTxId), 5 * 60 * 1000);
-
-    const { message, keyboard } = await buildBuyAmountSelectionUI(
-      telegramId,
-      paymentToken,
-      tokenInfo.symbol,
-      tokenInfo.address,
-      tokenTxId
-    );
-
-    const chatId = ctx.chat?.id;
-    const messageId = userState.messageId ?? ctx.message?.message_id;
-
-    if (chatId && messageId) {
-      try {
-        await ctx.api.editMessageText(chatId, messageId, message, {
-          parse_mode: "HTML",
-          reply_markup: keyboard,
-        });
-        return;
-      } catch (error) {
-        console.warn("Failed to edit token search message, sending new one.", error);
-        try {
-          await ctx.api.deleteMessage(chatId, messageId);
-        } catch {}
-      }
-    }
-
-    await ctx.reply(message, {
-      parse_mode: "HTML",
-      reply_markup: keyboard,
-      link_preview_options: { is_disabled: true },
-    });
-  } catch (error: any) {
-    console.error("Error searching for token:", error);
-
-    const errorMessage = [
+    },
+    retryState: { type: "buy_token_symbol" },
+    errorLines: (error) => [
       "❌ <b>Token Not Found</b>",
       "",
       `<b>Symbol:</b> ${tokenSymbol}`,
       "",
-      `<b>Error:</b> ${(error as Error).message}`,
+      `<b>Error:</b> ${error.message}`,
       "",
       "Please enter a valid token symbol:",
       "",
@@ -8311,34 +8395,9 @@ const handleBuyTokenSymbolInput = async (
       `<b>Or use:</b> Contract address for any token`,
       "",
       `⏱️ <i>This will timeout in 5 minutes</i>`,
-    ];
-
-    try {
-      await ctx.editMessageText(errorMessage.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
-      });
-    } catch (error) {
-      // If edit fails because message has media or doesn't exist, delete and send new
-      try {
-        await ctx.deleteMessage();
-      } catch {}
-
-      const newMsg = await ctx.reply(errorMessage.join("\n"), {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
-      });
-
-      // Update the message ID in user state
-      userState.messageId = newMsg.message_id;
-    }
-
-    // Keep the same state for retry
-    setUserState(ctx.from.id.toString(), {
-      type: "buy_token_symbol",
-      messageId: userState.messageId,
-    });
-  }
+    ],
+    logContext: "Error searching for token:",
+  });
 };
 
 /**
@@ -8620,11 +8679,10 @@ const showSellAmountSelection = async (ctx: any, tokenToSell: string) => {
     `<i>Use a quick percentage or enter a custom amount.</i>`,
   ];
 
-  const keyboard = appendQuickAmountRows(new InlineKeyboard(), {
+  const keyboard = buildQuickAmountKeyboard({
     baseCallback: (value) => `sell_amount_${tokenToSell}_${value}`,
+    backCallback: "cmd_sell",
   });
-
-  keyboard.text("← Back", "cmd_sell").row();
 
   await respondWithMenu(ctx, {
     text: response.join("\n"),
@@ -8722,89 +8780,79 @@ const showSellQuoteAndConfirmation = async (
 
     // Use the existing global swapManager instance
 
-    await respondWithMenu(ctx, {
-      text: `🔄 <b>GETTING SELL QUOTE</b>\n\n${displayAmount} ${tokenToSell} → ${toToken}\n\n<i>Finding best price...</i>`,
-      keyboard: new InlineKeyboard(),
-    });
-
-    const quote = await swapManager.getQuote({
-      inputMint: tokenInfo.token_mint, // Use tokenInfo instead of tokenBalance
-      outputMint: toTokenInfo.token_mint,
-      amount: rawAmount.toString(),
-      slippageBps: 200, // Use same 2% slippage as successful BUY/SWAP
-      userKeypair: wallet.getKeyPair(telegramId),
-      inputDecimals: sellDecimals || 6,
-      outputDecimals: toTokenInfo.decimals || 9,
-      inputTicker: tokenToSell.toUpperCase(),
-      outputTicker: "SOL",
-    });
-
-    if (!quote) {
-      throw new Error(`Cannot get quote for selling ${tokenToSell}`);
-    }
-
-    // Create transaction ID for caching
-    const txId = Math.random().toString(36).substring(2, 15);
-
-    // Cache sell data
-    transactionCache.set(txId, {
-      fromToken: tokenToSell,
-      toToken: toToken,
-      amount: displayAmount,
-      rawAmount: rawAmount.toString(), // Add raw amount for Jupiter
-      fromTokenInfo: {
-        token_mint: tokenInfo.token_mint,
-        decimals: sellDecimals,
-      },
-      toTokenInfo: toTokenInfo,
-      quote: quote,
-      userKeypair: wallet.getKeyPair(telegramId),
-    });
-
-    const summary = formatTradeConfirmationSummary({
+    await prepareTradeQuote({
+      ctx,
       kind: "sell",
-      payToken: tokenToSell,
-      payDisplay: displayAmount,
-      payRawAmount: rawAmount,
-      payDecimals: sellDecimals,
-      receiveToken: toToken,
-      receiveDecimals: toTokenInfo.decimals,
-      quote,
-      contractAddress: tokenInfo.token_mint,
-    });
-
-    const confirmKeyboard = createTradeConfirmKeyboard({
-      confirmLabel: "✅ Confirm Sell",
-      confirmCallback: `confirm_sell_${txId}`,
-      cancelLabel: "❌ Cancel",
-      cancelCallback: "cmd_sell",
-    });
-
-    await respondWithMenu(ctx, {
-      text: summary.message,
-      keyboard: confirmKeyboard,
+      spinnerText: `🔄 <b>GETTING SELL QUOTE</b>\n\n${displayAmount} ${tokenToSell} → ${toToken}\n\n<i>Finding best price...</i>`,
+      summaryInput: {
+        payToken: tokenToSell,
+        payDisplay: displayAmount,
+        payRawAmount: rawAmount,
+        payDecimals: sellDecimals,
+        receiveToken: toToken,
+        receiveDecimals: toTokenInfo.decimals,
+        contractAddress: tokenInfo.token_mint,
+      },
+      quoteFetcher: async () => {
+        const quote = await swapManager.getQuote({
+          inputMint: tokenInfo.token_mint,
+          outputMint: toTokenInfo.token_mint,
+          amount: rawAmount.toString(),
+          slippageBps: 200,
+          userKeypair: wallet.getKeyPair(telegramId),
+          inputDecimals: sellDecimals || 6,
+          outputDecimals: toTokenInfo.decimals || 9,
+          inputTicker: tokenToSell.toUpperCase(),
+          outputTicker: "SOL",
+        });
+        if (!quote) {
+          throw new Error(`Cannot get quote for selling ${tokenToSell}`);
+        }
+        return quote;
+      },
+      cacheQuote: (txId, quote) => {
+        transactionCache.set(txId, {
+          fromToken: tokenToSell,
+          toToken,
+          amount: displayAmount,
+          rawAmount: rawAmount.toString(),
+          fromTokenInfo: {
+            token_mint: tokenInfo.token_mint,
+            decimals: sellDecimals,
+          },
+          toTokenInfo,
+          quote,
+          userKeypair: wallet.getKeyPair(telegramId),
+        });
+      },
+      buildConfirmationKeyboard: (txId) =>
+        createTradeConfirmKeyboard({
+          confirmLabel: "✅ Confirm Sell",
+          confirmCallback: `confirm_sell_${txId}`,
+          cancelLabel: "❌ Cancel",
+          cancelCallback: "cmd_sell",
+        }),
+      onError: async (error) => {
+        const { text, keyboard } = renderTradeQuoteError("sell", {
+          error,
+          retryCallback: "cmd_sell",
+          fromToken: tokenToSell,
+          amountLabel: amount,
+        });
+        await respondWithMenu(ctx, { text, keyboard });
+      },
     });
   } catch (error: any) {
     console.error("Error getting sell quote:", error);
 
-    const errorResponse = [
-      `❌ <b>SELL QUOTE FAILED</b>`,
-      "",
-      `<b>Token:</b> ${tokenToSell}`,
-      `<b>Amount:</b> ${amount}`,
-      "",
-      `<b>Error:</b> ${(error as Error).message}`,
-      "",
-      "This could happen if:",
-      "• Token has no liquidity",
-      "• Network issues",
-      "• Token is not tradable",
-    ];
-
-    await respondWithMenu(ctx, {
-      text: errorResponse.join("\n"),
-      keyboard: new InlineKeyboard().text("← Try Again", "cmd_sell").row(),
+    const { text, keyboard } = renderTradeQuoteError("sell", {
+      error,
+      retryCallback: "cmd_sell",
+      fromToken: tokenToSell,
+      amountLabel: amount,
     });
+
+    await respondWithMenu(ctx, { text, keyboard });
   }
 };
 
