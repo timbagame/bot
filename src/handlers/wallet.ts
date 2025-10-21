@@ -1,7 +1,6 @@
 import type { InlineKeyboard } from "grammy";
-import { escapeHtml, formatUsdValue } from "../utils/format-amount";
-import { LAMPORTS_PER_SOL } from "../utils/constants";
-import type { TokenDisplayLine } from "../utils/wallet-ui";
+import { escapeHtml } from "../utils/format-amount";
+import { buildWalletTokenLines, type TokenDisplayLine } from "../utils/wallet-ui";
 import { isRecoverableMediaError, trySendVideoWithFallback } from "../utils/media";
 import { respondWithMenu } from "../utils/menu-response";
 
@@ -74,41 +73,15 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
 
   try {
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-    const solPriceUSD = await getPriceUSD("SOL");
-    const solDecimalBalance = solBalance / LAMPORTS_PER_SOL;
-    const solFormattedBalance = wallet.formatSolBalance(solBalance);
-    const tokenLines: TokenDisplayLine[] = [
-      {
-        ticker: "SOL",
-        amount: solFormattedBalance,
-        usdValue: formatUsdValue(solDecimalBalance * solPriceUSD),
-        unit: "SOL",
-      },
-    ];
-
-    for (const token of tokenBalances) {
-      if (token.ticker === "SOL") {
-        continue; // Already represented via SOL entry above
-      }
-
-      if (token.balance <= 0) {
-        continue;
-      }
-
-      const formatted = wallet.formatTokenBalance
-        ? (wallet as any).formatTokenBalance(token.balance, token.decimals)
-        : String(token.balance / Math.pow(10, token.decimals));
-
-      // Use the same robust logic as coinflip for price fetching
-      const reference = token.mint || token.ticker;
-      const tokenPriceUSD = await getPriceUSD(reference);
-      const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
-      tokenLines.push({
-        ticker: token.ticker,
-        amount: formatted,
-        usdValue: formatUsdValue(tokenDecimalBalance * tokenPriceUSD),
-      });
-    }
+    const tokenLines = await buildWalletTokenLines({
+      solBalanceLamports: solBalance,
+      tokenBalances,
+      formatSolBalance: (value) => wallet.formatSolBalance(value),
+      formatTokenBalance: wallet.formatTokenBalance
+        ? (amount, decimals) => (wallet as any).formatTokenBalance(amount, decimals)
+        : undefined,
+      getPriceUSD,
+    });
 
     const caption = buildWalletCaption(walletAddress, tokenLines);
 
@@ -242,37 +215,13 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     }
 
     const walletAddress = playerData.keypair.publicKey.toBase58();
-    const formattedSolBalance = wallet.formatSolBalance(solDisplayLamports);
-    const solPriceUSD = await getPriceUSD("SOL");
-    const solDecimalBalance = solDisplayLamports / LAMPORTS_PER_SOL;
-
-    const tokenLines: TokenDisplayLine[] = [
-      {
-        ticker: "SOL",
-        amount: formattedSolBalance,
-        usdValue: formatUsdValue(solDecimalBalance * solPriceUSD),
-        unit: "SOL",
-      },
-    ];
-
-    for (const token of tokenBalancesToShow) {
-      if (token.ticker === "SOL" || token.balance <= 0) {
-        continue;
-      }
-
-      const formattedTokenBalance = wallet.formatTokenBalance(
-        token.balance,
-        token.decimals
-      );
-      const tokenPriceUSD = await getPriceUSD(token.mint || token.ticker);
-      const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
-
-      tokenLines.push({
-        ticker: token.ticker,
-        amount: formattedTokenBalance,
-        usdValue: formatUsdValue(tokenDecimalBalance * tokenPriceUSD),
-      });
-    }
+    const tokenLines = await buildWalletTokenLines({
+      solBalanceLamports: solDisplayLamports,
+      tokenBalances: tokenBalancesToShow,
+      formatSolBalance: (value) => wallet.formatSolBalance(value),
+      formatTokenBalance: (amount, decimals) => wallet.formatTokenBalance(amount, decimals),
+      getPriceUSD,
+    });
 
     const caption = buildWalletCaption(walletAddress, tokenLines);
 
