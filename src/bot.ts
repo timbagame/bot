@@ -67,7 +67,10 @@ import type {
   PlayerEvent,
 } from "./types";
 import { TokenDatabase } from "./utils/token-database";
-import { handleCallbackErrorSafe } from "./utils/context-helpers";
+import {
+  handleCallbackErrorSafe,
+  safeAnswerCallbackQuery,
+} from "./utils/context-helpers";
 import { recentUpdateGuard } from "./utils/recent-update";
 import { getPriceUSD } from "./utils/prices";
 import { patchReplyBehavior } from "./utils/reply-patch";
@@ -686,28 +689,6 @@ const validateGameTokenData = (
     return { isValid: false, error: "Game missing token information" };
   }
   return { isValid: true };
-};
-
-/**
- * Safe callback query response with timeout handling
- */
-const safeAnswerCallbackQuery = async (
-  ctx: any,
-  text: string
-): Promise<void> => {
-  try {
-    await ctx.answerCallbackQuery(text);
-  } catch (error: any) {
-    if (
-      error.description?.includes("query is too old") ||
-      error.description?.includes("query ID is invalid") ||
-      error.error_code === 400
-    ) {
-      console.warn(`⚠️ Callback query timeout: ${text.substring(0, 50)}...`);
-    } else {
-      console.error("Error answering callback query:", error);
-    }
-  }
 };
 
 // Test helpers to exercise internal utilities

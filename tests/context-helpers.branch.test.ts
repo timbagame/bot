@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import { handleCallbackErrorSafe, truncateErrorMessage } from "../src/utils/context-helpers";
+import {
+  handleCallbackErrorSafe,
+  truncateErrorMessage,
+  safeAnswerCallbackQuery,
+} from "../src/utils/context-helpers";
 
 test("safeAnswerCallbackQuery falls back to ctx.api.answerCallbackQuery when no direct method", async () => {
   let answered = false;
@@ -12,7 +16,7 @@ test("safeAnswerCallbackQuery falls back to ctx.api.answerCallbackQuery when no 
     },
   };
 
-  await handleCallbackErrorSafe(ctx, new Error("some generic error"), "test");
+  await safeAnswerCallbackQuery(ctx, "sample message");
   expect(answered).toBe(true);
 });
 
