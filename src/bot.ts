@@ -249,7 +249,15 @@ const calculateBuySpend = ({
   let rawAmount: number;
   let displayAmount: string;
 
-  if (amount.includes("%")) {
+  if (amount.toLowerCase() === "max") {
+    const spendableLamports = clampLamportsForFees(solBalance);
+    if (spendableLamports <= 0) {
+      throw new Error("Not enough SOL to cover purchase and fees");
+    }
+
+    rawAmount = spendableLamports;
+    displayAmount = formatSol(spendableLamports);
+  } else if (amount.includes("%")) {
     const percentage = parseFloat(amount.replace("%", ""));
     if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
       throw new Error("Invalid percentage format");
@@ -5427,7 +5435,7 @@ bot.on("callback_query", async (ctx, next) => {
       .text("50%", `send_amount_${token}_pct50`)
       .row()
       .text("75%", `send_amount_${token}_pct75`)
-      .text("100%", `send_amount_${token}_pct100`)
+      .text("MAX", `send_amount_${token}_pctMAX`)
       .row();
 
     keyboard
@@ -5489,10 +5497,10 @@ bot.on("callback_query", async (ctx, next) => {
       });
     };
 
-    if (selectionKey === "max") {
+    if (selectionKey === "max" || selectionKey === "pctMAX") {
       resolvedAmount = "max";
-      amountDisplayLabel = `100% (~all ${token})`;
-      logLabel = "100%";
+      amountDisplayLabel = `MAX (~all ${token})`;
+      logLabel = "MAX";
     } else if (selectionKey.startsWith("pct")) {
       const percentageRaw = Number(selectionKey.replace("pct", ""));
       if (!Number.isFinite(percentageRaw) || percentageRaw <= 0) {
@@ -5512,8 +5520,8 @@ bot.on("callback_query", async (ctx, next) => {
         if (percentage === 100) {
           resolvedAmount = "max";
           const approx = formatForDisplay(totalLamports, 9);
-          amountDisplayLabel = `100% (~${approx} SOL)`;
-          logLabel = "100%";
+          amountDisplayLabel = `MAX (~${approx} SOL)`;
+          logLabel = "MAX";
         } else {
           const lamports = Math.floor((totalLamports * percentage) / 100);
           if (lamports <= 0) {
@@ -5538,8 +5546,8 @@ bot.on("callback_query", async (ctx, next) => {
         if (percentage === 100) {
           resolvedAmount = "max";
           const approx = formatForDisplay(totalRaw, selectedToken.decimals);
-          amountDisplayLabel = `100% (~${approx} ${token})`;
-          logLabel = "100%";
+          amountDisplayLabel = `MAX (~${approx} ${token})`;
+          logLabel = "MAX";
         } else {
           const rawAmount = Math.floor((selectedToken.balance * percentage) / 100);
           if (rawAmount <= 0) {
@@ -7163,7 +7171,7 @@ const showSwapAmountSelection = async (
     }
 
     keyboard
-      .text("100%", `swap_amount_${fromToken}_${toToken}_100%`)
+      .text("MAX", `swap_amount_${fromToken}_${toToken}_MAX`)
       .text("✏️ Custom", `swap_amount_${fromToken}_${toToken}_CUSTOM`)
       .row();
   } else {
@@ -7413,7 +7421,7 @@ const buildBuyAmountSelectionUI = async (
       .text("50%", `buy_amount_${paymentToken}_${callbackToken}_50%`)
       .row()
       .text("75%", `buy_amount_${paymentToken}_${callbackToken}_75%`)
-      .text("100%", `buy_amount_${paymentToken}_${callbackToken}_100%`)
+      .text("MAX", `buy_amount_${paymentToken}_${callbackToken}_MAX`)
       .row()
       .text("✏️ Custom", `buy_amount_${paymentToken}_${callbackToken}_CUSTOM`)
       .row();
@@ -8661,7 +8669,7 @@ const showSellAmountSelection = async (ctx: any, tokenToSell: string) => {
     .text("50%", `sell_amount_${tokenToSell}_50%`)
     .row()
     .text("75%", `sell_amount_${tokenToSell}_75%`)
-    .text("100%", `sell_amount_${tokenToSell}_100%`)
+    .text("MAX", `sell_amount_${tokenToSell}_MAX`)
     .row()
     .text("✏️ Custom", `sell_amount_${tokenToSell}_CUSTOM`)
     .row();
