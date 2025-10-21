@@ -72,3 +72,21 @@ test("buildSolscanTxUrl returns null for localnet", () => {
   expect(NetworkDetector.buildSolscanTxUrl("sig")).toBeNull();
   process.env.SOLANA_NETWORK = original;
 });
+
+test("getDisplayNameFromRpc returns friendly network labels", () => {
+  expect(
+    NetworkDetector.getDisplayNameFromRpc("https://api.devnet.solana.com")
+  ).toBe("Devnet");
+  expect(
+    NetworkDetector.getDisplayNameFromRpc("https://api.testnet.solana.com")
+  ).toBe("Testnet");
+  expect(
+    NetworkDetector.getDisplayNameFromRpc("https://api.mainnet-beta.solana.com")
+  ).toBe("Mainnet");
+  expect(
+    NetworkDetector.getDisplayNameFromRpc("http://localhost:8899")
+  ).toBe("Localnet");
+  expect(
+    NetworkDetector.getDisplayNameFromRpc("http://custom.rpc:8899")
+  ).toBe("Custom Network");
+});
