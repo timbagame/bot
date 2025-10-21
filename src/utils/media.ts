@@ -1,10 +1,85 @@
 /**
  * Utility helpers for dealing with Telegram media operations.
  */
+
+const getErrorDescription = (error: any): string => {
+  if (!error) return "";
+  const description = error?.description ?? error?.message;
+  return typeof description === "string" ? description : "";
+};
+
+const isTooManyRequestsError = (error: any): boolean => {
+  if (!error || typeof error !== "object") return false;
+  if ((error as any).error_code === 429) {
+    return true;
+  }
+
+  const description = getErrorDescription(error);
+  return description.toLowerCase().includes("too many requests");
+};
+
+const parseRetryAfterSeconds = (error: any): number => {
+  if (!error || typeof error !== "object") return 1;
+
+  const parameters = (error as any).parameters;
+  const retryAfter =
+    (parameters && typeof parameters.retry_after === "number"
+      ? parameters.retry_after
+      : undefined) ??
+    (typeof (error as any).retry_after === "number"
+      ? (error as any).retry_after
+      : undefined);
+
+  if (typeof retryAfter === "number" && Number.isFinite(retryAfter)) {
+    return Math.max(0, retryAfter);
+  }
+
+  const description = getErrorDescription(error);
+  const match = description.match(/retry after (\d+)/i);
+  if (match) {
+    const [, retryAfterDigits] = match;
+    if (retryAfterDigits) {
+      const parsed = Number.parseInt(retryAfterDigits, 10);
+      if (!Number.isNaN(parsed)) {
+        return Math.max(0, parsed);
+      }
+    }
+  }
+
+  return 1;
+};
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, ms)));
+
+export const awaitTelegramRetry = async <T>(
+  operation: () => Promise<T>,
+  options: { maxAttempts?: number } = {}
+): Promise<T> => {
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
+  let attempt = 0;
+
+  while (attempt < maxAttempts) {
+    try {
+      return await operation();
+    } catch (error) {
+      attempt += 1;
+      if (!isTooManyRequestsError(error) || attempt >= maxAttempts) {
+        throw error;
+      }
+
+      const delaySeconds = parseRetryAfterSeconds(error);
+      await sleep(delaySeconds * 1000);
+    }
+  }
+
+  throw new Error("awaitTelegramRetry exhausted attempts");
+};
+
 export const isRecoverableMediaError = (error: any): boolean => {
   if (!error) return false;
-  const description = error.description ?? error.message;
-  if (typeof description !== "string") return false;
+  const description = getErrorDescription(error);
+  if (!description) return false;
   const normalized = description.toLowerCase();
 
   if (normalized.includes("message is not modified")) {
@@ -22,8 +97,8 @@ export const isRecoverableMediaError = (error: any): boolean => {
 
 export const isMessageNotModifiedError = (error: any): boolean => {
   if (!error) return false;
-  const description = error.description ?? error.message;
-  if (typeof description !== "string") return false;
+  const description = getErrorDescription(error);
+  if (!description) return false;
   return description.toLowerCase().includes("message is not modified");
 };
 
@@ -56,6 +131,7 @@ export type EditMediaWithFallbackOptions<Primary, Fallback = Primary> = {
   fallback?: () => Promise<Fallback>;
   logLabel?: string;
   onFallback?: () => void;
+  maxAttempts?: number;
 };
 
 export type EditMediaWithFallbackResult<Primary, Fallback = Primary> = {
@@ -69,11 +145,12 @@ export async function editMediaWithFallback<Primary, Fallback = Primary>({
   fallback,
   logLabel = "media edit",
   onFallback,
+  maxAttempts,
 }: EditMediaWithFallbackOptions<Primary, Fallback>): Promise<
   EditMediaWithFallbackResult<Primary, Fallback>
 > {
   try {
-    const result = await edit();
+    const result = await awaitTelegramRetry(edit, { maxAttempts });
     return { result, usedFallback: false, skipped: false };
   } catch (error) {
     if (isMessageNotModifiedError(error)) {

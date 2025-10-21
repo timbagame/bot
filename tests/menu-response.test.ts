@@ -77,5 +77,42 @@ describe("respondWithMenu", () => {
     expect(calls[0]?.type).toBe("text");
     expect(calls.find((c: any) => c.type === "reply")).toBeUndefined();
   });
+
+  test("retries reply when Telegram responds with 429", async () => {
+    const ctx = makeCtx();
+    ctx.callbackQuery = undefined;
+
+    const originalSetTimeout = globalThis.setTimeout;
+    const delays: number[] = [];
+    globalThis.setTimeout = ((callback: (...args: any[]) => void, ms?: number) => {
+      delays.push(ms ?? 0);
+      callback();
+      return 0 as any;
+    }) as any;
+
+    let attempts = 0;
+    ctx.reply = async (text: string, opts: any) => {
+      attempts += 1;
+      if (attempts === 1) {
+        const error: any = new Error("Too Many Requests");
+        error.error_code = 429;
+        error.parameters = { retry_after: 1 };
+        throw error;
+      }
+      ctx.__calls.push({ type: "reply", args: [text, opts] });
+      return { ok: true };
+    };
+
+    try {
+      await respondWithMenu(ctx as any, basePayload);
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+    }
+
+    expect(attempts).toBe(2);
+    expect(delays).toEqual([1000]);
+    const replies = ctx.__calls.filter((c: any) => c.type === "reply");
+    expect(replies.length).toBe(1);
+  });
 });
 
