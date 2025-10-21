@@ -1,3 +1,4 @@
+import { InlineKeyboard } from "grammy";
 import { escapeHtml, formatUsdValue } from "./format-amount";
 import { LAMPORTS_PER_SOL } from "./constants";
 
@@ -104,3 +105,238 @@ export function buildWalletCaption(
 
   return lines.join("\n");
 }
+
+export type WalletActionMenuTokenBalance = WalletTokenBalance & {
+  rawBalance?: string;
+  [key: string]: unknown;
+};
+
+export type WalletActionMenuBalances = {
+  solBalanceLamports: number;
+  tokenBalances: WalletActionMenuTokenBalance[];
+};
+
+export type WalletActionMenuFormatters = {
+  formatSolBalance: (lamports: number) => string;
+  formatTokenBalance: (balance: number, decimals: number) => string;
+};
+
+type TokenSelectQuickActions = {
+  type: "token-select";
+  actionPrefix: string;
+  includeSol?:
+    | boolean
+    | {
+        callback?: string;
+        label?: (
+          formattedBalance: string,
+          lamports: number
+        ) => string;
+        includeIf?: (lamports: number) => boolean;
+      };
+  limit?: number;
+  filter?: (token: WalletActionMenuTokenBalance) => boolean;
+  tokenLabel?: (
+    token: WalletActionMenuTokenBalance,
+    formattedBalance: string
+  ) => string;
+  tokenCallback?: (token: WalletActionMenuTokenBalance) => string;
+  emptyLabel?: string;
+};
+
+type WrapQuickActions = {
+  type: "wrap";
+  callbackPrefix: string;
+  amounts: Array<{ label: string; value: string }>;
+  customAction?: { label: string; callback: string };
+  insufficientLabel?: string;
+  minimumLamports?: number;
+};
+
+type PrebuiltQuickActions = {
+  type: "prebuilt";
+  keyboard: InlineKeyboard;
+};
+
+export type WalletActionQuickActions =
+  | TokenSelectQuickActions
+  | WrapQuickActions
+  | PrebuiltQuickActions;
+
+export type WalletActionMenuParams = {
+  title: string;
+  walletAddress: string;
+  bodyLines: string[];
+  balances: WalletActionMenuBalances;
+  formatters: WalletActionMenuFormatters;
+  quickActions: WalletActionQuickActions;
+  backButton?: { label?: string; callback: string };
+};
+
+export type WalletActionMenuResult = {
+  text: string;
+  keyboard: InlineKeyboard;
+};
+
+const shouldIncludeSol = (
+  includeSol: TokenSelectQuickActions["includeSol"],
+  lamports: number
+): boolean => {
+  if (!includeSol) {
+    return false;
+  }
+
+  if (includeSol === true) {
+    return true;
+  }
+
+  if (typeof includeSol.includeIf === "function") {
+    return includeSol.includeIf(lamports);
+  }
+
+  return true;
+};
+
+const buildTokenSelectKeyboard = (
+  params: TokenSelectQuickActions,
+  balances: WalletActionMenuBalances,
+  formatters: WalletActionMenuFormatters
+): InlineKeyboard => {
+  const keyboard = new InlineKeyboard();
+  let hasEntries = false;
+
+  if (shouldIncludeSol(params.includeSol, balances.solBalanceLamports)) {
+    const formattedSol = formatters.formatSolBalance(
+      balances.solBalanceLamports
+    );
+    const solCallback =
+      typeof params.includeSol === "object" && params.includeSol.callback
+        ? params.includeSol.callback
+        : `${params.actionPrefix}SOL`;
+    const solLabel =
+      typeof params.includeSol === "object" && params.includeSol.label
+        ? params.includeSol.label(formattedSol, balances.solBalanceLamports)
+        : `SOL (${formattedSol})`;
+
+    keyboard.text(solLabel, solCallback).row();
+    hasEntries = true;
+  }
+
+  const limit = params.limit ?? balances.tokenBalances.length;
+  const tokens = balances.tokenBalances.slice(0, limit);
+
+  for (const token of tokens) {
+    if (params.filter && !params.filter(token)) {
+      continue;
+    }
+
+    const formatted = formatters.formatTokenBalance(
+      token.balance,
+      token.decimals
+    );
+    const label = params.tokenLabel
+      ? params.tokenLabel(token, formatted)
+      : `${token.ticker} (${formatted})`;
+    const callback = params.tokenCallback
+      ? params.tokenCallback(token)
+      : `${params.actionPrefix}${token.ticker}`;
+
+    keyboard.text(label, callback).row();
+    hasEntries = true;
+  }
+
+  if (!hasEntries && params.emptyLabel) {
+    keyboard.text(params.emptyLabel, "noop").row();
+  }
+
+  return keyboard;
+};
+
+const buildWrapKeyboard = (
+  params: WrapQuickActions,
+  balances: WalletActionMenuBalances
+): InlineKeyboard => {
+  const keyboard = new InlineKeyboard();
+  const minimumLamports = params.minimumLamports ?? 10_000;
+
+  if (balances.solBalanceLamports > minimumLamports) {
+    for (const amount of params.amounts) {
+      keyboard
+        .text(
+          amount.label,
+          `${params.callbackPrefix}${amount.value}`
+        )
+        .row();
+    }
+
+    if (params.customAction) {
+      keyboard
+        .text(params.customAction.label, params.customAction.callback)
+        .row();
+    }
+  } else {
+    const label = params.insufficientLabel ?? "❌ Insufficient balance";
+    keyboard.text(label, "noop").row();
+  }
+
+  return keyboard;
+};
+
+const trimTrailingEmptyRows = (keyboard: InlineKeyboard): InlineKeyboard => {
+  const rows = keyboard.inline_keyboard;
+  if (!rows) {
+    return keyboard;
+  }
+
+  while (rows.length > 0 && (rows[rows.length - 1]?.length ?? 0) === 0) {
+    rows.pop();
+  }
+  return keyboard;
+};
+
+export const buildWalletActionMenu = ({
+  title,
+  walletAddress,
+  bodyLines,
+  balances,
+  formatters,
+  quickActions,
+  backButton,
+}: WalletActionMenuParams): WalletActionMenuResult => {
+  if (!walletAddress) {
+    throw new Error("walletAddress is required");
+  }
+
+  const sanitizedAddress = escapeHtml(walletAddress);
+  const processedBodyLines = bodyLines.map((line) =>
+    line.replace(/\{\{WALLET_ADDRESS\}\}/g, sanitizedAddress)
+  );
+  const lines = [title, "", ...processedBodyLines];
+  const keyboard = (() => {
+    switch (quickActions.type) {
+      case "token-select":
+        return buildTokenSelectKeyboard(quickActions, balances, formatters);
+      case "wrap":
+        return buildWrapKeyboard(quickActions, balances);
+      case "prebuilt":
+        return quickActions.keyboard;
+      default: {
+        const neverType: never = quickActions;
+        return neverType;
+      }
+    }
+  })();
+
+  if (backButton) {
+    keyboard.text(backButton.label ?? "← Back", backButton.callback).row();
+  }
+
+  if (quickActions.type !== "prebuilt" || backButton) {
+    trimTrailingEmptyRows(keyboard);
+  }
+
+  return {
+    text: lines.join("\n"),
+    keyboard,
+  };
+};

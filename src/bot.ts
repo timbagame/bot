@@ -33,7 +33,6 @@ import {
   createWalletKeyboard,
   createWalletSettingsKeyboard,
   createBackToWalletKeyboard,
-  appendBackToWalletButton,
   createConfirmWrapKeyboard,
   createTradeConfirmKeyboard,
   createAmountSelectionKeyboard,
@@ -43,7 +42,7 @@ import {
   getFeeWarningMessage,
   getSuggestedStakeAmounts,
 } from "./utils/keyboards";
-import { buildWalletCaption } from "./utils/wallet-ui";
+import { buildWalletCaption, buildWalletActionMenu } from "./utils/wallet-ui";
 import {
   formatAmount,
   escapeHtml,
@@ -4829,42 +4828,36 @@ bot.callbackQuery("cmd_withdraw", async (ctx) => {
     const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
     const walletAddress = keypair.publicKey.toBase58();
-    const walletAddressHtml = escapeHtml(walletAddress);
 
     // Use cached wallet data
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-
-    const response = [
-      `💸 <b>WITHDRAW</b>`,
-      "",
-      `<b>From:</b> <code>${walletAddressHtml}</code>`,
-      "",
-      `<b>Select token to withdraw:</b>`,
-    ];
-
-    const keyboard = new InlineKeyboard();
-
-    // Add SOL option
-    const formattedSolBalance = wallet.formatSolBalance(solBalance);
-    keyboard.text(`SOL (${formattedSolBalance})`, `send_select_SOL`).row();
-
-    // Add token options (limit to 5 for better UX)
-    for (const token of tokenBalances.slice(0, 5)) {
-      const formatted = wallet.formatTokenBalance(
-        token.balance,
-        token.decimals
-      );
-      keyboard
-        .text(`${token.ticker} (${formatted})`, `send_select_${token.ticker}`)
-        .row();
-    }
-
-    appendBackToWalletButton(keyboard);
-
-    await respondWithMenu(ctx, {
-      text: response.join("\n"),
-      keyboard,
+    const menu = buildWalletActionMenu({
+      title: `💸 <b>WITHDRAW</b>`,
+      walletAddress,
+      bodyLines: [
+        `<b>From:</b> <code>{{WALLET_ADDRESS}}</code>`,
+        "",
+        `<b>Select token to withdraw:</b>`,
+      ],
+      balances: {
+        solBalanceLamports: solBalance,
+        tokenBalances,
+      },
+      formatters: {
+        formatSolBalance: (lamports) => wallet.formatSolBalance(lamports),
+        formatTokenBalance: (balance, decimals) =>
+          wallet.formatTokenBalance(balance, decimals),
+      },
+      quickActions: {
+        type: "token-select",
+        actionPrefix: "send_select_",
+        includeSol: true,
+        limit: 5,
+      },
+      backButton: { label: "← Back to Wallet", callback: "main_wallet" },
     });
+
+    await respondWithMenu(ctx, menu);
     await ctx.answerCallbackQuery("💸 Select Token to Withdraw");
   } catch (error) {
     console.error("Error in cmd_withdraw:", error);
@@ -4916,42 +4909,46 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
 bot.callbackQuery("cmd_wrap", async (ctx) => {
   try {
     const telegramId = BigInt(ctx.from?.id || 0) as bigint;
+    const keypair = wallet.getKeyPair(telegramId);
+    const walletAddress = keypair.publicKey.toBase58();
     const solBalance = await wallet.getBalance(telegramId);
     const formattedSolBalance = wallet.formatSolBalance(solBalance);
-
-    const response = [
-      `🔧 <b>WRAP SOL</b>`,
-      "",
-      `<b>SOL Balance:</b> ${formattedSolBalance}`,
-      "",
-      `Convert native SOL to WSOL tokens for DeFi operations.`,
-      "",
-      `<b>Quick Wrap Amounts:</b>`,
-    ];
-
-    const keyboard = new InlineKeyboard();
-
-    if (solBalance > 10000) {
-      // Has at least 0.00001 SOL
-      keyboard
-        .text("0.01 SOL", "wrap_amount_0.01")
-        .text("0.1 SOL", "wrap_amount_0.1")
-        .row()
-        .text("0.5 SOL", "wrap_amount_0.5")
-        .text("1 SOL", "wrap_amount_1")
-        .row()
-        .text("✏️ Custom Amount", "wrap_custom")
-        .row();
-    } else {
-      keyboard.text("❌ Insufficient SOL balance").row();
-    }
-
-    appendBackToWalletButton(keyboard);
-
-    await respondWithMenu(ctx, {
-      text: response.join("\n"),
-      keyboard,
+    const menu = buildWalletActionMenu({
+      title: `🔧 <b>WRAP SOL</b>`,
+      walletAddress,
+      bodyLines: [
+        `<b>SOL Balance:</b> ${escapeHtml(formattedSolBalance)}`,
+        "",
+        `Convert native SOL to WSOL tokens for DeFi operations.`,
+        "",
+        `<b>Quick Wrap Amounts:</b>`,
+      ],
+      balances: {
+        solBalanceLamports: solBalance,
+        tokenBalances: [],
+      },
+      formatters: {
+        formatSolBalance: (lamports) => wallet.formatSolBalance(lamports),
+        formatTokenBalance: (value, decimals) =>
+          wallet.formatTokenBalance(value, decimals),
+      },
+      quickActions: {
+        type: "wrap",
+        callbackPrefix: "wrap_amount_",
+        amounts: [
+          { label: "0.01 SOL", value: "0.01" },
+          { label: "0.1 SOL", value: "0.1" },
+          { label: "0.5 SOL", value: "0.5" },
+          { label: "1 SOL", value: "1" },
+        ],
+        customAction: { label: "✏️ Custom Amount", callback: "wrap_custom" },
+        insufficientLabel: "❌ Insufficient SOL balance",
+        minimumLamports: 10_000,
+      },
+      backButton: { label: "← Back to Wallet", callback: "main_wallet" },
     });
+
+    await respondWithMenu(ctx, menu);
     await ctx.answerCallbackQuery("🔧 Select wrap amount");
   } catch (error) {
     console.error("Error in cmd_wrap:", error);
@@ -5393,50 +5390,48 @@ bot.callbackQuery("cmd_swap", async (ctx) => {
     const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
     const walletAddress = keypair.publicKey.toBase58();
-    const walletAddressHtml = escapeHtml(walletAddress);
 
     // Use cached wallet data
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-
-    const response = [
-      `💱 <b>SWAP TOKENS</b>`,
-      "",
-      `<b>From Wallet:</b> <code>${walletAddressHtml}</code>`,
-      "",
-      `<b>Select token to swap FROM:</b>`,
-    ];
-
-    const keyboard = new InlineKeyboard();
-
-    // Add SOL option if user has balance
-    if (solBalance > 0) {
-      const formattedSolBalance = wallet.formatSolBalance(solBalance);
-      keyboard.text(`SOL (${formattedSolBalance})`, `swap_from_SOL`).row();
-    }
-
-    // Add token options (only tokens with balance)
-    for (const token of tokenBalances.slice(0, 6)) {
-      if (parseFloat(token.rawBalance) > 0) {
-        const formatted = wallet.formatTokenBalance(
-          token.balance,
-          token.decimals
-        );
-        keyboard
-          .text(`${token.ticker} (${formatted})`, `swap_from_${token.ticker}`)
-          .row();
-      }
-    }
-
-    if (keyboard.inline_keyboard.length === 0) {
-      keyboard.text("❌ No tokens available to swap").row();
-    }
-
-    appendBackToWalletButton(keyboard);
-
-    await respondWithMenu(ctx, {
-      text: response.join("\n"),
-      keyboard,
+    const menu = buildWalletActionMenu({
+      title: `💱 <b>SWAP TOKENS</b>`,
+      walletAddress,
+      bodyLines: [
+        `<b>From Wallet:</b> <code>{{WALLET_ADDRESS}}</code>`,
+        "",
+        `<b>Select token to swap FROM:</b>`,
+      ],
+      balances: {
+        solBalanceLamports: solBalance,
+        tokenBalances,
+      },
+      formatters: {
+        formatSolBalance: (lamports) => wallet.formatSolBalance(lamports),
+        formatTokenBalance: (balance, decimals) =>
+          wallet.formatTokenBalance(balance, decimals),
+      },
+      quickActions: {
+        type: "token-select",
+        actionPrefix: "swap_from_",
+        includeSol: {
+          includeIf: (lamports) => lamports > 0,
+        },
+        limit: 6,
+        filter: (token) => {
+          const rawValue =
+            token.rawBalance !== undefined
+              ? Number.parseFloat(String(token.rawBalance))
+              : token.balance > 0
+              ? token.balance
+              : 0;
+          return Number.isFinite(rawValue) && rawValue > 0;
+        },
+        emptyLabel: "❌ No tokens available to swap",
+      },
+      backButton: { label: "← Back to Wallet", callback: "main_wallet" },
     });
+
+    await respondWithMenu(ctx, menu);
     await ctx.answerCallbackQuery("💱 Select token to swap from");
   } catch (error) {
     console.error("Error in cmd_swap:", error);
@@ -5604,7 +5599,6 @@ bot.on("callback_query", async (ctx, next) => {
     const telegramId = BigInt(ctx.from?.id || 0) as bigint;
     const keypair = wallet.getKeyPair(telegramId);
     const walletAddress = keypair.publicKey.toBase58();
-    const walletAddressHtml = escapeHtml(walletAddress);
 
     // Use cached wallet data
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
@@ -5623,32 +5617,41 @@ bot.on("callback_query", async (ctx, next) => {
         );
       }
     }
-
-    const response = [
-      `📤 <b>SEND ${token}</b>`,
-      "",
-      `<b>From:</b> <code>${walletAddressHtml}</code>`,
-      `<b>Balance:</b> ${balance} ${token}`,
-      "",
-      `<b>Quick Send Amounts:</b>`,
-    ];
-
-    const keyboard = buildQuickAmountKeyboard({
-      baseCallback: (value) => {
-        if (value === "CUSTOM") {
-          return `send_custom_${token}`;
-        }
-        const normalized = value.replace("%", "").toUpperCase();
-        return `send_amount_${token}_pct${normalized}`;
+    const menu = buildWalletActionMenu({
+      title: `📤 <b>SEND ${escapeHtml(token)}</b>`,
+      walletAddress,
+      bodyLines: [
+        `<b>From:</b> <code>{{WALLET_ADDRESS}}</code>`,
+        `<b>Balance:</b> ${escapeHtml(balance)} ${escapeHtml(token)}`,
+        "",
+        `<b>Quick Send Amounts:</b>`,
+      ],
+      balances: {
+        solBalanceLamports: solBalance,
+        tokenBalances,
       },
-      customLabel: "✏️ Custom Amount",
-      backCallback: "cmd_withdraw",
+      formatters: {
+        formatSolBalance: (lamports) => wallet.formatSolBalance(lamports),
+        formatTokenBalance: (value, decimals) =>
+          wallet.formatTokenBalance(value, decimals),
+      },
+      quickActions: {
+        type: "prebuilt",
+        keyboard: buildQuickAmountKeyboard({
+          baseCallback: (value) => {
+            if (value === "CUSTOM") {
+              return `send_custom_${token}`;
+            }
+            const normalized = value.replace("%", "").toUpperCase();
+            return `send_amount_${token}_pct${normalized}`;
+          },
+          customLabel: "✏️ Custom Amount",
+          backCallback: "cmd_withdraw",
+        }),
+      },
     });
 
-    await respondWithMenu(ctx, {
-      text: response.join("\n"),
-      keyboard,
-    });
+    await respondWithMenu(ctx, menu);
     await ctx.answerCallbackQuery(`Selected ${token}`);
   } catch (error) {
     console.error("Error in send token selection:", error);

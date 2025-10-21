@@ -1,6 +1,10 @@
 import { describe, test, expect } from "bun:test";
+import { InlineKeyboard } from "grammy";
 import { showWalletUI } from "../src/handlers/wallet";
-import { buildWalletTokenLines } from "../src/utils/wallet-ui";
+import {
+  buildWalletTokenLines,
+  buildWalletActionMenu,
+} from "../src/utils/wallet-ui";
 
 type MakeCtxOptions = {
   editError?: Error;
@@ -129,4 +133,156 @@ test("buildWalletTokenLines formats balances and skips empty tokens", async () =
     { ticker: "SOL", amount: "2.000000", usdValue: "40.00", unit: "SOL" },
     { ticker: "AAA", amount: "1.500", usdValue: "7.50" },
   ]);
+});
+
+describe("buildWalletActionMenu", () => {
+  const formatters = {
+    formatSolBalance: (lamports: number) =>
+      (lamports / 1_000_000_000).toFixed(3),
+    formatTokenBalance: (balance: number, decimals: number) =>
+      (balance / Math.pow(10, decimals)).toFixed(3),
+  };
+
+  test("creates withdraw token selection menu", () => {
+    const menu = buildWalletActionMenu({
+      title: "💸 <b>WITHDRAW</b>",
+      walletAddress: "ADDR1111111111111111111111111111111",
+      bodyLines: [
+        "<b>From:</b> <code>{{WALLET_ADDRESS}}</code>",
+        "",
+        "<b>Select token to withdraw:</b>",
+      ],
+      balances: {
+        solBalanceLamports: 1_500_000_000,
+        tokenBalances: [
+          { mint: "mint-aaa", ticker: "AAA", balance: 900_000, decimals: 6 },
+          { mint: "mint-bbb", ticker: "BBB", balance: 0, decimals: 6 },
+        ],
+      },
+      formatters,
+      quickActions: {
+        type: "token-select",
+        actionPrefix: "send_select_",
+        includeSol: true,
+        limit: 5,
+      },
+      backButton: { label: "← Back to Wallet", callback: "main_wallet" },
+    });
+
+    expect(menu.text).toBe(
+      [
+        "💸 <b>WITHDRAW</b>",
+        "",
+        "<b>From:</b> <code>ADDR1111111111111111111111111111111</code>",
+        "",
+        "<b>Select token to withdraw:</b>",
+      ].join("\n")
+    );
+    expect(menu.keyboard.inline_keyboard).toEqual([
+      [{ text: "SOL (1.500)", callback_data: "send_select_SOL" }],
+      [{ text: "AAA (0.900)", callback_data: "send_select_AAA" }],
+      [{ text: "BBB (0.000)", callback_data: "send_select_BBB" }],
+      [{ text: "← Back to Wallet", callback_data: "main_wallet" }],
+    ]);
+  });
+
+  test("returns empty swap state when no balances available", () => {
+    const menu = buildWalletActionMenu({
+      title: "💱 <b>SWAP TOKENS</b>",
+      walletAddress: "swap-user",
+      bodyLines: [
+        "<b>From Wallet:</b> <code>{{WALLET_ADDRESS}}</code>",
+        "",
+        "<b>Select token to swap FROM:</b>",
+      ],
+      balances: {
+        solBalanceLamports: 0,
+        tokenBalances: [
+          { mint: "mint-ccc", ticker: "CCC", balance: 0, decimals: 6, rawBalance: "0" },
+        ],
+      },
+      formatters,
+      quickActions: {
+        type: "token-select",
+        actionPrefix: "swap_from_",
+        includeSol: { includeIf: (lamports) => lamports > 0 },
+        filter: (token) => Number.parseFloat(String(token.rawBalance ?? "0")) > 0,
+        emptyLabel: "❌ No tokens available to swap",
+      },
+      backButton: { label: "← Back to Wallet", callback: "main_wallet" },
+    });
+
+    expect(menu.text).toContain("<b>Select token to swap FROM:</b>");
+    expect(menu.keyboard.inline_keyboard).toEqual([
+      [{ text: "❌ No tokens available to swap", callback_data: "noop" }],
+      [{ text: "← Back to Wallet", callback_data: "main_wallet" }],
+    ]);
+  });
+
+  test("uses provided keyboard for prebuilt quick actions", () => {
+    const prebuilt = new InlineKeyboard().text("Option", "cb").row();
+
+    const menu = buildWalletActionMenu({
+      title: "📤 <b>SEND AAA</b>",
+      walletAddress: "send-user",
+      bodyLines: [
+        "<b>From:</b> <code>{{WALLET_ADDRESS}}</code>",
+        "<b>Balance:</b> 1 AAA",
+      ],
+      balances: { solBalanceLamports: 0, tokenBalances: [] },
+      formatters,
+      quickActions: { type: "prebuilt", keyboard: prebuilt },
+    });
+
+    expect(menu.keyboard).toBe(prebuilt);
+    expect(menu.text).toContain("<b>Balance:</b> 1 AAA");
+  });
+
+  test("wrap menu shows quick actions when balance sufficient", () => {
+    const baseConfig = {
+      title: "🔧 <b>WRAP SOL</b>",
+      bodyLines: [
+        "<b>SOL Balance:</b> 0.500",
+        "",
+        "<b>Quick Wrap Amounts:</b>",
+      ],
+      formatters,
+      quickActions: {
+        type: "wrap" as const,
+        callbackPrefix: "wrap_amount_",
+        amounts: [
+          { label: "0.01 SOL", value: "0.01" },
+          { label: "0.1 SOL", value: "0.1" },
+        ],
+        customAction: { label: "✏️ Custom Amount", callback: "wrap_custom" },
+        insufficientLabel: "❌ Insufficient SOL balance",
+        minimumLamports: 10_000,
+      },
+      backButton: { label: "← Back to Wallet", callback: "main_wallet" },
+    };
+
+    const withBalance = buildWalletActionMenu({
+      ...baseConfig,
+      walletAddress: "wrap-user",
+      balances: { solBalanceLamports: 50_000, tokenBalances: [] },
+    });
+
+    expect(withBalance.keyboard.inline_keyboard).toEqual([
+      [{ text: "0.01 SOL", callback_data: "wrap_amount_0.01" }],
+      [{ text: "0.1 SOL", callback_data: "wrap_amount_0.1" }],
+      [{ text: "✏️ Custom Amount", callback_data: "wrap_custom" }],
+      [{ text: "← Back to Wallet", callback_data: "main_wallet" }],
+    ]);
+
+    const insufficient = buildWalletActionMenu({
+      ...baseConfig,
+      walletAddress: "wrap-user",
+      balances: { solBalanceLamports: 1_000, tokenBalances: [] },
+    });
+
+    expect(insufficient.keyboard.inline_keyboard).toEqual([
+      [{ text: "❌ Insufficient SOL balance", callback_data: "noop" }],
+      [{ text: "← Back to Wallet", callback_data: "main_wallet" }],
+    ]);
+  });
 });
