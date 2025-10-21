@@ -13,11 +13,36 @@ describe("GameManager confirm/reload helpers", () => {
     const wallet = {
       confirmTransaction: async (_: string) => { throw new Error("transaction was not confirmed"); },
     } as any;
-    const program = { account: { game: { fetch: async () => ({}) } } } as any;
+    const program = {
+      account: { game: { fetchNullable: async () => ({}) } },
+      provider: {},
+    } as any;
     const gm = GameManager.getInstance(program, wallet, { getGameParticipants: () => [] } as any);
     (gm as any).isPlayerInGame = async () => true;
     const ok = await (gm as any).confirmTransactionWithRecovery("SIG123", new PublicKey("BPFLoader1111111111111111111111111111111111"), "Player join", new PublicKey("BPFLoader2111111111111111111111111111111111"));
     expect(ok).toBe(true);
+  });
+
+  test("confirmTransactionWithRecovery throws when game account missing after timeout", async () => {
+    resetGM();
+    const wallet = {
+      confirmTransaction: async () => {
+        const err = new Error("transaction was not confirmed in 30 seconds");
+        return Promise.reject(err);
+      },
+    } as any;
+    const program = {
+      account: { game: { fetchNullable: async () => null } },
+      provider: {},
+    } as any;
+    const gm = GameManager.getInstance(program, wallet, { getGameParticipants: () => [] } as any);
+    await expect(
+      (gm as any).confirmTransactionWithRecovery(
+        "SIG",
+        new PublicKey("BPFLoader1111111111111111111111111111111111"),
+        "Game creation"
+      )
+    ).rejects.toThrow(/Game account not found after timeout/);
   });
 
   test("confirmTransactionWithRecovery rethrows non-timeout errors", async () => {
