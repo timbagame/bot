@@ -17,7 +17,6 @@ import * as anchor from "@coral-xyz/anchor";
 import * as fs from "fs";
 import * as path from "path";
 import type { Timba } from "../idl/idlType";
-import idl from "../idl/idl.json";
 import { WalletManager } from "../src/utils/wallet";
 import { getSupportedTokens } from "../src/utils/token-registry";
 import {
@@ -25,6 +24,7 @@ import {
   resolveOracleOperatorKeypair,
   uniqueSigners,
 } from "./utils/keypairs";
+import { createAnchorContext } from "./utils/anchor-context";
 
 // ================================
 // CONFIGURATION
@@ -626,24 +626,9 @@ async function initializeGameToken() {
 
   const oracleOperatorKeypair = resolveOracleOperatorKeypair(adminKeypair);
 
-  // Setup Anchor provider
-  const adminWallet = new anchor.Wallet(
-    adminKeypair as unknown as anchor.web3.Keypair
-  );
-  const provider = new anchor.AnchorProvider(
-    connection as unknown as anchor.web3.Connection,
-    adminWallet,
-    {
-      commitment: "confirmed",
-    }
-  );
-  anchor.setProvider(provider);
-
-  // Initialize program
-  const program = new anchor.Program(
-    idl as Timba,
-    provider
-  ) as anchor.Program<Timba>;
+  const { program } = createAnchorContext(adminKeypair, {
+    connection,
+  });
   console.log(`📋 Program ID: ${program.programId.toBase58()}`);
 
   const tokensToInitialize: TokenInitTarget[] = TOKEN_CONFIGS;

@@ -1,9 +1,7 @@
-import * as anchor from "@coral-xyz/anchor";
-import type { Timba } from "../idl/idlType";
-import idl from "../idl/idl.json";
 import { WalletManager } from "../src/utils/wallet";
 import { GameDatabase } from "../src/utils/game-database";
 import { GameManager } from "../src/utils/game";
+import { createAnchorContext } from "./utils/anchor-context";
 
 const requireEnvVar = (name: string): string => {
   const value = process.env[name];
@@ -21,19 +19,9 @@ async function main(): Promise<void> {
 
   const wallet = WalletManager.getInstance(mnemonic);
   const adminKeypair = wallet.getAdminKeypair();
-  const connection = wallet.getConnection();
-
-  const provider = new anchor.AnchorProvider(
-    connection as unknown as anchor.web3.Connection,
-    new anchor.Wallet(adminKeypair as unknown as anchor.web3.Keypair),
-    { commitment: "confirmed" }
-  );
-  anchor.setProvider(provider);
-
-  const program = new anchor.Program(
-    idl as Timba,
-    provider
-  ) as anchor.Program<Timba>;
+  const { program } = createAnchorContext(adminKeypair, {
+    connection: wallet.getConnection(),
+  });
 
   console.log(`📋 Program ID: ${program.programId.toBase58()}`);
   console.log(`🌐 RPC endpoint: ${rpcEndpoint}`);
