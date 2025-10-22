@@ -182,13 +182,8 @@ async function buildProposal(
     }
   }
 
-  const proposedMinAmount =
-    requiredMinAmount > currentMinAmount
-      ? requiredMinAmount
-      : currentMinAmount;
-
   const newFee =
-    (proposedMinAmount * oracleFeePercentage) / 100n;
+    (requiredMinAmount * oracleFeePercentage) / 100n;
 
   return {
     mint: target.mint,
@@ -196,9 +191,9 @@ async function buildProposal(
     decimals: metadata.decimals,
     currentMinAmount,
     currentFee,
-    requiredMinAmount: proposedMinAmount,
+    requiredMinAmount,
     newFee,
-    updateNeeded: proposedMinAmount > currentMinAmount,
+    updateNeeded: requiredMinAmount !== currentMinAmount,
     tokenPriceUSD,
   };
 }
