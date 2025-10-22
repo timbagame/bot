@@ -1,4 +1,5 @@
 import { InlineKeyboard } from "grammy";
+import type { TradeSide } from "../bot";
 import { DEFAULT_TOKEN_TICKER } from "./constants";
 
 export const createMainMenuKeyboard = (): InlineKeyboard => {
@@ -55,20 +56,39 @@ export const createConfirmWrapKeyboard = (
     .row();
 };
 
-export const createConfirmBuyKeyboard = (txId: string): InlineKeyboard => {
-  return new InlineKeyboard()
-    .text("✅ Confirm Buy", `confirm_buy_${txId}`)
-    .row()
-    .text("← Back to Buy", "cmd_buy")
-    .row();
-};
+export interface ConfirmTradeKeyboardOptions {
+  backCallback?: string;
+  cancelCallback?: string;
+}
 
-export const createConfirmSellKeyboard = (txId: string): InlineKeyboard => {
-  return new InlineKeyboard()
-    .text("✅ Confirm Sell", `confirm_sell_${txId}`)
-    .row()
-    .text("❌ Cancel", "cmd_sell")
+export const createConfirmTradeKeyboard = (
+  side: TradeSide,
+  txId: string,
+  options: ConfirmTradeKeyboardOptions = {}
+): InlineKeyboard => {
+  const keyboard = new InlineKeyboard();
+  const prefix = side === "buy" ? "buy" : "sell";
+  const confirmLabel = side === "buy" ? "✅ Confirm Buy" : "✅ Confirm Sell";
+  const backLabel = side === "buy" ? "← Back to Buy" : "← Back to Sell";
+  const defaultBack = side === "buy" ? "cmd_buy" : "cmd_sell";
+  const backCallback = options.backCallback ?? defaultBack;
+  const cancelCallback = options.cancelCallback ?? backCallback;
+
+  keyboard.text(confirmLabel, `confirm_${prefix}_${txId}`).row();
+  keyboard.text(backLabel, backCallback).row();
+  keyboard
+    .text("0.5%", `${prefix}_slip_${txId}_0.5`)
+    .text("1%", `${prefix}_slip_${txId}_1.0`)
+    .text("2%", `${prefix}_slip_${txId}_2.0`)
     .row();
+  keyboard
+    .text("3%", `${prefix}_slip_${txId}_3.0`)
+    .text("5%", `${prefix}_slip_${txId}_5.0`)
+    .text("✏️", `${prefix}_slip_${txId}_custom`)
+    .row();
+  keyboard.text("❌ Cancel", cancelCallback).row();
+
+  return keyboard;
 };
 
 // ================================

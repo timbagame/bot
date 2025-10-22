@@ -3,8 +3,7 @@ import {
   createMainMenuKeyboard,
   createWalletKeyboard,
   createConfirmWrapKeyboard,
-  createConfirmBuyKeyboard,
-  createConfirmSellKeyboard,
+  createConfirmTradeKeyboard,
   createAmountSelectionKeyboard,
   createPlayerSelectionKeyboard,
   createGameConfirmKeyboard,
@@ -79,18 +78,25 @@ describe("keyboards: misc menus", () => {
     expect(callbacks).toContain("cmd_wrap");
   });
 
-  test("confirm buy keyboard embeds tx id and back to buy", () => {
-    const kb = createConfirmBuyKeyboard("abc123");
+  test("confirm trade keyboard adjusts callbacks for buy", () => {
+    const kb = createConfirmTradeKeyboard("buy", "abc123", {
+      backCallback: "buy_back",
+      cancelCallback: "buy_cancel",
+    });
     const callbacks = extractCallbacks(kb);
     expect(callbacks).toContain("confirm_buy_abc123");
-    expect(callbacks).toContain("cmd_buy");
+    expect(callbacks).toContain("buy_back");
+    expect(callbacks).toContain("buy_cancel");
+    expect(callbacks).toContain("buy_slip_abc123_0.5");
+    expect(callbacks).toContain("buy_slip_abc123_custom");
   });
 
-  test("confirm sell keyboard embeds tx id and cancel", () => {
-    const kb = createConfirmSellKeyboard("tx789");
+  test("confirm trade keyboard adjusts callbacks for sell", () => {
+    const kb = createConfirmTradeKeyboard("sell", "tx789");
     const callbacks = extractCallbacks(kb);
     expect(callbacks).toContain("confirm_sell_tx789");
     expect(callbacks).toContain("cmd_sell");
+    expect(callbacks).toContain("sell_slip_tx789_5.0");
   });
 });
 
