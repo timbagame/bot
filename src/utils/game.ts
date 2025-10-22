@@ -368,10 +368,61 @@ export class GameManager {
     gamePda: PublicKey,
     playerPubkey: PublicKey
   ): Promise<boolean> {
+    const gameAddress = gamePda.toBase58();
+    const playerPubkeyStr = playerPubkey.toBase58();
+
     try {
-      const participants = this.gameDb.getGameParticipants(gamePda.toBase58());
-      return participants.includes(playerPubkey.toBase58());
+      const playerTelegramId = this.gameDb.getPlayerTelegramId?.(
+        playerPubkeyStr
+      );
+
+      if (playerTelegramId) {
+        const participants = this.gameDb.getGameParticipants(gameAddress);
+        if (participants.includes(playerTelegramId)) {
+          return true;
+        }
+      }
     } catch (error) {
+      console.warn(
+        `⚠️ Failed to check local participant records for ${gameAddress}:`,
+        error
+      );
+    }
+
+    try {
+      const accountInterface = this.program.account.game as any;
+      const fetchNullable = accountInterface?.fetchNullable?.bind(
+        accountInterface
+      );
+
+      const gameAccount = fetchNullable
+        ? await fetchNullable(gamePda)
+        : await accountInterface.fetch(gamePda);
+
+      if (!gameAccount) {
+        return false;
+      }
+
+      const rawHashes = (gameAccount as any)?.participantHashes;
+      if (!Array.isArray(rawHashes) || rawHashes.length === 0) {
+        return false;
+      }
+
+      const playerHash = this.computeParticipantHash(gamePda, playerPubkey);
+
+      return rawHashes.some((value: any) => {
+        try {
+          const normalized = value?.toString?.();
+          return normalized === playerHash;
+        } catch {
+          return false;
+        }
+      });
+    } catch (error) {
+      console.warn(
+        `⚠️ Failed to verify on-chain participants for ${gameAddress}:`,
+        error
+      );
       return false;
     }
   }

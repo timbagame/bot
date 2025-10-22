@@ -23,7 +23,9 @@ describe("GameManager private auto-join recovery", () => {
       getConnection: () => ({}) as any,
     } as any;
 
-    const gameAccount = { isPrivate: true };
+    const gamePda = new PublicKey("BPFLoader1111111111111111111111111111111111");
+
+    const gameAccount: any = { isPrivate: true, participantHashes: [] };
     const program = {
       provider: {},
       account: {
@@ -48,6 +50,8 @@ describe("GameManager private auto-join recovery", () => {
         savedParticipants.push(args);
       },
       savePlayerMapping: () => {},
+      getGameParticipants: () => [],
+      getPlayerTelegramId: () => null,
     } as any;
 
     const gm = GameManager.getInstance(program, wallet, gameDb);
@@ -59,16 +63,40 @@ describe("GameManager private auto-join recovery", () => {
       }),
     };
     (gm as any).buildJoinAccounts = async () => ({});
-    (gm as any).isPlayerInGame = async () => true;
 
-    const result = await (gm as any).handleGameAutoJoinPure(
-      new PublicKey("BPFLoader1111111111111111111111111111111111"),
-      playerKp,
-      1n,
-      playerKp.publicKey.toBase58(),
-      "coinflip",
-      42
+    const participantHash = (gm as any).computeParticipantHash(
+      gamePda,
+      playerKp.publicKey
     );
+    gameAccount.participantHashes = [
+      {
+        toString: () => participantHash,
+      },
+    ];
+
+    const originalSetTimeout = globalThis.setTimeout;
+    (globalThis as any).setTimeout = (
+      handler: (...args: any[]) => void,
+      _ms?: number,
+      ...args: any[]
+    ) => {
+      handler(...args);
+      return 0 as any;
+    };
+
+    let result;
+    try {
+      result = await (gm as any).handleGameAutoJoinPure(
+        gamePda,
+        playerKp,
+        1n,
+        playerKp.publicKey.toBase58(),
+        "coinflip",
+        42
+      );
+    } finally {
+      (globalThis as any).setTimeout = originalSetTimeout;
+    }
 
     expect(result.success).toBe(true);
     expect(savedParticipants.length).toBe(1);
