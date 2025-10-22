@@ -5,6 +5,7 @@ import { WalletManager } from "./utils/wallet";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
+import type { Keypair } from "@solana/web3.js";
 import { createSyncNativeInstruction, getAssociatedTokenAddress } from "@solana/spl-token";
 import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
@@ -13,6 +14,7 @@ import { GameManager } from "./utils/game";
 import { PDAManager } from "./utils/pda";
 import { formatUserFriendlyError } from "./utils/errors";
 import { SwapManager, type SwapQuote } from "./utils/swap-manager";
+import { createExpiringCache } from "./utils/expiring-cache";
 import {
   LAMPORTS_PER_SOL,
   MIN_SOL_FOR_TX,
@@ -400,6 +402,83 @@ const resolveSpendAmount = ({
 
   return { rawAmount, displayAmount };
 };
+
+type SwapQuoteWithDecimals = SwapQuote & {
+  inputDecimals?: number;
+  outputDecimals?: number;
+};
+
+type TokenInfoCacheEntry = {
+  token_mint: string;
+  decimals: number;
+};
+
+interface TokenSelectionCacheEntry {
+  targetToken: string;
+  targetTokenAddress: string;
+  paymentToken: string;
+  tokenMetadata?: {
+    address: string;
+    symbol: string;
+    name: string;
+    decimals: number;
+    verified: boolean;
+  };
+  timestamp?: number;
+}
+
+interface SellTransactionCacheEntry {
+  fromToken: string;
+  toToken: string;
+  amount: string;
+  rawAmount: string;
+  fromTokenInfo: TokenInfoCacheEntry;
+  toTokenInfo: TokenInfoCacheEntry;
+  quote: SwapQuoteWithDecimals;
+  userKeypair: Keypair;
+  timestamp?: number;
+}
+
+interface BuyTransactionCacheEntry {
+  fromToken: string;
+  toToken: string;
+  amount: string;
+  rawAmount?: string;
+  quote: SwapQuoteWithDecimals;
+  retryAmount?: string;
+  contractAddress?: string;
+  inputDecimals?: number;
+  outputDecimals?: number;
+  type?: string;
+  userId?: string;
+  timestamp?: number;
+}
+
+type TransactionCacheEntry =
+  | TokenSelectionCacheEntry
+  | SellTransactionCacheEntry
+  | BuyTransactionCacheEntry;
+
+const isTokenSelectionCacheEntry = (
+  entry: TransactionCacheEntry | undefined
+): entry is TokenSelectionCacheEntry =>
+  Boolean(entry && "targetToken" in entry && "targetTokenAddress" in entry);
+
+const isSellTransactionCacheEntry = (
+  entry: TransactionCacheEntry | undefined
+): entry is SellTransactionCacheEntry =>
+  Boolean(entry && "fromTokenInfo" in entry && "toTokenInfo" in entry);
+
+const isBuyTransactionCacheEntry = (
+  entry: TransactionCacheEntry | undefined
+): entry is BuyTransactionCacheEntry =>
+  Boolean(
+    entry &&
+      "fromToken" in entry &&
+      "toToken" in entry &&
+      "quote" in entry &&
+      !("fromTokenInfo" in entry)
+  );
 
 type QuickAmountButton = {
   label: string;
@@ -2659,10 +2738,9 @@ bot.command(
         slippagePercent,
       };
 
-      // Store with timeout (5 minutes)
       setTimeout(() => {
         swapDataCache.delete(telegramId.toString());
-      }, 5 * 60 * 1000);
+      }, TRANSACTION_CACHE_TTL_MS);
 
       swapDataCache.set(telegramId.toString(), swapData);
     } catch (error: any) {
@@ -2676,7 +2754,30 @@ bot.command(
 const swapDataCache = new Map();
 
 // Transaction cache for buy/sell operations with TTL
-const transactionCache = new Map();
+const TRANSACTION_CACHE_TTL_MS = 5 * 60 * 1000;
+const transactionCache = createExpiringCache<TransactionCacheEntry>(
+  TRANSACTION_CACHE_TTL_MS
+);
+
+const getBuyTransactionCacheEntry = (
+  txId: string
+): { entry: BuyTransactionCacheEntry; source: "cache" | "pending" } | undefined => {
+  const cachedEntry = transactionCache.get(txId);
+  if (isBuyTransactionCacheEntry(cachedEntry)) {
+    return { entry: cachedEntry, source: "cache" };
+  }
+
+  const pendingEntry = getPendingTransaction<BuyTransactionCacheEntry>(
+    txId,
+    false
+  );
+
+  if (pendingEntry) {
+    return { entry: pendingEntry, source: "pending" };
+  }
+
+  return undefined;
+};
 
 // Swap confirmation callbacks
 bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
@@ -6050,12 +6151,11 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
         token.decimals
       );
       const tokenTxId = Math.random().toString(36).substring(2, 15);
-      transactionCache.set(tokenTxId, {
+      transactionCache.setWithTTL(tokenTxId, {
         targetToken: token.ticker,
         targetTokenAddress: token.mint,
         paymentToken: "SOL",
       });
-      setTimeout(() => transactionCache.delete(tokenTxId), 5 * 60 * 1000);
       return {
         label: `${token.ticker} (${formattedBalance})`,
         callbackData: `buy_dynamic_SOL_${tokenTxId}`,
@@ -6270,12 +6370,14 @@ bot.on("callback_query", async (ctx, next) => {
   }
 
   const txId = callbackData.replace("confirm_sell_", "");
-  const sellData = transactionCache.get(txId);
+  const sellEntry = transactionCache.get(txId);
 
-  if (!sellData) {
+  if (!isSellTransactionCacheEntry(sellEntry)) {
     await ctx.answerCallbackQuery("❌ Transaction expired. Please try again.");
     return;
   }
+
+  const sellData = sellEntry;
 
   console.log(
     `✅ SELL confirmation for: ${sellData.amount} ${sellData.fromToken} → ${sellData.toToken}`
@@ -6471,11 +6573,13 @@ bot.on("callback_query", async (ctx, next) => {
   }
 
   // Get the cached token info
-  const tokenData = transactionCache.get(tokenTxId);
-  if (!tokenData) {
+  const tokenEntry = transactionCache.get(tokenTxId);
+  if (!isTokenSelectionCacheEntry(tokenEntry)) {
     await ctx.answerCallbackQuery("❌ Token data expired. Please try again.");
     return;
   }
+
+  const tokenData = tokenEntry;
 
   const targetToken = tokenData.targetToken;
   const contractAddress = tokenData.targetTokenAddress;
@@ -6541,7 +6645,7 @@ bot.on("callback_query", async (ctx, next) => {
   // If it looks like a transaction ID (short alphanumeric), look it up in cache
   if (secondPart.length < 20 && /^[a-z0-9]+$/.test(secondPart)) {
     const cachedInfo = transactionCache.get(secondPart);
-    if (cachedInfo && cachedInfo.targetToken) {
+    if (isTokenSelectionCacheEntry(cachedInfo)) {
       targetToken = cachedInfo.targetToken;
       contractAddress = cachedInfo.targetTokenAddress;
     }
@@ -6634,8 +6738,8 @@ bot.on("callback_query", async (ctx, next) => {
   }
 
   const txId = callbackData.replace("confirm_buy_", "");
-  // Handle both transactionCache (new format with tx_ prefix) and old format
-  let buyData = transactionCache.get(txId) || getPendingTransaction<any>(txId, false);
+  const buyResult = getBuyTransactionCacheEntry(txId);
+  const buyData = buyResult?.entry;
 
   if (!buyData) {
     await ctx.answerCallbackQuery("❌ Transaction expired. Please try again.");
@@ -6908,7 +7012,8 @@ bot.on("callback_query", async (ctx, next) => {
   }
 
   const txId = callbackData.replace("buy_retry_exact_", "");
-  const buyData = transactionCache.get(txId) || getPendingTransaction<any>(txId, false);
+  const buyResult = getBuyTransactionCacheEntry(txId);
+  const buyData = buyResult?.entry;
 
   if (!buyData) {
     await ctx.answerCallbackQuery("❌ Transaction expired. Please try again.");
@@ -6925,11 +7030,9 @@ bot.on("callback_query", async (ctx, next) => {
     );
 
     // Update the stored transaction with new amount
-    if (transactionCache.has(txId)) {
-      buyData.amount = newAmount;
-      transactionCache.set(txId, buyData);
-    } else {
-      buyData.amount = newAmount;
+    buyData.amount = newAmount;
+    transactionCache.setWithTTL(txId, buyData);
+    if (buyResult?.source === "pending") {
       storePendingTransaction(txId, buyData);
     }
 
@@ -6981,7 +7084,8 @@ bot.on("callback_query", async (ctx, next) => {
   console.log(`⚙️ BUY slippage change: ${slippageValue}% for txId: ${txId}`);
 
   try {
-    const buyData = transactionCache.get(txId);
+    const buyResult = getBuyTransactionCacheEntry(txId);
+    const buyData = buyResult?.entry;
     if (!buyData) {
       await ctx.answerCallbackQuery(
         "❌ Transaction expired. Please try again."
@@ -7038,7 +7142,10 @@ bot.on("callback_query", async (ctx, next) => {
 
     // Update the cached buy data with new slippage
     buyData.quote.slippage = newSlippage;
-    transactionCache.set(txId, buyData);
+    transactionCache.setWithTTL(txId, buyData);
+    if (buyResult?.source === "pending") {
+      storePendingTransaction(txId, buyData);
+    }
 
     // Regenerate quote with new slippage
     await regenerateBuyQuoteWithSlippage(ctx, txId, newSlippage);
@@ -7690,13 +7797,12 @@ const handleBuyTokenLookup = async ({
 
     const tokenTxId = createTokenLookupId();
 
-    transactionCache.set(tokenTxId, {
+    transactionCache.setWithTTL(tokenTxId, {
       targetToken: tokenInfo.symbol,
       targetTokenAddress: tokenInfo.address,
       tokenMetadata: tokenInfo,
       paymentToken,
     });
-    setTimeout(() => transactionCache.delete(tokenTxId), 5 * 60 * 1000);
 
     const { message, keyboard } = await buildBuyAmountSelectionUI(
       telegramId,
@@ -7815,14 +7921,21 @@ const showBuyQuoteAndConfirmation = async (
         return quote;
       },
       cacheQuote: (txId, quote) => {
-        storePendingTransaction(txId, {
+        const entry: BuyTransactionCacheEntry = {
           type: "swap",
           fromToken: paymentToken,
           toToken: targetToken,
           amount: displayAmount,
+          rawAmount: baseAmount,
           userId: telegramId.toString(),
           quote,
-        });
+          contractAddress: contractAddress ?? outputMint,
+          inputDecimals,
+          outputDecimals,
+        };
+
+        transactionCache.setWithTTL(txId, entry);
+        storePendingTransaction(txId, entry);
       },
       buildConfirmationKeyboard: (txId) =>
         createTradeConfirmKeyboard({
@@ -8782,7 +8895,7 @@ const showSellQuoteAndConfirmation = async (
         return quote;
       },
       cacheQuote: (txId, quote) => {
-        transactionCache.set(txId, {
+        transactionCache.setWithTTL(txId, {
           fromToken: tokenToSell,
           toToken,
           amount: displayAmount,
@@ -8846,13 +8959,17 @@ const handleBuyCustomSlippageInput = async (
     }
 
     // Update the cached buy data with new slippage
-    const buyData = transactionCache.get(txId);
+    const buyResult = getBuyTransactionCacheEntry(txId);
+    const buyData = buyResult?.entry;
     if (!buyData) {
       throw new Error("Transaction expired. Please try again.");
     }
 
     buyData.quote.slippage = slippage;
-    transactionCache.set(txId, buyData);
+    transactionCache.setWithTTL(txId, buyData);
+    if (buyResult?.source === "pending") {
+      storePendingTransaction(txId, buyData);
+    }
 
     // Regenerate quote with new slippage
     const walletCtx = {
@@ -8919,7 +9036,8 @@ const regenerateBuyQuoteWithSlippage = async (
   newSlippage?: number
 ) => {
   try {
-    const buyData = transactionCache.get(txId);
+    const buyResult = getBuyTransactionCacheEntry(txId);
+    const buyData = buyResult?.entry;
     if (!buyData) {
       throw new Error("Transaction expired");
     }
@@ -8929,7 +9047,10 @@ const regenerateBuyQuoteWithSlippage = async (
     // Update slippage in quote if provided
     if (newSlippage) {
       quote.slippage = newSlippage;
-      transactionCache.set(txId, buyData);
+      transactionCache.setWithTTL(txId, buyData);
+      if (buyResult?.source === "pending") {
+        storePendingTransaction(txId, buyData);
+      }
     }
 
     const summary = formatTradeConfirmationSummary({
