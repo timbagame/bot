@@ -7,10 +7,6 @@ import type { ParseAmountResult, ChatTokenConfig, KnownToken } from "../types";
 import { TOKENS_LIST, WSOL_MINT } from "./constants";
 import { createSingleton } from "./singleton";
 
-const ADDITIONAL_TOKEN_MINTS: Record<string, string> = {
-  BONK: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
-};
-
 const BUILTIN_TOKEN_MINTS: Record<string, string> = (() => {
   const map: Record<string, string> = {
     SOL: WSOL_MINT,
@@ -19,10 +15,6 @@ const BUILTIN_TOKEN_MINTS: Record<string, string> = (() => {
 
   for (const token of TOKENS_LIST) {
     map[token.ticker.toUpperCase()] = token.mint;
-  }
-
-  for (const [ticker, mint] of Object.entries(ADDITIONAL_TOKEN_MINTS)) {
-    map[ticker.toUpperCase()] = mint;
   }
 
   return map;
