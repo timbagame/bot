@@ -68,6 +68,28 @@ export const getTelegramId = (
 };
 
 /**
+ * Creates a lightweight adapter that forces subsequent edits to target a specific message.
+ * Useful when downstream helpers expect a context-like object with an `editMessageText` method.
+ */
+export const createMessageEditAdapter = <T extends Context>(
+  ctx: T,
+  messageId: number,
+  chatId?: number
+): T => {
+  const targetChatId = chatId ?? ctx.chat?.id;
+  if (typeof targetChatId !== "number") {
+    throw new Error("Cannot create edit adapter without a valid chat id");
+  }
+
+  return {
+    ...ctx,
+    chat: ctx.chat ?? ({ id: targetChatId } as any),
+    editMessageText: async (text: string, options: any) =>
+      await ctx.api.editMessageText(targetChatId, messageId, text, options),
+  };
+};
+
+/**
  * Safely truncates error messages for callback queries with better context preservation
  */
 export const truncateErrorMessage = (

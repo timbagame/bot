@@ -61,6 +61,12 @@ export const DEFAULT_TOKEN_TICKER = DEFAULT_TOKEN.ticker;
 export const TOKENS_LIST = buildTokenList({ defaultToken: DEFAULT_TOKEN });
 
 // ================================
+// COMMON UI COPY
+// ================================
+
+export const INPUT_TIMEOUT_HINT = "⏱️ <i>This will timeout in 5 minutes</i>";
+
+// ================================
 // GAME BUFFER AND TIMING
 // ================================
 

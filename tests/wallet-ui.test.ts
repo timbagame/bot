@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { buildWalletCaption, showCustomAmountPrompt } from "../src/utils/wallet-ui";
+import { INPUT_TIMEOUT_HINT } from "../src/utils/constants";
 import { getUserState, __test_clearUserState } from "../src/utils/user-state";
 
 type EditCall = { text: string; options: any };
@@ -78,7 +79,7 @@ test("showCustomAmountPrompt formats send custom amount flow", async () => {
   expect(text).toContain("Please send a message with the amount you want to send.");
   expect(text).toContain("<b>Examples:</b>");
   expect(text).toContain("• <code>0.5</code>");
-  expect(text).toContain("⏱️ <i>This will timeout in 5 minutes</i>");
+  expect(text).toContain(INPUT_TIMEOUT_HINT);
   expect(options.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data).toBe(
     "send_select_SOL"
   );

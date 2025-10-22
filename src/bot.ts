@@ -27,6 +27,7 @@ import {
   TOKENS_LIST,
   WSOL_MINT,
   getStartVideoId,
+  INPUT_TIMEOUT_HINT,
 } from "./utils/constants";
 import { mergeWsolIntoSol } from "./utils/balance";
 import { setUserState, getUserState, storePendingTransaction, getPendingTransaction } from "./utils/user-state";
@@ -75,6 +76,7 @@ import type {
 import { TokenDatabase } from "./utils/token-database";
 import {
   getTelegramId,
+  createMessageEditAdapter,
   handleCallbackErrorSafe,
   safeAnswerCallbackQuery,
 } from "./utils/context-helpers";
@@ -380,6 +382,78 @@ const resolveSpendAmount = ({
   return { rawAmount, displayAmount };
 };
 
+type NormalizeCustomTradeAmountOptions = {
+  amount: string;
+  assetTicker: string;
+  solBalance: number;
+  tokenBalance?: TokenBalanceLike;
+  decimals: number;
+};
+
+type NormalizeCustomTradeAmountResult = {
+  normalizedAmount: string;
+  displayAmount: string;
+};
+
+const normalizeCustomTradeAmount = ({
+  amount,
+  assetTicker,
+  solBalance,
+  tokenBalance,
+  decimals,
+}: NormalizeCustomTradeAmountOptions): NormalizeCustomTradeAmountResult => {
+  const trimmed = amount.trim();
+  if (!trimmed) {
+    throw new Error("Amount cannot be empty");
+  }
+
+  const lower = trimmed.toLowerCase();
+  if (lower === "max") {
+    return { normalizedAmount: "max", displayAmount: "max" };
+  }
+
+  if (trimmed.includes("%")) {
+    const percentage = Number.parseFloat(trimmed.replace("%", ""));
+    if (!Number.isFinite(percentage) || percentage <= 0 || percentage > 100) {
+      throw new Error("Invalid percentage format");
+    }
+
+    if (assetTicker === "SOL") {
+      const portion = Math.floor(solBalance * (percentage / 100));
+      if (portion <= 0) {
+        throw new Error("Percentage results in zero amount");
+      }
+      const formatted = formatAmount(portion, decimals, {
+        maxFractionDigits: decimals,
+        trim: true,
+      });
+      return { normalizedAmount: formatted, displayAmount: formatted };
+    }
+
+    if (!tokenBalance) {
+      throw new Error(`Token ${assetTicker} not found in wallet`);
+    }
+
+    const portion = Math.floor(tokenBalance.balance * (percentage / 100));
+    if (portion <= 0) {
+      throw new Error("Percentage results in zero amount");
+    }
+
+    const formatted = formatAmount(portion, tokenBalance.decimals, {
+      maxFractionDigits: tokenBalance.decimals,
+      trim: true,
+    });
+    return { normalizedAmount: formatted, displayAmount: formatted };
+  }
+
+  const numeric = Number.parseFloat(trimmed);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    throw new Error("Invalid amount format");
+  }
+
+  return { normalizedAmount: trimmed, displayAmount: trimmed };
+};
+
 type SwapQuoteWithDecimals = SwapQuote & {
   inputDecimals?: number;
   outputDecimals?: number;
@@ -538,7 +612,7 @@ const buildQuickAmountKeyboard = ({
   return keyboard;
 };
 
-type TradeKind = "buy" | "sell";
+type TradeKind = "buy" | "sell" | "swap";
 
 type TradeConfirmationParams = {
   kind: TradeKind;
@@ -555,16 +629,19 @@ type TradeConfirmationParams = {
 const TRADE_ICONS: Record<TradeKind, string> = {
   buy: "🛒",
   sell: "🧾",
+  swap: "🔄",
 };
 
 const TRADE_TITLES: Record<TradeKind, string> = {
   buy: "Buy Confirmation",
   sell: "Sell Confirmation",
+  swap: "Swap Confirmation",
 };
 
 const TRADE_ACTION_LABEL: Record<TradeKind, string> = {
   buy: "purchase",
   sell: "sale",
+  swap: "swap",
 };
 
 const formatTradeConfirmationSummary = ({
@@ -753,6 +830,153 @@ const prepareTradeQuote = async ({
     await onError(error);
     return null;
   }
+};
+
+type WalletCacheSnapshot = Awaited<ReturnType<typeof getCachedWalletData>>;
+
+type TradeAssetFactoryContext = WalletCacheSnapshot & {
+  telegramId: bigint;
+};
+
+type ResolvedTradeAsset = {
+  ticker: string;
+  mint: string;
+  decimals: number;
+  tokenBalance?: TokenBalanceLike;
+  applySolFeeBuffer?: boolean;
+  metadata?: Record<string, unknown>;
+};
+
+type PreparedTradeQuoteContext = {
+  input: ResolvedTradeAsset;
+  output: ResolvedTradeAsset;
+  rawAmount: number;
+  displayAmount: string;
+};
+
+type PrepareTokenTradeQuoteParams = {
+  ctx: Context;
+  telegramId: bigint;
+  amountInput: string;
+  kind: TradeKind;
+  inputFactory: (
+    context: TradeAssetFactoryContext
+  ) => Promise<ResolvedTradeAsset> | ResolvedTradeAsset;
+  outputFactory: (
+    context: TradeAssetFactoryContext
+  ) => Promise<ResolvedTradeAsset> | ResolvedTradeAsset;
+  spinnerText: (info: {
+    displayAmount: string;
+    amountInput: string;
+    inputTicker: string;
+    outputTicker: string;
+  }) => string;
+  cacheQuote: (
+    txId: string,
+    quote: SwapQuote,
+    context: PreparedTradeQuoteContext
+  ) => void;
+  buildConfirmationKeyboard: (
+    txId: string,
+    summary: TradeConfirmationSummary,
+    quote: SwapQuote,
+    context: PreparedTradeQuoteContext
+  ) => InlineKeyboard;
+  onError: (error: unknown) => Promise<void> | void;
+  summaryExtras?: (
+    context: PreparedTradeQuoteContext
+  ) => Partial<Omit<TradeConfirmationParams, "kind" | "quote">>;
+  quoteOptions?: { slippageBps?: number };
+  quoteErrorMessage?: string;
+};
+
+const prepareTokenTradeQuote = async ({
+  ctx,
+  telegramId,
+  amountInput,
+  kind,
+  inputFactory,
+  outputFactory,
+  spinnerText,
+  cacheQuote,
+  buildConfirmationKeyboard,
+  onError,
+  summaryExtras,
+  quoteOptions,
+  quoteErrorMessage,
+}: PrepareTokenTradeQuoteParams) => {
+  const snapshot = await getCachedWalletData(telegramId);
+  const factoryContext: TradeAssetFactoryContext = { telegramId, ...snapshot };
+
+  const [inputAsset, outputAsset] = await Promise.all([
+    Promise.resolve(inputFactory(factoryContext)),
+    Promise.resolve(outputFactory(factoryContext)),
+  ]);
+
+  const amountResolution = resolveSpendAmount({
+    amount: amountInput,
+    assetTicker: inputAsset.ticker,
+    inputDecimals: inputAsset.decimals,
+    solBalance: snapshot.solBalance,
+    tokenBalance: inputAsset.tokenBalance,
+    formatSol: (lamports) => wallet.formatSolBalance(lamports),
+    formatToken: (value, decimals) => wallet.formatTokenBalance(value, decimals),
+    applySolFeeBuffer:
+      inputAsset.applySolFeeBuffer ?? inputAsset.ticker === "SOL",
+  });
+
+  const preparedContext: PreparedTradeQuoteContext = {
+    input: inputAsset,
+    output: outputAsset,
+    rawAmount: amountResolution.rawAmount,
+    displayAmount: amountResolution.displayAmount,
+  };
+
+  const spinner = spinnerText({
+    displayAmount: amountResolution.displayAmount,
+    amountInput,
+    inputTicker: inputAsset.ticker,
+    outputTicker: outputAsset.ticker,
+  });
+
+  await prepareTradeQuote({
+    ctx,
+    kind,
+    spinnerText: spinner,
+    summaryInput: {
+      payToken: inputAsset.ticker,
+      payDisplay: amountResolution.displayAmount,
+      payRawAmount: amountResolution.rawAmount,
+      payDecimals: inputAsset.decimals,
+      receiveToken: outputAsset.ticker,
+      receiveDecimals: outputAsset.decimals,
+      ...(summaryExtras?.(preparedContext) ?? {}),
+    },
+    quoteFetcher: async () => {
+      const quote = await swapManager.getQuote({
+        inputMint: inputAsset.mint,
+        outputMint: outputAsset.mint,
+        amount: amountResolution.rawAmount.toString(),
+        slippageBps: quoteOptions?.slippageBps ?? 100,
+        userKeypair: wallet.getKeyPair(telegramId),
+        inputDecimals: inputAsset.decimals,
+        outputDecimals: outputAsset.decimals,
+        inputTicker: inputAsset.ticker.toUpperCase(),
+        outputTicker: outputAsset.ticker.toUpperCase(),
+      });
+      if (!quote) {
+        throw new Error(
+          quoteErrorMessage ??
+            `Cannot get quote for ${inputAsset.ticker} → ${outputAsset.ticker}`
+        );
+      }
+      return quote;
+    },
+    cacheQuote: (txId, quote) => cacheQuote(txId, quote, preparedContext),
+    buildConfirmationKeyboard: (txId, summary, quote) =>
+      buildConfirmationKeyboard(txId, summary, quote, preparedContext),
+    onError,
+  });
 };
 
 
@@ -5077,7 +5301,7 @@ bot.on("callback_query", async (ctx, next) => {
       `• <code>0.5</code>`,
       `• <code>1.25</code>`,
       "",
-      `⏱️ <i>This will timeout in 5 minutes</i>`,
+      INPUT_TIMEOUT_HINT,
     ];
 
     await respondWithMenu(ctx, {
@@ -5858,7 +6082,7 @@ bot.on("callback_query", async (ctx, next) => {
       `<b>Format:</b> Public key (44 characters)`,
       `<b>Example:</b> <code>Ge6tnNaEY6kEznY795RSUHS5Wbm3DxMMcroLZcU3dB1Z</code>`,
       "",
-      `⏱️ <i>This will timeout in 5 minutes</i>`,
+      INPUT_TIMEOUT_HINT,
     ];
 
     await respondWithMenu(ctx, {
@@ -7097,7 +7321,7 @@ bot.on("callback_query", async (ctx, next) => {
         `• <code>3</code> (3% slippage)`,
         "",
         `<b>Range:</b> 0.1% - 10%`,
-        `⏱️ <i>This will timeout in 5 minutes</i>`,
+        INPUT_TIMEOUT_HINT,
       ];
 
       await respondWithMenu(ctx, {
@@ -7259,7 +7483,7 @@ bot.on("callback_query", async (ctx, next) => {
         `• <code>EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v</code> (USDC)`,
         `• <code>BONK</code>`,
         "",
-        `⏱️ <i>This will timeout in 5 minutes</i>`,
+        INPUT_TIMEOUT_HINT,
       ];
 
       await respondWithMenu(ctx, {
@@ -7326,7 +7550,7 @@ bot.on("callback_query", async (ctx, next) => {
         `• <code>0.5</code>`,
         `• <code>max</code> (all balance)`,
         "",
-        `⏱️ <i>This will timeout in 5 minutes</i>`,
+        INPUT_TIMEOUT_HINT,
       ];
 
       await respondWithMenu(ctx, {
@@ -7473,80 +7697,64 @@ const showSwapQuoteAndConfirmation = async (
   const userId = telegramId || getTelegramId(ctx);
 
   try {
-    // Get real quote from swapManager
-    const inputMint = tokenManager.resolveMintForTicker(fromToken);
-    const outputMint = tokenManager.resolveMintForTicker(toToken);
-
-    if (!inputMint || !outputMint) {
-      throw new Error(`Unsupported token pair: ${fromToken} → ${toToken}`);
-    }
-
-    const keypair = wallet.getKeyPair(userId);
-    const { solBalance, tokenBalances } = await getCachedWalletData(userId);
-    const tokenBalance = tokenBalances.find((t) => t.ticker === fromToken);
-
-    const inputDecimals =
-      fromToken === "SOL"
-        ? 9
-        : tokenBalance?.decimals ?? (await wallet.getTokenMetadata(inputMint)).decimals;
-    const outputDecimals =
-      toToken === "SOL"
-        ? 9
-        : await wallet.getTokenMetadata(outputMint).then((m) => m.decimals);
-
-    const { rawAmount, displayAmount } = resolveSpendAmount({
-      amount,
-      assetTicker: fromToken,
-      inputDecimals,
-      solBalance,
-      tokenBalance: tokenBalance
-        ? { balance: tokenBalance.balance, decimals: tokenBalance.decimals }
-        : undefined,
-      formatSol: (lamports) => wallet.formatSolBalance(lamports),
-      formatToken: (value, decimals) =>
-        wallet.formatTokenBalance(value, decimals),
-    });
-
-    const baseAmount = rawAmount.toString();
-
-    await prepareTradeQuote({
+    await prepareTokenTradeQuote({
       ctx,
-      kind: "sell",
-      spinnerText: `🔄 <b>GETTING QUOTE</b>\n\n${displayAmount} ${fromToken} → ${toToken}\n\n<i>Please wait...</i>`,
-      summaryInput: {
-        payToken: fromToken,
-        payDisplay: displayAmount,
-        payRawAmount: rawAmount,
-        payDecimals: inputDecimals,
-        receiveToken: toToken,
-        receiveDecimals: outputDecimals,
-      },
-      quoteFetcher: async () => {
-        const quote = await swapManager.getQuote({
-          inputMint,
-          outputMint,
-          amount: baseAmount,
-          slippageBps: 100,
-          userKeypair: keypair,
-          inputDecimals,
-          outputDecimals,
-          inputTicker: fromToken.toUpperCase(),
-          outputTicker: toToken.toUpperCase(),
-        });
-        if (!quote) {
-          throw new Error(`Cannot get quote for ${fromToken} → ${toToken}`);
+      telegramId: userId,
+      amountInput: amount,
+      kind: "swap",
+      inputFactory: async ({ tokenBalances }) => {
+        const inputMint = tokenManager.resolveMintForTicker(fromToken);
+        if (!inputMint) {
+          throw new Error(`Unsupported token pair: ${fromToken} → ${toToken}`);
         }
-        return quote;
+
+        const balanceEntry =
+          fromToken === "SOL"
+            ? undefined
+            : tokenBalances.find((t) => t.ticker === fromToken);
+        const decimals =
+          fromToken === "SOL"
+            ? 9
+            : balanceEntry?.decimals ??
+              (await wallet.getTokenMetadata(inputMint)).decimals;
+
+        return {
+          ticker: fromToken,
+          mint: inputMint,
+          decimals,
+          tokenBalance: balanceEntry
+            ? { balance: balanceEntry.balance, decimals: balanceEntry.decimals }
+            : undefined,
+          applySolFeeBuffer: fromToken === "SOL",
+        };
       },
-      cacheQuote: (txId, quote) => {
+      outputFactory: async () => {
+        const outputMint = tokenManager.resolveMintForTicker(toToken);
+        if (!outputMint) {
+          throw new Error(`Unsupported token pair: ${fromToken} → ${toToken}`);
+        }
+        const decimals =
+          toToken === "SOL"
+            ? 9
+            : (await wallet.getTokenMetadata(outputMint)).decimals;
+
+        return {
+          ticker: toToken,
+          mint: outputMint,
+          decimals,
+        };
+      },
+      spinnerText: ({ displayAmount }) =>
+        `🔄 <b>GETTING QUOTE</b>\n\n${displayAmount} ${fromToken} → ${toToken}\n\n<i>Please wait...</i>`,
+      cacheQuote: (txId, quote, context) => {
         storePendingTransaction(txId, {
           type: "swap",
           fromToken,
           toToken,
-          amount: displayAmount,
-          rawAmount: baseAmount,
-          inputDecimals,
-          outputDecimals,
+          amount: context.displayAmount,
+          rawAmount: context.rawAmount.toString(),
+          inputDecimals: context.input.decimals,
+          outputDecimals: context.output.decimals,
           userId: userId.toString(),
           quote,
         });
@@ -7567,6 +7775,7 @@ const showSwapQuoteAndConfirmation = async (
         });
         await respondWithMenu(ctx, { text, keyboard });
       },
+      quoteErrorMessage: `Cannot get quote for ${fromToken} → ${toToken}`,
     });
   } catch (error) {
     console.error("Error getting swap quote:", error);
@@ -7837,88 +8046,70 @@ const showBuyQuoteAndConfirmation = async (
   const telegramId = getTelegramId(ctx);
 
   try {
-    // Use existing swap logic but with BUY terminology
-    const inputMint = tokenManager.resolveMintForTicker(paymentToken);
-    const outputMint =
-      contractAddress || tokenManager.resolveMintForTicker(targetToken);
-
-    if (!inputMint) {
-      throw new Error(`Unsupported payment token: ${paymentToken}`);
-    }
-
-    if (!outputMint) {
-      throw new Error(`Token not found: ${targetToken}`);
-    }
-
-    const keypair = wallet.getKeyPair(telegramId);
-    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-    const tokenBalance = tokenBalances.find(
-      (t) => t.ticker === paymentToken
-    );
-
-    const inputDecimals =
-      paymentToken === "SOL"
-        ? 9
-        : tokenBalance?.decimals ?? (await wallet.getTokenMetadata(inputMint)).decimals;
-    const outputDecimals = contractAddress
-      ? await wallet.getTokenMetadata(outputMint).then((m) => m.decimals)
-      : 9;
-
-    const { rawAmount, displayAmount } = resolveSpendAmount({
-      amount,
-      assetTicker: paymentToken,
-      inputDecimals,
-      solBalance,
-      tokenBalance,
-      formatSol: (lamports) => wallet.formatSolBalance(lamports),
-      formatToken: (value, decimals) =>
-        wallet.formatTokenBalance(value, decimals),
-    });
-
-    const baseAmount = rawAmount.toString();
-
-    await prepareTradeQuote({
+    await prepareTokenTradeQuote({
       ctx,
+      telegramId,
+      amountInput: amount,
       kind: "buy",
-      spinnerText: `🔄 <b>GETTING QUOTE</b>\n\nBuy ${targetToken} with ${amount} ${paymentToken}\n\n<i>Detecting best provider...</i>`,
-      summaryInput: {
-        payToken: paymentToken,
-        payDisplay: displayAmount,
-        payRawAmount: rawAmount,
-        payDecimals: inputDecimals,
-        receiveToken: targetToken,
-        receiveDecimals: outputDecimals,
-        contractAddress: contractAddress ?? outputMint,
-      },
-      quoteFetcher: async () => {
-        const quote = await swapManager.getQuote({
-          inputMint,
-          outputMint,
-          amount: baseAmount,
-          slippageBps: 100,
-          userKeypair: keypair,
-          inputDecimals,
-          outputDecimals,
-          inputTicker: paymentToken.toUpperCase(),
-          outputTicker: targetToken.toUpperCase(),
-        });
-        if (!quote) {
-          throw new Error(`Cannot get quote for buying ${targetToken}`);
+      inputFactory: async ({ tokenBalances }) => {
+        const inputMint = tokenManager.resolveMintForTicker(paymentToken);
+        if (!inputMint) {
+          throw new Error(`Unsupported payment token: ${paymentToken}`);
         }
-        return quote;
+
+        const balanceEntry =
+          paymentToken === "SOL"
+            ? undefined
+            : tokenBalances.find((t) => t.ticker === paymentToken);
+        const decimals =
+          paymentToken === "SOL"
+            ? 9
+            : balanceEntry?.decimals ??
+              (await wallet.getTokenMetadata(inputMint)).decimals;
+
+        return {
+          ticker: paymentToken,
+          mint: inputMint,
+          decimals,
+          tokenBalance: balanceEntry
+            ? { balance: balanceEntry.balance, decimals: balanceEntry.decimals }
+            : undefined,
+        };
       },
-      cacheQuote: (txId, quote) => {
+      outputFactory: async () => {
+        const resolvedMint =
+          contractAddress || tokenManager.resolveMintForTicker(targetToken);
+        if (!resolvedMint) {
+          throw new Error(`Token not found: ${targetToken}`);
+        }
+
+        const decimals = contractAddress
+          ? (await wallet.getTokenMetadata(resolvedMint)).decimals
+          : 9;
+
+        return {
+          ticker: targetToken,
+          mint: resolvedMint,
+          decimals,
+        };
+      },
+      spinnerText: ({ displayAmount }) =>
+        `🔄 <b>GETTING QUOTE</b>\n\nBuy ${targetToken} with ${displayAmount} ${paymentToken}\n\n<i>Detecting best provider...</i>`,
+      summaryExtras: (context) => ({
+        contractAddress: contractAddress ?? context.output.mint,
+      }),
+      cacheQuote: (txId, quote, context) => {
         const entry: BuyTransactionCacheEntry = {
           type: "swap",
           fromToken: paymentToken,
           toToken: targetToken,
-          amount: displayAmount,
-          rawAmount: baseAmount,
+          amount: context.displayAmount,
+          rawAmount: context.rawAmount.toString(),
           userId: telegramId.toString(),
           quote,
-          contractAddress: contractAddress ?? outputMint,
-          inputDecimals,
-          outputDecimals,
+          contractAddress: contractAddress ?? context.output.mint,
+          inputDecimals: context.input.decimals,
+          outputDecimals: context.output.decimals,
         };
 
         transactionCache.setWithTTL(txId, entry);
@@ -7951,6 +8142,7 @@ const showBuyQuoteAndConfirmation = async (
         });
         await respondWithMenu(ctx, { text, keyboard });
       },
+      quoteErrorMessage: `Cannot get quote for buying ${targetToken}`,
     });
   } catch (error) {
     console.error("Error getting buy quote:", error);
@@ -8148,7 +8340,7 @@ const handleCustomAmountInput = async (
     `<b>Format:</b> Public key (44 characters)`,
     `<b>Example:</b> <code>Ge6tnNaEY6kEznY795RSUHS5Wbm3DxMMcroLZcU3dB1Z</code>`,
     "",
-    `⏱️ <i>This will timeout in 5 minutes</i>`,
+    INPUT_TIMEOUT_HINT,
   ];
 
   await ctx.api.editMessageText(
@@ -8285,17 +8477,11 @@ const handleSwapToTokenInput = async (
   const toToken = tokenInput.toUpperCase();
 
   // Show amount selection for the swap pair
-  const walletCtx = {
-    ...ctx,
-    editMessageText: async (text: string, options: any) => {
-      return await ctx.api.editMessageText(
-        ctx.chat.id,
-        userState.messageId,
-        text,
-        options
-      );
-    },
-  };
+  const walletCtx = createMessageEditAdapter(
+    ctx,
+    userState.messageId,
+    userState.chatId ?? ctx.chat?.id
+  );
 
   await showSwapAmountSelection(walletCtx, fromToken, toToken);
 };
@@ -8319,17 +8505,11 @@ const handleSwapCustomAmountInput = async (
   );
 
   // Show quote and confirmation
-  const walletCtx = {
-    ...ctx,
-    editMessageText: async (text: string, options: any) => {
-      return await ctx.api.editMessageText(
-        ctx.chat.id,
-        userState.messageId,
-        text,
-        options
-      );
-    },
-  };
+  const walletCtx = createMessageEditAdapter(
+    ctx,
+    userState.messageId,
+    userState.chatId ?? ctx.chat?.id
+  );
 
   await showSwapQuoteAndConfirmation(
     walletCtx,
@@ -8395,7 +8575,7 @@ const handleBuyContractAddressInput = async (
       `<b>Format:</b> Base58 string (~44 characters)`,
       `<b>Example:</b> <code>So11111111111111111111111111111111111111112</code>`,
       "",
-      `⏱️ <i>This will timeout in 5 minutes</i>`,
+      INPUT_TIMEOUT_HINT,
     ],
     logContext: "Error processing contract address:",
   });
@@ -8465,7 +8645,7 @@ const handleBuyTokenSymbolInput = async (
       `<b>Examples:</b> SOL, USDC, TIMBA`,
       `<b>Or use:</b> Contract address for any token`,
       "",
-      `⏱️ <i>This will timeout in 5 minutes</i>`,
+      INPUT_TIMEOUT_HINT,
     ],
     logContext: "Error searching for token:",
   });
@@ -8492,75 +8672,37 @@ const handleBuyCustomAmountInput = async (
   });
 
   try {
-    // Handle percentage amounts
-    let actualAmount = amount;
-    if (amount.includes("%")) {
-      const percentage = parseFloat(amount.replace("%", ""));
-      if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
-        throw new Error("Invalid percentage format");
-      }
+    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
+    const balanceEntry =
+      paymentToken === "SOL"
+        ? undefined
+        : tokenBalances.find((t) => t.ticker === paymentToken);
 
-      const { solBalance, tokenBalances } = await getCachedWalletData(
-        telegramId
-      );
-
-      if (paymentToken === "SOL") {
-        const lamportsPortion = Math.floor(solBalance * (percentage / 100));
-        if (lamportsPortion <= 0) {
-          throw new Error("Percentage results in zero amount");
-        }
-        actualAmount = formatAmount(lamportsPortion, 9, {
-          maxFractionDigits: 9,
-          trim: true,
-        });
-      } else {
-        const tokenBalance = tokenBalances.find(
-          (t) => t.ticker === paymentToken
-        );
-        if (!tokenBalance) {
-          throw new Error(`Token ${paymentToken} not found in wallet`);
-        }
-        const tokenPortion = Math.floor(tokenBalance.balance * (percentage / 100));
-        if (tokenPortion <= 0) {
-          throw new Error("Percentage results in zero amount");
-        }
-        actualAmount = formatAmount(tokenPortion, tokenBalance.decimals, {
-          maxFractionDigits: tokenBalance.decimals,
-          trim: true,
-        });
-      }
-    } else if (amount.toLowerCase() === "max") {
-      actualAmount = "max";
-    } else {
-      const numAmount = parseFloat(amount);
-      if (isNaN(numAmount) || numAmount <= 0) {
-        throw new Error("Invalid amount format");
-      }
-      actualAmount = amount;
-    }
+    const normalized = normalizeCustomTradeAmount({
+      amount,
+      assetTicker: paymentToken,
+      solBalance,
+      tokenBalance: balanceEntry
+        ? { balance: balanceEntry.balance, decimals: balanceEntry.decimals }
+        : undefined,
+      decimals: paymentToken === "SOL" ? 9 : balanceEntry?.decimals ?? 0,
+    });
 
     console.log(
-      `💰 Custom BUY amount received: ${actualAmount} ${paymentToken} → ${targetToken}`
+      `💰 Custom BUY amount received: ${normalized.displayAmount} ${paymentToken} → ${targetToken}`
     );
 
-    // Show quote and confirmation using the same pattern as swap
-    const walletCtx = {
-      ...ctx,
-      editMessageText: async (text: string, options: any) => {
-        return await ctx.api.editMessageText(
-          ctx.chat.id,
-          userState.messageId,
-          text,
-          options
-        );
-      },
-    };
+    const walletCtx = createMessageEditAdapter(
+      ctx,
+      userState.messageId,
+      userState.chatId ?? ctx.chat?.id
+    );
 
     await showBuyQuoteAndConfirmation(
       walletCtx,
       paymentToken,
       targetToken,
-      actualAmount,
+      normalized.normalizedAmount,
       contractAddress
     );
   } catch (error: any) {
@@ -8583,7 +8725,7 @@ const handleBuyCustomAmountInput = async (
       `• <code>50%</code> (spend 50% of balance)`,
       `• <code>max</code> (spend all available ${paymentToken})`,
       "",
-      `⏱️ <i>This will timeout in 5 minutes</i>`,
+      INPUT_TIMEOUT_HINT,
     ];
 
     await ctx.api.editMessageText(
@@ -8620,62 +8762,33 @@ const handleSellCustomAmountInput = async (
   const telegramId = getTelegramId(ctx);
 
   try {
-    // Handle percentage amounts
-    let actualAmount = amount;
-    if (amount.includes("%")) {
-      const percentage = parseFloat(amount.replace("%", ""));
-      if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
-        throw new Error("Invalid percentage format");
-      }
+    const { tokenBalances, solBalance } = await getCachedWalletData(telegramId);
+    const tokenBalance = tokenBalances.find((t) => t.ticker === tokenToSell);
 
-      const { tokenBalances } = await getCachedWalletData(telegramId);
-      const tokenBalance = tokenBalances.find((t) => t.ticker === tokenToSell);
-
-      if (!tokenBalance) {
-        throw new Error(`Token ${tokenToSell} not found in wallet`);
-      }
-
-      const tokenPortion = Math.floor(
-        tokenBalance.balance * (percentage / 100)
-      );
-      if (tokenPortion <= 0) {
-        throw new Error("Percentage results in zero amount");
-      }
-      actualAmount = formatAmount(tokenPortion, tokenBalance.decimals, {
-        maxFractionDigits: tokenBalance.decimals,
-        trim: true,
-      });
-    } else if (amount.toLowerCase() === "max") {
-      actualAmount = "max";
-    } else {
-      const numAmount = parseFloat(amount);
-      if (isNaN(numAmount) || numAmount <= 0) {
-        throw new Error("Invalid amount format");
-      }
-      actualAmount = amount;
-    }
+    const normalized = normalizeCustomTradeAmount({
+      amount,
+      assetTicker: tokenToSell,
+      solBalance,
+      tokenBalance: tokenBalance
+        ? { balance: tokenBalance.balance, decimals: tokenBalance.decimals }
+        : undefined,
+      decimals: tokenBalance?.decimals ?? 0,
+    });
 
     console.log(
-      `🔴 Custom SELL amount received: ${actualAmount} ${tokenToSell}`
+      `🔴 Custom SELL amount received: ${normalized.displayAmount} ${tokenToSell}`
     );
 
-    // Show quote and confirmation
-    const walletCtx = {
-      ...ctx,
-      editMessageText: async (text: string, options: any) => {
-        return await ctx.api.editMessageText(
-          ctx.chat.id,
-          userState.messageId,
-          text,
-          options
-        );
-      },
-    };
+    const walletCtx = createMessageEditAdapter(
+      ctx,
+      userState.messageId,
+      userState.chatId ?? ctx.chat?.id
+    );
 
     await showSellQuoteAndConfirmation(
       walletCtx,
       tokenToSell,
-      actualAmount,
+      normalized.normalizedAmount,
       telegramId
     );
   } catch (error: any) {
@@ -8696,7 +8809,7 @@ const handleSellCustomAmountInput = async (
       `• <code>50%</code> (sell 50% of balance)`,
       `• <code>max</code> (sell all ${tokenToSell})`,
       "",
-      `⏱️ <i>This will timeout in 5 minutes</i>`,
+      INPUT_TIMEOUT_HINT,
     ];
 
     await ctx.api.editMessageText(
@@ -8771,127 +8884,93 @@ const showSellQuoteAndConfirmation = async (
   telegramId: bigint
 ) => {
   try {
-    // Get token info for the token being sold
-    const { tokenBalances } = await getCachedWalletData(telegramId);
-    const tokenBalance = tokenBalances.find((t) => t.ticker === tokenToSell);
-
-    if (!tokenBalance) {
-      throw new Error(`Token ${tokenToSell} not found in wallet`);
-    }
-
-    // Get the actual token info - prioritize matching the exact mint from wallet balance
-    const approvedTokens = tokenManager.getAllApprovedTokensWithMetadata();
-    let tokenInfo = approvedTokens.find((t) =>
-      t.token_ticker === tokenToSell && t.token_mint === tokenBalance.mint
-    );
-
-    // If not found by exact mint match, try any token with matching ticker
-    if (!tokenInfo) {
-      tokenInfo = approvedTokens.find((t) => t.token_ticker === tokenToSell);
-    }
-
-    // If still not in approved tokens, use the info from wallet balance (for dynamic tokens)
-    if (!tokenInfo) {
-      tokenInfo = {
-        token_mint: tokenBalance.mint,
-        token_ticker: tokenBalance.ticker,
-        decimals: tokenBalance.decimals,
-      };
-      console.log(
-        `🔍 Using dynamic token info for ${tokenToSell}: mint=${tokenBalance.mint}, decimals=${tokenBalance.decimals}`
-      );
-    } else {
-      console.log(
-        `🔍 Using approved token info for ${tokenToSell}: mint=${tokenInfo.token_mint}, decimals=${tokenInfo.decimals}`
-      );
-    }
-
-    const balanceRaw = Math.floor(tokenBalance.balance);
-    const sellDecimals = tokenInfo.decimals ?? tokenBalance.decimals;
-
-    let rawAmount: number;
-    let displayAmount: string;
     try {
-      const resolved = resolveSpendAmount({
-        amount,
-        assetTicker: tokenToSell,
-        inputDecimals: sellDecimals,
-        solBalance: 0,
-        tokenBalance: { balance: balanceRaw, decimals: sellDecimals },
-        formatSol: (lamports) => wallet.formatSolBalance(lamports),
-        formatToken: (value, decimals) =>
-          wallet.formatTokenBalance(value, decimals),
-        applySolFeeBuffer: false,
-      });
-      rawAmount = resolved.rawAmount;
-      displayAmount = resolved.displayAmount;
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message === "Insufficient token balance"
-      ) {
-        const available = wallet.formatTokenBalance(balanceRaw, sellDecimals);
-        throw new Error(
-          `Cannot sell ${amount} ${tokenToSell}. You only have ${available} ${tokenToSell}`
+      await prepareTokenTradeQuote({
+        ctx,
+        telegramId,
+        amountInput: amount,
+        kind: "sell",
+        inputFactory: async ({ tokenBalances }) => {
+        const tokenBalance = tokenBalances.find(
+          (t) => t.ticker === tokenToSell
         );
-      }
-      throw error;
-    }
 
-    if (rawAmount <= 0) {
-      throw new Error("Amount must be greater than zero");
-    }
-
-    // For SELL, we typically sell tokens for SOL
-    const toToken = "SOL";
-    const toTokenInfo = {
-      token_mint: "So11111111111111111111111111111111111111112",
-      decimals: 9,
-    };
-
-    // Use the existing global swapManager instance
-
-    await prepareTradeQuote({
-      ctx,
-      kind: "sell",
-      spinnerText: `🔄 <b>GETTING SELL QUOTE</b>\n\n${displayAmount} ${tokenToSell} → ${toToken}\n\n<i>Finding best price...</i>`,
-      summaryInput: {
-        payToken: tokenToSell,
-        payDisplay: displayAmount,
-        payRawAmount: rawAmount,
-        payDecimals: sellDecimals,
-        receiveToken: toToken,
-        receiveDecimals: toTokenInfo.decimals,
-        contractAddress: tokenInfo.token_mint,
-      },
-      quoteFetcher: async () => {
-        const quote = await swapManager.getQuote({
-          inputMint: tokenInfo.token_mint,
-          outputMint: toTokenInfo.token_mint,
-          amount: rawAmount.toString(),
-          slippageBps: 200,
-          userKeypair: wallet.getKeyPair(telegramId),
-          inputDecimals: sellDecimals || 6,
-          outputDecimals: toTokenInfo.decimals || 9,
-          inputTicker: tokenToSell.toUpperCase(),
-          outputTicker: "SOL",
-        });
-        if (!quote) {
-          throw new Error(`Cannot get quote for selling ${tokenToSell}`);
+        if (!tokenBalance) {
+          throw new Error(`Token ${tokenToSell} not found in wallet`);
         }
-        return quote;
+
+        const approvedTokens = tokenManager.getAllApprovedTokensWithMetadata();
+        let tokenInfo: { token_mint: string; decimals?: number; token_ticker?: string } | undefined =
+          approvedTokens.find(
+            (t) =>
+              t.token_ticker === tokenToSell &&
+              t.token_mint === tokenBalance.mint
+          );
+
+        if (!tokenInfo) {
+          tokenInfo = approvedTokens.find(
+            (t) => t.token_ticker === tokenToSell
+          );
+        }
+
+        if (!tokenInfo) {
+          tokenInfo = {
+            token_mint: tokenBalance.mint,
+            token_ticker: tokenBalance.ticker,
+            decimals: tokenBalance.decimals,
+          };
+          console.log(
+            `🔍 Using dynamic token info for ${tokenToSell}: mint=${tokenBalance.mint}, decimals=${tokenBalance.decimals}`
+          );
+        } else {
+          console.log(
+            `🔍 Using approved token info for ${tokenToSell}: mint=${tokenInfo.token_mint}, decimals=${tokenInfo.decimals}`
+          );
+        }
+
+        if (!tokenInfo) {
+          throw new Error(`Unable to resolve metadata for ${tokenToSell}`);
+        }
+
+        const sellDecimals = tokenInfo.decimals ?? tokenBalance.decimals;
+        const balanceRaw = Math.floor(tokenBalance.balance);
+
+        return {
+          ticker: tokenToSell,
+          mint: tokenInfo.token_mint ?? tokenBalance.mint,
+          decimals: sellDecimals,
+          tokenBalance: { balance: balanceRaw, decimals: sellDecimals },
+          applySolFeeBuffer: false,
+          metadata: { tokenInfo, balanceRaw },
+        };
       },
-      cacheQuote: (txId, quote) => {
+      outputFactory: async () => ({
+        ticker: "SOL",
+        mint: WSOL_MINT,
+        decimals: 9,
+      }),
+      spinnerText: ({ displayAmount }) =>
+        `🔄 <b>GETTING SELL QUOTE</b>\n\n${displayAmount} ${tokenToSell} → SOL\n\n<i>Finding best price...</i>`,
+      summaryExtras: (context) => ({
+        contractAddress:
+          ((context.input.metadata as { tokenInfo?: { token_mint?: string } })
+            ?.tokenInfo?.token_mint ?? context.input.mint),
+      }),
+      cacheQuote: (txId, quote, context) => {
+        const tokenInfo = (context.input.metadata as {
+          tokenInfo?: { token_mint: string; decimals?: number };
+        })?.tokenInfo;
+
         transactionCache.setWithTTL(txId, {
           fromToken: tokenToSell,
-          toToken,
-          amount: displayAmount,
-          rawAmount: rawAmount.toString(),
+          toToken: "SOL",
+          amount: context.displayAmount,
+          rawAmount: context.rawAmount.toString(),
           fromTokenInfo: {
-            token_mint: tokenInfo.token_mint,
-            decimals: sellDecimals,
+            token_mint: tokenInfo?.token_mint ?? context.input.mint,
+            decimals: context.input.decimals,
           },
-          toTokenInfo,
+          toTokenInfo: { token_mint: WSOL_MINT, decimals: context.output.decimals },
           quote,
           userKeypair: wallet.getKeyPair(telegramId),
         });
@@ -8912,7 +8991,30 @@ const showSellQuoteAndConfirmation = async (
         });
         await respondWithMenu(ctx, { text, keyboard });
       },
-    });
+        quoteOptions: { slippageBps: 200 },
+        quoteErrorMessage: `Cannot get quote for selling ${tokenToSell}`,
+      });
+    } catch (innerError) {
+      if (
+        innerError instanceof Error &&
+        innerError.message === "Insufficient token balance"
+      ) {
+        const { tokenBalances } = await getCachedWalletData(telegramId);
+        const balanceEntry = tokenBalances.find(
+          (t) => t.ticker === tokenToSell
+        );
+        if (balanceEntry) {
+          const available = wallet.formatTokenBalance(
+            balanceEntry.balance,
+            balanceEntry.decimals
+          );
+          throw new Error(
+            `Cannot sell ${amount} ${tokenToSell}. You only have ${available} ${tokenToSell}`
+          );
+        }
+      }
+      throw innerError;
+    }
   } catch (error: any) {
     console.error("Error getting sell quote:", error);
 
@@ -8959,17 +9061,11 @@ const handleBuyCustomSlippageInput = async (
     }
 
     // Regenerate quote with new slippage
-    const walletCtx = {
-      ...ctx,
-      editMessageText: async (text: string, options: any) => {
-        return await ctx.api.editMessageText(
-          ctx.chat.id,
-          userState.messageId,
-          text,
-          options
-        );
-      },
-    };
+    const walletCtx = createMessageEditAdapter(
+      ctx,
+      userState.messageId,
+      userState.chatId ?? ctx.chat?.id
+    );
 
     await regenerateBuyQuoteWithSlippage(walletCtx, txId, slippage);
   } catch (error: any) {
@@ -8990,7 +9086,7 @@ const handleBuyCustomSlippageInput = async (
       `• <code>2.5</code> (2.5% slippage)`,
       "",
       `<b>Range:</b> 0.1% - 10%`,
-      `⏱️ <i>This will timeout in 5 minutes</i>`,
+      INPUT_TIMEOUT_HINT,
     ];
 
     await ctx.api.editMessageText(

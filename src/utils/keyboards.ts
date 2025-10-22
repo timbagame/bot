@@ -82,6 +82,9 @@ const roundToPrecision = (value: number, precision: number): number => {
   return Math.round(value * factor) / factor;
 };
 
+export const withCreatorSuffix = (base: string, creatorId?: string): string =>
+  creatorId ? `${base}_${creatorId}` : base;
+
 /**
  * Generate fee warning message for low balance users
  */
@@ -165,9 +168,10 @@ export const createAmountSelectionKeyboard = (
   const keyboard = new InlineKeyboard();
 
   amounts.forEach((amount) => {
-    const callbackData = creatorId
-      ? `amount_${gameType}_${amount}_${creatorId}`
-      : `amount_${gameType}_${amount}`;
+    const callbackData = withCreatorSuffix(
+      `amount_${gameType}_${amount}`,
+      creatorId
+    );
     const display = formatTokenDisplay(amount, { decimals });
     const usdText =
       tokenPriceUSD !== undefined
@@ -184,12 +188,12 @@ export const createAmountSelectionKeyboard = (
   keyboard
     .text(
       "📊 Custom Amount",
-      creatorId ? `custom_amount_${gameType}_${creatorId}` : `custom_amount_${gameType}`
+      withCreatorSuffix(`custom_amount_${gameType}`, creatorId)
     )
     .row()
     .text(
       "❌ Cancel",
-      creatorId ? `cancel_game_setup_${creatorId}` : `cancel_game_setup`
+      withCreatorSuffix("cancel_game_setup", creatorId)
     )
     .row();
 
@@ -201,45 +205,93 @@ export const createPlayerSelectionKeyboard = (gameType: string, amount: string, 
   
   if (gameType === "coinflip") {
     keyboard
-      .text("👥 2 Players", creatorId ? `players_${gameType}_${amount}_2_${creatorId}` : `players_${gameType}_${amount}_2`)
-      .text("👥 3 Players", creatorId ? `players_${gameType}_${amount}_3_${creatorId}` : `players_${gameType}_${amount}_3`)
-      .text("👥 4 Players", creatorId ? `players_${gameType}_${amount}_4_${creatorId}` : `players_${gameType}_${amount}_4`)
+      .text(
+        "👥 2 Players",
+        withCreatorSuffix(`players_${gameType}_${amount}_2`, creatorId)
+      )
+      .text(
+        "👥 3 Players",
+        withCreatorSuffix(`players_${gameType}_${amount}_3`, creatorId)
+      )
+      .text(
+        "👥 4 Players",
+        withCreatorSuffix(`players_${gameType}_${amount}_4`, creatorId)
+      )
       .row()
-      .text("👥 5 Players", creatorId ? `players_${gameType}_${amount}_5_${creatorId}` : `players_${gameType}_${amount}_5`)
-      .text("👥 6 Players", creatorId ? `players_${gameType}_${amount}_6_${creatorId}` : `players_${gameType}_${amount}_6`)
-      .text("👥 8 Players", creatorId ? `players_${gameType}_${amount}_8_${creatorId}` : `players_${gameType}_${amount}_8`)
+      .text(
+        "👥 5 Players",
+        withCreatorSuffix(`players_${gameType}_${amount}_5`, creatorId)
+      )
+      .text(
+        "👥 6 Players",
+        withCreatorSuffix(`players_${gameType}_${amount}_6`, creatorId)
+      )
+      .text(
+        "👥 8 Players",
+        withCreatorSuffix(`players_${gameType}_${amount}_8`, creatorId)
+      )
       .row();
   } else if (gameType === "giveaway") {
     keyboard
-      .text("👥 2 Players", creatorId ? `players_${gameType}_${amount}_2_${creatorId}` : `players_${gameType}_${amount}_2`)
-      .text("👥 3 Players", creatorId ? `players_${gameType}_${amount}_3_${creatorId}` : `players_${gameType}_${amount}_3`)
-      .text("👥 5 Players", creatorId ? `players_${gameType}_${amount}_5_${creatorId}` : `players_${gameType}_${amount}_5`)
+      .text(
+        "👥 2 Players",
+        withCreatorSuffix(`players_${gameType}_${amount}_2`, creatorId)
+      )
+      .text(
+        "👥 3 Players",
+        withCreatorSuffix(`players_${gameType}_${amount}_3`, creatorId)
+      )
+      .text(
+        "👥 5 Players",
+        withCreatorSuffix(`players_${gameType}_${amount}_5`, creatorId)
+      )
       .row()
-      .text("👥 10 Players", creatorId ? `players_${gameType}_${amount}_10_${creatorId}` : `players_${gameType}_${amount}_10`)
-      .text("👥 15 Players", creatorId ? `players_${gameType}_${amount}_15_${creatorId}` : `players_${gameType}_${amount}_15`)
-      .text("👥 20 Players", creatorId ? `players_${gameType}_${amount}_20_${creatorId}` : `players_${gameType}_${amount}_20`)
+      .text(
+        "👥 10 Players",
+        withCreatorSuffix(`players_${gameType}_${amount}_10`, creatorId)
+      )
+      .text(
+        "👥 15 Players",
+        withCreatorSuffix(`players_${gameType}_${amount}_15`, creatorId)
+      )
+      .text(
+        "👥 20 Players",
+        withCreatorSuffix(`players_${gameType}_${amount}_20`, creatorId)
+      )
       .row();
   }
-  
+
   keyboard
-    .text("📊 Custom Players", creatorId ? `custom_players_${gameType}_${amount}_${creatorId}` : `custom_players_${gameType}_${amount}`)
+    .text(
+      "📊 Custom Players",
+      withCreatorSuffix(`custom_players_${gameType}_${amount}`, creatorId)
+    )
     .row()
-    .text("❌ Cancel", creatorId ? `cancel_game_setup_${creatorId}` : `cancel_game_setup`)
+    .text("❌ Cancel", withCreatorSuffix("cancel_game_setup", creatorId))
     .row();
     
   return keyboard;
 };
 
 export const createGameConfirmKeyboard = (
-  gameType: string, 
-  amount: string, 
+  gameType: string,
+  amount: string,
   players: string,
   creatorId?: string
 ): InlineKeyboard => {
   return new InlineKeyboard()
-    .text("✅ Create Game", creatorId ? `confirm_game_${gameType}_${amount}_${players}_${creatorId}` : `confirm_game_${gameType}_${amount}_${players}`)
+    .text(
+      "✅ Create Game",
+      withCreatorSuffix(
+        `confirm_game_${gameType}_${amount}_${players}`,
+        creatorId
+      )
+    )
     .row()
-    .text("🔙 Back to Players", creatorId ? `amount_${gameType}_${amount}_${creatorId}` : `amount_${gameType}_${amount}`)
+    .text(
+      "🔙 Back to Players",
+      withCreatorSuffix(`amount_${gameType}_${amount}`, creatorId)
+    )
     .row();
 };
 
@@ -299,33 +351,31 @@ export const createSliderAmountKeyboard = (
     // Amount display
     .text(`💰 ${toDisplay(amountForCallback)} ${tokenTicker}`, `noop`)
     .row()
-    
+
     // Simplified controls
-    .text("⏪", creatorId ? `slider_${gameType}_${downBig}_${creatorId}` : `slider_${gameType}_${downBig}`)
-    .text(`-${step}`, creatorId ? `slider_${gameType}_${down}_${creatorId}` : `slider_${gameType}_${down}`)
-    .text(`+${step}`, creatorId ? `slider_${gameType}_${up}_${creatorId}` : `slider_${gameType}_${up}`)
-    .text("⏩", creatorId ? `slider_${gameType}_${upBig}_${creatorId}` : `slider_${gameType}_${upBig}`)
+    .text("⏪", withCreatorSuffix(`slider_${gameType}_${downBig}`, creatorId))
+    .text(`-${step}`, withCreatorSuffix(`slider_${gameType}_${down}`, creatorId))
+    .text(`+${step}`, withCreatorSuffix(`slider_${gameType}_${up}`, creatorId))
+    .text("⏩", withCreatorSuffix(`slider_${gameType}_${upBig}`, creatorId))
     .row()
-    
+
     // Quick options based on balance
-    .text("🏠 Min", creatorId ? `slider_${gameType}_${useMin}_${creatorId}` : `slider_${gameType}_${useMin}`)
-    .text("🎯 25%", creatorId ? `slider_${gameType}_${quarter}_${creatorId}` : `slider_${gameType}_${quarter}`)
-    .text("🔥 50%", creatorId ? `slider_${gameType}_${half}_${creatorId}` : `slider_${gameType}_${half}`)
-    .text("💎 Max", creatorId ? `slider_${gameType}_${useMax}_${creatorId}` : `slider_${gameType}_${useMax}`)
+    .text("🏠 Min", withCreatorSuffix(`slider_${gameType}_${useMin}`, creatorId))
+    .text("🎯 25%", withCreatorSuffix(`slider_${gameType}_${quarter}`, creatorId))
+    .text("🔥 50%", withCreatorSuffix(`slider_${gameType}_${half}`, creatorId))
+    .text("💎 Max", withCreatorSuffix(`slider_${gameType}_${useMax}`, creatorId))
     .row()
-    
+
     // Action buttons
     .text(
       `✅ Use ${toDisplay(amountForCallback)} ${tokenTicker}`,
-      creatorId
-        ? `amount_${gameType}_${amountForCallback}_${creatorId}`
-        : `amount_${gameType}_${amountForCallback}`
+      withCreatorSuffix(`amount_${gameType}_${amountForCallback}`, creatorId)
     )
     .row()
-    .text("✏️ Type Amount", creatorId ? `type_amount_${gameType}_${creatorId}` : `type_amount_${gameType}`)
+    .text("✏️ Type Amount", withCreatorSuffix(`type_amount_${gameType}`, creatorId))
     .row()
-    .text("🔙 Back", creatorId ? `back_to_amounts_${gameType}_${creatorId}` : `back_to_amounts_${gameType}`)
-    .text("❌ Cancel", creatorId ? `cancel_game_setup_${creatorId}` : `cancel_game_setup`)
+    .text("🔙 Back", withCreatorSuffix(`back_to_amounts_${gameType}`, creatorId))
+    .text("❌ Cancel", withCreatorSuffix("cancel_game_setup", creatorId))
     .row();
 
   return keyboard;
