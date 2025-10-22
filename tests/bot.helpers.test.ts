@@ -337,7 +337,7 @@ describe("Bot helper utilities", () => {
       inputAmount: rawAmount.toString(),
       outputAmount: "137500", // assume 0.1375 SOL (5 decimals?)
       estimatedRate: 0.55,
-      slippage: 2,
+      slippage: 1,
       provider: "jupiter" as const,
     };
 
@@ -359,7 +359,7 @@ describe("Bot helper utilities", () => {
       receiveToken: "SOL",
       providerLabel: "jupiter (graduated)",
       rateDisplay: "0.00055",
-      slippageText: "2.0%",
+      slippageText: "1.0%",
     });
   });
 });
