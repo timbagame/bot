@@ -6697,11 +6697,17 @@ bot.on("callback_query", async (ctx, next) => {
     return await next();
   }
 
-  const [kind, txId, ...valueParts] = parts;
+  const [kind, ...restParts] = parts;
   const tradeKind = kind === "buy" || kind === "sell" ? kind : undefined;
-  const slippageValue = valueParts.join("_");
 
-  if (!tradeKind || !txId || !slippageValue) {
+  if (!tradeKind || restParts.length < 2) {
+    return await ctx.answerCallbackQuery("❌ Invalid slippage request");
+  }
+
+  const slippageValue = restParts.pop();
+  const txId = restParts.join("_");
+
+  if (!txId || !slippageValue) {
     return await ctx.answerCallbackQuery("❌ Invalid slippage request");
   }
 
