@@ -42,7 +42,11 @@ import {
   getFeeWarningMessage,
   getSuggestedStakeAmounts,
 } from "./utils/keyboards";
-import { buildWalletCaption, buildWalletActionMenu } from "./utils/wallet-ui";
+import {
+  buildWalletCaption,
+  buildWalletActionMenu,
+  showCustomAmountPrompt,
+} from "./utils/wallet-ui";
 import {
   formatAmount,
   escapeHtml,
@@ -5674,30 +5678,24 @@ bot.on("callback_query", async (ctx, next) => {
     if (!userId) return;
 
     if (amountChoice === "CUSTOM") {
-      const response = [
-        `✏️ <b>CUSTOM AMOUNT - ${token}</b>`,
-        "",
-        `Please send a message with the amount you want to send.`,
-        "",
-        `<b>Examples:</b>`,
-        token === "SOL" ? `• <code>0.5</code>` : `• <code>1000</code>`,
-        token === "SOL" ? `• <code>1.25</code>` : `• <code>250.5</code>`,
-        "",
-        `⏱️ <i>This will timeout in 5 minutes</i>`,
-      ];
+      const examples =
+        token === "SOL"
+          ? [`• <code>0.5</code>`, `• <code>1.25</code>`]
+          : [`• <code>1000</code>`, `• <code>250.5</code>`];
 
-      await respondWithMenu(ctx, {
-        text: response.join("\n"),
-        keyboard: new InlineKeyboard()
-          .text("❌ Cancel", `send_select_${token}`)
-          .row(),
-      });
-
-      setUserState(userId, {
-        type: "send_custom_amount",
-        token,
-        messageId: ctx.callbackQuery?.message?.message_id,
-        chatId: ctx.chat?.id,
+      await showCustomAmountPrompt({
+        ctx,
+        userId,
+        title: `✏️ <b>CUSTOM AMOUNT - ${token}</b>`,
+        instructions: [
+          `Please send a message with the amount you want to send.`,
+        ],
+        examples,
+        cancelCallback: `send_select_${token}`,
+        state: {
+          type: "send_custom_amount",
+          token,
+        },
       });
 
       await ctx.answerCallbackQuery("Send the amount as a message");
@@ -6195,33 +6193,26 @@ bot.on("callback_query", async (ctx, next) => {
     const telegramId = getTelegramId(ctx);
 
     if (amount === "CUSTOM") {
-      // Handle custom amount input for SELL
       const userId = ctx.from?.id?.toString();
       if (!userId) return;
 
-      const response = [
-        `🔴 <b>SELL ${tokenToSell} - CUSTOM AMOUNT</b>`,
-        "",
-        `Please send a message with the amount of ${tokenToSell} you want to sell.`,
-        "",
-        `<b>Examples:</b>`,
-        `• <code>100</code> (sell 100 ${tokenToSell})`,
-        `• <code>50%</code> (sell 50% of balance)`,
-        `• <code>max</code> (sell all ${tokenToSell})`,
-        "",
-        `⏱️ <i>This will timeout in 5 minutes</i>`,
-      ];
-
-      await respondWithMenu(ctx, {
-        text: response.join("\n"),
-        keyboard: new InlineKeyboard().text("❌ Cancel", "cmd_sell").row(),
-      });
-
-      setUserState(userId, {
-        type: "sell_custom_amount",
-        tokenToSell: tokenToSell,
-        messageId: ctx.callbackQuery?.message?.message_id,
-        chatId: ctx.chat?.id,
+      await showCustomAmountPrompt({
+        ctx,
+        userId,
+        title: `🔴 <b>SELL ${tokenToSell} - CUSTOM AMOUNT</b>`,
+        instructions: [
+          `Please send a message with the amount of ${tokenToSell} you want to sell.`,
+        ],
+        examples: [
+          `• <code>100</code> (sell 100 ${tokenToSell})`,
+          `• <code>50%</code> (sell 50% of balance)`,
+          `• <code>max</code> (sell all ${tokenToSell})`,
+        ],
+        cancelCallback: "cmd_sell",
+        state: {
+          type: "sell_custom_amount",
+          tokenToSell,
+        },
       });
 
       await ctx.answerCallbackQuery("Send custom amount as message");
@@ -6554,37 +6545,32 @@ bot.on("callback_query", async (ctx, next) => {
     }
 
     if (amount === "CUSTOM") {
-      // Handle custom amount input
       if (!userId) return;
 
-      const response = [
-        `💰 <b>BUY ${targetToken} - CUSTOM AMOUNT</b>`,
-        "",
-        `<b>Paying with:</b> ${paymentToken}`,
-        `<b>Target token:</b> ${targetToken}`,
-        "",
-        `Please send a message with the amount of ${paymentToken} you want to spend.`,
-        "",
-        `<b>Examples:</b>`,
-        `• <code>0.1</code> (spend 0.1 ${paymentToken})`,
-        `• <code>5</code> (spend 5 ${paymentToken})`,
-        `• <code>50%</code> (spend 50% of balance)`,
-        `• <code>max</code> (spend all available ${paymentToken})`,
-        "",
-        `⏱️ <i>This will timeout in 5 minutes</i>`,
-      ];
-
-      await respondWithMenu(ctx, {
-        text: response.join("\n"),
-        keyboard: new InlineKeyboard().text("❌ Cancel", "cmd_buy").row(),
-      });
-
-      setUserState(userId, {
-        type: "buy_custom_amount",
-        paymentToken: paymentToken,
-        targetToken: targetToken,
-        contractAddress: contractAddress, // Preserve contract address from previous state
-        messageId: ctx.callbackQuery?.message?.message_id,
+      await showCustomAmountPrompt({
+        ctx,
+        userId,
+        title: `💰 <b>BUY ${targetToken} - CUSTOM AMOUNT</b>`,
+        tokenLines: [
+          `<b>Paying with:</b> ${paymentToken}`,
+          `<b>Target token:</b> ${targetToken}`,
+        ],
+        instructions: [
+          `Please send a message with the amount of ${paymentToken} you want to spend.`,
+        ],
+        examples: [
+          `• <code>0.1</code> (spend 0.1 ${paymentToken})`,
+          `• <code>5</code> (spend 5 ${paymentToken})`,
+          `• <code>50%</code> (spend 50% of balance)`,
+          `• <code>max</code> (spend all available ${paymentToken})`,
+        ],
+        cancelCallback: "cmd_buy",
+        state: {
+          type: "buy_custom_amount",
+          paymentToken,
+          targetToken,
+          contractAddress,
+        },
       });
 
       await ctx.answerCallbackQuery("Send custom amount as message");
