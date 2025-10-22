@@ -99,7 +99,10 @@ test("getConnection proxies injected connection", () => {
 
 test("withRpcFallback rotates to next RPC on transport failure", async () => {
   resetInstance();
-  const urls = ["http://primary-rpc", "http://secondary-rpc"];
+  const urls: [string, string] = [
+    "http://primary-rpc",
+    "http://secondary-rpc",
+  ];
   const calls: string[] = [];
 
   const manager = WalletManager.createForTest(mnemonic, {
@@ -129,7 +132,10 @@ test("withRpcFallback rotates to next RPC on transport failure", async () => {
 
 test("withRpcFallback bubbles final error when all RPCs fail", async () => {
   resetInstance();
-  const urls = ["http://primary-rpc", "http://secondary-rpc"];
+  const urls: [string, string] = [
+    "http://primary-rpc",
+    "http://secondary-rpc",
+  ];
   const calls: string[] = [];
 
   const manager = WalletManager.createForTest(mnemonic, {

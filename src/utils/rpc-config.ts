@@ -16,5 +16,6 @@ export const parseSolanaRpcUrls = (
 };
 
 export const getPrimarySolanaRpcUrl = (): string => {
-  return parseSolanaRpcUrls(process.env.SOLANA_NETWORK)[0];
+  const [primary] = parseSolanaRpcUrls(process.env.SOLANA_NETWORK);
+  return primary ?? DEFAULT_RPC_URL;
 };

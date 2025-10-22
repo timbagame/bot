@@ -1,7 +1,6 @@
 import { mnemonicToSeedSync } from "bip39";
 import {
   Connection,
-  Commitment,
   Keypair,
   PublicKey,
   TransactionInstruction,
@@ -12,7 +11,8 @@ import {
   SystemProgram,
   SendTransactionError,
 } from "@solana/web3.js";
-import { parseSolanaRpcUrls, getPrimarySolanaRpcUrl } from "./rpc-config";
+import type { Commitment } from "@solana/web3.js";
+import { parseSolanaRpcUrls } from "./rpc-config";
 
 export { parseSolanaRpcUrls, getPrimarySolanaRpcUrl } from "./rpc-config";
 import {
@@ -85,7 +85,11 @@ class RpcManager {
   }
 
   public getActiveRpcUrl(): string {
-    return this.rpcUrls[this.index];
+    const rpcUrl = this.rpcUrls[this.index];
+    if (!rpcUrl) {
+      throw new Error("RPC manager index is out of range");
+    }
+    return rpcUrl;
   }
 
   public getConnection(): Connection {
@@ -134,7 +138,7 @@ class RpcManager {
   private createProxy(): Connection {
     const self = this;
     const handler: ProxyHandler<Connection> = {
-      get(target, prop, receiver) {
+      get(_target, prop, receiver) {
         const activeConnection = self.getOrCreateConnection(self.index);
         const value = Reflect.get(activeConnection, prop, receiver);
 
@@ -162,6 +166,9 @@ class RpcManager {
   private getOrCreateConnection(index: number): Connection {
     if (!this.connections.has(index)) {
       const rpcUrl = this.rpcUrls[index];
+      if (!rpcUrl) {
+        throw new Error(`RPC index ${index} is out of range`);
+      }
       const connection = this.connectionFactory(rpcUrl);
       this.connections.set(index, connection);
     }
