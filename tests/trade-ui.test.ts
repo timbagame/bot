@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { buildBuyMenuUI, buildSellMenuUI, SELL_NOOP_CALLBACK } from "../src/utils/trade-ui";
+import {
+  buildBuyMenuUI,
+  buildProcessingStatus,
+  buildSellMenuUI,
+  SELL_NOOP_CALLBACK,
+} from "../src/utils/trade-ui";
 
 function extractCallbacks(kb: any): string[] {
   const rows = (kb && (kb.inline_keyboard || kb.rows)) as any[] | undefined;
@@ -109,5 +114,28 @@ describe("trade ui helpers", () => {
 
     const labels = extractTexts(withoutTokens.keyboard);
     expect(labels[0]).toContain("No tokens to sell");
+  });
+
+  test("processing status formats html content per kind", () => {
+    const swap = buildProcessingStatus("swap", "5", "SOL", "BONK");
+    expect(swap.message).toContain("<b>PROCESSING SWAP</b>");
+    expect(swap.message).toContain("Swapping 5 SOL → BONK...");
+    expect(swap.message).toContain("<i>Please wait...</i>");
+    expect(typeof swap.keyboard?.text).toBe("function");
+
+    const buy = buildProcessingStatus("buy", "2", "SOL", "TIMBA");
+    expect(buy.message).toContain("Processing Buy Transaction");
+    expect(buy.message).toContain("Executing 2 SOL → TIMBA");
+    expect(buy.keyboard).toBeUndefined();
+  });
+
+  test("processing status supports plain text output", () => {
+    const sellPlain = buildProcessingStatus("sell", "1.5", "TIMBA", "SOL", {
+      plain: true,
+    });
+
+    expect(sellPlain.message).not.toContain("<b>");
+    expect(sellPlain.message).toContain("Processing Sell Transaction");
+    expect(sellPlain.message).toContain("Executing 1.5 TIMBA → SOL");
   });
 });

@@ -84,6 +84,7 @@ import { patchReplyBehavior } from "./utils/reply-patch";
 import { NetworkDetector } from "./utils/network-detector";
 import {
   buildBuyMenuUI,
+  buildProcessingStatus,
   buildSellMenuUI,
   SELL_NOOP_CALLBACK,
 } from "./utils/trade-ui";
@@ -5425,10 +5426,17 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
     );
 
     // Update message to show processing state
+    const { message, keyboard } = buildProcessingStatus(
+      "swap",
+      transaction.amount,
+      transaction.fromToken,
+      transaction.toToken
+    );
+
     await respondWithMenu(ctx, {
-      text: `🔄 <b>PROCESSING SWAP</b>\n\nSwapping ${transaction.amount} ${transaction.fromToken} → ${transaction.toToken}...\n\n<i>Please wait...</i>`,
+      text: message,
       parseMode: "HTML",
-      keyboard: new InlineKeyboard(),
+      keyboard,
     });
 
     // Execute actual swap transaction
@@ -6385,14 +6393,15 @@ bot.on("callback_query", async (ctx, next) => {
 
   try {
     // Show processing state
+    const { message } = buildProcessingStatus(
+      "sell",
+      sellData.amount,
+      sellData.fromToken,
+      sellData.toToken
+    );
+
     await respondWithMenu(ctx, {
-      text: [
-        "⏳ <b>Processing Sell Transaction...</b>",
-        "",
-        `🔄 <i>Executing ${sellData.amount} ${sellData.fromToken} → ${sellData.toToken}</i>`,
-        "",
-        "Please wait, this may take a few moments...",
-      ].join("\n"),
+      text: message,
     });
 
     await safeAnswerCallbackQuery(ctx, "Processing sell...");
@@ -6752,14 +6761,15 @@ bot.on("callback_query", async (ctx, next) => {
 
   try {
     // Show processing state
+    const { message } = buildProcessingStatus(
+      "buy",
+      buyData.amount,
+      buyData.fromToken,
+      buyData.toToken
+    );
+
     await respondWithMenu(ctx, {
-      text: [
-        "⏳ <b>Processing Buy Transaction...</b>",
-        "",
-        `🔄 <i>Executing ${buyData.amount} ${buyData.fromToken} → ${buyData.toToken}</i>`,
-        "",
-        "Please wait, this may take a few moments...",
-      ].join("\n"),
+      text: message,
     });
 
     await safeAnswerCallbackQuery(ctx, "Processing buy...");
