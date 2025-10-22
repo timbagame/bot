@@ -7514,6 +7514,8 @@ bot.on("callback_query", async (ctx, next) => {
       `💡 Retrying buy with exact amount needed: ${newAmount} ${buyData.fromToken} → ${buyData.toToken}`
     );
 
+    const previousAmount = buyData.amount;
+
     // Update the stored transaction with new amount
     if (transactionCache.has(txId)) {
       buyData.amount = newAmount;
@@ -7525,18 +7527,25 @@ bot.on("callback_query", async (ctx, next) => {
 
     // Show updated confirmation with new amount
     await ctx.editMessageText(
-      [
-        "💡 <b>Using Exact Amount Needed</b>",
-        "",
-        `📈 <b>Original:</b> ${buyData.amount} ${buyData.fromToken}`,
-        `✅ <b>New Amount:</b> ${newAmount} ${buyData.fromToken}`,
-        `🎯 <b>Buying:</b> ${buyData.toToken}`,
-        "",
-        "This matches the current price. Ready to proceed?",
-      ].join("\n"),
+        [
+          "💡 <b>Using Exact Amount Needed</b>",
+          "",
+          `📈 <b>Original:</b> ${previousAmount} ${buyData.fromToken}`,
+          `✅ <b>New Amount:</b> ${newAmount} ${buyData.fromToken}`,
+          `🎯 <b>Buying:</b> ${buyData.toToken}`,
+          "",
+          "This matches the current price. Ready to proceed?",
+        ].join("\n"),
       {
         parse_mode: "HTML",
-        reply_markup: createConfirmBuyKeyboard(txId),
+        reply_markup: createConfirmTradeKeyboard(
+          buyData.side ?? "buy",
+          txId,
+          {
+            backCallback: buyData.backCallback,
+            cancelCallback: buyData.cancelCallback,
+          }
+        ),
       }
     );
 
