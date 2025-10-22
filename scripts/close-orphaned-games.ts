@@ -1,7 +1,6 @@
-import { WalletManager } from "../src/utils/wallet";
 import { GameDatabase } from "../src/utils/game-database";
 import { GameManager } from "../src/utils/game";
-import { createAnchorContext } from "./utils/anchor-context";
+import { loadProgramContext } from "./utils/anchor-context";
 
 const requireEnvVar = (name: string): string => {
   const value = process.env[name];
@@ -17,10 +16,9 @@ async function main(): Promise<void> {
   const mnemonic = requireEnvVar("MNEMONIC");
   const rpcEndpoint = requireEnvVar("SOLANA_NETWORK");
 
-  const wallet = WalletManager.getInstance(mnemonic);
-  const adminKeypair = wallet.getAdminKeypair();
-  const { program } = createAnchorContext(adminKeypair, {
-    connection: wallet.getConnection(),
+  const { wallet, program } = loadProgramContext({
+    mnemonic,
+    rpcUrl: rpcEndpoint,
   });
 
   console.log(`📋 Program ID: ${program.programId.toBase58()}`);

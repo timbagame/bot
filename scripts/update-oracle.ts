@@ -1,24 +1,19 @@
 import * as anchor from "@coral-xyz/anchor";
-import { WalletManager } from "../src/utils/wallet";
 import { PDAManager } from "../src/utils/pda";
 import {
   resolveKeypairFromEnv,
   resolveOracleOperatorKeypair,
   uniqueSigners,
 } from "./utils/keypairs";
-import { createAnchorContext } from "./utils/anchor-context";
+import { loadProgramContext } from "./utils/anchor-context";
 
 const NEW_ORACLE_OPERATOR_KEYPAIR_ENV = "NEW_ORACLE_OPERATOR_KEYPAIR_PATH";
-
-// Initialize wallet manager
-const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
 
 const updateOracle = async () => {
   try {
     console.log("🔄 Starting Oracle Update...");
 
-    // Get admin keypair
-    const adminKeypair = wallet.getAdminKeypair();
+    const { wallet, adminKeypair, program } = loadProgramContext();
     console.log(`Admin public key: ${adminKeypair.publicKey.toString()}`);
 
     const currentOracleOperatorKeypair = resolveOracleOperatorKeypair(
@@ -32,10 +27,6 @@ const updateOracle = async () => {
       "New oracle operator keypair"
     );
 
-    // Initialize shared Anchor context
-    const { program } = createAnchorContext(adminKeypair, {
-      connection: wallet.getConnection(),
-    });
     console.log(`Program ID: ${program.programId}`);
 
     // Get Oracle PDA

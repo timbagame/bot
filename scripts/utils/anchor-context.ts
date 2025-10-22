@@ -8,6 +8,7 @@ import type {
 import { clusterApiUrl } from "@solana/web3.js";
 import type { Timba } from "../../idl/idlType";
 import idl from "../../idl/idl.json";
+import { WalletManager } from "../../src/utils/wallet";
 
 type WalletOverride =
   | anchor.Wallet
@@ -57,6 +58,20 @@ export interface AnchorContextOverrides {
 export interface AnchorContextResult {
   provider: anchor.AnchorProvider;
   program: anchor.Program<Timba>;
+}
+
+export type ProgramContextLoadOptions = Omit<
+  AnchorContextOverrides,
+  "wallet"
+> & {
+  mnemonic?: string;
+  wallet?: WalletManager;
+};
+
+export interface LoadedProgramContext extends AnchorContextResult {
+  wallet: WalletManager;
+  adminKeypair: Keypair;
+  connection: anchor.web3.Connection;
 }
 
 const toAnchorKeypair = (keypair: Keypair | anchor.web3.Keypair) =>
@@ -136,4 +151,34 @@ export const createAnchorContext = (
   ) as anchor.Program<Timba>;
 
   return { provider, program };
+};
+
+export const loadProgramContext = (
+  options: ProgramContextLoadOptions = {}
+): LoadedProgramContext => {
+  const { mnemonic, wallet: walletOverride, ...anchorOverrides } = options;
+  const resolvedMnemonic = mnemonic ?? process.env.MNEMONIC;
+
+  if (!resolvedMnemonic || resolvedMnemonic.trim().length === 0) {
+    throw new Error(
+      "MNEMONIC environment variable is required to load the program context"
+    );
+  }
+
+  const wallet =
+    walletOverride ?? WalletManager.getInstance(resolvedMnemonic.trim());
+  const adminKeypair = wallet.getAdminKeypair();
+
+  const context = createAnchorContext(adminKeypair, {
+    ...anchorOverrides,
+    connection: anchorOverrides.connection ?? wallet.getConnection(),
+  });
+
+  return {
+    wallet,
+    adminKeypair,
+    program: context.program,
+    provider: context.provider,
+    connection: context.provider.connection,
+  };
 };

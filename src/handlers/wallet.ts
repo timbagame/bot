@@ -18,6 +18,59 @@ export type ShowWalletUIDeps = {
   WINNER_VIDEO_ID?: string | null;
 };
 
+export type SendWalletMediaWithFallbackOptions = {
+  caption: string;
+  videoFileId?: string | null;
+  sendText: () => Promise<void>;
+  sendVideo?: () => Promise<void>;
+  editMessage?: () => Promise<void>;
+  logLabel?: string;
+};
+
+export const sendWalletMediaWithFallback = async ({
+  caption,
+  videoFileId,
+  sendText,
+  sendVideo,
+  editMessage,
+  logLabel = "wallet media",
+}: SendWalletMediaWithFallbackOptions): Promise<void> => {
+  void caption;
+  if (!videoFileId) {
+    await sendText();
+    return;
+  }
+
+  if (editMessage) {
+    try {
+      const { skipped, usedFallback } = await editMediaWithFallback({
+        edit: () => editMessage(),
+        fallback: sendText,
+        logLabel: `${logLabel} edit`,
+      });
+
+      if (skipped || usedFallback) {
+        return;
+      }
+
+      return;
+    } catch (error) {
+      console.warn(`${logLabel} edit failed, sending new video`, error);
+    }
+  }
+
+  if (!sendVideo) {
+    await sendText();
+    return;
+  }
+
+  await trySendVideoWithFallback(
+    () => sendVideo(),
+    () => sendText(),
+    { logLabel: `${logLabel} send` }
+  );
+};
+
 export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
   const { wallet, getCachedWalletData, getPriceUSD, buildWalletCaption, createWalletKeyboard, WINNER_VIDEO_ID } = deps;
 
@@ -37,71 +90,34 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
     typeof ctx?.editMessageMedia === "function" && callbackMessage && authoredByBot
   );
 
-  const sendWalletContent = async (caption: string) => {
-    const respondWithText = async () => {
-      await respondWithMenu(ctx, {
-        text: caption,
-        keyboard: getWalletKeyboard(),
-      });
-    };
-
-    if (!walletVideoFileId) {
-      await respondWithText();
-      return;
-    }
-
-    if (!canEditBotMessage) {
-      await trySendVideoWithFallback(
-        () =>
-          ctx.replyWithVideo(walletVideoFileId, {
-            caption,
-            parse_mode: "HTML",
-            reply_markup: getWalletKeyboard(),
-            reply_to_message_id: ctx.message?.message_id,
-          }),
-        () => respondWithText(),
-        { logLabel: "wallet video send" }
-      );
-      return;
-    }
-
-    let editFailed = false;
-
-    try {
-      const { skipped, usedFallback } = await editMediaWithFallback({
-        edit: () =>
-          ctx.editMessageMedia(
-            { type: "video", media: walletVideoFileId, caption, parse_mode: "HTML" },
-            { reply_markup: getWalletKeyboard() }
-          ),
-        fallback: respondWithText,
-        logLabel: "wallet media edit",
-      });
-
-      if (skipped || usedFallback) {
-        return;
-      }
-    } catch (error) {
-      editFailed = true;
-      console.warn("wallet media edit failed, sending new video", error);
-    }
-
-    if (!editFailed) {
-      return;
-    }
-
-    await trySendVideoWithFallback(
-      () =>
-        ctx.replyWithVideo(walletVideoFileId, {
-          caption,
-          parse_mode: "HTML",
-          reply_markup: getWalletKeyboard(),
-          reply_to_message_id: ctx.message?.message_id,
+  const sendWalletContent = (caption: string) =>
+    sendWalletMediaWithFallback({
+      caption,
+      videoFileId: walletVideoFileId,
+      logLabel: "wallet media",
+      sendText: () =>
+        respondWithMenu(ctx, {
+          text: caption,
+          keyboard: getWalletKeyboard(),
         }),
-      () => respondWithText(),
-      { logLabel: "wallet video send" }
-    );
-  };
+      sendVideo: walletVideoFileId
+        ? () =>
+            ctx.replyWithVideo(walletVideoFileId, {
+              caption,
+              parse_mode: "HTML",
+              reply_markup: getWalletKeyboard(),
+              reply_to_message_id: ctx.message?.message_id,
+            })
+        : undefined,
+      editMessage:
+        canEditBotMessage && walletVideoFileId
+          ? () =>
+              ctx.editMessageMedia(
+                { type: "video", media: walletVideoFileId, caption, parse_mode: "HTML" },
+                { reply_markup: getWalletKeyboard() }
+              )
+          : undefined,
+    });
 
   try {
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
@@ -258,33 +274,25 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     const caption = buildWalletCaption(walletAddress, tokenLines);
 
     // Send privately to the user with video support
-    const sendPrivateWalletContent = async (caption: string) => {
-      const sendAsText = async () => {
-        await ctx.api.sendMessage(ctx.from!.id, caption, {
+    await sendWalletMediaWithFallback({
+      caption,
+      videoFileId: WINNER_VIDEO_ID,
+      logLabel: "wallet dm media",
+      sendText: () =>
+        ctx.api.sendMessage(ctx.from!.id, caption, {
           parse_mode: "HTML",
           reply_markup: createWalletKeyboard(),
-          link_preview_options: { is_disabled: true }
-        });
-      };
-
-      if (!WINNER_VIDEO_ID) {
-        await sendAsText();
-        return;
-      }
-
-      try {
-        await ctx.api.sendVideo(ctx.from!.id, WINNER_VIDEO_ID, {
-          caption,
-          parse_mode: "HTML",
-          reply_markup: createWalletKeyboard(),
-        });
-      } catch (videoError) {
-        console.warn("Failed to send video, falling back to text:", videoError);
-        await sendAsText();
-      }
-    };
-
-    await sendPrivateWalletContent(caption);
+          link_preview_options: { is_disabled: true },
+        }),
+      sendVideo: WINNER_VIDEO_ID
+        ? () =>
+            ctx.api.sendVideo(ctx.from!.id, WINNER_VIDEO_ID, {
+              caption,
+              parse_mode: "HTML",
+              reply_markup: createWalletKeyboard(),
+            })
+        : undefined,
+    });
 
   } catch (error) {
     await handleCommandError(ctx, error, "balance");
