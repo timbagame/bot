@@ -1,6 +1,8 @@
-import { InlineKeyboard } from "grammy";
+import { InlineKeyboard, type Context } from "grammy";
 import { escapeHtml, formatUsdValue } from "./format-amount";
 import { LAMPORTS_PER_SOL } from "./constants";
+import { respondWithMenu } from "./menu-response";
+import { setUserState } from "./user-state";
 
 export type TokenDisplayLine = {
   ticker: string;
@@ -176,6 +178,97 @@ export type WalletActionMenuParams = {
 export type WalletActionMenuResult = {
   text: string;
   keyboard: InlineKeyboard;
+};
+
+export type CustomAmountPromptOptions<State extends Record<string, unknown>> = {
+  ctx: Context;
+  userId: string;
+  title: string;
+  tokenLines?: string[];
+  instructions: string[];
+  examples?: string[];
+  cancelCallback: string;
+  state: State;
+  cancelLabel?: string;
+  footerLines?: string[];
+  examplesHeading?: string;
+};
+
+const appendSection = (target: string[], lines: string[] | undefined) => {
+  if (!lines || lines.length === 0) {
+    return;
+  }
+
+  const filtered = lines.filter((line) =>
+    typeof line === "string" && line.trim().length > 0
+  );
+
+  if (filtered.length === 0) {
+    return;
+  }
+
+  if (target.length > 0) {
+    target.push("");
+  }
+
+  target.push(...filtered);
+};
+
+type CustomAmountPromptDerivedState<State extends Record<string, unknown>> =
+  State & { messageId?: number; chatId?: number };
+
+export const showCustomAmountPrompt = async <State extends Record<string, unknown>>({
+  ctx,
+  userId,
+  title,
+  tokenLines,
+  instructions,
+  examples,
+  cancelCallback,
+  state,
+  cancelLabel = "❌ Cancel",
+  footerLines = ["⏱️ <i>This will timeout in 5 minutes</i>"],
+  examplesHeading = "<b>Examples:</b>",
+}: CustomAmountPromptOptions<State>): Promise<void> => {
+  const lines: string[] = [title];
+
+  appendSection(lines, tokenLines);
+  appendSection(lines, instructions);
+
+  if (examples && examples.length > 0) {
+    if (lines.length > 0) {
+      lines.push("");
+    }
+    if (examplesHeading) {
+      lines.push(examplesHeading);
+    }
+    lines.push(
+      ...examples.filter((line) => typeof line === "string" && line.trim().length > 0)
+    );
+  }
+
+  appendSection(lines, footerLines);
+
+  await respondWithMenu(ctx, {
+    text: lines.join("\n"),
+    keyboard: new InlineKeyboard().text(cancelLabel, cancelCallback).row(),
+  });
+
+  const derivedState: CustomAmountPromptDerivedState<State> = {
+    ...state,
+  } as CustomAmountPromptDerivedState<State>;
+  const messageId = ctx.callbackQuery?.message?.message_id;
+  const chatId = ctx.chat?.id;
+
+  if (messageId !== undefined && derivedState.messageId === undefined) {
+    derivedState.messageId = messageId;
+  }
+
+  if (chatId !== undefined && derivedState.chatId === undefined) {
+    derivedState.chatId = chatId;
+  }
+
+  setUserState(userId, derivedState);
 };
 
 const shouldIncludeSol = (
