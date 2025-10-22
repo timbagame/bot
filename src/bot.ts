@@ -1237,6 +1237,88 @@ const buildTokenContext = async (
   };
 };
 
+type CreatorCallbackOptions = {
+  name: string;
+  resolveCreatorId: (ctx: Context) => string | undefined;
+  failureText?: string;
+};
+
+type CreatorCallbackContext = {
+  creatorId: string;
+  userId: number;
+  session?: GameSetupSession;
+  tokenContext: TokenContext;
+  updateSession: (updates: Partial<GameSetupSession>) => GameSetupSession;
+  clearSession: () => void;
+};
+
+const withCreatorContext = (
+  options: CreatorCallbackOptions,
+  handler: (ctx: Context, creatorCtx: CreatorCallbackContext) => Promise<void> | void
+) => {
+  return async (ctx: Context) => {
+    const creatorId = options.resolveCreatorId(ctx);
+    const currentUserId = ctx.from?.id?.toString();
+
+    console.log(`🔔 ${options.name} callback triggered:`, ctx.callbackQuery?.data);
+    console.log(
+      `👤 Creator: ${creatorId ?? "unknown"}, Current user: ${currentUserId ?? "unknown"}`
+    );
+
+    if (!creatorId) {
+      console.warn(`${options.name}: unable to resolve creator id from callback`);
+      await ctx.answerCallbackQuery("❌ Unable to process action");
+      return;
+    }
+
+    if (!ensureCreator(ctx, creatorId, options.failureText)) {
+      return;
+    }
+
+    const userId = ctx.from?.id;
+    if (!userId) {
+      await ctx.answerCallbackQuery("❌ Unable to identify user");
+      return;
+    }
+
+    let session = userSessions.get(userId);
+    const tokenContext = await buildTokenContext(session, ctx.chat?.id);
+
+    const creatorContext: CreatorCallbackContext = {
+      creatorId,
+      userId,
+      session,
+      tokenContext,
+      updateSession: (updates) => {
+        const base: Partial<GameSetupSession> = session ? { ...session } : {};
+        const next = {
+          ...base,
+          ...updates,
+          creatorId,
+          tokenMint: tokenContext.tokenMint,
+          tokenTicker: tokenContext.tokenTicker,
+          tokenDecimals: tokenContext.tokenDecimals,
+          contractMinimum:
+            updates.contractMinimum ??
+            (base.contractMinimum ?? tokenContext.contractMinimum),
+        } as GameSetupSession;
+
+        userSessions.set(userId, next);
+        session = next;
+        creatorContext.session = next;
+        return next;
+      },
+      clearSession: () => {
+        userSessions.delete(userId);
+        session = undefined;
+        creatorContext.session = undefined;
+      },
+    };
+
+    await handler(ctx, creatorContext);
+  };
+};
+
 const determineFractionDigits = (
   value: string,
   maxDecimals: number
@@ -3638,920 +3720,799 @@ const handleJoinGame = async (
 // Amount selection callbacks (new format with creatorId)
 bot.callbackQuery(
   /^amount_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)$/,
-  async (ctx) => {
-    try {
-      console.log("🔔 Amount callback triggered:", ctx.callbackQuery?.data);
-      const gameType = ctx.match![1] as string;
-      const amount = ctx.match![2] as string;
-      const creatorId = ctx.match![3] as string;
+  withCreatorContext(
+    {
+      name: "amount",
+      resolveCreatorId: (ctx) => ctx.match?.[3],
+      failureText: "🚫 Only the game creator can modify this game setup!",
+    },
+    async (ctx, { session, tokenContext, updateSession, creatorId }) => {
+      try {
+        const gameType = ctx.match![1] as string;
+        const amount = ctx.match![2] as string;
 
-      // Check if the user pressing the button is the creator
-      if (
-        !ensureCreator(
-          ctx,
-          creatorId,
-          "🚫 Only the game creator can modify this game setup!"
-        )
-      ) {
-        return;
-      }
+        const amountNumber = Number(amount);
+        const formattedAmount = amountNumber.toLocaleString("en-US", {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: determineFractionDigits(
+            amount,
+            tokenContext.tokenDecimals
+          ),
+        });
 
-      const userId = ctx.from.id || 0;
-      const existingSession = userSessions.get(userId);
-      const tokenContext = await buildTokenContext(
-        existingSession,
-        ctx.chat?.id
-      );
+        const playerMessage = [
+          `<b>${gameType.toUpperCase()} - CHOOSE PLAYERS</b>`,
+          "",
+          `Amount: <b>${formattedAmount} ${tokenContext.tokenTicker}</b>`,
+          "",
+          "Select the number of players:",
+          "",
+          gameType === "coinflip"
+            ? "• All players compete for the total stakes"
+            : "• More players = higher chance for everyone",
+          "",
+          "Choose number of players:",
+        ].join("\n");
 
-      const amountNumber = Number(amount);
-      const formattedAmount = amountNumber.toLocaleString("en-US", {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: determineFractionDigits(
+        await respondWithMenu(ctx, {
+          text: playerMessage,
+          parseMode: "HTML",
+          keyboard: createPlayerSelectionKeyboard(gameType, amount, creatorId),
+        });
+
+        updateSession({
+          waitingFor: "setup",
+          gameType,
+          userBalance: session?.userBalance ?? 0,
+          messageId:
+            ctx.callbackQuery?.message?.message_id ?? session?.messageId,
+          chatId: ctx.chat?.id ?? session?.chatId ?? 0,
           amount,
-          tokenContext.tokenDecimals
-        ),
-      });
+        });
 
-      const playerMessage = [
-        `<b>${gameType.toUpperCase()} - CHOOSE PLAYERS</b>`,
-        "",
-        `Amount: <b>${formattedAmount} ${tokenContext.tokenTicker}</b>`,
-        "",
-        "Select the number of players:",
-        "",
-        gameType === "coinflip"
-          ? "• All players compete for the total stakes"
-          : "• More players = higher chance for everyone",
-        "",
-        "Choose number of players:",
-      ].join("\n");
-
-      await respondWithMenu(ctx, {
-        text: playerMessage,
-        parseMode: "HTML",
-        keyboard: createPlayerSelectionKeyboard(gameType, amount, creatorId),
-      });
-
-      userSessions.set(userId, {
-        waitingFor: "setup",
-        gameType,
-        userBalance: existingSession?.userBalance ?? 0,
-        messageId:
-          ctx.callbackQuery?.message?.message_id ?? existingSession?.messageId,
-        chatId: ctx.chat?.id ?? existingSession?.chatId ?? 0,
-        amount,
-        creatorId,
-        tokenMint: tokenContext.tokenMint,
-        tokenTicker: tokenContext.tokenTicker,
-        tokenDecimals: tokenContext.tokenDecimals,
-        contractMinimum: tokenContext.contractMinimum,
-      });
-
-      await ctx.answerCallbackQuery();
-    } catch (error) {
-      console.error("Error in amount callback:", error);
-      await ctx.answerCallbackQuery("❌ Error selecting amount");
+        await ctx.answerCallbackQuery();
+      } catch (error) {
+        console.error("Error in amount callback:", error);
+        await ctx.answerCallbackQuery("❌ Error selecting amount");
+      }
     }
-  }
+  )
 );
 
 
 // Player selection callbacks (new format with creatorId)
-bot.callbackQuery(/^players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/, async (ctx) => {
-  try {
-    console.log("🔔 Players callback triggered:", ctx.callbackQuery?.data);
-    const gameType = ctx.match![1] as string;
-    const amount = ctx.match![2] as string;
-    const players = ctx.match![3] as string;
-    const creatorId = ctx.match![4] as string;
+bot.callbackQuery(
+  /^players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/,
+  withCreatorContext(
+    {
+      name: "players",
+      resolveCreatorId: (ctx) => ctx.match?.[4],
+      failureText: "🚫 Only the game creator can modify this game setup!",
+    },
+    async (ctx, { session, tokenContext, updateSession, creatorId }) => {
+      try {
+        const gameType = ctx.match![1] as string;
+        const amount = ctx.match![2] as string;
+        const players = ctx.match![3] as string;
 
-    // Check if the user pressing the button is the creator
-    if (
-      !ensureCreator(
-        ctx,
-        creatorId,
-        "🚫 Only the game creator can modify this game setup!"
-      )
-    ) {
-      return;
+        const amountNumber = Number(amount);
+        const amountFormatted = amountNumber.toLocaleString("en-US", {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: determineFractionDigits(
+            amount,
+            tokenContext.tokenDecimals
+          ),
+        });
+        const playersCount = parseInt(players, 10);
+        const totalPot = amountNumber * playersCount;
+        const totalPotFormatted = totalPot.toLocaleString("en-US", {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: Math.min(
+            tokenContext.tokenDecimals,
+            6
+          ),
+        });
+
+        const confirmMessage = [
+          `<b>CONFIRM ${gameType.toUpperCase()}</b>`,
+          "",
+          `Amount: <b>${amountFormatted} ${tokenContext.tokenTicker}</b>`,
+          `Players: <b>${players}</b>`,
+          "",
+          gameType === "coinflip"
+            ? `• Total prize pool: <b>${totalPotFormatted} ${tokenContext.tokenTicker}</b>`
+            : `• Prize for winner: <b>${amountFormatted} ${tokenContext.tokenTicker}</b>`,
+          "",
+          `⚠️ Make sure you have enough ${tokenContext.tokenTicker} in your wallet!`,
+          "",
+          "Ready to create this game?"
+        ].join("\n");
+
+        await respondWithMenu(ctx, {
+          text: confirmMessage,
+          parseMode: "HTML",
+          keyboard: createGameConfirmKeyboard(
+            gameType,
+            amount,
+            players,
+            creatorId
+          ),
+        });
+
+        updateSession({
+          waitingFor: "setup",
+          gameType,
+          userBalance: session?.userBalance ?? 0,
+          messageId:
+            ctx.callbackQuery?.message?.message_id ?? session?.messageId,
+          chatId: ctx.chat?.id ?? session?.chatId ?? 0,
+          amount,
+        });
+
+        await ctx.answerCallbackQuery();
+      } catch (error) {
+        console.error("Error in players callback:", error);
+        await ctx.answerCallbackQuery("❌ Error selecting players");
+      }
     }
-    const userId = ctx.from.id || 0;
-    const existingSession = userSessions.get(userId);
-    const tokenContext = await buildTokenContext(
-      existingSession,
-      ctx.chat?.id
-    );
-
-    const amountNumber = Number(amount);
-    const amountFormatted = amountNumber.toLocaleString("en-US", {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: determineFractionDigits(
-        amount,
-        tokenContext.tokenDecimals
-      ),
-    });
-    const playersCount = parseInt(players, 10);
-    const totalPot = amountNumber * playersCount;
-    const totalPotFormatted = totalPot.toLocaleString("en-US", {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: Math.min(
-        tokenContext.tokenDecimals,
-        6
-      ),
-    });
-
-    const confirmMessage = [
-      `<b>CONFIRM ${gameType.toUpperCase()}</b>`,
-      "",
-      `Amount: <b>${amountFormatted} ${tokenContext.tokenTicker}</b>`,
-      `Players: <b>${players}</b>`,
-      "",
-      gameType === "coinflip"
-        ? `• Total prize pool: <b>${totalPotFormatted} ${tokenContext.tokenTicker}</b>`
-        : `• Prize for winner: <b>${amountFormatted} ${tokenContext.tokenTicker}</b>`,
-      "",
-      `⚠️ Make sure you have enough ${tokenContext.tokenTicker} in your wallet!`,
-      "",
-      "Ready to create this game?"
-    ].join("\n");
-
-    await respondWithMenu(ctx, {
-      text: confirmMessage,
-      parseMode: "HTML",
-      keyboard: createGameConfirmKeyboard(gameType, amount, players, creatorId),
-    });
-
-    userSessions.set(userId, {
-      waitingFor: "setup",
-      gameType,
-      userBalance: existingSession?.userBalance ?? 0,
-      messageId:
-        ctx.callbackQuery?.message?.message_id ?? existingSession?.messageId,
-      chatId: ctx.chat?.id ?? existingSession?.chatId ?? 0,
-      amount,
-      creatorId,
-      tokenMint: tokenContext.tokenMint,
-      tokenTicker: tokenContext.tokenTicker,
-      tokenDecimals: tokenContext.tokenDecimals,
-      contractMinimum: existingSession?.contractMinimum,
-    });
-
-    await ctx.answerCallbackQuery();
-  } catch (error) {
-    console.error("Error in players callback:", error);
-    await ctx.answerCallbackQuery("❌ Error selecting players");
-  }
-});
+  )
+);
 
 
 // Game creation confirmation (new format with creatorId)
 bot.callbackQuery(
   /^confirm_game_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/,
-  async (ctx) => {
-    const callbackData = ctx.callbackQuery?.data;
-    let confirmMessageMissing = false;
-
-    try {
-      console.log("🔔 Confirm game callback triggered:", callbackData);
-      const gameType = ctx.match![1] as "coinflip" | "giveaway";
-      const amount = parseFloat(ctx.match![2] as string);
-      const maxPlayers = parseInt(ctx.match![3] as string);
-      const minPlayers = gameType === "coinflip" ? 2 : 1;
-      if (isNaN(maxPlayers) || maxPlayers < minPlayers || maxPlayers > 100) {
-        await ctx.answerCallbackQuery(
-          `❌ Players must be between ${minPlayers} and 100`
-        );
-        return;
-      }
-
-      const creatorId = ctx.match![4] as string;
-
-      if (
-        !ensureCreator(
-          ctx,
-          creatorId,
-          "🚫 Only the game creator can create this game!"
-        )
-      ) {
-        return;
-      }
-
-      if (!ctx.from?.id) {
-        await ctx.answerCallbackQuery("❌ Unable to identify user");
-        return;
-      }
-
-      const confirmMessage = ctx.callbackQuery?.message;
-      const chatId = confirmMessage?.chat?.id;
-      const messageId = confirmMessage?.message_id;
-      const creationKey =
-        chatId && messageId
-          ? `${chatId}:${messageId}`
-          : `${ctx.from.id}:${gameType}:${amount}:${maxPlayers}`;
-
-      if (pendingGameCreations.has(creationKey)) {
-        await ctx.answerCallbackQuery("⏳ Already creating this game...");
-        return;
-      }
-
-      pendingGameCreations.add(creationKey);
+  withCreatorContext(
+    {
+      name: "confirm_game",
+      resolveCreatorId: (ctx) => ctx.match?.[4],
+      failureText: "🚫 Only the game creator can create this game!",
+    },
+    async (ctx, { userId, tokenContext, clearSession }) => {
+      let confirmMessageMissing = false;
 
       try {
-        const userId = ctx.from.id || 0;
-        const existingSession = userSessions.get(userId);
-        const tokenContext = await buildTokenContext(
-          existingSession,
-          ctx.chat?.id
-        );
+        const gameType = ctx.match![1] as "coinflip" | "giveaway";
+        const amount = parseFloat(ctx.match![2] as string);
+        const maxPlayers = parseInt(ctx.match![3] as string);
+        const minPlayers = gameType === "coinflip" ? 2 : 1;
+        if (isNaN(maxPlayers) || maxPlayers < minPlayers || maxPlayers > 100) {
+          await ctx.answerCallbackQuery(
+            `❌ Players must be between ${minPlayers} and 100`
+          );
+          return;
+        }
 
-        if (chatId && messageId && !confirmMessageMissing) {
-          try {
-            await ctx.api.editMessageReplyMarkup(chatId, messageId);
-          } catch (markError) {
-            console.warn(
-              "Failed to clear confirm keyboard before game creation:",
-              markError
-            );
-            if (isMessageMissing(markError)) {
-              confirmMessageMissing = true;
-            }
-          }
+        const confirmMessage = ctx.callbackQuery?.message;
+        const chatId = confirmMessage?.chat?.id;
+        const messageId = confirmMessage?.message_id;
+        const creationKey =
+          chatId && messageId
+            ? `${chatId}:${messageId}`
+            : `${userId}:${gameType}:${amount}:${maxPlayers}`;
 
-          if (!confirmMessageMissing) {
+        if (pendingGameCreations.has(creationKey)) {
+          await ctx.answerCallbackQuery("⏳ Already creating this game...");
+          return;
+        }
+
+        pendingGameCreations.add(creationKey);
+
+        try {
+          if (chatId && messageId && !confirmMessageMissing) {
             try {
-              await ctx.api.editMessageText(
-                chatId,
-                messageId,
-                "⏳ Creating game…",
-                {
-                  parse_mode: "HTML",
-                }
-              );
-            } catch (textError) {
+              await ctx.api.editMessageReplyMarkup(chatId, messageId);
+            } catch (markError) {
               console.warn(
-                "Failed to set progress text before game creation:",
-                textError
+                "Failed to clear confirm keyboard before game creation:",
+                markError
               );
-              if (isMessageMissing(textError)) {
+              if (isMessageMissing(markError)) {
                 confirmMessageMissing = true;
               }
             }
-          }
-        }
 
-        await ctx.answerCallbackQuery("Creating game...");
-
-        const decimals = tokenContext.tokenDecimals;
-        const amountRaw = Math.round(amount * Math.pow(10, decimals));
-        const gameData = {
-          amount: amountRaw,
-          isSol: false,
-          formattedAmount: amount.toString(),
-          tokenMint: tokenContext.tokenMint,
-          tokenTicker: tokenContext.tokenTicker,
-          tokenWasSpecified: tokenContext.tokenMint !== DEFAULT_TOKEN_MINT,
-        };
-
-        const result = await gameManager.createGame(
-          gameType,
-          gameData,
-          maxPlayers,
-          gameType === "coinflip" ? 2 : 1,
-          GAME_TIMEOUT,
-          getTelegramId(ctx),
-          ctx.chat?.id
-        );
-
-        if (!result.success) {
-          await notifyConfirmUser(
-            ctx,
-            `❌ ${result.error || "Failed to create game"}`,
-            confirmMessageMissing
-          );
-          return;
-        }
-
-        if (!result.gameAddress) {
-          await notifyConfirmUser(
-            ctx,
-            "❌ Game created but address not returned",
-            confirmMessageMissing
-          );
-          return;
-        }
-
-        const creatorUsername = ctx.from?.username
-          ? `@${ctx.from.username}`
-          : "Unknown";
-
-        const replyToUserMessageId = (ctx.callbackQuery as any)?.message
-          ?.reply_to_message?.message_id as number | undefined;
-
-        if (chatId && messageId && !confirmMessageMissing) {
-          try {
-            await ctx.api.deleteMessage(chatId, messageId);
-          } catch (e) {
-            console.warn("Could not delete confirmation message:", e);
-            if (isMessageMissing(e)) {
-              confirmMessageMissing = true;
-            } else {
+            if (!confirmMessageMissing) {
               try {
                 await ctx.api.editMessageText(
                   chatId,
                   messageId,
-                  `✅ Game created!\n\n<code>${result.gameAddress}</code>`,
+                  "⏳ Creating game…",
                   {
                     parse_mode: "HTML",
                   }
                 );
-              } catch (fallbackError) {
+              } catch (textError) {
                 console.warn(
-                  "Failed to mark confirmation message as processed:",
-                  fallbackError
+                  "Failed to set progress text before game creation:",
+                  textError
                 );
-                if (isMessageMissing(fallbackError)) {
+                if (isMessageMissing(textError)) {
                   confirmMessageMissing = true;
                 }
               }
             }
           }
-        }
 
-        await gameManager.createGameMessage(
-          ctx,
-          result.gameAddress,
-          gameType.charAt(0).toUpperCase() + gameType.slice(1),
-          gameData.amount,
-          creatorUsername,
-          gameData.tokenTicker,
-          "Active",
-          replyToUserMessageId
-        );
+          await ctx.answerCallbackQuery("Creating game...");
 
-        userSessions.delete(userId);
+          const decimals = tokenContext.tokenDecimals;
+          const amountRaw = Math.round(amount * Math.pow(10, decimals));
+          const gameData = {
+            amount: amountRaw,
+            isSol: false,
+            formattedAmount: amount.toString(),
+            tokenMint: tokenContext.tokenMint,
+            tokenTicker: tokenContext.tokenTicker,
+            tokenWasSpecified: tokenContext.tokenMint !== DEFAULT_TOKEN_MINT,
+          };
 
-        if (result.autoJoinResult?.success) {
-          try {
-            await gameManager.updateGameMessageFromData(
+          const result = await gameManager.createGame(
+            gameType,
+            gameData,
+            maxPlayers,
+            gameType === "coinflip" ? 2 : 1,
+            GAME_TIMEOUT,
+            getTelegramId(ctx),
+            ctx.chat?.id
+          );
+
+          if (!result.success) {
+            await notifyConfirmUser(
               ctx,
-              result.gameAddress,
-              "Active"
+              `❌ ${result.error || "Failed to create game"}`,
+              confirmMessageMissing
             );
-          } catch (error) {
-            console.error(
-              "Failed to update game message after auto-join:",
-              error
+            return;
+          }
+
+          if (!result.gameAddress) {
+            await notifyConfirmUser(
+              ctx,
+              "❌ Game created but address not returned",
+              confirmMessageMissing
+            );
+            return;
+          }
+
+          const creatorUsername = ctx.from?.username
+            ? `@${ctx.from.username}`
+            : "Unknown";
+
+          const replyToUserMessageId = (ctx.callbackQuery as any)?.message
+            ?.reply_to_message?.message_id as number | undefined;
+
+          if (chatId && messageId && !confirmMessageMissing) {
+            try {
+              await ctx.api.deleteMessage(chatId, messageId);
+            } catch (e) {
+              console.warn("Could not delete confirmation message:", e);
+              if (isMessageMissing(e)) {
+                confirmMessageMissing = true;
+              } else {
+                try {
+                  await ctx.api.editMessageText(
+                    chatId,
+                    messageId,
+                    `✅ Game created!\n\n<code>${result.gameAddress}</code>`,
+                    {
+                      parse_mode: "HTML",
+                    }
+                  );
+                } catch (fallbackError) {
+                  console.warn(
+                    "Failed to mark confirmation message as processed:",
+                    fallbackError
+                  );
+                  if (isMessageMissing(fallbackError)) {
+                    confirmMessageMissing = true;
+                  }
+                }
+              }
+            }
+          }
+
+          await gameManager.createGameMessage(
+            ctx,
+            result.gameAddress,
+            gameType.charAt(0).toUpperCase() + gameType.slice(1),
+            gameData.amount,
+            creatorUsername,
+            gameData.tokenTicker,
+            "Active",
+            replyToUserMessageId
+          );
+
+          clearSession();
+
+          if (result.autoJoinResult?.success) {
+            try {
+              await gameManager.updateGameMessageFromData(
+                ctx,
+                result.gameAddress,
+                "Active"
+              );
+            } catch (error) {
+              console.error(
+                "Failed to update game message after auto-join:",
+                error
+              );
+            }
+          }
+
+          if (result.autoJoinResult && !result.autoJoinResult.success) {
+            await ctx.reply(
+              result.autoJoinResult.error || "Failed to auto-join game",
+              {
+                parse_mode: "HTML",
+              }
             );
           }
+        } finally {
+          pendingGameCreations.delete(creationKey);
+        }
+      } catch (error) {
+        console.error("Error in confirm_game callback:", error);
+        try {
+          await ctx.answerCallbackQuery("❌ Error creating game");
+        } catch (answerError) {
+          console.error("Failed to answer callback after error:", answerError);
         }
 
-        if (result.autoJoinResult && !result.autoJoinResult.success) {
-          await ctx.reply(
-            result.autoJoinResult.error || "Failed to auto-join game",
-            {
-              parse_mode: "HTML",
-            }
+        try {
+          await notifyConfirmUser(
+            ctx,
+            "❌ Failed to create game. Please try again.",
+            confirmMessageMissing
+          );
+        } catch (notifyError) {
+          console.error(
+            "Failed to update confirmation message after error:",
+            notifyError
           );
         }
-      } finally {
-        pendingGameCreations.delete(creationKey);
-      }
-    } catch (error) {
-      console.error("Error in confirm_game callback:", error);
-      try {
-        await ctx.answerCallbackQuery("❌ Error creating game");
-      } catch (answerError) {
-        console.error("Failed to answer callback after error:", answerError);
-      }
-
-      try {
-        await notifyConfirmUser(
-          ctx,
-          "❌ Failed to create game. Please try again.",
-          confirmMessageMissing
-        );
-      } catch (notifyError) {
-        console.error(
-          "Failed to update confirmation message after error:",
-          notifyError
-        );
       }
     }
-  }
+  )
 );
 
 
 // Custom amount callback - shows slider interface (new format with creator ID)
-bot.callbackQuery(/^custom_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
-  try {
-    const gameType = ctx.match![1] as string;
-    const creatorId = ctx.match![2] as string;
-    const currentUserId = ctx.from?.id?.toString();
-
-    console.log("🔔 Creator-protected custom_amount callback triggered:", ctx.callbackQuery?.data);
-    console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
-
-    // Check if the user pressing the button is the creator
-    if (
-      !ensureCreator(
-        ctx,
-        creatorId,
-        "❌ Only the game creator can modify this setup!"
-      )
-    ) {
-      return;
-    }
-
-    const userId = ctx.from?.id || 0;
-    const session = userSessions.get(userId);
-    const tokenContext = await buildTokenContext(session, ctx.chat?.id);
-
-    const telegramId = getTelegramId(ctx);
-
-    let userBalance =
-      session?.userBalance && session.userBalance > 0
-        ? session.userBalance
-        : 0;
-    if (userBalance <= 0) {
+bot.callbackQuery(
+  /^custom_amount_(coinflip|giveaway)_(\d+)$/,
+  withCreatorContext(
+    {
+      name: "custom_amount",
+      resolveCreatorId: (ctx) => ctx.match?.[2],
+      failureText: "❌ Only the game creator can modify this setup!",
+    },
+    async (ctx, { session, tokenContext, updateSession, creatorId }) => {
       try {
-        const tokenBalance = await wallet.getTokenBalance(
-          telegramId,
-          tokenContext.tokenMint,
-          { createIfMissing: true }
-        );
-        userBalance =
-          tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
+        const gameType = ctx.match![1] as string;
+        const telegramId = getTelegramId(ctx);
+
+        let userBalance =
+          session?.userBalance && session.userBalance > 0
+            ? session.userBalance
+            : 0;
+        if (userBalance <= 0) {
+          try {
+            const tokenBalance = await wallet.getTokenBalance(
+              telegramId,
+              tokenContext.tokenMint,
+              { createIfMissing: true }
+            );
+            userBalance =
+              tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
+          } catch (error) {
+            console.error("Error getting balance for slider:", error);
+          }
+        }
+
+        const { formatted: contractMin } =
+          tokenContext.contractMinimum !== undefined
+            ? { formatted: tokenContext.contractMinimum }
+            : await getContractMinimumAmount(
+                tokenContext.tokenMint,
+                tokenContext.tokenDecimals
+              );
+
+        const precisionFactor = Math.pow(10, tokenContext.tokenDecimals);
+        const roundValue = (value: number) =>
+          Math.round(value * precisionFactor) / precisionFactor;
+
+        const defaultStart =
+          userBalance > 0
+            ? Math.min(
+                userBalance,
+                Math.max(contractMin, userBalance * 0.1)
+              )
+            : contractMin;
+        const startAmount = roundValue(Math.max(contractMin, defaultStart));
+
+        await respondWithMenu(ctx, {
+          text: `🎯 <b>CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>\n\n💰 Balance: <b>${userBalance.toFixed(
+            Math.min(4, tokenContext.tokenDecimals)
+          )} ${tokenContext.tokenTicker}</b>\n\nAdjust the amount using the controls below:`,
+          parseMode: "HTML",
+          keyboard: createSliderAmountKeyboard(
+            gameType,
+            startAmount,
+            userBalance,
+            creatorId,
+            tokenContext.tokenTicker,
+            tokenContext.tokenDecimals
+          ),
+        });
+
+        updateSession({
+          waitingFor: "setup",
+          gameType,
+          userBalance,
+          messageId: session?.messageId ?? ctx.callbackQuery?.message?.message_id,
+          chatId: session?.chatId ?? ctx.chat?.id ?? 0,
+          contractMinimum: contractMin,
+          amount: session?.amount,
+        });
+
+        await ctx.answerCallbackQuery();
       } catch (error) {
-        console.error("Error getting balance for slider:", error);
+        console.error("Error in creator-protected custom_amount callback:", error);
+        await ctx.answerCallbackQuery("❌ Error loading custom amount");
       }
     }
-
-    const { formatted: contractMin } =
-      tokenContext.contractMinimum !== undefined
-        ? { formatted: tokenContext.contractMinimum }
-        : await getContractMinimumAmount(
-            tokenContext.tokenMint,
-            tokenContext.tokenDecimals
-          );
-
-    const precisionFactor = Math.pow(10, tokenContext.tokenDecimals);
-    const roundValue = (value: number) =>
-      Math.round(value * precisionFactor) / precisionFactor;
-
-    const defaultStart =
-      userBalance > 0
-        ? Math.min(
-            userBalance,
-            Math.max(contractMin, userBalance * 0.1)
-          )
-        : contractMin;
-    const startAmount = roundValue(Math.max(contractMin, defaultStart));
-
-    await respondWithMenu(ctx, {
-      text: `🎯 <b>CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>\n\n💰 Balance: <b>${userBalance.toFixed(
-        Math.min(4, tokenContext.tokenDecimals)
-      )} ${tokenContext.tokenTicker}</b>\n\nAdjust the amount using the controls below:`,
-      parseMode: "HTML",
-      keyboard: createSliderAmountKeyboard(
-        gameType,
-        startAmount,
-        userBalance,
-        creatorId,
-        tokenContext.tokenTicker,
-        tokenContext.tokenDecimals
-      ),
-    });
-
-    userSessions.set(userId, {
-      waitingFor: "setup",
-      gameType,
-      userBalance,
-      messageId: session?.messageId ?? ctx.callbackQuery?.message?.message_id,
-      chatId: session?.chatId ?? ctx.chat?.id ?? 0,
-      creatorId,
-      tokenMint: tokenContext.tokenMint,
-      tokenTicker: tokenContext.tokenTicker,
-      tokenDecimals: tokenContext.tokenDecimals,
-      contractMinimum: contractMin,
-      amount: session?.amount,
-    });
-
-    await ctx.answerCallbackQuery();
-  } catch (error) {
-    console.error("Error in creator-protected custom_amount callback:", error);
-    await ctx.answerCallbackQuery("❌ Error loading custom amount");
-  }
-});
+  )
+);
 
 
 // Slider controls callback (new format with creator ID)
 bot.callbackQuery(
   /^slider_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)$/,
-  async (ctx) => {
-  try {
-    const gameType = ctx.match![1] as string;
-    const newAmount = parseFloat(ctx.match![2] as string);
-    const creatorId = ctx.match![3] as string;
-    const currentUserId = ctx.from?.id?.toString();
-
-    console.log("🔔 Creator-protected slider callback triggered:", ctx.callbackQuery?.data);
-    console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
-
-    // Check if the user pressing the button is the creator
-    if (
-      !ensureCreator(
-        ctx,
-        creatorId,
-        "❌ Only the game creator can modify this setup!"
-      )
-    ) {
-      return;
-    }
-    const userId = ctx.from?.id || 0;
-    const session = userSessions.get(userId);
-    const tokenContext = await buildTokenContext(session, ctx.chat?.id);
-
-    const telegramId = getTelegramId(ctx);
-
-    let userBalance =
-      session?.userBalance && session.userBalance > 0
-        ? session.userBalance
-        : 0;
-    if (userBalance <= 0) {
+  withCreatorContext(
+    {
+      name: "slider",
+      resolveCreatorId: (ctx) => ctx.match?.[3],
+      failureText: "❌ Only the game creator can modify this setup!",
+    },
+    async (ctx, { session, tokenContext, updateSession, creatorId }) => {
       try {
-        const tokenBalance = await wallet.getTokenBalance(
-          telegramId,
-          tokenContext.tokenMint,
-          { createIfMissing: true }
+        const gameType = ctx.match![1] as string;
+        const newAmount = parseFloat(ctx.match![2] as string);
+        const telegramId = getTelegramId(ctx);
+
+        let userBalance =
+          session?.userBalance && session.userBalance > 0
+            ? session.userBalance
+            : 0;
+        if (userBalance <= 0) {
+          try {
+            const tokenBalance = await wallet.getTokenBalance(
+              telegramId,
+              tokenContext.tokenMint,
+              { createIfMissing: true }
+            );
+            userBalance =
+              tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
+          } catch (error) {
+            console.error("Error getting balance for slider:", error);
+          }
+        }
+
+        const precisionFactor = Math.pow(10, tokenContext.tokenDecimals);
+        const roundValue = (value: number) =>
+          Math.round(value * precisionFactor) / precisionFactor;
+        const minValue =
+          tokenContext.contractMinimum !== undefined
+            ? tokenContext.contractMinimum
+            : (await getContractMinimumAmount(
+                tokenContext.tokenMint,
+                tokenContext.tokenDecimals
+              )).formatted;
+        const validAmount = roundValue(
+          Math.max(
+            minValue,
+            Math.min(
+              userBalance > 0 ? userBalance : newAmount,
+              newAmount
+            )
+          )
         );
-        userBalance =
-          tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
+
+        await respondWithMenu(ctx, {
+          text: `🎯 <b>CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>\n\n💰 Balance: <b>${userBalance.toFixed(
+            Math.min(4, tokenContext.tokenDecimals)
+          )} ${tokenContext.tokenTicker}</b>\n\nAdjust the amount using the controls below:`,
+          parseMode: "HTML",
+          keyboard: createSliderAmountKeyboard(
+            gameType,
+            validAmount,
+            userBalance,
+            creatorId,
+            tokenContext.tokenTicker,
+            tokenContext.tokenDecimals
+          ),
+        });
+
+        updateSession({
+          waitingFor: "setup",
+          gameType,
+          userBalance,
+          messageId: session?.messageId ?? ctx.callbackQuery?.message?.message_id,
+          chatId: session?.chatId ?? ctx.chat?.id ?? 0,
+          amount: validAmount.toString(),
+          contractMinimum: minValue,
+        });
+
+        await ctx.answerCallbackQuery();
       } catch (error) {
-        console.error("Error getting balance for slider:", error);
+        console.error("Error in creator-protected slider callback:", error);
+        await ctx.answerCallbackQuery("❌ Error adjusting amount");
       }
     }
-
-    const precisionFactor = Math.pow(10, tokenContext.tokenDecimals);
-    const roundValue = (value: number) =>
-      Math.round(value * precisionFactor) / precisionFactor;
-    const minValue =
-      tokenContext.contractMinimum !== undefined
-        ? tokenContext.contractMinimum
-        : (await getContractMinimumAmount(
-            tokenContext.tokenMint,
-            tokenContext.tokenDecimals
-          )).formatted;
-    const validAmount = roundValue(
-      Math.max(
-        minValue,
-        Math.min(
-          userBalance > 0 ? userBalance : newAmount,
-          newAmount
-        )
-      )
-    );
-
-    await respondWithMenu(ctx, {
-      text: `🎯 <b>CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>\n\n💰 Balance: <b>${userBalance.toFixed(
-        Math.min(4, tokenContext.tokenDecimals)
-      )} ${tokenContext.tokenTicker}</b>\n\nAdjust the amount using the controls below:`,
-      parseMode: "HTML",
-      keyboard: createSliderAmountKeyboard(
-        gameType,
-        validAmount,
-        userBalance,
-        creatorId,
-        tokenContext.tokenTicker,
-        tokenContext.tokenDecimals
-      ),
-    });
-
-    userSessions.set(userId, {
-      waitingFor: "setup",
-      gameType,
-      userBalance,
-      messageId: session?.messageId ?? ctx.callbackQuery?.message?.message_id,
-      chatId: session?.chatId ?? ctx.chat?.id ?? 0,
-      amount: validAmount.toString(),
-      creatorId,
-      tokenMint: tokenContext.tokenMint,
-      tokenTicker: tokenContext.tokenTicker,
-      tokenDecimals: tokenContext.tokenDecimals,
-      contractMinimum: minValue,
-    });
-
-    await ctx.answerCallbackQuery();
-  } catch (error) {
-    console.error("Error in creator-protected slider callback:", error);
-    await ctx.answerCallbackQuery("❌ Error adjusting amount");
-  }
-});
+  )
+);
 
 
 // Back to amounts callback (new format with creator ID)
-bot.callbackQuery(/^back_to_amounts_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
-  try {
-    const gameType = ctx.match![1] as string;
-    const creatorId = ctx.match![2] as string;
-    const currentUserId = ctx.from?.id?.toString();
-
-    console.log("🔔 Creator-protected back_to_amounts callback triggered:", ctx.callbackQuery?.data);
-    console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
-
-    // Check if the user pressing the button is the creator
-    if (
-      !ensureCreator(
-        ctx,
-        creatorId,
-        "❌ Only the game creator can modify this setup!"
-      )
-    ) {
-      return;
-    }
-
-    const userId = ctx.from?.id || 0;
-    const session = userSessions.get(userId);
-    const tokenContext = await buildTokenContext(session, ctx.chat?.id);
-
-    const telegramId = getTelegramId(ctx);
-
-    let userBalance =
-      session?.userBalance && session.userBalance > 0
-        ? session.userBalance
-        : 0;
-    if (userBalance <= 0) {
+bot.callbackQuery(
+  /^back_to_amounts_(coinflip|giveaway)_(\d+)$/,
+  withCreatorContext(
+    {
+      name: "back_to_amounts",
+      resolveCreatorId: (ctx) => ctx.match?.[2],
+      failureText: "❌ Only the game creator can modify this setup!",
+    },
+    async (
+      ctx,
+      { session, tokenContext, updateSession, clearSession, creatorId }
+    ) => {
       try {
-        const tokenBalance = await wallet.getTokenBalance(
-          telegramId,
-          tokenContext.tokenMint,
-          { createIfMissing: true }
+        const gameType = ctx.match![1] as string;
+        const telegramId = getTelegramId(ctx);
+
+        let userBalance =
+          session?.userBalance && session.userBalance > 0
+            ? session.userBalance
+            : 0;
+        if (userBalance <= 0) {
+          try {
+            const tokenBalance = await wallet.getTokenBalance(
+              telegramId,
+              tokenContext.tokenMint,
+              { createIfMissing: true }
+            );
+            userBalance =
+              tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
+          } catch (error) {
+            console.error("Error getting balance:", error);
+          }
+        }
+
+        const { formatted: contractMin } =
+          tokenContext.contractMinimum !== undefined
+            ? { formatted: tokenContext.contractMinimum }
+            : await getContractMinimumAmount(
+                tokenContext.tokenMint,
+                tokenContext.tokenDecimals
+              );
+
+        let tokenPriceUSD = await getPriceUSD(tokenContext.tokenMint);
+        if (!tokenPriceUSD) {
+          tokenPriceUSD = await getPriceUSD(tokenContext.tokenTicker);
+        }
+
+        const suggestedAmounts = getSuggestedStakeAmounts(
+          contractMin,
+          userBalance
         );
-        userBalance =
-          tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
-      } catch (error) {
-        console.error("Error getting balance:", error);
-      }
-    }
 
-    const { formatted: contractMin } =
-      tokenContext.contractMinimum !== undefined
-        ? { formatted: tokenContext.contractMinimum }
-        : await getContractMinimumAmount(
-            tokenContext.tokenMint,
-            tokenContext.tokenDecimals
-          );
+        clearSession();
 
-    let tokenPriceUSD = await getPriceUSD(tokenContext.tokenMint);
-    if (!tokenPriceUSD) {
-      tokenPriceUSD = await getPriceUSD(tokenContext.tokenTicker);
-    }
+        let warningMessage = getFeeWarningMessage(
+          gameType,
+          userBalance,
+          contractMin,
+          tokenContext.tokenTicker
+        );
 
-    const suggestedAmounts = getSuggestedStakeAmounts(
-      contractMin,
-      userBalance
-    );
+        if (suggestedAmounts.length > 0) {
+          warningMessage += "\n\nSuggested stakes:\n";
+          for (const amount of suggestedAmounts) {
+            const amountDisplay = formatTokenDisplay(amount, {
+              decimals: tokenContext.tokenDecimals,
+            });
+            warningMessage += `• ${amountDisplay} ${tokenContext.tokenTicker}`;
+            if (tokenPriceUSD) {
+              warningMessage += ` (~$${formatUsdValue(amount * tokenPriceUSD)})`;
+            }
+            warningMessage += "\n";
+          }
+        }
 
-    // Clear any pending typed-input session for this user when navigating back
-    userSessions.delete(ctx.from?.id || 0);
-
-    let warningMessage = getFeeWarningMessage(
-      gameType,
-      userBalance,
-      contractMin,
-      tokenContext.tokenTicker
-    );
-
-    if (suggestedAmounts.length > 0) {
-      warningMessage += "\n\nSuggested stakes:\n";
-      for (const amount of suggestedAmounts) {
-        const amountDisplay = formatTokenDisplay(amount, {
-          decimals: tokenContext.tokenDecimals,
+        await respondWithMenu(ctx, {
+          text: warningMessage,
+          parseMode: "HTML",
+          keyboard: createAmountSelectionKeyboard(
+            gameType,
+            userBalance,
+            creatorId,
+            contractMin,
+            tokenContext.tokenTicker,
+            {
+              decimals: tokenContext.tokenDecimals,
+              tokenPriceUSD: tokenPriceUSD ?? undefined,
+            }
+          ),
         });
-        warningMessage += `• ${amountDisplay} ${tokenContext.tokenTicker}`;
-        if (tokenPriceUSD) {
-          warningMessage += ` (~$${formatUsdValue(amount * tokenPriceUSD)})`;
-        }
-        warningMessage += "\n";
+
+        updateSession({
+          waitingFor: "setup",
+          gameType,
+          userBalance,
+          messageId: ctx.callbackQuery?.message?.message_id ?? 0,
+          chatId: ctx.chat?.id ?? 0,
+          contractMinimum: contractMin,
+        });
+
+        await ctx.answerCallbackQuery();
+      } catch (error) {
+        console.error("Error in creator-protected back_to_amounts callback:", error);
+        await ctx.answerCallbackQuery("❌ Error going back");
       }
     }
-
-    await respondWithMenu(ctx, {
-      text: warningMessage,
-      parseMode: "HTML",
-      keyboard: createAmountSelectionKeyboard(
-        gameType,
-        userBalance,
-        creatorId,
-        contractMin,
-        tokenContext.tokenTicker,
-        {
-          decimals: tokenContext.tokenDecimals,
-          tokenPriceUSD: tokenPriceUSD ?? undefined,
-        }
-      ),
-    });
-
-    userSessions.set(userId, {
-      waitingFor: "setup",
-      gameType,
-      userBalance,
-      messageId: ctx.callbackQuery?.message?.message_id ?? 0,
-      chatId: ctx.chat?.id ?? 0,
-      creatorId,
-      tokenMint: tokenContext.tokenMint,
-      tokenTicker: tokenContext.tokenTicker,
-      tokenDecimals: tokenContext.tokenDecimals,
-      contractMinimum: contractMin,
-    });
-
-    await ctx.answerCallbackQuery();
-  } catch (error) {
-    console.error("Error in creator-protected back_to_amounts callback:", error);
-    await ctx.answerCallbackQuery("❌ Error going back");
-  }
-});
+  )
+);
 
 
 // Type amount callback - prompts user to type amount (new format with creator ID)
-bot.callbackQuery(/^type_amount_(coinflip|giveaway)_(\d+)$/, async (ctx) => {
-  try {
-    const gameType = ctx.match![1] as string;
-    const creatorId = ctx.match![2] as string;
-    const currentUserId = ctx.from?.id?.toString();
-
-    console.log("🔔 Creator-protected type_amount callback triggered:", ctx.callbackQuery?.data);
-    console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
-
-    // Check if the user pressing the button is the creator
-    if (
-      !ensureCreator(
-        ctx,
-        creatorId,
-        "❌ Only the game creator can modify this setup!"
-      )
-    ) {
-      return;
-    }
-    const userId = ctx.from?.id || 0;
-    const session = userSessions.get(userId);
-    const tokenContext = await buildTokenContext(session, ctx.chat?.id);
-
-    const telegramId = getTelegramId(ctx);
-
-    let userBalance =
-      session?.userBalance && session.userBalance > 0
-        ? session.userBalance
-        : 0;
-    if (userBalance <= 0) {
+bot.callbackQuery(
+  /^type_amount_(coinflip|giveaway)_(\d+)$/,
+  withCreatorContext(
+    {
+      name: "type_amount",
+      resolveCreatorId: (ctx) => ctx.match?.[2],
+      failureText: "❌ Only the game creator can modify this setup!",
+    },
+    async (ctx, { session, tokenContext, updateSession, creatorId }) => {
       try {
-        const tokenBalance = await wallet.getTokenBalance(
-          telegramId,
-          tokenContext.tokenMint,
-          { createIfMissing: true }
-        );
-        userBalance =
-          tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
+        const gameType = ctx.match![1] as string;
+        const telegramId = getTelegramId(ctx);
+
+        let userBalance =
+          session?.userBalance && session.userBalance > 0
+            ? session.userBalance
+            : 0;
+        if (userBalance <= 0) {
+          try {
+            const tokenBalance = await wallet.getTokenBalance(
+              telegramId,
+              tokenContext.tokenMint,
+              { createIfMissing: true }
+            );
+            userBalance =
+              tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
+          } catch (error) {
+            console.error("Error getting balance:", error);
+          }
+        }
+
+        const { formatted: contractMin } =
+          tokenContext.contractMinimum !== undefined
+            ? { formatted: tokenContext.contractMinimum }
+            : await getContractMinimumAmount(
+                tokenContext.tokenMint,
+                tokenContext.tokenDecimals
+              );
+
+        const typeMessage = [
+          `✏️ <b>TYPE CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>`,
+          "",
+          `💰 Your balance: <b>${userBalance.toFixed(
+            Math.min(4, tokenContext.tokenDecimals)
+          )} ${tokenContext.tokenTicker}</b>`,
+          "",
+          "Please type the amount you want to use.",
+          "",
+          "<b>Example:</b>",
+          `• Type: <code>75</code> for 75 ${tokenContext.tokenTicker}`,
+          `• Type: <code>150.5</code> for 150.5 ${tokenContext.tokenTicker}`,
+          "",
+          `Min: ${contractMin} ${tokenContext.tokenTicker} • Max: ${userBalance.toFixed(
+            Math.min(2, tokenContext.tokenDecimals)
+          )} ${tokenContext.tokenTicker}`
+        ].join("\n");
+
+        await respondWithMenu(ctx, {
+          text: typeMessage,
+          parseMode: "HTML",
+          keyboard: new InlineKeyboard()
+            .text("❌ Cancel", `cancel_game_setup_${creatorId}`)
+            .row(),
+        });
+
+        await ctx.answerCallbackQuery("Type your amount...");
+
+        updateSession({
+          waitingFor: "amount_input",
+          gameType,
+          userBalance,
+          messageId: ctx.callbackQuery?.message?.message_id || 0,
+          chatId: ctx.chat?.id || 0,
+          contractMinimum: contractMin,
+          amount: session?.amount,
+        });
       } catch (error) {
-        console.error("Error getting balance:", error);
+        console.error("Error in creator-protected type_amount callback:", error);
+        await ctx.answerCallbackQuery("❌ Error setting up text input");
       }
     }
-
-    const { formatted: contractMin } =
-      tokenContext.contractMinimum !== undefined
-        ? { formatted: tokenContext.contractMinimum }
-        : await getContractMinimumAmount(
-            tokenContext.tokenMint,
-            tokenContext.tokenDecimals
-          );
-
-    const typeMessage = [
-      `✏️ <b>TYPE CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>`,
-      "",
-      `💰 Your balance: <b>${userBalance.toFixed(
-        Math.min(4, tokenContext.tokenDecimals)
-      )} ${tokenContext.tokenTicker}</b>`,
-      "",
-      "Please type the amount you want to use.",
-      "",
-      "<b>Example:</b>",
-      `• Type: <code>75</code> for 75 ${tokenContext.tokenTicker}`,
-      `• Type: <code>150.5</code> for 150.5 ${tokenContext.tokenTicker}`,
-      "",
-      `Min: ${contractMin} ${tokenContext.tokenTicker} • Max: ${userBalance.toFixed(
-        Math.min(2, tokenContext.tokenDecimals)
-      )} ${tokenContext.tokenTicker}`
-    ].join("\n");
-
-    await respondWithMenu(ctx, {
-      text: typeMessage,
-      parseMode: "HTML",
-      keyboard: new InlineKeyboard()
-        .text("❌ Cancel", `cancel_game_setup_${creatorId}`)
-        .row(),
-    });
-
-    await ctx.answerCallbackQuery("Type your amount...");
-
-    // Store the game type and message ID in user session for the text handler
-    userSessions.set(userId, {
-      waitingFor: "amount_input",
-      gameType,
-      userBalance,
-      messageId: ctx.callbackQuery?.message?.message_id || 0,
-      chatId: ctx.chat?.id || 0,
-      creatorId,
-      tokenMint: tokenContext.tokenMint,
-      tokenTicker: tokenContext.tokenTicker,
-      tokenDecimals: tokenContext.tokenDecimals,
-      contractMinimum: contractMin,
-      amount: session?.amount,
-    });
-
-  } catch (error) {
-    console.error("Error in creator-protected type_amount callback:", error);
-    await ctx.answerCallbackQuery("❌ Error setting up text input");
-  }
-});
+  )
+);
 
 
 // Custom players callback - prompts user to type number of players (new format with creator ID)
-bot.callbackQuery(/^custom_players_(coinflip|giveaway)_(.+)_(\d+)$/, async (ctx) => {
-  try {
-    const gameType = ctx.match![1] as string;
-    const amount = ctx.match![2] as string;
-    const creatorId = ctx.match![3] as string;
-    const currentUserId = ctx.from?.id?.toString();
+bot.callbackQuery(
+  /^custom_players_(coinflip|giveaway)_(.+)_(\d+)$/,
+  withCreatorContext(
+    {
+      name: "custom_players",
+      resolveCreatorId: (ctx) => ctx.match?.[3],
+      failureText: "❌ Only the game creator can modify this setup!",
+    },
+    async (ctx, { session, tokenContext, updateSession, creatorId }) => {
+      try {
+        const gameType = ctx.match![1] as string;
+        const amount = ctx.match![2] as string;
 
-    console.log("🔔 Creator-protected custom_players callback triggered:", ctx.callbackQuery?.data);
-    console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
+        const amountNumber = Number(amount);
+        const formattedAmount = amountNumber.toLocaleString("en-US", {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: determineFractionDigits(
+            amount,
+            tokenContext.tokenDecimals
+          ),
+        });
 
-    // Check if the user pressing the button is the creator
-    if (
-      !ensureCreator(
-        ctx,
-        creatorId,
-        "❌ Only the game creator can modify this setup!"
-      )
-    ) {
-      return;
+        const playersMessage = [
+          `👥 <b>TYPE CUSTOM PLAYERS - ${gameType.toUpperCase()}</b>`,
+          "",
+          `Amount: <b>${formattedAmount} ${tokenContext.tokenTicker}</b>`,
+          "",
+          "Please type the number of players for this game.",
+          "",
+          "<b>Example:</b>",
+          "• Type: <code>4</code> for 4 players",
+          "• Type: <code>10</code> for 10 players",
+          "",
+          `Range: 2-${gameType === "coinflip" ? "8" : "20"} players`
+        ].join("\n");
+
+        await respondWithMenu(ctx, {
+          text: playersMessage,
+          parseMode: "HTML",
+          keyboard: new InlineKeyboard()
+            .text("❌ Cancel", `cancel_game_setup_${creatorId}`)
+            .row(),
+        });
+
+        await ctx.answerCallbackQuery("Type the number of players...");
+
+        updateSession({
+          waitingFor: "players_input",
+          gameType,
+          userBalance: 0,
+          amount,
+          messageId: ctx.callbackQuery?.message?.message_id || 0,
+          chatId: ctx.chat?.id || 0,
+          contractMinimum: session?.contractMinimum,
+        });
+      } catch (error) {
+        console.error("Error in creator-protected custom_players callback:", error);
+        await ctx.answerCallbackQuery("❌ Error setting up players input");
+      }
     }
-    const userId = ctx.from?.id || 0;
-    const session = userSessions.get(userId);
-    const tokenContext = await buildTokenContext(session, ctx.chat?.id);
-
-    const amountNumber = Number(amount);
-    const formattedAmount = amountNumber.toLocaleString("en-US", {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: determineFractionDigits(
-        amount,
-        tokenContext.tokenDecimals
-      ),
-    });
-
-    const playersMessage = [
-      `👥 <b>TYPE CUSTOM PLAYERS - ${gameType.toUpperCase()}</b>`,
-      "",
-      `Amount: <b>${formattedAmount} ${tokenContext.tokenTicker}</b>`,
-      "",
-      "Please type the number of players for this game.",
-      "",
-      "<b>Example:</b>",
-      "• Type: <code>4</code> for 4 players",
-      "• Type: <code>10</code> for 10 players",
-      "",
-      `Range: 2-${gameType === "coinflip" ? "8" : "20"} players`
-    ].join("\n");
-
-    await respondWithMenu(ctx, {
-      text: playersMessage,
-      parseMode: "HTML",
-      keyboard: new InlineKeyboard()
-        .text("❌ Cancel", `cancel_game_setup_${creatorId}`)
-        .row(),
-    });
-
-    await ctx.answerCallbackQuery("Type the number of players...");
-
-    // Store data for text input handler
-    userSessions.set(userId, {
-      waitingFor: "players_input",
-      gameType,
-      userBalance: 0, // Add required field
-      amount,
-      messageId: ctx.callbackQuery?.message?.message_id || 0,
-      chatId: ctx.chat?.id || 0,
-      creatorId,
-      tokenMint: tokenContext.tokenMint,
-      tokenTicker: tokenContext.tokenTicker,
-      tokenDecimals: tokenContext.tokenDecimals,
-      contractMinimum: session?.contractMinimum,
-    });
-
-  } catch (error) {
-    console.error("Error in creator-protected custom_players callback:", error);
-    await ctx.answerCallbackQuery("❌ Error setting up players input");
-  }
-});
+  )
+);
 
 // No-op callback (for display-only buttons)
 bot.callbackQuery("noop", async (ctx) => {
@@ -4560,38 +4521,30 @@ bot.callbackQuery("noop", async (ctx) => {
 
 
 // Cancel game setup callback (new format with creator ID protection)
-bot.callbackQuery(/^cancel_game_setup_(\d+)$/, async (ctx) => {
-  try {
-    const creatorId = ctx.match![1] as string;
-    const currentUserId = ctx.from?.id?.toString();
+bot.callbackQuery(
+  /^cancel_game_setup_(\d+)$/,
+  withCreatorContext(
+    {
+      name: "cancel_game_setup",
+      resolveCreatorId: (ctx) => ctx.match?.[1],
+      failureText: "❌ Only the game creator can cancel this setup!",
+    },
+    async (ctx, { clearSession }) => {
+      try {
+        clearSession();
 
-    console.log("🔔 Creator-protected cancel callback triggered:", ctx.callbackQuery?.data);
-    console.log(`👤 Creator: ${creatorId}, Current user: ${currentUserId}`);
-
-    // Check if the user pressing the button is the creator
-    if (
-      !ensureCreator(
-        ctx,
-        creatorId,
-        "❌ Only the game creator can cancel this setup!"
-      )
-    ) {
-      return;
+        await respondWithMenu(ctx, {
+          text: "❌ Game creation cancelled.",
+          parseMode: "HTML",
+        });
+        await ctx.answerCallbackQuery("Cancelled");
+      } catch (error) {
+        console.error("Error in creator-protected cancel callback:", error);
+        await ctx.answerCallbackQuery("❌ Error cancelling");
+      }
     }
-
-    // Clear any pending typed-input session for this user to avoid hijacking
-    userSessions.delete(ctx.from?.id || 0);
-
-    await respondWithMenu(ctx, {
-      text: "❌ Game creation cancelled.",
-      parseMode: "HTML",
-    });
-    await ctx.answerCallbackQuery("Cancelled");
-  } catch (error) {
-    console.error("Error in creator-protected cancel callback:", error);
-    await ctx.answerCallbackQuery("❌ Error cancelling");
-  }
-});
+  )
+);
 
 // Text input handler for custom amounts
 bot.on("message:text", async (ctx, next) => {
