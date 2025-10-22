@@ -6963,11 +6963,16 @@ bot.on("callback_query", async (ctx, next) => {
 
     // Use the existing global swapManager instance
 
+    const slippagePercent = Number.isFinite(sellData.quote.slippage)
+      ? (sellData.quote.slippage as number)
+      : 2;
+    const slippageBps = Math.max(0, Math.round(slippagePercent * 100));
+
     const quote = await swapManager.getQuote({
       inputMint: sellData.fromTokenInfo.token_mint,
       outputMint: sellData.toTokenInfo.token_mint,
       amount: sellData.rawAmount, // Use raw amount - swapManager will convert for pump.fun if needed
-      slippageBps: 200, // Use same 2% slippage as successful BUY/SWAP
+      slippageBps,
       userKeypair: userKeypair,
       inputDecimals: sellData.fromTokenInfo.decimals || 6,
       outputDecimals: 9, // SOL decimals
@@ -6989,7 +6994,7 @@ bot.on("callback_query", async (ctx, next) => {
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
           amount: quote.inputAmount, // Use quote amount like successful BUY/SWAP
-          slippageBps: Math.floor(2.0 * 100), // Use same 2% slippage as successful BUY/SWAP
+          slippageBps,
           userKeypair: userKeypair,
           inputDecimals: sellData.fromTokenInfo.decimals,
           outputDecimals: 9,
@@ -7005,7 +7010,7 @@ bot.on("callback_query", async (ctx, next) => {
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
           amount: quote.inputAmount, // Use quote amount like successful BUY/SWAP
-          slippageBps: Math.floor(2.0 * 100), // Use same 2% slippage as successful BUY/SWAP
+          slippageBps,
           userKeypair: userKeypair,
           inputDecimals: sellData.fromTokenInfo.decimals,
           outputDecimals: 9,
