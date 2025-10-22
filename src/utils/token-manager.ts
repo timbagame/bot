@@ -4,8 +4,29 @@ import { TokenDatabase } from "./token-database";
 import { WalletManager } from "./wallet";
 import { PumpFunClient, isPotentialPumpFunToken } from "./pump-fun";
 import type { ParseAmountResult, ChatTokenConfig, KnownToken } from "../types";
-import { WSOL_MINT } from "./constants";
+import { TOKENS_LIST, WSOL_MINT } from "./constants";
 import { createSingleton } from "./singleton";
+
+const ADDITIONAL_TOKEN_MINTS: Record<string, string> = {
+  BONK: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+};
+
+const BUILTIN_TOKEN_MINTS: Record<string, string> = (() => {
+  const map: Record<string, string> = {
+    SOL: WSOL_MINT,
+    WSOL: WSOL_MINT,
+  };
+
+  for (const token of TOKENS_LIST) {
+    map[token.ticker.toUpperCase()] = token.mint;
+  }
+
+  for (const [ticker, mint] of Object.entries(ADDITIONAL_TOKEN_MINTS)) {
+    map[ticker.toUpperCase()] = mint;
+  }
+
+  return map;
+})();
 
 // ================================
 // MULTI-TOKEN MANAGER
@@ -235,6 +256,29 @@ export class TokenManager {
       tokenMint: this.defaultTokenMint,
       tokenTicker: this.defaultTokenTicker,
     };
+  }
+
+  public resolveMintForTicker(ticker: string): string | undefined {
+    if (!ticker) {
+      return undefined;
+    }
+
+    const normalized = ticker.trim().toUpperCase();
+    if (!normalized) {
+      return undefined;
+    }
+
+    const defaultTickerUpper = this.defaultTokenTicker.trim().toUpperCase();
+    if (normalized === defaultTickerUpper) {
+      return this.defaultTokenMint;
+    }
+
+    const knownToken = this.tokenDb.getKnownTokenByTicker(normalized);
+    if (knownToken) {
+      return knownToken.token_mint;
+    }
+
+    return BUILTIN_TOKEN_MINTS[normalized];
   }
 
   // ================================

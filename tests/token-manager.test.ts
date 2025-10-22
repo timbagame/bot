@@ -36,6 +36,21 @@ test("parseAmount maps SOL to WSOL for game context", async () => {
   expect(data.requestedNativeSol).toBe(true);
   expect(data.tokenMint).toBe(WSOL_MINT);
   expect(data.tokenTicker).toBe("SOL");
+  expect(tm.resolveMintForTicker("SOL")).toBe(WSOL_MINT);
+  expect(tm.resolveMintForTicker("wsol")).toBe(WSOL_MINT);
+});
+
+test("resolveMintForTicker returns default token mint for default ticker", () => {
+  const tm = TokenManager.getInstance(makeWalletStub(), "DEFAULT_MINT", "DEF");
+  expect(tm.resolveMintForTicker("def")).toBe("DEFAULT_MINT");
+});
+
+test("resolveMintForTicker prefers known tokens over built-ins", async () => {
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const overrideBonkMint = "TokenMint11111111111111111111111111111111";
+  // Register BONK with a synthetic mint to ensure DB lookup wins over alias map
+  await tm.addToken(overrideBonkMint, "BONK");
+  expect(tm.resolveMintForTicker("BONK")).toBe(overrideBonkMint);
 });
 
 test("parseAmount accepts SOL for tips and formats as SOL", async () => {
