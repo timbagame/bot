@@ -81,8 +81,11 @@ export const createMessageEditAdapter = <T extends Context>(
     throw new Error("Cannot create edit adapter without a valid chat id");
   }
 
+  const originalFrom = ctx.from ? { ...ctx.from } : undefined;
+
   return {
     ...ctx,
+    from: originalFrom,
     chat: ctx.chat ?? ({ id: targetChatId } as any),
     editMessageText: async (text: string, options: any) =>
       await ctx.api.editMessageText(targetChatId, messageId, text, options),

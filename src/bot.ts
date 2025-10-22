@@ -1089,6 +1089,19 @@ const updateGameMessageSafely = async (
   }
 };
 
+let prepareTokenTradeQuoteRunner: typeof prepareTokenTradeQuote =
+  prepareTokenTradeQuote;
+
+export const __test_setPrepareTokenTradeQuote = (
+  fn: typeof prepareTokenTradeQuote
+): void => {
+  prepareTokenTradeQuoteRunner = fn;
+};
+
+export const __test_resetPrepareTokenTradeQuote = (): void => {
+  prepareTokenTradeQuoteRunner = prepareTokenTradeQuote;
+};
+
 type GameMessageTarget = {
   chatId: number;
   messageId: number;
@@ -7736,7 +7749,7 @@ const showSwapQuoteAndConfirmation = async (
   const userId = telegramId || getTelegramId(ctx);
 
   try {
-    await prepareTokenTradeQuote({
+    await prepareTokenTradeQuoteRunner({
       ctx,
       telegramId: userId,
       amountInput: amount,
@@ -8080,12 +8093,13 @@ const showBuyQuoteAndConfirmation = async (
   paymentToken: string,
   targetToken: string,
   amount: string,
-  contractAddress?: string
+  contractAddress?: string,
+  telegramIdOverride?: bigint
 ) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = telegramIdOverride ?? getTelegramId(ctx);
 
   try {
-    await prepareTokenTradeQuote({
+    await prepareTokenTradeQuoteRunner({
       ctx,
       telegramId,
       amountInput: amount,
@@ -8194,6 +8208,8 @@ const showBuyQuoteAndConfirmation = async (
     await respondWithMenu(ctx, { text, keyboard });
   }
 };
+
+export const __test_showBuyQuoteAndConfirmation = showBuyQuoteAndConfirmation;
 
 // ================================
 // ERROR HANDLING & BOT STARTUP
@@ -8742,7 +8758,8 @@ const handleBuyCustomAmountInput = async (
       paymentToken,
       targetToken,
       normalized.normalizedAmount,
-      contractAddress
+      contractAddress,
+      telegramId
     );
   } catch (error: any) {
     console.error("Error processing custom buy amount:", error);
@@ -8788,6 +8805,8 @@ const handleBuyCustomAmountInput = async (
     });
   }
 };
+
+export const __test_handleBuyCustomAmountInput = handleBuyCustomAmountInput;
 
 /**
  * Handle SELL custom amount input
@@ -8924,7 +8943,7 @@ const showSellQuoteAndConfirmation = async (
 ) => {
   try {
     try {
-      await prepareTokenTradeQuote({
+      await prepareTokenTradeQuoteRunner({
         ctx,
         telegramId,
         amountInput: amount,
