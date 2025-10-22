@@ -1973,7 +1973,8 @@ export class GameManager {
     try {
       const gameAccount = await this.program.account.game.fetch(gamePda);
 
-      let joinTx: string;
+      let joinTx: string | undefined;
+      let joinConfirmed = false;
       if (gameAccount.isPrivate) {
         console.log(`🔐 Game is private, using authorized join...`);
         const result = await this.joinPrivateGame(
@@ -1987,7 +1988,8 @@ export class GameManager {
             error: result.error || "Failed to join private game",
           };
         }
-        joinTx = result.tx!;
+        joinTx = result.tx;
+        joinConfirmed = true;
       } else {
         console.log(`🌐 Game is public, using regular join...`);
         const joinAccounts = await this.buildJoinAccounts(
@@ -2003,15 +2005,14 @@ export class GameManager {
           [joinInstruction],
           [playerKp]
         );
-      }
 
-      // Confirm join with timeout recovery
-      const joinConfirmed = await this.confirmTransactionWithRecovery(
-        joinTx,
-        gamePda,
-        "Player join",
-        playerKp.publicKey
-      );
+        joinConfirmed = await this.confirmTransactionWithRecovery(
+          joinTx,
+          gamePda,
+          "Player join",
+          playerKp.publicKey
+        );
+      }
 
       if (joinConfirmed) {
         this.gameDb.saveGameParticipant(
@@ -2519,7 +2520,11 @@ export class GameManager {
     gamePda: PublicKey,
     playerKp: Keypair,
     chatId: number
-  ): Promise<{ success: boolean; tx?: string; error?: string }> {
+  ): Promise<{
+    success: boolean;
+    tx?: string;
+    error?: string;
+  }> {
     try {
       const authResult = await this.oracleClient.authorizePlayer(
         gamePda,
@@ -2560,7 +2565,21 @@ export class GameManager {
         [joinInstruction],
         [playerKp, adminKp]
       );
-      await this.wallet.confirmTransaction(tx);
+
+      const joinConfirmed = await this.confirmTransactionWithRecovery(
+        tx,
+        gamePda,
+        "Player join",
+        playerKp.publicKey
+      );
+
+      if (!joinConfirmed) {
+        return {
+          success: false,
+          error: "Join transaction could not be confirmed",
+        };
+      }
+
       return { success: true, tx };
     } catch (error: any) {
       console.error(`Error joining private game:`, error);
