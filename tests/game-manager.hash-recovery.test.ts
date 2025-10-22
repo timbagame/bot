@@ -41,7 +41,14 @@ describe("GameManager participant hash recovery", () => {
       },
     } as any;
 
-    const gm = GameManager.getInstance({} as any, {} as any, dbStub);
+    const walletStub = {
+      getConnection: () => ({} as any),
+      withRpcFallback: async (
+        _operation: string,
+        fn: (connection: any) => any
+      ) => await fn({}),
+    } as any;
+    const gm = GameManager.getInstance({} as any, walletStub, dbStub);
     const participantHash = BigInt((gm as any).computeParticipantHash(gamePda, playerPubkey));
 
     const info = (gm as any).analyzePlayerKeys(

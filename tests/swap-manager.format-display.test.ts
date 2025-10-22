@@ -9,7 +9,7 @@ describe("SwapManager.formatQuoteForDisplay", () => {
     "test walk nut penalty hip pave soap entry language right filter choice",
     { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
   );
-  const sm = new SwapManager(connection, wallet);
+  const sm = new SwapManager(wallet);
 
   test("formats via pump-fun client when provider is pump-fun", () => {
     (sm as any).pumpFunClient.formatQuoteForDisplay = () => "PUMP_FMT";

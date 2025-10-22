@@ -20,7 +20,7 @@ describe("SwapManager Jupiter fallback", () => {
   });
 
   test("throws clear error when Jupiter fails and not a pump.fun token", async () => {
-    const sm = new SwapManager(connection, wallet);
+    const sm = new SwapManager(wallet);
     // Force Jupiter to fail
     (sm as any).jupiterClient.getQuote = async () => { throw new Error("network down"); };
     // Force pump.fun detection negative
@@ -39,7 +39,7 @@ describe("SwapManager Jupiter fallback", () => {
   });
 
   test("falls back to pump.fun when detected and Jupiter fails", async () => {
-    const sm = new SwapManager(connection, wallet);
+    const sm = new SwapManager(wallet);
     // Force Jupiter to fail
     (sm as any).jupiterClient.getQuote = async () => { throw new Error("network down"); };
     // Force pump.fun detection positive (non-graduated)
@@ -71,7 +71,7 @@ describe("SwapManager Jupiter fallback", () => {
   });
 
   test("prefers pump.fun path for non-graduated tokens and normalizes raw amount", async () => {
-    const sm = new SwapManager(connection, wallet);
+    const sm = new SwapManager(wallet);
 
     (sm.pumpFunClient as any).isPumpFunToken = async (mint: string) => ({
       isPumpFun: mint !== SOL_MINT,
@@ -116,7 +116,7 @@ describe("SwapManager Jupiter fallback", () => {
   });
 
   test("uses Jupiter when no pump.fun tokens detected", async () => {
-    const sm = new SwapManager(connection, wallet);
+    const sm = new SwapManager(wallet);
 
     (sm.pumpFunClient as any).isPumpFunToken = async () => ({
       isPumpFun: false,

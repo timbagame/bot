@@ -15,7 +15,7 @@ describe("SwapManager.canSwap on devnet", () => {
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
-    const sm = new SwapManager(connection, wallet);
+    const sm = new SwapManager(wallet);
 
     const res = await sm.canSwap(
       "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",

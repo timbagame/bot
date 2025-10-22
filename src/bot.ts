@@ -1942,7 +1942,7 @@ const setupAnchor = async () => {
       `Initialized TokenManager with default token: ${DEFAULT_TOKEN_TICKER}`
     );
 
-    swapManager = new SwapManager(wallet.getConnection(), wallet);
+    swapManager = new SwapManager(wallet);
     console.log("Initialized SwapManager with pump.fun integration");
 
     await initializeTokensList();
@@ -3234,7 +3234,7 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
       swapData.quote.provider === "pump-fun"
         ? "🔥 **Pump.fun Token** - Non-graduated token swap"
         : `✅ **${NetworkDetector.getDisplayNameFromRpc(
-            process.env.SOLANA_NETWORK || wallet.getConnection().rpcEndpoint
+            wallet.getActiveRpcUrl()
           )} Transaction** - Tokens transferred successfully`,
     ].join("\n");
 

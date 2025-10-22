@@ -18,7 +18,7 @@ describe("SwapManager provider selection", () => {
   });
 
   test("returns pump-fun when non-graduated token detected", async () => {
-    const sm = new SwapManager(connection, wallet);
+    const sm = new SwapManager(wallet);
     // Force detection path
     (sm.pumpFunClient as any).isPumpFunToken = async () => ({ isPumpFun: true, isGraduated: false });
 
@@ -27,7 +27,7 @@ describe("SwapManager provider selection", () => {
   });
 
   test("returns jupiter for non pump.fun tokens on mainnet", async () => {
-    const sm = new SwapManager(connection, wallet);
+    const sm = new SwapManager(wallet);
     (sm.pumpFunClient as any).isPumpFunToken = async () => ({ isPumpFun: false, isGraduated: false });
 
     const provider = await sm.getBestProvider("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263");
@@ -35,7 +35,7 @@ describe("SwapManager provider selection", () => {
   });
 
   test("canSwap reports provider and success", async () => {
-    const sm = new SwapManager(connection, wallet);
+    const sm = new SwapManager(wallet);
     (sm.pumpFunClient as any).isPumpFunToken = async () => ({ isPumpFun: true, isGraduated: false });
 
     const res = await sm.canSwap("So11111111111111111111111111111111111111112", "pumpMint123456789012345678901234567890123456");

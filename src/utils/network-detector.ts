@@ -1,3 +1,5 @@
+import { getPrimarySolanaRpcUrl } from "./rpc-config";
+
 /**
  * Network detection utility
  */
@@ -82,8 +84,7 @@ export class NetworkDetector {
    * Get current network from environment
    */
   static getCurrentNetwork(): SolanaNetwork {
-    const rpcUrl =
-      process.env.SOLANA_NETWORK || "https://api.mainnet-beta.solana.com";
+    const rpcUrl = getPrimarySolanaRpcUrl();
     return this.detectNetwork(rpcUrl);
   }
 

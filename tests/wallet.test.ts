@@ -84,7 +84,7 @@ test("getAdminKeypair surfaces parse failures", () => {
   }
 });
 
-test("getConnection returns injected connection", () => {
+test("getConnection proxies injected connection", () => {
   resetInstance();
   const conn = { id: "connection" } as any;
   const manager = WalletManager.createForTest(mnemonic, {
@@ -92,5 +92,64 @@ test("getConnection returns injected connection", () => {
     fetch: globalThis.fetch as any,
     timeNow: () => Date.now(),
   });
-  expect(manager.getConnection()).toBe(conn);
+  const proxied = manager.getConnection();
+  expect(proxied).not.toBe(conn);
+  expect((proxied as any).id).toBe("connection");
+});
+
+test("withRpcFallback rotates to next RPC on transport failure", async () => {
+  resetInstance();
+  const urls = ["http://primary-rpc", "http://secondary-rpc"];
+  const calls: string[] = [];
+
+  const manager = WalletManager.createForTest(mnemonic, {
+    rpcUrls: urls,
+    connectionFactory: (rpcUrl) =>
+      ({
+        rpcEndpoint: rpcUrl,
+        async getBalance() {
+          calls.push(rpcUrl);
+          if (rpcUrl === urls[0]) {
+            const err = new Error("fetch failed");
+            (err as any).code = 502;
+            throw err;
+          }
+          return 99;
+        },
+      } as any),
+    fetch: globalThis.fetch as any,
+    timeNow: () => Date.now(),
+  });
+
+  const balance = await manager.getConnection().getBalance({} as any);
+  expect(balance).toBe(99);
+  expect(calls).toEqual(urls);
+  expect(manager.getActiveRpcUrl()).toBe(urls[1]);
+});
+
+test("withRpcFallback bubbles final error when all RPCs fail", async () => {
+  resetInstance();
+  const urls = ["http://primary-rpc", "http://secondary-rpc"];
+  const calls: string[] = [];
+
+  const manager = WalletManager.createForTest(mnemonic, {
+    rpcUrls: urls,
+    connectionFactory: (rpcUrl) =>
+      ({
+        rpcEndpoint: rpcUrl,
+        async getBalance() {
+          calls.push(rpcUrl);
+          const err = new Error(`RPC failure ${rpcUrl}`);
+          (err as any).status = 503;
+          throw err;
+        },
+      } as any),
+    fetch: globalThis.fetch as any,
+    timeNow: () => Date.now(),
+  });
+
+  await expect(
+    manager.getConnection().getBalance({} as any)
+  ).rejects.toThrow(/RPC failure http:\/\/secondary-rpc/);
+  expect(calls).toEqual(urls);
 });

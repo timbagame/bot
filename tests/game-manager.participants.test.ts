@@ -12,7 +12,13 @@ function makeProgram(game: any) {
 }
 
 function makeWallet() {
+  const connectionStub: any = {};
   return {
+    getConnection: () => connectionStub,
+    withRpcFallback: async (
+      _operation: string,
+      fn: (connection: any) => any
+    ) => await fn(connectionStub),
     getBlockchainTime: async () => Math.floor(Date.now() / 1000),
     formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toFixed(0),
   } as any;

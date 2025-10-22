@@ -20,7 +20,13 @@ function makeProgramStub(game: any) {
 
 function makeWalletStub(opts?: { blockTime?: number }) {
   const blockTime = opts?.blockTime ?? Math.floor(Date.now() / 1000);
+  const connectionStub: any = {};
   return {
+    getConnection: () => connectionStub,
+    withRpcFallback: async (
+      _operation: string,
+      fn: (connection: any) => any
+    ) => await fn(connectionStub),
     getBlockchainTime: async () => blockTime,
     formatTokenBalance: (amount: number, decimals: number) => {
       const v = amount / Math.pow(10, decimals);

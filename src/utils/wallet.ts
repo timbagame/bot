@@ -1,6 +1,7 @@
 import { mnemonicToSeedSync } from "bip39";
 import {
   Connection,
+  Commitment,
   Keypair,
   PublicKey,
   TransactionInstruction,
@@ -11,6 +12,9 @@ import {
   SystemProgram,
   SendTransactionError,
 } from "@solana/web3.js";
+import { parseSolanaRpcUrls, getPrimarySolanaRpcUrl } from "./rpc-config";
+
+export { parseSolanaRpcUrls, getPrimarySolanaRpcUrl } from "./rpc-config";
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
@@ -46,11 +50,174 @@ type HttpFetch = (input: string, init?: any) => Promise<{
 
 type WalletDeps = {
   connection?: Connection;
+  connectionFactory?: (rpcUrl: string) => Connection;
+  rpcUrls?: string[];
   fetch?: HttpFetch;
   timeNow?: () => number;
   tokenMetadataResolver?: (
     mint: string
   ) => Promise<{ decimals: number } | null> | { decimals: number } | null;
+};
+
+type RpcManagerOptions = {
+  commitment?: Commitment;
+  connectionFactory?: (rpcUrl: string) => Connection;
+};
+
+class RpcManager {
+  private readonly rpcUrls: string[];
+  private readonly commitment: Commitment;
+  private readonly connectionFactory: (rpcUrl: string) => Connection;
+  private readonly connections = new Map<number, Connection>();
+  private index = 0;
+  private proxy?: Connection;
+
+  constructor(rpcUrls: string[], options?: RpcManagerOptions) {
+    if (!rpcUrls || rpcUrls.length === 0) {
+      throw new Error("RPC manager requires at least one RPC URL");
+    }
+
+    this.rpcUrls = rpcUrls;
+    this.commitment = options?.commitment ?? "confirmed";
+    this.connectionFactory =
+      options?.connectionFactory ??
+      ((rpcUrl: string) => new Connection(rpcUrl, this.commitment));
+  }
+
+  public getActiveRpcUrl(): string {
+    return this.rpcUrls[this.index];
+  }
+
+  public getConnection(): Connection {
+    if (!this.proxy) {
+      this.proxy = this.createProxy();
+    }
+    return this.proxy;
+  }
+
+  public async withRpcFallback<T>(
+    operationName: string,
+    fn: (connection: Connection) => Promise<T>
+  ): Promise<T> {
+    let lastTransportError: unknown = null;
+
+    for (let attempt = 0; attempt < this.rpcUrls.length; attempt++) {
+      const connection = this.getOrCreateConnection(this.index);
+      try {
+        return await fn(connection);
+      } catch (error) {
+        if (!isTransportError(error)) {
+          throw error;
+        }
+
+        lastTransportError = error;
+
+        console.warn(
+          `RPC ${operationName} failed on ${this.getActiveRpcUrl()}: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+
+        if (this.rpcUrls.length === 1) {
+          throw error;
+        }
+
+        this.rotate();
+      }
+    }
+
+    throw lastTransportError instanceof Error
+      ? lastTransportError
+      : new Error("All RPC endpoints failed");
+  }
+
+  private createProxy(): Connection {
+    const self = this;
+    const handler: ProxyHandler<Connection> = {
+      get(target, prop, receiver) {
+        const activeConnection = self.getOrCreateConnection(self.index);
+        const value = Reflect.get(activeConnection, prop, receiver);
+
+        if (typeof value !== "function") {
+          return value;
+        }
+
+        return (...args: any[]) =>
+          self.withRpcFallback(String(prop), (connection) => {
+            const method = Reflect.get(connection, prop, receiver);
+            return (method as (...innerArgs: any[]) => any).apply(
+              connection,
+              args
+            );
+          });
+      },
+    };
+
+    // The proxy target is never used directly because all property accesses
+    // are forwarded to the active connection via the handler above.
+    const target = this.getOrCreateConnection(this.index);
+    return new Proxy(target, handler);
+  }
+
+  private getOrCreateConnection(index: number): Connection {
+    if (!this.connections.has(index)) {
+      const rpcUrl = this.rpcUrls[index];
+      const connection = this.connectionFactory(rpcUrl);
+      this.connections.set(index, connection);
+    }
+
+    return this.connections.get(index)!;
+  }
+
+  private rotate(): void {
+    this.index = (this.index + 1) % this.rpcUrls.length;
+  }
+}
+
+const TRANSPORT_ERROR_CODES = new Set([429, 500, 502, 503, 504, 522, 524]);
+
+const isTransportError = (error: unknown): boolean => {
+  if (!error) return false;
+
+  if (error instanceof SolanaJSONRPCError || error instanceof SendTransactionError) {
+    return false;
+  }
+
+  const status = (error as any)?.status ?? (error as any)?.code;
+  if (typeof status === "number" && TRANSPORT_ERROR_CODES.has(status)) {
+    return true;
+  }
+
+  const cause = (error as any)?.cause;
+  if (cause && isTransportError(cause)) {
+    return true;
+  }
+
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+
+    if (
+      message.includes("fetch failed") ||
+      message.includes("failed to fetch") ||
+      message.includes("network request failed") ||
+      message.includes("network error") ||
+      message.includes("timed out") ||
+      message.includes("timeout") ||
+      message.includes("econnreset") ||
+      message.includes("socket hang up") ||
+      message.includes("429") ||
+      message.includes("502") ||
+      message.includes("503") ||
+      message.includes("504") ||
+      message.includes("websocket") ||
+      message.includes("connection closed") ||
+      message.includes("connection error")
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 };
 
 // ================================
@@ -85,6 +252,8 @@ export class WalletManager {
   private static instance: WalletManager;
   private mnemonic: string;
   private connection: Connection;
+  private rpcManager: RpcManager;
+  private readonly rpcUrls: string[];
   private fetchFn: HttpFetch;
   private timeNow?: () => number;
   private tokenMetadataResolver?: (
@@ -108,8 +277,20 @@ export class WalletManager {
 
   private constructor(mnemonic: string, deps?: WalletDeps) {
     this.mnemonic = mnemonic;
-    this.connection =
-      deps?.connection ?? new Connection(process.env.SOLANA_NETWORK!, "confirmed");
+    this.rpcUrls = deps?.rpcUrls ?? parseSolanaRpcUrls(process.env.SOLANA_NETWORK);
+
+    const connectionFactory = deps?.connectionFactory
+      ? deps.connectionFactory
+      : deps?.connection
+      ? () => deps.connection as Connection
+      : (rpcUrl: string) => new Connection(rpcUrl, "confirmed");
+
+    this.rpcManager = new RpcManager(this.rpcUrls, {
+      commitment: "confirmed",
+      connectionFactory,
+    });
+
+    this.connection = this.rpcManager.getConnection();
     this.fetchFn = deps?.fetch ?? (globalThis.fetch as any);
     this.timeNow = deps?.timeNow;
     this.tokenMetadataResolver = deps?.tokenMetadataResolver;
@@ -218,6 +399,21 @@ export class WalletManager {
 
   public getConnection(): Connection {
     return this.connection;
+  }
+
+  public getActiveRpcUrl(): string {
+    return this.rpcManager.getActiveRpcUrl();
+  }
+
+  public getConfiguredRpcUrls(): string[] {
+    return [...this.rpcUrls];
+  }
+
+  public async withRpcFallback<T>(
+    operationName: string,
+    fn: (connection: Connection) => Promise<T>
+  ): Promise<T> {
+    return this.rpcManager.withRpcFallback(operationName, fn);
   }
 
   // ================================

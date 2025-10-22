@@ -22,10 +22,14 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
-    const swapManager = new SwapManager(connection, wallet);
-    (swapManager as any).connection = {
+    const swapManager = new SwapManager(wallet);
+    const stubConnection = {
       getBalance: async () => MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
-    };
+    } as any;
+    (wallet as any).withRpcFallback = async (
+      _operation: string,
+      fn: (connection: any) => Promise<any>
+    ) => fn(stubConnection);
 
     const user = Keypair.generate();
     const result = await swapManager.performJustInTimeSolSwap({
@@ -50,10 +54,14 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     (wallet as any).sendTransaction = async () => "sponsored";
     (wallet as any).confirmTransaction = async () => {};
 
-    const swapManager = new SwapManager(connection, wallet);
-    (swapManager as any).connection = {
+    const swapManager = new SwapManager(wallet);
+    const stubConnection = {
       getBalance: async () => 0,
-    };
+    } as any;
+    (wallet as any).withRpcFallback = async (
+      _operation: string,
+      fn: (connection: any) => Promise<any>
+    ) => fn(stubConnection);
     (swapManager as any).getBestProvider = async () => "jupiter";
     (swapManager as any).jupiterClient.getQuote = async () => ({
       inAmount: "2000000",
@@ -99,10 +107,14 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     };
     (wallet as any).confirmTransaction = async () => {};
 
-    const swapManager = new SwapManager(connection, wallet);
-    (swapManager as any).connection = {
+    const swapManager = new SwapManager(wallet);
+    const stubConnection = {
       getBalance: async () => 0,
-    };
+    } as any;
+    (wallet as any).withRpcFallback = async (
+      _operation: string,
+      fn: (connection: any) => Promise<any>
+    ) => fn(stubConnection);
     (swapManager as any).getBestProvider = async () => "pump-fun";
     (swapManager as any).pumpFunClient.getQuote = async () => ({
       outputAmount: "4000000",
@@ -149,10 +161,14 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     };
     (wallet as any).confirmTransaction = async () => {};
 
-    const swapManager = new SwapManager(connection, wallet);
-    (swapManager as any).connection = {
+    const swapManager = new SwapManager(wallet);
+    const stubConnection = {
       getBalance: async () => 0,
-    };
+    } as any;
+    (wallet as any).withRpcFallback = async (
+      _operation: string,
+      fn: (connection: any) => Promise<any>
+    ) => fn(stubConnection);
     (swapManager as any).getBestProvider = async () => "jupiter";
     (swapManager as any).jupiterClient.getQuote = async () => ({
       inputMint: "TokenMint",

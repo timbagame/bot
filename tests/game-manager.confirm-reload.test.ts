@@ -8,12 +8,26 @@ function resetGM() { // reset singleton
   GameManager["instance"] = undefined;
 }
 
+function makeWalletStub(overrides: Record<string, any> = {}) {
+  const connectionStub: any = {};
+  return {
+    getConnection: () => connectionStub,
+    withRpcFallback: async (
+      _operation: string,
+      fn: (connection: any) => any
+    ) => await fn(connectionStub),
+    ...overrides,
+  } as any;
+}
+
 describe("GameManager confirm/reload helpers", () => {
   test("confirmTransactionWithRecovery handles timeout and verifies success", async () => {
     resetGM();
-    const wallet = {
-      confirmTransaction: async (_: string) => { throw new Error("transaction was not confirmed"); },
-    } as any;
+    const wallet = makeWalletStub({
+      confirmTransaction: async (_: string) => {
+        throw new Error("transaction was not confirmed");
+      },
+    });
     const program = {
       account: { game: { fetchNullable: async () => ({}) } },
       provider: {},
@@ -26,14 +40,14 @@ describe("GameManager confirm/reload helpers", () => {
 
   test("confirmTransactionWithRecovery preserves timeout message when recovery fails", async () => {
     resetGM();
-    const wallet = {
+    const wallet = makeWalletStub({
       confirmTransaction: async () => {
         const err = new Error(
           "transaction confirmation timeout: RPC node did not respond"
         );
         return Promise.reject(err);
       },
-    } as any;
+    });
     const program = {
       account: { game: { fetchNullable: async () => null } },
       provider: {},
@@ -63,7 +77,11 @@ describe("GameManager confirm/reload helpers", () => {
 
   test("confirmTransactionWithRecovery rethrows non-timeout errors", async () => {
     resetGM();
-    const wallet = { confirmTransaction: async () => { throw new Error("boom"); } } as any;
+    const wallet = makeWalletStub({
+      confirmTransaction: async () => {
+        throw new Error("boom");
+      },
+    });
     const gm = GameManager.getInstance({} as any, wallet, { getGameParticipants: () => [] } as any);
     await expect((gm as any).confirmTransactionWithRecovery("SIG", new PublicKey("BPFLoader1111111111111111111111111111111111"), "Game creation")).rejects.toThrow(/boom/);
   });

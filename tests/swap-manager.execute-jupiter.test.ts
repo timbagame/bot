@@ -14,7 +14,7 @@ describe("SwapManager.executeJupiterSwap", () => {
       "test walk nut penalty hip pave soap entry language right filter choice",
       { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
     );
-    const sm = new SwapManager(connection, wallet);
+    const sm = new SwapManager(wallet);
 
     // Avoid network and account creation
     (sm as any).createTokenAccountsIfNeeded = async () => [];

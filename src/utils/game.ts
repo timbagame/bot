@@ -1,9 +1,4 @@
-import {
-  PublicKey,
-  Keypair,
-  Connection,
-  SystemProgram,
-} from "@solana/web3.js";
+import { PublicKey, Keypair, SystemProgram } from "@solana/web3.js";
 import {
   getAssociatedTokenAddress,
   ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -141,7 +136,6 @@ const categorizeGame = (
 export class GameManager {
   private static instance: GameManager;
   private activeGameMessages = new Map<string, GameMessage>();
-  private cachedConnection?: Connection;
   private tokenProgramCache = new Map<string, PublicKey>();
 
   private constructor(
@@ -159,16 +153,18 @@ export class GameManager {
   ): GameManager {
     if (!GameManager.instance) {
       const oracleClient = OracleClient.getInstance(wallet);
-      const maybeGetConnection = (wallet as any).getConnection;
-      const connection =
-        typeof maybeGetConnection === "function"
-          ? maybeGetConnection.call(wallet)
-          : (wallet as any).connection ??
-            new Connection(
-              process.env.SOLANA_NETWORK || "https://api.mainnet-beta.solana.com",
-              "confirmed"
-            );
-      const swapManager = new SwapManager(connection, wallet);
+      const walletAny = wallet as any;
+      if (typeof walletAny.getConnection !== "function") {
+        const fallbackConnection = walletAny.connection ?? ({} as any);
+        walletAny.getConnection = () => fallbackConnection;
+      }
+      if (typeof walletAny.withRpcFallback !== "function") {
+        walletAny.withRpcFallback = async (
+          _operation: string,
+          fn: (connection: any) => any
+        ) => await fn(walletAny.getConnection());
+      }
+      const swapManager = new SwapManager(wallet);
       GameManager.instance = new GameManager(
         program,
         wallet,
@@ -176,42 +172,8 @@ export class GameManager {
         oracleClient,
         swapManager
       );
-      GameManager.instance.cachedConnection = connection;
     }
     return GameManager.instance;
-  }
-
-  private getConnection(): Connection {
-    if (this.cachedConnection) {
-      return this.cachedConnection;
-    }
-
-    const providerConnection = (this.program.provider as any)?.connection as
-      | Connection
-      | undefined;
-    if (providerConnection) {
-      this.cachedConnection = providerConnection;
-      return providerConnection;
-    }
-
-    const maybeGetConnection = (this.wallet as any).getConnection;
-    if (typeof maybeGetConnection === "function") {
-      const resolved = maybeGetConnection.call(this.wallet);
-      if (resolved) {
-        this.cachedConnection = resolved as Connection;
-        return this.cachedConnection;
-      }
-    }
-
-    const fallback = (this.wallet as any).connection as
-      | Connection
-      | undefined;
-    if (fallback) {
-      this.cachedConnection = fallback;
-      return fallback;
-    }
-
-    throw new Error("Unable to resolve Solana connection");
   }
 
   private getOraclePda(): PublicKey {
@@ -233,7 +195,10 @@ export class GameManager {
       return cached;
     }
 
-    const accountInfo = await this.getConnection().getAccountInfo(tokenMint);
+    const accountInfo = await this.wallet.withRpcFallback(
+      "game-manager:get-account-info",
+      (connection) => connection.getAccountInfo(tokenMint)
+    );
     if (!accountInfo) {
       throw new Error(`Token mint ${cacheKey} not found`);
     }

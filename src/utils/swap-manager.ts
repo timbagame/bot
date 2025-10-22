@@ -66,17 +66,27 @@ export interface JustInTimeSwapResult {
 export class SwapManager {
   private jupiterClient: JupiterClient;
   public pumpFunClient: PumpFunClient;
-  private connection: Connection;
   private wallet: WalletManager;
   private network: SolanaNetwork;
 
-  constructor(connection: Connection, wallet: WalletManager) {
-    this.connection = connection;
+  constructor(wallet: WalletManager) {
     this.wallet = wallet;
+
+    const walletAny = this.wallet as any;
+    if (typeof walletAny.getConnection !== "function") {
+      walletAny.getConnection = () => ({} as Connection);
+    }
+    if (typeof walletAny.withRpcFallback !== "function") {
+      walletAny.withRpcFallback = async (
+        _operation: string,
+        fn: (connection: Connection) => any
+      ) => await fn(walletAny.getConnection());
+    }
+
     this.network = NetworkDetector.getCurrentNetwork();
 
     this.jupiterClient = new JupiterClient();
-    this.pumpFunClient = new PumpFunClient(connection);
+    this.pumpFunClient = new PumpFunClient(this.wallet.getConnection());
   }
 
   private isSolMint(mint: string): boolean {
@@ -386,8 +396,9 @@ export class SwapManager {
     let lastJupiterError: string | null = null;
 
     try {
-      const currentLamports = await this.connection.getBalance(
-        userKeypair.publicKey
+      const currentLamports = await this.wallet.withRpcFallback(
+        "swap-manager:get-balance",
+        (connection) => connection.getBalance(userKeypair.publicKey)
       );
       const targetLamports = Math.max(
         desiredLamports,
@@ -975,42 +986,38 @@ export class SwapManager {
     userKeypair: Keypair
   ): Promise<string> {
     try {
-      // Decode the base64 transaction
-      const transactionBuffer = Buffer.from(base64Transaction, "base64");
+      return await this.wallet.withRpcFallback(
+        "swap-manager:execute-jupiter",
+        async (connection) => {
+          const transactionBuffer = Buffer.from(base64Transaction, "base64");
+          const versionedTx = VersionedTransaction.deserialize(transactionBuffer);
 
-      // Deserialize as VersionedTransaction
-      const versionedTx = VersionedTransaction.deserialize(transactionBuffer);
+          const { blockhash } = await connection.getLatestBlockhash();
+          versionedTx.message.recentBlockhash = blockhash;
 
-      // Get fresh blockhash
-      const { blockhash } = await this.connection.getLatestBlockhash();
+          versionedTx.sign([userKeypair]);
 
-      // Update the recent blockhash
-      versionedTx.message.recentBlockhash = blockhash;
+          const signature = await connection.sendTransaction(versionedTx, {
+            maxRetries: 3,
+            preflightCommitment: "confirmed",
+          });
 
-      // Sign the transaction
-      versionedTx.sign([userKeypair]);
+          console.log(`Jupiter swap transaction sent: ${signature}`);
 
-      // Send the transaction
-      const signature = await this.connection.sendTransaction(versionedTx, {
-        maxRetries: 3,
-        preflightCommitment: "confirmed",
-      });
+          const confirmation = await connection.confirmTransaction(
+            signature,
+            "confirmed"
+          );
 
-      console.log(`Jupiter swap transaction sent: ${signature}`);
+          if (confirmation.value.err) {
+            throw new Error(
+              `Transaction failed: ${JSON.stringify(confirmation.value.err)}`
+            );
+          }
 
-      // Wait for confirmation
-      const confirmation = await this.connection.confirmTransaction(
-        signature,
-        "confirmed"
+          return signature;
+        }
       );
-
-      if (confirmation.value.err) {
-        throw new Error(
-          `Transaction failed: ${JSON.stringify(confirmation.value.err)}`
-        );
-      }
-
-      return signature;
     } catch (error: any) {
       console.error("Error executing Jupiter transaction:", error);
       throw new Error(

@@ -11,7 +11,7 @@ describe("SwapManager jupiter guard", () => {
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
-    const sm = new SwapManager(connection, wallet);
+    const sm = new SwapManager(wallet);
     // Avoid network access inside setup routine
     (sm as any).createTokenAccountsIfNeeded = async () => [];
     const user = Keypair.generate();
@@ -44,7 +44,7 @@ describe("SwapManager jupiter guard", () => {
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
-    const sm = new SwapManager(connection, wallet);
+    const sm = new SwapManager(wallet);
     (sm as any).getBestProvider = async () => "pump-fun";
     const res = await sm.canSwap("USDC", "BONK");
     expect(res.canSwap).toBe(false);

@@ -50,7 +50,7 @@ describe("SwapManager token account setup", () => {
       return result;
     }) as WalletManager["ensureAssociatedTokenAccount"];
 
-    const sm = new SwapManager(conn, wm);
+    const sm = new SwapManager(wm);
 
     // Stub pump fun path to avoid network
     (sm.pumpFunClient as any).createSwapTransaction = async () => [] as TransactionInstruction[];

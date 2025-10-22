@@ -43,6 +43,8 @@ function makeWallet(overrides: Record<string, any>) {
   const wallet: any = {
     connection,
     getConnection: () => connection,
+    withRpcFallback: async (_operation: string, fn: (conn: any) => any) =>
+      await fn(connection),
     getKeyPair: (_: bigint) => Keypair.generate(),
     formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toString(),
     ...rest,
@@ -51,6 +53,10 @@ function makeWallet(overrides: Record<string, any>) {
   wallet.connection = connection;
   if (!wallet.getConnection) {
     wallet.getConnection = () => connection;
+  }
+  if (!wallet.withRpcFallback) {
+    wallet.withRpcFallback = async (_operation: string, fn: (conn: any) => any) =>
+      await fn(connection);
   }
 
   return wallet;

@@ -10,7 +10,14 @@ function resetGM() {
 test("getActiveGameStats returns fallback when fetch fails", async () => {
   resetGM();
   const program = { account: { game: { fetch: async () => { throw new Error("boom"); } } } } as any;
-  const gm = GameManager.getInstance(program, {} as any, {} as any);
+  const walletStub = {
+    getConnection: () => ({} as any),
+    withRpcFallback: async (
+      _operation: string,
+      fn: (connection: any) => any
+    ) => await fn({}),
+  } as any;
+  const gm = GameManager.getInstance(program, walletStub, {} as any);
   const s = await (gm as any).getActiveGameStats(new PublicKey("BPFLoader1111111111111111111111111111111111"), 1_000_000_000);
   expect(s.currentTickets).toBe(0);
   expect(s.totalPot).toBe(1_000_000_000);
