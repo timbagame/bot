@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { GameManager } from "../src/utils/game";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, Keypair } from "@solana/web3.js";
 
 function resetGM() { // reset singleton
   // @ts-ignore
@@ -50,6 +50,45 @@ describe("GameManager confirm/reload helpers", () => {
     const wallet = { confirmTransaction: async () => { throw new Error("boom"); } } as any;
     const gm = GameManager.getInstance({} as any, wallet, { getGameParticipants: () => [] } as any);
     await expect((gm as any).confirmTransactionWithRecovery("SIG", new PublicKey("BPFLoader1111111111111111111111111111111111"), "Game creation")).rejects.toThrow(/boom/);
+  });
+
+  test("isPlayerInGame falls back to on-chain participant hashes", async () => {
+    resetGM();
+
+    const player = Keypair.generate();
+    const gamePda = new PublicKey("BPFLoader3111111111111111111111111111111111");
+
+    const gameAccount: any = { participantHashes: [] };
+    const program = {
+      account: {
+        game: {
+          fetchNullable: async () => gameAccount,
+        },
+      },
+      provider: {},
+    } as any;
+
+    const gm = GameManager.getInstance(
+      program,
+      {} as any,
+      {
+        getGameParticipants: () => [],
+        getPlayerTelegramId: () => null,
+      } as any
+    );
+
+    const participantHash = (gm as any).computeParticipantHash(
+      gamePda,
+      player.publicKey
+    );
+    gameAccount.participantHashes = [
+      {
+        toString: () => participantHash,
+      },
+    ];
+
+    const inGame = await (gm as any).isPlayerInGame(gamePda, player.publicKey);
+    expect(inGame).toBe(true);
   });
 
   test("reloadGameMessages seeds active map from DB", async () => {

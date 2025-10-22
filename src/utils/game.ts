@@ -368,10 +368,61 @@ export class GameManager {
     gamePda: PublicKey,
     playerPubkey: PublicKey
   ): Promise<boolean> {
+    const gameAddress = gamePda.toBase58();
+    const playerPubkeyStr = playerPubkey.toBase58();
+
     try {
-      const participants = this.gameDb.getGameParticipants(gamePda.toBase58());
-      return participants.includes(playerPubkey.toBase58());
+      const playerTelegramId = this.gameDb.getPlayerTelegramId?.(
+        playerPubkeyStr
+      );
+
+      if (playerTelegramId) {
+        const participants = this.gameDb.getGameParticipants(gameAddress);
+        if (participants.includes(playerTelegramId)) {
+          return true;
+        }
+      }
     } catch (error) {
+      console.warn(
+        `⚠️ Failed to check local participant records for ${gameAddress}:`,
+        error
+      );
+    }
+
+    try {
+      const accountInterface = this.program.account.game as any;
+      const fetchNullable = accountInterface?.fetchNullable?.bind(
+        accountInterface
+      );
+
+      const gameAccount = fetchNullable
+        ? await fetchNullable(gamePda)
+        : await accountInterface.fetch(gamePda);
+
+      if (!gameAccount) {
+        return false;
+      }
+
+      const rawHashes = (gameAccount as any)?.participantHashes;
+      if (!Array.isArray(rawHashes) || rawHashes.length === 0) {
+        return false;
+      }
+
+      const playerHash = this.computeParticipantHash(gamePda, playerPubkey);
+
+      return rawHashes.some((value: any) => {
+        try {
+          const normalized = value?.toString?.();
+          return normalized === playerHash;
+        } catch {
+          return false;
+        }
+      });
+    } catch (error) {
+      console.warn(
+        `⚠️ Failed to verify on-chain participants for ${gameAddress}:`,
+        error
+      );
       return false;
     }
   }
@@ -1973,7 +2024,8 @@ export class GameManager {
     try {
       const gameAccount = await this.program.account.game.fetch(gamePda);
 
-      let joinTx: string;
+      let joinTx: string | undefined;
+      let joinConfirmed = false;
       if (gameAccount.isPrivate) {
         console.log(`🔐 Game is private, using authorized join...`);
         const result = await this.joinPrivateGame(
@@ -1987,7 +2039,8 @@ export class GameManager {
             error: result.error || "Failed to join private game",
           };
         }
-        joinTx = result.tx!;
+        joinTx = result.tx;
+        joinConfirmed = true;
       } else {
         console.log(`🌐 Game is public, using regular join...`);
         const joinAccounts = await this.buildJoinAccounts(
@@ -2003,15 +2056,14 @@ export class GameManager {
           [joinInstruction],
           [playerKp]
         );
-      }
 
-      // Confirm join with timeout recovery
-      const joinConfirmed = await this.confirmTransactionWithRecovery(
-        joinTx,
-        gamePda,
-        "Player join",
-        playerKp.publicKey
-      );
+        joinConfirmed = await this.confirmTransactionWithRecovery(
+          joinTx,
+          gamePda,
+          "Player join",
+          playerKp.publicKey
+        );
+      }
 
       if (joinConfirmed) {
         this.gameDb.saveGameParticipant(
@@ -2519,7 +2571,11 @@ export class GameManager {
     gamePda: PublicKey,
     playerKp: Keypair,
     chatId: number
-  ): Promise<{ success: boolean; tx?: string; error?: string }> {
+  ): Promise<{
+    success: boolean;
+    tx?: string;
+    error?: string;
+  }> {
     try {
       const authResult = await this.oracleClient.authorizePlayer(
         gamePda,
@@ -2560,7 +2616,21 @@ export class GameManager {
         [joinInstruction],
         [playerKp, adminKp]
       );
-      await this.wallet.confirmTransaction(tx);
+
+      const joinConfirmed = await this.confirmTransactionWithRecovery(
+        tx,
+        gamePda,
+        "Player join",
+        playerKp.publicKey
+      );
+
+      if (!joinConfirmed) {
+        return {
+          success: false,
+          error: "Join transaction could not be confirmed",
+        };
+      }
+
       return { success: true, tx };
     } catch (error: any) {
       console.error(`Error joining private game:`, error);
