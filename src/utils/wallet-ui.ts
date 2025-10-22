@@ -1,6 +1,6 @@
 import { InlineKeyboard, type Context } from "grammy";
 import { escapeHtml, formatUsdValue } from "./format-amount";
-import { LAMPORTS_PER_SOL } from "./constants";
+import { INPUT_TIMEOUT_HINT, LAMPORTS_PER_SOL } from "./constants";
 import { respondWithMenu } from "./menu-response";
 import { setUserState } from "./user-state";
 
@@ -227,7 +227,7 @@ export const showCustomAmountPrompt = async <State extends Record<string, unknow
   cancelCallback,
   state,
   cancelLabel = "❌ Cancel",
-  footerLines = ["⏱️ <i>This will timeout in 5 minutes</i>"],
+  footerLines = [INPUT_TIMEOUT_HINT],
   examplesHeading = "<b>Examples:</b>",
 }: CustomAmountPromptOptions<State>): Promise<void> => {
   const lines: string[] = [title];
