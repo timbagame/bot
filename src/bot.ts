@@ -474,6 +474,17 @@ type SwapQuoteWithDecimals = SwapQuote & {
   outputDecimals?: number;
 };
 
+type TradeSlippageConfig = {
+  callbackPrefix: string;
+  defaultOptions: number[];
+  allowCustom?: boolean;
+};
+
+type TradeSlippageKeyboardConfig = TradeSlippageConfig & {
+  kind: Extract<TradeKind, "buy" | "sell">;
+  txId: string;
+};
+
 type TokenInfoCacheEntry = {
   token_mint: string;
   decimals: number;
@@ -494,6 +505,7 @@ interface TokenSelectionCacheEntry {
 }
 
 interface SellTransactionCacheEntry {
+  kind: "sell";
   fromToken: string;
   toToken: string;
   amount: string;
@@ -506,6 +518,7 @@ interface SellTransactionCacheEntry {
 }
 
 interface BuyTransactionCacheEntry {
+  kind: "buy";
   fromToken: string;
   toToken: string;
   amount: string;
@@ -525,6 +538,22 @@ type TransactionCacheEntry =
   | SellTransactionCacheEntry
   | BuyTransactionCacheEntry;
 
+type TradeTransactionCacheEntry =
+  | SellTransactionCacheEntry
+  | BuyTransactionCacheEntry;
+
+type TradeCacheEntryFactoryResult = {
+  entry: TradeTransactionCacheEntry;
+  storePending?: boolean;
+};
+
+type TradeCacheEntryFactory = (params: {
+  txId: string;
+  quote: SwapQuoteWithDecimals;
+  context: PreparedTradeQuoteContext;
+  telegramId: bigint;
+}) => TradeCacheEntryFactoryResult;
+
 const isTokenSelectionCacheEntry = (
   entry: TransactionCacheEntry | undefined
 ): entry is TokenSelectionCacheEntry =>
@@ -533,17 +562,36 @@ const isTokenSelectionCacheEntry = (
 const isSellTransactionCacheEntry = (
   entry: TransactionCacheEntry | undefined
 ): entry is SellTransactionCacheEntry =>
-  Boolean(entry && "fromTokenInfo" in entry && "toTokenInfo" in entry);
+  Boolean(
+    entry &&
+      "kind" in entry &&
+      entry.kind === "sell" &&
+      "fromTokenInfo" in entry &&
+      "toTokenInfo" in entry
+  );
 
 const isBuyTransactionCacheEntry = (
   entry: TransactionCacheEntry | undefined
 ): entry is BuyTransactionCacheEntry =>
   Boolean(
     entry &&
+      "kind" in entry &&
+      entry.kind === "buy" &&
       "fromToken" in entry &&
       "toToken" in entry &&
       "quote" in entry &&
       !("fromTokenInfo" in entry)
+  );
+
+const isTradeTransactionCacheEntry = (
+  entry: TransactionCacheEntry | undefined
+): entry is TradeTransactionCacheEntry =>
+  Boolean(
+    entry &&
+      "fromToken" in entry &&
+      "toToken" in entry &&
+      "quote" in entry &&
+      "kind" in entry
   );
 
 type QuickAmountButton = {
@@ -720,6 +768,95 @@ const formatTradeConfirmationSummary = ({
 };
 
 type TradeConfirmationSummary = ReturnType<typeof formatTradeConfirmationSummary>;
+
+const DEFAULT_TRADE_SLIPPAGE_CONFIG: TradeSlippageConfig = {
+  callbackPrefix: "trade_slip",
+  defaultOptions: [0.5, 1, 2, 3, 5],
+  allowCustom: true,
+};
+
+const TRADE_SLIPPAGE_RANGE = { min: 0.1, max: 10 } as const;
+
+const TRADE_CONFIRMATION_CONFIG: Record<
+  Extract<TradeKind, "buy" | "sell">,
+  {
+    confirmLabel: string;
+    confirmCallback: (txId: string) => string;
+    cancelLabel: string;
+    cancelCallback: string;
+  }
+> = {
+  buy: {
+    confirmLabel: "✅ Confirm Buy",
+    confirmCallback: (txId: string) => `confirm_buy_${txId}`,
+    cancelLabel: "← Back to Buy",
+    cancelCallback: "cmd_buy",
+  },
+  sell: {
+    confirmLabel: "✅ Confirm Sell",
+    confirmCallback: (txId: string) => `confirm_sell_${txId}`,
+    cancelLabel: "❌ Cancel",
+    cancelCallback: "cmd_sell",
+  },
+};
+
+type TradeConfirmationKeyboardParams = {
+  confirmLabel: string;
+  confirmCallback: string;
+  cancelLabel: string;
+  cancelCallback: string;
+  slippageConfig?: TradeSlippageKeyboardConfig;
+};
+
+const buildTradeConfirmationKeyboard = ({
+  confirmLabel,
+  confirmCallback,
+  cancelLabel,
+  cancelCallback,
+  slippageConfig,
+}: TradeConfirmationKeyboardParams) => {
+  const keyboard = createTradeConfirmKeyboard({
+    confirmLabel,
+    confirmCallback,
+    cancelLabel,
+    cancelCallback,
+  });
+
+  if (slippageConfig) {
+    keyboard.row().text("⚙️ Slippage", "noop");
+
+    slippageConfig.defaultOptions.forEach((value, index) => {
+      if (index % 3 === 0) {
+        keyboard.row();
+      }
+
+      const label = Number.isInteger(value)
+        ? `${value.toFixed(0)}%`
+        : `${value.toFixed(1)}%`;
+
+      const callbackValue = value.toString();
+      keyboard.text(
+        label,
+        `${slippageConfig.callbackPrefix}_${slippageConfig.kind}_${slippageConfig.txId}_${callbackValue}`
+      );
+    });
+
+    if (slippageConfig.allowCustom) {
+      if (slippageConfig.defaultOptions.length % 3 === 0) {
+        keyboard.row();
+      }
+
+      keyboard.text(
+        "✏️",
+        `${slippageConfig.callbackPrefix}_${slippageConfig.kind}_${slippageConfig.txId}_custom`
+      );
+    }
+
+    keyboard.row();
+  }
+
+  return keyboard;
+};
 
 type TradeQuoteErrorKind = "swap" | TradeKind;
 
@@ -2998,21 +3135,43 @@ const swapDataCache = createExpiringCache<SwapDataCacheEntry>(
   TRANSACTION_CACHE_TTL_MS
 );
 
-const getBuyTransactionCacheEntry = (
+const getTradeTransactionCacheEntry = (
   txId: string
-): { entry: BuyTransactionCacheEntry; source: "cache" | "pending" } | undefined => {
+): { entry: TradeTransactionCacheEntry; source: "cache" | "pending" } | undefined => {
   const cachedEntry = transactionCache.get(txId);
-  if (isBuyTransactionCacheEntry(cachedEntry)) {
+  if (isTradeTransactionCacheEntry(cachedEntry)) {
     return { entry: cachedEntry, source: "cache" };
   }
 
-  const pendingEntry = getPendingTransaction<BuyTransactionCacheEntry>(
+  const pendingEntry = getPendingTransaction<TradeTransactionCacheEntry>(
     txId,
     false
   );
 
-  if (pendingEntry) {
+  if (pendingEntry && isTradeTransactionCacheEntry(pendingEntry)) {
     return { entry: pendingEntry, source: "pending" };
+  }
+
+  return undefined;
+};
+
+const getBuyTransactionCacheEntry = (
+  txId: string
+): { entry: BuyTransactionCacheEntry; source: "cache" | "pending" } | undefined => {
+  const result = getTradeTransactionCacheEntry(txId);
+  if (result?.entry.kind === "buy" && isBuyTransactionCacheEntry(result.entry)) {
+    return { entry: result.entry, source: result.source };
+  }
+
+  return undefined;
+};
+
+const getSellTransactionCacheEntry = (
+  txId: string
+): { entry: SellTransactionCacheEntry; source: "cache" | "pending" } | undefined => {
+  const result = getTradeTransactionCacheEntry(txId);
+  if (result?.entry.kind === "sell" && isSellTransactionCacheEntry(result.entry)) {
+    return { entry: result.entry, source: result.source };
   }
 
   return undefined;
@@ -6527,6 +6686,138 @@ bot.callbackQuery(SELL_NOOP_CALLBACK, async (ctx) => {
   await ctx.answerCallbackQuery("No tokens available to sell");
 });
 
+bot.on("callback_query", async (ctx, next) => {
+  const callbackData = ctx.callbackQuery?.data;
+  if (!callbackData?.startsWith("trade_slip_")) {
+    return await next();
+  }
+
+  const parts = callbackData.replace("trade_slip_", "").split("_");
+  if (parts.length < 3) {
+    return await next();
+  }
+
+  const [kind, ...restParts] = parts;
+  const tradeKind = kind === "buy" || kind === "sell" ? kind : undefined;
+
+  if (!tradeKind || restParts.length < 2) {
+    return await ctx.answerCallbackQuery("❌ Invalid slippage request");
+  }
+
+  const slippageValue = restParts.pop();
+  const txId = restParts.join("_");
+
+  if (!txId || !slippageValue) {
+    return await ctx.answerCallbackQuery("❌ Invalid slippage request");
+  }
+
+  console.log(
+    `⚙️ ${tradeKind.toUpperCase()} slippage change: ${slippageValue} for txId: ${txId}`
+  );
+
+  try {
+    const tradeResult = getTradeTransactionCacheEntry(txId);
+    const tradeData = tradeResult?.entry;
+
+    if (!tradeData || tradeData.kind !== tradeKind) {
+      await ctx.answerCallbackQuery("❌ Transaction expired. Please try again.");
+      return;
+    }
+
+    if (slippageValue === "custom") {
+      const userId = ctx.from?.id?.toString();
+      if (!userId) return;
+
+      const currentSlippage = Number.isFinite(tradeData.quote.slippage)
+        ? (tradeData.quote.slippage as number)
+        : 1.0;
+
+      const response = [
+        `⚙️ <b>CUSTOM SLIPPAGE</b>`,
+        "",
+        `<b>Current:</b> ${currentSlippage.toFixed(1)}%`,
+        "",
+        `Please send a message with your desired slippage percentage.`,
+        "",
+        `<b>Examples:</b>`,
+        `• <code>0.5</code> (0.5% slippage)`,
+        `• <code>1.5</code> (1.5% slippage)`,
+        `• <code>3</code> (3% slippage)`,
+        "",
+        `<b>Range:</b> ${TRADE_SLIPPAGE_RANGE.min}% - ${TRADE_SLIPPAGE_RANGE.max}%`,
+        INPUT_TIMEOUT_HINT,
+      ];
+
+      await respondWithMenu(ctx, {
+        text: response.join("\n"),
+        parseMode: "HTML",
+        keyboard: new InlineKeyboard()
+          .text("❌ Cancel", `trade_slip_back_${tradeKind}_${txId}`)
+          .row(),
+      });
+
+      setUserState(userId, {
+        type: "trade_custom_slippage",
+        txId,
+        tradeKind,
+        messageId: ctx.callbackQuery?.message?.message_id,
+        chatId: ctx.chat?.id,
+      });
+
+      await ctx.answerCallbackQuery("Send custom slippage as message");
+      return;
+    }
+
+    const newSlippage = parseFloat(slippageValue);
+    if (
+      Number.isNaN(newSlippage) ||
+      newSlippage < TRADE_SLIPPAGE_RANGE.min ||
+      newSlippage > TRADE_SLIPPAGE_RANGE.max
+    ) {
+      await ctx.answerCallbackQuery("❌ Invalid slippage value");
+      return;
+    }
+
+    await regenerateTradeQuoteWithSlippage(ctx, {
+      txId,
+      tradeKind,
+      slippage: newSlippage,
+    });
+    await ctx.answerCallbackQuery(`✅ Slippage set to ${newSlippage}%`);
+  } catch (error: any) {
+    console.error("Error updating slippage:", error);
+    await ctx.answerCallbackQuery("❌ Error updating slippage");
+  }
+});
+
+bot.on("callback_query", async (ctx, next) => {
+  const callbackData = ctx.callbackQuery?.data;
+  if (!callbackData?.startsWith("trade_slip_back_")) {
+    return await next();
+  }
+
+  const parts = callbackData.replace("trade_slip_back_", "").split("_");
+  if (parts.length < 2) {
+    return await next();
+  }
+
+  const [kind, ...txParts] = parts;
+  const tradeKind = kind === "buy" || kind === "sell" ? kind : undefined;
+  const txId = txParts.join("_");
+
+  if (!tradeKind || !txId) {
+    return await ctx.answerCallbackQuery("❌ Invalid slippage request");
+  }
+
+  try {
+    await regenerateTradeQuoteWithSlippage(ctx, { txId, tradeKind });
+    await ctx.answerCallbackQuery("⚙️ Back to confirmation");
+  } catch (error) {
+    console.error("Error restoring trade confirmation:", error);
+    await ctx.answerCallbackQuery("❌ Error loading confirmation");
+  }
+});
+
 // Handle SELL token selection
 bot.on("callback_query", async (ctx, next) => {
   const callbackData = ctx.callbackQuery?.data;
@@ -6601,7 +6892,12 @@ bot.on("callback_query", async (ctx, next) => {
     }
 
     // Handle predefined amounts or percentages
-    await showSellQuoteAndConfirmation(ctx, tokenToSell, amount, telegramId);
+    await runSellTradeQuote({
+      ctx,
+      tokenToSell,
+      amount,
+      telegramId,
+    });
   } catch (error: any) {
     console.error("Error in sell_amount:", error);
 
@@ -6630,14 +6926,13 @@ bot.on("callback_query", async (ctx, next) => {
   }
 
   const txId = callbackData.replace("confirm_sell_", "");
-  const sellEntry = transactionCache.get(txId);
+  const sellResult = getSellTransactionCacheEntry(txId);
+  const sellData = sellResult?.entry;
 
-  if (!isSellTransactionCacheEntry(sellEntry)) {
+  if (!sellData) {
     await ctx.answerCallbackQuery("❌ Transaction expired. Please try again.");
     return;
   }
-
-  const sellData = sellEntry;
 
   console.log(
     `✅ SELL confirmation for: ${sellData.amount} ${sellData.fromToken} → ${sellData.toToken}`
@@ -6668,11 +6963,16 @@ bot.on("callback_query", async (ctx, next) => {
 
     // Use the existing global swapManager instance
 
+    const slippagePercent = Number.isFinite(sellData.quote.slippage)
+      ? (sellData.quote.slippage as number)
+      : 2;
+    const slippageBps = Math.max(0, Math.round(slippagePercent * 100));
+
     const quote = await swapManager.getQuote({
       inputMint: sellData.fromTokenInfo.token_mint,
       outputMint: sellData.toTokenInfo.token_mint,
       amount: sellData.rawAmount, // Use raw amount - swapManager will convert for pump.fun if needed
-      slippageBps: 200, // Use same 2% slippage as successful BUY/SWAP
+      slippageBps,
       userKeypair: userKeypair,
       inputDecimals: sellData.fromTokenInfo.decimals || 6,
       outputDecimals: 9, // SOL decimals
@@ -6694,7 +6994,7 @@ bot.on("callback_query", async (ctx, next) => {
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
           amount: quote.inputAmount, // Use quote amount like successful BUY/SWAP
-          slippageBps: Math.floor(2.0 * 100), // Use same 2% slippage as successful BUY/SWAP
+          slippageBps,
           userKeypair: userKeypair,
           inputDecimals: sellData.fromTokenInfo.decimals,
           outputDecimals: 9,
@@ -6710,7 +7010,7 @@ bot.on("callback_query", async (ctx, next) => {
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
           amount: quote.inputAmount, // Use quote amount like successful BUY/SWAP
-          slippageBps: Math.floor(2.0 * 100), // Use same 2% slippage as successful BUY/SWAP
+          slippageBps,
           userKeypair: userKeypair,
           inputDecimals: sellData.fromTokenInfo.decimals,
           outputDecimals: 9,
@@ -6964,13 +7264,13 @@ bot.on("callback_query", async (ctx, next) => {
     }
 
     // Handle predefined amounts or percentages
-    await showBuyQuoteAndConfirmation(
+    await runBuyTradeQuote({
       ctx,
       paymentToken,
       targetToken,
       amount,
-      contractAddress
-    );
+      contractAddress,
+    });
   } catch (error: any) {
     console.error("Error in buy_amount:", error);
 
@@ -7326,118 +7626,6 @@ bot.on("callback_query", async (ctx, next) => {
   }
 });
 
-// Handle BUY slippage selection
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("buy_slip_")) {
-    return await next();
-  }
-
-  const parts = callbackData.replace("buy_slip_", "").split("_");
-  if (parts.length < 2) return await next();
-
-  const txId = parts[0];
-  const slippageValue = parts[1];
-
-  if (!txId || !slippageValue) {
-    return await ctx.answerCallbackQuery("❌ Invalid slippage request");
-  }
-
-  console.log(`⚙️ BUY slippage change: ${slippageValue}% for txId: ${txId}`);
-
-  try {
-    const buyResult = getBuyTransactionCacheEntry(txId);
-    const buyData = buyResult?.entry;
-    if (!buyData) {
-      await ctx.answerCallbackQuery(
-        "❌ Transaction expired. Please try again."
-      );
-      return;
-    }
-
-    if (slippageValue === "custom") {
-      // Handle custom slippage input
-      const userId = ctx.from?.id?.toString();
-      if (!userId) return;
-
-      const response = [
-        `⚙️ <b>CUSTOM SLIPPAGE</b>`,
-        "",
-        `<b>Current:</b> ${buyData.quote.slippage || 1.0}%`,
-        "",
-        `Please send a message with your desired slippage percentage.`,
-        "",
-        `<b>Examples:</b>`,
-        `• <code>0.5</code> (0.5% slippage)`,
-        `• <code>1.5</code> (1.5% slippage)`,
-        `• <code>3</code> (3% slippage)`,
-        "",
-        `<b>Range:</b> 0.1% - 10%`,
-        INPUT_TIMEOUT_HINT,
-      ];
-
-      await respondWithMenu(ctx, {
-        text: response.join("\n"),
-        parseMode: "HTML",
-        keyboard: new InlineKeyboard()
-          .text("❌ Cancel", `buy_slip_back_${txId}`)
-          .row(),
-      });
-
-      setUserState(userId, {
-        type: "buy_custom_slippage",
-        txId: txId,
-        messageId: ctx.callbackQuery?.message?.message_id,
-        chatId: ctx.chat?.id,
-      });
-
-      await ctx.answerCallbackQuery("Send custom slippage as message");
-      return;
-    }
-
-    // Update slippage for predefined values
-    const newSlippage = parseFloat(slippageValue);
-    if (isNaN(newSlippage) || newSlippage < 0.1 || newSlippage > 10) {
-      await ctx.answerCallbackQuery("❌ Invalid slippage value");
-      return;
-    }
-
-    // Update the cached buy data with new slippage
-    buyData.quote.slippage = newSlippage;
-    transactionCache.setWithTTL(txId, buyData);
-    if (buyResult?.source === "pending") {
-      storePendingTransaction(txId, buyData);
-    }
-
-    // Regenerate quote with new slippage
-    await regenerateBuyQuoteWithSlippage(ctx, txId, newSlippage);
-    await ctx.answerCallbackQuery(`✅ Slippage set to ${newSlippage}%`);
-  } catch (error: any) {
-    console.error("Error in slippage change:", error);
-    await ctx.answerCallbackQuery("❌ Error updating slippage");
-  }
-});
-
-// Handle BUY slippage back button
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("buy_slip_back_")) {
-    return await next();
-  }
-
-  const txId = callbackData.replace("buy_slip_back_", "");
-
-  try {
-    // Regenerate the original buy confirmation screen
-    await regenerateBuyQuoteWithSlippage(ctx, txId);
-    await ctx.answerCallbackQuery("⚙️ Back to confirmation");
-  } catch (error) {
-    console.error("Error going back from slippage:", error);
-    await ctx.answerCallbackQuery("❌ Error loading confirmation");
-  }
-});
-
-// ================================
 // SWAP INTERFACE HANDLERS
 // ================================
 
@@ -7842,8 +8030,219 @@ const showSwapQuoteAndConfirmation = async (
 };
 
 // ================================
+// TRADE HELPER FUNCTIONS
+// ================================
+
+type ShowTradeQuoteParams = {
+  ctx: Context;
+  kind: Extract<TradeKind, "buy" | "sell">;
+  amount: string;
+  inputFactory: PrepareTokenTradeQuoteParams["inputFactory"];
+  outputFactory: PrepareTokenTradeQuoteParams["outputFactory"];
+  spinnerText: PrepareTokenTradeQuoteParams["spinnerText"];
+  summaryExtras?: PrepareTokenTradeQuoteParams["summaryExtras"];
+  cacheEntryFactory: TradeCacheEntryFactory;
+  retryCallback: string;
+  confirmationBuilder: (txId: string) => {
+    confirmLabel: string;
+    confirmCallback: string;
+    cancelLabel: string;
+    cancelCallback: string;
+  };
+  slippageConfig?: TradeSlippageConfig;
+  quoteErrorMessage?: string;
+  quoteOptions?: PrepareTokenTradeQuoteParams["quoteOptions"];
+  telegramId?: bigint;
+  onError?: (error: unknown) => Promise<void> | void;
+};
+
+const showTradeQuoteAndConfirmation = async ({
+  ctx,
+  kind,
+  amount,
+  inputFactory,
+  outputFactory,
+  spinnerText,
+  summaryExtras,
+  cacheEntryFactory,
+  retryCallback,
+  confirmationBuilder,
+  slippageConfig,
+  quoteErrorMessage,
+  quoteOptions,
+  telegramId: telegramIdOverride,
+  onError,
+}: ShowTradeQuoteParams) => {
+  const telegramId = telegramIdOverride ?? getTelegramId(ctx);
+
+  const handleError = async (error: unknown) => {
+    if (onError) {
+      await onError(error);
+      return;
+    }
+
+    const { text, keyboard } = renderTradeQuoteError(kind, {
+      error,
+      retryCallback,
+    });
+    await respondWithMenu(ctx, { text, keyboard });
+  };
+
+  try {
+    await prepareTokenTradeQuoteRunner({
+      ctx,
+      telegramId,
+      amountInput: amount,
+      kind,
+      inputFactory,
+      outputFactory,
+      spinnerText,
+      summaryExtras,
+      cacheQuote: (txId, quote, context) => {
+        const quoteWithDecimals: SwapQuoteWithDecimals = {
+          ...quote,
+          inputDecimals: context.input.decimals,
+          outputDecimals: context.output.decimals,
+        };
+
+        const result = cacheEntryFactory({
+          txId,
+          quote: quoteWithDecimals,
+          context,
+          telegramId,
+        });
+
+        transactionCache.setWithTTL(txId, result.entry);
+        if (result.storePending) {
+          storePendingTransaction(txId, result.entry);
+        }
+      },
+      buildConfirmationKeyboard: (txId) => {
+        const confirmation = confirmationBuilder(txId);
+
+        return buildTradeConfirmationKeyboard({
+          ...confirmation,
+          slippageConfig: slippageConfig
+            ? { ...slippageConfig, kind, txId }
+            : undefined,
+        });
+      },
+      onError: handleError,
+      quoteOptions,
+      quoteErrorMessage,
+    });
+  } catch (error) {
+    await handleError(error);
+  }
+};
+
+// ================================
 // BUY HELPER FUNCTIONS
 // ================================
+
+const runBuyTradeQuote = async ({
+  ctx,
+  paymentToken,
+  targetToken,
+  amount,
+  contractAddress,
+  telegramIdOverride,
+}: {
+  ctx: any;
+  paymentToken: string;
+  targetToken: string;
+  amount: string;
+  contractAddress?: string;
+  telegramIdOverride?: bigint;
+}) =>
+  showTradeQuoteAndConfirmation({
+    ctx,
+    kind: "buy",
+    amount,
+    telegramId: telegramIdOverride,
+    inputFactory: async ({ tokenBalances }) => {
+      const inputMint = tokenManager.resolveMintForTicker(paymentToken);
+      if (!inputMint) {
+        throw new Error(`Unsupported payment token: ${paymentToken}`);
+      }
+
+      const balanceEntry =
+        paymentToken === "SOL"
+          ? undefined
+          : tokenBalances.find((t) => t.ticker === paymentToken);
+      const decimals =
+        paymentToken === "SOL"
+          ? 9
+          : balanceEntry?.decimals ??
+            (await wallet.getTokenMetadata(inputMint)).decimals;
+
+      return {
+        ticker: paymentToken,
+        mint: inputMint,
+        decimals,
+        tokenBalance: balanceEntry
+          ? { balance: balanceEntry.balance, decimals: balanceEntry.decimals }
+          : undefined,
+      };
+    },
+    outputFactory: async () => {
+      const resolvedMint =
+        contractAddress || tokenManager.resolveMintForTicker(targetToken);
+      if (!resolvedMint) {
+        throw new Error(`Token not found: ${targetToken}`);
+      }
+
+      const decimals = contractAddress
+        ? (await wallet.getTokenMetadata(resolvedMint)).decimals
+        : 9;
+
+      return {
+        ticker: targetToken,
+        mint: resolvedMint,
+        decimals,
+      };
+    },
+    spinnerText: ({ displayAmount }) =>
+      `🔄 <b>GETTING QUOTE</b>\n\nBuy ${targetToken} with ${displayAmount} ${paymentToken}\n\n<i>Detecting best provider...</i>`,
+    summaryExtras: (context) => ({
+      contractAddress: contractAddress ?? context.output.mint,
+    }),
+    cacheEntryFactory: ({ quote, context, telegramId }) => {
+      const entry: BuyTransactionCacheEntry = {
+        kind: "buy",
+        type: "swap",
+        fromToken: paymentToken,
+        toToken: targetToken,
+        amount: context.displayAmount,
+        rawAmount: context.rawAmount.toString(),
+        userId: telegramId.toString(),
+        quote,
+        contractAddress: contractAddress ?? context.output.mint,
+        inputDecimals: context.input.decimals,
+        outputDecimals: context.output.decimals,
+      };
+
+      return { entry, storePending: true };
+    },
+    retryCallback: "cmd_buy",
+    confirmationBuilder: (txId) => ({
+      confirmLabel: TRADE_CONFIRMATION_CONFIG.buy.confirmLabel,
+      confirmCallback: TRADE_CONFIRMATION_CONFIG.buy.confirmCallback(txId),
+      cancelLabel: TRADE_CONFIRMATION_CONFIG.buy.cancelLabel,
+      cancelCallback: TRADE_CONFIRMATION_CONFIG.buy.cancelCallback,
+    }),
+    slippageConfig: DEFAULT_TRADE_SLIPPAGE_CONFIG,
+    quoteErrorMessage: `Cannot get quote for buying ${targetToken}`,
+    onError: async (error) => {
+      const { text, keyboard } = renderTradeQuoteError("buy", {
+        error,
+        retryCallback: "cmd_buy",
+        fromToken: paymentToken,
+        toToken: targetToken,
+      });
+      await respondWithMenu(ctx, { text, keyboard });
+    },
+  });
 
 /**
  * Show buy amount selection interface
@@ -8085,131 +8484,6 @@ const handleBuyTokenLookup = async ({
   }
 };
 
-/**
- * Show buy quote and confirmation with auto-detection
- */
-const showBuyQuoteAndConfirmation = async (
-  ctx: any,
-  paymentToken: string,
-  targetToken: string,
-  amount: string,
-  contractAddress?: string,
-  telegramIdOverride?: bigint
-) => {
-  const telegramId = telegramIdOverride ?? getTelegramId(ctx);
-
-  try {
-    await prepareTokenTradeQuoteRunner({
-      ctx,
-      telegramId,
-      amountInput: amount,
-      kind: "buy",
-      inputFactory: async ({ tokenBalances }) => {
-        const inputMint = tokenManager.resolveMintForTicker(paymentToken);
-        if (!inputMint) {
-          throw new Error(`Unsupported payment token: ${paymentToken}`);
-        }
-
-        const balanceEntry =
-          paymentToken === "SOL"
-            ? undefined
-            : tokenBalances.find((t) => t.ticker === paymentToken);
-        const decimals =
-          paymentToken === "SOL"
-            ? 9
-            : balanceEntry?.decimals ??
-              (await wallet.getTokenMetadata(inputMint)).decimals;
-
-        return {
-          ticker: paymentToken,
-          mint: inputMint,
-          decimals,
-          tokenBalance: balanceEntry
-            ? { balance: balanceEntry.balance, decimals: balanceEntry.decimals }
-            : undefined,
-        };
-      },
-      outputFactory: async () => {
-        const resolvedMint =
-          contractAddress || tokenManager.resolveMintForTicker(targetToken);
-        if (!resolvedMint) {
-          throw new Error(`Token not found: ${targetToken}`);
-        }
-
-        const decimals = contractAddress
-          ? (await wallet.getTokenMetadata(resolvedMint)).decimals
-          : 9;
-
-        return {
-          ticker: targetToken,
-          mint: resolvedMint,
-          decimals,
-        };
-      },
-      spinnerText: ({ displayAmount }) =>
-        `🔄 <b>GETTING QUOTE</b>\n\nBuy ${targetToken} with ${displayAmount} ${paymentToken}\n\n<i>Detecting best provider...</i>`,
-      summaryExtras: (context) => ({
-        contractAddress: contractAddress ?? context.output.mint,
-      }),
-      cacheQuote: (txId, quote, context) => {
-        const entry: BuyTransactionCacheEntry = {
-          type: "swap",
-          fromToken: paymentToken,
-          toToken: targetToken,
-          amount: context.displayAmount,
-          rawAmount: context.rawAmount.toString(),
-          userId: telegramId.toString(),
-          quote,
-          contractAddress: contractAddress ?? context.output.mint,
-          inputDecimals: context.input.decimals,
-          outputDecimals: context.output.decimals,
-        };
-
-        transactionCache.setWithTTL(txId, entry);
-        storePendingTransaction(txId, entry);
-      },
-      buildConfirmationKeyboard: (txId) =>
-        createTradeConfirmKeyboard({
-          confirmLabel: "✅ Confirm Buy",
-          confirmCallback: `confirm_buy_${txId}`,
-          cancelLabel: "← Back to Buy",
-          cancelCallback: "cmd_buy",
-        })
-          .row()
-          .text("⚙️ Slippage", `buy_slippage_${txId}`)
-          .row()
-          .text("0.5%", `buy_slip_${txId}_0.5`)
-          .text("1%", `buy_slip_${txId}_1.0`)
-          .text("2%", `buy_slip_${txId}_2.0`)
-          .row()
-          .text("3%", `buy_slip_${txId}_3.0`)
-          .text("5%", `buy_slip_${txId}_5.0`)
-          .text("✏️", `buy_slip_${txId}_custom`)
-          .row(),
-      onError: async (error) => {
-        const { text, keyboard } = renderTradeQuoteError("buy", {
-          error,
-          retryCallback: "cmd_buy",
-          fromToken: paymentToken,
-          toToken: targetToken,
-        });
-        await respondWithMenu(ctx, { text, keyboard });
-      },
-      quoteErrorMessage: `Cannot get quote for buying ${targetToken}`,
-    });
-  } catch (error) {
-    console.error("Error getting buy quote:", error);
-    const { text, keyboard } = renderTradeQuoteError("buy", {
-      error,
-      retryCallback: "cmd_buy",
-      fromToken: paymentToken,
-      toToken: targetToken,
-    });
-    await respondWithMenu(ctx, { text, keyboard });
-  }
-};
-
-export const __test_showBuyQuoteAndConfirmation = showBuyQuoteAndConfirmation;
 
 // ================================
 // ERROR HANDLING & BOT STARTUP
@@ -8306,8 +8580,8 @@ bot.on("message:text", async (ctx, next) => {
       await handleBuyCustomAmountInput(ctx, userState, userMessage);
     } else if (userState.type === "sell_custom_amount") {
       await handleSellCustomAmountInput(ctx, userState, userMessage);
-    } else if (userState.type === "buy_custom_slippage") {
-      await handleBuyCustomSlippageInput(ctx, userState, userMessage);
+    } else if (userState.type === "trade_custom_slippage") {
+      await handleTradeCustomSlippageInput(ctx, userState, userMessage);
     }
 
     // Clear state after successful processing
@@ -8753,14 +9027,14 @@ const handleBuyCustomAmountInput = async (
       userState.chatId ?? ctx.chat?.id
     );
 
-    await showBuyQuoteAndConfirmation(
-      walletCtx,
+    await runBuyTradeQuote({
+      ctx: walletCtx,
       paymentToken,
       targetToken,
-      normalized.normalizedAmount,
+      amount: normalized.normalizedAmount,
       contractAddress,
-      telegramId
-    );
+      telegramIdOverride: telegramId,
+    });
   } catch (error: any) {
     console.error("Error processing custom buy amount:", error);
 
@@ -8843,12 +9117,12 @@ const handleSellCustomAmountInput = async (
       userState.chatId ?? ctx.chat?.id
     );
 
-    await showSellQuoteAndConfirmation(
-      walletCtx,
+    await runSellTradeQuote({
+      ctx: walletCtx,
       tokenToSell,
-      normalized.normalizedAmount,
-      telegramId
-    );
+      amount: normalized.normalizedAmount,
+      telegramId,
+    });
   } catch (error: any) {
     console.error("Error processing custom sell amount:", error);
 
@@ -8893,6 +9167,293 @@ const handleSellCustomAmountInput = async (
 // SELL HELPER FUNCTIONS
 // ================================
 
+const runSellTradeQuote = async ({
+  ctx,
+  tokenToSell,
+  amount,
+  telegramId,
+}: {
+  ctx: any;
+  tokenToSell: string;
+  amount: string;
+  telegramId: bigint;
+}) =>
+  showTradeQuoteAndConfirmation({
+    ctx,
+    kind: "sell",
+    amount,
+    telegramId,
+    inputFactory: async ({ tokenBalances }) => {
+      const tokenBalance = tokenBalances.find((t) => t.ticker === tokenToSell);
+
+      if (!tokenBalance) {
+        throw new Error(`Token ${tokenToSell} not found in wallet`);
+      }
+
+      const approvedTokens = tokenManager.getAllApprovedTokensWithMetadata();
+      let tokenInfo:
+        | { token_mint: string; decimals?: number; token_ticker?: string }
+        | undefined = approvedTokens.find(
+        (t) => t.token_ticker === tokenToSell && t.token_mint === tokenBalance.mint
+      );
+
+      if (!tokenInfo) {
+        tokenInfo = approvedTokens.find((t) => t.token_ticker === tokenToSell);
+      }
+
+      if (!tokenInfo) {
+        tokenInfo = {
+          token_mint: tokenBalance.mint,
+          token_ticker: tokenBalance.ticker,
+          decimals: tokenBalance.decimals,
+        };
+        console.log(
+          `🔍 Using dynamic token info for ${tokenToSell}: mint=${tokenBalance.mint}, decimals=${tokenBalance.decimals}`
+        );
+      } else {
+        console.log(
+          `🔍 Using approved token info for ${tokenToSell}: mint=${tokenInfo.token_mint}, decimals=${tokenInfo.decimals}`
+        );
+      }
+
+      if (!tokenInfo) {
+        throw new Error(`Unable to resolve metadata for ${tokenToSell}`);
+      }
+
+      const sellDecimals = tokenInfo.decimals ?? tokenBalance.decimals;
+      const balanceRaw = Math.floor(tokenBalance.balance);
+
+      return {
+        ticker: tokenToSell,
+        mint: tokenInfo.token_mint ?? tokenBalance.mint,
+        decimals: sellDecimals,
+        tokenBalance: { balance: balanceRaw, decimals: sellDecimals },
+        applySolFeeBuffer: false,
+        metadata: { tokenInfo, balanceRaw },
+      };
+    },
+    outputFactory: async () => ({
+      ticker: "SOL",
+      mint: WSOL_MINT,
+      decimals: 9,
+    }),
+    spinnerText: ({ displayAmount }) =>
+      `🔄 <b>GETTING SELL QUOTE</b>\n\n${displayAmount} ${tokenToSell} → SOL\n\n<i>Finding best price...</i>`,
+    summaryExtras: (context) => ({
+      contractAddress:
+        ((context.input.metadata as { tokenInfo?: { token_mint?: string } })
+          ?.tokenInfo?.token_mint ?? context.input.mint),
+    }),
+    cacheEntryFactory: ({ quote, context }) => {
+      const tokenInfo = (context.input.metadata as {
+        tokenInfo?: { token_mint: string; decimals?: number };
+      })?.tokenInfo;
+
+      const entry: SellTransactionCacheEntry = {
+        kind: "sell",
+        fromToken: tokenToSell,
+        toToken: "SOL",
+        amount: context.displayAmount,
+        rawAmount: context.rawAmount.toString(),
+        fromTokenInfo: {
+          token_mint: tokenInfo?.token_mint ?? context.input.mint,
+          decimals: context.input.decimals,
+        },
+        toTokenInfo: {
+          token_mint: WSOL_MINT,
+          decimals: context.output.decimals,
+        },
+        quote,
+        userKeypair: wallet.getKeyPair(telegramId),
+      };
+
+      return { entry };
+    },
+    retryCallback: "cmd_sell",
+    confirmationBuilder: (txId) => ({
+      confirmLabel: TRADE_CONFIRMATION_CONFIG.sell.confirmLabel,
+      confirmCallback: TRADE_CONFIRMATION_CONFIG.sell.confirmCallback(txId),
+      cancelLabel: TRADE_CONFIRMATION_CONFIG.sell.cancelLabel,
+      cancelCallback: TRADE_CONFIRMATION_CONFIG.sell.cancelCallback,
+    }),
+    slippageConfig: DEFAULT_TRADE_SLIPPAGE_CONFIG,
+    quoteErrorMessage: `Cannot get quote for selling ${tokenToSell}`,
+    onError: async (error) => {
+      const { text, keyboard } = renderTradeQuoteError("sell", {
+        error,
+        retryCallback: "cmd_sell",
+        fromToken: tokenToSell,
+        amountLabel: amount,
+      });
+      await respondWithMenu(ctx, { text, keyboard });
+    },
+    quoteOptions: { slippageBps: 200 },
+  });
+
+const regenerateTradeQuoteWithSlippage = async (
+  ctx: any,
+  {
+    txId,
+    tradeKind,
+    slippage,
+  }: {
+    txId: string;
+    tradeKind: Extract<TradeKind, "buy" | "sell">;
+    slippage?: number;
+  }
+) => {
+  const tradeResult = getTradeTransactionCacheEntry(txId);
+  const tradeData = tradeResult?.entry;
+
+  if (!tradeData || tradeData.kind !== tradeKind) {
+    throw new Error("Transaction expired");
+  }
+
+  if (slippage !== undefined) {
+    tradeData.quote.slippage = slippage;
+    transactionCache.setWithTTL(txId, tradeData);
+    if (tradeResult?.source === "pending") {
+      storePendingTransaction(txId, tradeData);
+    }
+  }
+
+  const confirmation = TRADE_CONFIRMATION_CONFIG[tradeKind];
+
+  const summary =
+    tradeKind === "buy"
+      ? (() => {
+          const buyData = tradeData as BuyTransactionCacheEntry;
+          return formatTradeConfirmationSummary({
+            kind: "buy",
+            payToken: buyData.fromToken,
+            payDisplay: buyData.amount,
+            payRawAmount: Number(buyData.rawAmount ?? 0),
+            payDecimals:
+              buyData.inputDecimals ?? (buyData.fromToken === "SOL" ? 9 : 0),
+            receiveToken: buyData.toToken,
+            receiveDecimals: buyData.outputDecimals ?? 6,
+            quote: buyData.quote,
+            contractAddress: buyData.contractAddress,
+          });
+        })()
+      : (() => {
+          const sellData = tradeData as SellTransactionCacheEntry;
+          return formatTradeConfirmationSummary({
+            kind: "sell",
+            payToken: sellData.fromToken,
+            payDisplay: sellData.amount,
+            payRawAmount: Number(sellData.rawAmount ?? 0),
+            payDecimals: sellData.fromTokenInfo.decimals,
+            receiveToken: sellData.toToken,
+            receiveDecimals: sellData.toTokenInfo.decimals,
+            quote: sellData.quote,
+            contractAddress: sellData.fromTokenInfo.token_mint,
+          });
+        })();
+
+  const keyboard = buildTradeConfirmationKeyboard({
+    confirmLabel: confirmation.confirmLabel,
+    confirmCallback: confirmation.confirmCallback(txId),
+    cancelLabel: confirmation.cancelLabel,
+    cancelCallback: confirmation.cancelCallback,
+    slippageConfig: {
+      ...DEFAULT_TRADE_SLIPPAGE_CONFIG,
+      kind: tradeKind,
+      txId,
+    },
+  });
+
+  await respondWithMenu(ctx, {
+    text: summary.message,
+    keyboard,
+  });
+};
+
+const handleTradeCustomSlippageInput = async (
+  ctx: any,
+  userState: any,
+  slippageInput: string
+) => {
+  const txId: string | undefined = userState.txId;
+  const tradeKind: Extract<TradeKind, "buy" | "sell"> | undefined =
+    userState.tradeKind;
+
+  if (!txId || (tradeKind !== "buy" && tradeKind !== "sell")) {
+    throw new Error("Invalid trade slippage context");
+  }
+
+  console.log(
+    `⚙️ Custom slippage input: ${slippageInput} for ${tradeKind} txId: ${txId}`
+  );
+
+  try {
+    const slippage = parseFloat(slippageInput);
+    if (
+      Number.isNaN(slippage) ||
+      slippage < TRADE_SLIPPAGE_RANGE.min ||
+      slippage > TRADE_SLIPPAGE_RANGE.max
+    ) {
+      throw new Error(
+        `Slippage must be between ${TRADE_SLIPPAGE_RANGE.min}% and ${TRADE_SLIPPAGE_RANGE.max}%`
+      );
+    }
+
+    const walletCtx = createMessageEditAdapter(
+      ctx,
+      userState.messageId,
+      userState.chatId ?? ctx.chat?.id
+    );
+
+    await regenerateTradeQuoteWithSlippage(walletCtx, {
+      txId,
+      tradeKind,
+      slippage,
+    });
+  } catch (error: any) {
+    console.error("Error processing custom slippage:", error);
+
+    const errorMessage = [
+      "❌ <b>Invalid Slippage</b>",
+      "",
+      `<b>Input:</b> ${slippageInput}`,
+      "",
+      `<b>Error:</b> ${(error as Error).message}`,
+      "",
+      "Please enter a valid slippage percentage:",
+      "",
+      `<b>Examples:</b>`,
+      `• <code>0.5</code> (0.5% slippage)`,
+      `• <code>1</code> (1% slippage)`,
+      `• <code>2.5</code> (2.5% slippage)`,
+      "",
+      `<b>Range:</b> ${TRADE_SLIPPAGE_RANGE.min}% - ${TRADE_SLIPPAGE_RANGE.max}%`,
+      INPUT_TIMEOUT_HINT,
+    ];
+
+    await ctx.api.editMessageText(
+      ctx.chat.id,
+      userState.messageId,
+      errorMessage.join("\n"),
+      {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard()
+          .text(
+            "❌ Cancel",
+            `trade_slip_back_${tradeKind}_${txId}`
+          )
+          .row(),
+      }
+    );
+
+    setUserState(ctx.from.id.toString(), {
+      type: "trade_custom_slippage",
+      txId,
+      tradeKind,
+      messageId: userState.messageId,
+    });
+  }
+};
+
 /**
  * Show sell amount selection for a specific token
  */
@@ -8932,310 +9493,6 @@ const showSellAmountSelection = async (ctx: any, tokenToSell: string) => {
   });
 };
 
-/**
- * Show sell quote and confirmation
- */
-const showSellQuoteAndConfirmation = async (
-  ctx: any,
-  tokenToSell: string,
-  amount: string,
-  telegramId: bigint
-) => {
-  try {
-    try {
-      await prepareTokenTradeQuoteRunner({
-        ctx,
-        telegramId,
-        amountInput: amount,
-        kind: "sell",
-        inputFactory: async ({ tokenBalances }) => {
-        const tokenBalance = tokenBalances.find(
-          (t) => t.ticker === tokenToSell
-        );
-
-        if (!tokenBalance) {
-          throw new Error(`Token ${tokenToSell} not found in wallet`);
-        }
-
-        const approvedTokens = tokenManager.getAllApprovedTokensWithMetadata();
-        let tokenInfo: { token_mint: string; decimals?: number; token_ticker?: string } | undefined =
-          approvedTokens.find(
-            (t) =>
-              t.token_ticker === tokenToSell &&
-              t.token_mint === tokenBalance.mint
-          );
-
-        if (!tokenInfo) {
-          tokenInfo = approvedTokens.find(
-            (t) => t.token_ticker === tokenToSell
-          );
-        }
-
-        if (!tokenInfo) {
-          tokenInfo = {
-            token_mint: tokenBalance.mint,
-            token_ticker: tokenBalance.ticker,
-            decimals: tokenBalance.decimals,
-          };
-          console.log(
-            `🔍 Using dynamic token info for ${tokenToSell}: mint=${tokenBalance.mint}, decimals=${tokenBalance.decimals}`
-          );
-        } else {
-          console.log(
-            `🔍 Using approved token info for ${tokenToSell}: mint=${tokenInfo.token_mint}, decimals=${tokenInfo.decimals}`
-          );
-        }
-
-        if (!tokenInfo) {
-          throw new Error(`Unable to resolve metadata for ${tokenToSell}`);
-        }
-
-        const sellDecimals = tokenInfo.decimals ?? tokenBalance.decimals;
-        const balanceRaw = Math.floor(tokenBalance.balance);
-
-        return {
-          ticker: tokenToSell,
-          mint: tokenInfo.token_mint ?? tokenBalance.mint,
-          decimals: sellDecimals,
-          tokenBalance: { balance: balanceRaw, decimals: sellDecimals },
-          applySolFeeBuffer: false,
-          metadata: { tokenInfo, balanceRaw },
-        };
-      },
-      outputFactory: async () => ({
-        ticker: "SOL",
-        mint: WSOL_MINT,
-        decimals: 9,
-      }),
-      spinnerText: ({ displayAmount }) =>
-        `🔄 <b>GETTING SELL QUOTE</b>\n\n${displayAmount} ${tokenToSell} → SOL\n\n<i>Finding best price...</i>`,
-      summaryExtras: (context) => ({
-        contractAddress:
-          ((context.input.metadata as { tokenInfo?: { token_mint?: string } })
-            ?.tokenInfo?.token_mint ?? context.input.mint),
-      }),
-      cacheQuote: (txId, quote, context) => {
-        const tokenInfo = (context.input.metadata as {
-          tokenInfo?: { token_mint: string; decimals?: number };
-        })?.tokenInfo;
-
-        transactionCache.setWithTTL(txId, {
-          fromToken: tokenToSell,
-          toToken: "SOL",
-          amount: context.displayAmount,
-          rawAmount: context.rawAmount.toString(),
-          fromTokenInfo: {
-            token_mint: tokenInfo?.token_mint ?? context.input.mint,
-            decimals: context.input.decimals,
-          },
-          toTokenInfo: { token_mint: WSOL_MINT, decimals: context.output.decimals },
-          quote,
-          userKeypair: wallet.getKeyPair(telegramId),
-        });
-      },
-      buildConfirmationKeyboard: (txId) =>
-        createTradeConfirmKeyboard({
-          confirmLabel: "✅ Confirm Sell",
-          confirmCallback: `confirm_sell_${txId}`,
-          cancelLabel: "❌ Cancel",
-          cancelCallback: "cmd_sell",
-        }),
-      onError: async (error) => {
-        const { text, keyboard } = renderTradeQuoteError("sell", {
-          error,
-          retryCallback: "cmd_sell",
-          fromToken: tokenToSell,
-          amountLabel: amount,
-        });
-        await respondWithMenu(ctx, { text, keyboard });
-      },
-        quoteOptions: { slippageBps: 200 },
-        quoteErrorMessage: `Cannot get quote for selling ${tokenToSell}`,
-      });
-    } catch (innerError) {
-      if (
-        innerError instanceof Error &&
-        innerError.message === "Insufficient token balance"
-      ) {
-        const { tokenBalances } = await getCachedWalletData(telegramId);
-        const balanceEntry = tokenBalances.find(
-          (t) => t.ticker === tokenToSell
-        );
-        if (balanceEntry) {
-          const available = wallet.formatTokenBalance(
-            balanceEntry.balance,
-            balanceEntry.decimals
-          );
-          throw new Error(
-            `Cannot sell ${amount} ${tokenToSell}. You only have ${available} ${tokenToSell}`
-          );
-        }
-      }
-      throw innerError;
-    }
-  } catch (error: any) {
-    console.error("Error getting sell quote:", error);
-
-    const { text, keyboard } = renderTradeQuoteError("sell", {
-      error,
-      retryCallback: "cmd_sell",
-      fromToken: tokenToSell,
-      amountLabel: amount,
-    });
-
-    await respondWithMenu(ctx, { text, keyboard });
-  }
-};
-
-/**
- * Handle BUY custom slippage input
- */
-const handleBuyCustomSlippageInput = async (
-  ctx: any,
-  userState: any,
-  slippageInput: string
-) => {
-  const txId = userState.txId;
-
-  console.log(`⚙️ Custom slippage input: ${slippageInput} for txId: ${txId}`);
-
-  try {
-    const slippage = parseFloat(slippageInput);
-    if (isNaN(slippage) || slippage < 0.1 || slippage > 10) {
-      throw new Error("Slippage must be between 0.1% and 10%");
-    }
-
-    // Update the cached buy data with new slippage
-    const buyResult = getBuyTransactionCacheEntry(txId);
-    const buyData = buyResult?.entry;
-    if (!buyData) {
-      throw new Error("Transaction expired. Please try again.");
-    }
-
-    buyData.quote.slippage = slippage;
-    transactionCache.setWithTTL(txId, buyData);
-    if (buyResult?.source === "pending") {
-      storePendingTransaction(txId, buyData);
-    }
-
-    // Regenerate quote with new slippage
-    const walletCtx = createMessageEditAdapter(
-      ctx,
-      userState.messageId,
-      userState.chatId ?? ctx.chat?.id
-    );
-
-    await regenerateBuyQuoteWithSlippage(walletCtx, txId, slippage);
-  } catch (error: any) {
-    console.error("Error processing custom slippage:", error);
-
-    const errorMessage = [
-      "❌ <b>Invalid Slippage</b>",
-      "",
-      `<b>Input:</b> ${slippageInput}`,
-      "",
-      `<b>Error:</b> ${(error as Error).message}`,
-      "",
-      "Please enter a valid slippage percentage:",
-      "",
-      `<b>Examples:</b>`,
-      `• <code>0.5</code> (0.5% slippage)`,
-      `• <code>1</code> (1% slippage)`,
-      `• <code>2.5</code> (2.5% slippage)`,
-      "",
-      `<b>Range:</b> 0.1% - 10%`,
-      INPUT_TIMEOUT_HINT,
-    ];
-
-    await ctx.api.editMessageText(
-      ctx.chat.id,
-      userState.messageId,
-      errorMessage.join("\n"),
-      {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("❌ Cancel", `buy_slip_back_${txId}`)
-          .row(),
-      }
-    );
-
-    // Keep the same state for retry
-    setUserState(ctx.from.id.toString(), {
-      type: "buy_custom_slippage",
-      txId: txId,
-      messageId: userState.messageId,
-    });
-  }
-};
-
-/**
- * Regenerate buy quote with new slippage
- */
-const regenerateBuyQuoteWithSlippage = async (
-  ctx: any,
-  txId: string,
-  newSlippage?: number
-) => {
-  try {
-    const buyResult = getBuyTransactionCacheEntry(txId);
-    const buyData = buyResult?.entry;
-    if (!buyData) {
-      throw new Error("Transaction expired");
-    }
-
-    const quote = buyData.quote;
-
-    // Update slippage in quote if provided
-    if (newSlippage) {
-      quote.slippage = newSlippage;
-      transactionCache.setWithTTL(txId, buyData);
-      if (buyResult?.source === "pending") {
-        storePendingTransaction(txId, buyData);
-      }
-    }
-
-    const summary = formatTradeConfirmationSummary({
-      kind: "buy",
-      payToken: buyData.fromToken,
-      payDisplay: buyData.amount,
-      payRawAmount: Number(buyData.rawAmount ?? 0),
-      payDecimals: buyData.inputDecimals ?? (buyData.fromToken === "SOL" ? 9 : 0),
-      receiveToken: buyData.toToken,
-      receiveDecimals: buyData.outputDecimals ?? 6,
-      quote,
-      contractAddress: buyData.contractAddress,
-    });
-
-    const keyboard = createTradeConfirmKeyboard({
-      confirmLabel: "✅ Confirm Buy",
-      confirmCallback: `confirm_buy_${txId}`,
-      cancelLabel: "← Back to Buy",
-      cancelCallback: "cmd_buy",
-    })
-      .row()
-      .text("⚙️ Slippage", `buy_slippage_${txId}`)
-      .row()
-      .text("0.5%", `buy_slip_${txId}_0.5`)
-      .text("1%", `buy_slip_${txId}_1.0`)
-      .text("2%", `buy_slip_${txId}_2.0`)
-      .row()
-      .text("3%", `buy_slip_${txId}_3.0`)
-      .text("5%", `buy_slip_${txId}_5.0`)
-      .text("✏️", `buy_slip_${txId}_custom`)
-      .row();
-
-    await respondWithMenu(ctx, {
-      text: summary.message,
-      keyboard,
-    });
-  } catch (error: any) {
-    console.error("Error regenerating buy quote:", error);
-    await respondWithMenu(ctx, {
-      text: `❌ <b>Error</b>\n\n${(error as Error).message}\n\nPlease try again.`,
-      keyboard: new InlineKeyboard().text("← Try Again", "cmd_buy").row(),
-    });
-  }
-};
 
 // Start the bot and setup Anchor (skip during tests)
 if (process.env.NODE_ENV !== "test") {
