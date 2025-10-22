@@ -6965,7 +6965,7 @@ bot.on("callback_query", async (ctx, next) => {
 
     const slippagePercent = Number.isFinite(sellData.quote.slippage)
       ? (sellData.quote.slippage as number)
-      : 2;
+      : 1;
     const slippageBps = Math.max(0, Math.round(slippagePercent * 100));
 
     const quote = await swapManager.getQuote({
@@ -7356,7 +7356,7 @@ bot.on("callback_query", async (ctx, next) => {
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
           amount: quote.inputAmount, // Use quote amount like successful swap does
-          slippageBps: Math.floor(2.0 * 100), // Use same 2% slippage as successful swap
+          slippageBps: 100, // Use same 1% slippage as successful swap
           userKeypair: userKeypair,
           inputDecimals: quote.inputDecimals || 9,
           outputDecimals: quote.outputDecimals || 9,
@@ -7372,7 +7372,7 @@ bot.on("callback_query", async (ctx, next) => {
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
           amount: quote.inputAmount, // Use quote amount like successful swap does
-          slippageBps: Math.floor(2.0 * 100), // Use same 2% slippage as successful swap
+          slippageBps: 100, // Use same 1% slippage as successful swap
           userKeypair: userKeypair,
           inputDecimals: quote.inputDecimals || 9,
           outputDecimals: quote.outputDecimals || 6,
@@ -9287,7 +9287,7 @@ const runSellTradeQuote = async ({
       });
       await respondWithMenu(ctx, { text, keyboard });
     },
-    quoteOptions: { slippageBps: 200 },
+    quoteOptions: { slippageBps: 100 },
   });
 
 const regenerateTradeQuoteWithSlippage = async (
