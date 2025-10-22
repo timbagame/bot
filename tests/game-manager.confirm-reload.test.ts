@@ -1,6 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { GameManager } from "../src/utils/game";
 import { PublicKey, Keypair } from "@solana/web3.js";
+import { formatUserFriendlyError } from "../src/utils/errors";
 
 function resetGM() { // reset singleton
   // @ts-ignore
@@ -23,11 +24,13 @@ describe("GameManager confirm/reload helpers", () => {
     expect(ok).toBe(true);
   });
 
-  test("confirmTransactionWithRecovery throws when game account missing after timeout", async () => {
+  test("confirmTransactionWithRecovery preserves timeout message when recovery fails", async () => {
     resetGM();
     const wallet = {
       confirmTransaction: async () => {
-        const err = new Error("transaction was not confirmed in 30 seconds");
+        const err = new Error(
+          "transaction confirmation timeout: RPC node did not respond"
+        );
         return Promise.reject(err);
       },
     } as any;
@@ -36,13 +39,26 @@ describe("GameManager confirm/reload helpers", () => {
       provider: {},
     } as any;
     const gm = GameManager.getInstance(program, wallet, { getGameParticipants: () => [] } as any);
-    await expect(
-      (gm as any).confirmTransactionWithRecovery(
-        "SIG",
-        new PublicKey("BPFLoader1111111111111111111111111111111111"),
+    const signature = "SIG";
+    const gamePda = new PublicKey("BPFLoader1111111111111111111111111111111111");
+
+    try {
+      await (gm as any).confirmTransactionWithRecovery(
+        signature,
+        gamePda,
         "Game creation"
-      )
-    ).rejects.toThrow(/Game account not found after timeout/);
+      );
+      throw new Error("Expected transaction confirmation to fail");
+    } catch (error: any) {
+      expect(error).toBeInstanceOf(Error);
+      expect(error.message).toContain("transaction confirmation timeout");
+      expect(error.cause).toBeInstanceOf(Error);
+      expect((error.cause as Error).message).toContain(
+        "Game account not found after timeout"
+      );
+      const friendly = formatUserFriendlyError(error);
+      expect(friendly).toContain("Transaction confirmation timed out");
+    }
   });
 
   test("confirmTransactionWithRecovery rethrows non-timeout errors", async () => {
