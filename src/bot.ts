@@ -5789,6 +5789,7 @@ const getWalletCacheKey = (telegramId: bigint | number | string): string =>
  */
 const getCachedWalletData = async (telegramId: bigint) => {
   const cacheKey = getWalletCacheKey(telegramId);
+  const stale = walletDataCache.peek(cacheKey);
   const cached = walletDataCache.get(cacheKey);
 
   if (cached) {
@@ -5827,9 +5828,9 @@ const getCachedWalletData = async (telegramId: bigint) => {
   } catch (error) {
     console.error("Error fetching wallet data:", error);
     // Return cached data if available, even if expired
-    if (cached) {
+    if (stale) {
       console.log("⚠️ Using expired cache due to RPC error");
-      return cached;
+      return stale;
     }
     throw error;
   }
