@@ -172,7 +172,28 @@ type GameSetupSession = {
   contractMinimum?: number;
 };
 
+const defaultGameSetupSession: Pick<GameSetupSession, "waitingFor" | "gameType" | "userBalance"> = {
+  waitingFor: "setup",
+  gameType: "",
+  userBalance: 0,
+};
+
 const userSessions = new Map<number, GameSetupSession>();
+
+const updateGameSetupSession = (
+  userId: number,
+  overrides: Partial<GameSetupSession>
+): GameSetupSession => {
+  const existing = userSessions.get(userId);
+  const next: GameSetupSession = {
+    ...defaultGameSetupSession,
+    ...(existing ?? {}),
+    ...overrides,
+  } as GameSetupSession;
+
+  userSessions.set(userId, next);
+  return next;
+};
 
 // Test-only accessor for verifying session behavior in unit tests
 export const __testSessions = userSessions;
@@ -1195,7 +1216,7 @@ const startInteractiveGameSetup = async (
     reply_to_message_id: ctx.message?.message_id,
   });
 
-  userSessions.set(ctx.from?.id || 0, {
+  updateGameSetupSession(ctx.from?.id || 0, {
     waitingFor: "setup",
     gameType: copy.gameType,
     userBalance,
@@ -4655,7 +4676,7 @@ bot.on("message:text", async (ctx, next) => {
         });
       }
 
-      userSessions.set(ctx.from?.id || 0, {
+      updateGameSetupSession(ctx.from?.id || 0, {
         waitingFor: "setup",
         gameType: userSession.gameType,
         userBalance: userSession.userBalance,
@@ -4767,7 +4788,7 @@ bot.on("message:text", async (ctx, next) => {
       });
     }
 
-    userSessions.set(ctx.from?.id || 0, {
+    updateGameSetupSession(ctx.from?.id || 0, {
       waitingFor: "setup",
       gameType: userSession.gameType,
       userBalance: userSession.userBalance,
