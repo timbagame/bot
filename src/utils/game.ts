@@ -1721,7 +1721,21 @@ export class GameManager {
           console.error(
             `❌ ${operationType} verification failed, transaction ${signature} likely failed`
           );
-          throw checkError;
+          const recoveryError =
+            checkError instanceof Error
+              ? checkError
+              : new Error(String(checkError));
+
+          if (confirmError instanceof Error) {
+            if ((confirmError as any).cause === undefined) {
+              (confirmError as any).cause = recoveryError;
+            }
+            throw confirmError;
+          }
+
+          const wrappedError = new Error(String(confirmError));
+          (wrappedError as any).cause = recoveryError;
+          throw wrappedError;
         }
       }
 
