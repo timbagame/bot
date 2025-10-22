@@ -18,6 +18,17 @@ const createMockContext = (edits: EditCall[], overrides: Record<string, any> = {
   return { ...baseCtx, ...overrides } as any;
 };
 
+const expectSingleEdit = (edits: EditCall[]): EditCall => {
+  expect(edits.length).toBe(1);
+
+  const firstEdit = edits[0];
+  if (!firstEdit) {
+    throw new Error("Expected a single edit call");
+  }
+
+  return firstEdit;
+};
+
 afterEach(() => {
   __test_clearUserState("send-user");
   __test_clearUserState("sell-user");
@@ -62,8 +73,7 @@ test("showCustomAmountPrompt formats send custom amount flow", async () => {
     state: { type: "send_custom_amount", token: "SOL" },
   });
 
-  expect(edits.length).toBe(1);
-  const { text, options } = edits[0];
+  const { text, options } = expectSingleEdit(edits);
   expect(text).toContain("✏️ <b>CUSTOM AMOUNT - SOL</b>");
   expect(text).toContain("Please send a message with the amount you want to send.");
   expect(text).toContain("<b>Examples:</b>");
@@ -103,8 +113,7 @@ test("showCustomAmountPrompt formats sell custom amount flow", async () => {
     state: { type: "sell_custom_amount", tokenToSell: "TIMBA" },
   });
 
-  expect(edits.length).toBe(1);
-  const { text, options } = edits[0];
+  const { text, options } = expectSingleEdit(edits);
   expect(text).toContain("🔴 <b>SELL TIMBA - CUSTOM AMOUNT</b>");
   expect(text).toContain("amount of TIMBA you want to sell.");
   expect(text).toContain("• <code>100</code> (sell 100 TIMBA)");
@@ -152,8 +161,7 @@ test("showCustomAmountPrompt formats buy custom amount flow", async () => {
     },
   });
 
-  expect(edits.length).toBe(1);
-  const { text, options } = edits[0];
+  const { text, options } = expectSingleEdit(edits);
   expect(text).toContain("💰 <b>BUY TIMBA - CUSTOM AMOUNT</b>");
   expect(text).toContain("<b>Paying with:</b> USDC");
   expect(text).toContain("Please send a message with the amount of USDC you want to spend.");

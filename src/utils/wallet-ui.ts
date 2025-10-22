@@ -214,6 +214,9 @@ const appendSection = (target: string[], lines: string[] | undefined) => {
   target.push(...filtered);
 };
 
+type CustomAmountPromptDerivedState<State extends Record<string, unknown>> =
+  State & { messageId?: number; chatId?: number };
+
 export const showCustomAmountPrompt = async <State extends Record<string, unknown>>({
   ctx,
   userId,
@@ -251,7 +254,9 @@ export const showCustomAmountPrompt = async <State extends Record<string, unknow
     keyboard: new InlineKeyboard().text(cancelLabel, cancelCallback).row(),
   });
 
-  const derivedState: Record<string, unknown> = { ...state };
+  const derivedState: CustomAmountPromptDerivedState<State> = {
+    ...state,
+  } as CustomAmountPromptDerivedState<State>;
   const messageId = ctx.callbackQuery?.message?.message_id;
   const chatId = ctx.chat?.id;
 
