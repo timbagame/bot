@@ -74,3 +74,32 @@ export function parseDecimalAmount(
 }
 
 export const __test_decimalAmountPattern = decimalAmountPattern;
+
+export type TradeAmountParseResult =
+  | { kind: "max" }
+  | { kind: "percentage"; percentage: number }
+  | { kind: "absolute"; normalized: string };
+
+export const parseTradeAmountInput = (amount: string): TradeAmountParseResult => {
+  const trimmed = amount.trim();
+
+  if (!trimmed) {
+    throw new Error("Amount cannot be empty");
+  }
+
+  const lower = trimmed.toLowerCase();
+  if (lower === "max") {
+    return { kind: "max" };
+  }
+
+  if (trimmed.includes("%")) {
+    const percentage = Number.parseFloat(trimmed.replace(/%/g, ""));
+    if (!Number.isFinite(percentage) || percentage <= 0 || percentage > 100) {
+      throw new Error("Invalid percentage format");
+    }
+
+    return { kind: "percentage", percentage };
+  }
+
+  return { kind: "absolute", normalized: trimmed };
+};

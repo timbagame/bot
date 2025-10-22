@@ -49,6 +49,8 @@ import {
   buildWalletCaption,
   buildWalletActionMenu,
   showCustomAmountPrompt,
+  type WalletActionQuickActions,
+  type WalletActionMenuBalances,
 } from "./utils/wallet-ui";
 import {
   formatAmount,
@@ -64,6 +66,7 @@ import {
   onWalletSettings,
   onBalance,
   type BalanceDeps,
+  type WalletHandlersDeps,
 } from "./handlers/wallet";
 import { inferMaxPlayers } from "./utils/arg-parsing";
 import type {
@@ -91,7 +94,7 @@ import {
   SELL_NOOP_CALLBACK,
 } from "./utils/trade-ui";
 import { respondWithMenu } from "./utils/menu-response";
-import { parseDecimalAmount } from "./utils/amount";
+import { parseDecimalAmount, parseTradeAmountInput } from "./utils/amount";
 import { handleCoinflipCommand, type CoinflipDeps } from "./handlers/game";
 import { isMessageMissing } from "./utils/telegram-errors";
 
@@ -192,16 +195,13 @@ export const __test_setWalletCache = (
     }>;
     approvedTokens?: any[];
   },
-  ts?: number
+  _ts?: number
 ) => {
   const cacheKey = getWalletCacheKey(telegramId as any);
-  walletDataCache.set(cacheKey, {
-    data: {
-      solBalance: data.solBalance,
-      tokenBalances: data.tokenBalances,
-      approvedTokens: data.approvedTokens ?? [],
-    },
-    timestamp: ts ?? Date.now(),
+  walletDataCache.setWithTTL(cacheKey, {
+    solBalance: data.solBalance,
+    tokenBalances: data.tokenBalances,
+    approvedTokens: data.approvedTokens ?? [],
   });
 };
 
@@ -296,90 +296,112 @@ const resolveSpendAmount = ({
   formatToken,
   applySolFeeBuffer = true,
 }: ResolveSpendAmountParams) => {
-  let rawAmount: number;
-  let displayAmount: string;
-
-  const normalized = amount.trim();
-  const lower = normalized.toLowerCase();
+  const parsed = parseTradeAmountInput(amount);
   const isSolAsset = assetTicker === "SOL";
 
-  if (lower === "max") {
+  const ensureTokenBalance = () => {
+    if (!tokenBalance) {
+      throw new Error(`No ${assetTicker} balance found`);
+    }
+
+    if (tokenBalance.balance <= 0) {
+      throw new Error(`No ${assetTicker} balance found`);
+    }
+
+    return tokenBalance;
+  };
+
+  const resolveSolSpendable = () => {
+    const spendable = applySolFeeBuffer
+      ? clampLamportsForFees(solBalance)
+      : solBalance;
+
+    if (spendable <= 0) {
+      throw new Error("Not enough SOL to cover purchase and fees");
+    }
+
+    return spendable;
+  };
+
+  if (parsed.kind === "max") {
     if (isSolAsset) {
-      const spendableLamports = applySolFeeBuffer
-        ? clampLamportsForFees(solBalance)
-        : solBalance;
-      if (spendableLamports <= 0) {
-        throw new Error("Not enough SOL to cover purchase and fees");
-      }
-
-      rawAmount = spendableLamports;
-      displayAmount = formatSol(spendableLamports);
-    } else {
-      if (!tokenBalance) {
-        throw new Error(`No ${assetTicker} balance found`);
-      }
-
-      rawAmount = Math.floor(tokenBalance.balance);
-      if (rawAmount <= 0) {
-        throw new Error(`No ${assetTicker} balance found`);
-      }
-
-      displayAmount = formatToken(rawAmount, tokenBalance.decimals);
-    }
-  } else if (normalized.includes("%")) {
-    const percentage = parseFloat(normalized.replace("%", ""));
-    if (isNaN(percentage) || percentage <= 0 || percentage > 100) {
-      throw new Error("Invalid percentage format");
+      const spendableLamports = resolveSolSpendable();
+      return {
+        rawAmount: spendableLamports,
+        displayAmount: formatSol(spendableLamports),
+      };
     }
 
-    if (isSolAsset) {
-      const spendableLamports = applySolFeeBuffer
-        ? clampLamportsForFees(solBalance)
-        : solBalance;
-      if (spendableLamports <= 0) {
-        throw new Error("Not enough SOL to cover purchase and fees");
-      }
+    const balance = ensureTokenBalance();
+    const rawAmount = Math.floor(balance.balance);
 
-      rawAmount = Math.floor(spendableLamports * (percentage / 100));
-      if (rawAmount <= 0) {
-        throw new Error("Percentage results in zero amount");
-      }
-      displayAmount = formatSol(rawAmount);
-    } else {
-      if (!tokenBalance) {
-        throw new Error(`No ${assetTicker} balance found`);
-      }
-      rawAmount = Math.floor(tokenBalance.balance * (percentage / 100));
-      if (rawAmount <= 0) {
-        throw new Error("Percentage results in zero amount");
-      }
-      displayAmount = formatToken(rawAmount, tokenBalance.decimals);
+    if (rawAmount <= 0) {
+      throw new Error(`No ${assetTicker} balance found`);
     }
-  } else {
-    rawAmount = toRawAmount(normalized, inputDecimals);
 
-    if (isSolAsset) {
-      const feeBuffer = applySolFeeBuffer ? SOL_FEE_BUFFER_LAMPORTS : 0;
-      if (rawAmount + feeBuffer > solBalance) {
-        throw new Error(
-          applySolFeeBuffer
-            ? "Insufficient SOL balance for this purchase"
-            : "Insufficient SOL balance"
-        );
-      }
-      displayAmount = formatSol(rawAmount);
-    } else {
-      if (!tokenBalance) {
-        throw new Error(`No ${assetTicker} balance found`);
-      }
-      if (rawAmount > tokenBalance.balance) {
-        throw new Error("Insufficient token balance");
-      }
-      displayAmount = formatToken(rawAmount, inputDecimals);
-    }
+    return {
+      rawAmount,
+      displayAmount: formatToken(rawAmount, balance.decimals),
+    };
   }
 
-  return { rawAmount, displayAmount };
+  if (parsed.kind === "percentage") {
+    const percentage = parsed.percentage / 100;
+
+    if (isSolAsset) {
+      const spendableLamports = resolveSolSpendable();
+      const rawAmount = Math.floor(spendableLamports * percentage);
+
+      if (rawAmount <= 0) {
+        throw new Error("Percentage results in zero amount");
+      }
+
+      return {
+        rawAmount,
+        displayAmount: formatSol(rawAmount),
+      };
+    }
+
+    const balance = ensureTokenBalance();
+    const rawAmount = Math.floor(balance.balance * percentage);
+
+    if (rawAmount <= 0) {
+      throw new Error("Percentage results in zero amount");
+    }
+
+    return {
+      rawAmount,
+      displayAmount: formatToken(rawAmount, balance.decimals),
+    };
+  }
+
+  const rawAmount = toRawAmount(parsed.normalized, inputDecimals);
+
+  if (isSolAsset) {
+    const feeBuffer = applySolFeeBuffer ? SOL_FEE_BUFFER_LAMPORTS : 0;
+    if (rawAmount + feeBuffer > solBalance) {
+      throw new Error(
+        applySolFeeBuffer
+          ? "Insufficient SOL balance for this purchase"
+          : "Insufficient SOL balance"
+      );
+    }
+
+    return {
+      rawAmount,
+      displayAmount: formatSol(rawAmount),
+    };
+  }
+
+  const balance = ensureTokenBalance();
+  if (rawAmount > balance.balance) {
+    throw new Error("Insufficient token balance");
+  }
+
+  return {
+    rawAmount,
+    displayAmount: formatToken(rawAmount, inputDecimals),
+  };
 };
 
 type NormalizeCustomTradeAmountOptions = {
@@ -402,24 +424,17 @@ const normalizeCustomTradeAmount = ({
   tokenBalance,
   decimals,
 }: NormalizeCustomTradeAmountOptions): NormalizeCustomTradeAmountResult => {
-  const trimmed = amount.trim();
-  if (!trimmed) {
-    throw new Error("Amount cannot be empty");
-  }
+  const parsed = parseTradeAmountInput(amount);
 
-  const lower = trimmed.toLowerCase();
-  if (lower === "max") {
+  if (parsed.kind === "max") {
     return { normalizedAmount: "max", displayAmount: "max" };
   }
 
-  if (trimmed.includes("%")) {
-    const percentage = Number.parseFloat(trimmed.replace("%", ""));
-    if (!Number.isFinite(percentage) || percentage <= 0 || percentage > 100) {
-      throw new Error("Invalid percentage format");
-    }
+  if (parsed.kind === "percentage") {
+    const fraction = parsed.percentage / 100;
 
     if (assetTicker === "SOL") {
-      const portion = Math.floor(solBalance * (percentage / 100));
+      const portion = Math.floor(solBalance * fraction);
       if (portion <= 0) {
         throw new Error("Percentage results in zero amount");
       }
@@ -434,7 +449,7 @@ const normalizeCustomTradeAmount = ({
       throw new Error(`Token ${assetTicker} not found in wallet`);
     }
 
-    const portion = Math.floor(tokenBalance.balance * (percentage / 100));
+    const portion = Math.floor(tokenBalance.balance * fraction);
     if (portion <= 0) {
       throw new Error("Percentage results in zero amount");
     }
@@ -446,12 +461,12 @@ const normalizeCustomTradeAmount = ({
     return { normalizedAmount: formatted, displayAmount: formatted };
   }
 
-  const numeric = Number.parseFloat(trimmed);
+  const numeric = Number.parseFloat(parsed.normalized);
   if (!Number.isFinite(numeric) || numeric <= 0) {
     throw new Error("Invalid amount format");
   }
 
-  return { normalizedAmount: trimmed, displayAmount: trimmed };
+  return { normalizedAmount: parsed.normalized, displayAmount: parsed.normalized };
 };
 
 type SwapQuoteWithDecimals = SwapQuote & {
@@ -1043,6 +1058,7 @@ export const __test_validateGameTokenData = validateGameTokenData;
 export const __test_resetInitiatedChats = () => initiatedChats.clear();
 export const __test_getInitiatedChats = () => new Set(initiatedChats);
 export const __test_resolveSpendAmount = resolveSpendAmount;
+export const __test_normalizeCustomTradeAmount = normalizeCustomTradeAmount;
 export const __test_formatTradeConfirmationSummary = formatTradeConfirmationSummary;
 
 /**
@@ -2939,11 +2955,7 @@ bot.command(
         slippagePercent,
       };
 
-      setTimeout(() => {
-        swapDataCache.delete(telegramId.toString());
-      }, TRANSACTION_CACHE_TTL_MS);
-
-      swapDataCache.set(telegramId.toString(), swapData);
+      swapDataCache.setWithTTL(telegramId.toString(), swapData);
     } catch (error: any) {
       console.error("Swap error:", error);
       await handleCommandError(ctx, error, "swap");
@@ -2952,11 +2964,24 @@ bot.command(
 );
 
 // Temporary cache for swap data
-const swapDataCache = new Map();
-
 // Transaction cache for buy/sell operations with TTL
 const TRANSACTION_CACHE_TTL_MS = 5 * 60 * 1000;
 const transactionCache = createExpiringCache<TransactionCacheEntry>(
+  TRANSACTION_CACHE_TTL_MS
+);
+
+type SwapDataCacheEntry = {
+  quote: SwapQuoteWithDecimals;
+  fromTokenInfo: TokenInfoCacheEntry;
+  toTokenInfo: TokenInfoCacheEntry;
+  fromToken: string;
+  toToken: string;
+  userKeypair: Keypair;
+  telegramId: bigint;
+  slippagePercent: number;
+};
+
+const swapDataCache = createExpiringCache<SwapDataCacheEntry>(
   TRANSACTION_CACHE_TTL_MS
 );
 
@@ -5115,31 +5140,29 @@ bot.on("message:text", async (ctx, next) => {
 // MAIN MENU CALLBACK HANDLERS
 // ================================
 
-bot.callbackQuery("main_wallet", async (ctx) => {
-  const deps = {
+const createWalletHandlerDeps = (): WalletHandlersDeps =>
+  Object.freeze({
     showWalletUI: (c: any) => showWalletUI(c),
-    clearWalletCache: (id: bigint | string | number) => clearWalletCache(BigInt(id as any)),
+    clearWalletCache: (id: bigint | string | number) => {
+      const normalized =
+        typeof id === "bigint" ? id : BigInt(id as string | number);
+      clearWalletCache(normalized);
+    },
     createSettingsKeyboard: () => createWalletSettingsKeyboard(),
-  };
-  await onMainWallet(ctx as any, deps);
+  });
+
+const walletHandlerDeps = createWalletHandlerDeps();
+
+bot.callbackQuery("main_wallet", async (ctx) => {
+  await onMainWallet(ctx as any, walletHandlerDeps);
 });
 
 bot.callbackQuery("wallet_refresh", async (ctx) => {
-  const deps = {
-    showWalletUI: (c: any) => showWalletUI(c),
-    clearWalletCache: (id: bigint | string | number) => clearWalletCache(BigInt(id as any)),
-    createSettingsKeyboard: () => createWalletSettingsKeyboard(),
-  };
-  await onWalletRefresh(ctx as any, deps);
+  await onWalletRefresh(ctx as any, walletHandlerDeps);
 });
 
 bot.callbackQuery("wallet_settings", async (ctx) => {
-  const deps = {
-    showWalletUI: (c: any) => showWalletUI(c),
-    clearWalletCache: (id: bigint | string | number) => clearWalletCache(BigInt(id as any)),
-    createSettingsKeyboard: () => createWalletSettingsKeyboard(),
-  };
-  await onWalletSettings(ctx as any, deps);
+  await onWalletSettings(ctx as any, walletHandlerDeps);
 });
 
 // ================================
@@ -5148,36 +5171,20 @@ bot.callbackQuery("wallet_settings", async (ctx) => {
 
 bot.callbackQuery("cmd_withdraw", async (ctx) => {
   try {
-    const telegramId = getTelegramId(ctx);
-    const keypair = wallet.getKeyPair(telegramId);
-    const walletAddress = keypair.publicKey.toBase58();
-
-    // Use cached wallet data
-    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-    const menu = buildWalletActionMenu({
+    const { menu } = await buildWalletActionMenuForUser({
+      ctx,
       title: `💸 <b>WITHDRAW</b>`,
-      walletAddress,
       bodyLines: [
         `<b>From:</b> <code>{{WALLET_ADDRESS}}</code>`,
         "",
         `<b>Select token to withdraw:</b>`,
       ],
-      balances: {
-        solBalanceLamports: solBalance,
-        tokenBalances,
-      },
-      formatters: {
-        formatSolBalance: (lamports) => wallet.formatSolBalance(lamports),
-        formatTokenBalance: (balance, decimals) =>
-          wallet.formatTokenBalance(balance, decimals),
-      },
       quickActions: {
         type: "token-select",
         actionPrefix: "send_select_",
         includeSol: true,
         limit: 5,
       },
-      backButton: { label: "← Back to Wallet", callback: "main_wallet" },
     });
 
     await respondWithMenu(ctx, menu);
@@ -5231,29 +5238,18 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
 
 bot.callbackQuery("cmd_wrap", async (ctx) => {
   try {
-    const telegramId = getTelegramId(ctx);
-    const keypair = wallet.getKeyPair(telegramId);
-    const walletAddress = keypair.publicKey.toBase58();
-    const solBalance = await wallet.getBalance(telegramId);
-    const formattedSolBalance = wallet.formatSolBalance(solBalance);
-    const menu = buildWalletActionMenu({
+    const { menu } = await buildWalletActionMenuForUser({
+      ctx,
       title: `🔧 <b>WRAP SOL</b>`,
-      walletAddress,
-      bodyLines: [
-        `<b>SOL Balance:</b> ${escapeHtml(formattedSolBalance)}`,
-        "",
-        `Convert native SOL to WSOL tokens for DeFi operations.`,
-        "",
-        `<b>Quick Wrap Amounts:</b>`,
-      ],
-      balances: {
-        solBalanceLamports: solBalance,
-        tokenBalances: [],
-      },
-      formatters: {
-        formatSolBalance: (lamports) => wallet.formatSolBalance(lamports),
-        formatTokenBalance: (value, decimals) =>
-          wallet.formatTokenBalance(value, decimals),
+      bodyLines: ({ solBalance }) => {
+        const formattedSolBalance = wallet.formatSolBalance(solBalance);
+        return [
+          `<b>SOL Balance:</b> ${escapeHtml(formattedSolBalance)}`,
+          "",
+          `Convert native SOL to WSOL tokens for DeFi operations.`,
+          "",
+          `<b>Quick Wrap Amounts:</b>`,
+        ];
       },
       quickActions: {
         type: "wrap",
@@ -5268,7 +5264,10 @@ bot.callbackQuery("cmd_wrap", async (ctx) => {
         insufficientLabel: "❌ Insufficient SOL balance",
         minimumLamports: 10_000,
       },
-      backButton: { label: "← Back to Wallet", callback: "main_wallet" },
+      getBalances: async (telegramId) => ({
+        solBalance: await wallet.getBalance(telegramId),
+        tokenBalances: [],
+      }),
     });
 
     await respondWithMenu(ctx, menu);
@@ -5717,29 +5716,14 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
 
 bot.callbackQuery("cmd_swap", async (ctx) => {
   try {
-    const telegramId = getTelegramId(ctx);
-    const keypair = wallet.getKeyPair(telegramId);
-    const walletAddress = keypair.publicKey.toBase58();
-
-    // Use cached wallet data
-    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-    const menu = buildWalletActionMenu({
+    const { menu } = await buildWalletActionMenuForUser({
+      ctx,
       title: `💱 <b>SWAP TOKENS</b>`,
-      walletAddress,
       bodyLines: [
         `<b>From Wallet:</b> <code>{{WALLET_ADDRESS}}</code>`,
         "",
         `<b>Select token to swap FROM:</b>`,
       ],
-      balances: {
-        solBalanceLamports: solBalance,
-        tokenBalances,
-      },
-      formatters: {
-        formatSolBalance: (lamports) => wallet.formatSolBalance(lamports),
-        formatTokenBalance: (balance, decimals) =>
-          wallet.formatTokenBalance(balance, decimals),
-      },
       quickActions: {
         type: "token-select",
         actionPrefix: "swap_from_",
@@ -5758,7 +5742,6 @@ bot.callbackQuery("cmd_swap", async (ctx) => {
         },
         emptyLabel: "❌ No tokens available to swap",
       },
-      backButton: { label: "← Back to Wallet", callback: "main_wallet" },
     });
 
     await respondWithMenu(ctx, menu);
@@ -5779,26 +5762,23 @@ const generateTransactionId = (): string => {
 // WALLET DATA CACHE
 // ================================
 
-// Simple in-memory cache for wallet data (expires after 30 seconds)
-const walletDataCache = new Map<
-  string,
-  {
-    data: {
-      solBalance: number;
-      tokenBalances: Array<{
-        mint: string;
-        ticker: string;
-        balance: number;
-        decimals: number;
-        rawBalance: string;
-      }>;
-      approvedTokens: any[];
-    };
-    timestamp: number;
-  }
->();
-
 const WALLET_CACHE_DURATION = 30 * 1000; // 30 seconds
+
+type CachedWalletData = {
+  solBalance: number;
+  tokenBalances: Array<{
+    mint: string;
+    ticker: string;
+    balance: number;
+    decimals: number;
+    rawBalance: string;
+  }>;
+  approvedTokens: any[];
+};
+
+const walletDataCache = createExpiringCache<CachedWalletData>(
+  WALLET_CACHE_DURATION
+);
 
 // Consistent cache key generator
 const getWalletCacheKey = (telegramId: bigint | number | string): string =>
@@ -5809,13 +5789,12 @@ const getWalletCacheKey = (telegramId: bigint | number | string): string =>
  */
 const getCachedWalletData = async (telegramId: bigint) => {
   const cacheKey = getWalletCacheKey(telegramId);
+  const stale = walletDataCache.peek(cacheKey);
   const cached = walletDataCache.get(cacheKey);
-  const now = Date.now();
 
-  // Return cached data if still valid
-  if (cached && now - cached.timestamp < WALLET_CACHE_DURATION) {
+  if (cached) {
     console.log("📦 Using cached wallet data for user:", telegramId.toString());
-    return cached.data;
+    return cached;
   }
 
   console.log("🔄 Fetching fresh wallet data for user:", telegramId.toString());
@@ -5836,25 +5815,22 @@ const getCachedWalletData = async (telegramId: bigint) => {
     solBalance = merged.solLamports;
     tokenBalances = merged.tokenBalances;
 
-    const data = {
+    const data: CachedWalletData = {
       solBalance,
       tokenBalances,
       approvedTokens,
     };
 
     // Cache the data
-    walletDataCache.set(cacheKey, {
-      data,
-      timestamp: now,
-    });
+    walletDataCache.setWithTTL(cacheKey, data);
 
     return data;
   } catch (error) {
     console.error("Error fetching wallet data:", error);
     // Return cached data if available, even if expired
-    if (cached) {
+    if (stale) {
       console.log("⚠️ Using expired cache due to RPC error");
-      return cached.data;
+      return stale;
     }
     throw error;
   }
@@ -5911,6 +5887,84 @@ const getWalletOverview = async (telegramId: bigint): Promise<WalletOverview> =>
   };
 };
 
+type WalletMenuBalances = Pick<CachedWalletData, "solBalance" | "tokenBalances">;
+
+type WalletActionMenuContext = WalletMenuBalances & {
+  walletAddress: string;
+};
+
+type BuildWalletActionMenuForUserOptions = {
+  ctx: any;
+  title: string;
+  bodyLines: string[] | ((context: WalletActionMenuContext) => string[]);
+  quickActions: WalletActionQuickActions;
+  backButton?: { label?: string; callback: string };
+  getBalances?: (telegramId: bigint) => Promise<WalletMenuBalances>;
+  prepareBalances?: (
+    balances: WalletMenuBalances
+  ) => WalletActionMenuBalances;
+};
+
+const buildWalletActionMenuForUser = async ({
+  ctx,
+  title,
+  bodyLines,
+  quickActions,
+  backButton,
+  getBalances,
+  prepareBalances,
+}: BuildWalletActionMenuForUserOptions) => {
+  const telegramId = getTelegramId(ctx);
+  const keypair = wallet.getKeyPair(telegramId);
+  const walletAddress = keypair.publicKey.toBase58();
+
+  const resolveBalances =
+    getBalances ??
+    (async (id: bigint): Promise<WalletMenuBalances> => {
+      const { solBalance, tokenBalances } = await getCachedWalletData(id);
+      return { solBalance, tokenBalances };
+    });
+
+  const { solBalance, tokenBalances } = await resolveBalances(telegramId);
+
+  const context: WalletActionMenuContext = {
+    walletAddress,
+    solBalance,
+    tokenBalances,
+  };
+
+  const resolvedBodyLines =
+    typeof bodyLines === "function" ? bodyLines(context) : bodyLines;
+
+  const balancesForMenu = prepareBalances
+    ? prepareBalances({ solBalance, tokenBalances })
+    : ({
+        solBalanceLamports: solBalance,
+        tokenBalances,
+      } satisfies WalletActionMenuBalances);
+
+  const menu = buildWalletActionMenu({
+    title,
+    walletAddress,
+    bodyLines: resolvedBodyLines,
+    balances: balancesForMenu,
+    formatters: {
+      formatSolBalance: (lamports) => wallet.formatSolBalance(lamports),
+      formatTokenBalance: (balance, decimals) =>
+        wallet.formatTokenBalance(balance, decimals),
+    },
+    quickActions,
+    backButton: backButton ?? { label: "← Back to Wallet", callback: "main_wallet" },
+  });
+
+  return {
+    menu,
+    walletAddress,
+    solBalance,
+    tokenBalances,
+  };
+};
+
 // ================================
 // SEND TOKEN INTERFACE HANDLERS
 // ================================
@@ -5926,44 +5980,29 @@ bot.on("callback_query", async (ctx, next) => {
   console.log("🔔 Token selected for send:", token);
 
   try {
-    const telegramId = getTelegramId(ctx);
-    const keypair = wallet.getKeyPair(telegramId);
-    const walletAddress = keypair.publicKey.toBase58();
-
-    // Use cached wallet data
-    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-
-    // Get balance for selected token
-    let balance = "0";
-
-    if (token === "SOL") {
-      balance = wallet.formatSolBalance(solBalance);
-    } else {
-      const selectedToken = tokenBalances.find((t) => t.ticker === token);
-      if (selectedToken) {
-        balance = wallet.formatTokenBalance(
-          selectedToken.balance,
-          selectedToken.decimals
-        );
-      }
-    }
-    const menu = buildWalletActionMenu({
+    const { menu } = await buildWalletActionMenuForUser({
+      ctx,
       title: `📤 <b>SEND ${escapeHtml(token)}</b>`,
-      walletAddress,
-      bodyLines: [
-        `<b>From:</b> <code>{{WALLET_ADDRESS}}</code>`,
-        `<b>Balance:</b> ${escapeHtml(balance)} ${escapeHtml(token)}`,
-        "",
-        `<b>Quick Send Amounts:</b>`,
-      ],
-      balances: {
-        solBalanceLamports: solBalance,
-        tokenBalances,
-      },
-      formatters: {
-        formatSolBalance: (lamports) => wallet.formatSolBalance(lamports),
-        formatTokenBalance: (value, decimals) =>
-          wallet.formatTokenBalance(value, decimals),
+      bodyLines: ({ solBalance, tokenBalances }) => {
+        let balanceDisplay = "0";
+        if (token === "SOL") {
+          balanceDisplay = wallet.formatSolBalance(solBalance);
+        } else {
+          const selectedToken = tokenBalances.find((t) => t.ticker === token);
+          if (selectedToken) {
+            balanceDisplay = wallet.formatTokenBalance(
+              selectedToken.balance,
+              selectedToken.decimals
+            );
+          }
+        }
+
+        return [
+          `<b>From:</b> <code>{{WALLET_ADDRESS}}</code>`,
+          `<b>Balance:</b> ${escapeHtml(balanceDisplay)} ${escapeHtml(token)}`,
+          "",
+          `<b>Quick Send Amounts:</b>`,
+        ];
       },
       quickActions: {
         type: "prebuilt",

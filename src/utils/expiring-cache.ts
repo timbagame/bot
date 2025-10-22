@@ -1,6 +1,11 @@
 export interface ExpiringCache<TValue> {
   setWithTTL(key: string, value: TValue, ttlMs?: number): void;
   get(key: string): TValue | undefined;
+  /**
+   * Return the most recently cached value without considering TTL expiry.
+   * Useful when a caller wants to fallback to stale data on upstream errors.
+   */
+  peek(key: string): TValue | undefined;
   delete(key: string): boolean;
   has(key: string): boolean;
   clear(): void;
@@ -10,19 +15,25 @@ const NO_TTL = 0;
 
 class ExpiringCacheImpl<TValue> implements ExpiringCache<TValue> {
   private readonly entries = new Map<string, { value: TValue; expiresAt: number }>();
+  private readonly staleEntries = new Map<string, TValue>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(private readonly defaultTtlMs: number) {}
 
   setWithTTL(key: string, value: TValue, ttlMs: number = this.defaultTtlMs): void {
     this.clearTimer(key);
+    this.staleEntries.delete(key);
 
     const ttl = ttlMs > NO_TTL ? ttlMs : this.defaultTtlMs;
     const expiresAt = ttl > NO_TTL ? Date.now() + ttl : Number.POSITIVE_INFINITY;
 
     if (ttl > NO_TTL) {
       const timer = setTimeout(() => {
-        this.entries.delete(key);
+        const entry = this.entries.get(key);
+        if (entry && entry.expiresAt <= Date.now()) {
+          this.entries.delete(key);
+          this.staleEntries.set(key, entry.value);
+        }
         this.timers.delete(key);
       }, ttl);
       this.timers.set(key, timer);
@@ -38,15 +49,24 @@ class ExpiringCacheImpl<TValue> implements ExpiringCache<TValue> {
     }
 
     if (entry.expiresAt <= Date.now()) {
-      this.delete(key);
+      this.entries.delete(key);
+      this.staleEntries.set(key, entry.value);
       return undefined;
     }
 
     return entry.value;
   }
 
+  peek(key: string): TValue | undefined {
+    const entry = this.entries.get(key);
+    if (entry) {
+      return entry.value;
+    }
+    return this.staleEntries.get(key);
+  }
+
   delete(key: string): boolean {
-    const existed = this.entries.delete(key);
+    const existed = this.entries.delete(key) || this.staleEntries.delete(key);
     this.clearTimer(key);
     return existed;
   }
@@ -60,6 +80,7 @@ class ExpiringCacheImpl<TValue> implements ExpiringCache<TValue> {
       this.clearTimer(key);
     }
     this.entries.clear();
+    this.staleEntries.clear();
   }
 
   private clearTimer(key: string): void {

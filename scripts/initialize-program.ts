@@ -1,18 +1,18 @@
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
 import type { Timba } from "../idl/idlType";
-import { WalletManager } from "../src/utils/wallet";
+import type { WalletManager } from "../src/utils/wallet";
 import {
   resolveOracleOperatorKeypair,
   uniqueSigners,
 } from "./utils/keypairs";
-import { createAnchorContext } from "./utils/anchor-context";
-
-// Initialize wallet manager
-const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
+import { loadProgramContext } from "./utils/anchor-context";
 
 // Initialize Oracle if it doesn't exist
-const initializeOracle = async (program: anchor.Program<Timba>) => {
+const initializeOracle = async (
+  program: anchor.Program<Timba>,
+  wallet: WalletManager
+) => {
   try {
     // Get Oracle PDA
     const [oraclePda] = PublicKey.findProgramAddressSync(
@@ -71,14 +71,11 @@ const initializeOracle = async (program: anchor.Program<Timba>) => {
 const initializeProgram = async () => {
   try {
     console.log("Initializing program...");
-    const adminKeypair = wallet.getAdminKeypair();
-    const { program } = createAnchorContext(adminKeypair, {
-      connection: wallet.getConnection(),
-    });
+    const { wallet, program } = loadProgramContext();
     console.log(`Program ID: ${program.programId.toBase58()}`);
 
     // Initialize Oracle
-    const oraclePda = await initializeOracle(program);
+    const oraclePda = await initializeOracle(program, wallet);
     if (!oraclePda) {
       console.log("Failed to initialize Oracle. Aborting.");
       return;
