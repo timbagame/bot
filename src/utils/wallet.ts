@@ -40,11 +40,19 @@ type HttpFetch = (input: string, init?: any) => Promise<{
   json: () => Promise<any>;
 }>;
 
+type ConnectionFactory = (endpoint: string, isFallback: boolean) => Connection;
+
 type WalletDeps = {
   connection?: Connection;
   fetch?: HttpFetch;
   timeNow?: () => number;
+  allowFallback?: boolean;
+  primaryEndpoint?: string;
+  fallbackEndpoint?: string;
+  connectionFactory?: ConnectionFactory;
 };
+
+const DEFAULT_RPC_ENDPOINT = "https://api.mainnet-beta.solana.com";
 
 // ================================
 // UTILITY FUNCTIONS
@@ -82,6 +90,11 @@ export class WalletManager {
   private timeNow?: () => number;
   private adminKeypair: Keypair | null = null;
   private lastCallTime: number = 0;
+  private primaryEndpoint: string;
+  private readonly fallbackEndpoint: string;
+  private usingFallback: boolean = false;
+  private allowFallback: boolean;
+  private readonly connectionFactory: ConnectionFactory;
 
   // Simplified caching
   private keypairCache = new Map<string, Keypair>();
@@ -97,11 +110,145 @@ export class WalletManager {
 
   private constructor(mnemonic: string, deps?: WalletDeps) {
     this.mnemonic = mnemonic;
-    this.connection =
-      deps?.connection ?? new Connection(process.env.SOLANA_NETWORK!, "confirmed");
+    this.fallbackEndpoint = deps?.fallbackEndpoint ?? DEFAULT_RPC_ENDPOINT;
+    this.connectionFactory =
+      deps?.connectionFactory ??
+      ((endpoint) => new Connection(endpoint, "confirmed"));
+    this.allowFallback = deps?.allowFallback ?? !deps?.connection;
+
+    if (deps?.connection) {
+      const injectedEndpoint =
+        deps.primaryEndpoint ??
+        (deps.connection as any)?.rpcEndpoint ??
+        process.env.SOLANA_NETWORK?.trim() ??
+        this.fallbackEndpoint;
+      this.primaryEndpoint = injectedEndpoint;
+      this.connection = this.decorateConnection(
+        deps.connection,
+        injectedEndpoint === this.fallbackEndpoint
+      );
+      this.usingFallback = injectedEndpoint === this.fallbackEndpoint;
+    } else {
+      const configuredEndpoint = deps?.primaryEndpoint ?? process.env.SOLANA_NETWORK?.trim();
+      const endpoint = configuredEndpoint?.length
+        ? configuredEndpoint
+        : this.fallbackEndpoint;
+      this.primaryEndpoint = endpoint;
+      this.connection = this.createManagedConnection(
+        endpoint,
+        endpoint === this.fallbackEndpoint
+      );
+      this.usingFallback = endpoint === this.fallbackEndpoint;
+    }
+
     this.fetchFn = deps?.fetch ?? (globalThis.fetch as any);
     this.timeNow = deps?.timeNow;
     this.loadAdminKeypair();
+  }
+
+  private createManagedConnection(
+    endpoint: string,
+    usingFallback: boolean
+  ): Connection {
+    const connection = this.connectionFactory(endpoint, usingFallback);
+    return this.decorateConnection(connection, usingFallback);
+  }
+
+  private decorateConnection(
+    connection: Connection,
+    usingFallback: boolean
+  ): Connection {
+    if (!this.allowFallback) {
+      return connection;
+    }
+
+    this.patchRpcMethod(connection, "_rpcRequest", usingFallback);
+    this.patchRpcMethod(connection, "_rpcBatchRequest", usingFallback);
+    return connection;
+  }
+
+  private patchRpcMethod(
+    connection: Connection,
+    methodName: "_rpcRequest" | "_rpcBatchRequest",
+    usingFallback: boolean
+  ): void {
+    const original = (connection as any)[methodName]?.bind(connection);
+    if (typeof original !== "function") return;
+
+    (connection as any)[methodName] = async (...args: any[]) => {
+      if (this.usingFallback && !usingFallback) {
+        return (this.connection as any)[methodName](...args);
+      }
+
+      try {
+        return await original(...args);
+      } catch (error) {
+        if (!usingFallback && this.shouldFallback(error)) {
+          this.switchToFallback();
+          return (this.connection as any)[methodName](...args);
+        }
+        throw error;
+      }
+    };
+  }
+
+  private shouldFallback(error: unknown): boolean {
+    if (
+      !this.allowFallback ||
+      this.usingFallback ||
+      this.primaryEndpoint === this.fallbackEndpoint
+    ) {
+      return false;
+    }
+
+    return this.isConnectionError(error);
+  }
+
+  private isConnectionError(error: unknown): boolean {
+    if (!error) return false;
+    if (error instanceof SolanaJSONRPCError) return false;
+
+    const message =
+      typeof error === "string"
+        ? error
+        : error instanceof Error
+        ? error.message
+        : "";
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? String((error as any).code)
+        : "";
+
+    const haystack = `${message} ${code}`.toLowerCase();
+    const keywords = [
+      "fetch failed",
+      "failed to fetch",
+      "network request failed",
+      "econnrefused",
+      "ehostunreach",
+      "etimedout",
+      "connect etimedout",
+      "getaddrinfo",
+      "socket hang up",
+      "timeout",
+      "tls handshake",
+      "connection refused",
+    ];
+
+    return keywords.some((keyword) => haystack.includes(keyword));
+  }
+
+  private switchToFallback(): void {
+    if (this.usingFallback) return;
+
+    console.warn(
+      `[WalletManager] RPC endpoint ${this.primaryEndpoint} unreachable. Falling back to ${this.fallbackEndpoint}.`
+    );
+    this.usingFallback = true;
+    this.connection = this.createManagedConnection(
+      this.fallbackEndpoint,
+      true
+    );
   }
 
   public static getInstance(mnemonic: string): WalletManager {
