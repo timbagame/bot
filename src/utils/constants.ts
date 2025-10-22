@@ -104,16 +104,16 @@ export const PRICES_TIMEOUT_MS = Number(process.env["PRICES_TIMEOUT_MS"] ?? 3_00
 // Start/Wallet video - for /start command and wallet UI
 // Use getter function to allow dynamic changes
 export const getStartVideoId = () =>
-  "BAACAgEAAxkBAAIFdWjv1Ftg_7gnOFxENLIP8JMYM7NDAAKqBQACEHGARZs4P2UQ6MpENgQ";
+  "CgACAgEAAx0Ce_D3oQACZuxo-WS_4i1IJ6SlAx3s6vvIe6Qw-QACxAYAAo4w0EeJ0XIEobD7cjYE";
 
 // Coinflip start video - for when coinflip rounds begin
 // Use getter function to allow dynamic changes
 export const getCoinflipVideoId = () =>
-  "BAACAgEAAxkBAAIFdGjv1FuGkqg64o_097Sqoxwze22LAAKrBQACEHGART6YxgaWCkKGNgQ";
+  "CgACAgEAAx0Ce_D3oQACZuxo-WS_4i1IJ6SlAx3s6vvIe6Qw-QACxAYAAo4w0EeJ0XIEobD7cjYE";
 
 // Giveaway start video - for giveaway announcements
 export const getGiveawayVideoId = () =>
-  "BAACAgEAAxkBAAIFdWjv1Ftg_7gnOFxENLIP8JMYM7NDAAKqBQACEHGARZs4P2UQ6MpENgQ";
+  "CgACAgEAAx0Ce_D3oQACZuxo-WS_4i1IJ6SlAx3s6vvIe6Qw-QACxAYAAo4w0EeJ0XIEobD7cjYE";
 
 // Backwards compatibility - deprecated, use getters instead
 export const START_VIDEO_ID = getStartVideoId();
