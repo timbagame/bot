@@ -1667,6 +1667,48 @@ export class GameManager {
     }
   }
 
+  private async isSignatureConfirmedFromHistory(
+    signature: string
+  ): Promise<boolean> {
+    const connection = this.getConnection();
+    const getSignatureStatuses = (connection as any)
+      ?.getSignatureStatuses?.bind(connection);
+
+    if (typeof getSignatureStatuses !== "function") {
+      return false;
+    }
+
+    const statusResult = await getSignatureStatuses([signature], {
+      searchTransactionHistory: true,
+    });
+    const status = statusResult?.value?.[0];
+
+    if (!status) {
+      return false;
+    }
+
+    if (status.err) {
+      const error = new Error(
+        `Transaction ${signature} failed: ${JSON.stringify(status.err)}`
+      );
+      (error as any).cause = status.err;
+      throw error;
+    }
+
+    if (
+      status.confirmationStatus === "confirmed" ||
+      status.confirmationStatus === "finalized"
+    ) {
+      return true;
+    }
+
+    if (typeof status.confirmations === "number" && status.confirmations > 0) {
+      return true;
+    }
+
+    return false;
+  }
+
   // Helper method for transaction confirmation with timeout recovery
   private async confirmTransactionWithRecovery(
     signature: string,
@@ -1688,55 +1730,115 @@ export class GameManager {
         confirmError.message?.includes("timeout") ||
         confirmError.message?.includes("not confirmed")
       ) {
-        console.log(
-          `🔍 Checking if ${operationType} succeeded despite timeout...`
-        );
+        const retryDelays = [2000, 4000, 8000, 12000, 16000, 20000];
+        const timeoutError =
+          confirmError instanceof Error
+            ? confirmError
+            : new Error(String(confirmError));
+        let lastRecoveryError: Error | undefined;
 
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-
-        try {
-          if (operationType === "Game creation") {
-            const gameAccount = await this.program.account.game.fetchNullable(
-              gamePda
-            );
-
-            if (gameAccount) {
-              console.log(
-                `✅ Game account confirmed after timeout - transaction ${signature}`
-              );
-              return true;
-            }
-
-            throw new Error("Game account not found after timeout");
-          } else if (operationType === "Player join" && playerPubkey) {
-            const isInGame = await this.isPlayerInGame(gamePda, playerPubkey);
-            if (isInGame) {
-              console.log(
-                `✅ Player join confirmed despite timeout - tx: ${signature}`
-              );
-              return true;
-            }
-          }
-        } catch (checkError) {
-          console.error(
-            `❌ ${operationType} verification failed, transaction ${signature} likely failed`
+        for (let attempt = 0; attempt < retryDelays.length; attempt++) {
+          const delay = retryDelays[attempt];
+          const attemptLabel = `${attempt + 1}/${retryDelays.length}`;
+          console.log(
+            `🔄 ${operationType} confirmation retry ${attemptLabel} after ${delay}ms`
           );
-          const recoveryError =
-            checkError instanceof Error
-              ? checkError
-              : new Error(String(checkError));
+          await new Promise((resolve) => setTimeout(resolve, delay));
 
-          if (confirmError instanceof Error) {
-            if ((confirmError as any).cause === undefined) {
-              (confirmError as any).cause = recoveryError;
+          if (operationType === "Player join" && playerPubkey) {
+            try {
+              const isInGame = await this.isPlayerInGame(gamePda, playerPubkey);
+              if (isInGame) {
+                console.log(
+                  `✅ Player join confirmed during retry ${attemptLabel} - tx: ${signature}`
+                );
+                return true;
+              }
+
+              lastRecoveryError = new Error(
+                `Player not recorded in game after retry ${attempt + 1}`
+              );
+            } catch (joinProbeError) {
+              console.error(
+                `❌ Player join verification error during retry ${attemptLabel}`,
+                joinProbeError
+              );
+              throw joinProbeError;
             }
-            throw confirmError;
+          } else if (operationType === "Game creation") {
+            try {
+              const accountInterface = this.program.account.game as any;
+              const fetchNullable = accountInterface?.fetchNullable?.bind(
+                accountInterface
+              );
+              const gameAccount = fetchNullable
+                ? await fetchNullable(gamePda)
+                : await accountInterface.fetch(gamePda);
+
+              if (gameAccount) {
+                console.log(
+                  `✅ Game account confirmed after retry ${attemptLabel} - transaction ${signature}`
+                );
+                return true;
+              }
+
+              lastRecoveryError = new Error(
+                `Game account not found after timeout (attempt ${attempt + 1})`
+              );
+            } catch (gameProbeError) {
+              console.error(
+                `❌ Game account verification error during retry ${attemptLabel}`,
+                gameProbeError
+              );
+              throw gameProbeError;
+            }
           }
 
-          const wrappedError = new Error(String(confirmError));
-          (wrappedError as any).cause = recoveryError;
-          throw wrappedError;
+          try {
+            const signatureConfirmed =
+              await this.isSignatureConfirmedFromHistory(signature);
+            if (signatureConfirmed) {
+              console.log(
+                `✅ ${operationType} transaction confirmed via signature status on retry ${attemptLabel}: ${signature}`
+              );
+              return true;
+            }
+
+            lastRecoveryError = new Error(
+              `Transaction ${signature} still pending after retry ${attempt + 1}`
+            );
+          } catch (statusProbeError) {
+            console.error(
+              `❌ Failed to verify transaction status during retry ${attemptLabel}`,
+              statusProbeError
+            );
+            const normalizedError =
+              statusProbeError instanceof Error
+                ? statusProbeError
+                : new Error(String(statusProbeError));
+            if (lastRecoveryError) {
+              const existingRecoveries = Array.isArray(
+                (timeoutError as any).recoveryErrors
+              )
+                ? (timeoutError as any).recoveryErrors
+                : [lastRecoveryError];
+              existingRecoveries.push(normalizedError);
+              (timeoutError as any).recoveryErrors = existingRecoveries;
+            } else {
+              lastRecoveryError = normalizedError;
+            }
+            break;
+          }
         }
+
+        if (lastRecoveryError && (timeoutError as any).cause === undefined) {
+          (timeoutError as any).cause = lastRecoveryError;
+        }
+
+        console.warn(
+          `⚠️ ${operationType} confirmation timed out after ${retryDelays.length} retries for ${signature}`
+        );
+        throw timeoutError;
       }
 
       throw confirmError;
