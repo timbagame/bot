@@ -11,7 +11,10 @@ function stubProgram() {
   return { account: { game: { fetch: async () => ({}) } } } as any;
 }
 
-const stubDb = { getGameParticipants: () => [] } as any;
+const stubDb = {
+  getGameParticipants: () => [],
+  removeGameParticipant: () => {},
+} as any;
 
 const stubWallet = {} as any;
 
@@ -38,7 +41,7 @@ describe("GameManager expired coinflip handler", () => {
     ) => {
       expect(pda).toBeInstanceOf(PublicKey);
       expect(address).toBe("ADDR1");
-      expect(account).toEqual({ creator: "CREATOR" });
+      expect(account).toMatchObject({ creator: "CREATOR" });
       return analyzeInfo;
     };
     (gm as any).executeCompleteCleanup = async (...args: any[]) => {
@@ -52,14 +55,14 @@ describe("GameManager expired coinflip handler", () => {
 
     const result = await (gm as any).handleExpiredCoinflip(
       new PublicKey("BPFLoader1111111111111111111111111111111111"),
-      { creator: "CREATOR" },
+      { creator: "CREATOR", ticketsCount: 2, participantHashes: [1, 2] },
       "ADDR1"
     );
 
     expect(result).toBe(true);
     expect(cleanupCalls.length).toBe(1);
     expect(cleanupCalls[0][0]).toBeInstanceOf(PublicKey);
-    expect(cleanupCalls[0][1]).toEqual({ creator: "CREATOR" });
+    expect(cleanupCalls[0][1]).toMatchObject({ creator: "CREATOR" });
     expect(cleanupCalls[0][2]).toBe(analyzeInfo);
     expect(cleanupCalls[0][3]).toBe("ADDR1");
     expect(partialCalled).toBe(false);
@@ -100,7 +103,7 @@ describe("GameManager expired coinflip handler", () => {
 
     const result = await (gm as any).handleExpiredCoinflip(
       new PublicKey("BPFLoader2111111111111111111111111111111111"),
-      { creator: "CREATOR2" },
+      { creator: "CREATOR2", ticketsCount: 1, participantHashes: [1] },
       "ADDR2"
     );
 
