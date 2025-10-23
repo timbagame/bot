@@ -138,4 +138,15 @@ describe("trade ui helpers", () => {
     expect(sellPlain.message).toContain("Processing Sell Transaction");
     expect(sellPlain.message).toContain("Executing 1.5 TIMBA → SOL");
   });
+
+  test("processing status sanitizes missing values and guards invalid kinds", () => {
+    const { message } = buildProcessingStatus("swap", null, " ", undefined);
+
+    expect(message).toContain("Swapping ? UNKNOWN → UNKNOWN");
+    expect(message).toContain("PROCESSING SWAP");
+
+    expect(() =>
+      buildProcessingStatus("airdrop" as any, 1, "SOL", "BONK")
+    ).toThrow(/Unsupported processing status kind/);
+  });
 });
