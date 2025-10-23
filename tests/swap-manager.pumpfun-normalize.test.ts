@@ -70,7 +70,7 @@ describe("SwapManager pump.fun amount normalization", () => {
     expect(quote.provider).toBe("pump-fun");
   });
 
-  test("sell flow normalizes raw fractional pump token amounts", async () => {
+  test("sell flow normalizes raw fractional pump token amounts when magnitude exceeds decimals", async () => {
     const sm = createSwapManager();
     let capturedAmount = "";
     (sm.pumpFunClient as any).getQuote = async (
@@ -96,7 +96,7 @@ describe("SwapManager pump.fun amount normalization", () => {
     await sm.getQuote({
       inputMint: PUMP_MINT,
       outputMint: SOL_MINT,
-      amount: "500000",
+      amount: "1500000",
       inputDecimals: 6,
       outputDecimals: 9,
       userKeypair: Keypair.generate(),
@@ -105,10 +105,10 @@ describe("SwapManager pump.fun amount normalization", () => {
       slippageBps: 100,
     });
 
-    expect(capturedAmount).toBe("0.5");
+    expect(capturedAmount).toBe("1.5");
   });
 
-  test("sell flow normalizes raw pump token lamports without trailing zeros", async () => {
+  test("sell flow normalizes raw pump token lamports without trailing zeros when magnitude exceeds decimals", async () => {
     const sm = createSwapManager();
     let capturedAmount = "";
     (sm.pumpFunClient as any).getQuote = async (
@@ -134,7 +134,7 @@ describe("SwapManager pump.fun amount normalization", () => {
     await sm.getQuote({
       inputMint: PUMP_MINT,
       outputMint: SOL_MINT,
-      amount: "123456",
+      amount: "1234567",
       inputDecimals: 6,
       outputDecimals: 9,
       userKeypair: Keypair.generate(),
@@ -143,7 +143,45 @@ describe("SwapManager pump.fun amount normalization", () => {
       slippageBps: 100,
     });
 
-    expect(capturedAmount).toBe("0.123456");
+    expect(capturedAmount).toBe("1.234567");
+  });
+
+  test("sell flow keeps 6-digit pump token integer input intact", async () => {
+    const sm = createSwapManager();
+    let capturedAmount = "";
+    (sm.pumpFunClient as any).getQuote = async (
+      inputMint: string,
+      outputMint: string,
+      normalizedAmount: string,
+      _inputDecimals: number,
+      _outputDecimals: number,
+      slippageBps: number
+    ) => {
+      capturedAmount = normalizedAmount;
+      return {
+        inputMint,
+        outputMint,
+        inputAmount: normalizedAmount,
+        outputAmount: "50000000",
+        estimatedRate: 1,
+        slippage: slippageBps / 100,
+        isGraduated: false,
+      };
+    };
+
+    await sm.getQuote({
+      inputMint: PUMP_MINT,
+      outputMint: SOL_MINT,
+      amount: "100000",
+      inputDecimals: 6,
+      outputDecimals: 9,
+      userKeypair: Keypair.generate(),
+      inputTicker: "PUMP",
+      outputTicker: "SOL",
+      slippageBps: 100,
+    });
+
+    expect(capturedAmount).toBe("100000");
   });
 
   test("sell flow keeps decimal pump token input stable", async () => {
