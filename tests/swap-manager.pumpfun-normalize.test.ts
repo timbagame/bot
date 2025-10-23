@@ -146,6 +146,44 @@ describe("SwapManager pump.fun amount normalization", () => {
     expect(capturedAmount).toBe("0.5");
   });
 
+  test("sell flow keeps small integer pump token input intact", async () => {
+    const sm = createSwapManager();
+    let capturedAmount = "";
+    (sm.pumpFunClient as any).getQuote = async (
+      inputMint: string,
+      outputMint: string,
+      normalizedAmount: string,
+      inputDecimals: number,
+      outputDecimals: number,
+      slippageBps: number
+    ) => {
+      capturedAmount = normalizedAmount;
+      return {
+        inputMint,
+        outputMint,
+        inputAmount: normalizedAmount,
+        outputAmount: "50000000",
+        estimatedRate: 1,
+        slippage: slippageBps / 100,
+        isGraduated: false,
+      };
+    };
+
+    await sm.getQuote({
+      inputMint: PUMP_MINT,
+      outputMint: SOL_MINT,
+      amount: "1",
+      inputDecimals: 6,
+      outputDecimals: 9,
+      userKeypair: Keypair.generate(),
+      inputTicker: "PUMP",
+      outputTicker: "SOL",
+      slippageBps: 100,
+    });
+
+    expect(capturedAmount).toBe("1");
+  });
+
   test("buy flow normalizes raw SOL lamports", async () => {
     const sm = createSwapManager();
     let capturedAmount = "";
@@ -173,6 +211,44 @@ describe("SwapManager pump.fun amount normalization", () => {
       inputMint: SOL_MINT,
       outputMint: PUMP_MINT,
       amount: "1000000000",
+      inputDecimals: 9,
+      outputDecimals: 6,
+      userKeypair: Keypair.generate(),
+      inputTicker: "SOL",
+      outputTicker: "PUMP",
+      slippageBps: 100,
+    });
+
+    expect(capturedAmount).toBe("1");
+  });
+
+  test("buy flow keeps small integer SOL input intact", async () => {
+    const sm = createSwapManager();
+    let capturedAmount = "";
+    (sm.pumpFunClient as any).getQuote = async (
+      inputMint: string,
+      outputMint: string,
+      normalizedAmount: string,
+      inputDecimals: number,
+      outputDecimals: number,
+      slippageBps: number
+    ) => {
+      capturedAmount = normalizedAmount;
+      return {
+        inputMint,
+        outputMint,
+        inputAmount: normalizedAmount,
+        outputAmount: "1000000",
+        estimatedRate: 1,
+        slippage: slippageBps / 100,
+        isGraduated: false,
+      };
+    };
+
+    await sm.getQuote({
+      inputMint: SOL_MINT,
+      outputMint: PUMP_MINT,
+      amount: "1",
       inputDecimals: 9,
       outputDecimals: 6,
       userKeypair: Keypair.generate(),

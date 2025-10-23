@@ -202,12 +202,20 @@ export class SwapManager {
         };
       }
 
-      const fractionalPart = remainder
+      const fractionalRaw = remainder
         .toString()
-        .padStart(decimals, "0")
-        .replace(/0+$/, "");
+        .padStart(decimals, "0");
+      const fractionalPart = fractionalRaw.replace(/0+$/, "");
+      const leadingZeros = fractionalPart.match(/^0+/)?.[0].length ?? 0;
 
-      const decimalAmount = `${whole.toString()}.${fractionalPart}`;
+      if (whole === 0n && leadingZeros >= 4) {
+        return { decimalAmount: trimmed, probablyRawAmount: false };
+      }
+
+      const decimalAmount =
+        fractionalPart.length > 0
+          ? `${whole.toString()}.${fractionalPart}`
+          : whole.toString();
 
       return { decimalAmount, probablyRawAmount: true };
     } catch {
