@@ -176,22 +176,43 @@ export class SwapManager {
     decimalAmount: string;
     probablyRawAmount: boolean;
   } {
-    const amountFloat = parseFloat(amount);
-    if (!Number.isFinite(amountFloat)) {
-      return { decimalAmount: amount, probablyRawAmount: false };
+    const trimmed = amount.trim();
+    if (trimmed.length === 0) {
+      return { decimalAmount: trimmed, probablyRawAmount: false };
     }
 
-    const probablyRawAmount =
-      amountFloat > 1_000_000 && Number.isInteger(amountFloat);
-
-    if (!probablyRawAmount || decimals <= 0) {
-      return { decimalAmount: amount, probablyRawAmount };
+    if (decimals <= 0) {
+      return { decimalAmount: trimmed, probablyRawAmount: false };
     }
 
-    const divisor = Math.pow(10, Math.max(decimals, 0));
-    const decimalAmount = (amountFloat / divisor).toString();
+    if (!/^\d+$/.test(trimmed)) {
+      return { decimalAmount: trimmed, probablyRawAmount: false };
+    }
 
-    return { decimalAmount, probablyRawAmount };
+    try {
+      const rawAmount = BigInt(trimmed);
+      const divisor = BigInt(10) ** BigInt(decimals);
+      const whole = rawAmount / divisor;
+      const remainder = rawAmount % divisor;
+
+      if (remainder === 0n) {
+        return {
+          decimalAmount: whole.toString(),
+          probablyRawAmount: true,
+        };
+      }
+
+      const fractionalPart = remainder
+        .toString()
+        .padStart(decimals, "0")
+        .replace(/0+$/, "");
+
+      const decimalAmount = `${whole.toString()}.${fractionalPart}`;
+
+      return { decimalAmount, probablyRawAmount: true };
+    } catch {
+      return { decimalAmount: trimmed, probablyRawAmount: false };
+    }
   }
 
   /**
@@ -221,16 +242,36 @@ export class SwapManager {
     // If we have a non-graduated pump.fun token, use pump.fun
     if (hasNonGraduatedPumpFun && this.network === "mainnet") {
       console.log(`   🎯 Using pump.fun for quote`);
-      const validation = validatePumpFunSwap(inputMint, outputMint, amount);
+      const trimmedAmount = amount.trim();
+      let validation = validatePumpFunSwap(
+        inputMint,
+        outputMint,
+        trimmedAmount
+      );
+
+      const { decimalAmount, probablyRawAmount } =
+        this.normalizePumpFunAmount(trimmedAmount, inputDecimals);
+
+      if (decimalAmount !== trimmedAmount) {
+        const normalizedValidation = validatePumpFunSwap(
+          inputMint,
+          outputMint,
+          decimalAmount
+        );
+        if (!normalizedValidation.valid && validation.valid) {
+          console.log(
+            `   ❌ Pump.fun validation failed after normalization: ${normalizedValidation.error}`
+          );
+        }
+        validation = normalizedValidation;
+      }
+
       if (!validation.valid) {
         throw new Error(validation.error);
       }
 
-      const { decimalAmount, probablyRawAmount } =
-        this.normalizePumpFunAmount(amount, inputDecimals);
-
       console.log(
-        `   🔄 Amount conversion for pump.fun: ${amount} → ${decimalAmount} (probablyRaw: ${probablyRawAmount})`
+        `   🔄 Amount conversion for pump.fun: ${trimmedAmount} → ${decimalAmount} (probablyRaw: ${probablyRawAmount})`
       );
 
       const pumpQuote = await this.pumpFunClient.getQuote(
@@ -286,15 +327,35 @@ export class SwapManager {
             `   🔄 Trying pump.fun fallback for confirmed pump.fun token`
           );
 
-          const validation = validatePumpFunSwap(inputMint, outputMint, amount);
+          const trimmedAmount = amount.trim();
+          let validation = validatePumpFunSwap(
+            inputMint,
+            outputMint,
+            trimmedAmount
+          );
+
+          const { decimalAmount, probablyRawAmount } =
+            this.normalizePumpFunAmount(trimmedAmount, inputDecimals);
+
+          if (decimalAmount !== trimmedAmount) {
+            const normalizedValidation = validatePumpFunSwap(
+              inputMint,
+              outputMint,
+              decimalAmount
+            );
+            if (!normalizedValidation.valid && validation.valid) {
+              console.log(
+                `   ❌ Pump.fun validation failed after normalization: ${normalizedValidation.error}`
+              );
+            }
+            validation = normalizedValidation;
+          }
+
           if (validation.valid) {
             console.log(`   ✅ Pump.fun validation passed, getting quote...`);
 
-            const { decimalAmount, probablyRawAmount } =
-              this.normalizePumpFunAmount(amount, inputDecimals);
-
             console.log(
-              `   🔄 Amount conversion for pump.fun fallback: ${amount} → ${decimalAmount} (probablyRaw: ${probablyRawAmount})`
+              `   🔄 Amount conversion for pump.fun fallback: ${trimmedAmount} → ${decimalAmount} (probablyRaw: ${probablyRawAmount})`
             );
 
             const pumpQuote = await this.pumpFunClient.getQuote(
