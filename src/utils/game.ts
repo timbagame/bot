@@ -1783,7 +1783,7 @@ export class GameManager {
               }
 
               lastRecoveryError = new Error(
-                `Game account not found after retry ${attempt + 1}`
+                `Game account not found after timeout (attempt ${attempt + 1})`
               );
             } catch (gameProbeError) {
               console.error(
@@ -1812,7 +1812,22 @@ export class GameManager {
               `❌ Failed to verify transaction status during retry ${attemptLabel}`,
               statusProbeError
             );
-            throw statusProbeError;
+            const normalizedError =
+              statusProbeError instanceof Error
+                ? statusProbeError
+                : new Error(String(statusProbeError));
+            if (lastRecoveryError) {
+              const existingRecoveries = Array.isArray(
+                (timeoutError as any).recoveryErrors
+              )
+                ? (timeoutError as any).recoveryErrors
+                : [lastRecoveryError];
+              existingRecoveries.push(normalizedError);
+              (timeoutError as any).recoveryErrors = existingRecoveries;
+            } else {
+              lastRecoveryError = normalizedError;
+            }
+            break;
           }
         }
 
