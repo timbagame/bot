@@ -298,6 +298,44 @@ describe("SwapManager pump.fun amount normalization", () => {
     expect(capturedAmount).toBe("1");
   });
 
+  test("buy flow normalizes sub-one SOL raw lamports", async () => {
+    const sm = createSwapManager();
+    let capturedAmount = "";
+    (sm.pumpFunClient as any).getQuote = async (
+      inputMint: string,
+      outputMint: string,
+      normalizedAmount: string,
+      _inputDecimals: number,
+      _outputDecimals: number,
+      slippageBps: number
+    ) => {
+      capturedAmount = normalizedAmount;
+      return {
+        inputMint,
+        outputMint,
+        inputAmount: normalizedAmount,
+        outputAmount: "1000000",
+        estimatedRate: 1,
+        slippage: slippageBps / 100,
+        isGraduated: false,
+      };
+    };
+
+    await sm.getQuote({
+      inputMint: SOL_MINT,
+      outputMint: PUMP_MINT,
+      amount: "500000000",
+      inputDecimals: 9,
+      outputDecimals: 6,
+      userKeypair: Keypair.generate(),
+      inputTicker: "SOL",
+      outputTicker: "PUMP",
+      slippageBps: 100,
+    });
+
+    expect(capturedAmount).toBe("0.5");
+  });
+
   test("buy flow keeps small integer SOL input intact", async () => {
     const sm = createSwapManager();
     let capturedAmount = "";

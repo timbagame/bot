@@ -193,14 +193,13 @@ export class SwapManager {
       const rawAmount = BigInt(trimmed);
       const divisor = BigInt(10) ** BigInt(decimals);
       const remainder = rawAmount % divisor;
+      const whole = rawAmount / divisor;
       const meetsMagnitudeThreshold =
-        trimmed.length > decimals || remainder === 0n;
+        rawAmount >= 1_000_000n || remainder === 0n;
 
       if (!meetsMagnitudeThreshold) {
         return { decimalAmount: trimmed, probablyRawAmount: false };
       }
-
-      const whole = rawAmount / divisor;
 
       if (remainder === 0n) {
         return {
