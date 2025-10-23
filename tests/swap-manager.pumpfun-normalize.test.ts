@@ -108,6 +108,44 @@ describe("SwapManager pump.fun amount normalization", () => {
     expect(capturedAmount).toBe("0.5");
   });
 
+  test("sell flow normalizes raw pump token lamports without trailing zeros", async () => {
+    const sm = createSwapManager();
+    let capturedAmount = "";
+    (sm.pumpFunClient as any).getQuote = async (
+      inputMint: string,
+      outputMint: string,
+      normalizedAmount: string,
+      _inputDecimals: number,
+      _outputDecimals: number,
+      slippageBps: number
+    ) => {
+      capturedAmount = normalizedAmount;
+      return {
+        inputMint,
+        outputMint,
+        inputAmount: normalizedAmount,
+        outputAmount: "50000000",
+        estimatedRate: 1,
+        slippage: slippageBps / 100,
+        isGraduated: false,
+      };
+    };
+
+    await sm.getQuote({
+      inputMint: PUMP_MINT,
+      outputMint: SOL_MINT,
+      amount: "123456",
+      inputDecimals: 6,
+      outputDecimals: 9,
+      userKeypair: Keypair.generate(),
+      inputTicker: "PUMP",
+      outputTicker: "SOL",
+      slippageBps: 100,
+    });
+
+    expect(capturedAmount).toBe("0.123456");
+  });
+
   test("sell flow keeps decimal pump token input stable", async () => {
     const sm = createSwapManager();
     let capturedAmount = "";

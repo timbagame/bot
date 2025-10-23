@@ -196,7 +196,7 @@ export class SwapManager {
       trimmed.endsWith("0".repeat(trailingZeroThreshold));
 
     const meetsMagnitudeThreshold =
-      trimmed.length > decimals || hasTrailingZeroSignal;
+      trimmed.length >= decimals || hasTrailingZeroSignal;
 
     if (!meetsMagnitudeThreshold) {
       return { decimalAmount: trimmed, probablyRawAmount: false };
