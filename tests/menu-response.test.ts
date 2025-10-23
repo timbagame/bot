@@ -78,6 +78,22 @@ describe("respondWithMenu", () => {
     expect(calls.find((c: any) => c.type === "reply")).toBeUndefined();
   });
 
+  test("skips edits and replies directly when skipEdit is true", async () => {
+    const ctx = makeCtx();
+
+    await respondWithMenu(ctx as any, basePayload, { skipEdit: true });
+
+    const calls = ctx.__calls;
+    expect(calls.some((c: any) => c.type === "caption")).toBe(false);
+    expect(calls.some((c: any) => c.type === "text")).toBe(false);
+
+    const replies = calls.filter((c: any) => c.type === "reply");
+    expect(replies.length).toBe(1);
+    const [text, opts] = replies[0].args;
+    expect(text).toBe(basePayload.text);
+    expect(opts.reply_to_message_id).toBe(99);
+  });
+
   test("retries reply when Telegram responds with 429", async () => {
     const ctx = makeCtx();
     ctx.callbackQuery = undefined;
