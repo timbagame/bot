@@ -427,6 +427,111 @@ export class GameManager {
     }
   }
 
+  private async verifyParticipantJoin(
+    gamePda: PublicKey,
+    playerPubkey: PublicKey,
+    telegramId: string,
+    options: { joinSignature?: string | null; maxAttempts?: number } = {}
+  ): Promise<boolean> {
+    const maxAttempts = options.maxAttempts ?? 5;
+    const delays = [0, 500, 1_000, 2_000, 4_000];
+    const gameAddress = gamePda.toBase58();
+    const playerPubkeyStr = playerPubkey.toBase58();
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) {
+        const delayMs = delays[Math.min(attempt, delays.length - 1)];
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+
+      const isOnChain = await this.isPlayerInGame(gamePda, playerPubkey);
+      if (isOnChain) {
+        this.gameDb.saveGameParticipant(gameAddress, telegramId, playerPubkeyStr, {
+          status: "confirmed",
+          joinSignature: options.joinSignature,
+          lastVerifiedAt: Date.now(),
+        });
+        return true;
+      }
+    }
+
+    console.warn(
+      `⚠️ Player ${playerPubkeyStr} not yet recorded on-chain for ${gameAddress} after ${maxAttempts} verification attempt(s)`
+    );
+    return false;
+  }
+
+  private async reconcilePendingParticipants(gamePda: PublicKey): Promise<void> {
+    const getPending =
+      (this.gameDb as any).getPendingParticipants?.bind(this.gameDb);
+    if (typeof getPending !== "function") {
+      return;
+    }
+
+    const gameAddress = gamePda.toBase58();
+    const pendingParticipants = getPending(gameAddress) as Array<{
+      telegram_id?: string;
+      telegramId?: string;
+      public_key?: string | null;
+      publicKey?: string | null;
+      join_signature?: string | null;
+      joinSignature?: string | null;
+      joined_at?: number;
+      joinedAt?: number;
+    }>;
+
+    if (!Array.isArray(pendingParticipants) || pendingParticipants.length === 0) {
+      return;
+    }
+
+    const now = Date.now();
+    const staleThresholdMs = 5 * 60 * 1000; // 5 minutes
+
+    for (const participant of pendingParticipants) {
+      const telegramId =
+        participant.telegram_id ?? participant.telegramId ?? null;
+      if (!telegramId) {
+        continue;
+      }
+
+      let playerKeyStr =
+        participant.public_key ?? participant.publicKey ?? null;
+      if (!playerKeyStr) {
+        playerKeyStr = this.gameDb.getPlayerPublicKey?.(telegramId) ?? null;
+      }
+      if (!playerKeyStr) {
+        continue;
+      }
+
+      let playerPubkey: PublicKey;
+      try {
+        playerPubkey = new PublicKey(playerKeyStr);
+      } catch (_) {
+        continue;
+      }
+
+      const joinSignature =
+        participant.join_signature ?? participant.joinSignature ?? null;
+
+      const verified = await this.verifyParticipantJoin(gamePda, playerPubkey, telegramId, {
+        joinSignature,
+        maxAttempts: 2,
+      });
+
+      if (!verified) {
+        const joinedAt = participant.joined_at ?? participant.joinedAt ?? 0;
+        if (joinedAt > 0 && now - joinedAt > staleThresholdMs) {
+          console.warn(
+            `⚠️ Removing stale pending participant ${telegramId} from ${gameAddress}; no on-chain record after ${Math.round(
+              (now - joinedAt) / 1000
+            )}s`
+          );
+          this.gameDb.removeGameParticipant(gameAddress, telegramId);
+        }
+      }
+    }
+  }
+
   /** Get all players in a game from the database */
   private getGamePlayers(gameAddress: string): string[] {
     return this.gameDb.getGameParticipants(gameAddress);
@@ -542,7 +647,12 @@ export class GameManager {
         this.gameDb.saveGameParticipant?.(
           gamePda.toBase58(),
           participant.telegramId,
-          participant.publicKey
+          participant.publicKey,
+          {
+            status: "confirmed",
+            joinSignature: null,
+            lastVerifiedAt: Date.now(),
+          }
         );
         knownTelegramIds.add(participant.telegramId);
       } catch (error) {
@@ -2142,9 +2252,12 @@ export class GameManager {
 
     try {
       const gameAccount = await this.program.account.game.fetch(gamePda);
-
+      const gameAddress = gamePda.toBase58();
+      const telegramIdStr = telegramId.toString();
       let joinTx: string | undefined;
       let joinConfirmed = false;
+      let pendingRecorded = false;
+
       if (gameAccount.isPrivate) {
         console.log(`🔐 Game is private, using authorized join...`);
         const result = await this.joinPrivateGame(
@@ -2159,6 +2272,12 @@ export class GameManager {
           };
         }
         joinTx = result.tx;
+        this.gameDb.saveGameParticipant(gameAddress, telegramIdStr, creatorPubkey, {
+          status: "pending",
+          joinSignature: joinTx ?? null,
+          lastVerifiedAt: null,
+        });
+        pendingRecorded = true;
         joinConfirmed = true;
       } else {
         console.log(`🌐 Game is public, using regular join...`);
@@ -2176,6 +2295,13 @@ export class GameManager {
           [playerKp]
         );
 
+        this.gameDb.saveGameParticipant(gameAddress, telegramIdStr, creatorPubkey, {
+          status: "pending",
+          joinSignature: joinTx ?? null,
+          lastVerifiedAt: null,
+        });
+        pendingRecorded = true;
+
         joinConfirmed = await this.confirmTransactionWithRecovery(
           joinTx,
           gamePda,
@@ -2185,19 +2311,39 @@ export class GameManager {
       }
 
       if (joinConfirmed) {
-        this.gameDb.saveGameParticipant(
-          gamePda.toBase58(),
-          telegramId.toString(),
-          creatorPubkey
+        const verified = await this.verifyParticipantJoin(
+          gamePda,
+          playerKp.publicKey,
+          telegramIdStr,
+          { joinSignature: joinTx ?? null }
         );
-        return { success: true };
+        if (verified) {
+          return { success: true };
+        }
+
+        return {
+          success: false,
+          error:
+            "Join transaction confirmed but participant record is still syncing. We'll retry automatically.",
+        };
       } else {
+        if (pendingRecorded) {
+          this.gameDb.removeGameParticipant(gameAddress, telegramIdStr);
+        }
         return {
           success: false,
           error: "Failed to confirm auto-join transaction",
         };
       }
     } catch (joinError: any) {
+      try {
+        this.gameDb.removeGameParticipant(
+          gamePda.toBase58(),
+          telegramId.toString()
+        );
+      } catch (_) {
+        // ignore cleanup errors
+      }
       const errorMsg = logAndFormatError(
         joinError,
         `auto-joining creator to ${gameType} game`
@@ -2493,6 +2639,12 @@ export class GameManager {
 
       // Execute join
 
+      const telegramIdStr = telegramId.toString();
+      const playerPubkey = playerKp.publicKey.toBase58();
+      let joinTx: string | undefined;
+      let joinConfirmed = false;
+      let pendingRecorded = false;
+
       if (gameAccount.isPrivate) {
         const result = await this.joinPrivateGame(
           gamePda,
@@ -2505,6 +2657,14 @@ export class GameManager {
             error: result.error || "Failed to join private game",
           };
         }
+        joinTx = result.tx;
+        this.gameDb.saveGameParticipant(gameAddress, telegramIdStr, playerPubkey, {
+          status: "pending",
+          joinSignature: joinTx ?? null,
+          lastVerifiedAt: null,
+        });
+        pendingRecorded = true;
+        joinConfirmed = true;
       } else {
         const joinAccounts = await this.buildJoinAccounts(
           gamePda,
@@ -2520,21 +2680,56 @@ export class GameManager {
           [joinInstruction],
           [playerKp]
         );
-        await this.wallet.confirmTransaction(tx);
+        joinTx = tx;
+        this.gameDb.saveGameParticipant(gameAddress, telegramIdStr, playerPubkey, {
+          status: "pending",
+          joinSignature: joinTx ?? null,
+          lastVerifiedAt: null,
+        });
+        pendingRecorded = true;
+        joinConfirmed = await this.confirmTransactionWithRecovery(
+          tx,
+          gamePda,
+          "Player join",
+          playerKp.publicKey
+        );
+      }
+
+      if (!joinConfirmed) {
+        if (pendingRecorded) {
+          this.gameDb.removeGameParticipant(gameAddress, telegramIdStr);
+        }
+        return {
+          success: false,
+          error: "Failed to confirm join transaction",
+        };
       }
 
       // Update database
-      const playerPubkey = playerKp.publicKey.toBase58();
-      this.gameDb.savePlayerMapping(playerPubkey, telegramId.toString());
-      this.gameDb.saveGameParticipant(
-        gameAddress,
-        telegramId.toString(),
-        playerPubkey
+      this.gameDb.savePlayerMapping(playerPubkey, telegramIdStr);
+      const verified = await this.verifyParticipantJoin(
+        gamePda,
+        playerKp.publicKey,
+        telegramIdStr,
+        { joinSignature: joinTx ?? null }
       );
+
+      if (!verified) {
+        return {
+          success: false,
+          error:
+            "Join transaction confirmed but participant record is still syncing. We'll retry automatically.",
+        };
+      }
 
       return { success: true };
     } catch (error: any) {
       console.error(`Error joining game ${gameAddress}:`, error);
+      try {
+        this.gameDb.removeGameParticipant(gameAddress, telegramId.toString());
+      } catch (_) {
+        // ignore cleanup errors
+      }
       return { success: false, error: error.message || "Failed to join game" };
     }
   }
@@ -3111,6 +3306,7 @@ export class GameManager {
       ? gameAccount.participantHashes.length
       : 0;
     const dbParticipantsSnapshot = this.gameDb.getGameParticipants(address);
+    await this.reconcilePendingParticipants(gamePda);
     const playerKeyInfo = this.analyzePlayerKeys(gamePda, gameAccount, address);
     const effectiveOnChainTickets =
       playerKeyInfo.onChainTickets ?? onChainTickets;

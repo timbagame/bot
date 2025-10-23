@@ -66,16 +66,15 @@ describe("GameManager private auto-join recovery", () => {
     };
     (gm as any).buildJoinAccounts = async () => ({});
 
-    const participantHash = (gm as any).computeParticipantHash(
+    const participantHashFirst = (gm as any).computeParticipantHash(
       gamePda,
       playerKp.publicKey
     );
     gameAccount.participantHashes = [
       {
-        toString: () => participantHash,
+        toString: () => participantHashFirst,
       },
     ];
-
     const originalSetTimeout = globalThis.setTimeout;
     (globalThis as any).setTimeout = (
       handler: (...args: any[]) => void,
@@ -101,7 +100,9 @@ describe("GameManager private auto-join recovery", () => {
     }
 
     expect(result.success).toBe(true);
-    expect(savedParticipants.length).toBe(1);
+    expect(savedParticipants.length).toBe(2);
+    expect(savedParticipants[0][3]?.status).toBe("pending");
+    expect(savedParticipants[1][3]?.status).toBe("confirmed");
   });
 
   test("auto-join eventually succeeds after multiple confirmation polls", async () => {
@@ -176,6 +177,17 @@ describe("GameManager private auto-join recovery", () => {
     };
     (gm as any).buildJoinAccounts = async () => ({});
 
+    const participantHashSecond = (gm as any).computeParticipantHash(
+      gamePda,
+      playerKp.publicKey
+    );
+    gameAccount.participantHashes = [
+      {
+        toString: () => participantHashSecond,
+      },
+    ];
+    (gm as any).isPlayerInGame = async () => statusCalls >= 3;
+
     const originalSetTimeout = globalThis.setTimeout;
     let timerCalls = 0;
     (globalThis as any).setTimeout = (
@@ -203,7 +215,9 @@ describe("GameManager private auto-join recovery", () => {
     }
 
     expect(result.success).toBe(true);
-    expect(savedParticipants.length).toBe(1);
+    expect(savedParticipants.length).toBeGreaterThanOrEqual(2);
+    const latest = savedParticipants[savedParticipants.length - 1];
+    expect(latest[3]?.status).toBe("confirmed");
     expect(statusCalls).toBeGreaterThanOrEqual(3);
   });
 });

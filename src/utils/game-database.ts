@@ -43,12 +43,17 @@ export class GameDatabase extends BaseDatabase {
           telegram_id TEXT NOT NULL,
           public_key TEXT NOT NULL,
           joined_at INTEGER NOT NULL,
+          status TEXT NOT NULL DEFAULT 'confirmed',
+          join_signature TEXT,
+          last_verified_at INTEGER,
           PRIMARY KEY (game_address, telegram_id),
           FOREIGN KEY (game_address) REFERENCES games(game_address)
         )`,
       ],
       "Game"
     );
+
+    this.ensureGameParticipantSchema();
   }
 
   // Game methods
@@ -203,30 +208,145 @@ export class GameDatabase extends BaseDatabase {
   }
 
   // Game participant methods
+  private ensureGameParticipantSchema(): void {
+    try {
+      const columns = this.all<{ name: string }>(
+        "PRAGMA table_info(game_participants)",
+        [],
+        "reading game_participants schema"
+      );
+      const columnNames = new Set(columns.map((col) => col.name));
+
+      if (!columnNames.has("status")) {
+        this.run(
+          "ALTER TABLE game_participants ADD COLUMN status TEXT NOT NULL DEFAULT 'confirmed'",
+          [],
+          "adding status column to game_participants"
+        );
+      }
+
+      if (!columnNames.has("join_signature")) {
+        this.run(
+          "ALTER TABLE game_participants ADD COLUMN join_signature TEXT",
+          [],
+          "adding join_signature column to game_participants"
+        );
+      }
+
+      if (!columnNames.has("last_verified_at")) {
+        this.run(
+          "ALTER TABLE game_participants ADD COLUMN last_verified_at INTEGER",
+          [],
+          "adding last_verified_at column to game_participants"
+        );
+      }
+
+      this.run(
+        "UPDATE game_participants SET status = 'confirmed' WHERE status IS NULL",
+        [],
+        "normalizing participant status defaults"
+      );
+    } catch (error) {
+      console.error("Failed to ensure game_participants schema:", error);
+    }
+  }
+
   public saveGameParticipant(
     gameAddress: string,
     telegramId: string,
-    publicKey: string
+    publicKey: string,
+    options?: {
+      status?: "pending" | "confirmed";
+      joinSignature?: string | null;
+      lastVerifiedAt?: number | null;
+    }
   ): void {
+    const status = options?.status ?? "confirmed";
+    const joinSignature =
+      options && Object.prototype.hasOwnProperty.call(options, "joinSignature")
+        ? options.joinSignature ?? null
+        : null;
+    const lastVerifiedAt =
+      options && Object.prototype.hasOwnProperty.call(options, "lastVerifiedAt")
+        ? options.lastVerifiedAt ?? null
+        : status === "confirmed"
+        ? Date.now()
+        : null;
+
     this.run(
-      "INSERT OR REPLACE INTO game_participants (game_address, telegram_id, public_key, joined_at) VALUES (?, ?, ?, ?)",
-      [gameAddress, telegramId, publicKey, Date.now()],
+      `
+        INSERT INTO game_participants (
+          game_address,
+          telegram_id,
+          public_key,
+          joined_at,
+          status,
+          join_signature,
+          last_verified_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(game_address, telegram_id) DO UPDATE SET
+          public_key = excluded.public_key,
+          status = excluded.status,
+          join_signature = CASE
+            WHEN excluded.join_signature IS NOT NULL THEN excluded.join_signature
+            ELSE game_participants.join_signature
+          END,
+          last_verified_at = COALESCE(excluded.last_verified_at, game_participants.last_verified_at)
+      `,
+      [
+        gameAddress,
+        telegramId,
+        publicKey,
+        Date.now(),
+        status,
+        joinSignature,
+        lastVerifiedAt,
+      ],
       "saving game participant"
     );
   }
 
   public getGameParticipants(gameAddress: string): string[] {
     const results = this.all<{ telegram_id: string }>(
-      "SELECT telegram_id FROM game_participants WHERE game_address = ?",
+      `
+        SELECT telegram_id
+        FROM game_participants
+        WHERE game_address = ? AND status = 'confirmed'
+        ORDER BY joined_at ASC
+      `,
       [gameAddress],
       "getting game participants"
     );
     return results.map((r) => r.telegram_id);
   }
 
+  public getPendingParticipants(gameAddress: string): Array<{
+    telegram_id: string;
+    public_key: string | null;
+    join_signature: string | null;
+    joined_at: number;
+    last_verified_at: number | null;
+  }> {
+    return this.all(
+      `
+        SELECT telegram_id, public_key, join_signature, joined_at, last_verified_at
+        FROM game_participants
+        WHERE game_address = ? AND status = 'pending'
+        ORDER BY joined_at ASC
+      `,
+      [gameAddress],
+      "getting pending game participants"
+    );
+  }
+
   public getPlayerParticipatedGames(telegramId: string): string[] {
     const results = this.all<{ game_address: string }>(
-      "SELECT game_address FROM game_participants WHERE telegram_id = ?",
+      `
+        SELECT game_address
+        FROM game_participants
+        WHERE telegram_id = ? AND status = 'confirmed'
+      `,
       [telegramId],
       "getting player participated games"
     );
@@ -246,7 +366,9 @@ export class GameDatabase extends BaseDatabase {
     return this.all<GameData>(
       `
         SELECT DISTINCT g.* FROM games g
-        LEFT JOIN game_participants gp ON g.game_address = gp.game_address
+        LEFT JOIN game_participants gp
+          ON g.game_address = gp.game_address
+         AND gp.status = 'confirmed'
         WHERE g.status = 'active'
         AND (g.creator_telegram_id = ? OR gp.telegram_id = ?)
       `,
@@ -275,7 +397,9 @@ export class GameDatabase extends BaseDatabase {
     return this.all<GameData>(
       `
         SELECT DISTINCT g.* FROM games g
-        LEFT JOIN game_participants gp ON g.game_address = gp.game_address
+        LEFT JOIN game_participants gp
+          ON g.game_address = gp.game_address
+         AND gp.status = 'confirmed'
         WHERE g.status = 'completed'
         AND (g.creator_telegram_id = ? OR g.winner_address = ? OR gp.telegram_id = ?)
         ORDER BY g.completed_at DESC
@@ -394,7 +518,9 @@ export class GameDatabase extends BaseDatabase {
       return this.all<any>(
         `
           SELECT DISTINCT g.* FROM games g
-          LEFT JOIN game_participants gp ON g.game_address = gp.game_address
+          LEFT JOIN game_participants gp
+            ON g.game_address = gp.game_address
+           AND gp.status = 'confirmed'
           WHERE gp.telegram_id = ?
           ORDER BY g.created_at DESC
         `,
@@ -443,7 +569,10 @@ export class GameDatabase extends BaseDatabase {
             END as win_rate
           FROM player_mappings pm
           LEFT JOIN games g ON g.chat_id = ?
-          LEFT JOIN game_participants gp ON gp.telegram_id = pm.telegram_id AND gp.game_address = g.game_address
+          LEFT JOIN game_participants gp
+            ON gp.telegram_id = pm.telegram_id
+           AND gp.game_address = g.game_address
+           AND gp.status = 'confirmed'
           WHERE (g.creator_telegram_id = pm.telegram_id OR g.winner_address = pm.public_key OR gp.telegram_id = pm.telegram_id) OR g.game_address IS NULL
           GROUP BY pm.telegram_id
           HAVING total_games > 0
@@ -456,7 +585,10 @@ export class GameDatabase extends BaseDatabase {
             COALESCE(SUM(CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.amount ELSE 0 END), 0) as token_volume
           FROM player_mappings pm
           LEFT JOIN games g ON g.chat_id = ?
-          LEFT JOIN game_participants gp ON gp.telegram_id = pm.telegram_id AND gp.game_address = g.game_address
+          LEFT JOIN game_participants gp
+            ON gp.telegram_id = pm.telegram_id
+           AND gp.game_address = g.game_address
+           AND gp.status = 'confirmed'
           WHERE (g.creator_telegram_id = pm.telegram_id OR g.winner_address = pm.public_key OR gp.telegram_id = pm.telegram_id) AND g.status = 'completed'
           GROUP BY pm.telegram_id, g.token_ticker, g.token_mint
         )
