@@ -15,6 +15,8 @@ test("analyzePlayerKeys classifies available/unavailable and creator", () => {
   const db = {
     getGameParticipants: (_addr: string) => ["777", "888"],
     getPlayerPublicKey: (id: string) => (id === "777" ? creator.toBase58() : null),
+    getPlayerTelegramId: (pubkey: string) =>
+      pubkey === creator.toBase58() ? "777" : null,
   } as any;
   const gm = GameManager.getInstance(program, wallet, db);
   const gameAddress = "BPFLoader9999999999999999999999999999999999";
@@ -30,4 +32,3 @@ test("analyzePlayerKeys classifies available/unavailable and creator", () => {
   expect(info.nonCreators.length).toBe(0);
   expect(info.canCompleteCleanup).toBe(false);
 });
-
