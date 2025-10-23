@@ -189,6 +189,19 @@ export class SwapManager {
       return { decimalAmount: trimmed, probablyRawAmount: false };
     }
 
+    const trailingZeroThreshold = Math.min(4, decimals);
+    const hasTrailingZeroSignal =
+      trimmed.length === decimals &&
+      trailingZeroThreshold > 0 &&
+      trimmed.endsWith("0".repeat(trailingZeroThreshold));
+
+    const meetsMagnitudeThreshold =
+      trimmed.length > decimals || hasTrailingZeroSignal;
+
+    if (!meetsMagnitudeThreshold) {
+      return { decimalAmount: trimmed, probablyRawAmount: false };
+    }
+
     try {
       const rawAmount = BigInt(trimmed);
       const divisor = BigInt(10) ** BigInt(decimals);

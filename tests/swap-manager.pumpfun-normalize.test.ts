@@ -37,8 +37,8 @@ describe("SwapManager pump.fun amount normalization", () => {
       inputMint: string,
       outputMint: string,
       normalizedAmount: string,
-      inputDecimals: number,
-      outputDecimals: number,
+      _inputDecimals: number,
+      _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
@@ -77,8 +77,8 @@ describe("SwapManager pump.fun amount normalization", () => {
       inputMint: string,
       outputMint: string,
       normalizedAmount: string,
-      inputDecimals: number,
-      outputDecimals: number,
+      _inputDecimals: number,
+      _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
@@ -115,8 +115,8 @@ describe("SwapManager pump.fun amount normalization", () => {
       inputMint: string,
       outputMint: string,
       normalizedAmount: string,
-      inputDecimals: number,
-      outputDecimals: number,
+      _inputDecimals: number,
+      _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
@@ -153,8 +153,8 @@ describe("SwapManager pump.fun amount normalization", () => {
       inputMint: string,
       outputMint: string,
       normalizedAmount: string,
-      inputDecimals: number,
-      outputDecimals: number,
+      _inputDecimals: number,
+      _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
@@ -191,8 +191,8 @@ describe("SwapManager pump.fun amount normalization", () => {
       inputMint: string,
       outputMint: string,
       normalizedAmount: string,
-      inputDecimals: number,
-      outputDecimals: number,
+      _inputDecimals: number,
+      _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
@@ -229,8 +229,8 @@ describe("SwapManager pump.fun amount normalization", () => {
       inputMint: string,
       outputMint: string,
       normalizedAmount: string,
-      inputDecimals: number,
-      outputDecimals: number,
+      _inputDecimals: number,
+      _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
