@@ -111,7 +111,11 @@ describe("GameManager expired coinflip handler", () => {
     expect(completeCalled).toBe(false);
     expect(partialCalls.length).toBe(1);
     expect(partialCalls[0][0]).toBeInstanceOf(PublicKey);
-    expect(partialCalls[0][1]).toBe(analyzeInfo);
-    expect(partialCalls[0][2]).toBe("ADDR2");
+    expect(partialCalls[0][1]).toMatchObject({
+      creator: "CREATOR2",
+      ticketsCount: 1,
+    });
+    expect(partialCalls[0][2]).toBe(analyzeInfo);
+    expect(partialCalls[0][3]).toBe("ADDR2");
   });
 });
