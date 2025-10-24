@@ -4,6 +4,7 @@ import {
   __test_getUserState,
   __test_clearUserState,
   __test_setWalletCache,
+  wallet,
 } from "../src/bot";
 
 type MockCtxOptions = {
@@ -13,6 +14,9 @@ type MockCtxOptions = {
 const TELEGRAM_NUMERIC_ID = 9_876_543;
 const TELEGRAM_ID = BigInt(TELEGRAM_NUMERIC_ID);
 const DEFAULT_CHAT_ID = 777_001;
+const USER_WALLET_ADDRESS = wallet
+  .getKeyPair(TELEGRAM_ID)
+  .publicKey.toBase58();
 
 const baseWalletCache = {
   solBalance: 5_000_000_000, // 5 SOL
@@ -88,6 +92,7 @@ describe("handleCustomAmountInput", () => {
     expect(edits[0].chatId).toBe(DEFAULT_CHAT_ID);
     expect(edits[0].messageId).toBe(4321);
     expect(String(edits[0].text)).toContain("SEND");
+    expect(String(edits[0].text)).toContain(USER_WALLET_ADDRESS);
     expect(replies).toHaveLength(0);
 
     const state = __test_getUserState(userKey);
@@ -117,6 +122,7 @@ describe("handleCustomAmountInput", () => {
     expect(edits).toHaveLength(1);
     expect(replies).toHaveLength(1);
     expect(String(replies[0].text)).toContain("SEND");
+    expect(String(replies[0].text)).toContain(USER_WALLET_ADDRESS);
 
     const state = __test_getUserState(userKey);
     expect(state?.type).toBe("send_address");
@@ -139,6 +145,7 @@ describe("handleCustomAmountInput", () => {
 
     expect(edits).toHaveLength(0);
     expect(replies).toHaveLength(1);
+    expect(String(replies[0].text)).toContain(USER_WALLET_ADDRESS);
 
     const state = __test_getUserState(userKey);
     expect(state?.type).toBe("send_address");

@@ -66,14 +66,16 @@ describe("handleAddressInput", () => {
 
     await __test_handleAddressInput(ctx, baseState, ADDRESS);
 
-    const edits = ctx.__calls.filter((call) => call.type === "edit");
-    const replies = ctx.__calls.filter((call) => call.type === "reply");
+    const calls = ctx.__calls as RecordedCall[];
+    const edits = calls.filter((call: RecordedCall) => call.type === "edit");
+    const replies = calls.filter((call: RecordedCall) => call.type === "reply");
 
     expect(edits).toHaveLength(1);
-    expect(edits[0].chatId).toBe(CHAT_ID);
-    expect(edits[0].messageId).toBe(baseState.messageId);
-    expect(edits[0].text).toContain("SEND CONFIRMATION");
-    expect(edits[0].text).toContain(ADDRESS);
+    const firstEdit = edits[0]!;
+    expect(firstEdit.chatId).toBe(CHAT_ID);
+    expect(firstEdit.messageId).toBe(baseState.messageId);
+    expect(firstEdit.text).toContain("SEND CONFIRMATION");
+    expect(firstEdit.text).toContain(ADDRESS);
     expect(replies).toHaveLength(0);
   });
 
@@ -84,15 +86,17 @@ describe("handleAddressInput", () => {
 
     await __test_handleAddressInput(ctx, baseState, ADDRESS);
 
-    const edits = ctx.__calls.filter((call) => call.type === "edit");
-    const replies = ctx.__calls.filter((call) => call.type === "reply");
+    const calls = ctx.__calls as RecordedCall[];
+    const edits = calls.filter((call: RecordedCall) => call.type === "edit");
+    const replies = calls.filter((call: RecordedCall) => call.type === "reply");
 
     expect(edits).toHaveLength(1);
     expect(replies).toHaveLength(1);
-    expect(replies[0].text).toContain("SEND CONFIRMATION");
-    expect(replies[0].text).toContain(ADDRESS);
+    const firstReply = replies[0]!;
+    expect(firstReply.text).toContain("SEND CONFIRMATION");
+    expect(firstReply.text).toContain(ADDRESS);
     expect(
-      replies[0].opts?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data
+      firstReply.opts?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data
     ).toMatch(/^confirm_send_/);
   });
 
@@ -102,12 +106,14 @@ describe("handleAddressInput", () => {
 
     await __test_handleAddressInput(ctx, stateWithoutMessage, ADDRESS);
 
-    const edits = ctx.__calls.filter((call) => call.type === "edit");
-    const replies = ctx.__calls.filter((call) => call.type === "reply");
+    const calls = ctx.__calls as RecordedCall[];
+    const edits = calls.filter((call: RecordedCall) => call.type === "edit");
+    const replies = calls.filter((call: RecordedCall) => call.type === "reply");
 
     expect(edits).toHaveLength(0);
     expect(replies).toHaveLength(1);
-    expect(replies[0].text).toContain("SEND CONFIRMATION");
-    expect(replies[0].text).toContain(ADDRESS);
+    const firstReply = replies[0]!;
+    expect(firstReply.text).toContain("SEND CONFIRMATION");
+    expect(firstReply.text).toContain(ADDRESS);
   });
 });

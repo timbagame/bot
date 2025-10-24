@@ -270,6 +270,18 @@ const toRawAmount = (value: string, decimals: number): number =>
 const clampLamportsForFees = (lamports: number): number =>
   Math.max(0, lamports - SOL_FEE_BUFFER_LAMPORTS);
 
+const tryGetUserWalletAddress = (telegramId: bigint): string | undefined => {
+  if (telegramId === 0n) {
+    return undefined;
+  }
+
+  try {
+    return wallet.getKeyPair(telegramId).publicKey.toBase58();
+  } catch {
+    return undefined;
+  }
+};
+
 type TokenBalanceLike = {
   balance: number;
   decimals: number;
@@ -6279,6 +6291,8 @@ bot.on("callback_query", async (ctx, next) => {
       ? "max"
       : spend.displayAmount;
 
+    const exampleAddress = tryGetUserWalletAddress(telegramId);
+
     const response = [
       `📤 <b>SEND ${escapeHtml(displayLabel)}</b>`,
       "",
@@ -6287,10 +6301,15 @@ bot.on("callback_query", async (ctx, next) => {
       `Please send a message with the Solana wallet address.`,
       "",
       `<b>Format:</b> Public key (44 characters)`,
-      `<b>Example:</b> <code>Ge6tnNaEY6kEznY795RSUHS5Wbm3DxMMcroLZcU3dB1Z</code>`,
-      "",
-      INPUT_TIMEOUT_HINT,
     ];
+
+    if (exampleAddress) {
+      response.push(
+        `<b>Example:</b> <code>${escapeHtml(exampleAddress)}</code>`
+      );
+    }
+
+    response.push("", INPUT_TIMEOUT_HINT);
 
     await respondWithMenu(ctx, {
       text: response.join("\n"),
@@ -8655,6 +8674,8 @@ const handleCustomAmountInput = async (
 
   console.log(`💰 Custom amount received: ${displayLabel}`);
 
+  const exampleAddress = tryGetUserWalletAddress(telegramId);
+
   const response = [
     `📤 <b>SEND ${escapeHtml(displayLabel)}</b>`,
     "",
@@ -8663,10 +8684,13 @@ const handleCustomAmountInput = async (
     `Please send a message with the Solana wallet address.`,
     "",
     `<b>Format:</b> Public key (44 characters)`,
-    `<b>Example:</b> <code>Ge6tnNaEY6kEznY795RSUHS5Wbm3DxMMcroLZcU3dB1Z</code>`,
-    "",
-    INPUT_TIMEOUT_HINT,
   ];
+
+  if (exampleAddress) {
+    response.push(`<b>Example:</b> <code>${escapeHtml(exampleAddress)}</code>`);
+  }
+
+  response.push("", INPUT_TIMEOUT_HINT);
 
   const messageText = response.join("\n");
   const keyboard = new InlineKeyboard().text("❌ Cancel", `send_select_${token}`).row();
