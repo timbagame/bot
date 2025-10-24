@@ -25,6 +25,7 @@ import {
   GAME_EXPIRATION_BUFFER_TIME,
   MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
   WSOL_MINT,
+  DEFAULT_TOKEN_TICKER,
   getCoinflipVideoId,
   getGiveawayVideoId,
 } from "./constants";
@@ -908,6 +909,101 @@ export class GameManager {
       tokenBalance: updatedTokenBalance,
       solBalance: updatedSolBalance,
     };
+  }
+
+  private async ensureUnjoinFeePayerBalance(options: {
+    telegramId: string;
+    tokenMint: string | null;
+    tokenDecimals: number;
+    tokenTicker: string;
+    userKeypair: Keypair;
+    logContext: string;
+  }): Promise<{ success: true } | { success: false; reason: string }> {
+    const {
+      telegramId,
+      tokenMint,
+      tokenDecimals,
+      tokenTicker,
+      userKeypair,
+      logContext,
+    } = options;
+
+    if (!telegramId) {
+      return { success: false, reason: "Missing Telegram identifier" };
+    }
+
+    let telegramBigInt: bigint;
+    try {
+      telegramBigInt = BigInt(telegramId);
+    } catch {
+      return { success: false, reason: "Invalid player identifier" };
+    }
+
+    try {
+      let solBalance = await this.wallet.getBalance(telegramBigInt);
+      if (solBalance >= MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
+        return { success: true };
+      }
+
+      if (!tokenMint) {
+        return {
+          success: false,
+          reason: "Missing token mint information required for SOL top-up",
+        };
+      }
+
+      const tokenBalance = await this.wallet.getTokenBalance(
+        telegramBigInt,
+        tokenMint,
+        { createIfMissing: false }
+      );
+
+      if (tokenBalance <= 0) {
+        return {
+          success: false,
+          reason: `No spare ${tokenTicker.toUpperCase()} available to swap for SOL fees.`,
+        };
+      }
+
+      const swapResult = await this.swapManager.performJustInTimeSolSwap({
+        userKeypair,
+        tokenMint,
+        tokenDecimals,
+        availableTokenAmountRaw: Math.max(Math.floor(tokenBalance), 0),
+        desiredLamports: MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
+        slippageBps: 300,
+        tokenTicker,
+        logContext,
+      });
+
+      if (!swapResult.swapped) {
+        return {
+          success: false,
+          reason:
+            swapResult.error ??
+            `Unable to swap ${tokenTicker.toUpperCase()} for SOL fees.`,
+        };
+      }
+
+      solBalance = await this.wallet.getBalance(telegramBigInt);
+      if (solBalance < MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
+        return {
+          success: false,
+          reason:
+            "Swap executed but SOL balance is still below the required buffer.",
+        };
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.error(
+        `Failed to prepare SOL balance for ${logContext}:`,
+        error
+      );
+      const message =
+        error instanceof Error ? error.message : String(error ?? "unknown error");
+      return { success: false, reason: message };
+    }
   }
 
   // ================================
@@ -3418,7 +3514,12 @@ export class GameManager {
     }
 
     // Strategy 2: Partial cleanup (unjoin available players only)
-    return await this.executePartialCleanup(gamePda, playerKeyInfo, address);
+    return await this.executePartialCleanup(
+      gamePda,
+      gameAccount,
+      playerKeyInfo,
+      address
+    );
   }
 
   private analyzePlayerKeys(
@@ -3555,6 +3656,7 @@ export class GameManager {
     // Unjoin ALL players including creator for coinflip games
     const unjoinedCount = await this.unjoinPlayers(
       gamePda,
+      gameAccount,
       playerKeyInfo.available,
       playerKeyInfo.creator?.telegramId
     );
@@ -3579,6 +3681,7 @@ export class GameManager {
 
   private async executePartialCleanup(
     gamePda: PublicKey,
+    gameAccount: any,
     playerKeyInfo: any,
     address: string
   ): Promise<boolean> {
@@ -3588,6 +3691,7 @@ export class GameManager {
 
     const unjoinedCount = await this.unjoinPlayers(
       gamePda,
+      gameAccount,
       playerKeyInfo.available,
       playerKeyInfo.creator?.telegramId
     );
@@ -3600,6 +3704,7 @@ export class GameManager {
 
   private async unjoinPlayers(
     gamePda: PublicKey,
+    gameAccount: any,
     players: Array<{
       pubkey: PublicKey;
       telegramId: string;
@@ -3608,6 +3713,61 @@ export class GameManager {
     creatorTelegramId?: string
   ): Promise<number> {
     let unjoinedCount = 0;
+    const gameAddress = gamePda.toBase58();
+    const logContext = `unjoin ${gameAddress}`;
+
+    const resolvePublicKeyString = (value: any): string | null => {
+      if (!value) {
+        return null;
+      }
+      if (value instanceof PublicKey) {
+        return value.toBase58();
+      }
+      if (typeof value === "string") {
+        return value;
+      }
+      if (typeof value.toBase58 === "function") {
+        try {
+          return value.toBase58();
+        } catch (_) {
+          // fall through
+        }
+      }
+      if (typeof value.toString === "function") {
+        try {
+          return value.toString();
+        } catch (_) {
+          return null;
+        }
+      }
+      return null;
+    };
+
+    const tokenMintStr = resolvePublicKeyString(gameAccount?.tokenMint);
+
+    let tokenDecimals = 0;
+    if (tokenMintStr) {
+      try {
+        const metadata = await this.wallet.getTokenMetadata(tokenMintStr);
+        tokenDecimals = typeof metadata.decimals === "number" ? metadata.decimals : 0;
+      } catch (error) {
+        console.warn(
+          `⚠️ Failed to load token metadata for ${tokenMintStr} during unjoin cleanup:`,
+          error
+        );
+      }
+    }
+
+    const dbGame = this.gameDb.getGame(gameAddress);
+    const resolvedTickerRaw =
+      (dbGame?.token_ticker && dbGame.token_ticker.trim().length > 0
+        ? dbGame.token_ticker
+        : undefined) ??
+      (tokenMintStr &&
+      tokenMintStr.toLowerCase() === WSOL_MINT.toLowerCase()
+        ? "SOL"
+        : DEFAULT_TOKEN_TICKER);
+    const tokenTicker = resolvedTickerRaw.toUpperCase();
 
     const tryGetKeyPair = (telegramId?: string): Keypair | null => {
       if (!telegramId) {
@@ -3624,39 +3784,106 @@ export class GameManager {
     const creatorAuthority = tryGetKeyPair(creatorTelegramId);
 
     for (const player of players) {
-      let authorityKp = tryGetKeyPair(player.telegramId);
-      let usedCreatorFallback = false;
+      const playerKeypair = tryGetKeyPair(player.telegramId);
+      let playerSucceeded = false;
 
-      if (!authorityKp && creatorAuthority) {
-        authorityKp = creatorAuthority;
-        usedCreatorFallback = !player.isCreator;
-      }
+      if (playerKeypair) {
+        let canUsePlayer = true;
+        if (tokenMintStr) {
+          const preparation = await this.ensureUnjoinFeePayerBalance({
+            telegramId: player.telegramId,
+            tokenMint: tokenMintStr,
+            tokenDecimals,
+            tokenTicker,
+            userKeypair: playerKeypair,
+            logContext,
+          });
 
-      if (!authorityKp) {
+          if (!preparation.success) {
+            const fallbackAvailable = !player.isCreator && !!creatorAuthority;
+            if (fallbackAvailable) {
+              canUsePlayer = false;
+            }
+            console.warn(
+              `⚠️ Player ${player.pubkey.toBase58()} lacks SOL for unjoin: ${preparation.reason}${
+                fallbackAvailable
+                  ? " Falling back to creator authority."
+                  : " Attempting with remaining balance."
+              }`
+            );
+          }
+        }
+
+        if (canUsePlayer) {
+          try {
+            await this.unjoinPlayerFromGame(
+              gamePda,
+              playerKeypair,
+              player.pubkey,
+              player.telegramId,
+              { skipDbCheck: true }
+            );
+            console.log(
+              `➡️ Unjoined ${
+                player.isCreator ? "creator" : "player"
+              } ${player.pubkey.toBase58()}`
+            );
+            unjoinedCount++;
+            playerSucceeded = true;
+          } catch (error) {
+            console.error(
+              `Failed to unjoin ${player.pubkey.toBase58()} with player authority:`,
+              error
+            );
+          }
+        }
+      } else {
         console.error(
           `Failed to unjoin ${player.pubkey.toBase58()}: missing signing authority`
         );
+      }
+
+      if (playerSucceeded) {
         continue;
       }
 
-      try {
-        await this.unjoinPlayerFromGame(
-          gamePda,
-          authorityKp,
-          player.pubkey,
-          player.telegramId,
-          { skipDbCheck: true }
-        );
-        console.log(
-          `➡️ Unjoined ${
-            player.isCreator ? "creator" : "player"
-          } ${player.pubkey.toBase58()}${
-            usedCreatorFallback ? " using creator authority" : ""
-          }`
-        );
-        unjoinedCount++;
-      } catch (error) {
-        console.error(`Failed to unjoin ${player.pubkey.toBase58()}:`, error);
+      if (!player.isCreator && creatorAuthority) {
+        if (creatorTelegramId && tokenMintStr) {
+          const creatorPrep = await this.ensureUnjoinFeePayerBalance({
+            telegramId: creatorTelegramId,
+            tokenMint: tokenMintStr,
+            tokenDecimals,
+            tokenTicker,
+            userKeypair: creatorAuthority,
+            logContext,
+          });
+
+          if (!creatorPrep.success) {
+            console.warn(
+              `⚠️ Creator fallback lacks SOL for unjoin: ${creatorPrep.reason} Attempting with current balance.`
+            );
+          }
+        }
+
+        try {
+          await this.unjoinPlayerFromGame(
+            gamePda,
+            creatorAuthority,
+            player.pubkey,
+            player.telegramId,
+            { skipDbCheck: true }
+          );
+          console.log(
+            `➡️ Unjoined player ${player.pubkey.toBase58()} using creator authority`
+          );
+          unjoinedCount++;
+          continue;
+        } catch (fallbackError) {
+          console.error(
+            `Failed to unjoin ${player.pubkey.toBase58()} using creator authority:`,
+            fallbackError
+          );
+        }
       }
     }
 
