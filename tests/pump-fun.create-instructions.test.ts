@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { PumpFunClient } from "../src/utils/pump-fun";
-import { Keypair } from "@solana/web3.js";
+import { Keypair, PublicKey } from "@solana/web3.js";
+import BN from "bn.js";
 
 class FakeConn {}
 
@@ -25,11 +26,15 @@ describe("PumpFunClient.createSwapTransaction", () => {
     (pfc as any).isPumpFunToken = async () => ({ isPumpFun: true, isGraduated: false });
     // SDK returns placeholder arrays
     (pfc as any).onlineSdk = {
-      fetchGlobal: async () => ({}),
+      fetchGlobal: async () => ({
+        feeBasisPoints: new BN(0),
+        creatorFeeBasisPoints: new BN(0),
+      }),
       fetchBuyState: async () => ({
         bondingCurve: {
           virtualSolReserves: { toString: () => "1" },
           virtualTokenReserves: { toString: () => "1" },
+          creator: PublicKey.default,
         },
         bondingCurveAccountInfo: {},
         associatedUserAccountInfo: null,
@@ -37,6 +42,7 @@ describe("PumpFunClient.createSwapTransaction", () => {
       fetchBondingCurve: async () => ({
         virtualSolReserves: { toString: () => "1" },
         virtualTokenReserves: { toString: () => "1" },
+        creator: PublicKey.default,
       }),
     };
     (pfc as any).sdk = {
@@ -55,17 +61,22 @@ describe("PumpFunClient.createSwapTransaction", () => {
     const pfc = new PumpFunClient(new FakeConn() as any);
     (pfc as any).isPumpFunToken = async () => ({ isPumpFun: true, isGraduated: false });
     (pfc as any).onlineSdk = {
-      fetchGlobal: async () => ({}),
+      fetchGlobal: async () => ({
+        feeBasisPoints: new BN(0),
+        creatorFeeBasisPoints: new BN(0),
+      }),
       fetchSellState: async (_mint: any, _user: any) => ({
         bondingCurveAccountInfo: {},
         bondingCurve: {
           virtualSolReserves: { toString: () => "1" },
           virtualTokenReserves: { toString: () => "1" },
+          creator: PublicKey.default,
         },
       }),
       fetchBondingCurve: async () => ({
         virtualSolReserves: { toString: () => "1" },
         virtualTokenReserves: { toString: () => "1" },
+        creator: PublicKey.default,
       }),
     };
     (pfc as any).sdk = {

@@ -92,6 +92,48 @@ export class PumpFunClient {
     return Number(value);
   }
 
+  private toBigInt(value: any, label: string): bigint {
+    if (
+      value === null ||
+      value === undefined ||
+      (typeof value === "object" && typeof value.toString !== "function")
+    ) {
+      throw new Error(`${label} missing or invalid`);
+    }
+
+    try {
+      return BigInt(value.toString());
+    } catch (error) {
+      throw new Error(`Failed to parse ${label} as bigint`);
+    }
+  }
+
+  private getSellFeeBasisPoints(global: any, bondingCurve: any): bigint {
+    const protocolFeeBps = this.toBigInt(
+      global?.feeBasisPoints,
+      "Global fee basis points"
+    );
+
+    let totalFeeBps = protocolFeeBps;
+
+    if (global?.creatorFeeBasisPoints) {
+      const creatorFeeBps = this.toBigInt(
+        global.creatorFeeBasisPoints,
+        "Global creator fee basis points"
+      );
+      const creator = bondingCurve?.creator;
+      if (
+        creator &&
+        typeof (creator as PublicKey).equals === "function" &&
+        !(creator as PublicKey).equals(PublicKey.default)
+      ) {
+        totalFeeBps += creatorFeeBps;
+      }
+    }
+
+    return totalFeeBps;
+  }
+
   /**
    * Get token metadata from pump.fun
    */
@@ -308,16 +350,27 @@ export class PumpFunClient {
         };
       } else {
         // Calculate how much SOL we get for the token amount
-        const tokenAmount = this.toSafeNumber(
-          amountRaw,
+        const global = await this.onlineSdk.fetchGlobal();
+        const tokenAmountLamports = amountRaw;
+        const totalFeeBps = this.getSellFeeBasisPoints(
+          global,
+          bondingCurve
+        );
+        const solAmountLamports = this.calculateSellAmount({
+          bondingCurve,
+          tokenAmount: tokenAmountLamports,
+          feeBasisPoints: totalFeeBps,
+        });
+        outputAmount = solAmountLamports.toString();
+        const solAmountNumber = this.toSafeNumber(
+          solAmountLamports,
+          "SOL amount"
+        );
+        const tokenAmountNumber = this.toSafeNumber(
+          tokenAmountLamports,
           "Token amount"
         );
-        const solAmountLamports = this.calculateSellAmount(
-          bondingCurve,
-          tokenAmount
-        );
-        outputAmount = solAmountLamports.toString();
-        estimatedRate = solAmountLamports / tokenAmount;
+        estimatedRate = solAmountNumber / tokenAmountNumber;
       }
 
       return {
@@ -447,16 +500,33 @@ export class PumpFunClient {
         }
 
         // Calculate SOL amount we'll receive for the token amount
-        const expectedSolAmount = this.calculateSellAmount(
-          sellState.bondingCurve,
-          this.toSafeNumber(tokenAmount, "Token amount")
+        const totalFeeBps = this.getSellFeeBasisPoints(
+          global,
+          sellState.bondingCurve
         );
-        const minSolOut = Math.floor(
-          expectedSolAmount * (1 - slippageBps / 10000)
+        const expectedSolAmount = this.calculateSellAmount({
+          bondingCurve: sellState.bondingCurve,
+          tokenAmount,
+          feeBasisPoints: totalFeeBps,
+        });
+        const normalizedSlippage = Math.min(
+          Math.max(slippageBps, 0),
+          10_000
+        );
+        const minSolOut =
+          (expectedSolAmount * BigInt(10_000 - normalizedSlippage)) / 10_000n;
+
+        const expectedSolAmountNumber = this.toSafeNumber(
+          expectedSolAmount,
+          "Expected SOL amount"
+        );
+        const tokenAmountNumber = this.toSafeNumber(
+          tokenAmount,
+          "Token amount"
         );
 
         console.log(
-          `Creating sell instructions for ${tokenAmount} tokens, expecting ~${expectedSolAmount} lamports`
+          `Creating sell instructions for ${tokenAmountNumber} tokens, expecting ~${expectedSolAmountNumber} lamports`
         );
 
         // Use the SDK with the correct object format - use BN for amounts
@@ -467,7 +537,7 @@ export class PumpFunClient {
           mint: pumpMint,
           user: userKeypair.publicKey,
           amount: new BN(tokenAmount.toString()),
-          solAmount: new BN(minSolOut),
+          solAmount: new BN(minSolOut.toString()),
           slippage: slippageBps / 10000, // Use decimal format (e.g., 0.01 for 1%)
         });
       }
@@ -520,32 +590,58 @@ export class PumpFunClient {
   /**
    * Calculate sell amount based on bonding curve
    */
-  private calculateSellAmount(bondingCurve: any, tokenAmount: number): number {
-    try {
-      // Use pump.fun bonding curve math if available
-      if (
-        bondingCurve.virtualSolReserves &&
-        bondingCurve.virtualTokenReserves
-      ) {
-        const virtualSolReserves = Number(
-          bondingCurve.virtualSolReserves.toString()
-        );
-        const virtualTokenReserves = Number(
-          bondingCurve.virtualTokenReserves.toString()
-        );
-
-        if (virtualSolReserves > 0 && virtualTokenReserves > 0) {
-          const currentPrice = virtualSolReserves / virtualTokenReserves;
-          return Math.floor(tokenAmount * currentPrice);
-        }
-      }
-
-      // Fallback calculation
-      return Math.floor(tokenAmount / 1000000); // Rough estimate: 1M tokens = 1 SOL
-    } catch (error) {
-      console.error("Error calculating sell amount:", error);
-      return Math.floor(tokenAmount / 1000000);
+  private calculateSellAmount({
+    bondingCurve,
+    tokenAmount,
+    feeBasisPoints,
+  }: {
+    bondingCurve: any;
+    tokenAmount: bigint;
+    feeBasisPoints: bigint;
+  }): bigint {
+    if (tokenAmount <= 0n) {
+      return 0n;
     }
+
+    const virtualSolReserves = this.toBigInt(
+      bondingCurve?.virtualSolReserves,
+      "Bonding curve virtual SOL reserves"
+    );
+    const virtualTokenReserves = this.toBigInt(
+      bondingCurve?.virtualTokenReserves,
+      "Bonding curve virtual token reserves"
+    );
+
+    if (virtualSolReserves <= 0n || virtualTokenReserves <= 0n) {
+      throw new Error("Bonding curve reserves must be greater than zero");
+    }
+
+    const newTokenReserve = virtualTokenReserves + tokenAmount;
+    if (newTokenReserve <= 0n) {
+      throw new Error("New token reserve must be positive");
+    }
+
+    // Round the sell output down to match pump.fun's on-chain math before
+    // adjusting reserves. This mirrors the on-chain constant-product program,
+    // preventing the single-lamport rounding error highlighted in review.
+    const rawSolOut = (tokenAmount * virtualSolReserves) / newTokenReserve;
+    if (rawSolOut <= 0n) {
+      return 0n;
+    }
+
+    const newVirtualSolReserves = virtualSolReserves - rawSolOut;
+    if (newVirtualSolReserves < 0n) {
+      throw new Error("Sell would deplete SOL reserves, invariant broken");
+    }
+
+    const totalFeeBps = feeBasisPoints < 0n ? 0n : feeBasisPoints;
+    const fee =
+      totalFeeBps > 0n
+        ? (rawSolOut * totalFeeBps + 9_999n) / 10_000n
+        : 0n;
+
+    const netSolOut = rawSolOut - fee;
+    return netSolOut > 0n ? netSolOut : 0n;
   }
 
   /**
