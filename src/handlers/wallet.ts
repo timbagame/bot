@@ -19,7 +19,6 @@ export type ShowWalletUIDeps = {
 };
 
 export type SendWalletMediaWithFallbackOptions = {
-  caption: string;
   videoFileId?: string | null;
   sendText: () => Promise<void>;
   sendVideo?: () => Promise<void>;
@@ -28,14 +27,12 @@ export type SendWalletMediaWithFallbackOptions = {
 };
 
 export const sendWalletMediaWithFallback = async ({
-  caption,
   videoFileId,
   sendText,
   sendVideo,
   editMessage,
   logLabel = "wallet media",
 }: SendWalletMediaWithFallbackOptions): Promise<void> => {
-  void caption;
   if (!videoFileId) {
     await sendText();
     return;
@@ -92,7 +89,6 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
 
   const sendWalletContent = (caption: string) =>
     sendWalletMediaWithFallback({
-      caption,
       videoFileId: walletVideoFileId,
       logLabel: "wallet media",
       sendText: () =>
@@ -275,7 +271,6 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
 
     // Send privately to the user with video support
     await sendWalletMediaWithFallback({
-      caption,
       videoFileId: WINNER_VIDEO_ID,
       logLabel: "wallet dm media",
       sendText: () =>

@@ -5,6 +5,7 @@ import { stdin as input, stdout as output } from "node:process";
 import type { Timba } from "../idl/idlType";
 import { WalletManager } from "../src/utils/wallet";
 import { getPriceUSD } from "../src/utils/prices";
+import { LAMPORTS_PER_SOL } from "../src/utils/constants";
 import {
   getSupportedTokens,
   type TokenConfig,
@@ -96,8 +97,6 @@ async function estimateCompletionCostLamports(
   return signatureCost + priorityFeeLamports;
 }
 
-const SOL_LAMPORTS = 1_000_000_000;
-
 type Proposal = {
   mint: string;
   ticker: string;
@@ -149,7 +148,7 @@ async function buildProposal(
   const effectiveCompletionCostUSD =
     tokenCompletionCostLamports === 0n
       ? 0
-      : (Number(tokenCompletionCostLamports) / SOL_LAMPORTS) * solPriceUSD;
+      : (Number(tokenCompletionCostLamports) / LAMPORTS_PER_SOL) * solPriceUSD;
 
   let costInTokenRaw = 0n;
   if (tokenPriceUSD > 0) {
@@ -162,7 +161,7 @@ async function buildProposal(
     // fallback: use completion cost in lamports converted by decimals ratio
     const ratio =
       (scale * tokenCompletionCostLamports) /
-      BigInt(SOL_LAMPORTS);
+      BigInt(LAMPORTS_PER_SOL);
     costInTokenRaw = ratio;
   }
 
@@ -229,7 +228,7 @@ async function main() {
   const completionCostLamports = await estimateCompletionCostLamports(connection);
   const solPriceUSD = await getPriceUSD("SOL");
   const completionCostSOL =
-    Number(completionCostLamports) / SOL_LAMPORTS;
+    Number(completionCostLamports) / LAMPORTS_PER_SOL;
   const completionCostUSD = completionCostSOL * solPriceUSD;
 
   console.log("\n🔍 Estimated completion cost:");

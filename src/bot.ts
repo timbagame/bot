@@ -1965,20 +1965,15 @@ const validateAndProcessTransaction = async (
 
     // Add Solscan link if requested and we have a transaction signature
     if (showSolscanLink && txString) {
-      // Determine the correct Solscan URL based on the RPC endpoint
-      const rpcUrl = process.env['RPC_URL'] || "";
-      const isDevnet = rpcUrl.includes("devnet") || rpcUrl.includes("dev") || rpcUrl.includes("localhost");
-      const isTestnet = rpcUrl.includes("testnet") || rpcUrl.includes("test");
+      const solscanUrl = NetworkDetector.buildSolscanTxUrl(
+        txString,
+        process.env["RPC_URL"]
+      );
 
-      let solscanUrl = `https://solscan.io/tx/${txString}`;
-      if (isDevnet) {
-        solscanUrl = `https://solscan.io/tx/${txString}?cluster=devnet`;
-      } else if (isTestnet) {
-        solscanUrl = `https://solscan.io/tx/${txString}?cluster=testnet`;
+      if (solscanUrl) {
+        console.log(`🔗 Generated Solscan URL: ${solscanUrl}`);
+        successMessage += `\n\n<a href="${solscanUrl}">View in Blockchain</a>`;
       }
-
-      console.log(`🔗 Generated Solscan URL: ${solscanUrl} (isDevnet: ${isDevnet}, isTestnet: ${isTestnet})`);
-      successMessage += `\n\n<a href="${solscanUrl}">View in Blockchain</a>`;
     }
 
     await ctx.api.editMessageText(
@@ -2860,15 +2855,21 @@ bot.command("unwrap", async (ctx: Context) => {
     clearWalletCache(telegramId);
 
     const formattedAmount = wallet.formatSolBalance(amountLamports);
-    const solscanUrl = `https://solscan.io/tx/${signature}`;
+    const solscanUrl = NetworkDetector.buildSolscanTxUrl(
+      signature,
+      process.env["RPC_URL"]
+    );
+    const linkLine = solscanUrl
+      ? `\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`
+      : "";
 
     await ctx.api.editMessageText(
       ctx.chat!.id,
       processingMsg.message_id,
-      `✅ <b>UNWRAP COMPLETED</b>\n\nUnwrapped ${formattedAmount} WSOL to SOL\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`,
+      `✅ <b>UNWRAP COMPLETED</b>\n\nUnwrapped ${formattedAmount} WSOL to SOL${linkLine}`,
       {
         parse_mode: "HTML",
-        link_preview_options: { is_disabled: true },
+        link_preview_options: { is_disabled: Boolean(solscanUrl) },
       }
     );
   } catch (error) {
@@ -3387,14 +3388,19 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
       // Don't fail the swap if auto-registration fails
     }
 
+    const solscanUrl = NetworkDetector.buildSolscanTxUrl(
+      signature,
+      process.env["RPC_URL"]
+    );
+    const transactionLine = solscanUrl
+      ? `🔗 **Transaction:** [${signature.slice(0, 8)}...](${solscanUrl})`
+      : `🔗 **Transaction:** ${signature}`;
+
     const successMessage = [
       "✅ **Swap Completed Successfully!**",
       "",
       `🚀 **Provider:** ${swapData.quote.provider.toUpperCase()}`,
-      `🔗 **Transaction:** [${signature.slice(
-        0,
-        8
-      )}...](https://solscan.io/tx/${signature})`,
+      transactionLine,
       `📥 **Input:** ${wallet.formatTokenBalance(
         parseInt(swapData.quote.inputAmount),
         swapData.fromTokenInfo.decimals
@@ -3433,10 +3439,16 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
         "This often happens during network congestion.",
         "",
         signature
-          ? `🔗 **Check Status:** [${signature.slice(
-              0,
-              8
-            )}...](https://solscan.io/tx/${signature})`
+          ? (() => {
+              const timeoutUrl = NetworkDetector.buildSolscanTxUrl(
+                signature,
+                process.env["RPC_URL"]
+              );
+              if (!timeoutUrl) {
+                return `🔗 **Check Status:** ${signature}`;
+              }
+              return `🔗 **Check Status:** [${signature.slice(0, 8)}...](${timeoutUrl})`;
+            })()
           : "",
         "",
         "💡 **Next Steps:**",
@@ -5677,7 +5689,13 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
       await wallet.confirmTransaction(txSignature);
       clearWalletCache(telegramId);
 
-      const solscanUrl = `https://solscan.io/tx/${txSignature}`;
+      const solscanUrl = NetworkDetector.buildSolscanTxUrl(
+        txSignature,
+        process.env["RPC_URL"]
+      );
+      const viewLine = solscanUrl
+        ? `🔗 <a href="${solscanUrl}">View on Solscan</a>`
+        : "";
 
       const successMessage = (() => {
         if (
@@ -5710,14 +5728,18 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
           details.push(
             "",
             `To: <code>${transaction.address}</code>`,
-            "",
-            `🔗 <a href="${solscanUrl}">View on Solscan</a>`
+            ""
           );
+
+          if (viewLine) {
+            details.push(viewLine);
+          }
 
           return details.join("\n");
         }
 
-        return `✅ <b>TRANSACTION COMPLETED</b>\n\nSent ${formattedAmount} ${transaction.token}\nTo: <code>${transaction.address}</code>\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`;
+        const baseMessage = `✅ <b>TRANSACTION COMPLETED</b>\n\nSent ${formattedAmount} ${transaction.token}\nTo: <code>${transaction.address}</code>`;
+        return viewLine ? `${baseMessage}\n\n${viewLine}` : baseMessage;
       })();
 
       await respondWithMenu(ctx, {
@@ -5773,10 +5795,16 @@ bot.callbackQuery(/^confirm_wrap_/, async (ctx) => {
     clearWalletCache(telegramId);
 
     const formattedAmount = wallet.formatSolBalance(lamportsToWrap);
-    const solscanUrl = `https://solscan.io/tx/${signature}`;
+    const solscanUrl = NetworkDetector.buildSolscanTxUrl(
+      signature,
+      process.env["RPC_URL"]
+    );
+    const completionMessage = solscanUrl
+      ? `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${formattedAmount} SOL to WSOL\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`
+      : `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${formattedAmount} SOL to WSOL`;
 
     await respondWithMenu(ctx, {
-      text: `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${formattedAmount} SOL to WSOL\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`,
+      text: completionMessage,
       keyboard: createBackToWalletKeyboard(),
     });
 
@@ -5876,9 +5904,15 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
       await wallet.confirmTransaction(txSignature);
 
       // Show success with real Solscan link
-      const solscanUrl = `https://solscan.io/tx/${txSignature}`;
+      const solscanUrl = NetworkDetector.buildSolscanTxUrl(
+        txSignature,
+        process.env["RPC_URL"]
+      );
+      const successText = solscanUrl
+        ? `✅ <b>SWAP COMPLETED</b>\n\nSwapped ${transaction.amount} ${transaction.fromToken}\nReceived ~${quote.outputAmount} ${transaction.toToken}\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`
+        : `✅ <b>SWAP COMPLETED</b>\n\nSwapped ${transaction.amount} ${transaction.fromToken}\nReceived ~${quote.outputAmount} ${transaction.toToken}`;
       await respondWithMenu(ctx, {
-        text: `✅ <b>SWAP COMPLETED</b>\n\nSwapped ${transaction.amount} ${transaction.fromToken}\nReceived ~${quote.outputAmount} ${transaction.toToken}\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`,
+        text: successText,
         parseMode: "HTML",
         keyboard: createBackToWalletKeyboard(),
       });
@@ -7058,14 +7092,20 @@ bot.on("callback_query", async (ctx, next) => {
       "🎉 <b>Sale successful!</b>",
     ].join("\n");
 
+    const solscanUrl = NetworkDetector.buildSolscanTxUrl(
+      signature,
+      process.env["RPC_URL"]
+    );
+    const keyboard = new InlineKeyboard();
+    if (solscanUrl) {
+      keyboard.webApp("🔍 VIEW TX", solscanUrl).row();
+    }
+    keyboard.text("💰 Wallet", "main_wallet").text("🔴 Sell More", "cmd_sell");
+    keyboard.row();
+
     await respondWithMenu(ctx, {
       text: successMessage,
-      keyboard: new InlineKeyboard()
-        .webApp("🔍 VIEW TX", `https://solscan.io/tx/${signature}`)
-        .row()
-        .text("💰 Wallet", "main_wallet")
-        .text("🔴 Sell More", "cmd_sell")
-        .row(),
+      keyboard,
     });
     await safeAnswerCallbackQuery(ctx, "Sell completed!");
 
@@ -7420,14 +7460,20 @@ bot.on("callback_query", async (ctx, next) => {
       "🎉 <b>Purchase successful!</b>",
     ].join("\n");
 
+    const solscanUrl = NetworkDetector.buildSolscanTxUrl(
+      signature,
+      process.env["RPC_URL"]
+    );
+    const keyboard = new InlineKeyboard();
+    if (solscanUrl) {
+      keyboard.webApp("🔍 VIEW TX", solscanUrl).row();
+    }
+    keyboard.text("💰 Wallet", "main_wallet").text("🔄 Buy More", "cmd_buy");
+    keyboard.row();
+
     await respondWithMenu(ctx, {
       text: successMessage,
-      keyboard: new InlineKeyboard()
-        .webApp("🔍 VIEW TX", `https://solscan.io/tx/${signature}`)
-        .row()
-        .text("💰 Wallet", "main_wallet")
-        .text("🔄 Buy More", "cmd_buy")
-        .row(),
+      keyboard,
     });
     await safeAnswerCallbackQuery(ctx, "Buy completed!");
 

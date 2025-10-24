@@ -4,11 +4,11 @@ import { resetTestDatabase } from "./helpers/database";
 
 beforeEach(() => {
   resetTestDatabase("transaction-history.sqlite");
-  // @ts-ignore reset singleton not needed (class not singleton in tests)
+  TransactionHistory.resetForTesting();
 });
 
 test("TransactionHistory: query helpers and cleanup", () => {
-  const db = new TransactionHistory();
+  const db = TransactionHistory.getInstance();
   const now = Date.now();
 
   // Insert mixed transactions

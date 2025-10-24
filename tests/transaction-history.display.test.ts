@@ -4,6 +4,7 @@ import { resetTestDatabase } from "./helpers/database";
 
 beforeEach(() => {
   resetTestDatabase("transaction-history.sqlite");
+  TransactionHistory.resetForTesting();
 });
 
 test("formatTransactionForDisplay shows icons, link, and amounts", () => {
@@ -77,7 +78,7 @@ test("formatTransactionForDisplay adds cluster for non-mainnet networks", () => 
 });
 
 test("TransactionHistory add + display roundtrip smoke", () => {
-  const db = new TransactionHistory();
+  const db = TransactionHistory.getInstance();
   const rec = createTransactionRecord("u1", "DEPOSIT", "sig-x", "SOL", "SOL", "1.0", undefined, "PENDING");
   db.addTransaction(rec);
   const list = db.getUserHistory("u1", 1, 0);

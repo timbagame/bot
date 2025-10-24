@@ -3,6 +3,7 @@ import { escapeHtml, formatUsdValue } from "./format-amount";
 import { INPUT_TIMEOUT_HINT, LAMPORTS_PER_SOL } from "./constants";
 import { respondWithMenu } from "./menu-response";
 import { setUserState } from "./user-state";
+import { NetworkDetector } from "./network-detector";
 
 export type TokenDisplayLine = {
   ticker: string;
@@ -80,11 +81,12 @@ export function buildWalletCaption(
 ): string {
   const lines: string[] = [];
 
-  lines.push(
-    `Solana Address · <a href="https://solscan.io/account/${encodeURIComponent(
-      walletAddress
-    )}">🅴</a>`
-  );
+  const explorerUrl = NetworkDetector.buildSolscanAccountUrl(walletAddress);
+  const explorerIcon = explorerUrl
+    ? `<a href="${explorerUrl}">🅴</a>`
+    : "🅴";
+
+  lines.push(`Solana Address · ${explorerIcon}`);
   lines.push("");
   lines.push(`<code>${escapeHtml(walletAddress)}</code> (Tap to copy)`);
   lines.push("");
