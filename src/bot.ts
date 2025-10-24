@@ -8668,24 +8668,47 @@ const handleCustomAmountInput = async (
     INPUT_TIMEOUT_HINT,
   ];
 
-  await ctx.api.editMessageText(
-    ctx.chat.id,
-    userState.messageId,
-    response.join("\n"),
-    {
+  const messageText = response.join("\n");
+  const keyboard = new InlineKeyboard().text("❌ Cancel", `send_select_${token}`).row();
+
+  const chatId = ctx.chat?.id;
+  let targetMessageId = userState.messageId;
+
+  if (chatId === undefined || targetMessageId === undefined) {
+    const sentMessage = await ctx.reply(messageText, {
       parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
-        .text("❌ Cancel", `send_select_${token}`)
-        .row(),
+      reply_markup: keyboard,
+    });
+    targetMessageId = sentMessage.message_id;
+  } else {
+    try {
+      await ctx.api.editMessageText(chatId, targetMessageId, messageText, {
+        parse_mode: "HTML",
+        reply_markup: keyboard,
+      });
+    } catch (error) {
+      console.warn(
+        "handleCustomAmountInput: editMessageText failed, replying instead:",
+        error
+      );
+      const sentMessage = await ctx.reply(messageText, {
+        parse_mode: "HTML",
+        reply_markup: keyboard,
+      });
+      targetMessageId = sentMessage.message_id;
     }
-  );
+  }
+
+  if (!ctx.from?.id) {
+    return;
+  }
 
   setUserState(ctx.from.id.toString(), {
     type: "send_address",
     token,
     amount: storedAmount,
     amountDisplay: displayLabel,
-    messageId: userState.messageId,
+    messageId: targetMessageId,
     chatId: ctx.chat?.id,
   });
 };
