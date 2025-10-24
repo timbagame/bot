@@ -9100,6 +9100,7 @@ const handleBuyCustomAmountInput = async (
 };
 
 export const __test_handleBuyCustomAmountInput = handleBuyCustomAmountInput;
+export const __test_handleCustomAmountInput = handleCustomAmountInput;
 
 /**
  * Handle SELL custom amount input
