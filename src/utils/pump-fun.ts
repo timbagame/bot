@@ -616,21 +616,22 @@ export class PumpFunClient {
       throw new Error("Bonding curve reserves must be greater than zero");
     }
 
-    const invariant = virtualSolReserves * virtualTokenReserves;
     const newTokenReserve = virtualTokenReserves + tokenAmount;
     if (newTokenReserve <= 0n) {
       throw new Error("New token reserve must be positive");
     }
 
-    const newVirtualSolReserves = invariant / newTokenReserve;
-    if (newVirtualSolReserves > virtualSolReserves) {
-      throw new Error("Sell would increase SOL reserves, invariant broken");
-    }
-
-    // Round the sell output down to match pump.fun's on-chain math
+    // Round the sell output down to match pump.fun's on-chain math before
+    // adjusting reserves. This mirrors the on-chain constant-product program,
+    // preventing the single-lamport rounding error highlighted in review.
     const rawSolOut = (tokenAmount * virtualSolReserves) / newTokenReserve;
     if (rawSolOut <= 0n) {
       return 0n;
+    }
+
+    const newVirtualSolReserves = virtualSolReserves - rawSolOut;
+    if (newVirtualSolReserves < 0n) {
+      throw new Error("Sell would deplete SOL reserves, invariant broken");
     }
 
     const totalFeeBps = feeBasisPoints < 0n ? 0n : feeBasisPoints;

@@ -115,7 +115,7 @@ describe("PumpFunClient quotes (SDK stubbed)", () => {
     });
 
     expect(calls).toHaveLength(1);
-    const minOut = calls[0].solAmount as BN;
+    const minOut = calls[0].solAmount as InstanceType<typeof BN>;
 
     const virtualSol = 2_000_000_000_000n;
     const virtualToken = 1_000_000_000_000n;
