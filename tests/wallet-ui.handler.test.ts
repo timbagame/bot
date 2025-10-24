@@ -5,6 +5,7 @@ import {
   buildWalletTokenLines,
   buildWalletActionMenu,
 } from "../src/utils/wallet-ui";
+import { __test_buildQuickAmountKeyboard } from "../src/bot";
 
 type MakeCtxOptions = {
   editError?: Error;
@@ -335,5 +336,52 @@ describe("buildWalletActionMenu", () => {
       [{ text: "❌ Insufficient SOL balance", callback_data: "noop" }],
       [{ text: "← Back to Wallet", callback_data: "main_wallet" }],
     ]);
+  });
+});
+
+test("send quick amount keyboard preserves percentage and custom callbacks", () => {
+  const keyboard = __test_buildQuickAmountKeyboard({
+    baseCallback: (value) => `send_amount_SOL_${value.toUpperCase()}`,
+    customLabel: "✏️ Custom Amount",
+    backCallback: "cmd_withdraw",
+  });
+
+  const rows = keyboard.inline_keyboard.filter((row) => row.length > 0);
+  expect(rows).toHaveLength(4);
+
+  const [rowPercent1, rowPercent2, rowCustom, rowBack] = rows;
+  expect(rowPercent1).toBeDefined();
+  expect(rowPercent2).toBeDefined();
+  expect(rowCustom).toBeDefined();
+  expect(rowBack).toBeDefined();
+
+  const [btn25, btn50] = rowPercent1!;
+  const [btn75, btnMax] = rowPercent2!;
+  const [customBtn] = rowCustom!;
+  const [backBtn] = rowBack!;
+
+  expect(btn25).toMatchObject({
+    text: "25%",
+    callback_data: "send_amount_SOL_25%",
+  });
+  expect(btn50).toMatchObject({
+    text: "50%",
+    callback_data: "send_amount_SOL_50%",
+  });
+  expect(btn75).toMatchObject({
+    text: "75%",
+    callback_data: "send_amount_SOL_75%",
+  });
+  expect(btnMax).toMatchObject({
+    text: "MAX",
+    callback_data: "send_amount_SOL_MAX",
+  });
+  expect(customBtn).toMatchObject({
+    text: "✏️ Custom Amount",
+    callback_data: "send_amount_SOL_CUSTOM",
+  });
+  expect(backBtn).toMatchObject({
+    text: "← Back",
+    callback_data: "cmd_withdraw",
   });
 });

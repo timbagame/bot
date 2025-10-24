@@ -675,6 +675,8 @@ const buildQuickAmountKeyboard = ({
   return keyboard;
 };
 
+export const __test_buildQuickAmountKeyboard = buildQuickAmountKeyboard;
+
 type TradeKind = "buy" | "sell" | "swap";
 
 type TradeConfirmationParams = {
