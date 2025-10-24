@@ -8755,19 +8755,40 @@ const handleAddressInput = async (
     `This action cannot be undone.`,
   ];
 
-  await ctx.api.editMessageText(
-    ctx.chat.id,
-    userState.messageId,
-    response.join("\n"),
-    {
+  const messageText = response.join("\n");
+  const keyboard = new InlineKeyboard()
+    .text("✅ Confirm Send", `confirm_send_${txId}`)
+    .row()
+    .text("❌ Cancel", `send_select_${token}`)
+    .row();
+
+  const chatId = ctx.chat?.id;
+  const targetMessageId =
+    typeof userState.messageId === "number" ? userState.messageId : undefined;
+
+  if (chatId === undefined || targetMessageId === undefined) {
+    await ctx.reply(messageText, {
       parse_mode: "HTML",
-      reply_markup: new InlineKeyboard()
-        .text("✅ Confirm Send", `confirm_send_${txId}`)
-        .row()
-        .text("❌ Cancel", `send_select_${token}`)
-        .row(),
-    }
-  );
+      reply_markup: keyboard,
+    });
+    return;
+  }
+
+  try {
+    await ctx.api.editMessageText(chatId, targetMessageId, messageText, {
+      parse_mode: "HTML",
+      reply_markup: keyboard,
+    });
+  } catch (error) {
+    console.warn(
+      "handleAddressInput: editMessageText failed, replying instead:",
+      error
+    );
+    await ctx.reply(messageText, {
+      parse_mode: "HTML",
+      reply_markup: keyboard,
+    });
+  }
 };
 
 /**
@@ -9101,6 +9122,7 @@ const handleBuyCustomAmountInput = async (
 
 export const __test_handleBuyCustomAmountInput = handleBuyCustomAmountInput;
 export const __test_handleCustomAmountInput = handleCustomAmountInput;
+export const __test_handleAddressInput = handleAddressInput;
 
 /**
  * Handle SELL custom amount input
