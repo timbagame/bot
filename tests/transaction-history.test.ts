@@ -12,8 +12,7 @@ const dbPath = getTestDatabasePath("transaction-history.sqlite");
 describe("TransactionHistory", () => {
   beforeAll(() => {
     resetTestDatabase("transaction-history.sqlite");
-    // @ts-ignore - ensure singleton reinitializes against the fresh DB path
-    TransactionHistory["instance"] = null;
+    TransactionHistory.resetForTesting();
   });
 
   it("initializes schema with updated_at column", () => {

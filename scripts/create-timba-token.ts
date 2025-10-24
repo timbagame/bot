@@ -11,6 +11,7 @@ import {
 } from "@solana/spl-token";
 import * as fs from "fs";
 import * as path from "path";
+import { NetworkDetector } from "../src/utils/network-detector";
 
 // ================================
 // CONFIGURATION
@@ -156,7 +157,10 @@ async function createTimbaToken() {
     console.log(`Network: ${CONFIG.NETWORK}`);
     console.log("\n🔗 Solscan URL:");
     console.log(
-      `https://solscan.io/token/${mint.toBase58()}?cluster=${CONFIG.NETWORK}`
+      NetworkDetector.buildSolscanTokenUrl(
+        mint.toBase58(),
+        CONFIG.NETWORK
+      ) ?? `Explorer not available for ${CONFIG.NETWORK}`
     );
 
     // Step 5: Save token info to file

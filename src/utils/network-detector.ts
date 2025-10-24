@@ -91,18 +91,92 @@ export class NetworkDetector {
    * Build a Solscan transaction URL respecting the configured network.
    * Returns null when Solscan cannot display the network (e.g. localnet).
    */
-  static buildSolscanTxUrl(signature: string | undefined | null): string | null {
-    if (!signature) return null;
-    const network = this.getCurrentNetwork();
-    if (network === "localnet") return null;
+  static buildSolscanTxUrl(
+    signature: string | undefined | null,
+    networkOverride?: string | null
+  ): string | null {
+    return this.buildSolscanResourceUrl("tx", signature, networkOverride);
+  }
 
-    const baseUrl = `https://solscan.io/tx/${signature}`;
-    if (network === "mainnet") return baseUrl;
+  /**
+   * Build a Solscan account URL respecting the configured network.
+   * Returns null when Solscan cannot display the network (e.g. localnet).
+   */
+  static buildSolscanAccountUrl(
+    address: string | undefined | null,
+    networkOverride?: string | null
+  ): string | null {
+    return this.buildSolscanResourceUrl("account", address, networkOverride);
+  }
+
+  /**
+   * Build a Solscan token URL respecting the configured network.
+   * Returns null when Solscan cannot display the network (e.g. localnet).
+   */
+  static buildSolscanTokenUrl(
+    mint: string | undefined | null,
+    networkOverride?: string | null
+  ): string | null {
+    return this.buildSolscanResourceUrl("token", mint, networkOverride);
+  }
+
+  private static buildSolscanResourceUrl(
+    resource: "tx" | "account" | "token",
+    value: string | undefined | null,
+    networkOverride?: string | null
+  ): string | null {
+    if (!value) return null;
+
+    const network =
+      this.resolveNetworkInput(networkOverride) ?? this.getCurrentNetwork();
+    if (network === "localnet") {
+      return null;
+    }
+
+    const encodedValue =
+      resource === "account" ? encodeURIComponent(value) : value;
+    const baseUrl = `https://solscan.io/${resource}/${encodedValue}`;
+
+    if (network === "mainnet") {
+      return baseUrl;
+    }
 
     if (network === "devnet" || network === "testnet") {
       return `${baseUrl}?cluster=${network}`;
     }
 
     return baseUrl;
+  }
+
+  private static resolveNetworkInput(
+    input?: string | null
+  ): SolanaNetwork | undefined {
+    if (!input) {
+      return undefined;
+    }
+
+    const normalized = input.trim().toLowerCase();
+    if (!normalized) {
+      return undefined;
+    }
+
+    if (normalized.startsWith("http://") || normalized.startsWith("https://")) {
+      return this.detectNetwork(normalized);
+    }
+
+    if (normalized === "mainnet" || normalized === "mainnet-beta") {
+      return "mainnet";
+    }
+    if (normalized === "devnet") {
+      return "devnet";
+    }
+    if (normalized === "testnet") {
+      return "testnet";
+    }
+    if (normalized === "localnet" || normalized === "localhost") {
+      return "localnet";
+    }
+
+    return undefined;
   }
 }

@@ -124,3 +124,14 @@ export function createDatabaseHandle<T>(
     reset: () => singleton.reset(),
   };
 }
+
+export function createDatabaseSingleton<T>(factory: () => T): {
+  getInstance: () => T;
+  resetForTesting: () => void;
+} {
+  const { getInstance, reset } = createDatabaseHandle(factory);
+  return {
+    getInstance,
+    resetForTesting: () => reset(),
+  };
+}

@@ -81,6 +81,18 @@ test("buildSolscanTxUrl appends cluster for devnet/testnet", () => {
   process.env.SOLANA_NETWORK = original;
 });
 
+test("buildSolscanTxUrl respects explicit network overrides", () => {
+  expect(NetworkDetector.buildSolscanTxUrl("sig", "devnet")).toBe(
+    "https://solscan.io/tx/sig?cluster=devnet"
+  );
+  expect(
+    NetworkDetector.buildSolscanTxUrl(
+      "sig",
+      "https://api.testnet.solana.com"
+    )
+  ).toBe("https://solscan.io/tx/sig?cluster=testnet");
+});
+
 test("buildSolscanTxUrl returns null for localnet", () => {
   const original = process.env.SOLANA_NETWORK;
   process.env.SOLANA_NETWORK = "http://localhost:8899";
@@ -118,4 +130,28 @@ test("getDisplayNameFromRpc returns friendly network labels", () => {
   expect(
     NetworkDetector.getDisplayNameFromRpc("http://custom.rpc:8899")
   ).toBe("Custom Network");
+});
+
+test("buildSolscanAccountUrl encodes address and uses overrides", () => {
+  const original = process.env.SOLANA_NETWORK;
+  process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
+  expect(
+    NetworkDetector.buildSolscanAccountUrl('ADDR<&"')
+  ).toBe("https://solscan.io/account/ADDR%3C%26%22");
+
+  expect(
+    NetworkDetector.buildSolscanAccountUrl("ADDR123", "testnet")
+  ).toBe("https://solscan.io/account/ADDR123?cluster=testnet");
+  process.env.SOLANA_NETWORK = original;
+});
+
+test("buildSolscanTokenUrl returns null on localnet", () => {
+  const original = process.env.SOLANA_NETWORK;
+  process.env.SOLANA_NETWORK = "http://localhost:8899";
+  expect(NetworkDetector.buildSolscanTokenUrl("mint")).toBeNull();
+  process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
+  expect(NetworkDetector.buildSolscanTokenUrl("mint", "devnet")).toBe(
+    "https://solscan.io/token/mint?cluster=devnet"
+  );
+  process.env.SOLANA_NETWORK = original;
 });

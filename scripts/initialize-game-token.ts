@@ -137,16 +137,22 @@ type InitializationCostEstimate = {
 
 type FeeResponse = Awaited<ReturnType<Connection["getFeeForMessage"]>>;
 
-const buildExplorerUrl = (resource: "tx" | "token" | "account", value: string) => {
-  if (CONFIG.NETWORK === "localnet") {
-    return `Explorer not available for ${CONFIG.NETWORK_DISPLAY_NAME}`;
-  }
+const buildExplorerUrl = (
+  resource: "tx" | "token" | "account",
+  value: string
+) => {
+  const resolver = {
+    tx: NetworkDetector.buildSolscanTxUrl,
+    token: NetworkDetector.buildSolscanTokenUrl,
+    account: NetworkDetector.buildSolscanAccountUrl,
+  } as const;
 
-  const basePath = `${resource}/${value}`;
-  if (CONFIG.NETWORK === "mainnet") {
-    return `https://solscan.io/${basePath}`;
-  }
-  return `https://solscan.io/${basePath}?cluster=${CONFIG.NETWORK}`;
+  const build = resolver[resource];
+  const url = build(value, CONFIG.NETWORK);
+
+  return (
+    url ?? `Explorer not available for ${CONFIG.NETWORK_DISPLAY_NAME}`
+  );
 };
 
 type BaseTokenInitializationResult = {

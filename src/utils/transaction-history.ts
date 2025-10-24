@@ -1,5 +1,5 @@
-import { Database } from "bun:sqlite";
-import { resolveDatabaseFilename } from "./base-database";
+import { BaseDatabase, createDatabaseSingleton } from "./base-database";
+import { NetworkDetector } from "./network-detector";
 
 // ================================
 // TRANSACTION HISTORY TYPES
@@ -26,91 +26,76 @@ export interface TransactionRecord {
 // TRANSACTION HISTORY DATABASE
 // ================================
 
-export class TransactionHistory {
-  private db: Database;
-  private static instance: TransactionHistory | null = null;
+export class TransactionHistory extends BaseDatabase {
+  private static readonly handles = createDatabaseSingleton(
+    () => new TransactionHistory()
+  );
 
-  constructor() {
-    const dbPath = resolveDatabaseFilename("transaction-history.sqlite");
-    this.db = new Database(dbPath, { create: true });
-    this.initializeTables();
-    console.log("📊 TransactionHistory database initialized");
-  }
+  public static readonly getInstance = TransactionHistory.handles.getInstance;
+  public static readonly resetForTesting =
+    TransactionHistory.handles.resetForTesting;
 
-  static getInstance(): TransactionHistory {
-    if (!TransactionHistory.instance) {
-      TransactionHistory.instance = new TransactionHistory();
-    }
-    return TransactionHistory.instance;
-  }
-
-  private initializeTables(): void {
-    // Create transaction history table
-    this.db.run(
-      `CREATE TABLE IF NOT EXISTS transaction_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        transaction_type TEXT NOT NULL,
-        signature TEXT NOT NULL UNIQUE,
-        from_token TEXT NOT NULL,
-        to_token TEXT NOT NULL,
-        amount_in TEXT NOT NULL,
-        amount_out TEXT,
-        price_impact TEXT,
-        fee TEXT,
-        status TEXT NOT NULL DEFAULT 'PENDING',
-        timestamp INTEGER NOT NULL,
-        network TEXT DEFAULT 'mainnet',
-        block_height INTEGER,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`
+  private constructor() {
+    super(
+      "transaction-history.sqlite",
+      [
+        `CREATE TABLE IF NOT EXISTS transaction_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id TEXT NOT NULL,
+          transaction_type TEXT NOT NULL,
+          signature TEXT NOT NULL UNIQUE,
+          from_token TEXT NOT NULL,
+          to_token TEXT NOT NULL,
+          amount_in TEXT NOT NULL,
+          amount_out TEXT,
+          price_impact TEXT,
+          fee TEXT,
+          status TEXT NOT NULL DEFAULT 'PENDING',
+          timestamp INTEGER NOT NULL,
+          network TEXT DEFAULT 'mainnet',
+          block_height INTEGER,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_user_timestamp ON transaction_history(user_id, timestamp DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_signature ON transaction_history(signature)`,
+        `CREATE INDEX IF NOT EXISTS idx_type_user ON transaction_history(transaction_type, user_id)`
+      ],
+      "TransactionHistory"
     );
-
-    // Create indexes for better performance
-    this.db.run(
-      `CREATE INDEX IF NOT EXISTS idx_user_timestamp ON transaction_history(user_id, timestamp DESC)`
-    );
-    this.db.run(
-      `CREATE INDEX IF NOT EXISTS idx_signature ON transaction_history(signature)`
-    );
-    this.db.run(
-      `CREATE INDEX IF NOT EXISTS idx_type_user ON transaction_history(transaction_type, user_id)`
-    );
-
   }
 
   /**
    * Add a new transaction record
    */
   addTransaction(record: TransactionRecord): number {
-    const stmt = this.db.prepare(`
-      INSERT INTO transaction_history
-      (user_id, transaction_type, signature, from_token, to_token, amount_in, amount_out, price_impact, fee, status, timestamp, network, block_height)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
     try {
-      const result = stmt.run(
-        record.user_id,
-        record.transaction_type,
-        record.signature,
-        record.from_token,
-        record.to_token,
-        record.amount_in,
-        record.amount_out || null,
-        record.price_impact || null,
-        record.fee || null,
-        record.status,
-        record.timestamp,
-        record.network || "mainnet",
-        record.block_height || null
+      const result = this.run(
+        `INSERT INTO transaction_history
+        (user_id, transaction_type, signature, from_token, to_token, amount_in, amount_out, price_impact, fee, status, timestamp, network, block_height)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          record.user_id,
+          record.transaction_type,
+          record.signature,
+          record.from_token,
+          record.to_token,
+          record.amount_in,
+          record.amount_out || null,
+          record.price_impact || null,
+          record.fee || null,
+          record.status,
+          record.timestamp,
+          record.network || "mainnet",
+          record.block_height || null,
+        ],
+        "adding transaction record"
       );
 
       console.log(
         `📝 Added transaction record: ${record.transaction_type} ${record.from_token}→${record.to_token} for user ${record.user_id}`
       );
-      return result.lastInsertRowid as number;
+      return Number(result.lastInsertRowid ?? 0);
     } catch (error) {
       console.error("Error adding transaction record:", error);
       throw error;
@@ -125,14 +110,14 @@ export class TransactionHistory {
     status: "SUCCESS" | "FAILED",
     blockHeight?: number
   ): void {
-    const stmt = this.db.prepare(`
-      UPDATE transaction_history
-      SET status = ?, block_height = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE signature = ?
-    `);
-
     try {
-      stmt.run(status, blockHeight || null, signature);
+      this.run(
+        `UPDATE transaction_history
+        SET status = ?, block_height = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE signature = ?`,
+        [status, blockHeight || null, signature],
+        "updating transaction status"
+      );
       console.log(`🔄 Updated transaction ${signature} status to ${status}`);
     } catch (error) {
       console.error("Error updating transaction status:", error);
@@ -147,15 +132,15 @@ export class TransactionHistory {
     limit: number = 20,
     offset: number = 0
   ): TransactionRecord[] {
-    const stmt = this.db.prepare(`
-      SELECT * FROM transaction_history
-      WHERE user_id = ?
-      ORDER BY timestamp DESC
-      LIMIT ? OFFSET ?
-    `);
-
     try {
-      const records = stmt.all(userId, limit, offset) as TransactionRecord[];
+      const records = this.all<TransactionRecord>(
+        `SELECT * FROM transaction_history
+        WHERE user_id = ?
+        ORDER BY timestamp DESC
+        LIMIT ? OFFSET ?`,
+        [userId, limit, offset],
+        "getting user history"
+      );
       return records;
     } catch (error) {
       console.error("Error getting user history:", error);
@@ -171,15 +156,15 @@ export class TransactionHistory {
     type: TransactionRecord["transaction_type"],
     limit: number = 10
   ): TransactionRecord[] {
-    const stmt = this.db.prepare(`
-      SELECT * FROM transaction_history
-      WHERE user_id = ? AND transaction_type = ?
-      ORDER BY timestamp DESC
-      LIMIT ?
-    `);
-
     try {
-      const records = stmt.all(userId, type, limit) as TransactionRecord[];
+      const records = this.all<TransactionRecord>(
+        `SELECT * FROM transaction_history
+        WHERE user_id = ? AND transaction_type = ?
+        ORDER BY timestamp DESC
+        LIMIT ?`,
+        [userId, type, limit],
+        "getting user history by type"
+      );
       return records;
     } catch (error) {
       console.error("Error getting user history by type:", error);
@@ -191,13 +176,13 @@ export class TransactionHistory {
    * Get transaction count for user
    */
   getUserTransactionCount(userId: string): number {
-    const stmt = this.db.prepare(`
-      SELECT COUNT(*) as count FROM transaction_history WHERE user_id = ?
-    `);
-
     try {
-      const result = stmt.get(userId) as { count: number };
-      return result.count;
+      const result = this.get<{ count: number }>(
+        "SELECT COUNT(*) as count FROM transaction_history WHERE user_id = ?",
+        [userId],
+        "getting transaction count"
+      );
+      return result?.count ?? 0;
     } catch (error) {
       console.error("Error getting transaction count:", error);
       return 0;
@@ -208,15 +193,15 @@ export class TransactionHistory {
    * Get recent successful transactions across all users (for stats)
    */
   getRecentTransactions(limit: number = 10): TransactionRecord[] {
-    const stmt = this.db.prepare(`
-      SELECT * FROM transaction_history
-      WHERE status = 'SUCCESS'
-      ORDER BY timestamp DESC
-      LIMIT ?
-    `);
-
     try {
-      return stmt.all(limit) as TransactionRecord[];
+      return this.all<TransactionRecord>(
+        `SELECT * FROM transaction_history
+        WHERE status = 'SUCCESS'
+        ORDER BY timestamp DESC
+        LIMIT ?`,
+        [limit],
+        "getting recent transactions"
+      );
     } catch (error) {
       console.error("Error getting recent transactions:", error);
       return [];
@@ -229,13 +214,13 @@ export class TransactionHistory {
   cleanOldTransactions(daysToKeep: number = 90): number {
     const cutoffTime = Date.now() - daysToKeep * 24 * 60 * 60 * 1000;
 
-    const stmt = this.db.prepare(`
-      DELETE FROM transaction_history
-      WHERE timestamp < ? AND status != 'PENDING'
-    `);
-
     try {
-      const result = stmt.run(cutoffTime);
+      const result = this.run(
+        `DELETE FROM transaction_history
+        WHERE timestamp < ? AND status != 'PENDING'`,
+        [cutoffTime],
+        "cleaning old transactions"
+      );
       console.log(
         `🧹 Cleaned ${result.changes} old transaction records (older than ${daysToKeep} days)`
       );
@@ -278,11 +263,15 @@ export function formatTransactionForDisplay(tx: TransactionRecord): string {
     amountText += ` → ${tx.amount_out} ${tx.to_token}`;
   }
 
-  const network = tx.network?.toLowerCase();
-  const clusterQuery = network && network !== "mainnet" ? `?cluster=${encodeURIComponent(network)}` : "";
-  const explorerUrl = `https://solscan.io/tx/${tx.signature}${clusterQuery}`;
+  const explorerUrl = NetworkDetector.buildSolscanTxUrl(
+    tx.signature,
+    tx.network
+  );
+  const viewLink = explorerUrl
+    ? `<a href="${explorerUrl}">View</a>`
+    : "View";
 
-  return `${statusIcon}${typeIcon} ${amountText}\n<code>${date}</code> • <a href="${explorerUrl}">View</a>`;
+  return `${statusIcon}${typeIcon} ${amountText}\n<code>${date}</code> • ${viewLink}`;
 }
 
 function getTransactionTypeIcon(
