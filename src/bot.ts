@@ -6183,8 +6183,7 @@ bot.on("callback_query", async (ctx, next) => {
             if (value === "CUSTOM") {
               return `send_custom_${token}`;
             }
-            const normalized = value.replace("%", "").toUpperCase();
-            return `send_amount_${token}_pct${normalized}`;
+            return `send_amount_${token}_${value.toUpperCase()}`;
           },
           customLabel: "✏️ Custom Amount",
           backCallback: "cmd_withdraw",
