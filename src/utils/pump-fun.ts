@@ -627,7 +627,8 @@ export class PumpFunClient {
       throw new Error("Sell would increase SOL reserves, invariant broken");
     }
 
-    const rawSolOut = virtualSolReserves - newVirtualSolReserves;
+    // Round the sell output down to match pump.fun's on-chain math
+    const rawSolOut = (tokenAmount * virtualSolReserves) / newTokenReserve;
     if (rawSolOut <= 0n) {
       return 0n;
     }

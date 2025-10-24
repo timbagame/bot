@@ -65,7 +65,7 @@ describe("PumpFunClient quotes (SDK stubbed)", () => {
       100
     );
 
-    expect(Number(res.outputAmount)).toBe(1_999_997);
+    expect(Number(res.outputAmount)).toBe(1_999_996);
   });
 
   test("sell min-out matches constant product math for large trades", async () => {
@@ -120,9 +120,7 @@ describe("PumpFunClient quotes (SDK stubbed)", () => {
     const virtualSol = 2_000_000_000_000n;
     const virtualToken = 1_000_000_000_000n;
     const tokenIn = 400_000_000_000n;
-    const invariant = virtualSol * virtualToken;
-    const newSolReserve = invariant / (virtualToken + tokenIn);
-    const rawSolOut = virtualSol - newSolReserve;
+    const rawSolOut = (tokenIn * virtualSol) / (virtualToken + tokenIn);
     const feeBps = 200n;
     const fee = (rawSolOut * feeBps + 9_999n) / 10_000n;
     const netSol = rawSolOut - fee;
