@@ -6179,12 +6179,7 @@ bot.on("callback_query", async (ctx, next) => {
       quickActions: {
         type: "prebuilt",
         keyboard: buildQuickAmountKeyboard({
-          baseCallback: (value) => {
-            if (value === "CUSTOM") {
-              return `send_custom_${token}`;
-            }
-            return `send_amount_${token}_${value.toUpperCase()}`;
-          },
+          baseCallback: (value) => `send_amount_${token}_${value.toUpperCase()}`,
           customLabel: "✏️ Custom Amount",
           backCallback: "cmd_withdraw",
         }),
