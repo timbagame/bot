@@ -68,6 +68,15 @@ const resolveGameVideoId = (gameType: string): string | undefined => {
 
 const WRAP_SOL_FEE_BUFFER_LAMPORTS = 15_000; // ~0.000015 SOL buffer to cover wrap transaction fees
 
+type GameTokenContextAccounts = {
+  tokenMint: PublicKey;
+  gameToken: PublicKey;
+  gameVault: PublicKey;
+  gameTokenAccount: PublicKey;
+  tokenProgram: PublicKey;
+  associatedTokenProgram: PublicKey;
+};
+
 // ================================
 // UTILITY FUNCTIONS
 // ================================
@@ -284,33 +293,47 @@ export class GameManager {
     };
   }
 
+  private buildGameTokenContext(
+    tokenMint: PublicKey,
+    accounts: {
+      tokenProgram: PublicKey;
+      gameToken: PublicKey;
+      gameVault: PublicKey;
+      gameTokenAccount: PublicKey;
+    }
+  ): GameTokenContextAccounts {
+    return {
+      tokenMint,
+      gameToken: accounts.gameToken,
+      gameVault: accounts.gameVault,
+      gameTokenAccount: accounts.gameTokenAccount,
+      tokenProgram: accounts.tokenProgram,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+    };
+  }
+
   private async buildJoinAccounts(
     gamePda: PublicKey,
     gameAccount: any,
     player: PublicKey,
     oracleOperator?: PublicKey
-  ): Promise<Record<string, PublicKey>> {
+  ): Promise<Record<string, unknown>> {
     const tokenMint = new PublicKey(gameAccount.tokenMint);
-    const { tokenProgram, gameToken, gameVault, gameTokenAccount } =
-      await this.resolveGameTokenAccounts(tokenMint);
+    const tokenAccounts = await this.resolveGameTokenAccounts(tokenMint);
+    const gameTokenCtx = this.buildGameTokenContext(tokenMint, tokenAccounts);
     const playerTokenAccount = await this.deriveAta(
       tokenMint,
       player,
-      tokenProgram
+      tokenAccounts.tokenProgram
     );
 
-    const accounts: Record<string, PublicKey> = {
+    const accounts: Record<string, unknown> = {
       game: gamePda,
       player,
-      tokenMint,
-      gameToken,
-      gameVault,
+      gameTokenCtx,
       playerTokenAccount,
-      gameTokenAccount,
       oracle: this.getOraclePda(),
       systemProgram: SystemProgram.programId,
-      tokenProgram,
-      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
     };
 
     if (oracleOperator) {
@@ -325,7 +348,7 @@ export class GameManager {
     gameAccount: any,
     player: PublicKey,
     authority: PublicKey
-  ): Promise<Record<string, PublicKey>> {
+  ): Promise<Record<string, unknown>> {
     const accounts = await this.buildJoinAccounts(gamePda, gameAccount, player);
     accounts["authority"] = authority;
     return accounts;
@@ -334,29 +357,24 @@ export class GameManager {
   private async buildCloseGameAccounts(
     gamePda: PublicKey,
     gameAccount: any
-  ): Promise<Record<string, PublicKey>> {
+  ): Promise<Record<string, unknown>> {
     const tokenMint = new PublicKey(gameAccount.tokenMint);
-    const { tokenProgram, gameToken, gameVault, gameTokenAccount } =
-      await this.resolveGameTokenAccounts(tokenMint);
+    const tokenAccounts = await this.resolveGameTokenAccounts(tokenMint);
+    const gameTokenCtx = this.buildGameTokenContext(tokenMint, tokenAccounts);
     const creatorPubkey = new PublicKey(gameAccount.creator);
     const creatorTokenAccount = await this.deriveAta(
       tokenMint,
       creatorPubkey,
-      tokenProgram
+      tokenAccounts.tokenProgram
     );
 
     return {
       game: gamePda,
       creator: creatorPubkey,
-      tokenMint,
       oracle: this.getOraclePda(),
-      gameToken,
-      gameVault,
+      gameTokenCtx,
       creatorTokenAccount,
-      gameTokenAccount,
       systemProgram: SystemProgram.programId,
-      tokenProgram,
-      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
     };
   }
 
@@ -2236,12 +2254,15 @@ export class GameManager {
         randomHashBuffer,
         this.program.programId
       );
-      const { tokenProgram, gameToken, gameVault, gameTokenAccount } =
-        await this.resolveGameTokenAccounts(tokenMintPubkey);
+      const tokenAccounts = await this.resolveGameTokenAccounts(tokenMintPubkey);
+      const gameTokenCtx = this.buildGameTokenContext(
+        tokenMintPubkey,
+        tokenAccounts
+      );
       const creatorTokenAccount = await this.deriveAta(
         tokenMintPubkey,
         playerKp.publicKey,
-        tokenProgram
+        tokenAccounts.tokenProgram
       );
       const oraclePda = this.getOraclePda();
 
@@ -2252,14 +2273,9 @@ export class GameManager {
             game: gamePda,
             creator: playerKp.publicKey,
             oracle: oraclePda,
-            tokenMint: tokenMintPubkey,
-            gameToken,
-            gameVault,
+            gameTokenCtx,
             creatorTokenAccount,
-            gameTokenAccount,
             systemProgram: SystemProgram.programId,
-            tokenProgram,
-            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           } as any
         )
         .instruction();
