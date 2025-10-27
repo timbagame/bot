@@ -33,13 +33,13 @@ function makeProgram(connection = createConnectionStub()) {
     methods: {
       initializeGame: (_cfg: any, _hash: any) => ({
         accounts: (accs: any) => {
-          captures.initializeGameAccounts = accs;
+          captures["initializeGameAccounts"] = accs;
           return { instruction: async () => ({}) };
         },
       }),
       joinGame: () => ({
         accounts: (accs: any) => {
-          captures.joinGameAccounts = accs;
+          captures["joinGameAccounts"] = accs;
           return { instruction: async () => ({}) };
         },
       }),
