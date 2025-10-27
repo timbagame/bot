@@ -37,6 +37,7 @@ import {
   createWalletSettingsKeyboard,
   createBackToWalletKeyboard,
   createConfirmWrapKeyboard,
+  createConfirmUnwrapKeyboard,
   createTradeConfirmKeyboard,
   createAmountSelectionKeyboard,
   createPlayerSelectionKeyboard,
@@ -5519,6 +5520,69 @@ bot.callbackQuery("cmd_wrap", async (ctx) => {
   }
 });
 
+bot.callbackQuery("cmd_unwrap", async (ctx) => {
+  try {
+    const telegramId = getTelegramId(ctx);
+    const balances = await getCachedWalletData(telegramId);
+    const hasBalance = balances.wsolBalance > 0;
+
+    const { menu } = await buildWalletActionMenuForUser({
+      ctx,
+      title: `🧼 <b>UNWRAP WSOL</b>`,
+      bodyLines: ({ solBalance, tokenBalances }) => {
+        const wsolLamports =
+          tokenBalances.find((token) => token.mint === WSOL_MINT)?.balance ?? 0;
+        const formattedSolBalance = wallet.formatSolBalance(solBalance);
+        const formattedWsolBalance = wallet.formatSolBalance(wsolLamports);
+
+        const lines = [
+          `<b>Native SOL:</b> ${escapeHtml(formattedSolBalance)}`,
+          `<b>WSOL:</b> ${escapeHtml(formattedWsolBalance)}`,
+        ];
+
+        if (wsolLamports > 0) {
+          lines.push(
+            "",
+            "Unwrap converts WSOL back to native SOL and closes the WSOL account."
+          );
+        } else {
+          lines.push(
+            "",
+            "You currently have no WSOL to unwrap."
+          );
+        }
+
+        return lines;
+      },
+      quickActions: {
+        type: "prebuilt",
+        keyboard: createConfirmUnwrapKeyboard(hasBalance),
+      },
+      backButton: { label: "← Back to Settings", callback: "wallet_settings" },
+      getBalances: async () => ({
+        solBalance: balances.nativeSolBalance,
+        tokenBalances: [
+          {
+            mint: WSOL_MINT,
+            ticker: "WSOL",
+            balance: balances.wsolBalance,
+            decimals: 9,
+            rawBalance: balances.wsolBalance.toString(),
+          },
+        ],
+      }),
+    });
+
+    await respondWithMenu(ctx, menu);
+    await ctx.answerCallbackQuery(
+      hasBalance ? "🧼 Ready to unwrap WSOL" : "ℹ️ No WSOL balance found"
+    );
+  } catch (error) {
+    console.error("Error in cmd_unwrap:", error);
+    await ctx.answerCallbackQuery("❌ Error loading unwrap menu");
+  }
+});
+
 // Handle custom wrap amount
 bot.on("callback_query", async (ctx, next) => {
   const callbackData = ctx.callbackQuery?.data;
@@ -5641,6 +5705,63 @@ bot.on("callback_query", async (ctx, next) => {
     const message =
       error instanceof Error ? error.message : "Error processing wrap amount";
     await ctx.answerCallbackQuery(`❌ ${message}`);
+  }
+});
+
+bot.callbackQuery("unwrap_confirm", async (ctx) => {
+  try {
+    const telegramId = getTelegramId(ctx);
+    const { wsolBalance } = await getCachedWalletData(telegramId);
+
+    if (!Number.isFinite(wsolBalance) || wsolBalance <= 0) {
+      await ctx.answerCallbackQuery("ℹ️ No WSOL to unwrap");
+      await respondWithMenu(ctx, {
+        text: `❌ <b>UNWRAP FAILED</b>\n\nYour WSOL account is already empty.`,
+        keyboard: createBackToWalletKeyboard(),
+      });
+      return;
+    }
+
+    const formattedAmount = wallet.formatSolBalance(wsolBalance);
+
+    await respondWithMenu(ctx, {
+      text: `🔄 <b>PROCESSING UNWRAP</b>\n\nUnwrapping ${escapeHtml(
+        formattedAmount
+      )} WSOL to SOL...\n\n<i>Please wait...</i>`,
+      keyboard: new InlineKeyboard(),
+    });
+
+    const { signature, amountLamports } = await wallet.unwrapSol(telegramId);
+    await wallet.confirmTransaction(signature);
+    clearWalletCache(telegramId);
+
+    const completedAmount = wallet.formatSolBalance(amountLamports);
+    const solscanUrl = NetworkDetector.buildSolscanTxUrl(
+      signature,
+      process.env["RPC_URL"]
+    );
+    const completionMessage = solscanUrl
+      ? `✅ <b>UNWRAP COMPLETED</b>\n\nUnwrapped ${escapeHtml(
+          completedAmount
+        )} WSOL to SOL\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`
+      : `✅ <b>UNWRAP COMPLETED</b>\n\nUnwrapped ${escapeHtml(
+          completedAmount
+        )} WSOL to SOL`;
+
+    await respondWithMenu(ctx, {
+      text: completionMessage,
+      keyboard: createBackToWalletKeyboard(),
+    });
+
+    await ctx.answerCallbackQuery("✅ WSOL unwrapped");
+  } catch (error) {
+    console.error("Error in unwrap confirmation:", error);
+    const userFriendlyError = formatUserFriendlyError(error, wallet);
+    await respondWithMenu(ctx, {
+      text: userFriendlyError,
+      keyboard: createBackToWalletKeyboard(),
+    });
+    await ctx.answerCallbackQuery("❌ Unwrap failed");
   }
 });
 

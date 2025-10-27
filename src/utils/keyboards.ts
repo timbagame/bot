@@ -36,11 +36,12 @@ export const createWalletSettingsKeyboard = (): InlineKeyboard => {
   return appendBackToWalletButton(
     new InlineKeyboard()
       .text("🔧 Wrap SOL", "cmd_wrap")
+      .text("🧼 Unwrap WSOL", "cmd_unwrap")
+      .row()
       .text("🔐 Private Key", "cmd_privatekey")
       .row()
   );
 };
-
 
 export const createConfirmWrapKeyboard = (
   lamports: number
@@ -50,6 +51,20 @@ export const createConfirmWrapKeyboard = (
     .row()
     .text("❌ Cancel", "cmd_wrap")
     .row();
+};
+
+export const createConfirmUnwrapKeyboard = (
+  hasBalance: boolean
+): InlineKeyboard => {
+  const keyboard = new InlineKeyboard();
+
+  if (hasBalance) {
+    keyboard.text("✅ Unwrap All WSOL", "unwrap_confirm").row();
+  } else {
+    keyboard.text("❌ No WSOL to unwrap", "noop").row();
+  }
+
+  return keyboard;
 };
 
 export const createTradeConfirmKeyboard = ({

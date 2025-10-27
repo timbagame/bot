@@ -2,7 +2,9 @@ import { expect, test, describe } from "bun:test";
 import {
   createMainMenuKeyboard,
   createWalletKeyboard,
+  createWalletSettingsKeyboard,
   createConfirmWrapKeyboard,
+  createConfirmUnwrapKeyboard,
   createTradeConfirmKeyboard,
   createAmountSelectionKeyboard,
   createPlayerSelectionKeyboard,
@@ -68,6 +70,22 @@ describe("keyboards: main and wallet", () => {
     expect(callbacks).toContain("wallet_refresh");
     expect(callbacks).toContain("wallet_settings");
   });
+
+  test("wallet settings keyboard includes wrap, unwrap, private key, and back", () => {
+    const kb = createWalletSettingsKeyboard();
+    const callbacks = extractCallbacks(kb);
+    const texts = extractTexts(kb);
+
+    expect(callbacks).toContain("cmd_wrap");
+    expect(callbacks).toContain("cmd_unwrap");
+    expect(callbacks).toContain("cmd_privatekey");
+    expect(callbacks).toContain("main_wallet");
+
+    expect(texts).toContain("🔧 Wrap SOL");
+    expect(texts).toContain("🧼 Unwrap WSOL");
+    expect(texts).toContain("🔐 Private Key");
+    expect(texts).toContain("← Back to Wallet");
+  });
 });
 
 describe("keyboards: misc menus", () => {
@@ -76,6 +94,26 @@ describe("keyboards: misc menus", () => {
     const callbacks = extractCallbacks(kb);
     expect(callbacks).toContain("confirm_wrap_42");
     expect(callbacks).toContain("cmd_wrap");
+  });
+
+  test("confirm unwrap keyboard shows actionable button when balance exists", () => {
+    const kb = createConfirmUnwrapKeyboard(true);
+    const callbacks = extractCallbacks(kb);
+    const texts = extractTexts(kb);
+
+    expect(callbacks).toContain("unwrap_confirm");
+    expect(callbacks).not.toContain("noop");
+    expect(texts).toContain("✅ Unwrap All WSOL");
+  });
+
+  test("confirm unwrap keyboard disables action when no balance", () => {
+    const kb = createConfirmUnwrapKeyboard(false);
+    const callbacks = extractCallbacks(kb);
+    const texts = extractTexts(kb);
+
+    expect(callbacks).not.toContain("unwrap_confirm");
+    expect(callbacks).toContain("noop");
+    expect(texts).toContain("❌ No WSOL to unwrap");
   });
 
   test("trade confirm keyboard renders custom confirm/cancel buttons", () => {
