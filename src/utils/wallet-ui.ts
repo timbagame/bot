@@ -355,13 +355,24 @@ const buildWrapKeyboard = (
   const minimumLamports = params.minimumLamports ?? 10_000;
 
   if (balances.solBalanceLamports > minimumLamports) {
-    for (const amount of params.amounts) {
-      keyboard
-        .text(
-          amount.label,
-          `${params.callbackPrefix}${amount.value}`
-        )
-        .row();
+    for (let i = 0; i < params.amounts.length; i += 2) {
+      const left = params.amounts[i];
+      if (!left) continue;
+
+      keyboard.text(
+        left.label,
+        `${params.callbackPrefix}${left.value}`
+      );
+
+      const right = params.amounts[i + 1];
+      if (right) {
+        keyboard.text(
+          right.label,
+          `${params.callbackPrefix}${right.value}`
+        );
+      }
+
+      keyboard.row();
     }
 
     if (params.customAction) {

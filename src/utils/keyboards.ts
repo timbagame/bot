@@ -43,10 +43,10 @@ export const createWalletSettingsKeyboard = (): InlineKeyboard => {
 
 
 export const createConfirmWrapKeyboard = (
-  amount: number | string
+  lamports: number
 ): InlineKeyboard => {
   return new InlineKeyboard()
-    .text("✅ Confirm Wrap", `confirm_wrap_${String(amount)}`)
+    .text("✅ Confirm Wrap", `confirm_wrap_${String(lamports)}`)
     .row()
     .text("❌ Cancel", "cmd_wrap")
     .row();
