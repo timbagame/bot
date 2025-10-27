@@ -194,12 +194,16 @@ export const __test_setWalletCache = (
       rawBalance: string;
     }>;
     approvedTokens?: any[];
+    nativeSolBalance?: number;
+    wsolBalance?: number;
   },
   _ts?: number
 ) => {
   const cacheKey = getWalletCacheKey(telegramId as any);
   walletDataCache.setWithTTL(cacheKey, {
     solBalance: data.solBalance,
+    nativeSolBalance: data.nativeSolBalance ?? data.solBalance,
+    wsolBalance: data.wsolBalance ?? 0,
     tokenBalances: data.tokenBalances,
     approvedTokens: data.approvedTokens ?? [],
   });
@@ -5439,10 +5443,14 @@ bot.callbackQuery("cmd_wrap", async (ctx) => {
     const { menu } = await buildWalletActionMenuForUser({
       ctx,
       title: `🔧 <b>WRAP SOL</b>`,
-      bodyLines: ({ solBalance }) => {
+      bodyLines: ({ solBalance, tokenBalances }) => {
         const formattedSolBalance = wallet.formatSolBalance(solBalance);
+        const wsolLamports =
+          tokenBalances.find((token) => token.mint === WSOL_MINT)?.balance ?? 0;
+        const formattedWsolBalance = wallet.formatSolBalance(wsolLamports);
         return [
-          `<b>SOL Balance:</b> ${escapeHtml(formattedSolBalance)}`,
+          `<b>Native SOL:</b> ${escapeHtml(formattedSolBalance)}`,
+          `<b>WSOL:</b> ${escapeHtml(formattedWsolBalance)}`,
           "",
           `Convert native SOL to WSOL tokens for DeFi operations.`,
           "",
@@ -5462,10 +5470,25 @@ bot.callbackQuery("cmd_wrap", async (ctx) => {
         insufficientLabel: "❌ Insufficient SOL balance",
         minimumLamports: 10_000,
       },
-      getBalances: async (telegramId) => ({
-        solBalance: await wallet.getBalance(telegramId),
-        tokenBalances: [],
-      }),
+      getBalances: async (telegramId) => {
+        const [solBalance, wsolBalance] = await Promise.all([
+          wallet.getBalance(telegramId),
+          wallet.getTokenBalance(telegramId, WSOL_MINT),
+        ]);
+
+        return {
+          solBalance,
+          tokenBalances: [
+            {
+              mint: WSOL_MINT,
+              ticker: "WSOL",
+              balance: wsolBalance,
+              decimals: 9,
+              rawBalance: wsolBalance.toString(),
+            },
+          ],
+        };
+      },
     });
 
     await respondWithMenu(ctx, menu);
@@ -5530,13 +5553,14 @@ bot.on("callback_query", async (ctx, next) => {
   try {
     const amountChoice = callbackData.replace("wrap_amount_", "");
     const telegramId = getTelegramId(ctx);
-    const { solBalance } = await getCachedWalletData(telegramId);
+    const { nativeSolBalance, wsolBalance } = await getCachedWalletData(telegramId);
+    const availableSolLamports = nativeSolBalance;
 
     const spend = resolveSpendAmount({
       amount: amountChoice,
       assetTicker: "SOL",
       inputDecimals: 9,
-      solBalance,
+      solBalance: availableSolLamports,
       formatSol: (lamports) => wallet.formatSolBalance(lamports),
       formatToken: (value, decimals) =>
         wallet.formatTokenBalance(value, decimals),
@@ -5550,12 +5574,16 @@ bot.on("callback_query", async (ctx, next) => {
 
     const displayAmount = wallet.formatSolBalance(lamportsToWrap);
     console.log(`🔧 Wrap amount selected: ${displayAmount} SOL`);
+    const availableSolDisplay = wallet.formatSolBalance(availableSolLamports);
+    const currentWsolDisplay = wallet.formatSolBalance(wsolBalance);
 
     const selection = amountChoice.trim().toUpperCase();
     const response = [
       `✅ <b>WRAP CONFIRMATION</b>`,
       "",
       `<b>Amount:</b> ${escapeHtml(displayAmount)} SOL → WSOL`,
+      `<b>Available SOL:</b> ${escapeHtml(availableSolDisplay)}`,
+      `<b>Current WSOL:</b> ${escapeHtml(currentWsolDisplay)}`,
       "",
     ];
 
@@ -6024,6 +6052,8 @@ const WALLET_CACHE_DURATION = 30 * 1000; // 30 seconds
 
 type CachedWalletData = {
   solBalance: number;
+  nativeSolBalance: number;
+  wsolBalance: number;
   tokenBalances: Array<{
     mint: string;
     ticker: string;
@@ -6060,6 +6090,7 @@ const getCachedWalletData = async (telegramId: bigint) => {
   try {
     // Fetch fresh data
     let solBalance = await wallet.getBalance(telegramId);
+    const nativeSolBalance = solBalance;
     const approvedTokens = tokenManager
       ? tokenManager.getAllApprovedTokensWithMetadata()
       : [];
@@ -6068,6 +6099,9 @@ const getCachedWalletData = async (telegramId: bigint) => {
       approvedTokens
     );
 
+    const wsolToken = tokenBalances.find((token) => token.mint === WSOL_MINT);
+    const wsolBalance = wsolToken?.balance ?? 0;
+
     // Merge WSOL into SOL using util
     const merged = mergeWsolIntoSol(solBalance, tokenBalances, WSOL_MINT);
     solBalance = merged.solLamports;
@@ -6075,6 +6109,8 @@ const getCachedWalletData = async (telegramId: bigint) => {
 
     const data: CachedWalletData = {
       solBalance,
+      nativeSolBalance,
+      wsolBalance,
       tokenBalances,
       approvedTokens,
     };

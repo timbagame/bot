@@ -294,7 +294,8 @@ describe("buildWalletActionMenu", () => {
     const baseConfig = {
       title: "🔧 <b>WRAP SOL</b>",
       bodyLines: [
-        "<b>SOL Balance:</b> 0.500",
+        "<b>Native SOL:</b> 0.500",
+        "<b>WSOL:</b> 0.125",
         "",
         "<b>Quick Wrap Amounts:</b>",
       ],
@@ -303,8 +304,10 @@ describe("buildWalletActionMenu", () => {
         type: "wrap" as const,
         callbackPrefix: "wrap_amount_",
         amounts: [
-          { label: "0.01 SOL", value: "0.01" },
-          { label: "0.1 SOL", value: "0.1" },
+          { label: "25%", value: "25%" },
+          { label: "50%", value: "50%" },
+          { label: "75%", value: "75%" },
+          { label: "MAX", value: "MAX" },
         ],
         customAction: { label: "✏️ Custom Amount", callback: "wrap_custom" },
         insufficientLabel: "❌ Insufficient SOL balance",
@@ -320,8 +323,14 @@ describe("buildWalletActionMenu", () => {
     });
 
     expect(withBalance.keyboard.inline_keyboard).toEqual([
-      [{ text: "0.01 SOL", callback_data: "wrap_amount_0.01" }],
-      [{ text: "0.1 SOL", callback_data: "wrap_amount_0.1" }],
+      [
+        { text: "25%", callback_data: "wrap_amount_25%" },
+        { text: "50%", callback_data: "wrap_amount_50%" },
+      ],
+      [
+        { text: "75%", callback_data: "wrap_amount_75%" },
+        { text: "MAX", callback_data: "wrap_amount_MAX" },
+      ],
       [{ text: "✏️ Custom Amount", callback_data: "wrap_custom" }],
       [{ text: "← Back to Wallet", callback_data: "main_wallet" }],
     ]);
