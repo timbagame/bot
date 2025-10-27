@@ -1,32 +1,50 @@
 {
   "network": "mainnet",
-  "programId": "9MmCPEForkbt1L4Dk5BCd9ttErJiehwtdD4mM5J8YbFd",
+  "programId": "32Jr4JnXWvqq9GqPQynkooHsszaucUUvZfNLh2hdX2L5",
   "authority": "4oRdwjBqMGjhh5octi4BLvtNGCgWdJDMv3bBr9Jpi5V8",
-  "initializedAt": "2025-10-14T02:49:53.306Z",
+  "initializedAt": "2025-10-27T16:14:43.022Z",
   "tokens": [
     {
       "ticker": "TIMBA",
       "mint": "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
-      "gameTokenPda": "EmaTLvGMwU8XS3fphccF85mTcognHwFX12rfHWDeJq1E",
-      "gameVaultPda": "D56aALwaZ7PKVXQ2F4sQK7MGy9dguBK5x93DkoSEE8nb",
-      "gameTokenAccount": "BMLdPKuLriHHBJeZiHoQxA5s18DLWLAmgPLiscfjL5xw",
-      "minAmount": "1000",
-      "feeAmount": "0",
-      "enabled": true,
-      "transaction": "qw34JcQNPf58NhFvaJ5fAUU2bt6vhWpiNZrRkSYg5yVjb53KwDSgFrdWNU6SEzcDTVuLHh4vWwwYAWgxdB9Tohi",
-      "status": "newly_initialized"
+      "gameTokenPda": "Ez5rCDn2VXjkTaSSdbZWCDBmid74nmSzjG95gPRwAjsN",
+      "gameVaultPda": "kWBZDxd5vbiJbGfccTvx9fESaMf8gLKqSn987VZHPCt",
+      "status": "already_existed"
     },
     {
       "ticker": "WSOL",
       "mint": "So11111111111111111111111111111111111111112",
-      "gameTokenPda": "DxtPugoiyrKqXHS2448Ng5XDCB2f1gQySeX4cocgkjdP",
-      "gameVaultPda": "5kEjjnM11GEu2MWVNr5SxDxvnWeCuG6iaA7RpgGxj8L2",
-      "gameTokenAccount": "A3FpJCRLqV7XQMjLvJ1XJM1rjTowvdLs1Xrmfd9bDs79",
-      "minAmount": "10000000",
-      "feeAmount": "0",
-      "enabled": true,
-      "transaction": "4ev73hXWkPtsPSXVn8scX9MTKzDqqXunCFyNm2KL3o7ZbpTBxuW3iYCoN96mswQygRLaVrN1NScueUtdbmVJzM8d",
-      "status": "newly_initialized"
+      "gameTokenPda": "23EFNVrK84cMGMgNfLo8NCJ6WoEwVtUUgJJBnYsBM8pS",
+      "gameVaultPda": "55BY82LGTNAYHNhXvm4L2oVMz6YM8jeWuWeVqXJyFM87",
+      "status": "already_existed"
+    },
+    {
+      "ticker": "USDC",
+      "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "gameTokenPda": "AaW23h2YkZtAWoWwUiz8nkuPR719tH9fYnVhShykGwGc",
+      "gameVaultPda": "ATcbKVskCFUcbUWQKxhD2ukMRNkvEp2QKQh8UASyzu53",
+      "status": "already_existed"
+    },
+    {
+      "ticker": "MAGAIBA",
+      "mint": "A6rSPi9JmJgVkW6BatsA6MjFYLseizPM2Fnt92coFjf4",
+      "gameTokenPda": "JE196rerASsxmHmKpda8thCxkmpi6XudJAFs7LwkjMgq",
+      "gameVaultPda": "9h18P2jzE5LdrhkryKtfvWSUxcridLhPr2oAFitvPoA5",
+      "status": "already_existed"
+    },
+    {
+      "ticker": "GLORP",
+      "mint": "FkBF9u1upwEMUPxnXjcydxxVSxgr8f3k1YXbz7G7bmtA",
+      "gameTokenPda": "HzsFvYjGcwSL4cPed2BWPo4z3hSMVcuYdve7Q3gwt6RZ",
+      "gameVaultPda": "9ZqTBD8suRP43kiiHQUXvCs7puLhHdasFrg5SLsGAYth",
+      "status": "already_existed"
+    },
+    {
+      "ticker": "AI16Z",
+      "mint": "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC",
+      "gameTokenPda": "H2wNQaHMg7giXmCixxviyHBxVzTcYzWiyQ8rHCCLnLvT",
+      "gameVaultPda": "FjTeMeptVDtD7cbDTPKv3huSLUmvMG8LSr6xedrbfEbg",
+      "status": "already_existed"
     }
   ]
 }
