@@ -1257,6 +1257,64 @@ export const __test_resetPrepareTokenTradeQuote = (): void => {
   prepareTokenTradeQuoteRunner = prepareTokenTradeQuote;
 };
 
+const NON_GAME_CALLBACK_NAMES = [
+  "main_wallet",
+  "wallet_refresh",
+  "wallet_settings",
+  "cmd_help",
+  "cmd_balance",
+  "cmd_withdraw",
+  "cmd_swap",
+  "cmd_wrap",
+  "cmd_privatekey",
+  "help_wallet",
+  "help_games",
+  "help_utility",
+  "help_examples",
+  "cmd_buy",
+  "cmd_sell",
+] as const;
+
+const NON_GAME_CALLBACK_PREFIXES = [
+  "send_",
+  "swap_",
+  "wrap_",
+  "buy_",
+  "sell_",
+  "confirm_",
+  "amount_",
+  "players_",
+  "cancel_game_",
+  "custom_amount_",
+  "custom_players_",
+  "trade_slip_",
+  "trade_slip_back_",
+  "slider_",
+  "back_to_amounts_",
+  "type_amount_",
+  "admin_",
+  "info_",
+] as const;
+
+const shouldSkipGenericGameCallback = (callbackData: string): boolean => {
+  if (!callbackData) return false;
+  if (callbackData === "noop") return true;
+
+  if (
+    NON_GAME_CALLBACK_NAMES.includes(
+      callbackData as (typeof NON_GAME_CALLBACK_NAMES)[number]
+    )
+  ) {
+    return true;
+  }
+
+  return NON_GAME_CALLBACK_PREFIXES.some((prefix) =>
+    callbackData.startsWith(prefix)
+  );
+};
+
+export const __test_shouldSkipGenericGameCallback = shouldSkipGenericGameCallback;
+
 type GameMessageTarget = {
   chatId: number;
   messageId: number;
@@ -4085,46 +4143,7 @@ bot.on("callback_query", async (ctx, next) => {
   if (!callbackData || !ctx.from) return;
 
   // Skip non-game callbacks (let them be handled by specific handlers)
-  const nonGameCallbacks = [
-    "main_wallet",
-    "wallet_refresh",
-    "wallet_settings",
-    "cmd_help",
-    "cmd_balance",
-    "cmd_withdraw",
-    "cmd_swap",
-    "cmd_wrap",
-    "cmd_privatekey",
-    "help_wallet",
-    "help_games",
-    "help_utility",
-    "help_examples",
-    "cmd_buy",
-    "cmd_sell",
-  ];
-
-  // Also skip send/swap/wrap/game-setup interface callbacks
-  if (
-    callbackData.startsWith("send_") ||
-    callbackData.startsWith("swap_") ||
-    callbackData.startsWith("wrap_") ||
-    callbackData.startsWith("buy_") ||
-    callbackData.startsWith("sell_") ||
-    callbackData.startsWith("confirm_") ||
-    callbackData.startsWith("amount_") ||
-    callbackData.startsWith("players_") ||
-    callbackData.startsWith("cancel_game_") ||
-    callbackData.startsWith("custom_amount_") ||
-    callbackData.startsWith("custom_players_") ||
-    callbackData.startsWith("trade_slip_") ||
-    callbackData.startsWith("slider_") ||
-    callbackData.startsWith("back_to_amounts_") ||
-    callbackData.startsWith("type_amount_") ||
-    callbackData.startsWith("admin_") ||
-    callbackData.startsWith("info_") ||
-    callbackData === "noop" ||
-    nonGameCallbacks.includes(callbackData)
-  ) {
+  if (shouldSkipGenericGameCallback(callbackData)) {
     console.log("🔄 Calling next() for non-game callback:", callbackData);
     return await next(); // Pass to specific handlers
   }
