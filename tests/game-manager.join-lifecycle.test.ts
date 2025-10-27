@@ -17,7 +17,7 @@ describe("GameManager join lifecycle", () => {
     );
 
     const program = {
-      programId: new PublicKey("7GWv6X48imfr7SonQRCgka8XSh42J4UP74DyhP1RWNP6"),
+      programId: new PublicKey("32Jr4JnXWvqq9GqPQynkooHsszaucUUvZfNLh2hdX2L5"),
       account: {
         game: {
           fetch: async () => ({
@@ -105,7 +105,7 @@ describe("GameManager join lifecycle", () => {
     );
 
     const program = {
-      programId: new PublicKey("7GWv6X48imfr7SonQRCgka8XSh42J4UP74DyhP1RWNP6"),
+      programId: new PublicKey("32Jr4JnXWvqq9GqPQynkooHsszaucUUvZfNLh2hdX2L5"),
       account: {
         game: {
           fetch: async () => ({
