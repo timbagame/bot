@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { Keypair, PublicKey } from "@solana/web3.js";
+import {
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 import { GameManager } from "../src/utils/game";
 
 function resetGM() {
@@ -15,6 +19,7 @@ describe("GameManager join lifecycle", () => {
     const tokenMint = new PublicKey(
       "So11111111111111111111111111111111111111112"
     );
+    let capturedJoinAccounts: any;
 
     const program = {
       programId: new PublicKey("32Jr4JnXWvqq9GqPQynkooHsszaucUUvZfNLh2hdX2L5"),
@@ -32,9 +37,12 @@ describe("GameManager join lifecycle", () => {
       },
       methods: {
         joinGame: () => ({
-          accounts: () => ({
-            instruction: async () => ({}),
-          }),
+          accounts: (accs: any) => {
+            capturedJoinAccounts = accs;
+            return {
+              instruction: async () => ({}),
+            };
+          },
         }),
       },
     } as any;
@@ -72,13 +80,17 @@ describe("GameManager join lifecycle", () => {
       probeCount += 1;
       return probeCount > 1;
     };
+    const gameToken = Keypair.generate().publicKey;
+    const gameVault = Keypair.generate().publicKey;
+    const gameTokenAccount = Keypair.generate().publicKey;
+    const playerTokenAccount = Keypair.generate().publicKey;
     (gm as any).resolveGameTokenAccounts = async () => ({
-      tokenProgram: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-      gameToken: Keypair.generate().publicKey,
-      gameVault: Keypair.generate().publicKey,
-      gameTokenAccount: Keypair.generate().publicKey,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      gameToken,
+      gameVault,
+      gameTokenAccount,
     });
-    (gm as any).deriveAta = async () => Keypair.generate().publicKey;
+    (gm as any).deriveAta = async () => playerTokenAccount;
 
     const result = await gm.joinGame(
       new PublicKey("BPFLoader1111111111111111111111111111111111").toBase58(),
@@ -94,6 +106,28 @@ describe("GameManager join lifecycle", () => {
     expect(confirmedCall[3]?.joinSignature).toBe("SIG123");
     expect(typeof confirmedCall[3]?.lastVerifiedAt).toBe("number");
     expect(removed.length).toBe(0);
+
+    expect(capturedJoinAccounts).toBeDefined();
+    const ctx = capturedJoinAccounts.gameTokenCtx;
+    expect(ctx).toBeDefined();
+    expect(ctx.tokenMint.toBase58()).toBe(tokenMint.toBase58());
+    expect(ctx.gameToken.toBase58()).toBe(gameToken.toBase58());
+    expect(ctx.gameVault.toBase58()).toBe(gameVault.toBase58());
+    expect(ctx.gameTokenAccount.toBase58()).toBe(
+      gameTokenAccount.toBase58(),
+    );
+    expect(ctx.tokenProgram.toBase58()).toBe(TOKEN_PROGRAM_ID.toBase58());
+    expect(ctx.associatedTokenProgram.toBase58()).toBe(
+      ASSOCIATED_TOKEN_PROGRAM_ID.toBase58(),
+    );
+    expect(
+      capturedJoinAccounts.playerTokenAccount.toBase58(),
+    ).toBe(playerTokenAccount.toBase58());
+    expect(capturedJoinAccounts.tokenMint).toBeUndefined();
+    expect(capturedJoinAccounts.tokenProgram).toBeUndefined();
+    expect(capturedJoinAccounts.gameToken).toBeUndefined();
+    expect(capturedJoinAccounts.gameVault).toBeUndefined();
+    expect(capturedJoinAccounts.gameTokenAccount).toBeUndefined();
   });
 
   test("joinGame surfaces syncing error when on-chain confirmation is delayed", async () => {
@@ -103,6 +137,7 @@ describe("GameManager join lifecycle", () => {
     const tokenMint = new PublicKey(
       "So11111111111111111111111111111111111111112"
     );
+    let capturedJoinAccounts: any;
 
     const program = {
       programId: new PublicKey("32Jr4JnXWvqq9GqPQynkooHsszaucUUvZfNLh2hdX2L5"),
@@ -120,9 +155,12 @@ describe("GameManager join lifecycle", () => {
       },
       methods: {
         joinGame: () => ({
-          accounts: () => ({
-            instruction: async () => ({}),
-          }),
+          accounts: (accs: any) => {
+            capturedJoinAccounts = accs;
+            return {
+              instruction: async () => ({}),
+            };
+          },
         }),
       },
     } as any;
@@ -156,13 +194,17 @@ describe("GameManager join lifecycle", () => {
     (gm as any).confirmTransactionWithRecovery = async () => true;
     (gm as any).isPlayerInGame = async () => false;
     (gm as any).verifyParticipantJoin = async () => false;
+    const gameToken = Keypair.generate().publicKey;
+    const gameVault = Keypair.generate().publicKey;
+    const gameTokenAccount = Keypair.generate().publicKey;
+    const playerTokenAccount = Keypair.generate().publicKey;
     (gm as any).resolveGameTokenAccounts = async () => ({
-      tokenProgram: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-      gameToken: Keypair.generate().publicKey,
-      gameVault: Keypair.generate().publicKey,
-      gameTokenAccount: Keypair.generate().publicKey,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      gameToken,
+      gameVault,
+      gameTokenAccount,
     });
-    (gm as any).deriveAta = async () => Keypair.generate().publicKey;
+    (gm as any).deriveAta = async () => playerTokenAccount;
 
     const result = await gm.joinGame(
       new PublicKey("BPFLoader2111111111111111111111111111111111").toBase58(),
@@ -174,6 +216,27 @@ describe("GameManager join lifecycle", () => {
     expect(participantCalls.length).toBe(1);
     expect(participantCalls[0][3]?.status).toBe("pending");
     expect(participantCalls[0][3]?.joinSignature).toBe("SIG321");
+
+    expect(capturedJoinAccounts).toBeDefined();
+    const ctx = capturedJoinAccounts.gameTokenCtx;
+    expect(ctx.tokenMint.toBase58()).toBe(tokenMint.toBase58());
+    expect(ctx.gameToken.toBase58()).toBe(gameToken.toBase58());
+    expect(ctx.gameVault.toBase58()).toBe(gameVault.toBase58());
+    expect(ctx.gameTokenAccount.toBase58()).toBe(
+      gameTokenAccount.toBase58(),
+    );
+    expect(ctx.tokenProgram.toBase58()).toBe(TOKEN_PROGRAM_ID.toBase58());
+    expect(ctx.associatedTokenProgram.toBase58()).toBe(
+      ASSOCIATED_TOKEN_PROGRAM_ID.toBase58(),
+    );
+    expect(
+      capturedJoinAccounts.playerTokenAccount.toBase58(),
+    ).toBe(playerTokenAccount.toBase58());
+    expect(capturedJoinAccounts.tokenMint).toBeUndefined();
+    expect(capturedJoinAccounts.tokenProgram).toBeUndefined();
+    expect(capturedJoinAccounts.gameToken).toBeUndefined();
+    expect(capturedJoinAccounts.gameVault).toBeUndefined();
+    expect(capturedJoinAccounts.gameTokenAccount).toBeUndefined();
   });
 
   test("verifyParticipantJoin promotes pending entry when player appears on-chain", async () => {
