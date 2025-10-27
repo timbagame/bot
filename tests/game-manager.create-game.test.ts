@@ -184,7 +184,7 @@ describe("GameManager.createGame", () => {
     expect(saved.length).toBe(1);
 
     const captures = (program as any).__captures;
-    const accounts = captures.initializeGameAccounts;
+    const accounts = captures["initializeGameAccounts"];
     expect(accounts).toBeDefined();
     expect(accounts.gameTokenCtx).toBeDefined();
     const ctx = accounts.gameTokenCtx;
