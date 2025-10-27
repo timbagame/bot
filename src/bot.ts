@@ -5453,10 +5453,10 @@ bot.callbackQuery("cmd_wrap", async (ctx) => {
         type: "wrap",
         callbackPrefix: "wrap_amount_",
         amounts: [
-          { label: "0.01 SOL", value: "0.01" },
-          { label: "0.1 SOL", value: "0.1" },
-          { label: "0.5 SOL", value: "0.5" },
-          { label: "1 SOL", value: "1" },
+          { label: "25%", value: "25%" },
+          { label: "50%", value: "50%" },
+          { label: "75%", value: "75%" },
+          { label: "MAX", value: "MAX" },
         ],
         customAction: { label: "✏️ Custom Amount", callback: "wrap_custom" },
         insufficientLabel: "❌ Insufficient SOL balance",
@@ -5528,27 +5528,62 @@ bot.on("callback_query", async (ctx, next) => {
   }
 
   try {
-    const amount = callbackData.replace("wrap_amount_", "");
-    console.log(`🔧 Wrap amount selected: ${amount} SOL`);
+    const amountChoice = callbackData.replace("wrap_amount_", "");
+    const telegramId = getTelegramId(ctx);
+    const { solBalance } = await getCachedWalletData(telegramId);
 
+    const spend = resolveSpendAmount({
+      amount: amountChoice,
+      assetTicker: "SOL",
+      inputDecimals: 9,
+      solBalance,
+      formatSol: (lamports) => wallet.formatSolBalance(lamports),
+      formatToken: (value, decimals) =>
+        wallet.formatTokenBalance(value, decimals),
+    });
+
+    const lamportsToWrap = spend.rawAmount;
+
+    if (!Number.isFinite(lamportsToWrap) || lamportsToWrap <= 0) {
+      throw new Error("Amount is too small to wrap");
+    }
+
+    const displayAmount = wallet.formatSolBalance(lamportsToWrap);
+    console.log(`🔧 Wrap amount selected: ${displayAmount} SOL`);
+
+    const selection = amountChoice.trim().toUpperCase();
     const response = [
       `✅ <b>WRAP CONFIRMATION</b>`,
       "",
-      `<b>Amount:</b> ${amount} SOL → WSOL`,
+      `<b>Amount:</b> ${escapeHtml(displayAmount)} SOL → WSOL`,
       "",
-      `⚠️ <b>Please confirm this transaction</b>`,
-      `This will convert ${amount} SOL to ${amount} WSOL.`,
     ];
+
+    if (selection === "MAX" || selection.endsWith("%")) {
+      response.push(
+        `<b>Selection:</b> ${escapeHtml(selection)} of available SOL`,
+        ""
+      );
+    }
+
+    response.push(
+      `⚠️ <b>Please confirm this transaction</b>`,
+      `This will convert ${escapeHtml(displayAmount)} SOL to ${escapeHtml(
+        displayAmount
+      )} WSOL.`
+    );
 
     await respondWithMenu(ctx, {
       text: response.join("\n"),
-      keyboard: createConfirmWrapKeyboard(amount),
+      keyboard: createConfirmWrapKeyboard(lamportsToWrap),
     });
 
-    await ctx.answerCallbackQuery("Confirm wrap transaction");
+    await ctx.answerCallbackQuery(`Wrap ${displayAmount} SOL`);
   } catch (error) {
     console.error("Error in wrap amount selection:", error);
-    await ctx.answerCallbackQuery("❌ Error processing wrap amount");
+    const message =
+      error instanceof Error ? error.message : "Error processing wrap amount";
+    await ctx.answerCallbackQuery(`❌ ${message}`);
   }
 });
 
@@ -5767,26 +5802,30 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
 bot.callbackQuery(/^confirm_wrap_/, async (ctx) => {
   try {
     const callbackData = ctx.callbackQuery?.data || "";
-    const amount = callbackData.replace("confirm_wrap_", "");
-    console.log(`✅ Confirmed wrap: ${amount} SOL`);
+    const lamportsRaw = callbackData.replace("confirm_wrap_", "");
+    const lamportsToWrap = Number.parseInt(lamportsRaw, 10);
+
+    if (!Number.isFinite(lamportsToWrap) || lamportsToWrap <= 0) {
+      throw new Error("Invalid wrap amount");
+    }
+
+    const formattedAmount = wallet.formatSolBalance(lamportsToWrap);
+    console.log(`✅ Confirmed wrap: ${formattedAmount} SOL`);
 
     const telegramId = getTelegramId(ctx);
     const balanceLamports = await wallet.getBalance(telegramId);
-    const lamportsToWrap = toRawAmount(amount, 9);
 
     if (lamportsToWrap + SOL_FEE_BUFFER_LAMPORTS > balanceLamports) {
       await ctx.answerCallbackQuery("❌ Insufficient SOL for wrap");
       await respondWithMenu(ctx, {
-        text: `❌ <b>WRAP FAILED</b>\n\nNot enough SOL to wrap ${amount}.\nKeep at least ${MIN_SOL_FOR_TX} SOL for fees and try again.`,
+        text: `❌ <b>WRAP FAILED</b>\n\nNot enough SOL to wrap ${formattedAmount}.\nKeep at least ${MIN_SOL_FOR_TX} SOL for fees and try again.`,
         keyboard: createBackToWalletKeyboard(),
       });
       return;
     }
 
     await respondWithMenu(ctx, {
-      text: `🔄 <b>PROCESSING WRAP</b>\n\nWrapping ${wallet.formatSolBalance(
-        lamportsToWrap
-      )} SOL to WSOL...\n\n<i>Please wait...</i>`,
+      text: `🔄 <b>PROCESSING WRAP</b>\n\nWrapping ${formattedAmount} SOL to WSOL...\n\n<i>Please wait...</i>`,
       keyboard: new InlineKeyboard(),
     });
 
@@ -5794,7 +5833,6 @@ bot.callbackQuery(/^confirm_wrap_/, async (ctx) => {
     await wallet.confirmTransaction(signature);
     clearWalletCache(telegramId);
 
-    const formattedAmount = wallet.formatSolBalance(lamportsToWrap);
     const solscanUrl = NetworkDetector.buildSolscanTxUrl(
       signature,
       process.env["RPC_URL"]
@@ -8869,21 +8907,26 @@ const handleWrapAmountInput = async (
   userState: any,
   amount: string
 ) => {
-  const numAmount = parseFloat(amount);
+  const trimmedAmount = amount.trim();
+  const lamportsToWrap = toRawAmount(trimmedAmount, 9);
 
-  if (isNaN(numAmount) || numAmount <= 0) {
+  if (!Number.isFinite(lamportsToWrap) || lamportsToWrap <= 0) {
     throw new Error("Invalid amount format");
   }
 
-  console.log(`🔧 Wrap amount received: ${amount} SOL`);
+  const displayAmount = wallet.formatSolBalance(lamportsToWrap);
+
+  console.log(`🔧 Wrap amount received: ${displayAmount} SOL`);
 
   const response = [
     `✅ <b>WRAP CONFIRMATION</b>`,
     "",
-    `<b>Amount:</b> ${amount} SOL → WSOL`,
+    `<b>Amount:</b> ${escapeHtml(displayAmount)} SOL → WSOL`,
     "",
     `⚠️ <b>Please confirm this transaction</b>`,
-    `This will convert ${amount} SOL to ${amount} WSOL.`,
+    `This will convert ${escapeHtml(displayAmount)} SOL to ${escapeHtml(
+      displayAmount
+    )} WSOL.`,
   ];
 
   await ctx.api.editMessageText(
@@ -8892,7 +8935,7 @@ const handleWrapAmountInput = async (
     response.join("\n"),
     {
       parse_mode: "HTML",
-      reply_markup: createConfirmWrapKeyboard(amount),
+      reply_markup: createConfirmWrapKeyboard(lamportsToWrap),
     }
   );
 };
