@@ -96,7 +96,7 @@ import {
 import { respondWithMenu } from "./utils/menu-response";
 import { parseDecimalAmount, parseTradeAmountInput } from "./utils/amount";
 import { handleCoinflipCommand, type CoinflipDeps } from "./handlers/game";
-import { isMessageMissing } from "./utils/telegram-errors";
+import { isMessageMissing, shouldFallbackToReply } from "./utils/telegram-errors";
 
 // ================================
 // GLOBAL INSTANCES
@@ -5524,17 +5524,26 @@ bot.on("callback_query", async (ctx, next) => {
       INPUT_TIMEOUT_HINT,
     ];
 
-    await respondWithMenu(ctx, {
+    const menuResult = await respondWithMenu(ctx, {
       text: response.join("\n"),
       keyboard: new InlineKeyboard().text("❌ Cancel", "cmd_wrap").row(),
     });
 
     // Set user state to expect custom wrap amount
-    setUserState(userId, {
+    const nextState: Record<string, any> = {
       type: "wrap_custom_amount",
-      messageId: ctx.callbackQuery?.message?.message_id,
-      chatId: ctx.chat?.id,
-    });
+      chatId:
+        menuResult.chatId ??
+        (typeof ctx.chat?.id === "number" ? ctx.chat.id : undefined),
+    };
+
+    const fallbackMessageId =
+      menuResult.messageId ?? ctx.callbackQuery?.message?.message_id;
+    if (typeof fallbackMessageId === "number") {
+      nextState["messageId"] = fallbackMessageId;
+    }
+
+    setUserState(userId, nextState);
 
     await ctx.answerCallbackQuery("Send the amount as a message");
   } catch (error) {
@@ -8965,15 +8974,64 @@ const handleWrapAmountInput = async (
     )} WSOL.`,
   ];
 
-  await ctx.api.editMessageText(
-    ctx.chat.id,
-    userState.messageId,
-    response.join("\n"),
-    {
-      parse_mode: "HTML",
-      reply_markup: createConfirmWrapKeyboard(lamportsToWrap),
+  const messageText = response.join("\n");
+  const keyboard = createConfirmWrapKeyboard(lamportsToWrap);
+  const userId = ctx.from?.id?.toString();
+  const targetChatId =
+    typeof userState.chatId === "number"
+      ? userState.chatId
+      : typeof ctx.chat?.id === "number"
+      ? ctx.chat.id
+      : undefined;
+  const targetMessageId =
+    typeof userState.messageId === "number" ? userState.messageId : undefined;
+
+  if (targetChatId && targetMessageId) {
+    try {
+      await ctx.api.editMessageText(targetChatId, targetMessageId, messageText, {
+        parse_mode: "HTML",
+        reply_markup: keyboard,
+      });
+
+      if (userId) {
+        setUserState(userId, {
+          type: "wrap_custom_amount",
+          chatId: targetChatId,
+          messageId: targetMessageId,
+        });
+      }
+
+      return;
+    } catch (error) {
+      if (!shouldFallbackToReply(error)) {
+        throw error;
+      }
+
+      console.warn(
+        "handleWrapAmountInput: editMessageText failed, replying instead:",
+        error
+      );
     }
-  );
+  }
+
+  const fallbackMessage = await ctx.reply(messageText, {
+    parse_mode: "HTML",
+    reply_markup: keyboard,
+  });
+
+  if (userId) {
+    setUserState(userId, {
+      type: "wrap_custom_amount",
+      chatId:
+        typeof fallbackMessage?.chat?.id === "number"
+          ? fallbackMessage.chat.id
+          : targetChatId,
+      messageId:
+        typeof fallbackMessage?.message_id === "number"
+          ? fallbackMessage.message_id
+          : undefined,
+    });
+  }
 };
 
 /**
@@ -9272,6 +9330,7 @@ const handleBuyCustomAmountInput = async (
 export const __test_handleBuyCustomAmountInput = handleBuyCustomAmountInput;
 export const __test_handleCustomAmountInput = handleCustomAmountInput;
 export const __test_handleAddressInput = handleAddressInput;
+export const __test_handleWrapAmountInput = handleWrapAmountInput;
 
 /**
  * Handle SELL custom amount input

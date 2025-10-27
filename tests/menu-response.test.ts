@@ -7,14 +7,29 @@ const basePayload = {
   keyboard: new InlineKeyboard().text("OK", "noop"),
 };
 
-const makeCtx = () => {
+type MakeCtxOptions = {
+  message?: Record<string, unknown>;
+  replyResult?: Record<string, unknown>;
+};
+
+const makeCtx = (options: MakeCtxOptions = {}) => {
   const calls: Array<{ type: string; args: any[] }> = [];
+  const message = Object.assign(
+    {
+      chat: { id: 42 },
+      message_id: 99,
+    },
+    options.message ?? {}
+  );
+
+  const defaultReply = {
+    message_id: 123,
+    chat: { id: (message as any)?.chat?.id ?? 42 },
+  };
+
   const ctx: any = {
     callbackQuery: {
-      message: {
-        chat: { id: 42 },
-        message_id: 99,
-      },
+      message,
     },
     editMessageCaption: async (opts: any) => {
       calls.push({ type: "caption", args: [opts] });
@@ -26,10 +41,12 @@ const makeCtx = () => {
     },
     reply: async (text: string, opts: any) => {
       calls.push({ type: "reply", args: [text, opts] });
-      return { ok: true };
+      return options.replyResult ?? defaultReply;
     },
-    __calls: calls,
   };
+
+  ctx.__calls = calls;
+
   return ctx;
 };
 
@@ -38,15 +55,22 @@ describe("respondWithMenu", () => {
     const ctx = makeCtx();
     ctx.callbackQuery.message.caption = "previous caption";
 
-    await respondWithMenu(ctx as any, basePayload);
+    const result = await respondWithMenu(ctx as any, basePayload);
 
     const calls = ctx.__calls;
     expect(calls[0]?.type).toBe("caption");
     expect(calls.find((c: any) => c.type === "reply")).toBeUndefined();
+    expect(result).toEqual({
+      messageId: 99,
+      chatId: 42,
+      respondedWithReply: false,
+    });
   });
 
   test("falls back to reply when both caption and text edits fail with missing-content errors", async () => {
-    const ctx = makeCtx();
+    const ctx = makeCtx({
+      replyResult: { message_id: 314, chat: { id: 900 } },
+    });
     ctx.callbackQuery.message.photo = [{ file_id: "abc" }];
 
     ctx.editMessageCaption = async () => {
@@ -60,28 +84,38 @@ describe("respondWithMenu", () => {
       throw err;
     };
 
-    await respondWithMenu(ctx as any, basePayload);
+    const result = await respondWithMenu(ctx as any, basePayload);
 
     const replies = ctx.__calls.filter((c: any) => c.type === "reply");
     expect(replies.length).toBe(1);
     const replyArgs = replies[0].args;
     expect(replyArgs[0]).toBe(basePayload.text);
+    expect(result).toEqual({
+      messageId: 314,
+      chatId: 900,
+      respondedWithReply: true,
+    });
   });
 
   test("edits text when caption not supported", async () => {
     const ctx = makeCtx();
 
-    await respondWithMenu(ctx as any, basePayload);
+    const result = await respondWithMenu(ctx as any, basePayload);
 
     const calls = ctx.__calls;
     expect(calls[0]?.type).toBe("text");
     expect(calls.find((c: any) => c.type === "reply")).toBeUndefined();
+    expect(result).toEqual({
+      messageId: 99,
+      chatId: 42,
+      respondedWithReply: false,
+    });
   });
 
   test("skips edits and replies directly when skipEdit is true", async () => {
     const ctx = makeCtx();
 
-    await respondWithMenu(ctx as any, basePayload, { skipEdit: true });
+    const result = await respondWithMenu(ctx as any, basePayload, { skipEdit: true });
 
     const calls = ctx.__calls;
     expect(calls.some((c: any) => c.type === "caption")).toBe(false);
@@ -92,6 +126,11 @@ describe("respondWithMenu", () => {
     const [text, opts] = replies[0].args;
     expect(text).toBe(basePayload.text);
     expect(opts.reply_to_message_id).toBe(99);
+    expect(result).toEqual({
+      messageId: 123,
+      chatId: 42,
+      respondedWithReply: true,
+    });
   });
 
   test("retries reply when Telegram responds with 429", async () => {
@@ -107,6 +146,7 @@ describe("respondWithMenu", () => {
     }) as any;
 
     let attempts = 0;
+    let replyResult: any = { message_id: 777, chat: { id: 501 } };
     ctx.reply = async (text: string, opts: any) => {
       attempts += 1;
       if (attempts === 1) {
@@ -116,11 +156,16 @@ describe("respondWithMenu", () => {
         throw error;
       }
       ctx.__calls.push({ type: "reply", args: [text, opts] });
-      return { ok: true };
+      return replyResult;
     };
 
     try {
-      await respondWithMenu(ctx as any, basePayload);
+      const result = await respondWithMenu(ctx as any, basePayload);
+      expect(result).toEqual({
+        messageId: replyResult.message_id,
+        chatId: replyResult.chat.id,
+        respondedWithReply: true,
+      });
     } finally {
       globalThis.setTimeout = originalSetTimeout;
     }
@@ -131,4 +176,3 @@ describe("respondWithMenu", () => {
     expect(replies.length).toBe(1);
   });
 });
-

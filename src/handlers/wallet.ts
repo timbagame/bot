@@ -91,11 +91,12 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
     sendWalletMediaWithFallback({
       videoFileId: walletVideoFileId,
       logLabel: "wallet media",
-      sendText: () =>
-        respondWithMenu(ctx, {
+      sendText: async () => {
+        await respondWithMenu(ctx, {
           text: caption,
           keyboard: getWalletKeyboard(),
-        }),
+        });
+      },
       sendVideo: walletVideoFileId
         ? () =>
             ctx.replyWithVideo(walletVideoFileId, {

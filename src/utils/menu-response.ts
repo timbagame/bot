@@ -13,6 +13,12 @@ export type MenuResponseOptions = {
   skipEdit?: boolean;
 };
 
+export type MenuResponseResult = {
+  messageId: number | null;
+  chatId: number | null;
+  respondedWithReply: boolean;
+};
+
 const messageSupportsCaption = (message: any): boolean =>
   Boolean(
     message?.photo ||
@@ -69,17 +75,25 @@ export const respondWithMenu = async (
   ctx: Context,
   payload: MenuPayload,
   options: MenuResponseOptions = {}
-): Promise<void> => {
+): Promise<MenuResponseResult> => {
   const message = ctx.callbackQuery?.message;
 
   if (!options.skipEdit && ctx.callbackQuery && message) {
     const supportsCaption = messageSupportsCaption(message);
+    const messageId = typeof message?.message_id === "number" ? message.message_id : null;
+    const chatId =
+      (message as any)?.chat?.id ??
+      (typeof ctx.chat?.id === "number" ? ctx.chat.id : null);
 
     if (supportsCaption) {
       try {
         const captionEdited = await tryEditCaption(ctx, payload);
         if (captionEdited) {
-          return;
+          return {
+            messageId,
+            chatId,
+            respondedWithReply: false,
+          };
         }
       } catch (error) {
         console.warn(
@@ -92,7 +106,11 @@ export const respondWithMenu = async (
     try {
       const edited = await tryEditText(ctx, payload);
       if (edited) {
-        return;
+        return {
+          messageId,
+          chatId,
+          respondedWithReply: false,
+        };
       }
     } catch (error) {
       if (!supportsCaption) {
@@ -114,7 +132,7 @@ export const respondWithMenu = async (
     ctx.message?.message_id ??
     ctx.callbackQuery?.message?.message_id;
 
-  await awaitTelegramRetry(() =>
+  const sentMessage = await awaitTelegramRetry(() =>
     ctx.reply(payload.text, {
       parse_mode: payload.parseMode ?? "HTML",
       reply_markup: payload.keyboard,
@@ -122,4 +140,15 @@ export const respondWithMenu = async (
       link_preview_options: { is_disabled: true },
     })
   );
+
+  return {
+    messageId:
+      typeof (sentMessage as any)?.message_id === "number"
+        ? (sentMessage as any).message_id
+        : null,
+    chatId:
+      (sentMessage as any)?.chat?.id ??
+      (typeof ctx.chat?.id === "number" ? ctx.chat.id : null),
+    respondedWithReply: true,
+  };
 };
