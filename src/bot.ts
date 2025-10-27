@@ -4116,6 +4116,7 @@ bot.on("callback_query", async (ctx, next) => {
     callbackData.startsWith("cancel_game_") ||
     callbackData.startsWith("custom_amount_") ||
     callbackData.startsWith("custom_players_") ||
+    callbackData.startsWith("trade_slip_") ||
     callbackData.startsWith("slider_") ||
     callbackData.startsWith("back_to_amounts_") ||
     callbackData.startsWith("type_amount_") ||
