@@ -5,8 +5,7 @@ import { sendMediaWithFallback } from "../utils/media";
 import { respondWithMenu } from "../utils/menu-response";
 import {
   getTelegramId,
-  requireTelegramId,
-  MissingTelegramIdError,
+  getRequiredTelegramIdForContext,
   safeAnswerCallbackQuery,
 } from "../utils/context-helpers";
 
@@ -26,18 +25,17 @@ export type ShowWalletUIDeps = {
 export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
   const { wallet, getCachedWalletData, getPriceUSD, buildWalletCaption, createWalletKeyboard, WINNER_VIDEO_ID } = deps;
 
-  let telegramId: bigint;
-  try {
-    telegramId = requireTelegramId(ctx, "wallet display");
-  } catch (error) {
-    if (error instanceof MissingTelegramIdError) {
+  const telegramId = await getRequiredTelegramIdForContext(ctx, "wallet display", {
+    onMissing: async (message) => {
       await respondWithMenu(ctx, {
-        text: "❌ Unable to resolve your Telegram identity. Please open a direct chat with the bot and try again.",
+        text: message,
         keyboard: createWalletKeyboard(),
       });
-      return;
-    }
-    throw error;
+    },
+  });
+
+  if (telegramId == null) {
+    return;
   }
 
   const keypair = wallet.getKeyPair(telegramId);
@@ -176,23 +174,12 @@ export type BalanceDeps = {
 export async function onBalance(ctx: any, deps: BalanceDeps) {
   const { isPrivateChat, clearWalletCache, showWalletUI, handleCommandError } = deps;
 
-  let telegramId: bigint;
-  try {
-    telegramId = requireTelegramId(ctx, "balance command");
-  } catch (error) {
-    if (error instanceof MissingTelegramIdError) {
-      await handleCommandError(ctx, error, "balance");
-      return;
-    }
-    throw error;
-  }
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    "balance command"
+  );
 
-  if (telegramId === 0n) {
-    await handleCommandError(
-      ctx,
-      new Error("Missing Telegram user id while handling /balance"),
-      "balance"
-    );
+  if (telegramId == null) {
     return;
   }
 

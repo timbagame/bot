@@ -74,6 +74,63 @@ export class MissingTelegramIdError extends Error {
   }
 }
 
+export const MISSING_TELEGRAM_ID_MESSAGE =
+  "❌ Unable to resolve your Telegram identity. Please open a direct chat with the bot and try again.";
+
+type MissingTelegramIdHandler = (message: string) => Promise<void> | void;
+
+const notifyMissingTelegramId = async (
+  ctx: Pick<Context, "reply" | "api" | "chat" | "message"> | any,
+  message: string
+): Promise<void> => {
+  try {
+    if (typeof ctx?.reply === "function") {
+      await ctx.reply(message, {
+        reply_to_message_id: ctx.message?.message_id,
+      });
+      return;
+    }
+
+    const chatId = ctx?.chat?.id;
+    if (ctx?.api && typeof chatId === "number") {
+      await ctx.api.sendMessage(chatId, message, {
+        reply_to_message_id: ctx.message?.message_id,
+        link_preview_options: { is_disabled: true },
+      });
+    }
+  } catch (notifyError) {
+    console.error("Failed to send missing-id notification:", notifyError);
+  }
+};
+
+export const getRequiredTelegramIdForContext = async (
+  ctx: Context,
+  contextDescription: string,
+  options: { onMissing?: MissingTelegramIdHandler } = {}
+): Promise<bigint | null> => {
+  try {
+    return requireTelegramId(ctx, contextDescription);
+  } catch (error) {
+    if (error instanceof MissingTelegramIdError) {
+      const handler = options.onMissing;
+      if (handler) {
+        try {
+          await handler(MISSING_TELEGRAM_ID_MESSAGE);
+        } catch (handlerError) {
+          console.error(
+            "Missing Telegram ID handler failed:",
+            handlerError
+          );
+        }
+      } else {
+        await notifyMissingTelegramId(ctx, MISSING_TELEGRAM_ID_MESSAGE);
+      }
+      return null;
+    }
+    throw error;
+  }
+};
+
 export const requireTelegramId = (
   ctx: TelegramContextLike,
   contextDescription: string = "operation"

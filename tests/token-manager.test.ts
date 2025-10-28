@@ -1,4 +1,5 @@
 import { beforeEach, expect, test } from "bun:test";
+import { Keypair } from "@solana/web3.js";
 import { TokenManager } from "../src/utils/token-manager";
 import { ChatDatabase } from "../src/utils/chat-database";
 import { TokenDatabase } from "../src/utils/token-database";
@@ -17,11 +18,17 @@ beforeEach(() => {
 function makeWalletStub() {
   return {
     getTokenMetadata: async (_mint: string) => ({ decimals: 6 }),
+    getFullTokenMetadata: async (mint: string) => ({
+      decimals: 6,
+      symbol: "DISC",
+      name: `Token ${mint.slice(0, 4).toUpperCase()}`,
+    }),
     formatTokenBalance: (amount: number, decimals: number) => {
       const v = amount / Math.pow(10, decimals);
       return v.toFixed(6).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
     },
     formatSolBalance: (lamports: number) => (lamports / 1_000_000_000).toFixed(6),
+    getConnection: () => ({}) as any,
   } as any;
 }
 
@@ -116,6 +123,38 @@ test("parseAmount treats valid mint strings as explicit tokens even when unknown
   expect(data.tokenMint).toBe(mint);
   expect(data.tokenTicker).toBe(mint);
   expect(data.tokenWasSpecified).toBe(true);
+});
+
+test("resolveSwapToken returns builtin SOL metadata", async () => {
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const solInfo = await tm.resolveSwapToken("SOL");
+  expect(solInfo).not.toBeNull();
+  expect(solInfo?.token_mint).toBe(WSOL_MINT);
+  expect(solInfo?.decimals).toBe(9);
+  expect(solInfo?.isNativeSol).toBe(true);
+});
+
+test("resolveSwapToken auto-discovers and registers unknown mints", async () => {
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  TokenManager.setPumpFunClientFactoryForTesting(() => ({
+    isPumpFunToken: async () => ({ isPumpFun: false, isGraduated: false }),
+    getTokenMetadata: async () => ({
+      symbol: "DISC",
+      name: "Discovered Token",
+      decimals: 6,
+    }),
+  }) as any);
+
+  const mint = Keypair.generate().publicKey.toBase58();
+  const info = await tm.resolveSwapToken(mint);
+  expect(info).not.toBeNull();
+  expect(info?.token_mint).toBe(mint);
+  expect(info?.token_ticker).toBe("DISC");
+  expect(info?.newlyDiscovered).toBe(true);
+
+  const stored = tm.getKnownTokenByMint(mint);
+  expect(stored).not.toBeNull();
+  expect(stored?.token_ticker).toBe("DISC");
 });
 
 test("validateTokenMint validates base58 and metadata path", async () => {

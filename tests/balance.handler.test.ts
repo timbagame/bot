@@ -1,6 +1,9 @@
 import { test, expect, mock } from "bun:test";
 import { onBalance } from "../src/handlers/wallet";
-import { getTelegramId } from "../src/utils/context-helpers";
+import {
+  getTelegramId,
+  MISSING_TELEGRAM_ID_MESSAGE,
+} from "../src/utils/context-helpers";
 
 function makeCtx(privateChat: boolean) {
   const calls: any[] = [];
@@ -108,9 +111,11 @@ test("onBalance handles missing telegram id in group chat", async () => {
     handleCommandError,
   });
 
-  expect(handleCommandError).toHaveBeenCalledTimes(1);
-  const [, , action] = (handleCommandError.mock.calls[0] as any[]) ?? [];
-  expect(action).toBe("balance");
+  expect(handleCommandError).not.toHaveBeenCalled();
+  expect(ctx.__calls.length).toBe(1);
+  const [method, message] = ctx.__calls[0] ?? [];
+  expect(method).toBe("reply");
+  expect(message).toBe(MISSING_TELEGRAM_ID_MESSAGE);
 });
 
 test("onBalance DM context preserves original telegram id", async () => {

@@ -84,7 +84,7 @@ import {
   handleCallbackErrorSafe,
   safeAnswerCallbackQuery,
   requireTelegramId,
-  MissingTelegramIdError,
+  getRequiredTelegramIdForContext,
 } from "./utils/context-helpers";
 import { recentUpdateGuard } from "./utils/recent-update";
 import { getPriceUSD } from "./utils/prices";
@@ -97,7 +97,7 @@ import {
   SELL_NOOP_CALLBACK,
 } from "./utils/trade-ui";
 import { respondWithMenu } from "./utils/menu-response";
-import { parseDecimalAmount, parseTradeAmountInput } from "./utils/amount";
+import { parseDecimalAmount, evaluateTradeAmount } from "./utils/amount";
 import { handleCoinflipCommand, type CoinflipDeps } from "./handlers/game";
 import { isMessageMissing, shouldFallbackToReply } from "./utils/telegram-errors";
 
@@ -289,37 +289,6 @@ const tryGetUserWalletAddress = (telegramId: bigint): string | undefined => {
   }
 };
 
-const MISSING_TELEGRAM_ID_MESSAGE =
-  "❌ Unable to resolve your Telegram identity. Please open a direct chat with the bot and try again.";
-
-const getRequiredTelegramIdForContext = async (
-  ctx: Context,
-  contextDescription: string
-): Promise<bigint | null> => {
-  try {
-    return requireTelegramId(ctx, contextDescription);
-  } catch (error) {
-    if (error instanceof MissingTelegramIdError) {
-      try {
-        if (typeof ctx.reply === "function") {
-          await ctx.reply(MISSING_TELEGRAM_ID_MESSAGE, {
-            reply_to_message_id: ctx.message?.message_id,
-          });
-        } else if (ctx.api && ctx.chat?.id) {
-          await ctx.api.sendMessage(ctx.chat.id, MISSING_TELEGRAM_ID_MESSAGE, {
-            reply_to_message_id: undefined,
-            link_preview_options: { is_disabled: true },
-          });
-        }
-      } catch (notifyError) {
-        console.error("Failed to send missing-id notification:", notifyError);
-      }
-      return null;
-    }
-    throw error;
-  }
-};
-
 const getTelegramIdString = (ctx: Context): string | undefined => {
   const id = getTelegramId(ctx);
   return id === 0n ? undefined : id.toString();
@@ -351,111 +320,34 @@ const resolveSpendAmount = ({
   formatToken,
   applySolFeeBuffer = true,
 }: ResolveSpendAmountParams) => {
-  const parsed = parseTradeAmountInput(amount);
-  const isSolAsset = assetTicker === "SOL";
+  const evaluation = evaluateTradeAmount({
+    amount,
+    assetTicker,
+    decimals: inputDecimals,
+    solBalance,
+    tokenBalance,
+    applySolFeeBuffer,
+    solFeeBufferLamports: SOL_FEE_BUFFER_LAMPORTS,
+    insufficientSolForFeesMessage: "Not enough SOL to cover purchase and fees",
+    insufficientSolBalanceMessage: applySolFeeBuffer
+      ? "Insufficient SOL balance for this purchase"
+      : "Insufficient SOL balance",
+    formatSol,
+    formatToken,
+  });
 
-  const ensureTokenBalance = () => {
-    if (!tokenBalance) {
-      throw new Error(`No ${assetTicker} balance found`);
+  const fallbackDisplay = () => {
+    if (assetTicker === "SOL") {
+      return formatSol(evaluation.rawAmount);
     }
 
-    if (tokenBalance.balance <= 0) {
-      throw new Error(`No ${assetTicker} balance found`);
-    }
-
-    return tokenBalance;
+    const decimals = tokenBalance?.decimals ?? inputDecimals;
+    return formatToken(evaluation.rawAmount, decimals);
   };
-
-  const resolveSolSpendable = () => {
-    const spendable = applySolFeeBuffer
-      ? clampLamportsForFees(solBalance)
-      : solBalance;
-
-    if (spendable <= 0) {
-      throw new Error("Not enough SOL to cover purchase and fees");
-    }
-
-    return spendable;
-  };
-
-  if (parsed.kind === "max") {
-    if (isSolAsset) {
-      const spendableLamports = resolveSolSpendable();
-      return {
-        rawAmount: spendableLamports,
-        displayAmount: formatSol(spendableLamports),
-      };
-    }
-
-    const balance = ensureTokenBalance();
-    const rawAmount = Math.floor(balance.balance);
-
-    if (rawAmount <= 0) {
-      throw new Error(`No ${assetTicker} balance found`);
-    }
-
-    return {
-      rawAmount,
-      displayAmount: formatToken(rawAmount, balance.decimals),
-    };
-  }
-
-  if (parsed.kind === "percentage") {
-    const percentage = parsed.percentage / 100;
-
-    if (isSolAsset) {
-      const spendableLamports = resolveSolSpendable();
-      const rawAmount = Math.floor(spendableLamports * percentage);
-
-      if (rawAmount <= 0) {
-        throw new Error("Percentage results in zero amount");
-      }
-
-      return {
-        rawAmount,
-        displayAmount: formatSol(rawAmount),
-      };
-    }
-
-    const balance = ensureTokenBalance();
-    const rawAmount = Math.floor(balance.balance * percentage);
-
-    if (rawAmount <= 0) {
-      throw new Error("Percentage results in zero amount");
-    }
-
-    return {
-      rawAmount,
-      displayAmount: formatToken(rawAmount, balance.decimals),
-    };
-  }
-
-  const rawAmount = toRawAmount(parsed.normalized, inputDecimals);
-
-  if (isSolAsset) {
-    const feeBuffer = applySolFeeBuffer ? SOL_FEE_BUFFER_LAMPORTS : 0;
-    if (rawAmount + feeBuffer > solBalance) {
-      throw new Error(
-        applySolFeeBuffer
-          ? "Insufficient SOL balance for this purchase"
-          : "Insufficient SOL balance"
-      );
-    }
-
-    return {
-      rawAmount,
-      displayAmount: formatSol(rawAmount),
-    };
-  }
-
-  const balance = ensureTokenBalance();
-  if (rawAmount > balance.balance) {
-    throw new Error("Insufficient token balance");
-  }
 
   return {
-    rawAmount,
-    displayAmount: formatToken(rawAmount, inputDecimals),
+    rawAmount: evaluation.rawAmount,
+    displayAmount: evaluation.displayAmount ?? fallbackDisplay(),
   };
 };
 
@@ -479,49 +371,43 @@ const normalizeCustomTradeAmount = ({
   tokenBalance,
   decimals,
 }: NormalizeCustomTradeAmountOptions): NormalizeCustomTradeAmountResult => {
-  const parsed = parseTradeAmountInput(amount);
+  const evaluation = evaluateTradeAmount({
+    amount,
+    assetTicker,
+    decimals,
+    solBalance,
+    tokenBalance,
+    applySolFeeBuffer: false,
+  });
 
-  if (parsed.kind === "max") {
+  if (evaluation.kind === "max") {
     return { normalizedAmount: "max", displayAmount: "max" };
   }
 
-  if (parsed.kind === "percentage") {
-    const fraction = parsed.percentage / 100;
-
-    if (assetTicker === "SOL") {
-      const portion = Math.floor(solBalance * fraction);
-      if (portion <= 0) {
-        throw new Error("Percentage results in zero amount");
-      }
-      const formatted = formatAmount(portion, decimals, {
+  if (evaluation.kind === "absolute") {
+    const normalized =
+      evaluation.normalizedAmount ??
+      formatAmount(evaluation.rawAmount, decimals, {
         maxFractionDigits: decimals,
         trim: true,
       });
-      return { normalizedAmount: formatted, displayAmount: formatted };
-    }
 
-    if (!tokenBalance) {
-      throw new Error(`Token ${assetTicker} not found in wallet`);
-    }
+    return { normalizedAmount: normalized, displayAmount: normalized };
+  }
 
-    const portion = Math.floor(tokenBalance.balance * fraction);
-    if (portion <= 0) {
-      throw new Error("Percentage results in zero amount");
-    }
+  const decimalsForFormat =
+    assetTicker === "SOL"
+      ? decimals
+      : tokenBalance?.decimals ?? decimals;
 
-    const formatted = formatAmount(portion, tokenBalance.decimals, {
-      maxFractionDigits: tokenBalance.decimals,
+  const formatted =
+    evaluation.normalizedAmount ??
+    formatAmount(evaluation.rawAmount, decimalsForFormat, {
+      maxFractionDigits: decimalsForFormat,
       trim: true,
     });
-    return { normalizedAmount: formatted, displayAmount: formatted };
-  }
 
-  const numeric = Number.parseFloat(parsed.normalized);
-  if (!Number.isFinite(numeric) || numeric <= 0) {
-    throw new Error("Invalid amount format");
-  }
-
-  return { normalizedAmount: parsed.normalized, displayAmount: parsed.normalized };
+  return { normalizedAmount: formatted, displayAmount: formatted };
 };
 
 type SwapQuoteWithDecimals = SwapQuote & {
@@ -3037,9 +2923,18 @@ bot.command("wrap", async (ctx: Context) => {
 
   if (!args) return;
 
-  const amount = parseFloat(args?.[1] || "0") * LAMPORTS_PER_SOL;
+  const amountArg = args[1];
+  if (!amountArg) {
+    return replyUsageError(
+      ctx,
+      "Usage: /wrap &lt;amount&gt;\nExample: /wrap 0.1"
+    );
+  }
 
-  if (amount <= 0) {
+  let amount: number;
+  try {
+    amount = parseDecimalAmount(amountArg, 9, { returnType: "number" });
+  } catch {
     return replyUsageError(
       ctx,
       "Usage: /wrap &lt;amount&gt;\nExample: /wrap 0.1"
@@ -3197,12 +3092,16 @@ bot.command(
     }
 
     const [amountStr, fromToken, toToken, slippageStr] = args;
-    const amount = parseFloat(amountStr || "0");
-    const slippagePercent = slippageStr ? parseFloat(slippageStr) : 2.0; // Default 2% for better success rate
-
-    if (amount <= 0) {
+    if (!amountStr) {
       return replyUsageError(ctx, "Amount must be greater than 0");
     }
+
+    const numericAmount = Number.parseFloat(amountStr);
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      return replyUsageError(ctx, "Amount must be greater than 0");
+    }
+
+    const slippagePercent = slippageStr ? parseFloat(slippageStr) : 2.0; // Default 2% for better success rate
 
     if (slippagePercent < 0.1 || slippagePercent > 5.0) {
       return replyUsageError(ctx, "Slippage must be between 0.1% and 5%");
@@ -3247,66 +3146,8 @@ bot.command(
     try {
       const processingMsg = await ctx.reply(`🔄 Processing swap request...`);
 
-      // Get token information (handle SOL, common tokens, and mint addresses)
-      const getTokenInfo = async (tickerOrMint: string) => {
-        const upperTicker = tickerOrMint.toUpperCase();
-
-        if (upperTicker === "SOL") {
-          return {
-            token_mint: "So11111111111111111111111111111111111111112", // WSOL mint for swaps
-            token_ticker: "SOL",
-            decimals: 9,
-            added_at: 0,
-          };
-        }
-
-        if (upperTicker === "USDC") {
-          return {
-            token_mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-            token_ticker: "USDC",
-            decimals: 6,
-            added_at: 0,
-          };
-        }
-
-        // Check if it's a known token by ticker
-        const knownToken = tokenManager.getKnownTokenByTicker(tickerOrMint);
-        if (knownToken) {
-          return knownToken;
-        }
-
-        // Check if it looks like a mint address (44 characters, base58)
-        if (
-          tickerOrMint.length === 44 &&
-          /^[1-9A-HJ-NP-Za-km-z]+$/.test(tickerOrMint)
-        ) {
-          try {
-            // Auto-discover token info including pump.fun detection
-            const tokenInfo = await tokenManager.autoDiscoverTokenInfo(
-              tickerOrMint
-            );
-            if (tokenInfo) {
-              return {
-                token_mint: tickerOrMint,
-                token_ticker: tokenInfo.ticker,
-                decimals: tokenInfo.decimals,
-                added_at: Date.now(),
-                isPumpFun: tokenInfo.isPumpFun,
-              };
-            }
-          } catch (error) {
-            console.log(
-              `Failed to auto-discover token ${tickerOrMint}:`,
-              error
-            );
-          }
-        }
-
-        return null;
-      };
-
-      const fromTokenInfo = await getTokenInfo(fromToken);
-      const toTokenInfo = await getTokenInfo(toToken);
+      const fromTokenInfo = await tokenManager.resolveSwapToken(fromToken);
+      const toTokenInfo = await tokenManager.resolveSwapToken(toToken);
 
       if (!fromTokenInfo || !toTokenInfo) {
         await ctx.api.editMessageText(
@@ -3317,42 +3158,58 @@ bot.command(
         return;
       }
 
-      // Check user balance
-      const userKeypair = wallet.getKeyPair(telegramId);
-      const rawAmount = Math.floor(
-        amount * Math.pow(10, fromTokenInfo.decimals)
-      );
-      let userBalance: number;
+      if (fromTokenInfo.token_mint === toTokenInfo.token_mint) {
+        await ctx.api.editMessageText(
+          ctx.chat!.id,
+          processingMsg.message_id,
+          "❌ Cannot swap identical tokens. Try different token pairs"
+        );
+        return;
+      }
 
-      if (fromToken.toLowerCase() === "sol") {
+      let rawAmount: number;
+      try {
+        rawAmount = parseDecimalAmount(amountStr, fromTokenInfo.decimals, {
+          returnType: "number",
+        });
+      } catch {
+        await ctx.api.editMessageText(
+          ctx.chat!.id,
+          processingMsg.message_id,
+          "❌ Invalid amount. Please provide a positive number."
+        );
+        return;
+      }
+
+      const userKeypair = wallet.getKeyPair(telegramId);
+      let userBalance: number;
+      const fromTickerUpper = fromTokenInfo.token_ticker.toUpperCase();
+      const fromIsNativeSol = Boolean(fromTokenInfo.isNativeSol);
+
+      if (fromIsNativeSol) {
         userBalance = await wallet.getBalance(telegramId);
         if (userBalance < rawAmount + 0.01 * LAMPORTS_PER_SOL) {
-          // Reserve for fees
           await ctx.api.editMessageText(
             ctx.chat!.id,
             processingMsg.message_id,
-            `❌ Insufficient SOL balance. You need at least ${
-              amount + 0.01
-            } SOL (including fees)`
+            `❌ Insufficient SOL balance. You need at least ${wallet.formatSolBalance(
+              rawAmount + 0.01 * LAMPORTS_PER_SOL
+            )} SOL (including fees)`
           );
           return;
         }
       } else {
-        userBalance = await wallet.getTokenBalance(
-          telegramId,
-          fromTokenInfo.token_mint ===
-            "So11111111111111111111111111111111111111112"
-            ? "SOL"
-            : fromTokenInfo.token_mint
-        );
+        const balanceMint =
+          fromTokenInfo.token_mint === WSOL_MINT ? "SOL" : fromTokenInfo.token_mint;
+        userBalance = await wallet.getTokenBalance(telegramId, balanceMint);
         if (userBalance < rawAmount) {
           await ctx.api.editMessageText(
             ctx.chat!.id,
             processingMsg.message_id,
-            `❌ Insufficient ${fromToken} balance. You have ${wallet.formatTokenBalance(
+            `❌ Insufficient ${fromTickerUpper} balance. You have ${wallet.formatTokenBalance(
               userBalance,
               fromTokenInfo.decimals
-            )} ${fromToken}`
+            )} ${fromTickerUpper}`
           );
           return;
         }
@@ -3367,8 +3224,8 @@ bot.command(
         userKeypair,
         inputDecimals: fromTokenInfo.decimals,
         outputDecimals: toTokenInfo.decimals,
-        inputTicker: fromToken.toUpperCase(),
-        outputTicker: toToken.toUpperCase(),
+        inputTicker: fromTokenInfo.token_ticker.toUpperCase(),
+        outputTicker: toTokenInfo.token_ticker.toUpperCase(),
       });
 
       // Format quote for display
@@ -3376,8 +3233,8 @@ bot.command(
         quote,
         fromTokenInfo.decimals,
         toTokenInfo.decimals,
-        fromToken.toUpperCase(),
-        toToken.toUpperCase()
+        fromTokenInfo.token_ticker.toUpperCase(),
+        toTokenInfo.token_ticker.toUpperCase()
       );
 
       await ctx.api.editMessageText(
@@ -3408,8 +3265,8 @@ bot.command(
         quote,
         fromTokenInfo,
         toTokenInfo,
-        fromToken,
-        toToken,
+        fromToken: fromTokenInfo.token_ticker,
+        toToken: toTokenInfo.token_ticker,
         userKeypair,
         telegramId,
         slippagePercent,
