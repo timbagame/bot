@@ -840,6 +840,14 @@ export class GameManager {
     | { success: true; tokenBalance: number; solBalance: number }
     | { success: false; error: string }
   > {
+    console.log(
+      `🔍 WSOL wrap check (${context}): required=${this.wallet.formatSolBalance(
+        requiredLamports
+      )} WSOL, currentWSOL=${this.wallet.formatSolBalance(
+        currentTokenBalance
+      )}, currentSOL=${this.wallet.formatSolBalance(currentSolBalance)}`
+    );
+
     if (currentTokenBalance >= requiredLamports) {
       return {
         success: true,
@@ -864,6 +872,13 @@ export class GameManager {
       const formattedBuffer = this.wallet.formatSolBalance(
         MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS
       );
+      console.warn(
+        `⚠️ Not enough SOL to wrap ${formattedDeficit} for ${context}. Current SOL=${this.wallet.formatSolBalance(
+          currentSolBalance
+        )}, projected SOL after wrap=${this.wallet.formatSolBalance(
+          projectedRemaining
+        )}, required buffer=${formattedBuffer}`
+      );
       return {
         success: false,
         error: `Not enough SOL to wrap ${formattedDeficit} SOL automatically.\n\nKeep at least ${formattedBuffer} SOL for fees before attempting to ${
@@ -879,9 +894,17 @@ export class GameManager {
     );
 
     try {
-      await this.wallet.wrapSol(telegramId, deficit);
+      const wrapSignature = await this.wallet.wrapSol(telegramId, deficit);
+      console.log(
+        `✅ Wrap transaction submitted (${context}): signature=${wrapSignature}`
+      );
     } catch (error) {
       const friendly = formatUserFriendlyError(error, this.wallet);
+      console.error(
+        `❌ Wrap failed for ${context}: ${friendly}. deficit=${this.wallet.formatSolBalance(
+          deficit
+        )}, solBefore=${this.wallet.formatSolBalance(currentSolBalance)}`
+      );
       return {
         success: false,
         error:
@@ -899,6 +922,13 @@ export class GameManager {
     ]);
 
     if (updatedTokenBalance < requiredLamports) {
+      console.error(
+        `⚠️ Wrap completed but WSOL balance ${this.wallet.formatSolBalance(
+          updatedTokenBalance
+        )} still below required ${this.wallet.formatSolBalance(
+          requiredLamports
+        )}`
+      );
       return {
         success: false,
         error:
@@ -909,6 +939,11 @@ export class GameManager {
     if (updatedSolBalance < MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
       const formattedBuffer = this.wallet.formatSolBalance(
         MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS
+      );
+      console.warn(
+        `⚠️ Wrap left SOL balance ${this.wallet.formatSolBalance(
+          updatedSolBalance
+        )}, below buffer ${formattedBuffer}`
       );
       return {
         success: false,
@@ -2129,15 +2164,25 @@ export class GameManager {
       }
 
       if (tokenBalance < amount) {
+        const friendlyTokenBalance = this.wallet.formatTokenBalance(
+          tokenBalance,
+          metadata.decimals
+        );
+        const friendlyRequired = this.wallet.formatTokenBalance(
+          amount,
+          metadata.decimals
+        );
+        const friendlySolBalance = this.wallet.formatSolBalance(solBalance);
+        console.warn(
+          `⚠️ Token balance check failed (${tokenTicker}). have=${friendlyTokenBalance} ${tokenTicker}, need=${friendlyRequired} ${tokenTicker}, detected SOL=${friendlySolBalance}`
+        );
+        let errorMessage = `Insufficient balance. You have ${friendlyTokenBalance} ${tokenTicker} but need ${friendlyRequired} ${tokenTicker}`;
+        if (requestedSol) {
+          errorMessage += `.\nDetected native SOL balance: ${friendlySolBalance} SOL. If SOL was recently deposited, wait for confirmation and try again.`;
+        }
         return {
           success: false,
-          error: `Insufficient balance. You have ${this.wallet.formatTokenBalance(
-            tokenBalance,
-            metadata.decimals
-          )} ${tokenTicker} but need ${this.wallet.formatTokenBalance(
-            amount,
-            metadata.decimals
-          )} ${tokenTicker}`,
+          error: errorMessage,
         };
       }
 

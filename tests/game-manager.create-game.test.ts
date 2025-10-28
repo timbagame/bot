@@ -56,6 +56,7 @@ function makeWallet(overrides: Record<string, any>) {
     getConnection: () => connection,
     getKeyPair: (_: bigint) => Keypair.generate(),
     formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toString(),
+    formatSolBalance: (lamports: number) => (lamports / 1_000_000_000).toString(),
     ...rest,
   };
 

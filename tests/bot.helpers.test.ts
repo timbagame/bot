@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { LAMPORTS_PER_SOL, MIN_SOL_FOR_TX } from "../src/utils/constants";
+import { LAMPORTS_PER_SOL, MIN_SOL_FOR_TX, WSOL_MINT } from "../src/utils/constants";
 import { parseDecimalAmount } from "../src/utils/amount";
 
 type BotModule = typeof import("../src/bot");
@@ -403,6 +403,8 @@ describe("createGameViaCommand helper", () => {
         getTokenMetadata: async () => ({ decimals: 6 }),
         formatTokenBalance: (amount, decimals) =>
           (amount / Math.pow(10, decimals)).toString(),
+        getBalance: async () => 0,
+        formatSolBalance: () => "0",
       },
       getContractMinimumAmount: async () => ({
         raw: 500_000,
@@ -526,5 +528,101 @@ describe("createGameViaCommand helper", () => {
     expect(messageArgs[2]).toBe(coinflipOptions.gameLabel);
     expect(messageArgs[3]).toBe(baseParsedAmount.amount);
     expect(messageArgs[5]).toBe(baseParsedAmount.tokenTicker);
+  });
+
+  test("allows SOL games when native balance covers deficit", async () => {
+    const ctx: any = makeCtx();
+    const createCalls: any[] = [];
+
+    const solAmount = 600_000;
+    const deps = makeDeps({
+      parseAmount: async () => ({
+        success: true,
+        data: {
+          ...baseParsedAmount,
+          amount: solAmount,
+          tokenMint: WSOL_MINT,
+          tokenTicker: "SOL",
+          formattedAmount: "0.0006 SOL",
+          requestedNativeSol: true,
+        },
+      }),
+      wallet: {
+        getTokenBalance: async () => 0,
+        getTokenMetadata: async () => ({ decimals: 9 }),
+        formatTokenBalance: (amount, decimals) =>
+          (amount / Math.pow(10, decimals)).toString(),
+        getBalance: async () => 1_500_000,
+        formatSolBalance: (lamports) => (lamports / LAMPORTS_PER_SOL).toString(),
+      },
+      gameManager: {
+        createGame: async (...args) => {
+          createCalls.push(args);
+          return { success: true, gameAddress: "ADDR", autoJoinResult: { success: true } };
+        },
+        createGameMessage: async () => 0,
+      },
+    });
+
+    await botModule.__test_createGameViaCommand(
+      ctx,
+      ["/cf", "0.0006", "SOL"],
+      1n,
+      coinflipOptions,
+      deps
+    );
+
+    expect(ctx.__calls.length).toBe(0);
+    expect(createCalls.length).toBe(1);
+  });
+
+  test("reports combined SOL balance when insufficient for native SOL games", async () => {
+    const ctx: any = makeCtx();
+    const createCalls: any[] = [];
+    const solAmount = 500_000;
+
+    const deps = makeDeps({
+      parseAmount: async () => ({
+        success: true,
+        data: {
+          ...baseParsedAmount,
+          amount: solAmount,
+          tokenMint: WSOL_MINT,
+          tokenTicker: "SOL",
+          formattedAmount: "0.0005 SOL",
+          requestedNativeSol: true,
+        },
+      }),
+      wallet: {
+        getTokenBalance: async () => 100_000,
+        getTokenMetadata: async () => ({ decimals: 9 }),
+        formatTokenBalance: (amount, decimals) =>
+          (amount / Math.pow(10, decimals)).toFixed(6),
+        getBalance: async () => 200_000,
+        formatSolBalance: (lamports) => (lamports / LAMPORTS_PER_SOL).toFixed(6),
+      },
+      gameManager: {
+        createGame: async (...args) => {
+          createCalls.push(args);
+          return { success: true, gameAddress: "ADDR", autoJoinResult: { success: true } };
+        },
+        createGameMessage: async () => 0,
+      },
+    });
+
+    await botModule.__test_createGameViaCommand(
+      ctx,
+      ["/cf", "0.0005", "SOL"],
+      1n,
+      coinflipOptions,
+      deps
+    );
+
+    expect(createCalls.length).toBe(0);
+    expect(ctx.__calls.length).toBe(1);
+    const response = String(ctx.__calls[0]);
+    expect(response).toContain("SOL available natively");
+    expect(response).toContain("wrapped SOL");
+    expect(response).toContain("0.0005 SOL");
   });
 });

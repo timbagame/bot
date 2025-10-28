@@ -2452,6 +2452,8 @@ type CreateGameViaCommandDeps = {
       mint: string
     ) => Promise<{ decimals: number }>;
     formatTokenBalance: (amount: number, decimals: number) => string;
+    getBalance: (telegramId: bigint) => Promise<number>;
+    formatSolBalance: (lamports: number) => string;
   };
   getContractMinimumAmount: typeof getContractMinimumAmount;
   gameManager: {
@@ -2474,6 +2476,8 @@ const defaultCreateGameViaCommandDeps = (): CreateGameViaCommandDeps => ({
     getTokenMetadata: (mint) => wallet.getTokenMetadata(mint),
     formatTokenBalance: (amount, decimals) =>
       wallet.formatTokenBalance(amount, decimals),
+    getBalance: (telegramId) => wallet.getBalance(telegramId),
+    formatSolBalance: (lamports) => wallet.formatSolBalance(lamports),
   },
   getContractMinimumAmount,
   gameManager: {
@@ -2535,13 +2539,28 @@ const createGameViaCommand = async (
       return;
     }
 
-    const userBalance = await deps.wallet.getTokenBalance(
-      telegramId,
-      parsedAmount.tokenMint,
-      { createIfMissing: true }
-    );
+    const needsNativeSolCheck = parsedAmount.requestedNativeSol === true;
+    let nativeSolBalance = 0;
+    let userBalance: number;
 
-    if (userBalance < parsedAmount.amount) {
+    if (needsNativeSolCheck) {
+      const [tokenBalance, solBalance] = await Promise.all([
+        deps.wallet.getTokenBalance(telegramId, parsedAmount.tokenMint, {
+          createIfMissing: true,
+        }),
+        deps.wallet.getBalance(telegramId),
+      ]);
+      userBalance = tokenBalance;
+      nativeSolBalance = solBalance;
+    } else {
+      userBalance = await deps.wallet.getTokenBalance(
+        telegramId,
+        parsedAmount.tokenMint,
+        { createIfMissing: true }
+      );
+    }
+
+    if (!needsNativeSolCheck && userBalance < parsedAmount.amount) {
       const formatted = deps.wallet.formatTokenBalance(
         userBalance,
         tokenMetadata.decimals
@@ -2550,6 +2569,25 @@ const createGameViaCommand = async (
         `❌ Insufficient balance. You have ${formatted} ${parsedAmount.tokenTicker}, need ${parsedAmount.formattedAmount}.`
       );
       return;
+    }
+
+    if (needsNativeSolCheck) {
+      const totalLamports = userBalance + nativeSolBalance;
+      if (totalLamports < parsedAmount.amount) {
+        const formattedSol = deps.wallet.formatSolBalance(nativeSolBalance);
+        const formattedToken = deps.wallet.formatTokenBalance(
+          userBalance,
+          tokenMetadata.decimals
+        );
+        const wrappedLabel =
+          parsedAmount.tokenMint === WSOL_MINT
+            ? "wrapped SOL"
+            : parsedAmount.tokenTicker;
+        await ctx.reply(
+          `❌ Insufficient balance. You have ${formattedSol} SOL available natively and ${formattedToken} ${wrappedLabel}, need ${parsedAmount.formattedAmount}.`
+        );
+        return;
+      }
     }
 
     const gameResult = await deps.gameManager.createGame(
