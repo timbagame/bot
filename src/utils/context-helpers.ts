@@ -67,6 +67,26 @@ export const getTelegramId = (
   }
 };
 
+export class MissingTelegramIdError extends Error {
+  constructor(message: string = "Missing Telegram user id") {
+    super(message);
+    this.name = "MissingTelegramIdError";
+  }
+}
+
+export const requireTelegramId = (
+  ctx: TelegramContextLike,
+  contextDescription: string = "operation"
+): bigint => {
+  const id = getTelegramId(ctx);
+  if (id === 0n) {
+    throw new MissingTelegramIdError(
+      `Missing Telegram user id for ${contextDescription}`
+    );
+  }
+  return id;
+};
+
 /**
  * Creates a lightweight adapter that forces subsequent edits to target a specific message.
  * Useful when downstream helpers expect a context-like object with an `editMessageText` method.

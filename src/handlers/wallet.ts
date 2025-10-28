@@ -3,7 +3,12 @@ import { escapeHtml } from "../utils/format-amount";
 import { buildWalletTokenLines, type TokenDisplayLine } from "../utils/wallet-ui";
 import { sendMediaWithFallback } from "../utils/media";
 import { respondWithMenu } from "../utils/menu-response";
-import { getTelegramId, safeAnswerCallbackQuery } from "../utils/context-helpers";
+import {
+  getTelegramId,
+  requireTelegramId,
+  MissingTelegramIdError,
+  safeAnswerCallbackQuery,
+} from "../utils/context-helpers";
 
 export type ShowWalletUIDeps = {
   wallet: {
@@ -21,7 +26,20 @@ export type ShowWalletUIDeps = {
 export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
   const { wallet, getCachedWalletData, getPriceUSD, buildWalletCaption, createWalletKeyboard, WINNER_VIDEO_ID } = deps;
 
-  const telegramId = getTelegramId(ctx);
+  let telegramId: bigint;
+  try {
+    telegramId = requireTelegramId(ctx, "wallet display");
+  } catch (error) {
+    if (error instanceof MissingTelegramIdError) {
+      await respondWithMenu(ctx, {
+        text: "❌ Unable to resolve your Telegram identity. Please open a direct chat with the bot and try again.",
+        keyboard: createWalletKeyboard(),
+      });
+      return;
+    }
+    throw error;
+  }
+
   const keypair = wallet.getKeyPair(telegramId);
   const walletAddress = keypair.publicKey.toBase58();
   const walletVideoFileId = WINNER_VIDEO_ID ?? null;
@@ -158,7 +176,16 @@ export type BalanceDeps = {
 export async function onBalance(ctx: any, deps: BalanceDeps) {
   const { isPrivateChat, clearWalletCache, showWalletUI, handleCommandError } = deps;
 
-  const telegramId = getTelegramId(ctx);
+  let telegramId: bigint;
+  try {
+    telegramId = requireTelegramId(ctx, "balance command");
+  } catch (error) {
+    if (error instanceof MissingTelegramIdError) {
+      await handleCommandError(ctx, error, "balance");
+      return;
+    }
+    throw error;
+  }
 
   if (telegramId === 0n) {
     await handleCommandError(

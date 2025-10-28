@@ -83,6 +83,8 @@ import {
   createMessageEditAdapter,
   handleCallbackErrorSafe,
   safeAnswerCallbackQuery,
+  requireTelegramId,
+  MissingTelegramIdError,
 } from "./utils/context-helpers";
 import { recentUpdateGuard } from "./utils/recent-update";
 import { getPriceUSD } from "./utils/prices";
@@ -284,6 +286,37 @@ const tryGetUserWalletAddress = (telegramId: bigint): string | undefined => {
     return wallet.getKeyPair(telegramId).publicKey.toBase58();
   } catch {
     return undefined;
+  }
+};
+
+const MISSING_TELEGRAM_ID_MESSAGE =
+  "❌ Unable to resolve your Telegram identity. Please open a direct chat with the bot and try again.";
+
+const getRequiredTelegramIdForContext = async (
+  ctx: Context,
+  contextDescription: string
+): Promise<bigint | null> => {
+  try {
+    return requireTelegramId(ctx, contextDescription);
+  } catch (error) {
+    if (error instanceof MissingTelegramIdError) {
+      try {
+        if (typeof ctx.reply === "function") {
+          await ctx.reply(MISSING_TELEGRAM_ID_MESSAGE, {
+            reply_to_message_id: ctx.message?.message_id,
+          });
+        } else if (ctx.api && ctx.chat?.id) {
+          await ctx.api.sendMessage(ctx.chat.id, MISSING_TELEGRAM_ID_MESSAGE, {
+            reply_to_message_id: undefined,
+            link_preview_options: { is_disabled: true },
+          });
+        }
+      } catch (notifyError) {
+        console.error("Failed to send missing-id notification:", notifyError);
+      }
+      return null;
+    }
+    throw error;
   }
 };
 
@@ -2733,7 +2766,13 @@ bot.command(["giveaway", "ga"], async (ctx) => {
       return ctx.reply("❌ Giveaway games can only be created in groups!");
     }
 
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "giveaway command"
+    );
+    if (telegramId == null) {
+      return;
+    }
     const args = ctx.message?.text?.split(" ");
 
     if (args && args.length >= 2) {
@@ -2762,7 +2801,13 @@ bot.command(["giveaway", "ga"], async (ctx) => {
 // ================================
 
 bot.command(["withdraw", "wh"], async (ctx: Context) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    "withdraw command"
+  );
+  if (telegramId == null) {
+    return;
+  }
   const args = ctx.message?.text?.split(" ");
 
   if (!args || args.length < 3) {
@@ -2905,7 +2950,13 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
 });
 
 bot.command("tip", async (ctx: Context) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    "tip command"
+  );
+  if (telegramId == null) {
+    return;
+  }
   const repliedMessage = ctx.message?.reply_to_message;
   const args = ctx.message?.text?.split(" ");
 
@@ -2975,7 +3026,13 @@ bot.command("tip", async (ctx: Context) => {
 });
 
 bot.command("wrap", async (ctx: Context) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    "wrap command"
+  );
+  if (telegramId == null) {
+    return;
+  }
   const args = ctx.message?.text?.split(" ");
 
   if (!args) return;
@@ -3056,7 +3113,13 @@ bot.command("wrap", async (ctx: Context) => {
 });
 
 bot.command("unwrap", async (ctx: Context) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    "unwrap command"
+  );
+  if (telegramId == null) {
+    return;
+  }
 
   const processingMsg = await ctx.reply("Processing unwrap...", {
     reply_to_message_id: ctx.message?.message_id,
@@ -3115,9 +3178,15 @@ bot.command("unwrap", async (ctx: Context) => {
 
 bot.command(
   "swap",
-  sequentialize((ctx) => [getTelegramId(ctx).toString(), "swap"]),
+  sequentialize((ctx) => [getTelegramIdString(ctx) ?? "unknown", "swap"]),
   async (ctx: Context) => {
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "swap command"
+    );
+    if (telegramId == null) {
+      return;
+    }
     const args = ctx.message?.text?.split(" ").slice(1);
 
     if (!args || args.length < 3) {
@@ -3421,7 +3490,14 @@ const getSellTransactionCacheEntry = (
 // Swap confirmation callbacks
 bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
   const [, action, userId] = ctx.match!;
-  const telegramId = getTelegramId(ctx);
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    "swap confirmation"
+  );
+  if (telegramId == null) {
+    await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+    return;
+  }
 
   if (telegramId.toString() !== userId) {
     return safeAnswerCallbackQuery(ctx, "❌ This swap is not for you");
@@ -3869,7 +3945,13 @@ bot.command("help", async (ctx: Context) => {
 });
 
 bot.command("debug", async (ctx: Context) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    "debug command"
+  );
+  if (telegramId == null) {
+    return;
+  }
   const replyToMessage = ctx.message?.reply_to_message;
 
   try {
@@ -3991,7 +4073,13 @@ bot.command("checktx", async (ctx: Context) => {
 });
 
 bot.command("active", async (ctx: Context) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    "active command"
+  );
+  if (telegramId == null) {
+    return;
+  }
 
   try {
     const { activeGames } = await gameManager.getUserGames(ctx, telegramId);
@@ -4008,7 +4096,13 @@ bot.command("active", async (ctx: Context) => {
 });
 
 bot.command("games", async (ctx: Context) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    "games command"
+  );
+  if (telegramId == null) {
+    return;
+  }
 
   try {
     const { recentGames } = await gameManager.getUserGames(ctx, telegramId);
@@ -4339,8 +4433,11 @@ bot.on("callback_query", async (ctx, next) => {
   }
 
   try {
-    const telegramId = getTelegramId(ctx);
-    if (telegramId === 0n) {
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "game callback"
+    );
+    if (telegramId == null) {
       await safeAnswerCallbackQuery(
         ctx,
         "Unable to identify user. Please try again."
@@ -4836,7 +4933,14 @@ bot.callbackQuery(
     async (ctx, { session, tokenContext, updateSession, creatorId }) => {
       try {
         const gameType = ctx.match![1] as string;
-        const telegramId = getTelegramId(ctx);
+        const telegramId = await getRequiredTelegramIdForContext(
+          ctx,
+          "custom amount slider"
+        );
+        if (telegramId == null) {
+          await safeAnswerCallbackQuery(ctx, "Unable to identify user");
+          return;
+        }
 
         let userBalance =
           session?.userBalance && session.userBalance > 0
@@ -4925,7 +5029,14 @@ bot.callbackQuery(
       try {
         const gameType = ctx.match![1] as string;
         const newAmount = parseFloat(ctx.match![2] as string);
-        const telegramId = getTelegramId(ctx);
+        const telegramId = await getRequiredTelegramIdForContext(
+          ctx,
+          "slider adjustment"
+        );
+        if (telegramId == null) {
+          await safeAnswerCallbackQuery(ctx, "Unable to identify user");
+          return;
+        }
 
         let userBalance =
           session?.userBalance && session.userBalance > 0
@@ -5015,7 +5126,14 @@ bot.callbackQuery(
     ) => {
       try {
         const gameType = ctx.match![1] as string;
-        const telegramId = getTelegramId(ctx);
+        const telegramId = await getRequiredTelegramIdForContext(
+          ctx,
+          "amount selection"
+        );
+        if (telegramId == null) {
+          await safeAnswerCallbackQuery(ctx, "Unable to identify user");
+          return;
+        }
 
         let userBalance =
           session?.userBalance && session.userBalance > 0
@@ -5123,7 +5241,14 @@ bot.callbackQuery(
     async (ctx, { session, tokenContext, updateSession, creatorId }) => {
       try {
         const gameType = ctx.match![1] as string;
-        const telegramId = getTelegramId(ctx);
+        const telegramId = await getRequiredTelegramIdForContext(
+          ctx,
+          "type amount prompt"
+        );
+        if (telegramId == null) {
+          await safeAnswerCallbackQuery(ctx, "Unable to identify user");
+          return;
+        }
 
         let userBalance =
           session?.userBalance && session.userBalance > 0
@@ -5605,7 +5730,14 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
       return;
     }
 
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "show private key"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
+    }
     const keypair = wallet.getKeyPair(telegramId);
     const privateKeyBase64 = Buffer.from(keypair.secretKey).toString("base64");
 
@@ -5699,7 +5831,14 @@ bot.callbackQuery("cmd_wrap", async (ctx) => {
 
 bot.callbackQuery("cmd_unwrap", async (ctx) => {
   try {
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "unwrap menu"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
+    }
     const balances = await getCachedWalletData(telegramId);
     const hasBalance = balances.wsolBalance > 0;
 
@@ -5822,7 +5961,14 @@ bot.on("callback_query", async (ctx, next) => {
 
   try {
     const amountChoice = callbackData.replace("wrap_amount_", "");
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "wrap amount selection"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
+    }
     const { nativeSolBalance, wsolBalance } = await getCachedWalletData(telegramId);
     const availableSolLamports = nativeSolBalance;
 
@@ -5887,7 +6033,14 @@ bot.on("callback_query", async (ctx, next) => {
 
 bot.callbackQuery("unwrap_confirm", async (ctx) => {
   try {
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "unwrap confirmation"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
+    }
     const { wsolBalance } = await getCachedWalletData(telegramId);
 
     const result = await executeUnwrapFlow(telegramId, {
@@ -6178,7 +6331,14 @@ bot.callbackQuery(/^confirm_wrap_/, async (ctx) => {
     const formattedAmount = wallet.formatSolBalance(lamportsToWrap);
     console.log(`✅ Confirmed wrap: ${formattedAmount} SOL`);
 
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "wrap confirmation"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
+    }
 
     const result = await executeWrapFlow(telegramId, lamportsToWrap, {
       onProcessing: async (amountDisplay) => {
@@ -6561,7 +6721,7 @@ const buildWalletActionMenuForUser = async ({
   getBalances,
   prepareBalances,
 }: BuildWalletActionMenuForUserOptions) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "wallet action menu");
   const keypair = wallet.getKeyPair(telegramId);
   const walletAddress = keypair.publicKey.toBase58();
 
@@ -6712,7 +6872,14 @@ bot.on("callback_query", async (ctx, next) => {
       return;
     }
 
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "send amount selection"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
+    }
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
 
     const isSol = token === "SOL";
@@ -7015,8 +7182,12 @@ bot.callbackQuery("help_examples", async (ctx) => {
 
 bot.callbackQuery("cmd_buy", async (ctx) => {
   try {
-    const telegramId = getTelegramId(ctx);
-    if (telegramId === 0n) {
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "buy menu"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
       return;
     }
     const overview = await getWalletOverview(telegramId);
@@ -7083,8 +7254,12 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
 
 bot.callbackQuery("cmd_sell", async (ctx) => {
   try {
-    const telegramId = getTelegramId(ctx);
-    if (telegramId === 0n) {
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "sell menu"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
       return;
     }
 
@@ -7337,7 +7512,14 @@ bot.on("callback_query", async (ctx, next) => {
   console.log(`🔴 SELL amount selected: ${amount} ${tokenToSell}`);
 
   try {
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "sell amount selection"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
+    }
 
     if (amount === "CUSTOM") {
       const userId = getTelegramIdString(ctx);
@@ -7439,7 +7621,14 @@ bot.on("callback_query", async (ctx, next) => {
 
     await safeAnswerCallbackQuery(ctx, "Processing sell...");
 
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "sell confirmation"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
+    }
     const userKeypair = wallet.getKeyPair(telegramId);
 
     // Use the existing global swapManager instance
@@ -7828,7 +8017,14 @@ bot.on("callback_query", async (ctx, next) => {
 
     await safeAnswerCallbackQuery(ctx, "Processing buy...");
 
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "buy confirmation"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
+    }
     const userKeypair = wallet.getKeyPair(telegramId);
 
     // Use the existing global swapManager instance
@@ -8140,7 +8336,14 @@ bot.on("callback_query", async (ctx, next) => {
   console.log("🔔 Swap FROM token selected:", fromToken);
 
   try {
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "swap menu from token"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
+    }
     const keypair = wallet.getKeyPair(telegramId);
     const walletAddress = keypair.publicKey.toBase58();
     const walletAddressHtml = escapeHtml(walletAddress);
@@ -8314,7 +8517,14 @@ bot.on("callback_query", async (ctx, next) => {
     }
 
     // Get quote and show confirmation
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "swap amount selection"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
+    }
     await showSwapQuoteAndConfirmation(
       ctx,
       fromToken,
@@ -8337,7 +8547,7 @@ const showSwapAmountSelection = async (
   fromToken: string,
   toToken: string
 ) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "swap amount selection");
 
   // Get balance for the FROM token
   const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
@@ -8808,7 +9018,7 @@ const showBuyAmountSelection = async (
   contractAddress?: string,
   tokenTxId?: string
 ) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "buy amount selection");
   const { message, keyboard } = await buildBuyAmountSelectionUI(
     telegramId,
     paymentToken,
@@ -9122,7 +9332,7 @@ const handleCustomAmountInput = async (
   amount: string
 ) => {
   const token = userState.token;
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "send custom amount");
   const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
 
   const isSol = token === "SOL";
@@ -9432,7 +9642,7 @@ const handleSwapCustomAmountInput = async (
 ) => {
   const fromToken = userState.fromToken;
   const toToken = userState.toToken;
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "swap custom amount");
 
   const normalizedAmount = amount.trim();
 
@@ -9464,7 +9674,7 @@ const handleBuyContractAddressInput = async (
   userState: any,
   contractAddress: string
 ) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "buy contract lookup");
   const paymentToken = userState.fromToken;
   if (!paymentToken) {
     throw new Error("Payment token not found in user state");
@@ -9525,7 +9735,7 @@ const handleBuyTokenSymbolInput = async (
   userState: any,
   tokenSymbol: string
 ) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "buy token symbol lookup");
   console.log(`🔍 Searching for token: ${tokenSymbol}`);
 
   const cleanSymbol = tokenSymbol.trim().toUpperCase();
@@ -9598,7 +9808,7 @@ const handleBuyCustomAmountInput = async (
   const paymentToken = userState.paymentToken;
   const targetToken = userState.targetToken;
   const contractAddress = userState.contractAddress;
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "buy custom amount");
 
   console.log(`📝 Custom amount debug:`, {
     amount,
@@ -9701,7 +9911,7 @@ const handleSellCustomAmountInput = async (
   amount: string
 ) => {
   const tokenToSell = userState.tokenToSell;
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "sell custom amount");
 
   try {
     const { tokenBalances, solBalance } = await getCachedWalletData(telegramId);
@@ -10069,7 +10279,7 @@ const handleTradeCustomSlippageInput = async (
  * Show sell amount selection for a specific token
  */
 const showSellAmountSelection = async (ctx: any, tokenToSell: string) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "sell amount selection");
 
   // Get balance for the token being sold
   const { tokenBalances } = await getCachedWalletData(telegramId);

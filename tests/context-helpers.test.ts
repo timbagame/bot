@@ -3,6 +3,8 @@ import {
   truncateErrorMessage,
   categorizeError,
   getTelegramId,
+  requireTelegramId,
+  MissingTelegramIdError,
 } from "../src/utils/context-helpers";
 
 test("truncateErrorMessage returns original message when under limit", () => {
@@ -60,4 +62,15 @@ test("getTelegramId returns fallback for invalid identifiers", () => {
   expect(getTelegramId(ctxMissing, 42n)).toBe(42n);
   expect(getTelegramId(ctxGarbage, 99n)).toBe(99n);
   expect(getTelegramId(ctxInfinity)).toBe(0n);
+});
+
+test("requireTelegramId returns id when present", () => {
+  const ctx = { from: { id: 123 } } as any;
+  expect(requireTelegramId(ctx, "test")).toBe(123n);
+});
+
+test("requireTelegramId throws custom error when missing", () => {
+  const ctx = { from: { id: undefined } } as any;
+  expect(() => requireTelegramId(ctx, "test"))
+    .toThrow(MissingTelegramIdError);
 });
