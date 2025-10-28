@@ -67,7 +67,14 @@ const resolveGameVideoId = (gameType: string): string | undefined => {
 };
 
 const WRAP_SOL_FEE_BUFFER_LAMPORTS = 15_000; // ~0.000015 SOL buffer to cover wrap transaction fees
-const WRAP_BALANCE_RETRY_DELAYS_MS = [250, 500, 1000]; // Polling intervals to wait for WSOL balance propagation
+const WRAP_BALANCE_RETRY_DELAYS_MS = [250, 500, 1000, 2000, 4000, 8000]; // Polling intervals to wait for WSOL balance propagation
+
+const getWrapBalanceRetryDelays = (): number[] => {
+  if (process.env.NODE_ENV === "test") {
+    return new Array(WRAP_BALANCE_RETRY_DELAYS_MS.length).fill(0);
+  }
+  return WRAP_BALANCE_RETRY_DELAYS_MS;
+};
 
 type GameTokenContextAccounts = {
   tokenMint: PublicKey;
@@ -918,7 +925,9 @@ export class GameManager {
     let updatedTokenBalance = 0;
     let updatedSolBalance = 0;
 
-    for (let attempt = 0; attempt <= WRAP_BALANCE_RETRY_DELAYS_MS.length; attempt++) {
+    const retryDelays = getWrapBalanceRetryDelays();
+
+    for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
       [updatedTokenBalance, updatedSolBalance] = await Promise.all([
         this.wallet.getTokenBalance(telegramId, WSOL_MINT, {
           createIfMissing: true,
@@ -930,14 +939,14 @@ export class GameManager {
         break;
       }
 
-      const delay = WRAP_BALANCE_RETRY_DELAYS_MS[attempt];
+      const delay = retryDelays[attempt];
       if (delay === undefined) {
         break;
       }
 
       console.log(
         `⏳ Waiting for WSOL balance propagation (attempt ${attempt + 1}/${
-          WRAP_BALANCE_RETRY_DELAYS_MS.length + 1
+          retryDelays.length + 1
         })`
       );
       await new Promise((resolve) => setTimeout(resolve, delay));

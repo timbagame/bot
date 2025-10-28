@@ -154,6 +154,16 @@ describe("GameManager.createGame", () => {
     const db = {
       savePlayerMapping: () => {},
       saveGame: () => {},
+      saveGameParticipant: () => {},
+      getGame: () => ({
+        token_mint: WSOL_MINT,
+        token_ticker: "WSOL",
+        game_type: "coinflip",
+        amount: 600_000,
+        max_tickets: 2,
+        min_tickets: 2,
+        chat_id: 0,
+      }),
     } as any;
 
     const program = makeProgram(wallet.connection);
@@ -182,6 +192,73 @@ describe("GameManager.createGame", () => {
 
     expect(res.success).toBe(true);
     expect(wsolBalance).toBeGreaterThanOrEqual(600_000);
+  });
+
+  test("handles delayed WSOL propagation after wrapping", async () => {
+    resetGM();
+    let wsolBalance = 0;
+    let solBalance = 5_000_000;
+    let balanceCalls = 0;
+    const wallet = makeWallet({
+      getTokenMetadata: async () => ({ decimals: 9 }),
+      getTokenBalance: async () => {
+        balanceCalls += 1;
+        return balanceCalls >= 4 ? wsolBalance : 0;
+      },
+      getBalance: async () => solBalance,
+      wrapSol: async (_telegramId: bigint, amount: number) => {
+        wsolBalance = amount;
+        solBalance -= amount + 15_000;
+        return "WRAP_SIG";
+      },
+      sendTransaction: async () => "SIG",
+      confirmTransaction: async () => true,
+      formatSolBalance: (lamports: number) => (lamports / 1_000_000_000).toFixed(6),
+    });
+
+    const db = {
+      savePlayerMapping: () => {},
+      saveGame: () => {},
+      saveGameParticipant: () => {},
+      getGame: () => ({
+        token_mint: WSOL_MINT,
+        token_ticker: "WSOL",
+        game_type: "coinflip",
+        amount: 800_000,
+        max_tickets: 2,
+        min_tickets: 2,
+        chat_id: 0,
+      }),
+    } as any;
+
+    const program = makeProgram(wallet.connection);
+    const gm = GameManager.getInstance(program, wallet, db);
+    (gm as any).oracleClient = {
+      isHealthy: async () => true,
+      generateGameSecrets: async () => ({
+        randomHash: "1".repeat(64),
+      }),
+      hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
+    };
+
+    const res = await gm.createGame(
+      "coinflip",
+      {
+        amount: 800_000,
+        tokenMint: WSOL_MINT,
+        tokenTicker: "WSOL",
+        isSol: false,
+        requestedNativeSol: false,
+      },
+      2,
+      2,
+      60,
+      1n
+    );
+
+    expect(res.success).toBe(true);
+    expect(balanceCalls).toBeGreaterThanOrEqual(4);
+    expect(wsolBalance).toBeGreaterThanOrEqual(800_000);
   });
 
   test("happy path saves game and auto-joins creator", async () => {
