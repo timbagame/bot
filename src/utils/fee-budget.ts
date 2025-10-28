@@ -54,54 +54,54 @@ const parseEnvNumber = (
 };
 
 const DEFAULT_CONFIG: FeeBudgetConfig = {
-  cacheTtlMs: parseEnvNumber(process.env["FEE_CACHE_TTL_MS"], 60_000),
+  cacheTtlMs: parseEnvNumber(process.env["FEE_CACHE_TTL_MS"], 30_000),
   fallbackSingleTxLamports: parseEnvNumber(
     process.env["FEE_FALLBACK_SINGLE_TX_LAMPORTS"],
-    1_000_000
+    10_000
   ),
   singleTxMultiplier: parseEnvNumber(
     process.env["FEE_SINGLE_TX_MULTIPLIER"],
-    1
+    2
   ),
   singleTxExtraLamports: parseEnvNumber(
     process.env["FEE_SINGLE_TX_EXTRA_LAMPORTS"],
-    0
+    20_000
   ),
   wrapBufferMultiplier: parseEnvNumber(
     process.env["FEE_WRAP_BUFFER_MULTIPLIER"],
-    0
+    1
   ),
   wrapBufferExtraLamports: parseEnvNumber(
     process.env["FEE_WRAP_BUFFER_EXTRA_LAMPORTS"],
-    15_000
+    25_000
   ),
   wrapBufferMinLamports: parseEnvNumber(
     process.env["FEE_WRAP_BUFFER_MIN_LAMPORTS"],
-    15_000
+    25_000
   ),
   jitBufferMultiplier: parseEnvNumber(
     process.env["FEE_JIT_BUFFER_MULTIPLIER"],
-    0
+    1.5
   ),
   jitBufferExtraLamports: parseEnvNumber(
     process.env["FEE_JIT_BUFFER_EXTRA_LAMPORTS"],
-    500_000
+    120_000
   ),
   jitBufferMinLamports: parseEnvNumber(
     process.env["FEE_JIT_BUFFER_MIN_LAMPORTS"],
-    500_000
+    200_000
   ),
   gameBufferMultiplier: parseEnvNumber(
     process.env["FEE_GAME_BUFFER_MULTIPLIER"],
-    0
+    3
   ),
   gameBufferExtraLamports: parseEnvNumber(
     process.env["FEE_GAME_BUFFER_EXTRA_LAMPORTS"],
-    2_485_000
+    220_000
   ),
   gameBufferMinLamports: parseEnvNumber(
     process.env["FEE_GAME_BUFFER_MIN_LAMPORTS"],
-    2_500_000
+    400_000
   ),
   computeUnitLimit: parseEnvNumber(
     process.env["FEE_COMPUTE_UNIT_LIMIT"],
