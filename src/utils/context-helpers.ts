@@ -67,6 +67,26 @@ export const getTelegramId = (
   }
 };
 
+export class MissingTelegramIdError extends Error {
+  constructor(message: string = "Missing Telegram user id") {
+    super(message);
+    this.name = "MissingTelegramIdError";
+  }
+}
+
+export const requireTelegramId = (
+  ctx: TelegramContextLike,
+  contextDescription: string = "operation"
+): bigint => {
+  const id = getTelegramId(ctx);
+  if (id === 0n) {
+    throw new MissingTelegramIdError(
+      `Missing Telegram user id for ${contextDescription}`
+    );
+  }
+  return id;
+};
+
 /**
  * Creates a lightweight adapter that forces subsequent edits to target a specific message.
  * Useful when downstream helpers expect a context-like object with an `editMessageText` method.
@@ -151,13 +171,20 @@ export const categorizeError = (error: any): CallbackError => {
  */
 export const safeAnswerCallbackQuery = async (
   ctx: any,
-  text: string
+  text?: string
 ): Promise<void> => {
   try {
+    const hasText = typeof text === "string" && text.length > 0;
+
     if (ctx?.answerCallbackQuery) {
-      await ctx.answerCallbackQuery(text);
+      if (hasText) {
+        await ctx.answerCallbackQuery(text);
+      } else {
+        await ctx.answerCallbackQuery();
+      }
     } else if (ctx?.api && ctx?.callbackQuery?.id) {
-      await ctx.api.answerCallbackQuery(ctx.callbackQuery.id, { text });
+      const payload = hasText ? { text } : {};
+      await ctx.api.answerCallbackQuery(ctx.callbackQuery.id, payload);
     } else {
       console.warn("Unable to answer callback query - invalid context");
     }
@@ -168,7 +195,8 @@ export const safeAnswerCallbackQuery = async (
       description.includes("query ID is invalid") ||
       error?.error_code === 400
     ) {
-      const preview = text.length > 50 ? `${text.substring(0, 50)}...` : text;
+      const rawText = text ?? "";
+      const preview = rawText.length > 50 ? `${rawText.substring(0, 50)}...` : rawText;
       console.warn(`⚠️ Callback query timeout: ${preview}`);
       return;
     }

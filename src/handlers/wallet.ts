@@ -1,9 +1,14 @@
 import type { InlineKeyboard } from "grammy";
 import { escapeHtml } from "../utils/format-amount";
 import { buildWalletTokenLines, type TokenDisplayLine } from "../utils/wallet-ui";
-import { editMediaWithFallback, trySendVideoWithFallback } from "../utils/media";
+import { sendMediaWithFallback } from "../utils/media";
 import { respondWithMenu } from "../utils/menu-response";
-import { getTelegramId } from "../utils/context-helpers";
+import {
+  getTelegramId,
+  requireTelegramId,
+  MissingTelegramIdError,
+  safeAnswerCallbackQuery,
+} from "../utils/context-helpers";
 
 export type ShowWalletUIDeps = {
   wallet: {
@@ -18,60 +23,23 @@ export type ShowWalletUIDeps = {
   WINNER_VIDEO_ID?: string | null;
 };
 
-export type SendWalletMediaWithFallbackOptions = {
-  videoFileId?: string | null;
-  sendText: () => Promise<void>;
-  sendVideo?: () => Promise<void>;
-  editMessage?: () => Promise<void>;
-  logLabel?: string;
-};
-
-export const sendWalletMediaWithFallback = async ({
-  videoFileId,
-  sendText,
-  sendVideo,
-  editMessage,
-  logLabel = "wallet media",
-}: SendWalletMediaWithFallbackOptions): Promise<void> => {
-  if (!videoFileId) {
-    await sendText();
-    return;
-  }
-
-  if (editMessage) {
-    try {
-      const { skipped, usedFallback } = await editMediaWithFallback({
-        edit: () => editMessage(),
-        fallback: sendText,
-        logLabel: `${logLabel} edit`,
-      });
-
-      if (skipped || usedFallback) {
-        return;
-      }
-
-      return;
-    } catch (error) {
-      console.warn(`${logLabel} edit failed, sending new video`, error);
-    }
-  }
-
-  if (!sendVideo) {
-    await sendText();
-    return;
-  }
-
-  await trySendVideoWithFallback(
-    () => sendVideo(),
-    () => sendText(),
-    { logLabel: `${logLabel} send` }
-  );
-};
-
 export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
   const { wallet, getCachedWalletData, getPriceUSD, buildWalletCaption, createWalletKeyboard, WINNER_VIDEO_ID } = deps;
 
-  const telegramId = getTelegramId(ctx);
+  let telegramId: bigint;
+  try {
+    telegramId = requireTelegramId(ctx, "wallet display");
+  } catch (error) {
+    if (error instanceof MissingTelegramIdError) {
+      await respondWithMenu(ctx, {
+        text: "❌ Unable to resolve your Telegram identity. Please open a direct chat with the bot and try again.",
+        keyboard: createWalletKeyboard(),
+      });
+      return;
+    }
+    throw error;
+  }
+
   const keypair = wallet.getKeyPair(telegramId);
   const walletAddress = keypair.publicKey.toBase58();
   const walletVideoFileId = WINNER_VIDEO_ID ?? null;
@@ -88,24 +56,25 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
   );
 
   const sendWalletContent = (caption: string) =>
-    sendWalletMediaWithFallback({
+    sendMediaWithFallback({
       videoFileId: walletVideoFileId,
       logLabel: "wallet media",
       sendText: async () => {
-        await respondWithMenu(ctx, {
+        return await respondWithMenu(ctx, {
           text: caption,
           keyboard: getWalletKeyboard(),
         });
       },
-      sendVideo: walletVideoFileId
-        ? () =>
-            ctx.replyWithVideo(walletVideoFileId, {
-              caption,
-              parse_mode: "HTML",
-              reply_markup: getWalletKeyboard(),
-              reply_to_message_id: ctx.message?.message_id,
-            })
-        : undefined,
+      sendVideo:
+        walletVideoFileId && typeof ctx.replyWithVideo === "function"
+          ? () =>
+              ctx.replyWithVideo(walletVideoFileId, {
+                caption,
+                parse_mode: "HTML",
+                reply_markup: getWalletKeyboard(),
+                reply_to_message_id: ctx.message?.message_id,
+              })
+          : undefined,
       editMessage:
         canEditBotMessage && walletVideoFileId
           ? () =>
@@ -158,10 +127,10 @@ export type WalletHandlersDeps = {
 export async function onMainWallet(ctx: any, deps: WalletHandlersDeps) {
   try {
     await deps.showWalletUI(ctx);
-    await ctx.answerCallbackQuery();
+    await safeAnswerCallbackQuery(ctx);
   } catch (error) {
     console.error("❌ Error in main_wallet:", error);
-    await ctx.answerCallbackQuery("❌ Error loading wallet menu");
+    await safeAnswerCallbackQuery(ctx, "❌ Error loading wallet menu");
   }
 }
 
@@ -170,10 +139,10 @@ export async function onWalletRefresh(ctx: any, deps: WalletHandlersDeps) {
     const id = getTelegramId(ctx);
     deps.clearWalletCache(id);
     await deps.showWalletUI(ctx);
-    await ctx.answerCallbackQuery();
+    await safeAnswerCallbackQuery(ctx);
   } catch (error) {
     console.error("Error in wallet_refresh:", error);
-    await ctx.answerCallbackQuery("❌ Error refreshing wallet");
+    await safeAnswerCallbackQuery(ctx, "❌ Error refreshing wallet");
   }
 }
 
@@ -186,10 +155,10 @@ export async function onWalletSettings(ctx: any, deps: WalletHandlersDeps) {
       text: response.join("\n"),
       keyboard,
     });
-    await ctx.answerCallbackQuery("⚙️ Settings");
+    await safeAnswerCallbackQuery(ctx, "⚙️ Settings");
   } catch (error) {
     console.error("Error in wallet_settings:", error);
-    await ctx.answerCallbackQuery("❌ Error loading settings");
+    await safeAnswerCallbackQuery(ctx, "❌ Error loading settings");
   }
 }
 
@@ -201,36 +170,31 @@ export type BalanceDeps = {
   isPrivateChat: (ctx: any) => boolean;
   clearWalletCache: (telegramId: bigint) => void;
   showWalletUI: (ctx: any) => Promise<void>;
-  getPlayerData: (telegramId: bigint) => Promise<{ keypair: any; solBalance: number }>;
-  getApprovedTokens: () => Array<{ token_mint: string; token_ticker: string; decimals: number }>;
-  buildTokenBalances: (telegramId: bigint, approvedTokens: any[]) => Promise<Array<{ mint: string; ticker: string; balance: number; decimals: number }>>;
-  TOKENS_LIST: Array<{ mint: string; ticker: string }>;
-  wallet: { formatTokenBalance: (n: number, d: number) => string; formatSolBalance: (n: number) => string };
   handleCommandError: (ctx: any, error: any, name: string) => Promise<void>;
-  getPriceUSD: (mint: string) => Promise<number>;
-  buildWalletCaption: (walletAddress: string, tokenLines: TokenDisplayLine[]) => string;
-  createWalletKeyboard: () => InlineKeyboard;
-  WINNER_VIDEO_ID?: string | null;
 };
 
 export async function onBalance(ctx: any, deps: BalanceDeps) {
-  const {
-    isPrivateChat,
-    clearWalletCache,
-    showWalletUI,
-    getPlayerData,
-    getApprovedTokens,
-    buildTokenBalances,
-    TOKENS_LIST,
-    wallet,
-    handleCommandError,
-    getPriceUSD,
-    buildWalletCaption,
-    createWalletKeyboard,
-    WINNER_VIDEO_ID,
-  } = deps;
+  const { isPrivateChat, clearWalletCache, showWalletUI, handleCommandError } = deps;
 
-  const telegramId = getTelegramId(ctx);
+  let telegramId: bigint;
+  try {
+    telegramId = requireTelegramId(ctx, "balance command");
+  } catch (error) {
+    if (error instanceof MissingTelegramIdError) {
+      await handleCommandError(ctx, error, "balance");
+      return;
+    }
+    throw error;
+  }
+
+  if (telegramId === 0n) {
+    await handleCommandError(
+      ctx,
+      new Error("Missing Telegram user id while handling /balance"),
+      "balance"
+    );
+    return;
+  }
 
   if (isPrivateChat(ctx)) {
     try {
@@ -246,50 +210,36 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
   try {
     try { clearWalletCache(telegramId); } catch {}
 
-    // Get the same data as private chat using the existing logic
-    const playerData = await getPlayerData(telegramId);
-    const approvedTokens = getApprovedTokens();
-    const tokenBalancesToShow = await buildTokenBalances(telegramId, approvedTokens);
-
-    const WSOL_MINT = (TOKENS_LIST.find((t) => t.ticker === "WSOL")?.mint as string) || "So11111111111111111111111111111111111111112";
-    let solDisplayLamports = playerData.solBalance;
-    const wsolIndex = tokenBalancesToShow.findIndex((t) => t.mint === WSOL_MINT);
-    if (wsolIndex !== -1) {
-      solDisplayLamports += tokenBalancesToShow[wsolIndex]!.balance;
-      tokenBalancesToShow.splice(wsolIndex, 1);
+    const dmTargetBigInt = telegramId;
+    if (dmTargetBigInt === 0n) {
+      throw new Error("Unable to determine DM recipient");
     }
 
-    const walletAddress = playerData.keypair.publicKey.toBase58();
-    const tokenLines = await buildWalletTokenLines({
-      solBalanceLamports: solDisplayLamports,
-      tokenBalances: tokenBalancesToShow,
-      formatSolBalance: (value) => wallet.formatSolBalance(value),
-      formatTokenBalance: (amount, decimals) => wallet.formatTokenBalance(amount, decimals),
-      getPriceUSD,
-    });
+    const dmTarget = dmTargetBigInt.toString();
 
-    const caption = buildWalletCaption(walletAddress, tokenLines);
-
-    // Send privately to the user with video support
-    await sendWalletMediaWithFallback({
-      videoFileId: WINNER_VIDEO_ID,
-      logLabel: "wallet dm media",
-      sendText: () =>
-        ctx.api.sendMessage(ctx.from!.id, caption, {
-          parse_mode: "HTML",
-          reply_markup: createWalletKeyboard(),
+    const dmContext = {
+      ...ctx,
+      from: ctx.from,
+      chat: { id: dmTarget, type: "private" } as any,
+      message: undefined,
+      callbackQuery: undefined,
+      reply: (text: string, options: any = {}) =>
+        ctx.api.sendMessage(dmTarget, text, {
+          reply_to_message_id: undefined,
           link_preview_options: { is_disabled: true },
+          ...options,
         }),
-      sendVideo: WINNER_VIDEO_ID
-        ? () =>
-            ctx.api.sendVideo(ctx.from!.id, WINNER_VIDEO_ID, {
-              caption,
-              parse_mode: "HTML",
-              reply_markup: createWalletKeyboard(),
-            })
-        : undefined,
-    });
+      replyWithVideo: (fileId: string, options: any = {}) =>
+        ctx.api.sendVideo(dmTarget, fileId, {
+          reply_to_message_id: undefined,
+          ...options,
+        }),
+      editMessageMedia: undefined,
+      editMessageCaption: undefined,
+      editMessageText: undefined,
+    } as typeof ctx;
 
+    await showWalletUI(dmContext);
   } catch (error) {
     await handleCommandError(ctx, error, "balance");
   }

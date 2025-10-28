@@ -1,13 +1,16 @@
-import { test, expect } from "bun:test";
+import { test, expect, mock } from "bun:test";
 import { onBalance } from "../src/handlers/wallet";
-import { buildWalletCaption } from "../src/utils/wallet-ui";
+import { getTelegramId } from "../src/utils/context-helpers";
 
 function makeCtx(privateChat: boolean) {
   const calls: any[] = [];
   const ctx: any = {
     from: { id: 1, first_name: "User" },
     chat: { id: privateChat ? 1 : 2, type: privateChat ? "private" : "group" },
-    reply: async (...args: any[]) => { calls.push(["reply", ...args]); return { ok: true }; },
+    reply: async (...args: any[]) => {
+      calls.push(["reply", ...args]);
+      return { ok: true };
+    },
     __calls: calls,
   };
   return ctx;
@@ -15,246 +18,121 @@ function makeCtx(privateChat: boolean) {
 
 test("onBalance in private chat clears cache and calls showWalletUI", async () => {
   const ctx: any = makeCtx(true);
-  let cleared: any = null;
-  let shown = 0;
+  const clearWalletCache = mock(() => {});
+  const showWalletUI = mock(async () => {});
+
   await onBalance(ctx, {
     isPrivateChat: (c: any) => c.chat.type === "private",
-    clearWalletCache: (id: bigint) => { cleared = id; },
-    showWalletUI: async () => { shown++; },
-    getPlayerData: async () => ({ keypair: { publicKey: { toBase58: () => "addr" } }, solBalance: 0, wsolBalance: 0 }),
-    getApprovedTokens: () => [],
-    buildTokenBalances: async () => [],
-    TOKENS_LIST: [],
-    wallet: { formatTokenBalance: (_n: number, _d: number) => "0", formatSolBalance: (n: number) => String(n) },
+    clearWalletCache,
+    showWalletUI,
     handleCommandError: async () => {},
-    getPriceUSD: async () => 100,
-    buildWalletCaption,
-    createWalletKeyboard: () => ({} as any),
-    WINNER_VIDEO_ID: null,
   });
-  expect(cleared).toBe(1n);
-  expect(shown).toBe(1);
+
+  expect(clearWalletCache).toHaveBeenCalledWith(1n);
+  expect(showWalletUI).toHaveBeenCalledTimes(1);
+  const firstShowCall = showWalletUI.mock.calls[0] as any[] | undefined;
+  expect(firstShowCall?.[0]).toBe(ctx);
 });
 
 test("onBalance private chat errors call handler", async () => {
   const ctx: any = makeCtx(true);
-  let handled = 0;
+  const handleCommandError = mock(async () => {});
+
   await onBalance(ctx, {
     isPrivateChat: () => true,
-    clearWalletCache: (_: bigint) => { throw new Error("cache-fail"); },
-    showWalletUI: async () => { throw new Error("ui-fail"); },
-    getPlayerData: async () => ({ keypair: { publicKey: { toBase58: () => "addr" } }, solBalance: 0, wsolBalance: 0 }),
-    getApprovedTokens: () => [],
-    buildTokenBalances: async () => [],
-    TOKENS_LIST: [],
-    wallet: { formatTokenBalance: () => "0", formatSolBalance: (n: number) => String(n) },
-    handleCommandError: async () => { handled++; },
-    getPriceUSD: async () => 100,
-    buildWalletCaption,
-    createWalletKeyboard: () => ({} as any),
-    WINNER_VIDEO_ID: null,
+    clearWalletCache: () => {
+      throw new Error("cache-fail");
+    },
+    showWalletUI: async () => {
+      throw new Error("ui-fail");
+    },
+    handleCommandError,
   });
-  expect(handled).toBe(1);
+
+  expect(handleCommandError).toHaveBeenCalledTimes(1);
+  const firstErrorCall = handleCommandError.mock.calls[0] as any[] | undefined;
+  expect(firstErrorCall?.[2]).toBe("balance");
 });
 
-test("onBalance in group sends balance privately to user", async () => {
+test("onBalance in group sends balance privately via showWalletUI", async () => {
   const ctx: any = makeCtx(false);
-  // Mock api.sendMessage and sendVideo to track calls
   const sendMessageCalls: any[] = [];
   const sendVideoCalls: any[] = [];
+
   ctx.api = {
     sendMessage: (chatId: any, text: any, options: any) => {
       sendMessageCalls.push({ chatId, text, options });
-      return Promise.resolve();
+      return Promise.resolve({});
     },
     sendVideo: (chatId: any, videoId: any, options: any) => {
       sendVideoCalls.push({ chatId, videoId, options });
-      return Promise.resolve();
-    }
+      return Promise.resolve({});
+    },
   };
-  
+
+  const showWalletUI = mock(async (customCtx: any) => {
+    expect(customCtx.chat).toEqual({ id: "1", type: "private" });
+    expect(customCtx.callbackQuery).toBeUndefined();
+    expect(typeof customCtx.reply).toBe("function");
+
+    await customCtx.reply("wallet", { parse_mode: "HTML" });
+  });
+
   await onBalance(ctx, {
     isPrivateChat: () => false,
-    clearWalletCache: (_: any) => {},
-    showWalletUI: async () => {},
-    getPlayerData: async () => ({ keypair: { publicKey: { toBase58: () => "WALLETADDR" } }, solBalance: 1000000000, wsolBalance: 0 }),
-    getApprovedTokens: () => [{ token_mint: "USDC", token_ticker: "USDC", decimals: 6 }],
-    buildTokenBalances: async () => [{ mint: "USDC", ticker: "USDC", balance: 1000000, decimals: 6 }],
-    TOKENS_LIST: [{ mint: "So11111111111111111111111111111111111111112", ticker: "WSOL" }],
-    wallet: { formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toFixed(0), formatSolBalance: (n: number) => (n / 1_000_000_000).toFixed(6) },
+    clearWalletCache: () => {},
+    showWalletUI,
     handleCommandError: async () => {},
-    getPriceUSD: async () => 100,
-    buildWalletCaption,
-    createWalletKeyboard: () => ({} as any),
-    WINNER_VIDEO_ID: null,
   });
-  
-  // Should not reply in group
-  const calls = ctx.__calls;
-  expect(calls.length).toBe(0);
-  
-  // Should send privately to user (either as message or video)
-  const totalCalls = sendMessageCalls.length + sendVideoCalls.length;
-  expect(totalCalls).toBe(1);
-  
-  if (sendMessageCalls.length > 0) {
-    expect(sendMessageCalls[0].chatId).toBe(1); // user ID from makeCtx
-    const text = String(sendMessageCalls[0].text);
-    expect(text).toContain("WALLETADDR");
-    expect(text).toContain("SOL: 1.000000 SOL ($100.00)");
-    expect(text).toContain("USDC: 1 ($100.00)");
-    expect(sendMessageCalls[0].options.parse_mode).toBe("HTML");
-  } else if (sendVideoCalls.length > 0) {
-    expect(sendVideoCalls[0].chatId).toBe(1); // user ID from makeCtx
-    const text = String(sendVideoCalls[0].options.caption);
-    expect(text).toContain("WALLETADDR");
-    expect(text).toContain("SOL: 1.000000 SOL ($100.00)");
-    expect(text).toContain("USDC: 1 ($100.00)");
-    expect(sendVideoCalls[0].options.parse_mode).toBe("HTML");
+
+  expect(ctx.__calls.length).toBe(0);
+  expect(showWalletUI).toHaveBeenCalledTimes(1);
+  expect(sendMessageCalls.length + sendVideoCalls.length).toBe(1);
+  if (sendMessageCalls.length === 1) {
+    expect(sendMessageCalls[0].chatId).toBe("1");
+    expect(sendMessageCalls[0].options?.parse_mode).toBe("HTML");
+  } else {
+    expect(sendVideoCalls[0].chatId).toBe("1");
   }
 });
 
-test("onBalance merges WSOL and sends privately to user", async () => {
+test("onBalance handles missing telegram id in group chat", async () => {
   const ctx: any = makeCtx(false);
-  ctx.from.username = "alice";
-  
-  // Mock api.sendMessage and sendVideo to track calls
-  const sendMessageCalls: any[] = [];
-  const sendVideoCalls: any[] = [];
-  ctx.api = {
-    sendMessage: (chatId: any, text: any, options: any) => {
-      sendMessageCalls.push({ chatId, text, options });
-      return Promise.resolve();
-    },
-    sendVideo: (chatId: any, videoId: any, options: any) => {
-      sendVideoCalls.push({ chatId, videoId, options });
-      return Promise.resolve();
-    }
-  };
-  const tokens = [
-    { mint: "So11111111111111111111111111111111111111112", ticker: "WSOL", balance: 500_000_000, decimals: 9 },
-    { mint: "mint1", ticker: "AAA", balance: 1_000_000, decimals: 6 },
-    { mint: "mint2", ticker: "BBB", balance: 2_000_000, decimals: 6 },
-    { mint: "mint3", ticker: "CCC", balance: 3_000_000, decimals: 6 },
-    { mint: "mint4", ticker: "DDD", balance: 4_000_000, decimals: 6 },
-    { mint: "mint5", ticker: "EEE", balance: 5_000_000, decimals: 6 },
-  ];
+  ctx.from.id = undefined;
+  const handleCommandError = mock(async () => {});
 
   await onBalance(ctx, {
     isPrivateChat: () => false,
-    clearWalletCache: (_: any) => {},
+    clearWalletCache: () => {},
     showWalletUI: async () => {},
-    getPlayerData: async () => ({
-      keypair: { publicKey: { toBase58: () => "ADDR123" } },
-      solBalance: 1_000_000_000,
-      wsolBalance: 0,
-    }),
-    getApprovedTokens: () => tokens.map(({ mint, ticker, decimals }) => ({ token_mint: mint, token_ticker: ticker, decimals })),
-    buildTokenBalances: async () => tokens,
-    TOKENS_LIST: [{ mint: "So11111111111111111111111111111111111111112", ticker: "WSOL" }],
-    wallet: {
-      formatTokenBalance: (amount: number, decimals: number) => (amount / Math.pow(10, decimals)).toFixed(2),
-      formatSolBalance: (lamports: number) => (lamports / 1_000_000_000).toFixed(6),
-    },
-    handleCommandError: async () => {},
-    getPriceUSD: async () => 100,
-    buildWalletCaption,
-    createWalletKeyboard: () => ({} as any),
-    WINNER_VIDEO_ID: null,
+    handleCommandError,
   });
 
-  // Should not reply in group
-  const calls = ctx.__calls;
-  expect(calls.length).toBe(0);
-  
-  // Should send privately to user (either as message or video)
-  const totalCalls = sendMessageCalls.length + sendVideoCalls.length;
-  expect(totalCalls).toBe(1);
-  
-  if (sendMessageCalls.length > 0) {
-    expect(sendMessageCalls[0].chatId).toBe(1); // user ID
-    const message = String(sendMessageCalls[0].text);
-    expect(message).toContain("ADDR123");
-    expect(message).toContain("SOL: 1.500000 SOL ($150.00)");
-    expect(message).toContain("AAA: 1.00 ($100.00)");
-    expect(message).toContain("BBB: 2.00 ($200.00)");
-    expect(message).toContain("CCC: 3.00 ($300.00)");
-    expect(message).toContain("DDD: 4.00 ($400.00)");
-    expect(message).toContain("EEE: 5.00 ($500.00)");
-  } else if (sendVideoCalls.length > 0) {
-    expect(sendVideoCalls[0].chatId).toBe(1); // user ID
-    const message = String(sendVideoCalls[0].options.caption);
-    expect(message).toContain("ADDR123");
-    expect(message).toContain("SOL: 1.500000 SOL ($150.00)");
-    expect(message).toContain("AAA: 1.00 ($100.00)");
-    expect(message).toContain("BBB: 2.00 ($200.00)");
-    expect(message).toContain("CCC: 3.00 ($300.00)");
-    expect(message).toContain("DDD: 4.00 ($400.00)");
-    expect(message).toContain("EEE: 5.00 ($500.00)");
-  }
+  expect(handleCommandError).toHaveBeenCalledTimes(1);
+  const [, , action] = (handleCommandError.mock.calls[0] as any[]) ?? [];
+  expect(action).toBe("balance");
 });
 
-test("onBalance escapes HTML-sensitive values when sending privately", async () => {
+test("onBalance DM context preserves original telegram id", async () => {
   const ctx: any = makeCtx(false);
-  ctx.from.first_name = "<User>";
-  
-  // Mock api.sendMessage and sendVideo to track calls
-  const sendMessageCalls: any[] = [];
-  const sendVideoCalls: any[] = [];
   ctx.api = {
-    sendMessage: (chatId: any, text: any, options: any) => {
-      sendMessageCalls.push({ chatId, text, options });
-      return Promise.resolve();
-    },
-    sendVideo: (chatId: any, videoId: any, options: any) => {
-      sendVideoCalls.push({ chatId, videoId, options });
-      return Promise.resolve();
-    }
+    sendMessage: () => Promise.resolve({}),
+    sendVideo: () => Promise.resolve({}),
   };
-  await onBalance(ctx, {
-    isPrivateChat: () => false,
-    clearWalletCache: (_: any) => {},
-    showWalletUI: async () => {},
-    getPlayerData: async () => ({
-      keypair: { publicKey: { toBase58: () => 'ADDR<&"' } },
-      solBalance: 1_000_000_000,
-      wsolBalance: 0,
-    }),
-    getApprovedTokens: () => [{ token_mint: "mint", token_ticker: '<T&"', decimals: 6 }],
-    buildTokenBalances: async () => [
-      { mint: "mint", ticker: '<T&"', balance: 2_000_000, decimals: 6 },
-    ],
-    TOKENS_LIST: [],
-    wallet: {
-      formatTokenBalance: () => '2 & change',
-      formatSolBalance: () => '<1 & more>',
-    },
-    handleCommandError: async () => {},
-    getPriceUSD: async () => 100,
-    buildWalletCaption,
-    createWalletKeyboard: () => ({} as any),
-    WINNER_VIDEO_ID: null,
+
+  const showWalletUI = mock(async (customCtx: any) => {
+    expect(customCtx.from).toEqual(ctx.from);
+    expect(getTelegramId(customCtx)).toBe(1n);
   });
 
-  // Should not reply in group
-  const calls = ctx.__calls;
-  expect(calls.length).toBe(0);
-  
-  // Should send privately to user with HTML escaped (either as message or video)
-  const totalCalls = sendMessageCalls.length + sendVideoCalls.length;
-  expect(totalCalls).toBe(1);
-  
-  if (sendMessageCalls.length > 0) {
-    expect(sendMessageCalls[0].chatId).toBe(1); // user ID
-    const output = String(sendMessageCalls[0].text);
-    expect(output).toContain('<code>ADDR&lt;&amp;&quot;</code>');
-    expect(output).toContain('SOL: &lt;1 &amp; more&gt; SOL ($100.00)');
-    expect(output).toContain('&lt;T&amp;&quot;: 2 &amp; change ($200.00)');
-  } else if (sendVideoCalls.length > 0) {
-    expect(sendVideoCalls[0].chatId).toBe(1); // user ID
-    const output = String(sendVideoCalls[0].options.caption);
-    expect(output).toContain('<code>ADDR&lt;&amp;&quot;</code>');
-    expect(output).toContain('SOL: &lt;1 &amp; more&gt; SOL ($100.00)');
-    expect(output).toContain('&lt;T&amp;&quot;: 2 &amp; change ($200.00)');
-  }
+  await onBalance(ctx, {
+    isPrivateChat: () => false,
+    clearWalletCache: () => {},
+    showWalletUI,
+    handleCommandError: async () => {},
+  });
+
+  expect(showWalletUI).toHaveBeenCalledTimes(1);
+  const call = showWalletUI.mock.calls[0] as any[] | undefined;
+  expect(call?.[0]?.chat?.id).toBe("1");
 });

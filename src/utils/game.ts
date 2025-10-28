@@ -32,7 +32,7 @@ import {
 import {
   editMediaWithFallback,
   isRecoverableMediaError,
-  trySendVideoWithFallback,
+  sendMediaWithFallback,
 } from "./media";
 import type {
   GameMessage,
@@ -1556,33 +1556,29 @@ export class GameManager {
     const replyTo = replyToMessageId ?? (ctx as any).message?.message_id;
     const videoId = resolveGameVideoId(gameType);
     const replyMarkup = { inline_keyboard: keyboard };
-    let message: any;
-    let usesVideo = false;
+    const sendResult = await sendMediaWithFallback({
+      videoFileId: videoId ?? null,
+      logLabel: "game video",
+      sendText: () =>
+        ctx.reply(messageText, {
+          parse_mode: "HTML",
+          reply_markup: replyMarkup,
+          reply_to_message_id: replyTo,
+        }),
+      sendVideo:
+        videoId && typeof (ctx as any).replyWithVideo === "function"
+          ? () =>
+              ctx.replyWithVideo(videoId, {
+                caption: messageText,
+                parse_mode: "HTML",
+                reply_markup: replyMarkup,
+                reply_to_message_id: replyTo,
+              })
+          : undefined,
+    });
 
-    const sendText = async () =>
-      ctx.reply(messageText, {
-        parse_mode: "HTML",
-        reply_markup: replyMarkup,
-        reply_to_message_id: replyTo,
-      });
-
-    if (videoId) {
-      const { result, usedFallback } = await trySendVideoWithFallback(
-        () =>
-          ctx.replyWithVideo(videoId, {
-            caption: messageText,
-            parse_mode: "HTML",
-            reply_markup: replyMarkup,
-            reply_to_message_id: replyTo,
-          }),
-        () => sendText(),
-        { logLabel: "game video send" }
-      );
-      message = result;
-      usesVideo = !usedFallback;
-    } else {
-      message = await sendText();
-    }
+    const message: any = sendResult.result;
+    const usesVideo = sendResult.usedVideo;
 
     this.gameDb.saveGameMessage(
       gameAddress,

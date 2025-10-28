@@ -16,17 +16,23 @@ const resetInstance = () => {
 test("getKeyPair returns same instance for same index", () => {
   resetInstance();
   const manager = WalletManager.getInstance(mnemonic);
-  const kp1 = manager.getKeyPair(0n);
-  const kp2 = manager.getKeyPair(0n);
+  const kp1 = manager.getKeyPair(1n);
+  const kp2 = manager.getKeyPair(1n);
   expect(kp1).toBe(kp2);
 });
 
 test("getKeyPair derives different keys for different index", () => {
   resetInstance();
   const manager = WalletManager.getInstance(mnemonic);
-  const kp1 = manager.getKeyPair(0n);
-  const kp2 = manager.getKeyPair(1n);
+  const kp1 = manager.getKeyPair(1n);
+  const kp2 = manager.getKeyPair(2n);
   expect(kp1.publicKey.toBase58()).not.toBe(kp2.publicKey.toBase58());
+});
+
+test("getKeyPair throws when given fallback index", () => {
+  resetInstance();
+  const manager = WalletManager.getInstance(mnemonic);
+  expect(() => manager.getKeyPair(0n)).toThrow(/Missing Telegram id/);
 });
 
 test("formatSolBalance formats lamports with precision", () => {

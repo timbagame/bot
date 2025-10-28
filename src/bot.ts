@@ -6,7 +6,7 @@ import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import type { Keypair } from "@solana/web3.js";
-import { createSyncNativeInstruction, getAssociatedTokenAddress } from "@solana/spl-token";
+import { getAssociatedTokenAddress } from "@solana/spl-token";
 import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
 import { GameDatabase } from "./utils/game-database";
@@ -83,6 +83,8 @@ import {
   createMessageEditAdapter,
   handleCallbackErrorSafe,
   safeAnswerCallbackQuery,
+  requireTelegramId,
+  MissingTelegramIdError,
 } from "./utils/context-helpers";
 import { recentUpdateGuard } from "./utils/recent-update";
 import { getPriceUSD } from "./utils/prices";
@@ -219,7 +221,7 @@ const ensureCreator = (
   creatorId: string,
   failureText = "🚫 Only the game creator can modify this setup!"
 ): boolean => {
-  const currentUserId = ctx.from?.id?.toString();
+  const currentUserId = getTelegramIdString(ctx);
 
   if (currentUserId !== creatorId) {
     void safeAnswerCallbackQuery(ctx, failureText);
@@ -285,6 +287,42 @@ const tryGetUserWalletAddress = (telegramId: bigint): string | undefined => {
   } catch {
     return undefined;
   }
+};
+
+const MISSING_TELEGRAM_ID_MESSAGE =
+  "❌ Unable to resolve your Telegram identity. Please open a direct chat with the bot and try again.";
+
+const getRequiredTelegramIdForContext = async (
+  ctx: Context,
+  contextDescription: string
+): Promise<bigint | null> => {
+  try {
+    return requireTelegramId(ctx, contextDescription);
+  } catch (error) {
+    if (error instanceof MissingTelegramIdError) {
+      try {
+        if (typeof ctx.reply === "function") {
+          await ctx.reply(MISSING_TELEGRAM_ID_MESSAGE, {
+            reply_to_message_id: ctx.message?.message_id,
+          });
+        } else if (ctx.api && ctx.chat?.id) {
+          await ctx.api.sendMessage(ctx.chat.id, MISSING_TELEGRAM_ID_MESSAGE, {
+            reply_to_message_id: undefined,
+            link_preview_options: { is_disabled: true },
+          });
+        }
+      } catch (notifyError) {
+        console.error("Failed to send missing-id notification:", notifyError);
+      }
+      return null;
+    }
+    throw error;
+  }
+};
+
+const getTelegramIdString = (ctx: Context): string | undefined => {
+  const id = getTelegramId(ctx);
+  return id === 0n ? undefined : id.toString();
 };
 
 type TokenBalanceLike = {
@@ -531,6 +569,7 @@ interface SellTransactionCacheEntry {
   toTokenInfo: TokenInfoCacheEntry;
   quote: SwapQuoteWithDecimals;
   userKeypair: Keypair;
+  userId?: string;
   timestamp?: number;
 }
 
@@ -1526,7 +1565,7 @@ const cleanupOrphanedGame = async (gameAddress: string): Promise<void> => {
 const getSequentializationKey = (
   ctx: Context
 ): string | string[] | undefined => {
-  const userId = ctx.from?.id?.toString();
+  const userId = getTelegramIdString(ctx);
   if (!userId) return undefined;
 
   if (ctx.callbackQuery?.data) {
@@ -1730,7 +1769,7 @@ const startInteractiveGameSetup = async (
     reply_markup: createAmountSelectionKeyboard(
       copy.gameType,
       userBalance,
-      ctx.from?.id?.toString(),
+      getTelegramIdString(ctx),
       contractMin,
       tokenInfo.tokenTicker,
       {
@@ -1741,13 +1780,13 @@ const startInteractiveGameSetup = async (
     reply_to_message_id: ctx.message?.message_id,
   });
 
-  updateGameSetupSession(ctx.from?.id || 0, {
+  updateGameSetupSession(Number(getTelegramId(ctx)), {
     waitingFor: "setup",
     gameType: copy.gameType,
     userBalance,
     messageId: setupMessage.message_id,
     chatId: ctx.chat?.id || 0,
-    creatorId: ctx.from?.id?.toString(),
+    creatorId: getTelegramIdString(ctx),
     tokenMint: tokenInfo.tokenMint,
     tokenTicker: tokenInfo.tokenTicker,
     tokenDecimals: tokenInfo.decimals,
@@ -1808,7 +1847,7 @@ const withCreatorContext = (
 ) => {
   return async (ctx: Context) => {
     const creatorId = options.resolveCreatorId(ctx);
-    const currentUserId = ctx.from?.id?.toString();
+    const currentUserId = getTelegramIdString(ctx);
 
     console.log(`🔔 ${options.name} callback triggered:`, ctx.callbackQuery?.data);
     console.log(
@@ -1817,7 +1856,7 @@ const withCreatorContext = (
 
     if (!creatorId) {
       console.warn(`${options.name}: unable to resolve creator id from callback`);
-      await ctx.answerCallbackQuery("❌ Unable to process action");
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to process action");
       return;
     }
 
@@ -1825,11 +1864,13 @@ const withCreatorContext = (
       return;
     }
 
-    const userId = ctx.from?.id;
-    if (!userId) {
-      await ctx.answerCallbackQuery("❌ Unable to identify user");
+    const userIdBigInt = getTelegramId(ctx);
+    if (userIdBigInt === 0n) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to identify user");
       return;
     }
+
+    const userId = Number(userIdBigInt);
 
     let session = userSessions.get(userId);
     const tokenContext = await buildTokenContext(session, ctx.chat?.id);
@@ -2063,6 +2104,179 @@ const validateAndProcessTransaction = async (
     }
     throw error;
   }
+};
+
+type WrapFlowResult = {
+  status: "success" | "insufficient" | "error";
+  signature?: string;
+};
+
+type WrapFlowHandlers = {
+  onProcessing: (formattedAmount: string) => Promise<void>;
+  onSuccess: (
+    details: { signature: string; formattedAmount: string; solscanUrl?: string | null }
+  ) => Promise<void>;
+  onInsufficientBalance: (formattedAmount: string) => Promise<void>;
+  onError?: (error: unknown, formattedAmount: string) => Promise<void>;
+};
+
+const executeWrapFlow = async (
+  telegramId: bigint,
+  amountLamports: number,
+  handlers: WrapFlowHandlers
+): Promise<WrapFlowResult> => {
+  if (!Number.isFinite(amountLamports) || amountLamports <= 0) {
+    throw new Error("Wrap amount must be greater than zero");
+  }
+
+  const formattedAmount = wallet.formatSolBalance(amountLamports);
+  const balanceLamports = await wallet.getBalance(telegramId);
+
+  if (amountLamports + SOL_FEE_BUFFER_LAMPORTS > balanceLamports) {
+    await handlers.onInsufficientBalance(formattedAmount);
+    return { status: "insufficient" };
+  }
+
+  await handlers.onProcessing(formattedAmount);
+
+  try {
+    const signature = await wallet.wrapSol(telegramId, amountLamports);
+    await wallet.confirmTransaction(signature);
+    clearWalletCache(telegramId);
+
+    const solscanUrl = NetworkDetector.buildSolscanTxUrl(
+      signature,
+      process.env["RPC_URL"]
+    );
+
+    await handlers.onSuccess({ signature, formattedAmount, solscanUrl });
+    return { status: "success", signature };
+  } catch (error) {
+    if (handlers.onError) {
+      await handlers.onError(error, formattedAmount);
+      return { status: "error" };
+    }
+    throw error;
+  }
+};
+
+type UnwrapFlowResult = {
+  status: "success" | "empty" | "error";
+  signature?: string;
+  formattedAmount?: string;
+};
+
+type UnwrapFlowHandlers = {
+  expectedAmountLamports?: number;
+  onProcessing: (formattedAmount?: string) => Promise<void>;
+  onNoBalance: () => Promise<void>;
+  onSuccess: (
+    details: { signature: string; formattedAmount: string; solscanUrl?: string | null }
+  ) => Promise<void>;
+  onError?: (error: unknown) => Promise<void>;
+};
+
+const executeUnwrapFlow = async (
+  telegramId: bigint,
+  handlers: UnwrapFlowHandlers
+): Promise<UnwrapFlowResult> => {
+  const expected = handlers.expectedAmountLamports;
+
+  if (expected !== undefined) {
+    if (!Number.isFinite(expected) || expected <= 0) {
+      await handlers.onNoBalance();
+      return { status: "empty" };
+    }
+  }
+
+  const formattedExpected =
+    expected !== undefined ? wallet.formatSolBalance(expected) : undefined;
+
+  await handlers.onProcessing(formattedExpected);
+
+  try {
+    const { signature, amountLamports } = await wallet.unwrapSol(telegramId);
+
+    if (!Number.isFinite(amountLamports) || amountLamports <= 0) {
+      await handlers.onNoBalance();
+      return { status: "empty" };
+    }
+
+    await wallet.confirmTransaction(signature);
+    clearWalletCache(telegramId);
+
+    const formattedAmount = wallet.formatSolBalance(amountLamports);
+    const solscanUrl = NetworkDetector.buildSolscanTxUrl(
+      signature,
+      process.env["RPC_URL"]
+    );
+
+    await handlers.onSuccess({ signature, formattedAmount, solscanUrl });
+    return { status: "success", signature, formattedAmount };
+  } catch (error) {
+    const message =
+      error instanceof Error ? String(error.message ?? "") : String(error ?? "");
+    if (
+      message.includes("already empty") ||
+      message.includes("No WSOL account") ||
+      message.includes("WSOL account is already empty")
+    ) {
+      await handlers.onNoBalance();
+      return { status: "empty" };
+    }
+
+    if (handlers.onError) {
+      await handlers.onError(error);
+      return { status: "error" };
+    }
+    throw error;
+  }
+};
+
+type PendingTransactionValidationResult<T> =
+  | { status: "success"; transaction: T }
+  | { status: "expired" }
+  | { status: "unauthorized" };
+
+type PendingSendTransaction = {
+  type: "send";
+  userId: string;
+  token: string;
+  amount: string;
+  address: string;
+  amountDisplay?: string;
+};
+
+type PendingSwapTransaction = {
+  type: "swap";
+  userId: string;
+  fromToken?: string;
+  toToken?: string;
+  amount?: string;
+  quote?: SwapQuote;
+};
+
+const validatePendingTransaction = <T extends { type: string; userId: string }>(
+  ctx: Context,
+  txId: string,
+  expectedType: T["type"],
+  options: { removeFromCache?: boolean } = {}
+): PendingTransactionValidationResult<T> => {
+  const { removeFromCache = true } = options;
+  const transaction = getPendingTransaction(txId, removeFromCache) as
+    | (T & { type: string; userId: string })
+    | undefined;
+
+  if (!transaction || transaction.type !== expectedType) {
+    return { status: "expired" };
+  }
+
+  const currentUserId = getTelegramIdString(ctx);
+  if (!currentUserId || transaction.userId !== currentUserId) {
+    return { status: "unauthorized" };
+  }
+
+  return { status: "success", transaction };
 };
 
 // ================================
@@ -2501,75 +2715,11 @@ const createGameViaCommand = async (
 
 export const __test_createGameViaCommand = createGameViaCommand;
 
-/**
- * Build token balances for display, including game balances
- */
-const buildTokenBalances = async (
-  telegramId: bigint,
-  approvedTokens: any[]
-) => {
-  const allTokenBalances = await wallet.getAllApprovedTokenBalances(
-    telegramId,
-    approvedTokens
-  );
-
-  const tokenBalancesToShow = await Promise.all(
-    allTokenBalances.map(async (token) => {
-      try {
-        const tokenPlayerData = await getPlayerData(telegramId, token.mint);
-        return {
-          ...token,
-          balance: token.balance + tokenPlayerData.gameBalance,
-        };
-      } catch (error) {
-        return token; // If error getting game balance, just show wallet balance
-      }
-    })
-  );
-
-  // Add tokens that have game balance but no wallet balance
-  for (const approvedToken of approvedTokens) {
-    const hasToken = allTokenBalances.some(
-      (t) => t.mint === approvedToken.token_mint
-    );
-    if (!hasToken) {
-      try {
-        const tokenPlayerData = await getPlayerData(
-          telegramId,
-          approvedToken.token_mint
-        );
-        if (tokenPlayerData.gameBalance > 0) {
-          tokenBalancesToShow.push({
-            mint: approvedToken.token_mint,
-            ticker: approvedToken.token_ticker,
-            balance: tokenPlayerData.gameBalance,
-            decimals: approvedToken.decimals,
-            rawBalance: tokenPlayerData.gameBalance.toString(),
-          });
-        }
-      } catch (error) {
-        // Ignore if can't get game balance
-      }
-    }
-  }
-
-  return tokenBalancesToShow;
-};
-
 const createBalanceDeps = (): BalanceDeps => ({
   isPrivateChat,
   clearWalletCache,
   showWalletUI,
-  getPlayerData,
-  getApprovedTokens: () => tokenManager.getAllApprovedTokensWithMetadata(),
-  buildTokenBalances,
-  TOKENS_LIST,
-  wallet,
   handleCommandError,
-  getPriceUSD,
-  buildWalletCaption,
-  createWalletKeyboard,
-  WINNER_VIDEO_ID: getStartVideoId(),
 });
 
 const createCoinflipDeps = (): CoinflipDeps => ({
@@ -2616,7 +2766,13 @@ bot.command(["giveaway", "ga"], async (ctx) => {
       return ctx.reply("❌ Giveaway games can only be created in groups!");
     }
 
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "giveaway command"
+    );
+    if (telegramId == null) {
+      return;
+    }
     const args = ctx.message?.text?.split(" ");
 
     if (args && args.length >= 2) {
@@ -2645,7 +2801,13 @@ bot.command(["giveaway", "ga"], async (ctx) => {
 // ================================
 
 bot.command(["withdraw", "wh"], async (ctx: Context) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    "withdraw command"
+  );
+  if (telegramId == null) {
+    return;
+  }
   const args = ctx.message?.text?.split(" ");
 
   if (!args || args.length < 3) {
@@ -2788,7 +2950,13 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
 });
 
 bot.command("tip", async (ctx: Context) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    "tip command"
+  );
+  if (telegramId == null) {
+    return;
+  }
   const repliedMessage = ctx.message?.reply_to_message;
   const args = ctx.message?.text?.split(" ");
 
@@ -2858,7 +3026,13 @@ bot.command("tip", async (ctx: Context) => {
 });
 
 bot.command("wrap", async (ctx: Context) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    "wrap command"
+  );
+  if (telegramId == null) {
+    return;
+  }
   const args = ctx.message?.text?.split(" ");
 
   if (!args) return;
@@ -2872,71 +3046,121 @@ bot.command("wrap", async (ctx: Context) => {
     );
   }
 
+  let processingMessageId: number | null = null;
+
   try {
-    await validateAndProcessTransaction(
-      ctx,
-      telegramId,
-      amount,
-      true, // isSol
-      `Wrapping ${wallet.formatSolBalance(amount)} SOL to WSOL`,
-      async (playerData) => {
-        const wsolMint = new PublicKey(WSOL_MINT);
-        const { address: wsolAccount, instructions: createAtaIx } =
-          await wallet.findOrCreateAssociatedTokenAccount(
-            playerData.keypair.publicKey,
-            wsolMint,
-            playerData.keypair
+    const result = await executeWrapFlow(telegramId, amount, {
+      onProcessing: async (formattedAmount) => {
+        const message = await ctx.reply(
+          `Processing Wrapping ${formattedAmount} SOL to WSOL...`,
+          {
+            reply_to_message_id: ctx.message?.message_id,
+          }
+        );
+        processingMessageId = message.message_id;
+      },
+      onInsufficientBalance: async (formattedAmount) => {
+        await replyToMessage(
+          ctx,
+          `❌ <b>WRAP FAILED</b>\n\nNot enough SOL to wrap ${formattedAmount}.\nKeep at least ${MIN_SOL_FOR_TX} SOL for fees and try again.`
+        );
+      },
+      onSuccess: async ({ formattedAmount, solscanUrl }) => {
+        if (processingMessageId == null) {
+          return;
+        }
+
+        const linkLine = solscanUrl
+          ? `\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`
+          : "";
+
+        await ctx.api.editMessageText(
+          ctx.chat!.id,
+          processingMessageId,
+          `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${formattedAmount} SOL to WSOL${linkLine}`,
+          {
+            parse_mode: "HTML",
+            link_preview_options: { is_disabled: Boolean(solscanUrl) },
+          }
+        );
+      },
+      onError: async (error) => {
+        const userFriendlyError = formatUserFriendlyError(error, wallet);
+        if (processingMessageId != null) {
+          await ctx.api.editMessageText(
+            ctx.chat!.id,
+            processingMessageId,
+            userFriendlyError,
+            { parse_mode: "HTML" }
           );
+        } else {
+          await replyToMessage(ctx, userFriendlyError);
+        }
+        if (error && typeof error === "object") {
+          (error as any).__alreadyNotified = true;
+        }
+      },
+    });
 
-        const transferSolIx = SystemProgram.transfer({
-          fromPubkey: playerData.keypair.publicKey,
-          toPubkey: wsolAccount,
-          lamports: amount,
-        });
-
-        const syncNativeIx = createSyncNativeInstruction(wsolAccount);
-        const allInstructions = [...createAtaIx, transferSolIx, syncNativeIx];
-
-        return await wallet.sendTransaction(allInstructions, [
-          playerData.keypair,
-        ]);
-      }
-    );
+    if (result.status === "insufficient" && processingMessageId != null) {
+      try {
+        await ctx.api.deleteMessage(ctx.chat!.id, processingMessageId);
+      } catch {}
+    }
   } catch (error: any) {
     await handleCommandError(ctx, error, "wrap");
   }
 });
 
 bot.command("unwrap", async (ctx: Context) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    "unwrap command"
+  );
+  if (telegramId == null) {
+    return;
+  }
 
   const processingMsg = await ctx.reply("Processing unwrap...", {
     reply_to_message_id: ctx.message?.message_id,
   });
 
   try {
-    const { signature, amountLamports } = await wallet.unwrapSol(telegramId);
-    await wallet.confirmTransaction(signature);
-    clearWalletCache(telegramId);
+    await executeUnwrapFlow(telegramId, {
+      onProcessing: async () => {},
+      onNoBalance: async () => {
+        await ctx.api.editMessageText(
+          ctx.chat!.id,
+          processingMsg.message_id,
+          `❌ <b>UNWRAP FAILED</b>\n\nYour WSOL account is already empty.`,
+          { parse_mode: "HTML" }
+        );
+      },
+      onSuccess: async ({ formattedAmount, solscanUrl }) => {
+        const linkLine = solscanUrl
+          ? `\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`
+          : "";
 
-    const formattedAmount = wallet.formatSolBalance(amountLamports);
-    const solscanUrl = NetworkDetector.buildSolscanTxUrl(
-      signature,
-      process.env["RPC_URL"]
-    );
-    const linkLine = solscanUrl
-      ? `\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`
-      : "";
-
-    await ctx.api.editMessageText(
-      ctx.chat!.id,
-      processingMsg.message_id,
-      `✅ <b>UNWRAP COMPLETED</b>\n\nUnwrapped ${formattedAmount} WSOL to SOL${linkLine}`,
-      {
-        parse_mode: "HTML",
-        link_preview_options: { is_disabled: Boolean(solscanUrl) },
-      }
-    );
+        await ctx.api.editMessageText(
+          ctx.chat!.id,
+          processingMsg.message_id,
+          `✅ <b>UNWRAP COMPLETED</b>\n\nUnwrapped ${formattedAmount} WSOL to SOL${linkLine}`,
+          {
+            parse_mode: "HTML",
+            link_preview_options: { is_disabled: Boolean(solscanUrl) },
+          }
+        );
+      },
+      onError: async (error) => {
+        const userFriendlyError = formatUserFriendlyError(error, wallet);
+        await ctx.api.editMessageText(
+          ctx.chat!.id,
+          processingMsg.message_id,
+          userFriendlyError,
+          { parse_mode: "HTML" }
+        );
+      },
+    });
   } catch (error) {
     const userFriendlyError = formatUserFriendlyError(error, wallet);
     await ctx.api.editMessageText(
@@ -2954,9 +3178,15 @@ bot.command("unwrap", async (ctx: Context) => {
 
 bot.command(
   "swap",
-  sequentialize((ctx) => [String(ctx.from?.id || 0), "swap"]),
+  sequentialize((ctx) => [getTelegramIdString(ctx) ?? "unknown", "swap"]),
   async (ctx: Context) => {
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "swap command"
+    );
+    if (telegramId == null) {
+      return;
+    }
     const args = ctx.message?.text?.split(" ").slice(1);
 
     if (!args || args.length < 3) {
@@ -3260,7 +3490,14 @@ const getSellTransactionCacheEntry = (
 // Swap confirmation callbacks
 bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
   const [, action, userId] = ctx.match!;
-  const telegramId = getTelegramId(ctx);
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    "swap confirmation"
+  );
+  if (telegramId == null) {
+    await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+    return;
+  }
 
   if (telegramId.toString() !== userId) {
     return safeAnswerCallbackQuery(ctx, "❌ This swap is not for you");
@@ -3584,7 +3821,15 @@ bot.command("default", async (ctx: Context) => {
   }
 
   // For changing the default token, check admin permissions
-  const isAdmin = await isUserGroupAdmin(ctx, ctx.from.id);
+  const telegramId = getTelegramId(ctx);
+  if (telegramId === 0n) {
+    return replyToMessage(
+      ctx,
+      "🔒 Unable to verify permissions for this user."
+    );
+  }
+
+  const isAdmin = await isUserGroupAdmin(ctx, Number(telegramId));
   if (!isAdmin) {
     return replyToMessage(
       ctx,
@@ -3637,7 +3882,7 @@ bot.command("default", async (ctx: Context) => {
     ctx.chat!.id,
     knownToken.token_mint,
     knownToken.token_ticker,
-    ctx.from.id.toString()
+    getTelegramId(ctx).toString()
   );
 
   return replyToMessage(
@@ -3700,7 +3945,13 @@ bot.command("help", async (ctx: Context) => {
 });
 
 bot.command("debug", async (ctx: Context) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    "debug command"
+  );
+  if (telegramId == null) {
+    return;
+  }
   const replyToMessage = ctx.message?.reply_to_message;
 
   try {
@@ -3822,7 +4073,13 @@ bot.command("checktx", async (ctx: Context) => {
 });
 
 bot.command("active", async (ctx: Context) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    "active command"
+  );
+  if (telegramId == null) {
+    return;
+  }
 
   try {
     const { activeGames } = await gameManager.getUserGames(ctx, telegramId);
@@ -3839,7 +4096,13 @@ bot.command("active", async (ctx: Context) => {
 });
 
 bot.command("games", async (ctx: Context) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    "games command"
+  );
+  if (telegramId == null) {
+    return;
+  }
 
   try {
     const { recentGames } = await gameManager.getUserGames(ctx, telegramId);
@@ -4170,15 +4433,19 @@ bot.on("callback_query", async (ctx, next) => {
   }
 
   try {
-    if (!ctx.from?.id) {
-      await ctx.answerCallbackQuery(
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "game callback"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(
+        ctx,
         "Unable to identify user. Please try again."
       );
       return;
     }
 
     const gamePda = new PublicKey(gameAddress);
-    const telegramId = getTelegramId(ctx);
     const playerKp = wallet.getKeyPair(telegramId);
 
     switch (action) {
@@ -4208,17 +4475,17 @@ const handleCompletedGameCallback = async (ctx: any, game: any) => {
 
       const statusMessage =
         gameData.winner_address === "cancelled" ? "cancelled" : "completed";
-      await ctx.answerCallbackQuery(`Game ${statusMessage} - message updated!`);
+      await safeAnswerCallbackQuery(ctx, `Game ${statusMessage} - message updated!`);
     } else {
       // Game data not found in database - game may have been cleaned up
       console.warn(`Game data not found for ${game.game_address}`);
-      await ctx.answerCallbackQuery(
+      await safeAnswerCallbackQuery(ctx, 
         "Game data not found - game may have been completed"
       );
     }
   } catch (error) {
     console.error("Error updating completed game message:", error);
-    await ctx.answerCallbackQuery("Failed to update game message");
+    await safeAnswerCallbackQuery(ctx, "Failed to update game message");
   }
 };
 
@@ -4280,7 +4547,7 @@ const handleJoinGame = async (
   } catch (error: any) {
     // Handle specific case where account doesn't exist (game was completed/cancelled)
     if ((error as Error).message?.includes("Account does not exist")) {
-      await ctx.answerCallbackQuery("This game is no longer active!");
+      await safeAnswerCallbackQuery(ctx, "This game is no longer active!");
     } else {
       // Re-throw the error to be handled by the outer catch block
       throw error;
@@ -4347,10 +4614,10 @@ bot.callbackQuery(
           amount,
         });
 
-        await ctx.answerCallbackQuery();
+    await safeAnswerCallbackQuery(ctx);
       } catch (error) {
         console.error("Error in amount callback:", error);
-        await ctx.answerCallbackQuery("❌ Error selecting amount");
+        await safeAnswerCallbackQuery(ctx, "❌ Error selecting amount");
       }
     }
   )
@@ -4426,10 +4693,10 @@ bot.callbackQuery(
           amount,
         });
 
-        await ctx.answerCallbackQuery();
+        await safeAnswerCallbackQuery(ctx);
       } catch (error) {
         console.error("Error in players callback:", error);
-        await ctx.answerCallbackQuery("❌ Error selecting players");
+        await safeAnswerCallbackQuery(ctx, "❌ Error selecting players");
       }
     }
   )
@@ -4454,7 +4721,7 @@ bot.callbackQuery(
         const maxPlayers = parseInt(ctx.match![3] as string);
         const minPlayers = gameType === "coinflip" ? 2 : 1;
         if (isNaN(maxPlayers) || maxPlayers < minPlayers || maxPlayers > 100) {
-          await ctx.answerCallbackQuery(
+          await safeAnswerCallbackQuery(ctx, 
             `❌ Players must be between ${minPlayers} and 100`
           );
           return;
@@ -4469,7 +4736,7 @@ bot.callbackQuery(
             : `${userId}:${gameType}:${amount}:${maxPlayers}`;
 
         if (pendingGameCreations.has(creationKey)) {
-          await ctx.answerCallbackQuery("⏳ Already creating this game...");
+          await safeAnswerCallbackQuery(ctx, "⏳ Already creating this game...");
           return;
         }
 
@@ -4511,7 +4778,7 @@ bot.callbackQuery(
             }
           }
 
-          await ctx.answerCallbackQuery("Creating game...");
+          await safeAnswerCallbackQuery(ctx, "Creating game...");
 
           const decimals = tokenContext.tokenDecimals;
           const amountRaw = Math.round(amount * Math.pow(10, decimals));
@@ -4631,7 +4898,7 @@ bot.callbackQuery(
       } catch (error) {
         console.error("Error in confirm_game callback:", error);
         try {
-          await ctx.answerCallbackQuery("❌ Error creating game");
+          await safeAnswerCallbackQuery(ctx, "❌ Error creating game");
         } catch (answerError) {
           console.error("Failed to answer callback after error:", answerError);
         }
@@ -4666,7 +4933,14 @@ bot.callbackQuery(
     async (ctx, { session, tokenContext, updateSession, creatorId }) => {
       try {
         const gameType = ctx.match![1] as string;
-        const telegramId = getTelegramId(ctx);
+        const telegramId = await getRequiredTelegramIdForContext(
+          ctx,
+          "custom amount slider"
+        );
+        if (telegramId == null) {
+          await safeAnswerCallbackQuery(ctx, "Unable to identify user");
+          return;
+        }
 
         let userBalance =
           session?.userBalance && session.userBalance > 0
@@ -4732,10 +5006,10 @@ bot.callbackQuery(
           amount: session?.amount,
         });
 
-        await ctx.answerCallbackQuery();
+        await safeAnswerCallbackQuery(ctx);
       } catch (error) {
         console.error("Error in creator-protected custom_amount callback:", error);
-        await ctx.answerCallbackQuery("❌ Error loading custom amount");
+        await safeAnswerCallbackQuery(ctx, "❌ Error loading custom amount");
       }
     }
   )
@@ -4755,7 +5029,14 @@ bot.callbackQuery(
       try {
         const gameType = ctx.match![1] as string;
         const newAmount = parseFloat(ctx.match![2] as string);
-        const telegramId = getTelegramId(ctx);
+        const telegramId = await getRequiredTelegramIdForContext(
+          ctx,
+          "slider adjustment"
+        );
+        if (telegramId == null) {
+          await safeAnswerCallbackQuery(ctx, "Unable to identify user");
+          return;
+        }
 
         let userBalance =
           session?.userBalance && session.userBalance > 0
@@ -4820,10 +5101,10 @@ bot.callbackQuery(
           contractMinimum: minValue,
         });
 
-        await ctx.answerCallbackQuery();
+        await safeAnswerCallbackQuery(ctx);
       } catch (error) {
         console.error("Error in creator-protected slider callback:", error);
-        await ctx.answerCallbackQuery("❌ Error adjusting amount");
+        await safeAnswerCallbackQuery(ctx, "❌ Error adjusting amount");
       }
     }
   )
@@ -4845,7 +5126,14 @@ bot.callbackQuery(
     ) => {
       try {
         const gameType = ctx.match![1] as string;
-        const telegramId = getTelegramId(ctx);
+        const telegramId = await getRequiredTelegramIdForContext(
+          ctx,
+          "amount selection"
+        );
+        if (telegramId == null) {
+          await safeAnswerCallbackQuery(ctx, "Unable to identify user");
+          return;
+        }
 
         let userBalance =
           session?.userBalance && session.userBalance > 0
@@ -4931,10 +5219,10 @@ bot.callbackQuery(
           contractMinimum: contractMin,
         });
 
-        await ctx.answerCallbackQuery();
+        await safeAnswerCallbackQuery(ctx);
       } catch (error) {
         console.error("Error in creator-protected back_to_amounts callback:", error);
-        await ctx.answerCallbackQuery("❌ Error going back");
+        await safeAnswerCallbackQuery(ctx, "❌ Error going back");
       }
     }
   )
@@ -4953,7 +5241,14 @@ bot.callbackQuery(
     async (ctx, { session, tokenContext, updateSession, creatorId }) => {
       try {
         const gameType = ctx.match![1] as string;
-        const telegramId = getTelegramId(ctx);
+        const telegramId = await getRequiredTelegramIdForContext(
+          ctx,
+          "type amount prompt"
+        );
+        if (telegramId == null) {
+          await safeAnswerCallbackQuery(ctx, "Unable to identify user");
+          return;
+        }
 
         let userBalance =
           session?.userBalance && session.userBalance > 0
@@ -5007,7 +5302,7 @@ bot.callbackQuery(
             .row(),
         });
 
-        await ctx.answerCallbackQuery("Type your amount...");
+        await safeAnswerCallbackQuery(ctx, "Type your amount...");
 
         updateSession({
           waitingFor: "amount_input",
@@ -5020,7 +5315,7 @@ bot.callbackQuery(
         });
       } catch (error) {
         console.error("Error in creator-protected type_amount callback:", error);
-        await ctx.answerCallbackQuery("❌ Error setting up text input");
+        await safeAnswerCallbackQuery(ctx, "❌ Error setting up text input");
       }
     }
   )
@@ -5072,7 +5367,7 @@ bot.callbackQuery(
             .row(),
         });
 
-        await ctx.answerCallbackQuery("Type the number of players...");
+        await safeAnswerCallbackQuery(ctx, "Type the number of players...");
 
         updateSession({
           waitingFor: "players_input",
@@ -5085,7 +5380,7 @@ bot.callbackQuery(
         });
       } catch (error) {
         console.error("Error in creator-protected custom_players callback:", error);
-        await ctx.answerCallbackQuery("❌ Error setting up players input");
+        await safeAnswerCallbackQuery(ctx, "❌ Error setting up players input");
       }
     }
   )
@@ -5093,7 +5388,7 @@ bot.callbackQuery(
 
 // No-op callback (for display-only buttons)
 bot.callbackQuery("noop", async (ctx) => {
-  await ctx.answerCallbackQuery();
+  await safeAnswerCallbackQuery(ctx);
 });
 
 
@@ -5114,10 +5409,10 @@ bot.callbackQuery(
           text: "❌ Game creation cancelled.",
           parseMode: "HTML",
         });
-        await ctx.answerCallbackQuery("Cancelled");
+        await safeAnswerCallbackQuery(ctx, "Cancelled");
       } catch (error) {
         console.error("Error in creator-protected cancel callback:", error);
-        await ctx.answerCallbackQuery("❌ Error cancelling");
+        await safeAnswerCallbackQuery(ctx, "❌ Error cancelling");
       }
     }
   )
@@ -5126,8 +5421,13 @@ bot.callbackQuery(
 // Text input handler for custom amounts
 bot.on("message:text", async (ctx, next) => {
   try {
+    const telegramIdNumeric = Number(getTelegramId(ctx));
+    if (telegramIdNumeric === 0) {
+      return await next();
+    }
+
     // Check if user is in a session waiting for input
-    const userSession = userSessions.get(ctx.from?.id || 0);
+    const userSession = userSessions.get(telegramIdNumeric);
 
     if (!userSession || (userSession.waitingFor !== "amount_input" && userSession.waitingFor !== "players_input")) {
       return await next(); // Not waiting for input, pass to other handlers
@@ -5141,7 +5441,7 @@ bot.on("message:text", async (ctx, next) => {
     // Keep user's message (avoid deleting to preserve reply chain)
 
     // Clear the session
-    userSessions.delete(ctx.from?.id || 0);
+    userSessions.delete(telegramIdNumeric);
 
     const defaultMetadata = await getDefaultTokenMetadata();
     const tokenTicker =
@@ -5228,7 +5528,7 @@ bot.on("message:text", async (ctx, next) => {
         });
       }
 
-      updateGameSetupSession(ctx.from?.id || 0, {
+      updateGameSetupSession(Number(getTelegramId(ctx)), {
         waitingFor: "setup",
         gameType: userSession.gameType,
         userBalance: userSession.userBalance,
@@ -5340,7 +5640,7 @@ bot.on("message:text", async (ctx, next) => {
       });
     }
 
-    updateGameSetupSession(ctx.from?.id || 0, {
+    updateGameSetupSession(Number(getTelegramId(ctx)), {
       waitingFor: "setup",
       gameType: userSession.gameType,
       userBalance: userSession.userBalance,
@@ -5413,10 +5713,10 @@ bot.callbackQuery("cmd_withdraw", async (ctx) => {
     });
 
     await respondWithMenu(ctx, menu);
-    await ctx.answerCallbackQuery("💸 Select Token to Withdraw");
+    await safeAnswerCallbackQuery(ctx, "💸 Select Token to Withdraw");
   } catch (error) {
     console.error("Error in cmd_withdraw:", error);
-    await ctx.answerCallbackQuery("❌ Error loading send menu");
+    await safeAnswerCallbackQuery(ctx, "❌ Error loading send menu");
   }
 });
 
@@ -5424,13 +5724,20 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
   try {
     // Only show private key in private chats for security
     if (ctx.chat?.type !== "private") {
-      await ctx.answerCallbackQuery(
+      await safeAnswerCallbackQuery(ctx, 
         "❌ Private key only available in private chat"
       );
       return;
     }
 
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "show private key"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
+    }
     const keypair = wallet.getKeyPair(telegramId);
     const privateKeyBase64 = Buffer.from(keypair.secretKey).toString("base64");
 
@@ -5453,10 +5760,10 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
       text: response.join("\n"),
       keyboard: createBackToWalletKeyboard(),
     });
-    await ctx.answerCallbackQuery("🔐 Private key shown");
+    await safeAnswerCallbackQuery(ctx, "🔐 Private key shown");
   } catch (error) {
     console.error("Error in cmd_privatekey:", error);
-    await ctx.answerCallbackQuery("❌ Error showing private key");
+    await safeAnswerCallbackQuery(ctx, "❌ Error showing private key");
   }
 });
 
@@ -5515,16 +5822,23 @@ bot.callbackQuery("cmd_wrap", async (ctx) => {
     });
 
     await respondWithMenu(ctx, menu);
-    await ctx.answerCallbackQuery("🔧 Select wrap amount");
+    await safeAnswerCallbackQuery(ctx, "🔧 Select wrap amount");
   } catch (error) {
     console.error("Error in cmd_wrap:", error);
-    await ctx.answerCallbackQuery("❌ Error loading wrap menu");
+    await safeAnswerCallbackQuery(ctx, "❌ Error loading wrap menu");
   }
 });
 
 bot.callbackQuery("cmd_unwrap", async (ctx) => {
   try {
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "unwrap menu"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
+    }
     const balances = await getCachedWalletData(telegramId);
     const hasBalance = balances.wsolBalance > 0;
 
@@ -5576,12 +5890,12 @@ bot.callbackQuery("cmd_unwrap", async (ctx) => {
     });
 
     await respondWithMenu(ctx, menu);
-    await ctx.answerCallbackQuery(
+    await safeAnswerCallbackQuery(ctx, 
       hasBalance ? "🧼 Ready to unwrap WSOL" : "ℹ️ No WSOL balance found"
     );
   } catch (error) {
     console.error("Error in cmd_unwrap:", error);
-    await ctx.answerCallbackQuery("❌ Error loading unwrap menu");
+    await safeAnswerCallbackQuery(ctx, "❌ Error loading unwrap menu");
   }
 });
 
@@ -5593,7 +5907,7 @@ bot.on("callback_query", async (ctx, next) => {
   }
 
   try {
-    const userId = ctx.from?.id?.toString();
+    const userId = getTelegramIdString(ctx);
     if (!userId) return;
 
     console.log("🔔 Custom wrap amount requested");
@@ -5631,10 +5945,10 @@ bot.on("callback_query", async (ctx, next) => {
 
     setUserState(userId, nextState);
 
-    await ctx.answerCallbackQuery("Send the amount as a message");
+    await safeAnswerCallbackQuery(ctx, "Send the amount as a message");
   } catch (error) {
     console.error("Error in wrap_custom:", error);
-    await ctx.answerCallbackQuery("❌ Error processing custom amount");
+    await safeAnswerCallbackQuery(ctx, "❌ Error processing custom amount");
   }
 });
 
@@ -5647,7 +5961,14 @@ bot.on("callback_query", async (ctx, next) => {
 
   try {
     const amountChoice = callbackData.replace("wrap_amount_", "");
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "wrap amount selection"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
+    }
     const { nativeSolBalance, wsolBalance } = await getCachedWalletData(telegramId);
     const availableSolLamports = nativeSolBalance;
 
@@ -5701,61 +6022,74 @@ bot.on("callback_query", async (ctx, next) => {
       keyboard: createConfirmWrapKeyboard(lamportsToWrap),
     });
 
-    await ctx.answerCallbackQuery(`Wrap ${displayAmount} SOL`);
+    await safeAnswerCallbackQuery(ctx, `Wrap ${displayAmount} SOL`);
   } catch (error) {
     console.error("Error in wrap amount selection:", error);
     const message =
       error instanceof Error ? error.message : "Error processing wrap amount";
-    await ctx.answerCallbackQuery(`❌ ${message}`);
+    await safeAnswerCallbackQuery(ctx, `❌ ${message}`);
   }
 });
 
 bot.callbackQuery("unwrap_confirm", async (ctx) => {
   try {
-    const telegramId = getTelegramId(ctx);
-    const { wsolBalance } = await getCachedWalletData(telegramId);
-
-    if (!Number.isFinite(wsolBalance) || wsolBalance <= 0) {
-      await ctx.answerCallbackQuery("ℹ️ No WSOL to unwrap");
-      await respondWithMenu(ctx, {
-        text: `❌ <b>UNWRAP FAILED</b>\n\nYour WSOL account is already empty.`,
-        keyboard: createBackToWalletKeyboard(),
-      });
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "unwrap confirmation"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
       return;
     }
+    const { wsolBalance } = await getCachedWalletData(telegramId);
 
-    const formattedAmount = wallet.formatSolBalance(wsolBalance);
+    const result = await executeUnwrapFlow(telegramId, {
+      expectedAmountLamports: wsolBalance,
+      onProcessing: async (formattedAmount) => {
+        await respondWithMenu(ctx, {
+          text: `🔄 <b>PROCESSING UNWRAP</b>\n\nUnwrapping ${escapeHtml(
+            formattedAmount ?? "0"
+          )} WSOL to SOL...\n\n<i>Please wait...</i>`,
+          keyboard: new InlineKeyboard(),
+        });
+      },
+      onNoBalance: async () => {
+        await respondWithMenu(ctx, {
+          text: `❌ <b>UNWRAP FAILED</b>\n\nYour WSOL account is already empty.`,
+          keyboard: createBackToWalletKeyboard(),
+        });
+      },
+      onSuccess: async ({ formattedAmount, solscanUrl }) => {
+        const completionMessage = solscanUrl
+          ? `✅ <b>UNWRAP COMPLETED</b>\n\nUnwrapped ${escapeHtml(
+              formattedAmount
+            )} WSOL to SOL\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`
+          : `✅ <b>UNWRAP COMPLETED</b>\n\nUnwrapped ${escapeHtml(
+              formattedAmount
+            )} WSOL to SOL`;
 
-    await respondWithMenu(ctx, {
-      text: `🔄 <b>PROCESSING UNWRAP</b>\n\nUnwrapping ${escapeHtml(
-        formattedAmount
-      )} WSOL to SOL...\n\n<i>Please wait...</i>`,
-      keyboard: new InlineKeyboard(),
+        await respondWithMenu(ctx, {
+          text: completionMessage,
+          keyboard: createBackToWalletKeyboard(),
+        });
+      },
+      onError: async (error) => {
+        console.error("Error in unwrap confirmation:", error);
+        const userFriendlyError = formatUserFriendlyError(error, wallet);
+        await respondWithMenu(ctx, {
+          text: userFriendlyError,
+          keyboard: createBackToWalletKeyboard(),
+        });
+      },
     });
 
-    const { signature, amountLamports } = await wallet.unwrapSol(telegramId);
-    await wallet.confirmTransaction(signature);
-    clearWalletCache(telegramId);
-
-    const completedAmount = wallet.formatSolBalance(amountLamports);
-    const solscanUrl = NetworkDetector.buildSolscanTxUrl(
-      signature,
-      process.env["RPC_URL"]
-    );
-    const completionMessage = solscanUrl
-      ? `✅ <b>UNWRAP COMPLETED</b>\n\nUnwrapped ${escapeHtml(
-          completedAmount
-        )} WSOL to SOL\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`
-      : `✅ <b>UNWRAP COMPLETED</b>\n\nUnwrapped ${escapeHtml(
-          completedAmount
-        )} WSOL to SOL`;
-
-    await respondWithMenu(ctx, {
-      text: completionMessage,
-      keyboard: createBackToWalletKeyboard(),
-    });
-
-    await ctx.answerCallbackQuery("✅ WSOL unwrapped");
+    if (result.status === "success") {
+      await safeAnswerCallbackQuery(ctx, "✅ WSOL unwrapped");
+    } else if (result.status === "empty") {
+      await safeAnswerCallbackQuery(ctx, "ℹ️ No WSOL to unwrap");
+    } else {
+      await safeAnswerCallbackQuery(ctx, "❌ Unwrap failed");
+    }
   } catch (error) {
     console.error("Error in unwrap confirmation:", error);
     const userFriendlyError = formatUserFriendlyError(error, wallet);
@@ -5763,7 +6097,7 @@ bot.callbackQuery("unwrap_confirm", async (ctx) => {
       text: userFriendlyError,
       keyboard: createBackToWalletKeyboard(),
     });
-    await ctx.answerCallbackQuery("❌ Unwrap failed");
+    await safeAnswerCallbackQuery(ctx, "❌ Unwrap failed");
   }
 });
 
@@ -5773,18 +6107,23 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
     const callbackData = ctx.callbackQuery?.data || "";
     const txId = callbackData.replace("confirm_send_", "");
 
-    // Retrieve transaction details
-    const transaction = getPendingTransaction(txId, true);
-    if (!transaction || transaction.type !== "send") {
-      await ctx.answerCallbackQuery("❌ Transaction expired or not found");
+    const validation = validatePendingTransaction<PendingSendTransaction>(
+      ctx,
+      txId,
+      "send"
+    );
+
+    if (validation.status === "expired") {
+      await safeAnswerCallbackQuery(ctx, "❌ Transaction expired or not found");
       return;
     }
 
-    // Verify user owns this transaction
-    if (transaction.userId !== ctx.from.id.toString()) {
-      await ctx.answerCallbackQuery("❌ Unauthorized transaction");
+    if (validation.status === "unauthorized") {
+      await safeAnswerCallbackQuery(ctx, "❌ Unauthorized transaction");
       return;
     }
+
+    const transaction = validation.transaction;
 
     const amountSummary =
       transaction.amountDisplay ??
@@ -5971,10 +6310,10 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
       });
     }
 
-    await ctx.answerCallbackQuery("✅ Transaction submitted");
+    await safeAnswerCallbackQuery(ctx, "✅ Transaction submitted");
   } catch (error) {
     console.error("Error in send confirmation:", error);
-    await ctx.answerCallbackQuery("❌ Error processing transaction");
+    await safeAnswerCallbackQuery(ctx, "❌ Error processing transaction");
   }
 });
 
@@ -5992,44 +6331,58 @@ bot.callbackQuery(/^confirm_wrap_/, async (ctx) => {
     const formattedAmount = wallet.formatSolBalance(lamportsToWrap);
     console.log(`✅ Confirmed wrap: ${formattedAmount} SOL`);
 
-    const telegramId = getTelegramId(ctx);
-    const balanceLamports = await wallet.getBalance(telegramId);
-
-    if (lamportsToWrap + SOL_FEE_BUFFER_LAMPORTS > balanceLamports) {
-      await ctx.answerCallbackQuery("❌ Insufficient SOL for wrap");
-      await respondWithMenu(ctx, {
-        text: `❌ <b>WRAP FAILED</b>\n\nNot enough SOL to wrap ${formattedAmount}.\nKeep at least ${MIN_SOL_FOR_TX} SOL for fees and try again.`,
-        keyboard: createBackToWalletKeyboard(),
-      });
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "wrap confirmation"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
       return;
     }
 
-    await respondWithMenu(ctx, {
-      text: `🔄 <b>PROCESSING WRAP</b>\n\nWrapping ${formattedAmount} SOL to WSOL...\n\n<i>Please wait...</i>`,
-      keyboard: new InlineKeyboard(),
+    const result = await executeWrapFlow(telegramId, lamportsToWrap, {
+      onProcessing: async (amountDisplay) => {
+        await respondWithMenu(ctx, {
+          text: `🔄 <b>PROCESSING WRAP</b>\n\nWrapping ${amountDisplay} SOL to WSOL...\n\n<i>Please wait...</i>`,
+          keyboard: new InlineKeyboard(),
+        });
+      },
+      onInsufficientBalance: async (amountDisplay) => {
+        await respondWithMenu(ctx, {
+          text: `❌ <b>WRAP FAILED</b>\n\nNot enough SOL to wrap ${amountDisplay}.\nKeep at least ${MIN_SOL_FOR_TX} SOL for fees and try again.`,
+          keyboard: createBackToWalletKeyboard(),
+        });
+      },
+      onSuccess: async ({ formattedAmount: amountDisplay, solscanUrl }) => {
+        const completionMessage = solscanUrl
+          ? `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${amountDisplay} SOL to WSOL\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`
+          : `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${amountDisplay} SOL to WSOL`;
+
+        await respondWithMenu(ctx, {
+          text: completionMessage,
+          keyboard: createBackToWalletKeyboard(),
+        });
+      },
+      onError: async (error) => {
+        console.error("Error in wrap confirmation:", error);
+        const userFriendlyError = formatUserFriendlyError(error, wallet);
+        await respondWithMenu(ctx, {
+          text: userFriendlyError,
+          keyboard: createBackToWalletKeyboard(),
+        });
+      },
     });
 
-    const signature = await wallet.wrapSol(telegramId, lamportsToWrap);
-    await wallet.confirmTransaction(signature);
-    clearWalletCache(telegramId);
-
-    const solscanUrl = NetworkDetector.buildSolscanTxUrl(
-      signature,
-      process.env["RPC_URL"]
-    );
-    const completionMessage = solscanUrl
-      ? `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${formattedAmount} SOL to WSOL\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`
-      : `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${formattedAmount} SOL to WSOL`;
-
-    await respondWithMenu(ctx, {
-      text: completionMessage,
-      keyboard: createBackToWalletKeyboard(),
-    });
-
-    await ctx.answerCallbackQuery("✅ Wrap transaction submitted");
+    if (result.status === "success") {
+      await safeAnswerCallbackQuery(ctx, "✅ Wrap transaction submitted");
+    } else if (result.status === "insufficient") {
+      await safeAnswerCallbackQuery(ctx, "❌ Insufficient SOL for wrap");
+    } else {
+      await safeAnswerCallbackQuery(ctx, "❌ Error processing wrap");
+    }
   } catch (error) {
     console.error("Error in wrap confirmation:", error);
-    await ctx.answerCallbackQuery("❌ Error processing wrap");
+    await safeAnswerCallbackQuery(ctx, "❌ Error processing wrap");
   }
 });
 
@@ -6039,18 +6392,23 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
     const callbackData = ctx.callbackQuery?.data || "";
     const txId = callbackData.replace("confirm_swap_", "");
 
-    // Retrieve transaction details
-    const transaction = getPendingTransaction(txId, true);
-    if (!transaction || transaction.type !== "swap") {
-      await ctx.answerCallbackQuery("❌ Transaction expired or not found");
+    const validation = validatePendingTransaction<PendingSwapTransaction>(
+      ctx,
+      txId,
+      "swap"
+    );
+
+    if (validation.status === "expired") {
+      await safeAnswerCallbackQuery(ctx, "❌ Transaction expired or not found");
       return;
     }
 
-    // Verify user owns this transaction
-    if (transaction.userId !== ctx.from.id.toString()) {
-      await ctx.answerCallbackQuery("❌ Unauthorized transaction");
+    if (validation.status === "unauthorized") {
+      await safeAnswerCallbackQuery(ctx, "❌ Unauthorized transaction");
       return;
     }
+
+    const transaction = validation.transaction;
 
     console.log(
       `✅ Confirmed swap: ${transaction.amount} ${transaction.fromToken} → ${transaction.toToken}`
@@ -6080,6 +6438,9 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
       let txSignature: string;
       const keypair = wallet.getKeyPair(BigInt(transaction.userId));
 
+      const inputDecimals = (quote as any).inputDecimals ?? 9;
+      const outputDecimals = (quote as any).outputDecimals ?? 9;
+
       if (quote.provider === "jupiter") {
         // Use Jupiter execution method (same as original implementation)
         txSignature = await swapManager.executeJupiterSwap(
@@ -6089,8 +6450,8 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
             amount: quote.inputAmount, // Use inputAmount from quote like original
             slippageBps: 100,
             userKeypair: keypair,
-            inputDecimals: quote.inputDecimals || 9,
-            outputDecimals: quote.outputDecimals || 9,
+            inputDecimals,
+            outputDecimals,
             inputTicker: transaction.fromToken?.toUpperCase() || "UNKNOWN",
             outputTicker: transaction.toToken?.toUpperCase() || "UNKNOWN",
           },
@@ -6105,8 +6466,8 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
             amount: quote.inputAmount, // Use inputAmount from quote like original
             slippageBps: 100,
             userKeypair: keypair,
-            inputDecimals: quote.inputDecimals || 9,
-            outputDecimals: quote.outputDecimals || 9,
+            inputDecimals,
+            outputDecimals,
             inputTicker: transaction.fromToken?.toUpperCase() || "UNKNOWN",
             outputTicker: transaction.toToken?.toUpperCase() || "UNKNOWN",
           },
@@ -6145,10 +6506,10 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
       });
     }
 
-    await ctx.answerCallbackQuery("✅ Swap submitted");
+    await safeAnswerCallbackQuery(ctx, "✅ Swap submitted");
   } catch (error) {
     console.error("Error in swap confirmation:", error);
-    await ctx.answerCallbackQuery("❌ Error processing swap");
+    await safeAnswerCallbackQuery(ctx, "❌ Error processing swap");
   }
 });
 
@@ -6183,10 +6544,10 @@ bot.callbackQuery("cmd_swap", async (ctx) => {
     });
 
     await respondWithMenu(ctx, menu);
-    await ctx.answerCallbackQuery("💱 Select token to swap from");
+    await safeAnswerCallbackQuery(ctx, "💱 Select token to swap from");
   } catch (error) {
     console.error("Error in cmd_swap:", error);
-    await ctx.answerCallbackQuery("❌ Error loading swap menu");
+    await safeAnswerCallbackQuery(ctx, "❌ Error loading swap menu");
   }
 });
 
@@ -6360,7 +6721,7 @@ const buildWalletActionMenuForUser = async ({
   getBalances,
   prepareBalances,
 }: BuildWalletActionMenuForUserOptions) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "wallet action menu");
   const keypair = wallet.getKeyPair(telegramId);
   const walletAddress = keypair.publicKey.toBase58();
 
@@ -6461,10 +6822,10 @@ bot.on("callback_query", async (ctx, next) => {
     });
 
     await respondWithMenu(ctx, menu);
-    await ctx.answerCallbackQuery(`Selected ${token}`);
+    await safeAnswerCallbackQuery(ctx, `Selected ${token}`);
   } catch (error) {
     console.error("Error in send token selection:", error);
-    await ctx.answerCallbackQuery("❌ Error processing selection");
+    await safeAnswerCallbackQuery(ctx, "❌ Error processing selection");
   }
 });
 
@@ -6483,7 +6844,7 @@ bot.on("callback_query", async (ctx, next) => {
       throw new Error("Invalid amount selection");
     }
 
-    const userId = ctx.from?.id?.toString();
+    const userId = getTelegramIdString(ctx);
     if (!userId) return;
 
     if (amountChoice === "CUSTOM") {
@@ -6507,11 +6868,18 @@ bot.on("callback_query", async (ctx, next) => {
         },
       });
 
-      await ctx.answerCallbackQuery("Send the amount as a message");
+      await safeAnswerCallbackQuery(ctx, "Send the amount as a message");
       return;
     }
 
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "send amount selection"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
+    }
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
 
     const isSol = token === "SOL";
@@ -6587,10 +6955,10 @@ bot.on("callback_query", async (ctx, next) => {
       chatId: ctx.chat?.id,
     });
 
-    await ctx.answerCallbackQuery(`Selected ${displayLabel}`);
+    await safeAnswerCallbackQuery(ctx, `Selected ${displayLabel}`);
   } catch (error) {
     console.error("Error in send amount selection:", error);
-    await ctx.answerCallbackQuery("❌ Error processing amount");
+    await safeAnswerCallbackQuery(ctx, "❌ Error processing amount");
   }
 });
 
@@ -6605,10 +6973,10 @@ bot.callbackQuery("start_bot", async (ctx) => {
     }
 
     await onBalance(ctx as any, createBalanceDeps());
-    await ctx.answerCallbackQuery("🚀 Welcome to TIMBA!");
+    await safeAnswerCallbackQuery(ctx, "🚀 Welcome to TIMBA!");
   } catch (error) {
     console.error("Error in start_bot:", error);
-    await ctx.answerCallbackQuery("❌ Error loading main menu");
+    await safeAnswerCallbackQuery(ctx, "❌ Error loading main menu");
   }
 });
 
@@ -6634,10 +7002,10 @@ bot.callbackQuery("cmd_help", async (ctx) => {
       text: helpContent,
       keyboard: helpKeyboard,
     });
-    await ctx.answerCallbackQuery("❓ Help Center");
+    await safeAnswerCallbackQuery(ctx, "❓ Help Center");
   } catch (error) {
     console.error("Error in cmd_help:", error);
-    await ctx.answerCallbackQuery("❌ Error loading help");
+    await safeAnswerCallbackQuery(ctx, "❌ Error loading help");
   }
 });
 
@@ -6758,7 +7126,7 @@ const showHelpSection = async (
     parseMode: "HTML",
     keyboard,
   });
-  await ctx.answerCallbackQuery(config.ack);
+  await safeAnswerCallbackQuery(ctx, config.ack);
 };
 
 bot.callbackQuery("help_wallet", async (ctx) => {
@@ -6766,7 +7134,7 @@ bot.callbackQuery("help_wallet", async (ctx) => {
     await showHelpSection(ctx, "wallet");
   } catch (error) {
     console.error("Error in help_wallet:", error);
-    await ctx.answerCallbackQuery("❌ Error loading wallet help");
+    await safeAnswerCallbackQuery(ctx, "❌ Error loading wallet help");
   }
 });
 
@@ -6775,7 +7143,7 @@ bot.callbackQuery("help_games", async (ctx) => {
     await showHelpSection(ctx, "games");
   } catch (error) {
     console.error("Error in help_games:", error);
-    await ctx.answerCallbackQuery("❌ Error loading games help");
+    await safeAnswerCallbackQuery(ctx, "❌ Error loading games help");
   }
 });
 
@@ -6784,7 +7152,7 @@ bot.callbackQuery("help_utility", async (ctx) => {
     await showHelpSection(ctx, "utility");
   } catch (error) {
     console.error("Error in help_utility:", error);
-    await ctx.answerCallbackQuery("❌ Error loading utility help");
+    await safeAnswerCallbackQuery(ctx, "❌ Error loading utility help");
   }
 });
 
@@ -6793,7 +7161,7 @@ bot.callbackQuery("help_examples", async (ctx) => {
     await showHelpSection(ctx, "examples");
   } catch (error) {
     console.error("Error in help_examples:", error);
-    await ctx.answerCallbackQuery("❌ Error loading examples");
+    await safeAnswerCallbackQuery(ctx, "❌ Error loading examples");
   }
 });
 
@@ -6814,11 +7182,14 @@ bot.callbackQuery("help_examples", async (ctx) => {
 
 bot.callbackQuery("cmd_buy", async (ctx) => {
   try {
-    if (!ctx.from?.id) {
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "buy menu"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
       return;
     }
-
-    const telegramId = getTelegramId(ctx);
     const overview = await getWalletOverview(telegramId);
     const ownedTickers = new Set(
       overview.ownedTokens
@@ -6866,7 +7237,7 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
 
     await respondWithMenu(ctx, { text: message, keyboard });
 
-    const userId = ctx.from.id.toString();
+    const userId = getTelegramId(ctx).toString();
     setUserState(userId, {
       type: "buy_menu_idle",
       paymentToken: "SOL",
@@ -6874,20 +7245,24 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
       messageId: ctx.callbackQuery?.message?.message_id,
     });
 
-    await ctx.answerCallbackQuery("Select a token to buy");
+    await safeAnswerCallbackQuery(ctx, "Select a token to buy");
   } catch (error) {
     console.error("Error in cmd_buy:", error);
-    await ctx.answerCallbackQuery("❌ Error loading buy interface");
+    await safeAnswerCallbackQuery(ctx, "❌ Error loading buy interface");
   }
 });
 
 bot.callbackQuery("cmd_sell", async (ctx) => {
   try {
-    if (!ctx.from?.id) {
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "sell menu"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
       return;
     }
 
-    const telegramId = getTelegramId(ctx);
     const overview = await getWalletOverview(telegramId);
     const userKeypair = wallet.getKeyPair(telegramId);
 
@@ -6950,15 +7325,15 @@ bot.callbackQuery("cmd_sell", async (ctx) => {
     });
 
     await respondWithMenu(ctx, { text: message, keyboard });
-    await ctx.answerCallbackQuery("Select what you want to sell");
+    await safeAnswerCallbackQuery(ctx, "Select what you want to sell");
   } catch (error) {
     console.error("Error in cmd_sell:", error);
-    await ctx.answerCallbackQuery("❌ Error loading sell interface");
+    await safeAnswerCallbackQuery(ctx, "❌ Error loading sell interface");
   }
 });
 
 bot.callbackQuery(SELL_NOOP_CALLBACK, async (ctx) => {
-  await ctx.answerCallbackQuery("No tokens available to sell");
+  await safeAnswerCallbackQuery(ctx, "No tokens available to sell");
 });
 
 bot.on("callback_query", async (ctx, next) => {
@@ -6976,14 +7351,14 @@ bot.on("callback_query", async (ctx, next) => {
   const tradeKind = kind === "buy" || kind === "sell" ? kind : undefined;
 
   if (!tradeKind || restParts.length < 2) {
-    return await ctx.answerCallbackQuery("❌ Invalid slippage request");
+    return await safeAnswerCallbackQuery(ctx, "❌ Invalid slippage request");
   }
 
   const slippageValue = restParts.pop();
   const txId = restParts.join("_");
 
   if (!txId || !slippageValue) {
-    return await ctx.answerCallbackQuery("❌ Invalid slippage request");
+    return await safeAnswerCallbackQuery(ctx, "❌ Invalid slippage request");
   }
 
   console.log(
@@ -6995,12 +7370,12 @@ bot.on("callback_query", async (ctx, next) => {
     const tradeData = tradeResult?.entry;
 
     if (!tradeData || tradeData.kind !== tradeKind) {
-      await ctx.answerCallbackQuery("❌ Transaction expired. Please try again.");
+      await safeAnswerCallbackQuery(ctx, "❌ Transaction expired. Please try again.");
       return;
     }
 
     if (slippageValue === "custom") {
-      const userId = ctx.from?.id?.toString();
+      const userId = getTelegramIdString(ctx);
       if (!userId) return;
 
       const currentSlippage = Number.isFinite(tradeData.quote.slippage)
@@ -7039,7 +7414,7 @@ bot.on("callback_query", async (ctx, next) => {
         chatId: ctx.chat?.id,
       });
 
-      await ctx.answerCallbackQuery("Send custom slippage as message");
+      await safeAnswerCallbackQuery(ctx, "Send custom slippage as message");
       return;
     }
 
@@ -7049,7 +7424,7 @@ bot.on("callback_query", async (ctx, next) => {
       newSlippage < TRADE_SLIPPAGE_RANGE.min ||
       newSlippage > TRADE_SLIPPAGE_RANGE.max
     ) {
-      await ctx.answerCallbackQuery("❌ Invalid slippage value");
+      await safeAnswerCallbackQuery(ctx, "❌ Invalid slippage value");
       return;
     }
 
@@ -7058,10 +7433,10 @@ bot.on("callback_query", async (ctx, next) => {
       tradeKind,
       slippage: newSlippage,
     });
-    await ctx.answerCallbackQuery(`✅ Slippage set to ${newSlippage}%`);
+    await safeAnswerCallbackQuery(ctx, `✅ Slippage set to ${newSlippage}%`);
   } catch (error: any) {
     console.error("Error updating slippage:", error);
-    await ctx.answerCallbackQuery("❌ Error updating slippage");
+    await safeAnswerCallbackQuery(ctx, "❌ Error updating slippage");
   }
 });
 
@@ -7081,15 +7456,15 @@ bot.on("callback_query", async (ctx, next) => {
   const txId = txParts.join("_");
 
   if (!tradeKind || !txId) {
-    return await ctx.answerCallbackQuery("❌ Invalid slippage request");
+    return await safeAnswerCallbackQuery(ctx, "❌ Invalid slippage request");
   }
 
   try {
     await regenerateTradeQuoteWithSlippage(ctx, { txId, tradeKind });
-    await ctx.answerCallbackQuery("⚙️ Back to confirmation");
+    await safeAnswerCallbackQuery(ctx, "⚙️ Back to confirmation");
   } catch (error) {
     console.error("Error restoring trade confirmation:", error);
-    await ctx.answerCallbackQuery("❌ Error loading confirmation");
+    await safeAnswerCallbackQuery(ctx, "❌ Error loading confirmation");
   }
 });
 
@@ -7106,10 +7481,10 @@ bot.on("callback_query", async (ctx, next) => {
   try {
     // Show sell amount selection for this token
     await showSellAmountSelection(ctx, tokenToSell);
-    await ctx.answerCallbackQuery(`Sell ${tokenToSell}`);
+    await safeAnswerCallbackQuery(ctx, `Sell ${tokenToSell}`);
   } catch (error) {
     console.error("Error in sell_token selection:", error);
-    await ctx.answerCallbackQuery("❌ Error processing token selection");
+    await safeAnswerCallbackQuery(ctx, "❌ Error processing token selection");
   }
 });
 
@@ -7137,10 +7512,17 @@ bot.on("callback_query", async (ctx, next) => {
   console.log(`🔴 SELL amount selected: ${amount} ${tokenToSell}`);
 
   try {
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "sell amount selection"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
+    }
 
     if (amount === "CUSTOM") {
-      const userId = ctx.from?.id?.toString();
+      const userId = getTelegramIdString(ctx);
       if (!userId) return;
 
       await showCustomAmountPrompt({
@@ -7162,7 +7544,7 @@ bot.on("callback_query", async (ctx, next) => {
         },
       });
 
-      await ctx.answerCallbackQuery("Send custom amount as message");
+      await safeAnswerCallbackQuery(ctx, "Send custom amount as message");
       return;
     }
 
@@ -7189,7 +7571,7 @@ bot.on("callback_query", async (ctx, next) => {
       keyboard: new InlineKeyboard().text("← Try Again", "cmd_sell").row(),
     });
 
-    await ctx.answerCallbackQuery("❌ Error processing sell request");
+    await safeAnswerCallbackQuery(ctx, "❌ Error processing sell request");
   }
 });
 
@@ -7205,7 +7587,18 @@ bot.on("callback_query", async (ctx, next) => {
   const sellData = sellResult?.entry;
 
   if (!sellData) {
-    await ctx.answerCallbackQuery("❌ Transaction expired. Please try again.");
+    await safeAnswerCallbackQuery(ctx, "❌ Transaction expired. Please try again.");
+    return;
+  }
+
+  const currentUserId = getTelegramIdString(ctx);
+  if (!currentUserId) {
+    await safeAnswerCallbackQuery(ctx, "❌ Unable to identify user");
+    return;
+  }
+
+  if (sellData.userId && sellData.userId !== currentUserId) {
+    await safeAnswerCallbackQuery(ctx, "❌ Unauthorized transaction");
     return;
   }
 
@@ -7228,12 +7621,14 @@ bot.on("callback_query", async (ctx, next) => {
 
     await safeAnswerCallbackQuery(ctx, "Processing sell...");
 
-    const userId = ctx.from?.id?.toString();
-    if (!userId) {
-      throw new Error("User ID not found");
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "sell confirmation"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
     }
-
-    const telegramId = getTelegramId(ctx);
     const userKeypair = wallet.getKeyPair(telegramId);
 
     // Use the existing global swapManager instance
@@ -7336,7 +7731,7 @@ bot.on("callback_query", async (ctx, next) => {
     await safeAnswerCallbackQuery(ctx, "Sell completed!");
 
     // Clear wallet cache to force fresh balance on next wallet access
-    const cacheKey = getWalletCacheKey(ctx.from?.id || "");
+    const cacheKey = getWalletCacheKey(getTelegramIdString(ctx) ?? "");
     if (cacheKey) {
       walletDataCache.delete(cacheKey);
       console.log(`🧹 Cleared wallet cache for user ${cacheKey} after SELL`);
@@ -7389,10 +7784,10 @@ bot.on("callback_query", async (ctx, next) => {
 
   try {
     await showBuyAmountSelection(ctx, paymentToken, targetToken);
-    await ctx.answerCallbackQuery(`Buy ${targetToken} with ${paymentToken}`);
+    await safeAnswerCallbackQuery(ctx, `Buy ${targetToken} with ${paymentToken}`);
   } catch (error) {
     console.error("Error in buy_popular selection:", error);
-    await ctx.answerCallbackQuery("❌ Error processing token selection");
+    await safeAnswerCallbackQuery(ctx, "❌ Error processing token selection");
   }
 });
 
@@ -7417,7 +7812,7 @@ bot.on("callback_query", async (ctx, next) => {
   // Get the cached token info
   const tokenEntry = transactionCache.get(tokenTxId);
   if (!isTokenSelectionCacheEntry(tokenEntry)) {
-    await ctx.answerCallbackQuery("❌ Token data expired. Please try again.");
+    await safeAnswerCallbackQuery(ctx, "❌ Token data expired. Please try again.");
     return;
   }
 
@@ -7432,7 +7827,7 @@ bot.on("callback_query", async (ctx, next) => {
 
   try {
     // Store the contract address for later use in transactions
-    const userId = ctx.from?.id?.toString();
+    const userId = getTelegramIdString(ctx);
     if (userId) {
       setUserState(userId, {
         type: "dynamic_token_buy",
@@ -7452,10 +7847,10 @@ bot.on("callback_query", async (ctx, next) => {
       contractAddress,
       tokenTxId
     );
-    await ctx.answerCallbackQuery(`Buy ${targetToken} with ${paymentToken}`);
+    await safeAnswerCallbackQuery(ctx, `Buy ${targetToken} with ${paymentToken}`);
   } catch (error) {
     console.error("Error in dynamic token selection:", error);
-    await ctx.answerCallbackQuery("❌ Error processing token selection");
+    await safeAnswerCallbackQuery(ctx, "❌ Error processing token selection");
   }
 });
 
@@ -7477,7 +7872,7 @@ bot.on("callback_query", async (ctx, next) => {
   const amount = parts.slice(2).join("_"); // Handle cases where amount might contain underscores
 
   if (!paymentToken || !secondPart || !amount) {
-    return await ctx.answerCallbackQuery("❌ Invalid buy parameters");
+    return await safeAnswerCallbackQuery(ctx, "❌ Invalid buy parameters");
   }
 
   // Check if second part is a transaction ID (from contract address flow) or target token
@@ -7494,7 +7889,7 @@ bot.on("callback_query", async (ctx, next) => {
   }
 
   if (!targetToken) {
-    return await ctx.answerCallbackQuery("❌ Invalid target token");
+    return await safeAnswerCallbackQuery(ctx, "❌ Invalid target token");
   }
 
   console.log(
@@ -7502,7 +7897,11 @@ bot.on("callback_query", async (ctx, next) => {
   );
 
   try {
-    const userId = ctx.from?.id?.toString();
+    const userId = getTelegramIdString(ctx);
+    if (!userId) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to identify user");
+      return;
+    }
 
     // Get existing user state to check for dynamic token info
     const existingState = getUserState(userId, false); // Don't clear it yet
@@ -7540,7 +7939,7 @@ bot.on("callback_query", async (ctx, next) => {
         },
       });
 
-      await ctx.answerCallbackQuery("Send custom amount as message");
+      await safeAnswerCallbackQuery(ctx, "Send custom amount as message");
       return;
     }
 
@@ -7568,7 +7967,7 @@ bot.on("callback_query", async (ctx, next) => {
       keyboard: new InlineKeyboard().text("← Try Again", "cmd_buy").row(),
     });
 
-    await ctx.answerCallbackQuery("❌ Error processing buy request");
+    await safeAnswerCallbackQuery(ctx, "❌ Error processing buy request");
   }
 });
 
@@ -7584,7 +7983,18 @@ bot.on("callback_query", async (ctx, next) => {
   const buyData = buyResult?.entry;
 
   if (!buyData) {
-    await ctx.answerCallbackQuery("❌ Transaction expired. Please try again.");
+    await safeAnswerCallbackQuery(ctx, "❌ Transaction expired. Please try again.");
+    return;
+  }
+
+  const currentUserId = getTelegramIdString(ctx);
+  if (!currentUserId) {
+    await safeAnswerCallbackQuery(ctx, "❌ Unable to identify user");
+    return;
+  }
+
+  if (buyData.userId && buyData.userId !== currentUserId) {
+    await safeAnswerCallbackQuery(ctx, "❌ Unauthorized transaction");
     return;
   }
 
@@ -7607,12 +8017,14 @@ bot.on("callback_query", async (ctx, next) => {
 
     await safeAnswerCallbackQuery(ctx, "Processing buy...");
 
-    const userId = ctx.from?.id?.toString();
-    if (!userId) {
-      throw new Error("User ID not found");
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "buy confirmation"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
     }
-
-    const telegramId = getTelegramId(ctx);
     const userKeypair = wallet.getKeyPair(telegramId);
 
     // Use the existing global swapManager instance
@@ -7701,7 +8113,7 @@ bot.on("callback_query", async (ctx, next) => {
     await safeAnswerCallbackQuery(ctx, "Buy completed!");
 
     // Clear wallet cache to force fresh balance on next wallet access
-    const cacheKey = getWalletCacheKey(ctx.from?.id || "");
+    const cacheKey = getWalletCacheKey(getTelegramIdString(ctx) ?? "");
     if (cacheKey) {
       walletDataCache.delete(cacheKey);
       console.log(`🧹 Cleared wallet cache for user ${cacheKey} after BUY`);
@@ -7862,7 +8274,7 @@ bot.on("callback_query", async (ctx, next) => {
   const buyData = buyResult?.entry;
 
   if (!buyData) {
-    await ctx.answerCallbackQuery("❌ Transaction expired. Please try again.");
+    await safeAnswerCallbackQuery(ctx, "❌ Transaction expired. Please try again.");
     return;
   }
 
@@ -7903,10 +8315,10 @@ bot.on("callback_query", async (ctx, next) => {
       keyboard: confirmKeyboard,
     });
 
-    await ctx.answerCallbackQuery("💡 Amount increased slightly");
+    await safeAnswerCallbackQuery(ctx, "💡 Amount increased slightly");
   } catch (error) {
     console.error("Error in buy retry higher:", error);
-    await ctx.answerCallbackQuery("❌ Error processing retry");
+    await safeAnswerCallbackQuery(ctx, "❌ Error processing retry");
   }
 });
 
@@ -7924,7 +8336,14 @@ bot.on("callback_query", async (ctx, next) => {
   console.log("🔔 Swap FROM token selected:", fromToken);
 
   try {
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "swap menu from token"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
+    }
     const keypair = wallet.getKeyPair(telegramId);
     const walletAddress = keypair.publicKey.toBase58();
     const walletAddressHtml = escapeHtml(walletAddress);
@@ -7964,10 +8383,10 @@ bot.on("callback_query", async (ctx, next) => {
       parseMode: "HTML",
       keyboard,
     });
-    await ctx.answerCallbackQuery(`Select token to receive`);
+    await safeAnswerCallbackQuery(ctx, `Select token to receive`);
   } catch (error) {
     console.error("Error in swap_from selection:", error);
-    await ctx.answerCallbackQuery("❌ Error processing swap selection");
+    await safeAnswerCallbackQuery(ctx, "❌ Error processing swap selection");
   }
 });
 
@@ -7985,7 +8404,7 @@ bot.on("callback_query", async (ctx, next) => {
   const toToken = parts.slice(1).join("_");
 
   if (!fromToken || !toToken) {
-    return await ctx.answerCallbackQuery("❌ Invalid swap pair");
+    return await safeAnswerCallbackQuery(ctx, "❌ Invalid swap pair");
   }
 
   console.log(`🔔 Swap pair selected: ${fromToken} → ${toToken}`);
@@ -7993,7 +8412,7 @@ bot.on("callback_query", async (ctx, next) => {
   try {
     if (toToken === "OTHER") {
       // Handle custom token input
-      const userId = ctx.from?.id?.toString();
+      const userId = getTelegramIdString(ctx);
       if (!userId) return;
 
       const response = [
@@ -8023,16 +8442,16 @@ bot.on("callback_query", async (ctx, next) => {
         chatId: ctx.chat?.id,
       });
 
-      await ctx.answerCallbackQuery("Send token mint or symbol");
+      await safeAnswerCallbackQuery(ctx, "Send token mint or symbol");
       return;
     }
 
     // Show amount selection for the swap pair
     await showSwapAmountSelection(ctx, fromToken, toToken);
-    await ctx.answerCallbackQuery(`${fromToken} → ${toToken}`);
+    await safeAnswerCallbackQuery(ctx, `${fromToken} → ${toToken}`);
   } catch (error) {
     console.error("Error in swap_to selection:", error);
-    await ctx.answerCallbackQuery("❌ Error processing swap pair");
+    await safeAnswerCallbackQuery(ctx, "❌ Error processing swap pair");
   }
 });
 
@@ -8051,7 +8470,7 @@ bot.on("callback_query", async (ctx, next) => {
   const amount = parts.slice(2).join("_");
 
   if (!fromToken || !toToken || !amount) {
-    return await ctx.answerCallbackQuery("❌ Invalid swap parameters");
+    return await safeAnswerCallbackQuery(ctx, "❌ Invalid swap parameters");
   }
 
   console.log(`🔔 Swap amount selected: ${amount} ${fromToken} → ${toToken}`);
@@ -8059,7 +8478,7 @@ bot.on("callback_query", async (ctx, next) => {
   try {
     if (amount === "CUSTOM") {
       // Handle custom amount input
-      const userId = ctx.from?.id?.toString();
+      const userId = getTelegramIdString(ctx);
       if (!userId) return;
 
       const response = [
@@ -8093,12 +8512,19 @@ bot.on("callback_query", async (ctx, next) => {
         chatId: ctx.chat?.id,
       });
 
-      await ctx.answerCallbackQuery("Send amount as message");
+      await safeAnswerCallbackQuery(ctx, "Send amount as message");
       return;
     }
 
     // Get quote and show confirmation
-    const telegramId = getTelegramId(ctx);
+    const telegramId = await getRequiredTelegramIdForContext(
+      ctx,
+      "swap amount selection"
+    );
+    if (telegramId == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      return;
+    }
     await showSwapQuoteAndConfirmation(
       ctx,
       fromToken,
@@ -8106,10 +8532,10 @@ bot.on("callback_query", async (ctx, next) => {
       amount,
       telegramId
     );
-    await ctx.answerCallbackQuery("Getting swap quote...");
+    await safeAnswerCallbackQuery(ctx, "Getting swap quote...");
   } catch (error) {
     console.error("Error in swap amount selection:", error);
-    await ctx.answerCallbackQuery("❌ Error processing swap amount");
+    await safeAnswerCallbackQuery(ctx, "❌ Error processing swap amount");
   }
 });
 
@@ -8121,7 +8547,7 @@ const showSwapAmountSelection = async (
   fromToken: string,
   toToken: string
 ) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "swap amount selection");
 
   // Get balance for the FROM token
   const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
@@ -8592,7 +9018,7 @@ const showBuyAmountSelection = async (
   contractAddress?: string,
   tokenTxId?: string
 ) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "buy amount selection");
   const { message, keyboard } = await buildBuyAmountSelectionUI(
     telegramId,
     paymentToken,
@@ -8747,7 +9173,7 @@ const handleBuyTokenLookup = async ({
       keyboard,
     });
 
-    getUserState(ctx.from!.id.toString(), true);
+    getUserState(getTelegramId(ctx).toString(), true);
   } catch (error) {
     console.error(logContext, error);
 
@@ -8760,7 +9186,7 @@ const handleBuyTokenLookup = async ({
       keyboard: cancelKeyboard,
     });
 
-    setUserState(ctx.from!.id.toString(), {
+    setUserState(getTelegramId(ctx).toString(), {
       ...retryState,
       messageId: userState.messageId,
       chatId: userState.chatId,
@@ -8784,7 +9210,11 @@ bot.catch((err) => {
 
 // Handle text messages when user is in input state
 bot.on("message:text", async (ctx, next) => {
-  const userId = ctx.from?.id?.toString();
+  const userId = getTelegramIdString(ctx);
+  if (!userId) {
+    return await next();
+  }
+
   const userState = getUserState(userId, false); // Get state but DON'T clear it yet
 
   if (!userState) {
@@ -8816,7 +9246,7 @@ bot.on("message:text", async (ctx, next) => {
       await handleBuyTokenSymbolInput(ctx, userState, userMessage);
     } else if (userState.type === "buy_menu_idle") {
       const trimmed = userMessage.trim();
-      const userIdStr = ctx.from.id.toString();
+      const userIdStr = getTelegramId(ctx).toString();
       const isContractLike = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trimmed);
 
       if (isContractLike) {
@@ -8902,7 +9332,7 @@ const handleCustomAmountInput = async (
   amount: string
 ) => {
   const token = userState.token;
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "send custom amount");
   const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
 
   const isSol = token === "SOL";
@@ -8992,11 +9422,11 @@ const handleCustomAmountInput = async (
     }
   }
 
-  if (!ctx.from?.id) {
+  if (getTelegramId(ctx) === 0n) {
     return;
   }
 
-  setUserState(ctx.from.id.toString(), {
+  setUserState(getTelegramId(ctx).toString(), {
     type: "send_address",
     token,
     amount: storedAmount,
@@ -9034,7 +9464,7 @@ const handleAddressInput = async (
     token: token,
     amount: amount,
     address: address,
-    userId: ctx.from.id.toString(),
+    userId: getTelegramId(ctx).toString(),
     amountDisplay,
   });
 
@@ -9116,7 +9546,7 @@ const handleWrapAmountInput = async (
 
   const messageText = response.join("\n");
   const keyboard = createConfirmWrapKeyboard(lamportsToWrap);
-  const userId = ctx.from?.id?.toString();
+  const userId = getTelegramIdString(ctx);
   const targetChatId =
     typeof userState.chatId === "number"
       ? userState.chatId
@@ -9212,7 +9642,7 @@ const handleSwapCustomAmountInput = async (
 ) => {
   const fromToken = userState.fromToken;
   const toToken = userState.toToken;
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "swap custom amount");
 
   const normalizedAmount = amount.trim();
 
@@ -9244,7 +9674,7 @@ const handleBuyContractAddressInput = async (
   userState: any,
   contractAddress: string
 ) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "buy contract lookup");
   const paymentToken = userState.fromToken;
   if (!paymentToken) {
     throw new Error("Payment token not found in user state");
@@ -9305,7 +9735,7 @@ const handleBuyTokenSymbolInput = async (
   userState: any,
   tokenSymbol: string
 ) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "buy token symbol lookup");
   console.log(`🔍 Searching for token: ${tokenSymbol}`);
 
   const cleanSymbol = tokenSymbol.trim().toUpperCase();
@@ -9378,7 +9808,7 @@ const handleBuyCustomAmountInput = async (
   const paymentToken = userState.paymentToken;
   const targetToken = userState.targetToken;
   const contractAddress = userState.contractAddress;
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "buy custom amount");
 
   console.log(`📝 Custom amount debug:`, {
     amount,
@@ -9458,7 +9888,7 @@ const handleBuyCustomAmountInput = async (
     );
 
     // Keep the same state for retry
-    setUserState(ctx.from.id.toString(), {
+    setUserState(getTelegramId(ctx).toString(), {
       type: "buy_custom_amount",
       paymentToken: paymentToken,
       targetToken: targetToken,
@@ -9481,7 +9911,7 @@ const handleSellCustomAmountInput = async (
   amount: string
 ) => {
   const tokenToSell = userState.tokenToSell;
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "sell custom amount");
 
   try {
     const { tokenBalances, solBalance } = await getCachedWalletData(telegramId);
@@ -9545,7 +9975,7 @@ const handleSellCustomAmountInput = async (
     );
 
     // Keep the same state for retry
-    setUserState(ctx.from.id.toString(), {
+    setUserState(getTelegramId(ctx).toString(), {
       type: "sell_custom_amount",
       tokenToSell: tokenToSell,
       messageId: userState.messageId,
@@ -9655,6 +10085,7 @@ const runSellTradeQuote = async ({
         },
         quote,
         userKeypair: wallet.getKeyPair(telegramId),
+        userId: telegramId.toString(),
       };
 
       return { entry };
@@ -9835,7 +10266,7 @@ const handleTradeCustomSlippageInput = async (
       }
     );
 
-    setUserState(ctx.from.id.toString(), {
+    setUserState(getTelegramId(ctx).toString(), {
       type: "trade_custom_slippage",
       txId,
       tradeKind,
@@ -9848,7 +10279,7 @@ const handleTradeCustomSlippageInput = async (
  * Show sell amount selection for a specific token
  */
 const showSellAmountSelection = async (ctx: any, tokenToSell: string) => {
-  const telegramId = getTelegramId(ctx);
+  const telegramId = requireTelegramId(ctx, "sell amount selection");
 
   // Get balance for the token being sold
   const { tokenBalances } = await getCachedWalletData(telegramId);

@@ -24,70 +24,86 @@ export type SellMenuParams = {
 
 export const SELL_NOOP_CALLBACK = "sell_none";
 
-export const buildBuyMenuUI = (params: BuyMenuParams) => {
-  const hasButtons = params.tokenButtons.length > 0;
-  const summaryLine = hasButtons
-    ? "<b>Select a token to buy:</b>"
-    : "<b>Paste a token contract address to get started.</b>";
+type TradeMenuButton = { label: string; callbackData: string };
 
+type TradeMenuConfig<Button extends TradeMenuButton> = {
+  heading: string;
+  walletLines: string[];
+  tokenButtons: Button[];
+  summaryWithTokens: string[];
+  summaryWithoutTokens: string[];
+  emptyButton?: { label: string; callbackData: string };
+};
+
+const buildTradeMenuUI = <Button extends TradeMenuButton>({
+  heading,
+  walletLines,
+  tokenButtons,
+  summaryWithTokens,
+  summaryWithoutTokens,
+  emptyButton,
+}: TradeMenuConfig<Button>) => {
+  const hasTokens = tokenButtons.length > 0;
+  const messageLines = [
+    heading,
+    "",
+    ...walletLines,
+    "",
+    ...(hasTokens ? summaryWithTokens : summaryWithoutTokens),
+  ].filter(Boolean);
+
+  const keyboard = new InlineKeyboard();
+
+  if (hasTokens) {
+    for (const button of tokenButtons) {
+      keyboard.text(button.label, button.callbackData).row();
+    }
+  } else if (emptyButton) {
+    keyboard.text(emptyButton.label, emptyButton.callbackData).row();
+  }
+
+  keyboard.text("↩️ Wallet", "main_wallet").row();
+
+  return {
+    message: messageLines.join("\n"),
+    keyboard,
+  };
+};
+
+export const buildBuyMenuUI = (params: BuyMenuParams) => {
   const usdValue = Number.isFinite(params.totalUsd)
     ? params.totalUsd
     : 0;
 
-  const message = [
-    "🟢 <b>BUY TOKENS</b>",
-    "",
-    `<b>Wallet:</b> <code>${params.walletAddress}</code>`,
-    `<b>SOL:</b> ${params.formattedSolBalance} ($${usdValue.toFixed(2)})`,
-    "",
-    summaryLine,
-    hasButtons
-      ? "<i>Paste a contract address if you don't see your token.</i>"
-      : "",
-  ].filter(Boolean).join("\n");
-
-  const keyboard = new InlineKeyboard();
-
-  for (const button of params.tokenButtons) {
-    keyboard.text(button.label, button.callbackData).row();
-  }
-
-  keyboard.text("↩️ Wallet", "main_wallet").row();
-
-  return { message, keyboard };
+  return buildTradeMenuUI({
+    heading: "🟢 <b>BUY TOKENS</b>",
+    walletLines: [
+      `<b>Wallet:</b> <code>${params.walletAddress}</code>`,
+      `<b>SOL:</b> ${params.formattedSolBalance} ($${usdValue.toFixed(2)})`,
+    ],
+    tokenButtons: params.tokenButtons,
+    summaryWithTokens: [
+      "<b>Select a token to buy:</b>",
+      "<i>Paste a contract address if you don't see your token.</i>",
+    ],
+    summaryWithoutTokens: [
+      "<b>Paste a token contract address to get started.</b>",
+    ],
+  });
 };
 
 export const buildSellMenuUI = (params: SellMenuParams) => {
-  const hasTokens = params.tokenButtons.length > 0;
-  const messageParts = [
-    "🔴 <b>SELL TOKENS</b>",
-    "",
-    `<b>Wallet:</b> <code>${params.walletAddress}</code>`,
-    "",
-    hasTokens
-      ? "<b>Select a token to sell:</b>"
-      : "<i>No tokens available to sell.</i>",
-  ];
-
-  if (hasTokens) {
-    messageParts.push("<i>You'll choose the amount after selecting a token.</i>");
-  }
-
-  const message = messageParts.join("\n");
-
-  const keyboard = new InlineKeyboard();
-
-  if (hasTokens) {
-    for (const button of params.tokenButtons) {
-      keyboard.text(button.label, button.callbackData).row();
-    }
-  } else {
-    keyboard.text("⚠️ No tokens to sell", SELL_NOOP_CALLBACK).row();
-  }
-
-  keyboard.text("↩️ Wallet", "main_wallet").row();
-
-  return { message, keyboard };
+  return buildTradeMenuUI({
+    heading: "🔴 <b>SELL TOKENS</b>",
+    walletLines: [`<b>Wallet:</b> <code>${params.walletAddress}</code>`],
+    tokenButtons: params.tokenButtons,
+    summaryWithTokens: [
+      "<b>Select a token to sell:</b>",
+      "<i>You'll choose the amount after selecting a token.</i>",
+    ],
+    summaryWithoutTokens: ["<i>No tokens available to sell.</i>"],
+    emptyButton: { label: "⚠️ No tokens to sell", callbackData: SELL_NOOP_CALLBACK },
+  });
 };
 
 export type ProcessingStatusKind = "swap" | "buy" | "sell";
@@ -107,6 +123,20 @@ type ProcessingStatusConfig = {
   defaultKeyboard?: () => InlineKeyboard | undefined;
 };
 
+const createTradeProcessingConfig = (
+  headingHtml: string,
+  headingText: string
+): ProcessingStatusConfig => ({
+  headingHtml,
+  headingText,
+  actionHtml: (amount, fromToken, toToken) =>
+    `🔄 <i>Executing ${amount} ${fromToken} → ${toToken}</i>`,
+  actionText: (amount, fromToken, toToken) =>
+    `🔄 Executing ${amount} ${fromToken} → ${toToken}`,
+  waitHtml: "Please wait, this may take a few moments...",
+  waitText: "Please wait, this may take a few moments...",
+});
+
 const PROCESSING_STATUS_CONFIG: Record<ProcessingStatusKind, ProcessingStatusConfig> = {
   swap: {
     headingHtml: "🔄 <b>PROCESSING SWAP</b>",
@@ -119,26 +149,14 @@ const PROCESSING_STATUS_CONFIG: Record<ProcessingStatusKind, ProcessingStatusCon
     waitText: "Please wait...",
     defaultKeyboard: () => new InlineKeyboard(),
   },
-  buy: {
-    headingHtml: "⏳ <b>Processing Buy Transaction...</b>",
-    headingText: "⏳ Processing Buy Transaction...",
-    actionHtml: (amount, fromToken, toToken) =>
-      `🔄 <i>Executing ${amount} ${fromToken} → ${toToken}</i>`,
-    actionText: (amount, fromToken, toToken) =>
-      `🔄 Executing ${amount} ${fromToken} → ${toToken}`,
-    waitHtml: "Please wait, this may take a few moments...",
-    waitText: "Please wait, this may take a few moments...",
-  },
-  sell: {
-    headingHtml: "⏳ <b>Processing Sell Transaction...</b>",
-    headingText: "⏳ Processing Sell Transaction...",
-    actionHtml: (amount, fromToken, toToken) =>
-      `🔄 <i>Executing ${amount} ${fromToken} → ${toToken}</i>`,
-    actionText: (amount, fromToken, toToken) =>
-      `🔄 Executing ${amount} ${fromToken} → ${toToken}`,
-    waitHtml: "Please wait, this may take a few moments...",
-    waitText: "Please wait, this may take a few moments...",
-  },
+  buy: createTradeProcessingConfig(
+    "⏳ <b>Processing Buy Transaction...</b>",
+    "⏳ Processing Buy Transaction..."
+  ),
+  sell: createTradeProcessingConfig(
+    "⏳ <b>Processing Sell Transaction...</b>",
+    "⏳ Processing Sell Transaction..."
+  ),
 };
 
 const toSafeString = (value: string | number | null | undefined, fallback: string) =>

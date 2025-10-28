@@ -182,6 +182,9 @@ export class WalletManager {
   // ================================
 
   public getKeyPair(index: bigint): Keypair {
+    if (index === 0n) {
+      throw new Error("Missing Telegram id while deriving wallet – refusing to use fallback index 0");
+    }
     const cacheKey = index.toString();
     if (this.keypairCache.has(cacheKey)) {
       return this.keypairCache.get(cacheKey)!;
