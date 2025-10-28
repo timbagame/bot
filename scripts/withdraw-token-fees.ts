@@ -1,9 +1,6 @@
 import * as anchor from "@coral-xyz/anchor";
 import {
   getAssociatedTokenAddressSync,
-  createAssociatedTokenAccountInstruction,
-  TOKEN_PROGRAM_ID,
-  TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import { SystemProgram } from "@solana/web3.js";
@@ -25,59 +22,6 @@ const RPC_URL =
   process.env["SOLANA_NETWORK"] || "https://api.mainnet-beta.solana.com";
 
 const TOKENS: TokenConfig[] = getSupportedTokens();
-
-async function ensureAtaInstruction(
-  connection: anchor.web3.Connection,
-  payer: anchor.web3.PublicKey,
-  owner: anchor.web3.PublicKey,
-  mint: anchor.web3.PublicKey,
-  tokenProgramId: anchor.web3.PublicKey
-): Promise<anchor.web3.TransactionInstruction | null> {
-  const ata = getAssociatedTokenAddressSync(
-    mint,
-    owner,
-    true,
-    tokenProgramId,
-    ASSOCIATED_TOKEN_PROGRAM_ID
-  );
-  const accountInfo = await connection.getAccountInfo(ata);
-  if (accountInfo) return null;
-  return createAssociatedTokenAccountInstruction(
-    payer,
-    ata,
-    owner,
-    mint,
-    tokenProgramId,
-    ASSOCIATED_TOKEN_PROGRAM_ID
-  );
-}
-
-const tokenProgramCache = new Map<string, anchor.web3.PublicKey>();
-
-async function resolveTokenProgramId(
-  connection: anchor.web3.Connection,
-  mint: anchor.web3.PublicKey
-): Promise<anchor.web3.PublicKey> {
-  const cacheKey = mint.toBase58();
-  const cached = tokenProgramCache.get(cacheKey);
-  if (cached) return cached;
-
-  const accountInfo = await connection.getAccountInfo(mint);
-  if (!accountInfo) {
-    console.warn(
-      `⚠️  Unable to fetch mint account info for ${cacheKey}; defaulting to SPL Token program.`
-    );
-    tokenProgramCache.set(cacheKey, TOKEN_PROGRAM_ID);
-    return TOKEN_PROGRAM_ID;
-  }
-
-  const programId = accountInfo.owner.equals(TOKEN_2022_PROGRAM_ID)
-    ? TOKEN_2022_PROGRAM_ID
-    : TOKEN_PROGRAM_ID;
-
-  tokenProgramCache.set(cacheKey, programId);
-  return programId;
-}
 
 async function withdrawTokenFee(
   program: anchor.Program<Timba>,
@@ -101,8 +45,6 @@ async function withdrawTokenFee(
     program.programId
   );
 
-  const tokenProgramId = await resolveTokenProgramId(connection, mint);
-
   const gameTokenInfo = await connection.getAccountInfo(gameTokenPda);
   if (!gameTokenInfo) {
     console.warn(
@@ -124,12 +66,15 @@ async function withdrawTokenFee(
     metadata.decimals
   );
 
-  const operatorAta = getAssociatedTokenAddressSync(
-    mint,
+  const {
+    address: operatorAta,
+    instructions: operatorAtaInstructions,
+    programId: tokenProgramId,
+    created: operatorAtaCreated,
+  } = await wallet.ensureAssociatedTokenAccount(
     operatorBundle.anchor.publicKey,
-    false,
-    tokenProgramId,
-    ASSOCIATED_TOKEN_PROGRAM_ID
+    mint,
+    adminBundle.root
   );
   const gameVaultAta = getAssociatedTokenAddressSync(
     mint,
@@ -137,14 +82,6 @@ async function withdrawTokenFee(
     true,
     tokenProgramId,
     ASSOCIATED_TOKEN_PROGRAM_ID
-  );
-
-  const ataIx = await ensureAtaInstruction(
-    connection,
-    adminBundle.anchor.publicKey,
-    operatorBundle.anchor.publicKey,
-    mint,
-    tokenProgramId
   );
 
   console.log(
@@ -166,8 +103,13 @@ async function withdrawTokenFee(
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
     } as any)
     .instruction();
+  const instructions = [...operatorAtaInstructions, instruction];
 
-  const instructions = ataIx ? [ataIx, instruction] : [instruction];
+  if (operatorAtaCreated) {
+    console.log(
+      `🔧 Created oracle operator ATA ${operatorAta.toBase58()} for ${config.ticker}`
+    );
+  }
 
   const tx = await wallet.sendTransaction(
     instructions,

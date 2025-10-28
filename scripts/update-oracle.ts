@@ -6,6 +6,10 @@ import {
   uniqueSigners,
 } from "./utils/keypairs";
 import { loadProgramContext } from "./utils/anchor-context";
+import {
+  createOracleConfig,
+  logOracleConfig,
+} from "./utils/oracle-config";
 
 const NEW_ORACLE_OPERATOR_KEYPAIR_ENV = "NEW_ORACLE_OPERATOR_KEYPAIR_PATH";
 
@@ -36,22 +40,17 @@ const updateOracle = async () => {
     // Check current oracle config
     try {
       const currentOracle = await program.account.oracle.fetch(oraclePda);
-      console.log("\nCurrent Oracle Configuration:");
-      console.log(`- Operator: ${currentOracle.operator.toString()}`);
-      console.log(`- Fee Percentage: ${currentOracle.feePercentage}%`);
-      console.log(
-        `- Min Timeout: ${currentOracle.minTimeout} seconds (${Math.round(
-          currentOracle.minTimeout / 60
-        )} minutes)`
-      );
-      console.log(
-        `- Max Timeout: ${currentOracle.maxTimeout} seconds (${Math.round(
-          currentOracle.maxTimeout / 60
-        )} minutes)`
-      );
-      console.log(`- Max Tickets: ${currentOracle.maxTickets}`);
-      console.log(
-        `- Oracle Buffer Time: ${currentOracle.oracleBufferTime} seconds`
+      logOracleConfig(
+        createOracleConfig({
+          feePercentage: currentOracle.feePercentage,
+          oracleBufferTime: new anchor.BN(
+            currentOracle.oracleBufferTime.toString()
+          ),
+          maxTickets: currentOracle.maxTickets,
+          maxTimeout: new anchor.BN(currentOracle.maxTimeout.toString()),
+          minTimeout: new anchor.BN(currentOracle.minTimeout.toString()),
+        }),
+        { heading: "Current Oracle Configuration" }
       );
 
       // Verify operator
@@ -70,32 +69,8 @@ const updateOracle = async () => {
     }
 
     // New configuration with correct values
-    const newConfig = {
-      // u8
-      feePercentage: 1, // 1% fee
-      // u64 fields must be BN
-      oracleBufferTime: new anchor.BN(300),
-      // u32
-      maxTickets: 100, // 100 max tickets
-      // u64 fields must be BN
-      maxTimeout: new anchor.BN(86400), // 24 hours
-      minTimeout: new anchor.BN(60), // 1 minute
-    };
-
-    console.log("\nNew Oracle Configuration:");
-    console.log(`- Fee Percentage: ${newConfig.feePercentage}%`);
-    console.log(
-      `- Min Timeout: ${newConfig.minTimeout} seconds (${Math.round(
-        newConfig.minTimeout / 60
-      )} minutes)`
-    );
-    console.log(
-      `- Max Timeout: ${newConfig.maxTimeout} seconds (${Math.round(
-        newConfig.maxTimeout / 60
-      )} minutes)`
-    );
-    console.log(`- Max Tickets: ${newConfig.maxTickets}`);
-    console.log(`- Oracle Buffer Time: ${newConfig.oracleBufferTime} seconds`);
+    const newConfig = createOracleConfig();
+    logOracleConfig(newConfig, { heading: "New Oracle Configuration" });
     if (
       !newOracleOperatorKeypair.publicKey.equals(
         currentOracleOperatorKeypair.publicKey
@@ -130,22 +105,17 @@ const updateOracle = async () => {
 
     // Verify the update
     const updatedOracle = await program.account.oracle.fetch(oraclePda);
-    console.log("\nUpdated Oracle Configuration:");
-    console.log(`- Operator: ${updatedOracle.operator.toString()}`);
-    console.log(`- Fee Percentage: ${updatedOracle.feePercentage}%`);
-    console.log(
-      `- Min Timeout: ${updatedOracle.minTimeout} seconds (${Math.round(
-        updatedOracle.minTimeout / 60
-      )} minutes)`
-    );
-    console.log(
-      `- Max Timeout: ${updatedOracle.maxTimeout} seconds (${Math.round(
-        updatedOracle.maxTimeout / 60
-      )} minutes)`
-    );
-    console.log(`- Max Tickets: ${updatedOracle.maxTickets}`);
-    console.log(
-      `- Oracle Buffer Time: ${updatedOracle.oracleBufferTime} seconds`
+    logOracleConfig(
+      createOracleConfig({
+        feePercentage: updatedOracle.feePercentage,
+        oracleBufferTime: new anchor.BN(
+          updatedOracle.oracleBufferTime.toString()
+        ),
+        maxTickets: updatedOracle.maxTickets,
+        maxTimeout: new anchor.BN(updatedOracle.maxTimeout.toString()),
+        minTimeout: new anchor.BN(updatedOracle.minTimeout.toString()),
+      }),
+      { heading: "Updated Oracle Configuration" }
     );
   } catch (error) {
     console.error("❌ Error updating Oracle:", error);

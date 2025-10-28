@@ -16,6 +16,7 @@ import {
   uniqueSigners,
 } from "./utils/keypairs";
 import { createAnchorContext } from "./utils/anchor-context";
+import { readBigIntEnv } from "./utils/env";
 
 const RPC_URL =
   process.env["SOLANA_NETWORK"] || "https://api.mainnet-beta.solana.com";
@@ -34,27 +35,17 @@ type TokenTarget = TokenConfig & {
   minCompletionFeeLamports?: bigint;
 };
 
-const optionalBigIntEnv = (key: string): bigint | undefined => {
-  const rawValue = process.env[key]?.trim();
-  if (!rawValue) return undefined;
-
-  try {
-    return BigInt(rawValue);
-  } catch (error) {
-    throw new Error(
-      `${key} must be a valid integer value, received ${rawValue}: ${error}`
-    );
-  }
-};
-
 const buildCompletionFeeEnvKey = (ticker: string): string =>
   `${ticker.toUpperCase()}_MIN_COMPLETION_FEE_LAMPORTS`;
 
 const TARGET_TOKENS: TokenTarget[] = getSupportedTokens().map((token) => ({
   ...token,
-  minCompletionFeeLamports: optionalBigIntEnv(
-    buildCompletionFeeEnvKey(token.ticker)
-  ),
+  minCompletionFeeLamports: readBigIntEnv({
+    key: buildCompletionFeeEnvKey(token.ticker),
+    allowUndefined: true,
+    min: 0n,
+    description: `${token.ticker.toUpperCase()} min completion fee`,
+  }),
 }));
 
 

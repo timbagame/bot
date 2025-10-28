@@ -757,6 +757,101 @@ export class WalletManager {
     };
   }
 
+  public async buildUnwrapWsolPlan({
+    owner,
+    payer,
+    amountLamports,
+  }: {
+    owner: PublicKey;
+    payer: Keypair;
+    amountLamports?: number;
+  }): Promise<{
+    instructions: TransactionInstruction[];
+    unwrapLamports: number;
+    remainingLamports: number;
+  }> {
+    const wsolMint = new PublicKey(WSOL_MINT);
+    const wsolAta = await getAssociatedTokenAddress(
+      wsolMint,
+      owner,
+      false,
+      TOKEN_PROGRAM_ID
+    );
+
+    await this.throttle();
+    let accountInfo;
+    try {
+      accountInfo = await getAccount(
+        this.connection,
+        wsolAta,
+        "confirmed",
+        TOKEN_PROGRAM_ID
+      );
+    } catch (error) {
+      throw new Error("No WSOL account found to unwrap.");
+    }
+
+    const availableLamports = Number(accountInfo.amount);
+    if (!Number.isFinite(availableLamports) || availableLamports <= 0) {
+      throw new Error("Your WSOL account is already empty.");
+    }
+    if (!Number.isSafeInteger(availableLamports)) {
+      throw new Error(
+        "WSOL balance is too large to unwrap in a single transaction."
+      );
+    }
+
+    const unwrapLamports =
+      amountLamports !== undefined ? amountLamports : availableLamports;
+    if (!Number.isFinite(unwrapLamports) || unwrapLamports <= 0) {
+      throw new Error("Unwrap amount must be greater than zero.");
+    }
+    if (!Number.isSafeInteger(unwrapLamports)) {
+      throw new Error("Unwrap amount must be a safe integer in lamports.");
+    }
+    if (unwrapLamports > availableLamports) {
+      throw new Error(
+        `Requested WSOL unwrap (${unwrapLamports} lamports) exceeds current balance (${availableLamports}).`
+      );
+    }
+
+    const remainingLamports = availableLamports - unwrapLamports;
+    if (remainingLamports < 0) {
+      throw new Error("Unwrap would reduce WSOL balance below zero.");
+    }
+
+    const instructions: TransactionInstruction[] = [
+      createSyncNativeInstruction(wsolAta),
+      createCloseAccountInstruction(wsolAta, owner, owner),
+    ];
+
+    if (remainingLamports > 0) {
+      instructions.push(
+        createAssociatedTokenAccountInstruction(
+          payer.publicKey,
+          wsolAta,
+          owner,
+          wsolMint,
+          TOKEN_PROGRAM_ID
+        )
+      );
+      instructions.push(
+        SystemProgram.transfer({
+          fromPubkey: owner,
+          toPubkey: wsolAta,
+          lamports: remainingLamports,
+        })
+      );
+      instructions.push(createSyncNativeInstruction(wsolAta));
+    }
+
+    return {
+      instructions,
+      unwrapLamports,
+      remainingLamports,
+    };
+  }
+
   public async transferToken(
     fromTelegramId: bigint,
     toAddress: PublicKey,
@@ -1399,46 +1494,16 @@ export class WalletManager {
     telegramId: bigint
   ): Promise<{ signature: string; amountLamports: number }> {
     const userKeypair = this.getKeyPair(telegramId);
-    const wsolMint = new PublicKey(WSOL_MINT);
+    const unwrapPlan = await this.buildUnwrapWsolPlan({
+      owner: userKeypair.publicKey,
+      payer: userKeypair,
+    });
 
-    const wsolAta = await getAssociatedTokenAddress(
-      wsolMint,
-      userKeypair.publicKey,
-      false,
-      TOKEN_PROGRAM_ID
-    );
+    const signature = await this.sendTransaction(unwrapPlan.instructions, [
+      userKeypair,
+    ]);
 
-    await this.throttle();
-    let accountInfo;
-    try {
-      accountInfo = await getAccount(this.connection, wsolAta, "confirmed");
-    } catch (error) {
-      throw new Error("No WSOL account found to unwrap.");
-    }
-
-    const amountLamports = Number(accountInfo.amount);
-    if (!Number.isFinite(amountLamports) || amountLamports <= 0) {
-      throw new Error("Your WSOL account is already empty.");
-    }
-    if (!Number.isSafeInteger(amountLamports)) {
-      throw new Error(
-        "WSOL balance is too large to unwrap in a single transaction."
-      );
-    }
-
-    const syncIx = createSyncNativeInstruction(wsolAta);
-    const closeIx = createCloseAccountInstruction(
-      wsolAta,
-      userKeypair.publicKey,
-      userKeypair.publicKey
-    );
-
-    const signature = await this.sendTransaction(
-      [syncIx, closeIx],
-      [userKeypair]
-    );
-
-    return { signature, amountLamports };
+    return { signature, amountLamports: unwrapPlan.unwrapLamports };
   }
 
   private async getRentExemptMinimumLamports(): Promise<number> {
