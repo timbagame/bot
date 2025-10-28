@@ -151,6 +151,77 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(refundCalls).toEqual([JIT_SWAP_FEE_BUFFER_LAMPORTS]);
   });
 
+  test("unwrap still executes when current SOL already exceeds swap target", async () => {
+    const wallet = WalletManager.createForTest(mnemonic, {
+      connection,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+    const admin = Keypair.generate();
+    (wallet as any).getAdminKeypair = () => admin;
+
+    const currentLamports = 1_730_000; // ~0.00173 SOL
+    const swapManager = new SwapManager(connection, wallet);
+    (swapManager as any).connection = {
+      getBalance: async () => currentLamports,
+    };
+    (swapManager as any).getBestProvider = async () => {
+      throw new Error("Routing should be skipped when unwrapping WSOL");
+    };
+
+    const unwrapRequests: number[] = [];
+    (swapManager as any).unwrapWsolPortion = async ({
+      unwrapLamports,
+    }: {
+      unwrapLamports: number;
+    }) => {
+      unwrapRequests.push(unwrapLamports);
+      return {
+        signature: "SIG_UNWRAP_OVER_BUFFER",
+        lamportsReceived: unwrapLamports,
+      };
+    };
+
+    const sponsorCalls: number[] = [];
+    (swapManager as any).sponsorSwapFees = async (
+      _kp: Keypair,
+      lamports: number
+    ) => {
+      sponsorCalls.push(lamports);
+    };
+    const refundCalls: number[] = [];
+    (swapManager as any).refundSponsoredFees = async (
+      _kp: Keypair,
+      lamports: number
+    ) => {
+      refundCalls.push(lamports);
+    };
+
+    const user = Keypair.generate();
+    const availableRaw = 2_774_000; // ~0.002774 SOL wrapped
+    const result = await swapManager.performJustInTimeSolSwap({
+      userKeypair: user,
+      tokenMint: WSOL_MINT,
+      tokenDecimals: 9,
+      availableTokenAmountRaw: availableRaw,
+      tokenTicker: "SOL",
+    });
+
+    expect(result.swapped).toBe(true);
+    expect(result.provider).toBe("unwrap");
+    expect(result.signature).toBe("SIG_UNWRAP_OVER_BUFFER");
+    expect(result.lamportsReceived).toBe(
+      MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS - currentLamports +
+        JIT_SWAP_FEE_BUFFER_LAMPORTS
+    );
+    expect(unwrapRequests).toEqual([
+      MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS - currentLamports +
+        JIT_SWAP_FEE_BUFFER_LAMPORTS,
+    ]);
+    expect(sponsorCalls).toEqual([]);
+    expect(refundCalls).toEqual([]);
+  });
+
   test("returns helpful error when WSOL unwrap attempts fail", async () => {
     const wallet = WalletManager.createForTest(mnemonic, {
       connection,

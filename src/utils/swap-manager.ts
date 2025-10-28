@@ -586,8 +586,9 @@ export class SwapManager {
       const attemptWsolUnwrap = async (
         target: number
       ): Promise<JustInTimeSwapResult | null> => {
-        const lamportsNeeded = Math.max(target - currentLamports, 0);
-        const unwrapLamports = Math.min(availableRaw, lamportsNeeded);
+        // `target` is the lamports we want to unwrap (shortfall + buffer phases)
+        const desiredUnwrapLamports = Math.max(target, 0);
+        const unwrapLamports = Math.min(availableRaw, desiredUnwrapLamports);
 
         if (unwrapLamports <= 0) {
           return null;
