@@ -1,11 +1,10 @@
 import { WalletManager } from "./wallet";
 import {
   LAMPORTS_PER_SOL,
-  MIN_SOL_FOR_TX,
   CALLBACK_MESSAGE_MAX_LENGTH,
   SOL_BALANCE_PRECISION,
-  MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
 } from "./constants";
+import { FeeBudgetManager } from "./fee-budget";
 
 // ================================
 // SIMPLIFIED ERROR HANDLING
@@ -139,6 +138,31 @@ export const parseTransactionError = (
   const errorMessage = error instanceof Error ? error.message : String(error);
   const lowerMessage = errorMessage.toLowerCase();
 
+  let feeBudget: FeeBudgetManager | null = null;
+  try {
+    const connection = walletManager?.getConnection?.();
+    if (connection) {
+      feeBudget = FeeBudgetManager.getInstance(connection);
+    }
+  } catch (budgetError) {
+    console.warn("Failed to resolve fee budget manager for error formatting:", budgetError);
+  }
+
+  const singleTxLamports = feeBudget?.getCachedSingleTransactionLamports()
+    ?? FeeBudgetManager.getDefaultSingleTransactionLamports();
+  const gameBufferLamports = feeBudget?.getCachedGameSafetyBufferLamports()
+    ?? FeeBudgetManager.getDefaultGameSafetyBufferLamports();
+
+  const recommendedMinimum = walletManager
+    ? walletManager.formatSolBalance(gameBufferLamports)
+    : (gameBufferLamports / LAMPORTS_PER_SOL).toFixed(
+        SOL_BALANCE_PRECISION
+      );
+
+  const minimumSolForFees = walletManager
+    ? walletManager.formatSolBalance(singleTxLamports)
+    : (singleTxLamports / LAMPORTS_PER_SOL).toFixed(3);
+
   // Handle transaction timeout specifically
   if (isTransactionTimeoutError(lowerMessage)) {
     const signature = extractSignature(errorMessage);
@@ -172,12 +196,6 @@ export const parseTransactionError = (
       lowerMessage.includes(pattern)
     )
   ) {
-    const recommendedMinimum = walletManager
-      ? walletManager.formatSolBalance(MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS)
-      : (MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS / LAMPORTS_PER_SOL).toFixed(
-          SOL_BALANCE_PRECISION
-        );
-
     return (
       `💰 Insufficient SOL!\n\n` +
       `Rent-exempt account creation requires additional SOL.\n\n` +
@@ -186,14 +204,14 @@ export const parseTransactionError = (
   }
 
   if (lowerMessage.includes("insufficient")) {
-    return `💰 Insufficient funds!\n\nEnsure you have at least ${MIN_SOL_FOR_TX} SOL for fees.\nUse /balance to check your current balance.`;
+    return `💰 Insufficient funds!\n\nEnsure you have at least ${minimumSolForFees} SOL for fees.\nUse /balance to check your current balance.`;
   }
 
   if (
     lowerMessage.includes("account does not exist") ||
     lowerMessage.includes("could not find account")
   ) {
-    return `🏗️ Account setup required!\n\nEnsure you have at least ${MIN_SOL_FOR_TX} SOL for fees.\nUse /balance to check your balance.`;
+    return `🏗️ Account setup required!\n\nEnsure you have at least ${minimumSolForFees} SOL for fees.\nUse /balance to check your balance.`;
   }
 
   if (lowerMessage.includes("instruction does not support non-native tokens")) {

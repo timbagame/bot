@@ -3,17 +3,54 @@ import {
   resolveDefaultToken,
   WSOL_MINT,
 } from "./token-registry";
+import { FeeBudgetManager } from "./fee-budget";
 
 // ================================
 // SOLANA CONSTANTS
 // ================================
 
 export const LAMPORTS_PER_SOL = 1_000_000_000;
-export const MIN_SOL_FOR_TX = 0.001;
+export let MIN_SOL_FOR_TX =
+  FeeBudgetManager.getDefaultSingleTransactionLamports() / LAMPORTS_PER_SOL;
 export const SOL_BALANCE_PRECISION = 6;
 export const TOKEN_BALANCE_MAX_PRECISION = 6;
-export const MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS = 2_500_000; // ~0.0025 SOL buffer
-export const JIT_SWAP_FEE_BUFFER_LAMPORTS = 500_000; // Extra lamports sent before swap
+export let MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS =
+  FeeBudgetManager.getDefaultGameSafetyBufferLamports();
+export let JIT_SWAP_FEE_BUFFER_LAMPORTS =
+  FeeBudgetManager.getDefaultJitSwapFeeBufferLamports();
+
+export const applyDynamicFeeBudgets = (options: {
+  singleTransactionLamports?: number;
+  gameSafetyBufferLamports?: number;
+  jitSwapBufferLamports?: number;
+}) => {
+  const { singleTransactionLamports, gameSafetyBufferLamports, jitSwapBufferLamports } =
+    options;
+
+  if (
+    typeof singleTransactionLamports === "number" &&
+    Number.isFinite(singleTransactionLamports) &&
+    singleTransactionLamports > 0
+  ) {
+    MIN_SOL_FOR_TX = singleTransactionLamports / LAMPORTS_PER_SOL;
+  }
+
+  if (
+    typeof gameSafetyBufferLamports === "number" &&
+    Number.isFinite(gameSafetyBufferLamports) &&
+    gameSafetyBufferLamports > 0
+  ) {
+    MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS = gameSafetyBufferLamports;
+  }
+
+  if (
+    typeof jitSwapBufferLamports === "number" &&
+    Number.isFinite(jitSwapBufferLamports) &&
+    jitSwapBufferLamports > 0
+  ) {
+    JIT_SWAP_FEE_BUFFER_LAMPORTS = jitSwapBufferLamports;
+  }
+};
 
 // ================================
 // GAME CONSTANTS

@@ -31,11 +31,11 @@ import {
   MAX_RETRIES,
   CONFIRMATION_TIMEOUT_MS,
   WSOL_MINT,
-  MIN_SOL_FOR_TX,
 } from "./constants";
 import { formatAmount } from "./format-amount";
 import { resolveTokenMetadata } from "./token-metadata";
 import { detectTokenProgram } from "./token-programs";
+import { FeeBudgetManager } from "./fee-budget";
 
 // Lightweight dependency handles for testability
 type HttpFetch = (input: string, init?: any) => Promise<{
@@ -92,6 +92,7 @@ export class WalletManager {
   ) => Promise<{ decimals: number } | null> | { decimals: number } | null;
   private adminKeypair: Keypair | null = null;
   private lastCallTime: number = 0;
+  private feeBudgetManager: FeeBudgetManager | null = null;
 
   // Simplified caching
   private keypairCache = new Map<string, Keypair>();
@@ -152,6 +153,13 @@ export class WalletManager {
     } catch (error) {
       console.error("Failed to load admin keypair:", error);
     }
+  }
+
+  private getFeeBudget(): FeeBudgetManager {
+    if (!this.feeBudgetManager) {
+      this.feeBudgetManager = FeeBudgetManager.getInstance(this.connection);
+    }
+    return this.feeBudgetManager;
   }
 
   private isMissingTokenAccountError(error: unknown): boolean {
@@ -937,11 +945,11 @@ export class WalletManager {
     const userKeypair = this.getKeyPair(telegramId);
     const payer = userKeypair.publicKey;
     const nativeLamports = await this.getBalance(telegramId);
-    const fallbackBufferLamports = Math.ceil(MIN_SOL_FOR_TX * LAMPORTS_PER_SOL);
+    const singleTxBudget = await this.getFeeBudget().getSingleTransactionLamports();
     const rentExemptMinimumLamports =
       await this.getRentExemptMinimumLamports();
     const bufferLamports = Math.max(
-      fallbackBufferLamports,
+      singleTxBudget,
       rentExemptMinimumLamports
     );
     const targetReserveLamports = 0;
@@ -1002,8 +1010,8 @@ export class WalletManager {
         wsolAccountLamports
       )}, rent exempt minimum ${formatLamports(
         rentExemptMinimumLamports
-      )}, buffer ${formatLamports(bufferLamports)} (fallback ${formatLamports(
-        fallbackBufferLamports
+      )}, buffer ${formatLamports(bufferLamports)} (single tx ${formatLamports(
+        singleTxBudget
       )}), target reserve ${formatLamports(targetReserveLamports)}`
     );
 
@@ -1528,7 +1536,7 @@ export class WalletManager {
       );
     }
 
-    const fallback = Math.ceil(MIN_SOL_FOR_TX * LAMPORTS_PER_SOL);
+    const fallback = await this.getFeeBudget().getSingleTransactionLamports();
     this.rentExemptMinimumLamports = fallback;
     return fallback;
   }

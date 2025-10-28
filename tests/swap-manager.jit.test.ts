@@ -11,15 +11,27 @@ import * as splToken from "@solana/spl-token";
 
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
-import {
-  MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
-  JIT_SWAP_FEE_BUFFER_LAMPORTS,
-  WSOL_MINT,
-} from "../src/utils/constants";
+import { WSOL_MINT } from "../src/utils/constants";
+import type { FeeBudgetProvider } from "../src/utils/fee-budget";
 
 describe("SwapManager.performJustInTimeSolSwap", () => {
   const mnemonic = "test walk nut penalty hip pave soap entry language right filter choice";
   const connection = new Connection("http://localhost:8899", "confirmed");
+  const TEST_SINGLE_TX_LAMPORTS = 1_000_000;
+  const TEST_WRAP_BUFFER_LAMPORTS = 15_000;
+  const TEST_JIT_BUFFER_LAMPORTS = 500_000;
+  const TEST_GAME_BUFFER_LAMPORTS = 2_500_000;
+
+  const createFeeBudgetStub = (): FeeBudgetProvider => ({
+    getSingleTransactionLamports: async () => TEST_SINGLE_TX_LAMPORTS,
+    getWrapFeeBufferLamports: async () => TEST_WRAP_BUFFER_LAMPORTS,
+    getJitSwapFeeBufferLamports: async () => TEST_JIT_BUFFER_LAMPORTS,
+    getGameSafetyBufferLamports: async () => TEST_GAME_BUFFER_LAMPORTS,
+    getCachedSingleTransactionLamports: () => TEST_SINGLE_TX_LAMPORTS,
+    getCachedGameSafetyBufferLamports: () => TEST_GAME_BUFFER_LAMPORTS,
+    getDefaultSingleTransactionLamports: () => TEST_SINGLE_TX_LAMPORTS,
+    getDefaultGameSafetyBufferLamports: () => TEST_GAME_BUFFER_LAMPORTS,
+  });
 
   beforeEach(() => {
     process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
@@ -31,9 +43,9 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
-    const swapManager = new SwapManager(connection, wallet);
+    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
     (swapManager as any).connection = {
-      getBalance: async () => MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
+      getBalance: async () => TEST_GAME_BUFFER_LAMPORTS,
     };
 
     const user = Keypair.generate();
@@ -59,7 +71,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     (wallet as any).sendTransaction = async () => "sponsored";
     (wallet as any).confirmTransaction = async () => {};
 
-    const swapManager = new SwapManager(connection, wallet);
+    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
     (swapManager as any).connection = {
       getBalance: async () => 0,
     };
@@ -99,7 +111,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     const admin = Keypair.generate();
     (wallet as any).getAdminKeypair = () => admin;
 
-    const swapManager = new SwapManager(connection, wallet);
+    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
     (swapManager as any).connection = {
       getBalance: async () => 0,
     };
@@ -134,7 +146,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       userKeypair: user,
       tokenMint: WSOL_MINT,
       tokenDecimals: 9,
-      availableTokenAmountRaw: MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS * 2,
+      availableTokenAmountRaw: TEST_GAME_BUFFER_LAMPORTS * 2,
       tokenTicker: "SOL",
     });
 
@@ -142,13 +154,13 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(result.provider).toBe("unwrap");
     expect(result.signature).toBe("SIG_UNWRAP");
     expect(result.lamportsReceived).toBe(
-      MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS + JIT_SWAP_FEE_BUFFER_LAMPORTS
+      TEST_GAME_BUFFER_LAMPORTS + TEST_JIT_BUFFER_LAMPORTS
     );
     expect(unwrapRequests).toEqual([
-      MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS + JIT_SWAP_FEE_BUFFER_LAMPORTS,
+      TEST_GAME_BUFFER_LAMPORTS + TEST_JIT_BUFFER_LAMPORTS,
     ]);
-    expect(sponsorCalls).toEqual([JIT_SWAP_FEE_BUFFER_LAMPORTS]);
-    expect(refundCalls).toEqual([JIT_SWAP_FEE_BUFFER_LAMPORTS]);
+    expect(sponsorCalls).toEqual([TEST_JIT_BUFFER_LAMPORTS]);
+    expect(refundCalls).toEqual([TEST_JIT_BUFFER_LAMPORTS]);
   });
 
   test("unwrap still executes when current SOL already exceeds swap target", async () => {
@@ -161,7 +173,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     (wallet as any).getAdminKeypair = () => admin;
 
     const currentLamports = 1_730_000; // ~0.00173 SOL
-    const swapManager = new SwapManager(connection, wallet);
+    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
     (swapManager as any).connection = {
       getBalance: async () => currentLamports,
     };
@@ -211,12 +223,12 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(result.provider).toBe("unwrap");
     expect(result.signature).toBe("SIG_UNWRAP_OVER_BUFFER");
     expect(result.lamportsReceived).toBe(
-      MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS - currentLamports +
-        JIT_SWAP_FEE_BUFFER_LAMPORTS
+      TEST_GAME_BUFFER_LAMPORTS - currentLamports +
+        TEST_JIT_BUFFER_LAMPORTS
     );
     expect(unwrapRequests).toEqual([
-      MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS - currentLamports +
-        JIT_SWAP_FEE_BUFFER_LAMPORTS,
+      TEST_GAME_BUFFER_LAMPORTS - currentLamports +
+        TEST_JIT_BUFFER_LAMPORTS,
     ]);
     expect(sponsorCalls).toEqual([]);
     expect(refundCalls).toEqual([]);
@@ -231,7 +243,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     const admin = Keypair.generate();
     (wallet as any).getAdminKeypair = () => admin;
 
-    const swapManager = new SwapManager(connection, wallet);
+    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
     (swapManager as any).connection = {
       getBalance: async () => 0,
     };
@@ -256,7 +268,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       userKeypair: user,
       tokenMint: WSOL_MINT,
       tokenDecimals: 9,
-      availableTokenAmountRaw: MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS * 2,
+      availableTokenAmountRaw: TEST_GAME_BUFFER_LAMPORTS * 2,
       tokenTicker: "SOL",
     });
 
@@ -285,7 +297,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     };
     (wallet as any).confirmTransaction = async () => {};
 
-    const swapManager = new SwapManager(connection, wallet);
+    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
     (swapManager as any).connection = {
       getBalance: async () => 0,
     };
@@ -335,7 +347,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     };
     (wallet as any).confirmTransaction = async () => {};
 
-    const swapManager = new SwapManager(connection, wallet);
+    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
     (swapManager as any).connection = {
       getBalance: async () => 0,
     };
@@ -370,7 +382,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(result.provider).toBe("jupiter");
     expect(result.signature).toBe("SIG_JUP");
     expect(result.lamportsReceived).toBe(
-      MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS + JIT_SWAP_FEE_BUFFER_LAMPORTS
+      TEST_GAME_BUFFER_LAMPORTS + TEST_JIT_BUFFER_LAMPORTS
     );
 
     expect(sendCalls.length).toBe(2);
@@ -402,11 +414,11 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
-    const swapManager = new SwapManager(connection, wallet);
+    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
 
     const user = Keypair.generate();
-    const totalRaw = MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS + 500_000;
-    const unwrapLamports = MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS;
+    const totalRaw = TEST_GAME_BUFFER_LAMPORTS + TEST_JIT_BUFFER_LAMPORTS;
+    const unwrapLamports = TEST_GAME_BUFFER_LAMPORTS;
 
     const sendCalls: TransactionInstruction[][] = [];
     (wallet as any).sendTransaction = async (

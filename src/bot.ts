@@ -28,7 +28,9 @@ import {
   WSOL_MINT,
   getStartVideoId,
   INPUT_TIMEOUT_HINT,
+  applyDynamicFeeBudgets,
 } from "./utils/constants";
+import { FeeBudgetManager } from "./utils/fee-budget";
 import { mergeWsolIntoSol } from "./utils/balance";
 import { setUserState, getUserState, storePendingTransaction, getPendingTransaction } from "./utils/user-state";
 // import { createDmMessageAdapter } from "./utils/ctx-adapter";
@@ -126,6 +128,26 @@ bot.use(async (ctx, next) => {
   await next();
 });
 export const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
+const feeBudget = FeeBudgetManager.getInstance(wallet.getConnection());
+let SOL_FEE_BUFFER_LAMPORTS = feeBudget.getCachedSingleTransactionLamports();
+
+void (async () => {
+  try {
+    const [singleLamports, gameLamports, jitLamports] = await Promise.all([
+      feeBudget.getSingleTransactionLamports(),
+      feeBudget.getGameSafetyBufferLamports(),
+      feeBudget.getJitSwapFeeBufferLamports(),
+    ]);
+    SOL_FEE_BUFFER_LAMPORTS = singleLamports;
+    applyDynamicFeeBudgets({
+      singleTransactionLamports: singleLamports,
+      gameSafetyBufferLamports: gameLamports,
+      jitSwapBufferLamports: jitLamports,
+    });
+  } catch (error) {
+    console.warn("Failed to refresh dynamic fee budgets during startup:", error);
+  }
+})();
 const gameDb = GameDatabase.getInstance();
 const pendingGameCreations = new Set<string>();
 
@@ -271,7 +293,6 @@ export const __test_clearUserState = (userId: string) => { getUserState(userId, 
 
 // Main menu keyboard moved to utils/keyboards.ts
 
-const SOL_FEE_BUFFER_LAMPORTS = Math.ceil(MIN_SOL_FOR_TX * LAMPORTS_PER_SOL);
 const toRawAmount = (value: string, decimals: number): number =>
   parseDecimalAmount(value, decimals, { returnType: "number" });
 

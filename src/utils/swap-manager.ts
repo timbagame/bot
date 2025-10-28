@@ -11,10 +11,8 @@ import { PumpFunClient, validatePumpFunSwap } from "./pump-fun";
 import { NetworkDetector } from "./network-detector";
 import type { SolanaNetwork } from "./network-detector";
 import { WalletManager } from "./wallet";
-import {
-  JIT_SWAP_FEE_BUFFER_LAMPORTS,
-  MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
-} from "./constants";
+import { FeeBudgetManager } from "./fee-budget";
+import type { FeeBudgetProvider } from "./fee-budget";
 import { formatAmount } from "./format-amount";
 
 // ================================
@@ -69,12 +67,18 @@ export class SwapManager {
   public pumpFunClient: PumpFunClient;
   private connection: Connection;
   private wallet: WalletManager;
+  private feeBudget: FeeBudgetProvider;
   private network: SolanaNetwork;
 
-  constructor(connection: Connection, wallet: WalletManager) {
+  constructor(
+    connection: Connection,
+    wallet: WalletManager,
+    feeBudget?: FeeBudgetProvider
+  ) {
     this.connection = connection;
     this.wallet = wallet;
     this.network = NetworkDetector.getCurrentNetwork();
+    this.feeBudget = feeBudget ?? FeeBudgetManager.getInstance(connection);
 
     this.jupiterClient = new JupiterClient();
     this.pumpFunClient = new PumpFunClient(connection);
@@ -452,11 +456,18 @@ export class SwapManager {
       tokenMint,
       tokenDecimals,
       availableTokenAmountRaw,
-      desiredLamports = MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
+      desiredLamports,
       slippageBps = 250,
       tokenTicker = "token",
       logContext = "game",
     } = options;
+
+    const [minimumSolBuffer, jitFeeBuffer] = await Promise.all([
+      this.feeBudget.getGameSafetyBufferLamports(),
+      this.feeBudget.getJitSwapFeeBufferLamports(),
+    ]);
+
+    const targetLamports = Math.max(desiredLamports ?? 0, minimumSolBuffer);
 
     let sponsoredLamportsOutstanding = 0;
     let lastJupiterError: string | null = null;
@@ -465,10 +476,6 @@ export class SwapManager {
     try {
       const currentLamports = await this.connection.getBalance(
         userKeypair.publicKey
-      );
-      const targetLamports = Math.max(
-        desiredLamports,
-        MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS
       );
 
       if (currentLamports >= targetLamports) {
@@ -519,10 +526,7 @@ export class SwapManager {
             quoteResponse: quote,
           });
 
-          const sponsorLamports = Math.max(
-            JIT_SWAP_FEE_BUFFER_LAMPORTS - currentLamports,
-            0
-          );
+          const sponsorLamports = Math.max(jitFeeBuffer - currentLamports, 0);
           if (sponsorLamports > 0) {
             await this.sponsorSwapFees(userKeypair, sponsorLamports);
             sponsoredLamportsOutstanding += sponsorLamports;
@@ -581,7 +585,7 @@ export class SwapManager {
       }
 
       const lamportsShortfall = targetLamports - currentLamports;
-      const swapTarget = lamportsShortfall + JIT_SWAP_FEE_BUFFER_LAMPORTS;
+      const swapTarget = lamportsShortfall + jitFeeBuffer;
 
       const attemptWsolUnwrap = async (
         target: number
@@ -595,10 +599,7 @@ export class SwapManager {
         }
 
         try {
-          const sponsorLamports = Math.max(
-            JIT_SWAP_FEE_BUFFER_LAMPORTS - currentLamports,
-            0
-          );
+          const sponsorLamports = Math.max(jitFeeBuffer - currentLamports, 0);
           if (sponsorLamports > 0) {
             await this.sponsorSwapFees(userKeypair, sponsorLamports);
             sponsoredLamportsOutstanding += sponsorLamports;

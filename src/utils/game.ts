@@ -23,17 +23,19 @@ import {
   ADDRESS_DISPLAY_LENGTH,
   GAME_INFO_LIMIT,
   GAME_EXPIRATION_BUFFER_TIME,
-  MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
   WSOL_MINT,
   DEFAULT_TOKEN_TICKER,
   getCoinflipVideoId,
   getGiveawayVideoId,
+  applyDynamicFeeBudgets,
 } from "./constants";
 import {
   editMediaWithFallback,
   isRecoverableMediaError,
   sendMediaWithFallback,
 } from "./media";
+import { FeeBudgetManager } from "./fee-budget";
+import type { FeeBudgetProvider } from "./fee-budget";
 import type {
   GameMessage,
   GameCancellationResult,
@@ -66,7 +68,6 @@ const resolveGameVideoId = (gameType: string): string | undefined => {
   return undefined;
 };
 
-const WRAP_SOL_FEE_BUFFER_LAMPORTS = 15_000; // ~0.000015 SOL buffer to cover wrap transaction fees
 const WRAP_BALANCE_RETRY_DELAYS_MS = [250, 500, 1000, 2000, 4000, 8000]; // Polling intervals to wait for WSOL balance propagation
 
 const getWrapBalanceRetryDelays = (): number[] => {
@@ -167,7 +168,8 @@ export class GameManager {
     private wallet: WalletManager,
     private gameDb: GameDatabase,
     private oracleClient: OracleClient,
-    private swapManager: SwapManager
+    private swapManager: SwapManager,
+    private feeBudget: FeeBudgetProvider
   ) {}
 
   public static getInstance(
@@ -186,14 +188,32 @@ export class GameManager {
               process.env.SOLANA_NETWORK || "https://api.mainnet-beta.solana.com",
               "confirmed"
             );
-      const swapManager = new SwapManager(connection, wallet);
+      const feeBudget = FeeBudgetManager.getInstance(connection);
+      const swapManager = new SwapManager(connection, wallet, feeBudget);
       GameManager.instance = new GameManager(
         program,
         wallet,
         gameDb,
         oracleClient,
-        swapManager
+        swapManager,
+        feeBudget
       );
+      void (async () => {
+        try {
+          const [singleTx, gameBuffer, jitBuffer] = await Promise.all([
+            feeBudget.getSingleTransactionLamports(),
+            feeBudget.getGameSafetyBufferLamports(),
+            feeBudget.getJitSwapFeeBufferLamports(),
+          ]);
+          applyDynamicFeeBudgets({
+            singleTransactionLamports: singleTx,
+            gameSafetyBufferLamports: gameBuffer,
+            jitSwapBufferLamports: jitBuffer,
+          });
+        } catch (error) {
+          console.warn("Failed to prime dynamic fee budgets:", error);
+        }
+      })();
       GameManager.instance.cachedConnection = connection;
     }
     return GameManager.instance;
@@ -848,12 +868,19 @@ export class GameManager {
     | { success: true; tokenBalance: number; solBalance: number }
     | { success: false; error: string }
   > {
+    const [wrapFeeBuffer, minSolBuffer] = await Promise.all([
+      this.feeBudget.getWrapFeeBufferLamports(),
+      this.feeBudget.getGameSafetyBufferLamports(),
+    ]);
+
     console.log(
       `🔍 WSOL wrap check (${context}): required=${this.wallet.formatSolBalance(
         requiredLamports
       )} WSOL, currentWSOL=${this.wallet.formatSolBalance(
         currentTokenBalance
-      )}, currentSOL=${this.wallet.formatSolBalance(currentSolBalance)}`
+      )}, currentSOL=${this.wallet.formatSolBalance(currentSolBalance)}, wrapBuffer=${this.wallet.formatSolBalance(
+        wrapFeeBuffer
+      )}, minSolBuffer=${this.wallet.formatSolBalance(minSolBuffer)}`
     );
 
     if (currentTokenBalance >= requiredLamports) {
@@ -873,12 +900,11 @@ export class GameManager {
       };
     }
 
-    const projectedRemaining =
-      currentSolBalance - deficit - WRAP_SOL_FEE_BUFFER_LAMPORTS;
-    if (projectedRemaining < MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
+    const projectedRemaining = currentSolBalance - deficit - wrapFeeBuffer;
+    if (projectedRemaining < minSolBuffer) {
       const formattedDeficit = this.wallet.formatSolBalance(deficit);
       const formattedBuffer = this.wallet.formatSolBalance(
-        MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS
+        minSolBuffer
       );
       console.warn(
         `⚠️ Not enough SOL to wrap ${formattedDeficit} for ${context}. Current SOL=${this.wallet.formatSolBalance(
@@ -967,10 +993,8 @@ export class GameManager {
       };
     }
 
-    if (updatedSolBalance < MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
-      const formattedBuffer = this.wallet.formatSolBalance(
-        MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS
-      );
+    if (updatedSolBalance < minSolBuffer) {
+      const formattedBuffer = this.wallet.formatSolBalance(minSolBuffer);
       console.warn(
         `⚠️ Wrap left SOL balance ${this.wallet.formatSolBalance(
           updatedSolBalance
@@ -1024,8 +1048,9 @@ export class GameManager {
     }
 
     try {
+      const minSolBuffer = await this.feeBudget.getGameSafetyBufferLamports();
       let solBalance = await this.wallet.getBalance(telegramBigInt);
-      if (solBalance >= MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
+      if (solBalance >= minSolBuffer) {
         return { success: true };
       }
 
@@ -1054,7 +1079,7 @@ export class GameManager {
         tokenMint,
         tokenDecimals,
         availableTokenAmountRaw: Math.max(Math.floor(tokenBalance), 0),
-        desiredLamports: MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
+        desiredLamports: minSolBuffer,
         slippageBps: 300,
         tokenTicker,
         logContext,
@@ -1070,7 +1095,7 @@ export class GameManager {
       }
 
       solBalance = await this.wallet.getBalance(telegramBigInt);
-      if (solBalance < MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
+      if (solBalance < minSolBuffer) {
         return {
           success: false,
           reason:
@@ -2170,6 +2195,8 @@ export class GameManager {
     try {
       const metadata = await this.wallet.getTokenMetadata(tokenMint);
       const playerKp = this.wallet.getKeyPair(telegramId);
+      const minSolBuffer = await this.feeBudget.getGameSafetyBufferLamports();
+
       let [tokenBalance, solBalance] = await Promise.all([
         this.wallet.getTokenBalance(telegramId, tokenMint, {
           createIfMissing: true,
@@ -2222,7 +2249,7 @@ export class GameManager {
       const swapAllowanceRaw = Math.max(tokenBalance - reservedTicketAmount, 0);
 
       let lamportsBalance = solBalance;
-      if (lamportsBalance < MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
+      if (lamportsBalance < minSolBuffer) {
         if (swapAllowanceRaw <= 0) {
           const formattedStake = this.wallet.formatTokenBalance(
             reservedTicketAmount,
@@ -2240,7 +2267,7 @@ export class GameManager {
           tokenMint,
           tokenDecimals: metadata.decimals,
           availableTokenAmountRaw: swapAllowanceRaw,
-          desiredLamports: MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
+          desiredLamports: minSolBuffer,
           slippageBps: 300,
           tokenTicker,
           logContext: `create ${gameType} game`,
@@ -2278,7 +2305,7 @@ export class GameManager {
         }
 
         lamportsBalance = await this.wallet.getBalance(telegramId);
-        if (lamportsBalance < MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
+        if (lamportsBalance < minSolBuffer) {
           return {
             success: false,
             error:
@@ -2712,6 +2739,8 @@ export class GameManager {
         const metadata = await this.wallet.getTokenMetadata(
           gameData.token_mint
         );
+        const minSolBuffer = await this.feeBudget.getGameSafetyBufferLamports();
+
         let [tokenBalance, solBalance] = await Promise.all([
           this.wallet.getTokenBalance(telegramId, gameData.token_mint, {
             createIfMissing: true,
@@ -2762,7 +2791,7 @@ export class GameManager {
         const swapAllowanceRaw = Math.max(tokenBalance - reservedTicketAmount, 0);
 
         let lamportsBalance = solBalance;
-        if (lamportsBalance < MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
+        if (lamportsBalance < minSolBuffer) {
           if (swapAllowanceRaw <= 0) {
             const formattedStake = this.wallet.formatTokenBalance(
               reservedTicketAmount,
@@ -2780,7 +2809,7 @@ export class GameManager {
             tokenMint: gameData.token_mint,
             tokenDecimals: metadata.decimals,
             availableTokenAmountRaw: swapAllowanceRaw,
-            desiredLamports: MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
+            desiredLamports: minSolBuffer,
             slippageBps: 300,
             tokenTicker: gameData.token_ticker,
             logContext: `join ${gameAddress}`,
@@ -2811,7 +2840,7 @@ export class GameManager {
             }
 
             const refreshedLamports = await this.wallet.getBalance(telegramId);
-            if (refreshedLamports < MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS) {
+            if (refreshedLamports < minSolBuffer) {
               return {
                 success: false,
                 error:
