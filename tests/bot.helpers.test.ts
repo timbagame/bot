@@ -587,6 +587,68 @@ describe("createGameViaCommand helper", () => {
     expect(messageTokenTicker).toBe("WSOL");
   });
 
+  test("allows WSOL games when user specifies token explicitly", async () => {
+    const ctx: any = makeCtx();
+    const createCalls: any[] = [];
+    const messageCalls: any[] = [];
+    let balanceChecks = 0;
+
+    const solAmount = 600_000;
+    const deps = makeDeps({
+      parseAmount: async () => ({
+        success: true,
+        data: {
+          ...baseParsedAmount,
+          amount: solAmount,
+          tokenMint: WSOL_MINT,
+          tokenTicker: "WSOL",
+          formattedAmount: "0.0006 WSOL",
+          requestedNativeSol: false,
+          tokenWasSpecified: true,
+        },
+      }),
+      wallet: {
+        getTokenBalance: async () => 0,
+        getTokenMetadata: async () => ({ decimals: 9 }),
+        formatTokenBalance: (amount, decimals) =>
+          (amount / Math.pow(10, decimals)).toString(),
+        getBalance: async () => {
+          balanceChecks += 1;
+          return 1_500_000;
+        },
+        formatSolBalance: (lamports) => (lamports / LAMPORTS_PER_SOL).toString(),
+      },
+      gameManager: {
+        createGame: async (...args) => {
+          createCalls.push(args);
+          return { success: true, gameAddress: "ADDR", autoJoinResult: { success: true } };
+        },
+        createGameMessage: async (...args) => {
+          messageCalls.push(args);
+          return 0;
+        },
+      },
+    });
+
+    await botModule.__test_createGameViaCommand(
+      ctx,
+      ["/cf", "0.0006", "WSOL"],
+      1n,
+      coinflipOptions,
+      deps
+    );
+
+    expect(ctx.__calls.length).toBe(0);
+    expect(createCalls.length).toBe(1);
+    expect(messageCalls.length).toBe(1);
+    expect(balanceChecks).toBeGreaterThan(0);
+
+    const [, gameData] = createCalls[0];
+    expect(gameData.tokenTicker).toBe("WSOL");
+    const [, , , , , messageTokenTicker] = messageCalls[0];
+    expect(messageTokenTicker).toBe("WSOL");
+  });
+
   test("reports combined SOL balance when insufficient for native SOL games", async () => {
     const ctx: any = makeCtx();
     const createCalls: any[] = [];
@@ -635,5 +697,46 @@ describe("createGameViaCommand helper", () => {
     expect(response).toContain("SOL available natively");
     expect(response).toContain("wrapped SOL");
     expect(response).toContain("0.0005 SOL");
+  });
+
+  test("reports combined SOL balance when WSOL specified but insufficient", async () => {
+    const ctx: any = makeCtx();
+    const solAmount = 600_000;
+
+    const deps = makeDeps({
+      parseAmount: async () => ({
+        success: true,
+        data: {
+          ...baseParsedAmount,
+          amount: solAmount,
+          tokenMint: WSOL_MINT,
+          tokenTicker: "WSOL",
+          formattedAmount: "0.0006 WSOL",
+          requestedNativeSol: false,
+          tokenWasSpecified: true,
+        },
+      }),
+      wallet: {
+        getTokenBalance: async () => 150_000,
+        getTokenMetadata: async () => ({ decimals: 9 }),
+        formatTokenBalance: (amount, decimals) =>
+          (amount / Math.pow(10, decimals)).toFixed(6),
+        getBalance: async () => 200_000,
+        formatSolBalance: (lamports) => (lamports / LAMPORTS_PER_SOL).toFixed(6),
+      },
+    });
+
+    await botModule.__test_createGameViaCommand(
+      ctx,
+      ["/cf", "0.0004", "WSOL"],
+      1n,
+      coinflipOptions,
+      deps
+    );
+
+    expect(ctx.__calls.length).toBe(1);
+    const response = String(ctx.__calls[0]);
+    expect(response).toContain("SOL available natively");
+    expect(response).toContain("wrapped SOL");
   });
 });

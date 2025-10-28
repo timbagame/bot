@@ -133,6 +133,57 @@ describe("GameManager.createGame", () => {
     expect(String(res.error)).toContain("Oracle service is unavailable");
   });
 
+  test("wraps native SOL when WSOL token specified explicitly", async () => {
+    resetGM();
+    let wsolBalance = 0;
+    let solBalance = 4_000_000;
+    const wallet = makeWallet({
+      getTokenMetadata: async () => ({ decimals: 9 }),
+      getTokenBalance: async () => wsolBalance,
+      getBalance: async () => solBalance,
+      wrapSol: async (_telegramId: bigint, amount: number) => {
+        wsolBalance += amount;
+        solBalance -= amount + 15_000;
+        return "WRAP_SIG";
+      },
+      sendTransaction: async () => "SIG",
+      confirmTransaction: async () => true,
+      formatSolBalance: (lamports: number) => (lamports / 1_000_000_000).toFixed(6),
+    });
+
+    const db = {
+      savePlayerMapping: () => {},
+      saveGame: () => {},
+    } as any;
+
+    const program = makeProgram(wallet.connection);
+    const gm = GameManager.getInstance(program, wallet, db);
+    (gm as any).oracleClient = {
+      isHealthy: async () => true,
+      generateGameSecrets: async () => ({
+        randomHash: "0".repeat(64),
+      }),
+      hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
+    };
+    const res = await gm.createGame(
+      "coinflip",
+      {
+        amount: 600_000,
+        tokenMint: WSOL_MINT,
+        tokenTicker: "WSOL",
+        isSol: false,
+        requestedNativeSol: false,
+      },
+      2,
+      2,
+      60,
+      1n
+    );
+
+    expect(res.success).toBe(true);
+    expect(wsolBalance).toBeGreaterThanOrEqual(600_000);
+  });
+
   test("happy path saves game and auto-joins creator", async () => {
     resetGM();
     const wallet = makeWallet({

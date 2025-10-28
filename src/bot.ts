@@ -2539,7 +2539,9 @@ const createGameViaCommand = async (
       return;
     }
 
-    const needsNativeSolCheck = parsedAmount.requestedNativeSol === true;
+    const needsNativeSolCheck =
+      parsedAmount.requestedNativeSol === true ||
+      parsedAmount.tokenMint === WSOL_MINT;
     let nativeSolBalance = 0;
     let userBalance: number;
 
@@ -2591,9 +2593,7 @@ const createGameViaCommand = async (
     }
 
     const tokenTickerForGame =
-      parsedAmount.requestedNativeSol && parsedAmount.tokenMint === WSOL_MINT
-        ? "WSOL"
-        : parsedAmount.tokenTicker;
+      parsedAmount.tokenMint === WSOL_MINT ? "WSOL" : parsedAmount.tokenTicker;
 
     const gameResult = await deps.gameManager.createGame(
       options.gameType,
