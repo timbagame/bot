@@ -160,6 +160,15 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
 
   const telegramId = getTelegramId(ctx);
 
+  if (telegramId === 0n) {
+    await handleCommandError(
+      ctx,
+      new Error("Missing Telegram user id while handling /balance"),
+      "balance"
+    );
+    return;
+  }
+
   if (isPrivateChat(ctx)) {
     try {
       try { clearWalletCache(telegramId); } catch {}
