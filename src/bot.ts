@@ -7678,10 +7678,7 @@ bot.on("callback_query", async (ctx, next) => {
       `💰 <b>Spent:</b> ${buyData.amount} ${buyData.fromToken}`,
       `🎯 <b>Received:</b> ${buyData.toToken} tokens`,
       "",
-      `🔗 <b>Transaction:</b> <code>${signature.slice(
-        0,
-        8
-      )}...${signature.slice(-8)}</code>`,
+      `🔗 <b>Transaction:</b> <code>${signature}</code>`,
       "",
       "🎉 <b>Purchase successful!</b>",
     ].join("\n");
