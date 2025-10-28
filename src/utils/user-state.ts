@@ -4,14 +4,23 @@ const USER_STATE_TIMEOUT = 5 * 60 * 1000; // 5 minutes timeout
 
 type GenericState = { timestamp: number } & Record<string, any>;
 
+const pruneExpiredEntries = (
+  map: Map<string, GenericState>,
+  now: number
+): void => {
+  for (const [id, state] of map.entries()) {
+    if (now - state.timestamp > USER_STATE_TIMEOUT) {
+      map.delete(id);
+    }
+  }
+};
+
 const userStates = new Map<string, GenericState>();
 const pendingTransactions = new Map<string, GenericState>();
 
 export function setUserState(userId: string, state: Record<string, any>): void {
   const now = Date.now();
-  for (const [id, st] of userStates.entries()) {
-    if (now - st.timestamp > USER_STATE_TIMEOUT) userStates.delete(id);
-  }
+  pruneExpiredEntries(userStates, now);
   userStates.set(userId, { ...state, timestamp: now });
 }
 
@@ -23,9 +32,7 @@ export function getUserState<T = any>(userId: string, clear = false): (T & { tim
 
 export function storePendingTransaction(txId: string, transaction: Record<string, any>): void {
   const now = Date.now();
-  for (const [id, tx] of pendingTransactions.entries()) {
-    if (now - tx.timestamp > USER_STATE_TIMEOUT) pendingTransactions.delete(id);
-  }
+  pruneExpiredEntries(pendingTransactions, now);
   pendingTransactions.set(txId, { ...transaction, timestamp: now });
 }
 
