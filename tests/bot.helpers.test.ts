@@ -533,6 +533,7 @@ describe("createGameViaCommand helper", () => {
   test("allows SOL games when native balance covers deficit", async () => {
     const ctx: any = makeCtx();
     const createCalls: any[] = [];
+    const messageCalls: any[] = [];
 
     const solAmount = 600_000;
     const deps = makeDeps({
@@ -560,7 +561,10 @@ describe("createGameViaCommand helper", () => {
           createCalls.push(args);
           return { success: true, gameAddress: "ADDR", autoJoinResult: { success: true } };
         },
-        createGameMessage: async () => 0,
+        createGameMessage: async (...args) => {
+          messageCalls.push(args);
+          return 0;
+        },
       },
     });
 
@@ -574,6 +578,13 @@ describe("createGameViaCommand helper", () => {
 
     expect(ctx.__calls.length).toBe(0);
     expect(createCalls.length).toBe(1);
+    expect(messageCalls.length).toBe(1);
+
+    const [, gameData] = createCalls[0];
+    expect(gameData.tokenTicker).toBe("WSOL");
+
+    const [, , , , , messageTokenTicker] = messageCalls[0];
+    expect(messageTokenTicker).toBe("WSOL");
   });
 
   test("reports combined SOL balance when insufficient for native SOL games", async () => {

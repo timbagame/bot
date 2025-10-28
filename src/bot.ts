@@ -2590,12 +2590,17 @@ const createGameViaCommand = async (
       }
     }
 
+    const tokenTickerForGame =
+      parsedAmount.requestedNativeSol && parsedAmount.tokenMint === WSOL_MINT
+        ? "WSOL"
+        : parsedAmount.tokenTicker;
+
     const gameResult = await deps.gameManager.createGame(
       options.gameType,
       {
         amount: parsedAmount.amount,
         tokenMint: parsedAmount.tokenMint,
-        tokenTicker: parsedAmount.tokenTicker,
+        tokenTicker: tokenTickerForGame,
         isSol: parsedAmount.isSol,
         requestedNativeSol: parsedAmount.requestedNativeSol,
       },
@@ -2628,7 +2633,7 @@ const createGameViaCommand = async (
       options.gameLabel,
       parsedAmount.amount,
       creatorUsername,
-      parsedAmount.tokenTicker,
+      tokenTickerForGame,
       "Active"
     );
   } catch (error) {

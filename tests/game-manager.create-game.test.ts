@@ -88,7 +88,7 @@ describe("GameManager.createGame", () => {
       {
         amount: 1_000_000,
         tokenMint: WSOL_MINT,
-        tokenTicker: "SOL",
+        tokenTicker: "WSOL",
         isSol: false,
         requestedNativeSol: true,
       },
