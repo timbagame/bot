@@ -6,6 +6,10 @@ import {
   resolveOracleOperatorKeypair,
   uniqueSigners,
 } from "./utils/keypairs";
+import {
+  createOracleConfig,
+  logOracleConfig,
+} from "./utils/oracle-config";
 import { loadProgramContext } from "./utils/anchor-context";
 
 // Initialize Oracle if it doesn't exist
@@ -36,17 +40,10 @@ const initializeOracle = async (
     const oracleOperatorKeypair = resolveOracleOperatorKeypair(adminKeypair);
 
     // Initialize Oracle
-    const oracleConfig = {
-      // u8
-      feePercentage: 1,
-      // u64 fields must be BN
-      oracleBufferTime: new anchor.BN(300), // 5 minute buffer before cancellation
-      // u32
-      maxTickets: 100, // 100 max tickets
-      // u64 fields must be BN
-      maxTimeout: new anchor.BN(86400), // 24 hours max timeout
-      minTimeout: new anchor.BN(60), // 1 minute min timeout
-    };
+    const oracleConfig = createOracleConfig();
+    logOracleConfig(oracleConfig, {
+      heading: "Initialized oracle configuration",
+    });
 
     const oracleInstruction = await program.methods
       .initializeOracle(oracleConfig)

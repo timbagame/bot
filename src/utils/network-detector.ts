@@ -148,7 +148,7 @@ export class NetworkDetector {
     return baseUrl;
   }
 
-  private static resolveNetworkInput(
+  public static resolveNetworkInput(
     input?: string | null
   ): SolanaNetwork | undefined {
     if (!input) {

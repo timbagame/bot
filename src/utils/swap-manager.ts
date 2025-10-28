@@ -6,14 +6,6 @@ import {
   VersionedTransaction,
   SystemProgram,
 } from "@solana/web3.js";
-import {
-  getAccount,
-  getAssociatedTokenAddress,
-  createAssociatedTokenAccountInstruction,
-  createCloseAccountInstruction,
-  createSyncNativeInstruction,
-  TOKEN_PROGRAM_ID,
-} from "@solana/spl-token";
 import { JupiterClient } from "./jupiter";
 import { PumpFunClient, validatePumpFunSwap } from "./pump-fun";
 import { NetworkDetector } from "./network-detector";
@@ -23,6 +15,7 @@ import {
   JIT_SWAP_FEE_BUFFER_LAMPORTS,
   MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
 } from "./constants";
+import { formatAmount } from "./format-amount";
 
 // ================================
 // UNIFIED SWAP MANAGER
@@ -486,6 +479,16 @@ export class SwapManager {
       }
 
       const availableRaw = Math.max(Math.floor(availableTokenAmountRaw), 0);
+      const tokenDecimalsClamped = Math.max(tokenDecimals, 0);
+      const formatTokenUnits = (value: bigint | number) =>
+        formatAmount(
+          typeof value === "number" ? BigInt(Math.trunc(value)) : value,
+          tokenDecimalsClamped,
+          {
+            maxFractionDigits: Math.min(tokenDecimalsClamped, 6),
+            trim: true,
+          }
+        );
       const attemptJupiterSwap = async (
         target: number
       ): Promise<JustInTimeSwapResult | null> => {
@@ -502,11 +505,8 @@ export class SwapManager {
           const availableInput = BigInt(availableRaw);
 
           if (requiredInput > availableInput) {
-            const needed = this.describeTokenAmount(requiredInput, tokenDecimals);
-            const available = this.describeTokenAmount(
-              availableInput,
-              tokenDecimals
-            );
+            const needed = formatTokenUnits(requiredInput);
+            const available = formatTokenUnits(availableInput);
             lastJupiterError = `Need ${needed} ${tokenTicker.toUpperCase()} available for swap but only ${available}. Top up your balance or add SOL manually.`;
             console.log(
               `⚠️ Jupiter route requires ${needed} ${tokenTicker.toUpperCase()} but only ${available} available.`
@@ -730,10 +730,15 @@ export class SwapManager {
 
         for (let i = 0; i < 6; i++) {
           attemptCount = i + 1;
-          const amountStr = this.formatDecimalAmount(
-            attemptDecimal,
-            tokenDecimals
-          );
+          const decimalsForAmount = Math.max(tokenDecimals, 0);
+          const fixedPrecision = Math.min(decimalsForAmount, 20);
+          const fixedString = attemptDecimal.toFixed(fixedPrecision);
+          const normalizedRaw = fixedString.replace(".", "");
+          const rawAmount = BigInt(normalizedRaw);
+          const amountStr = formatAmount(rawAmount, decimalsForAmount, {
+            maxFractionDigits: Math.min(decimalsForAmount, 9),
+            trim: true,
+          });
           const quote = await this.pumpFunClient.getQuote(
             tokenMint,
             SOL_MINT,
@@ -851,32 +856,6 @@ export class SwapManager {
     }
   }
 
-  private formatDecimalAmount(amount: number, decimals: number): string {
-    const precision = Math.min(Math.max(decimals, 0), 9);
-    if (precision === 0) {
-      return Math.round(amount).toString();
-    }
-
-    const formatted = amount.toFixed(precision).replace(/0+$/, "");
-    return formatted.endsWith(".") ? formatted.slice(0, -1) : formatted;
-  }
-
-  private describeTokenAmount(amount: bigint, decimals: number): string {
-    const decimalsClamped = Math.max(decimals, 0);
-    const raw = amount.toString();
-    if (decimalsClamped === 0) {
-      return raw;
-    }
-
-    const padded = raw.padStart(decimalsClamped + 1, "0");
-    const integerPart = padded.slice(0, padded.length - decimalsClamped);
-    const fractionalRaw = padded.slice(padded.length - decimalsClamped);
-    const fractionalPart = fractionalRaw.replace(/0+$/, "");
-    return fractionalPart.length > 0
-      ? `${integerPart}.${fractionalPart}`
-      : integerPart;
-  }
-
   private async unwrapWsolPortion(options: {
     userKeypair: Keypair;
     unwrapLamports: number;
@@ -892,83 +871,37 @@ export class SwapManager {
     }
 
     const owner = userKeypair.publicKey;
-    const wsolMint = new PublicKey(SOL_MINT);
-    const wsolAta = await getAssociatedTokenAddress(
-      wsolMint,
+    const unwrapPlan = await this.wallet.buildUnwrapWsolPlan({
       owner,
-      false,
-      TOKEN_PROGRAM_ID
-    );
+      payer: userKeypair,
+      amountLamports: unwrapLamports,
+    });
 
-    const wsolAccount = await getAccount(
-      this.connection,
-      wsolAta,
-      "confirmed",
-      TOKEN_PROGRAM_ID
-    );
-
-    const totalRaw = Number(wsolAccount.amount);
-    if (!Number.isFinite(totalRaw) || totalRaw <= 0) {
-      throw new Error("No WSOL balance available to unwrap.");
-    }
-    if (!Number.isSafeInteger(totalRaw)) {
-      throw new Error("WSOL balance is too large to unwrap safely.");
-    }
-    if (unwrapLamports > totalRaw) {
-      throw new Error(
-        `Requested WSOL unwrap (${unwrapLamports} lamports) exceeds current balance (${totalRaw}).`
-      );
-    }
-
-    const remainingRaw = totalRaw - unwrapLamports;
-    if (remainingRaw < 0) {
-      throw new Error("Unwrap would reduce WSOL balance below zero.");
-    }
-
-    const formattedUnwrap = this.describeTokenAmount(
-      BigInt(unwrapLamports),
-      SOL_DECIMALS
-    );
-    const formattedRemaining = this.describeTokenAmount(
-      BigInt(Math.max(remainingRaw, 0)),
-      SOL_DECIMALS
+    const formattedUnwrap = formatAmount(BigInt(unwrapPlan.unwrapLamports), SOL_DECIMALS, {
+      maxFractionDigits: SOL_DECIMALS,
+      trim: true,
+    });
+    const formattedRemaining = formatAmount(
+      BigInt(Math.max(unwrapPlan.remainingLamports, 0)),
+      SOL_DECIMALS,
+      {
+        maxFractionDigits: SOL_DECIMALS,
+        trim: true,
+      }
     );
 
     console.log(
       `🧼 Unwrapping ${formattedUnwrap} WSOL for ${logContext}. Remaining WSOL after unwrap: ${formattedRemaining}.`
     );
 
-    const instructions: TransactionInstruction[] = [
-      createSyncNativeInstruction(wsolAta),
-      createCloseAccountInstruction(wsolAta, owner, owner),
-      createAssociatedTokenAccountInstruction(
-        owner,
-        wsolAta,
-        owner,
-        wsolMint,
-        TOKEN_PROGRAM_ID
-      ),
-    ];
-
-    if (remainingRaw > 0) {
-      instructions.push(
-        SystemProgram.transfer({
-          fromPubkey: owner,
-          toPubkey: wsolAta,
-          lamports: remainingRaw,
-        })
-      );
-      instructions.push(createSyncNativeInstruction(wsolAta));
-    }
-
-    const signature = await this.wallet.sendTransaction(instructions, [
+    const signature = await this.wallet.sendTransaction(unwrapPlan.instructions, [
       userKeypair,
     ]);
     await this.wallet.confirmTransaction(signature);
 
     return {
       signature,
-      lamportsReceived: unwrapLamports,
+      lamportsReceived: unwrapPlan.unwrapLamports,
     };
   }
 

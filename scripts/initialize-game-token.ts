@@ -5,7 +5,9 @@ import {
   LAMPORTS_PER_SOL,
   SystemProgram,
   Transaction,
+  TransactionInstruction,
 } from "@solana/web3.js";
+import type { AccountInfo } from "@solana/web3.js";
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
@@ -26,6 +28,7 @@ import {
   uniqueSigners,
 } from "./utils/keypairs";
 import { createAnchorContext } from "./utils/anchor-context";
+import { readBigIntEnv } from "./utils/env";
 
 // ================================
 // CONFIGURATION
@@ -41,39 +44,11 @@ const resolveEnvPath = (envVar?: string, fallback?: string): string => {
 
 const RPC_URL = resolveEnvPath(process.env["SOLANA_NETWORK"], DEFAULT_RPC_URL);
 
-const resolveNetworkOverride = (value?: string): SolanaNetwork | null => {
-  if (!value) return null;
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "mainnet" || normalized === "mainnet-beta") return "mainnet";
-  if (normalized === "devnet") return "devnet";
-  if (normalized === "testnet") return "testnet";
-  if (normalized === "localnet") return "localnet";
-  return null;
-};
-
-const NETWORK_OVERRIDE = resolveNetworkOverride(process.env["SOLANA_CLUSTER"]);
+const NETWORK_OVERRIDE =
+  NetworkDetector.resolveNetworkInput(process.env["SOLANA_CLUSTER"]) ?? null;
 const NETWORK: SolanaNetwork =
   NETWORK_OVERRIDE ?? NetworkDetector.detectNetwork(RPC_URL);
 const NETWORK_DISPLAY_NAME = NetworkDetector.getNetworkDisplayName(NETWORK);
-
-const resolveMinAmount = (envKey: string, fallback: bigint): bigint => {
-  const rawValue = process.env[envKey]?.trim();
-  if (!rawValue) return fallback;
-
-  try {
-    const parsed = BigInt(rawValue);
-    if (parsed < 0n) {
-      throw new Error(
-        `${envKey} must be a non-negative integer, received ${rawValue}`
-      );
-    }
-    return parsed;
-  } catch (error) {
-    throw new Error(
-      `${envKey} must be a valid integer value, received ${rawValue}: ${error}`
-    );
-  }
-};
 
 const CONFIG = {
   RPC_URL,
@@ -103,10 +78,12 @@ const TOKEN_CONFIGS: TokenInitTarget[] = getSupportedTokens().map((token) => {
   return {
     tokenMint: resolveEnvPath(process.env[mintEnvKey], token.mint),
     tokenTicker: resolveEnvPath(process.env[tickerEnvKey], token.ticker),
-    defaultMinAmount: resolveMinAmount(
-      minAmountEnvKey,
-      defaultMinAmountForTicker(tickerUpper)
-    ),
+    defaultMinAmount: readBigIntEnv({
+      key: minAmountEnvKey,
+      fallback: defaultMinAmountForTicker(tickerUpper),
+      min: 0n,
+      description: `${tickerUpper} default min amount`,
+    })!,
   };
 });
 
@@ -182,6 +159,70 @@ type TokenInitializationResult =
 // ================================
 // UTILITY FUNCTIONS
 // ================================
+
+
+type GameVaultAtaPlan = {
+  address: PublicKey;
+  needsCreation: boolean;
+  rentLamports: bigint;
+  instructions: TransactionInstruction[];
+};
+
+const prepareGameVaultAtaPlan = async ({
+  connection,
+  mint,
+  mintAccount,
+  mintProgramId,
+  gameVaultPda,
+  adminKeypair,
+}: {
+  connection: Connection;
+  mint: PublicKey;
+  mintAccount: AccountInfo<Buffer>;
+  mintProgramId: PublicKey;
+  gameVaultPda: PublicKey;
+  adminKeypair: Keypair;
+}): Promise<GameVaultAtaPlan> => {
+  const address = await getAssociatedTokenAddress(
+    mint,
+    gameVaultPda,
+    true,
+    mintProgramId,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  );
+
+  const existingAccount = await connection.getAccountInfo(address);
+  if (existingAccount) {
+    return {
+      address,
+      needsCreation: false,
+      rentLamports: 0n,
+      instructions: [],
+    };
+  }
+
+  const mintState = unpackMint(mint, mintAccount, mintProgramId);
+  const ataSpace = getAccountLenForMint(mintState);
+  const rentLamports = BigInt(
+    await connection.getMinimumBalanceForRentExemption(ataSpace)
+  );
+
+  const instruction = createAssociatedTokenAccountInstruction(
+    adminKeypair.publicKey,
+    address,
+    gameVaultPda,
+    mint,
+    mintProgramId,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  );
+
+  return {
+    address,
+    needsCreation: true,
+    rentLamports,
+    instructions: [instruction],
+  };
+};
 
 
 const lamportsToSol = (lamports: bigint): number =>
@@ -269,36 +310,24 @@ const estimateInitializationCosts = async (
     );
     const mintProgramId = mintAccount.owner;
 
-    const gameTokenAccount = await getAssociatedTokenAddress(
+    const ataPlan = await prepareGameVaultAtaPlan({
+      connection,
       mint,
+      mintAccount,
+      mintProgramId,
       gameVaultPda,
-      true,
-      mintProgramId
-    );
+      adminKeypair,
+    });
+    const gameTokenAccount = ataPlan.address;
+    const needsVaultAta = ataPlan.needsCreation;
 
-    let needsVaultAta = false;
-    const gameTokenAccountInfo = await connection.getAccountInfo(
-      gameTokenAccount
-    );
-    if (!gameTokenAccountInfo) {
-      needsVaultAta = true;
-      const mintState = unpackMint(mint, mintAccount, mintProgramId);
-      const ataSpace = getAccountLenForMint(mintState);
-      const ataRent =
-        await connection.getMinimumBalanceForRentExemption(ataSpace);
-      rentLamportsParts.push(BigInt(ataRent));
+    if (needsVaultAta) {
+      rentLamportsParts.push(ataPlan.rentLamports);
 
-      const createAtaIx = createAssociatedTokenAccountInstruction(
-        adminKeypair.publicKey,
-        gameTokenAccount,
-        gameVaultPda,
-        mint,
-        mintProgramId
-      );
       const createAtaTx = new Transaction({
         feePayer: adminKeypair.publicKey,
         recentBlockhash: blockhash,
-      }).add(createAtaIx);
+      }).add(...ataPlan.instructions);
       const ataFeeResponse = await connection.getFeeForMessage(
         createAtaTx.compileMessage()
       );
@@ -486,54 +515,40 @@ async function initializeToken(
   }
 
   // Create Associated Token Account for game vault
-  const gameTokenAccount = await getAssociatedTokenAddress(
+  const ataPlan = await prepareGameVaultAtaPlan({
+    connection,
     mint,
+    mintAccount,
+    mintProgramId,
     gameVaultPda,
-    true, // allowOwnerOffCurve
-    mintProgramId
-  );
+    adminKeypair,
+  });
+  const gameTokenAccount = ataPlan.address;
   console.log(
     `🏪 ${tokenTicker} Game Token Account (ATA): ${gameTokenAccount.toBase58()}`
   );
 
-  // Check if the ATA already exists, if not create it
-  try {
-    const accountInfo = await connection.getAccountInfo(gameTokenAccount);
-    if (!accountInfo) {
-      console.log(
-        `🔧 Creating Associated Token Account for ${tokenTicker} game vault...`
-      );
+  if (ataPlan.needsCreation) {
+    console.log(
+      `🔧 Creating Associated Token Account for ${tokenTicker} game vault...`
+    );
 
-      // Create the ATA instruction
-      const createAtaIx = createAssociatedTokenAccountInstruction(
-        adminKeypair.publicKey, // payer
-        gameTokenAccount, // ata
-        gameVaultPda, // owner
-        mint, // mint
-        mintProgramId
-      );
+    const createAtaTx = new Transaction().add(...ataPlan.instructions);
+    createAtaTx.recentBlockhash = (
+      await connection.getLatestBlockhash()
+    ).blockhash;
+    createAtaTx.feePayer = adminKeypair.publicKey;
 
-      // Send the ATA creation transaction
-      const createAtaTx = new Transaction().add(createAtaIx);
-      createAtaTx.recentBlockhash = (
-        await connection.getLatestBlockhash()
-      ).blockhash;
-      createAtaTx.feePayer = adminKeypair.publicKey;
-
-      const createAtaTxSignature = await connection.sendTransaction(
-        createAtaTx,
-        [adminKeypair]
-      );
-      await connection.confirmTransaction(createAtaTxSignature, "confirmed");
-      console.log(
-        `✅ ${tokenTicker} ATA created! Transaction: ${createAtaTxSignature}`
-      );
-    } else {
-      console.log(`✅ ${tokenTicker} ATA already exists`);
-    }
-  } catch (ataError) {
-    console.error(`❌ Error creating ${tokenTicker} ATA:`, ataError);
-    throw ataError;
+    const createAtaTxSignature = await connection.sendTransaction(
+      createAtaTx,
+      [adminKeypair]
+    );
+    await connection.confirmTransaction(createAtaTxSignature, "confirmed");
+    console.log(
+      `✅ ${tokenTicker} ATA created! Transaction: ${createAtaTxSignature}`
+    );
+  } else {
+    console.log(`✅ ${tokenTicker} ATA already exists`);
   }
 
   // Initialize game token

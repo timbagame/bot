@@ -12,6 +12,7 @@ import {
 import * as fs from "fs";
 import * as path from "path";
 import { NetworkDetector } from "../src/utils/network-detector";
+import { loadKeypairFromPath } from "./utils/keypairs";
 
 // ================================
 // CONFIGURATION
@@ -49,18 +50,15 @@ async function createTimbaToken() {
   // Load or create mint authority
   let mintAuthority: Keypair;
   try {
-    // Try to load existing admin keypair
-    if (fs.existsSync(CONFIG.ADMIN_KEYPAIR_PATH)) {
-      const adminKeypairData = JSON.parse(
-        fs.readFileSync(CONFIG.ADMIN_KEYPAIR_PATH, "utf-8")
-      );
-      mintAuthority = Keypair.fromSecretKey(new Uint8Array(adminKeypairData));
-      console.log("✅ Loaded admin keypair as mint authority");
-    } else {
-      throw new Error("Admin keypair not found");
-    }
+    mintAuthority = loadKeypairFromPath(CONFIG.ADMIN_KEYPAIR_PATH);
+    console.log("✅ Loaded admin keypair as mint authority");
   } catch (error) {
-    console.log("⚠️  Admin keypair not found, creating new mint authority...");
+    console.log(
+      "⚠️  Admin keypair not found or failed to load, creating new mint authority..."
+    );
+    if (error instanceof Error) {
+      console.log(`   Reason: ${error.message}`);
+    }
     mintAuthority = Keypair.generate();
 
     // Request airdrop for the new keypair
