@@ -1,3 +1,5 @@
+import { formatAmount } from "./format-amount";
+
 const decimalAmountPattern = /^(?:\d+\.?\d*|\.\d+)$/;
 
 export interface ParseDecimalAmountNumberOptions {
@@ -102,4 +104,182 @@ export const parseTradeAmountInput = (amount: string): TradeAmountParseResult =>
   }
 
   return { kind: "absolute", normalized: trimmed };
+};
+
+export interface TradeTokenBalanceSnapshot {
+  balance: number;
+  decimals: number;
+}
+
+export interface EvaluateTradeAmountParams {
+  amount: string;
+  assetTicker: string;
+  decimals: number;
+  solBalance: number;
+  tokenBalance?: TradeTokenBalanceSnapshot;
+  applySolFeeBuffer?: boolean;
+  solFeeBufferLamports?: number;
+  insufficientSolForFeesMessage?: string;
+  insufficientSolBalanceMessage?: string;
+  formatSol?: (lamports: number) => string;
+  formatToken?: (amount: number, decimals: number) => string;
+}
+
+export interface EvaluateTradeAmountResult {
+  kind: "max" | "percentage" | "absolute";
+  rawAmount: number;
+  displayAmount?: string;
+  normalizedAmount?: string;
+}
+
+export const evaluateTradeAmount = ({
+  amount,
+  assetTicker,
+  decimals,
+  solBalance,
+  tokenBalance,
+  applySolFeeBuffer = false,
+  solFeeBufferLamports = 0,
+  insufficientSolForFeesMessage = "Not enough SOL to cover purchase and fees",
+  insufficientSolBalanceMessage = applySolFeeBuffer
+    ? "Insufficient SOL balance for this purchase"
+    : "Insufficient SOL balance",
+  formatSol,
+  formatToken,
+}: EvaluateTradeAmountParams): EvaluateTradeAmountResult => {
+  const parsed = parseTradeAmountInput(amount);
+  const isSolAsset = assetTicker === "SOL";
+
+  const ensureTokenBalance = (): TradeTokenBalanceSnapshot => {
+    if (!tokenBalance || tokenBalance.balance <= 0) {
+      throw new Error(`No ${assetTicker} balance found`);
+    }
+    return tokenBalance;
+  };
+
+  const resolveSolSpendable = (): number => {
+    const spendable = applySolFeeBuffer
+      ? Math.max(0, solBalance - solFeeBufferLamports)
+      : solBalance;
+
+    if (spendable <= 0) {
+      throw new Error(insufficientSolForFeesMessage);
+    }
+
+    return spendable;
+  };
+
+  const formatDisplay = (
+    rawAmount: number,
+    decimalsOverride?: number
+  ): string | undefined => {
+    if (isSolAsset) {
+      return formatSol ? formatSol(rawAmount) : undefined;
+    }
+
+    const tokenDecimals =
+      decimalsOverride ?? tokenBalance?.decimals ?? decimals;
+    return formatToken ? formatToken(rawAmount, tokenDecimals) : undefined;
+  };
+
+  if (parsed.kind === "max") {
+    if (isSolAsset) {
+      const spendableLamports = resolveSolSpendable();
+      return {
+        kind: "max",
+        rawAmount: spendableLamports,
+        displayAmount: formatDisplay(spendableLamports),
+        normalizedAmount: "max",
+      };
+    }
+
+    const balance = ensureTokenBalance();
+    const rawAmount = Math.floor(balance.balance);
+
+    if (rawAmount <= 0) {
+      throw new Error(`No ${assetTicker} balance found`);
+    }
+
+    return {
+      kind: "max",
+      rawAmount,
+      displayAmount: formatDisplay(rawAmount, balance.decimals),
+      normalizedAmount: "max",
+    };
+  }
+
+  if (parsed.kind === "percentage") {
+    const fraction = parsed.percentage / 100;
+
+    if (isSolAsset) {
+      const spendableLamports = resolveSolSpendable();
+      const rawAmount = Math.floor(spendableLamports * fraction);
+
+      if (rawAmount <= 0) {
+        throw new Error("Percentage results in zero amount");
+      }
+
+      const formatted = formatAmount(rawAmount, decimals, {
+        maxFractionDigits: decimals,
+        trim: true,
+      });
+
+      return {
+        kind: "percentage",
+        rawAmount,
+        displayAmount: formatDisplay(rawAmount),
+        normalizedAmount: formatted,
+      };
+    }
+
+    const balance = ensureTokenBalance();
+    const rawAmount = Math.floor(balance.balance * fraction);
+
+    if (rawAmount <= 0) {
+      throw new Error("Percentage results in zero amount");
+    }
+
+    const formatted = formatAmount(rawAmount, balance.decimals, {
+      maxFractionDigits: balance.decimals,
+      trim: true,
+    });
+
+    return {
+      kind: "percentage",
+      rawAmount,
+      displayAmount:
+        formatToken?.(rawAmount, balance.decimals) ?? formatted,
+      normalizedAmount: formatted,
+    };
+  }
+
+  const rawAmount = parseDecimalAmount(parsed.normalized, decimals, {
+    returnType: "number",
+  });
+
+  if (isSolAsset) {
+    const feeBuffer = applySolFeeBuffer ? solFeeBufferLamports : 0;
+    if (rawAmount + feeBuffer > solBalance) {
+      throw new Error(insufficientSolBalanceMessage);
+    }
+
+    return {
+      kind: "absolute",
+      rawAmount,
+      displayAmount: formatDisplay(rawAmount),
+      normalizedAmount: parsed.normalized,
+    };
+  }
+
+  const balance = ensureTokenBalance();
+  if (rawAmount > balance.balance) {
+    throw new Error("Insufficient token balance");
+  }
+
+  return {
+    kind: "absolute",
+    rawAmount,
+    displayAmount: formatDisplay(rawAmount, balance.decimals),
+    normalizedAmount: parsed.normalized,
+  };
 };

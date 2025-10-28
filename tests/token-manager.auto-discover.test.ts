@@ -15,6 +15,11 @@ beforeEach(() => {
 function makeWalletStub() {
   return {
     getTokenMetadata: async (_mint: string) => ({ decimals: 6 }),
+    getFullTokenMetadata: async (_mint: string) => ({
+      decimals: 6,
+      symbol: "DISC",
+      name: "Discovered Token",
+    }),
     formatTokenBalance: (amount: number, decimals: number) => {
       const v = amount / Math.pow(10, decimals);
       return v.toFixed(6).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
@@ -29,7 +34,7 @@ test("autoDiscoverTokenInfo returns TOKEN_ prefix for non pump.fun", async () =>
   // Valid base58 to trigger potential pump.fun check, but will not be detected
   const mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
   const res = await tm.autoDiscoverTokenInfo(mint);
-  expect(res?.ticker?.startsWith("TOKEN_")).toBe(true);
+  expect(res?.ticker).toBe("DISC");
   expect(res?.decimals).toBe(6);
 });
 

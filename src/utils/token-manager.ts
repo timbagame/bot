@@ -5,6 +5,7 @@ import { WalletManager } from "./wallet";
 import { PumpFunClient, isPotentialPumpFunToken } from "./pump-fun";
 import type { ParseAmountResult, ChatTokenConfig, KnownToken } from "../types";
 import { TOKENS_LIST, WSOL_MINT } from "./constants";
+import { parseDecimalAmount } from "./amount";
 import { createSingleton } from "./singleton";
 
 const BUILTIN_TOKEN_MINTS: Record<string, string> = (() => {
@@ -19,6 +20,19 @@ const BUILTIN_TOKEN_MINTS: Record<string, string> = (() => {
 
   return map;
 })();
+
+const SWAP_BUILTIN_TOKENS: Record<
+  string,
+  { mint: string; ticker: string; decimals: number; isNativeSol?: boolean }
+> = {
+  SOL: { mint: WSOL_MINT, ticker: "SOL", decimals: 9, isNativeSol: true },
+  WSOL: { mint: WSOL_MINT, ticker: "WSOL", decimals: 9 },
+  USDC: {
+    mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    ticker: "USDC",
+    decimals: 6,
+  },
+};
 
 // ================================
 // MULTI-TOKEN MANAGER
@@ -191,21 +205,25 @@ export class TokenManager {
       }
     }
 
-    const rawAmount = parseFloat(amountArg);
-    if (isNaN(rawAmount) || rawAmount <= 0) {
-      return { success: false, error: "invalid_amount" };
-    }
-
     let amount: number;
     let formattedAmount: string;
 
-    if (isSol || requestedNativeSol) {
-      amount = rawAmount * 1_000_000_000; // LAMPORTS_PER_SOL
-      formattedAmount = this.wallet.formatSolBalance(amount) + " SOL";
-    } else {
-      const metadata = await this.wallet.getTokenMetadata(resolvedTokenMint);
-      amount = rawAmount * Math.pow(10, metadata.decimals);
-      formattedAmount = this.wallet.formatTokenBalance(amount, metadata.decimals) + " " + resolvedTokenTicker;
+    try {
+      if (isSol || requestedNativeSol) {
+        amount = parseDecimalAmount(amountArg, 9, { returnType: "number" });
+        formattedAmount = `${this.wallet.formatSolBalance(amount)} SOL`;
+      } else {
+        const metadata = await this.wallet.getTokenMetadata(resolvedTokenMint);
+        amount = parseDecimalAmount(amountArg, metadata.decimals, {
+          returnType: "number",
+        });
+        formattedAmount =
+          this.wallet.formatTokenBalance(amount, metadata.decimals) +
+          " " +
+          resolvedTokenTicker;
+      }
+    } catch {
+      return { success: false, error: "invalid_amount" };
     }
 
     return {
@@ -402,31 +420,124 @@ export class TokenManager {
     tokenMint: string
   ): Promise<{ ticker: string; decimals: number; isPumpFun?: boolean } | null> {
     try {
-      const metadata = await this.wallet.getTokenMetadata(tokenMint);
+      const metadata = await this.wallet.getFullTokenMetadata(tokenMint);
       if (!metadata) {
         return null;
       }
 
-      // Check if it's a pump.fun token
+      let symbol = metadata.symbol?.trim();
+      let decimals = metadata.decimals ?? 0;
       let isPumpFun = false;
+
       if (isPotentialPumpFunToken(tokenMint)) {
         const pumpInfo = await this.getPumpFunClient().isPumpFunToken(tokenMint);
         isPumpFun = pumpInfo.isPumpFun && !pumpInfo.isGraduated;
+
+        if (!symbol) {
+          try {
+            const pumpMetadata = await this.getPumpFunClient().getTokenMetadata(
+              tokenMint
+            );
+            if (pumpMetadata?.symbol) {
+              symbol = pumpMetadata.symbol;
+              decimals = pumpMetadata.decimals;
+            }
+          } catch (pumpMetadataError) {
+            console.warn(
+              `Failed to fetch pump.fun metadata for ${tokenMint}:`,
+              pumpMetadataError
+            );
+          }
+        }
       }
 
-      // For auto-discovery, we could add more logic here to fetch token name/symbol
-      // For now, we'll use a simple format
-      const shortMint = tokenMint.slice(0, 8).toUpperCase();
-      const ticker = isPumpFun ? `PUMP_${shortMint}` : `TOKEN_${shortMint}`;
+      if (!symbol || symbol.length === 0) {
+        symbol = tokenMint.slice(0, 6).toUpperCase();
+      }
+
+      if (!Number.isFinite(decimals) || decimals < 0) {
+        const basic = await this.wallet.getTokenMetadata(tokenMint);
+        decimals = basic.decimals;
+      }
 
       return {
-        ticker,
-        decimals: metadata.decimals,
+        ticker: symbol.toUpperCase(),
+        decimals,
         isPumpFun,
       };
     } catch {
       return null;
     }
+  }
+
+  public async resolveSwapToken(
+    tickerOrMint: string
+  ): Promise<
+    (KnownToken & {
+      isPumpFun?: boolean;
+      isNativeSol?: boolean;
+      newlyDiscovered?: boolean;
+    })
+    | null
+  > {
+    const candidate = tickerOrMint.trim();
+    if (!candidate) {
+      return null;
+    }
+
+    const upper = candidate.toUpperCase();
+    const builtin = SWAP_BUILTIN_TOKENS[upper];
+    if (builtin) {
+      return {
+        token_mint: builtin.mint,
+        token_ticker: builtin.ticker,
+        decimals: builtin.decimals,
+        added_at: Date.now(),
+        isNativeSol: builtin.isNativeSol,
+      };
+    }
+
+    const knownByTicker = this.tokenDb.getKnownTokenByTicker(upper);
+    if (knownByTicker) {
+      return knownByTicker;
+    }
+
+    let normalizedMint: string | null = null;
+    try {
+      normalizedMint = new PublicKey(candidate).toBase58();
+    } catch {
+      normalizedMint = null;
+    }
+
+    if (!normalizedMint) {
+      const knownByMint = this.tokenDb.getKnownTokenByMint(candidate);
+      if (knownByMint) {
+        return knownByMint;
+      }
+      return null;
+    }
+
+    const knownMint = this.tokenDb.getKnownTokenByMint(normalizedMint);
+    if (knownMint) {
+      return knownMint;
+    }
+
+    const discovered = await this.autoDiscoverTokenInfo(normalizedMint);
+    if (!discovered) {
+      return null;
+    }
+
+    const ticker = discovered.ticker.toUpperCase();
+    this.tokenDb.addKnownToken(normalizedMint, ticker, discovered.decimals);
+
+    return {
+      token_mint: normalizedMint,
+      token_ticker: ticker,
+      decimals: discovered.decimals,
+      added_at: Date.now(),
+      isPumpFun: discovered.isPumpFun,
+      newlyDiscovered: true,
+    };
   }
 
   // ================================

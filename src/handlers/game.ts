@@ -1,5 +1,5 @@
 import type { Context } from "grammy";
-import { requireTelegramId, MissingTelegramIdError } from "../utils/context-helpers";
+import { getRequiredTelegramIdForContext } from "../utils/context-helpers";
 
 export type CoinflipDeps = {
   isGroupChat: (ctx: Context) => boolean;
@@ -23,17 +23,12 @@ export async function handleCoinflipCommand(
     return;
   }
 
-  let telegramId: bigint;
-  try {
-    telegramId = requireTelegramId(ctx, "coinflip command");
-  } catch (error) {
-    if (error instanceof MissingTelegramIdError) {
-      await ctx.reply(
-        "❌ Unable to resolve your Telegram identity. Please open a direct chat with the bot and try again."
-      );
-      return;
-    }
-    throw error;
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    "coinflip command"
+  );
+  if (telegramId == null) {
+    return;
   }
   const args = ctx.message?.text?.split(" ");
 
