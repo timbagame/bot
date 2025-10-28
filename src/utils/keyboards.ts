@@ -215,65 +215,34 @@ export const createAmountSelectionKeyboard = (
   return keyboard;
 };
 
+const PLAYER_SELECTION_LAYOUTS: Record<string, number[][]> = {
+  coinflip: [
+    [2, 3, 4],
+    [5, 6, 8],
+  ],
+  giveaway: [
+    [2, 3, 5],
+    [10, 15, 20],
+  ],
+};
+
 export const createPlayerSelectionKeyboard = (gameType: string, amount: string, creatorId?: string): InlineKeyboard => {
   const keyboard = new InlineKeyboard();
-  
-  if (gameType === "coinflip") {
-    keyboard
-      .text(
-        "👥 2 Players",
-        withCreatorSuffix(`players_${gameType}_${amount}_2`, creatorId)
-      )
-      .text(
-        "👥 3 Players",
-        withCreatorSuffix(`players_${gameType}_${amount}_3`, creatorId)
-      )
-      .text(
-        "👥 4 Players",
-        withCreatorSuffix(`players_${gameType}_${amount}_4`, creatorId)
-      )
-      .row()
-      .text(
-        "👥 5 Players",
-        withCreatorSuffix(`players_${gameType}_${amount}_5`, creatorId)
-      )
-      .text(
-        "👥 6 Players",
-        withCreatorSuffix(`players_${gameType}_${amount}_6`, creatorId)
-      )
-      .text(
-        "👥 8 Players",
-        withCreatorSuffix(`players_${gameType}_${amount}_8`, creatorId)
-      )
-      .row();
-  } else if (gameType === "giveaway") {
-    keyboard
-      .text(
-        "👥 2 Players",
-        withCreatorSuffix(`players_${gameType}_${amount}_2`, creatorId)
-      )
-      .text(
-        "👥 3 Players",
-        withCreatorSuffix(`players_${gameType}_${amount}_3`, creatorId)
-      )
-      .text(
-        "👥 5 Players",
-        withCreatorSuffix(`players_${gameType}_${amount}_5`, creatorId)
-      )
-      .row()
-      .text(
-        "👥 10 Players",
-        withCreatorSuffix(`players_${gameType}_${amount}_10`, creatorId)
-      )
-      .text(
-        "👥 15 Players",
-        withCreatorSuffix(`players_${gameType}_${amount}_15`, creatorId)
-      )
-      .text(
-        "👥 20 Players",
-        withCreatorSuffix(`players_${gameType}_${amount}_20`, creatorId)
-      )
-      .row();
+  const layout = PLAYER_SELECTION_LAYOUTS[gameType] ?? [];
+
+  for (const row of layout) {
+    if (!Array.isArray(row) || row.length === 0) {
+      continue;
+    }
+
+    for (const count of row) {
+      keyboard.text(
+        `👥 ${count} Players`,
+        withCreatorSuffix(`players_${gameType}_${amount}_${count}`, creatorId)
+      );
+    }
+
+    keyboard.row();
   }
 
   keyboard

@@ -50,6 +50,7 @@ import {
   buildWalletCaption,
   buildWalletActionMenu,
   showCustomAmountPrompt,
+  upsertWalletMenuMessage,
   type WalletActionQuickActions,
   type WalletActionMenuBalances,
 } from "./utils/wallet-ui";
@@ -99,7 +100,7 @@ import {
 import { respondWithMenu } from "./utils/menu-response";
 import { parseDecimalAmount, evaluateTradeAmount } from "./utils/amount";
 import { handleCoinflipCommand, type CoinflipDeps } from "./handlers/game";
-import { isMessageMissing, shouldFallbackToReply } from "./utils/telegram-errors";
+import { isMessageMissing } from "./utils/telegram-errors";
 
 // ================================
 // GLOBAL INSTANCES
@@ -618,6 +619,36 @@ const buildQuickAmountKeyboard = ({
 };
 
 export const __test_buildQuickAmountKeyboard = buildQuickAmountKeyboard;
+
+type WalletBalanceEntry = {
+  ticker: string;
+  balance: number;
+  decimals: number;
+};
+
+const resolveFormattedBalance = (
+  ticker: string,
+  solBalance: number,
+  tokenBalances: WalletBalanceEntry[]
+): { decimalBalance: number; formattedBalance: string } => {
+  if (ticker === "SOL") {
+    return {
+      decimalBalance: solBalance / LAMPORTS_PER_SOL,
+      formattedBalance: wallet.formatSolBalance(solBalance),
+    };
+  }
+
+  const entry = tokenBalances.find((token) => token?.ticker === ticker);
+  if (!entry) {
+    return { decimalBalance: 0, formattedBalance: "0" };
+  }
+
+  const decimalBalance = entry.balance / Math.pow(10, entry.decimals);
+  return {
+    decimalBalance,
+    formattedBalance: wallet.formatTokenBalance(entry.balance, entry.decimals),
+  };
+};
 
 type TradeKind = "buy" | "sell" | "swap";
 
@@ -8452,23 +8483,8 @@ const showSwapAmountSelection = async (
   // Get balance for the FROM token
   const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
 
-  let balanceDecimal = 0;
-  let formattedBalance = "0";
-
-  if (fromToken === "SOL") {
-    balanceDecimal = solBalance / LAMPORTS_PER_SOL;
-    formattedBalance = wallet.formatSolBalance(solBalance);
-  } else {
-    const tokenBalance = tokenBalances.find((t) => t.ticker === fromToken);
-    if (tokenBalance) {
-      balanceDecimal =
-        tokenBalance.balance / Math.pow(10, tokenBalance.decimals);
-      formattedBalance = wallet.formatTokenBalance(
-        tokenBalance.balance,
-        tokenBalance.decimals
-      );
-    }
-  }
+  const { decimalBalance: balanceDecimal, formattedBalance } =
+    resolveFormattedBalance(fromToken, solBalance, tokenBalances);
 
   const response = [
     `💱 <b>SWAP AMOUNT</b>`,
@@ -8866,23 +8882,8 @@ const buildBuyAmountSelectionUI = async (
 ) => {
   const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
 
-  let balanceDecimal = 0;
-  let formattedBalance = "0";
-
-  if (paymentToken === "SOL") {
-    balanceDecimal = solBalance / LAMPORTS_PER_SOL;
-    formattedBalance = wallet.formatSolBalance(solBalance);
-  } else {
-    const tokenBalance = tokenBalances.find((t) => t.ticker === paymentToken);
-    if (tokenBalance) {
-      balanceDecimal =
-        tokenBalance.balance / Math.pow(10, tokenBalance.decimals);
-      formattedBalance = wallet.formatTokenBalance(
-        tokenBalance.balance,
-        tokenBalance.decimals
-      );
-    }
-  }
+  const { decimalBalance: balanceDecimal, formattedBalance } =
+    resolveFormattedBalance(paymentToken, solBalance, tokenBalances);
 
   const response = [
     `🟢 <b>BUY ${targetToken}</b>`,
@@ -9294,45 +9295,43 @@ const handleCustomAmountInput = async (
   const messageText = response.join("\n");
   const keyboard = new InlineKeyboard().text("❌ Cancel", `send_select_${token}`).row();
 
-  const chatId = ctx.chat?.id;
-  let targetMessageId = userState.messageId;
+  const targetChatId =
+    typeof userState.chatId === "number"
+      ? userState.chatId
+      : typeof ctx.chat?.id === "number"
+      ? ctx.chat.id
+      : undefined;
+  const targetMessageId =
+    typeof userState.messageId === "number" ? userState.messageId : undefined;
 
-  if (chatId === undefined || targetMessageId === undefined) {
-    const sentMessage = await ctx.reply(messageText, {
-      parse_mode: "HTML",
-      reply_markup: keyboard,
-    });
-    targetMessageId = sentMessage.message_id;
-  } else {
-    try {
-      await ctx.api.editMessageText(chatId, targetMessageId, messageText, {
-        parse_mode: "HTML",
-        reply_markup: keyboard,
-      });
-    } catch (error) {
-      console.warn(
-        "handleCustomAmountInput: editMessageText failed, replying instead:",
-        error
-      );
-      const sentMessage = await ctx.reply(messageText, {
-        parse_mode: "HTML",
-        reply_markup: keyboard,
-      });
-      targetMessageId = sentMessage.message_id;
-    }
-  }
+  const menuResult = await upsertWalletMenuMessage({
+    ctx,
+    text: messageText,
+    keyboard,
+    parseMode: "HTML",
+    targetChatId,
+    targetMessageId,
+    replyToMessageId: ctx.message?.message_id ?? undefined,
+    logLabel: "handleCustomAmountInput",
+  });
 
-  if (getTelegramId(ctx) === 0n) {
+  if (telegramId === 0n) {
     return;
   }
 
-  setUserState(getTelegramId(ctx).toString(), {
+  const resolvedMessageId = menuResult.messageId ?? targetMessageId;
+  const resolvedChatId =
+    menuResult.chatId ??
+    targetChatId ??
+    (typeof ctx.chat?.id === "number" ? ctx.chat.id : undefined);
+
+  setUserState(telegramId.toString(), {
     type: "send_address",
     token,
     amount: storedAmount,
     amountDisplay: displayLabel,
-    messageId: targetMessageId,
-    chatId: ctx.chat?.id,
+    messageId: resolvedMessageId,
+    chatId: resolvedChatId,
   });
 };
 
@@ -9385,33 +9384,25 @@ const handleAddressInput = async (
     .text("❌ Cancel", `send_select_${token}`)
     .row();
 
-  const chatId = ctx.chat?.id;
+  const targetChatId =
+    typeof userState.chatId === "number"
+      ? userState.chatId
+      : typeof ctx.chat?.id === "number"
+      ? ctx.chat.id
+      : undefined;
   const targetMessageId =
     typeof userState.messageId === "number" ? userState.messageId : undefined;
 
-  if (chatId === undefined || targetMessageId === undefined) {
-    await ctx.reply(messageText, {
-      parse_mode: "HTML",
-      reply_markup: keyboard,
-    });
-    return;
-  }
-
-  try {
-    await ctx.api.editMessageText(chatId, targetMessageId, messageText, {
-      parse_mode: "HTML",
-      reply_markup: keyboard,
-    });
-  } catch (error) {
-    console.warn(
-      "handleAddressInput: editMessageText failed, replying instead:",
-      error
-    );
-    await ctx.reply(messageText, {
-      parse_mode: "HTML",
-      reply_markup: keyboard,
-    });
-  }
+  await upsertWalletMenuMessage({
+    ctx,
+    text: messageText,
+    keyboard,
+    parseMode: "HTML",
+    targetChatId,
+    targetMessageId,
+    replyToMessageId: ctx.message?.message_id ?? undefined,
+    logLabel: "handleAddressInput",
+  });
 };
 
 /**
@@ -9456,50 +9447,28 @@ const handleWrapAmountInput = async (
   const targetMessageId =
     typeof userState.messageId === "number" ? userState.messageId : undefined;
 
-  if (targetChatId && targetMessageId) {
-    try {
-      await ctx.api.editMessageText(targetChatId, targetMessageId, messageText, {
-        parse_mode: "HTML",
-        reply_markup: keyboard,
-      });
-
-      if (userId) {
-        setUserState(userId, {
-          type: "wrap_custom_amount",
-          chatId: targetChatId,
-          messageId: targetMessageId,
-        });
-      }
-
-      return;
-    } catch (error) {
-      if (!shouldFallbackToReply(error)) {
-        throw error;
-      }
-
-      console.warn(
-        "handleWrapAmountInput: editMessageText failed, replying instead:",
-        error
-      );
-    }
-  }
-
-  const fallbackMessage = await ctx.reply(messageText, {
-    parse_mode: "HTML",
-    reply_markup: keyboard,
+  const menuResult = await upsertWalletMenuMessage({
+    ctx,
+    text: messageText,
+    keyboard,
+    parseMode: "HTML",
+    targetChatId,
+    targetMessageId,
+    replyToMessageId: ctx.message?.message_id ?? undefined,
+    logLabel: "handleWrapAmountInput",
   });
 
   if (userId) {
+    const resolvedChatId =
+      menuResult.chatId ??
+      targetChatId ??
+      (typeof ctx.chat?.id === "number" ? ctx.chat.id : undefined);
+    const resolvedMessageId = menuResult.messageId ?? targetMessageId;
+
     setUserState(userId, {
       type: "wrap_custom_amount",
-      chatId:
-        typeof fallbackMessage?.chat?.id === "number"
-          ? fallbackMessage.chat.id
-          : targetChatId,
-      messageId:
-        typeof fallbackMessage?.message_id === "number"
-          ? fallbackMessage.message_id
-          : undefined,
+      chatId: resolvedChatId,
+      messageId: resolvedMessageId,
     });
   }
 };

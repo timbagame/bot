@@ -4,6 +4,7 @@ import { INPUT_TIMEOUT_HINT, LAMPORTS_PER_SOL } from "./constants";
 import { respondWithMenu } from "./menu-response";
 import { setUserState } from "./user-state";
 import { NetworkDetector } from "./network-detector";
+import { isMessageNotModified, shouldFallbackToReply } from "./telegram-errors";
 
 export type TokenDisplayLine = {
   ticker: string;
@@ -271,6 +272,79 @@ export const showCustomAmountPrompt = async <State extends Record<string, unknow
   }
 
   setUserState(userId, derivedState);
+};
+
+export type WalletMenuUpsertOptions = {
+  ctx: Context;
+  text: string;
+  keyboard?: InlineKeyboard;
+  parseMode?: "HTML" | "Markdown" | "MarkdownV2";
+  targetChatId?: number;
+  targetMessageId?: number;
+  replyToMessageId?: number | null;
+  logLabel?: string;
+  allowContextEdit?: boolean;
+};
+
+export type WalletMenuUpsertResult = {
+  messageId?: number;
+  chatId?: number;
+  respondedWithReply: boolean;
+};
+
+export const upsertWalletMenuMessage = async ({
+  ctx,
+  text,
+  keyboard,
+  parseMode = "HTML",
+  targetChatId,
+  targetMessageId,
+  replyToMessageId,
+  logLabel = "wallet-menu",
+  allowContextEdit = false,
+}: WalletMenuUpsertOptions): Promise<WalletMenuUpsertResult> => {
+  if (
+    typeof targetChatId === "number" &&
+    typeof targetMessageId === "number"
+  ) {
+    try {
+      await ctx.api.editMessageText(targetChatId, targetMessageId, text, {
+        parse_mode: parseMode,
+        reply_markup: keyboard,
+      });
+      return {
+        messageId: targetMessageId,
+        chatId: targetChatId,
+        respondedWithReply: false,
+      };
+    } catch (error) {
+      if (isMessageNotModified(error)) {
+        return {
+          messageId: targetMessageId,
+          chatId: targetChatId,
+          respondedWithReply: false,
+        };
+      }
+
+      if (!shouldFallbackToReply(error)) {
+        throw error;
+      }
+
+      console.warn(`${logLabel}: editMessageText failed, replying instead:`, error);
+    }
+  }
+
+  const menuResult = await respondWithMenu(
+    ctx,
+    { text, keyboard, parseMode },
+    { replyToMessageId, skipEdit: !allowContextEdit }
+  );
+
+  return {
+    messageId: menuResult.messageId ?? undefined,
+    chatId: menuResult.chatId ?? undefined,
+    respondedWithReply: menuResult.respondedWithReply,
+  };
 };
 
 const shouldIncludeSol = (
