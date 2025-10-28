@@ -2155,7 +2155,8 @@ export class GameManager {
     }
 
     const { tokenMint, tokenTicker, amount } = parsedAmount;
-    const requestedSol = parsedAmount.requestedNativeSol === true;
+    const requestedSol =
+      parsedAmount.requestedNativeSol === true || tokenMint === WSOL_MINT;
 
     try {
       const metadata = await this.wallet.getTokenMetadata(tokenMint);
