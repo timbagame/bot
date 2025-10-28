@@ -4,7 +4,7 @@ import { INPUT_TIMEOUT_HINT, LAMPORTS_PER_SOL } from "./constants";
 import { respondWithMenu } from "./menu-response";
 import { setUserState } from "./user-state";
 import { NetworkDetector } from "./network-detector";
-import { shouldFallbackToReply } from "./telegram-errors";
+import { isMessageNotModified, shouldFallbackToReply } from "./telegram-errors";
 
 export type TokenDisplayLine = {
   ticker: string;
@@ -318,6 +318,14 @@ export const upsertWalletMenuMessage = async ({
         respondedWithReply: false,
       };
     } catch (error) {
+      if (isMessageNotModified(error)) {
+        return {
+          messageId: targetMessageId,
+          chatId: targetChatId,
+          respondedWithReply: false,
+        };
+      }
+
       if (!shouldFallbackToReply(error)) {
         throw error;
       }
