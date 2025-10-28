@@ -60,6 +60,15 @@ describe("Game callback guard", () => {
     ).toBe(true);
   });
 
+  test("skips wallet command callbacks", () => {
+    expect(
+      botModule.__test_shouldSkipGenericGameCallback("cmd_unwrap")
+    ).toBe(true);
+    expect(
+      botModule.__test_shouldSkipGenericGameCallback("unwrap_confirm")
+    ).toBe(true);
+  });
+
   test("continues handling for game callbacks", () => {
     expect(
       botModule.__test_shouldSkipGenericGameCallback("join_abcdef")
