@@ -174,15 +174,16 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
   try {
     try { clearWalletCache(telegramId); } catch {}
 
-    const dmTargetBigInt = getTelegramId(ctx);
+    const dmTargetBigInt = telegramId;
     if (dmTargetBigInt === 0n) {
       throw new Error("Unable to determine DM recipient");
     }
 
-    const dmTarget = Number(dmTargetBigInt);
+    const dmTarget = dmTargetBigInt.toString();
 
     const dmContext = {
       ...ctx,
+      from: ctx.from,
       chat: { id: dmTarget, type: "private" } as any,
       message: undefined,
       callbackQuery: undefined,

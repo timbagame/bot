@@ -1,5 +1,6 @@
 import { test, expect, mock } from "bun:test";
 import { onBalance } from "../src/handlers/wallet";
+import { getTelegramId } from "../src/utils/context-helpers";
 
 function makeCtx(privateChat: boolean) {
   const calls: any[] = [];
@@ -70,7 +71,7 @@ test("onBalance in group sends balance privately via showWalletUI", async () => 
   };
 
   const showWalletUI = mock(async (customCtx: any) => {
-    expect(customCtx.chat).toEqual({ id: 1, type: "private" });
+    expect(customCtx.chat).toEqual({ id: "1", type: "private" });
     expect(customCtx.callbackQuery).toBeUndefined();
     expect(typeof customCtx.reply).toBe("function");
 
@@ -88,10 +89,10 @@ test("onBalance in group sends balance privately via showWalletUI", async () => 
   expect(showWalletUI).toHaveBeenCalledTimes(1);
   expect(sendMessageCalls.length + sendVideoCalls.length).toBe(1);
   if (sendMessageCalls.length === 1) {
-    expect(sendMessageCalls[0].chatId).toBe(1);
+    expect(sendMessageCalls[0].chatId).toBe("1");
     expect(sendMessageCalls[0].options?.parse_mode).toBe("HTML");
   } else {
-    expect(sendVideoCalls[0].chatId).toBe(1);
+    expect(sendVideoCalls[0].chatId).toBe("1");
   }
 });
 
@@ -110,4 +111,28 @@ test("onBalance handles missing telegram id in group chat", async () => {
   expect(handleCommandError).toHaveBeenCalledTimes(1);
   const [, , action] = (handleCommandError.mock.calls[0] as any[]) ?? [];
   expect(action).toBe("balance");
+});
+
+test("onBalance DM context preserves original telegram id", async () => {
+  const ctx: any = makeCtx(false);
+  ctx.api = {
+    sendMessage: () => Promise.resolve({}),
+    sendVideo: () => Promise.resolve({}),
+  };
+
+  const showWalletUI = mock(async (customCtx: any) => {
+    expect(customCtx.from).toEqual(ctx.from);
+    expect(getTelegramId(customCtx)).toBe(1n);
+  });
+
+  await onBalance(ctx, {
+    isPrivateChat: () => false,
+    clearWalletCache: () => {},
+    showWalletUI,
+    handleCommandError: async () => {},
+  });
+
+  expect(showWalletUI).toHaveBeenCalledTimes(1);
+  const call = showWalletUI.mock.calls[0] as any[] | undefined;
+  expect(call?.[0]?.chat?.id).toBe("1");
 });
