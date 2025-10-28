@@ -1,11 +1,20 @@
-import { describe, test, expect, beforeEach } from "bun:test";
-import { Connection, Keypair, TransactionInstruction } from "@solana/web3.js";
+import { describe, test, expect, beforeEach, spyOn } from "bun:test";
+import {
+  Connection,
+  Keypair,
+  TransactionInstruction,
+  SystemProgram,
+  SystemInstruction,
+  PublicKey,
+} from "@solana/web3.js";
+import * as splToken from "@solana/spl-token";
 
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
 import {
   MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS,
   JIT_SWAP_FEE_BUFFER_LAMPORTS,
+  WSOL_MINT,
 } from "../src/utils/constants";
 
 describe("SwapManager.performJustInTimeSolSwap", () => {
@@ -79,6 +88,112 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
 
     expect(result.swapped).toBe(false);
     expect(result.error).toMatch(/Need/);
+  });
+
+  test("unwraps WSOL instead of swapping when token mint is SOL", async () => {
+    const wallet = WalletManager.createForTest(mnemonic, {
+      connection,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+    const admin = Keypair.generate();
+    (wallet as any).getAdminKeypair = () => admin;
+
+    const swapManager = new SwapManager(connection, wallet);
+    (swapManager as any).connection = {
+      getBalance: async () => 0,
+    };
+    (swapManager as any).getBestProvider = async () => {
+      throw new Error("Jupiter/Pump fun routing should be skipped for WSOL unwrap");
+    };
+
+    const sponsorCalls: number[] = [];
+    const refundCalls: number[] = [];
+    (swapManager as any).sponsorSwapFees = async (_kp: Keypair, lamports: number) => {
+      sponsorCalls.push(lamports);
+    };
+    (swapManager as any).refundSponsoredFees = async (_kp: Keypair, lamports: number) => {
+      refundCalls.push(lamports);
+    };
+
+    let unwrapRequests: number[] = [];
+    (swapManager as any).unwrapWsolPortion = async ({
+      unwrapLamports,
+    }: {
+      unwrapLamports: number;
+    }) => {
+      unwrapRequests.push(unwrapLamports);
+      return {
+        signature: "SIG_UNWRAP",
+        lamportsReceived: unwrapLamports,
+      };
+    };
+
+    const user = Keypair.generate();
+    const result = await swapManager.performJustInTimeSolSwap({
+      userKeypair: user,
+      tokenMint: WSOL_MINT,
+      tokenDecimals: 9,
+      availableTokenAmountRaw: MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS * 2,
+      tokenTicker: "SOL",
+    });
+
+    expect(result.swapped).toBe(true);
+    expect(result.provider).toBe("unwrap");
+    expect(result.signature).toBe("SIG_UNWRAP");
+    expect(result.lamportsReceived).toBe(
+      MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS + JIT_SWAP_FEE_BUFFER_LAMPORTS
+    );
+    expect(unwrapRequests).toEqual([
+      MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS + JIT_SWAP_FEE_BUFFER_LAMPORTS,
+    ]);
+    expect(sponsorCalls).toEqual([JIT_SWAP_FEE_BUFFER_LAMPORTS]);
+    expect(refundCalls).toEqual([JIT_SWAP_FEE_BUFFER_LAMPORTS]);
+  });
+
+  test("returns helpful error when WSOL unwrap attempts fail", async () => {
+    const wallet = WalletManager.createForTest(mnemonic, {
+      connection,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+    const admin = Keypair.generate();
+    (wallet as any).getAdminKeypair = () => admin;
+
+    const swapManager = new SwapManager(connection, wallet);
+    (swapManager as any).connection = {
+      getBalance: async () => 0,
+    };
+
+    const sponsorCalls: number[] = [];
+    const refundCalls: number[] = [];
+    (swapManager as any).sponsorSwapFees = async (_kp: Keypair, lamports: number) => {
+      sponsorCalls.push(lamports);
+    };
+    (swapManager as any).refundSponsoredFees = async (_kp: Keypair, lamports: number) => {
+      refundCalls.push(lamports);
+    };
+
+    let unwrapAttempts = 0;
+    (swapManager as any).unwrapWsolPortion = async () => {
+      unwrapAttempts += 1;
+      throw new Error("Unable to unwrap due to rent exempt requirement.");
+    };
+
+    const user = Keypair.generate();
+    const result = await swapManager.performJustInTimeSolSwap({
+      userKeypair: user,
+      tokenMint: WSOL_MINT,
+      tokenDecimals: 9,
+      availableTokenAmountRaw: MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS * 2,
+      tokenTicker: "SOL",
+    });
+
+    expect(result.swapped).toBe(false);
+    expect(result.error).toContain("Unable to unwrap due to rent exempt requirement.");
+    expect(unwrapAttempts).toBeGreaterThanOrEqual(1);
+    expect(sponsorCalls.length).toBe(unwrapAttempts);
+    expect(refundCalls.length).toBe(unwrapAttempts);
   });
 
   test("executes pump.fun swap with admin as fee payer", async () => {
@@ -208,5 +323,85 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(
       refundCall.instructions[0]?.keys[1]?.pubkey.equals(admin.publicKey)
     ).toBe(true);
+  });
+
+  test("unwrapWsolPortion closes WSOL ATA and rewraps remaining balance", async () => {
+    const wallet = WalletManager.createForTest(mnemonic, {
+      connection,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+    const swapManager = new SwapManager(connection, wallet);
+
+    const user = Keypair.generate();
+    const totalRaw = MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS + 500_000;
+    const unwrapLamports = MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS;
+
+    const sendCalls: TransactionInstruction[][] = [];
+    (wallet as any).sendTransaction = async (
+      instructions: TransactionInstruction[],
+      signers: Keypair[]
+    ) => {
+      sendCalls.push(instructions);
+      expect(signers[0]?.publicKey.equals(user.publicKey)).toBe(true);
+      return "SIG_UNWRAP_REAL";
+    };
+
+    let confirmCount = 0;
+    (wallet as any).confirmTransaction = async () => {
+      confirmCount += 1;
+    };
+
+    const wsolMintKey = new PublicKey(WSOL_MINT);
+    const wsolAta = await splToken.getAssociatedTokenAddress(
+      wsolMintKey,
+      user.publicKey,
+      false,
+      splToken.TOKEN_PROGRAM_ID
+    );
+
+    const getAccountSpy = spyOn(splToken, "getAccount") as any;
+    getAccountSpy.mockImplementation(async () => ({
+      address: wsolAta,
+      mint: wsolMintKey,
+      owner: user.publicKey,
+      amount: BigInt(totalRaw),
+      delegate: null,
+      delegatedAmount: 0n,
+      state: 1,
+      isNative: null,
+      rentExemptReserve: null,
+      closeAuthority: null,
+      isFrozen: false,
+      tlvData: Buffer.alloc(0),
+    }));
+
+    try {
+      const result = await (swapManager as any).unwrapWsolPortion({
+        userKeypair: user,
+        unwrapLamports,
+        logContext: "unit test",
+      });
+
+      expect(result.signature).toBe("SIG_UNWRAP_REAL");
+      expect(result.lamportsReceived).toBe(unwrapLamports);
+      expect(sendCalls.length).toBe(1);
+
+      const instructions = sendCalls[0]!;
+      expect(instructions.length).toBe(5);
+
+      const transferIx = instructions.find((ix) =>
+        ix.programId.equals(SystemProgram.programId)
+      );
+      expect(transferIx).toBeDefined();
+      const decoded = SystemInstruction.decodeTransfer(transferIx!);
+      expect(Number(decoded.lamports)).toBe(totalRaw - unwrapLamports);
+      expect(decoded.fromPubkey.equals(user.publicKey)).toBe(true);
+
+      expect(confirmCount).toBe(1);
+      expect(getAccountSpy.mock.calls.length).toBe(1);
+    } finally {
+      getAccountSpy.mockRestore();
+    }
   });
 });

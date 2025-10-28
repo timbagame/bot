@@ -6,6 +6,14 @@ import {
   VersionedTransaction,
   SystemProgram,
 } from "@solana/web3.js";
+import {
+  getAccount,
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
+  createCloseAccountInstruction,
+  createSyncNativeInstruction,
+  TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 import { JupiterClient } from "./jupiter";
 import { PumpFunClient, validatePumpFunSwap } from "./pump-fun";
 import { NetworkDetector } from "./network-detector";
@@ -57,7 +65,7 @@ const KNOWN_MAJOR_TOKENS = new Set([
 
 export interface JustInTimeSwapResult {
   swapped: boolean;
-  provider?: "jupiter" | "pump-fun";
+  provider?: "jupiter" | "pump-fun" | "unwrap";
   signature?: string;
   lamportsReceived?: number;
   error?: string;
@@ -459,6 +467,7 @@ export class SwapManager {
 
     let sponsoredLamportsOutstanding = 0;
     let lastJupiterError: string | null = null;
+    let lastUnwrapError: string | null = null;
 
     try {
       const currentLamports = await this.connection.getBalance(
@@ -571,9 +580,101 @@ export class SwapManager {
         };
       }
 
-      const provider = await this.getBestProvider(tokenMint, SOL_MINT);
       const lamportsShortfall = targetLamports - currentLamports;
       const swapTarget = lamportsShortfall + JIT_SWAP_FEE_BUFFER_LAMPORTS;
+
+      const attemptWsolUnwrap = async (
+        target: number
+      ): Promise<JustInTimeSwapResult | null> => {
+        const lamportsNeeded = Math.max(target - currentLamports, 0);
+        const unwrapLamports = Math.min(availableRaw, lamportsNeeded);
+
+        if (unwrapLamports <= 0) {
+          return null;
+        }
+
+        try {
+          const sponsorLamports = Math.max(
+            JIT_SWAP_FEE_BUFFER_LAMPORTS - currentLamports,
+            0
+          );
+          if (sponsorLamports > 0) {
+            await this.sponsorSwapFees(userKeypair, sponsorLamports);
+            sponsoredLamportsOutstanding += sponsorLamports;
+          }
+
+          const { signature, lamportsReceived } =
+            await this.unwrapWsolPortion({
+              userKeypair,
+              unwrapLamports,
+              logContext,
+            });
+
+          if (sponsoredLamportsOutstanding > 0) {
+            await this.refundSponsoredFees(
+              userKeypair,
+              sponsoredLamportsOutstanding
+            );
+            sponsoredLamportsOutstanding = 0;
+          }
+
+          lastUnwrapError = null;
+          return {
+            swapped: true,
+            provider: "unwrap",
+            signature,
+            lamportsReceived,
+          };
+        } catch (attemptError: any) {
+          if (sponsoredLamportsOutstanding > 0) {
+            try {
+              await this.refundSponsoredFees(
+                userKeypair,
+                sponsoredLamportsOutstanding
+              );
+            } catch (refundError) {
+              console.error(
+                "Failed to refund sponsored fees after WSOL unwrap attempt:",
+                refundError
+              );
+            } finally {
+              sponsoredLamportsOutstanding = 0;
+            }
+          }
+
+          const message = attemptError?.message || String(attemptError);
+          lastUnwrapError =
+            message ||
+            "Unable to unwrap WSOL automatically. Add SOL manually and try again.";
+          console.log("⚠️ WSOL unwrap attempt failed:", message);
+          return null;
+        }
+      };
+
+      if (this.isSolMint(tokenMint)) {
+        console.log(
+          `⚡ Executing just-in-time WSOL unwrap for ${logContext}. Need ${lamportsShortfall} lamports (target ${swapTarget}).`
+        );
+
+        const unwrapResult =
+          (await attemptWsolUnwrap(swapTarget)) ||
+          (lamportsShortfall > 0
+            ? await attemptWsolUnwrap(lamportsShortfall)
+            : null);
+
+        if (unwrapResult) {
+          return unwrapResult;
+        }
+
+        return {
+          swapped: false,
+          error:
+            lastUnwrapError ||
+            "Unable to unwrap WSOL for SOL fees. Add SOL manually and try again.",
+        };
+      }
+
+      const provider = await this.getBestProvider(tokenMint, SOL_MINT);
 
       console.log(
         `⚡ Executing just-in-time SOL swap for ${logContext} via ${provider}. Need ${lamportsShortfall} lamports (target ${swapTarget}).`
@@ -774,6 +875,101 @@ export class SwapManager {
     return fractionalPart.length > 0
       ? `${integerPart}.${fractionalPart}`
       : integerPart;
+  }
+
+  private async unwrapWsolPortion(options: {
+    userKeypair: Keypair;
+    unwrapLamports: number;
+    logContext: string;
+  }): Promise<{ signature: string; lamportsReceived: number }> {
+    const { userKeypair, unwrapLamports, logContext } = options;
+
+    if (!Number.isFinite(unwrapLamports) || unwrapLamports <= 0) {
+      throw new Error("Unwrap amount must be greater than zero.");
+    }
+    if (!Number.isSafeInteger(unwrapLamports)) {
+      throw new Error("Unwrap amount must be a safe integer in lamports.");
+    }
+
+    const owner = userKeypair.publicKey;
+    const wsolMint = new PublicKey(SOL_MINT);
+    const wsolAta = await getAssociatedTokenAddress(
+      wsolMint,
+      owner,
+      false,
+      TOKEN_PROGRAM_ID
+    );
+
+    const wsolAccount = await getAccount(
+      this.connection,
+      wsolAta,
+      "confirmed",
+      TOKEN_PROGRAM_ID
+    );
+
+    const totalRaw = Number(wsolAccount.amount);
+    if (!Number.isFinite(totalRaw) || totalRaw <= 0) {
+      throw new Error("No WSOL balance available to unwrap.");
+    }
+    if (!Number.isSafeInteger(totalRaw)) {
+      throw new Error("WSOL balance is too large to unwrap safely.");
+    }
+    if (unwrapLamports > totalRaw) {
+      throw new Error(
+        `Requested WSOL unwrap (${unwrapLamports} lamports) exceeds current balance (${totalRaw}).`
+      );
+    }
+
+    const remainingRaw = totalRaw - unwrapLamports;
+    if (remainingRaw < 0) {
+      throw new Error("Unwrap would reduce WSOL balance below zero.");
+    }
+
+    const formattedUnwrap = this.describeTokenAmount(
+      BigInt(unwrapLamports),
+      SOL_DECIMALS
+    );
+    const formattedRemaining = this.describeTokenAmount(
+      BigInt(Math.max(remainingRaw, 0)),
+      SOL_DECIMALS
+    );
+
+    console.log(
+      `🧼 Unwrapping ${formattedUnwrap} WSOL for ${logContext}. Remaining WSOL after unwrap: ${formattedRemaining}.`
+    );
+
+    const instructions: TransactionInstruction[] = [
+      createSyncNativeInstruction(wsolAta),
+      createCloseAccountInstruction(wsolAta, owner, owner),
+      createAssociatedTokenAccountInstruction(
+        owner,
+        wsolAta,
+        owner,
+        wsolMint,
+        TOKEN_PROGRAM_ID
+      ),
+    ];
+
+    if (remainingRaw > 0) {
+      instructions.push(
+        SystemProgram.transfer({
+          fromPubkey: owner,
+          toPubkey: wsolAta,
+          lamports: remainingRaw,
+        })
+      );
+      instructions.push(createSyncNativeInstruction(wsolAta));
+    }
+
+    const signature = await this.wallet.sendTransaction(instructions, [
+      userKeypair,
+    ]);
+    await this.wallet.confirmTransaction(signature);
+
+    return {
+      signature,
+      lamportsReceived: unwrapLamports,
+    };
   }
 
   private async sponsorSwapFees(
