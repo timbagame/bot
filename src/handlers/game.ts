@@ -1,4 +1,5 @@
 import type { Context } from "grammy";
+import { getTelegramId } from "../utils/context-helpers";
 
 export type CoinflipDeps = {
   isGroupChat: (ctx: Context) => boolean;
@@ -22,7 +23,7 @@ export async function handleCoinflipCommand(
     return;
   }
 
-  const telegramId = BigInt(ctx.from?.id || 0);
+  const telegramId = getTelegramId(ctx);
   const args = ctx.message?.text?.split(" ");
 
   if (!args || args.length < 2) {

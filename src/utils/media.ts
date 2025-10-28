@@ -156,3 +156,89 @@ export async function editMediaWithFallback<Primary, Fallback = Primary>({
     throw error;
   }
 }
+
+export type SendMediaWithFallbackOptions<Primary, Fallback = Primary> = {
+  videoFileId?: string | null;
+  logLabel?: string;
+  sendText: () => Promise<Fallback>;
+  sendVideo?: () => Promise<Primary>;
+  editMessage?: () => Promise<Primary>;
+};
+
+export type SendMediaWithFallbackResult<Primary, Fallback = Primary> = {
+  result: Primary | Fallback | null;
+  usedVideo: boolean;
+  usedFallback: boolean;
+  skippedEdit: boolean;
+};
+
+export async function sendMediaWithFallback<Primary, Fallback = Primary>({
+  videoFileId,
+  logLabel = "media",
+  sendText,
+  sendVideo,
+  editMessage,
+}: SendMediaWithFallbackOptions<Primary, Fallback>): Promise<
+  SendMediaWithFallbackResult<Primary, Fallback>
+> {
+  if (!videoFileId) {
+    const result = await sendText();
+    return {
+      result,
+      usedVideo: false,
+      usedFallback: true,
+      skippedEdit: false,
+    };
+  }
+
+  if (editMessage) {
+    try {
+      const editResult = await editMediaWithFallback({
+        edit: editMessage,
+        fallback: sendText,
+        logLabel: `${logLabel} edit`,
+      });
+
+      if (editResult.skipped) {
+        return {
+          result: editResult.result,
+          usedVideo: false,
+          usedFallback: editResult.usedFallback,
+          skippedEdit: true,
+        };
+      }
+
+      return {
+        result: editResult.result,
+        usedVideo: !editResult.usedFallback,
+        usedFallback: editResult.usedFallback,
+        skippedEdit: false,
+      };
+    } catch (error) {
+      console.warn(`${logLabel} edit failed, attempting send`, error);
+    }
+  }
+
+  if (!sendVideo) {
+    const result = await sendText();
+    return {
+      result,
+      usedVideo: false,
+      usedFallback: true,
+      skippedEdit: false,
+    };
+  }
+
+  const { result, usedFallback } = await trySendVideoWithFallback(
+    () => sendVideo(),
+    () => sendText(),
+    { logLabel: `${logLabel} send` }
+  );
+
+  return {
+    result,
+    usedVideo: !usedFallback,
+    usedFallback,
+    skippedEdit: false,
+  };
+}

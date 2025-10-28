@@ -1,4 +1,5 @@
 import type { Context, NextFunction } from "grammy";
+import { safeAnswerCallbackQuery } from "./context-helpers";
 
 const DEFAULT_MAX_AGE_SEC = 600; // 10 minutes
 
@@ -31,7 +32,10 @@ export async function recentUpdateGuard(ctx: Context, next: NextFunction) {
   if (shouldDropUpdate(updateUnix, nowSec, maxAgeSec)) {
     if (ctx.callbackQuery) {
       try {
-        await ctx.answerCallbackQuery("⏱️ This action expired. Please open a new menu.");
+        await safeAnswerCallbackQuery(
+          ctx,
+          "⏱️ This action expired. Please open a new menu."
+        );
       } catch {}
     }
     return; // drop silently for old messages
