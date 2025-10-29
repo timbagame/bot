@@ -157,19 +157,40 @@ export class TokenManager {
 
     const candidate = tokenArg?.trim();
     if (candidate) {
+      const normalizedCandidate = candidate.trim();
+      const candidateUpper = normalizedCandidate.toUpperCase();
+      const candidateLooksLikeTicker = looksLikeTokenTicker(normalizedCandidate);
+      let candidateMint: string | null = null;
+      try {
+        candidateMint = new PublicKey(normalizedCandidate).toBase58();
+      } catch {
+        candidateMint = null;
+      }
+
       const isNumericCandidate =
-        candidate.length <= 18 && /^[0-9]+(?:\.[0-9]+)?$/.test(candidate);
+        normalizedCandidate.length <= 18 &&
+        /^[0-9]+(?:\.[0-9]+)?$/.test(normalizedCandidate);
 
       if (!isNumericCandidate) {
         // Only attempt token parsing when the argument isn't a numeric
         // parameter (e.g., max players in `/cf 10 5`).
-        const resolvedToken = await this.resolveSwapToken(candidate);
+        const resolvedToken = await this.resolveSwapToken(normalizedCandidate);
         if (resolvedToken) {
           tokenWasSpecified = true;
           tokenDecimals = resolvedToken.decimals;
           resolvedTokenMint = resolvedToken.token_mint;
           resolvedTokenTicker = resolvedToken.token_ticker;
-          if (resolvedToken.isNativeSol) {
+          if (candidateMint && resolvedTokenMint === WSOL_MINT) {
+            const knownMint = this.tokenDb.getKnownTokenByMint(resolvedTokenMint);
+            resolvedTokenTicker = knownMint?.token_ticker ?? "WSOL";
+          }
+
+          const requestedNativeSolByTicker =
+            resolvedToken.isNativeSol &&
+            candidateLooksLikeTicker &&
+            candidateUpper === "SOL";
+
+          if (requestedNativeSolByTicker) {
             requestedNativeSol = true;
             if (context === "tip") {
               isSol = true;
@@ -180,36 +201,29 @@ export class TokenManager {
               resolvedTokenTicker = "SOL";
             }
           }
-        } else if (looksLikeTokenTicker(candidate)) {
+        } else if (candidateLooksLikeTicker) {
           return {
             success: false,
             error: "unknown_token",
-            unknownToken: candidate.toUpperCase(),
+            unknownToken: candidateUpper,
           };
         } else {
-          let explicitMint: string | null = null;
-          try {
-            explicitMint = new PublicKey(candidate).toBase58();
-          } catch {
-            explicitMint = null;
-          }
-
-          if (explicitMint) {
+          if (candidateMint) {
             tokenWasSpecified = true;
-            resolvedTokenMint = explicitMint;
+            resolvedTokenMint = candidateMint;
 
-            const knownMint = this.tokenDb.getKnownTokenByMint(explicitMint);
+            const knownMint = this.tokenDb.getKnownTokenByMint(candidateMint);
             if (knownMint) {
               tokenDecimals = knownMint.decimals;
               resolvedTokenTicker = knownMint.token_ticker;
             } else {
-              resolvedTokenTicker = candidate.toUpperCase();
+              resolvedTokenTicker = candidateUpper;
             }
           } else {
             return {
               success: false,
               error: "unknown_token",
-              unknownToken: candidate.toUpperCase(),
+              unknownToken: candidateUpper,
             };
           }
         }
