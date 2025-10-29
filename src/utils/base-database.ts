@@ -93,6 +93,19 @@ export abstract class BaseDatabase {
     }
   }
 
+  protected getCount(
+    sql: string,
+    params: SQLQueryBindings | SQLQueryBindings[] = [],
+    operation: string = "executing count query"
+  ): number {
+    try {
+      const result = this.get<{ count: number }>(sql, params, operation);
+      return result?.count ?? 0;
+    } catch {
+      return 0;
+    }
+  }
+
   private normalizeParams(
     params: SQLQueryBindings | SQLQueryBindings[] | undefined
   ): SQLQueryBindings[] {

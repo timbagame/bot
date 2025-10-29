@@ -11,6 +11,10 @@ export type MenuPayload = {
 export type MenuResponseOptions = {
   replyToMessageId?: number | null;
   skipEdit?: boolean;
+  targetChatId?: number;
+  targetMessageId?: number;
+  allowContextEdit?: boolean;
+  logLabel?: string;
 };
 
 export type MenuResponseResult = {
@@ -77,13 +81,57 @@ export const respondWithMenu = async (
   options: MenuResponseOptions = {}
 ): Promise<MenuResponseResult> => {
   const message = ctx.callbackQuery?.message;
+  const {
+    skipEdit = false,
+    targetChatId,
+    targetMessageId,
+    allowContextEdit = true,
+    logLabel = "respondWithMenu",
+  } = options;
 
-  if (!options.skipEdit && ctx.callbackQuery && message) {
-    const supportsCaption = messageSupportsCaption(message);
-    const messageId = typeof message?.message_id === "number" ? message.message_id : null;
-    const chatId =
-      (message as any)?.chat?.id ??
-      (typeof ctx.chat?.id === "number" ? ctx.chat.id : null);
+  if (!skipEdit) {
+    const hasExplicitTarget =
+      typeof targetChatId === "number" && typeof targetMessageId === "number";
+
+    if (hasExplicitTarget) {
+      try {
+        await ctx.api.editMessageText(targetChatId, targetMessageId, payload.text, {
+          parse_mode: payload.parseMode ?? "HTML",
+          reply_markup: payload.keyboard,
+          link_preview_options: { is_disabled: true },
+        });
+
+        return {
+          messageId: targetMessageId,
+          chatId: targetChatId,
+          respondedWithReply: false,
+        };
+      } catch (error) {
+        if (isMessageNotModified(error)) {
+          return {
+            messageId: targetMessageId,
+            chatId: targetChatId,
+            respondedWithReply: false,
+          };
+        }
+
+        if (!shouldFallbackToReply(error)) {
+          throw error;
+        }
+
+        console.warn(
+          `${logLabel}: editMessageText failed for explicit target, replying instead:`,
+          error
+        );
+      }
+    }
+
+    if (allowContextEdit && ctx.callbackQuery && message) {
+      const supportsCaption = messageSupportsCaption(message);
+      const messageId = typeof message?.message_id === "number" ? message.message_id : null;
+      const chatId =
+        (message as any)?.chat?.id ??
+        (typeof ctx.chat?.id === "number" ? ctx.chat.id : null);
 
     if (supportsCaption) {
       try {
@@ -103,26 +151,27 @@ export const respondWithMenu = async (
       }
     }
 
-    try {
-      const edited = await tryEditText(ctx, payload);
-      if (edited) {
-        return {
-          messageId,
-          chatId,
-          respondedWithReply: false,
-        };
-      }
-    } catch (error) {
-      if (!supportsCaption) {
-        console.warn(
-          "respondWithMenu: editMessageText failed, falling back to reply:",
-          error
-        );
-      } else {
-        console.warn(
-          "respondWithMenu: editMessageText failed after caption fallback, replying instead:",
-          error
-        );
+      try {
+        const edited = await tryEditText(ctx, payload);
+        if (edited) {
+          return {
+            messageId,
+            chatId,
+            respondedWithReply: false,
+          };
+        }
+      } catch (error) {
+        if (!supportsCaption) {
+          console.warn(
+            `${logLabel}: editMessageText failed, falling back to reply:`,
+            error
+          );
+        } else {
+          console.warn(
+            `${logLabel}: editMessageText failed after caption fallback, replying instead:`,
+            error
+          );
+        }
       }
     }
   }
