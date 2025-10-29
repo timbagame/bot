@@ -4,7 +4,6 @@ import { INPUT_TIMEOUT_HINT, LAMPORTS_PER_SOL } from "./constants";
 import { respondWithMenu } from "./menu-response";
 import { setUserState } from "./user-state";
 import { NetworkDetector } from "./network-detector";
-import { isMessageNotModified, shouldFallbackToReply } from "./telegram-errors";
 
 export type TokenDisplayLine = {
   ticker: string;
@@ -303,41 +302,20 @@ export const upsertWalletMenuMessage = async ({
   logLabel = "wallet-menu",
   allowContextEdit = false,
 }: WalletMenuUpsertOptions): Promise<WalletMenuUpsertResult> => {
-  if (
-    typeof targetChatId === "number" &&
-    typeof targetMessageId === "number"
-  ) {
-    try {
-      await ctx.api.editMessageText(targetChatId, targetMessageId, text, {
-        parse_mode: parseMode,
-        reply_markup: keyboard,
-      });
-      return {
-        messageId: targetMessageId,
-        chatId: targetChatId,
-        respondedWithReply: false,
-      };
-    } catch (error) {
-      if (isMessageNotModified(error)) {
-        return {
-          messageId: targetMessageId,
-          chatId: targetChatId,
-          respondedWithReply: false,
-        };
-      }
-
-      if (!shouldFallbackToReply(error)) {
-        throw error;
-      }
-
-      console.warn(`${logLabel}: editMessageText failed, replying instead:`, error);
-    }
-  }
+  const hasExplicitTarget =
+    typeof targetChatId === "number" && typeof targetMessageId === "number";
 
   const menuResult = await respondWithMenu(
     ctx,
     { text, keyboard, parseMode },
-    { replyToMessageId, skipEdit: !allowContextEdit }
+    {
+      replyToMessageId,
+      skipEdit: !allowContextEdit && !hasExplicitTarget,
+      targetChatId,
+      targetMessageId,
+      allowContextEdit,
+      logLabel,
+    }
   );
 
   return {

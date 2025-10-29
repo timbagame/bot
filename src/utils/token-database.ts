@@ -129,16 +129,11 @@ export class TokenDatabase extends BaseDatabase {
   // ================================
 
   public getTokenCount(): number {
-    try {
-      const result = this.get<{ count: number }>(
-        "SELECT COUNT(*) as count FROM known_tokens",
-        [],
-        "getting token count"
-      );
-      return result?.count ?? 0;
-    } catch {
-      return 0;
-    }
+    return this.getCount(
+      "SELECT COUNT(*) as count FROM known_tokens",
+      [],
+      "getting token count"
+    );
   }
 
   public cleanupOldMetadata(olderThanDays: number = 30): number {

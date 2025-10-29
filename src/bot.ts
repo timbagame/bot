@@ -100,7 +100,11 @@ import {
   buildSellMenuUI,
   SELL_NOOP_CALLBACK,
 } from "./utils/trade-ui";
-import { respondWithMenu } from "./utils/menu-response";
+import {
+  respondWithMenu,
+  type MenuPayload,
+  type MenuResponseResult,
+} from "./utils/menu-response";
 import {
   parseDecimalAmount,
   presentTradeAmount,
@@ -5671,14 +5675,99 @@ bot.callbackQuery("wallet_settings", async (ctx) => {
   await onWalletSettings(ctx as any, walletHandlerDeps);
 });
 
+type CallbackPrefixHandlerOptions = {
+  logLabel?: string;
+  errorAck?: string;
+};
+
+type CallbackPrefixContext = {
+  raw: string;
+  payload: string;
+};
+
+const registerCallbackPrefixHandler = (
+  prefix: string,
+  handler: (
+    ctx: any,
+    data: CallbackPrefixContext,
+    next: () => Promise<void>
+  ) => Promise<void> | void,
+  options: CallbackPrefixHandlerOptions = {}
+) => {
+  bot.on("callback_query", async (ctx, next) => {
+    const callbackData = ctx.callbackQuery?.data;
+    if (!callbackData?.startsWith(prefix)) {
+      return await next();
+    }
+
+    const payload = callbackData.slice(prefix.length);
+
+    try {
+      await handler(ctx, { raw: callbackData, payload }, () => next());
+    } catch (error) {
+      console.error(
+        `Error in ${options.logLabel ?? `${prefix} handler`}:`,
+        error
+      );
+      if (options.errorAck) {
+        await safeAnswerCallbackQuery(ctx, options.errorAck);
+      }
+    }
+  });
+};
+
 // ================================
 // WALLET ACTION HANDLERS
 // ================================
 
-bot.callbackQuery("cmd_withdraw", async (ctx) => {
-  try {
-    const { menu } = await buildWalletActionMenuForUser({
-      ctx,
+type WalletActionMenuResolution = {
+  menuOptions: Omit<BuildWalletActionMenuForUserOptions, "ctx">;
+  successAck?: string;
+};
+
+type WalletActionMenuHandlerConfig = {
+  callback: string;
+  logLabel?: string;
+  errorAck: string;
+  resolve: (ctx: any) => Promise<WalletActionMenuResolution | null | undefined>;
+};
+
+const registerWalletActionMenuHandler = ({
+  callback,
+  logLabel,
+  errorAck,
+  resolve,
+}: WalletActionMenuHandlerConfig) => {
+  bot.callbackQuery(callback, async (ctx) => {
+    try {
+      const resolution = await resolve(ctx);
+      if (!resolution) {
+        return;
+      }
+
+      const { menu } = await buildWalletActionMenuForUser({
+        ctx,
+        ...resolution.menuOptions,
+      });
+
+      await respondWithMenu(ctx, menu);
+
+      if (resolution.successAck) {
+        await safeAnswerCallbackQuery(ctx, resolution.successAck);
+      }
+    } catch (error) {
+      console.error(`Error in ${logLabel ?? callback}:`, error);
+      await safeAnswerCallbackQuery(ctx, errorAck);
+    }
+  });
+};
+
+registerWalletActionMenuHandler({
+  callback: "cmd_withdraw",
+  logLabel: "cmd_withdraw",
+  errorAck: "❌ Error loading send menu",
+  resolve: async () => ({
+    menuOptions: {
       title: `💸 <b>WITHDRAW</b>`,
       bodyLines: [
         `<b>From:</b> <code>{{WALLET_ADDRESS}}</code>`,
@@ -5691,14 +5780,9 @@ bot.callbackQuery("cmd_withdraw", async (ctx) => {
         includeSol: true,
         limit: 5,
       },
-    });
-
-    await respondWithMenu(ctx, menu);
-    await safeAnswerCallbackQuery(ctx, "💸 Select Token to Withdraw");
-  } catch (error) {
-    console.error("Error in cmd_withdraw:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error loading send menu");
-  }
+    },
+    successAck: "💸 Select Token to Withdraw",
+  }),
 });
 
 bot.callbackQuery("cmd_privatekey", async (ctx) => {
@@ -5749,10 +5833,12 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
 });
 
 
-bot.callbackQuery("cmd_wrap", async (ctx) => {
-  try {
-    const { menu } = await buildWalletActionMenuForUser({
-      ctx,
+registerWalletActionMenuHandler({
+  callback: "cmd_wrap",
+  logLabel: "cmd_wrap",
+  errorAck: "❌ Error loading wrap menu",
+  resolve: async () => ({
+    menuOptions: {
       title: `🔧 <b>WRAP SOL</b>`,
       bodyLines: ({ solBalance, tokenBalances }) => {
         const formattedSolBalance = wallet.formatSolBalance(solBalance);
@@ -5800,84 +5886,79 @@ bot.callbackQuery("cmd_wrap", async (ctx) => {
           ],
         };
       },
-    });
-
-    await respondWithMenu(ctx, menu);
-    await safeAnswerCallbackQuery(ctx, "🔧 Select wrap amount");
-  } catch (error) {
-    console.error("Error in cmd_wrap:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error loading wrap menu");
-  }
+    },
+    successAck: "🔧 Select wrap amount",
+  }),
 });
 
-bot.callbackQuery("cmd_unwrap", async (ctx) => {
-  try {
+registerWalletActionMenuHandler({
+  callback: "cmd_unwrap",
+  logLabel: "cmd_unwrap",
+  errorAck: "❌ Error loading unwrap menu",
+  resolve: async (ctx) => {
     const telegramId = await getRequiredTelegramIdForContext(
       ctx,
       "unwrap menu"
     );
     if (telegramId == null) {
       await respondMissingIdentity(ctx);
-      return;
+      return null;
     }
+
     const balances = await getCachedWalletData(telegramId);
     const hasBalance = balances.wsolBalance > 0;
 
-    const { menu } = await buildWalletActionMenuForUser({
-      ctx,
-      title: `🧼 <b>UNWRAP WSOL</b>`,
-      bodyLines: ({ solBalance, tokenBalances }) => {
-        const wsolLamports =
-          tokenBalances.find((token) => token.mint === WSOL_MINT)?.balance ?? 0;
-        const formattedSolBalance = wallet.formatSolBalance(solBalance);
-        const formattedWsolBalance = wallet.formatSolBalance(wsolLamports);
+    return {
+      menuOptions: {
+        title: `🧼 <b>UNWRAP WSOL</b>`,
+        bodyLines: ({ solBalance, tokenBalances }) => {
+          const wsolLamports =
+            tokenBalances.find((token) => token.mint === WSOL_MINT)?.balance ?? 0;
+          const formattedSolBalance = wallet.formatSolBalance(solBalance);
+          const formattedWsolBalance = wallet.formatSolBalance(wsolLamports);
 
-        const lines = [
-          `<b>Native SOL:</b> ${escapeHtml(formattedSolBalance)}`,
-          `<b>WSOL:</b> ${escapeHtml(formattedWsolBalance)}`,
-        ];
+          const lines = [
+            `<b>Native SOL:</b> ${escapeHtml(formattedSolBalance)}`,
+            `<b>WSOL:</b> ${escapeHtml(formattedWsolBalance)}`,
+          ];
 
-        if (wsolLamports > 0) {
-          lines.push(
-            "",
-            "Unwrap converts WSOL back to native SOL and closes the WSOL account."
-          );
-        } else {
-          lines.push(
-            "",
-            "You currently have no WSOL to unwrap."
-          );
-        }
+          if (wsolLamports > 0) {
+            lines.push(
+              "",
+              "Unwrap converts WSOL back to native SOL and closes the WSOL account."
+            );
+          } else {
+            lines.push(
+              "",
+              "You currently have no WSOL to unwrap."
+            );
+          }
 
-        return lines;
+          return lines;
+        },
+        quickActions: {
+          type: "prebuilt",
+          keyboard: createConfirmUnwrapKeyboard(hasBalance),
+        },
+        backButton: { label: "← Back to Settings", callback: "wallet_settings" },
+        getBalances: async () => ({
+          solBalance: balances.nativeSolBalance,
+          tokenBalances: [
+            {
+              mint: WSOL_MINT,
+              ticker: "WSOL",
+              balance: balances.wsolBalance,
+              decimals: 9,
+              rawBalance: balances.wsolBalance.toString(),
+            },
+          ],
+        }),
       },
-      quickActions: {
-        type: "prebuilt",
-        keyboard: createConfirmUnwrapKeyboard(hasBalance),
-      },
-      backButton: { label: "← Back to Settings", callback: "wallet_settings" },
-      getBalances: async () => ({
-        solBalance: balances.nativeSolBalance,
-        tokenBalances: [
-          {
-            mint: WSOL_MINT,
-            ticker: "WSOL",
-            balance: balances.wsolBalance,
-            decimals: 9,
-            rawBalance: balances.wsolBalance.toString(),
-          },
-        ],
-      }),
-    });
-
-    await respondWithMenu(ctx, menu);
-    await safeAnswerCallbackQuery(ctx, 
-      hasBalance ? "🧼 Ready to unwrap WSOL" : "ℹ️ No WSOL balance found"
-    );
-  } catch (error) {
-    console.error("Error in cmd_unwrap:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error loading unwrap menu");
-  }
+      successAck: hasBalance
+        ? "🧼 Ready to unwrap WSOL"
+        : "ℹ️ No WSOL balance found",
+    };
+  },
 });
 
 // Handle custom wrap amount
@@ -5933,15 +6014,8 @@ bot.on("callback_query", async (ctx, next) => {
   }
 });
 
-// Handle wrap amount buttons
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("wrap_amount_")) {
-    return await next();
-  }
-
+registerCallbackPrefixHandler("wrap_amount_", async (ctx, { payload }) => {
   try {
-    const amountChoice = callbackData.replace("wrap_amount_", "");
     const telegramId = await getRequiredTelegramIdForContext(
       ctx,
       "wrap amount selection"
@@ -5950,6 +6024,8 @@ bot.on("callback_query", async (ctx, next) => {
       await respondMissingIdentity(ctx);
       return;
     }
+
+    const amountChoice = payload;
     const { nativeSolBalance, wsolBalance } = await getCachedWalletData(telegramId);
     const availableSolLamports = nativeSolBalance;
 
@@ -6494,10 +6570,12 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
   }
 });
 
-bot.callbackQuery("cmd_swap", async (ctx) => {
-  try {
-    const { menu } = await buildWalletActionMenuForUser({
-      ctx,
+registerWalletActionMenuHandler({
+  callback: "cmd_swap",
+  logLabel: "cmd_swap",
+  errorAck: "❌ Error loading swap menu",
+  resolve: async () => ({
+    menuOptions: {
       title: `💱 <b>SWAP TOKENS</b>`,
       bodyLines: [
         `<b>From Wallet:</b> <code>{{WALLET_ADDRESS}}</code>`,
@@ -6522,14 +6600,9 @@ bot.callbackQuery("cmd_swap", async (ctx) => {
         },
         emptyLabel: "❌ No tokens available to swap",
       },
-    });
-
-    await respondWithMenu(ctx, menu);
-    await safeAnswerCallbackQuery(ctx, "💱 Select token to swap from");
-  } catch (error) {
-    console.error("Error in cmd_swap:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error loading swap menu");
-  }
+    },
+    successAck: "💱 Select token to swap from",
+  }),
 });
 
 // ================================
@@ -6675,6 +6748,64 @@ const getWalletOverview = async (telegramId: bigint): Promise<WalletOverview> =>
   };
 };
 
+type TradeMenuResolution = {
+  payload: MenuPayload;
+  successAck?: string;
+  afterSend?: (result: MenuResponseResult) => Promise<void> | void;
+};
+
+type TradeMenuHandlerConfig = {
+  callback: string;
+  logLabel: string;
+  identityPurpose: string;
+  errorAck: string;
+  resolve: (args: {
+    ctx: any;
+    telegramId: bigint;
+    overview: Awaited<ReturnType<typeof getWalletOverview>>;
+  }) => Promise<TradeMenuResolution | null | undefined>;
+};
+
+const registerTradeMenuHandler = ({
+  callback,
+  logLabel,
+  identityPurpose,
+  errorAck,
+  resolve,
+}: TradeMenuHandlerConfig) => {
+  bot.callbackQuery(callback, async (ctx) => {
+    try {
+      const telegramId = await getRequiredTelegramIdForContext(
+        ctx,
+        identityPurpose
+      );
+      if (telegramId == null) {
+        await respondMissingIdentity(ctx);
+        return;
+      }
+
+      const overview = await getWalletOverview(telegramId);
+      const resolution = await resolve({ ctx, telegramId, overview });
+      if (!resolution) {
+        return;
+      }
+
+      const response = await respondWithMenu(ctx, resolution.payload);
+
+      if (resolution.afterSend) {
+        await resolution.afterSend(response);
+      }
+
+      if (resolution.successAck) {
+        await safeAnswerCallbackQuery(ctx, resolution.successAck);
+      }
+    } catch (error) {
+      console.error(`Error in ${logLabel}:`, error);
+      await safeAnswerCallbackQuery(ctx, errorAck);
+    }
+  });
+};
+
 type WalletMenuBalances = Pick<CachedWalletData, "solBalance" | "tokenBalances">;
 
 type WalletActionMenuContext = WalletMenuBalances & {
@@ -6758,13 +6889,7 @@ const buildWalletActionMenuForUser = async ({
 // ================================
 
 // Handle token selection for send
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("send_select_")) {
-    return await next();
-  }
-
-  const token = callbackData.replace("send_select_", "");
+registerCallbackPrefixHandler("send_select_", async (ctx, { payload: token }) => {
   console.log("🔔 Token selected for send:", token);
 
   try {
@@ -6811,14 +6936,9 @@ bot.on("callback_query", async (ctx, next) => {
 });
 
 // Handle amount selection for send
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("send_amount_")) {
-    return await next();
-  }
-
+registerCallbackPrefixHandler("send_amount_", async (ctx, { payload }) => {
   try {
-    const segments = callbackData.replace("send_amount_", "").split("_");
+    const segments = payload.split("_");
     const token = segments.shift() ?? "";
     const amountChoice = segments.join("_");
     if (!token || !amountChoice) {
@@ -7110,41 +7230,43 @@ const showHelpSection = async (
   await safeAnswerCallbackQuery(ctx, config.ack);
 };
 
-bot.callbackQuery("help_wallet", async (ctx) => {
-  try {
-    await showHelpSection(ctx, "wallet");
-  } catch (error) {
-    console.error("Error in help_wallet:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error loading wallet help");
-  }
-});
+const HELP_SECTION_CALLBACKS: Array<{
+  callback: string;
+  section: HelpSectionKey;
+  errorAck: string;
+}> = [
+  {
+    callback: "help_wallet",
+    section: "wallet",
+    errorAck: "❌ Error loading wallet help",
+  },
+  {
+    callback: "help_games",
+    section: "games",
+    errorAck: "❌ Error loading games help",
+  },
+  {
+    callback: "help_utility",
+    section: "utility",
+    errorAck: "❌ Error loading utility help",
+  },
+  {
+    callback: "help_examples",
+    section: "examples",
+    errorAck: "❌ Error loading examples",
+  },
+];
 
-bot.callbackQuery("help_games", async (ctx) => {
-  try {
-    await showHelpSection(ctx, "games");
-  } catch (error) {
-    console.error("Error in help_games:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error loading games help");
-  }
-});
-
-bot.callbackQuery("help_utility", async (ctx) => {
-  try {
-    await showHelpSection(ctx, "utility");
-  } catch (error) {
-    console.error("Error in help_utility:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error loading utility help");
-  }
-});
-
-bot.callbackQuery("help_examples", async (ctx) => {
-  try {
-    await showHelpSection(ctx, "examples");
-  } catch (error) {
-    console.error("Error in help_examples:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error loading examples");
-  }
-});
+for (const { callback, section, errorAck } of HELP_SECTION_CALLBACKS) {
+  bot.callbackQuery(callback, async (ctx) => {
+    try {
+      await showHelpSection(ctx, section);
+    } catch (error) {
+      console.error(`Error in ${callback}:`, error);
+      await safeAnswerCallbackQuery(ctx, errorAck);
+    }
+  });
+}
 
 
 
@@ -7161,17 +7283,12 @@ bot.callbackQuery("help_examples", async (ctx) => {
 // BUY/SELL INTERFACE HANDLERS
 // ================================
 
-bot.callbackQuery("cmd_buy", async (ctx) => {
-  try {
-    const telegramId = await getRequiredTelegramIdForContext(
-      ctx,
-      "buy menu"
-    );
-    if (telegramId == null) {
-      await respondMissingIdentity(ctx);
-      return;
-    }
-    const overview = await getWalletOverview(telegramId);
+registerTradeMenuHandler({
+  callback: "cmd_buy",
+  logLabel: "cmd_buy",
+  identityPurpose: "buy menu",
+  errorAck: "❌ Error loading buy interface",
+  resolve: async ({ ctx, overview }) => {
     const ownedTickers = new Set(
       overview.ownedTokens
         .map((token) => token.ticker?.toUpperCase())
@@ -7216,35 +7333,38 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
       tokenButtons,
     });
 
-    await respondWithMenu(ctx, { text: message, keyboard });
+    return {
+      payload: { text: message, keyboard },
+      successAck: "Select a token to buy",
+      afterSend: (menuResult) => {
+        const telegramIdentifier = getTelegramId(ctx);
+        if (telegramIdentifier == null) {
+          return;
+        }
 
-    const userId = getTelegramId(ctx).toString();
-    setUserState(userId, {
-      type: "buy_menu_idle",
-      paymentToken: "SOL",
-      chatId: ctx.chat?.id,
-      messageId: ctx.callbackQuery?.message?.message_id,
-    });
+        const chatId =
+          menuResult.chatId ??
+          (typeof ctx.chat?.id === "number" ? ctx.chat.id : undefined);
+        const messageId =
+          menuResult.messageId ?? ctx.callbackQuery?.message?.message_id;
 
-    await safeAnswerCallbackQuery(ctx, "Select a token to buy");
-  } catch (error) {
-    console.error("Error in cmd_buy:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error loading buy interface");
-  }
+        setUserState(telegramIdentifier.toString(), {
+          type: "buy_menu_idle",
+          paymentToken: "SOL",
+          chatId,
+          messageId,
+        });
+      },
+    };
+  },
 });
 
-bot.callbackQuery("cmd_sell", async (ctx) => {
-  try {
-    const telegramId = await getRequiredTelegramIdForContext(
-      ctx,
-      "sell menu"
-    );
-    if (telegramId == null) {
-      await respondMissingIdentity(ctx);
-      return;
-    }
-
-    const overview = await getWalletOverview(telegramId);
+registerTradeMenuHandler({
+  callback: "cmd_sell",
+  logLabel: "cmd_sell",
+  identityPurpose: "sell menu",
+  errorAck: "❌ Error loading sell interface",
+  resolve: async ({ overview, telegramId }) => {
     const userKeypair = wallet.getKeyPair(telegramId);
 
     const sellTokenButtons: { label: string; callbackData: string }[] = [];
@@ -7305,158 +7425,158 @@ bot.callbackQuery("cmd_sell", async (ctx) => {
       tokenButtons: sellTokenButtons,
     });
 
-    await respondWithMenu(ctx, { text: message, keyboard });
-    await safeAnswerCallbackQuery(ctx, "Select what you want to sell");
-  } catch (error) {
-    console.error("Error in cmd_sell:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error loading sell interface");
-  }
+    return {
+      payload: { text: message, keyboard },
+      successAck: "Select what you want to sell",
+    };
+  },
 });
 
 bot.callbackQuery(SELL_NOOP_CALLBACK, async (ctx) => {
   await safeAnswerCallbackQuery(ctx, "No tokens available to sell");
 });
 
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("trade_slip_")) {
-    return await next();
-  }
-
-  const parts = callbackData.replace("trade_slip_", "").split("_");
-  if (parts.length < 3) {
-    return await next();
-  }
-
-  const [kind, ...restParts] = parts;
-  const tradeKind = kind === "buy" || kind === "sell" ? kind : undefined;
-
-  if (!tradeKind || restParts.length < 2) {
-    return await safeAnswerCallbackQuery(ctx, "❌ Invalid slippage request");
-  }
-
-  const slippageValue = restParts.pop();
-  const txId = restParts.join("_");
-
-  if (!txId || !slippageValue) {
-    return await safeAnswerCallbackQuery(ctx, "❌ Invalid slippage request");
-  }
-
-  console.log(
-    `⚙️ ${tradeKind.toUpperCase()} slippage change: ${slippageValue} for txId: ${txId}`
-  );
-
-  try {
-    const tradeResult = getTradeTransactionCacheEntry(txId);
-    const tradeData = tradeResult?.entry;
-
-    if (!tradeData || tradeData.kind !== tradeKind) {
-      await safeAnswerCallbackQuery(ctx, "❌ Transaction expired. Please try again.");
+registerCallbackPrefixHandler(
+  "trade_slip_",
+  async (ctx, { payload }, next) => {
+    const parts = payload.split("_");
+    if (parts.length < 3) {
+      await next();
       return;
     }
 
-    if (slippageValue === "custom") {
-      const userId = getTelegramIdString(ctx);
-      if (!userId) return;
+    const [kind, ...restParts] = parts;
+    const tradeKind = kind === "buy" || kind === "sell" ? kind : undefined;
 
-      const currentSlippage = Number.isFinite(tradeData.quote.slippage)
-        ? (tradeData.quote.slippage as number)
-        : 1.0;
+    if (!tradeKind || restParts.length < 2) {
+      await safeAnswerCallbackQuery(ctx, "❌ Invalid slippage request");
+      return;
+    }
 
-      const response = [
-        `⚙️ <b>CUSTOM SLIPPAGE</b>`,
-        "",
-        `<b>Current:</b> ${currentSlippage.toFixed(1)}%`,
-        "",
-        `Please send a message with your desired slippage percentage.`,
-        "",
-        `<b>Examples:</b>`,
-        `• <code>0.5</code> (0.5% slippage)`,
-        `• <code>1.5</code> (1.5% slippage)`,
-        `• <code>3</code> (3% slippage)`,
-        "",
-        `<b>Range:</b> ${TRADE_SLIPPAGE_RANGE.min}% - ${TRADE_SLIPPAGE_RANGE.max}%`,
-        INPUT_TIMEOUT_HINT,
-      ];
+    const slippageValue = restParts.pop();
+    const txId = restParts.join("_");
 
-      await respondWithMenu(ctx, {
-        text: response.join("\n"),
-        parseMode: "HTML",
-        keyboard: new InlineKeyboard()
-          .text("❌ Cancel", `trade_slip_back_${tradeKind}_${txId}`)
-          .row(),
-      });
+    if (!txId || !slippageValue) {
+      await safeAnswerCallbackQuery(ctx, "❌ Invalid slippage request");
+      return;
+    }
 
-      setUserState(userId, {
-        type: "trade_custom_slippage",
+    console.log(
+      `⚙️ ${tradeKind.toUpperCase()} slippage change: ${slippageValue} for txId: ${txId}`
+    );
+
+    try {
+      const tradeResult = getTradeTransactionCacheEntry(txId);
+      const tradeData = tradeResult?.entry;
+
+      if (!tradeData || tradeData.kind !== tradeKind) {
+        await safeAnswerCallbackQuery(
+          ctx,
+          "❌ Transaction expired. Please try again."
+        );
+        return;
+      }
+
+      if (slippageValue === "custom") {
+        const userId = getTelegramIdString(ctx);
+        if (!userId) return;
+
+        const currentSlippage = Number.isFinite(tradeData.quote.slippage)
+          ? (tradeData.quote.slippage as number)
+          : 1.0;
+
+        const response = [
+          `⚙️ <b>CUSTOM SLIPPAGE</b>`,
+          "",
+          `<b>Current:</b> ${currentSlippage.toFixed(1)}%`,
+          "",
+          `Please send a message with your desired slippage percentage.`,
+          "",
+          `<b>Examples:</b>`,
+          `• <code>0.5</code> (0.5% slippage)`,
+          `• <code>1.5</code> (1.5% slippage)`,
+          `• <code>3</code> (3% slippage)`,
+          "",
+          `<b>Range:</b> ${TRADE_SLIPPAGE_RANGE.min}% - ${TRADE_SLIPPAGE_RANGE.max}%`,
+          INPUT_TIMEOUT_HINT,
+        ];
+
+        await respondWithMenu(ctx, {
+          text: response.join("\n"),
+          parseMode: "HTML",
+          keyboard: new InlineKeyboard()
+            .text("❌ Cancel", `trade_slip_back_${tradeKind}_${txId}`)
+            .row(),
+        });
+
+        setUserState(userId, {
+          type: "trade_custom_slippage",
+          txId,
+          tradeKind,
+          messageId: ctx.callbackQuery?.message?.message_id,
+          chatId: ctx.chat?.id,
+        });
+
+        await safeAnswerCallbackQuery(ctx, "Send custom slippage as message");
+        return;
+      }
+
+      const newSlippage = parseFloat(slippageValue);
+      if (
+        Number.isNaN(newSlippage) ||
+        newSlippage < TRADE_SLIPPAGE_RANGE.min ||
+        newSlippage > TRADE_SLIPPAGE_RANGE.max
+      ) {
+        await safeAnswerCallbackQuery(ctx, "❌ Invalid slippage value");
+        return;
+      }
+
+      await regenerateTradeQuoteWithSlippage(ctx, {
         txId,
         tradeKind,
-        messageId: ctx.callbackQuery?.message?.message_id,
-        chatId: ctx.chat?.id,
+        slippage: newSlippage,
       });
+      await safeAnswerCallbackQuery(ctx, `✅ Slippage set to ${newSlippage}%`);
+    } catch (error: any) {
+      console.error("Error updating slippage:", error);
+      await safeAnswerCallbackQuery(ctx, "❌ Error updating slippage");
+    }
+  },
+  { logLabel: "trade_slip" }
+);
 
-      await safeAnswerCallbackQuery(ctx, "Send custom slippage as message");
+registerCallbackPrefixHandler(
+  "trade_slip_back_",
+  async (ctx, { payload }, next) => {
+    const parts = payload.split("_");
+    if (parts.length < 2) {
+      await next();
       return;
     }
 
-    const newSlippage = parseFloat(slippageValue);
-    if (
-      Number.isNaN(newSlippage) ||
-      newSlippage < TRADE_SLIPPAGE_RANGE.min ||
-      newSlippage > TRADE_SLIPPAGE_RANGE.max
-    ) {
-      await safeAnswerCallbackQuery(ctx, "❌ Invalid slippage value");
+    const [kind, ...txParts] = parts;
+    const tradeKind = kind === "buy" || kind === "sell" ? kind : undefined;
+    const txId = txParts.join("_");
+
+    if (!tradeKind || !txId) {
+      await safeAnswerCallbackQuery(ctx, "❌ Invalid slippage request");
       return;
     }
 
-    await regenerateTradeQuoteWithSlippage(ctx, {
-      txId,
-      tradeKind,
-      slippage: newSlippage,
-    });
-    await safeAnswerCallbackQuery(ctx, `✅ Slippage set to ${newSlippage}%`);
-  } catch (error: any) {
-    console.error("Error updating slippage:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error updating slippage");
-  }
-});
-
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("trade_slip_back_")) {
-    return await next();
-  }
-
-  const parts = callbackData.replace("trade_slip_back_", "").split("_");
-  if (parts.length < 2) {
-    return await next();
-  }
-
-  const [kind, ...txParts] = parts;
-  const tradeKind = kind === "buy" || kind === "sell" ? kind : undefined;
-  const txId = txParts.join("_");
-
-  if (!tradeKind || !txId) {
-    return await safeAnswerCallbackQuery(ctx, "❌ Invalid slippage request");
-  }
-
-  try {
-    await regenerateTradeQuoteWithSlippage(ctx, { txId, tradeKind });
-    await safeAnswerCallbackQuery(ctx, "⚙️ Back to confirmation");
-  } catch (error) {
-    console.error("Error restoring trade confirmation:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error loading confirmation");
-  }
-});
+    try {
+      await regenerateTradeQuoteWithSlippage(ctx, { txId, tradeKind });
+      await safeAnswerCallbackQuery(ctx, "⚙️ Back to confirmation");
+    } catch (error) {
+      console.error("Error restoring trade confirmation:", error);
+      await safeAnswerCallbackQuery(ctx, "❌ Error loading confirmation");
+    }
+  },
+  { logLabel: "trade_slip_back" }
+);
 
 // Handle SELL token selection
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("sell_token_")) {
-    return await next();
-  }
-
-  const tokenToSell = callbackData.replace("sell_token_", "");
+registerCallbackPrefixHandler("sell_token_", async (ctx, { payload }) => {
+  const tokenToSell = payload;
   console.log(`🔴 SELL token selected: ${tokenToSell}`);
 
   try {
@@ -7470,100 +7590,92 @@ bot.on("callback_query", async (ctx, next) => {
 });
 
 // Handle SELL amount selection
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("sell_amount_")) {
-    return await next();
-  }
-
-  // Parse callback data: sell_amount_TOKEN_AMOUNT
-  const parts = callbackData.replace("sell_amount_", "").split("_");
-  if (parts.length < 2) {
-    return await next();
-  }
-
-  const tokenToSell = parts[0];
-  const amount = parts.slice(1).join("_"); // Handle cases where amount might contain underscores
-
-  if (!tokenToSell || !amount) {
-    console.error("Invalid sell callback data");
-    return await next();
-  }
-
-  console.log(`🔴 SELL amount selected: ${amount} ${tokenToSell}`);
-
-  try {
-    const telegramId = await getRequiredTelegramIdForContext(
-      ctx,
-      "sell amount selection"
-    );
-    if (telegramId == null) {
-      await respondMissingIdentity(ctx);
+registerCallbackPrefixHandler(
+  "sell_amount_",
+  async (ctx, { payload }, next) => {
+    const parts = payload.split("_");
+    if (parts.length < 2) {
+      await next();
       return;
     }
 
-    if (amount === "CUSTOM") {
-      const userId = getTelegramIdString(ctx);
-      if (!userId) return;
+    const [tokenToSell, ...rest] = parts;
+    const amount = rest.join("_");
 
-      await showCustomAmountPrompt({
+    if (!tokenToSell || !amount) {
+      console.error("Invalid sell callback data");
+      await next();
+      return;
+    }
+
+    console.log(`🔴 SELL amount selected: ${amount} ${tokenToSell}`);
+
+    try {
+      const telegramId = await getRequiredTelegramIdForContext(
         ctx,
-        userId,
-        title: `🔴 <b>SELL ${tokenToSell} - CUSTOM AMOUNT</b>`,
-        instructions: [
-          `Please send a message with the amount of ${tokenToSell} you want to sell.`,
-        ],
-        examples: [
-          `• <code>100</code> (sell 100 ${tokenToSell})`,
-          `• <code>50%</code> (sell 50% of balance)`,
-          `• <code>max</code> (sell all ${tokenToSell})`,
-        ],
-        cancelCallback: "cmd_sell",
-        state: {
-          type: "sell_custom_amount",
-          tokenToSell,
-        },
+        "sell amount selection"
+      );
+      if (telegramId == null) {
+        await respondMissingIdentity(ctx);
+        return;
+      }
+
+      if (amount === "CUSTOM") {
+        const userId = getTelegramIdString(ctx);
+        if (!userId) return;
+
+        await showCustomAmountPrompt({
+          ctx,
+          userId,
+          title: `🔴 <b>SELL ${tokenToSell} - CUSTOM AMOUNT</b>`,
+          instructions: [
+            `Please send a message with the amount of ${tokenToSell} you want to sell.`,
+          ],
+          examples: [
+            `• <code>100</code> (sell 100 ${tokenToSell})`,
+            `• <code>50%</code> (sell 50% of balance)`,
+            `• <code>max</code> (sell all ${tokenToSell})`,
+          ],
+          cancelCallback: "cmd_sell",
+          state: {
+            type: "sell_custom_amount",
+            tokenToSell,
+          },
+        });
+
+        await safeAnswerCallbackQuery(ctx, "Send custom amount as message");
+        return;
+      }
+
+      await runSellTradeQuote({
+        ctx,
+        tokenToSell,
+        amount,
+        telegramId,
+      });
+    } catch (error: any) {
+      console.error("Error in sell_amount:", error);
+
+      const errorMessage = [
+        "❌ <b>Error Processing Sell Request</b>",
+        "",
+        `<b>Error:</b> ${(error as Error).message}`,
+        "",
+        "Please try again or contact support if the issue persists.",
+      ];
+
+      await respondWithMenu(ctx, {
+        text: errorMessage.join("\n"),
+        keyboard: new InlineKeyboard().text("← Try Again", "cmd_sell").row(),
       });
 
-      await safeAnswerCallbackQuery(ctx, "Send custom amount as message");
-      return;
+      await safeAnswerCallbackQuery(ctx, "❌ Error processing sell request");
     }
-
-    // Handle predefined amounts or percentages
-    await runSellTradeQuote({
-      ctx,
-      tokenToSell,
-      amount,
-      telegramId,
-    });
-  } catch (error: any) {
-    console.error("Error in sell_amount:", error);
-
-    const errorMessage = [
-      "❌ <b>Error Processing Sell Request</b>",
-      "",
-      `<b>Error:</b> ${(error as Error).message}`,
-      "",
-      "Please try again or contact support if the issue persists.",
-    ];
-
-    await respondWithMenu(ctx, {
-      text: errorMessage.join("\n"),
-      keyboard: new InlineKeyboard().text("← Try Again", "cmd_sell").row(),
-    });
-
-    await safeAnswerCallbackQuery(ctx, "❌ Error processing sell request");
   }
-});
+);
 
 // Handle SELL confirmation
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("confirm_sell_")) {
-    return await next();
-  }
-
-  const txId = callbackData.replace("confirm_sell_", "");
+registerCallbackPrefixHandler("confirm_sell_", async (ctx, { payload: txId }) => {
   const sellResult = getSellTransactionCacheEntry(txId);
   const sellData = sellResult?.entry;
 
@@ -7588,7 +7700,6 @@ bot.on("callback_query", async (ctx, next) => {
   );
 
   try {
-    // Show processing state
     const { message } = buildProcessingStatus(
       "sell",
       sellData.amount,
@@ -7612,8 +7723,6 @@ bot.on("callback_query", async (ctx, next) => {
     }
     const userKeypair = wallet.getKeyPair(telegramId);
 
-    // Use the existing global swapManager instance
-
     const slippagePercent = Number.isFinite(sellData.quote.slippage)
       ? (sellData.quote.slippage as number)
       : 1;
@@ -7622,11 +7731,11 @@ bot.on("callback_query", async (ctx, next) => {
     const quote = await swapManager.getQuote({
       inputMint: sellData.fromTokenInfo.token_mint,
       outputMint: sellData.toTokenInfo.token_mint,
-      amount: sellData.rawAmount, // Use raw amount - swapManager will convert for pump.fun if needed
+      amount: sellData.rawAmount,
       slippageBps,
       userKeypair: userKeypair,
       inputDecimals: sellData.fromTokenInfo.decimals || 6,
-      outputDecimals: 9, // SOL decimals
+      outputDecimals: 9,
       inputTicker: sellData.fromToken.toUpperCase(),
       outputTicker: sellData.toToken.toUpperCase(),
     });
@@ -7635,16 +7744,14 @@ bot.on("callback_query", async (ctx, next) => {
       throw new Error("Unable to get swap quote for sell");
     }
 
-    // Use the same successful approach as BUY command
     let signature: string;
 
     if (quote.provider === "jupiter") {
-      // Use Jupiter execution method
       signature = await swapManager.executeJupiterSwap(
         {
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
-          amount: quote.inputAmount, // Use quote amount like successful BUY/SWAP
+          amount: quote.inputAmount,
           slippageBps,
           userKeypair: userKeypair,
           inputDecimals: sellData.fromTokenInfo.decimals,
@@ -7655,12 +7762,11 @@ bot.on("callback_query", async (ctx, next) => {
         quote
       );
     } else {
-      // Use instruction-based approach for other providers (pump.fun)
       const instructions = await swapManager.createSwapTransaction(
         {
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
-          amount: quote.inputAmount, // Use quote amount like successful BUY/SWAP
+          amount: quote.inputAmount,
           slippageBps,
           userKeypair: userKeypair,
           inputDecimals: sellData.fromTokenInfo.decimals,
@@ -7671,13 +7777,10 @@ bot.on("callback_query", async (ctx, next) => {
         quote
       );
 
-      // Execute transaction
       signature = await wallet.sendTransaction(instructions, [userKeypair]);
     }
 
     console.log(`🚀 Sell transaction submitted: ${signature}`);
-
-    // Wait for confirmation
     await wallet.confirmTransaction(signature);
 
     const successMessage = [
@@ -7686,10 +7789,7 @@ bot.on("callback_query", async (ctx, next) => {
       `💰 <b>Sold:</b> ${sellData.amount} ${sellData.fromToken}`,
       `🎯 <b>Received:</b> ${sellData.toToken}`,
       "",
-      `🔗 <b>Transaction:</b> <code>${signature.slice(
-        0,
-        8
-      )}...${signature.slice(-8)}</code>`,
+      `🔗 <b>Transaction:</b> <code>${signature.slice(0, 8)}...${signature.slice(-8)}</code>`,
       "",
       "🎉 <b>Sale successful!</b>",
     ].join("\n");
@@ -7711,7 +7811,6 @@ bot.on("callback_query", async (ctx, next) => {
     });
     await safeAnswerCallbackQuery(ctx, "Sell completed!");
 
-    // Clear wallet cache to force fresh balance on next wallet access
     const cacheKey = getWalletCacheKey(getTelegramIdString(ctx) ?? "");
     if (cacheKey) {
       walletDataCache.delete(cacheKey);
@@ -7728,10 +7827,10 @@ bot.on("callback_query", async (ctx, next) => {
       `<b>Error:</b> ${(error as Error).message}`,
       "",
       "The transaction could not be completed. Please check your balance and try again.",
-    ].join("\n");
+    ];
 
     await respondWithMenu(ctx, {
-      text: errorMessage,
+      text: errorMessage.join("\n"),
       keyboard: new InlineKeyboard()
         .text("← Try Again", "cmd_sell")
         .text("💰 Wallet", "main_wallet")
@@ -7744,222 +7843,211 @@ bot.on("callback_query", async (ctx, next) => {
 });
 
 // Handle popular token selection for buy
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("buy_popular_")) {
-    return await next();
-  }
+registerCallbackPrefixHandler(
+  "buy_popular_",
+  async (ctx, { payload }, next) => {
+    const parts = payload.split("_");
+    if (parts.length < 2) {
+      await next();
+      return;
+    }
 
-  const parts = callbackData.replace("buy_popular_", "").split("_");
-  if (parts.length < 2) return await next();
+    const [paymentToken, targetToken] = parts;
 
-  const paymentToken = parts[0];
-  const targetToken = parts[1];
+    if (!paymentToken || !targetToken) {
+      console.error("Invalid buy popular callback data");
+      await next();
+      return;
+    }
 
-  if (!paymentToken || !targetToken) {
-    console.error("Invalid buy popular callback data");
-    return await next();
-  }
+    console.log(`🟢 Popular token buy: ${paymentToken} → ${targetToken}`);
 
-  console.log(`🟢 Popular token buy: ${paymentToken} → ${targetToken}`);
-
-  try {
-    await showBuyAmountSelection(ctx, paymentToken, targetToken);
-    await safeAnswerCallbackQuery(ctx, `Buy ${targetToken} with ${paymentToken}`);
-  } catch (error) {
-    console.error("Error in buy_popular selection:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error processing token selection");
-  }
-});
+    try {
+      await showBuyAmountSelection(ctx, paymentToken, targetToken);
+      await safeAnswerCallbackQuery(ctx, `Buy ${targetToken} with ${paymentToken}`);
+    } catch (error) {
+      console.error("Error in buy_popular selection:", error);
+      await safeAnswerCallbackQuery(ctx, "❌ Error processing token selection");
+    }
+  },
+  { logLabel: "buy_popular" }
+);
 
 // Handle dynamic token selection (from CA or symbol search)
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("buy_dynamic_")) {
-    return await next();
-  }
-
-  const parts = callbackData.replace("buy_dynamic_", "").split("_");
-  if (parts.length < 2) return await next();
-
-  const paymentToken = parts[0];
-  const tokenTxId = parts[1];
-
-  if (!paymentToken || !tokenTxId) {
-    console.error("Invalid buy dynamic callback data");
-    return await next();
-  }
-
-  // Get the cached token info
-  const tokenEntry = transactionCache.get(tokenTxId);
-  if (!isTokenSelectionCacheEntry(tokenEntry)) {
-    await safeAnswerCallbackQuery(ctx, "❌ Token data expired. Please try again.");
-    return;
-  }
-
-  const tokenData = tokenEntry;
-
-  const targetToken = tokenData.targetToken;
-  const contractAddress = tokenData.targetTokenAddress;
-
-  console.log(
-    `🟢 Dynamic token buy: ${paymentToken} → ${targetToken} (${contractAddress})`
-  );
-
-  try {
-    // Store the contract address for later use in transactions
-    const userId = getTelegramIdString(ctx);
-    if (userId) {
-      setUserState(userId, {
-        type: "dynamic_token_buy",
-        paymentToken: paymentToken,
-        targetToken: targetToken,
-        contractAddress: contractAddress,
-        messageId: ctx.callbackQuery?.message?.message_id,
-        chatId: ctx.chat?.id,
-      });
+registerCallbackPrefixHandler(
+  "buy_dynamic_",
+  async (ctx, { payload }, next) => {
+    const parts = payload.split("_");
+    if (parts.length < 2) {
+      await next();
+      return;
     }
 
-    // For dynamic tokens, pass contract address to amount selection
-    await showBuyAmountSelection(
-      ctx,
-      paymentToken,
-      targetToken,
-      contractAddress,
-      tokenTxId
+    const [paymentToken, tokenTxId] = parts;
+
+    if (!paymentToken || !tokenTxId) {
+      console.error("Invalid buy dynamic callback data");
+      await next();
+      return;
+    }
+
+    const tokenEntry = transactionCache.get(tokenTxId);
+    if (!isTokenSelectionCacheEntry(tokenEntry)) {
+      await safeAnswerCallbackQuery(ctx, "❌ Token data expired. Please try again.");
+      return;
+    }
+
+    const tokenData = tokenEntry;
+
+    const targetToken = tokenData.targetToken;
+    const contractAddress = tokenData.targetTokenAddress;
+
+    console.log(
+      `🟢 Dynamic token buy: ${paymentToken} → ${targetToken} (${contractAddress})`
     );
-    await safeAnswerCallbackQuery(ctx, `Buy ${targetToken} with ${paymentToken}`);
-  } catch (error) {
-    console.error("Error in dynamic token selection:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error processing token selection");
-  }
-});
+
+    try {
+      const userId = getTelegramIdString(ctx);
+      if (userId) {
+        setUserState(userId, {
+          type: "dynamic_token_buy",
+          paymentToken: paymentToken,
+          targetToken: targetToken,
+          contractAddress: contractAddress,
+          messageId: ctx.callbackQuery?.message?.message_id,
+          chatId: ctx.chat?.id,
+        });
+      }
+
+      await showBuyAmountSelection(
+        ctx,
+        paymentToken,
+        targetToken,
+        contractAddress,
+        tokenTxId
+      );
+      await safeAnswerCallbackQuery(ctx, `Buy ${targetToken} with ${paymentToken}`);
+    } catch (error) {
+      console.error("Error in dynamic token selection:", error);
+      await safeAnswerCallbackQuery(ctx, "❌ Error processing token selection");
+    }
+  },
+  { logLabel: "buy_dynamic" }
+);
 
 // Handle BUY amount selection
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("buy_amount_")) {
-    return await next();
-  }
-
-  // Parse callback data: buy_amount_PAYMENTTOKEN_TARGETTOKEN_AMOUNT or buy_amount_PAYMENTTOKEN_TOKENTXID_AMOUNT
-  const parts = callbackData.replace("buy_amount_", "").split("_");
-  if (parts.length < 3) {
-    return await next();
-  }
-
-  const paymentToken = parts[0];
-  const secondPart = parts[1];
-  const amount = parts.slice(2).join("_"); // Handle cases where amount might contain underscores
-
-  if (!paymentToken || !secondPart || !amount) {
-    return await safeAnswerCallbackQuery(ctx, "❌ Invalid buy parameters");
-  }
-
-  // Check if second part is a transaction ID (from contract address flow) or target token
-  let targetToken = secondPart;
-  let contractAddress: string | undefined;
-
-  // If it looks like a transaction ID (short alphanumeric), look it up in cache
-  if (secondPart.length < 20 && /^[a-z0-9]+$/.test(secondPart)) {
-    const cachedInfo = transactionCache.get(secondPart);
-    if (isTokenSelectionCacheEntry(cachedInfo)) {
-      targetToken = cachedInfo.targetToken;
-      contractAddress = cachedInfo.targetTokenAddress;
-    }
-  }
-
-  if (!targetToken) {
-    return await safeAnswerCallbackQuery(ctx, "❌ Invalid target token");
-  }
-
-  console.log(
-    `💰 BUY amount selected: ${amount} ${paymentToken} → ${targetToken}`
-  );
-
-  try {
-    const userId = getTelegramIdString(ctx);
-    if (!userId) {
-      await safeAnswerCallbackQuery(ctx, "❌ Unable to identify user");
+registerCallbackPrefixHandler(
+  "buy_amount_",
+  async (ctx, { payload }, next) => {
+    const parts = payload.split("_");
+    if (parts.length < 3) {
+      await next();
       return;
     }
 
-    // Get existing user state to check for dynamic token info
-    const existingState = getUserState(userId, false); // Don't clear it yet
-    // Use contractAddress from transaction cache if available, otherwise from user state
-    if (!contractAddress) {
-      contractAddress = existingState?.contractAddress;
+    const paymentToken = parts[0];
+    const secondPart = parts[1];
+    const amount = parts.slice(2).join("_");
+
+    if (!paymentToken || !secondPart || !amount) {
+      await safeAnswerCallbackQuery(ctx, "❌ Invalid buy parameters");
+      return;
     }
 
-    if (amount === "CUSTOM") {
-      if (!userId) return;
+    let targetToken = secondPart;
+    let contractAddress: string | undefined;
 
-      await showCustomAmountPrompt({
+    if (secondPart.length < 20 && /^[a-z0-9]+$/.test(secondPart)) {
+      const cachedInfo = transactionCache.get(secondPart);
+      if (isTokenSelectionCacheEntry(cachedInfo)) {
+        targetToken = cachedInfo.targetToken;
+        contractAddress = cachedInfo.targetTokenAddress;
+      }
+    }
+
+    if (!targetToken) {
+      await safeAnswerCallbackQuery(ctx, "❌ Invalid target token");
+      return;
+    }
+
+    console.log(
+      `💰 BUY amount selected: ${amount} ${paymentToken} → ${targetToken}`
+    );
+
+    try {
+      const userId = getTelegramIdString(ctx);
+      if (!userId) {
+        await safeAnswerCallbackQuery(ctx, "❌ Unable to identify user");
+        return;
+      }
+
+      const existingState = getUserState(userId, false);
+      if (!contractAddress) {
+        contractAddress = existingState?.contractAddress;
+      }
+
+      if (amount === "CUSTOM") {
+        await showCustomAmountPrompt({
+          ctx,
+          userId,
+          title: `💰 <b>BUY ${targetToken} - CUSTOM AMOUNT</b>`,
+          tokenLines: [
+            `<b>Paying with:</b> ${paymentToken}`,
+            `<b>Target token:</b> ${targetToken}`,
+          ],
+          instructions: [
+            `Please send a message with the amount of ${paymentToken} you want to spend.`,
+          ],
+          examples: [
+            `• <code>0.1</code> (spend 0.1 ${paymentToken})`,
+            `• <code>5</code> (spend 5 ${paymentToken})`,
+            `• <code>50%</code> (spend 50% of balance)`,
+            `• <code>max</code> (spend all available ${paymentToken})`,
+          ],
+          cancelCallback: "cmd_buy",
+          state: {
+            type: "buy_custom_amount",
+            paymentToken,
+            targetToken,
+            contractAddress,
+          },
+        });
+
+        await safeAnswerCallbackQuery(ctx, "Send custom amount as message");
+        return;
+      }
+
+      await runBuyTradeQuote({
         ctx,
-        userId,
-        title: `💰 <b>BUY ${targetToken} - CUSTOM AMOUNT</b>`,
-        tokenLines: [
-          `<b>Paying with:</b> ${paymentToken}`,
-          `<b>Target token:</b> ${targetToken}`,
-        ],
-        instructions: [
-          `Please send a message with the amount of ${paymentToken} you want to spend.`,
-        ],
-        examples: [
-          `• <code>0.1</code> (spend 0.1 ${paymentToken})`,
-          `• <code>5</code> (spend 5 ${paymentToken})`,
-          `• <code>50%</code> (spend 50% of balance)`,
-          `• <code>max</code> (spend all available ${paymentToken})`,
-        ],
-        cancelCallback: "cmd_buy",
-        state: {
-          type: "buy_custom_amount",
-          paymentToken,
-          targetToken,
-          contractAddress,
-        },
+        paymentToken,
+        targetToken,
+        amount,
+        contractAddress,
+        telegramIdOverride: BigInt(userId),
+      });
+    } catch (error: any) {
+      console.error("Error in buy_amount:", error);
+
+      const errorMessage = [
+        "❌ <b>Error Processing Buy Request</b>",
+        "",
+        `<b>Error:</b> ${(error as Error).message}`,
+        "",
+        "Please try again or contact support if the issue persists.",
+      ];
+
+      await respondWithMenu(ctx, {
+        text: errorMessage.join("\n"),
+        keyboard: new InlineKeyboard().text("← Try Again", "cmd_buy").row(),
       });
 
-      await safeAnswerCallbackQuery(ctx, "Send custom amount as message");
-      return;
+      await safeAnswerCallbackQuery(ctx, "❌ Error processing buy request");
     }
-
-    // Handle predefined amounts or percentages
-    await runBuyTradeQuote({
-      ctx,
-      paymentToken,
-      targetToken,
-      amount,
-      contractAddress,
-    });
-  } catch (error: any) {
-    console.error("Error in buy_amount:", error);
-
-    const errorMessage = [
-      "❌ <b>Error Processing Buy Request</b>",
-      "",
-      `<b>Error:</b> ${(error as Error).message}`,
-      "",
-      "Please try again or contact support if the issue persists.",
-    ];
-
-    await respondWithMenu(ctx, {
-      text: errorMessage.join("\n"),
-      keyboard: new InlineKeyboard().text("← Try Again", "cmd_buy").row(),
-    });
-
-    await safeAnswerCallbackQuery(ctx, "❌ Error processing buy request");
   }
-});
+);
 
 // Handle BUY confirmation
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("confirm_buy_")) {
-    return await next();
-  }
-
-  const txId = callbackData.replace("confirm_buy_", "");
+registerCallbackPrefixHandler("confirm_buy_", async (ctx, { payload: txId }) => {
   const buyResult = getBuyTransactionCacheEntry(txId);
   const buyData = buyResult?.entry;
 
@@ -7984,7 +8072,6 @@ bot.on("callback_query", async (ctx, next) => {
   );
 
   try {
-    // Show processing state
     const { message } = buildProcessingStatus(
       "buy",
       buyData.amount,
@@ -8008,29 +8095,22 @@ bot.on("callback_query", async (ctx, next) => {
     }
     const userKeypair = wallet.getKeyPair(telegramId);
 
-    // Use the existing global swapManager instance
-
     let signature: string;
-    let instructions: any[];
+    let instructions: any[] | undefined;
 
-    // Use the existing quote that was already generated and stored
     if (!buyData.quote) {
       throw new Error("No quote data available for this transaction");
     }
 
-    // Execute the swap using the stored quote (same logic as confirm_swap)
     const quote = buyData.quote;
 
-    // Use the same successful approach as the working /swap command
-
     if (quote.provider === "jupiter") {
-      // Use Jupiter execution method
       signature = await swapManager.executeJupiterSwap(
         {
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
-          amount: quote.inputAmount, // Use quote amount like successful swap does
-          slippageBps: 100, // Use same 1% slippage as successful swap
+          amount: quote.inputAmount,
+          slippageBps: 100,
           userKeypair: userKeypair,
           inputDecimals: quote.inputDecimals || 9,
           outputDecimals: quote.outputDecimals || 9,
@@ -8040,13 +8120,12 @@ bot.on("callback_query", async (ctx, next) => {
         quote
       );
     } else {
-      // Use instruction-based approach for other providers (pump.fun)
       instructions = await swapManager.createSwapTransaction(
         {
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
-          amount: quote.inputAmount, // Use quote amount like successful swap does
-          slippageBps: 100, // Use same 1% slippage as successful swap
+          amount: quote.inputAmount,
+          slippageBps: 100,
           userKeypair: userKeypair,
           inputDecimals: quote.inputDecimals || 9,
           outputDecimals: quote.outputDecimals || 6,
@@ -8056,13 +8135,10 @@ bot.on("callback_query", async (ctx, next) => {
         quote
       );
 
-      // Execute transaction
       signature = await wallet.sendTransaction(instructions, [userKeypair]);
     }
 
     console.log(`🚀 Buy transaction submitted: ${signature}`);
-
-    // Wait for confirmation
     await wallet.confirmTransaction(signature);
 
     const successMessage = [
@@ -8093,148 +8169,23 @@ bot.on("callback_query", async (ctx, next) => {
     });
     await safeAnswerCallbackQuery(ctx, "Buy completed!");
 
-    // Clear wallet cache to force fresh balance on next wallet access
-    const cacheKey = getWalletCacheKey(getTelegramIdString(ctx) ?? "");
-    if (cacheKey) {
-      walletDataCache.delete(cacheKey);
-      console.log(`🧹 Cleared wallet cache for user ${cacheKey} after BUY`);
-    }
-
     transactionCache.delete(txId);
-  } catch (error: any) {
+  } catch (error) {
     console.error("Buy execution error:", error);
 
-    let errorMessage: string;
-    let keyboard = new InlineKeyboard();
+    const keyboard = new InlineKeyboard()
+      .text("← Try Again", "cmd_buy")
+      .text("💰 Wallet", "main_wallet")
+      .row();
 
-    // Handle specific error types
-    if (
-      (error as Error).message?.includes("TooMuchSolRequired") ||
-      (error as Error).message?.includes("slippage") ||
-      error.transactionLogs?.some((log: string) =>
-        log.includes("TooMuchSolRequired")
-      )
-    ) {
-      // Extract the actual amounts needed from logs if available
-      let requiredAmount = null;
-      let yourAmount = null;
-
-      if (error.transactionLogs) {
-        for (const log of error.transactionLogs) {
-          if (log.includes("Left:") && log.includes("Right:")) {
-            const leftMatch = log.match(/Left: (\d+)/);
-            const rightMatch = log.match(/Right: (\d+)/);
-            if (leftMatch && rightMatch) {
-              yourAmount = parseInt(leftMatch[1]) / 1000000000; // Convert lamports to SOL
-              requiredAmount = parseInt(rightMatch[1]) / 1000000000;
-              break;
-            }
-          }
-        }
-      }
-
-      let suggestionText = "• Try a slightly higher amount";
-      let buttonText = "💡 TRY HIGHER";
-
-      if (requiredAmount && yourAmount) {
-        const difference = requiredAmount - yourAmount;
-        const suggestedAmount = requiredAmount + difference * 0.1; // Add 10% buffer
-        const isDifferenceSmall = difference < 0.001;
-
-        const suggestedLamports = Math.round(suggestedAmount * 1_000_000_000);
-        const suggestedStr = wallet.formatSolBalance(suggestedLamports);
-        suggestionText = isDifferenceSmall
-          ? `• Try with ${suggestedStr} SOL (includes fees/buffer)`
-          : `• Try with ${suggestedStr} SOL (price moved)`;
-        buttonText = `💡 ${suggestedStr} SOL`;
-      }
-
-      // Get difference amount for better messaging
-      const difference =
-        requiredAmount && yourAmount ? requiredAmount - yourAmount : 0;
-      const isDifferenceSmall = difference > 0 && difference < 0.001; // Less than 0.001 SOL
-
-      // Slippage error - offer specific solutions
-      errorMessage = [
-        isDifferenceSmall
-          ? "⚠️ <b>Small Amount Missing</b>"
-          : "⚠️ <b>Amount Adjustment Needed</b>",
-        "",
-        `You tried: ${buyData.amount} ${buyData.fromToken}`,
-        requiredAmount
-          ? `Need: ${wallet.formatSolBalance(Math.round(requiredAmount * 1_000_000_000))} ${buyData.fromToken}`
-          : "But need slightly more",
-        isDifferenceSmall
-          ? `Difference: ${wallet.formatSolBalance(Math.round(difference * 1_000_000_000))} SOL (likely fees/precision)`
-          : "",
-        "",
-        "<b>Why this happens:</b>",
-        isDifferenceSmall
-          ? "• Transaction fees not included in quote"
-          : "• Price moved or slippage protection",
-        isDifferenceSmall
-          ? "• Small calculation differences in SDK"
-          : "• Market volatility",
-        "",
-        "<b>Solutions:</b>",
-        suggestionText,
-        "• Wait and retry",
-        "",
-        "🛡️ <i>This protects you from failed transactions!</i>",
-      ]
-        .filter((line) => line !== "")
-        .join("\n");
-
-      keyboard
-        .text(buttonText, `buy_retry_exact_${txId}`)
-        .text("🔄 Retry Same", `confirm_buy_${txId}`)
-        .row()
-        .text("← Back to Buy", "cmd_buy")
-        .text("💰 Wallet", "main_wallet")
-        .row();
-
-      // Store the exact amount needed for the retry button
-      if (requiredAmount && yourAmount !== null) {
-        const retryAmount =
-          requiredAmount + (requiredAmount - yourAmount) * 0.1;
-        buyData.retryAmount = retryAmount.toFixed(4);
-      }
-    } else if (
-      (error as Error).message?.includes("Insufficient funds") ||
-      (error as Error).message?.includes("insufficient")
-    ) {
-      // Insufficient funds error
-      errorMessage = [
-        "❌ <b>Insufficient Funds</b>",
-        "",
-        `You don't have enough ${buyData.fromToken} to complete this purchase.`,
-        `Needed: ${buyData.amount} ${buyData.fromToken}`,
-        "",
-        "Please check your balance and try a smaller amount.",
-      ].join("\n");
-
-      keyboard
-        .text("💰 Check Balance", "main_wallet")
-        .text("← Try Smaller", "cmd_buy")
-        .row();
-    } else {
-      // Generic error
-      errorMessage = [
+    await respondWithMenu(ctx, {
+      text: [
         "❌ <b>Buy Transaction Failed</b>",
         "",
         `<b>Error:</b> ${(error as Error).message || "Unknown error"}`,
         "",
         "The transaction could not be completed. Please try again.",
-      ].join("\n");
-
-      keyboard
-        .text("🔄 Try Again", "cmd_buy")
-        .text("💰 Wallet", "main_wallet")
-        .row();
-    }
-
-    await respondWithMenu(ctx, {
-      text: errorMessage,
+      ].join("\n"),
       keyboard,
     });
 
@@ -8244,13 +8195,7 @@ bot.on("callback_query", async (ctx, next) => {
 });
 
 // Handle BUY retry with exact amount needed
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("buy_retry_exact_")) {
-    return await next();
-  }
-
-  const txId = callbackData.replace("buy_retry_exact_", "");
+registerCallbackPrefixHandler("buy_retry_exact_", async (ctx, { payload: txId }) => {
   const buyResult = getBuyTransactionCacheEntry(txId);
   const buyData = buyResult?.entry;
 
@@ -8260,7 +8205,6 @@ bot.on("callback_query", async (ctx, next) => {
   }
 
   try {
-    // Use the exact retry amount calculated from the error, or add small buffer
     let newAmount =
       buyData.retryAmount || (parseFloat(buyData.amount) * 1.01).toString();
 
@@ -8268,14 +8212,12 @@ bot.on("callback_query", async (ctx, next) => {
       `💡 Retrying buy with exact amount needed: ${newAmount} ${buyData.fromToken} → ${buyData.toToken}`
     );
 
-    // Update the stored transaction with new amount
     buyData.amount = newAmount;
     transactionCache.setWithTTL(txId, buyData);
     if (buyResult?.source === "pending") {
       storePendingTransaction(txId, buyData);
     }
 
-    // Show updated confirmation with new amount
     const confirmKeyboard = createTradeConfirmKeyboard({
       confirmLabel: "✅ Confirm Buy",
       confirmCallback: `confirm_buy_${txId}`,
@@ -8307,218 +8249,214 @@ bot.on("callback_query", async (ctx, next) => {
 // ================================
 
 // Handle "FROM" token selection for swap
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("swap_from_")) {
-    return await next();
-  }
+registerCallbackPrefixHandler(
+  "swap_from_",
+  async (ctx, { payload: fromToken }) => {
+    console.log("🔔 Swap FROM token selected:", fromToken);
 
-  const fromToken = callbackData.replace("swap_from_", "");
-  console.log("🔔 Swap FROM token selected:", fromToken);
-
-  try {
-    const telegramId = await getRequiredTelegramIdForContext(
-      ctx,
-      "swap menu from token"
-    );
-    if (telegramId == null) {
-      await respondMissingIdentity(ctx);
-      return;
-    }
-    const keypair = wallet.getKeyPair(telegramId);
-    const walletAddress = keypair.publicKey.toBase58();
-    const walletAddressHtml = escapeHtml(walletAddress);
-
-    // Get available tokens to swap TO (exclude the FROM token)
-    await getCachedWalletData(telegramId);
-
-    const response = [
-      `💱 <b>SWAP ${fromToken}</b>`,
-      "",
-      `<b>From:</b> <code>${walletAddressHtml}</code>`,
-      "",
-      `<b>Select token to swap TO:</b>`,
-    ];
-
-    const keyboard = new InlineKeyboard();
-
-    // Add SOL option if not swapping from SOL
-    if (fromToken !== "SOL") {
-      keyboard.text(`SOL`, `swap_to_${fromToken}_SOL`).row();
-    }
-
-    // Add popular tokens (USDC, WSOL, TIMBA)
-    const popularTokens = ["USDC", "WSOL", "TIMBA"];
-    for (const token of popularTokens) {
-      if (token !== fromToken) {
-        keyboard.text(`${token}`, `swap_to_${fromToken}_${token}`).row();
+    try {
+      const telegramId = await getRequiredTelegramIdForContext(
+        ctx,
+        "swap menu from token"
+      );
+      if (telegramId == null) {
+        await respondMissingIdentity(ctx);
+        return;
       }
+      const keypair = wallet.getKeyPair(telegramId);
+      const walletAddress = keypair.publicKey.toBase58();
+      const walletAddressHtml = escapeHtml(walletAddress);
+
+      await getCachedWalletData(telegramId);
+
+      const response = [
+        `💱 <b>SWAP ${fromToken}</b>`,
+        "",
+        `<b>From:</b> <code>${walletAddressHtml}</code>`,
+        "",
+        `<b>Select token to swap TO:</b>`,
+      ];
+
+      const keyboard = new InlineKeyboard();
+
+      if (fromToken !== "SOL") {
+        keyboard.text(`SOL`, `swap_to_${fromToken}_SOL`).row();
+      }
+
+      const popularTokens = ["USDC", "WSOL", "TIMBA"];
+      for (const token of popularTokens) {
+        if (token !== fromToken) {
+          keyboard.text(`${token}`, `swap_to_${fromToken}_${token}`).row();
+        }
+      }
+
+      keyboard.text("🔍 Other Token", `swap_to_${fromToken}_OTHER`).row();
+      keyboard.text("← Back to Swap", "cmd_swap").row();
+
+      await respondWithMenu(ctx, {
+        text: response.join("\n"),
+        parseMode: "HTML",
+        keyboard,
+      });
+      await safeAnswerCallbackQuery(ctx, `Select token to receive`);
+    } catch (error) {
+      console.error("Error in swap_from selection:", error);
+      await safeAnswerCallbackQuery(ctx, "❌ Error processing swap selection");
     }
-
-    // Add "Other Token" option
-    keyboard.text("🔍 Other Token", `swap_to_${fromToken}_OTHER`).row();
-    keyboard.text("← Back to Swap", "cmd_swap").row();
-
-    await respondWithMenu(ctx, {
-      text: response.join("\n"),
-      parseMode: "HTML",
-      keyboard,
-    });
-    await safeAnswerCallbackQuery(ctx, `Select token to receive`);
-  } catch (error) {
-    console.error("Error in swap_from selection:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error processing swap selection");
-  }
-});
+  },
+  { logLabel: "swap_from" }
+);
 
 // Handle "TO" token selection for swap
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("swap_to_")) {
-    return await next();
-  }
-
-  const parts = callbackData.replace("swap_to_", "").split("_");
-  if (parts.length < 2) return await next();
-
-  const fromToken = parts[0];
-  const toToken = parts.slice(1).join("_");
-
-  if (!fromToken || !toToken) {
-    return await safeAnswerCallbackQuery(ctx, "❌ Invalid swap pair");
-  }
-
-  console.log(`🔔 Swap pair selected: ${fromToken} → ${toToken}`);
-
-  try {
-    if (toToken === "OTHER") {
-      // Handle custom token input
-      const userId = getTelegramIdString(ctx);
-      if (!userId) return;
-
-      const response = [
-        `🔍 <b>CUSTOM TOKEN</b>`,
-        "",
-        `Swapping FROM: <b>${fromToken}</b>`,
-        "",
-        `Please send a message with the token mint address or symbol.`,
-        "",
-        `<b>Examples:</b>`,
-        `• <code>EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v</code> (USDC)`,
-        `• <code>BONK</code>`,
-        "",
-        INPUT_TIMEOUT_HINT,
-      ];
-
-      await respondWithMenu(ctx, {
-        text: response.join("\n"),
-        parseMode: "HTML",
-        keyboard: new InlineKeyboard().text("❌ Cancel", "cmd_swap").row(),
-      });
-
-      setUserState(userId, {
-        type: "swap_to_token",
-        fromToken: fromToken,
-        messageId: ctx.callbackQuery?.message?.message_id,
-        chatId: ctx.chat?.id,
-      });
-
-      await safeAnswerCallbackQuery(ctx, "Send token mint or symbol");
+registerCallbackPrefixHandler(
+  "swap_to_",
+  async (ctx, { payload }, next) => {
+    const parts = payload.split("_");
+    if (parts.length < 2) {
+      await next();
       return;
     }
 
-    // Show amount selection for the swap pair
-    await showSwapAmountSelection(ctx, fromToken, toToken);
-    await safeAnswerCallbackQuery(ctx, `${fromToken} → ${toToken}`);
-  } catch (error) {
-    console.error("Error in swap_to selection:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error processing swap pair");
-  }
-});
+    const fromToken = parts[0];
+    const toToken = parts.slice(1).join("_");
+
+    if (!fromToken || !toToken) {
+      await safeAnswerCallbackQuery(ctx, "❌ Invalid swap pair");
+      return;
+    }
+
+    console.log(`🔔 Swap pair selected: ${fromToken} → ${toToken}`);
+
+    try {
+      if (toToken === "OTHER") {
+        const userId = getTelegramIdString(ctx);
+        if (!userId) return;
+
+        const response = [
+          `🔍 <b>CUSTOM TOKEN</b>`,
+          "",
+          `Swapping FROM: <b>${fromToken}</b>`,
+          "",
+          `Please send a message with the token mint address or symbol.`,
+          "",
+          `<b>Examples:</b>`,
+          `• <code>EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v</code> (USDC)`,
+          `• <code>BONK</code>`,
+          "",
+          INPUT_TIMEOUT_HINT,
+        ];
+
+        await respondWithMenu(ctx, {
+          text: response.join("\n"),
+          parseMode: "HTML",
+          keyboard: new InlineKeyboard().text("❌ Cancel", "cmd_swap").row(),
+        });
+
+        setUserState(userId, {
+          type: "swap_to_token",
+          fromToken: fromToken,
+          messageId: ctx.callbackQuery?.message?.message_id,
+          chatId: ctx.chat?.id,
+        });
+
+        await safeAnswerCallbackQuery(ctx, "Send token mint or symbol");
+        return;
+      }
+
+      await showSwapAmountSelection(ctx, fromToken, toToken);
+      await safeAnswerCallbackQuery(ctx, `${fromToken} → ${toToken}`);
+    } catch (error) {
+      console.error("Error in swap_to selection:", error);
+      await safeAnswerCallbackQuery(ctx, "❌ Error processing swap pair");
+    }
+  },
+  { logLabel: "swap_to" }
+);
 
 // Handle swap amount selection
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (!callbackData?.startsWith("swap_amount_")) {
-    return await next();
-  }
-
-  const parts = callbackData.replace("swap_amount_", "").split("_");
-  if (parts.length < 3) return await next();
-
-  const fromToken = parts[0];
-  const toToken = parts[1];
-  const amount = parts.slice(2).join("_");
-
-  if (!fromToken || !toToken || !amount) {
-    return await safeAnswerCallbackQuery(ctx, "❌ Invalid swap parameters");
-  }
-
-  console.log(`🔔 Swap amount selected: ${amount} ${fromToken} → ${toToken}`);
-
-  try {
-    if (amount === "CUSTOM") {
-      // Handle custom amount input
-      const userId = getTelegramIdString(ctx);
-      if (!userId) return;
-
-      const response = [
-        `✏️ <b>CUSTOM AMOUNT</b>`,
-        "",
-        `<b>Swap:</b> ${fromToken} → ${toToken}`,
-        "",
-        `Please send a message with the amount of ${fromToken} to swap.`,
-        "",
-        `<b>Examples:</b>`,
-        `• <code>10</code>`,
-        `• <code>0.5</code>`,
-        `• <code>max</code> (all balance)`,
-        "",
-        INPUT_TIMEOUT_HINT,
-      ];
-
-      await respondWithMenu(ctx, {
-        text: response.join("\n"),
-        parseMode: "HTML",
-        keyboard: new InlineKeyboard()
-          .text("❌ Cancel", `swap_to_${fromToken}_${toToken}`)
-          .row(),
-      });
-
-      setUserState(userId, {
-        type: "swap_custom_amount",
-        fromToken: fromToken,
-        toToken: toToken,
-        messageId: ctx.callbackQuery?.message?.message_id,
-        chatId: ctx.chat?.id,
-      });
-
-      await safeAnswerCallbackQuery(ctx, "Send amount as message");
+registerCallbackPrefixHandler(
+  "swap_amount_",
+  async (ctx, { payload }, next) => {
+    const parts = payload.split("_");
+    if (parts.length < 3) {
+      await next();
       return;
     }
 
-    // Get quote and show confirmation
-    const telegramId = await getRequiredTelegramIdForContext(
-      ctx,
-      "swap amount selection"
-    );
-    if (telegramId == null) {
-      await respondMissingIdentity(ctx);
+    const fromToken = parts[0];
+    const toToken = parts[1];
+    const amount = parts.slice(2).join("_");
+
+    if (!fromToken || !toToken || !amount) {
+      await safeAnswerCallbackQuery(ctx, "❌ Invalid swap parameters");
       return;
     }
-    await showSwapQuoteAndConfirmation(
-      ctx,
-      fromToken,
-      toToken,
-      amount,
-      telegramId
-    );
-    await safeAnswerCallbackQuery(ctx, "Getting swap quote...");
-  } catch (error) {
-    console.error("Error in swap amount selection:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error processing swap amount");
-  }
-});
+
+    console.log(`🔔 Swap amount selected: ${amount} ${fromToken} → ${toToken}`);
+
+    try {
+      if (amount === "CUSTOM") {
+        const userId = getTelegramIdString(ctx);
+        if (!userId) return;
+
+        const response = [
+          `✏️ <b>CUSTOM AMOUNT</b>`,
+          "",
+          `<b>Swap:</b> ${fromToken} → ${toToken}`,
+          "",
+          `Please send a message with the amount of ${fromToken} to swap.`,
+          "",
+          `<b>Examples:</b>`,
+          `• <code>10</code>`,
+          `• <code>0.5</code>`,
+          `• <code>max</code> (all balance)`,
+          "",
+          INPUT_TIMEOUT_HINT,
+        ];
+
+        await respondWithMenu(ctx, {
+          text: response.join("\n"),
+          parseMode: "HTML",
+          keyboard: new InlineKeyboard()
+            .text("❌ Cancel", `swap_to_${fromToken}_${toToken}`)
+            .row(),
+        });
+
+        setUserState(userId, {
+          type: "swap_custom_amount",
+          fromToken: fromToken,
+          toToken: toToken,
+          messageId: ctx.callbackQuery?.message?.message_id,
+          chatId: ctx.chat?.id,
+        });
+
+        await safeAnswerCallbackQuery(ctx, "Send amount as message");
+        return;
+      }
+
+      const telegramId = await getRequiredTelegramIdForContext(
+        ctx,
+        "swap amount selection"
+      );
+      if (telegramId == null) {
+        await respondMissingIdentity(ctx);
+        return;
+      }
+      await showSwapQuoteAndConfirmation(
+        ctx,
+        fromToken,
+        toToken,
+        amount,
+        telegramId
+      );
+      await safeAnswerCallbackQuery(ctx, "Getting swap quote...");
+    } catch (error) {
+      console.error("Error in swap amount selection:", error);
+      await safeAnswerCallbackQuery(ctx, "❌ Error processing swap amount");
+    }
+  },
+  { logLabel: "swap_amount" }
+);
 
 /**
  * Show swap amount selection interface

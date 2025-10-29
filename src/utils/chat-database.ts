@@ -113,15 +113,10 @@ export class ChatDatabase extends BaseDatabase {
   // ================================
 
   public getChatCount(): number {
-    try {
-      const result = this.get<{ count: number }>(
-        "SELECT COUNT(DISTINCT chat_id) as count FROM chat_token_configs",
-        [],
-        "getting chat count"
-      );
-      return result?.count ?? 0;
-    } catch {
-      return 0;
-    }
+    return this.getCount(
+      "SELECT COUNT(DISTINCT chat_id) as count FROM chat_token_configs",
+      [],
+      "getting chat count"
+    );
   }
 }
