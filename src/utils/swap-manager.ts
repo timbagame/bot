@@ -34,6 +34,7 @@ export interface SwapQuote {
   priceImpact?: string;
   platformFee?: any;
   composite?: {
+    flow: "pump-then-jupiter" | "jupiter-then-pump";
     intermediateMint: string;
     intermediateAmount: string;
     pumpQuote: PumpFunQuote;
@@ -187,6 +188,24 @@ export class SwapManager {
     };
   }
 
+  private convertRawAmountToDecimal(rawAmount: string, decimals: number): string {
+    if (decimals <= 0) {
+      return rawAmount;
+    }
+
+    const raw = BigInt(rawAmount);
+    const divisor = BigInt(10) ** BigInt(decimals);
+    const whole = raw / divisor;
+    const remainder = raw % divisor;
+
+    if (remainder === 0n) {
+      return whole.toString();
+    }
+
+    const fractional = remainder.toString().padStart(decimals, "0").replace(/0+$/, "");
+    return fractional.length > 0 ? `${whole.toString()}.${fractional}` : whole.toString();
+  }
+
   private normalizePumpFunAmount(amount: string, decimals: number): {
     decimalAmount: string;
     probablyRawAmount: boolean;
@@ -197,92 +216,138 @@ export class SwapManager {
       return { decimalAmount: trimmed, probablyRawAmount: false };
     }
 
-    if (decimals <= 0) {
-      return { decimalAmount: trimmed, probablyRawAmount: false };
-    }
-
     if (!/^[0-9]+$/.test(trimmed)) {
       return { decimalAmount: trimmed, probablyRawAmount: false };
     }
 
     try {
-      const rawAmount = BigInt(trimmed);
-      const divisor = BigInt(10) ** BigInt(decimals);
-      const remainder = rawAmount % divisor;
-      const whole = rawAmount / divisor;
-      const meetsMagnitudeThreshold =
-        rawAmount >= 1_000_000n || remainder === 0n;
-
-      if (!meetsMagnitudeThreshold) {
-        return { decimalAmount: trimmed, probablyRawAmount: false };
-      }
-
-      if (remainder === 0n) {
-        return {
-          decimalAmount: whole.toString(),
-          probablyRawAmount: true,
-        };
-      }
-
-      const fractionalRaw = remainder.toString().padStart(decimals, "0");
-      const fractionalPart = fractionalRaw.replace(/0+$/, "");
-      const leadingZeros = fractionalPart.match(/^0+/)?.[0].length ?? 0;
-
-      if (whole === 0n && leadingZeros >= 4) {
-        return { decimalAmount: trimmed, probablyRawAmount: false };
-      }
-
-      const decimalAmount =
-        fractionalPart.length > 0
-          ? `${whole.toString()}.${fractionalPart}`
-          : whole.toString();
-
-      return { decimalAmount, probablyRawAmount: true };
+      const decimalAmount = this.convertRawAmountToDecimal(trimmed, decimals);
+      return {
+        decimalAmount,
+        probablyRawAmount: decimalAmount !== trimmed,
+      };
     } catch {
       return { decimalAmount: trimmed, probablyRawAmount: false };
     }
   }
 
-  private async buildPumpFunCompositeQuote(params: {
+  private determineCompositeFlow(options: {
+    inputIsPump: boolean;
+    outputIsPump: boolean;
     inputMint: string;
     outputMint: string;
+  }): "pump-then-jupiter" | "jupiter-then-pump" | null {
+    const { inputIsPump, outputIsPump, inputMint, outputMint } = options;
+
+    if (inputIsPump && !this.isSolMint(outputMint)) {
+      return "pump-then-jupiter";
+    }
+
+    if (outputIsPump && !this.isSolMint(inputMint)) {
+      return "jupiter-then-pump";
+    }
+
+    return null;
+  }
+
+  private async buildPumpFunCompositeQuote(params: {
+    flow: "pump-then-jupiter" | "jupiter-then-pump";
+    inputMint: string;
+    outputMint: string;
+    amountRaw: string;
     amountDecimal: string;
     inputDecimals: number;
     outputDecimals: number;
     slippageBps: number;
   }): Promise<SwapQuote> {
     const {
+      flow,
       inputMint,
       outputMint,
+      amountRaw,
       amountDecimal,
       inputDecimals,
       outputDecimals,
       slippageBps,
     } = params;
 
-    console.log(
-      "   🔁 Building composite pump.fun → SOL → Jupiter quote"
-    );
+    if (flow === "pump-then-jupiter") {
+      console.log("   🔁 Building composite pump.fun → SOL → Jupiter quote");
 
-    const pumpQuote = await this.pumpFunClient.getQuote(
-      inputMint,
-      SOL_MINT,
-      amountDecimal,
-      inputDecimals,
-      SOL_DECIMALS,
-      slippageBps
-    );
+      const pumpQuote = await this.pumpFunClient.getQuote(
+        inputMint,
+        SOL_MINT,
+        amountDecimal,
+        inputDecimals,
+        SOL_DECIMALS,
+        slippageBps
+      );
+
+      const jupiterQuote = await this.jupiterClient.getQuote({
+        inputMint: SOL_MINT,
+        outputMint,
+        amount: pumpQuote.outputAmount,
+        slippageBps,
+      });
+
+      const estimatedRate = (() => {
+        const inputRaw = Number.parseFloat(amountDecimal);
+        const outputRaw =
+          Number.parseFloat(jupiterQuote.outAmount) /
+          Math.pow(10, outputDecimals);
+        if (!Number.isFinite(inputRaw) || inputRaw === 0) {
+          return 0;
+        }
+        return outputRaw / inputRaw;
+      })();
+
+      return {
+        inputMint,
+        outputMint,
+        inputAmount: pumpQuote.inputAmount,
+        outputAmount: jupiterQuote.outAmount,
+        estimatedRate,
+        slippage: pumpQuote.slippage + jupiterQuote.slippageBps / 100,
+        provider: "pump-fun+jupiter",
+        priceImpact: jupiterQuote.priceImpactPct,
+        platformFee: jupiterQuote.platformFee ?? undefined,
+        composite: {
+          flow,
+          intermediateMint: SOL_MINT,
+          intermediateAmount: pumpQuote.outputAmount,
+          pumpQuote,
+          jupiterQuote,
+        },
+      };
+    }
+
+    console.log("   🔁 Building composite Jupiter → SOL → pump.fun quote");
 
     const jupiterQuote = await this.jupiterClient.getQuote({
-      inputMint: SOL_MINT,
-      outputMint,
-      amount: pumpQuote.outputAmount,
+      inputMint,
+      outputMint: SOL_MINT,
+      amount: amountRaw,
       slippageBps,
     });
 
+    const solDecimalAmount = this.convertRawAmountToDecimal(
+      jupiterQuote.outAmount,
+      SOL_DECIMALS
+    );
+
+    const pumpQuote = await this.pumpFunClient.getQuote(
+      SOL_MINT,
+      outputMint,
+      solDecimalAmount,
+      SOL_DECIMALS,
+      outputDecimals,
+      slippageBps
+    );
+
     const estimatedRate = (() => {
       const inputRaw = Number.parseFloat(amountDecimal);
-      const outputRaw = Number.parseFloat(jupiterQuote.outAmount) /
+      const outputRaw =
+        Number.parseFloat(pumpQuote.outputAmount) /
         Math.pow(10, outputDecimals);
       if (!Number.isFinite(inputRaw) || inputRaw === 0) {
         return 0;
@@ -293,16 +358,17 @@ export class SwapManager {
     return {
       inputMint,
       outputMint,
-      inputAmount: pumpQuote.inputAmount,
-      outputAmount: jupiterQuote.outAmount,
+      inputAmount: jupiterQuote.inAmount,
+      outputAmount: pumpQuote.outputAmount,
       estimatedRate,
       slippage: pumpQuote.slippage + jupiterQuote.slippageBps / 100,
       provider: "pump-fun+jupiter",
       priceImpact: jupiterQuote.priceImpactPct,
       platformFee: jupiterQuote.platformFee ?? undefined,
       composite: {
+        flow,
         intermediateMint: SOL_MINT,
-        intermediateAmount: pumpQuote.outputAmount,
+        intermediateAmount: jupiterQuote.outAmount,
         pumpQuote,
         jupiterQuote,
       },
@@ -330,8 +396,19 @@ export class SwapManager {
     console.log(`   Amount: ${amount}`);
     console.log(`   Network: ${this.network}`);
 
-    const { hasPumpFunToken, hasNonGraduatedPumpFun } =
-      await this.detectPumpFunContext(inputMint, outputMint, { log: true });
+    const {
+      inputPumpInfo,
+      outputPumpInfo,
+      hasPumpFunToken,
+      hasNonGraduatedPumpFun,
+    } = await this.detectPumpFunContext(inputMint, outputMint, { log: true });
+
+    const compositeFlow = this.determineCompositeFlow({
+      inputIsPump: inputPumpInfo.isPumpFun && !inputPumpInfo.isGraduated,
+      outputIsPump: outputPumpInfo.isPumpFun && !outputPumpInfo.isGraduated,
+      inputMint,
+      outputMint,
+    });
 
     // If we have a non-graduated pump.fun token, use pump.fun
     if (hasNonGraduatedPumpFun && this.network === "mainnet") {
@@ -363,11 +440,13 @@ export class SwapManager {
       if (!validation.valid) {
         if (
           validation.error?.includes("Pump.fun swaps must involve SOL") &&
-          outputMint !== SOL_MINT
+          compositeFlow
         ) {
           return await this.buildPumpFunCompositeQuote({
+            flow: compositeFlow,
             inputMint,
             outputMint,
+            amountRaw: trimmedAmount,
             amountDecimal: decimalAmount,
             inputDecimals,
             outputDecimals,
@@ -489,11 +568,13 @@ export class SwapManager {
               validation.error?.includes(
                 "Pump.fun swaps must involve SOL"
               ) &&
-              outputMint !== SOL_MINT
+              compositeFlow
             ) {
               return await this.buildPumpFunCompositeQuote({
+                flow: compositeFlow,
                 inputMint,
                 outputMint,
+                amountRaw: trimmedAmount,
                 amountDecimal: decimalAmount,
                 inputDecimals,
                 outputDecimals,
@@ -1181,11 +1262,16 @@ export class SwapManager {
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
-    const preBalance = await this.connection.getBalance(
-      userKeypair.publicKey
-    );
+    const flow = composite.flow ?? "pump-then-jupiter";
 
-    const pumpSignature = await (async () => {
+    let pumpSignature: string;
+    let jupiterSignature: string;
+
+    if (flow === "pump-then-jupiter") {
+      const preBalance = await this.connection.getBalance(
+        userKeypair.publicKey
+      );
+
       const pumpInstructions = await this.pumpFunClient.createSwapTransaction({
         inputMint: composite.pumpQuote.inputMint,
         outputMint: composite.pumpQuote.outputMint,
@@ -1194,64 +1280,143 @@ export class SwapManager {
         userKeypair,
       });
 
-      const signature = await this.wallet.sendTransaction(pumpInstructions, [
+      pumpSignature = await this.wallet.sendTransaction(pumpInstructions, [
         userKeypair,
       ]);
-      console.log(`Pump.fun leg submitted: ${signature}`);
-      await this.wallet.confirmTransaction(signature);
-      return signature;
-    })();
+      console.log(`Pump.fun leg submitted: ${pumpSignature}`);
+      await this.wallet.confirmTransaction(pumpSignature);
 
-    const postBalance = await this.connection.getBalance(
-      userKeypair.publicKey
-    );
-
-    const expectedLamports = BigInt(composite.intermediateAmount);
-    let availableLamports = BigInt(Math.max(postBalance - preBalance, 0));
-
-    if (availableLamports === 0n) {
-      availableLamports = expectedLamports;
-    } else if (availableLamports > expectedLamports) {
-      availableLamports = expectedLamports;
-    }
-
-    const feeBuffer = 10_000n;
-    if (availableLamports <= feeBuffer) {
-      throw new Error(
-        "Pump.fun leg completed but not enough SOL available for Jupiter leg"
+      const postBalance = await this.connection.getBalance(
+        userKeypair.publicKey
       );
-    }
 
-    const jupiterInputLamports = availableLamports - feeBuffer;
+      const expectedLamports = BigInt(composite.intermediateAmount);
+      let availableLamports = BigInt(Math.max(postBalance - preBalance, 0));
 
-    console.log(
-      `Jupiter leg will use ${jupiterInputLamports.toString()} lamports (keeping ${feeBuffer.toString()} for fees)`
-    );
+      if (availableLamports === 0n) {
+        availableLamports = expectedLamports;
+      } else if (availableLamports > expectedLamports) {
+        availableLamports = expectedLamports;
+      }
 
-    const jupiterQuote = await this.jupiterClient.getQuote({
-      inputMint: SOL_MINT,
-      outputMint: quote.outputMint,
-      amount: jupiterInputLamports.toString(),
-      slippageBps,
-    });
+      const feeBuffer = 10_000n;
+      if (availableLamports <= feeBuffer) {
+        throw new Error(
+          "Pump.fun leg completed but not enough SOL available for Jupiter leg"
+        );
+      }
 
-    const swapResponse = await this.jupiterClient.getSwapTransaction({
-      userPublicKey: userKeypair.publicKey.toBase58(),
-      quoteResponse: jupiterQuote,
-    });
+      const jupiterInputLamports = availableLamports - feeBuffer;
 
-    const jupiterSignature = await this.executeJupiterTransaction(
-      swapResponse.swapTransaction,
-      userKeypair
-    );
+      console.log(
+        `Jupiter leg will use ${jupiterInputLamports.toString()} lamports (keeping ${feeBuffer.toString()} for fees)`
+      );
 
-    console.log(
-      `Jupiter leg submitted: ${jupiterSignature} (expected ~${formatAmount(
-        BigInt(jupiterQuote.outAmount),
+      const jupiterQuote = await this.jupiterClient.getQuote({
+        inputMint: SOL_MINT,
+        outputMint: quote.outputMint,
+        amount: jupiterInputLamports.toString(),
+        slippageBps,
+      });
+
+      const swapResponse = await this.jupiterClient.getSwapTransaction({
+        userPublicKey: userKeypair.publicKey.toBase58(),
+        quoteResponse: jupiterQuote,
+      });
+
+      jupiterSignature = await this.executeJupiterTransaction(
+        swapResponse.swapTransaction,
+        userKeypair
+      );
+
+      console.log(
+        `Jupiter leg submitted: ${jupiterSignature} (expected ~${formatAmount(
+          BigInt(jupiterQuote.outAmount),
+          outputDecimals,
+          { maxFractionDigits: Math.min(outputDecimals, 6), trim: true }
+        )} ${outputTicker.toUpperCase()})`
+      );
+    } else if (flow === "jupiter-then-pump") {
+      const preBalance = await this.connection.getBalance(
+        userKeypair.publicKey
+      );
+
+      const jupiterQuote = await this.jupiterClient.getQuote({
+        inputMint: quote.inputMint,
+        outputMint: SOL_MINT,
+        amount: quote.inputAmount,
+        slippageBps,
+      });
+
+      const swapResponse = await this.jupiterClient.getSwapTransaction({
+        userPublicKey: userKeypair.publicKey.toBase58(),
+        quoteResponse: jupiterQuote,
+      });
+
+      jupiterSignature = await this.executeJupiterTransaction(
+        swapResponse.swapTransaction,
+        userKeypair
+      );
+      console.log(`Jupiter leg submitted: ${jupiterSignature}`);
+      await this.wallet.confirmTransaction(jupiterSignature);
+
+      const postBalance = await this.connection.getBalance(
+        userKeypair.publicKey
+      );
+
+      const expectedLamports = BigInt(composite.intermediateAmount);
+      let availableLamports = BigInt(Math.max(postBalance - preBalance, 0));
+
+      if (availableLamports === 0n) {
+        availableLamports = expectedLamports;
+      } else if (availableLamports > expectedLamports) {
+        availableLamports = expectedLamports;
+      }
+
+      const feeBuffer = 10_000n;
+      if (availableLamports <= feeBuffer) {
+        throw new Error(
+          "Jupiter leg completed but not enough SOL available for pump.fun leg"
+        );
+      }
+
+      const pumpInputLamports = availableLamports - feeBuffer;
+      const pumpInputDecimal = this.convertRawAmountToDecimal(
+        pumpInputLamports.toString(),
+        SOL_DECIMALS
+      );
+
+      const pumpQuote = await this.pumpFunClient.getQuote(
+        SOL_MINT,
+        quote.outputMint,
+        pumpInputDecimal,
+        SOL_DECIMALS,
         outputDecimals,
-        { maxFractionDigits: Math.min(outputDecimals, 6), trim: true }
-      )} ${outputTicker.toUpperCase()})`
-    );
+        slippageBps
+      );
+
+      const pumpInstructions = await this.pumpFunClient.createSwapTransaction({
+        inputMint: pumpQuote.inputMint,
+        outputMint: pumpQuote.outputMint,
+        amount: pumpQuote.inputAmount,
+        slippageBps,
+        userKeypair,
+      });
+
+      pumpSignature = await this.wallet.sendTransaction(pumpInstructions, [
+        userKeypair,
+      ]);
+      console.log(
+        `Pump.fun leg submitted: ${pumpSignature} (expected ~${formatAmount(
+          BigInt(pumpQuote.outputAmount),
+          outputDecimals,
+          { maxFractionDigits: Math.min(outputDecimals, 6), trim: true }
+        )} ${outputTicker.toUpperCase()})`
+      );
+      await this.wallet.confirmTransaction(pumpSignature);
+    } else {
+      throw new Error(`Unsupported composite flow: ${flow}`);
+    }
 
     return { pumpSignature, jupiterSignature };
   }
@@ -1310,30 +1475,38 @@ export class SwapManager {
 
         const pumpDisplay = this.pumpFunClient.formatQuoteForDisplay(
           {
-            inputMint: quote.composite?.pumpQuote.inputMint ?? quote.inputMint,
-            outputMint:
-              quote.composite?.pumpQuote.outputMint ?? SOL_MINT,
-            inputAmount: quote.composite?.pumpQuote.inputAmount ?? "0",
-            outputAmount: quote.composite?.pumpQuote.outputAmount ?? "0",
+            inputMint: composite?.pumpQuote.inputMint ?? quote.inputMint,
+            outputMint: composite?.pumpQuote.outputMint ?? SOL_MINT,
+            inputAmount: composite?.pumpQuote.inputAmount ?? "0",
+            outputAmount: composite?.pumpQuote.outputAmount ?? "0",
             estimatedRate:
-              quote.composite?.pumpQuote.estimatedRate ?? quote.estimatedRate,
-            slippage: quote.composite?.pumpQuote.slippage ?? 0,
+              composite?.pumpQuote.estimatedRate ?? quote.estimatedRate,
+            slippage: composite?.pumpQuote.slippage ?? 0,
             isGraduated: false,
           },
-          inputDecimals,
-          SOL_DECIMALS,
-          inputTicker,
-          "SOL"
+          composite?.flow === "jupiter-then-pump" ? SOL_DECIMALS : inputDecimals,
+          composite?.flow === "jupiter-then-pump" ? outputDecimals : SOL_DECIMALS,
+          composite?.flow === "jupiter-then-pump" ? "SOL" : inputTicker,
+          composite?.flow === "jupiter-then-pump" ? outputTicker : "SOL"
         );
 
         const jupiterDisplay = this.jupiterClient.formatQuoteForDisplay(
           {
-            inputMint: SOL_MINT,
+            inputMint: composite?.flow === "jupiter-then-pump"
+              ? quote.inputMint
+              : SOL_MINT,
             inAmount:
-              composite?.jupiterQuote?.inAmount ??
-              composite?.intermediateAmount ?? "0",
-            outputMint: quote.outputMint,
-            outAmount: quote.outputAmount,
+              composite?.flow === "jupiter-then-pump"
+                ? composite?.jupiterQuote?.inAmount ?? quote.inputAmount
+                : composite?.jupiterQuote?.inAmount ??
+                  composite?.intermediateAmount ?? "0",
+            outputMint: composite?.flow === "jupiter-then-pump"
+              ? SOL_MINT
+              : quote.outputMint,
+            outAmount:
+              composite?.flow === "jupiter-then-pump"
+                ? composite?.intermediateAmount ?? "0"
+                : quote.outputAmount,
             otherAmountThreshold: "0",
             swapMode: "ExactIn",
             slippageBps:
@@ -1346,13 +1519,18 @@ export class SwapManager {
             totalTime: 0,
             platformFee: quote.platformFee ?? null,
           },
-          SOL_DECIMALS,
-          outputDecimals,
-          "SOL",
-          outputTicker
+          composite?.flow === "jupiter-then-pump" ? inputDecimals : SOL_DECIMALS,
+          composite?.flow === "jupiter-then-pump" ? SOL_DECIMALS : outputDecimals,
+          composite?.flow === "jupiter-then-pump" ? inputTicker : "SOL",
+          composite?.flow === "jupiter-then-pump" ? "SOL" : outputTicker
         );
 
-        return [pumpDisplay, jupiterDisplay].join("\n\n");
+        const orderedDisplays =
+          composite?.flow === "jupiter-then-pump"
+            ? [jupiterDisplay, pumpDisplay]
+            : [pumpDisplay, jupiterDisplay];
+
+        return orderedDisplays.join("\n\n");
       }
 
       default:
