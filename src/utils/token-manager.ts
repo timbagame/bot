@@ -515,7 +515,7 @@ export class TokenManager {
     }
 
     if (!resolvedTicker) {
-      resolvedTicker = `TOKEN_${mint.slice(-4).toUpperCase()}`;
+      resolvedTicker = `TOKEN_${mint.toUpperCase()}`;
     }
 
     console.log(
@@ -681,7 +681,8 @@ export class TokenManager {
       }
 
       if (!symbol || symbol.length === 0) {
-        symbol = pumpMetadata?.symbol ?? tokenMint.slice(0, 6).toUpperCase();
+        const fallbackSymbolSource = pumpMetadata?.symbol ?? tokenMint;
+        symbol = fallbackSymbolSource.toUpperCase();
       }
 
       if (!Number.isFinite(decimals) || decimals < 0) {

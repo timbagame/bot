@@ -190,7 +190,6 @@ export interface TransactionLinkOptions {
   linkText?: string;
   format?: TransactionLinkFormat;
   fallbackToSignature?: boolean;
-  shortSignatureLength?: number;
 }
 
 export interface TransactionLinkResult {
@@ -207,7 +206,6 @@ export function buildTransactionLinkMessage({
   linkText,
   format = "html",
   fallbackToSignature = false,
-  shortSignatureLength = 8,
 }: TransactionLinkOptions): TransactionLinkResult {
   if (!signature) {
     return {
@@ -224,14 +222,8 @@ export function buildTransactionLinkMessage({
   );
   const normalizedLabel = label ?? "";
 
-  const shouldTruncate =
-    shortSignatureLength > 0 && signature.length > shortSignatureLength;
-  const truncatedSignature = shouldTruncate
-    ? `${signature.slice(0, shortSignatureLength)}...`
-    : signature;
-
   if (solscanUrl) {
-    const anchorText = linkText ?? truncatedSignature;
+    const anchorText = linkText ?? signature;
     const message =
       format === "markdown"
         ? `${normalizedLabel}[${anchorText}](${solscanUrl})`
@@ -241,7 +233,7 @@ export function buildTransactionLinkMessage({
       message,
       solscanUrl,
       previewDisabled: true,
-      displaySignature: truncatedSignature,
+      displaySignature: signature,
     };
   }
 
@@ -250,14 +242,14 @@ export function buildTransactionLinkMessage({
       message: null,
       solscanUrl: null,
       previewDisabled: false,
-      displaySignature: truncatedSignature,
+      displaySignature: signature,
     };
   }
 
   return {
-    message: `${normalizedLabel}${truncatedSignature}`,
+    message: `${normalizedLabel}${signature}`,
     solscanUrl: null,
     previewDisabled: false,
-    displaySignature: truncatedSignature,
+    displaySignature: signature,
   };
 }

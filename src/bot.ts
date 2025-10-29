@@ -1389,10 +1389,7 @@ const getGameMessageTarget = (gameAddress: string): GameMessageTarget | null => 
   } catch (error) {
     // gameManager might not be initialized yet; fall back to database record
     console.warn(
-      `Game manager not ready when resolving message target for ${gameAddress.slice(
-        0,
-        8
-      )}...`
+      `Game manager not ready when resolving message target for ${gameAddress}`
     );
   }
 
@@ -1431,10 +1428,7 @@ const getGameMessageTarget = (gameAddress: string): GameMessageTarget | null => 
     Number.isNaN(messageId)
   ) {
     console.warn(
-      `Cannot find chat/message reference for game ${gameAddress.slice(
-        0,
-        8
-      )}...`
+      `Cannot find chat/message reference for game ${gameAddress}`
     );
     return null;
   }
@@ -3876,10 +3870,8 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
       signature,
       networkOverride: process.env["RPC_URL"],
       label: "🔗 **Transaction:** ",
-      linkText: `${signature.slice(0, 8)}...`,
       format: "markdown",
       fallbackToSignature: true,
-      shortSignatureLength: signature.length,
     });
 
     const successMessage = [
@@ -3930,10 +3922,8 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
                 signature,
                 networkOverride: process.env["RPC_URL"],
                 label: "🔗 **Check Status:** ",
-                linkText: `${signature.slice(0, 8)}...`,
                 format: "markdown",
                 fallbackToSignature: true,
-                shortSignatureLength: signature.length,
               });
               return message ?? `🔗 **Check Status:** ${signature}`;
             })()
@@ -7385,7 +7375,7 @@ const HELP_SECTIONS: Record<HelpSectionKey, HelpSectionConfig> = {
       "<code>/coinflip 100 TIMBA 2</code> (2-player, 100 TIMBA each)\n" +
       "<code>/giveaway 500 TIMBA 5</code> (5 players, 500 TIMBA prize)\n\n" +
       "<b>🔧 Utility Examples:</b>\n" +
-      "<code>/checktx 3x7k2m...</code> (check transaction)\n" +
+      "<code>/checktx FULL_TRANSACTION_SIGNATURE</code> (check transaction)\n" +
       "<code>/default USDC</code> (set chat default token)",
     ack: "📋 Command Examples",
     buttons: [
@@ -7977,7 +7967,7 @@ registerCallbackPrefixHandler("confirm_sell_", async (ctx, { payload: txId }) =>
       signature,
       networkOverride: process.env["RPC_URL"],
       label: "🔗 <b>Transaction:</b> ",
-      linkText: `<code>${signature.slice(0, 8)}...${signature.slice(-8)}</code>`,
+      linkText: `<code>${signature}</code>`,
       format: "html",
     });
 
@@ -7988,7 +7978,7 @@ registerCallbackPrefixHandler("confirm_sell_", async (ctx, { payload: txId }) =>
       `🎯 <b>Received:</b> ${sellData.toToken}`,
       "",
       transactionLink ??
-        `🔗 <b>Transaction:</b> <code>${signature.slice(0, 8)}...${signature.slice(-8)}</code>`,
+        `🔗 <b>Transaction:</b> <code>${signature}</code>`,
       "",
       "🎉 <b>Sale successful!</b>",
     ].join("\n");
@@ -9183,10 +9173,10 @@ const fetchTokenMetadata = async (
       console.log("Wallet metadata failed:", (metadataError as Error).message);
     }
 
-    // Fallback: return truncated address as symbol
+    // Fallback: return the full address as the symbol when metadata is unavailable
     return {
       address: contractAddress,
-      symbol: `${contractAddress.slice(0, 4)}...${contractAddress.slice(-4)}`,
+      symbol: contractAddress,
       name: "Unknown Token",
       decimals: 6,
       verified: false,
