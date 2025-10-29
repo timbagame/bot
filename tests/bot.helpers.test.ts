@@ -325,7 +325,7 @@ describe("Bot helper utilities", () => {
       receiveToken: "USDC",
       providerLabel: "jupiter",
       rateDisplay: "0.00009",
-      slippageText: "1.0%",
+      slippageText: "0.5%",
     });
   });
 
