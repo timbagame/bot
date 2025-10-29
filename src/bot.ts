@@ -835,7 +835,7 @@ const formatTradeConfirmationSummary = ({
   const providerLabel =
     quote.provider === "pump-fun"
       ? "pump-fun (ungraduated)"
-      : `${quote.provider} (graduated)`;
+      : quote.provider;
 
   const slippageText = formatSlippagePercent(
     quote.slippage !== undefined ? (quote.slippage as number) : 1
