@@ -4540,7 +4540,24 @@ const handleJoinGame = async (
     );
 
     if (!result.success) {
-      await safeAnswerCallbackQuery(ctx, result.error || "Failed to join game");
+      const errorMessage = result.error || "Failed to join game";
+
+      if (errorMessage.includes("already completed")) {
+        try {
+          await gameManager.updateGameMessageFromData(
+            ctx,
+            game.game_address,
+            "Completed"
+          );
+        } catch (updateError) {
+          console.error(
+            `Error syncing completed game message for ${game.game_address}:`,
+            updateError
+          );
+        }
+      }
+
+      await safeAnswerCallbackQuery(ctx, errorMessage);
       return;
     }
 

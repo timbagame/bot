@@ -335,4 +335,188 @@ describe("GameManager join lifecycle", () => {
     expect(removed.length).toBe(1);
     expect(removed[0][1]).toBe("222");
   });
+
+  test("joinGame returns completion message when on-chain account is missing", async () => {
+    resetGM();
+
+    const playerKp = Keypair.generate();
+    const sendSignatures: string[] = [];
+
+    const program = {
+      programId: new PublicKey("32Jr4JnXWvqq9GqPQynkooHsszaucUUvZfNLh2hdX2L5"),
+      account: {
+        game: {
+          fetch: async () => {
+            throw new Error("fetch should not be called when fetchNullable returns null");
+          },
+          fetchNullable: async () => null,
+        },
+      },
+      methods: {
+        joinGame: () => ({
+          accounts: () => ({
+            instruction: async () => ({})
+          }),
+        }),
+      },
+    } as any;
+
+    const wallet = {
+      getKeyPair: () => playerKp,
+      getTokenMetadata: async () => ({ decimals: 6 }),
+      getTokenBalance: async () => 1_000_000,
+      getBalance: async () => 1_000_000,
+      sendTransaction: async () => {
+        sendSignatures.push("unexpected");
+        throw new Error("sendTransaction should not be reached");
+      },
+    } as any;
+
+    const gameDb = {
+      getGame: () => ({
+        status: "active",
+        token_mint: "Mint",
+        token_ticker: "TOK",
+      }),
+      savePlayerMapping: () => {},
+      saveGameParticipant: () => {},
+      removeGameParticipant: () => {},
+      getGameParticipants: () => [],
+      getPlayerTelegramId: () => null,
+    } as any;
+
+    const gm = GameManager.getInstance(program, wallet, gameDb);
+    (gm as any).swapManager = {
+      performJustInTimeSolSwap: async () => ({ swapped: false }),
+    };
+
+    const result = await gm.joinGame(
+      new PublicKey("BPFLoader1111111111111111111111111111111111").toBase58(),
+      5n
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(
+      "This game has already completed. Refresh to see the result."
+    );
+    expect(sendSignatures.length).toBe(0);
+  });
+
+  test("joinGame retries the transaction once after a confirmation timeout", async () => {
+    resetGM();
+
+    const playerKp = Keypair.generate();
+    const tokenMint = new PublicKey(
+      "So11111111111111111111111111111111111111112"
+    );
+
+    const program = {
+      programId: new PublicKey("32Jr4JnXWvqq9GqPQynkooHsszaucUUvZfNLh2hdX2L5"),
+      account: {
+        game: {
+          fetch: async () => ({
+            isPrivate: false,
+            ticketsCount: 0,
+            maxTickets: 2,
+            gameType: { coinflip: {} },
+            ticketAmount: 500_000,
+            tokenMint,
+          }),
+          fetchNullable: async () => ({
+            isPrivate: false,
+            ticketsCount: 0,
+            maxTickets: 2,
+            gameType: { coinflip: {} },
+            ticketAmount: 500_000,
+            tokenMint,
+          }),
+        },
+      },
+      methods: {
+        joinGame: () => ({
+          accounts: (accs: any) => ({
+            instruction: async () => accs,
+          }),
+        }),
+      },
+    } as any;
+
+    const sendSignatures: string[] = [];
+    const wallet = {
+      getKeyPair: () => playerKp,
+      getTokenMetadata: async () => ({ decimals: 9 }),
+      getTokenBalance: async () => 5_000_000_000,
+      getBalance: async () => 5_000_000_000,
+      sendTransaction: async () => {
+        const sig = `SIG${sendSignatures.length + 1}`;
+        sendSignatures.push(sig);
+        return sig;
+      },
+    } as any;
+
+    const participantCalls: any[] = [];
+    const confirmedCalls: any[] = [];
+    const gameDb = {
+      getGame: () => ({
+        status: "active",
+        token_mint: tokenMint.toBase58(),
+        token_ticker: "TOK",
+      }),
+      savePlayerMapping: () => {},
+      saveGameParticipant: (...args: any[]) => participantCalls.push(args),
+      removeGameParticipant: () => {},
+      getGameParticipants: () => [],
+      getPlayerTelegramId: () => null,
+    } as any;
+
+    const gm = GameManager.getInstance(program, wallet, gameDb);
+    (gm as any).swapManager = {
+      performJustInTimeSolSwap: async () => ({ swapped: false }),
+    };
+
+    const gameToken = Keypair.generate().publicKey;
+    const gameVault = Keypair.generate().publicKey;
+    const gameTokenAccount = Keypair.generate().publicKey;
+    const playerTokenAccount = Keypair.generate().publicKey;
+
+    (gm as any).resolveGameTokenAccounts = async () => ({
+      tokenProgram: TOKEN_PROGRAM_ID,
+      gameToken,
+      gameVault,
+      gameTokenAccount,
+    });
+    (gm as any).deriveAta = async () => playerTokenAccount;
+
+    let confirmCalls = 0;
+    (gm as any).confirmTransactionWithRecovery = async () => {
+      confirmCalls += 1;
+      if (confirmCalls === 1) {
+        throw new Error("timeout while confirming");
+      }
+      return true;
+    };
+    (gm as any).isPlayerInGame = async () => false;
+    (gm as any).verifyParticipantJoin = async (
+      _gamePda: PublicKey,
+      _player: PublicKey,
+      telegramId: string,
+      options: { joinSignature?: string | null }
+    ) => {
+      confirmedCalls.push({ telegramId, joinSignature: options.joinSignature });
+      return true;
+    };
+
+    const result = await gm.joinGame(
+      new PublicKey("BPFLoader1111111111111111111111111111111111").toBase58(),
+      7n
+    );
+
+    expect(result.success).toBe(true);
+    expect(sendSignatures).toEqual(["SIG1", "SIG2"]);
+    expect(confirmCalls).toBe(2);
+    expect(participantCalls.length).toBe(2);
+    expect(confirmedCalls).toEqual([
+      { telegramId: "7", joinSignature: "SIG2" },
+    ]);
+  });
 });

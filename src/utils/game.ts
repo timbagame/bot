@@ -164,6 +164,8 @@ export class GameManager {
   private cachedConnection?: Connection;
   private tokenProgramCache = new Map<string, PublicKey>();
   private gameRentLamports: number | null = null;
+  private readonly completedGameErrorMessage =
+    "This game has already completed. Refresh to see the result.";
 
   private constructor(
     private program: anchor.Program<Timba>,
@@ -2817,7 +2819,29 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
       }
 
       // Fetch blockchain game state
-      const gameAccount = await this.program.account.game.fetch(gamePda);
+      let gameAccount: any;
+      try {
+        const accountApi = this.program.account.game as any;
+        const fetchNullable = accountApi?.fetchNullable?.bind(accountApi);
+        gameAccount = fetchNullable
+          ? await fetchNullable(gamePda)
+          : await accountApi.fetch(gamePda);
+
+        if (!gameAccount) {
+          return {
+            success: false,
+            error: this.completedGameErrorMessage,
+          };
+        }
+      } catch (fetchError: any) {
+        if (fetchError?.message?.includes("Account does not exist")) {
+          return {
+            success: false,
+            error: this.completedGameErrorMessage,
+          };
+        }
+        throw fetchError;
+      }
 
       // Check if player already in game
       const isInGame = await this.isPlayerInGame(gamePda, playerKp.publicKey);
@@ -2994,33 +3018,70 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         pendingRecorded = true;
         joinConfirmed = true;
       } else {
-        const joinAccounts = await this.buildJoinAccounts(
-          gamePda,
-          gameAccount,
-          playerKp.publicKey
-        );
-        const joinInstruction = await this.program.methods
-          .joinGame()
-          .accounts(joinAccounts as any)
-          .instruction();
+        const maxAttempts = 2;
+        for (let attempt = 0; attempt < maxAttempts && !joinConfirmed; attempt++) {
+          try {
+            const joinAccounts = await this.buildJoinAccounts(
+              gamePda,
+              gameAccount,
+              playerKp.publicKey
+            );
+            const joinInstruction = await this.program.methods
+              .joinGame()
+              .accounts(joinAccounts as any)
+              .instruction();
 
-        const tx = await this.wallet.sendTransaction(
-          [joinInstruction],
-          [playerKp]
-        );
-        joinTx = tx;
-        this.gameDb.saveGameParticipant(gameAddress, telegramIdStr, playerPubkey, {
-          status: "pending",
-          joinSignature: joinTx ?? null,
-          lastVerifiedAt: null,
-        });
-        pendingRecorded = true;
-        joinConfirmed = await this.confirmTransactionWithRecovery(
-          tx,
-          gamePda,
-          "Player join",
-          playerKp.publicKey
-        );
+            const tx = await this.wallet.sendTransaction(
+              [joinInstruction],
+              [playerKp]
+            );
+            joinTx = tx;
+            this.gameDb.saveGameParticipant(
+              gameAddress,
+              telegramIdStr,
+              playerPubkey,
+              {
+                status: "pending",
+                joinSignature: joinTx ?? null,
+                lastVerifiedAt: null,
+              }
+            );
+            pendingRecorded = true;
+
+            await this.confirmTransactionWithRecovery(
+              tx,
+              gamePda,
+              "Player join",
+              playerKp.publicKey
+            );
+            joinConfirmed = true;
+          } catch (joinError: any) {
+            const message = joinError?.message ?? "";
+            const isTimeout =
+              message.includes("timeout") ||
+              message.includes("not confirmed");
+            const isLastAttempt = attempt === maxAttempts - 1;
+
+            if (isTimeout && !isLastAttempt) {
+              const alreadyJoined = await this.isPlayerInGame(
+                gamePda,
+                playerKp.publicKey
+              ).catch(() => false);
+
+              if (alreadyJoined) {
+                joinConfirmed = true;
+                break;
+              }
+
+              console.warn(
+                `⚠️ Player join attempt ${attempt + 1} for ${gameAddress} timed out; retrying with a fresh blockhash.`
+              );
+              continue;
+            }
+
+            throw joinError;
+          }
+        }
       }
 
       if (!joinConfirmed) {
@@ -3029,7 +3090,8 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         }
         return {
           success: false,
-          error: "Failed to confirm join transaction",
+          error:
+            "Join transaction is still pending on Solana. Tap Refresh or try again shortly.",
         };
       }
 
@@ -3302,41 +3364,115 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       }
 
       const adminKp = authResult.adminKeypair!;
-      const gameAccount = await this.program.account.game.fetch(gamePda);
-      const joinAccounts = await this.buildJoinAccounts(
-        gamePda,
-        gameAccount,
-        playerKp.publicKey,
-        adminKp.publicKey
-      );
+      const loadGameAccount = async (): Promise<any | null> => {
+        const accountApi = this.program.account.game as any;
+        const fetchNullable = accountApi?.fetchNullable?.bind(accountApi);
+        const account = fetchNullable
+          ? await fetchNullable(gamePda)
+          : await accountApi.fetch(gamePda);
+        return account ?? null;
+      };
 
-      const joinInstruction = await this.program.methods
-        .joinGame()
-        .accounts(joinAccounts as any)
-        .instruction();
-
-      const tx = await this.wallet.sendTransaction(
-        [joinInstruction],
-        [playerKp, adminKp]
-      );
-
-      const joinConfirmed = await this.confirmTransactionWithRecovery(
-        tx,
-        gamePda,
-        "Player join",
-        playerKp.publicKey
-      );
-
-      if (!joinConfirmed) {
-        return {
-          success: false,
-          error: "Join transaction could not be confirmed",
-        };
+      let gameAccount: any;
+      try {
+        gameAccount = await loadGameAccount();
+      } catch (fetchError: any) {
+        if (fetchError?.message?.includes("Account does not exist")) {
+          return { success: false, error: this.completedGameErrorMessage };
+        }
+        throw fetchError;
       }
 
-      return { success: true, tx };
+      if (!gameAccount) {
+        return { success: false, error: this.completedGameErrorMessage };
+      }
+
+      const maxAttempts = 2;
+      let lastSignature: string | undefined;
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+          if (attempt > 0) {
+            gameAccount = await loadGameAccount();
+            if (!gameAccount) {
+              return {
+                success: false,
+                error: this.completedGameErrorMessage,
+              };
+            }
+          }
+
+          const joinAccounts = await this.buildJoinAccounts(
+            gamePda,
+            gameAccount,
+            playerKp.publicKey,
+            adminKp.publicKey
+          );
+
+          const joinInstruction = await this.program.methods
+            .joinGame()
+            .accounts(joinAccounts as any)
+            .instruction();
+
+          const tx = await this.wallet.sendTransaction(
+            [joinInstruction],
+            [playerKp, adminKp]
+          );
+          lastSignature = tx;
+
+          await this.confirmTransactionWithRecovery(
+            tx,
+            gamePda,
+            "Player join",
+            playerKp.publicKey
+          );
+
+          return { success: true, tx };
+        } catch (joinError: any) {
+          const message = joinError?.message ?? "";
+
+          if (message.includes("Account does not exist")) {
+            return {
+              success: false,
+              error: this.completedGameErrorMessage,
+            };
+          }
+
+          const isTimeout =
+            message.includes("timeout") || message.includes("not confirmed");
+          const isLastAttempt = attempt === maxAttempts - 1;
+
+          if (isTimeout && !isLastAttempt) {
+            const alreadyJoined = await this.isPlayerInGame(
+              gamePda,
+              playerKp.publicKey
+            ).catch(() => false);
+
+            if (alreadyJoined) {
+              return { success: true, tx: lastSignature };
+            }
+
+            console.warn(
+              `⚠️ Player join attempt ${attempt + 1} for ${gamePda.toBase58()} timed out; retrying with a fresh blockhash.`
+            );
+            continue;
+          }
+
+          throw joinError;
+        }
+      }
+
+      return {
+        success: false,
+        error:
+          "Join transaction is still pending on Solana. Tap Refresh or try again shortly.",
+        tx: lastSignature,
+      };
     } catch (error: any) {
       console.error(`Error joining private game:`, error);
+      if (error?.message?.includes("Account does not exist")) {
+        return { success: false, error: this.completedGameErrorMessage };
+      }
       return { success: false, error: error.message || "Unknown error" };
     }
   }
