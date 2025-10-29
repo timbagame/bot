@@ -784,6 +784,33 @@ const TRADE_ACTION_LABEL: Record<TradeKind, string> = {
   swap: "swap",
 };
 
+const formatSlippagePercent = (value: number): string => {
+  if (!Number.isFinite(value)) {
+    return "0%";
+  }
+
+  if (value === 0) {
+    return "0%";
+  }
+
+  const absolute = Math.abs(value);
+
+  if (absolute >= 1) {
+    const decimals = Number.isInteger(value) ? 0 : 1;
+    return `${value.toFixed(decimals)}%`;
+  }
+
+  if (absolute >= 0.1) {
+    return `${value.toFixed(1)}%`;
+  }
+
+  if (absolute >= 0.01) {
+    return `${value.toFixed(2)}%`;
+  }
+
+  return `${value.toFixed(3)}%`;
+};
+
 const formatTradeConfirmationSummary = ({
   kind,
   payToken,
@@ -810,9 +837,9 @@ const formatTradeConfirmationSummary = ({
       ? "pump-fun (ungraduated)"
       : `${quote.provider} (graduated)`;
 
-  const slippageText = quote.slippage !== undefined
-    ? `${quote.slippage.toFixed(1)}%`
-    : "1.0%";
+  const slippageText = formatSlippagePercent(
+    quote.slippage !== undefined ? (quote.slippage as number) : 1
+  );
 
   const lines = [
     `${TRADE_ICONS[kind]} <b>${TRADE_TITLES[kind]}</b>`,
@@ -848,11 +875,11 @@ type TradeConfirmationSummary = ReturnType<typeof formatTradeConfirmationSummary
 
 const DEFAULT_TRADE_SLIPPAGE_CONFIG: TradeSlippageConfig = {
   callbackPrefix: "trade_slip",
-  defaultOptions: [0.5, 1, 2, 3, 5],
+  defaultOptions: [0.02, 0.1, 0.5, 1],
   allowCustom: true,
 };
 
-const TRADE_SLIPPAGE_RANGE = { min: 0.1, max: 10 } as const;
+const TRADE_SLIPPAGE_RANGE = { min: 0.02, max: 10 } as const;
 
 const TRADE_CONFIRMATION_CONFIG: Record<
   Extract<TradeKind, "buy" | "sell">,
@@ -907,9 +934,7 @@ const buildTradeConfirmationKeyboard = ({
         keyboard.row();
       }
 
-      const label = Number.isInteger(value)
-        ? `${value.toFixed(0)}%`
-        : `${value.toFixed(1)}%`;
+      const label = formatSlippagePercent(value);
 
       const callbackValue = value.toString();
       keyboard.text(
@@ -7625,14 +7650,15 @@ registerCallbackPrefixHandler(
         const response = [
           `⚙️ <b>CUSTOM SLIPPAGE</b>`,
           "",
-          `<b>Current:</b> ${currentSlippage.toFixed(1)}%`,
+          `<b>Current:</b> ${formatSlippagePercent(currentSlippage)}`,
           "",
           `Please send a message with your desired slippage percentage.`,
           "",
           `<b>Examples:</b>`,
+          `• <code>0.02</code> (0.02% slippage)`,
+          `• <code>0.1</code> (0.1% slippage)`,
           `• <code>0.5</code> (0.5% slippage)`,
-          `• <code>1.5</code> (1.5% slippage)`,
-          `• <code>3</code> (3% slippage)`,
+          `• <code>1</code> (1% slippage)`,
           "",
           `<b>Range:</b> ${TRADE_SLIPPAGE_RANGE.min}% - ${TRADE_SLIPPAGE_RANGE.max}%`,
           INPUT_TIMEOUT_HINT,
@@ -10209,9 +10235,9 @@ const handleTradeCustomSlippageInput = async (
       "Please enter a valid slippage percentage:",
       "",
       `<b>Examples:</b>`,
+      `• <code>0.02</code> (0.02% slippage)`,
+      `• <code>0.1</code> (0.1% slippage)`,
       `• <code>0.5</code> (0.5% slippage)`,
-      `• <code>1</code> (1% slippage)`,
-      `• <code>2.5</code> (2.5% slippage)`,
       "",
       `<b>Range:</b> ${TRADE_SLIPPAGE_RANGE.min}% - ${TRADE_SLIPPAGE_RANGE.max}%`,
       INPUT_TIMEOUT_HINT,
