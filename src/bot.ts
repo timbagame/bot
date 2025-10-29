@@ -1412,6 +1412,13 @@ const fetchTokenPriceUSD = async ({
   return tokenPriceUSD ?? null;
 };
 
+const toTitleCase = (value: string): string => {
+  if (typeof value !== "string" || value.length === 0) {
+    return "";
+  }
+  return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+};
+
 type GameSetupCopy = {
   gameType: "coinflip" | "giveaway";
   heading: string;
@@ -3830,8 +3837,10 @@ bot.callbackQuery(
           ),
         });
 
+        const formattedGameType = toTitleCase(gameType);
+
         const playerMessage = [
-          `<b>${gameType.toUpperCase()} - CHOOSE PLAYERS</b>`,
+          `<b>${formattedGameType} - Choose Players</b>`,
           "",
           `Amount: <b>${formattedAmount} ${tokenContext.tokenTicker}</b>`,
           "",
@@ -3903,8 +3912,10 @@ bot.callbackQuery(
           ),
         });
 
+        const formattedGameType = toTitleCase(gameType);
+
         const confirmMessage = [
-          `<b>CONFIRM ${gameType.toUpperCase()}</b>`,
+          `<b>Confirm ${formattedGameType}</b>`,
           "",
           `Amount: <b>${amountFormatted} ${tokenContext.tokenTicker}</b>`,
           `Players: <b>${players}</b>`,
@@ -4204,8 +4215,10 @@ bot.callbackQuery(
             : contractMin;
         const startAmount = roundValue(Math.max(contractMin, defaultStart));
 
+        const formattedGameType = toTitleCase(gameType);
+
         await respondWithMenu(ctx, {
-          text: `🎯 <b>CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>\n\n💰 Balance: <b>${userBalance.toFixed(
+          text: `🎯 <b>Custom Amount - ${formattedGameType}</b>\n\n💰 Balance: <b>${userBalance.toFixed(
             Math.min(4, tokenContext.tokenDecimals)
           )} ${tokenContext.tokenTicker}</b>\n\nAdjust the amount using the controls below:`,
           parseMode: "HTML",
@@ -4277,8 +4290,10 @@ bot.callbackQuery(
           )
         );
 
+        const formattedGameType = toTitleCase(gameType);
+
         await respondWithMenu(ctx, {
-          text: `🎯 <b>CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>\n\n💰 Balance: <b>${userBalance.toFixed(
+          text: `🎯 <b>Custom Amount - ${formattedGameType}</b>\n\n💰 Balance: <b>${userBalance.toFixed(
             Math.min(4, tokenContext.tokenDecimals)
           )} ${tokenContext.tokenTicker}</b>\n\nAdjust the amount using the controls below:`,
           parseMode: "HTML",
@@ -4479,8 +4494,10 @@ bot.callbackQuery(
                 tokenContext.tokenDecimals
               );
 
+        const formattedGameType = toTitleCase(gameType);
+
         const typeMessage = [
-          `✏️ <b>TYPE CUSTOM AMOUNT - ${gameType.toUpperCase()}</b>`,
+          `✏️ <b>Type Custom Amount - ${formattedGameType}</b>`,
           "",
           `💰 Your balance: <b>${userBalance.toFixed(
             Math.min(4, tokenContext.tokenDecimals)
@@ -4548,8 +4565,10 @@ bot.callbackQuery(
           ),
         });
 
+        const formattedGameType = toTitleCase(gameType);
+
         const playersMessage = [
-          `👥 <b>TYPE CUSTOM PLAYERS - ${gameType.toUpperCase()}</b>`,
+          `👥 <b>Type Custom Players - ${formattedGameType}</b>`,
           "",
           `Amount: <b>${formattedAmount} ${tokenContext.tokenTicker}</b>`,
           "",
@@ -4701,8 +4720,10 @@ bot.on("message:text", async (ctx, next) => {
         maximumFractionDigits: Math.min(tokenDecimals, 6),
       });
 
+      const formattedGameType = toTitleCase(userSession.gameType);
+
       const confirmMessage = [
-        `<b>CONFIRM ${userSession.gameType.toUpperCase()}</b>`,
+        `<b>Confirm ${formattedGameType}</b>`,
         "",
         `Amount: <b>${amountFormatted} ${tokenTicker}</b>`,
         `Players: <b>${players}</b>`,
@@ -4810,8 +4831,10 @@ bot.on("message:text", async (ctx, next) => {
       ),
     });
 
-    const playerMessage = [
-      `<b>${userSession.gameType.toUpperCase()} - CHOOSE PLAYERS</b>`,
+      const formattedGameTypeForPlayers = toTitleCase(userSession.gameType);
+
+      const playerMessage = [
+        `<b>${formattedGameTypeForPlayers} - Choose Players</b>`,
       "",
       `Amount: <b>${amountFormatted} ${tokenTicker}</b>`,
       "",
@@ -6067,7 +6090,7 @@ registerCallbackPrefixHandler("send_select_", async (ctx, { payload: token }) =>
   try {
     const { menu } = await buildWalletActionMenuForUser({
       ctx,
-      title: `📤 <b>SEND ${escapeHtml(token)}</b>`,
+      title: `📤 <b>Send ${escapeHtml(token)}</b>`,
       bodyLines: ({ solBalance, tokenBalances }) => {
         let balanceDisplay = "0";
         if (token === "SOL") {
@@ -6129,7 +6152,7 @@ registerCallbackPrefixHandler("send_amount_", async (ctx, { payload }) => {
       await showCustomAmountPrompt({
         ctx,
         userId,
-        title: `✏️ <b>CUSTOM AMOUNT - ${token}</b>`,
+        title: `✏️ <b>Custom Amount - ${token}</b>`,
         instructions: [
           `Please send a message with the amount you want to send.`,
         ],
@@ -6195,7 +6218,7 @@ registerCallbackPrefixHandler("send_amount_", async (ctx, { payload }) => {
     const exampleAddress = tryGetUserWalletAddress(telegramId);
 
     const response = [
-      `📤 <b>SEND ${escapeHtml(displayLabel)}</b>`,
+      `📤 <b>Send ${escapeHtml(displayLabel)}</b>`,
       "",
       `<b>Step 2:</b> Enter destination address`,
       "",
@@ -6470,7 +6493,7 @@ registerCallbackPrefixHandler(
       await getCachedWalletData(telegramId);
 
       const response = [
-        `💱 <b>SWAP ${fromToken}</b>`,
+        `💱 <b>Swap ${fromToken}</b>`,
         "",
         `<b>From:</b> <code>${walletAddressHtml}</code>`,
         "",
@@ -7086,7 +7109,7 @@ const handleCustomAmountInput = async (
   const exampleAddress = tryGetUserWalletAddress(telegramId);
 
   const response = [
-    `📤 <b>SEND ${escapeHtml(displayLabel)}</b>`,
+    `📤 <b>Send ${escapeHtml(displayLabel)}</b>`,
     "",
     `<b>Step 2:</b> Enter destination address`,
     "",

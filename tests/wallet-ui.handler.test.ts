@@ -197,7 +197,7 @@ describe("buildWalletActionMenu", () => {
 
   test("creates withdraw token selection menu", () => {
     const menu = buildWalletActionMenu({
-      title: "💸 <b>WITHDRAW</b>",
+      title: "💸 <b>Withdraw</b>",
       walletAddress: "ADDR1111111111111111111111111111111",
       bodyLines: [
         "<b>From:</b> <code>{{WALLET_ADDRESS}}</code>",
@@ -223,7 +223,7 @@ describe("buildWalletActionMenu", () => {
 
     expect(menu.text).toBe(
       [
-        "💸 <b>WITHDRAW</b>",
+        "💸 <b>Withdraw</b>",
         "",
         "<b>From:</b> <code>ADDR1111111111111111111111111111111</code>",
         "",
@@ -240,7 +240,7 @@ describe("buildWalletActionMenu", () => {
 
   test("returns empty swap state when no balances available", () => {
     const menu = buildWalletActionMenu({
-      title: "💱 <b>SWAP TOKENS</b>",
+      title: "💱 <b>Swap Tokens</b>",
       walletAddress: "swap-user",
       bodyLines: [
         "<b>From Wallet:</b> <code>{{WALLET_ADDRESS}}</code>",
@@ -275,7 +275,7 @@ describe("buildWalletActionMenu", () => {
     const prebuilt = new InlineKeyboard().text("Option", "cb").row();
 
     const menu = buildWalletActionMenu({
-      title: "📤 <b>SEND AAA</b>",
+      title: "📤 <b>Send AAA</b>",
       walletAddress: "send-user",
       bodyLines: [
         "<b>From:</b> <code>{{WALLET_ADDRESS}}</code>",
@@ -292,7 +292,7 @@ describe("buildWalletActionMenu", () => {
 
   test("wrap menu shows quick actions when balance sufficient", () => {
     const baseConfig = {
-      title: "🔧 <b>WRAP SOL</b>",
+      title: "🔧 <b>Wrap SOL</b>",
       bodyLines: [
         "<b>Native SOL:</b> 0.500",
         "<b>WSOL:</b> 0.125",

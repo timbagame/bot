@@ -91,7 +91,7 @@ describe("handleCustomAmountInput", () => {
     expect(edits).toHaveLength(1);
     expect(edits[0].chatId).toBe(DEFAULT_CHAT_ID);
     expect(edits[0].messageId).toBe(4321);
-    expect(String(edits[0].text)).toContain("SEND");
+    expect(String(edits[0].text)).toContain("Send");
     expect(String(edits[0].text)).toContain(USER_WALLET_ADDRESS);
     expect(replies).toHaveLength(0);
 
@@ -121,7 +121,7 @@ describe("handleCustomAmountInput", () => {
 
     expect(edits).toHaveLength(1);
     expect(replies).toHaveLength(1);
-    expect(String(replies[0].text)).toContain("SEND");
+    expect(String(replies[0].text)).toContain("Send");
     expect(String(replies[0].text)).toContain(USER_WALLET_ADDRESS);
 
     const state = __test_getUserState(userKey);

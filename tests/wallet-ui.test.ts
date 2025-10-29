@@ -121,7 +121,7 @@ test("showCustomAmountPrompt formats send custom amount flow", async () => {
   await showCustomAmountPrompt({
     ctx,
     userId: "send-user",
-    title: "✏️ <b>CUSTOM AMOUNT - SOL</b>",
+    title: "✏️ <b>Custom Amount - SOL</b>",
     instructions: ["Please send a message with the amount you want to send."],
     examples: ["• <code>0.5</code>", "• <code>1.25</code>"],
     cancelCallback: "send_select_SOL",
@@ -129,7 +129,7 @@ test("showCustomAmountPrompt formats send custom amount flow", async () => {
   });
 
   const { text, options } = expectSingleEdit(edits);
-  expect(text).toContain("✏️ <b>CUSTOM AMOUNT - SOL</b>");
+  expect(text).toContain("✏️ <b>Custom Amount - SOL</b>");
   expect(text).toContain("Please send a message with the amount you want to send.");
   expect(text).toContain("<b>Examples:</b>");
   expect(text).toContain("• <code>0.5</code>");
@@ -157,7 +157,7 @@ test("showCustomAmountPrompt formats sell custom amount flow", async () => {
   await showCustomAmountPrompt({
     ctx,
     userId: "sender",
-    title: "📤 <b>SEND TIMBA - CUSTOM AMOUNT</b>",
+    title: "📤 <b>Send TIMBA - Custom Amount</b>",
     instructions: [
       "Please send a message with the amount of TIMBA you want to send.",
     ],
@@ -171,7 +171,7 @@ test("showCustomAmountPrompt formats sell custom amount flow", async () => {
   });
 
   const { text, options } = expectSingleEdit(edits);
-  expect(text).toContain("📤 <b>SEND TIMBA - CUSTOM AMOUNT</b>");
+  expect(text).toContain("📤 <b>Send TIMBA - Custom Amount</b>");
   expect(text).toContain("amount of TIMBA you want to send.");
   expect(text).toContain("• <code>100</code> (send 100 TIMBA)");
   expect(options.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data).toBe(
@@ -197,7 +197,7 @@ test("showCustomAmountPrompt formats buy custom amount flow", async () => {
   await showCustomAmountPrompt({
     ctx,
     userId: "buy-user",
-    title: "💱 <b>SWAP TIMBA - CUSTOM AMOUNT</b>",
+    title: "💱 <b>Swap TIMBA - Custom Amount</b>",
     tokenLines: [
       "<b>From:</b> USDC",
       "<b>To:</b> TIMBA",
@@ -220,7 +220,7 @@ test("showCustomAmountPrompt formats buy custom amount flow", async () => {
   });
 
   const { text, options } = expectSingleEdit(edits);
-  expect(text).toContain("💱 <b>SWAP TIMBA - CUSTOM AMOUNT</b>");
+  expect(text).toContain("💱 <b>Swap TIMBA - Custom Amount</b>");
   expect(text).toContain("<b>From:</b> USDC");
   expect(text).toContain("Please send a message with the amount of USDC you want to spend.");
   expect(text).toContain("• <code>max</code> (spend all available USDC)");
@@ -252,7 +252,7 @@ test("showCustomAmountPrompt stores fallback reply identifiers when edit fails",
   await showCustomAmountPrompt({
     ctx,
     userId: "send-user",
-    title: "✏️ <b>CUSTOM AMOUNT - SOL</b>",
+    title: "✏️ <b>Custom Amount - SOL</b>",
     instructions: ["Please send a message with the amount you want to send."],
     cancelCallback: "send_select_SOL",
     state: { type: "send_custom_amount", token: "SOL" },
@@ -263,7 +263,7 @@ test("showCustomAmountPrompt stores fallback reply identifiers when edit fails",
 
   const reply = replies[0];
   expect(reply).toBeDefined();
-  expect(reply?.text).toContain("✏️ <b>CUSTOM AMOUNT - SOL</b>");
+  expect(reply?.text).toContain("✏️ <b>Custom Amount - SOL</b>");
   expect(reply?.options.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data).toBe(
     "send_select_SOL"
   );
