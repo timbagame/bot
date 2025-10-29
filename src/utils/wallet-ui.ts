@@ -251,7 +251,7 @@ export const showCustomAmountPrompt = async <State extends Record<string, unknow
 
   appendSection(lines, footerLines);
 
-  await respondWithMenu(ctx, {
+  const menuResult = await respondWithMenu(ctx, {
     text: lines.join("\n"),
     keyboard: new InlineKeyboard().text(cancelLabel, cancelCallback).row(),
   });
@@ -259,15 +259,27 @@ export const showCustomAmountPrompt = async <State extends Record<string, unknow
   const derivedState: CustomAmountPromptDerivedState<State> = {
     ...state,
   } as CustomAmountPromptDerivedState<State>;
-  const messageId = ctx.callbackQuery?.message?.message_id;
-  const chatId = ctx.chat?.id;
+  const contextMessageIdValue = ctx.callbackQuery?.message?.message_id;
+  const contextMessageId =
+    typeof contextMessageIdValue === "number" ? contextMessageIdValue : undefined;
+  const contextChatIdValue = ctx.chat?.id;
+  const contextChatId =
+    typeof contextChatIdValue === "number" ? contextChatIdValue : undefined;
+  const resolvedMessageId =
+    typeof menuResult.messageId === "number"
+      ? menuResult.messageId
+      : contextMessageId ?? derivedState.messageId;
+  const resolvedChatId =
+    typeof menuResult.chatId === "number"
+      ? menuResult.chatId
+      : contextChatId ?? derivedState.chatId;
 
-  if (messageId !== undefined && derivedState.messageId === undefined) {
-    derivedState.messageId = messageId;
+  if (typeof resolvedMessageId === "number") {
+    derivedState.messageId = resolvedMessageId;
   }
 
-  if (chatId !== undefined && derivedState.chatId === undefined) {
-    derivedState.chatId = chatId;
+  if (typeof resolvedChatId === "number") {
+    derivedState.chatId = resolvedChatId;
   }
 
   setUserState(userId, derivedState);
