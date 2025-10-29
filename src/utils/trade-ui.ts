@@ -7,8 +7,8 @@ export type ProcessingStatusOptions = {
 
 const PROCESSING_STATUS_CONFIG = {
   swap: {
-    headingHtml: "🔄 <b>PROCESSING SWAP</b>",
-    headingText: "🔄 PROCESSING SWAP",
+    headingHtml: "🔄 <b>Processing Swap</b>",
+    headingText: "🔄 Processing Swap",
     actionHtml: (amount: string, fromToken: string, toToken: string) =>
       `Swapping ${amount} ${fromToken} → ${toToken}...`,
     actionText: (amount: string, fromToken: string, toToken: string) =>

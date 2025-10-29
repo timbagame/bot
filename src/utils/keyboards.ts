@@ -114,7 +114,12 @@ export const getFeeWarningMessage = (
   contractMinimum: number = 20,
   tokenTicker: string = DEFAULT_TOKEN_TICKER
 ): string => {
-  let message = `💰 <b>SELECT AMOUNT - ${gameType.toUpperCase()}</b>\n\n`;
+  const formattedGameType =
+    typeof gameType === "string" && gameType.length > 0
+      ? `${gameType.charAt(0).toUpperCase()}${gameType.slice(1)}`
+      : "Game";
+
+  let message = `💰 <b>Select Amount - ${formattedGameType}</b>\n\n`;
 
   if (balance < contractMinimum) {
     message += `⚠️ <b>Low Balance Warning</b>\n`;

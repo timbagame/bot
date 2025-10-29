@@ -21,7 +21,7 @@ const MEDALS = ["🥇", "🥈", "🥉"] as const;
 
 export const buildEmptyLeaderboardMessage = (): string =>
   [
-    "⚔️ <b>HALL OF LEGENDS</b> ⚔️",
+    "⚔️ <b>Hall of Legends</b> ⚔️",
     "No statistics available for this group yet.",
     "Play some coinflips to appear on the leaderboard!",
     "🎮 <i>Be the first to claim your throne!</i>",

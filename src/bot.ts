@@ -714,7 +714,7 @@ const renderTradeQuoteError = (
   const keyboard = new InlineKeyboard().text("← Try Again", retryCallback).row();
   const userFriendly = formatUserFriendlyError(error, wallet);
   return {
-    text: `❌ <b>QUOTE ERROR</b>\n\n${userFriendly}`,
+    text: `❌ <b>Quote Error</b>\n\n${userFriendly}`,
     keyboard,
   };
 };
@@ -1428,7 +1428,7 @@ type GameSetupCopy = {
 const GAME_SETUP_COPY: Record<"coinflip" | "giveaway", GameSetupCopy> = {
   coinflip: {
     gameType: "coinflip",
-    heading: "🪙 <b>CREATE COINFLIP</b>",
+    heading: "🪙 <b>Create Coinflip</b>",
     introLines: [],
     bulletPoints: [],
     amountPrompt: "Select stake per player in <b>{TOKEN}</b>:",
@@ -1439,7 +1439,7 @@ const GAME_SETUP_COPY: Record<"coinflip" | "giveaway", GameSetupCopy> = {
   },
   giveaway: {
     gameType: "giveaway",
-    heading: "🎁 <b>CREATE GIVEAWAY</b>",
+    heading: "🎁 <b>Create Giveaway</b>",
     introLines: ["Choose the prize amount you want to give away:"],
     bulletPoints: [
       "• Free to join for all players",
@@ -3080,7 +3080,7 @@ bot.command("wrap", async (ctx: Context) => {
       onInsufficientBalance: async (formattedAmount) => {
         await replyToMessage(
           ctx,
-          `❌ <b>WRAP FAILED</b>\n\nNot enough SOL to wrap ${formattedAmount}.\nKeep at least ${MIN_SOL_FOR_TX} SOL for fees and try again.`
+          `❌ <b>Wrap Failed</b>\n\nNot enough SOL to wrap ${formattedAmount}.\nKeep at least ${MIN_SOL_FOR_TX} SOL for fees and try again.`
         );
       },
       onSuccess: async ({ signature, formattedAmount }) => {
@@ -3100,7 +3100,7 @@ bot.command("wrap", async (ctx: Context) => {
         await ctx.api.editMessageText(
           ctx.chat!.id,
           processingMessageId,
-          `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${formattedAmount} SOL to WSOL${linkSuffix}`,
+          `✅ <b>Wrap Completed</b>\n\nWrapped ${formattedAmount} SOL to WSOL${linkSuffix}`,
           {
             parse_mode: "HTML",
             link_preview_options: { is_disabled: Boolean(linkLine) },
@@ -3155,7 +3155,7 @@ bot.command("unwrap", async (ctx: Context) => {
         await ctx.api.editMessageText(
           ctx.chat!.id,
           processingMsg.message_id,
-          `❌ <b>UNWRAP FAILED</b>\n\nYour WSOL account is already empty.`,
+          `❌ <b>Unwrap Failed</b>\n\nYour WSOL account is already empty.`,
           { parse_mode: "HTML" }
         );
       },
@@ -3172,7 +3172,7 @@ bot.command("unwrap", async (ctx: Context) => {
         await ctx.api.editMessageText(
           ctx.chat!.id,
           processingMsg.message_id,
-          `✅ <b>UNWRAP COMPLETED</b>\n\nUnwrapped ${formattedAmount} WSOL to SOL${linkSuffix}`,
+          `✅ <b>Unwrap Completed</b>\n\nUnwrapped ${formattedAmount} WSOL to SOL${linkSuffix}`,
           {
             parse_mode: "HTML",
             link_preview_options: { is_disabled: Boolean(linkLine) },
@@ -5007,7 +5007,7 @@ registerWalletActionMenuHandler({
   errorAck: "❌ Error loading send menu",
   resolve: async () => ({
     menuOptions: {
-      title: `💸 <b>WITHDRAW</b>`,
+      title: `💸 <b>Withdraw</b>`,
       bodyLines: [
         `<b>From:</b> <code>{{WALLET_ADDRESS}}</code>`,
         "",
@@ -5078,7 +5078,7 @@ registerWalletActionMenuHandler({
   errorAck: "❌ Error loading wrap menu",
   resolve: async () => ({
     menuOptions: {
-      title: `🔧 <b>WRAP SOL</b>`,
+      title: `🔧 <b>Wrap SOL</b>`,
       bodyLines: ({ solBalance, tokenBalances }) => {
         const formattedSolBalance = wallet.formatSolBalance(solBalance);
         const wsolLamports =
@@ -5149,7 +5149,7 @@ registerWalletActionMenuHandler({
 
     return {
       menuOptions: {
-        title: `🧼 <b>UNWRAP WSOL</b>`,
+        title: `🧼 <b>Unwrap WSOL</b>`,
         bodyLines: ({ solBalance, tokenBalances }) => {
           const wsolLamports =
             tokenBalances.find((token) => token.mint === WSOL_MINT)?.balance ?? 0;
@@ -5216,7 +5216,7 @@ bot.on("callback_query", async (ctx, next) => {
     await showCustomAmountPrompt({
       ctx,
       userId,
-      title: "✏️ <b>CUSTOM WRAP AMOUNT</b>",
+      title: "✏️ <b>Custom Wrap Amount</b>",
       instructions: [
         "Please send a message with the amount of SOL you want to wrap.",
       ],
@@ -5270,7 +5270,7 @@ registerCallbackPrefixHandler("wrap_amount_", async (ctx, { payload }) => {
 
     const selection = amountChoice.trim().toUpperCase();
     const response = [
-      `✅ <b>WRAP CONFIRMATION</b>`,
+      `✅ <b>Wrap Confirmation</b>`,
       "",
       `<b>Amount:</b> ${escapeHtml(displayAmount)} SOL → WSOL`,
       `<b>Available SOL:</b> ${escapeHtml(availableSolDisplay)}`,
@@ -5322,22 +5322,22 @@ bot.callbackQuery("unwrap_confirm", async (ctx) => {
       expectedAmountLamports: wsolBalance,
       onProcessing: async (formattedAmount) => {
         await respondWithMenu(ctx, {
-          text: `🔄 <b>PROCESSING UNWRAP</b>\n\nUnwrapping ${escapeHtml(
-            formattedAmount ?? "0"
-          )} WSOL to SOL...\n\n<i>Please wait...</i>`,
+          text: `🔄 <b>Processing Unwrap</b>\n\nUnwrapping ${escapeHtml(
+              formattedAmount ?? "0"
+            )} WSOL to SOL...\n\n<i>Please wait...</i>`,
           keyboard: new InlineKeyboard(),
         });
       },
       onNoBalance: async () => {
         await respondWithMenu(ctx, {
-          text: `❌ <b>UNWRAP FAILED</b>\n\nYour WSOL account is already empty.`,
+          text: `❌ <b>Unwrap Failed</b>\n\nYour WSOL account is already empty.`,
           keyboard: createBackToWalletKeyboard(),
         });
       },
       onSuccess: async ({ signature, formattedAmount }) => {
         const amountLabel = escapeHtml(formattedAmount ?? "0");
         const { text, disablePreview } = buildSolscanSuccessMessage({
-          title: "✅ <b>UNWRAP COMPLETED</b>",
+          title: "✅ <b>Unwrap Completed</b>",
           bodyLines: [`Unwrapped ${amountLabel} WSOL to SOL`],
           signature,
         });
@@ -5412,7 +5412,7 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
 
     // Update message to show processing state
     await respondWithMenu(ctx, {
-      text: `🔄 <b>PROCESSING TRANSACTION</b>\n\nSending ${escapeHtml(
+      text: `🔄 <b>Processing Transaction</b>\n\nSending ${escapeHtml(
         amountSummary
       )}...\n\n<i>Please wait...</i>`,
       keyboard: new InlineKeyboard(),
@@ -5533,7 +5533,7 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
           transaction.amount === "max"
         ) {
           const details: string[] = [
-            `✅ <b>TRANSACTION COMPLETED</b>`,
+            `✅ <b>Transaction Completed</b>`,
             "",
             `Sent ${formattedAmount} SOL`,
           ];
@@ -5567,7 +5567,7 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
           return details.join("\n");
         }
 
-        const baseMessage = `✅ <b>TRANSACTION COMPLETED</b>\n\nSent ${formattedAmount} ${transaction.token}\nTo: <code>${transaction.address}</code>`;
+        const baseMessage = `✅ <b>Transaction Completed</b>\n\nSent ${formattedAmount} ${transaction.token}\nTo: <code>${transaction.address}</code>`;
         return viewLine ? `${baseMessage}\n\n${viewLine}` : baseMessage;
       })();
 
@@ -5578,7 +5578,7 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
     } catch (txError) {
       console.error("Transaction failed:", txError);
       await respondWithMenu(ctx, {
-        text: `❌ <b>TRANSACTION FAILED</b>\n\n${
+        text: `❌ <b>Transaction Failed</b>\n\n${
           (txError as Error).message
         }\n\nPlease try again.`,
         keyboard: createBackToWalletKeyboard(),
@@ -5618,20 +5618,20 @@ bot.callbackQuery(/^confirm_wrap_/, async (ctx) => {
     const result = await executeWrapFlow(telegramId, lamportsToWrap, {
       onProcessing: async (amountDisplay) => {
         await respondWithMenu(ctx, {
-          text: `🔄 <b>PROCESSING WRAP</b>\n\nWrapping ${amountDisplay} SOL to WSOL...\n\n<i>Please wait...</i>`,
+          text: `🔄 <b>Processing Wrap</b>\n\nWrapping ${amountDisplay} SOL to WSOL...\n\n<i>Please wait...</i>`,
           keyboard: new InlineKeyboard(),
         });
       },
       onInsufficientBalance: async (amountDisplay) => {
         await respondWithMenu(ctx, {
-          text: `❌ <b>WRAP FAILED</b>\n\nNot enough SOL to wrap ${amountDisplay}.\nKeep at least ${MIN_SOL_FOR_TX} SOL for fees and try again.`,
+          text: `❌ <b>Wrap Failed</b>\n\nNot enough SOL to wrap ${amountDisplay}.\nKeep at least ${MIN_SOL_FOR_TX} SOL for fees and try again.`,
           keyboard: createBackToWalletKeyboard(),
         });
       },
       onSuccess: async ({ signature, formattedAmount: amountDisplay }) => {
         const amountLabel = escapeHtml(amountDisplay ?? "0");
         const { text, disablePreview } = buildSolscanSuccessMessage({
-          title: "✅ <b>WRAP COMPLETED</b>",
+          title: "✅ <b>Wrap Completed</b>",
           bodyLines: [`Wrapped ${amountLabel} SOL to WSOL`],
           signature,
         });
@@ -5805,7 +5805,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
       );
 
       const successLines = [
-        `✅ <b>SWAP COMPLETED</b>`,
+        `✅ <b>Swap Completed</b>`,
         "",
         `Swapped ${transaction.amount} ${transaction.fromToken}`,
         `Received ~${receivedDisplay} ${transaction.toToken}`,
@@ -5850,7 +5850,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
     } catch (swapError) {
       console.error("Swap transaction failed:", swapError);
       await respondWithMenu(ctx, {
-        text: `❌ <b>SWAP FAILED</b>\n\n${
+        text: `❌ <b>Swap Failed</b>\n\n${
           (swapError as Error).message
         }\n\nPlease try again.`,
         parseMode: "HTML",
@@ -5871,7 +5871,7 @@ registerWalletActionMenuHandler({
   errorAck: "❌ Error loading swap menu",
   resolve: async () => ({
     menuOptions: {
-      title: `💱 <b>SWAP TOKENS</b>`,
+      title: `💱 <b>Swap Tokens</b>`,
       bodyLines: [
         `<b>From Wallet:</b> <code>{{WALLET_ADDRESS}}</code>`,
         "",
@@ -6279,7 +6279,7 @@ bot.callbackQuery("start_bot", async (ctx) => {
 
 bot.callbackQuery("cmd_help", async (ctx) => {
   try {
-    const helpContent = "❓ <b>HELP CENTER</b>\n\n" + "Choose a category to get detailed help:";
+    const helpContent = "❓ <b>Help Center</b>\n\n" + "Choose a category to get detailed help:";
     const helpKeyboard = new InlineKeyboard()
       .text("💰 Wallet Commands", "help_wallet")
       .row()
@@ -6554,7 +6554,7 @@ registerCallbackPrefixHandler(
         if (!userId) return;
 
         const response = [
-          `🔍 <b>CUSTOM TOKEN</b>`,
+          `🔍 <b>Custom Token</b>`,
           "",
           `Swapping FROM: <b>${fromToken}</b>`,
           "",
@@ -6644,7 +6644,7 @@ registerCallbackPrefixHandler(
         await showCustomAmountPrompt({
           ctx,
           userId,
-          title: "✏️ <b>CUSTOM AMOUNT</b>",
+          title: "✏️ <b>Custom Amount</b>",
           tokenLines: [
             `<b>Swap:</b> ${escapeHtml(fromToken)} → ${escapeHtml(displayToToken)}`,
           ],
@@ -6726,7 +6726,7 @@ const showSwapAmountSelection = async (
     resolveFormattedBalance(fromToken, solBalance, tokenBalances);
 
   const response = [
-    `💱 <b>SWAP AMOUNT</b>`,
+    `💱 <b>Swap Amount</b>`,
     "",
     `<b>From:</b> ${fromToken} (${formattedBalance})`,
     `<b>To:</b> ${toToken}`,
@@ -6825,7 +6825,7 @@ const showSwapQuoteAndConfirmation = async (
         };
       },
       spinnerText: ({ displayAmount }) =>
-        `🔄 <b>GETTING QUOTE</b>\n\n${displayAmount} ${fromToken} → ${toToken}\n\n<i>Please wait...</i>`,
+        `🔄 <b>Getting Quote</b>\n\n${displayAmount} ${fromToken} → ${toToken}\n\n<i>Please wait...</i>`,
       cacheQuote: (txId, quote, context) => {
         storePendingTransaction(txId, {
           type: "swap",
@@ -7198,7 +7198,7 @@ const handleAddressInput = async (
   });
 
   const response = [
-    `✅ <b>SEND CONFIRMATION</b>`,
+    `✅ <b>Send Confirmation</b>`,
     "",
     `<b>Amount:</b> ${escapeHtml(amountDisplay)}`,
     `<b>To:</b> <code>${escapeHtml(address)}</code>`,
@@ -7256,7 +7256,7 @@ const handleWrapAmountInput = async (
   console.log(`🔧 Wrap amount received: ${displayAmount} SOL`);
 
   const response = [
-    `✅ <b>WRAP CONFIRMATION</b>`,
+    `✅ <b>Wrap Confirmation</b>`,
     "",
     `<b>Amount:</b> ${escapeHtml(displayAmount)} SOL → WSOL`,
     "",
