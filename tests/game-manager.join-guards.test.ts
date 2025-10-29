@@ -128,7 +128,7 @@ describe("GameManager.joinGame guards", () => {
 
     const res = await gm.joinGame(new PublicKey("BPFLoader7111111111111111111111111111111111").toBase58(), 1n);
     expect(res.success).toBe(false);
-    expect(res.error).toMatch(/no spare tokens to cover SOL fees/i);
+    expect(res.error).toMatch(/shortfall/i);
+    expect(res.error).toMatch(/no spare tokens to convert into sol fees/i);
   });
 });
-

@@ -8,9 +8,9 @@ const walletStub = {
 describe("errors extras", () => {
   test("lamports error with wallet shows detailed balances", () => {
     const msg = parseTransactionError(new Error("insufficient lamports 100, need 200"), walletStub);
-    expect(msg).toContain("Current:");
-    expect(msg).toContain("Required:");
-    expect(msg).toContain("Missing:");
+    expect(msg).toContain("Current balance:");
+    expect(msg).toContain("Required reserve:");
+    expect(msg).toContain("Shortfall:");
   });
 
   test("generic insufficient maps to helpful guidance", () => {

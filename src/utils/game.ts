@@ -163,6 +163,7 @@ export class GameManager {
   private activeGameMessages = new Map<string, GameMessage>();
   private cachedConnection?: Connection;
   private tokenProgramCache = new Map<string, PublicKey>();
+  private gameRentLamports: number | null = null;
 
   private constructor(
     private program: anchor.Program<Timba>,
@@ -860,9 +861,57 @@ export class GameManager {
 
   private formatLamportsForDisplay(lamports: number): string {
     if (typeof (this.wallet as any).formatSolBalance === "function") {
-      return (this.wallet as any).formatSolBalance(lamports);
+      const formatted = (this.wallet as any).formatSolBalance(lamports);
+      return `${formatted} SOL`;
     }
     return `${(lamports / LAMPORTS_PER_SOL).toFixed(6)} SOL`;
+  }
+
+  private buildSolShortfallMessage(options: {
+    currentLamports: number;
+    requiredLamports: number;
+    reason: string;
+    nextSteps?: string;
+  }): string {
+    const { currentLamports, requiredLamports, reason, nextSteps } = options;
+    const missingLamports = Math.max(requiredLamports - currentLamports, 0);
+    const current = this.formatLamportsForDisplay(Math.max(currentLamports, 0));
+    const required = this.formatLamportsForDisplay(Math.max(requiredLamports, 0));
+    const missing = this.formatLamportsForDisplay(missingLamports);
+
+    const steps = nextSteps ?? "Top up the shortfall and try again.";
+
+    return (
+      `💰 Insufficient SOL!\n\n` +
+      `Current balance: ${current}\n` +
+      `Required reserve: ${required}\n` +
+      `Shortfall: ${missing}\n\n` +
+      `Why: ${reason}.\n` +
+      steps
+    );
+  }
+
+  private async getGameCreationRentLamports(): Promise<number> {
+    if (this.gameRentLamports !== null) {
+      return this.gameRentLamports;
+    }
+
+    try {
+      const size = (this.program.account as any)?.game?.size;
+      if (typeof size === "number" && size > 0) {
+        const connection = this.getConnection();
+        const rent = await connection.getMinimumBalanceForRentExemption(size);
+        if (Number.isFinite(rent) && rent > 0) {
+          this.gameRentLamports = rent;
+          return rent;
+        }
+      }
+    } catch (error) {
+      console.warn("⚠️ Failed to determine game account rent lamports, falling back to zero:", error);
+    }
+
+    this.gameRentLamports = 0;
+    return 0;
   }
 
   private async ensureWrappedSolBalance(
@@ -871,15 +920,19 @@ export class GameManager {
     currentTokenBalance: number,
     currentSolBalance: number,
     context: "create" | "join",
-    tokenTicker: string
+    solReserveOverrideLamports?: number
   ): Promise<
     | { success: true; tokenBalance: number; solBalance: number }
     | { success: false; error: string }
   > {
-    const [wrapFeeBuffer, minSolBuffer] = await Promise.all([
+    const [wrapFeeBuffer, defaultMinSolBuffer] = await Promise.all([
       this.feeBudget.getWrapFeeBufferLamports(),
       this.feeBudget.getGameSafetyBufferLamports(),
     ]);
+    const minSolBuffer =
+      solReserveOverrideLamports !== undefined
+        ? solReserveOverrideLamports
+        : defaultMinSolBuffer;
 
     console.log(
       `🔍 WSOL wrap check (${context}): required=${this.wallet.formatSolBalance(
@@ -910,22 +963,26 @@ export class GameManager {
 
     const projectedRemaining = currentSolBalance - deficit - wrapFeeBuffer;
     if (projectedRemaining < minSolBuffer) {
-      const formattedDeficit = this.wallet.formatSolBalance(deficit);
-      const formattedBuffer = this.wallet.formatSolBalance(
-        minSolBuffer
-      );
+      const requiredReserve = deficit + wrapFeeBuffer + minSolBuffer;
       console.warn(
-        `⚠️ Not enough SOL to wrap ${formattedDeficit} for ${context}. Current SOL=${this.wallet.formatSolBalance(
+        `⚠️ Not enough SOL to wrap ${this.wallet.formatSolBalance(
+          deficit
+        )} for ${context}. Current SOL=${this.wallet.formatSolBalance(
           currentSolBalance
         )}, projected SOL after wrap=${this.wallet.formatSolBalance(
           projectedRemaining
-        )}, required buffer=${formattedBuffer}`
+        )}, required reserve=${this.wallet.formatSolBalance(requiredReserve)}`
       );
       return {
         success: false,
-        error: `Not enough SOL to wrap ${formattedDeficit} SOL automatically.\n\nKeep at least ${formattedBuffer} SOL for fees before attempting to ${
-          context === "create" ? "create" : "join"
-        } a ${tokenTicker} game.`,
+        error: this.buildSolShortfallMessage({
+          currentLamports: currentSolBalance,
+          requiredLamports: requiredReserve,
+          reason: "Wrapping this amount would leave too little SOL for rent and fees",
+          nextSteps: `Add ${this.formatLamportsForDisplay(
+            requiredReserve - currentSolBalance
+          )} or reduce the stake to continue.`,
+        }),
       };
     }
 
@@ -1002,15 +1059,21 @@ export class GameManager {
     }
 
     if (updatedSolBalance < minSolBuffer) {
-      const formattedBuffer = this.wallet.formatSolBalance(minSolBuffer);
       console.warn(
         `⚠️ Wrap left SOL balance ${this.wallet.formatSolBalance(
           updatedSolBalance
-        )}, below buffer ${formattedBuffer}`
+        )}, below buffer ${this.wallet.formatSolBalance(minSolBuffer)}`
       );
       return {
         success: false,
-        error: `Wrap completed but SOL balance fell below the safety buffer (${formattedBuffer} SOL). Add SOL for fees and try again.`,
+        error: this.buildSolShortfallMessage({
+          currentLamports: updatedSolBalance,
+          requiredLamports: minSolBuffer,
+          reason: "Wrapping reduced your SOL below the fee reserve threshold",
+          nextSteps: `Add ${this.formatLamportsForDisplay(
+            minSolBuffer - updatedSolBalance
+          )} before trying again.`,
+        }),
       };
     }
 
@@ -1106,8 +1169,14 @@ export class GameManager {
       if (solBalance < minSolBuffer) {
         return {
           success: false,
-          reason:
-            "Swap executed but SOL balance is still below the required buffer.",
+          reason: this.buildSolShortfallMessage({
+            currentLamports: solBalance,
+            requiredLamports: minSolBuffer,
+            reason: "Just-in-time swap did not leave enough SOL for the rent and fee reserve",
+            nextSteps: `Add ${this.formatLamportsForDisplay(
+              minSolBuffer - solBalance
+            )} to continue.`,
+          }),
         };
       }
 
@@ -2203,7 +2272,11 @@ export class GameManager {
     try {
       const metadata = await this.wallet.getTokenMetadata(tokenMint);
       const playerKp = this.wallet.getKeyPair(telegramId);
-      const minSolBuffer = await this.feeBudget.getGameSafetyBufferLamports();
+      const [minSolBuffer, gameRentLamports] = await Promise.all([
+        this.feeBudget.getGameSafetyBufferLamports(),
+        this.getGameCreationRentLamports(),
+      ]);
+      const requiredSolReserveLamports = minSolBuffer + gameRentLamports;
 
       let [tokenBalance, solBalance] = await Promise.all([
         this.wallet.getTokenBalance(telegramId, tokenMint, {
@@ -2219,7 +2292,7 @@ export class GameManager {
           tokenBalance,
           solBalance,
           "create",
-          tokenTicker
+          requiredSolReserveLamports
         );
 
         if (!ensured.success) {
@@ -2257,19 +2330,27 @@ export class GameManager {
       const swapAllowanceRaw = Math.max(tokenBalance - reservedTicketAmount, 0);
 
       let lamportsBalance = solBalance;
-      if (lamportsBalance < minSolBuffer) {
+      if (lamportsBalance < requiredSolReserveLamports) {
         if (swapAllowanceRaw <= 0) {
           const formattedStake = this.wallet.formatTokenBalance(
             reservedTicketAmount,
             metadata.decimals
           );
-          const formattedBuffer = this.formatLamportsForDisplay(minSolBuffer);
+
+          const shortfallMessage = this.buildSolShortfallMessage({
+            currentLamports: solBalance,
+            requiredLamports: requiredSolReserveLamports,
+            reason: "Creating a game requires a SOL reserve for rent and fees",
+            nextSteps: `Add ${this.formatLamportsForDisplay(
+              requiredSolReserveLamports - solBalance
+            )} or deposit additional ${tokenTicker} to swap for fees before trying again.`,
+          });
 
           return {
             success: false,
-            error: `You have exactly ${formattedStake} ${tokenTicker} reserved for the ticket but no spare tokens to cover SOL fees.
+            error: `${shortfallMessage}
 
-Keep at least ${formattedBuffer} SOL available for fees or deposit more ${tokenTicker} before trying again.`,
+You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and no spare tokens to convert into SOL fees.`,
           };
         }
 
@@ -2278,7 +2359,7 @@ Keep at least ${formattedBuffer} SOL available for fees or deposit more ${tokenT
           tokenMint,
           tokenDecimals: metadata.decimals,
           availableTokenAmountRaw: swapAllowanceRaw,
-          desiredLamports: minSolBuffer,
+          desiredLamports: requiredSolReserveLamports,
           slippageBps: 300,
           tokenTicker,
           logContext: `create ${gameType} game`,
@@ -2316,11 +2397,17 @@ Keep at least ${formattedBuffer} SOL available for fees or deposit more ${tokenT
         }
 
         lamportsBalance = await this.wallet.getBalance(telegramId);
-        if (lamportsBalance < minSolBuffer) {
+        if (lamportsBalance < requiredSolReserveLamports) {
           return {
             success: false,
-            error:
-              "Swap executed but SOL balance is still below the safety buffer. Add SOL manually and try again.",
+            error: this.buildSolShortfallMessage({
+              currentLamports: lamportsBalance,
+              requiredLamports: requiredSolReserveLamports,
+              reason: "Just-in-time swap did not leave enough SOL for the rent and fee reserve",
+              nextSteps: `Add ${this.formatLamportsForDisplay(
+                requiredSolReserveLamports - lamportsBalance
+              )} to continue.`,
+            }),
           };
         }
       }
@@ -2771,8 +2858,7 @@ Keep at least ${formattedBuffer} SOL available for fees or deposit more ${tokenT
             gameAmount,
             tokenBalance,
             solBalance,
-            "join",
-            gameData.token_ticker || "SOL"
+            "join"
           );
 
           if (!ensured.success) {
@@ -2808,13 +2894,21 @@ Keep at least ${formattedBuffer} SOL available for fees or deposit more ${tokenT
               reservedTicketAmount,
               metadata.decimals
             );
-            const formattedBuffer = this.formatLamportsForDisplay(minSolBuffer);
+
+            const shortfallMessage = this.buildSolShortfallMessage({
+              currentLamports: solBalance,
+              requiredLamports: minSolBuffer,
+              reason: "Joining this game requires a SOL reserve for rent and transaction fees",
+              nextSteps: `Add ${this.formatLamportsForDisplay(
+                minSolBuffer - solBalance
+              )} or deposit additional ${gameData.token_ticker} to swap for fees before trying again.`,
+            });
 
             return {
               success: false,
-              error: `You have exactly ${formattedStake} ${gameData.token_ticker} for the ticket but no spare tokens to cover SOL fees.
+              error: `${shortfallMessage}
 
-Keep at least ${formattedBuffer} SOL available for fees or deposit more ${gameData.token_ticker} before trying again.`,
+You currently have ${formattedStake} ${gameData.token_ticker} reserved for the ticket and no spare tokens to convert into SOL fees.`,
             };
           }
 
@@ -2857,8 +2951,14 @@ Keep at least ${formattedBuffer} SOL available for fees or deposit more ${gameDa
             if (refreshedLamports < minSolBuffer) {
               return {
                 success: false,
-                error:
-                  "Swap executed but SOL balance is still below the safety buffer. Add SOL manually and try again.",
+                error: this.buildSolShortfallMessage({
+                  currentLamports: refreshedLamports,
+                  requiredLamports: minSolBuffer,
+                  reason: "Just-in-time swap did not leave enough SOL for the rent and fee reserve",
+                  nextSteps: `Add ${this.formatLamportsForDisplay(
+                    minSolBuffer - refreshedLamports
+                  )} to continue.`,
+                }),
               };
             }
           }

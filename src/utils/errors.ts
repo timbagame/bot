@@ -107,28 +107,33 @@ const extractSignature = (errorMessage: string): string | null => {
   return null;
 };
 
+const formatLamportsForDisplay = (
+  lamports: number,
+  walletManager?: WalletManager
+): string => {
+  if (walletManager) {
+    return `${walletManager.formatSolBalance(lamports)} SOL`;
+  }
+  return `${(lamports / LAMPORTS_PER_SOL).toFixed(SOL_BALANCE_PRECISION)} SOL`;
+};
+
 const formatInsufficientFundsError = (
   currentLamports: number,
   neededLamports: number,
   walletManager?: WalletManager
 ): string => {
-  const missingSol = (neededLamports - currentLamports) / LAMPORTS_PER_SOL;
+  const missingLamports = Math.max(neededLamports - currentLamports, 0);
+  const current = formatLamportsForDisplay(currentLamports, walletManager);
+  const required = formatLamportsForDisplay(neededLamports, walletManager);
+  const missing = formatLamportsForDisplay(missingLamports, walletManager);
 
-  if (walletManager) {
-    return (
-      `💰 Insufficient SOL!\n\n` +
-      `Current: ${walletManager.formatSolBalance(currentLamports)} SOL\n` +
-      `Required: ${walletManager.formatSolBalance(neededLamports)} SOL\n` +
-      `Missing: ${walletManager.formatSolBalance(
-        neededLamports - currentLamports
-      )} SOL\n\n` +
-      `Please add ${missingSol.toFixed(SOL_BALANCE_PRECISION)} SOL to continue.`
-    );
-  }
-
-  return `💰 Insufficient SOL!\n\nMissing: ${missingSol.toFixed(
-    SOL_BALANCE_PRECISION
-  )} SOL\n\nPlease add SOL to your wallet to continue.`;
+  return (
+    `💰 Insufficient SOL!\n\n` +
+    `Current balance: ${current}\n` +
+    `Required reserve: ${required}\n` +
+    `Shortfall: ${missing}\n\n` +
+    `Please add ${missing} to continue.`
+  );
 };
 
 export const parseTransactionError = (

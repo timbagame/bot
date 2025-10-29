@@ -304,7 +304,7 @@ describe("GameManager cleanup flows", () => {
     });
 
     expect(result.success).toBe(false);
-    expect((result as any).reason).toContain("still below");
+    expect((result as any).reason).toContain("Shortfall");
     expect(swapCalls).toBe(1);
   });
 });
