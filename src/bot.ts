@@ -6874,7 +6874,7 @@ const showSwapQuoteAndConfirmation = async (
 
 bot.callbackQuery(/^swap_slippage_/, async (ctx) => {
   const data = ctx.callbackQuery?.data ?? "";
-  const match = data.match(/^swap_slippage_(\d+)_([A-Za-z0-9-]+)/);
+  const match = data.match(/^swap_slippage_(\d+)_([A-Za-z0-9_-]+)$/);
 
   if (!match) {
     await safeAnswerCallbackQuery(ctx, "❌ Invalid slippage option");
