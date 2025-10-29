@@ -208,7 +208,7 @@ export const createAmountSelectionKeyboard = (
 
   keyboard
     .text(
-      "📊 Custom Amount",
+      "✏️ Custom Amount",
       withCreatorSuffix(`custom_amount_${gameType}`, creatorId)
     )
     .row()

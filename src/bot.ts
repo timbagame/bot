@@ -420,7 +420,7 @@ const appendQuickAmountRows = (
     baseCallback,
     percentages = ["25%", "50%", "75%", "MAX"],
     includeCustom = true,
-    customLabel = "✏️ Custom",
+    customLabel = "✏️ Custom Amount",
     extraRows = [],
   }: QuickAmountOptions
 ) => {
