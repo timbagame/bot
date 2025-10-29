@@ -1,6 +1,6 @@
 import { InlineKeyboard } from "grammy";
 import { DEFAULT_TOKEN_TICKER } from "./constants";
-import { formatTokenDisplay } from "./format-amount";
+import { formatTokenDisplay, formatUsdValue } from "./format-amount";
 
 export const createMainMenuKeyboard = (): InlineKeyboard => {
   return new InlineKeyboard()
@@ -162,7 +162,6 @@ export const createAmountSelectionKeyboard = (
   userBalance?: number,
   creatorId?: string,
   contractMinimum: number = 20,
-  tokenTicker: string = DEFAULT_TOKEN_TICKER,
   options?: {
     decimals?: number;
     tokenPriceUSD?: number;
@@ -195,12 +194,9 @@ export const createAmountSelectionKeyboard = (
     const display = formatTokenDisplay(amount, { decimals });
     const usdText =
       tokenPriceUSD !== undefined
-        ? ` (~$${(amount * tokenPriceUSD).toLocaleString("en-US", {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })})`
+        ? ` (~$${formatUsdValue(amount * tokenPriceUSD)})`
         : "";
-    keyboard.text(`💰 ${display} ${tokenTicker}${usdText}`, callbackData);
+    keyboard.text(`💰 ${display}${usdText}`, callbackData);
   });
 
   keyboard.row();

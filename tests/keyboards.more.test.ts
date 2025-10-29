@@ -177,6 +177,17 @@ describe("keyboards: amount selection", () => {
     expect(callbacks.every((s) => s.endsWith("_999"))).toBe(true);
   });
 
+  test("amount buttons omit token ticker and show USD when price is known", () => {
+    const kb = createAmountSelectionKeyboard("coinflip", undefined, undefined, 20, {
+      decimals: 2,
+      tokenPriceUSD: 0.01,
+    });
+    const texts = extractTexts(kb).filter((text) => text.startsWith("💰"));
+    expect(texts.length).toBeGreaterThan(0);
+    expect(texts.every((text) => !text.includes("TIMBA"))).toBe(true);
+    expect(texts.every((text) => text.includes("(~$"))).toBe(true);
+  });
+
   test("fee warning message shows for low balance", () => {
     const msg = getFeeWarningMessage("coinflip", 5, 20);
     expect(msg).toContain("Low Balance Warning");

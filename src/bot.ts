@@ -1418,7 +1418,7 @@ type GameSetupCopy = {
   introLines: string[];
   bulletPoints: string[];
   amountPrompt: string;
-  suggestionLabel: string;
+  suggestionLabel?: string;
   lowBalanceCopy?: {
     object: string;
   };
@@ -1436,7 +1436,6 @@ const GAME_SETUP_COPY: Record<"coinflip" | "giveaway", GameSetupCopy> = {
       "• Fair and transparent results",
     ],
     amountPrompt: "Select stake per player in <b>{TOKEN}</b>:",
-    suggestionLabel: "Suggested stakes",
     lowBalanceCopy: {
       object: "stake per player",
     },
@@ -1524,7 +1523,7 @@ const startInteractiveGameSetup = async (
 
   message += copy.amountPrompt.replace("{TOKEN}", tokenInfo.tokenTicker);
 
-  if (suggestedAmounts.length > 0) {
+  if (copy.suggestionLabel && suggestedAmounts.length > 0) {
     message += `\n\n${copy.suggestionLabel}:\n`;
     for (const amount of suggestedAmounts) {
       const amountDisplay = formatTokenDisplay(amount, {
@@ -1545,7 +1544,6 @@ const startInteractiveGameSetup = async (
       userBalance,
       getTelegramIdString(ctx),
       contractMin,
-      tokenInfo.tokenTicker,
       {
         decimals: tokenInfo.decimals,
         tokenPriceUSD: tokenPriceUSD ?? undefined,
@@ -4408,8 +4406,11 @@ bot.callbackQuery(
           tokenContext.tokenTicker
         );
 
-        if (suggestedAmounts.length > 0) {
-          warningMessage += "\n\nSuggested stakes:\n";
+        const suggestionLabel =
+          GAME_SETUP_COPY[gameType as "coinflip" | "giveaway"]?.suggestionLabel;
+
+        if (suggestionLabel && suggestedAmounts.length > 0) {
+          warningMessage += `\n\n${suggestionLabel}:\n`;
           for (const amount of suggestedAmounts) {
             const amountDisplay = formatTokenDisplay(amount, {
               decimals: tokenContext.tokenDecimals,
@@ -4430,7 +4431,6 @@ bot.callbackQuery(
             userBalance,
             creatorId,
             contractMin,
-            tokenContext.tokenTicker,
             {
               decimals: tokenContext.tokenDecimals,
               tokenPriceUSD: tokenPriceUSD ?? undefined,
