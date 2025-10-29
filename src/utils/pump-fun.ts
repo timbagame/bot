@@ -10,6 +10,7 @@ import { escapeHtml, formatAmount, formatRate } from "./format-amount";
 import BN from "bn.js";
 import { resolveTokenMetadata } from "./token-metadata";
 import { parseDecimalAmount } from "./amount";
+import { buildPumpFunCoinUrl } from "./constants";
 
 const SOL_MINTS = new Set<string>([
   "So11111111111111111111111111111111111111112",
@@ -170,12 +171,9 @@ export class PumpFunClient {
         hooks: [
           async ({ fetch, ensureDecimals }) => {
             try {
-              console.log(
-                `🔍 Fetching from pump.fun API: https://frontend-api.pump.fun/coins/${mintAddress}`
-              );
-              const response = await fetch(
-                `https://frontend-api.pump.fun/coins/${mintAddress}`
-              );
+              const requestUrl = buildPumpFunCoinUrl(mintAddress);
+              console.log(`🔍 Fetching from pump.fun API: ${requestUrl}`);
+              const response = await fetch(requestUrl);
               console.log(`📡 Pump.fun API response status: ${response.status}`);
 
               if (!response.ok) {

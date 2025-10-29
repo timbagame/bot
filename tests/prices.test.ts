@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { getPriceUSD } from "../src/utils/prices";
+import { PUMP_FUN_API_BASE } from "../src/utils/constants";
 
 const jupOkFetch = (price: number) => async (input: RequestInfo | URL) => {
   const url = typeof input === "string" ? input : input.toString();
@@ -18,7 +19,7 @@ const jupFailPumpOkFetch = (pumpPrice: number) => async (input: RequestInfo | UR
   if (url.includes("lite-api.jup.ag")) {
     return new Response("oops", { status: 500 });
   }
-  if (url.includes("frontend-api.pump.fun")) {
+  if (url.startsWith(PUMP_FUN_API_BASE)) {
     return new Response(
       JSON.stringify({ priceUsd: String(pumpPrice) }),
       { status: 200, headers: { "content-type": "application/json" } }

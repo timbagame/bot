@@ -38,6 +38,7 @@ import {
   createWalletKeyboard,
   createWalletSettingsKeyboard,
   createBackToWalletKeyboard,
+  createCancelKeyboard,
   createConfirmWrapKeyboard,
   createConfirmUnwrapKeyboard,
   createTradeConfirmKeyboard,
@@ -716,6 +717,43 @@ const renderTradeQuoteError = (
     text: `❌ <b>QUOTE ERROR</b>\n\n${userFriendly}`,
     keyboard,
   };
+};
+
+type SolscanSuccessMessageOptions = {
+  title: string;
+  bodyLines: string[];
+  signature?: string;
+  linkText?: string;
+};
+
+const buildSolscanSuccessMessage = ({
+  title,
+  bodyLines,
+  signature,
+  linkText = "View on Solscan",
+}: SolscanSuccessMessageOptions): { text: string; disablePreview: boolean } => {
+  const lines: string[] = [title];
+  const normalizedBody = bodyLines.filter(
+    (line) => typeof line === "string" && line.trim().length > 0
+  );
+
+  if (normalizedBody.length > 0) {
+    lines.push("", ...normalizedBody);
+  }
+
+  const { message, previewDisabled } = buildTransactionLinkMessage({
+    signature,
+    networkOverride: process.env["RPC_URL"],
+    label: "🔗 ",
+    linkText,
+    format: "html",
+  });
+
+  if (message) {
+    lines.push("", message);
+  }
+
+  return { text: lines.join("\n"), disablePreview: previewDisabled };
 };
 
 type PrepareTradeQuoteParams = {
@@ -5179,38 +5217,17 @@ bot.on("callback_query", async (ctx, next) => {
 
     console.log("🔔 Custom wrap amount requested");
 
-    const response = [
-      `✏️ <b>CUSTOM WRAP AMOUNT</b>`,
-      "",
-      `Please send a message with the amount of SOL you want to wrap.`,
-      "",
-      `<b>Examples:</b>`,
-      `• <code>0.5</code>`,
-      `• <code>1.25</code>`,
-      "",
-      INPUT_TIMEOUT_HINT,
-    ];
-
-    const menuResult = await respondWithMenu(ctx, {
-      text: response.join("\n"),
-      keyboard: new InlineKeyboard().text("❌ Cancel", "cmd_wrap").row(),
+    await showCustomAmountPrompt({
+      ctx,
+      userId,
+      title: "✏️ <b>CUSTOM WRAP AMOUNT</b>",
+      instructions: [
+        "Please send a message with the amount of SOL you want to wrap.",
+      ],
+      examples: ["• <code>0.5</code>", "• <code>1.25</code>"],
+      cancelCallback: "cmd_wrap",
+      state: { type: "wrap_custom_amount" },
     });
-
-    // Set user state to expect custom wrap amount
-    const nextState: Record<string, any> = {
-      type: "wrap_custom_amount",
-      chatId:
-        menuResult.chatId ??
-        (typeof ctx.chat?.id === "number" ? ctx.chat.id : undefined),
-    };
-
-    const fallbackMessageId =
-      menuResult.messageId ?? ctx.callbackQuery?.message?.message_id;
-    if (typeof fallbackMessageId === "number") {
-      nextState["messageId"] = fallbackMessageId;
-    }
-
-    setUserState(userId, nextState);
 
     await safeAnswerCallbackQuery(ctx, "Send the amount as a message");
   } catch (error) {
@@ -5322,24 +5339,17 @@ bot.callbackQuery("unwrap_confirm", async (ctx) => {
         });
       },
       onSuccess: async ({ signature, formattedAmount }) => {
-        const { message: linkLine } = buildTransactionLinkMessage({
+        const amountLabel = escapeHtml(formattedAmount ?? "0");
+        const { text, disablePreview } = buildSolscanSuccessMessage({
+          title: "✅ <b>UNWRAP COMPLETED</b>",
+          bodyLines: [`Unwrapped ${amountLabel} WSOL to SOL`],
           signature,
-          networkOverride: process.env["RPC_URL"],
-          label: "🔗 ",
-          linkText: "View on Solscan",
-          format: "html",
         });
-        const completionMessage = linkLine
-          ? `✅ <b>UNWRAP COMPLETED</b>\n\nUnwrapped ${escapeHtml(
-              formattedAmount
-            )} WSOL to SOL\n\n${linkLine}`
-          : `✅ <b>UNWRAP COMPLETED</b>\n\nUnwrapped ${escapeHtml(
-              formattedAmount
-            )} WSOL to SOL`;
 
         await respondWithMenu(ctx, {
-          text: completionMessage,
+          text,
           keyboard: createBackToWalletKeyboard(),
+          disableLinkPreview: disablePreview,
         });
       },
       onError: async (error) => {
@@ -5623,20 +5633,17 @@ bot.callbackQuery(/^confirm_wrap_/, async (ctx) => {
         });
       },
       onSuccess: async ({ signature, formattedAmount: amountDisplay }) => {
-        const { message: linkLine } = buildTransactionLinkMessage({
+        const amountLabel = escapeHtml(amountDisplay ?? "0");
+        const { text, disablePreview } = buildSolscanSuccessMessage({
+          title: "✅ <b>WRAP COMPLETED</b>",
+          bodyLines: [`Wrapped ${amountLabel} SOL to WSOL`],
           signature,
-          networkOverride: process.env["RPC_URL"],
-          label: "🔗 ",
-          linkText: "View on Solscan",
-          format: "html",
         });
-        const completionMessage = linkLine
-          ? `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${amountDisplay} SOL to WSOL\n\n${linkLine}`
-          : `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${amountDisplay} SOL to WSOL`;
 
         await respondWithMenu(ctx, {
-          text: completionMessage,
+          text,
           keyboard: createBackToWalletKeyboard(),
+          disableLinkPreview: disablePreview,
         });
       },
       onError: async (error) => {
@@ -6232,9 +6239,7 @@ registerCallbackPrefixHandler("send_amount_", async (ctx, { payload }) => {
 
     await respondWithMenu(ctx, {
       text: response.join("\n"),
-      keyboard: new InlineKeyboard()
-        .text("❌ Cancel", `send_select_${token}`)
-        .row(),
+      keyboard: createCancelKeyboard(`send_select_${token}`),
     });
 
     setUserState(userId, {
@@ -6569,7 +6574,7 @@ registerCallbackPrefixHandler(
         await respondWithMenu(ctx, {
           text: response.join("\n"),
           parseMode: "HTML",
-          keyboard: new InlineKeyboard().text("❌ Cancel", "cmd_swap").row(),
+          keyboard: createCancelKeyboard("cmd_swap"),
         });
 
         setUserState(userId, {
@@ -6640,35 +6645,29 @@ registerCallbackPrefixHandler(
         const userId = getTelegramIdString(ctx);
         if (!userId) return;
 
-        const response = [
-          `✏️ <b>CUSTOM AMOUNT</b>`,
-          "",
-          `<b>Swap:</b> ${fromToken} → ${displayToToken}`,
-          "",
-          `Please send a message with the amount of ${fromToken} to swap.`,
-          "",
-          `<b>Examples:</b>`,
-          `• <code>10</code>`,
-          `• <code>0.5</code>`,
-          `• <code>max</code> (all balance)`,
-          "",
-          INPUT_TIMEOUT_HINT,
-        ];
-
-        await respondWithMenu(ctx, {
-          text: response.join("\n"),
-          parseMode: "HTML",
-          keyboard: new InlineKeyboard()
-            .text("❌ Cancel", `swap_to_${fromToken}_${toTokenIdentifier}`)
-            .row(),
-        });
-
-        setUserState(userId, {
-          type: "swap_custom_amount",
-          fromToken: fromToken,
-          toToken: toTokenIdentifier,
-          messageId: ctx.callbackQuery?.message?.message_id,
-          chatId: ctx.chat?.id,
+        await showCustomAmountPrompt({
+          ctx,
+          userId,
+          title: "✏️ <b>CUSTOM AMOUNT</b>",
+          tokenLines: [
+            `<b>Swap:</b> ${escapeHtml(fromToken)} → ${escapeHtml(displayToToken)}`,
+          ],
+          instructions: [
+            `Please send a message with the amount of ${escapeHtml(
+              fromToken
+            )} to swap.`,
+          ],
+          examples: [
+            "• <code>10</code>",
+            "• <code>0.5</code>",
+            "• <code>max</code> (all balance)",
+          ],
+          cancelCallback: `swap_to_${fromToken}_${toTokenIdentifier}`,
+          state: {
+            type: "swap_custom_amount",
+            fromToken,
+            toToken: toTokenIdentifier,
+          },
         });
 
         await safeAnswerCallbackQuery(ctx, "Send amount as message");
@@ -7128,7 +7127,7 @@ const handleCustomAmountInput = async (
   response.push("", INPUT_TIMEOUT_HINT);
 
   const messageText = response.join("\n");
-  const keyboard = new InlineKeyboard().text("❌ Cancel", `send_select_${token}`).row();
+  const keyboard = createCancelKeyboard(`send_select_${token}`);
 
   const targetChatId =
     typeof userState.chatId === "number"
@@ -7213,11 +7212,12 @@ const handleAddressInput = async (
   ];
 
   const messageText = response.join("\n");
-  const keyboard = new InlineKeyboard()
-    .text("✅ Confirm Send", `confirm_send_${txId}`)
-    .row()
-    .text("❌ Cancel", `send_select_${token}`)
-    .row();
+  const keyboard = createTradeConfirmKeyboard({
+    confirmLabel: "✅ Confirm Send",
+    confirmCallback: `confirm_send_${txId}`,
+    cancelLabel: "❌ Cancel",
+    cancelCallback: `send_select_${token}`,
+  });
 
   const targetChatId =
     typeof userState.chatId === "number"
@@ -7329,9 +7329,7 @@ const handleSwapToTokenInput = async (
     await respondWithMenu(ctx, {
       text: "❌ <b>Invalid input</b>\n\nPlease provide a token symbol or contract address.",
       parseMode: "HTML",
-      keyboard: new InlineKeyboard()
-        .text("❌ Cancel", `swap_to_${fromToken}_OTHER`)
-        .row(),
+      keyboard: createCancelKeyboard(`swap_to_${fromToken}_OTHER`),
     });
     return;
   }
@@ -7347,9 +7345,7 @@ const handleSwapToTokenInput = async (
   await respondWithMenu(ctx, {
     text: loadingLines.join("\n"),
     parseMode: "HTML",
-    keyboard: new InlineKeyboard()
-      .text("❌ Cancel", `swap_to_${fromToken}_OTHER`)
-      .row(),
+    keyboard: createCancelKeyboard(`swap_to_${fromToken}_OTHER`),
   });
 
   try {
@@ -7442,13 +7438,11 @@ const handleSwapToTokenInput = async (
       INPUT_TIMEOUT_HINT,
     ];
 
-    await respondWithMenu(ctx, {
-      text: messageLines.join("\n"),
-      parseMode: "HTML",
-      keyboard: new InlineKeyboard()
-        .text("❌ Cancel", `swap_to_${fromToken}_OTHER`)
-        .row(),
-    });
+  await respondWithMenu(ctx, {
+    text: messageLines.join("\n"),
+    parseMode: "HTML",
+    keyboard: createCancelKeyboard(`swap_to_${fromToken}_OTHER`),
+  });
 
     setUserState(userId, {
       type: "swap_to_token",

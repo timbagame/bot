@@ -6,6 +6,7 @@ export type MenuPayload = {
   text: string;
   keyboard?: InlineKeyboard;
   parseMode?: "HTML" | "Markdown" | "MarkdownV2";
+  disableLinkPreview?: boolean;
 };
 
 export type MenuResponseOptions = {
@@ -59,7 +60,9 @@ const tryEditText = async (
     await ctx.editMessageText(payload.text, {
       parse_mode: payload.parseMode ?? "HTML",
       reply_markup: payload.keyboard,
-      link_preview_options: { is_disabled: true },
+      link_preview_options: {
+        is_disabled: payload.disableLinkPreview ?? true,
+      },
     });
   });
 
@@ -98,7 +101,9 @@ export const respondWithMenu = async (
         await ctx.api.editMessageText(targetChatId, targetMessageId, payload.text, {
           parse_mode: payload.parseMode ?? "HTML",
           reply_markup: payload.keyboard,
-          link_preview_options: { is_disabled: true },
+          link_preview_options: {
+            is_disabled: payload.disableLinkPreview ?? true,
+          },
         });
 
         return {
@@ -186,7 +191,9 @@ export const respondWithMenu = async (
       parse_mode: payload.parseMode ?? "HTML",
       reply_markup: payload.keyboard,
       reply_to_message_id: replyToId ?? undefined,
-      link_preview_options: { is_disabled: true },
+      link_preview_options: {
+        is_disabled: payload.disableLinkPreview ?? true,
+      },
     })
   );
 

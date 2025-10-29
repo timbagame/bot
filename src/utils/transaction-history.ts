@@ -127,6 +127,35 @@ export class TransactionHistory extends BaseDatabase {
     }
   }
 
+  private fetchTransactions(options: {
+    userId: string;
+    limit?: number;
+    offset?: number;
+    type?: TransactionRecord["transaction_type"];
+    logLabel: string;
+  }): TransactionRecord[] {
+    const { userId, limit = 20, offset, type, logLabel } = options;
+    const whereClauses = ["user_id = ?"];
+    const params: Array<string | number> = [userId];
+
+    if (type) {
+      whereClauses.push("transaction_type = ?");
+      params.push(type);
+    }
+
+    let query = `SELECT * FROM transaction_history WHERE ${whereClauses.join(
+      " AND "
+    )} ORDER BY timestamp DESC LIMIT ?`;
+    params.push(limit);
+
+    if (offset !== undefined) {
+      query += " OFFSET ?";
+      params.push(offset);
+    }
+
+    return this.all<TransactionRecord>(query, params, logLabel);
+  }
+
   /**
    * Get transaction history for a user
    */
@@ -136,15 +165,12 @@ export class TransactionHistory extends BaseDatabase {
     offset: number = 0
   ): TransactionRecord[] {
     try {
-      const records = this.all<TransactionRecord>(
-        `SELECT * FROM transaction_history
-        WHERE user_id = ?
-        ORDER BY timestamp DESC
-        LIMIT ? OFFSET ?`,
-        [userId, limit, offset],
-        "getting user history"
-      );
-      return records;
+      return this.fetchTransactions({
+        userId,
+        limit,
+        offset,
+        logLabel: "getting user history",
+      });
     } catch (error) {
       console.error("Error getting user history:", error);
       return [];
@@ -160,15 +186,12 @@ export class TransactionHistory extends BaseDatabase {
     limit: number = 10
   ): TransactionRecord[] {
     try {
-      const records = this.all<TransactionRecord>(
-        `SELECT * FROM transaction_history
-        WHERE user_id = ? AND transaction_type = ?
-        ORDER BY timestamp DESC
-        LIMIT ?`,
-        [userId, type, limit],
-        "getting user history by type"
-      );
-      return records;
+      return this.fetchTransactions({
+        userId,
+        type,
+        limit,
+        logLabel: "getting user history by type",
+      });
     } catch (error) {
       console.error("Error getting user history by type:", error);
       return [];

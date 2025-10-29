@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { PumpFunClient } from "../src/utils/pump-fun";
+import { PUMP_FUN_API_BASE } from "../src/utils/constants";
 
 class ConnNoMeta {
   async getAccountInfo(_pk: any) { return null as any; }
@@ -16,7 +17,7 @@ describe("PumpFunClient.getTokenMetadata fallbacks", () => {
     const pfc = new PumpFunClient(new ConnNoMeta() as any);
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = (typeof input === "string" ? input : input.toString());
-      if (url.includes("frontend-api.pump.fun/coins/")) {
+      if (url.startsWith(PUMP_FUN_API_BASE)) {
         return new Response(JSON.stringify({ symbol: "PUMPX", name: "Pump X" }), { status: 200 });
       }
       return new Response("not used", { status: 404 });
@@ -30,7 +31,7 @@ describe("PumpFunClient.getTokenMetadata fallbacks", () => {
     const pfc = new PumpFunClient(new ConnNoMeta() as any);
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = (typeof input === "string" ? input : input.toString());
-      if (url.includes("frontend-api.pump.fun")) return new Response("oops", { status: 500 });
+      if (url.startsWith(PUMP_FUN_API_BASE)) return new Response("oops", { status: 500 });
       if (url.includes("lite-api.jup.ag/tokens/v2/search")) {
         return new Response(
           JSON.stringify([
