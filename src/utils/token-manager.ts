@@ -180,6 +180,32 @@ export class TokenManager {
           error: "unknown_token",
           unknownToken: candidate.toUpperCase(),
         };
+      } else {
+        let explicitMint: string | null = null;
+        try {
+          explicitMint = new PublicKey(candidate).toBase58();
+        } catch {
+          explicitMint = null;
+        }
+
+        if (explicitMint) {
+          tokenWasSpecified = true;
+          resolvedTokenMint = explicitMint;
+
+          const knownMint = this.tokenDb.getKnownTokenByMint(explicitMint);
+          if (knownMint) {
+            tokenDecimals = knownMint.decimals;
+            resolvedTokenTicker = knownMint.token_ticker;
+          } else {
+            resolvedTokenTicker = candidate.toUpperCase();
+          }
+        } else {
+          return {
+            success: false,
+            error: "unknown_token",
+            unknownToken: candidate.toUpperCase(),
+          };
+        }
       }
     }
 
