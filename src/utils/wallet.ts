@@ -301,7 +301,8 @@ export class WalletManager {
             console.log(
               `🆕 Creating token account ${ata.toBase58()} for user ${pubkey.toBase58()}`
             );
-            await this.sendTransaction(instructions, [payer]);
+            const signature = await this.sendTransaction(instructions, [payer]);
+            await this.confirmTransaction(signature);
 
             const createdAccount = await getAccount(
               this.connection,
@@ -1535,7 +1536,9 @@ export class WalletManager {
     const syncIx = createSyncNativeInstruction(wsolAta);
 
     const allInstructions = [...instructions, transferIx, syncIx];
-    return await this.sendTransaction(allInstructions, [userKeypair]);
+    const signature = await this.sendTransaction(allInstructions, [userKeypair]);
+    await this.confirmTransaction(signature);
+    return signature;
   }
 
   public async unwrapSol(
