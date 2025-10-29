@@ -2,6 +2,15 @@ import { PublicKey, Keypair } from "@solana/web3.js";
 type BN = any;
 
 // ================================
+// SHARED UTILITY TYPES
+// ================================
+
+export type FetchLike = (
+  input: RequestInfo | URL,
+  init?: RequestInit
+) => Promise<Response>;
+
+// ================================
 // DATABASE TYPES
 // ================================
 

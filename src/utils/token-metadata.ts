@@ -1,7 +1,6 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { fetchJupiterTokenMetadata } from "./jupiter";
-
-type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+import type { FetchLike } from "../types";
 
 export interface TokenMetadataResult {
   decimals: number;

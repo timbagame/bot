@@ -2,10 +2,10 @@ import {
   JUPITER_PRICE_URL,
   PRICES_CACHE_TTL_MS,
   PRICES_TIMEOUT_MS,
+  buildPumpFunCoinUrl,
 } from "./constants";
 import { WSOL_MINT } from "./token-registry";
-
-export type PriceFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+import type { FetchLike } from "../types";
 
 const cache = new Map<string, { price: number; ts: number }>();
 const inflight = new Map<string, Promise<number>>();
@@ -65,7 +65,7 @@ function pickValidPrice(
 
 async function fetchFromJupiter(
   id: string,
-  fetchImpl: PriceFetch,
+  fetchImpl: FetchLike,
   timeoutMs: number
 ): Promise<number | null> {
   try {
@@ -84,11 +84,11 @@ async function fetchFromJupiter(
 
 async function fetchFromPumpFun(
   addr: string,
-  fetchImpl: PriceFetch,
+  fetchImpl: FetchLike,
   timeoutMs: number
 ): Promise<number | null> {
   try {
-    const url = `https://frontend-api.pump.fun/coins/${addr}`;
+    const url = buildPumpFunCoinUrl(addr);
     const res = await withTimeout(
       fetchImpl(url, {
         method: "GET",
@@ -122,7 +122,7 @@ async function fetchFromPumpFun(
 
 export async function getPriceUSD(
   mintOrTicker: string,
-  fetchImpl: PriceFetch = (globalThis.fetch as any)
+  fetchImpl: FetchLike = (globalThis.fetch as any)
 ): Promise<number> {
   if (!isPricesEnabled()) return 0;
   const key = normalizeKey(mintOrTicker);
@@ -165,7 +165,7 @@ export async function getPriceUSD(
 
 export async function getPricesUSD(
   ids: string[],
-  fetchImpl: PriceFetch = (globalThis.fetch as any)
+  fetchImpl: FetchLike = (globalThis.fetch as any)
 ): Promise<Record<string, number>> {
   const entries = await Promise.all(
     ids.map(async (id) => [id, await getPriceUSD(id, fetchImpl)] as const)

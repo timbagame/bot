@@ -30,6 +30,13 @@ export const createBackToWalletKeyboard = (): InlineKeyboard => {
   return appendBackToWalletButton(new InlineKeyboard());
 };
 
+export const createCancelKeyboard = (
+  callback: string,
+  label = "❌ Cancel"
+): InlineKeyboard => {
+  return new InlineKeyboard().text(label, callback).row();
+};
+
 export const createWalletSettingsKeyboard = (): InlineKeyboard => {
   return appendBackToWalletButton(
     new InlineKeyboard()

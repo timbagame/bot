@@ -1,8 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 import { escapeHtml, formatRate } from "./format-amount";
 import { JUPITER_DEFAULT_SLIPPAGE_BPS } from "./constants";
-
-type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+import type { FetchLike } from "../types";
 
 // ================================
 // JUPITER TYPES

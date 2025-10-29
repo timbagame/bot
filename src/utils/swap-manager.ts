@@ -261,6 +261,70 @@ export class SwapManager {
     }
   }
 
+  private normalizePumpFunQuoteArgs(params: {
+    amount: string;
+    inputMint: string;
+    outputMint: string;
+    inputDecimals: number;
+    compositeFlow?: "pump-then-jupiter" | "jupiter-then-pump" | null;
+    log?: (message: string) => void;
+  }): {
+    decimalAmount: string;
+    trimmedAmount: string;
+    probablyRawAmount: boolean;
+    valid: boolean;
+    error?: string;
+    compositeDirective: "pump-then-jupiter" | "jupiter-then-pump" | null;
+  } {
+    const {
+      amount,
+      inputMint,
+      outputMint,
+      inputDecimals,
+      compositeFlow = null,
+      log,
+    } = params;
+
+    const trimmedAmount = amount.trim();
+    let validation = validatePumpFunSwap(inputMint, outputMint, trimmedAmount);
+    const { decimalAmount, probablyRawAmount } = this.normalizePumpFunAmount(
+      trimmedAmount,
+      inputDecimals
+    );
+
+    if (decimalAmount !== trimmedAmount) {
+      const normalizedValidation = validatePumpFunSwap(
+        inputMint,
+        outputMint,
+        decimalAmount
+      );
+
+      if (!normalizedValidation.valid && validation.valid && log) {
+        log(
+          `   ❌ Pump.fun validation failed after normalization: ${normalizedValidation.error}`
+        );
+      }
+
+      validation = normalizedValidation;
+    }
+
+    const compositeDirective =
+      !validation.valid &&
+      validation.error?.includes("Pump.fun swaps must involve SOL") &&
+      compositeFlow
+        ? compositeFlow
+        : null;
+
+    return {
+      decimalAmount,
+      trimmedAmount,
+      probablyRawAmount,
+      valid: validation.valid,
+      error: validation.valid ? undefined : validation.error,
+      compositeDirective,
+    };
+  }
+
   private determineCompositeFlow(options: {
     inputIsPump: boolean;
     outputIsPump: boolean;
@@ -443,58 +507,40 @@ export class SwapManager {
     // If we have a non-graduated pump.fun token, use pump.fun
     if (hasNonGraduatedPumpFun && this.network === "mainnet") {
       console.log(`   🎯 Using pump.fun for quote`);
-      const trimmedAmount = amount.trim();
-      let validation = validatePumpFunSwap(
+      const normalized = this.normalizePumpFunQuoteArgs({
+        amount,
         inputMint,
         outputMint,
-        trimmedAmount
-      );
+        inputDecimals,
+        compositeFlow,
+        log: (message) => console.log(message),
+      });
 
-      const { decimalAmount, probablyRawAmount } =
-        this.normalizePumpFunAmount(trimmedAmount, inputDecimals);
-
-      if (decimalAmount !== trimmedAmount) {
-        const normalizedValidation = validatePumpFunSwap(
-          inputMint,
-          outputMint,
-          decimalAmount
-        );
-        if (!normalizedValidation.valid && validation.valid) {
-          console.log(
-            `   ❌ Pump.fun validation failed after normalization: ${normalizedValidation.error}`
-          );
-        }
-        validation = normalizedValidation;
-      }
-
-      if (!validation.valid) {
-        if (
-          validation.error?.includes("Pump.fun swaps must involve SOL") &&
-          compositeFlow
-        ) {
+      if (!normalized.valid) {
+        if (normalized.compositeDirective) {
           return await this.buildPumpFunCompositeQuote({
-            flow: compositeFlow,
+            flow: normalized.compositeDirective,
             inputMint,
             outputMint,
-            amountRaw: trimmedAmount,
-            amountDecimal: decimalAmount,
+            amountRaw: normalized.trimmedAmount,
+            amountDecimal: normalized.decimalAmount,
             inputDecimals,
             outputDecimals,
             slippageBps,
           });
         }
 
-        throw new Error(validation.error);
+        throw new Error(normalized.error ?? "Invalid pump.fun swap request");
       }
 
       console.log(
-        `   🔄 Amount conversion for pump.fun: ${trimmedAmount} → ${decimalAmount} (probablyRaw: ${probablyRawAmount})`
+        `   🔄 Amount conversion for pump.fun: ${normalized.trimmedAmount} → ${normalized.decimalAmount} (probablyRaw: ${normalized.probablyRawAmount})`
       );
 
       const pumpQuote = await this.pumpFunClient.getQuote(
         inputMint,
         outputMint,
-        decimalAmount,
+        normalized.decimalAmount,
         inputDecimals,
         outputDecimals,
         slippageBps
@@ -544,41 +590,26 @@ export class SwapManager {
             `   🔄 Trying pump.fun fallback for confirmed pump.fun token`
           );
 
-          const trimmedAmount = amount.trim();
-          let validation = validatePumpFunSwap(
+          const normalized = this.normalizePumpFunQuoteArgs({
+            amount,
             inputMint,
             outputMint,
-            trimmedAmount
-          );
+            inputDecimals,
+            compositeFlow,
+            log: (message) => console.log(message),
+          });
 
-          const { decimalAmount, probablyRawAmount } =
-            this.normalizePumpFunAmount(trimmedAmount, inputDecimals);
-
-          if (decimalAmount !== trimmedAmount) {
-            const normalizedValidation = validatePumpFunSwap(
-              inputMint,
-              outputMint,
-              decimalAmount
-            );
-            if (!normalizedValidation.valid && validation.valid) {
-              console.log(
-                `   ❌ Pump.fun validation failed after normalization: ${normalizedValidation.error}`
-              );
-            }
-            validation = normalizedValidation;
-          }
-
-          if (validation.valid) {
+          if (normalized.valid) {
             console.log(`   ✅ Pump.fun validation passed, getting quote...`);
 
             console.log(
-              `   🔄 Amount conversion for pump.fun fallback: ${trimmedAmount} → ${decimalAmount} (probablyRaw: ${probablyRawAmount})`
+              `   🔄 Amount conversion for pump.fun fallback: ${normalized.trimmedAmount} → ${normalized.decimalAmount} (probablyRaw: ${normalized.probablyRawAmount})`
             );
 
             const pumpQuote = await this.pumpFunClient.getQuote(
               inputMint,
               outputMint,
-              decimalAmount,
+              normalized.decimalAmount,
               inputDecimals,
               outputDecimals,
               slippageBps
@@ -594,26 +625,23 @@ export class SwapManager {
               provider: "pump-fun",
             };
           } else {
-            if (
-              validation.error?.includes(
-                "Pump.fun swaps must involve SOL"
-              ) &&
-              compositeFlow
-            ) {
+            if (normalized.compositeDirective) {
               return await this.buildPumpFunCompositeQuote({
-                flow: compositeFlow,
+                flow: normalized.compositeDirective,
                 inputMint,
                 outputMint,
-                amountRaw: trimmedAmount,
-                amountDecimal: decimalAmount,
+                amountRaw: normalized.trimmedAmount,
+                amountDecimal: normalized.decimalAmount,
                 inputDecimals,
                 outputDecimals,
                 slippageBps,
               });
             }
 
+            const errorMessage =
+              normalized.error ?? "Unknown pump.fun validation error";
             console.log(
-              `   ❌ Pump.fun validation failed: ${validation.error}`
+              `   ❌ Pump.fun validation failed: ${errorMessage}`
             );
           }
         } else {

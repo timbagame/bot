@@ -4,6 +4,7 @@ import { INPUT_TIMEOUT_HINT, LAMPORTS_PER_SOL } from "./constants";
 import { respondWithMenu } from "./menu-response";
 import { setUserState } from "./user-state";
 import { NetworkDetector } from "./network-detector";
+import { createCancelKeyboard } from "./keyboards";
 
 export type TokenDisplayLine = {
   ticker: string;
@@ -253,7 +254,7 @@ export const showCustomAmountPrompt = async <State extends Record<string, unknow
 
   const menuResult = await respondWithMenu(ctx, {
     text: lines.join("\n"),
-    keyboard: new InlineKeyboard().text(cancelLabel, cancelCallback).row(),
+    keyboard: createCancelKeyboard(cancelCallback, cancelLabel),
   });
 
   const derivedState: CustomAmountPromptDerivedState<State> = {

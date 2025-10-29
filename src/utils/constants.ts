@@ -135,6 +135,14 @@ export const PRICES_CACHE_TTL_MS = Number(process.env["PRICES_CACHE_TTL_MS"] ?? 
 // Request timeout (ms)
 export const PRICES_TIMEOUT_MS = Number(process.env["PRICES_TIMEOUT_MS"] ?? 3_000);
 
+export const PUMP_FUN_API_BASE = "https://frontend-api.pump.fun/coins";
+export const buildPumpFunCoinUrl = (mintAddress: string): string => {
+  const base = PUMP_FUN_API_BASE.endsWith("/")
+    ? PUMP_FUN_API_BASE.slice(0, -1)
+    : PUMP_FUN_API_BASE;
+  return `${base}/${mintAddress}`;
+};
+
 // ================================
 // MEDIA FILE IDs
 // ================================
