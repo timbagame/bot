@@ -98,7 +98,7 @@ describe("GameManager.createGame", () => {
       1n
     );
     expect(res.success).toBe(false);
-    expect(String(res.error)).toContain("Not enough SOL");
+    expect(String(res.error)).toContain("Failed to wrap SOL automatically");
   });
 
   test("errors on insufficient balance with formatted message", async () => {

@@ -25,6 +25,7 @@ import {
   GAME_EXPIRATION_BUFFER_TIME,
   WSOL_MINT,
   DEFAULT_TOKEN_TICKER,
+  LAMPORTS_PER_SOL,
   getCoinflipVideoId,
   getGiveawayVideoId,
   applyDynamicFeeBudgets,
@@ -855,6 +856,13 @@ export class GameManager {
       );
       return null;
     }
+  }
+
+  private formatLamportsForDisplay(lamports: number): string {
+    if (typeof (this.wallet as any).formatSolBalance === "function") {
+      return (this.wallet as any).formatSolBalance(lamports);
+    }
+    return `${(lamports / LAMPORTS_PER_SOL).toFixed(6)} SOL`;
   }
 
   private async ensureWrappedSolBalance(
@@ -2255,7 +2263,7 @@ export class GameManager {
             reservedTicketAmount,
             metadata.decimals
           );
-          const formattedBuffer = this.wallet.formatSolBalance(minSolBuffer);
+          const formattedBuffer = this.formatLamportsForDisplay(minSolBuffer);
 
           return {
             success: false,
@@ -2800,7 +2808,7 @@ Keep at least ${formattedBuffer} SOL available for fees or deposit more ${tokenT
               reservedTicketAmount,
               metadata.decimals
             );
-            const formattedBuffer = this.wallet.formatSolBalance(minSolBuffer);
+            const formattedBuffer = this.formatLamportsForDisplay(minSolBuffer);
 
             return {
               success: false,
