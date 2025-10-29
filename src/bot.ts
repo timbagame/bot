@@ -5,7 +5,6 @@ import { WalletManager } from "./utils/wallet";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
-import type { Keypair } from "@solana/web3.js";
 import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
 import { GameDatabase, type LeaderboardStatsRecord } from "./utils/game-database";
@@ -98,22 +97,9 @@ import { recentUpdateGuard } from "./utils/recent-update";
 import { getPriceUSD } from "./utils/prices";
 import { patchReplyBehavior } from "./utils/reply-patch";
 import { buildTransactionLinkMessage } from "./utils/network-detector";
-import {
-  buildBuyMenuUI,
-  buildProcessingStatus,
-  buildSellMenuUI,
-  SELL_NOOP_CALLBACK,
-} from "./utils/trade-ui";
-import {
-  respondWithMenu,
-  type MenuPayload,
-  type MenuResponseResult,
-} from "./utils/menu-response";
-import {
-  parseDecimalAmount,
-  presentTradeAmount,
-  type PresentedTradeAmountResult,
-} from "./utils/amount";
+import { buildProcessingStatus } from "./utils/trade-ui";
+import { respondWithMenu } from "./utils/menu-response";
+import { parseDecimalAmount, presentTradeAmount } from "./utils/amount";
 import { handleCoinflipCommand, type CoinflipDeps } from "./handlers/game";
 import { isMessageMissing } from "./utils/telegram-errors";
 
@@ -412,232 +398,6 @@ const normalizeCustomTradeAmount = ({
   };
 };
 
-type ProcessCustomTradeAmountParams = {
-  ctx: any;
-  userState: any;
-  amount: string;
-  assetTicker: string;
-  getWalletSnapshot: () => Promise<WalletCacheSnapshot>;
-  selectTokenBalance?: (snapshot: WalletCacheSnapshot) =>
-    | TokenBalanceLike
-    | undefined;
-  resolveDecimals: (
-    snapshot: WalletCacheSnapshot,
-    tokenBalance?: TokenBalanceLike
-  ) => Promise<number> | number;
-  onSuccess: (args: {
-    normalizedAmount: string;
-    displayAmount: string;
-    walletCtx: any;
-    snapshot: WalletCacheSnapshot;
-    presentation: PresentedTradeAmountResult;
-  }) => Promise<void>;
-  buildErrorMessage: (error: Error) => string[];
-  buildRetryState: () => Record<string, unknown>;
-  cancelCallbackData: string;
-  logLabel: string;
-};
-
-const processCustomTradeAmount = async ({
-  ctx,
-  userState,
-  amount,
-  assetTicker,
-  getWalletSnapshot,
-  selectTokenBalance,
-  resolveDecimals,
-  onSuccess,
-  buildErrorMessage,
-  buildRetryState,
-  cancelCallbackData,
-  logLabel,
-}: ProcessCustomTradeAmountParams) => {
-  try {
-    const snapshot = await getWalletSnapshot();
-    const tokenBalance = selectTokenBalance
-      ? selectTokenBalance(snapshot)
-      : undefined;
-
-    const decimals = await resolveDecimals(snapshot, tokenBalance);
-
-    const presentation = presentTradeAmount({
-      amount,
-      assetTicker,
-      decimals,
-      solBalance: snapshot.solBalance,
-      tokenBalance,
-      applySolFeeBuffer: false,
-    });
-
-    console.log(
-      `${logLabel}: ${presentation.displayAmount} ${assetTicker}`
-    );
-
-    const walletCtx = createMessageEditAdapter(
-      ctx,
-      userState.messageId,
-      userState.chatId ?? ctx.chat?.id
-    );
-
-    await onSuccess({
-      normalizedAmount: presentation.normalizedAmount,
-      displayAmount: presentation.displayAmount,
-      walletCtx,
-      snapshot,
-      presentation,
-    });
-  } catch (error) {
-    console.error(`${logLabel} error:`, error);
-
-    const errorMessage = buildErrorMessage(error as Error);
-
-    try {
-      await ctx.api.editMessageText(
-        ctx.chat.id,
-        userState.messageId,
-        errorMessage.join("\n"),
-        {
-          parse_mode: "HTML",
-          reply_markup: new InlineKeyboard()
-            .text("❌ Cancel", cancelCallbackData)
-            .row(),
-        }
-      );
-    } catch (editError) {
-      console.error(`${logLabel} failed to show error:`, editError);
-    }
-
-    const retryState = buildRetryState();
-    setUserState(getTelegramId(ctx).toString(), retryState);
-  }
-};
-
-type SwapQuoteWithDecimals = SwapQuote & {
-  inputDecimals?: number;
-  outputDecimals?: number;
-};
-
-type TradeSlippageConfig = {
-  callbackPrefix: string;
-  defaultOptions: number[];
-  allowCustom?: boolean;
-};
-
-type TradeSlippageKeyboardConfig = TradeSlippageConfig & {
-  kind: Extract<TradeKind, "buy" | "sell">;
-  txId: string;
-};
-
-type TokenInfoCacheEntry = {
-  token_mint: string;
-  decimals: number;
-};
-
-interface TokenSelectionCacheEntry {
-  targetToken: string;
-  targetTokenAddress: string;
-  paymentToken: string;
-  tokenMetadata?: {
-    address: string;
-    symbol: string;
-    name: string;
-    decimals: number;
-    verified: boolean;
-  };
-  timestamp?: number;
-}
-
-interface SellTransactionCacheEntry {
-  kind: "sell";
-  fromToken: string;
-  toToken: string;
-  amount: string;
-  rawAmount: string;
-  fromTokenInfo: TokenInfoCacheEntry;
-  toTokenInfo: TokenInfoCacheEntry;
-  quote: SwapQuoteWithDecimals;
-  userKeypair: Keypair;
-  userId?: string;
-  timestamp?: number;
-}
-
-interface BuyTransactionCacheEntry {
-  kind: "buy";
-  fromToken: string;
-  toToken: string;
-  amount: string;
-  rawAmount?: string;
-  quote: SwapQuoteWithDecimals;
-  retryAmount?: string;
-  contractAddress?: string;
-  inputDecimals?: number;
-  outputDecimals?: number;
-  type?: string;
-  userId?: string;
-  timestamp?: number;
-}
-
-type TransactionCacheEntry =
-  | TokenSelectionCacheEntry
-  | SellTransactionCacheEntry
-  | BuyTransactionCacheEntry;
-
-type TradeTransactionCacheEntry =
-  | SellTransactionCacheEntry
-  | BuyTransactionCacheEntry;
-
-type TradeCacheEntryFactoryResult = {
-  entry: TradeTransactionCacheEntry;
-  storePending?: boolean;
-};
-
-type TradeCacheEntryFactory = (params: {
-  txId: string;
-  quote: SwapQuoteWithDecimals;
-  context: PreparedTradeQuoteContext;
-  telegramId: bigint;
-}) => TradeCacheEntryFactoryResult;
-
-const isTokenSelectionCacheEntry = (
-  entry: TransactionCacheEntry | undefined
-): entry is TokenSelectionCacheEntry =>
-  Boolean(entry && "targetToken" in entry && "targetTokenAddress" in entry);
-
-const isSellTransactionCacheEntry = (
-  entry: TransactionCacheEntry | undefined
-): entry is SellTransactionCacheEntry =>
-  Boolean(
-    entry &&
-      "kind" in entry &&
-      entry.kind === "sell" &&
-      "fromTokenInfo" in entry &&
-      "toTokenInfo" in entry
-  );
-
-const isBuyTransactionCacheEntry = (
-  entry: TransactionCacheEntry | undefined
-): entry is BuyTransactionCacheEntry =>
-  Boolean(
-    entry &&
-      "kind" in entry &&
-      entry.kind === "buy" &&
-      "fromToken" in entry &&
-      "toToken" in entry &&
-      "quote" in entry &&
-      !("fromTokenInfo" in entry)
-  );
-
-const isTradeTransactionCacheEntry = (
-  entry: TransactionCacheEntry | undefined
-): entry is TradeTransactionCacheEntry =>
-  Boolean(
-    entry &&
-      "fromToken" in entry &&
-      "toToken" in entry &&
-      "quote" in entry &&
-      "kind" in entry
-  );
-
 type QuickAmountButton = {
   label: string;
   value: string;
@@ -751,7 +511,29 @@ const resolveFormattedBalance = (
   };
 };
 
-type TradeKind = "buy" | "sell" | "swap";
+interface TokenSelectionCacheEntry {
+  targetToken: string;
+  targetTokenAddress: string;
+  paymentToken: string;
+  tokenMetadata?: {
+    symbol: string;
+    decimals: number;
+    verified: boolean;
+  };
+  timestamp?: number;
+}
+
+const createTokenLookupId = (): string =>
+  Math.random().toString(36).substring(2, 15);
+
+type TransactionCacheEntry = TokenSelectionCacheEntry;
+
+const isTokenSelectionCacheEntry = (
+  entry: TransactionCacheEntry | undefined
+): entry is TokenSelectionCacheEntry =>
+  Boolean(entry && "targetToken" in entry && "targetTokenAddress" in entry);
+
+type TradeKind = "swap";
 
 type TradeConfirmationParams = {
   kind: TradeKind;
@@ -763,24 +545,6 @@ type TradeConfirmationParams = {
   receiveDecimals: number;
   quote: SwapQuote;
   contractAddress?: string;
-};
-
-const TRADE_ICONS: Record<TradeKind, string> = {
-  buy: "🛒",
-  sell: "🧾",
-  swap: "🔄",
-};
-
-const TRADE_TITLES: Record<TradeKind, string> = {
-  buy: "Buy Confirmation",
-  sell: "Sell Confirmation",
-  swap: "Swap Confirmation",
-};
-
-const TRADE_ACTION_LABEL: Record<TradeKind, string> = {
-  buy: "purchase",
-  sell: "sale",
-  swap: "swap",
 };
 
 const formatSlippagePercent = (value: number): string => {
@@ -810,7 +574,7 @@ const formatSlippagePercent = (value: number): string => {
 };
 
 const formatTradeConfirmationSummary = ({
-  kind,
+  kind: _kind,
   payToken,
   payDisplay,
   payRawAmount,
@@ -845,8 +609,8 @@ const formatTradeConfirmationSummary = ({
     quote.slippage !== undefined ? (quote.slippage as number) : 0.5
   );
 
-  const lines = [
-    `${TRADE_ICONS[kind]} <b>${TRADE_TITLES[kind]}</b>`,
+const lines = [
+    `🔄 <b>Swap Confirmation</b>`,
     "",
     `<b>You Pay:</b> ${payDisplay} ${payToken}`,
     `<b>You Receive:</b> ~${receiveDisplay} ${receiveToken}`,
@@ -860,7 +624,7 @@ const formatTradeConfirmationSummary = ({
     lines.push("", `🔗 <b>Contract:</b> <code>${contractAddress}</code>`);
   }
 
-  lines.push("", `⚠️ <b>Confirm this ${TRADE_ACTION_LABEL[kind]}?</b>`);
+  lines.push("", `⚠️ <b>Confirm this swap?</b>`);
 
   return {
     message: lines.join("\n"),
@@ -873,157 +637,21 @@ const formatTradeConfirmationSummary = ({
 
 type TradeConfirmationSummary = ReturnType<typeof formatTradeConfirmationSummary>;
 
-const DEFAULT_TRADE_SLIPPAGE_CONFIG: TradeSlippageConfig = {
-  callbackPrefix: "trade_slip",
-  defaultOptions: [0.02, 0.1, 0.5, 1],
-  allowCustom: true,
-};
-
-const TRADE_SLIPPAGE_RANGE = { min: 0.02, max: 10 } as const;
-
-const TRADE_CONFIRMATION_CONFIG: Record<
-  Extract<TradeKind, "buy" | "sell">,
-  {
-    confirmLabel: string;
-    confirmCallback: (txId: string) => string;
-    cancelLabel: string;
-    cancelCallback: string;
-  }
-> = {
-  buy: {
-    confirmLabel: "✅ Confirm Buy",
-    confirmCallback: (txId: string) => `confirm_buy_${txId}`,
-    cancelLabel: "← Back to Buy",
-    cancelCallback: "cmd_buy",
-  },
-  sell: {
-    confirmLabel: "✅ Confirm Sell",
-    confirmCallback: (txId: string) => `confirm_sell_${txId}`,
-    cancelLabel: "❌ Cancel",
-    cancelCallback: "cmd_sell",
-  },
-};
-
-type TradeConfirmationKeyboardParams = {
-  confirmLabel: string;
-  confirmCallback: string;
-  cancelLabel: string;
-  cancelCallback: string;
-  slippageConfig?: TradeSlippageKeyboardConfig;
-};
-
-const buildTradeConfirmationKeyboard = ({
-  confirmLabel,
-  confirmCallback,
-  cancelLabel,
-  cancelCallback,
-  slippageConfig,
-}: TradeConfirmationKeyboardParams) => {
-  const keyboard = createTradeConfirmKeyboard({
-    confirmLabel,
-    confirmCallback,
-    cancelLabel,
-    cancelCallback,
-  });
-
-  if (slippageConfig) {
-    keyboard.row().text("⚙️ Slippage", "noop");
-
-    slippageConfig.defaultOptions.forEach((value, index) => {
-      if (index % 3 === 0) {
-        keyboard.row();
-      }
-
-      const label = formatSlippagePercent(value);
-
-      const callbackValue = value.toString();
-      keyboard.text(
-        label,
-        `${slippageConfig.callbackPrefix}_${slippageConfig.kind}_${slippageConfig.txId}_${callbackValue}`
-      );
-    });
-
-    if (slippageConfig.allowCustom) {
-      if (slippageConfig.defaultOptions.length % 3 === 0) {
-        keyboard.row();
-      }
-
-      keyboard.text(
-        "✏️",
-        `${slippageConfig.callbackPrefix}_${slippageConfig.kind}_${slippageConfig.txId}_custom`
-      );
-    }
-
-    keyboard.row();
-  }
-
-  return keyboard;
-};
-
-type TradeQuoteErrorKind = "swap" | TradeKind;
+type TradeQuoteErrorKind = "swap";
 
 type TradeQuoteErrorParams = {
   error: unknown;
   retryCallback: string;
-  amountLabel?: string;
-  fromToken?: string;
-  toToken?: string;
 };
 
 const renderTradeQuoteError = (
-  kind: TradeQuoteErrorKind,
-  { error, retryCallback, amountLabel, fromToken, toToken }: TradeQuoteErrorParams
+  _kind: TradeQuoteErrorKind,
+  { error, retryCallback }: TradeQuoteErrorParams
 ) => {
   const keyboard = new InlineKeyboard().text("← Try Again", retryCallback).row();
-  const asError = error instanceof Error ? error : new Error(String(error));
-
-  if (kind === "swap") {
-    const userFriendly = formatUserFriendlyError(error, wallet);
-    return {
-      text: `❌ <b>QUOTE ERROR</b>\n\n${userFriendly}`,
-      keyboard,
-    };
-  }
-
-  if (kind === "buy") {
-    const lines = [
-      "❌ <b>QUOTE ERROR</b>",
-      "",
-      `<b>Error:</b> ${asError.message}`,
-      "",
-      "Please try again.",
-    ];
-
-    if (fromToken && toToken) {
-      lines.splice(2, 0, `<b>Pair:</b> ${fromToken} → ${toToken}`, "");
-    }
-
-    return {
-      text: lines.join("\n"),
-      keyboard,
-    };
-  }
-
-  const details = [
-    "❌ <b>SELL QUOTE FAILED</b>",
-    "",
-  ];
-
-  if (fromToken) {
-    details.push(`<b>Token:</b> ${fromToken}`);
-  }
-  if (amountLabel) {
-    details.push(`<b>Amount:</b> ${amountLabel}`);
-  }
-  if (fromToken || amountLabel) {
-    details.push("");
-  }
-
-  details.push(`<b>Error:</b> ${asError.message}`, "", "This could happen if:");
-  details.push("• Token has no liquidity", "• Network issues", "• Token is not tradable");
-
+  const userFriendly = formatUserFriendlyError(error, wallet);
   return {
-    text: details.join("\n"),
+    text: `❌ <b>QUOTE ERROR</b>\n\n${userFriendly}`,
     keyboard,
   };
 };
@@ -1357,24 +985,18 @@ const NON_GAME_CALLBACK_NAMES = [
   "help_games",
   "help_utility",
   "help_examples",
-  "cmd_buy",
-  "cmd_sell",
 ] as const;
 
 const NON_GAME_CALLBACK_PREFIXES = [
   "send_",
   "swap_",
   "wrap_",
-  "buy_",
-  "sell_",
   "confirm_",
   "amount_",
   "players_",
   "cancel_game_",
   "custom_amount_",
   "custom_players_",
-  "trade_slip_",
-  "trade_slip_back_",
   "slider_",
   "back_to_amounts_",
   "type_amount_",
@@ -3484,48 +3106,6 @@ const TRANSACTION_CACHE_TTL_MS = 5 * 60 * 1000;
 const transactionCache = createExpiringCache<TransactionCacheEntry>(
   TRANSACTION_CACHE_TTL_MS
 );
-
-const getTradeTransactionCacheEntry = (
-  txId: string
-): { entry: TradeTransactionCacheEntry; source: "cache" | "pending" } | undefined => {
-  const cachedEntry = transactionCache.get(txId);
-  if (isTradeTransactionCacheEntry(cachedEntry)) {
-    return { entry: cachedEntry, source: "cache" };
-  }
-
-  const pendingEntry = getPendingTransaction<TradeTransactionCacheEntry>(
-    txId,
-    false
-  );
-
-  if (pendingEntry && isTradeTransactionCacheEntry(pendingEntry)) {
-    return { entry: pendingEntry, source: "pending" };
-  }
-
-  return undefined;
-};
-
-const getBuyTransactionCacheEntry = (
-  txId: string
-): { entry: BuyTransactionCacheEntry; source: "cache" | "pending" } | undefined => {
-  const result = getTradeTransactionCacheEntry(txId);
-  if (result?.entry.kind === "buy" && isBuyTransactionCacheEntry(result.entry)) {
-    return { entry: result.entry, source: result.source };
-  }
-
-  return undefined;
-};
-
-const getSellTransactionCacheEntry = (
-  txId: string
-): { entry: SellTransactionCacheEntry; source: "cache" | "pending" } | undefined => {
-  const result = getTradeTransactionCacheEntry(txId);
-  if (result?.entry.kind === "sell" && isSellTransactionCacheEntry(result.entry)) {
-    return { entry: result.entry, source: result.source };
-  }
-
-  return undefined;
-};
 
 // ================================
 // TOKEN MANAGEMENT COMMANDS
@@ -6279,108 +5859,6 @@ const clearWalletCache = (telegramId: bigint) => {
   console.log(`🗑️ Cleared wallet cache for user: ${telegramId}`);
 };
 
-type WalletOverview = {
-  walletAddress: string;
-  solBalance: number;
-  formattedSolBalance: string;
-  totalUsd: number;
-  tokenBalances: Array<{
-    mint: string;
-    ticker: string;
-    balance: number;
-    decimals: number;
-    rawBalance: string;
-  }>;
-  ownedTokens: Array<{
-    mint: string;
-    ticker: string;
-    balance: number;
-    decimals: number;
-    rawBalance: string;
-  }>;
-};
-
-const getWalletOverview = async (telegramId: bigint): Promise<WalletOverview> => {
-  const keypair = wallet.getKeyPair(telegramId);
-  const walletAddress = keypair.publicKey.toBase58();
-  const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-  const formattedSolBalance = wallet.formatSolBalance(solBalance);
-  const solPriceUSD = await getPriceUSD("SOL");
-  const solDecimalBalance = solBalance / LAMPORTS_PER_SOL;
-  const totalUsd = solDecimalBalance * solPriceUSD;
-  const ownedTokens = tokenBalances.filter((token) => {
-    const raw = Number.parseFloat(token.rawBalance);
-    return Number.isFinite(raw) && raw > 0;
-  });
-
-  return {
-    walletAddress,
-    solBalance,
-    formattedSolBalance,
-    totalUsd,
-    tokenBalances,
-    ownedTokens,
-  };
-};
-
-type TradeMenuResolution = {
-  payload: MenuPayload;
-  successAck?: string;
-  afterSend?: (result: MenuResponseResult) => Promise<void> | void;
-};
-
-type TradeMenuHandlerConfig = {
-  callback: string;
-  logLabel: string;
-  identityPurpose: string;
-  errorAck: string;
-  resolve: (args: {
-    ctx: any;
-    telegramId: bigint;
-    overview: Awaited<ReturnType<typeof getWalletOverview>>;
-  }) => Promise<TradeMenuResolution | null | undefined>;
-};
-
-const registerTradeMenuHandler = ({
-  callback,
-  logLabel,
-  identityPurpose,
-  errorAck,
-  resolve,
-}: TradeMenuHandlerConfig) => {
-  bot.callbackQuery(callback, async (ctx) => {
-    try {
-      const telegramId = await getRequiredTelegramIdForContext(
-        ctx,
-        identityPurpose
-      );
-      if (telegramId == null) {
-        await respondMissingIdentity(ctx);
-        return;
-      }
-
-      const overview = await getWalletOverview(telegramId);
-      const resolution = await resolve({ ctx, telegramId, overview });
-      if (!resolution) {
-        return;
-      }
-
-      const response = await respondWithMenu(ctx, resolution.payload);
-
-      if (resolution.afterSend) {
-        await resolution.afterSend(response);
-      }
-
-      if (resolution.successAck) {
-        await safeAnswerCallbackQuery(ctx, resolution.successAck);
-      }
-    } catch (error) {
-      console.error(`Error in ${logLabel}:`, error);
-      await safeAnswerCallbackQuery(ctx, errorAck);
-    }
-  });
-};
-
 type WalletMenuBalances = Pick<CachedWalletData, "solBalance" | "tokenBalances">;
 
 type WalletActionMenuContext = WalletMenuBalances & {
@@ -6849,980 +6327,7 @@ for (const { callback, section, errorAck } of HELP_SECTION_CALLBACKS) {
 
 // (Removed admin placeholder handlers)
 
-// ================================
-// BUY/SELL INTERFACE HANDLERS
-// ================================
-
-registerTradeMenuHandler({
-  callback: "cmd_buy",
-  logLabel: "cmd_buy",
-  identityPurpose: "buy menu",
-  errorAck: "❌ Error loading buy interface",
-  resolve: async ({ ctx, overview }) => {
-    const ownedTickers = new Set(
-      overview.ownedTokens
-        .map((token) => token.ticker?.toUpperCase())
-        .filter((ticker): ticker is string => Boolean(ticker))
-    );
-
-    const tokenButtons: { label: string; callbackData: string }[] = [];
-
-    const featuredTokens = [{ ticker: "TIMBA", label: "🎲 TIMBA" }];
-
-    for (const featured of featuredTokens) {
-      if (!ownedTickers.has(featured.ticker)) {
-        tokenButtons.push({
-          label: featured.label,
-          callbackData: `buy_popular_SOL_${featured.ticker}`,
-        });
-      }
-    }
-
-    const ownedTokenButtons = overview.ownedTokens.slice(0, 6).map((token) => {
-      const formattedBalance = wallet.formatTokenBalance(
-        token.balance,
-        token.decimals
-      );
-      const tokenTxId = Math.random().toString(36).substring(2, 15);
-      transactionCache.setWithTTL(tokenTxId, {
-        targetToken: token.ticker,
-        targetTokenAddress: token.mint,
-        paymentToken: "SOL",
-      });
-      return {
-        label: `${token.ticker} (${formattedBalance})`,
-        callbackData: `buy_dynamic_SOL_${tokenTxId}`,
-      };
-    });
-    tokenButtons.push(...ownedTokenButtons);
-
-    const { message, keyboard } = buildBuyMenuUI({
-      walletAddress: overview.walletAddress,
-      formattedSolBalance: overview.formattedSolBalance,
-      totalUsd: overview.totalUsd,
-      tokenButtons,
-    });
-
-    return {
-      payload: { text: message, keyboard },
-      successAck: "Select a token to buy",
-      afterSend: (menuResult) => {
-        const telegramIdentifier = getTelegramId(ctx);
-        if (telegramIdentifier == null) {
-          return;
-        }
-
-        const chatId =
-          menuResult.chatId ??
-          (typeof ctx.chat?.id === "number" ? ctx.chat.id : undefined);
-        const messageId =
-          menuResult.messageId ?? ctx.callbackQuery?.message?.message_id;
-
-        setUserState(telegramIdentifier.toString(), {
-          type: "buy_menu_idle",
-          paymentToken: "SOL",
-          chatId,
-          messageId,
-        });
-      },
-    };
-  },
-});
-
-registerTradeMenuHandler({
-  callback: "cmd_sell",
-  logLabel: "cmd_sell",
-  identityPurpose: "sell menu",
-  errorAck: "❌ Error loading sell interface",
-  resolve: async ({ overview, telegramId }) => {
-    const userKeypair = wallet.getKeyPair(telegramId);
-
-    const sellTokenButtons: { label: string; callbackData: string }[] = [];
-    for (const token of overview.ownedTokens.slice(0, 6)) {
-      const formatted = wallet.formatTokenBalance(
-        token.balance,
-        token.decimals
-      );
-
-      let solEstimate = "";
-      try {
-        if (
-          token.mint &&
-          token.mint !== "undefined" &&
-          token.mint !== "So11111111111111111111111111111111111111112" &&
-          token.ticker &&
-          token.ticker !== "undefined" &&
-          typeof token.mint === "string" &&
-          token.mint.length > 30 &&
-          token.rawBalance &&
-          token.decimals !== undefined
-        ) {
-          const quote = await swapManager.getQuote({
-            inputMint: token.mint,
-            outputMint: "So11111111111111111111111111111111111111112",
-            amount: token.rawBalance,
-            slippageBps: 500,
-            userKeypair,
-            inputDecimals: token.decimals,
-            outputDecimals: 9,
-            inputTicker: token.ticker.toUpperCase(),
-            outputTicker: "SOL",
-          });
-
-          const solAmount = parseFloat(quote.outputAmount) / LAMPORTS_PER_SOL;
-          if (solAmount > 0.001) {
-            solEstimate = ` → ${solAmount.toFixed(4)} SOL`;
-          } else if (solAmount > 0) {
-            solEstimate = ` → ${solAmount.toFixed(6)} SOL`;
-          }
-        }
-      } catch (error) {
-        console.log(
-          `Could not get quote for ${token.ticker || "unknown token"}: ${
-            (error as Error).message
-          }`
-        );
-      }
-
-      sellTokenButtons.push({
-        label: `${token.ticker} (${formatted}${solEstimate})`,
-        callbackData: `sell_token_${token.ticker}`,
-      });
-    }
-
-    const { message, keyboard } = buildSellMenuUI({
-      walletAddress: overview.walletAddress,
-      tokenButtons: sellTokenButtons,
-    });
-
-    return {
-      payload: { text: message, keyboard },
-      successAck: "Select what you want to sell",
-    };
-  },
-});
-
-bot.callbackQuery(SELL_NOOP_CALLBACK, async (ctx) => {
-  await safeAnswerCallbackQuery(ctx, "No tokens available to sell");
-});
-
-registerCallbackPrefixHandler(
-  "trade_slip_",
-  async (ctx, { payload }, next) => {
-    const parts = payload.split("_");
-    if (parts.length < 3) {
-      await next();
-      return;
-    }
-
-    const [kind, ...restParts] = parts;
-    const tradeKind = kind === "buy" || kind === "sell" ? kind : undefined;
-
-    if (!tradeKind || restParts.length < 2) {
-      await safeAnswerCallbackQuery(ctx, "❌ Invalid slippage request");
-      return;
-    }
-
-    const slippageValue = restParts.pop();
-    const txId = restParts.join("_");
-
-    if (!txId || !slippageValue) {
-      await safeAnswerCallbackQuery(ctx, "❌ Invalid slippage request");
-      return;
-    }
-
-    console.log(
-      `⚙️ ${tradeKind.toUpperCase()} slippage change: ${slippageValue} for txId: ${txId}`
-    );
-
-    try {
-      const tradeResult = getTradeTransactionCacheEntry(txId);
-      const tradeData = tradeResult?.entry;
-
-      if (!tradeData || tradeData.kind !== tradeKind) {
-        await safeAnswerCallbackQuery(
-          ctx,
-          "❌ Transaction expired. Please try again."
-        );
-        return;
-      }
-
-      if (slippageValue === "custom") {
-        const userId = getTelegramIdString(ctx);
-        if (!userId) return;
-
-        const currentSlippage = Number.isFinite(tradeData.quote.slippage)
-          ? (tradeData.quote.slippage as number)
-          : 1.0;
-
-        const response = [
-          `⚙️ <b>CUSTOM SLIPPAGE</b>`,
-          "",
-          `<b>Current:</b> ${formatSlippagePercent(currentSlippage)}`,
-          "",
-          `Please send a message with your desired slippage percentage.`,
-          "",
-          `<b>Examples:</b>`,
-          `• <code>0.02</code> (0.02% slippage)`,
-          `• <code>0.1</code> (0.1% slippage)`,
-          `• <code>0.5</code> (0.5% slippage)`,
-          `• <code>1</code> (1% slippage)`,
-          "",
-          `<b>Range:</b> ${TRADE_SLIPPAGE_RANGE.min}% - ${TRADE_SLIPPAGE_RANGE.max}%`,
-          INPUT_TIMEOUT_HINT,
-        ];
-
-        await respondWithMenu(ctx, {
-          text: response.join("\n"),
-          parseMode: "HTML",
-          keyboard: new InlineKeyboard()
-            .text("❌ Cancel", `trade_slip_back_${tradeKind}_${txId}`)
-            .row(),
-        });
-
-        setUserState(userId, {
-          type: "trade_custom_slippage",
-          txId,
-          tradeKind,
-          messageId: ctx.callbackQuery?.message?.message_id,
-          chatId: ctx.chat?.id,
-        });
-
-        await safeAnswerCallbackQuery(ctx, "Send custom slippage as message");
-        return;
-      }
-
-      const newSlippage = parseFloat(slippageValue);
-      if (
-        Number.isNaN(newSlippage) ||
-        newSlippage < TRADE_SLIPPAGE_RANGE.min ||
-        newSlippage > TRADE_SLIPPAGE_RANGE.max
-      ) {
-        await safeAnswerCallbackQuery(ctx, "❌ Invalid slippage value");
-        return;
-      }
-
-      await regenerateTradeQuoteWithSlippage(ctx, {
-        txId,
-        tradeKind,
-        slippage: newSlippage,
-      });
-      await safeAnswerCallbackQuery(ctx, `✅ Slippage set to ${newSlippage}%`);
-    } catch (error: any) {
-      console.error("Error updating slippage:", error);
-      await safeAnswerCallbackQuery(ctx, "❌ Error updating slippage");
-    }
-  },
-  { logLabel: "trade_slip" }
-);
-
-registerCallbackPrefixHandler(
-  "trade_slip_back_",
-  async (ctx, { payload }, next) => {
-    const parts = payload.split("_");
-    if (parts.length < 2) {
-      await next();
-      return;
-    }
-
-    const [kind, ...txParts] = parts;
-    const tradeKind = kind === "buy" || kind === "sell" ? kind : undefined;
-    const txId = txParts.join("_");
-
-    if (!tradeKind || !txId) {
-      await safeAnswerCallbackQuery(ctx, "❌ Invalid slippage request");
-      return;
-    }
-
-    try {
-      await regenerateTradeQuoteWithSlippage(ctx, { txId, tradeKind });
-      await safeAnswerCallbackQuery(ctx, "⚙️ Back to confirmation");
-    } catch (error) {
-      console.error("Error restoring trade confirmation:", error);
-      await safeAnswerCallbackQuery(ctx, "❌ Error loading confirmation");
-    }
-  },
-  { logLabel: "trade_slip_back" }
-);
-
 // Handle SELL token selection
-registerCallbackPrefixHandler("sell_token_", async (ctx, { payload }) => {
-  const tokenToSell = payload;
-  console.log(`🔴 SELL token selected: ${tokenToSell}`);
-
-  try {
-    // Show sell amount selection for this token
-    await showSellAmountSelection(ctx, tokenToSell);
-    await safeAnswerCallbackQuery(ctx, `Sell ${tokenToSell}`);
-  } catch (error) {
-    console.error("Error in sell_token selection:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error processing token selection");
-  }
-});
-
-// Handle SELL amount selection
-registerCallbackPrefixHandler(
-  "sell_amount_",
-  async (ctx, { payload }, next) => {
-    const parts = payload.split("_");
-    if (parts.length < 2) {
-      await next();
-      return;
-    }
-
-    const [tokenToSell, ...rest] = parts;
-    const amount = rest.join("_");
-
-    if (!tokenToSell || !amount) {
-      console.error("Invalid sell callback data");
-      await next();
-      return;
-    }
-
-    console.log(`🔴 SELL amount selected: ${amount} ${tokenToSell}`);
-
-    try {
-      const telegramId = await getRequiredTelegramIdForContext(
-        ctx,
-        "sell amount selection"
-      );
-      if (telegramId == null) {
-        await respondMissingIdentity(ctx);
-        return;
-      }
-
-      if (amount === "CUSTOM") {
-        const userId = getTelegramIdString(ctx);
-        if (!userId) return;
-
-        await showCustomAmountPrompt({
-          ctx,
-          userId,
-          title: `🔴 <b>SELL ${tokenToSell} - CUSTOM AMOUNT</b>`,
-          instructions: [
-            `Please send a message with the amount of ${tokenToSell} you want to sell.`,
-          ],
-          examples: [
-            `• <code>100</code> (sell 100 ${tokenToSell})`,
-            `• <code>50%</code> (sell 50% of balance)`,
-            `• <code>max</code> (sell all ${tokenToSell})`,
-          ],
-          cancelCallback: "cmd_sell",
-          state: {
-            type: "sell_custom_amount",
-            tokenToSell,
-          },
-        });
-
-        await safeAnswerCallbackQuery(ctx, "Send custom amount as message");
-        return;
-      }
-
-      await runSellTradeQuote({
-        ctx,
-        tokenToSell,
-        amount,
-        telegramId,
-      });
-    } catch (error: any) {
-      console.error("Error in sell_amount:", error);
-
-      const errorMessage = [
-        "❌ <b>Error Processing Sell Request</b>",
-        "",
-        `<b>Error:</b> ${(error as Error).message}`,
-        "",
-        "Please try again or contact support if the issue persists.",
-      ];
-
-      await respondWithMenu(ctx, {
-        text: errorMessage.join("\n"),
-        keyboard: new InlineKeyboard().text("← Try Again", "cmd_sell").row(),
-      });
-
-      await safeAnswerCallbackQuery(ctx, "❌ Error processing sell request");
-    }
-  }
-);
-
-// Handle SELL confirmation
-registerCallbackPrefixHandler("confirm_sell_", async (ctx, { payload: txId }) => {
-  const sellResult = getSellTransactionCacheEntry(txId);
-  const sellData = sellResult?.entry;
-
-  if (!sellData) {
-    await safeAnswerCallbackQuery(ctx, "❌ Transaction expired. Please try again.");
-    return;
-  }
-
-  const currentUserId = getTelegramIdString(ctx);
-  if (!currentUserId) {
-    await safeAnswerCallbackQuery(ctx, "❌ Unable to identify user");
-    return;
-  }
-
-  if (sellData.userId && sellData.userId !== currentUserId) {
-    await safeAnswerCallbackQuery(ctx, "❌ Unauthorized transaction");
-    return;
-  }
-
-  console.log(
-    `✅ SELL confirmation for: ${sellData.amount} ${sellData.fromToken} → ${sellData.toToken}`
-  );
-
-  try {
-    const { message } = buildProcessingStatus(
-      "sell",
-      sellData.amount,
-      sellData.fromToken,
-      sellData.toToken
-    );
-
-    await respondWithMenu(ctx, {
-      text: message,
-    });
-
-    await safeAnswerCallbackQuery(ctx, "Processing sell...");
-
-    const telegramId = await getRequiredTelegramIdForContext(
-      ctx,
-      "sell confirmation"
-    );
-    if (telegramId == null) {
-      await respondMissingIdentity(ctx);
-      return;
-    }
-    const userKeypair = wallet.getKeyPair(telegramId);
-
-    const slippagePercent = Number.isFinite(sellData.quote.slippage)
-      ? (sellData.quote.slippage as number)
-      : 0.5;
-    const slippageBps = Math.max(0, Math.round(slippagePercent * 100));
-
-    const quote = await swapManager.getQuote({
-      inputMint: sellData.fromTokenInfo.token_mint,
-      outputMint: sellData.toTokenInfo.token_mint,
-      amount: sellData.rawAmount,
-      slippageBps,
-      userKeypair: userKeypair,
-      inputDecimals: sellData.fromTokenInfo.decimals || 6,
-      outputDecimals: 9,
-      inputTicker: sellData.fromToken.toUpperCase(),
-      outputTicker: sellData.toToken.toUpperCase(),
-    });
-
-    if (!quote) {
-      throw new Error("Unable to get swap quote for sell");
-    }
-
-    let signature: string;
-
-    if (quote.provider === "jupiter") {
-      signature = await swapManager.executeJupiterSwap(
-        {
-          inputMint: quote.inputMint,
-          outputMint: quote.outputMint,
-          amount: quote.inputAmount,
-          slippageBps,
-          userKeypair: userKeypair,
-          inputDecimals: sellData.fromTokenInfo.decimals,
-          outputDecimals: 9,
-          inputTicker: sellData.fromToken.toUpperCase(),
-          outputTicker: sellData.toToken.toUpperCase(),
-        },
-        quote
-      );
-    } else {
-      const instructions = await swapManager.createSwapTransaction(
-        {
-          inputMint: quote.inputMint,
-          outputMint: quote.outputMint,
-          amount: quote.inputAmount,
-          slippageBps,
-          userKeypair: userKeypair,
-          inputDecimals: sellData.fromTokenInfo.decimals,
-          outputDecimals: 9,
-          inputTicker: sellData.fromToken.toUpperCase(),
-          outputTicker: sellData.toToken.toUpperCase(),
-        },
-        quote
-      );
-
-      signature = await wallet.sendTransaction(instructions, [userKeypair]);
-    }
-
-    console.log(`🚀 Sell transaction submitted: ${signature}`);
-    await wallet.confirmTransaction(signature);
-
-    const { message: transactionLink, solscanUrl } = buildTransactionLinkMessage({
-      signature,
-      networkOverride: process.env["RPC_URL"],
-      label: "🔗 <b>Transaction:</b> ",
-      linkText: `<code>${signature}</code>`,
-      format: "html",
-    });
-
-    const successMessage = [
-      "✅ <b>SELL COMPLETED!</b>",
-      "",
-      `💰 <b>Sold:</b> ${sellData.amount} ${sellData.fromToken}`,
-      `🎯 <b>Received:</b> ${sellData.toToken}`,
-      "",
-      transactionLink ??
-        `🔗 <b>Transaction:</b> <code>${signature}</code>`,
-      "",
-      "🎉 <b>Sale successful!</b>",
-    ].join("\n");
-    const keyboard = new InlineKeyboard();
-    if (solscanUrl) {
-      keyboard.webApp("🔍 VIEW TX", solscanUrl).row();
-    }
-    keyboard.text("💰 Wallet", "main_wallet").text("🔴 Sell More", "cmd_sell");
-    keyboard.row();
-
-    await respondWithMenu(ctx, {
-      text: successMessage,
-      keyboard,
-    });
-    await safeAnswerCallbackQuery(ctx, "Sell completed!");
-
-    const cacheKey = getWalletCacheKey(getTelegramIdString(ctx) ?? "");
-    if (cacheKey) {
-      walletDataCache.delete(cacheKey);
-      console.log(`🧹 Cleared wallet cache for user ${cacheKey} after SELL`);
-    }
-
-    transactionCache.delete(txId);
-  } catch (error: any) {
-    console.error("Sell execution error:", error);
-
-    const errorMessage = [
-      "❌ <b>Sell Transaction Failed</b>",
-      "",
-      `<b>Error:</b> ${(error as Error).message}`,
-      "",
-      "The transaction could not be completed. Please check your balance and try again.",
-    ];
-
-    await respondWithMenu(ctx, {
-      text: errorMessage.join("\n"),
-      keyboard: new InlineKeyboard()
-        .text("← Try Again", "cmd_sell")
-        .text("💰 Wallet", "main_wallet")
-        .row(),
-    });
-
-    await safeAnswerCallbackQuery(ctx, "❌ Sell failed");
-    transactionCache.delete(txId);
-  }
-});
-
-// Handle popular token selection for buy
-registerCallbackPrefixHandler(
-  "buy_popular_",
-  async (ctx, { payload }, next) => {
-    const parts = payload.split("_");
-    if (parts.length < 2) {
-      await next();
-      return;
-    }
-
-    const [paymentToken, targetToken] = parts;
-
-    if (!paymentToken || !targetToken) {
-      console.error("Invalid buy popular callback data");
-      await next();
-      return;
-    }
-
-    console.log(`🟢 Popular token buy: ${paymentToken} → ${targetToken}`);
-
-    try {
-      await showBuyAmountSelection(ctx, paymentToken, targetToken);
-      await safeAnswerCallbackQuery(ctx, `Buy ${targetToken} with ${paymentToken}`);
-    } catch (error) {
-      console.error("Error in buy_popular selection:", error);
-      await safeAnswerCallbackQuery(ctx, "❌ Error processing token selection");
-    }
-  },
-  { logLabel: "buy_popular" }
-);
-
-// Handle dynamic token selection (from CA or symbol search)
-registerCallbackPrefixHandler(
-  "buy_dynamic_",
-  async (ctx, { payload }, next) => {
-    const parts = payload.split("_");
-    if (parts.length < 2) {
-      await next();
-      return;
-    }
-
-    const [paymentToken, tokenTxId] = parts;
-
-    if (!paymentToken || !tokenTxId) {
-      console.error("Invalid buy dynamic callback data");
-      await next();
-      return;
-    }
-
-    const tokenEntry = transactionCache.get(tokenTxId);
-    if (!isTokenSelectionCacheEntry(tokenEntry)) {
-      await safeAnswerCallbackQuery(ctx, "❌ Token data expired. Please try again.");
-      return;
-    }
-
-    const tokenData = tokenEntry;
-
-    const targetToken = tokenData.targetToken;
-    const contractAddress = tokenData.targetTokenAddress;
-
-    console.log(
-      `🟢 Dynamic token buy: ${paymentToken} → ${targetToken} (${contractAddress})`
-    );
-
-    try {
-      const userId = getTelegramIdString(ctx);
-      if (userId) {
-        setUserState(userId, {
-          type: "dynamic_token_buy",
-          paymentToken: paymentToken,
-          targetToken: targetToken,
-          contractAddress: contractAddress,
-          messageId: ctx.callbackQuery?.message?.message_id,
-          chatId: ctx.chat?.id,
-        });
-      }
-
-      await showBuyAmountSelection(
-        ctx,
-        paymentToken,
-        targetToken,
-        contractAddress,
-        tokenTxId
-      );
-      await safeAnswerCallbackQuery(ctx, `Buy ${targetToken} with ${paymentToken}`);
-    } catch (error) {
-      console.error("Error in dynamic token selection:", error);
-      await safeAnswerCallbackQuery(ctx, "❌ Error processing token selection");
-    }
-  },
-  { logLabel: "buy_dynamic" }
-);
-
-// Handle BUY amount selection
-registerCallbackPrefixHandler(
-  "buy_amount_",
-  async (ctx, { payload }, next) => {
-    const parts = payload.split("_");
-    if (parts.length < 3) {
-      await next();
-      return;
-    }
-
-    const paymentToken = parts[0];
-    const secondPart = parts[1];
-    const amount = parts.slice(2).join("_");
-
-    if (!paymentToken || !secondPart || !amount) {
-      await safeAnswerCallbackQuery(ctx, "❌ Invalid buy parameters");
-      return;
-    }
-
-    let targetToken = secondPart;
-    let contractAddress: string | undefined;
-
-    if (secondPart.length < 20 && /^[a-z0-9]+$/.test(secondPart)) {
-      const cachedInfo = transactionCache.get(secondPart);
-      if (isTokenSelectionCacheEntry(cachedInfo)) {
-        targetToken = cachedInfo.targetToken;
-        contractAddress = cachedInfo.targetTokenAddress;
-      }
-    }
-
-    if (!targetToken) {
-      await safeAnswerCallbackQuery(ctx, "❌ Invalid target token");
-      return;
-    }
-
-    console.log(
-      `💰 BUY amount selected: ${amount} ${paymentToken} → ${targetToken}`
-    );
-
-    try {
-      const userId = getTelegramIdString(ctx);
-      if (!userId) {
-        await safeAnswerCallbackQuery(ctx, "❌ Unable to identify user");
-        return;
-      }
-
-      const existingState = getUserState(userId, false);
-      if (!contractAddress) {
-        contractAddress = existingState?.contractAddress;
-      }
-
-      if (amount === "CUSTOM") {
-        await showCustomAmountPrompt({
-          ctx,
-          userId,
-          title: `💰 <b>BUY ${targetToken} - CUSTOM AMOUNT</b>`,
-          tokenLines: [
-            `<b>Paying with:</b> ${paymentToken}`,
-            `<b>Target token:</b> ${targetToken}`,
-          ],
-          instructions: [
-            `Please send a message with the amount of ${paymentToken} you want to spend.`,
-          ],
-          examples: [
-            `• <code>0.1</code> (spend 0.1 ${paymentToken})`,
-            `• <code>5</code> (spend 5 ${paymentToken})`,
-            `• <code>50%</code> (spend 50% of balance)`,
-            `• <code>max</code> (spend all available ${paymentToken})`,
-          ],
-          cancelCallback: "cmd_buy",
-          state: {
-            type: "buy_custom_amount",
-            paymentToken,
-            targetToken,
-            contractAddress,
-          },
-        });
-
-        await safeAnswerCallbackQuery(ctx, "Send custom amount as message");
-        return;
-      }
-
-      await runBuyTradeQuote({
-        ctx,
-        paymentToken,
-        targetToken,
-        amount,
-        contractAddress,
-        telegramIdOverride: BigInt(userId),
-      });
-    } catch (error: any) {
-      console.error("Error in buy_amount:", error);
-
-      const errorMessage = [
-        "❌ <b>Error Processing Buy Request</b>",
-        "",
-        `<b>Error:</b> ${(error as Error).message}`,
-        "",
-        "Please try again or contact support if the issue persists.",
-      ];
-
-      await respondWithMenu(ctx, {
-        text: errorMessage.join("\n"),
-        keyboard: new InlineKeyboard().text("← Try Again", "cmd_buy").row(),
-      });
-
-      await safeAnswerCallbackQuery(ctx, "❌ Error processing buy request");
-    }
-  }
-);
-
-// Handle BUY confirmation
-registerCallbackPrefixHandler("confirm_buy_", async (ctx, { payload: txId }) => {
-  const buyResult = getBuyTransactionCacheEntry(txId);
-  const buyData = buyResult?.entry;
-
-  if (!buyData) {
-    await safeAnswerCallbackQuery(ctx, "❌ Transaction expired. Please try again.");
-    return;
-  }
-
-  const currentUserId = getTelegramIdString(ctx);
-  if (!currentUserId) {
-    await safeAnswerCallbackQuery(ctx, "❌ Unable to identify user");
-    return;
-  }
-
-  if (buyData.userId && buyData.userId !== currentUserId) {
-    await safeAnswerCallbackQuery(ctx, "❌ Unauthorized transaction");
-    return;
-  }
-
-  console.log(
-    `✅ BUY confirmation for: ${buyData.amount} ${buyData.fromToken} → ${buyData.toToken}`
-  );
-
-  try {
-    const { message } = buildProcessingStatus(
-      "buy",
-      buyData.amount,
-      buyData.fromToken,
-      buyData.toToken
-    );
-
-    await respondWithMenu(ctx, {
-      text: message,
-    });
-
-    await safeAnswerCallbackQuery(ctx, "Processing buy...");
-
-    const telegramId = await getRequiredTelegramIdForContext(
-      ctx,
-      "buy confirmation"
-    );
-    if (telegramId == null) {
-      await respondMissingIdentity(ctx);
-      return;
-    }
-    const userKeypair = wallet.getKeyPair(telegramId);
-
-    let signature: string;
-    let instructions: any[] | undefined;
-
-    if (!buyData.quote) {
-      throw new Error("No quote data available for this transaction");
-    }
-
-    const quote = buyData.quote;
-
-    if (quote.provider === "jupiter") {
-      signature = await swapManager.executeJupiterSwap(
-        {
-          inputMint: quote.inputMint,
-          outputMint: quote.outputMint,
-          amount: quote.inputAmount,
-          slippageBps: 50,
-          userKeypair: userKeypair,
-          inputDecimals: quote.inputDecimals || 9,
-          outputDecimals: quote.outputDecimals || 9,
-          inputTicker: buyData.fromToken.toUpperCase(),
-          outputTicker: buyData.toToken.toUpperCase(),
-        },
-        quote
-      );
-    } else {
-      instructions = await swapManager.createSwapTransaction(
-        {
-          inputMint: quote.inputMint,
-          outputMint: quote.outputMint,
-          amount: quote.inputAmount,
-          slippageBps: 50,
-          userKeypair: userKeypair,
-          inputDecimals: quote.inputDecimals || 9,
-          outputDecimals: quote.outputDecimals || 6,
-          inputTicker: buyData.fromToken.toUpperCase(),
-          outputTicker: buyData.toToken.toUpperCase(),
-        },
-        quote
-      );
-
-      signature = await wallet.sendTransaction(instructions, [userKeypair]);
-    }
-
-    console.log(`🚀 Buy transaction submitted: ${signature}`);
-    await wallet.confirmTransaction(signature);
-
-    const { message: transactionLink, solscanUrl } = buildTransactionLinkMessage({
-      signature,
-      networkOverride: process.env["RPC_URL"],
-      label: "🔗 <b>Transaction:</b> ",
-      linkText: `<code>${signature}</code>`,
-      format: "html",
-    });
-
-    const successMessage = [
-      "✅ <b>BUY COMPLETED!</b>",
-      "",
-      `💰 <b>Spent:</b> ${buyData.amount} ${buyData.fromToken}`,
-      `🎯 <b>Received:</b> ${buyData.toToken} tokens`,
-      "",
-      transactionLink ?? `🔗 <b>Transaction:</b> <code>${signature}</code>`,
-      "",
-      "🎉 <b>Purchase successful!</b>",
-    ].join("\n");
-    const keyboard = new InlineKeyboard();
-    if (solscanUrl) {
-      keyboard.webApp("🔍 VIEW TX", solscanUrl).row();
-    }
-    keyboard.text("💰 Wallet", "main_wallet").text("🔄 Buy More", "cmd_buy");
-    keyboard.row();
-
-    await respondWithMenu(ctx, {
-      text: successMessage,
-      keyboard,
-    });
-    await safeAnswerCallbackQuery(ctx, "Buy completed!");
-
-    transactionCache.delete(txId);
-  } catch (error) {
-    console.error("Buy execution error:", error);
-
-    const keyboard = new InlineKeyboard()
-      .text("← Try Again", "cmd_buy")
-      .text("💰 Wallet", "main_wallet")
-      .row();
-
-    await respondWithMenu(ctx, {
-      text: [
-        "❌ <b>Buy Transaction Failed</b>",
-        "",
-        `<b>Error:</b> ${(error as Error).message || "Unknown error"}`,
-        "",
-        "The transaction could not be completed. Please try again.",
-      ].join("\n"),
-      keyboard,
-    });
-
-    await safeAnswerCallbackQuery(ctx, "❌ Buy failed");
-    transactionCache.delete(txId);
-  }
-});
-
-// Handle BUY retry with exact amount needed
-registerCallbackPrefixHandler("buy_retry_exact_", async (ctx, { payload: txId }) => {
-  const buyResult = getBuyTransactionCacheEntry(txId);
-  const buyData = buyResult?.entry;
-
-  if (!buyData) {
-    await safeAnswerCallbackQuery(ctx, "❌ Transaction expired. Please try again.");
-    return;
-  }
-
-  try {
-    let newAmount =
-      buyData.retryAmount || (parseFloat(buyData.amount) * 1.01).toString();
-
-    console.log(
-      `💡 Retrying buy with exact amount needed: ${newAmount} ${buyData.fromToken} → ${buyData.toToken}`
-    );
-
-    buyData.amount = newAmount;
-    transactionCache.setWithTTL(txId, buyData);
-    if (buyResult?.source === "pending") {
-      storePendingTransaction(txId, buyData);
-    }
-
-    const confirmKeyboard = createTradeConfirmKeyboard({
-      confirmLabel: "✅ Confirm Buy",
-      confirmCallback: `confirm_buy_${txId}`,
-      cancelLabel: "← Back to Buy",
-      cancelCallback: "cmd_buy",
-    });
-
-    await respondWithMenu(ctx, {
-      text: [
-        "💡 <b>Using Exact Amount Needed</b>",
-        "",
-        `📈 <b>Original:</b> ${buyData.amount} ${buyData.fromToken}`,
-        `✅ <b>New Amount:</b> ${newAmount} ${buyData.fromToken}`,
-        `🎯 <b>Buying:</b> ${buyData.toToken}`,
-        "",
-        "This matches the current price. Ready to proceed?",
-      ].join("\n"),
-      keyboard: confirmKeyboard,
-    });
-
-    await safeAnswerCallbackQuery(ctx, "💡 Amount increased slightly");
-  } catch (error) {
-    console.error("Error in buy retry higher:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error processing retry");
-  }
-});
-
 // SWAP INTERFACE HANDLERS
 // ================================
 
@@ -7941,8 +6446,21 @@ registerCallbackPrefixHandler(
         return;
       }
 
-      await showSwapAmountSelection(ctx, fromToken, toToken);
-      await safeAnswerCallbackQuery(ctx, `${fromToken} → ${toToken}`);
+      const cachedEntry = transactionCache.get(toToken);
+      if (isTokenSelectionCacheEntry(cachedEntry)) {
+        const displayToken = cachedEntry.tokenMetadata?.symbol ?? cachedEntry.targetToken;
+        await showSwapAmountSelection(ctx, fromToken, displayToken, {
+          toTokenIdentifier: toToken,
+        });
+        await safeAnswerCallbackQuery(ctx, `${fromToken} → ${displayToken}`);
+        return;
+      }
+
+      const normalizedTarget = toToken.toUpperCase();
+      await showSwapAmountSelection(ctx, fromToken, normalizedTarget, {
+        toTokenIdentifier: normalizedTarget,
+      });
+      await safeAnswerCallbackQuery(ctx, `${fromToken} → ${normalizedTarget}`);
     } catch (error) {
       console.error("Error in swap_to selection:", error);
       await safeAnswerCallbackQuery(ctx, "❌ Error processing swap pair");
@@ -7962,17 +6480,25 @@ registerCallbackPrefixHandler(
     }
 
     const fromToken = parts[0];
-    const toToken = parts[1];
+    const toTokenIdentifier = parts[1];
     const amount = parts.slice(2).join("_");
 
-    if (!fromToken || !toToken || !amount) {
+    if (!fromToken || !toTokenIdentifier || !amount) {
       await safeAnswerCallbackQuery(ctx, "❌ Invalid swap parameters");
       return;
     }
 
-    console.log(`🔔 Swap amount selected: ${amount} ${fromToken} → ${toToken}`);
+    console.log(
+      `🔔 Swap amount selected: ${amount} ${fromToken} → ${toTokenIdentifier}`
+    );
 
     try {
+      const cachedTarget = transactionCache.get(toTokenIdentifier);
+      const isCachedSelection = isTokenSelectionCacheEntry(cachedTarget);
+      const displayToToken = isCachedSelection
+        ? cachedTarget.tokenMetadata?.symbol ?? cachedTarget.targetToken
+        : toTokenIdentifier.toUpperCase();
+
       if (amount === "CUSTOM") {
         const userId = getTelegramIdString(ctx);
         if (!userId) return;
@@ -7980,7 +6506,7 @@ registerCallbackPrefixHandler(
         const response = [
           `✏️ <b>CUSTOM AMOUNT</b>`,
           "",
-          `<b>Swap:</b> ${fromToken} → ${toToken}`,
+          `<b>Swap:</b> ${fromToken} → ${displayToToken}`,
           "",
           `Please send a message with the amount of ${fromToken} to swap.`,
           "",
@@ -7996,14 +6522,14 @@ registerCallbackPrefixHandler(
           text: response.join("\n"),
           parseMode: "HTML",
           keyboard: new InlineKeyboard()
-            .text("❌ Cancel", `swap_to_${fromToken}_${toToken}`)
+            .text("❌ Cancel", `swap_to_${fromToken}_${toTokenIdentifier}`)
             .row(),
         });
 
         setUserState(userId, {
           type: "swap_custom_amount",
           fromToken: fromToken,
-          toToken: toToken,
+          toToken: toTokenIdentifier,
           messageId: ctx.callbackQuery?.message?.message_id,
           chatId: ctx.chat?.id,
         });
@@ -8020,12 +6546,26 @@ registerCallbackPrefixHandler(
         await respondMissingIdentity(ctx);
         return;
       }
+      const quoteOverrides: {
+        toMint?: string;
+        toDecimals?: number;
+      } = {};
+
+      if (isCachedSelection && cachedTarget) {
+        quoteOverrides.toMint = cachedTarget.targetTokenAddress;
+        quoteOverrides.toDecimals = cachedTarget.tokenMetadata?.decimals;
+      }
+
       await showSwapQuoteAndConfirmation(
         ctx,
         fromToken,
-        toToken,
+        displayToToken,
         amount,
-        telegramId
+        telegramId,
+        {
+          toMint: quoteOverrides.toMint,
+          toDecimals: quoteOverrides.toDecimals,
+        }
       );
       await safeAnswerCallbackQuery(ctx, "Getting swap quote...");
     } catch (error) {
@@ -8042,7 +6582,8 @@ registerCallbackPrefixHandler(
 const showSwapAmountSelection = async (
   ctx: any,
   fromToken: string,
-  toToken: string
+  toToken: string,
+  options: { toTokenIdentifier?: string } = {}
 ) => {
   const telegramId = requireTelegramId(ctx, "swap amount selection");
 
@@ -8101,11 +6642,14 @@ const showSwapAmountSelection = async (
     }
   }
 
+  const toTokenIdentifier = options.toTokenIdentifier ?? toToken;
+
   const keyboard = buildQuickAmountKeyboard({
-    baseCallback: (value) => `swap_amount_${fromToken}_${toToken}_${value}`,
+    baseCallback: (value) =>
+      `swap_amount_${fromToken}_${toTokenIdentifier}_${value}`,
     percentages: ["25%", "50%", "75%", "MAX"],
     extraRows,
-    backCallback: `swap_to_${fromToken}_${toToken}`,
+    backCallback: `swap_to_${fromToken}_${toTokenIdentifier}`,
     showQuickRows: canTrade,
     insufficientLabel: "❌ Insufficient balance",
   });
@@ -8124,7 +6668,13 @@ const showSwapQuoteAndConfirmation = async (
   fromToken: string,
   toToken: string,
   amount: string,
-  telegramId?: bigint
+  telegramId?: bigint,
+  overrides: {
+    fromMint?: string;
+    fromDecimals?: number;
+    toMint?: string;
+    toDecimals?: number;
+  } = {}
 ) => {
   const userId = telegramId || getTelegramId(ctx);
 
@@ -8135,7 +6685,8 @@ const showSwapQuoteAndConfirmation = async (
       amountInput: amount,
       kind: "swap",
       inputFactory: async ({ tokenBalances }) => {
-        const inputMint = tokenManager.resolveMintForTicker(fromToken);
+        const inputMint =
+          overrides.fromMint ?? tokenManager.resolveMintForTicker(fromToken);
         if (!inputMint) {
           throw new Error(`Unsupported token pair: ${fromToken} → ${toToken}`);
         }
@@ -8145,10 +6696,11 @@ const showSwapQuoteAndConfirmation = async (
             ? undefined
             : tokenBalances.find((t) => t.ticker === fromToken);
         const decimals =
-          fromToken === "SOL"
+          overrides.fromDecimals ??
+          (fromToken === "SOL"
             ? 9
             : balanceEntry?.decimals ??
-              (await wallet.getTokenMetadata(inputMint)).decimals;
+              (await wallet.getTokenMetadata(inputMint)).decimals);
 
         return {
           ticker: fromToken,
@@ -8161,14 +6713,16 @@ const showSwapQuoteAndConfirmation = async (
         };
       },
       outputFactory: async () => {
-        const outputMint = tokenManager.resolveMintForTicker(toToken);
+        const outputMint =
+          overrides.toMint ?? tokenManager.resolveMintForTicker(toToken);
         if (!outputMint) {
           throw new Error(`Unsupported token pair: ${fromToken} → ${toToken}`);
         }
         const decimals =
-          toToken === "SOL"
+          overrides.toDecimals ??
+          (toToken === "SOL"
             ? 9
-            : (await wallet.getTokenMetadata(outputMint)).decimals;
+            : (await wallet.getTokenMetadata(outputMint)).decimals);
 
         return {
           ticker: toToken,
@@ -8202,8 +6756,6 @@ const showSwapQuoteAndConfirmation = async (
         const { text, keyboard } = renderTradeQuoteError("swap", {
           error,
           retryCallback: `swap_to_${fromToken}_${toToken}`,
-          fromToken,
-          toToken,
         });
         await respondWithMenu(ctx, { text, keyboard });
       },
@@ -8214,453 +6766,10 @@ const showSwapQuoteAndConfirmation = async (
     const { text, keyboard } = renderTradeQuoteError("swap", {
       error,
       retryCallback: `swap_to_${fromToken}_${toToken}`,
-      fromToken,
-      toToken,
     });
     await respondWithMenu(ctx, { text, keyboard });
   }
 };
-
-// ================================
-// TRADE HELPER FUNCTIONS
-// ================================
-
-type ShowTradeQuoteParams = {
-  ctx: Context;
-  kind: Extract<TradeKind, "buy" | "sell">;
-  amount: string;
-  inputFactory: PrepareTokenTradeQuoteParams["inputFactory"];
-  outputFactory: PrepareTokenTradeQuoteParams["outputFactory"];
-  spinnerText: PrepareTokenTradeQuoteParams["spinnerText"];
-  summaryExtras?: PrepareTokenTradeQuoteParams["summaryExtras"];
-  cacheEntryFactory: TradeCacheEntryFactory;
-  retryCallback: string;
-  confirmationBuilder: (txId: string) => {
-    confirmLabel: string;
-    confirmCallback: string;
-    cancelLabel: string;
-    cancelCallback: string;
-  };
-  slippageConfig?: TradeSlippageConfig;
-  quoteErrorMessage?: string;
-  quoteOptions?: PrepareTokenTradeQuoteParams["quoteOptions"];
-  telegramId?: bigint;
-  onError?: (error: unknown) => Promise<void> | void;
-};
-
-const showTradeQuoteAndConfirmation = async ({
-  ctx,
-  kind,
-  amount,
-  inputFactory,
-  outputFactory,
-  spinnerText,
-  summaryExtras,
-  cacheEntryFactory,
-  retryCallback,
-  confirmationBuilder,
-  slippageConfig,
-  quoteErrorMessage,
-  quoteOptions,
-  telegramId: telegramIdOverride,
-  onError,
-}: ShowTradeQuoteParams) => {
-  const telegramId = telegramIdOverride ?? getTelegramId(ctx);
-
-  const handleError = async (error: unknown) => {
-    if (onError) {
-      await onError(error);
-      return;
-    }
-
-    const { text, keyboard } = renderTradeQuoteError(kind, {
-      error,
-      retryCallback,
-    });
-    await respondWithMenu(ctx, { text, keyboard });
-  };
-
-  try {
-    await prepareTokenTradeQuoteRunner({
-      ctx,
-      telegramId,
-      amountInput: amount,
-      kind,
-      inputFactory,
-      outputFactory,
-      spinnerText,
-      summaryExtras,
-      cacheQuote: (txId, quote, context) => {
-        const quoteWithDecimals: SwapQuoteWithDecimals = {
-          ...quote,
-          inputDecimals: context.input.decimals,
-          outputDecimals: context.output.decimals,
-        };
-
-        const result = cacheEntryFactory({
-          txId,
-          quote: quoteWithDecimals,
-          context,
-          telegramId,
-        });
-
-        transactionCache.setWithTTL(txId, result.entry);
-        if (result.storePending) {
-          storePendingTransaction(txId, result.entry);
-        }
-      },
-      buildConfirmationKeyboard: (txId) => {
-        const confirmation = confirmationBuilder(txId);
-
-        return buildTradeConfirmationKeyboard({
-          ...confirmation,
-          slippageConfig: slippageConfig
-            ? { ...slippageConfig, kind, txId }
-            : undefined,
-        });
-      },
-      onError: handleError,
-      quoteOptions,
-      quoteErrorMessage,
-    });
-  } catch (error) {
-    await handleError(error);
-  }
-};
-
-// ================================
-// BUY HELPER FUNCTIONS
-// ================================
-
-const runBuyTradeQuote = async ({
-  ctx,
-  paymentToken,
-  targetToken,
-  amount,
-  contractAddress,
-  telegramIdOverride,
-}: {
-  ctx: any;
-  paymentToken: string;
-  targetToken: string;
-  amount: string;
-  contractAddress?: string;
-  telegramIdOverride?: bigint;
-}) =>
-  showTradeQuoteAndConfirmation({
-    ctx,
-    kind: "buy",
-    amount,
-    telegramId: telegramIdOverride,
-    inputFactory: async ({ tokenBalances }) => {
-      const inputMint = tokenManager.resolveMintForTicker(paymentToken);
-      if (!inputMint) {
-        throw new Error(`Unsupported payment token: ${paymentToken}`);
-      }
-
-      const balanceEntry =
-        paymentToken === "SOL"
-          ? undefined
-          : tokenBalances.find((t) => t.ticker === paymentToken);
-      const decimals =
-        paymentToken === "SOL"
-          ? 9
-          : balanceEntry?.decimals ??
-            (await wallet.getTokenMetadata(inputMint)).decimals;
-
-      return {
-        ticker: paymentToken,
-        mint: inputMint,
-        decimals,
-        tokenBalance: balanceEntry
-          ? { balance: balanceEntry.balance, decimals: balanceEntry.decimals }
-          : undefined,
-      };
-    },
-    outputFactory: async () => {
-      const resolvedMint =
-        contractAddress || tokenManager.resolveMintForTicker(targetToken);
-      if (!resolvedMint) {
-        throw new Error(`Token not found: ${targetToken}`);
-      }
-
-      const decimals = contractAddress
-        ? (await wallet.getTokenMetadata(resolvedMint)).decimals
-        : 9;
-
-      return {
-        ticker: targetToken,
-        mint: resolvedMint,
-        decimals,
-      };
-    },
-    spinnerText: ({ displayAmount }) =>
-      `🔄 <b>GETTING QUOTE</b>\n\nBuy ${targetToken} with ${displayAmount} ${paymentToken}\n\n<i>Detecting best provider...</i>`,
-    summaryExtras: (context) => ({
-      contractAddress: contractAddress ?? context.output.mint,
-    }),
-    cacheEntryFactory: ({ quote, context, telegramId }) => {
-      const entry: BuyTransactionCacheEntry = {
-        kind: "buy",
-        type: "swap",
-        fromToken: paymentToken,
-        toToken: targetToken,
-        amount: context.displayAmount,
-        rawAmount: context.rawAmount.toString(),
-        userId: telegramId.toString(),
-        quote,
-        contractAddress: contractAddress ?? context.output.mint,
-        inputDecimals: context.input.decimals,
-        outputDecimals: context.output.decimals,
-      };
-
-      return { entry, storePending: true };
-    },
-    retryCallback: "cmd_buy",
-    confirmationBuilder: (txId) => ({
-      confirmLabel: TRADE_CONFIRMATION_CONFIG.buy.confirmLabel,
-      confirmCallback: TRADE_CONFIRMATION_CONFIG.buy.confirmCallback(txId),
-      cancelLabel: TRADE_CONFIRMATION_CONFIG.buy.cancelLabel,
-      cancelCallback: TRADE_CONFIRMATION_CONFIG.buy.cancelCallback,
-    }),
-    slippageConfig: DEFAULT_TRADE_SLIPPAGE_CONFIG,
-    quoteErrorMessage: `Cannot get quote for buying ${targetToken}`,
-    onError: async (error) => {
-      const { text, keyboard } = renderTradeQuoteError("buy", {
-        error,
-        retryCallback: "cmd_buy",
-        fromToken: paymentToken,
-        toToken: targetToken,
-      });
-      await respondWithMenu(ctx, { text, keyboard });
-    },
-  });
-
-/**
- * Show buy amount selection interface
- */
-const buildBuyAmountSelectionUI = async (
-  telegramId: bigint,
-  paymentToken: string,
-  targetToken: string,
-  contractAddress?: string,
-  tokenTxId?: string
-) => {
-  const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-
-  const { decimalBalance: balanceDecimal, formattedBalance } =
-    resolveFormattedBalance(paymentToken, solBalance, tokenBalances);
-
-  const response = [
-    `🟢 <b>BUY ${targetToken}</b>`,
-    "",
-    `<b>Paying with:</b> ${paymentToken} (${formattedBalance})`,
-    `<b>Target:</b> ${targetToken}`,
-  ];
-
-  if (contractAddress) {
-    response.push(`<b>Contract:</b> <code>${contractAddress}</code>`);
-  }
-
-  response.push("", `<b>How much ${paymentToken} to spend?</b>`);
-
-  const callbackToken = tokenTxId ?? targetToken;
-  const keyboard = buildQuickAmountKeyboard({
-    baseCallback: (value) => `buy_amount_${paymentToken}_${callbackToken}_${value}`,
-    backCallback: "cmd_buy",
-    showQuickRows: balanceDecimal > 0.01,
-    insufficientLabel: "❌ Insufficient balance",
-  });
-
-  return {
-    message: response.join("\n"),
-    keyboard,
-  };
-};
-
-const showBuyAmountSelection = async (
-  ctx: any,
-  paymentToken: string,
-  targetToken: string,
-  contractAddress?: string,
-  tokenTxId?: string
-) => {
-  const telegramId = requireTelegramId(ctx, "buy amount selection");
-  const { message, keyboard } = await buildBuyAmountSelectionUI(
-    telegramId,
-    paymentToken,
-    targetToken,
-    contractAddress,
-    tokenTxId
-  );
-
-  await respondWithMenu(ctx, {
-    text: message,
-    keyboard,
-  });
-};
-
-/**
- * Fetch and validate token metadata by contract address
- */
-const fetchTokenMetadata = async (
-  contractAddress: string,
-  telegramId?: bigint
-) => {
-  try {
-    // Validate contract address format
-    if (contractAddress.length !== 44) {
-      throw new Error(
-        "Invalid contract address format (must be 44 characters)"
-      );
-    }
-
-    // Use the same method as wallet balance: check if token exists in wallet
-    if (telegramId) {
-      console.log("🔍 Checking wallet balances for token metadata...");
-      try {
-        const { tokenBalances } = await getCachedWalletData(telegramId);
-        const existingToken = tokenBalances.find(
-          (token) => token.mint === contractAddress
-        );
-
-        if (existingToken) {
-          console.log("✅ Found token in wallet balance:", existingToken);
-          return {
-            address: contractAddress,
-            symbol: existingToken.ticker,
-            name: existingToken.ticker,
-            decimals: existingToken.decimals,
-            verified: true,
-          };
-        }
-      } catch (walletError) {
-        console.log(
-          "Wallet balance check failed:",
-          (walletError as Error).message
-        );
-      }
-    }
-
-    // Try to get metadata using wallet's metadata function
-    try {
-      const metadata = await wallet.getTokenMetadata(contractAddress);
-      if (
-        metadata &&
-        typeof metadata === "object" &&
-        "symbol" in metadata &&
-        metadata.symbol &&
-        metadata.symbol !== "UNKNOWN"
-      ) {
-        return {
-          address: contractAddress,
-          symbol: (metadata as any).symbol,
-          name: (metadata as any).name || (metadata as any).symbol,
-          decimals: metadata.decimals || 6,
-          verified: true,
-        };
-      }
-    } catch (metadataError) {
-      console.log("Wallet metadata failed:", (metadataError as Error).message);
-    }
-
-    // Fallback: return the full address as the symbol when metadata is unavailable
-    return {
-      address: contractAddress,
-      symbol: contractAddress,
-      name: "Unknown Token",
-      decimals: 6,
-      verified: false,
-    };
-  } catch (error) {
-    console.error("Error fetching token metadata:", error);
-    throw new Error(
-      `Failed to fetch token information: ${(error as Error).message}`
-    );
-  }
-};
-
-type BuyTokenMetadata = Awaited<ReturnType<typeof fetchTokenMetadata>>;
-
-const createTokenLookupId = (): string =>
-  Math.random().toString(36).substring(2, 15);
-
-type BuyTokenLookupOptions = {
-  ctx: Context;
-  userState: any;
-  telegramId: bigint;
-  paymentToken: string;
-  loadingLines: string[];
-  fetchTokenInfo: () => Promise<BuyTokenMetadata>;
-  retryState: Record<string, unknown> & { type: string };
-  errorLines: (error: Error) => string[];
-  logContext: string;
-};
-
-const handleBuyTokenLookup = async ({
-  ctx,
-  userState,
-  telegramId,
-  paymentToken,
-  loadingLines,
-  fetchTokenInfo,
-  retryState,
-  errorLines,
-  logContext,
-}: BuyTokenLookupOptions) => {
-  const cancelKeyboard = new InlineKeyboard().text("❌ Cancel", "cmd_buy").row();
-
-  try {
-    await respondWithMenu(ctx, {
-      text: loadingLines.join("\n"),
-      keyboard: cancelKeyboard,
-    });
-
-    const tokenInfo = await fetchTokenInfo();
-
-    const tokenTxId = createTokenLookupId();
-
-    transactionCache.setWithTTL(tokenTxId, {
-      targetToken: tokenInfo.symbol,
-      targetTokenAddress: tokenInfo.address,
-      tokenMetadata: tokenInfo,
-      paymentToken,
-    });
-
-    const { message, keyboard } = await buildBuyAmountSelectionUI(
-      telegramId,
-      paymentToken,
-      tokenInfo.symbol,
-      tokenInfo.address,
-      tokenTxId
-    );
-
-    await respondWithMenu(ctx, {
-      text: message,
-      keyboard,
-    });
-
-    getUserState(getTelegramId(ctx).toString(), true);
-  } catch (error) {
-    console.error(logContext, error);
-
-    const messageLines = errorLines(
-      error instanceof Error ? error : new Error(String(error))
-    );
-
-    await respondWithMenu(ctx, {
-      text: messageLines.join("\n"),
-      keyboard: cancelKeyboard,
-    });
-
-    setUserState(getTelegramId(ctx).toString(), {
-      ...retryState,
-      messageId: userState.messageId,
-      chatId: userState.chatId,
-    });
-  }
-};
-
 
 // ================================
 // ERROR HANDLING & BOT STARTUP
@@ -8707,62 +6816,6 @@ bot.on("message:text", async (ctx, next) => {
       await handleSwapToTokenInput(ctx, userState, userMessage);
     } else if (userState.type === "swap_custom_amount") {
       await handleSwapCustomAmountInput(ctx, userState, userMessage);
-    } else if (userState.type === "buy_contract_address") {
-      await handleBuyContractAddressInput(ctx, userState, userMessage);
-    } else if (userState.type === "buy_token_symbol") {
-      await handleBuyTokenSymbolInput(ctx, userState, userMessage);
-    } else if (userState.type === "buy_menu_idle") {
-      const trimmed = userMessage.trim();
-      const userIdStr = getTelegramId(ctx).toString();
-      const isContractLike = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trimmed);
-
-      if (isContractLike) {
-        const contractState = {
-          type: "buy_contract_address",
-          fromToken: userState.paymentToken ?? "SOL",
-          messageId: userState.messageId,
-          chatId: userState.chatId,
-        };
-        setUserState(userIdStr, contractState);
-        await handleBuyContractAddressInput(ctx, contractState, trimmed);
-        getUserState(userIdStr, true);
-      } else if (/^[a-z0-9]{1,10}$/i.test(trimmed)) {
-        const symbolState = {
-          type: "buy_token_symbol",
-          messageId: userState.messageId,
-          chatId: userState.chatId,
-        };
-        setUserState(userIdStr, symbolState);
-        await handleBuyTokenSymbolInput(ctx, symbolState, trimmed);
-        getUserState(userIdStr, true);
-      } else {
-        setUserState(userIdStr, {
-          type: "buy_menu_idle",
-          paymentToken: userState.paymentToken ?? "SOL",
-          chatId: userState.chatId,
-          messageId: userState.messageId,
-        });
-
-        await ctx.reply(
-          [
-            "❔ <b>Unrecognized Input</b>",
-            "",
-            "Send a token ticker (e.g. <code>TIMBA</code>) or paste the contract address.",
-            "",
-            `<b>Contract format:</b>\n${CONTRACT_EXAMPLE_LINES.join("\n")}`,
-          ].join("\n"),
-          { parse_mode: "HTML" }
-        );
-        return;
-      }
-
-      return;
-    } else if (userState.type === "buy_custom_amount") {
-      await handleBuyCustomAmountInput(ctx, userState, userMessage);
-    } else if (userState.type === "sell_custom_amount") {
-      await handleSellCustomAmountInput(ctx, userState, userMessage);
-    } else if (userState.type === "trade_custom_slippage") {
-      await handleTradeCustomSlippageInput(ctx, userState, userMessage);
     }
 
     // Clear state after successful processing
@@ -9048,23 +7101,146 @@ const handleSwapToTokenInput = async (
   tokenInput: string
 ) => {
   const fromToken = userState.fromToken;
+  const telegramId = requireTelegramId(ctx, "swap token input");
+  const userId = getTelegramId(ctx).toString();
+  const trimmedInput = tokenInput.trim();
 
   console.log(
-    `🔍 Token input received for swap from ${fromToken}: ${tokenInput}`
+    `🔍 Token input received for swap from ${fromToken}: ${trimmedInput}`
   );
 
-  // For now, treat any input as a valid token
-  // TODO: Add proper token validation and mint address resolution
-  const toToken = tokenInput.toUpperCase();
+  if (!trimmedInput) {
+    await respondWithMenu(ctx, {
+      text: "❌ <b>Invalid input</b>\n\nPlease provide a token symbol or contract address.",
+      parseMode: "HTML",
+      keyboard: new InlineKeyboard()
+        .text("❌ Cancel", `swap_to_${fromToken}_OTHER`)
+        .row(),
+    });
+    return;
+  }
 
-  // Show amount selection for the swap pair
-  const walletCtx = createMessageEditAdapter(
-    ctx,
-    userState.messageId,
-    userState.chatId ?? ctx.chat?.id
-  );
+  const loadingLines = [
+    "🔍 <b>Looking up token...</b>",
+    "",
+    `<b>Input:</b> ${escapeHtml(trimmedInput)}`,
+    "",
+    "<i>Please wait...</i>",
+  ];
 
-  await showSwapAmountSelection(walletCtx, fromToken, toToken);
+  await respondWithMenu(ctx, {
+    text: loadingLines.join("\n"),
+    parseMode: "HTML",
+    keyboard: new InlineKeyboard()
+      .text("❌ Cancel", `swap_to_${fromToken}_OTHER`)
+      .row(),
+  });
+
+  try {
+    let metadata: SwapTokenMetadata | undefined;
+
+    if (isProbableMintAddress(trimmedInput)) {
+      metadata = await fetchSwapTokenMetadata(trimmedInput, telegramId);
+    } else {
+      const normalized = trimmedInput.toUpperCase();
+
+      const mintFromTicker = tokenManager.resolveMintForTicker(normalized);
+      if (mintFromTicker) {
+        let decimals: number | undefined;
+        try {
+          const tokenMeta = await wallet.getTokenMetadata(mintFromTicker);
+          if (tokenMeta && typeof tokenMeta === "object" && "decimals" in tokenMeta) {
+            const value = Number((tokenMeta as any).decimals);
+            if (Number.isFinite(value)) {
+              decimals = value;
+            }
+          }
+        } catch (error) {
+          console.log("Metadata lookup failed for", normalized, error);
+        }
+
+        metadata = {
+          symbol: normalized,
+          address: mintFromTicker,
+          decimals: decimals ?? 6,
+          verified: true,
+        };
+      } else {
+        const known = tokenManager
+          .getAllKnownTokens()
+          .find((token) => token.token_ticker?.toUpperCase() === normalized);
+
+        if (known) {
+          metadata = {
+            symbol: known.token_ticker.toUpperCase(),
+            address: known.token_mint,
+            decimals: known.decimals ?? 6,
+            verified: true,
+          };
+        }
+      }
+
+      if (!metadata) {
+        throw new Error(
+          `Token "${trimmedInput}" not found. Try using the contract address.`
+        );
+      }
+    }
+
+    if (!metadata) {
+      throw new Error("Unable to resolve token metadata");
+    }
+
+    const tokenCacheId = createTokenLookupId();
+    transactionCache.setWithTTL(tokenCacheId, {
+      targetToken: metadata.symbol,
+      targetTokenAddress: metadata.address,
+      paymentToken: fromToken,
+      tokenMetadata: metadata,
+    });
+
+    await showSwapAmountSelection(ctx, fromToken, metadata.symbol, {
+      toTokenIdentifier: tokenCacheId,
+    });
+
+    getUserState(userId, true);
+    await safeAnswerCallbackQuery(ctx, `Swap to ${metadata.symbol}`);
+  } catch (error) {
+    console.error("Error resolving swap token input:", error);
+
+    const messageLines = [
+      "❌ <b>Token Not Found</b>",
+      "",
+      `<b>Input:</b> ${escapeHtml(trimmedInput)}`,
+      "",
+      `<b>Error:</b> ${(error as Error).message}`,
+      "",
+      "Please enter a valid token symbol or paste a contract address.",
+      "",
+      `<b>Examples:</b>`,
+      `• <code>USDC</code>`,
+      `• <code>EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v</code>`,
+      "",
+      `<b>Contract format:</b>\n${CONTRACT_EXAMPLE_LINES.join("\n")}`,
+      "",
+      INPUT_TIMEOUT_HINT,
+    ];
+
+    await respondWithMenu(ctx, {
+      text: messageLines.join("\n"),
+      parseMode: "HTML",
+      keyboard: new InlineKeyboard()
+        .text("❌ Cancel", `swap_to_${fromToken}_OTHER`)
+        .row(),
+    });
+
+    setUserState(userId, {
+      type: "swap_to_token",
+      fromToken,
+      messageId: userState.messageId,
+      chatId: userState.chatId,
+    });
+  }
 };
 
 /**
@@ -9101,619 +7277,71 @@ const handleSwapCustomAmountInput = async (
   );
 };
 
-/**
- * Handle BUY contract address input
- */
-const handleBuyContractAddressInput = async (
-  ctx: any,
-  userState: any,
-  contractAddress: string
-) => {
-  const telegramId = requireTelegramId(ctx, "buy contract lookup");
-  const paymentToken = userState.fromToken;
-  if (!paymentToken) {
-    throw new Error("Payment token not found in user state");
+const isProbableMintAddress = (value: string): boolean =>
+  /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
+
+type SwapTokenMetadata = {
+  symbol: string;
+  address: string;
+  decimals: number;
+  verified: boolean;
+};
+
+const fetchSwapTokenMetadata = async (
+  contractAddress: string,
+  telegramId?: bigint
+): Promise<SwapTokenMetadata> => {
+  if (!isProbableMintAddress(contractAddress)) {
+    throw new Error("Invalid Solana contract address format");
   }
 
-  console.log(`🔍 Validating contract address: ${contractAddress}`);
-
-  await handleBuyTokenLookup({
-    ctx,
-    userState,
-    telegramId,
-    paymentToken,
-    loadingLines: [
-      "🔍 <b>Fetching Token Information...</b>",
-      "",
-      `<b>Contract Address:</b>`,
-      `<code>${contractAddress}</code>`,
-      "",
-      "🔄 <i>Please wait while we validate and fetch token metadata...</i>",
-    ],
-    fetchTokenInfo: async () => {
-      if (contractAddress.length < 30 || contractAddress.length > 50) {
-        throw new Error("Invalid Solana contract address format");
+  if (telegramId) {
+    try {
+      const { tokenBalances } = await getCachedWalletData(telegramId);
+      const owned = tokenBalances.find((token) => token.mint === contractAddress);
+      if (owned) {
+        return {
+          symbol: owned.ticker,
+          address: contractAddress,
+          decimals: owned.decimals,
+          verified: true,
+        };
       }
-      const tokenInfo = await fetchTokenMetadata(contractAddress, telegramId);
-      if (!tokenInfo) {
-        throw new Error(
-          "Unable to fetch token metadata. Please check the contract address."
-        );
-      }
-      console.log(`✅ Token found: ${tokenInfo.symbol} (${contractAddress})`);
-      return tokenInfo;
-    },
-    retryState: { type: "buy_contract_address", fromToken: paymentToken },
-    errorLines: (error) => [
-      "❌ <b>Invalid Contract Address</b>",
-      "",
-      `<b>Address:</b> <code>${contractAddress}</code>`,
-      "",
-      `<b>Error:</b> ${error.message}`,
-      "",
-      "Please enter a valid Solana contract address (SPL Token mint):",
-      "",
-      `<b>Format:</b> Base58 string (~44 characters)`,
-      `<b>Example:</b> <code>So11111111111111111111111111111111111111112</code>`,
-      "",
-      INPUT_TIMEOUT_HINT,
-    ],
-    logContext: "Error processing contract address:",
-  });
-};
-
-/**
- * Handle BUY token symbol input
- */
-const handleBuyTokenSymbolInput = async (
-  ctx: any,
-  userState: any,
-  tokenSymbol: string
-) => {
-  const telegramId = requireTelegramId(ctx, "buy token symbol lookup");
-  console.log(`🔍 Searching for token: ${tokenSymbol}`);
-
-  const cleanSymbol = tokenSymbol.trim().toUpperCase();
-  if (cleanSymbol.length === 0 || cleanSymbol.length > 10) {
-    throw new Error("Token symbol must be 1-10 characters");
+    } catch (error) {
+      console.log("Wallet balance lookup for metadata failed:", error);
+    }
   }
 
-  await handleBuyTokenLookup({
-    ctx,
-    userState,
-    telegramId,
-    paymentToken: "SOL",
-    loadingLines: [
-      "🔍 <b>Searching for Token...</b>",
-      "",
-      `<b>Symbol:</b> ${cleanSymbol}`,
-      "",
-      "🔄 <i>Looking up token metadata...</i>",
-    ],
-    fetchTokenInfo: async () => {
-      const knownTokens = tokenManager.getAllKnownTokens();
-      const knownToken = knownTokens.find(
-        (t: any) => t.ticker.toUpperCase() === cleanSymbol
-      );
+  try {
+    const metadata = await wallet.getTokenMetadata(contractAddress);
+    if (metadata && typeof metadata === "object" && "symbol" in metadata) {
+      const symbol = String((metadata as any).symbol ?? contractAddress).toUpperCase();
+      const decimals = Number.isFinite((metadata as any).decimals)
+        ? Number((metadata as any).decimals)
+        : 6;
+      return {
+        symbol,
+        address: contractAddress,
+        decimals,
+        verified: symbol !== contractAddress,
+      };
+    }
+  } catch (error) {
+    console.log("Token metadata fetch failed:", error);
+  }
 
-      if (knownToken) {
-        const tokenInfo = await fetchTokenMetadata(
-          knownToken.token_mint,
-          telegramId
-        );
-        if (tokenInfo) {
-          console.log(
-            `✅ Token found: ${tokenInfo.symbol} (${tokenInfo.address})`
-          );
-          return tokenInfo;
-        }
-      }
-
-      throw new Error(
-        `Token "${cleanSymbol}" not found. Try using the contract address instead.`
-      );
-    },
-    retryState: { type: "buy_token_symbol" },
-    errorLines: (error) => [
-      "❌ <b>Token Not Found</b>",
-      "",
-      `<b>Symbol:</b> ${tokenSymbol}`,
-      "",
-      `<b>Error:</b> ${error.message}`,
-      "",
-      "Please enter a valid token symbol:",
-      "",
-      `<b>Examples:</b> SOL, USDC, TIMBA`,
-      `<b>Or use:</b> Contract address for any token`,
-      "",
-      INPUT_TIMEOUT_HINT,
-    ],
-    logContext: "Error searching for token:",
-  });
+  return {
+    symbol: contractAddress,
+    address: contractAddress,
+    decimals: 6,
+    verified: false,
+  };
 };
 
-/**
- * Handle BUY custom amount input
- */
-const handleBuyCustomAmountInput = async (
-  ctx: any,
-  userState: any,
-  amount: string
-) => {
-  const paymentToken = userState.paymentToken;
-  const targetToken = userState.targetToken;
-  const contractAddress = userState.contractAddress;
-  const telegramId = requireTelegramId(ctx, "buy custom amount");
-  await processCustomTradeAmount({
-    ctx,
-    userState,
-    amount,
-    assetTicker: paymentToken,
-    getWalletSnapshot: () => getCachedWalletData(telegramId),
-    selectTokenBalance:
-      paymentToken === "SOL"
-        ? undefined
-        : (snapshot) => {
-            const entry = snapshot.tokenBalances.find(
-              (t) => t.ticker === paymentToken
-            );
-            return entry
-              ? { balance: entry.balance, decimals: entry.decimals }
-              : undefined;
-          },
-    resolveDecimals: async (_, tokenBalance) => {
-      if (paymentToken === "SOL") {
-        return 9;
-      }
-
-      if (tokenBalance) {
-        return tokenBalance.decimals;
-      }
-
-      const mint = tokenManager.resolveMintForTicker(paymentToken);
-      if (!mint) {
-        throw new Error(`Unsupported payment token: ${paymentToken}`);
-      }
-
-      const metadata = await wallet.getTokenMetadata(mint);
-      return metadata.decimals;
-    },
-    onSuccess: async ({ normalizedAmount, walletCtx }) => {
-      await runBuyTradeQuote({
-        ctx: walletCtx,
-        paymentToken,
-        targetToken,
-        amount: normalizedAmount,
-        contractAddress,
-        telegramIdOverride: telegramId,
-      });
-    },
-    buildErrorMessage: (error) => [
-      "❌ <b>Invalid Amount</b>",
-      "",
-      `<b>Payment Token:</b> ${paymentToken}`,
-      `<b>Target Token:</b> ${targetToken}`,
-      `<b>Amount:</b> ${amount}`,
-      "",
-      `<b>Error:</b> ${error.message}`,
-      "",
-      "Please enter a valid amount:",
-      "",
-      `<b>Examples:</b>`,
-      `• <code>0.1</code> (spend 0.1 ${paymentToken})`,
-      `• <code>5</code> (spend 5 ${paymentToken})`,
-      `• <code>50%</code> (spend 50% of balance)`,
-      `• <code>max</code> (spend all available ${paymentToken})`,
-      "",
-      INPUT_TIMEOUT_HINT,
-    ],
-    buildRetryState: () => ({
-      type: "buy_custom_amount",
-      paymentToken,
-      targetToken,
-      messageId: userState.messageId,
-    }),
-    cancelCallbackData: "cmd_buy",
-    logLabel: `💰 Custom BUY amount received (${paymentToken} → ${targetToken})`,
-  });
-};
-
-export const __test_handleBuyCustomAmountInput = handleBuyCustomAmountInput;
 export const __test_handleCustomAmountInput = handleCustomAmountInput;
 export const __test_handleAddressInput = handleAddressInput;
 export const __test_handleWrapAmountInput = handleWrapAmountInput;
-
-/**
- * Handle SELL custom amount input
- */
-const handleSellCustomAmountInput = async (
-  ctx: any,
-  userState: any,
-  amount: string
-) => {
-  const tokenToSell = userState.tokenToSell;
-  const telegramId = requireTelegramId(ctx, "sell custom amount");
-  await processCustomTradeAmount({
-    ctx,
-    userState,
-    amount,
-    assetTicker: tokenToSell,
-    getWalletSnapshot: () => getCachedWalletData(telegramId),
-    selectTokenBalance: (snapshot) => {
-      const entry = snapshot.tokenBalances.find(
-        (t) => t.ticker === tokenToSell
-      );
-      return entry
-        ? { balance: entry.balance, decimals: entry.decimals }
-        : undefined;
-    },
-    resolveDecimals: (_, tokenBalance) => tokenBalance?.decimals ?? 0,
-    onSuccess: async ({ normalizedAmount, walletCtx }) => {
-      await runSellTradeQuote({
-        ctx: walletCtx,
-        tokenToSell,
-        amount: normalizedAmount,
-        telegramId,
-      });
-    },
-    buildErrorMessage: (error) => [
-      "❌ <b>Invalid Amount</b>",
-      "",
-      `<b>Token:</b> ${tokenToSell}`,
-      `<b>Amount:</b> ${amount}`,
-      "",
-      `<b>Error:</b> ${error.message}`,
-      "",
-      "Please enter a valid amount:",
-      "",
-      `<b>Examples:</b>`,
-      `• <code>100</code> (sell 100 ${tokenToSell})`,
-      `• <code>50%</code> (sell 50% of balance)`,
-      `• <code>max</code> (sell all ${tokenToSell})`,
-      "",
-      INPUT_TIMEOUT_HINT,
-    ],
-    buildRetryState: () => ({
-      type: "sell_custom_amount",
-      tokenToSell,
-      messageId: userState.messageId,
-    }),
-    cancelCallbackData: "cmd_sell",
-    logLabel: `🔴 Custom SELL amount received (${tokenToSell})`,
-  });
-};
-
-// ================================
-// SELL HELPER FUNCTIONS
-// ================================
-
-const runSellTradeQuote = async ({
-  ctx,
-  tokenToSell,
-  amount,
-  telegramId,
-}: {
-  ctx: any;
-  tokenToSell: string;
-  amount: string;
-  telegramId: bigint;
-}) =>
-  showTradeQuoteAndConfirmation({
-    ctx,
-    kind: "sell",
-    amount,
-    telegramId,
-    inputFactory: async ({ tokenBalances }) => {
-      const tokenBalance = tokenBalances.find((t) => t.ticker === tokenToSell);
-
-      if (!tokenBalance) {
-        throw new Error(`Token ${tokenToSell} not found in wallet`);
-      }
-
-      const approvedTokens = tokenManager.getAllApprovedTokensWithMetadata();
-      let tokenInfo:
-        | { token_mint: string; decimals?: number; token_ticker?: string }
-        | undefined = approvedTokens.find(
-        (t) => t.token_ticker === tokenToSell && t.token_mint === tokenBalance.mint
-      );
-
-      if (!tokenInfo) {
-        tokenInfo = approvedTokens.find((t) => t.token_ticker === tokenToSell);
-      }
-
-      if (!tokenInfo) {
-        tokenInfo = {
-          token_mint: tokenBalance.mint,
-          token_ticker: tokenBalance.ticker,
-          decimals: tokenBalance.decimals,
-        };
-        console.log(
-          `🔍 Using dynamic token info for ${tokenToSell}: mint=${tokenBalance.mint}, decimals=${tokenBalance.decimals}`
-        );
-      } else {
-        console.log(
-          `🔍 Using approved token info for ${tokenToSell}: mint=${tokenInfo.token_mint}, decimals=${tokenInfo.decimals}`
-        );
-      }
-
-      if (!tokenInfo) {
-        throw new Error(`Unable to resolve metadata for ${tokenToSell}`);
-      }
-
-      const sellDecimals = tokenInfo.decimals ?? tokenBalance.decimals;
-      const balanceRaw = Math.floor(tokenBalance.balance);
-
-      return {
-        ticker: tokenToSell,
-        mint: tokenInfo.token_mint ?? tokenBalance.mint,
-        decimals: sellDecimals,
-        tokenBalance: { balance: balanceRaw, decimals: sellDecimals },
-        applySolFeeBuffer: false,
-        metadata: { tokenInfo, balanceRaw },
-      };
-    },
-    outputFactory: async () => ({
-      ticker: "SOL",
-      mint: WSOL_MINT,
-      decimals: 9,
-    }),
-    spinnerText: ({ displayAmount }) =>
-      `🔄 <b>GETTING SELL QUOTE</b>\n\n${displayAmount} ${tokenToSell} → SOL\n\n<i>Finding best price...</i>`,
-    summaryExtras: (context) => ({
-      contractAddress:
-        ((context.input.metadata as { tokenInfo?: { token_mint?: string } })
-          ?.tokenInfo?.token_mint ?? context.input.mint),
-    }),
-    cacheEntryFactory: ({ quote, context }) => {
-      const tokenInfo = (context.input.metadata as {
-        tokenInfo?: { token_mint: string; decimals?: number };
-      })?.tokenInfo;
-
-      const entry: SellTransactionCacheEntry = {
-        kind: "sell",
-        fromToken: tokenToSell,
-        toToken: "SOL",
-        amount: context.displayAmount,
-        rawAmount: context.rawAmount.toString(),
-        fromTokenInfo: {
-          token_mint: tokenInfo?.token_mint ?? context.input.mint,
-          decimals: context.input.decimals,
-        },
-        toTokenInfo: {
-          token_mint: WSOL_MINT,
-          decimals: context.output.decimals,
-        },
-        quote,
-        userKeypair: wallet.getKeyPair(telegramId),
-        userId: telegramId.toString(),
-      };
-
-      return { entry };
-    },
-    retryCallback: "cmd_sell",
-    confirmationBuilder: (txId) => ({
-      confirmLabel: TRADE_CONFIRMATION_CONFIG.sell.confirmLabel,
-      confirmCallback: TRADE_CONFIRMATION_CONFIG.sell.confirmCallback(txId),
-      cancelLabel: TRADE_CONFIRMATION_CONFIG.sell.cancelLabel,
-      cancelCallback: TRADE_CONFIRMATION_CONFIG.sell.cancelCallback,
-    }),
-    slippageConfig: DEFAULT_TRADE_SLIPPAGE_CONFIG,
-    quoteErrorMessage: `Cannot get quote for selling ${tokenToSell}`,
-    onError: async (error) => {
-      const { text, keyboard } = renderTradeQuoteError("sell", {
-        error,
-        retryCallback: "cmd_sell",
-        fromToken: tokenToSell,
-        amountLabel: amount,
-      });
-      await respondWithMenu(ctx, { text, keyboard });
-    },
-    quoteOptions: { slippageBps: 50 },
-  });
-
-const regenerateTradeQuoteWithSlippage = async (
-  ctx: any,
-  {
-    txId,
-    tradeKind,
-    slippage,
-  }: {
-    txId: string;
-    tradeKind: Extract<TradeKind, "buy" | "sell">;
-    slippage?: number;
-  }
-) => {
-  const tradeResult = getTradeTransactionCacheEntry(txId);
-  const tradeData = tradeResult?.entry;
-
-  if (!tradeData || tradeData.kind !== tradeKind) {
-    throw new Error("Transaction expired");
-  }
-
-  if (slippage !== undefined) {
-    tradeData.quote.slippage = slippage;
-    transactionCache.setWithTTL(txId, tradeData);
-    if (tradeResult?.source === "pending") {
-      storePendingTransaction(txId, tradeData);
-    }
-  }
-
-  const confirmation = TRADE_CONFIRMATION_CONFIG[tradeKind];
-
-  const summary =
-    tradeKind === "buy"
-      ? (() => {
-          const buyData = tradeData as BuyTransactionCacheEntry;
-          return formatTradeConfirmationSummary({
-            kind: "buy",
-            payToken: buyData.fromToken,
-            payDisplay: buyData.amount,
-            payRawAmount: Number(buyData.rawAmount ?? 0),
-            payDecimals:
-              buyData.inputDecimals ?? (buyData.fromToken === "SOL" ? 9 : 0),
-            receiveToken: buyData.toToken,
-            receiveDecimals: buyData.outputDecimals ?? 6,
-            quote: buyData.quote,
-            contractAddress: buyData.contractAddress,
-          });
-        })()
-      : (() => {
-          const sellData = tradeData as SellTransactionCacheEntry;
-          return formatTradeConfirmationSummary({
-            kind: "sell",
-            payToken: sellData.fromToken,
-            payDisplay: sellData.amount,
-            payRawAmount: Number(sellData.rawAmount ?? 0),
-            payDecimals: sellData.fromTokenInfo.decimals,
-            receiveToken: sellData.toToken,
-            receiveDecimals: sellData.toTokenInfo.decimals,
-            quote: sellData.quote,
-            contractAddress: sellData.fromTokenInfo.token_mint,
-          });
-        })();
-
-  const keyboard = buildTradeConfirmationKeyboard({
-    confirmLabel: confirmation.confirmLabel,
-    confirmCallback: confirmation.confirmCallback(txId),
-    cancelLabel: confirmation.cancelLabel,
-    cancelCallback: confirmation.cancelCallback,
-    slippageConfig: {
-      ...DEFAULT_TRADE_SLIPPAGE_CONFIG,
-      kind: tradeKind,
-      txId,
-    },
-  });
-
-  await respondWithMenu(ctx, {
-    text: summary.message,
-    keyboard,
-  });
-};
-
-const handleTradeCustomSlippageInput = async (
-  ctx: any,
-  userState: any,
-  slippageInput: string
-) => {
-  const txId: string | undefined = userState.txId;
-  const tradeKind: Extract<TradeKind, "buy" | "sell"> | undefined =
-    userState.tradeKind;
-
-  if (!txId || (tradeKind !== "buy" && tradeKind !== "sell")) {
-    throw new Error("Invalid trade slippage context");
-  }
-
-  console.log(
-    `⚙️ Custom slippage input: ${slippageInput} for ${tradeKind} txId: ${txId}`
-  );
-
-  try {
-    const slippage = parseFloat(slippageInput);
-    if (
-      Number.isNaN(slippage) ||
-      slippage < TRADE_SLIPPAGE_RANGE.min ||
-      slippage > TRADE_SLIPPAGE_RANGE.max
-    ) {
-      throw new Error(
-        `Slippage must be between ${TRADE_SLIPPAGE_RANGE.min}% and ${TRADE_SLIPPAGE_RANGE.max}%`
-      );
-    }
-
-    const walletCtx = createMessageEditAdapter(
-      ctx,
-      userState.messageId,
-      userState.chatId ?? ctx.chat?.id
-    );
-
-    await regenerateTradeQuoteWithSlippage(walletCtx, {
-      txId,
-      tradeKind,
-      slippage,
-    });
-  } catch (error: any) {
-    console.error("Error processing custom slippage:", error);
-
-    const errorMessage = [
-      "❌ <b>Invalid Slippage</b>",
-      "",
-      `<b>Input:</b> ${slippageInput}`,
-      "",
-      `<b>Error:</b> ${(error as Error).message}`,
-      "",
-      "Please enter a valid slippage percentage:",
-      "",
-      `<b>Examples:</b>`,
-      `• <code>0.02</code> (0.02% slippage)`,
-      `• <code>0.1</code> (0.1% slippage)`,
-      `• <code>0.5</code> (0.5% slippage)`,
-      "",
-      `<b>Range:</b> ${TRADE_SLIPPAGE_RANGE.min}% - ${TRADE_SLIPPAGE_RANGE.max}%`,
-      INPUT_TIMEOUT_HINT,
-    ];
-
-    await ctx.api.editMessageText(
-      ctx.chat.id,
-      userState.messageId,
-      errorMessage.join("\n"),
-      {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text(
-            "❌ Cancel",
-            `trade_slip_back_${tradeKind}_${txId}`
-          )
-          .row(),
-      }
-    );
-
-    setUserState(getTelegramId(ctx).toString(), {
-      type: "trade_custom_slippage",
-      txId,
-      tradeKind,
-      messageId: userState.messageId,
-    });
-  }
-};
-
-/**
- * Show sell amount selection for a specific token
- */
-const showSellAmountSelection = async (ctx: any, tokenToSell: string) => {
-  const telegramId = requireTelegramId(ctx, "sell amount selection");
-
-  // Get balance for the token being sold
-  const { tokenBalances } = await getCachedWalletData(telegramId);
-  const tokenBalance = tokenBalances.find((t) => t.ticker === tokenToSell);
-
-  if (!tokenBalance) {
-    throw new Error(`Token ${tokenToSell} not found in wallet`);
-  }
-
-  const formattedBalance = wallet.formatTokenBalance(
-    tokenBalance.balance,
-    tokenBalance.decimals
-  );
-
-  const response = [
-    `🔴 <b>SELL ${tokenToSell}</b>`,
-    "",
-    `<b>Available:</b> ${formattedBalance} ${tokenToSell}`,
-    "",
-    `<b>Select amount to sell:</b>`,
-    `<i>Use a quick percentage or enter a custom amount.</i>`,
-  ];
-
-  const keyboard = buildQuickAmountKeyboard({
-    baseCallback: (value) => `sell_amount_${tokenToSell}_${value}`,
-    backCallback: "cmd_sell",
-  });
-
-  await respondWithMenu(ctx, {
-    text: response.join("\n"),
-    keyboard,
-  });
-};
-
+export const __test_handleSwapCustomAmountInput = handleSwapCustomAmountInput;
 
 // Start the bot and setup Anchor (skip during tests)
 if (process.env.NODE_ENV !== "test") {

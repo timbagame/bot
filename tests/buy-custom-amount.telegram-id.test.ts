@@ -4,7 +4,7 @@ const botModule = await import("../src/bot");
 
 const TELEGRAM_ID = 987654321n;
 
-describe("buy custom amount telegram id propagation", () => {
+describe("swap custom amount telegram id propagation", () => {
   beforeEach(() => {
     botModule.__test_resetPrepareTokenTradeQuote();
   });
@@ -13,7 +13,7 @@ describe("buy custom amount telegram id propagation", () => {
     botModule.__test_resetPrepareTokenTradeQuote();
   });
 
-  test("handleBuyCustomAmountInput forwards the caller telegram id", async () => {
+  test("handleSwapCustomAmountInput forwards the caller telegram id", async () => {
     const capturedIds: bigint[] = [];
 
     botModule.__test_setPrepareTokenTradeQuote(async (params) => {
@@ -37,15 +37,14 @@ describe("buy custom amount telegram id propagation", () => {
     };
 
     const userState = {
-      type: "buy_custom_amount" as const,
-      paymentToken: "SOL",
-      targetToken: "TIMBA",
-      contractAddress: undefined,
+      type: "swap_custom_amount" as const,
+      fromToken: "SOL",
+      toToken: "TIMBA",
       messageId: 111,
       chatId: ctx.chat.id,
     };
 
-    await botModule.__test_handleBuyCustomAmountInput(ctx, userState, "1");
+    await botModule.__test_handleSwapCustomAmountInput(ctx, userState, "1");
 
     expect(capturedIds).toEqual([TELEGRAM_ID]);
   });

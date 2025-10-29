@@ -156,31 +156,31 @@ test("showCustomAmountPrompt formats sell custom amount flow", async () => {
 
   await showCustomAmountPrompt({
     ctx,
-    userId: "sell-user",
-    title: "🔴 <b>SELL TIMBA - CUSTOM AMOUNT</b>",
+    userId: "sender",
+    title: "📤 <b>SEND TIMBA - CUSTOM AMOUNT</b>",
     instructions: [
-      "Please send a message with the amount of TIMBA you want to sell.",
+      "Please send a message with the amount of TIMBA you want to send.",
     ],
     examples: [
-      "• <code>100</code> (sell 100 TIMBA)",
-      "• <code>50%</code> (sell 50% of balance)",
-      "• <code>max</code> (sell all TIMBA)",
+      "• <code>100</code> (send 100 TIMBA)",
+      "• <code>50%</code> (send 50% of balance)",
+      "• <code>max</code> (send all TIMBA)",
     ],
-    cancelCallback: "cmd_sell",
-    state: { type: "sell_custom_amount", tokenToSell: "TIMBA" },
+    cancelCallback: "cmd_withdraw",
+    state: { type: "send_custom_amount", token: "TIMBA" },
   });
 
   const { text, options } = expectSingleEdit(edits);
-  expect(text).toContain("🔴 <b>SELL TIMBA - CUSTOM AMOUNT</b>");
-  expect(text).toContain("amount of TIMBA you want to sell.");
-  expect(text).toContain("• <code>100</code> (sell 100 TIMBA)");
+  expect(text).toContain("📤 <b>SEND TIMBA - CUSTOM AMOUNT</b>");
+  expect(text).toContain("amount of TIMBA you want to send.");
+  expect(text).toContain("• <code>100</code> (send 100 TIMBA)");
   expect(options.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data).toBe(
-    "cmd_sell"
+    "cmd_withdraw"
   );
 
-  const state = getUserState("sell-user", false);
-  expect(state?.type).toBe("sell_custom_amount");
-  expect(state?.tokenToSell).toBe("TIMBA");
+  const state = getUserState("sender", false);
+  expect(state?.type).toBe("send_custom_amount");
+  expect(state?.token).toBe("TIMBA");
   expect(state?.messageId).toBe(111);
   expect(state?.chatId).toBe(222);
 });
@@ -197,10 +197,10 @@ test("showCustomAmountPrompt formats buy custom amount flow", async () => {
   await showCustomAmountPrompt({
     ctx,
     userId: "buy-user",
-    title: "💰 <b>BUY TIMBA - CUSTOM AMOUNT</b>",
+    title: "💱 <b>SWAP TIMBA - CUSTOM AMOUNT</b>",
     tokenLines: [
-      "<b>Paying with:</b> USDC",
-      "<b>Target token:</b> TIMBA",
+      "<b>From:</b> USDC",
+      "<b>To:</b> TIMBA",
     ],
     instructions: [
       "Please send a message with the amount of USDC you want to spend.",
@@ -211,29 +211,27 @@ test("showCustomAmountPrompt formats buy custom amount flow", async () => {
       "• <code>50%</code> (spend 50% of balance)",
       "• <code>max</code> (spend all available USDC)",
     ],
-    cancelCallback: "cmd_buy",
+    cancelCallback: "cmd_swap",
     state: {
-      type: "buy_custom_amount",
-      paymentToken: "USDC",
-      targetToken: "TIMBA",
-      contractAddress: "Abc123",
+      type: "swap_custom_amount",
+      fromToken: "USDC",
+      toToken: "TIMBA",
     },
   });
 
   const { text, options } = expectSingleEdit(edits);
-  expect(text).toContain("💰 <b>BUY TIMBA - CUSTOM AMOUNT</b>");
-  expect(text).toContain("<b>Paying with:</b> USDC");
+  expect(text).toContain("💱 <b>SWAP TIMBA - CUSTOM AMOUNT</b>");
+  expect(text).toContain("<b>From:</b> USDC");
   expect(text).toContain("Please send a message with the amount of USDC you want to spend.");
   expect(text).toContain("• <code>max</code> (spend all available USDC)");
   expect(options.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data).toBe(
-    "cmd_buy"
+    "cmd_swap"
   );
 
   const state = getUserState("buy-user", false);
-  expect(state?.type).toBe("buy_custom_amount");
-  expect(state?.paymentToken).toBe("USDC");
-  expect(state?.targetToken).toBe("TIMBA");
-  expect(state?.contractAddress).toBe("Abc123");
+  expect(state?.type).toBe("swap_custom_amount");
+  expect(state?.fromToken).toBe("USDC");
+  expect(state?.toToken).toBe("TIMBA");
   expect(state?.messageId).toBe(777);
   expect(state?.chatId).toBe(888);
 });

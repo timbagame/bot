@@ -56,10 +56,11 @@ beforeAll(async () => {
   (bot as any).api.answerCallbackQuery = async () => ({ ok: true, result: true });
 });
 
-test("typed-input ignores messages from a different chat (buy_contract_address)", async () => {
+test("typed-input ignores messages from a different chat (swap_to_token)", async () => {
   const userId = 1111;
   __test_setUserState(String(userId), {
-    type: "buy_contract_address",
+    type: "swap_to_token",
+    fromToken: "SOL",
     messageId: 10,
     chatId: 1,
   });
@@ -89,7 +90,4 @@ test("typed-input ignores messages from a different chat (buy_contract_address)"
 });
 
 // Note: a full same-chat flow test is brittle due to global bot middlewares.
-// The guard test above plus cmd_buy chatId test provide sufficient coverage.
-
-// Note: cmd_buy chatId assignment is covered indirectly by code review
-// and other integration tests; bot API stubbing makes direct testing noisy.
+// The guard test above provides sufficient coverage for swap state guards.

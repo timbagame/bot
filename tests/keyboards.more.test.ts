@@ -61,12 +61,11 @@ describe("keyboards: main and wallet", () => {
     expect(callbacks).toContain("cmd_help");
   });
 
-  test("wallet keyboard contains buy/sell/refresh and settings", () => {
+  test("wallet keyboard contains swap/withdraw/refresh and settings", () => {
     const kb = createWalletKeyboard();
     const callbacks = extractCallbacks(kb);
+    expect(callbacks).toContain("cmd_swap");
     expect(callbacks).toContain("cmd_withdraw");
-    expect(callbacks).toContain("cmd_buy");
-    expect(callbacks).toContain("cmd_sell");
     expect(callbacks).toContain("wallet_refresh");
     expect(callbacks).toContain("wallet_settings");
   });

@@ -47,15 +47,15 @@ describe("Game callback guard", () => {
     }
   });
 
-  test("skips trade slippage callbacks", () => {
+  test("skips swap-related callbacks", () => {
     expect(
       botModule.__test_shouldSkipGenericGameCallback(
-        "trade_slip_buy_abc123_1.5"
+        "swap_to_SOL_USDC"
       )
     ).toBe(true);
     expect(
       botModule.__test_shouldSkipGenericGameCallback(
-        "trade_slip_back_sell_tx999"
+        "swap_amount_SOL_USDC_1"
       )
     ).toBe(true);
   });

@@ -350,7 +350,7 @@ describe("buildWalletActionMenu", () => {
 
 test("send quick amount keyboard preserves percentage and custom callbacks", () => {
   const keyboard = __test_buildQuickAmountKeyboard({
-    baseCallback: (value) => `send_amount_SOL_${value.toUpperCase()}`,
+    baseCallback: (value: string) => `send_amount_SOL_${value.toUpperCase()}`,
     customLabel: "✏️ Custom Amount",
     backCallback: "cmd_withdraw",
   });
