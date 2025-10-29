@@ -423,6 +423,19 @@ export class WalletManager {
             }`
           );
 
+          let cachedMetadata:
+            | { decimals: number; symbol?: string; name?: string }
+            | null = null;
+          const loadFullMetadata = async () => {
+            if (cachedMetadata) {
+              return cachedMetadata;
+            }
+            const metadata = await this.getFullTokenMetadata(mint);
+            console.log(`📋 Full metadata result for ${mint}:`, metadata);
+            cachedMetadata = metadata;
+            return cachedMetadata;
+          };
+
           // Auto-register tokens with non-zero balance that aren't approved
           if (!approvedToken && parseFloat(tokenAmount.amount) > 0) {
             console.log(
@@ -430,35 +443,47 @@ export class WalletManager {
             );
 
             try {
-              // Import TokenManager dynamically to avoid circular imports
               const { TokenManager } = await import("./token-manager");
               const tokenManager = TokenManager.getInstance();
 
-              // Try to get metadata for the unknown token
-              const fullMetadata = await this.getFullTokenMetadata(mint);
-              let ticker = fullMetadata.symbol || `TOKEN_${mint.slice(-4)}`;
+              const registration = await tokenManager.registerTokenIfNeeded({
+                mint,
+                source: "wallet:auto",
+                metadataResolvers: [
+                  async () => {
+                    try {
+                      return await loadFullMetadata();
+                    } catch (metadataError) {
+                      console.error(
+                        `❌ Error fetching metadata for ${mint}:`,
+                        metadataError
+                      );
+                      return null;
+                    }
+                  },
+                ],
+              });
 
-              console.log(`📝 Auto-registering token: ${ticker} (${mint})`);
-              const registered = await tokenManager.addToken(mint, ticker);
-
-              if (registered) {
-                console.log(`✅ Successfully auto-registered: ${ticker}`);
-                // Add to approved tokens map for immediate use
-                approvedTokensMap.set(mint, {
-                  token_mint: mint,
-                  token_ticker: ticker,
-                  decimals: tokenAmount.decimals,
-                });
-              } else {
-                console.log(`❌ Failed to auto-register: ${ticker}`);
-                continue; // Skip this token if registration failed
+              if (!registration.token) {
+                console.log(
+                  `❌ Failed to auto-register: ${
+                    registration.resolvedTicker ?? mint
+                  }`
+                );
+                continue;
               }
+
+              approvedTokensMap.set(mint, {
+                token_mint: registration.token.token_mint,
+                token_ticker: registration.token.token_ticker,
+                decimals: registration.token.decimals,
+              });
             } catch (regError) {
               console.error(
                 `❌ Error auto-registering token ${mint}:`,
                 regError
               );
-              continue; // Skip this token if auto-registration failed
+              continue;
             }
           }
 
@@ -473,8 +498,7 @@ export class WalletManager {
             );
 
             try {
-              const fullMetadata = await this.getFullTokenMetadata(mint);
-              console.log(`📋 Full metadata result for ${mint}:`, fullMetadata);
+              const fullMetadata = await loadFullMetadata();
 
               // Preserve WSOL ticker for the wrapped SOL mint to avoid
               // confusing duplication with native SOL balances

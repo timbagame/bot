@@ -12,6 +12,28 @@ import {
 import { parseDecimalAmount } from "./amount";
 import { createSingleton } from "./singleton";
 
+type TokenMetadataResolverResult =
+  | { symbol?: string | null; decimals?: number | null }
+  | null
+  | undefined;
+
+type TokenMetadataResolver = () =>
+  | TokenMetadataResolverResult
+  | Promise<TokenMetadataResolverResult>;
+
+export interface RegisterTokenIfNeededOptions {
+  mint: string;
+  tickerHint?: string;
+  source?: string;
+  metadataResolvers?: TokenMetadataResolver[];
+}
+
+export interface TokenRegistrationResult {
+  status: "already_registered" | "registered" | "failed";
+  token?: KnownToken | null;
+  resolvedTicker?: string;
+}
+
 const BUILTIN_TOKEN_MINTS: Record<string, string> = (() => {
   const map: Record<string, string> = {
     SOL: WSOL_MINT,
@@ -337,10 +359,16 @@ export class TokenManager {
   // TOKEN MANAGEMENT
   // ================================
 
-  public async addToken(tokenMint: string, ticker: string): Promise<boolean> {
+  public async addToken(
+    tokenMint: string,
+    ticker: string,
+    decimalsOverride?: number
+  ): Promise<boolean> {
     try {
-      // Validate token mint exists on blockchain
-      const metadata = await this.wallet.getTokenMetadata(tokenMint);
+      const metadata =
+        typeof decimalsOverride === "number"
+          ? { decimals: decimalsOverride }
+          : await this.wallet.getTokenMetadata(tokenMint);
 
       this.tokenDb.addKnownToken(
         tokenMint,
@@ -352,6 +380,141 @@ export class TokenManager {
       console.error(`Error adding token ${ticker}:`, error);
       return false;
     }
+  }
+
+  public async registerTokenIfNeeded({
+    mint,
+    tickerHint,
+    source,
+    metadataResolvers = [],
+  }: RegisterTokenIfNeededOptions): Promise<TokenRegistrationResult> {
+    const logPrefix = source ? `[${source}]` : "[TokenManager]";
+    const existing = this.getKnownTokenByMint(mint);
+    if (existing) {
+      console.log(
+        `${logPrefix} Token already registered: ${existing.token_ticker} (${mint})`
+      );
+      return {
+        status: "already_registered",
+        token: existing,
+        resolvedTicker: existing.token_ticker,
+      };
+    }
+
+    let resolvedTicker = tickerHint?.trim().toUpperCase();
+    if (mint === WSOL_MINT) {
+      resolvedTicker = "WSOL";
+    }
+
+    const builtinMetadata = getBuiltinTokenMetadataByMint(mint);
+    if (!resolvedTicker && builtinMetadata?.ticker) {
+      resolvedTicker = builtinMetadata.ticker.toUpperCase();
+    }
+
+    let decimals: number | undefined;
+
+    for (const resolver of metadataResolvers) {
+      if (!resolver) {
+        continue;
+      }
+      try {
+        const metadata = await resolver();
+        if (!metadata) {
+          continue;
+        }
+
+        if (metadata.symbol && metadata.symbol !== "UNKNOWN") {
+          resolvedTicker = metadata.symbol.toUpperCase();
+        }
+
+        if (
+          typeof metadata.decimals === "number" &&
+          Number.isFinite(metadata.decimals)
+        ) {
+          decimals = metadata.decimals;
+        }
+
+        if (resolvedTicker && decimals !== undefined) {
+          break;
+        }
+      } catch (resolverError) {
+        console.warn(
+          `${logPrefix} Metadata resolver failed for ${mint}:`,
+          resolverError
+        );
+      }
+    }
+
+    let fetchedMetadata: { symbol?: string; decimals: number } | null = null;
+    const ensureFullMetadata = async () => {
+      if (fetchedMetadata) {
+        return fetchedMetadata;
+      }
+      const metadata = await this.wallet.getFullTokenMetadata(mint);
+      fetchedMetadata = {
+        symbol: metadata.symbol ?? undefined,
+        decimals: metadata.decimals,
+      };
+      return fetchedMetadata;
+    };
+
+    if (!resolvedTicker || decimals === undefined) {
+      try {
+        const metadata = await ensureFullMetadata();
+        if (!resolvedTicker && metadata.symbol && metadata.symbol !== "UNKNOWN") {
+          resolvedTicker = metadata.symbol.toUpperCase();
+        }
+        if (decimals === undefined) {
+          decimals = metadata.decimals;
+        }
+      } catch (metadataError) {
+        console.warn(
+          `${logPrefix} Failed to fetch full metadata for ${mint}:`,
+          metadataError
+        );
+      }
+    }
+
+    if (decimals === undefined) {
+      try {
+        const metadata = await this.wallet.getTokenMetadata(mint);
+        decimals = metadata.decimals;
+      } catch (decimalsError) {
+        console.error(
+          `${logPrefix} Failed to fetch token metadata for ${mint}:`,
+          decimalsError
+        );
+        return { status: "failed", resolvedTicker };
+      }
+    }
+
+    if (!resolvedTicker) {
+      resolvedTicker = `TOKEN_${mint.slice(-4).toUpperCase()}`;
+    }
+
+    console.log(
+      `${logPrefix} Auto-registering token ${resolvedTicker} (${mint})`
+    );
+    const added = await this.addToken(mint, resolvedTicker, decimals);
+    if (!added) {
+      console.log(
+        `${logPrefix} Failed to auto-register token ${resolvedTicker} (${mint})`
+      );
+      return { status: "failed", resolvedTicker };
+    }
+
+    const registered = this.getKnownTokenByMint(mint);
+    if (registered) {
+      console.log(
+        `${logPrefix} Registered token ${registered.token_ticker} (${mint})`
+      );
+    }
+
+    return {
+      status: "registered",
+      token: registered,
+      resolvedTicker,
+    };
   }
 
   public setChatDefaultToken(

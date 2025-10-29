@@ -283,3 +283,51 @@ export const evaluateTradeAmount = ({
     normalizedAmount: parsed.normalized,
   };
 };
+
+export interface PresentedTradeAmountResult {
+  kind: EvaluateTradeAmountResult["kind"];
+  rawAmount: number;
+  normalizedAmount: string;
+  displayAmount: string;
+}
+
+export const presentTradeAmount = (
+  params: EvaluateTradeAmountParams
+): PresentedTradeAmountResult => {
+  const evaluation = evaluateTradeAmount(params);
+
+  const decimalsForFallback =
+    params.assetTicker === "SOL"
+      ? params.decimals
+      : params.tokenBalance?.decimals ?? params.decimals;
+
+  const fallbackFormatted = formatAmount(evaluation.rawAmount, decimalsForFallback, {
+    maxFractionDigits: decimalsForFallback,
+    trim: true,
+  });
+
+  const normalizedAmount =
+    evaluation.normalizedAmount ??
+    (evaluation.kind === "max" ? "max" : fallbackFormatted);
+
+  let displayAmount = evaluation.displayAmount;
+  if (!displayAmount) {
+    if (evaluation.kind === "max" && normalizedAmount === "max") {
+      displayAmount = "max";
+    } else if (params.assetTicker === "SOL") {
+      displayAmount =
+        params.formatSol?.(evaluation.rawAmount) ?? fallbackFormatted;
+    } else {
+      displayAmount =
+        params.formatToken?.(evaluation.rawAmount, decimalsForFallback) ??
+        fallbackFormatted;
+    }
+  }
+
+  return {
+    kind: evaluation.kind,
+    rawAmount: evaluation.rawAmount,
+    normalizedAmount,
+    displayAmount,
+  };
+};
