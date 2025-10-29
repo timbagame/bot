@@ -2008,12 +2008,12 @@ export class GameManager {
           ctx,
           gameData.winner_address
         );
-        winnerLine = `Winner: @${winnerUsername}`;
+        winnerLine = `Winner: ${winnerUsername}`;
       }
 
       let message =
         `${gameTypeText} • ${formatBalanceForDisplay(amount)} ${tokenTicker}` +
-        `\n👤 Creator: ${creatorLabel} • ${playerCount} tickets`;
+        `\nCreator: ${creatorLabel} • ${playerCount} tickets`;
 
       try {
         const participantIds = this.gameDb.getGameParticipants(
