@@ -1415,8 +1415,6 @@ const fetchTokenPriceUSD = async ({
 type GameSetupCopy = {
   gameType: "coinflip" | "giveaway";
   heading: string;
-  introLines: string[];
-  bulletPoints: string[];
   amountPrompt: string;
   suggestionLabel?: string;
   lowBalanceCopy?: {
@@ -1429,8 +1427,6 @@ const GAME_SETUP_COPY: Record<"coinflip" | "giveaway", GameSetupCopy> = {
   coinflip: {
     gameType: "coinflip",
     heading: "🪙 <b>Create Coinflip</b>",
-    introLines: [],
-    bulletPoints: [],
     amountPrompt: "Select stake per player in <b>{TOKEN}</b>:",
     lowBalanceCopy: {
       object: "stake per player",
@@ -1440,12 +1436,6 @@ const GAME_SETUP_COPY: Record<"coinflip" | "giveaway", GameSetupCopy> = {
   giveaway: {
     gameType: "giveaway",
     heading: "🎁 <b>Create Giveaway</b>",
-    introLines: ["Choose the prize amount you want to give away:"],
-    bulletPoints: [
-      "• Free to join for all players",
-      "• One lucky winner gets the prize",
-      "• Fair and transparent results",
-    ],
     amountPrompt: "Select prize amount in <b>{TOKEN}</b>:",
     suggestionLabel: "Suggested prizes",
     lowBalanceCopy: {
@@ -1496,9 +1486,6 @@ const startInteractiveGameSetup = async (
 
   let message = `${copy.heading}\n\n`;
   message += `Token: <b>${tokenInfo.tokenTicker}</b>\n`;
-  for (const line of copy.introLines) {
-    message += line ? `${line}\n` : "\n";
-  }
   message += balanceText;
 
   if (copy.lowBalanceCopy && userBalance < contractMin) {
@@ -1507,14 +1494,6 @@ const startInteractiveGameSetup = async (
       decimals: tokenInfo.decimals,
     });
     message += `\n⚠️ Minimum ${object}: ${minDisplay} ${tokenInfo.tokenTicker}.\n`;
-  }
-
-  if (copy.bulletPoints.length > 0) {
-    message += "\n";
-    for (const bullet of copy.bulletPoints) {
-      message += `${bullet}\n`;
-    }
-    message += "\n";
   }
 
   message += copy.amountPrompt.replace("{TOKEN}", tokenInfo.tokenTicker);
