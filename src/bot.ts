@@ -6603,52 +6603,12 @@ const showSwapAmountSelection = async (
   ];
 
   const canTrade = balanceDecimal > 0;
-  let extraRows: QuickAmountButton[][] | undefined;
-
-  if (canTrade) {
-    const maxBalance = balanceDecimal;
-    extraRows = [];
-
-    if (maxBalance >= 100) {
-      extraRows.push(
-        [
-          { label: "10", value: "10" },
-          { label: "50", value: "50" },
-        ],
-        [
-          { label: "100", value: "100" },
-        ]
-      );
-    } else if (maxBalance >= 10) {
-      extraRows.push(
-        [
-          { label: "1", value: "1" },
-          { label: "5", value: "5" },
-        ],
-        [
-          { label: "10", value: "10" },
-        ]
-      );
-    } else {
-      extraRows.push(
-        [
-          { label: "0.1", value: "0.1" },
-          { label: "0.5", value: "0.5" },
-        ],
-        [
-          { label: "1", value: "1" },
-        ]
-      );
-    }
-  }
 
   const toTokenIdentifier = options.toTokenIdentifier ?? toToken;
 
   const keyboard = buildQuickAmountKeyboard({
     baseCallback: (value) =>
       `swap_amount_${fromToken}_${toTokenIdentifier}_${value}`,
-    percentages: ["25%", "50%", "75%", "MAX"],
-    extraRows,
     backCallback: `swap_to_${fromToken}_${toTokenIdentifier}`,
     showQuickRows: canTrade,
     insufficientLabel: "❌ Insufficient balance",
