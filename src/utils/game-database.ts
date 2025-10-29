@@ -1,6 +1,16 @@
 import type { GameData, PlayerMapping } from "../types";
 import { BaseDatabase, createDatabaseClassSingleton } from "./base-database";
 
+export type LeaderboardStatsRecord = {
+  telegramId: string;
+  totalGames: number;
+  gamesWon: number;
+  gamesCreated: number;
+  gamesJoined: number;
+  totalVolume: number;
+  winRate: number;
+};
+
 /**
  * Database service for storing game-related data
  */
@@ -554,9 +564,9 @@ export class GameDatabase extends BaseDatabase {
   /**
    * Get leaderboard statistics for players in a specific chat
    */
-  public getLeaderboardStats(chatId: number, limit: number = 10): any[] {
+  public getLeaderboardStats(chatId: number, limit: number = 10): LeaderboardStatsRecord[] {
     try {
-      return this.all<any>(
+      const rows = this.all<any>(
         `
         WITH player_stats AS (
           SELECT
@@ -597,6 +607,25 @@ export class GameDatabase extends BaseDatabase {
         [chatId, limit],
         "getting leaderboard stats"
       );
+
+      return rows
+        .map((row: any) => {
+          const telegramId = String(row.telegram_id ?? "").trim();
+          if (!telegramId) {
+            return null;
+          }
+
+          return {
+            telegramId,
+            totalGames: Number(row.total_games ?? 0),
+            gamesWon: Number(row.games_won ?? 0),
+            gamesCreated: Number(row.games_created ?? 0),
+            gamesJoined: Number(row.games_joined ?? 0),
+            totalVolume: Number(row.total_volume ?? 0),
+            winRate: Number(row.win_rate ?? 0),
+          } satisfies LeaderboardStatsRecord;
+        })
+        .filter((row): row is LeaderboardStatsRecord => row !== null);
     } catch {
       return [];
     }

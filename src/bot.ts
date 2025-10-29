@@ -9,7 +9,7 @@ import type { Keypair } from "@solana/web3.js";
 import { getAssociatedTokenAddress } from "@solana/spl-token";
 import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
-import { GameDatabase } from "./utils/game-database";
+import { GameDatabase, type LeaderboardStatsRecord } from "./utils/game-database";
 import { GameManager } from "./utils/game";
 import { PDAManager } from "./utils/pda";
 import { formatUserFriendlyError } from "./utils/errors";
@@ -56,6 +56,11 @@ import {
   type WalletActionQuickActions,
   type WalletActionMenuBalances,
 } from "./utils/wallet-ui";
+import {
+  buildEmptyLeaderboardMessage,
+  buildLeaderboardMessage,
+  type LeaderboardPlayerDisplay,
+} from "./utils/leaderboard-ui";
 import {
   formatAmount,
   escapeHtml,
@@ -4293,120 +4298,91 @@ bot.command("games", async (ctx: Context) => {
   }
 });
 
+const LEADERBOARD_PLAYER_LIMIT = 10;
+
+const resolveLeaderboardDisplayName = async (ctx: Context, telegramId: string): Promise<string> => {
+  try {
+    const username = await gameManager.getUsernameFromTelegramId(ctx, telegramId);
+    if (username) {
+      return username.startsWith("@") ? username : `@${username}`;
+    }
+  } catch (error) {
+    console.warn(`Could not get username for ${telegramId}:`, error);
+  }
+
+  return `Player ${telegramId}`;
+};
+
+const resolveLeaderboardPlayers = async (
+  ctx: Context,
+  stats: LeaderboardStatsRecord[]
+): Promise<LeaderboardPlayerDisplay[]> => {
+  const players = await Promise.all(
+    stats.map(async (row) => {
+      const displayName = await resolveLeaderboardDisplayName(ctx, row.telegramId);
+      const wins = Math.max(0, row.gamesWon);
+      const totalGames = Math.max(0, row.totalGames);
+      const losses = Math.max(totalGames - wins, 0);
+
+      return {
+        telegramId: row.telegramId,
+        displayName,
+        totalGames,
+        wins,
+        losses,
+        winRate: Math.max(0, row.winRate),
+        gamesCreated: Math.max(0, row.gamesCreated),
+        gamesJoined: Math.max(0, row.gamesJoined),
+        totalVolume: Math.max(0, row.totalVolume),
+      } satisfies LeaderboardPlayerDisplay;
+    })
+  );
+
+  return players.filter((player) => player.totalGames > 0);
+};
+
 bot.command(["leaderboard", "lb"], async (ctx: Context) => {
-  // Check if it's a group/supergroup chat
-  if (ctx.chat?.type !== "group" && ctx.chat?.type !== "supergroup") {
-    return ctx.reply("❌ Leaderboard can only be used in groups!");
+  if (!isGroupChat(ctx)) {
+    return ctx.reply("❌ Leaderboard is only available in group chats.");
   }
 
   const chatId = ctx.chat?.id;
   if (!chatId) {
-    return ctx.reply("❌ Could not get chat information.");
+    return ctx.reply("❌ Could not load chat information.");
   }
 
   try {
     console.log(`🏆 Generating leaderboard for chat ${chatId}`);
 
-    // Get leaderboard stats for this chat
-    const leaderboardStats = gameDb.getLeaderboardStats(chatId, 10);
+    const leaderboardStats = gameDb.getLeaderboardStats(chatId, LEADERBOARD_PLAYER_LIMIT);
 
     if (leaderboardStats.length === 0) {
-      return ctx.reply(
-        "⚔️ <b>HALL OF LEGENDS</b> ⚔️\n\n" +
-        "No statistics available for this group yet.\n" +
-        "Play some coinflips to appear on the leaderboard!\n\n" +
-        "🎮 <i>Be the first to claim your throne!</i>",
-        { parse_mode: "HTML", reply_to_message_id: ctx.message?.message_id }
-      );
+      return ctx.reply(buildEmptyLeaderboardMessage(), {
+        parse_mode: "HTML",
+        reply_to_message_id: ctx.message?.message_id,
+      });
     }
 
-    const resolvedPlayers = await Promise.all(
-      leaderboardStats.map(async (stats) => {
-        try {
-          const username = await gameManager.getUsernameFromTelegramId(ctx, stats.telegram_id);
-          const displayName = username ? `@${username}` : `Player ${stats.telegram_id}`;
-          return { ...stats, displayName };
-        } catch (error) {
-          console.warn(`Could not get username for ${stats.telegram_id}:`, error);
-          return { ...stats, displayName: `Player ${stats.telegram_id}` };
-        }
-      })
-    );
-
-    type LeaderboardPlayerRow = {
-      displayName: string;
-      telegramId: string;
-      totalGames: number;
-      wins: number;
-      losses: number;
-      winRate: number;
-    };
-
-    const players: LeaderboardPlayerRow[] = resolvedPlayers.map((stats) => {
-      const totalGames = Number(stats.total_games ?? 0);
-      const wins = Number(stats.games_won ?? 0);
-      const losses = Math.max(totalGames - wins, 0);
-      const winRate = Number(stats.win_rate ?? 0);
-
-      return {
-        displayName: stats.displayName,
-        telegramId: String(stats.telegram_id ?? ""),
-        totalGames,
-        wins,
-        losses,
-        winRate,
-      };
-    });
+    const players = await resolveLeaderboardPlayers(ctx, leaderboardStats);
 
     if (players.length === 0) {
-      return ctx.reply(
-        "⚠️ <b>LEADERBOARD</b>\n\nNo statistics available right now.",
-        { parse_mode: "HTML", reply_to_message_id: ctx.message?.message_id }
-      );
+      return ctx.reply(buildEmptyLeaderboardMessage(), {
+        parse_mode: "HTML",
+        reply_to_message_id: ctx.message?.message_id,
+      });
     }
 
-    const chatTitle = ctx.chat?.title?.trim();
-    const headerTitle = chatTitle ? `🏆 <b>${escapeHtml(chatTitle)}</b>` : "🏆 <b>Leaderboard</b>";
-
-    const medals = ["🥇", "🥈", "🥉"];
-    const leaderboardLines = players.map((player, index) => {
-      const rank = index + 1;
-      const medal = medals[index] ?? "";
-      const safeName = escapeHtml(player.displayName);
-      const record = `${player.wins}W-${player.losses}L`;
-      const rate = `${player.winRate.toFixed(1)}% win rate`;
-      const medalPrefix = medal ? `${medal} ` : "";
-      return `${rank}. ${medalPrefix}${safeName} - ${record} | ${rate}`;
+    const leaderboardText = buildLeaderboardMessage({
+      chatTitle: ctx.chat?.title ?? null,
+      players,
     });
-
-    let leaderboardText = `${headerTitle}\nTop players in this group\n\n${leaderboardLines.join("\n")}`;
-
-    const topByWins = players[0]!;
-    const bestWinRatePlayer = players.reduce((best, current) => {
-      return current.winRate > best.winRate ? current : best;
-    }, topByWins);
-    const mostGamesPlayer = players.reduce((best, current) => {
-      return current.totalGames > best.totalGames ? current : best;
-    }, topByWins);
-
-    const summarySegments: string[] = [];
-    if (bestWinRatePlayer.telegramId !== topByWins.telegramId) {
-      summarySegments.push(`Best win rate: ${escapeHtml(bestWinRatePlayer.displayName)} (${bestWinRatePlayer.winRate.toFixed(1)}%)`);
-    }
-    if (mostGamesPlayer.telegramId !== topByWins.telegramId) {
-      summarySegments.push(`Most games: ${escapeHtml(mostGamesPlayer.displayName)} (${mostGamesPlayer.totalGames})`);
-    }
-
-    if (summarySegments.length > 0) {
-      leaderboardText += `\n\n${summarySegments.join(" | ")}`;
-    }
 
     await ctx.reply(leaderboardText, {
       parse_mode: "HTML",
       reply_to_message_id: ctx.message?.message_id,
     });
 
-    console.log(`✅ Leaderboard generated for chat ${chatId} with ${leaderboardStats.length} players`);
+    console.log(`✅ Leaderboard generated for chat ${chatId} with ${players.length} players`);
   } catch (error) {
     console.error("Error generating leaderboard:", error);
     await handleCommandError(ctx, error, "leaderboard");

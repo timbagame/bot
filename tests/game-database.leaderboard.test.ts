@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import { GameDatabase } from "../src/utils/game-database";
+import { GameDatabase, type LeaderboardStatsRecord } from "../src/utils/game-database";
 
 describe("GameDatabase Leaderboard", () => {
   let gameDb: GameDatabase;
@@ -36,15 +36,14 @@ describe("GameDatabase Leaderboard", () => {
 
     // Get leaderboard stats
     const stats = gameDb.getLeaderboardStats(chatId, 10);
-    const playerStats = stats.find(s => s.telegram_id === playerId);
+    const playerStats = stats.find((s) => s.telegramId === playerId);
 
     expect(playerStats).toBeDefined();
-    expect(playerStats?.games_won).toBe(3);
-    expect(playerStats?.total_games).toBe(3);
+    expect(playerStats?.gamesWon).toBe(3);
+    expect(playerStats?.totalGames).toBe(3);
     
     const expectedTotalVolume = 1000000 + 500000000 + 50000000;
-    expect(playerStats?.total_volume).toBe(expectedTotalVolume);
-    expect(playerStats?.token_volumes).toBeUndefined();
+    expect(playerStats?.totalVolume).toBe(expectedTotalVolume);
   });
 
   test("should calculate win rate correctly and round to 1 decimal", async () => {
@@ -68,11 +67,11 @@ describe("GameDatabase Leaderboard", () => {
     gameDb.completeGame("GAME3_WINRATE", "PK555"); // Player loses
 
     const stats = gameDb.getLeaderboardStats(chatId, 10);
-    const playerStats = stats.find(s => s.telegram_id === playerId);
+    const playerStats = stats.find((s) => s.telegramId === playerId);
 
-    expect(playerStats?.games_won).toBe(1);
-    expect(playerStats?.total_games).toBe(3);
-    expect(playerStats?.win_rate).toBe(33.3); // Should be rounded to 1 decimal
+    expect(playerStats?.gamesWon).toBe(1);
+    expect(playerStats?.totalGames).toBe(3);
+    expect(playerStats?.winRate).toBe(33.3); // Should be rounded to 1 decimal
   });
 
   test("should handle players with no victories", async () => {
@@ -87,12 +86,12 @@ describe("GameDatabase Leaderboard", () => {
     gameDb.saveGameParticipant("GAME1_NOVICTORY", "444", "PK444");
     gameDb.completeGame("GAME1_NOVICTORY", "PK444"); // Other player wins
 
-    const stats = gameDb.getLeaderboardStats(chatId, 10);
-    const playerStats = stats.find(s => s.telegram_id === playerId);
+    const stats: LeaderboardStatsRecord[] = gameDb.getLeaderboardStats(chatId, 10);
+    const playerStats = stats.find((s) => s.telegramId === playerId);
     
     expect(playerStats).toBeDefined();
-    expect(playerStats?.games_won).toBe(0);
-    expect(playerStats?.total_games).toBe(1);
-    expect(playerStats?.win_rate).toBe(0);
+    expect(playerStats?.gamesWon).toBe(0);
+    expect(playerStats?.totalGames).toBe(1);
+    expect(playerStats?.winRate).toBe(0);
   });
 });
