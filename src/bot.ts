@@ -610,7 +610,7 @@ const formatTradeConfirmationSummary = ({
   })();
 
   const slippageText = formatSlippagePercent(
-    quote.slippage !== undefined ? (quote.slippage as number) : 0.5
+    quote.slippage !== undefined ? (quote.slippage as number) : 1
   );
 
 const lines = [

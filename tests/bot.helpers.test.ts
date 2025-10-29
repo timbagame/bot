@@ -362,7 +362,7 @@ describe("Bot helper utilities", () => {
       receiveToken: "USDC",
       providerLabel: "Jupiter",
       rateDisplay: "0.00009",
-      slippageText: "0.5%",
+      slippageText: "1.0%",
     });
   });
 
@@ -411,7 +411,7 @@ describe("Bot helper utilities", () => {
     const userId = "slippage-user";
     botModule.__test_clearUserState(userId);
 
-    expect(botModule.__test_getUserSwapSlippageBps(userId)).toBe(50);
+    expect(botModule.__test_getUserSwapSlippageBps(userId)).toBe(100);
 
     botModule.__test_setUserSwapSlippageBps(userId, 100);
     expect(botModule.__test_getUserSwapSlippageBps(userId)).toBe(100);
