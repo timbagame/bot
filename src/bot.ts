@@ -4367,10 +4367,8 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
                              stats.win_rate >= 60 ? "🔥🔥" :
                              stats.win_rate >= 40 ? "🔥" : "💀";
 
-      leaderboardText += `${rankDisplay}\n`;
-      leaderboardText += `<b>${displayName}</b> ${winStreakEmoji}\n`;
-      leaderboardText += `💯 <b>${stats.games_won}W</b> | 📊 ${stats.win_rate}%\n`;
-      leaderboardText += `🎮 ${stats.total_games} battles\n\n`;
+      const entryLine = `${rankDisplay} · <b>${displayName}</b> ${winStreakEmoji} · 💯 <b>${stats.games_won}W</b> | 📊 ${stats.win_rate}% | 🎮 ${stats.total_games} battles`;
+      leaderboardText += `${entryLine}\n\n`;
     }
 
 
