@@ -25,7 +25,8 @@ test("parseTransactionError handles transaction timeout with signature", () => {
     `Transaction confirmation timeout. signature ${signature}`
   );
   const message = parseTransactionError(error);
-  expect(message).toContain(`/checktx ${signature}`);
+  expect(message).toContain(`Transaction signature: ${signature}`);
+  expect(message).toContain("Solscan");
 });
 
 test("parseTransactionError handles transaction timeout without signature", () => {

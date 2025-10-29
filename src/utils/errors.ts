@@ -177,7 +177,7 @@ export const parseTransactionError = (
       `The transaction may have succeeded but confirmation took longer than expected.\n\n` +
       `${
         signature
-          ? `Use /checktx ${signature} to verify the transaction status.\n\n`
+          ? `Transaction signature: ${signature}\nUse Solscan or another explorer to verify the status.\n\n`
           : ""
       }` +
       `💡 This can happen during network congestion. Please check the transaction status before retrying.`

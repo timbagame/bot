@@ -836,7 +836,7 @@ const formatTradeConfirmationSummary = ({
       : quote.provider;
 
   const slippageText = formatSlippagePercent(
-    quote.slippage !== undefined ? (quote.slippage as number) : 1
+    quote.slippage !== undefined ? (quote.slippage as number) : 0.5
   );
 
   const lines = [
@@ -1209,7 +1209,7 @@ const prepareTokenTradeQuote = async ({
         inputMint: inputAsset.mint,
         outputMint: outputAsset.mint,
         amount: amountResolution.rawAmount.toString(),
-        slippageBps: quoteOptions?.slippageBps ?? 100,
+        slippageBps: quoteOptions?.slippageBps ?? 50,
         userKeypair: wallet.getKeyPair(telegramId),
         inputDecimals: inputAsset.decimals,
         outputDecimals: outputAsset.decimals,
@@ -3673,7 +3673,6 @@ bot.command("help", async (ctx: Context) => {
     "/default [TOKEN] - Show/set default token for this chat (admin only to set)",
     "",
     "<b>🔧 Utility Commands:</b>",
-    "/checktx &lt;signature&gt; - Check transaction details and status",
     "/oracle - Check Oracle configuration",
     "",
     "<b>ℹ️ Important:</b> ",
@@ -3688,62 +3687,6 @@ bot.command("help", async (ctx: Context) => {
     parse_mode: "HTML",
     reply_to_message_id: ctx.message?.message_id,
   });
-});
-
-bot.command("checktx", async (ctx: Context) => {
-  const args = ctx.message?.text?.split(" ");
-  const signature = args?.[1];
-
-  if (!signature) {
-    return ctx.reply("Usage: /checktx <transaction_signature>", {
-      reply_to_message_id: ctx.message?.message_id,
-    });
-  }
-
-  try {
-    console.log(`Checking transaction: ${signature}`);
-    const connection = wallet.getConnection();
-    const txDetails = await connection.getTransaction(signature, {
-      commitment: "confirmed",
-      maxSupportedTransactionVersion: 0,
-    });
-
-    if (!txDetails) {
-      return ctx.reply("Transaction not found or not confirmed yet.", {
-        reply_to_message_id: ctx.message?.message_id,
-      });
-    }
-
-    const response = [
-      "🔍 <b>Transaction Details</b>",
-      "",
-      `Signature: <code>${signature}</code>`,
-      `Slot: ${txDetails.slot}`,
-      `Block Time: ${
-        txDetails.blockTime
-          ? new Date(txDetails.blockTime * 1000).toISOString()
-          : "Unknown"
-      }`,
-      `Fee: ${txDetails.meta?.fee || 0} lamports`,
-      `Status: ${txDetails.meta?.err ? "❌ Failed" : "✅ Success"}`,
-    ];
-
-    if (txDetails.meta?.err) {
-      response.push(
-        `Error: <code>${JSON.stringify(txDetails.meta.err)}</code>`
-      );
-    }
-
-    await ctx.reply(response.join("\n"), {
-      parse_mode: "HTML",
-      reply_to_message_id: ctx.message?.message_id,
-    });
-  } catch (error: any) {
-    console.error("Error checking transaction:", error);
-    await ctx.reply(`Error checking transaction: ${(error as Error).message}`, {
-      reply_to_message_id: ctx.message?.message_id,
-    });
-  }
 });
 
 bot.command("active", async (ctx: Context) => {
@@ -6132,7 +6075,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
             inputMint: quote.inputMint,
             outputMint: quote.outputMint,
             amount: quote.inputAmount, // Use inputAmount from quote like original
-            slippageBps: 100,
+            slippageBps: 50,
             userKeypair: keypair,
             inputDecimals,
             outputDecimals,
@@ -6148,7 +6091,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
             inputMint: quote.inputMint,
             outputMint: quote.outputMint,
             amount: quote.inputAmount, // Use inputAmount from quote like original
-            slippageBps: 100,
+            slippageBps: 50,
             userKeypair: keypair,
             inputDecimals,
             outputDecimals,
@@ -6794,7 +6737,6 @@ const HELP_SECTIONS: Record<HelpSectionKey, HelpSectionConfig> = {
   utility: {
     text:
       "🔧 <b>Utility Commands</b>\n\n" +
-      "<code>/checktx &lt;signature&gt;</code> - Check transaction status\n" +
       "<code>/oracle</code> - Check oracle status\n" +
       "<code>/default [TOKEN]</code> - Show/set chat default token\n\n" +
       "🔐 <b>Security:</b>\n" +
@@ -6822,7 +6764,6 @@ const HELP_SECTIONS: Record<HelpSectionKey, HelpSectionConfig> = {
       "<code>/coinflip 100 TIMBA 2</code> (2-player, 100 TIMBA each)\n" +
       "<code>/giveaway 500 TIMBA 5</code> (5 players, 500 TIMBA prize)\n\n" +
       "<b>🔧 Utility Examples:</b>\n" +
-      "<code>/checktx FULL_TRANSACTION_SIGNATURE</code> (check transaction)\n" +
       "<code>/default USDC</code> (set chat default token)",
     ack: "📋 Command Examples",
     buttons: [
@@ -7353,7 +7294,7 @@ registerCallbackPrefixHandler("confirm_sell_", async (ctx, { payload: txId }) =>
 
     const slippagePercent = Number.isFinite(sellData.quote.slippage)
       ? (sellData.quote.slippage as number)
-      : 1;
+      : 0.5;
     const slippageBps = Math.max(0, Math.round(slippagePercent * 100));
 
     const quote = await swapManager.getQuote({
@@ -7742,7 +7683,7 @@ registerCallbackPrefixHandler("confirm_buy_", async (ctx, { payload: txId }) => 
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
           amount: quote.inputAmount,
-          slippageBps: 100,
+          slippageBps: 50,
           userKeypair: userKeypair,
           inputDecimals: quote.inputDecimals || 9,
           outputDecimals: quote.outputDecimals || 9,
@@ -7757,7 +7698,7 @@ registerCallbackPrefixHandler("confirm_buy_", async (ctx, { payload: txId }) => 
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
           amount: quote.inputAmount,
-          slippageBps: 100,
+          slippageBps: 50,
           userKeypair: userKeypair,
           inputDecimals: quote.inputDecimals || 9,
           outputDecimals: quote.outputDecimals || 6,
@@ -9565,7 +9506,7 @@ const runSellTradeQuote = async ({
       });
       await respondWithMenu(ctx, { text, keyboard });
     },
-    quoteOptions: { slippageBps: 100 },
+    quoteOptions: { slippageBps: 50 },
   });
 
 const regenerateTradeQuoteWithSlippage = async (
