@@ -48,11 +48,16 @@ test("wrapSol builds instructions and forwards to sendTransaction", async () => 
     sendCalls.push({ ixs, signers });
     return "WRAP123";
   };
+  const confirmed: string[] = [];
+  (wm as any).confirmTransaction = async (sig: string) => {
+    confirmed.push(sig);
+  };
 
   const sig = await wm.wrapSol(1n, 500_000_000);
   expect(sig).toBe("WRAP123");
   expect(sendCalls[0]!.ixs.length).toBe(3);
   expect(sendCalls[0]!.signers[0]).toBeDefined();
+  expect(confirmed).toEqual(["WRAP123"]);
 });
 
 test("wrapSol rejects non-positive amounts", async () => {

@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
 import { PublicKey, Keypair } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import {
+  AccountLayout,
+  TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddress,
+} from "@solana/spl-token";
 
 import { WalletManager } from "../src/utils/wallet";
 
@@ -71,6 +75,78 @@ test("getTokenBalance creates ATA with user as payer when missing", async () => 
   ).toBe(true);
 });
 
+test("getTokenBalance waits for confirmation before returning new ATA balance", async () => {
+  const mint = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+  const accountLamports = 123_456n;
+
+  let expectedAta: PublicKey | null = null;
+  let accountCreated = false;
+  let accountData = Buffer.alloc(AccountLayout.span);
+
+  const connection = {
+    async getAccountInfo(pubkey: PublicKey) {
+      if (!accountCreated || !expectedAta || !pubkey.equals(expectedAta)) {
+        return null;
+      }
+      return {
+        owner: TOKEN_PROGRAM_ID,
+        data: accountData,
+      };
+    },
+  };
+
+  const wm = WalletManager.createForTest(MNEMONIC, {
+    connection: connection as any,
+    fetch: globalThis.fetch as any,
+    timeNow: () => Date.now(),
+  });
+
+  const telegramId = 77n;
+  const userKeypair = wm.getKeyPair(telegramId);
+  AccountLayout.encode(
+    {
+      mint,
+      owner: userKeypair.publicKey,
+      amount: accountLamports,
+      delegateOption: 0,
+      delegate: PublicKey.default,
+      state: 1,
+      isNativeOption: 0,
+      isNative: 0n,
+      delegatedAmount: 0n,
+      closeAuthorityOption: 0,
+      closeAuthority: PublicKey.default,
+    },
+    accountData
+  );
+  expectedAta = await getAssociatedTokenAddress(
+    mint,
+    userKeypair.publicKey,
+    false,
+    TOKEN_PROGRAM_ID
+  );
+
+  (wm as any).findOrCreateAssociatedTokenAccount = async () => ({
+    address: expectedAta!,
+    instructions: ["ix"],
+  });
+
+  const signature = "ATA123";
+  const confirmed: string[] = [];
+  (wm as any).sendTransaction = async () => signature;
+  (wm as any).confirmTransaction = async (sig: string) => {
+    confirmed.push(sig);
+    accountCreated = true;
+  };
+
+  const balance = await wm.getTokenBalance(telegramId, mint.toBase58(), {
+    createIfMissing: true,
+  });
+
+  expect(confirmed).toEqual([signature]);
+  expect(balance).toBe(Number(accountLamports));
+});
+
 test("getTokenBalance without createIfMissing does not attempt ATA creation", async () => {
   const mint = new PublicKey("So11111111111111111111111111111111111111112");
   const wm = WalletManager.createForTest(MNEMONIC, {
@@ -91,4 +167,3 @@ test("getTokenBalance without createIfMissing does not attempt ATA creation", as
   expect(balance).toBe(0);
   expect(creationAttempted).toBe(false);
 });
-
