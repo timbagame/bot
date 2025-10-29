@@ -157,54 +157,61 @@ export class TokenManager {
 
     const candidate = tokenArg?.trim();
     if (candidate) {
-      const resolvedToken = await this.resolveSwapToken(candidate);
-      if (resolvedToken) {
-        tokenWasSpecified = true;
-        tokenDecimals = resolvedToken.decimals;
-        resolvedTokenMint = resolvedToken.token_mint;
-        resolvedTokenTicker = resolvedToken.token_ticker;
-        if (resolvedToken.isNativeSol) {
-          requestedNativeSol = true;
-          if (context === "tip") {
-            isSol = true;
-            resolvedTokenMint = "SOL";
-            resolvedTokenTicker = "SOL";
-            tokenDecimals = 9;
-          } else {
-            resolvedTokenTicker = "SOL";
-          }
-        }
-      } else if (looksLikeTokenTicker(candidate)) {
-        return {
-          success: false,
-          error: "unknown_token",
-          unknownToken: candidate.toUpperCase(),
-        };
-      } else {
-        let explicitMint: string | null = null;
-        try {
-          explicitMint = new PublicKey(candidate).toBase58();
-        } catch {
-          explicitMint = null;
-        }
+      const isNumericCandidate =
+        candidate.length <= 18 && /^[0-9]+(?:\.[0-9]+)?$/.test(candidate);
 
-        if (explicitMint) {
+      if (!isNumericCandidate) {
+        // Only attempt token parsing when the argument isn't a numeric
+        // parameter (e.g., max players in `/cf 10 5`).
+        const resolvedToken = await this.resolveSwapToken(candidate);
+        if (resolvedToken) {
           tokenWasSpecified = true;
-          resolvedTokenMint = explicitMint;
-
-          const knownMint = this.tokenDb.getKnownTokenByMint(explicitMint);
-          if (knownMint) {
-            tokenDecimals = knownMint.decimals;
-            resolvedTokenTicker = knownMint.token_ticker;
-          } else {
-            resolvedTokenTicker = candidate.toUpperCase();
+          tokenDecimals = resolvedToken.decimals;
+          resolvedTokenMint = resolvedToken.token_mint;
+          resolvedTokenTicker = resolvedToken.token_ticker;
+          if (resolvedToken.isNativeSol) {
+            requestedNativeSol = true;
+            if (context === "tip") {
+              isSol = true;
+              resolvedTokenMint = "SOL";
+              resolvedTokenTicker = "SOL";
+              tokenDecimals = 9;
+            } else {
+              resolvedTokenTicker = "SOL";
+            }
           }
-        } else {
+        } else if (looksLikeTokenTicker(candidate)) {
           return {
             success: false,
             error: "unknown_token",
             unknownToken: candidate.toUpperCase(),
           };
+        } else {
+          let explicitMint: string | null = null;
+          try {
+            explicitMint = new PublicKey(candidate).toBase58();
+          } catch {
+            explicitMint = null;
+          }
+
+          if (explicitMint) {
+            tokenWasSpecified = true;
+            resolvedTokenMint = explicitMint;
+
+            const knownMint = this.tokenDb.getKnownTokenByMint(explicitMint);
+            if (knownMint) {
+              tokenDecimals = knownMint.decimals;
+              resolvedTokenTicker = knownMint.token_ticker;
+            } else {
+              resolvedTokenTicker = candidate.toUpperCase();
+            }
+          } else {
+            return {
+              success: false,
+              error: "unknown_token",
+              unknownToken: candidate.toUpperCase(),
+            };
+          }
         }
       }
     }
