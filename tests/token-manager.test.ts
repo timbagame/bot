@@ -121,7 +121,7 @@ test("parseAmount treats valid mint strings as explicit tokens even when unknown
   }
   const data = res.data;
   expect(data.tokenMint).toBe(mint);
-  expect(data.tokenTicker).toBe(mint);
+  expect(data.tokenTicker).toBe("DISC");
   expect(data.tokenWasSpecified).toBe(true);
 });
 

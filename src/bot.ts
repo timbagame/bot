@@ -1576,6 +1576,20 @@ const resolveChatTokenInfo = async (
   }
 };
 
+const fetchTokenPriceUSD = async ({
+  tokenMint,
+  tokenTicker,
+}: {
+  tokenMint: string;
+  tokenTicker: string;
+}): Promise<number | null> => {
+  let tokenPriceUSD = await getPriceUSD(tokenMint);
+  if (!tokenPriceUSD) {
+    tokenPriceUSD = await getPriceUSD(tokenTicker);
+  }
+  return tokenPriceUSD ?? null;
+};
+
 type GameSetupCopy = {
   gameType: "coinflip" | "giveaway";
   heading: string;
@@ -1656,10 +1670,10 @@ const startInteractiveGameSetup = async (
     tokenInfo.decimals
   );
 
-  let tokenPriceUSD = await getPriceUSD(tokenInfo.tokenMint);
-  if (!tokenPriceUSD) {
-    tokenPriceUSD = await getPriceUSD(tokenInfo.tokenTicker);
-  }
+  const tokenPriceUSD = await fetchTokenPriceUSD({
+    tokenMint: tokenInfo.tokenMint,
+    tokenTicker: tokenInfo.tokenTicker,
+  });
 
   const suggestedAmounts = getSuggestedStakeAmounts(contractMin, userBalance);
 
@@ -1845,6 +1859,57 @@ const withCreatorContext = (
     };
 
     await handler(ctx, creatorContext);
+  };
+};
+
+const prepareSliderContext = async ({
+  session,
+  tokenContext,
+  telegramId,
+}: {
+  session: GameSetupSession | undefined;
+  tokenContext: TokenContext;
+  telegramId: bigint;
+}): Promise<{
+  userBalance: number;
+  contractMinimum: number;
+  roundValue: (value: number) => number;
+}> => {
+  let userBalance =
+    session?.userBalance && session.userBalance > 0 ? session.userBalance : 0;
+
+  if (userBalance <= 0) {
+    try {
+      const tokenBalance = await wallet.getTokenBalance(
+        telegramId,
+        tokenContext.tokenMint,
+        { createIfMissing: true }
+      );
+      userBalance =
+        tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
+    } catch (error) {
+      console.error("Error getting balance for slider:", error);
+    }
+  }
+
+  const contractMinimum =
+    tokenContext.contractMinimum !== undefined
+      ? tokenContext.contractMinimum
+      : (
+          await getContractMinimumAmount(
+            tokenContext.tokenMint,
+            tokenContext.tokenDecimals
+          )
+        ).formatted;
+
+  const precisionFactor = Math.pow(10, tokenContext.tokenDecimals);
+  const roundValue = (value: number) =>
+    Math.round(value * precisionFactor) / precisionFactor;
+
+  return {
+    userBalance,
+    contractMinimum,
+    roundValue,
   };
 };
 
@@ -4894,35 +4959,12 @@ bot.callbackQuery(
           return;
         }
 
-        let userBalance =
-          session?.userBalance && session.userBalance > 0
-            ? session.userBalance
-            : 0;
-        if (userBalance <= 0) {
-          try {
-            const tokenBalance = await wallet.getTokenBalance(
-              telegramId,
-              tokenContext.tokenMint,
-              { createIfMissing: true }
-            );
-            userBalance =
-              tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
-          } catch (error) {
-            console.error("Error getting balance for slider:", error);
-          }
-        }
-
-        const { formatted: contractMin } =
-          tokenContext.contractMinimum !== undefined
-            ? { formatted: tokenContext.contractMinimum }
-            : await getContractMinimumAmount(
-                tokenContext.tokenMint,
-                tokenContext.tokenDecimals
-              );
-
-        const precisionFactor = Math.pow(10, tokenContext.tokenDecimals);
-        const roundValue = (value: number) =>
-          Math.round(value * precisionFactor) / precisionFactor;
+        const { userBalance, contractMinimum: contractMin, roundValue } =
+          await prepareSliderContext({
+            session,
+            tokenContext,
+            telegramId,
+          });
 
         const defaultStart =
           userBalance > 0
@@ -4990,34 +5032,12 @@ bot.callbackQuery(
           return;
         }
 
-        let userBalance =
-          session?.userBalance && session.userBalance > 0
-            ? session.userBalance
-            : 0;
-        if (userBalance <= 0) {
-          try {
-            const tokenBalance = await wallet.getTokenBalance(
-              telegramId,
-              tokenContext.tokenMint,
-              { createIfMissing: true }
-            );
-            userBalance =
-              tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
-          } catch (error) {
-            console.error("Error getting balance for slider:", error);
-          }
-        }
-
-        const precisionFactor = Math.pow(10, tokenContext.tokenDecimals);
-        const roundValue = (value: number) =>
-          Math.round(value * precisionFactor) / precisionFactor;
-        const minValue =
-          tokenContext.contractMinimum !== undefined
-            ? tokenContext.contractMinimum
-            : (await getContractMinimumAmount(
-                tokenContext.tokenMint,
-                tokenContext.tokenDecimals
-              )).formatted;
+        const { userBalance, contractMinimum: minValue, roundValue } =
+          await prepareSliderContext({
+            session,
+            tokenContext,
+            telegramId,
+          });
         const validAmount = roundValue(
           Math.max(
             minValue,
@@ -5113,10 +5133,10 @@ bot.callbackQuery(
                 tokenContext.tokenDecimals
               );
 
-        let tokenPriceUSD = await getPriceUSD(tokenContext.tokenMint);
-        if (!tokenPriceUSD) {
-          tokenPriceUSD = await getPriceUSD(tokenContext.tokenTicker);
-        }
+        const tokenPriceUSD = await fetchTokenPriceUSD({
+          tokenMint: tokenContext.tokenMint,
+          tokenTicker: tokenContext.tokenTicker,
+        });
 
         const suggestedAmounts = getSuggestedStakeAmounts(
           contractMin,
