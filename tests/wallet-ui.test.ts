@@ -4,19 +4,51 @@ import { INPUT_TIMEOUT_HINT } from "../src/utils/constants";
 import { getUserState, __test_clearUserState } from "../src/utils/user-state";
 
 type EditCall = { text: string; options: any };
+type ReplyCall = { text: string; options: any; message_id: number };
 
-const createMockContext = (edits: EditCall[], overrides: Record<string, any> = {}) => {
-  const baseCtx = {
-    callbackQuery: { message: { message_id: 321 } },
-    chat: { id: 654 },
-    editMessageText: (text: string, options: any) => {
+type CreateMockContextOptions = {
+  overrides?: Record<string, any>;
+  replyCalls?: ReplyCall[];
+  editError?: Error;
+  replyChatId?: number;
+};
+
+const createMockContext = (
+  edits: EditCall[],
+  options: CreateMockContextOptions = {}
+) => {
+  const { overrides = {}, replyCalls, editError, replyChatId } = options;
+  const { callbackQuery: overrideCallbackQuery, chat: overrideChat, ...restOverrides } =
+    overrides;
+
+  let nextMessageId = 10_000;
+
+  const ctx: any = {
+    callbackQuery: overrideCallbackQuery ?? { message: { message_id: 321 } },
+    chat: overrideChat ?? { id: 654 },
+    editMessageText: async (text: string, options: any) => {
       edits.push({ text, options });
-      return Promise.resolve();
+      if (editError) {
+        throw editError;
+      }
     },
-    reply: () => Promise.resolve(),
+    reply: async (text: string, options: any) => {
+      const message_id = nextMessageId++;
+      const chatId =
+        replyChatId ??
+        (typeof ctx.chat?.id === "number" ? ctx.chat.id : undefined);
+      const message = {
+        message_id,
+        chat: typeof chatId === "number" ? { id: chatId } : undefined,
+        text,
+        options,
+      };
+      replyCalls?.push({ text, options, message_id });
+      return message;
+    },
   };
 
-  return { ...baseCtx, ...overrides } as any;
+  return Object.assign(ctx, restOverrides);
 };
 
 const expectSingleEdit = (edits: EditCall[]): EditCall => {
@@ -116,8 +148,10 @@ test("showCustomAmountPrompt formats send custom amount flow", async () => {
 test("showCustomAmountPrompt formats sell custom amount flow", async () => {
   const edits: EditCall[] = [];
   const ctx = createMockContext(edits, {
-    callbackQuery: { message: { message_id: 111 } },
-    chat: { id: 222 },
+    overrides: {
+      callbackQuery: { message: { message_id: 111 } },
+      chat: { id: 222 },
+    },
   });
 
   await showCustomAmountPrompt({
@@ -154,8 +188,10 @@ test("showCustomAmountPrompt formats sell custom amount flow", async () => {
 test("showCustomAmountPrompt formats buy custom amount flow", async () => {
   const edits: EditCall[] = [];
   const ctx = createMockContext(edits, {
-    callbackQuery: { message: { message_id: 777 } },
-    chat: { id: 888 },
+    overrides: {
+      callbackQuery: { message: { message_id: 777 } },
+      chat: { id: 888 },
+    },
   });
 
   await showCustomAmountPrompt({
@@ -200,4 +236,43 @@ test("showCustomAmountPrompt formats buy custom amount flow", async () => {
   expect(state?.contractAddress).toBe("Abc123");
   expect(state?.messageId).toBe(777);
   expect(state?.chatId).toBe(888);
+});
+
+test("showCustomAmountPrompt stores fallback reply identifiers when edit fails", async () => {
+  const edits: EditCall[] = [];
+  const replies: ReplyCall[] = [];
+  const ctx = createMockContext(edits, {
+    editError: new Error("Bad Request: there is no text in the message to edit"),
+    replyCalls: replies,
+    replyChatId: 9_001,
+    overrides: {
+      callbackQuery: { message: { message_id: 654321 } },
+      chat: { id: 8_765 },
+    },
+  });
+
+  await showCustomAmountPrompt({
+    ctx,
+    userId: "send-user",
+    title: "✏️ <b>CUSTOM AMOUNT - SOL</b>",
+    instructions: ["Please send a message with the amount you want to send."],
+    cancelCallback: "send_select_SOL",
+    state: { type: "send_custom_amount", token: "SOL" },
+  });
+
+  expect(edits.length).toBe(1);
+  expect(replies.length).toBe(1);
+
+  const reply = replies[0];
+  expect(reply).toBeDefined();
+  expect(reply?.text).toContain("✏️ <b>CUSTOM AMOUNT - SOL</b>");
+  expect(reply?.options.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data).toBe(
+    "send_select_SOL"
+  );
+
+  const state = getUserState("send-user", false);
+  expect(state?.type).toBe("send_custom_amount");
+  expect(reply).toBeDefined();
+  expect(state?.messageId).toBe(reply?.message_id);
+  expect(state?.chatId).toBe(9_001);
 });
