@@ -86,6 +86,7 @@ import {
   createMessageEditAdapter,
   handleCallbackErrorSafe,
   safeAnswerCallbackQuery,
+  respondMissingIdentity,
   requireTelegramId,
   getRequiredTelegramIdForContext,
 } from "./utils/context-helpers";
@@ -100,7 +101,11 @@ import {
   SELL_NOOP_CALLBACK,
 } from "./utils/trade-ui";
 import { respondWithMenu } from "./utils/menu-response";
-import { parseDecimalAmount, evaluateTradeAmount } from "./utils/amount";
+import {
+  parseDecimalAmount,
+  presentTradeAmount,
+  type PresentedTradeAmountResult,
+} from "./utils/amount";
 import { handleCoinflipCommand, type CoinflipDeps } from "./handlers/game";
 import { isMessageMissing } from "./utils/telegram-errors";
 
@@ -342,7 +347,7 @@ const resolveSpendAmount = ({
   formatToken,
   applySolFeeBuffer = true,
 }: ResolveSpendAmountParams) => {
-  const evaluation = evaluateTradeAmount({
+  const presentation = presentTradeAmount({
     amount,
     assetTicker,
     decimals: inputDecimals,
@@ -358,18 +363,9 @@ const resolveSpendAmount = ({
     formatToken,
   });
 
-  const fallbackDisplay = () => {
-    if (assetTicker === "SOL") {
-      return formatSol(evaluation.rawAmount);
-    }
-
-    const decimals = tokenBalance?.decimals ?? inputDecimals;
-    return formatToken(evaluation.rawAmount, decimals);
-  };
-
   return {
-    rawAmount: evaluation.rawAmount,
-    displayAmount: evaluation.displayAmount ?? fallbackDisplay(),
+    rawAmount: presentation.rawAmount,
+    displayAmount: presentation.displayAmount,
   };
 };
 
@@ -393,7 +389,7 @@ const normalizeCustomTradeAmount = ({
   tokenBalance,
   decimals,
 }: NormalizeCustomTradeAmountOptions): NormalizeCustomTradeAmountResult => {
-  const evaluation = evaluateTradeAmount({
+  const presentation = presentTradeAmount({
     amount,
     assetTicker,
     decimals,
@@ -402,34 +398,110 @@ const normalizeCustomTradeAmount = ({
     applySolFeeBuffer: false,
   });
 
-  if (evaluation.kind === "max") {
-    return { normalizedAmount: "max", displayAmount: "max" };
-  }
+  return {
+    normalizedAmount: presentation.normalizedAmount,
+    displayAmount: presentation.displayAmount,
+  };
+};
 
-  if (evaluation.kind === "absolute") {
-    const normalized =
-      evaluation.normalizedAmount ??
-      formatAmount(evaluation.rawAmount, decimals, {
-        maxFractionDigits: decimals,
-        trim: true,
-      });
+type ProcessCustomTradeAmountParams = {
+  ctx: any;
+  userState: any;
+  amount: string;
+  assetTicker: string;
+  getWalletSnapshot: () => Promise<WalletCacheSnapshot>;
+  selectTokenBalance?: (snapshot: WalletCacheSnapshot) =>
+    | TokenBalanceLike
+    | undefined;
+  resolveDecimals: (
+    snapshot: WalletCacheSnapshot,
+    tokenBalance?: TokenBalanceLike
+  ) => Promise<number> | number;
+  onSuccess: (args: {
+    normalizedAmount: string;
+    displayAmount: string;
+    walletCtx: any;
+    snapshot: WalletCacheSnapshot;
+    presentation: PresentedTradeAmountResult;
+  }) => Promise<void>;
+  buildErrorMessage: (error: Error) => string[];
+  buildRetryState: () => Record<string, unknown>;
+  cancelCallbackData: string;
+  logLabel: string;
+};
 
-    return { normalizedAmount: normalized, displayAmount: normalized };
-  }
+const processCustomTradeAmount = async ({
+  ctx,
+  userState,
+  amount,
+  assetTicker,
+  getWalletSnapshot,
+  selectTokenBalance,
+  resolveDecimals,
+  onSuccess,
+  buildErrorMessage,
+  buildRetryState,
+  cancelCallbackData,
+  logLabel,
+}: ProcessCustomTradeAmountParams) => {
+  try {
+    const snapshot = await getWalletSnapshot();
+    const tokenBalance = selectTokenBalance
+      ? selectTokenBalance(snapshot)
+      : undefined;
 
-  const decimalsForFormat =
-    assetTicker === "SOL"
-      ? decimals
-      : tokenBalance?.decimals ?? decimals;
+    const decimals = await resolveDecimals(snapshot, tokenBalance);
 
-  const formatted =
-    evaluation.normalizedAmount ??
-    formatAmount(evaluation.rawAmount, decimalsForFormat, {
-      maxFractionDigits: decimalsForFormat,
-      trim: true,
+    const presentation = presentTradeAmount({
+      amount,
+      assetTicker,
+      decimals,
+      solBalance: snapshot.solBalance,
+      tokenBalance,
+      applySolFeeBuffer: false,
     });
 
-  return { normalizedAmount: formatted, displayAmount: formatted };
+    console.log(
+      `${logLabel}: ${presentation.displayAmount} ${assetTicker}`
+    );
+
+    const walletCtx = createMessageEditAdapter(
+      ctx,
+      userState.messageId,
+      userState.chatId ?? ctx.chat?.id
+    );
+
+    await onSuccess({
+      normalizedAmount: presentation.normalizedAmount,
+      displayAmount: presentation.displayAmount,
+      walletCtx,
+      snapshot,
+      presentation,
+    });
+  } catch (error) {
+    console.error(`${logLabel} error:`, error);
+
+    const errorMessage = buildErrorMessage(error as Error);
+
+    try {
+      await ctx.api.editMessageText(
+        ctx.chat.id,
+        userState.messageId,
+        errorMessage.join("\n"),
+        {
+          parse_mode: "HTML",
+          reply_markup: new InlineKeyboard()
+            .text("❌ Cancel", cancelCallbackData)
+            .row(),
+        }
+      );
+    } catch (editError) {
+      console.error(`${logLabel} failed to show error:`, editError);
+    }
+
+    const retryState = buildRetryState();
+    setUserState(getTelegramId(ctx).toString(), retryState);
+  }
 };
 
 type SwapQuoteWithDecimals = SwapQuote & {
@@ -3512,7 +3584,7 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
     "swap confirmation"
   );
   if (telegramId == null) {
-    await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+    await respondMissingIdentity(ctx);
     return;
   }
 
@@ -3584,124 +3656,61 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
 
     // Auto-register tokens if they're not already known
     try {
-      // Import SwapManager to access pumpFunClient
       const { pumpFunClient } = swapManager as any;
+      const isPumpFunSwap = swapData.quote.provider === "pump-fun";
 
-      // Register input token if not known
-      const inputTokenMint = swapData.fromTokenInfo.token_mint;
-      let inputTokenTicker = swapData.fromToken.toUpperCase();
-
-      if (inputTokenTicker !== "SOL") {
-        const existingInputToken =
-          tokenManager.getKnownTokenByMint(inputTokenMint);
-        if (!existingInputToken) {
-          // Try to get real metadata for pump.fun tokens
-          if (swapData.quote.provider === "pump-fun" && pumpFunClient) {
-            try {
-              const metadata = await pumpFunClient.getTokenMetadata(
-                inputTokenMint
-              );
-              if (metadata && metadata.symbol) {
-                inputTokenTicker = metadata.symbol.toUpperCase();
-                console.log(
-                  `🔍 Got pump.fun metadata for input token: ${inputTokenTicker}`
-                );
-              }
-            } catch (metadataError) {
-              console.log(
-                `⚠️ Could not fetch pump.fun metadata for input token ${inputTokenMint}:`,
-                (metadataError as Error).message
-              );
-            }
+      const buildPumpFunResolver = (mint: string, role: "input" | "output") =>
+        async () => {
+          if (!isPumpFunSwap || !pumpFunClient) {
+            return null;
           }
 
-          console.log(
-            `🔄 Auto-registering input token from swap: ${inputTokenTicker} (${inputTokenMint})`
-          );
           try {
-            const registered = await tokenManager.addToken(
-              inputTokenMint,
-              inputTokenTicker
-            );
-            if (registered) {
+            const metadata = await pumpFunClient.getTokenMetadata(mint);
+            if (metadata?.symbol) {
+              const upper = metadata.symbol.toUpperCase();
               console.log(
-                `✅ Successfully auto-registered input token: ${inputTokenTicker}`
+                `🔍 Got pump.fun metadata for ${role} token: ${upper}`
               );
-            } else {
-              console.log(
-                `❌ Failed to auto-register input token: ${inputTokenTicker} (${inputTokenMint})`
-              );
+              return { symbol: upper };
             }
-          } catch (regError) {
-            console.error(
-              `❌ Error auto-registering input token ${inputTokenTicker}:`,
-              regError
+            return metadata;
+          } catch (metadataError) {
+            console.log(
+              `⚠️ Could not fetch pump.fun metadata for ${role} token ${mint}:`,
+              (metadataError as Error).message
             );
+            return null;
           }
-        } else {
-          console.log(
-            `✅ Input token already registered: ${existingInputToken.token_ticker} (${inputTokenMint})`
-          );
+        };
+
+      const registerSwapToken = async (
+        role: "input" | "output",
+        mint: string,
+        ticker: string
+      ) => {
+        if (ticker.toUpperCase() === "SOL") {
+          return;
         }
-      }
 
-      // Register output token if not known
-      const outputTokenMint = swapData.toTokenInfo.token_mint;
-      let outputTokenTicker = swapData.toToken.toUpperCase();
+        await tokenManager.registerTokenIfNeeded({
+          mint,
+          tickerHint: ticker,
+          source: `swap:auto:${role}`,
+          metadataResolvers: [buildPumpFunResolver(mint, role)],
+        });
+      };
 
-      if (outputTokenTicker !== "SOL") {
-        const existingOutputToken =
-          tokenManager.getKnownTokenByMint(outputTokenMint);
-        if (!existingOutputToken) {
-          // Try to get real metadata for pump.fun tokens
-          if (swapData.quote.provider === "pump-fun" && pumpFunClient) {
-            try {
-              const metadata = await pumpFunClient.getTokenMetadata(
-                outputTokenMint
-              );
-              if (metadata && metadata.symbol) {
-                outputTokenTicker = metadata.symbol.toUpperCase();
-                console.log(
-                  `🔍 Got pump.fun metadata for output token: ${outputTokenTicker}`
-                );
-              }
-            } catch (metadataError) {
-              console.log(
-                `⚠️ Could not fetch pump.fun metadata for output token ${outputTokenMint}:`,
-                (metadataError as Error).message
-              );
-            }
-          }
-
-          console.log(
-            `🔄 Auto-registering output token from swap: ${outputTokenTicker} (${outputTokenMint})`
-          );
-          try {
-            const registered = await tokenManager.addToken(
-              outputTokenMint,
-              outputTokenTicker
-            );
-            if (registered) {
-              console.log(
-                `✅ Successfully auto-registered output token: ${outputTokenTicker}`
-              );
-            } else {
-              console.log(
-                `❌ Failed to auto-register output token: ${outputTokenTicker} (${outputTokenMint})`
-              );
-            }
-          } catch (regError) {
-            console.error(
-              `❌ Error auto-registering output token ${outputTokenTicker}:`,
-              regError
-            );
-          }
-        } else {
-          console.log(
-            `✅ Output token already registered: ${existingOutputToken.token_ticker} (${outputTokenMint})`
-          );
-        }
-      }
+      await registerSwapToken(
+        "input",
+        swapData.fromTokenInfo.token_mint,
+        swapData.fromToken.toUpperCase()
+      );
+      await registerSwapToken(
+        "output",
+        swapData.toTokenInfo.token_mint,
+        swapData.toToken.toUpperCase()
+      );
     } catch (error) {
       console.warn("Failed to auto-register tokens:", error);
       // Don't fail the swap if auto-registration fails
@@ -5707,7 +5716,7 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
       "show private key"
     );
     if (telegramId == null) {
-      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      await respondMissingIdentity(ctx);
       return;
     }
     const keypair = wallet.getKeyPair(telegramId);
@@ -5808,7 +5817,7 @@ bot.callbackQuery("cmd_unwrap", async (ctx) => {
       "unwrap menu"
     );
     if (telegramId == null) {
-      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      await respondMissingIdentity(ctx);
       return;
     }
     const balances = await getCachedWalletData(telegramId);
@@ -5938,7 +5947,7 @@ bot.on("callback_query", async (ctx, next) => {
       "wrap amount selection"
     );
     if (telegramId == null) {
-      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      await respondMissingIdentity(ctx);
       return;
     }
     const { nativeSolBalance, wsolBalance } = await getCachedWalletData(telegramId);
@@ -6010,7 +6019,7 @@ bot.callbackQuery("unwrap_confirm", async (ctx) => {
       "unwrap confirmation"
     );
     if (telegramId == null) {
-      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      await respondMissingIdentity(ctx);
       return;
     }
     const { wsolBalance } = await getCachedWalletData(telegramId);
@@ -6308,7 +6317,7 @@ bot.callbackQuery(/^confirm_wrap_/, async (ctx) => {
       "wrap confirmation"
     );
     if (telegramId == null) {
-      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      await respondMissingIdentity(ctx);
       return;
     }
 
@@ -6849,7 +6858,7 @@ bot.on("callback_query", async (ctx, next) => {
       "send amount selection"
     );
     if (telegramId == null) {
-      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      await respondMissingIdentity(ctx);
       return;
     }
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
@@ -7159,7 +7168,7 @@ bot.callbackQuery("cmd_buy", async (ctx) => {
       "buy menu"
     );
     if (telegramId == null) {
-      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      await respondMissingIdentity(ctx);
       return;
     }
     const overview = await getWalletOverview(telegramId);
@@ -7231,7 +7240,7 @@ bot.callbackQuery("cmd_sell", async (ctx) => {
       "sell menu"
     );
     if (telegramId == null) {
-      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      await respondMissingIdentity(ctx);
       return;
     }
 
@@ -7489,7 +7498,7 @@ bot.on("callback_query", async (ctx, next) => {
       "sell amount selection"
     );
     if (telegramId == null) {
-      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      await respondMissingIdentity(ctx);
       return;
     }
 
@@ -7598,7 +7607,7 @@ bot.on("callback_query", async (ctx, next) => {
       "sell confirmation"
     );
     if (telegramId == null) {
-      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      await respondMissingIdentity(ctx);
       return;
     }
     const userKeypair = wallet.getKeyPair(telegramId);
@@ -7994,7 +8003,7 @@ bot.on("callback_query", async (ctx, next) => {
       "buy confirmation"
     );
     if (telegramId == null) {
-      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      await respondMissingIdentity(ctx);
       return;
     }
     const userKeypair = wallet.getKeyPair(telegramId);
@@ -8313,7 +8322,7 @@ bot.on("callback_query", async (ctx, next) => {
       "swap menu from token"
     );
     if (telegramId == null) {
-      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      await respondMissingIdentity(ctx);
       return;
     }
     const keypair = wallet.getKeyPair(telegramId);
@@ -8494,7 +8503,7 @@ bot.on("callback_query", async (ctx, next) => {
       "swap amount selection"
     );
     if (telegramId == null) {
-      await safeAnswerCallbackQuery(ctx, "❌ Unable to resolve Telegram identity");
+      await respondMissingIdentity(ctx);
       return;
     }
     await showSwapQuoteAndConfirmation(
@@ -9719,60 +9728,58 @@ const handleBuyCustomAmountInput = async (
   const targetToken = userState.targetToken;
   const contractAddress = userState.contractAddress;
   const telegramId = requireTelegramId(ctx, "buy custom amount");
-
-  console.log(`📝 Custom amount debug:`, {
+  await processCustomTradeAmount({
+    ctx,
+    userState,
     amount,
-    paymentToken,
-    targetToken,
-    contractAddress,
-  });
-
-  try {
-    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-    const balanceEntry =
+    assetTicker: paymentToken,
+    getWalletSnapshot: () => getCachedWalletData(telegramId),
+    selectTokenBalance:
       paymentToken === "SOL"
         ? undefined
-        : tokenBalances.find((t) => t.ticker === paymentToken);
+        : (snapshot) => {
+            const entry = snapshot.tokenBalances.find(
+              (t) => t.ticker === paymentToken
+            );
+            return entry
+              ? { balance: entry.balance, decimals: entry.decimals }
+              : undefined;
+          },
+    resolveDecimals: async (_, tokenBalance) => {
+      if (paymentToken === "SOL") {
+        return 9;
+      }
 
-    const normalized = normalizeCustomTradeAmount({
-      amount,
-      assetTicker: paymentToken,
-      solBalance,
-      tokenBalance: balanceEntry
-        ? { balance: balanceEntry.balance, decimals: balanceEntry.decimals }
-        : undefined,
-      decimals: paymentToken === "SOL" ? 9 : balanceEntry?.decimals ?? 0,
-    });
+      if (tokenBalance) {
+        return tokenBalance.decimals;
+      }
 
-    console.log(
-      `💰 Custom BUY amount received: ${normalized.displayAmount} ${paymentToken} → ${targetToken}`
-    );
+      const mint = tokenManager.resolveMintForTicker(paymentToken);
+      if (!mint) {
+        throw new Error(`Unsupported payment token: ${paymentToken}`);
+      }
 
-    const walletCtx = createMessageEditAdapter(
-      ctx,
-      userState.messageId,
-      userState.chatId ?? ctx.chat?.id
-    );
-
-    await runBuyTradeQuote({
-      ctx: walletCtx,
-      paymentToken,
-      targetToken,
-      amount: normalized.normalizedAmount,
-      contractAddress,
-      telegramIdOverride: telegramId,
-    });
-  } catch (error: any) {
-    console.error("Error processing custom buy amount:", error);
-
-    const errorMessage = [
+      const metadata = await wallet.getTokenMetadata(mint);
+      return metadata.decimals;
+    },
+    onSuccess: async ({ normalizedAmount, walletCtx }) => {
+      await runBuyTradeQuote({
+        ctx: walletCtx,
+        paymentToken,
+        targetToken,
+        amount: normalizedAmount,
+        contractAddress,
+        telegramIdOverride: telegramId,
+      });
+    },
+    buildErrorMessage: (error) => [
       "❌ <b>Invalid Amount</b>",
       "",
       `<b>Payment Token:</b> ${paymentToken}`,
       `<b>Target Token:</b> ${targetToken}`,
       `<b>Amount:</b> ${amount}`,
       "",
-      `<b>Error:</b> ${(error as Error).message}`,
+      `<b>Error:</b> ${error.message}`,
       "",
       "Please enter a valid amount:",
       "",
@@ -9783,28 +9790,16 @@ const handleBuyCustomAmountInput = async (
       `• <code>max</code> (spend all available ${paymentToken})`,
       "",
       INPUT_TIMEOUT_HINT,
-    ];
-
-    await ctx.api.editMessageText(
-      ctx.chat.id,
-      userState.messageId,
-      errorMessage.join("\n"),
-      {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard()
-          .text("❌ Cancel", "cmd_buy")
-          .row(),
-      }
-    );
-
-    // Keep the same state for retry
-    setUserState(getTelegramId(ctx).toString(), {
+    ],
+    buildRetryState: () => ({
       type: "buy_custom_amount",
-      paymentToken: paymentToken,
-      targetToken: targetToken,
+      paymentToken,
+      targetToken,
       messageId: userState.messageId,
-    });
-  }
+    }),
+    cancelCallbackData: "cmd_buy",
+    logLabel: `💰 Custom BUY amount received (${paymentToken} → ${targetToken})`,
+  });
 };
 
 export const __test_handleBuyCustomAmountInput = handleBuyCustomAmountInput;
@@ -9822,47 +9817,36 @@ const handleSellCustomAmountInput = async (
 ) => {
   const tokenToSell = userState.tokenToSell;
   const telegramId = requireTelegramId(ctx, "sell custom amount");
-
-  try {
-    const { tokenBalances, solBalance } = await getCachedWalletData(telegramId);
-    const tokenBalance = tokenBalances.find((t) => t.ticker === tokenToSell);
-
-    const normalized = normalizeCustomTradeAmount({
-      amount,
-      assetTicker: tokenToSell,
-      solBalance,
-      tokenBalance: tokenBalance
-        ? { balance: tokenBalance.balance, decimals: tokenBalance.decimals }
-        : undefined,
-      decimals: tokenBalance?.decimals ?? 0,
-    });
-
-    console.log(
-      `🔴 Custom SELL amount received: ${normalized.displayAmount} ${tokenToSell}`
-    );
-
-    const walletCtx = createMessageEditAdapter(
-      ctx,
-      userState.messageId,
-      userState.chatId ?? ctx.chat?.id
-    );
-
-    await runSellTradeQuote({
-      ctx: walletCtx,
-      tokenToSell,
-      amount: normalized.normalizedAmount,
-      telegramId,
-    });
-  } catch (error: any) {
-    console.error("Error processing custom sell amount:", error);
-
-    const errorMessage = [
+  await processCustomTradeAmount({
+    ctx,
+    userState,
+    amount,
+    assetTicker: tokenToSell,
+    getWalletSnapshot: () => getCachedWalletData(telegramId),
+    selectTokenBalance: (snapshot) => {
+      const entry = snapshot.tokenBalances.find(
+        (t) => t.ticker === tokenToSell
+      );
+      return entry
+        ? { balance: entry.balance, decimals: entry.decimals }
+        : undefined;
+    },
+    resolveDecimals: (_, tokenBalance) => tokenBalance?.decimals ?? 0,
+    onSuccess: async ({ normalizedAmount, walletCtx }) => {
+      await runSellTradeQuote({
+        ctx: walletCtx,
+        tokenToSell,
+        amount: normalizedAmount,
+        telegramId,
+      });
+    },
+    buildErrorMessage: (error) => [
       "❌ <b>Invalid Amount</b>",
       "",
       `<b>Token:</b> ${tokenToSell}`,
       `<b>Amount:</b> ${amount}`,
       "",
-      `<b>Error:</b> ${(error as Error).message}`,
+      `<b>Error:</b> ${error.message}`,
       "",
       "Please enter a valid amount:",
       "",
@@ -9872,25 +9856,15 @@ const handleSellCustomAmountInput = async (
       `• <code>max</code> (sell all ${tokenToSell})`,
       "",
       INPUT_TIMEOUT_HINT,
-    ];
-
-    await ctx.api.editMessageText(
-      ctx.chat.id,
-      userState.messageId,
-      errorMessage.join("\n"),
-      {
-        parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("❌ Cancel", "cmd_sell").row(),
-      }
-    );
-
-    // Keep the same state for retry
-    setUserState(getTelegramId(ctx).toString(), {
+    ],
+    buildRetryState: () => ({
       type: "sell_custom_amount",
-      tokenToSell: tokenToSell,
+      tokenToSell,
       messageId: userState.messageId,
-    });
-  }
+    }),
+    cancelCallbackData: "cmd_sell",
+    logLabel: `🔴 Custom SELL amount received (${tokenToSell})`,
+  });
 };
 
 // ================================
@@ -10404,43 +10378,59 @@ setupAnchor()
     // ================================
     // TEMPORARY: VIDEO/GIF ID GETTER (Private chats only)
     // ================================
-    bot.on("message:video", async (ctx) => {
-      if (ctx.chat?.type === "private") {
-        const fileId = ctx.message.video.file_id;
-        const fileName = ctx.message.video.file_name || "video";
-        const duration = ctx.message.video.duration || 0;
-        const width = ctx.message.video.width || 0;
-        const height = ctx.message.video.height || 0;
+    const logMediaDetails = (
+      label: string,
+      media: {
+        file_id: string;
+        file_name?: string | null;
+        duration?: number | null;
+        width?: number | null;
+        height?: number | null;
+      },
+      fallbackName: string
+    ) => {
+      const fileId = media.file_id;
+      const fileName = media.file_name || fallbackName;
+      const duration = media.duration || 0;
+      const width = media.width || 0;
+      const height = media.height || 0;
 
-        // Only log to console, don't reply to user
-        console.log(
-          `🎥 Video received:\n` +
+      console.log(
+        `${label} received:\n` +
           `   File ID: ${fileId}\n` +
           `   Name: ${fileName}\n` +
           `   Duration: ${duration}s\n` +
           `   Size: ${width}x${height}`
-        );
-      }
-    });
+      );
+    };
 
-    bot.on("message:animation", async (ctx) => {
-      if (ctx.chat?.type === "private") {
-        const fileId = ctx.message.animation.file_id;
-        const fileName = ctx.message.animation.file_name || "animation.gif";
-        const duration = ctx.message.animation.duration || 0;
-        const width = ctx.message.animation.width || 0;
-        const height = ctx.message.animation.height || 0;
+    const MEDIA_LOGGERS = [
+      {
+        kind: "video",
+        label: "🎥 Video",
+        fallbackName: "video",
+      },
+      {
+        kind: "animation",
+        label: "🎭 GIF/Animation",
+        fallbackName: "animation.gif",
+      },
+    ] as const;
 
-        // Only log to console, don't reply to user
-        console.log(
-          `🎭 GIF/Animation received:\n` +
-          `   File ID: ${fileId}\n` +
-          `   Name: ${fileName}\n` +
-          `   Duration: ${duration}s\n` +
-          `   Size: ${width}x${height}`
-        );
-      }
-    });
+    for (const { kind, label, fallbackName } of MEDIA_LOGGERS) {
+      bot.on(`message:${kind}` as const, async (ctx) => {
+        if (ctx.chat?.type !== "private") {
+          return;
+        }
+
+        const media = ctx.message[kind];
+        if (!media) {
+          return;
+        }
+
+        logMediaDetails(label, media, fallbackName);
+      });
+    }
 
     // Set up graceful shutdown
     const shutdown = async (signal: string) => {

@@ -77,6 +77,9 @@ export class MissingTelegramIdError extends Error {
 export const MISSING_TELEGRAM_ID_MESSAGE =
   "❌ Unable to resolve your Telegram identity. Please open a direct chat with the bot and try again.";
 
+const MISSING_TELEGRAM_ID_CALLBACK_MESSAGE =
+  "❌ Unable to resolve Telegram identity";
+
 type MissingTelegramIdHandler = (message: string) => Promise<void> | void;
 
 const notifyMissingTelegramId = async (
@@ -260,6 +263,17 @@ export const safeAnswerCallbackQuery = async (
 
     console.error("Failed to answer callback query:", error);
   }
+};
+
+export const respondMissingIdentity = async (
+  ctx: any,
+  options: { logMessage?: string } = {}
+): Promise<void> => {
+  if (options.logMessage) {
+    console.warn(options.logMessage);
+  }
+
+  await safeAnswerCallbackQuery(ctx, MISSING_TELEGRAM_ID_CALLBACK_MESSAGE);
 };
 
 /**
