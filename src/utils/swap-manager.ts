@@ -6,8 +6,12 @@ import {
   VersionedTransaction,
   SystemProgram,
 } from "@solana/web3.js";
-import { JupiterClient } from "./jupiter";
-import { PumpFunClient, validatePumpFunSwap } from "./pump-fun";
+import { JupiterClient, type JupiterQuoteResponse } from "./jupiter";
+import {
+  PumpFunClient,
+  validatePumpFunSwap,
+  type PumpFunQuote,
+} from "./pump-fun";
 import { NetworkDetector } from "./network-detector";
 import type { SolanaNetwork } from "./network-detector";
 import { WalletManager } from "./wallet";
@@ -26,9 +30,15 @@ export interface SwapQuote {
   outputAmount: string;
   estimatedRate: number;
   slippage: number;
-  provider: "jupiter" | "pump-fun";
+  provider: "jupiter" | "pump-fun" | "pump-fun+jupiter";
   priceImpact?: string;
   platformFee?: any;
+  composite?: {
+    intermediateMint: string;
+    intermediateAmount: string;
+    pumpQuote: PumpFunQuote;
+    jupiterQuote: JupiterQuoteResponse;
+  };
 }
 
 export interface SwapRequest {
@@ -182,6 +192,7 @@ export class SwapManager {
     probablyRawAmount: boolean;
   } {
     const trimmed = amount.trim();
+
     if (trimmed.length === 0) {
       return { decimalAmount: trimmed, probablyRawAmount: false };
     }
@@ -190,7 +201,7 @@ export class SwapManager {
       return { decimalAmount: trimmed, probablyRawAmount: false };
     }
 
-    if (!/^\d+$/.test(trimmed)) {
+    if (!/^[0-9]+$/.test(trimmed)) {
       return { decimalAmount: trimmed, probablyRawAmount: false };
     }
 
@@ -213,9 +224,7 @@ export class SwapManager {
         };
       }
 
-      const fractionalRaw = remainder
-        .toString()
-        .padStart(decimals, "0");
+      const fractionalRaw = remainder.toString().padStart(decimals, "0");
       const fractionalPart = fractionalRaw.replace(/0+$/, "");
       const leadingZeros = fractionalPart.match(/^0+/)?.[0].length ?? 0;
 
@@ -232,6 +241,72 @@ export class SwapManager {
     } catch {
       return { decimalAmount: trimmed, probablyRawAmount: false };
     }
+  }
+
+  private async buildPumpFunCompositeQuote(params: {
+    inputMint: string;
+    outputMint: string;
+    amountDecimal: string;
+    inputDecimals: number;
+    outputDecimals: number;
+    slippageBps: number;
+  }): Promise<SwapQuote> {
+    const {
+      inputMint,
+      outputMint,
+      amountDecimal,
+      inputDecimals,
+      outputDecimals,
+      slippageBps,
+    } = params;
+
+    console.log(
+      "   🔁 Building composite pump.fun → SOL → Jupiter quote"
+    );
+
+    const pumpQuote = await this.pumpFunClient.getQuote(
+      inputMint,
+      SOL_MINT,
+      amountDecimal,
+      inputDecimals,
+      SOL_DECIMALS,
+      slippageBps
+    );
+
+    const jupiterQuote = await this.jupiterClient.getQuote({
+      inputMint: SOL_MINT,
+      outputMint,
+      amount: pumpQuote.outputAmount,
+      slippageBps,
+    });
+
+    const estimatedRate = (() => {
+      const inputRaw = Number.parseFloat(amountDecimal);
+      const outputRaw = Number.parseFloat(jupiterQuote.outAmount) /
+        Math.pow(10, outputDecimals);
+      if (!Number.isFinite(inputRaw) || inputRaw === 0) {
+        return 0;
+      }
+      return outputRaw / inputRaw;
+    })();
+
+    return {
+      inputMint,
+      outputMint,
+      inputAmount: pumpQuote.inputAmount,
+      outputAmount: jupiterQuote.outAmount,
+      estimatedRate,
+      slippage: pumpQuote.slippage + jupiterQuote.slippageBps / 100,
+      provider: "pump-fun+jupiter",
+      priceImpact: jupiterQuote.priceImpactPct,
+      platformFee: jupiterQuote.platformFee ?? undefined,
+      composite: {
+        intermediateMint: SOL_MINT,
+        intermediateAmount: pumpQuote.outputAmount,
+        pumpQuote,
+        jupiterQuote,
+      },
+    };
   }
 
   /**
@@ -286,6 +361,20 @@ export class SwapManager {
       }
 
       if (!validation.valid) {
+        if (
+          validation.error?.includes("Pump.fun swaps must involve SOL") &&
+          outputMint !== SOL_MINT
+        ) {
+          return await this.buildPumpFunCompositeQuote({
+            inputMint,
+            outputMint,
+            amountDecimal: decimalAmount,
+            inputDecimals,
+            outputDecimals,
+            slippageBps,
+          });
+        }
+
         throw new Error(validation.error);
       }
 
@@ -396,6 +485,22 @@ export class SwapManager {
               provider: "pump-fun",
             };
           } else {
+            if (
+              validation.error?.includes(
+                "Pump.fun swaps must involve SOL"
+              ) &&
+              outputMint !== SOL_MINT
+            ) {
+              return await this.buildPumpFunCompositeQuote({
+                inputMint,
+                outputMint,
+                amountDecimal: decimalAmount,
+                inputDecimals,
+                outputDecimals,
+                slippageBps,
+              });
+            }
+
             console.log(
               `   ❌ Pump.fun validation failed: ${validation.error}`
             );
@@ -1043,6 +1148,114 @@ export class SwapManager {
     );
   }
 
+  async executeCompositePumpFunJupiterSwap(
+    request: SwapRequest,
+    quote: SwapQuote
+  ): Promise<{ pumpSignature: string; jupiterSignature: string }> {
+    if (quote.provider !== "pump-fun+jupiter") {
+      throw new Error("Composite swap quote is not available");
+    }
+
+    const composite = quote.composite;
+    if (!composite) {
+      throw new Error("Composite swap quote is not available");
+    }
+
+    const { userKeypair, slippageBps = 500, outputDecimals, outputTicker } =
+      request;
+
+    const setupInstructions = await this.createTokenAccountsIfNeeded(
+      userKeypair,
+      quote.inputMint,
+      quote.outputMint
+    );
+
+    if (setupInstructions.length > 0) {
+      console.log(
+        `Creating ${setupInstructions.length} token accounts before composite swap`
+      );
+      const setupSig = await this.wallet.sendTransaction(setupInstructions, [
+        userKeypair,
+      ]);
+      console.log(`Token accounts created: ${setupSig}`);
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
+    const preBalance = await this.connection.getBalance(
+      userKeypair.publicKey
+    );
+
+    const pumpSignature = await (async () => {
+      const pumpInstructions = await this.pumpFunClient.createSwapTransaction({
+        inputMint: composite.pumpQuote.inputMint,
+        outputMint: composite.pumpQuote.outputMint,
+        amount: composite.pumpQuote.inputAmount,
+        slippageBps,
+        userKeypair,
+      });
+
+      const signature = await this.wallet.sendTransaction(pumpInstructions, [
+        userKeypair,
+      ]);
+      console.log(`Pump.fun leg submitted: ${signature}`);
+      await this.wallet.confirmTransaction(signature);
+      return signature;
+    })();
+
+    const postBalance = await this.connection.getBalance(
+      userKeypair.publicKey
+    );
+
+    const expectedLamports = BigInt(composite.intermediateAmount);
+    let availableLamports = BigInt(Math.max(postBalance - preBalance, 0));
+
+    if (availableLamports === 0n) {
+      availableLamports = expectedLamports;
+    } else if (availableLamports > expectedLamports) {
+      availableLamports = expectedLamports;
+    }
+
+    const feeBuffer = 10_000n;
+    if (availableLamports <= feeBuffer) {
+      throw new Error(
+        "Pump.fun leg completed but not enough SOL available for Jupiter leg"
+      );
+    }
+
+    const jupiterInputLamports = availableLamports - feeBuffer;
+
+    console.log(
+      `Jupiter leg will use ${jupiterInputLamports.toString()} lamports (keeping ${feeBuffer.toString()} for fees)`
+    );
+
+    const jupiterQuote = await this.jupiterClient.getQuote({
+      inputMint: SOL_MINT,
+      outputMint: quote.outputMint,
+      amount: jupiterInputLamports.toString(),
+      slippageBps,
+    });
+
+    const swapResponse = await this.jupiterClient.getSwapTransaction({
+      userPublicKey: userKeypair.publicKey.toBase58(),
+      quoteResponse: jupiterQuote,
+    });
+
+    const jupiterSignature = await this.executeJupiterTransaction(
+      swapResponse.swapTransaction,
+      userKeypair
+    );
+
+    console.log(
+      `Jupiter leg submitted: ${jupiterSignature} (expected ~${formatAmount(
+        BigInt(jupiterQuote.outAmount),
+        outputDecimals,
+        { maxFractionDigits: Math.min(outputDecimals, 6), trim: true }
+      )} ${outputTicker.toUpperCase()})`
+    );
+
+    return { pumpSignature, jupiterSignature };
+  }
+
   /**
    * Format quote for display
    */
@@ -1091,6 +1304,56 @@ export class SwapManager {
           inputTicker,
           outputTicker
         );
+
+      case "pump-fun+jupiter": {
+        const composite = quote.composite;
+
+        const pumpDisplay = this.pumpFunClient.formatQuoteForDisplay(
+          {
+            inputMint: quote.composite?.pumpQuote.inputMint ?? quote.inputMint,
+            outputMint:
+              quote.composite?.pumpQuote.outputMint ?? SOL_MINT,
+            inputAmount: quote.composite?.pumpQuote.inputAmount ?? "0",
+            outputAmount: quote.composite?.pumpQuote.outputAmount ?? "0",
+            estimatedRate:
+              quote.composite?.pumpQuote.estimatedRate ?? quote.estimatedRate,
+            slippage: quote.composite?.pumpQuote.slippage ?? 0,
+            isGraduated: false,
+          },
+          inputDecimals,
+          SOL_DECIMALS,
+          inputTicker,
+          "SOL"
+        );
+
+        const jupiterDisplay = this.jupiterClient.formatQuoteForDisplay(
+          {
+            inputMint: SOL_MINT,
+            inAmount:
+              composite?.jupiterQuote?.inAmount ??
+              composite?.intermediateAmount ?? "0",
+            outputMint: quote.outputMint,
+            outAmount: quote.outputAmount,
+            otherAmountThreshold: "0",
+            swapMode: "ExactIn",
+            slippageBps:
+              composite?.jupiterQuote?.slippageBps ??
+              Math.round(quote.slippage * 100),
+            priceImpactPct:
+              composite?.jupiterQuote?.priceImpactPct ??
+              quote.priceImpact ?? "0",
+            routePlan: composite?.jupiterQuote?.routePlan ?? [],
+            totalTime: 0,
+            platformFee: quote.platformFee ?? null,
+          },
+          SOL_DECIMALS,
+          outputDecimals,
+          "SOL",
+          outputTicker
+        );
+
+        return [pumpDisplay, jupiterDisplay].join("\n\n");
+      }
 
       default:
         return `Unsupported provider: ${quote.provider}`;

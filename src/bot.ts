@@ -600,6 +600,8 @@ const formatTradeConfirmationSummary = ({
         return "Pump.fun (Not graduated)";
       case "jupiter":
         return "Jupiter";
+      case "pump-fun+jupiter":
+        return "Pump.fun → Jupiter";
       default:
         return quote.provider;
     }
@@ -5645,10 +5647,22 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
       }
 
       let txSignature: string;
+      let pumpFunSignature: string | null = null;
       const keypair = wallet.getKeyPair(BigInt(transaction.userId));
 
-      const inputDecimals = (quote as any).inputDecimals ?? 9;
-      const outputDecimals = (quote as any).outputDecimals ?? 9;
+      const rawInputDecimals =
+        (transaction as any).inputDecimals ?? (quote as any).inputDecimals;
+      const inferredInputDecimals = Number(rawInputDecimals);
+      const inputDecimals = Number.isFinite(inferredInputDecimals)
+        ? inferredInputDecimals
+        : 9;
+
+      const rawOutputDecimals =
+        (transaction as any).outputDecimals ?? (quote as any).outputDecimals;
+      const inferredOutputDecimals = Number(rawOutputDecimals);
+      const outputDecimals = Number.isFinite(inferredOutputDecimals)
+        ? inferredOutputDecimals
+        : 9;
 
       if (quote.provider === "jupiter") {
         // Use Jupiter execution method (same as original implementation)
@@ -5666,6 +5680,24 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
           },
           quote
         );
+      } else if (quote.provider === "pump-fun+jupiter") {
+        const result = await swapManager.executeCompositePumpFunJupiterSwap(
+          {
+            inputMint: quote.inputMint,
+            outputMint: quote.outputMint,
+            amount: quote.inputAmount,
+            slippageBps: 50,
+            userKeypair: keypair,
+            inputDecimals,
+            outputDecimals,
+            inputTicker: transaction.fromToken?.toUpperCase() || "UNKNOWN",
+            outputTicker: transaction.toToken?.toUpperCase() || "UNKNOWN",
+          },
+          quote
+        );
+        console.log(`Pump.fun leg signature: ${result.pumpSignature}`);
+        pumpFunSignature = result.pumpSignature;
+        txSignature = result.jupiterSignature;
       } else {
         // Use instruction-based approach for other providers
         const instructions = await swapManager.createSwapTransaction(
@@ -5691,17 +5723,53 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
       // Wait for confirmation
       await wallet.confirmTransaction(txSignature);
 
-      // Show success with real Solscan link
-      const { message: solscanLink } = buildTransactionLinkMessage({
+      const receivedDisplay = formatAmount(
+        quote.outputAmount ?? "0",
+        outputDecimals,
+        {
+          maxFractionDigits: Math.min(outputDecimals, 6),
+          trim: true,
+        }
+      );
+
+      const successLines = [
+        `✅ <b>SWAP COMPLETED</b>`,
+        "",
+        `Swapped ${transaction.amount} ${transaction.fromToken}`,
+        `Received ~${receivedDisplay} ${transaction.toToken}`,
+      ];
+
+      const linkLines: string[] = [];
+
+      if (pumpFunSignature) {
+        const { message: pumpLink } = buildTransactionLinkMessage({
+          signature: pumpFunSignature,
+          networkOverride: process.env["RPC_URL"],
+          label: "🔗 Pump.fun: ",
+          linkText: "View leg",
+          format: "html",
+        });
+        if (pumpLink) {
+          linkLines.push(pumpLink);
+        }
+      }
+
+      const { message: jupiterLink } = buildTransactionLinkMessage({
         signature: txSignature,
         networkOverride: process.env["RPC_URL"],
-        label: "🔗 ",
-        linkText: "View on Solscan",
+        label: pumpFunSignature ? "🔗 Jupiter: " : "🔗 ",
+        linkText: pumpFunSignature ? "View leg" : "View on Solscan",
         format: "html",
       });
-      const successText = solscanLink
-        ? `✅ <b>SWAP COMPLETED</b>\n\nSwapped ${transaction.amount} ${transaction.fromToken}\nReceived ~${quote.outputAmount} ${transaction.toToken}\n\n${solscanLink}`
-        : `✅ <b>SWAP COMPLETED</b>\n\nSwapped ${transaction.amount} ${transaction.fromToken}\nReceived ~${quote.outputAmount} ${transaction.toToken}`;
+      if (jupiterLink) {
+        linkLines.push(jupiterLink);
+      }
+
+      if (linkLines.length > 0) {
+        successLines.push("", ...linkLines);
+      }
+
+      const successText = successLines.join("\n");
       await respondWithMenu(ctx, {
         text: successText,
         parseMode: "HTML",
