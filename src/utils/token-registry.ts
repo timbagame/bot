@@ -2,7 +2,35 @@ import { NetworkDetector, type SolanaNetwork } from "./network-detector";
 
 export type TokenConfig = { mint: string; ticker: string };
 
+export type BuiltinTokenMetadata = TokenConfig & {
+  decimals: number;
+  isNativeSol?: boolean;
+};
+
 export const WSOL_MINT = "So11111111111111111111111111111111111111112";
+
+const BUILTIN_TOKEN_METADATA: BuiltinTokenMetadata[] = [
+  { mint: WSOL_MINT, ticker: "SOL", decimals: 9, isNativeSol: true },
+  { mint: WSOL_MINT, ticker: "WSOL", decimals: 9 },
+  {
+    mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    ticker: "USDC",
+    decimals: 6,
+  },
+];
+
+const BUILTIN_TOKEN_METADATA_BY_TICKER = new Map<string, BuiltinTokenMetadata>();
+const BUILTIN_TOKEN_METADATA_BY_MINT = new Map<string, BuiltinTokenMetadata>();
+
+for (const token of BUILTIN_TOKEN_METADATA) {
+  const tickerKey = token.ticker.trim().toUpperCase();
+  BUILTIN_TOKEN_METADATA_BY_TICKER.set(tickerKey, token);
+
+  const existingByMint = BUILTIN_TOKEN_METADATA_BY_MINT.get(token.mint);
+  if (!existingByMint || token.isNativeSol) {
+    BUILTIN_TOKEN_METADATA_BY_MINT.set(token.mint, token);
+  }
+}
 
 const TIMBA_MAINNET_TOKEN: TokenConfig = {
   mint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
@@ -12,7 +40,10 @@ const TIMBA_MAINNET_TOKEN: TokenConfig = {
 const REGISTERED_TOKENS: TokenConfig[] = [
   TIMBA_MAINNET_TOKEN,
   { mint: WSOL_MINT, ticker: "WSOL" },
-  { mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", ticker: "USDC" },
+  {
+    mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    ticker: "USDC",
+  },
   { mint: "A6rSPi9JmJgVkW6BatsA6MjFYLseizPM2Fnt92coFjf4", ticker: "MAGAIBA" },
   { mint: "FkBF9u1upwEMUPxnXjcydxxVSxgr8f3k1YXbz7G7bmtA", ticker: "GLORP" },
   { mint: "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC", ticker: "AI16Z" },
@@ -87,6 +118,24 @@ export function buildTokenList(options: TokenRegistryOptions = {}): TokenConfig[
 
 export function getSupportedTokens(options: TokenRegistryOptions = {}): TokenConfig[] {
   return buildTokenList(options);
+}
+
+export function getBuiltinTokenMetadata(): BuiltinTokenMetadata[] {
+  return [...BUILTIN_TOKEN_METADATA];
+}
+
+export function getBuiltinTokenMetadataByTicker(
+  ticker: string
+): BuiltinTokenMetadata | undefined {
+  if (!ticker) return undefined;
+  return BUILTIN_TOKEN_METADATA_BY_TICKER.get(ticker.trim().toUpperCase());
+}
+
+export function getBuiltinTokenMetadataByMint(
+  mint: string
+): BuiltinTokenMetadata | undefined {
+  if (!mint) return undefined;
+  return BUILTIN_TOKEN_METADATA_BY_MINT.get(mint.trim());
 }
 
 function normalizeTicker(ticker: string): string {

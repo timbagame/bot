@@ -10,6 +10,7 @@ import {
   SolanaJSONRPCError,
   SystemProgram,
   SendTransactionError,
+  type SendOptions,
 } from "@solana/web3.js";
 import {
   getAssociatedTokenAddress,
@@ -1315,12 +1316,10 @@ export class WalletManager {
 
     let signature: string;
     try {
-      signature = await retryWithBackoff(async () => {
-        return await this.connection.sendTransaction(tx, {
-          skipPreflight: false,
-          preflightCommitment: "confirmed",
-          maxRetries: 3,
-        });
+      signature = await this.sendVersionedTransactionWithRetry(tx, {
+        skipPreflight: false,
+        preflightCommitment: "confirmed",
+        maxRetries: 3,
       });
     } catch (error: any) {
       if (error instanceof SendTransactionError) {
@@ -1388,12 +1387,10 @@ export class WalletManager {
       tx.sign([signer]);
 
       // Send the transaction with more permissive settings for Jupiter transactions
-      const signature = await retryWithBackoff(async () => {
-        return await this.connection.sendTransaction(tx, {
-          skipPreflight: true, // Skip preflight for complex Jupiter transactions
-          preflightCommitment: "processed",
-          maxRetries: 5,
-        });
+      const signature = await this.sendVersionedTransactionWithRetry(tx, {
+        skipPreflight: true, // Skip preflight for complex Jupiter transactions
+        preflightCommitment: "processed",
+        maxRetries: 5,
       });
 
       console.log(
@@ -1416,6 +1413,25 @@ export class WalletManager {
 
       throw new Error(`Failed to send transaction: ${error.message}`);
     }
+  }
+
+  private async sendVersionedTransactionWithRetry(
+    tx: VersionedTransaction,
+    options: (SendOptions & { retryAttempts?: number }) = {}
+  ): Promise<string> {
+    const { retryAttempts, ...sendOptionsInput } = options;
+    const sendOptions: SendOptions = {
+      skipPreflight: sendOptionsInput.skipPreflight ?? false,
+      preflightCommitment: sendOptionsInput.preflightCommitment ?? "confirmed",
+      maxRetries: sendOptionsInput.maxRetries ?? 3,
+      minContextSlot: sendOptionsInput.minContextSlot,
+    };
+
+    const attempts = retryAttempts ?? MAX_RETRIES;
+
+    return await retryWithBackoff(async () => {
+      return await this.connection.sendTransaction(tx, sendOptions);
+    }, attempts);
   }
 
   // ================================

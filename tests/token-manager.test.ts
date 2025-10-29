@@ -121,7 +121,7 @@ test("parseAmount treats valid mint strings as explicit tokens even when unknown
   }
   const data = res.data;
   expect(data.tokenMint).toBe(mint);
-  expect(data.tokenTicker).toBe(mint);
+  expect(data.tokenTicker).toBe("DISC");
   expect(data.tokenWasSpecified).toBe(true);
 });
 
@@ -155,6 +155,81 @@ test("resolveSwapToken auto-discovers and registers unknown mints", async () => 
   const stored = tm.getKnownTokenByMint(mint);
   expect(stored).not.toBeNull();
   expect(stored?.token_ticker).toBe("DISC");
+});
+
+test("parseAmount fails when explicit mint metadata cannot be fetched", async () => {
+  const explicitMint = Keypair.generate().publicKey.toBase58();
+  const wallet = makeWalletStub();
+  const metadataCalls: string[] = [];
+
+  wallet.getTokenMetadata = async (mint: string) => {
+    metadataCalls.push(mint);
+    if (mint === explicitMint) {
+      throw new Error("missing metadata");
+    }
+    return { decimals: 6 };
+  };
+
+  wallet.getFullTokenMetadata = async (mint: string) => {
+    if (mint === explicitMint) {
+      return null;
+    }
+    return {
+      decimals: 6,
+      symbol: "DISC",
+      name: `Token ${mint.slice(0, 4).toUpperCase()}`,
+    };
+  };
+
+  const tm = TokenManager.getInstance(wallet, "DEFAULT_MINT", "DEF");
+  const res = await tm.parseAmount(["/cf", "5", explicitMint], 1, 9, "game");
+
+  expect(res.success).toBe(false);
+  if (res.success) {
+    throw new Error("expected explicit mint failure");
+  }
+  expect(res.error).toBe("invalid_amount");
+  expect(metadataCalls).toEqual([explicitMint]);
+});
+
+test("parseAmount ignores numeric trailing arguments when resolving tokens", async () => {
+  const tm = TokenManager.getInstance(makeWalletStub(), "DEFAULT_MINT", "DEF");
+  const res = await tm.parseAmount(["/cf", "10", "5"], 1, 22, "game");
+
+  if (!res.success) {
+    throw new Error(`expected success, got ${res.error}`);
+  }
+
+  const data = res.data;
+  expect(data.tokenMint).toBe("DEFAULT_MINT");
+  expect(data.tokenWasSpecified).toBe(false);
+  expect(data.requestedNativeSol).toBe(false);
+});
+
+test("parseAmount preserves explicit WSOL mint without switching to SOL", async () => {
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const res = await tm.parseAmount(["/tip", "1", WSOL_MINT], 1, 11, "tip");
+
+  if (!res.success) {
+    throw new Error(`expected success, got ${res.error}`);
+  }
+
+  const data = res.data;
+  expect(data.isSol).toBe(false);
+  expect(data.tokenMint).toBe(WSOL_MINT);
+  expect(data.tokenTicker).toBe("WSOL");
+  expect(data.tokenWasSpecified).toBe(true);
+  expect(data.requestedNativeSol).toBe(false);
+});
+
+test("resolveSwapToken treats explicit WSOL mint as SPL token metadata", async () => {
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const info = await tm.resolveSwapToken(WSOL_MINT);
+
+  expect(info).not.toBeNull();
+  expect(info?.token_mint).toBe(WSOL_MINT);
+  expect(info?.token_ticker).toBe("WSOL");
+  expect(info?.isNativeSol).toBe(false);
 });
 
 test("validateTokenMint validates base58 and metadata path", async () => {

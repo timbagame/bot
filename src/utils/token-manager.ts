@@ -5,6 +5,10 @@ import { WalletManager } from "./wallet";
 import { PumpFunClient, isPotentialPumpFunToken } from "./pump-fun";
 import type { ParseAmountResult, ChatTokenConfig, KnownToken } from "../types";
 import { TOKENS_LIST, WSOL_MINT } from "./constants";
+import {
+  getBuiltinTokenMetadataByMint,
+  getBuiltinTokenMetadataByTicker,
+} from "./token-registry";
 import { parseDecimalAmount } from "./amount";
 import { createSingleton } from "./singleton";
 
@@ -21,17 +25,21 @@ const BUILTIN_TOKEN_MINTS: Record<string, string> = (() => {
   return map;
 })();
 
-const SWAP_BUILTIN_TOKENS: Record<
-  string,
-  { mint: string; ticker: string; decimals: number; isNativeSol?: boolean }
-> = {
-  SOL: { mint: WSOL_MINT, ticker: "SOL", decimals: 9, isNativeSol: true },
-  WSOL: { mint: WSOL_MINT, ticker: "WSOL", decimals: 9 },
-  USDC: {
-    mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-    ticker: "USDC",
-    decimals: 6,
-  },
+const looksLikeTokenTicker = (candidate: string): boolean => {
+  if (!candidate) {
+    return false;
+  }
+
+  const trimmed = candidate.trim();
+  if (trimmed.length < 2 || trimmed.length > 12) {
+    return false;
+  }
+
+  if (!/^[A-Za-z]+$/.test(trimmed)) {
+    return false;
+  }
+
+  return Number.isNaN(parseInt(trimmed, 10));
 };
 
 // ================================
@@ -142,66 +150,100 @@ export class TokenManager {
 
     let resolvedTokenMint = tokenMint;
     let resolvedTokenTicker = tokenTicker;
+    let tokenDecimals: number | undefined;
     let isSol = false;
     let tokenWasSpecified = false;
     let requestedNativeSol = false;
 
-    if (tokenArg) {
-      const upperTokenArg = tokenArg.toUpperCase();
+    const candidate = tokenArg?.trim();
+    if (candidate) {
+      const normalizedCandidate = candidate.trim();
+      const candidateUpper = normalizedCandidate.toUpperCase();
+      const candidateLooksLikeTicker = looksLikeTokenTicker(normalizedCandidate);
+      let candidateMint: string | null = null;
+      try {
+        candidateMint = new PublicKey(normalizedCandidate).toBase58();
+      } catch {
+        candidateMint = null;
+      }
 
-      if (upperTokenArg === "SOL") {
-        if (context === "game") {
-          // Allow SOL for games by mapping to WSOL mint under the hood
-          resolvedTokenMint = WSOL_MINT;
-          resolvedTokenTicker = "SOL";
-          requestedNativeSol = true;
-          tokenWasSpecified = true;
-          isSol = false;
-        } else {
-          // Allow SOL for tips - set special values
-          resolvedTokenMint = "SOL";
-          resolvedTokenTicker = "SOL";
-          isSol = true;
-          tokenWasSpecified = true;
-          requestedNativeSol = true;
-        }
-      } else {
-        // Check if it's a known token ticker
-        const knownToken = this.tokenDb.getKnownTokenByTicker(tokenArg);
-        if (knownToken) {
-          resolvedTokenMint = knownToken.token_mint;
-          resolvedTokenTicker = knownToken.token_ticker;
-          tokenWasSpecified = true;
-        } else {
-          // Check if it's a valid token mint address
-          try {
-            const mintKey = new PublicKey(tokenArg);
-            const mintAddress = mintKey.toBase58();
-            const knownMint = this.tokenDb.getKnownTokenByMint(mintAddress);
+      const isNumericCandidate =
+        normalizedCandidate.length <= 18 &&
+        /^[0-9]+(?:\.[0-9]+)?$/.test(normalizedCandidate);
 
-            resolvedTokenMint = mintAddress;
-            resolvedTokenTicker = knownMint?.token_ticker ?? tokenArg;
-            tokenWasSpecified = true;
-          } catch {
-            // Check if it looks like a token ticker but isn't a number
-            const isLikelyToken =
-              isNaN(parseInt(tokenArg, 10)) &&
-              tokenArg.length >= 2 &&
-              tokenArg.length <= 12 &&
-              /^[A-Za-z]+$/.test(tokenArg); // Letters only (case insensitive)
+      if (!isNumericCandidate) {
+        // Only attempt token parsing when the argument isn't a numeric
+        // parameter (e.g., max players in `/cf 10 5`).
+        const resolvedToken = await this.resolveSwapToken(normalizedCandidate);
+        if (resolvedToken) {
+          tokenWasSpecified = true;
+          tokenDecimals = resolvedToken.decimals;
+          resolvedTokenMint = resolvedToken.token_mint;
+          resolvedTokenTicker = resolvedToken.token_ticker;
+          if (candidateMint && resolvedTokenMint === WSOL_MINT) {
+            const knownMint = this.tokenDb.getKnownTokenByMint(resolvedTokenMint);
+            resolvedTokenTicker = knownMint?.token_ticker ?? "WSOL";
+          }
 
-            if (isLikelyToken) {
-              // It looks like a token ticker but we don't recognize it
-              return {
-                success: false,
-                error: "unknown_token",
-                unknownToken: upperTokenArg,
-              };
+          const requestedNativeSolByTicker =
+            resolvedToken.isNativeSol &&
+            candidateLooksLikeTicker &&
+            candidateUpper === "SOL";
+
+          if (requestedNativeSolByTicker) {
+            requestedNativeSol = true;
+            if (context === "tip") {
+              isSol = true;
+              resolvedTokenMint = "SOL";
+              resolvedTokenTicker = "SOL";
+              tokenDecimals = 9;
+            } else {
+              resolvedTokenTicker = "SOL";
             }
-            // If it doesn't look like a token (e.g., number for maxPlayers), use default token
-            tokenWasSpecified = false;
+          }
+        } else if (candidateLooksLikeTicker) {
+          return {
+            success: false,
+            error: "unknown_token",
+            unknownToken: candidateUpper,
+          };
+        } else {
+          if (candidateMint) {
+            tokenWasSpecified = true;
+            resolvedTokenMint = candidateMint;
+
+            const knownMint = this.tokenDb.getKnownTokenByMint(candidateMint);
+            if (knownMint) {
+              tokenDecimals = knownMint.decimals;
+              resolvedTokenTicker = knownMint.token_ticker;
+            } else {
+              resolvedTokenTicker = candidateUpper;
+            }
+          } else {
+            return {
+              success: false,
+              error: "unknown_token",
+              unknownToken: candidateUpper,
+            };
           }
         }
+      }
+    }
+
+    if (!tokenWasSpecified) {
+      const knownMint = this.tokenDb.getKnownTokenByMint(resolvedTokenMint);
+      if (knownMint) {
+        tokenDecimals = knownMint.decimals;
+        resolvedTokenTicker = knownMint.token_ticker;
+      }
+    }
+
+    if (!isSol && tokenDecimals === undefined) {
+      try {
+        const metadata = await this.wallet.getTokenMetadata(resolvedTokenMint);
+        tokenDecimals = metadata.decimals;
+      } catch {
+        return { success: false, error: "invalid_amount" };
       }
     }
 
@@ -209,16 +251,16 @@ export class TokenManager {
     let formattedAmount: string;
 
     try {
-      if (isSol || requestedNativeSol) {
+      if (isSol) {
         amount = parseDecimalAmount(amountArg, 9, { returnType: "number" });
         formattedAmount = `${this.wallet.formatSolBalance(amount)} SOL`;
       } else {
-        const metadata = await this.wallet.getTokenMetadata(resolvedTokenMint);
-        amount = parseDecimalAmount(amountArg, metadata.decimals, {
+        const decimals = tokenDecimals ?? 0;
+        amount = parseDecimalAmount(amountArg, decimals, {
           returnType: "number",
         });
         formattedAmount =
-          this.wallet.formatTokenBalance(amount, metadata.decimals) +
+          this.wallet.formatTokenBalance(amount, decimals) +
           " " +
           resolvedTokenTicker;
       }
@@ -486,7 +528,7 @@ export class TokenManager {
     }
 
     const upper = candidate.toUpperCase();
-    const builtin = SWAP_BUILTIN_TOKENS[upper];
+    const builtin = getBuiltinTokenMetadataByTicker(upper);
     if (builtin) {
       return {
         token_mint: builtin.mint,
@@ -514,12 +556,51 @@ export class TokenManager {
       if (knownByMint) {
         return knownByMint;
       }
+      const builtinByMint = getBuiltinTokenMetadataByMint(candidate);
+      if (builtinByMint) {
+        const treatAsNativeSol =
+          builtinByMint.isNativeSol && candidate.toUpperCase() === "SOL";
+        const fallbackTicker =
+          builtinByMint.isNativeSol && !treatAsNativeSol
+            ? builtinByMint.mint === WSOL_MINT
+              ? "WSOL"
+              : builtinByMint.ticker
+            : builtinByMint.ticker;
+
+        return {
+          token_mint: builtinByMint.mint,
+          token_ticker: fallbackTicker,
+          decimals: builtinByMint.decimals,
+          added_at: Date.now(),
+          isNativeSol: treatAsNativeSol,
+        };
+      }
       return null;
     }
 
     const knownMint = this.tokenDb.getKnownTokenByMint(normalizedMint);
     if (knownMint) {
       return knownMint;
+    }
+
+    const builtinMint = getBuiltinTokenMetadataByMint(normalizedMint);
+    if (builtinMint) {
+      const treatAsNativeSol =
+        builtinMint.isNativeSol && tickerOrMint.trim().toUpperCase() === "SOL";
+      const fallbackTicker =
+        builtinMint.isNativeSol && !treatAsNativeSol
+          ? builtinMint.mint === WSOL_MINT
+            ? "WSOL"
+            : builtinMint.ticker
+          : builtinMint.ticker;
+
+      return {
+        token_mint: builtinMint.mint,
+        token_ticker: fallbackTicker,
+        decimals: builtinMint.decimals,
+        added_at: Date.now(),
+        isNativeSol: treatAsNativeSol,
+      };
     }
 
     const discovered = await this.autoDiscoverTokenInfo(normalizedMint);
