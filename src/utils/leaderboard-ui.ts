@@ -48,30 +48,18 @@ const formatLeaderboardRow = (player: LeaderboardPlayerDisplay, position: number
   const medal = MEDALS[position] ?? "";
   const displayName = `<b>${escapeHtml(player.displayName)}</b>`;
 
-  const baseStats = [
-    `Record ${player.wins}-${player.losses}`,
-    `${formatWinRate(player.winRate)}% WR`,
-    gamesLabel(player.totalGames),
+  const detailSegments = [
+    formatWinCount(player.wins),
+    formatLossCount(player.losses),
+    `${formatWinRate(player.winRate)}% win rate`,
   ];
 
-  const participationSegments: string[] = [];
-  if (player.gamesCreated > 0) {
-    participationSegments.push(`${player.gamesCreated} created`);
-  }
-  if (player.gamesJoined > player.gamesCreated) {
-    participationSegments.push(`${player.gamesJoined} joined`);
-  }
-
-  if (participationSegments.length > 0) {
-    baseStats.push(participationSegments.join(" · "));
-  }
-
-  const detailLine = baseStats.join(" • ");
+  const detailLine = detailSegments.join(" • ");
 
   const medalPart = medal ? `${medal} ` : "";
   const headerLine = `${rank} ${medalPart}${displayName}`.trim();
 
-  return `${headerLine}\n<code>   ${detailLine}</code>`;
+  return `${headerLine}\n${detailLine}`;
 };
 
 const buildLeaderboardHighlights = (players: LeaderboardPlayerDisplay[]): string | null => {
@@ -119,8 +107,12 @@ const formatWinRate = (value: number): string => {
   return Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1);
 };
 
-const gamesLabel = (games: number): string => {
-  const safeGames = Math.max(0, Math.floor(games));
-  const suffix = safeGames === 1 ? "game" : "games";
-  return `${safeGames} ${suffix}`;
+const formatWinCount = (wins: number): string => {
+  const safeWins = Math.max(0, wins);
+  return `${safeWins} ${safeWins === 1 ? "win" : "wins"}`;
+};
+
+const formatLossCount = (losses: number): string => {
+  const safeLosses = Math.max(0, losses);
+  return `${safeLosses} ${safeLosses === 1 ? "loss" : "losses"}`;
 };
