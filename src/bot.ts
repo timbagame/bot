@@ -4340,7 +4340,6 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
       wins: number;
       losses: number;
       winRate: number;
-      winDiff: number;
     };
 
     const players: LeaderboardPlayerRow[] = resolvedPlayers.map((stats) => {
@@ -4348,7 +4347,6 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
       const wins = Number(stats.games_won ?? 0);
       const losses = Math.max(totalGames - wins, 0);
       const winRate = Number(stats.win_rate ?? 0);
-      const winDiff = wins - losses;
 
       return {
         displayName: stats.displayName,
@@ -4357,7 +4355,6 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
         wins,
         losses,
         winRate,
-        winDiff,
       };
     });
 
@@ -4368,49 +4365,21 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
       );
     }
 
-    const chatTitle = ctx.chat?.title ? `${ctx.chat.title} leaderboard` : "Leaderboard";
-    const headerTitle = `🏆 <b>${escapeHtml(chatTitle)}</b>`;
-    const contextLine = "<i>Lifetime stats • Minimum 1 match</i>";
+    const chatTitle = ctx.chat?.title?.trim();
+    const headerTitle = chatTitle ? `🏆 <b>${escapeHtml(chatTitle)}</b>` : "🏆 <b>Leaderboard</b>";
 
     const medals = ["🥇", "🥈", "🥉"];
-    const topPlayersLines = players.slice(0, 3).map((player, index) => {
+    const leaderboardLines = players.map((player, index) => {
+      const rank = index + 1;
       const medal = medals[index] ?? "";
       const safeName = escapeHtml(player.displayName);
-      const winWord = player.wins === 1 ? "win" : "wins";
-      return `${medal} ${safeName} • ${player.wins} ${winWord} • ${player.winRate.toFixed(1)}% • ${player.totalGames} games`;
+      const record = `${player.wins}W-${player.losses}L`;
+      const rate = `${player.winRate.toFixed(1)}% win rate`;
+      const medalPrefix = medal ? `${medal} ` : "";
+      return `${rank}. ${medalPrefix}${safeName} - ${record} | ${rate}`;
     });
 
-    const rankWidth = 4;
-    const playerWidth = 16;
-    const recordWidth = 8;
-    const rateWidth = 8;
-    const diffWidth = 5;
-
-    const truncateAndPad = (value: string, width: number): string => {
-      const normalized = value.length > width ? `${value.slice(0, Math.max(0, width - 3))}...` : value;
-      return normalized.padEnd(width, " ");
-    };
-
-    const tableHeader = `${"#".padEnd(rankWidth)}${"Player".padEnd(playerWidth)}${"W-L".padEnd(recordWidth)}${"Rate".padEnd(rateWidth)}${"Δ".padEnd(diffWidth)}`;
-    const tableRows = players.map((player, index) => {
-      const rank = `${index + 1}.`;
-      const rankLabel = truncateAndPad(rank, rankWidth);
-      const playerLabel = truncateAndPad(player.displayName, playerWidth);
-      const recordLabel = truncateAndPad(`${player.wins}-${player.losses}`, recordWidth);
-      const rateLabel = truncateAndPad(`${player.winRate.toFixed(1)}%`, rateWidth);
-      const diffLabel = truncateAndPad(player.winDiff > 0 ? `+${player.winDiff}` : "", diffWidth);
-      const row = `${rankLabel}${playerLabel}${recordLabel}${rateLabel}${diffLabel}`;
-      return escapeHtml(row);
-    });
-
-    let leaderboardText = `${headerTitle}\n${contextLine}\n\n`;
-
-    if (topPlayersLines.length > 0) {
-      leaderboardText += "Top players\n";
-      leaderboardText += `${topPlayersLines.join("\n")}\n\n`;
-    }
-
-    leaderboardText += `<pre>${escapeHtml(tableHeader)}\n${tableRows.join("\n")}</pre>\n\n`;
+    let leaderboardText = `${headerTitle}\nTop players in this group\n\n${leaderboardLines.join("\n")}`;
 
     const topByWins = players[0]!;
     const bestWinRatePlayer = players.reduce((best, current) => {
@@ -4421,13 +4390,16 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
     }, topByWins);
 
     const summarySegments: string[] = [];
-    summarySegments.push(`Most wins: ${escapeHtml(topByWins.displayName)} (${topByWins.wins})`);
-    summarySegments.push(`Best win rate: ${escapeHtml(bestWinRatePlayer.displayName)} (${bestWinRatePlayer.winRate.toFixed(1)}%)`);
+    if (bestWinRatePlayer.telegramId !== topByWins.telegramId) {
+      summarySegments.push(`Best win rate: ${escapeHtml(bestWinRatePlayer.displayName)} (${bestWinRatePlayer.winRate.toFixed(1)}%)`);
+    }
     if (mostGamesPlayer.telegramId !== topByWins.telegramId) {
       summarySegments.push(`Most games: ${escapeHtml(mostGamesPlayer.displayName)} (${mostGamesPlayer.totalGames})`);
     }
 
-    leaderboardText += summarySegments.join(" • ");
+    if (summarySegments.length > 0) {
+      leaderboardText += `\n\n${summarySegments.join(" | ")}`;
+    }
 
     await ctx.reply(leaderboardText, {
       parse_mode: "HTML",
