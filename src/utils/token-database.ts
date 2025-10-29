@@ -1,17 +1,20 @@
 import type { KnownToken } from "../types";
-import { BaseDatabase, createDatabaseSingleton } from "./base-database";
+import { BaseDatabase, createDatabaseClassSingleton } from "./base-database";
 
 /**
  * Database service for storing token-related data
  */
 export class TokenDatabase extends BaseDatabase {
-  private static readonly handles = createDatabaseSingleton(
-    () => new TokenDatabase()
-  );
+  public static getInstance: () => TokenDatabase;
+  public static resetForTesting: () => void;
 
-  public static readonly getInstance = TokenDatabase.handles.getInstance;
-  public static readonly resetForTesting =
-    TokenDatabase.handles.resetForTesting;
+  static {
+    const { getInstance, resetForTesting } = createDatabaseClassSingleton(
+      () => new TokenDatabase()
+    );
+    TokenDatabase.getInstance = getInstance;
+    TokenDatabase.resetForTesting = resetForTesting;
+  }
 
   private constructor() {
     super(

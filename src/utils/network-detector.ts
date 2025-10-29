@@ -180,3 +180,84 @@ export class NetworkDetector {
     return undefined;
   }
 }
+
+export type TransactionLinkFormat = "html" | "markdown";
+
+export interface TransactionLinkOptions {
+  signature?: string | null;
+  networkOverride?: string | null;
+  label?: string;
+  linkText?: string;
+  format?: TransactionLinkFormat;
+  fallbackToSignature?: boolean;
+  shortSignatureLength?: number;
+}
+
+export interface TransactionLinkResult {
+  message: string | null;
+  solscanUrl: string | null;
+  previewDisabled: boolean;
+  displaySignature: string | null;
+}
+
+export function buildTransactionLinkMessage({
+  signature,
+  networkOverride,
+  label,
+  linkText,
+  format = "html",
+  fallbackToSignature = false,
+  shortSignatureLength = 8,
+}: TransactionLinkOptions): TransactionLinkResult {
+  if (!signature) {
+    return {
+      message: null,
+      solscanUrl: null,
+      previewDisabled: false,
+      displaySignature: null,
+    };
+  }
+
+  const solscanUrl = NetworkDetector.buildSolscanTxUrl(
+    signature,
+    networkOverride
+  );
+  const normalizedLabel = label ?? "";
+
+  const shouldTruncate =
+    shortSignatureLength > 0 && signature.length > shortSignatureLength;
+  const truncatedSignature = shouldTruncate
+    ? `${signature.slice(0, shortSignatureLength)}...`
+    : signature;
+
+  if (solscanUrl) {
+    const anchorText = linkText ?? truncatedSignature;
+    const message =
+      format === "markdown"
+        ? `${normalizedLabel}[${anchorText}](${solscanUrl})`
+        : `${normalizedLabel}<a href="${solscanUrl}">${anchorText}</a>`;
+
+    return {
+      message,
+      solscanUrl,
+      previewDisabled: true,
+      displaySignature: truncatedSignature,
+    };
+  }
+
+  if (!fallbackToSignature) {
+    return {
+      message: null,
+      solscanUrl: null,
+      previewDisabled: false,
+      displaySignature: truncatedSignature,
+    };
+  }
+
+  return {
+    message: `${normalizedLabel}${truncatedSignature}`,
+    solscanUrl: null,
+    previewDisabled: false,
+    displaySignature: truncatedSignature,
+  };
+}

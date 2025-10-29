@@ -1,17 +1,20 @@
 import type { GameData, PlayerMapping } from "../types";
-import { BaseDatabase, createDatabaseSingleton } from "./base-database";
+import { BaseDatabase, createDatabaseClassSingleton } from "./base-database";
 
 /**
  * Database service for storing game-related data
  */
 export class GameDatabase extends BaseDatabase {
-  private static readonly handles = createDatabaseSingleton(
-    () => new GameDatabase()
-  );
+  public static getInstance: () => GameDatabase;
+  public static resetForTesting: () => void;
 
-  public static readonly getInstance = GameDatabase.handles.getInstance;
-  public static readonly resetForTesting =
-    GameDatabase.handles.resetForTesting;
+  static {
+    const { getInstance, resetForTesting } = createDatabaseClassSingleton(
+      () => new GameDatabase()
+    );
+    GameDatabase.getInstance = getInstance;
+    GameDatabase.resetForTesting = resetForTesting;
+  }
 
   private constructor() {
     super(

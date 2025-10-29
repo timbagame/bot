@@ -148,3 +148,14 @@ export function createDatabaseSingleton<T>(factory: () => T): {
     resetForTesting: () => reset(),
   };
 }
+
+export function createDatabaseClassSingleton<T>(factory: () => T): {
+  getInstance: () => T;
+  resetForTesting: () => void;
+} {
+  const handles = createDatabaseSingleton(factory);
+  return {
+    getInstance: () => handles.getInstance(),
+    resetForTesting: () => handles.resetForTesting(),
+  };
+}

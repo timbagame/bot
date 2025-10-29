@@ -1,4 +1,4 @@
-import { BaseDatabase, createDatabaseSingleton } from "./base-database";
+import { BaseDatabase, createDatabaseClassSingleton } from "./base-database";
 import { NetworkDetector } from "./network-detector";
 
 // ================================
@@ -27,13 +27,16 @@ export interface TransactionRecord {
 // ================================
 
 export class TransactionHistory extends BaseDatabase {
-  private static readonly handles = createDatabaseSingleton(
-    () => new TransactionHistory()
-  );
+  public static getInstance: () => TransactionHistory;
+  public static resetForTesting: () => void;
 
-  public static readonly getInstance = TransactionHistory.handles.getInstance;
-  public static readonly resetForTesting =
-    TransactionHistory.handles.resetForTesting;
+  static {
+    const { getInstance, resetForTesting } = createDatabaseClassSingleton(
+      () => new TransactionHistory()
+    );
+    TransactionHistory.getInstance = getInstance;
+    TransactionHistory.resetForTesting = resetForTesting;
+  }
 
   private constructor() {
     super(
