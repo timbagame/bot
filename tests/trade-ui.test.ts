@@ -5,7 +5,7 @@ describe("trade ui helpers", () => {
   test("swap processing status renders html content", () => {
     const { message, keyboard } = buildProcessingStatus("swap", "5", "SOL", "BONK");
 
-    expect(message).toContain("PROCESSING SWAP");
+    expect(message).toContain("Processing Swap");
     expect(message).toContain("Swapping 5 SOL → BONK");
     expect(message).toContain("Please wait");
     expect(typeof keyboard?.text).toBe("function");

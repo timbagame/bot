@@ -74,7 +74,7 @@ describe("handleAddressInput", () => {
     const firstEdit = edits[0]!;
     expect(firstEdit.chatId).toBe(CHAT_ID);
     expect(firstEdit.messageId).toBe(baseState.messageId);
-    expect(firstEdit.text).toContain("SEND CONFIRMATION");
+    expect(firstEdit.text).toContain("Send Confirmation");
     expect(firstEdit.text).toContain(ADDRESS);
     expect(replies).toHaveLength(0);
   });
@@ -93,7 +93,7 @@ describe("handleAddressInput", () => {
     expect(edits).toHaveLength(1);
     expect(replies).toHaveLength(1);
     const firstReply = replies[0]!;
-    expect(firstReply.text).toContain("SEND CONFIRMATION");
+    expect(firstReply.text).toContain("Send Confirmation");
     expect(firstReply.text).toContain(ADDRESS);
     expect(
       firstReply.opts?.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data
@@ -113,7 +113,7 @@ describe("handleAddressInput", () => {
     expect(edits).toHaveLength(0);
     expect(replies).toHaveLength(1);
     const firstReply = replies[0]!;
-    expect(firstReply.text).toContain("SEND CONFIRMATION");
+    expect(firstReply.text).toContain("Send Confirmation");
     expect(firstReply.text).toContain(ADDRESS);
   });
 });
