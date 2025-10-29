@@ -38,6 +38,14 @@ export interface PumpFunSwapRequest {
   userKeypair: Keypair;
 }
 
+export interface PumpFunTokenMetadata {
+  symbol: string;
+  name: string;
+  decimals: number;
+  isPumpFun: boolean;
+  isGraduated: boolean;
+}
+
 // ================================
 // PUMP.FUN CLIENT
 // ================================
@@ -139,7 +147,7 @@ export class PumpFunClient {
    */
   async getTokenMetadata(
     mintAddress: string
-  ): Promise<{ symbol: string; name: string; decimals: number } | null> {
+  ): Promise<PumpFunTokenMetadata | null> {
     try {
       const mint = new PublicKey(mintAddress);
 
@@ -147,6 +155,11 @@ export class PumpFunClient {
         input: RequestInfo | URL,
         init?: RequestInit
       ) => Promise<Response>;
+
+      const pumpStatusPromise = this.isPumpFunToken(mintAddress).catch(() => ({
+        isPumpFun: false,
+        isGraduated: false,
+      }));
 
       const metadata = await resolveTokenMetadata({
         connection: this.connection,
@@ -196,11 +209,14 @@ export class PumpFunClient {
         ],
       });
 
+      const pumpStatus = await pumpStatusPromise;
+
       if (metadata.symbol) {
         return {
           symbol: metadata.symbol.toUpperCase(),
           name: metadata.name || metadata.symbol,
           decimals: metadata.decimals,
+          ...pumpStatus,
         };
       }
 
@@ -218,6 +234,7 @@ export class PumpFunClient {
         symbol: ticker,
         name: "Pump.fun Token",
         decimals: metadata.decimals ?? 6,
+        ...pumpStatus,
       };
     } catch (error) {
       console.error(`Error getting metadata for ${mintAddress}:`, error);

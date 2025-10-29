@@ -1,17 +1,20 @@
 import type { ChatTokenConfig } from "../types";
-import { BaseDatabase, createDatabaseSingleton } from "./base-database";
+import { BaseDatabase, createDatabaseClassSingleton } from "./base-database";
 
 /**
  * Database service for storing chat-related settings
  */
 export class ChatDatabase extends BaseDatabase {
-  private static readonly handles = createDatabaseSingleton(
-    () => new ChatDatabase()
-  );
+  public static getInstance: () => ChatDatabase;
+  public static resetForTesting: () => void;
 
-  public static readonly getInstance = ChatDatabase.handles.getInstance;
-  public static readonly resetForTesting =
-    ChatDatabase.handles.resetForTesting;
+  static {
+    const { getInstance, resetForTesting } = createDatabaseClassSingleton(
+      () => new ChatDatabase()
+    );
+    ChatDatabase.getInstance = getInstance;
+    ChatDatabase.resetForTesting = resetForTesting;
+  }
 
   private constructor() {
     super(

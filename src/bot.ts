@@ -93,7 +93,7 @@ import {
 import { recentUpdateGuard } from "./utils/recent-update";
 import { getPriceUSD } from "./utils/prices";
 import { patchReplyBehavior } from "./utils/reply-patch";
-import { NetworkDetector } from "./utils/network-detector";
+import { NetworkDetector, buildTransactionLinkMessage } from "./utils/network-detector";
 import {
   buildBuyMenuUI,
   buildProcessingStatus,
@@ -1389,10 +1389,7 @@ const getGameMessageTarget = (gameAddress: string): GameMessageTarget | null => 
   } catch (error) {
     // gameManager might not be initialized yet; fall back to database record
     console.warn(
-      `Game manager not ready when resolving message target for ${gameAddress.slice(
-        0,
-        8
-      )}...`
+      `Game manager not ready when resolving message target for ${gameAddress}`
     );
   }
 
@@ -1431,10 +1428,7 @@ const getGameMessageTarget = (gameAddress: string): GameMessageTarget | null => 
     Number.isNaN(messageId)
   ) {
     console.warn(
-      `Cannot find chat/message reference for game ${gameAddress.slice(
-        0,
-        8
-      )}...`
+      `Cannot find chat/message reference for game ${gameAddress}`
     );
     return null;
   }
@@ -2148,16 +2142,23 @@ const validateAndProcessTransaction = async (
         : `${description} successful! 💸`;
     }
 
+    let disablePreview = false;
     // Add Solscan link if requested and we have a transaction signature
     if (showSolscanLink && txString) {
-      const solscanUrl = NetworkDetector.buildSolscanTxUrl(
-        txString,
-        process.env["RPC_URL"]
-      );
+      const { message: linkMessage, solscanUrl } = buildTransactionLinkMessage({
+        signature: txString,
+        networkOverride: process.env["RPC_URL"],
+        linkText: "View in Blockchain",
+        format: "html",
+      });
 
       if (solscanUrl) {
         console.log(`🔗 Generated Solscan URL: ${solscanUrl}`);
-        successMessage += `\n\n<a href="${solscanUrl}">View in Blockchain</a>`;
+      }
+
+      if (linkMessage) {
+        successMessage += `\n\n${linkMessage}`;
+        disablePreview = true;
       }
     }
 
@@ -2167,7 +2168,7 @@ const validateAndProcessTransaction = async (
       successMessage,
       {
         parse_mode: "HTML",
-        link_preview_options: { is_disabled: showSolscanLink && !!txString }
+        link_preview_options: { is_disabled: disablePreview },
       }
     );
   } catch (error: any) {
@@ -2180,6 +2181,121 @@ const validateAndProcessTransaction = async (
     );
     if (error && typeof error === "object") {
       (error as any).__alreadyNotified = true;
+    }
+    throw error;
+  }
+};
+
+type SolConversionValidationResult =
+  | { status: "ok"; formattedAmount?: string }
+  | { status: "insufficient"; formattedAmount: string }
+  | { status: "empty"; formattedAmount?: string };
+
+type SolConversionFlowOutcome =
+  | { status: "success"; signature: string; formattedAmount: string }
+  | { status: "insufficient"; formattedAmount: string }
+  | { status: "empty"; formattedAmount?: string }
+  | { status: "error" };
+
+interface SolConversionFlowConfig {
+  telegramId: bigint;
+  ensureProceed: () => Promise<SolConversionValidationResult>;
+  perform: () => Promise<{ signature: string; amountLamports?: number }>;
+  onProcessing: (formattedAmount?: string) => Promise<void>;
+  onSuccess: (
+    details: { signature: string; formattedAmount: string; solscanUrl?: string | null }
+  ) => Promise<void>;
+  onInsufficient?: (formattedAmount: string) => Promise<void>;
+  onEmpty?: (formattedAmount?: string) => Promise<void>;
+  onError?: (error: unknown, formattedAmount?: string) => Promise<void>;
+  formatAmount: (lamports: number) => string;
+  initialAmountLamports?: number;
+  treatZeroAmountAsEmpty?: boolean;
+  handleEmptyError?: (error: unknown) => boolean;
+  networkOverride?: string | null;
+}
+
+const executeSolConversionFlow = async ({
+  telegramId,
+  ensureProceed,
+  perform,
+  onProcessing,
+  onSuccess,
+  onInsufficient,
+  onEmpty,
+  onError,
+  formatAmount,
+  initialAmountLamports,
+  treatZeroAmountAsEmpty = false,
+  handleEmptyError,
+  networkOverride,
+}: SolConversionFlowConfig): Promise<SolConversionFlowOutcome> => {
+  const validation = await ensureProceed();
+
+  if (validation.status === "insufficient") {
+    await onInsufficient?.(validation.formattedAmount);
+    return { status: "insufficient", formattedAmount: validation.formattedAmount };
+  }
+
+  if (validation.status === "empty") {
+    await onEmpty?.(validation.formattedAmount);
+    return { status: "empty", formattedAmount: validation.formattedAmount };
+  }
+
+  const processingAmount =
+    validation.formattedAmount ??
+    (initialAmountLamports !== undefined
+      ? formatAmount(initialAmountLamports)
+      : undefined);
+
+  await onProcessing(processingAmount);
+
+  let formattedAmountForError = processingAmount;
+
+  try {
+    const { signature, amountLamports } = await perform();
+    let normalizedAmount =
+      amountLamports !== undefined ? amountLamports : initialAmountLamports;
+
+    if (normalizedAmount === undefined) {
+      if (treatZeroAmountAsEmpty) {
+        await onEmpty?.(validation.formattedAmount);
+        return { status: "empty", formattedAmount: validation.formattedAmount };
+      }
+      throw new Error("Unable to determine transaction amount");
+    }
+
+    if (!Number.isFinite(normalizedAmount)) {
+      throw new Error("Invalid transaction amount");
+    }
+
+    if (treatZeroAmountAsEmpty && normalizedAmount <= 0) {
+      await onEmpty?.(validation.formattedAmount);
+      return { status: "empty", formattedAmount: validation.formattedAmount };
+    }
+
+    const formattedAmount = formatAmount(normalizedAmount);
+    formattedAmountForError = formattedAmount;
+
+    await wallet.confirmTransaction(signature);
+    clearWalletCache(telegramId);
+
+    const { solscanUrl } = buildTransactionLinkMessage({
+      signature,
+      networkOverride: networkOverride ?? process.env["RPC_URL"],
+    });
+
+    await onSuccess({ signature, formattedAmount, solscanUrl });
+    return { status: "success", signature, formattedAmount };
+  } catch (error) {
+    if (handleEmptyError?.(error)) {
+      await onEmpty?.(validation.formattedAmount);
+      return { status: "empty", formattedAmount: validation.formattedAmount };
+    }
+
+    if (onError) {
+      await onError(error, formattedAmountForError ?? validation.formattedAmount);
+      return { status: "error" };
     }
     throw error;
   }
@@ -2208,35 +2324,52 @@ const executeWrapFlow = async (
     throw new Error("Wrap amount must be greater than zero");
   }
 
-  const formattedAmount = wallet.formatSolBalance(amountLamports);
-  const balanceLamports = await wallet.getBalance(telegramId);
+  const result = await executeSolConversionFlow({
+    telegramId,
+    initialAmountLamports: amountLamports,
+    formatAmount: (lamports) => wallet.formatSolBalance(lamports),
+    ensureProceed: async () => {
+      const formattedAmount = wallet.formatSolBalance(amountLamports);
+      const balanceLamports = await wallet.getBalance(telegramId);
 
-  if (amountLamports + SOL_FEE_BUFFER_LAMPORTS > balanceLamports) {
-    await handlers.onInsufficientBalance(formattedAmount);
+      if (amountLamports + SOL_FEE_BUFFER_LAMPORTS > balanceLamports) {
+        return { status: "insufficient", formattedAmount } as const;
+      }
+
+      return { status: "ok", formattedAmount } as const;
+    },
+    perform: async () => ({
+      signature: await wallet.wrapSol(telegramId, amountLamports),
+      amountLamports,
+    }),
+    onProcessing: async (amount) =>
+      handlers.onProcessing(
+        amount ?? wallet.formatSolBalance(amountLamports)
+      ),
+    onSuccess: handlers.onSuccess,
+    onInsufficient: handlers.onInsufficientBalance,
+    onError: handlers.onError
+      ? (error, formattedAmount) =>
+          handlers.onError!(
+            error,
+            formattedAmount ?? wallet.formatSolBalance(amountLamports)
+          )
+      : undefined,
+  });
+
+  if (result.status === "success") {
+    return { status: "success", signature: result.signature };
+  }
+
+  if (result.status === "insufficient") {
     return { status: "insufficient" };
   }
 
-  await handlers.onProcessing(formattedAmount);
-
-  try {
-    const signature = await wallet.wrapSol(telegramId, amountLamports);
-    await wallet.confirmTransaction(signature);
-    clearWalletCache(telegramId);
-
-    const solscanUrl = NetworkDetector.buildSolscanTxUrl(
-      signature,
-      process.env["RPC_URL"]
-    );
-
-    await handlers.onSuccess({ signature, formattedAmount, solscanUrl });
-    return { status: "success", signature };
-  } catch (error) {
-    if (handlers.onError) {
-      await handlers.onError(error, formattedAmount);
-      return { status: "error" };
-    }
-    throw error;
+  if (result.status === "error") {
+    return { status: "error" };
   }
+
+  return { status: "error" };
 };
 
 type UnwrapFlowResult = {
@@ -2259,57 +2392,60 @@ const executeUnwrapFlow = async (
   telegramId: bigint,
   handlers: UnwrapFlowHandlers
 ): Promise<UnwrapFlowResult> => {
-  const expected = handlers.expectedAmountLamports;
+  const result = await executeSolConversionFlow({
+    telegramId,
+    formatAmount: (lamports) => wallet.formatSolBalance(lamports),
+    ensureProceed: async () => {
+      const expected = handlers.expectedAmountLamports;
+      if (expected !== undefined) {
+        if (!Number.isFinite(expected) || expected <= 0) {
+          return { status: "empty" } as const;
+        }
 
-  if (expected !== undefined) {
-    if (!Number.isFinite(expected) || expected <= 0) {
-      await handlers.onNoBalance();
-      return { status: "empty" };
-    }
+        return {
+          status: "ok",
+          formattedAmount: wallet.formatSolBalance(expected),
+        } as const;
+      }
+
+      return { status: "ok" } as const;
+    },
+    perform: async () => wallet.unwrapSol(telegramId),
+    onProcessing: handlers.onProcessing,
+    onSuccess: handlers.onSuccess,
+    onEmpty: handlers.onNoBalance,
+    onError: handlers.onError ? (error) => handlers.onError!(error) : undefined,
+    treatZeroAmountAsEmpty: true,
+    handleEmptyError: (error) => {
+      const message =
+        error instanceof Error
+          ? String(error.message ?? "")
+          : String(error ?? "");
+      return (
+        message.includes("already empty") ||
+        message.includes("No WSOL account") ||
+        message.includes("WSOL account is already empty")
+      );
+    },
+  });
+
+  if (result.status === "success") {
+    return {
+      status: "success",
+      signature: result.signature,
+      formattedAmount: result.formattedAmount,
+    };
   }
 
-  const formattedExpected =
-    expected !== undefined ? wallet.formatSolBalance(expected) : undefined;
-
-  await handlers.onProcessing(formattedExpected);
-
-  try {
-    const { signature, amountLamports } = await wallet.unwrapSol(telegramId);
-
-    if (!Number.isFinite(amountLamports) || amountLamports <= 0) {
-      await handlers.onNoBalance();
-      return { status: "empty" };
-    }
-
-    await wallet.confirmTransaction(signature);
-    clearWalletCache(telegramId);
-
-    const formattedAmount = wallet.formatSolBalance(amountLamports);
-    const solscanUrl = NetworkDetector.buildSolscanTxUrl(
-      signature,
-      process.env["RPC_URL"]
-    );
-
-    await handlers.onSuccess({ signature, formattedAmount, solscanUrl });
-    return { status: "success", signature, formattedAmount };
-  } catch (error) {
-    const message =
-      error instanceof Error ? String(error.message ?? "") : String(error ?? "");
-    if (
-      message.includes("already empty") ||
-      message.includes("No WSOL account") ||
-      message.includes("WSOL account is already empty")
-    ) {
-      await handlers.onNoBalance();
-      return { status: "empty" };
-    }
-
-    if (handlers.onError) {
-      await handlers.onError(error);
-      return { status: "error" };
-    }
-    throw error;
+  if (result.status === "empty") {
+    return { status: "empty", formattedAmount: result.formattedAmount };
   }
+
+  if (result.status === "error") {
+    return { status: "error" };
+  }
+
+  return { status: "error" };
 };
 
 type PendingTransactionValidationResult<T> =
@@ -3196,22 +3332,27 @@ bot.command("wrap", async (ctx: Context) => {
           `❌ <b>WRAP FAILED</b>\n\nNot enough SOL to wrap ${formattedAmount}.\nKeep at least ${MIN_SOL_FOR_TX} SOL for fees and try again.`
         );
       },
-      onSuccess: async ({ formattedAmount, solscanUrl }) => {
+      onSuccess: async ({ signature, formattedAmount }) => {
         if (processingMessageId == null) {
           return;
         }
 
-        const linkLine = solscanUrl
-          ? `\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`
-          : "";
+        const { message: linkLine } = buildTransactionLinkMessage({
+          signature,
+          networkOverride: process.env["RPC_URL"],
+          label: "🔗 ",
+          linkText: "View on Solscan",
+          format: "html",
+        });
+        const linkSuffix = linkLine ? `\n\n${linkLine}` : "";
 
         await ctx.api.editMessageText(
           ctx.chat!.id,
           processingMessageId,
-          `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${formattedAmount} SOL to WSOL${linkLine}`,
+          `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${formattedAmount} SOL to WSOL${linkSuffix}`,
           {
             parse_mode: "HTML",
-            link_preview_options: { is_disabled: Boolean(solscanUrl) },
+            link_preview_options: { is_disabled: Boolean(linkLine) },
           }
         );
       },
@@ -3267,18 +3408,23 @@ bot.command("unwrap", async (ctx: Context) => {
           { parse_mode: "HTML" }
         );
       },
-      onSuccess: async ({ formattedAmount, solscanUrl }) => {
-        const linkLine = solscanUrl
-          ? `\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`
-          : "";
+      onSuccess: async ({ signature, formattedAmount }) => {
+        const { message: linkLine } = buildTransactionLinkMessage({
+          signature,
+          networkOverride: process.env["RPC_URL"],
+          label: "🔗 ",
+          linkText: "View on Solscan",
+          format: "html",
+        });
+        const linkSuffix = linkLine ? `\n\n${linkLine}` : "";
 
         await ctx.api.editMessageText(
           ctx.chat!.id,
           processingMsg.message_id,
-          `✅ <b>UNWRAP COMPLETED</b>\n\nUnwrapped ${formattedAmount} WSOL to SOL${linkLine}`,
+          `✅ <b>UNWRAP COMPLETED</b>\n\nUnwrapped ${formattedAmount} WSOL to SOL${linkSuffix}`,
           {
             parse_mode: "HTML",
-            link_preview_options: { is_disabled: Boolean(solscanUrl) },
+            link_preview_options: { is_disabled: Boolean(linkLine) },
           }
         );
       },
@@ -3720,19 +3866,19 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
       // Don't fail the swap if auto-registration fails
     }
 
-    const solscanUrl = NetworkDetector.buildSolscanTxUrl(
+    const { message: transactionLine } = buildTransactionLinkMessage({
       signature,
-      process.env["RPC_URL"]
-    );
-    const transactionLine = solscanUrl
-      ? `🔗 **Transaction:** [${signature.slice(0, 8)}...](${solscanUrl})`
-      : `🔗 **Transaction:** ${signature}`;
+      networkOverride: process.env["RPC_URL"],
+      label: "🔗 **Transaction:** ",
+      format: "markdown",
+      fallbackToSignature: true,
+    });
 
     const successMessage = [
       "✅ **Swap Completed Successfully!**",
       "",
       `🚀 **Provider:** ${swapData.quote.provider.toUpperCase()}`,
-      transactionLine,
+      transactionLine ?? `🔗 **Transaction:** ${signature}`,
       `📥 **Input:** ${wallet.formatTokenBalance(
         parseInt(swapData.quote.inputAmount),
         swapData.fromTokenInfo.decimals
@@ -3772,14 +3918,14 @@ bot.callbackQuery(/^swap_(confirm|cancel)_(\d+)$/, async (ctx) => {
         "",
         signature
           ? (() => {
-              const timeoutUrl = NetworkDetector.buildSolscanTxUrl(
+              const { message } = buildTransactionLinkMessage({
                 signature,
-                process.env["RPC_URL"]
-              );
-              if (!timeoutUrl) {
-                return `🔗 **Check Status:** ${signature}`;
-              }
-              return `🔗 **Check Status:** [${signature.slice(0, 8)}...](${timeoutUrl})`;
+                networkOverride: process.env["RPC_URL"],
+                label: "🔗 **Check Status:** ",
+                format: "markdown",
+                fallbackToSignature: true,
+              });
+              return message ?? `🔗 **Check Status:** ${signature}`;
             })()
           : "",
         "",
@@ -6133,11 +6279,18 @@ bot.callbackQuery("unwrap_confirm", async (ctx) => {
           keyboard: createBackToWalletKeyboard(),
         });
       },
-      onSuccess: async ({ formattedAmount, solscanUrl }) => {
-        const completionMessage = solscanUrl
+      onSuccess: async ({ signature, formattedAmount }) => {
+        const { message: linkLine } = buildTransactionLinkMessage({
+          signature,
+          networkOverride: process.env["RPC_URL"],
+          label: "🔗 ",
+          linkText: "View on Solscan",
+          format: "html",
+        });
+        const completionMessage = linkLine
           ? `✅ <b>UNWRAP COMPLETED</b>\n\nUnwrapped ${escapeHtml(
               formattedAmount
-            )} WSOL to SOL\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`
+            )} WSOL to SOL\n\n${linkLine}`
           : `✅ <b>UNWRAP COMPLETED</b>\n\nUnwrapped ${escapeHtml(
               formattedAmount
             )} WSOL to SOL`;
@@ -6317,13 +6470,13 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
       await wallet.confirmTransaction(txSignature);
       clearWalletCache(telegramId);
 
-      const solscanUrl = NetworkDetector.buildSolscanTxUrl(
-        txSignature,
-        process.env["RPC_URL"]
-      );
-      const viewLine = solscanUrl
-        ? `🔗 <a href="${solscanUrl}">View on Solscan</a>`
-        : "";
+      const { message: viewLine } = buildTransactionLinkMessage({
+        signature: txSignature,
+        networkOverride: process.env["RPC_URL"],
+        label: "🔗 ",
+        linkText: "View on Solscan",
+        format: "html",
+      });
 
       const successMessage = (() => {
         if (
@@ -6427,9 +6580,16 @@ bot.callbackQuery(/^confirm_wrap_/, async (ctx) => {
           keyboard: createBackToWalletKeyboard(),
         });
       },
-      onSuccess: async ({ formattedAmount: amountDisplay, solscanUrl }) => {
-        const completionMessage = solscanUrl
-          ? `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${amountDisplay} SOL to WSOL\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`
+      onSuccess: async ({ signature, formattedAmount: amountDisplay }) => {
+        const { message: linkLine } = buildTransactionLinkMessage({
+          signature,
+          networkOverride: process.env["RPC_URL"],
+          label: "🔗 ",
+          linkText: "View on Solscan",
+          format: "html",
+        });
+        const completionMessage = linkLine
+          ? `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${amountDisplay} SOL to WSOL\n\n${linkLine}`
           : `✅ <b>WRAP COMPLETED</b>\n\nWrapped ${amountDisplay} SOL to WSOL`;
 
         await respondWithMenu(ctx, {
@@ -6557,12 +6717,15 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
       await wallet.confirmTransaction(txSignature);
 
       // Show success with real Solscan link
-      const solscanUrl = NetworkDetector.buildSolscanTxUrl(
-        txSignature,
-        process.env["RPC_URL"]
-      );
-      const successText = solscanUrl
-        ? `✅ <b>SWAP COMPLETED</b>\n\nSwapped ${transaction.amount} ${transaction.fromToken}\nReceived ~${quote.outputAmount} ${transaction.toToken}\n\n🔗 <a href="${solscanUrl}">View on Solscan</a>`
+      const { message: solscanLink } = buildTransactionLinkMessage({
+        signature: txSignature,
+        networkOverride: process.env["RPC_URL"],
+        label: "🔗 ",
+        linkText: "View on Solscan",
+        format: "html",
+      });
+      const successText = solscanLink
+        ? `✅ <b>SWAP COMPLETED</b>\n\nSwapped ${transaction.amount} ${transaction.fromToken}\nReceived ~${quote.outputAmount} ${transaction.toToken}\n\n${solscanLink}`
         : `✅ <b>SWAP COMPLETED</b>\n\nSwapped ${transaction.amount} ${transaction.fromToken}\nReceived ~${quote.outputAmount} ${transaction.toToken}`;
       await respondWithMenu(ctx, {
         text: successText,
@@ -7212,7 +7375,7 @@ const HELP_SECTIONS: Record<HelpSectionKey, HelpSectionConfig> = {
       "<code>/coinflip 100 TIMBA 2</code> (2-player, 100 TIMBA each)\n" +
       "<code>/giveaway 500 TIMBA 5</code> (5 players, 500 TIMBA prize)\n\n" +
       "<b>🔧 Utility Examples:</b>\n" +
-      "<code>/checktx 3x7k2m...</code> (check transaction)\n" +
+      "<code>/checktx FULL_TRANSACTION_SIGNATURE</code> (check transaction)\n" +
       "<code>/default USDC</code> (set chat default token)",
     ack: "📋 Command Examples",
     buttons: [
@@ -7800,21 +7963,25 @@ registerCallbackPrefixHandler("confirm_sell_", async (ctx, { payload: txId }) =>
     console.log(`🚀 Sell transaction submitted: ${signature}`);
     await wallet.confirmTransaction(signature);
 
+    const { message: transactionLink, solscanUrl } = buildTransactionLinkMessage({
+      signature,
+      networkOverride: process.env["RPC_URL"],
+      label: "🔗 <b>Transaction:</b> ",
+      linkText: `<code>${signature}</code>`,
+      format: "html",
+    });
+
     const successMessage = [
       "✅ <b>SELL COMPLETED!</b>",
       "",
       `💰 <b>Sold:</b> ${sellData.amount} ${sellData.fromToken}`,
       `🎯 <b>Received:</b> ${sellData.toToken}`,
       "",
-      `🔗 <b>Transaction:</b> <code>${signature.slice(0, 8)}...${signature.slice(-8)}</code>`,
+      transactionLink ??
+        `🔗 <b>Transaction:</b> <code>${signature}</code>`,
       "",
       "🎉 <b>Sale successful!</b>",
     ].join("\n");
-
-    const solscanUrl = NetworkDetector.buildSolscanTxUrl(
-      signature,
-      process.env["RPC_URL"]
-    );
     const keyboard = new InlineKeyboard();
     if (solscanUrl) {
       keyboard.webApp("🔍 VIEW TX", solscanUrl).row();
@@ -8158,21 +8325,24 @@ registerCallbackPrefixHandler("confirm_buy_", async (ctx, { payload: txId }) => 
     console.log(`🚀 Buy transaction submitted: ${signature}`);
     await wallet.confirmTransaction(signature);
 
+    const { message: transactionLink, solscanUrl } = buildTransactionLinkMessage({
+      signature,
+      networkOverride: process.env["RPC_URL"],
+      label: "🔗 <b>Transaction:</b> ",
+      linkText: `<code>${signature}</code>`,
+      format: "html",
+    });
+
     const successMessage = [
       "✅ <b>BUY COMPLETED!</b>",
       "",
       `💰 <b>Spent:</b> ${buyData.amount} ${buyData.fromToken}`,
       `🎯 <b>Received:</b> ${buyData.toToken} tokens`,
       "",
-      `🔗 <b>Transaction:</b> <code>${signature}</code>`,
+      transactionLink ?? `🔗 <b>Transaction:</b> <code>${signature}</code>`,
       "",
       "🎉 <b>Purchase successful!</b>",
     ].join("\n");
-
-    const solscanUrl = NetworkDetector.buildSolscanTxUrl(
-      signature,
-      process.env["RPC_URL"]
-    );
     const keyboard = new InlineKeyboard();
     if (solscanUrl) {
       keyboard.webApp("🔍 VIEW TX", solscanUrl).row();
@@ -9003,10 +9173,10 @@ const fetchTokenMetadata = async (
       console.log("Wallet metadata failed:", (metadataError as Error).message);
     }
 
-    // Fallback: return truncated address as symbol
+    // Fallback: return the full address as the symbol when metadata is unavailable
     return {
       address: contractAddress,
-      symbol: `${contractAddress.slice(0, 4)}...${contractAddress.slice(-4)}`,
+      symbol: contractAddress,
       name: "Unknown Token",
       decimals: 6,
       verified: false,

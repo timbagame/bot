@@ -14,6 +14,6 @@ test("getPlayerUsername falls back to address when mapping missing", async () =>
   const gm = GameManager.getInstance(program, wallet, db);
   const ctx = { chat: { id: 1, type: "private" }, api: { getChatMember: async () => ({ user: {} }) } } as any;
   const label = await gm.getPlayerUsername(ctx, "BPFLoader1111111111111111111111111111111111");
-  expect(label).toContain("...");
+  expect(label).toBe("BPFLoader1111111111111111111111111111111111");
 });
 

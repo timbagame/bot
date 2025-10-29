@@ -146,6 +146,32 @@ export class TokenManager {
     return this.pumpFunClient;
   }
 
+  private resolveBuiltinMintToken(
+    metadata: ReturnType<typeof getBuiltinTokenMetadataByMint> | null,
+    userInput: string
+  ): (KnownToken & { isNativeSol?: boolean }) | null {
+    if (!metadata) {
+      return null;
+    }
+
+    const normalizedInput = userInput.trim().toUpperCase();
+    const treatAsNativeSol = metadata.isNativeSol && normalizedInput === "SOL";
+    const fallbackTicker =
+      metadata.isNativeSol && !treatAsNativeSol
+        ? metadata.mint === WSOL_MINT
+          ? "WSOL"
+          : metadata.ticker
+        : metadata.ticker;
+
+    return {
+      token_mint: metadata.mint,
+      token_ticker: fallbackTicker,
+      decimals: metadata.decimals,
+      added_at: Date.now(),
+      isNativeSol: treatAsNativeSol,
+    };
+  }
+
   // ================================
   // TOKEN PARSING WITH MULTI-TOKEN SUPPORT
   // ================================
@@ -489,7 +515,7 @@ export class TokenManager {
     }
 
     if (!resolvedTicker) {
-      resolvedTicker = `TOKEN_${mint.slice(-4).toUpperCase()}`;
+      resolvedTicker = `TOKEN_${mint.toUpperCase()}`;
     }
 
     console.log(
@@ -633,31 +659,36 @@ export class TokenManager {
       let symbol = metadata.symbol?.trim();
       let decimals = metadata.decimals ?? 0;
       let isPumpFun = false;
+      let pumpMetadata: { symbol: string; decimals: number } | null = null;
 
       if (isPotentialPumpFunToken(tokenMint)) {
-        const pumpInfo = await this.getPumpFunClient().isPumpFunToken(tokenMint);
-        isPumpFun = pumpInfo.isPumpFun && !pumpInfo.isGraduated;
+        const pumpInfo = await this.getPumpFunClient().getTokenMetadata(
+          tokenMint
+        );
 
-        if (!symbol) {
-          try {
-            const pumpMetadata = await this.getPumpFunClient().getTokenMetadata(
-              tokenMint
-            );
-            if (pumpMetadata?.symbol) {
-              symbol = pumpMetadata.symbol;
-              decimals = pumpMetadata.decimals;
-            }
-          } catch (pumpMetadataError) {
-            console.warn(
-              `Failed to fetch pump.fun metadata for ${tokenMint}:`,
-              pumpMetadataError
-            );
-          }
+        if (pumpInfo) {
+          isPumpFun = pumpInfo.isPumpFun && !pumpInfo.isGraduated;
+          pumpMetadata = {
+            symbol: pumpInfo.symbol,
+            decimals: pumpInfo.decimals,
+          };
+        } else {
+          const status = await this.getPumpFunClient().isPumpFunToken(
+            tokenMint
+          );
+          isPumpFun = status.isPumpFun && !status.isGraduated;
         }
       }
 
       if (!symbol || symbol.length === 0) {
-        symbol = tokenMint.slice(0, 6).toUpperCase();
+        const fallbackSymbolSource = pumpMetadata?.symbol ?? tokenMint;
+        symbol = fallbackSymbolSource.toUpperCase();
+      }
+
+      if (!Number.isFinite(decimals) || decimals < 0) {
+        if (pumpMetadata?.decimals !== undefined) {
+          decimals = pumpMetadata.decimals;
+        }
       }
 
       if (!Number.isFinite(decimals) || decimals < 0) {
@@ -719,24 +750,12 @@ export class TokenManager {
       if (knownByMint) {
         return knownByMint;
       }
-      const builtinByMint = getBuiltinTokenMetadataByMint(candidate);
+      const builtinByMint = this.resolveBuiltinMintToken(
+        getBuiltinTokenMetadataByMint(candidate),
+        candidate
+      );
       if (builtinByMint) {
-        const treatAsNativeSol =
-          builtinByMint.isNativeSol && candidate.toUpperCase() === "SOL";
-        const fallbackTicker =
-          builtinByMint.isNativeSol && !treatAsNativeSol
-            ? builtinByMint.mint === WSOL_MINT
-              ? "WSOL"
-              : builtinByMint.ticker
-            : builtinByMint.ticker;
-
-        return {
-          token_mint: builtinByMint.mint,
-          token_ticker: fallbackTicker,
-          decimals: builtinByMint.decimals,
-          added_at: Date.now(),
-          isNativeSol: treatAsNativeSol,
-        };
+        return builtinByMint;
       }
       return null;
     }
@@ -746,24 +765,12 @@ export class TokenManager {
       return knownMint;
     }
 
-    const builtinMint = getBuiltinTokenMetadataByMint(normalizedMint);
+    const builtinMint = this.resolveBuiltinMintToken(
+      getBuiltinTokenMetadataByMint(normalizedMint),
+      tickerOrMint
+    );
     if (builtinMint) {
-      const treatAsNativeSol =
-        builtinMint.isNativeSol && tickerOrMint.trim().toUpperCase() === "SOL";
-      const fallbackTicker =
-        builtinMint.isNativeSol && !treatAsNativeSol
-          ? builtinMint.mint === WSOL_MINT
-            ? "WSOL"
-            : builtinMint.ticker
-          : builtinMint.ticker;
-
-      return {
-        token_mint: builtinMint.mint,
-        token_ticker: fallbackTicker,
-        decimals: builtinMint.decimals,
-        added_at: Date.now(),
-        isNativeSol: treatAsNativeSol,
-      };
+      return builtinMint;
     }
 
     const discovered = await this.autoDiscoverTokenInfo(normalizedMint);

@@ -180,3 +180,76 @@ export class NetworkDetector {
     return undefined;
   }
 }
+
+export type TransactionLinkFormat = "html" | "markdown";
+
+export interface TransactionLinkOptions {
+  signature?: string | null;
+  networkOverride?: string | null;
+  label?: string;
+  linkText?: string;
+  format?: TransactionLinkFormat;
+  fallbackToSignature?: boolean;
+}
+
+export interface TransactionLinkResult {
+  message: string | null;
+  solscanUrl: string | null;
+  previewDisabled: boolean;
+  displaySignature: string | null;
+}
+
+export function buildTransactionLinkMessage({
+  signature,
+  networkOverride,
+  label,
+  linkText,
+  format = "html",
+  fallbackToSignature = false,
+}: TransactionLinkOptions): TransactionLinkResult {
+  if (!signature) {
+    return {
+      message: null,
+      solscanUrl: null,
+      previewDisabled: false,
+      displaySignature: null,
+    };
+  }
+
+  const solscanUrl = NetworkDetector.buildSolscanTxUrl(
+    signature,
+    networkOverride
+  );
+  const normalizedLabel = label ?? "";
+
+  if (solscanUrl) {
+    const anchorText = linkText ?? signature;
+    const message =
+      format === "markdown"
+        ? `${normalizedLabel}[${anchorText}](${solscanUrl})`
+        : `${normalizedLabel}<a href="${solscanUrl}">${anchorText}</a>`;
+
+    return {
+      message,
+      solscanUrl,
+      previewDisabled: true,
+      displaySignature: signature,
+    };
+  }
+
+  if (!fallbackToSignature) {
+    return {
+      message: null,
+      solscanUrl: null,
+      previewDisabled: false,
+      displaySignature: signature,
+    };
+  }
+
+  return {
+    message: `${normalizedLabel}${signature}`,
+    solscanUrl: null,
+    previewDisabled: false,
+    displaySignature: signature,
+  };
+}

@@ -20,7 +20,6 @@ import { formatUserFriendlyError } from "./errors";
 import { formatUsdValue as formatUsdValueText } from "./format-amount";
 import {
   DEFAULT_NULL_ADDRESS,
-  ADDRESS_DISPLAY_LENGTH,
   GAME_INFO_LIMIT,
   GAME_EXPIRATION_BUFFER_TIME,
   WSOL_MINT,
@@ -1202,9 +1201,7 @@ export class GameManager {
    * Format Solana address for display
    */
   private formatAddress(address: string): string {
-    return address.length >= 8
-      ? `${address.slice(0, 4)}...${address.slice(-4)}`
-      : address.slice(0, ADDRESS_DISPLAY_LENGTH) + "...";
+    return address;
   }
 
   /**
@@ -1943,7 +1940,7 @@ export class GameManager {
       const creatorInfo =
         creatorUsername !== "Unknown"
           ? creatorUsername
-          : `<code>${creatorPubkey.slice(0, ADDRESS_DISPLAY_LENGTH)}...</code>`;
+          : `<code>${creatorPubkey}</code>`;
 
       const status = gameData?.status ?? "active";
       const { messageText } = await this.formatGameMessage(
