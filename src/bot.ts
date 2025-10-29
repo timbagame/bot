@@ -26,6 +26,8 @@ import {
   WSOL_MINT,
   getStartVideoId,
   INPUT_TIMEOUT_HINT,
+  SWAP_DEFAULT_SLIPPAGE_BPS,
+  SWAP_SLIPPAGE_OPTIONS_BPS,
   applyDynamicFeeBudgets,
 } from "./utils/constants";
 import { FeeBudgetManager } from "./utils/fee-budget";
@@ -639,6 +641,64 @@ const lines = [
 
 type TradeConfirmationSummary = ReturnType<typeof formatTradeConfirmationSummary>;
 
+const formatSlippageOptionLabel = (bps: number): string => {
+  if (!Number.isFinite(bps)) {
+    return "0%";
+  }
+
+  if (bps < 10) {
+    return `${(bps / 100).toFixed(2)}%`;
+  }
+
+  if (bps < 100) {
+    return `${(bps / 100).toFixed(1)}%`;
+  }
+
+  const decimals = bps % 100 === 0 ? 0 : 1;
+  return `${(bps / 100).toFixed(decimals)}%`;
+};
+
+const getUserSwapSlippageBps = (userId: string): number => {
+  const state = getUserState<{ swapSlippageBps?: number }>(userId, false);
+  const candidate = state?.swapSlippageBps;
+  if (typeof candidate === "number" && Number.isFinite(candidate)) {
+    return candidate;
+  }
+  return SWAP_DEFAULT_SLIPPAGE_BPS;
+};
+
+const setUserSwapSlippageBps = (userId: string, slippageBps: number): void => {
+  const existing = getUserState(userId, false);
+  const { timestamp: _timestamp, ...rest } = existing ?? {};
+  setUserState(userId, { ...rest, swapSlippageBps: slippageBps });
+};
+
+const buildSwapConfirmationKeyboard = ({
+  txId,
+  cancelCallback,
+  selectedSlippageBps,
+}: {
+  txId: string;
+  cancelCallback: string;
+  selectedSlippageBps: number;
+}): InlineKeyboard => {
+  const keyboard = createTradeConfirmKeyboard({
+    confirmLabel: "✅ Confirm Swap",
+    confirmCallback: `confirm_swap_${txId}`,
+    cancelLabel: "❌ Cancel",
+    cancelCallback,
+  });
+
+  for (const option of SWAP_SLIPPAGE_OPTIONS_BPS) {
+    const optionLabel = formatSlippageOptionLabel(option);
+    const displayLabel = option === selectedSlippageBps ? `• ${optionLabel}` : optionLabel;
+    keyboard.text(displayLabel, `swap_slippage_${option}_${txId}`);
+  }
+
+  keyboard.row();
+  return keyboard;
+};
+
 type TradeQuoteErrorKind = "swap";
 
 type TradeQuoteErrorParams = {
@@ -841,7 +901,7 @@ const prepareTokenTradeQuote = async ({
         inputMint: inputAsset.mint,
         outputMint: outputAsset.mint,
         amount: amountResolution.rawAmount.toString(),
-        slippageBps: quoteOptions?.slippageBps ?? 50,
+        slippageBps: quoteOptions?.slippageBps ?? SWAP_DEFAULT_SLIPPAGE_BPS,
         userKeypair: wallet.getKeyPair(telegramId),
         inputDecimals: inputAsset.decimals,
         outputDecimals: outputAsset.decimals,
@@ -2119,10 +2179,15 @@ type PendingSendTransaction = {
 type PendingSwapTransaction = {
   type: "swap";
   userId: string;
-  fromToken?: string;
-  toToken?: string;
-  amount?: string;
-  quote?: SwapQuote;
+  fromToken: string;
+  toToken: string;
+  amount: string;
+  rawAmount: string;
+  inputDecimals: number;
+  outputDecimals: number;
+  cancelCallback: string;
+  slippageBps: number;
+  quote: SwapQuote;
 };
 
 const validatePendingTransaction = <T extends { type: string; userId: string }>(
@@ -5649,6 +5714,10 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
       let txSignature: string;
       let pumpFunSignature: string | null = null;
       const keypair = wallet.getKeyPair(BigInt(transaction.userId));
+      const parsedSlippageBps = Number((transaction as any).slippageBps);
+      const slippageBps = Number.isFinite(parsedSlippageBps)
+        ? parsedSlippageBps
+        : SWAP_DEFAULT_SLIPPAGE_BPS;
 
       const rawInputDecimals =
         (transaction as any).inputDecimals ?? (quote as any).inputDecimals;
@@ -5671,7 +5740,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
             inputMint: quote.inputMint,
             outputMint: quote.outputMint,
             amount: quote.inputAmount, // Use inputAmount from quote like original
-            slippageBps: 50,
+            slippageBps,
             userKeypair: keypair,
             inputDecimals,
             outputDecimals,
@@ -5686,7 +5755,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
             inputMint: quote.inputMint,
             outputMint: quote.outputMint,
             amount: quote.inputAmount,
-            slippageBps: 50,
+            slippageBps,
             userKeypair: keypair,
             inputDecimals,
             outputDecimals,
@@ -5705,7 +5774,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
             inputMint: quote.inputMint,
             outputMint: quote.outputMint,
             amount: quote.inputAmount, // Use inputAmount from quote like original
-            slippageBps: 50,
+            slippageBps,
             userKeypair: keypair,
             inputDecimals,
             outputDecimals,
@@ -6705,6 +6774,8 @@ const showSwapQuoteAndConfirmation = async (
   } = {}
 ) => {
   const userId = telegramId || getTelegramId(ctx);
+  const cancelCallback = `swap_to_${fromToken}_${toToken}`;
+  const selectedSlippageBps = getUserSwapSlippageBps(userId.toString());
 
   try {
     await prepareTokenTradeQuoteRunner({
@@ -6765,39 +6836,156 @@ const showSwapQuoteAndConfirmation = async (
           type: "swap",
           fromToken,
           toToken,
+          cancelCallback,
           amount: context.displayAmount,
           rawAmount: context.rawAmount.toString(),
           inputDecimals: context.input.decimals,
           outputDecimals: context.output.decimals,
           userId: userId.toString(),
+          slippageBps: selectedSlippageBps,
           quote,
         });
       },
       buildConfirmationKeyboard: (txId) =>
-        createTradeConfirmKeyboard({
-          confirmLabel: "✅ Confirm Swap",
-          confirmCallback: `confirm_swap_${txId}`,
-          cancelLabel: "❌ Cancel",
-          cancelCallback: `swap_to_${fromToken}_${toToken}`,
+        buildSwapConfirmationKeyboard({
+          txId,
+          cancelCallback,
+          selectedSlippageBps,
         }),
       onError: async (error) => {
         const { text, keyboard } = renderTradeQuoteError("swap", {
           error,
-          retryCallback: `swap_to_${fromToken}_${toToken}`,
+          retryCallback: cancelCallback,
         });
         await respondWithMenu(ctx, { text, keyboard });
       },
+      quoteOptions: { slippageBps: selectedSlippageBps },
       quoteErrorMessage: `Cannot get quote for ${fromToken} → ${toToken}`,
     });
   } catch (error) {
     console.error("Error getting swap quote:", error);
     const { text, keyboard } = renderTradeQuoteError("swap", {
       error,
-      retryCallback: `swap_to_${fromToken}_${toToken}`,
+      retryCallback: cancelCallback,
     });
     await respondWithMenu(ctx, { text, keyboard });
   }
 };
+
+bot.callbackQuery(/^swap_slippage_/, async (ctx) => {
+  const data = ctx.callbackQuery?.data ?? "";
+  const match = data.match(/^swap_slippage_(\d+)_([A-Za-z0-9-]+)/);
+
+  if (!match) {
+    await safeAnswerCallbackQuery(ctx, "❌ Invalid slippage option");
+    return;
+  }
+
+  const slippageBps = Number(match[1]);
+  const rawTxId = match[2];
+
+  if (!rawTxId) {
+    await safeAnswerCallbackQuery(ctx, "❌ Invalid transaction reference");
+    return;
+  }
+
+  const txId = rawTxId;
+
+  if (!SWAP_SLIPPAGE_OPTIONS_BPS.some((value) => value === slippageBps)) {
+    await safeAnswerCallbackQuery(ctx, "❌ Unsupported slippage option");
+    return;
+  }
+
+  const pendingEntry = getPendingTransaction<
+    PendingSwapTransaction & { timestamp?: number }
+  >(txId, false);
+
+  if (!pendingEntry || pendingEntry.type !== "swap") {
+    await safeAnswerCallbackQuery(ctx, "❌ Swap quote expired");
+    return;
+  }
+
+  const currentUserId = getTelegramIdString(ctx);
+  if (!currentUserId || pendingEntry.userId !== currentUserId) {
+    await safeAnswerCallbackQuery(ctx, "❌ Unauthorized");
+    return;
+  }
+
+  const pending = pendingEntry;
+
+  const pendingUserId: string = pending.userId;
+  const cancelCallback: string =
+    pending.cancelCallback ??
+    `swap_to_${pending.fromToken ?? "UNKNOWN"}_${pending.toToken ?? "UNKNOWN"}`;
+
+  try {
+    const previousQuote = pending.quote;
+    if (!previousQuote) {
+      await safeAnswerCallbackQuery(ctx, "❌ Quote unavailable");
+      return;
+    }
+
+    setUserSwapSlippageBps(pendingUserId, slippageBps);
+
+    const amountForQuote = pending.rawAmount ?? previousQuote.inputAmount;
+    if (!amountForQuote) {
+      await safeAnswerCallbackQuery(ctx, "❌ Invalid amount for quote");
+      return;
+    }
+
+    const quote = await swapManager.getQuote({
+      inputMint: previousQuote.inputMint,
+      outputMint: previousQuote.outputMint,
+      amount: amountForQuote,
+      slippageBps,
+      userKeypair: wallet.getKeyPair(BigInt(pendingUserId)),
+      inputDecimals: pending.inputDecimals ?? 9,
+      outputDecimals: pending.outputDecimals ?? 9,
+      inputTicker: (pending.fromToken ?? "UNKNOWN").toUpperCase(),
+      outputTicker: (pending.toToken ?? "UNKNOWN").toUpperCase(),
+    });
+
+    const summary = formatTradeConfirmationSummary({
+      kind: "swap",
+      payToken: pending.fromToken ?? quote.inputMint,
+      payDisplay: pending.amount ?? "0",
+      payRawAmount: Number(amountForQuote ?? 0),
+      payDecimals: pending.inputDecimals ?? 9,
+      receiveToken: pending.toToken ?? quote.outputMint,
+      receiveDecimals: pending.outputDecimals ?? 9,
+      quote,
+    });
+
+    const { timestamp: _timestamp, ...rest } = pending;
+
+    storePendingTransaction(txId, {
+      ...rest,
+      userId: pendingUserId,
+      slippageBps,
+      quote,
+    });
+
+    const keyboard = buildSwapConfirmationKeyboard({
+      txId,
+      cancelCallback,
+      selectedSlippageBps: slippageBps,
+    });
+
+    await respondWithMenu(ctx, {
+      text: summary.message,
+      parseMode: "HTML",
+      keyboard,
+    });
+
+    await safeAnswerCallbackQuery(
+      ctx,
+      `Slippage set to ${formatSlippageOptionLabel(slippageBps)}`
+    );
+  } catch (error) {
+    console.error("Error updating swap slippage:", error);
+    await safeAnswerCallbackQuery(ctx, "❌ Failed to update slippage");
+  }
+});
 
 // ================================
 // ERROR HANDLING & BOT STARTUP

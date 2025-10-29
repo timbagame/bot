@@ -115,11 +115,15 @@ export const PLAYER_CLEANUP_DELAY_MS = 100; // Delay between player participatio
 // ================================
 
 export const JUPITER_BASE_URL = "https://quote-api.jup.ag";
-export const JUPITER_DEFAULT_SLIPPAGE_BPS = 100; // 1%
+export const JUPITER_DEFAULT_SLIPPAGE_BPS = 50; // 0.5%
 export const JUPITER_MAX_SLIPPAGE_BPS = 500; // 5%
 export const JUPITER_MIN_SLIPPAGE_BPS = 10; // 0.1%
 export const JUPITER_MAX_PRICE_IMPACT = 5; // 5%
 export const JUPITER_PLATFORM_FEE_BPS = 0; // No platform fee by default
+
+// Swap UI defaults
+export const SWAP_DEFAULT_SLIPPAGE_BPS = 50; // 0.5%
+export const SWAP_SLIPPAGE_OPTIONS_BPS = [2, 10, 50, 100] as const;
 
 // ================================
 // PRICES CONFIG

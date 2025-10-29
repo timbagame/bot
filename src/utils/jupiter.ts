@@ -1,5 +1,6 @@
 import { PublicKey } from "@solana/web3.js";
 import { escapeHtml, formatRate } from "./format-amount";
+import { JUPITER_DEFAULT_SLIPPAGE_BPS } from "./constants";
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -345,11 +346,9 @@ export class JupiterClient {
    */
   getDefaultSlippage(_inputMint: string, _outputMint: string): number {
     // Default slippage in basis points (100 = 1%)
-    const DEFAULT_SLIPPAGE_BPS = 100;
-
     // Could add logic here to adjust slippage based on token pair
     // For now, use a conservative default
-    return DEFAULT_SLIPPAGE_BPS;
+    return JUPITER_DEFAULT_SLIPPAGE_BPS;
   }
 }
 
