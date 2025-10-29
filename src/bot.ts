@@ -7558,6 +7558,10 @@ export const __test_handleCustomAmountInput = handleCustomAmountInput;
 export const __test_handleAddressInput = handleAddressInput;
 export const __test_handleWrapAmountInput = handleWrapAmountInput;
 export const __test_handleSwapCustomAmountInput = handleSwapCustomAmountInput;
+export const __test_formatSlippageOptionLabel = formatSlippageOptionLabel;
+export const __test_getUserSwapSlippageBps = getUserSwapSlippageBps;
+export const __test_setUserSwapSlippageBps = setUserSwapSlippageBps;
+export const __test_buildSwapConfirmationKeyboard = buildSwapConfirmationKeyboard;
 
 // Start the bot and setup Anchor (skip during tests)
 if (process.env.NODE_ENV !== "test") {

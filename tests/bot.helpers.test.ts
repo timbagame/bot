@@ -2,6 +2,44 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { LAMPORTS_PER_SOL, MIN_SOL_FOR_TX, WSOL_MINT } from "../src/utils/constants";
 import { parseDecimalAmount } from "../src/utils/amount";
 
+const extractCallbacks = (kb: any): string[] => {
+  const grid = (kb && (kb.inline_keyboard || kb.keyboard)) as any[] | undefined;
+  if (Array.isArray(grid)) {
+    return grid.flat().map((b: any) => b?.callback_data).filter(Boolean);
+  }
+  const rows = (kb as any).rows as any[] | undefined;
+  if (Array.isArray(rows)) {
+    return rows.flat().map((b: any) => b?.callback_data).filter(Boolean);
+  }
+  try {
+    const j = JSON.parse(JSON.stringify(kb));
+    const arr = (j && (j.inline_keyboard || j.keyboard)) as any[] | undefined;
+    if (Array.isArray(arr)) {
+      return arr.flat().map((b: any) => b?.callback_data).filter(Boolean);
+    }
+  } catch {}
+  return [];
+};
+
+const extractTexts = (kb: any): string[] => {
+  const grid = (kb && (kb.inline_keyboard || kb.keyboard)) as any[] | undefined;
+  if (Array.isArray(grid)) {
+    return grid.flat().map((b: any) => b?.text).filter(Boolean);
+  }
+  const rows = (kb as any).rows as any[] | undefined;
+  if (Array.isArray(rows)) {
+    return rows.flat().map((b: any) => b?.text).filter(Boolean);
+  }
+  try {
+    const j = JSON.parse(JSON.stringify(kb));
+    const arr = (j && (j.inline_keyboard || j.keyboard)) as any[] | undefined;
+    if (Array.isArray(arr)) {
+      return arr.flat().map((b: any) => b?.text).filter(Boolean);
+    }
+  } catch {}
+  return [];
+};
+
 type BotModule = typeof import("../src/bot");
 type CreateGameViaCommandOptions = Parameters<
   BotModule["__test_createGameViaCommand"]
@@ -360,6 +398,55 @@ describe("Bot helper utilities", () => {
       rateDisplay: "0.00055",
       slippageText: "1.0%",
     });
+  });
+
+  test("formatSlippageOptionLabel formats bps cleanly", () => {
+    expect(botModule.__test_formatSlippageOptionLabel(2)).toBe("0.02%");
+    expect(botModule.__test_formatSlippageOptionLabel(10)).toBe("0.1%");
+    expect(botModule.__test_formatSlippageOptionLabel(50)).toBe("0.5%");
+    expect(botModule.__test_formatSlippageOptionLabel(100)).toBe("1%");
+  });
+
+  test("swap slippage state defaults and persists per user", () => {
+    const userId = "slippage-user";
+    botModule.__test_clearUserState(userId);
+
+    expect(botModule.__test_getUserSwapSlippageBps(userId)).toBe(50);
+
+    botModule.__test_setUserSwapSlippageBps(userId, 100);
+    expect(botModule.__test_getUserSwapSlippageBps(userId)).toBe(100);
+
+    botModule.__test_setUserState(userId, { foo: "bar" });
+    botModule.__test_setUserSwapSlippageBps(userId, 10);
+
+    const state = botModule.__test_getUserState(userId);
+    expect(state?.foo).toBe("bar");
+    expect(state?.swapSlippageBps).toBe(10);
+    expect(botModule.__test_getUserSwapSlippageBps(userId)).toBe(10);
+
+    botModule.__test_clearUserState(userId);
+  });
+
+  test("buildSwapConfirmationKeyboard includes slippage options", () => {
+    const keyboard = botModule.__test_buildSwapConfirmationKeyboard({
+      txId: "tx_test",
+      cancelCallback: "swap_to_SOL_TIMBA",
+      selectedSlippageBps: 10,
+    });
+
+    const callbacks = extractCallbacks(keyboard);
+    expect(callbacks).toContain("confirm_swap_tx_test");
+    expect(callbacks).toContain("swap_to_SOL_TIMBA");
+    expect(callbacks).toContain("swap_slippage_2_tx_test");
+    expect(callbacks).toContain("swap_slippage_10_tx_test");
+    expect(callbacks).toContain("swap_slippage_50_tx_test");
+    expect(callbacks).toContain("swap_slippage_100_tx_test");
+
+    const texts = extractTexts(keyboard);
+    expect(texts).toContain("✅ Confirm Swap");
+    expect(texts).toContain("❌ Cancel");
+    const selectedLabel = texts.find((t) => t.includes("0.1%"));
+    expect(selectedLabel?.startsWith("• ")).toBe(true);
   });
 });
 
