@@ -1429,12 +1429,8 @@ const GAME_SETUP_COPY: Record<"coinflip" | "giveaway", GameSetupCopy> = {
   coinflip: {
     gameType: "coinflip",
     heading: "🪙 <b>CREATE COINFLIP</b>",
-    introLines: ["Choose how much each player should stake:"],
-    bulletPoints: [
-      "• Two or more players enter with the same stake",
-      "• Winner takes the full pot",
-      "• Fair and transparent results",
-    ],
+    introLines: [],
+    bulletPoints: [],
     amountPrompt: "Select stake per player in <b>{TOKEN}</b>:",
     lowBalanceCopy: {
       object: "stake per player",
