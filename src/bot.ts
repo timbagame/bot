@@ -830,10 +830,16 @@ const formatTradeConfirmationSummary = ({
   const rateValue = payAmountDecimal > 0 ? receiveAmountDecimal / payAmountDecimal : 0;
   const rateDisplay = formatRate(rateValue);
 
-  const providerLabel =
-    quote.provider === "pump-fun"
-      ? "Pump.fun (Not graduated)"
-      : quote.provider;
+  const providerLabel = (() => {
+    switch (quote.provider) {
+      case "pump-fun":
+        return "Pump.fun (Not graduated)";
+      case "jupiter":
+        return "Jupiter";
+      default:
+        return quote.provider;
+    }
+  })();
 
   const slippageText = formatSlippagePercent(
     quote.slippage !== undefined ? (quote.slippage as number) : 0.5

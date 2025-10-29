@@ -322,7 +322,7 @@ describe("Bot helper utilities", () => {
       payToken: "SOL",
       receiveDisplay: "0.000045",
       receiveToken: "USDC",
-      providerLabel: "jupiter",
+      providerLabel: "Jupiter",
       rateDisplay: "0.00009",
       slippageText: "0.5%",
     });
@@ -356,7 +356,7 @@ describe("Bot helper utilities", () => {
       payToken: "FOO",
       receiveDisplay: botModule.wallet.formatSolBalance(Number(quote.outputAmount)),
       receiveToken: "SOL",
-      providerLabel: "jupiter",
+      providerLabel: "Jupiter",
       rateDisplay: "0.00055",
       slippageText: "1.0%",
     });
