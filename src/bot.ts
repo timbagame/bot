@@ -796,8 +796,7 @@ const formatSlippagePercent = (value: number): string => {
   const absolute = Math.abs(value);
 
   if (absolute >= 1) {
-    const decimals = Number.isInteger(value) ? 0 : 1;
-    return `${value.toFixed(decimals)}%`;
+    return `${value.toFixed(1)}%`;
   }
 
   if (absolute >= 0.1) {
