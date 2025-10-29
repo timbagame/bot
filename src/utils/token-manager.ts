@@ -558,12 +558,21 @@ export class TokenManager {
       }
       const builtinByMint = getBuiltinTokenMetadataByMint(candidate);
       if (builtinByMint) {
+        const treatAsNativeSol =
+          builtinByMint.isNativeSol && candidate.toUpperCase() === "SOL";
+        const fallbackTicker =
+          builtinByMint.isNativeSol && !treatAsNativeSol
+            ? builtinByMint.mint === WSOL_MINT
+              ? "WSOL"
+              : builtinByMint.ticker
+            : builtinByMint.ticker;
+
         return {
           token_mint: builtinByMint.mint,
-          token_ticker: builtinByMint.ticker,
+          token_ticker: fallbackTicker,
           decimals: builtinByMint.decimals,
           added_at: Date.now(),
-          isNativeSol: builtinByMint.isNativeSol,
+          isNativeSol: treatAsNativeSol,
         };
       }
       return null;
@@ -576,12 +585,21 @@ export class TokenManager {
 
     const builtinMint = getBuiltinTokenMetadataByMint(normalizedMint);
     if (builtinMint) {
+      const treatAsNativeSol =
+        builtinMint.isNativeSol && tickerOrMint.trim().toUpperCase() === "SOL";
+      const fallbackTicker =
+        builtinMint.isNativeSol && !treatAsNativeSol
+          ? builtinMint.mint === WSOL_MINT
+            ? "WSOL"
+            : builtinMint.ticker
+          : builtinMint.ticker;
+
       return {
         token_mint: builtinMint.mint,
-        token_ticker: builtinMint.ticker,
+        token_ticker: fallbackTicker,
         decimals: builtinMint.decimals,
         added_at: Date.now(),
-        isNativeSol: builtinMint.isNativeSol,
+        isNativeSol: treatAsNativeSol,
       };
     }
 
