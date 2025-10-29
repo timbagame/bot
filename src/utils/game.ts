@@ -2255,10 +2255,13 @@ export class GameManager {
             reservedTicketAmount,
             metadata.decimals
           );
+          const formattedBuffer = this.wallet.formatSolBalance(minSolBuffer);
 
           return {
             success: false,
-            error: `You have exactly ${formattedStake} ${tokenTicker} reserved for the ticket but no spare tokens to cover SOL fees. Add SOL manually or deposit more ${tokenTicker} before trying again.`,
+            error: `You have exactly ${formattedStake} ${tokenTicker} reserved for the ticket but no spare tokens to cover SOL fees.
+
+Keep at least ${formattedBuffer} SOL available for fees or deposit more ${tokenTicker} before trying again.`,
           };
         }
 
@@ -2797,10 +2800,13 @@ export class GameManager {
               reservedTicketAmount,
               metadata.decimals
             );
+            const formattedBuffer = this.wallet.formatSolBalance(minSolBuffer);
 
             return {
               success: false,
-              error: `You have exactly ${formattedStake} ${gameData.token_ticker} for the ticket but no spare tokens to cover SOL fees. Add SOL manually or deposit more ${gameData.token_ticker} before trying again.`,
+              error: `You have exactly ${formattedStake} ${gameData.token_ticker} for the ticket but no spare tokens to cover SOL fees.
+
+Keep at least ${formattedBuffer} SOL available for fees or deposit more ${gameData.token_ticker} before trying again.`,
             };
           }
 
