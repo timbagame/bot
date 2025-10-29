@@ -832,7 +832,7 @@ const formatTradeConfirmationSummary = ({
 
   const providerLabel =
     quote.provider === "pump-fun"
-      ? "pump-fun (ungraduated)"
+      ? "Pump.fun (Not graduated)"
       : quote.provider;
 
   const slippageText = formatSlippagePercent(
@@ -849,10 +849,6 @@ const formatTradeConfirmationSummary = ({
     `<b>Provider:</b> ${providerLabel}`,
     `<b>Slippage:</b> ${slippageText}`,
   ];
-
-  if (quote.provider === "pump-fun") {
-    lines.push("🔥 <b>Pump.fun Token</b> (Not graduated)");
-  }
 
   if (contractAddress) {
     lines.push("", `🔗 <b>Contract:</b> <code>${contractAddress}</code>`);

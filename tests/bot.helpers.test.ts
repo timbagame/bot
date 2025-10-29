@@ -287,12 +287,11 @@ describe("Bot helper utilities", () => {
       payToken: "SOL",
       receiveDisplay: "455090.146672",
       receiveToken: "TIMBA",
-      providerLabel: "pump-fun (ungraduated)",
+      providerLabel: "Pump.fun (Not graduated)",
       rateDisplay: "20959339.8734",
       slippageText: "1.0%",
       contractAddress: quote.outputMint,
     });
-    expect(summary.message).toContain("Pump.fun Token");
   });
 
   test("formatTradeConfirmationSummary labels Jupiter routes and defaults slippage", () => {
