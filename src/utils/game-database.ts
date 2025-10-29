@@ -552,7 +552,7 @@ export class GameDatabase extends BaseDatabase {
   }
 
   /**
-   * Get leaderboard statistics for players in a specific chat with token breakdown
+   * Get leaderboard statistics for players in a specific chat
    */
   public getLeaderboardStats(chatId: number, limit: number = 10): any[] {
     try {
@@ -580,21 +580,6 @@ export class GameDatabase extends BaseDatabase {
           WHERE (g.creator_telegram_id = pm.telegram_id OR g.winner_address = pm.public_key OR gp.telegram_id = pm.telegram_id) OR g.game_address IS NULL
           GROUP BY pm.telegram_id
           HAVING total_games > 0
-        ),
-        token_volumes AS (
-          SELECT
-            pm.telegram_id,
-            g.token_ticker,
-            g.token_mint,
-            COALESCE(SUM(CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.amount ELSE 0 END), 0) as token_volume
-          FROM player_mappings pm
-          LEFT JOIN games g ON g.chat_id = ?
-          LEFT JOIN game_participants gp
-            ON gp.telegram_id = pm.telegram_id
-           AND gp.game_address = g.game_address
-           AND gp.status = 'confirmed'
-          WHERE (g.creator_telegram_id = pm.telegram_id OR g.winner_address = pm.public_key OR gp.telegram_id = pm.telegram_id) AND g.status = 'completed'
-          GROUP BY pm.telegram_id, g.token_ticker, g.token_mint
         )
         SELECT
           ps.telegram_id,
@@ -603,21 +588,13 @@ export class GameDatabase extends BaseDatabase {
           ps.games_created,
           ps.games_joined,
           ps.total_volume,
-          ROUND(ps.win_rate, 1) as win_rate,
-          GROUP_CONCAT(
-            CASE
-              WHEN tv.token_volume > 0
-              THEN tv.token_ticker || ':' || tv.token_volume
-              ELSE NULL
-            END, '|'
-          ) as token_volumes
+          ROUND(ps.win_rate, 1) as win_rate
         FROM player_stats ps
-        LEFT JOIN token_volumes tv ON ps.telegram_id = tv.telegram_id
         GROUP BY ps.telegram_id, ps.total_games, ps.games_won, ps.games_created, ps.games_joined, ps.total_volume, ps.win_rate
         ORDER BY ps.games_won DESC, ps.win_rate DESC, ps.total_volume DESC
         LIMIT ?
       `,
-        [chatId, chatId, limit],
+        [chatId, limit],
         "getting leaderboard stats"
       );
     } catch {

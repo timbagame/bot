@@ -8,7 +8,7 @@ describe("GameDatabase Leaderboard", () => {
     gameDb = GameDatabase.getInstance();
   });
 
-  test("should correctly calculate volume by token with proper decimals", async () => {
+  test("should aggregate leaderboard stats across multiple tokens", async () => {
     const chatId = 12345;
     const playerId = "111";
     const playerPk = "PK111";
@@ -42,45 +42,9 @@ describe("GameDatabase Leaderboard", () => {
     expect(playerStats?.games_won).toBe(3);
     expect(playerStats?.total_games).toBe(3);
     
-    // Check token volumes breakdown
-    expect(playerStats?.token_volumes).toBeDefined();
-    const tokenVolumes = playerStats.token_volumes.split('|').filter(Boolean);
-    expect(tokenVolumes.length).toBe(3);
-    
-    // Should contain TIMBA:1000000, WSOL:500000000, USDC:50000000
-    expect(tokenVolumes).toContain('TIMBA:1000000');
-    expect(tokenVolumes).toContain('WSOL:500000000');
-    expect(tokenVolumes).toContain('USDC:50000000');
-  });
-
-  test("should prioritize TIMBA first in token volumes", async () => {
-    const chatId = 12346; // Different chat ID
-    const playerId = "111";
-    const playerPk = "PK111";
-
-    gameDb.savePlayerMapping(playerPk, playerId);
-
-    // Create games with different tokens
-    gameDb.saveGame("GAME1_PRIORITY", playerId, 1000000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
-    gameDb.saveGameParticipant("GAME1_PRIORITY", "222", "PK222");
-    gameDb.completeGame("GAME1_PRIORITY", playerPk);
-
-    gameDb.saveGame("GAME2_PRIORITY", playerId, 2000000000, "coinflip", "WSOL_MINT", "WSOL", 2, 2, chatId);
-    gameDb.saveGameParticipant("GAME2_PRIORITY", "333", "PK333");
-    gameDb.completeGame("GAME2_PRIORITY", playerPk);
-
-    gameDb.saveGame("GAME3_PRIORITY", playerId, 50000000, "coinflip", "USDC_MINT", "USDC", 2, 2, chatId);
-    gameDb.saveGameParticipant("GAME3_PRIORITY", "444", "PK444");
-    gameDb.completeGame("GAME3_PRIORITY", playerPk);
-
-    const stats = gameDb.getLeaderboardStats(chatId, 10);
-    const playerStats = stats.find(s => s.telegram_id === playerId);
-
-    expect(playerStats?.token_volumes).toBeDefined();
-    const tokenVolumes = playerStats.token_volumes.split('|').filter(Boolean);
-    
-    // TIMBA should be first regardless of volume
-    expect(tokenVolumes[0]).toBe('TIMBA:1000000');
+    const expectedTotalVolume = 1000000 + 500000000 + 50000000;
+    expect(playerStats?.total_volume).toBe(expectedTotalVolume);
+    expect(playerStats?.token_volumes).toBeUndefined();
   });
 
   test("should calculate win rate correctly and round to 1 decimal", async () => {
@@ -130,35 +94,5 @@ describe("GameDatabase Leaderboard", () => {
     expect(playerStats?.games_won).toBe(0);
     expect(playerStats?.total_games).toBe(1);
     expect(playerStats?.win_rate).toBe(0);
-  });
-
-  test("should limit token volumes to prevent huge messages", async () => {
-    const chatId = 12349; // Different chat ID
-    const playerId = "444"; // Different player ID
-    const playerPk = "PK444";
-
-    gameDb.savePlayerMapping(playerPk, playerId);
-
-    // Create 7 games with different tokens (more than 5 limit)
-    const tokens = ["TIMBA", "WSOL", "USDC", "USDT", "DOGE", "PEPE", "BONK"];
-    
-    for (let i = 0; i < tokens.length; i++) {
-      const gameId = `GAME${i + 1}_LIMIT`;
-      gameDb.saveGame(gameId, playerId, 1000000, "coinflip", `${tokens[i]}_MINT`, tokens[i], 2, 2, chatId);
-      gameDb.saveGameParticipant(gameId, "555", "PK555");
-      gameDb.completeGame(gameId, playerPk);
-    }
-
-    const stats = gameDb.getLeaderboardStats(chatId, 10);
-    const playerStats = stats.find(s => s.telegram_id === playerId);
-
-    expect(playerStats?.token_volumes).toBeDefined();
-    const tokenVolumes = playerStats.token_volumes.split('|').filter(Boolean);
-    
-    // Should have all 7 tokens in the database query
-    expect(tokenVolumes.length).toBe(7);
-    
-    // Should contain TIMBA token
-    expect(tokenVolumes).toContain('TIMBA:1000000');
   });
 });
