@@ -1227,15 +1227,42 @@ export class WalletManager {
   public async confirmTransaction(signature: string): Promise<void> {
     const startTime = Date.now();
     const timeout = CONFIRMATION_TIMEOUT_MS;
-    const pollInterval = 1000;
+    const pollInterval = 500; // Reduced to 500ms for faster polling
+    let pollCount = 0;
+    let lastStatus: string | null = null;
+    let lastConfirmationStatus: string | null = null;
+    let lastConfirmations: number | null = null;
 
-    console.log(`🔍 Confirming transaction ${signature} (timeout: ${timeout}ms)`);
+    console.log(`🔍 Confirming transaction ${signature} (timeout: ${timeout}ms, poll interval: ${pollInterval}ms)`);
 
     while (Date.now() - startTime < timeout) {
+      pollCount++;
+      const elapsed = Date.now() - startTime;
+
       try {
         const result = await this.connection.getSignatureStatus(signature);
 
         if (result?.value) {
+          const currentStatus = result.value.confirmationStatus || "unknown";
+          const currentConfirmations = typeof result.value.confirmations === "number"
+            ? result.value.confirmations
+            : null;
+
+          // Log status changes or every 10 polls
+          if (
+            currentStatus !== lastConfirmationStatus ||
+            currentConfirmations !== lastConfirmations ||
+            pollCount % 10 === 0
+          ) {
+            console.log(
+              `📊 Transaction ${signature} status update (poll ${pollCount}, ${elapsed}ms): ${currentStatus}${
+                currentConfirmations !== null ? ` (${currentConfirmations} confirmations)` : ""
+              }`
+            );
+            lastConfirmationStatus = currentStatus;
+            lastConfirmations = currentConfirmations;
+          }
+
           if (result.value.err) {
             console.error(
               `❌ Transaction ${signature} failed:`,
@@ -1251,19 +1278,15 @@ export class WalletManager {
             result.value.confirmationStatus === "finalized"
           ) {
             console.log(
-              `✅ Transaction ${signature} confirmed in ${
-                Date.now() - startTime
-              }ms`
+              `✅ Transaction ${signature} confirmed in ${elapsed}ms (${pollCount} polls)`
             );
             return;
           }
-
-          if (result.value.confirmationStatus) {
-            console.log(
-              `⏳ Transaction ${signature} status: ${
-                result.value.confirmationStatus
-              }`
-            );
+        } else {
+          // Log when no result is returned, but less frequently
+          if (lastStatus !== "no-result" && pollCount % 5 === 0) {
+            console.log(`⚠️ Transaction ${signature} returned no status result (poll ${pollCount}, ${elapsed}ms)`);
+            lastStatus = "no-result";
           }
         }
 
@@ -1274,13 +1297,13 @@ export class WalletManager {
           error.message?.includes("timeout")
         ) {
           console.warn(
-            `⚠️ Network issue checking ${signature}, retrying`
+            `⚠️ Network issue checking ${signature} (poll ${pollCount}, ${elapsed}ms), retrying with longer delay`
           );
           await new Promise((resolve) => setTimeout(resolve, pollInterval * 2));
           continue;
         }
         console.error(
-          `❌ Error checking transaction status for ${signature}:`,
+          `❌ Error checking transaction status for ${signature} (poll ${pollCount}, ${elapsed}ms):`,
           error.message
         );
         throw error;
@@ -1288,6 +1311,7 @@ export class WalletManager {
     }
 
     // Final check before giving up
+    console.log(`🔄 Performing final status check for ${signature} after ${pollCount} polls`);
     try {
       const finalResult = await this.connection.getSignatureStatus(signature);
       if (
@@ -1299,6 +1323,19 @@ export class WalletManager {
         );
         return;
       }
+
+      // Log final status if available
+      if (finalResult?.value) {
+        const finalStatus = finalResult.value.confirmationStatus || "unknown";
+        const finalConfirmations = typeof finalResult.value.confirmations === "number"
+          ? finalResult.value.confirmations
+          : null;
+        console.log(
+          `📊 Final status for ${signature}: ${finalStatus}${
+            finalConfirmations !== null ? ` (${finalConfirmations} confirmations)` : ""
+          }`
+        );
+      }
     } catch (error) {
       console.warn(
         `⚠️ Error on final check for ${signature}:`,
@@ -1307,7 +1344,7 @@ export class WalletManager {
     }
 
     console.error(
-      `⏰ Transaction confirmation timeout for ${signature} after ${timeout}ms`
+      `⏰ Transaction confirmation timeout for ${signature} after ${timeout}ms (${pollCount} polls)`
     );
     throw new Error(
       `Transaction confirmation timeout after ${timeout}ms. Transaction may still succeed - check signature ${signature}`
