@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { buildWalletCaption, showCustomAmountPrompt } from "../src/utils/wallet-ui";
 import { INPUT_TIMEOUT_HINT } from "../src/utils/constants";
-import { getUserState, __test_clearUserState } from "../src/utils/user-state";
+import { getInputSession, clearAllInputSessions } from "../src/utils/user-state";
 
 type EditCall = { text: string; options: any };
 type ReplyCall = { text: string; options: any; message_id: number };
@@ -63,9 +63,7 @@ const expectSingleEdit = (edits: EditCall[]): EditCall => {
 };
 
 afterEach(() => {
-  __test_clearUserState("send-user");
-  __test_clearUserState("sell-user");
-  __test_clearUserState("buy-user");
+  clearAllInputSessions();
 });
 
 test("buildWalletCaption formats address and token lines", () => {
@@ -138,11 +136,11 @@ test("showCustomAmountPrompt formats send custom amount flow", async () => {
     "send_select_SOL"
   );
 
-  const state = getUserState("send-user", false);
-  expect(state?.type).toBe("send_custom_amount");
-  expect(state?.token).toBe("SOL");
-  expect(state?.messageId).toBe(321);
-  expect(state?.chatId).toBe(654);
+  const session = getInputSession("654_321");
+  expect(session?.type).toBe("send_custom_amount");
+  expect(session?.["token"]).toBe("SOL");
+  expect(session?.messageId).toBe(321);
+  expect(session?.chatId).toBe(654);
 });
 
 test("showCustomAmountPrompt formats sell custom amount flow", async () => {
@@ -178,11 +176,11 @@ test("showCustomAmountPrompt formats sell custom amount flow", async () => {
     "cmd_withdraw"
   );
 
-  const state = getUserState("sender", false);
-  expect(state?.type).toBe("send_custom_amount");
-  expect(state?.token).toBe("TIMBA");
-  expect(state?.messageId).toBe(111);
-  expect(state?.chatId).toBe(222);
+  const session = getInputSession("222_111");
+  expect(session?.type).toBe("send_custom_amount");
+  expect(session?.["token"]).toBe("TIMBA");
+  expect(session?.messageId).toBe(111);
+  expect(session?.chatId).toBe(222);
 });
 
 test("showCustomAmountPrompt formats buy custom amount flow", async () => {
@@ -228,12 +226,12 @@ test("showCustomAmountPrompt formats buy custom amount flow", async () => {
     "cmd_swap"
   );
 
-  const state = getUserState("buy-user", false);
-  expect(state?.type).toBe("swap_custom_amount");
-  expect(state?.fromToken).toBe("USDC");
-  expect(state?.toToken).toBe("TIMBA");
-  expect(state?.messageId).toBe(777);
-  expect(state?.chatId).toBe(888);
+  const session = getInputSession("888_777");
+  expect(session?.type).toBe("swap_custom_amount");
+  expect(session?.["fromToken"]).toBe("USDC");
+  expect(session?.["toToken"]).toBe("TIMBA");
+  expect(session?.messageId).toBe(777);
+  expect(session?.chatId).toBe(888);
 });
 
 test("showCustomAmountPrompt stores fallback reply identifiers when edit fails", async () => {
@@ -268,9 +266,15 @@ test("showCustomAmountPrompt stores fallback reply identifiers when edit fails",
     "send_select_SOL"
   );
 
-  const state = getUserState("send-user", false);
-  expect(state?.type).toBe("send_custom_amount");
-  expect(reply).toBeDefined();
-  expect(state?.messageId).toBe(reply?.message_id);
-  expect(state?.chatId).toBe(9_001);
+  const replyMessageId = reply?.message_id;
+  expect(replyMessageId).toBeDefined();
+
+  const sessionKey = replyMessageId
+    ? `9001_${replyMessageId}`
+    : undefined;
+  const session = sessionKey ? getInputSession(sessionKey) : undefined;
+
+  expect(session?.type).toBe("send_custom_amount");
+  expect(session?.messageId).toBe(replyMessageId);
+  expect(session?.chatId).toBe(9_001);
 });

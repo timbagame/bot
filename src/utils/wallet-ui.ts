@@ -2,7 +2,7 @@ import { InlineKeyboard, type Context } from "grammy";
 import { escapeHtml, formatUsdValue } from "./format-amount";
 import { INPUT_TIMEOUT_HINT, LAMPORTS_PER_SOL } from "./constants";
 import { respondWithMenu } from "./menu-response";
-import { setUserState } from "./user-state";
+import { setInputSession, type InputSessionState } from "./user-state";
 import { NetworkDetector } from "./network-detector";
 import { createCancelKeyboard } from "./keyboards";
 
@@ -183,7 +183,7 @@ export type WalletActionMenuResult = {
   keyboard: InlineKeyboard;
 };
 
-export type CustomAmountPromptOptions<State extends Record<string, unknown>> = {
+export type CustomAmountPromptOptions<State extends InputSessionState> = {
   ctx: Context;
   userId: string;
   title: string;
@@ -217,10 +217,7 @@ const appendSection = (target: string[], lines: string[] | undefined) => {
   target.push(...filtered);
 };
 
-type CustomAmountPromptDerivedState<State extends Record<string, unknown>> =
-  State & { messageId?: number; chatId?: number };
-
-export const showCustomAmountPrompt = async <State extends Record<string, unknown>>({
+export const showCustomAmountPrompt = async <State extends InputSessionState>({
   ctx,
   userId,
   title,
@@ -252,38 +249,15 @@ export const showCustomAmountPrompt = async <State extends Record<string, unknow
 
   appendSection(lines, footerLines);
 
-  const menuResult = await respondWithMenu(ctx, {
+  await persistInputPrompt({
+    ctx,
+    userState: { chatId: state.chatId, messageId: state.messageId },
     text: lines.join("\n"),
     keyboard: createCancelKeyboard(cancelCallback, cancelLabel),
+    session: { ...state },
+    logLabel: "showCustomAmountPrompt",
+    persistSession: Boolean(userId),
   });
-
-  const derivedState: CustomAmountPromptDerivedState<State> = {
-    ...state,
-  } as CustomAmountPromptDerivedState<State>;
-  const contextMessageIdValue = ctx.callbackQuery?.message?.message_id;
-  const contextMessageId =
-    typeof contextMessageIdValue === "number" ? contextMessageIdValue : undefined;
-  const contextChatIdValue = ctx.chat?.id;
-  const contextChatId =
-    typeof contextChatIdValue === "number" ? contextChatIdValue : undefined;
-  const resolvedMessageId =
-    typeof menuResult.messageId === "number"
-      ? menuResult.messageId
-      : contextMessageId ?? derivedState.messageId;
-  const resolvedChatId =
-    typeof menuResult.chatId === "number"
-      ? menuResult.chatId
-      : contextChatId ?? derivedState.chatId;
-
-  if (typeof resolvedMessageId === "number") {
-    derivedState.messageId = resolvedMessageId;
-  }
-
-  if (typeof resolvedChatId === "number") {
-    derivedState.chatId = resolvedChatId;
-  }
-
-  setUserState(userId, derivedState);
 };
 
 export type WalletMenuUpsertOptions = {
@@ -337,6 +311,68 @@ export const upsertWalletMenuMessage = async ({
     respondedWithReply: menuResult.respondedWithReply,
   };
 };
+
+export type PersistInputPromptOptions = {
+  ctx: Context;
+  userState: { chatId?: number; messageId?: number };
+  text: string;
+  keyboard: InlineKeyboard;
+  session: InputSessionState;
+  logLabel: string;
+  parseMode?: "HTML" | "Markdown" | "MarkdownV2";
+  replyToMessageId?: number;
+  persistSession?: boolean;
+};
+
+export async function persistInputPrompt({
+  ctx,
+  userState,
+  text,
+  keyboard,
+  session,
+  logLabel,
+  parseMode = "HTML",
+  replyToMessageId,
+  persistSession = true,
+}: PersistInputPromptOptions): Promise<{ chatId?: number; messageId?: number }> {
+  const targetChatId =
+    typeof userState.chatId === "number"
+      ? userState.chatId
+      : typeof ctx.chat?.id === "number"
+      ? ctx.chat.id
+      : undefined;
+  const targetMessageId =
+    typeof userState.messageId === "number" ? userState.messageId : undefined;
+
+  const menuResult = await upsertWalletMenuMessage({
+    ctx,
+    text,
+    keyboard,
+    parseMode,
+    targetChatId,
+    targetMessageId,
+    replyToMessageId:
+      replyToMessageId ?? ctx.message?.message_id ?? undefined,
+    logLabel,
+    allowContextEdit: true,
+  });
+
+  const resolvedChatId =
+    menuResult.chatId ??
+    targetChatId ??
+    (typeof ctx.chat?.id === "number" ? ctx.chat.id : undefined);
+  const resolvedMessageId = menuResult.messageId ?? targetMessageId;
+
+  if (persistSession && resolvedChatId != null && resolvedMessageId != null) {
+    setInputSession(`${resolvedChatId}_${resolvedMessageId}`, {
+      ...session,
+      chatId: resolvedChatId,
+      messageId: resolvedMessageId,
+    });
+  }
+
+  return { chatId: resolvedChatId, messageId: resolvedMessageId };
+}
 
 const shouldIncludeSol = (
   includeSol: TokenSelectQuickActions["includeSol"],

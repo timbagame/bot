@@ -293,8 +293,13 @@ export function formatTransactionForDisplay(tx: TransactionRecord): string {
     tx.signature,
     tx.network
   );
+  const fallbackUrl = tx.signature
+    ? `https://solscan.io/tx/${tx.signature}`
+    : null;
   const viewLink = explorerUrl
-    ? `<a href="${explorerUrl}">View</a>`
+    ? `<a href="${explorerUrl}">${explorerUrl}</a>`
+    : fallbackUrl
+    ? `<a href="${fallbackUrl}">${fallbackUrl}</a>`
     : "View";
 
   return `${statusIcon}${typeIcon} ${amountText}\n<code>${date}</code> • ${viewLink}`;
