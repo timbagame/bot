@@ -188,7 +188,8 @@ test("parseAmount fails when explicit mint metadata cannot be fetched", async ()
   if (res.success) {
     throw new Error("expected explicit mint failure");
   }
-  expect(res.error).toBe("invalid_amount");
+  expect(res.error).toBe("unknown_token");
+  expect(res.unknownToken).toBe(explicitMint.toUpperCase());
   expect(metadataCalls).toEqual([explicitMint]);
 });
 
