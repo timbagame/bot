@@ -200,11 +200,13 @@ describe("game setup typed input handling", () => {
     expect(replies).toHaveLength(1);
     const firstEdit = edits[0]!;
     const firstReply = replies[0]!;
-    expect(String(firstEdit.text)).toContain("Invalid number of players");
-    expect(String(firstReply.text)).toContain("Invalid number of players");
+    expect(String(firstEdit.text)).toContain("Confirm Giveaway");
+    expect(String(firstEdit.text)).toContain("Players: <b>1</b>");
+    expect(String(firstReply.text)).toContain("Confirm Giveaway");
+    expect(String(firstReply.text)).toContain("Players: <b>1</b>");
 
     const restored = __testSessions.get(TELEGRAM_USER_ID) as any;
-    expect(restored.waitingFor).toBe("players_input");
+    expect(restored.waitingFor).toBe("setup");
     expect(restored.tokenTicker).toBe("USDC");
     expect(restored.tokenMint).toBe("MintGiveaway222");
     expect(restored.creatorId).toBe("creator-2");
