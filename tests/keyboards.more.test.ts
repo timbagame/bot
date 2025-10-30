@@ -139,6 +139,8 @@ describe("keyboards: amount selection", () => {
     "amount_coinflip_300",
     "amount_coinflip_400",
     "amount_coinflip_500",
+    "amount_coinflip_700",
+    "amount_coinflip_1000",
   ];
 
   test("defaults to fixed contract minimum multiples when no balance", () => {
@@ -196,7 +198,8 @@ describe("keyboards: amount selection", () => {
     const texts = extractTexts(kb).filter((text) => /^\d/.test(text));
     expect(texts.length).toBeGreaterThan(0);
     expect(texts.every((text) => !text.includes("TIMBA"))).toBe(true);
-    expect(texts.every((text) => text.includes("(~$"))).toBe(true);
+    expect(texts.every((text) => !text.includes("~"))).toBe(true);
+    expect(texts.every((text) => /\(\$\d+\.\d\)/.test(text))).toBe(true);
   });
 
   test("fee warning message shows for low balance", () => {

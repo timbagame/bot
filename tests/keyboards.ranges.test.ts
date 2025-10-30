@@ -29,6 +29,8 @@ describe("createAmountSelectionKeyboard ranges", () => {
     "amount_coinflip_300",
     "amount_coinflip_400",
     "amount_coinflip_500",
+    "amount_coinflip_700",
+    "amount_coinflip_1000",
   ];
 
   test("medium balance (between 50 and 200) still uses fixed contract minimum multiples", () => {

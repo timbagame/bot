@@ -133,7 +133,7 @@ export const getFeeWarningMessage = (
   return message;
 };
 
-const SUGGESTION_MULTIPLIERS = [1, 5, 10, 15, 20, 25] as const;
+const SUGGESTION_MULTIPLIERS = [1, 5, 10, 15, 20, 25, 35, 50] as const;
 
 export const getSuggestedStakeAmounts = (
   contractMinimum: number,
@@ -193,10 +193,15 @@ export const createAmountSelectionKeyboard = (
       creatorId
     );
     const display = formatTokenDisplay(amount, { decimals });
-    const usdText =
-      tokenPriceUSD !== undefined
-        ? ` (~$${formatUsdValue(amount * tokenPriceUSD)})`
-        : "";
+    let usdText = "";
+    if (tokenPriceUSD !== undefined) {
+      const usdFormatted = formatUsdValue(amount * tokenPriceUSD, {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+        fallback: "0.0",
+      });
+      usdText = ` ($${usdFormatted})`;
+    }
     keyboard.text(`${display}${usdText}`, callbackData);
     const isEndOfPair = index % 2 === 1;
     const isLast = index === amounts.length - 1;
