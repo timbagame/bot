@@ -141,7 +141,7 @@ describe("game setup typed input handling", () => {
       contractMinimum: 0.25,
     } as any;
 
-    __testSessions.set(TELEGRAM_USER_ID, session);
+    __testSessions.set(`${CHAT_ID}_${session.messageId}`, session);
 
     const ctx = createMockCtx("abc", {
       reply_to_message: { message_id: 21_000 }
@@ -163,7 +163,7 @@ describe("game setup typed input handling", () => {
     expect(firstEdit.messageId).toBe(session.messageId);
     expect(String(firstEdit.text)).toContain("Invalid amount");
 
-    const restored = __testSessions.get(TELEGRAM_USER_ID) as any;
+    const restored = __testSessions.get(`${CHAT_ID}_${session.messageId}`) as any;
     expect(restored.waitingFor).toBe("amount_input");
     expect(restored.tokenTicker).toBe("BONK");
     expect(restored.tokenMint).toBe("MintCoinflip111");
@@ -185,7 +185,7 @@ describe("game setup typed input handling", () => {
       contractMinimum: 1,
     } as any;
 
-    __testSessions.set(TELEGRAM_USER_ID, session);
+    __testSessions.set(`${CHAT_ID}_${session.messageId}`, session);
 
     const ctx = createMockCtx("1", {
       editError: new Error("message not found"),
@@ -213,7 +213,7 @@ describe("game setup typed input handling", () => {
     expect(String(firstReply.text)).toContain("Confirm Giveaway");
     expect(String(firstReply.text)).toContain("Players: <b>1</b>");
 
-    const restored = __testSessions.get(TELEGRAM_USER_ID) as any;
+    const restored = __testSessions.get(`${CHAT_ID}_${session.messageId}`) as any;
     expect(restored.waitingFor).toBe("setup");
     expect(restored.tokenTicker).toBe("USDC");
     expect(restored.tokenMint).toBe("MintGiveaway222");
@@ -260,7 +260,7 @@ describe("game setup typed input handling", () => {
       );
       expect(minSpy).toHaveBeenCalledWith("OverrideMint111", 6);
 
-      const session = __testSessions.get(TELEGRAM_USER_ID) as any;
+      const session = __testSessions.get(`${CHAT_ID}_${ctx.message.message_id}`) as any;
       expect(session.tokenMint).toBe("OverrideMint111");
       expect(session.tokenTicker).toBe("OVR");
       expect(session.tokenDecimals).toBe(6);

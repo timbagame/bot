@@ -230,20 +230,20 @@ const defaultGameSetupSession: Pick<GameSetupSession, "waitingFor" | "gameType" 
   userBalance: 0,
 };
 
-const userSessions = new Map<number, GameSetupSession>();
+const userSessions = new Map<string, GameSetupSession>();
 
 const updateGameSetupSession = (
-  userId: number,
+  sessionKey: string,
   overrides: Partial<GameSetupSession>
 ): GameSetupSession => {
-  const existing = userSessions.get(userId);
+  const existing = userSessions.get(sessionKey);
   const next: GameSetupSession = {
     ...defaultGameSetupSession,
     ...(existing ?? {}),
     ...overrides,
   } as GameSetupSession;
 
-  userSessions.set(userId, next);
+  userSessions.set(sessionKey, next);
   return next;
 };
 
@@ -1559,7 +1559,7 @@ const startInteractiveGameSetup = async (
     reply_to_message_id: ctx.message?.message_id,
   });
 
-  updateGameSetupSession(Number(getTelegramId(ctx)), {
+  updateGameSetupSession(`${ctx.chat?.id || 0}_${setupMessage.message_id}`, {
     waitingFor: "setup",
     gameType: copy.gameType,
     userBalance,
@@ -1697,8 +1697,9 @@ const withCreatorContext = (
     }
 
     const userId = Number(userIdBigInt);
+    const sessionKey = `${ctx.chat?.id ?? 0}_${ctx.callbackQuery?.message?.message_id ?? 0}`;
 
-    let session = userSessions.get(userId);
+    let session = userSessions.get(sessionKey);
     const tokenContext = await buildTokenContext(session, ctx.chat?.id);
 
     const creatorContext: CreatorCallbackContext = {
@@ -1706,7 +1707,7 @@ const withCreatorContext = (
       userId,
       session,
       tokenContext,
-      updateSession: (updates) => {
+      updateSession: (updates, keyOverride?: string) => {
         const base: Partial<GameSetupSession> = session ? { ...session } : {};
         const next = {
           ...base,
@@ -1720,13 +1721,14 @@ const withCreatorContext = (
             (base.contractMinimum ?? tokenContext.contractMinimum),
         } as GameSetupSession;
 
-        userSessions.set(userId, next);
+        const keyToUse = keyOverride ?? sessionKey;
+        userSessions.set(keyToUse, next);
         session = next;
         creatorContext.session = next;
         return next;
       },
       clearSession: () => {
-        userSessions.delete(userId);
+        userSessions.delete(sessionKey);
         session = undefined;
         creatorContext.session = undefined;
       },
@@ -4673,21 +4675,20 @@ const handleGameSetupTextInput = async (
       return await next();
     }
 
-    // Check if user is in a session waiting for input
-    const userSession = userSessions.get(telegramIdNumeric);
-
-    if (!userSession || (userSession.waitingFor !== "amount_input" && userSession.waitingFor !== "players_input")) {
-      return await next(); // Not waiting for input, pass to other handlers
-    }
-
-    // Only handle messages from the same chat where session was created
-    if (userSession.chatId && ctx.chat?.id !== userSession.chatId) {
+    // Check if the message is a reply to a prompting message
+    const replyToMessageId = ctx.message?.reply_to_message?.message_id;
+    if (!replyToMessageId) {
       return await next();
     }
 
-    // Check if the message is a reply to the prompting message
-    if (!ctx.message?.reply_to_message || ctx.message.reply_to_message.message_id !== userSession.messageId) {
-      return await next(); // Not a reply to the prompting message, ignore
+    // Construct session key from chat and message ID
+    const sessionKey = `${ctx.chat?.id || 0}_${replyToMessageId}`;
+
+    // Check if user is in a session waiting for input
+    const userSession = userSessions.get(sessionKey);
+
+    if (!userSession || (userSession.waitingFor !== "amount_input" && userSession.waitingFor !== "players_input")) {
+      return await next(); // Not waiting for input, pass to other handlers
     }
 
     // Keep user's message (avoid deleting to preserve reply chain)
@@ -4698,12 +4699,12 @@ const handleGameSetupTextInput = async (
     // default token.
     const sessionSnapshot = { ...userSession };
     const restoreSession = (overrides: Partial<GameSetupSession> = {}) => {
-      userSessions.set(telegramIdNumeric, {
+      userSessions.set(sessionKey, {
         ...sessionSnapshot,
         ...overrides,
       });
     };
-    userSessions.delete(telegramIdNumeric);
+    userSessions.delete(sessionKey);
 
     const defaultMetadata = await getDefaultTokenMetadata();
     const tokenTicker =
@@ -4804,7 +4805,7 @@ const handleGameSetupTextInput = async (
         });
       }
 
-      updateGameSetupSession(Number(getTelegramId(ctx)), {
+      updateGameSetupSession(sessionKey, {
         waitingFor: "setup",
         gameType: userSession.gameType,
         userBalance: userSession.userBalance,
@@ -4922,7 +4923,7 @@ const handleGameSetupTextInput = async (
       });
     }
 
-    updateGameSetupSession(Number(getTelegramId(ctx)), {
+    updateGameSetupSession(sessionKey, {
       waitingFor: "setup",
       gameType: userSession.gameType,
       userBalance: userSession.userBalance,
