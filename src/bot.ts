@@ -1,5 +1,6 @@
 import "./utils/logging";
 import { Bot, Context, InlineKeyboard } from "grammy";
+import type { NextFunction } from "grammy";
 import { run, sequentialize } from "@grammyjs/runner";
 import { WalletManager } from "./utils/wallet";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
@@ -4643,7 +4644,10 @@ bot.callbackQuery(
 );
 
 // Text input handler for custom amounts
-bot.on("message:text", async (ctx, next) => {
+const handleGameSetupTextInput = async (
+  ctx: Context,
+  next: NextFunction
+) => {
   try {
     const telegramIdNumeric = Number(getTelegramId(ctx));
     if (telegramIdNumeric === 0) {
@@ -4664,7 +4668,17 @@ bot.on("message:text", async (ctx, next) => {
 
     // Keep user's message (avoid deleting to preserve reply chain)
 
-    // Clear the session
+    // Clear the session temporarily while we process the input. We'll
+    // restore it on validation errors so the flow keeps the original token
+    // context instead of falling back to the (potentially changed) chat
+    // default token.
+    const sessionSnapshot = { ...userSession };
+    const restoreSession = (overrides: Partial<GameSetupSession> = {}) => {
+      userSessions.set(telegramIdNumeric, {
+        ...sessionSnapshot,
+        ...overrides,
+      });
+    };
     userSessions.delete(telegramIdNumeric);
 
     const defaultMetadata = await getDefaultTokenMetadata();
@@ -4704,6 +4718,7 @@ bot.on("message:text", async (ctx, next) => {
         } catch (error) {
           await ctx.reply(errorMessage, { parse_mode: "HTML" });
         }
+        restoreSession({ waitingFor: "players_input" });
         return;
       }
 
@@ -4789,6 +4804,7 @@ bot.on("message:text", async (ctx, next) => {
           parse_mode: "HTML"
         });
       }
+      restoreSession({ waitingFor: "amount_input" });
       return;
     }
 
@@ -4806,6 +4822,7 @@ bot.on("message:text", async (ctx, next) => {
           parse_mode: "HTML"
         });
       }
+      restoreSession({ waitingFor: "amount_input" });
       return;
     }
 
@@ -4821,6 +4838,7 @@ bot.on("message:text", async (ctx, next) => {
       } catch (error) {
         await ctx.reply(errorMessage, { parse_mode: "HTML" });
       }
+      restoreSession({ waitingFor: "amount_input" });
       return;
     }
 
@@ -4886,7 +4904,11 @@ bot.on("message:text", async (ctx, next) => {
     console.error("Error in text input handler:", error);
     await next();
   }
-});
+};
+
+bot.on("message:text", handleGameSetupTextInput);
+
+export const __test_handleGameSetupTextInput = handleGameSetupTextInput;
 
 
 // ================================
