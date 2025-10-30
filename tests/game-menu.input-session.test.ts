@@ -18,8 +18,25 @@ import * as prices from "../src/utils/prices";
 const TELEGRAM_USER_ID = 4242;
 const CHAT_ID = 998_001;
 
+type EditCall = {
+  type: "edit";
+  chatId: number;
+  messageId: number;
+  text: string;
+  options: Record<string, unknown>;
+};
+
+type ReplyCall = {
+  type: "reply";
+  text: string;
+  options: Record<string, unknown>;
+  message_id: number;
+};
+
+type CallLog = EditCall | ReplyCall;
+
 type MockCtx = {
-  __calls: Array<Record<string, unknown>>;
+  __calls: CallLog[];
   api: {
     editMessageText: (
       chatId: number,
@@ -40,9 +57,12 @@ type MockCtxOptions = {
   editError?: Error;
 };
 
+const isEditCall = (call: CallLog): call is EditCall => call.type === "edit";
+const isReplyCall = (call: CallLog): call is ReplyCall => call.type === "reply";
+
 const createMockCtx = (text: string, options: MockCtxOptions = {}): MockCtx => {
   const { editError } = options;
-  const calls: Array<Record<string, unknown>> = [];
+  const calls: CallLog[] = [];
   let replyId = 50_000;
 
   return {
@@ -74,7 +94,12 @@ const createMockCtx = (text: string, options: MockCtxOptions = {}): MockCtx => {
     },
     reply: async (replyText: string, opts: Record<string, unknown>) => {
       replyId += 1;
-      calls.push({ type: "reply", text: replyText, options: opts, message_id: replyId });
+      calls.push({
+        type: "reply",
+        text: replyText,
+        options: opts,
+        message_id: replyId,
+      });
       return { message_id: replyId };
     },
   };
@@ -124,11 +149,12 @@ describe("game setup typed input handling", () => {
     expect(nextCalled).toBe(false);
     expect(metadataSpy).toHaveBeenCalledTimes(1);
 
-    const edits = ctx.__calls.filter((call) => call.type === "edit");
+    const edits = ctx.__calls.filter(isEditCall);
     expect(edits).toHaveLength(1);
-    expect(edits[0].chatId).toBe(CHAT_ID);
-    expect(edits[0].messageId).toBe(session.messageId);
-    expect(String(edits[0].text)).toContain("Invalid amount");
+    const firstEdit = edits[0]!;
+    expect(firstEdit.chatId).toBe(CHAT_ID);
+    expect(firstEdit.messageId).toBe(session.messageId);
+    expect(String(firstEdit.text)).toContain("Invalid amount");
 
     const restored = __testSessions.get(TELEGRAM_USER_ID) as any;
     expect(restored.waitingFor).toBe("amount_input");
@@ -168,12 +194,14 @@ describe("game setup typed input handling", () => {
     expect(nextCalled).toBe(false);
     expect(metadataSpy).toHaveBeenCalledTimes(1);
 
-    const edits = ctx.__calls.filter((call) => call.type === "edit");
-    const replies = ctx.__calls.filter((call) => call.type === "reply");
+    const edits = ctx.__calls.filter(isEditCall);
+    const replies = ctx.__calls.filter(isReplyCall);
     expect(edits).toHaveLength(1);
     expect(replies).toHaveLength(1);
-    expect(String(edits[0].text)).toContain("Invalid number of players");
-    expect(String(replies[0].text)).toContain("Invalid number of players");
+    const firstEdit = edits[0]!;
+    const firstReply = replies[0]!;
+    expect(String(firstEdit.text)).toContain("Invalid number of players");
+    expect(String(firstReply.text)).toContain("Invalid number of players");
 
     const restored = __testSessions.get(TELEGRAM_USER_ID) as any;
     expect(restored.waitingFor).toBe("players_input");

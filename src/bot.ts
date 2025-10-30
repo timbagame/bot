@@ -4780,7 +4780,14 @@ const handleGameSetupTextInput = async (
         )
       ).formatted;
 
-    const inputText = ctx.message.text.trim();
+    const messageText = ctx.message?.text;
+
+    if (!messageText) {
+      restoreSession();
+      return await next();
+    }
+
+    const inputText = messageText.trim();
 
     // Handle players input
     if (userSession.waitingFor === "players_input") {
