@@ -132,43 +132,54 @@ describe("keyboards: misc menus", () => {
 });
 
 describe("keyboards: amount selection", () => {
-  test("defaults to 3 simple amounts when no balance", () => {
+  const expectedDefaultCallbacks = [
+    "amount_coinflip_20",
+    "amount_coinflip_100",
+    "amount_coinflip_200",
+    "amount_coinflip_300",
+    "amount_coinflip_400",
+    "amount_coinflip_500",
+  ];
+
+  test("defaults to fixed contract minimum multiples when no balance", () => {
     const kb = createAmountSelectionKeyboard("coinflip");
     const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
-    expect(callbacks).toEqual([
-      "amount_coinflip_20",
-      "amount_coinflip_100",
-      "amount_coinflip_200",
-    ]);
+    expect(callbacks).toEqual(expectedDefaultCallbacks);
   });
 
-  test("very small balance yields <= balance amounts without duplicates", () => {
+  test("small balance still surfaces fixed contract minimum multiples", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 3);
     const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
-    const amounts = callbacks.map((s) => Number(s.split("_")[2]));
-    expect(amounts).toContain(20);
-    expect(amounts).toContain(3);
-    expect(new Set(amounts).size).toBe(amounts.length);
+    expect(callbacks).toEqual(expectedDefaultCallbacks);
   });
 
-  test("sub-unit balances still show at least one affordable option", () => {
+  test("sub-unit balances still show contract minimum first and keep ordering", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 1.2);
-    const amounts = extractCallbacks(kb)
-      .filter((s) => s.startsWith("amount_coinflip_"))
-      .map((s) => Number(s.split("_")[2]));
-    expect(amounts[0]).toBe(20);
-    expect(amounts).toContain(1.2);
-    expect(new Set(amounts).size).toBe(amounts.length);
+    const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
+    expect(callbacks).toEqual(expectedDefaultCallbacks);
   });
 
-  test("balance under 50 starts from recommended minimum", () => {
+  test("balance under 50 still starts from contract minimum", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 40);
     const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
-    expect(callbacks).toEqual([
-      "amount_coinflip_20",
-      "amount_coinflip_100",
-      "amount_coinflip_200",
-    ]);
+    expect(callbacks[0]).toBe("amount_coinflip_20");
+    expect(callbacks).toEqual(expectedDefaultCallbacks);
+  });
+
+  test("amount buttons render two per row", () => {
+    const kb = createAmountSelectionKeyboard("coinflip", 200);
+    const rows =
+      (kb && (kb as any).inline_keyboard) ||
+      (kb && (kb as any).rows) ||
+      [];
+    const amountRows = rows.filter((row: any[]) =>
+      row.some((btn: any) => btn?.callback_data?.startsWith("amount_coinflip_"))
+    );
+    const flattened = amountRows.flat().filter((btn: any) =>
+      btn?.callback_data?.startsWith("amount_coinflip_")
+    );
+    expect(flattened.map((btn: any) => btn.callback_data)).toEqual(expectedDefaultCallbacks);
+    expect(amountRows.every((row: any[]) => row.length === 2)).toBe(true);
   });
 
   test("creatorId is appended to callbacks when provided", () => {

@@ -22,33 +22,30 @@ function extractCallbacks(kb: any): string[] {
 }
 
 describe("createAmountSelectionKeyboard ranges", () => {
-  test("medium balance (between 50 and 200) uses 25,50,100", () => {
+  const expectedAmounts = [
+    "amount_coinflip_20",
+    "amount_coinflip_100",
+    "amount_coinflip_200",
+    "amount_coinflip_300",
+    "amount_coinflip_400",
+    "amount_coinflip_500",
+  ];
+
+  test("medium balance (between 50 and 200) still uses fixed contract minimum multiples", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 120);
     const cbs = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
-    expect(cbs).toEqual([
-      "amount_coinflip_20",
-      "amount_coinflip_100",
-      "amount_coinflip_200",
-    ]);
+    expect(cbs).toEqual(expectedAmounts);
   });
 
-  test("large balance (between 200 and 1000) uses 50,150,300", () => {
+  test("large balance (between 200 and 1000) still uses fixed contract minimum multiples", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 300);
     const cbs = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
-    expect(cbs).toEqual([
-      "amount_coinflip_20",
-      "amount_coinflip_100",
-      "amount_coinflip_200",
-    ]);
+    expect(cbs).toEqual(expectedAmounts);
   });
 
-  test("very large balance (>= 1000) uses 100,500,1000", () => {
+  test("very large balance (>= 1000) still uses fixed contract minimum multiples", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 5_000);
     const cbs = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
-    expect(cbs).toEqual([
-      "amount_coinflip_20",
-      "amount_coinflip_100",
-      "amount_coinflip_200",
-    ]);
+    expect(cbs).toEqual(expectedAmounts);
   });
 });
