@@ -260,7 +260,13 @@ describe("game setup typed input handling", () => {
       );
       expect(minSpy).toHaveBeenCalledWith("OverrideMint111", 6);
 
-      const session = __testSessions.get(`${CHAT_ID}_${ctx.message.message_id}`) as any;
+      // The session key is constructed as `${ctx.chat?.id || 0}_${setupMessage.message_id}`
+      // In the mock ctx, chat.id is CHAT_ID (998_001), and message.message_id is 12_345
+      // But the function creates a new message, so we need to find the session key
+      const sessionKeys = Array.from(__testSessions.keys());
+      expect(sessionKeys.length).toBe(1);
+      const sessionKey = sessionKeys[0]!;
+      const session = __testSessions.get(sessionKey) as any;
       expect(session.tokenMint).toBe("OverrideMint111");
       expect(session.tokenTicker).toBe("OVR");
       expect(session.tokenDecimals).toBe(6);
