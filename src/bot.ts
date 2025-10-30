@@ -1368,38 +1368,19 @@ type ChatTokenInfo = {
 const resolveChatTokenInfo = async (
   chatId?: number
 ): Promise<ChatTokenInfo> => {
-  const defaultMetadata = await getDefaultTokenMetadata();
-  const fallback: ChatTokenInfo = {
-    tokenMint: DEFAULT_TOKEN_MINT,
-    tokenTicker: DEFAULT_TOKEN_TICKER,
-    decimals: defaultMetadata.decimals,
-  };
-
   try {
-    const { tokenMint, tokenTicker } = await tokenManager.resolveTokenForChat(
-      chatId
-    );
-
-    try {
-      const metadata = await wallet.getTokenMetadata(tokenMint);
-      return {
-        tokenMint,
-        tokenTicker,
-        decimals: metadata.decimals,
-      };
-    } catch (metadataError) {
-      console.warn(
-        `⚠️ Failed to load metadata for chat token ${tokenTicker} (${tokenMint}), falling back to default token`,
-        metadataError
-      );
-      return fallback;
-    }
+    return await tokenManager.resolveTokenForChat(chatId);
   } catch (error) {
     console.warn(
       "⚠️ Could not resolve chat token configuration, using default token",
       error
     );
-    return fallback;
+    const defaultMetadata = await getDefaultTokenMetadata();
+    return {
+      tokenMint: DEFAULT_TOKEN_MINT,
+      tokenTicker: DEFAULT_TOKEN_TICKER,
+      decimals: defaultMetadata.decimals,
+    };
   }
 };
 
@@ -1583,18 +1564,12 @@ const resolveCommandTokenOverride = async (
       return null;
     }
 
-    let decimals = resolved.decimals;
+    const decimals = resolved.decimals;
     if (!Number.isFinite(decimals) || decimals < 0) {
-      try {
-        const metadata = await wallet.getTokenMetadata(resolved.token_mint);
-        decimals = metadata.decimals;
-      } catch (error) {
-        console.warn(
-          `⚠️ Failed to load metadata for token override ${candidate}`,
-          error
-        );
-        return null;
-      }
+      console.warn(
+        `⚠️ ResolveSwapToken returned invalid decimals for override ${candidate}`
+      );
+      return null;
     }
 
     const tokenTicker = resolved.isNativeSol ? "SOL" : resolved.token_ticker;

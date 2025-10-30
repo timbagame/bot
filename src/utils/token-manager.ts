@@ -4,10 +4,12 @@ import { TokenDatabase } from "./token-database";
 import { WalletManager } from "./wallet";
 import { PumpFunClient, isPotentialPumpFunToken } from "./pump-fun";
 import type { ParseAmountResult, ChatTokenConfig, KnownToken } from "../types";
-import { TOKENS_LIST, WSOL_MINT } from "./constants";
+import { WSOL_MINT } from "./constants";
 import {
   getBuiltinTokenMetadataByMint,
   getBuiltinTokenMetadataByTicker,
+  getTokenByMint,
+  getTokenByTicker,
 } from "./token-registry";
 import { parseDecimalAmount } from "./amount";
 import { createSingleton } from "./singleton";
@@ -34,19 +36,6 @@ export interface TokenRegistrationResult {
   resolvedTicker?: string;
 }
 
-const BUILTIN_TOKEN_MINTS: Record<string, string> = (() => {
-  const map: Record<string, string> = {
-    SOL: WSOL_MINT,
-    WSOL: WSOL_MINT,
-  };
-
-  for (const token of TOKENS_LIST) {
-    map[token.ticker.toUpperCase()] = token.mint;
-  }
-
-  return map;
-})();
-
 const looksLikeTokenTicker = (candidate: string): boolean => {
   if (!candidate) {
     return false;
@@ -62,6 +51,13 @@ const looksLikeTokenTicker = (candidate: string): boolean => {
   }
 
   return Number.isNaN(parseInt(trimmed, 10));
+};
+
+type ResolvedTokenMetadata = {
+  ticker: string;
+  decimals: number;
+  isPumpFun?: boolean;
+  isNativeSol?: boolean;
 };
 
 // ================================
@@ -172,6 +168,205 @@ export class TokenManager {
     };
   }
 
+  private async resolveMetadataForMint(
+    mint: string,
+    {
+      tickerHint,
+      metadataResolvers = [],
+      allowPumpFun = true,
+    }: {
+      tickerHint?: string;
+      metadataResolvers?: TokenMetadataResolver[];
+      allowPumpFun?: boolean;
+    } = {}
+  ): Promise<ResolvedTokenMetadata | null> {
+    const builtinMetadata = getBuiltinTokenMetadataByMint(mint);
+    const normalizedHint = tickerHint?.trim().toUpperCase();
+    let resolvedTicker = normalizedHint;
+    let resolvedTickerSource: "hint" | "builtin" | "metadata" | undefined =
+      normalizedHint ? "hint" : undefined;
+    let decimals = builtinMetadata?.decimals;
+    let isNativeSol = builtinMetadata?.isNativeSol ?? false;
+    const allowMetadataTickerOverride = !builtinMetadata?.isNativeSol;
+
+    if (!resolvedTicker && builtinMetadata?.ticker) {
+      resolvedTicker = builtinMetadata.ticker.toUpperCase();
+      resolvedTickerSource = "builtin";
+    }
+
+    let pumpFunMetadata:
+      | {
+          symbol?: string | null;
+          decimals?: number | null;
+          isPumpFun: boolean;
+        }
+      | null = null;
+
+    const ensurePumpFunMetadata = async () => {
+      if (!allowPumpFun || pumpFunMetadata || !isPotentialPumpFunToken(mint)) {
+        return pumpFunMetadata;
+      }
+
+      try {
+        const client = this.getPumpFunClient();
+        const metadata = await client.getTokenMetadata(mint);
+        if (metadata) {
+          pumpFunMetadata = {
+            symbol: metadata.symbol,
+            decimals: metadata.decimals,
+            isPumpFun: metadata.isPumpFun && !metadata.isGraduated,
+          };
+          return pumpFunMetadata;
+        }
+
+        const status = await client.isPumpFunToken(mint);
+        pumpFunMetadata = {
+          isPumpFun: status.isPumpFun && !status.isGraduated,
+          symbol: null,
+          decimals: null,
+        };
+        return pumpFunMetadata;
+      } catch (error) {
+        console.warn(
+          `[TokenManager] Pump.fun metadata lookup failed for ${mint}:`,
+          error
+        );
+        pumpFunMetadata = { isPumpFun: false, symbol: null, decimals: null };
+        return pumpFunMetadata;
+      }
+    };
+
+    let fetchedMetadata:
+      | { symbol?: string | null; decimals?: number | null }
+      | null = null;
+    const ensureFullMetadata = async () => {
+      if (fetchedMetadata) {
+        return fetchedMetadata;
+      }
+
+      try {
+        fetchedMetadata = await this.wallet.getFullTokenMetadata(mint);
+      } catch (error) {
+        console.warn(
+          `[TokenManager] Failed to fetch full metadata for ${mint}:`,
+          error
+        );
+        fetchedMetadata = null;
+      }
+
+      return fetchedMetadata;
+    };
+
+    for (const resolver of metadataResolvers) {
+      if (!resolver) {
+        continue;
+      }
+
+      try {
+        const metadata = await resolver();
+        if (!metadata) {
+          continue;
+        }
+
+        if (
+          allowMetadataTickerOverride &&
+          metadata.symbol &&
+          metadata.symbol !== "UNKNOWN"
+        ) {
+          resolvedTicker = metadata.symbol.toUpperCase();
+          resolvedTickerSource = "metadata";
+        }
+
+        if (
+          typeof metadata.decimals === "number" &&
+          Number.isFinite(metadata.decimals)
+        ) {
+          decimals = metadata.decimals;
+        }
+
+        if (resolvedTicker && decimals !== undefined) {
+          break;
+        }
+      } catch (resolverError) {
+        console.warn(
+          `[TokenManager] Metadata resolver failed for ${mint}:`,
+          resolverError
+        );
+      }
+    }
+
+    if (resolvedTickerSource !== "metadata" || decimals === undefined) {
+      const metadata = await ensureFullMetadata();
+      if (metadata) {
+        if (
+          allowMetadataTickerOverride &&
+          metadata.symbol &&
+          metadata.symbol !== "UNKNOWN"
+        ) {
+          resolvedTicker = metadata.symbol.toUpperCase();
+          resolvedTickerSource = "metadata";
+        }
+
+        if (
+          decimals === undefined &&
+          typeof metadata.decimals === "number" &&
+          Number.isFinite(metadata.decimals)
+        ) {
+          decimals = metadata.decimals;
+        }
+      }
+    }
+
+    if (decimals === undefined) {
+      const pumpMetadata = await ensurePumpFunMetadata();
+      if (
+        pumpMetadata &&
+        typeof pumpMetadata.decimals === "number" &&
+        Number.isFinite(pumpMetadata.decimals)
+      ) {
+        decimals = pumpMetadata.decimals;
+      }
+    }
+
+    if (!resolvedTicker) {
+      const pumpMetadata = await ensurePumpFunMetadata();
+      if (pumpMetadata?.symbol && pumpMetadata.symbol !== "UNKNOWN") {
+        resolvedTicker = pumpMetadata.symbol.toUpperCase();
+      }
+    }
+
+    if (decimals === undefined) {
+      try {
+        const metadata = await this.wallet.getTokenMetadata(mint);
+        if (typeof metadata.decimals === "number") {
+          decimals = metadata.decimals;
+        }
+      } catch (decimalsError) {
+        console.error(
+          `[TokenManager] Failed to fetch token metadata for ${mint}:`,
+          decimalsError
+        );
+      }
+    }
+
+    if (decimals === undefined) {
+      return null;
+    }
+
+    if (!resolvedTicker) {
+      resolvedTicker = `TOKEN_${mint.toUpperCase()}`;
+    }
+
+    const pumpMetadata = await ensurePumpFunMetadata();
+
+    return {
+      ticker: resolvedTicker,
+      decimals,
+      isPumpFun: pumpMetadata?.isPumpFun,
+      isNativeSol,
+    };
+  }
+
   // ================================
   // TOKEN PARSING WITH MULTI-TOKEN SUPPORT
   // ================================
@@ -186,7 +381,8 @@ export class TokenManager {
       return { success: false, error: "invalid_amount" };
     }
 
-    const { tokenMint, tokenTicker } = await this.resolveTokenForChat(chatId);
+    const { tokenMint, tokenTicker, decimals: defaultDecimals } =
+      await this.resolveTokenForChat(chatId);
 
     const amountArg = args[argIndex];
     if (!amountArg) {
@@ -198,7 +394,7 @@ export class TokenManager {
 
     let resolvedTokenMint = tokenMint;
     let resolvedTokenTicker = tokenTicker;
-    let tokenDecimals: number | undefined;
+    let tokenDecimals: number | undefined = defaultDecimals;
     let isSol = false;
     let tokenWasSpecified = false;
     let requestedNativeSol = false;
@@ -208,30 +404,17 @@ export class TokenManager {
       const normalizedCandidate = candidate.trim();
       const candidateUpper = normalizedCandidate.toUpperCase();
       const candidateLooksLikeTicker = looksLikeTokenTicker(normalizedCandidate);
-      let candidateMint: string | null = null;
-      try {
-        candidateMint = new PublicKey(normalizedCandidate).toBase58();
-      } catch {
-        candidateMint = null;
-      }
-
       const isNumericCandidate =
         normalizedCandidate.length <= 18 &&
         /^[0-9]+(?:\.[0-9]+)?$/.test(normalizedCandidate);
 
       if (!isNumericCandidate) {
-        // Only attempt token parsing when the argument isn't a numeric
-        // parameter (e.g., max players in `/cf 10 5`).
         const resolvedToken = await this.resolveSwapToken(normalizedCandidate);
         if (resolvedToken) {
           tokenWasSpecified = true;
           tokenDecimals = resolvedToken.decimals;
           resolvedTokenMint = resolvedToken.token_mint;
           resolvedTokenTicker = resolvedToken.token_ticker;
-          if (candidateMint && resolvedTokenMint === WSOL_MINT) {
-            const knownMint = this.tokenDb.getKnownTokenByMint(resolvedTokenMint);
-            resolvedTokenTicker = knownMint?.token_ticker ?? "WSOL";
-          }
 
           const requestedNativeSolByTicker =
             resolvedToken.isNativeSol &&
@@ -256,24 +439,11 @@ export class TokenManager {
             unknownToken: candidateUpper,
           };
         } else {
-          if (candidateMint) {
-            tokenWasSpecified = true;
-            resolvedTokenMint = candidateMint;
-
-            const knownMint = this.tokenDb.getKnownTokenByMint(candidateMint);
-            if (knownMint) {
-              tokenDecimals = knownMint.decimals;
-              resolvedTokenTicker = knownMint.token_ticker;
-            } else {
-              resolvedTokenTicker = candidateUpper;
-            }
-          } else {
-            return {
-              success: false,
-              error: "unknown_token",
-              unknownToken: candidateUpper,
-            };
-          }
+          return {
+            success: false,
+            error: "unknown_token",
+            unknownToken: candidateUpper,
+          };
         }
       }
     }
@@ -283,15 +453,6 @@ export class TokenManager {
       if (knownMint) {
         tokenDecimals = knownMint.decimals;
         resolvedTokenTicker = knownMint.token_ticker;
-      }
-    }
-
-    if (!isSol && tokenDecimals === undefined) {
-      try {
-        const metadata = await this.wallet.getTokenMetadata(resolvedTokenMint);
-        tokenDecimals = metadata.decimals;
-      } catch {
-        return { success: false, error: "invalid_amount" };
       }
     }
 
@@ -336,25 +497,54 @@ export class TokenManager {
 
   public async resolveTokenForChat(
     chatId?: number
-  ): Promise<{ tokenMint: string; tokenTicker: string }> {
-    if (!chatId) {
+  ): Promise<{ tokenMint: string; tokenTicker: string; decimals: number }> {
+    const chatConfig = chatId
+      ? this.chatDb.getChatDefaultToken(chatId) ?? null
+      : null;
+
+    const targetMint = chatConfig?.token_mint ?? this.defaultTokenMint;
+    const targetTicker = chatConfig?.token_ticker ?? this.defaultTokenTicker;
+
+    const known = this.tokenDb.getKnownTokenByMint(targetMint);
+    if (known) {
       return {
-        tokenMint: this.defaultTokenMint,
-        tokenTicker: this.defaultTokenTicker,
+        tokenMint: known.token_mint,
+        tokenTicker: chatConfig?.token_ticker ?? known.token_ticker,
+        decimals: known.decimals,
       };
     }
 
-    const chatConfig = this.chatDb.getChatDefaultToken(chatId);
-    if (chatConfig) {
+    const metadata = await this.resolveMetadataForMint(targetMint, {
+      tickerHint: targetTicker,
+    });
+
+    if (metadata) {
+      const tokenTicker = chatConfig?.token_ticker
+        ? chatConfig.token_ticker.trim().toUpperCase()
+        : metadata.ticker;
+
       return {
-        tokenMint: chatConfig.token_mint,
-        tokenTicker: chatConfig.token_ticker,
+        tokenMint: targetMint,
+        tokenTicker,
+        decimals: metadata.decimals,
       };
     }
+
+    if (chatConfig) {
+      console.warn(
+        `[TokenManager] Failed to resolve metadata for chat token ${chatConfig.token_ticker} (${chatConfig.token_mint}), falling back to default token`
+      );
+    }
+
+    const fallbackMetadata = await this.resolveMetadataForMint(
+      this.defaultTokenMint,
+      { tickerHint: this.defaultTokenTicker }
+    );
 
     return {
       tokenMint: this.defaultTokenMint,
       tokenTicker: this.defaultTokenTicker,
+      decimals: fallbackMetadata?.decimals ?? 0,
     };
   }
 
@@ -378,7 +568,20 @@ export class TokenManager {
       return knownToken.token_mint;
     }
 
-    return BUILTIN_TOKEN_MINTS[normalized];
+    const builtin = getBuiltinTokenMetadataByTicker(normalized);
+    if (builtin) {
+      return builtin.mint;
+    }
+
+    const registryToken =
+      getTokenByTicker(normalized, {
+        defaultToken: {
+          mint: this.defaultTokenMint,
+          ticker: this.defaultTokenTicker,
+        },
+      }) ?? getTokenByTicker(normalized);
+
+    return registryToken?.mint;
   }
 
   // ================================
@@ -427,101 +630,27 @@ export class TokenManager {
       };
     }
 
-    let resolvedTicker = tickerHint?.trim().toUpperCase();
-    if (mint === WSOL_MINT) {
-      resolvedTicker = "WSOL";
-    }
+    const metadata = await this.resolveMetadataForMint(mint, {
+      tickerHint,
+      metadataResolvers,
+    });
 
-    const builtinMetadata = getBuiltinTokenMetadataByMint(mint);
-    if (!resolvedTicker && builtinMetadata?.ticker) {
-      resolvedTicker = builtinMetadata.ticker.toUpperCase();
-    }
-
-    let decimals: number | undefined;
-
-    for (const resolver of metadataResolvers) {
-      if (!resolver) {
-        continue;
-      }
-      try {
-        const metadata = await resolver();
-        if (!metadata) {
-          continue;
-        }
-
-        if (metadata.symbol && metadata.symbol !== "UNKNOWN") {
-          resolvedTicker = metadata.symbol.toUpperCase();
-        }
-
-        if (
-          typeof metadata.decimals === "number" &&
-          Number.isFinite(metadata.decimals)
-        ) {
-          decimals = metadata.decimals;
-        }
-
-        if (resolvedTicker && decimals !== undefined) {
-          break;
-        }
-      } catch (resolverError) {
-        console.warn(
-          `${logPrefix} Metadata resolver failed for ${mint}:`,
-          resolverError
-        );
-      }
-    }
-
-    let fetchedMetadata: { symbol?: string; decimals: number } | null = null;
-    const ensureFullMetadata = async () => {
-      if (fetchedMetadata) {
-        return fetchedMetadata;
-      }
-      const metadata = await this.wallet.getFullTokenMetadata(mint);
-      fetchedMetadata = {
-        symbol: metadata.symbol ?? undefined,
-        decimals: metadata.decimals,
+    if (!metadata) {
+      return {
+        status: "failed",
+        resolvedTicker: tickerHint?.trim().toUpperCase(),
       };
-      return fetchedMetadata;
-    };
-
-    if (!resolvedTicker || decimals === undefined) {
-      try {
-        const metadata = await ensureFullMetadata();
-        if (!resolvedTicker && metadata.symbol && metadata.symbol !== "UNKNOWN") {
-          resolvedTicker = metadata.symbol.toUpperCase();
-        }
-        if (decimals === undefined) {
-          decimals = metadata.decimals;
-        }
-      } catch (metadataError) {
-        console.warn(
-          `${logPrefix} Failed to fetch full metadata for ${mint}:`,
-          metadataError
-        );
-      }
     }
 
-    if (decimals === undefined) {
-      try {
-        const metadata = await this.wallet.getTokenMetadata(mint);
-        decimals = metadata.decimals;
-      } catch (decimalsError) {
-        console.error(
-          `${logPrefix} Failed to fetch token metadata for ${mint}:`,
-          decimalsError
-        );
-        return { status: "failed", resolvedTicker };
-      }
-    }
-
-    if (!resolvedTicker) {
-      resolvedTicker = `TOKEN_${mint.toUpperCase()}`;
+    let resolvedTicker = metadata.ticker;
+    if (mint === WSOL_MINT && metadata.isNativeSol) {
+      resolvedTicker = "WSOL";
     }
 
     console.log(
       `${logPrefix} Auto-registering token ${resolvedTicker} (${mint})`
     );
-    const added = await this.addToken(mint, resolvedTicker, decimals);
+    const added = await this.addToken(mint, resolvedTicker, metadata.decimals);
     if (!added) {
       console.log(
         `${logPrefix} Failed to auto-register token ${resolvedTicker} (${mint})`
@@ -609,12 +738,7 @@ export class TokenManager {
     token_ticker: string;
     decimals: number;
   }> {
-    const tokens = this.tokenDb.getAllKnownTokens();
-    console.log(
-      `📋 getAllApprovedTokensWithMetadata returning ${tokens.length} tokens:`,
-      tokens.map((t) => `${t.token_ticker}(${t.token_mint})`)
-    );
-    return tokens;
+    return this.tokenDb.getAllKnownTokens();
   }
 
   // ================================
@@ -650,60 +774,21 @@ export class TokenManager {
   public async autoDiscoverTokenInfo(
     tokenMint: string
   ): Promise<{ ticker: string; decimals: number; isPumpFun?: boolean } | null> {
-    try {
-      const metadata = await this.wallet.getFullTokenMetadata(tokenMint);
-      if (!metadata) {
-        return null;
-      }
-
-      let symbol = metadata.symbol?.trim();
-      let decimals = metadata.decimals ?? 0;
-      let isPumpFun = false;
-      let pumpMetadata: { symbol: string; decimals: number } | null = null;
-
-      if (isPotentialPumpFunToken(tokenMint)) {
-        const pumpInfo = await this.getPumpFunClient().getTokenMetadata(
-          tokenMint
-        );
-
-        if (pumpInfo) {
-          isPumpFun = pumpInfo.isPumpFun && !pumpInfo.isGraduated;
-          pumpMetadata = {
-            symbol: pumpInfo.symbol,
-            decimals: pumpInfo.decimals,
-          };
-        } else {
-          const status = await this.getPumpFunClient().isPumpFunToken(
-            tokenMint
-          );
-          isPumpFun = status.isPumpFun && !status.isGraduated;
-        }
-      }
-
-      if (!symbol || symbol.length === 0) {
-        const fallbackSymbolSource = pumpMetadata?.symbol ?? tokenMint;
-        symbol = fallbackSymbolSource.toUpperCase();
-      }
-
-      if (!Number.isFinite(decimals) || decimals < 0) {
-        if (pumpMetadata?.decimals !== undefined) {
-          decimals = pumpMetadata.decimals;
-        }
-      }
-
-      if (!Number.isFinite(decimals) || decimals < 0) {
-        const basic = await this.wallet.getTokenMetadata(tokenMint);
-        decimals = basic.decimals;
-      }
-
-      return {
-        ticker: symbol.toUpperCase(),
-        decimals,
-        isPumpFun,
-      };
-    } catch {
+    const metadata = await this.resolveMetadataForMint(tokenMint);
+    if (!metadata) {
       return null;
     }
+
+    const ticker =
+      tokenMint === WSOL_MINT && metadata.isNativeSol
+        ? "WSOL"
+        : metadata.ticker;
+
+    return {
+      ticker,
+      decimals: metadata.decimals,
+      isPumpFun: metadata.isPumpFun,
+    };
   }
 
   public async resolveSwapToken(
@@ -763,6 +848,34 @@ export class TokenManager {
     const knownMint = this.tokenDb.getKnownTokenByMint(normalizedMint);
     if (knownMint) {
       return knownMint;
+    }
+
+    const registryMint =
+      getTokenByMint(normalizedMint, {
+        defaultToken: {
+          mint: this.defaultTokenMint,
+          ticker: this.defaultTokenTicker,
+        },
+      }) ?? getTokenByMint(normalizedMint);
+
+    if (registryMint) {
+      const metadata = await this.resolveMetadataForMint(registryMint.mint, {
+        tickerHint: registryMint.ticker,
+      });
+
+      if (metadata) {
+        const ticker = metadata.ticker.toUpperCase();
+        this.tokenDb.addKnownToken(registryMint.mint, ticker, metadata.decimals);
+        return {
+          token_mint: registryMint.mint,
+          token_ticker: ticker,
+          decimals: metadata.decimals,
+          added_at: Date.now(),
+          newlyDiscovered: true,
+          isPumpFun: metadata.isPumpFun,
+          isNativeSol: false,
+        };
+      }
     }
 
     const builtinMint = this.resolveBuiltinMintToken(
