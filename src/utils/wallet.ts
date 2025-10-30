@@ -1317,8 +1317,10 @@ export class WalletManager {
         const pollStart = Date.now();
         const elapsed = pollStart - startTime;
 
-        const enableHistorySearch = elapsed >= SIGNATURE_HISTORY_SEARCH_DELAY_MS;
-        const searchHistory = historySearchEnabled || enableHistorySearch;
+        const enableHistorySearch =
+          elapsed >= SIGNATURE_HISTORY_SEARCH_DELAY_MS;
+        const shouldUseHistory =
+          historySearchEnabled || enableHistorySearch;
 
         if (enableHistorySearch && !historySearchEnabled && hasStatusesMethod) {
           console.log(
@@ -1328,7 +1330,7 @@ export class WalletManager {
 
         let status: any = null;
         try {
-          status = await fetchStatus(searchHistory);
+          status = await fetchStatus(shouldUseHistory);
         } catch (error: any) {
           if (
             typeof error?.message === "string" &&
@@ -1340,7 +1342,9 @@ export class WalletManager {
             await new Promise((resolve) =>
               setTimeout(resolve, pollInterval * 2)
             );
-            historySearchEnabled = searchHistory || historySearchEnabled;
+            if (enableHistorySearch) {
+              historySearchEnabled = true;
+            }
             continue;
           }
 
@@ -1351,7 +1355,9 @@ export class WalletManager {
           throw error;
         }
 
-        historySearchEnabled = searchHistory || historySearchEnabled;
+        if (enableHistorySearch) {
+          historySearchEnabled = true;
+        }
         const now = Date.now();
         const elapsedAfterFetch = now - startTime;
 
