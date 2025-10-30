@@ -7163,6 +7163,8 @@ bot.on("message:text", async (ctx, next) => {
 
   const userMessage = ctx.message.text.trim();
 
+  const previousSessionType = inputSession.type;
+
   try {
     if (inputSession.type === "send_custom_amount") {
       await handleCustomAmountInput(ctx, inputSession, userMessage);
@@ -7176,8 +7178,14 @@ bot.on("message:text", async (ctx, next) => {
       await handleSwapCustomAmountInput(ctx, inputSession, userMessage);
     }
 
-    // Clear session after successful processing
-    clearInputSession(sessionKey);
+    const updatedSession = getInputSession(sessionKey);
+    const sessionTransitioned =
+      updatedSession && updatedSession.type !== previousSessionType;
+
+    // Clear session after successful processing unless a new session replaced it
+    if (!sessionTransitioned) {
+      clearInputSession(sessionKey);
+    }
   } catch (error) {
     // Clear session even on error to prevent stuck states
     clearInputSession(sessionKey);
