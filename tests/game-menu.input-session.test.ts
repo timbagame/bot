@@ -7,11 +7,16 @@ import {
   test,
 } from "bun:test";
 import {
-  __testSessions,
   __test_handleGameSetupTextInput,
   __test_startInteractiveGameSetup,
   wallet,
 } from "../src/bot";
+import {
+  upsertGameSetupSession,
+  getGameSetupSession,
+  clearAllGameSetupSessions,
+  __test_listGameSetupSessions,
+} from "../src/utils/user-state";
 import * as botModule from "../src/bot";
 import * as prices from "../src/utils/prices";
 
@@ -114,7 +119,7 @@ describe("game setup typed input handling", () => {
   let metadataSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    __testSessions.clear();
+    clearAllGameSetupSessions();
     metadataSpy = spyOn(wallet, "getTokenMetadata").mockResolvedValue({
       symbol: "SOL",
       decimals: 9,
@@ -123,7 +128,7 @@ describe("game setup typed input handling", () => {
 
   afterEach(() => {
     metadataSpy.mockRestore();
-    __testSessions.clear();
+    clearAllGameSetupSessions();
   });
 
   test("restores session after invalid custom amount while preserving token context", async () => {
@@ -141,7 +146,7 @@ describe("game setup typed input handling", () => {
       contractMinimum: 0.25,
     } as any;
 
-    __testSessions.set(`${CHAT_ID}_${session.messageId}`, session);
+    upsertGameSetupSession(`${CHAT_ID}_${session.messageId}`, session);
 
     const ctx = createMockCtx("abc", {
       reply_to_message: { message_id: 21_000 }
@@ -163,7 +168,7 @@ describe("game setup typed input handling", () => {
     expect(firstEdit.messageId).toBe(session.messageId);
     expect(String(firstEdit.text)).toContain("Invalid amount");
 
-    const restored = __testSessions.get(`${CHAT_ID}_${session.messageId}`) as any;
+    const restored = getGameSetupSession(`${CHAT_ID}_${session.messageId}`) as any;
     expect(restored.waitingFor).toBe("amount_input");
     expect(restored.tokenTicker).toBe("BONK");
     expect(restored.tokenMint).toBe("MintCoinflip111");
@@ -185,7 +190,7 @@ describe("game setup typed input handling", () => {
       contractMinimum: 1,
     } as any;
 
-    __testSessions.set(`${CHAT_ID}_${session.messageId}`, session);
+    upsertGameSetupSession(`${CHAT_ID}_${session.messageId}`, session);
 
     const ctx = createMockCtx("1", {
       editError: new Error("message not found"),
@@ -213,7 +218,7 @@ describe("game setup typed input handling", () => {
     expect(String(firstReply.text)).toContain("Confirm Giveaway");
     expect(String(firstReply.text)).toContain("Players: <b>1</b>");
 
-    const restored = __testSessions.get(`${CHAT_ID}_${session.messageId}`) as any;
+    const restored = getGameSetupSession(`${CHAT_ID}_${session.messageId}`) as any;
     expect(restored.waitingFor).toBe("setup");
     expect(restored.tokenTicker).toBe("USDC");
     expect(restored.tokenMint).toBe("MintGiveaway222");
@@ -263,10 +268,9 @@ describe("game setup typed input handling", () => {
       // The session key is constructed as `${ctx.chat?.id || 0}_${setupMessage.message_id}`
       // In the mock ctx, chat.id is CHAT_ID (998_001), and message.message_id is 12_345
       // But the function creates a new message, so we need to find the session key
-      const sessionKeys = Array.from(__testSessions.keys());
-      expect(sessionKeys.length).toBe(1);
-      const sessionKey = sessionKeys[0]!;
-      const session = __testSessions.get(sessionKey) as any;
+      const sessionEntries = __test_listGameSetupSessions();
+      expect(sessionEntries.length).toBe(1);
+      const [, session] = sessionEntries[0]!;
       expect(session.tokenMint).toBe("OverrideMint111");
       expect(session.tokenTicker).toBe("OVR");
       expect(session.tokenDecimals).toBe(6);

@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { LAMPORTS_PER_SOL } from "../src/utils/constants";
 
 let botModule: typeof import("../src/bot");
 const originalNodeEnv = process.env.NODE_ENV;
@@ -101,12 +102,22 @@ describe("Bot Main Entry Point Tests", () => {
       expect(botModule.__test_getUserState("42")).toBeUndefined();
     });
 
-    test("tracks user sessions map", () => {
-      expect(botModule).toHaveProperty("__testSessions");
-      const sessions = botModule.__testSessions as Map<any, any>;
-      sessions.set(1, { waitingFor: "amount" });
-      expect(sessions.get(1)?.waitingFor).toBe("amount");
-      sessions.delete(1);
+    test("exposes presentSpendAmount helper", () => {
+      expect(typeof botModule.__test_presentSpendAmount).toBe("function");
+      const result = botModule.__test_presentSpendAmount({
+        amount: "1",
+        assetTicker: "SOL",
+        decimals: 9,
+        solBalance: 10 * LAMPORTS_PER_SOL,
+        tokenBalance: undefined,
+        formatSol: (lamports: number) => botModule.wallet.formatSolBalance(lamports),
+        formatToken: (value: number, decimals: number) =>
+          botModule.wallet.formatTokenBalance(value, decimals),
+      });
+
+      expect(result.displayAmount).toBe(
+        botModule.wallet.formatSolBalance(LAMPORTS_PER_SOL)
+      );
     });
   });
 

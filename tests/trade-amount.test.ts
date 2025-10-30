@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { parseTradeAmountInput } from "../src/utils/amount";
-import {
-  __test_resolveSpendAmount as resolveSpendAmount,
-  __test_normalizeCustomTradeAmount as normalizeCustomTradeAmount,
-} from "../src/bot";
+import { __test_presentSpendAmount as presentSpendAmount } from "../src/bot";
 
 describe("parseTradeAmountInput", () => {
   test("parses max input", () => {
@@ -24,67 +21,62 @@ describe("parseTradeAmountInput", () => {
 describe("trade amount helpers share validation", () => {
   const solParams = {
     assetTicker: "SOL",
-    inputDecimals: 9,
+    decimals: 9,
     solBalance: 10,
     tokenBalance: undefined,
     formatSol: (lamports: number) => `${lamports} lamports`,
     formatToken: () => "",
-    applySolFeeBuffer: false,
-  } as const;
-
-  const normalizeParams = {
-    assetTicker: "SOL",
-    solBalance: 10,
-    decimals: 9,
+    applySolFeeBuffer: true,
+    solFeeBufferLamports: 0,
   } as const;
 
   test("rejects empty inputs", () => {
     expect(() =>
-      resolveSpendAmount({
+      presentSpendAmount({
         amount: " ",
         ...solParams,
       })
     ).toThrow("Amount cannot be empty");
 
     expect(() =>
-      normalizeCustomTradeAmount({
+      presentSpendAmount({
         amount: " ",
-        tokenBalance: undefined,
-        ...normalizeParams,
+        ...solParams,
+        applySolFeeBuffer: false,
       })
     ).toThrow("Amount cannot be empty");
   });
 
   test("rejects invalid percentages", () => {
     expect(() =>
-      resolveSpendAmount({
+      presentSpendAmount({
         amount: "150%",
         ...solParams,
       })
     ).toThrow("Invalid percentage format");
 
     expect(() =>
-      normalizeCustomTradeAmount({
+      presentSpendAmount({
         amount: "150%",
-        tokenBalance: undefined,
-        ...normalizeParams,
+        ...solParams,
+        applySolFeeBuffer: false,
       })
     ).toThrow("Invalid percentage format");
   });
 
   test("rejects percentages that round to zero", () => {
     expect(() =>
-      resolveSpendAmount({
+      presentSpendAmount({
         amount: "0.01%",
         ...solParams,
       })
     ).toThrow("Percentage results in zero amount");
 
     expect(() =>
-      normalizeCustomTradeAmount({
+      presentSpendAmount({
         amount: "0.01%",
-        tokenBalance: undefined,
-        ...normalizeParams,
+        ...solParams,
+        applySolFeeBuffer: false,
       })
     ).toThrow("Percentage results in zero amount");
   });
