@@ -224,11 +224,11 @@ export const createAmountSelectionKeyboard = (
 const PLAYER_SELECTION_LAYOUTS: Record<string, number[][]> = {
   coinflip: [
     [2, 3, 4],
-    [5, 6, 8],
+    [5, 10, 20],
   ],
   giveaway: [
-    [2, 3, 5],
-    [10, 15, 20],
+    [1, 2, 3],
+    [5, 10, 20],
   ],
 };
 
@@ -259,7 +259,7 @@ export const createPlayerSelectionKeyboard = (gameType: string, amount: string, 
     .row()
     .text("❌ Cancel", withCreatorSuffix("cancel_game_setup", creatorId))
     .row();
-    
+
   return keyboard;
 };
 
@@ -301,7 +301,7 @@ export const createSliderAmountKeyboard = (
 
   // Simplified step sizes
   let step: number;
-  
+
   if (currentAmount <= 50 * minUnit) {
     step = minUnit;
   } else if (currentAmount <= 200 * minUnit) {
@@ -315,7 +315,7 @@ export const createSliderAmountKeyboard = (
   // Calculate new amounts
   const minAmount = minUnit;
   const maxAmount = Math.max(minAmount, userBalance);
-  
+
   const roundForSlider = (value: number) =>
     roundToPrecision(value, precision);
   const amountForCallback = roundForSlider(currentAmount);

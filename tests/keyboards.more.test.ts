@@ -202,6 +202,9 @@ describe("keyboards: player selection and confirm", () => {
     expect(callbacks).toContain("players_coinflip_25_2");
     expect(callbacks).toContain("players_coinflip_25_3");
     expect(callbacks).toContain("players_coinflip_25_4");
+    expect(callbacks).toContain("players_coinflip_25_5");
+    expect(callbacks).toContain("players_coinflip_25_10");
+    expect(callbacks).toContain("players_coinflip_25_20");
     // Also includes custom and cancel
     const all = extractCallbacks(kb);
     expect(all).toContain("custom_players_coinflip_25");
@@ -211,11 +214,11 @@ describe("keyboards: player selection and confirm", () => {
   test("player selection for giveaway uses specific player options", () => {
     const kb = createPlayerSelectionKeyboard("giveaway", "10", "42");
     const callbacks = extractCallbacks(kb).filter((s) => s?.startsWith("players_giveaway_10_"));
+    expect(callbacks).toContain("players_giveaway_10_1_42");
     expect(callbacks).toContain("players_giveaway_10_2_42");
     expect(callbacks).toContain("players_giveaway_10_3_42");
     expect(callbacks).toContain("players_giveaway_10_5_42");
     expect(callbacks).toContain("players_giveaway_10_10_42");
-    expect(callbacks).toContain("players_giveaway_10_15_42");
     expect(callbacks).toContain("players_giveaway_10_20_42");
   });
 
