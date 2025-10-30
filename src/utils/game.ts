@@ -2143,10 +2143,15 @@ export class GameManager {
       );
 
       // Only try recovery for timeout errors
-      if (
-        confirmError.message?.includes("timeout") ||
-        confirmError.message?.includes("not confirmed")
-      ) {
+      const normalizedMessage = confirmError.message?.toLowerCase?.() ?? "";
+      const isTimeout =
+        normalizedMessage.includes("timeout") ||
+        normalizedMessage.includes("not confirmed");
+      const isExpiration =
+        normalizedMessage.includes("expired before confirmation") ||
+        normalizedMessage.includes("last valid block height");
+
+      if (isTimeout || isExpiration) {
         const retryDelays = [2000, 4000, 8000, 12000, 16000, 20000];
         const timeoutError =
           confirmError instanceof Error
@@ -3459,11 +3464,16 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             };
           }
 
+          const normalized = message.toLowerCase();
           const isTimeout =
-            message.includes("timeout") || message.includes("not confirmed");
+            normalized.includes("timeout") ||
+            normalized.includes("not confirmed");
+          const isExpiration =
+            normalized.includes("expired before confirmation") ||
+            normalized.includes("last valid block height");
           const isLastAttempt = attempt === maxAttempts - 1;
 
-          if (isTimeout && !isLastAttempt) {
+          if ((isTimeout || isExpiration) && !isLastAttempt) {
             const alreadyJoined = await this.isPlayerInGame(
               gamePda,
               playerKp.publicKey
@@ -3474,7 +3484,8 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             }
 
             console.warn(
-              `⚠️ Player join attempt ${attempt + 1} for ${gamePda.toBase58()} timed out; retrying with a fresh blockhash.`
+              `⚠️ Player join attempt ${attempt + 1} for ${gamePda.toBase58()} ` +
+                `timed out or expired; retrying with a fresh blockhash.`
             );
             continue;
           }
