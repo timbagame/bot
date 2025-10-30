@@ -2659,11 +2659,15 @@ const createGameViaCommand = async (
       options.minPlayers,
       options.getMaxPlayers()
     );
+    const defaultMaxPlayers = Math.min(
+      options.defaultMaxPlayers,
+      maxPlayersLimit
+    );
     const inferred = deps.inferMaxPlayers(
       args,
       1,
       parsedAmount.tokenWasSpecified,
-      options.defaultMaxPlayers,
+      defaultMaxPlayers,
       options.minPlayers,
       maxPlayersLimit
     );
