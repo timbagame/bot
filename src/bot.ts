@@ -1742,6 +1742,98 @@ const determineFractionDigits = (
   return Math.min(fraction.length, maxDecimals, 6);
 };
 
+type GameConfirmationMessageParams = {
+  gameType: "coinflip" | "giveaway";
+  amount: string;
+  players: number;
+  tokenTicker: string;
+  tokenDecimals: number;
+};
+
+const buildGameConfirmationMessage = ({
+  gameType,
+  amount,
+  players,
+  tokenTicker,
+  tokenDecimals,
+}: GameConfirmationMessageParams): string => {
+  const parsedAmount = Number(amount);
+  const amountNumber = Number.isFinite(parsedAmount) ? parsedAmount : 0;
+  const amountSource = amount ?? amountNumber.toString();
+
+  const amountFormatted = amountNumber.toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: determineFractionDigits(
+      amountSource,
+      tokenDecimals
+    ),
+  });
+
+  const totalPot = amountNumber * players;
+  const totalPotFormatted = totalPot.toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: Math.min(tokenDecimals, 6),
+  });
+
+  const formattedGameType = toTitleCase(gameType);
+
+  return [
+    `<b>Confirm ${formattedGameType}</b>`,
+    "",
+    `Amount: <b>${amountFormatted} ${tokenTicker}</b>`,
+    `Players: <b>${players}</b>`,
+    "",
+    gameType === "coinflip"
+      ? `• Total prize pool: <b>${totalPotFormatted} ${tokenTicker}</b>`
+      : `• Prize for winner: <b>${amountFormatted} ${tokenTicker}</b>`,
+    "",
+    `⚠️ Make sure you have enough ${tokenTicker} in your wallet!`,
+    "",
+    "Ready to create this game?",
+  ].join("\n");
+};
+
+type GameConfirmMenuConfig = {
+  menu: {
+    parseMode: "HTML";
+    keyboard: InlineKeyboard;
+  };
+  replyMarkup: {
+    parse_mode: "HTML";
+    reply_markup: InlineKeyboard;
+  };
+};
+
+const buildGameConfirmMenuConfig = ({
+  gameType,
+  amount,
+  players,
+  creatorId,
+}: {
+  gameType: "coinflip" | "giveaway";
+  amount: string;
+  players: number;
+  creatorId?: string;
+}): GameConfirmMenuConfig => {
+  const keyboard = createGameConfirmKeyboard(
+    gameType,
+    amount,
+    players.toString(),
+    creatorId
+  );
+
+  return {
+    menu: {
+      parseMode: "HTML",
+      keyboard,
+    },
+    replyMarkup: {
+      parse_mode: "HTML",
+      reply_markup: keyboard,
+    },
+  };
+};
+
 const getPlayerData = async (
   telegramId: bigint,
   tokenMint?: string,
@@ -3969,50 +4061,25 @@ bot.callbackQuery(
         const amount = ctx.match![2] as string;
         const players = ctx.match![3] as string;
 
-        const amountNumber = Number(amount);
-        const amountFormatted = amountNumber.toLocaleString("en-US", {
-          minimumFractionDigits: 0,
-          maximumFractionDigits: determineFractionDigits(
-            amount,
-            tokenContext.tokenDecimals
-          ),
-        });
         const playersCount = parseInt(players, 10);
-        const totalPot = amountNumber * playersCount;
-        const totalPotFormatted = totalPot.toLocaleString("en-US", {
-          minimumFractionDigits: 0,
-          maximumFractionDigits: Math.min(
-            tokenContext.tokenDecimals,
-            6
-          ),
+        const confirmMessage = buildGameConfirmationMessage({
+          gameType: gameType as "coinflip" | "giveaway",
+          amount,
+          players: playersCount,
+          tokenTicker: tokenContext.tokenTicker,
+          tokenDecimals: tokenContext.tokenDecimals,
         });
 
-        const formattedGameType = toTitleCase(gameType);
-
-        const confirmMessage = [
-          `<b>Confirm ${formattedGameType}</b>`,
-          "",
-          `Amount: <b>${amountFormatted} ${tokenContext.tokenTicker}</b>`,
-          `Players: <b>${players}</b>`,
-          "",
-          gameType === "coinflip"
-            ? `• Total prize pool: <b>${totalPotFormatted} ${tokenContext.tokenTicker}</b>`
-            : `• Prize for winner: <b>${amountFormatted} ${tokenContext.tokenTicker}</b>`,
-          "",
-          `⚠️ Make sure you have enough ${tokenContext.tokenTicker} in your wallet!`,
-          "",
-          "Ready to create this game?"
-        ].join("\n");
+        const confirmMenu = buildGameConfirmMenuConfig({
+          gameType: gameType as "coinflip" | "giveaway",
+          amount,
+          players: playersCount,
+          creatorId,
+        });
 
         await respondWithMenu(ctx, {
           text: confirmMessage,
-          parseMode: "HTML",
-          keyboard: createGameConfirmKeyboard(
-            gameType,
-            amount,
-            players,
-            creatorId
-          ),
+          ...confirmMenu.menu,
         });
 
         updateSession({
@@ -4800,49 +4867,32 @@ const handleGameSetupTextInput = async (
 
       // Show confirmation with custom players
       const amountNumber = Number(userSession.amount ?? "0");
-      const amountFormatted = amountNumber.toLocaleString("en-US", {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: determineFractionDigits(
-          userSession.amount ?? amountNumber.toString(),
-          tokenDecimals
-        ),
-      });
-      const totalPot = amountNumber * players;
-      const totalPotFormatted = totalPot.toLocaleString("en-US", {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: Math.min(tokenDecimals, 6),
+      const amountValue = userSession.amount ?? amountNumber.toString();
+
+      const confirmMessage = buildGameConfirmationMessage({
+        gameType: userSession.gameType as "coinflip" | "giveaway",
+        amount: amountValue,
+        players,
+        tokenTicker,
+        tokenDecimals,
       });
 
-      const formattedGameType = toTitleCase(userSession.gameType);
-
-      const confirmMessage = [
-        `<b>Confirm ${formattedGameType}</b>`,
-        "",
-        `Amount: <b>${amountFormatted} ${tokenTicker}</b>`,
-        `Players: <b>${players}</b>`,
-        "",
-        userSession.gameType === "coinflip"
-          ? `• Total prize pool: <b>${totalPotFormatted} ${tokenTicker}</b>`
-          : `• Prize for winner: <b>${amountFormatted} ${tokenTicker}</b>`,
-        "",
-        "Ready to create the game?"
-      ].join("\n");
+      const confirmMenu = buildGameConfirmMenuConfig({
+        gameType: userSession.gameType as "coinflip" | "giveaway",
+        amount: amountValue,
+        players,
+        creatorId: userSession.creatorId,
+      });
 
       try {
         await ctx.api.editMessageText(
           userSession.chatId!,
           userSession.messageId!,
           confirmMessage,
-          {
-            parse_mode: "HTML",
-            reply_markup: createGameConfirmKeyboard(userSession.gameType, userSession.amount!, players.toString(), userSession.creatorId)
-          }
+          confirmMenu.replyMarkup
         );
       } catch (error) {
-        await ctx.reply(confirmMessage, {
-          parse_mode: "HTML",
-          reply_markup: createGameConfirmKeyboard(userSession.gameType, userSession.amount!, players.toString(), userSession.creatorId)
-        });
+        await ctx.reply(confirmMessage, confirmMenu.replyMarkup);
       }
 
       upsertGameSetupSession(sessionKey, {
