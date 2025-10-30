@@ -4685,6 +4685,11 @@ const handleGameSetupTextInput = async (
       return await next();
     }
 
+    // Check if the message is a reply to the prompting message
+    if (!ctx.message?.reply_to_message || ctx.message.reply_to_message.message_id !== userSession.messageId) {
+      return await next(); // Not a reply to the prompting message, ignore
+    }
+
     // Keep user's message (avoid deleting to preserve reply chain)
 
     // Clear the session temporarily while we process the input. We'll
@@ -5275,7 +5280,7 @@ bot.on("callback_query", async (ctx, next) => {
       userId,
       title: "✏️ <b>Custom Wrap Amount</b>",
       instructions: [
-        "Please send a message with the amount of SOL you want to wrap.",
+        "Reply to this message with the amount of SOL you want to wrap.",
       ],
       examples: ["• <code>0.5</code>", "• <code>1.25</code>"],
       cancelCallback: "cmd_wrap",
@@ -6209,7 +6214,7 @@ registerCallbackPrefixHandler("send_amount_", async (ctx, { payload }) => {
         userId,
         title: `✏️ <b>Custom Amount - ${token}</b>`,
         instructions: [
-          `Please send a message with the amount you want to send.`,
+          `Reply to this message with the amount you want to send.`,
         ],
         examples,
         cancelCallback: `send_select_${token}`,
@@ -6277,7 +6282,7 @@ registerCallbackPrefixHandler("send_amount_", async (ctx, { payload }) => {
       "",
       `<b>Step 2:</b> Enter destination address`,
       "",
-      `Please send a message with the Solana wallet address.`,
+      `Reply to this message with the Solana wallet address.`,
       "",
       `<b>Format:</b> Public key (44 characters)`,
     ];
@@ -6615,7 +6620,7 @@ registerCallbackPrefixHandler(
           "",
           `Swapping FROM: <b>${fromToken}</b>`,
           "",
-          `Please send a message with the token mint address or symbol.`,
+          `Reply to this message with the token mint address or symbol.`,
           "",
           `<b>Examples:</b>`,
           `• <code>EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v</code> (USDC)`,
@@ -6706,7 +6711,7 @@ registerCallbackPrefixHandler(
             `<b>Swap:</b> ${escapeHtml(fromToken)} → ${escapeHtml(displayToToken)}`,
           ],
           instructions: [
-            `Please send a message with the amount of ${escapeHtml(
+            `Reply to this message with the amount of ${escapeHtml(
               fromToken
             )} to swap.`,
           ],
@@ -7070,6 +7075,11 @@ bot.on("message:text", async (ctx, next) => {
     return await next();
   }
 
+  // Check if the message is a reply to the prompting message
+  if (!ctx.message?.reply_to_message || ctx.message.reply_to_message.message_id !== userState.messageId) {
+    return await next(); // Not a reply to the prompting message, ignore
+  }
+
   const userMessage = ctx.message.text.trim();
 
   try {
@@ -7168,7 +7178,7 @@ const handleCustomAmountInput = async (
     "",
     `<b>Step 2:</b> Enter destination address`,
     "",
-    `Please send a message with the Solana wallet address.`,
+    `Reply to this message with the Solana wallet address.`,
     "",
     `<b>Format:</b> Public key (44 characters)`,
   ];

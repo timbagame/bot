@@ -50,18 +50,19 @@ type MockCtx = {
   }>;
   chat: { id: number };
   from: { id: number };
-  message: { message_id: number; text: string };
+  message: { message_id: number; text: string; reply_to_message?: { message_id: number } };
 };
 
 type MockCtxOptions = {
   editError?: Error;
+  reply_to_message?: { message_id: number };
 };
 
 const isEditCall = (call: CallLog): call is EditCall => call.type === "edit";
 const isReplyCall = (call: CallLog): call is ReplyCall => call.type === "reply";
 
 const createMockCtx = (text: string, options: MockCtxOptions = {}): MockCtx => {
-  const { editError } = options;
+  const { editError, reply_to_message } = options;
   const calls: CallLog[] = [];
   let replyId = 50_000;
 
@@ -69,7 +70,11 @@ const createMockCtx = (text: string, options: MockCtxOptions = {}): MockCtx => {
     __calls: calls,
     chat: { id: CHAT_ID },
     from: { id: TELEGRAM_USER_ID },
-    message: { message_id: 12_345, text },
+    message: {
+      message_id: 12_345,
+      text,
+      reply_to_message: reply_to_message ? reply_to_message : undefined
+    },
     api: {
       editMessageText: async (
         chatId: number,
@@ -138,7 +143,9 @@ describe("game setup typed input handling", () => {
 
     __testSessions.set(TELEGRAM_USER_ID, session);
 
-    const ctx = createMockCtx("abc");
+    const ctx = createMockCtx("abc", {
+      reply_to_message: { message_id: 21_000 }
+    });
     let nextCalled = false;
     const next = async () => {
       nextCalled = true;
@@ -182,6 +189,7 @@ describe("game setup typed input handling", () => {
 
     const ctx = createMockCtx("1", {
       editError: new Error("message not found"),
+      reply_to_message: { message_id: 31_200 }
     });
 
     let nextCalled = false;
@@ -263,4 +271,3 @@ describe("game setup typed input handling", () => {
     }
   });
 });
-
