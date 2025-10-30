@@ -1,5 +1,6 @@
 import "./utils/logging";
 import { Bot, Context, InlineKeyboard } from "grammy";
+import type { NextFunction } from "grammy";
 import { run, sequentialize } from "@grammyjs/runner";
 import { WalletManager } from "./utils/wallet";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
@@ -103,7 +104,11 @@ import { buildTransactionLinkMessage } from "./utils/network-detector";
 import { buildProcessingStatus } from "./utils/trade-ui";
 import { respondWithMenu } from "./utils/menu-response";
 import { parseDecimalAmount, presentTradeAmount } from "./utils/amount";
-import { handleCoinflipCommand, type CoinflipDeps } from "./handlers/game";
+import {
+  handleCoinflipCommand,
+  type CoinflipDeps,
+  type GameTokenOverride,
+} from "./handlers/game";
 import { isMessageMissing } from "./utils/telegram-errors";
 
 // ================================
@@ -1454,11 +1459,18 @@ const GAME_SETUP_COPY: Record<"coinflip" | "giveaway", GameSetupCopy> = {
 const startInteractiveGameSetup = async (
   ctx: Context & { message?: any },
   telegramId: bigint,
-  copy: GameSetupCopy
+  copy: GameSetupCopy,
+  tokenOverride?: GameTokenOverride
 ): Promise<void> => {
   console.log(`${copy.logPrefix} UI-based ${copy.gameType} creation`);
 
-  const tokenInfo = await resolveChatTokenInfo(ctx.chat?.id);
+  const tokenInfo = tokenOverride
+    ? {
+        tokenMint: tokenOverride.tokenMint,
+        tokenTicker: tokenOverride.tokenTicker,
+        decimals: tokenOverride.tokenDecimals,
+      }
+    : await resolveChatTokenInfo(ctx.chat?.id);
 
   let userBalance = 0;
 
@@ -1543,6 +1555,59 @@ const startInteractiveGameSetup = async (
     tokenDecimals: tokenInfo.decimals,
     contractMinimum: contractMin,
   });
+};
+
+export const __test_startInteractiveGameSetup = startInteractiveGameSetup;
+
+const NUMERIC_TOKEN_CANDIDATE = /^[0-9]+(?:\.[0-9]+)?$/;
+
+const resolveCommandTokenOverride = async (
+  tokenInput: string
+): Promise<GameTokenOverride | null> => {
+  if (!tokenManager) {
+    return null;
+  }
+
+  const candidate = tokenInput.trim();
+  if (!candidate) {
+    return null;
+  }
+
+  if (NUMERIC_TOKEN_CANDIDATE.test(candidate)) {
+    return null;
+  }
+
+  try {
+    const resolved = await tokenManager.resolveSwapToken(candidate);
+    if (!resolved) {
+      return null;
+    }
+
+    let decimals = resolved.decimals;
+    if (!Number.isFinite(decimals) || decimals < 0) {
+      try {
+        const metadata = await wallet.getTokenMetadata(resolved.token_mint);
+        decimals = metadata.decimals;
+      } catch (error) {
+        console.warn(
+          `⚠️ Failed to load metadata for token override ${candidate}`,
+          error
+        );
+        return null;
+      }
+    }
+
+    const tokenTicker = resolved.isNativeSol ? "SOL" : resolved.token_ticker;
+
+    return {
+      tokenMint: resolved.token_mint,
+      tokenTicker,
+      tokenDecimals: decimals,
+    };
+  } catch (error) {
+    console.warn(`⚠️ Could not resolve token override ${candidate}`, error);
+    return null;
+  }
 };
 
 type TokenContext = {
@@ -2716,11 +2781,12 @@ const createBalanceDeps = (): BalanceDeps => ({
 
 const createCoinflipDeps = (): CoinflipDeps => ({
   isGroupChat,
-  showInteractiveSetup: (ctxWithMessage, telegramId) =>
+  showInteractiveSetup: (ctxWithMessage, telegramId, tokenOverride) =>
     startInteractiveGameSetup(
       ctxWithMessage,
       telegramId,
-      GAME_SETUP_COPY.coinflip
+      GAME_SETUP_COPY.coinflip,
+      tokenOverride
     ),
   createGameViaCommand: (ctxWithMessage, args, telegramId) =>
     createGameViaCommand(
@@ -2729,6 +2795,8 @@ const createCoinflipDeps = (): CoinflipDeps => ({
       telegramId,
       COINFLIP_COMMAND_OPTIONS
     ),
+  resolveTokenOverride: (tokenInput) =>
+    resolveCommandTokenOverride(tokenInput),
 });
 
 bot.command(["start", "balance"], async (ctx: Context) => {
@@ -2766,21 +2834,39 @@ bot.command(["giveaway", "ga"], async (ctx) => {
       return;
     }
     const args = ctx.message?.text?.split(" ");
+    const tokenCandidate = args?.[1]?.trim();
 
-    if (args && args.length >= 2) {
-      await createGameViaCommand(
+    if (!args || args.length < 2) {
+      await startInteractiveGameSetup(
         ctx as Context & { message?: any },
-        args,
         telegramId,
-        GIVEAWAY_COMMAND_OPTIONS
+        GAME_SETUP_COPY.giveaway
       );
       return;
     }
 
-    await startInteractiveGameSetup(
+    if (args.length === 2 && tokenCandidate) {
+      let tokenOverride: GameTokenOverride | null = null;
+      if (!NUMERIC_TOKEN_CANDIDATE.test(tokenCandidate)) {
+        tokenOverride = await resolveCommandTokenOverride(tokenCandidate);
+      }
+
+      if (tokenOverride) {
+        await startInteractiveGameSetup(
+          ctx as Context & { message?: any },
+          telegramId,
+          GAME_SETUP_COPY.giveaway,
+          tokenOverride
+        );
+        return;
+      }
+    }
+
+    await createGameViaCommand(
       ctx as Context & { message?: any },
+      args,
       telegramId,
-      GAME_SETUP_COPY.giveaway
+      GIVEAWAY_COMMAND_OPTIONS
     );
   } catch (error) {
     console.error("Error in giveaway command:", error);
@@ -4643,7 +4729,10 @@ bot.callbackQuery(
 );
 
 // Text input handler for custom amounts
-bot.on("message:text", async (ctx, next) => {
+const handleGameSetupTextInput = async (
+  ctx: Context,
+  next: NextFunction
+) => {
   try {
     const telegramIdNumeric = Number(getTelegramId(ctx));
     if (telegramIdNumeric === 0) {
@@ -4664,7 +4753,17 @@ bot.on("message:text", async (ctx, next) => {
 
     // Keep user's message (avoid deleting to preserve reply chain)
 
-    // Clear the session
+    // Clear the session temporarily while we process the input. We'll
+    // restore it on validation errors so the flow keeps the original token
+    // context instead of falling back to the (potentially changed) chat
+    // default token.
+    const sessionSnapshot = { ...userSession };
+    const restoreSession = (overrides: Partial<GameSetupSession> = {}) => {
+      userSessions.set(telegramIdNumeric, {
+        ...sessionSnapshot,
+        ...overrides,
+      });
+    };
     userSessions.delete(telegramIdNumeric);
 
     const defaultMetadata = await getDefaultTokenMetadata();
@@ -4681,7 +4780,14 @@ bot.on("message:text", async (ctx, next) => {
         )
       ).formatted;
 
-    const inputText = ctx.message.text.trim();
+    const messageText = ctx.message?.text;
+
+    if (!messageText) {
+      restoreSession();
+      return await next();
+    }
+
+    const inputText = messageText.trim();
 
     // Handle players input
     if (userSession.waitingFor === "players_input") {
@@ -4704,6 +4810,7 @@ bot.on("message:text", async (ctx, next) => {
         } catch (error) {
           await ctx.reply(errorMessage, { parse_mode: "HTML" });
         }
+        restoreSession({ waitingFor: "players_input" });
         return;
       }
 
@@ -4789,6 +4896,7 @@ bot.on("message:text", async (ctx, next) => {
           parse_mode: "HTML"
         });
       }
+      restoreSession({ waitingFor: "amount_input" });
       return;
     }
 
@@ -4806,6 +4914,7 @@ bot.on("message:text", async (ctx, next) => {
           parse_mode: "HTML"
         });
       }
+      restoreSession({ waitingFor: "amount_input" });
       return;
     }
 
@@ -4821,6 +4930,7 @@ bot.on("message:text", async (ctx, next) => {
       } catch (error) {
         await ctx.reply(errorMessage, { parse_mode: "HTML" });
       }
+      restoreSession({ waitingFor: "amount_input" });
       return;
     }
 
@@ -4886,7 +4996,11 @@ bot.on("message:text", async (ctx, next) => {
     console.error("Error in text input handler:", error);
     await next();
   }
-});
+};
+
+bot.on("message:text", handleGameSetupTextInput);
+
+export const __test_handleGameSetupTextInput = handleGameSetupTextInput;
 
 
 // ================================

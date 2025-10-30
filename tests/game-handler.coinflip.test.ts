@@ -39,6 +39,7 @@ describe("game handler: coinflip command", () => {
       createGameViaCommand: async () => {
         commandCalls.push(true);
       },
+      resolveTokenOverride: async () => null,
     };
 
     await handleCoinflipCommand(ctx, deps);
@@ -62,6 +63,7 @@ describe("game handler: coinflip command", () => {
       createGameViaCommand: async () => {
         commandCalls.push(true);
       },
+      resolveTokenOverride: async () => null,
     };
 
     await handleCoinflipCommand(ctx, deps);
@@ -80,8 +82,12 @@ describe("game handler: coinflip command", () => {
 
     const deps: any = {
       isGroupChat: () => true,
-      showInteractiveSetup: async () => {
-        interactiveCalls.push(true);
+      showInteractiveSetup: async (
+        forwardedCtx: any,
+        telegramId: bigint,
+        override?: any
+      ) => {
+        interactiveCalls.push({ forwardedCtx, telegramId, override });
       },
       createGameViaCommand: async (
         forwardedCtx: any,
@@ -90,6 +96,7 @@ describe("game handler: coinflip command", () => {
       ) => {
         commandCalls.push({ forwardedCtx, args, telegramId });
       },
+      resolveTokenOverride: async () => null,
     };
 
     await handleCoinflipCommand(ctx, deps);
@@ -99,5 +106,47 @@ describe("game handler: coinflip command", () => {
     expect(commandCalls[0].forwardedCtx).toBe(ctx);
     expect(commandCalls[0].args).toEqual(["/cf", "25"]);
     expect(commandCalls[0].telegramId).toBe(1n);
+  });
+
+  test("token-only argument opens interactive setup with override", async () => {
+    const ctx: any = makeCtx("/cf TIMBA");
+    const interactiveCalls: any[] = [];
+    const commandCalls: any[] = [];
+
+    const deps: any = {
+      isGroupChat: () => true,
+      showInteractiveSetup: async (
+        forwardedCtx: any,
+        telegramId: bigint,
+        override?: any
+      ) => {
+        interactiveCalls.push({ forwardedCtx, telegramId, override });
+      },
+      createGameViaCommand: async () => {
+        commandCalls.push(true);
+      },
+      resolveTokenOverride: async (tokenInput: string) => {
+        if (tokenInput === "TIMBA") {
+          return {
+            tokenMint: "TIMBA_MINT",
+            tokenTicker: "TIMBA",
+            tokenDecimals: 6,
+          };
+        }
+        return null;
+      },
+    };
+
+    await handleCoinflipCommand(ctx, deps);
+
+    expect(commandCalls.length).toBe(0);
+    expect(interactiveCalls.length).toBe(1);
+    expect(interactiveCalls[0].forwardedCtx).toBe(ctx);
+    expect(interactiveCalls[0].telegramId).toBe(1n);
+    expect(interactiveCalls[0].override).toEqual({
+      tokenMint: "TIMBA_MINT",
+      tokenTicker: "TIMBA",
+      tokenDecimals: 6,
+    });
   });
 });
