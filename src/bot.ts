@@ -2487,7 +2487,7 @@ export type CreateGameViaCommandOptions = {
 const COINFLIP_COMMAND_OPTIONS: CreateGameViaCommandOptions = {
   gameType: "coinflip",
   usageMessage:
-    "❌ Please provide a valid amount greater than 0.\n\nUsage: `/cf <amount>` or `/cf <amount> <maxPlayers>`",
+    "❌ Please provide a valid amount greater than 0.\n\nUsage: <code>/cf &lt;amount&gt;</code> or <code>/cf &lt;amount&gt; &lt;maxPlayers&gt;</code>",
   defaultMaxPlayers: 2,
   minPlayers: 2,
   getMaxPlayers: () => getOracleMaxPlayers(),
@@ -2501,7 +2501,7 @@ const COINFLIP_COMMAND_OPTIONS: CreateGameViaCommandOptions = {
 const GIVEAWAY_COMMAND_OPTIONS: CreateGameViaCommandOptions = {
   gameType: "giveaway",
   usageMessage:
-    "❌ Please provide a valid amount greater than 0.\n\nUsage: `/ga <amount>` or `/ga <amount> <maxPlayers>`",
+    "❌ Please provide a valid amount greater than 0.\n\nUsage: <code>/ga &lt;amount&gt;</code> or <code>/ga &lt;amount&gt; &lt;maxPlayers&gt;</code>",
   defaultMaxPlayers: 10,
   minPlayers: 1,
   getMaxPlayers: () => getOracleMaxPlayers(),
@@ -3257,11 +3257,14 @@ bot.command("default", async (ctx: Context) => {
         ctx,
         chatConfig.set_by_telegram_id
       );
+      const setByDisplay = setBy
+        ? `@${escapeHtml(setBy)}`
+        : "Unknown user";
       return replyToMessage(
         ctx,
         `📄 Current default token: ${chatConfig.token_ticker}\n` +
           `🏷️ Token mint: <code>${chatConfig.token_mint}</code>\n` +
-          `👤 Set by: @${setBy}\n` +
+          `👤 Set by: ${setByDisplay}\n` +
           `📅 Set at: ${new Date(chatConfig.set_at).toLocaleString()}\n\n` +
           `Use /default &lt;TOKEN_TICKER&gt; to change or /default clear to remove.`
       );
@@ -3315,7 +3318,8 @@ bot.command("default", async (ctx: Context) => {
   const knownToken = tokenManager.getKnownTokenByTicker(tokenInput);
   if (!knownToken) {
     const allTokens = tokenManager.getAllKnownTokens();
-    let response = `❌ Token "${tokenInput.toUpperCase()}" not found.\n\n`;
+    const escapedTokenInput = escapeHtml(tokenInput.toUpperCase());
+    let response = `❌ Token "${escapedTokenInput}" not found.\n\n`;
 
     if (allTokens.length > 0) {
       response += "📋 Known tokens:\n";
