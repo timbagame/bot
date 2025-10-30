@@ -23,11 +23,11 @@ function walletStub(opts?: { blockTime?: number; decimals?: number }) {
   } as any;
 }
 
-function dbStub(overrides: Partial<any> = {}) {
+function dbStub(overrides: Partial<any> = {}, participants: string[] = []) {
   return {
     getGame: (_addr: string) => ({ token_mint: "MINT", token_ticker: "TOK", ...overrides }),
     getCreatorInfo: (_addr: string) => ({ telegramId: "777" }),
-    getGameParticipants: () => [],
+    getGameParticipants: () => participants,
     getPlayerTelegramId: (pk: string) => ({
       WINNER111: "999",
     } as Record<string, string>)[pk] || null,
@@ -81,5 +81,29 @@ describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
     expect(out).toContain("Winner:");
     expect(out).toContain("user999");
     expect(out).toContain("Giveaway");
+  });
+
+  test("getCompletedGameInfo keeps original max ticket count", async () => {
+    resetGM();
+    const participants = ["101", "102", "103"];
+    const gm = GameManager.getInstance(
+      programStub({}),
+      walletStub(),
+      dbStub({ max_players: 10, min_players: 2 }, participants)
+    );
+    const ctx = ctxStub();
+    const output = await gm.getCompletedGameInfo(ctx, {
+      creator_telegram_id: "777",
+      amount: 1_000_000_000,
+      token_ticker: "TOK",
+      max_players: 10,
+      min_players: 2,
+      game_type: "coinflip",
+      token_mint: "MINT",
+      game_address: new PublicKey("11111111111111111111111111111111").toBase58(),
+      winner_address: "WINNER111",
+    });
+
+    expect(output).toContain("3/10 tickets");
   });
 });

@@ -1386,6 +1386,20 @@ export class GameManager {
     const gameData = this.gameDb.getGame(gameAddress);
     const participants = this.getGamePlayers(gameAddress);
     const currentTickets = participants.length;
+
+    const parsedMax = Number(gameData?.max_players);
+    const maxTickets = Number.isFinite(parsedMax) && parsedMax > 0
+      ? parsedMax
+      : Math.max(currentTickets, 0);
+
+    const parsedMin = Number(gameData?.min_players);
+    let minTickets = Number.isFinite(parsedMin) && parsedMin > 0
+      ? parsedMin
+      : Math.min(currentTickets, maxTickets);
+
+    if (!Number.isFinite(minTickets) || minTickets <= 0) {
+      minTickets = Math.min(maxTickets, Math.max(currentTickets, 0));
+    }
     
     // Get game type from database to calculate totalPot correctly
     let totalPot = providedTotalPot;
@@ -1403,8 +1417,8 @@ export class GameManager {
 
     return {
       currentTickets,
-      maxTickets: currentTickets,
-      minTickets: currentTickets,
+      maxTickets,
+      minTickets,
       totalPot,
       expirationInfo: "",
       tokenMint: gameData?.token_mint || undefined,
@@ -1996,7 +2010,25 @@ export class GameManager {
         gameData.creator_telegram_id
       );
       const amount = Number(gameData.amount);
-      const playerCount = gameData.max_players || 2;
+      let participants: string[] = [];
+      if (gameData.game_address) {
+        try {
+          participants = this.gameDb.getGameParticipants(gameData.game_address) ?? [];
+        } catch (participantError) {
+          console.error(
+            "Error retrieving participants for completed game:",
+            participantError
+          );
+        }
+      }
+      const currentTickets = participants.length;
+      const storedMax = Number(gameData.max_players);
+      const maxTickets = Number.isFinite(storedMax) && storedMax > 0
+        ? storedMax
+        : Math.max(currentTickets, 0);
+      const playerCountDisplay = maxTickets > 0
+        ? `${currentTickets}/${maxTickets}`
+        : `${currentTickets}`;
       const gameTypeText = formatGameTypeWithEmoji(gameData.game_type);
       const tokenTicker = gameData.token_ticker || "WSOL";
       let formatBalanceForDisplay = (value: number) =>
@@ -2040,15 +2072,12 @@ export class GameManager {
       );
       let message =
         `${gameTypeText} • ${amountDisplay} ${tokenTicker}` +
-        `\nCreator: ${creatorLabel} • ${playerCount} tickets`;
+        `\nCreator: ${creatorLabel} • ${playerCountDisplay} tickets`;
 
-      try {
-        const participantIds = this.gameDb.getGameParticipants(
-          gameData.game_address
-        );
-        if (participantIds.length > 0) {
+      if (participants.length > 0) {
+        try {
           const participantNames = await Promise.all(
-            participantIds.map(async (telegramId) => {
+            participants.map(async (telegramId) => {
               const username = await this.getUsernameFromTelegramId(
                 ctx,
                 telegramId
@@ -2065,12 +2094,12 @@ export class GameManager {
               message = message.slice(0, -1);
             }
           }
+        } catch (participantError) {
+          console.error(
+            "Error retrieving participants for completed game:",
+            participantError
+          );
         }
-      } catch (participantError) {
-        console.error(
-          "Error retrieving participants for completed game:",
-          participantError
-        );
       }
 
       if (winnerLine) {
