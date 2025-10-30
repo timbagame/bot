@@ -51,12 +51,14 @@ beforeAll(async () => {
 
 test("cancel_game_setup clears session so next text is not intercepted", async () => {
   const uid = 4242;
+  const messageId = 1;
+  const sessionKey = `${uid}_${messageId}`;
   // Seed a pending typed-input session
-  __testSessions.set(uid, {
+  __testSessions.set(sessionKey, {
     waitingFor: "amount_input",
     gameType: "coinflip",
     userBalance: 100,
-    messageId: 1,
+    messageId,
     chatId: uid,
     creatorId: String(uid),
   });
@@ -68,22 +70,24 @@ test("cancel_game_setup clears session so next text is not intercepted", async (
       callback_query: {
         id: "cb-1",
         from: { id: uid } as any,
-        message: { message_id: 1, date: Math.floor(Date.now() / 1000), chat: { id: uid, type: "private" } } as any,
+        message: { message_id: messageId, date: Math.floor(Date.now() / 1000), chat: { id: uid, type: "private" } } as any,
         data: `cancel_game_setup_${uid}`,
       } as any,
     } as any);
   } catch {}
 
-  expect(__testSessions.has(uid)).toBe(false);
+  expect(__testSessions.has(sessionKey)).toBe(false);
 }, 15000);
 
 test("back_to_amounts clears session so next text is not intercepted", async () => {
   const uid = 5252;
-  __testSessions.set(uid, {
+  const messageId = 2;
+  const sessionKey = `${uid}_${messageId}`;
+  __testSessions.set(sessionKey, {
     waitingFor: "players_input",
     gameType: "coinflip",
     userBalance: 100,
-    messageId: 2,
+    messageId,
     chatId: uid,
     creatorId: String(uid),
   });
@@ -95,23 +99,25 @@ test("back_to_amounts clears session so next text is not intercepted", async () 
       callback_query: {
         id: "cb-2",
         from: { id: uid } as any,
-        message: { message_id: 2, date: Math.floor(Date.now() / 1000), chat: { id: uid, type: "private" } } as any,
+        message: { message_id: messageId, date: Math.floor(Date.now() / 1000), chat: { id: uid, type: "private" } } as any,
         data: `back_to_amounts_coinflip_${uid}`,
       } as any,
     } as any);
   } catch {}
 
-  expect(__testSessions.has(uid)).toBe(false);
+  expect(__testSessions.has(sessionKey)).toBe(false);
 }, 15000);
 
 test("cancel by non-creator does not clear another user's session", async () => {
   const creator = 6000;
   const other = 6001;
-  __testSessions.set(creator, {
+  const messageId = 3;
+  const sessionKey = `${creator}_${messageId}`;
+  __testSessions.set(sessionKey, {
     waitingFor: "amount_input",
     gameType: "coinflip",
     userBalance: 50,
-    messageId: 3,
+    messageId,
     chatId: creator,
     creatorId: String(creator),
   });
@@ -122,24 +128,26 @@ test("cancel by non-creator does not clear another user's session", async () => 
       callback_query: {
         id: "cb-3",
         from: { id: other } as any,
-        message: { message_id: 3, date: Math.floor(Date.now() / 1000), chat: { id: creator, type: "private" } } as any,
+        message: { message_id: messageId, date: Math.floor(Date.now() / 1000), chat: { id: creator, type: "private" } } as any,
         data: `cancel_game_setup_${creator}`,
       } as any,
     } as any);
   } catch {}
 
   // Session stays for the creator; non-creator action ignored
-  expect(__testSessions.has(creator)).toBe(true);
+  expect(__testSessions.has(sessionKey)).toBe(true);
 }, 15000);
 
 test("back_to_amounts by non-creator does not clear session", async () => {
   const creator = 6100;
   const other = 6101;
-  __testSessions.set(creator, {
+  const messageId = 4;
+  const sessionKey = `${creator}_${messageId}`;
+  __testSessions.set(sessionKey, {
     waitingFor: "players_input",
     gameType: "coinflip",
     userBalance: 50,
-    messageId: 4,
+    messageId,
     chatId: creator,
     creatorId: String(creator),
   });
@@ -150,18 +158,20 @@ test("back_to_amounts by non-creator does not clear session", async () => {
       callback_query: {
         id: "cb-4",
         from: { id: other } as any,
-        message: { message_id: 4, date: Math.floor(Date.now() / 1000), chat: { id: creator, type: "private" } } as any,
+        message: { message_id: messageId, date: Math.floor(Date.now() / 1000), chat: { id: creator, type: "private" } } as any,
         data: `back_to_amounts_coinflip_${creator}`,
       } as any,
     } as any);
   } catch {}
 
-  expect(__testSessions.has(creator)).toBe(true);
+  expect(__testSessions.has(sessionKey)).toBe(true);
 }, 15000);
 
 test("back_to_amounts with no existing session does not create one", async () => {
   const uid = 6200;
-  __testSessions.delete(uid);
+  const messageId = 5;
+  const sessionKey = `${uid}_${messageId}`;
+  __testSessions.delete(sessionKey);
 
   try {
     await bot.handleUpdate({
@@ -169,22 +179,24 @@ test("back_to_amounts with no existing session does not create one", async () =>
       callback_query: {
         id: "cb-5",
         from: { id: uid } as any,
-        message: { message_id: 5, date: Math.floor(Date.now() / 1000), chat: { id: uid, type: "private" } } as any,
+        message: { message_id: messageId, date: Math.floor(Date.now() / 1000), chat: { id: uid, type: "private" } } as any,
         data: `back_to_amounts_coinflip_${uid}`,
       } as any,
     } as any);
   } catch {}
 
-  expect(__testSessions.has(uid)).toBe(false);
+  expect(__testSessions.has(sessionKey)).toBe(false);
 }, 15000);
 
 test("cancel clears players_input sessions as well", async () => {
   const uid = 6300;
-  __testSessions.set(uid, {
+  const messageId = 6;
+  const sessionKey = `${uid}_${messageId}`;
+  __testSessions.set(sessionKey, {
     waitingFor: "players_input",
     gameType: "coinflip",
     userBalance: 0,
-    messageId: 6,
+    messageId,
     chatId: uid,
     creatorId: String(uid),
   });
@@ -195,11 +207,11 @@ test("cancel clears players_input sessions as well", async () => {
       callback_query: {
         id: "cb-6",
         from: { id: uid } as any,
-        message: { message_id: 6, date: Math.floor(Date.now() / 1000), chat: { id: uid, type: "private" } } as any,
+        message: { message_id: messageId, date: Math.floor(Date.now() / 1000), chat: { id: uid, type: "private" } } as any,
         data: `cancel_game_setup_${uid}`,
       } as any,
     } as any);
   } catch {}
 
-  expect(__testSessions.has(uid)).toBe(false);
+  expect(__testSessions.has(sessionKey)).toBe(false);
 }, 15000);
