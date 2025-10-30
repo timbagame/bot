@@ -70,8 +70,8 @@ describe("wallet handler showWalletUI", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0][0]).toBe("edit");
     expect(capturedLines).toEqual([
-      { ticker: "SOL", amount: "0.000000", usdValue: "0.00", unit: "SOL" },
-      { ticker: "USDC", amount: "1", usdValue: "1.00" },
+      { ticker: "SOL", amount: "0.000000", usdValue: "0", unit: "SOL" },
+      { ticker: "USDC", amount: "1", usdValue: "1" },
     ]);
   });
 
@@ -100,8 +100,8 @@ describe("wallet handler showWalletUI", () => {
     expect(calls.some((call: any[]) => call[0] === "edit")).toBe(false);
     expect(calls[0][0]).toBe("video");
     expect(capturedLines).toEqual([
-      { ticker: "SOL", amount: "0.000000", usdValue: "0.00", unit: "SOL" },
-      { ticker: "USDC", amount: "1", usdValue: "1.00" },
+      { ticker: "SOL", amount: "0.000000", usdValue: "0", unit: "SOL" },
+      { ticker: "USDC", amount: "1", usdValue: "1" },
     ]);
   });
 
@@ -182,7 +182,7 @@ test("buildWalletTokenLines formats balances and skips empty tokens", async () =
   });
 
   expect(lines).toEqual([
-    { ticker: "SOL", amount: "2.000000", usdValue: "40.00", unit: "SOL" },
+    { ticker: "SOL", amount: "2.000000", usdValue: "40", unit: "SOL" },
     { ticker: "AAA", amount: "1.500", usdValue: "7.50" },
   ]);
 });

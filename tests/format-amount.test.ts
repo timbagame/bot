@@ -3,6 +3,7 @@ import {
   formatAmount,
   formatCompactTokenDisplay,
   formatTokenDisplay,
+  formatUsdValue,
 } from "../src/utils/format-amount";
 
 test("formatAmount formats basic integer", () => {
@@ -94,4 +95,20 @@ test("formatCompactTokenDisplay scales to large suffixes", () => {
 test("formatCompactTokenDisplay falls back to raw string for invalid numbers", () => {
   expect(formatCompactTokenDisplay("not-a-number")).toBe("not-a-number");
   expect(formatCompactTokenDisplay(" ")).toBe("0");
+});
+
+test("formatUsdValue omits decimals when value is an integer", () => {
+  expect(formatUsdValue(1250)).toBe("1,250");
+});
+
+test("formatUsdValue retains decimals for non-integer values", () => {
+  expect(formatUsdValue(12.5)).toBe("12.50");
+});
+
+test("formatUsdValue formats approximate amounts with trimmed decimals", () => {
+  expect(formatUsdValue(42, { approximate: true })).toBe("≈ $42");
+});
+
+test("formatUsdValue uses fallback when input is not finite", () => {
+  expect(formatUsdValue(Number.NaN, { fallback: "n/a" })).toBe("n/a");
 });

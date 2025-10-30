@@ -216,7 +216,7 @@ export function formatUsdValue(
   } = options;
 
   const resolvedFallback =
-    fallback ?? (approximate ? "≈ $0.00" : "0.00");
+    fallback ?? (approximate ? "≈ $0" : "0");
 
   if (!Number.isFinite(value)) {
     return resolvedFallback;
@@ -227,7 +227,17 @@ export function formatUsdValue(
     maximumFractionDigits,
   });
 
-  return approximate ? `≈ $${formatted}` : formatted;
+  let normalized = formatted;
+  const decimalSeparatorIndex = normalized.indexOf(".");
+
+  if (decimalSeparatorIndex >= 0) {
+    const fractionalPart = normalized.slice(decimalSeparatorIndex + 1);
+    if (/^0+$/.test(fractionalPart)) {
+      normalized = normalized.slice(0, decimalSeparatorIndex);
+    }
+  }
+
+  return approximate ? `≈ $${normalized}` : normalized;
 }
 
 export function formatRate(value: number): string {
