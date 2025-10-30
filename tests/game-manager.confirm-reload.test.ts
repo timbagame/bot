@@ -24,6 +24,30 @@ describe("GameManager confirm/reload helpers", () => {
     expect(ok).toBe(true);
   });
 
+  test("confirmTransactionWithRecovery treats expirations as recoverable", async () => {
+    resetGM();
+    const wallet = {
+      confirmTransaction: async () => {
+        throw new Error(
+          "Transaction abc expired before confirmation (last valid block height 10, current 15)"
+        );
+      },
+    } as any;
+    const program = {
+      account: { game: { fetchNullable: async () => ({}) } },
+      provider: {},
+    } as any;
+    const gm = GameManager.getInstance(program, wallet, { getGameParticipants: () => [] } as any);
+    (gm as any).isPlayerInGame = async () => true;
+    const ok = await (gm as any).confirmTransactionWithRecovery(
+      "SIG-EXP",
+      new PublicKey("BPFLoader1111111111111111111111111111111111"),
+      "Player join",
+      new PublicKey("BPFLoader2111111111111111111111111111111111")
+    );
+    expect(ok).toBe(true);
+  });
+
   test("confirmTransactionWithRecovery preserves timeout message when recovery fails", async () => {
     resetGM();
     const wallet = {
@@ -59,6 +83,83 @@ describe("GameManager confirm/reload helpers", () => {
       const friendly = formatUserFriendlyError(error);
       expect(friendly).toContain("Transaction confirmation timed out");
     }
+  });
+
+  test("handleGameAutoJoinPure retries public joins that expire", async () => {
+    resetGM();
+    const sendSignatures = ["SIG_ATTEMPT_1", "SIG_ATTEMPT_2"];
+    let sendCalls = 0;
+    const wallet = {
+      sendTransaction: async () => {
+        const sig = sendSignatures[Math.min(sendCalls, sendSignatures.length - 1)];
+        sendCalls += 1;
+        return sig;
+      },
+    } as any;
+
+    let fetchCalls = 0;
+    const program = {
+      account: {
+        game: {
+          fetch: async () => {
+            fetchCalls += 1;
+            return { isPrivate: false };
+          },
+        },
+      },
+      methods: {
+        joinGame: () => ({
+          accounts: () => ({
+            instruction: async () => ({}),
+          }),
+        }),
+      },
+      provider: {},
+    } as any;
+
+    const participantSaves: Array<{ signature: string | null }> = [];
+    const gameDb = {
+      saveGameParticipant: (
+        _game: string,
+        _telegramId: string,
+        _creatorPubkey: string,
+        participant: { joinSignature: string | null }
+      ) => {
+        participantSaves.push({ signature: participant.joinSignature });
+      },
+    } as any;
+
+    const gm = GameManager.getInstance(program, wallet, gameDb);
+    (gm as any).buildJoinAccounts = async () => ({});
+    (gm as any).verifyParticipantJoin = async () => true;
+
+    let confirmCalls = 0;
+    (gm as any).confirmTransactionWithRecovery = async () => {
+      confirmCalls += 1;
+      if (confirmCalls === 1) {
+        throw new Error(
+          "Transaction expired before confirmation (last valid block height 10, current 15)"
+        );
+      }
+      return true;
+    };
+
+    const gamePda = new PublicKey("BPFLoader3111111111111111111111111111111111");
+    const player = Keypair.generate();
+    const result = await (gm as any).handleGameAutoJoinPure(
+      gamePda,
+      player,
+      123n,
+      player.publicKey.toBase58(),
+      "coinflip",
+      0
+    );
+
+    expect(result.success).toBe(true);
+    expect(confirmCalls).toBe(2);
+    expect(sendCalls).toBe(2);
+    expect(fetchCalls).toBeGreaterThanOrEqual(2);
+    expect(participantSaves.length).toBeGreaterThanOrEqual(2);
   });
 
   test("confirmTransactionWithRecovery rethrows non-timeout errors", async () => {
@@ -121,4 +222,3 @@ describe("GameManager confirm/reload helpers", () => {
     expect(gm.getActiveGameMessage("ADDR2")?.chatId).toBe(200);
   });
 });
-
