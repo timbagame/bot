@@ -2576,7 +2576,8 @@ const createGameViaCommand = async (
     const parsed = await deps.parseAmount(args, 1, ctx.chat?.id);
     if (!parsed.success) {
       await ctx.reply(
-        formatParseAmountError(parsed, options.usageMessage)
+        formatParseAmountError(parsed, options.usageMessage),
+        { parse_mode: "HTML" }
       );
       return;
     }

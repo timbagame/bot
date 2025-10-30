@@ -12,6 +12,7 @@ import {
   getTokenByTicker,
 } from "./token-registry";
 import { parseDecimalAmount } from "./amount";
+import { escapeHtml } from "./format-amount";
 import { createSingleton } from "./singleton";
 
 type TokenMetadataResolverResult =
@@ -934,7 +935,7 @@ export function formatParseAmountError(
   switch (result.error) {
     case "unknown_token":
       return result.unknownToken
-        ? `❌ Unknown token "${result.unknownToken}"`
+        ? `❌ Unknown token <code>${escapeHtml(result.unknownToken)}</code>`
         : fallbackMessage;
     default:
       return fallbackMessage;
