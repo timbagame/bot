@@ -1434,7 +1434,7 @@ const GAME_SETUP_COPY: Record<"coinflip" | "giveaway", GameSetupCopy> = {
   coinflip: {
     gameType: "coinflip",
     heading: "🪙 <b>Create Coinflip</b>",
-    amountPrompt: "Select stake per player in <b>{TOKEN}</b>:",
+    amountPrompt: "Select stake per player:",
     lowBalanceCopy: {
       object: "stake per player",
     },
@@ -1443,7 +1443,7 @@ const GAME_SETUP_COPY: Record<"coinflip" | "giveaway", GameSetupCopy> = {
   giveaway: {
     gameType: "giveaway",
     heading: "🎁 <b>Create Giveaway</b>",
-    amountPrompt: "Select prize amount in <b>{TOKEN}</b>:",
+    amountPrompt: "Select prize amount:",
     lowBalanceCopy: {
       object: "prize amount",
     },
@@ -1485,16 +1485,17 @@ const startInteractiveGameSetup = async (
 
   let message = `${copy.heading}\n\n`;
   message += `Token: <b>${tokenInfo.tokenTicker}</b>\n`;
+  message += "\n";
 
   if (copy.lowBalanceCopy && userBalance < contractMin) {
     const { object } = copy.lowBalanceCopy;
     const minDisplay = formatTokenDisplay(contractMin, {
       decimals: tokenInfo.decimals,
     });
-    message += `\n⚠️ Minimum ${object}: ${minDisplay} ${tokenInfo.tokenTicker}.\n`;
+    message += `⚠️ Minimum ${object}: ${minDisplay} ${tokenInfo.tokenTicker}.\n\n`;
   }
 
-  message += copy.amountPrompt.replace("{TOKEN}", tokenInfo.tokenTicker);
+  message += copy.amountPrompt;
 
   if (copy.suggestionLabel && suggestedAmounts.length > 0) {
     message += `\n\n${copy.suggestionLabel}:\n`;

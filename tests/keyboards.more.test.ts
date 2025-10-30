@@ -193,7 +193,7 @@ describe("keyboards: amount selection", () => {
       decimals: 2,
       tokenPriceUSD: 0.01,
     });
-    const texts = extractTexts(kb).filter((text) => text.startsWith("💰"));
+    const texts = extractTexts(kb).filter((text) => /^\d/.test(text));
     expect(texts.length).toBeGreaterThan(0);
     expect(texts.every((text) => !text.includes("TIMBA"))).toBe(true);
     expect(texts.every((text) => text.includes("(~$"))).toBe(true);

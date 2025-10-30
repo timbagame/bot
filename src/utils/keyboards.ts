@@ -197,7 +197,7 @@ export const createAmountSelectionKeyboard = (
       tokenPriceUSD !== undefined
         ? ` (~$${formatUsdValue(amount * tokenPriceUSD)})`
         : "";
-    keyboard.text(`💰 ${display}${usdText}`, callbackData);
+    keyboard.text(`${display}${usdText}`, callbackData);
     const isEndOfPair = index % 2 === 1;
     const isLast = index === amounts.length - 1;
     if (isEndOfPair && !isLast) {
