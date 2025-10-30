@@ -33,7 +33,20 @@ import {
 } from "./utils/constants";
 import { FeeBudgetManager } from "./utils/fee-budget";
 import { mergeWsolIntoSol } from "./utils/balance";
-import { setUserState, getUserState, storePendingTransaction, getPendingTransaction } from "./utils/user-state";
+import {
+  setUserState,
+  getUserState,
+  storePendingTransaction,
+  getPendingTransaction,
+  upsertGameSetupSession,
+  getGameSetupSession as fetchGameSetupSession,
+  clearGameSetupSession as removeGameSetupSession,
+  setInputSession as persistInputSession,
+  getInputSession as fetchInputSession,
+  clearInputSession as removeInputSession,
+  type GameSetupSessionState,
+  type InputSessionState,
+} from "./utils/user-state";
 // import { createDmMessageAdapter } from "./utils/ctx-adapter";
 import {
   createWalletKeyboard,
@@ -209,70 +222,38 @@ const CONTRACT_EXAMPLE_LINES = (() => {
 // Helper moved to utils/service-health.ts as checkServiceHealth
 
 // User sessions for text input handling
-type GameSetupSession = {
-  waitingFor: string;
-  gameType: string;
-  userBalance: number;
-  messageId?: number;
-  chatId?: number;
-  amount?: string;
-  creatorId?: string;
-  tokenMint?: string;
-  tokenTicker?: string;
-  tokenDecimals?: number;
-  contractMinimum?: number;
-  maxPlayersLimit?: number;
-};
-
-const defaultGameSetupSession: Pick<GameSetupSession, "waitingFor" | "gameType" | "userBalance"> = {
-  waitingFor: "setup",
-  gameType: "",
-  userBalance: 0,
-};
-
-const userSessions = new Map<string, GameSetupSession>();
+type GameSetupSession = GameSetupSessionState;
 
 const updateGameSetupSession = (
   sessionKey: string,
   overrides: Partial<GameSetupSession>
-): GameSetupSession => {
-  const existing = userSessions.get(sessionKey);
-  const next: GameSetupSession = {
-    ...defaultGameSetupSession,
-    ...(existing ?? {}),
-    ...overrides,
-  } as GameSetupSession;
+): GameSetupSession => upsertGameSetupSession(sessionKey, overrides);
 
-  userSessions.set(sessionKey, next);
-  return next;
+const getGameSetupSession = (
+  sessionKey: string
+): GameSetupSession | undefined => fetchGameSetupSession(sessionKey);
+
+const clearGameSetupSession = (sessionKey: string): void => {
+  removeGameSetupSession(sessionKey);
 };
 
 // Input sessions for non-game text inputs (send, swap, wrap, etc.)
-type InputSession = {
-  type: string;
-  [key: string]: any;
-};
-
-const inputSessions = new Map<string, InputSession>();
+type InputSession = InputSessionState;
 
 const updateInputSession = (
   sessionKey: string,
   session: InputSession
 ): void => {
-  inputSessions.set(sessionKey, session);
+  persistInputSession(sessionKey, session);
 };
 
-const getInputSession = (sessionKey: string): InputSession | undefined => {
-  return inputSessions.get(sessionKey);
-};
+const getInputSession = (
+  sessionKey: string
+): InputSession | undefined => fetchInputSession(sessionKey);
 
 const clearInputSession = (sessionKey: string): void => {
-  inputSessions.delete(sessionKey);
+  removeInputSession(sessionKey);
 };
-
-// Test-only accessor for verifying session behavior in unit tests
-export const __testSessions = userSessions;
-export const __testInputSessions = inputSessions;
 // Test-only helpers to manipulate wallet cache in unit tests
 export const __test_setWalletCache = (
   telegramId: bigint | number | string,
@@ -387,39 +368,45 @@ type TokenBalanceLike = {
   decimals: number;
 };
 
-type ResolveSpendAmountParams = {
+type PresentSpendAmountParams = {
   amount: string;
   assetTicker: string;
-  inputDecimals: number;
+  decimals: number;
   solBalance: number;
   tokenBalance?: TokenBalanceLike;
   formatSol: (lamports: number) => string;
   formatToken: (amount: number, decimals: number) => string;
   applySolFeeBuffer?: boolean;
+  solFeeBufferLamports?: number;
 };
 
-const resolveSpendAmount = ({
+const presentSpendAmount = ({
   amount,
   assetTicker,
-  inputDecimals,
+  decimals,
   solBalance,
   tokenBalance,
   formatSol,
   formatToken,
   applySolFeeBuffer = true,
-}: ResolveSpendAmountParams) => {
+  solFeeBufferLamports = SOL_FEE_BUFFER_LAMPORTS,
+}: PresentSpendAmountParams) => {
   const presentation = presentTradeAmount({
     amount,
     assetTicker,
-    decimals: inputDecimals,
+    decimals,
     solBalance,
     tokenBalance,
     applySolFeeBuffer,
-    solFeeBufferLamports: SOL_FEE_BUFFER_LAMPORTS,
-    insufficientSolForFeesMessage: "Not enough SOL to cover purchase and fees",
-    insufficientSolBalanceMessage: applySolFeeBuffer
-      ? "Insufficient SOL balance for this purchase"
-      : "Insufficient SOL balance",
+    ...(applySolFeeBuffer
+      ? {
+          solFeeBufferLamports,
+          insufficientSolForFeesMessage:
+            "Not enough SOL to cover purchase and fees",
+          insufficientSolBalanceMessage:
+            "Insufficient SOL balance for this purchase",
+        }
+      : {}),
     formatSol,
     formatToken,
   });
@@ -427,41 +414,7 @@ const resolveSpendAmount = ({
   return {
     rawAmount: presentation.rawAmount,
     displayAmount: presentation.displayAmount,
-  };
-};
-
-type NormalizeCustomTradeAmountOptions = {
-  amount: string;
-  assetTicker: string;
-  solBalance: number;
-  tokenBalance?: TokenBalanceLike;
-  decimals: number;
-};
-
-type NormalizeCustomTradeAmountResult = {
-  normalizedAmount: string;
-  displayAmount: string;
-};
-
-const normalizeCustomTradeAmount = ({
-  amount,
-  assetTicker,
-  solBalance,
-  tokenBalance,
-  decimals,
-}: NormalizeCustomTradeAmountOptions): NormalizeCustomTradeAmountResult => {
-  const presentation = presentTradeAmount({
-    amount,
-    assetTicker,
-    decimals,
-    solBalance,
-    tokenBalance,
-    applySolFeeBuffer: false,
-  });
-
-  return {
     normalizedAmount: presentation.normalizedAmount,
-    displayAmount: presentation.displayAmount,
   };
 };
 
@@ -959,10 +912,10 @@ const prepareTokenTradeQuote = async ({
     Promise.resolve(outputFactory(factoryContext)),
   ]);
 
-  const amountResolution = resolveSpendAmount({
+  const amountResolution = presentSpendAmount({
     amount: amountInput,
     assetTicker: inputAsset.ticker,
-    inputDecimals: inputAsset.decimals,
+    decimals: inputAsset.decimals,
     solBalance: snapshot.solBalance,
     tokenBalance: inputAsset.tokenBalance,
     formatSol: (lamports) => wallet.formatSolBalance(lamports),
@@ -1088,8 +1041,7 @@ export const __test_createApiContext = createApiContext;
 export const __test_validateGameTokenData = validateGameTokenData;
 export const __test_resetInitiatedChats = () => initiatedChats.clear();
 export const __test_getInitiatedChats = () => new Set(initiatedChats);
-export const __test_resolveSpendAmount = resolveSpendAmount;
-export const __test_normalizeCustomTradeAmount = normalizeCustomTradeAmount;
+export const __test_presentSpendAmount = presentSpendAmount;
 export const __test_formatTradeConfirmationSummary = formatTradeConfirmationSummary;
 
 /**
@@ -1723,7 +1675,7 @@ const withCreatorContext = (
     const userId = Number(userIdBigInt);
     const sessionKey = `${ctx.chat?.id ?? 0}_${ctx.callbackQuery?.message?.message_id ?? 0}`;
 
-    let session = userSessions.get(sessionKey);
+    let session = getGameSetupSession(sessionKey);
     const tokenContext = await buildTokenContext(session, ctx.chat?.id);
 
     const creatorContext: CreatorCallbackContext = {
@@ -1732,27 +1684,27 @@ const withCreatorContext = (
       session,
       tokenContext,
       updateSession: (updates, keyOverride?: string) => {
-        const base: Partial<GameSetupSession> = session ? { ...session } : {};
-        const next = {
-          ...base,
+        const keyToUse = keyOverride ?? sessionKey;
+        const contractMinimum =
+          updates.contractMinimum ??
+          session?.contractMinimum ??
+          tokenContext.contractMinimum;
+
+        const next = updateGameSetupSession(keyToUse, {
           ...updates,
           creatorId,
           tokenMint: tokenContext.tokenMint,
           tokenTicker: tokenContext.tokenTicker,
           tokenDecimals: tokenContext.tokenDecimals,
-          contractMinimum:
-            updates.contractMinimum ??
-            (base.contractMinimum ?? tokenContext.contractMinimum),
-        } as GameSetupSession;
+          contractMinimum,
+        });
 
-        const keyToUse = keyOverride ?? sessionKey;
-        userSessions.set(keyToUse, next);
         session = next;
         creatorContext.session = next;
         return next;
       },
       clearSession: () => {
-        userSessions.delete(sessionKey);
+        clearGameSetupSession(sessionKey);
         session = undefined;
         creatorContext.session = undefined;
       },
@@ -3621,6 +3573,32 @@ bot.command("oracle", async (ctx: Context) => {
 // CALLBACK QUERY HANDLING
 // ================================
 
+type CallbackHandler<TCtx extends Context = any> = (
+  ctx: TCtx,
+  next: NextFunction
+) => Promise<void> | void;
+
+const wrapCallbackHandler = <TCtx extends Context>(
+  handler: CallbackHandler<TCtx>,
+  options: { action?: string; errorAck?: string } = {}
+) => {
+  return async (ctx: TCtx, next: NextFunction) => {
+    try {
+      await handler(ctx, next);
+    } catch (error) {
+      const fallbackAction = handler.name || "callback handler";
+      const actionLabel =
+        options.action ?? ctx.callbackQuery?.data ?? fallbackAction;
+      if (options.errorAck) {
+        console.error(`Error in ${actionLabel}:`, error);
+        await safeAnswerCallbackQuery(ctx, options.errorAck);
+      } else {
+        await handleCallbackErrorSafe(ctx, error, actionLabel);
+      }
+    }
+  };
+};
+
 const handleRefreshGameCallback = async (
   ctx: any,
   gamePda: PublicKey,
@@ -3905,14 +3883,14 @@ const handleJoinGame = async (
 // Amount selection callbacks (new format with creatorId)
 bot.callbackQuery(
   /^amount_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)$/,
-  withCreatorContext(
-    {
-      name: "amount",
-      resolveCreatorId: (ctx) => ctx.match?.[3],
-      failureText: "🚫 Only the game creator can modify this game setup!",
-    },
-    async (ctx, { session, tokenContext, updateSession, creatorId }) => {
-      try {
+  wrapCallbackHandler(
+    withCreatorContext(
+      {
+        name: "amount",
+        resolveCreatorId: (ctx) => ctx.match?.[3],
+        failureText: "🚫 Only the game creator can modify this game setup!",
+      },
+      async (ctx, { session, tokenContext, updateSession, creatorId }) => {
         const gameType = ctx.match![1] as string;
         const amount = ctx.match![2] as string;
 
@@ -3957,12 +3935,10 @@ bot.callbackQuery(
           amount,
         });
 
-    await safeAnswerCallbackQuery(ctx);
-      } catch (error) {
-        console.error("Error in amount callback:", error);
-        await safeAnswerCallbackQuery(ctx, "❌ Error selecting amount");
+        await safeAnswerCallbackQuery(ctx);
       }
-    }
+    ),
+    { action: "amount", errorAck: "❌ Error selecting amount" }
   )
 );
 
@@ -3970,14 +3946,14 @@ bot.callbackQuery(
 // Player selection callbacks (new format with creatorId)
 bot.callbackQuery(
   /^players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/,
-  withCreatorContext(
-    {
-      name: "players",
-      resolveCreatorId: (ctx) => ctx.match?.[4],
-      failureText: "🚫 Only the game creator can modify this game setup!",
-    },
-    async (ctx, { session, tokenContext, updateSession, creatorId }) => {
-      try {
+  wrapCallbackHandler(
+    withCreatorContext(
+      {
+        name: "players",
+        resolveCreatorId: (ctx) => ctx.match?.[4],
+        failureText: "🚫 Only the game creator can modify this game setup!",
+      },
+      async (ctx, { session, tokenContext, updateSession, creatorId }) => {
         const gameType = ctx.match![1] as string;
         const amount = ctx.match![2] as string;
         const players = ctx.match![3] as string;
@@ -4039,11 +4015,9 @@ bot.callbackQuery(
         });
 
         await safeAnswerCallbackQuery(ctx);
-      } catch (error) {
-        console.error("Error in players callback:", error);
-        await safeAnswerCallbackQuery(ctx, "❌ Error selecting players");
       }
-    }
+    ),
+    { action: "players", errorAck: "❌ Error selecting players" }
   )
 );
 
@@ -4709,7 +4683,7 @@ const handleGameSetupTextInput = async (
     const sessionKey = `${ctx.chat?.id || 0}_${replyToMessageId}`;
 
     // Check if user is in a session waiting for input
-    const userSession = userSessions.get(sessionKey);
+    const userSession = getGameSetupSession(sessionKey);
 
     if (!userSession || (userSession.waitingFor !== "amount_input" && userSession.waitingFor !== "players_input")) {
       return await next(); // Not waiting for input, pass to other handlers
@@ -4723,12 +4697,12 @@ const handleGameSetupTextInput = async (
     // default token.
     const sessionSnapshot = { ...userSession };
     const restoreSession = (overrides: Partial<GameSetupSession> = {}) => {
-      userSessions.set(sessionKey, {
+      updateGameSetupSession(sessionKey, {
         ...sessionSnapshot,
         ...overrides,
       });
     };
-    userSessions.delete(sessionKey);
+    clearGameSetupSession(sessionKey);
 
     const defaultMetadata = await getDefaultTokenMetadata();
     const tokenTicker =
@@ -5020,26 +4994,24 @@ const registerCallbackPrefixHandler = (
   ) => Promise<void> | void,
   options: CallbackPrefixHandlerOptions = {}
 ) => {
-  bot.on("callback_query", async (ctx, next) => {
-    const callbackData = ctx.callbackQuery?.data;
-    if (!callbackData?.startsWith(prefix)) {
-      return await next();
-    }
+  bot.on(
+    "callback_query",
+    wrapCallbackHandler(
+      async (ctx, next) => {
+        const callbackData = ctx.callbackQuery?.data;
+        if (!callbackData?.startsWith(prefix)) {
+          return await next();
+        }
 
-    const payload = callbackData.slice(prefix.length);
-
-    try {
-      await handler(ctx, { raw: callbackData, payload }, () => next());
-    } catch (error) {
-      console.error(
-        `Error in ${options.logLabel ?? `${prefix} handler`}:`,
-        error
-      );
-      if (options.errorAck) {
-        await safeAnswerCallbackQuery(ctx, options.errorAck);
+        const payload = callbackData.slice(prefix.length);
+        await handler(ctx, { raw: callbackData, payload }, () => next());
+      },
+      {
+        action: options.logLabel ?? `${prefix} handler`,
+        errorAck: options.errorAck,
       }
-    }
-  });
+    )
+  );
 };
 
 // ================================
@@ -5064,28 +5036,29 @@ const registerWalletActionMenuHandler = ({
   errorAck,
   resolve,
 }: WalletActionMenuHandlerConfig) => {
-  bot.callbackQuery(callback, async (ctx) => {
-    try {
-      const resolution = await resolve(ctx);
-      if (!resolution) {
-        return;
-      }
+  bot.callbackQuery(
+    callback,
+    wrapCallbackHandler(
+      async (ctx) => {
+        const resolution = await resolve(ctx);
+        if (!resolution) {
+          return;
+        }
 
-      const { menu } = await buildWalletActionMenuForUser({
-        ctx,
-        ...resolution.menuOptions,
-      });
+        const { menu } = await buildWalletActionMenuForUser({
+          ctx,
+          ...resolution.menuOptions,
+        });
 
-      await respondWithMenu(ctx, menu);
+        await respondWithMenu(ctx, menu);
 
-      if (resolution.successAck) {
-        await safeAnswerCallbackQuery(ctx, resolution.successAck);
-      }
-    } catch (error) {
-      console.error(`Error in ${logLabel ?? callback}:`, error);
-      await safeAnswerCallbackQuery(ctx, errorAck);
-    }
-  });
+        if (resolution.successAck) {
+          await safeAnswerCallbackQuery(ctx, resolution.successAck);
+        }
+      },
+      { action: logLabel ?? callback, errorAck }
+    )
+  );
 };
 
 registerWalletActionMenuHandler({
@@ -5111,52 +5084,54 @@ registerWalletActionMenuHandler({
   }),
 });
 
-bot.callbackQuery("cmd_privatekey", async (ctx) => {
-  try {
-    // Only show private key in private chats for security
-    if (ctx.chat?.type !== "private") {
-      await safeAnswerCallbackQuery(ctx,
-        "❌ Private key only available in private chat"
+bot.callbackQuery(
+  "cmd_privatekey",
+  wrapCallbackHandler(
+    async (ctx) => {
+      // Only show private key in private chats for security
+      if (ctx.chat?.type !== "private") {
+        await safeAnswerCallbackQuery(
+          ctx,
+          "❌ Private key only available in private chat"
+        );
+        return;
+      }
+
+      const telegramId = await getRequiredTelegramIdForContext(
+        ctx,
+        "show private key"
       );
-      return;
-    }
+      if (telegramId == null) {
+        await respondMissingIdentity(ctx);
+        return;
+      }
+      const keypair = wallet.getKeyPair(telegramId);
+      const privateKeyBase64 = Buffer.from(keypair.secretKey).toString("base64");
 
-    const telegramId = await getRequiredTelegramIdForContext(
-      ctx,
-      "show private key"
-    );
-    if (telegramId == null) {
-      await respondMissingIdentity(ctx);
-      return;
-    }
-    const keypair = wallet.getKeyPair(telegramId);
-    const privateKeyBase64 = Buffer.from(keypair.secretKey).toString("base64");
+      const response = [
+        `🔐 <b>Private Key</b>`,
+        "",
+        `⚠️ <b>Keep This Secret!</b>`,
+        `Never share your private key with anyone.`,
+        `Store it securely offline.`,
+        "",
+        `Wallet Address: <code>${escapeHtml(keypair.publicKey.toBase58())}</code>`,
+        "",
+        `<b>Secret Key (Base64):</b>`,
+        `<span class="tg-spoiler"><code>${escapeHtml(privateKeyBase64)}</code></span>`,
+        "",
+        `You can import this key into Phantom, Solflare, or other Solana wallets.`,
+      ];
 
-    const response = [
-      `🔐 <b>Private Key</b>`,
-      "",
-      `⚠️ <b>Keep This Secret!</b>`,
-      `Never share your private key with anyone.`,
-      `Store it securely offline.`,
-      "",
-      `Wallet Address: <code>${escapeHtml(keypair.publicKey.toBase58())}</code>`,
-      "",
-      `<b>Secret Key (Base64):</b>`,
-      `<span class="tg-spoiler"><code>${escapeHtml(privateKeyBase64)}</code></span>`,
-      "",
-      `You can import this key into Phantom, Solflare, or other Solana wallets.`,
-    ];
-
-    await respondWithMenu(ctx, {
-      text: response.join("\n"),
-      keyboard: createBackToWalletKeyboard(),
-    });
-    await safeAnswerCallbackQuery(ctx, "🔐 Private key shown");
-  } catch (error) {
-    console.error("Error in cmd_privatekey:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error showing private key");
-  }
-});
+      await respondWithMenu(ctx, {
+        text: response.join("\n"),
+        keyboard: createBackToWalletKeyboard(),
+      });
+      await safeAnswerCallbackQuery(ctx, "🔐 Private key shown");
+    },
+    { action: "cmd_privatekey", errorAck: "❌ Error showing private key" }
+  )
+);
 
 
 registerWalletActionMenuHandler({
@@ -5288,36 +5263,37 @@ registerWalletActionMenuHandler({
 });
 
 // Handle custom wrap amount
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery?.data;
-  if (callbackData !== "wrap_custom") {
-    return await next();
-  }
+bot.on(
+  "callback_query",
+  wrapCallbackHandler(
+    async (ctx, next) => {
+      const callbackData = ctx.callbackQuery?.data;
+      if (callbackData !== "wrap_custom") {
+        return await next();
+      }
 
-  try {
-    const userId = getTelegramIdString(ctx);
-    if (!userId) return;
+      const userId = getTelegramIdString(ctx);
+      if (!userId) return;
 
-    console.log("🔔 Custom wrap amount requested");
+      console.log("🔔 Custom wrap amount requested");
 
-    await showCustomAmountPrompt({
-      ctx,
-      userId,
-      title: "✏️ <b>Custom Wrap Amount</b>",
-      instructions: [
-        "Reply to this message with the amount of SOL you want to wrap.",
-      ],
-      examples: ["• <code>0.5</code>", "• <code>1.25</code>"],
-      cancelCallback: "cmd_wrap",
-      state: { type: "wrap_custom_amount" },
-    });
+      await showCustomAmountPrompt({
+        ctx,
+        userId,
+        title: "✏️ <b>Custom Wrap Amount</b>",
+        instructions: [
+          "Reply to this message with the amount of SOL you want to wrap.",
+        ],
+        examples: ["• <code>0.5</code>", "• <code>1.25</code>"],
+        cancelCallback: "cmd_wrap",
+        state: { type: "wrap_custom_amount" },
+      });
 
-    await safeAnswerCallbackQuery(ctx, "Send the amount as a message");
-  } catch (error) {
-    console.error("Error in wrap_custom:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error processing custom amount");
-  }
-});
+      await safeAnswerCallbackQuery(ctx, "Send the amount as a message");
+    },
+    { action: "wrap_custom", errorAck: "❌ Error processing custom amount" }
+  )
+);
 
 registerCallbackPrefixHandler("wrap_amount_", async (ctx, { payload }) => {
   try {
@@ -5334,10 +5310,10 @@ registerCallbackPrefixHandler("wrap_amount_", async (ctx, { payload }) => {
     const { nativeSolBalance, wsolBalance } = await getCachedWalletData(telegramId);
     const availableSolLamports = nativeSolBalance;
 
-    const spend = resolveSpendAmount({
+    const spend = presentSpendAmount({
       amount: amountChoice,
       assetTicker: "SOL",
-      inputDecimals: 9,
+      decimals: 9,
       solBalance: availableSolLamports,
       formatSol: (lamports) => wallet.formatSolBalance(lamports),
       formatToken: (value, decimals) =>
@@ -6272,10 +6248,10 @@ registerCallbackPrefixHandler("send_amount_", async (ctx, { payload }) => {
       throw new Error(`Token ${token} not found in wallet`);
     }
 
-    const spend = resolveSpendAmount({
+    const spend = presentSpendAmount({
       amount: amountChoice,
       assetTicker: token,
-      inputDecimals: isSol ? 9 : selectedToken!.decimals,
+      decimals: isSol ? 9 : selectedToken!.decimals,
       solBalance,
       tokenBalance: selectedToken
         ? { balance: selectedToken.balance, decimals: selectedToken.decimals }
@@ -7099,7 +7075,7 @@ bot.on("message:text", async (ctx, next) => {
   const sessionKey = `${ctx.chat?.id || 0}_${replyToMessageId}`;
 
   // Check for game setup session first
-  const gameSession = userSessions.get(sessionKey);
+  const gameSession = getGameSetupSession(sessionKey);
   if (gameSession && (gameSession.waitingFor === "amount_input" || gameSession.waitingFor === "players_input")) {
     // Handle game setup input
     await handleGameSetupTextInput(ctx, next);
@@ -7152,6 +7128,67 @@ bot.on("message:text", async (ctx, next) => {
   }
 });
 
+type PersistInputPromptOptions = {
+  ctx: any;
+  userState: { chatId?: number; messageId?: number };
+  text: string;
+  keyboard: InlineKeyboard;
+  session: InputSession;
+  logLabel: string;
+  parseMode?: "HTML" | "Markdown" | "MarkdownV2";
+  replyToMessageId?: number;
+  persistSession?: boolean;
+};
+
+const persistInputPrompt = async ({
+  ctx,
+  userState,
+  text,
+  keyboard,
+  session,
+  logLabel,
+  parseMode = "HTML",
+  replyToMessageId,
+  persistSession = true,
+}: PersistInputPromptOptions) => {
+  const targetChatId =
+    typeof userState.chatId === "number"
+      ? userState.chatId
+      : typeof ctx.chat?.id === "number"
+      ? ctx.chat.id
+      : undefined;
+  const targetMessageId =
+    typeof userState.messageId === "number" ? userState.messageId : undefined;
+
+  const menuResult = await upsertWalletMenuMessage({
+    ctx,
+    text,
+    keyboard,
+    parseMode,
+    targetChatId,
+    targetMessageId,
+    replyToMessageId:
+      replyToMessageId ?? ctx.message?.message_id ?? undefined,
+    logLabel,
+  });
+
+  const resolvedChatId =
+    menuResult.chatId ??
+    targetChatId ??
+    (typeof ctx.chat?.id === "number" ? ctx.chat.id : undefined);
+  const resolvedMessageId = menuResult.messageId ?? targetMessageId;
+
+  if (persistSession && resolvedChatId != null && resolvedMessageId != null) {
+    updateInputSession(`${resolvedChatId}_${resolvedMessageId}`, {
+      ...session,
+      chatId: resolvedChatId,
+      messageId: resolvedMessageId,
+    });
+  }
+
+  return { chatId: resolvedChatId, messageId: resolvedMessageId };
+};
+
 /**
  * Handle custom amount input for send
  */
@@ -7173,10 +7210,10 @@ const handleCustomAmountInput = async (
     throw new Error(`Token ${token} not found in wallet`);
   }
 
-  const spend = resolveSpendAmount({
+  const spend = presentSpendAmount({
     amount,
     assetTicker: token,
-    inputDecimals: isSol ? 9 : selectedToken!.decimals,
+    decimals: isSol ? 9 : selectedToken!.decimals,
     solBalance,
     tokenBalance: selectedToken
       ? { balance: selectedToken.balance, decimals: selectedToken.decimals }
@@ -7222,44 +7259,18 @@ const handleCustomAmountInput = async (
 
   const messageText = response.join("\n");
   const keyboard = createCancelKeyboard(`send_select_${token}`);
-
-  const targetChatId =
-    typeof userState.chatId === "number"
-      ? userState.chatId
-      : typeof ctx.chat?.id === "number"
-      ? ctx.chat.id
-      : undefined;
-  const targetMessageId =
-    typeof userState.messageId === "number" ? userState.messageId : undefined;
-
-  const menuResult = await upsertWalletMenuMessage({
+  await persistInputPrompt({
     ctx,
+    userState,
     text: messageText,
     keyboard,
-    parseMode: "HTML",
-    targetChatId,
-    targetMessageId,
-    replyToMessageId: ctx.message?.message_id ?? undefined,
+    session: {
+      type: "send_address",
+      token,
+      amount: storedAmount,
+      amountDisplay: displayLabel,
+    },
     logLabel: "handleCustomAmountInput",
-  });
-
-  if (telegramId === 0n) {
-    return;
-  }
-
-  const resolvedMessageId = menuResult.messageId ?? targetMessageId;
-  const resolvedChatId =
-    menuResult.chatId ??
-    targetChatId ??
-    (typeof ctx.chat?.id === "number" ? ctx.chat.id : undefined);
-
-  updateInputSession(`${resolvedChatId}_${resolvedMessageId}`, {
-    type: "send_address",
-    token,
-    amount: storedAmount,
-    amountDisplay: displayLabel,
-    messageId: resolvedMessageId,
-    chatId: resolvedChatId,
   });
 };
 
@@ -7367,39 +7378,16 @@ const handleWrapAmountInput = async (
   const messageText = response.join("\n");
   const keyboard = createConfirmWrapKeyboard(lamportsToWrap);
   const userId = getTelegramIdString(ctx);
-  const targetChatId =
-    typeof userState.chatId === "number"
-      ? userState.chatId
-      : typeof ctx.chat?.id === "number"
-      ? ctx.chat.id
-      : undefined;
-  const targetMessageId =
-    typeof userState.messageId === "number" ? userState.messageId : undefined;
 
-  const menuResult = await upsertWalletMenuMessage({
+  await persistInputPrompt({
     ctx,
+    userState,
     text: messageText,
     keyboard,
-    parseMode: "HTML",
-    targetChatId,
-    targetMessageId,
-    replyToMessageId: ctx.message?.message_id ?? undefined,
+    session: { type: "wrap_custom_amount" },
     logLabel: "handleWrapAmountInput",
+    persistSession: Boolean(userId),
   });
-
-  if (userId) {
-    const resolvedChatId =
-      menuResult.chatId ??
-      targetChatId ??
-      (typeof ctx.chat?.id === "number" ? ctx.chat.id : undefined);
-    const resolvedMessageId = menuResult.messageId ?? targetMessageId;
-
-    updateInputSession(`${resolvedChatId}_${resolvedMessageId}`, {
-      type: "wrap_custom_amount",
-      chatId: resolvedChatId,
-      messageId: resolvedMessageId,
-    });
-  }
 };
 
 /**
@@ -7411,7 +7399,6 @@ const handleSwapToTokenInput = async (
   tokenInput: string
 ) => {
   const fromToken = userState.fromToken;
-  const telegramId = requireTelegramId(ctx, "swap token input");
   const trimmedInput = tokenInput.trim();
 
   console.log(
@@ -7442,59 +7429,30 @@ const handleSwapToTokenInput = async (
   });
 
   try {
-    let metadata: SwapTokenMetadata | undefined;
-
-    if (isProbableMintAddress(trimmedInput)) {
-      metadata = await fetchSwapTokenMetadata(trimmedInput, telegramId);
-    } else {
-      const normalized = trimmedInput.toUpperCase();
-
-      const mintFromTicker = tokenManager.resolveMintForTicker(normalized);
-      if (mintFromTicker) {
-        let decimals: number | undefined;
-        try {
-          const tokenMeta = await wallet.getTokenMetadata(mintFromTicker);
-          if (tokenMeta && typeof tokenMeta === "object" && "decimals" in tokenMeta) {
-            const value = Number((tokenMeta as any).decimals);
-            if (Number.isFinite(value)) {
-              decimals = value;
-            }
-          }
-        } catch (error) {
-          console.log("Metadata lookup failed for", normalized, error);
-        }
-
-        metadata = {
-          symbol: normalized,
-          address: mintFromTicker,
-          decimals: decimals ?? 6,
-          verified: true,
-        };
-      } else {
-        const known = tokenManager
-          .getAllKnownTokens()
-          .find((token) => token.token_ticker?.toUpperCase() === normalized);
-
-        if (known) {
-          metadata = {
-            symbol: known.token_ticker.toUpperCase(),
-            address: known.token_mint,
-            decimals: known.decimals ?? 6,
-            verified: true,
-          };
-        }
-      }
-
-      if (!metadata) {
-        throw new Error(
-          `Token "${trimmedInput}" not found. Try using the contract address.`
-        );
-      }
+    const resolved = await tokenManager.resolveSwapToken(trimmedInput);
+    if (!resolved) {
+      throw new Error(
+        `Token "${trimmedInput}" not found. Try using the contract address.`
+      );
     }
 
-    if (!metadata) {
-      throw new Error("Unable to resolve token metadata");
+    const decimals = Number(resolved.decimals);
+    if (!Number.isFinite(decimals) || decimals < 0) {
+      throw new Error(
+        `Token metadata missing decimals for ${resolved.token_ticker}`
+      );
     }
+
+    const tokenSymbol = resolved.isNativeSol
+      ? "SOL"
+      : resolved.token_ticker.toUpperCase();
+
+    const metadata: SwapTokenMetadata = {
+      symbol: tokenSymbol,
+      address: resolved.token_mint,
+      decimals,
+      verified: !resolved.newlyDiscovered,
+    };
 
     const tokenCacheId = createTokenLookupId();
     transactionCache.setWithTTL(tokenCacheId, {
@@ -7580,65 +7538,11 @@ const handleSwapCustomAmountInput = async (
   );
 };
 
-const isProbableMintAddress = (value: string): boolean =>
-  /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
-
 type SwapTokenMetadata = {
   symbol: string;
   address: string;
   decimals: number;
   verified: boolean;
-};
-
-const fetchSwapTokenMetadata = async (
-  contractAddress: string,
-  telegramId?: bigint
-): Promise<SwapTokenMetadata> => {
-  if (!isProbableMintAddress(contractAddress)) {
-    throw new Error("Invalid Solana contract address format");
-  }
-
-  if (telegramId) {
-    try {
-      const { tokenBalances } = await getCachedWalletData(telegramId);
-      const owned = tokenBalances.find((token) => token.mint === contractAddress);
-      if (owned) {
-        return {
-          symbol: owned.ticker,
-          address: contractAddress,
-          decimals: owned.decimals,
-          verified: true,
-        };
-      }
-    } catch (error) {
-      console.log("Wallet balance lookup for metadata failed:", error);
-    }
-  }
-
-  try {
-    const metadata = await wallet.getTokenMetadata(contractAddress);
-    if (metadata && typeof metadata === "object" && "symbol" in metadata) {
-      const symbol = String((metadata as any).symbol ?? contractAddress).toUpperCase();
-      const decimals = Number.isFinite((metadata as any).decimals)
-        ? Number((metadata as any).decimals)
-        : 6;
-      return {
-        symbol,
-        address: contractAddress,
-        decimals,
-        verified: symbol !== contractAddress,
-      };
-    }
-  } catch (error) {
-    console.log("Token metadata fetch failed:", error);
-  }
-
-  return {
-    symbol: contractAddress,
-    address: contractAddress,
-    decimals: 6,
-    verified: false,
-  };
 };
 
 export const __test_handleCustomAmountInput = handleCustomAmountInput;

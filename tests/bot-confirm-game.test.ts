@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, afterEach, expect, test } from "bun:test";
+import { upsertGameSetupSession, clearAllGameSetupSessions } from "../src/utils/user-state";
 
 process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
 process.env.MNEMONIC =
@@ -9,7 +10,6 @@ process.env.NODE_ENV = "test";
 
 let botModule: typeof import("../src/bot");
 let bot: any;
-let __testSessions: Map<string, any>;
 type ApiHandler = (payload: any) => any | Promise<any>;
 const apiHandlers: Record<string, ApiHandler | undefined> = {};
 let interceptorInstalled = false;
@@ -17,7 +17,6 @@ let interceptorInstalled = false;
 beforeAll(async () => {
   botModule = await import("../src/bot");
   bot = botModule.bot;
-  __testSessions = botModule.__testSessions as Map<string, any>;
 
   (bot as any).botInfo = {
     id: 0,
@@ -61,7 +60,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-  __testSessions.clear();
+  clearAllGameSetupSessions();
 
   botModule.__test_setGameManager({
     createGame: async () => ({ success: true, gameAddress: "GAME123" }),
@@ -96,7 +95,7 @@ test(
     const chatId = 8200;
     const messageId = 91;
 
-    __testSessions.set(`${chatId}_${messageId}`, {
+    upsertGameSetupSession(`${chatId}_${messageId}`, {
       waitingFor: "setup",
       gameType: "coinflip",
       userBalance: 100,
@@ -166,7 +165,7 @@ test(
     const chatId = 8300;
     const messageId = 92;
 
-    __testSessions.set(`${chatId}_${messageId}`, {
+    upsertGameSetupSession(`${chatId}_${messageId}`, {
       waitingFor: "setup",
       gameType: "coinflip",
       userBalance: 50,

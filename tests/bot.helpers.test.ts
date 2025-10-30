@@ -219,14 +219,14 @@ describe("Bot helper utilities", () => {
     expect(botModule.__test_getInitiatedChats).toBeDefined();
   });
 
-  test("resolveSpendAmount handles percentage-based SOL spend", () => {
+  test("presentSpendAmount handles percentage-based SOL spend", () => {
     const buffer = Math.ceil(MIN_SOL_FOR_TX * LAMPORTS_PER_SOL);
     const solBalance = buffer * 5;
 
-    const { rawAmount, displayAmount } = botModule.__test_resolveSpendAmount({
+    const { rawAmount, displayAmount } = botModule.__test_presentSpendAmount({
       amount: "25%",
       assetTicker: "SOL",
-      inputDecimals: 9,
+      decimals: 9,
       solBalance,
       tokenBalance: undefined,
       formatSol: (lamports: number) => botModule.wallet.formatSolBalance(lamports),
@@ -241,14 +241,14 @@ describe("Bot helper utilities", () => {
     expect(displayAmount).toBe(botModule.wallet.formatSolBalance(expectedRaw));
   });
 
-  test("resolveSpendAmount handles token percentage and max paths", () => {
+  test("presentSpendAmount handles token percentage and max paths", () => {
     const tokenBalance = { balance: 1_500_000_000, decimals: 6 };
     const solBalance = 10 * LAMPORTS_PER_SOL;
 
-    const percentResult = botModule.__test_resolveSpendAmount({
+    const percentResult = botModule.__test_presentSpendAmount({
       amount: "50%",
       assetTicker: "TIMBA",
-      inputDecimals: 6,
+      decimals: 6,
       solBalance,
       tokenBalance,
       formatSol: (lamports: number) => botModule.wallet.formatSolBalance(lamports),
@@ -261,10 +261,10 @@ describe("Bot helper utilities", () => {
       botModule.wallet.formatTokenBalance(750_000_000, 6)
     );
 
-    const maxResult = botModule.__test_resolveSpendAmount({
+    const maxResult = botModule.__test_presentSpendAmount({
       amount: "max",
       assetTicker: "TIMBA",
-      inputDecimals: 6,
+      decimals: 6,
       solBalance,
       tokenBalance,
       formatSol: (lamports: number) => botModule.wallet.formatSolBalance(lamports),
@@ -278,15 +278,15 @@ describe("Bot helper utilities", () => {
     );
   });
 
-  test("resolveSpendAmount throws when requested amount exceeds balance", () => {
+  test("presentSpendAmount throws when requested amount exceeds balance", () => {
     const tokenBalance = { balance: 1_000_000, decimals: 6 };
     const solBalance = 2 * LAMPORTS_PER_SOL;
 
     expect(() =>
-      botModule.__test_resolveSpendAmount({
+      botModule.__test_presentSpendAmount({
         amount: "2",
         assetTicker: "TIMBA",
-        inputDecimals: 6,
+        decimals: 6,
         solBalance,
         tokenBalance,
         formatSol: (lamports: number) => botModule.wallet.formatSolBalance(lamports),

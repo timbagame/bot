@@ -1,4 +1,10 @@
-import { expect, test, beforeAll } from "bun:test";
+import { expect, test, beforeAll, beforeEach } from "bun:test";
+import {
+  upsertGameSetupSession,
+  getGameSetupSession,
+  clearGameSetupSession,
+  clearAllGameSetupSessions,
+} from "../src/utils/user-state";
 
 // Set required env vars before importing the bot
 process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
@@ -8,12 +14,11 @@ process.env.MNEMONIC =
 process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost";
 
 let bot: any;
-let __testSessions: any;
 let wallet: any;
 
 // Stub Telegram API calls to avoid network
 beforeAll(async () => {
-  ({ bot, __testSessions, wallet } = await import("../src/bot"));
+  ({ bot, wallet } = await import("../src/bot"));
 
   // Replace global fetch used by grammy API with a dummy success
   // for methods invoked in these handlers
@@ -49,12 +54,16 @@ beforeAll(async () => {
   } catch {}
 });
 
+beforeEach(() => {
+  clearAllGameSetupSessions();
+});
+
 test("cancel_game_setup clears session so next text is not intercepted", async () => {
   const uid = 4242;
   const messageId = 1;
   const sessionKey = `${uid}_${messageId}`;
   // Seed a pending typed-input session
-  __testSessions.set(sessionKey, {
+  upsertGameSetupSession(sessionKey, {
     waitingFor: "amount_input",
     gameType: "coinflip",
     userBalance: 100,
@@ -76,14 +85,14 @@ test("cancel_game_setup clears session so next text is not intercepted", async (
     } as any);
   } catch {}
 
-  expect(__testSessions.has(sessionKey)).toBe(false);
+  expect(getGameSetupSession(sessionKey)).toBeUndefined();
 }, 15000);
 
 test("back_to_amounts clears session so next text is not intercepted", async () => {
   const uid = 5252;
   const messageId = 2;
   const sessionKey = `${uid}_${messageId}`;
-  __testSessions.set(sessionKey, {
+  upsertGameSetupSession(sessionKey, {
     waitingFor: "players_input",
     gameType: "coinflip",
     userBalance: 100,
@@ -105,7 +114,7 @@ test("back_to_amounts clears session so next text is not intercepted", async () 
     } as any);
   } catch {}
 
-  expect(__testSessions.has(sessionKey)).toBe(false);
+  expect(getGameSetupSession(sessionKey)).toBeUndefined();
 }, 15000);
 
 test("cancel by non-creator does not clear another user's session", async () => {
@@ -113,7 +122,7 @@ test("cancel by non-creator does not clear another user's session", async () => 
   const other = 6001;
   const messageId = 3;
   const sessionKey = `${creator}_${messageId}`;
-  __testSessions.set(sessionKey, {
+  upsertGameSetupSession(sessionKey, {
     waitingFor: "amount_input",
     gameType: "coinflip",
     userBalance: 50,
@@ -135,7 +144,7 @@ test("cancel by non-creator does not clear another user's session", async () => 
   } catch {}
 
   // Session stays for the creator; non-creator action ignored
-  expect(__testSessions.has(sessionKey)).toBe(true);
+  expect(getGameSetupSession(sessionKey)).toBeDefined();
 }, 15000);
 
 test("back_to_amounts by non-creator does not clear session", async () => {
@@ -143,7 +152,7 @@ test("back_to_amounts by non-creator does not clear session", async () => {
   const other = 6101;
   const messageId = 4;
   const sessionKey = `${creator}_${messageId}`;
-  __testSessions.set(sessionKey, {
+  upsertGameSetupSession(sessionKey, {
     waitingFor: "players_input",
     gameType: "coinflip",
     userBalance: 50,
@@ -164,14 +173,14 @@ test("back_to_amounts by non-creator does not clear session", async () => {
     } as any);
   } catch {}
 
-  expect(__testSessions.has(sessionKey)).toBe(true);
+  expect(getGameSetupSession(sessionKey)).toBeDefined();
 }, 15000);
 
 test("back_to_amounts with no existing session does not create one", async () => {
   const uid = 6200;
   const messageId = 5;
   const sessionKey = `${uid}_${messageId}`;
-  __testSessions.delete(sessionKey);
+  clearGameSetupSession(sessionKey);
 
   try {
     await bot.handleUpdate({
@@ -185,14 +194,14 @@ test("back_to_amounts with no existing session does not create one", async () =>
     } as any);
   } catch {}
 
-  expect(__testSessions.has(sessionKey)).toBe(false);
+  expect(getGameSetupSession(sessionKey)).toBeUndefined();
 }, 15000);
 
 test("cancel clears players_input sessions as well", async () => {
   const uid = 6300;
   const messageId = 6;
   const sessionKey = `${uid}_${messageId}`;
-  __testSessions.set(sessionKey, {
+  upsertGameSetupSession(sessionKey, {
     waitingFor: "players_input",
     gameType: "coinflip",
     userBalance: 0,
@@ -213,5 +222,5 @@ test("cancel clears players_input sessions as well", async () => {
     } as any);
   } catch {}
 
-  expect(__testSessions.has(sessionKey)).toBe(false);
+  expect(getGameSetupSession(sessionKey)).toBeUndefined();
 }, 15000);
