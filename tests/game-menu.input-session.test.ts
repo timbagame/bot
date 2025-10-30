@@ -258,10 +258,7 @@ describe("game setup typed input handling", () => {
 
       expect(balanceSpy).toHaveBeenCalledWith(
         BigInt(TELEGRAM_USER_ID),
-        "OverrideMint111",
-        {
-          createIfMissing: true,
-        }
+        "OverrideMint111"
       );
       expect(minSpy).toHaveBeenCalledWith("OverrideMint111", 6);
 
