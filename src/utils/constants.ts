@@ -61,6 +61,9 @@ export const COINFLIP_MAX_TICKETS = 2;
 export const GIVEAWAY_MAX_TICKETS = 5;
 export const MAX_RETRIES = 3;
 export const CONFIRMATION_TIMEOUT_MS = 90000; // Increased to 90 seconds for better reliability
+export const SIGNATURE_HISTORY_SEARCH_DELAY_MS = 15000; // After 15s leverage transaction history lookup
+export const BLOCK_HEIGHT_CHECK_INTERVAL_MS = 1000; // Check block height drift every 1s during confirmation
+export const BLOCK_HEIGHT_EXPIRATION_GRACE = 2; // Allow a couple of blocks past lastValidBlockHeight before treating as expired
 
 // ================================
 // INTERVALS

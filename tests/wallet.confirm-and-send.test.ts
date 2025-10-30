@@ -7,15 +7,19 @@ const MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abando
 
 class ConnConfirmOk implements Partial<Connection> {
   calls = 0;
-  async getSignatureStatus(_sig: string) {
+  async getSignatureStatuses(_sig: string[]) {
     this.calls += 1;
-    return { value: { confirmationStatus: "confirmed" } } as any;
+    return { value: [{ confirmationStatus: "confirmed" }] } as any;
   }
 }
 
 class ConnConfirmErr implements Partial<Connection> {
-  async getSignatureStatus(_sig: string) {
-    return { value: { err: { Custom: 1 }, confirmationStatus: "processed" } } as any;
+  async getSignatureStatuses(_sig: string[]) {
+    return {
+      value: [
+        { err: { Custom: 1 }, confirmationStatus: "processed" },
+      ],
+    } as any;
   }
 }
 
@@ -68,11 +72,12 @@ describe("WalletManager confirmTransaction and sendTransaction", () => {
   test("confirmTransaction retries on 429 then succeeds", async () => {
     let calls = 0;
     const conn: any = {
-      getSignatureStatus: async () => {
+      getSignatureStatuses: async () => {
         calls += 1;
         if (calls === 1) throw new Error("429 Too Many Requests");
-        return { value: { confirmationStatus: "confirmed" } };
+        return { value: [{ confirmationStatus: "confirmed" }] };
       },
+      getBlockHeight: async () => 1,
     };
     const wm = WalletManager.createForTest(MNEMONIC, {
       connection: conn,
@@ -81,6 +86,28 @@ describe("WalletManager confirmTransaction and sendTransaction", () => {
     });
     await wm.confirmTransaction("FAKESIG");
     expect(calls).toBeGreaterThanOrEqual(2);
+  });
+
+  test("confirmTransaction throws when blockhash expires", async () => {
+    const conn: any = {
+      getSignatureStatuses: async () => ({ value: [null] }),
+      getBlockHeight: async () => 105,
+    };
+    const wm = WalletManager.createForTest(MNEMONIC, {
+      connection: conn,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+
+    (wm as any).pendingSignatures.set("EXPIREME", {
+      blockhash: "BH",
+      lastValidBlockHeight: 100,
+      recordedAt: Date.now() - 10_000,
+    });
+
+    await expect(wm.confirmTransaction("EXPIREME")).rejects.toThrow(
+      /expired before confirmation/
+    );
   });
 
   test("getTokenBalance returns 0 on generic error", async () => {

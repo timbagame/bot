@@ -24,6 +24,11 @@ const TRANSACTION_TIMEOUT_PATTERNS = [
   "transactionexpiredtimeouterror",
 ];
 
+const TRANSACTION_EXPIRED_PATTERNS = [
+  "transaction expired before confirmation",
+  "last valid block height",
+];
+
 const SIGNATURE_PATTERNS = [
   /signature ([A-Za-z0-9]{44,})/,
   /Check signature ([A-Za-z0-9]{44,})/,
@@ -98,6 +103,9 @@ const extractLamportsInfoFromError = (
 
 const isTransactionTimeoutError = (message: string): boolean =>
   TRANSACTION_TIMEOUT_PATTERNS.some((p) => message.includes(p));
+
+const isTransactionExpiredError = (message: string): boolean =>
+  TRANSACTION_EXPIRED_PATTERNS.some((p) => message.includes(p));
 
 const extractSignature = (errorMessage: string): string | null => {
   for (const pattern of SIGNATURE_PATTERNS) {
@@ -181,6 +189,21 @@ export const parseTransactionError = (
           : ""
       }` +
       `💡 This can happen during network congestion. Please check the transaction status before retrying.`
+    );
+  }
+
+  if (isTransactionExpiredError(lowerMessage)) {
+    const signature = extractSignature(errorMessage);
+
+    return (
+      `⛔ Transaction expired before confirmation!\n\n` +
+      `The network dropped the transaction before it could be processed.\n\n` +
+      `${
+        signature
+          ? `Transaction signature: ${signature}\nYou can still look it up on an explorer to confirm it never landed.\n\n`
+          : ""
+      }` +
+      `Please retry the action to submit a fresh transaction.`
     );
   }
 

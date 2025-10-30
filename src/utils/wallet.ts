@@ -31,6 +31,9 @@ import {
   BLOCKHASH_CACHE_DURATION,
   MAX_RETRIES,
   CONFIRMATION_TIMEOUT_MS,
+  SIGNATURE_HISTORY_SEARCH_DELAY_MS,
+  BLOCK_HEIGHT_CHECK_INTERVAL_MS,
+  BLOCK_HEIGHT_EXPIRATION_GRACE,
   WSOL_MINT,
 } from "./constants";
 import { formatAmount } from "./format-amount";
@@ -107,6 +110,10 @@ export class WalletManager {
     timestamp: number;
   } | null = null;
   private rentExemptMinimumLamports: number | null = null;
+  private pendingSignatures = new Map<
+    string,
+    { blockhash: string; lastValidBlockHeight: number; recordedAt: number }
+  >();
 
   private constructor(mnemonic: string, deps?: WalletDeps) {
     this.mnemonic = mnemonic;
@@ -153,6 +160,15 @@ export class WalletManager {
       }
     } catch (error) {
       console.error("Failed to load admin keypair:", error);
+    }
+  }
+
+  private prunePendingSignatures(now: number = Date.now()): void {
+    const expiryWindow = CONFIRMATION_TIMEOUT_MS * 2;
+    for (const [sig, meta] of this.pendingSignatures) {
+      if (now - meta.recordedAt > expiryWindow) {
+        this.pendingSignatures.delete(sig);
+      }
     }
   }
 
@@ -1227,120 +1243,215 @@ export class WalletManager {
   public async confirmTransaction(signature: string): Promise<void> {
     const startTime = Date.now();
     const timeout = CONFIRMATION_TIMEOUT_MS;
-    const pollInterval = 500; // Reduced to 500ms for faster polling
+    const pollInterval = 500; // 500ms polling cadence
     let pollCount = 0;
-    let lastStatus: string | null = null;
+    let lastStatusLabel: "no-result" | null = null;
     let lastConfirmationStatus: string | null = null;
     let lastConfirmations: number | null = null;
+    let historySearchEnabled = false;
 
-    console.log(`🔍 Confirming transaction ${signature} (timeout: ${timeout}ms, poll interval: ${pollInterval}ms)`);
+    const trackedSignature = this.pendingSignatures.get(signature);
+    let lastBlockHeightCheck = startTime;
 
-    while (Date.now() - startTime < timeout) {
-      pollCount++;
-      const elapsed = Date.now() - startTime;
+    const boundGetSignatureStatuses = (this.connection as any)
+      ?.getSignatureStatuses?.bind(this.connection);
+    const hasStatusesMethod = typeof boundGetSignatureStatuses === "function";
+
+    const fetchStatus = async (useHistory: boolean) => {
+      if (hasStatusesMethod) {
+        const response = await boundGetSignatureStatuses(
+          [signature],
+          useHistory ? { searchTransactionHistory: true } : undefined
+        );
+        return response?.value?.[0] ?? null;
+      }
+
+      const response = await this.connection.getSignatureStatus(signature);
+      return response?.value ?? null;
+    };
+
+    const checkForExpiration = async (
+      now: number,
+      force: boolean = false
+    ): Promise<string | null> => {
+      if (!trackedSignature) {
+        return null;
+      }
+
+      if (!force && now - lastBlockHeightCheck < BLOCK_HEIGHT_CHECK_INTERVAL_MS) {
+        return null;
+      }
+
+      lastBlockHeightCheck = now;
 
       try {
-        const result = await this.connection.getSignatureStatus(signature);
+        const currentBlockHeight = await this.connection.getBlockHeight();
+        const expiryThreshold =
+          trackedSignature.lastValidBlockHeight + BLOCK_HEIGHT_EXPIRATION_GRACE;
 
-        if (result?.value) {
-          const currentStatus = result.value.confirmationStatus || "unknown";
-          const currentConfirmations = typeof result.value.confirmations === "number"
-            ? result.value.confirmations
-            : null;
+        if (currentBlockHeight > expiryThreshold) {
+          const message = `Transaction ${signature} expired before confirmation (last valid block height ${trackedSignature.lastValidBlockHeight}, current ${currentBlockHeight})`;
+          console.error(`⛔ ${message}`);
+          return message;
+        }
+      } catch (blockHeightError: any) {
+        const errorMessage =
+          blockHeightError instanceof Error
+            ? blockHeightError.message
+            : String(blockHeightError);
+        console.warn(
+          `⚠️ Failed to check block height for ${signature}: ${errorMessage}`
+        );
+      }
 
-          // Log status changes or every 10 polls
+      return null;
+    };
+
+    console.log(
+      `🔍 Confirming transaction ${signature} (timeout: ${timeout}ms, poll interval: ${pollInterval}ms)`
+    );
+
+    try {
+      while (Date.now() - startTime < timeout) {
+        pollCount += 1;
+        const pollStart = Date.now();
+        const elapsed = pollStart - startTime;
+
+        const enableHistorySearch = elapsed >= SIGNATURE_HISTORY_SEARCH_DELAY_MS;
+        const searchHistory = historySearchEnabled || enableHistorySearch;
+
+        if (enableHistorySearch && !historySearchEnabled && hasStatusesMethod) {
+          console.log(
+            `🗂️ Transaction ${signature} history lookup enabled after ${elapsed}ms`
+          );
+        }
+
+        let status: any = null;
+        try {
+          status = await fetchStatus(searchHistory);
+        } catch (error: any) {
+          if (
+            typeof error?.message === "string" &&
+            (error.message.includes("429") || error.message.includes("timeout"))
+          ) {
+            console.warn(
+              `⚠️ Network issue checking ${signature} (poll ${pollCount}, ${elapsed}ms), retrying with longer delay`
+            );
+            await new Promise((resolve) =>
+              setTimeout(resolve, pollInterval * 2)
+            );
+            historySearchEnabled = searchHistory || historySearchEnabled;
+            continue;
+          }
+
+          console.error(
+            `❌ Error checking transaction status for ${signature} (poll ${pollCount}, ${elapsed}ms):`,
+            error instanceof Error ? error.message : error
+          );
+          throw error;
+        }
+
+        historySearchEnabled = searchHistory || historySearchEnabled;
+        const now = Date.now();
+        const elapsedAfterFetch = now - startTime;
+
+        if (status) {
+          const currentStatus = status.confirmationStatus || "unknown";
+          const currentConfirmations =
+            typeof status.confirmations === "number"
+              ? status.confirmations
+              : null;
+
           if (
             currentStatus !== lastConfirmationStatus ||
             currentConfirmations !== lastConfirmations ||
             pollCount % 10 === 0
           ) {
             console.log(
-              `📊 Transaction ${signature} status update (poll ${pollCount}, ${elapsed}ms): ${currentStatus}${
-                currentConfirmations !== null ? ` (${currentConfirmations} confirmations)` : ""
+              `📊 Transaction ${signature} status update (poll ${pollCount}, ${elapsedAfterFetch}ms): ${currentStatus}${
+                currentConfirmations !== null
+                  ? ` (${currentConfirmations} confirmations)`
+                  : ""
               }`
             );
             lastConfirmationStatus = currentStatus;
             lastConfirmations = currentConfirmations;
           }
 
-          if (result.value.err) {
-            console.error(
-              `❌ Transaction ${signature} failed:`,
-              result.value.err
-            );
+          if (status.err) {
+            console.error(`❌ Transaction ${signature} failed:`, status.err);
             throw new Error(
-              `Transaction failed: ${JSON.stringify(result.value.err)}`
+              `Transaction failed: ${JSON.stringify(status.err)}`
             );
           }
 
           if (
-            result.value.confirmationStatus === "confirmed" ||
-            result.value.confirmationStatus === "finalized"
+            currentStatus === "confirmed" ||
+            currentStatus === "finalized"
           ) {
             console.log(
-              `✅ Transaction ${signature} confirmed in ${elapsed}ms (${pollCount} polls)`
+              `✅ Transaction ${signature} confirmed in ${elapsedAfterFetch}ms (${pollCount} polls)`
             );
             return;
           }
+
+          lastStatusLabel = null;
         } else {
-          // Log when no result is returned, but less frequently
-          if (lastStatus !== "no-result" && pollCount % 5 === 0) {
-            console.log(`⚠️ Transaction ${signature} returned no status result (poll ${pollCount}, ${elapsed}ms)`);
-            lastStatus = "no-result";
+          if (lastStatusLabel !== "no-result" && pollCount % 5 === 0) {
+            console.log(
+              `⚠️ Transaction ${signature} returned no status result (poll ${pollCount}, ${elapsedAfterFetch}ms)`
+            );
+            lastStatusLabel = "no-result";
+          }
+
+          const expirationMessage = await checkForExpiration(now);
+          if (expirationMessage) {
+            throw new Error(expirationMessage);
           }
         }
 
         await new Promise((resolve) => setTimeout(resolve, pollInterval));
-      } catch (error: any) {
-        if (
-          error.message?.includes("429") ||
-          error.message?.includes("timeout")
-        ) {
-          console.warn(
-            `⚠️ Network issue checking ${signature} (poll ${pollCount}, ${elapsed}ms), retrying with longer delay`
-          );
-          await new Promise((resolve) => setTimeout(resolve, pollInterval * 2));
-          continue;
+      }
+
+      console.log(`🔄 Performing final status check for ${signature} after ${pollCount} polls`);
+      const finalStatus = await fetchStatus(true);
+      const finalNow = Date.now();
+
+      if (finalStatus) {
+        if (finalStatus.err) {
+          console.error(`❌ Transaction ${signature} failed:`, finalStatus.err);
+          throw new Error(`Transaction failed: ${JSON.stringify(finalStatus.err)}`);
         }
-        console.error(
-          `❌ Error checking transaction status for ${signature} (poll ${pollCount}, ${elapsed}ms):`,
-          error.message
-        );
-        throw error;
-      }
-    }
 
-    // Final check before giving up
-    console.log(`🔄 Performing final status check for ${signature} after ${pollCount} polls`);
-    try {
-      const finalResult = await this.connection.getSignatureStatus(signature);
-      if (
-        finalResult?.value?.confirmationStatus === "confirmed" ||
-        finalResult?.value?.confirmationStatus === "finalized"
-      ) {
-        console.log(
-          `✅ Transaction ${signature} confirmed on final check`
-        );
-        return;
-      }
+        const finalStatusLabel = finalStatus.confirmationStatus || "unknown";
+        const finalConfirmations =
+          typeof finalStatus.confirmations === "number"
+            ? finalStatus.confirmations
+            : null;
 
-      // Log final status if available
-      if (finalResult?.value) {
-        const finalStatus = finalResult.value.confirmationStatus || "unknown";
-        const finalConfirmations = typeof finalResult.value.confirmations === "number"
-          ? finalResult.value.confirmations
-          : null;
+        if (
+          finalStatusLabel === "confirmed" ||
+          finalStatusLabel === "finalized"
+        ) {
+          console.log(`✅ Transaction ${signature} confirmed on final check`);
+          return;
+        }
+
         console.log(
-          `📊 Final status for ${signature}: ${finalStatus}${
-            finalConfirmations !== null ? ` (${finalConfirmations} confirmations)` : ""
+          `📊 Final status for ${signature}: ${finalStatusLabel}${
+            finalConfirmations !== null
+              ? ` (${finalConfirmations} confirmations)`
+              : ""
           }`
         );
       }
-    } catch (error) {
-      console.warn(
-        `⚠️ Error on final check for ${signature}:`,
-        error
-      );
+
+      const finalExpirationMessage = await checkForExpiration(finalNow, true);
+      if (finalExpirationMessage) {
+        throw new Error(finalExpirationMessage);
+      }
+    } finally {
+      this.pendingSignatures.delete(signature);
     }
 
     console.error(
@@ -1398,6 +1509,13 @@ export class WalletManager {
     }
 
     console.log(`📤 Transaction sent: ${signature}`);
+    const now = Date.now();
+    this.prunePendingSignatures(now);
+    this.pendingSignatures.set(signature, {
+      blockhash: latestBlockhash.blockhash,
+      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+      recordedAt: now,
+    });
     return signature;
   }
 
