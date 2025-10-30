@@ -1322,7 +1322,7 @@ export class GameManager {
     providedTotalPot?: number
   ) {
     try {
-      const gameAccount = await this.program.account.game.fetch(gamePda);
+      let gameAccount = await this.program.account.game.fetch(gamePda);
       const currentTickets = gameAccount.ticketsCount;
       const maxTickets = gameAccount.maxTickets;
       const minTickets = gameAccount.minTickets;
@@ -1936,7 +1936,7 @@ export class GameManager {
 
   public async getGameInfo(ctx: Context, gamePda: PublicKey): Promise<string> {
     try {
-      const gameAccount = await this.program.account.game.fetch(gamePda);
+      let gameAccount = await this.program.account.game.fetch(gamePda);
       const amount = Number(gameAccount.ticketAmount);
 
       // Get token info from database
@@ -2586,7 +2586,7 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
     );
 
     try {
-      const gameAccount = await this.program.account.game.fetch(gamePda);
+      let gameAccount = await this.program.account.game.fetch(gamePda);
       const gameAddress = gamePda.toBase58();
       const telegramIdStr = telegramId.toString();
       let joinTx: string | undefined;
@@ -2616,33 +2616,82 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
         joinConfirmed = true;
       } else {
         console.log(`🌐 Game is public, using regular join...`);
-        const joinAccounts = await this.buildJoinAccounts(
-          gamePda,
-          gameAccount,
-          playerKp.publicKey
-        );
-        const joinInstruction = await this.program.methods
-          .joinGame()
-          .accounts(joinAccounts as any)
-          .instruction();
-        joinTx = await this.wallet.sendTransaction(
-          [joinInstruction],
-          [playerKp]
-        );
+        const maxJoinAttempts = 2;
 
-        this.gameDb.saveGameParticipant(gameAddress, telegramIdStr, creatorPubkey, {
-          status: "pending",
-          joinSignature: joinTx ?? null,
-          lastVerifiedAt: null,
-        });
-        pendingRecorded = true;
+        for (let attempt = 0; attempt < maxJoinAttempts; attempt++) {
+          try {
+            if (attempt > 0) {
+              gameAccount = await this.program.account.game.fetch(gamePda);
+            }
 
-        joinConfirmed = await this.confirmTransactionWithRecovery(
-          joinTx,
-          gamePda,
-          "Player join",
-          playerKp.publicKey
-        );
+            const joinAccounts = await this.buildJoinAccounts(
+              gamePda,
+              gameAccount,
+              playerKp.publicKey
+            );
+            const joinInstruction = await this.program.methods
+              .joinGame()
+              .accounts(joinAccounts as any)
+              .instruction();
+
+            joinTx = await this.wallet.sendTransaction(
+              [joinInstruction],
+              [playerKp]
+            );
+
+            this.gameDb.saveGameParticipant(
+              gameAddress,
+              telegramIdStr,
+              creatorPubkey,
+              {
+                status: "pending",
+                joinSignature: joinTx ?? null,
+                lastVerifiedAt: null,
+              }
+            );
+            pendingRecorded = true;
+
+            await this.confirmTransactionWithRecovery(
+              joinTx,
+              gamePda,
+              "Player join",
+              playerKp.publicKey
+            );
+
+            joinConfirmed = true;
+            break;
+          } catch (joinError: any) {
+            const message = joinError?.message ?? "";
+            const normalized = message.toLowerCase();
+            const isTimeout =
+              normalized.includes("timeout") ||
+              normalized.includes("not confirmed");
+            const isExpiration =
+              normalized.includes("expired before confirmation") ||
+              normalized.includes("last valid block height");
+            const isLastAttempt = attempt === maxJoinAttempts - 1;
+
+            if ((isTimeout || isExpiration) && !isLastAttempt) {
+              const alreadyJoined = await this.isPlayerInGame(
+                gamePda,
+                playerKp.publicKey
+              ).catch(() => false);
+
+              if (alreadyJoined) {
+                joinConfirmed = true;
+                break;
+              }
+
+              console.warn(
+                `⚠️ Player join attempt ${attempt + 1} for ${gamePda.toBase58()} ` +
+                  `timed out or expired; retrying with a fresh blockhash.`
+              );
+              continue;
+            }
+
+            throw joinError;
+          }
+        }
       }
 
       if (joinConfirmed) {
