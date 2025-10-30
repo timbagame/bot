@@ -158,6 +158,41 @@ void (async () => {
 const gameDb = GameDatabase.getInstance();
 const pendingGameCreations = new Set<string>();
 
+let oracleMaxTickets = 100;
+
+const getOracleMaxPlayers = (): number => oracleMaxTickets;
+
+const updateOracleMaxPlayers = (maybeMax: number) => {
+  if (Number.isFinite(maybeMax) && maybeMax > 0) {
+    oracleMaxTickets = maybeMax;
+  }
+};
+
+const parseOracleNumeric = (value: unknown): number | null => {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "bigint") {
+    return Number(value);
+  }
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toNumber" in value &&
+    typeof (value as { toNumber?: () => number }).toNumber === "function"
+  ) {
+    try {
+      const converted = (value as { toNumber: () => number }).toNumber();
+      return Number.isFinite(converted) ? converted : null;
+    } catch (error) {
+      console.warn("Failed to convert oracle numeric value:", error);
+      return null;
+    }
+  }
+
+  return null;
+};
+
 const CONTRACT_EXAMPLE_LINES = (() => {
   const uniqueMints = new Set<string>([
     ...TOKENS_LIST.map((token) => token.mint),
@@ -187,6 +222,7 @@ type GameSetupSession = {
   tokenTicker?: string;
   tokenDecimals?: number;
   contractMinimum?: number;
+  maxPlayersLimit?: number;
 };
 
 const defaultGameSetupSession: Pick<GameSetupSession, "waitingFor" | "gameType" | "userBalance"> = {
@@ -2404,6 +2440,17 @@ const checkOracleStatus = async () => {
     const oraclePda = PDAManager.getOraclePDA(program.programId);
     const oracleAccount = await program.account.oracle.fetch(oraclePda);
     console.log(`Oracle found, operator: ${oracleAccount.operator.toString()}`);
+
+    const maxTickets = parseOracleNumeric(oracleAccount.maxTickets);
+    if (maxTickets !== null) {
+      updateOracleMaxPlayers(maxTickets);
+      console.log(`Oracle max tickets set to ${oracleMaxTickets}`);
+    } else {
+      console.warn(
+        "Unable to determine oracle max tickets, keeping previous limit",
+        oracleAccount.maxTickets
+      );
+    }
   } catch (error) {
     console.log("Oracle not found, it might need to be initialized");
   }
@@ -2502,7 +2549,7 @@ export type CreateGameViaCommandOptions = {
   usageMessage: string;
   defaultMaxPlayers: number;
   minPlayers: number;
-  maxPlayers: number;
+  getMaxPlayers: () => number;
   timeoutSeconds: number;
   gameLabel: string;
   inferErrorLabel: string;
@@ -2516,7 +2563,7 @@ const COINFLIP_COMMAND_OPTIONS: CreateGameViaCommandOptions = {
     "❌ Please provide a valid amount greater than 0.\n\nUsage: `/cf <amount>` or `/cf <amount> <maxPlayers>`",
   defaultMaxPlayers: 2,
   minPlayers: 2,
-  maxPlayers: 100,
+  getMaxPlayers: () => getOracleMaxPlayers(),
   timeoutSeconds: 60 * 60,
   gameLabel: "Coinflip",
   inferErrorLabel: "Coinflip",
@@ -2530,7 +2577,7 @@ const GIVEAWAY_COMMAND_OPTIONS: CreateGameViaCommandOptions = {
     "❌ Please provide a valid amount greater than 0.\n\nUsage: `/ga <amount>` or `/ga <amount> <maxPlayers>`",
   defaultMaxPlayers: 10,
   minPlayers: 1,
-  maxPlayers: 100,
+  getMaxPlayers: () => getOracleMaxPlayers(),
   timeoutSeconds: 60 * 60,
   gameLabel: "Giveaway",
   inferErrorLabel: "Giveaway",
@@ -2608,13 +2655,21 @@ const createGameViaCommand = async (
     }
 
     const parsedAmount = parsed.data;
+    const maxPlayersLimit = Math.max(
+      options.minPlayers,
+      options.getMaxPlayers()
+    );
+    const defaultMaxPlayers = Math.min(
+      options.defaultMaxPlayers,
+      maxPlayersLimit
+    );
     const inferred = deps.inferMaxPlayers(
       args,
       1,
       parsedAmount.tokenWasSpecified,
-      options.defaultMaxPlayers,
+      defaultMaxPlayers,
       options.minPlayers,
-      options.maxPlayers
+      maxPlayersLimit
     );
 
     if (!inferred.ok) {
@@ -4035,9 +4090,17 @@ bot.callbackQuery(
         const amount = parseFloat(ctx.match![2] as string);
         const maxPlayers = parseInt(ctx.match![3] as string);
         const minPlayers = gameType === "coinflip" ? 2 : 1;
-        if (isNaN(maxPlayers) || maxPlayers < minPlayers || maxPlayers > 100) {
-          await safeAnswerCallbackQuery(ctx, 
-            `❌ Players must be between ${minPlayers} and 100`
+        const maxPlayersLimit = Math.max(
+          minPlayers,
+          getOracleMaxPlayers()
+        );
+        if (
+          isNaN(maxPlayers) ||
+          maxPlayers < minPlayers ||
+          maxPlayers > maxPlayersLimit
+        ) {
+          await safeAnswerCallbackQuery(ctx,
+            `❌ Players must be between ${minPlayers} and ${maxPlayersLimit}`
           );
           return;
         }
@@ -4629,6 +4692,8 @@ bot.callbackQuery(
         });
 
         const formattedGameType = toTitleCase(gameType);
+        const minPlayers = gameType === "coinflip" ? 2 : 1;
+        const maxPlayers = Math.max(minPlayers, getOracleMaxPlayers());
 
         const playersMessage = [
           `👥 <b>Type Custom Players - ${formattedGameType}</b>`,
@@ -4637,11 +4702,7 @@ bot.callbackQuery(
           "",
           "Please type the number of players for this game.",
           "",
-          "<b>Example:</b>",
-          "• Type: <code>4</code> for 4 players",
-          "• Type: <code>10</code> for 10 players",
-          "",
-          `Range: 2-${gameType === "coinflip" ? "8" : "20"} players`
+          `Range: ${minPlayers}-${maxPlayers} players`
         ].join("\n");
 
         await respondWithMenu(ctx, {
@@ -4662,6 +4723,7 @@ bot.callbackQuery(
           messageId: ctx.callbackQuery?.message?.message_id || 0,
           chatId: ctx.chat?.id || 0,
           contractMinimum: session?.contractMinimum,
+          maxPlayersLimit: maxPlayers,
         });
       } catch (error) {
         console.error("Error in creator-protected custom_players callback:", error);
@@ -4767,8 +4829,12 @@ const handleGameSetupTextInput = async (
     // Handle players input
     if (userSession.waitingFor === "players_input") {
       const players = parseInt(inputText);
-      const maxPlayers = 100;
-      const minPlayers = 2;
+      const minPlayers =
+        userSession.gameType === "coinflip" ? 2 : 1;
+      const maxPlayers = Math.max(
+        minPlayers,
+        userSession.maxPlayersLimit ?? getOracleMaxPlayers()
+      );
 
       console.log(`🔍 Custom players input: "${inputText}" -> ${players} (gameType: ${userSession.gameType}, min: ${minPlayers}, max: ${maxPlayers})`);
 
@@ -4848,6 +4914,7 @@ const handleGameSetupTextInput = async (
         tokenTicker,
         tokenDecimals,
         contractMinimum: minAllowed,
+        maxPlayersLimit: maxPlayers,
       });
 
       return;

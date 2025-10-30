@@ -457,7 +457,7 @@ describe("createGameViaCommand helper", () => {
       "❌ Please provide a valid amount greater than 0.\n\nUsage: `/cf <amount>` or `/cf <amount> <maxPlayers>`",
     defaultMaxPlayers: 2,
     minPlayers: 2,
-    maxPlayers: 100,
+    getMaxPlayers: () => 100,
     timeoutSeconds: 60 * 60,
     gameLabel: "Coinflip",
     inferErrorLabel: "Coinflip",
