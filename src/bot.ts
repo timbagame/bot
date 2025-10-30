@@ -1444,7 +1444,6 @@ const GAME_SETUP_COPY: Record<"coinflip" | "giveaway", GameSetupCopy> = {
     gameType: "giveaway",
     heading: "🎁 <b>Create Giveaway</b>",
     amountPrompt: "Select prize amount in <b>{TOKEN}</b>:",
-    suggestionLabel: "Suggested prizes",
     lowBalanceCopy: {
       object: "prize amount",
     },
@@ -1461,22 +1460,15 @@ const startInteractiveGameSetup = async (
 
   const tokenInfo = await resolveChatTokenInfo(ctx.chat?.id);
 
-  let balanceText = "";
   let userBalance = 0;
 
   try {
     const tokenBalance = await wallet.getTokenBalance(telegramId, tokenInfo.tokenMint, {
       createIfMissing: true,
     });
-    const formattedBalance = wallet.formatTokenBalance(
-      tokenBalance,
-      tokenInfo.decimals
-    );
     userBalance = tokenBalance / Math.pow(10, tokenInfo.decimals);
-    balanceText = `\n💰 Your balance: <b>${formattedBalance} ${tokenInfo.tokenTicker}</b>\n`;
   } catch (error) {
     console.error("Error getting token balance:", error);
-    balanceText = `\n⚠️ Could not load ${tokenInfo.tokenTicker} balance\n`;
   }
 
   const { formatted: contractMin } = await getContractMinimumAmount(
@@ -1493,7 +1485,6 @@ const startInteractiveGameSetup = async (
 
   let message = `${copy.heading}\n\n`;
   message += `Token: <b>${tokenInfo.tokenTicker}</b>\n`;
-  message += balanceText;
 
   if (copy.lowBalanceCopy && userBalance < contractMin) {
     const { object } = copy.lowBalanceCopy;

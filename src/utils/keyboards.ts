@@ -133,21 +133,17 @@ export const getFeeWarningMessage = (
   return message;
 };
 
-const SUGGESTION_MULTIPLIERS = [1, 5, 10] as const;
+const SUGGESTION_MULTIPLIERS = [1, 5, 10, 15, 20, 25] as const;
 
 export const getSuggestedStakeAmounts = (
   contractMinimum: number,
-  balance?: number
+  _balance?: number
 ): number[] => {
   const min = Math.max(contractMinimum, 0);
 
-  const suggestions = SUGGESTION_MULTIPLIERS.map(
-    (multiplier) => min * multiplier
+  const suggestions = SUGGESTION_MULTIPLIERS.map((multiplier) =>
+    roundToPrecision(min * multiplier, 6)
   );
-
-  if (balance !== undefined && balance > 0 && balance < min) {
-    suggestions.push(balance);
-  }
 
   const unique: number[] = [];
   const eps = 1e-6;
@@ -191,7 +187,7 @@ export const createAmountSelectionKeyboard = (
 
   const keyboard = new InlineKeyboard();
 
-  amounts.forEach((amount) => {
+  amounts.forEach((amount, index) => {
     const callbackData = withCreatorSuffix(
       `amount_${gameType}_${amount}`,
       creatorId
@@ -202,6 +198,11 @@ export const createAmountSelectionKeyboard = (
         ? ` (~$${formatUsdValue(amount * tokenPriceUSD)})`
         : "";
     keyboard.text(`💰 ${display}${usdText}`, callbackData);
+    const isEndOfPair = index % 2 === 1;
+    const isLast = index === amounts.length - 1;
+    if (isEndOfPair && !isLast) {
+      keyboard.row();
+    }
   });
 
   keyboard.row();
