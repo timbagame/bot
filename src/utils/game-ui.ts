@@ -1,4 +1,4 @@
-import { escapeHtml } from "./format-amount";
+import { escapeHtml, formatCompactTokenDisplay } from "./format-amount";
 
 /**
  * Build the status text line for a game based on tickets.
@@ -35,8 +35,11 @@ export function buildGameHeader(
   const usdSegment = usdApproximation
     ? ` (${escapeHtml(usdApproximation)})`
     : "";
+  const amountDisplay = escapeHtml(
+    formatCompactTokenDisplay(amountFormatted)
+  );
   return (
-    `<b>${gameTypeLabel} • ${amountFormatted} ${tokenTicker}${usdSegment}</b>\n` +
+    `<b>${gameTypeLabel} • ${amountDisplay} ${tokenTicker}${usdSegment}</b>\n` +
     `Creator: ${creatorUsername} • ${currentTickets}/${maxTickets} tickets`
   );
 }
@@ -54,7 +57,10 @@ export function buildPrizeLine(
   const usdSegment = usdApproximation
     ? ` (${escapeHtml(usdApproximation)})`
     : "";
-  return `\nCurrent Prize: ${totalFormatted} ${tokenTicker}${usdSegment}\n`;
+  const prizeDisplay = escapeHtml(
+    formatCompactTokenDisplay(totalFormatted)
+  );
+  return `\nCurrent Prize: ${prizeDisplay} ${tokenTicker}${usdSegment}\n`;
 }
 
 /**

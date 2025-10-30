@@ -17,7 +17,10 @@ import { GameDatabase } from "./game-database";
 import { OracleClient } from "./oracle";
 import { PDAManager } from "./pda";
 import { formatUserFriendlyError } from "./errors";
-import { formatUsdValue as formatUsdValueText } from "./format-amount";
+import {
+  formatUsdValue as formatUsdValueText,
+  formatCompactTokenDisplay,
+} from "./format-amount";
 import {
   DEFAULT_NULL_ADDRESS,
   GAME_INFO_LIMIT,
@@ -2017,8 +2020,11 @@ export class GameManager {
         winnerLine = `Winner: ${winnerUsername}`;
       }
 
+      const amountDisplay = formatCompactTokenDisplay(
+        formatBalanceForDisplay(amount)
+      );
       let message =
-        `${gameTypeText} • ${formatBalanceForDisplay(amount)} ${tokenTicker}` +
+        `${gameTypeText} • ${amountDisplay} ${tokenTicker}` +
         `\nCreator: ${creatorLabel} • ${playerCount} tickets`;
 
       try {

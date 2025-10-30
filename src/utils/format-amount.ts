@@ -157,6 +157,53 @@ export function formatTokenDisplay(
   });
 }
 
+export function formatCompactTokenDisplay(value: string | number): string {
+  if (value === null || value === undefined) {
+    return "0";
+  }
+
+  const rawString = typeof value === "string" ? value : String(value);
+  const normalized = rawString.replace(/,/g, "").trim();
+  const numeric = Number(normalized);
+
+  if (!Number.isFinite(numeric)) {
+    return rawString;
+  }
+
+  const sign = numeric < 0 ? "-" : "";
+  let absValue = Math.abs(numeric);
+
+  const suffixes = ["", "k", "M", "B", "T", "P", "E"] as const;
+  let suffixIndex = 0;
+
+  while (absValue >= 1000 && suffixIndex < suffixes.length - 1) {
+    absValue /= 1000;
+    suffixIndex += 1;
+  }
+
+  if (suffixIndex === 0) {
+    if (normalized === "") {
+      return "0";
+    }
+
+    const [, fractional = ""] = normalized.split(".");
+    const trimmedFraction = fractional.replace(/0+$/, "");
+    const precision = Math.min(trimmedFraction.length, 6);
+
+    if (precision > 0) {
+      return formatTokenDisplay(numeric, { decimals: precision });
+    }
+
+    return `${sign}${Math.trunc(Math.abs(numeric)).toLocaleString("en-US")}`;
+  }
+
+  const truncated = Math.floor(absValue * 10) / 10;
+  let formatted = truncated.toFixed(1);
+  formatted = formatted.replace(/\.0$/, "");
+
+  return `${sign}${formatted}${suffixes[suffixIndex]}`;
+}
+
 export function formatUsdValue(
   value: number,
   options: FormatUsdValueOptions = {}
@@ -169,7 +216,7 @@ export function formatUsdValue(
   } = options;
 
   const resolvedFallback =
-    fallback ?? (approximate ? "≈ $0.00" : "0.00");
+    fallback ?? (approximate ? "≈ $0" : "0");
 
   if (!Number.isFinite(value)) {
     return resolvedFallback;
@@ -180,7 +227,17 @@ export function formatUsdValue(
     maximumFractionDigits,
   });
 
-  return approximate ? `≈ $${formatted}` : formatted;
+  let normalized = formatted;
+  const decimalSeparatorIndex = normalized.indexOf(".");
+
+  if (decimalSeparatorIndex >= 0) {
+    const fractionalPart = normalized.slice(decimalSeparatorIndex + 1);
+    if (/^0+$/.test(fractionalPart)) {
+      normalized = normalized.slice(0, decimalSeparatorIndex);
+    }
+  }
+
+  return approximate ? `≈ $${normalized}` : normalized;
 }
 
 export function formatRate(value: number): string {

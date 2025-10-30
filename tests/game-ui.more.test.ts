@@ -14,7 +14,7 @@ test("buildGameHeader formats header line", () => {
     1,
     2
   );
-  expect(header).toContain("🪙 Coinflip • 10.000000 TIMBA");
+  expect(header).toContain("🪙 Coinflip • 10 TIMBA");
   expect(header).toContain("Creator: @user • 1/2 tickets");
 });
 
@@ -34,7 +34,7 @@ test("buildGameHeader includes USD approximation when provided", () => {
 test("buildPrizeLine shows only when flag true", () => {
   const shown = buildPrizeLine(true, "20.000000", "TIMBA");
   const hidden = buildPrizeLine(false, "20.000000", "TIMBA");
-  expect(shown).toContain("Current Prize: 20.000000 TIMBA");
+  expect(shown).toContain("Current Prize: 20 TIMBA");
   expect(hidden).toBe("");
 });
 
@@ -45,7 +45,7 @@ test("buildPrizeLine appends USD approximation when provided", () => {
     "TIMBA",
     "$5.0"
   );
-  expect(shown).toContain("Current Prize: 20.000000 TIMBA ($5.0)");
+  expect(shown).toContain("Current Prize: 20 TIMBA ($5.0)");
 });
 
 test("buildParticipantsList formats numbered list", () => {

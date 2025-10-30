@@ -199,7 +199,7 @@ describe("keyboards: amount selection", () => {
     expect(texts.length).toBeGreaterThan(0);
     expect(texts.every((text) => !text.includes("TIMBA"))).toBe(true);
     expect(texts.every((text) => !text.includes("~"))).toBe(true);
-    expect(texts.every((text) => /\(\$\d+\.\d\)/.test(text))).toBe(true);
+    expect(texts.every((text) => /\(\$[0-9,]+(?:\.\d+)?\)/.test(text))).toBe(true);
   });
 
   test("fee warning message shows for low balance", () => {
