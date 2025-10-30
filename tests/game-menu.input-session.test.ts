@@ -9,8 +9,11 @@ import {
 import {
   __testSessions,
   __test_handleGameSetupTextInput,
+  __test_startInteractiveGameSetup,
   wallet,
 } from "../src/bot";
+import * as botModule from "../src/bot";
+import * as prices from "../src/utils/prices";
 
 const TELEGRAM_USER_ID = 4242;
 const CHAT_ID = 998_001;
@@ -177,6 +180,57 @@ describe("game setup typed input handling", () => {
     expect(restored.tokenTicker).toBe("USDC");
     expect(restored.tokenMint).toBe("MintGiveaway222");
     expect(restored.creatorId).toBe("creator-2");
+  });
+
+  test("startInteractiveGameSetup respects token override context", async () => {
+    const ctx = createMockCtx("/cf");
+    const balanceSpy = spyOn(wallet, "getTokenBalance").mockResolvedValue(
+      2_500_000
+    );
+    const minSpy = spyOn(botModule, "getContractMinimumAmount").mockResolvedValue({
+      formatted: 0.2,
+      raw: 200_000,
+      decimals: 6,
+    });
+    const priceSpy = spyOn(prices, "getPriceUSD").mockResolvedValue(null as any);
+
+    const override = {
+      tokenMint: "OverrideMint111",
+      tokenTicker: "OVR",
+      tokenDecimals: 6,
+    };
+
+    try {
+      await __test_startInteractiveGameSetup(
+        ctx as any,
+        BigInt(TELEGRAM_USER_ID),
+        {
+          gameType: "coinflip",
+          heading: "Test",
+          amountPrompt: "Prompt",
+          logPrefix: "🪙",
+        },
+        override
+      );
+
+      expect(balanceSpy).toHaveBeenCalledWith(
+        BigInt(TELEGRAM_USER_ID),
+        "OverrideMint111",
+        {
+          createIfMissing: true,
+        }
+      );
+      expect(minSpy).toHaveBeenCalledWith("OverrideMint111", 6);
+
+      const session = __testSessions.get(TELEGRAM_USER_ID) as any;
+      expect(session.tokenMint).toBe("OverrideMint111");
+      expect(session.tokenTicker).toBe("OVR");
+      expect(session.tokenDecimals).toBe(6);
+    } finally {
+      balanceSpy.mockRestore();
+      minSpy.mockRestore();
+      priceSpy.mockRestore();
+    }
   });
 });
 
