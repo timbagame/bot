@@ -824,7 +824,13 @@ export class GameManager {
       return null;
     }
 
-    return formatUsdValueText(usdValue, { approximate: true });
+    const formatted = formatUsdValueText(usdValue, {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+      fallback: "0.0",
+    });
+
+    return `$${formatted}`;
   }
 
   private async getUsdApproximation(

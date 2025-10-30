@@ -26,9 +26,9 @@ test("buildGameHeader includes USD approximation when provided", () => {
     "@user",
     1,
     2,
-    "≈ $12.34"
+    "$12.3"
   );
-  expect(header).toContain("(≈ $12.34)");
+  expect(header).toContain("($12.3)");
 });
 
 test("buildPrizeLine shows only when flag true", () => {
@@ -43,9 +43,9 @@ test("buildPrizeLine appends USD approximation when provided", () => {
     true,
     "20.000000",
     "TIMBA",
-    "≈ $5.00"
+    "$5.0"
   );
-  expect(shown).toContain("Current Prize: 20.000000 TIMBA (≈ $5.00)");
+  expect(shown).toContain("Current Prize: 20.000000 TIMBA ($5.0)");
 });
 
 test("buildParticipantsList formats numbered list", () => {

@@ -1505,7 +1505,12 @@ const startInteractiveGameSetup = async (
       });
       message += `• ${amountDisplay} ${tokenInfo.tokenTicker}`;
       if (tokenPriceUSD) {
-        message += ` (~$${formatUsdValue(amount * tokenPriceUSD)})`;
+        const usdFormatted = formatUsdValue(amount * tokenPriceUSD, {
+          minimumFractionDigits: 1,
+          maximumFractionDigits: 1,
+          fallback: "0.0",
+        });
+        message += ` ($${usdFormatted})`;
       }
       message += "\n";
     }
@@ -4399,7 +4404,12 @@ bot.callbackQuery(
             });
             warningMessage += `• ${amountDisplay} ${tokenContext.tokenTicker}`;
             if (tokenPriceUSD) {
-              warningMessage += ` (~$${formatUsdValue(amount * tokenPriceUSD)})`;
+              const usdFormatted = formatUsdValue(amount * tokenPriceUSD, {
+                minimumFractionDigits: 1,
+                maximumFractionDigits: 1,
+                fallback: "0.0",
+              });
+              warningMessage += ` ($${usdFormatted})`;
             }
             warningMessage += "\n";
           }
