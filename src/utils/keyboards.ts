@@ -1,6 +1,10 @@
 import { InlineKeyboard } from "grammy";
 import { DEFAULT_TOKEN_TICKER } from "./constants";
-import { formatTokenDisplay, formatUsdValue } from "./format-amount";
+import {
+  formatCompactTokenDisplay,
+  formatTokenDisplay,
+  formatUsdValue,
+} from "./format-amount";
 
 export const createMainMenuKeyboard = (): InlineKeyboard => {
   return new InlineKeyboard()
@@ -192,7 +196,8 @@ export const createAmountSelectionKeyboard = (
       `amount_${gameType}_${amount}`,
       creatorId
     );
-    const display = formatTokenDisplay(amount, { decimals });
+    const fullDisplay = formatTokenDisplay(amount, { decimals });
+    const display = formatCompactTokenDisplay(fullDisplay);
     let usdText = "";
     if (tokenPriceUSD !== undefined) {
       const usdFormatted = formatUsdValue(amount * tokenPriceUSD, {
