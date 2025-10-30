@@ -247,8 +247,32 @@ const updateGameSetupSession = (
   return next;
 };
 
+// Input sessions for non-game text inputs (send, swap, wrap, etc.)
+type InputSession = {
+  type: string;
+  [key: string]: any;
+};
+
+const inputSessions = new Map<string, InputSession>();
+
+const updateInputSession = (
+  sessionKey: string,
+  session: InputSession
+): void => {
+  inputSessions.set(sessionKey, session);
+};
+
+const getInputSession = (sessionKey: string): InputSession | undefined => {
+  return inputSessions.get(sessionKey);
+};
+
+const clearInputSession = (sessionKey: string): void => {
+  inputSessions.delete(sessionKey);
+};
+
 // Test-only accessor for verifying session behavior in unit tests
 export const __testSessions = userSessions;
+export const __testInputSessions = inputSessions;
 // Test-only helpers to manipulate wallet cache in unit tests
 export const __test_setWalletCache = (
   telegramId: bigint | number | string,
@@ -7065,43 +7089,49 @@ bot.on("message:text", async (ctx, next) => {
     return await next();
   }
 
-  const userState = getUserState(userId, false); // Get state but DON'T clear it yet
-
-  if (!userState) {
-    return await next(); // Not waiting for input, continue to other handlers
-  }
-
-  // Only process input in the same chat where the state was created
-  if (userState.chatId && ctx.chat?.id !== userState.chatId) {
+  // Check if the message is a reply to a prompting message
+  const replyToMessageId = ctx.message?.reply_to_message?.message_id;
+  if (!replyToMessageId) {
     return await next();
   }
 
-  // Check if the message is a reply to the prompting message
-  if (!ctx.message?.reply_to_message || ctx.message.reply_to_message.message_id !== userState.messageId) {
-    return await next(); // Not a reply to the prompting message, ignore
+  // Construct session key from chat and message ID
+  const sessionKey = `${ctx.chat?.id || 0}_${replyToMessageId}`;
+
+  // Check for game setup session first
+  const gameSession = userSessions.get(sessionKey);
+  if (gameSession && (gameSession.waitingFor === "amount_input" || gameSession.waitingFor === "players_input")) {
+    // Handle game setup input
+    await handleGameSetupTextInput(ctx, next);
+    return;
+  }
+
+  // Check for input session
+  const inputSession = getInputSession(sessionKey);
+  if (!inputSession) {
+    return await next(); // Not waiting for input, continue to other handlers
   }
 
   const userMessage = ctx.message.text.trim();
 
   try {
-
-    if (userState.type === "send_custom_amount") {
-      await handleCustomAmountInput(ctx, userState, userMessage);
-    } else if (userState.type === "send_address") {
-      await handleAddressInput(ctx, userState, userMessage);
-    } else if (userState.type === "wrap_custom_amount") {
-      await handleWrapAmountInput(ctx, userState, userMessage);
-    } else if (userState.type === "swap_to_token") {
-      await handleSwapToTokenInput(ctx, userState, userMessage);
-    } else if (userState.type === "swap_custom_amount") {
-      await handleSwapCustomAmountInput(ctx, userState, userMessage);
+    if (inputSession.type === "send_custom_amount") {
+      await handleCustomAmountInput(ctx, inputSession, userMessage);
+    } else if (inputSession.type === "send_address") {
+      await handleAddressInput(ctx, inputSession, userMessage);
+    } else if (inputSession.type === "wrap_custom_amount") {
+      await handleWrapAmountInput(ctx, inputSession, userMessage);
+    } else if (inputSession.type === "swap_to_token") {
+      await handleSwapToTokenInput(ctx, inputSession, userMessage);
+    } else if (inputSession.type === "swap_custom_amount") {
+      await handleSwapCustomAmountInput(ctx, inputSession, userMessage);
     }
 
-    // Clear state after successful processing
-    getUserState(userId, true);
+    // Clear session after successful processing
+    clearInputSession(sessionKey);
   } catch (error) {
-    // Clear state even on error to prevent stuck states
-    getUserState(userId, true);
+    // Clear session even on error to prevent stuck states
+    clearInputSession(sessionKey);
     console.error("Error handling user input:", error);
 
     // Try to update the original message with error
@@ -7223,7 +7253,7 @@ const handleCustomAmountInput = async (
     targetChatId ??
     (typeof ctx.chat?.id === "number" ? ctx.chat.id : undefined);
 
-  setUserState(telegramId.toString(), {
+  updateInputSession(`${resolvedChatId}_${resolvedMessageId}`, {
     type: "send_address",
     token,
     amount: storedAmount,
@@ -7364,7 +7394,7 @@ const handleWrapAmountInput = async (
       (typeof ctx.chat?.id === "number" ? ctx.chat.id : undefined);
     const resolvedMessageId = menuResult.messageId ?? targetMessageId;
 
-    setUserState(userId, {
+    updateInputSession(`${resolvedChatId}_${resolvedMessageId}`, {
       type: "wrap_custom_amount",
       chatId: resolvedChatId,
       messageId: resolvedMessageId,
@@ -7382,7 +7412,6 @@ const handleSwapToTokenInput = async (
 ) => {
   const fromToken = userState.fromToken;
   const telegramId = requireTelegramId(ctx, "swap token input");
-  const userId = getTelegramId(ctx).toString();
   const trimmedInput = tokenInput.trim();
 
   console.log(
@@ -7479,7 +7508,7 @@ const handleSwapToTokenInput = async (
       toTokenIdentifier: tokenCacheId,
     });
 
-    getUserState(userId, true);
+    clearInputSession(`${userState.chatId}_${userState.messageId}`);
     await safeAnswerCallbackQuery(ctx, `Swap to ${metadata.symbol}`);
   } catch (error) {
     console.error("Error resolving swap token input:", error);
@@ -7508,7 +7537,7 @@ const handleSwapToTokenInput = async (
     keyboard: createCancelKeyboard(`swap_to_${fromToken}_OTHER`),
   });
 
-    setUserState(userId, {
+    updateInputSession(`${userState.chatId}_${userState.messageId}`, {
       type: "swap_to_token",
       fromToken,
       messageId: userState.messageId,

@@ -73,8 +73,7 @@ describe("handleWrapAmountInput", () => {
     expect(calls.replies.length).toBe(0);
 
     const state = getUserState(USER_ID);
-    expect(state?.messageId).toBe(BASE_STATE.messageId);
-    expect(state?.chatId).toBe(BASE_STATE.chatId);
+    expect(state).toBeUndefined(); // Now using inputSessions instead of user-state
   });
 
   test("falls back to sending a fresh message when edit fails", async () => {
@@ -88,7 +87,6 @@ describe("handleWrapAmountInput", () => {
     expect(calls.replies.length).toBe(1);
 
     const state = getUserState(USER_ID);
-    expect(state?.messageId).toBe(fallback.message_id);
-    expect(state?.chatId).toBe(fallback.chat.id);
+    expect(state).toBeUndefined(); // Now using inputSessions instead of user-state
   });
 });

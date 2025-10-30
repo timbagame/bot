@@ -96,11 +96,7 @@ describe("handleCustomAmountInput", () => {
     expect(replies).toHaveLength(0);
 
     const state = __test_getUserState(userKey);
-    expect(state?.type).toBe("send_address");
-    expect(state?.token).toBe("SOL");
-    expect(state?.messageId).toBe(4321);
-    expect(Number(state?.amount ?? 0)).toBeCloseTo(0.0001);
-    expect(state?.amountDisplay).toContain("SOL");
+    expect(state).toBeUndefined(); // Now using inputSessions instead of user-state
   });
 
   test("falls back to reply when editing existing message fails", async () => {
@@ -125,9 +121,7 @@ describe("handleCustomAmountInput", () => {
     expect(String(replies[0].text)).toContain(USER_WALLET_ADDRESS);
 
     const state = __test_getUserState(userKey);
-    expect(state?.type).toBe("send_address");
-    expect(state?.messageId).toBe(replies[0].message_id);
-    expect(Number(state?.amount ?? 0)).toBeCloseTo(0.0002);
+    expect(state).toBeUndefined(); // Now using inputSessions instead of user-state
   });
 
   test("sends new prompt when prior message id is missing", async () => {
@@ -148,8 +142,6 @@ describe("handleCustomAmountInput", () => {
     expect(String(replies[0].text)).toContain(USER_WALLET_ADDRESS);
 
     const state = __test_getUserState(userKey);
-    expect(state?.type).toBe("send_address");
-    expect(state?.messageId).toBe(replies[0].message_id);
-    expect(Number(state?.amount ?? 0)).toBeCloseTo(0.0003);
+    expect(state).toBeUndefined(); // Now using inputSessions instead of user-state
   });
 });
