@@ -1,5 +1,9 @@
 import { test, expect } from "bun:test";
-import { formatAmount, formatTokenDisplay } from "../src/utils/format-amount";
+import {
+  formatAmount,
+  formatCompactTokenDisplay,
+  formatTokenDisplay,
+} from "../src/utils/format-amount";
 
 test("formatAmount formats basic integer", () => {
   expect(formatAmount(123456, 5)).toBe("1.23456");
@@ -63,4 +67,31 @@ test("formatTokenDisplay clamps to six fractional digits", () => {
 
 test("formatTokenDisplay handles non-finite values", () => {
   expect(formatTokenDisplay(Number.NaN)).toBe("0");
+});
+
+test("formatCompactTokenDisplay abbreviates thousands", () => {
+  expect(formatCompactTokenDisplay("267,980")).toBe("267.9k");
+});
+
+test("formatCompactTokenDisplay preserves small decimal values", () => {
+  expect(formatCompactTokenDisplay("12.3400")).toBe("12.34");
+  expect(formatCompactTokenDisplay("0.000123")).toBe("0.000123");
+});
+
+test("formatCompactTokenDisplay keeps integers under one thousand intact", () => {
+  expect(formatCompactTokenDisplay("950")).toBe("950");
+});
+
+test("formatCompactTokenDisplay handles negative numbers", () => {
+  expect(formatCompactTokenDisplay(-15500)).toBe("-15.5k");
+});
+
+test("formatCompactTokenDisplay scales to large suffixes", () => {
+  expect(formatCompactTokenDisplay(2_500_000_000)).toBe("2.5B");
+  expect(formatCompactTokenDisplay(1_000_000_000_000_000)).toBe("1P");
+});
+
+test("formatCompactTokenDisplay falls back to raw string for invalid numbers", () => {
+  expect(formatCompactTokenDisplay("not-a-number")).toBe("not-a-number");
+  expect(formatCompactTokenDisplay(" ")).toBe("0");
 });

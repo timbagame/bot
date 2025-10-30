@@ -173,7 +173,7 @@ export function formatCompactTokenDisplay(value: string | number): string {
   const sign = numeric < 0 ? "-" : "";
   let absValue = Math.abs(numeric);
 
-  const suffixes = ["", "k", "M", "B", "T"] as const;
+  const suffixes = ["", "k", "M", "B", "T", "P", "E"] as const;
   let suffixIndex = 0;
 
   while (absValue >= 1000 && suffixIndex < suffixes.length - 1) {
@@ -182,7 +182,19 @@ export function formatCompactTokenDisplay(value: string | number): string {
   }
 
   if (suffixIndex === 0) {
-    return rawString;
+    if (normalized === "") {
+      return "0";
+    }
+
+    const [, fractional = ""] = normalized.split(".");
+    const trimmedFraction = fractional.replace(/0+$/, "");
+    const precision = Math.min(trimmedFraction.length, 6);
+
+    if (precision > 0) {
+      return formatTokenDisplay(numeric, { decimals: precision });
+    }
+
+    return `${sign}${Math.trunc(Math.abs(numeric)).toLocaleString("en-US")}`;
   }
 
   const truncated = Math.floor(absValue * 10) / 10;
