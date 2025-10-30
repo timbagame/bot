@@ -157,6 +157,41 @@ export function formatTokenDisplay(
   });
 }
 
+export function formatCompactTokenDisplay(value: string | number): string {
+  if (value === null || value === undefined) {
+    return "0";
+  }
+
+  const rawString = typeof value === "string" ? value : String(value);
+  const normalized = rawString.replace(/,/g, "").trim();
+  const numeric = Number(normalized);
+
+  if (!Number.isFinite(numeric)) {
+    return rawString;
+  }
+
+  const sign = numeric < 0 ? "-" : "";
+  let absValue = Math.abs(numeric);
+
+  const suffixes = ["", "k", "M", "B", "T"] as const;
+  let suffixIndex = 0;
+
+  while (absValue >= 1000 && suffixIndex < suffixes.length - 1) {
+    absValue /= 1000;
+    suffixIndex += 1;
+  }
+
+  if (suffixIndex === 0) {
+    return rawString;
+  }
+
+  const truncated = Math.floor(absValue * 10) / 10;
+  let formatted = truncated.toFixed(1);
+  formatted = formatted.replace(/\.0$/, "");
+
+  return `${sign}${formatted}${suffixes[suffixIndex]}`;
+}
+
 export function formatUsdValue(
   value: number,
   options: FormatUsdValueOptions = {}
