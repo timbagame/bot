@@ -38,6 +38,17 @@ type TokenTarget = TokenConfig & {
 const buildCompletionFeeEnvKey = (ticker: string): string =>
   `${ticker.toUpperCase()}_MIN_COMPLETION_FEE_LAMPORTS`;
 
+function roundToSignificantDigits(num: number, digits: number): number {
+  if (num === 0) return 0;
+  const sign = Math.sign(num);
+  const absNum = Math.abs(num);
+  const magnitude = Math.floor(Math.log10(absNum));
+  const scale = Math.pow(10, magnitude - digits + 1);
+  const scaled = absNum / scale;
+  const roundedScaled = Math.round(scaled);
+  return sign * roundedScaled * scale;
+}
+
 const TARGET_TOKENS: TokenTarget[] = getSupportedTokens().map((token) => ({
   ...token,
   minCompletionFeeLamports: readBigIntEnv({
@@ -163,7 +174,11 @@ async function buildProposal(
   const requiredMinNumber = Math.ceil(
     (marginAdjustedCostNumber * 100) / Number(oracleFeePercentage || 1n)
   );
-  let requiredMinAmount = BigInt(requiredMinNumber);
+
+  // Round to 2 significant digits for user-friendly numbers
+  const roundedRequiredMinNumber = roundToSignificantDigits(requiredMinNumber, 2);
+
+  let requiredMinAmount = BigInt(Math.ceil(roundedRequiredMinNumber));
 
   if (requiredMinAmount >= scale && scale > 0n) {
     const remainder = requiredMinAmount % scale;
