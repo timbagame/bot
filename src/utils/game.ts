@@ -1039,9 +1039,7 @@ export class GameManager {
 
     for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
       [updatedTokenBalance, updatedSolBalance] = await Promise.all([
-        this.wallet.getTokenBalance(telegramId, WSOL_MINT, {
-          createIfMissing: true,
-        }),
+        this.wallet.getTokenBalance(telegramId, WSOL_MINT),
         this.wallet.getBalance(telegramId),
       ]);
 
@@ -2307,9 +2305,7 @@ export class GameManager {
       const requiredSolReserveLamports = minSolBuffer + gameRentLamports;
 
       let [tokenBalance, solBalance] = await Promise.all([
-        this.wallet.getTokenBalance(telegramId, tokenMint, {
-          createIfMissing: true,
-        }),
+        this.wallet.getTokenBalance(telegramId, tokenMint),
         this.wallet.getBalance(telegramId),
       ]);
 
@@ -2405,11 +2401,7 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
           };
         }
 
-        tokenBalance = await this.wallet.getTokenBalance(
-          telegramId,
-          tokenMint,
-          { createIfMissing: true }
-        );
+        tokenBalance = await this.wallet.getTokenBalance(telegramId, tokenMint);
 
         if (tokenBalance < amount) {
           return {
@@ -2891,9 +2883,7 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
         const minSolBuffer = await this.feeBudget.getGameSafetyBufferLamports();
 
         let [tokenBalance, solBalance] = await Promise.all([
-          this.wallet.getTokenBalance(telegramId, gameData.token_mint, {
-            createIfMissing: true,
-          }),
+          this.wallet.getTokenBalance(telegramId, gameData.token_mint),
           this.wallet.getBalance(telegramId),
         ]);
 
@@ -2981,8 +2971,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           if (jitResult.swapped) {
             tokenBalance = await this.wallet.getTokenBalance(
               telegramId,
-              gameData.token_mint,
-              { createIfMissing: true }
+              gameData.token_mint
             );
 
             if (tokenBalance < gameAmount) {

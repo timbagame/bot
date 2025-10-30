@@ -1467,9 +1467,10 @@ const startInteractiveGameSetup = async (
   let userBalance = 0;
 
   try {
-    const tokenBalance = await wallet.getTokenBalance(telegramId, tokenInfo.tokenMint, {
-      createIfMissing: true,
-    });
+    const tokenBalance = await wallet.getTokenBalance(
+      telegramId,
+      tokenInfo.tokenMint
+    );
     userBalance = tokenBalance / Math.pow(10, tokenInfo.decimals);
   } catch (error) {
     console.error("Error getting token balance:", error);
@@ -1737,13 +1738,7 @@ const getPlayerData = async (
   const includeWsol = options.includeWsol === true;
 
   const balancePromises: Array<Promise<number>> = [
-    wallet.getTokenBalance(
-      telegramId,
-      effectiveTokenMint,
-      effectiveTokenMint === DEFAULT_TOKEN_MINT
-        ? { createIfMissing: true }
-        : undefined
-    ),
+    wallet.getTokenBalance(telegramId, effectiveTokenMint),
     wallet.getBalance(telegramId),
   ];
 
@@ -2633,9 +2628,7 @@ const createGameViaCommand = async (
 
     if (needsNativeSolCheck) {
       const [tokenBalance, solBalance] = await Promise.all([
-        deps.wallet.getTokenBalance(telegramId, parsedAmount.tokenMint, {
-          createIfMissing: true,
-        }),
+        deps.wallet.getTokenBalance(telegramId, parsedAmount.tokenMint),
         deps.wallet.getBalance(telegramId),
       ]);
       userBalance = tokenBalance;
@@ -2643,8 +2636,7 @@ const createGameViaCommand = async (
     } else {
       userBalance = await deps.wallet.getTokenBalance(
         telegramId,
-        parsedAmount.tokenMint,
-        { createIfMissing: true }
+        parsedAmount.tokenMint
       );
     }
 
@@ -4282,8 +4274,7 @@ bot.callbackQuery(
           try {
             const tokenBalance = await wallet.getTokenBalance(
               telegramId,
-              tokenContext.tokenMint,
-              { createIfMissing: true }
+              tokenContext.tokenMint
             );
             userBalance =
               tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
@@ -4382,8 +4373,7 @@ bot.callbackQuery(
           try {
             const tokenBalance = await wallet.getTokenBalance(
               telegramId,
-              tokenContext.tokenMint,
-              { createIfMissing: true }
+              tokenContext.tokenMint
             );
             userBalance =
               tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
@@ -4504,8 +4494,7 @@ bot.callbackQuery(
           try {
             const tokenBalance = await wallet.getTokenBalance(
               telegramId,
-              tokenContext.tokenMint,
-              { createIfMissing: true }
+              tokenContext.tokenMint
             );
             userBalance =
               tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
