@@ -1,6 +1,6 @@
 // Utilities for managing per-user state and pending transactions
 
-const USER_STATE_TIMEOUT = 5 * 60 * 1000; // 5 minutes timeout
+const USER_STATE_TIMEOUT = 15 * 60 * 1000; // 15 minutes timeout
 
 type GenericState = { timestamp: number } & Record<string, any>;
 
@@ -46,4 +46,3 @@ export function getPendingTransaction<T = any>(txId: string, remove = true): (T 
 export const __test_getRawUserState = (id: string) => userStates.get(id);
 export const __test_clearUserState = (id: string) => userStates.delete(id);
 export const __test_getRawPending = (id: string) => pendingTransactions.get(id);
-
