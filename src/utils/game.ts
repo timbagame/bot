@@ -93,15 +93,24 @@ type GameTokenContextAccounts = {
 // UTILITY FUNCTIONS
 // ================================
 
+const DEFAULT_FRIENDLY_ERROR_MESSAGE =
+  "❌ Something went wrong. Please try again in a moment.";
+
 const logAndFormatError = (
-  error: any,
+  error: unknown,
   operation: string,
   walletManager?: WalletManager
 ): string => {
   console.error(`Error in ${operation}:`, error);
-  return walletManager
-    ? formatUserFriendlyError(error, walletManager)
-    : error.message;
+  try {
+    return formatUserFriendlyError(error, walletManager);
+  } catch (formatError) {
+    console.error(
+      `Failed to format user-friendly error for ${operation}:`,
+      formatError
+    );
+    return DEFAULT_FRIENDLY_ERROR_MESSAGE;
+  }
 };
 
 const formatGameTypeWithEmoji = (gameType: string): string => {
@@ -1966,7 +1975,15 @@ export class GameManager {
 
       return messageText;
     } catch (error: any) {
-      return `Error fetching game: ${error.message}`;
+      const userFriendlyError = logAndFormatError(
+        error,
+        `fetching game info for ${gamePda.toBase58()}`,
+        this.wallet
+      );
+      return (
+        "⚠️ Unable to load this game right now. Please try again in a moment.\n\n" +
+        userFriendlyError
+      );
     }
   }
 
@@ -2667,7 +2684,8 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
       }
       const errorMsg = logAndFormatError(
         joinError,
-        `auto-joining creator to ${gameType} game`
+        `auto-joining creator to ${gameType} game`,
+        this.wallet
       );
       return {
         success: false,
@@ -3129,7 +3147,12 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       } catch (_) {
         // ignore cleanup errors
       }
-      return { success: false, error: error.message || "Failed to join game" };
+      const userFriendlyError = logAndFormatError(
+        error,
+        `joining game ${gameAddress}`,
+        this.wallet
+      );
+      return { success: false, error: userFriendlyError };
     }
   }
 
@@ -3482,7 +3505,12 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       if (error?.message?.includes("Account does not exist")) {
         return { success: false, error: this.completedGameErrorMessage };
       }
-      return { success: false, error: error.message || "Unknown error" };
+      const userFriendlyError = logAndFormatError(
+        error,
+        "joining private game",
+        this.wallet
+      );
+      return { success: false, error: userFriendlyError };
     }
   }
 
