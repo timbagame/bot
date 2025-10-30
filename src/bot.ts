@@ -46,7 +46,6 @@ import {
   createAmountSelectionKeyboard,
   createPlayerSelectionKeyboard,
   createGameConfirmKeyboard,
-  createSliderAmountKeyboard,
   getFeeWarningMessage,
   getSuggestedStakeAmounts,
 } from "./utils/keyboards";
@@ -1737,56 +1736,6 @@ const withCreatorContext = (
   };
 };
 
-const prepareSliderContext = async ({
-  session,
-  tokenContext,
-  telegramId,
-}: {
-  session: GameSetupSession | undefined;
-  tokenContext: TokenContext;
-  telegramId: bigint;
-}): Promise<{
-  userBalance: number;
-  contractMinimum: number;
-  roundValue: (value: number) => number;
-}> => {
-  let userBalance =
-    session?.userBalance && session.userBalance > 0 ? session.userBalance : 0;
-
-  if (userBalance <= 0) {
-    try {
-      const tokenBalance = await wallet.getTokenBalance(
-        telegramId,
-        tokenContext.tokenMint,
-        { createIfMissing: true }
-      );
-      userBalance =
-        tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
-    } catch (error) {
-      console.error("Error getting balance for slider:", error);
-    }
-  }
-
-  const contractMinimum =
-    tokenContext.contractMinimum !== undefined
-      ? tokenContext.contractMinimum
-      : (
-          await getContractMinimumAmount(
-            tokenContext.tokenMint,
-            tokenContext.tokenDecimals
-          )
-        ).formatted;
-
-  const precisionFactor = Math.pow(10, tokenContext.tokenDecimals);
-  const roundValue = (value: number) =>
-    Math.round(value * precisionFactor) / precisionFactor;
-
-  return {
-    userBalance,
-    contractMinimum,
-    roundValue,
-  };
-};
 
 const determineFractionDigits = (
   value: string,
@@ -3828,7 +3777,7 @@ const handleCompletedGameCallback = async (ctx: any, game: any) => {
     } else {
       // Game data not found in database - game may have been cleaned up
       console.warn(`Game data not found for ${game.game_address}`);
-      await safeAnswerCallbackQuery(ctx, 
+      await safeAnswerCallbackQuery(ctx,
         "Game data not found - game may have been completed"
       );
     }
@@ -4299,7 +4248,7 @@ bot.callbackQuery(
 );
 
 
-// Custom amount callback - shows slider interface (new format with creator ID)
+// Custom amount callback - prompts user to type amount (new format with creator ID)
 bot.callbackQuery(
   /^custom_amount_(coinflip|giveaway)_(\d+)$/,
   withCreatorContext(
@@ -4313,139 +4262,87 @@ bot.callbackQuery(
         const gameType = ctx.match![1] as string;
         const telegramId = await getRequiredTelegramIdForContext(
           ctx,
-          "custom amount slider"
+          "type amount prompt"
         );
         if (telegramId == null) {
           await safeAnswerCallbackQuery(ctx, "Unable to identify user");
           return;
         }
 
-        const { userBalance, contractMinimum: contractMin, roundValue } =
-          await prepareSliderContext({
-            session,
-            tokenContext,
-            telegramId,
-          });
+        let userBalance =
+          session?.userBalance && session.userBalance > 0
+            ? session.userBalance
+            : 0;
+        if (userBalance <= 0) {
+          try {
+            const tokenBalance = await wallet.getTokenBalance(
+              telegramId,
+              tokenContext.tokenMint,
+              { createIfMissing: true }
+            );
+            userBalance =
+              tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
+          } catch (error) {
+            console.error("Error getting balance:", error);
+          }
+        }
 
-        const defaultStart =
-          userBalance > 0
-            ? Math.min(
-                userBalance,
-                Math.max(contractMin, userBalance * 0.1)
-              )
-            : contractMin;
-        const startAmount = roundValue(Math.max(contractMin, defaultStart));
+        const { formatted: contractMin } =
+          tokenContext.contractMinimum !== undefined
+            ? { formatted: tokenContext.contractMinimum }
+            : await getContractMinimumAmount(
+                tokenContext.tokenMint,
+                tokenContext.tokenDecimals
+              );
 
         const formattedGameType = toTitleCase(gameType);
 
-        await respondWithMenu(ctx, {
-          text: `🎯 <b>Custom Amount - ${formattedGameType}</b>\n\n💰 Balance: <b>${userBalance.toFixed(
+        const typeMessage = [
+          `✏️ <b>Type Custom Amount - ${formattedGameType}</b>`,
+          "",
+          `💰 Your balance: <b>${userBalance.toFixed(
             Math.min(4, tokenContext.tokenDecimals)
-          )} ${tokenContext.tokenTicker}</b>\n\nAdjust the amount using the controls below:`,
+          )} ${tokenContext.tokenTicker}</b>`,
+          "",
+          "Please type the amount you want to use.",
+          "",
+          "<b>Example:</b>",
+          `• Type: <code>75</code> for 75 ${tokenContext.tokenTicker}`,
+          `• Type: <code>150.5</code> for 150.5 ${tokenContext.tokenTicker}`,
+          "",
+          `Min: ${contractMin} ${tokenContext.tokenTicker} • Max: ${userBalance.toFixed(
+            Math.min(2, tokenContext.tokenDecimals)
+          )} ${tokenContext.tokenTicker}`
+        ].join("\n");
+
+        await respondWithMenu(ctx, {
+          text: typeMessage,
           parseMode: "HTML",
-          keyboard: createSliderAmountKeyboard(
-            gameType,
-            startAmount,
-            userBalance,
-            creatorId,
-            tokenContext.tokenTicker,
-            tokenContext.tokenDecimals
-          ),
+          keyboard: new InlineKeyboard()
+            .text("❌ Cancel", `cancel_game_setup_${creatorId}`)
+            .row(),
         });
 
+        await safeAnswerCallbackQuery(ctx, "Type your amount...");
+
         updateSession({
-          waitingFor: "setup",
+          waitingFor: "amount_input",
           gameType,
           userBalance,
-          messageId: session?.messageId ?? ctx.callbackQuery?.message?.message_id,
-          chatId: session?.chatId ?? ctx.chat?.id ?? 0,
+          messageId: ctx.callbackQuery?.message?.message_id || 0,
+          chatId: ctx.chat?.id || 0,
           contractMinimum: contractMin,
           amount: session?.amount,
         });
-
-        await safeAnswerCallbackQuery(ctx);
       } catch (error) {
         console.error("Error in creator-protected custom_amount callback:", error);
-        await safeAnswerCallbackQuery(ctx, "❌ Error loading custom amount");
+        await safeAnswerCallbackQuery(ctx, "❌ Error setting up text input");
       }
     }
   )
 );
 
 
-// Slider controls callback (new format with creator ID)
-bot.callbackQuery(
-  /^slider_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)$/,
-  withCreatorContext(
-    {
-      name: "slider",
-      resolveCreatorId: (ctx) => ctx.match?.[3],
-      failureText: "❌ Only the game creator can modify this setup!",
-    },
-    async (ctx, { session, tokenContext, updateSession, creatorId }) => {
-      try {
-        const gameType = ctx.match![1] as string;
-        const newAmount = parseFloat(ctx.match![2] as string);
-        const telegramId = await getRequiredTelegramIdForContext(
-          ctx,
-          "slider adjustment"
-        );
-        if (telegramId == null) {
-          await safeAnswerCallbackQuery(ctx, "Unable to identify user");
-          return;
-        }
-
-        const { userBalance, contractMinimum: minValue, roundValue } =
-          await prepareSliderContext({
-            session,
-            tokenContext,
-            telegramId,
-          });
-        const validAmount = roundValue(
-          Math.max(
-            minValue,
-            Math.min(
-              userBalance > 0 ? userBalance : newAmount,
-              newAmount
-            )
-          )
-        );
-
-        const formattedGameType = toTitleCase(gameType);
-
-        await respondWithMenu(ctx, {
-          text: `🎯 <b>Custom Amount - ${formattedGameType}</b>\n\n💰 Balance: <b>${userBalance.toFixed(
-            Math.min(4, tokenContext.tokenDecimals)
-          )} ${tokenContext.tokenTicker}</b>\n\nAdjust the amount using the controls below:`,
-          parseMode: "HTML",
-          keyboard: createSliderAmountKeyboard(
-            gameType,
-            validAmount,
-            userBalance,
-            creatorId,
-            tokenContext.tokenTicker,
-            tokenContext.tokenDecimals
-          ),
-        });
-
-        updateSession({
-          waitingFor: "setup",
-          gameType,
-          userBalance,
-          messageId: session?.messageId ?? ctx.callbackQuery?.message?.message_id,
-          chatId: session?.chatId ?? ctx.chat?.id ?? 0,
-          amount: validAmount.toString(),
-          contractMinimum: minValue,
-        });
-
-        await safeAnswerCallbackQuery(ctx);
-      } catch (error) {
-        console.error("Error in creator-protected slider callback:", error);
-        await safeAnswerCallbackQuery(ctx, "❌ Error adjusting amount");
-      }
-    }
-  )
-);
 
 
 // Back to amounts callback (new format with creator ID)
@@ -5188,7 +5085,7 @@ bot.callbackQuery("cmd_privatekey", async (ctx) => {
   try {
     // Only show private key in private chats for security
     if (ctx.chat?.type !== "private") {
-      await safeAnswerCallbackQuery(ctx, 
+      await safeAnswerCallbackQuery(ctx,
         "❌ Private key only available in private chat"
       );
       return;

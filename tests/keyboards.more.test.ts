@@ -9,7 +9,6 @@ import {
   createAmountSelectionKeyboard,
   createPlayerSelectionKeyboard,
   createGameConfirmKeyboard,
-  createSliderAmountKeyboard,
   getFeeWarningMessage,
 } from "../src/utils/keyboards";
 
@@ -241,36 +240,5 @@ describe("keyboards: player selection and confirm", () => {
     const callbacks = extractCallbacks(kb);
     expect(callbacks).toContain("confirm_game_coinflip_30_4_abc");
     expect(callbacks).toContain("amount_coinflip_30_abc");
-  });
-});
-
-describe("keyboards: slider amount", () => {
-  test("uses correct step sizes based on current amount", () => {
-    const cases: Array<[number, number]> = [
-      [10, 1],
-      [150, 5],
-      [500, 25],
-      [2000, 100],
-    ];
-
-    for (const [amt, step] of cases) {
-      const kb = createSliderAmountKeyboard("coinflip", amt, 10_000);
-      const texts = extractTexts(kb);
-      expect(texts).toContain(`-${step}`);
-      expect(texts).toContain(`+${step}`);
-      const expectedLabel = `✅ Use ${amt.toLocaleString("en-US")} TIMBA`;
-      expect(texts).toContain(expectedLabel);
-    }
-  });
-
-  test("respects user balance for min/max quick options", () => {
-    const kb = createSliderAmountKeyboard("coinflip", 25, 88, "777");
-    const callbacks = extractCallbacks(kb);
-    expect(callbacks).toContain("slider_coinflip_1_777");
-    // 25% and 50% of 88 => 22 and 44
-    expect(callbacks).toContain("slider_coinflip_22_777");
-    expect(callbacks).toContain("slider_coinflip_44_777");
-    // Max uses balance
-    expect(callbacks).toContain("slider_coinflip_88_777");
   });
 });
