@@ -4629,6 +4629,8 @@ bot.callbackQuery(
         });
 
         const formattedGameType = toTitleCase(gameType);
+        const minPlayers = gameType === "coinflip" ? 2 : 1;
+        const maxPlayers = 100;
 
         const playersMessage = [
           `👥 <b>Type Custom Players - ${formattedGameType}</b>`,
@@ -4637,11 +4639,7 @@ bot.callbackQuery(
           "",
           "Please type the number of players for this game.",
           "",
-          "<b>Example:</b>",
-          "• Type: <code>4</code> for 4 players",
-          "• Type: <code>10</code> for 10 players",
-          "",
-          `Range: 2-${gameType === "coinflip" ? "8" : "20"} players`
+          `Range: ${minPlayers}-${maxPlayers} players`
         ].join("\n");
 
         await respondWithMenu(ctx, {
@@ -4768,7 +4766,8 @@ const handleGameSetupTextInput = async (
     if (userSession.waitingFor === "players_input") {
       const players = parseInt(inputText);
       const maxPlayers = 100;
-      const minPlayers = 2;
+      const minPlayers =
+        userSession.gameType === "coinflip" ? 2 : 1;
 
       console.log(`🔍 Custom players input: "${inputText}" -> ${players} (gameType: ${userSession.gameType}, min: ${minPlayers}, max: ${maxPlayers})`);
 
