@@ -36,7 +36,7 @@ test("setUserState prunes stale entries when adding new state", () => {
     setUserState("stale", { type: "old" });
     expect(__test_getRawUserState("stale")).toBeDefined();
 
-    now += 5 * 60 * 1000 + 42;
+    now += 16 * 60 * 1000; // 16 minutes to ensure pruning
     Date.now = () => now;
     setUserState("fresh", { type: "new" });
 
@@ -59,7 +59,7 @@ test("storePendingTransaction drops expired entries on new insert", () => {
     storePendingTransaction("old", { intent: "swap" });
     expect(__test_getRawPending("old")).toBeDefined();
 
-    now += 5 * 60 * 1000 + 7;
+    now += 16 * 60 * 1000; // 16 minutes to ensure pruning
     Date.now = () => now;
     storePendingTransaction("current", { intent: "send" });
 
