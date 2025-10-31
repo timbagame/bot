@@ -175,4 +175,50 @@ describe("respondWithMenu", () => {
     const replies = ctx.__calls.filter((c: any) => c.type === "reply");
     expect(replies.length).toBe(1);
   });
+
+  test("uses adapter target metadata to edit without callback context", async () => {
+    const ctx = makeCtx();
+    ctx.callbackQuery = undefined;
+    ctx.__editAdapterTarget = { chatId: 777, messageId: 888 };
+
+    const result = await respondWithMenu(ctx as any, basePayload);
+
+    const calls = ctx.__calls;
+    expect(calls[0]?.type).toBe("caption");
+    expect(calls.find((c: any) => c.type === "reply")).toBeUndefined();
+    expect(result).toEqual({
+      messageId: 888,
+      chatId: 777,
+      respondedWithReply: false,
+    });
+  });
+
+  test("falls back to reply when adapter edits cannot proceed", async () => {
+    const ctx = makeCtx({
+      replyResult: { message_id: 222, chat: { id: 333 } },
+    });
+    ctx.callbackQuery = undefined;
+    ctx.__editAdapterTarget = { chatId: 777, messageId: 888 };
+
+    ctx.editMessageCaption = async () => {
+      const err: any = new Error("no caption");
+      err.description = "Bad Request: there is no caption in the message to edit";
+      throw err;
+    };
+    ctx.editMessageText = async () => {
+      const err: any = new Error("no text");
+      err.description = "Bad Request: there is no text in the message to edit";
+      throw err;
+    };
+
+    const result = await respondWithMenu(ctx as any, basePayload);
+
+    const replies = ctx.__calls.filter((c: any) => c.type === "reply");
+    expect(replies.length).toBe(1);
+    expect(result).toEqual({
+      messageId: 222,
+      chatId: 333,
+      respondedWithReply: true,
+    });
+  });
 });
