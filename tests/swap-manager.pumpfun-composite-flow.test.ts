@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { Connection, Keypair } from "@solana/web3.js";
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
+import { normalizePumpFunAmount } from "../src/utils/swap/pump-fun-amount";
 import type { JupiterQuoteResponse } from "../src/utils/jupiter";
 import type { PumpFunQuote } from "../src/utils/pump-fun";
 import { WSOL_MINT } from "../src/utils/token-registry";
@@ -67,7 +68,10 @@ describe("SwapManager pump.fun composite quotes", () => {
     (manager.pumpFunClient as any).getQuote = async (
       inputMint: string,
       outputMint: string,
-      amount: string
+      amount: string,
+      _inputDecimals: number,
+      _outputDecimals: number,
+      _slippageBps: number
     ) => {
       expect(inputMint).toBe(pumpMint);
       expect(outputMint).toBe(WSOL_MINT);
@@ -101,7 +105,10 @@ describe("SwapManager pump.fun composite quotes", () => {
     (manager.pumpFunClient as any).getQuote = async (
       inputMint: string,
       outputMint: string,
-      amount: string
+      amount: string,
+      _inputDecimals: number,
+      _outputDecimals: number,
+      _slippageBps: number
     ) => {
       expect(inputMint).toBe(WSOL_MINT);
       expect(outputMint).toBe(pumpMint);
@@ -144,5 +151,43 @@ describe("SwapManager pump.fun composite quotes", () => {
     expect(quote.composite?.flow).toBe("jupiter-then-pump");
     expect(quote.composite?.pumpQuote.outputMint).toBe(pumpMint);
     expect(quote.composite?.jupiterQuote.outputMint).toBe(WSOL_MINT);
+  });
+
+  test("pump → SOL composite forwards raw lamports to pump.fun", async () => {
+    const manager = createManager();
+    const rawAmount = "1000000"; // 1 token with 6 decimals
+    (manager.pumpFunClient as any).getQuote = async (
+      inputMint: string,
+      outputMint: string,
+      amount: string,
+      inputDecimals: number,
+      _outputDecimals: number,
+      _slippageBps: number
+    ) => {
+      expect(inputMint).toBe(pumpMint);
+      expect(outputMint).toBe(WSOL_MINT);
+      expect(amount).toBe(rawAmount);
+      const decimalAmount = normalizePumpFunAmount(amount, inputDecimals).decimalAmount;
+      return stubPumpQuote({ inputAmount: decimalAmount, outputAmount: "1000" });
+    };
+
+    (manager as any).jupiterClient.getQuote = async () =>
+      stubJupiterQuote({ inAmount: "1000" });
+
+    const quote = await manager.getQuote({
+      inputMint: pumpMint,
+      outputMint: usdcMint,
+      amount: rawAmount,
+      inputDecimals: 6,
+      outputDecimals: 6,
+      userKeypair: Keypair.generate(),
+      inputTicker: "PUMP",
+      outputTicker: "USDC",
+      slippageBps: 50,
+    });
+
+    expect(quote.provider).toBe("pump-fun+jupiter");
+    expect(quote.inputAmount).toBe("1");
+    expect(quote.composite?.pumpQuote.inputAmount).toBe("1");
   });
 });
