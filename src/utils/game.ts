@@ -2234,6 +2234,17 @@ export class GameManager {
               resubmitError instanceof Error
                 ? resubmitError
                 : new Error(String(resubmitError));
+            const latestSignature =
+              resubmitError &&
+              typeof resubmitError === "object" &&
+              "lastSignature" in resubmitError &&
+              typeof (resubmitError as { lastSignature?: unknown }).lastSignature ===
+                "string"
+                ? (resubmitError as { lastSignature: string }).lastSignature
+                : undefined;
+            if (latestSignature) {
+              currentSignature = latestSignature;
+            }
             lastRecoveryError = normalizedError;
             console.error(
               `❌ ${operationType} resubmission ${attemptLabel} failed`,
