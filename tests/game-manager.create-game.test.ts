@@ -296,7 +296,7 @@ describe("GameManager.createGame", () => {
     const pda = new PublicKey("11111111111111111111111111111111");
     const original = (PDAManager as any).getGamePDA;
     (PDAManager as any).getGamePDA = () => pda;
-    (gm as any).confirmTransactionWithRecovery = async () => true;
+    (gm as any).confirmTransactionWithRecovery = async () => "CONFIRMED_SIG";
     (gm as any).handleGameAutoJoinPure = async () => ({ success: true });
 
     const res = await gm.createGame(
