@@ -29,6 +29,43 @@ describe("GameManager confirm/reload helpers", () => {
     expect(confirmed).toBe("SIG123");
   });
 
+  test("confirmTransactionWithRecovery resubmits using the latest failed signature", async () => {
+    resetGM();
+    const wallet = {
+      confirmTransaction: async () => {
+        throw new Error("transaction confirmation timeout");
+      },
+    } as any;
+    const program = {
+      account: { game: { fetchNullable: async () => ({}) } },
+      provider: {},
+    } as any;
+    const gm = GameManager.getInstance(program, wallet, { getGameParticipants: () => [] } as any);
+
+    const resubmitAttempts: Array<{ attempt: number; previousSignature: string }> = [];
+    const finalSignature = await (gm as any).confirmTransactionWithRecovery(
+      "SIG_ORIGINAL",
+      new PublicKey("BPFLoader1111111111111111111111111111111111"),
+      "Game creation",
+      undefined,
+      async (attempt: number, previousSignature: string) => {
+        resubmitAttempts.push({ attempt, previousSignature });
+        if (attempt === 0) {
+          const error = new Error("resubmit failed");
+          (error as any).lastSignature = "SIG_FROM_ERROR";
+          throw error;
+        }
+        return "SIG_SUCCESS";
+      }
+    );
+
+    expect(finalSignature).toBe("SIG_SUCCESS");
+    expect(resubmitAttempts).toEqual([
+      { attempt: 0, previousSignature: "SIG_ORIGINAL" },
+      { attempt: 1, previousSignature: "SIG_FROM_ERROR" },
+    ]);
+  });
+
   test("confirmTransactionWithRecovery treats expirations as recoverable", async () => {
     resetGM();
     const wallet = {
