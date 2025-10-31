@@ -169,8 +169,8 @@ export class GameDatabase extends BaseDatabase {
         "checking if game exists"
       );
       return result !== null;
-    } catch {
-      return false;
+    } catch (error) {
+      throw this.handleDatabaseError("checking if game exists", error);
     }
   }
 
@@ -626,8 +626,13 @@ export class GameDatabase extends BaseDatabase {
           } satisfies LeaderboardStatsRecord;
         })
         .filter((row): row is LeaderboardStatsRecord => row !== null);
-    } catch {
-      return [];
+    } catch (error) {
+      throw this.handleDatabaseError("getting leaderboard stats", error);
     }
+  }
+
+  private handleDatabaseError(operation: string, error: unknown): never {
+    console.error(`[Game DB] Error ${operation}:`, error);
+    throw error instanceof Error ? error : new Error(String(error));
   }
 }

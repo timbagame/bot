@@ -101,8 +101,8 @@ export abstract class BaseDatabase {
     try {
       const result = this.get<{ count: number }>(sql, params, operation);
       return result?.count ?? 0;
-    } catch {
-      return 0;
+    } catch (error) {
+      this.handleError(`during ${operation}`, error);
     }
   }
 

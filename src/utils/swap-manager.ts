@@ -6,55 +6,35 @@ import {
   VersionedTransaction,
   SystemProgram,
 } from "@solana/web3.js";
-import { JupiterClient, type JupiterQuoteResponse } from "./jupiter";
 import {
-  PumpFunClient,
-  validatePumpFunSwap,
-  type PumpFunQuote,
-} from "./pump-fun";
+  JupiterClient,
+  type JupiterQuoteResponse,
+  type JupiterQuoteRequest,
+} from "./jupiter";
+import { PumpFunClient, type PumpFunQuote } from "./pump-fun";
 import { NetworkDetector } from "./network-detector";
 import type { SolanaNetwork } from "./network-detector";
 import { WalletManager } from "./wallet";
 import { FeeBudgetManager } from "./fee-budget";
 import type { FeeBudgetProvider } from "./fee-budget";
 import { formatAmount } from "./format-amount";
+import { WSOL_MINT } from "./token-registry";
+import type { JustInTimeSwapResult, SwapQuote, SwapRequest } from "./swap/types";
+import { SwapQuoteCache } from "./swap/quote-cache";
+import {
+  buildPumpFunCompositeQuote,
+  detectPumpFunContext,
+  determineCompositeFlow,
+  normalizePumpFunQuoteArgs,
+} from "./swap/pump-fun-support";
+
+export type { SwapQuote, SwapRequest, JustInTimeSwapResult } from "./swap/types";
 
 // ================================
 // UNIFIED SWAP MANAGER
 // ================================
 
-export interface SwapQuote {
-  inputMint: string;
-  outputMint: string;
-  inputAmount: string;
-  outputAmount: string;
-  estimatedRate: number;
-  slippage: number;
-  provider: "jupiter" | "pump-fun" | "pump-fun+jupiter";
-  priceImpact?: string;
-  platformFee?: any;
-  composite?: {
-    flow: "pump-then-jupiter" | "jupiter-then-pump";
-    intermediateMint: string;
-    intermediateAmount: string;
-    pumpQuote: PumpFunQuote;
-    jupiterQuote: JupiterQuoteResponse;
-  };
-}
-
-export interface SwapRequest {
-  inputMint: string;
-  outputMint: string;
-  amount: string;
-  slippageBps?: number;
-  userKeypair: Keypair;
-  inputDecimals: number;
-  outputDecimals: number;
-  inputTicker: string;
-  outputTicker: string;
-}
-
-const SOL_MINT = "So11111111111111111111111111111111111111112";
+const SOL_MINT = WSOL_MINT;
 const SOL_DECIMALS = 9;
 const KNOWN_MAJOR_TOKENS = new Set([
   "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
@@ -65,14 +45,6 @@ const KNOWN_MAJOR_TOKENS = new Set([
   "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E", // BTC
 ]);
 
-export interface JustInTimeSwapResult {
-  swapped: boolean;
-  provider?: "jupiter" | "pump-fun" | "unwrap";
-  signature?: string;
-  lamportsReceived?: number;
-  error?: string;
-}
-
 export class SwapManager {
   private jupiterClient: JupiterClient;
   public pumpFunClient: PumpFunClient;
@@ -80,6 +52,7 @@ export class SwapManager {
   private wallet: WalletManager;
   private feeBudget: FeeBudgetProvider;
   private network: SolanaNetwork;
+  private readonly quoteCache = new SwapQuoteCache();
 
   constructor(
     connection: Connection,
@@ -103,91 +76,6 @@ export class SwapManager {
     return KNOWN_MAJOR_TOKENS.has(mint);
   }
 
-  private async detectPumpFunContext(
-    inputMint: string,
-    outputMint: string,
-    options?: { log?: boolean }
-  ): Promise<{
-    inputPumpInfo: { isPumpFun: boolean; isGraduated: boolean };
-    outputPumpInfo: { isPumpFun: boolean; isGraduated: boolean };
-    hasPumpFunToken: boolean;
-    hasNonGraduatedPumpFun: boolean;
-  }> {
-    const log = options?.log ?? false;
-
-    const emptyInfo = { isPumpFun: false, isGraduated: false };
-
-    if (this.network !== "mainnet") {
-      return {
-        inputPumpInfo: emptyInfo,
-        outputPumpInfo: emptyInfo,
-        hasPumpFunToken: false,
-        hasNonGraduatedPumpFun: false,
-      };
-    }
-
-    const checkToken = async (
-      mint: string,
-      role: "input" | "output"
-    ): Promise<{ isPumpFun: boolean; isGraduated: boolean }> => {
-      const label = role === "input" ? "Input" : "Output";
-
-      if (this.isSolMint(mint) || this.isKnownMajorToken(mint)) {
-        if (log) {
-          console.log(
-            `   ${label} token ${mint} skipped for pump.fun detection (SOL/major token)`
-          );
-        }
-        return emptyInfo;
-      }
-
-      try {
-        if (log) {
-          console.log(`   Checking if ${role} token ${mint} is pump.fun...`);
-        }
-        const info = await this.pumpFunClient.isPumpFunToken(mint);
-        if (log) {
-          console.log(
-            `   ${label} pump.fun result: isPumpFun=${info.isPumpFun}, isGraduated=${info.isGraduated}`
-          );
-        }
-        return info;
-      } catch (error) {
-        if (log) {
-          const message = error instanceof Error ? error.message : String(error);
-          console.log(
-            `   ${label} token ${mint} is not a pump.fun token: ${message}`
-          );
-        }
-        return emptyInfo;
-      }
-    };
-
-    const [inputPumpInfo, outputPumpInfo] = await Promise.all([
-      checkToken(inputMint, "input"),
-      checkToken(outputMint, "output"),
-    ]);
-
-    const hasPumpFunToken =
-      inputPumpInfo.isPumpFun || outputPumpInfo.isPumpFun;
-    const hasNonGraduatedPumpFun =
-      (inputPumpInfo.isPumpFun && !inputPumpInfo.isGraduated) ||
-      (outputPumpInfo.isPumpFun && !outputPumpInfo.isGraduated);
-
-    if (log) {
-      console.log(
-        `   Detection results: hasPumpFunToken=${hasPumpFunToken}, hasNonGraduatedPumpFun=${hasNonGraduatedPumpFun}`
-      );
-    }
-
-    return {
-      inputPumpInfo,
-      outputPumpInfo,
-      hasPumpFunToken,
-      hasNonGraduatedPumpFun,
-    };
-  }
-
   private convertRawAmountToDecimal(rawAmount: string, decimals: number): string {
     if (decimals <= 0) {
       return rawAmount;
@@ -206,267 +94,34 @@ export class SwapManager {
     return fractional.length > 0 ? `${whole.toString()}.${fractional}` : whole.toString();
   }
 
-  private normalizePumpFunAmount(amount: string, decimals: number): {
-    decimalAmount: string;
-    probablyRawAmount: boolean;
-  } {
-    const trimmed = amount.trim();
-
-    if (trimmed.length === 0) {
-      return { decimalAmount: trimmed, probablyRawAmount: false };
-    }
-
-    if (decimals <= 0 || !/^[0-9]+$/.test(trimmed)) {
-      return { decimalAmount: trimmed, probablyRawAmount: false };
-    }
-
-    try {
-      const rawAmount = BigInt(trimmed);
-      const divisor = BigInt(10) ** BigInt(decimals);
-      const remainder = rawAmount % divisor;
-      const whole = rawAmount / divisor;
-      const meetsMagnitudeThreshold =
-        rawAmount >= 1_000_000n || remainder === 0n;
-
-      if (!meetsMagnitudeThreshold) {
-        return { decimalAmount: trimmed, probablyRawAmount: false };
-      }
-
-      if (remainder === 0n) {
-        return {
-          decimalAmount: whole.toString(),
-          probablyRawAmount: true,
-        };
-      }
-
-      const fractionalRaw = remainder.toString().padStart(decimals, "0");
-      const fractionalPart = fractionalRaw.replace(/0+$/, "");
-      const leadingZeros = fractionalPart.match(/^0+/)?.[0].length ?? 0;
-
-      if (whole === 0n && leadingZeros >= 4) {
-        return { decimalAmount: trimmed, probablyRawAmount: false };
-      }
-
-      const decimalAmount =
-        fractionalPart.length > 0
-          ? `${whole.toString()}.${fractionalPart}`
-          : whole.toString();
-
-      return {
-        decimalAmount,
-        probablyRawAmount: true,
-      };
-    } catch {
-      return { decimalAmount: trimmed, probablyRawAmount: false };
-    }
-  }
-
-  private normalizePumpFunQuoteArgs(params: {
-    amount: string;
-    inputMint: string;
-    outputMint: string;
-    inputDecimals: number;
-    compositeFlow?: "pump-then-jupiter" | "jupiter-then-pump" | null;
-    log?: (message: string) => void;
-  }): {
-    decimalAmount: string;
-    trimmedAmount: string;
-    probablyRawAmount: boolean;
-    valid: boolean;
-    error?: string;
-    compositeDirective: "pump-then-jupiter" | "jupiter-then-pump" | null;
-  } {
-    const {
-      amount,
-      inputMint,
-      outputMint,
-      inputDecimals,
-      compositeFlow = null,
-      log,
-    } = params;
-
-    const trimmedAmount = amount.trim();
-    let validation = validatePumpFunSwap(inputMint, outputMint, trimmedAmount);
-    const { decimalAmount, probablyRawAmount } = this.normalizePumpFunAmount(
-      trimmedAmount,
-      inputDecimals
+  private getJupiterQuote(
+    params: JupiterQuoteRequest
+  ): Promise<JupiterQuoteResponse> {
+    return this.quoteCache.getJupiterQuote(params, () =>
+      this.jupiterClient.getQuote(params)
     );
-
-    if (decimalAmount !== trimmedAmount) {
-      const normalizedValidation = validatePumpFunSwap(
-        inputMint,
-        outputMint,
-        decimalAmount
-      );
-
-      if (!normalizedValidation.valid && validation.valid && log) {
-        log(
-          `   ❌ Pump.fun validation failed after normalization: ${normalizedValidation.error}`
-        );
-      }
-
-      validation = normalizedValidation;
-    }
-
-    const compositeDirective =
-      !validation.valid &&
-      validation.error?.includes("Pump.fun swaps must involve SOL") &&
-      compositeFlow
-        ? compositeFlow
-        : null;
-
-    return {
-      decimalAmount,
-      trimmedAmount,
-      probablyRawAmount,
-      valid: validation.valid,
-      error: validation.valid ? undefined : validation.error,
-      compositeDirective,
-    };
   }
 
-  private determineCompositeFlow(options: {
-    inputIsPump: boolean;
-    outputIsPump: boolean;
+  private getPumpFunQuote(options: {
     inputMint: string;
     outputMint: string;
-  }): "pump-then-jupiter" | "jupiter-then-pump" | null {
-    const { inputIsPump, outputIsPump, inputMint, outputMint } = options;
-
-    if (inputIsPump && !this.isSolMint(outputMint)) {
-      return "pump-then-jupiter";
-    }
-
-    if (outputIsPump && !this.isSolMint(inputMint)) {
-      return "jupiter-then-pump";
-    }
-
-    return null;
-  }
-
-  private async buildPumpFunCompositeQuote(params: {
-    flow: "pump-then-jupiter" | "jupiter-then-pump";
-    inputMint: string;
-    outputMint: string;
-    amountRaw: string;
-    amountDecimal: string;
+    amount: string;
     inputDecimals: number;
     outputDecimals: number;
     slippageBps: number;
-  }): Promise<SwapQuote> {
-    const {
-      flow,
-      inputMint,
-      outputMint,
-      amountRaw,
-      amountDecimal,
-      inputDecimals,
-      outputDecimals,
-      slippageBps,
-    } = params;
-
-    if (flow === "pump-then-jupiter") {
-      console.log("   🔁 Building composite pump.fun → SOL → Jupiter quote");
-
-      const pumpQuote = await this.pumpFunClient.getQuote(
+  }): Promise<PumpFunQuote> {
+    const { inputMint, outputMint, amount, inputDecimals, outputDecimals, slippageBps } =
+      options;
+    return this.quoteCache.getPumpFunQuote(options, () =>
+      this.pumpFunClient.getQuote(
         inputMint,
-        SOL_MINT,
-        amountDecimal,
+        outputMint,
+        amount,
         inputDecimals,
-        SOL_DECIMALS,
+        outputDecimals,
         slippageBps
-      );
-
-      const jupiterQuote = await this.jupiterClient.getQuote({
-        inputMint: SOL_MINT,
-        outputMint,
-        amount: pumpQuote.outputAmount,
-        slippageBps,
-      });
-
-      const estimatedRate = (() => {
-        const inputRaw = Number.parseFloat(amountDecimal);
-        const outputRaw =
-          Number.parseFloat(jupiterQuote.outAmount) /
-          Math.pow(10, outputDecimals);
-        if (!Number.isFinite(inputRaw) || inputRaw === 0) {
-          return 0;
-        }
-        return outputRaw / inputRaw;
-      })();
-
-      return {
-        inputMint,
-        outputMint,
-        inputAmount: pumpQuote.inputAmount,
-        outputAmount: jupiterQuote.outAmount,
-        estimatedRate,
-        slippage: slippageBps / 100,
-        provider: "pump-fun+jupiter",
-        priceImpact: jupiterQuote.priceImpactPct,
-        platformFee: jupiterQuote.platformFee ?? undefined,
-        composite: {
-          flow,
-          intermediateMint: SOL_MINT,
-          intermediateAmount: pumpQuote.outputAmount,
-          pumpQuote,
-          jupiterQuote,
-        },
-      };
-    }
-
-    console.log("   🔁 Building composite Jupiter → SOL → pump.fun quote");
-
-    const jupiterQuote = await this.jupiterClient.getQuote({
-      inputMint,
-      outputMint: SOL_MINT,
-      amount: amountRaw,
-      slippageBps,
-    });
-
-    const solDecimalAmount = this.convertRawAmountToDecimal(
-      jupiterQuote.outAmount,
-      SOL_DECIMALS
+      )
     );
-
-    const pumpQuote = await this.pumpFunClient.getQuote(
-      SOL_MINT,
-      outputMint,
-      solDecimalAmount,
-      SOL_DECIMALS,
-      outputDecimals,
-      slippageBps
-    );
-
-    const estimatedRate = (() => {
-      const inputRaw = Number.parseFloat(amountDecimal);
-      const outputRaw =
-        Number.parseFloat(pumpQuote.outputAmount) /
-        Math.pow(10, outputDecimals);
-      if (!Number.isFinite(inputRaw) || inputRaw === 0) {
-        return 0;
-      }
-      return outputRaw / inputRaw;
-    })();
-
-    return {
-      inputMint,
-      outputMint,
-      inputAmount: jupiterQuote.inAmount,
-      outputAmount: pumpQuote.outputAmount,
-      estimatedRate,
-      slippage: slippageBps / 100,
-      provider: "pump-fun+jupiter",
-      priceImpact: jupiterQuote.priceImpactPct,
-      platformFee: jupiterQuote.platformFee ?? undefined,
-      composite: {
-        flow,
-        intermediateMint: SOL_MINT,
-        intermediateAmount: jupiterQuote.outAmount,
-        pumpQuote,
-        jupiterQuote,
-      },
-    };
   }
 
   /**
@@ -495,19 +150,28 @@ export class SwapManager {
       outputPumpInfo,
       hasPumpFunToken,
       hasNonGraduatedPumpFun,
-    } = await this.detectPumpFunContext(inputMint, outputMint, { log: true });
+    } = await detectPumpFunContext({
+      pumpFunClient: this.pumpFunClient,
+      inputMint,
+      outputMint,
+      network: this.network,
+      isSolMint: (mint) => this.isSolMint(mint),
+      isKnownMajorToken: (mint) => this.isKnownMajorToken(mint),
+      log: true,
+    });
 
-    const compositeFlow = this.determineCompositeFlow({
+    const compositeFlow = determineCompositeFlow({
       inputIsPump: inputPumpInfo.isPumpFun && !inputPumpInfo.isGraduated,
       outputIsPump: outputPumpInfo.isPumpFun && !outputPumpInfo.isGraduated,
       inputMint,
       outputMint,
+      isSolMint: (mint) => this.isSolMint(mint),
     });
 
     // If we have a non-graduated pump.fun token, use pump.fun
     if (hasNonGraduatedPumpFun && this.network === "mainnet") {
       console.log(`   🎯 Using pump.fun for quote`);
-      const normalized = this.normalizePumpFunQuoteArgs({
+      const normalized = normalizePumpFunQuoteArgs({
         amount,
         inputMint,
         outputMint,
@@ -518,7 +182,7 @@ export class SwapManager {
 
       if (!normalized.valid) {
         if (normalized.compositeDirective) {
-          return await this.buildPumpFunCompositeQuote({
+          return await buildPumpFunCompositeQuote({
             flow: normalized.compositeDirective,
             inputMint,
             outputMint,
@@ -527,6 +191,11 @@ export class SwapManager {
             inputDecimals,
             outputDecimals,
             slippageBps,
+            pumpFunClient: this.pumpFunClient,
+            jupiterClient: this.jupiterClient,
+            quoteCache: this.quoteCache,
+            convertRawAmountToDecimal: (raw, dec) =>
+              this.convertRawAmountToDecimal(raw, dec),
           });
         }
 
@@ -537,14 +206,14 @@ export class SwapManager {
         `   🔄 Amount conversion for pump.fun: ${normalized.trimmedAmount} → ${normalized.decimalAmount} (probablyRaw: ${normalized.probablyRawAmount})`
       );
 
-      const pumpQuote = await this.pumpFunClient.getQuote(
+      const pumpQuote = await this.getPumpFunQuote({
         inputMint,
         outputMint,
-        normalized.decimalAmount,
+        amount: normalized.decimalAmount,
         inputDecimals,
         outputDecimals,
-        slippageBps
-      );
+        slippageBps,
+      });
 
       return {
         inputMint: pumpQuote.inputMint,
@@ -561,7 +230,7 @@ export class SwapManager {
     if (this.network === "mainnet") {
       console.log(`   🚀 Using Jupiter for quote`);
       try {
-        const jupiterQuote = await this.jupiterClient.getQuote({
+        const jupiterQuote = await this.getJupiterQuote({
           inputMint,
           outputMint,
           amount,
@@ -590,7 +259,7 @@ export class SwapManager {
             `   🔄 Trying pump.fun fallback for confirmed pump.fun token`
           );
 
-          const normalized = this.normalizePumpFunQuoteArgs({
+          const normalized = normalizePumpFunQuoteArgs({
             amount,
             inputMint,
             outputMint,
@@ -606,14 +275,14 @@ export class SwapManager {
               `   🔄 Amount conversion for pump.fun fallback: ${normalized.trimmedAmount} → ${normalized.decimalAmount} (probablyRaw: ${normalized.probablyRawAmount})`
             );
 
-            const pumpQuote = await this.pumpFunClient.getQuote(
+            const pumpQuote = await this.getPumpFunQuote({
               inputMint,
               outputMint,
-              normalized.decimalAmount,
+              amount: normalized.decimalAmount,
               inputDecimals,
               outputDecimals,
-              slippageBps
-            );
+              slippageBps,
+            });
 
             return {
               inputMint: pumpQuote.inputMint,
@@ -626,7 +295,7 @@ export class SwapManager {
             };
           } else {
             if (normalized.compositeDirective) {
-              return await this.buildPumpFunCompositeQuote({
+              return await buildPumpFunCompositeQuote({
                 flow: normalized.compositeDirective,
                 inputMint,
                 outputMint,
@@ -635,6 +304,11 @@ export class SwapManager {
                 inputDecimals,
                 outputDecimals,
                 slippageBps,
+                pumpFunClient: this.pumpFunClient,
+                jupiterClient: this.jupiterClient,
+                quoteCache: this.quoteCache,
+                convertRawAmountToDecimal: (raw, dec) =>
+                  this.convertRawAmountToDecimal(raw, dec),
               });
             }
 
@@ -660,7 +334,7 @@ export class SwapManager {
     }
 
     // Fallback to Jupiter for all other cases
-    const jupiterQuote = await this.jupiterClient.getQuote({
+    const jupiterQuote = await this.getJupiterQuote({
       inputMint,
       outputMint,
       amount,
@@ -744,7 +418,7 @@ export class SwapManager {
         target: number
       ): Promise<JustInTimeSwapResult | null> => {
         try {
-          const quote = await this.jupiterClient.getQuote({
+          const quote = await this.getJupiterQuote({
             inputMint: tokenMint,
             outputMint: SOL_MINT,
             amount: target.toString(),
@@ -985,14 +659,14 @@ export class SwapManager {
             maxFractionDigits: Math.min(decimalsForAmount, 9),
             trim: true,
           });
-          const quote = await this.pumpFunClient.getQuote(
-            tokenMint,
-            SOL_MINT,
-            amountStr,
-            tokenDecimals,
-            SOL_DECIMALS,
-            slippageBps
-          );
+          const quote = await this.getPumpFunQuote({
+            inputMint: tokenMint,
+            outputMint: SOL_MINT,
+            amount: amountStr,
+            inputDecimals: tokenDecimals,
+            outputDecimals: SOL_DECIMALS,
+            slippageBps,
+          });
           const lamportsOut = Number(quote.outputAmount);
           lastLamportsOut = lamportsOut;
 
@@ -1268,7 +942,7 @@ export class SwapManager {
     }
 
     // Get Jupiter quote and transaction
-    const jupiterQuote = await this.jupiterClient.getQuote({
+    const jupiterQuote = await this.getJupiterQuote({
       inputMint: quote.inputMint,
       outputMint: quote.outputMint,
       amount: quote.inputAmount,
@@ -1370,7 +1044,7 @@ export class SwapManager {
         `Jupiter leg will use ${jupiterInputLamports.toString()} lamports (keeping ${feeBuffer.toString()} for fees)`
       );
 
-      const jupiterQuote = await this.jupiterClient.getQuote({
+      const jupiterQuote = await this.getJupiterQuote({
         inputMint: SOL_MINT,
         outputMint: quote.outputMint,
         amount: jupiterInputLamports.toString(),
@@ -1399,7 +1073,7 @@ export class SwapManager {
         userKeypair.publicKey
       );
 
-      const jupiterQuote = await this.jupiterClient.getQuote({
+      const jupiterQuote = await this.getJupiterQuote({
         inputMint: quote.inputMint,
         outputMint: SOL_MINT,
         amount: quote.inputAmount,
@@ -1444,14 +1118,14 @@ export class SwapManager {
         SOL_DECIMALS
       );
 
-      const pumpQuote = await this.pumpFunClient.getQuote(
-        SOL_MINT,
-        quote.outputMint,
-        pumpInputDecimal,
-        SOL_DECIMALS,
+      const pumpQuote = await this.getPumpFunQuote({
+        inputMint: SOL_MINT,
+        outputMint: quote.outputMint,
+        amount: pumpInputDecimal,
+        inputDecimals: SOL_DECIMALS,
         outputDecimals,
-        slippageBps
-      );
+        slippageBps,
+      });
 
       const pumpInstructions = await this.pumpFunClient.createSwapTransaction({
         inputMint: pumpQuote.inputMint,
@@ -1603,10 +1277,14 @@ export class SwapManager {
     inputMint: string,
     outputMint: string
   ): Promise<"jupiter" | "pump-fun"> {
-    const { hasNonGraduatedPumpFun } = await this.detectPumpFunContext(
+    const { hasNonGraduatedPumpFun } = await detectPumpFunContext({
+      pumpFunClient: this.pumpFunClient,
       inputMint,
-      outputMint
-    );
+      outputMint,
+      network: this.network,
+      isSolMint: (mint) => this.isSolMint(mint),
+      isKnownMajorToken: (mint) => this.isKnownMajorToken(mint),
+    });
 
     if (this.network === "mainnet" && hasNonGraduatedPumpFun) {
       return "pump-fun";
@@ -1626,10 +1304,7 @@ export class SwapManager {
     const instructions: TransactionInstruction[] = [];
 
     // Check input token account (skip for SOL/WSOL)
-    if (
-      inputMint !== "So11111111111111111111111111111111111111112" &&
-      inputMint !== "SOL"
-    ) {
+    if (inputMint !== WSOL_MINT && inputMint !== "SOL") {
       const mintPubkey = new PublicKey(inputMint);
       const inputSetup = await this.wallet.ensureAssociatedTokenAccount(
         userKeypair.publicKey,
@@ -1648,10 +1323,7 @@ export class SwapManager {
     }
 
     // Check output token account (skip for SOL/WSOL)
-    if (
-      outputMint !== "So11111111111111111111111111111111111111112" &&
-      outputMint !== "SOL"
-    ) {
+    if (outputMint !== WSOL_MINT && outputMint !== "SOL") {
       const mintPubkey = new PublicKey(outputMint);
       const outputSetup = await this.wallet.ensureAssociatedTokenAccount(
         userKeypair.publicKey,
@@ -1736,15 +1408,18 @@ export class SwapManager {
 
       switch (provider) {
         case "pump-fun":
-          const validation = validatePumpFunSwap(
-            inputMint,
-            outputMint,
-            "1000000"
-          );
-          if (!validation.valid) {
-            return { canSwap: false, reason: validation.error };
+          {
+            const normalized = normalizePumpFunQuoteArgs({
+              amount: "1000000",
+              inputMint,
+              outputMint,
+              inputDecimals: 9,
+            });
+            if (!normalized.valid) {
+              return { canSwap: false, reason: normalized.error };
+            }
+            return { canSwap: true, provider };
           }
-          return { canSwap: true, provider };
 
         case "jupiter":
           // Jupiter can handle most token pairs on mainnet

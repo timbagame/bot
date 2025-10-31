@@ -116,7 +116,10 @@ import {
 import { recentUpdateGuard } from "./utils/recent-update";
 import { getPriceUSD, resolveTokenPriceUSD } from "./utils/prices";
 import { patchReplyBehavior } from "./utils/reply-patch";
-import { buildTransactionLinkMessage } from "./utils/network-detector";
+import {
+  NetworkDetector,
+  buildTransactionLinkMessage,
+} from "./utils/network-detector";
 import { buildProcessingStatus } from "./utils/trade-ui";
 import { respondWithMenu } from "./utils/menu-response";
 import { parseDecimalAmount, presentTradeAmount } from "./utils/amount";
@@ -788,19 +791,38 @@ const buildSolscanSuccessMessage = ({
     lines.push("", ...normalizedBody);
   }
 
-  const { message, previewDisabled } = buildTransactionLinkMessage({
+  const {
+    message,
+    previewDisabled,
+    solscanUrl,
+    displaySignature,
+  } = buildTransactionLinkMessage({
     signature,
-    networkOverride: process.env["RPC_URL"],
+    networkOverride: process.env["SOLANA_NETWORK"],
     label: "🔗 ",
     linkText,
     format: "html",
+    fallbackToSignature: true,
   });
 
-  if (message) {
-    lines.push("", message);
+  let finalMessage = message;
+  let disablePreview = previewDisabled;
+
+  if (!solscanUrl && signature) {
+    const fallbackUrl = NetworkDetector.buildSolscanTxUrl(signature, "mainnet");
+    if (fallbackUrl) {
+      finalMessage = `🔗 <a href="${fallbackUrl}">${linkText}</a>`;
+      disablePreview = true;
+    } else if (!finalMessage && displaySignature) {
+      finalMessage = `🔗 ${escapeHtml(displaySignature)}`;
+    }
   }
 
-  return { text: lines.join("\n"), disablePreview: previewDisabled };
+  if (finalMessage) {
+    lines.push("", finalMessage);
+  }
+
+  return { text: lines.join("\n"), disablePreview };
 };
 
 type SolConversionSuccessKind = "wrap" | "unwrap";

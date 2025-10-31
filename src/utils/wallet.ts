@@ -35,9 +35,9 @@ import {
   BLOCK_HEIGHT_CHECK_INTERVAL_MS,
   BLOCK_HEIGHT_EXPIRATION_GRACE,
   TRANSACTION_RESUBMIT_ATTEMPTS,
-  WSOL_MINT,
 } from "./constants";
 import { formatAmount } from "./format-amount";
+import { WSOL_MINT } from "./token-registry";
 import { resolveTokenMetadata } from "./token-metadata";
 import { detectTokenProgram } from "./token-programs";
 import { FeeBudgetManager } from "./fee-budget";
@@ -428,13 +428,75 @@ export class WalletManager {
         approvedTokens.map((token) => [token.token_mint, token])
       );
 
-      // Process each token account
+      const parsedAccounts: Array<{
+        mint: string;
+        tokenAmount: { amount: string; decimals: number };
+      }> = [];
+      const metadataPrefetchMints = new Set<string>();
+
       for (const accountInfo of allTokenAccounts) {
         try {
           const parsedData = accountInfo.account.data.parsed;
           const tokenAmount = parsedData.info.tokenAmount;
           const mint = parsedData.info.mint;
 
+          parsedAccounts.push({ mint, tokenAmount });
+
+          if (parseFloat(tokenAmount.amount) > 0) {
+            metadataPrefetchMints.add(mint);
+          }
+        } catch (error) {
+          console.error(
+            `❌ Error parsing token account for user ${telegramId}:`,
+            error
+          );
+        }
+      }
+
+      const metadataCache = new Map<
+        string,
+        { decimals: number; symbol?: string; name?: string } | null
+      >();
+      const metadataPromises = new Map<
+        string,
+        Promise<{ decimals: number; symbol?: string; name?: string } | null>
+      >();
+
+      const loadMetadataForMint = async (
+        mint: string
+      ): Promise<{ decimals: number; symbol?: string; name?: string } | null> => {
+        if (metadataCache.has(mint)) {
+          return metadataCache.get(mint) ?? null;
+        }
+
+        if (!metadataPromises.has(mint)) {
+          const promise = this.getFullTokenMetadata(mint)
+            .then((metadata) => {
+              console.log(`📋 Full metadata result for ${mint}:`, metadata);
+              metadataCache.set(mint, metadata);
+              return metadata;
+            })
+            .catch((metadataError) => {
+              console.error(
+                `❌ Error fetching metadata for ${mint}:`,
+                metadataError
+              );
+              metadataCache.set(mint, null);
+              return null;
+            });
+          metadataPromises.set(mint, promise);
+        }
+
+        const metadata = await metadataPromises.get(mint)!;
+        return metadata ?? null;
+      };
+
+      await Promise.all(
+        [...metadataPrefetchMints].map((mint) => loadMetadataForMint(mint))
+      );
+
+      for (const { mint, tokenAmount } of parsedAccounts) {
+        try {
           const approvedToken = approvedTokensMap.get(mint);
           console.log(
             `🔍 Token found: ${mint}, approved: ${!!approvedToken}, ticker: ${
@@ -444,18 +506,7 @@ export class WalletManager {
             }`
           );
 
-          let cachedMetadata:
-            | { decimals: number; symbol?: string; name?: string }
-            | null = null;
-          const loadFullMetadata = async () => {
-            if (cachedMetadata) {
-              return cachedMetadata;
-            }
-            const metadata = await this.getFullTokenMetadata(mint);
-            console.log(`📋 Full metadata result for ${mint}:`, metadata);
-            cachedMetadata = metadata;
-            return cachedMetadata;
-          };
+          const loadFullMetadata = async () => loadMetadataForMint(mint);
 
           // Auto-register tokens with non-zero balance that aren't approved
           if (!approvedToken && parseFloat(tokenAmount.amount) > 0) {
@@ -523,11 +574,10 @@ export class WalletManager {
 
               // Preserve WSOL ticker for the wrapped SOL mint to avoid
               // confusing duplication with native SOL balances
-              const WSOL_MINT = "So11111111111111111111111111111111111111112";
               if (mint === WSOL_MINT) {
                 // Always show WSOL for the wrapped SOL mint
                 finalTicker = "WSOL";
-              } else if (fullMetadata.symbol && fullMetadata.symbol !== "UNKNOWN") {
+              } else if (fullMetadata?.symbol && fullMetadata.symbol !== "UNKNOWN") {
                 finalTicker = fullMetadata.symbol;
                 console.log(
                   `✅ Updated ticker for ${mint}: ${finalApprovedToken.token_ticker} → ${finalTicker}`
@@ -559,8 +609,10 @@ export class WalletManager {
           }
         } catch (error) {
           // Skip malformed token accounts
-          console.warn(`Skipping malformed token account: ${error}`);
-          continue;
+          console.error(
+            `❌ Error processing token account for user ${telegramId}:`,
+            error
+          );
         }
       }
 

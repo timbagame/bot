@@ -11,11 +11,10 @@ import BN from "bn.js";
 import { resolveTokenMetadata } from "./token-metadata";
 import { parseDecimalAmount } from "./amount";
 import { buildPumpFunCoinUrl } from "./constants";
+import { WSOL_MINT } from "./token-registry";
+import { normalizePumpFunAmount } from "./swap/pump-fun-amount";
 
-const SOL_MINTS = new Set<string>([
-  "So11111111111111111111111111111111111111112",
-  "SOL",
-]);
+const SOL_MINTS = new Set<string>([WSOL_MINT, "SOL"]);
 
 // ================================
 // PUMP.FUN TYPES
@@ -295,10 +294,10 @@ export class PumpFunClient {
 
       // Check if one of the tokens is SOL/WSOL
       const isSolInput =
-        inputMint === "So11111111111111111111111111111111111111112" ||
+        inputMint === WSOL_MINT ||
         inputMint === "SOL";
       const isSolOutput =
-        outputMint === "So11111111111111111111111111111111111111112" ||
+        outputMint === WSOL_MINT ||
         outputMint === "SOL";
 
       let pumpMint: PublicKey;
@@ -339,7 +338,14 @@ export class PumpFunClient {
         ? 9
         : Math.max(_inputDecimals ?? 6, 0);
 
-      const amountRaw = this.parseAmountLamports(amount, inputDecimalsSafe);
+      const normalizedAmount = normalizePumpFunAmount(
+        amount,
+        inputDecimalsSafe
+      ).decimalAmount;
+      const amountRaw = this.parseAmountLamports(
+        normalizedAmount,
+        inputDecimalsSafe
+      );
 
       if (isBuy) {
         // Calculate how many tokens we get for the SOL amount
@@ -357,7 +363,7 @@ export class PumpFunClient {
         return {
           inputMint,
           outputMint,
-          inputAmount: amount, // Use original amount, not calculated
+          inputAmount: normalizedAmount,
           outputAmount,
           estimatedRate,
           slippage: slippageBps / 100,
@@ -391,7 +397,7 @@ export class PumpFunClient {
       return {
         inputMint,
         outputMint,
-        inputAmount: amount,
+        inputAmount: normalizedAmount,
         outputAmount,
         estimatedRate,
         slippage: slippageBps / 100,
@@ -420,10 +426,10 @@ export class PumpFunClient {
     try {
       // Check if one of the tokens is SOL/WSOL
       const isSolInput =
-        inputMint === "So11111111111111111111111111111111111111112" ||
+        inputMint === WSOL_MINT ||
         inputMint === "SOL";
       const isSolOutput =
-        outputMint === "So11111111111111111111111111111111111111112" ||
+        outputMint === WSOL_MINT ||
         outputMint === "SOL";
 
       let pumpMint: PublicKey;
@@ -434,15 +440,23 @@ export class PumpFunClient {
         // Buying pump.fun token with SOL
         pumpMint = new PublicKey(outputMint);
         isBuy = true;
-        amountLamports = this.parseAmountLamports(amount, 9);
+        const normalizedAmount = normalizePumpFunAmount(amount, 9).decimalAmount;
+        amountLamports = this.parseAmountLamports(normalizedAmount, 9);
       } else if (!isSolInput && isSolOutput) {
         // Selling pump.fun token for SOL
         pumpMint = new PublicKey(inputMint);
         isBuy = false;
         const tokenDecimals = await this.getMintDecimals(pumpMint);
-        amountLamports = this.parseAmountLamports(amount, tokenDecimals);
+        const normalizedSellAmount = normalizePumpFunAmount(
+          amount,
+          tokenDecimals
+        ).decimalAmount;
+        amountLamports = this.parseAmountLamports(
+          normalizedSellAmount,
+          tokenDecimals
+        );
         console.log(
-          `🔢 SELL conversion: ${amount} → raw=${amountLamports.toString()} (decimals=${tokenDecimals})`
+          `🔢 SELL conversion: ${amount} → normalized=${normalizedSellAmount} → raw=${amountLamports.toString()} (decimals=${tokenDecimals})`
         );
       } else {
         throw new Error("Pump.fun swaps must involve SOL and a pump.fun token");

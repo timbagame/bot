@@ -36,6 +36,9 @@ class ExpiringCacheImpl<TValue> implements ExpiringCache<TValue> {
         }
         this.timers.delete(key);
       }, ttl);
+      if (typeof (timer as NodeJS.Timeout).unref === "function") {
+        (timer as NodeJS.Timeout).unref();
+      }
       this.timers.set(key, timer);
     }
 
