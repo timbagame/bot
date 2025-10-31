@@ -180,6 +180,10 @@ export class SwapManager {
         log: (message) => console.log(message),
       });
 
+      const amountForPumpQuote = normalized.probablyRawAmount
+        ? normalized.trimmedAmount
+        : normalized.decimalAmount;
+
       if (!normalized.valid) {
         if (normalized.compositeDirective) {
           return await buildPumpFunCompositeQuote({
@@ -188,6 +192,7 @@ export class SwapManager {
             outputMint,
             amountRaw: normalized.trimmedAmount,
             amountDecimal: normalized.decimalAmount,
+            amountForPumpQuote,
             inputDecimals,
             outputDecimals,
             slippageBps,
@@ -209,7 +214,7 @@ export class SwapManager {
       const pumpQuote = await this.getPumpFunQuote({
         inputMint,
         outputMint,
-        amount: normalized.decimalAmount,
+        amount: amountForPumpQuote,
         inputDecimals,
         outputDecimals,
         slippageBps,
@@ -269,6 +274,9 @@ export class SwapManager {
           });
 
           if (normalized.valid) {
+            const amountForPumpQuote = normalized.probablyRawAmount
+              ? normalized.trimmedAmount
+              : normalized.decimalAmount;
             console.log(`   ✅ Pump.fun validation passed, getting quote...`);
 
             console.log(
@@ -278,7 +286,7 @@ export class SwapManager {
             const pumpQuote = await this.getPumpFunQuote({
               inputMint,
               outputMint,
-              amount: normalized.decimalAmount,
+              amount: amountForPumpQuote,
               inputDecimals,
               outputDecimals,
               slippageBps,
@@ -295,12 +303,16 @@ export class SwapManager {
             };
           } else {
             if (normalized.compositeDirective) {
+              const amountForPumpQuote = normalized.probablyRawAmount
+                ? normalized.trimmedAmount
+                : normalized.decimalAmount;
               return await buildPumpFunCompositeQuote({
                 flow: normalized.compositeDirective,
                 inputMint,
                 outputMint,
                 amountRaw: normalized.trimmedAmount,
                 amountDecimal: normalized.decimalAmount,
+                amountForPumpQuote,
                 inputDecimals,
                 outputDecimals,
                 slippageBps,

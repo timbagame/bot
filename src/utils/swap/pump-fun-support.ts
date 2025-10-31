@@ -244,6 +244,7 @@ export async function buildPumpFunCompositeQuote(options: {
   outputMint: string;
   amountRaw: string;
   amountDecimal: string;
+  amountForPumpQuote: string;
   inputDecimals: number;
   outputDecimals: number;
   slippageBps: number;
@@ -258,6 +259,7 @@ export async function buildPumpFunCompositeQuote(options: {
     outputMint,
     amountRaw,
     amountDecimal,
+    amountForPumpQuote,
     inputDecimals,
     outputDecimals,
     slippageBps,
@@ -273,7 +275,7 @@ export async function buildPumpFunCompositeQuote(options: {
     const pumpQuote = await getPumpFunQuoteCached(quoteCache, pumpFunClient, {
       inputMint,
       outputMint: WSOL_MINT,
-      amount: amountDecimal,
+      amount: amountForPumpQuote,
       inputDecimals,
       outputDecimals: SOL_DECIMALS,
       slippageBps,

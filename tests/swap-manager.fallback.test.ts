@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { Connection, Keypair } from "@solana/web3.js";
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
+import { normalizePumpFunAmount } from "../src/utils/swap/pump-fun-amount";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 
@@ -45,15 +46,25 @@ describe("SwapManager Jupiter fallback", () => {
     // Force pump.fun detection positive (non-graduated)
     (sm.pumpFunClient as any).isPumpFunToken = async () => ({ isPumpFun: true, isGraduated: false });
     // Provide a fake pump.fun quote
-    (sm.pumpFunClient as any).getQuote = async () => ({
-      inputMint: "So11111111111111111111111111111111111111112",
-      outputMint: "PumpMint111111111111111111111111111111111111",
-      inputAmount: "1000000",
-      outputAmount: "2000000",
-      estimatedRate: 2,
-      slippage: 5,
-      isGraduated: false,
-    });
+    (sm.pumpFunClient as any).getQuote = async (
+      inputMint: string,
+      outputMint: string,
+      amountStr: string,
+      inputDecimals: number,
+      _outputDecimals: number,
+      _slippageBps: number
+    ) => {
+      const decimalAmount = normalizePumpFunAmount(amountStr, inputDecimals).decimalAmount;
+      return {
+        inputMint,
+        outputMint,
+        inputAmount: decimalAmount,
+        outputAmount: "2000000",
+        estimatedRate: 2,
+        slippage: 5,
+        isGraduated: false,
+      };
+    };
 
     const quote = await sm.getQuote({
       inputMint: "So11111111111111111111111111111111111111112",
@@ -82,13 +93,17 @@ describe("SwapManager Jupiter fallback", () => {
     (sm.pumpFunClient as any).getQuote = async (
       _inputMint: string,
       _outputMint: string,
-      amountStr: string
+      amountStr: string,
+      inputDecimals: number,
+      _outputDecimals: number,
+      _slippageBps: number
     ) => {
       receivedAmount = amountStr;
+      const decimalAmount = normalizePumpFunAmount(amountStr, inputDecimals).decimalAmount;
       return {
         inputMint: SOL_MINT,
         outputMint: "PumpMint111111111111111111111111111111111111",
-        inputAmount: amountStr,
+        inputAmount: decimalAmount,
         outputAmount: "2000000",
         estimatedRate: 2,
         slippage: 5,
@@ -112,7 +127,8 @@ describe("SwapManager Jupiter fallback", () => {
     });
 
     expect(quote.provider).toBe("pump-fun");
-    expect(receivedAmount).toBe("1");
+    expect(receivedAmount).toBe("1000000000");
+    expect(quote.inputAmount).toBe("1");
   });
 
   test("uses Jupiter when no pump.fun tokens detected", async () => {
@@ -156,4 +172,3 @@ describe("SwapManager Jupiter fallback", () => {
     expect(quote.outputAmount).toBe("2000000");
   });
 });
-

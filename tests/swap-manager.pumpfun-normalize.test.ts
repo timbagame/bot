@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { Connection, Keypair } from "@solana/web3.js";
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
+import { normalizePumpFunAmount } from "../src/utils/swap/pump-fun-amount";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const PUMP_MINT = "pumpMint123456789012345678901234567890123456";
@@ -30,22 +31,26 @@ describe("SwapManager pump.fun amount normalization", () => {
       "test walk nut penalty hip pave soap entry language right filter choice";
   });
 
-  test("sell flow normalizes raw 6-dec token amount to whole token", async () => {
+  test("sell flow forwards raw lamports for 6-dec token amounts", async () => {
     const sm = createSwapManager();
     let capturedAmount = "";
     (sm.pumpFunClient as any).getQuote = async (
       inputMint: string,
       outputMint: string,
       normalizedAmount: string,
-      _inputDecimals: number,
+      inputDecimals: number,
       _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
+      const decimalAmount = normalizePumpFunAmount(
+        normalizedAmount,
+        inputDecimals
+      ).decimalAmount;
       return {
         inputMint,
         outputMint,
-        inputAmount: normalizedAmount,
+        inputAmount: decimalAmount,
         outputAmount: "100000000", // dummy lamports
         estimatedRate: 1,
         slippage: slippageBps / 100,
@@ -65,27 +70,31 @@ describe("SwapManager pump.fun amount normalization", () => {
       slippageBps: 100,
     });
 
-    expect(capturedAmount).toBe("1");
+    expect(capturedAmount).toBe("1000000");
     expect(quote.inputAmount).toBe("1");
     expect(quote.provider).toBe("pump-fun");
   });
 
-  test("sell flow normalizes raw fractional pump token amounts when magnitude exceeds decimals", async () => {
+  test("sell flow keeps fractional raw pump token lamports for pump.fun normalization", async () => {
     const sm = createSwapManager();
     let capturedAmount = "";
     (sm.pumpFunClient as any).getQuote = async (
       inputMint: string,
       outputMint: string,
       normalizedAmount: string,
-      _inputDecimals: number,
+      inputDecimals: number,
       _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
+      const decimalAmount = normalizePumpFunAmount(
+        normalizedAmount,
+        inputDecimals
+      ).decimalAmount;
       return {
         inputMint,
         outputMint,
-        inputAmount: normalizedAmount,
+        inputAmount: decimalAmount,
         outputAmount: "50000000",
         estimatedRate: 1,
         slippage: slippageBps / 100,
@@ -105,25 +114,29 @@ describe("SwapManager pump.fun amount normalization", () => {
       slippageBps: 100,
     });
 
-    expect(capturedAmount).toBe("1.5");
+    expect(capturedAmount).toBe("1500000");
   });
 
-  test("sell flow normalizes raw pump token lamports without trailing zeros when magnitude exceeds decimals", async () => {
+  test("sell flow keeps raw lamports with trailing digits for pump.fun normalization", async () => {
     const sm = createSwapManager();
     let capturedAmount = "";
     (sm.pumpFunClient as any).getQuote = async (
       inputMint: string,
       outputMint: string,
       normalizedAmount: string,
-      _inputDecimals: number,
+      inputDecimals: number,
       _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
+      const decimalAmount = normalizePumpFunAmount(
+        normalizedAmount,
+        inputDecimals
+      ).decimalAmount;
       return {
         inputMint,
         outputMint,
-        inputAmount: normalizedAmount,
+        inputAmount: decimalAmount,
         outputAmount: "50000000",
         estimatedRate: 1,
         slippage: slippageBps / 100,
@@ -143,7 +156,7 @@ describe("SwapManager pump.fun amount normalization", () => {
       slippageBps: 100,
     });
 
-    expect(capturedAmount).toBe("1.234567");
+    expect(capturedAmount).toBe("1234567");
   });
 
   test("sell flow keeps 6-digit pump token integer input intact", async () => {
@@ -153,15 +166,19 @@ describe("SwapManager pump.fun amount normalization", () => {
       inputMint: string,
       outputMint: string,
       normalizedAmount: string,
-      _inputDecimals: number,
+      inputDecimals: number,
       _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
+      const decimalAmount = normalizePumpFunAmount(
+        normalizedAmount,
+        inputDecimals
+      ).decimalAmount;
       return {
         inputMint,
         outputMint,
-        inputAmount: normalizedAmount,
+        inputAmount: decimalAmount,
         outputAmount: "50000000",
         estimatedRate: 1,
         slippage: slippageBps / 100,
@@ -191,15 +208,19 @@ describe("SwapManager pump.fun amount normalization", () => {
       inputMint: string,
       outputMint: string,
       normalizedAmount: string,
-      _inputDecimals: number,
+      inputDecimals: number,
       _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
+      const decimalAmount = normalizePumpFunAmount(
+        normalizedAmount,
+        inputDecimals
+      ).decimalAmount;
       return {
         inputMint,
         outputMint,
-        inputAmount: normalizedAmount,
+        inputAmount: decimalAmount,
         outputAmount: "50000000",
         estimatedRate: 1,
         slippage: slippageBps / 100,
@@ -229,15 +250,19 @@ describe("SwapManager pump.fun amount normalization", () => {
       inputMint: string,
       outputMint: string,
       normalizedAmount: string,
-      _inputDecimals: number,
+      inputDecimals: number,
       _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
+      const decimalAmount = normalizePumpFunAmount(
+        normalizedAmount,
+        inputDecimals
+      ).decimalAmount;
       return {
         inputMint,
         outputMint,
-        inputAmount: normalizedAmount,
+        inputAmount: decimalAmount,
         outputAmount: "50000000",
         estimatedRate: 1,
         slippage: slippageBps / 100,
@@ -260,22 +285,26 @@ describe("SwapManager pump.fun amount normalization", () => {
     expect(capturedAmount).toBe("1");
   });
 
-  test("buy flow normalizes raw SOL lamports", async () => {
+  test("buy flow forwards probable raw SOL lamports", async () => {
     const sm = createSwapManager();
     let capturedAmount = "";
     (sm.pumpFunClient as any).getQuote = async (
       inputMint: string,
       outputMint: string,
       normalizedAmount: string,
-      _inputDecimals: number,
+      inputDecimals: number,
       _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
+      const decimalAmount = normalizePumpFunAmount(
+        normalizedAmount,
+        inputDecimals
+      ).decimalAmount;
       return {
         inputMint,
         outputMint,
-        inputAmount: normalizedAmount,
+        inputAmount: decimalAmount,
         outputAmount: "1000000",
         estimatedRate: 1,
         slippage: slippageBps / 100,
@@ -295,10 +324,10 @@ describe("SwapManager pump.fun amount normalization", () => {
       slippageBps: 100,
     });
 
-    expect(capturedAmount).toBe("1");
+    expect(capturedAmount).toBe("1000000000");
   });
 
-  test("buy flow normalizes sub-one SOL raw lamports", async () => {
+  test("buy flow keeps sub-one SOL lamports intact for pump.fun parsing", async () => {
     const sm = createSwapManager();
     let capturedAmount = "";
     (sm.pumpFunClient as any).getQuote = async (
@@ -333,7 +362,7 @@ describe("SwapManager pump.fun amount normalization", () => {
       slippageBps: 100,
     });
 
-    expect(capturedAmount).toBe("0.5");
+    expect(capturedAmount).toBe("500000000");
   });
 
   test("buy flow keeps small integer SOL input intact", async () => {
