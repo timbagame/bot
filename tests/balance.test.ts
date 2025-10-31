@@ -12,6 +12,7 @@ test("mergeWsolIntoSol merges WSOL into SOL and removes WSOL token", () => {
       balance: 100,
       decimals: 9,
       rawBalance: "100",
+      lamports: BigInt(100),
     },
     {
       mint: "USDC_MINT",
@@ -19,6 +20,7 @@ test("mergeWsolIntoSol merges WSOL into SOL and removes WSOL token", () => {
       balance: 1_000_000, // 1 USDC with 6 decimals
       decimals: 6,
       rawBalance: "1000000",
+      lamports: BigInt(1_000_000),
     },
   ];
 
@@ -42,6 +44,7 @@ test("mergeWsolIntoSol is a no-op when WSOL not present", () => {
       balance: 2_000_000,
       decimals: 6,
       rawBalance: "2000000",
+      lamports: BigInt(2_000_000),
     },
   ];
 

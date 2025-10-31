@@ -26,14 +26,6 @@ export class TokenDatabase extends BaseDatabase {
           decimals INTEGER NOT NULL,
           added_at INTEGER NOT NULL
         )`,
-        `CREATE TABLE IF NOT EXISTS token_metadata (
-          token_mint TEXT PRIMARY KEY,
-          name TEXT,
-          symbol TEXT,
-          decimals INTEGER NOT NULL,
-          logo_uri TEXT,
-          last_updated INTEGER NOT NULL
-        )`,
       ],
       "Token"
     );
@@ -88,46 +80,6 @@ export class TokenDatabase extends BaseDatabase {
   }
 
   // ================================
-  // TOKEN METADATA METHODS (for future use)
-  // ================================
-
-  public saveTokenMetadata(
-    tokenMint: string,
-    name?: string,
-    symbol?: string,
-    decimals?: number,
-    logoUri?: string
-  ): void {
-    this.run(
-      "INSERT OR REPLACE INTO token_metadata (token_mint, name, symbol, decimals, logo_uri, last_updated) VALUES (?, ?, ?, ?, ?, ?)",
-      [
-        tokenMint,
-        name || null,
-        symbol || null,
-        decimals || null,
-        logoUri || null,
-        Date.now(),
-      ],
-      "saving token metadata"
-    );
-  }
-
-  public getTokenMetadata(tokenMint: string): {
-    token_mint: string;
-    name?: string;
-    symbol?: string;
-    decimals?: number;
-    logo_uri?: string;
-    last_updated: number;
-  } | null {
-    return this.get(
-      "SELECT * FROM token_metadata WHERE token_mint = ?",
-      [tokenMint],
-      "getting token metadata"
-    );
-  }
-
-  // ================================
   // MAINTENANCE METHODS
   // ================================
 
@@ -139,17 +91,4 @@ export class TokenDatabase extends BaseDatabase {
     );
   }
 
-  public cleanupOldMetadata(olderThanDays: number = 30): number {
-    try {
-      const cutoffTime = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
-      const result = this.run(
-        "DELETE FROM token_metadata WHERE last_updated < ?",
-        [cutoffTime],
-        "cleaning up old metadata"
-      );
-      return (result?.changes as number | undefined) ?? 0;
-    } catch {
-      return 0;
-    }
-  }
 }

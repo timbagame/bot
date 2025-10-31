@@ -82,6 +82,10 @@ export const TELEGRAM_USERNAME_CACHE_TTL_MS = parsePositiveDuration(
   "TELEGRAM_USERNAME_CACHE_TTL_MS",
   5 * 60_000
 );
+export const TOKEN_DISCOVERY_COOLDOWN_MS = parsePositiveDuration(
+  "TOKEN_DISCOVERY_COOLDOWN_MS",
+  2 * 60_000
+);
 
 // ================================
 // LIMITS

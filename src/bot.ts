@@ -5903,7 +5903,7 @@ const getCachedWalletData = async (telegramId: bigint) => {
     // Merge WSOL into SOL using util
     const merged = mergeWsolIntoSol(solBalance, tokenBalances, WSOL_MINT);
     solBalance = merged.solLamports;
-    tokenBalances = merged.tokenBalances;
+    tokenBalances = merged.tokenBalances as typeof tokenBalances;
 
     const data: CachedWalletData = {
       solBalance,
