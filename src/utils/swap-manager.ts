@@ -224,6 +224,7 @@ export class SwapManager {
         inputMint: pumpQuote.inputMint,
         outputMint: pumpQuote.outputMint,
         inputAmount: pumpQuote.inputAmount,
+        inputAmountRaw: pumpQuote.inputAmountRaw,
         outputAmount: pumpQuote.outputAmount,
         estimatedRate: pumpQuote.estimatedRate,
         slippage: pumpQuote.slippage,
@@ -246,6 +247,7 @@ export class SwapManager {
           inputMint: jupiterQuote.inputMint,
           outputMint: jupiterQuote.outputMint,
           inputAmount: jupiterQuote.inAmount,
+          inputAmountRaw: jupiterQuote.inAmount,
           outputAmount: jupiterQuote.outAmount,
           estimatedRate:
             parseFloat(jupiterQuote.outAmount) /
@@ -296,6 +298,7 @@ export class SwapManager {
               inputMint: pumpQuote.inputMint,
               outputMint: pumpQuote.outputMint,
               inputAmount: pumpQuote.inputAmount,
+              inputAmountRaw: pumpQuote.inputAmountRaw,
               outputAmount: pumpQuote.outputAmount,
               estimatedRate: pumpQuote.estimatedRate,
               slippage: pumpQuote.slippage,
@@ -359,15 +362,16 @@ export class SwapManager {
       parseFloat(jupiterQuote.outAmount) / Math.pow(10, outputDecimals);
     const estimatedRate = outputAmount / inputAmount;
 
-    return {
-      inputMint: jupiterQuote.inputMint,
-      outputMint: jupiterQuote.outputMint,
-      inputAmount: jupiterQuote.inAmount,
-      outputAmount: jupiterQuote.outAmount,
-      estimatedRate,
-      slippage: jupiterQuote.slippageBps / 100,
-      provider: "jupiter",
-      priceImpact: jupiterQuote.priceImpactPct,
+  return {
+    inputMint: jupiterQuote.inputMint,
+    outputMint: jupiterQuote.outputMint,
+    inputAmount: jupiterQuote.inAmount,
+    inputAmountRaw: jupiterQuote.inAmount,
+    outputAmount: jupiterQuote.outAmount,
+    estimatedRate,
+    slippage: jupiterQuote.slippageBps / 100,
+    provider: "jupiter",
+    priceImpact: jupiterQuote.priceImpactPct,
     };
   }
 
@@ -648,7 +652,9 @@ export class SwapManager {
 
       const tryPumpFunQuote = async (
         targetLamports: number
-      ): Promise<{ amountStr: string; lamportsOut: number } | null> => {
+      ): Promise<
+        { amountStr: string; amountRawStr: string; lamportsOut: number } | null
+      > => {
         let attemptDecimal = Math.min(
           availableDecimal,
           Math.max(
@@ -690,7 +696,11 @@ export class SwapManager {
             console.log(
               `   ✅ Pump.fun quote met target with ${lamportsOut} lamports using amount ${amountStr}`
             );
-            return { amountStr, lamportsOut };
+            return {
+              amountStr,
+              amountRawStr: rawAmount.toString(),
+              lamportsOut,
+            };
           }
 
           if (attemptDecimal >= availableDecimal) {
@@ -717,7 +727,7 @@ export class SwapManager {
       };
 
       let selectedQuote:
-        | { amountStr: string; lamportsOut: number }
+        | { amountStr: string; amountRawStr: string; lamportsOut: number }
         | null = await tryPumpFunQuote(swapTarget);
 
       if (!selectedQuote && lamportsShortfall > 0) {
@@ -748,7 +758,7 @@ export class SwapManager {
       const swapInstructions = await this.pumpFunClient.createSwapTransaction({
         inputMint: tokenMint,
         outputMint: SOL_MINT,
-        amount: selectedQuote.amountStr,
+        amount: selectedQuote.amountRawStr,
         slippageBps,
         userKeypair,
       });
@@ -902,7 +912,7 @@ export class SwapManager {
         swapInstructions = await this.pumpFunClient.createSwapTransaction({
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
-          amount: quote.inputAmount,
+          amount: quote.inputAmountRaw,
           slippageBps,
           userKeypair,
         });
@@ -957,7 +967,7 @@ export class SwapManager {
     const jupiterQuote = await this.getJupiterQuote({
       inputMint: quote.inputMint,
       outputMint: quote.outputMint,
-      amount: quote.inputAmount,
+      amount: quote.inputAmountRaw,
       slippageBps,
     });
 
@@ -1019,7 +1029,7 @@ export class SwapManager {
       const pumpInstructions = await this.pumpFunClient.createSwapTransaction({
         inputMint: composite.pumpQuote.inputMint,
         outputMint: composite.pumpQuote.outputMint,
-        amount: composite.pumpQuote.inputAmount,
+        amount: composite.pumpQuote.inputAmountRaw,
         slippageBps,
         userKeypair,
       });
@@ -1088,7 +1098,7 @@ export class SwapManager {
       const jupiterQuote = await this.getJupiterQuote({
         inputMint: quote.inputMint,
         outputMint: SOL_MINT,
-        amount: quote.inputAmount,
+        amount: quote.inputAmountRaw,
         slippageBps,
       });
 
@@ -1142,7 +1152,7 @@ export class SwapManager {
       const pumpInstructions = await this.pumpFunClient.createSwapTransaction({
         inputMint: pumpQuote.inputMint,
         outputMint: pumpQuote.outputMint,
-        amount: pumpQuote.inputAmount,
+        amount: pumpQuote.inputAmountRaw,
         slippageBps,
         userKeypair,
       });
@@ -1182,6 +1192,7 @@ export class SwapManager {
             inputMint: quote.inputMint,
             outputMint: quote.outputMint,
             inputAmount: quote.inputAmount,
+            inputAmountRaw: quote.inputAmountRaw,
             outputAmount: quote.outputAmount,
             estimatedRate: quote.estimatedRate,
             slippage: quote.slippage,
@@ -1222,6 +1233,7 @@ export class SwapManager {
             inputMint: composite?.pumpQuote.inputMint ?? quote.inputMint,
             outputMint: composite?.pumpQuote.outputMint ?? SOL_MINT,
             inputAmount: composite?.pumpQuote.inputAmount ?? "0",
+            inputAmountRaw: composite?.pumpQuote.inputAmountRaw ?? "0",
             outputAmount: composite?.pumpQuote.outputAmount ?? "0",
             estimatedRate:
               composite?.pumpQuote.estimatedRate ?? quote.estimatedRate,

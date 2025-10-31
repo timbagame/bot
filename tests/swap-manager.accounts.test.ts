@@ -59,6 +59,7 @@ describe("SwapManager token account setup", () => {
       inputMint: t22Mint.toBase58(),
       outputMint: splMint.toBase58(),
       inputAmount: "1000000",
+      inputAmountRaw: "1000000",
       outputAmount: "1000",
       estimatedRate: 0.001,
       slippage: 1,
@@ -68,7 +69,7 @@ describe("SwapManager token account setup", () => {
     const req = {
       inputMint: quote.inputMint,
       outputMint: quote.outputMint,
-      amount: quote.inputAmount,
+      amount: quote.inputAmountRaw,
       slippageBps: 100,
       userKeypair: user,
       inputDecimals: 6,

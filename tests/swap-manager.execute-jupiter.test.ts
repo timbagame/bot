@@ -42,6 +42,7 @@ describe("SwapManager.executeJupiterSwap", () => {
       inputMint: req.inputMint,
       outputMint: req.outputMint,
       inputAmount: req.amount,
+      inputAmountRaw: req.amount,
       outputAmount: "100",
       estimatedRate: 0.0001,
       slippage: 1,

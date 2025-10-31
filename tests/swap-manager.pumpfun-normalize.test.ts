@@ -3,6 +3,7 @@ import { Connection, Keypair } from "@solana/web3.js";
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
 import { normalizePumpFunAmount } from "../src/utils/swap/pump-fun-amount";
+import { parseDecimalAmount } from "../src/utils/amount";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const PUMP_MINT = "pumpMint123456789012345678901234567890123456";
@@ -21,6 +22,13 @@ function createSwapManager(): SwapManager {
   });
   return sm;
 }
+
+const toRaw = (amount: string, decimals: number): string =>
+  parseDecimalAmount(
+    normalizePumpFunAmount(amount, decimals).decimalAmount,
+    decimals,
+    { returnType: "bigint", allowZero: true }
+  ).toString();
 
 describe("SwapManager pump.fun amount normalization", () => {
   beforeAll(() => {
@@ -51,6 +59,7 @@ describe("SwapManager pump.fun amount normalization", () => {
         inputMint,
         outputMint,
         inputAmount: decimalAmount,
+        inputAmountRaw: toRaw(normalizedAmount, inputDecimals),
         outputAmount: "100000000", // dummy lamports
         estimatedRate: 1,
         slippage: slippageBps / 100,
@@ -72,6 +81,7 @@ describe("SwapManager pump.fun amount normalization", () => {
 
     expect(capturedAmount).toBe("1000000");
     expect(quote.inputAmount).toBe("1");
+    expect(quote.inputAmountRaw).toBe("1000000");
     expect(quote.provider).toBe("pump-fun");
   });
 
@@ -95,6 +105,7 @@ describe("SwapManager pump.fun amount normalization", () => {
         inputMint,
         outputMint,
         inputAmount: decimalAmount,
+        inputAmountRaw: toRaw(normalizedAmount, inputDecimals),
         outputAmount: "50000000",
         estimatedRate: 1,
         slippage: slippageBps / 100,
@@ -137,6 +148,7 @@ describe("SwapManager pump.fun amount normalization", () => {
         inputMint,
         outputMint,
         inputAmount: decimalAmount,
+        inputAmountRaw: toRaw(normalizedAmount, inputDecimals),
         outputAmount: "50000000",
         estimatedRate: 1,
         slippage: slippageBps / 100,
@@ -179,6 +191,7 @@ describe("SwapManager pump.fun amount normalization", () => {
         inputMint,
         outputMint,
         inputAmount: decimalAmount,
+        inputAmountRaw: toRaw(normalizedAmount, inputDecimals),
         outputAmount: "50000000",
         estimatedRate: 1,
         slippage: slippageBps / 100,
@@ -221,6 +234,7 @@ describe("SwapManager pump.fun amount normalization", () => {
         inputMint,
         outputMint,
         inputAmount: decimalAmount,
+        inputAmountRaw: toRaw(normalizedAmount, inputDecimals),
         outputAmount: "50000000",
         estimatedRate: 1,
         slippage: slippageBps / 100,
@@ -263,6 +277,7 @@ describe("SwapManager pump.fun amount normalization", () => {
         inputMint,
         outputMint,
         inputAmount: decimalAmount,
+        inputAmountRaw: toRaw(normalizedAmount, inputDecimals),
         outputAmount: "50000000",
         estimatedRate: 1,
         slippage: slippageBps / 100,
@@ -305,6 +320,7 @@ describe("SwapManager pump.fun amount normalization", () => {
         inputMint,
         outputMint,
         inputAmount: decimalAmount,
+        inputAmountRaw: toRaw(normalizedAmount, inputDecimals),
         outputAmount: "1000000",
         estimatedRate: 1,
         slippage: slippageBps / 100,
@@ -343,6 +359,7 @@ describe("SwapManager pump.fun amount normalization", () => {
         inputMint,
         outputMint,
         inputAmount: normalizedAmount,
+        inputAmountRaw: normalizedAmount,
         outputAmount: "1000000",
         estimatedRate: 1,
         slippage: slippageBps / 100,
@@ -381,6 +398,7 @@ describe("SwapManager pump.fun amount normalization", () => {
         inputMint,
         outputMint,
         inputAmount: normalizedAmount,
+        inputAmountRaw: normalizedAmount,
         outputAmount: "1000000",
         estimatedRate: 1,
         slippage: slippageBps / 100,
@@ -401,5 +419,62 @@ describe("SwapManager pump.fun amount normalization", () => {
     });
 
     expect(capturedAmount).toBe("1");
+  });
+
+  test("createSwapTransaction forwards pump.fun raw lamports", async () => {
+    const sm = createSwapManager();
+    (sm as any).createTokenAccountsIfNeeded = async () => [];
+
+    (sm.pumpFunClient as any).getQuote = async () => ({
+      inputMint: PUMP_MINT,
+      outputMint: SOL_MINT,
+      inputAmount: "1",
+      inputAmountRaw: "1000000",
+      outputAmount: "46000000",
+      estimatedRate: 0.046,
+      slippage: 1,
+      isGraduated: false,
+    });
+
+    const quote = await sm.getQuote({
+      inputMint: PUMP_MINT,
+      outputMint: SOL_MINT,
+      amount: "1000000",
+      inputDecimals: 6,
+      outputDecimals: 9,
+      userKeypair: Keypair.generate(),
+      inputTicker: "PUMP",
+      outputTicker: "SOL",
+      slippageBps: 100,
+    });
+
+    let receivedAmount: string | null = null;
+    (sm.pumpFunClient as any).createSwapTransaction = async (args: {
+      amount: string;
+    }) => {
+      receivedAmount = args.amount;
+      return [];
+    };
+
+    await sm.createSwapTransaction(
+      {
+        inputMint: quote.inputMint,
+        outputMint: quote.outputMint,
+        amount: quote.inputAmountRaw,
+        slippageBps: 100,
+        userKeypair: Keypair.generate(),
+        inputDecimals: 6,
+        outputDecimals: 9,
+        inputTicker: "PUMP",
+        outputTicker: "SOL",
+      },
+      quote
+    );
+
+    const amount = receivedAmount;
+    if (!amount) {
+      throw new Error("Expected pump.fun amount to be captured");
+    }
+    expect(amount as string).toBe("1000000");
   });
 });

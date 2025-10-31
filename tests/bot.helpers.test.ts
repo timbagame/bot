@@ -302,6 +302,7 @@ describe("Bot helper utilities", () => {
       inputMint: "So11111111111111111111111111111111111111112",
       outputMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
       inputAmount: rawAmount.toString(),
+      inputAmountRaw: rawAmount.toString(),
       outputAmount: "455090146672",
       estimatedRate: 0,
       slippage: 1,
@@ -338,6 +339,7 @@ describe("Bot helper utilities", () => {
       inputMint: "So11111111111111111111111111111111111111112",
       outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
       inputAmount: rawAmount.toString(),
+      inputAmountRaw: rawAmount.toString(),
       outputAmount: "45",
       estimatedRate: 90,
       slippage: undefined as any,
@@ -372,6 +374,7 @@ describe("Bot helper utilities", () => {
       inputMint: "TokenMint",
       outputMint: "So11111111111111111111111111111111111111112",
       inputAmount: rawAmount.toString(),
+      inputAmountRaw: rawAmount.toString(),
       outputAmount: "137500", // assume 0.1375 SOL (5 decimals?)
       estimatedRate: 0.55,
       slippage: 1,

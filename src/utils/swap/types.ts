@@ -8,6 +8,7 @@ export interface SwapQuote {
   inputMint: string;
   outputMint: string;
   inputAmount: string;
+  inputAmountRaw: string;
   outputAmount: string;
   estimatedRate: number;
   slippage: number;

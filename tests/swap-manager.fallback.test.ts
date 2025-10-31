@@ -3,6 +3,7 @@ import { Connection, Keypair } from "@solana/web3.js";
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
 import { normalizePumpFunAmount } from "../src/utils/swap/pump-fun-amount";
+import { parseDecimalAmount } from "../src/utils/amount";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 
@@ -12,6 +13,9 @@ describe("SwapManager Jupiter fallback", () => {
     process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
     process.env.MNEMONIC = process.env.MNEMONIC || "test walk nut penalty hip pave soap entry language right filter choice";
   });
+
+  const toRaw = (value: string, decimals: number): string =>
+    parseDecimalAmount(value, decimals, { returnType: "bigint", allowZero: true }).toString();
 
   const connection = new Connection("http://localhost:8899", "confirmed");
   const wallet = WalletManager.createForTest(process.env.MNEMONIC!, {
@@ -59,6 +63,7 @@ describe("SwapManager Jupiter fallback", () => {
         inputMint,
         outputMint,
         inputAmount: decimalAmount,
+        inputAmountRaw: toRaw(decimalAmount, inputDecimals),
         outputAmount: "2000000",
         estimatedRate: 2,
         slippage: 5,
@@ -104,6 +109,7 @@ describe("SwapManager Jupiter fallback", () => {
         inputMint: SOL_MINT,
         outputMint: "PumpMint111111111111111111111111111111111111",
         inputAmount: decimalAmount,
+        inputAmountRaw: toRaw(decimalAmount, inputDecimals),
         outputAmount: "2000000",
         estimatedRate: 2,
         slippage: 5,
@@ -129,6 +135,7 @@ describe("SwapManager Jupiter fallback", () => {
     expect(quote.provider).toBe("pump-fun");
     expect(receivedAmount).toBe("1000000000");
     expect(quote.inputAmount).toBe("1");
+    expect(quote.inputAmountRaw).toBe("1000000000");
   });
 
   test("uses Jupiter when no pump.fun tokens detected", async () => {
@@ -170,5 +177,6 @@ describe("SwapManager Jupiter fallback", () => {
 
     expect(quote.provider).toBe("jupiter");
     expect(quote.outputAmount).toBe("2000000");
+    expect(quote.inputAmountRaw).toBe("1000000");
   });
 });

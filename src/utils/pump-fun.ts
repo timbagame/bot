@@ -24,6 +24,7 @@ export interface PumpFunQuote {
   inputMint: string;
   outputMint: string;
   inputAmount: string;
+  inputAmountRaw: string;
   outputAmount: string;
   estimatedRate: number;
   slippage: number;
@@ -364,6 +365,7 @@ export class PumpFunClient {
           inputMint,
           outputMint,
           inputAmount: normalizedAmount,
+          inputAmountRaw: amountRaw.toString(),
           outputAmount,
           estimatedRate,
           slippage: slippageBps / 100,
@@ -398,6 +400,7 @@ export class PumpFunClient {
         inputMint,
         outputMint,
         inputAmount: normalizedAmount,
+        inputAmountRaw: amountRaw.toString(),
         outputAmount,
         estimatedRate,
         slippage: slippageBps / 100,

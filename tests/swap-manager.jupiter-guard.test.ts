@@ -29,6 +29,7 @@ describe("SwapManager jupiter guard", () => {
       inputMint: "So11111111111111111111111111111111111111112",
       outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
       inputAmount: "1000000",
+      inputAmountRaw: "1000000",
       outputAmount: "100",
       estimatedRate: 0.0001,
       slippage: 1,

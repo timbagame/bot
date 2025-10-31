@@ -5700,7 +5700,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
           {
             inputMint: quote.inputMint,
             outputMint: quote.outputMint,
-            amount: quote.inputAmount, // Use inputAmount from quote like original
+            amount: quote.inputAmountRaw,
             slippageBps,
             userKeypair: keypair,
             inputDecimals,
@@ -5715,7 +5715,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
           {
             inputMint: quote.inputMint,
             outputMint: quote.outputMint,
-            amount: quote.inputAmount,
+            amount: quote.inputAmountRaw,
             slippageBps,
             userKeypair: keypair,
             inputDecimals,
@@ -5734,7 +5734,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
           {
             inputMint: quote.inputMint,
             outputMint: quote.outputMint,
-            amount: quote.inputAmount, // Use inputAmount from quote like original
+            amount: quote.inputAmountRaw,
             slippageBps,
             userKeypair: keypair,
             inputDecimals,

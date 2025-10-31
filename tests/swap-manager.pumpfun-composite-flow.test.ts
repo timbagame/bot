@@ -40,6 +40,7 @@ describe("SwapManager pump.fun composite quotes", () => {
     inputMint: pumpMint,
     outputMint: WSOL_MINT,
     inputAmount: "1",
+    inputAmountRaw: overrides.inputAmountRaw ?? overrides.inputAmount ?? "1",
     outputAmount: "1000",
     estimatedRate: 1000,
     slippage: 5,
