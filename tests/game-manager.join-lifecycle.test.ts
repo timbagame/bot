@@ -74,7 +74,7 @@ describe("GameManager join lifecycle", () => {
     (gm as any).swapManager = {
       performJustInTimeSolSwap: async () => ({ swapped: false }),
     };
-    (gm as any).confirmTransactionWithRecovery = async () => true;
+    (gm as any).confirmTransactionWithRecovery = async () => "SIG123";
     let probeCount = 0;
     (gm as any).isPlayerInGame = async () => {
       probeCount += 1;
@@ -191,7 +191,7 @@ describe("GameManager join lifecycle", () => {
     (gm as any).swapManager = {
       performJustInTimeSolSwap: async () => ({ swapped: false }),
     };
-    (gm as any).confirmTransactionWithRecovery = async () => true;
+    (gm as any).confirmTransactionWithRecovery = async () => "SIG321";
     (gm as any).isPlayerInGame = async () => false;
     (gm as any).verifyParticipantJoin = async () => false;
     const gameToken = Keypair.generate().publicKey;
@@ -493,7 +493,7 @@ describe("GameManager join lifecycle", () => {
       if (confirmCalls === 1) {
         throw new Error("timeout while confirming");
       }
-      return true;
+      return "SIG2";
     };
     (gm as any).isPlayerInGame = async () => false;
     (gm as any).verifyParticipantJoin = async (

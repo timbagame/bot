@@ -20,8 +20,50 @@ describe("GameManager confirm/reload helpers", () => {
     } as any;
     const gm = GameManager.getInstance(program, wallet, { getGameParticipants: () => [] } as any);
     (gm as any).isPlayerInGame = async () => true;
-    const ok = await (gm as any).confirmTransactionWithRecovery("SIG123", new PublicKey("BPFLoader1111111111111111111111111111111111"), "Player join", new PublicKey("BPFLoader2111111111111111111111111111111111"));
-    expect(ok).toBe(true);
+    const confirmed = await (gm as any).confirmTransactionWithRecovery(
+      "SIG123",
+      new PublicKey("BPFLoader1111111111111111111111111111111111"),
+      "Player join",
+      new PublicKey("BPFLoader2111111111111111111111111111111111")
+    );
+    expect(confirmed).toBe("SIG123");
+  });
+
+  test("confirmTransactionWithRecovery resubmits using the latest failed signature", async () => {
+    resetGM();
+    const wallet = {
+      confirmTransaction: async () => {
+        throw new Error("transaction confirmation timeout");
+      },
+    } as any;
+    const program = {
+      account: { game: { fetchNullable: async () => ({}) } },
+      provider: {},
+    } as any;
+    const gm = GameManager.getInstance(program, wallet, { getGameParticipants: () => [] } as any);
+
+    const resubmitAttempts: Array<{ attempt: number; previousSignature: string }> = [];
+    const finalSignature = await (gm as any).confirmTransactionWithRecovery(
+      "SIG_ORIGINAL",
+      new PublicKey("BPFLoader1111111111111111111111111111111111"),
+      "Game creation",
+      undefined,
+      async (attempt: number, previousSignature: string) => {
+        resubmitAttempts.push({ attempt, previousSignature });
+        if (attempt === 0) {
+          const error = new Error("resubmit failed");
+          (error as any).lastSignature = "SIG_FROM_ERROR";
+          throw error;
+        }
+        return "SIG_SUCCESS";
+      }
+    );
+
+    expect(finalSignature).toBe("SIG_SUCCESS");
+    expect(resubmitAttempts).toEqual([
+      { attempt: 0, previousSignature: "SIG_ORIGINAL" },
+      { attempt: 1, previousSignature: "SIG_FROM_ERROR" },
+    ]);
   });
 
   test("confirmTransactionWithRecovery treats expirations as recoverable", async () => {
@@ -39,13 +81,13 @@ describe("GameManager confirm/reload helpers", () => {
     } as any;
     const gm = GameManager.getInstance(program, wallet, { getGameParticipants: () => [] } as any);
     (gm as any).isPlayerInGame = async () => true;
-    const ok = await (gm as any).confirmTransactionWithRecovery(
+    const confirmed = await (gm as any).confirmTransactionWithRecovery(
       "SIG-EXP",
       new PublicKey("BPFLoader1111111111111111111111111111111111"),
       "Player join",
       new PublicKey("BPFLoader2111111111111111111111111111111111")
     );
-    expect(ok).toBe(true);
+    expect(confirmed).toBe("SIG-EXP");
   });
 
   test("confirmTransactionWithRecovery preserves timeout message when recovery fails", async () => {
@@ -56,6 +98,9 @@ describe("GameManager confirm/reload helpers", () => {
           "transaction confirmation timeout: RPC node did not respond"
         );
         return Promise.reject(err);
+      },
+      connection: {
+        getSignatureStatuses: async () => ({ value: [null] }),
       },
     } as any;
     const program = {
@@ -141,7 +186,7 @@ describe("GameManager confirm/reload helpers", () => {
           "Transaction expired before confirmation (last valid block height 10, current 15)"
         );
       }
-      return true;
+      return "SIG_ATTEMPT_2";
     };
 
     const gamePda = new PublicKey("BPFLoader3111111111111111111111111111111111");

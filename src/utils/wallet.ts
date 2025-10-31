@@ -34,6 +34,7 @@ import {
   SIGNATURE_HISTORY_SEARCH_DELAY_MS,
   BLOCK_HEIGHT_CHECK_INTERVAL_MS,
   BLOCK_HEIGHT_EXPIRATION_GRACE,
+  TRANSACTION_RESUBMIT_ATTEMPTS,
   WSOL_MINT,
 } from "./constants";
 import { formatAmount } from "./format-amount";
@@ -1525,6 +1526,75 @@ export class WalletManager {
       recordedAt: now,
     });
     return signature;
+  }
+
+  public async sendAndConfirmWithResubmits(
+    instructions: TransactionInstruction[],
+    signers: Keypair[],
+    options: {
+      maxResubmits?: number;
+      operationLabel?: string;
+      initialSignature?: string;
+    } = {}
+  ): Promise<string> {
+    if (instructions.length === 0) {
+      throw new Error("No instructions provided for sendAndConfirmWithResubmits");
+    }
+
+    if (signers.length === 0) {
+      throw new Error("No signers provided for sendAndConfirmWithResubmits");
+    }
+
+    const {
+      maxResubmits = TRANSACTION_RESUBMIT_ATTEMPTS,
+      operationLabel = "Transaction",
+      initialSignature,
+    } = options;
+
+    let currentSignature =
+      typeof initialSignature === "string" && initialSignature.length > 0
+        ? initialSignature
+        : await this.sendTransaction(instructions, signers);
+
+    let resubmitAttempts = 0;
+
+    while (true) {
+      try {
+        await this.confirmTransaction(currentSignature);
+
+        if (resubmitAttempts > 0) {
+          console.log(
+            `✅ ${operationLabel} confirmed after ${resubmitAttempts} ${
+              resubmitAttempts === 1 ? "resubmit" : "resubmits"
+            }: ${currentSignature}`
+          );
+        }
+
+        return currentSignature;
+      } catch (error: any) {
+        const normalizedMessage = error?.message?.toLowerCase?.() ?? "";
+        const isRecoverable =
+          normalizedMessage.includes("timeout") ||
+          normalizedMessage.includes("timed out") ||
+          normalizedMessage.includes("not confirmed") ||
+          normalizedMessage.includes("expired before confirmation") ||
+          normalizedMessage.includes("last valid block height");
+
+        if (!isRecoverable || resubmitAttempts >= maxResubmits) {
+          (error as any).lastSignature = currentSignature;
+          throw error;
+        }
+
+        resubmitAttempts += 1;
+        console.warn(
+          `♻️ ${operationLabel} resubmit ${resubmitAttempts}/${maxResubmits} after failure: ${
+            error?.message ?? error
+          }`
+        );
+
+        currentSignature = await this.sendTransaction(instructions, signers);
+      }
+    }
   }
 
   private async estimateFee(

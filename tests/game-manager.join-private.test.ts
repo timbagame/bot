@@ -118,7 +118,7 @@ describe("GameManager joinPrivateGame resilience", () => {
       if (sendHistory.length === 1) {
         throw new Error("timeout while confirming private join");
       }
-      return true;
+      return sendHistory[sendHistory.length - 1];
     };
     (gm as any).isPlayerInGame = async () => false;
 
