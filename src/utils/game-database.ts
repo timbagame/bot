@@ -260,6 +260,18 @@ export class GameDatabase extends BaseDatabase {
         [],
         "normalizing participant status defaults"
       );
+
+      this.run(
+        "CREATE INDEX IF NOT EXISTS idx_game_participants_game_status ON game_participants (game_address, status)",
+        [],
+        "ensuring game participants index on game and status"
+      );
+
+      this.run(
+        "CREATE INDEX IF NOT EXISTS idx_game_participants_telegram_status ON game_participants (telegram_id, status)",
+        [],
+        "ensuring game participants index on telegram and status"
+      );
     } catch (error) {
       console.error("Failed to ensure game_participants schema:", error);
     }

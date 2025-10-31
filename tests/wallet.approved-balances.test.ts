@@ -5,60 +5,139 @@ import {
   getAssociatedTokenAddress,
   AccountLayout,
   AccountState,
+  TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import { WalletManager } from "../src/utils/wallet";
 
+type MockAccountEntry = {
+  owner: PublicKey;
+  data: Buffer;
+  mint: PublicKey;
+  amount: bigint;
+  decimals: number;
+};
+
 class ConnParsed implements Partial<Connection> {
+  public owner: PublicKey | null = null;
+  public accounts = new Map<string, MockAccountEntry>();
+  public parsedCalls: string[] = [];
+
+  setOwner(owner: PublicKey) {
+    this.owner = owner;
+  }
+
+  async seedTokenAccount(options: {
+    mint: PublicKey;
+    programId: PublicKey;
+    amount: bigint;
+    decimals: number;
+  }) {
+    if (!this.owner) {
+      throw new Error("owner not set");
+    }
+
+    const ata = await getAssociatedTokenAddress(
+      options.mint,
+      this.owner,
+      false,
+      options.programId
+    );
+
+    const buffer = Buffer.alloc(AccountLayout.span);
+    AccountLayout.encode(
+      {
+        mint: options.mint,
+        owner: this.owner,
+        amount: options.amount,
+        delegateOption: 0,
+        delegate: this.owner,
+        state: AccountState.Initialized,
+        isNativeOption: 0,
+        isNative: 0n,
+        delegatedAmount: 0n,
+        closeAuthorityOption: 0,
+        closeAuthority: this.owner,
+      } as any,
+      buffer
+    );
+
+    this.accounts.set(ata.toBase58(), {
+      owner: options.programId,
+      data: buffer,
+      mint: options.mint,
+      amount: options.amount,
+      decimals: options.decimals,
+    });
+  }
+
+  async getMultipleAccountsInfo(pubkeys: PublicKey[]) {
+    return pubkeys.map((pubkey) => {
+      const entry = this.accounts.get(pubkey.toBase58());
+      if (!entry) {
+        return null;
+      }
+
+      return {
+        data: entry.data,
+        executable: false,
+        lamports: 0,
+        owner: entry.owner,
+        rentEpoch: 0,
+      } as any;
+    });
+  }
+
   async getParsedTokenAccountsByOwner(_owner: PublicKey, filter: any) {
     const program = filter?.programId?.toBase58?.() || "";
-    // SPL Token program mints USDC
-    if (program === "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA") {
-      return {
-        value: [
-          {
-            account: {
-              data: {
-                parsed: {
-                  info: {
-                    tokenAmount: { amount: "1000", decimals: 6 },
-                    mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-                  },
+    this.parsedCalls.push(program);
+
+    const value = Array.from(this.accounts.entries())
+      .filter(([_, entry]) => entry.owner.toBase58() === program)
+      .map(([address, entry]) => ({
+        pubkey: new PublicKey(address),
+        account: {
+          data: {
+            parsed: {
+              info: {
+                tokenAmount: {
+                  amount: entry.amount.toString(),
+                  decimals: entry.decimals,
                 },
+                mint: entry.mint.toBase58(),
               },
             },
           },
-        ],
-      } as any;
-    }
-    // Token-2022 program mints WSOL (for test simplicity)
-    if (program === "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb") {
-      return {
-        value: [
-          {
-            account: {
-              data: {
-                parsed: {
-                  info: {
-                    tokenAmount: { amount: "500000000", decimals: 9 },
-                    mint: "So11111111111111111111111111111111111111112",
-                  },
-                },
-              },
-            },
-          },
-        ],
-      } as any;
-    }
-    return { value: [] } as any;
+        },
+      }));
+
+    return { value } as any;
   }
 }
 
 describe("WalletManager.getAllApprovedTokenBalances", () => {
   test("returns filtered balances for approved tokens", async () => {
+    const connection = new ConnParsed();
     const wm = WalletManager.createForTest(
       "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-      { connection: new ConnParsed() as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+      { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
     );
+
+    const owner = wm.getPublicKey(1n);
+    connection.setOwner(owner);
+
+    await connection.seedTokenAccount({
+      mint: new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
+      programId: TOKEN_PROGRAM_ID,
+      amount: 1_000n,
+      decimals: 6,
+    });
+
+    await connection.seedTokenAccount({
+      mint: new PublicKey("So11111111111111111111111111111111111111112"),
+      programId: TOKEN_2022_PROGRAM_ID,
+      amount: 500_000_000n,
+      decimals: 9,
+    });
 
     const approved = [
       { token_mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", token_ticker: "USDC", decimals: 6 },
@@ -71,6 +150,7 @@ describe("WalletManager.getAllApprovedTokenBalances", () => {
     const wsol = res.find((r) => r.ticker === "WSOL")!;
     expect(usdc.balance).toBe(1000);
     expect(wsol.balance).toBe(500000000);
+    expect(connection.parsedCalls.length).toBeGreaterThan(0);
   });
 
   test("getTokenBalance resolves Token-2022 associated account", async () => {

@@ -11,6 +11,7 @@ import {
   SystemProgram,
   SendTransactionError,
   type SendOptions,
+  type AccountInfo,
 } from "@solana/web3.js";
 import {
   getAssociatedTokenAddress,
@@ -20,9 +21,11 @@ import {
   createCloseAccountInstruction,
   getAccount,
   TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
   TokenAccountNotFoundError,
   TokenInvalidAccountOwnerError,
   unpackMint,
+  unpackAccount,
 } from "@solana/spl-token";
 import * as fs from "fs";
 import * as path from "path";
@@ -35,6 +38,7 @@ import {
   BLOCK_HEIGHT_CHECK_INTERVAL_MS,
   BLOCK_HEIGHT_EXPIRATION_GRACE,
   TRANSACTION_RESUBMIT_ATTEMPTS,
+  TOKEN_DISCOVERY_COOLDOWN_MS,
 } from "./constants";
 import { formatAmount } from "./format-amount";
 import { WSOL_MINT } from "./token-registry";
@@ -115,6 +119,7 @@ export class WalletManager {
     string,
     { blockhash: string; lastValidBlockHeight: number; recordedAt: number }
   >();
+  private lastTokenDiscoveryByUser = new Map<string, number>();
 
   private constructor(mnemonic: string, deps?: WalletDeps) {
     this.mnemonic = mnemonic;
@@ -149,7 +154,7 @@ export class WalletManager {
     if (timeToWait > 0) {
       await new Promise((resolve) => setTimeout(resolve, timeToWait));
     }
-    this.lastCallTime = now;
+    this.lastCallTime = this.timeNow ? this.timeNow() : Date.now();
   }
 
   private loadAdminKeypair(): void {
@@ -366,6 +371,10 @@ export class WalletManager {
       balance: number;
       decimals: number;
       rawBalance: string;
+      lamports: bigint;
+      formattedBalance: string;
+      decimalBalance: number;
+      truncated?: boolean;
     }>
   > {
     await this.throttle();
@@ -381,48 +390,6 @@ export class WalletManager {
         `🔍 Getting token accounts for user: ${telegramId}, pubkey: ${pubkey.toBase58()}`
       );
 
-      // Get all token accounts for both SPL Token and Token-2022 programs
-      const [splTokenAccounts, token2022Accounts] = await Promise.all([
-        this.connection.getParsedTokenAccountsByOwner(pubkey, {
-          programId: new PublicKey(
-            "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-          ), // SPL Token program
-        }),
-        this.connection.getParsedTokenAccountsByOwner(pubkey, {
-          programId: new PublicKey(
-            "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
-          ), // Token-2022 program
-        }),
-      ]);
-
-      // Combine both token account arrays
-      const allTokenAccounts = [
-        ...(splTokenAccounts.value || []),
-        ...(token2022Accounts.value || []),
-      ];
-
-      console.log(
-        `📊 Found ${
-          splTokenAccounts.value?.length || 0
-        } SPL token accounts and ${
-          token2022Accounts.value?.length || 0
-        } Token-2022 accounts (${allTokenAccounts.length} total)`
-      );
-
-      // Early return if user has no token accounts
-      if (!allTokenAccounts || allTokenAccounts.length === 0) {
-        console.log(`❌ No token accounts found for user ${telegramId}`);
-        return [];
-      }
-
-      const results: Array<{
-        mint: string;
-        ticker: string;
-        balance: number;
-        decimals: number;
-        rawBalance: string;
-      }> = [];
-
       // Create a map of approved token mints for O(1) lookup
       const approvedTokensMap = new Map(
         approvedTokens.map((token) => [token.token_mint, token])
@@ -433,25 +400,205 @@ export class WalletManager {
         tokenAmount: { amount: string; decimals: number };
       }> = [];
       const metadataPrefetchMints = new Set<string>();
+      const seenAccounts = new Set<string>();
 
-      for (const accountInfo of allTokenAccounts) {
+      const ataLookup = new Map<
+        string,
+        {
+          address: PublicKey;
+          mint: string;
+          programId: PublicKey;
+          decimals: number;
+        }
+      >();
+
+      for (const token of approvedTokens) {
         try {
-          const parsedData = accountInfo.account.data.parsed;
-          const tokenAmount = parsedData.info.tokenAmount;
-          const mint = parsedData.info.mint;
+          const mintKey = new PublicKey(token.token_mint);
+          const [splAta, token2022Ata] = await Promise.all([
+            getAssociatedTokenAddress(mintKey, pubkey, false, TOKEN_PROGRAM_ID),
+            getAssociatedTokenAddress(
+              mintKey,
+              pubkey,
+              false,
+              TOKEN_2022_PROGRAM_ID
+            ),
+          ]);
 
-          parsedAccounts.push({ mint, tokenAmount });
-
-          if (parseFloat(tokenAmount.amount) > 0) {
-            metadataPrefetchMints.add(mint);
-          }
+          ataLookup.set(splAta.toBase58(), {
+            address: splAta,
+            mint: token.token_mint,
+            programId: TOKEN_PROGRAM_ID,
+            decimals: token.decimals,
+          });
+          ataLookup.set(token2022Ata.toBase58(), {
+            address: token2022Ata,
+            mint: token.token_mint,
+            programId: TOKEN_2022_PROGRAM_ID,
+            decimals: token.decimals,
+          });
         } catch (error) {
           console.error(
-            `❌ Error parsing token account for user ${telegramId}:`,
+            `❌ Failed to derive associated token address for ${token.token_mint}:`,
             error
           );
         }
       }
+
+      const ataEntries = Array.from(ataLookup.values());
+      let fetchedAtaAccounts = 0;
+
+      if (ataEntries.length > 0) {
+        const CHUNK_SIZE = 100;
+        for (let i = 0; i < ataEntries.length; i += CHUNK_SIZE) {
+          const chunk = ataEntries.slice(i, i + CHUNK_SIZE);
+          const infos = await this.connection.getMultipleAccountsInfo(
+            chunk.map((item) => item.address)
+          );
+
+          infos.forEach((info, index) => {
+            const lookup = chunk[index];
+            if (!info || !lookup) {
+              return;
+            }
+
+            try {
+              const account = unpackAccount(
+                lookup.address,
+                info as AccountInfo<Buffer>,
+                lookup.programId
+              );
+              const amount = account.amount ?? 0n;
+
+              parsedAccounts.push({
+                mint: lookup.mint,
+                tokenAmount: {
+                  amount: amount.toString(),
+                  decimals: lookup.decimals,
+                },
+              });
+
+              if (amount > 0n) {
+                metadataPrefetchMints.add(lookup.mint);
+              }
+
+              seenAccounts.add(lookup.address.toBase58());
+              fetchedAtaAccounts += 1;
+            } catch (error) {
+              if (
+                !(error instanceof TokenAccountNotFoundError) &&
+                !(error instanceof TokenInvalidAccountOwnerError)
+              ) {
+                console.error(
+                  `❌ Error unpacking token account ${lookup.address.toBase58()}:`,
+                  error
+                );
+              }
+            }
+          });
+        }
+
+        console.log(
+          `📦 Loaded ${fetchedAtaAccounts} approved token accounts via ATA lookups`
+        );
+      }
+
+      const now = this.timeNow?.() ?? Date.now();
+      const discoveryKey = telegramId.toString();
+      const lastDiscovery = this.lastTokenDiscoveryByUser.get(discoveryKey) ?? 0;
+      const forceDiscovery = parsedAccounts.length === 0;
+      const shouldDiscover =
+        forceDiscovery || now - lastDiscovery >= TOKEN_DISCOVERY_COOLDOWN_MS;
+
+      if (shouldDiscover) {
+        const [splTokenAccounts, token2022Accounts] = await Promise.all([
+          this.connection.getParsedTokenAccountsByOwner(pubkey, {
+            programId: new PublicKey(
+              "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+            ), // SPL Token program
+          }),
+          this.connection.getParsedTokenAccountsByOwner(pubkey, {
+            programId: new PublicKey(
+              "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+            ), // Token-2022 program
+          }),
+        ]);
+
+        this.lastTokenDiscoveryByUser.set(discoveryKey, now);
+
+        const allTokenAccounts = [
+          ...(splTokenAccounts.value || []),
+          ...(token2022Accounts.value || []),
+        ];
+
+        console.log(
+          `📡 Token discovery fetched ${
+            splTokenAccounts.value?.length || 0
+          } SPL and ${
+            token2022Accounts.value?.length || 0
+          } Token-2022 accounts (${allTokenAccounts.length} total)`
+        );
+
+        for (const accountInfo of allTokenAccounts) {
+          const accountPubkey = accountInfo.pubkey?.toBase58?.();
+          if (accountPubkey) {
+            if (seenAccounts.has(accountPubkey)) {
+              continue;
+            }
+            seenAccounts.add(accountPubkey);
+          }
+
+          try {
+            const parsedData = accountInfo.account.data.parsed;
+            const tokenAmount = parsedData.info.tokenAmount;
+            const mint = parsedData.info.mint;
+
+            const rawAmount = tokenAmount.amount;
+            let lamports: bigint;
+            try {
+              lamports = BigInt(rawAmount);
+            } catch (parseError) {
+              console.error(
+                `❌ Invalid lamport amount for ${mint}: ${rawAmount}`,
+                parseError
+              );
+              continue;
+            }
+
+            parsedAccounts.push({ mint, tokenAmount });
+
+            if (lamports > 0n) {
+              metadataPrefetchMints.add(mint);
+            }
+          } catch (error) {
+            console.error(
+              `❌ Error parsing token account for user ${telegramId}:`,
+              error
+            );
+          }
+        }
+      } else {
+        console.log(
+          `⏭️ Skipping token discovery (cooldown ${TOKEN_DISCOVERY_COOLDOWN_MS}ms active)`
+        );
+      }
+
+      if (parsedAccounts.length === 0) {
+        console.log(`❌ No token accounts found for user ${telegramId}`);
+        return [];
+      }
+
+      const results: Array<{
+        mint: string;
+        ticker: string;
+        balance: number;
+        decimals: number;
+        rawBalance: string;
+        lamports: bigint;
+        formattedBalance: string;
+        decimalBalance: number;
+        truncated?: boolean;
+      }> = [];
 
       const metadataCache = new Map<
         string,
@@ -508,8 +655,20 @@ export class WalletManager {
 
           const loadFullMetadata = async () => loadMetadataForMint(mint);
 
+          const rawAmount = tokenAmount.amount;
+          let lamports: bigint;
+          try {
+            lamports = BigInt(rawAmount);
+          } catch (parseError) {
+            console.error(
+              `❌ Invalid lamport amount for ${mint}: ${rawAmount}`,
+              parseError
+            );
+            continue;
+          }
+
           // Auto-register tokens with non-zero balance that aren't approved
-          if (!approvedToken && parseFloat(tokenAmount.amount) > 0) {
+          if (!approvedToken && lamports > 0n) {
             console.log(
               `🔄 Auto-registering unknown token with balance: ${mint}`
             );
@@ -560,8 +719,28 @@ export class WalletManager {
           }
 
           const finalApprovedToken = approvedTokensMap.get(mint);
-          if (finalApprovedToken && parseFloat(tokenAmount.amount) > 0) {
-            const balance = parseFloat(tokenAmount.amount);
+          if (finalApprovedToken && lamports > 0n) {
+            const formattedBalance = this.formatTokenBalance(
+              lamports,
+              tokenAmount.decimals
+            );
+            const decimalBalance = Number.parseFloat(
+              formatAmount(lamports, tokenAmount.decimals, {
+                maxFractionDigits: Math.min(tokenAmount.decimals, 12),
+                trim: false,
+              })
+            );
+            let balanceNumber = 0;
+            let truncated = false;
+            if (lamports > BigInt(Number.MAX_SAFE_INTEGER)) {
+              balanceNumber = Number.MAX_SAFE_INTEGER;
+              truncated = true;
+              console.warn(
+                `⚠️ Token ${mint} balance ${lamports.toString()} exceeds JS safe integer; clamping numeric balance`
+              );
+            } else {
+              balanceNumber = Number(lamports);
+            }
 
             // Try to get real ticker from metadata, fallback to approved ticker
             let finalTicker = finalApprovedToken.token_ticker;
@@ -594,17 +773,18 @@ export class WalletManager {
             }
 
             console.log(
-              `✅ Adding token: ${finalTicker}, balance: ${balance}, formatted: ${this.formatTokenBalance(
-                balance,
-                tokenAmount.decimals
-              )}`
+              `✅ Adding token: ${finalTicker}, lamports: ${lamports.toString()}, formatted: ${formattedBalance}`
             );
             results.push({
               mint,
               ticker: finalTicker,
-              balance,
+              balance: balanceNumber,
               decimals: tokenAmount.decimals,
-              rawBalance: tokenAmount.amount,
+              rawBalance: rawAmount,
+              lamports,
+              formattedBalance,
+              decimalBalance: Number.isFinite(decimalBalance) ? decimalBalance : 0,
+              truncated,
             });
           }
         } catch (error) {
@@ -1788,7 +1968,10 @@ export class WalletManager {
     return formatAmount(lamports, 9, { maxFractionDigits: 6, trim: true });
   }
 
-  public formatTokenBalance(amount: number, decimals: number): string {
+  public formatTokenBalance(
+    amount: number | bigint | string,
+    decimals: number
+  ): string {
     // Use shared formatter for consistent rounding and trimming
     return formatAmount(amount, decimals, { maxFractionDigits: 6, trim: true });
   }

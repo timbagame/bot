@@ -1,1 +1,11 @@
 .env
+.env.*
+.git
+.github
+node_modules
+tests
+coverage
+*.log
+*.sqlite
+docs
+tmp

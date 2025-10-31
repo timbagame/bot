@@ -4,6 +4,10 @@ export type TokenBalance = {
   balance: number; // raw units
   decimals: number;
   rawBalance: string;
+  lamports: bigint;
+  formattedBalance?: string;
+  decimalBalance?: number;
+  truncated?: boolean;
 };
 
 /**
