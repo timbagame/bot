@@ -77,6 +77,11 @@ export const EXPIRED_GAMES_CHECK_INTERVAL_MS = 60000; // 1 minute
 // ================================
 
 export const BLOCKHASH_CACHE_DURATION = 10 * 1000; // 10 seconds
+export const TOKEN_MANAGER_APPROVED_CACHE_TTL_MS = 60 * 1000; // 60 seconds
+export const TELEGRAM_USERNAME_CACHE_TTL_MS = parsePositiveDuration(
+  "TELEGRAM_USERNAME_CACHE_TTL_MS",
+  5 * 60_000
+);
 
 // ================================
 // LIMITS
@@ -134,8 +139,37 @@ export const SWAP_SLIPPAGE_OPTIONS_BPS = [2, 10, 50, 100] as const;
 export const JUPITER_PRICE_URL = "https://lite-api.jup.ag/price/v3";
 // Toggle price fetching (disable to avoid network)
 export const PRICES_ENABLED = (process.env["PRICES_ENABLED"] ?? "true").toLowerCase() !== "false";
+
+function parsePositiveDuration(key: string, fallback: number): number {
+  const raw = process.env[key];
+  if (raw === undefined) {
+    return fallback;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    console.warn(
+      `[Config] ${key} must be a positive number. Received '${raw}', using fallback ${fallback}.`
+    );
+    return fallback;
+  }
+
+  if (parsed <= 0) {
+    const clamped = Math.max(1, fallback);
+    console.warn(
+      `[Config] ${key} must be > 0. Received ${parsed}, clamping to ${clamped}.`
+    );
+    return clamped;
+  }
+
+  return parsed;
+}
+
 // Cache TTL (ms) for token prices
-export const PRICES_CACHE_TTL_MS = Number(process.env["PRICES_CACHE_TTL_MS"] ?? 60_000);
+export const PRICES_CACHE_TTL_MS = parsePositiveDuration(
+  "PRICES_CACHE_TTL_MS",
+  60_000
+);
 // Request timeout (ms)
 export const PRICES_TIMEOUT_MS = Number(process.env["PRICES_TIMEOUT_MS"] ?? 3_000);
 

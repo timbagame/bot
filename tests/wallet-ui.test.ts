@@ -1,6 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
-import { buildWalletCaption, showCustomAmountPrompt } from "../src/utils/wallet-ui";
-import { INPUT_TIMEOUT_HINT } from "../src/utils/constants";
+import { InlineKeyboard, type Context } from "grammy";
+import {
+  buildWalletCaption,
+  buildWalletTokenLines,
+  buildWalletActionMenuForUser,
+  showCustomAmountPrompt,
+} from "../src/utils/wallet-ui";
+import { INPUT_TIMEOUT_HINT, LAMPORTS_PER_SOL } from "../src/utils/constants";
 import { getInputSession, clearAllInputSessions } from "../src/utils/user-state";
 
 type EditCall = { text: string; options: any };
@@ -110,6 +116,49 @@ test("buildWalletCaption escapes HTML-sensitive ticker and address", () => {
       process.env.SOLANA_NETWORK = originalNetwork;
     }
   }
+});
+
+test("buildWalletTokenLines batches price lookups and reuses cached values", async () => {
+  const calls: string[] = [];
+  const lines = await buildWalletTokenLines({
+    solBalanceLamports: 2 * LAMPORTS_PER_SOL,
+    tokenBalances: [
+      { mint: "mint-1", ticker: "TOKEN", balance: 2_000_000, decimals: 6 },
+      { mint: "mint-1", ticker: "TOKEN-B", balance: 3_000_000, decimals: 6 },
+      { mint: "", ticker: "USDC", balance: 10_000_000, decimals: 6 },
+    ],
+    formatSolBalance: (lamports) => `${lamports / LAMPORTS_PER_SOL} SOL`,
+    formatTokenBalance: (balance, decimals) =>
+      (balance / Math.pow(10, decimals)).toFixed(2),
+    getPriceUSD: async (reference) => {
+      calls.push(reference);
+      switch (reference) {
+        case "SOL":
+          return 25;
+        case "mint-1":
+          return 0.5;
+        case "USDC":
+          return 1;
+        default:
+          return 0;
+      }
+    },
+  });
+
+  expect(calls).toEqual(["SOL", "mint-1", "USDC"]);
+  expect(lines).toHaveLength(4);
+  expect(lines[0]).toEqual({
+    ticker: "SOL",
+    amount: "2 SOL",
+    usdValue: "50",
+    unit: "SOL",
+  });
+  const tokenLine = lines[1]!;
+  const tokenLineB = lines[2]!;
+  const stablecoinLine = lines[3]!;
+  expect(tokenLine.usdValue).toBe("1");
+  expect(tokenLineB.usdValue).toBe("1.50");
+  expect(stablecoinLine.usdValue).toBe("10");
 });
 
 test("showCustomAmountPrompt formats send custom amount flow", async () => {
@@ -277,4 +326,99 @@ test("showCustomAmountPrompt stores fallback reply identifiers when edit fails",
   expect(session?.type).toBe("send_custom_amount");
   expect(session?.messageId).toBe(replyMessageId);
   expect(session?.chatId).toBe(9_001);
+});
+
+test("buildWalletActionMenuForUser assembles menu using shared dependencies", async () => {
+  const keyboard = new InlineKeyboard();
+  const balancesCalls: bigint[] = [];
+  const deps = {
+    requireTelegramId: (_ctx: any, label: string) => {
+      expect(label).toBe("wallet action menu");
+      return 77n;
+    },
+    getWalletAddress: async (telegramId: bigint) => {
+      expect(telegramId).toBe(77n);
+      return "WALLET111111111111111111111111111111111111";
+    },
+    getWalletBalances: async (telegramId: bigint) => {
+      balancesCalls.push(telegramId);
+      return {
+        solBalance: 2_500_000_000,
+        tokenBalances: [
+          { mint: "mint-aaa", ticker: "AAA", balance: 500_000_000, decimals: 9 },
+        ],
+      };
+    },
+    formatSolBalance: (lamports: number) => `${lamports / 1_000_000_000} SOL`,
+    formatTokenBalance: (balance: number, decimals: number) =>
+      (balance / Math.pow(10, decimals)).toString(),
+  } as const;
+
+  const { menu, walletAddress, solBalance, tokenBalances } =
+    await buildWalletActionMenuForUser(deps, {
+      ctx: {} as Context,
+      title: "💸 <b>Withdraw</b>",
+      bodyLines: ["<b>Balances:</b>", "AAA tokens available"],
+      quickActions: { type: "prebuilt", keyboard },
+    });
+
+  expect(walletAddress).toBe("WALLET111111111111111111111111111111111111");
+  expect(solBalance).toBe(2_500_000_000);
+  expect(tokenBalances).toHaveLength(1);
+  expect(menu.text).toContain("AAA tokens available");
+  expect(balancesCalls).toEqual([77n]);
+
+  const rows = menu.keyboard.inline_keyboard ?? [];
+  const lastRow = rows[rows.length - 1];
+  const lastButton = lastRow?.[0];
+  expect(lastButton?.text).toBe("← Back to Wallet");
+  expect(
+    lastButton && "callback_data" in lastButton
+      ? lastButton.callback_data
+      : undefined
+  ).toBe("main_wallet");
+});
+
+test("buildWalletActionMenuForUser applies prepareBalances overrides", async () => {
+  const deps = {
+    requireTelegramId: () => 88n,
+    getWalletAddress: () => "ADDR22222222222222222222222222222222222",
+    getWalletBalances: async () => ({
+      solBalance: 3_000_000_000,
+      tokenBalances: [
+        { mint: "mint-aaa", ticker: "AAA", balance: 1_000_000, decimals: 6 },
+        { mint: "mint-bbb", ticker: "BBB", balance: 2_000_000, decimals: 6 },
+      ],
+    }),
+    formatSolBalance: (lamports: number) => `${lamports / 1_000_000_000} SOL`,
+    formatTokenBalance: (balance: number, decimals: number) =>
+      (balance / Math.pow(10, decimals)).toFixed(3),
+  } as const;
+
+  let prepareCalledWith: { solBalance: number; tokenBalances: any[] } | undefined;
+
+  const { menu } = await buildWalletActionMenuForUser(deps, {
+    ctx: {} as Context,
+    title: "🎯 <b>Select Token</b>",
+    bodyLines: ["Choose a token"],
+    quickActions: {
+      type: "token-select",
+      actionPrefix: "send_select_",
+      includeSol: true,
+    },
+    prepareBalances: (balances) => {
+      prepareCalledWith = balances;
+      return {
+        solBalanceLamports: balances.solBalance,
+        tokenBalances: balances.tokenBalances.slice(0, 1),
+      };
+    },
+  });
+
+  expect(prepareCalledWith?.tokenBalances).toHaveLength(2);
+  const rows = menu.keyboard.inline_keyboard ?? [];
+  const flattened = rows.flat();
+  const buttonLabels = flattened.map((btn) => btn?.text);
+  expect(buttonLabels.filter((label) => label?.includes("AAA"))).toHaveLength(1);
+  expect(buttonLabels.some((label) => label?.includes("BBB"))).toBe(false);
 });

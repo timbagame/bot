@@ -41,6 +41,34 @@ describe("FeeBudgetManager", () => {
     nowSpy?.mockRestore();
   });
 
+  test("clamps cache TTL when env override is non-positive", async () => {
+    const originalTtl = process.env["FEE_CACHE_TTL_MS"];
+    process.env["FEE_CACHE_TTL_MS"] = "0";
+
+    try {
+      const module = await import(
+        `../src/utils/fee-budget?ttl=${Date.now()}`
+      );
+      const FreshManager = module.FeeBudgetManager;
+      const manager = FreshManager.createForTest(createConnectionStub());
+      expect((manager as any).config.cacheTtlMs).toBeGreaterThan(0);
+    } finally {
+      if (originalTtl === undefined) {
+        Reflect.deleteProperty(process.env, "FEE_CACHE_TTL_MS");
+      } else {
+        process.env["FEE_CACHE_TTL_MS"] = originalTtl;
+      }
+    }
+  });
+
+  test("clamps cache TTL when config override is non-positive", () => {
+    const connection = createConnectionStub();
+    const manager = FeeBudgetManager.createForTest(connection, {
+      cacheTtlMs: 0,
+    });
+    expect((manager as any).config.cacheTtlMs).toBeGreaterThan(0);
+  });
+
   test("getOrCompute caches values until TTL expires", async () => {
     const connection = createConnectionStub();
     const manager = FeeBudgetManager.createForTest(connection, { cacheTtlMs: 100 });

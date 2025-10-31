@@ -57,4 +57,23 @@ describe("prices util", () => {
     expect(b).toBe(1.23);
     expect(calls).toBe(1);
   });
+
+  test("handles non-positive TTL env override without throwing", async () => {
+    const previousTtl = process.env["PRICES_CACHE_TTL_MS"];
+    process.env["PRICES_CACHE_TTL_MS"] = "0";
+
+    try {
+      const module = await import(
+        `../src/utils/prices?ttl=${Date.now()}`
+      );
+      const price = await module.getPriceUSD("SOL", jupOkFetch(9.99) as any);
+      expect(price).toBe(9.99);
+    } finally {
+      if (previousTtl === undefined) {
+        Reflect.deleteProperty(process.env, "PRICES_CACHE_TTL_MS");
+      } else {
+        process.env["PRICES_CACHE_TTL_MS"] = previousTtl;
+      }
+    }
+  });
 });

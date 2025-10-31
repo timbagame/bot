@@ -35,8 +35,28 @@ export async function buildWalletTokenLines({
   formatTokenBalance,
   getPriceUSD,
 }: BuildWalletTokenLinesParams): Promise<TokenDisplayLine[]> {
+  const filteredBalances = tokenBalances.filter((token) => {
+    if (!token) return false;
+    if (token.balance <= 0) return false;
+    if (token.ticker === "SOL") return false;
+    return true;
+  });
+
+  const priceReferences = new Set<string>(["SOL"]);
+  for (const token of filteredBalances) {
+    priceReferences.add(token.mint || token.ticker);
+  }
+
+  const priceEntries = await Promise.all(
+    Array.from(priceReferences, async (reference) => {
+      const price = await getPriceUSD(reference);
+      return [reference, price] as const;
+    })
+  );
+  const priceMap = new Map(priceEntries);
+
   const solFormatted = formatSolBalance(solBalanceLamports);
-  const solPriceUSD = await getPriceUSD("SOL");
+  const solPriceUSD = priceMap.get("SOL") ?? 0;
   const solDecimalBalance = solBalanceLamports / LAMPORTS_PER_SOL;
 
   const lines: TokenDisplayLine[] = [
@@ -48,17 +68,13 @@ export async function buildWalletTokenLines({
     },
   ];
 
-  for (const token of tokenBalances) {
-    if (!token || token.balance <= 0 || token.ticker === "SOL") {
-      continue;
-    }
-
+  for (const token of filteredBalances) {
     const formattedAmount = formatTokenBalance
       ? formatTokenBalance(token.balance, token.decimals)
       : String(token.balance / Math.pow(10, token.decimals));
 
     const reference = token.mint || token.ticker;
-    const tokenPriceUSD = await getPriceUSD(reference);
+    const tokenPriceUSD = priceMap.get(reference) ?? 0;
     const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
 
     lines.push({
@@ -114,6 +130,11 @@ export function buildWalletCaption(
 export type WalletActionMenuTokenBalance = WalletTokenBalance & {
   rawBalance?: string;
   [key: string]: unknown;
+};
+
+export type WalletMenuBalances = {
+  solBalance: number;
+  tokenBalances: WalletActionMenuTokenBalance[];
 };
 
 export type WalletActionMenuBalances = {
@@ -181,6 +202,39 @@ export type WalletActionMenuParams = {
 export type WalletActionMenuResult = {
   text: string;
   keyboard: InlineKeyboard;
+};
+
+export type WalletActionMenuContext = WalletMenuBalances & {
+  walletAddress: string;
+};
+
+export type BuildWalletActionMenuForUserDeps = {
+  requireTelegramId: (ctx: Context, contextDescription: string) => bigint;
+  getWalletAddress: (telegramId: bigint) => string | Promise<string>;
+  getWalletBalances: (
+    telegramId: bigint
+  ) => Promise<WalletMenuBalances> | WalletMenuBalances;
+  formatSolBalance: (lamports: number) => string;
+  formatTokenBalance: (balance: number, decimals: number) => string;
+};
+
+export type BuildWalletActionMenuForUserOptions = {
+  ctx: Context;
+  title: string;
+  bodyLines: string[] | ((context: WalletActionMenuContext) => string[]);
+  quickActions: WalletActionQuickActions;
+  backButton?: { label?: string; callback: string };
+  getBalances?: (
+    telegramId: bigint
+  ) => Promise<WalletMenuBalances> | WalletMenuBalances;
+  prepareBalances?: (balances: WalletMenuBalances) => WalletActionMenuBalances;
+};
+
+export type BuildWalletActionMenuForUserResult = {
+  menu: WalletActionMenuResult;
+  walletAddress: string;
+  solBalance: number;
+  tokenBalances: WalletActionMenuTokenBalance[];
 };
 
 export type CustomAmountPromptOptions<State extends InputSessionState> = {
@@ -545,5 +599,64 @@ export const buildWalletActionMenu = ({
   return {
     text: lines.join("\n"),
     keyboard,
+  };
+};
+
+export const buildWalletActionMenuForUser = async (
+  deps: BuildWalletActionMenuForUserDeps,
+  {
+    ctx,
+    title,
+    bodyLines,
+    quickActions,
+    backButton,
+    getBalances,
+    prepareBalances,
+  }: BuildWalletActionMenuForUserOptions
+): Promise<BuildWalletActionMenuForUserResult> => {
+  const telegramId = deps.requireTelegramId(ctx, "wallet action menu");
+  const walletAddress = await Promise.resolve(
+    deps.getWalletAddress(telegramId)
+  );
+
+  const resolveBalances =
+    getBalances ?? ((id: bigint) => Promise.resolve(deps.getWalletBalances(id)));
+
+  const { solBalance, tokenBalances } = await resolveBalances(telegramId);
+
+  const context: WalletActionMenuContext = {
+    walletAddress,
+    solBalance,
+    tokenBalances,
+  };
+
+  const resolvedBodyLines =
+    typeof bodyLines === "function" ? bodyLines(context) : bodyLines;
+
+  const balancesForMenu = prepareBalances
+    ? prepareBalances({ solBalance, tokenBalances })
+    : ({
+        solBalanceLamports: solBalance,
+        tokenBalances,
+      } satisfies WalletActionMenuBalances);
+
+  const menu = buildWalletActionMenu({
+    title,
+    walletAddress,
+    bodyLines: resolvedBodyLines,
+    balances: balancesForMenu,
+    formatters: {
+      formatSolBalance: deps.formatSolBalance,
+      formatTokenBalance: deps.formatTokenBalance,
+    },
+    quickActions,
+    backButton: backButton ?? { label: "← Back to Wallet", callback: "main_wallet" },
+  });
+
+  return {
+    menu,
+    walletAddress,
+    solBalance,
+    tokenBalances,
   };
 };

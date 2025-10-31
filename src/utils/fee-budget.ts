@@ -42,15 +42,58 @@ type FeeBudgetConfig = {
 
 const parseEnvNumber = (
   value: string | undefined,
-  fallback: number
+  fallback: number,
+  options: { min?: number; label?: string } = {}
 ): number => {
-  if (!value) return fallback;
+  if (value === undefined) return fallback;
   const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+
+  if (!Number.isFinite(parsed)) {
+    if (options.label) {
+      console.warn(
+        `[FeeBudget] ${options.label} must be numeric. Received '${value}', using ${fallback}.`
+      );
+    }
+    return fallback;
+  }
+
+  if (parsed < 0) {
+    if (options.label) {
+      console.warn(
+        `[FeeBudget] ${options.label} cannot be negative. Received ${parsed}, using ${fallback}.`
+      );
+    }
+    return fallback;
+  }
+
+  if (options.min !== undefined && parsed < options.min) {
+    if (options.label) {
+      console.warn(
+        `[FeeBudget] ${options.label} must be >= ${options.min}. Received ${parsed}, clamping to ${options.min}.`
+      );
+    }
+    return options.min;
+  }
+
+  return parsed;
+};
+
+const normalizeCacheTtlMs = (value: number, source: string, fallback: number): number => {
+  if (!Number.isFinite(value) || value <= 0) {
+    const clamped = Math.max(1, fallback);
+    console.warn(
+      `[FeeBudget] ${source} must be > 0. Received ${value}, using ${clamped}.`
+    );
+    return clamped;
+  }
+  return value;
 };
 
 const DEFAULT_CONFIG: FeeBudgetConfig = {
-  cacheTtlMs: parseEnvNumber(process.env["FEE_CACHE_TTL_MS"], 30_000),
+  cacheTtlMs: parseEnvNumber(process.env["FEE_CACHE_TTL_MS"], 30_000, {
+    min: 1,
+    label: "FEE_CACHE_TTL_MS",
+  }),
   fallbackSingleTxLamports: parseEnvNumber(
     process.env["FEE_FALLBACK_SINGLE_TX_LAMPORTS"],
     10_000
@@ -115,8 +158,14 @@ export class FeeBudgetManager implements FeeBudgetProvider {
 
   constructor(connection: Connection, config?: Partial<FeeBudgetConfig>) {
     this.connection = connection;
-    this.config = { ...DEFAULT_CONFIG, ...(config ?? {}) };
-    this.cache = createExpiringCache<number>(this.config.cacheTtlMs);
+    const mergedConfig = { ...DEFAULT_CONFIG, ...(config ?? {}) };
+    const normalizedCacheTtl = normalizeCacheTtlMs(
+      mergedConfig.cacheTtlMs,
+      "FeeBudgetManager.cacheTtlMs",
+      DEFAULT_CONFIG.cacheTtlMs
+    );
+    this.config = { ...mergedConfig, cacheTtlMs: normalizedCacheTtl };
+    this.cache = createExpiringCache<number>(normalizedCacheTtl);
     this.stubPayer = Keypair.generate().publicKey;
   }
 

@@ -62,12 +62,12 @@ import {
 } from "./utils/keyboards";
 import {
   buildWalletCaption,
-  buildWalletActionMenu,
+  buildWalletActionMenuForUser,
   showCustomAmountPrompt,
   upsertWalletMenuMessage,
   persistInputPrompt,
-  type WalletActionQuickActions,
-  type WalletActionMenuBalances,
+  type BuildWalletActionMenuForUserOptions,
+  type WalletMenuBalances,
 } from "./utils/wallet-ui";
 import {
   buildEmptyLeaderboardMessage,
@@ -81,6 +81,11 @@ import {
   formatTokenDisplay,
   formatUsdValue,
 } from "./utils/format-amount";
+import {
+  createSolConversionUtilities,
+  type PendingSendTransaction,
+  type PendingSwapTransaction,
+} from "./bot/flows/sol-conversion";
 import {
   showWalletUI as showWalletUIHandler,
   onMainWallet,
@@ -178,6 +183,18 @@ const updateOracleMaxPlayers = (maybeMax: number) => {
     oracleMaxTickets = maybeMax;
   }
 };
+
+const {
+  executeWrapFlow,
+  executeUnwrapFlow,
+  validatePendingTransaction,
+} = createSolConversionUtilities({
+  wallet,
+  clearWalletCache,
+  buildTransactionLinkMessage,
+  getPendingTransaction,
+  getSolFeeBufferLamports: () => SOL_FEE_BUFFER_LAMPORTS,
+});
 
 const parseOracleNumeric = (value: unknown): number | null => {
   if (typeof value === "number") {
@@ -784,6 +801,36 @@ const buildSolscanSuccessMessage = ({
   }
 
   return { text: lines.join("\n"), disablePreview: previewDisabled };
+};
+
+type SolConversionSuccessKind = "wrap" | "unwrap";
+
+const renderSolConversionSuccess = ({
+  kind,
+  formattedAmount,
+  signature,
+}: {
+  kind: SolConversionSuccessKind;
+  formattedAmount: string | undefined;
+  signature: string;
+}): { text: string; disablePreview: boolean } => {
+  const safeAmount = escapeHtml(formattedAmount ?? "0");
+  const { title, body } =
+    kind === "wrap"
+      ? {
+          title: "✅ <b>Wrap Completed</b>",
+          body: `Wrapped ${safeAmount} SOL to WSOL`,
+        }
+      : {
+          title: "✅ <b>Unwrap Completed</b>",
+          body: `Unwrapped ${safeAmount} WSOL to SOL`,
+        };
+
+  return buildSolscanSuccessMessage({
+    title,
+    bodyLines: [body],
+    signature,
+  });
 };
 
 type PrepareTradeQuoteParams = {
@@ -2018,319 +2065,6 @@ const validateAndProcessTransaction = async (
   }
 };
 
-type SolConversionValidationResult =
-  | { status: "ok"; formattedAmount?: string }
-  | { status: "insufficient"; formattedAmount: string }
-  | { status: "empty"; formattedAmount?: string };
-
-type SolConversionFlowOutcome =
-  | { status: "success"; signature: string; formattedAmount: string }
-  | { status: "insufficient"; formattedAmount: string }
-  | { status: "empty"; formattedAmount?: string }
-  | { status: "error" };
-
-interface SolConversionFlowConfig {
-  telegramId: bigint;
-  ensureProceed: () => Promise<SolConversionValidationResult>;
-  perform: () => Promise<{ signature: string; amountLamports?: number }>;
-  onProcessing: (formattedAmount?: string) => Promise<void>;
-  onSuccess: (
-    details: { signature: string; formattedAmount: string; solscanUrl?: string | null }
-  ) => Promise<void>;
-  onInsufficient?: (formattedAmount: string) => Promise<void>;
-  onEmpty?: (formattedAmount?: string) => Promise<void>;
-  onError?: (error: unknown, formattedAmount?: string) => Promise<void>;
-  formatAmount: (lamports: number) => string;
-  initialAmountLamports?: number;
-  treatZeroAmountAsEmpty?: boolean;
-  handleEmptyError?: (error: unknown) => boolean;
-  networkOverride?: string | null;
-}
-
-const executeSolConversionFlow = async ({
-  telegramId,
-  ensureProceed,
-  perform,
-  onProcessing,
-  onSuccess,
-  onInsufficient,
-  onEmpty,
-  onError,
-  formatAmount,
-  initialAmountLamports,
-  treatZeroAmountAsEmpty = false,
-  handleEmptyError,
-  networkOverride,
-}: SolConversionFlowConfig): Promise<SolConversionFlowOutcome> => {
-  const validation = await ensureProceed();
-
-  if (validation.status === "insufficient") {
-    await onInsufficient?.(validation.formattedAmount);
-    return { status: "insufficient", formattedAmount: validation.formattedAmount };
-  }
-
-  if (validation.status === "empty") {
-    await onEmpty?.(validation.formattedAmount);
-    return { status: "empty", formattedAmount: validation.formattedAmount };
-  }
-
-  const processingAmount =
-    validation.formattedAmount ??
-    (initialAmountLamports !== undefined
-      ? formatAmount(initialAmountLamports)
-      : undefined);
-
-  await onProcessing(processingAmount);
-
-  let formattedAmountForError = processingAmount;
-
-  try {
-    const { signature, amountLamports } = await perform();
-    let normalizedAmount =
-      amountLamports !== undefined ? amountLamports : initialAmountLamports;
-
-    if (normalizedAmount === undefined) {
-      if (treatZeroAmountAsEmpty) {
-        await onEmpty?.(validation.formattedAmount);
-        return { status: "empty", formattedAmount: validation.formattedAmount };
-      }
-      throw new Error("Unable to determine transaction amount");
-    }
-
-    if (!Number.isFinite(normalizedAmount)) {
-      throw new Error("Invalid transaction amount");
-    }
-
-    if (treatZeroAmountAsEmpty && normalizedAmount <= 0) {
-      await onEmpty?.(validation.formattedAmount);
-      return { status: "empty", formattedAmount: validation.formattedAmount };
-    }
-
-    const formattedAmount = formatAmount(normalizedAmount);
-    formattedAmountForError = formattedAmount;
-
-    await wallet.confirmTransaction(signature);
-    clearWalletCache(telegramId);
-
-    const { solscanUrl } = buildTransactionLinkMessage({
-      signature,
-      networkOverride: networkOverride ?? process.env["RPC_URL"],
-    });
-
-    await onSuccess({ signature, formattedAmount, solscanUrl });
-    return { status: "success", signature, formattedAmount };
-  } catch (error) {
-    if (handleEmptyError?.(error)) {
-      await onEmpty?.(validation.formattedAmount);
-      return { status: "empty", formattedAmount: validation.formattedAmount };
-    }
-
-    if (onError) {
-      await onError(error, formattedAmountForError ?? validation.formattedAmount);
-      return { status: "error" };
-    }
-    throw error;
-  }
-};
-
-type WrapFlowResult = {
-  status: "success" | "insufficient" | "error";
-  signature?: string;
-};
-
-type WrapFlowHandlers = {
-  onProcessing: (formattedAmount: string) => Promise<void>;
-  onSuccess: (
-    details: { signature: string; formattedAmount: string; solscanUrl?: string | null }
-  ) => Promise<void>;
-  onInsufficientBalance: (formattedAmount: string) => Promise<void>;
-  onError?: (error: unknown, formattedAmount: string) => Promise<void>;
-};
-
-const executeWrapFlow = async (
-  telegramId: bigint,
-  amountLamports: number,
-  handlers: WrapFlowHandlers
-): Promise<WrapFlowResult> => {
-  if (!Number.isFinite(amountLamports) || amountLamports <= 0) {
-    throw new Error("Wrap amount must be greater than zero");
-  }
-
-  const result = await executeSolConversionFlow({
-    telegramId,
-    initialAmountLamports: amountLamports,
-    formatAmount: (lamports) => wallet.formatSolBalance(lamports),
-    ensureProceed: async () => {
-      const formattedAmount = wallet.formatSolBalance(amountLamports);
-      const balanceLamports = await wallet.getBalance(telegramId);
-
-      if (amountLamports + SOL_FEE_BUFFER_LAMPORTS > balanceLamports) {
-        return { status: "insufficient", formattedAmount } as const;
-      }
-
-      return { status: "ok", formattedAmount } as const;
-    },
-    perform: async () => ({
-      signature: await wallet.wrapSol(telegramId, amountLamports),
-      amountLamports,
-    }),
-    onProcessing: async (amount) =>
-      handlers.onProcessing(
-        amount ?? wallet.formatSolBalance(amountLamports)
-      ),
-    onSuccess: handlers.onSuccess,
-    onInsufficient: handlers.onInsufficientBalance,
-    onError: handlers.onError
-      ? (error, formattedAmount) =>
-          handlers.onError!(
-            error,
-            formattedAmount ?? wallet.formatSolBalance(amountLamports)
-          )
-      : undefined,
-  });
-
-  if (result.status === "success") {
-    return { status: "success", signature: result.signature };
-  }
-
-  if (result.status === "insufficient") {
-    return { status: "insufficient" };
-  }
-
-  if (result.status === "error") {
-    return { status: "error" };
-  }
-
-  return { status: "error" };
-};
-
-type UnwrapFlowResult = {
-  status: "success" | "empty" | "error";
-  signature?: string;
-  formattedAmount?: string;
-};
-
-type UnwrapFlowHandlers = {
-  expectedAmountLamports?: number;
-  onProcessing: (formattedAmount?: string) => Promise<void>;
-  onNoBalance: () => Promise<void>;
-  onSuccess: (
-    details: { signature: string; formattedAmount: string; solscanUrl?: string | null }
-  ) => Promise<void>;
-  onError?: (error: unknown) => Promise<void>;
-};
-
-const executeUnwrapFlow = async (
-  telegramId: bigint,
-  handlers: UnwrapFlowHandlers
-): Promise<UnwrapFlowResult> => {
-  const result = await executeSolConversionFlow({
-    telegramId,
-    formatAmount: (lamports) => wallet.formatSolBalance(lamports),
-    ensureProceed: async () => {
-      const expected = handlers.expectedAmountLamports;
-      if (expected !== undefined) {
-        if (!Number.isFinite(expected) || expected <= 0) {
-          return { status: "empty" } as const;
-        }
-
-        return {
-          status: "ok",
-          formattedAmount: wallet.formatSolBalance(expected),
-        } as const;
-      }
-
-      return { status: "ok" } as const;
-    },
-    perform: async () => wallet.unwrapSol(telegramId),
-    onProcessing: handlers.onProcessing,
-    onSuccess: handlers.onSuccess,
-    onEmpty: handlers.onNoBalance,
-    onError: handlers.onError ? (error) => handlers.onError!(error) : undefined,
-    treatZeroAmountAsEmpty: true,
-    handleEmptyError: (error) => {
-      const message =
-        error instanceof Error
-          ? String(error.message ?? "")
-          : String(error ?? "");
-      return (
-        message.includes("already empty") ||
-        message.includes("No WSOL account") ||
-        message.includes("WSOL account is already empty")
-      );
-    },
-  });
-
-  if (result.status === "success") {
-    return {
-      status: "success",
-      signature: result.signature,
-      formattedAmount: result.formattedAmount,
-    };
-  }
-
-  if (result.status === "empty") {
-    return { status: "empty", formattedAmount: result.formattedAmount };
-  }
-
-  if (result.status === "error") {
-    return { status: "error" };
-  }
-
-  return { status: "error" };
-};
-
-type PendingTransactionValidationResult<T> =
-  | { status: "success"; transaction: T }
-  | { status: "expired" }
-  | { status: "unauthorized" };
-
-type PendingSendTransaction = {
-  type: "send";
-  userId: string;
-  token: string;
-  amount: string;
-  address: string;
-  amountDisplay?: string;
-};
-
-type PendingSwapTransaction = {
-  type: "swap";
-  userId: string;
-  fromToken: string;
-  toToken: string;
-  amount: string;
-  rawAmount: string;
-  inputDecimals: number;
-  outputDecimals: number;
-  cancelCallback: string;
-  slippageBps: number;
-  quote: SwapQuote;
-};
-
-const validatePendingTransaction = <T extends { type: string; userId: string }>(
-  ctx: Context,
-  txId: string,
-  expectedType: T["type"],
-  options: { removeFromCache?: boolean } = {}
-): PendingTransactionValidationResult<T> => {
-  const { removeFromCache = true } = options;
-  const transaction = getPendingTransaction(txId, removeFromCache) as
-    | (T & { type: string; userId: string })
-    | undefined;
-
-  if (!transaction || transaction.type !== expectedType) {
-    return { status: "expired" };
-  }
-
-  const currentUserId = getTelegramIdString(ctx);
-  if (!currentUserId || transaction.userId !== currentUserId) {
-    return { status: "unauthorized" };
-  }
-
-  return { status: "success", transaction };
-};
-
 // ================================
 // RESPONSE HELPERS
 // ================================
@@ -3212,22 +2946,19 @@ bot.command("wrap", async (ctx: Context) => {
           return;
         }
 
-        const { message: linkLine } = buildTransactionLinkMessage({
+        const successView = renderSolConversionSuccess({
+          kind: "wrap",
+          formattedAmount,
           signature,
-          networkOverride: process.env["RPC_URL"],
-          label: "🔗 ",
-          linkText: "View on Solscan",
-          format: "html",
         });
-        const linkSuffix = linkLine ? `\n\n${linkLine}` : "";
 
         await ctx.api.editMessageText(
           ctx.chat!.id,
           processingMessageId,
-          `✅ <b>Wrap Completed</b>\n\nWrapped ${formattedAmount} SOL to WSOL${linkSuffix}`,
+          successView.text,
           {
             parse_mode: "HTML",
-            link_preview_options: { is_disabled: Boolean(linkLine) },
+            link_preview_options: { is_disabled: successView.disablePreview },
           }
         );
       },
@@ -5125,10 +4856,13 @@ const registerWalletActionMenuHandler = ({
           return;
         }
 
-        const { menu } = await buildWalletActionMenuForUser({
-          ctx,
-          ...resolution.menuOptions,
-        });
+        const { menu } = await buildWalletActionMenuForUser(
+          defaultWalletActionMenuDeps,
+          {
+            ctx,
+            ...resolution.menuOptions,
+          }
+        );
 
         await respondWithMenu(ctx, menu);
 
@@ -5516,17 +5250,16 @@ bot.callbackQuery("unwrap_confirm", async (ctx) => {
         });
       },
       onSuccess: async ({ signature, formattedAmount }) => {
-        const amountLabel = escapeHtml(formattedAmount ?? "0");
-        const { text, disablePreview } = buildSolscanSuccessMessage({
-          title: "✅ <b>Unwrap Completed</b>",
-          bodyLines: [`Unwrapped ${amountLabel} WSOL to SOL`],
+        const successView = renderSolConversionSuccess({
+          kind: "unwrap",
+          formattedAmount,
           signature,
         });
 
         await respondWithMenu(ctx, {
-          text,
+          text: successView.text,
           keyboard: createBackToWalletKeyboard(),
-          disableLinkPreview: disablePreview,
+          disableLinkPreview: successView.disablePreview,
         });
       },
       onError: async (error) => {
@@ -6174,88 +5907,25 @@ const getCachedWalletData = async (telegramId: bigint) => {
 };
 
 // Function to clear wallet cache (useful after token registration)
-const clearWalletCache = (telegramId: bigint) => {
+function clearWalletCache(telegramId: bigint) {
   const cacheKey = getWalletCacheKey(telegramId);
   walletDataCache.delete(cacheKey);
   console.log(`🗑️ Cleared wallet cache for user: ${telegramId}`);
-};
+}
 
-type WalletMenuBalances = Pick<CachedWalletData, "solBalance" | "tokenBalances">;
-
-type WalletActionMenuContext = WalletMenuBalances & {
-  walletAddress: string;
-};
-
-type BuildWalletActionMenuForUserOptions = {
-  ctx: any;
-  title: string;
-  bodyLines: string[] | ((context: WalletActionMenuContext) => string[]);
-  quickActions: WalletActionQuickActions;
-  backButton?: { label?: string; callback: string };
-  getBalances?: (telegramId: bigint) => Promise<WalletMenuBalances>;
-  prepareBalances?: (
-    balances: WalletMenuBalances
-  ) => WalletActionMenuBalances;
-};
-
-const buildWalletActionMenuForUser = async ({
-  ctx,
-  title,
-  bodyLines,
-  quickActions,
-  backButton,
-  getBalances,
-  prepareBalances,
-}: BuildWalletActionMenuForUserOptions) => {
-  const telegramId = requireTelegramId(ctx, "wallet action menu");
-  const keypair = wallet.getKeyPair(telegramId);
-  const walletAddress = keypair.publicKey.toBase58();
-
-  const resolveBalances =
-    getBalances ??
-    (async (id: bigint): Promise<WalletMenuBalances> => {
-      const { solBalance, tokenBalances } = await getCachedWalletData(id);
-      return { solBalance, tokenBalances };
-    });
-
-  const { solBalance, tokenBalances } = await resolveBalances(telegramId);
-
-  const context: WalletActionMenuContext = {
-    walletAddress,
-    solBalance,
-    tokenBalances,
-  };
-
-  const resolvedBodyLines =
-    typeof bodyLines === "function" ? bodyLines(context) : bodyLines;
-
-  const balancesForMenu = prepareBalances
-    ? prepareBalances({ solBalance, tokenBalances })
-    : ({
-        solBalanceLamports: solBalance,
-        tokenBalances,
-      } satisfies WalletActionMenuBalances);
-
-  const menu = buildWalletActionMenu({
-    title,
-    walletAddress,
-    bodyLines: resolvedBodyLines,
-    balances: balancesForMenu,
-    formatters: {
-      formatSolBalance: (lamports) => wallet.formatSolBalance(lamports),
-      formatTokenBalance: (balance, decimals) =>
-        wallet.formatTokenBalance(balance, decimals),
-    },
-    quickActions,
-    backButton: backButton ?? { label: "← Back to Wallet", callback: "main_wallet" },
-  });
-
-  return {
-    menu,
-    walletAddress,
-    solBalance,
-    tokenBalances,
-  };
+const defaultWalletActionMenuDeps = {
+  requireTelegramId,
+  getWalletAddress: (telegramId: bigint) =>
+    wallet.getKeyPair(telegramId).publicKey.toBase58(),
+  getWalletBalances: async (
+    telegramId: bigint
+  ): Promise<WalletMenuBalances> => {
+    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
+    return { solBalance, tokenBalances };
+  },
+  formatSolBalance: (lamports: number) => wallet.formatSolBalance(lamports),
+  formatTokenBalance: (balance: number, decimals: number) =>
+    wallet.formatTokenBalance(balance, decimals),
 };
 
 // ================================
@@ -6267,15 +5937,17 @@ registerCallbackPrefixHandler("send_select_", async (ctx, { payload: token }) =>
   console.log("🔔 Token selected for send:", token);
 
   try {
-    const { menu } = await buildWalletActionMenuForUser({
-      ctx,
-      title: `📤 <b>Send ${escapeHtml(token)}</b>`,
-      bodyLines: ({ solBalance, tokenBalances }) => {
-        let balanceDisplay = "0";
-        if (token === "SOL") {
-          balanceDisplay = wallet.formatSolBalance(solBalance);
-        } else {
-          const selectedToken = tokenBalances.find((t) => t.ticker === token);
+    const { menu } = await buildWalletActionMenuForUser(
+      defaultWalletActionMenuDeps,
+      {
+        ctx,
+        title: `📤 <b>Send ${escapeHtml(token)}</b>`,
+        bodyLines: ({ solBalance, tokenBalances }) => {
+          let balanceDisplay = "0";
+          if (token === "SOL") {
+            balanceDisplay = wallet.formatSolBalance(solBalance);
+          } else {
+            const selectedToken = tokenBalances.find((t) => t.ticker === token);
           if (selectedToken) {
             balanceDisplay = wallet.formatTokenBalance(
               selectedToken.balance,
@@ -6284,22 +5956,24 @@ registerCallbackPrefixHandler("send_select_", async (ctx, { payload: token }) =>
           }
         }
 
-        return [
-          `<b>From:</b> <code>{{WALLET_ADDRESS}}</code>`,
-          `<b>Balance:</b> ${escapeHtml(balanceDisplay)} ${escapeHtml(token)}`,
-          "",
-          `<b>Quick Send Amounts:</b>`,
-        ];
-      },
-      quickActions: {
-        type: "prebuilt",
-        keyboard: buildQuickAmountKeyboard({
-          baseCallback: (value) => `send_amount_${token}_${value.toUpperCase()}`,
-          customLabel: "✏️ Custom Amount",
-          backCallback: "cmd_withdraw",
-        }),
-      },
-    });
+          return [
+            `<b>From:</b> <code>{{WALLET_ADDRESS}}</code>`,
+            `<b>Balance:</b> ${escapeHtml(balanceDisplay)} ${escapeHtml(token)}`,
+            "",
+            `<b>Quick Send Amounts:</b>`,
+          ];
+        },
+        quickActions: {
+          type: "prebuilt",
+          keyboard: buildQuickAmountKeyboard({
+            baseCallback: (value) =>
+              `send_amount_${token}_${value.toUpperCase()}`,
+            customLabel: "✏️ Custom Amount",
+            backCallback: "cmd_withdraw",
+          }),
+        },
+      }
+    );
 
     await respondWithMenu(ctx, menu);
     await safeAnswerCallbackQuery(ctx, `Selected ${token}`);
@@ -7581,6 +7255,7 @@ export const __test_formatSlippageOptionLabel = formatSlippageOptionLabel;
 export const __test_getUserSwapSlippageBps = getUserSwapSlippageBps;
 export const __test_setUserSwapSlippageBps = setUserSwapSlippageBps;
 export const __test_buildSwapConfirmationKeyboard = buildSwapConfirmationKeyboard;
+export const __test_renderSolConversionSuccess = renderSolConversionSuccess;
 
 // Start the bot and setup Anchor (skip during tests)
 if (process.env.NODE_ENV !== "test") {

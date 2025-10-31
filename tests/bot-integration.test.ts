@@ -25,6 +25,12 @@ describe("Bot Integration Tests", () => {
     process.env.SOLANA_NETWORK =
       process.env.SOLANA_NETWORK || "http://localhost:8899";
 
+    // Reset singleton instances to ensure deterministic resolver wiring.
+    // @ts-ignore - test-only escape hatch
+    WalletManager["instance"] = undefined;
+    // @ts-ignore - test-only escape hatch
+    TokenManager["instance"] = undefined;
+
     const decimalsMap: Record<string, number> = {
       [DEFAULT_TOKEN_MINT]: 6,
       [WSOL_MINT]: 9,
