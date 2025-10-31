@@ -132,6 +132,11 @@ export type WalletActionMenuTokenBalance = WalletTokenBalance & {
   [key: string]: unknown;
 };
 
+export type WalletMenuBalances = {
+  solBalance: number;
+  tokenBalances: WalletActionMenuTokenBalance[];
+};
+
 export type WalletActionMenuBalances = {
   solBalanceLamports: number;
   tokenBalances: WalletActionMenuTokenBalance[];
@@ -197,6 +202,39 @@ export type WalletActionMenuParams = {
 export type WalletActionMenuResult = {
   text: string;
   keyboard: InlineKeyboard;
+};
+
+export type WalletActionMenuContext = WalletMenuBalances & {
+  walletAddress: string;
+};
+
+export type BuildWalletActionMenuForUserDeps = {
+  requireTelegramId: (ctx: Context, contextDescription: string) => bigint;
+  getWalletAddress: (telegramId: bigint) => string | Promise<string>;
+  getWalletBalances: (
+    telegramId: bigint
+  ) => Promise<WalletMenuBalances> | WalletMenuBalances;
+  formatSolBalance: (lamports: number) => string;
+  formatTokenBalance: (balance: number, decimals: number) => string;
+};
+
+export type BuildWalletActionMenuForUserOptions = {
+  ctx: Context;
+  title: string;
+  bodyLines: string[] | ((context: WalletActionMenuContext) => string[]);
+  quickActions: WalletActionQuickActions;
+  backButton?: { label?: string; callback: string };
+  getBalances?: (
+    telegramId: bigint
+  ) => Promise<WalletMenuBalances> | WalletMenuBalances;
+  prepareBalances?: (balances: WalletMenuBalances) => WalletActionMenuBalances;
+};
+
+export type BuildWalletActionMenuForUserResult = {
+  menu: WalletActionMenuResult;
+  walletAddress: string;
+  solBalance: number;
+  tokenBalances: WalletActionMenuTokenBalance[];
 };
 
 export type CustomAmountPromptOptions<State extends InputSessionState> = {
@@ -561,5 +599,64 @@ export const buildWalletActionMenu = ({
   return {
     text: lines.join("\n"),
     keyboard,
+  };
+};
+
+export const buildWalletActionMenuForUser = async (
+  deps: BuildWalletActionMenuForUserDeps,
+  {
+    ctx,
+    title,
+    bodyLines,
+    quickActions,
+    backButton,
+    getBalances,
+    prepareBalances,
+  }: BuildWalletActionMenuForUserOptions
+): Promise<BuildWalletActionMenuForUserResult> => {
+  const telegramId = deps.requireTelegramId(ctx, "wallet action menu");
+  const walletAddress = await Promise.resolve(
+    deps.getWalletAddress(telegramId)
+  );
+
+  const resolveBalances =
+    getBalances ?? ((id: bigint) => Promise.resolve(deps.getWalletBalances(id)));
+
+  const { solBalance, tokenBalances } = await resolveBalances(telegramId);
+
+  const context: WalletActionMenuContext = {
+    walletAddress,
+    solBalance,
+    tokenBalances,
+  };
+
+  const resolvedBodyLines =
+    typeof bodyLines === "function" ? bodyLines(context) : bodyLines;
+
+  const balancesForMenu = prepareBalances
+    ? prepareBalances({ solBalance, tokenBalances })
+    : ({
+        solBalanceLamports: solBalance,
+        tokenBalances,
+      } satisfies WalletActionMenuBalances);
+
+  const menu = buildWalletActionMenu({
+    title,
+    walletAddress,
+    bodyLines: resolvedBodyLines,
+    balances: balancesForMenu,
+    formatters: {
+      formatSolBalance: deps.formatSolBalance,
+      formatTokenBalance: deps.formatTokenBalance,
+    },
+    quickActions,
+    backButton: backButton ?? { label: "← Back to Wallet", callback: "main_wallet" },
+  });
+
+  return {
+    menu,
+    walletAddress,
+    solBalance,
+    tokenBalances,
   };
 };

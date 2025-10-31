@@ -77,6 +77,7 @@ export const EXPIRED_GAMES_CHECK_INTERVAL_MS = 60000; // 1 minute
 // ================================
 
 export const BLOCKHASH_CACHE_DURATION = 10 * 1000; // 10 seconds
+export const TOKEN_MANAGER_APPROVED_CACHE_TTL_MS = 60 * 1000; // 60 seconds
 export const TELEGRAM_USERNAME_CACHE_TTL_MS = parsePositiveDuration(
   "TELEGRAM_USERNAME_CACHE_TTL_MS",
   5 * 60_000

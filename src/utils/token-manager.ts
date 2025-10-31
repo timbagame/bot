@@ -4,7 +4,7 @@ import { TokenDatabase } from "./token-database";
 import { WalletManager } from "./wallet";
 import { PumpFunClient, isPotentialPumpFunToken } from "./pump-fun";
 import type { ParseAmountResult, ChatTokenConfig, KnownToken } from "../types";
-import { WSOL_MINT } from "./constants";
+import { WSOL_MINT, TOKEN_MANAGER_APPROVED_CACHE_TTL_MS } from "./constants";
 import {
   getBuiltinTokenMetadataByMint,
   getBuiltinTokenMetadataByTicker,
@@ -80,6 +80,18 @@ export class TokenManager {
   private defaultTokenTicker: string;
   private pumpFunClient?: PumpFunClient;
   private static pumpFunClientFactory?: () => PumpFunClient;
+  private approvedTokensCache:
+    | {
+        value: Array<{
+          token_mint: string;
+          token_ticker: string;
+          decimals: number;
+        }>;
+        expiresAt: number;
+      }
+    | null = null;
+  private readonly approvedTokensCacheTtlMs =
+    TOKEN_MANAGER_APPROVED_CACHE_TTL_MS;
 
   private constructor(
     wallet: WalletManager,
@@ -141,6 +153,20 @@ export class TokenManager {
     }
 
     return this.pumpFunClient;
+  }
+
+  private snapshotApprovedTokens(
+    tokens: KnownToken[]
+  ): Array<{ token_mint: string; token_ticker: string; decimals: number }> {
+    return tokens.map(({ token_mint, token_ticker, decimals }) => ({
+      token_mint,
+      token_ticker,
+      decimals,
+    }));
+  }
+
+  private invalidateApprovedTokensCache(): void {
+    this.approvedTokensCache = null;
   }
 
   private resolveBuiltinMintToken(
@@ -605,6 +631,7 @@ export class TokenManager {
         ticker.toUpperCase(),
         metadata.decimals
       );
+      this.invalidateApprovedTokensCache();
       return true;
     } catch (error) {
       console.error(`Error adding token ${ticker}:`, error);
@@ -709,6 +736,7 @@ export class TokenManager {
 
   public removeToken(tokenMint: string): void {
     this.tokenDb.removeKnownToken(tokenMint);
+    this.invalidateApprovedTokensCache();
   }
 
   // ================================
@@ -739,7 +767,19 @@ export class TokenManager {
     token_ticker: string;
     decimals: number;
   }> {
-    return this.tokenDb.getAllKnownTokens();
+    const now = Date.now();
+    const cache = this.approvedTokensCache;
+    if (cache && cache.expiresAt > now) {
+      return cache.value;
+    }
+
+    const tokens = this.tokenDb.getAllKnownTokens();
+    const snapshot = this.snapshotApprovedTokens(tokens);
+    this.approvedTokensCache = {
+      value: snapshot,
+      expiresAt: now + this.approvedTokensCacheTtlMs,
+    };
+    return snapshot;
   }
 
   // ================================
@@ -867,6 +907,7 @@ export class TokenManager {
       if (metadata) {
         const ticker = metadata.ticker.toUpperCase();
         this.tokenDb.addKnownToken(registryMint.mint, ticker, metadata.decimals);
+        this.invalidateApprovedTokensCache();
         return {
           token_mint: registryMint.mint,
           token_ticker: ticker,
@@ -894,6 +935,7 @@ export class TokenManager {
 
     const ticker = discovered.ticker.toUpperCase();
     this.tokenDb.addKnownToken(normalizedMint, ticker, discovered.decimals);
+    this.invalidateApprovedTokensCache();
 
     return {
       token_mint: normalizedMint,

@@ -62,12 +62,12 @@ import {
 } from "./utils/keyboards";
 import {
   buildWalletCaption,
-  buildWalletActionMenu,
+  buildWalletActionMenuForUser,
   showCustomAmountPrompt,
   upsertWalletMenuMessage,
   persistInputPrompt,
-  type WalletActionQuickActions,
-  type WalletActionMenuBalances,
+  type BuildWalletActionMenuForUserOptions,
+  type WalletMenuBalances,
 } from "./utils/wallet-ui";
 import {
   buildEmptyLeaderboardMessage,
@@ -801,6 +801,36 @@ const buildSolscanSuccessMessage = ({
   }
 
   return { text: lines.join("\n"), disablePreview: previewDisabled };
+};
+
+type SolConversionSuccessKind = "wrap" | "unwrap";
+
+const renderSolConversionSuccess = ({
+  kind,
+  formattedAmount,
+  signature,
+}: {
+  kind: SolConversionSuccessKind;
+  formattedAmount: string | undefined;
+  signature: string;
+}): { text: string; disablePreview: boolean } => {
+  const safeAmount = escapeHtml(formattedAmount ?? "0");
+  const { title, body } =
+    kind === "wrap"
+      ? {
+          title: "✅ <b>Wrap Completed</b>",
+          body: `Wrapped ${safeAmount} SOL to WSOL`,
+        }
+      : {
+          title: "✅ <b>Unwrap Completed</b>",
+          body: `Unwrapped ${safeAmount} WSOL to SOL`,
+        };
+
+  return buildSolscanSuccessMessage({
+    title,
+    bodyLines: [body],
+    signature,
+  });
 };
 
 type PrepareTradeQuoteParams = {
@@ -2916,22 +2946,19 @@ bot.command("wrap", async (ctx: Context) => {
           return;
         }
 
-        const { message: linkLine } = buildTransactionLinkMessage({
+        const successView = renderSolConversionSuccess({
+          kind: "wrap",
+          formattedAmount,
           signature,
-          networkOverride: process.env["RPC_URL"],
-          label: "🔗 ",
-          linkText: "View on Solscan",
-          format: "html",
         });
-        const linkSuffix = linkLine ? `\n\n${linkLine}` : "";
 
         await ctx.api.editMessageText(
           ctx.chat!.id,
           processingMessageId,
-          `✅ <b>Wrap Completed</b>\n\nWrapped ${formattedAmount} SOL to WSOL${linkSuffix}`,
+          successView.text,
           {
             parse_mode: "HTML",
-            link_preview_options: { is_disabled: Boolean(linkLine) },
+            link_preview_options: { is_disabled: successView.disablePreview },
           }
         );
       },
@@ -4829,10 +4856,13 @@ const registerWalletActionMenuHandler = ({
           return;
         }
 
-        const { menu } = await buildWalletActionMenuForUser({
-          ctx,
-          ...resolution.menuOptions,
-        });
+        const { menu } = await buildWalletActionMenuForUser(
+          defaultWalletActionMenuDeps,
+          {
+            ctx,
+            ...resolution.menuOptions,
+          }
+        );
 
         await respondWithMenu(ctx, menu);
 
@@ -5220,17 +5250,16 @@ bot.callbackQuery("unwrap_confirm", async (ctx) => {
         });
       },
       onSuccess: async ({ signature, formattedAmount }) => {
-        const amountLabel = escapeHtml(formattedAmount ?? "0");
-        const { text, disablePreview } = buildSolscanSuccessMessage({
-          title: "✅ <b>Unwrap Completed</b>",
-          bodyLines: [`Unwrapped ${amountLabel} WSOL to SOL`],
+        const successView = renderSolConversionSuccess({
+          kind: "unwrap",
+          formattedAmount,
           signature,
         });
 
         await respondWithMenu(ctx, {
-          text,
+          text: successView.text,
           keyboard: createBackToWalletKeyboard(),
-          disableLinkPreview: disablePreview,
+          disableLinkPreview: successView.disablePreview,
         });
       },
       onError: async (error) => {
@@ -5884,82 +5913,19 @@ function clearWalletCache(telegramId: bigint) {
   console.log(`🗑️ Cleared wallet cache for user: ${telegramId}`);
 }
 
-type WalletMenuBalances = Pick<CachedWalletData, "solBalance" | "tokenBalances">;
-
-type WalletActionMenuContext = WalletMenuBalances & {
-  walletAddress: string;
-};
-
-type BuildWalletActionMenuForUserOptions = {
-  ctx: any;
-  title: string;
-  bodyLines: string[] | ((context: WalletActionMenuContext) => string[]);
-  quickActions: WalletActionQuickActions;
-  backButton?: { label?: string; callback: string };
-  getBalances?: (telegramId: bigint) => Promise<WalletMenuBalances>;
-  prepareBalances?: (
-    balances: WalletMenuBalances
-  ) => WalletActionMenuBalances;
-};
-
-const buildWalletActionMenuForUser = async ({
-  ctx,
-  title,
-  bodyLines,
-  quickActions,
-  backButton,
-  getBalances,
-  prepareBalances,
-}: BuildWalletActionMenuForUserOptions) => {
-  const telegramId = requireTelegramId(ctx, "wallet action menu");
-  const keypair = wallet.getKeyPair(telegramId);
-  const walletAddress = keypair.publicKey.toBase58();
-
-  const resolveBalances =
-    getBalances ??
-    (async (id: bigint): Promise<WalletMenuBalances> => {
-      const { solBalance, tokenBalances } = await getCachedWalletData(id);
-      return { solBalance, tokenBalances };
-    });
-
-  const { solBalance, tokenBalances } = await resolveBalances(telegramId);
-
-  const context: WalletActionMenuContext = {
-    walletAddress,
-    solBalance,
-    tokenBalances,
-  };
-
-  const resolvedBodyLines =
-    typeof bodyLines === "function" ? bodyLines(context) : bodyLines;
-
-  const balancesForMenu = prepareBalances
-    ? prepareBalances({ solBalance, tokenBalances })
-    : ({
-        solBalanceLamports: solBalance,
-        tokenBalances,
-      } satisfies WalletActionMenuBalances);
-
-  const menu = buildWalletActionMenu({
-    title,
-    walletAddress,
-    bodyLines: resolvedBodyLines,
-    balances: balancesForMenu,
-    formatters: {
-      formatSolBalance: (lamports) => wallet.formatSolBalance(lamports),
-      formatTokenBalance: (balance, decimals) =>
-        wallet.formatTokenBalance(balance, decimals),
-    },
-    quickActions,
-    backButton: backButton ?? { label: "← Back to Wallet", callback: "main_wallet" },
-  });
-
-  return {
-    menu,
-    walletAddress,
-    solBalance,
-    tokenBalances,
-  };
+const defaultWalletActionMenuDeps = {
+  requireTelegramId,
+  getWalletAddress: (telegramId: bigint) =>
+    wallet.getKeyPair(telegramId).publicKey.toBase58(),
+  getWalletBalances: async (
+    telegramId: bigint
+  ): Promise<WalletMenuBalances> => {
+    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
+    return { solBalance, tokenBalances };
+  },
+  formatSolBalance: (lamports: number) => wallet.formatSolBalance(lamports),
+  formatTokenBalance: (balance: number, decimals: number) =>
+    wallet.formatTokenBalance(balance, decimals),
 };
 
 // ================================
@@ -5971,15 +5937,17 @@ registerCallbackPrefixHandler("send_select_", async (ctx, { payload: token }) =>
   console.log("🔔 Token selected for send:", token);
 
   try {
-    const { menu } = await buildWalletActionMenuForUser({
-      ctx,
-      title: `📤 <b>Send ${escapeHtml(token)}</b>`,
-      bodyLines: ({ solBalance, tokenBalances }) => {
-        let balanceDisplay = "0";
-        if (token === "SOL") {
-          balanceDisplay = wallet.formatSolBalance(solBalance);
-        } else {
-          const selectedToken = tokenBalances.find((t) => t.ticker === token);
+    const { menu } = await buildWalletActionMenuForUser(
+      defaultWalletActionMenuDeps,
+      {
+        ctx,
+        title: `📤 <b>Send ${escapeHtml(token)}</b>`,
+        bodyLines: ({ solBalance, tokenBalances }) => {
+          let balanceDisplay = "0";
+          if (token === "SOL") {
+            balanceDisplay = wallet.formatSolBalance(solBalance);
+          } else {
+            const selectedToken = tokenBalances.find((t) => t.ticker === token);
           if (selectedToken) {
             balanceDisplay = wallet.formatTokenBalance(
               selectedToken.balance,
@@ -5988,22 +5956,24 @@ registerCallbackPrefixHandler("send_select_", async (ctx, { payload: token }) =>
           }
         }
 
-        return [
-          `<b>From:</b> <code>{{WALLET_ADDRESS}}</code>`,
-          `<b>Balance:</b> ${escapeHtml(balanceDisplay)} ${escapeHtml(token)}`,
-          "",
-          `<b>Quick Send Amounts:</b>`,
-        ];
-      },
-      quickActions: {
-        type: "prebuilt",
-        keyboard: buildQuickAmountKeyboard({
-          baseCallback: (value) => `send_amount_${token}_${value.toUpperCase()}`,
-          customLabel: "✏️ Custom Amount",
-          backCallback: "cmd_withdraw",
-        }),
-      },
-    });
+          return [
+            `<b>From:</b> <code>{{WALLET_ADDRESS}}</code>`,
+            `<b>Balance:</b> ${escapeHtml(balanceDisplay)} ${escapeHtml(token)}`,
+            "",
+            `<b>Quick Send Amounts:</b>`,
+          ];
+        },
+        quickActions: {
+          type: "prebuilt",
+          keyboard: buildQuickAmountKeyboard({
+            baseCallback: (value) =>
+              `send_amount_${token}_${value.toUpperCase()}`,
+            customLabel: "✏️ Custom Amount",
+            backCallback: "cmd_withdraw",
+          }),
+        },
+      }
+    );
 
     await respondWithMenu(ctx, menu);
     await safeAnswerCallbackQuery(ctx, `Selected ${token}`);
@@ -7285,6 +7255,7 @@ export const __test_formatSlippageOptionLabel = formatSlippageOptionLabel;
 export const __test_getUserSwapSlippageBps = getUserSwapSlippageBps;
 export const __test_setUserSwapSlippageBps = setUserSwapSlippageBps;
 export const __test_buildSwapConfirmationKeyboard = buildSwapConfirmationKeyboard;
+export const __test_renderSolConversionSuccess = renderSolConversionSuccess;
 
 // Start the bot and setup Anchor (skip during tests)
 if (process.env.NODE_ENV !== "test") {

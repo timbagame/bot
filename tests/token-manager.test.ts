@@ -4,7 +4,10 @@ import { TokenManager } from "../src/utils/token-manager";
 import { ChatDatabase } from "../src/utils/chat-database";
 import { TokenDatabase } from "../src/utils/token-database";
 import { resetTestDatabase } from "./helpers/database";
-import { WSOL_MINT } from "../src/utils/constants";
+import {
+  WSOL_MINT,
+  TOKEN_MANAGER_APPROVED_CACHE_TTL_MS,
+} from "../src/utils/constants";
 
 // Clean DBs and singletons before each test
 beforeEach(() => {
@@ -239,4 +242,46 @@ test("validateTokenMint validates base58 and metadata path", async () => {
   expect(await tm.validateTokenMint("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")).toBe(true);
   // Clearly invalid should fail
   expect(await tm.validateTokenMint("not-a-mint")).toBe(false);
+});
+
+test("getAllApprovedTokensWithMetadata caches results and invalidates on changes", async () => {
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tokenDb = TokenDatabase.getInstance();
+  const originalGetter = tokenDb.getAllKnownTokens.bind(tokenDb);
+  let calls = 0;
+  tokenDb.getAllKnownTokens = function patched() {
+    calls += 1;
+    return originalGetter();
+  };
+
+  const originalNow = Date.now;
+  let now = 1_000_000;
+  Date.now = () => now;
+
+  try {
+    expect(tm.getAllApprovedTokensWithMetadata()).toEqual([]);
+    expect(calls).toBe(1);
+
+    now += TOKEN_MANAGER_APPROVED_CACHE_TTL_MS - 10;
+    expect(tm.getAllApprovedTokensWithMetadata()).toEqual([]);
+    expect(calls).toBe(1);
+
+    now += 20;
+    expect(tm.getAllApprovedTokensWithMetadata()).toEqual([]);
+    expect(calls).toBe(2);
+
+    const newMint = Keypair.generate().publicKey.toBase58();
+    await tm.addToken(newMint, "CACHE", 6);
+    const cachedAfterAdd = tm.getAllApprovedTokensWithMetadata();
+    expect(calls).toBe(3);
+    expect(cachedAfterAdd.some((token) => token.token_mint === newMint)).toBe(true);
+
+    tm.removeToken(newMint);
+    const afterRemove = tm.getAllApprovedTokensWithMetadata();
+    expect(calls).toBe(4);
+    expect(afterRemove.some((token) => token.token_mint === newMint)).toBe(false);
+  } finally {
+    tokenDb.getAllKnownTokens = originalGetter;
+    Date.now = originalNow;
+  }
 });
