@@ -12,3 +12,10 @@ services:
       ORACLE_API_URL: ${ORACLE_API_URL:-http://host.docker.internal:3001}
       TOKEN_MINT: ${TOKEN_MINT}
       TICKER: ${TICKER}
+    volumes:
+      # Read-only keypair for on-chain interactions
+      - ./admin-keypair.json:/app/admin-keypair.json:ro
+      # Persist local sqlite databases between restarts
+      - ./chat-settings.sqlite:/app/chat-settings.sqlite
+      - ./games.sqlite:/app/games.sqlite
+      - ./tokens.sqlite:/app/tokens.sqlite

@@ -1,16 +1,22 @@
-FROM oven/bun:latest
+FROM oven/bun:1.3.1
 
 WORKDIR /app
 
-# Install dependencies using lockfile for reproducible builds
+# Copy dependency manifests first for better caching
 COPY package.json bun.lock bunfig.toml ./
+
+# Install dependencies using the exact lockfile
 RUN bun install --frozen-lockfile
 
-# Copy application source
+# Copy the rest of the application source
 COPY tsconfig.json ./tsconfig.json
 COPY game-tokens-info.json ./game-tokens-info.json
 COPY src ./src
 COPY scripts ./scripts
 COPY idl ./idl
 
+# Expose the bot HTTP port
+EXPOSE 3000
+
+# Start the bot
 CMD ["bun", "start"]
