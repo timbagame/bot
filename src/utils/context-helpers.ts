@@ -163,13 +163,18 @@ export const createMessageEditAdapter = <T extends Context>(
 
   const originalFrom = ctx.from ? { ...ctx.from } : undefined;
 
+  const adapterTarget = { chatId: targetChatId, messageId };
+
   return {
     ...ctx,
     from: originalFrom,
     chat: ctx.chat ?? ({ id: targetChatId } as any),
     editMessageText: async (text: string, options: any) =>
       await ctx.api.editMessageText(targetChatId, messageId, text, options),
-  };
+    editMessageCaption: async (options: any) =>
+      await ctx.api.editMessageCaption(targetChatId, messageId, options),
+    __editAdapterTarget: adapterTarget,
+  } as T;
 };
 
 /**

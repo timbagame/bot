@@ -131,6 +131,56 @@ export const respondWithMenu = async (
       }
     }
 
+    const adapterTarget =
+      allowContextEdit && (ctx as any).__editAdapterTarget
+        ? (ctx as any).__editAdapterTarget
+        : null;
+
+    if (adapterTarget) {
+      const messageId =
+        typeof adapterTarget.messageId === "number" ? adapterTarget.messageId : null;
+      const chatId =
+        typeof adapterTarget.chatId === "number"
+          ? adapterTarget.chatId
+          : typeof ctx.chat?.id === "number"
+          ? ctx.chat.id
+          : null;
+
+      if (typeof (ctx as any).editMessageCaption === "function") {
+        try {
+          const captionEdited = await tryEditCaption(ctx, payload);
+          if (captionEdited) {
+            return {
+              messageId,
+              chatId,
+              respondedWithReply: false,
+            };
+          }
+        } catch (error) {
+          console.warn(
+            `${logLabel}: adapter editMessageCaption failed, attempting text edit:`,
+            error
+          );
+        }
+      }
+
+      try {
+        const edited = await tryEditText(ctx, payload);
+        if (edited) {
+          return {
+            messageId,
+            chatId,
+            respondedWithReply: false,
+          };
+        }
+      } catch (error) {
+        console.warn(
+          `${logLabel}: adapter editMessageText failed, replying instead:`,
+          error
+        );
+      }
+    }
+
     if (allowContextEdit && ctx.callbackQuery && message) {
       const supportsCaption = messageSupportsCaption(message);
       const messageId = typeof message?.message_id === "number" ? message.message_id : null;
