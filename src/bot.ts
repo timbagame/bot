@@ -19,7 +19,6 @@ import {
   MIN_SOL_FOR_TX,
   GAME_TIMEOUT,
   EXPIRED_GAMES_CHECK_INTERVAL_MS,
-  GAME_EXPIRATION_BUFFER_TIME,
   DEFAULT_NULL_ADDRESS,
   DEFAULT_TOKEN_MINT,
   DEFAULT_TOKEN_TICKER,
@@ -110,7 +109,7 @@ import {
   getRequiredTelegramIdForContext,
 } from "./utils/context-helpers";
 import { recentUpdateGuard } from "./utils/recent-update";
-import { getPriceUSD } from "./utils/prices";
+import { getPriceUSD, resolveTokenPriceUSD } from "./utils/prices";
 import { patchReplyBehavior } from "./utils/reply-patch";
 import { buildTransactionLinkMessage } from "./utils/network-detector";
 import { buildProcessingStatus } from "./utils/trade-ui";
@@ -1416,11 +1415,11 @@ const fetchTokenPriceUSD = async ({
   tokenMint: string;
   tokenTicker: string;
 }): Promise<number | null> => {
-  let tokenPriceUSD = await getPriceUSD(tokenMint);
-  if (!tokenPriceUSD) {
-    tokenPriceUSD = await getPriceUSD(tokenTicker);
-  }
-  return tokenPriceUSD ?? null;
+  const lookup = await resolveTokenPriceUSD({
+    tokenMint,
+    tokenTicker,
+  });
+  return lookup?.price ?? null;
 };
 
 const toTitleCase = (value: string): string => {
@@ -4465,10 +4464,7 @@ bot.callbackQuery(
       resolveCreatorId: (ctx) => ctx.match?.[2],
       failureText: "❌ Only the game creator can modify this setup!",
     },
-    async (
-      ctx,
-      { session, tokenContext, updateSession, clearSession, creatorId }
-    ) => {
+    async (ctx, { session, tokenContext, clearSession, creatorId }) => {
       try {
         const gameType = ctx.match![1] as string;
         const telegramId = await getRequiredTelegramIdForContext(
@@ -4561,14 +4557,6 @@ bot.callbackQuery(
           ),
         });
 
-        updateSession({
-          waitingFor: "setup",
-          gameType,
-          userBalance,
-          messageId: ctx.callbackQuery?.message?.message_id ?? 0,
-          chatId: ctx.chat?.id ?? 0,
-          contractMinimum: contractMin,
-        });
 
         await safeAnswerCallbackQuery(ctx);
       } catch (error) {
@@ -7704,10 +7692,10 @@ setupAnchor()
      */
     const isGameExpired = async (gameAccount: any): Promise<boolean> => {
       const blockTime = await wallet.getBlockchainTime();
-      const createdAt = Number(gameAccount.createdAt);
-      const timeout = Number(gameAccount.timeout);
-      const expiresAt = createdAt + timeout;
-      return blockTime > expiresAt + GAME_EXPIRATION_BUFFER_TIME;
+      if (typeof blockTime === "number" && Number.isFinite(blockTime)) {
+        return GameManager.isExpiredWithBuffer(gameAccount, blockTime);
+      }
+      return GameManager.isExpiredWithBuffer(gameAccount);
     };
 
     // Start periodic check for expired games

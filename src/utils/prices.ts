@@ -5,10 +5,17 @@ import {
   buildPumpFunCoinUrl,
 } from "./constants";
 import { WSOL_MINT } from "./token-registry";
+import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
 import type { FetchLike } from "../types";
 
-const cache = new Map<string, { price: number; ts: number }>();
-const inflight = new Map<string, Promise<number>>();
+type PriceCacheEntry = {
+  value?: number;
+  inflight?: Promise<number>;
+};
+
+const priceCache: ExpiringCache<PriceCacheEntry> = createExpiringCache(
+  PRICES_CACHE_TTL_MS
+);
 
 const PRICES_ENV_KEY = "PRICES_ENABLED";
 
@@ -25,10 +32,6 @@ function isPricesEnabled(): boolean {
 
 function normalizeKey(id: string): string {
   return id.trim().toUpperCase();
-}
-
-function now() {
-  return Date.now();
 }
 
 async function withTimeout<T>(p: Promise<T>, timeoutMs: number): Promise<T> {
@@ -127,40 +130,61 @@ export async function getPriceUSD(
   if (!isPricesEnabled()) return 0;
   const key = normalizeKey(mintOrTicker);
 
-  const c = cache.get(key);
-  if (c && now() - c.ts < PRICES_CACHE_TTL_MS) return c.price;
+  const liveEntry = priceCache.get(key);
+  if (liveEntry?.value !== undefined) {
+    return liveEntry.value;
+  }
 
-  const inflightKey = key;
-  const existing = inflight.get(inflightKey);
-  if (existing) return existing;
+  const cachedOrPending = priceCache.peek(key);
+  if (cachedOrPending?.inflight) {
+    return cachedOrPending.inflight;
+  }
 
-  const p = (async () => {
+  const staleValue = cachedOrPending?.value;
+
+  const inflightRef: { current?: Promise<number> } = {};
+
+  const pendingPromise = (async () => {
+    let resolvedPrice = 0;
     try {
       const { jupId, forDex } = toMintOrId(mintOrTicker);
 
       // 1) Jupiter price endpoint
       const fromJup = await fetchFromJupiter(jupId, fetchImpl, PRICES_TIMEOUT_MS);
       if (fromJup && fromJup > 0) {
-        cache.set(key, { price: fromJup, ts: now() });
+        resolvedPrice = fromJup;
+        priceCache.setWithTTL(key, { value: fromJup });
         return fromJup;
       }
 
       // 2) Pump.fun fallback (requires address)
       const fromPump = await fetchFromPumpFun(forDex, fetchImpl, PRICES_TIMEOUT_MS);
       if (fromPump && fromPump > 0) {
-        cache.set(key, { price: fromPump, ts: now() });
+        resolvedPrice = fromPump;
+        priceCache.setWithTTL(key, { value: fromPump });
         return fromPump;
       }
 
       // 3) Give up
       return 0;
     } finally {
-      inflight.delete(inflightKey);
+      const latest = priceCache.peek(key);
+      if (latest?.inflight === inflightRef.current) {
+        if (resolvedPrice > 0) {
+          priceCache.setWithTTL(key, { value: resolvedPrice });
+        } else if (latest?.value !== undefined) {
+          priceCache.setWithTTL(key, { value: latest.value });
+        } else {
+          priceCache.delete(key);
+        }
+      }
     }
   })();
 
-  inflight.set(inflightKey, p);
-  return p;
+  inflightRef.current = pendingPromise;
+
+  priceCache.setWithTTL(key, { value: staleValue, inflight: pendingPromise });
+  return pendingPromise;
 }
 
 export async function getPricesUSD(
@@ -171,5 +195,58 @@ export async function getPricesUSD(
     ids.map(async (id) => [id, await getPriceUSD(id, fetchImpl)] as const)
   );
   return Object.fromEntries(entries);
+}
+
+type PriceLookupOptions = {
+  tokenMint?: string;
+  tokenTicker?: string;
+  isSol?: boolean;
+  fetchImpl?: FetchLike;
+};
+
+export type PriceLookupResult = {
+  price: number;
+  identifier: string;
+};
+
+export async function resolveTokenPriceUSD({
+  tokenMint,
+  tokenTicker,
+  isSol,
+  fetchImpl,
+}: PriceLookupOptions): Promise<PriceLookupResult | null> {
+  const seen = new Set<string>();
+  const candidates: string[] = [];
+
+  const pushCandidate = (candidate?: string) => {
+    if (!candidate) return;
+    const trimmed = candidate.trim();
+    if (!trimmed) return;
+    const normalized = normalizeKey(trimmed);
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    candidates.push(trimmed);
+  };
+
+  if (isSol) {
+    pushCandidate("SOL");
+    pushCandidate(WSOL_MINT);
+  } else {
+    pushCandidate(tokenMint);
+    pushCandidate(tokenTicker);
+  }
+
+  // Always fall back to SOL pricing if token-specific lookups fail.
+  pushCandidate("SOL");
+  pushCandidate(WSOL_MINT);
+
+  for (const candidate of candidates) {
+    const price = await getPriceUSD(candidate, fetchImpl);
+    if (price && Number.isFinite(price) && price > 0) {
+      return { price, identifier: candidate };
+    }
+  }
+
+  return null;
 }
 
