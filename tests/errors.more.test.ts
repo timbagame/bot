@@ -44,4 +44,22 @@ describe("errors extras", () => {
     const msg = parseTransactionError(new Error("Jupiter: input and output mints are not allowed to be equal"));
     expect(msg).toContain("Cannot swap same token");
   });
+
+  test("rent shortfall error explains SOL top up instead of dumping logs", () => {
+    const rentError = new Error(
+      "Transaction simulation failed: Transaction results in an account (0) with insufficient funds for rent."
+    ) as Error & { transactionLogs?: string[] };
+    rentError.transactionLogs = [
+      "Program log: Instruction: InitializeImmutableOwner",
+      "Program log: Please upgrade to SPL Token 2022 for immutable owner support",
+      "Program log: Instruction: InitializeAccount3",
+      "Program log: Transaction results in an account (0) with insufficient funds for rent",
+    ];
+
+    const msg = parseTransactionError(rentError, walletStub);
+    expect(msg).toContain("Rent-exempt account creation requires additional SOL");
+    expect(msg).toContain("Please top up");
+    expect(msg).not.toContain("InitializeImmutableOwner");
+    expect(msg).not.toContain("SPL Token 2022");
+  });
 });

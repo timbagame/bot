@@ -5534,10 +5534,11 @@ bot.callbackQuery(/^confirm_send_/, async (ctx) => {
       });
     } catch (txError) {
       console.error("Transaction failed:", txError);
+      const userFriendlyError = formatUserFriendlyError(txError, wallet);
       await respondWithMenu(ctx, {
-        text: `❌ <b>Transaction Failed</b>\n\n${
-          (txError as Error).message
-        }\n\nPlease try again.`,
+        text: `❌ <b>Transaction Failed</b>\n\n${escapeHtml(
+          userFriendlyError
+        )}`,
         keyboard: createBackToWalletKeyboard(),
       });
     }
@@ -5806,10 +5807,9 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
       });
     } catch (swapError) {
       console.error("Swap transaction failed:", swapError);
+      const userFriendlyError = formatUserFriendlyError(swapError, wallet);
       await respondWithMenu(ctx, {
-        text: `❌ <b>Swap Failed</b>\n\n${
-          (swapError as Error).message
-        }\n\nPlease try again.`,
+        text: `❌ <b>Swap Failed</b>\n\n${escapeHtml(userFriendlyError)}`,
         parseMode: "HTML",
         keyboard: createBackToWalletKeyboard(),
       });
