@@ -2,6 +2,7 @@ import { test, expect } from "bun:test";
 import {
   formatAmount,
   formatCompactTokenDisplay,
+  formatRate,
   formatTokenDisplay,
   formatUsdValue,
 } from "../src/utils/format-amount";
@@ -111,4 +112,13 @@ test("formatUsdValue formats approximate amounts with trimmed decimals", () => {
 
 test("formatUsdValue uses fallback when input is not finite", () => {
   expect(formatUsdValue(Number.NaN, { fallback: "n/a" })).toBe("n/a");
+});
+
+test("formatRate renders tiny values without scientific notation", () => {
+  expect(formatRate(8e-12)).toBe("0.000000000008");
+  expect(formatRate(3.456e-9)).toBe("0.000000003456");
+});
+
+test("formatRate falls back to exponential for extremely small values", () => {
+  expect(formatRate(4e-13)).toBe("4.00e-13");
 });

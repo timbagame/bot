@@ -256,6 +256,8 @@ export function formatRate(value: number): string {
     formatted = value.toFixed(8);
   } else if (value >= 0.00000001) {
     formatted = value.toFixed(10);
+  } else if (value >= 0.000000000001) {
+    formatted = value.toFixed(12);
   } else {
     formatted = value.toExponential(2);
   }
