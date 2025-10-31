@@ -1,6 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
-import { buildWalletCaption, showCustomAmountPrompt } from "../src/utils/wallet-ui";
-import { INPUT_TIMEOUT_HINT } from "../src/utils/constants";
+import {
+  buildWalletCaption,
+  buildWalletTokenLines,
+  showCustomAmountPrompt,
+} from "../src/utils/wallet-ui";
+import { INPUT_TIMEOUT_HINT, LAMPORTS_PER_SOL } from "../src/utils/constants";
 import { getInputSession, clearAllInputSessions } from "../src/utils/user-state";
 
 type EditCall = { text: string; options: any };
@@ -110,6 +114,49 @@ test("buildWalletCaption escapes HTML-sensitive ticker and address", () => {
       process.env.SOLANA_NETWORK = originalNetwork;
     }
   }
+});
+
+test("buildWalletTokenLines batches price lookups and reuses cached values", async () => {
+  const calls: string[] = [];
+  const lines = await buildWalletTokenLines({
+    solBalanceLamports: 2 * LAMPORTS_PER_SOL,
+    tokenBalances: [
+      { mint: "mint-1", ticker: "TOKEN", balance: 2_000_000, decimals: 6 },
+      { mint: "mint-1", ticker: "TOKEN-B", balance: 3_000_000, decimals: 6 },
+      { mint: "", ticker: "USDC", balance: 10_000_000, decimals: 6 },
+    ],
+    formatSolBalance: (lamports) => `${lamports / LAMPORTS_PER_SOL} SOL`,
+    formatTokenBalance: (balance, decimals) =>
+      (balance / Math.pow(10, decimals)).toFixed(2),
+    getPriceUSD: async (reference) => {
+      calls.push(reference);
+      switch (reference) {
+        case "SOL":
+          return 25;
+        case "mint-1":
+          return 0.5;
+        case "USDC":
+          return 1;
+        default:
+          return 0;
+      }
+    },
+  });
+
+  expect(calls).toEqual(["SOL", "mint-1", "USDC"]);
+  expect(lines).toHaveLength(4);
+  expect(lines[0]).toEqual({
+    ticker: "SOL",
+    amount: "2 SOL",
+    usdValue: "50",
+    unit: "SOL",
+  });
+  const tokenLine = lines[1]!;
+  const tokenLineB = lines[2]!;
+  const stablecoinLine = lines[3]!;
+  expect(tokenLine.usdValue).toBe("1");
+  expect(tokenLineB.usdValue).toBe("1.50");
+  expect(stablecoinLine.usdValue).toBe("10");
 });
 
 test("showCustomAmountPrompt formats send custom amount flow", async () => {

@@ -35,8 +35,28 @@ export async function buildWalletTokenLines({
   formatTokenBalance,
   getPriceUSD,
 }: BuildWalletTokenLinesParams): Promise<TokenDisplayLine[]> {
+  const filteredBalances = tokenBalances.filter((token) => {
+    if (!token) return false;
+    if (token.balance <= 0) return false;
+    if (token.ticker === "SOL") return false;
+    return true;
+  });
+
+  const priceReferences = new Set<string>(["SOL"]);
+  for (const token of filteredBalances) {
+    priceReferences.add(token.mint || token.ticker);
+  }
+
+  const priceEntries = await Promise.all(
+    Array.from(priceReferences, async (reference) => {
+      const price = await getPriceUSD(reference);
+      return [reference, price] as const;
+    })
+  );
+  const priceMap = new Map(priceEntries);
+
   const solFormatted = formatSolBalance(solBalanceLamports);
-  const solPriceUSD = await getPriceUSD("SOL");
+  const solPriceUSD = priceMap.get("SOL") ?? 0;
   const solDecimalBalance = solBalanceLamports / LAMPORTS_PER_SOL;
 
   const lines: TokenDisplayLine[] = [
@@ -48,17 +68,13 @@ export async function buildWalletTokenLines({
     },
   ];
 
-  for (const token of tokenBalances) {
-    if (!token || token.balance <= 0 || token.ticker === "SOL") {
-      continue;
-    }
-
+  for (const token of filteredBalances) {
     const formattedAmount = formatTokenBalance
       ? formatTokenBalance(token.balance, token.decimals)
       : String(token.balance / Math.pow(10, token.decimals));
 
     const reference = token.mint || token.ticker;
-    const tokenPriceUSD = await getPriceUSD(reference);
+    const tokenPriceUSD = priceMap.get(reference) ?? 0;
     const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
 
     lines.push({

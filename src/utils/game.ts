@@ -31,6 +31,7 @@ import {
   getCoinflipVideoId,
   getGiveawayVideoId,
   applyDynamicFeeBudgets,
+  TELEGRAM_USERNAME_CACHE_TTL_MS,
   TRANSACTION_RESUBMIT_ATTEMPTS,
 } from "./constants";
 import {
@@ -187,6 +188,13 @@ export class GameManager {
   private gameRentLamports: number | null = null;
   private readonly completedGameErrorMessage =
     "This game has already completed. Refresh to see the result.";
+  private readonly usernameCacheTtlMs = TELEGRAM_USERNAME_CACHE_TTL_MS;
+  private readonly usernameCacheMaxEntries = 500;
+  private usernameCache = new Map<
+    string,
+    { value: string | null; expiresAt: number }
+  >();
+  private usernameLookupPromises = new Map<string, Promise<string | null>>();
 
   private constructor(
     private program: anchor.Program<Timba>,
@@ -275,6 +283,50 @@ export class GameManager {
     }
 
     throw new Error("Unable to resolve Solana connection");
+  }
+
+  private buildUsernameCacheKey(ctx: Context, telegramId: number): string {
+    const chatId = ctx.chat?.id ?? ctx.from?.id ?? "global";
+    return `${chatId}:${telegramId}`;
+  }
+
+  private pruneUsernameCache(now = Date.now()): void {
+    for (const [key, entry] of this.usernameCache) {
+      if (entry.expiresAt <= now) {
+        this.usernameCache.delete(key);
+      }
+    }
+  }
+
+  private enforceUsernameCacheLimit(): void {
+    if (this.usernameCache.size <= this.usernameCacheMaxEntries) {
+      return;
+    }
+
+    const excess = this.usernameCache.size - this.usernameCacheMaxEntries;
+    const iterator = this.usernameCache.keys();
+    for (let removed = 0; removed < excess; removed += 1) {
+      const next = iterator.next();
+      if (next.done) {
+        break;
+      }
+      this.usernameCache.delete(next.value);
+    }
+  }
+
+  private setCachedUsername(
+    key: string,
+    value: string | null,
+    now = Date.now()
+  ): void {
+    const ttl =
+      value === null
+        ? Math.min(this.usernameCacheTtlMs, 30_000)
+        : this.usernameCacheTtlMs;
+
+    this.pruneUsernameCache(now);
+    this.usernameCache.set(key, { value, expiresAt: now + ttl });
+    this.enforceUsernameCacheLimit();
   }
 
   private getOraclePda(): PublicKey {
@@ -1247,8 +1299,42 @@ export class GameManager {
         throw new Error(`Invalid Telegram ID: ${telegramId}`);
       }
 
-      const chatMember = await ctx.api.getChatMember(ctx.chat!.id, numericId);
-      return chatMember.user.username || chatMember.user.first_name || null;
+      const chatId = ctx.chat?.id;
+      if (chatId === undefined || chatId === null) {
+        throw new Error("Chat context is required to resolve usernames");
+      }
+
+      const key = this.buildUsernameCacheKey(ctx, numericId);
+      const now = Date.now();
+      const cached = this.usernameCache.get(key);
+      if (cached && cached.expiresAt > now) {
+        return cached.value;
+      }
+
+      if (cached) {
+        this.usernameCache.delete(key);
+      }
+
+      let lookup = this.usernameLookupPromises.get(key);
+      if (!lookup) {
+        lookup = (async () => {
+          try {
+            const chatMember = await ctx.api.getChatMember(chatId, numericId);
+            const resolved =
+              chatMember.user.username || chatMember.user.first_name || null;
+            this.setCachedUsername(key, resolved);
+            return resolved;
+          } catch (fetchError) {
+            this.setCachedUsername(key, null);
+            throw fetchError;
+          } finally {
+            this.usernameLookupPromises.delete(key);
+          }
+        })();
+        this.usernameLookupPromises.set(key, lookup);
+      }
+
+      return await lookup;
     } catch (error) {
       console.warn(
         `Error getting username for Telegram ID ${telegramId}:`,
