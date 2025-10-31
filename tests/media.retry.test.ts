@@ -24,15 +24,15 @@ describe("media retry helpers", () => {
 
   test("awaitTelegramRetry respects retry-after metadata (property)", async () => {
     await fc.assert(
-      fc.asyncProperty(
-        fc.integer({ min: 1, max: 4 }),
-        fc.integer({ min: 0, max: 5 }),
-        async (maxAttempts, retryAfter) => {
-          const delays: number[] = [];
-          // @ts-ignore override timers for deterministic measurement
-          globalThis.setTimeout = ((cb: (...args: any[]) => void, ms?: number) => {
-            delays.push(ms ?? 0);
-            cb();
+        fc.asyncProperty(
+          fc.integer({ min: 1, max: 4 }),
+          fc.integer({ min: 0, max: 5 }),
+          async (maxAttempts: number, retryAfter: number) => {
+            const delays: number[] = [];
+            // @ts-ignore override timers for deterministic measurement
+            globalThis.setTimeout = ((cb: (...args: any[]) => void, ms?: number) => {
+              delays.push(ms ?? 0);
+              cb();
             return 0 as any;
           }) as any;
 

@@ -7,6 +7,16 @@ import {
 } from "../src/utils/leaderboard-ui";
 import { escapeHtml } from "../src/utils/format-amount";
 
+type LeaderboardPlayerSeed = {
+  displayName: string;
+  winRate: number;
+  wins: number;
+  losses: number;
+  totalGames: number;
+  gamesCreated: number;
+  gamesJoined: number;
+};
+
 describe("leaderboard UI rendering", () => {
   test("empty leaderboard message provides onboarding guidance", () => {
     const message = buildEmptyLeaderboardMessage();
@@ -98,32 +108,34 @@ describe("leaderboard UI rendering", () => {
   test("player names are always HTML escaped (property)", async () => {
     await fc.assert(
       fc.asyncProperty(
-        fc.array(
-          fc.record({
-            displayName: fc.string({ minLength: 1, maxLength: 20 }),
-            winRate: fc.float({ min: 0, max: 100 }),
-            wins: fc.integer({ min: 0, max: 100 }),
-            losses: fc.integer({ min: 0, max: 100 }),
-            totalGames: fc.integer({ min: 0, max: 200 }),
-            gamesCreated: fc.integer({ min: 0, max: 200 }),
-            gamesJoined: fc.integer({ min: 0, max: 200 }),
-          }),
-          { minLength: 1, maxLength: 5 }
-        ),
-        async (entries) => {
-          const players: LeaderboardPlayerDisplay[] = entries.map((entry, index) => ({
-            telegramId: `${index}`,
-            displayName: entry.displayName,
-            totalGames: entry.totalGames,
-            wins: entry.wins,
-            losses: entry.losses,
-            winRate: entry.winRate,
-            gamesCreated: entry.gamesCreated,
-            gamesJoined: entry.gamesJoined,
-            totalVolume: 0,
-          }));
+           fc.array(
+             fc.record<LeaderboardPlayerSeed>({
+               displayName: fc.string({ minLength: 1, maxLength: 20 }),
+               winRate: fc.float({ min: 0, max: 100 }),
+               wins: fc.integer({ min: 0, max: 100 }),
+               losses: fc.integer({ min: 0, max: 100 }),
+               totalGames: fc.integer({ min: 0, max: 200 }),
+               gamesCreated: fc.integer({ min: 0, max: 200 }),
+               gamesJoined: fc.integer({ min: 0, max: 200 }),
+             }),
+             { minLength: 1, maxLength: 5 }
+           ),
+           async (entries: LeaderboardPlayerSeed[]) => {
+             const players: LeaderboardPlayerDisplay[] = entries.map(
+               (entry: LeaderboardPlayerSeed, index: number) => ({
+                 telegramId: `${index}`,
+                 displayName: entry.displayName,
+                 totalGames: entry.totalGames,
+                 wins: entry.wins,
+                 losses: entry.losses,
+                 winRate: entry.winRate,
+                 gamesCreated: entry.gamesCreated,
+                 gamesJoined: entry.gamesJoined,
+                 totalVolume: 0,
+               })
+             );
 
-          const rendered = buildLeaderboardMessage({ chatTitle: "Guild", players });
+             const rendered = buildLeaderboardMessage({ chatTitle: "Guild", players });
           for (const player of players) {
             const escaped = escapeHtml(player.displayName);
             expect(rendered).toContain(escaped);

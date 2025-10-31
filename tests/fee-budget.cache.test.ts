@@ -9,17 +9,18 @@ const baseConnection = {
   getRecentPrioritizationFees: async () => [],
 } as any;
 
-const originalEnv = process.env.NODE_ENV;
+let previousEnv: string | undefined;
 
 beforeEach(() => {
-  process.env.NODE_ENV = "test";
+  previousEnv = process.env["NODE_ENV"];
+  process.env["NODE_ENV"] = "test";
 });
 
 afterEach(() => {
-  if (originalEnv === undefined) {
-    delete process.env.NODE_ENV;
+  if (previousEnv === undefined) {
+    delete process.env["NODE_ENV"];
   } else {
-    process.env.NODE_ENV = originalEnv;
+    process.env["NODE_ENV"] = previousEnv;
   }
 });
 
@@ -63,7 +64,7 @@ describe("FeeBudgetManager caching and fallbacks", () => {
   });
 
   test("computeSingleTransaction uses production fees and caches result", async () => {
-    process.env.NODE_ENV = "production";
+    process.env["NODE_ENV"] = "production";
     let feeCalls = 0;
     const connection = {
       ...baseConnection,
@@ -91,7 +92,7 @@ describe("FeeBudgetManager caching and fallbacks", () => {
   });
 
   test("estimatePriorityFee handles invalid RPC responses gracefully", async () => {
-    process.env.NODE_ENV = "production";
+    process.env["NODE_ENV"] = "production";
     const connection = {
       ...baseConnection,
       async getRecentPrioritizationFees() {
@@ -117,7 +118,16 @@ describe("FeeBudgetManager caching and fallbacks", () => {
           gameBufferExtraLamports: fc.integer({ min: 0, max: 400_000 }),
           gameBufferMinLamports: fc.integer({ min: 1, max: 600_000 }),
         }),
-        async (config) => {
+        async (config: {
+          fallbackSingleTxLamports: number;
+          wrapBufferExtraLamports: number;
+          wrapBufferMinLamports: number;
+          jitBufferExtraLamports: number;
+          jitBufferMinLamports: number;
+          gameBufferMultiplier: number;
+          gameBufferExtraLamports: number;
+          gameBufferMinLamports: number;
+        }) => {
           const manager = FeeBudgetManager.createForTest(baseConnection, config) as any;
           const wrapFallback = manager.getFallbackForKey("wrap");
           const jitFallback = manager.getFallbackForKey("jit");

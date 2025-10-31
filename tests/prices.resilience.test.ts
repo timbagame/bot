@@ -6,19 +6,19 @@ import {
   resolveTokenPriceUSD,
 } from "../src/utils/prices";
 
-const originalEnv = process.env.PRICES_ENABLED;
+const originalEnv = process.env["PRICES_ENABLED"];
 
 afterEach(() => {
   if (originalEnv === undefined) {
-    delete process.env.PRICES_ENABLED;
+    delete process.env["PRICES_ENABLED"];
   } else {
-    process.env.PRICES_ENABLED = originalEnv;
+    process.env["PRICES_ENABLED"] = originalEnv;
   }
 });
 
 describe("price utilities resilience", () => {
   test("getPriceUSD returns zero when prices feature disabled", async () => {
-    process.env.PRICES_ENABLED = "false";
+    process.env["PRICES_ENABLED"] = "false";
     let fetchCalls = 0;
     const neverCalledFetch = (async () => {
       fetchCalls += 1;
@@ -31,7 +31,7 @@ describe("price utilities resilience", () => {
   });
 
   test("deduplicates inflight requests and caches successful result", async () => {
-    process.env.PRICES_ENABLED = "true";
+    process.env["PRICES_ENABLED"] = "true";
     const token = `TOKEN-${Date.now()}`;
     let calls = 0;
     const fetchImpl = (async (url: string) => {
@@ -59,7 +59,7 @@ describe("price utilities resilience", () => {
   });
 
   test("falls back to pump.fun pricing when Jupiter fails", async () => {
-    process.env.PRICES_ENABLED = "true";
+    process.env["PRICES_ENABLED"] = "true";
     const token = `Mint${Date.now()}`;
     const fetchImpl = (async (url: string) => {
       if (url.includes("jup.ag")) {
@@ -86,7 +86,7 @@ describe("price utilities resilience", () => {
   });
 
   test("resolveTokenPriceUSD iterates candidates and reports identifier", async () => {
-    process.env.PRICES_ENABLED = "true";
+    process.env["PRICES_ENABLED"] = "true";
     const attempts: string[] = [];
     const now = Date.now();
     const tokenMint = `mint-${now}`;
@@ -122,7 +122,7 @@ describe("price utilities resilience", () => {
   });
 
   test("getPriceUSD preserves stale cache when downstream returns zero", async () => {
-    process.env.PRICES_ENABLED = "true";
+    process.env["PRICES_ENABLED"] = "true";
     const token = `STALE-${Date.now()}`;
     let call = 0;
     const fetchImpl = (async () => {
@@ -149,18 +149,20 @@ describe("price utilities resilience", () => {
   });
 
   test("getPricesUSD aggregates values for mixed identifiers (property)", async () => {
-    process.env.PRICES_ENABLED = "true";
+    process.env["PRICES_ENABLED"] = "true";
 
     await fc.assert(
-      fc.asyncProperty(
-        fc.subarray(["AAA", "BBB", "CCC", "DDD", "EEE", "FFF", "GGG"], {
-          minLength: 1,
-          maxLength: 5,
-        }),
-        fc.integer({ min: 1, max: 100 }),
-        async (tokens, basePriceInteger) => {
-          const basePrice = basePriceInteger;
-          const uniqueTokens = tokens.map((token, index) => `${token}${basePriceInteger}${index}`);
+        fc.asyncProperty(
+          fc.subarray(["AAA", "BBB", "CCC", "DDD", "EEE", "FFF", "GGG"], {
+            minLength: 1,
+            maxLength: 5,
+          }),
+          fc.integer({ min: 1, max: 100 }),
+          async (tokens: string[], basePriceInteger: number) => {
+            const basePrice = basePriceInteger;
+            const uniqueTokens = tokens.map((token: string, index: number) =>
+              `${token}${basePriceInteger}${index}`
+            );
 
           const fetchImpl = (async (url: string) => {
             const parsed = new URL(url);
@@ -183,11 +185,11 @@ describe("price utilities resilience", () => {
 
           const ids = [...uniqueTokens];
           const results = await getPricesUSD(ids, fetchImpl);
-          for (const id of ids) {
-            expect(results[id]).toBe(basePrice);
-          }
-        }
-      ),
+             for (const id of ids) {
+               expect(results[id]).toBe(basePrice);
+             }
+           }
+         ),
       { seed: 12345, numRuns: 25 }
     );
   });

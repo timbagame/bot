@@ -45,12 +45,12 @@ describe("dynamic constants", () => {
   });
 
   test("parsePositiveDuration clamps invalid env values via dynamic import", async () => {
-    process.env.PRICES_CACHE_TTL_MS = "-50";
+    process.env["PRICES_CACHE_TTL_MS"] = "-50";
     try {
       const module = await import(`../src/utils/constants.ts?test=${Date.now()}`);
       expect(module.PRICES_CACHE_TTL_MS).toBe(60_000);
     } finally {
-      delete process.env.PRICES_CACHE_TTL_MS;
+      delete process.env["PRICES_CACHE_TTL_MS"];
     }
   });
 });

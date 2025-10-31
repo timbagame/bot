@@ -3,9 +3,9 @@ import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { FeeBudgetManager } from "../src/utils/fee-budget";
 
 const envBackup: Record<string, string | undefined> = {
-  FEE_SINGLE_TX_MULTIPLIER: process.env.FEE_SINGLE_TX_MULTIPLIER,
-  FEE_WRAP_BUFFER_MULTIPLIER: process.env.FEE_WRAP_BUFFER_MULTIPLIER,
-  FEE_CACHE_TTL_MS: process.env.FEE_CACHE_TTL_MS,
+  FEE_SINGLE_TX_MULTIPLIER: process.env["FEE_SINGLE_TX_MULTIPLIER"],
+  FEE_WRAP_BUFFER_MULTIPLIER: process.env["FEE_WRAP_BUFFER_MULTIPLIER"],
+  FEE_CACHE_TTL_MS: process.env["FEE_CACHE_TTL_MS"],
 };
 
 afterEach(() => {
@@ -20,17 +20,17 @@ afterEach(() => {
 
 describe("fee budget environment parsing", () => {
   test("invalid environment values fall back to defaults", async () => {
-    process.env.FEE_SINGLE_TX_MULTIPLIER = "abc";
-    process.env.FEE_WRAP_BUFFER_MULTIPLIER = "-2";
-    process.env.FEE_CACHE_TTL_MS = "0";
+    process.env["FEE_SINGLE_TX_MULTIPLIER"] = "abc";
+    process.env["FEE_WRAP_BUFFER_MULTIPLIER"] = "-2";
+    process.env["FEE_CACHE_TTL_MS"] = "0";
 
     const module = await import(`../src/utils/fee-budget.ts?env=${Date.now()}`);
-    const manager = module.FeeBudgetManager.createForTest({
+    const manager: any = module.FeeBudgetManager.createForTest({
       rpcEndpoint: "http://localhost:8899",
       getLatestBlockhash: async () => ({ blockhash: "x", lastValidBlockHeight: 1 }),
       getFeeForMessage: async () => 1,
       getRecentPrioritizationFees: async () => [],
-    } as any) as any;
+    } as any);
 
     expect(manager.config.singleTxMultiplier).toBe(2);
     expect(manager.config.wrapBufferMultiplier).toBe(1);
@@ -38,21 +38,21 @@ describe("fee budget environment parsing", () => {
   });
 
   test("estimateFee returns zero for empty instruction list", async () => {
-    const previousNodeEnv = process.env.NODE_ENV;
-    process.env.NODE_ENV = "production";
+    const previousNodeEnv = process.env["NODE_ENV"];
+    process.env["NODE_ENV"] = "production";
     const connection = {
       rpcEndpoint: "http://localhost:8899",
       getLatestBlockhash: async () => ({ blockhash: "abc", lastValidBlockHeight: 1 }),
       getFeeForMessage: async () => 1,
       getRecentPrioritizationFees: async () => [],
     } as any;
-    const manager = FeeBudgetManager.createForTest(connection);
+    const manager = FeeBudgetManager.createForTest(connection) as any;
     const value = await (manager as any).estimateFee(new PublicKey(SystemProgram.programId), []);
-    expect(value).toBe(manager.config.fallbackSingleTxLamports);
+    expect(value).toBe((manager as any).config.fallbackSingleTxLamports);
     if (previousNodeEnv === undefined) {
-      delete process.env.NODE_ENV;
+      delete process.env["NODE_ENV"];
     } else {
-      process.env.NODE_ENV = previousNodeEnv;
+      process.env["NODE_ENV"] = previousNodeEnv;
     }
   });
 

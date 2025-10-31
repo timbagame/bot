@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { WSOL_MINT } from "../src/utils/token-registry";
 
-const originalTimeout = process.env.PRICES_TIMEOUT_MS;
+const originalTimeout = process.env["PRICES_TIMEOUT_MS"];
 
 describe("price utilities fallbacks", () => {
   test("withTimeout rejects long fetches and returns zero", async () => {
-    process.env.PRICES_TIMEOUT_MS = "1";
+    process.env["PRICES_TIMEOUT_MS"] = "1";
     const module = await import(`../src/utils/prices.ts?timeout=${Date.now()}`);
     try {
       const slowFetch = (async () => {
@@ -21,9 +21,9 @@ describe("price utilities fallbacks", () => {
       expect(price).toBe(0);
     } finally {
       if (originalTimeout === undefined) {
-        delete process.env.PRICES_TIMEOUT_MS;
+        delete process.env["PRICES_TIMEOUT_MS"];
       } else {
-        process.env.PRICES_TIMEOUT_MS = originalTimeout;
+        process.env["PRICES_TIMEOUT_MS"] = originalTimeout;
       }
     }
   });
