@@ -1,6 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 import { escapeHtml, formatRate } from "./format-amount";
 import { JUPITER_DEFAULT_SLIPPAGE_BPS } from "./constants";
+import { WSOL_MINT } from "./token-registry";
 import type { FetchLike } from "../types";
 
 // ================================
@@ -361,10 +362,10 @@ export class JupiterClient {
 export function getJupiterMint(mint: string): string {
   // SOL should be represented as WSOL mint for Jupiter
   if (mint === "SOL") {
-    return "So11111111111111111111111111111111111111112"; // WSOL mint
+    return WSOL_MINT; // WSOL mint
   }
   // WSOL mint is already correct
-  if (mint === "So11111111111111111111111111111111111111112") {
+  if (mint === WSOL_MINT) {
     return mint;
   }
   return mint;

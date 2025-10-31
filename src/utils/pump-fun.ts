@@ -11,11 +11,9 @@ import BN from "bn.js";
 import { resolveTokenMetadata } from "./token-metadata";
 import { parseDecimalAmount } from "./amount";
 import { buildPumpFunCoinUrl } from "./constants";
+import { WSOL_MINT } from "./token-registry";
 
-const SOL_MINTS = new Set<string>([
-  "So11111111111111111111111111111111111111112",
-  "SOL",
-]);
+const SOL_MINTS = new Set<string>([WSOL_MINT, "SOL"]);
 
 // ================================
 // PUMP.FUN TYPES
@@ -295,10 +293,10 @@ export class PumpFunClient {
 
       // Check if one of the tokens is SOL/WSOL
       const isSolInput =
-        inputMint === "So11111111111111111111111111111111111111112" ||
+        inputMint === WSOL_MINT ||
         inputMint === "SOL";
       const isSolOutput =
-        outputMint === "So11111111111111111111111111111111111111112" ||
+        outputMint === WSOL_MINT ||
         outputMint === "SOL";
 
       let pumpMint: PublicKey;
@@ -420,10 +418,10 @@ export class PumpFunClient {
     try {
       // Check if one of the tokens is SOL/WSOL
       const isSolInput =
-        inputMint === "So11111111111111111111111111111111111111112" ||
+        inputMint === WSOL_MINT ||
         inputMint === "SOL";
       const isSolOutput =
-        outputMint === "So11111111111111111111111111111111111111112" ||
+        outputMint === WSOL_MINT ||
         outputMint === "SOL";
 
       let pumpMint: PublicKey;

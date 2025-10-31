@@ -18,6 +18,7 @@ import { WalletManager } from "./wallet";
 import { FeeBudgetManager } from "./fee-budget";
 import type { FeeBudgetProvider } from "./fee-budget";
 import { formatAmount } from "./format-amount";
+import { WSOL_MINT } from "./token-registry";
 
 // ================================
 // UNIFIED SWAP MANAGER
@@ -54,7 +55,7 @@ export interface SwapRequest {
   outputTicker: string;
 }
 
-const SOL_MINT = "So11111111111111111111111111111111111111112";
+const SOL_MINT = WSOL_MINT;
 const SOL_DECIMALS = 9;
 const KNOWN_MAJOR_TOKENS = new Set([
   "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
@@ -1626,10 +1627,7 @@ export class SwapManager {
     const instructions: TransactionInstruction[] = [];
 
     // Check input token account (skip for SOL/WSOL)
-    if (
-      inputMint !== "So11111111111111111111111111111111111111112" &&
-      inputMint !== "SOL"
-    ) {
+    if (inputMint !== WSOL_MINT && inputMint !== "SOL") {
       const mintPubkey = new PublicKey(inputMint);
       const inputSetup = await this.wallet.ensureAssociatedTokenAccount(
         userKeypair.publicKey,
@@ -1648,10 +1646,7 @@ export class SwapManager {
     }
 
     // Check output token account (skip for SOL/WSOL)
-    if (
-      outputMint !== "So11111111111111111111111111111111111111112" &&
-      outputMint !== "SOL"
-    ) {
+    if (outputMint !== WSOL_MINT && outputMint !== "SOL") {
       const mintPubkey = new PublicKey(outputMint);
       const outputSetup = await this.wallet.ensureAssociatedTokenAccount(
         userKeypair.publicKey,
