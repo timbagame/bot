@@ -459,6 +459,27 @@ const buildQuickAmountKeyboard = ({
 
 export const __test_buildQuickAmountKeyboard = buildQuickAmountKeyboard;
 
+type SwapAmountKeyboardOptions = {
+  fromToken: string;
+  toTokenIdentifier: string;
+  canTrade: boolean;
+};
+
+const createSwapAmountKeyboard = ({
+  fromToken,
+  toTokenIdentifier,
+  canTrade,
+}: SwapAmountKeyboardOptions) =>
+  buildQuickAmountKeyboard({
+    baseCallback: (value) =>
+      `swap_amount_${fromToken}_${toTokenIdentifier}_${value}`,
+    backCallback: `swap_from_${fromToken}`,
+    showQuickRows: canTrade,
+    insufficientLabel: "❌ Insufficient balance",
+  });
+
+export const __test_createSwapAmountKeyboard = createSwapAmountKeyboard;
+
 type SendAmountPromptParams = {
   token: string;
   rawAmount: string;
@@ -6608,12 +6629,10 @@ const showSwapAmountSelection = async (
 
   const toTokenIdentifier = options.toTokenIdentifier ?? toToken;
 
-  const keyboard = buildQuickAmountKeyboard({
-    baseCallback: (value) =>
-      `swap_amount_${fromToken}_${toTokenIdentifier}_${value}`,
-    backCallback: `swap_from_${fromToken}`,
-    showQuickRows: canTrade,
-    insufficientLabel: "❌ Insufficient balance",
+  const keyboard = createSwapAmountKeyboard({
+    fromToken,
+    toTokenIdentifier,
+    canTrade,
   });
 
   await respondWithMenu(ctx, {

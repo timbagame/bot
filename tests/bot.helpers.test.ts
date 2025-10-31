@@ -428,11 +428,11 @@ describe("Bot helper utilities", () => {
   });
 
   test("buildSwapConfirmationKeyboard includes slippage options", () => {
-    const keyboard = botModule.__test_buildSwapConfirmationKeyboard({
-      txId: "tx_test",
-      cancelCallback: "swap_to_SOL_TIMBA",
-      selectedSlippageBps: 10,
-    });
+  const keyboard = botModule.__test_buildSwapConfirmationKeyboard({
+    txId: "tx_test",
+    cancelCallback: "swap_to_SOL_TIMBA",
+    selectedSlippageBps: 10,
+  });
 
     const callbacks = extractCallbacks(keyboard);
     expect(callbacks).toContain("confirm_swap_tx_test");
@@ -447,6 +447,41 @@ describe("Bot helper utilities", () => {
     expect(texts).toContain("❌ Cancel");
     const selectedLabel = texts.find((t) => t.includes("0.1%"));
     expect(selectedLabel?.startsWith("• ")).toBe(true);
+  });
+
+  test("swap amount keyboard routes back to swap_from handler", () => {
+    const keyboard = botModule.__test_createSwapAmountKeyboard({
+      fromToken: "SOL",
+      toTokenIdentifier: "TIMBA",
+      canTrade: true,
+    });
+
+    const callbacks = extractCallbacks(keyboard);
+    expect(callbacks).toContain("swap_amount_SOL_TIMBA_25%");
+    expect(callbacks).toContain("swap_amount_SOL_TIMBA_50%");
+    expect(callbacks).toContain("swap_amount_SOL_TIMBA_75%");
+    expect(callbacks).toContain("swap_amount_SOL_TIMBA_MAX");
+    expect(callbacks).toContain("swap_amount_SOL_TIMBA_CUSTOM");
+    expect(callbacks).toContain("swap_from_SOL");
+
+    const texts = extractTexts(keyboard);
+    expect(texts).toContain("← Back");
+  });
+
+  test("swap amount keyboard shows insufficient state when balance is zero", () => {
+    const keyboard = botModule.__test_createSwapAmountKeyboard({
+      fromToken: "TIMBA",
+      toTokenIdentifier: "SOL",
+      canTrade: false,
+    });
+
+    const callbacks = extractCallbacks(keyboard);
+    expect(callbacks).toContain("swap_from_TIMBA");
+    expect(callbacks).not.toContain("swap_amount_TIMBA_SOL_25%");
+
+    const texts = extractTexts(keyboard);
+    expect(texts).toContain("❌ Insufficient balance");
+    expect(texts).toContain("← Back");
   });
 });
 
