@@ -6611,7 +6611,7 @@ const showSwapAmountSelection = async (
   const keyboard = buildQuickAmountKeyboard({
     baseCallback: (value) =>
       `swap_amount_${fromToken}_${toTokenIdentifier}_${value}`,
-    backCallback: `swap_to_${fromToken}_${toTokenIdentifier}`,
+    backCallback: `swap_from_${fromToken}`,
     showQuickRows: canTrade,
     insufficientLabel: "❌ Insufficient balance",
   });
