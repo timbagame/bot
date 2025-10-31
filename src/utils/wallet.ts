@@ -149,7 +149,7 @@ export class WalletManager {
     if (timeToWait > 0) {
       await new Promise((resolve) => setTimeout(resolve, timeToWait));
     }
-    this.lastCallTime = now;
+    this.lastCallTime = this.timeNow ? this.timeNow() : Date.now();
   }
 
   private loadAdminKeypair(): void {
