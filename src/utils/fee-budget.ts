@@ -6,15 +6,11 @@ import {
   TransactionInstruction,
   TransactionMessage,
 } from "@solana/web3.js";
+import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
 
 const MICRO_LAMPORTS_PER_LAMPORT = 1_000_000;
 
 type CacheKey = "single" | "wrap" | "jit" | "game";
-
-type CacheEntry = {
-  value: number;
-  expiresAt: number;
-};
 
 export interface FeeBudgetProvider {
   getSingleTransactionLamports(): Promise<number>;
@@ -114,12 +110,13 @@ const globalInstances = new Map<string, FeeBudgetManager>();
 export class FeeBudgetManager implements FeeBudgetProvider {
   private readonly connection: Connection;
   private readonly config: FeeBudgetConfig;
-  private readonly cache = new Map<CacheKey, CacheEntry>();
+  private readonly cache: ExpiringCache<number>;
   private readonly stubPayer: PublicKey;
 
   constructor(connection: Connection, config?: Partial<FeeBudgetConfig>) {
     this.connection = connection;
     this.config = { ...DEFAULT_CONFIG, ...(config ?? {}) };
+    this.cache = createExpiringCache<number>(this.config.cacheTtlMs);
     this.stubPayer = Keypair.generate().publicKey;
   }
 
@@ -193,14 +190,14 @@ export class FeeBudgetManager implements FeeBudgetProvider {
 
   public getCachedSingleTransactionLamports(): number {
     return (
-      this.cache.get("single")?.value ??
+      this.cache.peek("single") ??
       FeeBudgetManager.getDefaultSingleTransactionLamports()
     );
   }
 
   public getCachedGameSafetyBufferLamports(): number {
     return (
-      this.cache.get("game")?.value ??
+      this.cache.peek("game") ??
       FeeBudgetManager.getDefaultGameSafetyBufferLamports()
     );
   }
@@ -258,22 +255,24 @@ export class FeeBudgetManager implements FeeBudgetProvider {
     key: CacheKey,
     compute: () => Promise<number>
   ): Promise<number> {
-    const now = Date.now();
     const cached = this.cache.get(key);
-    if (cached && cached.expiresAt > now) {
-      return cached.value;
+    if (cached !== undefined) {
+      return cached;
     }
 
     const value = await compute();
     if (Number.isFinite(value) && value > 0) {
-      this.cache.set(key, {
-        value,
-        expiresAt: now + this.config.cacheTtlMs,
-      });
+      this.cache.setWithTTL(key, value);
       return value;
     }
 
-    return cached?.value ?? this.getFallbackForKey(key);
+    const stale = this.cache.peek(key);
+    if (stale !== undefined) {
+      this.cache.setWithTTL(key, stale);
+      return stale;
+    }
+
+    return this.getFallbackForKey(key);
   }
 
   private getFallbackForKey(key: CacheKey): number {

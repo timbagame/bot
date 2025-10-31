@@ -40,6 +40,7 @@ import { formatAmount } from "./format-amount";
 import { resolveTokenMetadata } from "./token-metadata";
 import { detectTokenProgram } from "./token-programs";
 import { FeeBudgetManager } from "./fee-budget";
+import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
 
 // Lightweight dependency handles for testability
 type HttpFetch = (input: string, init?: any) => Promise<{
@@ -56,6 +57,8 @@ type WalletDeps = {
     mint: string
   ) => Promise<{ decimals: number } | null> | { decimals: number } | null;
 };
+
+const TOKEN_METADATA_CACHE_DURATION_MS = 5 * 60 * 1000;
 
 // ================================
 // UTILITY FUNCTIONS
@@ -100,10 +103,7 @@ export class WalletManager {
 
   // Simplified caching
   private keypairCache = new Map<string, Keypair>();
-  private tokenMetadataCache = new Map<
-    string,
-    { decimals: number; timestamp: number }
-  >();
+  private tokenMetadataCache: ExpiringCache<number>;
   private blockhashCache: {
     blockhash: string;
     lastValidBlockHeight: number;
@@ -122,6 +122,9 @@ export class WalletManager {
     this.fetchFn = deps?.fetch ?? (globalThis.fetch as any);
     this.timeNow = deps?.timeNow;
     this.tokenMetadataResolver = deps?.tokenMetadataResolver;
+    this.tokenMetadataCache = createExpiringCache<number>(
+      TOKEN_METADATA_CACHE_DURATION_MS
+    );
     this.loadAdminKeypair();
   }
 
@@ -616,12 +619,8 @@ export class WalletManager {
     tokenMint: string
   ): Promise<{ decimals: number }> {
     const cached = this.tokenMetadataCache.get(tokenMint);
-    const now = this.timeNow ? this.timeNow() : Date.now();
-
-    // Cache token metadata for 5 minutes
-    const TOKEN_METADATA_CACHE_DURATION = 5 * 60 * 1000;
-    if (cached && now - cached.timestamp < TOKEN_METADATA_CACHE_DURATION) {
-      return { decimals: cached.decimals };
+    if (cached !== undefined) {
+      return { decimals: cached };
     }
 
     const resolveLocally = async (): Promise<number | null> => {
@@ -631,10 +630,7 @@ export class WalletManager {
       try {
         const result = await this.tokenMetadataResolver(tokenMint);
         if (result && typeof result.decimals === "number") {
-          this.tokenMetadataCache.set(tokenMint, {
-            decimals: result.decimals,
-            timestamp: now,
-          });
+          this.tokenMetadataCache.setWithTTL(tokenMint, result.decimals);
           return result.decimals;
         }
       } catch (resolverError) {
@@ -704,7 +700,7 @@ export class WalletManager {
         throw new Error("Unable to determine mint decimals");
       }
 
-      this.tokenMetadataCache.set(tokenMint, { decimals, timestamp: now });
+      this.tokenMetadataCache.setWithTTL(tokenMint, decimals);
       return { decimals };
     } catch (error) {
       console.error(`Error getting token metadata for ${tokenMint}:`, error);
@@ -712,6 +708,12 @@ export class WalletManager {
       const fallbackDecimals = await resolveLocally();
       if (fallbackDecimals !== null) {
         return { decimals: fallbackDecimals };
+      }
+
+      const stale = this.tokenMetadataCache.peek(tokenMint);
+      if (stale !== undefined) {
+        this.tokenMetadataCache.setWithTTL(tokenMint, stale);
+        return { decimals: stale };
       }
 
       throw new Error(

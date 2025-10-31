@@ -54,7 +54,7 @@ import {
   buildParticipantsList,
   buildExpirationText,
 } from "./game-ui";
-import { getPriceUSD } from "./prices";
+import { resolveTokenPriceUSD } from "./prices";
 import { NetworkDetector } from "./network-detector";
 import { SwapManager } from "./swap-manager";
 
@@ -858,17 +858,21 @@ export class GameManager {
     if (process.env.NODE_ENV === "test") return null;
 
     try {
-      const price = await getPriceUSD(reference);
-      if (!price || !isFinite(price) || price <= 0) {
+      const lookup = await resolveTokenPriceUSD({
+        tokenMint,
+        tokenTicker,
+        isSol,
+      });
+      if (!lookup) {
         return null;
       }
 
-      const usdText = this.formatUsdValue(amount, decimals, price);
+      const usdText = this.formatUsdValue(amount, decimals, lookup.price);
       if (!usdText) {
         return null;
       }
 
-      return { text: usdText, price };
+      return { text: usdText, price: lookup.price };
     } catch (error) {
       console.warn(
         `Failed to compute USD pricing for ${reference}:`,
@@ -3273,28 +3277,33 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
   // GAME CLOSURE AND CLEANUP
   // ================================
 
-  public async cancelGameWithPlayerKeys(
-    gamePda: PublicKey,
-    gameType: string
-  ): Promise<{ success: boolean; tx?: string; error?: string }> {
+  private async closeGameWithCreatorAuthority(options: {
+    gamePda: PublicKey;
+    gameAccount: any;
+    creatorTelegramId: string;
+    gameType: string;
+    attemptLog?: string;
+    successPrefix?: string;
+    failurePrefix?: string;
+  }): Promise<{ success: boolean; tx?: string; error?: string }> {
+    const {
+      gamePda,
+      gameAccount,
+      creatorTelegramId,
+      gameType,
+      attemptLog,
+      successPrefix,
+      failurePrefix,
+    } = options;
+
+    const address = gamePda.toBase58();
+    if (attemptLog) {
+      console.log(attemptLog);
+    } else {
+      console.log(`Closing ${gameType} game ${address} with cleanup`);
+    }
+
     try {
-      const gameAccount = await this.program.account.game.fetch(gamePda);
-      const gameAddress = gamePda.toBase58();
-      console.log(
-        `Attempting to close ${gameType} game ${gameAddress} with cleanup`
-      );
-
-      // Step 2: Close the game using creator's key to recover remaining rent
-      const creatorPubkey = gameAccount.creator.toBase58();
-      const creatorTelegramId = this.gameDb.getPlayerTelegramId(creatorPubkey);
-
-      if (!creatorTelegramId) {
-        console.log(
-          `No telegram ID found for creator ${creatorPubkey}, cannot close game`
-        );
-        return { success: false, error: "Creator not found in database" };
-      }
-
       const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
 
       const closeAccounts = await this.buildCloseGameAccounts(
@@ -3311,11 +3320,49 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         [creatorKp]
       );
       await this.wallet.confirmTransaction(tx);
-      console.log(
-        `✅ Successfully closed ${gameType} game ${gameAddress} with tx: ${tx}`
-      );
+
+      const successMessage =
+        successPrefix ?? `✅ Successfully closed ${gameType} game`;
+      console.log(`${successMessage} ${address} with tx: ${tx}`);
 
       return { success: true, tx };
+    } catch (error: any) {
+      const failureMessage =
+        failurePrefix ?? `❌ Failed to close ${gameType} game`;
+      console.error(
+        `${failureMessage} ${address}:`,
+        error?.message ?? error
+      );
+      return { success: false, error: error?.message ?? String(error) };
+    }
+  }
+
+  public async cancelGameWithPlayerKeys(
+    gamePda: PublicKey,
+    gameType: string
+  ): Promise<{ success: boolean; tx?: string; error?: string }> {
+    try {
+      const gameAccount = await this.program.account.game.fetch(gamePda);
+      const gameAddress = gamePda.toBase58();
+
+      // Step 2: Close the game using creator's key to recover remaining rent
+      const creatorPubkey = gameAccount.creator.toBase58();
+      const creatorTelegramId = this.gameDb.getPlayerTelegramId(creatorPubkey);
+
+      if (!creatorTelegramId) {
+        console.log(
+          `No telegram ID found for creator ${creatorPubkey}, cannot close game`
+        );
+        return { success: false, error: "Creator not found in database" };
+      }
+
+      return await this.closeGameWithCreatorAuthority({
+        gamePda,
+        gameAccount,
+        creatorTelegramId,
+        gameType,
+        attemptLog: `Attempting to close ${gameType} game ${gameAddress} with cleanup`,
+      });
     } catch (error: any) {
       console.error(
         `❌ Error closing ${gameType} game ${gamePda.toBase58()}:`,
@@ -3827,12 +3874,20 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     }
   }
 
-  private isGameExpiredWithBuffer(gameAccount: any): boolean {
-    const currentTime = Math.floor(Date.now() / 1000);
+  public static isExpiredWithBuffer(
+    gameAccount: any,
+    currentTimeSeconds?: number
+  ): boolean {
+    const currentTime =
+      currentTimeSeconds ?? Math.floor(Date.now() / 1000);
     const createdAt = Number(gameAccount.createdAt);
     const timeout = Number(gameAccount.timeout);
     const expiresAt = createdAt + timeout;
     return currentTime > expiresAt + GAME_EXPIRATION_BUFFER_TIME;
+  }
+
+  private isGameExpiredWithBuffer(gameAccount: any): boolean {
+    return GameManager.isExpiredWithBuffer(gameAccount);
   }
 
   private getGameType(gameAccount: any): string {
@@ -4380,36 +4435,15 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     address: string,
     gameType: string
   ): Promise<boolean> {
-    try {
-      console.log(`🎁 Closing expired ${gameType} ${address} with cleanup`);
-
-      // Step 2: Close the game
-      const creatorKp = this.wallet.getKeyPair(BigInt(creatorTelegramId));
-
-      const closeAccounts = await this.buildCloseGameAccounts(
-        gamePda,
-        gameAccount
-      );
-      const closeInstruction = await this.program.methods
-        .closeGame()
-        .accounts(closeAccounts as any)
-        .instruction();
-
-      const tx = await this.wallet.sendTransaction(
-        [closeInstruction],
-        [creatorKp]
-      );
-      await this.wallet.confirmTransaction(tx);
-      console.log(
-        `✅ Successfully closed expired ${gameType} ${address} with tx: ${tx}`
-      );
-      return true;
-    } catch (error: any) {
-      console.error(
-        `❌ Failed to close expired ${gameType} ${address}:`,
-        error.message
-      );
-      return false;
-    }
+    const result = await this.closeGameWithCreatorAuthority({
+      gamePda,
+      gameAccount,
+      creatorTelegramId,
+      gameType,
+      attemptLog: `🎁 Closing expired ${gameType} ${address} with cleanup`,
+      successPrefix: `✅ Successfully closed expired ${gameType}`,
+      failurePrefix: `❌ Failed to close expired ${gameType}`,
+    });
+    return result.success;
   }
 }
