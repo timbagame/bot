@@ -428,6 +428,101 @@ export async function persistInputPrompt({
   return { chatId: resolvedChatId, messageId: resolvedMessageId };
 }
 
+export type PersistInputPromptFromContextOptions = Omit<
+  PersistInputPromptOptions,
+  "ctx" | "userState" | "replyToMessageId"
+> & {
+  ctx: Context;
+  target?: { chatId?: number; messageId?: number };
+  replyToMessageId?: number;
+};
+
+export const persistInputPromptFromContext = async ({
+  ctx,
+  target,
+  replyToMessageId,
+  ...promptOptions
+}: PersistInputPromptFromContextOptions): Promise<{
+  chatId?: number;
+  messageId?: number;
+}> => {
+  const callbackMessage = ctx.callbackQuery?.message;
+  const derivedChatId =
+    target?.chatId ??
+    (typeof callbackMessage?.chat?.id === "number"
+      ? callbackMessage.chat.id
+      : typeof ctx.chat?.id === "number"
+      ? ctx.chat.id
+      : undefined);
+
+  const derivedMessageId =
+    target?.messageId ??
+    (typeof callbackMessage?.message_id === "number"
+      ? callbackMessage.message_id
+      : undefined);
+
+  const resolvedReplyTo =
+    typeof replyToMessageId === "number"
+      ? replyToMessageId
+      : typeof callbackMessage?.message_id === "number"
+      ? callbackMessage.message_id
+      : typeof ctx.message?.message_id === "number"
+      ? ctx.message.message_id
+      : undefined;
+
+  return await persistInputPrompt({
+    ctx,
+    userState: { chatId: derivedChatId, messageId: derivedMessageId },
+    replyToMessageId: resolvedReplyTo,
+    ...promptOptions,
+  });
+};
+
+export type QuickAmountKeyboardButton = {
+  label: string;
+  callback: string;
+};
+
+export const buildQuickAmountRows = (
+  buttons: QuickAmountKeyboardButton[],
+  columns = 2
+): QuickAmountKeyboardButton[][] => {
+  if (!Number.isFinite(columns) || columns <= 0) {
+    return [];
+  }
+
+  const normalizedColumns = Math.trunc(columns);
+  const rows: QuickAmountKeyboardButton[][] = [];
+
+  for (let i = 0; i < buttons.length; i += normalizedColumns) {
+    const row = buttons.slice(i, i + normalizedColumns);
+    if (row.length > 0) {
+      rows.push(row);
+    }
+  }
+
+  return rows;
+};
+
+export const appendQuickAmountKeyboardRows = (
+  keyboard: InlineKeyboard,
+  rows: QuickAmountKeyboardButton[][]
+): InlineKeyboard => {
+  for (const row of rows) {
+    if (!row || row.length === 0) {
+      continue;
+    }
+
+    for (const button of row) {
+      keyboard.text(button.label, button.callback);
+    }
+
+    keyboard.row();
+  }
+
+  return keyboard;
+};
+
 const shouldIncludeSol = (
   includeSol: TokenSelectQuickActions["includeSol"],
   lamports: number
@@ -510,30 +605,25 @@ const buildWrapKeyboard = (
   const minimumLamports = params.minimumLamports ?? 10_000;
 
   if (balances.solBalanceLamports > minimumLamports) {
-    for (let i = 0; i < params.amounts.length; i += 2) {
-      const left = params.amounts[i];
-      if (!left) continue;
+    const wrapButtons = params.amounts.map((amount) => ({
+      label: amount.label,
+      callback: `${params.callbackPrefix}${amount.value}`,
+    }));
 
-      keyboard.text(
-        left.label,
-        `${params.callbackPrefix}${left.value}`
-      );
-
-      const right = params.amounts[i + 1];
-      if (right) {
-        keyboard.text(
-          right.label,
-          `${params.callbackPrefix}${right.value}`
-        );
-      }
-
-      keyboard.row();
-    }
+    appendQuickAmountKeyboardRows(
+      keyboard,
+      buildQuickAmountRows(wrapButtons)
+    );
 
     if (params.customAction) {
-      keyboard
-        .text(params.customAction.label, params.customAction.callback)
-        .row();
+      appendQuickAmountKeyboardRows(keyboard, [
+        [
+          {
+            label: params.customAction.label,
+            callback: params.customAction.callback,
+          },
+        ],
+      ]);
     }
   } else {
     const label = params.insufficientLabel ?? "❌ Insufficient balance";

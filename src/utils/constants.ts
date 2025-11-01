@@ -114,7 +114,16 @@ export const TOKENS_LIST = buildTokenList({ defaultToken: DEFAULT_TOKEN });
 // COMMON UI COPY
 // ================================
 
-export const INPUT_TIMEOUT_HINT = "⏱️ <i>Reply to this message with your input. This will timeout in 15 minutes</i>";
+export const INPUT_TIMEOUT_MS = 15 * 60_000;
+
+const formatInputTimeoutMinutes = (timeoutMs: number): string => {
+  const minutes = Math.round(timeoutMs / 60_000);
+  return Math.max(1, minutes).toString();
+};
+
+export const INPUT_TIMEOUT_HINT = `⏱️ <i>Reply to this message with your input. This will timeout in ${formatInputTimeoutMinutes(
+  INPUT_TIMEOUT_MS
+)} minutes</i>`;
 
 // ================================
 // GAME BUFFER AND TIMING

@@ -66,6 +66,9 @@ import {
   showCustomAmountPrompt,
   upsertWalletMenuMessage,
   persistInputPrompt,
+  persistInputPromptFromContext,
+  appendQuickAmountKeyboardRows,
+  buildQuickAmountRows,
   type BuildWalletActionMenuForUserOptions,
   type WalletMenuBalances,
 } from "./utils/wallet-ui";
@@ -109,9 +112,9 @@ import {
   createMessageEditAdapter,
   handleCallbackErrorSafe,
   safeAnswerCallbackQuery,
-  respondMissingIdentity,
   requireTelegramId,
   getRequiredTelegramIdForContext,
+  resolveTelegramIdOrRespond,
 } from "./utils/context-helpers";
 import { recentUpdateGuard } from "./utils/recent-update";
 import { getPriceUSD, resolveTokenPriceUSD } from "./utils/prices";
@@ -389,48 +392,6 @@ type QuickAmountOptions = {
   extraRows?: QuickAmountButton[][];
 };
 
-const appendQuickAmountRows = (
-  keyboard: InlineKeyboard,
-  {
-    baseCallback,
-    percentages = ["25%", "50%", "75%", "MAX"],
-    includeCustom = true,
-    customLabel = "✏️ Custom Amount",
-    extraRows = [],
-  }: QuickAmountOptions
-) => {
-  const addRow = (buttons: QuickAmountButton[]) => {
-    if (buttons.length === 0) return;
-    for (const button of buttons) {
-      keyboard.text(button.label, baseCallback(button.value));
-    }
-    keyboard.row();
-  };
-
-  for (const row of extraRows) {
-    addRow(row);
-  }
-
-  if (percentages.length > 0) {
-    for (let i = 0; i < percentages.length; i += 2) {
-      const left = percentages[i];
-      if (!left) continue;
-      const rowButtons: QuickAmountButton[] = [{ label: left, value: left }];
-      const right = percentages[i + 1];
-      if (right) {
-        rowButtons.push({ label: right, value: right });
-      }
-      addRow(rowButtons);
-    }
-  }
-
-  if (includeCustom) {
-    keyboard.text(customLabel, baseCallback("CUSTOM")).row();
-  }
-
-  return keyboard;
-};
-
 type QuickAmountKeyboardConfig = QuickAmountOptions & {
   backCallback: string;
   backLabel?: string;
@@ -448,7 +409,46 @@ const buildQuickAmountKeyboard = ({
   const keyboard = new InlineKeyboard();
 
   if (showQuickRows) {
-    appendQuickAmountRows(keyboard, quickOptions);
+    const {
+      baseCallback,
+      percentages = ["25%", "50%", "75%", "MAX"],
+      includeCustom = true,
+      customLabel = "✏️ Custom Amount",
+      extraRows = [],
+    } = quickOptions;
+
+    const rows: Array<{ label: string; callback: string }[]> = [];
+
+    for (const row of extraRows) {
+      if (!row || row.length === 0) {
+        continue;
+      }
+      rows.push(
+        row.map((button) => ({
+          label: button.label,
+          callback: baseCallback(button.value),
+        }))
+      );
+    }
+
+    if (percentages.length > 0) {
+      const percentageButtons = percentages.map((value) => ({
+        label: value,
+        callback: baseCallback(value),
+      }));
+      rows.push(...buildQuickAmountRows(percentageButtons));
+    }
+
+    if (includeCustom) {
+      rows.push([
+        {
+          label: customLabel,
+          callback: baseCallback("CUSTOM"),
+        },
+      ]);
+    }
+
+    appendQuickAmountKeyboardRows(keyboard, rows);
   } else if (insufficientLabel) {
     keyboard.text(insufficientLabel).row();
   }
@@ -4954,12 +4954,11 @@ bot.callbackQuery(
         return;
       }
 
-      const telegramId = await getRequiredTelegramIdForContext(
+      const telegramId = await resolveTelegramIdOrRespond(
         ctx,
         "show private key"
       );
       if (telegramId == null) {
-        await respondMissingIdentity(ctx);
         return;
       }
       const keypair = wallet.getKeyPair(telegramId);
@@ -5054,12 +5053,8 @@ registerWalletActionMenuHandler({
   logLabel: "cmd_unwrap",
   errorAck: "❌ Error loading unwrap menu",
   resolve: async (ctx) => {
-    const telegramId = await getRequiredTelegramIdForContext(
-      ctx,
-      "unwrap menu"
-    );
+    const telegramId = await resolveTelegramIdOrRespond(ctx, "unwrap menu");
     if (telegramId == null) {
-      await respondMissingIdentity(ctx);
       return null;
     }
 
@@ -5207,12 +5202,11 @@ bot.on(
 
 registerCallbackPrefixHandler("wrap_amount_", async (ctx, { payload }) => {
   try {
-    const telegramId = await getRequiredTelegramIdForContext(
+    const telegramId = await resolveTelegramIdOrRespond(
       ctx,
       "wrap amount selection"
     );
     if (telegramId == null) {
-      await respondMissingIdentity(ctx);
       return;
     }
 
@@ -5266,12 +5260,11 @@ registerCallbackPrefixHandler("wrap_amount_", async (ctx, { payload }) => {
 
 bot.callbackQuery("unwrap_confirm", async (ctx) => {
   try {
-    const telegramId = await getRequiredTelegramIdForContext(
+    const telegramId = await resolveTelegramIdOrRespond(
       ctx,
       "unwrap confirmation"
     );
     if (telegramId == null) {
-      await respondMissingIdentity(ctx);
       return;
     }
     const { wsolBalance } = await getCachedWalletData(telegramId);
@@ -5564,12 +5557,11 @@ bot.callbackQuery(/^confirm_wrap_/, async (ctx) => {
     const formattedAmount = wallet.formatSolBalance(lamportsToWrap);
     console.log(`✅ Confirmed wrap: ${formattedAmount} SOL`);
 
-    const telegramId = await getRequiredTelegramIdForContext(
+    const telegramId = await resolveTelegramIdOrRespond(
       ctx,
       "wrap confirmation"
     );
     if (telegramId == null) {
-      await respondMissingIdentity(ctx);
       return;
     }
 
@@ -6064,12 +6056,11 @@ registerCallbackPrefixHandler("send_amount_", async (ctx, { payload }) => {
       return;
     }
 
-    const telegramId = await getRequiredTelegramIdForContext(
+    const telegramId = await resolveTelegramIdOrRespond(
       ctx,
       "send amount selection"
     );
     if (telegramId == null) {
-      await respondMissingIdentity(ctx);
       return;
     }
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
@@ -6097,21 +6088,8 @@ registerCallbackPrefixHandler("send_amount_", async (ctx, { payload }) => {
       formatToken: (value, decimals) => wallet.formatTokenBalance(value, decimals),
     });
 
-    const callbackMessage = ctx.callbackQuery?.message;
-    await persistInputPrompt({
+    await persistInputPromptFromContext({
       ctx,
-      userState: {
-        chatId:
-          typeof callbackMessage?.chat?.id === "number"
-            ? callbackMessage.chat.id
-            : typeof ctx.chat?.id === "number"
-            ? ctx.chat.id
-            : undefined,
-        messageId:
-          typeof callbackMessage?.message_id === "number"
-            ? callbackMessage.message_id
-            : undefined,
-      },
       text: amountResolution.messageText,
       keyboard: createCancelKeyboard(`send_select_${token}`),
       session: {
@@ -6355,12 +6333,11 @@ registerCallbackPrefixHandler(
     console.log("🔔 Swap FROM token selected:", fromToken);
 
     try {
-      const telegramId = await getRequiredTelegramIdForContext(
+      const telegramId = await resolveTelegramIdOrRespond(
         ctx,
         "swap menu from token"
       );
       if (telegramId == null) {
-        await respondMissingIdentity(ctx);
         return;
       }
       const keypair = wallet.getKeyPair(telegramId);
@@ -6446,21 +6423,8 @@ registerCallbackPrefixHandler(
           INPUT_TIMEOUT_HINT,
         ];
 
-        const callbackMessage = ctx.callbackQuery?.message;
-        await persistInputPrompt({
+        await persistInputPromptFromContext({
           ctx,
-          userState: {
-            chatId:
-              typeof callbackMessage?.chat?.id === "number"
-                ? callbackMessage.chat.id
-                : typeof ctx.chat?.id === "number"
-                ? ctx.chat.id
-                : undefined,
-            messageId:
-              typeof callbackMessage?.message_id === "number"
-                ? callbackMessage.message_id
-                : undefined,
-          },
           text: response.join("\n"),
           keyboard: createCancelKeyboard("cmd_swap"),
           session: {
@@ -6561,12 +6525,11 @@ registerCallbackPrefixHandler(
         return;
       }
 
-      const telegramId = await getRequiredTelegramIdForContext(
+      const telegramId = await resolveTelegramIdOrRespond(
         ctx,
         "swap amount selection"
       );
       if (telegramId == null) {
-        await respondMissingIdentity(ctx);
         return;
       }
       const quoteOverrides: {
