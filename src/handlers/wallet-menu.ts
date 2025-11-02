@@ -1,27 +1,33 @@
-import type { Bot, Context } from "grammy";
-import type { NextFunction } from "grammy";
+import type { Bot } from "grammy";
 
 import { createExpiringCache } from "../utils/expiring-cache";
 import { mergeWsolIntoSol } from "../utils/balance";
 import { WSOL_MINT, getStartVideoId } from "../utils/constants";
-import { buildWalletCaption, buildWalletActionMenuForUser, type BuildWalletActionMenuForUserOptions, type WalletMenuBalances } from "../utils/wallet-ui";
+import {
+  buildWalletCaption,
+  buildWalletActionMenuForUser,
+  type BuildWalletActionMenuForUserOptions,
+  type WalletMenuBalances,
+} from "../utils/wallet-ui";
 import { createWalletKeyboard, createWalletSettingsKeyboard } from "../utils/keyboards";
 import { getPriceUSD } from "../utils/prices";
 import { respondWithMenu } from "../utils/menu-response";
 import { safeAnswerCallbackQuery, requireTelegramId } from "../utils/context-helpers";
 import type { WalletManager } from "../utils/wallet";
 import type { TokenManager } from "../utils/token-manager";
-import { showWalletUI as showWalletUIHandler, onMainWallet, onWalletRefresh, onWalletSettings, type WalletHandlersDeps } from "./wallet";
+import {
+  showWalletUI as showWalletUIHandler,
+  onMainWallet,
+  onWalletRefresh,
+  onWalletSettings,
+  type WalletHandlersDeps,
+} from "./wallet";
+import {
+  type CallbackPrefixContext,
+  type CallbackPrefixHandlerOptions,
+  type WrapCallbackHandler,
+} from "../utils/callback-registry";
 
-export type CallbackPrefixHandlerOptions = {
-  logLabel?: string;
-  errorAck?: string;
-};
-
-export type CallbackPrefixContext = {
-  raw: string;
-  payload: string;
-};
 
 export type WalletActionMenuResolution = {
   menuOptions: Omit<BuildWalletActionMenuForUserOptions, "ctx">;
@@ -55,10 +61,7 @@ type WalletMenuModuleOptions = {
   bot: Bot;
   wallet: WalletManager;
   getTokenManager: () => TokenManager | undefined;
-  wrapCallbackHandler: <TCtx extends Context>(
-    handler: (ctx: TCtx, next: NextFunction) => Promise<void> | void,
-    options?: { action?: string; errorAck?: string }
-  ) => (ctx: TCtx, next: NextFunction) => Promise<void>;
+  wrapCallbackHandler: WrapCallbackHandler;
 };
 
 type WalletMenuModule = {
