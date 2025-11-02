@@ -24,14 +24,12 @@ import {
   DEFAULT_TOKEN_TICKER,
   TOKENS_LIST,
   WSOL_MINT,
-  getStartVideoId,
   INPUT_TIMEOUT_HINT,
   SWAP_DEFAULT_SLIPPAGE_BPS,
   SWAP_SLIPPAGE_OPTIONS_BPS,
   applyDynamicFeeBudgets,
 } from "./utils/constants";
 import { FeeBudgetManager } from "./utils/fee-budget";
-import { mergeWsolIntoSol } from "./utils/balance";
 import {
   setUserState,
   getUserState,
@@ -47,8 +45,6 @@ import {
 } from "./utils/user-state";
 // import { createDmMessageAdapter } from "./utils/ctx-adapter";
 import {
-  createWalletKeyboard,
-  createWalletSettingsKeyboard,
   createBackToWalletKeyboard,
   createCancelKeyboard,
   createConfirmWrapKeyboard,
@@ -61,7 +57,6 @@ import {
   getSuggestedStakeAmounts,
 } from "./utils/keyboards";
 import {
-  buildWalletCaption,
   buildWalletActionMenuForUser,
   showCustomAmountPrompt,
   upsertWalletMenuMessage,
@@ -69,8 +64,6 @@ import {
   persistInputPromptFromContext,
   appendQuickAmountKeyboardRows,
   buildQuickAmountRows,
-  type BuildWalletActionMenuForUserOptions,
-  type WalletMenuBalances,
 } from "./utils/wallet-ui";
 import {
   buildEmptyLeaderboardMessage,
@@ -90,13 +83,8 @@ import {
   type PendingSwapTransaction,
 } from "./bot/flows/sol-conversion";
 import {
-  showWalletUI as showWalletUIHandler,
-  onMainWallet,
-  onWalletRefresh,
-  onWalletSettings,
   onBalance,
   type BalanceDeps,
-  type WalletHandlersDeps,
 } from "./handlers/wallet";
 import { inferMaxPlayers } from "./utils/arg-parsing";
 import type {
@@ -117,7 +105,7 @@ import {
   resolveTelegramIdOrRespond,
 } from "./utils/context-helpers";
 import { recentUpdateGuard } from "./utils/recent-update";
-import { getPriceUSD, resolveTokenPriceUSD } from "./utils/prices";
+import { resolveTokenPriceUSD } from "./utils/prices";
 import { patchReplyBehavior } from "./utils/reply-patch";
 import {
   NetworkDetector,
@@ -132,6 +120,10 @@ import {
   type GameTokenOverride,
 } from "./handlers/game";
 import { isMessageMissing } from "./utils/telegram-errors";
+import {
+  createWalletMenuModule,
+  type WalletCacheSnapshot as WalletCacheSnapshotData,
+} from "./handlers/wallet-menu";
 
 // ================================
 // GLOBAL INSTANCES
@@ -190,6 +182,54 @@ const updateOracleMaxPlayers = (maybeMax: number) => {
   }
 };
 
+type CallbackHandler<TCtx extends Context = any> = (
+  ctx: TCtx,
+  next: NextFunction
+) => Promise<void> | void;
+
+const wrapCallbackHandler = <TCtx extends Context>(
+  handler: CallbackHandler<TCtx>,
+  options: { action?: string; errorAck?: string } = {}
+) => {
+  return async (ctx: TCtx, next: NextFunction) => {
+    try {
+      await handler(ctx, next);
+    } catch (error) {
+      const fallbackAction = handler.name || "callback handler";
+      const actionLabel =
+        options.action ?? ctx.callbackQuery?.data ?? fallbackAction;
+      if (options.errorAck) {
+        console.error(`Error in ${actionLabel}:`, error);
+        await safeAnswerCallbackQuery(ctx, options.errorAck);
+      } else {
+        await handleCallbackErrorSafe(ctx, error, actionLabel);
+      }
+    }
+  };
+};
+
+const walletMenuModule = createWalletMenuModule({
+  bot,
+  wallet,
+  getTokenManager: () => tokenManager,
+  wrapCallbackHandler,
+});
+
+const {
+  registerWalletMenuHandlers,
+  registerCallbackPrefixHandler,
+  registerWalletActionMenuHandler,
+  getCachedWalletData,
+  clearWalletCache,
+  defaultWalletActionMenuDeps,
+  showWalletUI,
+  __test_setWalletCache: setWalletCacheForTests,
+} = walletMenuModule;
+
+registerWalletMenuHandlers();
+
+export const __test_setWalletCache = setWalletCacheForTests;
+
 const {
   executeWrapFlow,
   executeUnwrapFlow,
@@ -245,35 +285,6 @@ const CONTRACT_EXAMPLE_LINES = (() => {
 
 // User sessions for text input handling
 type GameSetupSession = GameSetupSessionState;
-
-// Input sessions for non-game text inputs (send, swap, wrap, etc.)
-// Test-only helpers to manipulate wallet cache in unit tests
-export const __test_setWalletCache = (
-  telegramId: bigint | number | string,
-  data: {
-    solBalance: number;
-    tokenBalances: Array<{
-      mint: string;
-      ticker: string;
-      balance: number;
-      decimals: number;
-      rawBalance: string;
-    }>;
-    approvedTokens?: any[];
-    nativeSolBalance?: number;
-    wsolBalance?: number;
-  },
-  _ts?: number
-) => {
-  const cacheKey = getWalletCacheKey(telegramId as any);
-  walletDataCache.setWithTTL(cacheKey, {
-    solBalance: data.solBalance,
-    nativeSolBalance: data.nativeSolBalance ?? data.solBalance,
-    wsolBalance: data.wsolBalance ?? 0,
-    tokenBalances: data.tokenBalances,
-    approvedTokens: data.approvedTokens ?? [],
-  });
-};
 
 export const __test_setGameManager = (manager: GameManager): void => {
   gameManager = manager;
@@ -934,7 +945,7 @@ const prepareTradeQuote = async ({
   }
 };
 
-type WalletCacheSnapshot = Awaited<ReturnType<typeof getCachedWalletData>>;
+type WalletCacheSnapshot = WalletCacheSnapshotData;
 
 type TradeAssetFactoryContext = WalletCacheSnapshot & {
   telegramId: bigint;
@@ -1320,21 +1331,6 @@ const sendReplyToGameMessage = async (
   } catch (error) {
     console.error("Error sending reply to game message:", error);
   }
-};
-
-/**
- * Dynamic wallet UI that loads balances automatically
- */
-
-const showWalletUI = async (ctx: any) => {
-  await showWalletUIHandler(ctx, {
-    wallet,
-    getCachedWalletData,
-    getPriceUSD,
-    buildWalletCaption,
-    createWalletKeyboard,
-    WINNER_VIDEO_ID: getStartVideoId(),
-  });
 };
 
 /**
@@ -3445,35 +3441,6 @@ bot.command("oracle", async (ctx: Context) => {
   }
 });
 
-// ================================
-// CALLBACK QUERY HANDLING
-// ================================
-
-type CallbackHandler<TCtx extends Context = any> = (
-  ctx: TCtx,
-  next: NextFunction
-) => Promise<void> | void;
-
-const wrapCallbackHandler = <TCtx extends Context>(
-  handler: CallbackHandler<TCtx>,
-  options: { action?: string; errorAck?: string } = {}
-) => {
-  return async (ctx: TCtx, next: NextFunction) => {
-    try {
-      await handler(ctx, next);
-    } catch (error) {
-      const fallbackAction = handler.name || "callback handler";
-      const actionLabel =
-        options.action ?? ctx.callbackQuery?.data ?? fallbackAction;
-      if (options.errorAck) {
-        console.error(`Error in ${actionLabel}:`, error);
-        await safeAnswerCallbackQuery(ctx, options.errorAck);
-      } else {
-        await handleCallbackErrorSafe(ctx, error, actionLabel);
-      }
-    }
-  };
-};
 
 const handleRefreshGameCallback = async (
   ctx: any,
@@ -4804,120 +4771,6 @@ export const __test_handleGameSetupTextInput = handleGameSetupTextInput;
 // MAIN MENU CALLBACK HANDLERS
 // ================================
 
-const createWalletHandlerDeps = (): WalletHandlersDeps =>
-  Object.freeze({
-    showWalletUI: (c: any) => showWalletUI(c),
-    clearWalletCache: (id: bigint | string | number) => {
-      const normalized =
-        typeof id === "bigint" ? id : BigInt(id as string | number);
-      clearWalletCache(normalized);
-    },
-    createSettingsKeyboard: () => createWalletSettingsKeyboard(),
-  });
-
-const walletHandlerDeps = createWalletHandlerDeps();
-
-bot.callbackQuery("main_wallet", async (ctx) => {
-  await onMainWallet(ctx as any, walletHandlerDeps);
-});
-
-bot.callbackQuery("wallet_refresh", async (ctx) => {
-  await onWalletRefresh(ctx as any, walletHandlerDeps);
-});
-
-bot.callbackQuery("wallet_settings", async (ctx) => {
-  await onWalletSettings(ctx as any, walletHandlerDeps);
-});
-
-type CallbackPrefixHandlerOptions = {
-  logLabel?: string;
-  errorAck?: string;
-};
-
-type CallbackPrefixContext = {
-  raw: string;
-  payload: string;
-};
-
-const registerCallbackPrefixHandler = (
-  prefix: string,
-  handler: (
-    ctx: any,
-    data: CallbackPrefixContext,
-    next: () => Promise<void>
-  ) => Promise<void> | void,
-  options: CallbackPrefixHandlerOptions = {}
-) => {
-  bot.on(
-    "callback_query",
-    wrapCallbackHandler(
-      async (ctx, next) => {
-        const callbackData = ctx.callbackQuery?.data;
-        if (!callbackData?.startsWith(prefix)) {
-          return await next();
-        }
-
-        const payload = callbackData.slice(prefix.length);
-        await handler(ctx, { raw: callbackData, payload }, () => next());
-      },
-      {
-        action: options.logLabel ?? `${prefix} handler`,
-        errorAck: options.errorAck,
-      }
-    )
-  );
-};
-
-// ================================
-// WALLET ACTION HANDLERS
-// ================================
-
-type WalletActionMenuResolution = {
-  menuOptions: Omit<BuildWalletActionMenuForUserOptions, "ctx">;
-  successAck?: string;
-};
-
-type WalletActionMenuHandlerConfig = {
-  callback: string;
-  logLabel?: string;
-  errorAck: string;
-  resolve: (ctx: any) => Promise<WalletActionMenuResolution | null | undefined>;
-};
-
-const registerWalletActionMenuHandler = ({
-  callback,
-  logLabel,
-  errorAck,
-  resolve,
-}: WalletActionMenuHandlerConfig) => {
-  bot.callbackQuery(
-    callback,
-    wrapCallbackHandler(
-      async (ctx) => {
-        const resolution = await resolve(ctx);
-        if (!resolution) {
-          return;
-        }
-
-        const { menu } = await buildWalletActionMenuForUser(
-          defaultWalletActionMenuDeps,
-          {
-            ctx,
-            ...resolution.menuOptions,
-          }
-        );
-
-        await respondWithMenu(ctx, menu);
-
-        if (resolution.successAck) {
-          await safeAnswerCallbackQuery(ctx, resolution.successAck);
-        }
-      },
-      { action: logLabel ?? callback, errorAck }
-    )
-  );
-};
-
 registerWalletActionMenuHandler({
   callback: "cmd_withdraw",
   logLabel: "cmd_withdraw",
@@ -5858,110 +5711,6 @@ const generateTransactionId = (): string => {
 // ================================
 // WALLET DATA CACHE
 // ================================
-
-const WALLET_CACHE_DURATION = 30 * 1000; // 30 seconds
-
-type CachedWalletData = {
-  solBalance: number;
-  nativeSolBalance: number;
-  wsolBalance: number;
-  tokenBalances: Array<{
-    mint: string;
-    ticker: string;
-    balance: number;
-    decimals: number;
-    rawBalance: string;
-  }>;
-  approvedTokens: any[];
-};
-
-const walletDataCache = createExpiringCache<CachedWalletData>(
-  WALLET_CACHE_DURATION
-);
-
-// Consistent cache key generator
-const getWalletCacheKey = (telegramId: bigint | number | string): string =>
-  String(telegramId);
-
-/**
- * Get cached wallet data or fetch fresh data
- */
-const getCachedWalletData = async (telegramId: bigint) => {
-  const cacheKey = getWalletCacheKey(telegramId);
-  const stale = walletDataCache.peek(cacheKey);
-  const cached = walletDataCache.get(cacheKey);
-
-  if (cached) {
-    console.log("📦 Using cached wallet data for user:", telegramId.toString());
-    return cached;
-  }
-
-  console.log("🔄 Fetching fresh wallet data for user:", telegramId.toString());
-
-  try {
-    // Fetch fresh data
-    let solBalance = await wallet.getBalance(telegramId);
-    const nativeSolBalance = solBalance;
-    const approvedTokens = tokenManager
-      ? tokenManager.getAllApprovedTokensWithMetadata()
-      : [];
-    let tokenBalances = await wallet.getAllApprovedTokenBalances(
-      telegramId,
-      approvedTokens
-    );
-
-    const wsolToken = tokenBalances.find((token) => token.mint === WSOL_MINT);
-    const wsolBalance = wsolToken?.balance ?? 0;
-
-    // Merge WSOL into SOL using util
-    const merged = mergeWsolIntoSol(solBalance, tokenBalances, WSOL_MINT);
-    solBalance = merged.solLamports;
-    tokenBalances = merged.tokenBalances as typeof tokenBalances;
-
-    const data: CachedWalletData = {
-      solBalance,
-      nativeSolBalance,
-      wsolBalance,
-      tokenBalances,
-      approvedTokens,
-    };
-
-    // Cache the data
-    walletDataCache.setWithTTL(cacheKey, data);
-
-    return data;
-  } catch (error) {
-    console.error("Error fetching wallet data:", error);
-    // Return cached data if available, even if expired
-    if (stale) {
-      console.log("⚠️ Using expired cache due to RPC error");
-      return stale;
-    }
-    throw error;
-  }
-};
-
-// Function to clear wallet cache (useful after token registration)
-function clearWalletCache(telegramId: bigint) {
-  const cacheKey = getWalletCacheKey(telegramId);
-  walletDataCache.delete(cacheKey);
-  console.log(`🗑️ Cleared wallet cache for user: ${telegramId}`);
-}
-
-const defaultWalletActionMenuDeps = {
-  requireTelegramId,
-  getWalletAddress: (telegramId: bigint) =>
-    wallet.getKeyPair(telegramId).publicKey.toBase58(),
-  getWalletBalances: async (
-    telegramId: bigint
-  ): Promise<WalletMenuBalances> => {
-    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-    return { solBalance, tokenBalances };
-  },
-  formatSolBalance: (lamports: number) => wallet.formatSolBalance(lamports),
-  formatTokenBalance: (balance: number, decimals: number) =>
-    wallet.formatTokenBalance(balance, decimals),
-};
 
 // ================================
 // SEND TOKEN INTERFACE HANDLERS
