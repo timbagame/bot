@@ -170,17 +170,12 @@ export class GameDatabase extends BaseDatabase {
   }
 
   public gameExists(gameAddress: string): boolean {
-    try {
-      const result = this.get(
-        "SELECT 1 FROM games WHERE game_address = ? LIMIT 1",
-        [gameAddress],
-        "checking if game exists"
-      );
-      return result !== null;
-    } catch (error) {
-      console.error(`[Game DB] Error checking if game exists:`, error);
-      return false;
-    }
+    const result = this.get(
+      "SELECT 1 FROM games WHERE game_address = ? LIMIT 1",
+      [gameAddress],
+      "checking if game exists"
+    );
+    return result !== null;
   }
 
   public saveGameMessage(

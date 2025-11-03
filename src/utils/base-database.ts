@@ -1,6 +1,6 @@
 import type { Changes, SQLQueryBindings } from "bun:sqlite";
 import { Database } from "bun:sqlite";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import { createSingleton } from "./singleton";
@@ -118,6 +118,11 @@ export abstract class BaseDatabase {
     return Array.isArray(params) ? params : [params];
   }
 
+  /**
+   * This method is intentionally marked as `protected` so subclasses can
+   * customize or reuse the shared error handling behavior. This is an
+   * intentional API expansion to support database-specific overrides.
+   */
   protected handleError(operation: string, error: unknown): never {
     console.error(`[${this.name} DB] Error ${operation}:`, error);
     throw error instanceof Error ? error : new Error(String(error));
@@ -199,7 +204,6 @@ export function createDatabaseSingleton<T extends BaseDatabase>(factory: () => T
       // Clean up the database file before resetting
       if (cachedFilename) {
         try {
-          const { rmSync } = require("node:fs");
           const fullPath = resolveDatabaseFilename(cachedFilename);
           if (fullPath && fullPath !== ":memory:" && !fullPath.startsWith("file:")) {
             rmSync(fullPath, { force: true });
