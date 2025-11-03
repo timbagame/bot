@@ -31,8 +31,8 @@ function makeWalletStub() {
 
 test("autoDiscoverTokenInfo returns TOKEN_ prefix for non pump.fun", async () => {
   const tm = TokenManager.getInstance(makeWalletStub(), "DEF_MINT", "DEF");
-  // Valid base58 to trigger potential pump.fun check, but will not be detected
-  const mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+  // Use a fake but valid base58 mint that is not in builtin tokens
+  const mint = "FakeTokenMint1111111111111111111111111111111";
   const res = await tm.autoDiscoverTokenInfo(mint);
   expect(res?.ticker).toBe("DISC");
   expect(res?.decimals).toBe(6);
