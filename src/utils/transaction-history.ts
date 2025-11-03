@@ -1,4 +1,4 @@
-import { BaseDatabase, createDatabaseClassSingleton } from "./base-database";
+import { BaseDatabase, createDatabaseSingleton } from "./base-database";
 import { NetworkDetector } from "./network-detector";
 
 // ================================
@@ -31,7 +31,7 @@ export class TransactionHistory extends BaseDatabase {
   public static resetForTesting: () => void;
 
   static {
-    const { getInstance, resetForTesting } = createDatabaseClassSingleton(
+    const { getInstance, resetForTesting } = createDatabaseSingleton(
       () => new TransactionHistory()
     );
     TransactionHistory.getInstance = getInstance;

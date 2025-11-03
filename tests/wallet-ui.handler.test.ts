@@ -57,7 +57,13 @@ describe("wallet handler showWalletUI", () => {
         formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toFixed(0),
       },
       getCachedWalletData: async () => ({ solBalance: 0, tokenBalances: [{ mint: "EPjF...USDC", ticker: "USDC", balance: 1000000, decimals: 6 }] }),
-      getPriceUSD: async (_: string) => 1,
+      fetchPricesUSD: async (references: string[]) => {
+        const record: Record<string, number> = {};
+        for (const reference of references) {
+          record[reference] = 1;
+        }
+        return record;
+      },
       buildWalletCaption: (_: string, lines: any) => {
         capturedLines = lines;
         return "CAPTION";
@@ -85,7 +91,13 @@ describe("wallet handler showWalletUI", () => {
         formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toFixed(0),
       },
       getCachedWalletData: async () => ({ solBalance: 0, tokenBalances: [{ mint: "EPjF...USDC", ticker: "USDC", balance: 1000000, decimals: 6 }] }),
-      getPriceUSD: async (_: string) => 1,
+      fetchPricesUSD: async (references: string[]) => {
+        const record: Record<string, number> = {};
+        for (const reference of references) {
+          record[reference] = 1;
+        }
+        return record;
+      },
       buildWalletCaption: (_: string, lines: any) => {
         capturedLines = lines;
         return "CAPTION";
@@ -119,7 +131,13 @@ describe("wallet handler showWalletUI", () => {
         formatSolBalance: (_: number) => "0.000000",
       },
       getCachedWalletData: async () => { throw new Error("fail"); },
-      getPriceUSD: async (_: string) => 1,
+      fetchPricesUSD: async (references: string[]) => {
+        const record: Record<string, number> = {};
+        for (const reference of references) {
+          record[reference] = 1;
+        }
+        return record;
+      },
       buildWalletCaption: () => "CAPTION",
       createWalletKeyboard: () => ({ rows: [] } as any),
       WINNER_VIDEO_ID: "VID",
@@ -148,7 +166,13 @@ describe("wallet handler showWalletUI", () => {
         formatSolBalance: (_: number) => "0.000000",
       },
       getCachedWalletData: async () => ({ solBalance: 0, tokenBalances: [] }),
-      getPriceUSD: async (_: string) => 1,
+      fetchPricesUSD: async (references: string[]) => {
+        const record: Record<string, number> = {};
+        for (const reference of references) {
+          record[reference] = 1;
+        }
+        return record;
+      },
       buildWalletCaption: () => "CAPTION",
       createWalletKeyboard: () => ({ rows: [] } as any),
       WINNER_VIDEO_ID: "VID",
@@ -173,11 +197,16 @@ test("buildWalletTokenLines formats balances and skips empty tokens", async () =
     ],
     formatSolBalance: (lamports) => (lamports / 1_000_000_000).toFixed(6),
     formatTokenBalance: (amount, decimals) => (amount / Math.pow(10, decimals)).toFixed(3),
-    getPriceUSD: async (reference: string) => {
-      if (reference === "SOL") {
-        return 20;
+    fetchPricesUSD: async (references: string[]) => {
+      const record: Record<string, number> = {};
+      for (const reference of references) {
+        if (reference === "SOL") {
+          record[reference] = 20;
+        } else {
+          record[reference] = 5;
+        }
       }
-      return 5;
+      return record;
     },
   });
 

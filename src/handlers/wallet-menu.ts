@@ -10,7 +10,7 @@ import {
   type WalletMenuBalances,
 } from "../utils/wallet-ui";
 import { createWalletKeyboard, createWalletSettingsKeyboard } from "../utils/keyboards";
-import { getPriceUSD } from "../utils/prices";
+import { getPricesUSD } from "../utils/prices";
 import { respondWithMenu } from "../utils/menu-response";
 import { safeAnswerCallbackQuery, requireTelegramId } from "../utils/context-helpers";
 import type { WalletManager } from "../utils/wallet";
@@ -177,7 +177,7 @@ export const createWalletMenuModule = (
     await showWalletUIHandler(ctx, {
       wallet,
       getCachedWalletData,
-      getPriceUSD,
+      fetchPricesUSD: getPricesUSD,
       buildWalletCaption,
       createWalletKeyboard,
       WINNER_VIDEO_ID: getStartVideoId(),

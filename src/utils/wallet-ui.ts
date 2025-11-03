@@ -5,6 +5,7 @@ import { respondWithMenu } from "./menu-response";
 import { setInputSession, type InputSessionState } from "./user-state";
 import { NetworkDetector } from "./network-detector";
 import { createCancelKeyboard } from "./keyboards";
+import { getPricesUSD } from "./prices";
 
 export type TokenDisplayLine = {
   ticker: string;
@@ -25,7 +26,9 @@ export type BuildWalletTokenLinesParams = {
   tokenBalances: WalletTokenBalance[];
   formatSolBalance: (lamports: number) => string;
   formatTokenBalance?: (balance: number, decimals: number) => string;
-  getPriceUSD: (reference: string) => Promise<number>;
+  fetchPricesUSD?: (
+    references: string[]
+  ) => Promise<Record<string, number>>;
 };
 
 export async function buildWalletTokenLines({
@@ -33,7 +36,7 @@ export async function buildWalletTokenLines({
   tokenBalances,
   formatSolBalance,
   formatTokenBalance,
-  getPriceUSD,
+  fetchPricesUSD,
 }: BuildWalletTokenLinesParams): Promise<TokenDisplayLine[]> {
   const filteredBalances = tokenBalances.filter((token) => {
     if (!token) return false;
@@ -47,16 +50,14 @@ export async function buildWalletTokenLines({
     priceReferences.add(token.mint || token.ticker);
   }
 
-  const priceEntries = await Promise.all(
-    Array.from(priceReferences, async (reference) => {
-      const price = await getPriceUSD(reference);
-      return [reference, price] as const;
-    })
-  );
-  const priceMap = new Map(priceEntries);
+  const references = Array.from(priceReferences);
+  const resolvePrices =
+    fetchPricesUSD ?? ((ids: string[]) => getPricesUSD(ids));
+  const priceRecord = await resolvePrices(references);
+  const getPriceFor = (reference: string) => priceRecord?.[reference] ?? 0;
 
   const solFormatted = formatSolBalance(solBalanceLamports);
-  const solPriceUSD = priceMap.get("SOL") ?? 0;
+  const solPriceUSD = getPriceFor("SOL");
   const solDecimalBalance = solBalanceLamports / LAMPORTS_PER_SOL;
 
   const lines: TokenDisplayLine[] = [
@@ -74,7 +75,7 @@ export async function buildWalletTokenLines({
       : String(token.balance / Math.pow(10, token.decimals));
 
     const reference = token.mint || token.ticker;
-    const tokenPriceUSD = priceMap.get(reference) ?? 0;
+    const tokenPriceUSD = getPriceFor(reference);
     const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
 
     lines.push({

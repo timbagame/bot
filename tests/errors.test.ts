@@ -1,15 +1,15 @@
 import { expect, test } from "bun:test";
-import { parseTransactionError, truncateErrorForCallback } from "../src/utils/errors";
+import { parseTransactionError, truncateMessage } from "../src/utils/errors";
 
-test("truncateErrorForCallback returns original message when under limit", () => {
+test("truncateMessage returns original message when under limit", () => {
   const message = "short error";
-  expect(truncateErrorForCallback(message, 20)).toBe(message);
+  expect(truncateMessage(message, { maxLength: 20 })).toBe(message);
 });
 
-test("truncateErrorForCallback truncates long message and appends ellipsis", () => {
+test("truncateMessage truncates long message and appends ellipsis", () => {
   const longMessage = "a".repeat(50);
-  expect(truncateErrorForCallback(longMessage, 10)).toBe(
-    "a".repeat(10) + "..."
+  expect(truncateMessage(longMessage, { maxLength: 10 })).toBe(
+    "a".repeat(7) + "..."
   );
 });
 

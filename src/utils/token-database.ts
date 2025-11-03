@@ -1,5 +1,5 @@
 import type { KnownToken } from "../types";
-import { BaseDatabase, createDatabaseClassSingleton } from "./base-database";
+import { BaseDatabase, initializeDatabaseSingleton } from "./base-database";
 
 /**
  * Database service for storing token-related data
@@ -9,11 +9,7 @@ export class TokenDatabase extends BaseDatabase {
   public static resetForTesting: () => void;
 
   static {
-    const { getInstance, resetForTesting } = createDatabaseClassSingleton(
-      () => new TokenDatabase()
-    );
-    TokenDatabase.getInstance = getInstance;
-    TokenDatabase.resetForTesting = resetForTesting;
+    initializeDatabaseSingleton(TokenDatabase, () => new TokenDatabase());
   }
 
   private constructor() {

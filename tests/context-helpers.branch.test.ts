@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import {
   handleCallbackErrorSafe,
-  truncateErrorMessage,
   safeAnswerCallbackQuery,
 } from "../src/utils/context-helpers";
+import { truncateMessage } from "../src/utils/errors";
 
 test("safeAnswerCallbackQuery falls back to ctx.api.answerCallbackQuery when no direct method", async () => {
   let answered = false;
@@ -20,9 +20,9 @@ test("safeAnswerCallbackQuery falls back to ctx.api.answerCallbackQuery when no 
   expect(answered).toBe(true);
 });
 
-test("truncateErrorMessage honors important prefix and first sentence", () => {
+test("truncateMessage honors important prefix and first sentence", () => {
   const msg = "❌ Failure: Something bad happened. Additional verbose context that should be dropped.";
-  const truncated = truncateErrorMessage(msg, { maxLength: 60 });
+  const truncated = truncateMessage(msg, { maxLength: 60, preserveSentences: true, wordBoundary: true });
   // Should keep just the first sentence due to important prefix
   expect(truncated).toBe("❌ Failure: Something bad happened.");
 });

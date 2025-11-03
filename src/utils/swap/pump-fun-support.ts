@@ -1,6 +1,6 @@
-import type { PumpFunClient, PumpFunQuote } from "../pump-fun";
+import type { PumpFunClient } from "../pump-fun";
 import { validatePumpFunSwap } from "../pump-fun";
-import type { JupiterClient, JupiterQuoteResponse } from "../jupiter";
+import type { JupiterClient } from "../jupiter";
 import type { SolanaNetwork } from "../network-detector";
 import { WSOL_MINT } from "../token-registry";
 import type { SwapQuote, CompositeFlow } from "./types";
@@ -196,48 +196,6 @@ export function determineCompositeFlow(options: {
   return null;
 }
 
-interface PumpFunQuoteParams {
-  inputMint: string;
-  outputMint: string;
-  amount: string;
-  inputDecimals: number;
-  outputDecimals: number;
-  slippageBps: number;
-}
-
-async function getPumpFunQuoteCached(
-  cache: SwapQuoteCache,
-  client: PumpFunClient,
-  params: PumpFunQuoteParams
-): Promise<PumpFunQuote> {
-  const { inputMint, outputMint, amount, inputDecimals, outputDecimals, slippageBps } =
-    params;
-  return cache.getPumpFunQuote(params, () =>
-    client.getQuote(
-      inputMint,
-      outputMint,
-      amount,
-      inputDecimals,
-      outputDecimals,
-      slippageBps
-    )
-  );
-}
-
-async function getJupiterQuoteCached(
-  cache: SwapQuoteCache,
-  client: JupiterClient,
-  params: {
-    inputMint: string;
-    outputMint: string;
-    amount: string;
-    slippageBps: number;
-    swapMode?: "ExactIn" | "ExactOut";
-  }
-): Promise<JupiterQuoteResponse> {
-  return cache.getJupiterQuote(params, () => client.getQuote(params));
-}
-
 export async function buildPumpFunCompositeQuote(options: {
   flow: CompositeFlow;
   inputMint: string;
@@ -272,21 +230,34 @@ export async function buildPumpFunCompositeQuote(options: {
   if (flow === "pump-then-jupiter") {
     console.log("   🔁 Building composite pump.fun → SOL → Jupiter quote");
 
-    const pumpQuote = await getPumpFunQuoteCached(quoteCache, pumpFunClient, {
+    const pumpQuoteParams = {
       inputMint,
       outputMint: WSOL_MINT,
       amount: amountForPumpQuote,
       inputDecimals,
       outputDecimals: SOL_DECIMALS,
       slippageBps,
-    });
+    };
+    const pumpQuote = await quoteCache.getPumpFunQuote(pumpQuoteParams, () =>
+      pumpFunClient.getQuote(
+        pumpQuoteParams.inputMint,
+        pumpQuoteParams.outputMint,
+        pumpQuoteParams.amount,
+        pumpQuoteParams.inputDecimals,
+        pumpQuoteParams.outputDecimals,
+        pumpQuoteParams.slippageBps
+      )
+    );
 
-    const jupiterQuote = await getJupiterQuoteCached(quoteCache, jupiterClient, {
+    const jupiterQuoteParams = {
       inputMint: WSOL_MINT,
       outputMint,
       amount: pumpQuote.outputAmount,
       slippageBps,
-    });
+    };
+    const jupiterQuote = await quoteCache.getJupiterQuote(jupiterQuoteParams, () =>
+      jupiterClient.getQuote(jupiterQuoteParams)
+    );
 
     const estimatedRate = (() => {
       const inputRaw = Number.parseFloat(amountDecimal);
@@ -321,26 +292,39 @@ export async function buildPumpFunCompositeQuote(options: {
 
   console.log("   🔁 Building composite Jupiter → SOL → pump.fun quote");
 
-  const jupiterQuote = await getJupiterQuoteCached(quoteCache, jupiterClient, {
+  const jupiterQuoteParams = {
     inputMint,
     outputMint: WSOL_MINT,
     amount: amountRaw,
     slippageBps,
-  });
+  };
+  const jupiterQuote = await quoteCache.getJupiterQuote(jupiterQuoteParams, () =>
+    jupiterClient.getQuote(jupiterQuoteParams)
+  );
 
   const solDecimalAmount = convertRawAmountToDecimal(
     jupiterQuote.outAmount,
     SOL_DECIMALS
   );
 
-  const pumpQuote = await getPumpFunQuoteCached(quoteCache, pumpFunClient, {
+  const pumpQuoteParams = {
     inputMint: WSOL_MINT,
     outputMint,
     amount: solDecimalAmount,
     inputDecimals: SOL_DECIMALS,
     outputDecimals,
     slippageBps,
-  });
+  };
+  const pumpQuote = await quoteCache.getPumpFunQuote(pumpQuoteParams, () =>
+    pumpFunClient.getQuote(
+      pumpQuoteParams.inputMint,
+      pumpQuoteParams.outputMint,
+      pumpQuoteParams.amount,
+      pumpQuoteParams.inputDecimals,
+      pumpQuoteParams.outputDecimals,
+      pumpQuoteParams.slippageBps
+    )
+  );
 
   const estimatedRate = (() => {
     const inputRaw = Number.parseFloat(amountDecimal);

@@ -34,48 +34,67 @@ const messageSupportsCaption = (message: any): boolean =>
       message?.caption !== undefined
   );
 
+const buildMenuTextOptions = (payload: MenuPayload) => ({
+  parse_mode: payload.parseMode ?? "HTML",
+  reply_markup: payload.keyboard,
+  link_preview_options: {
+    is_disabled: payload.disableLinkPreview ?? true,
+  },
+});
+
+type MenuEditKind = "text" | "caption";
+
+type EditAttemptResult = {
+  status: "edited" | "skipped" | "fallback" | "error";
+  error?: unknown;
+};
+
+type EditTargetAttempt = {
+  invoke: () => Promise<EditAttemptResult>;
+  continueOnFailure?: boolean;
+  onFailure?: (result: EditAttemptResult) => void;
+};
+
+type EditTarget = {
+  messageId: number | null;
+  chatId: number | null;
+  attempts: EditTargetAttempt[];
+};
+
 const attemptEdit = async (
-  _kind: "text" | "caption",
+  _kind: MenuEditKind,
   performEdit: () => Promise<unknown>
-): Promise<boolean> => {
+): Promise<EditAttemptResult> => {
   try {
     await performEdit();
-    return true;
+    return { status: "edited" };
   } catch (error) {
     if (isMessageNotModified(error)) {
-      return true;
+      return { status: "skipped" };
     }
     if (shouldFallbackToReply(error)) {
-      return false;
+      return { status: "fallback", error };
     }
-    throw error;
+    return { status: "error", error };
   }
 };
 
-const tryEditText = async (
+const editMenuMessage = async (
   ctx: Context,
-  payload: MenuPayload
-): Promise<boolean> =>
-  attemptEdit("text", async () => {
-    await ctx.editMessageText(payload.text, {
-      parse_mode: payload.parseMode ?? "HTML",
-      reply_markup: payload.keyboard,
-      link_preview_options: {
-        is_disabled: payload.disableLinkPreview ?? true,
-      },
-    });
-  });
+  payload: MenuPayload,
+  kind: MenuEditKind
+): Promise<EditAttemptResult> =>
+  attemptEdit(kind, async () => {
+    if (kind === "caption") {
+      await ctx.editMessageCaption({
+        caption: payload.text,
+        parse_mode: payload.parseMode ?? "HTML",
+        reply_markup: payload.keyboard,
+      });
+      return;
+    }
 
-const tryEditCaption = async (
-  ctx: Context,
-  payload: MenuPayload
-): Promise<boolean> =>
-  attemptEdit("caption", async () => {
-    await ctx.editMessageCaption({
-      caption: payload.text,
-      parse_mode: payload.parseMode ?? "HTML",
-      reply_markup: payload.keyboard,
-    });
+    await ctx.editMessageText(payload.text, buildMenuTextOptions(payload));
   });
 
 export const respondWithMenu = async (
@@ -93,42 +112,38 @@ export const respondWithMenu = async (
   } = options;
 
   if (!skipEdit) {
+    const editTargets: EditTarget[] = [];
+
     const hasExplicitTarget =
       typeof targetChatId === "number" && typeof targetMessageId === "number";
 
     if (hasExplicitTarget) {
-      try {
-        await ctx.api.editMessageText(targetChatId, targetMessageId, payload.text, {
-          parse_mode: payload.parseMode ?? "HTML",
-          reply_markup: payload.keyboard,
-          link_preview_options: {
-            is_disabled: payload.disableLinkPreview ?? true,
+      editTargets.push({
+        messageId: targetMessageId,
+        chatId: targetChatId,
+        attempts: [
+          {
+            invoke: () =>
+              attemptEdit("text", () =>
+                ctx.api.editMessageText(
+                  targetChatId,
+                  targetMessageId,
+                  payload.text,
+                  buildMenuTextOptions(payload)
+                )
+              ),
+            continueOnFailure: false,
+            onFailure: (result) => {
+              if (result.error) {
+                console.warn(
+                  `${logLabel}: editMessageText failed for explicit target, replying instead:`,
+                  result.error
+                );
+              }
+            },
           },
-        });
-
-        return {
-          messageId: targetMessageId,
-          chatId: targetChatId,
-          respondedWithReply: false,
-        };
-      } catch (error) {
-        if (isMessageNotModified(error)) {
-          return {
-            messageId: targetMessageId,
-            chatId: targetChatId,
-            respondedWithReply: false,
-          };
-        }
-
-        if (!shouldFallbackToReply(error)) {
-          throw error;
-        }
-
-        console.warn(
-          `${logLabel}: editMessageText failed for explicit target, replying instead:`,
-          error
-        );
-      }
+        ],
+      });
     }
 
     const adapterTarget =
@@ -146,39 +161,36 @@ export const respondWithMenu = async (
           ? ctx.chat.id
           : null;
 
+      const attempts: EditTargetAttempt[] = [];
+
       if (typeof (ctx as any).editMessageCaption === "function") {
-        try {
-          const captionEdited = await tryEditCaption(ctx, payload);
-          if (captionEdited) {
-            return {
-              messageId,
-              chatId,
-              respondedWithReply: false,
-            };
-          }
-        } catch (error) {
-          console.warn(
-            `${logLabel}: adapter editMessageCaption failed, attempting text edit:`,
-            error
-          );
-        }
+        attempts.push({
+          invoke: () => editMenuMessage(ctx, payload, "caption"),
+          onFailure: (result) => {
+            if (result.error) {
+              console.warn(
+                `${logLabel}: adapter editMessageCaption failed, attempting text edit:`,
+                result.error
+              );
+            }
+          },
+        });
       }
 
-      try {
-        const edited = await tryEditText(ctx, payload);
-        if (edited) {
-          return {
-            messageId,
-            chatId,
-            respondedWithReply: false,
-          };
-        }
-      } catch (error) {
-        console.warn(
-          `${logLabel}: adapter editMessageText failed, replying instead:`,
-          error
-        );
-      }
+      attempts.push({
+        invoke: () => editMenuMessage(ctx, payload, "text"),
+        continueOnFailure: false,
+        onFailure: (result) => {
+          if (result.error) {
+            console.warn(
+              `${logLabel}: adapter editMessageText failed, replying instead:`,
+              result.error
+            );
+          }
+        },
+      });
+
+      editTargets.push({ messageId, chatId, attempts });
     }
 
     if (allowContextEdit && ctx.callbackQuery && message) {
@@ -188,44 +200,55 @@ export const respondWithMenu = async (
         (message as any)?.chat?.id ??
         (typeof ctx.chat?.id === "number" ? ctx.chat.id : null);
 
-    if (supportsCaption) {
-      try {
-        const captionEdited = await tryEditCaption(ctx, payload);
-        if (captionEdited) {
-          return {
-            messageId,
-            chatId,
-            respondedWithReply: false,
-          };
-        }
-      } catch (error) {
-        console.warn(
-          "respondWithMenu: editMessageCaption failed, attempting text edit:",
-          error
-        );
+      const attempts: EditTargetAttempt[] = [];
+
+      if (supportsCaption) {
+        attempts.push({
+          invoke: () => editMenuMessage(ctx, payload, "caption"),
+          onFailure: (result) => {
+            if (result.error) {
+              console.warn(
+                `${logLabel}: editMessageCaption failed, attempting text edit:`,
+                result.error
+              );
+            }
+          },
+        });
       }
+
+      attempts.push({
+        invoke: () => editMenuMessage(ctx, payload, "text"),
+        continueOnFailure: false,
+        onFailure: (result) => {
+          if (result.error) {
+            const messageText = supportsCaption
+              ? `${logLabel}: editMessageText failed after caption fallback, replying instead:`
+              : `${logLabel}: editMessageText failed, falling back to reply:`;
+            console.warn(messageText, result.error);
+          }
+        },
+      });
+
+      editTargets.push({ messageId, chatId, attempts });
     }
 
-      try {
-        const edited = await tryEditText(ctx, payload);
-        if (edited) {
+    for (const target of editTargets) {
+      for (const attempt of target.attempts) {
+        const result = await attempt.invoke();
+        if (result.status === "edited" || result.status === "skipped") {
           return {
-            messageId,
-            chatId,
+            messageId: target.messageId,
+            chatId: target.chatId,
             respondedWithReply: false,
           };
         }
-      } catch (error) {
-        if (!supportsCaption) {
-          console.warn(
-            `${logLabel}: editMessageText failed, falling back to reply:`,
-            error
-          );
-        } else {
-          console.warn(
-            `${logLabel}: editMessageText failed after caption fallback, replying instead:`,
-            error
-          );
+
+        if (attempt.onFailure && result.error) {
+          attempt.onFailure(result);
+        }
+
+        if (attempt.continueOnFailure === false) {
+          break;
         }
       }
     }
@@ -238,12 +261,8 @@ export const respondWithMenu = async (
 
   const sentMessage = await awaitTelegramRetry(() =>
     ctx.reply(payload.text, {
-      parse_mode: payload.parseMode ?? "HTML",
-      reply_markup: payload.keyboard,
+      ...buildMenuTextOptions(payload),
       reply_to_message_id: replyToId ?? undefined,
-      link_preview_options: {
-        is_disabled: payload.disableLinkPreview ?? true,
-      },
     })
   );
 

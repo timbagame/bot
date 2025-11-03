@@ -12,6 +12,10 @@ import { GameDatabase, type LeaderboardStatsRecord } from "./utils/game-database
 import { GameManager } from "./utils/game";
 import { PDAManager } from "./utils/pda";
 import { formatUserFriendlyError } from "./utils/errors";
+import {
+  handleTransactionError,
+  handleCommandError as handleCommandErrorHelper,
+} from "./utils/bot-helpers/error-response";
 import { SwapManager, type SwapQuote } from "./utils/swap-manager";
 import { createExpiringCache } from "./utils/expiring-cache";
 import {
@@ -1348,16 +1352,7 @@ const validateAndProcessTransaction = async (
       }
     );
   } catch (error: any) {
-    const userFriendlyError = formatUserFriendlyError(error, wallet);
-    await ctx.api.editMessageText(
-      ctx.chat!.id,
-      processingMsg.message_id,
-      userFriendlyError,
-      { parse_mode: "HTML" }
-    );
-    if (error && typeof error === "object") {
-      (error as any).__alreadyNotified = true;
-    }
+    await handleTransactionError(ctx, error, processingMsg.message_id, wallet);
     throw error;
   }
 };
@@ -1371,12 +1366,7 @@ const handleCommandError = async (
   error: any,
   commandName: string
 ): Promise<void> => {
-  console.error(`Error in ${commandName} command:`, error);
-  if (error && typeof error === "object" && (error as any).__alreadyNotified) {
-    return;
-  }
-  const userFriendlyError = formatUserFriendlyError(error, wallet);
-  await replyToMessage(ctx, userFriendlyError);
+  await handleCommandErrorHelper(ctx, error, commandName, wallet);
 };
 
 const replyToMessage = async (
@@ -1920,19 +1910,14 @@ bot.command("wrap", async (ctx: Context) => {
         );
       },
       onError: async (error) => {
-        const userFriendlyError = formatUserFriendlyError(error, wallet);
         if (processingMessageId != null) {
-          await ctx.api.editMessageText(
-            ctx.chat!.id,
-            processingMessageId,
-            userFriendlyError,
-            { parse_mode: "HTML" }
-          );
+          await handleTransactionError(ctx, error, processingMessageId, wallet);
         } else {
+          const userFriendlyError = formatUserFriendlyError(error, wallet);
           await replyToMessage(ctx, userFriendlyError);
-        }
-        if (error && typeof error === "object") {
-          (error as any).__alreadyNotified = true;
+          if (error && typeof error === "object") {
+            (error as any).__alreadyNotified = true;
+          }
         }
       },
     });
@@ -1992,23 +1977,11 @@ bot.command("unwrap", async (ctx: Context) => {
         );
       },
       onError: async (error) => {
-        const userFriendlyError = formatUserFriendlyError(error, wallet);
-        await ctx.api.editMessageText(
-          ctx.chat!.id,
-          processingMsg.message_id,
-          userFriendlyError,
-          { parse_mode: "HTML" }
-        );
+        await handleTransactionError(ctx, error, processingMsg.message_id, wallet);
       },
     });
   } catch (error) {
-    const userFriendlyError = formatUserFriendlyError(error, wallet);
-    await ctx.api.editMessageText(
-      ctx.chat!.id,
-      processingMsg.message_id,
-      userFriendlyError,
-      { parse_mode: "HTML" }
-    );
+    await handleTransactionError(ctx, error, processingMsg.message_id, wallet);
   }
 });
 
@@ -3241,7 +3214,8 @@ const showSwapQuoteAndConfirmation = async (
       kind: "swap",
       inputFactory: async ({ tokenBalances }) => {
         const inputMint =
-          overrides.fromMint ?? tokenManager.resolveMintForTicker(fromToken);
+          overrides.fromMint ??
+          (await tokenManager.resolveMintForTicker(fromToken));
         if (!inputMint) {
           throw new Error(`Unsupported token pair: ${fromToken} → ${toToken}`);
         }
@@ -3269,7 +3243,7 @@ const showSwapQuoteAndConfirmation = async (
       },
       outputFactory: async () => {
         const outputMint =
-          overrides.toMint ?? tokenManager.resolveMintForTicker(toToken);
+          overrides.toMint ?? (await tokenManager.resolveMintForTicker(toToken));
         if (!outputMint) {
           throw new Error(`Unsupported token pair: ${fromToken} → ${toToken}`);
         }
