@@ -130,18 +130,25 @@ test("buildWalletTokenLines batches price lookups and reuses cached values", asy
     formatSolBalance: (lamports) => `${lamports / LAMPORTS_PER_SOL} SOL`,
     formatTokenBalance: (balance, decimals) =>
       (balance / Math.pow(10, decimals)).toFixed(2),
-    getPriceUSD: async (reference) => {
-      calls.push(reference);
-      switch (reference) {
-        case "SOL":
-          return 25;
-        case "mint-1":
-          return 0.5;
-        case "USDC":
-          return 1;
-        default:
-          return 0;
+    fetchPricesUSD: async (references) => {
+      const record: Record<string, number> = {};
+      for (const reference of references) {
+        calls.push(reference);
+        switch (reference) {
+          case "SOL":
+            record[reference] = 25;
+            break;
+          case "mint-1":
+            record[reference] = 0.5;
+            break;
+          case "USDC":
+            record[reference] = 1;
+            break;
+          default:
+            record[reference] = 0;
+        }
       }
+      return record;
     },
   });
 

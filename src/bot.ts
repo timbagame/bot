@@ -3214,7 +3214,8 @@ const showSwapQuoteAndConfirmation = async (
       kind: "swap",
       inputFactory: async ({ tokenBalances }) => {
         const inputMint =
-          overrides.fromMint ?? tokenManager.resolveMintForTicker(fromToken);
+          overrides.fromMint ??
+          (await tokenManager.resolveMintForTicker(fromToken));
         if (!inputMint) {
           throw new Error(`Unsupported token pair: ${fromToken} → ${toToken}`);
         }
@@ -3242,7 +3243,7 @@ const showSwapQuoteAndConfirmation = async (
       },
       outputFactory: async () => {
         const outputMint =
-          overrides.toMint ?? tokenManager.resolveMintForTicker(toToken);
+          overrides.toMint ?? (await tokenManager.resolveMintForTicker(toToken));
         if (!outputMint) {
           throw new Error(`Unsupported token pair: ${fromToken} → ${toToken}`);
         }

@@ -16,14 +16,14 @@ export type ShowWalletUIDeps = {
     formatTokenBalance?: (n: number, d: number) => string;
   };
   getCachedWalletData: (telegramId: bigint) => Promise<{ solBalance: number; tokenBalances: Array<{ mint: string; ticker: string; balance: number; decimals: number }> }>;
-  getPriceUSD: (mint: string) => Promise<number>;
+  fetchPricesUSD?: (references: string[]) => Promise<Record<string, number>>;
   buildWalletCaption: (walletAddress: string, tokenLines: TokenDisplayLine[]) => string;
   createWalletKeyboard: () => InlineKeyboard;
   WINNER_VIDEO_ID?: string | null;
 };
 
 export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
-  const { wallet, getCachedWalletData, getPriceUSD, buildWalletCaption, createWalletKeyboard, WINNER_VIDEO_ID } = deps;
+  const { wallet, getCachedWalletData, fetchPricesUSD, buildWalletCaption, createWalletKeyboard, WINNER_VIDEO_ID } = deps;
 
   const telegramId = await getRequiredTelegramIdForContext(ctx, "wallet display", {
     onMissing: async (message) => {
@@ -92,7 +92,7 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
       formatTokenBalance: wallet.formatTokenBalance
         ? (amount, decimals) => (wallet as any).formatTokenBalance(amount, decimals)
         : undefined,
-      getPriceUSD,
+      fetchPricesUSD,
     });
 
     const caption = buildWalletCaption(walletAddress, tokenLines);
