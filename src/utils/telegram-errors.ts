@@ -13,70 +13,40 @@ const getErrorString = (value: unknown): string => {
 
 const normalize = (value: unknown): string => getErrorString(value).toLowerCase();
 
+const matchesAny = (value: unknown, phrases: string[]): boolean => {
+  const description = normalize(value);
+  if (!description) {
+    return false;
+  }
+  return phrases.some((phrase) => description.includes(phrase));
+};
+
 export const getErrorDescription = (error: unknown): string => getErrorString(error);
 
-export const isMessageNotModified = (error: unknown): boolean => {
-  const description = normalize(error);
-  return description.includes("message is not modified");
-};
+export const isMessageNotModified = (error: unknown): boolean =>
+  matchesAny(error, ["message is not modified"]);
 
-export const isMessageMissing = (error: unknown): boolean => {
-  const description = normalize(error);
-  if (!description) {
-    return false;
-  }
+export const isMessageMissing = (error: unknown): boolean =>
+  matchesAny(error, [
+    "message to edit not found",
+    "message to delete not found",
+    "message not found",
+  ]);
 
-  return (
-    description.includes("message to edit not found") ||
-    description.includes("message to delete not found") ||
-    description.includes("message not found")
-  );
-};
+export const isEditProhibited = (error: unknown): boolean =>
+  matchesAny(error, ["message can't be edited", "message cant be edited"]);
 
-export const isEditProhibited = (error: unknown): boolean => {
-  const description = normalize(error);
-  if (!description) {
-    return false;
-  }
+export const isChatInaccessible = (error: unknown): boolean =>
+  matchesAny(error, ["have no access to the chat", "bot was blocked by the user"]);
 
-  return (
-    description.includes("message can't be edited") ||
-    description.includes("message cant be edited")
-  );
-};
+export const isMissingEditableContent = (error: unknown): boolean =>
+  matchesAny(error, [
+    "there is no text in the message to edit",
+    "there is no caption in the message to edit",
+  ]);
 
-export const isChatInaccessible = (error: unknown): boolean => {
-  const description = normalize(error);
-  if (!description) {
-    return false;
-  }
-
-  return (
-    description.includes("have no access to the chat") ||
-    description.includes("bot was blocked by the user")
-  );
-};
-
-export const isMissingEditableContent = (error: unknown): boolean => {
-  const description = normalize(error);
-  if (!description) {
-    return false;
-  }
-
-  return (
-    description.includes("there is no text in the message to edit") ||
-    description.includes("there is no caption in the message to edit")
-  );
-};
-
-export const isDuplicateContent = (error: unknown): boolean => {
-  const description = normalize(error);
-  if (!description) {
-    return false;
-  }
-
-  return description.includes("message with the same content already exists");
-};
+export const isDuplicateContent = (error: unknown): boolean =>
+  matchesAny(error, ["message with the same content already exists"]);
 
 export const shouldFallbackToReply = (error: unknown): boolean =>
   isMessageMissing(error) ||

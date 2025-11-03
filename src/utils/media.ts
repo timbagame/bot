@@ -172,6 +172,16 @@ export type SendMediaWithFallbackResult<Primary, Fallback = Primary> = {
   skippedEdit: boolean;
 };
 
+const buildSendMediaResult = <Primary, Fallback>(
+  result: Primary | Fallback | null,
+  options: { usedVideo: boolean; usedFallback: boolean; skippedEdit: boolean }
+): SendMediaWithFallbackResult<Primary, Fallback> => ({
+  result,
+  usedVideo: options.usedVideo,
+  usedFallback: options.usedFallback,
+  skippedEdit: options.skippedEdit,
+});
+
 export async function sendMediaWithFallback<Primary, Fallback = Primary>({
   videoFileId,
   logLabel = "media",
@@ -183,37 +193,40 @@ export async function sendMediaWithFallback<Primary, Fallback = Primary>({
 > {
   if (!videoFileId) {
     const result = await sendText();
-    return {
-      result,
+    return buildSendMediaResult<Primary, Fallback>(result as Primary | Fallback, {
       usedVideo: false,
       usedFallback: true,
       skippedEdit: false,
-    };
+    });
   }
 
   if (editMessage) {
     try {
-      const editResult = await editMediaWithFallback({
+      const editResult = await editMediaWithFallback<Primary, Fallback>({
         edit: editMessage,
         fallback: sendText,
         logLabel: `${logLabel} edit`,
       });
 
       if (editResult.skipped) {
-        return {
-          result: editResult.result,
-          usedVideo: false,
-          usedFallback: editResult.usedFallback,
-          skippedEdit: true,
-        };
+        return buildSendMediaResult<Primary, Fallback>(
+          editResult.result as Primary | Fallback | null,
+          {
+            usedVideo: false,
+            usedFallback: editResult.usedFallback,
+            skippedEdit: true,
+          }
+        );
       }
 
-      return {
-        result: editResult.result,
-        usedVideo: !editResult.usedFallback,
-        usedFallback: editResult.usedFallback,
-        skippedEdit: false,
-      };
+      return buildSendMediaResult<Primary, Fallback>(
+        editResult.result as Primary | Fallback | null,
+        {
+          usedVideo: !editResult.usedFallback,
+          usedFallback: editResult.usedFallback,
+          skippedEdit: false,
+        }
+      );
     } catch (error) {
       console.warn(`${logLabel} edit failed, attempting send`, error);
     }
@@ -221,24 +234,22 @@ export async function sendMediaWithFallback<Primary, Fallback = Primary>({
 
   if (!sendVideo) {
     const result = await sendText();
-    return {
-      result,
+    return buildSendMediaResult<Primary, Fallback>(result as Primary | Fallback, {
       usedVideo: false,
       usedFallback: true,
       skippedEdit: false,
-    };
+    });
   }
 
-  const { result, usedFallback } = await trySendVideoWithFallback(
+  const { result, usedFallback } = await trySendVideoWithFallback<Primary, Fallback>(
     () => sendVideo(),
     () => sendText(),
     { logLabel: `${logLabel} send` }
   );
 
-  return {
-    result,
+  return buildSendMediaResult<Primary, Fallback>(result as Primary | Fallback | null, {
     usedVideo: !usedFallback,
     usedFallback,
     skippedEdit: false,
-  };
+  });
 }
