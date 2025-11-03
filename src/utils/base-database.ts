@@ -30,6 +30,7 @@ export function resolveDatabaseFilename(filename: string): string {
 export abstract class BaseDatabase {
   protected db: Database;
   private readonly name: string;
+  private readonly filename: string;
 
   protected constructor(
     filename: string,
@@ -38,6 +39,7 @@ export abstract class BaseDatabase {
   ) {
     const resolvedFilename = resolveDatabaseFilename(filename);
     this.name = name;
+    this.filename = filename; // Store original filename
     this.db = new Database(resolvedFilename, { create: true });
 
     try {
@@ -116,9 +118,17 @@ export abstract class BaseDatabase {
     return Array.isArray(params) ? params : [params];
   }
 
-  private handleError(operation: string, error: unknown): never {
+  protected handleError(operation: string, error: unknown): never {
     console.error(`[${this.name} DB] Error ${operation}:`, error);
     throw error instanceof Error ? error : new Error(String(error));
+  }
+
+  /**
+   * Internal method to get the original filename for cleanup purposes
+   * @internal
+   */
+  getFilenameForCleanup(): string {
+    return this.filename;
   }
 }
 
@@ -138,24 +148,37 @@ export function createDatabaseHandle<T>(
   };
 }
 
-export function createDatabaseSingleton<T>(factory: () => T): {
+export function createDatabaseSingleton<T extends BaseDatabase>(factory: () => T): {
   getInstance: () => T;
   resetForTesting: () => void;
 } {
   const { getInstance, reset } = createDatabaseHandle(factory);
-  return {
-    getInstance,
-    resetForTesting: () => reset(),
-  };
-}
+  let cachedFilename: string | null = null;
 
-export function createDatabaseClassSingleton<T>(factory: () => T): {
-  getInstance: () => T;
-  resetForTesting: () => void;
-} {
-  const handles = createDatabaseSingleton(factory);
   return {
-    getInstance: () => handles.getInstance(),
-    resetForTesting: () => handles.resetForTesting(),
+    getInstance: () => {
+      const instance = getInstance();
+      // Cache the filename from the first instance
+      if (!cachedFilename && instance instanceof BaseDatabase) {
+        cachedFilename = (instance as any).getFilenameForCleanup?.() || null;
+      }
+      return instance;
+    },
+    resetForTesting: () => {
+      // Clean up the database file before resetting
+      if (cachedFilename) {
+        try {
+          const { rmSync } = require("node:fs");
+          const fullPath = resolveDatabaseFilename(cachedFilename);
+          if (fullPath && fullPath !== ":memory:" && !fullPath.startsWith("file:")) {
+            rmSync(fullPath, { force: true });
+          }
+        } catch (error) {
+          // Ignore cleanup errors, similar to resetTestDatabase behavior
+        }
+      }
+      reset();
+      cachedFilename = null;
+    },
   };
 }

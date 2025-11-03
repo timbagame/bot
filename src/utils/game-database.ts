@@ -1,7 +1,19 @@
 import type { GameData, PlayerMapping } from "../types";
-import { BaseDatabase, createDatabaseClassSingleton } from "./base-database";
+import { BaseDatabase, createDatabaseSingleton } from "./base-database";
 
-export type LeaderboardStatsRecord = {
+// ================================
+// LEADERBOARD TYPES
+// ================================
+
+export interface LeaderboardEntry {
+  telegram_id: string;
+  username: string | null;
+  total_wins: number;
+  total_games: number;
+  win_rate: number;
+}
+
+export interface LeaderboardStatsRecord {
   telegramId: string;
   totalGames: number;
   gamesWon: number;
@@ -9,7 +21,7 @@ export type LeaderboardStatsRecord = {
   gamesJoined: number;
   totalVolume: number;
   winRate: number;
-};
+}
 
 /**
  * Database service for storing game-related data
@@ -19,7 +31,7 @@ export class GameDatabase extends BaseDatabase {
   public static resetForTesting: () => void;
 
   static {
-    const { getInstance, resetForTesting } = createDatabaseClassSingleton(
+    const { getInstance, resetForTesting } = createDatabaseSingleton(
       () => new GameDatabase()
     );
     GameDatabase.getInstance = getInstance;
@@ -170,7 +182,8 @@ export class GameDatabase extends BaseDatabase {
       );
       return result !== null;
     } catch (error) {
-      throw this.handleDatabaseError("checking if game exists", error);
+      console.error(`[Game DB] Error checking if game exists:`, error);
+      return false;
     }
   }
 
@@ -639,12 +652,7 @@ export class GameDatabase extends BaseDatabase {
         })
         .filter((row): row is LeaderboardStatsRecord => row !== null);
     } catch (error) {
-      throw this.handleDatabaseError("getting leaderboard stats", error);
+      return this.handleError("getting leaderboard stats", error);
     }
-  }
-
-  private handleDatabaseError(operation: string, error: unknown): never {
-    console.error(`[Game DB] Error ${operation}:`, error);
-    throw error instanceof Error ? error : new Error(String(error));
   }
 }

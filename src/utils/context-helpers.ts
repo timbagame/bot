@@ -1,6 +1,6 @@
 import type { Context } from "grammy";
 import type { CallbackError, ErrorHandlingOptions } from "../types";
-import { formatUserFriendlyError } from "./errors";
+import { formatUserFriendlyError, truncateMessage } from "./errors";
 
 // ================================
 // ERROR HANDLING UTILITIES
@@ -186,41 +186,18 @@ export const createMessageEditAdapter = <T extends Context>(
 
 /**
  * Safely truncates error messages for callback queries with better context preservation
+ * @deprecated Use truncateMessage from errors.ts instead
  */
 export const truncateErrorMessage = (
   message: string,
   options: ErrorHandlingOptions = {}
 ): string => {
   const { maxLength = 180 } = options;
-
-  if (message.length <= maxLength) {
-    return message;
-  }
-
-  // Try to preserve important parts of the error message
-  const importantPrefixes = ["❌", "⚠️", "Error:", "Failed:", "Invalid:"];
-  const hasImportantPrefix = importantPrefixes.some((prefix) =>
-    message.startsWith(prefix)
-  );
-
-  if (hasImportantPrefix) {
-    // Find the first sentence or important part
-    const sentenceEnd = message.indexOf(". ");
-    if (sentenceEnd > 0 && sentenceEnd < maxLength - 3) {
-      return message.substring(0, sentenceEnd + 1);
-    }
-  }
-
-  // Truncate but try to end at a word boundary
-  const truncated = message.substring(0, maxLength - 3);
-  const lastSpace = truncated.lastIndexOf(" ");
-
-  if (lastSpace > maxLength * 0.7) {
-    // Only use word boundary if it's not too short
-    return truncated.substring(0, lastSpace) + "...";
-  }
-
-  return truncated + "...";
+  return truncateMessage(message, {
+    maxLength,
+    preserveSentences: true,
+    wordBoundary: true,
+  });
 };
 
 /**

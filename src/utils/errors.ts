@@ -383,10 +383,68 @@ export const formatUserFriendlyError = (
   return parseTransactionError(error, walletManager);
 };
 
+export interface TruncateOptions {
+  maxLength?: number;
+  preserveSentences?: boolean;
+  wordBoundary?: boolean;
+}
+
+/**
+ * Truncates a message to fit within a maximum length with smart truncation strategies.
+ * Supports preserving sentences and word boundaries for better readability.
+ */
+export const truncateMessage = (
+  message: string,
+  options: TruncateOptions = {}
+): string => {
+  const {
+    maxLength = CALLBACK_MESSAGE_MAX_LENGTH,
+    preserveSentences = false,
+    wordBoundary = false,
+  } = options;
+
+  if (message.length <= maxLength) {
+    return message;
+  }
+
+  // Try to preserve important parts of the error message
+  if (preserveSentences) {
+    const importantPrefixes = ["❌", "⚠️", "Error:", "Failed:", "Invalid:"];
+    const hasImportantPrefix = importantPrefixes.some((prefix) =>
+      message.startsWith(prefix)
+    );
+
+    if (hasImportantPrefix) {
+      // Find the first sentence or important part
+      const sentenceEnd = message.indexOf(". ");
+      if (sentenceEnd > 0 && sentenceEnd < maxLength - 3) {
+        return message.substring(0, sentenceEnd + 1);
+      }
+    }
+  }
+
+  // Truncate but try to end at a word boundary
+  if (wordBoundary) {
+    const truncated = message.substring(0, maxLength - 3);
+    const lastSpace = truncated.lastIndexOf(" ");
+
+    if (lastSpace > maxLength * 0.7) {
+      // Only use word boundary if it's not too short
+      return truncated.substring(0, lastSpace) + "...";
+    }
+  }
+
+  return message.substring(0, maxLength - 3) + "...";
+};
+
+/**
+ * @deprecated Use truncateMessage instead
+ */
 export const truncateErrorForCallback = (
   error: string,
   maxLength: number = CALLBACK_MESSAGE_MAX_LENGTH
 ): string => {
+  // Original behavior: truncate at maxLength and add "..." (for backward compatibility)
   return error.length > maxLength
     ? `${error.substring(0, maxLength)}...`
     : error;

@@ -205,6 +205,26 @@ interface PumpFunQuoteParams {
   slippageBps: number;
 }
 
+interface JupiterQuoteParams {
+  inputMint: string;
+  outputMint: string;
+  amount: string;
+  slippageBps: number;
+  swapMode?: "ExactIn" | "ExactOut";
+}
+
+/**
+ * Generic helper to fetch quotes with caching
+ */
+async function getCachedQuote<TParams, TQuote>(
+  cache: SwapQuoteCache,
+  cacheMethod: (params: TParams, fetcher: () => Promise<TQuote>) => Promise<TQuote>,
+  params: TParams,
+  fetcher: () => Promise<TQuote>
+): Promise<TQuote> {
+  return cacheMethod.call(cache, params, fetcher);
+}
+
 async function getPumpFunQuoteCached(
   cache: SwapQuoteCache,
   client: PumpFunClient,
@@ -212,30 +232,25 @@ async function getPumpFunQuoteCached(
 ): Promise<PumpFunQuote> {
   const { inputMint, outputMint, amount, inputDecimals, outputDecimals, slippageBps } =
     params;
-  return cache.getPumpFunQuote(params, () =>
-    client.getQuote(
-      inputMint,
-      outputMint,
-      amount,
-      inputDecimals,
-      outputDecimals,
-      slippageBps
-    )
+  return getCachedQuote(
+    cache,
+    cache.getPumpFunQuote,
+    params,
+    () => client.getQuote(inputMint, outputMint, amount, inputDecimals, outputDecimals, slippageBps)
   );
 }
 
 async function getJupiterQuoteCached(
   cache: SwapQuoteCache,
   client: JupiterClient,
-  params: {
-    inputMint: string;
-    outputMint: string;
-    amount: string;
-    slippageBps: number;
-    swapMode?: "ExactIn" | "ExactOut";
-  }
+  params: JupiterQuoteParams
 ): Promise<JupiterQuoteResponse> {
-  return cache.getJupiterQuote(params, () => client.getQuote(params));
+  return getCachedQuote(
+    cache,
+    cache.getJupiterQuote,
+    params,
+    () => client.getQuote(params)
+  );
 }
 
 export async function buildPumpFunCompositeQuote(options: {
