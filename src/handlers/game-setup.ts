@@ -192,17 +192,17 @@ export const createGameSetupModule = (
         }
       : await resolveChatTokenInfo(ctx.chat?.id);
 
-    const tokenManager = deps.getTokenManager();
-    const balanceInfo = tokenManager
-      ? await tokenManager.getBalanceWithMetadata(telegramId, tokenInfo)
-      : {
-          rawBalance: 0,
-          displayBalance: 0,
-          tokenMint: tokenInfo.tokenMint,
-          tokenTicker: tokenInfo.tokenTicker,
-          decimals: tokenInfo.decimals,
-        };
-    const userBalance = balanceInfo.displayBalance;
+    let userBalance = 0;
+
+    try {
+      const tokenBalance = await deps.wallet.getTokenBalance(
+        telegramId,
+        tokenInfo.tokenMint
+      );
+      userBalance = tokenBalance / Math.pow(10, tokenInfo.decimals);
+    } catch (error) {
+      console.error("Error getting token balance:", error);
+    }
 
     const { formatted: contractMin } = await deps.getContractMinimumAmount(
       tokenInfo.tokenMint,
