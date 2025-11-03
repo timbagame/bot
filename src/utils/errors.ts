@@ -115,14 +115,14 @@ const extractSignature = (errorMessage: string): string | null => {
   return null;
 };
 
-const formatLamportsForDisplay = (
+const formatSolAmount = (
   lamports: number,
   walletManager?: WalletManager
 ): string => {
   if (walletManager) {
-    return `${walletManager.formatSolBalance(lamports)} SOL`;
+    return walletManager.formatSolBalance(lamports);
   }
-  return `${(lamports / LAMPORTS_PER_SOL).toFixed(SOL_BALANCE_PRECISION)} SOL`;
+  return (lamports / LAMPORTS_PER_SOL).toFixed(SOL_BALANCE_PRECISION);
 };
 
 const formatInsufficientFundsError = (
@@ -131,9 +131,9 @@ const formatInsufficientFundsError = (
   walletManager?: WalletManager
 ): string => {
   const missingLamports = Math.max(neededLamports - currentLamports, 0);
-  const current = formatLamportsForDisplay(currentLamports, walletManager);
-  const required = formatLamportsForDisplay(neededLamports, walletManager);
-  const missing = formatLamportsForDisplay(missingLamports, walletManager);
+  const current = `${formatSolAmount(currentLamports, walletManager)} SOL`;
+  const required = `${formatSolAmount(neededLamports, walletManager)} SOL`;
+  const missing = `${formatSolAmount(missingLamports, walletManager)} SOL`;
 
   return (
     `💰 Insufficient SOL!\n\n` +
@@ -144,81 +144,45 @@ const formatInsufficientFundsError = (
   );
 };
 
-export const parseTransactionError = (
-  error: unknown,
-  walletManager?: WalletManager
-): string => {
-  const errorMessage = error instanceof Error ? error.message : String(error);
-  const lowerMessage = errorMessage.toLowerCase();
+// ================================
+// CATEGORY-SPECIFIC ERROR HANDLERS
+// ================================
 
-  let feeBudget: FeeBudgetManager | null = null;
-  try {
-    const connection = walletManager?.getConnection?.();
-    if (connection) {
-      feeBudget = FeeBudgetManager.getInstance(connection);
-    }
-  } catch (budgetError) {
-    console.warn("Failed to resolve fee budget manager for error formatting:", budgetError);
-  }
+const handleTransactionTimeoutError = (errorMessage: string): string => {
+  const signature = extractSignature(errorMessage);
 
-  const singleTxLamports = feeBudget?.getCachedSingleTransactionLamports()
-    ?? FeeBudgetManager.getDefaultSingleTransactionLamports();
-  const gameBufferLamports = feeBudget?.getCachedGameSafetyBufferLamports()
-    ?? FeeBudgetManager.getDefaultGameSafetyBufferLamports();
+  return (
+    `⏳ Transaction confirmation timed out!\n\n` +
+    `The transaction may have succeeded but confirmation took longer than expected.\n\n` +
+    `${
+      signature
+        ? `Transaction signature: ${signature}\nUse Solscan or another explorer to verify the status.\n\n`
+        : ""
+    }` +
+    `💡 This can happen during network congestion. Please check the transaction status before retrying.`
+  );
+};
 
-  const recommendedMinimum = walletManager
-    ? walletManager.formatSolBalance(gameBufferLamports)
-    : (gameBufferLamports / LAMPORTS_PER_SOL).toFixed(
-        SOL_BALANCE_PRECISION
-      );
+const handleTransactionExpiredError = (errorMessage: string): string => {
+  const signature = extractSignature(errorMessage);
 
-  const minimumSolForFees = walletManager
-    ? walletManager.formatSolBalance(singleTxLamports)
-    : (singleTxLamports / LAMPORTS_PER_SOL).toFixed(3);
+  return (
+    `⛔ Transaction expired before confirmation!\n\n` +
+    `The network dropped the transaction before it could be processed.\n\n` +
+    `${
+      signature
+        ? `Transaction signature: ${signature}\nYou can still look it up on an explorer to confirm it never landed.\n\n`
+        : ""
+    }` +
+    `Please retry the action to submit a fresh transaction.`
+  );
+};
 
-  // Handle transaction timeout specifically
-  if (isTransactionTimeoutError(lowerMessage)) {
-    const signature = extractSignature(errorMessage);
-
-    return (
-      `⏳ Transaction confirmation timed out!\n\n` +
-      `The transaction may have succeeded but confirmation took longer than expected.\n\n` +
-      `${
-        signature
-          ? `Transaction signature: ${signature}\nUse Solscan or another explorer to verify the status.\n\n`
-          : ""
-      }` +
-      `💡 This can happen during network congestion. Please check the transaction status before retrying.`
-    );
-  }
-
-  if (isTransactionExpiredError(lowerMessage)) {
-    const signature = extractSignature(errorMessage);
-
-    return (
-      `⛔ Transaction expired before confirmation!\n\n` +
-      `The network dropped the transaction before it could be processed.\n\n` +
-      `${
-        signature
-          ? `Transaction signature: ${signature}\nYou can still look it up on an explorer to confirm it never landed.\n\n`
-          : ""
-      }` +
-      `Please retry the action to submit a fresh transaction.`
-    );
-  }
-
-  // Check for specific lamports info
-  const lamportsInfo =
-    extractLamportsInfo(errorMessage) || extractLamportsInfoFromError(error);
-  if (lamportsInfo) {
-    return formatInsufficientFundsError(
-      lamportsInfo.current,
-      lamportsInfo.needed,
-      walletManager
-    );
-  }
-
-  // Handle common error patterns
+const handleSolanaNetworkErrors = (
+  lowerMessage: string,
+  recommendedMinimum: string,
+  minimumSolForFees: string
+): string | null => {
   if (
     RENT_INSUFFICIENT_FUNDS_PATTERNS.some((pattern) =>
       lowerMessage.includes(pattern)
@@ -261,86 +225,147 @@ export const parseTransactionError = (
     );
   }
 
-  // Handle Jupiter API errors
+  return null;
+};
+
+const handleJupiterSwapErrors = (lowerMessage: string): string | null => {
+  if (
+    lowerMessage.includes("no route found") ||
+    lowerMessage.includes("no routes")
+  ) {
+    return `🛣️ No swap route available!\n\nJupiter couldn't find a route for this token pair.\nTry:\n• Different token pair\n• Smaller amount\n• Wait a few minutes and retry`;
+  }
+
+  if (lowerMessage.includes("slippage")) {
+    return `📊 Slippage error!\n\nThe price changed too much during the swap.\nTry:\n• Increase slippage tolerance\n• Use smaller amount\n• Wait for better market conditions`;
+  }
+
+  if (lowerMessage.includes("price impact")) {
+    return `💹 Price impact too high!\n\nThis swap would significantly affect the token price.\nTry:\n• Smaller swap amount\n• Split into multiple smaller swaps`;
+  }
+
+  const connectionErrorPatterns = [
+    "unable to connect",
+    "connectionrefused",
+    "network request failed",
+    "fetch failed",
+  ];
+
+  if (
+    connectionErrorPatterns.some((pattern) => lowerMessage.includes(pattern))
+  ) {
+    return (
+      `🌐 Jupiter is temporarily unavailable.\n\n` +
+      `We couldn't reach the quote service right now.\n\n` +
+      `Try again in a moment or pick another token pair.\n` +
+      `If it keeps failing, reach out to an admin so we can take a look.`
+    );
+  }
+
+  if (
+    lowerMessage.includes("quote failed") ||
+    lowerMessage.includes("failed to get swap quote")
+  ) {
+    return (
+      `📋 Quote unavailable right now.\n\n` +
+      `We couldn't price this swap.\n\n` +
+      `Try again shortly or choose a different token pair.\n` +
+      `New or illiquid tokens might take a bit to show routes.`
+    );
+  }
+
+  if (
+    lowerMessage.includes("token_not_tradable") ||
+    lowerMessage.includes("is not tradable")
+  ) {
+    return (
+      `🚫 Token not tradable.\n\n` +
+      `Jupiter doesn't have enough liquidity for this token yet.\n\n` +
+      `Try a more liquid pair like SOL, WSOL, or USDC.`
+    );
+  }
+
+  if (
+    lowerMessage.includes("circular_arbitrage_is_disabled") ||
+    lowerMessage.includes("input and output mints are not allowed to be equal")
+  ) {
+    return `🔄 Cannot swap same token!\n\nYou're trying to swap a token for itself.\nExample: SOL → SOL is not allowed.\n\nTry:\n• SOL → WSOL\n• WSOL → SOL\n• Different token pairs`;
+  }
+
+  if (
+    lowerMessage.includes("address table account") ||
+    lowerMessage.includes("lookup table") ||
+    lowerMessage.includes("addresstablelookup")
+  ) {
+    return (
+      `🔗 Swap route unavailable.\n\n` +
+      `This trade needs a complex route that's not supported here.\n\n` +
+      `Try a smaller amount or a different token pair.`
+    );
+  }
+
+  return null;
+};
+
+export const parseTransactionError = (
+  error: unknown,
+  walletManager?: WalletManager
+): string => {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const lowerMessage = errorMessage.toLowerCase();
+
+  // Handle transaction timeout errors
+  if (isTransactionTimeoutError(lowerMessage)) {
+    return handleTransactionTimeoutError(errorMessage);
+  }
+
+  // Handle transaction expired errors
+  if (isTransactionExpiredError(lowerMessage)) {
+    return handleTransactionExpiredError(errorMessage);
+  }
+
+  // Check for specific lamports info (insufficient funds with details)
+  const lamportsInfo =
+    extractLamportsInfo(errorMessage) || extractLamportsInfoFromError(error);
+  if (lamportsInfo) {
+    return formatInsufficientFundsError(
+      lamportsInfo.current,
+      lamportsInfo.needed,
+      walletManager
+    );
+  }
+
+  // Resolve fee budget for common error messages
+  let feeBudget: FeeBudgetManager | null = null;
+  try {
+    const connection = walletManager?.getConnection?.();
+    if (connection) {
+      feeBudget = FeeBudgetManager.getInstance(connection);
+    }
+  } catch (budgetError) {
+    console.warn("Failed to resolve fee budget manager for error formatting:", budgetError);
+  }
+
+  const singleTxLamports = feeBudget?.getCachedSingleTransactionLamports()
+    ?? FeeBudgetManager.getDefaultSingleTransactionLamports();
+  const gameBufferLamports = feeBudget?.getCachedGameSafetyBufferLamports()
+    ?? FeeBudgetManager.getDefaultGameSafetyBufferLamports();
+
+  const recommendedMinimum = formatSolAmount(gameBufferLamports, walletManager);
+  const minimumSolForFees = formatSolAmount(singleTxLamports, walletManager);
+
+  // Handle Solana network errors
+  const solanaError = handleSolanaNetworkErrors(
+    lowerMessage,
+    recommendedMinimum,
+    minimumSolForFees
+  );
+  if (solanaError) return solanaError;
+
+  // Handle Jupiter swap errors
   if (lowerMessage.includes("jupiter") || lowerMessage.includes("swap")) {
-    if (
-      lowerMessage.includes("no route found") ||
-      lowerMessage.includes("no routes")
-    ) {
-      return `🛣️ No swap route available!\n\nJupiter couldn't find a route for this token pair.\nTry:\n• Different token pair\n• Smaller amount\n• Wait a few minutes and retry`;
-    }
-
-    if (lowerMessage.includes("slippage")) {
-      return `📊 Slippage error!\n\nThe price changed too much during the swap.\nTry:\n• Increase slippage tolerance\n• Use smaller amount\n• Wait for better market conditions`;
-    }
-
-    if (lowerMessage.includes("price impact")) {
-      return `💹 Price impact too high!\n\nThis swap would significantly affect the token price.\nTry:\n• Smaller swap amount\n• Split into multiple smaller swaps`;
-    }
-
-    const connectionErrorPatterns = [
-      "unable to connect",
-      "connectionrefused",
-      "network request failed",
-      "fetch failed",
-    ];
-
-    if (
-      connectionErrorPatterns.some((pattern) =>
-        lowerMessage.includes(pattern)
-      )
-    ) {
-      return (
-        `🌐 Jupiter is temporarily unavailable.\n\n` +
-        `We couldn't reach the quote service right now.\n\n` +
-        `Try again in a moment or pick another token pair.\n` +
-        `If it keeps failing, reach out to an admin so we can take a look.`
-      );
-    }
-
-    if (
-      lowerMessage.includes("quote failed") ||
-      lowerMessage.includes("failed to get swap quote")
-    ) {
-      return (
-        `📋 Quote unavailable right now.\n\n` +
-        `We couldn't price this swap.\n\n` +
-        `Try again shortly or choose a different token pair.\n` +
-        `New or illiquid tokens might take a bit to show routes.`
-      );
-    }
-
-    if (
-      lowerMessage.includes("token_not_tradable") ||
-      lowerMessage.includes("is not tradable")
-    ) {
-      return (
-        `🚫 Token not tradable.\n\n` +
-        `Jupiter doesn't have enough liquidity for this token yet.\n\n` +
-        `Try a more liquid pair like SOL, WSOL, or USDC.`
-      );
-    }
-
-    if (
-      lowerMessage.includes("circular_arbitrage_is_disabled") ||
-      lowerMessage.includes(
-        "input and output mints are not allowed to be equal"
-      )
-    ) {
-      return `🔄 Cannot swap same token!\n\nYou're trying to swap a token for itself.\nExample: SOL → SOL is not allowed.\n\nTry:\n• SOL → WSOL\n• WSOL → SOL\n• Different token pairs`;
-    }
-
-    if (
-      lowerMessage.includes("address table account") ||
-      lowerMessage.includes("lookup table") ||
-      lowerMessage.includes("addresstablelookup")
-    ) {
-      return (
-        `🔗 Swap route unavailable.\n\n` +
-        `This trade needs a complex route that's not supported here.\n\n` +
-        `Try a smaller amount or a different token pair.`
-      );
-    }
+    const jupiterError = handleJupiterSwapErrors(lowerMessage);
+    if (jupiterError) return jupiterError;
   }
 
   // Default error message

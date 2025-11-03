@@ -65,11 +65,16 @@ export class PumpFunClient {
   private parseAmountLamports(
     amount: string,
     decimals: number,
-    { allowZero = false }: { allowZero?: boolean } = {}
+    { allowZero = false, mint }: { allowZero?: boolean; mint?: string } = {}
   ): bigint {
     const trimmed = amount.trim();
     if (trimmed.length === 0) {
       return 0n;
+    }
+
+    // Handle raw lamports for SOL mints
+    if (mint && SOL_MINTS.has(mint) && /^\d+$/.test(trimmed)) {
+      return BigInt(trimmed);
     }
 
     return parseDecimalAmount(trimmed, Math.max(decimals, 0), {
@@ -689,34 +694,15 @@ export class PumpFunClient {
     const safeInputTicker = escapeHtml(inputTicker);
     const safeOutputTicker = escapeHtml(outputTicker);
 
-    const parseQuoteAmount = (
-      rawValue: string | undefined | null,
-      decimals: number,
-      mint: string
-    ): bigint => {
-      const trimmed = (rawValue ?? "0").trim();
-      if (trimmed.length === 0) {
-        return 0n;
-      }
-
-      if (SOL_MINTS.has(mint) && /^\d+$/.test(trimmed)) {
-        return BigInt(trimmed);
-      }
-
-      return this.parseAmountLamports(trimmed, Math.max(decimals, 0), {
-        allowZero: true,
-      });
-    };
-
-    const inputRaw = parseQuoteAmount(
-      quote.inputAmount,
+    const inputRaw = this.parseAmountLamports(
+      quote.inputAmount ?? "0",
       inputDecimals,
-      quote.inputMint
+      { allowZero: true, mint: quote.inputMint }
     );
-    const outputRaw = parseQuoteAmount(
-      quote.outputAmount,
+    const outputRaw = this.parseAmountLamports(
+      quote.outputAmount ?? "0",
       outputDecimals,
-      quote.outputMint
+      { allowZero: true, mint: quote.outputMint }
     );
 
     const inputAmountStr = formatAmount(inputRaw, inputDecimals, {

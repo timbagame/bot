@@ -148,6 +148,11 @@ export class WalletManager {
     return new WalletManager(mnemonic, deps);
   }
 
+  // For tests: reset the singleton instance
+  public static resetForTest(): void {
+    WalletManager.instance = undefined as any;
+  }
+
   private async throttle(): Promise<void> {
     const now = this.timeNow ? this.timeNow() : Date.now();
     const timeToWait = WALLET_RATE_LIMIT_MS - (now - this.lastCallTime);
