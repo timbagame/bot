@@ -9,7 +9,6 @@ import {
   getBuiltinTokenMetadataByMint,
   getBuiltinTokenMetadataByTicker,
   getTokenByMint,
-  getTokenByTicker,
 } from "./token-registry";
 import { parseDecimalAmount } from "./amount";
 import { escapeHtml } from "./format-amount";
@@ -362,7 +361,11 @@ export class TokenManager {
       }
     }
 
-    if (resolvedTickerSource !== "metadata" || decimals === undefined) {
+    if (
+      resolvedTickerSource === "hint" ||
+      resolvedTickerSource === undefined ||
+      decimals === undefined
+    ) {
       const metadata = await ensureFullMetadata();
       if (metadata) {
         if (allowMetadataTickerOverride) {
