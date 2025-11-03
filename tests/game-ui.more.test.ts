@@ -48,6 +48,21 @@ test("buildPrizeLine appends USD approximation when provided", () => {
   expect(shown).toContain("Current Prize: 20 TIMBA ($5.0)");
 });
 
+test("buildGameHeader escapes ticker markup", () => {
+  const maliciousTicker = "<script>alert(1)</script>";
+  const header = buildGameHeader(
+    "🪙 Coinflip",
+    "10.000000",
+    maliciousTicker,
+    "@user",
+    1,
+    2
+  );
+  expect(header).toContain("🪙 Coinflip • 10");
+  expect(header).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+  expect(header).not.toContain("<script>alert(1)</script>");
+});
+
 test("buildParticipantsList formats numbered list", () => {
   const list = buildParticipantsList(["@a", "@b"]);
   expect(list).toContain("1. @a");

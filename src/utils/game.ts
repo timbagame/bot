@@ -1365,10 +1365,10 @@ export class GameManager {
     publicKey: string
   ): Promise<string> {
     console.log(`🔍 Getting username for publicKey: ${publicKey}`);
-    
+
     const playerTelegramId = this.gameDb.getPlayerTelegramId(publicKey);
     console.log(`🔍 Found telegramId: ${playerTelegramId} for publicKey: ${publicKey}`);
-    
+
     if (!playerTelegramId) {
       console.log(`⚠️ No telegram ID found for publicKey: ${publicKey}`);
       return this.formatAddress(publicKey);
@@ -1379,7 +1379,7 @@ export class GameManager {
       playerTelegramId
     );
     console.log(`🔍 Found username: ${username} for telegramId: ${playerTelegramId}`);
-    
+
     if (!username) {
       console.log(`⚠️ No username found for telegramId: ${playerTelegramId}`);
       return this.formatAddress(publicKey);
@@ -1480,12 +1480,12 @@ export class GameManager {
     if (!Number.isFinite(minTickets) || minTickets <= 0) {
       minTickets = Math.min(maxTickets, Math.max(currentTickets, 0));
     }
-    
+
     // Get game type from database to calculate totalPot correctly
     let totalPot = providedTotalPot;
     if (!totalPot) {
       const gameType = gameData?.game_type || "coinflip"; // default to coinflip if not found
-      
+
       if (gameType === "giveaway") {
         // For giveaways, totalPot is just the amount (prize from creator)
         totalPot = amount;
@@ -1566,7 +1566,7 @@ export class GameManager {
       providedTotalPot,
       winnerSignature
     );
-    
+
     const videoId = resolveGameVideoId(gameType);
     const replyMarkup = { inline_keyboard: formatted.keyboard };
     let message: any;
@@ -2089,7 +2089,8 @@ export class GameManager {
         ctx,
         gameData.creator_telegram_id
       );
-      const amount = Number(gameData.amount);
+      const rawAmount = Number(gameData.amount);
+      const amount = Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : 0;
       let participants: string[] = [];
       if (gameData.game_address) {
         try {
@@ -2627,10 +2628,10 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
       // Check oracle and generate game secrets
       console.log("🔍 Checking Oracle health for game creation...");
       const isOracleHealthy = await this.oracleClient.isHealthy();
-      
+
       let randomHash: string;
       let randomHashBuffer: Buffer;
-      
+
       if (!isOracleHealthy) {
         return {
           success: false,
@@ -3984,7 +3985,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             console.error(`Game data missing address:`, gameData);
             return null;
           }
-          
+
           let gamePda: PublicKey;
           try {
             gamePda = new PublicKey(gameData.game_address);
@@ -3992,7 +3993,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             console.error(`Invalid game address format: ${gameData.game_address}`);
             return null;
           }
-          
+
           return this.getGameInfo(ctx, gamePda);
         } catch (error) {
           console.error(`Error fetching game ${gameData.game_address}:`, error);

@@ -106,4 +106,23 @@ describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
 
     expect(output).toContain("3/10 tickets");
   });
+
+  test("getCompletedGameInfo falls back gracefully on non-numeric amount", async () => {
+    resetGM();
+    const gm = GameManager.getInstance(programStub({}), walletStub(), dbStub());
+    const ctx = ctxStub();
+    const message = await gm.getCompletedGameInfo(ctx, {
+      creator_telegram_id: "777",
+      amount: "oops",
+      token_ticker: "TOK",
+      max_players: 4,
+      game_type: "coinflip",
+      token_mint: "MINT",
+      game_address: new PublicKey("22222222222222222222222222222222").toBase58(),
+      winner_address: "cancelled",
+    });
+
+    expect(message).not.toContain("NaN");
+    expect(message).toContain("• 0 TOK");
+  });
 });

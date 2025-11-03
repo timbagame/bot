@@ -119,6 +119,67 @@ describe("GameManager Username Resolution", () => {
       expect(second).toBeNull();
       expect(calls).toBe(1);
     });
+
+    test("evicts oldest cache entry when capacity exceeded", async () => {
+      resetGM();
+      const gm = GameManager.getInstance(programStub(), walletStub(), dbStub());
+      let calls = 0;
+      const ctx = {
+        chat: { id: 88, type: "group" },
+        api: {
+          getChatMember: async (_chatId: number, telegramId: number) => {
+            calls += 1;
+            return { user: { username: `user${telegramId}` } };
+          },
+        },
+      } as any;
+
+      const maxEntries = (gm as any).usernameCacheMaxEntries as number;
+      const cache = (gm as any).usernameCache as {
+        get: (key: string) => unknown;
+      };
+
+      for (let i = 0; i < maxEntries + 1; i++) {
+        const id = String(10_000 + i);
+        const label = await gm.getUsernameFromTelegramId(ctx, id);
+        expect(label).toBe(`user${Number(id)}`);
+      }
+
+      expect((gm as any).usernameCacheKeys.length).toBe(maxEntries);
+      const evictedKey = `${ctx.chat.id}:10000`;
+      expect(cache.get(evictedKey)).toBeUndefined();
+      expect((gm as any).usernameCacheKeys.includes(evictedKey)).toBe(false);
+      expect(calls).toBe(maxEntries + 1);
+    });
+
+    test("coalesces concurrent lookups for the same user", async () => {
+      resetGM();
+      const gm = GameManager.getInstance(programStub(), walletStub(), dbStub());
+      let calls = 0;
+      const resolvers: Array<(value: { user: { username: string } }) => void> = [];
+      const ctx = {
+        chat: { id: 123, type: "supergroup" },
+        api: {
+          getChatMember: (_chatId: number, _telegramId: number) => {
+            calls += 1;
+            return new Promise<{ user: { username: string } }>((resolve) => {
+              resolvers.push(resolve);
+            });
+          },
+        },
+      } as any;
+
+      const firstPromise = gm.getUsernameFromTelegramId(ctx, "4242");
+      const secondPromise = gm.getUsernameFromTelegramId(ctx, "4242");
+
+      expect(calls).toBe(1);
+      resolvers[0]?.({ user: { username: "coalesced" } });
+
+      const [first, second] = await Promise.all([firstPromise, secondPromise]);
+      expect(first).toBe("coalesced");
+      expect(second).toBe("coalesced");
+      expect(calls).toBe(1);
+    });
   });
 
   describe("getPlayerUsername", () => {
