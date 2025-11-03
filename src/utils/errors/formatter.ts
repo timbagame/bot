@@ -81,134 +81,98 @@ const handleTransactionExpiredError = (errorMessage: string): string => {
   );
 };
 
-const handleSolanaNetworkErrors = (
-  lowerMessage: string,
-  recommendedMinimum: string,
-  minimumSolForFees: string
-): string | null => {
-  if (
-    RENT_INSUFFICIENT_FUNDS_PATTERNS.some((pattern) =>
-      lowerMessage.includes(pattern)
-    )
-  ) {
-    return (
+interface ErrorContext {
+  lowerMessage: string;
+  recommendedMinimum?: string;
+  minimumSolForFees?: string;
+}
+
+type ErrorHandler = (ctx: ErrorContext) => string | null;
+
+const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: ErrorHandler }> = [
+  {
+    matcher: (ctx) => RENT_INSUFFICIENT_FUNDS_PATTERNS.some((pattern) => ctx.lowerMessage.includes(pattern)),
+    handler: (ctx) => (
       `💰 Insufficient SOL!\n\n` +
       `Rent-exempt account creation requires additional SOL.\n\n` +
-      `Please top up to at least ${recommendedMinimum} SOL and try again.`
-    );
-  }
-
-  if (lowerMessage.includes("insufficient")) {
-    return `💰 Insufficient funds!\n\nEnsure you have at least ${minimumSolForFees} SOL for fees.\nUse /balance to check your current balance.`;
-  }
-
-  if (
-    lowerMessage.includes("account does not exist") ||
-    lowerMessage.includes("could not find account")
-  ) {
-    return `🏗️ Account setup required!\n\nEnsure you have at least ${minimumSolForFees} SOL for fees.\nUse /balance to check your balance.`;
-  }
-
-  if (lowerMessage.includes("instruction does not support non-native tokens")) {
-    return (
+      `Please top up to at least ${ctx.recommendedMinimum} SOL and try again.`
+    ),
+  },
+  {
+    matcher: (ctx) => ctx.lowerMessage.includes("insufficient"),
+    handler: (ctx) => `💰 Insufficient funds!\n\nEnsure you have at least ${ctx.minimumSolForFees} SOL for fees.\nUse /balance to check your current balance.`,
+  },
+  {
+    matcher: (ctx) => ctx.lowerMessage.includes("account does not exist") || ctx.lowerMessage.includes("could not find account"),
+    handler: (ctx) => `🏗️ Account setup required!\n\nEnsure you have at least ${ctx.minimumSolForFees} SOL for fees.\nUse /balance to check your balance.`,
+  },
+  {
+    matcher: (ctx) => ctx.lowerMessage.includes("instruction does not support non-native tokens"),
+    handler: () => (
       `🪙 Wrap failed.\n\n` +
       `We couldn't convert SOL to WSOL.\n\n` +
       `Your WSOL account may be stuck from a previous wrap. Unwrap any existing WSOL and try again, or contact an admin if it keeps happening.`
-    );
-  }
-
-  if (
-    lowerMessage.includes("simulation failed") ||
-    lowerMessage.includes("custom program error")
-  ) {
-    return (
+    ),
+  },
+  {
+    matcher: (ctx) => ctx.lowerMessage.includes("simulation failed") || ctx.lowerMessage.includes("custom program error"),
+    handler: () => (
       `❌ Transaction failed.\n\n` +
       `The network couldn't process this transaction.\n\n` +
       `Try again in a moment or contact an admin if the issue persists.`
-    );
-  }
-
-  return null;
-};
-
-const handleJupiterSwapErrors = (lowerMessage: string): string | null => {
-  if (
-    lowerMessage.includes("no route found") ||
-    lowerMessage.includes("no routes")
-  ) {
-    return `🛣️ No swap route available!\n\nJupiter couldn't find a route for this token pair.\nTry:\n• Different token pair\n• Smaller amount\n• Wait a few minutes and retry`;
-  }
-
-  if (lowerMessage.includes("slippage")) {
-    return `📊 Slippage error!\n\nThe price changed too much during the swap.\nTry:\n• Increase slippage tolerance\n• Use smaller amount\n• Wait for better market conditions`;
-  }
-
-  if (lowerMessage.includes("price impact")) {
-    return `💹 Price impact too high!\n\nThis swap would significantly affect the token price.\nTry:\n• Smaller swap amount\n• Split into multiple smaller swaps`;
-  }
-
-  const connectionErrorPatterns = [
-    "unable to connect",
-    "connectionrefused",
-    "network request failed",
-    "fetch failed",
-  ];
-
-  if (
-    connectionErrorPatterns.some((pattern) => lowerMessage.includes(pattern))
-  ) {
-    return (
+    ),
+  },
+  {
+    matcher: (ctx) => ctx.lowerMessage.includes("no route found") || ctx.lowerMessage.includes("no routes"),
+    handler: () => `🛣️ No swap route available!\n\nJupiter couldn't find a route for this token pair.\nTry:\n• Different token pair\n• Smaller amount\n• Wait a few minutes and retry`,
+  },
+  {
+    matcher: (ctx) => ctx.lowerMessage.includes("slippage"),
+    handler: () => `📊 Slippage error!\n\nThe price changed too much during the swap.\nTry:\n• Increase slippage tolerance\n• Use smaller amount\n• Wait for better market conditions`,
+  },
+  {
+    matcher: (ctx) => ctx.lowerMessage.includes("price impact"),
+    handler: () => `💹 Price impact too high!\n\nThis swap would significantly affect the token price.\nTry:\n• Smaller swap amount\n• Split into multiple smaller swaps`,
+  },
+  {
+    matcher: (ctx) => ["unable to connect", "connectionrefused", "network request failed", "fetch failed"].some((p) => ctx.lowerMessage.includes(p)),
+    handler: () => (
       `🌐 Jupiter is temporarily unavailable.\n\n` +
       `We couldn't reach the quote service right now.\n\n` +
       `Try again in a moment or pick another token pair.\n` +
       `If it keeps failing, reach out to an admin so we can take a look.`
-    );
-  }
-
-  if (
-    lowerMessage.includes("quote failed") ||
-    lowerMessage.includes("failed to get swap quote")
-  ) {
-    return (
+    ),
+  },
+  {
+    matcher: (ctx) => ctx.lowerMessage.includes("quote failed") || ctx.lowerMessage.includes("failed to get swap quote"),
+    handler: () => (
       `📋 Quote unavailable right now.\n\n` +
       `We couldn't price this swap.\n\n` +
       `Try again shortly or choose a different token pair.\n` +
       `New or illiquid tokens might take a bit to show routes.`
-    );
-  }
-
-  if (
-    lowerMessage.includes("token_not_tradable") ||
-    lowerMessage.includes("is not tradable")
-  ) {
-    return (
+    ),
+  },
+  {
+    matcher: (ctx) => ctx.lowerMessage.includes("token_not_tradable") || ctx.lowerMessage.includes("is not tradable"),
+    handler: () => (
       `🚫 Token not tradable.\n\n` +
       `Jupiter doesn't have enough liquidity for this token yet.\n\n` +
       `Try a more liquid pair like SOL, WSOL, or USDC.`
-    );
-  }
-
-  if (
-    lowerMessage.includes("circular_arbitrage_is_disabled") ||
-    lowerMessage.includes("input and output mints are not allowed to be equal")
-  ) {
-    return `🔄 Cannot swap same token!\n\nYou're trying to swap a token for itself.\nExample: SOL → SOL is not allowed.\n\nTry:\n• SOL → WSOL\n• WSOL → SOL\n• Different token pairs`;
-  }
-
-  if (
-    lowerMessage.includes("address table account") ||
-    lowerMessage.includes("lookup table") ||
-    lowerMessage.includes("addresstablelookup")
-  ) {
-    return (
+    ),
+  },
+  {
+    matcher: (ctx) => ctx.lowerMessage.includes("circular_arbitrage_is_disabled") || ctx.lowerMessage.includes("input and output mints are not allowed to be equal"),
+    handler: () => `🔄 Cannot swap same token!\n\nYou're trying to swap a token for itself.\nExample: SOL → SOL is not allowed.\n\nTry:\n• SOL → WSOL\n• WSOL → SOL\n• Different token pairs`,
+  },
+  {
+    matcher: (ctx) => ctx.lowerMessage.includes("address table account") || ctx.lowerMessage.includes("lookup table") || ctx.lowerMessage.includes("addresstablelookup"),
+    handler: () => (
       `🔗 Swap route unavailable.\n\n` +
       `This trade needs a complex route that's not supported here.\n\n` +
       `Try a smaller amount or a different token pair.`
-    );
-  }
-
-  return null;
-};
+    ),
+  },
+];
 
 export const parseTransactionError = (
   error: unknown,
@@ -257,18 +221,18 @@ export const parseTransactionError = (
   const recommendedMinimum = formatSolAmount(gameBufferLamports, walletManager);
   const minimumSolForFees = formatSolAmount(singleTxLamports, walletManager);
 
-  // Handle Solana network errors
-  const solanaError = handleSolanaNetworkErrors(
+  // Try each error handler in the registry
+  const errorContext: ErrorContext = {
     lowerMessage,
     recommendedMinimum,
-    minimumSolForFees
-  );
-  if (solanaError) return solanaError;
+    minimumSolForFees,
+  };
 
-  // Handle Jupiter swap errors
-  if (lowerMessage.includes("jupiter") || lowerMessage.includes("swap")) {
-    const jupiterError = handleJupiterSwapErrors(lowerMessage);
-    if (jupiterError) return jupiterError;
+  for (const { matcher, handler } of errorHandlers) {
+    if (matcher(errorContext)) {
+      const result = handler(errorContext);
+      if (result) return result;
+    }
   }
 
   // Default error message

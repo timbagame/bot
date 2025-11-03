@@ -1,29 +1,29 @@
 import { expect, test } from "bun:test";
 import {
-  truncateErrorMessage,
   categorizeError,
   getTelegramId,
   requireTelegramId,
   MissingTelegramIdError,
 } from "../src/utils/context-helpers";
+import { truncateMessage } from "../src/utils/errors";
 
-test("truncateErrorMessage returns original message when under limit", () => {
+test("truncateMessage returns original message when under limit", () => {
   const message = "short error";
-  expect(truncateErrorMessage(message)).toBe(message);
+  expect(truncateMessage(message, { maxLength: 200 })).toBe(message);
 });
 
-test("truncateErrorMessage preserves important prefix and first sentence", () => {
+test("truncateMessage preserves important prefix and first sentence", () => {
   const message =
     "❌ Error: something bad happened. Additional details that are not needed.";
-  expect(truncateErrorMessage(message, { maxLength: 40 })).toBe(
+  expect(truncateMessage(message, { maxLength: 40, preserveSentences: true })).toBe(
     "❌ Error: something bad happened."
   );
 });
 
-test("truncateErrorMessage truncates long message at word boundary", () => {
+test("truncateMessage truncates long message at word boundary", () => {
   const message =
     "This is a very long message that should be truncated properly";
-  expect(truncateErrorMessage(message, { maxLength: 40 })).toBe(
+  expect(truncateMessage(message, { maxLength: 40, wordBoundary: true })).toBe(
     "This is a very long message that..."
   );
 });

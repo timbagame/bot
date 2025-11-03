@@ -184,21 +184,7 @@ export const createMessageEditAdapter = <T extends Context>(
   } as T;
 };
 
-/**
- * Safely truncates error messages for callback queries with better context preservation
- * @deprecated Use truncateMessage from errors.ts instead
- */
-export const truncateErrorMessage = (
-  message: string,
-  options: ErrorHandlingOptions = {}
-): string => {
-  const { maxLength = 180 } = options;
-  return truncateMessage(message, {
-    maxLength,
-    preserveSentences: true,
-    wordBoundary: true,
-  });
-};
+
 
 /**
  * Categorizes errors for better handling
@@ -314,6 +300,11 @@ export const handleCallbackErrorSafe = async (
   // Format without wallet context; formatter handles this gracefully
   const errorMessage = formatUserFriendlyError(error);
 
-  const truncatedMessage = truncateErrorMessage(errorMessage, options);
+  const { maxLength = 180 } = options;
+  const truncatedMessage = truncateMessage(errorMessage, {
+    maxLength,
+    preserveSentences: true,
+    wordBoundary: true,
+  });
   await safeAnswerCallbackQuery(ctx, truncatedMessage);
 };

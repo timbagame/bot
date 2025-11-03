@@ -847,46 +847,41 @@ export class SwapManager {
     };
   }
 
-  private async sponsorSwapFees(
-    userKeypair: Keypair,
+  private async transferFees(
+    fromKeypair: Keypair,
+    toPublicKey: PublicKey,
     lamports: number
   ): Promise<void> {
     if (lamports <= 0) {
       return;
     }
 
-    const adminKeypair = this.wallet.getAdminKeypair();
     const transferIx = SystemProgram.transfer({
-      fromPubkey: adminKeypair.publicKey,
-      toPubkey: userKeypair.publicKey,
+      fromPubkey: fromKeypair.publicKey,
+      toPubkey: toPublicKey,
       lamports,
     });
 
     const signature = await this.wallet.sendTransaction([transferIx], [
-      adminKeypair,
+      fromKeypair,
     ]);
     await this.wallet.confirmTransaction(signature);
+  }
+
+  private async sponsorSwapFees(
+    userKeypair: Keypair,
+    lamports: number
+  ): Promise<void> {
+    const adminKeypair = this.wallet.getAdminKeypair();
+    await this.transferFees(adminKeypair, userKeypair.publicKey, lamports);
   }
 
   private async refundSponsoredFees(
     userKeypair: Keypair,
     lamports: number
   ): Promise<void> {
-    if (lamports <= 0) {
-      return;
-    }
-
     const adminKeypair = this.wallet.getAdminKeypair();
-    const transferIx = SystemProgram.transfer({
-      fromPubkey: userKeypair.publicKey,
-      toPubkey: adminKeypair.publicKey,
-      lamports,
-    });
-
-    const signature = await this.wallet.sendTransaction([transferIx], [
-      userKeypair,
-    ]);
-    await this.wallet.confirmTransaction(signature);
+    await this.transferFees(userKeypair, adminKeypair.publicKey, lamports);
   }
 
   /**
