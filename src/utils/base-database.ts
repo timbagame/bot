@@ -148,6 +148,37 @@ export function createDatabaseHandle<T>(
   };
 }
 
+/**
+ * Helper to initialize singleton pattern for database classes.
+ * Reduces boilerplate by generating getInstance and resetForTesting methods.
+ *
+ * Usage: Call this in a static block to set up the singleton pattern.
+ *
+ * @example
+ * ```ts
+ * export class MyDatabase extends BaseDatabase {
+ *   public static getInstance: () => MyDatabase;
+ *   public static resetForTesting: () => void;
+ *
+ *   static {
+ *     initializeDatabaseSingleton(MyDatabase, () => new MyDatabase());
+ *   }
+ *
+ *   private constructor() {
+ *     super("my-db.sqlite", [...schemas], "MyDb");
+ *   }
+ * }
+ * ```
+ */
+export function initializeDatabaseSingleton<T extends BaseDatabase>(
+  DatabaseClass: { getInstance?: () => T; resetForTesting?: () => void },
+  factory: () => T
+): void {
+  const { getInstance, resetForTesting } = createDatabaseSingleton(factory);
+  DatabaseClass.getInstance = getInstance;
+  DatabaseClass.resetForTesting = resetForTesting;
+}
+
 export function createDatabaseSingleton<T extends BaseDatabase>(factory: () => T): {
   getInstance: () => T;
   resetForTesting: () => void;

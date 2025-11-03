@@ -1,5 +1,5 @@
 import type { ChatTokenConfig } from "../types";
-import { BaseDatabase, createDatabaseSingleton } from "./base-database";
+import { BaseDatabase, initializeDatabaseSingleton } from "./base-database";
 
 /**
  * Database service for storing chat-related settings
@@ -9,11 +9,7 @@ export class ChatDatabase extends BaseDatabase {
   public static resetForTesting: () => void;
 
   static {
-    const { getInstance, resetForTesting } = createDatabaseSingleton(
-      () => new ChatDatabase()
-    );
-    ChatDatabase.getInstance = getInstance;
-    ChatDatabase.resetForTesting = resetForTesting;
+    initializeDatabaseSingleton(ChatDatabase, () => new ChatDatabase());
   }
 
   private constructor() {

@@ -1,5 +1,5 @@
 import type { GameData, PlayerMapping } from "../types";
-import { BaseDatabase, createDatabaseSingleton } from "./base-database";
+import { BaseDatabase, initializeDatabaseSingleton } from "./base-database";
 
 // ================================
 // LEADERBOARD TYPES
@@ -31,11 +31,7 @@ export class GameDatabase extends BaseDatabase {
   public static resetForTesting: () => void;
 
   static {
-    const { getInstance, resetForTesting } = createDatabaseSingleton(
-      () => new GameDatabase()
-    );
-    GameDatabase.getInstance = getInstance;
-    GameDatabase.resetForTesting = resetForTesting;
+    initializeDatabaseSingleton(GameDatabase, () => new GameDatabase());
   }
 
   private constructor() {

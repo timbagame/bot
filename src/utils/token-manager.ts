@@ -575,6 +575,50 @@ export class TokenManager {
     };
   }
 
+  /**
+   * Fetches token balance and metadata in one call.
+   * Consolidates the common pattern of fetching balance + metadata + computing display balance.
+   *
+   * @param telegramId - User's Telegram ID
+   * @param tokenInfo - Token mint, ticker, and decimals
+   * @returns Object with raw balance, display balance, and token metadata
+   */
+  public async getBalanceWithMetadata(
+    telegramId: bigint,
+    tokenInfo: { tokenMint: string; tokenTicker: string; decimals: number }
+  ): Promise<{
+    rawBalance: number;
+    displayBalance: number;
+    tokenMint: string;
+    tokenTicker: string;
+    decimals: number;
+  }> {
+    try {
+      const rawBalance = await this.wallet.getTokenBalance(
+        telegramId,
+        tokenInfo.tokenMint
+      );
+      const displayBalance = rawBalance / Math.pow(10, tokenInfo.decimals);
+
+      return {
+        rawBalance,
+        displayBalance,
+        tokenMint: tokenInfo.tokenMint,
+        tokenTicker: tokenInfo.tokenTicker,
+        decimals: tokenInfo.decimals,
+      };
+    } catch (error) {
+      console.error("Error getting token balance with metadata:", error);
+      return {
+        rawBalance: 0,
+        displayBalance: 0,
+        tokenMint: tokenInfo.tokenMint,
+        tokenTicker: tokenInfo.tokenTicker,
+        decimals: tokenInfo.decimals,
+      };
+    }
+  }
+
   public resolveMintForTicker(ticker: string): string | undefined {
     if (!ticker) {
       return undefined;
