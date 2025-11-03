@@ -102,6 +102,10 @@ import {
   type CoinflipDeps,
   type GameTokenOverride,
 } from "./handlers/game";
+import {
+  createGameSetupModule,
+  GAME_SETUP_COPY,
+} from "./handlers/game-setup";
 import { isMessageMissing } from "./utils/telegram-errors";
 import {
   createWalletMenuModule,
@@ -287,21 +291,6 @@ type GameSetupSession = GameSetupSessionState;
 
 export const __test_setGameManager = (manager: GameManager): void => {
   gameManager = manager;
-};
-
-const ensureCreator = (
-  ctx: Context,
-  creatorId: string,
-  failureText = "🚫 Only the game creator can modify this setup!"
-): boolean => {
-  const currentUserId = getTelegramIdString(ctx);
-
-  if (currentUserId !== creatorId) {
-    void safeAnswerCallbackQuery(ctx, failureText);
-    return false;
-  }
-
-  return true;
 };
 
 // Test-only proxies for user-state helpers
@@ -1163,31 +1152,6 @@ const getDefaultTokenMetadata = async () => {
   return await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
 };
 
-type ChatTokenInfo = {
-  tokenMint: string;
-  tokenTicker: string;
-  decimals: number;
-};
-
-const resolveChatTokenInfo = async (
-  chatId?: number
-): Promise<ChatTokenInfo> => {
-  try {
-    return await tokenManager.resolveTokenForChat(chatId);
-  } catch (error) {
-    console.warn(
-      "⚠️ Could not resolve chat token configuration, using default token",
-      error
-    );
-    const defaultMetadata = await getDefaultTokenMetadata();
-    return {
-      tokenMint: DEFAULT_TOKEN_MINT,
-      tokenTicker: DEFAULT_TOKEN_TICKER,
-      decimals: defaultMetadata.decimals,
-    };
-  }
-};
-
 const fetchTokenPriceUSD = async ({
   tokenMint,
   tokenTicker,
@@ -1209,305 +1173,31 @@ const toTitleCase = (value: string): string => {
   return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
 };
 
-type GameSetupCopy = {
-  gameType: "coinflip" | "giveaway";
-  heading: string;
-  amountPrompt: string;
-  suggestionLabel?: string;
-  lowBalanceCopy?: {
-    object: string;
-  };
-  logPrefix: string;
-};
+const gameSetupModule = createGameSetupModule({
+  wallet,
+  getTokenManager: () => tokenManager,
+  getDefaultTokenMetadata,
+  getContractMinimumAmount: (tokenMint, decimalsHint) =>
+    getContractMinimumAmount(tokenMint, decimalsHint),
+  fetchTokenPriceUSD: (params) => fetchTokenPriceUSD(params),
+  createAmountSelectionKeyboard,
+  getSuggestedStakeAmounts,
+  getGameSetupSession,
+  upsertGameSetupSession,
+  clearGameSetupSession,
+  safeAnswerCallbackQuery,
+  getTelegramId,
+  getTelegramIdString,
+});
 
-const GAME_SETUP_COPY: Record<"coinflip" | "giveaway", GameSetupCopy> = {
-  coinflip: {
-    gameType: "coinflip",
-    heading: "🪙 <b>Create Coinflip</b>",
-    amountPrompt: "Select stake per player:",
-    lowBalanceCopy: {
-      object: "stake per player",
-    },
-    logPrefix: "🪙",
-  },
-  giveaway: {
-    gameType: "giveaway",
-    heading: "🎁 <b>Create Giveaway</b>",
-    amountPrompt: "Select prize amount:",
-    lowBalanceCopy: {
-      object: "prize amount",
-    },
-    logPrefix: "🎁",
-  },
-};
+const {
+  startInteractiveGameSetup,
+  resolveCommandTokenOverride,
+  withCreatorContext,
+  __test_startInteractiveGameSetup: startInteractiveGameSetupTest,
+} = gameSetupModule;
 
-const startInteractiveGameSetup = async (
-  ctx: Context & { message?: any },
-  telegramId: bigint,
-  copy: GameSetupCopy,
-  tokenOverride?: GameTokenOverride
-): Promise<void> => {
-  console.log(`${copy.logPrefix} UI-based ${copy.gameType} creation`);
-
-  const tokenInfo = tokenOverride
-    ? {
-        tokenMint: tokenOverride.tokenMint,
-        tokenTicker: tokenOverride.tokenTicker,
-        decimals: tokenOverride.tokenDecimals,
-      }
-    : await resolveChatTokenInfo(ctx.chat?.id);
-
-  let userBalance = 0;
-
-  try {
-    const tokenBalance = await wallet.getTokenBalance(
-      telegramId,
-      tokenInfo.tokenMint
-    );
-    userBalance = tokenBalance / Math.pow(10, tokenInfo.decimals);
-  } catch (error) {
-    console.error("Error getting token balance:", error);
-  }
-
-  const { formatted: contractMin } = await getContractMinimumAmount(
-    tokenInfo.tokenMint,
-    tokenInfo.decimals
-  );
-
-  const tokenPriceUSD = await fetchTokenPriceUSD({
-    tokenMint: tokenInfo.tokenMint,
-    tokenTicker: tokenInfo.tokenTicker,
-  });
-
-  const suggestedAmounts = getSuggestedStakeAmounts(contractMin, userBalance);
-
-  let message = `${copy.heading}\n\n`;
-  message += `Token: <b>${tokenInfo.tokenTicker}</b>\n`;
-  message += "\n";
-
-  if (copy.lowBalanceCopy && userBalance < contractMin) {
-    const { object } = copy.lowBalanceCopy;
-    const minDisplay = formatTokenDisplay(contractMin, {
-      decimals: tokenInfo.decimals,
-    });
-    message += `⚠️ Minimum ${object}: ${minDisplay} ${tokenInfo.tokenTicker}.\n\n`;
-  }
-
-  message += copy.amountPrompt;
-
-  if (copy.suggestionLabel && suggestedAmounts.length > 0) {
-    message += `\n\n${copy.suggestionLabel}:\n`;
-    for (const amount of suggestedAmounts) {
-      const amountDisplay = formatTokenDisplay(amount, {
-        decimals: tokenInfo.decimals,
-      });
-      message += `• ${amountDisplay} ${tokenInfo.tokenTicker}`;
-      if (tokenPriceUSD) {
-        const usdFormatted = formatUsdValue(amount * tokenPriceUSD, {
-          minimumFractionDigits: 1,
-          maximumFractionDigits: 1,
-          fallback: "0.0",
-        });
-        message += ` ($${usdFormatted})`;
-      }
-      message += "\n";
-    }
-  }
-
-  const setupMessage = await ctx.reply(message, {
-    parse_mode: "HTML",
-    reply_markup: createAmountSelectionKeyboard(
-      copy.gameType,
-      userBalance,
-      getTelegramIdString(ctx),
-      contractMin,
-      {
-        decimals: tokenInfo.decimals,
-        tokenPriceUSD: tokenPriceUSD ?? undefined,
-      }
-    ),
-    reply_to_message_id: ctx.message?.message_id,
-  });
-
-  upsertGameSetupSession(`${ctx.chat?.id || 0}_${setupMessage.message_id}`, {
-    waitingFor: "setup",
-    gameType: copy.gameType,
-    userBalance,
-    messageId: setupMessage.message_id,
-    chatId: ctx.chat?.id || 0,
-    creatorId: getTelegramIdString(ctx),
-    tokenMint: tokenInfo.tokenMint,
-    tokenTicker: tokenInfo.tokenTicker,
-    tokenDecimals: tokenInfo.decimals,
-    contractMinimum: contractMin,
-  });
-};
-
-export const __test_startInteractiveGameSetup = startInteractiveGameSetup;
-
-const NUMERIC_TOKEN_CANDIDATE = /^[0-9]+(?:\.[0-9]+)?$/;
-
-const resolveCommandTokenOverride = async (
-  tokenInput: string
-): Promise<GameTokenOverride | null> => {
-  if (!tokenManager) {
-    return null;
-  }
-
-  const candidate = tokenInput.trim();
-  if (!candidate) {
-    return null;
-  }
-
-  if (NUMERIC_TOKEN_CANDIDATE.test(candidate)) {
-    return null;
-  }
-
-  try {
-    const resolved = await tokenManager.resolveSwapToken(candidate);
-    if (!resolved) {
-      return null;
-    }
-
-    const decimals = resolved.decimals;
-    if (!Number.isFinite(decimals) || decimals < 0) {
-      console.warn(
-        `⚠️ ResolveSwapToken returned invalid decimals for override ${candidate}`
-      );
-      return null;
-    }
-
-    const tokenTicker = resolved.isNativeSol ? "SOL" : resolved.token_ticker;
-
-    return {
-      tokenMint: resolved.token_mint,
-      tokenTicker,
-      tokenDecimals: decimals,
-    };
-  } catch (error) {
-    console.warn(`⚠️ Could not resolve token override ${candidate}`, error);
-    return null;
-  }
-};
-
-type TokenContext = {
-  tokenMint: string;
-  tokenTicker: string;
-  tokenDecimals: number;
-  contractMinimum?: number;
-};
-
-const buildTokenContext = async (
-  session: GameSetupSession | undefined,
-  chatId?: number
-): Promise<TokenContext> => {
-  if (session?.tokenMint) {
-    const decimals =
-      typeof session.tokenDecimals === "number"
-        ? session.tokenDecimals
-        : (await getDefaultTokenMetadata()).decimals;
-    return {
-      tokenMint: session.tokenMint,
-      tokenTicker: session.tokenTicker ?? DEFAULT_TOKEN_TICKER,
-      tokenDecimals: decimals,
-      contractMinimum: session.contractMinimum,
-    };
-  }
-
-  const resolved = await resolveChatTokenInfo(chatId);
-  return {
-    tokenMint: resolved.tokenMint,
-    tokenTicker: resolved.tokenTicker,
-    tokenDecimals: resolved.decimals,
-  };
-};
-
-type CreatorCallbackOptions = {
-  name: string;
-  resolveCreatorId: (ctx: Context) => string | undefined;
-  failureText?: string;
-};
-
-type CreatorCallbackContext = {
-  creatorId: string;
-  userId: number;
-  session?: GameSetupSession;
-  tokenContext: TokenContext;
-  updateSession: (updates: Partial<GameSetupSession>) => GameSetupSession;
-  clearSession: () => void;
-};
-
-const withCreatorContext = (
-  options: CreatorCallbackOptions,
-  handler: (ctx: Context, creatorCtx: CreatorCallbackContext) => Promise<void> | void
-) => {
-  return async (ctx: Context) => {
-    const creatorId = options.resolveCreatorId(ctx);
-    const currentUserId = getTelegramIdString(ctx);
-
-    console.log(`🔔 ${options.name} callback triggered:`, ctx.callbackQuery?.data);
-    console.log(
-      `👤 Creator: ${creatorId ?? "unknown"}, Current user: ${currentUserId ?? "unknown"}`
-    );
-
-    if (!creatorId) {
-      console.warn(`${options.name}: unable to resolve creator id from callback`);
-      await safeAnswerCallbackQuery(ctx, "❌ Unable to process action");
-      return;
-    }
-
-    if (!ensureCreator(ctx, creatorId, options.failureText)) {
-      return;
-    }
-
-    const userIdBigInt = getTelegramId(ctx);
-    if (userIdBigInt === 0n) {
-      await safeAnswerCallbackQuery(ctx, "❌ Unable to identify user");
-      return;
-    }
-
-    const userId = Number(userIdBigInt);
-    const sessionKey = `${ctx.chat?.id ?? 0}_${ctx.callbackQuery?.message?.message_id ?? 0}`;
-
-    let session = getGameSetupSession(sessionKey);
-    const tokenContext = await buildTokenContext(session, ctx.chat?.id);
-
-    const creatorContext: CreatorCallbackContext = {
-      creatorId,
-      userId,
-      session,
-      tokenContext,
-      updateSession: (updates, keyOverride?: string) => {
-        const keyToUse = keyOverride ?? sessionKey;
-        const contractMinimum =
-          updates.contractMinimum ??
-          session?.contractMinimum ??
-          tokenContext.contractMinimum;
-
-        const next = upsertGameSetupSession(keyToUse, {
-          ...updates,
-          creatorId,
-          tokenMint: tokenContext.tokenMint,
-          tokenTicker: tokenContext.tokenTicker,
-          tokenDecimals: tokenContext.tokenDecimals,
-          contractMinimum,
-        });
-
-        session = next;
-        creatorContext.session = next;
-        return next;
-      },
-      clearSession: () => {
-        clearGameSetupSession(sessionKey);
-        session = undefined;
-        creatorContext.session = undefined;
-      },
-    };
-
-    await handler(ctx, creatorContext);
-  };
-};
-
+export const __test_startInteractiveGameSetup = startInteractiveGameSetupTest;
 
 const determineFractionDigits = (
   value: string,
@@ -1953,7 +1643,7 @@ const checkOracleStatus = async () => {
 /**
  * Get the actual minimum amount from the smart contract for a specific token.
  */
-export const getContractMinimumAmount = async (
+export let getContractMinimumAmount = async (
   tokenMint: string = DEFAULT_TOKEN_MINT,
   decimalsHint?: number
 ): Promise<{ formatted: number; raw: number; decimals: number }> => {
@@ -2367,21 +2057,19 @@ bot.command(["giveaway", "ga"], async (ctx) => {
       return;
     }
 
-    if (args.length === 2 && tokenCandidate) {
-      let tokenOverride: GameTokenOverride | null = null;
-      if (!NUMERIC_TOKEN_CANDIDATE.test(tokenCandidate)) {
-        tokenOverride = await resolveCommandTokenOverride(tokenCandidate);
-      }
+    let tokenOverride: GameTokenOverride | null = null;
+    if (tokenCandidate) {
+      tokenOverride = await resolveCommandTokenOverride(tokenCandidate);
+    }
 
-      if (tokenOverride) {
-        await startInteractiveGameSetup(
-          ctx as Context & { message?: any },
-          telegramId,
-          GAME_SETUP_COPY.giveaway,
-          tokenOverride
-        );
-        return;
-      }
+    if (tokenOverride) {
+      await startInteractiveGameSetup(
+        ctx as Context & { message?: any },
+        telegramId,
+        GAME_SETUP_COPY.giveaway,
+        tokenOverride
+      );
+      return;
     }
 
     await createGameViaCommand(
