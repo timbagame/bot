@@ -27,7 +27,6 @@ import {
   INPUT_TIMEOUT_HINT,
   SWAP_DEFAULT_SLIPPAGE_BPS,
   SWAP_SLIPPAGE_OPTIONS_BPS,
-  applyDynamicFeeBudgets,
 } from "./utils/constants";
 import { FeeBudgetManager } from "./utils/fee-budget";
 import {
@@ -73,6 +72,7 @@ import type {
 import { TokenDatabase } from "./utils/token-database";
 import {
   getTelegramId,
+  getTelegramIdString,
   createMessageEditAdapter,
   handleCallbackErrorSafe,
   safeAnswerCallbackQuery,
@@ -99,6 +99,9 @@ import {
   type WalletCacheSnapshot as WalletCacheSnapshotData,
 } from "./handlers/wallet-menu";
 import { createWalletTransactionsModule } from "./handlers/wallet-transactions";
+import { generateTransactionId } from "./utils/transaction-id";
+import type { TokenBalanceLike } from "./types/wallet";
+import { refreshDynamicFeeBudgets } from "./utils/fee-budget-refresh";
 export type { CreateGameViaCommandOptions } from "./handlers/game-commands";
 
 // ================================
@@ -130,17 +133,8 @@ let SOL_FEE_BUFFER_LAMPORTS = feeBudget.getCachedSingleTransactionLamports();
 
 void (async () => {
   try {
-    const [singleLamports, gameLamports, jitLamports] = await Promise.all([
-      feeBudget.getSingleTransactionLamports(),
-      feeBudget.getGameSafetyBufferLamports(),
-      feeBudget.getJitSwapFeeBufferLamports(),
-    ]);
-    SOL_FEE_BUFFER_LAMPORTS = singleLamports;
-    applyDynamicFeeBudgets({
-      singleTransactionLamports: singleLamports,
-      gameSafetyBufferLamports: gameLamports,
-      jitSwapBufferLamports: jitLamports,
-    });
+    const { singleTransactionLamports } = await refreshDynamicFeeBudgets(feeBudget);
+    SOL_FEE_BUFFER_LAMPORTS = singleTransactionLamports;
   } catch (error) {
     console.warn("Failed to refresh dynamic fee budgets during startup:", error);
   }
@@ -288,16 +282,6 @@ export const __test_clearUserState = (userId: string) => { getUserState(userId, 
 
 const clampLamportsForFees = (lamports: number): number =>
   Math.max(0, lamports - SOL_FEE_BUFFER_LAMPORTS);
-
-const getTelegramIdString = (ctx: Context): string | undefined => {
-  const id = getTelegramId(ctx);
-  return id === 0n ? undefined : id.toString();
-};
-
-type TokenBalanceLike = {
-  balance: number;
-  decimals: number;
-};
 
 type SwapAmountKeyboardOptions = {
   fromToken: string;
@@ -2734,12 +2718,6 @@ registerWalletActionMenuHandler({
     successAck: "💱 Select token to swap from",
   }),
 });
-
-// ================================
-// Generate unique transaction ID
-const generateTransactionId = (): string => {
-  return `tx_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-};
 
 // ================================
 // WALLET DATA CACHE

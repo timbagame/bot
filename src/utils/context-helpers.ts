@@ -147,6 +147,13 @@ export const requireTelegramId = (
   return id;
 };
 
+export const getTelegramIdString = (
+  ctx: TelegramContextLike
+): string | undefined => {
+  const id = getTelegramId(ctx);
+  return id === 0n ? undefined : id.toString();
+};
+
 /**
  * Creates a lightweight adapter that forces subsequent edits to target a specific message.
  * Useful when downstream helpers expect a context-like object with an `editMessageText` method.

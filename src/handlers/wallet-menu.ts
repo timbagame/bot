@@ -23,8 +23,8 @@ import {
   type WalletHandlersDeps,
 } from "./wallet";
 import {
-  type CallbackPrefixContext,
-  type CallbackPrefixHandlerOptions,
+  createCallbackPrefixRegistrar,
+  type RegisterCallbackPrefixHandler,
   type WrapCallbackHandler,
 } from "../utils/callback-registry";
 
@@ -66,15 +66,7 @@ type WalletMenuModuleOptions = {
 
 type WalletMenuModule = {
   registerWalletMenuHandlers: () => void;
-  registerCallbackPrefixHandler: (
-    prefix: string,
-    handler: (
-      ctx: any,
-      data: CallbackPrefixContext,
-      next: () => Promise<void>
-    ) => Promise<void> | void,
-    options?: CallbackPrefixHandlerOptions
-  ) => void;
+  registerCallbackPrefixHandler: RegisterCallbackPrefixHandler;
   registerWalletActionMenuHandler: (
     config: WalletActionMenuHandlerConfig
   ) => void;
@@ -219,34 +211,10 @@ export const createWalletMenuModule = (
     });
   };
 
-  const registerCallbackPrefixHandler = (
-    prefix: string,
-    handler: (
-      ctx: any,
-      data: CallbackPrefixContext,
-      next: () => Promise<void>
-    ) => Promise<void> | void,
-    options: CallbackPrefixHandlerOptions = {}
-  ) => {
-    bot.on(
-      "callback_query",
-      wrapCallbackHandler(
-        async (ctx, next) => {
-          const callbackData = ctx.callbackQuery?.data;
-          if (!callbackData?.startsWith(prefix)) {
-            return await next();
-          }
-
-          const payload = callbackData.slice(prefix.length);
-          await handler(ctx, { raw: callbackData, payload }, () => next());
-        },
-        {
-          action: options.logLabel ?? `${prefix} handler`,
-          errorAck: options.errorAck,
-        }
-      )
-    );
-  };
+  const registerCallbackPrefixHandler = createCallbackPrefixRegistrar({
+    bot,
+    wrapCallbackHandler,
+  });
 
   const defaultWalletActionMenuDeps = {
     requireTelegramId,
