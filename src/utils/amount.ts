@@ -157,6 +157,15 @@ export const evaluateTradeAmount = ({
     return tokenBalance;
   };
 
+  let cachedTokenBalance: TradeTokenBalanceSnapshot | null = null;
+  const getTokenSnapshot = (): TradeTokenBalanceSnapshot => {
+    if (cachedTokenBalance) {
+      return cachedTokenBalance;
+    }
+    cachedTokenBalance = ensureTokenBalance();
+    return cachedTokenBalance;
+  };
+
   const resolveSolSpendable = (): number => {
     const spendable = applySolFeeBuffer
       ? Math.max(0, solBalance - solFeeBufferLamports)
@@ -169,16 +178,12 @@ export const evaluateTradeAmount = ({
     return spendable;
   };
 
-  const formatDisplay = (
-    rawAmount: number,
-    decimalsOverride?: number
-  ): string | undefined => {
+  const formatDisplayAmount = (rawAmount: number): string | undefined => {
     if (isSolAsset) {
       return formatSol ? formatSol(rawAmount) : undefined;
     }
 
-    const tokenDecimals =
-      decimalsOverride ?? tokenBalance?.decimals ?? decimals;
+    const { decimals: tokenDecimals } = getTokenSnapshot();
     return formatToken ? formatToken(rawAmount, tokenDecimals) : undefined;
   };
 
@@ -188,13 +193,13 @@ export const evaluateTradeAmount = ({
       return {
         kind: "max",
         rawAmount: spendableLamports,
-        displayAmount: formatDisplay(spendableLamports),
+        displayAmount: formatDisplayAmount(spendableLamports),
         normalizedAmount: "max",
       };
     }
 
-    const balance = ensureTokenBalance();
-    const rawAmount = Math.floor(balance.balance);
+    const tokenSnapshot = getTokenSnapshot();
+    const rawAmount = Math.floor(tokenSnapshot.balance);
 
     if (rawAmount <= 0) {
       throw new Error(`No ${assetTicker} balance found`);
@@ -203,7 +208,7 @@ export const evaluateTradeAmount = ({
     return {
       kind: "max",
       rawAmount,
-      displayAmount: formatDisplay(rawAmount, balance.decimals),
+      displayAmount: formatDisplayAmount(rawAmount),
       normalizedAmount: "max",
     };
   }
@@ -227,28 +232,30 @@ export const evaluateTradeAmount = ({
       return {
         kind: "percentage",
         rawAmount,
-        displayAmount: formatDisplay(rawAmount),
+        displayAmount: formatDisplayAmount(rawAmount),
         normalizedAmount: formatted,
       };
     }
 
-    const balance = ensureTokenBalance();
-    const rawAmount = Math.floor(balance.balance * fraction);
+    const tokenSnapshot = getTokenSnapshot();
+    const rawAmount = Math.floor(tokenSnapshot.balance * fraction);
 
     if (rawAmount <= 0) {
       throw new Error("Percentage results in zero amount");
     }
 
-    const formatted = formatAmount(rawAmount, balance.decimals, {
-      maxFractionDigits: balance.decimals,
+    const formatted = formatAmount(rawAmount, tokenSnapshot.decimals, {
+      maxFractionDigits: tokenSnapshot.decimals,
       trim: true,
     });
+
+    const displayOverride = formatDisplayAmount(rawAmount);
+    const displayAmount = displayOverride ?? formatted;
 
     return {
       kind: "percentage",
       rawAmount,
-      displayAmount:
-        formatToken?.(rawAmount, balance.decimals) ?? formatted,
+      displayAmount,
       normalizedAmount: formatted,
     };
   }
@@ -266,20 +273,20 @@ export const evaluateTradeAmount = ({
     return {
       kind: "absolute",
       rawAmount,
-      displayAmount: formatDisplay(rawAmount),
+      displayAmount: formatDisplayAmount(rawAmount),
       normalizedAmount: parsed.normalized,
     };
   }
 
-  const balance = ensureTokenBalance();
-  if (rawAmount > balance.balance) {
+  const tokenSnapshot = getTokenSnapshot();
+  if (rawAmount > tokenSnapshot.balance) {
     throw new Error("Insufficient token balance");
   }
 
   return {
     kind: "absolute",
     rawAmount,
-    displayAmount: formatDisplay(rawAmount, balance.decimals),
+    displayAmount: formatDisplayAmount(rawAmount),
     normalizedAmount: parsed.normalized,
   };
 };
