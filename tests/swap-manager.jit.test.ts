@@ -487,4 +487,124 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       getAccountSpy.mockRestore();
     }
   });
+
+  test("performs pump.fun JIT swap without zeroing low-decimal amounts", async () => {
+    const wallet = WalletManager.createForTest(mnemonic, {
+      connection,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+    const admin = Keypair.generate();
+    (wallet as any).getAdminKeypair = () => admin;
+    (wallet as any).sendTransaction = async () => "SIG_PUMP_LOW_DEC";
+    (wallet as any).confirmTransaction = async () => {};
+
+    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
+    (swapManager as any).connection = {
+      getBalance: async () => 0,
+    };
+    (swapManager as any).getBestProvider = async () => "pump-fun";
+
+    const requestedAmounts: string[] = [];
+    (swapManager as any).getPumpFunQuote = async (opts: any) => {
+      requestedAmounts.push(opts.amount);
+      const normalizedRaw = opts.amount.includes(".")
+        ? opts.amount.replace(".", "")
+        : opts.amount;
+      return {
+        inputMint: opts.inputMint,
+        outputMint: opts.outputMint,
+        inputAmount: opts.amount,
+        inputAmountRaw: normalizedRaw,
+        outputAmount: "4000000",
+        estimatedRate: 1,
+        slippage: opts.slippageBps / 100,
+        isGraduated: false,
+      };
+    };
+    (swapManager.pumpFunClient as any).createSwapTransaction = async () => [
+      {} as TransactionInstruction,
+    ];
+
+    const user = Keypair.generate();
+    const result = await swapManager.performJustInTimeSolSwap({
+      userKeypair: user,
+      tokenMint: "LowDecToken",
+      tokenDecimals: 2,
+      availableTokenAmountRaw: 375, // 3.75 tokens available
+      tokenTicker: "LDEC",
+    });
+
+    expect(result.swapped).toBe(true);
+    expect(result.provider).toBe("pump-fun");
+    expect(requestedAmounts.length).toBeGreaterThan(0);
+    const firstAmount = requestedAmounts[0]!;
+    expect(firstAmount).not.toBe("0");
+    expect(firstAmount).not.toBe("0.00");
+    const rawUnits = BigInt(firstAmount.replace(".", ""));
+    expect(rawUnits > 0n).toBe(true);
+  });
+
+  test("refunds sponsored lamports when Jupiter swap fails", async () => {
+    const wallet = WalletManager.createForTest(mnemonic, {
+      connection,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+    const admin = Keypair.generate();
+    (wallet as any).getAdminKeypair = () => admin;
+
+    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
+    (swapManager as any).connection = {
+      getBalance: async () => 0,
+    };
+    (swapManager as any).getBestProvider = async () => "jupiter";
+    (swapManager as any).jupiterClient.getQuote = async () => ({
+      inputMint: "TokenMint",
+      outputMint: WSOL_MINT,
+      inAmount: "1000000",
+      outAmount: "4000000",
+      otherAmountThreshold: "0",
+      swapMode: "ExactOut",
+      slippageBps: 100,
+      priceImpactPct: "0",
+      routePlan: [],
+      totalTime: 0,
+    });
+    (swapManager as any).jupiterClient.getSwapTransaction = async () => ({
+      swapTransaction: "BASE64",
+    });
+    (swapManager as any).executeJupiterTransaction = async () => {
+      throw new Error("Jupiter execution failed");
+    };
+
+    const sponsorCalls: number[] = [];
+    const refundCalls: number[] = [];
+    (swapManager as any).sponsorSwapFees = async (
+      _kp: Keypair,
+      lamports: number
+    ) => {
+      sponsorCalls.push(lamports);
+    };
+    (swapManager as any).refundSponsoredFees = async (
+      _kp: Keypair,
+      lamports: number
+    ) => {
+      refundCalls.push(lamports);
+    };
+
+    const user = Keypair.generate();
+    const result = await swapManager.performJustInTimeSolSwap({
+      userKeypair: user,
+      tokenMint: "TokenMint",
+      tokenDecimals: 6,
+      availableTokenAmountRaw: 5_000_000,
+      tokenTicker: "TEST",
+    });
+
+    expect(result.swapped).toBe(false);
+    expect(result.error).toMatch(/Jupiter execution failed/);
+    expect(sponsorCalls).toEqual([TEST_JIT_BUFFER_LAMPORTS, TEST_JIT_BUFFER_LAMPORTS]);
+    expect(refundCalls).toEqual([TEST_JIT_BUFFER_LAMPORTS, TEST_JIT_BUFFER_LAMPORTS]);
+  });
 });

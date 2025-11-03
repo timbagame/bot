@@ -309,23 +309,33 @@ export const createSolConversionUtilities = ({
   };
 
   const validatePendingTransaction = <T extends { type: string; userId: string }>(
-    ctx: { chat?: { id?: number | string | bigint } | undefined; from?: { id?: number | string | bigint } | undefined },
+    ctx: {
+      chat?: { id?: number | string | bigint } | undefined;
+      from?: { id?: number | string | bigint } | undefined;
+    },
     txId: string,
     expectedType: T["type"],
     options: { removeFromCache?: boolean } = {}
   ): PendingTransactionValidationResult<T> => {
     const { removeFromCache = true } = options;
-    const transaction = getPendingTransaction(txId, removeFromCache) as
+    const transaction = getPendingTransaction(txId, false) as
       | (T & { type: string; userId: string })
       | undefined;
 
     if (!transaction || transaction.type !== expectedType) {
+      if (removeFromCache) {
+        getPendingTransaction(txId, true);
+      }
       return { status: "expired" };
     }
 
     const telegramId = ctx?.from?.id ?? ctx?.chat?.id;
     if (telegramId == null || transaction.userId !== String(telegramId)) {
       return { status: "unauthorized" };
+    }
+
+    if (removeFromCache) {
+      getPendingTransaction(txId, true);
     }
 
     return { status: "success", transaction };
