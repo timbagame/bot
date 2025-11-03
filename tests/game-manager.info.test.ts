@@ -118,7 +118,7 @@ describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
       max_players: 4,
       game_type: "coinflip",
       token_mint: "MINT",
-      game_address: new PublicKey("22222222222222222222222222222222").toBase58(),
+      game_address: new PublicKey("BPFLoader1111111111111111111111111111111111").toBase58(),
       winner_address: "cancelled",
     });
 
