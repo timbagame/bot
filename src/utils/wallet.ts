@@ -633,8 +633,11 @@ export class WalletManager {
                 `❌ Error fetching metadata for ${mint}:`,
                 metadataError
               );
-              metadataCache.set(mint, null);
+              metadataCache.delete(mint);
               return null;
+            })
+            .finally(() => {
+              metadataPromises.delete(mint);
             });
           metadataPromises.set(mint, promise);
         }

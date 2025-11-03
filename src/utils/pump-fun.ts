@@ -69,7 +69,10 @@ export class PumpFunClient {
   ): bigint {
     const trimmed = amount.trim();
     if (trimmed.length === 0) {
-      return 0n;
+      if (allowZero) {
+        return 0n;
+      }
+      throw new Error("Amount must be greater than zero");
     }
 
     // Handle raw lamports for SOL mints

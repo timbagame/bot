@@ -7,12 +7,19 @@ import {
 } from "../src/utils/prices";
 
 const originalEnv = process.env["PRICES_ENABLED"];
+const originalTimeout = process.env["PRICES_TIMEOUT_MS"];
 
 afterEach(() => {
   if (originalEnv === undefined) {
     delete process.env["PRICES_ENABLED"];
   } else {
     process.env["PRICES_ENABLED"] = originalEnv;
+  }
+
+  if (originalTimeout === undefined) {
+    delete process.env["PRICES_TIMEOUT_MS"];
+  } else {
+    process.env["PRICES_TIMEOUT_MS"] = originalTimeout;
   }
 });
 
@@ -192,5 +199,40 @@ describe("price utilities resilience", () => {
          ),
       { seed: 12345, numRuns: 25 }
     );
+  });
+
+  test("invalid PRICES_TIMEOUT_MS falls back to default timeout", async () => {
+    process.env["PRICES_ENABLED"] = "true";
+    const previousTimeout = process.env["PRICES_TIMEOUT_MS"];
+    process.env["PRICES_TIMEOUT_MS"] = "0";
+
+    const module = await import(
+      `../src/utils/prices.ts?timeout=${Date.now()}`
+    );
+
+    let calls = 0;
+    const fetchImpl = (async (url: string) => {
+      calls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return {
+        ok: true,
+        async json() {
+          const id = new URL(url).searchParams.get("ids") ?? "SOL";
+          return { data: { [id]: { price: 7.5 } } };
+        },
+      } as any;
+    }) as any;
+
+    try {
+      const price = await module.getPriceUSD("SOL", fetchImpl);
+      expect(price).toBe(7.5);
+      expect(calls).toBe(1);
+    } finally {
+      if (previousTimeout === undefined) {
+        delete process.env["PRICES_TIMEOUT_MS"];
+      } else {
+        process.env["PRICES_TIMEOUT_MS"] = previousTimeout;
+      }
+    }
   });
 });

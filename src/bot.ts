@@ -156,6 +156,7 @@ const updateOracleMaxPlayers = (maybeMax: number) => {
   }
 };
 
+
 type CallbackHandler<TCtx extends Context = any> = (
   ctx: TCtx,
   next: NextFunction
@@ -1387,6 +1388,21 @@ const replyUsageError = async (
   return replyToMessage(ctx, message);
 };
 
+const formatDefaultTokenSetMessage = (
+  tokenTicker: string,
+  tokenMint: string
+): string => {
+  const safeTicker = escapeHtml(tokenTicker);
+  const safeMint = escapeHtml(tokenMint);
+  return (
+    `✅ Default token set to ${safeTicker}\n` +
+    `🏷️ Token mint: <code>${safeMint}</code>\n\n` +
+    `All games and transactions will now use ${safeTicker} by default unless specified otherwise.`
+  );
+};
+
+export const __test_formatDefaultTokenSetMessage = formatDefaultTokenSetMessage;
+
 // ================================
 // ANCHOR SETUP
 // ================================
@@ -2021,8 +2037,8 @@ bot.command("default", async (ctx: Context) => {
         : "Unknown user";
       return replyToMessage(
         ctx,
-        `📄 Current default token: ${chatConfig.token_ticker}\n` +
-          `🏷️ Token mint: <code>${chatConfig.token_mint}</code>\n` +
+        `📄 Current default token: ${escapeHtml(chatConfig.token_ticker)}\n` +
+          `🏷️ Token mint: <code>${escapeHtml(chatConfig.token_mint)}</code>\n` +
           `👤 Set by: ${setByDisplay}\n` +
           `📅 Set at: ${new Date(chatConfig.set_at).toLocaleString()}\n\n` +
           `Use /default &lt;TOKEN_TICKER&gt; to change or /default clear to remove.`
@@ -2032,7 +2048,7 @@ bot.command("default", async (ctx: Context) => {
       return replyToMessage(
         ctx,
         `📄 No default token set for this chat.\n` +
-          `🔄 Using bot default: ${defaultToken.tokenTicker}\n\n` +
+          `🔄 Using bot default: ${escapeHtml(defaultToken.tokenTicker)}\n\n` +
           `Use /default &lt;TOKEN_TICKER&gt; to set a default token for this chat.`
       );
     }
@@ -2084,7 +2100,7 @@ bot.command("default", async (ctx: Context) => {
       response += "📋 Known tokens:\n";
       for (const token of allTokens.slice(0, 10)) {
         // Show max 10 tokens
-        response += `• ${token.token_ticker}\n`;
+          response += `• ${escapeHtml(token.token_ticker)}\n`;
       }
       if (allTokens.length > 10) {
         response += `... and ${allTokens.length - 10} more.`;
@@ -2106,9 +2122,7 @@ bot.command("default", async (ctx: Context) => {
 
   return replyToMessage(
     ctx,
-    `✅ Default token set to ${knownToken.token_ticker}\n` +
-      `🏷️ Token mint: <code>${knownToken.token_mint}</code>\n\n` +
-      `All games and transactions will now use ${knownToken.token_ticker} by default unless specified otherwise.`
+    formatDefaultTokenSetMessage(knownToken.token_ticker, knownToken.token_mint)
   );
 });
 

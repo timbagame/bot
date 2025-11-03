@@ -214,4 +214,47 @@ describe("WalletManager.getAllApprovedTokenBalances", () => {
     const value = await wm.getTokenBalance(1n, mint.toBase58());
     expect(value).toBe(Number(rawAmount));
   });
+
+  test("metadata failures are retried on subsequent balance lookups", async () => {
+    const connection = new ConnParsed();
+    const wm = WalletManager.createForTest(
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    );
+
+    const owner = wm.getPublicKey(1n);
+    connection.setOwner(owner);
+
+    const mint = new PublicKey("4Nd1mFatW4Kfo7oyi7T5C5x64K8jKe3SWP7WRHnS8svB");
+    await connection.seedTokenAccount({
+      mint,
+      programId: TOKEN_PROGRAM_ID,
+      amount: 10_000n,
+      decimals: 6,
+    });
+
+    const approved = [
+      { token_mint: mint.toBase58(), token_ticker: "FALLBACK", decimals: 6 },
+    ];
+
+    let invocations = 0;
+    let failures = 0;
+    (wm as any).getFullTokenMetadata = async (_mint: string) => {
+      invocations += 1;
+      if (failures === 0) {
+        failures += 1;
+        throw new Error("temporary metadata failure");
+      }
+      return { decimals: 6, symbol: "META" };
+    };
+
+    const first = await wm.getAllApprovedTokenBalances(1n, approved);
+    expect(first[0]?.ticker).toBe("META");
+    expect(invocations).toBeGreaterThan(1);
+    expect(failures).toBe(1);
+
+    const cached = await wm.getAllApprovedTokenBalances(1n, approved);
+    expect(cached[0]?.ticker).toBe("META");
+    expect(failures).toBe(1);
+  });
 });

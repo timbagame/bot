@@ -28,4 +28,16 @@ describe("PumpFunClient.parseAmountLamports", () => {
     const amount = (client as any).parseAmountLamports("0", 9, { allowZero: true });
     expect(amount).toBe(0n);
   });
+
+  test("rejects whitespace-only input unless zero allowed", () => {
+    const client = getClient();
+    expect(() => (client as any).parseAmountLamports("   \t", 9)).toThrow(
+      "Amount must be greater than zero"
+    );
+
+    const zero = (client as any).parseAmountLamports("   \n", 9, {
+      allowZero: true,
+    });
+    expect(zero).toBe(0n);
+  });
 });

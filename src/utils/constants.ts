@@ -184,7 +184,10 @@ export const PRICES_CACHE_TTL_MS = parsePositiveDuration(
   60_000
 );
 // Request timeout (ms)
-export const PRICES_TIMEOUT_MS = Number(process.env["PRICES_TIMEOUT_MS"] ?? 3_000);
+export const PRICES_TIMEOUT_MS = parsePositiveDuration(
+  "PRICES_TIMEOUT_MS",
+  3_000
+);
 
 export const PUMP_FUN_API_BASE = "https://frontend-api.pump.fun/coins";
 export const buildPumpFunCoinUrl = (mintAddress: string): string => {
