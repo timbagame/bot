@@ -30,7 +30,6 @@ import {
   LAMPORTS_PER_SOL,
   getCoinflipVideoId,
   getGiveawayVideoId,
-  applyDynamicFeeBudgets,
   TELEGRAM_USERNAME_CACHE_TTL_MS,
   TRANSACTION_RESUBMIT_ATTEMPTS,
 } from "./constants";
@@ -59,6 +58,8 @@ import {
 import { resolveTokenPriceUSD } from "./prices";
 import { NetworkDetector } from "./network-detector";
 import { SwapManager } from "./swap-manager";
+import { createExpiringCache } from "./expiring-cache";
+import { refreshDynamicFeeBudgets } from "./fee-budget-refresh";
 
 const resolveGameVideoId = (gameType: string): string | undefined => {
   const lower = gameType.toLowerCase();
@@ -190,10 +191,10 @@ export class GameManager {
     "This game has already completed. Refresh to see the result.";
   private readonly usernameCacheTtlMs = TELEGRAM_USERNAME_CACHE_TTL_MS;
   private readonly usernameCacheMaxEntries = 500;
-  private usernameCache = new Map<
-    string,
-    { value: string | null; expiresAt: number }
-  >();
+  private readonly usernameCache = createExpiringCache<string | null>(
+    TELEGRAM_USERNAME_CACHE_TTL_MS
+  );
+  private readonly usernameCacheKeys: string[] = [];
   private usernameLookupPromises = new Map<string, Promise<string | null>>();
 
   private constructor(
@@ -233,16 +234,7 @@ export class GameManager {
       );
       void (async () => {
         try {
-          const [singleTx, gameBuffer, jitBuffer] = await Promise.all([
-            feeBudget.getSingleTransactionLamports(),
-            feeBudget.getGameSafetyBufferLamports(),
-            feeBudget.getJitSwapFeeBufferLamports(),
-          ]);
-          applyDynamicFeeBudgets({
-            singleTransactionLamports: singleTx,
-            gameSafetyBufferLamports: gameBuffer,
-            jitSwapBufferLamports: jitBuffer,
-          });
+          await refreshDynamicFeeBudgets(feeBudget);
         } catch (error) {
           console.warn("Failed to prime dynamic fee budgets:", error);
         }
@@ -290,43 +282,33 @@ export class GameManager {
     return `${chatId}:${telegramId}`;
   }
 
-  private pruneUsernameCache(now = Date.now()): void {
-    for (const [key, entry] of this.usernameCache) {
-      if (entry.expiresAt <= now) {
-        this.usernameCache.delete(key);
+  private removeUsernameCacheKey(key: string): void {
+    const index = this.usernameCacheKeys.indexOf(key);
+    if (index !== -1) {
+      this.usernameCacheKeys.splice(index, 1);
+    }
+  }
+
+  private trackUsernameCacheKey(key: string): void {
+    this.removeUsernameCacheKey(key);
+    this.usernameCacheKeys.push(key);
+
+    while (this.usernameCacheKeys.length > this.usernameCacheMaxEntries) {
+      const oldestKey = this.usernameCacheKeys.shift();
+      if (oldestKey) {
+        this.usernameCache.delete(oldestKey);
       }
     }
   }
 
-  private enforceUsernameCacheLimit(): void {
-    if (this.usernameCache.size <= this.usernameCacheMaxEntries) {
-      return;
-    }
-
-    const excess = this.usernameCache.size - this.usernameCacheMaxEntries;
-    const iterator = this.usernameCache.keys();
-    for (let removed = 0; removed < excess; removed += 1) {
-      const next = iterator.next();
-      if (next.done) {
-        break;
-      }
-      this.usernameCache.delete(next.value);
-    }
-  }
-
-  private setCachedUsername(
-    key: string,
-    value: string | null,
-    now = Date.now()
-  ): void {
+  private setCachedUsername(key: string, value: string | null): void {
     const ttl =
       value === null
         ? Math.min(this.usernameCacheTtlMs, 30_000)
         : this.usernameCacheTtlMs;
 
-    this.pruneUsernameCache(now);
-    this.usernameCache.set(key, { value, expiresAt: now + ttl });
-    this.enforceUsernameCacheLimit();
+    this.usernameCache.setWithTTL(key, value, ttl);
+    this.trackUsernameCacheKey(key);
   }
 
   private getOraclePda(): PublicKey {
@@ -1305,15 +1287,13 @@ export class GameManager {
       }
 
       const key = this.buildUsernameCacheKey(ctx, numericId);
-      const now = Date.now();
       const cached = this.usernameCache.get(key);
-      if (cached && cached.expiresAt > now) {
-        return cached.value;
+      if (cached !== undefined) {
+        return cached;
       }
 
-      if (cached) {
-        this.usernameCache.delete(key);
-      }
+      this.usernameCache.delete(key);
+      this.removeUsernameCacheKey(key);
 
       let lookup = this.usernameLookupPromises.get(key);
       if (!lookup) {

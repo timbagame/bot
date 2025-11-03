@@ -34,6 +34,7 @@ import {
   resolveTelegramIdOrRespond,
   requireTelegramId,
   getTelegramId,
+  getTelegramIdString,
 } from "../utils/context-helpers";
 import { presentTradeAmount, parseDecimalAmount } from "../utils/amount";
 import { escapeHtml } from "../utils/format-amount";
@@ -46,11 +47,8 @@ import type {
   WalletCacheSnapshot as CachedWalletData,
 } from "./wallet-menu";
 import type { RegisterCallbackPrefixHandler, WrapCallbackHandler } from "../utils/callback-registry";
-
-type TokenBalanceLike = {
-  balance: number;
-  decimals: number;
-};
+import type { TokenBalanceLike } from "../types/wallet";
+import { generateTransactionId } from "../utils/transaction-id";
 
 type PresentSpendAmountParams = {
   amount: string;
@@ -170,11 +168,6 @@ export type WalletTransactionsModule = {
 
 const toRawAmount = (value: string, decimals: number): number =>
   parseDecimalAmount(value, decimals, { returnType: "number" });
-
-const getTelegramIdString = (ctx: Context): string | undefined => {
-  const id = getTelegramId(ctx);
-  return id === 0n ? undefined : id.toString();
-};
 
 const tryGetUserWalletAddress = (
   wallet: WalletManager,
@@ -483,9 +476,6 @@ export const createWalletTransactionsModule = (
       displayAmount,
     };
   };
-
-  const generateTransactionId = (): string =>
-    `tx_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
   const handleCustomAmountInput = async (
     ctx: Context,
