@@ -1,6 +1,8 @@
 // Utilities for managing per-user state and pending transactions
 
-const USER_STATE_TIMEOUT = 15 * 60 * 1000; // 15 minutes timeout
+import { INPUT_TIMEOUT_MS } from "./constants";
+
+const USER_STATE_TIMEOUT = INPUT_TIMEOUT_MS; // Keep aligned with user prompt timeout
 
 type GenericState = { timestamp: number } & Record<string, any>;
 

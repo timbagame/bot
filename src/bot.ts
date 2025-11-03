@@ -24,14 +24,12 @@ import {
   DEFAULT_TOKEN_TICKER,
   TOKENS_LIST,
   WSOL_MINT,
-  getStartVideoId,
   INPUT_TIMEOUT_HINT,
   SWAP_DEFAULT_SLIPPAGE_BPS,
   SWAP_SLIPPAGE_OPTIONS_BPS,
   applyDynamicFeeBudgets,
 } from "./utils/constants";
 import { FeeBudgetManager } from "./utils/fee-budget";
-import { mergeWsolIntoSol } from "./utils/balance";
 import {
   setUserState,
   getUserState,
@@ -43,57 +41,26 @@ import {
   setInputSession,
   getInputSession,
   clearInputSession,
-  type GameSetupSessionState,
 } from "./utils/user-state";
 // import { createDmMessageAdapter } from "./utils/ctx-adapter";
 import {
-  createWalletKeyboard,
-  createWalletSettingsKeyboard,
   createBackToWalletKeyboard,
   createCancelKeyboard,
-  createConfirmWrapKeyboard,
-  createConfirmUnwrapKeyboard,
   createTradeConfirmKeyboard,
   createAmountSelectionKeyboard,
-  createPlayerSelectionKeyboard,
-  createGameConfirmKeyboard,
-  getFeeWarningMessage,
   getSuggestedStakeAmounts,
 } from "./utils/keyboards";
-import {
-  buildWalletCaption,
-  buildWalletActionMenuForUser,
-  showCustomAmountPrompt,
-  upsertWalletMenuMessage,
-  persistInputPrompt,
-  type BuildWalletActionMenuForUserOptions,
-  type WalletMenuBalances,
-} from "./utils/wallet-ui";
+import { showCustomAmountPrompt, persistInputPromptFromContext } from "./utils/wallet-ui";
 import {
   buildEmptyLeaderboardMessage,
   buildLeaderboardMessage,
   type LeaderboardPlayerDisplay,
 } from "./utils/leaderboard-ui";
+import { formatAmount, escapeHtml, formatRate } from "./utils/format-amount";
+import { type PendingSwapTransaction } from "./bot/flows/sol-conversion";
 import {
-  formatAmount,
-  escapeHtml,
-  formatRate,
-  formatTokenDisplay,
-  formatUsdValue,
-} from "./utils/format-amount";
-import {
-  createSolConversionUtilities,
-  type PendingSendTransaction,
-  type PendingSwapTransaction,
-} from "./bot/flows/sol-conversion";
-import {
-  showWalletUI as showWalletUIHandler,
-  onMainWallet,
-  onWalletRefresh,
-  onWalletSettings,
   onBalance,
   type BalanceDeps,
-  type WalletHandlersDeps,
 } from "./handlers/wallet";
 import { inferMaxPlayers } from "./utils/arg-parsing";
 import type {
@@ -109,26 +76,30 @@ import {
   createMessageEditAdapter,
   handleCallbackErrorSafe,
   safeAnswerCallbackQuery,
-  respondMissingIdentity,
   requireTelegramId,
   getRequiredTelegramIdForContext,
+  resolveTelegramIdOrRespond,
 } from "./utils/context-helpers";
 import { recentUpdateGuard } from "./utils/recent-update";
-import { getPriceUSD, resolveTokenPriceUSD } from "./utils/prices";
+import { resolveTokenPriceUSD } from "./utils/prices";
 import { patchReplyBehavior } from "./utils/reply-patch";
-import {
-  NetworkDetector,
-  buildTransactionLinkMessage,
-} from "./utils/network-detector";
+import { buildTransactionLinkMessage } from "./utils/network-detector";
 import { buildProcessingStatus } from "./utils/trade-ui";
 import { respondWithMenu } from "./utils/menu-response";
-import { parseDecimalAmount, presentTradeAmount } from "./utils/amount";
+import { parseDecimalAmount } from "./utils/amount";
+import { handleCoinflipCommand } from "./handlers/game";
 import {
-  handleCoinflipCommand,
-  type CoinflipDeps,
-  type GameTokenOverride,
-} from "./handlers/game";
-import { isMessageMissing } from "./utils/telegram-errors";
+  createGameSetupModule,
+  GAME_SETUP_COPY,
+} from "./handlers/game-setup";
+import { createGameCommandsModule } from "./handlers/game-commands";
+import { createGameCallbacksModule } from "./handlers/game-callbacks";
+import {
+  createWalletMenuModule,
+  type WalletCacheSnapshot as WalletCacheSnapshotData,
+} from "./handlers/wallet-menu";
+import { createWalletTransactionsModule } from "./handlers/wallet-transactions";
+export type { CreateGameViaCommandOptions } from "./handlers/game-commands";
 
 // ================================
 // GLOBAL INSTANCES
@@ -187,17 +158,80 @@ const updateOracleMaxPlayers = (maybeMax: number) => {
   }
 };
 
+type CallbackHandler<TCtx extends Context = any> = (
+  ctx: TCtx,
+  next: NextFunction
+) => Promise<void> | void;
+
+const wrapCallbackHandler = <TCtx extends Context>(
+  handler: CallbackHandler<TCtx>,
+  options: { action?: string; errorAck?: string } = {}
+) => {
+  return async (ctx: TCtx, next: NextFunction) => {
+    try {
+      await handler(ctx, next);
+    } catch (error) {
+      const fallbackAction = handler.name || "callback handler";
+      const actionLabel =
+        options.action ?? ctx.callbackQuery?.data ?? fallbackAction;
+      if (options.errorAck) {
+        console.error(`Error in ${actionLabel}:`, error);
+        await safeAnswerCallbackQuery(ctx, options.errorAck);
+      } else {
+        await handleCallbackErrorSafe(ctx, error, actionLabel);
+      }
+    }
+  };
+};
+
+const walletMenuModule = createWalletMenuModule({
+  bot,
+  wallet,
+  getTokenManager: () => tokenManager,
+  wrapCallbackHandler,
+});
+
 const {
+  registerWalletMenuHandlers,
+  registerCallbackPrefixHandler,
+  registerWalletActionMenuHandler,
+  getCachedWalletData,
+  clearWalletCache,
+  defaultWalletActionMenuDeps,
+  showWalletUI,
+  __test_setWalletCache: setWalletCacheForTests,
+} = walletMenuModule;
+
+registerWalletMenuHandlers();
+
+export const __test_setWalletCache = setWalletCacheForTests;
+
+const walletTransactionsModule = createWalletTransactionsModule({
+  bot,
+  wallet,
+  registerWalletActionMenuHandler,
+  registerCallbackPrefixHandler,
+  defaultWalletActionMenuDeps,
+  getCachedWalletData,
+  clearWalletCache,
+  wrapCallbackHandler,
+  getSolFeeBufferLamports: () => SOL_FEE_BUFFER_LAMPORTS,
+});
+
+const {
+  registerHandlers: registerWalletTransactionHandlers,
   executeWrapFlow,
   executeUnwrapFlow,
   validatePendingTransaction,
-} = createSolConversionUtilities({
-  wallet,
-  clearWalletCache,
-  buildTransactionLinkMessage,
-  getPendingTransaction,
-  getSolFeeBufferLamports: () => SOL_FEE_BUFFER_LAMPORTS,
-});
+  presentSpendAmount,
+  buildQuickAmountKeyboard,
+  handleCustomAmountInput,
+  handleAddressInput,
+  handleWrapAmountInput,
+  renderSolConversionSuccess,
+} = walletTransactionsModule;
+
+registerWalletTransactionHandlers();
 
 const parseOracleNumeric = (value: unknown): number | null => {
   if (typeof value === "number") {
@@ -241,54 +275,8 @@ const CONTRACT_EXAMPLE_LINES = (() => {
 // Helper moved to utils/service-health.ts as checkServiceHealth
 
 // User sessions for text input handling
-type GameSetupSession = GameSetupSessionState;
-
-// Input sessions for non-game text inputs (send, swap, wrap, etc.)
-// Test-only helpers to manipulate wallet cache in unit tests
-export const __test_setWalletCache = (
-  telegramId: bigint | number | string,
-  data: {
-    solBalance: number;
-    tokenBalances: Array<{
-      mint: string;
-      ticker: string;
-      balance: number;
-      decimals: number;
-      rawBalance: string;
-    }>;
-    approvedTokens?: any[];
-    nativeSolBalance?: number;
-    wsolBalance?: number;
-  },
-  _ts?: number
-) => {
-  const cacheKey = getWalletCacheKey(telegramId as any);
-  walletDataCache.setWithTTL(cacheKey, {
-    solBalance: data.solBalance,
-    nativeSolBalance: data.nativeSolBalance ?? data.solBalance,
-    wsolBalance: data.wsolBalance ?? 0,
-    tokenBalances: data.tokenBalances,
-    approvedTokens: data.approvedTokens ?? [],
-  });
-};
-
 export const __test_setGameManager = (manager: GameManager): void => {
   gameManager = manager;
-};
-
-const ensureCreator = (
-  ctx: Context,
-  creatorId: string,
-  failureText = "🚫 Only the game creator can modify this setup!"
-): boolean => {
-  const currentUserId = getTelegramIdString(ctx);
-
-  if (currentUserId !== creatorId) {
-    void safeAnswerCallbackQuery(ctx, failureText);
-    return false;
-  }
-
-  return true;
 };
 
 // Test-only proxies for user-state helpers
@@ -298,23 +286,8 @@ export const __test_clearUserState = (userId: string) => { getUserState(userId, 
 
 // Main menu keyboard moved to utils/keyboards.ts
 
-const toRawAmount = (value: string, decimals: number): number =>
-  parseDecimalAmount(value, decimals, { returnType: "number" });
-
 const clampLamportsForFees = (lamports: number): number =>
   Math.max(0, lamports - SOL_FEE_BUFFER_LAMPORTS);
-
-const tryGetUserWalletAddress = (telegramId: bigint): string | undefined => {
-  if (telegramId === 0n) {
-    return undefined;
-  }
-
-  try {
-    return wallet.getKeyPair(telegramId).publicKey.toBase58();
-  } catch {
-    return undefined;
-  }
-};
 
 const getTelegramIdString = (ctx: Context): string | undefined => {
   const id = getTelegramId(ctx);
@@ -325,139 +298,6 @@ type TokenBalanceLike = {
   balance: number;
   decimals: number;
 };
-
-type PresentSpendAmountParams = {
-  amount: string;
-  assetTicker: string;
-  decimals: number;
-  solBalance: number;
-  tokenBalance?: TokenBalanceLike;
-  formatSol: (lamports: number) => string;
-  formatToken: (amount: number, decimals: number) => string;
-  applySolFeeBuffer?: boolean;
-  solFeeBufferLamports?: number;
-};
-
-const presentSpendAmount = ({
-  amount,
-  assetTicker,
-  decimals,
-  solBalance,
-  tokenBalance,
-  formatSol,
-  formatToken,
-  applySolFeeBuffer = true,
-  solFeeBufferLamports = SOL_FEE_BUFFER_LAMPORTS,
-}: PresentSpendAmountParams) => {
-  const presentation = presentTradeAmount({
-    amount,
-    assetTicker,
-    decimals,
-    solBalance,
-    tokenBalance,
-    applySolFeeBuffer,
-    ...(applySolFeeBuffer
-      ? {
-          solFeeBufferLamports,
-          insufficientSolForFeesMessage:
-            "Not enough SOL to cover purchase and fees",
-          insufficientSolBalanceMessage:
-            "Insufficient SOL balance for this purchase",
-        }
-      : {}),
-    formatSol,
-    formatToken,
-  });
-
-  return {
-    rawAmount: presentation.rawAmount,
-    displayAmount: presentation.displayAmount,
-    normalizedAmount: presentation.normalizedAmount,
-  };
-};
-
-type QuickAmountButton = {
-  label: string;
-  value: string;
-};
-
-type QuickAmountOptions = {
-  baseCallback: (value: string) => string;
-  percentages?: string[];
-  includeCustom?: boolean;
-  customLabel?: string;
-  extraRows?: QuickAmountButton[][];
-};
-
-const appendQuickAmountRows = (
-  keyboard: InlineKeyboard,
-  {
-    baseCallback,
-    percentages = ["25%", "50%", "75%", "MAX"],
-    includeCustom = true,
-    customLabel = "✏️ Custom Amount",
-    extraRows = [],
-  }: QuickAmountOptions
-) => {
-  const addRow = (buttons: QuickAmountButton[]) => {
-    if (buttons.length === 0) return;
-    for (const button of buttons) {
-      keyboard.text(button.label, baseCallback(button.value));
-    }
-    keyboard.row();
-  };
-
-  for (const row of extraRows) {
-    addRow(row);
-  }
-
-  if (percentages.length > 0) {
-    for (let i = 0; i < percentages.length; i += 2) {
-      const left = percentages[i];
-      if (!left) continue;
-      const rowButtons: QuickAmountButton[] = [{ label: left, value: left }];
-      const right = percentages[i + 1];
-      if (right) {
-        rowButtons.push({ label: right, value: right });
-      }
-      addRow(rowButtons);
-    }
-  }
-
-  if (includeCustom) {
-    keyboard.text(customLabel, baseCallback("CUSTOM")).row();
-  }
-
-  return keyboard;
-};
-
-type QuickAmountKeyboardConfig = QuickAmountOptions & {
-  backCallback: string;
-  backLabel?: string;
-  showQuickRows?: boolean;
-  insufficientLabel?: string;
-};
-
-const buildQuickAmountKeyboard = ({
-  backCallback,
-  backLabel = "← Back",
-  showQuickRows = true,
-  insufficientLabel,
-  ...quickOptions
-}: QuickAmountKeyboardConfig) => {
-  const keyboard = new InlineKeyboard();
-
-  if (showQuickRows) {
-    appendQuickAmountRows(keyboard, quickOptions);
-  } else if (insufficientLabel) {
-    keyboard.text(insufficientLabel).row();
-  }
-
-  keyboard.text(backLabel, backCallback).row();
-  return keyboard;
-};
-
-export const __test_buildQuickAmountKeyboard = buildQuickAmountKeyboard;
 
 type SwapAmountKeyboardOptions = {
   fromToken: string;
@@ -479,81 +319,6 @@ const createSwapAmountKeyboard = ({
   });
 
 export const __test_createSwapAmountKeyboard = createSwapAmountKeyboard;
-
-type SendAmountPromptParams = {
-  token: string;
-  rawAmount: string;
-  decimals: number;
-  solBalance: number;
-  tokenBalance?: TokenBalanceLike;
-  exampleAddress?: string;
-  formatSol: (lamports: number) => string;
-  formatToken: (amount: number, decimals: number) => string;
-};
-
-type SendAmountPromptResult = {
-  displayLabel: string;
-  storedAmount: string;
-  messageText: string;
-};
-
-const resolveSendAmountSelection = ({
-  token,
-  rawAmount,
-  decimals,
-  solBalance,
-  tokenBalance,
-  exampleAddress,
-  formatSol,
-  formatToken,
-}: SendAmountPromptParams): SendAmountPromptResult => {
-  const spend = presentSpendAmount({
-    amount: rawAmount,
-    assetTicker: token,
-    decimals,
-    solBalance,
-    tokenBalance,
-    formatSol,
-    formatToken,
-    applySolFeeBuffer: true,
-  });
-
-  const normalized = rawAmount.trim();
-  const lower = normalized.toLowerCase();
-  const displayLabel = (() => {
-    if (lower === "max") {
-      return `MAX (~${spend.displayAmount} ${token})`;
-    }
-    if (normalized.endsWith("%")) {
-      return `${normalized} (~${spend.displayAmount} ${token})`;
-    }
-    return `${spend.displayAmount} ${token}`;
-  })();
-
-  const storedAmount = lower === "max" ? "max" : spend.displayAmount;
-
-  const response = [
-    `📤 <b>Send ${escapeHtml(displayLabel)}</b>`,
-    "",
-    `<b>Step 2:</b> Enter destination address`,
-    "",
-    `Reply to this message with the Solana wallet address.`,
-    "",
-    `<b>Format:</b> Public key (44 characters)`,
-  ];
-
-  if (exampleAddress) {
-    response.push(`<b>Example:</b> <code>${escapeHtml(exampleAddress)}</code>`);
-  }
-
-  response.push("", INPUT_TIMEOUT_HINT);
-
-  return {
-    displayLabel,
-    storedAmount,
-    messageText: response.join("\n"),
-  };
-};
 
 type WalletBalanceEntry = {
   ticker: string;
@@ -790,93 +555,7 @@ const renderTradeQuoteError = (
   };
 };
 
-type SolscanSuccessMessageOptions = {
-  title: string;
-  bodyLines: string[];
-  signature?: string;
-  linkText?: string;
-};
-
-const buildSolscanSuccessMessage = ({
-  title,
-  bodyLines,
-  signature,
-  linkText = "View on Solscan",
-}: SolscanSuccessMessageOptions): { text: string; disablePreview: boolean } => {
-  const lines: string[] = [title];
-  const normalizedBody = bodyLines.filter(
-    (line) => typeof line === "string" && line.trim().length > 0
-  );
-
-  if (normalizedBody.length > 0) {
-    lines.push("", ...normalizedBody);
-  }
-
-  const {
-    message,
-    previewDisabled,
-    solscanUrl,
-    displaySignature,
-  } = buildTransactionLinkMessage({
-    signature,
-    networkOverride: process.env["SOLANA_NETWORK"],
-    label: "🔗 ",
-    linkText,
-    format: "html",
-    fallbackToSignature: true,
-  });
-
-  let finalMessage = message;
-  let disablePreview = previewDisabled;
-
-  if (!solscanUrl && signature) {
-    const fallbackUrl = NetworkDetector.buildSolscanTxUrl(signature, "mainnet");
-    if (fallbackUrl) {
-      finalMessage = `🔗 <a href="${fallbackUrl}">${linkText}</a>`;
-      disablePreview = true;
-    } else if (!finalMessage && displaySignature) {
-      finalMessage = `🔗 ${escapeHtml(displaySignature)}`;
-    }
-  }
-
-  if (finalMessage) {
-    lines.push("", finalMessage);
-  }
-
-  return { text: lines.join("\n"), disablePreview };
-};
-
-type SolConversionSuccessKind = "wrap" | "unwrap";
-
-const renderSolConversionSuccess = ({
-  kind,
-  formattedAmount,
-  signature,
-}: {
-  kind: SolConversionSuccessKind;
-  formattedAmount: string | undefined;
-  signature: string;
-}): { text: string; disablePreview: boolean } => {
-  const safeAmount = escapeHtml(formattedAmount ?? "0");
-  const { title, body } =
-    kind === "wrap"
-      ? {
-          title: "✅ <b>Wrap Completed</b>",
-          body: `Wrapped ${safeAmount} SOL to WSOL`,
-        }
-      : {
-          title: "✅ <b>Unwrap Completed</b>",
-          body: `Unwrapped ${safeAmount} WSOL to SOL`,
-        };
-
-  return buildSolscanSuccessMessage({
-    title,
-    bodyLines: [body],
-    signature,
-  });
-};
-
-type PrepareTradeQuoteParams = {
+  type PrepareTradeQuoteParams = {
   ctx: Context;
   kind: TradeKind;
   spinnerText: string;
@@ -934,7 +613,7 @@ const prepareTradeQuote = async ({
   }
 };
 
-type WalletCacheSnapshot = Awaited<ReturnType<typeof getCachedWalletData>>;
+type WalletCacheSnapshot = WalletCacheSnapshotData;
 
 type TradeAssetFactoryContext = WalletCacheSnapshot & {
   telegramId: bigint;
@@ -1145,6 +824,7 @@ export const __test_validateGameTokenData = validateGameTokenData;
 export const __test_resetInitiatedChats = () => initiatedChats.clear();
 export const __test_getInitiatedChats = () => new Set(initiatedChats);
 export const __test_presentSpendAmount = presentSpendAmount;
+export const __test_buildQuickAmountKeyboard = buildQuickAmountKeyboard;
 export const __test_formatTradeConfirmationSummary = formatTradeConfirmationSummary;
 
 /**
@@ -1188,59 +868,6 @@ export const __test_resetPrepareTokenTradeQuote = (): void => {
   prepareTokenTradeQuoteRunner = prepareTokenTradeQuote;
 };
 
-const NON_GAME_CALLBACK_NAMES = [
-  "main_wallet",
-  "wallet_refresh",
-  "wallet_settings",
-  "cmd_help",
-  "cmd_balance",
-  "cmd_withdraw",
-  "cmd_swap",
-  "cmd_wrap",
-  "cmd_unwrap",
-  "cmd_privatekey",
-  "unwrap_confirm",
-  "help_wallet",
-  "help_games",
-  "help_utility",
-  "help_examples",
-] as const;
-
-const NON_GAME_CALLBACK_PREFIXES = [
-  "send_",
-  "swap_",
-  "wrap_",
-  "confirm_",
-  "amount_",
-  "players_",
-  "cancel_game_",
-  "custom_amount_",
-  "custom_players_",
-  "slider_",
-  "back_to_amounts_",
-  "type_amount_",
-  "admin_",
-  "info_",
-] as const;
-
-const shouldSkipGenericGameCallback = (callbackData: string): boolean => {
-  if (!callbackData) return false;
-  if (callbackData === "noop") return true;
-
-  if (
-    NON_GAME_CALLBACK_NAMES.includes(
-      callbackData as (typeof NON_GAME_CALLBACK_NAMES)[number]
-    )
-  ) {
-    return true;
-  }
-
-  return NON_GAME_CALLBACK_PREFIXES.some((prefix) =>
-    callbackData.startsWith(prefix)
-  );
-};
-
-export const __test_shouldSkipGenericGameCallback = shouldSkipGenericGameCallback;
 
 type GameMessageTarget = {
   chatId: number;
@@ -1320,21 +947,6 @@ const sendReplyToGameMessage = async (
   } catch (error) {
     console.error("Error sending reply to game message:", error);
   }
-};
-
-/**
- * Dynamic wallet UI that loads balances automatically
- */
-
-const showWalletUI = async (ctx: any) => {
-  await showWalletUIHandler(ctx, {
-    wallet,
-    getCachedWalletData,
-    getPriceUSD,
-    buildWalletCaption,
-    createWalletKeyboard,
-    WINNER_VIDEO_ID: getStartVideoId(),
-  });
 };
 
 /**
@@ -1473,31 +1085,6 @@ const getDefaultTokenMetadata = async () => {
   return await wallet.getTokenMetadata(DEFAULT_TOKEN_MINT);
 };
 
-type ChatTokenInfo = {
-  tokenMint: string;
-  tokenTicker: string;
-  decimals: number;
-};
-
-const resolveChatTokenInfo = async (
-  chatId?: number
-): Promise<ChatTokenInfo> => {
-  try {
-    return await tokenManager.resolveTokenForChat(chatId);
-  } catch (error) {
-    console.warn(
-      "⚠️ Could not resolve chat token configuration, using default token",
-      error
-    );
-    const defaultMetadata = await getDefaultTokenMetadata();
-    return {
-      tokenMint: DEFAULT_TOKEN_MINT,
-      tokenTicker: DEFAULT_TOKEN_TICKER,
-      decimals: defaultMetadata.decimals,
-    };
-  }
-};
-
 const fetchTokenPriceUSD = async ({
   tokenMint,
   tokenTicker,
@@ -1512,416 +1099,99 @@ const fetchTokenPriceUSD = async ({
   return lookup?.price ?? null;
 };
 
-const toTitleCase = (value: string): string => {
-  if (typeof value !== "string" || value.length === 0) {
-    return "";
-  }
-  return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
-};
+const gameSetupModule = createGameSetupModule({
+  wallet,
+  getTokenManager: () => tokenManager,
+  getDefaultTokenMetadata,
+  getContractMinimumAmount: (tokenMint, decimalsHint) =>
+    getContractMinimumAmount(tokenMint, decimalsHint),
+  fetchTokenPriceUSD: (params) => fetchTokenPriceUSD(params),
+  createAmountSelectionKeyboard,
+  getSuggestedStakeAmounts,
+  getGameSetupSession,
+  upsertGameSetupSession,
+  clearGameSetupSession,
+  safeAnswerCallbackQuery,
+  getTelegramId,
+  getTelegramIdString,
+});
 
-type GameSetupCopy = {
-  gameType: "coinflip" | "giveaway";
-  heading: string;
-  amountPrompt: string;
-  suggestionLabel?: string;
-  lowBalanceCopy?: {
-    object: string;
-  };
-  logPrefix: string;
-};
+const {
+  startInteractiveGameSetup,
+  resolveCommandTokenOverride: resolveGameCommandTokenOverride,
+  withCreatorContext,
+  __test_startInteractiveGameSetup: startInteractiveGameSetupTest,
+} = gameSetupModule;
 
-const GAME_SETUP_COPY: Record<"coinflip" | "giveaway", GameSetupCopy> = {
-  coinflip: {
-    gameType: "coinflip",
-    heading: "🪙 <b>Create Coinflip</b>",
-    amountPrompt: "Select stake per player:",
-    lowBalanceCopy: {
-      object: "stake per player",
-    },
-    logPrefix: "🪙",
+export const __test_startInteractiveGameSetup = startInteractiveGameSetupTest;
+
+const gameCommandsModule = createGameCommandsModule({
+  parseAmount: (args, index, chatId) =>
+    tokenManager.parseAmount(args, index, chatId),
+  inferMaxPlayers,
+  wallet: {
+    getTokenBalance: (telegramId, mint, options) =>
+      wallet.getTokenBalance(telegramId, mint, options),
+    getTokenMetadata: (mint) => wallet.getTokenMetadata(mint),
+    formatTokenBalance: (amount, decimals) =>
+      wallet.formatTokenBalance(amount, decimals),
+    getBalance: (telegramId) => wallet.getBalance(telegramId),
+    formatSolBalance: (lamports) => wallet.formatSolBalance(lamports),
   },
-  giveaway: {
-    gameType: "giveaway",
-    heading: "🎁 <b>Create Giveaway</b>",
-    amountPrompt: "Select prize amount:",
-    lowBalanceCopy: {
-      object: "prize amount",
-    },
-    logPrefix: "🎁",
+  getContractMinimumAmount: (tokenMint, decimalsHint) =>
+    getContractMinimumAmount(tokenMint, decimalsHint),
+  gameManager: {
+    createGame: (...args) => gameManager.createGame(...args),
+    createGameMessage: (...args) => gameManager.createGameMessage(...args),
   },
-};
+  getOracleMaxPlayers,
+  isGroupChat,
+  startInteractiveGameSetup: (ctx, telegramId, copy, tokenOverride) =>
+    startInteractiveGameSetup(ctx, telegramId, copy, tokenOverride),
+  resolveCommandTokenOverride: (tokenInput, _chatId) =>
+    resolveGameCommandTokenOverride(tokenInput),
+  getRequiredTelegramIdForContext: (ctx, label) =>
+    getRequiredTelegramIdForContext(ctx, label),
+  gameSetupCopy: GAME_SETUP_COPY,
+});
 
-const startInteractiveGameSetup = async (
-  ctx: Context & { message?: any },
-  telegramId: bigint,
-  copy: GameSetupCopy,
-  tokenOverride?: GameTokenOverride
-): Promise<void> => {
-  console.log(`${copy.logPrefix} UI-based ${copy.gameType} creation`);
+const { createCoinflipDeps, handleGiveawayCommand, __test_createGameViaCommand } =
+  gameCommandsModule;
 
-  const tokenInfo = tokenOverride
-    ? {
-        tokenMint: tokenOverride.tokenMint,
-        tokenTicker: tokenOverride.tokenTicker,
-        decimals: tokenOverride.tokenDecimals,
-      }
-    : await resolveChatTokenInfo(ctx.chat?.id);
+export { __test_createGameViaCommand };
 
-  let userBalance = 0;
+const gameCallbacksModule = createGameCallbacksModule({
+  bot,
+  wallet,
+  getGameManager: () => gameManager,
+  gameDb,
+  wrapCallbackHandler,
+  withCreatorContext,
+  pendingGameCreations,
+  getOracleMaxPlayers,
+  getDefaultTokenMetadata: () => getDefaultTokenMetadata(),
+  getContractMinimumAmount: (tokenMint, decimalsHint) =>
+    getContractMinimumAmount(tokenMint, decimalsHint),
+  fetchTokenPriceUSD: (params) => fetchTokenPriceUSD(params),
+  getProgram: () => program,
+  validateGameTokenData: (gameData) => validateGameTokenData(gameData),
+  gameSetupCopy: GAME_SETUP_COPY,
+});
 
-  try {
-    const tokenBalance = await wallet.getTokenBalance(
-      telegramId,
-      tokenInfo.tokenMint
-    );
-    userBalance = tokenBalance / Math.pow(10, tokenInfo.decimals);
-  } catch (error) {
-    console.error("Error getting token balance:", error);
-  }
+const {
+  registerHandlers: registerGameCallbackHandlers,
+  createTextInputMiddleware: createGameSetupTextInputMiddleware,
+  __test_handleGameSetupTextInput: handleGameSetupTextInputTest,
+  __test_shouldSkipGenericGameCallback: shouldSkipGenericGameCallbackTest,
+} = gameCallbacksModule;
 
-  const { formatted: contractMin } = await getContractMinimumAmount(
-    tokenInfo.tokenMint,
-    tokenInfo.decimals
-  );
+registerGameCallbackHandlers();
 
-  const tokenPriceUSD = await fetchTokenPriceUSD({
-    tokenMint: tokenInfo.tokenMint,
-    tokenTicker: tokenInfo.tokenTicker,
-  });
+bot.use(createGameSetupTextInputMiddleware());
 
-  const suggestedAmounts = getSuggestedStakeAmounts(contractMin, userBalance);
-
-  let message = `${copy.heading}\n\n`;
-  message += `Token: <b>${tokenInfo.tokenTicker}</b>\n`;
-  message += "\n";
-
-  if (copy.lowBalanceCopy && userBalance < contractMin) {
-    const { object } = copy.lowBalanceCopy;
-    const minDisplay = formatTokenDisplay(contractMin, {
-      decimals: tokenInfo.decimals,
-    });
-    message += `⚠️ Minimum ${object}: ${minDisplay} ${tokenInfo.tokenTicker}.\n\n`;
-  }
-
-  message += copy.amountPrompt;
-
-  if (copy.suggestionLabel && suggestedAmounts.length > 0) {
-    message += `\n\n${copy.suggestionLabel}:\n`;
-    for (const amount of suggestedAmounts) {
-      const amountDisplay = formatTokenDisplay(amount, {
-        decimals: tokenInfo.decimals,
-      });
-      message += `• ${amountDisplay} ${tokenInfo.tokenTicker}`;
-      if (tokenPriceUSD) {
-        const usdFormatted = formatUsdValue(amount * tokenPriceUSD, {
-          minimumFractionDigits: 1,
-          maximumFractionDigits: 1,
-          fallback: "0.0",
-        });
-        message += ` ($${usdFormatted})`;
-      }
-      message += "\n";
-    }
-  }
-
-  const setupMessage = await ctx.reply(message, {
-    parse_mode: "HTML",
-    reply_markup: createAmountSelectionKeyboard(
-      copy.gameType,
-      userBalance,
-      getTelegramIdString(ctx),
-      contractMin,
-      {
-        decimals: tokenInfo.decimals,
-        tokenPriceUSD: tokenPriceUSD ?? undefined,
-      }
-    ),
-    reply_to_message_id: ctx.message?.message_id,
-  });
-
-  upsertGameSetupSession(`${ctx.chat?.id || 0}_${setupMessage.message_id}`, {
-    waitingFor: "setup",
-    gameType: copy.gameType,
-    userBalance,
-    messageId: setupMessage.message_id,
-    chatId: ctx.chat?.id || 0,
-    creatorId: getTelegramIdString(ctx),
-    tokenMint: tokenInfo.tokenMint,
-    tokenTicker: tokenInfo.tokenTicker,
-    tokenDecimals: tokenInfo.decimals,
-    contractMinimum: contractMin,
-  });
-};
-
-export const __test_startInteractiveGameSetup = startInteractiveGameSetup;
-
-const NUMERIC_TOKEN_CANDIDATE = /^[0-9]+(?:\.[0-9]+)?$/;
-
-const resolveCommandTokenOverride = async (
-  tokenInput: string
-): Promise<GameTokenOverride | null> => {
-  if (!tokenManager) {
-    return null;
-  }
-
-  const candidate = tokenInput.trim();
-  if (!candidate) {
-    return null;
-  }
-
-  if (NUMERIC_TOKEN_CANDIDATE.test(candidate)) {
-    return null;
-  }
-
-  try {
-    const resolved = await tokenManager.resolveSwapToken(candidate);
-    if (!resolved) {
-      return null;
-    }
-
-    const decimals = resolved.decimals;
-    if (!Number.isFinite(decimals) || decimals < 0) {
-      console.warn(
-        `⚠️ ResolveSwapToken returned invalid decimals for override ${candidate}`
-      );
-      return null;
-    }
-
-    const tokenTicker = resolved.isNativeSol ? "SOL" : resolved.token_ticker;
-
-    return {
-      tokenMint: resolved.token_mint,
-      tokenTicker,
-      tokenDecimals: decimals,
-    };
-  } catch (error) {
-    console.warn(`⚠️ Could not resolve token override ${candidate}`, error);
-    return null;
-  }
-};
-
-type TokenContext = {
-  tokenMint: string;
-  tokenTicker: string;
-  tokenDecimals: number;
-  contractMinimum?: number;
-};
-
-const buildTokenContext = async (
-  session: GameSetupSession | undefined,
-  chatId?: number
-): Promise<TokenContext> => {
-  if (session?.tokenMint) {
-    const decimals =
-      typeof session.tokenDecimals === "number"
-        ? session.tokenDecimals
-        : (await getDefaultTokenMetadata()).decimals;
-    return {
-      tokenMint: session.tokenMint,
-      tokenTicker: session.tokenTicker ?? DEFAULT_TOKEN_TICKER,
-      tokenDecimals: decimals,
-      contractMinimum: session.contractMinimum,
-    };
-  }
-
-  const resolved = await resolveChatTokenInfo(chatId);
-  return {
-    tokenMint: resolved.tokenMint,
-    tokenTicker: resolved.tokenTicker,
-    tokenDecimals: resolved.decimals,
-  };
-};
-
-type CreatorCallbackOptions = {
-  name: string;
-  resolveCreatorId: (ctx: Context) => string | undefined;
-  failureText?: string;
-};
-
-type CreatorCallbackContext = {
-  creatorId: string;
-  userId: number;
-  session?: GameSetupSession;
-  tokenContext: TokenContext;
-  updateSession: (updates: Partial<GameSetupSession>) => GameSetupSession;
-  clearSession: () => void;
-};
-
-const withCreatorContext = (
-  options: CreatorCallbackOptions,
-  handler: (ctx: Context, creatorCtx: CreatorCallbackContext) => Promise<void> | void
-) => {
-  return async (ctx: Context) => {
-    const creatorId = options.resolveCreatorId(ctx);
-    const currentUserId = getTelegramIdString(ctx);
-
-    console.log(`🔔 ${options.name} callback triggered:`, ctx.callbackQuery?.data);
-    console.log(
-      `👤 Creator: ${creatorId ?? "unknown"}, Current user: ${currentUserId ?? "unknown"}`
-    );
-
-    if (!creatorId) {
-      console.warn(`${options.name}: unable to resolve creator id from callback`);
-      await safeAnswerCallbackQuery(ctx, "❌ Unable to process action");
-      return;
-    }
-
-    if (!ensureCreator(ctx, creatorId, options.failureText)) {
-      return;
-    }
-
-    const userIdBigInt = getTelegramId(ctx);
-    if (userIdBigInt === 0n) {
-      await safeAnswerCallbackQuery(ctx, "❌ Unable to identify user");
-      return;
-    }
-
-    const userId = Number(userIdBigInt);
-    const sessionKey = `${ctx.chat?.id ?? 0}_${ctx.callbackQuery?.message?.message_id ?? 0}`;
-
-    let session = getGameSetupSession(sessionKey);
-    const tokenContext = await buildTokenContext(session, ctx.chat?.id);
-
-    const creatorContext: CreatorCallbackContext = {
-      creatorId,
-      userId,
-      session,
-      tokenContext,
-      updateSession: (updates, keyOverride?: string) => {
-        const keyToUse = keyOverride ?? sessionKey;
-        const contractMinimum =
-          updates.contractMinimum ??
-          session?.contractMinimum ??
-          tokenContext.contractMinimum;
-
-        const next = upsertGameSetupSession(keyToUse, {
-          ...updates,
-          creatorId,
-          tokenMint: tokenContext.tokenMint,
-          tokenTicker: tokenContext.tokenTicker,
-          tokenDecimals: tokenContext.tokenDecimals,
-          contractMinimum,
-        });
-
-        session = next;
-        creatorContext.session = next;
-        return next;
-      },
-      clearSession: () => {
-        clearGameSetupSession(sessionKey);
-        session = undefined;
-        creatorContext.session = undefined;
-      },
-    };
-
-    await handler(ctx, creatorContext);
-  };
-};
-
-
-const determineFractionDigits = (
-  value: string,
-  maxDecimals: number
-): number => {
-  const parts = value.split(".");
-  const fraction = parts[1] ?? "";
-  if (!fraction) {
-    return Math.min(6, maxDecimals);
-  }
-  return Math.min(fraction.length, maxDecimals, 6);
-};
-
-type GameConfirmationMessageParams = {
-  gameType: "coinflip" | "giveaway";
-  amount: string;
-  players: number;
-  tokenTicker: string;
-  tokenDecimals: number;
-};
-
-const buildGameConfirmationMessage = ({
-  gameType,
-  amount,
-  players,
-  tokenTicker,
-  tokenDecimals,
-}: GameConfirmationMessageParams): string => {
-  const parsedAmount = Number(amount);
-  const amountNumber = Number.isFinite(parsedAmount) ? parsedAmount : 0;
-  const amountSource = amount ?? amountNumber.toString();
-
-  const amountFormatted = amountNumber.toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: determineFractionDigits(
-      amountSource,
-      tokenDecimals
-    ),
-  });
-
-  const totalPot = amountNumber * players;
-  const totalPotFormatted = totalPot.toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: Math.min(tokenDecimals, 6),
-  });
-
-  const formattedGameType = toTitleCase(gameType);
-
-  return [
-    `<b>Confirm ${formattedGameType}</b>`,
-    "",
-    `Amount: <b>${amountFormatted} ${tokenTicker}</b>`,
-    `Players: <b>${players}</b>`,
-    "",
-    gameType === "coinflip"
-      ? `• Total prize pool: <b>${totalPotFormatted} ${tokenTicker}</b>`
-      : `• Prize for winner: <b>${amountFormatted} ${tokenTicker}</b>`,
-    "",
-    `⚠️ Make sure you have enough ${tokenTicker} in your wallet!`,
-    "",
-    "Ready to create this game?",
-  ].join("\n");
-};
-
-type GameConfirmMenuConfig = {
-  menu: {
-    parseMode: "HTML";
-    keyboard: InlineKeyboard;
-  };
-  replyMarkup: {
-    parse_mode: "HTML";
-    reply_markup: InlineKeyboard;
-  };
-};
-
-const buildGameConfirmMenuConfig = ({
-  gameType,
-  amount,
-  players,
-  creatorId,
-}: {
-  gameType: "coinflip" | "giveaway";
-  amount: string;
-  players: number;
-  creatorId?: string;
-}): GameConfirmMenuConfig => {
-  const keyboard = createGameConfirmKeyboard(
-    gameType,
-    amount,
-    players.toString(),
-    creatorId
-  );
-
-  return {
-    menu: {
-      parseMode: "HTML",
-      keyboard,
-    },
-    replyMarkup: {
-      parse_mode: "HTML",
-      reply_markup: keyboard,
-    },
-  };
-};
+export const __test_handleGameSetupTextInput = handleGameSetupTextInputTest;
+export const __test_shouldSkipGenericGameCallback =
+  shouldSkipGenericGameCallbackTest;
 
 const getPlayerData = async (
   telegramId: bigint,
@@ -2143,16 +1413,6 @@ const replyUsageError = async (
   return replyToMessage(ctx, message);
 };
 
-const handleCallbackError = async (
-  ctx: any,
-  error: any,
-  action: string
-): Promise<void> => {
-  await handleCallbackErrorSafe(ctx, error, action, {
-    maxLength: 180,
-  });
-};
-
 // ================================
 // ANCHOR SETUP
 // ================================
@@ -2263,7 +1523,7 @@ const checkOracleStatus = async () => {
 /**
  * Get the actual minimum amount from the smart contract for a specific token.
  */
-export const getContractMinimumAmount = async (
+export let getContractMinimumAmount = async (
   tokenMint: string = DEFAULT_TOKEN_MINT,
   decimalsHint?: number
 ): Promise<{ formatted: number; raw: number; decimals: number }> => {
@@ -2344,291 +1604,11 @@ const checkGameTokenStatus = async () => {
   }
 };
 
-// ================================
-// BOT COMMANDS
-// ================================
-
-export type CreateGameViaCommandOptions = {
-  gameType: "coinflip" | "giveaway";
-  usageMessage: string;
-  defaultMaxPlayers: number;
-  minPlayers: number;
-  getMaxPlayers: () => number;
-  timeoutSeconds: number;
-  gameLabel: string;
-  inferErrorLabel: string;
-  logPrefix: string;
-  errorMessage: string;
-};
-
-const COINFLIP_COMMAND_OPTIONS: CreateGameViaCommandOptions = {
-  gameType: "coinflip",
-  usageMessage:
-    "❌ Please provide a valid amount greater than 0.\n\nUsage: <code>/cf &lt;amount&gt;</code> or <code>/cf &lt;amount&gt; &lt;maxPlayers&gt;</code>",
-  defaultMaxPlayers: 2,
-  minPlayers: 2,
-  getMaxPlayers: () => getOracleMaxPlayers(),
-  timeoutSeconds: 60 * 60,
-  gameLabel: "Coinflip",
-  inferErrorLabel: "Coinflip",
-  logPrefix: "🪙",
-  errorMessage: "❌ Error creating coinflip game. Please try again.",
-};
-
-const GIVEAWAY_COMMAND_OPTIONS: CreateGameViaCommandOptions = {
-  gameType: "giveaway",
-  usageMessage:
-    "❌ Please provide a valid amount greater than 0.\n\nUsage: <code>/ga &lt;amount&gt;</code> or <code>/ga &lt;amount&gt; &lt;maxPlayers&gt;</code>",
-  defaultMaxPlayers: 10,
-  minPlayers: 1,
-  getMaxPlayers: () => getOracleMaxPlayers(),
-  timeoutSeconds: 60 * 60,
-  gameLabel: "Giveaway",
-  inferErrorLabel: "Giveaway",
-  logPrefix: "🎁",
-  errorMessage: "❌ Error creating giveaway game. Please try again.",
-};
-
-type CreateGameViaCommandDeps = {
-  parseAmount: (
-    args: string[],
-    amountArgIndex: number,
-    chatId?: number
-  ) => Promise<import("./types").ParseAmountResult>;
-  inferMaxPlayers: typeof inferMaxPlayers;
-  wallet: {
-    getTokenBalance: (
-      telegramId: bigint,
-      mint: string,
-      options?: { createIfMissing?: boolean }
-    ) => Promise<number>;
-    getTokenMetadata: (
-      mint: string
-    ) => Promise<{ decimals: number }>;
-    formatTokenBalance: (amount: number, decimals: number) => string;
-    getBalance: (telegramId: bigint) => Promise<number>;
-    formatSolBalance: (lamports: number) => string;
-  };
-  getContractMinimumAmount: typeof getContractMinimumAmount;
-  gameManager: {
-    createGame: (
-      ...args: Parameters<GameManager["createGame"]>
-    ) => ReturnType<GameManager["createGame"]>;
-    createGameMessage: (
-      ...args: Parameters<GameManager["createGameMessage"]>
-    ) => ReturnType<GameManager["createGameMessage"]>;
-  };
-};
-
-const defaultCreateGameViaCommandDeps = (): CreateGameViaCommandDeps => ({
-  parseAmount: (args, index, chatId) =>
-    tokenManager.parseAmount(args, index, chatId),
-  inferMaxPlayers,
-  wallet: {
-    getTokenBalance: (telegramId, mint, options) =>
-      wallet.getTokenBalance(telegramId, mint, options),
-    getTokenMetadata: (mint) => wallet.getTokenMetadata(mint),
-    formatTokenBalance: (amount, decimals) =>
-      wallet.formatTokenBalance(amount, decimals),
-    getBalance: (telegramId) => wallet.getBalance(telegramId),
-    formatSolBalance: (lamports) => wallet.formatSolBalance(lamports),
-  },
-  getContractMinimumAmount,
-  gameManager: {
-    createGame: (...args) => gameManager.createGame(...args),
-    createGameMessage: (...args) => gameManager.createGameMessage(...args),
-  },
-});
-
-const createGameViaCommand = async (
-  ctx: Context & { message?: any },
-  args: string[],
-  telegramId: bigint,
-  options: CreateGameViaCommandOptions,
-  deps: CreateGameViaCommandDeps = defaultCreateGameViaCommandDeps()
-): Promise<void> => {
-  console.log(`${options.logPrefix} Command-based ${options.gameType} creation:`, args);
-
-  try {
-    const parsed = await deps.parseAmount(args, 1, ctx.chat?.id);
-    if (!parsed.success) {
-      await ctx.reply(
-        formatParseAmountError(parsed, options.usageMessage),
-        { parse_mode: "HTML" }
-      );
-      return;
-    }
-
-    const parsedAmount = parsed.data;
-    const maxPlayersLimit = Math.max(
-      options.minPlayers,
-      options.getMaxPlayers()
-    );
-    const defaultMaxPlayers = Math.min(
-      options.defaultMaxPlayers,
-      maxPlayersLimit
-    );
-    const inferred = deps.inferMaxPlayers(
-      args,
-      1,
-      parsedAmount.tokenWasSpecified,
-      defaultMaxPlayers,
-      options.minPlayers,
-      maxPlayersLimit
-    );
-
-    if (!inferred.ok) {
-      await ctx.reply(`❌ ${options.inferErrorLabel} ${inferred.error}`);
-      return;
-    }
-
-    const maxPlayers = inferred.value;
-    const tokenMetadata = await deps.wallet.getTokenMetadata(
-      parsedAmount.tokenMint
-    );
-    const { raw: minAmountRaw } = await deps.getContractMinimumAmount(
-      parsedAmount.tokenMint,
-      tokenMetadata.decimals
-    );
-
-    if (parsedAmount.amount < minAmountRaw) {
-      const formattedMinimum = deps.wallet.formatTokenBalance(
-        minAmountRaw,
-        tokenMetadata.decimals
-      );
-      await ctx.reply(
-        `❌ Amount below contract minimum of ${formattedMinimum} ${parsedAmount.tokenTicker}.`
-      );
-      return;
-    }
-
-    const needsNativeSolCheck =
-      parsedAmount.requestedNativeSol === true ||
-      parsedAmount.tokenMint === WSOL_MINT;
-    let nativeSolBalance = 0;
-    let userBalance: number;
-
-    if (needsNativeSolCheck) {
-      const [tokenBalance, solBalance] = await Promise.all([
-        deps.wallet.getTokenBalance(telegramId, parsedAmount.tokenMint),
-        deps.wallet.getBalance(telegramId),
-      ]);
-      userBalance = tokenBalance;
-      nativeSolBalance = solBalance;
-    } else {
-      userBalance = await deps.wallet.getTokenBalance(
-        telegramId,
-        parsedAmount.tokenMint
-      );
-    }
-
-    if (!needsNativeSolCheck && userBalance < parsedAmount.amount) {
-      const formatted = deps.wallet.formatTokenBalance(
-        userBalance,
-        tokenMetadata.decimals
-      );
-      await ctx.reply(
-        `❌ Insufficient balance. You have ${formatted} ${parsedAmount.tokenTicker}, need ${parsedAmount.formattedAmount}.`
-      );
-      return;
-    }
-
-    if (needsNativeSolCheck) {
-      const totalLamports = userBalance + nativeSolBalance;
-      if (totalLamports < parsedAmount.amount) {
-        const formattedSol = deps.wallet.formatSolBalance(nativeSolBalance);
-        const formattedToken = deps.wallet.formatTokenBalance(
-          userBalance,
-          tokenMetadata.decimals
-        );
-        const wrappedLabel =
-          parsedAmount.tokenMint === WSOL_MINT
-            ? "wrapped SOL"
-            : parsedAmount.tokenTicker;
-        await ctx.reply(
-          `❌ Insufficient balance. You have ${formattedSol} SOL available natively and ${formattedToken} ${wrappedLabel}, need ${parsedAmount.formattedAmount}.`
-        );
-        return;
-      }
-    }
-
-    const tokenTickerForGame =
-      parsedAmount.tokenMint === WSOL_MINT ? "WSOL" : parsedAmount.tokenTicker;
-
-    const gameResult = await deps.gameManager.createGame(
-      options.gameType,
-      {
-        amount: parsedAmount.amount,
-        tokenMint: parsedAmount.tokenMint,
-        tokenTicker: tokenTickerForGame,
-        isSol: parsedAmount.isSol,
-        requestedNativeSol: parsedAmount.requestedNativeSol,
-      },
-      maxPlayers,
-      options.minPlayers,
-      options.timeoutSeconds,
-      telegramId,
-      ctx.chat?.id || 0
-    );
-
-    if (!gameResult.success) {
-      await ctx.reply(`❌ Failed to create game: ${gameResult.error}`);
-      return;
-    }
-
-    if (gameResult.autoJoinResult && !gameResult.autoJoinResult.success) {
-      await ctx.reply(
-        gameResult.autoJoinResult.error || "Failed to auto-join game",
-        { parse_mode: "HTML" }
-      );
-    }
-
-    const creatorUsername = ctx.from?.username
-      ? `@${ctx.from.username}`
-      : ctx.from?.first_name || "Unknown";
-
-    await deps.gameManager.createGameMessage(
-      ctx,
-      gameResult.gameAddress!,
-      options.gameLabel,
-      parsedAmount.amount,
-      creatorUsername,
-      tokenTickerForGame,
-      "Active"
-    );
-  } catch (error) {
-    console.error(`Error in command-based ${options.gameType}:`, error);
-    await ctx.reply(options.errorMessage);
-  }
-};
-
-export const __test_createGameViaCommand = createGameViaCommand;
-
 const createBalanceDeps = (): BalanceDeps => ({
   isPrivateChat,
   clearWalletCache,
   showWalletUI,
   handleCommandError,
-});
-
-const createCoinflipDeps = (): CoinflipDeps => ({
-  isGroupChat,
-  showInteractiveSetup: (ctxWithMessage, telegramId, tokenOverride) =>
-    startInteractiveGameSetup(
-      ctxWithMessage,
-      telegramId,
-      GAME_SETUP_COPY.coinflip,
-      tokenOverride
-    ),
-  createGameViaCommand: (ctxWithMessage, args, telegramId) =>
-    createGameViaCommand(
-      ctxWithMessage,
-      args,
-      telegramId,
-      COINFLIP_COMMAND_OPTIONS
-    ),
-  resolveTokenOverride: (tokenInput) =>
-    resolveCommandTokenOverride(tokenInput),
 });
 
 bot.command(["start", "balance"], async (ctx: Context) => {
@@ -2653,57 +1633,7 @@ bot.command(["coinflip", "cf"], async (ctx) => {
 });
 
 bot.command(["giveaway", "ga"], async (ctx) => {
-  try {
-    if (ctx.chat?.type !== "group" && ctx.chat?.type !== "supergroup") {
-      return ctx.reply("❌ Giveaway games can only be created in groups!");
-    }
-
-    const telegramId = await getRequiredTelegramIdForContext(
-      ctx,
-      "giveaway command"
-    );
-    if (telegramId == null) {
-      return;
-    }
-    const args = ctx.message?.text?.split(" ");
-    const tokenCandidate = args?.[1]?.trim();
-
-    if (!args || args.length < 2) {
-      await startInteractiveGameSetup(
-        ctx as Context & { message?: any },
-        telegramId,
-        GAME_SETUP_COPY.giveaway
-      );
-      return;
-    }
-
-    if (args.length === 2 && tokenCandidate) {
-      let tokenOverride: GameTokenOverride | null = null;
-      if (!NUMERIC_TOKEN_CANDIDATE.test(tokenCandidate)) {
-        tokenOverride = await resolveCommandTokenOverride(tokenCandidate);
-      }
-
-      if (tokenOverride) {
-        await startInteractiveGameSetup(
-          ctx as Context & { message?: any },
-          telegramId,
-          GAME_SETUP_COPY.giveaway,
-          tokenOverride
-        );
-        return;
-      }
-    }
-
-    await createGameViaCommand(
-      ctx as Context & { message?: any },
-      args,
-      telegramId,
-      GIVEAWAY_COMMAND_OPTIONS
-    );
-  } catch (error) {
-    console.error("Error in giveaway command:", error);
-    await ctx.reply("❌ Error setting up giveaway game. Please try again.");
-  }
+  await handleGiveawayCommand(ctx as Context & { message?: any });
 });
 
 // ================================
@@ -3445,70 +2375,8 @@ bot.command("oracle", async (ctx: Context) => {
   }
 });
 
-// ================================
-// CALLBACK QUERY HANDLING
-// ================================
 
-type CallbackHandler<TCtx extends Context = any> = (
-  ctx: TCtx,
-  next: NextFunction
-) => Promise<void> | void;
 
-const wrapCallbackHandler = <TCtx extends Context>(
-  handler: CallbackHandler<TCtx>,
-  options: { action?: string; errorAck?: string } = {}
-) => {
-  return async (ctx: TCtx, next: NextFunction) => {
-    try {
-      await handler(ctx, next);
-    } catch (error) {
-      const fallbackAction = handler.name || "callback handler";
-      const actionLabel =
-        options.action ?? ctx.callbackQuery?.data ?? fallbackAction;
-      if (options.errorAck) {
-        console.error(`Error in ${actionLabel}:`, error);
-        await safeAnswerCallbackQuery(ctx, options.errorAck);
-      } else {
-        await handleCallbackErrorSafe(ctx, error, actionLabel);
-      }
-    }
-  };
-};
-
-const handleRefreshGameCallback = async (
-  ctx: any,
-  gamePda: PublicKey,
-  gameAddress: string
-): Promise<void> => {
-  const gameData = gameDb.getGame(gameAddress);
-  const validation = validateGameTokenData(gameData);
-
-  if (!validation.isValid) {
-    await safeAnswerCallbackQuery(ctx, validation.error!);
-    return;
-  }
-
-  if (gameData!.status === "completed") {
-    await safeAnswerCallbackQuery(ctx, "This game has already been completed!");
-    return;
-  }
-
-  try {
-    // Verify game still exists on blockchain
-    await program.account.game.fetch(gamePda);
-
-    await gameManager.updateGameMessageFromData(ctx, gameAddress, "Active");
-
-    await safeAnswerCallbackQuery(ctx, "Game status refreshed!");
-  } catch (error: any) {
-    if ((error as Error).message?.includes("Account does not exist")) {
-      await safeAnswerCallbackQuery(ctx, "This game is no longer active!");
-    } else {
-      console.error(`Error refreshing game ${gameAddress}:`, error);
-      await safeAnswerCallbackQuery(ctx, "Error refreshing game status!");
-    }
-  }
-};
 
 const handlePlayerEvent = async (
   event: PlayerEvent,
@@ -3580,1366 +2448,11 @@ const handlePlayerEvent = async (
   }
 };
 
-bot.on("callback_query", async (ctx, next) => {
-  const callbackData = ctx.callbackQuery.data;
-  console.log("📢 Generic callback handler received:", callbackData);
-
-  if (!callbackData || !ctx.from) return;
-
-  // Skip non-game callbacks (let them be handled by specific handlers)
-  if (shouldSkipGenericGameCallback(callbackData)) {
-    console.log("🔄 Calling next() for non-game callback:", callbackData);
-    return await next(); // Pass to specific handlers
-  }
-
-  const splitData = callbackData.split("_");
-  if (splitData.length < 2) return;
-
-  const [action, gameAddress] = splitData;
-  if (!action || !gameAddress) return;
-
-  const game = gameDb.getGame(gameAddress);
-  if (!game) {
-    await safeAnswerCallbackQuery(ctx, "Game not found!");
-    return;
-  }
-
-  // Check if the game is completed before allowing any actions
-  if (game.status === "completed") {
-    await handleCompletedGameCallback(ctx, game);
-    return;
-  }
-
-  try {
-    const telegramId = await getRequiredTelegramIdForContext(
-      ctx,
-      "game callback"
-    );
-    if (telegramId == null) {
-      await safeAnswerCallbackQuery(
-        ctx,
-        "Unable to identify user. Please try again."
-      );
-      return;
-    }
-
-    const gamePda = new PublicKey(gameAddress);
-    const playerKp = wallet.getKeyPair(telegramId);
-
-    switch (action) {
-      case "join":
-        await handleJoinGame(ctx, gamePda, playerKp, telegramId, game);
-        break;
-      case "refresh":
-        await handleRefreshGameCallback(ctx, gamePda, gameAddress);
-        break;
-    }
-  } catch (error: any) {
-    await handleCallbackError(ctx, error, action);
-  }
-});
-
-const handleCompletedGameCallback = async (ctx: any, game: any) => {
-  try {
-    const gameData = gameDb.getGame(game.game_address);
-
-    if (gameData) {
-      await gameManager.updateGameMessageFromData(
-        ctx,
-        game.game_address,
-        "Completed",
-        gameData.winner_address || undefined
-      );
-
-      const statusMessage =
-        gameData.winner_address === "cancelled" ? "cancelled" : "completed";
-      await safeAnswerCallbackQuery(ctx, `Game ${statusMessage} - message updated!`);
-    } else {
-      // Game data not found in database - game may have been cleaned up
-      console.warn(`Game data not found for ${game.game_address}`);
-      await safeAnswerCallbackQuery(ctx,
-        "Game data not found - game may have been completed"
-      );
-    }
-  } catch (error) {
-    console.error("Error updating completed game message:", error);
-    await safeAnswerCallbackQuery(ctx, "Failed to update game message");
-  }
-};
-
-const handleJoinGame = async (
-  ctx: any,
-  gamePda: PublicKey,
-  _playerKp: any,
-  telegramId: bigint,
-  game: any
-) => {
-  // Validate game status before attempting to join
-  if (game.status !== "active") {
-    await safeAnswerCallbackQuery(ctx, "This game is no longer active!");
-    return;
-  }
-
-  try {
-    const result = await gameManager.joinGame(
-      game.game_address,
-      telegramId,
-      ctx.chat?.id
-    );
-
-    if (!result.success) {
-      const errorMessage = result.error || "Failed to join game";
-
-      if (errorMessage.includes("already completed")) {
-        try {
-          await gameManager.updateGameMessageFromData(
-            ctx,
-            game.game_address,
-            "Completed"
-          );
-        } catch (updateError) {
-          console.error(
-            `Error syncing completed game message for ${game.game_address}:`,
-            updateError
-          );
-        }
-      }
-
-      await safeAnswerCallbackQuery(ctx, errorMessage);
-      return;
-    }
-
-    // Update game message after successful join
-    await gameManager.updateGameMessageFromData(
-      ctx,
-      game.game_address,
-      "Active"
-    );
-
-    // Send join notification (commented out to prevent duplicate messages)
-    // const joinerUsername =
-    //   ctx.from?.username || ctx.from?.first_name || "Player";
-    // const updatedGameAccount = await program.account.game.fetch(gamePda);
-    // const ticketCount = updatedGameAccount.ticketsCount;
-    // const maxTickets = updatedGameAccount.maxTickets;
-    // const gameTypeKeys = Object.keys(updatedGameAccount.gameType);
-    // const gameName = gameTypeKeys[0] || "game";
-
-    // const gameMessage = gameManager.getActiveGameMessage(game.game_address);
-    // await ctx.reply(
-    //   `🎮 @${joinerUsername} joined the ${gameName}! (${ticketCount}/${maxTickets} tickets)`,
-    //   {
-    //     parse_mode: "HTML",
-    //     reply_to_message_id: gameMessage?.messageId,
-    //   }
-    // );
-
-    // Just show callback confirmation instead
-    const updatedGameAccount = await program.account.game.fetch(gamePda);
-    const ticketCount = updatedGameAccount.ticketsCount;
-    const maxTickets = updatedGameAccount.maxTickets;
-    await safeAnswerCallbackQuery(ctx, `✅ Joined! (${ticketCount}/${maxTickets})`);
-  } catch (error: any) {
-    // Handle specific case where account doesn't exist (game was completed/cancelled)
-    if ((error as Error).message?.includes("Account does not exist")) {
-      await safeAnswerCallbackQuery(ctx, "This game is no longer active!");
-    } else {
-      // Re-throw the error to be handled by the outer catch block
-      throw error;
-    }
-  }
-};
-
-// ================================
-// GAME SETUP CALLBACK HANDLERS
-// ================================
-
-
-
-// Amount selection callbacks (new format with creatorId)
-bot.callbackQuery(
-  /^amount_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)$/,
-  wrapCallbackHandler(
-    withCreatorContext(
-      {
-        name: "amount",
-        resolveCreatorId: (ctx) => ctx.match?.[3],
-        failureText: "🚫 Only the game creator can modify this game setup!",
-      },
-      async (ctx, { session, tokenContext, updateSession, creatorId }) => {
-        const gameType = ctx.match![1] as string;
-        const amount = ctx.match![2] as string;
-
-        const amountNumber = Number(amount);
-        const formattedAmount = amountNumber.toLocaleString("en-US", {
-          minimumFractionDigits: 0,
-          maximumFractionDigits: determineFractionDigits(
-            amount,
-            tokenContext.tokenDecimals
-          ),
-        });
-
-        const formattedGameType = toTitleCase(gameType);
-
-        const playerMessage = [
-          `<b>${formattedGameType} - Choose Players</b>`,
-          "",
-          `Amount: <b>${formattedAmount} ${tokenContext.tokenTicker}</b>`,
-          "",
-          "Select the number of players:",
-          "",
-          gameType === "coinflip"
-            ? "• All players compete for the total stakes"
-            : "• More players = higher chance for everyone",
-          "",
-          "Choose number of players:",
-        ].join("\n");
-
-        await respondWithMenu(ctx, {
-          text: playerMessage,
-          parseMode: "HTML",
-          keyboard: createPlayerSelectionKeyboard(gameType, amount, creatorId),
-        });
-
-        updateSession({
-          waitingFor: "setup",
-          gameType,
-          userBalance: session?.userBalance ?? 0,
-          messageId:
-            ctx.callbackQuery?.message?.message_id ?? session?.messageId,
-          chatId: ctx.chat?.id ?? session?.chatId ?? 0,
-          amount,
-        });
-
-        await safeAnswerCallbackQuery(ctx);
-      }
-    ),
-    { action: "amount", errorAck: "❌ Error selecting amount" }
-  )
-);
-
-
-// Player selection callbacks (new format with creatorId)
-bot.callbackQuery(
-  /^players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/,
-  wrapCallbackHandler(
-    withCreatorContext(
-      {
-        name: "players",
-        resolveCreatorId: (ctx) => ctx.match?.[4],
-        failureText: "🚫 Only the game creator can modify this game setup!",
-      },
-      async (ctx, { session, tokenContext, updateSession, creatorId }) => {
-        const gameType = ctx.match![1] as string;
-        const amount = ctx.match![2] as string;
-        const players = ctx.match![3] as string;
-
-        const playersCount = parseInt(players, 10);
-        const confirmMessage = buildGameConfirmationMessage({
-          gameType: gameType as "coinflip" | "giveaway",
-          amount,
-          players: playersCount,
-          tokenTicker: tokenContext.tokenTicker,
-          tokenDecimals: tokenContext.tokenDecimals,
-        });
-
-        const confirmMenu = buildGameConfirmMenuConfig({
-          gameType: gameType as "coinflip" | "giveaway",
-          amount,
-          players: playersCount,
-          creatorId,
-        });
-
-        await respondWithMenu(ctx, {
-          text: confirmMessage,
-          ...confirmMenu.menu,
-        });
-
-        updateSession({
-          waitingFor: "setup",
-          gameType,
-          userBalance: session?.userBalance ?? 0,
-          messageId:
-            ctx.callbackQuery?.message?.message_id ?? session?.messageId,
-          chatId: ctx.chat?.id ?? session?.chatId ?? 0,
-          amount,
-        });
-
-        await safeAnswerCallbackQuery(ctx);
-      }
-    ),
-    { action: "players", errorAck: "❌ Error selecting players" }
-  )
-);
-
-
-// Game creation confirmation (new format with creatorId)
-bot.callbackQuery(
-  /^confirm_game_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/,
-  withCreatorContext(
-    {
-      name: "confirm_game",
-      resolveCreatorId: (ctx) => ctx.match?.[4],
-      failureText: "🚫 Only the game creator can create this game!",
-    },
-    async (ctx, { userId, tokenContext, clearSession }) => {
-      let confirmMessageMissing = false;
-      const confirmationFallbackReplyTo =
-        ctx.callbackQuery?.message?.reply_to_message?.message_id ??
-        ctx.message?.message_id ??
-        undefined;
-
-      try {
-        const gameType = ctx.match![1] as "coinflip" | "giveaway";
-        const amount = parseFloat(ctx.match![2] as string);
-        const maxPlayers = parseInt(ctx.match![3] as string);
-        const minPlayers = gameType === "coinflip" ? 2 : 1;
-        const maxPlayersLimit = Math.max(
-          minPlayers,
-          getOracleMaxPlayers()
-        );
-        if (
-          isNaN(maxPlayers) ||
-          maxPlayers < minPlayers ||
-          maxPlayers > maxPlayersLimit
-        ) {
-          await safeAnswerCallbackQuery(ctx,
-            `❌ Players must be between ${minPlayers} and ${maxPlayersLimit}`
-          );
-          return;
-        }
-
-        const confirmMessage = ctx.callbackQuery?.message;
-        const chatId = confirmMessage?.chat?.id;
-        const messageId = confirmMessage?.message_id;
-        const creationKey =
-          chatId && messageId
-            ? `${chatId}:${messageId}`
-            : `${userId}:${gameType}:${amount}:${maxPlayers}`;
-
-        if (pendingGameCreations.has(creationKey)) {
-          await safeAnswerCallbackQuery(ctx, "⏳ Already creating this game...");
-          return;
-        }
-
-        pendingGameCreations.add(creationKey);
-
-        try {
-          if (chatId && messageId && !confirmMessageMissing) {
-            try {
-              await ctx.api.editMessageReplyMarkup(chatId, messageId);
-            } catch (markError) {
-              console.warn(
-                "Failed to clear confirm keyboard before game creation:",
-                markError
-              );
-              if (isMessageMissing(markError)) {
-                confirmMessageMissing = true;
-              }
-            }
-
-            if (!confirmMessageMissing) {
-              try {
-                await ctx.api.editMessageText(
-                  chatId,
-                  messageId,
-                  "⏳ Creating game…",
-                  {
-                    parse_mode: "HTML",
-                  }
-                );
-              } catch (textError) {
-                console.warn(
-                  "Failed to set progress text before game creation:",
-                  textError
-                );
-                if (isMessageMissing(textError)) {
-                  confirmMessageMissing = true;
-                }
-              }
-            }
-          }
-
-          await safeAnswerCallbackQuery(ctx, "Creating game...");
-
-          const decimals = tokenContext.tokenDecimals;
-          const amountRaw = Math.round(amount * Math.pow(10, decimals));
-          const gameData = {
-            amount: amountRaw,
-            isSol: false,
-            formattedAmount: amount.toString(),
-            tokenMint: tokenContext.tokenMint,
-            tokenTicker: tokenContext.tokenTicker,
-            tokenWasSpecified: tokenContext.tokenMint !== DEFAULT_TOKEN_MINT,
-          };
-
-          const result = await gameManager.createGame(
-            gameType,
-            gameData,
-            maxPlayers,
-            gameType === "coinflip" ? 2 : 1,
-            GAME_TIMEOUT,
-            getTelegramId(ctx),
-            ctx.chat?.id
-          );
-
-          if (!result.success) {
-            await respondWithMenu(
-              ctx,
-              {
-                text: `❌ ${result.error || "Failed to create game"}`,
-                parseMode: "HTML",
-              },
-              {
-                allowContextEdit: !confirmMessageMissing,
-                skipEdit: confirmMessageMissing,
-                replyToMessageId: confirmMessageMissing
-                  ? confirmationFallbackReplyTo
-                  : undefined,
-                logLabel: "confirm_game_error",
-              }
-            );
-            return;
-          }
-
-          if (!result.gameAddress) {
-            await respondWithMenu(
-              ctx,
-              {
-                text: "❌ Game created but address not returned",
-                parseMode: "HTML",
-              },
-              {
-                allowContextEdit: !confirmMessageMissing,
-                skipEdit: confirmMessageMissing,
-                replyToMessageId: confirmMessageMissing
-                  ? confirmationFallbackReplyTo
-                  : undefined,
-                logLabel: "confirm_game_missing_address",
-              }
-            );
-            return;
-          }
-
-          const creatorUsername = ctx.from?.username
-            ? `@${ctx.from.username}`
-            : "Unknown";
-
-          const replyToUserMessageId = (ctx.callbackQuery as any)?.message
-            ?.reply_to_message?.message_id as number | undefined;
-
-          if (chatId && messageId && !confirmMessageMissing) {
-            try {
-              await ctx.api.deleteMessage(chatId, messageId);
-            } catch (e) {
-              console.warn("Could not delete confirmation message:", e);
-              if (isMessageMissing(e)) {
-                confirmMessageMissing = true;
-              } else {
-                try {
-                  await ctx.api.editMessageText(
-                    chatId,
-                    messageId,
-                    `✅ Game created!\n\n<code>${result.gameAddress}</code>`,
-                    {
-                      parse_mode: "HTML",
-                    }
-                  );
-                } catch (fallbackError) {
-                  console.warn(
-                    "Failed to mark confirmation message as processed:",
-                    fallbackError
-                  );
-                  if (isMessageMissing(fallbackError)) {
-                    confirmMessageMissing = true;
-                  }
-                }
-              }
-            }
-          }
-
-          await gameManager.createGameMessage(
-            ctx,
-            result.gameAddress,
-            gameType.charAt(0).toUpperCase() + gameType.slice(1),
-            gameData.amount,
-            creatorUsername,
-            gameData.tokenTicker,
-            "Active",
-            replyToUserMessageId
-          );
-
-          clearSession();
-
-          if (result.autoJoinResult?.success) {
-            try {
-              await gameManager.updateGameMessageFromData(
-                ctx,
-                result.gameAddress,
-                "Active"
-              );
-            } catch (error) {
-              console.error(
-                "Failed to update game message after auto-join:",
-                error
-              );
-            }
-          }
-
-          if (result.autoJoinResult && !result.autoJoinResult.success) {
-            await ctx.reply(
-              result.autoJoinResult.error || "Failed to auto-join game",
-              {
-                parse_mode: "HTML",
-              }
-            );
-          }
-        } finally {
-          pendingGameCreations.delete(creationKey);
-        }
-      } catch (error) {
-        console.error("Error in confirm_game callback:", error);
-        try {
-          await safeAnswerCallbackQuery(ctx, "❌ Error creating game");
-        } catch (answerError) {
-          console.error("Failed to answer callback after error:", answerError);
-        }
-
-        try {
-          await respondWithMenu(
-            ctx,
-            {
-              text: "❌ Failed to create game. Please try again.",
-              parseMode: "HTML",
-            },
-            {
-              allowContextEdit: !confirmMessageMissing,
-              skipEdit: confirmMessageMissing,
-              replyToMessageId: confirmMessageMissing
-                ? confirmationFallbackReplyTo
-                : undefined,
-              logLabel: "confirm_game_failure_notice",
-            }
-          );
-        } catch (notifyError) {
-          console.error(
-            "Failed to update confirmation message after error:",
-            notifyError
-          );
-        }
-      }
-    }
-  )
-);
-
-
-// Custom amount callback - prompts user to type amount (new format with creator ID)
-bot.callbackQuery(
-  /^custom_amount_(coinflip|giveaway)_(\d+)$/,
-  withCreatorContext(
-    {
-      name: "custom_amount",
-      resolveCreatorId: (ctx) => ctx.match?.[2],
-      failureText: "❌ Only the game creator can modify this setup!",
-    },
-    async (ctx, { session, tokenContext, updateSession, creatorId }) => {
-      try {
-        const gameType = ctx.match![1] as string;
-        const telegramId = await getRequiredTelegramIdForContext(
-          ctx,
-          "type amount prompt"
-        );
-        if (telegramId == null) {
-          await safeAnswerCallbackQuery(ctx, "Unable to identify user");
-          return;
-        }
-
-        let userBalance =
-          session?.userBalance && session.userBalance > 0
-            ? session.userBalance
-            : 0;
-        if (userBalance <= 0) {
-          try {
-            const tokenBalance = await wallet.getTokenBalance(
-              telegramId,
-              tokenContext.tokenMint
-            );
-            userBalance =
-              tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
-          } catch (error) {
-            console.error("Error getting balance:", error);
-          }
-        }
-
-        const { formatted: contractMin } =
-          tokenContext.contractMinimum !== undefined
-            ? { formatted: tokenContext.contractMinimum }
-            : await getContractMinimumAmount(
-                tokenContext.tokenMint,
-                tokenContext.tokenDecimals
-              );
-
-        const formattedGameType = toTitleCase(gameType);
-
-        const typeMessage = [
-          `✏️ <b>Type Custom Amount - ${formattedGameType}</b>`,
-          "",
-          `💰 Your balance: <b>${userBalance.toFixed(
-            Math.min(4, tokenContext.tokenDecimals)
-          )} ${tokenContext.tokenTicker}</b>`,
-          "",
-          "Please type the amount you want to use.",
-          "",
-          "<b>Example:</b>",
-          `• Type: <code>75</code> for 75 ${tokenContext.tokenTicker}`,
-          `• Type: <code>150.5</code> for 150.5 ${tokenContext.tokenTicker}`,
-          "",
-          `Min: ${contractMin} ${tokenContext.tokenTicker} • Max: ${userBalance.toFixed(
-            Math.min(2, tokenContext.tokenDecimals)
-          )} ${tokenContext.tokenTicker}`
-        ].join("\n");
-
-        await respondWithMenu(ctx, {
-          text: typeMessage,
-          parseMode: "HTML",
-          keyboard: new InlineKeyboard()
-            .text("❌ Cancel", `cancel_game_setup_${creatorId}`)
-            .row(),
-        });
-
-        await safeAnswerCallbackQuery(ctx, "Type your amount...");
-
-        updateSession({
-          waitingFor: "amount_input",
-          gameType,
-          userBalance,
-          messageId: ctx.callbackQuery?.message?.message_id || 0,
-          chatId: ctx.chat?.id || 0,
-          contractMinimum: contractMin,
-          amount: session?.amount,
-        });
-      } catch (error) {
-        console.error("Error in creator-protected custom_amount callback:", error);
-        await safeAnswerCallbackQuery(ctx, "❌ Error setting up text input");
-      }
-    }
-  )
-);
-
-
-
-
-// Back to amounts callback (new format with creator ID)
-bot.callbackQuery(
-  /^back_to_amounts_(coinflip|giveaway)_(\d+)$/,
-  withCreatorContext(
-    {
-      name: "back_to_amounts",
-      resolveCreatorId: (ctx) => ctx.match?.[2],
-      failureText: "❌ Only the game creator can modify this setup!",
-    },
-    async (ctx, { session, tokenContext, clearSession, creatorId }) => {
-      try {
-        const gameType = ctx.match![1] as string;
-        const telegramId = await getRequiredTelegramIdForContext(
-          ctx,
-          "amount selection"
-        );
-        if (telegramId == null) {
-          await safeAnswerCallbackQuery(ctx, "Unable to identify user");
-          return;
-        }
-
-        let userBalance =
-          session?.userBalance && session.userBalance > 0
-            ? session.userBalance
-            : 0;
-        if (userBalance <= 0) {
-          try {
-            const tokenBalance = await wallet.getTokenBalance(
-              telegramId,
-              tokenContext.tokenMint
-            );
-            userBalance =
-              tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
-          } catch (error) {
-            console.error("Error getting balance:", error);
-          }
-        }
-
-        const { formatted: contractMin } =
-          tokenContext.contractMinimum !== undefined
-            ? { formatted: tokenContext.contractMinimum }
-            : await getContractMinimumAmount(
-                tokenContext.tokenMint,
-                tokenContext.tokenDecimals
-              );
-
-        const tokenPriceUSD = await fetchTokenPriceUSD({
-          tokenMint: tokenContext.tokenMint,
-          tokenTicker: tokenContext.tokenTicker,
-        });
-
-        const suggestedAmounts = getSuggestedStakeAmounts(
-          contractMin,
-          userBalance
-        );
-
-        clearSession();
-
-        let warningMessage = getFeeWarningMessage(
-          gameType,
-          userBalance,
-          contractMin,
-          tokenContext.tokenTicker
-        );
-
-        const suggestionLabel =
-          GAME_SETUP_COPY[gameType as "coinflip" | "giveaway"]?.suggestionLabel;
-
-        if (suggestionLabel && suggestedAmounts.length > 0) {
-          warningMessage += `\n\n${suggestionLabel}:\n`;
-          for (const amount of suggestedAmounts) {
-            const amountDisplay = formatTokenDisplay(amount, {
-              decimals: tokenContext.tokenDecimals,
-            });
-            warningMessage += `• ${amountDisplay} ${tokenContext.tokenTicker}`;
-            if (tokenPriceUSD) {
-              const usdFormatted = formatUsdValue(amount * tokenPriceUSD, {
-                minimumFractionDigits: 1,
-                maximumFractionDigits: 1,
-                fallback: "0.0",
-              });
-              warningMessage += ` ($${usdFormatted})`;
-            }
-            warningMessage += "\n";
-          }
-        }
-
-        await respondWithMenu(ctx, {
-          text: warningMessage,
-          parseMode: "HTML",
-          keyboard: createAmountSelectionKeyboard(
-            gameType,
-            userBalance,
-            creatorId,
-            contractMin,
-            {
-              decimals: tokenContext.tokenDecimals,
-              tokenPriceUSD: tokenPriceUSD ?? undefined,
-            }
-          ),
-        });
-
-
-        await safeAnswerCallbackQuery(ctx);
-      } catch (error) {
-        console.error("Error in creator-protected back_to_amounts callback:", error);
-        await safeAnswerCallbackQuery(ctx, "❌ Error going back");
-      }
-    }
-  )
-);
-
-
-// Type amount callback - prompts user to type amount (new format with creator ID)
-bot.callbackQuery(
-  /^type_amount_(coinflip|giveaway)_(\d+)$/,
-  withCreatorContext(
-    {
-      name: "type_amount",
-      resolveCreatorId: (ctx) => ctx.match?.[2],
-      failureText: "❌ Only the game creator can modify this setup!",
-    },
-    async (ctx, { session, tokenContext, updateSession, creatorId }) => {
-      try {
-        const gameType = ctx.match![1] as string;
-        const telegramId = await getRequiredTelegramIdForContext(
-          ctx,
-          "type amount prompt"
-        );
-        if (telegramId == null) {
-          await safeAnswerCallbackQuery(ctx, "Unable to identify user");
-          return;
-        }
-
-        let userBalance =
-          session?.userBalance && session.userBalance > 0
-            ? session.userBalance
-            : 0;
-        if (userBalance <= 0) {
-          try {
-            const tokenBalance = await wallet.getTokenBalance(
-              telegramId,
-              tokenContext.tokenMint
-            );
-            userBalance =
-              tokenBalance / Math.pow(10, tokenContext.tokenDecimals);
-          } catch (error) {
-            console.error("Error getting balance:", error);
-          }
-        }
-
-        const { formatted: contractMin } =
-          tokenContext.contractMinimum !== undefined
-            ? { formatted: tokenContext.contractMinimum }
-            : await getContractMinimumAmount(
-                tokenContext.tokenMint,
-                tokenContext.tokenDecimals
-              );
-
-        const formattedGameType = toTitleCase(gameType);
-
-        const typeMessage = [
-          `✏️ <b>Type Custom Amount - ${formattedGameType}</b>`,
-          "",
-          `💰 Your balance: <b>${userBalance.toFixed(
-            Math.min(4, tokenContext.tokenDecimals)
-          )} ${tokenContext.tokenTicker}</b>`,
-          "",
-          "Please type the amount you want to use.",
-          "",
-          "<b>Example:</b>",
-          `• Type: <code>75</code> for 75 ${tokenContext.tokenTicker}`,
-          `• Type: <code>150.5</code> for 150.5 ${tokenContext.tokenTicker}`,
-          "",
-          `Min: ${contractMin} ${tokenContext.tokenTicker} • Max: ${userBalance.toFixed(
-            Math.min(2, tokenContext.tokenDecimals)
-          )} ${tokenContext.tokenTicker}`
-        ].join("\n");
-
-        await respondWithMenu(ctx, {
-          text: typeMessage,
-          parseMode: "HTML",
-          keyboard: new InlineKeyboard()
-            .text("❌ Cancel", `cancel_game_setup_${creatorId}`)
-            .row(),
-        });
-
-        await safeAnswerCallbackQuery(ctx, "Type your amount...");
-
-        updateSession({
-          waitingFor: "amount_input",
-          gameType,
-          userBalance,
-          messageId: ctx.callbackQuery?.message?.message_id || 0,
-          chatId: ctx.chat?.id || 0,
-          contractMinimum: contractMin,
-          amount: session?.amount,
-        });
-      } catch (error) {
-        console.error("Error in creator-protected type_amount callback:", error);
-        await safeAnswerCallbackQuery(ctx, "❌ Error setting up text input");
-      }
-    }
-  )
-);
-
-
-// Custom players callback - prompts user to type number of players (new format with creator ID)
-bot.callbackQuery(
-  /^custom_players_(coinflip|giveaway)_(.+)_(\d+)$/,
-  withCreatorContext(
-    {
-      name: "custom_players",
-      resolveCreatorId: (ctx) => ctx.match?.[3],
-      failureText: "❌ Only the game creator can modify this setup!",
-    },
-    async (ctx, { session, tokenContext, updateSession, creatorId }) => {
-      try {
-        const gameType = ctx.match![1] as string;
-        const amount = ctx.match![2] as string;
-
-        const amountNumber = Number(amount);
-        const formattedAmount = amountNumber.toLocaleString("en-US", {
-          minimumFractionDigits: 0,
-          maximumFractionDigits: determineFractionDigits(
-            amount,
-            tokenContext.tokenDecimals
-          ),
-        });
-
-        const formattedGameType = toTitleCase(gameType);
-        const minPlayers = gameType === "coinflip" ? 2 : 1;
-        const maxPlayers = Math.max(minPlayers, getOracleMaxPlayers());
-
-        const playersMessage = [
-          `👥 <b>Type Custom Players - ${formattedGameType}</b>`,
-          "",
-          `Amount: <b>${formattedAmount} ${tokenContext.tokenTicker}</b>`,
-          "",
-          "Please type the number of players for this game.",
-          "",
-          `Range: ${minPlayers}-${maxPlayers} players`
-        ].join("\n");
-
-        await respondWithMenu(ctx, {
-          text: playersMessage,
-          parseMode: "HTML",
-          keyboard: new InlineKeyboard()
-            .text("❌ Cancel", `cancel_game_setup_${creatorId}`)
-            .row(),
-        });
-
-        await safeAnswerCallbackQuery(ctx, "Type the number of players...");
-
-        updateSession({
-          waitingFor: "players_input",
-          gameType,
-          userBalance: 0,
-          amount,
-          messageId: ctx.callbackQuery?.message?.message_id || 0,
-          chatId: ctx.chat?.id || 0,
-          contractMinimum: session?.contractMinimum,
-          maxPlayersLimit: maxPlayers,
-        });
-      } catch (error) {
-        console.error("Error in creator-protected custom_players callback:", error);
-        await safeAnswerCallbackQuery(ctx, "❌ Error setting up players input");
-      }
-    }
-  )
-);
-
-// No-op callback (for display-only buttons)
-bot.callbackQuery("noop", async (ctx) => {
-  await safeAnswerCallbackQuery(ctx);
-});
-
-
-// Cancel game setup callback (new format with creator ID protection)
-bot.callbackQuery(
-  /^cancel_game_setup_(\d+)$/,
-  withCreatorContext(
-    {
-      name: "cancel_game_setup",
-      resolveCreatorId: (ctx) => ctx.match?.[1],
-      failureText: "❌ Only the game creator can cancel this setup!",
-    },
-    async (ctx, { clearSession }) => {
-      try {
-        clearSession();
-
-        await respondWithMenu(ctx, {
-          text: "❌ Game creation cancelled.",
-          parseMode: "HTML",
-        });
-        await safeAnswerCallbackQuery(ctx, "Cancelled");
-      } catch (error) {
-        console.error("Error in creator-protected cancel callback:", error);
-        await safeAnswerCallbackQuery(ctx, "❌ Error cancelling");
-      }
-    }
-  )
-);
-
-// Text input handler for custom amounts
-const handleGameSetupTextInput = async (
-  ctx: Context,
-  next: NextFunction
-) => {
-  try {
-    const telegramIdNumeric = Number(getTelegramId(ctx));
-    if (telegramIdNumeric === 0) {
-      return await next();
-    }
-
-    // Check if the message is a reply to a prompting message
-    const replyToMessageId = ctx.message?.reply_to_message?.message_id;
-    if (!replyToMessageId) {
-      return await next();
-    }
-
-    // Construct session key from chat and message ID
-    const sessionKey = `${ctx.chat?.id || 0}_${replyToMessageId}`;
-
-    // Check if user is in a session waiting for input
-    const userSession = getGameSetupSession(sessionKey);
-
-    if (!userSession || (userSession.waitingFor !== "amount_input" && userSession.waitingFor !== "players_input")) {
-      return await next(); // Not waiting for input, pass to other handlers
-    }
-
-    // Keep user's message (avoid deleting to preserve reply chain)
-
-    // Clear the session temporarily while we process the input. We'll
-    // restore it on validation errors so the flow keeps the original token
-    // context instead of falling back to the (potentially changed) chat
-    // default token.
-    const sessionSnapshot = { ...userSession };
-    const restoreSession = (overrides: Partial<GameSetupSession> = {}) => {
-      upsertGameSetupSession(sessionKey, {
-        ...sessionSnapshot,
-        ...overrides,
-      });
-    };
-    clearGameSetupSession(sessionKey);
-
-    const defaultMetadata = await getDefaultTokenMetadata();
-    const tokenTicker =
-      userSession.tokenTicker ?? DEFAULT_TOKEN_TICKER;
-    const tokenDecimals =
-      userSession.tokenDecimals ?? defaultMetadata.decimals;
-    const minAllowed =
-      userSession.contractMinimum ??
-      (
-        await getContractMinimumAmount(
-          userSession.tokenMint ?? DEFAULT_TOKEN_MINT,
-          tokenDecimals
-        )
-      ).formatted;
-
-    const messageText = ctx.message?.text;
-
-    if (!messageText) {
-      restoreSession();
-      return await next();
-    }
-
-    const inputText = messageText.trim();
-
-    // Handle players input
-    if (userSession.waitingFor === "players_input") {
-      const players = parseInt(inputText);
-      const minPlayers =
-        userSession.gameType === "coinflip" ? 2 : 1;
-      const maxPlayers = Math.max(
-        minPlayers,
-        userSession.maxPlayersLimit ?? getOracleMaxPlayers()
-      );
-
-      console.log(`🔍 Custom players input: "${inputText}" -> ${players} (gameType: ${userSession.gameType}, min: ${minPlayers}, max: ${maxPlayers})`);
-
-      // Validate players input
-      if (isNaN(players) || players < minPlayers || players > maxPlayers) {
-        const errorMessage = `❌ Invalid number of players. Please enter a number between ${minPlayers} and ${maxPlayers}.`;
-        try {
-          await ctx.api.editMessageText(
-            userSession.chatId!,
-            userSession.messageId!,
-            errorMessage,
-            { parse_mode: "HTML" }
-          );
-        } catch (error) {
-          await ctx.reply(errorMessage, { parse_mode: "HTML" });
-        }
-        restoreSession({ waitingFor: "players_input" });
-        return;
-      }
-
-      // Show confirmation with custom players
-      const amountNumber = Number(userSession.amount ?? "0");
-      const amountValue = userSession.amount ?? amountNumber.toString();
-
-      const confirmMessage = buildGameConfirmationMessage({
-        gameType: userSession.gameType as "coinflip" | "giveaway",
-        amount: amountValue,
-        players,
-        tokenTicker,
-        tokenDecimals,
-      });
-
-      const confirmMenu = buildGameConfirmMenuConfig({
-        gameType: userSession.gameType as "coinflip" | "giveaway",
-        amount: amountValue,
-        players,
-        creatorId: userSession.creatorId,
-      });
-
-      try {
-        await ctx.api.editMessageText(
-          userSession.chatId!,
-          userSession.messageId!,
-          confirmMessage,
-          confirmMenu.replyMarkup
-        );
-      } catch (error) {
-        await ctx.reply(confirmMessage, confirmMenu.replyMarkup);
-      }
-
-      upsertGameSetupSession(sessionKey, {
-        waitingFor: "setup",
-        gameType: userSession.gameType,
-        userBalance: userSession.userBalance,
-        messageId: userSession.messageId,
-        chatId: userSession.chatId,
-        amount: userSession.amount,
-        creatorId: userSession.creatorId,
-        tokenMint: userSession.tokenMint,
-        tokenTicker,
-        tokenDecimals,
-        contractMinimum: minAllowed,
-        maxPlayersLimit: maxPlayers,
-      });
-
-      return;
-    }
-
-    // Handle amount input
-    const amount = parseFloat(inputText);
-
-    // Validate the input
-    if (isNaN(amount) || amount <= 0) {
-      // Update the original message with error
-      try {
-        await ctx.api.editMessageText(
-          userSession.chatId!,
-          userSession.messageId!,
-          "❌ Invalid amount. Please use /coinflip or /giveaway to try again.",
-          { parse_mode: "HTML" }
-        );
-      } catch (error) {
-        await ctx.reply("❌ Invalid amount. Please use /coinflip or /giveaway to try again.", {
-          parse_mode: "HTML"
-        });
-      }
-      restoreSession({ waitingFor: "amount_input" });
-      return;
-    }
-
-    if (amount > userSession.userBalance) {
-      // Update the original message with error
-      try {
-        await ctx.api.editMessageText(
-          userSession.chatId!,
-          userSession.messageId!,
-          `❌ Amount too high. Your balance is ${userSession.userBalance.toFixed(2)} ${tokenTicker}. Please use /coinflip or /giveaway to try again.`,
-          { parse_mode: "HTML" }
-        );
-      } catch (error) {
-        await ctx.reply(`❌ Amount too high. Your balance is ${userSession.userBalance.toFixed(2)} ${tokenTicker}. Please try again.`, {
-          parse_mode: "HTML"
-        });
-      }
-      restoreSession({ waitingFor: "amount_input" });
-      return;
-    }
-
-    if (amount < minAllowed) {
-      const errorMessage = `❌ Amount below contract minimum of ${minAllowed} ${tokenTicker}.`;
-      try {
-        await ctx.api.editMessageText(
-          userSession.chatId!,
-          userSession.messageId!,
-          errorMessage,
-          { parse_mode: "HTML" }
-        );
-      } catch (error) {
-        await ctx.reply(errorMessage, { parse_mode: "HTML" });
-      }
-      restoreSession({ waitingFor: "amount_input" });
-      return;
-    }
-
-    // Proceed to player selection with the custom amount
-    const amountFormatted = amount.toLocaleString("en-US", {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: determineFractionDigits(
-        inputText,
-        tokenDecimals
-      ),
-    });
-
-      const formattedGameTypeForPlayers = toTitleCase(userSession.gameType);
-
-      const playerMessage = [
-        `<b>${formattedGameTypeForPlayers} - Choose Players</b>`,
-      "",
-      `Amount: <b>${amountFormatted} ${tokenTicker}</b>`,
-      "",
-      "Select the number of players:",
-      "",
-      userSession.gameType === "coinflip"
-        ? "• All players compete for the total stakes"
-        : "• More players = higher chance for everyone",
-      "",
-      "Choose number of players:"
-    ].join("\n");
-
-    // Update the original message with player selection
-    try {
-      await ctx.api.editMessageText(
-        userSession.chatId!,
-        userSession.messageId!,
-        playerMessage,
-        {
-          parse_mode: "HTML",
-          reply_markup: createPlayerSelectionKeyboard(userSession.gameType, amount.toString(), userSession.creatorId)
-        }
-      );
-    } catch (error) {
-      // Fallback to new message if edit fails
-      await ctx.reply(playerMessage, {
-        parse_mode: "HTML",
-        reply_markup: createPlayerSelectionKeyboard(userSession.gameType, amount.toString(), userSession.creatorId)
-      });
-    }
-
-    upsertGameSetupSession(sessionKey, {
-      waitingFor: "setup",
-      gameType: userSession.gameType,
-      userBalance: userSession.userBalance,
-      messageId: userSession.messageId,
-      chatId: userSession.chatId,
-      amount: amount.toString(),
-      creatorId: userSession.creatorId,
-      tokenMint: userSession.tokenMint,
-      tokenTicker,
-      tokenDecimals,
-      contractMinimum: minAllowed,
-    });
-
-  } catch (error) {
-    console.error("Error in text input handler:", error);
-    await next();
-  }
-};
-
-bot.on("message:text", handleGameSetupTextInput);
-
-export const __test_handleGameSetupTextInput = handleGameSetupTextInput;
-
 
 // ================================
 // MAIN MENU CALLBACK HANDLERS
 // ================================
 
-const createWalletHandlerDeps = (): WalletHandlersDeps =>
-  Object.freeze({
-    showWalletUI: (c: any) => showWalletUI(c),
-    clearWalletCache: (id: bigint | string | number) => {
-      const normalized =
-        typeof id === "bigint" ? id : BigInt(id as string | number);
-      clearWalletCache(normalized);
-    },
-    createSettingsKeyboard: () => createWalletSettingsKeyboard(),
-  });
-
-const walletHandlerDeps = createWalletHandlerDeps();
-
-bot.callbackQuery("main_wallet", async (ctx) => {
-  await onMainWallet(ctx as any, walletHandlerDeps);
-});
-
-bot.callbackQuery("wallet_refresh", async (ctx) => {
-  await onWalletRefresh(ctx as any, walletHandlerDeps);
-});
-
-bot.callbackQuery("wallet_settings", async (ctx) => {
-  await onWalletSettings(ctx as any, walletHandlerDeps);
-});
-
-type CallbackPrefixHandlerOptions = {
-  logLabel?: string;
-  errorAck?: string;
-};
-
-type CallbackPrefixContext = {
-  raw: string;
-  payload: string;
-};
-
-const registerCallbackPrefixHandler = (
-  prefix: string,
-  handler: (
-    ctx: any,
-    data: CallbackPrefixContext,
-    next: () => Promise<void>
-  ) => Promise<void> | void,
-  options: CallbackPrefixHandlerOptions = {}
-) => {
-  bot.on(
-    "callback_query",
-    wrapCallbackHandler(
-      async (ctx, next) => {
-        const callbackData = ctx.callbackQuery?.data;
-        if (!callbackData?.startsWith(prefix)) {
-          return await next();
-        }
-
-        const payload = callbackData.slice(prefix.length);
-        await handler(ctx, { raw: callbackData, payload }, () => next());
-      },
-      {
-        action: options.logLabel ?? `${prefix} handler`,
-        errorAck: options.errorAck,
-      }
-    )
-  );
-};
-
-// ================================
-// WALLET ACTION HANDLERS
-// ================================
-
-type WalletActionMenuResolution = {
-  menuOptions: Omit<BuildWalletActionMenuForUserOptions, "ctx">;
-  successAck?: string;
-};
-
-type WalletActionMenuHandlerConfig = {
-  callback: string;
-  logLabel?: string;
-  errorAck: string;
-  resolve: (ctx: any) => Promise<WalletActionMenuResolution | null | undefined>;
-};
-
-const registerWalletActionMenuHandler = ({
-  callback,
-  logLabel,
-  errorAck,
-  resolve,
-}: WalletActionMenuHandlerConfig) => {
-  bot.callbackQuery(
-    callback,
-    wrapCallbackHandler(
-      async (ctx) => {
-        const resolution = await resolve(ctx);
-        if (!resolution) {
-          return;
-        }
-
-        const { menu } = await buildWalletActionMenuForUser(
-          defaultWalletActionMenuDeps,
-          {
-            ctx,
-            ...resolution.menuOptions,
-          }
-        );
-
-        await respondWithMenu(ctx, menu);
-
-        if (resolution.successAck) {
-          await safeAnswerCallbackQuery(ctx, resolution.successAck);
-        }
-      },
-      { action: logLabel ?? callback, errorAck }
-    )
-  );
-};
-
-registerWalletActionMenuHandler({
-  callback: "cmd_withdraw",
-  logLabel: "cmd_withdraw",
-  errorAck: "❌ Error loading send menu",
-  resolve: async () => ({
-    menuOptions: {
-      title: `💸 <b>Withdraw</b>`,
-      bodyLines: [
-        `<b>From:</b> <code>{{WALLET_ADDRESS}}</code>`,
-        "",
-        `<b>Select token to withdraw:</b>`,
-      ],
-      quickActions: {
-        type: "token-select",
-        actionPrefix: "send_select_",
-        includeSol: true,
-        limit: 5,
-      },
-    },
-    successAck: "💸 Select Token to Withdraw",
-  }),
-});
 
 bot.callbackQuery(
   "cmd_privatekey",
@@ -4954,12 +2467,11 @@ bot.callbackQuery(
         return;
       }
 
-      const telegramId = await getRequiredTelegramIdForContext(
+      const telegramId = await resolveTelegramIdOrRespond(
         ctx,
         "show private key"
       );
       if (telegramId == null) {
-        await respondMissingIdentity(ctx);
         return;
       }
       const keypair = wallet.getKeyPair(telegramId);
@@ -4989,640 +2501,6 @@ bot.callbackQuery(
     { action: "cmd_privatekey", errorAck: "❌ Error showing private key" }
   )
 );
-
-
-registerWalletActionMenuHandler({
-  callback: "cmd_wrap",
-  logLabel: "cmd_wrap",
-  errorAck: "❌ Error loading wrap menu",
-  resolve: async () => ({
-    menuOptions: {
-      title: `🔧 <b>Wrap SOL</b>`,
-      bodyLines: ({ solBalance, tokenBalances }) => {
-        const formattedSolBalance = wallet.formatSolBalance(solBalance);
-        const wsolLamports =
-          tokenBalances.find((token) => token.mint === WSOL_MINT)?.balance ?? 0;
-        const formattedWsolBalance = wallet.formatSolBalance(wsolLamports);
-        return [
-          `<b>Native SOL:</b> ${escapeHtml(formattedSolBalance)}`,
-          `<b>WSOL:</b> ${escapeHtml(formattedWsolBalance)}`,
-          "",
-          `Convert native SOL to WSOL tokens for DeFi operations.`,
-          "",
-          `<b>Quick Wrap Amounts:</b>`,
-        ];
-      },
-      quickActions: {
-        type: "wrap",
-        callbackPrefix: "wrap_amount_",
-        amounts: [
-          { label: "25%", value: "25%" },
-          { label: "50%", value: "50%" },
-          { label: "75%", value: "75%" },
-          { label: "MAX", value: "MAX" },
-        ],
-        customAction: { label: "✏️ Custom Amount", callback: "wrap_custom" },
-        insufficientLabel: "❌ Insufficient SOL balance",
-        minimumLamports: 10_000,
-      },
-      getBalances: async (telegramId) => {
-        const [solBalance, wsolBalance] = await Promise.all([
-          wallet.getBalance(telegramId),
-          wallet.getTokenBalance(telegramId, WSOL_MINT),
-        ]);
-
-        return {
-          solBalance,
-          tokenBalances: [
-            {
-              mint: WSOL_MINT,
-              ticker: "WSOL",
-              balance: wsolBalance,
-              decimals: 9,
-              rawBalance: wsolBalance.toString(),
-            },
-          ],
-        };
-      },
-    },
-    successAck: "🔧 Select wrap amount",
-  }),
-});
-
-registerWalletActionMenuHandler({
-  callback: "cmd_unwrap",
-  logLabel: "cmd_unwrap",
-  errorAck: "❌ Error loading unwrap menu",
-  resolve: async (ctx) => {
-    const telegramId = await getRequiredTelegramIdForContext(
-      ctx,
-      "unwrap menu"
-    );
-    if (telegramId == null) {
-      await respondMissingIdentity(ctx);
-      return null;
-    }
-
-    const balances = await getCachedWalletData(telegramId);
-    const hasBalance = balances.wsolBalance > 0;
-
-    return {
-      menuOptions: {
-        title: `🧼 <b>Unwrap WSOL</b>`,
-        bodyLines: ({ solBalance, tokenBalances }) => {
-          const wsolLamports =
-            tokenBalances.find((token) => token.mint === WSOL_MINT)?.balance ?? 0;
-          const formattedSolBalance = wallet.formatSolBalance(solBalance);
-          const formattedWsolBalance = wallet.formatSolBalance(wsolLamports);
-
-          const lines = [
-            `<b>Native SOL:</b> ${escapeHtml(formattedSolBalance)}`,
-            `<b>WSOL:</b> ${escapeHtml(formattedWsolBalance)}`,
-          ];
-
-          if (wsolLamports > 0) {
-            lines.push(
-              "",
-              "Unwrap converts WSOL back to native SOL and closes the WSOL account."
-            );
-          } else {
-            lines.push(
-              "",
-              "You currently have no WSOL to unwrap."
-            );
-          }
-
-          return lines;
-        },
-        quickActions: {
-          type: "prebuilt",
-          keyboard: createConfirmUnwrapKeyboard(hasBalance),
-        },
-        backButton: { label: "← Back to Settings", callback: "wallet_settings" },
-        getBalances: async () => ({
-          solBalance: balances.nativeSolBalance,
-          tokenBalances: [
-            {
-              mint: WSOL_MINT,
-              ticker: "WSOL",
-              balance: balances.wsolBalance,
-              decimals: 9,
-              rawBalance: balances.wsolBalance.toString(),
-            },
-          ],
-        }),
-      },
-      successAck: hasBalance
-        ? "🧼 Ready to unwrap WSOL"
-        : "ℹ️ No WSOL balance found",
-    };
-  },
-});
-
-type WrapConfirmationParams = {
-  lamportsToWrap: number;
-  availableSolLamports: number;
-  currentWsolLamports: number;
-  selectionLabel?: string;
-};
-
-type WrapConfirmationResult = {
-  text: string;
-  keyboard: InlineKeyboard;
-  displayAmount: string;
-};
-
-const buildWrapConfirmation = ({
-  lamportsToWrap,
-  availableSolLamports,
-  currentWsolLamports,
-  selectionLabel,
-}: WrapConfirmationParams): WrapConfirmationResult => {
-  const displayAmount = wallet.formatSolBalance(lamportsToWrap);
-  const availableSolDisplay = wallet.formatSolBalance(availableSolLamports);
-  const currentWsolDisplay = wallet.formatSolBalance(currentWsolLamports);
-
-  const lines = [
-    `✅ <b>Wrap Confirmation</b>`,
-    "",
-    `<b>Amount:</b> ${escapeHtml(displayAmount)} SOL → WSOL`,
-    `<b>Available SOL:</b> ${escapeHtml(availableSolDisplay)}`,
-    `<b>Current WSOL:</b> ${escapeHtml(currentWsolDisplay)}`,
-    "",
-  ];
-
-  if (selectionLabel) {
-    lines.push(
-      `<b>Selection:</b> ${escapeHtml(selectionLabel)} of available SOL`,
-      ""
-    );
-  }
-
-  lines.push(
-    `⚠️ <b>Please confirm this transaction</b>`,
-    `This will convert ${escapeHtml(displayAmount)} SOL to ${escapeHtml(
-      displayAmount
-    )} WSOL.`
-  );
-
-  return {
-    text: lines.join("\n"),
-    keyboard: createConfirmWrapKeyboard(lamportsToWrap),
-    displayAmount,
-  };
-};
-
-// Handle custom wrap amount
-bot.on(
-  "callback_query",
-  wrapCallbackHandler(
-    async (ctx, next) => {
-      const callbackData = ctx.callbackQuery?.data;
-      if (callbackData !== "wrap_custom") {
-        return await next();
-      }
-
-      const userId = getTelegramIdString(ctx);
-      if (!userId) return;
-
-      console.log("🔔 Custom wrap amount requested");
-
-      await showCustomAmountPrompt({
-        ctx,
-        userId,
-        title: "✏️ <b>Custom Wrap Amount</b>",
-        instructions: [
-          "Reply to this message with the amount of SOL you want to wrap.",
-        ],
-        examples: ["• <code>0.5</code>", "• <code>1.25</code>"],
-        cancelCallback: "cmd_wrap",
-        state: { type: "wrap_custom_amount" },
-      });
-
-      await safeAnswerCallbackQuery(ctx, "Send the amount as a message");
-    },
-    { action: "wrap_custom", errorAck: "❌ Error processing custom amount" }
-  )
-);
-
-registerCallbackPrefixHandler("wrap_amount_", async (ctx, { payload }) => {
-  try {
-    const telegramId = await getRequiredTelegramIdForContext(
-      ctx,
-      "wrap amount selection"
-    );
-    if (telegramId == null) {
-      await respondMissingIdentity(ctx);
-      return;
-    }
-
-    const amountChoice = payload;
-    const { nativeSolBalance, wsolBalance } = await getCachedWalletData(telegramId);
-    const availableSolLamports = nativeSolBalance;
-
-    const spend = presentSpendAmount({
-      amount: amountChoice,
-      assetTicker: "SOL",
-      decimals: 9,
-      solBalance: availableSolLamports,
-      formatSol: (lamports) => wallet.formatSolBalance(lamports),
-      formatToken: (value, decimals) =>
-        wallet.formatTokenBalance(value, decimals),
-    });
-
-    const lamportsToWrap = spend.rawAmount;
-
-    if (!Number.isFinite(lamportsToWrap) || lamportsToWrap <= 0) {
-      throw new Error("Amount is too small to wrap");
-    }
-
-    const selection = amountChoice.trim().toUpperCase();
-    const confirmation = buildWrapConfirmation({
-      lamportsToWrap,
-      availableSolLamports,
-      currentWsolLamports: wsolBalance,
-      selectionLabel:
-        selection === "MAX" || selection.endsWith("%") ? selection : undefined,
-    });
-
-    console.log(`🔧 Wrap amount selected: ${confirmation.displayAmount} SOL`);
-
-    await respondWithMenu(ctx, {
-      text: confirmation.text,
-      keyboard: confirmation.keyboard,
-    });
-
-    await safeAnswerCallbackQuery(
-      ctx,
-      `Wrap ${confirmation.displayAmount} SOL`
-    );
-  } catch (error) {
-    console.error("Error in wrap amount selection:", error);
-    const message =
-      error instanceof Error ? error.message : "Error processing wrap amount";
-    await safeAnswerCallbackQuery(ctx, `❌ ${message}`);
-  }
-});
-
-bot.callbackQuery("unwrap_confirm", async (ctx) => {
-  try {
-    const telegramId = await getRequiredTelegramIdForContext(
-      ctx,
-      "unwrap confirmation"
-    );
-    if (telegramId == null) {
-      await respondMissingIdentity(ctx);
-      return;
-    }
-    const { wsolBalance } = await getCachedWalletData(telegramId);
-
-    const result = await executeUnwrapFlow(telegramId, {
-      expectedAmountLamports: wsolBalance,
-      onProcessing: async (formattedAmount) => {
-        await respondWithMenu(ctx, {
-          text: `🔄 <b>Processing Unwrap</b>\n\nUnwrapping ${escapeHtml(
-              formattedAmount ?? "0"
-            )} WSOL to SOL...\n\n<i>Please wait...</i>`,
-          keyboard: new InlineKeyboard(),
-        });
-      },
-      onNoBalance: async () => {
-        await respondWithMenu(ctx, {
-          text: `❌ <b>Unwrap Failed</b>\n\nYour WSOL account is already empty.`,
-          keyboard: createBackToWalletKeyboard(),
-        });
-      },
-      onSuccess: async ({ signature, formattedAmount }) => {
-        const successView = renderSolConversionSuccess({
-          kind: "unwrap",
-          formattedAmount,
-          signature,
-        });
-
-        await respondWithMenu(ctx, {
-          text: successView.text,
-          keyboard: createBackToWalletKeyboard(),
-          disableLinkPreview: successView.disablePreview,
-        });
-      },
-      onError: async (error) => {
-        console.error("Error in unwrap confirmation:", error);
-        const userFriendlyError = formatUserFriendlyError(error, wallet);
-        await respondWithMenu(ctx, {
-          text: userFriendlyError,
-          keyboard: createBackToWalletKeyboard(),
-        });
-      },
-    });
-
-    if (result.status === "success") {
-      await safeAnswerCallbackQuery(ctx, "✅ WSOL unwrapped");
-    } else if (result.status === "empty") {
-      await safeAnswerCallbackQuery(ctx, "ℹ️ No WSOL to unwrap");
-    } else {
-      await safeAnswerCallbackQuery(ctx, "❌ Unwrap failed");
-    }
-  } catch (error) {
-    console.error("Error in unwrap confirmation:", error);
-    const userFriendlyError = formatUserFriendlyError(error, wallet);
-    await respondWithMenu(ctx, {
-      text: userFriendlyError,
-      keyboard: createBackToWalletKeyboard(),
-    });
-    await safeAnswerCallbackQuery(ctx, "❌ Unwrap failed");
-  }
-});
-
-// Handle send confirmation
-bot.callbackQuery(/^confirm_send_/, async (ctx) => {
-  try {
-    const callbackData = ctx.callbackQuery?.data || "";
-    const txId = callbackData.replace("confirm_send_", "");
-
-    const validation = validatePendingTransaction<PendingSendTransaction>(
-      ctx,
-      txId,
-      "send"
-    );
-
-    if (validation.status === "expired") {
-      await safeAnswerCallbackQuery(ctx, "❌ Transaction expired or not found");
-      return;
-    }
-
-    if (validation.status === "unauthorized") {
-      await safeAnswerCallbackQuery(ctx, "❌ Unauthorized transaction");
-      return;
-    }
-
-    const transaction = validation.transaction;
-
-    const amountSummary =
-      transaction.amountDisplay ??
-      (transaction.amount === "max"
-        ? `MAX ${transaction.token}`
-        : `${transaction.amount} ${transaction.token}`);
-
-    console.log(
-      `✅ Confirmed send: ${amountSummary} to ${transaction.address}`
-    );
-
-    // Update message to show processing state
-    await respondWithMenu(ctx, {
-      text: `🔄 <b>Processing Transaction</b>\n\nSending ${escapeHtml(
-        amountSummary
-      )}...\n\n<i>Please wait...</i>`,
-      keyboard: new InlineKeyboard(),
-    });
-
-    // Execute actual transaction
-    try {
-      if (!transaction.address) {
-        throw new Error("Invalid recipient address");
-      }
-
-      const toPublicKey = new PublicKey(transaction.address);
-      const telegramId = BigInt(transaction.userId);
-      let txSignature: string;
-      let formattedAmount: string;
-      let withdrawAllResult:
-        | Awaited<ReturnType<typeof wallet.withdrawAllSol>>
-        | null = null;
-
-      if (transaction.token === "SOL") {
-        const balanceLamports = await wallet.getBalance(telegramId);
-        if (transaction.amount === "max") {
-          withdrawAllResult = await wallet.withdrawAllSol(
-            telegramId,
-            toPublicKey
-          );
-
-          if (withdrawAllResult.totalLamportsSent <= 0) {
-            throw new Error(
-              "Unable to withdraw SOL. Ensure you have enough balance to cover fees."
-            );
-          }
-
-          txSignature = withdrawAllResult.signature;
-          formattedAmount = wallet.formatSolBalance(
-            withdrawAllResult.totalLamportsSent
-          );
-        } else {
-          const lamportsToSend = toRawAmount(transaction.amount, 9);
-          if (lamportsToSend + SOL_FEE_BUFFER_LAMPORTS > balanceLamports) {
-            throw new Error("Insufficient SOL balance for this transfer");
-          }
-          formattedAmount = transaction.amount;
-
-          const solAmount = lamportsToSend / LAMPORTS_PER_SOL;
-
-          txSignature = await wallet.transferSol(
-            telegramId,
-            toPublicKey,
-            solAmount
-          );
-        }
-      } else {
-        if (!transaction.token) {
-          throw new Error("Token not specified in transaction");
-        }
-
-        const { tokenBalances } = await getCachedWalletData(telegramId);
-        const tokenBalance = tokenBalances.find(
-          (t) => t.ticker === transaction.token
-        );
-
-        if (!tokenBalance) {
-          throw new Error(`Token ${transaction.token} not found in wallet`);
-        }
-
-        const tokenMint = tokenBalance.mint;
-        if (!tokenMint) {
-          throw new Error(`Token mint not found for ${transaction.token}`);
-        }
-
-        let rawAmount = 0;
-        if (transaction.amount === "max") {
-          rawAmount = Math.floor(tokenBalance.balance);
-          if (rawAmount <= 0) {
-            throw new Error(`No ${transaction.token} balance found`);
-          }
-          formattedAmount = wallet.formatTokenBalance(
-            rawAmount,
-            tokenBalance.decimals
-          );
-        } else {
-          rawAmount = toRawAmount(
-            transaction.amount,
-            tokenBalance.decimals
-          );
-          if (rawAmount > tokenBalance.balance) {
-            throw new Error("Insufficient token balance for this transfer");
-          }
-          formattedAmount = transaction.amount;
-        }
-
-        txSignature = await wallet.transferToken(
-          telegramId,
-          toPublicKey,
-          rawAmount,
-          tokenMint
-        );
-      }
-
-      console.log(`🚀 Transaction submitted: ${txSignature}`);
-
-      await wallet.confirmTransaction(txSignature);
-      clearWalletCache(telegramId);
-
-      const { message: viewLine } = buildTransactionLinkMessage({
-        signature: txSignature,
-        networkOverride: process.env["RPC_URL"],
-        label: "🔗 ",
-        linkText: "View on Solscan",
-        format: "html",
-      });
-
-      const successMessage = (() => {
-        if (
-          withdrawAllResult &&
-          transaction.token === "SOL" &&
-          transaction.amount === "max"
-        ) {
-          const details: string[] = [
-            `✅ <b>Transaction Completed</b>`,
-            "",
-            `Sent ${formattedAmount} SOL`,
-          ];
-
-          if (withdrawAllResult.nativeLamportsSent > 0) {
-            details.push(
-              `• Native SOL: ${wallet.formatSolBalance(
-                withdrawAllResult.nativeLamportsSent
-              )} SOL`
-            );
-          }
-
-          if (withdrawAllResult.wsolLamportsSent > 0) {
-            details.push(
-              `• WSOL (unwrapped): ${wallet.formatSolBalance(
-                withdrawAllResult.wsolLamportsSent
-              )} SOL`
-            );
-          }
-
-          details.push(
-            "",
-            `To: <code>${transaction.address}</code>`,
-            ""
-          );
-
-          if (viewLine) {
-            details.push(viewLine);
-          }
-
-          return details.join("\n");
-        }
-
-        const baseMessage = `✅ <b>Transaction Completed</b>\n\nSent ${formattedAmount} ${transaction.token}\nTo: <code>${transaction.address}</code>`;
-        return viewLine ? `${baseMessage}\n\n${viewLine}` : baseMessage;
-      })();
-
-      await respondWithMenu(ctx, {
-        text: successMessage,
-        keyboard: createBackToWalletKeyboard(),
-      });
-    } catch (txError) {
-      console.error("Transaction failed:", txError);
-      const userFriendlyError = formatUserFriendlyError(txError, wallet);
-      await respondWithMenu(ctx, {
-        text: `❌ <b>Transaction Failed</b>\n\n${escapeHtml(
-          userFriendlyError
-        )}`,
-        keyboard: createBackToWalletKeyboard(),
-      });
-    }
-
-    await safeAnswerCallbackQuery(ctx, "✅ Transaction submitted");
-  } catch (error) {
-    console.error("Error in send confirmation:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error processing transaction");
-  }
-});
-
-// Handle wrap confirmation
-bot.callbackQuery(/^confirm_wrap_/, async (ctx) => {
-  try {
-    const callbackData = ctx.callbackQuery?.data || "";
-    const lamportsRaw = callbackData.replace("confirm_wrap_", "");
-    const lamportsToWrap = Number.parseInt(lamportsRaw, 10);
-
-    if (!Number.isFinite(lamportsToWrap) || lamportsToWrap <= 0) {
-      throw new Error("Invalid wrap amount");
-    }
-
-    const formattedAmount = wallet.formatSolBalance(lamportsToWrap);
-    console.log(`✅ Confirmed wrap: ${formattedAmount} SOL`);
-
-    const telegramId = await getRequiredTelegramIdForContext(
-      ctx,
-      "wrap confirmation"
-    );
-    if (telegramId == null) {
-      await respondMissingIdentity(ctx);
-      return;
-    }
-
-    const result = await executeWrapFlow(telegramId, lamportsToWrap, {
-      onProcessing: async (amountDisplay) => {
-        await respondWithMenu(ctx, {
-          text: `🔄 <b>Processing Wrap</b>\n\nWrapping ${amountDisplay} SOL to WSOL...\n\n<i>Please wait...</i>`,
-          keyboard: new InlineKeyboard(),
-        });
-      },
-      onInsufficientBalance: async (amountDisplay) => {
-        await respondWithMenu(ctx, {
-          text: `❌ <b>Wrap Failed</b>\n\nNot enough SOL to wrap ${amountDisplay}.\nKeep at least ${MIN_SOL_FOR_TX} SOL for fees and try again.`,
-          keyboard: createBackToWalletKeyboard(),
-        });
-      },
-      onSuccess: async ({ signature, formattedAmount: amountDisplay }) => {
-        const amountLabel = escapeHtml(amountDisplay ?? "0");
-        const { text, disablePreview } = buildSolscanSuccessMessage({
-          title: "✅ <b>Wrap Completed</b>",
-          bodyLines: [`Wrapped ${amountLabel} SOL to WSOL`],
-          signature,
-        });
-
-        await respondWithMenu(ctx, {
-          text,
-          keyboard: createBackToWalletKeyboard(),
-          disableLinkPreview: disablePreview,
-        });
-      },
-      onError: async (error) => {
-        console.error("Error in wrap confirmation:", error);
-        const userFriendlyError = formatUserFriendlyError(error, wallet);
-        await respondWithMenu(ctx, {
-          text: userFriendlyError,
-          keyboard: createBackToWalletKeyboard(),
-        });
-      },
-    });
-
-    if (result.status === "success") {
-      await safeAnswerCallbackQuery(ctx, "✅ Wrap transaction submitted");
-    } else if (result.status === "insufficient") {
-      await safeAnswerCallbackQuery(ctx, "❌ Insufficient SOL for wrap");
-    } else {
-      await safeAnswerCallbackQuery(ctx, "❌ Error processing wrap");
-    }
-  } catch (error) {
-    console.error("Error in wrap confirmation:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error processing wrap");
-  }
-});
-
 // Handle swap confirmation
 bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
   try {
@@ -5867,275 +2745,6 @@ const generateTransactionId = (): string => {
 // WALLET DATA CACHE
 // ================================
 
-const WALLET_CACHE_DURATION = 30 * 1000; // 30 seconds
-
-type CachedWalletData = {
-  solBalance: number;
-  nativeSolBalance: number;
-  wsolBalance: number;
-  tokenBalances: Array<{
-    mint: string;
-    ticker: string;
-    balance: number;
-    decimals: number;
-    rawBalance: string;
-  }>;
-  approvedTokens: any[];
-};
-
-const walletDataCache = createExpiringCache<CachedWalletData>(
-  WALLET_CACHE_DURATION
-);
-
-// Consistent cache key generator
-const getWalletCacheKey = (telegramId: bigint | number | string): string =>
-  String(telegramId);
-
-/**
- * Get cached wallet data or fetch fresh data
- */
-const getCachedWalletData = async (telegramId: bigint) => {
-  const cacheKey = getWalletCacheKey(telegramId);
-  const stale = walletDataCache.peek(cacheKey);
-  const cached = walletDataCache.get(cacheKey);
-
-  if (cached) {
-    console.log("📦 Using cached wallet data for user:", telegramId.toString());
-    return cached;
-  }
-
-  console.log("🔄 Fetching fresh wallet data for user:", telegramId.toString());
-
-  try {
-    // Fetch fresh data
-    let solBalance = await wallet.getBalance(telegramId);
-    const nativeSolBalance = solBalance;
-    const approvedTokens = tokenManager
-      ? tokenManager.getAllApprovedTokensWithMetadata()
-      : [];
-    let tokenBalances = await wallet.getAllApprovedTokenBalances(
-      telegramId,
-      approvedTokens
-    );
-
-    const wsolToken = tokenBalances.find((token) => token.mint === WSOL_MINT);
-    const wsolBalance = wsolToken?.balance ?? 0;
-
-    // Merge WSOL into SOL using util
-    const merged = mergeWsolIntoSol(solBalance, tokenBalances, WSOL_MINT);
-    solBalance = merged.solLamports;
-    tokenBalances = merged.tokenBalances as typeof tokenBalances;
-
-    const data: CachedWalletData = {
-      solBalance,
-      nativeSolBalance,
-      wsolBalance,
-      tokenBalances,
-      approvedTokens,
-    };
-
-    // Cache the data
-    walletDataCache.setWithTTL(cacheKey, data);
-
-    return data;
-  } catch (error) {
-    console.error("Error fetching wallet data:", error);
-    // Return cached data if available, even if expired
-    if (stale) {
-      console.log("⚠️ Using expired cache due to RPC error");
-      return stale;
-    }
-    throw error;
-  }
-};
-
-// Function to clear wallet cache (useful after token registration)
-function clearWalletCache(telegramId: bigint) {
-  const cacheKey = getWalletCacheKey(telegramId);
-  walletDataCache.delete(cacheKey);
-  console.log(`🗑️ Cleared wallet cache for user: ${telegramId}`);
-}
-
-const defaultWalletActionMenuDeps = {
-  requireTelegramId,
-  getWalletAddress: (telegramId: bigint) =>
-    wallet.getKeyPair(telegramId).publicKey.toBase58(),
-  getWalletBalances: async (
-    telegramId: bigint
-  ): Promise<WalletMenuBalances> => {
-    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-    return { solBalance, tokenBalances };
-  },
-  formatSolBalance: (lamports: number) => wallet.formatSolBalance(lamports),
-  formatTokenBalance: (balance: number, decimals: number) =>
-    wallet.formatTokenBalance(balance, decimals),
-};
-
-// ================================
-// SEND TOKEN INTERFACE HANDLERS
-// ================================
-
-// Handle token selection for send
-registerCallbackPrefixHandler("send_select_", async (ctx, { payload: token }) => {
-  console.log("🔔 Token selected for send:", token);
-
-  try {
-    const { menu } = await buildWalletActionMenuForUser(
-      defaultWalletActionMenuDeps,
-      {
-        ctx,
-        title: `📤 <b>Send ${escapeHtml(token)}</b>`,
-        bodyLines: ({ solBalance, tokenBalances }) => {
-          let balanceDisplay = "0";
-          if (token === "SOL") {
-            balanceDisplay = wallet.formatSolBalance(solBalance);
-          } else {
-            const selectedToken = tokenBalances.find((t) => t.ticker === token);
-          if (selectedToken) {
-            balanceDisplay = wallet.formatTokenBalance(
-              selectedToken.balance,
-              selectedToken.decimals
-            );
-          }
-        }
-
-          return [
-            `<b>From:</b> <code>{{WALLET_ADDRESS}}</code>`,
-            `<b>Balance:</b> ${escapeHtml(balanceDisplay)} ${escapeHtml(token)}`,
-            "",
-            `<b>Quick Send Amounts:</b>`,
-          ];
-        },
-        quickActions: {
-          type: "prebuilt",
-          keyboard: buildQuickAmountKeyboard({
-            baseCallback: (value) =>
-              `send_amount_${token}_${value.toUpperCase()}`,
-            customLabel: "✏️ Custom Amount",
-            backCallback: "cmd_withdraw",
-          }),
-        },
-      }
-    );
-
-    await respondWithMenu(ctx, menu);
-    await safeAnswerCallbackQuery(ctx, `Selected ${token}`);
-  } catch (error) {
-    console.error("Error in send token selection:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error processing selection");
-  }
-});
-
-// Handle amount selection for send
-registerCallbackPrefixHandler("send_amount_", async (ctx, { payload }) => {
-  try {
-    const segments = payload.split("_");
-    const token = segments.shift() ?? "";
-    const amountChoice = segments.join("_");
-    if (!token || !amountChoice) {
-      throw new Error("Invalid amount selection");
-    }
-
-    const userId = getTelegramIdString(ctx);
-    if (!userId) return;
-
-    if (amountChoice === "CUSTOM") {
-      const examples =
-        token === "SOL"
-          ? [`• <code>0.5</code>`, `• <code>1.25</code>`]
-          : [`• <code>1000</code>`, `• <code>250.5</code>`];
-
-      await showCustomAmountPrompt({
-        ctx,
-        userId,
-        title: `✏️ <b>Custom Amount - ${token}</b>`,
-        instructions: [
-          `Reply to this message with the amount you want to send.`,
-        ],
-        examples,
-        cancelCallback: `send_select_${token}`,
-        state: {
-          type: "send_custom_amount",
-          token,
-        },
-      });
-
-      await safeAnswerCallbackQuery(ctx, "Send the amount as a message");
-      return;
-    }
-
-    const telegramId = await getRequiredTelegramIdForContext(
-      ctx,
-      "send amount selection"
-    );
-    if (telegramId == null) {
-      await respondMissingIdentity(ctx);
-      return;
-    }
-    const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-
-    const isSol = token === "SOL";
-    const selectedToken = !isSol
-      ? tokenBalances.find((t) => t.ticker === token)
-      : undefined;
-
-    if (!isSol && !selectedToken) {
-      throw new Error(`Token ${token} not found in wallet`);
-    }
-
-    const exampleAddress = tryGetUserWalletAddress(telegramId);
-    const amountResolution = resolveSendAmountSelection({
-      token,
-      rawAmount: amountChoice,
-      decimals: isSol ? 9 : selectedToken!.decimals,
-      solBalance,
-      tokenBalance: selectedToken
-        ? { balance: selectedToken.balance, decimals: selectedToken.decimals }
-        : undefined,
-      exampleAddress,
-      formatSol: (lamports) => wallet.formatSolBalance(lamports),
-      formatToken: (value, decimals) => wallet.formatTokenBalance(value, decimals),
-    });
-
-    const callbackMessage = ctx.callbackQuery?.message;
-    await persistInputPrompt({
-      ctx,
-      userState: {
-        chatId:
-          typeof callbackMessage?.chat?.id === "number"
-            ? callbackMessage.chat.id
-            : typeof ctx.chat?.id === "number"
-            ? ctx.chat.id
-            : undefined,
-        messageId:
-          typeof callbackMessage?.message_id === "number"
-            ? callbackMessage.message_id
-            : undefined,
-      },
-      text: amountResolution.messageText,
-      keyboard: createCancelKeyboard(`send_select_${token}`),
-      session: {
-        type: "send_address",
-        token,
-        amount: amountResolution.storedAmount,
-        amountDisplay: amountResolution.displayLabel,
-      },
-      logLabel: "send_amount_selection",
-    });
-
-    await safeAnswerCallbackQuery(
-      ctx,
-      `Selected ${amountResolution.displayLabel}`
-    );
-  } catch (error) {
-    console.error("Error in send amount selection:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error processing amount");
-  }
-});
-
-
-
-
 // Handle "GET STARTED" button from bot info screen - triggers /start
 bot.callbackQuery("start_bot", async (ctx) => {
   try {
@@ -6355,12 +2964,11 @@ registerCallbackPrefixHandler(
     console.log("🔔 Swap FROM token selected:", fromToken);
 
     try {
-      const telegramId = await getRequiredTelegramIdForContext(
+      const telegramId = await resolveTelegramIdOrRespond(
         ctx,
         "swap menu from token"
       );
       if (telegramId == null) {
-        await respondMissingIdentity(ctx);
         return;
       }
       const keypair = wallet.getKeyPair(telegramId);
@@ -6446,21 +3054,8 @@ registerCallbackPrefixHandler(
           INPUT_TIMEOUT_HINT,
         ];
 
-        const callbackMessage = ctx.callbackQuery?.message;
-        await persistInputPrompt({
+        await persistInputPromptFromContext({
           ctx,
-          userState: {
-            chatId:
-              typeof callbackMessage?.chat?.id === "number"
-                ? callbackMessage.chat.id
-                : typeof ctx.chat?.id === "number"
-                ? ctx.chat.id
-                : undefined,
-            messageId:
-              typeof callbackMessage?.message_id === "number"
-                ? callbackMessage.message_id
-                : undefined,
-          },
           text: response.join("\n"),
           keyboard: createCancelKeyboard("cmd_swap"),
           session: {
@@ -6561,12 +3156,11 @@ registerCallbackPrefixHandler(
         return;
       }
 
-      const telegramId = await getRequiredTelegramIdForContext(
+      const telegramId = await resolveTelegramIdOrRespond(
         ctx,
         "swap amount selection"
       );
       if (telegramId == null) {
-        await respondMissingIdentity(ctx);
         return;
       }
       const quoteOverrides: {
@@ -6900,14 +3494,6 @@ bot.on("message:text", async (ctx, next) => {
   // Construct session key from chat and message ID
   const sessionKey = `${ctx.chat?.id || 0}_${replyToMessageId}`;
 
-  // Check for game setup session first
-  const gameSession = getGameSetupSession(sessionKey);
-  if (gameSession && (gameSession.waitingFor === "amount_input" || gameSession.waitingFor === "players_input")) {
-    // Handle game setup input
-    await handleGameSetupTextInput(ctx, next);
-    return;
-  }
-
   // Check for input session
   const inputSession = getInputSession(sessionKey);
   if (!inputSession) {
@@ -6961,177 +3547,6 @@ bot.on("message:text", async (ctx, next) => {
     }
   }
 });
-
-/**
- * Handle custom amount input for send
- */
-const handleCustomAmountInput = async (
-  ctx: any,
-  userState: any,
-  amount: string
-) => {
-  const token = userState.token;
-  const telegramId = requireTelegramId(ctx, "send custom amount");
-  const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
-
-  const isSol = token === "SOL";
-  const selectedToken = !isSol
-    ? tokenBalances.find((t) => t.ticker === token)
-    : undefined;
-
-  if (!isSol && !selectedToken) {
-    throw new Error(`Token ${token} not found in wallet`);
-  }
-
-  const exampleAddress = tryGetUserWalletAddress(telegramId);
-  const amountResolution = resolveSendAmountSelection({
-    token,
-    rawAmount: amount,
-    decimals: isSol ? 9 : selectedToken!.decimals,
-    solBalance,
-    tokenBalance: selectedToken
-      ? { balance: selectedToken.balance, decimals: selectedToken.decimals }
-      : undefined,
-    exampleAddress,
-    formatSol: (lamports) => wallet.formatSolBalance(lamports),
-    formatToken: (value, decimals) => wallet.formatTokenBalance(value, decimals),
-  });
-
-  console.log(`💰 Custom amount received: ${amountResolution.displayLabel}`);
-
-  await persistInputPrompt({
-    ctx,
-    userState,
-    text: amountResolution.messageText,
-    keyboard: createCancelKeyboard(`send_select_${token}`),
-    session: {
-      type: "send_address",
-      token,
-      amount: amountResolution.storedAmount,
-      amountDisplay: amountResolution.displayLabel,
-    },
-    logLabel: "handleCustomAmountInput",
-  });
-};
-
-/**
- * Handle wallet address input for send
- */
-const handleAddressInput = async (
-  ctx: any,
-  userState: any,
-  address: string
-) => {
-  const token = userState.token;
-  const amount = userState.amount;
-  const amountDisplay =
-    userState.amountDisplay ??
-    (amount === "max" ? `MAX ${token}` : `${amount} ${token}`);
-
-  // Basic Solana address validation (should be ~44 characters)
-  if (address.length < 30 || address.length > 50) {
-    throw new Error("Invalid wallet address format");
-  }
-
-  console.log(`📍 Address received for ${amountDisplay}: ${address}`);
-
-  // Generate unique transaction ID and store transaction details
-  const txId = generateTransactionId();
-  storePendingTransaction(txId, {
-    type: "send",
-    token: token,
-    amount: amount,
-    address: address,
-    userId: getTelegramId(ctx).toString(),
-    amountDisplay,
-  });
-
-  const response = [
-    `✅ <b>Send Confirmation</b>`,
-    "",
-    `<b>Amount:</b> ${escapeHtml(amountDisplay)}`,
-    `<b>To:</b> <code>${escapeHtml(address)}</code>`,
-    "",
-    `⚠️ <b>Please confirm this transaction</b>`,
-    `This action cannot be undone.`,
-  ];
-
-  const messageText = response.join("\n");
-  const keyboard = createTradeConfirmKeyboard({
-    confirmLabel: "✅ Confirm Send",
-    confirmCallback: `confirm_send_${txId}`,
-    cancelLabel: "❌ Cancel",
-    cancelCallback: `send_select_${token}`,
-  });
-
-  const targetChatId =
-    typeof userState.chatId === "number"
-      ? userState.chatId
-      : typeof ctx.chat?.id === "number"
-      ? ctx.chat.id
-      : undefined;
-  const targetMessageId =
-    typeof userState.messageId === "number" ? userState.messageId : undefined;
-
-  await upsertWalletMenuMessage({
-    ctx,
-    text: messageText,
-    keyboard,
-    parseMode: "HTML",
-    targetChatId,
-    targetMessageId,
-    replyToMessageId: ctx.message?.message_id ?? undefined,
-    logLabel: "handleAddressInput",
-  });
-};
-
-/**
- * Handle wrap amount input
- */
-const handleWrapAmountInput = async (
-  ctx: any,
-  userState: any,
-  amount: string
-) => {
-  const trimmedAmount = amount.trim();
-  const lamportsToWrap = toRawAmount(trimmedAmount, 9);
-
-  if (!Number.isFinite(lamportsToWrap) || lamportsToWrap <= 0) {
-    throw new Error("Invalid amount format");
-  }
-
-  const telegramId = requireTelegramId(ctx, "wrap custom amount input");
-  let nativeSolBalance = 0;
-  let wsolBalance = 0;
-
-  try {
-    const balances = await getCachedWalletData(telegramId);
-    nativeSolBalance = balances.nativeSolBalance;
-    wsolBalance = balances.wsolBalance;
-  } catch (error) {
-    console.warn("Failed to load wallet balances for wrap confirmation:", error);
-  }
-
-  const confirmation = buildWrapConfirmation({
-    lamportsToWrap,
-    availableSolLamports: nativeSolBalance,
-    currentWsolLamports: wsolBalance,
-  });
-
-  console.log(`🔧 Wrap amount received: ${confirmation.displayAmount} SOL`);
-
-  const userId = getTelegramIdString(ctx);
-
-  await persistInputPrompt({
-    ctx,
-    userState,
-    text: confirmation.text,
-    keyboard: confirmation.keyboard,
-    session: { type: "wrap_custom_amount" },
-    logLabel: "handleWrapAmountInput",
-    persistSession: Boolean(userId),
-  });
-};
 
 /**
  * Handle swap token input (when user sends token mint or symbol)

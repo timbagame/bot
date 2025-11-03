@@ -281,6 +281,34 @@ export const respondMissingIdentity = async (
   await safeAnswerCallbackQuery(ctx, MISSING_TELEGRAM_ID_CALLBACK_MESSAGE);
 };
 
+export type ResolveTelegramIdOptions = {
+  onMissing?: MissingTelegramIdHandler;
+  logMessage?: string;
+};
+
+export const resolveTelegramIdOrRespond = async (
+  ctx: Context,
+  contextDescription: string,
+  options: ResolveTelegramIdOptions = {}
+): Promise<bigint | null> => {
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    contextDescription,
+    { onMissing: options.onMissing }
+  );
+
+  if (telegramId == null) {
+    await respondMissingIdentity(ctx, {
+      logMessage:
+        options.logMessage ??
+        `Missing Telegram ID for ${contextDescription}`,
+    });
+    return null;
+  }
+
+  return telegramId;
+};
+
 /**
  * Enhanced error handler for callback queries
  */
