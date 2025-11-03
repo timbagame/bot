@@ -226,6 +226,45 @@ test("parseAmount preserves explicit WSOL mint without switching to SOL", async 
   expect(data.requestedNativeSol).toBe(false);
 });
 
+test("registerTokenIfNeeded fails when metadata decimals invalid", async () => {
+  TokenManager.resetForTesting();
+  const invalidDecimalsWallet = {
+    ...makeWalletStub(),
+    getTokenMetadata: async () => ({ decimals: -1 }),
+    getFullTokenMetadata: async () => ({ symbol: "BAD", decimals: -1 }),
+  };
+
+  const tm = TokenManager.getInstance(
+    invalidDecimalsWallet as any,
+    "DEF_MINT",
+    "DEF"
+  );
+
+  const mint = Keypair.generate().publicKey.toBase58();
+  const result = await tm.registerTokenIfNeeded({ mint, tickerHint: "BAD" });
+
+  expect(result.status).toBe("failed");
+  expect(tm.getKnownTokenByMint(mint)).toBeNull();
+});
+
+test("registerTokenIfNeeded ignores excessive decimal metadata", async () => {
+  TokenManager.resetForTesting();
+  const wallet = {
+    ...makeWalletStub(),
+    getTokenMetadata: async () => ({ decimals: 99 }),
+    getFullTokenMetadata: async () => ({ symbol: "DISC", decimals: 6 }),
+  };
+
+  const tm = TokenManager.getInstance(wallet as any, "DEF_MINT", "DEF");
+  const mint = Keypair.generate().publicKey.toBase58();
+
+  const result = await tm.registerTokenIfNeeded({ mint, tickerHint: "DISC" });
+
+  expect(result.status).toBe("registered");
+  const stored = tm.getKnownTokenByMint(mint);
+  expect(stored?.decimals).toBe(6);
+});
+
 test("resolveSwapToken treats explicit WSOL mint as SPL token metadata", async () => {
   const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
   const info = await tm.resolveSwapToken(WSOL_MINT);

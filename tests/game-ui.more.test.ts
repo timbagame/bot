@@ -72,3 +72,11 @@ test("buildParticipantsList formats numbered list", () => {
 test("buildParticipantsList empty yields empty string", () => {
   expect(buildParticipantsList([])).toBe("");
 });
+
+test("buildParticipantsList escapes markup in usernames", () => {
+  const list = buildParticipantsList(["<b>bold</b>", "user & co"]);
+  expect(list).toContain("1. &lt;b&gt;bold&lt;/b&gt;");
+  expect(list).toContain("2. user &amp; co");
+  expect(list).not.toContain("<b>bold</b>");
+  expect(list).not.toContain("user & co");
+});

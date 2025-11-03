@@ -4,6 +4,8 @@ import {
   getTelegramId,
   requireTelegramId,
   MissingTelegramIdError,
+  getRequiredTelegramIdForContext,
+  MISSING_TELEGRAM_ID_MESSAGE,
 } from "../src/utils/context-helpers";
 import { truncateMessage } from "../src/utils/errors";
 
@@ -73,4 +75,19 @@ test("requireTelegramId throws custom error when missing", () => {
   const ctx = { from: { id: undefined } } as any;
   expect(() => requireTelegramId(ctx, "test"))
     .toThrow(MissingTelegramIdError);
+});
+
+test("getRequiredTelegramIdForContext notifies when identity missing", async () => {
+  const replies: string[] = [];
+  const ctx = {
+    from: undefined,
+    reply: async (message: string) => {
+      replies.push(message);
+    },
+    message: { message_id: 42 },
+  } as any;
+
+  const result = await getRequiredTelegramIdForContext(ctx, "test command");
+  expect(result).toBeNull();
+  expect(replies).toEqual([MISSING_TELEGRAM_ID_MESSAGE]);
 });

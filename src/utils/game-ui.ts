@@ -69,7 +69,7 @@ export function buildPrizeLine(
  */
 export function buildParticipantsList(usernames: string[]): string {
   if (!usernames.length) return "";
-  const lines = usernames.map((u, i) => `${i + 1}. ${u}`);
+  const lines = usernames.map((u, i) => `${i + 1}. ${escapeHtml(u)}`);
   return `\n${lines.join("\n")}\n`;
 }
 

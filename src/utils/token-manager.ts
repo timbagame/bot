@@ -60,6 +60,8 @@ type ResolvedTokenMetadata = {
   isNativeSol?: boolean;
 };
 
+const MAX_SUPPORTED_TOKEN_DECIMALS = 18;
+
 // ================================
 // MULTI-TOKEN MANAGER
 // ================================
@@ -91,6 +93,7 @@ export class TokenManager {
     | null = null;
   private readonly approvedTokensCacheTtlMs =
     TOKEN_MANAGER_APPROVED_CACHE_TTL_MS;
+  private readonly maxSupportedDecimals = MAX_SUPPORTED_TOKEN_DECIMALS;
 
   private constructor(
     wallet: WalletManager,
@@ -152,6 +155,23 @@ export class TokenManager {
     }
 
     return this.pumpFunClient;
+  }
+
+  private normalizeDecimals(value: number | null | undefined): number | null {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return null;
+    }
+
+    const integer = Math.trunc(value);
+    if (integer !== value) {
+      return null;
+    }
+
+    if (integer < 0 || integer > this.maxSupportedDecimals) {
+      return null;
+    }
+
+    return integer;
   }
 
   private snapshotApprovedTokens(
@@ -254,12 +274,13 @@ export class TokenManager {
       value: number | null | undefined,
       { allowOverride = false }: { allowOverride?: boolean } = {}
     ) => {
-      if (typeof value !== "number" || !Number.isFinite(value)) {
+      const normalized = this.normalizeDecimals(value ?? undefined);
+      if (normalized === null) {
         return;
       }
 
       if (decimals === undefined || allowOverride) {
-        decimals = value;
+        decimals = normalized;
       }
     };
 
@@ -414,6 +435,11 @@ export class TokenManager {
       return null;
     }
 
+    const sanitizedDecimals = this.normalizeDecimals(decimals);
+    if (sanitizedDecimals === null) {
+      return null;
+    }
+
     if (!resolvedTicker) {
       resolvedTicker = `TOKEN_${mint.toUpperCase()}`;
     }
@@ -422,7 +448,7 @@ export class TokenManager {
 
     return {
       ticker: resolvedTicker,
-      decimals,
+      decimals: sanitizedDecimals,
       isPumpFun: pumpMetadata?.isPumpFun,
       isNativeSol,
     };
@@ -686,15 +712,23 @@ export class TokenManager {
     decimalsOverride?: number
   ): Promise<boolean> {
     try {
-      const metadata =
+      const decimalsCandidate =
         typeof decimalsOverride === "number"
-          ? { decimals: decimalsOverride }
-          : await this.wallet.getTokenMetadata(tokenMint);
+          ? this.normalizeDecimals(decimalsOverride)
+          : this.normalizeDecimals(
+              (await this.wallet.getTokenMetadata(tokenMint)).decimals
+            );
+
+      if (decimalsCandidate === null) {
+        throw new Error(
+          `Invalid token decimals received for ${ticker.toUpperCase()}`
+        );
+      }
 
       this.tokenDb.addKnownToken(
         tokenMint,
         ticker.toUpperCase(),
-        metadata.decimals
+        decimalsCandidate
       );
       this.invalidateApprovedTokensCache();
       return true;
