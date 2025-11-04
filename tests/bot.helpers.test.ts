@@ -212,7 +212,7 @@ describe("Bot helper utilities", () => {
     // Test that chat initialization helpers are accessible and work
     botModule.__test_resetInitiatedChats();
     expect(botModule.__test_getInitiatedChats().size).toBe(0);
-    
+
     // showBotInfoScreen was removed as part of cleanup
     // This test now focuses on the remaining helper functions
     expect(botModule.__test_resetInitiatedChats).toBeDefined();
@@ -403,11 +403,119 @@ describe("Bot helper utilities", () => {
     });
   });
 
+  test("formatTradeConfirmationSummary escapes dynamic fields for HTML output", () => {
+    const rawAmount = 100_000;
+    const quote = {
+      inputMint: "InMint",
+      outputMint: "OutMint",
+      inputAmount: rawAmount.toString(),
+      inputAmountRaw: rawAmount.toString(),
+      outputAmount: "250000",
+      estimatedRate: 0,
+      slippage: 1,
+      provider: "jupiter" as const,
+    };
+
+    const summary = botModule.__test_formatTradeConfirmationSummary({
+      kind: "swap",
+      payToken: "<SOL>",
+      payDisplay: "<0.1>",
+      payRawAmount: rawAmount,
+      payDecimals: 9,
+      receiveToken: "TIMBA & Co",
+      receiveDecimals: 6,
+      quote,
+      contractAddress: "Mint<unsafe>",
+    });
+
+    expect(summary.message).not.toContain("<SOL>");
+    expect(summary.message).not.toContain("TIMBA & Co");
+    expect(summary.message).toContain("&lt;SOL&gt;");
+    expect(summary.message).toContain("TIMBA &amp; Co");
+    expect(summary.message).toContain("Mint&lt;unsafe&gt;");
+  });
+
   test("formatSlippageOptionLabel formats bps cleanly", () => {
     expect(botModule.__test_formatSlippageOptionLabel(2)).toBe("0.02%");
     expect(botModule.__test_formatSlippageOptionLabel(10)).toBe("0.1%");
     expect(botModule.__test_formatSlippageOptionLabel(50)).toBe("0.5%");
     expect(botModule.__test_formatSlippageOptionLabel(100)).toBe("1%");
+  });
+
+  test("parseOracleNumeric returns null for values above Number.MAX_SAFE_INTEGER", () => {
+  const hugeResult = botModule.__test_parseOracleNumeric(2n ** 60n);
+    expect(hugeResult).toBeNull();
+  });
+
+  test("validateAndProcessTransaction allows SOL + WSOL withdraw-all flow", async () => {
+    const original = {
+      getKeyPair: botModule.wallet.getKeyPair,
+      getTokenBalance: botModule.wallet.getTokenBalance,
+      getBalance: botModule.wallet.getBalance,
+      getTokenMetadata: botModule.wallet.getTokenMetadata,
+      formatSolBalance: botModule.wallet.formatSolBalance,
+      formatTokenBalance: botModule.wallet.formatTokenBalance,
+    };
+
+    const solBalance = 1_000_000_000;
+    const wsolBalance = 2_000_000_000;
+    const totalLamports = solBalance + wsolBalance;
+
+    try {
+      botModule.wallet.getKeyPair = (() => ({
+        publicKey: { toBase58: () => "test-player" },
+      })) as any;
+      botModule.wallet.getTokenBalance = (async (
+        _telegramId: bigint,
+        mint: string
+      ) => (mint === WSOL_MINT ? wsolBalance : 0)) as any;
+      botModule.wallet.getBalance = (async () => solBalance) as any;
+      botModule.wallet.getTokenMetadata = (async () => ({ decimals: 9 })) as any;
+      botModule.wallet.formatSolBalance = ((lamports: number) =>
+        `${lamports / 1_000_000_000} SOL`) as any;
+      botModule.wallet.formatTokenBalance = ((amount: number) =>
+        `${amount / 1_000_000_000}`) as any;
+
+      const replies: string[] = [];
+      const edits: string[] = [];
+      const ctx: any = {
+        chat: { id: 42 },
+        message: { message_id: 7 },
+        reply: async (text: string) => {
+          replies.push(text);
+          return { message_id: 999 };
+        },
+        api: {
+          editMessageText: async (_chatId: number, _msgId: number, text: string) => {
+            edits.push(text);
+          },
+        },
+      };
+
+      let transactionCalls = 0;
+      await botModule.__test_validateAndProcessTransaction(
+        ctx,
+        123n,
+        totalLamports,
+        true,
+        "SOL withdrawal",
+        async () => {
+          transactionCalls += 1;
+          return "sig-123";
+        }
+      );
+
+      expect(replies.some((msg) => msg.includes("unwrap WSOL"))).toBe(false);
+      expect(transactionCalls).toBe(1);
+      expect(edits.join(" ")).toContain("sig-123");
+    } finally {
+      botModule.wallet.getKeyPair = original.getKeyPair;
+      botModule.wallet.getTokenBalance = original.getTokenBalance;
+      botModule.wallet.getBalance = original.getBalance;
+      botModule.wallet.getTokenMetadata = original.getTokenMetadata;
+      botModule.wallet.formatSolBalance = original.formatSolBalance;
+      botModule.wallet.formatTokenBalance = original.formatTokenBalance;
+    }
   });
 
   test("swap slippage state defaults and persists per user", () => {

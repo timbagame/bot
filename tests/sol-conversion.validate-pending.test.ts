@@ -56,4 +56,33 @@ describe("validatePendingTransaction", () => {
     }
     expect(getPendingTransaction(txId, false)).toBeUndefined();
   });
+
+  test("returns expired when transaction timestamp exceeds input timeout", () => {
+    const originalNow = Date.now;
+    try {
+      let current = 10_000;
+      Date.now = () => current;
+
+      storePendingTransaction(txId, {
+        type: "send",
+        userId: "123",
+        token: "SOL",
+        amount: "1",
+        address: "FhvxPt3M79xMBZZhNX3eVfn3DrM6vjrE1rjhyu5x1t8L",
+      });
+
+      current += 16 * 60 * 1000; // advance beyond INPUT_TIMEOUT_MS (15 min default)
+
+      const expired = validatePendingTransaction(
+        { from: { id: 123 } } as any,
+        txId,
+        "send"
+      );
+
+      expect(expired.status).toBe("expired");
+      expect(getPendingTransaction(txId, false)).toBeUndefined();
+    } finally {
+      Date.now = originalNow;
+    }
+  });
 });
