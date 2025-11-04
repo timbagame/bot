@@ -5,6 +5,7 @@ import { run, sequentialize } from "@grammyjs/runner";
 import { WalletManager } from "./utils/wallet";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import * as anchor from "@coral-xyz/anchor";
+import { EventParser } from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
@@ -1022,6 +1023,174 @@ const processGameCompletion = async (
   console.log(`✅ Processed game completion: ${gameAddress} with prize: ${totalPot}`);
 };
 
+const COMPLETION_SIGNATURE_LOOKBACK = 25;
+
+type CompletionDetails = {
+  winnerAddress: string;
+  totalPot?: number;
+  signature?: string;
+};
+
+const toBase58String = (value: unknown): string => {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "object" && value !== null) {
+    const candidate = value as {
+      toBase58?: () => string;
+      toString?: () => string;
+    };
+
+    if (typeof candidate.toBase58 === "function") {
+      return candidate.toBase58();
+    }
+
+    if (typeof candidate.toString === "function") {
+      return candidate.toString();
+    }
+  }
+
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+
+  return String(value ?? "");
+};
+
+const bnLikeToNumber = (value: unknown): number | undefined => {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value === "number") {
+    return value;
+  }
+
+  if (typeof value === "bigint") {
+    return Number(value);
+  }
+
+  if (typeof value === "object") {
+    const candidate = value as {
+      toNumber?: () => number;
+      toString?: () => string;
+    };
+
+    if (typeof candidate.toNumber === "function") {
+      try {
+        return candidate.toNumber();
+      } catch {
+        // Fall through to string parsing if the number is too large
+      }
+    }
+
+    if (typeof candidate.toString === "function") {
+      const numericValue = Number(candidate.toString());
+      if (!Number.isNaN(numericValue)) {
+        return numericValue;
+      }
+    }
+  }
+
+  return undefined;
+};
+
+const parseCompletionEventFromLogs = (
+  logs: readonly string[] | null | undefined,
+  parser: EventParser,
+  expectedGameAddress: string
+): Omit<CompletionDetails, "signature"> | null => {
+  if (!logs?.length) {
+    return null;
+  }
+
+  const mutableLogs = [...logs];
+
+  for (const event of parser.parseLogs(mutableLogs)) {
+    if (!event || (event.name !== "gameCompleted" && event.name !== "GameCompleted")) {
+      continue;
+    }
+
+    const data = event.data as Record<string, unknown> | undefined;
+    if (!data) {
+      continue;
+    }
+
+  const eventGameAddress = toBase58String(data["gameKey"]);
+    if (!eventGameAddress || eventGameAddress !== expectedGameAddress) {
+      continue;
+    }
+
+  const winnerAddress = toBase58String(data["winner"]);
+    if (!winnerAddress) {
+      continue;
+    }
+
+  const totalPot = bnLikeToNumber(data["winnerAmount"]);
+
+    return {
+      winnerAddress,
+      totalPot,
+    };
+  }
+
+  return null;
+};
+
+const fetchCompletionDetailsFromHistory = async (
+  gameAddress: string
+): Promise<CompletionDetails | null> => {
+  if (!program) {
+    return null;
+  }
+
+  try {
+    const gamePda = new PublicKey(gameAddress);
+    const connection = wallet.getConnection();
+    const signatures = await connection.getSignaturesForAddress(gamePda, {
+      limit: COMPLETION_SIGNATURE_LOOKBACK,
+    });
+
+    if (!signatures.length) {
+      return null;
+    }
+
+    const parser = new EventParser(program.programId, program.coder);
+
+    for (const { signature } of signatures) {
+      if (!signature) {
+        continue;
+      }
+
+      const transaction = await connection.getTransaction(signature, {
+        commitment: "confirmed",
+        maxSupportedTransactionVersion: 0,
+      });
+
+      const parsed = parseCompletionEventFromLogs(
+        transaction?.meta?.logMessages ?? null,
+        parser,
+        gameAddress
+      );
+
+      if (parsed) {
+        return {
+          ...parsed,
+          signature,
+        };
+      }
+    }
+  } catch (error) {
+    console.error(
+      `Error reconstructing completion history for ${gameAddress}:`,
+      error
+    );
+  }
+
+  return null;
+};
+
 /**
  * Clean up orphaned games (accounts closed but DB shows active)
  */
@@ -1030,6 +1199,22 @@ const cleanupOrphanedGame = async (gameAddress: string): Promise<void> => {
   if (!gameData || gameData.status === "completed") return;
 
   console.log(`🧹 Cleaning up orphaned game ${gameAddress}`);
+
+  const completionDetails = await fetchCompletionDetailsFromHistory(gameAddress);
+  if (completionDetails) {
+    console.log(
+      `♻️ Reconstructed completion for ${gameAddress} from transaction history`
+    );
+
+    await processGameCompletion(
+      gameAddress,
+      completionDetails.winnerAddress,
+      completionDetails.totalPot,
+      completionDetails.signature
+    );
+
+    return;
+  }
 
   gameDb.completeGame(gameAddress, "cancelled", Date.now());
   await updateGameMessageSafely(
