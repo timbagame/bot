@@ -1,9 +1,9 @@
 import { describe, test, expect, beforeAll, beforeEach, afterEach } from "bun:test";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, Keypair } from "@solana/web3.js";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GameDatabase } from "../src/utils/game-database";
+import type { GameData } from "../src/types";
 
 process.env["NODE_ENV"] = "test";
 process.env["MNEMONIC"] ??=
@@ -14,13 +14,16 @@ process.env["BOT_DB_DIR"] ??= mkdtempSync(join(tmpdir(), "timba-bot-tests-"));
 
 const botModulePromise = import("../src/bot");
 
-const GAME_ADDRESS = "7kMeeUSALZ4taJDK5o1e8FGKS2ZEZND3NBgY3qEN66Bx";
+const createTestGameAddress = () => Keypair.generate().publicKey.toBase58();
 
-const createCompletionEvent = (overrides: Partial<Record<string, unknown>> = {}) => ({
+const createCompletionEvent = (
+  gameAddress: string,
+  overrides: Partial<Record<string, unknown>> = {}
+) => ({
   name: "GameCompleted",
   data: {
     gameKey: {
-      toBase58: () => GAME_ADDRESS,
+      toBase58: () => gameAddress,
     },
     winner: {
       toBase58: () => "WinnerPubkey",
@@ -54,16 +57,17 @@ describe("Game completion recovery", () => {
   });
 
   test("parses completion data from logs", () => {
+    const gameAddress = createTestGameAddress();
     const fakeParser = {
       *parseLogs(_logs: string[]) {
-        yield createCompletionEvent();
+        yield createCompletionEvent(gameAddress);
       },
     } as any;
 
     const parsed = botModule.__test_parseCompletionEventFromLogs(
       ["Program log"],
       fakeParser,
-      GAME_ADDRESS
+      gameAddress
     );
 
     expect(parsed).toEqual({
@@ -73,6 +77,7 @@ describe("Game completion recovery", () => {
   });
 
   test("fetches completion details from transaction history", async () => {
+    const gameAddress = createTestGameAddress();
     const connectionStub = {
       getSignaturesForAddress: async () => [
         {
@@ -94,13 +99,13 @@ describe("Game completion recovery", () => {
 
     botModule.__test_setCompletionEventParserFactory(() => ({
       *parseLogs(_logs: string[]) {
-        yield createCompletionEvent();
+        yield createCompletionEvent(gameAddress);
       },
     } as any));
 
     try {
       const details = await botModule.__test_fetchCompletionDetailsFromHistory(
-        GAME_ADDRESS
+        gameAddress
       );
 
       expect(details).toEqual({
@@ -114,50 +119,86 @@ describe("Game completion recovery", () => {
   });
 
   test("cleanup uses reconstructed completion details", async () => {
-    const completionSpy: Array<unknown[]> = [];
+    const gameAddress = createTestGameAddress();
+  const gameDb = botModule.__test_getGameDatabase();
+    const completionCalls: Array<[string, string, number | undefined, string | undefined]> = [];
+    const historyCalls: string[] = [];
 
-    botModule.__test_setCompletionHistoryFetcher(async () => ({
-      winnerAddress: "RecoveredWinner",
-      totalPot: 42_000,
-      signature: "sig123",
-    }));
-
-    botModule.__test_setProcessGameCompletionHandler(async (...args) => {
-      completionSpy.push(args);
-    });
-
-    const gameDb = GameDatabase.getInstance();
     const originalGetGame = gameDb.getGame.bind(gameDb);
-
     const originalCompleteGame = gameDb.completeGame.bind(gameDb);
 
-    gameDb.getGame = (() => ({
-      game_address: GAME_ADDRESS,
-      status: "active",
+    const stubGameRecord: GameData = {
+      game_address: gameAddress,
+      creator_telegram_id: "creator",
       amount: 12_000,
-      token_ticker: "TIMBA",
+      created_at: Date.now(),
+  status: "active",
+  winner_address: undefined,
+  completed_at: undefined,
+  message_id: undefined,
+  chat_id: undefined,
+      game_type: "coinflip",
       token_mint: "Mint",
-      chat_id: null,
-      message_id: null,
+      token_ticker: "TIMBA",
       max_players: 2,
       min_players: 2,
-    })) as any;
+    };
 
-    const cancellationCalls: Array<[string, string]> = [];
-    gameDb.completeGame = ((address: string, winner: string) => {
-      cancellationCalls.push([address, winner]);
-    }) as any;
+    const gameDbAny = gameDb as unknown as {
+      getGame: typeof gameDb.getGame;
+      completeGame: typeof gameDb.completeGame;
+    };
+
+    gameDbAny.getGame = (address: string) => {
+      if (address === gameAddress) {
+        return stubGameRecord as any;
+      }
+      return originalGetGame(address);
+    };
+
+    gameDbAny.completeGame = (
+      address: string,
+      winner: string,
+      completedAt?: number
+    ) => {
+      if (address === gameAddress) {
+        stubGameRecord.status = "completed";
+        stubGameRecord.winner_address = winner;
+        stubGameRecord.completed_at = completedAt ?? Date.now();
+        return;
+      }
+      originalCompleteGame(address, winner, completedAt);
+    };
+
+    botModule.__test_setCompletionHistoryFetcher(async () => {
+      historyCalls.push(gameAddress);
+      return {
+        winnerAddress: "RecoveredWinner",
+        totalPot: 42_000,
+        signature: "sig123",
+      };
+    });
+
+    botModule.__test_setProcessGameCompletionHandler(
+      async (address, winner, totalPot, signature) => {
+        completionCalls.push([address, winner, totalPot, signature]);
+        gameDbAny.completeGame(address, winner, Date.now());
+      }
+    );
 
     try {
-      await botModule.__test_cleanupOrphanedGame(GAME_ADDRESS);
-
-      expect(completionSpy).toEqual([
-        [GAME_ADDRESS, "RecoveredWinner", 42_000, "sig123"],
-      ]);
-      expect(cancellationCalls).toEqual([]);
+      await botModule.__test_cleanupOrphanedGame(gameAddress);
     } finally {
-      gameDb.getGame = originalGetGame;
-      gameDb.completeGame = originalCompleteGame;
+      gameDbAny.getGame = originalGetGame;
+      gameDbAny.completeGame = originalCompleteGame;
     }
+
+    expect(historyCalls).toEqual([gameAddress]);
+    expect(completionCalls).toEqual([
+      [gameAddress, "RecoveredWinner", 42_000, "sig123"],
+    ]);
+
+    expect(stubGameRecord.status).toBe("completed");
+    expect(stubGameRecord.winner_address).toBe("RecoveredWinner");
   });
 });

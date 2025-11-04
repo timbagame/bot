@@ -146,7 +146,7 @@ void (async () => {
     console.warn("Failed to refresh dynamic fee budgets during startup:", error);
   }
 })();
-const gameDb = GameDatabase.getInstance();
+let gameDb = GameDatabase.getInstance();
 const pendingGameCreations = new Set<string>();
 
 let oracleMaxTickets = 100;
@@ -281,6 +281,16 @@ const CONTRACT_EXAMPLE_LINES = (() => {
 // User sessions for text input handling
 export const __test_setGameManager = (manager: GameManager): void => {
   gameManager = manager;
+};
+
+export const __test_getGameDatabase = () => gameDb;
+
+export const __test_setGameDatabase = (db: GameDatabase) => {
+  gameDb = db;
+};
+
+export const __test_resetGameDatabase = () => {
+  gameDb = GameDatabase.getInstance();
 };
 
 // Test-only proxies for user-state helpers
