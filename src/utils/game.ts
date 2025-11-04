@@ -93,6 +93,8 @@ const getConfirmationRetryDelays = (): number[] => {
   return CONFIRMATION_RETRY_DELAYS_MS;
 };
 
+const TELEGRAM_MESSAGE_CHAR_LIMIT = 4096;
+
 type GameTokenContextAccounts = {
   tokenMint: PublicKey;
   gameToken: PublicKey;
@@ -278,9 +280,9 @@ export class GameManager {
     throw new Error("Unable to resolve Solana connection");
   }
 
-  private buildUsernameCacheKey(ctx: Context, telegramId: number): string {
+  private buildUsernameCacheKey(ctx: Context, telegramId: string): string {
     const chatId = ctx.chat?.id ?? ctx.from?.id ?? "global";
-    return `${chatId}:${telegramId}`;
+    return `${String(chatId)}:${telegramId}`;
   }
 
   private removeUsernameCacheKey(key: string): void {
@@ -1277,8 +1279,8 @@ export class GameManager {
     telegramId: string
   ): Promise<string | null> {
     try {
-      const numericId = parseInt(telegramId, 10);
-      if (isNaN(numericId)) {
+      const trimmedId = telegramId.trim();
+      if (!/^\d+$/.test(trimmedId)) {
         throw new Error(`Invalid Telegram ID: ${telegramId}`);
       }
 
@@ -1287,32 +1289,39 @@ export class GameManager {
         throw new Error("Chat context is required to resolve usernames");
       }
 
-      const key = this.buildUsernameCacheKey(ctx, numericId);
-      const cached = this.usernameCache.get(key);
+      const cacheKey = this.buildUsernameCacheKey(ctx, trimmedId);
+      const cached = this.usernameCache.get(cacheKey);
       if (cached !== undefined) {
         return cached;
       }
 
-      this.usernameCache.delete(key);
-      this.removeUsernameCacheKey(key);
+      this.usernameCache.delete(cacheKey);
+      this.removeUsernameCacheKey(cacheKey);
 
-      let lookup = this.usernameLookupPromises.get(key);
+      let lookup = this.usernameLookupPromises.get(cacheKey);
       if (!lookup) {
         lookup = (async () => {
           try {
-            const chatMember = await ctx.api.getChatMember(chatId, numericId);
+            const maybeNumericId = Number(trimmedId);
+            const targetId = Number.isSafeInteger(maybeNumericId)
+              ? maybeNumericId
+              : trimmedId;
+            const chatMember = await (ctx.api as any).getChatMember(
+              chatId,
+              targetId
+            );
             const resolved =
               chatMember.user.username || chatMember.user.first_name || null;
-            this.setCachedUsername(key, resolved);
+            this.setCachedUsername(cacheKey, resolved);
             return resolved;
           } catch (fetchError) {
-            this.setCachedUsername(key, null);
+            this.setCachedUsername(cacheKey, null);
             throw fetchError;
           } finally {
-            this.usernameLookupPromises.delete(key);
+            this.usernameLookupPromises.delete(cacheKey);
           }
         })();
-        this.usernameLookupPromises.set(key, lookup);
+        this.usernameLookupPromises.set(cacheKey, lookup);
       }
 
       return await lookup;
@@ -1680,8 +1689,6 @@ export class GameManager {
       maxTickets,
       usdApproximation?.text
     );
-    let messageText = header;
-
     // Show current prize if different from base amount
     let prizeUsdApproximation: string | null = null;
     if (usdApproximation) {
@@ -1707,32 +1714,26 @@ export class GameManager {
       tokenTicker,
       prizeUsdApproximation
     );
-    messageText += prize;
 
-    // Add list of players if any have joined
+    const baseBeforeParticipants = header + prize;
+
+    const participantDisplayNames: string[] = [];
     if (currentTickets > 0) {
       try {
         const participants = this.getGamePlayers(gamePda.toBase58());
-        if (participants.length > 0) {
-          const playerNames = await Promise.all(
-            participants.map(async (telegramId) => {
-              try {
-                const username = await this.getUsernameFromTelegramId(
-                  ctx,
-                  telegramId
-                );
-                return username ? `@${username}` : `Player ${telegramId.slice(0, 6)}...`;
-              } catch (error) {
-                return `Player ${telegramId.slice(0, 6)}...`;
-              }
-            })
-          );
-          const participantsList = buildParticipantsList(playerNames);
-          if (participantsList) {
-            messageText += participantsList;
-            if (isCompleted && messageText.endsWith("\n")) {
-              messageText = messageText.slice(0, -1);
-            }
+        for (const telegramId of participants) {
+          try {
+            const username = await this.getUsernameFromTelegramId(
+              ctx,
+              telegramId
+            );
+            participantDisplayNames.push(
+              username ? `@${username}` : `Player ${telegramId.slice(0, 6)}...`
+            );
+          } catch {
+            participantDisplayNames.push(
+              `Player ${telegramId.slice(0, 6)}...`
+            );
           }
         }
       } catch (error) {
@@ -1740,13 +1741,55 @@ export class GameManager {
       }
     }
 
-    // Add status and expiration info for active games
-    if (!isCompleted) {
-      const statusText = buildGameStatus(currentTickets, minTickets, maxTickets);
-      messageText += `\nStatus: ${statusText}${expirationInfo}`;
+    const statusSection = !isCompleted
+      ? `\nStatus: ${buildGameStatus(
+          currentTickets,
+          minTickets,
+          maxTickets
+        )}${expirationInfo}`
+      : "";
+
+    const composeMessage = (
+      names: string[],
+      omittedCount: number
+    ): string => {
+      const participantsSection =
+        names.length > 0 ? buildParticipantsList(names) : "";
+      let message = baseBeforeParticipants + participantsSection;
+      if (isCompleted && participantsSection.endsWith("\n")) {
+        message = message.slice(0, -1);
+      }
+      if (omittedCount > 0) {
+        message += `\n… and ${omittedCount} more`;
+      }
+      message += statusSection;
+      message += winnerInfo;
+      return message;
+    };
+
+    let messageText = composeMessage(participantDisplayNames, 0);
+
+    if (
+      messageText.length > TELEGRAM_MESSAGE_CHAR_LIMIT &&
+      participantDisplayNames.length > 0
+    ) {
+      for (let keep = participantDisplayNames.length; keep >= 0; keep -= 1) {
+        const omitted = participantDisplayNames.length - keep;
+        const candidate = composeMessage(
+          participantDisplayNames.slice(0, keep),
+          omitted
+        );
+        if (candidate.length <= TELEGRAM_MESSAGE_CHAR_LIMIT || keep === 0) {
+          messageText = candidate;
+          break;
+        }
+      }
     }
 
-    messageText += winnerInfo;
+    if (messageText.length > TELEGRAM_MESSAGE_CHAR_LIMIT) {
+      messageText =
+        messageText.slice(0, TELEGRAM_MESSAGE_CHAR_LIMIT - 1) + "…";
+    }
 
     const keyboard = this.generateGameKeyboard(status, gamePda);
 

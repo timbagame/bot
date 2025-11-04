@@ -63,6 +63,19 @@ test("buildGameHeader escapes ticker markup", () => {
   expect(header).not.toContain("<script>alert(1)</script>");
 });
 
+test("buildGameHeader escapes creator markup", () => {
+  const header = buildGameHeader(
+    "🪙 Coinflip",
+    "10.000000",
+    "TIMBA",
+    "<b>attacker</b>",
+    1,
+    2
+  );
+  expect(header).toContain("Creator: &lt;b&gt;attacker&lt;/b&gt; • 1/2 tickets");
+  expect(header).not.toContain("<b>attacker</b>");
+});
+
 test("buildParticipantsList formats numbered list", () => {
   const list = buildParticipantsList(["@a", "@b"]);
   expect(list).toContain("1. @a");

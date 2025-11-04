@@ -60,6 +60,47 @@ test("wrapSol builds instructions and forwards to sendTransaction", async () => 
   expect(confirmed).toEqual(["WRAP123"]);
 });
 
+test("wrapSol retries without ATA creation when account already exists", async () => {
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+  const ata = Keypair.generate().publicKey;
+  let planCalls = 0;
+  (wm as any).findOrCreateAssociatedTokenAccount = async () => {
+    planCalls += 1;
+    return {
+      address: ata,
+      instructions: planCalls === 1 ? ["create"] : [],
+    };
+  };
+
+  const sendCalls: any[] = [];
+  let attempt = 0;
+  (wm as any).sendTransaction = async (ixs: any[]) => {
+    sendCalls.push(ixs);
+    attempt += 1;
+    if (attempt === 1) {
+      const err = new Error(
+        "failed to send transaction: Instruction 0: custom program error: 0x0 (already in use)"
+      ) as any;
+      err.logs = ["Program log: account already in use"];
+      throw err;
+    }
+    return "RETRY_SIG";
+  };
+  const confirmed: string[] = [];
+  (wm as any).confirmTransaction = async (sig: string) => {
+    confirmed.push(sig);
+  };
+
+  const sig = await wm.wrapSol(1n, 200_000_000);
+  expect(sig).toBe("RETRY_SIG");
+  expect(sendCalls.length).toBe(2);
+  expect(sendCalls[0]!.length).toBeGreaterThan(sendCalls[1]!.length);
+  expect(confirmed).toEqual(["RETRY_SIG"]);
+});
+
 test("wrapSol rejects non-positive amounts", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",

@@ -216,6 +216,34 @@ export class WalletManager {
     return false;
   }
 
+  private isAtaAlreadyExistsError(error: unknown): boolean {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+        ? error
+        : "";
+    const normalized = message.toLowerCase();
+    if (
+      normalized.includes("already in use") ||
+      normalized.includes("account exists")
+    ) {
+      return true;
+    }
+
+    if (error instanceof SendTransactionError && Array.isArray(error.logs)) {
+      return error.logs.some((log: string) => {
+        const lower = log.toLowerCase();
+        return (
+          lower.includes("already in use") ||
+          lower.includes("account exists")
+        );
+      });
+    }
+
+    return false;
+  }
+
   // ================================
   // PUBLIC METHODS
   // ================================
@@ -1995,26 +2023,51 @@ export class WalletManager {
     const userKeypair = this.getKeyPair(telegramId);
     const wsolMint = new PublicKey(WSOL_MINT);
 
-    const { address: wsolAta, instructions } =
-      await this.findOrCreateAssociatedTokenAccount(
-        userKeypair.publicKey,
-        wsolMint,
-        userKeypair,
-        TOKEN_PROGRAM_ID
+    const sendWrap = async (
+      planInstructions: TransactionInstruction[],
+      ata: PublicKey
+    ): Promise<string> => {
+      const transferInstructions = [
+        SystemProgram.transfer({
+          fromPubkey: userKeypair.publicKey,
+          toPubkey: ata,
+          lamports: amountLamports,
+        }),
+        createSyncNativeInstruction(ata),
+      ];
+      const signature = await this.sendTransaction(
+        [...planInstructions, ...transferInstructions],
+        [userKeypair]
       );
+      await this.confirmTransaction(signature);
+      return signature;
+    };
 
-    const transferIx = SystemProgram.transfer({
-      fromPubkey: userKeypair.publicKey,
-      toPubkey: wsolAta,
-      lamports: amountLamports,
-    });
+    const initialPlan = await this.findOrCreateAssociatedTokenAccount(
+      userKeypair.publicKey,
+      wsolMint,
+      userKeypair,
+      TOKEN_PROGRAM_ID
+    );
 
-    const syncIx = createSyncNativeInstruction(wsolAta);
+    try {
+      return await sendWrap(initialPlan.instructions, initialPlan.address);
+    } catch (error) {
+      if (
+        initialPlan.instructions.length > 0 &&
+        this.isAtaAlreadyExistsError(error)
+      ) {
+        const retryPlan = await this.findOrCreateAssociatedTokenAccount(
+          userKeypair.publicKey,
+          wsolMint,
+          userKeypair,
+          TOKEN_PROGRAM_ID
+        );
+        return await sendWrap(retryPlan.instructions, retryPlan.address);
+      }
 
-    const allInstructions = [...instructions, transferIx, syncIx];
-    const signature = await this.sendTransaction(allInstructions, [userKeypair]);
-    await this.confirmTransaction(signature);
-    return signature;
+      throw error;
+    }
   }
 
   public async unwrapSol(

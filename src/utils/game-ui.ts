@@ -39,9 +39,10 @@ export function buildGameHeader(
     formatCompactTokenDisplay(amountFormatted)
   );
   const tickerDisplay = escapeHtml(tokenTicker);
+  const creatorDisplay = escapeHtml(creatorUsername);
   return (
     `<b>${gameTypeLabel} • ${amountDisplay} ${tickerDisplay}${usdSegment}</b>\n` +
-    `Creator: ${creatorUsername} • ${currentTickets}/${maxTickets} tickets`
+    `Creator: ${creatorDisplay} • ${currentTickets}/${maxTickets} tickets`
   );
 }
 

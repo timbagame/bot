@@ -152,6 +152,26 @@ describe("GameManager Username Resolution", () => {
       expect(calls).toBe(maxEntries + 1);
     });
 
+    test("uses string identifiers when Telegram ID exceeds safe integer range", async () => {
+      resetGM();
+      const gm = GameManager.getInstance(programStub(), walletStub(), dbStub());
+      const bigId = "9007199254740993";
+      const received: Array<number | string> = [];
+      const ctx = {
+        chat: { id: 1, type: "private" },
+        api: {
+          getChatMember: async (_chatId: number, targetId: number | string) => {
+            received.push(targetId);
+            return { user: { username: "huge" } };
+          },
+        },
+      } as any;
+
+      const res = await gm.getUsernameFromTelegramId(ctx, bigId);
+      expect(res).toBe("huge");
+      expect(received[0]).toBe(bigId);
+    });
+
     test("coalesces concurrent lookups for the same user", async () => {
       resetGM();
       const gm = GameManager.getInstance(programStub(), walletStub(), dbStub());
