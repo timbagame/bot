@@ -61,7 +61,8 @@ export function buildPrizeLine(
   const prizeDisplay = escapeHtml(
     formatCompactTokenDisplay(totalFormatted)
   );
-  return `\nCurrent Prize: ${prizeDisplay} ${tokenTicker}${usdSegment}\n`;
+  const safeTicker = escapeHtml(tokenTicker);
+  return `\nCurrent Prize: ${prizeDisplay} ${safeTicker}${usdSegment}\n`;
 }
 
 /**

@@ -20,6 +20,7 @@ import { formatUserFriendlyError } from "./errors";
 import {
   formatUsdValue as formatUsdValueText,
   formatCompactTokenDisplay,
+  escapeHtml,
 } from "./format-amount";
 import {
   DEFAULT_NULL_ADDRESS,
@@ -2145,16 +2146,20 @@ export class GameManager {
           ctx,
           gameData.winner_address
         );
-        winnerLine = `Winner: ${winnerUsername}`;
+        const safeWinner = escapeHtml(winnerUsername);
+        winnerLine = `Winner: ${safeWinner}`;
       }
 
       const amountDisplay = formatCompactTokenDisplay(
         formatBalanceForDisplay(amount)
       );
+      const safeAmountDisplay = escapeHtml(amountDisplay);
+      const safeTicker = escapeHtml(tokenTicker);
+      const safeCreator = escapeHtml(creatorLabel);
+      const safePlayerCount = escapeHtml(playerCountDisplay);
       let message =
-        `${gameTypeText} • ${amountDisplay} ${tokenTicker}` +
-        `\nCreator: ${creatorLabel} • ${playerCountDisplay} tickets`;
-
+        `${gameTypeText} • ${safeAmountDisplay} ${safeTicker}` +
+        `\nCreator: ${safeCreator} • ${safePlayerCount} tickets`;
       if (participants.length > 0) {
         try {
           const participantNames = await Promise.all(
