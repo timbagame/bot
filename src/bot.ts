@@ -1023,6 +1023,18 @@ const processGameCompletion = async (
   console.log(`✅ Processed game completion: ${gameAddress} with prize: ${totalPot}`);
 };
 
+let processGameCompletionHandler = processGameCompletion;
+
+export const __test_setProcessGameCompletionHandler = (
+  handler: typeof processGameCompletion
+) => {
+  processGameCompletionHandler = handler;
+};
+
+export const __test_resetProcessGameCompletionHandler = () => {
+  processGameCompletionHandler = processGameCompletion;
+};
+
 const COMPLETION_SIGNATURE_LOOKBACK = 25;
 
 type CompletionDetails = {
@@ -1096,9 +1108,11 @@ const bnLikeToNumber = (value: unknown): number | undefined => {
   return undefined;
 };
 
+type EventParserLike = Pick<EventParser, "parseLogs">;
+
 const parseCompletionEventFromLogs = (
   logs: readonly string[] | null | undefined,
-  parser: EventParser,
+  parser: EventParserLike,
   expectedGameAddress: string
 ): Omit<CompletionDetails, "signature"> | null => {
   if (!logs?.length) {
@@ -1156,7 +1170,7 @@ const fetchCompletionDetailsFromHistory = async (
       return null;
     }
 
-    const parser = new EventParser(program.programId, program.coder);
+    const parser = completionEventParserFactory();
 
     for (const { signature } of signatures) {
       if (!signature) {
@@ -1191,6 +1205,53 @@ const fetchCompletionDetailsFromHistory = async (
   return null;
 };
 
+let completionHistoryFetcher: (
+  gameAddress: string
+) => Promise<CompletionDetails | null> = fetchCompletionDetailsFromHistory;
+
+const getDefaultCompletionEventParserFactory = () => () => {
+  if (!program) {
+    throw new Error("Program not initialized");
+  }
+  return new EventParser(program.programId, program.coder);
+};
+
+let completionEventParserFactory: () => EventParserLike =
+  getDefaultCompletionEventParserFactory();
+
+export const __test_setCompletionHistoryFetcher = (
+  fetcher: typeof completionHistoryFetcher
+) => {
+  completionHistoryFetcher = fetcher;
+};
+
+export const __test_resetCompletionHistoryFetcher = () => {
+  completionHistoryFetcher = fetchCompletionDetailsFromHistory;
+};
+
+export const __test_setCompletionEventParserFactory = (
+  factory: typeof completionEventParserFactory
+) => {
+  completionEventParserFactory = factory;
+};
+
+export const __test_resetCompletionEventParserFactory = () => {
+  completionEventParserFactory = getDefaultCompletionEventParserFactory();
+};
+
+export const __test_parseCompletionEventFromLogs = (
+  logs: readonly string[] | null | undefined,
+  parser: EventParserLike,
+  expectedGameAddress: string
+) => parseCompletionEventFromLogs(logs, parser, expectedGameAddress);
+
+export const __test_fetchCompletionDetailsFromHistory = (
+  gameAddress: string
+) => fetchCompletionDetailsFromHistory(gameAddress);
+
+export const __test_bnLikeToNumber = bnLikeToNumber;
+export const __test_toBase58String = toBase58String;
+
 /**
  * Clean up orphaned games (accounts closed but DB shows active)
  */
@@ -1200,13 +1261,13 @@ const cleanupOrphanedGame = async (gameAddress: string): Promise<void> => {
 
   console.log(`🧹 Cleaning up orphaned game ${gameAddress}`);
 
-  const completionDetails = await fetchCompletionDetailsFromHistory(gameAddress);
+  const completionDetails = await completionHistoryFetcher(gameAddress);
   if (completionDetails) {
     console.log(
       `♻️ Reconstructed completion for ${gameAddress} from transaction history`
     );
 
-    await processGameCompletion(
+    await processGameCompletionHandler(
       gameAddress,
       completionDetails.winnerAddress,
       completionDetails.totalPot,
@@ -1226,6 +1287,8 @@ const cleanupOrphanedGame = async (gameAddress: string): Promise<void> => {
 
   console.log(`✅ Successfully cleaned up orphaned game ${gameAddress}`);
 };
+
+export const __test_cleanupOrphanedGame = cleanupOrphanedGame;
 
 // ================================
 // BOT SEQUENTIALIZATION
@@ -3926,7 +3989,7 @@ setupAnchor()
 
           // Process game completion with total pot from event
           const totalPot = Number(event.winnerAmount);
-          await processGameCompletion(
+          await processGameCompletionHandler(
             gameAddress,
             winnerAddress,
             totalPot,
