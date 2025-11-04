@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterEach } from "bun:test";
+import { describe, test, expect, beforeAll, beforeEach, afterEach } from "bun:test";
 import { PublicKey } from "@solana/web3.js";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,16 +37,20 @@ describe("Game completion recovery", () => {
 
   beforeAll(async () => {
     botModule = await botModulePromise;
-    botModule.program = {
+  });
+
+  beforeEach(() => {
+    botModule.__test_setProgram({
       programId: new PublicKey("32Jr4JnXWvqq9GqPQynkooHsszaucUUvZfNLh2hdX2L5"),
       coder: {} as any,
-    } as any;
+    } as any);
   });
 
   afterEach(() => {
     botModule.__test_resetCompletionHistoryFetcher();
     botModule.__test_resetProcessGameCompletionHandler();
     botModule.__test_resetCompletionEventParserFactory();
+    botModule.__test_resetProgram();
   });
 
   test("parses completion data from logs", () => {

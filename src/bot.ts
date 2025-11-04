@@ -784,6 +784,16 @@ const tokenDb = TokenDatabase.getInstance();
 let tokenManager: TokenManager;
 let swapManager: SwapManager;
 
+export const __test_setProgram = (
+  nextProgram: anchor.Program<Timba> | undefined
+) => {
+  program = nextProgram as anchor.Program<Timba>;
+};
+
+export const __test_resetProgram = () => {
+  program = undefined as any;
+};
+
 // ================================
 // HELPER FUNCTIONS
 // ================================
