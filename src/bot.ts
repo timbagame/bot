@@ -239,11 +239,28 @@ registerWalletTransactionHandlers();
 
 const parseOracleNumeric = (value: unknown): number | null => {
   if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null;
+    if (!Number.isFinite(value)) {
+      return null;
+    }
+
+    if (value > Number.MAX_SAFE_INTEGER || value < Number.MIN_SAFE_INTEGER) {
+      return null;
+    }
+
+    return value;
   }
+
   if (typeof value === "bigint") {
+    const maxSafe = BigInt(Number.MAX_SAFE_INTEGER);
+    const minSafe = BigInt(Number.MIN_SAFE_INTEGER);
+
+    if (value > maxSafe || value < minSafe) {
+      return null;
+    }
+
     return Number(value);
   }
+
   if (
     typeof value === "object" &&
     value !== null &&
@@ -252,7 +269,16 @@ const parseOracleNumeric = (value: unknown): number | null => {
   ) {
     try {
       const converted = (value as { toNumber: () => number }).toNumber();
-      return Number.isFinite(converted) ? converted : null;
+
+      if (!Number.isFinite(converted)) {
+        return null;
+      }
+
+      if (converted > Number.MAX_SAFE_INTEGER || converted < Number.MIN_SAFE_INTEGER) {
+        return null;
+      }
+
+      return converted;
     } catch (error) {
       console.warn("Failed to convert oracle numeric value:", error);
       return null;
@@ -261,6 +287,8 @@ const parseOracleNumeric = (value: unknown): number | null => {
 
   return null;
 };
+
+export const __test_parseOracleNumeric = parseOracleNumeric;
 
 const CONTRACT_EXAMPLE_LINES = (() => {
   const uniqueMints = new Set<string>([
@@ -454,19 +482,29 @@ const formatTradeConfirmationSummary = ({
     quote.slippage !== undefined ? (quote.slippage as number) : 1
   );
 
-const lines = [
+  const safePayDisplay = escapeHtml(payDisplay);
+  const safePayToken = escapeHtml(payToken);
+  const safeReceiveToken = escapeHtml(receiveToken);
+  const safeReceiveDisplay = escapeHtml(receiveDisplay);
+  const safeRateDisplay = escapeHtml(rateDisplay);
+  const safeProviderLabel = escapeHtml(providerLabel);
+  const safeContractAddress = contractAddress
+    ? escapeHtml(contractAddress)
+    : undefined;
+
+  const lines = [
     `🔄 <b>Swap Confirmation</b>`,
     "",
-    `<b>You Pay:</b> ${payDisplay} ${payToken}`,
-    `<b>You Receive:</b> ~${receiveDisplay} ${receiveToken}`,
+    `<b>You Pay:</b> ${safePayDisplay} ${safePayToken}`,
+    `<b>You Receive:</b> ~${safeReceiveDisplay} ${safeReceiveToken}`,
     "",
-    `<b>Rate:</b> ${rateDisplay} ${receiveToken}/${payToken}`,
-    `<b>Provider:</b> ${providerLabel}`,
+    `<b>Rate:</b> ${safeRateDisplay} ${safeReceiveToken}/${safePayToken}`,
+    `<b>Provider:</b> ${safeProviderLabel}`,
     `<b>Slippage:</b> ${slippageText}`,
   ];
 
-  if (contractAddress) {
-    lines.push("", `🔗 <b>Contract:</b> <code>${contractAddress}</code>`);
+  if (safeContractAddress) {
+    lines.push("", `🔗 <b>Contract:</b> <code>${safeContractAddress}</code>`);
   }
 
   lines.push("", `⚠️ <b>Confirm this swap?</b>`);
@@ -1549,7 +1587,8 @@ const validateAndProcessTransaction = async (
   if (
     isSol &&
     playerData.solBalance < amount &&
-    playerData.solBalance + playerData.wsolBalance >= amount
+    totalBalance >= amount &&
+    amount < totalBalance
   ) {
     await ctx.reply(
       "You have enough WSOL to cover this amount. Use `/withdraw ADDRESS all` to withdraw everything at once, or unwrap WSOL with /unwrap before sending a partial SOL amount.",
@@ -1629,6 +1668,8 @@ const validateAndProcessTransaction = async (
     throw error;
   }
 };
+
+export const __test_validateAndProcessTransaction = validateAndProcessTransaction;
 
 // ================================
 // RESPONSE HELPERS

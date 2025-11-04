@@ -2,6 +2,7 @@ import type { WalletManager } from "../../utils/wallet";
 import type { SwapQuote } from "../../utils/swap-manager";
 import type { buildTransactionLinkMessage } from "../../utils/network-detector";
 import type { getPendingTransaction } from "../../utils/user-state";
+import { INPUT_TIMEOUT_MS } from "../../utils/constants";
 
 export type SolConversionValidationResult =
   | { status: "ok"; formattedAmount?: string }
@@ -315,22 +316,45 @@ export const createSolConversionUtilities = ({
     },
     txId: string,
     expectedType: T["type"],
-    options: { removeFromCache?: boolean } = {}
+    options: {
+      removeFromCache?: boolean;
+      timeoutMs?: number;
+      now?: number;
+    } = {}
   ): PendingTransactionValidationResult<T> => {
-    const { removeFromCache = true } = options;
-    const transaction = getPendingTransaction(txId, false) as
-      | (T & { type: string; userId: string })
+    const {
+      removeFromCache = true,
+      timeoutMs = INPUT_TIMEOUT_MS,
+      now = Date.now(),
+    } = options;
+
+    const entry = getPendingTransaction(txId, false) as
+      | (T & { type: string; userId: string; timestamp?: number })
       | undefined;
 
-    if (!transaction || transaction.type !== expectedType) {
-      if (removeFromCache) {
-        getPendingTransaction(txId, true);
-      }
+    if (!entry || entry.type !== expectedType) {
+      getPendingTransaction(txId, true);
+      return { status: "expired" };
+    }
+
+    const { timestamp, ...transaction } = entry;
+    const entryTimestamp =
+      typeof timestamp === "number" && Number.isFinite(timestamp)
+        ? timestamp
+        : undefined;
+
+    if (
+      entryTimestamp !== undefined &&
+      Number.isFinite(entryTimestamp) &&
+      timeoutMs > 0 &&
+      now - entryTimestamp > timeoutMs
+    ) {
+      getPendingTransaction(txId, true);
       return { status: "expired" };
     }
 
     const telegramId = ctx?.from?.id ?? ctx?.chat?.id;
-    if (telegramId == null || transaction.userId !== String(telegramId)) {
+    if (telegramId == null || entry.userId !== String(telegramId)) {
       return { status: "unauthorized" };
     }
 
@@ -338,7 +362,7 @@ export const createSolConversionUtilities = ({
       getPendingTransaction(txId, true);
     }
 
-    return { status: "success", transaction };
+    return { status: "success", transaction: transaction as T };
   };
 
   return {
