@@ -151,6 +151,9 @@ export type InputSessionState = {
   type: string;
   messageId?: number;
   chatId?: number;
+  initiatorId?: string;
+  processing?: boolean;
+  processingBy?: string;
   [key: string]: unknown;
 };
 
@@ -160,7 +163,15 @@ export const setInputSession = (
   key: string,
   session: InputSessionState
 ): InputSessionState => {
-  setNamespacedState(INPUT_SESSION_NAMESPACE, key, session);
+  const sanitized: InputSessionState = {
+    ...session,
+  };
+
+  // Never persist transient processing flags when storing sessions
+  delete (sanitized as any).processing;
+  delete (sanitized as any).processingBy;
+
+  setNamespacedState(INPUT_SESSION_NAMESPACE, key, sanitized);
   return session;
 };
 
@@ -175,6 +186,51 @@ export const clearInputSession = (key: string): void => {
 
 export const clearAllInputSessions = (): void => {
   clearNamespace(INPUT_SESSION_NAMESPACE);
+};
+
+const getInputSessionNamespacedKey = (key: string): string =>
+  buildNamespacedKey(INPUT_SESSION_NAMESPACE, key);
+
+export const markInputSessionProcessing = (
+  key: string,
+  lockerId: string
+): boolean => {
+  const namespacedKey = getInputSessionNamespacedKey(key);
+  const existing = userStates.get(namespacedKey);
+  if (!existing) {
+    return false;
+  }
+
+  if (
+    existing["processing"] === true &&
+    typeof existing["processingBy"] === "string" &&
+    existing["processingBy"] !== lockerId
+  ) {
+    return false;
+  }
+
+  userStates.set(namespacedKey, {
+    ...existing,
+    processing: true,
+    processingBy: lockerId,
+  });
+
+  return true;
+};
+
+export const clearInputSessionProcessing = (key: string): void => {
+  const namespacedKey = getInputSessionNamespacedKey(key);
+  const existing = userStates.get(namespacedKey);
+  if (!existing) {
+    return;
+  }
+
+  if (!existing["processing"] && !existing["processingBy"]) {
+    return;
+  }
+
+  const { processing: _processing, processingBy: _processingBy, ...rest } = existing;
+  userStates.set(namespacedKey, rest);
 };
 
 const listNamespaceEntries = <T>(namespace: string): Array<[string, T]> => {

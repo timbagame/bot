@@ -6,6 +6,10 @@ import {
   __test_setWalletCache,
   wallet,
 } from "../src/bot";
+import {
+  __test_listInputSessions,
+  __test_clearUserState as __test_clearRawState,
+} from "../src/utils/user-state";
 
 type MockCtxOptions = {
   editError?: Error;
@@ -31,6 +35,12 @@ const baseWalletCache = {
 };
 
 const userKey = String(TELEGRAM_NUMERIC_ID);
+
+const clearInputSessions = () => {
+  for (const [key] of __test_listInputSessions()) {
+    __test_clearRawState(`input_session:${key}`);
+  }
+};
 
 const createMockCtx = (options: MockCtxOptions = {}) => {
   const { editError } = options;
@@ -71,6 +81,7 @@ beforeEach(() => {
   __test_setWalletCache(TELEGRAM_ID, {
     ...baseWalletCache,
   });
+  clearInputSessions();
 });
 
 describe("handleCustomAmountInput", () => {
@@ -97,6 +108,13 @@ describe("handleCustomAmountInput", () => {
 
     const state = __test_getUserState(userKey);
     expect(state).toBeUndefined(); // Now using inputSessions instead of user-state
+
+    const sessions = __test_listInputSessions();
+    const sessionEntry = sessions.find(([key]) => key === `${DEFAULT_CHAT_ID}_4321`);
+    expect(sessionEntry?.[1]).toMatchObject({
+      initiatorId: String(TELEGRAM_NUMERIC_ID),
+      type: "send_address",
+    });
   });
 
   test("falls back to reply when editing existing message fails", async () => {
@@ -122,6 +140,12 @@ describe("handleCustomAmountInput", () => {
 
     const state = __test_getUserState(userKey);
     expect(state).toBeUndefined(); // Now using inputSessions instead of user-state
+
+    const sessions = __test_listInputSessions();
+    const replySession = sessions.find(([, value]) => value?.type === "send_address");
+    expect(replySession?.[1]).toMatchObject({
+      initiatorId: String(TELEGRAM_NUMERIC_ID),
+    });
   });
 
   test("sends new prompt when prior message id is missing", async () => {
@@ -143,5 +167,11 @@ describe("handleCustomAmountInput", () => {
 
     const state = __test_getUserState(userKey);
     expect(state).toBeUndefined(); // Now using inputSessions instead of user-state
+
+    const sessions = __test_listInputSessions();
+    const replySession = sessions.find(([, value]) => value?.type === "send_address");
+    expect(replySession?.[1]).toMatchObject({
+      initiatorId: String(TELEGRAM_NUMERIC_ID),
+    });
   });
 });

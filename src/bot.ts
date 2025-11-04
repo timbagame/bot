@@ -44,6 +44,8 @@ import {
   setInputSession,
   getInputSession,
   clearInputSession,
+  markInputSessionProcessing,
+  clearInputSessionProcessing,
 } from "./utils/user-state";
 // import { createDmMessageAdapter } from "./utils/ctx-adapter";
 import {
@@ -204,6 +206,8 @@ const {
 registerWalletMenuHandlers();
 
 export const __test_setWalletCache = setWalletCacheForTests;
+export const __test_getCachedWalletData = getCachedWalletData;
+export const __test_clearWalletCache = clearWalletCache;
 
 const walletTransactionsModule = createWalletTransactionsModule({
   bot,
@@ -3466,6 +3470,29 @@ bot.on("message:text", async (ctx, next) => {
     return await next(); // Not waiting for input, continue to other handlers
   }
 
+  if (
+    typeof inputSession.initiatorId === "string" &&
+    inputSession.initiatorId.length > 0 &&
+    inputSession.initiatorId !== userId
+  ) {
+    await ctx.reply(
+      "❌ <b>This prompt is no longer active for you.</b>\n\nOpen the wallet menu again to continue.",
+      {
+        parse_mode: "HTML",
+        reply_markup: createBackToWalletKeyboard(),
+      }
+    );
+    return;
+  }
+
+  const lockerSuffix = ctx.message?.message_id ?? ctx.update?.update_id ?? Date.now();
+  const lockerId = `${userId}:${lockerSuffix}`;
+  const locked = markInputSessionProcessing(sessionKey, lockerId);
+
+  if (!locked) {
+    return;
+  }
+
   const userMessage = ctx.message.text.trim();
 
   const previousSessionType = inputSession.type;
@@ -3511,6 +3538,8 @@ bot.on("message:text", async (ctx, next) => {
         reply_markup: createBackToWalletKeyboard(),
       });
     }
+  } finally {
+    clearInputSessionProcessing(sessionKey);
   }
 });
 

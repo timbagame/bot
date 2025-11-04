@@ -40,7 +40,11 @@ import { presentTradeAmount, parseDecimalAmount } from "../utils/amount";
 import { escapeHtml } from "../utils/format-amount";
 import { formatUserFriendlyError } from "../utils/errors";
 import { buildTransactionLinkMessage, NetworkDetector } from "../utils/network-detector";
-import { storePendingTransaction, getPendingTransaction } from "../utils/user-state";
+import {
+  storePendingTransaction,
+  getPendingTransaction,
+  type InputSessionState,
+} from "../utils/user-state";
 import type { WalletManager } from "../utils/wallet";
 import type {
   WalletActionMenuHandlerConfig,
@@ -236,6 +240,27 @@ const buildSolscanSuccessMessage = ({
   }
 
   return { text: lines.join("\n"), disablePreview };
+};
+
+const assertSessionOwnership = (
+  ctx: Context,
+  session: Pick<InputSessionState, "initiatorId">
+): string => {
+  const userId = getTelegramIdString(ctx);
+
+  if (!userId) {
+    throw new Error("Unable to resolve user for prompt session");
+  }
+
+  if (
+    typeof session?.initiatorId === "string" &&
+    session.initiatorId.length > 0 &&
+    session.initiatorId !== userId
+  ) {
+    throw new Error("Input prompt locked to a different user");
+  }
+
+  return userId;
 };
 
 const renderSolConversionSuccess = ({
@@ -482,6 +507,7 @@ export const createWalletTransactionsModule = (
     userState: any,
     amount: string
   ): Promise<void> => {
+    const initiatorId = assertSessionOwnership(ctx, userState);
     const token = userState.token;
     const telegramId = requireTelegramId(ctx, "send custom amount");
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
@@ -520,8 +546,10 @@ export const createWalletTransactionsModule = (
         token,
         amount: amountResolution.storedAmount,
         amountDisplay: amountResolution.displayLabel,
+        initiatorId,
       },
       logLabel: "handleCustomAmountInput",
+      initiatorId,
     });
   };
 
@@ -530,6 +558,7 @@ export const createWalletTransactionsModule = (
     userState: any,
     address: string
   ): Promise<void> => {
+    assertSessionOwnership(ctx, userState);
     const token = userState.token;
     const amount = userState.amount;
     const amountDisplay =
@@ -594,6 +623,7 @@ export const createWalletTransactionsModule = (
     userState: any,
     amount: string
   ): Promise<void> => {
+    const initiatorId = assertSessionOwnership(ctx, userState);
     const trimmedAmount = amount.trim();
     const lamportsToWrap = toRawAmount(trimmedAmount, 9);
 
@@ -626,9 +656,10 @@ export const createWalletTransactionsModule = (
       userState,
       text: confirmation.text,
       keyboard: confirmation.keyboard,
-      session: { type: "wrap_custom_amount" },
+      session: { type: "wrap_custom_amount", initiatorId },
       logLabel: "handleWrapAmountInput",
       persistSession: Boolean(userId),
+      initiatorId,
     });
   };
 
@@ -1384,4 +1415,3 @@ export const createWalletTransactionsModule = (
     buildSolscanSuccessMessage,
   };
 };
-

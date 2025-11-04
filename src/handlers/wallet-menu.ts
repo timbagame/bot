@@ -97,7 +97,7 @@ type WalletMenuModule = {
       nativeSolBalance?: number;
       wsolBalance?: number;
     },
-    _ts?: number
+    ttlOverrideMs?: number
   ) => void;
 };
 
@@ -279,7 +279,8 @@ export const createWalletMenuModule = (
       approvedTokens?: any[];
       nativeSolBalance?: number;
       wsolBalance?: number;
-    }
+    },
+    ttlOverrideMs?: number
   ) => {
     const cacheKey = getWalletCacheKey(telegramId);
     walletDataCache.setWithTTL(cacheKey, {
@@ -288,7 +289,7 @@ export const createWalletMenuModule = (
       wsolBalance: data.wsolBalance ?? 0,
       tokenBalances: data.tokenBalances,
       approvedTokens: data.approvedTokens ?? [],
-    });
+    }, ttlOverrideMs);
   };
 
   return {

@@ -4082,18 +4082,33 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     return recentGames.filter((game): game is any => game !== null);
   }
 
+  private static readonly MAX_GAMES_PER_SECTION = 8;
+
   private formatGameSection(games: any[], title: string): string {
     if (games.length === 0) return "";
-    let section = `${title}\n\n`;
-    for (const game of games) {
-      section += `${game.gameInfo}\n`;
+    const lines: string[] = [title, ""]; // blank line after title
+
+    const limit = GameManager.MAX_GAMES_PER_SECTION;
+    const limitedGames = games.slice(0, limit);
+
+    for (const game of limitedGames) {
+      lines.push(`${game.gameInfo}`);
       if (game.completedAt) {
-        section += `📅 ${formatDate(game.completedAt)}\n\n`;
-      } else {
-        section += "\n";
+        lines.push(`📅 ${formatDate(game.completedAt)}`);
       }
+      lines.push("");
     }
-    return section;
+
+    if (lines[lines.length - 1] === "") {
+      lines.pop();
+    }
+
+    if (games.length > limit) {
+      const remaining = games.length - limit;
+      lines.push("", `<i>+${remaining} more game${remaining === 1 ? "" : "s"} not shown</i>`);
+    }
+
+    return lines.join("\n") + "\n";
   }
 
   // ================================

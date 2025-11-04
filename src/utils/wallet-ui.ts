@@ -3,6 +3,7 @@ import { escapeHtml, formatUsdValue } from "./format-amount";
 import { INPUT_TIMEOUT_HINT, LAMPORTS_PER_SOL } from "./constants";
 import { respondWithMenu } from "./menu-response";
 import { setInputSession, type InputSessionState } from "./user-state";
+import { getTelegramIdString } from "./context-helpers";
 import { NetworkDetector } from "./network-detector";
 import { createCancelKeyboard } from "./keyboards";
 import { getPricesUSD } from "./prices";
@@ -309,9 +310,10 @@ export const showCustomAmountPrompt = async <State extends InputSessionState>({
     userState: { chatId: state.chatId, messageId: state.messageId },
     text: lines.join("\n"),
     keyboard: createCancelKeyboard(cancelCallback, cancelLabel),
-    session: { ...state },
+    session: { ...state, initiatorId: state.initiatorId ?? userId },
     logLabel: "showCustomAmountPrompt",
     persistSession: Boolean(userId),
+    initiatorId: userId,
   });
 };
 
@@ -377,6 +379,7 @@ export type PersistInputPromptOptions = {
   parseMode?: "HTML" | "Markdown" | "MarkdownV2";
   replyToMessageId?: number;
   persistSession?: boolean;
+  initiatorId?: string;
 };
 
 export async function persistInputPrompt({
@@ -389,6 +392,7 @@ export async function persistInputPrompt({
   parseMode = "HTML",
   replyToMessageId,
   persistSession = true,
+  initiatorId,
 }: PersistInputPromptOptions): Promise<{ chatId?: number; messageId?: number }> {
   const targetChatId =
     typeof userState.chatId === "number"
@@ -418,11 +422,17 @@ export async function persistInputPrompt({
     (typeof ctx.chat?.id === "number" ? ctx.chat.id : undefined);
   const resolvedMessageId = menuResult.messageId ?? targetMessageId;
 
+  const resolvedInitiator =
+    (typeof session.initiatorId === "string" && session.initiatorId.length > 0
+      ? session.initiatorId
+      : undefined) ?? initiatorId;
+
   if (persistSession && resolvedChatId != null && resolvedMessageId != null) {
     setInputSession(`${resolvedChatId}_${resolvedMessageId}`, {
       ...session,
       chatId: resolvedChatId,
       messageId: resolvedMessageId,
+      initiatorId: resolvedInitiator,
     });
   }
 
@@ -476,6 +486,13 @@ export const persistInputPromptFromContext = async ({
     userState: { chatId: derivedChatId, messageId: derivedMessageId },
     replyToMessageId: resolvedReplyTo,
     ...promptOptions,
+    session: {
+      ...promptOptions.session,
+      initiatorId:
+        promptOptions.session.initiatorId ?? getTelegramIdString(ctx) ?? undefined,
+    },
+    initiatorId:
+      promptOptions.session.initiatorId ?? getTelegramIdString(ctx) ?? undefined,
   });
 };
 
