@@ -32,6 +32,7 @@ import {
   INPUT_TIMEOUT_HINT,
   SWAP_DEFAULT_SLIPPAGE_BPS,
   SWAP_SLIPPAGE_OPTIONS_BPS,
+  applyOracleBufferTime,
 } from "./utils/constants";
 import { FeeBudgetManager } from "./utils/fee-budget";
 import {
@@ -1816,6 +1817,19 @@ const checkOracleStatus = async () => {
       console.warn(
         "Unable to determine oracle max tickets, keeping previous limit",
         oracleAccount.maxTickets
+      );
+    }
+
+    const bufferSeconds = parseOracleNumeric(oracleAccount.oracleBufferTime);
+    if (bufferSeconds !== null) {
+      const appliedBuffer = applyOracleBufferTime(bufferSeconds);
+      const hours = appliedBuffer / 3600;
+      const hoursNote = hours >= 1 ? ` (~${hours.toFixed(hours >= 10 ? 1 : 2)} hours)` : "";
+      console.log(`Oracle buffer time set to ${appliedBuffer} seconds${hoursNote}`);
+    } else {
+      console.warn(
+        "Unable to determine oracle buffer time, keeping previous value",
+        oracleAccount.oracleBufferTime
       );
     }
   } catch (error) {

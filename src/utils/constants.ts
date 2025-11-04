@@ -129,7 +129,31 @@ export const INPUT_TIMEOUT_HINT = `⏱️ <i>Reply to this message with your inp
 // GAME BUFFER AND TIMING
 // ================================
 
-export const GAME_EXPIRATION_BUFFER_TIME = 300; // 5 minutes buffer for expired games
+const DEFAULT_GAME_EXPIRATION_BUFFER_TIME = 300;
+export let GAME_EXPIRATION_BUFFER_TIME = DEFAULT_GAME_EXPIRATION_BUFFER_TIME; // 5 minutes buffer for expired games
+
+export const applyOracleBufferTime = (bufferSeconds: number): number => {
+  if (!Number.isFinite(bufferSeconds)) {
+    console.warn(
+      `[Config] Oracle buffer time must be a finite number. Received '${bufferSeconds}'. Keeping current value ${GAME_EXPIRATION_BUFFER_TIME}.`
+    );
+    return GAME_EXPIRATION_BUFFER_TIME;
+  }
+
+  if (bufferSeconds < 0) {
+    console.warn(
+      `[Config] Oracle buffer time must be >= 0. Received ${bufferSeconds}, clamping to 0.`
+    );
+  }
+
+  const normalized = Math.max(0, Math.round(bufferSeconds));
+
+  if (normalized !== GAME_EXPIRATION_BUFFER_TIME) {
+    GAME_EXPIRATION_BUFFER_TIME = normalized;
+  }
+
+  return GAME_EXPIRATION_BUFFER_TIME;
+};
 export const PLAYER_CLEANUP_DELAY_MS = 100; // Delay between player participation cleanups
 
 // ================================
