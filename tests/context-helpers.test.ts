@@ -6,6 +6,7 @@ import {
   MissingTelegramIdError,
   getRequiredTelegramIdForContext,
   MISSING_TELEGRAM_ID_MESSAGE,
+  createMessageEditAdapter,
 } from "../src/utils/context-helpers";
 import { truncateMessage } from "../src/utils/errors";
 
@@ -66,6 +67,23 @@ test("getTelegramId returns fallback for invalid identifiers", () => {
   expect(getTelegramId(ctxInfinity)).toBe(0n);
 });
 
+test("getTelegramId trims and normalizes string identifiers", () => {
+  const ctxWithWhitespace = { from: { id: "  +12345  " } } as any;
+  const ctxNegative = { from: { id: " -6789" } } as any;
+
+  expect(getTelegramId(ctxWithWhitespace)).toBe(12345n);
+  expect(getTelegramId(ctxNegative)).toBe(-6789n);
+});
+
+test("getTelegramId converts coercible identifier objects", () => {
+  const customId = {
+    valueOf: () => 777777,
+  };
+  const ctx = { from: { id: customId } } as any;
+
+  expect(getTelegramId(ctx)).toBe(777777n);
+});
+
 test("requireTelegramId returns id when present", () => {
   const ctx = { from: { id: 123 } } as any;
   expect(requireTelegramId(ctx, "test")).toBe(123n);
@@ -90,4 +108,74 @@ test("getRequiredTelegramIdForContext notifies when identity missing", async () 
   const result = await getRequiredTelegramIdForContext(ctx, "test command");
   expect(result).toBeNull();
   expect(replies).toEqual([MISSING_TELEGRAM_ID_MESSAGE]);
+});
+
+test("getRequiredTelegramIdForContext uses onMissing handler when provided", async () => {
+  const replies: string[] = [];
+  const handlerCalls: string[] = [];
+  const ctx = {
+    from: undefined,
+    reply: async (message: string) => {
+      replies.push(message);
+    },
+    message: { message_id: 10 },
+  } as any;
+
+  const result = await getRequiredTelegramIdForContext(ctx, "custom handler", {
+    onMissing: async (message) => {
+      handlerCalls.push(message);
+    },
+  });
+
+  expect(result).toBeNull();
+  expect(handlerCalls).toEqual([MISSING_TELEGRAM_ID_MESSAGE]);
+  expect(replies).toHaveLength(0);
+});
+
+test("createMessageEditAdapter reuses API with pinned targets", async () => {
+  const capturedTextCalls: Array<[
+    number,
+    number,
+    string,
+    any
+  ]> = [];
+  const capturedCaptionCalls: Array<[
+    number,
+    number,
+    any
+  ]> = [];
+
+  const ctx = {
+    from: { id: 555 },
+    api: {
+      editMessageText: async (
+        chatId: number,
+        messageId: number,
+        text: string,
+        options: any
+      ) => {
+        capturedTextCalls.push([chatId, messageId, text, options]);
+      },
+      editMessageCaption: async (
+        chatId: number,
+        messageId: number,
+        options: any
+      ) => {
+        capturedCaptionCalls.push([chatId, messageId, options]);
+      },
+    },
+  } as any;
+
+  const adapter = createMessageEditAdapter(ctx, 222, 333);
+
+  await adapter.editMessageText("hello", { parse_mode: "MarkdownV2" });
+  await adapter.editMessageCaption({ caption: "world" });
+
+  expect(capturedTextCalls).toEqual([
+    [333, 222, "hello", { parse_mode: "MarkdownV2" }],
+  ]);
+  expect(capturedCaptionCalls).toEqual([[333, 222, { caption: "world" }]]);
+  expect(adapter.chat?.id).toBe(333);
+  expect(adapter.__editAdapterTarget).toEqual({ chatId: 333, messageId: 222 });
+  expect(adapter.from).toEqual({ id: 555 });
 });
