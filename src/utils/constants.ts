@@ -129,8 +129,8 @@ export const INPUT_TIMEOUT_HINT = `⏱️ <i>Reply to this message with your inp
 // GAME BUFFER AND TIMING
 // ================================
 
-const DEFAULT_GAME_EXPIRATION_BUFFER_TIME = 300;
-export let GAME_EXPIRATION_BUFFER_TIME = DEFAULT_GAME_EXPIRATION_BUFFER_TIME; // 5 minutes buffer for expired games
+const DEFAULT_GAME_EXPIRATION_BUFFER_TIME = 900;
+export let GAME_EXPIRATION_BUFFER_TIME = DEFAULT_GAME_EXPIRATION_BUFFER_TIME; // 15 minutes buffer for expired games
 
 export const applyOracleBufferTime = (bufferSeconds: number): number => {
   if (!Number.isFinite(bufferSeconds)) {

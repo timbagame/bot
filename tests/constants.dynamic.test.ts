@@ -49,9 +49,9 @@ describe("dynamic constants", () => {
   });
 
   test("applyOracleBufferTime updates expiration buffer", () => {
-    const updated = applyOracleBufferTime(900);
-    expect(updated).toBe(900);
-    expect(GAME_EXPIRATION_BUFFER_TIME).toBe(900);
+  const updated = applyOracleBufferTime(600);
+  expect(updated).toBe(600);
+  expect(GAME_EXPIRATION_BUFFER_TIME).toBe(600);
   });
 
   test("applyOracleBufferTime ignores invalid input", () => {
