@@ -2000,7 +2000,7 @@ export class WalletManager {
     return result;
   }
 
-  public formatSolBalance(lamports: number): string {
+  public formatSolBalance(lamports: number | bigint | string): string {
     return formatAmount(lamports, 9, { maxFractionDigits: 6, trim: true });
   }
 

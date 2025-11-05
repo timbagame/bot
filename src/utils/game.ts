@@ -111,6 +111,62 @@ type GameTokenContextAccounts = {
 const DEFAULT_FRIENDLY_ERROR_MESSAGE =
   "❌ Something went wrong. Please try again in a moment.";
 
+const INTEGER_PATTERN = /^-?\d+$/;
+
+const MAX_SAFE_LAMPORTS = BigInt(Number.MAX_SAFE_INTEGER);
+
+const coerceLamportValue = (value: unknown): bigint | null => {
+  if (typeof value === "bigint") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      return null;
+    }
+    return BigInt(Math.trunc(value));
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!INTEGER_PATTERN.test(trimmed)) {
+      return null;
+    }
+    try {
+      return BigInt(trimmed);
+    } catch {
+      return null;
+    }
+  }
+
+  if (value && typeof value === "object") {
+    const candidate = (value as { toString?: () => string; toNumber?: () => number }) ?? {};
+    if (typeof candidate.toString === "function") {
+      const stringified = candidate.toString();
+      if (INTEGER_PATTERN.test(stringified.trim())) {
+        try {
+          return BigInt(stringified.trim());
+        } catch {
+          // fall through
+        }
+      }
+    }
+
+    if (typeof candidate.toNumber === "function") {
+      try {
+        const asNumber = candidate.toNumber();
+        if (Number.isFinite(asNumber)) {
+          return BigInt(Math.trunc(asNumber));
+        }
+      } catch {
+        // swallow and fall through to null return
+      }
+    }
+  }
+
+  return null;
+};
+
 const logAndFormatError = (
   error: unknown,
   operation: string,
@@ -796,7 +852,7 @@ export class GameManager {
     tokenTicker: string,
     tokenMintHint?: string | null
   ): Promise<{
-    formatBalance: (value: number) => string;
+    formatBalance: (value: number | bigint | string) => string;
     decimals: number;
     tokenMint?: string;
     isSol: boolean;
@@ -832,7 +888,8 @@ export class GameManager {
 
     if (isSolToken) {
       return {
-        formatBalance: (value: number) => this.wallet.formatSolBalance(value),
+        formatBalance: (value: number | bigint | string) =>
+          this.wallet.formatSolBalance(value),
         decimals: 9,
         tokenMint,
         isSol: true,
@@ -845,7 +902,7 @@ export class GameManager {
         const decimals =
           typeof metadata?.decimals === "number" ? metadata.decimals : 6;
         return {
-          formatBalance: (value: number) =>
+          formatBalance: (value: number | bigint | string) =>
             this.wallet.formatTokenBalance(value, decimals),
           decimals,
           tokenMint,
@@ -861,7 +918,7 @@ export class GameManager {
 
     const fallbackDecimals = 6;
     return {
-      formatBalance: (value: number) =>
+      formatBalance: (value: number | bigint | string) =>
         this.wallet.formatTokenBalance(value, fallbackDecimals),
       decimals: fallbackDecimals,
       tokenMint,
@@ -870,14 +927,19 @@ export class GameManager {
   }
 
   private formatUsdValue(
-    amount: number,
+    amount: number | bigint | string,
     decimals: number,
     price: number
   ): string | null {
-    if (!Number.isFinite(amount) || amount <= 0) return null;
+    const lamports = coerceLamportValue(amount);
+    if (lamports === null || lamports <= 0n) return null;
     if (!Number.isFinite(price) || price <= 0) return null;
 
-    const normalizedAmount = amount / Math.pow(10, decimals);
+    if (lamports > MAX_SAFE_LAMPORTS) {
+      return null;
+    }
+
+    const normalizedAmount = Number(lamports) / Math.pow(10, decimals);
     const usdValue = normalizedAmount * price;
     if (!Number.isFinite(usdValue) || usdValue <= 0) {
       return null;
@@ -893,7 +955,7 @@ export class GameManager {
   }
 
   private async getUsdApproximation(
-    amount: number,
+    amount: number | bigint | string,
     decimals: number,
     tokenMint?: string,
     tokenTicker?: string,
@@ -901,7 +963,9 @@ export class GameManager {
   ): Promise<{ text: string; price: number } | null> {
     const reference = isSol ? "SOL" : tokenMint || tokenTicker;
     if (!reference) return null;
-    if (!Number.isFinite(amount) || amount <= 0) return null;
+    const lamports = coerceLamportValue(amount);
+    if (lamports === null || lamports <= 0n) return null;
+    if (lamports > MAX_SAFE_LAMPORTS) return null;
     if (process.env.NODE_ENV === "test") return null;
 
     try {
@@ -914,7 +978,7 @@ export class GameManager {
         return null;
       }
 
-      const usdText = this.formatUsdValue(amount, decimals, lookup.price);
+      const usdText = this.formatUsdValue(lamports, decimals, lookup.price);
       if (!usdText) {
         return null;
       }
@@ -1310,8 +1374,13 @@ export class GameManager {
               chatId,
               targetId
             );
-            const resolved =
-              chatMember.user.username || chatMember.user.first_name || null;
+            const userRecord = chatMember.user ?? {};
+            const handle =
+              typeof userRecord.username === "string" &&
+              userRecord.username.trim().length > 0
+                ? `@${userRecord.username.trim()}`
+                : null;
+            const resolved = handle ?? userRecord.first_name ?? null;
             this.setCachedUsername(cacheKey, resolved);
             return resolved;
           } catch (fetchError) {
@@ -1354,7 +1423,7 @@ export class GameManager {
         creatorInfo.telegramId
       );
       if (username) {
-        return `@${username}`;
+        return username;
       }
     }
 
@@ -1395,7 +1464,7 @@ export class GameManager {
       return this.formatAddress(publicKey);
     }
 
-    return `@${username}`;
+    return username;
   }
 
   // ================================
@@ -1408,25 +1477,30 @@ export class GameManager {
 
   private async getActiveGameStats(
     gamePda: PublicKey,
-    amount: number,
-    providedTotalPot?: number
+    amountLamports: bigint,
+    providedTotalPot?: bigint
   ) {
     try {
       let gameAccount = await this.program.account.game.fetch(gamePda);
-      const currentTickets = gameAccount.ticketsCount;
-      const maxTickets = gameAccount.maxTickets;
-      const minTickets = gameAccount.minTickets;
+      const currentTickets = Number(gameAccount.ticketsCount ?? 0);
+      const maxTickets = Number(gameAccount.maxTickets ?? 0);
+      const minTickets = Number(gameAccount.minTickets ?? 0);
 
       // Calculate totalPot based on game type
-      let totalPot = providedTotalPot;
-      if (!totalPot) {
-        const gameType = this.getGameType(gameAccount);
-        if (gameType === "giveaway") {
-          // For giveaways, totalPot is just the amount (prize from creator)
-          totalPot = Number(gameAccount.totalAmount || 0) || amount;
+      let totalPot = providedTotalPot ?? null;
+      if (totalPot === null) {
+        const chainTotal = coerceLamportValue((gameAccount as any)?.totalAmount);
+        if (chainTotal !== null) {
+          totalPot = chainTotal;
         } else {
-          // For coinflips, totalPot = amount * participants
-          totalPot = Number(gameAccount.totalAmount || 0) || amount * currentTickets;
+          const gameType = this.getGameType(gameAccount);
+          if (gameType === "giveaway") {
+            // For giveaways, totalPot is just the amount (prize from creator)
+            totalPot = amountLamports;
+          } else {
+            // For coinflips, totalPot = amount * participants
+            totalPot = amountLamports * BigInt(Math.max(currentTickets, 0));
+          }
         }
       }
 
@@ -1447,7 +1521,7 @@ export class GameManager {
         currentTickets,
         maxTickets,
         minTickets,
-        totalPot,
+        totalPot: totalPot ?? amountLamports,
         expirationInfo,
         tokenMint,
       };
@@ -1460,7 +1534,7 @@ export class GameManager {
         currentTickets: 0,
         maxTickets: 0,
         minTickets: 0,
-        totalPot: amount,
+        totalPot: amountLamports,
         expirationInfo: "",
         tokenMint: undefined,
       };
@@ -1469,8 +1543,8 @@ export class GameManager {
 
   private async getCompletedGameStats(
     gamePda: PublicKey,
-    amount: number,
-    providedTotalPot?: number
+    amountLamports: bigint,
+    providedTotalPot?: bigint
   ) {
     const gameAddress = gamePda.toBase58();
     const gameData = this.gameDb.getGame(gameAddress);
@@ -1492,16 +1566,23 @@ export class GameManager {
     }
 
     // Get game type from database to calculate totalPot correctly
-    let totalPot = providedTotalPot;
-    if (!totalPot) {
+    let totalPot = providedTotalPot ?? null;
+    if (totalPot === null) {
+      const storedTotal = coerceLamportValue(
+        (gameData as any)?.total_amount ?? (gameData as any)?.totalPot
+      );
+      if (storedTotal !== null) {
+        totalPot = storedTotal;
+      } else {
       const gameType = gameData?.game_type || "coinflip"; // default to coinflip if not found
 
       if (gameType === "giveaway") {
         // For giveaways, totalPot is just the amount (prize from creator)
-        totalPot = amount;
+          totalPot = amountLamports;
       } else {
         // For coinflips, totalPot = amount * participants
-        totalPot = amount * currentTickets;
+          totalPot = amountLamports * BigInt(Math.max(currentTickets, 0));
+      }
       }
     }
 
@@ -1509,7 +1590,7 @@ export class GameManager {
       currentTickets,
       maxTickets,
       minTickets,
-      totalPot,
+      totalPot: totalPot ?? amountLamports,
       expirationInfo: "",
       tokenMint: gameData?.token_mint || undefined,
     };
@@ -1532,10 +1613,11 @@ export class GameManager {
 
     const winnerUsername = await this.getPlayerUsername(ctx, winnerAddress);
     const solscanUrl = NetworkDetector.buildSolscanTxUrl(winnerSignature);
+    const safeWinner = escapeHtml(winnerUsername);
     const linkLine = solscanUrl
       ? `\n\n🔗 <a href="${solscanUrl}">View transaction</a>`
       : "";
-    return `\n\nWinner: ${winnerUsername}${linkLine}`;
+    return `\n\nWinner: ${safeWinner}${linkLine}`;
   }
 
   private generateGameKeyboard(status: string, gamePda: PublicKey) {
@@ -1630,19 +1712,35 @@ export class GameManager {
     ctx: Context,
     gamePda: PublicKey,
     gameType: string,
-    amount: number,
+    amount: number | bigint,
     creatorUsername: string,
     status: string,
     tokenTicker: string,
     winnerAddress?: string,
-    providedTotalPot?: number,
+    providedTotalPot?: number | bigint,
     winnerSignature?: string
   ): Promise<GameMessageFormat> {
     const isCompleted = status.toLowerCase() === "completed";
 
+    const amountLamports =
+      typeof amount === "bigint" ? amount : BigInt(Math.trunc(amount));
+
+    const coerceProvidedTotal =
+      providedTotalPot !== undefined && providedTotalPot !== null
+        ? coerceLamportValue(providedTotalPot)
+        : null;
+
     const gameStats = isCompleted
-      ? await this.getCompletedGameStats(gamePda, amount, providedTotalPot)
-      : await this.getActiveGameStats(gamePda, amount, providedTotalPot);
+      ? await this.getCompletedGameStats(
+          gamePda,
+          amountLamports,
+          coerceProvidedTotal ?? undefined
+        )
+      : await this.getActiveGameStats(
+          gamePda,
+          amountLamports,
+          coerceProvidedTotal ?? undefined
+        );
 
     const {
       currentTickets,
@@ -1666,7 +1764,7 @@ export class GameManager {
     );
 
     const usdApproximation = await this.getUsdApproximation(
-      amount,
+      amountLamports,
       decimals,
       tokenMint,
       tokenTicker,
@@ -1680,9 +1778,11 @@ export class GameManager {
       winnerSignature
     );
 
+    const formattedTicketAmount = formatBalanceForDisplay(amountLamports);
+
     const header = buildGameHeader(
       formatGameTypeWithEmoji(gameType),
-      formatBalanceForDisplay(amount),
+      formattedTicketAmount,
       tokenTicker,
       creatorUsername,
       currentTickets,
@@ -1697,7 +1797,7 @@ export class GameManager {
         decimals,
         usdApproximation.price
       );
-    } else if (currentTickets > 0 || totalPot !== amount) {
+    } else if (currentTickets > 0 || totalPot !== amountLamports) {
       const computedPrizeUsd = await this.getUsdApproximation(
         totalPot,
         decimals,
@@ -1709,7 +1809,7 @@ export class GameManager {
     }
 
     const prize = buildPrizeLine(
-      currentTickets > 0 || totalPot !== amount,
+      currentTickets > 0 || totalPot !== amountLamports,
       formatBalanceForDisplay(totalPot),
       tokenTicker,
       prizeUsdApproximation
@@ -1728,7 +1828,7 @@ export class GameManager {
               telegramId
             );
             participantDisplayNames.push(
-              username ? `@${username}` : `Player ${telegramId.slice(0, 6)}...`
+              username ?? `Player ${telegramId.slice(0, 6)}...`
             );
           } catch {
             participantDisplayNames.push(
