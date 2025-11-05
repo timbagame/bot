@@ -266,6 +266,7 @@ export class GameManager {
   );
   private readonly usernameCacheKeys: string[] = [];
   private usernameLookupPromises = new Map<string, Promise<string | null>>();
+  private gameMessageReadyListener?: (gameAddress: string) => void;
 
   private constructor(
     private program: anchor.Program<Timba>,
@@ -312,6 +313,12 @@ export class GameManager {
       GameManager.instance.cachedConnection = connection;
     }
     return GameManager.instance;
+  }
+
+  public setGameMessageReadyListener(
+    listener: ((gameAddress: string) => void) | undefined
+  ): void {
+    this.gameMessageReadyListener = listener ?? undefined;
   }
 
   private getConnection(): Connection {
@@ -1772,6 +1779,8 @@ export class GameManager {
       usesVideo,
     });
 
+    this.gameMessageReadyListener?.(gameAddress);
+
     return message;
   }
 
@@ -2085,6 +2094,8 @@ export class GameManager {
       chatId: message.chat.id,
       usesVideo,
     });
+
+    this.gameMessageReadyListener?.(gameAddress);
 
     return message.message_id;
   }

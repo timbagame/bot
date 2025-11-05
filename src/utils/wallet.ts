@@ -1520,6 +1520,9 @@ export class WalletManager {
     let lastConfirmationStatus: string | null = null;
     let lastConfirmations: number | null = null;
     let historySearchEnabled = false;
+    let historyEnabledAt: number | null = null;
+    let firstStatusObservedAt: number | null = null;
+    let networkRetryCount = 0;
 
     const trackedSignature = this.pendingSignatures.get(signature);
     let lastBlockHeightCheck = startTime;
@@ -1590,14 +1593,18 @@ export class WalletManager {
 
         const enableHistorySearch =
           elapsed >= SIGNATURE_HISTORY_SEARCH_DELAY_MS;
-        const shouldUseHistory =
-          historySearchEnabled || enableHistorySearch;
 
-        if (enableHistorySearch && !historySearchEnabled && hasStatusesMethod) {
-          console.log(
-            `🗂️ Transaction ${signature} history lookup enabled after ${elapsed}ms`
-          );
+        if (enableHistorySearch && !historySearchEnabled) {
+          historySearchEnabled = true;
+          if (hasStatusesMethod) {
+            historyEnabledAt = elapsed;
+            console.log(
+              `🗂️ Transaction ${signature} history lookup enabled after ${elapsed}ms`
+            );
+          }
         }
+
+        const shouldUseHistory = historySearchEnabled && hasStatusesMethod;
 
         let status: any = null;
         try {
@@ -1607,15 +1614,13 @@ export class WalletManager {
             typeof error?.message === "string" &&
             (error.message.includes("429") || error.message.includes("timeout"))
           ) {
+            networkRetryCount += 1;
             console.warn(
               `⚠️ Network issue checking ${signature} (poll ${pollCount}, ${elapsed}ms), retrying with longer delay`
             );
             await new Promise((resolve) =>
               setTimeout(resolve, pollInterval * 2)
             );
-            if (enableHistorySearch) {
-              historySearchEnabled = true;
-            }
             continue;
           }
 
@@ -1625,12 +1630,12 @@ export class WalletManager {
           );
           throw error;
         }
-
-        if (enableHistorySearch) {
-          historySearchEnabled = true;
-        }
         const now = Date.now();
         const elapsedAfterFetch = now - startTime;
+
+        if (status && firstStatusObservedAt === null) {
+          firstStatusObservedAt = elapsedAfterFetch;
+        }
 
         if (status) {
           const currentStatus = status.confirmationStatus || "unknown";
@@ -1667,7 +1672,15 @@ export class WalletManager {
             currentStatus === "finalized"
           ) {
             console.log(
-              `✅ Transaction ${signature} confirmed in ${elapsedAfterFetch}ms (${pollCount} polls)`
+              `✅ Transaction ${signature} confirmed in ${elapsedAfterFetch}ms (${pollCount} polls, history=${
+                historyEnabledAt !== null
+                  ? `enabled@${historyEnabledAt}ms`
+                  : "not-used"
+              }, firstStatus=${
+                firstStatusObservedAt !== null
+                  ? `${firstStatusObservedAt}ms`
+                  : "none"
+              }, networkRetries=${networkRetryCount})`
             );
             return;
           }
@@ -1695,6 +1708,9 @@ export class WalletManager {
       const finalNow = Date.now();
 
       if (finalStatus) {
+        if (firstStatusObservedAt === null) {
+          firstStatusObservedAt = finalNow - startTime;
+        }
         if (finalStatus.err) {
           console.error(`❌ Transaction ${signature} failed:`, finalStatus.err);
           throw new Error(`Transaction failed: ${JSON.stringify(finalStatus.err)}`);
@@ -1710,7 +1726,15 @@ export class WalletManager {
           finalStatusLabel === "confirmed" ||
           finalStatusLabel === "finalized"
         ) {
-          console.log(`✅ Transaction ${signature} confirmed on final check`);
+          console.log(
+            `✅ Transaction ${signature} confirmed on final check (polls=${pollCount}, history=${
+              historyEnabledAt !== null ? `enabled@${historyEnabledAt}ms` : "not-used"
+            }, firstStatus=${
+              firstStatusObservedAt !== null
+                ? `${firstStatusObservedAt}ms`
+                : "none"
+            }, networkRetries=${networkRetryCount})`
+          );
           return;
         }
 
@@ -1719,7 +1743,13 @@ export class WalletManager {
             finalConfirmations !== null
               ? ` (${finalConfirmations} confirmations)`
               : ""
-          }`
+          } (polls=${pollCount}, history=${
+            historyEnabledAt !== null ? `enabled@${historyEnabledAt}ms` : "not-used"
+          }, firstStatus=${
+            firstStatusObservedAt !== null
+              ? `${firstStatusObservedAt}ms`
+              : "none"
+          }, networkRetries=${networkRetryCount})`
         );
       }
 
@@ -1732,7 +1762,11 @@ export class WalletManager {
     }
 
     console.error(
-      `⏰ Transaction confirmation timeout for ${signature} after ${timeout}ms (${pollCount} polls)`
+      `⏰ Transaction confirmation timeout for ${signature} after ${timeout}ms (${pollCount} polls, history=${
+        historyEnabledAt !== null ? `enabled@${historyEnabledAt}ms` : "not-used"
+      }, firstStatus=${
+        firstStatusObservedAt !== null ? `${firstStatusObservedAt}ms` : "none"
+      }, networkRetries=${networkRetryCount})`
     );
     throw new Error(
       `Transaction confirmation timeout after ${timeout}ms. Transaction may still succeed - check signature ${signature}`

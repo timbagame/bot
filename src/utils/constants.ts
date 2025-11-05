@@ -57,8 +57,8 @@ export const applyDynamicFeeBudgets = (options: {
 
 export const GAME_TIMEOUT = 3600; // 1 hour
 export const MAX_RETRIES = 3;
-export const CONFIRMATION_TIMEOUT_MS = 30000; // 30 second confirmation window
-export const SIGNATURE_HISTORY_SEARCH_DELAY_MS = 15000; // After 15s leverage transaction history lookup
+export const CONFIRMATION_TIMEOUT_MS = 45000; // 45 second confirmation window
+export const SIGNATURE_HISTORY_SEARCH_DELAY_MS = 8000; // After 8s leverage transaction history lookup
 export const BLOCK_HEIGHT_CHECK_INTERVAL_MS = 1000; // Check block height drift every 1s during confirmation
 export const BLOCK_HEIGHT_EXPIRATION_GRACE = 2; // Allow a couple of blocks past lastValidBlockHeight before treating as expired
 export const TRANSACTION_RESUBMIT_ATTEMPTS = 2; // Number of times to rebuild and resend transactions on expiry/timeout

@@ -945,6 +945,7 @@ const getGameMessageTarget = (gameAddress: string): GameMessageTarget | null => 
     );
   }
 
+
   if (chatId === undefined || messageId === undefined) {
     const gameRecord = gameDb.getGame(gameAddress);
     if (gameRecord) {
@@ -987,6 +988,179 @@ const getGameMessageTarget = (gameAddress: string): GameMessageTarget | null => 
 
   return { chatId, messageId };
 };
+
+const PENDING_PLAYER_EVENT_FLUSH_INTERVAL_MS = 1000;
+const PENDING_PLAYER_EVENT_MAX_AGE_MS = 15_000;
+
+type PendingPlayerEventPayload = {
+  event: PlayerEvent;
+  eventName: string;
+  receivedAt: number;
+};
+
+type PendingPlayerEventState = {
+  events: PendingPlayerEventPayload[];
+  timer?: ReturnType<typeof setTimeout>;
+};
+
+const pendingPlayerEvents = new Map<string, PendingPlayerEventState>();
+
+const prunePendingPlayerEvents = (
+  state: PendingPlayerEventState
+): PendingPlayerEventPayload[] => {
+  const now = Date.now();
+  return state.events.filter((payload) => {
+    const age = now - payload.receivedAt;
+    if (age > PENDING_PLAYER_EVENT_MAX_AGE_MS) {
+      console.warn(
+        `⚠️ Dropping stale ${payload.eventName} event after waiting ${age}ms`
+      );
+      return false;
+    }
+    return true;
+  });
+};
+
+const enqueuePendingPlayerEvent = (
+  gameAddress: string,
+  payload: PendingPlayerEventPayload
+): void => {
+  const state = pendingPlayerEvents.get(gameAddress) ?? { events: [] };
+  state.events.push(payload);
+  pendingPlayerEvents.set(gameAddress, state);
+
+  console.log(
+    `⌛ Queued ${payload.eventName} event for ${gameAddress} until message target is available`
+  );
+
+  schedulePendingPlayerEventFlush(gameAddress);
+};
+
+const processPlayerEventWithTarget = async (
+  event: PlayerEvent,
+  eventName: string,
+  target: GameMessageTarget
+): Promise<void> => {
+  if (!gameManager) {
+    console.warn(
+      `Game manager not ready to process ${eventName} event for ${event.gameKey.toString()}`
+    );
+    return;
+  }
+
+  const gameAddress = event.gameKey.toString();
+  const totalPot = Number(event.totalAmount);
+  const eventTimestamp = Number(event.timestamp);
+  const lastSlotInfo = gameDb.getGameLastSlotWithTimestamp(gameAddress);
+
+  if (
+    Number.isFinite(eventTimestamp) &&
+    lastSlotInfo.timestamp !== null &&
+    eventTimestamp < lastSlotInfo.timestamp
+  ) {
+    console.log(
+      `⏭️ Skipping stale ${eventName} event for ${gameAddress} (event ${eventTimestamp}, recorded ${lastSlotInfo.timestamp})`
+    );
+    return;
+  }
+
+  try {
+    const apiCtx = createApiContext(target.chatId, bot.api);
+    await gameManager.updateGameMessageFromData(
+      apiCtx,
+      gameAddress,
+      "Active",
+      undefined,
+      totalPot
+    );
+
+    if (eventName === "PlayerJoined") {
+      try {
+        const displayName = await gameManager.getPlayerUsername(
+          apiCtx,
+          event.player.toString()
+        );
+        const announcement = `👤 <b>${displayName}</b> joined the game!`;
+        await sendReplyToGameMessage(target, announcement);
+      } catch (announcementError) {
+        console.error(
+          `Error announcing player join for game ${gameAddress}:`,
+          announcementError
+        );
+      }
+    }
+  } catch (error) {
+    console.error(`Error processing ${eventName} for game ${gameAddress}:`, error);
+  }
+};
+
+const notifyGameMessageReady = (gameAddress: string): void => {
+  void flushPendingPlayerEvents(gameAddress, "notify");
+};
+
+function schedulePendingPlayerEventFlush(gameAddress: string): void {
+  const state = pendingPlayerEvents.get(gameAddress);
+  if (!state) {
+    return;
+  }
+
+  if (state.timer) {
+    return;
+  }
+
+  state.timer = setTimeout(() => {
+    state.timer = undefined;
+    void flushPendingPlayerEvents(gameAddress, "retry");
+  }, PENDING_PLAYER_EVENT_FLUSH_INTERVAL_MS);
+
+  pendingPlayerEvents.set(gameAddress, state);
+}
+
+async function flushPendingPlayerEvents(
+  gameAddress: string,
+  reason: "notify" | "retry" = "retry"
+): Promise<void> {
+  const state = pendingPlayerEvents.get(gameAddress);
+  if (!state) {
+    return;
+  }
+
+  if (state.timer) {
+    clearTimeout(state.timer);
+  }
+  state.timer = undefined;
+
+  const target = getGameMessageTarget(gameAddress);
+  if (!target) {
+    state.events = prunePendingPlayerEvents(state);
+
+    if (state.events.length === 0) {
+      pendingPlayerEvents.delete(gameAddress);
+      return;
+    }
+
+    pendingPlayerEvents.set(gameAddress, state);
+    if (reason === "notify") {
+      console.warn(
+        `⚠️ Message target still unavailable for ${gameAddress}; will retry pending events`
+      );
+    }
+    schedulePendingPlayerEventFlush(gameAddress);
+    return;
+  }
+
+  pendingPlayerEvents.delete(gameAddress);
+
+  if (state.events.length > 0) {
+    console.log(
+      `📬 Flushing ${state.events.length} pending player event(s) for ${gameAddress}`
+    );
+  }
+
+  for (const payload of state.events) {
+    await processPlayerEventWithTarget(payload.event, payload.eventName, target);
+  }
+}
 
 const sendReplyToGameMessage = async (
   target: GameMessageTarget,
@@ -1766,6 +1940,7 @@ const setupAnchor = async () => {
 
     await initializeTokensList();
     gameManager = GameManager.getInstance(program, wallet, gameDb);
+  gameManager.setGameMessageReadyListener(notifyGameMessageReady);
 
     await checkOracleStatus();
     await checkGameTokenStatus();
@@ -2721,45 +2896,19 @@ const handlePlayerEvent = async (
     );
 
     if (slotWasUpdated) {
-      const gameData = gameDb.getGame(gameAddress);
       const target = getGameMessageTarget(gameAddress);
-      const chatId = target?.chatId ?? gameData?.chat_id;
 
-      if (chatId) {
-        try {
-          const apiCtx = createApiContext(chatId, bot.api);
-          await gameManager.updateGameMessageFromData(
-            apiCtx,
-            gameAddress,
-            "Active",
-            undefined,
-            totalPot
-          );
-
-          if (eventName === "PlayerJoined" && target) {
-            try {
-              const displayName = await gameManager.getPlayerUsername(
-                apiCtx,
-                event.player.toString()
-              );
-              const announcement = `👤 <b>${displayName}</b> joined the game!`;
-              await sendReplyToGameMessage(target, announcement);
-            } catch (announcementError) {
-              console.error(
-                `Error announcing player join for game ${gameAddress}:`,
-                announcementError
-              );
-            }
-          }
-
-          // Game completion is handled autonomously by the oracle
-          // The bot only processes GameCompleted events from Solana
-        } catch (contextError) {
-          console.error(
-            `Error creating context for chat ${chatId}:`,
-            contextError
-          );
+      if (target) {
+        if (pendingPlayerEvents.has(gameAddress)) {
+          await flushPendingPlayerEvents(gameAddress, "notify");
         }
+        await processPlayerEventWithTarget(event, eventName, target);
+      } else {
+        enqueuePendingPlayerEvent(gameAddress, {
+          event,
+          eventName,
+          receivedAt: Date.now(),
+        });
       }
     }
   } catch (error) {
