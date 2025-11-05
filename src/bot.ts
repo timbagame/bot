@@ -2335,6 +2335,26 @@ const transactionCache = createExpiringCache<TransactionCacheEntry>(
   TRANSACTION_CACHE_TTL_MS
 );
 
+export const __test_setTransactionCacheEntry = (
+  key: string,
+  entry: TransactionCacheEntry | null,
+  ttlMs: number = TRANSACTION_CACHE_TTL_MS
+): void => {
+  if (!entry) {
+    transactionCache.delete(key);
+    return;
+  }
+  transactionCache.setWithTTL(key, entry, ttlMs);
+};
+
+export const __test_getTransactionCacheEntry = (
+  key: string
+): TransactionCacheEntry | undefined => transactionCache.peek(key);
+
+export const __test_clearTransactionCache = (): void => {
+  transactionCache.clear();
+};
+
 // ================================
 // TOKEN MANAGEMENT COMMANDS
 // ================================
