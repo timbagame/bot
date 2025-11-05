@@ -211,18 +211,29 @@ export const safeAnswerCallbackQuery = async (
   try {
     const hasText = typeof text === "string" && text.length > 0;
 
-    if (ctx?.answerCallbackQuery) {
+    const callbackId = ctx?.callbackQuery?.id;
+
+    if (!callbackId) {
+      console.warn("Unable to answer callback query - missing callback id");
+      return;
+    }
+
+    if (typeof ctx?.answerCallbackQuery === "function") {
       if (hasText) {
         await ctx.answerCallbackQuery(text);
       } else {
         await ctx.answerCallbackQuery();
       }
-    } else if (ctx?.api && ctx?.callbackQuery?.id) {
-      const payload = hasText ? { text } : {};
-      await ctx.api.answerCallbackQuery(ctx.callbackQuery.id, payload);
-    } else {
-      console.warn("Unable to answer callback query - invalid context");
+      return;
     }
+
+    if (ctx?.api) {
+      const payload = hasText ? { text } : {};
+      await ctx.api.answerCallbackQuery(callbackId, payload);
+      return;
+    }
+
+    console.warn("Unable to answer callback query - invalid context");
   } catch (error: any) {
     const description = String(error?.description ?? "");
     if (

@@ -6,6 +6,7 @@ import {
   VersionedTransaction,
   SystemProgram,
 } from "@solana/web3.js";
+import type { BlockhashWithExpiryBlockHeight } from "@solana/web3.js";
 import {
   JupiterClient,
   type JupiterQuoteResponse,
@@ -44,6 +45,24 @@ const KNOWN_MAJOR_TOKENS = new Set([
   "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", // ETH
   "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E", // BTC
 ]);
+
+const CONFIRMATION_POLL_INTERVAL_MS = 2_000;
+const CONFIRMATION_POLL_DURATION_MS = 30_000;
+
+const delay = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+class TransactionConfirmationTimeoutError extends Error {
+  readonly signature: string;
+
+  constructor(signature: string) {
+    super(
+      `Transaction confirmation timed out after extended polling. Check signature ${signature}`
+    );
+    this.name = "TransactionConfirmationTimeoutError";
+    this.signature = signature;
+  }
+}
 
 export class SwapManager {
   private jupiterClient: JupiterClient;
@@ -1377,11 +1396,11 @@ export class SwapManager {
       // Deserialize as VersionedTransaction
       const versionedTx = VersionedTransaction.deserialize(transactionBuffer);
 
-      // Get fresh blockhash
-      const { blockhash } = await this.connection.getLatestBlockhash();
+      // Get fresh blockhash metadata for improved confirmation tracking
+      const latestBlockhash = await this.connection.getLatestBlockhash();
 
       // Update the recent blockhash
-      versionedTx.message.recentBlockhash = blockhash;
+      versionedTx.message.recentBlockhash = latestBlockhash.blockhash;
 
       // Sign the transaction
       versionedTx.sign([userKeypair]);
@@ -1395,16 +1414,10 @@ export class SwapManager {
       console.log(`Jupiter swap transaction sent: ${signature}`);
 
       // Wait for confirmation
-      const confirmation = await this.connection.confirmTransaction(
+      await this.waitForTransactionConfirmation(
         signature,
-        "confirmed"
+        latestBlockhash
       );
-
-      if (confirmation.value.err) {
-        throw new Error(
-          `Transaction failed: ${JSON.stringify(confirmation.value.err)}`
-        );
-      }
 
       return signature;
     } catch (error: any) {
@@ -1413,6 +1426,97 @@ export class SwapManager {
         `Failed to execute Jupiter transaction: ${error.message}`
       );
     }
+  }
+
+  private isConfirmationTimeoutError(error: unknown): boolean {
+    if (!error) return false;
+    const candidate = error as { name?: string; message?: string };
+    const name = candidate?.name?.toLowerCase() ?? "";
+    const message = candidate?.message?.toLowerCase() ?? String(error).toLowerCase();
+
+    return (
+      name === "transactionexpiredtimeouterror" ||
+      message.includes("transaction was not confirmed") ||
+      message.includes("transaction confirmation timeout")
+    );
+  }
+
+  private async waitForTransactionConfirmation(
+    signature: string,
+    latestBlockhash: BlockhashWithExpiryBlockHeight
+  ): Promise<void> {
+    try {
+      const confirmation = await this.connection.confirmTransaction(
+        {
+          signature,
+          blockhash: latestBlockhash.blockhash,
+          lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+        },
+        "confirmed"
+      );
+
+      if (confirmation.value.err) {
+        throw new Error(
+          `Transaction failed: ${JSON.stringify(confirmation.value.err)}`
+        );
+      }
+    } catch (error) {
+      if (!this.isConfirmationTimeoutError(error)) {
+        throw error;
+      }
+
+      console.warn(
+        `Transaction ${signature} confirmation timed out via RPC, polling status...`
+      );
+
+      const confirmed = await this.pollSignatureUntilConfirmed(signature);
+
+      if (confirmed) {
+        console.warn(
+          `Transaction ${signature} confirmed after extended polling`
+        );
+        return;
+      }
+
+      throw new TransactionConfirmationTimeoutError(signature);
+    }
+  }
+
+  private async pollSignatureUntilConfirmed(signature: string): Promise<boolean> {
+    const deadline = Date.now() + CONFIRMATION_POLL_DURATION_MS;
+
+    while (Date.now() < deadline) {
+      const statusResponse = await this.connection.getSignatureStatuses(
+        [signature],
+        { searchTransactionHistory: true }
+      );
+
+      const status = statusResponse?.value?.[0];
+
+      if (status) {
+        if (status.err) {
+          throw new Error(
+            `Transaction failed: ${JSON.stringify(status.err)}`
+          );
+        }
+
+        const confirmationStatus = status.confirmationStatus ?? null;
+        const hasConfirmations =
+          typeof status.confirmations === "number" && status.confirmations > 0;
+
+        if (
+          confirmationStatus === "confirmed" ||
+          confirmationStatus === "finalized" ||
+          hasConfirmations
+        ) {
+          return true;
+        }
+      }
+
+      await delay(CONFIRMATION_POLL_INTERVAL_MS);
+    }
+
+    return false;
   }
 
   /**
