@@ -12,7 +12,15 @@ function baseProgram() {
 }
 
 function baseWallet() { return {} as any; }
-function baseDb() { return { getGameParticipants: (_: string) => [] } as any; }
+function baseDb(overrides: Partial<any> = {}) {
+  return {
+    getGameParticipants: (_: string) => [],
+    getPlayerPublicKey: (_: string) => null,
+    getPlayerTelegramId: (_: string) => null,
+    getGame: (_: string) => null,
+    ...overrides,
+  } as any;
+}
 
 describe("GameManager.handleExpiredGame", () => {
   test("giveaway expired triggers cancelGameWithPlayerKeys and returns true", async () => {
@@ -70,5 +78,100 @@ describe("GameManager.handleExpiredGame", () => {
     const res = await (gm as any).handleExpiredGame(new PublicKey("BPFLoader4111111111111111111111111111111111"), gameAccount);
     expect(res).toBe(false);
   });
-});
 
+  test("coinflip below minimum players cancels immediately after cleanup", async () => {
+    resetGM();
+    const cleanupAddress = new PublicKey("BPFLoader5111111111111111111111111111111111");
+    const refreshedCreator = new PublicKey("BPFLoader6111111111111111111111111111111111");
+
+    const gm = GameManager.getInstance(baseProgram(), baseWallet(), baseDb());
+
+    let cleanupCalled = false;
+    (gm as any).handleExpiredCoinflip = async () => {
+      cleanupCalled = true;
+      return true;
+    };
+
+    let cancelArgs: any[] | null = null;
+    (gm as any).cancelGameWithPlayerKeys = async (...args: any[]) => {
+      cancelArgs = args;
+      return { success: true, tx: "cleanup-tx" };
+    };
+
+    let fetchCalls = 0;
+    (gm as any).program = {
+      account: {
+        game: {
+          fetch: async () => {
+            fetchCalls += 1;
+            return {
+              ticketsCount: 0,
+              ticketAmount: 50,
+              creator: refreshedCreator,
+            };
+          },
+        },
+      },
+    } as any;
+
+    const now = Math.floor(Date.now() / 1000);
+    const gameAccount = {
+      gameType: { coinflip: {} },
+      createdAt: now - 10_000,
+      timeout: 60,
+      ticketsCount: 1,
+      minTickets: 3,
+      maxTickets: 5,
+      ticketAmount: 50,
+      creator: new PublicKey("BPFLoader6211111111111111111111111111111111"),
+    };
+
+    const result = await (gm as any).handleExpiredGame(cleanupAddress, gameAccount);
+
+    expect(cleanupCalled).toBe(true);
+    expect(cancelArgs).not.toBeNull();
+  expect(fetchCalls).toBeGreaterThan(0);
+    expect(result).toEqual({
+      cancelled: true,
+      amount: 50,
+      creator: refreshedCreator.toBase58(),
+      tx: "cleanup-tx",
+    });
+  });
+
+  test("coinflip with minimum players waits until buffer elapses", async () => {
+    resetGM();
+    const gm = GameManager.getInstance(baseProgram(), baseWallet(), baseDb());
+
+    (gm as any).handleExpiredCoinflip = async () => {
+      throw new Error("should not attempt cleanup before buffer elapses");
+    };
+
+    let cancelCalled = false;
+    (gm as any).cancelGameWithPlayerKeys = async () => {
+      cancelCalled = true;
+      return { success: true, tx: "noop" };
+    };
+
+    const now = Math.floor(Date.now() / 1000);
+    const timeout = 300;
+    const gameAccount = {
+      gameType: { coinflip: {} },
+      createdAt: now - (timeout + 10),
+      timeout,
+      ticketsCount: 2,
+      minTickets: 2,
+      maxTickets: 5,
+      ticketAmount: 75,
+      creator: new PublicKey("BPFLoader6311111111111111111111111111111111"),
+    };
+
+    const result = await (gm as any).handleExpiredGame(
+      new PublicKey("BPFLoader6411111111111111111111111111111111"),
+      gameAccount
+    );
+
+    expect(result).toBe(false);
+    expect(cancelCalled).toBe(false);
+  });
+});
