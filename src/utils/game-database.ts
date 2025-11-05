@@ -648,14 +648,17 @@ export class GameDatabase extends BaseDatabase {
           COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_creator = 1 THEN pgs.game_address END) AS games_created,
           COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_participant = 1 THEN pgs.game_address END) AS games_joined,
           COALESCE(SUM(CASE WHEN pgs.status = 'completed' THEN pgs.amount ELSE 0 END), 0) AS total_volume,
-          CASE
-            WHEN COUNT(DISTINCT CASE WHEN pgs.status = 'completed' THEN pgs.game_address END) > 0
-            THEN (
-              COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_winner = 1 THEN pgs.game_address END) * 100.0
-            ) /
-            COUNT(DISTINCT CASE WHEN pgs.status = 'completed' THEN pgs.game_address END)
-            ELSE 0
-          END AS win_rate
+          ROUND(
+            CASE
+              WHEN COUNT(DISTINCT CASE WHEN pgs.status = 'completed' THEN pgs.game_address END) > 0
+              THEN (
+                COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_winner = 1 THEN pgs.game_address END) * 100.0
+              ) /
+              COUNT(DISTINCT CASE WHEN pgs.status = 'completed' THEN pgs.game_address END)
+              ELSE 0
+            END,
+            1
+          ) AS win_rate
         FROM player_game_summary pgs
         GROUP BY pgs.telegram_id
         HAVING COUNT(DISTINCT CASE WHEN pgs.status = 'completed' THEN pgs.game_address END) > 0
