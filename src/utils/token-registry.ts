@@ -96,10 +96,6 @@ export function resolveDefaultToken(options?: {
   );
 }
 
-export function getBaseTokens(): TokenConfig[] {
-  return [...REGISTERED_TOKENS];
-}
-
 export function buildTokenList(options: TokenRegistryOptions = {}): TokenConfig[] {
   const network = options.network ?? NetworkDetector.getCurrentNetwork();
   const includeDefault = options.includeDefault ?? true;
@@ -118,10 +114,6 @@ export function buildTokenList(options: TokenRegistryOptions = {}): TokenConfig[
 
 export function getSupportedTokens(options: TokenRegistryOptions = {}): TokenConfig[] {
   return buildTokenList(options);
-}
-
-export function getBuiltinTokenMetadata(): BuiltinTokenMetadata[] {
-  return [...BUILTIN_TOKEN_METADATA];
 }
 
 export function getBuiltinTokenMetadataByTicker(

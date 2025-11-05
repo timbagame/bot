@@ -13,7 +13,6 @@ export const LAMPORTS_PER_SOL = 1_000_000_000;
 export let MIN_SOL_FOR_TX =
   FeeBudgetManager.getDefaultSingleTransactionLamports() / LAMPORTS_PER_SOL;
 export const SOL_BALANCE_PRECISION = 6;
-export const TOKEN_BALANCE_MAX_PRECISION = 6;
 export let MIN_SOL_BALANCE_FOR_GAMES_LAMPORTS =
   FeeBudgetManager.getDefaultGameSafetyBufferLamports();
 export let JIT_SWAP_FEE_BUFFER_LAMPORTS =
@@ -92,8 +91,6 @@ export const TOKEN_DISCOVERY_COOLDOWN_MS = parsePositiveDuration(
 export const WALLET_RATE_LIMIT_MS = 500;
 export const CALLBACK_MESSAGE_MAX_LENGTH = 180;
 export const GAME_INFO_LIMIT = 5;
-export const ADDRESS_DISPLAY_LENGTH = 8;
-
 // ================================
 // DEFAULTS
 // ================================
@@ -152,15 +149,11 @@ export const applyOracleBufferTime = (bufferSeconds: number): number => {
 
   return GAME_EXPIRATION_BUFFER_TIME;
 };
-export const PLAYER_CLEANUP_DELAY_MS = 100; // Delay between player participation cleanups
-
 // ================================
 // JUPITER SWAP CONSTANTS
 // ================================
 
-export const JUPITER_BASE_URL = "https://quote-api.jup.ag";
 export const JUPITER_DEFAULT_SLIPPAGE_BPS = 100; // 1%
-export const JUPITER_PLATFORM_FEE_BPS = 0; // No platform fee by default
 
 // Swap UI defaults
 export const SWAP_DEFAULT_SLIPPAGE_BPS = 100; // 1%
@@ -172,9 +165,6 @@ export const SWAP_SLIPPAGE_OPTIONS_BPS = [2, 10, 50, 100] as const;
 
 // Jupiter Price API base
 export const JUPITER_PRICE_URL = "https://lite-api.jup.ag/price/v3";
-// Toggle price fetching (disable to avoid network)
-export const PRICES_ENABLED = (process.env["PRICES_ENABLED"] ?? "true").toLowerCase() !== "false";
-
 function parsePositiveDuration(key: string, fallback: number): number {
   const raw = process.env[key];
   if (raw === undefined) {
@@ -236,8 +226,3 @@ export const getCoinflipVideoId = () =>
 // Giveaway start video - for giveaway announcements
 export const getGiveawayVideoId = () =>
   "CgACAgEAAx0Ce_D3oQACZuxo-WS_4i1IJ6SlAx3s6vvIe6Qw-QACxAYAAo4w0EeJ0XIEobD7cjYE";
-
-// Backwards compatibility - deprecated, use getters instead
-export const START_VIDEO_ID = getStartVideoId();
-export const COINFLIP_START_VIDEO_ID = getCoinflipVideoId();
-export const GIVEAWAY_START_VIDEO_ID = getGiveawayVideoId();

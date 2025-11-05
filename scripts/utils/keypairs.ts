@@ -42,18 +42,6 @@ const bundleFromSecret = (secret: Uint8Array): KeypairBundle => ({
 export const bundleFromKeypair = (keypair: Keypair): KeypairBundle =>
   bundleFromSecret(keypair.secretKey);
 
-export const loadKeypairBundleFromPath = (filePath: string): KeypairBundle => {
-  const resolvedPath = resolvePath(filePath);
-  try {
-    const secret = readSecretKey(resolvedPath);
-    return bundleFromSecret(secret);
-  } catch (error) {
-    throw new Error(
-      `Failed to load keypair bundle from ${resolvedPath}: ${error}`
-    );
-  }
-};
-
 type OracleOperatorOptions = {
   envVar?: string;
   description?: string;

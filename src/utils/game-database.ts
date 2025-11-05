@@ -1,18 +1,6 @@
 import type { GameData, PlayerMapping } from "../types";
 import { BaseDatabase, initializeDatabaseSingleton } from "./base-database";
 
-// ================================
-// LEADERBOARD TYPES
-// ================================
-
-export interface LeaderboardEntry {
-  telegram_id: string;
-  username: string | null;
-  total_wins: number;
-  total_games: number;
-  win_rate: number;
-}
-
 export interface LeaderboardStatsRecord {
   telegramId: string;
   totalGames: number;

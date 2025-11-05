@@ -75,8 +75,6 @@ export function parseDecimalAmount(
   return Number(rawAmount);
 }
 
-export const __test_decimalAmountPattern = decimalAmountPattern;
-
 export type TradeAmountParseResult =
   | { kind: "max" }
   | { kind: "percentage"; percentage: number }
