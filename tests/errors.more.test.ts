@@ -45,6 +45,12 @@ describe("errors extras", () => {
     expect(msg).toContain("Cannot swap same token");
   });
 
+  test("percentage rounding guidance highlights fee buffer", () => {
+    const msg = parseTransactionError(new Error("Percentage results in zero amount"));
+    expect(msg).toContain("Amount too small");
+    expect(msg).toContain("percentage rounds down to zero");
+  });
+
   test("rent shortfall error explains SOL top up instead of dumping logs", () => {
     const rentError = new Error(
       "Transaction simulation failed: Transaction results in an account (0) with insufficient funds for rent."

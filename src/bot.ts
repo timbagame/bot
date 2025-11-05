@@ -3954,7 +3954,9 @@ const handleSwapToTokenInput = async (
     });
 
     clearInputSession(`${userState.chatId}_${userState.messageId}`);
-    await safeAnswerCallbackQuery(ctx, `Swap to ${metadata.symbol}`);
+    if (ctx?.callbackQuery) {
+      await safeAnswerCallbackQuery(ctx, `Swap to ${metadata.symbol}`);
+    }
   } catch (error) {
     console.error("Error resolving swap token input:", error);
 
@@ -3976,11 +3978,11 @@ const handleSwapToTokenInput = async (
       INPUT_TIMEOUT_HINT,
     ];
 
-  await respondWithMenu(ctx, {
-    text: messageLines.join("\n"),
-    parseMode: "HTML",
-    keyboard: createCancelKeyboard(`swap_to_${fromToken}_OTHER`),
-  });
+    await respondWithMenu(ctx, {
+      text: messageLines.join("\n"),
+      parseMode: "HTML",
+      keyboard: createCancelKeyboard(`swap_to_${fromToken}_OTHER`),
+    });
 
     setInputSession(`${userState.chatId}_${userState.messageId}`, {
       type: "swap_to_token",

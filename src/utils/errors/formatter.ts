@@ -103,6 +103,13 @@ const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: E
     handler: (ctx) => `💰 Insufficient funds!\n\nEnsure you have at least ${ctx.minimumSolForFees} SOL for fees.\nUse /balance to check your current balance.`,
   },
   {
+    matcher: (ctx) => ctx.lowerMessage.includes("percentage results in zero amount"),
+    handler: () =>
+      `⚠️ Amount too small.\n\n` +
+      `After reserving network fees, that percentage rounds down to zero.\n\n` +
+      `Try a larger percentage or enter a custom amount.`,
+  },
+  {
     matcher: (ctx) => ctx.lowerMessage.includes("account does not exist") || ctx.lowerMessage.includes("could not find account"),
     handler: (ctx) => `🏗️ Account setup required!\n\nEnsure you have at least ${ctx.minimumSolForFees} SOL for fees.\nUse /balance to check your balance.`,
   },
