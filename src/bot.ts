@@ -3402,6 +3402,16 @@ registerCallbackPrefixHandler(
         ? cachedTarget.tokenMetadata?.symbol ?? cachedTarget.targetToken
         : toTokenIdentifier.toUpperCase();
 
+      const quoteOverrides: {
+        toMint?: string;
+        toDecimals?: number;
+      } = {};
+
+      if (isCachedSelection && cachedTarget) {
+        quoteOverrides.toMint = cachedTarget.targetTokenAddress;
+        quoteOverrides.toDecimals = cachedTarget.tokenMetadata?.decimals;
+      }
+
       if (amount === "CUSTOM") {
         const userId = getTelegramIdString(ctx);
         if (!userId) return;
@@ -3428,6 +3438,9 @@ registerCallbackPrefixHandler(
             type: "swap_custom_amount",
             fromToken,
             toToken: toTokenIdentifier,
+            toTokenDisplay: displayToToken,
+            toMintOverride: quoteOverrides.toMint,
+            toDecimalsOverride: quoteOverrides.toDecimals,
           },
         });
 
@@ -3441,15 +3454,6 @@ registerCallbackPrefixHandler(
       );
       if (telegramId == null) {
         return;
-      }
-      const quoteOverrides: {
-        toMint?: string;
-        toDecimals?: number;
-      } = {};
-
-      if (isCachedSelection && cachedTarget) {
-        quoteOverrides.toMint = cachedTarget.targetTokenAddress;
-        quoteOverrides.toDecimals = cachedTarget.tokenMetadata?.decimals;
       }
 
       await showSwapQuoteAndConfirmation(
@@ -3975,14 +3979,82 @@ const handleSwapCustomAmountInput = async (
   userState: any,
   amount: string
 ) => {
-  const fromToken = userState.fromToken;
-  const toToken = userState.toToken;
+  const fromToken =
+    typeof userState.fromToken === "string" ? userState.fromToken : undefined;
+  const toTokenIdentifier =
+    typeof userState.toToken === "string" ? userState.toToken : undefined;
+
+  if (!fromToken || !toTokenIdentifier) {
+    await respondWithMenu(ctx, {
+      text:
+        "❌ <b>Swap session expired</b>\n\nPlease restart the swap flow.",
+      parseMode: "HTML",
+      keyboard: createBackToWalletKeyboard(),
+    });
+    return;
+  }
+
   const telegramId = requireTelegramId(ctx, "swap custom amount");
 
   const normalizedAmount = amount.trim();
 
   console.log(
-    `💱 Custom swap amount received: ${normalizedAmount} ${fromToken} → ${toToken}`
+    `💱 Custom swap amount received: ${normalizedAmount} ${fromToken} → ${toTokenIdentifier}`
+  );
+
+  const quoteOverrides: {
+    toMint?: string;
+    toDecimals?: number;
+  } = {};
+
+  if (
+    typeof userState.toMintOverride === "string" &&
+    userState.toMintOverride.length > 0
+  ) {
+    quoteOverrides.toMint = userState.toMintOverride;
+  }
+
+  if (typeof userState.toDecimalsOverride === "number") {
+    quoteOverrides.toDecimals = userState.toDecimalsOverride;
+  }
+
+  let displayToToken =
+    typeof userState.toTokenDisplay === "string" &&
+    userState.toTokenDisplay.length > 0
+      ? userState.toTokenDisplay
+      : toTokenIdentifier.toUpperCase();
+
+  if (!quoteOverrides.toMint || quoteOverrides.toDecimals === undefined) {
+    const cachedTarget = transactionCache.get(toTokenIdentifier);
+    if (isTokenSelectionCacheEntry(cachedTarget)) {
+      displayToToken =
+        cachedTarget.tokenMetadata?.symbol ?? cachedTarget.targetToken;
+      quoteOverrides.toMint =
+        quoteOverrides.toMint ?? cachedTarget.targetTokenAddress;
+      if (quoteOverrides.toDecimals === undefined) {
+        const cachedDecimals = cachedTarget.tokenMetadata?.decimals;
+        if (typeof cachedDecimals === "number" && Number.isFinite(cachedDecimals)) {
+          quoteOverrides.toDecimals = cachedDecimals;
+        }
+      }
+    }
+  }
+
+  if (
+    displayToToken !== toTokenIdentifier.toUpperCase() &&
+    !quoteOverrides.toMint
+  ) {
+    await respondWithMenu(ctx, {
+      text:
+        "❌ <b>Swap session expired</b>\n\nPlease reselect the token to continue.",
+      parseMode: "HTML",
+      keyboard: createCancelKeyboard("cmd_swap"),
+    });
+    return;
+  }
+
+  console.log(
+    `💱 Normalized swap amount: ${normalizedAmount} ${fromToken} → ${displayToToken}`
   );
 
   // Show quote and confirmation
@@ -3995,9 +4067,10 @@ const handleSwapCustomAmountInput = async (
   await showSwapQuoteAndConfirmation(
     walletCtx,
     fromToken,
-    toToken,
+    displayToToken,
     normalizedAmount,
-    telegramId
+    telegramId,
+    quoteOverrides
   );
 };
 
