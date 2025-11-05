@@ -70,6 +70,10 @@ export async function buildWalletTokenLines({
     },
   ];
 
+  const otherTokenLines: TokenDisplayLine[] = [];
+  let wsolLine: TokenDisplayLine | undefined;
+  let timbaLine: TokenDisplayLine | undefined;
+
   for (const token of filteredBalances) {
     const formattedAmount = formatTokenBalance
       ? formatTokenBalance(token.balance, token.decimals)
@@ -79,11 +83,35 @@ export async function buildWalletTokenLines({
     const tokenPriceUSD = getPriceFor(reference);
     const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
 
-    lines.push({
+    const line: TokenDisplayLine = {
       ticker: token.ticker,
       amount: formattedAmount,
       usdValue: formatUsdValue(tokenDecimalBalance * tokenPriceUSD),
-    });
+    };
+
+    if (token.ticker === "WSOL") {
+      wsolLine = line;
+      continue;
+    }
+
+    if (token.ticker === "TIMBA") {
+      timbaLine = line;
+      continue;
+    }
+
+    otherTokenLines.push(line);
+  }
+
+  if (wsolLine) {
+    lines.push(wsolLine);
+  }
+
+  if (timbaLine) {
+    lines.push(timbaLine);
+  }
+
+  for (const line of otherTokenLines) {
+    lines.push(line);
   }
 
   return lines;
