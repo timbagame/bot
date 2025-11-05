@@ -109,7 +109,8 @@ async function fetchFromPumpFun(
           method: "GET",
           headers: {
             accept: "application/json",
-            "user-agent": "timba-bot/1.0 (+https://timba.ai)",
+            // Generic user agent keeps requests from being flagged as automated.
+            "user-agent": "Mozilla/5.0",
           },
           signal,
         }),
