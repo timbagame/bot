@@ -20,6 +20,7 @@ import { formatUserFriendlyError } from "./errors";
 import {
   formatUsdValue as formatUsdValueText,
   formatCompactTokenDisplay,
+  formatAmount,
   escapeHtml,
 } from "./format-amount";
 import {
@@ -886,10 +887,51 @@ export class GameManager {
       }
     }
 
+    const buildFormatter = (options: {
+      decimals: number;
+      useSolFormatter: boolean;
+    }) => {
+      const { decimals, useSolFormatter } = options;
+      const formatWithWallet = (value: number): string => {
+        if (useSolFormatter) {
+          return this.wallet.formatSolBalance(value);
+        }
+        return this.wallet.formatTokenBalance(value, decimals);
+      };
+
+      return (value: number | bigint | string): string => {
+        const lamports = coerceLamportValue(value);
+        if (lamports !== null) {
+          if (lamports > MAX_SAFE_LAMPORTS) {
+            return formatAmount(lamports, decimals, {
+              maxFractionDigits: 6,
+              trim: true,
+            });
+          }
+          return formatWithWallet(Number(lamports));
+        }
+
+        if (typeof value === "number" && Number.isFinite(value)) {
+          return formatWithWallet(value);
+        }
+
+        if (typeof value === "string") {
+          const parsed = Number(value);
+          if (Number.isFinite(parsed)) {
+            return formatWithWallet(parsed);
+          }
+        }
+
+        return formatAmount(0, decimals, {
+          maxFractionDigits: 6,
+          trim: true,
+        });
+      };
+    };
+
     if (isSolToken) {
       return {
-        formatBalance: (value: number | bigint | string) =>
-          this.wallet.formatSolBalance(value),
+        formatBalance: buildFormatter({ decimals: 9, useSolFormatter: true }),
         decimals: 9,
         tokenMint,
         isSol: true,
@@ -902,8 +944,7 @@ export class GameManager {
         const decimals =
           typeof metadata?.decimals === "number" ? metadata.decimals : 6;
         return {
-          formatBalance: (value: number | bigint | string) =>
-            this.wallet.formatTokenBalance(value, decimals),
+          formatBalance: buildFormatter({ decimals, useSolFormatter: false }),
           decimals,
           tokenMint,
           isSol: false,
@@ -918,8 +959,10 @@ export class GameManager {
 
     const fallbackDecimals = 6;
     return {
-      formatBalance: (value: number | bigint | string) =>
-        this.wallet.formatTokenBalance(value, fallbackDecimals),
+      formatBalance: buildFormatter({
+        decimals: fallbackDecimals,
+        useSolFormatter: false,
+      }),
       decimals: fallbackDecimals,
       tokenMint,
       isSol: false,
@@ -1477,9 +1520,16 @@ export class GameManager {
 
   private async getActiveGameStats(
     gamePda: PublicKey,
-    amountLamports: bigint,
-    providedTotalPot?: bigint
+    amountLamportsInput: number | bigint,
+    providedTotalPotInput?: number | bigint
   ) {
+    const baseAmountLamports =
+      coerceLamportValue(amountLamportsInput) ?? 0n;
+    const providedTotalPot =
+      providedTotalPotInput !== undefined
+        ? coerceLamportValue(providedTotalPotInput)
+        : null;
+
     try {
       let gameAccount = await this.program.account.game.fetch(gamePda);
       const currentTickets = Number(gameAccount.ticketsCount ?? 0);
@@ -1490,16 +1540,16 @@ export class GameManager {
       let totalPot = providedTotalPot ?? null;
       if (totalPot === null) {
         const chainTotal = coerceLamportValue((gameAccount as any)?.totalAmount);
-        if (chainTotal !== null) {
+        if (chainTotal !== null && chainTotal > 0n) {
           totalPot = chainTotal;
         } else {
           const gameType = this.getGameType(gameAccount);
           if (gameType === "giveaway") {
             // For giveaways, totalPot is just the amount (prize from creator)
-            totalPot = amountLamports;
+            totalPot = baseAmountLamports;
           } else {
             // For coinflips, totalPot = amount * participants
-            totalPot = amountLamports * BigInt(Math.max(currentTickets, 0));
+            totalPot = baseAmountLamports * BigInt(Math.max(currentTickets, 0));
           }
         }
       }
@@ -1521,7 +1571,7 @@ export class GameManager {
         currentTickets,
         maxTickets,
         minTickets,
-        totalPot: totalPot ?? amountLamports,
+        totalPot: totalPot ?? baseAmountLamports,
         expirationInfo,
         tokenMint,
       };
@@ -1534,7 +1584,7 @@ export class GameManager {
         currentTickets: 0,
         maxTickets: 0,
         minTickets: 0,
-        totalPot: amountLamports,
+        totalPot: baseAmountLamports,
         expirationInfo: "",
         tokenMint: undefined,
       };
@@ -1543,9 +1593,16 @@ export class GameManager {
 
   private async getCompletedGameStats(
     gamePda: PublicKey,
-    amountLamports: bigint,
-    providedTotalPot?: bigint
+    amountLamportsInput: number | bigint,
+    providedTotalPotInput?: number | bigint
   ) {
+    const baseAmountLamports =
+      coerceLamportValue(amountLamportsInput) ?? 0n;
+    const providedTotalPot =
+      providedTotalPotInput !== undefined
+        ? coerceLamportValue(providedTotalPotInput)
+        : null;
+
     const gameAddress = gamePda.toBase58();
     const gameData = this.gameDb.getGame(gameAddress);
     const participants = this.getGamePlayers(gameAddress);
@@ -1571,17 +1628,17 @@ export class GameManager {
       const storedTotal = coerceLamportValue(
         (gameData as any)?.total_amount ?? (gameData as any)?.totalPot
       );
-      if (storedTotal !== null) {
+      if (storedTotal !== null && storedTotal > 0n) {
         totalPot = storedTotal;
       } else {
       const gameType = gameData?.game_type || "coinflip"; // default to coinflip if not found
 
       if (gameType === "giveaway") {
         // For giveaways, totalPot is just the amount (prize from creator)
-          totalPot = amountLamports;
+          totalPot = baseAmountLamports;
       } else {
         // For coinflips, totalPot = amount * participants
-          totalPot = amountLamports * BigInt(Math.max(currentTickets, 0));
+          totalPot = baseAmountLamports * BigInt(Math.max(currentTickets, 0));
       }
       }
     }
@@ -1590,7 +1647,7 @@ export class GameManager {
       currentTickets,
       maxTickets,
       minTickets,
-      totalPot: totalPot ?? amountLamports,
+      totalPot: totalPot ?? baseAmountLamports,
       expirationInfo: "",
       tokenMint: gameData?.token_mint || undefined,
     };
@@ -1827,9 +1884,16 @@ export class GameManager {
               ctx,
               telegramId
             );
-            participantDisplayNames.push(
-              username ?? `Player ${telegramId.slice(0, 6)}...`
-            );
+            if (username) {
+              const normalized = username.startsWith("@")
+                ? username
+                : `@${username}`;
+              participantDisplayNames.push(normalized);
+            } else {
+              participantDisplayNames.push(
+                `Player ${telegramId.slice(0, 6)}...`
+              );
+            }
           } catch {
             participantDisplayNames.push(
               `Player ${telegramId.slice(0, 6)}...`

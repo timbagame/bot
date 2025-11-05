@@ -81,9 +81,9 @@ test("getUsernameFromTelegramId shares in-flight lookups", async () => {
   ]);
 
   expect(lookups).toEqual([
-    "user_777_42",
-    "user_777_42",
-    "user_777_42",
+    "@user_777_42",
+    "@user_777_42",
+    "@user_777_42",
   ]);
   expect(callCount).toBe(1);
 });

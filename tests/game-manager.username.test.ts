@@ -51,10 +51,10 @@ describe("GameManager Username Resolution", () => {
         },
       } as any;
 
-      const first = await gm.getUsernameFromTelegramId(ctx, "555");
-      expect(first).toBe("cached");
-      const second = await gm.getUsernameFromTelegramId(ctx, "555");
-      expect(second).toBe("cached");
+  const first = await gm.getUsernameFromTelegramId(ctx, "555");
+  expect(first).toBe("@cached");
+  const second = await gm.getUsernameFromTelegramId(ctx, "555");
+  expect(second).toBe("@cached");
       expect(calls).toBe(1);
     });
 
@@ -79,18 +79,18 @@ describe("GameManager Username Resolution", () => {
       } as any;
 
       try {
-        const first = await gm.getUsernameFromTelegramId(ctx, "777");
-        expect(first).toBe("first");
+  const first = await gm.getUsernameFromTelegramId(ctx, "777");
+  expect(first).toBe("@first");
         expect(calls).toBe(1);
 
-        const second = await gm.getUsernameFromTelegramId(ctx, "777");
-        expect(second).toBe("first");
+  const second = await gm.getUsernameFromTelegramId(ctx, "777");
+  expect(second).toBe("@first");
         expect(calls).toBe(1);
 
         now += TELEGRAM_USERNAME_CACHE_TTL_MS + 1;
 
-        const third = await gm.getUsernameFromTelegramId(ctx, "777");
-        expect(third).toBe("second");
+  const third = await gm.getUsernameFromTelegramId(ctx, "777");
+  expect(third).toBe("@second");
         expect(calls).toBe(2);
       } finally {
         Date.now = originalNow;
@@ -142,7 +142,7 @@ describe("GameManager Username Resolution", () => {
       for (let i = 0; i < maxEntries + 1; i++) {
         const id = String(10_000 + i);
         const label = await gm.getUsernameFromTelegramId(ctx, id);
-        expect(label).toBe(`user${Number(id)}`);
+  expect(label).toBe(`@user${Number(id)}`);
       }
 
       expect((gm as any).usernameCacheKeys.length).toBe(maxEntries);
@@ -168,7 +168,7 @@ describe("GameManager Username Resolution", () => {
       } as any;
 
       const res = await gm.getUsernameFromTelegramId(ctx, bigId);
-      expect(res).toBe("huge");
+  expect(res).toBe("@huge");
       expect(received[0]).toBe(bigId);
     });
 
@@ -196,8 +196,8 @@ describe("GameManager Username Resolution", () => {
       resolvers[0]?.({ user: { username: "coalesced" } });
 
       const [first, second] = await Promise.all([firstPromise, secondPromise]);
-      expect(first).toBe("coalesced");
-      expect(second).toBe("coalesced");
+  expect(first).toBe("@coalesced");
+  expect(second).toBe("@coalesced");
       expect(calls).toBe(1);
     });
   });

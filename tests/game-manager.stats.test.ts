@@ -36,8 +36,8 @@ describe("GameManager Stats", () => {
         },
       } as any;
       const gm1 = GameManager.getInstance(program, walletStub(createdAt + 30), {} as any);
-      const s1 = await (gm1 as any).getActiveGameStats(gamePda, 1_000_000_000);
-      expect(s1.totalPot).toBe(1_000_000_000);
+  const s1 = await (gm1 as any).getActiveGameStats(gamePda, 1_000_000_000);
+  expect(s1.totalPot).toBe(1_000_000_000n);
       expect(String(s1.expirationInfo)).toContain("⏰");
 
       resetGM();
@@ -58,7 +58,7 @@ describe("GameManager Stats", () => {
       } as any;
       const gm2 = GameManager.getInstance(program2, walletStub(createdAt + 30), {} as any);
       const s2 = await (gm2 as any).getActiveGameStats(gamePda, 1_000_000_000);
-      expect(s2.totalPot).toBe(4_000_000_000);
+  expect(s2.totalPot).toBe(4_000_000_000n);
     });
 
     test("returns fallback when fetch fails", async () => {
@@ -67,7 +67,7 @@ describe("GameManager Stats", () => {
       const gm = GameManager.getInstance(program, {} as any, {} as any);
       const s = await (gm as any).getActiveGameStats(new PublicKey("BPFLoader1111111111111111111111111111111111"), 1_000_000_000);
       expect(s.currentTickets).toBe(0);
-      expect(s.totalPot).toBe(1_000_000_000);
+  expect(s.totalPot).toBe(1_000_000_000n);
       expect(s.expirationInfo).toBe("");
     });
   });
@@ -84,7 +84,7 @@ describe("GameManager Stats", () => {
         1_000_000_000
       );
       expect(s.currentTickets).toBe(3);
-      expect(s.totalPot).toBe(3_000_000_000);
+  expect(s.totalPot).toBe(3_000_000_000n);
     });
 
     test("giveaway uses base amount", async () => {
@@ -97,7 +97,7 @@ describe("GameManager Stats", () => {
         new PublicKey("BPFLoader3111111111111111111111111111111111"),
         1_000_000_000
       );
-      expect(s2.totalPot).toBe(1_000_000_000);
+  expect(s2.totalPot).toBe(1_000_000_000n);
     });
   });
 });
