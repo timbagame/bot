@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { GameManager } from "../src/utils/game";
 import { PublicKey, Keypair } from "@solana/web3.js";
 
@@ -38,6 +38,10 @@ afterEach(() => {
   } else {
     process.env.NODE_ENV = originalNodeEnv;
   }
+});
+
+beforeEach(() => {
+  resetGM();
 });
 
 test("getGameInfo returns friendly message on fetch failure", async () => {
