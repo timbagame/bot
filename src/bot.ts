@@ -4214,7 +4214,9 @@ setupAnchor()
           "cancelled"
         );
       } else {
-        console.error(`⚠️ Failed to process expired game ${game.game_address}`);
+        console.log(
+          `ℹ️ No cancellation yet for expired game ${game.game_address}; will retry`
+        );
       }
     };
 
@@ -4224,9 +4226,9 @@ setupAnchor()
     const isGameExpired = async (gameAccount: any): Promise<boolean> => {
       const blockTime = await wallet.getBlockchainTime();
       if (typeof blockTime === "number" && Number.isFinite(blockTime)) {
-        return GameManager.isExpiredWithBuffer(gameAccount, blockTime);
+        return GameManager.isExpired(gameAccount, blockTime);
       }
-      return GameManager.isExpiredWithBuffer(gameAccount);
+      return GameManager.isExpired(gameAccount);
     };
 
     // Start periodic check for expired games

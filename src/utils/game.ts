@@ -3222,12 +3222,15 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
   ): Promise<GameCancellationResult | false> {
     const gameType = this.getGameType(gameAccount);
     const ticketsCount = Number(gameAccount.ticketsCount || 0);
-    const hasEnoughTickets =
-      ticketsCount >= Number(gameAccount.minTickets || 0);
+    const minTickets = Number(gameAccount.minTickets || 0);
+    const hasEnoughTickets = ticketsCount >= minTickets;
+    const expired = GameManager.isExpired(gameAccount);
 
-    if (!this.isGameExpiredWithBuffer(gameAccount)) {
+    if (!expired) {
       return false;
     }
+
+    const bufferElapsed = this.isGameExpiredWithBuffer(gameAccount);
 
     debugLog(
       `🔄 Processing expired ${gameType} game ${gamePda.toBase58()} (${ticketsCount}/${
@@ -3252,8 +3255,14 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
           console.error(`Error closing expired giveaway:`, error);
         }
       } else {
+        if (!bufferElapsed) {
+          debugLog(
+            "⏳ Giveaway has participants; waiting for oracle to complete."
+          );
+          return false;
+        }
         debugLog(
-          "⏳ Giveaway has participants; waiting for oracle to complete."
+          "⌛ Giveaway buffer elapsed; awaiting oracle completion."
         );
       }
       return false;
@@ -3317,7 +3326,12 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
     }
 
     // Has enough tickets -> wait for oracle completion, do not attempt close
-    debugLog("⏳ Game has minimum tickets; waiting for oracle to complete.");
+    if (!bufferElapsed) {
+      debugLog("⏳ Game has minimum tickets; waiting for oracle to complete.");
+      return false;
+    }
+
+    debugLog("⌛ Buffer elapsed; waiting for oracle completion.");
     return false;
   }
 
@@ -4363,17 +4377,27 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       const gamePda = new PublicKey(address);
       const gameAccount = await this.program.account.game.fetch(gamePda);
 
-      if (!this.isGameExpiredWithBuffer(gameAccount)) {
-        debugLog(
-          `⏰ Game ${address} hasn't passed buffer time yet, skipping`
-        );
+      const expired = GameManager.isExpired(gameAccount);
+      if (!expired) {
+        debugLog(`⏰ Game ${address} not expired yet, skipping`);
         return false;
       }
+
+      const bufferElapsed = this.isGameExpiredWithBuffer(gameAccount);
+      const ticketsCount = Number(gameAccount.ticketsCount ?? 0);
+      const minTickets = Number(gameAccount.minTickets ?? 0);
 
       const gameType = this.getGameType(gameAccount);
       debugLog(
         `🔄 Processing expired ${gameType} game ${address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`
       );
+
+      if (!bufferElapsed && ticketsCount >= minTickets && minTickets > 0) {
+        debugLog(
+          "⏳ Game has enough participants, waiting for oracle before cleanup"
+        );
+        return false;
+      }
 
       return gameType === "giveaway"
         ? await this.handleExpiredGiveaway(gamePda, gameAccount, address)
@@ -4381,6 +4405,18 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     } catch (error: any) {
       return this.handleGameProcessingError(error, address);
     }
+  }
+
+  public static isExpired(
+    gameAccount: any,
+    currentTimeSeconds?: number
+  ): boolean {
+    const currentTime =
+      currentTimeSeconds ?? Math.floor(Date.now() / 1000);
+    const createdAt = Number(gameAccount.createdAt ?? 0);
+    const timeout = Number(gameAccount.timeout ?? 0);
+    const expiresAt = createdAt + timeout;
+    return currentTime > expiresAt;
   }
 
   public static isExpiredWithBuffer(
@@ -4423,17 +4459,32 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     address: string
   ): Promise<boolean> {
     const gameType = this.getGameType(gameAccount);
+    const ticketsCount = Number(gameAccount.ticketsCount ?? 0);
 
-    if (this.isGameExpiredWithBuffer(gameAccount)) {
-      debugLog(
-        `🔄 Processing expired ${gameType} game ${address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`
+    if (ticketsCount === 0) {
+      const immediateResult = await this.cancelGameWithPlayerKeys(
+        gamePda,
+        gameType
       );
-
-      const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
-      if (result.success) {
+      if (immediateResult.success) {
         debugLog(`✅ Successfully handled expired giveaway: ${address}`);
         return true;
       }
+      return false;
+    }
+
+    if (!this.isGameExpiredWithBuffer(gameAccount)) {
+      return false;
+    }
+
+    debugLog(
+      `🔄 Processing expired ${gameType} game ${address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`
+    );
+
+    const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
+    if (result.success) {
+      debugLog(`✅ Successfully handled expired giveaway: ${address}`);
+      return true;
     }
 
     return false;
