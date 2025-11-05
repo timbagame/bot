@@ -57,8 +57,6 @@ export const applyDynamicFeeBudgets = (options: {
 // ================================
 
 export const GAME_TIMEOUT = 3600; // 1 hour
-export const COINFLIP_MAX_TICKETS = 2;
-export const GIVEAWAY_MAX_TICKETS = 5;
 export const MAX_RETRIES = 3;
 export const CONFIRMATION_TIMEOUT_MS = 30000; // 30 second confirmation window
 export const SIGNATURE_HISTORY_SEARCH_DELAY_MS = 15000; // After 15s leverage transaction history lookup
