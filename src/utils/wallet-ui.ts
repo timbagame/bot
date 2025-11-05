@@ -501,6 +501,11 @@ export type QuickAmountKeyboardButton = {
   callback: string;
 };
 
+export type QuickAmountValueButton = {
+  label: string;
+  value: string;
+};
+
 export const buildQuickAmountRows = (
   buttons: QuickAmountKeyboardButton[],
   columns = 2
@@ -538,6 +543,73 @@ export const appendQuickAmountKeyboardRows = (
     keyboard.row();
   }
 
+  return keyboard;
+};
+
+export type QuickAmountKeyboardConfig = {
+  baseCallback: (value: string) => string;
+  backCallback: string;
+  backLabel?: string;
+  showQuickRows?: boolean;
+  insufficientLabel?: string;
+  percentages?: string[];
+  includeCustom?: boolean;
+  customLabel?: string;
+  extraRows?: QuickAmountValueButton[][];
+};
+
+export const buildQuickAmountKeyboard = ({
+  baseCallback,
+  backCallback,
+  backLabel = "← Back",
+  showQuickRows = true,
+  insufficientLabel,
+  percentages = ["25%", "50%", "75%", "MAX"],
+  includeCustom = true,
+  customLabel = "✏️ Custom Amount",
+  extraRows = [],
+}: QuickAmountKeyboardConfig): InlineKeyboard => {
+  const keyboard = new InlineKeyboard();
+
+  if (showQuickRows) {
+    const rows: QuickAmountKeyboardButton[][] = [];
+
+    for (const row of extraRows) {
+      if (!row || row.length === 0) {
+        continue;
+      }
+
+      rows.push(
+        row.map(({ label, value }) => ({
+          label,
+          callback: baseCallback(value),
+        }))
+      );
+    }
+
+    if (percentages.length > 0) {
+      const percentageButtons = percentages.map((value) => ({
+        label: value,
+        callback: baseCallback(value),
+      }));
+      rows.push(...buildQuickAmountRows(percentageButtons));
+    }
+
+    if (includeCustom) {
+      rows.push([
+        {
+          label: customLabel,
+          callback: baseCallback("CUSTOM"),
+        },
+      ]);
+    }
+
+    appendQuickAmountKeyboardRows(keyboard, rows);
+  } else if (insufficientLabel) {
+    keyboard.text(insufficientLabel, "noop").row();
+  }
+
+  keyboard.text(backLabel, backCallback).row();
   return keyboard;
 };
 

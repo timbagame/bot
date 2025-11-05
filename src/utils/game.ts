@@ -96,6 +96,16 @@ const getConfirmationRetryDelays = (): number[] => {
 
 const TELEGRAM_MESSAGE_CHAR_LIMIT = 4096;
 
+const isDebugLoggingEnabled =
+  (process.env["TIMBA_DEBUG"] ?? "").toLowerCase() === "true";
+
+const debugLog = (...args: unknown[]): void => {
+  if (!isDebugLoggingEnabled) {
+    return;
+  }
+  console.debug(...args);
+};
+
 type GameTokenContextAccounts = {
   tokenMint: PublicKey;
   gameToken: PublicKey;
@@ -830,7 +840,7 @@ export class GameManager {
     }
 
     if (recovered.length > 0) {
-      console.log(
+      debugLog(
         `🔄 Recovered ${recovered.length} participant(s) for ${gamePda.toBase58()} from on-chain hashes`
       );
     }
@@ -1111,7 +1121,7 @@ export class GameManager {
         ? solReserveOverrideLamports
         : defaultMinSolBuffer;
 
-    console.log(
+    debugLog(
       `🔍 WSOL wrap check (${context}): required=${this.wallet.formatSolBalance(
         requiredLamports
       )} WSOL, currentWSOL=${this.wallet.formatSolBalance(
@@ -1163,7 +1173,7 @@ export class GameManager {
       };
     }
 
-    console.log(
+    debugLog(
       `🔄 Wrapping ${this.wallet.formatSolBalance(
         deficit
       )} SOL into WSOL for game ${context}...`
@@ -1171,7 +1181,7 @@ export class GameManager {
 
     try {
       const wrapSignature = await this.wallet.wrapSol(telegramId, deficit);
-      console.log(
+      debugLog(
         `✅ Wrap transaction submitted (${context}): signature=${wrapSignature}`
       );
     } catch (error) {
@@ -1210,7 +1220,7 @@ export class GameManager {
         break;
       }
 
-      console.log(
+      debugLog(
         `⏳ Waiting for WSOL balance propagation (attempt ${attempt + 1}/${
           retryDelays.length + 1
         })`
@@ -1252,7 +1262,7 @@ export class GameManager {
       };
     }
 
-    console.log(
+    debugLog(
       `✅ Wrapped SOL. New WSOL balance: ${this.wallet.formatSolBalance(
         updatedTokenBalance
       )}, remaining SOL: ${this.wallet.formatSolBalance(updatedSolBalance)}`
@@ -1486,13 +1496,13 @@ export class GameManager {
     ctx: Context,
     publicKey: string
   ): Promise<string> {
-    console.log(`🔍 Getting username for publicKey: ${publicKey}`);
+    debugLog(`🔍 Getting username for publicKey: ${publicKey}`);
 
     const playerTelegramId = this.gameDb.getPlayerTelegramId(publicKey);
-    console.log(`🔍 Found telegramId: ${playerTelegramId} for publicKey: ${publicKey}`);
+    debugLog(`🔍 Found telegramId: ${playerTelegramId} for publicKey: ${publicKey}`);
 
     if (!playerTelegramId) {
-      console.log(`⚠️ No telegram ID found for publicKey: ${publicKey}`);
+      debugLog(`⚠️ No telegram ID found for publicKey: ${publicKey}`);
       return this.formatAddress(publicKey);
     }
 
@@ -1500,10 +1510,10 @@ export class GameManager {
       ctx,
       playerTelegramId
     );
-    console.log(`🔍 Found username: ${username} for telegramId: ${playerTelegramId}`);
+    debugLog(`🔍 Found username: ${username} for telegramId: ${playerTelegramId}`);
 
     if (!username) {
-      console.log(`⚠️ No username found for telegramId: ${playerTelegramId}`);
+      debugLog(`⚠️ No username found for telegramId: ${playerTelegramId}`);
       return this.formatAddress(publicKey);
     }
 
@@ -2460,7 +2470,7 @@ export class GameManager {
 
     try {
       await this.wallet.confirmTransaction(currentSignature);
-      console.log(
+      debugLog(
         `✅ ${operationType} transaction confirmed: ${currentSignature}`
       );
       return currentSignature;
@@ -2489,7 +2499,7 @@ export class GameManager {
         ) {
           const attemptLabel = `${attempt + 1}/${TRANSACTION_RESUBMIT_ATTEMPTS}`;
           try {
-            console.log(
+            debugLog(
               `🔄 ${operationType} resubmission attempt ${attemptLabel} after failure for ${currentSignature}`
             );
             const resubmittedSignature = await resubmit(
@@ -2504,7 +2514,7 @@ export class GameManager {
             }
 
             currentSignature = resubmittedSignature;
-            console.log(
+            debugLog(
               `✅ ${operationType} transaction confirmed via resubmission ${attemptLabel}: ${currentSignature}`
             );
             return currentSignature;
@@ -2546,7 +2556,7 @@ export class GameManager {
         for (let attempt = 0; attempt < retryDelays.length; attempt++) {
           const delay = retryDelays[attempt] ?? 0;
           const attemptLabel = `${attempt + 1}/${retryDelays.length}`;
-          console.log(
+          debugLog(
             `🔄 ${operationType} confirmation retry ${attemptLabel} after ${delay}ms`
           );
           if (delay > 0) {
@@ -2557,7 +2567,7 @@ export class GameManager {
             try {
               const isInGame = await this.isPlayerInGame(gamePda, playerPubkey);
               if (isInGame) {
-                console.log(
+                debugLog(
                   `✅ Player join confirmed during retry ${attemptLabel} - tx: ${currentSignature}`
                 );
                 return currentSignature;
@@ -2591,7 +2601,7 @@ export class GameManager {
                 : await accountInterface.fetch(gamePda);
 
               if (gameAccount) {
-                console.log(
+                debugLog(
                   `✅ Game account confirmed after retry ${attemptLabel} - transaction ${currentSignature}`
                 );
                 return currentSignature;
@@ -2620,7 +2630,7 @@ export class GameManager {
             const signatureConfirmed =
               await this.isSignatureConfirmedFromHistory(currentSignature);
             if (signatureConfirmed) {
-              console.log(
+              debugLog(
                 `✅ ${operationType} transaction confirmed via signature status on retry ${attemptLabel}: ${currentSignature}`
               );
               return currentSignature;
@@ -2838,7 +2848,7 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
       this.gameDb.savePlayerMapping(creatorPubkey, telegramId.toString());
 
       // Check oracle and generate game secrets
-      console.log("🔍 Checking Oracle health for game creation...");
+      debugLog("🔍 Checking Oracle health for game creation...");
       const isOracleHealthy = await this.oracleClient.isHealthy();
 
       let randomHash: string;
@@ -2850,7 +2860,7 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
           error: "❌ Oracle service is unavailable. Please try again later.",
         };
       } else {
-        console.log("✅ Oracle is healthy, generating proper random hash");
+        debugLog("✅ Oracle is healthy, generating proper random hash");
         const secretsResponse = await this.oracleClient.generateGameSecrets();
         randomHash = secretsResponse.randomHash;
         randomHashBuffer = this.oracleClient.hexToBuffer(randomHash);
@@ -2904,7 +2914,7 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
         gameInstruction,
       ], [playerKp]);
 
-      console.log(`📍 Game address: ${gamePda.toBase58()}`);
+      debugLog(`📍 Game address: ${gamePda.toBase58()}`);
 
       tx = await this.confirmTransactionWithRecovery(
         tx,
@@ -2964,7 +2974,7 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
           chatId || 0
         );
       } else {
-        console.log(
+        debugLog(
           `🎁 ${
             gameType.charAt(0).toUpperCase() + gameType.slice(1)
           } game ${gamePda.toBase58()} created - creator not auto-joined`
@@ -2997,7 +3007,7 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
     gameType: string,
     chatId?: number
   ): Promise<{ success: boolean; error?: string }> {
-    console.log(
+    debugLog(
       `🎮 Auto-joining creator to ${gameType} game ${gamePda.toBase58()}...`
     );
 
@@ -3010,7 +3020,7 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
       let pendingRecorded = false;
 
       if (gameAccount.isPrivate) {
-        console.log(`🔐 Game is private, using authorized join...`);
+        debugLog(`🔐 Game is private, using authorized join...`);
         const result = await this.joinPrivateGame(
           gamePda,
           playerKp,
@@ -3031,7 +3041,7 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
         pendingRecorded = true;
         joinConfirmed = true;
       } else {
-        console.log(`🌐 Game is public, using regular join...`);
+        debugLog(`🌐 Game is public, using regular join...`);
         const maxJoinAttempts = 2;
 
         for (let attempt = 0; attempt < maxJoinAttempts; attempt++) {
@@ -3219,7 +3229,7 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
       return false;
     }
 
-    console.log(
+    debugLog(
       `🔄 Processing expired ${gameType} game ${gamePda.toBase58()} (${ticketsCount}/${
         gameAccount.maxTickets
       })`
@@ -3242,7 +3252,7 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
           console.error(`Error closing expired giveaway:`, error);
         }
       } else {
-        console.log(
+        debugLog(
           "⏳ Giveaway has participants; waiting for oracle to complete."
         );
       }
@@ -3298,7 +3308,7 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
       } catch (error: any) {
         // If account doesn't exist, the game was already successfully closed
         if (error.message?.includes("Account does not exist")) {
-          console.log("✅ Game account already closed successfully");
+          debugLog("✅ Game account already closed successfully");
         } else {
           console.error("Post-cleanup close attempt failed:", error);
         }
@@ -3307,7 +3317,7 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
     }
 
     // Has enough tickets -> wait for oracle completion, do not attempt close
-    console.log("⏳ Game has minimum tickets; waiting for oracle to complete.");
+    debugLog("⏳ Game has minimum tickets; waiting for oracle to complete.");
     return false;
   }
 
@@ -3756,9 +3766,9 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
     const address = gamePda.toBase58();
     if (attemptLog) {
-      console.log(attemptLog);
+      debugLog(attemptLog);
     } else {
-      console.log(`Closing ${gameType} game ${address} with cleanup`);
+      debugLog(`Closing ${gameType} game ${address} with cleanup`);
     }
 
     try {
@@ -3781,7 +3791,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
       const successMessage =
         successPrefix ?? `✅ Successfully closed ${gameType} game`;
-      console.log(`${successMessage} ${address} with tx: ${tx}`);
+      debugLog(`${successMessage} ${address} with tx: ${tx}`);
 
       return { success: true, tx };
     } catch (error: any) {
@@ -3808,7 +3818,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       const creatorTelegramId = this.gameDb.getPlayerTelegramId(creatorPubkey);
 
       if (!creatorTelegramId) {
-        console.log(
+        debugLog(
           `No telegram ID found for creator ${creatorPubkey}, cannot close game`
         );
         return { success: false, error: "Creator not found in database" };
@@ -3925,7 +3935,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     if (resolvedTelegramId) {
       try {
         this.gameDb.removeGameParticipant(gameAddress, resolvedTelegramId);
-        console.log(
+        debugLog(
           `Unjoined player ${resolvedTelegramId} from game participants tracking`
         );
       } catch (error) {
@@ -4290,7 +4300,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           });
         }
       }
-      console.log(`Reloaded ${this.activeGameMessages.size} game messages`);
+      debugLog(`Reloaded ${this.activeGameMessages.size} game messages`);
     } catch (error) {
       console.error("Error reloading game messages:", error);
     }
@@ -4302,10 +4312,10 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
   public async scanBlockchainForOrphanedGames(): Promise<void> {
     try {
-      console.log("🔍 Starting blockchain scan for orphaned games...");
+      debugLog("🔍 Starting blockchain scan for orphaned games...");
 
       const orphanedGames = await this.findOrphanedGames();
-      console.log(`🚨 Found ${orphanedGames.length} orphaned games`);
+      debugLog(`🚨 Found ${orphanedGames.length} orphaned games`);
 
       let cancelledCount = 0;
       for (const { address } of orphanedGames) {
@@ -4313,7 +4323,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         if (cancelled) cancelledCount++;
       }
 
-      console.log(
+      debugLog(
         `🏁 Blockchain scan completed. Cancelled ${cancelledCount}/${orphanedGames.length} orphaned games`
       );
     } catch (error) {
@@ -4335,7 +4345,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
         // Check if this game is in our database
         if (!this.gameDb.gameExists(gameAddress)) {
-          console.log(
+          debugLog(
             `🔍 Found orphaned game: ${gameAddress} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`
           );
           orphanedGames.push({ address: gameAddress, account: gameAccount });
@@ -4354,14 +4364,14 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       const gameAccount = await this.program.account.game.fetch(gamePda);
 
       if (!this.isGameExpiredWithBuffer(gameAccount)) {
-        console.log(
+        debugLog(
           `⏰ Game ${address} hasn't passed buffer time yet, skipping`
         );
         return false;
       }
 
       const gameType = this.getGameType(gameAccount);
-      console.log(
+      debugLog(
         `🔄 Processing expired ${gameType} game ${address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`
       );
 
@@ -4396,7 +4406,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
   private handleGameProcessingError(error: any, address: string): boolean {
     if (error.message?.includes("Account does not exist")) {
-      console.log(`ℹ️ Orphaned game ${address} was already closed`);
+      debugLog(`ℹ️ Orphaned game ${address} was already closed`);
       return true;
     } else {
       console.error(
@@ -4415,13 +4425,13 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     const gameType = this.getGameType(gameAccount);
 
     if (this.isGameExpiredWithBuffer(gameAccount)) {
-      console.log(
+      debugLog(
         `🔄 Processing expired ${gameType} game ${address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`
       );
 
       const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
       if (result.success) {
-        console.log(`✅ Successfully handled expired giveaway: ${address}`);
+        debugLog(`✅ Successfully handled expired giveaway: ${address}`);
         return true;
       }
     }
@@ -4448,7 +4458,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     const effectiveDbParticipants =
       playerKeyInfo.dbParticipantCount ?? dbParticipantsSnapshot.length;
 
-    console.log(
+    debugLog(
       `🪙 Coinflip ${address}: ${playerKeyInfo.available.length}/${playerKeyInfo.total} player keys available (on-chain tickets: ${effectiveOnChainTickets}, on-chain hashes: ${effectiveOnChainHashes}, db participants: ${effectiveDbParticipants})`
     );
 
@@ -4686,7 +4696,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     playerKeyInfo: any,
     address: string
   ): Promise<boolean> {
-    console.log(
+    debugLog(
       `🔧 Strategy 1: Complete cleanup - unjoin all ${playerKeyInfo.available.length} players, then cancel`
     );
 
@@ -4700,7 +4710,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
     // Only proceed if all players were successfully unjoined
     if (unjoinedCount !== playerKeyInfo.available.length) {
-      console.log(
+      debugLog(
         `❌ Could only unjoin ${unjoinedCount}/${playerKeyInfo.available.length} players from coinflip ${address}, skipping cancellation`
       );
       return false;
@@ -4722,7 +4732,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     playerKeyInfo: any,
     address: string
   ): Promise<boolean> {
-    console.log(
+    debugLog(
       `🔧 Strategy 2: Partial cleanup - unjoin ${playerKeyInfo.available.length} available players`
     );
 
@@ -4732,7 +4742,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       playerKeyInfo.available,
       playerKeyInfo.creator?.telegramId
     );
-    console.log(
+    debugLog(
       `📊 Unjoined ${unjoinedCount}/${playerKeyInfo.available.length} players from coinflip ${address}`
     );
 
@@ -4860,7 +4870,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
               player.telegramId,
               { skipDbCheck: true }
             );
-            console.log(
+            debugLog(
               `➡️ Unjoined ${
                 player.isCreator ? "creator" : "player"
               } ${player.pubkey.toBase58()}`
@@ -4910,7 +4920,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             player.telegramId,
             { skipDbCheck: true }
           );
-          console.log(
+          debugLog(
             `➡️ Unjoined player ${player.pubkey.toBase58()} using creator authority`
           );
           unjoinedCount++;

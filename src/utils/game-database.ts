@@ -584,40 +584,82 @@ export class GameDatabase extends BaseDatabase {
     try {
       const rows = this.all<any>(
         `
-        WITH player_stats AS (
+        WITH relevant_games AS (
+          SELECT *
+          FROM games
+          WHERE chat_id = ?
+        ),
+        player_game_roles AS (
           SELECT
-            pm.telegram_id,
-            COUNT(DISTINCT CASE WHEN g.status = 'completed' THEN g.game_address END) as total_games,
-            COUNT(DISTINCT CASE WHEN g.status = 'completed' AND g.winner_address = pm.public_key THEN g.game_address END) as games_won,
-            COUNT(DISTINCT CASE WHEN g.creator_telegram_id = pm.telegram_id AND g.status = 'completed' THEN g.game_address END) as games_created,
-            COUNT(DISTINCT CASE WHEN gp.telegram_id = pm.telegram_id AND g.status = 'completed' THEN g.game_address END) as games_joined,
-            COALESCE(SUM(CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.amount ELSE 0 END), 0) as total_volume,
-            CASE
-              WHEN COUNT(DISTINCT CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.game_address END) > 0
-              THEN (COUNT(DISTINCT CASE WHEN g.status = 'completed' AND g.winner_address = pm.public_key THEN g.game_address END) * 100.0) / COUNT(DISTINCT CASE WHEN g.status = 'completed' AND (g.creator_telegram_id = pm.telegram_id OR gp.telegram_id = pm.telegram_id) THEN g.game_address END)
-              ELSE 0
-            END as win_rate
-          FROM player_mappings pm
-          LEFT JOIN games g ON g.chat_id = ?
-          LEFT JOIN game_participants gp
-            ON gp.telegram_id = pm.telegram_id
-           AND gp.game_address = g.game_address
+            rg.game_address,
+            rg.status,
+            rg.amount,
+            rg.winner_address,
+            rg.creator_telegram_id AS telegram_id,
+            'creator' AS role
+          FROM relevant_games rg
+          WHERE rg.creator_telegram_id IS NOT NULL
+
+          UNION
+
+          SELECT
+            rg.game_address,
+            rg.status,
+            rg.amount,
+            rg.winner_address,
+            gp.telegram_id AS telegram_id,
+            'participant' AS role
+          FROM relevant_games rg
+          JOIN game_participants gp
+            ON gp.game_address = rg.game_address
            AND gp.status = 'confirmed'
-          WHERE (g.creator_telegram_id = pm.telegram_id OR g.winner_address = pm.public_key OR gp.telegram_id = pm.telegram_id) OR g.game_address IS NULL
-          GROUP BY pm.telegram_id
-          HAVING total_games > 0
+          WHERE gp.telegram_id IS NOT NULL
+
+          UNION
+
+          SELECT
+            rg.game_address,
+            rg.status,
+            rg.amount,
+            rg.winner_address,
+            pm.telegram_id AS telegram_id,
+            'winner' AS role
+          FROM relevant_games rg
+          JOIN player_mappings pm
+            ON pm.public_key = rg.winner_address
+          WHERE pm.telegram_id IS NOT NULL
+        ),
+        player_game_summary AS (
+          SELECT
+            telegram_id,
+            game_address,
+            status,
+            amount,
+            MAX(CASE WHEN role = 'creator' THEN 1 ELSE 0 END) AS is_creator,
+            MAX(CASE WHEN role = 'participant' THEN 1 ELSE 0 END) AS is_participant,
+            MAX(CASE WHEN role = 'winner' THEN 1 ELSE 0 END) AS is_winner
+          FROM player_game_roles
+          GROUP BY telegram_id, game_address, status, amount
         )
         SELECT
-          ps.telegram_id,
-          ps.total_games,
-          ps.games_won,
-          ps.games_created,
-          ps.games_joined,
-          ps.total_volume,
-          ROUND(ps.win_rate, 1) as win_rate
-        FROM player_stats ps
-        GROUP BY ps.telegram_id, ps.total_games, ps.games_won, ps.games_created, ps.games_joined, ps.total_volume, ps.win_rate
-        ORDER BY ps.games_won DESC, ps.win_rate DESC, ps.total_volume DESC
+          pgs.telegram_id,
+          COUNT(DISTINCT CASE WHEN pgs.status = 'completed' THEN pgs.game_address END) AS total_games,
+          COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_winner = 1 THEN pgs.game_address END) AS games_won,
+          COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_creator = 1 THEN pgs.game_address END) AS games_created,
+          COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_participant = 1 THEN pgs.game_address END) AS games_joined,
+          COALESCE(SUM(CASE WHEN pgs.status = 'completed' THEN pgs.amount ELSE 0 END), 0) AS total_volume,
+          CASE
+            WHEN COUNT(DISTINCT CASE WHEN pgs.status = 'completed' THEN pgs.game_address END) > 0
+            THEN (
+              COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_winner = 1 THEN pgs.game_address END) * 100.0
+            ) /
+            COUNT(DISTINCT CASE WHEN pgs.status = 'completed' THEN pgs.game_address END)
+            ELSE 0
+          END AS win_rate
+        FROM player_game_summary pgs
+        GROUP BY pgs.telegram_id
+        HAVING COUNT(DISTINCT CASE WHEN pgs.status = 'completed' THEN pgs.game_address END) > 0
+        ORDER BY games_won DESC, win_rate DESC, total_volume DESC
         LIMIT ?
       `,
         [chatId, limit],

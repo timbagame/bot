@@ -19,13 +19,13 @@ import {
   createTradeConfirmKeyboard,
 } from "../utils/keyboards";
 import {
-  appendQuickAmountKeyboardRows,
-  buildQuickAmountRows,
+  buildQuickAmountKeyboard,
   buildWalletActionMenuForUser,
   persistInputPrompt,
   persistInputPromptFromContext,
   showCustomAmountPrompt,
   upsertWalletMenuMessage,
+  type QuickAmountKeyboardConfig,
   type WalletMenuBalances,
 } from "../utils/wallet-ui";
 import { respondWithMenu } from "../utils/menu-response";
@@ -64,26 +64,6 @@ type PresentSpendAmountParams = {
   formatToken: (amount: number, decimals: number) => string;
   applySolFeeBuffer?: boolean;
   solFeeBufferLamports?: number;
-};
-
-type QuickAmountButton = {
-  label: string;
-  value: string;
-};
-
-type QuickAmountOptions = {
-  baseCallback: (value: string) => string;
-  percentages?: string[];
-  includeCustom?: boolean;
-  customLabel?: string;
-  extraRows?: QuickAmountButton[][];
-};
-
-type QuickAmountKeyboardConfig = QuickAmountOptions & {
-  backCallback: string;
-  backLabel?: string;
-  showQuickRows?: boolean;
-  insufficientLabel?: string;
 };
 
 type SendAmountPromptParams = {
@@ -342,64 +322,6 @@ export const createWalletTransactionsModule = (
       displayAmount: presentation.displayAmount,
       normalizedAmount: presentation.normalizedAmount,
     };
-  };
-
-  const buildQuickAmountKeyboard = ({
-    backCallback,
-    backLabel = "← Back",
-    showQuickRows = true,
-    insufficientLabel,
-    ...quickOptions
-  }: QuickAmountKeyboardConfig) => {
-    const keyboard = new InlineKeyboard();
-
-    if (showQuickRows) {
-      const {
-        baseCallback,
-        percentages = ["25%", "50%", "75%", "MAX"],
-        includeCustom = true,
-        customLabel = "✏️ Custom Amount",
-        extraRows = [],
-      } = quickOptions;
-
-      const rows: Array<{ label: string; callback: string }[]> = [];
-
-      for (const row of extraRows) {
-        if (!row || row.length === 0) {
-          continue;
-        }
-        rows.push(
-          row.map((button) => ({
-            label: button.label,
-            callback: baseCallback(button.value),
-          }))
-        );
-      }
-
-      if (percentages.length > 0) {
-        const percentageButtons = percentages.map((value) => ({
-          label: value,
-          callback: baseCallback(value),
-        }));
-        rows.push(...buildQuickAmountRows(percentageButtons));
-      }
-
-      if (includeCustom) {
-        rows.push([
-          {
-            label: customLabel,
-            callback: baseCallback("CUSTOM"),
-          },
-        ]);
-      }
-
-      appendQuickAmountKeyboardRows(keyboard, rows);
-    } else if (insufficientLabel) {
-      keyboard.text(insufficientLabel).row();
-    }
-
-    keyboard.text(backLabel, backCallback).row();
-    return keyboard;
   };
 
   const resolveSendAmountSelection = ({

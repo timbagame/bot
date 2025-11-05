@@ -34,17 +34,25 @@ function normalizeKey(id: string): string {
   return id.trim().toUpperCase();
 }
 
-async function withTimeout<T>(p: Promise<T>, timeoutMs: number): Promise<T> {
+async function withTimeout<T>(
+  factory: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number
+): Promise<T> {
   const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), timeoutMs);
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+
   try {
-    // Caller should pass ac.signal in fetch init; for generic promises, just race
-    return await Promise.race([
-      p,
-      new Promise<T>((_, rej) => setTimeout(() => rej(new Error("timeout")), timeoutMs)),
-    ]);
+    return await factory(ac.signal);
+  } catch (error) {
+    if (
+      (error as any)?.name === "AbortError" ||
+      (error as any)?.code === "ABORT_ERR"
+    ) {
+      throw new Error("timeout");
+    }
+    throw error;
   } finally {
-    clearTimeout(t);
+    clearTimeout(timer);
   }
 }
 
@@ -74,7 +82,10 @@ async function fetchFromJupiter(
   try {
     const url = new URL(JUPITER_PRICE_URL);
     url.searchParams.set("ids", id);
-    const res = await withTimeout(fetchImpl(url.toString(), { method: "GET" }), timeoutMs);
+    const res = await withTimeout(
+      (signal) => fetchImpl(url.toString(), { method: "GET", signal }),
+      timeoutMs
+    );
     if (!res.ok) return null;
     const data = (await res.json()) as any;
     const entry = data?.data?.[id] ?? data?.[id];
@@ -93,13 +104,15 @@ async function fetchFromPumpFun(
   try {
     const url = buildPumpFunCoinUrl(addr);
     const res = await withTimeout(
-      fetchImpl(url, {
-        method: "GET",
-        headers: {
-          accept: "application/json",
-          "user-agent": "timba-bot/1.0 (+https://timba.ai)",
-        },
-      }),
+      (signal) =>
+        fetchImpl(url, {
+          method: "GET",
+          headers: {
+            accept: "application/json",
+            "user-agent": "timba-bot/1.0 (+https://timba.ai)",
+          },
+          signal,
+        }),
       timeoutMs
     );
     if (!res.ok) return null;
@@ -249,4 +262,3 @@ export async function resolveTokenPriceUSD({
 
   return null;
 }
-
