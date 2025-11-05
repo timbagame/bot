@@ -7,12 +7,18 @@ describe("Game completion announcements", () => {
   let botModule: Awaited<typeof botModulePromise>;
   let originalSendMessage: any;
   let sendCalls: Array<{ chatId: number; text: string; options: any }>;
+  let originalGameManager: any;
+  let originalGetBlockchainTime: any;
 
   beforeEach(async () => {
     botModule = await botModulePromise;
     sendCalls = [];
 
     originalSendMessage = botModule.bot.api.sendMessage.bind(botModule.bot.api);
+    originalGameManager = botModule.gameManager;
+    originalGetBlockchainTime = botModule.wallet.getBlockchainTime.bind(
+      botModule.wallet
+    );
     (botModule.bot.api as any).sendMessage = async (
       chatId: number,
       text: string,
@@ -26,6 +32,8 @@ describe("Game completion announcements", () => {
   afterEach(async () => {
     const module = await botModulePromise;
     (module.bot.api as any).sendMessage = originalSendMessage;
+    module.__test_setGameManager(originalGameManager);
+    module.wallet.getBlockchainTime = originalGetBlockchainTime;
     module.__test_resetGameDatabase?.();
   });
 
