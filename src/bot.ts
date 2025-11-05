@@ -1080,7 +1080,8 @@ const processPlayerEventWithTarget = async (
           apiCtx,
           event.player.toString()
         );
-        const announcement = `👤 <b>${displayName}</b> joined the game!`;
+        const safeDisplayName = escapeHtml(displayName);
+        const announcement = `👤 <b>${safeDisplayName}</b> joined the game!`;
         await sendReplyToGameMessage(target, announcement);
       } catch (announcementError) {
         console.error(
@@ -1161,6 +1162,13 @@ async function flushPendingPlayerEvents(
     await processPlayerEventWithTarget(payload.event, payload.eventName, target);
   }
 }
+
+export const __test_processPlayerEventWithTarget = processPlayerEventWithTarget;
+export const __test_enqueuePendingPlayerEvent = enqueuePendingPlayerEvent;
+export const __test_flushPendingPlayerEvents = flushPendingPlayerEvents;
+export const __test_clearPendingPlayerEvents = () => pendingPlayerEvents.clear();
+export const __test_getPendingPlayerEventsState = (gameAddress: string) =>
+  pendingPlayerEvents.get(gameAddress);
 
 const sendReplyToGameMessage = async (
   target: GameMessageTarget,

@@ -110,6 +110,60 @@ describe("WalletManager confirmTransaction and sendTransaction", () => {
     );
   });
 
+  test("probeTransactionAfterTimeout accepts versioned transactions", async () => {
+    const probeOptions: any[] = [];
+    const conn: any = {
+      getTransaction: async (_sig: string, options: any) => {
+        probeOptions.push(options);
+        if (options?.maxSupportedTransactionVersion === 0) {
+          throw new Error("Restricted to legacy transactions");
+        }
+        return { meta: { err: null } };
+      },
+      getSignatureStatus: async () => ({ value: [null] }),
+    };
+
+    const wm = WalletManager.createForTest(MNEMONIC, {
+      connection: conn,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+
+    (wm as any).postTimeoutProbeRetryDelayMs = 0;
+    const result = await (wm as any).probeTransactionAfterTimeout("SIGV1");
+
+    expect(result).toBe("found");
+    expect(probeOptions[0]?.maxSupportedTransactionVersion).toBeUndefined();
+  });
+
+  test("probeTransactionAfterTimeout retries when getTransaction is rate limited", async () => {
+    let attempts = 0;
+    const conn: any = {
+      getTransaction: async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error("429 Too Many Requests");
+        }
+        return { meta: { err: null } };
+      },
+      getSignatureStatus: async () => ({ value: [null] }),
+    };
+
+    const wm = WalletManager.createForTest(MNEMONIC, {
+      connection: conn,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+
+    (wm as any).postTimeoutProbeRetryDelayMs = 0;
+    (wm as any).postTimeoutProbeMaxAttempts = 3;
+
+    const result = await (wm as any).probeTransactionAfterTimeout("SIG429");
+
+    expect(result).toBe("found");
+    expect(attempts).toBeGreaterThanOrEqual(2);
+  });
+
   test("getTokenBalance returns 0 on generic error", async () => {
     const mint = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
     const conn: any = {

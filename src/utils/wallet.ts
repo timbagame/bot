@@ -121,69 +121,116 @@ export class WalletManager {
   >();
   private lastTokenDiscoveryByUser = new Map<string, number>();
   private postTimeoutProbeBackoffMs = 2000;
+  private postTimeoutProbeRetryDelayMs = 250;
+  private postTimeoutProbeMaxAttempts = 3;
+  private confirmationTimeoutMs = CONFIRMATION_TIMEOUT_MS;
+  private signaturePollIntervalMs = 1000;
 
   private async probeTransactionAfterTimeout(
     signature: string
   ): Promise<"found" | "failed" | "missing"> {
-    try {
-      const tx = await this.connection.getTransaction(signature, {
-        commitment: "confirmed",
-        maxSupportedTransactionVersion: 0,
-      } as any);
-
-      if (tx) {
-        if (tx.meta?.err) {
-          console.error(
-            `❌ Post-timeout getTransaction reports failure for ${signature}:`,
-            tx.meta.err
-          );
-          return "failed";
-        }
-
-        console.log(
-          `🔎 Post-timeout getTransaction found confirmed signature ${signature}`
-        );
-        return "found";
+    const tryDelay = async () => {
+      if (this.postTimeoutProbeRetryDelayMs > 0) {
+        await this.sleep(this.postTimeoutProbeRetryDelayMs);
       }
-    } catch (probeError: any) {
+    };
+
+    const isRetryableProbeError = (error: unknown): boolean => {
       const message =
-        probeError instanceof Error ? probeError.message : String(probeError);
-      console.warn(
-        `⚠️ getTransaction probe for ${signature} failed: ${message}`
+        error instanceof Error ? error.message : String(error ?? "");
+      const normalized = message.toLowerCase();
+      return (
+        normalized.includes("429") ||
+        normalized.includes("too many requests") ||
+        normalized.includes("rate limit") ||
+        normalized.includes("timeout")
       );
-    }
+    };
 
-    try {
-      const status = await this.connection.getSignatureStatus(signature, {
-        searchTransactionHistory: true,
-      });
-      const value = status?.value;
+    for (let attempt = 1; attempt <= this.postTimeoutProbeMaxAttempts; attempt++) {
+      try {
+        const tx = await this.connection.getTransaction(signature, {
+          commitment: "confirmed",
+        } as any);
 
-      if (value) {
-        if (value.err) {
-          console.error(
-            `❌ Post-timeout signature status reports failure for ${signature}:`,
-            value.err
+        if (tx) {
+          if (tx.meta?.err) {
+            console.error(
+              `❌ Post-timeout getTransaction reports failure for ${signature}:`,
+              tx.meta.err
+            );
+            return "failed";
+          }
+
+          console.log(
+            `🔎 Post-timeout getTransaction found confirmed signature ${signature}`
           );
-          return "failed";
-        }
-
-        const confirmation = value.confirmationStatus || "unknown";
-        console.log(
-          `🔎 Post-timeout signature status found ${signature} with status ${confirmation}`
-        );
-        if (confirmation === "confirmed" || confirmation === "finalized") {
           return "found";
         }
+
+        break;
+      } catch (probeError: any) {
+        const message =
+          probeError instanceof Error ? probeError.message : String(probeError);
+
+        if (!isRetryableProbeError(probeError) || attempt === this.postTimeoutProbeMaxAttempts) {
+          console.warn(
+            `⚠️ getTransaction probe for ${signature} failed: ${message}`
+          );
+          break;
+        }
+
+        console.warn(
+          `⚠️ getTransaction probe for ${signature} failed (attempt ${attempt}): ${message}; retrying`
+        );
+        await tryDelay();
       }
-    } catch (statusError: any) {
-      const message =
-        statusError instanceof Error
-          ? statusError.message
-          : String(statusError);
-      console.warn(
-        `⚠️ getSignatureStatus probe for ${signature} failed: ${message}`
-      );
+    }
+
+    for (let attempt = 1; attempt <= this.postTimeoutProbeMaxAttempts; attempt++) {
+      try {
+        const status = await this.connection.getSignatureStatus(signature, {
+          searchTransactionHistory: true,
+        });
+        const value = status?.value;
+
+        if (value) {
+          if (value.err) {
+            console.error(
+              `❌ Post-timeout signature status reports failure for ${signature}:`,
+              value.err
+            );
+            return "failed";
+          }
+
+          const confirmation = value.confirmationStatus || "unknown";
+          console.log(
+            `🔎 Post-timeout signature status found ${signature} with status ${confirmation}`
+          );
+          if (confirmation === "confirmed" || confirmation === "finalized") {
+            return "found";
+          }
+        }
+
+        break;
+      } catch (statusError: any) {
+        const message =
+          statusError instanceof Error
+            ? statusError.message
+            : String(statusError);
+
+        if (!isRetryableProbeError(statusError) || attempt === this.postTimeoutProbeMaxAttempts) {
+          console.warn(
+            `⚠️ getSignatureStatus probe for ${signature} failed: ${message}`
+          );
+          break;
+        }
+
+        console.warn(
+          `⚠️ getSignatureStatus probe for ${signature} failed (attempt ${attempt}): ${message}; retrying`
+        );
+        await tryDelay();
+      }
     }
 
     return "missing";
@@ -225,9 +272,16 @@ export class WalletManager {
     const now = this.timeNow ? this.timeNow() : Date.now();
     const timeToWait = WALLET_RATE_LIMIT_MS - (now - this.lastCallTime);
     if (timeToWait > 0) {
-      await new Promise((resolve) => setTimeout(resolve, timeToWait));
+      await this.sleep(timeToWait);
     }
     this.lastCallTime = this.timeNow ? this.timeNow() : Date.now();
+  }
+
+  private async sleep(ms: number): Promise<void> {
+    if (ms <= 0) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private loadAdminKeypair(): void {
@@ -1581,8 +1635,8 @@ export class WalletManager {
 
   public async confirmTransaction(signature: string): Promise<void> {
     const startTime = Date.now();
-    const timeout = CONFIRMATION_TIMEOUT_MS;
-    const pollInterval = 1000; // 1s polling cadence for signature status checks
+    const timeout = this.confirmationTimeoutMs;
+    const pollInterval = this.signaturePollIntervalMs;
     let pollCount = 0;
     let lastStatusLabel: "no-result" | null = null;
     let lastConfirmationStatus: string | null = null;
@@ -1686,9 +1740,7 @@ export class WalletManager {
             console.warn(
               `⚠️ Network issue checking ${signature} (poll ${pollCount}, ${elapsed}ms), retrying with longer delay`
             );
-            await new Promise((resolve) =>
-              setTimeout(resolve, pollInterval * 2)
-            );
+            await this.sleep(pollInterval * 2);
             continue;
           }
 
@@ -1768,7 +1820,7 @@ export class WalletManager {
           }
         }
 
-        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+        await this.sleep(pollInterval);
       }
 
       console.log(`🔄 Performing final status check for ${signature} after ${pollCount} polls`);
