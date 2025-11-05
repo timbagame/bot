@@ -155,6 +155,50 @@ describe("price utilities resilience", () => {
     expect(call).toBe(1);
   });
 
+  test("getPriceUSD retries after synchronous upstream failure", async () => {
+    process.env["PRICES_ENABLED"] = "true";
+    const token = `RETRY-${Date.now()}`;
+    let jupiterCalls = 0;
+    let pumpCalls = 0;
+
+    const fetchImpl = (async (url: string) => {
+      if (url.includes("jup.ag")) {
+        jupiterCalls += 1;
+        if (jupiterCalls === 1) {
+          throw new Error("network down");
+        }
+        return {
+          ok: true,
+          async json() {
+            return { data: { [token]: { price: 7.77 } } };
+          },
+        } as any;
+      }
+
+      if (url.includes(token)) {
+        pumpCalls += 1;
+        return {
+          ok: false,
+          async json() {
+            return {};
+          },
+        } as any;
+      }
+
+      throw new Error(`unexpected url ${url}`);
+    }) as any;
+
+    const firstAttempt = await getPriceUSD(token, fetchImpl);
+    expect(firstAttempt).toBe(0);
+    expect(jupiterCalls).toBeGreaterThanOrEqual(1);
+    expect(pumpCalls).toBeGreaterThanOrEqual(1);
+
+    const secondAttempt = await getPriceUSD(token, fetchImpl);
+    expect(secondAttempt).toBe(7.77);
+    expect(jupiterCalls).toBe(2);
+    expect(pumpCalls).toBe(1);
+  });
+
   test("getPricesUSD aggregates values for mixed identifiers (property)", async () => {
     process.env["PRICES_ENABLED"] = "true";
 

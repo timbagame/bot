@@ -5,6 +5,7 @@ describe("GameDatabase Leaderboard", () => {
   let gameDb: GameDatabase;
 
   beforeEach(() => {
+    GameDatabase.resetForTesting();
     gameDb = GameDatabase.getInstance();
   });
 
@@ -41,7 +42,7 @@ describe("GameDatabase Leaderboard", () => {
     expect(playerStats).toBeDefined();
     expect(playerStats?.gamesWon).toBe(3);
     expect(playerStats?.totalGames).toBe(3);
-    
+
     const expectedTotalVolume = 1000000 + 500000000 + 50000000;
     expect(playerStats?.totalVolume).toBe(expectedTotalVolume);
   });
@@ -88,10 +89,53 @@ describe("GameDatabase Leaderboard", () => {
 
     const stats: LeaderboardStatsRecord[] = gameDb.getLeaderboardStats(chatId, 10);
     const playerStats = stats.find((s) => s.telegramId === playerId);
-    
+
     expect(playerStats).toBeDefined();
     expect(playerStats?.gamesWon).toBe(0);
     expect(playerStats?.totalGames).toBe(1);
     expect(playerStats?.winRate).toBe(0);
+  });
+
+  test("should exclude cancelled games from leaderboard aggregates", () => {
+    const chatId = 77701;
+    const playerId = "444";
+    const playerPk = "PK444";
+
+    gameDb.savePlayerMapping(playerPk, playerId);
+
+    gameDb.saveGame("CANCEL_TEST", playerId, 2_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGameParticipant("CANCEL_TEST", "555", "PK555");
+    gameDb.completeGame("CANCEL_TEST", "cancelled");
+
+    const stats = gameDb.getLeaderboardStats(chatId, 10);
+    const playerStats = stats.find((s) => s.telegramId === playerId);
+
+    expect(playerStats).toBeUndefined();
+  });
+
+  test("should ignore cancelled volume while retaining completed wins", () => {
+    const chatId = 77702;
+    const playerId = "555";
+    const playerPk = "PK555";
+
+    gameDb.savePlayerMapping(playerPk, playerId);
+
+    // Cancelled game (should be ignored)
+    gameDb.saveGame("CANCELLED_VOL", playerId, 9_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGameParticipant("CANCELLED_VOL", "666", "PK666");
+    gameDb.completeGame("CANCELLED_VOL", "cancelled");
+
+    // Completed win that should count
+    gameDb.saveGame("WIN_VOL", playerId, 5_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGameParticipant("WIN_VOL", "777", "PK777");
+    gameDb.completeGame("WIN_VOL", playerPk);
+
+    const stats = gameDb.getLeaderboardStats(chatId, 10);
+    const playerStats = stats.find((s) => s.telegramId === playerId);
+
+    expect(playerStats).toBeDefined();
+    expect(playerStats?.gamesWon).toBe(1);
+    expect(playerStats?.totalGames).toBe(1);
+    expect(playerStats?.totalVolume).toBe(5_000_000);
   });
 });

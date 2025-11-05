@@ -120,7 +120,7 @@ export function buildWalletCaption(
     parts.push(amountLabel);
 
     if (line.usdValue !== undefined) {
-      parts.push(`($${line.usdValue})`);
+      parts.push(`($${escapeHtml(String(line.usdValue))})`);
     }
 
     lines.push(parts.join(" "));

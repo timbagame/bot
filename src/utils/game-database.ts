@@ -637,31 +637,32 @@ export class GameDatabase extends BaseDatabase {
             amount,
             MAX(CASE WHEN role = 'creator' THEN 1 ELSE 0 END) AS is_creator,
             MAX(CASE WHEN role = 'participant' THEN 1 ELSE 0 END) AS is_participant,
-            MAX(CASE WHEN role = 'winner' THEN 1 ELSE 0 END) AS is_winner
+            MAX(CASE WHEN role = 'winner' THEN 1 ELSE 0 END) AS is_winner,
+            MAX(CASE WHEN LOWER(winner_address) = 'cancelled' THEN 1 ELSE 0 END) AS is_cancelled
           FROM player_game_roles
           GROUP BY telegram_id, game_address, status, amount
         )
         SELECT
           pgs.telegram_id,
-          COUNT(DISTINCT CASE WHEN pgs.status = 'completed' THEN pgs.game_address END) AS total_games,
-          COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_winner = 1 THEN pgs.game_address END) AS games_won,
-          COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_creator = 1 THEN pgs.game_address END) AS games_created,
-          COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_participant = 1 THEN pgs.game_address END) AS games_joined,
-          COALESCE(SUM(CASE WHEN pgs.status = 'completed' THEN pgs.amount ELSE 0 END), 0) AS total_volume,
+          COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_cancelled = 0 THEN pgs.game_address END) AS total_games,
+          COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_cancelled = 0 AND pgs.is_winner = 1 THEN pgs.game_address END) AS games_won,
+          COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_cancelled = 0 AND pgs.is_creator = 1 THEN pgs.game_address END) AS games_created,
+          COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_cancelled = 0 AND pgs.is_participant = 1 THEN pgs.game_address END) AS games_joined,
+          COALESCE(SUM(CASE WHEN pgs.status = 'completed' AND pgs.is_cancelled = 0 THEN pgs.amount ELSE 0 END), 0) AS total_volume,
           ROUND(
             CASE
-              WHEN COUNT(DISTINCT CASE WHEN pgs.status = 'completed' THEN pgs.game_address END) > 0
+              WHEN COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_cancelled = 0 THEN pgs.game_address END) > 0
               THEN (
-                COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_winner = 1 THEN pgs.game_address END) * 100.0
+                COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_cancelled = 0 AND pgs.is_winner = 1 THEN pgs.game_address END) * 100.0
               ) /
-              COUNT(DISTINCT CASE WHEN pgs.status = 'completed' THEN pgs.game_address END)
+              COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_cancelled = 0 THEN pgs.game_address END)
               ELSE 0
             END,
             1
           ) AS win_rate
         FROM player_game_summary pgs
         GROUP BY pgs.telegram_id
-        HAVING COUNT(DISTINCT CASE WHEN pgs.status = 'completed' THEN pgs.game_address END) > 0
+        HAVING COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_cancelled = 0 THEN pgs.game_address END) > 0
         ORDER BY games_won DESC, win_rate DESC, total_volume DESC
         LIMIT ?
       `,
