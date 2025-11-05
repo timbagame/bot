@@ -58,7 +58,7 @@ describe("Pending player events", () => {
 
   test("player join announcements escape display names", async () => {
     const target = { chatId: 77, messageId: 301 };
-  const event = makePlayerEvent(Keypair.generate().publicKey, 5, 10);
+    const event = makePlayerEvent(Keypair.generate().publicKey, 5, 10);
 
     await botModule.__test_processPlayerEventWithTarget(
       event,
@@ -84,7 +84,7 @@ describe("Pending player events", () => {
     botModule.__test_setGameManager({
       updateGameMessageFromData: async () => {},
       getPlayerUsername: async (_ctx: any, pubkey: string) =>
-  names.get(pubkey) ?? "Unknown",
+        names.get(pubkey) ?? "Unknown",
       getActiveGameMessage: () => ({ chatId: 77, messageId: 301 }),
     } as any);
 
@@ -125,6 +125,55 @@ describe("Pending player events", () => {
     expect(sendCalls.length).toBe(2);
     expect(sendCalls[0]?.text).toContain("First");
     expect(sendCalls[1]?.text).toContain("Second");
+    expect(botModule.__test_getPendingPlayerEventsState(gameAddress)).toBeUndefined();
+  });
+
+  test("pending events near age limit flush once target becomes available", async () => {
+    const gameAddress = "BOUNDARY_GAME";
+    const player = Keypair.generate().publicKey;
+    const names = new Map<string, string>([[player.toBase58(), "Boundary"]]);
+
+    let targetReady = false;
+    let dbRecord: any = null;
+    const target = { chatId: 88, messageId: 409 };
+
+    botModule.__test_setGameManager({
+      updateGameMessageFromData: async () => {},
+      getPlayerUsername: async (_ctx: any, pubkey: string) =>
+        names.get(pubkey) ?? "Unknown",
+      getActiveGameMessage: () => (targetReady ? target : null),
+    } as any);
+
+    botModule.__test_setGameDatabase({
+      getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
+      getGame: () => dbRecord,
+    } as any);
+
+    const eventReceivedAt = Date.now() - (15_000 - 100);
+
+    botModule.__test_enqueuePendingPlayerEvent(gameAddress, {
+      event: makePlayerEvent(player, 7, 30),
+      eventName: "PlayerJoined",
+      receivedAt: eventReceivedAt,
+    });
+
+    await botModule.__test_flushPendingPlayerEvents(gameAddress, "notify");
+
+    const pendingState = botModule.__test_getPendingPlayerEventsState(gameAddress);
+    expect(pendingState?.events.length).toBe(1);
+
+    if (pendingState?.timer) {
+      clearTimeout(pendingState.timer);
+      pendingState.timer = undefined;
+    }
+
+    targetReady = true;
+    dbRecord = { chat_id: target.chatId, message_id: target.messageId };
+
+    await botModule.__test_flushPendingPlayerEvents(gameAddress, "notify");
+
+    expect(sendCalls.length).toBe(1);
+    expect(sendCalls[0]?.text).toContain("Boundary");
     expect(botModule.__test_getPendingPlayerEventsState(gameAddress)).toBeUndefined();
   });
 });

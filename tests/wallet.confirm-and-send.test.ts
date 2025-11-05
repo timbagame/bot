@@ -164,6 +164,78 @@ describe("WalletManager confirmTransaction and sendTransaction", () => {
     expect(attempts).toBeGreaterThanOrEqual(2);
   });
 
+  test("confirmTransaction resolves after timeout when post-timeout probe finds confirmation", async () => {
+    let statusCalls = 0;
+    let probeCalls = 0;
+    const conn: any = {
+      getSignatureStatuses: async () => {
+        statusCalls += 1;
+        return { value: [null] };
+      },
+      getBlockHeight: async () => 50,
+      getTransaction: async () => {
+        probeCalls += 1;
+        return { meta: { err: null } };
+      },
+      getSignatureStatus: async () => ({ value: null }),
+    };
+
+    const wm = WalletManager.createForTest(MNEMONIC, {
+      connection: conn,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+
+    (wm as any).confirmationTimeoutMs = 20;
+    (wm as any).signaturePollIntervalMs = 5;
+    (wm as any).postTimeoutProbeBackoffMs = 0;
+    (wm as any).postTimeoutProbeRetryDelayMs = 0;
+    (wm as any).postTimeoutProbeMaxAttempts = 1;
+
+    (wm as any).pendingSignatures.set("TIMEOUT_SIG", {
+      blockhash: "BH",
+      lastValidBlockHeight: 100,
+      recordedAt: Date.now() - 5,
+    });
+
+    await wm.confirmTransaction("TIMEOUT_SIG");
+
+    expect(statusCalls).toBeGreaterThan(0);
+    expect(probeCalls).toBe(1);
+    expect((wm as any).pendingSignatures.has("TIMEOUT_SIG")).toBe(false);
+  });
+
+  test("confirmTransaction throws timeout error when probes cannot find signature", async () => {
+    const conn: any = {
+      getSignatureStatuses: async () => ({ value: [null] }),
+      getBlockHeight: async () => 50,
+      getTransaction: async () => null,
+      getSignatureStatus: async () => ({ value: null }),
+    };
+
+    const wm = WalletManager.createForTest(MNEMONIC, {
+      connection: conn,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+
+    (wm as any).confirmationTimeoutMs = 20;
+    (wm as any).signaturePollIntervalMs = 5;
+    (wm as any).postTimeoutProbeBackoffMs = 0;
+    (wm as any).postTimeoutProbeRetryDelayMs = 0;
+    (wm as any).postTimeoutProbeMaxAttempts = 1;
+
+    (wm as any).pendingSignatures.set("MISSING_SIG", {
+      blockhash: "BH",
+      lastValidBlockHeight: 100,
+      recordedAt: Date.now() - 5,
+    });
+
+    await expect(wm.confirmTransaction("MISSING_SIG")).rejects.toThrow(
+      /Transaction confirmation timeout/
+    );
+  });
+
   test("getTokenBalance returns 0 on generic error", async () => {
     const mint = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
     const conn: any = {
