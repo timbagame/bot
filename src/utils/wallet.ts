@@ -120,6 +120,74 @@ export class WalletManager {
     { blockhash: string; lastValidBlockHeight: number; recordedAt: number }
   >();
   private lastTokenDiscoveryByUser = new Map<string, number>();
+  private postTimeoutProbeBackoffMs = 2000;
+
+  private async probeTransactionAfterTimeout(
+    signature: string
+  ): Promise<"found" | "failed" | "missing"> {
+    try {
+      const tx = await this.connection.getTransaction(signature, {
+        commitment: "confirmed",
+        maxSupportedTransactionVersion: 0,
+      } as any);
+
+      if (tx) {
+        if (tx.meta?.err) {
+          console.error(
+            `❌ Post-timeout getTransaction reports failure for ${signature}:`,
+            tx.meta.err
+          );
+          return "failed";
+        }
+
+        console.log(
+          `🔎 Post-timeout getTransaction found confirmed signature ${signature}`
+        );
+        return "found";
+      }
+    } catch (probeError: any) {
+      const message =
+        probeError instanceof Error ? probeError.message : String(probeError);
+      console.warn(
+        `⚠️ getTransaction probe for ${signature} failed: ${message}`
+      );
+    }
+
+    try {
+      const status = await this.connection.getSignatureStatus(signature, {
+        searchTransactionHistory: true,
+      });
+      const value = status?.value;
+
+      if (value) {
+        if (value.err) {
+          console.error(
+            `❌ Post-timeout signature status reports failure for ${signature}:`,
+            value.err
+          );
+          return "failed";
+        }
+
+        const confirmation = value.confirmationStatus || "unknown";
+        console.log(
+          `🔎 Post-timeout signature status found ${signature} with status ${confirmation}`
+        );
+        if (confirmation === "confirmed" || confirmation === "finalized") {
+          return "found";
+        }
+      }
+    } catch (statusError: any) {
+      const message =
+        statusError instanceof Error
+          ? statusError.message
+          : String(statusError);
+      console.warn(
+        `⚠️ getSignatureStatus probe for ${signature} failed: ${message}`
+      );
+    }
+
+    return "missing";
+  }
 
   private constructor(mnemonic: string, deps?: WalletDeps) {
     this.mnemonic = mnemonic;
@@ -1761,13 +1829,35 @@ export class WalletManager {
       this.pendingSignatures.delete(signature);
     }
 
+    if (this.postTimeoutProbeBackoffMs > 0) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, this.postTimeoutProbeBackoffMs)
+      );
+    }
+
+    const probeResult = await this.probeTransactionAfterTimeout(signature);
+
     console.error(
       `⏰ Transaction confirmation timeout for ${signature} after ${timeout}ms (${pollCount} polls, history=${
         historyEnabledAt !== null ? `enabled@${historyEnabledAt}ms` : "not-used"
       }, firstStatus=${
         firstStatusObservedAt !== null ? `${firstStatusObservedAt}ms` : "none"
-      }, networkRetries=${networkRetryCount})`
+      }, networkRetries=${networkRetryCount}, postTimeoutProbe=${probeResult})`
     );
+
+    if (probeResult === "found") {
+      console.log(
+        `✅ Post-timeout probe recovered confirmation for ${signature}; returning successfully`
+      );
+      return;
+    }
+
+    if (probeResult === "failed") {
+      throw new Error(
+        `Transaction ${signature} failed after timeout. Inspect on-chain logs for details.`
+      );
+    }
+
     throw new Error(
       `Transaction confirmation timeout after ${timeout}ms. Transaction may still succeed - check signature ${signature}`
     );
