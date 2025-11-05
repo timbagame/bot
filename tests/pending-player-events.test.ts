@@ -38,6 +38,7 @@ describe("Pending player events", () => {
     const module = await botModulePromise;
     (module.bot.api as any).sendMessage = originalSendMessage;
     module.__test_clearPendingPlayerEvents();
+    module.__test_resetGameDatabase?.();
   });
 
   const baseGameKey = Keypair.generate().publicKey;
