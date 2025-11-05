@@ -1514,7 +1514,7 @@ export class WalletManager {
   public async confirmTransaction(signature: string): Promise<void> {
     const startTime = Date.now();
     const timeout = CONFIRMATION_TIMEOUT_MS;
-  const pollInterval = 1000; // 1s polling cadence for signature status checks
+    const pollInterval = 1000; // 1s polling cadence for signature status checks
     let pollCount = 0;
     let lastStatusLabel: "no-result" | null = null;
     let lastConfirmationStatus: string | null = null;
