@@ -20,6 +20,22 @@ test("safeAnswerCallbackQuery falls back to ctx.api.answerCallbackQuery when no 
   expect(answered).toBe(true);
 });
 
+test("safeAnswerCallbackQuery exits early when callback id missing", async () => {
+  let called = false;
+  const ctx: any = {
+    callbackQuery: {},
+    api: {
+      answerCallbackQuery: async () => {
+        called = true;
+      },
+    },
+  };
+
+  await expect(safeAnswerCallbackQuery(ctx, "ignored"))
+    .resolves.toBeUndefined();
+  expect(called).toBe(false);
+});
+
 test("truncateMessage honors important prefix and first sentence", () => {
   const msg = "❌ Failure: Something bad happened. Additional verbose context that should be dropped.";
   const truncated = truncateMessage(msg, { maxLength: 60, preserveSentences: true, wordBoundary: true });

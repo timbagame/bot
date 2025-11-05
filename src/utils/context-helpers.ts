@@ -211,13 +211,6 @@ export const safeAnswerCallbackQuery = async (
   try {
     const hasText = typeof text === "string" && text.length > 0;
 
-    const callbackId = ctx?.callbackQuery?.id;
-
-    if (!callbackId) {
-      console.warn("Unable to answer callback query - missing callback id");
-      return;
-    }
-
     if (typeof ctx?.answerCallbackQuery === "function") {
       if (hasText) {
         await ctx.answerCallbackQuery(text);
@@ -227,9 +220,16 @@ export const safeAnswerCallbackQuery = async (
       return;
     }
 
-    if (ctx?.api) {
+    const callbackId = ctx?.callbackQuery?.id;
+
+    if (ctx?.api && callbackId) {
       const payload = hasText ? { text } : {};
       await ctx.api.answerCallbackQuery(callbackId, payload);
+      return;
+    }
+
+    if (!callbackId) {
+      console.warn("Unable to answer callback query - missing callback id");
       return;
     }
 

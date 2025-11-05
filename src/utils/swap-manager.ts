@@ -46,8 +46,26 @@ const KNOWN_MAJOR_TOKENS = new Set([
   "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E", // BTC
 ]);
 
-const CONFIRMATION_POLL_INTERVAL_MS = 2_000;
-const CONFIRMATION_POLL_DURATION_MS = 30_000;
+const DEFAULT_CONFIRMATION_POLL_INTERVAL_MS = 2_000;
+const DEFAULT_CONFIRMATION_POLL_DURATION_MS = 30_000;
+
+const parsePositiveInt = (value: string | undefined, fallback: number): number => {
+  if (!value) return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+};
+
+const getConfirmationPollIntervalMs = (): number =>
+  parsePositiveInt(
+    process.env["SWAP_CONFIRMATION_POLL_INTERVAL_MS"],
+    DEFAULT_CONFIRMATION_POLL_INTERVAL_MS
+  );
+
+const getConfirmationPollDurationMs = (): number =>
+  parsePositiveInt(
+    process.env["SWAP_CONFIRMATION_POLL_DURATION_MS"],
+    DEFAULT_CONFIRMATION_POLL_DURATION_MS
+  );
 
 const delay = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -1483,7 +1501,8 @@ export class SwapManager {
   }
 
   private async pollSignatureUntilConfirmed(signature: string): Promise<boolean> {
-    const deadline = Date.now() + CONFIRMATION_POLL_DURATION_MS;
+    const pollIntervalMs = getConfirmationPollIntervalMs();
+    const deadline = Date.now() + getConfirmationPollDurationMs();
 
     while (Date.now() < deadline) {
       const statusResponse = await this.connection.getSignatureStatuses(
@@ -1513,7 +1532,7 @@ export class SwapManager {
         }
       }
 
-      await delay(CONFIRMATION_POLL_INTERVAL_MS);
+      await delay(pollIntervalMs);
     }
 
     return false;
