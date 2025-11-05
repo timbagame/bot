@@ -1,7 +1,7 @@
 import type { Context, NextFunction } from "grammy";
 import { safeAnswerCallbackQuery } from "./context-helpers";
 
-const DEFAULT_MAX_AGE_SEC = 600; // 10 minutes
+const DEFAULT_MAX_AGE_SEC = 24 * 60 * 60; // 24 hours
 
 export function shouldDropUpdate(updateUnixSec: number, nowUnixSec: number, maxAgeSec: number = DEFAULT_MAX_AGE_SEC): boolean {
   return nowUnixSec - updateUnixSec > maxAgeSec;
