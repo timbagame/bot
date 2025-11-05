@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { GameManager } from "../src/utils/game";
+import { GAME_EXPIRATION_BUFFER_TIME } from "../src/utils/constants";
 // PublicKey not needed in this test
 
 function resetGM() {
@@ -16,7 +17,10 @@ describe("GameManager private helpers", () => {
     resetGM();
     const gm = GameManager.getInstance(programStub(), walletStub(), dbStub());
     const now = Math.floor(Date.now() / 1000);
-    const expired = (gm as any).isGameExpiredWithBuffer({ createdAt: now - (60 + 301), timeout: 60 });
+    const expired = (gm as any).isGameExpiredWithBuffer({
+      createdAt: now - (60 + GAME_EXPIRATION_BUFFER_TIME + 1),
+      timeout: 60,
+    });
     const notExpired = (gm as any).isGameExpiredWithBuffer({ createdAt: now - 50, timeout: 60 });
     expect(expired).toBe(true);
     expect(notExpired).toBe(false);
