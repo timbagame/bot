@@ -452,19 +452,13 @@ export class GameDatabase extends BaseDatabase {
           "updating game last slot timestamp"
         );
         console.log(
-          `🕐 Updated lastSlot for game ${gameAddress.slice(
-            0,
-            8
-          )}... to ${lastSlot} (timestamp: ${timestamp})`
+          `🕐 Updated lastSlot for game ${gameAddress} to ${lastSlot} (timestamp: ${timestamp})`
         );
         return true;
       }
 
       console.log(
-        `⏰ Skipped outdated slot update for game ${gameAddress.slice(
-          0,
-          8
-        )}... (current: ${current.last_slot_timestamp}, received: ${timestamp})`
+        `⏰ Skipped outdated slot update for game ${gameAddress} (current: ${current.last_slot_timestamp}, received: ${timestamp})`
       );
       return false;
     } catch {
