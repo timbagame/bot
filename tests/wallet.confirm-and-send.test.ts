@@ -167,6 +167,12 @@ describe("WalletManager confirmTransaction and sendTransaction", () => {
   test("confirmTransaction resolves after timeout when post-timeout probe finds confirmation", async () => {
     let statusCalls = 0;
     let probeCalls = 0;
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.map((item) => String(item)).join(" "));
+    };
+
     const conn: any = {
       getSignatureStatuses: async () => {
         statusCalls += 1;
@@ -198,11 +204,16 @@ describe("WalletManager confirmTransaction and sendTransaction", () => {
       recordedAt: Date.now() - 5,
     });
 
-    await wm.confirmTransaction("TIMEOUT_SIG");
+    try {
+      await wm.confirmTransaction("TIMEOUT_SIG");
+    } finally {
+      console.log = originalLog;
+    }
 
     expect(statusCalls).toBeGreaterThan(0);
     expect(probeCalls).toBe(1);
     expect((wm as any).pendingSignatures.has("TIMEOUT_SIG")).toBe(false);
+    expect(logs.some((entry) => entry.includes("Post-timeout probe recovered"))).toBe(true);
   });
 
   test("confirmTransaction throws timeout error when probes cannot find signature", async () => {
@@ -231,9 +242,26 @@ describe("WalletManager confirmTransaction and sendTransaction", () => {
       recordedAt: Date.now() - 5,
     });
 
-    await expect(wm.confirmTransaction("MISSING_SIG")).rejects.toThrow(
-      /Transaction confirmation timeout/
-    );
+    const errors: string[] = [];
+    const originalError = console.error;
+    const originalWarn = console.warn;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map((item) => String(item)).join(" "));
+    };
+    console.warn = (...args: unknown[]) => {
+      errors.push(args.map((item) => String(item)).join(" "));
+    };
+
+    try {
+      await expect(wm.confirmTransaction("MISSING_SIG")).rejects.toThrow(
+        /Transaction confirmation timeout/
+      );
+    } finally {
+      console.error = originalError;
+      console.warn = originalWarn;
+    }
+
+    expect(errors.some((entry) => entry.includes("postTimeoutProbe=missing"))).toBe(true);
   });
 
   test("getTokenBalance returns 0 on generic error", async () => {

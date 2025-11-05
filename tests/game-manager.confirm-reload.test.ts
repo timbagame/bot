@@ -90,6 +90,37 @@ describe("GameManager confirm/reload helpers", () => {
     expect(confirmed).toBe("SIG-EXP");
   });
 
+  test("confirmTransactionWithRecovery falls back to signature history status", async () => {
+    resetGM();
+    const wallet = {
+      confirmTransaction: async () => {
+        throw new Error("transaction confirmation timeout");
+      },
+    } as any;
+    const program = {
+      account: { game: { fetchNullable: async () => null } },
+      provider: {},
+    } as any;
+    const gm = GameManager.getInstance(program, wallet, {
+      getGameParticipants: () => [],
+    } as any);
+
+    let historyChecks = 0;
+    (gm as any).isSignatureConfirmedFromHistory = async () => {
+      historyChecks += 1;
+      return true;
+    };
+
+    const confirmed = await (gm as any).confirmTransactionWithRecovery(
+      "SIG-HISTORY",
+      new PublicKey("BPFLoader1111111111111111111111111111111111"),
+      "Game creation"
+    );
+
+    expect(confirmed).toBe("SIG-HISTORY");
+    expect(historyChecks).toBeGreaterThanOrEqual(1);
+  });
+
   test("confirmTransactionWithRecovery preserves timeout message when recovery fails", async () => {
     resetGM();
     const wallet = {

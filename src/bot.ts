@@ -1249,9 +1249,10 @@ const processGameCompletion = async (
               `${escapeHtml(usdSegment)}`;
           }
         }
+        const safeWinnerDisplay = escapeHtml(winnerDisplay);
         await sendReplyToGameMessage(
           target,
-          `🏆 <b>${winnerDisplay}</b> won the game!${prizeDetails}`
+          `🏆 <b>${safeWinnerDisplay}</b> won the game!${prizeDetails}`
         );
       } catch (winnerAnnouncementError) {
         console.error(
@@ -1276,6 +1277,8 @@ export const __test_setProcessGameCompletionHandler = (
 export const __test_resetProcessGameCompletionHandler = () => {
   processGameCompletionHandler = processGameCompletion;
 };
+
+export const __test_processGameCompletion = processGameCompletion;
 
 const COMPLETION_SIGNATURE_LOOKBACK = 25;
 

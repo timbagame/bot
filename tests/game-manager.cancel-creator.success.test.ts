@@ -1,12 +1,15 @@
 import { test, expect } from "bun:test";
 import { GameManager } from "../src/utils/game";
 import { PublicKey, Keypair } from "@solana/web3.js";
+import { WalletManager } from "../src/utils/wallet";
 import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 
 function resetGM() { // reset singleton
   // @ts-ignore
   GameManager["instance"] = undefined;
 }
+
+const MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
 test("cancelGameWithCreator returns true on successful close", async () => {
   resetGM();
@@ -82,4 +85,91 @@ test("cancelGameWithCreator returns true on successful close", async () => {
   expect(accounts.gameToken).toBeUndefined();
   expect(accounts.gameVault).toBeUndefined();
   expect(accounts.gameTokenAccount).toBeUndefined();
+});
+
+test("closeGameWithCreatorAuthority succeeds when wallet confirmation relies on probe recovery", async () => {
+  resetGM();
+
+  let transactionChecks = 0;
+  const connection: any = {
+    getSignatureStatuses: async () => ({ value: [null] }),
+    getBlockHeight: async () => 0,
+    getTransaction: async () => {
+      transactionChecks += 1;
+      return { meta: { err: null } };
+    },
+    getSignatureStatus: async () => ({ value: null }),
+  };
+
+  const wallet = WalletManager.createForTest(MNEMONIC, {
+    connection,
+    fetch: globalThis.fetch as any,
+    timeNow: () => Date.now(),
+  });
+
+  (wallet as any).confirmationTimeoutMs = 20;
+  (wallet as any).signaturePollIntervalMs = 5;
+  (wallet as any).postTimeoutProbeBackoffMs = 0;
+  (wallet as any).postTimeoutProbeRetryDelayMs = 0;
+  (wallet as any).postTimeoutProbeMaxAttempts = 1;
+
+  const pendingSignatures = (wallet as any).pendingSignatures as Map<string, any>;
+  const closeSig = "SIG_CLOSE_PROBE";
+
+  (wallet as any).sendTransaction = async () => {
+    pendingSignatures.set(closeSig, {
+      blockhash: "BH",
+      lastValidBlockHeight: 100,
+      recordedAt: Date.now() - 5,
+    });
+    return closeSig;
+  };
+
+  const connectionForProgram = {
+    getAccountInfo: async () => ({ owner: TOKEN_PROGRAM_ID }),
+    getAccountInfoAndContext: async () => ({ value: null }),
+    getParsedAccountInfo: async () => ({ value: { data: { parsed: { info: { decimals: 6 } } } } }),
+  } as any;
+
+  const program = {
+    programId: new PublicKey("BPFLoader1111111111111111111111111111111111"),
+    provider: { connection: connectionForProgram },
+    methods: {
+      closeGame: () => ({
+        accounts: () => ({
+          instruction: async () => ({}),
+        }),
+      }),
+    },
+  } as any;
+
+  const gm = GameManager.getInstance(program, wallet as any, {
+    getGameParticipants: () => [],
+  } as any);
+
+  const creatorTelegramId = "777";
+  const creatorKeypair = wallet.getKeyPair(BigInt(creatorTelegramId));
+
+  (gm as any).resolveGameTokenAccounts = async () => ({
+    tokenProgram: TOKEN_PROGRAM_ID,
+    gameToken: Keypair.generate().publicKey,
+    gameVault: Keypair.generate().publicKey,
+    gameTokenAccount: Keypair.generate().publicKey,
+  });
+  (gm as any).deriveAta = async () => Keypair.generate().publicKey;
+
+  const result = await (gm as any).closeGameWithCreatorAuthority({
+    gamePda: new PublicKey("BPFLoader2111111111111111111111111111111111"),
+    gameAccount: {
+      tokenMint: Keypair.generate().publicKey.toBase58(),
+      creator: creatorKeypair.publicKey.toBase58(),
+    },
+    creatorTelegramId,
+    gameType: "coinflip",
+  });
+
+  expect(result.success).toBe(true);
+  expect(result.tx).toBe(closeSig);
+  expect(transactionChecks).toBeGreaterThanOrEqual(1);
+  expect(pendingSignatures.has(closeSig)).toBe(false);
 });

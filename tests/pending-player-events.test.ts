@@ -176,4 +176,41 @@ describe("Pending player events", () => {
     expect(sendCalls[0]?.text).toContain("Boundary");
     expect(botModule.__test_getPendingPlayerEventsState(gameAddress)).toBeUndefined();
   });
+
+  test("stale pending events are dropped after exceeding max age", async () => {
+    const gameAddress = "STALE_GAME";
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+
+    try {
+      console.warn = (...args: unknown[]) => {
+        warnings.push(args.map((item) => String(item)).join(" "));
+      };
+
+      botModule.__test_setGameManager({
+        updateGameMessageFromData: async () => {},
+        getPlayerUsername: async () => "Late", // unused
+        getActiveGameMessage: () => null,
+      } as any);
+
+      botModule.__test_setGameDatabase({
+        getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
+        getGame: () => null,
+      } as any);
+
+      botModule.__test_enqueuePendingPlayerEvent(gameAddress, {
+        event: makePlayerEvent(Keypair.generate().publicKey, 3, 5),
+        eventName: "PlayerJoined",
+        receivedAt: Date.now() - 20_000,
+      });
+
+      await botModule.__test_flushPendingPlayerEvents(gameAddress, "retry");
+
+      expect(sendCalls.length).toBe(0);
+      expect(botModule.__test_getPendingPlayerEventsState(gameAddress)).toBeUndefined();
+      expect(warnings.some((msg) => msg.includes("Dropping stale PlayerJoined event"))).toBe(true);
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
 });
