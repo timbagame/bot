@@ -168,4 +168,45 @@ describe("SwapManager Jupiter confirmation", () => {
       `Failed to execute Jupiter transaction: Transaction confirmation timed out after extended polling. Check signature ${SIGNATURE_TIMEOUT_FAILURE}`
     );
   });
+
+  test("clamps zero poll interval to minimum delay", async () => {
+    process.env["SWAP_CONFIRMATION_POLL_INTERVAL_MS"] = "0";
+    process.env["SWAP_CONFIRMATION_POLL_DURATION_MS"] = "25";
+
+    const setTimeoutCalls: number[] = [];
+    const originalSetTimeout = globalThis.setTimeout;
+
+    (globalThis as any).setTimeout = (
+      callback: (...args: any[]) => void,
+      ms?: number,
+      ...args: any[]
+    ): any => {
+      setTimeoutCalls.push(ms ?? 0);
+      return originalSetTimeout(callback as any, Math.max(ms ?? 0, 1), ...args);
+    };
+
+    try {
+      const { connection } = createMockConnection(SIGNATURE_TIMEOUT_SUCCESS, {
+        confirmBehavior: "timeout",
+        signatureStatuses: [
+          { confirmations: 0, confirmationStatus: "processed" },
+          { confirmations: 1, confirmationStatus: "confirmed" },
+        ],
+      });
+
+      const manager = new SwapManager(connection as any, walletStub, feeBudgetStub);
+
+      const result = await (manager as any).executeJupiterTransaction(base64Tx, payer);
+
+      expect(result).toBe(SIGNATURE_TIMEOUT_SUCCESS);
+      expect(setTimeoutCalls.length).toBeGreaterThan(0);
+      for (const delay of setTimeoutCalls) {
+        expect(delay).toBeGreaterThanOrEqual(1);
+      }
+    } finally {
+      process.env["SWAP_CONFIRMATION_POLL_INTERVAL_MS"] = "1";
+      process.env["SWAP_CONFIRMATION_POLL_DURATION_MS"] = "10";
+      globalThis.setTimeout = originalSetTimeout;
+    }
+  });
 });

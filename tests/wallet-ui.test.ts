@@ -5,6 +5,7 @@ import {
   buildWalletTokenLines,
   buildWalletActionMenuForUser,
   showCustomAmountPrompt,
+  persistInputPromptFromContext,
 } from "../src/utils/wallet-ui";
 import { INPUT_TIMEOUT_HINT, LAMPORTS_PER_SOL } from "../src/utils/constants";
 import { getInputSession, clearAllInputSessions } from "../src/utils/user-state";
@@ -333,6 +334,39 @@ test("showCustomAmountPrompt stores fallback reply identifiers when edit fails",
   expect(session?.type).toBe("send_custom_amount");
   expect(session?.messageId).toBe(replyMessageId);
   expect(session?.chatId).toBe(9_001);
+});
+
+test("persistInputPromptFromContext overwrites session with latest prompt", async () => {
+  const edits: EditCall[] = [];
+  const ctx = createMockContext(edits, {
+    overrides: {
+      from: { id: 999 },
+    },
+  });
+
+  const keyboard = new InlineKeyboard().text("Cancel", "cancel");
+
+  await persistInputPromptFromContext({
+    ctx,
+    text: "First prompt",
+    keyboard,
+    session: { type: "first_prompt", payload: 1 },
+    logLabel: "first",
+  });
+
+  await persistInputPromptFromContext({
+    ctx,
+    text: "Second prompt",
+    keyboard,
+    session: { type: "second_prompt", payload: 2 },
+    logLabel: "second",
+  });
+
+  const sessionKey = "654_321";
+  const session = getInputSession(sessionKey);
+
+  expect(session?.type).toBe("second_prompt");
+  expect(session?.["payload"]).toBe(2);
 });
 
 test("buildWalletActionMenuForUser assembles menu using shared dependencies", async () => {

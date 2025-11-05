@@ -58,6 +58,7 @@ import {
   getSuggestedStakeAmounts,
 } from "./utils/keyboards";
 import { showCustomAmountPrompt, persistInputPromptFromContext } from "./utils/wallet-ui";
+import { buildCustomTokenPrompt } from "./utils/swap/prompts";
 import {
   buildEmptyLeaderboardMessage,
   buildLeaderboardMessage,
@@ -3332,23 +3333,9 @@ registerCallbackPrefixHandler(
         const userId = getTelegramIdString(ctx);
         if (!userId) return;
 
-        const response = [
-          `🔍 <b>Custom Token</b>`,
-          "",
-          `Swapping FROM: <b>${fromToken}</b>`,
-          "",
-          `Reply to this message with the token mint address or symbol.`,
-          "",
-          `<b>Examples:</b>`,
-          `• <code>EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v</code> (USDC)`,
-          `• <code>BONK</code>`,
-          "",
-          INPUT_TIMEOUT_HINT,
-        ];
-
         await persistInputPromptFromContext({
           ctx,
-          text: response.join("\n"),
+          text: buildCustomTokenPrompt(fromToken),
           keyboard: createCancelKeyboard("cmd_swap"),
           session: {
             type: "swap_to_token",

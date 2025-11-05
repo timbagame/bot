@@ -36,6 +36,29 @@ test("safeAnswerCallbackQuery exits early when callback id missing", async () =>
   expect(called).toBe(false);
 });
 
+test("safeAnswerCallbackQuery suppresses stale direct callback errors", async () => {
+  let fallbackCalled = false;
+  const err: any = new Error("query is too old");
+  err.description = "query is too old";
+  err.error_code = 400;
+
+  const ctx: any = {
+    callbackQuery: { id: "cb-123" },
+    answerCallbackQuery: async () => {
+      throw err;
+    },
+    api: {
+      answerCallbackQuery: async () => {
+        fallbackCalled = true;
+      },
+    },
+  };
+
+  await expect(safeAnswerCallbackQuery(ctx, "stale"))
+    .resolves.toBeUndefined();
+  expect(fallbackCalled).toBe(false);
+});
+
 test("truncateMessage honors important prefix and first sentence", () => {
   const msg = "❌ Failure: Something bad happened. Additional verbose context that should be dropped.";
   const truncated = truncateMessage(msg, { maxLength: 60, preserveSentences: true, wordBoundary: true });
