@@ -1,59 +1,55 @@
 import { expect, test } from "bun:test";
-import { mergeWsolIntoSol, type TokenBalance } from "../src/utils/balance";
+import {
+  LAMPORTS_PER_SOL,
+  WSOL_MINT,
+} from "../src/utils/constants";
+import { buildWalletTokenLines } from "../src/utils/wallet-ui";
 
-const WSOL = "So11111111111111111111111111111111111111112";
+const formatSol = (lamports: number): string =>
+  (lamports / LAMPORTS_PER_SOL).toFixed(2);
 
-test("mergeWsolIntoSol merges WSOL into SOL and removes WSOL token", () => {
-  const solLamports = 200; // lamports as number for util
-  const tokens: TokenBalance[] = [
-    {
-      mint: WSOL,
-      ticker: "WSOL",
-      balance: 100,
-      decimals: 9,
-      rawBalance: "100",
-      lamports: BigInt(100),
-    },
-    {
-      mint: "USDC_MINT",
-      ticker: "USDC",
-      balance: 1_000_000, // 1 USDC with 6 decimals
-      decimals: 6,
-      rawBalance: "1000000",
-      lamports: BigInt(1_000_000),
-    },
-  ];
+const formatToken = (balance: number, decimals: number): string =>
+  (balance / Math.pow(10, decimals)).toFixed(2);
 
-  const { solLamports: merged, tokenBalances } = mergeWsolIntoSol(
-    solLamports,
-    tokens,
-    WSOL
-  );
+test("wallet token lines list native SOL and WSOL separately", async () => {
+  const solLamports = 3 * LAMPORTS_PER_SOL;
+  const wsolLamports = 2 * LAMPORTS_PER_SOL;
 
-  expect(merged).toBe(Number(solLamports) + 100);
-  expect(tokenBalances.length).toBe(1);
-  expect(tokenBalances[0]!.ticker).toBe("USDC");
+  const lines = await buildWalletTokenLines({
+    solBalanceLamports: solLamports,
+    tokenBalances: [
+      { mint: WSOL_MINT, ticker: "WSOL", balance: wsolLamports, decimals: 9 },
+      { mint: "USDC_MINT", ticker: "USDC", balance: 1_500_000, decimals: 6 },
+    ],
+    formatSolBalance: formatSol,
+    formatTokenBalance: formatToken,
+    fetchPricesUSD: async () => ({}),
+  });
+
+  const solLine = lines.find((line) => line.ticker === "SOL");
+  const wsolLine = lines.find((line) => line.ticker === "WSOL");
+
+  expect(solLine).toBeDefined();
+  expect(solLine?.amount).toBe("3.00");
+  expect(solLine?.unit).toBe("SOL");
+
+  expect(wsolLine).toBeDefined();
+  expect(wsolLine?.amount).toBe("2.00");
+  expect(wsolLine?.unit).toBeUndefined();
 });
 
-test("mergeWsolIntoSol is a no-op when WSOL not present", () => {
-  const solLamports = 500;
-  const tokens: TokenBalance[] = [
-    {
-      mint: "USDC_MINT",
-      ticker: "USDC",
-      balance: 2_000_000,
-      decimals: 6,
-      rawBalance: "2000000",
-      lamports: BigInt(2_000_000),
-    },
-  ];
+test("wallet token lines omit zero WSOL balances", async () => {
+  const lines = await buildWalletTokenLines({
+    solBalanceLamports: 1 * LAMPORTS_PER_SOL,
+    tokenBalances: [
+      { mint: WSOL_MINT, ticker: "WSOL", balance: 0, decimals: 9 },
+      { mint: "USDC_MINT", ticker: "USDC", balance: 2_000_000, decimals: 6 },
+    ],
+    formatSolBalance: formatSol,
+    formatTokenBalance: formatToken,
+    fetchPricesUSD: async () => ({}),
+  });
 
-  const { solLamports: merged, tokenBalances } = mergeWsolIntoSol(
-    solLamports,
-    tokens,
-    WSOL
-  );
-
-  expect(merged).toBe(solLamports);
-  expect(tokenBalances).toEqual(tokens);
+  expect(lines.some((line) => line.ticker === "WSOL")).toBe(false);
+  expect(lines.some((line) => line.ticker === "USDC")).toBe(true);
 });

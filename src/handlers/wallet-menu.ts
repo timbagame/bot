@@ -1,7 +1,6 @@
 import type { Bot } from "grammy";
 
 import { createExpiringCache } from "../utils/expiring-cache";
-import { mergeWsolIntoSol } from "../utils/balance";
 import { WSOL_MINT, getStartVideoId } from "../utils/constants";
 import {
   buildWalletCaption,
@@ -129,12 +128,11 @@ export const createWalletMenuModule = (
     const tokenManager = getTokenManager();
 
     try {
-      let solBalance = await wallet.getBalance(telegramId);
-      const nativeSolBalance = solBalance;
+      const nativeSolBalance = await wallet.getBalance(telegramId);
       const approvedTokens = tokenManager
         ? tokenManager.getAllApprovedTokensWithMetadata()
         : [];
-      let tokenBalances = await wallet.getAllApprovedTokenBalances(
+      const tokenBalances = await wallet.getAllApprovedTokenBalances(
         telegramId,
         approvedTokens
       );
@@ -142,12 +140,8 @@ export const createWalletMenuModule = (
       const wsolToken = tokenBalances.find((token) => token.mint === WSOL_MINT);
       const wsolBalance = wsolToken?.balance ?? 0;
 
-      const merged = mergeWsolIntoSol(solBalance, tokenBalances, WSOL_MINT);
-      solBalance = merged.solLamports;
-      tokenBalances = merged.tokenBalances as typeof tokenBalances;
-
       const data: CachedWalletData = {
-        solBalance,
+        solBalance: nativeSolBalance,
         nativeSolBalance,
         wsolBalance,
         tokenBalances,
