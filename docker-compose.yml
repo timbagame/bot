@@ -10,8 +10,6 @@ services:
       SOLANA_NETWORK: ${SOLANA_NETWORK}
       MNEMONIC: ${MNEMONIC}
       ORACLE_API_URL: ${ORACLE_API_URL:-http://host.docker.internal:3001}
-      TOKEN_MINT: ${TOKEN_MINT}
-      TICKER: ${TICKER}
     volumes:
       # Read-only keypair for on-chain interactions
       - ./admin-keypair.json:/app/admin-keypair.json:ro
