@@ -337,16 +337,14 @@ export class GameManager {
 
   private prunePendingCreationRequests(
     telegramId: string,
-    referenceTimestampMs: number
+    windowStartMs: number
   ): number {
     const existing = this.pendingCreationRequests.get(telegramId);
     if (!existing || existing.length === 0) {
       return 0;
     }
 
-    const windowStart =
-      referenceTimestampMs - GAME_CREATION_RATE_LIMIT_WINDOW_MS;
-    const filtered = existing.filter((ts) => ts >= windowStart);
+    const filtered = existing.filter((ts) => ts >= windowStartMs);
 
     if (filtered.length === 0) {
       this.pendingCreationRequests.delete(telegramId);
@@ -2875,13 +2873,16 @@ export class GameManager {
       ? Math.min(nowMs, Math.max(0, Math.trunc(requestTimestampMs)))
       : nowMs;
 
+    const windowStart = Math.max(
+      nowMs - GAME_CREATION_RATE_LIMIT_WINDOW_MS,
+      safeRequestTimestamp - GAME_CREATION_RATE_LIMIT_WINDOW_MS
+    );
+    const pendingRequestTimestamp = Math.max(safeRequestTimestamp, nowMs);
+
     const pendingCount = this.prunePendingCreationRequests(
       telegramIdStr,
-      safeRequestTimestamp
+      windowStart
     );
-
-    const windowStart =
-      safeRequestTimestamp - GAME_CREATION_RATE_LIMIT_WINDOW_MS;
     const recentCreationCount = this.gameDb.countRecentGamesByCreator(
       telegramIdStr,
       windowStart
@@ -2905,7 +2906,10 @@ export class GameManager {
       };
     }
 
-    this.trackPendingCreationRequest(telegramIdStr, safeRequestTimestamp);
+    this.trackPendingCreationRequest(
+      telegramIdStr,
+      pendingRequestTimestamp
+    );
     this.incrementInFlightCreations(telegramIdStr);
 
     try {
@@ -3218,7 +3222,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
       this.decrementInFlightCreations(telegramIdStr);
       this.clearPendingCreationRequest(
         telegramIdStr,
-        safeRequestTimestamp
+        pendingRequestTimestamp
       );
     }
   }
