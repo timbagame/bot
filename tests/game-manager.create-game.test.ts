@@ -9,6 +9,7 @@ import { PDAManager } from "../src/utils/pda";
 import {
   MAX_ACTIVE_GAMES_PER_CREATOR,
   MAX_GAMES_PER_CREATOR_WINDOW,
+  GAME_CREATION_RATE_LIMIT_WINDOW_MS,
   WSOL_MINT,
 } from "../src/utils/constants";
 
@@ -236,10 +237,71 @@ describe("GameManager.createGame", () => {
     expect(res.success).toBe(false);
     const message = String(res.error);
     expect(message.toLowerCase()).toContain("rate limit");
+    expect(message.toLowerCase()).toContain("created or requested");
     expect(message).toContain(String(recentCount));
     expect(message).toContain(String(MAX_GAMES_PER_CREATOR_WINDOW));
     expect(message).toContain("Please wait");
     expect(message).toContain("last");
+  });
+
+  test("counts pending creations against rate limit window using request timestamps", async () => {
+    resetGM();
+    const wallet = makeWallet({
+      getTokenMetadata: async () => {
+        throw new Error("metadata should not be fetched when pending limit hit");
+      },
+      getTokenBalance: async () => {
+        throw new Error("token balance should not be fetched when pending limit hit");
+      },
+      getBalance: async () => {
+        throw new Error("sol balance should not be fetched when pending limit hit");
+      },
+    });
+
+    const recentCount = Math.max(0, MAX_GAMES_PER_CREATOR_WINDOW - 1);
+    let capturedWindowStart: number | null = null;
+    const db = {
+      savePlayerMapping: () => {},
+      countActiveGamesByCreator: () => 0,
+      countRecentGamesByCreator: (_: string, windowStart: number) => {
+        capturedWindowStart = windowStart;
+        return recentCount;
+      },
+    } as any;
+
+    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, db);
+
+    const baseTimestamp = 1_700_000_000_000;
+    const pendingCount = Math.max(1, MAX_GAMES_PER_CREATOR_WINDOW - recentCount);
+    const pendingEntries = Array.from({ length: pendingCount }, (_, index) =>
+      baseTimestamp - index * 100
+    );
+    (gm as any).pendingCreationRequests = new Map([
+      ["1", pendingEntries.slice()],
+    ]);
+
+    const result = await gm.createGame(
+      "coinflip",
+      { amount: 1_000_000, tokenMint: "Mint", tokenTicker: "TOK", isSol: false },
+      2,
+      2,
+      60,
+      1n,
+      undefined,
+      baseTimestamp
+    );
+
+    expect(result.success).toBe(false);
+    const message = String(result.error ?? "");
+    expect(message.toLowerCase()).toContain("rate limit");
+    expect(message).toContain(String(MAX_GAMES_PER_CREATOR_WINDOW));
+
+    const expectedWindowStart = Math.max(
+      0,
+      baseTimestamp - GAME_CREATION_RATE_LIMIT_WINDOW_MS
+    );
+    expect(capturedWindowStart).not.toBeNull();
+    expect(capturedWindowStart!).toBe(expectedWindowStart);
   });
 
   test("wraps native SOL when WSOL token specified explicitly", async () => {

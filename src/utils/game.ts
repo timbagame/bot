@@ -295,6 +295,7 @@ export class GameManager {
   private tokenProgramCache = new Map<string, PublicKey>();
   private gameRentLamports: number | null = null;
   private inFlightGameCreations = new Map<string, number>();
+  private pendingCreationRequests = new Map<string, number[]>();
   private readonly completedGameErrorMessage =
     "This game has already completed. Refresh to see the result.";
   private readonly usernameCacheTtlMs = TELEGRAM_USERNAME_CACHE_TTL_MS;
@@ -332,6 +333,74 @@ export class GameManager {
     }
 
     this.inFlightGameCreations.set(telegramId, current - 1);
+  }
+
+  private normalizeRequestTimestamp(timestamp?: number): number {
+    if (
+      typeof timestamp === "number" &&
+      Number.isFinite(timestamp) &&
+      timestamp > 0
+    ) {
+      return Math.floor(timestamp);
+    }
+
+    return Date.now();
+  }
+
+  private prunePendingCreationRequests(
+    telegramId: string,
+    windowStart: number
+  ): number[] {
+    const pending = this.pendingCreationRequests.get(telegramId);
+    if (!pending) {
+      return [];
+    }
+
+    const pruned = pending.filter((timestamp) => timestamp >= windowStart);
+    if (pruned.length === 0) {
+      this.pendingCreationRequests.delete(telegramId);
+      return [];
+    }
+
+    if (pruned.length !== pending.length) {
+      this.pendingCreationRequests.set(telegramId, pruned);
+    }
+
+    return pruned;
+  }
+
+  private addPendingCreationRequest(
+    telegramId: string,
+    timestamp: number
+  ): void {
+    const pending = this.pendingCreationRequests.get(telegramId);
+    if (!pending) {
+      this.pendingCreationRequests.set(telegramId, [timestamp]);
+      return;
+    }
+
+    pending.push(timestamp);
+  }
+
+  private removePendingCreationRequest(
+    telegramId: string,
+    timestamp: number
+  ): void {
+    const pending = this.pendingCreationRequests.get(telegramId);
+    if (!pending) {
+      return;
+    }
+
+    const index = pending.indexOf(timestamp);
+    if (index >= 0) {
+      pending.splice(index, 1);
+    } else {
+      pending.shift();
+    }
+
+    if (pending.length === 0) {
+      this.pendingCreationRequests.delete(telegramId);
+    }
   }
 
   public static getInstance(
@@ -2778,7 +2847,8 @@ export class GameManager {
     minTickets: number,
     timeout: number,
     telegramId: bigint,
-    chatId?: number
+    chatId?: number,
+    requestTimestampMs?: number
   ): Promise<{
     success: boolean;
     error?: string;
@@ -2795,6 +2865,20 @@ export class GameManager {
     }
 
     const telegramIdStr = telegramId.toString();
+    const requestTimestamp = this.normalizeRequestTimestamp(
+      requestTimestampMs
+    );
+    const windowStart = Math.max(
+      0,
+      requestTimestamp - GAME_CREATION_RATE_LIMIT_WINDOW_MS
+    );
+    const pendingInWindow = this.prunePendingCreationRequests(
+      telegramIdStr,
+      windowStart
+    );
+    const pendingCreationCount = pendingInWindow.filter(
+      (timestamp) => timestamp <= requestTimestamp
+    ).length;
     const inFlightCount = this.getInFlightCreations(telegramIdStr);
     const activeGameCount = this.gameDb.countActiveGamesByCreator(
       telegramIdStr
@@ -2811,20 +2895,27 @@ export class GameManager {
       };
     }
 
-    const windowStart = Date.now() - GAME_CREATION_RATE_LIMIT_WINDOW_MS;
     const recentCreationCount = this.gameDb.countRecentGamesByCreator(
       telegramIdStr,
       windowStart
     );
 
-    if (recentCreationCount >= MAX_GAMES_PER_CREATOR_WINDOW) {
+    const totalRecentRequests = recentCreationCount + pendingCreationCount;
+
+    if (totalRecentRequests >= MAX_GAMES_PER_CREATOR_WINDOW) {
       const windowLabel = formatRateLimitWindow(
         GAME_CREATION_RATE_LIMIT_WINDOW_MS
       );
       return {
         success: false,
-        error: `Game creation rate limit reached. You have created ${recentCreationCount} games in the last ${windowLabel} (maximum ${MAX_GAMES_PER_CREATOR_WINDOW}). Please wait before creating a new game.`,
+        error: `Game creation rate limit reached. You have created or requested ${totalRecentRequests} games in the last ${windowLabel} (maximum ${MAX_GAMES_PER_CREATOR_WINDOW}). Please wait before creating a new game.`,
       };
+    }
+
+    let pendingRequestTimestamp: number | null = null;
+    if (pendingCreationCount < MAX_GAMES_PER_CREATOR_WINDOW) {
+      this.addPendingCreationRequest(telegramIdStr, requestTimestamp);
+      pendingRequestTimestamp = requestTimestamp;
     }
 
     this.incrementInFlightCreations(telegramIdStr);
@@ -3137,6 +3228,12 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
       };
     } finally {
       this.decrementInFlightCreations(telegramIdStr);
+      if (pendingRequestTimestamp !== null) {
+        this.removePendingCreationRequest(
+          telegramIdStr,
+          pendingRequestTimestamp
+        );
+      }
     }
   }
 

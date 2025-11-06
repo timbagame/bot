@@ -829,7 +829,7 @@ describe("createGameViaCommand helper", () => {
     const ctx: any = makeCtx();
     const recentCount = MAX_GAMES_PER_CREATOR_WINDOW;
     const windowLabel = formatWindowForTests(GAME_CREATION_RATE_LIMIT_WINDOW_MS);
-    const rateLimitMessage = `Game creation rate limit reached. You have created ${recentCount} games in the last ${windowLabel} (maximum ${MAX_GAMES_PER_CREATOR_WINDOW}). Please wait before creating a new game.`;
+    const rateLimitMessage = `Game creation rate limit reached. You have created or requested ${recentCount} games in the last ${windowLabel} (maximum ${MAX_GAMES_PER_CREATOR_WINDOW}). Please wait before creating a new game.`;
     const deps = makeDeps({
       gameManager: {
         createGame: async () => ({ success: false, error: rateLimitMessage }),

@@ -876,6 +876,11 @@ export const createGameCallbacksModule = (
                 tokenWasSpecified: tokenContext.tokenMint !== DEFAULT_TOKEN_MINT,
               };
 
+              const callbackMessageDate =
+                typeof ctx.callbackQuery?.message?.date === "number"
+                  ? ctx.callbackQuery.message.date * 1000
+                  : undefined;
+
               const result = await gameManager.createGame(
                 gameType,
                 gameData,
@@ -883,7 +888,8 @@ export const createGameCallbacksModule = (
                 gameType === "coinflip" ? 2 : 1,
                 GAME_TIMEOUT,
                 getTelegramId(ctx),
-                ctx.chat?.id
+                ctx.chat?.id,
+                callbackMessageDate
               );
 
               if (!result.success) {
