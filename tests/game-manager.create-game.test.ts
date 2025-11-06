@@ -7,6 +7,7 @@ import {
 } from "@solana/spl-token";
 import { PDAManager } from "../src/utils/pda";
 import {
+  GAME_CREATION_RATE_LIMIT_WINDOW_MS,
   MAX_ACTIVE_GAMES_PER_CREATOR,
   MAX_GAMES_PER_CREATOR_WINDOW,
   WSOL_MINT,
@@ -240,6 +241,119 @@ describe("GameManager.createGame", () => {
     expect(message).toContain(String(MAX_GAMES_PER_CREATOR_WINDOW));
     expect(message).toContain("Please wait");
     expect(message).toContain("last");
+  });
+
+  test("blocks overlapping game creation requests within the rate limit window", async () => {
+    resetGM();
+    const metadataDeferrals: ((reason?: any) => void)[] = [];
+    const wallet = makeWallet({
+      getTokenMetadata: () =>
+        new Promise((_, reject) => {
+          metadataDeferrals.push(reject);
+        }),
+      getTokenBalance: async () => 5_000_000,
+      getBalance: async () => 5_000_000,
+    });
+
+    const db = {
+      savePlayerMapping: () => {},
+      countActiveGamesByCreator: () => 0,
+      countRecentGamesByCreator: () => 0,
+    } as any;
+
+    const gm = GameManager.getInstance(
+      makeProgram(wallet.connection),
+      wallet,
+      db
+    );
+
+    const sharedTimestamp = 1_700_000_000_000;
+    const baseArgs: Parameters<GameManager["createGame"]> = [
+      "coinflip",
+      {
+        amount: 1_000_000,
+        tokenMint: "M",
+        tokenTicker: "TOK",
+        isSol: false,
+      },
+      2,
+      2,
+      60,
+      1n,
+      0,
+      sharedTimestamp,
+    ];
+
+    const first = gm.createGame(...baseArgs);
+    const second = gm.createGame(...baseArgs);
+    const third = gm.createGame(...baseArgs);
+
+    expect(metadataDeferrals.length).toBe(3);
+
+    const fourthResult = await gm.createGame(...baseArgs);
+    expect(fourthResult.success).toBe(false);
+    const fourthError = String(fourthResult.error || "");
+    expect(fourthError.toLowerCase()).toContain("rate limit");
+    expect(fourthError).toContain(String(MAX_GAMES_PER_CREATOR_WINDOW));
+
+    metadataDeferrals.forEach((reject) => reject(new Error("abort")));
+    await Promise.allSettled([first, second, third]);
+  });
+
+  test("clamps future request timestamps to the current window", async () => {
+    resetGM();
+    const fixedNow = 1_700_000_000_000;
+    const originalNow = Date.now;
+    let capturedWindowStart: number | undefined;
+
+    try {
+      Date.now = () => fixedNow;
+
+      const wallet = makeWallet({
+        getTokenMetadata: async () => ({ decimals: 6 }),
+        getTokenBalance: async () => 1_000_000,
+        getBalance: async () => 1_000_000,
+      });
+
+      const db = {
+        savePlayerMapping: () => {},
+        countActiveGamesByCreator: () => 0,
+        countRecentGamesByCreator: (_id: string, windowStart: number) => {
+          capturedWindowStart = windowStart;
+          return MAX_GAMES_PER_CREATOR_WINDOW;
+        },
+      } as any;
+
+      const gm = GameManager.getInstance(
+        makeProgram(wallet.connection),
+        wallet,
+        db
+      );
+
+      const futureTimestamp = fixedNow + 60_000;
+      const result = await gm.createGame(
+        "coinflip",
+        {
+          amount: 1_000_000,
+          tokenMint: "M",
+          tokenTicker: "TOK",
+          isSol: false,
+        },
+        2,
+        2,
+        60,
+        1n,
+        0,
+        futureTimestamp
+      );
+
+      expect(result.success).toBe(false);
+      expect(capturedWindowStart).toBe(
+        fixedNow - GAME_CREATION_RATE_LIMIT_WINDOW_MS
+      );
+    } finally {
+      Date.now = originalNow;
+    }
   });
 
   test("wraps native SOL when WSOL token specified explicitly", async () => {
