@@ -1093,19 +1093,31 @@ const processPlayerEventWithTarget = async (
     );
 
     if (eventName === "PlayerJoined") {
-      try {
-        const displayName = await gameManager.getPlayerUsername(
-          apiCtx,
-          event.player.toString()
+      const playerPublicKey = event.player.toString();
+      const creatorPublicKey =
+        typeof gameDb?.getCreatorInfo === "function"
+          ? gameDb.getCreatorInfo(gameAddress)?.publicKey ?? null
+          : null;
+
+      if (creatorPublicKey && creatorPublicKey === playerPublicKey) {
+        console.debug(
+          `Skipping auto-join announcement for creator ${creatorPublicKey} in game ${gameAddress}`
         );
-        const safeDisplayName = escapeHtml(displayName);
-        const announcement = `👤 <b>${safeDisplayName}</b> joined the game!`;
-        await sendReplyToGameMessage(target, announcement);
-      } catch (announcementError) {
-        console.error(
-          `Error announcing player join for game ${gameAddress}:`,
-          announcementError
-        );
+      } else {
+        try {
+          const displayName = await gameManager.getPlayerUsername(
+            apiCtx,
+            playerPublicKey
+          );
+          const safeDisplayName = escapeHtml(displayName);
+          const announcement = `👤 <b>${safeDisplayName}</b> joined the game!`;
+          await sendReplyToGameMessage(target, announcement);
+        } catch (announcementError) {
+          console.error(
+            `Error announcing player join for game ${gameAddress}:`,
+            announcementError
+          );
+        }
       }
     }
   } catch (error) {

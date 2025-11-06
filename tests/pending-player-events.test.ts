@@ -2,6 +2,14 @@ import { beforeEach, afterEach, describe, expect, test } from "bun:test";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 
+process.env.TELEGRAM_TOKEN =
+  process.env.TELEGRAM_TOKEN ?? "TEST_TELEGRAM_TOKEN";
+process.env.MNEMONIC =
+  process.env.MNEMONIC ??
+  "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+process.env.SOLANA_NETWORK =
+  process.env.SOLANA_NETWORK ?? "http://localhost:8899";
+
 const botModulePromise = import("../src/bot");
 
 describe("Pending player events", () => {
@@ -31,6 +39,7 @@ describe("Pending player events", () => {
     } as any);
     botModule.__test_setGameDatabase({
       getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
+      getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
     } as any);
   });
 
@@ -70,6 +79,28 @@ describe("Pending player events", () => {
     expect(sendCalls.length).toBe(1);
     expect(sendCalls[0]?.text).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     expect(sendCalls[0]?.options?.parse_mode).toBe("HTML");
+  });
+
+  test("auto-join for game creator is not announced", async () => {
+    const target = { chatId: 77, messageId: 301 };
+    const creatorKeypair = Keypair.generate();
+    const event = makePlayerEvent(creatorKeypair.publicKey, 5, 10);
+
+    botModule.__test_setGameDatabase({
+      getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
+      getCreatorInfo: () => ({
+        telegramId: "creator-telegram",
+        publicKey: creatorKeypair.publicKey.toBase58(),
+      }),
+    } as any);
+
+    await botModule.__test_processPlayerEventWithTarget(
+      event,
+      "PlayerJoined",
+      target
+    );
+
+    expect(sendCalls.length).toBe(0);
   });
 
   test("flushPendingPlayerEvents processes events enqueued mid-flush", async () => {
@@ -148,6 +179,7 @@ describe("Pending player events", () => {
     botModule.__test_setGameDatabase({
       getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
       getGame: () => dbRecord,
+      getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
     } as any);
 
     const eventReceivedAt = Date.now() - (15_000 - 100);
@@ -197,6 +229,7 @@ describe("Pending player events", () => {
       botModule.__test_setGameDatabase({
         getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
         getGame: () => null,
+        getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
       } as any);
 
       botModule.__test_enqueuePendingPlayerEvent(gameAddress, {
