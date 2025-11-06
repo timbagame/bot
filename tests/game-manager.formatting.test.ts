@@ -34,11 +34,18 @@ function makeWalletStub(opts?: { blockTime?: number; tokenDecimals?: number }) {
   } as any;
 }
 
-function makeDbStub(participants: string[], gameData: any, playerTelegramByPub: Record<string,string>) {
+function makeDbStub(
+  participants: string[],
+  gameData: any,
+  playerTelegramByPub: Record<string, string>,
+  displayNameByTelegram: Record<string, string> = {}
+) {
   return {
     getGameParticipants: (_addr: string) => participants,
     getGame: (_addr: string) => gameData,
     getPlayerTelegramId: (pub: string) => playerTelegramByPub[pub] || null,
+    getPlayerDisplayName: (telegramId: string) =>
+      displayNameByTelegram[telegramId] ?? null,
   } as any;
 }
 
@@ -151,6 +158,62 @@ describe("GameManager.formatGameMessage", () => {
     const gm = GameManager.getInstance(program, wallet, db);
   const gamePda = Keypair.generate().publicKey;
 
+  const res = await gm.formatGameMessage(
+    ctx,
+    gamePda,
+    "coinflip",
+    amount,
+    "@creator",
+    "Completed",
+    "WSOL",
+    winnerPubkey
+  );
+
+  expect(res.messageText).toContain("Winner: &lt;Winner &amp; Co&gt;");
+});
+
+  test("falls back to stored display name and escapes HTML when Telegram lookup fails", async () => {
+    resetGameManager();
+    const amount = 1_000_000_000;
+    const tokenMint = {
+      toBase58: () => "TokenMint33333333333333333333333333333333",
+    } as unknown as PublicKey;
+    const gameAccount = {
+      ticketsCount: 2,
+      maxTickets: 2,
+      minTickets: 1,
+      totalAmount: null,
+      createdAt: 1_500_000,
+      timeout: 120,
+      gameType: { coinflip: {} },
+      tokenMint,
+    };
+    const winnerPubkey = "WinnerPubkey";
+    const program = makeProgramStub(gameAccount);
+    const wallet = makeWalletStub();
+    const db = makeDbStub(
+      ["999"],
+      {
+        token_ticker: "WSOL",
+        game_type: "coinflip",
+        token_mint: tokenMint.toBase58(),
+      },
+      { [winnerPubkey]: "999" },
+      { "999": "<Stored Winner>" }
+    );
+    const ctx = {
+      ...makeCtxStub(),
+      api: {
+        getChatMember: async () => {
+          throw Object.assign(new Error("Forbidden"), {
+            description: "Forbidden: bot can't initiate conversation with a user",
+          });
+        },
+      },
+    } as any;
+    const gm = GameManager.getInstance(program, wallet, db);
+    const gamePda = Keypair.generate().publicKey;
+
     const res = await gm.formatGameMessage(
       ctx,
       gamePda,
@@ -162,7 +225,7 @@ describe("GameManager.formatGameMessage", () => {
       winnerPubkey
     );
 
-    expect(res.messageText).toContain("Winner: &lt;Winner &amp; Co&gt;");
+    expect(res.messageText).toContain("Winner: &lt;Stored Winner&gt;");
   });
 
   test("supports bigint ticket amounts without USD approximations", async () => {

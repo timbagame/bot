@@ -15,8 +15,10 @@ function walletStub() {
   return {} as any;
 }
 
-function dbStub() {
-  return {} as any;
+function dbStub(displayNames: Record<string, string> = {}) {
+  return {
+    getPlayerDisplayName: (id: string) => displayNames[id] ?? null,
+  } as any;
 }
 
 describe("GameManager Username Resolution", () => {
@@ -56,6 +58,25 @@ describe("GameManager Username Resolution", () => {
       const second = await gm.getUsernameFromTelegramId(ctx, "555");
       expect(second).toBe("@cached");
       expect(calls).toBe(1);
+    });
+
+    test("trims whitespace around telegram id before lookup", async () => {
+      resetGM();
+      const gm = GameManager.getInstance(programStub(), walletStub(), dbStub());
+      const received: Array<number | string> = [];
+      const ctx = {
+        chat: { id: 77, type: "group" },
+        api: {
+          getChatMember: async (_chatId: number, targetId: number | string) => {
+            received.push(targetId);
+            return { user: { username: "trimmed" } };
+          },
+        },
+      } as any;
+
+      const result = await gm.getUsernameFromTelegramId(ctx, " 777 ");
+      expect(result).toBe("@trimmed");
+      expect(received[0]).toBe(777);
     });
 
     test("re-fetches after cache ttl", async () => {

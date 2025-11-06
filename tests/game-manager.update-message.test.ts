@@ -22,15 +22,26 @@ function walletStub() {
 }
 
 function dbStub(overrides: Partial<any> = {}) {
+  const savedMessages: Array<{ address: string; messageId: number; chatId: number }> = [];
+  const clearedMessages: string[] = [];
   return {
     getGameParticipants: (_: string) => [],
     getGame: (_: string) => ({ token_mint: "MINT", token_ticker: "TOK", game_type: "coinflip", ...overrides }),
     getCreatorInfo: (_: string) => ({ telegramId: "777" }),
     getPlayerTelegramId: (_: string) => null,
+    saveGameMessage: (address: string, messageId: number, chatId: number) => {
+      savedMessages.push({ address, messageId, chatId });
+    },
+    clearGameMessage: (address: string) => {
+      clearedMessages.push(address);
+    },
+    getPlayerDisplayName: () => null,
+    __savedMessages: savedMessages,
+    __clearedMessages: clearedMessages,
   } as any;
 }
 
-function ctxStub(options: { failMedia?: any; failCaption?: any } = {}) {
+function ctxStub(options: { failMedia?: any; failCaption?: any; failText?: any; sendMessageResult?: any } = {}) {
   const calls: any[] = [];
   const ctx: any = {
     chat: { id: 1, type: "private" },
@@ -50,7 +61,22 @@ function ctxStub(options: { failMedia?: any; failCaption?: any } = {}) {
         }
         return { message_id: 99 };
       },
-      editMessageText: async (...args: any[]) => { calls.push(["text", ...args]); return { message_id: 99 }; },
+      editMessageText: async (...args: any[]) => {
+        calls.push(["text", ...args]);
+        if (options.failText) {
+          throw options.failText;
+        }
+        return { message_id: 99 };
+      },
+      sendMessage: async (...args: any[]) => {
+        calls.push(["send", ...args]);
+        return (
+          options.sendMessageResult ?? {
+            message_id: 777,
+            chat: { id: args[0] },
+          }
+        );
+      },
     },
     __calls: calls,
   };
@@ -208,5 +234,50 @@ describe("GameManager.updateGameMessage routing", () => {
     expect(calls[1][0]).toBe("text");
     const active = gm.getActiveGameMessage(addr);
     expect(active?.usesVideo).toBe(false);
+  });
+
+  test("recreates missing message and preserves inline keyboard when edit target is gone", async () => {
+    resetGM();
+    const gameAcc = {
+      ticketsCount: 1,
+      maxTickets: 2,
+      minTickets: 1,
+      totalAmount: 0,
+      createdAt: 1_000_000,
+      timeout: 60,
+      gameType: { coinflip: {} },
+    };
+    const addr = new PublicKey("11111111111111111111111111111116").toBase58();
+    const database = dbStub();
+    const gm = GameManager.getInstance(programStub(gameAcc), walletStub(), database);
+    const missingError = {
+      description: "Bad Request: message to edit not found",
+    };
+    const ctx = ctxStub({
+      failText: missingError,
+      sendMessageResult: { message_id: 888, chat: { id: 1 } },
+    });
+    ctx.chat = { id: 1, type: "supergroup" };
+    (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 47, usesVideo: false });
+
+    await gm.updateGameMessage(
+      ctx as any,
+      addr,
+      "coinflip",
+      1_000_000_000,
+      "@creator",
+      "Active",
+      "TOK"
+    );
+
+    const calls = (ctx as any).__calls;
+    const sendCall = calls.find((call: any[]) => call[0] === "send");
+    expect(sendCall).toBeDefined();
+    expect(sendCall?.[3]?.reply_markup?.inline_keyboard).toBeDefined();
+    const active = gm.getActiveGameMessage(addr);
+    expect(active?.messageId).toBe(888);
+    const saved = (database as any).__savedMessages.pop();
+    expect(saved).toEqual({ address: addr, messageId: 888, chatId: 1 });
+    expect((database as any).__clearedMessages).toContain(addr);
   });
 });

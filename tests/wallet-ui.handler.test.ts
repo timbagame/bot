@@ -26,6 +26,7 @@ function makeCtx(options: MakeCtxOptions = {}) {
     from: { id: 1 },
     message: { message_id: 7 },
     me: { id: 42 },
+    chat: { id: 1, type: "private" },
     editMessageMedia: async (...args: any[]) => {
       calls.push(["edit", ...args]);
       if (editError) {
@@ -41,6 +42,12 @@ function makeCtx(options: MakeCtxOptions = {}) {
     },
     replyWithVideo: async (...args: any[]) => { calls.push(["video", ...args]); return { ok: true }; },
     reply: async (...args: any[]) => { calls.push(["reply", ...args]); return { ok: true }; },
+    api: {
+      sendMessage: async (...args: any[]) => {
+        calls.push(["send", ...args]);
+        return { message_id: 200, chat: { id: args[0] } };
+      },
+    },
     __calls: calls,
   };
   return ctx;
@@ -190,6 +197,37 @@ describe("wallet handler showWalletUI", () => {
     expect(calls[0][0]).toBe("edit");
     expect(calls[1][0]).toBe("reply");
     expect(calls.some((call: any[]) => call[0] === "video")).toBe(false);
+  });
+
+  test("notifies origin chat when bot cannot initiate DM", async () => {
+    const ctx: any = makeCtx();
+    ctx.chat = { id: 123, type: "private" };
+    ctx.__originChatId = -100;
+    ctx.reply = async (...args: any[]) => {
+      ctx.__calls.push(["reply", ...args]);
+      const err: any = new Error("forbidden");
+      err.error_code = 403;
+      err.description = "Forbidden: bot can't initiate conversation with a user";
+      throw err;
+    };
+    const deps: any = {
+      wallet: {
+        getKeyPair: () => ({ publicKey: { toBase58: () => "WALLETADDR11111111111111111111111111111111" } }),
+        formatSolBalance: (_: number) => "0.000000",
+      },
+      getCachedWalletData: async () => ({ solBalance: 0, tokenBalances: [] }),
+      buildWalletCaption: () => "CAPTION",
+      createWalletKeyboard: () => new InlineKeyboard().text("Refresh", "refresh"),
+      WINNER_VIDEO_ID: null,
+    };
+
+    await showWalletUI(ctx, deps);
+
+    expect((ctx as any).__walletDmForbidden).toBe(true);
+    const sendCall = ctx.__calls.find((call: any[]) => call[0] === "send");
+    expect(sendCall).toBeDefined();
+    expect(sendCall?.[1]).toBe(-100);
+    expect(String(sendCall?.[2])).toMatch(/Start/);
   });
 });
 
