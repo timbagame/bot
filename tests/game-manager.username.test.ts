@@ -235,6 +235,35 @@ describe("GameManager Username Resolution", () => {
       expect(calls).toBe(1);
     });
 
+    test("caches PARTICIPANT_ID_INVALID failures to throttle lookups", async () => {
+      resetGM();
+      let calls = 0;
+      const ctx = {
+        chat: { id: -100, type: "supergroup" },
+        api: {
+          getChatMember: async () => {
+            calls += 1;
+            const err: any = new Error("Bad Request: PARTICIPANT_ID_INVALID");
+            err.error_code = 400;
+            err.description = "Bad Request: PARTICIPANT_ID_INVALID";
+            throw err;
+          },
+        },
+      } as any;
+      const gm = GameManager.getInstance(
+        makeProgramStub(),
+        makeWalletStub(),
+        makeDbStub()
+      );
+
+      const first = await gm.getUsernameFromTelegramId(ctx, "555");
+      const second = await gm.getUsernameFromTelegramId(ctx, "555");
+
+      expect(first).toBeNull();
+      expect(second).toBeNull();
+      expect(calls).toBe(1);
+    });
+
     test("uses string identifiers when Telegram ID exceeds safe integer range", async () => {
       resetGM();
       const gm = GameManager.getInstance(

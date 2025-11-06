@@ -229,6 +229,57 @@ describe("wallet handler showWalletUI", () => {
     expect(sendCall?.[1]).toBe(-100);
     expect(String(sendCall?.[2])).toMatch(/Start/);
   });
+
+  test("flags DM forbidden when video and text paths both fail in private chat", async () => {
+    const ctx: any = makeCtx();
+    ctx.chat = { id: 321, type: "private" };
+    ctx.__originChatId = -100;
+    ctx.me = { id: 42, username: "playtimbabot" };
+
+    const recoverableVideoError: any = new Error(
+      "Bad Request: wrong file identifier specified"
+    );
+    recoverableVideoError.description = "Bad Request: wrong file identifier specified";
+
+    const forbiddenDmError: any = new Error(
+      "Forbidden: bot can't initiate conversation with a user"
+    );
+    forbiddenDmError.error_code = 403;
+    forbiddenDmError.description = "Forbidden: bot can't initiate conversation with a user";
+
+    ctx.replyWithVideo = async (...args: any[]) => {
+      ctx.__calls.push(["video", ...args]);
+      throw recoverableVideoError;
+    };
+    ctx.reply = async (...args: any[]) => {
+      ctx.__calls.push(["reply", ...args]);
+      throw forbiddenDmError;
+    };
+
+    const deps: any = {
+      wallet: {
+        getKeyPair: () => ({
+          publicKey: { toBase58: () => "WALLETADDR1111111111111111111111111111111" },
+        }),
+        formatSolBalance: (_: number | bigint) => "0.000000",
+      },
+      getCachedWalletData: async () => ({ solBalance: 0n, tokenBalances: [] }),
+      fetchPricesUSD: async () => ({}),
+      buildWalletCaption: () => "CAPTION",
+      createWalletKeyboard: () => ({ rows: [] } as any),
+      WINNER_VIDEO_ID: "VID",
+    };
+
+    await showWalletUI(ctx, deps);
+
+    expect((ctx as any).__walletDmForbidden).toBe(true);
+    const replyAttempts = ctx.__calls.filter((call: any[]) => call[0] === "reply");
+    expect(replyAttempts).toHaveLength(1);
+    const notifyCall = ctx.__calls.find((call: any[]) => call[0] === "send");
+    expect(notifyCall).toBeDefined();
+    expect(notifyCall?.[1]).toBe(-100);
+    expect(String(notifyCall?.[2])).toContain("Start");
+  });
 });
 
 test("buildWalletTokenLines formats balances and skips empty tokens", async () => {

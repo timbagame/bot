@@ -282,4 +282,65 @@ describe("GameManager.updateGameMessage routing", () => {
     expect(saved).toEqual({ address: addr, messageId: 888, chatId: 1 });
     expect((database as any).__clearedMessages).toContain(addr);
   });
+
+  test("deduplicates concurrent recreation attempts per game address", async () => {
+    resetGM();
+    const gameAcc = {
+      ticketsCount: 1,
+      maxTickets: 2,
+      minTickets: 1,
+      totalAmount: 0,
+      createdAt: 1_000_000,
+      timeout: 60,
+      gameType: { coinflip: {} },
+    };
+    const database = makeDbStub();
+    const gm = GameManager.getInstance(
+      makeProgramStub(gameAcc),
+      makeWalletStub({
+        tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
+      }),
+      database
+    );
+    const missingError = {
+      description: "Bad Request: message to edit not found",
+    };
+    const ctx = ctxStub({
+      failText: missingError,
+      sendMessageResult: { message_id: 555, chat: { id: 1 } },
+    });
+    ctx.chat = { id: 1, type: "supergroup" };
+    const originalSend = ctx.api.sendMessage;
+    ctx.api.sendMessage = async (...args: any[]) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return originalSend(...args);
+    };
+    const addr = new PublicKey("11111111111111111111111111111117").toBase58();
+    (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 45, usesVideo: false });
+
+    await Promise.all([
+      gm.updateGameMessage(
+        ctx as any,
+        addr,
+        "coinflip",
+        1_000_000_000,
+        "@creator",
+        "Active",
+        "TOK"
+      ),
+      gm.updateGameMessage(
+        ctx as any,
+        addr,
+        "coinflip",
+        1_000_000_000,
+        "@creator",
+        "Active",
+        "TOK"
+      ),
+    ]);
+
+    expect((database as any).__savedMessages).toHaveLength(1);
+    const sendCalls = ctx.__calls.filter((call: any[]) => call[0] === "send");
+    expect(sendCalls).toHaveLength(1);
+  });
 });

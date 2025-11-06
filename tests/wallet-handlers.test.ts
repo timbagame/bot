@@ -88,6 +88,24 @@ describe("wallet handlers", () => {
     expect(String(answer[1])).toContain("Error refreshing wallet");
   });
 
+  test("onWalletRefresh still replies when cache clearing fails", async () => {
+    const ctx: any = makeCtx();
+    let shown = 0;
+    const deps = {
+      showWalletUI: async () => {
+        shown += 1;
+      },
+      clearWalletCache: (_: any) => {
+        throw new Error("cache-fail");
+      },
+      createSettingsKeyboard: () => createWalletSettingsKeyboard(),
+    };
+    await onWalletRefresh(ctx, deps);
+    expect(shown).toBe(0);
+    const answer = ctx.__calls.find((c: any[]) => c[0] === "answer");
+    expect(String(answer[1])).toContain("Error refreshing wallet");
+  });
+
   test("onWalletSettings surfaces keyboard creation errors", async () => {
     const ctx: any = makeCtx();
     const deps = {

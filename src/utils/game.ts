@@ -306,6 +306,7 @@ export class GameManager {
   );
   private readonly usernameCacheKeys: string[] = [];
   private readonly usernameHints = new Map<string, string>();
+  private readonly messageRecreationLocks = new Set<string>();
   private usernameLookupPromises = new Map<string, Promise<string | null>>();
   private gameMessageReadyListener?: (gameAddress: string) => void;
 
@@ -2449,11 +2450,20 @@ export class GameManager {
       }
     } catch (error) {
       if (messageTextValue && isMessageMissing(error)) {
-        await this.recreateMissingGameMessage(ctx, gameAddress, {
-          chatId: gameMessage.chatId,
-          messageText: messageTextValue,
-          inlineKeyboard: inlineKeyboardValue,
-        });
+        if (this.messageRecreationLocks.has(gameAddress)) {
+          return;
+        }
+
+        this.messageRecreationLocks.add(gameAddress);
+        try {
+          await this.recreateMissingGameMessage(ctx, gameAddress, {
+            chatId: gameMessage.chatId,
+            messageText: messageTextValue,
+            inlineKeyboard: inlineKeyboardValue,
+          });
+        } finally {
+          this.messageRecreationLocks.delete(gameAddress);
+        }
         return;
       }
       console.error("Error in updateGameMessage:", error);
