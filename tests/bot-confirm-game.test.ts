@@ -227,3 +227,80 @@ test(
   },
   15000
 );
+
+test(
+  "confirm_game clears pending state and surfaces limit errors",
+  async () => {
+    const userId = 7300;
+    const chatId = 8400;
+    const messageId = 93;
+
+    upsertGameSetupSession(`${chatId}_${messageId}`, {
+      waitingFor: "setup",
+      gameType: "coinflip",
+      userBalance: 20,
+      messageId,
+      chatId,
+      amount: "3",
+      creatorId: String(userId),
+      tokenMint: "Mint111111111111111111111111111111111111111",
+      tokenTicker: "SOL",
+      tokenDecimals: 9,
+    });
+
+    const replyMarkupCalls: any[] = [];
+    const editCalls: any[] = [];
+    const sendCalls: any[] = [];
+
+    apiHandlers["editMessageReplyMarkup"] = async (payload: any) => {
+      replyMarkupCalls.push(payload);
+      return { ok: true, result: true };
+    };
+
+    apiHandlers["editMessageText"] = async (payload: any) => {
+      editCalls.push(payload);
+      return { ok: true, result: true };
+    };
+
+    apiHandlers["sendMessage"] = async (payload: any) => {
+      sendCalls.push(payload);
+      return { ok: true, result: { message_id: 2000, ...payload } };
+    };
+
+    const limitMessage =
+      "Game creation rate limit reached. You have created 3 games in the last 60 seconds (maximum 3). Please wait before creating a new game.";
+
+    botModule.__test_setGameManager({
+      createGame: async () => ({ success: false, error: limitMessage }),
+      createGameMessage: async () => {
+        throw new Error("should not send game message when creation fails");
+      },
+      updateGameMessageFromData: async () => {},
+    } as any);
+
+    expect(botModule.__test_getPendingGameCreations().size).toBe(0);
+
+    await bot.handleUpdate({
+      update_id: 3,
+      callback_query: {
+        id: "cb-3",
+        from: { id: userId } as any,
+        message: {
+          message_id: messageId,
+          date: Math.floor(Date.now() / 1000),
+          chat: { id: chatId, type: "private" },
+        } as any,
+        data: `confirm_game_coinflip_3_2_${userId}`,
+      },
+    } as any);
+
+    expect(replyMarkupCalls.length).toBe(1);
+    expect(editCalls.length).toBeGreaterThanOrEqual(2);
+    expect(sendCalls.length).toBe(0);
+
+    const errorEdit = editCalls[editCalls.length - 1];
+    expect(errorEdit[2] || errorEdit.text || "").toContain("limit");
+    expect(botModule.__test_getPendingGameCreations().size).toBe(0);
+  },
+  15000
+);

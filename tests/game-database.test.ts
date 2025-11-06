@@ -1,5 +1,6 @@
 import { expect, test, beforeEach } from "bun:test";
 import { GameDatabase } from "../src/utils/game-database";
+import { GAME_CREATION_RATE_LIMIT_WINDOW_MS } from "../src/utils/constants";
 import { resetTestDatabase } from "./helpers/database";
 
 beforeEach(() => {
@@ -97,4 +98,36 @@ test("GameDatabase read helpers return safe defaults on errors", () => {
   expect(db.getPlayer("789")).toBeNull();
 
   sqlite.prepare = originalPrepare;
+});
+
+test("countRecentGamesByCreator respects rate-limit window boundaries", () => {
+  const db = GameDatabase.getInstance();
+  const sqlite: any = (db as any).db;
+
+  const creator = "creator_123";
+  db.saveGame("game_old", creator, 100, "coinflip");
+  db.saveGame("game_window_edge", creator, 150, "coinflip");
+  db.saveGame("game_recent", creator, 200, "coinflip");
+
+  const now = Date.now();
+  const windowStart = now - GAME_CREATION_RATE_LIMIT_WINDOW_MS;
+
+  sqlite
+    .prepare("UPDATE games SET created_at = ? WHERE game_address = ?")
+    .run(windowStart - 1, "game_old");
+  sqlite
+    .prepare("UPDATE games SET created_at = ? WHERE game_address = ?")
+    .run(windowStart, "game_window_edge");
+  sqlite
+    .prepare("UPDATE games SET created_at = ? WHERE game_address = ?")
+    .run(windowStart + 1, "game_recent");
+
+  const inclusiveCount = db.countRecentGamesByCreator(creator, windowStart);
+  expect(inclusiveCount).toBe(2);
+
+  const afterWindowCount = db.countRecentGamesByCreator(
+    creator,
+    windowStart + 1
+  );
+  expect(afterWindowCount).toBe(1);
 });

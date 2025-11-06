@@ -294,6 +294,7 @@ export class GameManager {
   private cachedConnection?: Connection;
   private tokenProgramCache = new Map<string, PublicKey>();
   private gameRentLamports: number | null = null;
+  private inFlightGameCreations = new Map<string, number>();
   private readonly completedGameErrorMessage =
     "This game has already completed. Refresh to see the result.";
   private readonly usernameCacheTtlMs = TELEGRAM_USERNAME_CACHE_TTL_MS;
@@ -313,6 +314,25 @@ export class GameManager {
     private swapManager: SwapManager,
     private feeBudget: FeeBudgetProvider
   ) {}
+
+  private getInFlightCreations(telegramId: string): number {
+    return this.inFlightGameCreations.get(telegramId) ?? 0;
+  }
+
+  private incrementInFlightCreations(telegramId: string): void {
+    const current = this.getInFlightCreations(telegramId);
+    this.inFlightGameCreations.set(telegramId, current + 1);
+  }
+
+  private decrementInFlightCreations(telegramId: string): void {
+    const current = this.getInFlightCreations(telegramId);
+    if (current <= 1) {
+      this.inFlightGameCreations.delete(telegramId);
+      return;
+    }
+
+    this.inFlightGameCreations.set(telegramId, current - 1);
+  }
 
   public static getInstance(
     program: anchor.Program<Timba>,
@@ -1124,19 +1144,24 @@ export class GameManager {
   }): string {
     const { currentLamports, requiredLamports, reason, nextSteps } = options;
     const missingLamports = Math.max(requiredLamports - currentLamports, 0);
-    const current = this.formatLamportsForDisplay(Math.max(currentLamports, 0));
-    const required = this.formatLamportsForDisplay(Math.max(requiredLamports, 0));
-    const missing = this.formatLamportsForDisplay(missingLamports);
+    const currentRaw = this.formatLamportsForDisplay(Math.max(currentLamports, 0));
+    const requiredRaw = this.formatLamportsForDisplay(Math.max(requiredLamports, 0));
+    const missingRaw = this.formatLamportsForDisplay(missingLamports);
 
-    const steps = nextSteps ?? "Top up the shortfall and try again.";
+    const stepsRaw = nextSteps ?? "Top up the shortfall and try again.";
+    const current = escapeHtml(currentRaw);
+    const required = escapeHtml(requiredRaw);
+    const missing = escapeHtml(missingRaw);
+    const safeReason = escapeHtml(reason);
+    const safeSteps = escapeHtml(stepsRaw);
 
     return (
       `💰 Insufficient SOL!\n\n` +
       `Current balance: ${current}\n` +
       `Required reserve: ${required}\n` +
       `Shortfall: ${missing}\n\n` +
-      `Why: ${reason}.\n` +
-      steps
+      `Why: ${safeReason}.\n` +
+      safeSteps
     );
   }
 
@@ -2770,14 +2795,19 @@ export class GameManager {
     }
 
     const telegramIdStr = telegramId.toString();
+    const inFlightCount = this.getInFlightCreations(telegramIdStr);
     const activeGameCount = this.gameDb.countActiveGamesByCreator(
       telegramIdStr
     );
 
-    if (activeGameCount >= MAX_ACTIVE_GAMES_PER_CREATOR) {
+    if (
+      activeGameCount + inFlightCount >= MAX_ACTIVE_GAMES_PER_CREATOR
+    ) {
       return {
         success: false,
-        error: `Active game limit reached. You currently have ${activeGameCount} active games (maximum ${MAX_ACTIVE_GAMES_PER_CREATOR}). Finish or cancel an existing game before creating a new one.`,
+        error: `Active game limit reached. You currently have ${
+          activeGameCount + inFlightCount
+        } active games (maximum ${MAX_ACTIVE_GAMES_PER_CREATOR}). Finish or cancel an existing game before creating a new one.`,
       };
     }
 
@@ -2797,11 +2827,13 @@ export class GameManager {
       };
     }
 
-    const { tokenMint, tokenTicker, amount } = parsedAmount;
-    const requestedSol =
-      parsedAmount.requestedNativeSol === true || tokenMint === WSOL_MINT;
+    this.incrementInFlightCreations(telegramIdStr);
 
     try {
+      const { tokenMint, tokenTicker, amount } = parsedAmount;
+      const requestedSol =
+        parsedAmount.requestedNativeSol === true || tokenMint === WSOL_MINT;
+
       const metadata = await this.wallet.getTokenMetadata(tokenMint);
       const playerKp = this.wallet.getKeyPair(telegramId);
       const [minSolBuffer, gameRentLamports] = await Promise.all([
@@ -2844,18 +2876,21 @@ export class GameManager {
         );
         const friendlySolBalance = this.wallet.formatSolBalance(solBalance);
         console.warn(
-          `⚠️ Token balance check failed (${tokenTicker}). have=${friendlyTokenBalance} ${tokenTicker}, need=${friendlyRequired} ${tokenTicker}, detected SOL=${friendlySolBalance}`
+          `⚠️ Token balance check failed (${tokenTicker}). have=${friendlyTokenBalance} ${tokenTicker}, need=${friendlyRequired}${tokenTicker}, detected SOL=${friendlySolBalance}`
         );
-        let errorMessage = `Insufficient balance. You have ${friendlyTokenBalance} ${tokenTicker} but need ${friendlyRequired} ${tokenTicker}`;
+        const safeTokenBalance = escapeHtml(friendlyTokenBalance);
+        const safeRequired = escapeHtml(friendlyRequired);
+        const safeTicker = escapeHtml(tokenTicker);
+        const safeSolBalance = escapeHtml(friendlySolBalance);
+        let errorMessage = `Insufficient balance. You have ${safeTokenBalance} ${safeTicker} but need ${safeRequired} ${safeTicker}`;
         if (requestedSol) {
-          errorMessage += `.\nDetected native SOL balance: ${friendlySolBalance} SOL. If SOL was recently deposited, wait for confirmation and try again.`;
+          errorMessage += `.\nDetected native SOL balance: ${safeSolBalance} SOL. If SOL was recently deposited, wait for confirmation and try again.`;
         }
         return {
           success: false,
           error: errorMessage,
         };
       }
-
       const reservedTicketAmount = amount;
       const swapAllowanceRaw = Math.max(tokenBalance - reservedTicketAmount, 0);
 
@@ -2876,11 +2911,13 @@ export class GameManager {
             )} or deposit additional ${tokenTicker} to swap for fees before trying again.`,
           });
 
+          const safeStake = escapeHtml(formattedStake);
+          const safeTicker = escapeHtml(tokenTicker);
           return {
             success: false,
             error: `${shortfallMessage}
 
-You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and no spare tokens to convert into SOL fees.`,
+You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spare tokens to convert into SOL fees.`,
           };
         }
 
@@ -2910,14 +2947,22 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
         tokenBalance = await this.wallet.getTokenBalance(telegramId, tokenMint);
 
         if (tokenBalance < amount) {
+          const remainingBalance = this.wallet.formatTokenBalance(
+            tokenBalance,
+            metadata.decimals
+          );
+          const requiredBalance = this.wallet.formatTokenBalance(
+            amount,
+            metadata.decimals
+          );
           return {
             success: false,
-            error: `Swap completed but only ${this.wallet.formatTokenBalance(
-              tokenBalance,
-              metadata.decimals
-            )} ${tokenTicker} remain, which is below the required ${this.wallet.formatTokenBalance(
-              amount,
-              metadata.decimals
+            error: `Swap completed but only ${escapeHtml(
+              remainingBalance
+            )} ${escapeHtml(
+              tokenTicker
+            )} remain, which is below the required ${escapeHtml(
+              requiredBalance
             )}. Please top up your tokens and try again.`,
           };
         }
@@ -3090,6 +3135,8 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
         success: false,
         error: userFriendlyError,
       };
+    } finally {
+      this.decrementInFlightCreations(telegramIdStr);
     }
   }
 
