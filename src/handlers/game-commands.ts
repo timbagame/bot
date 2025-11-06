@@ -238,6 +238,9 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
           ? "WSOL"
           : parsedAmount.tokenTicker;
 
+      const messageTimestampMs =
+        ctx.message?.date != null ? ctx.message.date * 1_000 : undefined;
+
       const gameResult = await createDeps.gameManager.createGame(
         options.gameType,
         {
@@ -251,7 +254,8 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         options.minPlayers,
         options.timeoutSeconds,
         telegramId,
-        ctx.chat?.id || 0
+        ctx.chat?.id || 0,
+        messageTimestampMs
       );
 
       if (!gameResult.success) {

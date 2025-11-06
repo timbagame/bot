@@ -883,7 +883,10 @@ export const createGameCallbacksModule = (
                 gameType === "coinflip" ? 2 : 1,
                 GAME_TIMEOUT,
                 getTelegramId(ctx),
-                ctx.chat?.id
+                ctx.chat?.id,
+                ctx.callbackQuery?.message?.date != null
+                  ? ctx.callbackQuery.message.date * 1_000
+                  : undefined
               );
 
               if (!result.success) {

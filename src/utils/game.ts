@@ -295,6 +295,7 @@ export class GameManager {
   private tokenProgramCache = new Map<string, PublicKey>();
   private gameRentLamports: number | null = null;
   private inFlightGameCreations = new Map<string, number>();
+  private pendingCreationRequests = new Map<string, number[]>();
   private readonly completedGameErrorMessage =
     "This game has already completed. Refresh to see the result.";
   private readonly usernameCacheTtlMs = TELEGRAM_USERNAME_CACHE_TTL_MS;
@@ -332,6 +333,61 @@ export class GameManager {
     }
 
     this.inFlightGameCreations.set(telegramId, current - 1);
+  }
+
+  private prunePendingCreationRequests(
+    telegramId: string,
+    windowStartMs: number
+  ): number {
+    const existing = this.pendingCreationRequests.get(telegramId);
+    if (!existing || existing.length === 0) {
+      return 0;
+    }
+
+    const filtered = existing.filter((ts) => ts >= windowStartMs);
+
+    if (filtered.length === 0) {
+      this.pendingCreationRequests.delete(telegramId);
+      return 0;
+    }
+
+    if (filtered.length !== existing.length) {
+      this.pendingCreationRequests.set(telegramId, filtered);
+    }
+
+    return filtered.length;
+  }
+
+  private trackPendingCreationRequest(
+    telegramId: string,
+    timestampMs: number
+  ): void {
+    const existing = this.pendingCreationRequests.get(telegramId);
+    if (existing) {
+      existing.push(timestampMs);
+      return;
+    }
+
+    this.pendingCreationRequests.set(telegramId, [timestampMs]);
+  }
+
+  private clearPendingCreationRequest(
+    telegramId: string,
+    timestampMs: number
+  ): void {
+    const existing = this.pendingCreationRequests.get(telegramId);
+    if (!existing || existing.length === 0) {
+      return;
+    }
+
+    const index = existing.findIndex((ts) => ts === timestampMs);
+    if (index !== -1) {
+      existing.splice(index, 1);
+    }
+
+    if (existing.length === 0) {
+      this.pendingCreationRequests.delete(telegramId);
+    }
   }
 
   public static getInstance(
@@ -2778,7 +2834,8 @@ export class GameManager {
     minTickets: number,
     timeout: number,
     telegramId: bigint,
-    chatId?: number
+    chatId?: number,
+    requestTimestampMs: number = Date.now()
   ): Promise<{
     success: boolean;
     error?: string;
@@ -2811,22 +2868,48 @@ export class GameManager {
       };
     }
 
-    const windowStart = Date.now() - GAME_CREATION_RATE_LIMIT_WINDOW_MS;
+    const nowMs = Date.now();
+    const safeRequestTimestamp = Number.isFinite(requestTimestampMs)
+      ? Math.min(nowMs, Math.max(0, Math.trunc(requestTimestampMs)))
+      : nowMs;
+
+    const windowStart = Math.max(
+      nowMs - GAME_CREATION_RATE_LIMIT_WINDOW_MS,
+      safeRequestTimestamp - GAME_CREATION_RATE_LIMIT_WINDOW_MS
+    );
+    const pendingRequestTimestamp = Math.max(safeRequestTimestamp, nowMs);
+
+    const pendingCount = this.prunePendingCreationRequests(
+      telegramIdStr,
+      windowStart
+    );
     const recentCreationCount = this.gameDb.countRecentGamesByCreator(
       telegramIdStr,
       windowStart
     );
 
-    if (recentCreationCount >= MAX_GAMES_PER_CREATOR_WINDOW) {
+    const totalWindowCreations = pendingCount + recentCreationCount;
+
+    if (totalWindowCreations >= MAX_GAMES_PER_CREATOR_WINDOW) {
       const windowLabel = formatRateLimitWindow(
         GAME_CREATION_RATE_LIMIT_WINDOW_MS
       );
       return {
         success: false,
-        error: `Game creation rate limit reached. You have created ${recentCreationCount} games in the last ${windowLabel} (maximum ${MAX_GAMES_PER_CREATOR_WINDOW}). Please wait before creating a new game.`,
+        error: `Game creation rate limit reached. You have ${totalWindowCreations} game creation${
+          totalWindowCreations === 1 ? "" : "s"
+        } in the last ${windowLabel} (maximum ${MAX_GAMES_PER_CREATOR_WINDOW}). Please wait before creating a new game.${
+          pendingCount > 0
+            ? " Some requests are still processing."
+            : ""
+        }`,
       };
     }
 
+    this.trackPendingCreationRequest(
+      telegramIdStr,
+      pendingRequestTimestamp
+    );
     this.incrementInFlightCreations(telegramIdStr);
 
     try {
@@ -3137,6 +3220,10 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
       };
     } finally {
       this.decrementInFlightCreations(telegramIdStr);
+      this.clearPendingCreationRequest(
+        telegramIdStr,
+        pendingRequestTimestamp
+      );
     }
   }
 
