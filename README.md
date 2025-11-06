@@ -139,12 +139,6 @@ To inspect coverage:
 bun test --coverage
 ```
 
-## ⏱️ Rate Limits
-
-- Creators can only start a limited number of games per sliding window (`MAX_GAMES_PER_CREATOR_WINDOW`).
-- Overlapping requests are tracked using the original Telegram message timestamp, so rapid-fire button presses count toward the limit until they finish.
-- Pending creations are automatically released when the request completes, ensuring the limit reflects both completed and in-progress games.
-
 ## 📊 Monitoring
 
 The bot includes comprehensive logging and monitoring:
