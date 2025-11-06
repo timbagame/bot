@@ -145,6 +145,11 @@ const walletRpcLimiter = new SlidingWindowRateLimiter(
 );
 const feeBudget = FeeBudgetManager.getInstance(wallet.getConnection());
 let SOL_FEE_BUFFER_LAMPORTS = feeBudget.getCachedSingleTransactionLamports();
+export const __test_getSolFeeBufferLamports = (): number =>
+  SOL_FEE_BUFFER_LAMPORTS;
+export const __test_setSolFeeBufferLamports = (value: number): void => {
+  SOL_FEE_BUFFER_LAMPORTS = value;
+};
 
 void (async () => {
   try {

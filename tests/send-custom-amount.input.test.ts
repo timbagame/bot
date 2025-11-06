@@ -1,15 +1,18 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import {
   __test_handleCustomAmountInput,
   __test_getUserState,
   __test_clearUserState,
   __test_setWalletCache,
+  __test_getSolFeeBufferLamports,
+  __test_setSolFeeBufferLamports,
   wallet,
 } from "../src/bot";
 import {
   __test_listInputSessions,
   __test_clearUserState as __test_clearRawState,
 } from "../src/utils/user-state";
+import type { ApprovedTokenBalance } from "../src/utils/wallet";
 
 type MockCtxOptions = {
   editError?: Error;
@@ -35,6 +38,46 @@ const baseWalletCache = {
 };
 
 const userKey = String(TELEGRAM_NUMERIC_ID);
+
+let originalFeeBuffer = 0;
+let originalGetBalance: typeof wallet.getBalance;
+let originalGetAllApprovedTokenBalances: typeof wallet.getAllApprovedTokenBalances;
+
+beforeAll(() => {
+  originalFeeBuffer = __test_getSolFeeBufferLamports();
+  originalGetBalance = wallet.getBalance.bind(wallet);
+  originalGetAllApprovedTokenBalances = wallet.getAllApprovedTokenBalances.bind(wallet);
+
+  wallet.getBalance = async (telegramId: bigint, options?: any) => {
+    if (telegramId === TELEGRAM_ID) {
+      return baseWalletCache.solBalance;
+    }
+    return originalGetBalance(telegramId, options);
+  };
+
+  wallet.getAllApprovedTokenBalances = async (
+    telegramId: bigint,
+    approvedTokens: Parameters<typeof originalGetAllApprovedTokenBalances>[1],
+    options?: Parameters<typeof originalGetAllApprovedTokenBalances>[2]
+  ): Promise<ApprovedTokenBalance[]> => {
+    if (telegramId === TELEGRAM_ID) {
+      return baseWalletCache.tokenBalances.map((token): ApprovedTokenBalance => {
+        const lamports =
+          typeof token.rawBalance === "string"
+            ? BigInt(token.rawBalance)
+            : 0n;
+        return {
+          ...token,
+          lamports,
+          formattedBalance: token.balance.toString(),
+          decimalBalance: token.balance,
+          truncated: (token as Partial<ApprovedTokenBalance>).truncated ?? false,
+        };
+      });
+    }
+    return originalGetAllApprovedTokenBalances(telegramId, approvedTokens, options);
+  };
+});
 
 const clearInputSessions = () => {
   for (const [key] of __test_listInputSessions()) {
@@ -77,11 +120,18 @@ const createMockCtx = (options: MockCtxOptions = {}) => {
 };
 
 beforeEach(() => {
+  __test_setSolFeeBufferLamports(0);
   __test_clearUserState(userKey);
   __test_setWalletCache(TELEGRAM_ID, {
     ...baseWalletCache,
   });
   clearInputSessions();
+});
+
+afterAll(() => {
+  __test_setSolFeeBufferLamports(originalFeeBuffer);
+  wallet.getBalance = originalGetBalance;
+  wallet.getAllApprovedTokenBalances = originalGetAllApprovedTokenBalances;
 });
 
 describe("handleCustomAmountInput", () => {
@@ -94,6 +144,7 @@ describe("handleCustomAmountInput", () => {
       chatId: DEFAULT_CHAT_ID,
     };
 
+    __test_setSolFeeBufferLamports(0);
     await __test_handleCustomAmountInput(ctx, userState, "0.0001");
 
     const edits = ctx.__calls.filter((call: any) => call.type === "edit");
@@ -128,6 +179,7 @@ describe("handleCustomAmountInput", () => {
       chatId: DEFAULT_CHAT_ID,
     };
 
+    __test_setSolFeeBufferLamports(0);
     await __test_handleCustomAmountInput(ctx, userState, "0.0002");
 
     const edits = ctx.__calls.filter((call: any) => call.type === "edit");
@@ -156,6 +208,7 @@ describe("handleCustomAmountInput", () => {
       chatId: DEFAULT_CHAT_ID,
     };
 
+    __test_setSolFeeBufferLamports(0);
     await __test_handleCustomAmountInput(ctx, userState, "0.0003");
 
     const edits = ctx.__calls.filter((call: any) => call.type === "edit");
