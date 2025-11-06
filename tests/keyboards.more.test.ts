@@ -3,6 +3,7 @@ import {
   createMainMenuKeyboard,
   createWalletKeyboard,
   createWalletSettingsKeyboard,
+  createBackToSettingsKeyboard,
   createConfirmWrapKeyboard,
   createConfirmUnwrapKeyboard,
   createTradeConfirmKeyboard,
@@ -84,6 +85,15 @@ describe("keyboards: main and wallet", () => {
     expect(texts).toContain("🔐 Private Key");
     expect(texts).toContain("← Back to Wallet");
   });
+});
+
+test("back to settings keyboard returns wallet_settings callback", () => {
+  const kb = createBackToSettingsKeyboard();
+  const callbacks = extractCallbacks(kb);
+  const texts = extractTexts(kb);
+
+  expect(callbacks).toContain("wallet_settings");
+  expect(texts).toContain("← Back to Settings");
 });
 
 describe("keyboards: misc menus", () => {

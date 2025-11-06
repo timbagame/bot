@@ -342,7 +342,7 @@ describe("buildWalletActionMenu", () => {
         insufficientLabel: "❌ Insufficient SOL balance",
         minimumLamports: 10_000,
       },
-      backButton: { label: "← Back to Wallet", callback: "main_wallet" },
+      backButton: { label: "← Back to Settings", callback: "wallet_settings" },
     };
 
     const withBalance = buildWalletActionMenu({
@@ -361,7 +361,7 @@ describe("buildWalletActionMenu", () => {
         { text: "MAX", callback_data: "wrap_amount_MAX" },
       ],
       [{ text: "✏️ Custom Amount", callback_data: "wrap_custom" }],
-      [{ text: "← Back to Wallet", callback_data: "main_wallet" }],
+      [{ text: "← Back to Settings", callback_data: "wallet_settings" }],
     ]);
 
     const insufficient = buildWalletActionMenu({
@@ -372,7 +372,7 @@ describe("buildWalletActionMenu", () => {
 
     expect(insufficient.keyboard.inline_keyboard).toEqual([
       [{ text: "❌ Insufficient SOL balance", callback_data: "noop" }],
-      [{ text: "← Back to Wallet", callback_data: "main_wallet" }],
+      [{ text: "← Back to Settings", callback_data: "wallet_settings" }],
     ]);
   });
 });

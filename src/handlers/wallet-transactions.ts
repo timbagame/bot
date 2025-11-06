@@ -643,21 +643,22 @@ export const createWalletTransactionsModule = (
           quickActions: {
             type: "wrap",
             callbackPrefix: "wrap_amount_",
-            amounts: [
-              { label: "25%", value: "25%" },
-              { label: "50%", value: "50%" },
-              { label: "75%", value: "75%" },
-              { label: "MAX", value: "MAX" },
-            ],
-            customAction: { label: "✏️ Custom Amount", callback: "wrap_custom" },
-            insufficientLabel: "❌ Insufficient SOL balance",
-            minimumLamports: 10_000,
-          },
-          getBalances: async (telegramId) => {
-            const [solBalance, wsolBalance] = await Promise.all([
-              wallet.getBalance(telegramId),
-              wallet.getTokenBalance(telegramId, WSOL_MINT),
-            ]);
+        amounts: [
+          { label: "25%", value: "25%" },
+          { label: "50%", value: "50%" },
+          { label: "75%", value: "75%" },
+          { label: "MAX", value: "MAX" },
+        ],
+        customAction: { label: "✏️ Custom Amount", callback: "wrap_custom" },
+        insufficientLabel: "❌ Insufficient SOL balance",
+        minimumLamports: 10_000,
+      },
+      backButton: { label: "← Back to Settings", callback: "wallet_settings" },
+      getBalances: async (telegramId) => {
+        const [solBalance, wsolBalance] = await Promise.all([
+          wallet.getBalance(telegramId),
+          wallet.getTokenBalance(telegramId, WSOL_MINT),
+        ]);
 
             return {
               solBalance,

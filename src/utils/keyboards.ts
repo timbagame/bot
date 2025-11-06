@@ -34,6 +34,10 @@ export const createBackToWalletKeyboard = (): InlineKeyboard => {
   return appendBackToWalletButton(new InlineKeyboard());
 };
 
+export const createBackToSettingsKeyboard = (): InlineKeyboard => {
+  return new InlineKeyboard().text("← Back to Settings", "wallet_settings").row();
+};
+
 export const createCancelKeyboard = (
   callback: string,
   label = "❌ Cancel"

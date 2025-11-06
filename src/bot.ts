@@ -54,6 +54,7 @@ import {
 // import { createDmMessageAdapter } from "./utils/ctx-adapter";
 import {
   createBackToWalletKeyboard,
+  createBackToSettingsKeyboard,
   createCancelKeyboard,
   createTradeConfirmKeyboard,
   createAmountSelectionKeyboard,
@@ -3055,7 +3056,7 @@ bot.callbackQuery(
 
       await respondWithMenu(ctx, {
         text: response.join("\n"),
-        keyboard: createBackToWalletKeyboard(),
+        keyboard: createBackToSettingsKeyboard(),
       });
       await safeAnswerCallbackQuery(ctx, "🔐 Private key shown");
     },
