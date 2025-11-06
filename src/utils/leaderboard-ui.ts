@@ -21,10 +21,9 @@ const MEDALS = ["🥇", "🥈", "🥉"] as const;
 
 export const buildEmptyLeaderboardMessage = (): string =>
   [
-    "⚔️ <b>Hall of Legends</b> ⚔️",
-    "No statistics available for this group yet.",
-    "Play some coinflips to appear on the leaderboard!",
-    "🎮 <i>Be the first to claim your throne!</i>",
+    "🏆 <b>Leaderboard</b>",
+    "Top players in this group",
+    "No statistics available yet - play a coinflip to appear here.",
   ].join("\n\n");
 
 export const buildLeaderboardMessage = ({ chatTitle, players }: BuildLeaderboardMessageArgs): string => {

@@ -18,10 +18,11 @@ type LeaderboardPlayerSeed = {
 };
 
 describe("leaderboard UI rendering", () => {
-  test("empty leaderboard message provides onboarding guidance", () => {
+  test("empty leaderboard message mirrors leaderboard layout", () => {
     const message = buildEmptyLeaderboardMessage();
-    expect(message).toContain("Hall of Legends");
-    expect(message).toContain("Play some coinflips");
+    expect(message).toContain("Leaderboard");
+    expect(message).toContain("Top players in this group");
+    expect(message).toContain("play a coinflip");
   });
 
   test("buildLeaderboardMessage escapes chat title and highlights leaders", () => {
