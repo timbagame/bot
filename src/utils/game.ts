@@ -335,16 +335,38 @@ export class GameManager {
     this.inFlightGameCreations.set(telegramId, current - 1);
   }
 
-  private normalizeRequestTimestamp(timestamp?: number): number {
+  private normalizeRequestTimestamp(
+    timestamp: number | undefined,
+    now: number
+  ): number {
     if (
       typeof timestamp === "number" &&
       Number.isFinite(timestamp) &&
       timestamp > 0
     ) {
-      return Math.floor(timestamp);
+      let normalized = Math.floor(timestamp);
+
+      if (normalized < 1_000_000_000_000) {
+        normalized *= 1000;
+      }
+
+      if (normalized > now) {
+        return now;
+      }
+
+      const lowerBound = Math.max(
+        0,
+        now - GAME_CREATION_RATE_LIMIT_WINDOW_MS
+      );
+
+      if (normalized < lowerBound) {
+        return lowerBound;
+      }
+
+      return normalized;
     }
 
-    return Date.now();
+    return now;
   }
 
   private prunePendingCreationRequests(
@@ -394,8 +416,6 @@ export class GameManager {
     const index = pending.indexOf(timestamp);
     if (index >= 0) {
       pending.splice(index, 1);
-    } else {
-      pending.shift();
     }
 
     if (pending.length === 0) {
@@ -2865,11 +2885,14 @@ export class GameManager {
     }
 
     const telegramIdStr = telegramId.toString();
+    const now = Date.now();
     const requestTimestamp = this.normalizeRequestTimestamp(
-      requestTimestampMs
+      requestTimestampMs,
+      now
     );
+    const windowFloor = Math.max(0, now - GAME_CREATION_RATE_LIMIT_WINDOW_MS);
     const windowStart = Math.max(
-      0,
+      windowFloor,
       requestTimestamp - GAME_CREATION_RATE_LIMIT_WINDOW_MS
     );
     const pendingInWindow = this.prunePendingCreationRequests(

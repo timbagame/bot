@@ -73,6 +73,33 @@ function makeWallet(overrides: Record<string, any>) {
   return wallet;
 }
 
+function isPromiseLike(value: unknown): value is Promise<unknown> {
+  return !!value && typeof (value as any).then === "function";
+}
+
+function withMockedNow<T>(now: number, fn: () => T): T {
+  const originalNow = Date.now;
+  (Date as any).now = () => now;
+  const restore = () => {
+    (Date as any).now = originalNow;
+  };
+
+  try {
+    const result = fn();
+    if (isPromiseLike(result)) {
+      return (result as unknown as Promise<unknown>).finally(() => {
+        restore();
+      }) as T;
+    }
+
+    restore();
+    return result;
+  } catch (error) {
+    restore();
+    throw error;
+  }
+}
+
 describe("GameManager.createGame", () => {
   test("surface helpful error when SOL auto-wrap cannot proceed", async () => {
     resetGM();
@@ -245,63 +272,294 @@ describe("GameManager.createGame", () => {
   });
 
   test("counts pending creations against rate limit window using request timestamps", async () => {
-    resetGM();
-    const wallet = makeWallet({
-      getTokenMetadata: async () => {
-        throw new Error("metadata should not be fetched when pending limit hit");
-      },
-      getTokenBalance: async () => {
-        throw new Error("token balance should not be fetched when pending limit hit");
-      },
-      getBalance: async () => {
-        throw new Error("sol balance should not be fetched when pending limit hit");
-      },
+    await withMockedNow(1_700_000_500_000, async () => {
+      resetGM();
+      const wallet = makeWallet({
+        getTokenMetadata: async () => {
+          throw new Error("metadata should not be fetched when pending limit hit");
+        },
+        getTokenBalance: async () => {
+          throw new Error("token balance should not be fetched when pending limit hit");
+        },
+        getBalance: async () => {
+          throw new Error("sol balance should not be fetched when pending limit hit");
+        },
+      });
+
+      const recentCount = Math.max(0, MAX_GAMES_PER_CREATOR_WINDOW - 1);
+      let capturedWindowStart: number | null = null;
+      const db = {
+        savePlayerMapping: () => {},
+        countActiveGamesByCreator: () => 0,
+        countRecentGamesByCreator: (_: string, windowStart: number) => {
+          capturedWindowStart = windowStart;
+          return recentCount;
+        },
+      } as any;
+
+      const gm = GameManager.getInstance(
+        makeProgram(wallet.connection),
+        wallet,
+        db
+      );
+
+      const baseTimestamp = Date.now();
+      const pendingCount = Math.max(
+        1,
+        MAX_GAMES_PER_CREATOR_WINDOW - recentCount
+      );
+      const pendingEntries = Array.from({ length: pendingCount }, (_, index) =>
+        baseTimestamp - index * 100
+      );
+      (gm as any).pendingCreationRequests = new Map([
+        ["1", pendingEntries.slice()],
+      ]);
+
+      const result = await gm.createGame(
+        "coinflip",
+        { amount: 1_000_000, tokenMint: "Mint", tokenTicker: "TOK", isSol: false },
+        2,
+        2,
+        60,
+        1n,
+        undefined,
+        baseTimestamp
+      );
+
+      expect(result.success).toBe(false);
+      const message = String(result.error ?? "");
+      expect(message.toLowerCase()).toContain("rate limit");
+      expect(message).toContain(String(MAX_GAMES_PER_CREATOR_WINDOW));
+
+      if (capturedWindowStart === null) {
+        throw new Error("window start should have been captured");
+      }
+
+      const windowStart: number = capturedWindowStart;
+      expect(windowStart).toBe(
+        Date.now() - GAME_CREATION_RATE_LIMIT_WINDOW_MS
+      );
     });
+  });
 
-    const recentCount = Math.max(0, MAX_GAMES_PER_CREATOR_WINDOW - 1);
-    let capturedWindowStart: number | null = null;
-    const db = {
-      savePlayerMapping: () => {},
-      countActiveGamesByCreator: () => 0,
-      countRecentGamesByCreator: (_: string, windowStart: number) => {
-        capturedWindowStart = windowStart;
-        return recentCount;
-      },
-    } as any;
+  test("clamps stale request timestamps to the current rate-limit window", async () => {
+    await withMockedNow(1_700_000_000_000, async () => {
+      resetGM();
+      const wallet = makeWallet({
+        getTokenMetadata: async () => {
+          throw new Error("metadata should not be fetched when rate limit hit");
+        },
+        getTokenBalance: async () => {
+          throw new Error("token balance should not be fetched when rate limit hit");
+        },
+        getBalance: async () => {
+          throw new Error("sol balance should not be fetched when rate limit hit");
+        },
+      });
 
-    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, db);
+      let capturedWindowStart: number | null = null;
+      const db = {
+        savePlayerMapping: () => {},
+        countActiveGamesByCreator: () => 0,
+        countRecentGamesByCreator: (_: string, windowStart: number) => {
+          capturedWindowStart = windowStart;
+          return MAX_GAMES_PER_CREATOR_WINDOW;
+        },
+      } as any;
 
-    const baseTimestamp = 1_700_000_000_000;
-    const pendingCount = Math.max(1, MAX_GAMES_PER_CREATOR_WINDOW - recentCount);
-    const pendingEntries = Array.from({ length: pendingCount }, (_, index) =>
-      baseTimestamp - index * 100
-    );
-    (gm as any).pendingCreationRequests = new Map([
-      ["1", pendingEntries.slice()],
-    ]);
+      const gm = GameManager.getInstance(
+        makeProgram(wallet.connection),
+        wallet,
+        db
+      );
 
-    const result = await gm.createGame(
-      "coinflip",
-      { amount: 1_000_000, tokenMint: "Mint", tokenTicker: "TOK", isSol: false },
-      2,
-      2,
-      60,
-      1n,
-      undefined,
-      baseTimestamp
-    );
+      const ancientTimestamp =
+        Date.now() - 5 * GAME_CREATION_RATE_LIMIT_WINDOW_MS;
 
-    expect(result.success).toBe(false);
-    const message = String(result.error ?? "");
-    expect(message.toLowerCase()).toContain("rate limit");
-    expect(message).toContain(String(MAX_GAMES_PER_CREATOR_WINDOW));
+      const result = await gm.createGame(
+        "coinflip",
+        { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
+        2,
+        2,
+        60,
+        1n,
+        undefined,
+        ancientTimestamp
+      );
 
-    const expectedWindowStart = Math.max(
-      0,
-      baseTimestamp - GAME_CREATION_RATE_LIMIT_WINDOW_MS
-    );
-    expect(capturedWindowStart).not.toBeNull();
-    expect(capturedWindowStart!).toBe(expectedWindowStart);
+      expect(result.success).toBe(false);
+      const message = String(result.error ?? "");
+      expect(message.toLowerCase()).toContain("rate limit");
+      if (capturedWindowStart === null) {
+        throw new Error("window start should have been captured");
+      }
+
+      const windowStart: number = capturedWindowStart;
+
+      expect(windowStart).toBe(
+        Date.now() - GAME_CREATION_RATE_LIMIT_WINDOW_MS
+      );
+    });
+  });
+
+  test("rejects future-dated timestamps that try to bypass the rate limit", async () => {
+    await withMockedNow(1_700_000_100_000, async () => {
+      resetGM();
+      const wallet = makeWallet({
+        getTokenMetadata: async () => {
+          throw new Error("metadata should not be fetched when rate limit hit");
+        },
+        getTokenBalance: async () => {
+          throw new Error("token balance should not be fetched when rate limit hit");
+        },
+        getBalance: async () => {
+          throw new Error("sol balance should not be fetched when rate limit hit");
+        },
+      });
+
+      const pendingEntries = Array.from(
+        { length: Math.max(1, MAX_GAMES_PER_CREATOR_WINDOW - 1) },
+        () => Date.now() - 100
+      );
+
+      let capturedWindowStart: number | null = null;
+      const recentCount = Math.max(1, MAX_GAMES_PER_CREATOR_WINDOW - 1);
+      const db = {
+        savePlayerMapping: () => {},
+        countActiveGamesByCreator: () => 0,
+        countRecentGamesByCreator: (_: string, windowStart: number) => {
+          capturedWindowStart = windowStart;
+          return recentCount;
+        },
+      } as any;
+
+      const gm = GameManager.getInstance(
+        makeProgram(wallet.connection),
+        wallet,
+        db
+      );
+
+      (gm as any).pendingCreationRequests = new Map([
+        ["1", pendingEntries.slice(0, MAX_GAMES_PER_CREATOR_WINDOW - recentCount)],
+      ]);
+
+      const result = await gm.createGame(
+        "coinflip",
+        { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
+        2,
+        2,
+        60,
+        1n,
+        undefined,
+        Date.now() + 10 * GAME_CREATION_RATE_LIMIT_WINDOW_MS
+      );
+
+      expect(result.success).toBe(false);
+      const message = String(result.error ?? "");
+      expect(message.toLowerCase()).toContain("rate limit");
+      expect(capturedWindowStart).not.toBeNull();
+      expect(capturedWindowStart!).toBeLessThanOrEqual(Date.now());
+    });
+  });
+
+  test("normalizes second-based request timestamps", async () => {
+    await withMockedNow(1_700_000_200_000, async () => {
+      resetGM();
+      const wallet = makeWallet({
+        getTokenMetadata: async () => {
+          throw new Error("metadata should not be fetched when rate limit hit");
+        },
+        getTokenBalance: async () => {
+          throw new Error("token balance should not be fetched when rate limit hit");
+        },
+        getBalance: async () => {
+          throw new Error("sol balance should not be fetched when rate limit hit");
+        },
+      });
+
+      let capturedWindowStart: number | null = null;
+      const db = {
+        savePlayerMapping: () => {},
+        countActiveGamesByCreator: () => 0,
+        countRecentGamesByCreator: (_: string, windowStart: number) => {
+          capturedWindowStart = windowStart;
+          return MAX_GAMES_PER_CREATOR_WINDOW;
+        },
+      } as any;
+
+      const gm = GameManager.getInstance(
+        makeProgram(wallet.connection),
+        wallet,
+        db
+      );
+
+      const secondsTimestamp = Math.floor(Date.now() / 1000);
+      const result = await gm.createGame(
+        "coinflip",
+        { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
+        2,
+        2,
+        60,
+        1n,
+        undefined,
+        secondsTimestamp
+      );
+
+      expect(result.success).toBe(false);
+      const message = String(result.error ?? "");
+      expect(message.toLowerCase()).toContain("rate limit");
+      if (capturedWindowStart === null) {
+        throw new Error("window start should have been captured");
+      }
+
+      const windowStart: number = capturedWindowStart;
+
+      expect(windowStart).toBe(
+        Date.now() - GAME_CREATION_RATE_LIMIT_WINDOW_MS
+      );
+    });
+  });
+
+  test("removing a pruned pending request leaves newer entries intact", () => {
+    withMockedNow(1_700_000_300_000, () => {
+      resetGM();
+      const wallet = makeWallet({
+        getTokenMetadata: async () => ({ decimals: 6 }),
+        getTokenBalance: async () => 0,
+        getBalance: async () => 0,
+      });
+
+      const gm = GameManager.getInstance(
+        makeProgram(wallet.connection),
+        wallet,
+        {
+          savePlayerMapping: () => {},
+          countActiveGamesByCreator: () => 0,
+          countRecentGamesByCreator: () => 0,
+        } as any
+      );
+
+      const gmAny = gm as any;
+      const telegramId = "123";
+      const now = Date.now();
+      const oldTimestamp = now - GAME_CREATION_RATE_LIMIT_WINDOW_MS - 10;
+      const newTimestamp = now - 100;
+
+      gmAny.pendingCreationRequests = new Map([
+        [telegramId, [oldTimestamp, newTimestamp]],
+      ]);
+
+      const windowStart = now - GAME_CREATION_RATE_LIMIT_WINDOW_MS + 50;
+      const pruned = gmAny.prunePendingCreationRequests(telegramId, windowStart);
+
+      expect(pruned).toEqual([newTimestamp]);
+
+      gmAny.removePendingCreationRequest(telegramId, oldTimestamp);
+
+      expect(gmAny.pendingCreationRequests.get(telegramId)).toEqual([
+        newTimestamp,
+      ]);
+    });
   });
 
   test("wraps native SOL when WSOL token specified explicitly", async () => {
