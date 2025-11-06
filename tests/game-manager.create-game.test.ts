@@ -7,7 +7,6 @@ import {
 } from "@solana/spl-token";
 import { PDAManager } from "../src/utils/pda";
 import {
-  GAME_CREATION_RATE_LIMIT_WINDOW_MS,
   MAX_ACTIVE_GAMES_PER_CREATOR,
   MAX_GAMES_PER_CREATOR_WINDOW,
   WSOL_MINT,
