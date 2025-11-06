@@ -304,6 +304,7 @@ export class GameManager {
     TELEGRAM_USERNAME_CACHE_TTL_MS
   );
   private readonly usernameCacheKeys: string[] = [];
+  private readonly usernameHints = new Map<string, string>();
   private usernameLookupPromises = new Map<string, Promise<string | null>>();
   private gameMessageReadyListener?: (gameAddress: string) => void;
 
@@ -517,6 +518,39 @@ export class GameManager {
 
     this.usernameCache.setWithTTL(key, value, ttl);
     this.trackUsernameCacheKey(key);
+  }
+
+  private rememberTelegramUsername(
+    telegramId: string,
+    username: string
+  ): void {
+    const trimmedId = telegramId.trim();
+    const trimmedUsername = username.trim();
+    if (!/^\d+$/.test(trimmedId) || trimmedUsername.length === 0) {
+      return;
+    }
+
+    this.usernameHints.set(trimmedId, trimmedUsername);
+  }
+
+  public primeUsernameCache(
+    ctx: Context,
+    telegramId: string,
+    username: string | null
+  ): void {
+    if (!username) {
+      return;
+    }
+
+    const trimmedId = telegramId.trim();
+    const trimmedUsername = username.trim();
+    if (!/^\d+$/.test(trimmedId) || trimmedUsername.length === 0) {
+      return;
+    }
+
+    this.rememberTelegramUsername(trimmedId, trimmedUsername);
+    const cacheKey = this.buildUsernameCacheKey(ctx, trimmedId);
+    this.setCachedUsername(cacheKey, trimmedUsername);
   }
 
   private getOraclePda(): PublicKey {
@@ -1555,6 +1589,16 @@ export class GameManager {
         return cached;
       }
 
+      const hinted = this.usernameHints.get(trimmedId) ?? null;
+      const persistedDisplayName =
+        typeof this.gameDb.getPlayerDisplayName === "function"
+          ? this.gameDb.getPlayerDisplayName(trimmedId)
+          : null;
+      const fallbackCandidate = hinted ?? persistedDisplayName ?? null;
+      if (persistedDisplayName && !hinted) {
+        this.rememberTelegramUsername(trimmedId, persistedDisplayName);
+      }
+
       this.usernameCache.delete(cacheKey);
       this.removeUsernameCacheKey(cacheKey);
 
@@ -1577,9 +1621,17 @@ export class GameManager {
                 ? `@${userRecord.username.trim()}`
                 : null;
             const resolved = handle ?? userRecord.first_name ?? null;
+            if (resolved) {
+              this.rememberTelegramUsername(trimmedId, resolved);
+            }
             this.setCachedUsername(cacheKey, resolved);
             return resolved;
           } catch (fetchError) {
+            if (fallbackCandidate) {
+              this.rememberTelegramUsername(trimmedId, fallbackCandidate);
+              this.setCachedUsername(cacheKey, fallbackCandidate);
+              return fallbackCandidate;
+            }
             this.setCachedUsername(cacheKey, null);
             throw fetchError;
           } finally {
@@ -3573,7 +3625,8 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
   public async joinGame(
     gameAddress: string,
     telegramId: bigint,
-    chatId?: number
+    chatId?: number,
+    displayName?: string | null
   ): Promise<{ success: boolean; error?: string; isRoll?: boolean }> {
     try {
       const gamePda = new PublicKey(gameAddress);
@@ -3768,6 +3821,13 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       // Execute join
 
       const telegramIdStr = telegramId.toString();
+      const normalizedDisplayName =
+        typeof displayName === "string" && displayName.trim().length > 0
+          ? displayName.trim()
+          : null;
+      if (normalizedDisplayName) {
+        this.rememberTelegramUsername(telegramIdStr, normalizedDisplayName);
+      }
       const playerPubkey = playerKp.publicKey.toBase58();
       let joinTx: string | undefined;
       let joinConfirmed = false;
@@ -3909,7 +3969,15 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       }
 
       // Update database
-      this.gameDb.savePlayerMapping(playerPubkey, telegramIdStr);
+      if (normalizedDisplayName) {
+        this.gameDb.savePlayerMapping(
+          playerPubkey,
+          telegramIdStr,
+          normalizedDisplayName
+        );
+      } else {
+        this.gameDb.savePlayerMapping(playerPubkey, telegramIdStr);
+      }
       const verified = await this.verifyParticipantJoin(
         gamePda,
         playerKp.publicKey,

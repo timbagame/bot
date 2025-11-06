@@ -35,10 +35,11 @@ test("GameDatabase: CRUD for games, mappings, participants, and slot updates", (
   expect(withMsg.chat_id).toBe(999);
 
   // Player mapping roundtrip
-  db.savePlayerMapping("pub_creator", "tg_creator");
+  db.savePlayerMapping("pub_creator", "tg_creator", "@astro");
   expect(db.getPlayerTelegramId("pub_creator")).toBe("tg_creator");
   expect(db.getPlayerPublicKey("tg_creator")).toBe("pub_creator");
   expect(db.getAllPlayerMappings().length).toBe(1);
+  expect(db.getPlayerDisplayName("tg_creator")).toBe("@astro");
 
   // Creator info join
   const creatorInfo = db.getCreatorInfo("gameA")!;

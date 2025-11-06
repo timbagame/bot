@@ -263,11 +263,38 @@ export const createGameCallbacksModule = (
       return;
     }
 
+    const telegramIdStr = telegramId.toString();
+    const displayNameFromContext = (() => {
+      const from = ctx.from;
+      if (!from) return null;
+
+      if (typeof from.username === "string" && from.username.trim().length > 0) {
+        const normalizedHandle = from.username.trim().replace(/^@+/, "");
+        return normalizedHandle.length > 0 ? `@${normalizedHandle}` : null;
+      }
+
+      const nameParts = [
+        typeof from.first_name === "string" ? from.first_name.trim() : "",
+        typeof from.last_name === "string" ? from.last_name.trim() : "",
+      ].filter((part) => part.length > 0);
+
+      if (nameParts.length === 0) {
+        return null;
+      }
+
+      return nameParts.join(" ");
+    })();
+
+    if (displayNameFromContext) {
+      gameManager.primeUsernameCache(ctx, telegramIdStr, displayNameFromContext);
+    }
+
     try {
       const result = await gameManager.joinGame(
         game.game_address,
         telegramId,
-        ctx.chat?.id
+        ctx.chat?.id,
+        displayNameFromContext
       );
 
       if (!result.success) {

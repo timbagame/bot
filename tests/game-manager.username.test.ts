@@ -51,10 +51,10 @@ describe("GameManager Username Resolution", () => {
         },
       } as any;
 
-  const first = await gm.getUsernameFromTelegramId(ctx, "555");
-  expect(first).toBe("@cached");
-  const second = await gm.getUsernameFromTelegramId(ctx, "555");
-  expect(second).toBe("@cached");
+      const first = await gm.getUsernameFromTelegramId(ctx, "555");
+      expect(first).toBe("@cached");
+      const second = await gm.getUsernameFromTelegramId(ctx, "555");
+      expect(second).toBe("@cached");
       expect(calls).toBe(1);
     });
 
@@ -79,18 +79,18 @@ describe("GameManager Username Resolution", () => {
       } as any;
 
       try {
-  const first = await gm.getUsernameFromTelegramId(ctx, "777");
-  expect(first).toBe("@first");
+        const first = await gm.getUsernameFromTelegramId(ctx, "777");
+        expect(first).toBe("@first");
         expect(calls).toBe(1);
 
-  const second = await gm.getUsernameFromTelegramId(ctx, "777");
-  expect(second).toBe("@first");
+        const second = await gm.getUsernameFromTelegramId(ctx, "777");
+        expect(second).toBe("@first");
         expect(calls).toBe(1);
 
         now += TELEGRAM_USERNAME_CACHE_TTL_MS + 1;
 
-  const third = await gm.getUsernameFromTelegramId(ctx, "777");
-  expect(third).toBe("@second");
+        const third = await gm.getUsernameFromTelegramId(ctx, "777");
+        expect(third).toBe("@second");
         expect(calls).toBe(2);
       } finally {
         Date.now = originalNow;
@@ -142,7 +142,7 @@ describe("GameManager Username Resolution", () => {
       for (let i = 0; i < maxEntries + 1; i++) {
         const id = String(10_000 + i);
         const label = await gm.getUsernameFromTelegramId(ctx, id);
-  expect(label).toBe(`@user${Number(id)}`);
+        expect(label).toBe(`@user${Number(id)}`);
       }
 
       expect((gm as any).usernameCacheKeys.length).toBe(maxEntries);
@@ -150,6 +150,54 @@ describe("GameManager Username Resolution", () => {
       expect(cache.get(evictedKey)).toBeUndefined();
       expect((gm as any).usernameCacheKeys.includes(evictedKey)).toBe(false);
       expect(calls).toBe(maxEntries + 1);
+    });
+
+    test("primeUsernameCache seeds username without hitting Telegram", async () => {
+      resetGM();
+      let calls = 0;
+      const ctx = {
+        chat: { id: 101, type: "supergroup" },
+        api: {
+          getChatMember: async () => {
+            calls += 1;
+            return { user: { username: "should-not-run" } };
+          },
+        },
+      } as any;
+      const gm = GameManager.getInstance(
+        programStub(),
+        walletStub(),
+        { getPlayerDisplayName: () => null } as any
+      );
+      gm.primeUsernameCache(ctx, "9999", "@callbackUser");
+      const result = await gm.getUsernameFromTelegramId(ctx, "9999");
+      expect(result).toBe("@callbackUser");
+      expect(calls).toBe(0);
+    });
+
+    test("falls back to persisted display name when API fails", async () => {
+      resetGM();
+      let calls = 0;
+      const ctx = {
+        chat: { id: 202, type: "supergroup" },
+        api: {
+          getChatMember: async () => {
+            calls += 1;
+            throw new Error("Forbidden");
+          },
+        },
+      } as any;
+      const gm = GameManager.getInstance(
+        programStub(),
+        walletStub(),
+        {
+          getPlayerDisplayName: (id: string) =>
+            id === "424242" ? "@persistedUser" : null,
+        } as any
+      );
+      const result = await gm.getUsernameFromTelegramId(ctx, "424242");
+      expect(result).toBe("@persistedUser");
+      expect(calls).toBe(1);
     });
 
     test("uses string identifiers when Telegram ID exceeds safe integer range", async () => {

@@ -46,7 +46,8 @@ export class GameDatabase extends BaseDatabase {
         )`,
         `CREATE TABLE IF NOT EXISTS player_mappings (
           public_key TEXT PRIMARY KEY,
-          telegram_id TEXT NOT NULL
+          telegram_id TEXT NOT NULL,
+          display_name TEXT
         )`,
         `CREATE TABLE IF NOT EXISTS game_participants (
           game_address TEXT NOT NULL,
@@ -64,6 +65,7 @@ export class GameDatabase extends BaseDatabase {
     );
 
     this.ensureGameParticipantSchema();
+    this.ensurePlayerMappingSchema();
   }
 
   // Game methods
@@ -179,10 +181,14 @@ export class GameDatabase extends BaseDatabase {
   }
 
   // Player mapping methods
-  public savePlayerMapping(publicKey: string, telegramId: string): void {
+  public savePlayerMapping(
+    publicKey: string,
+    telegramId: string,
+    displayName?: string | null
+  ): void {
     this.run(
-      "INSERT OR REPLACE INTO player_mappings (public_key, telegram_id) VALUES (?, ?)",
-      [publicKey, telegramId],
+      "INSERT OR REPLACE INTO player_mappings (public_key, telegram_id, display_name) VALUES (?, ?, ?)",
+      [publicKey, telegramId, displayName ?? null],
       "saving player mapping"
     );
   }
@@ -203,6 +209,16 @@ export class GameDatabase extends BaseDatabase {
       "getting player public key"
     );
     return result?.public_key ?? null;
+  }
+
+  public getPlayerDisplayName(telegramId: string): string | null {
+    const result = this.get<{ display_name: string }>(
+      "SELECT display_name FROM player_mappings WHERE telegram_id = ? AND display_name IS NOT NULL ORDER BY ROWID DESC LIMIT 1",
+      [telegramId],
+      "getting player display name"
+    );
+    const name = result?.display_name?.trim();
+    return name && name.length > 0 ? name : null;
   }
 
   public getAllPlayerMappings(): PlayerMapping[] {
@@ -266,6 +282,27 @@ export class GameDatabase extends BaseDatabase {
       );
     } catch (error) {
       console.error("Failed to ensure game_participants schema:", error);
+    }
+  }
+
+  private ensurePlayerMappingSchema(): void {
+    try {
+      const columns = this.all<{ name: string }>(
+        "PRAGMA table_info(player_mappings)",
+        [],
+        "reading player_mappings schema"
+      );
+      const columnNames = new Set(columns.map((col) => col.name));
+
+      if (!columnNames.has("display_name")) {
+        this.run(
+          "ALTER TABLE player_mappings ADD COLUMN display_name TEXT",
+          [],
+          "adding display_name column to player_mappings"
+        );
+      }
+    } catch (error) {
+      console.error("Failed to ensure player_mappings schema:", error);
     }
   }
 
