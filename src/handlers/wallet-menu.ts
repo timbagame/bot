@@ -1,7 +1,6 @@
 import type { Bot } from "grammy";
 
-import { createExpiringCache } from "../utils/expiring-cache";
-import { WSOL_MINT, getStartVideoId } from "../utils/constants";
+import { WSOL_MINT, getStartVideoId, USER_WALLET_RPC_MAX_CALLS } from "../utils/constants";
 import {
   buildWalletCaption,
   buildWalletActionMenuForUser,
@@ -12,7 +11,11 @@ import { createWalletKeyboard, createWalletSettingsKeyboard } from "../utils/key
 import { getPricesUSD } from "../utils/prices";
 import { respondWithMenu } from "../utils/menu-response";
 import { safeAnswerCallbackQuery, requireTelegramId } from "../utils/context-helpers";
-import type { WalletManager } from "../utils/wallet";
+import type {
+  WalletManager,
+  WalletBalancesSnapshot,
+  ApprovedTokenBalance,
+} from "../utils/wallet";
 import type { TokenManager } from "../utils/token-manager";
 import {
   showWalletUI as showWalletUIHandler,
@@ -26,6 +29,10 @@ import {
   type RegisterCallbackPrefixHandler,
   type WrapCallbackHandler,
 } from "../utils/callback-registry";
+import {
+  RateLimitExceededError,
+  SlidingWindowRateLimiter,
+} from "../utils/rate-limiter";
 
 
 export type WalletActionMenuResolution = {
@@ -40,27 +47,33 @@ export type WalletActionMenuHandlerConfig = {
   resolve: (ctx: any) => Promise<WalletActionMenuResolution | null | undefined>;
 };
 
-type CachedWalletData = {
-  solBalance: number;
-  nativeSolBalance: number;
-  wsolBalance: number;
-  tokenBalances: Array<{
-    mint: string;
-    ticker: string;
-    balance: number;
-    decimals: number;
-    rawBalance: string;
-  }>;
-  approvedTokens: any[];
-};
+export type WalletCacheSnapshot = WalletBalancesSnapshot;
 
-export type WalletCacheSnapshot = CachedWalletData;
+type WalletSnapshotSeed = {
+  solBalance: number;
+  tokenBalances: Array<
+    Partial<ApprovedTokenBalance> & {
+      mint: string;
+      ticker: string;
+      balance: number;
+      decimals: number;
+      rawBalance?: string;
+    }
+  >;
+  approvedTokens?: WalletBalancesSnapshot["approvedTokens"];
+  nativeSolBalance?: number;
+  wsolBalance?: number;
+};
 
 type WalletMenuModuleOptions = {
   bot: Bot;
   wallet: WalletManager;
   getTokenManager: () => TokenManager | undefined;
   wrapCallbackHandler: WrapCallbackHandler;
+  rpcRateLimiter: {
+    limiter: SlidingWindowRateLimiter;
+    maxRequests?: number;
+  };
 };
 
 type WalletMenuModule = {
@@ -69,7 +82,7 @@ type WalletMenuModule = {
   registerWalletActionMenuHandler: (
     config: WalletActionMenuHandlerConfig
   ) => void;
-  getCachedWalletData: (telegramId: bigint) => Promise<CachedWalletData>;
+  getCachedWalletData: (telegramId: bigint) => Promise<WalletBalancesSnapshot>;
   clearWalletCache: (telegramId: bigint) => void;
   defaultWalletActionMenuDeps: {
     requireTelegramId: typeof requireTelegramId;
@@ -83,19 +96,7 @@ type WalletMenuModule = {
   showWalletUI: (ctx: any) => Promise<void>;
   __test_setWalletCache: (
     telegramId: bigint | number | string,
-    data: {
-      solBalance: number;
-      tokenBalances: Array<{
-        mint: string;
-        ticker: string;
-        balance: number;
-        decimals: number;
-        rawBalance: string;
-      }>;
-      approvedTokens?: any[];
-      nativeSolBalance?: number;
-      wsolBalance?: number;
-    },
+    data: WalletSnapshotSeed,
     ttlOverrideMs?: number
   ) => void;
 };
@@ -103,67 +104,148 @@ type WalletMenuModule = {
 export const createWalletMenuModule = (
   options: WalletMenuModuleOptions
 ): WalletMenuModule => {
-  const { bot, wallet, getTokenManager, wrapCallbackHandler } = options;
+  const { bot, wallet, getTokenManager, wrapCallbackHandler, rpcRateLimiter } =
+    options;
 
-  const walletDataCache = createExpiringCache<CachedWalletData>(30 * 1000);
+  const walletRpcLimiter = rpcRateLimiter.limiter;
+  const walletRpcMax = Math.max(
+    1,
+    rpcRateLimiter.maxRequests ?? USER_WALLET_RPC_MAX_CALLS
+  );
 
-  const getWalletCacheKey = (
-    telegramId: bigint | number | string
-  ): string => String(telegramId);
+  const testApprovedTokenOverrides = new Map<
+    string,
+    WalletBalancesSnapshot["approvedTokens"]
+  >();
+
+  const normalizeTelegramId = (
+    value: bigint | number | string
+  ): bigint => (typeof value === "bigint" ? value : BigInt(value));
+
+  const coerceApprovedTokenBalances = (
+    entries: WalletSnapshotSeed["tokenBalances"]
+  ): ApprovedTokenBalance[] =>
+    entries.map((entry) => {
+      const rawBalance =
+        entry.rawBalance ??
+        (Number.isFinite(entry.balance) ? String(entry.balance) : "0");
+
+      let lamports: bigint;
+      try {
+        lamports = BigInt(rawBalance);
+      } catch {
+        lamports = BigInt(Math.max(0, Math.trunc(entry.balance ?? 0)));
+      }
+
+      return {
+        mint: entry.mint,
+        ticker: entry.ticker,
+        balance: entry.balance,
+        decimals: entry.decimals,
+        rawBalance,
+        lamports,
+        formattedBalance:
+          entry.formattedBalance ?? String(entry.balance ?? 0),
+        decimalBalance:
+          entry.decimalBalance ?? Number(entry.balance ?? 0),
+        truncated: entry.truncated ?? false,
+      };
+    });
+
+  const enforceWalletBudget = (telegramId: bigint) => {
+    const result = walletRpcLimiter.consume(telegramId, walletRpcMax);
+    if (!result.allowed) {
+      const retryAfterMs = result.resetInMs;
+      const waitSeconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
+      throw new RateLimitExceededError(
+        `⏳ Too many wallet refreshes. Try again in ${waitSeconds}s.`,
+        retryAfterMs
+      );
+    }
+  };
 
   const getCachedWalletData = async (
     telegramId: bigint
-  ): Promise<CachedWalletData> => {
-    const cacheKey = getWalletCacheKey(telegramId);
-    const stale = walletDataCache.peek(cacheKey);
-    const cached = walletDataCache.get(cacheKey);
-
-    if (cached) {
-      console.log("📦 Using cached wallet data for user:", telegramId.toString());
-      return cached;
-    }
-
-    console.log("🔄 Fetching fresh wallet data for user:", telegramId.toString());
+  ): Promise<WalletBalancesSnapshot> => {
+    enforceWalletBudget(telegramId);
 
     const tokenManager = getTokenManager();
+    const overrideKey = telegramId.toString();
+    const overrideApprovedTokens =
+      testApprovedTokenOverrides.get(overrideKey);
+    const approvedTokens =
+      overrideApprovedTokens ??
+      (tokenManager
+        ? tokenManager.getAllApprovedTokensWithMetadata()
+        : []);
+
+    const staleNative = wallet.peekCachedNativeBalance(telegramId);
+    const staleTokens = wallet.peekCachedApprovedTokenBalances(telegramId);
+    const allowStaleOnError =
+      staleNative !== undefined || (staleTokens?.length ?? 0) > 0;
 
     try {
-      const nativeSolBalance = await wallet.getBalance(telegramId);
-      const approvedTokens = tokenManager
-        ? tokenManager.getAllApprovedTokensWithMetadata()
-        : [];
+      const nativeSolBalance = await wallet.getBalance(telegramId, {
+        allowStaleOnError,
+      });
       const tokenBalances = await wallet.getAllApprovedTokenBalances(
         telegramId,
-        approvedTokens
+        approvedTokens,
+        { allowStaleOnError }
       );
 
       const wsolToken = tokenBalances.find((token) => token.mint === WSOL_MINT);
       const wsolBalance = wsolToken?.balance ?? 0;
 
-      const data: CachedWalletData = {
+      return {
         solBalance: nativeSolBalance,
         nativeSolBalance,
         wsolBalance,
         tokenBalances,
         approvedTokens,
       };
-
-      walletDataCache.setWithTTL(cacheKey, data);
-
-      return data;
     } catch (error) {
-      console.error("Error fetching wallet data:", error);
-      if (stale) {
-        console.log("⚠️ Using expired cache due to RPC error");
-        return stale;
+      if (allowStaleOnError) {
+        const fallbackNative =
+          wallet.peekCachedNativeBalance(telegramId) ?? staleNative;
+        const fallbackTokens =
+          wallet.peekCachedApprovedTokenBalances(telegramId) ?? staleTokens;
+
+        if (
+          fallbackNative !== undefined ||
+          (fallbackTokens && fallbackTokens.length > 0)
+        ) {
+          console.warn(
+            `⚠️ Falling back to stale wallet cache for user ${telegramId.toString()} due to RPC error:`,
+            error
+          );
+
+          const resolvedNative = fallbackNative ?? 0;
+          const resolvedTokensSource = fallbackTokens ?? [];
+          const resolvedTokens: ApprovedTokenBalance[] =
+            resolvedTokensSource.map((token) => ({ ...token }));
+          const wsolToken = resolvedTokens.find(
+            (token) => token.mint === WSOL_MINT
+          );
+          const wsolBalance = wsolToken?.balance ?? 0;
+
+          return {
+            solBalance: resolvedNative,
+            nativeSolBalance: resolvedNative,
+            wsolBalance,
+            tokenBalances: resolvedTokens,
+            approvedTokens,
+          };
+        }
       }
+
       throw error;
     }
   };
 
   const clearWalletCache = (telegramId: bigint) => {
-    const cacheKey = getWalletCacheKey(telegramId);
-    walletDataCache.delete(cacheKey);
+    wallet.clearCachedWalletData(telegramId);
+    testApprovedTokenOverrides.delete(telegramId.toString());
     console.log(`🗑️ Cleared wallet cache for user: ${telegramId}`);
   };
 
@@ -182,9 +264,7 @@ export const createWalletMenuModule = (
     Object.freeze({
       showWalletUI: (c: any) => showWalletUI(c),
       clearWalletCache: (id: bigint | string | number) => {
-        const normalized =
-          typeof id === "bigint" ? id : BigInt(id as string | number);
-        clearWalletCache(normalized);
+        clearWalletCache(normalizeTelegramId(id));
       },
       createSettingsKeyboard: () => createWalletSettingsKeyboard(),
     });
@@ -261,29 +341,28 @@ export const createWalletMenuModule = (
 
   const __test_setWalletCache = (
     telegramId: bigint | number | string,
-    data: {
-      solBalance: number;
-      tokenBalances: Array<{
-        mint: string;
-        ticker: string;
-        balance: number;
-        decimals: number;
-        rawBalance: string;
-      }>;
-      approvedTokens?: any[];
-      nativeSolBalance?: number;
-      wsolBalance?: number;
-    },
+    data: WalletSnapshotSeed,
     ttlOverrideMs?: number
   ) => {
-    const cacheKey = getWalletCacheKey(telegramId);
-    walletDataCache.setWithTTL(cacheKey, {
-      solBalance: data.solBalance,
-      nativeSolBalance: data.nativeSolBalance ?? data.solBalance,
-      wsolBalance: data.wsolBalance ?? 0,
-      tokenBalances: data.tokenBalances,
-      approvedTokens: data.approvedTokens ?? [],
-    }, ttlOverrideMs);
+    const normalizedId = normalizeTelegramId(telegramId);
+    const nativeBalance = data.nativeSolBalance ?? data.solBalance;
+    const coercedTokenBalances = coerceApprovedTokenBalances(
+      data.tokenBalances ?? []
+    );
+
+    wallet.setCachedNativeBalance(normalizedId, nativeBalance, ttlOverrideMs);
+    wallet.setCachedApprovedTokenBalances(
+      normalizedId,
+      coercedTokenBalances,
+      ttlOverrideMs
+    );
+
+    if (data.approvedTokens) {
+      testApprovedTokenOverrides.set(
+        normalizedId.toString(),
+        data.approvedTokens
+      );
+    }
   };
 
   return {
@@ -297,5 +376,3 @@ export const createWalletMenuModule = (
     __test_setWalletCache,
   };
 };
-
-export type { CachedWalletData };

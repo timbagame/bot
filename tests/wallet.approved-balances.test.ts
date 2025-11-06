@@ -8,6 +8,7 @@ import {
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import { WalletManager } from "../src/utils/wallet";
+import type { TokenDatabase } from "../src/utils/token-database";
 
 type MockAccountEntry = {
   owner: PublicKey;
@@ -21,6 +22,7 @@ class ConnParsed implements Partial<Connection> {
   public owner: PublicKey | null = null;
   public accounts = new Map<string, MockAccountEntry>();
   public parsedCalls: string[] = [];
+  private mintOwners = new Map<string, PublicKey>();
 
   setOwner(owner: PublicKey) {
     this.owner = owner;
@@ -68,6 +70,7 @@ class ConnParsed implements Partial<Connection> {
       amount: options.amount,
       decimals: options.decimals,
     });
+    this.mintOwners.set(options.mint.toBase58(), options.programId);
   }
 
   async getMultipleAccountsInfo(pubkeys: PublicKey[]) {
@@ -85,6 +88,31 @@ class ConnParsed implements Partial<Connection> {
         rentEpoch: 0,
       } as any;
     });
+  }
+
+  async getAccountInfo(pubkey: PublicKey) {
+    const address = pubkey.toBase58();
+    const mintOwner = this.mintOwners.get(address);
+    if (mintOwner) {
+      return {
+        owner: mintOwner,
+        data: Buffer.alloc(0),
+        executable: false,
+        lamports: 0,
+      } as any;
+    }
+
+    const entry = this.accounts.get(address);
+    if (!entry) {
+      return null;
+    }
+
+    return {
+      owner: entry.owner,
+      data: entry.data,
+      executable: false,
+      lamports: 0,
+    } as any;
   }
 
   async getParsedTokenAccountsByOwner(_owner: PublicKey, filter: any) {
@@ -256,5 +284,60 @@ describe("WalletManager.getAllApprovedTokenBalances", () => {
     const cached = await wm.getAllApprovedTokenBalances(1n, approved);
     expect(cached[0]?.ticker).toBe("META");
     expect(failures).toBe(1);
+  });
+
+  test("persists detected program ids for approved tokens without hints", async () => {
+    const connection = new ConnParsed();
+    const persisted: Array<[string, string | null]> = [];
+    const tokenDbStub = {
+      setTokenProgramId(tokenMint: string, programId: string | null) {
+        persisted.push([tokenMint, programId]);
+      },
+    } as unknown as TokenDatabase;
+
+    const wm = WalletManager.createForTest(
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      {
+        connection: connection as any,
+        fetch: globalThis.fetch as any,
+        timeNow: () => Date.now(),
+        tokenDb: tokenDbStub,
+      }
+    );
+
+    const owner = wm.getPublicKey(1n);
+    connection.setOwner(owner);
+
+    const splMint = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+    const token2022Mint = new PublicKey("So11111111111111111111111111111111111111112");
+
+    await connection.seedTokenAccount({
+      mint: splMint,
+      programId: TOKEN_PROGRAM_ID,
+      amount: 1_000n,
+      decimals: 6,
+    });
+
+    await connection.seedTokenAccount({
+      mint: token2022Mint,
+      programId: TOKEN_2022_PROGRAM_ID,
+      amount: 1_000n,
+      decimals: 9,
+    });
+
+    const approved = [
+      { token_mint: splMint.toBase58(), token_ticker: "USDC", decimals: 6 },
+      {
+        token_mint: token2022Mint.toBase58(),
+        token_ticker: "WSOL",
+        decimals: 9,
+        token_program_id: TOKEN_2022_PROGRAM_ID.toBase58(),
+      },
+    ];
+
+    await wm.getAllApprovedTokenBalances(1n, approved);
+
+    expect(persisted).toEqual([[splMint.toBase58(), TOKEN_PROGRAM_ID.toBase58()]]);
+    expect(approved[0]?.token_program_id).toBe(TOKEN_PROGRAM_ID.toBase58());
   });
 });

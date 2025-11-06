@@ -176,12 +176,20 @@ export class TokenManager {
 
   private snapshotApprovedTokens(
     tokens: KnownToken[]
-  ): Array<{ token_mint: string; token_ticker: string; decimals: number }> {
-    return tokens.map(({ token_mint, token_ticker, decimals }) => ({
-      token_mint,
-      token_ticker,
-      decimals,
-    }));
+  ): Array<{
+    token_mint: string;
+    token_ticker: string;
+    decimals: number;
+    token_program_id?: string | null;
+  }> {
+    return tokens.map(
+      ({ token_mint, token_ticker, decimals, token_program_id }) => ({
+        token_mint,
+        token_ticker,
+        decimals,
+        token_program_id: token_program_id ?? null,
+      })
+    );
   }
 
   private invalidateApprovedTokensCache(): void {
@@ -865,6 +873,7 @@ export class TokenManager {
     token_mint: string;
     token_ticker: string;
     decimals: number;
+    token_program_id?: string | null;
   }> {
     const now = Date.now();
     const cache = this.approvedTokensCache;

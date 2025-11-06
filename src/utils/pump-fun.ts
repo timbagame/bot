@@ -55,11 +55,19 @@ export class PumpFunClient {
   private sdk: PumpSdk;
   private onlineSdk: OnlinePumpSdk;
   private connection: Connection;
+  private verboseLogging: boolean;
 
   constructor(connection: Connection) {
     this.connection = connection;
     this.sdk = new PumpSdk();
     this.onlineSdk = new OnlinePumpSdk(connection);
+    this.verboseLogging = process.env["PUMPFUN_DEBUG"] === "1";
+  }
+
+  private debugLog(message: string, ...args: unknown[]): void {
+    if (this.verboseLogging) {
+      console.log(message, ...args);
+    }
   }
 
   private parseAmountLamports(
@@ -189,10 +197,21 @@ export class PumpFunClient {
               }
 
               const data = (await response.json()) as any;
-              console.log("🎯 Pump.fun API data:", data);
+              if (this.verboseLogging) {
+                console.log("🎯 Pump.fun API data:", data);
+              } else {
+                const { symbol: rawSymbol, name: rawName } = data ?? {};
+                console.log("🎯 Pump.fun API data summary:", {
+                  symbol: rawSymbol,
+                  name: rawName,
+                  fields: Array.isArray(data)
+                    ? data.length
+                    : Object.keys(data ?? {}).length,
+                });
+              }
 
               if (!data?.symbol) {
-                console.log("❌ Pump.fun API data missing symbol:", data);
+                this.debugLog("❌ Pump.fun API data missing symbol:", data);
                 return null;
               }
 
@@ -208,7 +227,11 @@ export class PumpFunClient {
                 decimals: await ensureDecimals(),
               };
             } catch (error) {
-              console.log("💥 Pump.fun API error:", error);
+              if (this.verboseLogging) {
+                console.log("💥 Pump.fun API error:", error);
+              } else {
+                console.log("💥 Pump.fun API error:", (error as Error)?.message ?? error);
+              }
               return null;
             }
           },

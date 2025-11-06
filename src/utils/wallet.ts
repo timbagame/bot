@@ -39,13 +39,18 @@ import {
   BLOCK_HEIGHT_EXPIRATION_GRACE,
   TRANSACTION_RESUBMIT_ATTEMPTS,
   TOKEN_DISCOVERY_COOLDOWN_MS,
+  WALLET_RPC_CACHE_TTL_MS,
 } from "./constants";
 import { formatAmount } from "./format-amount";
 import { WSOL_MINT } from "./token-registry";
 import { resolveTokenMetadata } from "./token-metadata";
-import { detectTokenProgram } from "./token-programs";
+import {
+  detectTokenProgram,
+  type TokenProgramDetection,
+} from "./token-programs";
 import { FeeBudgetManager } from "./fee-budget";
 import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
+import { TokenDatabase } from "./token-database";
 
 // Lightweight dependency handles for testability
 type HttpFetch = (input: string, init?: any) => Promise<{
@@ -61,9 +66,41 @@ type WalletDeps = {
   tokenMetadataResolver?: (
     mint: string
   ) => Promise<{ decimals: number } | null> | { decimals: number } | null;
+  tokenDb?: TokenDatabase;
 };
 
 const TOKEN_METADATA_CACHE_DURATION_MS = 5 * 60 * 1000;
+
+export type WalletFetchOptions = {
+  forceFresh?: boolean;
+  allowStaleOnError?: boolean;
+  cacheTtlMs?: number;
+};
+
+export type ApprovedTokenBalance = {
+  mint: string;
+  ticker: string;
+  balance: number;
+  decimals: number;
+  rawBalance: string;
+  lamports: bigint;
+  formattedBalance: string;
+  decimalBalance: number;
+  truncated?: boolean;
+};
+
+export type WalletBalancesSnapshot = {
+  solBalance: number;
+  nativeSolBalance: number;
+  wsolBalance: number;
+  tokenBalances: ApprovedTokenBalance[];
+  approvedTokens: Array<{
+    token_mint: string;
+    token_ticker: string;
+    decimals: number;
+    token_program_id?: string | null;
+  }>;
+};
 
 // ================================
 // UTILITY FUNCTIONS
@@ -105,6 +142,7 @@ export class WalletManager {
   private adminKeypair: Keypair | null = null;
   private lastCallTime: number = 0;
   private feeBudgetManager: FeeBudgetManager | null = null;
+  private tokenDb: TokenDatabase;
 
   // Simplified caching
   private keypairCache = new Map<string, Keypair>();
@@ -125,6 +163,13 @@ export class WalletManager {
   private postTimeoutProbeMaxAttempts = 3;
   private confirmationTimeoutMs = CONFIRMATION_TIMEOUT_MS;
   private signaturePollIntervalMs = 1000;
+  private mintProgramCache = new Map<string, TokenProgramDetection>();
+  private nativeBalanceCache = createExpiringCache<number>(
+    WALLET_RPC_CACHE_TTL_MS
+  );
+  private approvedTokenBalanceCache = createExpiringCache<
+    ApprovedTokenBalance[]
+  >(WALLET_RPC_CACHE_TTL_MS);
 
   private async probeTransactionAfterTimeout(
     signature: string
@@ -246,6 +291,7 @@ export class WalletManager {
     this.tokenMetadataCache = createExpiringCache<number>(
       TOKEN_METADATA_CACHE_DURATION_MS
     );
+    this.tokenDb = deps?.tokenDb ?? TokenDatabase.getInstance();
     this.loadAdminKeypair();
   }
 
@@ -308,11 +354,52 @@ export class WalletManager {
     }
   }
 
+  private getUserCacheKey(telegramId: bigint | number | string): string {
+    return typeof telegramId === "bigint"
+      ? telegramId.toString()
+      : String(telegramId);
+  }
+
+  private cloneApprovedTokenBalances(
+    balances: ApprovedTokenBalance[]
+  ): ApprovedTokenBalance[] {
+    return balances.map((entry) => ({ ...entry }));
+  }
+
+  private applyProgramHintsToApprovedTokens(
+    approvedTokens: Array<{
+      token_mint: string;
+      token_program_id?: string | null;
+    }>
+  ): void {
+    for (const token of approvedTokens) {
+      const detection = this.mintProgramCache.get(token.token_mint);
+      if (detection) {
+        token.token_program_id = detection.programId.toBase58();
+      }
+    }
+  }
+
   private getFeeBudget(): FeeBudgetManager {
     if (!this.feeBudgetManager) {
       this.feeBudgetManager = FeeBudgetManager.getInstance(this.connection);
     }
     return this.feeBudgetManager;
+  }
+
+  private async resolveTokenProgram(
+    mint: PublicKey | string
+  ): Promise<TokenProgramDetection> {
+    const mintKey = typeof mint === "string" ? new PublicKey(mint) : mint;
+    const cacheKey = mintKey.toBase58();
+    const cached = this.mintProgramCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const detection = await detectTokenProgram(this.connection, mintKey);
+    this.mintProgramCache.set(cacheKey, detection);
+    return detection;
   }
 
   private isMissingTokenAccountError(error: unknown): boolean {
@@ -416,10 +503,41 @@ export class WalletManager {
   // BALANCE METHODS
   // ================================
 
-  public async getBalance(telegramId: bigint): Promise<number> {
+  public async getBalance(
+    telegramId: bigint,
+    options: WalletFetchOptions = {}
+  ): Promise<number> {
+    const { forceFresh = false, allowStaleOnError = false, cacheTtlMs } = options;
+    const cacheKey = this.getUserCacheKey(telegramId);
+
+    if (!forceFresh) {
+      const cached = this.nativeBalanceCache.get(cacheKey);
+      if (typeof cached === "number") {
+        return cached;
+      }
+    }
+
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
-    return this.connection.getBalance(pubkey);
+
+    try {
+      const lamports = await this.connection.getBalance(pubkey);
+      this.nativeBalanceCache.setWithTTL(cacheKey, lamports, cacheTtlMs);
+      return lamports;
+    } catch (error) {
+      if (!forceFresh && allowStaleOnError) {
+        const stale = this.nativeBalanceCache.peek(cacheKey);
+        if (typeof stale === "number") {
+          console.warn(
+            `⚠️ Using stale SOL balance for ${pubkey.toBase58()} after RPC error:`,
+            error
+          );
+          return stale;
+        }
+      }
+
+      throw error;
+    }
   }
 
   public async getTokenBalance(
@@ -430,7 +548,7 @@ export class WalletManager {
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
     const mintPubkey = new PublicKey(tokenMint);
-    const { programId } = await detectTokenProgram(this.connection, mintPubkey);
+    const { programId } = await this.resolveTokenProgram(mintPubkey);
     const ata = await getAssociatedTokenAddress(
       mintPubkey,
       pubkey,
@@ -460,12 +578,14 @@ export class WalletManager {
           const payer = this.getKeyPair(telegramId);
 
           try {
+            const { programId: refreshedProgramId } =
+              await this.resolveTokenProgram(mintPubkey);
             const { instructions } =
               await this.findOrCreateAssociatedTokenAccount(
                 pubkey,
                 mintPubkey,
                 payer,
-                programId
+                refreshedProgramId
               );
 
             if (instructions.length === 0) {
@@ -473,7 +593,7 @@ export class WalletManager {
                 this.connection,
                 ata,
                 "confirmed",
-                programId
+                refreshedProgramId
               );
               return Number(refreshed.amount);
             }
@@ -488,7 +608,7 @@ export class WalletManager {
               this.connection,
               ata,
               "confirmed",
-              programId
+              refreshedProgramId
             );
             return Number(createdAccount.amount);
           } catch (creationError) {
@@ -518,20 +638,21 @@ export class WalletManager {
       token_mint: string;
       token_ticker: string;
       decimals: number;
-    }>
-  ): Promise<
-    Array<{
-      mint: string;
-      ticker: string;
-      balance: number;
-      decimals: number;
-      rawBalance: string;
-      lamports: bigint;
-      formattedBalance: string;
-      decimalBalance: number;
-      truncated?: boolean;
-    }>
-  > {
+      token_program_id?: string | null;
+    }>,
+    options: WalletFetchOptions = {}
+  ): Promise<ApprovedTokenBalance[]> {
+    const { forceFresh = false, allowStaleOnError = false, cacheTtlMs } = options;
+    const cacheKey = this.getUserCacheKey(telegramId);
+
+    if (!forceFresh) {
+      const cached = this.approvedTokenBalanceCache.get(cacheKey);
+      if (cached) {
+        this.applyProgramHintsToApprovedTokens(approvedTokens);
+        return this.cloneApprovedTokenBalances(cached);
+      }
+    }
+
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
 
@@ -567,37 +688,67 @@ export class WalletManager {
         }
       >();
 
-      for (const token of approvedTokens) {
-        try {
-          const mintKey = new PublicKey(token.token_mint);
-          const [splAta, token2022Ata] = await Promise.all([
-            getAssociatedTokenAddress(mintKey, pubkey, false, TOKEN_PROGRAM_ID),
-            getAssociatedTokenAddress(
+      const ataPlans = await Promise.all(
+        approvedTokens.map(async (token) => {
+          try {
+            const mintKey = new PublicKey(token.token_mint);
+            const hintedProgram = token.token_program_id;
+            let programDetection: TokenProgramDetection;
+            if (hintedProgram) {
+              const hintedId = new PublicKey(hintedProgram);
+              programDetection = {
+                programId: hintedId,
+                isToken2022: hintedId.equals(TOKEN_2022_PROGRAM_ID),
+              };
+              this.mintProgramCache.set(mintKey.toBase58(), programDetection);
+            } else {
+              programDetection = await this.resolveTokenProgram(mintKey);
+              try {
+                this.tokenDb.setTokenProgramId(
+                  token.token_mint,
+                  programDetection.programId.toBase58()
+                );
+              } catch (programPersistError) {
+                console.error(
+                  `Failed to persist token program for ${token.token_mint}:`,
+                  programPersistError
+                );
+              }
+              const mapEntry = approvedTokensMap.get(token.token_mint);
+              if (mapEntry) {
+                mapEntry.token_program_id = programDetection.programId.toBase58();
+              }
+              token.token_program_id = programDetection.programId.toBase58();
+            }
+
+            const ata = await getAssociatedTokenAddress(
               mintKey,
               pubkey,
               false,
-              TOKEN_2022_PROGRAM_ID
-            ),
-          ]);
+              programDetection.programId
+            );
 
-          ataLookup.set(splAta.toBase58(), {
-            address: splAta,
-            mint: token.token_mint,
-            programId: TOKEN_PROGRAM_ID,
-            decimals: token.decimals,
-          });
-          ataLookup.set(token2022Ata.toBase58(), {
-            address: token2022Ata,
-            mint: token.token_mint,
-            programId: TOKEN_2022_PROGRAM_ID,
-            decimals: token.decimals,
-          });
-        } catch (error) {
-          console.error(
-            `❌ Failed to derive associated token address for ${token.token_mint}:`,
-            error
-          );
+            return {
+              address: ata,
+              mint: token.token_mint,
+              programId: programDetection.programId,
+              decimals: token.decimals,
+            };
+          } catch (error) {
+            console.error(
+              `❌ Failed to derive associated token address for ${token.token_mint}:`,
+              error
+            );
+            return null;
+          }
+        })
+      );
+
+      for (const plan of ataPlans) {
+        if (!plan) {
+          continue;
         }
+        ataLookup.set(plan.address.toBase58(), plan);
       }
 
       const ataEntries = Array.from(ataLookup.values());
@@ -743,17 +894,7 @@ export class WalletManager {
         return [];
       }
 
-      const results: Array<{
-        mint: string;
-        ticker: string;
-        balance: number;
-        decimals: number;
-        rawBalance: string;
-        lamports: bigint;
-        formattedBalance: string;
-        decimalBalance: number;
-        truncated?: boolean;
-      }> = [];
+      const results: ApprovedTokenBalance[] = [];
 
       const metadataCache = new Map<
         string,
@@ -866,6 +1007,7 @@ export class WalletManager {
                 token_mint: registration.token.token_mint,
                 token_ticker: registration.token.token_ticker,
                 decimals: registration.token.decimals,
+                token_program_id: registration.token.token_program_id ?? null,
               });
             } catch (regError) {
               console.error(
@@ -954,15 +1096,33 @@ export class WalletManager {
         }
       }
 
-      return results.sort((a, b) => a.ticker.localeCompare(b.ticker));
+      results.sort((a, b) => a.ticker.localeCompare(b.ticker));
+      this.approvedTokenBalanceCache.setWithTTL(
+        cacheKey,
+        this.cloneApprovedTokenBalances(results),
+        cacheTtlMs
+      );
+      return results;
     } catch (error: any) {
       // Handle the case where user has no token accounts gracefully
       if (
-        error.message?.includes("could not find account") ||
-        error.message?.includes("Invalid param")
+        error?.message?.includes("could not find account") ||
+        error?.message?.includes("Invalid param")
       ) {
         console.log(`No token accounts found for user ${pubkey.toBase58()}`);
         return [];
+      }
+
+      if (!forceFresh && allowStaleOnError) {
+        const stale = this.approvedTokenBalanceCache.peek(cacheKey);
+        if (stale) {
+          console.warn(
+            `⚠️ Using stale token balances for ${pubkey.toBase58()} after RPC error:`,
+            error
+          );
+          this.applyProgramHintsToApprovedTokens(approvedTokens);
+          return this.cloneApprovedTokenBalances(stale);
+        }
       }
 
       console.error(
@@ -976,6 +1136,51 @@ export class WalletManager {
   /**
    * Get full token metadata including symbol and name
    */
+  public peekCachedNativeBalance(telegramId: bigint): number | undefined {
+    return this.nativeBalanceCache.peek(this.getUserCacheKey(telegramId));
+  }
+
+  public peekCachedApprovedTokenBalances(
+    telegramId: bigint
+  ): ApprovedTokenBalance[] | undefined {
+    const cached = this.approvedTokenBalanceCache.peek(
+      this.getUserCacheKey(telegramId)
+    );
+    return cached ? this.cloneApprovedTokenBalances(cached) : undefined;
+  }
+
+  public setCachedNativeBalance(
+    telegramId: bigint,
+    lamports: number,
+    ttlMs?: number
+  ): void {
+    this.nativeBalanceCache.setWithTTL(
+      this.getUserCacheKey(telegramId),
+      lamports,
+      ttlMs
+    );
+  }
+
+  public setCachedApprovedTokenBalances(
+    telegramId: bigint,
+    balances: ApprovedTokenBalance[],
+    ttlMs?: number
+  ): void {
+    this.approvedTokenBalanceCache.setWithTTL(
+      this.getUserCacheKey(telegramId),
+      this.cloneApprovedTokenBalances(balances),
+      ttlMs
+    );
+  }
+
+  public clearCachedWalletData(
+    telegramId: bigint | number | string
+  ): void {
+    const cacheKey = this.getUserCacheKey(telegramId);
+    this.nativeBalanceCache.delete(cacheKey);
+    this.approvedTokenBalanceCache.delete(cacheKey);
+  }
+
   public async getFullTokenMetadata(
     tokenMint: string
   ): Promise<{ decimals: number; symbol?: string; name?: string }> {
@@ -1928,9 +2133,7 @@ export class WalletManager {
       throw new Error("No signers provided");
     }
 
-    const latestBlockhash = await this.connection.getLatestBlockhash(
-      "confirmed"
-    );
+    const latestBlockhash = await this.getLatestBlockhash();
     const message = new TransactionMessage({
       payerKey: signers[0]!.publicKey,
       recentBlockhash: latestBlockhash.blockhash,
@@ -2051,9 +2254,7 @@ export class WalletManager {
 
     await this.throttle();
     try {
-      const latestBlockhash = await this.connection.getLatestBlockhash(
-        "confirmed"
-      );
+      const latestBlockhash = await this.getLatestBlockhash();
       const message = new TransactionMessage({
         payerKey: payer,
         recentBlockhash: latestBlockhash.blockhash,
@@ -2171,7 +2372,7 @@ export class WalletManager {
     }
 
     await this.throttle();
-    const result = await this.connection.getLatestBlockhash();
+    const result = await this.connection.getLatestBlockhash("confirmed");
     this.blockhashCache = { ...result, timestamp: now };
     return result;
   }
