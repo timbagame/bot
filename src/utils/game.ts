@@ -27,6 +27,7 @@ import {
   DEFAULT_NULL_ADDRESS,
   GAME_INFO_LIMIT,
   GAME_EXPIRATION_BUFFER_TIME,
+  MAX_ACTIVE_GAMES_PER_CREATOR,
   WSOL_MINT,
   DEFAULT_TOKEN_TICKER,
   LAMPORTS_PER_SOL,
@@ -2737,6 +2738,18 @@ export class GameManager {
       };
     }
 
+    const telegramIdStr = telegramId.toString();
+    const activeGameCount = this.gameDb.countActiveGamesByCreator(
+      telegramIdStr
+    );
+
+    if (activeGameCount >= MAX_ACTIVE_GAMES_PER_CREATOR) {
+      return {
+        success: false,
+        error: `Active game limit reached. You currently have ${activeGameCount} active games (maximum ${MAX_ACTIVE_GAMES_PER_CREATOR}). Finish or cancel an existing game before creating a new one.`,
+      };
+    }
+
     const { tokenMint, tokenTicker, amount } = parsedAmount;
     const requestedSol =
       parsedAmount.requestedNativeSol === true || tokenMint === WSOL_MINT;
@@ -2986,7 +2999,7 @@ You currently have ${formattedStake} ${tokenTicker} reserved for the ticket and 
       // Save game
       this.gameDb.saveGame(
         gamePda.toBase58(),
-        telegramId.toString(),
+        telegramIdStr,
         amount,
         gameType,
         tokenMint,

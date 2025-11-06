@@ -1,5 +1,10 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { LAMPORTS_PER_SOL, MIN_SOL_FOR_TX, WSOL_MINT } from "../src/utils/constants";
+import {
+  LAMPORTS_PER_SOL,
+  MAX_ACTIVE_GAMES_PER_CREATOR,
+  MIN_SOL_FOR_TX,
+  WSOL_MINT,
+} from "../src/utils/constants";
 import { parseDecimalAmount } from "../src/utils/amount";
 
 const extractCallbacks = (kb: any): string[] => {
@@ -760,6 +765,33 @@ describe("createGameViaCommand helper", () => {
     expect(messageArgs[2]).toBe(coinflipOptions.gameLabel);
     expect(messageArgs[3]).toBe(baseParsedAmount.amount);
     expect(messageArgs[5]).toBe(baseParsedAmount.tokenTicker);
+  });
+
+  test("relays active game limit failures from GameManager", async () => {
+    const ctx: any = makeCtx();
+    const limitMessage = `Active game limit reached. You currently have ${MAX_ACTIVE_GAMES_PER_CREATOR} active games (maximum ${MAX_ACTIVE_GAMES_PER_CREATOR}). Finish or cancel an existing game before creating a new one.`;
+    const deps = makeDeps({
+      gameManager: {
+        createGame: async () => ({ success: false, error: limitMessage }),
+        createGameMessage: async () => {
+          throw new Error("should not send message when creation fails");
+        },
+      },
+    });
+
+    await botModule.__test_createGameViaCommand(
+      ctx,
+      ["/cf", "5"],
+      1n,
+      coinflipOptions,
+      deps
+    );
+
+    expect(ctx.__calls.length).toBe(1);
+    const response = String(ctx.__calls[0]);
+    expect(response).toContain("Failed to create game");
+    expect(response).toContain("limit reached");
+    expect(response).toContain(String(MAX_ACTIVE_GAMES_PER_CREATOR));
   });
 
   test("allows SOL games when native balance covers deficit", async () => {

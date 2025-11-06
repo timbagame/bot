@@ -395,6 +395,19 @@ export class GameDatabase extends BaseDatabase {
     );
   }
 
+  public countActiveGamesByCreator(telegramId: string): number {
+    const result = this.get<{ active_count: number }>(
+      `
+        SELECT COUNT(*) as active_count
+        FROM games
+        WHERE creator_telegram_id = ? AND status = 'active'
+      `,
+      [telegramId],
+      "counting active games by creator"
+    );
+    return result?.active_count ?? 0;
+  }
+
   // Get recent completed games for a player
   public getRecentGames(telegramId: string, limit: number = 10): GameData[] {
     const playerKey = this.getPlayerPublicKey(telegramId);
