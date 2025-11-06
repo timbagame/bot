@@ -107,6 +107,14 @@ export const MAX_ACTIVE_GAMES_PER_CREATOR = parsePositiveInteger(
   "MAX_ACTIVE_GAMES_PER_CREATOR",
   3
 );
+export const GAME_CREATION_RATE_LIMIT_WINDOW_MS = parsePositiveDuration(
+  "GAME_CREATION_RATE_LIMIT_WINDOW_MS",
+  5 * 60_000
+);
+export const MAX_GAMES_PER_CREATOR_WINDOW = parsePositiveInteger(
+  "MAX_GAMES_PER_CREATOR_WINDOW",
+  2
+);
 // ================================
 // DEFAULTS
 // ================================

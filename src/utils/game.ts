@@ -25,9 +25,11 @@ import {
 } from "./format-amount";
 import {
   DEFAULT_NULL_ADDRESS,
+  GAME_CREATION_RATE_LIMIT_WINDOW_MS,
   GAME_INFO_LIMIT,
   GAME_EXPIRATION_BUFFER_TIME,
   MAX_ACTIVE_GAMES_PER_CREATOR,
+  MAX_GAMES_PER_CREATOR_WINDOW,
   WSOL_MINT,
   DEFAULT_TOKEN_TICKER,
   LAMPORTS_PER_SOL,
@@ -105,6 +107,35 @@ const debugLog = (...args: unknown[]): void => {
     return;
   }
   console.debug(...args);
+};
+
+const formatRateLimitWindow = (windowMs: number): string => {
+  if (!Number.isFinite(windowMs) || windowMs <= 0) {
+    return "recent window";
+  }
+
+  if (windowMs < 1_000) {
+    const rounded = Math.ceil(windowMs);
+    return `${rounded}ms`;
+  }
+
+  const seconds = Math.ceil(windowMs / 1_000);
+  if (seconds < 60) {
+    return `${seconds} second${seconds === 1 ? "" : "s"}`;
+  }
+
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  }
+
+  const hours = Math.ceil(minutes / 60);
+  if (hours < 24) {
+    return `${hours} hour${hours === 1 ? "" : "s"}`;
+  }
+
+  const days = Math.ceil(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"}`;
 };
 
 type GameTokenContextAccounts = {
@@ -2747,6 +2778,22 @@ export class GameManager {
       return {
         success: false,
         error: `Active game limit reached. You currently have ${activeGameCount} active games (maximum ${MAX_ACTIVE_GAMES_PER_CREATOR}). Finish or cancel an existing game before creating a new one.`,
+      };
+    }
+
+    const windowStart = Date.now() - GAME_CREATION_RATE_LIMIT_WINDOW_MS;
+    const recentCreationCount = this.gameDb.countRecentGamesByCreator(
+      telegramIdStr,
+      windowStart
+    );
+
+    if (recentCreationCount >= MAX_GAMES_PER_CREATOR_WINDOW) {
+      const windowLabel = formatRateLimitWindow(
+        GAME_CREATION_RATE_LIMIT_WINDOW_MS
+      );
+      return {
+        success: false,
+        error: `Game creation rate limit reached. You have created ${recentCreationCount} games in the last ${windowLabel} (maximum ${MAX_GAMES_PER_CREATOR_WINDOW}). Please wait before creating a new game.`,
       };
     }
 

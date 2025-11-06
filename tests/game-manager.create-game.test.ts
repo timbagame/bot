@@ -6,7 +6,12 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import { PDAManager } from "../src/utils/pda";
-import { MAX_ACTIVE_GAMES_PER_CREATOR, WSOL_MINT } from "../src/utils/constants";
+import {
+  GAME_CREATION_RATE_LIMIT_WINDOW_MS,
+  MAX_ACTIVE_GAMES_PER_CREATOR,
+  MAX_GAMES_PER_CREATOR_WINDOW,
+  WSOL_MINT,
+} from "../src/utils/constants";
 
 function resetGM() {
   // @ts-ignore
@@ -83,6 +88,7 @@ describe("GameManager.createGame", () => {
     const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, {
       savePlayerMapping: () => {},
       countActiveGamesByCreator: () => 0,
+      countRecentGamesByCreator: () => 0,
     } as any);
     const res = await gm.createGame(
       "coinflip",
@@ -112,6 +118,7 @@ describe("GameManager.createGame", () => {
     const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, {
       savePlayerMapping: () => {},
       countActiveGamesByCreator: () => 0,
+      countRecentGamesByCreator: () => 0,
     } as any);
     const res = await gm.createGame("coinflip", { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false }, 2, 2, 60, 1n);
     expect(res.success).toBe(false);
@@ -129,6 +136,7 @@ describe("GameManager.createGame", () => {
     const db = {
       savePlayerMapping: () => {},
       countActiveGamesByCreator: () => 0,
+      countRecentGamesByCreator: () => 0,
     } as any;
     const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, db);
     // Patch oracle client on the instance
@@ -154,6 +162,7 @@ describe("GameManager.createGame", () => {
     const db = {
       savePlayerMapping: () => {},
       countActiveGamesByCreator: () => MAX_ACTIVE_GAMES_PER_CREATOR,
+      countRecentGamesByCreator: () => 0,
     } as any;
     const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, db);
     const res = await gm.createGame(
@@ -168,6 +177,44 @@ describe("GameManager.createGame", () => {
     const message = String(res.error);
     expect(message).toContain("limit reached");
     expect(message).toContain(String(MAX_ACTIVE_GAMES_PER_CREATOR));
+  });
+
+  test("fails fast when creator hits recent creation rate limit", async () => {
+    resetGM();
+    const wallet = makeWallet({
+      getTokenMetadata: async () => {
+        throw new Error("metadata should not be fetched when rate limit hit");
+      },
+      getTokenBalance: async () => {
+        throw new Error("balance should not be checked when rate limit hit");
+      },
+      getBalance: async () => {
+        throw new Error("SOL balance should not be checked when rate limit hit");
+      },
+    });
+    const recentCount = MAX_GAMES_PER_CREATOR_WINDOW;
+    const db = {
+      savePlayerMapping: () => {},
+      countActiveGamesByCreator: () => 0,
+      countRecentGamesByCreator: () => recentCount,
+    } as any;
+    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, db);
+    const res = await gm.createGame(
+      "coinflip",
+      { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
+      2,
+      2,
+      60,
+      1n
+    );
+
+    expect(res.success).toBe(false);
+    const message = String(res.error);
+    expect(message.toLowerCase()).toContain("rate limit");
+    expect(message).toContain(String(recentCount));
+    expect(message).toContain(String(MAX_GAMES_PER_CREATOR_WINDOW));
+    expect(message).toContain("Please wait");
+    expect(message).toContain("last");
   });
 
   test("wraps native SOL when WSOL token specified explicitly", async () => {
@@ -193,6 +240,7 @@ describe("GameManager.createGame", () => {
       saveGame: () => {},
       saveGameParticipant: () => {},
       countActiveGamesByCreator: () => 0,
+      countRecentGamesByCreator: () => 0,
       getGame: () => ({
         token_mint: WSOL_MINT,
         token_ticker: "WSOL",
@@ -259,6 +307,7 @@ describe("GameManager.createGame", () => {
       saveGame: () => {},
       saveGameParticipant: () => {},
       countActiveGamesByCreator: () => 0,
+      countRecentGamesByCreator: () => 0,
       getGame: () => ({
         token_mint: WSOL_MINT,
         token_ticker: "WSOL",
@@ -313,6 +362,7 @@ describe("GameManager.createGame", () => {
       savePlayerMapping: () => {},
       saveGame: (...args: any[]) => { saved.push(args); },
       countActiveGamesByCreator: () => 0,
+      countRecentGamesByCreator: () => 0,
     } as any;
     const program = makeProgram(wallet.connection);
     const gm = GameManager.getInstance(program, wallet, db);
@@ -393,6 +443,7 @@ describe("GameManager.createGame", () => {
     const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, {
       savePlayerMapping: () => {},
       countActiveGamesByCreator: () => 0,
+      countRecentGamesByCreator: () => 0,
     } as any);
     const res = await gm.createGame("coinflip", { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false }, 2, 2, 60, 1n);
     expect(res.success).toBe(false);
