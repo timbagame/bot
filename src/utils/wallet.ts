@@ -39,6 +39,7 @@ import {
   BLOCK_HEIGHT_EXPIRATION_GRACE,
   TRANSACTION_RESUBMIT_ATTEMPTS,
   TOKEN_DISCOVERY_COOLDOWN_MS,
+  WALLET_RPC_CACHE_TTL_MS,
 } from "./constants";
 import { formatAmount } from "./format-amount";
 import { WSOL_MINT } from "./token-registry";
@@ -69,6 +70,37 @@ type WalletDeps = {
 };
 
 const TOKEN_METADATA_CACHE_DURATION_MS = 5 * 60 * 1000;
+
+export type WalletFetchOptions = {
+  forceFresh?: boolean;
+  allowStaleOnError?: boolean;
+  cacheTtlMs?: number;
+};
+
+export type ApprovedTokenBalance = {
+  mint: string;
+  ticker: string;
+  balance: number;
+  decimals: number;
+  rawBalance: string;
+  lamports: bigint;
+  formattedBalance: string;
+  decimalBalance: number;
+  truncated?: boolean;
+};
+
+export type WalletBalancesSnapshot = {
+  solBalance: number;
+  nativeSolBalance: number;
+  wsolBalance: number;
+  tokenBalances: ApprovedTokenBalance[];
+  approvedTokens: Array<{
+    token_mint: string;
+    token_ticker: string;
+    decimals: number;
+    token_program_id?: string | null;
+  }>;
+};
 
 // ================================
 // UTILITY FUNCTIONS
@@ -132,6 +164,12 @@ export class WalletManager {
   private confirmationTimeoutMs = CONFIRMATION_TIMEOUT_MS;
   private signaturePollIntervalMs = 1000;
   private mintProgramCache = new Map<string, TokenProgramDetection>();
+  private nativeBalanceCache = createExpiringCache<number>(
+    WALLET_RPC_CACHE_TTL_MS
+  );
+  private approvedTokenBalanceCache = createExpiringCache<
+    ApprovedTokenBalance[]
+  >(WALLET_RPC_CACHE_TTL_MS);
 
   private async probeTransactionAfterTimeout(
     signature: string
@@ -316,6 +354,32 @@ export class WalletManager {
     }
   }
 
+  private getUserCacheKey(telegramId: bigint | number | string): string {
+    return typeof telegramId === "bigint"
+      ? telegramId.toString()
+      : String(telegramId);
+  }
+
+  private cloneApprovedTokenBalances(
+    balances: ApprovedTokenBalance[]
+  ): ApprovedTokenBalance[] {
+    return balances.map((entry) => ({ ...entry }));
+  }
+
+  private applyProgramHintsToApprovedTokens(
+    approvedTokens: Array<{
+      token_mint: string;
+      token_program_id?: string | null;
+    }>
+  ): void {
+    for (const token of approvedTokens) {
+      const detection = this.mintProgramCache.get(token.token_mint);
+      if (detection) {
+        token.token_program_id = detection.programId.toBase58();
+      }
+    }
+  }
+
   private getFeeBudget(): FeeBudgetManager {
     if (!this.feeBudgetManager) {
       this.feeBudgetManager = FeeBudgetManager.getInstance(this.connection);
@@ -439,10 +503,41 @@ export class WalletManager {
   // BALANCE METHODS
   // ================================
 
-  public async getBalance(telegramId: bigint): Promise<number> {
+  public async getBalance(
+    telegramId: bigint,
+    options: WalletFetchOptions = {}
+  ): Promise<number> {
+    const { forceFresh = false, allowStaleOnError = false, cacheTtlMs } = options;
+    const cacheKey = this.getUserCacheKey(telegramId);
+
+    if (!forceFresh) {
+      const cached = this.nativeBalanceCache.get(cacheKey);
+      if (typeof cached === "number") {
+        return cached;
+      }
+    }
+
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
-    return this.connection.getBalance(pubkey);
+
+    try {
+      const lamports = await this.connection.getBalance(pubkey);
+      this.nativeBalanceCache.setWithTTL(cacheKey, lamports, cacheTtlMs);
+      return lamports;
+    } catch (error) {
+      if (!forceFresh && allowStaleOnError) {
+        const stale = this.nativeBalanceCache.peek(cacheKey);
+        if (typeof stale === "number") {
+          console.warn(
+            `⚠️ Using stale SOL balance for ${pubkey.toBase58()} after RPC error:`,
+            error
+          );
+          return stale;
+        }
+      }
+
+      throw error;
+    }
   }
 
   public async getTokenBalance(
@@ -544,20 +639,20 @@ export class WalletManager {
       token_ticker: string;
       decimals: number;
       token_program_id?: string | null;
-    }>
-  ): Promise<
-    Array<{
-      mint: string;
-      ticker: string;
-      balance: number;
-      decimals: number;
-      rawBalance: string;
-      lamports: bigint;
-      formattedBalance: string;
-      decimalBalance: number;
-      truncated?: boolean;
-    }>
-  > {
+    }>,
+    options: WalletFetchOptions = {}
+  ): Promise<ApprovedTokenBalance[]> {
+    const { forceFresh = false, allowStaleOnError = false, cacheTtlMs } = options;
+    const cacheKey = this.getUserCacheKey(telegramId);
+
+    if (!forceFresh) {
+      const cached = this.approvedTokenBalanceCache.get(cacheKey);
+      if (cached) {
+        this.applyProgramHintsToApprovedTokens(approvedTokens);
+        return this.cloneApprovedTokenBalances(cached);
+      }
+    }
+
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
 
@@ -799,17 +894,7 @@ export class WalletManager {
         return [];
       }
 
-      const results: Array<{
-        mint: string;
-        ticker: string;
-        balance: number;
-        decimals: number;
-        rawBalance: string;
-        lamports: bigint;
-        formattedBalance: string;
-        decimalBalance: number;
-        truncated?: boolean;
-      }> = [];
+      const results: ApprovedTokenBalance[] = [];
 
       const metadataCache = new Map<
         string,
@@ -1011,15 +1096,33 @@ export class WalletManager {
         }
       }
 
-      return results.sort((a, b) => a.ticker.localeCompare(b.ticker));
+      results.sort((a, b) => a.ticker.localeCompare(b.ticker));
+      this.approvedTokenBalanceCache.setWithTTL(
+        cacheKey,
+        this.cloneApprovedTokenBalances(results),
+        cacheTtlMs
+      );
+      return results;
     } catch (error: any) {
       // Handle the case where user has no token accounts gracefully
       if (
-        error.message?.includes("could not find account") ||
-        error.message?.includes("Invalid param")
+        error?.message?.includes("could not find account") ||
+        error?.message?.includes("Invalid param")
       ) {
         console.log(`No token accounts found for user ${pubkey.toBase58()}`);
         return [];
+      }
+
+      if (!forceFresh && allowStaleOnError) {
+        const stale = this.approvedTokenBalanceCache.peek(cacheKey);
+        if (stale) {
+          console.warn(
+            `⚠️ Using stale token balances for ${pubkey.toBase58()} after RPC error:`,
+            error
+          );
+          this.applyProgramHintsToApprovedTokens(approvedTokens);
+          return this.cloneApprovedTokenBalances(stale);
+        }
       }
 
       console.error(
@@ -1033,6 +1136,51 @@ export class WalletManager {
   /**
    * Get full token metadata including symbol and name
    */
+  public peekCachedNativeBalance(telegramId: bigint): number | undefined {
+    return this.nativeBalanceCache.peek(this.getUserCacheKey(telegramId));
+  }
+
+  public peekCachedApprovedTokenBalances(
+    telegramId: bigint
+  ): ApprovedTokenBalance[] | undefined {
+    const cached = this.approvedTokenBalanceCache.peek(
+      this.getUserCacheKey(telegramId)
+    );
+    return cached ? this.cloneApprovedTokenBalances(cached) : undefined;
+  }
+
+  public setCachedNativeBalance(
+    telegramId: bigint,
+    lamports: number,
+    ttlMs?: number
+  ): void {
+    this.nativeBalanceCache.setWithTTL(
+      this.getUserCacheKey(telegramId),
+      lamports,
+      ttlMs
+    );
+  }
+
+  public setCachedApprovedTokenBalances(
+    telegramId: bigint,
+    balances: ApprovedTokenBalance[],
+    ttlMs?: number
+  ): void {
+    this.approvedTokenBalanceCache.setWithTTL(
+      this.getUserCacheKey(telegramId),
+      this.cloneApprovedTokenBalances(balances),
+      ttlMs
+    );
+  }
+
+  public clearCachedWalletData(
+    telegramId: bigint | number | string
+  ): void {
+    const cacheKey = this.getUserCacheKey(telegramId);
+    this.nativeBalanceCache.delete(cacheKey);
+    this.approvedTokenBalanceCache.delete(cacheKey);
+  }
+
   public async getFullTokenMetadata(
     tokenMint: string
   ): Promise<{ decimals: number; symbol?: string; name?: string }> {

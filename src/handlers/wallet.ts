@@ -8,6 +8,7 @@ import {
   getRequiredTelegramIdForContext,
   safeAnswerCallbackQuery,
 } from "../utils/context-helpers";
+import { RateLimitExceededError } from "../utils/rate-limiter";
 
 export type ShowWalletUIDeps = {
   wallet: {
@@ -99,6 +100,23 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
 
     await sendWalletContent(caption);
   } catch (error) {
+    if (error instanceof RateLimitExceededError) {
+      const waitSeconds = Math.max(1, Math.ceil(error.retryAfterMs / 1000));
+      console.warn(
+        `Rate limit hit for wallet UI ${telegramId.toString()}: retry in ${waitSeconds}s`
+      );
+      const response = [
+        `💳 <b>Wallet</b>`,
+        "",
+        `<code>${escapeHtml(walletAddress)}</code>`,
+        "",
+        "⏳ <i>Too many refreshes</i>",
+        `<i>Try again in ${waitSeconds}s.</i>`,
+      ];
+      await sendWalletContent(response.join("\n"));
+      return;
+    }
+
     console.error("Error loading balances:", error);
     const errorResponse = [
       `💳 <b>Wallet</b>`,

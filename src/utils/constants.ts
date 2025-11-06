@@ -83,12 +83,24 @@ export const TOKEN_DISCOVERY_COOLDOWN_MS = parsePositiveDuration(
   "TOKEN_DISCOVERY_COOLDOWN_MS",
   2 * 60_000
 );
+export const WALLET_RPC_CACHE_TTL_MS = parsePositiveDuration(
+  "WALLET_RPC_CACHE_TTL_MS",
+  20_000
+);
 
 // ================================
 // LIMITS
 // ================================
 
 export const WALLET_RATE_LIMIT_MS = 500;
+export const USER_WALLET_RPC_WINDOW_MS = parsePositiveDuration(
+  "USER_WALLET_RPC_WINDOW_MS",
+  30_000
+);
+export const USER_WALLET_RPC_MAX_CALLS = parsePositiveInteger(
+  "USER_WALLET_RPC_MAX_CALLS",
+  6
+);
 export const CALLBACK_MESSAGE_MAX_LENGTH = 180;
 export const GAME_INFO_LIMIT = 5;
 // ================================
@@ -188,6 +200,31 @@ function parsePositiveDuration(key: string, fallback: number): number {
   }
 
   return parsed;
+}
+
+function parsePositiveInteger(key: string, fallback: number): number {
+  const raw = process.env[key];
+  if (raw === undefined) {
+    return fallback;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    console.warn(
+      `[Config] ${key} must be a positive integer. Received '${raw}', using fallback ${fallback}.`
+    );
+    return fallback;
+  }
+
+  if (parsed <= 0) {
+    const clamped = Math.max(1, Math.floor(fallback));
+    console.warn(
+      `[Config] ${key} must be > 0. Received ${parsed}, clamping to ${clamped}.`
+    );
+    return clamped;
+  }
+
+  return Math.floor(parsed);
 }
 
 // Cache TTL (ms) for token prices

@@ -32,6 +32,8 @@ import {
   INPUT_TIMEOUT_HINT,
   SWAP_DEFAULT_SLIPPAGE_BPS,
   SWAP_SLIPPAGE_OPTIONS_BPS,
+  USER_WALLET_RPC_WINDOW_MS,
+  USER_WALLET_RPC_MAX_CALLS,
   applyOracleBufferTime,
 } from "./utils/constants";
 import { FeeBudgetManager } from "./utils/fee-budget";
@@ -111,6 +113,7 @@ import { createWalletTransactionsModule } from "./handlers/wallet-transactions";
 import { generateTransactionId } from "./utils/transaction-id";
 import type { TokenBalanceLike } from "./types/wallet";
 import { refreshDynamicFeeBudgets } from "./utils/fee-budget-refresh";
+import { SlidingWindowRateLimiter } from "./utils/rate-limiter";
 export type { CreateGameViaCommandOptions } from "./handlers/game-commands";
 
 // ================================
@@ -137,6 +140,9 @@ bot.use(async (ctx, next) => {
   await next();
 });
 export const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
+const walletRpcLimiter = new SlidingWindowRateLimiter(
+  USER_WALLET_RPC_WINDOW_MS
+);
 const feeBudget = FeeBudgetManager.getInstance(wallet.getConnection());
 let SOL_FEE_BUFFER_LAMPORTS = feeBudget.getCachedSingleTransactionLamports();
 
@@ -193,6 +199,10 @@ const walletMenuModule = createWalletMenuModule({
   wallet,
   getTokenManager: () => tokenManager,
   wrapCallbackHandler,
+  rpcRateLimiter: {
+    limiter: walletRpcLimiter,
+    maxRequests: USER_WALLET_RPC_MAX_CALLS,
+  },
 });
 
 const {
