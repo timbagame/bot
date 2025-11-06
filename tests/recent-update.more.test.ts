@@ -69,6 +69,74 @@ test("recentUpdateGuard: processes recent messages (not dropped)", async () => {
   delete process.env["MAX_MESSAGE_AGE_SEC"];
 });
 
+test("recentUpdateGuard: drops message older than limit even with sub-second drift", async () => {
+  const originalDateNow = Date.now;
+  const baseSecond = 1_700_000_000;
+  try {
+    Date.now = () => baseSecond * 1000 + 60_900; // 60.9 seconds later
+    process.env["MAX_MESSAGE_AGE_SEC"] = "60";
+    let nextCalled = 0;
+    const ctx: any = {
+      message: { date: baseSecond },
+    };
+
+    await recentUpdateGuard(ctx, async () => {
+      nextCalled++;
+    });
+
+    expect(nextCalled).toBe(0);
+  } finally {
+    Date.now = originalDateNow;
+    delete process.env["MAX_MESSAGE_AGE_SEC"];
+  }
+});
+
+test("recentUpdateGuard: ignores invalid negative message age override", async () => {
+  const originalDateNow = Date.now;
+  try {
+    const nowMs = 1_700_000_100_000;
+    Date.now = () => nowMs;
+    process.env["MAX_MESSAGE_AGE_SEC"] = "-5";
+    let nextCalled = 0;
+
+    const ctx: any = {
+      message: { date: Math.floor((nowMs - 2_000) / 1000) }, // 2 seconds old
+    };
+
+    await recentUpdateGuard(ctx, async () => {
+      nextCalled++;
+    });
+
+    expect(nextCalled).toBe(1);
+  } finally {
+    Date.now = originalDateNow;
+    delete process.env["MAX_MESSAGE_AGE_SEC"];
+  }
+});
+
+test("recentUpdateGuard: drops inline callback with missing timestamp", async () => {
+  delete process.env["MAX_CALLBACK_AGE_SEC"];
+  let answeredText: string | undefined;
+  let nextCalled = 0;
+
+  const ctx: any = {
+    callbackQuery: {
+      id: "cb-inline",
+      inline_message_id: "inline:42",
+    },
+    answerCallbackQuery: async (text?: string) => {
+      answeredText = text;
+    },
+  };
+
+  await recentUpdateGuard(ctx, async () => {
+    nextCalled++;
+  });
+
+  expect(nextCalled).toBe(0);
+  expect(answeredText).toContain("expired");
+});
+
 test("shouldDropUpdate sanity (boundary)", () => {
   const now = 1_700_000_000;
   expect(shouldDropUpdate(now - 5, now, 5)).toBe(false);

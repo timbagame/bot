@@ -25,7 +25,7 @@ function resolveMaxAgeSec(ctx: Context): number {
   const legacyOverride = process.env["MAX_UPDATE_AGE_SEC"];
   if (legacyOverride) {
     const parsed = Number(legacyOverride);
-    if (!Number.isNaN(parsed)) return parsed;
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
 
   const isCallback = Boolean((ctx as any).callbackQuery);
@@ -33,7 +33,7 @@ function resolveMaxAgeSec(ctx: Context): number {
   const envValue = process.env[envKey];
   if (envValue) {
     const parsed = Number(envValue);
-    if (!Number.isNaN(parsed)) {
+    if (Number.isFinite(parsed) && parsed > 0) {
       return parsed;
     }
   }
@@ -50,8 +50,18 @@ export async function recentUpdateGuard(ctx: Context, next: NextFunction) {
     return next();
   }
   const updateUnix = getUpdateUnixSeconds(ctx);
-  if (!updateUnix) return next();
-  const nowSec = Math.floor(Date.now() / 1000);
+  const isInlineCallback = Boolean((ctx as any).callbackQuery?.inline_message_id);
+  if (updateUnix == null) {
+    if (isInlineCallback) {
+      await safeAnswerCallbackQuery(
+        ctx,
+        "⏱️ This action expired. Please open a new menu.",
+      );
+      return;
+    }
+    return next();
+  }
+  const nowSec = Date.now() / 1000;
   const maxAgeSec = resolveMaxAgeSec(ctx);
   if (shouldDropUpdate(updateUnix, nowSec, maxAgeSec)) {
     if (ctx.callbackQuery) {
