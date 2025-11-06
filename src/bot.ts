@@ -323,6 +323,9 @@ export const __test_setGameManager = (manager: GameManager): void => {
   gameManager = manager;
 };
 
+export const __test_getPendingGameCreations = (): Set<string> =>
+  new Set(pendingGameCreations);
+
 export const __test_getGameDatabase = () => gameDb;
 
 export const __test_setGameDatabase = (db: GameDatabase) => {

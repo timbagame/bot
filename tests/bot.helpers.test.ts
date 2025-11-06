@@ -1,5 +1,12 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { LAMPORTS_PER_SOL, MIN_SOL_FOR_TX, WSOL_MINT } from "../src/utils/constants";
+import {
+  GAME_CREATION_RATE_LIMIT_WINDOW_MS,
+  LAMPORTS_PER_SOL,
+  MAX_ACTIVE_GAMES_PER_CREATOR,
+  MAX_GAMES_PER_CREATOR_WINDOW,
+  MIN_SOL_FOR_TX,
+  WSOL_MINT,
+} from "../src/utils/constants";
 import { parseDecimalAmount } from "../src/utils/amount";
 
 const extractCallbacks = (kb: any): string[] => {
@@ -621,6 +628,35 @@ describe("createGameViaCommand helper", () => {
     requestedNativeSol: false,
   };
 
+  const formatWindowForTests = (ms: number): string => {
+    if (!Number.isFinite(ms) || ms <= 0) {
+      return "recent window";
+    }
+
+    if (ms < 1_000) {
+      const rounded = Math.ceil(ms);
+      return `${rounded}ms`;
+    }
+
+    const seconds = Math.ceil(ms / 1_000);
+    if (seconds < 60) {
+      return `${seconds} second${seconds === 1 ? "" : "s"}`;
+    }
+
+    const minutes = Math.ceil(seconds / 60);
+    if (minutes < 60) {
+      return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+    }
+
+    const hours = Math.ceil(minutes / 60);
+    if (hours < 24) {
+      return `${hours} hour${hours === 1 ? "" : "s"}`;
+    }
+
+    const days = Math.ceil(hours / 24);
+    return `${days} day${days === 1 ? "" : "s"}`;
+  };
+
   const makeDeps = (
     overrides: Partial<CreateGameViaCommandDeps> & {
       wallet?: Partial<CreateGameViaCommandDeps["wallet"]>;
@@ -760,6 +796,63 @@ describe("createGameViaCommand helper", () => {
     expect(messageArgs[2]).toBe(coinflipOptions.gameLabel);
     expect(messageArgs[3]).toBe(baseParsedAmount.amount);
     expect(messageArgs[5]).toBe(baseParsedAmount.tokenTicker);
+  });
+
+  test("relays active game limit failures from GameManager", async () => {
+    const ctx: any = makeCtx();
+    const limitMessage = `Active game limit reached. You currently have ${MAX_ACTIVE_GAMES_PER_CREATOR} active games (maximum ${MAX_ACTIVE_GAMES_PER_CREATOR}). Finish or cancel an existing game before creating a new one.`;
+    const deps = makeDeps({
+      gameManager: {
+        createGame: async () => ({ success: false, error: limitMessage }),
+        createGameMessage: async () => {
+          throw new Error("should not send message when creation fails");
+        },
+      },
+    });
+
+    await botModule.__test_createGameViaCommand(
+      ctx,
+      ["/cf", "5"],
+      1n,
+      coinflipOptions,
+      deps
+    );
+
+    expect(ctx.__calls.length).toBe(1);
+    const response = String(ctx.__calls[0]);
+    expect(response).toContain("Failed to create game");
+    expect(response).toContain("limit reached");
+    expect(response).toContain(String(MAX_ACTIVE_GAMES_PER_CREATOR));
+  });
+
+  test("relays creation rate limit failures from GameManager", async () => {
+    const ctx: any = makeCtx();
+    const recentCount = MAX_GAMES_PER_CREATOR_WINDOW;
+    const windowLabel = formatWindowForTests(GAME_CREATION_RATE_LIMIT_WINDOW_MS);
+    const rateLimitMessage = `Game creation rate limit reached. You have created ${recentCount} games in the last ${windowLabel} (maximum ${MAX_GAMES_PER_CREATOR_WINDOW}). Please wait before creating a new game.`;
+    const deps = makeDeps({
+      gameManager: {
+        createGame: async () => ({ success: false, error: rateLimitMessage }),
+        createGameMessage: async () => {
+          throw new Error("should not send message when creation fails");
+        },
+      },
+    });
+
+    await botModule.__test_createGameViaCommand(
+      ctx,
+      ["/cf", "5"],
+      1n,
+      coinflipOptions,
+      deps
+    );
+
+    expect(ctx.__calls.length).toBe(1);
+    const response = String(ctx.__calls[0]);
+    expect(response).toContain("Failed to create game");
+    expect(response.toLowerCase()).toContain("rate limit");
+    expect(response).toContain(String(MAX_GAMES_PER_CREATOR_WINDOW));
+    expect(response).toContain("Please wait");
   });
 
   test("allows SOL games when native balance covers deficit", async () => {
