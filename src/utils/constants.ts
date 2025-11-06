@@ -265,13 +265,13 @@ export const buildPumpFunCoinUrl = (mintAddress: string): string => {
 // Start/Wallet video - for /start command and wallet UI
 // Use getter function to allow dynamic changes
 export const getStartVideoId = () =>
-  "CgACAgEAAx0Ce_D3oQACZuxo-WS_4i1IJ6SlAx3s6vvIe6Qw-QACxAYAAo4w0EeJ0XIEobD7cjYE";
+  "CgACAgEAAxkBAAMDaQ0M13GXsOvS-Sbb3E_QntmacWoAAsQGAAKOMNBHC0hnpwojqy82BA";
 
 // Coinflip start video - for when coinflip rounds begin
 // Use getter function to allow dynamic changes
 export const getCoinflipVideoId = () =>
-  "CgACAgEAAx0Ce_D3oQACZuxo-WS_4i1IJ6SlAx3s6vvIe6Qw-QACxAYAAo4w0EeJ0XIEobD7cjYE";
+  "CgACAgEAAxkBAAMDaQ0M13GXsOvS-Sbb3E_QntmacWoAAsQGAAKOMNBHC0hnpwojqy82BA";
 
 // Giveaway start video - for giveaway announcements
 export const getGiveawayVideoId = () =>
-  "CgACAgEAAx0Ce_D3oQACZuxo-WS_4i1IJ6SlAx3s6vvIe6Qw-QACxAYAAo4w0EeJ0XIEobD7cjYE";
+  "CgACAgEAAxkBAAMDaQ0M13GXsOvS-Sbb3E_QntmacWoAAsQGAAKOMNBHC0hnpwojqy82BA";
