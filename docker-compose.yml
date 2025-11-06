@@ -1,6 +1,6 @@
 services:
   app:
-    build: .
+    image: ghcr.io/timbagame/bot:main
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
