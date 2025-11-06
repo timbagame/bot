@@ -2769,6 +2769,7 @@ bot.command("help", async (ctx: Context) => {
     "/active - Show your active games",
     "/games - Show your recent games",
     "/leaderboard - Show top 10 players in this group (groups only)",
+    "/lb - Shorthand for leaderboard command",
     "",
     "<b>🪙 Token Management:</b>",
     "/default [TOKEN] - Show/set default token for this chat (admin only to set)",
