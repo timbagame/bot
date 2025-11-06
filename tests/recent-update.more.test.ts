@@ -2,6 +2,9 @@ import { expect, test } from "bun:test";
 import { recentUpdateGuard, shouldDropUpdate } from "../src/utils/recent-update";
 
 test("recentUpdateGuard: calls next when no date present", async () => {
+  delete process.env["MAX_CALLBACK_AGE_SEC"];
+  delete process.env["MAX_MESSAGE_AGE_SEC"];
+  delete process.env["MAX_UPDATE_AGE_SEC"];
   let called = 0;
   await recentUpdateGuard({} as any, async () => {
     called++;
@@ -11,7 +14,8 @@ test("recentUpdateGuard: calls next when no date present", async () => {
 
 test("recentUpdateGuard: drops old callback update and answers via ctx.answerCallbackQuery if present", async () => {
   const nowSec = Math.floor(Date.now() / 1000);
-  process.env["MAX_UPDATE_AGE_SEC"] = "5"; // 5 seconds max
+  delete process.env["MAX_MESSAGE_AGE_SEC"];
+  process.env["MAX_CALLBACK_AGE_SEC"] = "5"; // 5 seconds max
   let answeredText: string | undefined;
   let nextCalled = 0;
 
@@ -28,11 +32,12 @@ test("recentUpdateGuard: drops old callback update and answers via ctx.answerCal
 
   expect(nextCalled).toBe(0);
   expect(answeredText).toContain("expired");
+  delete process.env["MAX_CALLBACK_AGE_SEC"];
 });
 
 test("recentUpdateGuard: drops old update even when ctx.answerCallbackQuery missing (no throw)", async () => {
   const nowSec = Math.floor(Date.now() / 1000);
-  process.env["MAX_UPDATE_AGE_SEC"] = "5";
+  process.env["MAX_CALLBACK_AGE_SEC"] = "5";
   let nextCalled = 0;
 
   const ctx: any = {
@@ -44,11 +49,12 @@ test("recentUpdateGuard: drops old update even when ctx.answerCallbackQuery miss
     nextCalled++;
   });
   expect(nextCalled).toBe(0);
+  delete process.env["MAX_CALLBACK_AGE_SEC"];
 });
 
 test("recentUpdateGuard: processes recent messages (not dropped)", async () => {
   const nowSec = Math.floor(Date.now() / 1000);
-  process.env["MAX_UPDATE_AGE_SEC"] = "20";
+  process.env["MAX_MESSAGE_AGE_SEC"] = "20";
   let nextCalled = 0;
 
   const ctx: any = {
@@ -60,6 +66,7 @@ test("recentUpdateGuard: processes recent messages (not dropped)", async () => {
   });
 
   expect(nextCalled).toBe(1);
+  delete process.env["MAX_MESSAGE_AGE_SEC"];
 });
 
 test("shouldDropUpdate sanity (boundary)", () => {

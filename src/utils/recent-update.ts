@@ -1,9 +1,14 @@
 import type { Context, NextFunction } from "grammy";
 import { safeAnswerCallbackQuery } from "./context-helpers";
 
-const DEFAULT_MAX_AGE_SEC = 24 * 60 * 60; // 24 hours
+const DEFAULT_MAX_CALLBACK_AGE_SEC = 24 * 60 * 60; // 24 hours
+const DEFAULT_MAX_MESSAGE_AGE_SEC = 60; // 1 minute
 
-export function shouldDropUpdate(updateUnixSec: number, nowUnixSec: number, maxAgeSec: number = DEFAULT_MAX_AGE_SEC): boolean {
+export function shouldDropUpdate(
+  updateUnixSec: number,
+  nowUnixSec: number,
+  maxAgeSec: number = DEFAULT_MAX_CALLBACK_AGE_SEC,
+): boolean {
   return nowUnixSec - updateUnixSec > maxAgeSec;
 }
 
@@ -16,6 +21,26 @@ function getUpdateUnixSeconds(ctx: Context): number | null {
   return null;
 }
 
+function resolveMaxAgeSec(ctx: Context): number {
+  const legacyOverride = process.env["MAX_UPDATE_AGE_SEC"];
+  if (legacyOverride) {
+    const parsed = Number(legacyOverride);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+
+  const isCallback = Boolean((ctx as any).callbackQuery);
+  const envKey = isCallback ? "MAX_CALLBACK_AGE_SEC" : "MAX_MESSAGE_AGE_SEC";
+  const envValue = process.env[envKey];
+  if (envValue) {
+    const parsed = Number(envValue);
+    if (!Number.isNaN(parsed)) {
+      return parsed;
+    }
+  }
+
+  return isCallback ? DEFAULT_MAX_CALLBACK_AGE_SEC : DEFAULT_MAX_MESSAGE_AGE_SEC;
+}
+
 export async function recentUpdateGuard(ctx: Context, next: NextFunction) {
   // Allow game actions to work for the full game lifetime.
   // These callbacks are safe to process even for older messages because
@@ -24,11 +49,10 @@ export async function recentUpdateGuard(ctx: Context, next: NextFunction) {
   if (cbData && (cbData.startsWith("join_") || cbData.startsWith("refresh_"))) {
     return next();
   }
-  const envVal = process.env["MAX_UPDATE_AGE_SEC"];
-  const maxAgeSec = envVal ? Number(envVal) : DEFAULT_MAX_AGE_SEC;
   const updateUnix = getUpdateUnixSeconds(ctx);
   if (!updateUnix) return next();
   const nowSec = Math.floor(Date.now() / 1000);
+  const maxAgeSec = resolveMaxAgeSec(ctx);
   if (shouldDropUpdate(updateUnix, nowSec, maxAgeSec)) {
     if (ctx.callbackQuery) {
       try {
