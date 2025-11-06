@@ -43,7 +43,10 @@ import {
 import { formatAmount } from "./format-amount";
 import { WSOL_MINT } from "./token-registry";
 import { resolveTokenMetadata } from "./token-metadata";
-import { detectTokenProgram } from "./token-programs";
+import {
+  detectTokenProgram,
+  type TokenProgramDetection,
+} from "./token-programs";
 import { FeeBudgetManager } from "./fee-budget";
 import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
 
@@ -125,6 +128,7 @@ export class WalletManager {
   private postTimeoutProbeMaxAttempts = 3;
   private confirmationTimeoutMs = CONFIRMATION_TIMEOUT_MS;
   private signaturePollIntervalMs = 1000;
+  private mintProgramCache = new Map<string, TokenProgramDetection>();
 
   private async probeTransactionAfterTimeout(
     signature: string
@@ -315,6 +319,21 @@ export class WalletManager {
     return this.feeBudgetManager;
   }
 
+  private async resolveTokenProgram(
+    mint: PublicKey | string
+  ): Promise<TokenProgramDetection> {
+    const mintKey = typeof mint === "string" ? new PublicKey(mint) : mint;
+    const cacheKey = mintKey.toBase58();
+    const cached = this.mintProgramCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const detection = await detectTokenProgram(this.connection, mintKey);
+    this.mintProgramCache.set(cacheKey, detection);
+    return detection;
+  }
+
   private isMissingTokenAccountError(error: unknown): boolean {
     if (
       error instanceof TokenAccountNotFoundError ||
@@ -430,7 +449,7 @@ export class WalletManager {
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
     const mintPubkey = new PublicKey(tokenMint);
-    const { programId } = await detectTokenProgram(this.connection, mintPubkey);
+    const { programId } = await this.resolveTokenProgram(mintPubkey);
     const ata = await getAssociatedTokenAddress(
       mintPubkey,
       pubkey,
@@ -460,12 +479,14 @@ export class WalletManager {
           const payer = this.getKeyPair(telegramId);
 
           try {
+            const { programId: refreshedProgramId } =
+              await this.resolveTokenProgram(mintPubkey);
             const { instructions } =
               await this.findOrCreateAssociatedTokenAccount(
                 pubkey,
                 mintPubkey,
                 payer,
-                programId
+                refreshedProgramId
               );
 
             if (instructions.length === 0) {
@@ -473,7 +494,7 @@ export class WalletManager {
                 this.connection,
                 ata,
                 "confirmed",
-                programId
+                refreshedProgramId
               );
               return Number(refreshed.amount);
             }
@@ -488,7 +509,7 @@ export class WalletManager {
               this.connection,
               ata,
               "confirmed",
-              programId
+              refreshedProgramId
             );
             return Number(createdAccount.amount);
           } catch (creationError) {
@@ -567,37 +588,51 @@ export class WalletManager {
         }
       >();
 
-      for (const token of approvedTokens) {
-        try {
-          const mintKey = new PublicKey(token.token_mint);
-          const [splAta, token2022Ata] = await Promise.all([
-            getAssociatedTokenAddress(mintKey, pubkey, false, TOKEN_PROGRAM_ID),
-            getAssociatedTokenAddress(
+      const ataPlans = await Promise.all(
+        approvedTokens.map(async (token) => {
+          try {
+            const mintKey = new PublicKey(token.token_mint);
+            const hintedProgram = (token as any).token_program_id;
+            let programDetection: TokenProgramDetection;
+            if (hintedProgram) {
+              const hintedId = new PublicKey(hintedProgram);
+              programDetection = {
+                programId: hintedId,
+                isToken2022: hintedId.equals(TOKEN_2022_PROGRAM_ID),
+              };
+              this.mintProgramCache.set(mintKey.toBase58(), programDetection);
+            } else {
+              programDetection = await this.resolveTokenProgram(mintKey);
+            }
+
+            const ata = await getAssociatedTokenAddress(
               mintKey,
               pubkey,
               false,
-              TOKEN_2022_PROGRAM_ID
-            ),
-          ]);
+              programDetection.programId
+            );
 
-          ataLookup.set(splAta.toBase58(), {
-            address: splAta,
-            mint: token.token_mint,
-            programId: TOKEN_PROGRAM_ID,
-            decimals: token.decimals,
-          });
-          ataLookup.set(token2022Ata.toBase58(), {
-            address: token2022Ata,
-            mint: token.token_mint,
-            programId: TOKEN_2022_PROGRAM_ID,
-            decimals: token.decimals,
-          });
-        } catch (error) {
-          console.error(
-            `❌ Failed to derive associated token address for ${token.token_mint}:`,
-            error
-          );
+            return {
+              address: ata,
+              mint: token.token_mint,
+              programId: programDetection.programId,
+              decimals: token.decimals,
+            };
+          } catch (error) {
+            console.error(
+              `❌ Failed to derive associated token address for ${token.token_mint}:`,
+              error
+            );
+            return null;
+          }
+        })
+      );
+
+      for (const plan of ataPlans) {
+        if (!plan) {
+          continue;
         }
+        ataLookup.set(plan.address.toBase58(), plan);
       }
 
       const ataEntries = Array.from(ataLookup.values());
@@ -1928,9 +1963,7 @@ export class WalletManager {
       throw new Error("No signers provided");
     }
 
-    const latestBlockhash = await this.connection.getLatestBlockhash(
-      "confirmed"
-    );
+    const latestBlockhash = await this.getLatestBlockhash();
     const message = new TransactionMessage({
       payerKey: signers[0]!.publicKey,
       recentBlockhash: latestBlockhash.blockhash,
@@ -2051,9 +2084,7 @@ export class WalletManager {
 
     await this.throttle();
     try {
-      const latestBlockhash = await this.connection.getLatestBlockhash(
-        "confirmed"
-      );
+      const latestBlockhash = await this.getLatestBlockhash();
       const message = new TransactionMessage({
         payerKey: payer,
         recentBlockhash: latestBlockhash.blockhash,
@@ -2171,7 +2202,7 @@ export class WalletManager {
     }
 
     await this.throttle();
-    const result = await this.connection.getLatestBlockhash();
+    const result = await this.connection.getLatestBlockhash("confirmed");
     this.blockhashCache = { ...result, timestamp: now };
     return result;
   }

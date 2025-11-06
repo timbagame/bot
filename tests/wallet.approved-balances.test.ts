@@ -21,6 +21,7 @@ class ConnParsed implements Partial<Connection> {
   public owner: PublicKey | null = null;
   public accounts = new Map<string, MockAccountEntry>();
   public parsedCalls: string[] = [];
+  private mintOwners = new Map<string, PublicKey>();
 
   setOwner(owner: PublicKey) {
     this.owner = owner;
@@ -68,6 +69,7 @@ class ConnParsed implements Partial<Connection> {
       amount: options.amount,
       decimals: options.decimals,
     });
+    this.mintOwners.set(options.mint.toBase58(), options.programId);
   }
 
   async getMultipleAccountsInfo(pubkeys: PublicKey[]) {
@@ -85,6 +87,31 @@ class ConnParsed implements Partial<Connection> {
         rentEpoch: 0,
       } as any;
     });
+  }
+
+  async getAccountInfo(pubkey: PublicKey) {
+    const address = pubkey.toBase58();
+    const mintOwner = this.mintOwners.get(address);
+    if (mintOwner) {
+      return {
+        owner: mintOwner,
+        data: Buffer.alloc(0),
+        executable: false,
+        lamports: 0,
+      } as any;
+    }
+
+    const entry = this.accounts.get(address);
+    if (!entry) {
+      return null;
+    }
+
+    return {
+      owner: entry.owner,
+      data: entry.data,
+      executable: false,
+      lamports: 0,
+    } as any;
   }
 
   async getParsedTokenAccountsByOwner(_owner: PublicKey, filter: any) {

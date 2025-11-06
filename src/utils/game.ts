@@ -253,6 +253,11 @@ const categorizeGame = (
 
 export class GameManager {
   private static instance: GameManager;
+  private static instanceDeps?: {
+    program: anchor.Program<Timba>;
+    wallet: WalletManager;
+    gameDb: GameDatabase;
+  };
   private activeGameMessages = new Map<string, GameMessage>();
   private cachedConnection?: Connection;
   private tokenProgramCache = new Map<string, PublicKey>();
@@ -282,7 +287,19 @@ export class GameManager {
     wallet: WalletManager,
     gameDb: GameDatabase
   ): GameManager {
-    if (!GameManager.instance) {
+    const depsChanged = (() => {
+      const current = GameManager.instanceDeps;
+      if (!current) {
+        return true;
+      }
+      return (
+        current.program !== program ||
+        current.wallet !== wallet ||
+        current.gameDb !== gameDb
+      );
+    })();
+
+    if (!GameManager.instance || depsChanged) {
       const oracleClient = OracleClient.getInstance(wallet);
       const maybeGetConnection = (wallet as any).getConnection;
       const connection =
@@ -303,6 +320,7 @@ export class GameManager {
         swapManager,
         feeBudget
       );
+      GameManager.instanceDeps = { program, wallet, gameDb };
       void (async () => {
         try {
           await refreshDynamicFeeBudgets(feeBudget);
@@ -313,6 +331,11 @@ export class GameManager {
       GameManager.instance.cachedConnection = connection;
     }
     return GameManager.instance;
+  }
+
+  public static resetForTest(): void {
+    GameManager.instance = undefined as any;
+    GameManager.instanceDeps = undefined;
   }
 
   public setGameMessageReadyListener(
