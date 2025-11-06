@@ -876,10 +876,7 @@ export const createGameCallbacksModule = (
                 tokenWasSpecified: tokenContext.tokenMint !== DEFAULT_TOKEN_MINT,
               };
 
-              const callbackMessageDate =
-                typeof ctx.callbackQuery?.message?.date === "number"
-                  ? ctx.callbackQuery.message.date * 1000
-                  : undefined;
+              const callbackTimeMs = Date.now();
 
               const result = await gameManager.createGame(
                 gameType,
@@ -889,7 +886,7 @@ export const createGameCallbacksModule = (
                 GAME_TIMEOUT,
                 getTelegramId(ctx),
                 ctx.chat?.id,
-                callbackMessageDate
+                callbackTimeMs
               );
 
               if (!result.success) {
