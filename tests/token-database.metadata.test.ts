@@ -16,9 +16,15 @@ test("TokenDatabase: known tokens CRUD", () => {
   // get by mint + list all
   const byMint = db.getKnownTokenByMint("mintY");
   expect(byMint?.token_ticker).toBe("YYY");
+  expect(byMint?.token_program_id ?? null).toBeNull();
 
   const all = db.getAllKnownTokens();
   expect(all.length).toBe(2);
+
+  db.setTokenProgramId("mintY", "ProgramId111111111111111111111111111111111111");
+  expect(db.getKnownTokenByMint("mintY")?.token_program_id).toBe(
+    "ProgramId111111111111111111111111111111111111"
+  );
 
   // Removing one token shrinks list
   db.removeKnownToken("mintX");

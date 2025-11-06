@@ -49,6 +49,7 @@ export interface KnownToken {
   token_ticker: string;
   decimals: number;
   added_at: number;
+  token_program_id?: string | null;
 }
 
 // ================================

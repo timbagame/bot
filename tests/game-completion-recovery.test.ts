@@ -53,6 +53,7 @@ describe("Game completion recovery", () => {
     botModule.__test_resetCompletionHistoryFetcher();
     botModule.__test_resetProcessGameCompletionHandler();
     botModule.__test_resetCompletionEventParserFactory();
+    botModule.__test_resetCompletionJobs();
     botModule.__test_resetProgram();
   });
 
@@ -120,7 +121,7 @@ describe("Game completion recovery", () => {
 
   test("cleanup uses reconstructed completion details", async () => {
     const gameAddress = createTestGameAddress();
-  const gameDb = botModule.__test_getGameDatabase();
+    const gameDb = botModule.__test_getGameDatabase();
     const completionCalls: Array<[string, string, number | undefined, string | undefined]> = [];
     const historyCalls: string[] = [];
 
@@ -200,5 +201,110 @@ describe("Game completion recovery", () => {
 
     expect(stubGameRecord.status).toBe("completed");
     expect(stubGameRecord.winner_address).toBe("RecoveredWinner");
+  });
+
+  test("cleanup skips when completion is already running", async () => {
+    const gameAddress = createTestGameAddress();
+    const gameDb = botModule.__test_getGameDatabase();
+    const gameDbAny = gameDb as unknown as {
+      getGame: typeof gameDb.getGame;
+      completeGame: typeof gameDb.completeGame;
+    };
+
+    const originalGetGame = gameDb.getGame.bind(gameDb);
+    const originalCompleteGame = gameDb.completeGame.bind(gameDb);
+
+    const stubGameRecord: GameData = {
+      game_address: gameAddress,
+      creator_telegram_id: "creator",
+      amount: 12_000,
+      created_at: Date.now(),
+      status: "active",
+      winner_address: undefined,
+      completed_at: undefined,
+      message_id: undefined,
+      chat_id: undefined,
+      game_type: "coinflip",
+      token_mint: "Mint",
+      token_ticker: "TIMBA",
+      max_players: 2,
+      min_players: 2,
+    };
+
+    gameDbAny.getGame = (address: string) => {
+      if (address === gameAddress) {
+        return stubGameRecord as any;
+      }
+      return originalGetGame(address);
+    };
+
+    gameDbAny.completeGame = (
+      address: string,
+      winner: string,
+      completedAt?: number
+    ) => {
+      if (address === gameAddress) {
+        stubGameRecord.status = "completed";
+        stubGameRecord.winner_address = winner;
+        stubGameRecord.completed_at = completedAt ?? Date.now();
+        return;
+      }
+      originalCompleteGame(address, winner, completedAt);
+    };
+
+    const completionCalls: Array<[
+      string,
+      string | undefined,
+      number | undefined,
+      string | undefined
+    ]> = [];
+    let releaseCompletion: (() => void) | undefined;
+
+    botModule.__test_setProcessGameCompletionHandler(
+      async (address, winner, totalPot, signature) => {
+        completionCalls.push([address, winner, totalPot, signature]);
+        await new Promise<void>((resolve) => {
+          releaseCompletion = () => resolve();
+        });
+        gameDbAny.completeGame(address, winner ?? "cancelled", Date.now());
+      }
+    );
+
+    botModule.__test_setCompletionHistoryFetcher(async () => ({
+      winnerAddress: "RecoveredWinner",
+      totalPot: 42_000,
+      signature: "sig123",
+    }));
+
+    try {
+      const inFlight = botModule.__test_runProcessGameCompletion(
+        gameAddress,
+        "RecoveredWinner",
+        42_000,
+        "sig123"
+      );
+
+      expect(botModule.__test_isCompletionJobActive(gameAddress)).toBe(true);
+
+      await botModule.__test_cleanupOrphanedGame(gameAddress);
+
+      expect(completionCalls).toEqual([[gameAddress, "RecoveredWinner", 42_000, "sig123"]]);
+
+      if (releaseCompletion) {
+        releaseCompletion();
+      }
+      await inFlight;
+      releaseCompletion = undefined;
+
+      expect(botModule.__test_isCompletionJobActive(gameAddress)).toBe(false);
+      expect(stubGameRecord.status).toBe("completed");
+      expect(stubGameRecord.winner_address).toBe("RecoveredWinner");
+    } finally {
+      gameDbAny.getGame = originalGetGame;
+      gameDbAny.completeGame = originalCompleteGame;
+      if (releaseCompletion) {
+        releaseCompletion();
+      }
+    }
   });
 });

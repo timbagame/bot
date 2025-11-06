@@ -1268,6 +1268,46 @@ const processGameCompletion = async (
 
 let processGameCompletionHandler = processGameCompletion;
 
+const COMPLETION_JOB_STALE_MS = 2 * 60 * 1000;
+const inFlightCompletionJobs = new Map<string, number>();
+
+const pruneStaleCompletionJob = (gameAddress: string, now: number): void => {
+  const startedAt = inFlightCompletionJobs.get(gameAddress);
+  if (startedAt !== undefined && now - startedAt > COMPLETION_JOB_STALE_MS) {
+    inFlightCompletionJobs.delete(gameAddress);
+  }
+};
+
+const runProcessGameCompletion = async (
+  gameAddress: string,
+  winnerAddress: string,
+  totalPot?: number,
+  winnerTxSignature?: string
+): Promise<boolean> => {
+  const now = Date.now();
+  pruneStaleCompletionJob(gameAddress, now);
+
+  if (inFlightCompletionJobs.has(gameAddress)) {
+    console.log(
+      `⏳ Skipping duplicate completion processing for ${gameAddress}; job already in-flight`
+    );
+    return false;
+  }
+
+  inFlightCompletionJobs.set(gameAddress, now);
+  try {
+    await processGameCompletionHandler(
+      gameAddress,
+      winnerAddress,
+      totalPot,
+      winnerTxSignature
+    );
+    return true;
+  } finally {
+    inFlightCompletionJobs.delete(gameAddress);
+  }
+};
+
 export const __test_setProcessGameCompletionHandler = (
   handler: typeof processGameCompletion
 ) => {
@@ -1279,6 +1319,12 @@ export const __test_resetProcessGameCompletionHandler = () => {
 };
 
 export const __test_processGameCompletion = processGameCompletion;
+export const __test_runProcessGameCompletion = runProcessGameCompletion;
+export const __test_isCompletionJobActive = (gameAddress: string): boolean => {
+  pruneStaleCompletionJob(gameAddress, Date.now());
+  return inFlightCompletionJobs.has(gameAddress);
+};
+export const __test_resetCompletionJobs = () => inFlightCompletionJobs.clear();
 
 const COMPLETION_SIGNATURE_LOOKBACK = 25;
 
@@ -1512,12 +1558,18 @@ const cleanupOrphanedGame = async (gameAddress: string): Promise<void> => {
       `♻️ Reconstructed completion for ${gameAddress} from transaction history`
     );
 
-    await processGameCompletionHandler(
+    const processed = await runProcessGameCompletion(
       gameAddress,
       completionDetails.winnerAddress,
       completionDetails.totalPot,
       completionDetails.signature
     );
+
+    if (!processed) {
+      console.log(
+        `⏳ Skipping orphaned cleanup replay for ${gameAddress}; completion already running`
+      );
+    }
 
     return;
   }
@@ -4306,16 +4358,18 @@ setupAnchor()
 
           // Process game completion with total pot from event
           const totalPot = Number(event.winnerAmount);
-          await processGameCompletionHandler(
+          const processed = await runProcessGameCompletion(
             gameAddress,
             winnerAddress,
             totalPot,
             signature
           );
 
-          console.log(
-            `✅ Successfully processed GameCompleted event for game ${gameAddress}`
-          );
+          if (processed) {
+            console.log(
+              `✅ Successfully processed GameCompleted event for game ${gameAddress}`
+            );
+          }
         } catch (error) {
           console.error("Error processing GameCompleted event:", error);
         }

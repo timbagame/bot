@@ -49,6 +49,7 @@ import {
 } from "./token-programs";
 import { FeeBudgetManager } from "./fee-budget";
 import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
+import { TokenDatabase } from "./token-database";
 
 // Lightweight dependency handles for testability
 type HttpFetch = (input: string, init?: any) => Promise<{
@@ -64,6 +65,7 @@ type WalletDeps = {
   tokenMetadataResolver?: (
     mint: string
   ) => Promise<{ decimals: number } | null> | { decimals: number } | null;
+  tokenDb?: TokenDatabase;
 };
 
 const TOKEN_METADATA_CACHE_DURATION_MS = 5 * 60 * 1000;
@@ -108,6 +110,7 @@ export class WalletManager {
   private adminKeypair: Keypair | null = null;
   private lastCallTime: number = 0;
   private feeBudgetManager: FeeBudgetManager | null = null;
+  private tokenDb: TokenDatabase;
 
   // Simplified caching
   private keypairCache = new Map<string, Keypair>();
@@ -250,6 +253,7 @@ export class WalletManager {
     this.tokenMetadataCache = createExpiringCache<number>(
       TOKEN_METADATA_CACHE_DURATION_MS
     );
+    this.tokenDb = deps?.tokenDb ?? TokenDatabase.getInstance();
     this.loadAdminKeypair();
   }
 
@@ -539,6 +543,7 @@ export class WalletManager {
       token_mint: string;
       token_ticker: string;
       decimals: number;
+      token_program_id?: string | null;
     }>
   ): Promise<
     Array<{
@@ -592,7 +597,7 @@ export class WalletManager {
         approvedTokens.map(async (token) => {
           try {
             const mintKey = new PublicKey(token.token_mint);
-            const hintedProgram = (token as any).token_program_id;
+            const hintedProgram = token.token_program_id;
             let programDetection: TokenProgramDetection;
             if (hintedProgram) {
               const hintedId = new PublicKey(hintedProgram);
@@ -603,6 +608,22 @@ export class WalletManager {
               this.mintProgramCache.set(mintKey.toBase58(), programDetection);
             } else {
               programDetection = await this.resolveTokenProgram(mintKey);
+              try {
+                this.tokenDb.setTokenProgramId(
+                  token.token_mint,
+                  programDetection.programId.toBase58()
+                );
+              } catch (programPersistError) {
+                console.error(
+                  `Failed to persist token program for ${token.token_mint}:`,
+                  programPersistError
+                );
+              }
+              const mapEntry = approvedTokensMap.get(token.token_mint);
+              if (mapEntry) {
+                mapEntry.token_program_id = programDetection.programId.toBase58();
+              }
+              token.token_program_id = programDetection.programId.toBase58();
             }
 
             const ata = await getAssociatedTokenAddress(
@@ -901,6 +922,7 @@ export class WalletManager {
                 token_mint: registration.token.token_mint,
                 token_ticker: registration.token.token_ticker,
                 decimals: registration.token.decimals,
+                token_program_id: registration.token.token_program_id ?? null,
               });
             } catch (regError) {
               console.error(
