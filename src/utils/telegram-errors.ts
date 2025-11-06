@@ -49,7 +49,10 @@ export const isBotInitiationForbidden = (error: unknown): boolean => {
     return false;
   }
 
-  return matchesAny(error, ["bot can't initiate conversation"]);
+  return (
+    matchesAny(error, ["bot can't initiate conversation"]) ||
+    isChatInaccessible(error)
+  );
 };
 
 export const isMissingEditableContent = (error: unknown): boolean =>

@@ -62,6 +62,6 @@ describe("telegram error helpers", () => {
         error_code: 403,
         description: "Forbidden: bot was blocked by the user",
       })
-    ).toBe(false);
+    ).toBe(true);
   });
 });
