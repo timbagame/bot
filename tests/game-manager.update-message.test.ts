@@ -1,52 +1,18 @@
 import { describe, test, expect } from "bun:test";
 import { PublicKey } from "@solana/web3.js";
+import {
+  makeCtxStub,
+  makeDbStub,
+  makeProgramStub,
+  makeWalletStub,
+  resetGameManager as resetGM,
+} from "./helpers/game-manager";
 import { GameManager } from "../src/utils/game";
-
-function resetGM() {
-  // @ts-ignore
-  GameManager["instance"] = undefined;
-}
-
-function programStub(gameAccount: any) {
-  return {
-    account: { game: { fetch: async () => gameAccount } },
-  } as any;
-}
-
-function walletStub() {
-  return {
-    getBlockchainTime: async () => Math.floor(Date.now() / 1000),
-    getTokenMetadata: async () => ({ decimals: 9 }),
-    formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toFixed(0),
-  } as any;
-}
-
-function dbStub(overrides: Partial<any> = {}) {
-  const savedMessages: Array<{ address: string; messageId: number; chatId: number }> = [];
-  const clearedMessages: string[] = [];
-  return {
-    getGameParticipants: (_: string) => [],
-    getGame: (_: string) => ({ token_mint: "MINT", token_ticker: "TOK", game_type: "coinflip", ...overrides }),
-    getCreatorInfo: (_: string) => ({ telegramId: "777" }),
-    getPlayerTelegramId: (_: string) => null,
-    saveGameMessage: (address: string, messageId: number, chatId: number) => {
-      savedMessages.push({ address, messageId, chatId });
-    },
-    clearGameMessage: (address: string) => {
-      clearedMessages.push(address);
-    },
-    getPlayerDisplayName: () => null,
-    __savedMessages: savedMessages,
-    __clearedMessages: clearedMessages,
-  } as any;
-}
 
 function ctxStub(options: { failMedia?: any; failCaption?: any; failText?: any; sendMessageResult?: any } = {}) {
   const calls: any[] = [];
-  const ctx: any = {
-    chat: { id: 1, type: "private" },
-    api: {
-      getChatMember: async (_chat: number, id: number) => ({ user: { username: `user${id}` } }),
+  const base = makeCtxStub({
+    apiOverrides: {
       editMessageCaption: async (...args: any[]) => {
         calls.push(["caption", ...args]);
         if (options.failCaption) {
@@ -78,8 +44,8 @@ function ctxStub(options: { failMedia?: any; failCaption?: any; failText?: any; 
         );
       },
     },
-    __calls: calls,
-  };
+  });
+  const ctx: any = { ...base, __calls: calls };
   return ctx;
 }
 
@@ -95,7 +61,13 @@ describe("GameManager.updateGameMessage routing", () => {
       timeout: 60,
       gameType: { coinflip: {} },
     };
-    const gm = GameManager.getInstance(programStub(gameAcc), walletStub(), dbStub());
+    const gm = GameManager.getInstance(
+      makeProgramStub(gameAcc),
+      makeWalletStub({
+        tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
+      }),
+      makeDbStub()
+    );
     const ctx = ctxStub();
     const addr = new PublicKey("11111111111111111111111111111111").toBase58();
     // seed active message
@@ -126,7 +98,13 @@ describe("GameManager.updateGameMessage routing", () => {
       timeout: 60,
       gameType: { coinflip: {} },
     };
-    const gm = GameManager.getInstance(programStub(gameAcc), walletStub(), dbStub({ game_type: "coinflip" }));
+    const gm = GameManager.getInstance(
+      makeProgramStub(gameAcc),
+      makeWalletStub({
+        tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
+      }),
+      makeDbStub({ gameOverride: { game_type: "coinflip" } })
+    );
     const ctx = ctxStub();
     const addr = new PublicKey("11111111111111111111111111111112").toBase58();
     (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 43, usesVideo: true });
@@ -157,7 +135,13 @@ describe("GameManager.updateGameMessage routing", () => {
       timeout: 60,
       gameType: { giveaway: {} },
     };
-    const gm = GameManager.getInstance(programStub(gameAcc), walletStub(), dbStub({ game_type: "giveaway" }));
+    const gm = GameManager.getInstance(
+      makeProgramStub(gameAcc),
+      makeWalletStub({
+        tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
+      }),
+      makeDbStub({ gameOverride: { game_type: "giveaway" } })
+    );
     const ctx = ctxStub();
     const addr = new PublicKey("11111111111111111111111111111113").toBase58();
     (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 44, usesVideo: false });
@@ -185,7 +169,13 @@ describe("GameManager.updateGameMessage routing", () => {
       timeout: 60,
       gameType: { coinflip: {} },
     };
-    const gm = GameManager.getInstance(programStub(gameAcc), walletStub(), dbStub());
+    const gm = GameManager.getInstance(
+      makeProgramStub(gameAcc),
+      makeWalletStub({
+        tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
+      }),
+      makeDbStub()
+    );
     const ctx = ctxStub();
     const addr = new PublicKey("11111111111111111111111111111114").toBase58();
     (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 45, usesVideo: false });
@@ -215,7 +205,13 @@ describe("GameManager.updateGameMessage routing", () => {
       timeout: 60,
       gameType: { coinflip: {} },
     };
-    const gm = GameManager.getInstance(programStub(gameAcc), walletStub(), dbStub({ game_type: "coinflip" }));
+    const gm = GameManager.getInstance(
+      makeProgramStub(gameAcc),
+      makeWalletStub({
+        tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
+      }),
+      makeDbStub({ gameOverride: { game_type: "coinflip" } })
+    );
     const ctx = ctxStub({ failMedia: { description: "Bad Request: wrong file identifier/HTTP URL specified" } });
     const addr = new PublicKey("11111111111111111111111111111115").toBase58();
     (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 46, usesVideo: true });
@@ -248,8 +244,14 @@ describe("GameManager.updateGameMessage routing", () => {
       gameType: { coinflip: {} },
     };
     const addr = new PublicKey("11111111111111111111111111111116").toBase58();
-    const database = dbStub();
-    const gm = GameManager.getInstance(programStub(gameAcc), walletStub(), database);
+    const database = makeDbStub();
+    const gm = GameManager.getInstance(
+      makeProgramStub(gameAcc),
+      makeWalletStub({
+        tokenFormatter: (n, d) => (Number(n) / Math.pow(10, d)).toFixed(0),
+      }),
+      database
+    );
     const missingError = {
       description: "Bad Request: message to edit not found",
     };

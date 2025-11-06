@@ -2145,28 +2145,19 @@ export class GameManager {
     if (currentTickets > 0) {
       try {
         const participants = this.getGamePlayers(gamePda.toBase58());
-        for (const telegramId of participants) {
+        const lookups = participants.map(async (telegramId) => {
           try {
-            const username = await this.getUsernameFromTelegramId(
-              ctx,
-              telegramId
-            );
+            const username = await this.getUsernameFromTelegramId(ctx, telegramId);
             if (username) {
-              const normalized = username.startsWith("@")
-                ? username
-                : `@${username}`;
-              participantDisplayNames.push(normalized);
-            } else {
-              participantDisplayNames.push(
-                `Player ${telegramId.slice(0, 6)}...`
-              );
+              return username.startsWith("@") ? username : `@${username}`;
             }
           } catch {
-            participantDisplayNames.push(
-              `Player ${telegramId.slice(0, 6)}...`
-            );
+            // fall back to placeholder
           }
-        }
+          return `Player ${telegramId.slice(0, 6)}...`;
+        });
+        const resolved = await Promise.all(lookups);
+        participantDisplayNames.push(...resolved);
       } catch (error) {
         console.error("Error getting player list:", error);
       }

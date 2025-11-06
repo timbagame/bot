@@ -1,65 +1,15 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import { PublicKey, Keypair } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 import { GameManager } from "../src/utils/game";
 import { formatAmount, formatCompactTokenDisplay } from "../src/utils/format-amount";
-
-// Helpers to reset singleton
-function resetGameManager() {
-  // @ts-ignore
-  GameManager["instance"] = undefined;
-}
-
-function makeProgramStub(game: any) {
-  return {
-    account: {
-      game: {
-        fetch: async () => game,
-      },
-    },
-  } as any;
-}
-
-function makeWalletStub(opts?: { blockTime?: number; tokenDecimals?: number }) {
-  const blockTime = opts?.blockTime ?? Math.floor(Date.now() / 1000);
-  const tokenDecimals = opts?.tokenDecimals ?? 9;
-  return {
-    getBlockchainTime: async () => blockTime,
-    formatTokenBalance: (
-      amount: number | bigint | string,
-      decimals: number
-    ) => formatAmount(amount, decimals, { maxFractionDigits: 6, trim: true }),
-    formatSolBalance: (amount: number | bigint | string) =>
-      formatAmount(amount, 9, { maxFractionDigits: 6, trim: true }),
-    getTokenMetadata: async () => ({ decimals: tokenDecimals }),
-  } as any;
-}
-
-function makeDbStub(
-  participants: string[],
-  gameData: any,
-  playerTelegramByPub: Record<string, string>,
-  displayNameByTelegram: Record<string, string> = {}
-) {
-  return {
-    getGameParticipants: (_addr: string) => participants,
-    getGame: (_addr: string) => gameData,
-    getPlayerTelegramId: (pub: string) => playerTelegramByPub[pub] || null,
-    getPlayerDisplayName: (telegramId: string) =>
-      displayNameByTelegram[telegramId] ?? null,
-  } as any;
-}
-
-function makeCtxStub() {
-  return {
-    chat: { id: 42 },
-    api: {
-      getChatMember: async (_chatId: number, userId: number) => ({
-        user: { username: `user${userId}`, first_name: `U${userId}` },
-        status: "member",
-      }),
-    },
-  } as any;
-}
+import {
+  makeCtxStub,
+  makeDbStub,
+  makeProgramStub,
+  makeWalletStub,
+  randomGamePublicKey,
+  resetGameManager,
+} from "./helpers/game-manager";
 
 describe("GameManager.formatGameMessage", () => {
   beforeEach(resetGameManager);
@@ -77,11 +27,18 @@ describe("GameManager.formatGameMessage", () => {
       timeout,
     };
     const program = makeProgramStub(gameAccount);
-    const wallet = makeWalletStub({ blockTime: createdAt + 30 });
-    const db = makeDbStub(["123", "456"], { token_ticker: "WSOL" }, {});
+    const wallet = makeWalletStub({
+      blockTime: createdAt + 30,
+      tokenFormatter: (amount, decimals) =>
+        formatAmount(amount, decimals, { maxFractionDigits: 6, trim: true }),
+    });
+    const db = makeDbStub({
+      participants: ["123", "456"],
+      gameOverride: { token_ticker: "WSOL" },
+    });
     const gm = GameManager.getInstance(program, wallet, db);
     const ctx = makeCtxStub();
-  const gamePda = Keypair.generate().publicKey;
+  const gamePda = randomGamePublicKey();
 
   const res = await gm.formatGameMessage(ctx, gamePda, "coinflip", amount, "@creator", "Active", "WSOL");
     expect(res.messageText).toContain("WSOL");
@@ -109,11 +66,18 @@ describe("GameManager.formatGameMessage", () => {
     };
     const winner = "WINNERPUB";
     const program = makeProgramStub(gameAccount);
-    const wallet = makeWalletStub();
-    const db = makeDbStub(["111","222","333"], { token_ticker: "WSOL", game_type: "giveaway" }, { [winner]: "999" });
+    const wallet = makeWalletStub({
+      tokenFormatter: (amount, decimals) =>
+        formatAmount(amount, decimals, { maxFractionDigits: 6, trim: true }),
+    });
+    const db = makeDbStub({
+      participants: ["111", "222", "333"],
+      gameOverride: { token_ticker: "WSOL", game_type: "giveaway" },
+      playerTelegramByPub: { [winner]: "999" },
+    });
     const gm = GameManager.getInstance(program, wallet, db);
     const ctx = makeCtxStub();
-  const gamePda = Keypair.generate().publicKey;
+  const gamePda = randomGamePublicKey();
 
     const res = await gm.formatGameMessage(ctx, gamePda, "giveaway", amount, "@creator", "Completed", "WSOL", winner);
     expect(res.messageText).toContain("Winner:");
@@ -139,14 +103,19 @@ describe("GameManager.formatGameMessage", () => {
     };
     const winnerPubkey = "WinnerPubkey";
     const program = makeProgramStub(gameAccount);
-    const wallet = makeWalletStub();
-    const db = makeDbStub([
-      "321",
-    ], {
-      token_ticker: "WSOL",
-      game_type: "coinflip",
-      token_mint: tokenMint.toBase58(),
-    }, { [winnerPubkey]: "321" });
+    const wallet = makeWalletStub({
+      tokenFormatter: (amount, decimals) =>
+        formatAmount(amount, decimals, { maxFractionDigits: 6, trim: true }),
+    });
+    const db = makeDbStub({
+      participants: ["321"],
+      gameOverride: {
+        token_ticker: "WSOL",
+        game_type: "coinflip",
+        token_mint: tokenMint.toBase58(),
+      },
+      playerTelegramByPub: { [winnerPubkey]: "321" },
+    });
     const ctx = {
       ...makeCtxStub(),
       api: {
@@ -156,7 +125,7 @@ describe("GameManager.formatGameMessage", () => {
       },
     } as any;
     const gm = GameManager.getInstance(program, wallet, db);
-  const gamePda = Keypair.generate().publicKey;
+  const gamePda = randomGamePublicKey();
 
   const res = await gm.formatGameMessage(
     ctx,
@@ -190,17 +159,20 @@ describe("GameManager.formatGameMessage", () => {
     };
     const winnerPubkey = "WinnerPubkey";
     const program = makeProgramStub(gameAccount);
-    const wallet = makeWalletStub();
-    const db = makeDbStub(
-      ["999"],
-      {
+    const wallet = makeWalletStub({
+      tokenFormatter: (amount, decimals) =>
+        formatAmount(amount, decimals, { maxFractionDigits: 6, trim: true }),
+    });
+    const db = makeDbStub({
+      participants: ["999"],
+      gameOverride: {
         token_ticker: "WSOL",
         game_type: "coinflip",
         token_mint: tokenMint.toBase58(),
       },
-      { [winnerPubkey]: "999" },
-      { "999": "<Stored Winner>" }
-    );
+      playerTelegramByPub: { [winnerPubkey]: "999" },
+      displayNameByTelegram: { "999": "<Stored Winner>" },
+    });
     const ctx = {
       ...makeCtxStub(),
       api: {
@@ -212,7 +184,7 @@ describe("GameManager.formatGameMessage", () => {
       },
     } as any;
     const gm = GameManager.getInstance(program, wallet, db);
-    const gamePda = Keypair.generate().publicKey;
+    const gamePda = randomGamePublicKey();
 
     const res = await gm.formatGameMessage(
       ctx,
@@ -245,13 +217,16 @@ describe("GameManager.formatGameMessage", () => {
     };
     const program = makeProgramStub(gameAccount);
     const wallet = makeWalletStub();
-    const db = makeDbStub([
-      "555",
-      "666",
-    ], { token_ticker: "WSOL", token_mint: tokenMint.toBase58() }, {});
+    const db = makeDbStub({
+      participants: ["555", "666"],
+      gameOverride: {
+        token_ticker: "WSOL",
+        token_mint: tokenMint.toBase58(),
+      },
+    });
     const gm = GameManager.getInstance(program, wallet, db);
     const ctx = makeCtxStub();
-  const gamePda = Keypair.generate().publicKey;
+  const gamePda = randomGamePublicKey();
 
     const res = await gm.formatGameMessage(
       ctx,
