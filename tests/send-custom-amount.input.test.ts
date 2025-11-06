@@ -1,3 +1,4 @@
+import "./setup-env";
 import { describe, test, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import {
   __test_handleCustomAmountInput,
@@ -226,5 +227,19 @@ describe("handleCustomAmountInput", () => {
     expect(replySession?.[1]).toMatchObject({
       initiatorId: String(TELEGRAM_NUMERIC_ID),
     });
+  });
+
+  test("throws descriptive error when selected token no longer exists", async () => {
+    const ctx = createMockCtx();
+    const userState = {
+      type: "send_custom_amount",
+      token: "AAA",
+      messageId: 4700,
+      chatId: DEFAULT_CHAT_ID,
+    };
+
+    await expect(
+      __test_handleCustomAmountInput(ctx, userState, "0.25")
+    ).rejects.toThrow("Token AAA not found in wallet");
   });
 });

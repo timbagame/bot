@@ -1,3 +1,4 @@
+import "./setup-env";
 import { describe, test, expect } from "bun:test";
 import { InlineKeyboard } from "grammy";
 import { showWalletUI } from "../src/handlers/wallet";
@@ -6,6 +7,11 @@ import {
   buildWalletActionMenu,
 } from "../src/utils/wallet-ui";
 import { __test_buildQuickAmountKeyboard } from "../src/bot";
+
+process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
+process.env.MNEMONIC =
+  process.env.MNEMONIC ||
+  "test walk nut penalty hip pave soap entry language right filter choice";
 
 type MakeCtxOptions = {
   editError?: Error;
@@ -371,6 +377,44 @@ describe("buildWalletActionMenu", () => {
     });
 
     expect(insufficient.keyboard.inline_keyboard).toEqual([
+      [{ text: "❌ Insufficient SOL balance", callback_data: "noop" }],
+      [{ text: "← Back to Settings", callback_data: "wallet_settings" }],
+    ]);
+  });
+
+  test("wrap menu treats exact minimum lamports as insufficient", () => {
+    const baseConfig = {
+      title: "🔧 <b>Wrap SOL</b>",
+      bodyLines: [
+        "<b>Native SOL:</b> 0.010",
+        "<b>WSOL:</b> 0.000",
+        "",
+        "<b>Quick Wrap Amounts:</b>",
+      ],
+      formatters,
+      quickActions: {
+        type: "wrap" as const,
+        callbackPrefix: "wrap_amount_",
+        amounts: [
+          { label: "25%", value: "25%" },
+          { label: "50%", value: "50%" },
+          { label: "75%", value: "75%" },
+          { label: "MAX", value: "MAX" },
+        ],
+        customAction: { label: "✏️ Custom Amount", callback: "wrap_custom" },
+        insufficientLabel: "❌ Insufficient SOL balance",
+        minimumLamports: 10_000,
+      },
+      backButton: { label: "← Back to Settings", callback: "wallet_settings" },
+    };
+
+    const equalThreshold = buildWalletActionMenu({
+      ...baseConfig,
+      walletAddress: "wrap-user",
+      balances: { solBalanceLamports: 10_000, tokenBalances: [] },
+    });
+
+    expect(equalThreshold.keyboard.inline_keyboard).toEqual([
       [{ text: "❌ Insufficient SOL balance", callback_data: "noop" }],
       [{ text: "← Back to Settings", callback_data: "wallet_settings" }],
     ]);
