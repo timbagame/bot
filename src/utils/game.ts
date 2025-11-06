@@ -43,6 +43,7 @@ import {
   isRecoverableMediaError,
   sendMediaWithFallback,
 } from "./media";
+import { isMessageMissing } from "./telegram-errors";
 import { FeeBudgetManager } from "./fee-budget";
 import type { FeeBudgetProvider } from "./fee-budget";
 import type {
@@ -551,6 +552,65 @@ export class GameManager {
     this.rememberTelegramUsername(trimmedId, trimmedUsername);
     const cacheKey = this.buildUsernameCacheKey(ctx, trimmedId);
     this.setCachedUsername(cacheKey, trimmedUsername);
+  }
+
+  private async recreateMissingGameMessage(
+    ctx: Context,
+    gameAddress: string,
+    options: { chatId?: number; messageText: string; inlineKeyboard?: any }
+  ): Promise<void> {
+    const fallbackChatId =
+      options.chatId ??
+      ctx.chat?.id ??
+      this.gameDb.getGame(gameAddress)?.chat_id ??
+      null;
+
+    if (typeof fallbackChatId !== "number" || Number.isNaN(fallbackChatId)) {
+      console.warn(
+        `Unable to recreate Telegram message for ${gameAddress}: missing chat id`
+      );
+      return;
+    }
+
+    try {
+      this.gameDb.clearGameMessage(gameAddress);
+    } catch (clearError) {
+      console.warn(
+        `Failed to clear stale message mapping for ${gameAddress}:`,
+        clearError
+      );
+    }
+
+    this.activeGameMessages.delete(gameAddress);
+
+    try {
+      const sentMessage = await ctx.api.sendMessage(
+        fallbackChatId,
+        options.messageText,
+        {
+          parse_mode: "HTML",
+          reply_markup: options.inlineKeyboard,
+          link_preview_options: { is_disabled: true },
+        }
+      );
+
+      this.gameDb.saveGameMessage(
+        gameAddress,
+        sentMessage.message_id,
+        sentMessage.chat.id
+      );
+      this.activeGameMessages.set(gameAddress, {
+        messageId: sentMessage.message_id,
+        chatId: sentMessage.chat.id,
+        usesVideo: false,
+      });
+      this.gameMessageReadyListener?.(gameAddress);
+    } catch (sendError) {
+      console.error(
+        `Failed to recreate Telegram message for game ${gameAddress}:`,
+        sendError
+      );
+    }
   }
 
   private getOraclePda(): PublicKey {
@@ -2303,6 +2363,9 @@ export class GameManager {
     const gameMessage = this.activeGameMessages.get(gameAddress);
     if (!gameMessage) return;
 
+    let messageTextValue = "";
+    let inlineKeyboardValue: any;
+
     try {
       const { messageText, keyboard } = await this.formatGameMessage(
         ctx,
@@ -2316,9 +2379,11 @@ export class GameManager {
         totalPot,
         winnerSignature
       );
+      messageTextValue = messageText;
 
       const inlineKeyboard =
         keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined;
+      inlineKeyboardValue = inlineKeyboard;
       const lowerStatus = status.toLowerCase();
       const supportsVideo = gameMessage.usesVideo !== false;
       const winnerVideoId = resolveGameVideoId(gameType);
@@ -2392,6 +2457,14 @@ export class GameManager {
         return;
       }
     } catch (error) {
+      if (messageTextValue && isMessageMissing(error)) {
+        await this.recreateMissingGameMessage(ctx, gameAddress, {
+          chatId: gameMessage.chatId,
+          messageText: messageTextValue,
+          inlineKeyboard: inlineKeyboardValue,
+        });
+        return;
+      }
       console.error("Error in updateGameMessage:", error);
     }
   }

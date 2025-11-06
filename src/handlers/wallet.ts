@@ -9,6 +9,7 @@ import {
   safeAnswerCallbackQuery,
 } from "../utils/context-helpers";
 import { RateLimitExceededError } from "../utils/rate-limiter";
+import { isBotInitiationForbidden } from "../utils/telegram-errors";
 
 export type ShowWalletUIDeps = {
   wallet: {
@@ -54,35 +55,85 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
     typeof ctx?.editMessageMedia === "function" && callbackMessage && authoredByBot
   );
 
-  const sendWalletContent = (caption: string) =>
-    sendMediaWithFallback({
-      videoFileId: walletVideoFileId,
-      logLabel: "wallet media",
-      sendText: async () => {
-        return await respondWithMenu(ctx, {
-          text: caption,
-          keyboard: getWalletKeyboard(),
-        });
-      },
-      sendVideo:
-        walletVideoFileId && typeof ctx.replyWithVideo === "function"
-          ? () =>
-              ctx.replyWithVideo(walletVideoFileId, {
-                caption,
-                parse_mode: "HTML",
-                reply_markup: getWalletKeyboard(),
-                reply_to_message_id: ctx.message?.message_id,
-              })
-          : undefined,
-      editMessage:
-        canEditBotMessage && walletVideoFileId
-          ? () =>
-              ctx.editMessageMedia(
-                { type: "video", media: walletVideoFileId, caption, parse_mode: "HTML" },
-                { reply_markup: getWalletKeyboard() }
-              )
-          : undefined,
-    });
+  const resolveOriginChatId = (): number | undefined => {
+    if (ctx.chat && ctx.chat.type !== "private" && typeof ctx.chat.id === "number") {
+      return ctx.chat.id;
+    }
+    const fromCtx = (ctx as any).__originChatId;
+    if (typeof fromCtx === "number" && !Number.isNaN(fromCtx)) {
+      return fromCtx;
+    }
+    return undefined;
+  };
+
+  const notifyDmRequired = async () => {
+    const originChatId = resolveOriginChatId();
+    if (originChatId === undefined) {
+      return;
+    }
+
+    const botUsername = ctx?.me?.username;
+    const botMention = botUsername ? `@${botUsername}` : "the bot";
+    const startInstruction = botUsername
+      ? `Tap <a href="https://t.me/${botUsername}">${botMention}</a> and press <b>Start</b>, then run /balance again.`
+      : "Open a private chat with the bot, tap <b>Start</b>, then run /balance again.";
+
+    const lines = [
+      "❌ <b>I can’t DM you yet</b>",
+      "",
+      "Start a private chat with the bot so I can share your balances.",
+      startInstruction,
+    ];
+
+    try {
+      await ctx.api.sendMessage(originChatId, lines.join("\n"), {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+      });
+    } catch (notifyError) {
+      console.warn("Failed to notify user about DM requirement:", notifyError);
+    }
+  };
+
+  const sendWalletContent = async (caption: string) => {
+    try {
+      return await sendMediaWithFallback({
+        videoFileId: walletVideoFileId,
+        logLabel: "wallet media",
+        sendText: async () => {
+          return await respondWithMenu(ctx, {
+            text: caption,
+            keyboard: getWalletKeyboard(),
+          });
+        },
+        sendVideo:
+          walletVideoFileId && typeof ctx.replyWithVideo === "function"
+            ? () =>
+                ctx.replyWithVideo(walletVideoFileId, {
+                  caption,
+                  parse_mode: "HTML",
+                  reply_markup: getWalletKeyboard(),
+                  reply_to_message_id: ctx.message?.message_id,
+                })
+            : undefined,
+        editMessage:
+          canEditBotMessage && walletVideoFileId
+            ? () =>
+                ctx.editMessageMedia(
+                  { type: "video", media: walletVideoFileId, caption, parse_mode: "HTML" },
+                  { reply_markup: getWalletKeyboard() }
+                )
+            : undefined,
+      });
+    } catch (error) {
+      if (isBotInitiationForbidden(error)) {
+        (ctx as any).__walletDmForbidden = true;
+        await notifyDmRequired();
+        return null;
+      }
+      throw error;
+    }
+  };
 
   try {
     const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
@@ -99,6 +150,9 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
     const caption = buildWalletCaption(walletAddress, tokenLines);
 
     await sendWalletContent(caption);
+    if ((ctx as any).__walletDmForbidden) {
+      return;
+    }
   } catch (error) {
     if (error instanceof RateLimitExceededError) {
       const waitSeconds = Math.max(1, Math.ceil(error.retryAfterMs / 1000));
@@ -114,6 +168,9 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
         `<i>Try again in ${waitSeconds}s.</i>`,
       ];
       await sendWalletContent(response.join("\n"));
+      if ((ctx as any).__walletDmForbidden) {
+        return;
+      }
       return;
     }
 
@@ -127,6 +184,9 @@ export async function showWalletUI(ctx: any, deps: ShowWalletUIDeps) {
       "<i>Tap Refresh to try again</i>",
     ];
     await sendWalletContent(errorResponse.join("\n"));
+    if ((ctx as any).__walletDmForbidden) {
+      return;
+    }
   }
 }
 
@@ -228,6 +288,7 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
       chat: { id: dmTarget, type: "private" } as any,
       message: undefined,
       callbackQuery: undefined,
+      __originChatId: ctx.chat?.id,
       reply: (text: string, options: any = {}) =>
         ctx.api.sendMessage(dmTarget, text, {
           reply_to_message_id: undefined,

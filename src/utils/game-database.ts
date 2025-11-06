@@ -180,6 +180,14 @@ export class GameDatabase extends BaseDatabase {
     );
   }
 
+  public clearGameMessage(gameAddress: string): void {
+    this.run(
+      "UPDATE games SET message_id = NULL, chat_id = NULL WHERE game_address = ?",
+      [gameAddress],
+      "clearing game message"
+    );
+  }
+
   // Player mapping methods
   public savePlayerMapping(
     publicKey: string,

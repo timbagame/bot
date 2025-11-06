@@ -4,6 +4,7 @@ import {
   isChatInaccessible,
   isDuplicateContent,
   isEditProhibited,
+  isBotInitiationForbidden,
   isMessageMissing,
   isMessageNotModified,
   isMissingEditableContent,
@@ -39,6 +40,7 @@ describe("telegram error helpers", () => {
     expect(isChatInaccessible(unrelated)).toBe(false);
     expect(isMissingEditableContent(unrelated)).toBe(false);
     expect(isDuplicateContent(unrelated)).toBe(false);
+    expect(isBotInitiationForbidden(unrelated)).toBe(false);
   });
 
   test("shouldFallbackToReply aggregates individual predicates", () => {
@@ -46,5 +48,20 @@ describe("telegram error helpers", () => {
       .toBe(true);
     expect(shouldFallbackToReply("some other error"))
       .toBe(false);
+  });
+
+  test("isBotInitiationForbidden detects 403 initiation errors", () => {
+    expect(
+      isBotInitiationForbidden({
+        error_code: 403,
+        description: "Forbidden: bot can't initiate conversation with a user",
+      })
+    ).toBe(true);
+    expect(
+      isBotInitiationForbidden({
+        error_code: 403,
+        description: "Forbidden: bot was blocked by the user",
+      })
+    ).toBe(false);
   });
 });

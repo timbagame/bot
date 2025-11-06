@@ -33,6 +33,10 @@ test("GameDatabase: CRUD for games, mappings, participants, and slot updates", (
   const withMsg = db.getGame("gameA")!;
   expect(withMsg.message_id).toBe(777);
   expect(withMsg.chat_id).toBe(999);
+  db.clearGameMessage("gameA");
+  const clearedMsg = db.getGame("gameA")!;
+  expect(clearedMsg.message_id).toBeNull();
+  expect(clearedMsg.chat_id).toBeNull();
 
   // Player mapping roundtrip
   db.savePlayerMapping("pub_creator", "tg_creator", "@astro");

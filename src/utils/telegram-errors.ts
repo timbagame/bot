@@ -39,6 +39,19 @@ export const isEditProhibited = (error: unknown): boolean =>
 export const isChatInaccessible = (error: unknown): boolean =>
   matchesAny(error, ["have no access to the chat", "bot was blocked by the user"]);
 
+export const isBotInitiationForbidden = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const code = (error as any).error_code;
+  if (code !== 403) {
+    return false;
+  }
+
+  return matchesAny(error, ["bot can't initiate conversation"]);
+};
+
 export const isMissingEditableContent = (error: unknown): boolean =>
   matchesAny(error, [
     "there is no text in the message to edit",
