@@ -64,8 +64,7 @@ describe("WalletManager confirmTransaction and sendTransaction", () => {
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
-    // Stub sendTransaction directly to avoid building a real tx
-    (wm as any).sendTransaction = async () => "ABCDEF12";
+    (wm as any).sendAndConfirmWithResubmits = async () => "ABCDEF12";
     const sig = await wm.transferSol(
       1n,
       Keypair.generate().publicKey,

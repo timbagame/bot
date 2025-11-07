@@ -63,7 +63,7 @@ import {
 import { resolveTokenPriceUSD } from "./prices";
 import { NetworkDetector } from "./network-detector";
 import { SwapManager } from "./swap-manager";
-import { confirmTransactionWithRecovery } from "./transaction-runner";
+import { confirmTransactionWithRecovery, type TransactionProbe } from "./transaction-runner";
 import { createExpiringCache } from "./expiring-cache";
 import { refreshDynamicFeeBudgets } from "./fee-budget-refresh";
 
@@ -1305,6 +1305,82 @@ export class GameManager {
       `Why: ${safeReason}.\n` +
       safeSteps
     );
+  }
+
+  private async confirmTransactionWithRecovery(
+    signature: string,
+    gamePda: PublicKey,
+    operationType: "Game creation" | "Player join",
+    playerPubkey?: PublicKey,
+    resubmit?: (attempt: number, previousSignature: string) => Promise<string>
+  ): Promise<string> {
+    const probes: TransactionProbe[] = [];
+
+    if (operationType === "Game creation") {
+      probes.push({
+        label: "Game account exists",
+        check: async () => {
+          const accountInterface = this.program.account.game as any;
+          const fetchNullable = accountInterface?.fetchNullable?.bind(accountInterface);
+          const gameAccount = fetchNullable
+            ? await fetchNullable(gamePda)
+            : await accountInterface.fetch(gamePda);
+          return Boolean(gameAccount);
+        },
+      });
+    } else if (operationType === "Player join" && playerPubkey) {
+      probes.push({
+        label: "Player is recorded in game",
+        check: async () => {
+          try {
+            return await this.isPlayerInGame(gamePda, playerPubkey);
+          } catch {
+            return false;
+          }
+        },
+      });
+    }
+
+    try {
+      return await confirmTransactionWithRecovery({
+        wallet: this.wallet,
+        initialSignature: signature,
+        operationLabel: operationType,
+        resubmit,
+        probes,
+        logger: debugLog,
+      });
+    } catch (error: any) {
+      try {
+        if (operationType === "Game creation") {
+          const accountInterface = this.program.account.game as any;
+          const fetchNullable = accountInterface?.fetchNullable?.bind(accountInterface);
+          const gameAccount = fetchNullable
+            ? await fetchNullable(gamePda)
+            : await accountInterface.fetch(gamePda);
+          if (!gameAccount) {
+            (error as any).cause = new Error(
+              "Game account not found after timeout (attempted recovery)."
+            );
+          }
+        } else if (operationType === "Player join" && playerPubkey) {
+          const isInGame = await this.isPlayerInGame(gamePda, playerPubkey).catch(
+            () => false
+          );
+          if (!isInGame) {
+            (error as any).cause = new Error(
+              "Player not recorded in game after timeout (attempted recovery)."
+            );
+          }
+        }
+      } catch (probeError) {
+        (error as any).cause =
+          probeError instanceof Error
+            ? probeError
+            : new Error(String(probeError));
+      }
+      throw error;
+    }
   }
 
   private async getGameCreationRentLamports(): Promise<number> {
@@ -2997,12 +3073,12 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
 
       debugLog(`📍 Game address: ${gamePda.toBase58()}`);
 
-      tx = await confirmTransactionWithRecovery({
-        wallet: this.wallet,
-        initialSignature: tx,
-        operationLabel: "Game creation",
-        logger: debugLog,
-        resubmit: async () => {
+      tx = await this.confirmTransactionWithRecovery(
+        tx,
+        gamePda,
+        "Game creation",
+        undefined,
+        async () => {
           const resendGameTransaction = async () => {
             if (
               typeof (this.wallet as any).sendAndConfirmWithResubmits ===
@@ -3026,23 +3102,8 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
           };
 
           return await resendGameTransaction();
-        },
-        probes: [
-          {
-            label: "Game account exists",
-            check: async () => {
-              const accountInterface = this.program.account.game as any;
-              const fetchNullable = accountInterface?.fetchNullable?.bind(
-                accountInterface
-              );
-              const gameAccount = fetchNullable
-                ? await fetchNullable(gamePda)
-                : await accountInterface.fetch(gamePda);
-              return Boolean(gameAccount);
-            },
-          },
-        ],
-      });
+        }
+      );
 
       // Save game
       this.gameDb.saveGame(
@@ -3178,12 +3239,12 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
             );
             pendingRecorded = true;
 
-            joinTx = await confirmTransactionWithRecovery({
-              wallet: this.wallet,
-              initialSignature: joinTx,
-              operationLabel: "Player join",
-              logger: debugLog,
-              resubmit: async () => {
+            joinTx = await this.confirmTransactionWithRecovery(
+              joinTx,
+              gamePda,
+              "Player join",
+              playerKp.publicKey,
+              async () => {
                 const resendJoinTransaction = async () => {
                   if (
                     typeof (this.wallet as any).sendAndConfirmWithResubmits ===
@@ -3220,17 +3281,8 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
                 );
 
                 return refreshedSignature ?? joinTx;
-              },
-              probes: [
-                {
-                  label: "Player is recorded in game",
-                  check: async () =>
-                    await this.isPlayerInGame(gamePda, playerKp.publicKey).catch(
-                      () => false
-                    ),
-                },
-              ],
-            });
+              }
+            );
 
             joinConfirmed = true;
             break;
@@ -3713,12 +3765,12 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             );
             pendingRecorded = true;
 
-            joinTx = await confirmTransactionWithRecovery({
-              wallet: this.wallet,
-              initialSignature: joinTx,
-              operationLabel: "Player join",
-              logger: debugLog,
-              resubmit: async () => {
+            joinTx = await this.confirmTransactionWithRecovery(
+              joinTx,
+              gamePda,
+              "Player join",
+              playerKp.publicKey,
+              async () => {
                 const resendJoinTransaction = async () => {
                   if (
                     typeof (this.wallet as any).sendAndConfirmWithResubmits ===
@@ -3755,17 +3807,8 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
                 );
 
                 return refreshedSignature ?? joinTx;
-              },
-              probes: [
-                {
-                  label: "Player is recorded in game",
-                  check: async () =>
-                    await this.isPlayerInGame(gamePda, playerKp.publicKey).catch(
-                      () => false
-                    ),
-                },
-              ],
-            });
+              }
+            );
             joinConfirmed = true;
           } catch (joinError: any) {
             const message = joinError?.message ?? "";
@@ -4187,12 +4230,12 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             [playerKp, adminKp]
           );
 
-          lastSignature = await confirmTransactionWithRecovery({
-            wallet: this.wallet,
-            initialSignature: lastSignature!,
-            operationLabel: "Player join",
-            logger: debugLog,
-            resubmit: async () => {
+          lastSignature = await this.confirmTransactionWithRecovery(
+            lastSignature!,
+            gamePda,
+            "Player join",
+            playerKp.publicKey,
+            async () => {
               const resendJoinTransaction = async () => {
                 if (
                   typeof (this.wallet as any).sendAndConfirmWithResubmits ===
@@ -4216,17 +4259,8 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
               };
 
               return await resendJoinTransaction();
-            },
-            probes: [
-              {
-                label: "Player is recorded in game",
-                check: async () =>
-                  await this.isPlayerInGame(gamePda, playerKp.publicKey).catch(
-                    () => false
-                  ),
-              },
-            ],
-          });
+            }
+          );
 
 
           return { success: true, tx: lastSignature };

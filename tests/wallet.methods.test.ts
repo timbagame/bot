@@ -121,7 +121,7 @@ test("transferSol preserves lamports for dust transfers", async () => {
   );
 
   const instructions: any[][] = [];
-  (wm as any).sendTransaction = async (ixs: any[]) => {
+  (wm as any).sendAndConfirmWithResubmits = async (ixs: any[]) => {
     instructions.push(ixs);
     return "SIG_DUST";
   };
@@ -151,7 +151,7 @@ test("withdrawAllSol aborts when fees exceed balance", async () => {
   (wm as any).estimateFee = async () => 2000;
 
   let sendCalled = false;
-  (wm as any).sendTransaction = async () => {
+  (wm as any).sendAndConfirmWithResubmits = async () => {
     sendCalled = true;
     return "UNREACHABLE";
   };
@@ -184,7 +184,7 @@ test("withdrawAllSol refreshes balance instead of using stale cache", async () =
   (wm as any).estimateFee = async () => 5_000;
 
   const lamportTransfers: number[] = [];
-  (wm as any).sendTransaction = async (ixs: any[]) => {
+  (wm as any).sendAndConfirmWithResubmits = async (ixs: any[]) => {
     const instruction = ixs[0]!;
     const lamports = Number((instruction.data as Buffer).readBigUInt64LE(4));
     lamportTransfers.push(lamports);

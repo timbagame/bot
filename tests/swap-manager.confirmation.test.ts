@@ -1,37 +1,18 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import {
-  Keypair,
-  TransactionMessage,
-  VersionedTransaction,
-} from "@solana/web3.js";
+import { describe, expect, test } from "bun:test";
+import { Buffer } from "buffer";
+import { Keypair, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
 import { SwapManager } from "../src/utils/swap-manager";
 import type { WalletManager } from "../src/utils/wallet";
 import type { FeeBudgetProvider } from "../src/utils/fee-budget";
 
-type SignatureStatusResponse = { value: Array<any> };
-
-type MockConnectionDeps = {
-  confirmBehavior?: "success" | "timeout";
-  signatureStatuses?: Array<any>;
-};
-
 type MockConnection = {
   getLatestBlockhash: () => Promise<{ blockhash: string; lastValidBlockHeight: number }>;
-  sendTransaction: (tx: VersionedTransaction, options: Record<string, unknown>) => Promise<string>;
-  confirmTransaction: (
-    args: { signature: string; blockhash: string; lastValidBlockHeight: number },
-    commitment: string
-  ) => Promise<{ value: { err: null } }>;
-  getSignatureStatuses: (
-    signatures: string[],
-    config: { searchTransactionHistory: boolean }
-  ) => Promise<SignatureStatusResponse>;
 };
 
 const BASE58_BLOCKHASH = "11111111111111111111111111111111";
-const SIGNATURE_CONFIRMED = "2".repeat(88);
-const SIGNATURE_TIMEOUT_SUCCESS = "3".repeat(88);
-const SIGNATURE_TIMEOUT_FAILURE = "4".repeat(88);
+const UPDATED_BASE58_BLOCKHASH = "BPFLoaderUpgradeab1e11111111111111111111111";
+const SIGNATURE_OK = "2".repeat(88);
+const SIGNATURE_ERR = "3".repeat(88);
 
 const createBase64Transaction = (payer: Keypair): string => {
   const message = new TransactionMessage({
@@ -44,169 +25,65 @@ const createBase64Transaction = (payer: Keypair): string => {
   return Buffer.from(tx.serialize()).toString("base64");
 };
 
-const createMockConnection = (
-  signature: string,
-  deps: MockConnectionDeps = {}
-): {
-  connection: MockConnection;
-  metrics: { readonly confirmCalls: number; readonly statusCalls: number };
-} => {
-  const { confirmBehavior = "success", signatureStatuses = [] } = deps;
-  let confirmCalls = 0;
-  let statusCalls = 0;
-
-  const connection: MockConnection = {
-    getLatestBlockhash: async () => ({
-      blockhash: BASE58_BLOCKHASH,
-      lastValidBlockHeight: 123456,
-    }),
-    sendTransaction: async (
-      _tx: VersionedTransaction,
-      _options: Record<string, unknown>
-    ) => signature,
-    confirmTransaction: async (_strategy: any, _commitment: string) => {
-      confirmCalls += 1;
-      if (confirmBehavior === "timeout") {
-        throw new Error("Transaction was not confirmed in 30.00 seconds.");
-      }
-      return { value: { err: null } };
-    },
-    getSignatureStatuses: async (_signatures: string[], _config: any) => {
-      statusCalls += 1;
-      const next = signatureStatuses.shift() ?? null;
-      return { value: [next] };
-    },
-  };
-
-  return {
-    connection,
-    metrics: {
-      get confirmCalls() {
-        return confirmCalls;
-      },
-      get statusCalls() {
-        return statusCalls;
-      },
-    },
-  };
-};
-
-const walletStub = {} as WalletManager;
 const feeBudgetStub = {
   getGameSafetyBufferLamports: () => 0,
   getJitSwapFeeBufferLamports: () => 0,
 } as unknown as FeeBudgetProvider;
 
-const originalEnvInterval = process.env["SWAP_CONFIRMATION_POLL_INTERVAL_MS"];
-const originalEnvDuration = process.env["SWAP_CONFIRMATION_POLL_DURATION_MS"];
-
 describe("SwapManager Jupiter confirmation", () => {
   const payer = Keypair.generate();
   const base64Tx = createBase64Transaction(payer);
 
-  beforeEach(() => {
-    process.env["SWAP_CONFIRMATION_POLL_INTERVAL_MS"] = "1";
-    process.env["SWAP_CONFIRMATION_POLL_DURATION_MS"] = "10";
-  });
+  test("invokes wallet helpers to sign, send, and confirm", async () => {
+    let capturedTx: string | null = null;
+    let confirmed: string | null = null;
 
-  afterEach(() => {
-    if (originalEnvInterval === undefined) {
-      delete process.env["SWAP_CONFIRMATION_POLL_INTERVAL_MS"];
-    } else {
-      process.env["SWAP_CONFIRMATION_POLL_INTERVAL_MS"] = originalEnvInterval;
-    }
+    const walletStub = {
+      signAndSendSerializedTransaction: async (tx: string, signer: Keypair) => {
+        capturedTx = tx;
+        expect(signer).toBe(payer);
+        return SIGNATURE_OK;
+      },
+      confirmTransaction: async (signature: string) => {
+        confirmed = signature;
+      },
+    } as unknown as WalletManager;
 
-    if (originalEnvDuration === undefined) {
-      delete process.env["SWAP_CONFIRMATION_POLL_DURATION_MS"];
-    } else {
-      process.env["SWAP_CONFIRMATION_POLL_DURATION_MS"] = originalEnvDuration;
-    }
-  });
-
-  test("executes Jupiter transaction when RPC confirms immediately", async () => {
-    const { connection, metrics } = createMockConnection(SIGNATURE_CONFIRMED);
-
-    const manager = new SwapManager(connection as any, walletStub, feeBudgetStub);
-
-    const result = await (manager as any).executeJupiterTransaction(base64Tx, payer);
-
-    expect(result).toBe(SIGNATURE_CONFIRMED);
-    expect(metrics.confirmCalls).toBe(1);
-    expect(metrics.statusCalls).toBe(0);
-  });
-
-  test("recovers from RPC timeout by polling signature until confirmed", async () => {
-    const { connection } = createMockConnection(SIGNATURE_TIMEOUT_SUCCESS, {
-      confirmBehavior: "timeout",
-      signatureStatuses: [
-        { confirmations: 0, confirmationStatus: "processed" },
-        { confirmations: 1, confirmationStatus: "confirmed" },
-      ],
-    });
-
-    const manager = new SwapManager(connection as any, walletStub, feeBudgetStub);
-
-    const result = await (manager as any).executeJupiterTransaction(base64Tx, payer);
-
-    expect(result).toBe(SIGNATURE_TIMEOUT_SUCCESS);
-  });
-
-  test("throws descriptive error when signature never confirms", async () => {
-    const { connection } = createMockConnection(SIGNATURE_TIMEOUT_FAILURE, {
-      confirmBehavior: "timeout",
-      signatureStatuses: [
-        { confirmations: 0, confirmationStatus: "processed" },
-        { confirmations: 0, confirmationStatus: "processed" },
-      ],
-    });
-
-    const manager = new SwapManager(connection as any, walletStub, feeBudgetStub);
-
-    await expect(
-      (manager as any).executeJupiterTransaction(base64Tx, payer)
-    ).rejects.toThrow(
-      `Failed to execute Jupiter transaction: Transaction confirmation timed out after extended polling. Check signature ${SIGNATURE_TIMEOUT_FAILURE}`
-    );
-  });
-
-  test("clamps zero poll interval to minimum delay", async () => {
-    process.env["SWAP_CONFIRMATION_POLL_INTERVAL_MS"] = "0";
-    process.env["SWAP_CONFIRMATION_POLL_DURATION_MS"] = "25";
-
-    const setTimeoutCalls: number[] = [];
-    const originalSetTimeout = globalThis.setTimeout;
-
-    (globalThis as any).setTimeout = (
-      callback: (...args: any[]) => void,
-      ms?: number,
-      ...args: any[]
-    ): any => {
-      setTimeoutCalls.push(ms ?? 0);
-      return originalSetTimeout(callback as any, Math.max(ms ?? 0, 1), ...args);
+    const connection: MockConnection = {
+      getLatestBlockhash: async () => ({
+        blockhash: UPDATED_BASE58_BLOCKHASH,
+        lastValidBlockHeight: 999,
+      }),
     };
 
-    try {
-      const { connection } = createMockConnection(SIGNATURE_TIMEOUT_SUCCESS, {
-        confirmBehavior: "timeout",
-        signatureStatuses: [
-          { confirmations: 0, confirmationStatus: "processed" },
-          { confirmations: 1, confirmationStatus: "confirmed" },
-        ],
-      });
+    const manager = new SwapManager(connection as any, walletStub, feeBudgetStub);
+    const result = await (manager as any).executeJupiterTransaction(base64Tx, payer);
 
-      const manager = new SwapManager(connection as any, walletStub, feeBudgetStub);
+    expect(result).toBe(SIGNATURE_OK);
+    expect(confirmed).not.toBeNull();
+    expect(confirmed!).toBe(SIGNATURE_OK);
+    expect(capturedTx).not.toBeNull();
+    expect(capturedTx).not.toEqual(base64Tx);
+  });
 
-      const result = await (manager as any).executeJupiterTransaction(base64Tx, payer);
+  test("surfaces errors from confirmTransaction", async () => {
+    const walletStub = {
+      signAndSendSerializedTransaction: async () => SIGNATURE_ERR,
+      confirmTransaction: async () => {
+        throw new Error("RPC timeout");
+      },
+    } as unknown as WalletManager;
 
-      expect(result).toBe(SIGNATURE_TIMEOUT_SUCCESS);
-      expect(setTimeoutCalls.length).toBeGreaterThan(0);
-      for (const delay of setTimeoutCalls) {
-        expect(delay).toBeGreaterThanOrEqual(1);
-      }
-    } finally {
-      process.env["SWAP_CONFIRMATION_POLL_INTERVAL_MS"] = "1";
-      process.env["SWAP_CONFIRMATION_POLL_DURATION_MS"] = "10";
-      globalThis.setTimeout = originalSetTimeout;
-    }
+    const connection: MockConnection = {
+      getLatestBlockhash: async () => ({
+        blockhash: BASE58_BLOCKHASH,
+        lastValidBlockHeight: 42,
+      }),
+    };
+
+    const manager = new SwapManager(connection as any, walletStub, feeBudgetStub);
+    await expect((manager as any).executeJupiterTransaction(base64Tx, payer)).rejects.toThrow(
+      "RPC timeout"
+    );
   });
 });

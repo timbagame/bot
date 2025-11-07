@@ -92,10 +92,17 @@ describe("GameManager confirm/reload helpers", () => {
 
   test("confirmTransactionWithRecovery falls back to signature history status", async () => {
     resetGM();
+    const statuses = [
+      { confirmations: 0, confirmationStatus: "processed" },
+      { confirmations: 1, confirmationStatus: "confirmed" },
+    ];
     const wallet = {
       confirmTransaction: async () => {
         throw new Error("transaction confirmation timeout");
       },
+      getConnection: () => ({
+        getSignatureStatuses: async () => ({ value: [statuses.shift() ?? null] }),
+      }),
     } as any;
     const program = {
       account: { game: { fetchNullable: async () => null } },
@@ -105,12 +112,6 @@ describe("GameManager confirm/reload helpers", () => {
       getGameParticipants: () => [],
     } as any);
 
-    let historyChecks = 0;
-    (gm as any).isSignatureConfirmedFromHistory = async () => {
-      historyChecks += 1;
-      return true;
-    };
-
     const confirmed = await (gm as any).confirmTransactionWithRecovery(
       "SIG-HISTORY",
       new PublicKey("BPFLoader1111111111111111111111111111111111"),
@@ -118,7 +119,6 @@ describe("GameManager confirm/reload helpers", () => {
     );
 
     expect(confirmed).toBe("SIG-HISTORY");
-    expect(historyChecks).toBeGreaterThanOrEqual(1);
   });
 
   test("confirmTransactionWithRecovery preserves timeout message when recovery fails", async () => {
@@ -130,9 +130,9 @@ describe("GameManager confirm/reload helpers", () => {
         );
         return Promise.reject(err);
       },
-      connection: {
+      getConnection: () => ({
         getSignatureStatuses: async () => ({ value: [null] }),
-      },
+      }),
     } as any;
     const program = {
       account: { game: { fetchNullable: async () => null } },
