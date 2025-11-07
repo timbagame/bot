@@ -2270,7 +2270,8 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
             `<b>Withdrawal completed</b> 💸\n\nSent ${totalText} SOL`;
 
           return { signature: result.signature, message };
-        }
+        },
+        true
       );
     } catch (error: any) {
       await handleCommandError(ctx, error, "withdraw");
@@ -2315,7 +2316,8 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
             parsedAmount.tokenMint
           );
         }
-      }
+      },
+      true
     );
   } catch (error: any) {
     await handleCommandError(ctx, error, "withdraw");
