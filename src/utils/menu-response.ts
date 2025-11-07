@@ -62,7 +62,6 @@ type EditTarget = {
 };
 
 const attemptEdit = async (
-  _kind: MenuEditKind,
   performEdit: () => Promise<unknown>
 ): Promise<EditAttemptResult> => {
   try {
@@ -84,7 +83,7 @@ const editMenuMessage = async (
   payload: MenuPayload,
   kind: MenuEditKind
 ): Promise<EditAttemptResult> =>
-  attemptEdit(kind, async () => {
+  attemptEdit(async () => {
     if (kind === "caption") {
       await ctx.editMessageCaption({
         caption: payload.text,
@@ -124,7 +123,7 @@ export const respondWithMenu = async (
         attempts: [
           {
             invoke: () =>
-              attemptEdit("text", () =>
+              attemptEdit(() =>
                 ctx.api.editMessageText(
                   targetChatId,
                   targetMessageId,

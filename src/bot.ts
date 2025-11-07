@@ -425,10 +425,7 @@ const isTokenSelectionCacheEntry = (
 ): entry is TokenSelectionCacheEntry =>
   Boolean(entry && "targetToken" in entry && "targetTokenAddress" in entry);
 
-type TradeKind = "swap";
-
 type TradeConfirmationParams = {
-  kind: TradeKind;
   payToken: string;
   payDisplay: string;
   payRawAmount: number;
@@ -466,7 +463,6 @@ const formatSlippagePercent = (value: number): string => {
 };
 
 const formatTradeConfirmationSummary = ({
-  kind: _kind,
   payToken,
   payDisplay,
   payRawAmount,
@@ -513,8 +509,10 @@ const formatTradeConfirmationSummary = ({
     ? escapeHtml(contractAddress)
     : undefined;
 
+  const heading = "Swap Confirmation";
+
   const lines = [
-    `🔄 <b>Swap Confirmation</b>`,
+    `🔄 <b>${heading}</b>`,
     "",
     `<b>You Pay:</b> ${safePayDisplay} ${safePayToken}`,
     `<b>You Receive:</b> ~${safeReceiveDisplay} ${safeReceiveToken}`,
@@ -569,8 +567,11 @@ const getUserSwapSlippageBps = (userId: string): number => {
 
 const setUserSwapSlippageBps = (userId: string, slippageBps: number): void => {
   const existing = getUserState(userId, false);
-  const { timestamp: _timestamp, ...rest } = existing ?? {};
-  setUserState(userId, { ...rest, swapSlippageBps: slippageBps });
+  const sanitizedState: Record<string, any> = existing
+    ? { ...existing }
+    : {};
+  Reflect.deleteProperty(sanitizedState, "timestamp");
+  setUserState(userId, { ...sanitizedState, swapSlippageBps: slippageBps });
 };
 
 const buildSwapConfirmationKeyboard = ({
@@ -599,17 +600,15 @@ const buildSwapConfirmationKeyboard = ({
   return keyboard;
 };
 
-type TradeQuoteErrorKind = "swap";
-
 type TradeQuoteErrorParams = {
   error: unknown;
   retryCallback: string;
 };
 
-const renderTradeQuoteError = (
-  _kind: TradeQuoteErrorKind,
-  { error, retryCallback }: TradeQuoteErrorParams
-) => {
+const renderTradeQuoteError = ({
+  error,
+  retryCallback,
+}: TradeQuoteErrorParams) => {
   const keyboard = new InlineKeyboard().text("← Try Again", retryCallback).row();
   const userFriendly = formatUserFriendlyError(error, wallet);
   return {
@@ -618,11 +617,10 @@ const renderTradeQuoteError = (
   };
 };
 
-  type PrepareTradeQuoteParams = {
+type PrepareTradeQuoteParams = {
   ctx: Context;
-  kind: TradeKind;
   spinnerText: string;
-  summaryInput: Omit<TradeConfirmationParams, "quote" | "kind">;
+  summaryInput: Omit<TradeConfirmationParams, "quote">;
   quoteFetcher: () => Promise<SwapQuote>;
   cacheQuote: (txId: string, quote: SwapQuote, summary: TradeConfirmationSummary) => void;
   buildConfirmationKeyboard: (
@@ -636,7 +634,6 @@ const renderTradeQuoteError = (
 
 const prepareTradeQuote = async ({
   ctx,
-  kind,
   spinnerText,
   summaryInput,
   quoteFetcher,
@@ -654,7 +651,6 @@ const prepareTradeQuote = async ({
   try {
     const quote = await quoteFetcher();
     const summary = formatTradeConfirmationSummary({
-      kind,
       ...summaryInput,
       quote,
     });
@@ -670,7 +666,7 @@ const prepareTradeQuote = async ({
 
     return { txId, quote, summary };
   } catch (error) {
-    console.error(`Error getting ${kind} quote:`, error);
+    console.error("Error getting swap quote:", error);
     await onError(error);
     return null;
   }
@@ -702,7 +698,6 @@ type PrepareTokenTradeQuoteParams = {
   ctx: Context;
   telegramId: bigint;
   amountInput: string;
-  kind: TradeKind;
   inputFactory: (
     context: TradeAssetFactoryContext
   ) => Promise<ResolvedTradeAsset> | ResolvedTradeAsset;
@@ -729,7 +724,7 @@ type PrepareTokenTradeQuoteParams = {
   onError: (error: unknown) => Promise<void> | void;
   summaryExtras?: (
     context: PreparedTradeQuoteContext
-  ) => Partial<Omit<TradeConfirmationParams, "kind" | "quote">>;
+  ) => Partial<Omit<TradeConfirmationParams, "quote">>;
   quoteOptions?: { slippageBps?: number };
   quoteErrorMessage?: string;
 };
@@ -738,7 +733,6 @@ const prepareTokenTradeQuote = async ({
   ctx,
   telegramId,
   amountInput,
-  kind,
   inputFactory,
   outputFactory,
   spinnerText,
@@ -785,7 +779,6 @@ const prepareTokenTradeQuote = async ({
 
   await prepareTradeQuote({
     ctx,
-    kind,
     spinnerText: spinner,
     summaryInput: {
       payToken: inputAsset.ticker,
@@ -3766,7 +3759,6 @@ const showSwapQuoteAndConfirmation = async (
       ctx,
       telegramId: userId,
       amountInput: amount,
-      kind: "swap",
       inputFactory: async ({ tokenBalances }) => {
         const inputMint =
           overrides.fromMint ??
@@ -3838,7 +3830,7 @@ const showSwapQuoteAndConfirmation = async (
           selectedSlippageBps,
         }),
       onError: async (error) => {
-        const { text, keyboard } = renderTradeQuoteError("swap", {
+        const { text, keyboard } = renderTradeQuoteError({
           error,
           retryCallback: cancelCallback,
         });
@@ -3849,7 +3841,7 @@ const showSwapQuoteAndConfirmation = async (
     });
   } catch (error) {
     console.error("Error getting swap quote:", error);
-    const { text, keyboard } = renderTradeQuoteError("swap", {
+    const { text, keyboard } = renderTradeQuoteError({
       error,
       retryCallback: cancelCallback,
     });
@@ -3931,7 +3923,6 @@ bot.callbackQuery(/^swap_slippage_/, async (ctx) => {
     });
 
     const summary = formatTradeConfirmationSummary({
-      kind: "swap",
       payToken: pending.fromToken ?? quote.inputMint,
       payDisplay: pending.amount ?? "0",
       payRawAmount: Number(amountForQuote ?? 0),
@@ -3941,10 +3932,11 @@ bot.callbackQuery(/^swap_slippage_/, async (ctx) => {
       quote,
     });
 
-    const { timestamp: _timestamp, ...rest } = pending;
+    const sanitizedPending: Record<string, any> = { ...pending };
+    Reflect.deleteProperty(sanitizedPending, "timestamp");
 
     storePendingTransaction(txId, {
-      ...rest,
+      ...sanitizedPending,
       userId: pendingUserId,
       slippageBps,
       quote,
@@ -4331,17 +4323,13 @@ setupAnchor()
     console.log("Setting up GameCompleted event listener...");
     program.addEventListener(
       "gameCompleted",
-      async (
-        event: GameCompletedEvent,
-        _slot: number,
-        signature?: string
-      ) => {
+      async (event: GameCompletedEvent, slot: number, signature?: string) => {
         try {
           const gameAddress = event.gameKey.toString();
           const winnerAddress = event.winner.toString();
 
           console.log(
-            `🎉 GameCompleted event received for game: ${gameAddress}`
+            `🎉 GameCompleted event received for game: ${gameAddress} (slot ${slot})`
           );
           if (signature) {
             console.log(`🔗 Completion signature: ${signature}`);

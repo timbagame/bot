@@ -13,7 +13,6 @@ interface PumpFunQuoteKey {
   outputMint: string;
   amount: string;
   inputDecimals: number;
-  outputDecimals: number;
   slippageBps: number;
 }
 
@@ -119,15 +118,13 @@ export class SwapQuoteCache {
   }
 
   private serializePumpFunParams(params: PumpFunQuoteKey): string {
-    const { inputMint, outputMint, amount, inputDecimals, outputDecimals, slippageBps } =
-      params;
+    const { inputMint, outputMint, amount, inputDecimals, slippageBps } = params;
 
     return JSON.stringify({
       inputMint,
       outputMint,
       amount,
       inputDecimals,
-      outputDecimals,
       slippageBps,
     });
   }

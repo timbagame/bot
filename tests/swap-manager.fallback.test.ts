@@ -55,7 +55,6 @@ describe("SwapManager Jupiter fallback", () => {
       outputMint: string,
       amountStr: string,
       inputDecimals: number,
-      _outputDecimals: number,
       _slippageBps: number
     ) => {
       const decimalAmount = normalizePumpFunAmount(amountStr, inputDecimals).decimalAmount;
@@ -100,7 +99,6 @@ describe("SwapManager Jupiter fallback", () => {
       _outputMint: string,
       amountStr: string,
       inputDecimals: number,
-      _outputDecimals: number,
       _slippageBps: number
     ) => {
       receivedAmount = amountStr;

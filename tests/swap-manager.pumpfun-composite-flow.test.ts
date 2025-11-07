@@ -70,13 +70,13 @@ describe("SwapManager pump.fun composite quotes", () => {
       inputMint: string,
       outputMint: string,
       amount: string,
-      _inputDecimals: number,
-      _outputDecimals: number,
+      inputDecimals: number,
       _slippageBps: number
     ) => {
       expect(inputMint).toBe(pumpMint);
       expect(outputMint).toBe(WSOL_MINT);
       expect(amount).toBe("1");
+      expect(inputDecimals).toBe(6);
       return stubPumpQuote({ inputAmount: amount });
     };
     (manager as any).jupiterClient.getQuote = async () =>
@@ -107,13 +107,13 @@ describe("SwapManager pump.fun composite quotes", () => {
       inputMint: string,
       outputMint: string,
       amount: string,
-      _inputDecimals: number,
-      _outputDecimals: number,
+      inputDecimals: number,
       _slippageBps: number
     ) => {
       expect(inputMint).toBe(WSOL_MINT);
       expect(outputMint).toBe(pumpMint);
       expect(amount).toBe("0.001");
+      expect(inputDecimals).toBe(9);
       return stubPumpQuote({
         inputMint,
         outputMint,
@@ -162,7 +162,6 @@ describe("SwapManager pump.fun composite quotes", () => {
       outputMint: string,
       amount: string,
       inputDecimals: number,
-      _outputDecimals: number,
       _slippageBps: number
     ) => {
       expect(inputMint).toBe(pumpMint);

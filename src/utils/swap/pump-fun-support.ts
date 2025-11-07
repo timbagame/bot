@@ -235,7 +235,6 @@ export async function buildPumpFunCompositeQuote(options: {
       outputMint: WSOL_MINT,
       amount: amountForPumpQuote,
       inputDecimals,
-      outputDecimals: SOL_DECIMALS,
       slippageBps,
     };
     const pumpQuote = await quoteCache.getPumpFunQuote(pumpQuoteParams, () =>
@@ -244,7 +243,6 @@ export async function buildPumpFunCompositeQuote(options: {
         pumpQuoteParams.outputMint,
         pumpQuoteParams.amount,
         pumpQuoteParams.inputDecimals,
-        pumpQuoteParams.outputDecimals,
         pumpQuoteParams.slippageBps
       )
     );
@@ -312,7 +310,6 @@ export async function buildPumpFunCompositeQuote(options: {
     outputMint,
     amount: solDecimalAmount,
     inputDecimals: SOL_DECIMALS,
-    outputDecimals,
     slippageBps,
   };
   const pumpQuote = await quoteCache.getPumpFunQuote(pumpQuoteParams, () =>
@@ -321,7 +318,6 @@ export async function buildPumpFunCompositeQuote(options: {
       pumpQuoteParams.outputMint,
       pumpQuoteParams.amount,
       pumpQuoteParams.inputDecimals,
-      pumpQuoteParams.outputDecimals,
       pumpQuoteParams.slippageBps
     )
   );

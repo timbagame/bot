@@ -316,8 +316,7 @@ export class PumpFunClient {
     inputMint: string,
     outputMint: string,
     amount: string,
-    _inputDecimals: number,
-    _outputDecimals: number,
+    inputDecimals?: number,
     slippageBps: number = 500
   ): Promise<PumpFunQuote> {
     try {
@@ -368,7 +367,7 @@ export class PumpFunClient {
 
       const inputDecimalsSafe = isSolInput
         ? 9
-        : Math.max(_inputDecimals ?? 6, 0);
+        : Math.max(inputDecimals ?? 6, 0);
 
       const normalizedAmount = normalizePumpFunAmount(
         amount,

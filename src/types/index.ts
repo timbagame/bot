@@ -83,12 +83,6 @@ export interface PlayerData {
   gameBalance: number;
 }
 
-// ================================
-// GAME TYPES
-// ================================
-
-export type GameStatus = "Active" | "Completed" | "Cancelled";
-
 export interface GameMessage {
   messageId: number;
   chatId: number;
@@ -176,43 +170,17 @@ export interface OracleStatsResponse {
   error?: string;
 }
 
-export interface OracleHealthResponse {
-  status: string;
-  timestamp: string;
-  uptime: number;
-}
-
 // ================================
 // UTILITY TYPES
 // ================================
 
 export type GameType = "coinflip" | "giveaway";
 
-export interface TokenMetadata {
-  decimals: number;
-}
-
 // ================================
 // ENHANCED TYPES FOR REFACTORING
 // ================================
 
 export type PlayerEvent = PlayerJoinedEvent | PlayerUnjoinedEvent;
-
-export interface ApiContext {
-  api: any;
-  chat: { id: number };
-  from?: { username?: string; first_name?: string };
-  answerCallbackQuery?: (text: string) => Promise<void>;
-  reply?: (text: string, options?: any) => Promise<any>;
-}
-
-export interface GameStats {
-  currentTickets: number;
-  maxTickets: number;
-  minTickets: number;
-  totalPot: number;
-  expirationInfo: string;
-}
 
 export interface CallbackError {
   message?: string;
