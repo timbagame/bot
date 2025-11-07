@@ -361,9 +361,10 @@ async function main() {
       } as any)
       .instruction();
 
-    const tx = await wallet.sendTransaction(
+    const tx = await wallet.sendAndConfirmWithResubmits(
       [instruction],
-      uniqueSigners(adminBundle.root, oracleOperatorBundle.root)
+      uniqueSigners(adminBundle.root, oracleOperatorBundle.root),
+      { operationLabel: `Update ${proposal.ticker} min bet` }
     );
 
     console.log(

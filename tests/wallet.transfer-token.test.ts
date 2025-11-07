@@ -26,8 +26,7 @@ describe("WalletManager.transferToken", () => {
           : null,
     });
 
-    // Stub sendTransaction to avoid real network
-    (wm as any).sendTransaction = async () => "SIG_SPL";
+    (wm as any).sendAndConfirmWithResubmits = async () => "SIG_SPL";
 
     const fromId = 1n;
     const to = Keypair.generate().publicKey;
@@ -55,7 +54,7 @@ describe("WalletManager.transferToken", () => {
       tokenMetadataResolver: async (mint) =>
         mint === mint2022.toBase58() ? { decimals: 7 } : null,
     });
-    (wm as any).sendTransaction = async () => "SIG_2022";
+    (wm as any).sendAndConfirmWithResubmits = async () => "SIG_2022";
 
     const fromId = 2n;
     const to = Keypair.generate().publicKey;

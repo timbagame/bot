@@ -1,6 +1,10 @@
 /**
  * Network detection utility
  */
+import {
+  DEFAULT_MAINNET_ENDPOINT,
+  resolvePrimaryRpcEndpoint,
+} from "./rpc-endpoints";
 
 export type SolanaNetwork = "mainnet" | "devnet" | "testnet" | "localnet";
 
@@ -82,8 +86,10 @@ export class NetworkDetector {
    * Get current network from environment
    */
   static getCurrentNetwork(): SolanaNetwork {
-    const rpcUrl =
-      process.env.SOLANA_NETWORK || "https://api.mainnet-beta.solana.com";
+    const rpcUrl = resolvePrimaryRpcEndpoint(
+      process.env.SOLANA_NETWORK,
+      DEFAULT_MAINNET_ENDPOINT
+    );
     return this.detectNetwork(rpcUrl);
   }
 

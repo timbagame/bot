@@ -50,6 +50,12 @@ import {
 } from "./token-programs";
 import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
 import { TokenDatabase } from "./token-database";
+import {
+  DEFAULT_MAINNET_ENDPOINT,
+  RpcEndpointManager,
+  parseRpcEndpointList,
+  type ActiveEndpointChange,
+} from "./rpc-endpoints";
 
 // Lightweight dependency handles for testability
 type HttpFetch = (input: string, init?: any) => Promise<{
@@ -133,6 +139,7 @@ export class WalletManager {
   private static instance: WalletManager;
   private mnemonic: string;
   private connection: Connection;
+  private rpcEndpointManager?: RpcEndpointManager;
   private fetchFn: HttpFetch;
   private timeNow?: () => number;
   private tokenMetadataResolver?: (
@@ -280,8 +287,19 @@ export class WalletManager {
 
   private constructor(mnemonic: string, deps?: WalletDeps) {
     this.mnemonic = mnemonic;
-    this.connection =
-      deps?.connection ?? new Connection(process.env.SOLANA_NETWORK!, "confirmed");
+
+    if (deps?.connection) {
+      this.connection = deps.connection;
+    } else {
+      const endpoints = parseRpcEndpointList(process.env.SOLANA_NETWORK, {
+        fallback: DEFAULT_MAINNET_ENDPOINT,
+      });
+      this.rpcEndpointManager = new RpcEndpointManager(endpoints, {
+        commitment: "confirmed",
+        logger: console,
+      });
+      this.connection = this.rpcEndpointManager.getConnection();
+    }
     this.fetchFn = deps?.fetch ?? (globalThis.fetch as any);
     this.timeNow = deps?.timeNow;
     this.tokenMetadataResolver = deps?.tokenMetadataResolver;
@@ -487,6 +505,19 @@ export class WalletManager {
 
   public getConnection(): Connection {
     return this.connection;
+  }
+
+  public onRpcEndpointChange(
+    listener: (change: ActiveEndpointChange) => void | Promise<void>
+  ): () => void {
+    if (!this.rpcEndpointManager) {
+      console.warn(
+        "RPC endpoint manager is not available; listener registration ignored."
+      );
+      return () => {};
+    }
+
+    return this.rpcEndpointManager.onActiveEndpointChange(listener);
   }
 
   // ================================
@@ -1543,7 +1574,11 @@ export class WalletManager {
       ...toInstructions,
       transferInstruction,
     ];
-    return await this.sendTransaction(allInstructions, [fromKeypair]);
+    return await this.sendAndConfirmWithResubmits(
+      allInstructions,
+      [fromKeypair],
+      { operationLabel: "Token transfer" }
+    );
   }
 
   public async transferSol(
@@ -1564,7 +1599,11 @@ export class WalletManager {
       lamports: amountLamports,
     });
 
-    return await this.sendTransaction([transferInstruction], [fromKeypair]);
+    return await this.sendAndConfirmWithResubmits(
+      [transferInstruction],
+      [fromKeypair],
+      { operationLabel: "SOL transfer" }
+    );
   }
 
   public async withdrawAllSol(
@@ -1635,9 +1674,10 @@ export class WalletManager {
       lamports: transferLamports,
     });
 
-    const signature = await this.sendTransaction(
+    const signature = await this.sendAndConfirmWithResubmits(
       [transferInstruction],
-      [userKeypair]
+      [userKeypair],
+      { operationLabel: "Withdraw SOL" }
     );
 
     console.log(
@@ -1996,6 +2036,7 @@ export class WalletManager {
       maxResubmits?: number;
       operationLabel?: string;
       initialSignature?: string;
+      skipConfirmation?: boolean;
     } = {}
   ): Promise<string> {
     if (instructions.length === 0) {
@@ -2010,12 +2051,19 @@ export class WalletManager {
       maxResubmits = TRANSACTION_RESUBMIT_ATTEMPTS,
       operationLabel = "Transaction",
       initialSignature,
+      skipConfirmation = false,
     } = options;
 
-    let currentSignature =
+    const startingSignature =
       typeof initialSignature === "string" && initialSignature.length > 0
         ? initialSignature
         : await this.sendTransaction(instructions, signers);
+
+    if (skipConfirmation) {
+      return startingSignature;
+    }
+
+    let currentSignature = startingSignature;
 
     let resubmitAttempts = 0;
 
@@ -2226,12 +2274,11 @@ export class WalletManager {
         }),
         createSyncNativeInstruction(ata),
       ];
-      const signature = await this.sendTransaction(
+      return await this.sendAndConfirmWithResubmits(
         [...planInstructions, ...transferInstructions],
-        [userKeypair]
+        [userKeypair],
+        { operationLabel: "Wrap SOL" }
       );
-      await this.confirmTransaction(signature);
-      return signature;
     };
 
     const initialPlan = await this.findOrCreateAssociatedTokenAccount(
@@ -2270,9 +2317,11 @@ export class WalletManager {
       payer: userKeypair,
     });
 
-    const signature = await this.sendTransaction(unwrapPlan.instructions, [
-      userKeypair,
-    ]);
+    const signature = await this.sendAndConfirmWithResubmits(
+      unwrapPlan.instructions,
+      [userKeypair],
+      { operationLabel: "Unwrap WSOL" }
+    );
 
     return { signature, amountLamports: unwrapPlan.unwrapLamports };
   }

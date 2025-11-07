@@ -69,9 +69,10 @@ async function disableToken(
     } as any)
     .instruction();
 
-  const tx = await wallet.sendTransaction(
+  const tx = await wallet.sendAndConfirmWithResubmits(
     [instruction],
-    uniqueSigners(admin.root, oracleOperator.root)
+    uniqueSigners(admin.root, oracleOperator.root),
+    { operationLabel: `Disable ${ticker} token` }
   );
 
   console.log(`🚫 ${ticker} disabled. Transaction: ${tx}`);

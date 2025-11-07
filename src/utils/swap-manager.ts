@@ -6,7 +6,6 @@ import {
   VersionedTransaction,
   SystemProgram,
 } from "@solana/web3.js";
-import type { BlockhashWithExpiryBlockHeight } from "@solana/web3.js";
 import {
   JupiterClient,
   type JupiterQuoteResponse,
@@ -46,58 +45,6 @@ const KNOWN_MAJOR_TOKENS = new Set([
   "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E", // BTC
 ]);
 
-const DEFAULT_CONFIRMATION_POLL_INTERVAL_MS = 2_000;
-const DEFAULT_CONFIRMATION_POLL_DURATION_MS = 30_000;
-const MIN_CONFIRMATION_POLL_INTERVAL_MS = 1;
-const MIN_CONFIRMATION_POLL_DURATION_MS = 1;
-
-const parsePositiveInt = (
-  value: string | undefined,
-  fallback: number,
-  minValue: number
-): number => {
-  if (!value) return fallback;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return fallback;
-  }
-
-  const normalized = Math.trunc(parsed);
-  if (normalized < minValue) {
-    return minValue;
-  }
-
-  return normalized;
-};
-
-const getConfirmationPollIntervalMs = (): number =>
-  parsePositiveInt(
-    process.env["SWAP_CONFIRMATION_POLL_INTERVAL_MS"],
-    DEFAULT_CONFIRMATION_POLL_INTERVAL_MS,
-    MIN_CONFIRMATION_POLL_INTERVAL_MS
-  );
-
-const getConfirmationPollDurationMs = (): number =>
-  parsePositiveInt(
-    process.env["SWAP_CONFIRMATION_POLL_DURATION_MS"],
-    DEFAULT_CONFIRMATION_POLL_DURATION_MS,
-    MIN_CONFIRMATION_POLL_DURATION_MS
-  );
-
-const delay = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
-
-class TransactionConfirmationTimeoutError extends Error {
-  readonly signature: string;
-
-  constructor(signature: string) {
-    super(
-      `Transaction confirmation timed out after extended polling. Check signature ${signature}`
-    );
-    this.name = "TransactionConfirmationTimeoutError";
-    this.signature = signature;
-  }
-}
 
 export class SwapManager {
   private jupiterClient: JupiterClient;
@@ -812,11 +759,11 @@ export class SwapManager {
       });
 
       const adminKeypair = this.wallet.getAdminKeypair();
-      const signature = await this.wallet.sendTransaction(swapInstructions, [
-        adminKeypair,
-        userKeypair,
-      ]);
-      await this.wallet.confirmTransaction(signature);
+      const signature = await this.wallet.sendAndConfirmWithResubmits(
+        swapInstructions,
+        [adminKeypair, userKeypair],
+        { operationLabel: "pump.fun JIT swap" }
+      );
 
       return {
         swapped: true,
@@ -884,10 +831,11 @@ export class SwapManager {
       `🧼 Unwrapping ${formattedUnwrap} WSOL for ${logContext}. Remaining WSOL after unwrap: ${formattedRemaining}.`
     );
 
-    const signature = await this.wallet.sendTransaction(unwrapPlan.instructions, [
-      userKeypair,
-    ]);
-    await this.wallet.confirmTransaction(signature);
+    const signature = await this.wallet.sendAndConfirmWithResubmits(
+      unwrapPlan.instructions,
+      [userKeypair],
+      { operationLabel: "WSOL unwrap" }
+    );
 
     return {
       signature,
@@ -910,10 +858,11 @@ export class SwapManager {
       lamports,
     });
 
-    const signature = await this.wallet.sendTransaction([transferIx], [
-      fromKeypair,
-    ]);
-    await this.wallet.confirmTransaction(signature);
+    await this.wallet.sendAndConfirmWithResubmits(
+      [transferIx],
+      [fromKeypair],
+      { operationLabel: "Fee transfer" }
+    );
   }
 
   private async sponsorSwapFees(
@@ -997,9 +946,11 @@ export class SwapManager {
       console.log(
         `Creating ${setupInstructions.length} token accounts before Jupiter swap`
       );
-      const setupTxid = await this.wallet.sendTransaction(setupInstructions, [
-        userKeypair,
-      ]);
+      const setupTxid = await this.wallet.sendAndConfirmWithResubmits(
+        setupInstructions,
+        [userKeypair],
+        { operationLabel: "Create token accounts" }
+      );
       console.log(`Token accounts created: ${setupTxid}`);
 
       // Wait a bit for the accounts to be created
@@ -1052,9 +1003,11 @@ export class SwapManager {
       console.log(
         `Creating ${setupInstructions.length} token accounts before composite swap`
       );
-      const setupSig = await this.wallet.sendTransaction(setupInstructions, [
-        userKeypair,
-      ]);
+      const setupSig = await this.wallet.sendAndConfirmWithResubmits(
+        setupInstructions,
+        [userKeypair],
+        { operationLabel: "Create token accounts" }
+      );
       console.log(`Token accounts created: ${setupSig}`);
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
@@ -1077,11 +1030,12 @@ export class SwapManager {
         userKeypair,
       });
 
-      pumpSignature = await this.wallet.sendTransaction(pumpInstructions, [
-        userKeypair,
-      ]);
+      pumpSignature = await this.wallet.sendAndConfirmWithResubmits(
+        pumpInstructions,
+        [userKeypair],
+        { operationLabel: "Pump.fun leg" }
+      );
       console.log(`Pump.fun leg submitted: ${pumpSignature}`);
-      await this.wallet.confirmTransaction(pumpSignature);
 
       const postBalance = await this.connection.getBalance(
         userKeypair.publicKey
@@ -1199,9 +1153,11 @@ export class SwapManager {
         userKeypair,
       });
 
-      pumpSignature = await this.wallet.sendTransaction(pumpInstructions, [
-        userKeypair,
-      ]);
+      pumpSignature = await this.wallet.sendAndConfirmWithResubmits(
+        pumpInstructions,
+        [userKeypair],
+        { operationLabel: "Pump.fun leg" }
+      );
       console.log(
         `Pump.fun leg submitted: ${pumpSignature} (expected ~${formatAmount(
           BigInt(pumpQuote.outputAmount),
@@ -1209,7 +1165,6 @@ export class SwapManager {
           { maxFractionDigits: Math.min(outputDecimals, 6), trim: true }
         )} ${outputTicker.toUpperCase()})`
       );
-      await this.wallet.confirmTransaction(pumpSignature);
     } else {
       throw new Error(`Unsupported composite flow: ${flow}`);
     }
@@ -1418,34 +1373,23 @@ export class SwapManager {
     userKeypair: Keypair
   ): Promise<string> {
     try {
-      // Decode the base64 transaction
+      // Decode the base64 transaction so we can refresh the blockhash
       const transactionBuffer = Buffer.from(base64Transaction, "base64");
-
-      // Deserialize as VersionedTransaction
       const versionedTx = VersionedTransaction.deserialize(transactionBuffer);
 
-      // Get fresh blockhash metadata for improved confirmation tracking
       const latestBlockhash = await this.connection.getLatestBlockhash();
-
-      // Update the recent blockhash
       versionedTx.message.recentBlockhash = latestBlockhash.blockhash;
 
-      // Sign the transaction
-      versionedTx.sign([userKeypair]);
+      const refreshedBase64 = Buffer.from(
+        versionedTx.serialize()
+      ).toString("base64");
 
-      // Send the transaction
-      const signature = await this.connection.sendTransaction(versionedTx, {
-        maxRetries: 3,
-        preflightCommitment: "confirmed",
-      });
-
-      console.log(`Jupiter swap transaction sent: ${signature}`);
-
-      // Wait for confirmation
-      await this.waitForTransactionConfirmation(
-        signature,
-        latestBlockhash
+      const signature = await this.wallet.signAndSendSerializedTransaction(
+        refreshedBase64,
+        userKeypair
       );
+
+      await this.wallet.confirmTransaction(signature);
 
       return signature;
     } catch (error: any) {
@@ -1454,98 +1398,6 @@ export class SwapManager {
         `Failed to execute Jupiter transaction: ${error.message}`
       );
     }
-  }
-
-  private isConfirmationTimeoutError(error: unknown): boolean {
-    if (!error) return false;
-    const candidate = error as { name?: string; message?: string };
-    const name = candidate?.name?.toLowerCase() ?? "";
-    const message = candidate?.message?.toLowerCase() ?? String(error).toLowerCase();
-
-    return (
-      name === "transactionexpiredtimeouterror" ||
-      message.includes("transaction was not confirmed") ||
-      message.includes("transaction confirmation timeout")
-    );
-  }
-
-  private async waitForTransactionConfirmation(
-    signature: string,
-    latestBlockhash: BlockhashWithExpiryBlockHeight
-  ): Promise<void> {
-    try {
-      const confirmation = await this.connection.confirmTransaction(
-        {
-          signature,
-          blockhash: latestBlockhash.blockhash,
-          lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-        },
-        "confirmed"
-      );
-
-      if (confirmation.value.err) {
-        throw new Error(
-          `Transaction failed: ${JSON.stringify(confirmation.value.err)}`
-        );
-      }
-    } catch (error) {
-      if (!this.isConfirmationTimeoutError(error)) {
-        throw error;
-      }
-
-      console.warn(
-        `Transaction ${signature} confirmation timed out via RPC, polling status...`
-      );
-
-      const confirmed = await this.pollSignatureUntilConfirmed(signature);
-
-      if (confirmed) {
-        console.warn(
-          `Transaction ${signature} confirmed after extended polling`
-        );
-        return;
-      }
-
-      throw new TransactionConfirmationTimeoutError(signature);
-    }
-  }
-
-  private async pollSignatureUntilConfirmed(signature: string): Promise<boolean> {
-    const pollIntervalMs = getConfirmationPollIntervalMs();
-    const deadline = Date.now() + getConfirmationPollDurationMs();
-
-    while (Date.now() < deadline) {
-      const statusResponse = await this.connection.getSignatureStatuses(
-        [signature],
-        { searchTransactionHistory: true }
-      );
-
-      const status = statusResponse?.value?.[0];
-
-      if (status) {
-        if (status.err) {
-          throw new Error(
-            `Transaction failed: ${JSON.stringify(status.err)}`
-          );
-        }
-
-        const confirmationStatus = status.confirmationStatus ?? null;
-        const hasConfirmations =
-          typeof status.confirmations === "number" && status.confirmations > 0;
-
-        if (
-          confirmationStatus === "confirmed" ||
-          confirmationStatus === "finalized" ||
-          hasConfirmations
-        ) {
-          return true;
-        }
-      }
-
-      await delay(pollIntervalMs);
-    }
-
-    return false;
   }
 
   /**

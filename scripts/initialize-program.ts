@@ -52,9 +52,10 @@ const initializeOracle = async (
       })
       .instruction();
 
-    const tx = await wallet.sendTransaction(
+    const tx = await wallet.sendAndConfirmWithResubmits(
       [oracleInstruction],
-      uniqueSigners(adminKeypair, oracleOperatorKeypair)
+      uniqueSigners(adminKeypair, oracleOperatorKeypair),
+      { operationLabel: 'Initialize oracle' }
     );
     console.log(`Oracle initialized! Transaction: ${tx}`);
     return oraclePda;

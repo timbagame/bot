@@ -3,6 +3,7 @@ import {
   Keypair,
   Connection,
   SystemProgram,
+  TransactionInstruction,
 } from "@solana/web3.js";
 import {
   getAssociatedTokenAddress,
@@ -36,7 +37,6 @@ import {
   getCoinflipVideoId,
   getGiveawayVideoId,
   TELEGRAM_USERNAME_CACHE_TTL_MS,
-  TRANSACTION_RESUBMIT_ATTEMPTS,
 } from "./constants";
 import {
   editMediaWithFallback,
@@ -64,8 +64,13 @@ import {
 import { resolveTokenPriceUSD } from "./prices";
 import { NetworkDetector } from "./network-detector";
 import { SwapManager } from "./swap-manager";
+import { confirmTransactionWithRecovery, type TransactionProbe } from "./transaction-runner";
 import { createExpiringCache } from "./expiring-cache";
 import { refreshDynamicFeeBudgets } from "./fee-budget-refresh";
+import {
+  DEFAULT_MAINNET_ENDPOINT,
+  resolvePrimaryRpcEndpoint,
+} from "./rpc-endpoints";
 
 const resolveGameVideoId = (gameType: string): string | undefined => {
   const lower = gameType.toLowerCase();
@@ -87,15 +92,6 @@ const getWrapBalanceRetryDelays = (): number[] => {
     return new Array(WRAP_BALANCE_RETRY_DELAYS_MS.length).fill(0);
   }
   return WRAP_BALANCE_RETRY_DELAYS_MS;
-};
-
-const CONFIRMATION_RETRY_DELAYS_MS = [2000, 4000, 8000, 12000, 16000, 20000];
-
-const getConfirmationRetryDelays = (): number[] => {
-  if (process.env.NODE_ENV === "test") {
-    return new Array(CONFIRMATION_RETRY_DELAYS_MS.length).fill(0);
-  }
-  return CONFIRMATION_RETRY_DELAYS_MS;
 };
 
 const TELEGRAM_MESSAGE_CHAR_LIMIT = 4096;
@@ -418,7 +414,10 @@ export class GameManager {
           ? maybeGetConnection.call(wallet)
           : (wallet as any).connection ??
             new Connection(
-              process.env.SOLANA_NETWORK || "https://api.mainnet-beta.solana.com",
+              resolvePrimaryRpcEndpoint(
+                process.env.SOLANA_NETWORK,
+                DEFAULT_MAINNET_ENDPOINT
+              ),
               "confirmed"
             );
       const feeBudget = FeeBudgetManager.getInstance(connection);
@@ -1314,6 +1313,159 @@ export class GameManager {
       `Why: ${safeReason}.\n` +
       safeSteps
     );
+  }
+
+  private async confirmTransactionWithRecovery(
+    signature: string,
+    gamePda: PublicKey,
+    operationType:
+      | "Game creation"
+      | "Player join"
+      | "Game close"
+      | "Player unjoin",
+    playerPubkey?: PublicKey,
+    resubmit?: (attempt: number, previousSignature: string) => Promise<string>,
+    options?: { retryDelays?: number[] }
+  ): Promise<string> {
+    const probes: TransactionProbe[] = [];
+    const fetchGameAccountNullable = async (): Promise<any | null> => {
+      try {
+        const accountInterface = this.program.account.game as any;
+        const fetchNullable = accountInterface?.fetchNullable?.bind(
+          accountInterface
+        );
+        if (fetchNullable) {
+          return await fetchNullable(gamePda);
+        }
+        return await accountInterface.fetch(gamePda);
+      } catch (error: any) {
+        const message = error?.message?.toLowerCase?.() ?? "";
+        if (message.includes("account does not exist")) {
+          return null;
+        }
+        throw error;
+      }
+    };
+
+    if (operationType === "Game creation") {
+      probes.push({
+        label: "Game account exists",
+        check: async () => {
+          try {
+            const gameAccount = await fetchGameAccountNullable();
+            return Boolean(gameAccount);
+          } catch {
+            return false;
+          }
+        },
+      });
+    } else if (operationType === "Game close") {
+      probes.push({
+        label: "Game account closed",
+        check: async () => {
+          try {
+            const gameAccount = await fetchGameAccountNullable();
+            return !gameAccount;
+          } catch {
+            return false;
+          }
+        },
+      });
+    } else if (
+      (operationType === "Player join" || operationType === "Player unjoin") &&
+      playerPubkey
+    ) {
+      probes.push({
+        label:
+          operationType === "Player join"
+            ? "Player is recorded in game"
+            : "Player removed from game",
+        check: async () => {
+          const isInGame = await this.isPlayerInGame(gamePda, playerPubkey);
+          return operationType === "Player join" ? isInGame : !isInGame;
+        },
+      });
+    }
+
+    try {
+      return await confirmTransactionWithRecovery({
+        wallet: this.wallet,
+        initialSignature: signature,
+        operationLabel: operationType,
+        resubmit,
+        probes,
+        retryDelays: options?.retryDelays,
+        logger: debugLog,
+      });
+    } catch (error: any) {
+      try {
+        const hasCause = (error as any).cause !== undefined;
+        if (operationType === "Game creation") {
+          const gameAccount = await fetchGameAccountNullable();
+          if (!gameAccount && !hasCause) {
+            (error as any).cause = new Error(
+              "Game account not found after timeout (attempted recovery)."
+            );
+          }
+        } else if (operationType === "Game close") {
+          const gameAccount = await fetchGameAccountNullable();
+          if (gameAccount && !hasCause) {
+            (error as any).cause = new Error(
+              "Game account still exists after timeout (attempted recovery)."
+            );
+          }
+        } else if (
+          (operationType === "Player join" ||
+            operationType === "Player unjoin") &&
+          playerPubkey
+        ) {
+          const isInGame = await this.isPlayerInGame(
+            gamePda,
+            playerPubkey
+          ).catch(() => false);
+          const violation =
+            operationType === "Player join" ? !isInGame : isInGame;
+          if (violation && !hasCause) {
+            (error as any).cause = new Error(
+              operationType === "Player join"
+                ? "Player not recorded in game after timeout (attempted recovery)."
+                : "Player still recorded in game after timeout (attempted recovery)."
+            );
+          }
+        }
+      } catch (probeError) {
+        (error as any).cause =
+          probeError instanceof Error
+            ? probeError
+            : new Error(String(probeError));
+      }
+      throw error;
+    }
+  }
+
+  private async sendInstructionsWithFallback(
+    instructions: TransactionInstruction[],
+    signers: Keypair[],
+    operationLabel: string,
+    options?: { skipConfirmation?: boolean }
+  ): Promise<string> {
+    const walletWithResubmits = (this.wallet as any)
+      .sendAndConfirmWithResubmits;
+    if (typeof walletWithResubmits === "function") {
+      return await walletWithResubmits.call(this.wallet, instructions, signers, {
+        operationLabel,
+        skipConfirmation: options?.skipConfirmation,
+      });
+    }
+
+    const signature = await this.wallet.sendTransaction(
+      instructions,
+      signers
+    );
+    if (!options?.skipConfirmation) {
+      await this.wallet.confirmTransaction(signature);
+    }
+    return signature;
   }
 
   private async getGameCreationRentLamports(): Promise<number> {
@@ -2689,264 +2841,6 @@ export class GameManager {
     }
   }
 
-  private async isSignatureConfirmedFromHistory(
-    signature: string
-  ): Promise<boolean> {
-    const connection = this.getConnection();
-    const getSignatureStatuses = (connection as any)
-      ?.getSignatureStatuses?.bind(connection);
-
-    if (typeof getSignatureStatuses !== "function") {
-      return false;
-    }
-
-    const statusResult = await getSignatureStatuses([signature], {
-      searchTransactionHistory: true,
-    });
-    const status = statusResult?.value?.[0];
-
-    if (!status) {
-      return false;
-    }
-
-    if (status.err) {
-      const error = new Error(
-        `Transaction ${signature} failed: ${JSON.stringify(status.err)}`
-      );
-      (error as any).cause = status.err;
-      throw error;
-    }
-
-    if (
-      status.confirmationStatus === "confirmed" ||
-      status.confirmationStatus === "finalized"
-    ) {
-      return true;
-    }
-
-    if (typeof status.confirmations === "number" && status.confirmations > 0) {
-      return true;
-    }
-
-    return false;
-  }
-
-  // Helper method for transaction confirmation with timeout recovery
-  private async confirmTransactionWithRecovery(
-    signature: string,
-    gamePda: PublicKey,
-    operationType: "Game creation" | "Player join",
-    playerPubkey?: PublicKey,
-    resubmit?: (attempt: number, previousSignature: string) => Promise<string>
-  ): Promise<string> {
-    let currentSignature = signature;
-
-    try {
-      await this.wallet.confirmTransaction(currentSignature);
-      debugLog(
-        `✅ ${operationType} transaction confirmed: ${currentSignature}`
-      );
-      return currentSignature;
-    } catch (confirmError: any) {
-      console.warn(
-        `⚠️ ${operationType} confirmation failed: ${confirmError.message}`
-      );
-
-      const normalizedMessage = confirmError.message?.toLowerCase?.() ?? "";
-      const isTimeout =
-        normalizedMessage.includes("timeout") ||
-        normalizedMessage.includes("timed out") ||
-        normalizedMessage.includes("not confirmed");
-      const isExpiration =
-        normalizedMessage.includes("expired before confirmation") ||
-        normalizedMessage.includes("last valid block height");
-
-      let lastRecoveryError: Error | undefined;
-      let lastObservationError: Error | undefined;
-
-      if ((isTimeout || isExpiration) && resubmit) {
-        for (
-          let attempt = 0;
-          attempt < TRANSACTION_RESUBMIT_ATTEMPTS;
-          attempt++
-        ) {
-          const attemptLabel = `${attempt + 1}/${TRANSACTION_RESUBMIT_ATTEMPTS}`;
-          try {
-            debugLog(
-              `🔄 ${operationType} resubmission attempt ${attemptLabel} after failure for ${currentSignature}`
-            );
-            const resubmittedSignature = await resubmit(
-              attempt,
-              currentSignature
-            );
-
-            if (!resubmittedSignature || typeof resubmittedSignature !== "string") {
-              throw new Error(
-                "Resubmission callback did not return a transaction signature"
-              );
-            }
-
-            currentSignature = resubmittedSignature;
-            debugLog(
-              `✅ ${operationType} transaction confirmed via resubmission ${attemptLabel}: ${currentSignature}`
-            );
-            return currentSignature;
-          } catch (resubmitError) {
-            const normalizedError =
-              resubmitError instanceof Error
-                ? resubmitError
-                : new Error(String(resubmitError));
-            const latestSignature =
-              resubmitError &&
-              typeof resubmitError === "object" &&
-              "lastSignature" in resubmitError &&
-              typeof (resubmitError as { lastSignature?: unknown }).lastSignature ===
-                "string"
-                ? (resubmitError as { lastSignature: string }).lastSignature
-                : undefined;
-            if (latestSignature) {
-              currentSignature = latestSignature;
-            }
-            lastRecoveryError = normalizedError;
-            console.error(
-              `❌ ${operationType} resubmission ${attemptLabel} failed`,
-              normalizedError
-            );
-          }
-        }
-      }
-
-      if (isTimeout || isExpiration) {
-        const retryDelays = getConfirmationRetryDelays();
-        const timeoutError =
-          confirmError instanceof Error
-            ? confirmError
-            : new Error(String(confirmError));
-        const recoveryErrors: Error[] = lastRecoveryError
-          ? [lastRecoveryError]
-          : [];
-
-        for (let attempt = 0; attempt < retryDelays.length; attempt++) {
-          const delay = retryDelays[attempt] ?? 0;
-          const attemptLabel = `${attempt + 1}/${retryDelays.length}`;
-          debugLog(
-            `🔄 ${operationType} confirmation retry ${attemptLabel} after ${delay}ms`
-          );
-          if (delay > 0) {
-            await new Promise((resolve) => setTimeout(resolve, delay));
-          }
-
-          if (operationType === "Player join" && playerPubkey) {
-            try {
-              const isInGame = await this.isPlayerInGame(gamePda, playerPubkey);
-              if (isInGame) {
-                debugLog(
-                  `✅ Player join confirmed during retry ${attemptLabel} - tx: ${currentSignature}`
-                );
-                return currentSignature;
-              }
-
-              const probeError = new Error(
-                `Player not recorded in game after retry ${attempt + 1}`
-              );
-              recoveryErrors.push(probeError);
-              lastRecoveryError = probeError;
-              lastObservationError = probeError;
-            } catch (joinProbeError) {
-              const normalizedError =
-                joinProbeError instanceof Error
-                  ? joinProbeError
-                  : new Error(String(joinProbeError));
-              console.error(
-                `❌ Player join verification error during retry ${attemptLabel}`,
-                normalizedError
-              );
-              throw normalizedError;
-            }
-          } else if (operationType === "Game creation") {
-            try {
-              const accountInterface = this.program.account.game as any;
-              const fetchNullable = accountInterface?.fetchNullable?.bind(
-                accountInterface
-              );
-              const gameAccount = fetchNullable
-                ? await fetchNullable(gamePda)
-                : await accountInterface.fetch(gamePda);
-
-              if (gameAccount) {
-                debugLog(
-                  `✅ Game account confirmed after retry ${attemptLabel} - transaction ${currentSignature}`
-                );
-                return currentSignature;
-              }
-
-              const probeError = new Error(
-                `Game account not found after timeout (attempt ${attempt + 1})`
-              );
-              recoveryErrors.push(probeError);
-              lastRecoveryError = probeError;
-              lastObservationError = probeError;
-            } catch (gameProbeError) {
-              const normalizedError =
-                gameProbeError instanceof Error
-                  ? gameProbeError
-                  : new Error(String(gameProbeError));
-              console.error(
-                `❌ Game account verification error during retry ${attemptLabel}`,
-                normalizedError
-              );
-              throw normalizedError;
-            }
-          }
-
-          try {
-            const signatureConfirmed =
-              await this.isSignatureConfirmedFromHistory(currentSignature);
-            if (signatureConfirmed) {
-              debugLog(
-                `✅ ${operationType} transaction confirmed via signature status on retry ${attemptLabel}: ${currentSignature}`
-              );
-              return currentSignature;
-            }
-
-            const statusError = new Error(
-              `Transaction ${currentSignature} still pending after retry ${attempt + 1}`
-            );
-            recoveryErrors.push(statusError);
-            lastRecoveryError = statusError;
-          } catch (statusProbeError) {
-            const normalizedError =
-              statusProbeError instanceof Error
-                ? statusProbeError
-                : new Error(String(statusProbeError));
-            recoveryErrors.push(normalizedError);
-            console.error(
-              `❌ Failed to verify transaction status during retry ${attemptLabel}`,
-              normalizedError
-            );
-            throw normalizedError;
-          }
-        }
-
-        if (recoveryErrors.length > 0) {
-          (timeoutError as any).recoveryErrors = recoveryErrors;
-        }
-
-        const preferredCause = lastObservationError ?? lastRecoveryError;
-        if (preferredCause && (timeoutError as any).cause === undefined) {
-          (timeoutError as any).cause = preferredCause;
-        }
-
-        console.warn(
-          `⚠️ ${operationType} confirmation timed out after ${retryDelays.length} retries for ${currentSignature}`
-        );
-        throw timeoutError;
-      }
-
-      throw confirmError;
-    }
-  }
-
   public async createGame(
     gameType: GameType,
     parsedAmount: {
@@ -3271,29 +3165,14 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         undefined,
         async () => {
           const resendGameTransaction = async () => {
-            if (
-              typeof (this.wallet as any).sendAndConfirmWithResubmits ===
-              "function"
-            ) {
-              return await this.wallet.sendAndConfirmWithResubmits(
-                [gameInstruction],
-                [playerKp],
-                {
-                  operationLabel: "Game creation transaction",
-                }
-              );
-            }
-
-            const newSignature = await this.wallet.sendTransaction(
+            return await this.sendInstructionsWithFallback(
               [gameInstruction],
-              [playerKp]
+              [playerKp],
+              "Game creation transaction"
             );
-            await this.wallet.confirmTransaction(newSignature);
-            return newSignature;
           };
 
-          tx = await resendGameTransaction();
-          return tx;
+          return await resendGameTransaction();
         }
       );
 
@@ -3438,28 +3317,14 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
               playerKp.publicKey,
               async () => {
                 const resendJoinTransaction = async () => {
-                  if (
-                    typeof (this.wallet as any).sendAndConfirmWithResubmits ===
-                    "function"
-                  ) {
-                    return await this.wallet.sendAndConfirmWithResubmits(
-                      [joinInstruction],
-                      [playerKp],
-                      {
-                        operationLabel: "Player join transaction",
-                      }
-                    );
-                  }
-
-                  const newSignature = await this.wallet.sendTransaction(
+                  return await this.sendInstructionsWithFallback(
                     [joinInstruction],
-                    [playerKp]
+                    [playerKp],
+                    "Player join transaction"
                   );
-                  await this.wallet.confirmTransaction(newSignature);
-                  return newSignature;
                 };
 
-                joinTx = await resendJoinTransaction();
+                const refreshedSignature = await resendJoinTransaction();
 
                 this.gameDb.saveGameParticipant(
                   gameAddress,
@@ -3467,12 +3332,12 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
                   creatorPubkey,
                   {
                     status: "pending",
-                    joinSignature: joinTx ?? null,
+                    joinSignature: refreshedSignature ?? null,
                     lastVerifiedAt: null,
                   }
                 );
 
-                return joinTx;
+                return refreshedSignature ?? joinTx;
               }
             );
 
@@ -3964,28 +3829,14 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
               playerKp.publicKey,
               async () => {
                 const resendJoinTransaction = async () => {
-                  if (
-                    typeof (this.wallet as any).sendAndConfirmWithResubmits ===
-                    "function"
-                  ) {
-                    return await this.wallet.sendAndConfirmWithResubmits(
-                      [joinInstruction],
-                      [playerKp],
-                      {
-                        operationLabel: "Player join transaction",
-                      }
-                    );
-                  }
-
-                  const newSignature = await this.wallet.sendTransaction(
+                  return await this.sendInstructionsWithFallback(
                     [joinInstruction],
-                    [playerKp]
+                    [playerKp],
+                    "Player join transaction"
                   );
-                  await this.wallet.confirmTransaction(newSignature);
-                  return newSignature;
                 };
 
-                joinTx = await resendJoinTransaction();
+                const refreshedSignature = await resendJoinTransaction();
 
                 this.gameDb.saveGameParticipant(
                   gameAddress,
@@ -3993,12 +3844,12 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
                   playerPubkey,
                   {
                     status: "pending",
-                    joinSignature: joinTx ?? null,
+                    joinSignature: refreshedSignature ?? null,
                     lastVerifiedAt: null,
                   }
                 );
 
-                return joinTx;
+                return refreshedSignature ?? joinTx;
               }
             );
             joinConfirmed = true;
@@ -4167,11 +4018,29 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         .accounts(closeAccounts as any)
         .instruction();
 
-      const tx = await this.wallet.sendTransaction(
-        [closeInstruction],
-        [creatorKp]
+      const sendCloseTransaction = async () => {
+        return await this.sendInstructionsWithFallback(
+          [closeInstruction],
+          [creatorKp],
+          `${gameType} close transaction`,
+          { skipConfirmation: true }
+        );
+      };
+
+      let tx = await sendCloseTransaction();
+
+      tx = await this.confirmTransactionWithRecovery(
+        tx,
+        gamePda,
+        "Game close",
+        creatorKp.publicKey,
+        async () =>
+          await this.sendInstructionsWithFallback(
+            [closeInstruction],
+            [creatorKp],
+            `${gameType} close transaction`
+          )
       );
-      await this.wallet.confirmTransaction(tx);
 
       const successMessage =
         successPrefix ?? `✅ Successfully closed ${gameType} game`;
@@ -4294,6 +4163,24 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       }
     }
 
+    const creatorPubkeyFromAccount =
+      typeof gameAccount?.creator === "string"
+        ? new PublicKey(gameAccount.creator)
+        : gameAccount?.creator ?? null;
+
+    if (skipDbChecks) {
+      const isPlayerAuthority = authorityKp.publicKey.equals(playerPubkey);
+      const isCreatorAuthority =
+        !!creatorPubkeyFromAccount &&
+        authorityKp.publicKey.equals(creatorPubkeyFromAccount);
+
+      if (!isPlayerAuthority && !isCreatorAuthority) {
+        throw new Error(
+          "Unauthorized unjoin attempt during cleanup; authority must be player or creator."
+        );
+      }
+    }
+
     const unjoinAccounts = await this.buildUnjoinAccounts(
       gamePda,
       gameAccount,
@@ -4305,11 +4192,29 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       .accounts(unjoinAccounts as any)
       .instruction();
 
-    const tx = await this.wallet.sendTransaction(
-      [unjoinInstruction],
-      [authorityKp]
+    const sendUnjoinTransaction = async () => {
+      return await this.sendInstructionsWithFallback(
+        [unjoinInstruction],
+        [authorityKp],
+        "Player unjoin transaction",
+        { skipConfirmation: true }
+      );
+    };
+
+    let tx = await sendUnjoinTransaction();
+
+    tx = await this.confirmTransactionWithRecovery(
+      tx,
+      gamePda,
+      "Player unjoin",
+      playerPubkey,
+      async () =>
+        await this.sendInstructionsWithFallback(
+          [unjoinInstruction],
+          [authorityKp],
+          "Player unjoin transaction"
+        )
     );
-    await this.wallet.confirmTransaction(tx);
 
     const resolvedTelegramId =
       playerTelegramId ??
@@ -4423,38 +4328,23 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           );
 
           lastSignature = await this.confirmTransactionWithRecovery(
-            lastSignature,
+            lastSignature!,
             gamePda,
             "Player join",
             playerKp.publicKey,
             async () => {
               const resendJoinTransaction = async () => {
-                if (
-                  typeof (this.wallet as any).sendAndConfirmWithResubmits ===
-                  "function"
-                ) {
-                  return await this.wallet.sendAndConfirmWithResubmits(
+                  return await this.sendInstructionsWithFallback(
                     [joinInstruction],
                     [playerKp, adminKp],
-                    {
-                      operationLabel: "Player join transaction",
-                    }
+                    "Player join transaction"
                   );
-                }
-
-                const newSignature = await this.wallet.sendTransaction(
-                  [joinInstruction],
-                  [playerKp, adminKp]
-                );
-                await this.wallet.confirmTransaction(newSignature);
-                return newSignature;
               };
 
-              lastSignature = await resendJoinTransaction();
-
-              return lastSignature;
+              return await resendJoinTransaction();
             }
           );
+
 
           return { success: true, tx: lastSignature };
         } catch (joinError: any) {

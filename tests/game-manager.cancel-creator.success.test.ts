@@ -173,3 +173,73 @@ test("closeGameWithCreatorAuthority succeeds when wallet confirmation relies on 
   expect(transactionChecks).toBeGreaterThanOrEqual(1);
   expect(pendingSignatures.has(closeSig)).toBe(false);
 });
+
+test("closeGameWithCreatorAuthority resubmits when helper is unavailable", async () => {
+  resetGM();
+
+  const creator = Keypair.generate();
+  const connectionStub = {
+    getSignatureStatuses: async () => ({ value: [null] }),
+    getSignatureStatus: async () => ({ value: null }),
+    getBlockHeight: async () => 0,
+    getTransaction: async () => ({ meta: { err: null } }),
+    getAccountInfo: async () => ({ owner: TOKEN_PROGRAM_ID }),
+    getAccountInfoAndContext: async () => ({ value: null }),
+    getParsedAccountInfo: async () => ({
+      value: { data: { parsed: { info: { decimals: 6 } } } },
+    }),
+  } as any;
+
+  const signatures = ["SIG_CLOSE_FALLBACK_1", "SIG_CLOSE_FALLBACK_2"];
+  let sendCalls = 0;
+  const wallet = {
+    getKeyPair: (_: bigint) => creator,
+    sendTransaction: async () =>
+      signatures[Math.min(sendCalls++, signatures.length - 1)],
+    confirmTransaction: async (signature: string) => {
+      if (signature === signatures[0]) {
+        throw new Error("transaction confirmation timeout");
+      }
+    },
+    getConnection: () => connectionStub,
+  } as any;
+  (wallet as any).sendAndConfirmWithResubmits = undefined;
+
+  const program = {
+    programId: new PublicKey("BPFLoader1111111111111111111111111111111111"),
+    provider: { connection: connectionStub },
+    methods: {
+      closeGame: () => ({
+        accounts: () => ({
+          instruction: async () => ({}),
+        }),
+      }),
+    },
+  } as any;
+
+  const gm = GameManager.getInstance(program, wallet, {
+    getGameParticipants: () => [],
+  } as any);
+
+  (gm as any).resolveGameTokenAccounts = async () => ({
+    tokenProgram: TOKEN_PROGRAM_ID,
+    gameToken: Keypair.generate().publicKey,
+    gameVault: Keypair.generate().publicKey,
+    gameTokenAccount: Keypair.generate().publicKey,
+  });
+  (gm as any).deriveAta = async () => Keypair.generate().publicKey;
+
+  const result = await (gm as any).closeGameWithCreatorAuthority({
+    gamePda: new PublicKey("BPFLoader3211111111111111111111111111111111"),
+    gameAccount: {
+      tokenMint: Keypair.generate().publicKey.toBase58(),
+      creator: creator.publicKey.toBase58(),
+    },
+    creatorTelegramId: "123",
+    gameType: "coinflip",
+  });
+
+  expect(result.success).toBe(true);
+  expect(result.tx).toBe(signatures[1]);
+  expect(sendCalls).toBe(2);
+});
