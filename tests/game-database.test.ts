@@ -53,8 +53,12 @@ test("GameDatabase: CRUD for games, mappings, participants, and slot updates", (
   // Participants CRUD
   db.saveGameParticipant("gameA", "tg_creator", "pub_creator");
   db.saveGameParticipant("gameA", "tg_p2", "pub_p2");
+  db.saveGameParticipant("gameA", "tg_pending", "pub_pending", {
+    status: "pending",
+  });
   expect(db.getGameParticipants("gameA")).toEqual(["tg_creator", "tg_p2"]);
   expect(db.getPlayerParticipatedGames("tg_p2")).toEqual(["gameA"]);
+  expect(db.getPlayerTelegramId("pub_pending")).toBe("tg_pending");
 
   // Active and Recent queries
   const activeForCreator = db.getActiveGames("tg_creator");

@@ -202,12 +202,38 @@ export class GameDatabase extends BaseDatabase {
   }
 
   public getPlayerTelegramId(publicKey: string): string | null {
-    const result = this.get<{ telegram_id: string }>(
+    if (typeof publicKey !== "string") {
+      return null;
+    }
+
+    const trimmed = publicKey.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const mapping = this.get<{ telegram_id: string }>(
       "SELECT telegram_id FROM player_mappings WHERE public_key = ?",
-      [publicKey],
+      [trimmed],
       "getting player telegram ID"
     );
-    return result?.telegram_id ?? null;
+
+    if (mapping?.telegram_id) {
+      return mapping.telegram_id;
+    }
+
+    const participantFallback = this.get<{ telegram_id: string }>(
+      `
+        SELECT telegram_id
+        FROM game_participants
+        WHERE public_key = ?
+        ORDER BY joined_at DESC
+        LIMIT 1
+      `,
+      [trimmed],
+      "getting player telegram ID from participants"
+    );
+
+    return participantFallback?.telegram_id ?? null;
   }
 
   public getPlayerPublicKey(telegramId: string): string | null {
