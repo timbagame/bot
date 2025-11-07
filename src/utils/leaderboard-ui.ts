@@ -19,6 +19,17 @@ type BuildLeaderboardMessageArgs = {
 
 const MEDALS = ["🥇", "🥈", "🥉"] as const;
 
+const ZERO_WIDTH_WORD_JOINER = "\u2060";
+
+export const sanitizeLeaderboardDisplayName = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed.includes("@")) {
+    return trimmed;
+  }
+
+  return trimmed.replace(/@+/g, (match) => `${match}${ZERO_WIDTH_WORD_JOINER}`);
+};
+
 export const buildEmptyLeaderboardMessage = (): string =>
   [
     "🏆 <b>Leaderboard</b>",
@@ -42,10 +53,15 @@ export const buildLeaderboardMessage = ({ chatTitle, players }: BuildLeaderboard
   return [heading, legend, rows, highlights].filter(Boolean).join("\n\n");
 };
 
+const formatDisplayName = (value: string): string => {
+  const safeValue = sanitizeLeaderboardDisplayName(value);
+  return `<b>${escapeHtml(safeValue)}</b>`;
+};
+
 const formatLeaderboardRow = (player: LeaderboardPlayerDisplay, position: number): string => {
   const rank = `${position + 1}.`.padStart(3, " ");
   const medal = MEDALS[position] ?? "";
-  const displayName = `<b>${escapeHtml(player.displayName)}</b>`;
+  const displayName = formatDisplayName(player.displayName);
 
   const detailSegments = [
     formatWinCount(player.wins),
@@ -80,13 +96,13 @@ const buildLeaderboardHighlights = (players: LeaderboardPlayerDisplay[]): string
 
   if (highestWinRate.telegramId !== champion.telegramId) {
     highlights.push(
-      `• Best win rate: <b>${escapeHtml(highestWinRate.displayName)}</b> (${formatWinRate(highestWinRate.winRate)}%)`
+      `• Best win rate: ${formatDisplayName(highestWinRate.displayName)} (${formatWinRate(highestWinRate.winRate)}%)`
     );
   }
 
   if (mostGames.telegramId !== champion.telegramId) {
     highlights.push(
-      `• Most games played: <b>${escapeHtml(mostGames.displayName)}</b> (${mostGames.totalGames})`
+      `• Most games played: ${formatDisplayName(mostGames.displayName)} (${mostGames.totalGames})`
     );
   }
 

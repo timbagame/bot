@@ -3,6 +3,7 @@ import fc from "fast-check";
 import {
   buildEmptyLeaderboardMessage,
   buildLeaderboardMessage,
+  sanitizeLeaderboardDisplayName,
   type LeaderboardPlayerDisplay,
 } from "../src/utils/leaderboard-ui";
 import { escapeHtml } from "../src/utils/format-amount";
@@ -138,8 +139,8 @@ describe("leaderboard UI rendering", () => {
 
              const rendered = buildLeaderboardMessage({ chatTitle: "Guild", players });
           for (const player of players) {
-            const escaped = escapeHtml(player.displayName);
-            expect(rendered).toContain(escaped);
+            const escaped = escapeHtml(sanitizeLeaderboardDisplayName(player.displayName));
+            expect(rendered).toContain(`<b>${escaped}</b>`);
           }
         }
       ),
