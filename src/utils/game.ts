@@ -1454,6 +1454,7 @@ export class GameManager {
     if (typeof walletWithResubmits === "function") {
       return await walletWithResubmits.call(this.wallet, instructions, signers, {
         operationLabel,
+        skipConfirmation: options?.skipConfirmation,
       });
     }
 

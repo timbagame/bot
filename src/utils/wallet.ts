@@ -2022,6 +2022,7 @@ export class WalletManager {
       maxResubmits?: number;
       operationLabel?: string;
       initialSignature?: string;
+      skipConfirmation?: boolean;
     } = {}
   ): Promise<string> {
     if (instructions.length === 0) {
@@ -2036,12 +2037,19 @@ export class WalletManager {
       maxResubmits = TRANSACTION_RESUBMIT_ATTEMPTS,
       operationLabel = "Transaction",
       initialSignature,
+      skipConfirmation = false,
     } = options;
 
-    let currentSignature =
+    const startingSignature =
       typeof initialSignature === "string" && initialSignature.length > 0
         ? initialSignature
         : await this.sendTransaction(instructions, signers);
+
+    if (skipConfirmation) {
+      return startingSignature;
+    }
+
+    let currentSignature = startingSignature;
 
     let resubmitAttempts = 0;
 
