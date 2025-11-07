@@ -90,7 +90,7 @@ export class RpcEndpointManager {
   }
 
   public getActiveEndpoint(): string {
-    return this.endpoints[this.activeIndex];
+    return this.endpoints[this.activeIndex] ?? this.endpoints[0]!;
   }
 
   public getAllEndpoints(): readonly string[] {
@@ -100,7 +100,8 @@ export class RpcEndpointManager {
   private ensureConnection(index: number): Connection {
     let connection = this.connectionCache.get(index);
     if (!connection) {
-      connection = this.connectionFactory(this.endpoints[index], this.commitment);
+      const endpoint = this.endpoints[index] ?? this.endpoints[0]!;
+      connection = this.connectionFactory(endpoint, this.commitment);
       this.connectionCache.set(index, connection);
     }
     return connection;
@@ -262,5 +263,5 @@ export function resolvePrimaryRpcEndpoint(
   fallback: string | string[] = DEFAULT_MAINNET_ENDPOINT
 ): string {
   const endpoints = parseRpcEndpointList(value, { fallback });
-  return endpoints[0];
+  return endpoints[0]!;
 }
