@@ -317,7 +317,6 @@ describe("Bot helper utilities", () => {
     };
 
     const summary = botModule.__test_formatTradeConfirmationSummary({
-      kind: "swap",
       payToken: "SOL",
       payDisplay: botModule.wallet.formatSolBalance(rawAmount),
       payRawAmount: rawAmount,
@@ -354,7 +353,6 @@ describe("Bot helper utilities", () => {
     };
 
     const summary = botModule.__test_formatTradeConfirmationSummary({
-      kind: "swap",
       payToken: "SOL",
       payDisplay: botModule.wallet.formatSolBalance(rawAmount),
       payRawAmount: rawAmount,
@@ -389,7 +387,6 @@ describe("Bot helper utilities", () => {
     };
 
     const summary = botModule.__test_formatTradeConfirmationSummary({
-      kind: "swap",
       payToken: "FOO",
       payDisplay: botModule.wallet.formatTokenBalance(rawAmount, 6),
       payRawAmount: rawAmount,
@@ -424,7 +421,6 @@ describe("Bot helper utilities", () => {
     };
 
     const summary = botModule.__test_formatTradeConfirmationSummary({
-      kind: "swap",
       payToken: "<SOL>",
       payDisplay: "<0.1>",
       payRawAmount: rawAmount,
