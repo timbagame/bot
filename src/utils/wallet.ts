@@ -1543,7 +1543,11 @@ export class WalletManager {
       ...toInstructions,
       transferInstruction,
     ];
-    return await this.sendTransaction(allInstructions, [fromKeypair]);
+    return await this.sendAndConfirmWithResubmits(
+      allInstructions,
+      [fromKeypair],
+      { operationLabel: "Token transfer" }
+    );
   }
 
   public async transferSol(
@@ -1564,7 +1568,11 @@ export class WalletManager {
       lamports: amountLamports,
     });
 
-    return await this.sendTransaction([transferInstruction], [fromKeypair]);
+    return await this.sendAndConfirmWithResubmits(
+      [transferInstruction],
+      [fromKeypair],
+      { operationLabel: "SOL transfer" }
+    );
   }
 
   public async withdrawAllSol(
@@ -1635,9 +1643,10 @@ export class WalletManager {
       lamports: transferLamports,
     });
 
-    const signature = await this.sendTransaction(
+    const signature = await this.sendAndConfirmWithResubmits(
       [transferInstruction],
-      [userKeypair]
+      [userKeypair],
+      { operationLabel: "Withdraw SOL" }
     );
 
     console.log(
@@ -2226,12 +2235,11 @@ export class WalletManager {
         }),
         createSyncNativeInstruction(ata),
       ];
-      const signature = await this.sendTransaction(
+      return await this.sendAndConfirmWithResubmits(
         [...planInstructions, ...transferInstructions],
-        [userKeypair]
+        [userKeypair],
+        { operationLabel: "Wrap SOL" }
       );
-      await this.confirmTransaction(signature);
-      return signature;
     };
 
     const initialPlan = await this.findOrCreateAssociatedTokenAccount(
@@ -2270,9 +2278,11 @@ export class WalletManager {
       payer: userKeypair,
     });
 
-    const signature = await this.sendTransaction(unwrapPlan.instructions, [
-      userKeypair,
-    ]);
+    const signature = await this.sendAndConfirmWithResubmits(
+      unwrapPlan.instructions,
+      [userKeypair],
+      { operationLabel: "Unwrap WSOL" }
+    );
 
     return { signature, amountLamports: unwrapPlan.unwrapLamports };
   }

@@ -6,7 +6,7 @@ import { WalletManager } from "./utils/wallet";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import * as anchor from "@coral-xyz/anchor";
 import { EventParser } from "@coral-xyz/anchor";
-import { PublicKey, SystemProgram } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
 import { GameDatabase, type LeaderboardStatsRecord } from "./utils/game-database";
@@ -2297,16 +2297,12 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
       parsedAmount.amount,
       parsedAmount.isSol,
       `Withdrawal of ${parsedAmount.formattedAmount}`,
-      async (playerData) => {
+      async (_playerData) => {
         if (parsedAmount.isSol) {
-          const transferSolIx = SystemProgram.transfer({
-            fromPubkey: playerData.keypair.publicKey,
-            toPubkey: toAddress,
-            lamports: parsedAmount.amount,
-          });
-          return await wallet.sendTransaction(
-            [transferSolIx],
-            [playerData.keypair]
+          return await wallet.transferSol(
+            telegramId,
+            toAddress,
+            parsedAmount.amount
           );
         } else {
           return await wallet.transferToken(
@@ -2373,16 +2369,12 @@ bot.command("tip", async (ctx: Context) => {
       parsedAmount.amount,
       parsedAmount.isSol,
       `Tip of ${parsedAmount.formattedAmount} to ${recipientName}`,
-      async (playerData) => {
+      async (_playerData) => {
         if (parsedAmount.isSol) {
-          const transferSolIx = SystemProgram.transfer({
-            fromPubkey: playerData.keypair.publicKey,
-            toPubkey: recipientPubKey,
-            lamports: parsedAmount.amount,
-          });
-          return await wallet.sendTransaction(
-            [transferSolIx],
-            [playerData.keypair]
+          return await wallet.transferSol(
+            telegramId,
+            recipientPubKey,
+            parsedAmount.amount
           );
         } else {
           return await wallet.transferToken(
@@ -3133,13 +3125,14 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
           quote
         );
 
-        txSignature = await wallet.sendTransaction(instructions, [keypair]);
+        txSignature = await wallet.sendAndConfirmWithResubmits(
+          instructions,
+          [keypair],
+          { operationLabel: "Swap transaction" }
+        );
       }
 
       console.log(`🚀 Swap transaction submitted: ${txSignature}`);
-
-      // Wait for confirmation
-      await wallet.confirmTransaction(txSignature);
 
       const receivedDisplay = formatAmount(
         quote.outputAmount ?? "0",
