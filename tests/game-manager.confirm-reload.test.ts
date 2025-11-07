@@ -121,6 +121,60 @@ describe("GameManager confirm/reload helpers", () => {
     expect(confirmed).toBe("SIG-HISTORY");
   });
 
+  test("confirmTransactionWithRecovery honors player unjoin probe", async () => {
+    resetGM();
+    const wallet = {
+      confirmTransaction: async () => {
+        throw new Error("transaction confirmation timeout");
+      },
+    } as any;
+    const program = {
+      account: { game: { fetchNullable: async () => ({}) } },
+      provider: {},
+    } as any;
+    const gm = GameManager.getInstance(program, wallet, {
+      getGameParticipants: () => [],
+    } as any);
+    (gm as any).isPlayerInGame = async () => false;
+
+    const confirmed = await (gm as any).confirmTransactionWithRecovery(
+      "SIG-UNJOIN",
+      new PublicKey("BPFLoader1111111111111111111111111111111111"),
+      "Player unjoin",
+      new PublicKey("BPFLoader2111111111111111111111111111111111")
+    );
+
+    expect(confirmed).toBe("SIG-UNJOIN");
+  });
+
+  test("confirmTransactionWithRecovery honors game close probe", async () => {
+    resetGM();
+    const wallet = {
+      confirmTransaction: async () => {
+        throw new Error("transaction confirmation timeout");
+      },
+    } as any;
+    const program = {
+      account: {
+        game: {
+          fetchNullable: async () => null,
+        },
+      },
+      provider: {},
+    } as any;
+    const gm = GameManager.getInstance(program, wallet, {
+      getGameParticipants: () => [],
+    } as any);
+
+    const confirmed = await (gm as any).confirmTransactionWithRecovery(
+      "SIG-CLOSE",
+      new PublicKey("BPFLoader1111111111111111111111111111111111"),
+      "Game close"
+    );
+
+    expect(confirmed).toBe("SIG-CLOSE");
+  });
+
   test("confirmTransactionWithRecovery preserves timeout message when recovery fails", async () => {
     resetGM();
     const wallet = {

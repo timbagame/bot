@@ -1310,30 +1310,71 @@ export class GameManager {
   private async confirmTransactionWithRecovery(
     signature: string,
     gamePda: PublicKey,
-    operationType: "Game creation" | "Player join",
+    operationType:
+      | "Game creation"
+      | "Player join"
+      | "Game close"
+      | "Player unjoin",
     playerPubkey?: PublicKey,
     resubmit?: (attempt: number, previousSignature: string) => Promise<string>
   ): Promise<string> {
     const probes: TransactionProbe[] = [];
+    const fetchGameAccountNullable = async (): Promise<any | null> => {
+      try {
+        const accountInterface = this.program.account.game as any;
+        const fetchNullable = accountInterface?.fetchNullable?.bind(
+          accountInterface
+        );
+        if (fetchNullable) {
+          return await fetchNullable(gamePda);
+        }
+        return await accountInterface.fetch(gamePda);
+      } catch (error: any) {
+        const message = error?.message?.toLowerCase?.() ?? "";
+        if (message.includes("account does not exist")) {
+          return null;
+        }
+        throw error;
+      }
+    };
 
     if (operationType === "Game creation") {
       probes.push({
         label: "Game account exists",
         check: async () => {
-          const accountInterface = this.program.account.game as any;
-          const fetchNullable = accountInterface?.fetchNullable?.bind(accountInterface);
-          const gameAccount = fetchNullable
-            ? await fetchNullable(gamePda)
-            : await accountInterface.fetch(gamePda);
-          return Boolean(gameAccount);
+          try {
+            const gameAccount = await fetchGameAccountNullable();
+            return Boolean(gameAccount);
+          } catch {
+            return false;
+          }
         },
       });
-    } else if (operationType === "Player join" && playerPubkey) {
+    } else if (operationType === "Game close") {
       probes.push({
-        label: "Player is recorded in game",
+        label: "Game account closed",
         check: async () => {
           try {
-            return await this.isPlayerInGame(gamePda, playerPubkey);
+            const gameAccount = await fetchGameAccountNullable();
+            return !gameAccount;
+          } catch {
+            return false;
+          }
+        },
+      });
+    } else if (
+      (operationType === "Player join" || operationType === "Player unjoin") &&
+      playerPubkey
+    ) {
+      probes.push({
+        label:
+          operationType === "Player join"
+            ? "Player is recorded in game"
+            : "Player removed from game",
+        check: async () => {
+          try {
+            const isInGame = await this.isPlayerInGame(gamePda, playerPubkey);
+            return operationType === "Player join" ? isInGame : !isInGame;
           } catch {
             return false;
           }
@@ -1353,23 +1394,35 @@ export class GameManager {
     } catch (error: any) {
       try {
         if (operationType === "Game creation") {
-          const accountInterface = this.program.account.game as any;
-          const fetchNullable = accountInterface?.fetchNullable?.bind(accountInterface);
-          const gameAccount = fetchNullable
-            ? await fetchNullable(gamePda)
-            : await accountInterface.fetch(gamePda);
+          const gameAccount = await fetchGameAccountNullable();
           if (!gameAccount) {
             (error as any).cause = new Error(
               "Game account not found after timeout (attempted recovery)."
             );
           }
-        } else if (operationType === "Player join" && playerPubkey) {
-          const isInGame = await this.isPlayerInGame(gamePda, playerPubkey).catch(
-            () => false
-          );
-          if (!isInGame) {
+        } else if (operationType === "Game close") {
+          const gameAccount = await fetchGameAccountNullable();
+          if (gameAccount) {
             (error as any).cause = new Error(
-              "Player not recorded in game after timeout (attempted recovery)."
+              "Game account still exists after timeout (attempted recovery)."
+            );
+          }
+        } else if (
+          (operationType === "Player join" ||
+            operationType === "Player unjoin") &&
+          playerPubkey
+        ) {
+          const isInGame = await this.isPlayerInGame(
+            gamePda,
+            playerPubkey
+          ).catch(() => false);
+          const violation =
+            operationType === "Player join" ? !isInGame : isInGame;
+          if (violation) {
+            (error as any).cause = new Error(
+              operationType === "Player join"
+                ? "Player not recorded in game after timeout (attempted recovery)."
+                : "Player still recorded in game after timeout (attempted recovery)."
             );
           }
         }
@@ -3975,11 +4028,39 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         .accounts(closeAccounts as any)
         .instruction();
 
-      const tx = await this.wallet.sendTransaction(
-        [closeInstruction],
-        [creatorKp]
+      const sendCloseTransaction = async () => {
+        return await this.wallet.sendTransaction(
+          [closeInstruction],
+          [creatorKp]
+        );
+      };
+
+      let tx = await sendCloseTransaction();
+
+      tx = await this.confirmTransactionWithRecovery(
+        tx,
+        gamePda,
+        "Game close",
+        creatorKp.publicKey,
+        async () => {
+          if (
+            typeof (this.wallet as any).sendAndConfirmWithResubmits ===
+            "function"
+          ) {
+            return await this.wallet.sendAndConfirmWithResubmits(
+              [closeInstruction],
+              [creatorKp],
+              {
+                operationLabel: `${gameType} close transaction`,
+              }
+            );
+          }
+
+          const newSignature = await sendCloseTransaction();
+          await this.wallet.confirmTransaction(newSignature);
+          return newSignature;
+        }
       );
-      await this.wallet.confirmTransaction(tx);
 
       const successMessage =
         successPrefix ?? `✅ Successfully closed ${gameType} game`;
@@ -4113,11 +4194,36 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       .accounts(unjoinAccounts as any)
       .instruction();
 
-    const tx = await this.wallet.sendTransaction(
-      [unjoinInstruction],
-      [authorityKp]
+    const sendUnjoinTransaction = async () => {
+      return await this.wallet.sendTransaction(
+        [unjoinInstruction],
+        [authorityKp]
+      );
+    };
+
+    let tx = await sendUnjoinTransaction();
+
+    tx = await this.confirmTransactionWithRecovery(
+      tx,
+      gamePda,
+      "Player unjoin",
+      playerPubkey,
+      async () => {
+        if (
+          typeof (this.wallet as any).sendAndConfirmWithResubmits === "function"
+        ) {
+          return await this.wallet.sendAndConfirmWithResubmits(
+            [unjoinInstruction],
+            [authorityKp],
+            { operationLabel: "Player unjoin transaction" }
+          );
+        }
+
+        const newSignature = await sendUnjoinTransaction();
+        await this.wallet.confirmTransaction(newSignature);
+        return newSignature;
+      }
     );
-    await this.wallet.confirmTransaction(tx);
 
     const resolvedTelegramId =
       playerTelegramId ??
