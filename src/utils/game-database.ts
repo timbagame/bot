@@ -194,9 +194,20 @@ export class GameDatabase extends BaseDatabase {
     telegramId: string,
     displayName?: string | null
   ): void {
+    const normalizedKey = typeof publicKey === "string" ? publicKey.trim() : "";
+    const normalizedId = typeof telegramId === "string" ? telegramId.trim() : "";
+    const normalizedDisplay =
+      typeof displayName === "string" && displayName.trim().length > 0
+        ? displayName.trim()
+        : null;
+
+    if (!normalizedKey || !normalizedId) {
+      return;
+    }
+
     this.run(
       "INSERT OR REPLACE INTO player_mappings (public_key, telegram_id, display_name) VALUES (?, ?, ?)",
-      [publicKey, telegramId, displayName ?? null],
+      [normalizedKey, normalizedId, normalizedDisplay],
       "saving player mapping"
     );
   }
@@ -226,6 +237,7 @@ export class GameDatabase extends BaseDatabase {
         SELECT telegram_id
         FROM game_participants
         WHERE public_key = ?
+          AND status = 'confirmed'
         ORDER BY joined_at DESC
         LIMIT 1
       `,
@@ -376,12 +388,20 @@ export class GameDatabase extends BaseDatabase {
         VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(game_address, telegram_id) DO UPDATE SET
           public_key = excluded.public_key,
-          status = excluded.status,
+          status = CASE
+            WHEN game_participants.status = 'confirmed' AND excluded.status = 'pending' THEN 'confirmed'
+            ELSE excluded.status
+          END,
           join_signature = CASE
             WHEN excluded.join_signature IS NOT NULL THEN excluded.join_signature
             ELSE game_participants.join_signature
           END,
-          last_verified_at = COALESCE(excluded.last_verified_at, game_participants.last_verified_at)
+          last_verified_at = CASE
+            WHEN (
+              game_participants.status = 'confirmed' AND excluded.status = 'pending'
+            ) THEN game_participants.last_verified_at
+            ELSE COALESCE(excluded.last_verified_at, game_participants.last_verified_at)
+          END
       `,
       [
         gameAddress,
@@ -545,7 +565,10 @@ export class GameDatabase extends BaseDatabase {
         "reading game last slot timestamp"
       );
 
-      if (!current?.last_slot_timestamp || timestamp > current.last_slot_timestamp) {
+      if (
+        !current?.last_slot_timestamp ||
+        timestamp >= current.last_slot_timestamp
+      ) {
         this.run(
           "UPDATE games SET last_slot = ?, last_slot_timestamp = ? WHERE game_address = ?",
           [lastSlot, timestamp, gameAddress],

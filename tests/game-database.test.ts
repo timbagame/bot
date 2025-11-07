@@ -58,7 +58,7 @@ test("GameDatabase: CRUD for games, mappings, participants, and slot updates", (
   });
   expect(db.getGameParticipants("gameA")).toEqual(["tg_creator", "tg_p2"]);
   expect(db.getPlayerParticipatedGames("tg_p2")).toEqual(["gameA"]);
-  expect(db.getPlayerTelegramId("pub_pending")).toBe("tg_pending");
+  expect(db.getPlayerTelegramId("pub_pending")).toBeNull();
 
   // Active and Recent queries
   const activeForCreator = db.getActiveGames("tg_creator");
@@ -91,6 +91,107 @@ test("GameDatabase: CRUD for games, mappings, participants, and slot updates", (
   // Remove participant and ensure list shrinks
   db.removeGameParticipant("gameA", "tg_p2");
   expect(db.getGameParticipants("gameA")).toEqual(["tg_creator"]);
+});
+
+test("updateGameLastSlotWithTimestamp accepts equal timestamp updates", () => {
+  const db = GameDatabase.getInstance();
+
+  db.saveGame("slotGame", "creator_slot", 100, "coinflip");
+  const now = Date.now();
+
+  const first = db.updateGameLastSlotWithTimestamp("slotGame", "111", now);
+  expect(first).toBe(true);
+
+  const second = db.updateGameLastSlotWithTimestamp("slotGame", "222", now);
+  expect(second).toBe(true);
+
+  const last = db.getGameLastSlotWithTimestamp("slotGame");
+  expect(last.lastSlot).toBe("222");
+  expect(last.timestamp).toBe(now);
+});
+
+test("savePlayerMapping normalizes inputs and ignores blanks", () => {
+  const db = GameDatabase.getInstance();
+  const sqlite: any = (db as any).db;
+
+  db.savePlayerMapping("  pub_key  ", "  555  ", "  Astro  ");
+  const mappings = db.getAllPlayerMappings();
+  expect(mappings.length).toBe(1);
+  const mapping = mappings[0]!;
+  expect(mapping.public_key).toBe("pub_key");
+  expect(mapping.telegram_id).toBe("555");
+
+  const stored = sqlite
+    .prepare(
+      "SELECT public_key, telegram_id, display_name FROM player_mappings WHERE public_key = ?"
+    )
+    .get("pub_key");
+  expect(stored.display_name).toBe("Astro");
+  expect(db.getPlayerDisplayName("555")).toBe("Astro");
+  expect(db.getPlayerPublicKey("555")).toBe("pub_key");
+  expect(db.getPlayerTelegramId("pub_key")).toBe("555");
+
+  db.savePlayerMapping("   ", "777");
+  db.savePlayerMapping("valid", "   ");
+  expect(db.getAllPlayerMappings().length).toBe(1);
+});
+
+test("getPlayerTelegramId falls back to confirmed participants only", () => {
+  const db = GameDatabase.getInstance();
+
+  db.saveGame("pendingGame", "creator_pending", 100, "coinflip");
+  db.saveGameParticipant("pendingGame", "tg_pending", "pub_shared", {
+    status: "pending",
+  });
+
+  expect(db.getPlayerTelegramId("pub_shared")).toBeNull();
+
+  db.saveGame("confirmedGame", "creator_confirmed", 100, "coinflip");
+  db.saveGameParticipant("confirmedGame", "tg_confirmed", "pub_shared", {
+    status: "confirmed",
+  });
+
+  expect(db.getPlayerTelegramId("pub_shared")).toBe("tg_confirmed");
+
+  db.saveGame("pendingLater", "creator_pending2", 100, "coinflip");
+  db.saveGameParticipant("pendingLater", "tg_pending2", "pub_shared", {
+    status: "pending",
+  });
+
+  expect(db.getPlayerTelegramId("pub_shared")).toBe("tg_confirmed");
+});
+
+test("saveGameParticipant preserves confirmed status when pending write races", () => {
+  const db = GameDatabase.getInstance();
+  const sqlite: any = (db as any).db;
+
+  db.saveGame("raceGame", "creator_race", 100, "coinflip");
+
+  db.saveGameParticipant("raceGame", "tg_race", "pub_race", {
+    status: "pending",
+    joinSignature: "sig_pending",
+  });
+
+  const verifiedAt = Date.now();
+  db.saveGameParticipant("raceGame", "tg_race", "pub_race", {
+    status: "confirmed",
+    joinSignature: "sig_confirmed",
+    lastVerifiedAt: verifiedAt,
+  });
+
+  db.saveGameParticipant("raceGame", "tg_race", "pub_race", {
+    status: "pending",
+  });
+
+  const row = sqlite
+    .prepare(
+      "SELECT status, join_signature, last_verified_at FROM game_participants WHERE game_address = ? AND telegram_id = ?"
+    )
+    .get("raceGame", "tg_race");
+
+  expect(row.status).toBe("confirmed");
+  expect(row.join_signature).toBe("sig_confirmed");
+  expect(row.last_verified_at).toBeGreaterThanOrEqual(verifiedAt);
 });
 
 test("GameDatabase read helpers return safe defaults on errors", () => {
