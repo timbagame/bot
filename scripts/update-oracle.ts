@@ -92,17 +92,16 @@ const updateOracle = async () => {
       })
       .instruction();
 
-    const tx = await wallet.sendTransaction(
+    const tx = await wallet.sendAndConfirmWithResubmits(
       [updateInstruction],
       uniqueSigners(
         adminKeypair,
         currentOracleOperatorKeypair,
         newOracleOperatorKeypair
-      )
+      ),
+      { operationLabel: 'Update oracle config' }
     );
 
-    console.log(`⏳ Waiting for confirmation...`);
-    await wallet.confirmTransaction(tx);
     console.log(`✅ Oracle updated successfully!`);
     console.log(`Transaction: ${tx}`);
 

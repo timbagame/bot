@@ -111,9 +111,10 @@ async function withdrawTokenFee(
     );
   }
 
-  const tx = await wallet.sendTransaction(
+  const tx = await wallet.sendAndConfirmWithResubmits(
     instructions,
-    uniqueSigners(adminBundle.root, operatorBundle.root)
+    uniqueSigners(adminBundle.root, operatorBundle.root),
+    { operationLabel: `Withdraw ${config.ticker} fees` }
   );
 
   console.log(`   ✅ Withdrawn. Transaction: ${tx}`);

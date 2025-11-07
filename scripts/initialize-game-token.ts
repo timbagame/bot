@@ -533,17 +533,11 @@ async function initializeToken(
       `🔧 Creating Associated Token Account for ${tokenTicker} game vault...`
     );
 
-    const createAtaTx = new Transaction().add(...ataPlan.instructions);
-    createAtaTx.recentBlockhash = (
-      await connection.getLatestBlockhash()
-    ).blockhash;
-    createAtaTx.feePayer = adminKeypair.publicKey;
-
-    const createAtaTxSignature = await connection.sendTransaction(
-      createAtaTx,
-      [adminKeypair]
+    const createAtaTxSignature = await wallet.sendAndConfirmWithResubmits(
+      ataPlan.instructions,
+      [adminKeypair],
+      { operationLabel: `Create ${tokenTicker} vault ATA` }
     );
-    await connection.confirmTransaction(createAtaTxSignature, "confirmed");
     console.log(
       `✅ ${tokenTicker} ATA created! Transaction: ${createAtaTxSignature}`
     );
@@ -573,9 +567,10 @@ async function initializeToken(
     )
     .instruction();
 
-  const tx = await wallet.sendTransaction(
+  const tx = await wallet.sendAndConfirmWithResubmits(
     [tokenInstruction],
-    uniqueSigners(adminKeypair, oracleOperatorKeypair)
+    uniqueSigners(adminKeypair, oracleOperatorKeypair),
+    { operationLabel: `Initialize ${tokenTicker} token` }
   );
   console.log(`✅ ${tokenTicker} game token initialized successfully!`);
 
