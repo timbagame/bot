@@ -5,6 +5,7 @@ import {
   RpcEndpointManager,
   parseRpcEndpointList,
   resolvePrimaryRpcEndpoint,
+  type ActiveEndpointChange,
 } from "../src/utils/rpc-endpoints";
 
 class FakeConnection {
@@ -89,5 +90,32 @@ describe("RpcEndpointManager", () => {
 
     expect(slot).toBe(42);
     expect(manager.getActiveEndpoint()).toBe("https://rpc-secondary");
+  });
+
+  test("notifies listeners when active endpoint changes", async () => {
+    const endpoints = ["https://rpc-primary", "https://rpc-secondary"];
+    const connectionFactory = (endpoint: string, commitment: string) =>
+      new FakeConnection(endpoint, commitment, endpoint === endpoints[0]) as unknown as Connection;
+
+    const manager = new RpcEndpointManager(endpoints, {
+      commitment: "confirmed",
+      connectionFactory,
+    });
+
+    const changes: ActiveEndpointChange[] = [];
+    manager.onActiveEndpointChange((change) => {
+      changes.push(change);
+    });
+
+    const connection = manager.getConnection();
+    await connection.getSlot();
+
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toEqual({
+      endpoint: "https://rpc-secondary",
+      index: 1,
+      previousEndpoint: "https://rpc-primary",
+      previousIndex: 0,
+    });
   });
 });

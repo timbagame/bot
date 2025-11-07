@@ -1501,6 +1501,22 @@ const attachRpcEndpointFailoverHandler = (): void => {
   }
 };
 
+export const __test_registerProgramEventListeners = registerProgramEventListeners;
+export const __test_unregisterProgramEventListeners = unregisterProgramEventListeners;
+export const __test_attachRpcEndpointFailoverHandler = attachRpcEndpointFailoverHandler;
+export const __test_getProgramEventListenerState = () => ({
+  gameCompletedListenerId,
+  playerJoinedListenerId,
+  playerUnjoinedListenerId,
+  programEventListenersReady,
+});
+export const __test_resetProgramEventState = async (): Promise<void> => {
+  await unregisterProgramEventListeners();
+  rpcEndpointListenerCleanup?.();
+  rpcEndpointListenerCleanup = null;
+  programEventListenersReady = false;
+};
+
 const COMPLETION_SIGNATURE_LOOKBACK = 25;
 
 type CompletionDetails = {
