@@ -1259,46 +1259,6 @@ export const createWalletTransactionsModule = (
           });
 
           const successMessage = (() => {
-            if (
-              withdrawAllResult &&
-              transaction.token === "SOL" &&
-              transaction.amount === "max"
-            ) {
-              const details: string[] = [
-                `✅ <b>Transaction Completed</b>`,
-                "",
-                `Sent ${formattedAmount} SOL`,
-              ];
-
-              if (withdrawAllResult.nativeLamportsSent > 0) {
-                details.push(
-                  `• Native SOL: ${wallet.formatSolBalance(
-                    withdrawAllResult.nativeLamportsSent
-                  )} SOL`
-                );
-              }
-
-              if (withdrawAllResult.wsolLamportsSent > 0) {
-                details.push(
-                  `• WSOL (unwrapped): ${wallet.formatSolBalance(
-                    withdrawAllResult.wsolLamportsSent
-                  )} SOL`
-                );
-              }
-
-              details.push(
-                "",
-                `To: <code>${escapeHtml(transaction.address ?? "")}</code>`,
-                ""
-              );
-
-              if (viewLine) {
-                details.push(viewLine);
-              }
-
-              return details.join("\n");
-            }
-
             const baseMessage = `✅ <b>Transaction Completed</b>\n\nSent ${escapeHtml(
               formattedAmount
             )} ${escapeHtml(transaction.token ?? "")}\nTo: <code>${escapeHtml(

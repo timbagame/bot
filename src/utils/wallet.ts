@@ -1585,256 +1585,73 @@ export class WalletManager {
     const userKeypair = this.getKeyPair(telegramId);
     const payer = userKeypair.publicKey;
     const nativeLamports = await this.getBalance(telegramId);
-    const singleTxBudget = await this.getFeeBudget().getSingleTransactionLamports();
-    const rentExemptMinimumLamports =
-      await this.getRentExemptMinimumLamports();
-    const bufferLamports = Math.max(
-      singleTxBudget,
-      rentExemptMinimumLamports
-    );
-    const targetReserveLamports = 0;
-
     const debugPrefix = "[Withdraw SOL]";
+
     const formatLamports = (lamports: number) =>
       `${lamports} lamports (${(lamports / LAMPORTS_PER_SOL).toFixed(9)} SOL)`;
 
-    const wsolMint = new PublicKey(WSOL_MINT);
-    const wsolAta = await getAssociatedTokenAddress(
-      wsolMint,
-      payer,
-      false,
-      TOKEN_PROGRAM_ID
+    console.log(
+      `${debugPrefix} Native balance ${formatLamports(nativeLamports)}`
     );
 
-    let wsolAmount = 0;
-    let wsolAccountLamports = 0;
-    let wsolAccountExists = false;
-
-    try {
-      await this.throttle();
-      const wsolAccount = await getAccount(
-        this.connection,
-        wsolAta,
-        "confirmed",
-        TOKEN_PROGRAM_ID
-      );
-      wsolAmount = Number(wsolAccount.amount);
-      wsolAccountExists = true;
-      const ataInfo = await this.connection.getAccountInfo(wsolAta);
-      if (ataInfo?.lamports) {
-        wsolAccountLamports = ataInfo.lamports;
-      } else {
-        wsolAccountLamports = wsolAmount;
-      }
-      console.log(
-        `${debugPrefix} Found WSOL account ${wsolAta.toBase58()} with token balance ${formatLamports(
-          wsolAmount
-        )} and rent ${formatLamports(wsolAccountLamports)}`
-      );
-    } catch (error: unknown) {
-      if (!this.isMissingTokenAccountError(error)) {
-        console.error(`${debugPrefix} Failed to load WSOL account:`, error);
-        throw error;
-      }
-      console.log(
-        `${debugPrefix} No WSOL account found for ${payer.toBase58()}`
-      );
+    if (nativeLamports <= 0) {
+      throw new Error("No SOL available to withdraw.");
     }
+
+    const placeholderTransfer = SystemProgram.transfer({
+      fromPubkey: payer,
+      toPubkey: destination,
+      lamports: 0,
+    });
+
+    const feeWithTransfer = await this.estimateFee(payer, [placeholderTransfer]);
 
     console.log(
-      `${debugPrefix} Native balance ${formatLamports(
-        nativeLamports
-      )}, WSOL tokens ${formatLamports(
-        wsolAmount
-      )}, WSOL account lamports ${formatLamports(
-        wsolAccountLamports
-      )}, rent exempt minimum ${formatLamports(
-        rentExemptMinimumLamports
-      )}, buffer ${formatLamports(bufferLamports)} (single tx ${formatLamports(
-        singleTxBudget
-      )}), target reserve ${formatLamports(targetReserveLamports)}`
-    );
-
-    if (nativeLamports <= 0 && wsolAmount <= 0 && wsolAccountLamports <= 0) {
-      throw new Error("No SOL or WSOL available to withdraw.");
-    }
-
-    const instructions: TransactionInstruction[] = [];
-    let wsolLamportsSent = 0;
-    let totalLamportsSent = 0;
-
-    if (wsolAccountExists && wsolAccountLamports > 0) {
-      if (wsolAmount > 0) {
-        instructions.push(createSyncNativeInstruction(wsolAta));
-        console.log(
-          `${debugPrefix} Added sync instruction for WSOL account ${wsolAta.toBase58()}`
-        );
-      }
-      instructions.push(
-        createCloseAccountInstruction(wsolAta, payer, payer)
-      );
-      wsolLamportsSent = wsolAccountLamports;
-      console.log(
-        `${debugPrefix} Added close instruction for WSOL account ${wsolAta.toBase58()} returning ${formatLamports(
-          wsolLamportsSent
-        )}`
-      );
-    }
-
-    let nativeLamportsSent = 0;
-
-    if (instructions.length > 0) {
-      if (nativeLamports < 1) {
-        console.warn(
-          `${debugPrefix} Cannot unwrap WSOL because native balance ${formatLamports(
-            nativeLamports
-          )} is below minimum fee`
-        );
-        throw new Error(
-          "Not enough SOL to pay network fees when unwrapping WSOL. Keep a small SOL balance and try again."
-        );
-      }
-      const feeForCloseOnly = await this.estimateFee(payer, instructions);
-      console.log(
-        `${debugPrefix} Estimated fee for close-only transaction: ${formatLamports(
-          feeForCloseOnly
-        )}`
-      );
-      if (nativeLamports < feeForCloseOnly) {
-        throw new Error(
-          "Not enough SOL to cover transaction fees. Top up SOL and try again."
-        );
-      }
-    }
-
-    const totalAvailableLamports = nativeLamports + wsolLamportsSent;
-
-    console.log(
-      `${debugPrefix} Total available lamports after WSOL close: ${formatLamports(
-        totalAvailableLamports
+      `${debugPrefix} Estimated fee with transfer: ${formatLamports(
+        feeWithTransfer
       )}`
     );
 
-    if (totalAvailableLamports > 0) {
-      const placeholderTransfer = SystemProgram.transfer({
-        fromPubkey: payer,
-        toPubkey: destination,
-        lamports: 0,
-      });
-
-      const feeWithTransfer = await this.estimateFee(payer, [
-        ...instructions,
-        placeholderTransfer,
-      ]);
-
-      console.log(
-        `${debugPrefix} Estimated fee with transfer: ${formatLamports(
-          feeWithTransfer
-        )}`
-      );
-
-      if (nativeLamports <= feeWithTransfer) {
-        if (instructions.length === 0) {
-          throw new Error(
-            "Not enough SOL to cover the transaction fee. Leave a small amount for fees and try again."
-          );
-        }
-
-        throw new Error(
-          "Not enough SOL to cover transaction fees before unwrapping WSOL. Top up SOL and try again."
-        );
-      }
-
-      const maxTransferLamports =
-        totalAvailableLamports - feeWithTransfer - targetReserveLamports;
-
-      console.log(
-        `${debugPrefix} Lamports available to transfer after reserving fees ${formatLamports(
-          maxTransferLamports
-        )} (fee ${formatLamports(feeWithTransfer)}, reserve ${formatLamports(
-          targetReserveLamports
-        )})`
-      );
-
-      if (maxTransferLamports <= 0) {
-        throw new Error(
-          "Not enough SOL or WSOL to withdraw after paying transaction fees."
-        );
-      }
-
-      const transferLamports = Math.min(
-        maxTransferLamports,
-        totalAvailableLamports
-      );
-
-      const nativeAvailableForTransfer = Math.max(
-        nativeLamports - feeWithTransfer,
-        0
-      );
-
-      nativeLamportsSent = Math.min(
-        nativeAvailableForTransfer,
-        transferLamports
-      );
-
-      const wsolContribution = Math.min(
-        wsolLamportsSent,
-        Math.max(transferLamports - nativeLamportsSent, 0)
-      );
-
-      wsolLamportsSent = wsolContribution;
-      totalLamportsSent = nativeLamportsSent + wsolLamportsSent;
-
-      const finalReserveLamports =
-        totalAvailableLamports - transferLamports - feeWithTransfer;
-
-      console.log(
-        `${debugPrefix} Transfer plan: native ${formatLamports(
-          nativeLamportsSent
-        )}, WSOL contribution ${formatLamports(
-          wsolLamportsSent
-        )}, total ${formatLamports(
-          totalLamportsSent
-        )}, final reserve ${formatLamports(finalReserveLamports)}`
-      );
-
-      instructions.push(
-        SystemProgram.transfer({
-          fromPubkey: payer,
-          toPubkey: destination,
-          lamports: transferLamports,
-        })
-      );
-      console.log(
-        `${debugPrefix} Added system transfer of ${formatLamports(
-          transferLamports
-        )} to ${destination.toBase58()}`
+    if (nativeLamports <= feeWithTransfer) {
+      throw new Error(
+        "Not enough SOL to cover the transaction fee. Leave a small amount for fees and try again."
       );
     }
 
-    if (instructions.length === 0) {
-      console.error(
-        `${debugPrefix} No instructions generated despite available balances. Native ${formatLamports(
-          nativeLamports
-        )}, WSOL lamports ${formatLamports(wsolLamportsSent)}`
-      );
+    const transferLamports = nativeLamports - feeWithTransfer;
+
+    if (transferLamports <= 0) {
       throw new Error(
-        "Unable to build withdrawal transaction. Ensure your balance is above the fee cost."
+        "Not enough SOL to withdraw after paying transaction fees."
       );
     }
 
     console.log(
-      `${debugPrefix} Final instruction count: ${instructions.length}`
+      `${debugPrefix} Transfer plan: native ${formatLamports(
+        transferLamports
+      )}`
     );
-    const signature = await this.sendTransaction(instructions, [userKeypair]);
+
+    const transferInstruction = SystemProgram.transfer({
+      fromPubkey: payer,
+      toPubkey: destination,
+      lamports: transferLamports,
+    });
+
+    const signature = await this.sendTransaction(
+      [transferInstruction],
+      [userKeypair]
+    );
+
     console.log(
       `${debugPrefix} Sent withdraw-all transaction ${signature}`
     );
+
     return {
       signature,
-      nativeLamportsSent,
-      wsolLamportsSent,
-      totalLamportsSent,
+      nativeLamportsSent: transferLamports,
+      wsolLamportsSent: 0,
+      totalLamportsSent: transferLamports,
     };
   }
 
