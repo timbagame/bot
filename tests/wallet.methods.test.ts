@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import { Buffer } from "buffer";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { WalletManager } from "../src/utils/wallet";
-import { LAMPORTS_PER_SOL } from "../src/utils/constants";
 
 class ConnFailTime implements Partial<Connection> {
   async getSlot(_cfg?: any): Promise<number> { throw new Error("rpc down"); }
@@ -128,8 +127,7 @@ test("transferSol preserves lamports for dust transfers", async () => {
   };
 
   const destination = Keypair.generate().publicKey;
-  const dustAmount = 1 / LAMPORTS_PER_SOL;
-  const sig = await wm.transferSol(1n, destination, dustAmount);
+  const sig = await wm.transferSol(1n, destination, 1);
 
   expect(sig).toBe("SIG_DUST");
   const dataBuffer: Buffer = instructions[0]![0]!.data as Buffer;
