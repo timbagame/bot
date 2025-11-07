@@ -161,18 +161,15 @@ export class SwapManager {
     outputMint: string;
     amount: string;
     inputDecimals: number;
-    outputDecimals: number;
     slippageBps: number;
   }): Promise<PumpFunQuote> {
-    const { inputMint, outputMint, amount, inputDecimals, outputDecimals, slippageBps } =
-      options;
+    const { inputMint, outputMint, amount, inputDecimals, slippageBps } = options;
     return this.quoteCache.getPumpFunQuote(options, () =>
       this.pumpFunClient.getQuote(
         inputMint,
         outputMint,
         amount,
         inputDecimals,
-        outputDecimals,
         slippageBps
       )
     );
@@ -270,7 +267,6 @@ export class SwapManager {
         outputMint,
         amount: amountForPumpQuote,
         inputDecimals,
-        outputDecimals,
         slippageBps,
       });
 
@@ -344,7 +340,6 @@ export class SwapManager {
               outputMint,
               amount: amountForPumpQuote,
               inputDecimals,
-              outputDecimals,
               slippageBps,
             });
 
@@ -736,7 +731,6 @@ export class SwapManager {
             outputMint: SOL_MINT,
             amount: amountStr,
             inputDecimals: tokenDecimals,
-            outputDecimals: SOL_DECIMALS,
             slippageBps,
           });
           const lamportsOut = Number(quote.outputAmount);
@@ -1194,7 +1188,6 @@ export class SwapManager {
         outputMint: quote.outputMint,
         amount: pumpInputDecimal,
         inputDecimals: SOL_DECIMALS,
-        outputDecimals,
         slippageBps,
       });
 

@@ -466,7 +466,7 @@ const formatSlippagePercent = (value: number): string => {
 };
 
 const formatTradeConfirmationSummary = ({
-  kind: _kind,
+  kind,
   payToken,
   payDisplay,
   payRawAmount,
@@ -513,8 +513,10 @@ const formatTradeConfirmationSummary = ({
     ? escapeHtml(contractAddress)
     : undefined;
 
+  const heading = kind === "swap" ? "Swap Confirmation" : "Trade Confirmation";
+
   const lines = [
-    `🔄 <b>Swap Confirmation</b>`,
+    `🔄 <b>${heading}</b>`,
     "",
     `<b>You Pay:</b> ${safePayDisplay} ${safePayToken}`,
     `<b>You Receive:</b> ~${safeReceiveDisplay} ${safeReceiveToken}`,
@@ -569,8 +571,11 @@ const getUserSwapSlippageBps = (userId: string): number => {
 
 const setUserSwapSlippageBps = (userId: string, slippageBps: number): void => {
   const existing = getUserState(userId, false);
-  const { timestamp: _timestamp, ...rest } = existing ?? {};
-  setUserState(userId, { ...rest, swapSlippageBps: slippageBps });
+  const sanitizedState: Record<string, any> = existing
+    ? { ...existing }
+    : {};
+  Reflect.deleteProperty(sanitizedState, "timestamp");
+  setUserState(userId, { ...sanitizedState, swapSlippageBps: slippageBps });
 };
 
 const buildSwapConfirmationKeyboard = ({
@@ -599,17 +604,15 @@ const buildSwapConfirmationKeyboard = ({
   return keyboard;
 };
 
-type TradeQuoteErrorKind = "swap";
-
 type TradeQuoteErrorParams = {
   error: unknown;
   retryCallback: string;
 };
 
-const renderTradeQuoteError = (
-  _kind: TradeQuoteErrorKind,
-  { error, retryCallback }: TradeQuoteErrorParams
-) => {
+const renderTradeQuoteError = ({
+  error,
+  retryCallback,
+}: TradeQuoteErrorParams) => {
   const keyboard = new InlineKeyboard().text("← Try Again", retryCallback).row();
   const userFriendly = formatUserFriendlyError(error, wallet);
   return {
@@ -3838,7 +3841,7 @@ const showSwapQuoteAndConfirmation = async (
           selectedSlippageBps,
         }),
       onError: async (error) => {
-        const { text, keyboard } = renderTradeQuoteError("swap", {
+        const { text, keyboard } = renderTradeQuoteError({
           error,
           retryCallback: cancelCallback,
         });
@@ -3849,7 +3852,7 @@ const showSwapQuoteAndConfirmation = async (
     });
   } catch (error) {
     console.error("Error getting swap quote:", error);
-    const { text, keyboard } = renderTradeQuoteError("swap", {
+    const { text, keyboard } = renderTradeQuoteError({
       error,
       retryCallback: cancelCallback,
     });
@@ -3941,10 +3944,11 @@ bot.callbackQuery(/^swap_slippage_/, async (ctx) => {
       quote,
     });
 
-    const { timestamp: _timestamp, ...rest } = pending;
+    const sanitizedPending: Record<string, any> = { ...pending };
+    Reflect.deleteProperty(sanitizedPending, "timestamp");
 
     storePendingTransaction(txId, {
-      ...rest,
+      ...sanitizedPending,
       userId: pendingUserId,
       slippageBps,
       quote,
@@ -4331,17 +4335,13 @@ setupAnchor()
     console.log("Setting up GameCompleted event listener...");
     program.addEventListener(
       "gameCompleted",
-      async (
-        event: GameCompletedEvent,
-        _slot: number,
-        signature?: string
-      ) => {
+      async (event: GameCompletedEvent, slot: number, signature?: string) => {
         try {
           const gameAddress = event.gameKey.toString();
           const winnerAddress = event.winner.toString();
 
           console.log(
-            `🎉 GameCompleted event received for game: ${gameAddress}`
+            `🎉 GameCompleted event received for game: ${gameAddress} (slot ${slot})`
           );
           if (signature) {
             console.log(`🔗 Completion signature: ${signature}`);

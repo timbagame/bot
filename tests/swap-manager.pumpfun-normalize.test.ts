@@ -47,7 +47,6 @@ describe("SwapManager pump.fun amount normalization", () => {
       outputMint: string,
       normalizedAmount: string,
       inputDecimals: number,
-      _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
@@ -93,7 +92,6 @@ describe("SwapManager pump.fun amount normalization", () => {
       outputMint: string,
       normalizedAmount: string,
       inputDecimals: number,
-      _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
@@ -136,7 +134,6 @@ describe("SwapManager pump.fun amount normalization", () => {
       outputMint: string,
       normalizedAmount: string,
       inputDecimals: number,
-      _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
@@ -179,7 +176,6 @@ describe("SwapManager pump.fun amount normalization", () => {
       outputMint: string,
       normalizedAmount: string,
       inputDecimals: number,
-      _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
@@ -222,7 +218,6 @@ describe("SwapManager pump.fun amount normalization", () => {
       outputMint: string,
       normalizedAmount: string,
       inputDecimals: number,
-      _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
@@ -265,7 +260,6 @@ describe("SwapManager pump.fun amount normalization", () => {
       outputMint: string,
       normalizedAmount: string,
       inputDecimals: number,
-      _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
@@ -308,7 +302,6 @@ describe("SwapManager pump.fun amount normalization", () => {
       outputMint: string,
       normalizedAmount: string,
       inputDecimals: number,
-      _outputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
@@ -350,11 +343,11 @@ describe("SwapManager pump.fun amount normalization", () => {
       inputMint: string,
       outputMint: string,
       normalizedAmount: string,
-      _inputDecimals: number,
-      _outputDecimals: number,
+      inputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
+      expect(inputDecimals).toBe(9);
       return {
         inputMint,
         outputMint,
@@ -389,11 +382,11 @@ describe("SwapManager pump.fun amount normalization", () => {
       inputMint: string,
       outputMint: string,
       normalizedAmount: string,
-      _inputDecimals: number,
-      _outputDecimals: number,
+      inputDecimals: number,
       slippageBps: number
     ) => {
       capturedAmount = normalizedAmount;
+      expect(inputDecimals).toBe(9);
       return {
         inputMint,
         outputMint,

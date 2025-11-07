@@ -31,7 +31,6 @@ describe("PumpFunClient quotes (SDK stubbed)", () => {
       pumpMint,
       "0.001",
       9,
-      6,
       100
     );
 
@@ -61,7 +60,6 @@ describe("PumpFunClient quotes (SDK stubbed)", () => {
       "So11111111111111111111111111111111111111112",
       "0.002",
       6,
-      9,
       100
     );
 

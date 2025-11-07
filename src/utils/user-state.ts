@@ -28,7 +28,8 @@ const stripTimestamp = <T>(state?: GenericState): T | undefined => {
     return undefined;
   }
 
-  const { timestamp: _timestamp, ...rest } = state;
+  const rest = { ...state };
+  Reflect.deleteProperty(rest, "timestamp");
   return rest as T;
 };
 
@@ -229,8 +230,10 @@ export const clearInputSessionProcessing = (key: string): void => {
     return;
   }
 
-  const { processing: _processing, processingBy: _processingBy, ...rest } = existing;
-  userStates.set(namespacedKey, rest);
+  const sanitized = { ...existing };
+  Reflect.deleteProperty(sanitized, "processing");
+  Reflect.deleteProperty(sanitized, "processingBy");
+  userStates.set(namespacedKey, sanitized);
 };
 
 const listNamespaceEntries = <T>(namespace: string): Array<[string, T]> => {
