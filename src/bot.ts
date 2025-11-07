@@ -425,10 +425,7 @@ const isTokenSelectionCacheEntry = (
 ): entry is TokenSelectionCacheEntry =>
   Boolean(entry && "targetToken" in entry && "targetTokenAddress" in entry);
 
-type TradeKind = "swap";
-
 type TradeConfirmationParams = {
-  kind: TradeKind;
   payToken: string;
   payDisplay: string;
   payRawAmount: number;
@@ -466,7 +463,6 @@ const formatSlippagePercent = (value: number): string => {
 };
 
 const formatTradeConfirmationSummary = ({
-  kind,
   payToken,
   payDisplay,
   payRawAmount,
@@ -513,7 +509,7 @@ const formatTradeConfirmationSummary = ({
     ? escapeHtml(contractAddress)
     : undefined;
 
-  const heading = kind === "swap" ? "Swap Confirmation" : "Trade Confirmation";
+  const heading = "Swap Confirmation";
 
   const lines = [
     `🔄 <b>${heading}</b>`,
@@ -621,11 +617,10 @@ const renderTradeQuoteError = ({
   };
 };
 
-  type PrepareTradeQuoteParams = {
+type PrepareTradeQuoteParams = {
   ctx: Context;
-  kind: TradeKind;
   spinnerText: string;
-  summaryInput: Omit<TradeConfirmationParams, "quote" | "kind">;
+  summaryInput: Omit<TradeConfirmationParams, "quote">;
   quoteFetcher: () => Promise<SwapQuote>;
   cacheQuote: (txId: string, quote: SwapQuote, summary: TradeConfirmationSummary) => void;
   buildConfirmationKeyboard: (
@@ -639,7 +634,6 @@ const renderTradeQuoteError = ({
 
 const prepareTradeQuote = async ({
   ctx,
-  kind,
   spinnerText,
   summaryInput,
   quoteFetcher,
@@ -657,7 +651,6 @@ const prepareTradeQuote = async ({
   try {
     const quote = await quoteFetcher();
     const summary = formatTradeConfirmationSummary({
-      kind,
       ...summaryInput,
       quote,
     });
@@ -673,7 +666,7 @@ const prepareTradeQuote = async ({
 
     return { txId, quote, summary };
   } catch (error) {
-    console.error(`Error getting ${kind} quote:`, error);
+    console.error("Error getting swap quote:", error);
     await onError(error);
     return null;
   }
@@ -705,7 +698,6 @@ type PrepareTokenTradeQuoteParams = {
   ctx: Context;
   telegramId: bigint;
   amountInput: string;
-  kind: TradeKind;
   inputFactory: (
     context: TradeAssetFactoryContext
   ) => Promise<ResolvedTradeAsset> | ResolvedTradeAsset;
@@ -732,7 +724,7 @@ type PrepareTokenTradeQuoteParams = {
   onError: (error: unknown) => Promise<void> | void;
   summaryExtras?: (
     context: PreparedTradeQuoteContext
-  ) => Partial<Omit<TradeConfirmationParams, "kind" | "quote">>;
+  ) => Partial<Omit<TradeConfirmationParams, "quote">>;
   quoteOptions?: { slippageBps?: number };
   quoteErrorMessage?: string;
 };
@@ -741,7 +733,6 @@ const prepareTokenTradeQuote = async ({
   ctx,
   telegramId,
   amountInput,
-  kind,
   inputFactory,
   outputFactory,
   spinnerText,
@@ -788,7 +779,6 @@ const prepareTokenTradeQuote = async ({
 
   await prepareTradeQuote({
     ctx,
-    kind,
     spinnerText: spinner,
     summaryInput: {
       payToken: inputAsset.ticker,
@@ -3769,7 +3759,6 @@ const showSwapQuoteAndConfirmation = async (
       ctx,
       telegramId: userId,
       amountInput: amount,
-      kind: "swap",
       inputFactory: async ({ tokenBalances }) => {
         const inputMint =
           overrides.fromMint ??
@@ -3934,7 +3923,6 @@ bot.callbackQuery(/^swap_slippage_/, async (ctx) => {
     });
 
     const summary = formatTradeConfirmationSummary({
-      kind: "swap",
       payToken: pending.fromToken ?? quote.inputMint,
       payDisplay: pending.amount ?? "0",
       payRawAmount: Number(amountForQuote ?? 0),
