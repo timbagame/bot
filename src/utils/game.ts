@@ -1374,12 +1374,8 @@ export class GameManager {
             ? "Player is recorded in game"
             : "Player removed from game",
         check: async () => {
-          try {
-            const isInGame = await this.isPlayerInGame(gamePda, playerPubkey);
-            return operationType === "Player join" ? isInGame : !isInGame;
-          } catch {
-            return false;
-          }
+          const isInGame = await this.isPlayerInGame(gamePda, playerPubkey);
+          return operationType === "Player join" ? isInGame : !isInGame;
         },
       });
     }
@@ -1396,16 +1392,17 @@ export class GameManager {
       });
     } catch (error: any) {
       try {
+        const hasCause = (error as any).cause !== undefined;
         if (operationType === "Game creation") {
           const gameAccount = await fetchGameAccountNullable();
-          if (!gameAccount) {
+          if (!gameAccount && !hasCause) {
             (error as any).cause = new Error(
               "Game account not found after timeout (attempted recovery)."
             );
           }
         } else if (operationType === "Game close") {
           const gameAccount = await fetchGameAccountNullable();
-          if (gameAccount) {
+          if (gameAccount && !hasCause) {
             (error as any).cause = new Error(
               "Game account still exists after timeout (attempted recovery)."
             );
@@ -1421,7 +1418,7 @@ export class GameManager {
           ).catch(() => false);
           const violation =
             operationType === "Player join" ? !isInGame : isInGame;
-          if (violation) {
+          if (violation && !hasCause) {
             (error as any).cause = new Error(
               operationType === "Player join"
                 ? "Player not recorded in game after timeout (attempted recovery)."
@@ -1442,7 +1439,8 @@ export class GameManager {
   private async sendInstructionsWithFallback(
     instructions: TransactionInstruction[],
     signers: Keypair[],
-    operationLabel: string
+    operationLabel: string,
+    options?: { skipConfirmation?: boolean }
   ): Promise<string> {
     const walletWithResubmits = (this.wallet as any)
       .sendAndConfirmWithResubmits;
@@ -1456,7 +1454,9 @@ export class GameManager {
       instructions,
       signers
     );
-    await this.wallet.confirmTransaction(signature);
+    if (!options?.skipConfirmation) {
+      await this.wallet.confirmTransaction(signature);
+    }
     return signature;
   }
 
@@ -4014,7 +4014,8 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         return await this.sendInstructionsWithFallback(
           [closeInstruction],
           [creatorKp],
-          `${gameType} close transaction`
+          `${gameType} close transaction`,
+          { skipConfirmation: true }
         );
       };
 
@@ -4187,7 +4188,8 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       return await this.sendInstructionsWithFallback(
         [unjoinInstruction],
         [authorityKp],
-        "Player unjoin transaction"
+        "Player unjoin transaction",
+        { skipConfirmation: true }
       );
     };
 

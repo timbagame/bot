@@ -162,7 +162,7 @@ export const confirmTransactionWithRecovery = async (
     }
 
     if (isTimeout || isExpiration) {
-      const retryPlan = retryDelays.length > 0 ? retryDelays : [0];
+      const retryPlan = retryDelays.length > 0 ? retryDelays : [];
       const recoveryErrors: Error[] = lastRecoveryError
         ? [lastRecoveryError]
         : [];

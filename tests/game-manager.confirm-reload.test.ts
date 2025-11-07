@@ -37,6 +37,11 @@ function setupGameManager({
   gameDb?: any;
 }) {
   resetGM();
+  if (typeof wallet.getConnection !== "function") {
+    wallet.getConnection = () => ({
+      getSignatureStatuses: async () => ({ value: [null] }),
+    });
+  }
   const programStub = program ?? createDefaultProgram();
   const gameDbStub = gameDb ?? createDefaultGameDb();
   const gm = GameManager.getInstance(programStub, wallet, gameDbStub);
@@ -50,8 +55,14 @@ describe("GameManager confirm/reload helpers", () => {
         throw new Error("transaction was not confirmed");
       },
     } as any;
-    const { gm } = setupGameManager({ wallet });
-    (gm as any).isPlayerInGame = async () => true;
+    const participantDb = {
+      ...createDefaultGameDb(),
+      getGameParticipants: () => ["123"],
+      getPlayerTelegramId: (pubkey: string) =>
+        pubkey === DEFAULT_PLAYER_PUBKEY.toBase58() ? "123" : null,
+      getPlayerPublicKey: () => DEFAULT_PLAYER_PUBKEY.toBase58(),
+    };
+    const { gm } = setupGameManager({ wallet, gameDb: participantDb });
     const confirmed = await (gm as any).confirmTransactionWithRecovery(
       "SIG123",
       DEFAULT_GAME_PDA,
@@ -101,8 +112,14 @@ describe("GameManager confirm/reload helpers", () => {
         );
       },
     } as any;
-    const { gm } = setupGameManager({ wallet });
-    (gm as any).isPlayerInGame = async () => true;
+    const participantDb = {
+      ...createDefaultGameDb(),
+      getGameParticipants: () => ["123"],
+      getPlayerTelegramId: (pubkey: string) =>
+        pubkey === DEFAULT_PLAYER_PUBKEY.toBase58() ? "123" : null,
+      getPlayerPublicKey: () => DEFAULT_PLAYER_PUBKEY.toBase58(),
+    };
+    const { gm } = setupGameManager({ wallet, gameDb: participantDb });
     const confirmed = await (gm as any).confirmTransactionWithRecovery(
       "SIG-EXP",
       DEFAULT_GAME_PDA,
@@ -203,7 +220,7 @@ describe("GameManager confirm/reload helpers", () => {
       "Player join",
       DEFAULT_PLAYER_PUBKEY,
       undefined,
-      { retryDelays: [] }
+      { retryDelays: [0] }
     );
 
     expect(confirmed).toBe("SIG-EMPTY-RETRY");
@@ -257,8 +274,13 @@ describe("GameManager confirm/reload helpers", () => {
         }),
       }),
     } as any;
-    const { gm } = setupGameManager({ wallet });
-    (gm as any).isPlayerInGame = async () => true;
+    const participantDb = {
+      ...createDefaultGameDb(),
+      getGameParticipants: () => ["123"],
+      getPlayerTelegramId: () => "123",
+      getPlayerPublicKey: () => DEFAULT_PLAYER_PUBKEY.toBase58(),
+    };
+    const { gm } = setupGameManager({ wallet, gameDb: participantDb });
 
     const [sig1, sig2] = await Promise.all(
       ["SIG_CONC_1", "SIG_CONC_2"].map((signature) =>
@@ -284,8 +306,12 @@ describe("GameManager confirm/reload helpers", () => {
         getSignatureStatuses: async () => ({ value: [null] }),
       }),
     } as any;
-    const { gm } = setupGameManager({ wallet });
-    (gm as any).isPlayerInGame = async () => true;
+    const emptyDb = {
+      ...createDefaultGameDb(),
+      getGameParticipants: () => [],
+      getPlayerTelegramId: () => null,
+    };
+    const { gm } = setupGameManager({ wallet, gameDb: emptyDb });
 
     let attempts = 0;
 
@@ -301,7 +327,8 @@ describe("GameManager confirm/reload helpers", () => {
           attempts += 1;
           const err = new Error(`resubmit attempt ${attempts}`);
           throw err;
-        }
+        },
+        { retryDelays: [] }
       );
       throw new Error("Expected failure");
     } catch (error: any) {
@@ -340,7 +367,10 @@ describe("GameManager confirm/reload helpers", () => {
       await (gm as any).confirmTransactionWithRecovery(
         signature,
         DEFAULT_GAME_PDA,
-        "Game creation"
+        "Game creation",
+        undefined,
+        undefined,
+        { retryDelays: [] }
       );
       throw new Error("Expected transaction confirmation to fail");
     } catch (error: any) {
