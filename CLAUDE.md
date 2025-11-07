@@ -65,7 +65,7 @@ This is a Telegram bot for creating and playing coinflip and giveaway games on S
 
 - `TELEGRAM_TOKEN` - Bot token from BotFather
 - `MNEMONIC` - Wallet seed phrase for Solana operations
-- `SOLANA_NETWORK` - Solana RPC endpoint (defaults to mainnet-beta)
+- `SOLANA_NETWORK` - Ordered list of Solana RPC endpoints (JSON array or comma list) used for automatic fallback (defaults to mainnet-beta when unset)
 - `ORACLE_API_URL` - Oracle service endpoint
 - `DEFAULT_TOKEN_MINT` / `DEFAULT_TOKEN_TICKER` - Optional overrides for the default staking token
 

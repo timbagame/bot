@@ -44,6 +44,14 @@ test("getCurrentNetwork reads from environment", () => {
   process.env.SOLANA_NETWORK = original;
 });
 
+test("getCurrentNetwork reads from array-style environment", () => {
+  const original = process.env.SOLANA_NETWORK;
+  process.env.SOLANA_NETWORK =
+    '["https://api.devnet.solana.com","https://api.mainnet-beta.solana.com"]';
+  expect(NetworkDetector.getCurrentNetwork()).toBe("devnet");
+  process.env.SOLANA_NETWORK = original;
+});
+
 test("getDisplayNameFromRpc falls back to current network when rpc missing", () => {
   const original = process.env.SOLANA_NETWORK;
 

@@ -67,6 +67,10 @@ import { SwapManager } from "./swap-manager";
 import { confirmTransactionWithRecovery, type TransactionProbe } from "./transaction-runner";
 import { createExpiringCache } from "./expiring-cache";
 import { refreshDynamicFeeBudgets } from "./fee-budget-refresh";
+import {
+  DEFAULT_MAINNET_ENDPOINT,
+  resolvePrimaryRpcEndpoint,
+} from "./rpc-endpoints";
 
 const resolveGameVideoId = (gameType: string): string | undefined => {
   const lower = gameType.toLowerCase();
@@ -410,7 +414,10 @@ export class GameManager {
           ? maybeGetConnection.call(wallet)
           : (wallet as any).connection ??
             new Connection(
-              process.env.SOLANA_NETWORK || "https://api.mainnet-beta.solana.com",
+              resolvePrimaryRpcEndpoint(
+                process.env.SOLANA_NETWORK,
+                DEFAULT_MAINNET_ENDPOINT
+              ),
               "confirmed"
             );
       const feeBudget = FeeBudgetManager.getInstance(connection);

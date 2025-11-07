@@ -50,6 +50,11 @@ import {
 } from "./token-programs";
 import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
 import { TokenDatabase } from "./token-database";
+import {
+  DEFAULT_MAINNET_ENDPOINT,
+  RpcEndpointManager,
+  parseRpcEndpointList,
+} from "./rpc-endpoints";
 
 // Lightweight dependency handles for testability
 type HttpFetch = (input: string, init?: any) => Promise<{
@@ -133,6 +138,7 @@ export class WalletManager {
   private static instance: WalletManager;
   private mnemonic: string;
   private connection: Connection;
+  private rpcEndpointManager?: RpcEndpointManager;
   private fetchFn: HttpFetch;
   private timeNow?: () => number;
   private tokenMetadataResolver?: (
@@ -280,8 +286,19 @@ export class WalletManager {
 
   private constructor(mnemonic: string, deps?: WalletDeps) {
     this.mnemonic = mnemonic;
-    this.connection =
-      deps?.connection ?? new Connection(process.env.SOLANA_NETWORK!, "confirmed");
+
+    if (deps?.connection) {
+      this.connection = deps.connection;
+    } else {
+      const endpoints = parseRpcEndpointList(process.env.SOLANA_NETWORK, {
+        fallback: DEFAULT_MAINNET_ENDPOINT,
+      });
+      this.rpcEndpointManager = new RpcEndpointManager(endpoints, {
+        commitment: "confirmed",
+        logger: console,
+      });
+      this.connection = this.rpcEndpointManager.getConnection();
+    }
     this.fetchFn = deps?.fetch ?? (globalThis.fetch as any);
     this.timeNow = deps?.timeNow;
     this.tokenMetadataResolver = deps?.tokenMetadataResolver;

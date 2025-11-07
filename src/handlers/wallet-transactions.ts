@@ -40,6 +40,10 @@ import { escapeHtml } from "../utils/format-amount";
 import { formatUserFriendlyError } from "../utils/errors";
 import { buildTransactionLinkMessage, NetworkDetector } from "../utils/network-detector";
 import {
+  DEFAULT_MAINNET_ENDPOINT,
+  resolvePrimaryRpcEndpoint,
+} from "../utils/rpc-endpoints";
+import {
   storePendingTransaction,
   getPendingTransaction,
   type InputSessionState,
@@ -190,7 +194,10 @@ const buildSolscanSuccessMessage = ({
   const { message, previewDisabled, solscanUrl } =
     buildTransactionLinkMessage({
       signature,
-      networkOverride: process.env["SOLANA_NETWORK"],
+      networkOverride: resolvePrimaryRpcEndpoint(
+        process.env["SOLANA_NETWORK"],
+        DEFAULT_MAINNET_ENDPOINT
+      ),
       linkText,
       format: "html",
       fallbackToSignature: false,

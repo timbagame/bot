@@ -22,7 +22,7 @@ Populate `.env` with production values:
 ```bash
 TELEGRAM_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxx
 MNEMONIC="word1 word2 ... word24"
-SOLANA_NETWORK=https://api.mainnet-beta.solana.com
+SOLANA_NETWORK=["https://api.mainnet-beta.solana.com","https://rpc-backup.example.com"]
 ORACLE_API_URL=https://oracle.example.com
 # Optional overrides if default detection is insufficient
 # DEFAULT_TOKEN_MINT=F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump
@@ -31,6 +31,8 @@ ORACLE_API_URL=https://oracle.example.com
 # ORACLE_OPERATOR_KEYPAIR_PATH=/path/to/oracle-operator.json
 # NEW_ORACLE_OPERATOR_KEYPAIR_PATH=/path/to/new-operator.json
 ```
+
+`SOLANA_NETWORK` accepts either a JSON array (as shown) or a comma-separated string; the bot will cycle through the list automatically when it encounters transient RPC failures.
 
 Place `admin-keypair.json` (bot authority) in the project root. Fund it with enough SOL to cover gameplay and swap fees.
 
