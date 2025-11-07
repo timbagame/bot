@@ -16,7 +16,7 @@ describe("renderSendSuccessMessage", () => {
     expect(text).toContain(
       "To: <code>addr&lt;script&gt;alert(1)&lt;/script&gt;</code>"
     );
-    expect(text).toContain("View on Solscan");
+    expect(text).toContain("🔗 View transaction");
     expect(disablePreview).toBe(true);
   });
 });

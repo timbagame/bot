@@ -1863,14 +1863,8 @@ const validateAndProcessTransaction = async (
       console.log(`🔗 Solscan link requested. txString: "${txString}", length: ${txString?.length || 0}`);
     }
 
-    let successMessage: string;
-    if (overrideMessage) {
-      successMessage = overrideMessage;
-    } else {
-      successMessage = txString
-        ? `${description} successful! 💸\n\n<code>${txString}</code>`
-        : `${description} successful! 💸`;
-    }
+    const baseMessage = `${description} successful! 💸`;
+    let successMessage = overrideMessage ?? baseMessage;
 
     let disablePreview = false;
     // Add Solscan link if requested and we have a transaction signature
@@ -1878,7 +1872,7 @@ const validateAndProcessTransaction = async (
       const { message: linkMessage, solscanUrl } = buildTransactionLinkMessage({
         signature: txString,
         networkOverride: process.env["RPC_URL"],
-        linkText: "View in Blockchain",
+        linkText: "🔗 View transaction",
         format: "html",
       });
 
@@ -2273,10 +2267,11 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
           );
 
           const message =
-            `<b>Withdrawal completed</b> 💸\n\nSent ${totalText} SOL\n\n<code>${result.signature}</code>`;
+            `<b>Withdrawal completed</b> 💸\n\nSent ${totalText} SOL`;
 
           return { signature: result.signature, message };
-        }
+        },
+        true
       );
     } catch (error: any) {
       await handleCommandError(ctx, error, "withdraw");
@@ -2321,7 +2316,8 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
             parsedAmount.tokenMint
           );
         }
-      }
+      },
+      true
     );
   } catch (error: any) {
     await handleCommandError(ctx, error, "withdraw");
@@ -2525,8 +2521,7 @@ bot.command("unwrap", async (ctx: Context) => {
         const { message: linkLine } = buildTransactionLinkMessage({
           signature,
           networkOverride: process.env["RPC_URL"],
-          label: "🔗 ",
-          linkText: "View on Solscan",
+          linkText: "🔗 View transaction",
           format: "html",
         });
         const linkSuffix = linkLine ? `\n\n${linkLine}` : "";
@@ -3168,8 +3163,8 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
         const { message: pumpLink } = buildTransactionLinkMessage({
           signature: pumpFunSignature,
           networkOverride: process.env["RPC_URL"],
-          label: "🔗 Pump.fun: ",
-          linkText: "View leg",
+          label: "Pump.fun: ",
+          linkText: "🔗 View transaction",
           format: "html",
         });
         if (pumpLink) {
@@ -3180,8 +3175,8 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
       const { message: jupiterLink } = buildTransactionLinkMessage({
         signature: txSignature,
         networkOverride: process.env["RPC_URL"],
-        label: pumpFunSignature ? "🔗 Jupiter: " : "🔗 ",
-        linkText: pumpFunSignature ? "View leg" : "View on Solscan",
+        label: pumpFunSignature ? "Jupiter: " : "",
+        linkText: "🔗 View transaction",
         format: "html",
       });
       if (jupiterLink) {

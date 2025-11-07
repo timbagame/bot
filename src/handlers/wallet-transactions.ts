@@ -171,7 +171,7 @@ const buildSolscanSuccessMessage = ({
   title,
   bodyLines,
   signature,
-  linkText = "View on Solscan",
+  linkText = "🔗 View transaction",
 }: {
   title: string;
   bodyLines: string[];
@@ -187,19 +187,14 @@ const buildSolscanSuccessMessage = ({
     lines.push("", ...normalizedBody);
   }
 
-  const {
-    message,
-    previewDisabled,
-    solscanUrl,
-    displaySignature,
-  } = buildTransactionLinkMessage({
-    signature,
-    networkOverride: process.env["SOLANA_NETWORK"],
-    label: "🔗 ",
-    linkText,
-    format: "html",
-    fallbackToSignature: true,
-  });
+  const { message, previewDisabled, solscanUrl } =
+    buildTransactionLinkMessage({
+      signature,
+      networkOverride: process.env["SOLANA_NETWORK"],
+      linkText,
+      format: "html",
+      fallbackToSignature: false,
+    });
 
   let finalMessage = message;
   let disablePreview = previewDisabled;
@@ -207,10 +202,8 @@ const buildSolscanSuccessMessage = ({
   if (!solscanUrl && signature) {
     const fallbackUrl = NetworkDetector.buildSolscanTxUrl(signature, "mainnet");
     if (fallbackUrl) {
-      finalMessage = `🔗 <a href="${fallbackUrl}">${linkText}</a>`;
+      finalMessage = `<a href="${fallbackUrl}">${linkText}</a>`;
       disablePreview = true;
-    } else if (!finalMessage && displaySignature) {
-      finalMessage = `🔗 ${escapeHtml(displaySignature)}`;
     }
   }
 
@@ -292,7 +285,7 @@ const renderSendSuccessMessage = ({
       `To: <code>${safeAddress}</code>`,
     ],
     signature,
-    linkText: "View on Solscan",
+    linkText: "🔗 View transaction",
   });
 };
 
