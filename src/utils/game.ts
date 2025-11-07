@@ -1938,7 +1938,7 @@ export class GameManager {
     const solscanUrl = NetworkDetector.buildSolscanTxUrl(winnerSignature);
     const safeWinner = escapeHtml(winnerUsername);
     const linkLine = solscanUrl
-      ? `\n\n🔗 <a href="${solscanUrl}">View transaction</a>`
+      ? `\n\n<a href="${solscanUrl}">🔗 View transaction</a>`
       : "";
     return `\n\nWinner: ${safeWinner}${linkLine}`;
   }
