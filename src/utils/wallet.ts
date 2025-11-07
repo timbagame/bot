@@ -54,6 +54,7 @@ import {
   DEFAULT_MAINNET_ENDPOINT,
   RpcEndpointManager,
   parseRpcEndpointList,
+  type ActiveEndpointChange,
 } from "./rpc-endpoints";
 
 // Lightweight dependency handles for testability
@@ -504,6 +505,19 @@ export class WalletManager {
 
   public getConnection(): Connection {
     return this.connection;
+  }
+
+  public onRpcEndpointChange(
+    listener: (change: ActiveEndpointChange) => void | Promise<void>
+  ): () => void {
+    if (!this.rpcEndpointManager) {
+      console.warn(
+        "RPC endpoint manager is not available; listener registration ignored."
+      );
+      return () => {};
+    }
+
+    return this.rpcEndpointManager.onActiveEndpointChange(listener);
   }
 
   // ================================

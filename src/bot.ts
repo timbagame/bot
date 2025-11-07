@@ -845,6 +845,11 @@ export let program: anchor.Program<Timba>;
 const tokenDb = TokenDatabase.getInstance();
 let tokenManager: TokenManager;
 let swapManager: SwapManager;
+let gameCompletedListenerId: number | null = null;
+let playerJoinedListenerId: number | null = null;
+let playerUnjoinedListenerId: number | null = null;
+let rpcEndpointListenerCleanup: (() => void) | null = null;
+let programEventListenersReady = false;
 
 export const __test_setProgram = (
   nextProgram: anchor.Program<Timba> | undefined
@@ -1349,6 +1354,152 @@ export const __test_isCompletionJobActive = (gameAddress: string): boolean => {
   return inFlightCompletionJobs.has(gameAddress);
 };
 export const __test_resetCompletionJobs = () => inFlightCompletionJobs.clear();
+
+const handleGameCompletedAnchorEvent = async (
+  event: GameCompletedEvent,
+  slot: number,
+  signature?: string
+): Promise<void> => {
+  try {
+    const gameAddress = event.gameKey.toString();
+    const winnerAddress = event.winner.toString();
+
+    console.log(
+      `🎉 GameCompleted event received for game: ${gameAddress} (slot ${slot})`
+    );
+    if (signature) {
+      console.log(`🔗 Completion signature: ${signature}`);
+    }
+
+    const totalPot = Number(event.winnerAmount);
+    const processed = await runProcessGameCompletion(
+      gameAddress,
+      winnerAddress,
+      totalPot,
+      signature
+    );
+
+    if (processed) {
+      console.log(
+        `✅ Successfully processed GameCompleted event for game ${gameAddress}`
+      );
+    }
+  } catch (error) {
+    console.error("Error processing GameCompleted event:", error);
+  }
+};
+
+const handlePlayerJoinedAnchorEvent = async (
+  event: PlayerJoinedEvent
+): Promise<void> => {
+  await handlePlayerEvent(event, "PlayerJoined", "👤", "joined");
+};
+
+const handlePlayerUnjoinedAnchorEvent = async (
+  event: PlayerUnjoinedEvent
+): Promise<void> => {
+  await handlePlayerEvent(event, "PlayerUnjoined", "👤", "left");
+};
+
+const unregisterProgramEventListeners = async (): Promise<void> => {
+  if (!program) {
+    return;
+  }
+
+  const listeners: Array<{ id: number | null; label: string }> = [
+    { id: gameCompletedListenerId, label: "GameCompleted" },
+    { id: playerJoinedListenerId, label: "PlayerJoined" },
+    { id: playerUnjoinedListenerId, label: "PlayerUnjoined" },
+  ];
+
+  await Promise.all(
+    listeners.map(async ({ id, label }) => {
+      if (id === null) {
+        return;
+      }
+      try {
+        await program.removeEventListener(id);
+        console.log(`🔌 Removed ${label} event listener`);
+      } catch (error) {
+        console.warn(
+          `⚠️ Failed to remove ${label} event listener (id=${id}):`,
+          error
+        );
+      }
+    })
+  );
+
+  gameCompletedListenerId = null;
+  playerJoinedListenerId = null;
+  playerUnjoinedListenerId = null;
+  programEventListenersReady = false;
+};
+
+const registerProgramEventListeners = async (): Promise<void> => {
+  if (!program) {
+    return;
+  }
+
+  await unregisterProgramEventListeners();
+
+  console.log("Setting up GameCompleted event listener...");
+  gameCompletedListenerId = await program.addEventListener(
+    "gameCompleted",
+    handleGameCompletedAnchorEvent
+  );
+  console.log("GameCompleted event listener set up successfully");
+
+  console.log("Setting up PlayerJoined event listener...");
+  playerJoinedListenerId = await program.addEventListener(
+    "playerJoined",
+    handlePlayerJoinedAnchorEvent
+  );
+
+  console.log("Setting up PlayerUnjoined event listener...");
+  playerUnjoinedListenerId = await program.addEventListener(
+    "playerUnjoined",
+    handlePlayerUnjoinedAnchorEvent
+  );
+  console.log("Player event listeners set up successfully");
+
+  programEventListenersReady = true;
+};
+
+const attachRpcEndpointFailoverHandler = (): void => {
+  rpcEndpointListenerCleanup?.();
+  try {
+    rpcEndpointListenerCleanup = wallet.onRpcEndpointChange(
+      ({ endpoint, previousEndpoint }) => {
+        if (!programEventListenersReady || !program) {
+          return;
+        }
+
+        console.warn(
+          `RPC endpoint changed from ${previousEndpoint} to ${endpoint}; restarting program event listeners.`
+        );
+
+        const restart = async () => {
+          try {
+            await registerProgramEventListeners();
+            console.log(`🔁 Re-subscribed event listeners on ${endpoint}`);
+          } catch (error) {
+            console.error(
+              `❌ Failed to restart program event listeners after switching to ${endpoint}:`,
+              error
+            );
+          }
+        };
+
+        void restart();
+      }
+    );
+  } catch (error) {
+    console.warn(
+      "⚠️ Unable to attach RPC endpoint failover handler:",
+      error
+    );
+  }
+};
 
 const COMPLETION_SIGNATURE_LOOKBACK = 25;
 
@@ -4307,63 +4458,8 @@ setupAnchor()
     console.log(`Reloaded game message mappings from database`);
 
 
-    // Set up global event listener for GameCompleted events
-    console.log("Setting up GameCompleted event listener...");
-    program.addEventListener(
-      "gameCompleted",
-      async (event: GameCompletedEvent, slot: number, signature?: string) => {
-        try {
-          const gameAddress = event.gameKey.toString();
-          const winnerAddress = event.winner.toString();
-
-          console.log(
-            `🎉 GameCompleted event received for game: ${gameAddress} (slot ${slot})`
-          );
-          if (signature) {
-            console.log(`🔗 Completion signature: ${signature}`);
-          }
-
-          // Process game completion with total pot from event
-          const totalPot = Number(event.winnerAmount);
-          const processed = await runProcessGameCompletion(
-            gameAddress,
-            winnerAddress,
-            totalPot,
-            signature
-          );
-
-          if (processed) {
-            console.log(
-              `✅ Successfully processed GameCompleted event for game ${gameAddress}`
-            );
-          }
-        } catch (error) {
-          console.error("Error processing GameCompleted event:", error);
-        }
-      }
-    );
-
-    console.log("GameCompleted event listener set up successfully");
-
-    // Set up PlayerJoined event listener to track lastSlot for winner calculation
-    console.log("Setting up PlayerJoined event listener...");
-    program.addEventListener(
-      "playerJoined",
-      async (event: PlayerJoinedEvent) => {
-        await handlePlayerEvent(event, "PlayerJoined", "👤", "joined");
-      }
-    );
-
-    // Set up PlayerUnjoined event listener to track lastSlot for winner calculation
-    console.log("Setting up PlayerUnjoined event listener...");
-    program.addEventListener(
-      "playerUnjoined",
-      async (event: PlayerUnjoinedEvent) => {
-        await handlePlayerEvent(event, "PlayerUnjoined", "👤", "left");
-      }
-    );
-
-    console.log("Player event listeners set up successfully");
+    await registerProgramEventListeners();
+    attachRpcEndpointFailoverHandler();
 
     /**
      * Process expired game with cancellation
@@ -4533,6 +4629,9 @@ setupAnchor()
     const shutdown = async (signal: string) => {
       console.log(`\n🛑 Received ${signal}, shutting down gracefully...`);
       try {
+        rpcEndpointListenerCleanup?.();
+        rpcEndpointListenerCleanup = null;
+        await unregisterProgramEventListeners();
         await handle?.stop();
         console.log("✅ Bot stopped successfully");
         process.exit(0);
