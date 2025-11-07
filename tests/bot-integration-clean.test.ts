@@ -28,7 +28,8 @@ describe("Bot Integration Tests", () => {
     };
 
     // Initialize components
-    wallet = WalletManager.getInstance(process.env.MNEMONIC!, {
+    WalletManager.resetForTest();
+    wallet = WalletManager.createForTest(process.env.MNEMONIC!, {
       tokenMetadataResolver: (mint) => {
         const decimals = decimalsMap[mint];
         return typeof decimals === "number" ? { decimals } : null;
@@ -44,7 +45,7 @@ describe("Bot Integration Tests", () => {
   });
 
   afterAll(async () => {
-    // Cleanup
+    WalletManager.resetForTest();
   });
 
   describe("Database Integration", () => {

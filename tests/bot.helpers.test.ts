@@ -454,7 +454,7 @@ describe("Bot helper utilities", () => {
     expect(hugeResult).toBeNull();
   });
 
-  test("validateAndProcessTransaction allows SOL + WSOL withdraw-all flow", async () => {
+  test("validateAndProcessTransaction requires native SOL for withdraw-all flow", async () => {
     const original = {
       getKeyPair: botModule.wallet.getKeyPair,
       getTokenBalance: botModule.wallet.getTokenBalance,
@@ -512,9 +512,11 @@ describe("Bot helper utilities", () => {
         }
       );
 
-      expect(replies.some((msg) => msg.includes("unwrap WSOL"))).toBe(false);
-      expect(transactionCalls).toBe(1);
-      expect(edits.join(" ")).toContain("sig-123");
+      expect(replies).toHaveLength(1);
+      expect(replies[0]).toContain("Insufficient balance");
+      expect(replies[0]).not.toContain("unwrap WSOL");
+      expect(transactionCalls).toBe(0);
+      expect(edits).toHaveLength(0);
     } finally {
       botModule.wallet.getKeyPair = original.getKeyPair;
       botModule.wallet.getTokenBalance = original.getTokenBalance;

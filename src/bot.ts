@@ -1764,26 +1764,20 @@ export const __test_shouldSkipGenericGameCallback =
 
 const getPlayerData = async (
   telegramId: bigint,
-  tokenMint?: string,
-  options: { includeWsol?: boolean } = {}
+  tokenMint?: string
 ): Promise<PlayerData> => {
   const keypair = wallet.getKeyPair(telegramId);
   const effectiveTokenMint = tokenMint || DEFAULT_TOKEN_MINT;
-  const includeWsol = options.includeWsol === true;
 
   const balancePromises: Array<Promise<number>> = [
     wallet.getTokenBalance(telegramId, effectiveTokenMint),
     wallet.getBalance(telegramId),
   ];
 
-  if (includeWsol) {
-    balancePromises.push(wallet.getTokenBalance(telegramId, WSOL_MINT));
-  }
-
   const results = await Promise.all(balancePromises);
   const tokenBalance = results[0]!;
   const solBalance = results[1]!;
-  const wsolBalance = includeWsol ? results[2]! : 0;
+  const wsolBalance = 0;
 
   // Funds are handled per-game; no separate aggregate player balance account
   const gameBalance = 0;
@@ -1820,20 +1814,16 @@ const validateAndProcessTransaction = async (
   ) => Promise<string | { signature: string; message?: string }>,
   showSolscanLink: boolean = false
 ): Promise<void> => {
-  const playerData = await getPlayerData(telegramId, undefined, {
-    includeWsol: isSol,
-  });
+  const playerData = await getPlayerData(telegramId, undefined);
   const metadata = await getDefaultTokenMetadata();
 
   // Validate balance
   const totalBalance = isSol
-    ? playerData.solBalance + playerData.wsolBalance
+    ? playerData.solBalance
     : playerData.tokenBalance + playerData.gameBalance;
   if (totalBalance < amount) {
     const balanceStr = isSol
-      ? `${wallet.formatSolBalance(
-          playerData.solBalance + playerData.wsolBalance
-        )} SOL`
+      ? `${wallet.formatSolBalance(playerData.solBalance)} SOL`
       : `${wallet.formatTokenBalance(
           totalBalance,
           metadata.decimals
@@ -1847,21 +1837,6 @@ const validateAndProcessTransaction = async (
 
     await ctx.reply(
       `Insufficient balance. You have ${balanceStr} but need ${needStr}`,
-      {
-        reply_to_message_id: ctx.message?.message_id,
-      }
-    );
-    return;
-  }
-
-  if (
-    isSol &&
-    playerData.solBalance < amount &&
-    totalBalance >= amount &&
-    amount < totalBalance
-  ) {
-    await ctx.reply(
-      "You have enough WSOL to cover this amount. Use `/withdraw ADDRESS all` to withdraw everything at once, or unwrap WSOL with /unwrap before sending a partial SOL amount.",
       {
         reply_to_message_id: ctx.message?.message_id,
       }
@@ -2279,23 +2254,19 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
     }
 
     try {
-      const [nativeLamports, wsolLamports] = await Promise.all([
-        wallet.getBalance(telegramId),
-        wallet.getTokenBalance(telegramId, WSOL_MINT),
-      ]);
-      const totalLamports = nativeLamports + wsolLamports;
+      const nativeLamports = await wallet.getBalance(telegramId);
 
-      if (totalLamports <= 0) {
+      if (nativeLamports <= 0) {
         return replyToMessage(
           ctx,
-          "Your wallet has no SOL or WSOL available to withdraw."
+          "Your wallet has no SOL available to withdraw."
         );
       }
 
       await validateAndProcessTransaction(
         ctx,
         telegramId,
-        totalLamports,
+        nativeLamports,
         true,
         "SOL withdrawal",
         async () => {
@@ -2307,21 +2278,9 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
           const totalText = wallet.formatSolBalance(
             result.totalLamportsSent
           );
-          const nativeText =
-            result.nativeLamportsSent > 0
-              ? `\n• Native SOL: ${wallet.formatSolBalance(
-                  result.nativeLamportsSent
-                )} SOL`
-              : "";
-          const wsolText =
-            result.wsolLamportsSent > 0
-              ? `\n• WSOL (auto-unwrapped): ${wallet.formatSolBalance(
-                  result.wsolLamportsSent
-                )} SOL`
-              : "";
 
           const message =
-            `<b>Withdrawal completed</b> 💸\n\nSent ${totalText} SOL${nativeText}${wsolText}\n\n<code>${result.signature}</code>`;
+            `<b>Withdrawal completed</b> 💸\n\nSent ${totalText} SOL\n\n<code>${result.signature}</code>`;
 
           return { signature: result.signature, message };
         }

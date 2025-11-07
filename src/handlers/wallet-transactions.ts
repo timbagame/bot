@@ -6,7 +6,6 @@ import {
   type PendingSendTransaction,
 } from "../bot/flows/sol-conversion";
 import {
-  LAMPORTS_PER_SOL,
   MIN_SOL_FOR_TX,
   WSOL_MINT,
   INPUT_TIMEOUT_HINT,
@@ -268,6 +267,32 @@ const renderSolConversionSuccess = ({
     title,
     bodyLines: [body],
     signature,
+  });
+};
+
+const renderSendSuccessMessage = ({
+  formattedAmount,
+  token,
+  address,
+  signature,
+}: {
+  formattedAmount: string | undefined;
+  token: string | undefined;
+  address: string | undefined;
+  signature: string;
+}): { text: string; disablePreview: boolean } => {
+  const safeAmount = escapeHtml(formattedAmount ?? "");
+  const safeToken = escapeHtml(token ?? "");
+  const safeAddress = escapeHtml(address ?? "");
+
+  return buildSolscanSuccessMessage({
+    title: "✅ <b>Transaction Completed</b>",
+    bodyLines: [
+      `Sent ${safeAmount} ${safeToken}`,
+      `To: <code>${safeAddress}</code>`,
+    ],
+    signature,
+    linkText: "View on Solscan",
   });
 };
 
@@ -1165,7 +1190,10 @@ export const createWalletTransactionsModule = (
             | null = null;
 
           if (transaction.token === "SOL") {
-            const balanceLamports = await wallet.getBalance(telegramId);
+            const balanceLamports = await wallet.getBalance(telegramId, {
+              forceFresh: true,
+              allowStaleOnError: true,
+            });
             if (transaction.amount === "max") {
               withdrawAllResult = await wallet.withdrawAllSol(
                 telegramId,
@@ -1191,12 +1219,10 @@ export const createWalletTransactionsModule = (
               }
               formattedAmount = transaction.amount;
 
-              const solAmount = lamportsToSend / LAMPORTS_PER_SOL;
-
               txSignature = await wallet.transferSol(
                 telegramId,
                 toPublicKey,
-                solAmount
+                lamportsToSend
               );
             }
           } else {
@@ -1250,66 +1276,18 @@ export const createWalletTransactionsModule = (
           await wallet.confirmTransaction(txSignature);
           clearWalletCache(telegramId);
 
-          const { message: viewLine } = buildTransactionLinkMessage({
-            signature: txSignature,
-            networkOverride: process.env["RPC_URL"],
-            label: "🔗 ",
-            linkText: "View on Solscan",
-            format: "html",
-          });
-
-          const successMessage = (() => {
-            if (
-              withdrawAllResult &&
-              transaction.token === "SOL" &&
-              transaction.amount === "max"
-            ) {
-              const details: string[] = [
-                `✅ <b>Transaction Completed</b>`,
-                "",
-                `Sent ${formattedAmount} SOL`,
-              ];
-
-              if (withdrawAllResult.nativeLamportsSent > 0) {
-                details.push(
-                  `• Native SOL: ${wallet.formatSolBalance(
-                    withdrawAllResult.nativeLamportsSent
-                  )} SOL`
-                );
-              }
-
-              if (withdrawAllResult.wsolLamportsSent > 0) {
-                details.push(
-                  `• WSOL (unwrapped): ${wallet.formatSolBalance(
-                    withdrawAllResult.wsolLamportsSent
-                  )} SOL`
-                );
-              }
-
-              details.push(
-                "",
-                `To: <code>${escapeHtml(transaction.address ?? "")}</code>`,
-                ""
-              );
-
-              if (viewLine) {
-                details.push(viewLine);
-              }
-
-              return details.join("\n");
-            }
-
-            const baseMessage = `✅ <b>Transaction Completed</b>\n\nSent ${escapeHtml(
-              formattedAmount
-            )} ${escapeHtml(transaction.token ?? "")}\nTo: <code>${escapeHtml(
-              transaction.address ?? ""
-            )}</code>`;
-            return viewLine ? `${baseMessage}\n\n${viewLine}` : baseMessage;
-          })();
+          const { text: successMessage, disablePreview } =
+            renderSendSuccessMessage({
+              formattedAmount,
+              token: transaction.token,
+              address: transaction.address,
+              signature: txSignature,
+            });
 
           await respondWithMenu(ctx, {
             text: successMessage,
             keyboard: createBackToWalletKeyboard(),
+            disableLinkPreview: disablePreview,
           });
           await safeAnswerCallbackQuery(ctx, "✅ Transaction submitted");
         } catch (txError) {
@@ -1345,3 +1323,5 @@ export const createWalletTransactionsModule = (
     buildSolscanSuccessMessage,
   };
 };
+
+export const __test_renderSendSuccessMessage = renderSendSuccessMessage;

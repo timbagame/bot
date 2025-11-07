@@ -2,6 +2,7 @@ import { describe, test, expect } from "bun:test";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { WalletManager } from "../src/utils/wallet";
+import { LAMPORTS_PER_SOL } from "../src/utils/constants";
 
 const MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
@@ -65,7 +66,11 @@ describe("WalletManager confirmTransaction and sendTransaction", () => {
     });
     // Stub sendTransaction directly to avoid building a real tx
     (wm as any).sendTransaction = async () => "ABCDEF12";
-    const sig = await wm.transferSol(1n, Keypair.generate().publicKey, 0.5);
+    const sig = await wm.transferSol(
+      1n,
+      Keypair.generate().publicKey,
+      LAMPORTS_PER_SOL / 2
+    );
     expect(sig).toBe("ABCDEF12");
   });
 

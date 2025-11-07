@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { Buffer } from "buffer";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { WalletManager } from "../src/utils/wallet";
 
@@ -107,4 +108,94 @@ test("wrapSol rejects non-positive amounts", async () => {
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
   );
   await expect(wm.wrapSol(1n, 0)).rejects.toThrow(/greater than zero/);
+});
+
+test("transferSol preserves lamports for dust transfers", async () => {
+  const connection: any = {
+    getLatestBlockhash: async () => ({ blockhash: "BH", lastValidBlockHeight: 1 }),
+    sendTransaction: async () => "SIG1",
+  };
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  const instructions: any[][] = [];
+  (wm as any).sendTransaction = async (ixs: any[]) => {
+    instructions.push(ixs);
+    return "SIG_DUST";
+  };
+
+  const destination = Keypair.generate().publicKey;
+  const sig = await wm.transferSol(1n, destination, 1);
+
+  expect(sig).toBe("SIG_DUST");
+  const dataBuffer: Buffer = instructions[0]![0]!.data as Buffer;
+  const lamports = Number(dataBuffer.readBigUInt64LE(4));
+  expect(lamports).toBe(1);
+});
+
+test("withdrawAllSol aborts when fees exceed balance", async () => {
+  let balanceCalls = 0;
+  const connection: any = {
+    getBalance: async () => {
+      balanceCalls += 1;
+      return 1000;
+    },
+  };
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  (wm as any).estimateFee = async () => 2000;
+
+  let sendCalled = false;
+  (wm as any).sendTransaction = async () => {
+    sendCalled = true;
+    return "UNREACHABLE";
+  };
+
+  await expect(
+    wm.withdrawAllSol(1n, Keypair.generate().publicKey)
+  ).rejects.toThrow(/Not enough SOL to cover the transaction fee/);
+
+  expect(balanceCalls).toBe(1);
+  expect(sendCalled).toBe(false);
+});
+
+test("withdrawAllSol refreshes balance instead of using stale cache", async () => {
+  let balanceCalls = 0;
+  const connection: any = {
+    getBalance: async () => {
+      balanceCalls += 1;
+      return 1_000_000;
+    },
+  };
+
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  const telegramId = 1n;
+  wm.setCachedNativeBalance(telegramId, 5_000_000);
+
+  (wm as any).estimateFee = async () => 5_000;
+
+  const lamportTransfers: number[] = [];
+  (wm as any).sendTransaction = async (ixs: any[]) => {
+    const instruction = ixs[0]!;
+    const lamports = Number((instruction.data as Buffer).readBigUInt64LE(4));
+    lamportTransfers.push(lamports);
+    return "WITHDRAW_SIG";
+  };
+
+  const destination = Keypair.generate().publicKey;
+  const result = await wm.withdrawAllSol(telegramId, destination);
+
+  expect(balanceCalls).toBe(1);
+  expect(result.nativeLamportsSent).toBe(995_000);
+  expect(result.totalLamportsSent).toBe(995_000);
+  expect(lamportTransfers[0]).toBe(995_000);
 });
