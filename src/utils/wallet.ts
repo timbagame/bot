@@ -48,7 +48,6 @@ import {
   detectTokenProgram,
   type TokenProgramDetection,
 } from "./token-programs";
-import { FeeBudgetManager } from "./fee-budget";
 import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
 import { TokenDatabase } from "./token-database";
 
@@ -141,7 +140,6 @@ export class WalletManager {
   ) => Promise<{ decimals: number } | null> | { decimals: number } | null;
   private adminKeypair: Keypair | null = null;
   private lastCallTime: number = 0;
-  private feeBudgetManager: FeeBudgetManager | null = null;
   private tokenDb: TokenDatabase;
 
   // Simplified caching
@@ -152,7 +150,6 @@ export class WalletManager {
     lastValidBlockHeight: number;
     timestamp: number;
   } | null = null;
-  private rentExemptMinimumLamports: number | null = null;
   private pendingSignatures = new Map<
     string,
     { blockhash: string; lastValidBlockHeight: number; recordedAt: number }
@@ -378,13 +375,6 @@ export class WalletManager {
         token.token_program_id = detection.programId.toBase58();
       }
     }
-  }
-
-  private getFeeBudget(): FeeBudgetManager {
-    if (!this.feeBudgetManager) {
-      this.feeBudgetManager = FeeBudgetManager.getInstance(this.connection);
-    }
-    return this.feeBudgetManager;
   }
 
   private async resolveTokenProgram(
@@ -2280,30 +2270,4 @@ export class WalletManager {
     return { signature, amountLamports: unwrapPlan.unwrapLamports };
   }
 
-  private async getRentExemptMinimumLamports(): Promise<number> {
-    if (this.rentExemptMinimumLamports !== null) {
-      return this.rentExemptMinimumLamports;
-    }
-
-    try {
-      const rentExempt = await this.connection.getMinimumBalanceForRentExemption(
-        0,
-        "confirmed"
-      );
-
-      if (rentExempt > 0) {
-        this.rentExemptMinimumLamports = rentExempt;
-        return rentExempt;
-      }
-    } catch (error) {
-      console.warn(
-        "[Withdraw SOL] Failed to fetch rent-exempt minimum, using fallback:",
-        error
-      );
-    }
-
-    const fallback = await this.getFeeBudget().getSingleTransactionLamports();
-    this.rentExemptMinimumLamports = fallback;
-    return fallback;
-  }
 }
