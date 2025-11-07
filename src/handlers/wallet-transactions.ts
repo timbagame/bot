@@ -271,6 +271,27 @@ const renderSolConversionSuccess = ({
   });
 };
 
+const renderSendSuccessMessage = ({
+  formattedAmount,
+  token,
+  address,
+  viewLine,
+}: {
+  formattedAmount: string | undefined;
+  token: string | undefined;
+  address: string | undefined;
+  viewLine?: string | null;
+}): string => {
+  const safeAmount = escapeHtml(formattedAmount ?? "");
+  const safeToken = escapeHtml(token ?? "");
+  const safeAddress = escapeHtml(address ?? "");
+  const baseMessage =
+    `✅ <b>Transaction Completed</b>\n\n` +
+    `Sent ${safeAmount} ${safeToken}\n` +
+    `To: <code>${safeAddress}</code>`;
+  return viewLine ? `${baseMessage}\n\n${viewLine}` : baseMessage;
+};
+
 export const createWalletTransactionsModule = (
   options: WalletTransactionsModuleOptions
 ): WalletTransactionsModule => {
@@ -1258,14 +1279,12 @@ export const createWalletTransactionsModule = (
             format: "html",
           });
 
-          const successMessage = (() => {
-            const baseMessage = `✅ <b>Transaction Completed</b>\n\nSent ${escapeHtml(
-              formattedAmount
-            )} ${escapeHtml(transaction.token ?? "")}\nTo: <code>${escapeHtml(
-              transaction.address ?? ""
-            )}</code>`;
-            return viewLine ? `${baseMessage}\n\n${viewLine}` : baseMessage;
-          })();
+          const successMessage = renderSendSuccessMessage({
+            formattedAmount,
+            token: transaction.token,
+            address: transaction.address,
+            viewLine,
+          });
 
           await respondWithMenu(ctx, {
             text: successMessage,
@@ -1305,3 +1324,5 @@ export const createWalletTransactionsModule = (
     buildSolscanSuccessMessage,
   };
 };
+
+export const __test_renderSendSuccessMessage = renderSendSuccessMessage;

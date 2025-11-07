@@ -1549,15 +1549,29 @@ export class WalletManager {
   public async transferSol(
     fromTelegramId: bigint,
     toAddress: PublicKey,
-    amount: number
+    amountSol: number
   ): Promise<string> {
+    if (!Number.isFinite(amountSol) || amountSol <= 0) {
+      throw new Error("Transfer amount must be greater than zero");
+    }
+
     const fromKeypair = this.getKeyPair(fromTelegramId);
-    const lamports = Math.floor(amount * LAMPORTS_PER_SOL);
+    const lamportsBigInt = BigInt(
+      Math.round((amountSol + Number.EPSILON) * LAMPORTS_PER_SOL)
+    );
+
+    if (lamportsBigInt <= 0n) {
+      throw new Error("Transfer amount must be greater than zero");
+    }
+
+    if (lamportsBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error("Transfer amount is too large");
+    }
 
     const transferInstruction = SystemProgram.transfer({
       fromPubkey: fromKeypair.publicKey,
       toPubkey: toAddress,
-      lamports: lamports,
+      lamports: Number(lamportsBigInt),
     });
 
     return await this.sendTransaction([transferInstruction], [fromKeypair]);
@@ -1574,7 +1588,10 @@ export class WalletManager {
   }> {
     const userKeypair = this.getKeyPair(telegramId);
     const payer = userKeypair.publicKey;
-    const nativeLamports = await this.getBalance(telegramId);
+    const nativeLamports = await this.getBalance(telegramId, {
+      forceFresh: true,
+      allowStaleOnError: true,
+    });
     const debugPrefix = "[Withdraw SOL]";
 
     const formatLamports = (lamports: number) =>
