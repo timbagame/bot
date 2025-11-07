@@ -491,6 +491,13 @@ export const createWalletTransactionsModule = (
       throw new Error("Invalid wallet address format");
     }
 
+    try {
+      // Ensure address is a valid base58 public key before persisting state
+      new PublicKey(address);
+    } catch {
+      throw new Error("Invalid wallet address format");
+    }
+
     const txId = generateTransactionId();
     storePendingTransaction(txId, {
       type: "send",

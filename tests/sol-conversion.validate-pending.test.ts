@@ -57,6 +57,22 @@ describe("validatePendingTransaction", () => {
     expect(getPendingTransaction(txId, false)).toBeUndefined();
   });
 
+  test("only first validation succeeds per pending transaction", () => {
+    storePendingTransaction(txId, {
+      type: "send",
+      userId: "100",
+      token: "SOL",
+      amount: "2",
+      address: "FhvxPt3M79xMBZZhNX3eVfn3DrM6vjrE1rjhyu5x1t8L",
+    });
+
+    const first = validatePendingTransaction({ from: { id: 100 } } as any, txId, "send");
+    expect(first.status).toBe("success");
+
+    const second = validatePendingTransaction({ from: { id: 100 } } as any, txId, "send");
+    expect(second.status).toBe("expired");
+  });
+
   test("returns expired when transaction timestamp exceeds input timeout", () => {
     const originalNow = Date.now;
     try {

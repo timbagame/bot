@@ -107,6 +107,33 @@ describe("leaderboard UI rendering", () => {
     expect(output).not.toContain("-5 wins");
   });
 
+  test("sanitizeLeaderboardDisplayName obfuscates mentions", () => {
+    const sanitized = sanitizeLeaderboardDisplayName("@someone");
+    expect(sanitized).toContain("@\u2060");
+  });
+
+  test("sanitizeLeaderboardDisplayName falls back for blank names", () => {
+    const sanitized = sanitizeLeaderboardDisplayName("   ".repeat(1));
+    expect(sanitized).toBe("Player");
+    const rendered = buildLeaderboardMessage({
+      chatTitle: null,
+      players: [
+        {
+          telegramId: "42",
+          displayName: "   ",
+          totalGames: 1,
+          wins: 1,
+          losses: 0,
+          winRate: 100,
+          gamesCreated: 0,
+          gamesJoined: 1,
+          totalVolume: 0,
+        },
+      ],
+    });
+    expect(rendered).toContain("<b>Player</b>");
+  });
+
   test("player names are always HTML escaped (property)", async () => {
     await fc.assert(
       fc.asyncProperty(

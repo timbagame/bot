@@ -20,14 +20,16 @@ type BuildLeaderboardMessageArgs = {
 const MEDALS = ["🥇", "🥈", "🥉"] as const;
 
 const ZERO_WIDTH_WORD_JOINER = "\u2060";
+const DEFAULT_FALLBACK_NAME = "Player";
 
 export const sanitizeLeaderboardDisplayName = (value: string): string => {
   const trimmed = value.trim();
-  if (!trimmed.includes("@")) {
-    return trimmed;
+  const normalized = trimmed.length > 0 ? trimmed : DEFAULT_FALLBACK_NAME;
+  if (!normalized.includes("@")) {
+    return normalized;
   }
 
-  return trimmed.replace(/@+/g, (match) => `${match}${ZERO_WIDTH_WORD_JOINER}`);
+  return normalized.replace(/@+/g, (match) => `${match}${ZERO_WIDTH_WORD_JOINER}`);
 };
 
 export const buildEmptyLeaderboardMessage = (): string =>

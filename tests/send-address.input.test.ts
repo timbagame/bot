@@ -116,4 +116,17 @@ describe("handleAddressInput", () => {
     expect(firstReply.text).toContain("Send Confirmation");
     expect(firstReply.text).toContain(ADDRESS);
   });
+
+  test("rejects invalid base58 wallet addresses", async () => {
+    const ctx = makeCtx();
+    const invalid = ADDRESS.replace("H", "0");
+
+    await expect(__test_handleAddressInput(ctx, baseState, invalid)).rejects.toThrow(
+      /Invalid wallet address format/
+    );
+
+    const calls = ctx.__calls as RecordedCall[];
+    expect(calls.length).toBe(0);
+  });
+
 });
