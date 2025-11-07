@@ -55,4 +55,27 @@ describe("GameManager unjoin errors", () => {
       (gm as any).unjoinPlayerFromGame(new PublicKey("BPFLoader5111111111111111111111111111111111"), Keypair.generate(), new PublicKey("BPFLoader6111111111111111111111111111111111"))
     ).rejects.toThrow(/Player not found/);
   });
+
+  test("unjoinPlayerFromGame rejects skipDbCheck for unauthorized authority", async () => {
+    resetGM();
+    const creator = Keypair.generate();
+    const player = Keypair.generate();
+    const impostor = Keypair.generate();
+    const gameAccount = { creator: creator.publicKey };
+    const db = baseDb({
+      getGameParticipants: (_: string) => ["123"],
+      getPlayerPublicKey: (_: string) => player.publicKey.toBase58(),
+    });
+    const gm = GameManager.getInstance(baseProgram(gameAccount), baseWallet(), db);
+
+    await expect(
+      (gm as any).unjoinPlayerFromGame(
+        new PublicKey("BPFLoader7111111111111111111111111111111111"),
+        impostor,
+        player.publicKey,
+        "123",
+        { skipDbCheck: true }
+      )
+    ).rejects.toThrow(/Unauthorized unjoin attempt/);
+  });
 });

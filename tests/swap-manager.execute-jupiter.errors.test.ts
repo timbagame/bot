@@ -1,15 +1,18 @@
 import { describe, test, expect } from "bun:test";
-import { Connection, Keypair } from "@solana/web3.js";
+import { Keypair } from "@solana/web3.js";
 import { SwapManager } from "../src/utils/swap-manager";
-import { WalletManager } from "../src/utils/wallet";
 
 describe("SwapManager.executeJupiterTransaction errors", () => {
-  test("throws friendly error when deserialization fails", async () => {
-    const connection = new Connection("http://localhost:8899", "confirmed");
-    const wallet = WalletManager.createForTest(
-      "test walk nut penalty hip pave soap entry language right filter choice",
-      { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
-    );
+  test("throws friendly error when deserialization fails before wallet usage", async () => {
+    const wallet = {
+      signAndSendSerializedTransaction: async () => {
+        throw new Error("sign should not be called");
+      },
+      confirmTransaction: async () => {
+        throw new Error("confirm should not be called");
+      },
+    } as any;
+    const connection = {} as any;
     const sm = new SwapManager(connection, wallet);
     const user = Keypair.generate();
     await expect(
@@ -17,4 +20,3 @@ describe("SwapManager.executeJupiterTransaction errors", () => {
     ).rejects.toThrow(/Failed to execute Jupiter transaction/);
   });
 });
-

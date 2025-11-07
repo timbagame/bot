@@ -3,6 +3,7 @@ import {
   Keypair,
   Connection,
   SystemProgram,
+  TransactionInstruction,
 } from "@solana/web3.js";
 import {
   getAssociatedTokenAddress,
@@ -1316,7 +1317,8 @@ export class GameManager {
       | "Game close"
       | "Player unjoin",
     playerPubkey?: PublicKey,
-    resubmit?: (attempt: number, previousSignature: string) => Promise<string>
+    resubmit?: (attempt: number, previousSignature: string) => Promise<string>,
+    options?: { retryDelays?: number[] }
   ): Promise<string> {
     const probes: TransactionProbe[] = [];
     const fetchGameAccountNullable = async (): Promise<any | null> => {
@@ -1389,6 +1391,7 @@ export class GameManager {
         operationLabel: operationType,
         resubmit,
         probes,
+        retryDelays: options?.retryDelays,
         logger: debugLog,
       });
     } catch (error: any) {
@@ -1434,6 +1437,27 @@ export class GameManager {
       }
       throw error;
     }
+  }
+
+  private async sendInstructionsWithFallback(
+    instructions: TransactionInstruction[],
+    signers: Keypair[],
+    operationLabel: string
+  ): Promise<string> {
+    const walletWithResubmits = (this.wallet as any)
+      .sendAndConfirmWithResubmits;
+    if (typeof walletWithResubmits === "function") {
+      return await walletWithResubmits.call(this.wallet, instructions, signers, {
+        operationLabel,
+      });
+    }
+
+    const signature = await this.wallet.sendTransaction(
+      instructions,
+      signers
+    );
+    await this.wallet.confirmTransaction(signature);
+    return signature;
   }
 
   private async getGameCreationRentLamports(): Promise<number> {
@@ -3133,25 +3157,11 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         undefined,
         async () => {
           const resendGameTransaction = async () => {
-            if (
-              typeof (this.wallet as any).sendAndConfirmWithResubmits ===
-              "function"
-            ) {
-              return await this.wallet.sendAndConfirmWithResubmits(
-                [gameInstruction],
-                [playerKp],
-                {
-                  operationLabel: "Game creation transaction",
-                }
-              );
-            }
-
-            const newSignature = await this.wallet.sendTransaction(
+            return await this.sendInstructionsWithFallback(
               [gameInstruction],
-              [playerKp]
+              [playerKp],
+              "Game creation transaction"
             );
-            await this.wallet.confirmTransaction(newSignature);
-            return newSignature;
           };
 
           return await resendGameTransaction();
@@ -3299,25 +3309,11 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
               playerKp.publicKey,
               async () => {
                 const resendJoinTransaction = async () => {
-                  if (
-                    typeof (this.wallet as any).sendAndConfirmWithResubmits ===
-                    "function"
-                  ) {
-                    return await this.wallet.sendAndConfirmWithResubmits(
-                      [joinInstruction],
-                      [playerKp],
-                      {
-                        operationLabel: "Player join transaction",
-                      }
-                    );
-                  }
-
-                  const newSignature = await this.wallet.sendTransaction(
+                  return await this.sendInstructionsWithFallback(
                     [joinInstruction],
-                    [playerKp]
+                    [playerKp],
+                    "Player join transaction"
                   );
-                  await this.wallet.confirmTransaction(newSignature);
-                  return newSignature;
                 };
 
                 const refreshedSignature = await resendJoinTransaction();
@@ -3825,25 +3821,11 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
               playerKp.publicKey,
               async () => {
                 const resendJoinTransaction = async () => {
-                  if (
-                    typeof (this.wallet as any).sendAndConfirmWithResubmits ===
-                    "function"
-                  ) {
-                    return await this.wallet.sendAndConfirmWithResubmits(
-                      [joinInstruction],
-                      [playerKp],
-                      {
-                        operationLabel: "Player join transaction",
-                      }
-                    );
-                  }
-
-                  const newSignature = await this.wallet.sendTransaction(
+                  return await this.sendInstructionsWithFallback(
                     [joinInstruction],
-                    [playerKp]
+                    [playerKp],
+                    "Player join transaction"
                   );
-                  await this.wallet.confirmTransaction(newSignature);
-                  return newSignature;
                 };
 
                 const refreshedSignature = await resendJoinTransaction();
@@ -4029,9 +4011,10 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         .instruction();
 
       const sendCloseTransaction = async () => {
-        return await this.wallet.sendTransaction(
+        return await this.sendInstructionsWithFallback(
           [closeInstruction],
-          [creatorKp]
+          [creatorKp],
+          `${gameType} close transaction`
         );
       };
 
@@ -4042,24 +4025,12 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         gamePda,
         "Game close",
         creatorKp.publicKey,
-        async () => {
-          if (
-            typeof (this.wallet as any).sendAndConfirmWithResubmits ===
-            "function"
-          ) {
-            return await this.wallet.sendAndConfirmWithResubmits(
-              [closeInstruction],
-              [creatorKp],
-              {
-                operationLabel: `${gameType} close transaction`,
-              }
-            );
-          }
-
-          const newSignature = await sendCloseTransaction();
-          await this.wallet.confirmTransaction(newSignature);
-          return newSignature;
-        }
+        async () =>
+          await this.sendInstructionsWithFallback(
+            [closeInstruction],
+            [creatorKp],
+            `${gameType} close transaction`
+          )
       );
 
       const successMessage =
@@ -4183,6 +4154,24 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       }
     }
 
+    const creatorPubkeyFromAccount =
+      typeof gameAccount?.creator === "string"
+        ? new PublicKey(gameAccount.creator)
+        : gameAccount?.creator ?? null;
+
+    if (skipDbChecks) {
+      const isPlayerAuthority = authorityKp.publicKey.equals(playerPubkey);
+      const isCreatorAuthority =
+        !!creatorPubkeyFromAccount &&
+        authorityKp.publicKey.equals(creatorPubkeyFromAccount);
+
+      if (!isPlayerAuthority && !isCreatorAuthority) {
+        throw new Error(
+          "Unauthorized unjoin attempt during cleanup; authority must be player or creator."
+        );
+      }
+    }
+
     const unjoinAccounts = await this.buildUnjoinAccounts(
       gamePda,
       gameAccount,
@@ -4195,9 +4184,10 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       .instruction();
 
     const sendUnjoinTransaction = async () => {
-      return await this.wallet.sendTransaction(
+      return await this.sendInstructionsWithFallback(
         [unjoinInstruction],
-        [authorityKp]
+        [authorityKp],
+        "Player unjoin transaction"
       );
     };
 
@@ -4208,21 +4198,12 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       gamePda,
       "Player unjoin",
       playerPubkey,
-      async () => {
-        if (
-          typeof (this.wallet as any).sendAndConfirmWithResubmits === "function"
-        ) {
-          return await this.wallet.sendAndConfirmWithResubmits(
-            [unjoinInstruction],
-            [authorityKp],
-            { operationLabel: "Player unjoin transaction" }
-          );
-        }
-
-        const newSignature = await sendUnjoinTransaction();
-        await this.wallet.confirmTransaction(newSignature);
-        return newSignature;
-      }
+      async () =>
+        await this.sendInstructionsWithFallback(
+          [unjoinInstruction],
+          [authorityKp],
+          "Player unjoin transaction"
+        )
     );
 
     const resolvedTelegramId =
@@ -4343,25 +4324,11 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             playerKp.publicKey,
             async () => {
               const resendJoinTransaction = async () => {
-                if (
-                  typeof (this.wallet as any).sendAndConfirmWithResubmits ===
-                  "function"
-                ) {
-                  return await this.wallet.sendAndConfirmWithResubmits(
+                  return await this.sendInstructionsWithFallback(
                     [joinInstruction],
                     [playerKp, adminKp],
-                    {
-                      operationLabel: "Player join transaction",
-                    }
+                    "Player join transaction"
                   );
-                }
-
-                const newSignature = await this.wallet.sendTransaction(
-                  [joinInstruction],
-                  [playerKp, adminKp]
-                );
-                await this.wallet.confirmTransaction(newSignature);
-                return newSignature;
               };
 
               return await resendJoinTransaction();
