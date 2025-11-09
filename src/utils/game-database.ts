@@ -237,8 +237,13 @@ export class GameDatabase extends BaseDatabase {
         SELECT telegram_id
         FROM game_participants
         WHERE public_key = ?
-          AND status = 'confirmed'
-        ORDER BY joined_at DESC
+        ORDER BY
+          CASE status
+            WHEN 'confirmed' THEN 0
+            WHEN 'pending' THEN 1
+            ELSE 2
+          END,
+          joined_at DESC
         LIMIT 1
       `,
       [trimmed],

@@ -58,7 +58,7 @@ test("GameDatabase: CRUD for games, mappings, participants, and slot updates", (
   });
   expect(db.getGameParticipants("gameA")).toEqual(["tg_creator", "tg_p2"]);
   expect(db.getPlayerParticipatedGames("tg_p2")).toEqual(["gameA"]);
-  expect(db.getPlayerTelegramId("pub_pending")).toBeNull();
+  expect(db.getPlayerTelegramId("pub_pending")).toBe("tg_pending");
 
   // Active and Recent queries
   const activeForCreator = db.getActiveGames("tg_creator");
@@ -136,7 +136,7 @@ test("savePlayerMapping normalizes inputs and ignores blanks", () => {
   expect(db.getAllPlayerMappings().length).toBe(1);
 });
 
-test("getPlayerTelegramId falls back to confirmed participants only", () => {
+test("getPlayerTelegramId prioritizes confirmed participants over pending fallback", () => {
   const db = GameDatabase.getInstance();
 
   db.saveGame("pendingGame", "creator_pending", 100, "coinflip");
@@ -144,7 +144,7 @@ test("getPlayerTelegramId falls back to confirmed participants only", () => {
     status: "pending",
   });
 
-  expect(db.getPlayerTelegramId("pub_shared")).toBeNull();
+  expect(db.getPlayerTelegramId("pub_shared")).toBe("tg_pending");
 
   db.saveGame("confirmedGame", "creator_confirmed", 100, "coinflip");
   db.saveGameParticipant("confirmedGame", "tg_confirmed", "pub_shared", {
