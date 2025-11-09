@@ -2567,7 +2567,12 @@ const resolveTelegramUsername = async (
   username: string
 ): Promise<string | null> => {
   const api = ctx.api as { getChat?: (id: string) => Promise<any> } | undefined;
-  if (!api || typeof api.getChat !== "function") {
+  if (!api) {
+    return null;
+  }
+
+  const getChat = api.getChat;
+  if (typeof getChat !== "function") {
     return null;
   }
 
@@ -2589,7 +2594,7 @@ const resolveTelegramUsername = async (
 
   const lookupPromise = (async () => {
     try {
-      const chat = await api.getChat(sanitized);
+      const chat = await getChat.call(api, sanitized);
       const rawId = (chat as any)?.id;
       let resolvedId: string | null = null;
 
