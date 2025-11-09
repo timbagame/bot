@@ -333,6 +333,15 @@ const estimateInitializationCosts = async (
       feeLamportsParts.push(toLamportsBigInt(extractFeeValue(ataFeeResponse)));
     }
 
+    const gameTokenCtx = {
+      tokenMint: mint,
+      gameToken: gameTokenPda,
+      gameVault: gameVaultPda,
+      gameTokenAccount,
+      tokenProgram: mintProgramId,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+    };
+
     const tokenInstruction = await program.methods
       .initializeToken({
         minAmount: new anchor.BN(defaultMinAmount.toString()),
@@ -349,6 +358,7 @@ const estimateInitializationCosts = async (
           systemProgram: SystemProgram.programId,
           tokenProgram: mintProgramId,
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          gameTokenCtx,
         } as any
       )
       .instruction();
@@ -546,6 +556,15 @@ async function initializeToken(
 
   // Initialize game token
   console.log(`\n🔄 Initializing ${tokenTicker} game token...`);
+  const gameTokenCtx = {
+    tokenMint: mint,
+    gameToken: gameTokenPda,
+    gameVault: gameVaultPda,
+    gameTokenAccount,
+    tokenProgram: mintProgramId,
+    associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+  };
+
   const tokenInstruction = await program.methods
     .initializeToken({
       minAmount: new anchor.BN(defaultMinAmount.toString()),
@@ -562,6 +581,7 @@ async function initializeToken(
         systemProgram: SystemProgram.programId,
         tokenProgram: mintProgramId,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        gameTokenCtx,
       } as any
     )
     .instruction();
