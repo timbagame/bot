@@ -17,9 +17,9 @@ import {
   uniqueSigners,
 } from "./utils/keypairs";
 import { createAnchorContext } from "./utils/anchor-context";
+import { resolvePrimaryRpcEndpoint } from "../src/utils/rpc-endpoints";
 
-const RPC_URL =
-  process.env["SOLANA_NETWORK"] || "https://api.mainnet-beta.solana.com";
+const RPC_URL = resolvePrimaryRpcEndpoint(process.env.SOLANA_NETWORK);
 
 const TOKENS: TokenConfig[] = getSupportedTokens();
 

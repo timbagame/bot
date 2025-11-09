@@ -9,11 +9,11 @@ import {
   uniqueSigners,
 } from "./utils/keypairs";
 import { createAnchorContext } from "./utils/anchor-context";
+import { resolvePrimaryRpcEndpoint } from "../src/utils/rpc-endpoints";
 
 const TOKENS_TO_DISABLE = getSupportedTokens();
 
-const RPC_URL =
-  process.env.SOLANA_NETWORK || "https://api.mainnet-beta.solana.com";
+const RPC_URL = resolvePrimaryRpcEndpoint(process.env.SOLANA_NETWORK);
 
 async function disableToken(
   program: anchor.Program<Timba>,
