@@ -575,7 +575,7 @@ export class GameManager {
     return normalized;
   }
 
-  private cacheTelegramIdForUsername(
+  public cacheTelegramIdForUsername(
     telegramId: string,
     username: string
   ): void {

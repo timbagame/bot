@@ -2533,6 +2533,103 @@ const getTipMentionTokenInfo = (
   };
 };
 
+const TELEGRAM_USERNAME_LOOKUP_COOLDOWN_MS = 30_000;
+const telegramUsernameLookupCooldown =
+  createExpiringCache<boolean>(TELEGRAM_USERNAME_LOOKUP_COOLDOWN_MS);
+const telegramUsernameLookupInflight = new Map<
+  string,
+  Promise<string | null>
+>();
+
+const normalizeTelegramUsernameForLookup = (
+  username: string
+): { sanitized: string; normalizedKey: string } | null => {
+  if (typeof username !== "string") {
+    return null;
+  }
+
+  const trimmed = username.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  const sanitized = trimmed.startsWith("@") ? trimmed : `@${trimmed}`;
+  const normalizedKey = sanitized.slice(1).trim().toLowerCase();
+  if (normalizedKey.length === 0) {
+    return null;
+  }
+
+  return { sanitized, normalizedKey };
+};
+
+const resolveTelegramUsername = async (
+  ctx: Context,
+  username: string
+): Promise<string | null> => {
+  const api = ctx.api as { getChat?: (id: string) => Promise<any> } | undefined;
+  if (!api || typeof api.getChat !== "function") {
+    return null;
+  }
+
+  const normalized = normalizeTelegramUsernameForLookup(username);
+  if (!normalized) {
+    return null;
+  }
+
+  const { sanitized, normalizedKey } = normalized;
+
+  if (telegramUsernameLookupCooldown.has(normalizedKey)) {
+    return null;
+  }
+
+  const existing = telegramUsernameLookupInflight.get(normalizedKey);
+  if (existing) {
+    return existing;
+  }
+
+  const lookupPromise = (async () => {
+    try {
+      const chat = await api.getChat(sanitized);
+      const rawId = (chat as any)?.id;
+      let resolvedId: string | null = null;
+
+      if (typeof rawId === "number" || typeof rawId === "bigint") {
+        resolvedId = rawId.toString();
+      } else if (typeof rawId === "string") {
+        resolvedId = rawId.trim();
+      }
+
+      if (!resolvedId || !/^\d+$/.test(resolvedId)) {
+        return null;
+      }
+
+      gameManager.cacheTelegramIdForUsername(resolvedId, sanitized);
+      gameManager.primeUsernameCache(ctx, resolvedId, sanitized);
+
+      return resolvedId;
+    } catch (error: any) {
+      if (error && typeof error === "object" && "error_code" in error) {
+        if ((error as any).error_code === 429) {
+          telegramUsernameLookupCooldown.setWithTTL(normalizedKey, true);
+        }
+      }
+      return null;
+    }
+  })();
+
+  telegramUsernameLookupInflight.set(normalizedKey, lookupPromise);
+
+  try {
+    const resolved = await lookupPromise;
+    if (!resolved) {
+      telegramUsernameLookupCooldown.setWithTTL(normalizedKey, true);
+    }
+    return resolved;
+  } finally {
+    telegramUsernameLookupInflight.delete(normalizedKey);
+  }
+};
+
 const handleTipCommand = async (ctx: Context): Promise<void> => {
   const telegramId = await getRequiredTelegramIdForContext(
     ctx,
@@ -2659,7 +2756,10 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
         return replyUsageError(ctx, TIP_USAGE_MESSAGE);
       }
 
-      const lookedUpId = gameManager.findTelegramIdByUsername(mentionUsername);
+      let lookedUpId = gameManager.findTelegramIdByUsername(mentionUsername);
+      if (!lookedUpId) {
+        lookedUpId = await resolveTelegramUsername(ctx, mentionUsername);
+      }
       if (!lookedUpId) {
         return replyToMessage(
           ctx,
