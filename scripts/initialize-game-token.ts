@@ -22,6 +22,7 @@ import type { Timba } from "../idl/idlType";
 import { WalletManager } from "../src/utils/wallet";
 import { getSupportedTokens } from "../src/utils/token-registry";
 import { NetworkDetector, type SolanaNetwork } from "../src/utils/network-detector";
+import { resolvePrimaryRpcEndpoint } from "../src/utils/rpc-endpoints";
 import {
   loadKeypairFromPath,
   resolveOracleOperatorKeypair,
@@ -34,15 +35,13 @@ import { readBigIntEnv } from "./utils/env";
 // CONFIGURATION
 // ================================
 
-const DEFAULT_RPC_URL = "https://api.mainnet-beta.solana.com";
-
 const resolveEnvPath = (envVar?: string, fallback?: string): string => {
   const trimmed = envVar?.trim();
   if (trimmed && trimmed.length > 0) return trimmed;
   return fallback ?? "";
 };
 
-const RPC_URL = resolveEnvPath(process.env["SOLANA_NETWORK"], DEFAULT_RPC_URL);
+const RPC_URL = resolvePrimaryRpcEndpoint(process.env.SOLANA_NETWORK);
 
 const NETWORK_OVERRIDE =
   NetworkDetector.resolveNetworkInput(process.env["SOLANA_CLUSTER"]) ?? null;

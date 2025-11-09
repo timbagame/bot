@@ -9,6 +9,7 @@ import { clusterApiUrl } from "@solana/web3.js";
 import type { Timba } from "../../idl/idlType";
 import idl from "../../idl/idl.json";
 import { WalletManager } from "../../src/utils/wallet";
+import { resolvePrimaryRpcEndpoint } from "../../src/utils/rpc-endpoints";
 
 type WalletOverride =
   | anchor.Wallet
@@ -130,15 +131,14 @@ export const createAnchorContext = (
     ...(overrides.providerOptions ?? {}),
   } as ProviderOptions;
 
+  const resolvedRpcUrl = resolvePrimaryRpcEndpoint(
+    overrides.rpcUrl ?? process.env.SOLANA_NETWORK,
+    clusterApiUrl("mainnet-beta")
+  );
+
   const connection = overrides.connection
     ? toAnchorConnection(overrides.connection)
-    : resolveConnection(
-        overrides.rpcUrl ??
-          process.env.SOLANA_NETWORK ??
-          clusterApiUrl("mainnet-beta"),
-        commitment,
-        overrides.connectionConfig
-      );
+    : resolveConnection(resolvedRpcUrl, commitment, overrides.connectionConfig);
 
   const wallet = resolveWallet(adminKeypair, overrides.wallet);
 

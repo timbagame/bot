@@ -17,9 +17,9 @@ import {
 } from "./utils/keypairs";
 import { createAnchorContext } from "./utils/anchor-context";
 import { readBigIntEnv } from "./utils/env";
+import { resolvePrimaryRpcEndpoint } from "../src/utils/rpc-endpoints";
 
-const RPC_URL =
-  process.env["SOLANA_NETWORK"] || "https://api.mainnet-beta.solana.com";
+const RPC_URL = resolvePrimaryRpcEndpoint(process.env.SOLANA_NETWORK);
 
 const DEFAULT_COMPLETION_COMPUTE_UNITS = BigInt(
   process.env["COMPLETION_COMPUTE_UNITS"] ?? 200_000
