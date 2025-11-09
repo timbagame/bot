@@ -91,16 +91,18 @@ async function withdrawTokenFee(
   const instruction = await program.methods
     .withdrawTokenFee()
     .accounts({
-      gameToken: gameTokenPda,
-      tokenMint: mint,
-      gameVault: gameVaultPda,
       oracle: oraclePda,
       oracleOperator: operatorBundle.anchor.publicKey,
       oracleOperatorTokenAccount: operatorAta,
-      gameTokenAccount: gameVaultAta,
       systemProgram: SystemProgram.programId,
-      tokenProgram: tokenProgramId,
-      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      gameTokenCtx: {
+        tokenMint: mint,
+        gameToken: gameTokenPda,
+        gameVault: gameVaultPda,
+        gameTokenAccount: gameVaultAta,
+        tokenProgram: tokenProgramId,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      },
     } as any)
     .instruction();
   const instructions = [...operatorAtaInstructions, instruction];
