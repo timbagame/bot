@@ -322,6 +322,51 @@ describe("GameManager Username Resolution", () => {
     });
   });
 
+  describe("findTelegramIdByUsername", () => {
+    test("normalizes usernames and caches lookups", () => {
+      resetGM();
+      const dbStub = makeDbStub({ usernameToId: { cached: "111" } });
+      const calls: string[] = [];
+      const originalFind = dbStub.findTelegramIdByUsername;
+      dbStub.findTelegramIdByUsername = (username: string) => {
+        calls.push(username);
+        return originalFind(username);
+      };
+      const gm = GameManager.getInstance(
+        makeProgramStub(),
+        makeWalletStub(),
+        dbStub
+      );
+
+      const first = gm.findTelegramIdByUsername("@Cached");
+      expect(first).toBe("111");
+      expect(calls).toEqual(["@Cached"]);
+
+      const second = gm.findTelegramIdByUsername("cached");
+      expect(second).toBe("111");
+      expect(calls).toEqual(["@Cached"]);
+    });
+
+    test("returns null for blank usernames", () => {
+      resetGM();
+      const dbStub = makeDbStub();
+      let called = false;
+      dbStub.findTelegramIdByUsername = () => {
+        called = true;
+        return null;
+      };
+      const gm = GameManager.getInstance(
+        makeProgramStub(),
+        makeWalletStub(),
+        dbStub
+      );
+
+      expect(gm.findTelegramIdByUsername("   " )).toBeNull();
+      expect(gm.findTelegramIdByUsername("")).toBeNull();
+      expect(called).toBe(false);
+    });
+  });
+
   describe("getPlayerUsername", () => {
     test("returns @username when mapping exists", async () => {
       resetGM();

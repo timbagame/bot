@@ -844,6 +844,10 @@ export let gameManager: GameManager;
 export let program: anchor.Program<Timba>;
 const tokenDb = TokenDatabase.getInstance();
 let tokenManager: TokenManager;
+export const __test_getTokenManager = (): TokenManager => tokenManager;
+export const __test_setTokenManager = (manager: TokenManager): void => {
+  tokenManager = manager;
+};
 let swapManager: SwapManager;
 let gameCompletedListenerId: number | null = null;
 let playerJoinedListenerId: number | null = null;
@@ -2487,7 +2491,49 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
   }
 });
 
-bot.command("tip", async (ctx: Context) => {
+
+const TIP_USAGE_MESSAGE =
+  "Usage: Reply to a user's message or use /tip @username <amount> [TOKEN]";
+
+type TipMentionTokenInfo = {
+  index: number | null;
+  length: number | null;
+};
+
+const getTipMentionTokenInfo = (
+  entity: { offset?: number; length?: number },
+  text: string
+): TipMentionTokenInfo => {
+  if (typeof entity.offset !== "number" || entity.offset < 0) {
+    return { index: null, length: null };
+  }
+
+  const before = text.slice(0, entity.offset);
+  const trimmedBefore = before.trim();
+  const index =
+    trimmedBefore.length === 0 ? 0 : trimmedBefore.split(/\s+/).length;
+
+  if (typeof entity.length !== "number" || entity.length <= 0) {
+    return { index, length: null };
+  }
+
+  const mentionText = text
+    .slice(entity.offset, entity.offset + entity.length)
+    .trim();
+
+  if (mentionText.length === 0) {
+    return { index, length: null };
+  }
+
+  const tokens = mentionText.split(/\s+/).filter((part) => part.length > 0);
+
+  return {
+    index,
+    length: tokens.length > 0 ? tokens.length : null,
+  };
+};
+
+const handleTipCommand = async (ctx: Context): Promise<void> => {
   const telegramId = await getRequiredTelegramIdForContext(
     ctx,
     "tip command"
@@ -2495,30 +2541,208 @@ bot.command("tip", async (ctx: Context) => {
   if (telegramId == null) {
     return;
   }
-  const repliedMessage = ctx.message?.reply_to_message;
-  const args = ctx.message?.text?.split(" ");
 
-  if (!repliedMessage || !repliedMessage.from || !args || args.length < 2) {
-    return replyUsageError(
-      ctx,
-      "Usage: Reply to a user's message with /tip &lt;amount&gt; [TOKEN] or /tip &lt;amount&gt; SOL"
-    );
+  const message = ctx.message;
+  const repliedMessage = message?.reply_to_message;
+  const messageText = message?.text ?? "";
+  const args =
+    messageText.trim().length > 0 ? messageText.trim().split(/\s+/) : [];
+
+  if (!repliedMessage?.from && args.length < 2) {
+    return replyUsageError(ctx, TIP_USAGE_MESSAGE);
   }
 
-  if (repliedMessage.from.is_bot) {
-    return replyToMessage(ctx, "You cannot tip bots!");
+  let recipientTelegramId: bigint | null = null;
+  let recipientName = "User";
+  let amountArgIndex = 1;
+
+  if (repliedMessage?.from) {
+    const fromUser = repliedMessage.from;
+
+    if (fromUser.is_bot) {
+      return replyToMessage(ctx, "You cannot tip bots!");
+    }
+
+    recipientTelegramId = BigInt(fromUser.id);
+    if (recipientTelegramId === telegramId) {
+      return replyToMessage(ctx, "You can't tip yourself!");
+    }
+
+    if (fromUser.username) {
+      gameManager.primeUsernameCache(
+        ctx,
+        String(fromUser.id),
+        `@${fromUser.username}`
+      );
+      recipientName = `@${fromUser.username}`;
+    } else if (fromUser.first_name) {
+      recipientName = fromUser.first_name;
+    }
+
+    amountArgIndex = 1;
+  } else {
+    const tokens = args;
+    const entities = Array.isArray(message?.entities)
+      ? (message?.entities as Array<any>)
+      : [];
+
+    let mentionTokenIndex: number | null = null;
+    let mentionUsername: string | null = null;
+    let mentionLabel: string | null = null;
+    let mentionUser: any = null;
+    let mentionIsBot: boolean | null = null;
+    let mentionTokenLength: number | null = null;
+
+    for (const entity of entities) {
+      if (!entity || typeof entity.type !== "string") {
+        continue;
+      }
+
+      if (entity.type === "text_mention" && entity.user) {
+        mentionUser = entity.user;
+        mentionIsBot = entity.user.is_bot === true;
+        const slice =
+          typeof entity.offset === "number" && typeof entity.length === "number"
+            ? messageText.slice(entity.offset, entity.offset + entity.length)
+            : null;
+        if (entity.user.username) {
+          mentionUsername = `@${entity.user.username}`;
+        } else if (slice?.startsWith("@")) {
+          mentionUsername = slice;
+        }
+        mentionLabel =
+          slice && slice.trim().length > 0
+            ? slice
+            : entity.user.first_name ?? null;
+        const info = getTipMentionTokenInfo(entity, messageText);
+        mentionTokenIndex = info.index;
+        mentionTokenLength = info.length;
+        break;
+      }
+
+      if (entity.type === "mention") {
+        const slice =
+          typeof entity.offset === "number" && typeof entity.length === "number"
+            ? messageText.slice(entity.offset, entity.offset + entity.length)
+            : null;
+        if (slice) {
+          mentionUsername = slice;
+          mentionLabel = slice;
+          const info = getTipMentionTokenInfo(entity, messageText);
+          mentionTokenIndex = info.index;
+          mentionTokenLength = info.length;
+          break;
+        }
+      }
+    }
+
+    if (!mentionUsername && tokens.length > 1) {
+      for (let i = 1; i < tokens.length; i++) {
+        const token = tokens[i];
+        if (typeof token === "string" && token.startsWith("@") && token.length > 1) {
+          mentionUsername = token;
+          mentionTokenIndex = i;
+          mentionTokenLength = 1;
+          break;
+        }
+      }
+    }
+
+    let resolvedId: string | null = null;
+
+    if (mentionUser?.id !== undefined) {
+      resolvedId = String(mentionUser.id);
+    }
+
+    if (!resolvedId) {
+      if (!mentionUsername) {
+        return replyUsageError(ctx, TIP_USAGE_MESSAGE);
+      }
+
+      const lookedUpId = gameManager.findTelegramIdByUsername(mentionUsername);
+      if (!lookedUpId) {
+        return replyToMessage(
+          ctx,
+          `Unable to resolve <code>${escapeHtml(
+            mentionUsername
+          )}</code>. Ask them to start a chat with the bot first.`
+        );
+      }
+      resolvedId = lookedUpId;
+    }
+
+    let recipientIdBigInt: bigint;
+    try {
+      recipientIdBigInt = BigInt(resolvedId);
+    } catch {
+      return replyToMessage(
+        ctx,
+        "Unable to resolve the specified user. Please try replying to their message instead."
+      );
+    }
+
+    if (recipientIdBigInt === telegramId) {
+      return replyToMessage(ctx, "You can't tip yourself!");
+    }
+
+    if (
+      mentionIsBot !== true &&
+      ctx.chat?.id &&
+      typeof ctx.api?.getChatMember === "function"
+    ) {
+      const candidate = Number(resolvedId);
+      if (Number.isSafeInteger(candidate)) {
+        try {
+          const member = await ctx.api.getChatMember(ctx.chat.id, candidate);
+          if (member?.user?.is_bot) {
+            mentionIsBot = true;
+          }
+          if (!mentionUsername && member?.user?.username) {
+            mentionUsername = `@${member.user.username}`;
+          }
+          if (!mentionLabel && member?.user?.first_name) {
+            mentionLabel = member.user.first_name;
+          }
+        } catch {
+          // Ignore errors from getChatMember lookup
+        }
+      }
+    }
+
+    if (mentionIsBot) {
+      return replyToMessage(ctx, "You cannot tip bots!");
+    }
+
+    recipientTelegramId = recipientIdBigInt;
+    recipientName =
+      mentionUsername ?? mentionLabel ?? mentionUser?.first_name ?? "User";
+
+    if (mentionUsername && resolvedId) {
+      gameManager.primeUsernameCache(ctx, resolvedId, mentionUsername);
+    }
+
+    const tokensConsumed =
+      mentionTokenLength && mentionTokenLength > 0 ? mentionTokenLength : 1;
+    amountArgIndex = (mentionTokenIndex ?? 1) + tokensConsumed;
   }
 
-  const recipientTelegramId = BigInt(repliedMessage.from.id);
-  if (recipientTelegramId === telegramId) {
-    return replyToMessage(ctx, "You can't tip yourself!");
+  if (recipientTelegramId === null) {
+    return replyUsageError(ctx, TIP_USAGE_MESSAGE);
   }
 
-  const parsed = await tokenManager.parseAmount(args, 1, ctx.chat?.id, "tip");
+  const parsed = await tokenManager.parseAmount(
+    args,
+    amountArgIndex,
+    ctx.chat?.id,
+    "tip"
+  );
   if (!parsed.success) {
     return replyToMessage(
       ctx,
-      formatParseAmountError(parsed, "Please provide a valid amount greater than 0.")
+      formatParseAmountError(
+        parsed,
+        "Please provide a valid amount greater than 0."
+      )
     );
   }
 
@@ -2526,10 +2750,6 @@ bot.command("tip", async (ctx: Context) => {
 
   try {
     const recipientPubKey = wallet.getPublicKey(recipientTelegramId);
-    const recipientName = repliedMessage.from.username
-      ? `@${repliedMessage.from.username}`
-      : repliedMessage.from.first_name || "User";
-
     await validateAndProcessTransaction(
       ctx,
       telegramId,
@@ -2552,12 +2772,16 @@ bot.command("tip", async (ctx: Context) => {
           );
         }
       },
-      true // Show Solscan link for tips
+      true
     );
   } catch (error: any) {
     await handleCommandError(ctx, error, "tip");
   }
-});
+};
+
+bot.command("tip", handleTipCommand);
+
+export const __test_handleTipCommand = handleTipCommand;
 
 bot.command("wrap", async (ctx: Context) => {
   const telegramId = await getRequiredTelegramIdForContext(
@@ -2863,7 +3087,7 @@ bot.command("help", async (ctx: Context) => {
     "/unwrap - Convert your entire WSOL balance back to SOL",
     "/withdraw &lt;address&gt; &lt;amount&gt; [TOKEN] - Withdraw tokens to external wallet",
     "/wh &lt;address&gt; &lt;amount&gt; [TOKEN] - Shorthand for withdraw command",
-    "/tip &lt;amount&gt; [TOKEN] - Reply to a user's message to send them tokens",
+    "/tip @username &lt;amount&gt; [TOKEN] - Reply to a message or include @username to tip",
     "",
     "<b>🎮 Game Commands:</b>",
     "/coinflip &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Create a new coinflip game",
@@ -2885,7 +3109,7 @@ bot.command("help", async (ctx: Context) => {
     "",
     "<b>ℹ️ Important:</b> ",
     "• Your player balance account will be automatically initialized when needed",
-    "• Specify token after amount: /coinflip 100 TIMBA 2 or /tip 50 SOL",
+    "• Specify token after amount: /coinflip 100 TIMBA 2 or /tip @user 50 SOL",
     "• Group admins can set default tokens with /default &lt;TOKEN&gt;",
 
     "• Contact bot administrator to add support for new SPL tokens",
@@ -3470,7 +3694,7 @@ const HELP_SECTIONS: Record<HelpSectionKey, HelpSectionConfig> = {
       "<code>/wrap &lt;amount&gt;</code> - Convert SOL to WSOL\n" +
       "<code>/unwrap</code> - Convert WSOL back to SOL\n" +
       "<code>/withdraw &lt;address&gt; &lt;amount&gt;</code> - Send tokens\n" +
-      "<code>/tip &lt;amount&gt;</code> - Tip a user (reply to their message)\n\n" +
+      "<code>/tip @username &lt;amount&gt;</code> - Tip a user (reply or @mention)\n\n" +
       "💡 <i>All wallet commands work with different tokens</i>",
     ack: "💰 Wallet Commands",
     buttons: [

@@ -136,6 +136,22 @@ test("savePlayerMapping normalizes inputs and ignores blanks", () => {
   expect(db.getAllPlayerMappings().length).toBe(1);
 });
 
+test("findTelegramIdByUsername normalizes usernames", () => {
+  const db = GameDatabase.getInstance();
+
+  db.savePlayerMapping("pk_old", "111", "@CaseUser");
+  db.savePlayerMapping("pk_new", "222", "caseuser");
+  db.savePlayerMapping("pk_other", "333", "@otherUser");
+  db.savePlayerMapping("pk_plain", "444", "alice");
+
+  expect(db.findTelegramIdByUsername("@CASEUSER")).toBe("111");
+  expect(db.findTelegramIdByUsername("caseuser")).toBe("111");
+  expect(db.findTelegramIdByUsername("otheruser")).toBe("333");
+  expect(db.findTelegramIdByUsername("@alice")).toBeNull();
+  expect(db.findTelegramIdByUsername("@missing")).toBeNull();
+  expect(db.findTelegramIdByUsername("   ")).toBeNull();
+});
+
 test("getPlayerTelegramId prioritizes confirmed participants over pending fallback", () => {
   const db = GameDatabase.getInstance();
 

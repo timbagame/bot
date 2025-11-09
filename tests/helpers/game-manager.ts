@@ -12,6 +12,7 @@ type DbStubOptions = {
   gameOverride?: Record<string, unknown>;
   playerTelegramByPub?: Record<string, string>;
   displayNameByTelegram?: Record<string, string>;
+  usernameToId?: Record<string, string>;
   extra?: Record<string, unknown>;
 };
 
@@ -70,6 +71,7 @@ export function makeDbStub(options: DbStubOptions = {}): any {
     gameOverride = {},
     playerTelegramByPub = {},
     displayNameByTelegram = {},
+    usernameToId = {},
     extra = {},
   } = options;
 
@@ -90,6 +92,26 @@ export function makeDbStub(options: DbStubOptions = {}): any {
       displayNameByTelegram[telegramId] ?? null,
     saveGameMessage: (address: string, messageId: number, chatId: number) => {
       savedMessages.push({ address, messageId, chatId });
+    },
+    findTelegramIdByUsername: (username: string) => {
+      if (typeof username !== "string") {
+        return null;
+      }
+      const trimmed = username.trim();
+      if (trimmed.length === 0) {
+        return null;
+      }
+      const withoutAt = trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
+      const normalized = withoutAt.trim().toLowerCase();
+      if (normalized.length === 0) {
+        return null;
+      }
+      const direct = usernameToId[normalized];
+      if (direct) {
+        return direct;
+      }
+      const withAt = usernameToId["@" + normalized];
+      return withAt ?? null;
     },
     clearGameMessage: (address: string) => {
       clearedMessages.push(address);

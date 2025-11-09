@@ -272,6 +272,40 @@ export class GameDatabase extends BaseDatabase {
     return name && name.length > 0 ? name : null;
   }
 
+  public findTelegramIdByUsername(username: string): string | null {
+    if (typeof username !== "string") {
+      return null;
+    }
+
+    const trimmed = username.trim();
+    if (trimmed.length === 0) {
+      return null;
+    }
+
+    const withoutAt = trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
+    const normalized = withoutAt.trim().toLowerCase();
+    if (normalized.length === 0) {
+      return null;
+    }
+
+    const withAt = "@" + normalized;
+    const result = this.get<{ telegram_id: string }>(
+      `
+        SELECT telegram_id
+        FROM player_mappings
+        WHERE display_name IS NOT NULL
+          AND TRIM(display_name) LIKE '@%'
+          AND LOWER(TRIM(display_name)) = ?
+        ORDER BY ROWID DESC
+        LIMIT 1
+      `,
+      [withAt],
+      "finding telegram id by username"
+    );
+
+    return result?.telegram_id ?? null;
+  }
+
   public getAllPlayerMappings(): PlayerMapping[] {
     return this.all<PlayerMapping>(
       "SELECT * FROM player_mappings",

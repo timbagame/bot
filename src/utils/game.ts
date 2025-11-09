@@ -302,6 +302,10 @@ export class GameManager {
   );
   private readonly usernameCacheKeys: string[] = [];
   private readonly usernameHints = new Map<string, string>();
+  private readonly normalizedUsernameToIdCache = createExpiringCache<string>(
+    TELEGRAM_USERNAME_CACHE_TTL_MS
+  );
+  private readonly usernameToIdCacheKeys: string[] = [];
   private readonly messageRecreationLocks = new Set<string>();
   private usernameLookupPromises = new Map<string, Promise<string | null>>();
   private gameMessageReadyListener?: (gameAddress: string) => void;
@@ -521,6 +525,70 @@ export class GameManager {
     this.trackUsernameCacheKey(key);
   }
 
+  private removeUsernameToIdCacheKey(key: string): void {
+    const index = this.usernameToIdCacheKeys.indexOf(key);
+    if (index !== -1) {
+      this.usernameToIdCacheKeys.splice(index, 1);
+    }
+  }
+
+  private trackUsernameToIdCacheKey(key: string): void {
+    this.removeUsernameToIdCacheKey(key);
+    this.usernameToIdCacheKeys.push(key);
+
+    while (this.usernameToIdCacheKeys.length > this.usernameCacheMaxEntries) {
+      const oldestKey = this.usernameToIdCacheKeys.shift();
+      if (oldestKey) {
+        this.normalizedUsernameToIdCache.delete(oldestKey);
+      }
+    }
+  }
+
+  private setCachedTelegramIdForUsername(
+    key: string,
+    telegramId: string
+  ): void {
+    this.normalizedUsernameToIdCache.setWithTTL(
+      key,
+      telegramId,
+      this.usernameCacheTtlMs
+    );
+    this.trackUsernameToIdCacheKey(key);
+  }
+
+  private normalizeUsernameForLookup(username: string): string | null {
+    if (typeof username !== "string") {
+      return null;
+    }
+
+    const trimmed = username.trim();
+    if (trimmed.length === 0) {
+      return null;
+    }
+
+    const withoutAt = trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
+    const normalized = withoutAt.trim().toLowerCase();
+    if (normalized.length === 0) {
+      return null;
+    }
+
+    return normalized;
+  }
+
+  private cacheTelegramIdForUsername(
+    telegramId: string,
+    username: string
+  ): void {
+    const normalized = this.normalizeUsernameForLookup(username);
+    const trimmedId = telegramId.trim();
+
+    if (!normalized || !/^\d+$/.test(trimmedId)) {
+      return;
+    }
+
+    this.setCachedTelegramIdForUsername(normalized, trimmedId);
+  }
+
   private rememberTelegramUsername(
     telegramId: string,
     username: string
@@ -531,6 +599,7 @@ export class GameManager {
       return;
     }
 
+    this.cacheTelegramIdForUsername(trimmedId, trimmedUsername);
     this.usernameHints.set(trimmedId, trimmedUsername);
   }
 
@@ -552,6 +621,27 @@ export class GameManager {
     this.rememberTelegramUsername(trimmedId, trimmedUsername);
     const cacheKey = this.buildUsernameCacheKey(ctx, trimmedId);
     this.setCachedUsername(cacheKey, trimmedUsername);
+  }
+
+  public findTelegramIdByUsername(username: string): string | null {
+    const normalized = this.normalizeUsernameForLookup(username);
+    if (!normalized) {
+      return null;
+    }
+
+    const cached = this.normalizedUsernameToIdCache.get(normalized);
+    if (cached) {
+      return cached;
+    }
+
+    const fromDb = this.gameDb.findTelegramIdByUsername(username);
+    if (fromDb) {
+      this.setCachedTelegramIdForUsername(normalized, fromDb);
+      this.rememberTelegramUsername(fromDb, username);
+      return fromDb;
+    }
+
+    return null;
   }
 
   private async recreateMissingGameMessage(
