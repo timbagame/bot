@@ -4,6 +4,7 @@ import {
   Keypair,
   TransactionInstruction,
 } from "@solana/web3.js";
+import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { PumpSdk, OnlinePumpSdk } from "@pump-fun/pump-sdk";
 import { NetworkDetector } from "./network-detector";
 import { escapeHtml, formatAmount, formatRate } from "./format-amount";
@@ -543,6 +544,7 @@ export class PumpFunClient {
           solAmount: new BN(solAmount.toString()),
           amount: new BN(minTokensOut),
           slippage: slippageBps / 10000, // Use decimal format (e.g., 0.01 for 1%)
+          tokenProgram: TOKEN_PROGRAM_ID,
         });
       } else {
         // For selling: amount is in token units
@@ -601,6 +603,8 @@ export class PumpFunClient {
           amount: new BN(tokenAmount.toString()),
           solAmount: new BN(minSolOut.toString()),
           slippage: slippageBps / 10000, // Use decimal format (e.g., 0.01 for 1%)
+          tokenProgram: TOKEN_PROGRAM_ID,
+          mayhemMode: false,
         });
       }
 
