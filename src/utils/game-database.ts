@@ -294,11 +294,12 @@ export class GameDatabase extends BaseDatabase {
         SELECT telegram_id
         FROM player_mappings
         WHERE display_name IS NOT NULL
-          AND LOWER(display_name) IN (?, ?)
+          AND TRIM(display_name) LIKE '@%'
+          AND LOWER(TRIM(display_name)) = ?
         ORDER BY ROWID DESC
         LIMIT 1
       `,
-      [normalized, withAt],
+      [withAt],
       "finding telegram id by username"
     );
 

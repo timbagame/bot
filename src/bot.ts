@@ -2495,25 +2495,42 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
 const TIP_USAGE_MESSAGE =
   "Usage: Reply to a user's message or use /tip @username <amount> [TOKEN]";
 
-const getTipMentionTokenIndex = (
+type TipMentionTokenInfo = {
+  index: number | null;
+  length: number | null;
+};
+
+const getTipMentionTokenInfo = (
   entity: { offset?: number; length?: number },
   text: string
-): number | null => {
+): TipMentionTokenInfo => {
   if (typeof entity.offset !== "number" || entity.offset < 0) {
-    return null;
+    return { index: null, length: null };
   }
 
   const before = text.slice(0, entity.offset);
-  if (before.length === 0) {
-    return 0;
+  const trimmedBefore = before.trim();
+  const index =
+    trimmedBefore.length === 0 ? 0 : trimmedBefore.split(/\s+/).length;
+
+  if (typeof entity.length !== "number" || entity.length <= 0) {
+    return { index, length: null };
   }
 
-  const trimmed = before.trim();
-  if (trimmed.length === 0) {
-    return 0;
+  const mentionText = text
+    .slice(entity.offset, entity.offset + entity.length)
+    .trim();
+
+  if (mentionText.length === 0) {
+    return { index, length: null };
   }
 
-  return trimmed.split(/\s+/).length;
+  const tokens = mentionText.split(/\s+/).filter((part) => part.length > 0);
+
+  return {
+    index,
+    length: tokens.length > 0 ? tokens.length : null,
+  };
 };
 
 const handleTipCommand = async (ctx: Context): Promise<void> => {
@@ -2574,6 +2591,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
     let mentionLabel: string | null = null;
     let mentionUser: any = null;
     let mentionIsBot: boolean | null = null;
+    let mentionTokenLength: number | null = null;
 
     for (const entity of entities) {
       if (!entity || typeof entity.type !== "string") {
@@ -2596,7 +2614,9 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
           slice && slice.trim().length > 0
             ? slice
             : entity.user.first_name ?? null;
-        mentionTokenIndex = getTipMentionTokenIndex(entity, messageText);
+        const info = getTipMentionTokenInfo(entity, messageText);
+        mentionTokenIndex = info.index;
+        mentionTokenLength = info.length;
         break;
       }
 
@@ -2608,7 +2628,9 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
         if (slice) {
           mentionUsername = slice;
           mentionLabel = slice;
-          mentionTokenIndex = getTipMentionTokenIndex(entity, messageText);
+          const info = getTipMentionTokenInfo(entity, messageText);
+          mentionTokenIndex = info.index;
+          mentionTokenLength = info.length;
           break;
         }
       }
@@ -2620,6 +2642,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
         if (typeof token === "string" && token.startsWith("@") && token.length > 1) {
           mentionUsername = token;
           mentionTokenIndex = i;
+          mentionTokenLength = 1;
           break;
         }
       }
@@ -2698,7 +2721,9 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
       gameManager.primeUsernameCache(ctx, resolvedId, mentionUsername);
     }
 
-    amountArgIndex = (mentionTokenIndex ?? 1) + 1;
+    const tokensConsumed =
+      mentionTokenLength && mentionTokenLength > 0 ? mentionTokenLength : 1;
+    amountArgIndex = (mentionTokenIndex ?? 1) + tokensConsumed;
   }
 
   if (recipientTelegramId === null) {

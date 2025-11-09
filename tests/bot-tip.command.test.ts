@@ -142,3 +142,62 @@ test("handleTipCommand resolves username mentions via game manager lookup", asyn
   expect(replies).toHaveLength(1);
   expect(replies[0]).toContain("Please provide a valid amount greater than 0.");
 });
+
+test("handleTipCommand positions amount after multi-word text mention", async () => {
+  const tokenManager = botModule.__test_getTokenManager();
+  const parseCalls: Array<{ args: string[]; index: number; context: "game" | "tip" }> = [];
+  tokenManager.parseAmount = async (
+    args: string[],
+    index: number,
+    _chatId: number | undefined,
+    context: "game" | "tip" = "game"
+  ) => {
+    parseCalls.push({ args, index, context });
+    return { success: false, error: "invalid_amount" } as const;
+  };
+
+  botModule.__test_setGameManager({
+    findTelegramIdByUsername: () => null,
+    primeUsernameCache: () => {},
+  } as any);
+
+  const replies: string[] = [];
+  const chatMemberCalls: Array<{ chatId: number; userId: number }> = [];
+  const ctx: any = {
+    chat: { id: 55, type: "group" },
+    from: { id: 222, is_bot: false },
+    message: {
+      message_id: 101,
+      text: "/tip John Doe 5",
+      entities: [
+        { type: "bot_command", offset: 0, length: 4 },
+        {
+          type: "text_mention",
+          offset: 5,
+          length: 8,
+          user: { id: 9999, is_bot: false, first_name: "John" },
+        },
+      ],
+    },
+    reply: async (text: string) => {
+      replies.push(text);
+      return { message_id: 202 };
+    },
+    api: {
+      getChatMember: async (chatId: number, userId: number) => {
+        chatMemberCalls.push({ chatId, userId });
+        return { user: { is_bot: false } };
+      },
+    },
+  };
+
+  await botModule.__test_handleTipCommand(ctx);
+
+  expect(chatMemberCalls).toEqual([{ chatId: 55, userId: 9999 }]);
+  expect(parseCalls).toHaveLength(1);
+  expect(parseCalls[0]?.args).toEqual(["/tip", "John", "Doe", "5"]);
+  expect(parseCalls[0]?.index).toBe(3);
+  expect(parseCalls[0]?.context).toBe("tip");
+  expect(replies).toHaveLength(1);
+  expect(replies[0]).toContain("Please provide a valid amount greater than 0.");
+});
