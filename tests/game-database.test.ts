@@ -1,4 +1,5 @@
 import { expect, test, beforeEach } from "bun:test";
+import type { GameData } from "../src/types";
 import { GameDatabase } from "../src/utils/game-database";
 import { GAME_CREATION_RATE_LIMIT_WINDOW_MS } from "../src/utils/constants";
 import { resetTestDatabase } from "./helpers/database";
@@ -177,6 +178,44 @@ test("getGamesExpiringBefore returns games with zero and large timeouts", () => 
   const farFuture = now + hugeTimeoutSeconds * 1000 + 1_000;
   const farResults = db.getGamesExpiringBefore(farFuture);
   expect(farResults.map((g) => g.game_address)).toContain(largeAddress);
+});
+
+test("getGamesExpiringBefore can paginate large batches by excluding processed entries", () => {
+  const db = GameDatabase.getInstance();
+  const base = Date.now();
+  const total = 60;
+  const addresses = [];
+  for (let i = 0; i < total; i += 1) {
+    const addr = `paginated-${i}`;
+    addresses.push(addr);
+    db.saveGame(
+      addr,
+      `creator-${i}`,
+      50,
+      "coinflip",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      10,
+      base
+    );
+  }
+
+  const seen = new Set<string>();
+  const limit = 15;
+  let batch: GameData[] = [];
+  let excludes: string[] = [];
+  do {
+    batch = db.getGamesExpiringBefore(base + 1000, limit, excludes);
+    for (const game of batch) {
+      seen.add(game.game_address);
+      excludes.push(game.game_address);
+    }
+  } while (batch.length === limit);
+
+  expect(seen.size).toBe(total);
 });
 
 test("findTelegramIdByUsername normalizes usernames", () => {

@@ -152,10 +152,22 @@ export class GameDatabase extends BaseDatabase {
     return this.all<GameData>("SELECT * FROM games", [], "getting all games");
   }
 
-  public getGamesExpiringBefore(cutoffMs: number, limit = 25): GameData[] {
+  public getGamesExpiringBefore(
+    cutoffMs: number,
+    limit = 25,
+    excludeAddresses: string[] = []
+  ): GameData[] {
+    const expireClause = `status != 'completed' AND expires_at IS NOT NULL AND expires_at <= ?`;
+    const excludeClause = excludeAddresses.length
+      ? `AND game_address NOT IN (${excludeAddresses.map(() => "?").join(",")})`
+      : "";
+
+    const expiringParams = excludeAddresses.length
+      ? [...excludeAddresses, cutoffMs, limit]
+      : [cutoffMs, limit];
     const expiring = this.all<GameData>(
-      "SELECT * FROM games WHERE status != 'completed' AND expires_at IS NOT NULL AND expires_at <= ? ORDER BY expires_at ASC LIMIT ?",
-      [cutoffMs, limit],
+      `SELECT * FROM games WHERE ${expireClause} ${excludeClause} ORDER BY expires_at ASC LIMIT ?`,
+      expiringParams,
       "getting expiring games"
     );
 
@@ -168,9 +180,17 @@ export class GameDatabase extends BaseDatabase {
       return expiring;
     }
 
+    const fallbackExcludeClause = excludeAddresses.length
+      ? `AND game_address NOT IN (${excludeAddresses.map(() => "?").join(",")})`
+      : "";
+
+    const fallbackParams = excludeAddresses.length
+      ? [...excludeAddresses, remainingLimit]
+      : [remainingLimit];
+
     const fallback = this.all<GameData>(
-      "SELECT * FROM games WHERE status != 'completed' AND expires_at IS NULL ORDER BY created_at ASC LIMIT ?",
-      [remainingLimit],
+      `SELECT * FROM games WHERE status != 'completed' AND expires_at IS NULL ${fallbackExcludeClause} ORDER BY created_at ASC LIMIT ?`,
+      fallbackParams,
       "getting games missing expiration"
     );
 

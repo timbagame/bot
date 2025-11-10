@@ -75,6 +75,7 @@ import {
 } from "./handlers/wallet";
 import { inferMaxPlayers } from "./utils/arg-parsing";
 import type {
+  GameData,
   PlayerData,
   GameCompletedEvent,
   PlayerJoinedEvent,
@@ -4886,59 +4887,73 @@ setupAnchor()
       try {
         const nowMs = Date.now();
         const cutoffMs = nowMs + EXPIRED_GAMES_CHECK_INTERVAL_MS;
-        const expiringGames = gameDb.getGamesExpiringBefore(
-          cutoffMs,
-          MAX_EXPIRING_GAMES_PER_SCAN
-        );
+        const processedAddresses: string[] = [];
+        let batchCount = 0;
+        let expiringGames: GameData[] = [];
 
-        if (expiringGames.length === 0) {
-          return;
-        }
+        do {
+          expiringGames = gameDb.getGamesExpiringBefore(
+            cutoffMs,
+            MAX_EXPIRING_GAMES_PER_SCAN,
+            processedAddresses
+          );
 
-        for (const game of expiringGames) {
-          if (!game.game_address) {
-            console.log(`🗑️ Skipping game with null address`);
-            continue;
+          if (expiringGames.length === 0) {
+            break;
           }
 
-          if (game.game_address === DEFAULT_NULL_ADDRESS) {
-            console.log(
-              `🗑️ Skipping placeholder game address ${game.game_address}`
-            );
-            await cleanupOrphanedGame(game.game_address);
-            continue;
-          }
-
-          try {
-            let gamePda: PublicKey;
-            try {
-              gamePda = new PublicKey(game.game_address);
-            } catch (pkError) {
-              console.log(
-                `🗑️ Skipping game with invalid address format: ${game.game_address}`
-              );
+          for (const game of expiringGames) {
+            if (!game.game_address) {
+              console.log(`🗑️ Skipping game with null address`);
               continue;
             }
-            const gameAccount = await program.account.game.fetch(gamePda);
 
-            if (await isGameExpired(gameAccount)) {
-              await processExpiredGame(game);
-            }
-          } catch (error: any) {
-            const msg = (error as Error).message || "";
-            if (
-              msg.includes("Account does not exist") ||
-              msg.includes("Invalid account discriminator")
-            ) {
-              await cleanupOrphanedGame(game.game_address);
-            } else {
-              console.error(
-                `Error processing game ${game.game_address}:`,
-                error
+            processedAddresses.push(game.game_address);
+
+            if (game.game_address === DEFAULT_NULL_ADDRESS) {
+              console.log(
+                `🗑️ Skipping placeholder game address ${game.game_address}`
               );
+              await cleanupOrphanedGame(game.game_address);
+              continue;
+            }
+
+            try {
+              let gamePda: PublicKey;
+              try {
+                gamePda = new PublicKey(game.game_address);
+              } catch (pkError) {
+                console.log(
+                  `🗑️ Skipping game with invalid address format: ${game.game_address}`
+                );
+                continue;
+              }
+              const gameAccount = await program.account.game.fetch(gamePda);
+
+              if (await isGameExpired(gameAccount)) {
+                await processExpiredGame(game);
+              }
+            } catch (error: any) {
+              const msg = (error as Error).message || "";
+              if (
+                msg.includes("Account does not exist") ||
+                msg.includes("Invalid account discriminator")
+              ) {
+                await cleanupOrphanedGame(game.game_address);
+              } else {
+                console.error(
+                  `Error processing game ${game.game_address}:`,
+                  error
+                );
+              }
             }
           }
-        }
+
+          batchCount += 1;
+        } while (
+          expiringGames.length === MAX_EXPIRING_GAMES_PER_SCAN &&
+          batchCount < 10
+        );
       } catch (error) {
         console.error("Error in periodic game check:", error);
       }
