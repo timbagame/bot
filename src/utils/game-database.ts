@@ -66,6 +66,7 @@ export class GameDatabase extends BaseDatabase {
 
     this.ensureGameParticipantSchema();
     this.ensurePlayerMappingSchema();
+    this.ensureUsernameMappingSchema();
   }
 
   // Game methods
@@ -212,6 +213,38 @@ export class GameDatabase extends BaseDatabase {
     );
   }
 
+  public saveUsernameMapping(
+    normalizedUsername: string,
+    telegramId: string,
+    displayName?: string | null
+  ): void {
+    const normalized = typeof normalizedUsername === "string"
+      ? normalizedUsername.trim().toLowerCase()
+      : "";
+    const trimmedId = typeof telegramId === "string" ? telegramId.trim() : "";
+    const trimmedDisplay =
+      typeof displayName === "string" && displayName.trim().length > 0
+        ? displayName.trim()
+        : null;
+
+    if (!normalized || !/^\d+$/.test(trimmedId)) {
+      return;
+    }
+
+    this.run(
+      `
+        INSERT INTO username_mappings (normalized_username, telegram_id, display_name, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(normalized_username) DO UPDATE SET
+          telegram_id = excluded.telegram_id,
+          display_name = excluded.display_name,
+          updated_at = excluded.updated_at
+      `,
+      [normalized, trimmedId, trimmedDisplay, Date.now()],
+      "saving username mapping"
+    );
+  }
+
   public getPlayerTelegramId(publicKey: string): string | null {
     if (typeof publicKey !== "string") {
       return null;
@@ -272,6 +305,25 @@ export class GameDatabase extends BaseDatabase {
     return name && name.length > 0 ? name : null;
   }
 
+  public findTelegramIdByNormalizedUsername(normalizedUsername: string): string | null {
+    if (typeof normalizedUsername !== "string") {
+      return null;
+    }
+
+    const trimmed = normalizedUsername.trim().toLowerCase();
+    if (trimmed.length === 0) {
+      return null;
+    }
+
+    const result = this.get<{ telegram_id: string }>(
+      "SELECT telegram_id FROM username_mappings WHERE normalized_username = ? LIMIT 1",
+      [trimmed],
+      "finding telegram id by normalized username"
+    );
+
+    return result?.telegram_id ?? null;
+  }
+
   public findTelegramIdByUsername(username: string): string | null {
     if (typeof username !== "string") {
       return null;
@@ -286,6 +338,13 @@ export class GameDatabase extends BaseDatabase {
     const normalized = withoutAt.trim().toLowerCase();
     if (normalized.length === 0) {
       return null;
+    }
+
+    const normalizedLookup = this.findTelegramIdByNormalizedUsername(
+      normalized
+    );
+    if (normalizedLookup) {
+      return normalizedLookup;
     }
 
     const withAt = "@" + normalized;
@@ -388,6 +447,28 @@ export class GameDatabase extends BaseDatabase {
       }
     } catch (error) {
       console.error("Failed to ensure player_mappings schema:", error);
+    }
+  }
+
+  private ensureUsernameMappingSchema(): void {
+    try {
+      this.run(
+        `CREATE TABLE IF NOT EXISTS username_mappings (
+          normalized_username TEXT PRIMARY KEY,
+          telegram_id TEXT NOT NULL,
+          display_name TEXT,
+          updated_at INTEGER NOT NULL
+        )`,
+        [],
+        "ensuring username_mappings schema"
+      );
+      this.run(
+        "CREATE INDEX IF NOT EXISTS idx_username_mappings_telegram_id ON username_mappings (telegram_id)",
+        [],
+        "creating username_mappings telegram_id index"
+      );
+    } catch (error) {
+      console.error("Failed to ensure username_mappings schema:", error);
     }
   }
 

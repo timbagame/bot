@@ -96,6 +96,10 @@ const getWrapBalanceRetryDelays = (): number[] => {
 
 const TELEGRAM_MESSAGE_CHAR_LIMIT = 4096;
 
+const PLAYER_TELEGRAM_ID_POLL_INTERVAL_MS =
+  process.env.NODE_ENV === "test" ? 1 : 40;
+const PLAYER_TELEGRAM_ID_POLL_ATTEMPTS = 5;
+
 const isDebugLoggingEnabled =
   (process.env["TIMBA_DEBUG"] ?? "").toLowerCase() === "true";
 
@@ -599,8 +603,14 @@ export class GameManager {
       return;
     }
 
+    const normalized = this.normalizeUsernameForLookup(trimmedUsername);
+    if (!normalized) {
+      return;
+    }
+
     this.cacheTelegramIdForUsername(trimmedId, trimmedUsername);
     this.usernameHints.set(trimmedId, trimmedUsername);
+    this.gameDb.saveUsernameMapping(normalized, trimmedId, trimmedUsername);
   }
 
   public primeUsernameCache(
@@ -2000,7 +2010,7 @@ export class GameManager {
   ): Promise<string> {
     debugLog(`🔍 Getting username for publicKey: ${publicKey}`);
 
-    const playerTelegramId = this.gameDb.getPlayerTelegramId(publicKey);
+    const playerTelegramId = await this.getPlayerTelegramIdWithRetry(publicKey);
     debugLog(`🔍 Found telegramId: ${playerTelegramId} for publicKey: ${publicKey}`);
 
     if (!playerTelegramId) {
@@ -2020,6 +2030,23 @@ export class GameManager {
     }
 
     return username;
+  }
+
+  private async getPlayerTelegramIdWithRetry(
+    publicKey: string
+  ): Promise<string | null> {
+    for (let attempt = 0; attempt < PLAYER_TELEGRAM_ID_POLL_ATTEMPTS; attempt++) {
+      const candidate = this.gameDb.getPlayerTelegramId(publicKey);
+      if (candidate) {
+        return candidate;
+      }
+      if (attempt < PLAYER_TELEGRAM_ID_POLL_ATTEMPTS - 1) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, PLAYER_TELEGRAM_ID_POLL_INTERVAL_MS)
+        );
+      }
+    }
+    return null;
   }
 
   // ================================

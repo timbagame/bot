@@ -152,6 +152,17 @@ test("findTelegramIdByUsername normalizes usernames", () => {
   expect(db.findTelegramIdByUsername("   ")).toBeNull();
 });
 
+test("username mapping lookup persists normalized usernames", () => {
+  const db = GameDatabase.getInstance();
+
+  db.saveUsernameMapping("caseuser", "888", "@CaseUser");
+
+  expect(db.findTelegramIdByNormalizedUsername("caseuser")).toBe("888");
+  expect(db.findTelegramIdByNormalizedUsername("CaseUser")).toBe("888");
+  expect(db.findTelegramIdByUsername("@CASEUSER")).toBe("888");
+  expect(db.findTelegramIdByUsername("@missing")).toBeNull();
+});
+
 test("getPlayerTelegramId prioritizes confirmed participants over pending fallback", () => {
   const db = GameDatabase.getInstance();
 

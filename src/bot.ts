@@ -140,6 +140,28 @@ bot.use(async (ctx, next) => {
   try { patchReplyBehavior(ctx); } catch {}
   await next();
 });
+
+bot.use(async (ctx, next) => {
+  const from = ctx.from;
+  if (
+    gameManager &&
+    from &&
+    from.id !== undefined &&
+    typeof from.username === "string" &&
+    from.username.trim().length > 0
+  ) {
+    const handle = from.username.trim().replace(/^@+/, "");
+    if (handle.length > 0) {
+      try {
+        gameManager.primeUsernameCache(ctx, String(from.id), `@${handle}`);
+      } catch (error) {
+        console.warn("Failed to prime username cache:", error);
+      }
+    }
+  }
+
+  await next();
+});
 export const wallet = WalletManager.getInstance(process.env.MNEMONIC!);
 const walletRpcLimiter = new SlidingWindowRateLimiter(
   USER_WALLET_RPC_WINDOW_MS
@@ -2557,7 +2579,7 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
 
 
 const TIP_USAGE_MESSAGE =
-  "Usage: Reply to a user's message or use /tip @username <amount> [TOKEN]";
+  "Usage: Reply to a user's message or use /tip @username &lt;amount&gt; [TOKEN]";
 
 type TipMentionTokenInfo = {
   index: number | null;

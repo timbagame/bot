@@ -2,9 +2,8 @@ import { describe, test, expect } from "bun:test";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { GameManager } from "../src/utils/game";
 
-function reset() { // reset singleton
-  // @ts-ignore
-  GameManager["instance"] = undefined;
+function reset() {
+  GameManager.resetForTest();
 }
 
 function makeProgram(game: any) {
@@ -23,6 +22,9 @@ function makeDb() {
   return {
     getGameParticipants: (_addr: string) => ["111", "222"],
     getGame: (_addr: string) => ({ token_mint: "M", token_ticker: "TOK" }),
+    getPlayerTelegramId: (pub: string) => pub,
+    saveUsernameMapping: () => {},
+    findTelegramIdByNormalizedUsername: () => null,
   } as any;
 }
 

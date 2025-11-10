@@ -391,5 +391,34 @@ describe("GameManager Username Resolution", () => {
       const label = await gm.getPlayerUsername(ctx, "BPFLoader1111111111111111111111111111111111");
       expect(label).toBe("BPFLoader1111111111111111111111111111111111");
     });
+
+    test("retries until telegram id mapping appears", async () => {
+      resetGM();
+      let attempts = 0;
+      const stubDb = makeDbStub({
+        extra: {
+          getPlayerTelegramId: () => {
+            attempts += 1;
+            return attempts > 1 ? "888" : null;
+          },
+        },
+      });
+      const ctx = {
+        chat: { id: 5, type: "private" },
+        api: {
+          getChatMember: async () => ({
+            user: { username: "delayed" },
+          }),
+        },
+      } as any;
+      const gm = GameManager.getInstance(
+        makeProgramStub(),
+        makeWalletStub(),
+        stubDb
+      );
+      const label = await gm.getPlayerUsername(ctx, "LazyPublicKey");
+      expect(label).toBe("@delayed");
+      expect(attempts).toBeGreaterThan(1);
+    });
   });
 });
