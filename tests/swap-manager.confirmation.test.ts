@@ -26,8 +26,16 @@ const createBase64Transaction = (payer: Keypair): string => {
 };
 
 const feeBudgetStub = {
-  getGameSafetyBufferLamports: () => 0,
-  getJitSwapFeeBufferLamports: () => 0,
+  getSingleTransactionLamports: async () => 0,
+  getWrapFeeBufferLamports: async () => 0,
+  getJitSwapFeeBufferLamports: async () => 0,
+  getGameSafetyBufferLamports: async () => 0,
+  getCachedSingleTransactionLamports: () => 0,
+  getCachedWrapFeeBufferLamports: () => 0,
+  getCachedGameSafetyBufferLamports: () => 0,
+  getDefaultSingleTransactionLamports: () => 0,
+  getDefaultWrapFeeBufferLamports: () => 0,
+  getDefaultGameSafetyBufferLamports: () => 0,
 } as unknown as FeeBudgetProvider;
 
 describe("SwapManager Jupiter confirmation", () => {

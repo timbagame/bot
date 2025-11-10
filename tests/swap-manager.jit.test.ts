@@ -28,8 +28,10 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     getJitSwapFeeBufferLamports: async () => TEST_JIT_BUFFER_LAMPORTS,
     getGameSafetyBufferLamports: async () => TEST_GAME_BUFFER_LAMPORTS,
     getCachedSingleTransactionLamports: () => TEST_SINGLE_TX_LAMPORTS,
+    getCachedWrapFeeBufferLamports: () => TEST_WRAP_BUFFER_LAMPORTS,
     getCachedGameSafetyBufferLamports: () => TEST_GAME_BUFFER_LAMPORTS,
     getDefaultSingleTransactionLamports: () => TEST_SINGLE_TX_LAMPORTS,
+    getDefaultWrapFeeBufferLamports: () => TEST_WRAP_BUFFER_LAMPORTS,
     getDefaultGameSafetyBufferLamports: () => TEST_GAME_BUFFER_LAMPORTS,
   });
 
