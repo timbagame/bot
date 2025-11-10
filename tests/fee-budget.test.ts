@@ -19,7 +19,10 @@ const createConnectionStub = (
       lastValidBlockHeight: 1,
       blockhashCommitment: "confirmed",
     }),
-    getFeeForMessage: async () => 5000,
+    getFeeForMessage: async () => ({
+      context: { slot: 0 },
+      value: 5_000,
+    }),
     getRecentPrioritizationFees: async () => [
       { prioritizationFee: "1200000" } as any,
     ],
@@ -208,7 +211,10 @@ describe("FeeBudgetManager", () => {
 
   test("computeSingleTransaction incorporates percentile-based priority fee", async () => {
     const connection = createConnectionStub({
-      getFeeForMessage: async () => 1_000,
+      getFeeForMessage: async () => ({
+        context: { slot: 0 },
+        value: 1_000,
+      }),
       getRecentPrioritizationFees: async () =>
         [
           { prioritizationFee: "100000" },

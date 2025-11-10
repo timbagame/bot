@@ -412,8 +412,13 @@ export class FeeBudgetManager implements FeeBudgetProvider {
         instructions,
       }).compileToV0Message();
       const fee = await this.connection.getFeeForMessage(message);
-      if (typeof fee === "number" && Number.isFinite(fee) && fee > 0) {
-        return fee;
+      const lamports =
+        typeof fee === "number"
+          ? fee
+          : fee?.value ?? null;
+
+      if (typeof lamports === "number" && Number.isFinite(lamports) && lamports > 0) {
+        return lamports;
       }
     } catch (error) {
       console.warn("Failed to estimate transaction fee:", error);
@@ -450,6 +455,10 @@ export class FeeBudgetManager implements FeeBudgetProvider {
       );
 
       const selectedMicroLamports = microLamports[percentileIndex];
+      if (selectedMicroLamports === undefined) {
+        return 0;
+      }
+
       const lamports = Math.ceil(
         (selectedMicroLamports / MICRO_LAMPORTS_PER_LAMPORT) *
           this.config.computeUnitLimit
