@@ -1491,37 +1491,72 @@ const handlePlayerUnjoinedAnchorEvent = async (
   await handlePlayerEvent(event, "PlayerUnjoined", "👤", "left");
 };
 
+type ProgramEventName = "gameCompleted" | "playerJoined" | "playerUnjoined";
+
+type ProgramEventDescriptor = {
+  eventName: ProgramEventName;
+  handler: (...args: any[]) => Promise<void> | void;
+  label: string;
+  getId: () => number | null;
+  setId: (id: number | null) => void;
+};
+
+const programEventDescriptors: ProgramEventDescriptor[] = [
+  {
+    eventName: "gameCompleted",
+    handler: handleGameCompletedAnchorEvent,
+    label: "GameCompleted",
+    getId: () => gameCompletedListenerId,
+    setId: (value) => {
+      gameCompletedListenerId = value;
+    },
+  },
+  {
+    eventName: "playerJoined",
+    handler: handlePlayerJoinedAnchorEvent,
+    label: "PlayerJoined",
+    getId: () => playerJoinedListenerId,
+    setId: (value) => {
+      playerJoinedListenerId = value;
+    },
+  },
+  {
+    eventName: "playerUnjoined",
+    handler: handlePlayerUnjoinedAnchorEvent,
+    label: "PlayerUnjoined",
+    getId: () => playerUnjoinedListenerId,
+    setId: (value) => {
+      playerUnjoinedListenerId = value;
+    },
+  },
+];
+
 const unregisterProgramEventListeners = async (): Promise<void> => {
   if (!program) {
     return;
   }
 
-  const listeners: Array<{ id: number | null; label: string }> = [
-    { id: gameCompletedListenerId, label: "GameCompleted" },
-    { id: playerJoinedListenerId, label: "PlayerJoined" },
-    { id: playerUnjoinedListenerId, label: "PlayerUnjoined" },
-  ];
-
   await Promise.all(
-    listeners.map(async ({ id, label }) => {
+    programEventDescriptors.map(async (descriptor) => {
+      const id = descriptor.getId();
       if (id === null) {
         return;
       }
+
       try {
         await program.removeEventListener(id);
-        console.log(`🔌 Removed ${label} event listener`);
+        console.log(`🔌 Removed ${descriptor.label} event listener`);
       } catch (error) {
         console.warn(
-          `⚠️ Failed to remove ${label} event listener (id=${id}):`,
+          `⚠️ Failed to remove ${descriptor.label} event listener (id=${id}):`,
           error
         );
+      } finally {
+        descriptor.setId(null);
       }
     })
   );
 
-  gameCompletedListenerId = null;
-  playerJoinedListenerId = null;
-  playerUnjoinedListenerId = null;
   programEventListenersReady = false;
 };
 
@@ -1532,26 +1567,17 @@ const registerProgramEventListeners = async (): Promise<void> => {
 
   await unregisterProgramEventListeners();
 
-  console.log("Setting up GameCompleted event listener...");
-  gameCompletedListenerId = await program.addEventListener(
-    "gameCompleted",
-    handleGameCompletedAnchorEvent
-  );
-  console.log("GameCompleted event listener set up successfully");
+  for (const descriptor of programEventDescriptors) {
+    console.log(`Setting up ${descriptor.label} event listener...`);
+    const listenerId = (await program.addEventListener(
+      descriptor.eventName,
+      descriptor.handler as any
+    )) as number;
+    descriptor.setId(listenerId);
+    console.log(`${descriptor.label} event listener set up successfully`);
+  }
 
-  console.log("Setting up PlayerJoined event listener...");
-  playerJoinedListenerId = await program.addEventListener(
-    "playerJoined",
-    handlePlayerJoinedAnchorEvent
-  );
-
-  console.log("Setting up PlayerUnjoined event listener...");
-  playerUnjoinedListenerId = await program.addEventListener(
-    "playerUnjoined",
-    handlePlayerUnjoinedAnchorEvent
-  );
-  console.log("Player event listeners set up successfully");
-
+  console.log("Program event listeners set up successfully");
   programEventListenersReady = true;
 };
 
@@ -4835,31 +4861,43 @@ setupAnchor()
       return GameManager.isExpired(gameAccount);
     };
 
+    const MAX_EXPIRING_GAMES_PER_SCAN = 25;
     // Start periodic check for expired games
     setInterval(async () => {
       try {
-        const allGames = gameDb.getAllGames();
-        for (const game of allGames) {
-          if (game.status === "completed") continue;
+        const nowMs = Date.now();
+        const cutoffMs = nowMs + EXPIRED_GAMES_CHECK_INTERVAL_MS;
+        const expiringGames = gameDb.getGamesExpiringBefore(
+          cutoffMs,
+          MAX_EXPIRING_GAMES_PER_SCAN
+        );
+
+        if (expiringGames.length === 0) {
+          return;
+        }
+
+        for (const game of expiringGames) {
+          if (!game.game_address) {
+            console.log(`🗑️ Skipping game with null address`);
+            continue;
+          }
+
+          if (game.game_address === DEFAULT_NULL_ADDRESS) {
+            console.log(
+              `🗑️ Skipping placeholder game address ${game.game_address}`
+            );
+            await cleanupOrphanedGame(game.game_address);
+            continue;
+          }
 
           try {
-            // Validate game address before creating PublicKey
-            if (!game.game_address) {
-              console.log(`🗑️ Skipping game with null address`);
-              continue;
-            }
-            // Skip placeholder/null address and clean it up
-            if (game.game_address === DEFAULT_NULL_ADDRESS) {
-              console.log(`🗑️ Skipping placeholder game address ${game.game_address}`);
-              await cleanupOrphanedGame(game.game_address);
-              continue;
-            }
-
             let gamePda: PublicKey;
             try {
               gamePda = new PublicKey(game.game_address);
             } catch (pkError) {
-              console.log(`🗑️ Skipping game with invalid address format: ${game.game_address}`);
+              console.log(
+                `🗑️ Skipping game with invalid address format: ${game.game_address}`
+              );
               continue;
             }
             const gameAccount = await program.account.game.fetch(gamePda);
@@ -4869,7 +4907,10 @@ setupAnchor()
             }
           } catch (error: any) {
             const msg = (error as Error).message || "";
-            if (msg.includes("Account does not exist") || msg.includes("Invalid account discriminator")) {
+            if (
+              msg.includes("Account does not exist") ||
+              msg.includes("Invalid account discriminator")
+            ) {
               await cleanupOrphanedGame(game.game_address);
             } else {
               console.error(
