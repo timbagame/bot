@@ -163,7 +163,7 @@ export class GameDatabase extends BaseDatabase {
       : "";
 
     const expiringParams = excludeAddresses.length
-      ? [...excludeAddresses, cutoffMs, limit]
+      ? [cutoffMs, ...excludeAddresses, limit]
       : [cutoffMs, limit];
     const expiring = this.all<GameData>(
       `SELECT * FROM games WHERE ${expireClause} ${excludeClause} ORDER BY expires_at ASC LIMIT ?`,
