@@ -19,7 +19,10 @@ const createConnectionStub = (
       lastValidBlockHeight: 1,
       blockhashCommitment: "confirmed",
     }),
-    getFeeForMessage: async () => 5000,
+    getFeeForMessage: async () => ({
+      context: { slot: 0 },
+      value: 5_000,
+    }),
     getRecentPrioritizationFees: async () => [
       { prioritizationFee: "1200000" } as any,
     ],
@@ -168,6 +171,81 @@ describe("FeeBudgetManager", () => {
       computeUnitLimit: 1_000,
     });
     result = await (positiveManager as any).estimatePriorityFee();
-    expect(result).toBeGreaterThan(0);
+    expect(result).toBe(2_500);
+  });
+
+  test("estimatePriorityFee uses percentile and clamps outliers", async () => {
+    const connection = createConnectionStub({
+      getRecentPrioritizationFees: async () =>
+        [
+          { prioritizationFee: "100000" },
+          { prioritizationFee: "150000" },
+          { prioritizationFee: "200000" },
+          { prioritizationFee: "1000000000" },
+        ] as any,
+    });
+    const manager = FeeBudgetManager.createForTest(connection, {
+      computeUnitLimit: 1_000,
+    });
+
+    const result = await (manager as any).estimatePriorityFee();
+    expect(result).toBe(200);
+  });
+
+  test("estimatePriorityFee selects upper sample when only two entries", async () => {
+    const connection = createConnectionStub({
+      getRecentPrioritizationFees: async () =>
+        [
+          { prioritizationFee: "100000" },
+          { prioritizationFee: "600000" },
+        ] as any,
+    });
+    const manager = FeeBudgetManager.createForTest(connection, {
+      computeUnitLimit: 1_000,
+    });
+
+    const result = await (manager as any).estimatePriorityFee();
+    expect(result).toBe(600);
+  });
+
+  test("estimatePriorityFee caps extreme percentile values", async () => {
+    const connection = createConnectionStub({
+      getRecentPrioritizationFees: async () =>
+        [
+          { prioritizationFee: "800000000" },
+          { prioritizationFee: "900000000" },
+          { prioritizationFee: "1000000000" },
+        ] as any,
+    });
+    const manager = FeeBudgetManager.createForTest(connection, {
+      computeUnitLimit: 1_000,
+    });
+
+    const result = await (manager as any).estimatePriorityFee();
+    expect(result).toBe(500_000);
+  });
+
+  test("computeSingleTransaction incorporates percentile-based priority fee", async () => {
+    const connection = createConnectionStub({
+      getFeeForMessage: async () => ({
+        context: { slot: 0 },
+        value: 1_000,
+      }),
+      getRecentPrioritizationFees: async () =>
+        [
+          { prioritizationFee: "100000" },
+          { prioritizationFee: "200000" },
+          { prioritizationFee: "4000000" },
+        ] as any,
+    });
+    const manager = FeeBudgetManager.createForTest(connection, {
+      singleTxMultiplier: 1,
+      singleTxExtraLamports: 0,
+      fallbackSingleTxLamports: 100,
+      computeUnitLimit: 1_000,
+    });
+
+    const result = await (manager as any).computeSingleTransaction();
+    expect(result).toBe(1_200);
   });
 });

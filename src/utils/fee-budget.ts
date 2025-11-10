@@ -9,6 +9,10 @@ import {
 import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
 
 const MICRO_LAMPORTS_PER_LAMPORT = 1_000_000;
+// Bias toward the high end of recent priority fees without inheriting the worst outlier.
+const PRIORITY_FEE_PERCENTILE = 0.9;
+// Roughly 0.0005 SOL ceiling to keep short-lived spikes from dominating the buffer.
+const PRIORITY_FEE_LAMPORT_CEILING = 500_000;
 
 type CacheKey = "single" | "wrap" | "jit" | "game";
 
@@ -408,8 +412,13 @@ export class FeeBudgetManager implements FeeBudgetProvider {
         instructions,
       }).compileToV0Message();
       const fee = await this.connection.getFeeForMessage(message);
-      if (typeof fee === "number" && Number.isFinite(fee) && fee > 0) {
-        return fee;
+      const lamports =
+        typeof fee === "number"
+          ? fee
+          : fee?.value ?? null;
+
+      if (typeof lamports === "number" && Number.isFinite(lamports) && lamports > 0) {
+        return lamports;
       }
     } catch (error) {
       console.warn("Failed to estimate transaction fee:", error);
@@ -426,19 +435,43 @@ export class FeeBudgetManager implements FeeBudgetProvider {
       if (!recent || recent.length === 0) {
         return 0;
       }
-      const maxMicroLamports = recent.reduce((max, entry) => {
-        const value = Number(entry.prioritizationFee ?? 0);
-        return value > max ? value : max;
-      }, 0);
 
-      if (!Number.isFinite(maxMicroLamports) || maxMicroLamports <= 0) {
+      const microLamports = recent
+        .map((entry) => Number(entry.prioritizationFee ?? 0))
+        .filter((value) => Number.isFinite(value) && value > 0);
+
+      if (microLamports.length === 0) {
         return 0;
       }
 
-      return Math.ceil(
-        (maxMicroLamports / MICRO_LAMPORTS_PER_LAMPORT) *
+      microLamports.sort((a, b) => a - b);
+
+      const desiredPercentileIndex =
+        Math.ceil(microLamports.length * PRIORITY_FEE_PERCENTILE) - 1;
+      const highestAllowedIndex =
+        microLamports.length > 2
+          ? microLamports.length - 2
+          : microLamports.length - 1;
+      const percentileIndex = Math.max(
+        0,
+        Math.min(highestAllowedIndex, desiredPercentileIndex)
+      );
+
+      const selectedMicroLamports = microLamports[percentileIndex];
+      if (selectedMicroLamports === undefined) {
+        return 0;
+      }
+
+      const lamports = Math.ceil(
+        (selectedMicroLamports / MICRO_LAMPORTS_PER_LAMPORT) *
           this.config.computeUnitLimit
       );
+
+      if (!Number.isFinite(lamports) || lamports <= 0) {
+        return 0;
+      }
+
+      return Math.min(lamports, PRIORITY_FEE_LAMPORT_CEILING);
     } catch (error) {
       console.warn("Failed to estimate priority fee:", error);
       return 0;
