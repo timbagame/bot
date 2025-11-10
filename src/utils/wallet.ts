@@ -64,6 +64,74 @@ type HttpFetch = (input: string, init?: any) => Promise<{
   json: () => Promise<any>;
 }>;
 
+const KEYPAIR_CACHE_MAX_ENTRIES = 1024;
+const KEYPAIR_CACHE_TTL_MS = 30 * 60 * 1000;
+
+type KeypairCacheEntry = {
+  keypair: Keypair;
+  accessedAt: number;
+};
+
+export type KeypairCacheOptions = {
+  capacity?: number;
+  ttlMs?: number;
+  timeNow?: () => number;
+};
+
+class KeypairCache {
+  private readonly cache = new Map<string, KeypairCacheEntry>();
+
+  constructor(
+    private readonly capacity = KEYPAIR_CACHE_MAX_ENTRIES,
+    private readonly ttlMs = KEYPAIR_CACHE_TTL_MS,
+    private readonly timeNow = () => Date.now()
+  ) {}
+
+  private now(): number {
+    return this.timeNow();
+  }
+
+  get(key: string): Keypair | undefined {
+    const entry = this.cache.get(key);
+    if (!entry) {
+      return undefined;
+    }
+
+    const current = this.now();
+    if (current - entry.accessedAt > this.ttlMs) {
+      this.cache.delete(key);
+      return undefined;
+    }
+
+    entry.accessedAt = current;
+    this.cache.delete(key);
+    this.cache.set(key, entry);
+
+    return entry.keypair;
+  }
+
+  set(key: string, keypair: Keypair): void {
+    const current = this.now();
+    this.cache.delete(key);
+    this.cache.set(key, { keypair, accessedAt: current });
+    this.trim();
+  }
+
+  private trim(): void {
+    while (this.cache.size > this.capacity) {
+      const oldestKey = this.cache.keys().next().value;
+      if (oldestKey === undefined) {
+        break;
+      }
+      this.cache.delete(oldestKey);
+    }
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+}
+
 type WalletDeps = {
   connection?: Connection;
   fetch?: HttpFetch;
@@ -150,7 +218,7 @@ export class WalletManager {
   private tokenDb: TokenDatabase;
 
   // Simplified caching
-  private keypairCache = new Map<string, Keypair>();
+  private keypairCache = new KeypairCache();
   private tokenMetadataCache: ExpiringCache<number>;
   private blockhashCache: {
     blockhash: string;
@@ -174,6 +242,16 @@ export class WalletManager {
   private approvedTokenBalanceCache = createExpiringCache<
     ApprovedTokenBalance[]
   >(WALLET_RPC_CACHE_TTL_MS);
+
+  public __test_setKeypairCacheConfig(
+    config: KeypairCacheOptions = {}
+  ): void {
+    this.keypairCache = new KeypairCache(
+      config.capacity ?? KEYPAIR_CACHE_MAX_ENTRIES,
+      config.ttlMs ?? KEYPAIR_CACHE_TTL_MS,
+      config.timeNow ?? (() => Date.now())
+    );
+  }
 
   private async probeTransactionAfterTimeout(
     signature: string
@@ -470,8 +548,9 @@ export class WalletManager {
       throw new Error("Missing Telegram id while deriving wallet – refusing to use fallback index 0");
     }
     const cacheKey = index.toString();
-    if (this.keypairCache.has(cacheKey)) {
-      return this.keypairCache.get(cacheKey)!;
+    const cached = this.keypairCache.get(cacheKey);
+    if (cached) {
+      return cached;
     }
 
     const seed = mnemonicToSeedSync(this.mnemonic, cacheKey);

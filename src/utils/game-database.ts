@@ -67,6 +67,7 @@ export class GameDatabase extends BaseDatabase {
     this.ensureGameParticipantSchema();
     this.ensurePlayerMappingSchema();
     this.ensureUsernameMappingSchema();
+    this.ensureGameSchema();
   }
 
   // Game methods
@@ -79,10 +80,35 @@ export class GameDatabase extends BaseDatabase {
     tokenTicker?: string,
     maxPlayers?: number,
     minPlayers?: number,
-    chatId?: number
+    chatId?: number,
+    timeoutSeconds?: number,
+    expiresAtMs?: number
   ): void {
+    const normalizedTimeoutSeconds =
+      typeof timeoutSeconds === "number" && Number.isFinite(timeoutSeconds)
+        ? timeoutSeconds
+        : null;
+
+    const normalizedExpiresAtMs =
+      typeof expiresAtMs === "number" && Number.isFinite(expiresAtMs)
+        ? expiresAtMs
+        : null;
+
     this.run(
-      "INSERT INTO games (game_address, creator_telegram_id, amount, created_at, game_type, token_mint, token_ticker, max_players, min_players, chat_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      `INSERT INTO games (
+          game_address,
+          creator_telegram_id,
+          amount,
+          created_at,
+          game_type,
+          token_mint,
+          token_ticker,
+          max_players,
+          min_players,
+          chat_id,
+          timeout_seconds,
+          expires_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         gameAddress,
         creatorTelegramId,
@@ -94,6 +120,8 @@ export class GameDatabase extends BaseDatabase {
         maxPlayers || null,
         minPlayers || null,
         chatId || null,
+        normalizedTimeoutSeconds,
+        normalizedExpiresAtMs,
       ],
       "saving game"
     );
@@ -122,6 +150,51 @@ export class GameDatabase extends BaseDatabase {
 
   public getAllGames(): GameData[] {
     return this.all<GameData>("SELECT * FROM games", [], "getting all games");
+  }
+
+  public getGamesExpiringBefore(
+    cutoffMs: number,
+    limit = 25,
+    excludeAddresses: string[] = []
+  ): GameData[] {
+    const expireClause = `status != 'completed' AND expires_at IS NOT NULL AND expires_at <= ?`;
+    const excludeClause = excludeAddresses.length
+      ? `AND game_address NOT IN (${excludeAddresses.map(() => "?").join(",")})`
+      : "";
+
+    const expiringParams = excludeAddresses.length
+      ? [cutoffMs, ...excludeAddresses, limit]
+      : [cutoffMs, limit];
+    const expiring = this.all<GameData>(
+      `SELECT * FROM games WHERE ${expireClause} ${excludeClause} ORDER BY expires_at ASC LIMIT ?`,
+      expiringParams,
+      "getting expiring games"
+    );
+
+    if (expiring.length >= limit) {
+      return expiring;
+    }
+
+    const remainingLimit = limit - expiring.length;
+    if (remainingLimit <= 0) {
+      return expiring;
+    }
+
+    const fallbackExcludeClause = excludeAddresses.length
+      ? `AND game_address NOT IN (${excludeAddresses.map(() => "?").join(",")})`
+      : "";
+
+    const fallbackParams = excludeAddresses.length
+      ? [...excludeAddresses, remainingLimit]
+      : [remainingLimit];
+
+    const fallback = this.all<GameData>(
+      `SELECT * FROM games WHERE status != 'completed' AND expires_at IS NULL ${fallbackExcludeClause} ORDER BY created_at ASC LIMIT ?`,
+      fallbackParams,
+      "getting games missing expiration"
+    );
+
+    return expiring.concat(fallback);
   }
 
   public getCreatorTelegramId(gameAddress: string): string | null {
@@ -469,6 +542,56 @@ export class GameDatabase extends BaseDatabase {
       );
     } catch (error) {
       console.error("Failed to ensure username_mappings schema:", error);
+    }
+  }
+
+  private ensureGameSchema(): void {
+    try {
+      const columns = this.all<{ name: string }>(
+        "PRAGMA table_info(games)",
+        [],
+        "reading games schema"
+      );
+      const columnNames = new Set(columns.map((col) => col.name));
+
+      if (!columnNames.has("timeout_seconds")) {
+        this.run(
+          "ALTER TABLE games ADD COLUMN timeout_seconds INTEGER",
+          [],
+          "adding timeout_seconds column to games"
+        );
+      }
+
+      if (!columnNames.has("expires_at")) {
+        this.run(
+          "ALTER TABLE games ADD COLUMN expires_at INTEGER",
+          [],
+          "adding expires_at column to games"
+        );
+      }
+
+      this.run(
+        "CREATE INDEX IF NOT EXISTS idx_games_chat_id ON games (chat_id)",
+        [],
+        "ensuring games chat_id index"
+      );
+      this.run(
+        "CREATE INDEX IF NOT EXISTS idx_games_creator_id ON games (creator_telegram_id)",
+        [],
+        "ensuring games creator index"
+      );
+      this.run(
+        "CREATE INDEX IF NOT EXISTS idx_games_winner_address ON games (winner_address)",
+        [],
+        "ensuring games winner address index"
+      );
+      this.run(
+        "CREATE INDEX IF NOT EXISTS idx_games_expires_at ON games (expires_at)",
+        [],
+        "ensuring games expires_at index"
+      );
+    } catch (error) {
+      console.error("Failed to ensure games schema:", error);
     }
   }
 

@@ -48,6 +48,43 @@ test("formatTokenBalance caps precision for large amounts", () => {
   expect(manager.formatTokenBalance(1234567890, 9)).toBe("1.234568");
 });
 
+test("getKeyPair remains consistent under concurrent cache evictions", async () => {
+  WalletManager.resetForTest();
+  const manager = WalletManager.getInstance(mnemonic);
+  const clock = { now: Date.now() };
+  manager.__test_setKeypairCacheConfig({
+    capacity: 2,
+    ttlMs: 5,
+    timeNow: () => clock.now,
+  });
+
+  manager.getKeyPair(7n);
+  clock.now += 10;
+
+  const concurrent = await Promise.all([
+    (async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      clock.now += 1;
+      return manager.getKeyPair(7n);
+    })(),
+    (async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      clock.now += 1;
+      return manager.getKeyPair(8n);
+    })(),
+    (async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      clock.now += 1;
+      return manager.getKeyPair(7n);
+    })(),
+  ]);
+
+  const expected = manager.getKeyPair(7n);
+  expect(concurrent[0].publicKey.toBase58()).toBe(expected.publicKey.toBase58());
+  expect(concurrent[2].publicKey.toBase58()).toBe(expected.publicKey.toBase58());
+  expect(concurrent[1].publicKey.toBase58()).not.toBe(expected.publicKey.toBase58());
+});
+
 test("getAdminKeypair throws when file missing", () => {
   WalletManager.resetForTest();
   const originalCwd = process.cwd();

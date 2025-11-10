@@ -1,4 +1,5 @@
 import { expect, test, beforeEach } from "bun:test";
+import type { GameData } from "../src/types";
 import { GameDatabase } from "../src/utils/game-database";
 import { GAME_CREATION_RATE_LIMIT_WINDOW_MS } from "../src/utils/constants";
 import { resetTestDatabase } from "./helpers/database";
@@ -134,6 +135,87 @@ test("savePlayerMapping normalizes inputs and ignores blanks", () => {
   db.savePlayerMapping("   ", "777");
   db.savePlayerMapping("valid", "   ");
   expect(db.getAllPlayerMappings().length).toBe(1);
+});
+
+test("getGamesExpiringBefore returns games with zero and large timeouts", () => {
+  const db = GameDatabase.getInstance();
+  const now = Date.now();
+  const zeroAddress = "game_zero_expiry";
+  const largeAddress = "game_large_expiry";
+
+  db.saveGame(
+    zeroAddress,
+    "creator_zero",
+    100,
+    "coinflip",
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    0,
+    now
+  );
+
+  const hugeTimeoutSeconds = 1_000_000_000;
+  db.saveGame(
+    largeAddress,
+    "creator_large",
+    200,
+    "coinflip",
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    hugeTimeoutSeconds,
+    now + hugeTimeoutSeconds * 1000
+  );
+
+  const immediate = db.getGamesExpiringBefore(now + 1000);
+  expect(immediate.map((g) => g.game_address)).toContain(zeroAddress);
+
+  const farFuture = now + hugeTimeoutSeconds * 1000 + 1_000;
+  const farResults = db.getGamesExpiringBefore(farFuture);
+  expect(farResults.map((g) => g.game_address)).toContain(largeAddress);
+});
+
+test("getGamesExpiringBefore can paginate large batches by excluding processed entries", () => {
+  const db = GameDatabase.getInstance();
+  const base = Date.now();
+  const total = 60;
+  const addresses = [];
+  for (let i = 0; i < total; i += 1) {
+    const addr = `paginated-${i}`;
+    addresses.push(addr);
+    db.saveGame(
+      addr,
+      `creator-${i}`,
+      50,
+      "coinflip",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      10,
+      base
+    );
+  }
+
+  const seen = new Set<string>();
+  const limit = 15;
+  let batch: GameData[] = [];
+  let excludes: string[] = [];
+  do {
+    batch = db.getGamesExpiringBefore(base + 1000, limit, excludes);
+    for (const game of batch) {
+      seen.add(game.game_address);
+      excludes.push(game.game_address);
+    }
+  } while (batch.length === limit);
+
+  expect(seen.size).toBe(total);
 });
 
 test("findTelegramIdByUsername normalizes usernames", () => {

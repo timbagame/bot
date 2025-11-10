@@ -29,6 +29,8 @@ export interface GameData {
   token_ticker?: string;
   max_players?: number;
   min_players?: number;
+  timeout_seconds?: number;
+  expires_at?: number;
 }
 
 export interface PlayerMapping {

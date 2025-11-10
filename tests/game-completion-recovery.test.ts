@@ -119,6 +119,66 @@ describe("Game completion recovery", () => {
     }
   });
 
+  test("fetch completion history continues after empty batches", async () => {
+    const gameAddress = createTestGameAddress();
+    const signatures = Array.from({ length: 6 }, (_, index) => ({
+      signature: `completion-${index}`,
+    }));
+
+    const transactionResponses: Array<{ meta: { logMessages: string[] } } | null> =
+      [
+        null,
+        null,
+        null,
+        null,
+        {
+          meta: {
+            logMessages: ["Program log for completion-4"],
+          },
+        },
+        null,
+      ];
+
+    let txCallCount = 0;
+
+    const connectionStub = {
+      getSignaturesForAddress: async () => signatures,
+      getTransaction: async () => {
+        const response = transactionResponses[txCallCount];
+        txCallCount += 1;
+        return response ?? null;
+      },
+    };
+
+    const originalGetConnection = botModule.wallet.getConnection.bind(
+      botModule.wallet
+    );
+
+    botModule.wallet.getConnection = () => connectionStub as any;
+
+    botModule.__test_setCompletionEventParserFactory(() => ({
+      *parseLogs(logs: string[] = []) {
+        if (logs.some((message) => message.includes("completion-4"))) {
+          yield createCompletionEvent(gameAddress);
+        }
+      },
+    } as any));
+
+    try {
+      const details = await botModule.__test_fetchCompletionDetailsFromHistory(
+        gameAddress
+      );
+
+      expect(details).toEqual({
+        winnerAddress: "WinnerPubkey",
+        totalPot: 24_000,
+        signature: "completion-4",
+      });
+    } finally {
+      botModule.wallet.getConnection = originalGetConnection;
+    }
+  });
+
   test("cleanup uses reconstructed completion details", async () => {
     const gameAddress = createTestGameAddress();
     const gameDb = botModule.__test_getGameDatabase();

@@ -2986,6 +2986,7 @@ export class GameManager {
     const safeRequestTimestamp = Number.isFinite(requestTimestampMs)
       ? Math.min(nowMs, Math.max(0, Math.trunc(requestTimestampMs)))
       : nowMs;
+    const expiresAtMs = safeRequestTimestamp + timeout * 1000;
 
     const windowStart = Math.max(
       nowMs - GAME_CREATION_RATE_LIMIT_WINDOW_MS,
@@ -3282,7 +3283,9 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         tokenTicker,
         maxTickets,
         minTickets,
-        chatId
+        chatId,
+        timeout,
+        expiresAtMs
       );
 
       // Auto-join logic based on game type
