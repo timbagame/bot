@@ -1830,6 +1830,8 @@ export class GameManager {
         };
       }
 
+      this.wallet.clearCachedWalletData?.(telegramBigInt);
+
       solBalance = await this.wallet.getBalance(telegramBigInt, {
         forceFresh: true,
       });
@@ -3162,6 +3164,8 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
           };
         }
 
+        this.wallet.clearCachedWalletData?.(telegramId);
+
         lamportsBalance = await this.wallet.getBalance(telegramId, {
           forceFresh: true,
         });
@@ -3833,6 +3837,8 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
                 )}. Please top up your tokens and try again.`,
               };
             }
+
+            this.wallet.clearCachedWalletData?.(telegramId);
 
             const refreshedLamports = await this.wallet.getBalance(telegramId, {
               forceFresh: true,
