@@ -192,6 +192,22 @@ describe("FeeBudgetManager", () => {
     expect(result).toBe(200);
   });
 
+  test("estimatePriorityFee selects upper sample when only two entries", async () => {
+    const connection = createConnectionStub({
+      getRecentPrioritizationFees: async () =>
+        [
+          { prioritizationFee: "100000" },
+          { prioritizationFee: "600000" },
+        ] as any,
+    });
+    const manager = FeeBudgetManager.createForTest(connection, {
+      computeUnitLimit: 1_000,
+    });
+
+    const result = await (manager as any).estimatePriorityFee();
+    expect(result).toBe(600);
+  });
+
   test("estimatePriorityFee caps extreme percentile values", async () => {
     const connection = createConnectionStub({
       getRecentPrioritizationFees: async () =>

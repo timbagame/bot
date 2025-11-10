@@ -446,12 +446,15 @@ export class FeeBudgetManager implements FeeBudgetProvider {
 
       microLamports.sort((a, b) => a - b);
 
-      const percentileIndex = Math.min(
-        microLamports.length - 1,
-        Math.max(
-          0,
-          Math.floor((microLamports.length - 1) * PRIORITY_FEE_PERCENTILE)
-        )
+      const desiredPercentileIndex =
+        Math.ceil(microLamports.length * PRIORITY_FEE_PERCENTILE) - 1;
+      const highestAllowedIndex =
+        microLamports.length > 2
+          ? microLamports.length - 2
+          : microLamports.length - 1;
+      const percentileIndex = Math.max(
+        0,
+        Math.min(highestAllowedIndex, desiredPercentileIndex)
       );
 
       const selectedMicroLamports = microLamports[percentileIndex];
