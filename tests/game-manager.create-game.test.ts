@@ -740,6 +740,101 @@ describe("GameManager.createGame", () => {
     (PDAManager as any).getGamePDA = original;
   });
 
+  test("creates game after SOL swap refreshes cached balance", async () => {
+    resetGM();
+    const playerKp = Keypair.generate();
+    const initialLamports = 100_000;
+    const refreshedLamports = 900_000;
+    const telegramId = 1n;
+    const balanceCalls: Array<{ forceFresh: boolean }> = [];
+    const clearedIds: bigint[] = [];
+    let cachedLamports: number | undefined = initialLamports;
+    const wallet = makeWallet({
+      getKeyPair: () => playerKp,
+      getTokenMetadata: async () => ({ decimals: 6 }),
+      getTokenBalance: async () => 2_000_000,
+      getBalance: async (_id: bigint, options: any = {}) => {
+        const forceFresh = options?.forceFresh === true;
+        balanceCalls.push({ forceFresh });
+        if (forceFresh) {
+          cachedLamports = refreshedLamports;
+          return refreshedLamports;
+        }
+        return cachedLamports ?? initialLamports;
+      },
+      clearCachedWalletData: (id: bigint) => {
+        clearedIds.push(id);
+        cachedLamports = undefined;
+      },
+      sendTransaction: async () => "SIG",
+    });
+    const saved: any[] = [];
+    const db = {
+      savePlayerMapping: () => {},
+      saveGame: (...args: any[]) => saved.push(args),
+      countActiveGamesByCreator: () => 0,
+      countRecentGamesByCreator: () => 0,
+    } as any;
+    const program = makeProgram(wallet.connection);
+    const gm = GameManager.getInstance(program, wallet, db);
+    (gm as any).feeBudget = {
+      getGameSafetyBufferLamports: async () => 800_000,
+    };
+    (gm as any).getGameCreationRentLamports = async () => 0;
+    let swapCalls = 0;
+    (gm as any).swapManager = {
+      performJustInTimeSolSwap: async () => {
+        swapCalls += 1;
+        return { swapped: true, lamportsReceived: refreshedLamports };
+      },
+    };
+    (gm as any).oracleClient = {
+      isHealthy: async () => true,
+      generateGameSecrets: async () => ({ randomHash: "cafebabe" }),
+      hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
+    };
+    const gameToken = Keypair.generate().publicKey;
+    const gameVault = Keypair.generate().publicKey;
+    const gameTokenAccount = Keypair.generate().publicKey;
+    const creatorTokenAccount = Keypair.generate().publicKey;
+    (gm as any).resolveGameTokenAccounts = async () => ({
+      tokenProgram: TOKEN_PROGRAM_ID,
+      gameToken,
+      gameVault,
+      gameTokenAccount,
+    });
+    (gm as any).deriveAta = async () => creatorTokenAccount;
+    const originalGetGamePda = (PDAManager as any).getGamePDA;
+    const fixedPda = new PublicKey("11111111111111111111111111111111");
+    (PDAManager as any).getGamePDA = () => fixedPda;
+    (gm as any).confirmTransactionWithRecovery = async () => "CONFIRMED";
+
+    try {
+      const result = await gm.createGame(
+        "giveaway",
+        { amount: 1_000_000, tokenMint: "11111111111111111111111111111111", tokenTicker: "TOK", isSol: false },
+        5,
+        1,
+        60,
+        telegramId
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.gameAddress).toBe(fixedPda.toBase58());
+      expect(saved.length).toBe(1);
+      expect(swapCalls).toBe(1);
+      expect(balanceCalls.some((call) => call.forceFresh)).toBe(true);
+      expect(balanceCalls[0]?.forceFresh).toBe(false);
+      expect(balanceCalls.at(-1)?.forceFresh).toBe(true);
+      expect(clearedIds).toContain(telegramId);
+      const cachedBalance = await wallet.getBalance(telegramId);
+      expect(cachedBalance).toBe(refreshedLamports);
+    } finally {
+      (PDAManager as any).getGamePDA = originalGetGamePda;
+      resetGM();
+    }
+  });
+
   test("prevents concurrent creations from exceeding active game cap", async () => {
     resetGM();
     const wallet = makeWallet({

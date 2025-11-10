@@ -1830,7 +1830,11 @@ export class GameManager {
         };
       }
 
-      solBalance = await this.wallet.getBalance(telegramBigInt);
+      this.wallet.clearCachedWalletData?.(telegramBigInt);
+
+      solBalance = await this.wallet.getBalance(telegramBigInt, {
+        forceFresh: true,
+      });
       if (solBalance < minSolBuffer) {
         return {
           success: false,
@@ -3160,7 +3164,12 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
           };
         }
 
-        lamportsBalance = await this.wallet.getBalance(telegramId);
+        this.wallet.clearCachedWalletData?.(telegramId);
+
+        lamportsBalance = await this.wallet.getBalance(telegramId, {
+          forceFresh: true,
+        });
+        solBalance = lamportsBalance;
         if (lamportsBalance < requiredSolReserveLamports) {
           return {
             success: false,
@@ -3829,7 +3838,13 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
               };
             }
 
-            const refreshedLamports = await this.wallet.getBalance(telegramId);
+            this.wallet.clearCachedWalletData?.(telegramId);
+
+            const refreshedLamports = await this.wallet.getBalance(telegramId, {
+              forceFresh: true,
+            });
+            lamportsBalance = refreshedLamports;
+            solBalance = refreshedLamports;
             if (refreshedLamports < minSolBuffer) {
               return {
                 success: false,
