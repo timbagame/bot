@@ -80,4 +80,42 @@ describe("trade amount helpers share validation", () => {
       })
     ).toThrow("Percentage results in zero amount");
   });
+
+  test("max SOL trades leave configured fee buffer behind", () => {
+    const solBalance = 1_000_000_000; // 1 SOL
+    const solFeeBufferLamports = 250_000_000; // 0.25 SOL rent+fees
+
+    const result = presentSpendAmount({
+      amount: "max",
+      assetTicker: "SOL",
+      decimals: 9,
+      solBalance,
+      tokenBalance: undefined,
+      formatSol: (lamports) => `${lamports} lamports`,
+      formatToken: () => "",
+      applySolFeeBuffer: true,
+      solFeeBufferLamports,
+    });
+
+    expect(solBalance - result.rawAmount).toBe(solFeeBufferLamports);
+  });
+
+  test("rejects SOL inputs that exceed spendable lamports", () => {
+    const solBalance = 1_000_000_000; // 1 SOL
+    const solFeeBufferLamports = 200_000_000; // Reserve for rent + fees
+
+    expect(() =>
+      presentSpendAmount({
+        amount: "1",
+        assetTicker: "SOL",
+        decimals: 9,
+        solBalance,
+        tokenBalance: undefined,
+        formatSol: (lamports) => `${lamports} lamports`,
+        formatToken: () => "",
+        applySolFeeBuffer: true,
+        solFeeBufferLamports,
+      })
+    ).toThrow("Insufficient SOL balance for this purchase");
+  });
 });

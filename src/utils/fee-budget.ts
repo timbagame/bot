@@ -18,8 +18,10 @@ export interface FeeBudgetProvider {
   getJitSwapFeeBufferLamports(): Promise<number>;
   getGameSafetyBufferLamports(): Promise<number>;
   getCachedSingleTransactionLamports(): number;
+  getCachedWrapFeeBufferLamports(): number;
   getCachedGameSafetyBufferLamports(): number;
   getDefaultSingleTransactionLamports(): number;
+  getDefaultWrapFeeBufferLamports(): number;
   getDefaultGameSafetyBufferLamports(): number;
 }
 
@@ -244,6 +246,13 @@ export class FeeBudgetManager implements FeeBudgetProvider {
     );
   }
 
+  public getCachedWrapFeeBufferLamports(): number {
+    return (
+      this.cache.peek("wrap") ??
+      FeeBudgetManager.getDefaultWrapFeeBufferLamports()
+    );
+  }
+
   public getCachedGameSafetyBufferLamports(): number {
     return (
       this.cache.peek("game") ??
@@ -253,6 +262,10 @@ export class FeeBudgetManager implements FeeBudgetProvider {
 
   public getDefaultSingleTransactionLamports(): number {
     return FeeBudgetManager.getDefaultSingleTransactionLamports();
+  }
+
+  public getDefaultWrapFeeBufferLamports(): number {
+    return FeeBudgetManager.getDefaultWrapFeeBufferLamports();
   }
 
   public getDefaultGameSafetyBufferLamports(): number {

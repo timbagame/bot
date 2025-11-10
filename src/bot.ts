@@ -146,18 +146,67 @@ const walletRpcLimiter = new SlidingWindowRateLimiter(
 );
 const feeBudget = FeeBudgetManager.getInstance(wallet.getConnection());
 let SOL_FEE_BUFFER_LAMPORTS = feeBudget.getCachedSingleTransactionLamports();
+let SOL_WRAP_RENT_RESERVE_LAMPORTS =
+  feeBudget.getCachedWrapFeeBufferLamports();
 export const __test_getSolFeeBufferLamports = (): number =>
   SOL_FEE_BUFFER_LAMPORTS;
 export const __test_setSolFeeBufferLamports = (value: number): void => {
   SOL_FEE_BUFFER_LAMPORTS = value;
 };
+export const __test_getSolWrapRentReserveLamports = (): number =>
+  SOL_WRAP_RENT_RESERVE_LAMPORTS;
+export const __test_setSolWrapRentReserveLamports = (value: number): void => {
+  SOL_WRAP_RENT_RESERVE_LAMPORTS = value;
+};
+
+const getSolWrapRentReserveLamports = async (): Promise<number> => {
+  if (
+    Number.isFinite(SOL_WRAP_RENT_RESERVE_LAMPORTS) &&
+    SOL_WRAP_RENT_RESERVE_LAMPORTS > 0
+  ) {
+    return SOL_WRAP_RENT_RESERVE_LAMPORTS;
+  }
+
+  try {
+    const wrapLamports = await feeBudget.getWrapFeeBufferLamports();
+    if (Number.isFinite(wrapLamports) && wrapLamports > 0) {
+      SOL_WRAP_RENT_RESERVE_LAMPORTS = wrapLamports;
+      return wrapLamports;
+    }
+  } catch (error) {
+    console.warn(
+      "Failed to refresh SOL wrap rent reserve from fee budget:",
+      error
+    );
+  }
+
+  const fallback = feeBudget.getDefaultWrapFeeBufferLamports();
+  SOL_WRAP_RENT_RESERVE_LAMPORTS = fallback;
+  return fallback;
+};
 
 void (async () => {
   try {
-    const { singleTransactionLamports } = await refreshDynamicFeeBudgets(feeBudget);
+    const { singleTransactionLamports } = await refreshDynamicFeeBudgets(
+      feeBudget
+    );
     SOL_FEE_BUFFER_LAMPORTS = singleTransactionLamports;
   } catch (error) {
     console.warn("Failed to refresh dynamic fee budgets during startup:", error);
+  }
+
+  try {
+    const wrapLamports = await feeBudget.getWrapFeeBufferLamports();
+    if (Number.isFinite(wrapLamports) && wrapLamports > 0) {
+      SOL_WRAP_RENT_RESERVE_LAMPORTS = wrapLamports;
+    }
+  } catch (error) {
+    console.warn(
+      "Failed to refresh wrap fee buffer during startup, using fallback:",
+      error
+    );
+    SOL_WRAP_RENT_RESERVE_LAMPORTS =
+      feeBudget.getDefaultWrapFeeBufferLamports();
   }
 })();
 let gameDb = GameDatabase.getInstance();
@@ -751,6 +800,19 @@ const prepareTokenTradeQuote = async ({
     Promise.resolve(outputFactory(factoryContext)),
   ]);
 
+  const shouldApplySolFeeBuffer =
+    inputAsset.applySolFeeBuffer ?? inputAsset.ticker === "SOL";
+
+  let solFeeBufferLamports: number | undefined;
+  if (shouldApplySolFeeBuffer) {
+    solFeeBufferLamports = SOL_FEE_BUFFER_LAMPORTS;
+
+    if (inputAsset.ticker === "SOL") {
+      const rentReserveLamports = await getSolWrapRentReserveLamports();
+      solFeeBufferLamports += rentReserveLamports;
+    }
+  }
+
   const amountResolution = presentSpendAmount({
     amount: amountInput,
     assetTicker: inputAsset.ticker,
@@ -759,8 +821,10 @@ const prepareTokenTradeQuote = async ({
     tokenBalance: inputAsset.tokenBalance,
     formatSol: (lamports) => wallet.formatSolBalance(lamports),
     formatToken: (value, decimals) => wallet.formatTokenBalance(value, decimals),
-    applySolFeeBuffer:
-      inputAsset.applySolFeeBuffer ?? inputAsset.ticker === "SOL",
+    applySolFeeBuffer: shouldApplySolFeeBuffer,
+    ...(solFeeBufferLamports !== undefined
+      ? { solFeeBufferLamports }
+      : {}),
   });
 
   const preparedContext: PreparedTradeQuoteContext = {
