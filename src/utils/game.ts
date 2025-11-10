@@ -599,8 +599,14 @@ export class GameManager {
       return;
     }
 
+    const normalized = this.normalizeUsernameForLookup(trimmedUsername);
+    if (!normalized) {
+      return;
+    }
+
     this.cacheTelegramIdForUsername(trimmedId, trimmedUsername);
     this.usernameHints.set(trimmedId, trimmedUsername);
+    this.gameDb.saveUsernameMapping(normalized, trimmedId, trimmedUsername);
   }
 
   public primeUsernameCache(
