@@ -136,6 +136,49 @@ test("savePlayerMapping normalizes inputs and ignores blanks", () => {
   expect(db.getAllPlayerMappings().length).toBe(1);
 });
 
+test("getGamesExpiringBefore returns games with zero and large timeouts", () => {
+  const db = GameDatabase.getInstance();
+  const now = Date.now();
+  const zeroAddress = "game_zero_expiry";
+  const largeAddress = "game_large_expiry";
+
+  db.saveGame(
+    zeroAddress,
+    "creator_zero",
+    100,
+    "coinflip",
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    0,
+    now
+  );
+
+  const hugeTimeoutSeconds = 1_000_000_000;
+  db.saveGame(
+    largeAddress,
+    "creator_large",
+    200,
+    "coinflip",
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    hugeTimeoutSeconds,
+    now + hugeTimeoutSeconds * 1000
+  );
+
+  const immediate = db.getGamesExpiringBefore(now + 1000);
+  expect(immediate.map((g) => g.game_address)).toContain(zeroAddress);
+
+  const farFuture = now + hugeTimeoutSeconds * 1000 + 1_000;
+  const farResults = db.getGamesExpiringBefore(farFuture);
+  expect(farResults.map((g) => g.game_address)).toContain(largeAddress);
+});
+
 test("findTelegramIdByUsername normalizes usernames", () => {
   const db = GameDatabase.getInstance();
 
