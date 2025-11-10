@@ -2557,7 +2557,7 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
 
 
 const TIP_USAGE_MESSAGE =
-  "Usage: Reply to a user's message or use /tip @username <amount> [TOKEN]";
+  "Usage: Reply to a user's message or use /tip @username &lt;amount&gt; [TOKEN]";
 
 type TipMentionTokenInfo = {
   index: number | null;
