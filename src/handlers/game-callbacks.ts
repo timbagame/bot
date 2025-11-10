@@ -56,6 +56,13 @@ export type GameCallbacksModuleDeps = {
   gameSetupCopy: Record<"coinflip" | "giveaway", GameSetupCopy>;
 };
 
+type HandleJoinGameFn = (
+  ctx: Context,
+  gamePda: PublicKey,
+  telegramId: bigint,
+  game: any
+) => Promise<void>;
+
 export type GameCallbacksModule = {
   registerHandlers: () => void;
   createTextInputMiddleware: () => MiddlewareFn<Context>;
@@ -64,6 +71,7 @@ export type GameCallbacksModule = {
     next: NextFunction
   ) => Promise<void>;
   __test_shouldSkipGenericGameCallback: (callbackData: string) => boolean;
+  __test_handleJoinGame: HandleJoinGameFn;
 };
 
 const toTitleCase = (value: string): string => {
@@ -1499,6 +1507,7 @@ export const createGameCallbacksModule = (
     registerHandlers,
     createTextInputMiddleware,
     __test_handleGameSetupTextInput: handleGameSetupTextInput,
+    __test_handleJoinGame: handleJoinGame,
     __test_shouldSkipGenericGameCallback: shouldSkipGenericGameCallback,
   };
 };
