@@ -72,13 +72,24 @@ type KeypairCacheEntry = {
   accessedAt: number;
 };
 
+export type KeypairCacheOptions = {
+  capacity?: number;
+  ttlMs?: number;
+  timeNow?: () => number;
+};
+
 class KeypairCache {
   private readonly cache = new Map<string, KeypairCacheEntry>();
 
   constructor(
     private readonly capacity = KEYPAIR_CACHE_MAX_ENTRIES,
-    private readonly ttlMs = KEYPAIR_CACHE_TTL_MS
+    private readonly ttlMs = KEYPAIR_CACHE_TTL_MS,
+    private readonly timeNow = () => Date.now()
   ) {}
+
+  private now(): number {
+    return this.timeNow();
+  }
 
   get(key: string): Keypair | undefined {
     const entry = this.cache.get(key);
@@ -86,12 +97,13 @@ class KeypairCache {
       return undefined;
     }
 
-    if (Date.now() - entry.accessedAt > this.ttlMs) {
+    const current = this.now();
+    if (current - entry.accessedAt > this.ttlMs) {
       this.cache.delete(key);
       return undefined;
     }
 
-    entry.accessedAt = Date.now();
+    entry.accessedAt = current;
     this.cache.delete(key);
     this.cache.set(key, entry);
 
@@ -99,8 +111,9 @@ class KeypairCache {
   }
 
   set(key: string, keypair: Keypair): void {
+    const current = this.now();
     this.cache.delete(key);
-    this.cache.set(key, { keypair, accessedAt: Date.now() });
+    this.cache.set(key, { keypair, accessedAt: current });
     this.trim();
   }
 
@@ -229,6 +242,16 @@ export class WalletManager {
   private approvedTokenBalanceCache = createExpiringCache<
     ApprovedTokenBalance[]
   >(WALLET_RPC_CACHE_TTL_MS);
+
+  public __test_setKeypairCacheConfig(
+    config: KeypairCacheOptions = {}
+  ): void {
+    this.keypairCache = new KeypairCache(
+      config.capacity ?? KEYPAIR_CACHE_MAX_ENTRIES,
+      config.ttlMs ?? KEYPAIR_CACHE_TTL_MS,
+      config.timeNow ?? (() => Date.now())
+    );
+  }
 
   private async probeTransactionAfterTimeout(
     signature: string

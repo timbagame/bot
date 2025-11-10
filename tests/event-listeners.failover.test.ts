@@ -62,6 +62,34 @@ let nextListenerId: number;
     expect(after.programEventListenersReady).toBe(false);
   });
 
+  test("cleans up listeners when registration fails", async () => {
+    addCalls = [];
+    removeCalls = [];
+    nextListenerId = 1;
+
+    const failingProgram = {
+      addEventListener: async (eventName: string) => {
+        addCalls.push(eventName);
+        if (eventName === "playerJoined") {
+          throw new Error("boom");
+        }
+        return nextListenerId++;
+      },
+      removeEventListener: async (id: number) => {
+        removeCalls.push(id);
+      },
+    };
+
+    __test_setProgram(failingProgram as any);
+
+    await expect(__test_registerProgramEventListeners()).rejects.toThrow("boom");
+
+    expect(addCalls).toEqual(["gameCompleted", "playerJoined"]);
+    expect(removeCalls).toEqual([1]);
+    const state = __test_getProgramEventListenerState();
+    expect(state.programEventListenersReady).toBe(false);
+  });
+
   test("restarts listeners when RPC endpoint changes", async () => {
     const callbacks: Array<(change: ActiveEndpointChange) => void> = [];
     (wallet as any).onRpcEndpointChange = (

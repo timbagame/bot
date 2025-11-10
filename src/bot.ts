@@ -1567,18 +1567,24 @@ const registerProgramEventListeners = async (): Promise<void> => {
 
   await unregisterProgramEventListeners();
 
-  for (const descriptor of programEventDescriptors) {
-    console.log(`Setting up ${descriptor.label} event listener...`);
-    const listenerId = (await program.addEventListener(
-      descriptor.eventName,
-      descriptor.handler as any
-    )) as number;
-    descriptor.setId(listenerId);
-    console.log(`${descriptor.label} event listener set up successfully`);
-  }
+  try {
+    for (const descriptor of programEventDescriptors) {
+      console.log(`Setting up ${descriptor.label} event listener...`);
+      const listenerId = (await program.addEventListener(
+        descriptor.eventName,
+        descriptor.handler as any
+      )) as number;
+      descriptor.setId(listenerId);
+      console.log(`${descriptor.label} event listener set up successfully`);
+    }
 
-  console.log("Program event listeners set up successfully");
-  programEventListenersReady = true;
+    console.log("Program event listeners set up successfully");
+    programEventListenersReady = true;
+  } catch (error) {
+    console.error("❌ Failed to register program event listeners:", error);
+    await unregisterProgramEventListeners();
+    throw error;
+  }
 };
 
 const attachRpcEndpointFailoverHandler = (): void => {
