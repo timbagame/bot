@@ -203,7 +203,7 @@ describe("FeeBudgetManager", () => {
     });
 
     const result = await (manager as any).estimatePriorityFee();
-    expect(result).toBe(500_000);
+    expect(result).toBe(50_000);
   });
 
   test("computeSingleTransaction incorporates percentile-based priority fee", async () => {

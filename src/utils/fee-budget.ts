@@ -11,8 +11,8 @@ import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
 const MICRO_LAMPORTS_PER_LAMPORT = 1_000_000;
 // Bias toward the high end of recent priority fees without inheriting the worst outlier.
 const PRIORITY_FEE_PERCENTILE = 0.9;
-// Roughly 0.5 SOL ceiling to keep short-lived spikes from dominating the buffer.
-const PRIORITY_FEE_LAMPORT_CEILING = 500_000;
+// Roughly 0.00005 SOL ceiling to keep short-lived spikes from dominating the buffer.
+const PRIORITY_FEE_LAMPORT_CEILING = 50_000;
 
 type CacheKey = "single" | "wrap" | "jit" | "game";
 
