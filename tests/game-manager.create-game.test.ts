@@ -745,7 +745,10 @@ describe("GameManager.createGame", () => {
     const playerKp = Keypair.generate();
     const initialLamports = 100_000;
     const refreshedLamports = 900_000;
+    const telegramId = 1n;
     const balanceCalls: Array<{ forceFresh: boolean }> = [];
+    const clearedIds: bigint[] = [];
+    let cachedLamports: number | undefined = initialLamports;
     const wallet = makeWallet({
       getKeyPair: () => playerKp,
       getTokenMetadata: async () => ({ decimals: 6 }),
@@ -753,7 +756,15 @@ describe("GameManager.createGame", () => {
       getBalance: async (_id: bigint, options: any = {}) => {
         const forceFresh = options?.forceFresh === true;
         balanceCalls.push({ forceFresh });
-        return forceFresh ? refreshedLamports : initialLamports;
+        if (forceFresh) {
+          cachedLamports = refreshedLamports;
+          return refreshedLamports;
+        }
+        return cachedLamports ?? initialLamports;
+      },
+      clearCachedWalletData: (id: bigint) => {
+        clearedIds.push(id);
+        cachedLamports = undefined;
       },
       sendTransaction: async () => "SIG",
     });
@@ -805,7 +816,7 @@ describe("GameManager.createGame", () => {
         5,
         1,
         60,
-        1n
+        telegramId
       );
 
       expect(result.success).toBe(true);
@@ -813,6 +824,11 @@ describe("GameManager.createGame", () => {
       expect(saved.length).toBe(1);
       expect(swapCalls).toBe(1);
       expect(balanceCalls.some((call) => call.forceFresh)).toBe(true);
+      expect(balanceCalls[0]?.forceFresh).toBe(false);
+      expect(balanceCalls.at(-1)?.forceFresh).toBe(true);
+      expect(clearedIds).toContain(telegramId);
+      const cachedBalance = await wallet.getBalance(telegramId);
+      expect(cachedBalance).toBe(refreshedLamports);
     } finally {
       (PDAManager as any).getGamePDA = originalGetGamePda;
       resetGM();
