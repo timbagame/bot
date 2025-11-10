@@ -2536,10 +2536,6 @@ const getTipMentionTokenInfo = (
 const TELEGRAM_USERNAME_LOOKUP_COOLDOWN_MS = 30_000;
 const telegramUsernameLookupCooldown =
   createExpiringCache<boolean>(TELEGRAM_USERNAME_LOOKUP_COOLDOWN_MS);
-const telegramUsernameLookupInflight = new Map<
-  string,
-  Promise<string | null>
->();
 
 const normalizeTelegramUsernameForLookup = (
   username: string
@@ -2566,73 +2562,19 @@ const resolveTelegramUsername = async (
   ctx: Context,
   username: string
 ): Promise<string | null> => {
-  const api = ctx.api as { getChat?: (id: string) => Promise<any> } | undefined;
-  if (!api) {
-    return null;
-  }
-
-  const getChat = api.getChat;
-  if (typeof getChat !== "function") {
-    return null;
-  }
-
   const normalized = normalizeTelegramUsernameForLookup(username);
   if (!normalized) {
     return null;
   }
 
-  const { sanitized, normalizedKey } = normalized;
+  const { normalizedKey } = normalized;
 
   if (telegramUsernameLookupCooldown.has(normalizedKey)) {
     return null;
   }
 
-  const existing = telegramUsernameLookupInflight.get(normalizedKey);
-  if (existing) {
-    return existing;
-  }
-
-  const lookupPromise = (async () => {
-    try {
-      const chat = await getChat.call(api, sanitized);
-      const rawId = (chat as any)?.id;
-      let resolvedId: string | null = null;
-
-      if (typeof rawId === "number" || typeof rawId === "bigint") {
-        resolvedId = rawId.toString();
-      } else if (typeof rawId === "string") {
-        resolvedId = rawId.trim();
-      }
-
-      if (!resolvedId || !/^\d+$/.test(resolvedId)) {
-        return null;
-      }
-
-      gameManager.cacheTelegramIdForUsername(resolvedId, sanitized);
-      gameManager.primeUsernameCache(ctx, resolvedId, sanitized);
-
-      return resolvedId;
-    } catch (error: any) {
-      if (error && typeof error === "object" && "error_code" in error) {
-        if ((error as any).error_code === 429) {
-          telegramUsernameLookupCooldown.setWithTTL(normalizedKey, true);
-        }
-      }
-      return null;
-    }
-  })();
-
-  telegramUsernameLookupInflight.set(normalizedKey, lookupPromise);
-
-  try {
-    const resolved = await lookupPromise;
-    if (!resolved) {
-      telegramUsernameLookupCooldown.setWithTTL(normalizedKey, true);
-    }
-    return resolved;
-  } finally {
-    telegramUsernameLookupInflight.delete(normalizedKey);
-  }
+  telegramUsernameLookupCooldown.setWithTTL(normalizedKey, true);
+  return null;
 };
 
 const handleTipCommand = async (ctx: Context): Promise<void> => {
