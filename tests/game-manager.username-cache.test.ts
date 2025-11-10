@@ -58,6 +58,8 @@ test("getUsernameFromTelegramId shares in-flight lookups", async () => {
 
   const gameDb = {
     getGameParticipants: () => [] as string[],
+    saveUsernameMapping: () => {},
+    findTelegramIdByNormalizedUsername: () => null,
   } as any;
 
   const gm = GameManager.getInstance(program, wallet, gameDb);

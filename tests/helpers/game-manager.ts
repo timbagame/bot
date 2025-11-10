@@ -23,8 +23,7 @@ type CtxStubOptions = {
 };
 
 export function resetGameManager(): void {
-  // @ts-ignore
-  GameManager["instance"] = undefined;
+  GameManager.resetForTest();
 }
 
 export function makeProgramStub(gameAccount: any = {}): any {
@@ -75,8 +74,54 @@ export function makeDbStub(options: DbStubOptions = {}): any {
     extra = {},
   } = options;
 
+  const normalizeKey = (value: string): string => value.trim().toLowerCase();
+  const normalizedUsernameToId: Record<string, string> = {};
+  const registerNormalized = (key: string, value: string) => {
+    const normalized = normalizeKey(key);
+    if (normalized.length === 0) {
+      return;
+    }
+    normalizedUsernameToId[normalized] = value;
+  };
+  Object.entries(usernameToId).forEach(([key, value]) => {
+    registerNormalized(key, value);
+    if (key.startsWith("@")) {
+      registerNormalized(key.slice(1), value);
+    }
+  });
+
   const savedMessages: Array<{ address: string; messageId: number; chatId: number }> = [];
   const clearedMessages: string[] = [];
+
+  const saveUsernameMapping = (
+    normalizedUsername: string,
+    telegramId: string,
+    displayName?: string | null
+  ) => {
+    if (!normalizedUsername || !/^\d+$/.test(telegramId)) {
+      return;
+    }
+    const normalized = normalizeKey(normalizedUsername);
+    if (normalized.length === 0) {
+      return;
+    }
+    normalizedUsernameToId[normalized] = telegramId;
+    usernameToId[normalized] = telegramId;
+    usernameToId[`@${normalized}`] = telegramId;
+    if (displayName && displayName.trim().length > 0) {
+      displayNameByTelegram[telegramId] = displayName.trim();
+    }
+  };
+
+  const findTelegramIdByNormalizedUsername = (
+    normalizedUsername: string
+  ): string | null => {
+    if (!normalizedUsername) {
+      return null;
+    }
+    const normalized = normalizeKey(normalizedUsername);
+    return normalizedUsernameToId[normalized] ?? null;
+  };
 
   return {
     getGameParticipants: (_addr: string) => participants,
@@ -106,6 +151,10 @@ export function makeDbStub(options: DbStubOptions = {}): any {
       if (normalized.length === 0) {
         return null;
       }
+      const normalizedLookup = findTelegramIdByNormalizedUsername(normalized);
+      if (normalizedLookup) {
+        return normalizedLookup;
+      }
       const direct = usernameToId[normalized];
       if (direct) {
         return direct;
@@ -113,6 +162,8 @@ export function makeDbStub(options: DbStubOptions = {}): any {
       const withAt = usernameToId["@" + normalized];
       return withAt ?? null;
     },
+    saveUsernameMapping,
+    findTelegramIdByNormalizedUsername,
     clearGameMessage: (address: string) => {
       clearedMessages.push(address);
     },

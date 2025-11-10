@@ -3,8 +3,7 @@ import { PublicKey } from "@solana/web3.js";
 import { GameManager } from "../src/utils/game";
 
 function resetGM() {
-  // @ts-ignore
-  GameManager["instance"] = undefined;
+  GameManager.resetForTest();
 }
 
 function programStub(gameAccount: any) {
@@ -31,6 +30,8 @@ function dbStub(overrides: Partial<any> = {}, participants: string[] = []) {
     getPlayerTelegramId: (pk: string) => ({
       WINNER111: "999",
     } as Record<string, string>)[pk] || null,
+    saveUsernameMapping: () => {},
+    findTelegramIdByNormalizedUsername: () => null,
   } as any;
 }
 
