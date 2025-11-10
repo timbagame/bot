@@ -21,10 +21,10 @@ type OracleConfigOverrides = {
 
 const DEFAULT_ORACLE_CONFIG: OracleConfig = {
   feePercentage: 1,
-  oracleBufferTime: new anchor.BN(900),
+  oracleBufferTime: new anchor.BN(1800),
   maxTickets: 100,
   maxTimeout: new anchor.BN(86400),
-  minTimeout: new anchor.BN(60),
+  minTimeout: new anchor.BN(300),
 };
 
 const toBN = (value: BNLike | bigint | number | undefined): BNLike => {
