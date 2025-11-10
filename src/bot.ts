@@ -1769,28 +1769,41 @@ const fetchCompletionDetailsFromHistory = async (
     }
 
     const parser = completionEventParserFactory();
+    const concurrency = 4;
 
-    for (const { signature } of signatures) {
-      if (!signature) {
-        continue;
-      }
-
-      const transaction = await connection.getTransaction(signature, {
-        commitment: "confirmed",
-        maxSupportedTransactionVersion: 0,
-      });
-
-      const parsed = parseCompletionEventFromLogs(
-        transaction?.meta?.logMessages ?? null,
-        parser,
-        gameAddress
+    for (let index = 0; index < signatures.length; index += concurrency) {
+      const window = signatures.slice(index, index + concurrency);
+      const transactions = await Promise.all(
+        window.map(({ signature }) =>
+          signature
+            ? connection.getTransaction(signature, {
+                commitment: "confirmed",
+                maxSupportedTransactionVersion: 0,
+              })
+            : Promise.resolve(null)
+        )
       );
 
-      if (parsed) {
-        return {
-          ...parsed,
-          signature,
-        };
+      for (let txIndex = 0; txIndex < window.length; txIndex += 1) {
+        const entry = window[txIndex];
+        const signature = entry?.signature;
+        const transaction = transactions[txIndex];
+        if (!entry || !signature || !transaction) {
+          continue;
+        }
+
+        const parsed = parseCompletionEventFromLogs(
+          transaction.meta?.logMessages ?? null,
+          parser,
+          gameAddress
+        );
+
+        if (parsed) {
+          return {
+            ...parsed,
+            signature,
+          };
+        }
       }
     }
   } catch (error) {
