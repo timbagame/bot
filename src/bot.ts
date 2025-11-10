@@ -2085,8 +2085,9 @@ const validateAndProcessTransaction = async (
           metadata.decimals
         )} ${DEFAULT_TOKEN_TICKER}`;
 
+    const balanceLabel = isSol ? "SOL" : DEFAULT_TOKEN_TICKER;
     await ctx.reply(
-      `Insufficient balance. You have ${balanceStr} but need ${needStr}`,
+      `❌ Not enough ${balanceLabel}. You have ${balanceStr} but need ${needStr}. Add more ${balanceLabel} or lower the amount and try again.`,
       {
         reply_to_message_id: ctx.message?.message_id,
       }

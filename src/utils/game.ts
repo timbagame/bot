@@ -17,7 +17,7 @@ import { WalletManager } from "./wallet";
 import { GameDatabase } from "./game-database";
 import { OracleClient } from "./oracle";
 import { PDAManager } from "./pda";
-import { formatUserFriendlyError } from "./errors";
+import { buildFriendlyShortfallMessage, formatUserFriendlyError } from "./errors";
 import {
   formatUsdValue as formatUsdValueText,
   formatCompactTokenDisplay,
@@ -33,7 +33,6 @@ import {
   MAX_GAMES_PER_CREATOR_WINDOW,
   WSOL_MINT,
   DEFAULT_TOKEN_TICKER,
-  LAMPORTS_PER_SOL,
   getCoinflipVideoId,
   getGiveawayVideoId,
   TELEGRAM_USERNAME_CACHE_TTL_MS,
@@ -1378,41 +1377,21 @@ export class GameManager {
     }
   }
 
-  private formatLamportsForDisplay(lamports: number): string {
-    if (typeof (this.wallet as any).formatSolBalance === "function") {
-      const formatted = (this.wallet as any).formatSolBalance(lamports);
-      return `${formatted} SOL`;
-    }
-    return `${(lamports / LAMPORTS_PER_SOL).toFixed(6)} SOL`;
-  }
-
   private buildSolShortfallMessage(options: {
     currentLamports: number;
     requiredLamports: number;
-    reason: string;
+    reason?: string;
     nextSteps?: string;
   }): string {
     const { currentLamports, requiredLamports, reason, nextSteps } = options;
     const missingLamports = Math.max(requiredLamports - currentLamports, 0);
-    const currentRaw = this.formatLamportsForDisplay(Math.max(currentLamports, 0));
-    const requiredRaw = this.formatLamportsForDisplay(Math.max(requiredLamports, 0));
-    const missingRaw = this.formatLamportsForDisplay(missingLamports);
 
-    const stepsRaw = nextSteps ?? "Top up the shortfall and try again.";
-    const current = escapeHtml(currentRaw);
-    const required = escapeHtml(requiredRaw);
-    const missing = escapeHtml(missingRaw);
-    const safeReason = escapeHtml(reason);
-    const safeSteps = escapeHtml(stepsRaw);
-
-    return (
-      `💰 Insufficient SOL!\n\n` +
-      `Current balance: ${current}\n` +
-      `Required reserve: ${required}\n` +
-      `Shortfall: ${missing}\n\n` +
-      `Why: ${safeReason}.\n` +
-      safeSteps
-    );
+    return buildFriendlyShortfallMessage({
+      missingLamports,
+      walletManager: this.wallet,
+      reason,
+      action: nextSteps,
+    });
   }
 
   private async confirmTransactionWithRecovery(
@@ -1656,9 +1635,7 @@ export class GameManager {
           currentLamports: currentSolBalance,
           requiredLamports: requiredReserve,
           reason: "Wrapping this amount would leave too little SOL for rent and fees",
-          nextSteps: `Add ${this.formatLamportsForDisplay(
-            requiredReserve - currentSolBalance
-          )} or reduce the stake to continue.`,
+          nextSteps: "Add more SOL or reduce the amount to continue.",
         }),
       };
     }
@@ -1745,9 +1722,7 @@ export class GameManager {
           currentLamports: updatedSolBalance,
           requiredLamports: minSolBuffer,
           reason: "Wrapping reduced your SOL below the fee reserve threshold",
-          nextSteps: `Add ${this.formatLamportsForDisplay(
-            minSolBuffer - updatedSolBalance
-          )} before trying again.`,
+          nextSteps: "Add more SOL before trying again.",
         }),
       };
     }
@@ -1852,9 +1827,7 @@ export class GameManager {
             currentLamports: solBalance,
             requiredLamports: minSolBuffer,
             reason: "Just-in-time swap did not leave enough SOL for the rent and fee reserve",
-            nextSteps: `Add ${this.formatLamportsForDisplay(
-              minSolBuffer - solBalance
-            )} to continue.`,
+            nextSteps: "Add more SOL to continue.",
           }),
         };
       }
@@ -3105,10 +3078,10 @@ export class GameManager {
         const safeTokenBalance = escapeHtml(friendlyTokenBalance);
         const safeRequired = escapeHtml(friendlyRequired);
         const safeTicker = escapeHtml(tokenTicker);
-        const safeSolBalance = escapeHtml(friendlySolBalance);
-        let errorMessage = `Insufficient balance. You have ${safeTokenBalance} ${safeTicker} but need ${safeRequired} ${safeTicker}`;
+        let errorMessage = `❌ Not enough ${safeTicker}. You have ${safeTokenBalance} but need ${safeRequired}.`;
+        errorMessage += ` Add more ${safeTicker} or lower the amount and try again.`;
         if (requestedSol) {
-          errorMessage += `.\nDetected native SOL balance: ${safeSolBalance} SOL. If SOL was recently deposited, wait for confirmation and try again.`;
+          errorMessage += ` If you recently deposited SOL, wait for confirmation before trying again.`;
         }
         return {
           success: false,
@@ -3130,9 +3103,8 @@ export class GameManager {
             currentLamports: solBalance,
             requiredLamports: requiredSolReserveLamports,
             reason: "Creating a game requires a SOL reserve for rent and fees",
-            nextSteps: `Add ${this.formatLamportsForDisplay(
-              requiredSolReserveLamports - solBalance
-            )} or deposit additional ${tokenTicker} to swap for fees before trying again.`,
+            nextSteps:
+              "Add more SOL or swap extra tokens for fees before trying again.",
           });
 
           const safeStake = escapeHtml(formattedStake);
@@ -3204,9 +3176,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
               currentLamports: lamportsBalance,
               requiredLamports: requiredSolReserveLamports,
               reason: "Just-in-time swap did not leave enough SOL for the rent and fee reserve",
-              nextSteps: `Add ${this.formatLamportsForDisplay(
-                requiredSolReserveLamports - lamportsBalance
-              )} to continue.`,
+              nextSteps: "Add more SOL to continue.",
             }),
           };
         }
@@ -3789,17 +3759,18 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         }
 
         if (tokenBalance < gameAmount) {
+          const formattedBalance = this.wallet.formatTokenBalance(
+            tokenBalance,
+            metadata.decimals
+          );
+          const formattedNeed = this.wallet.formatTokenBalance(
+            gameAmount,
+            metadata.decimals
+          );
+          const safeTicker = escapeHtml(gameData.token_ticker);
           return {
             success: false,
-            error: `Insufficient balance. You have ${this.wallet.formatTokenBalance(
-              tokenBalance,
-              metadata.decimals
-            )} ${
-              gameData.token_ticker
-            } but need ${this.wallet.formatTokenBalance(
-              gameAmount,
-              metadata.decimals
-            )} ${gameData.token_ticker}`,
+            error: `❌ Not enough ${safeTicker}. You have ${formattedBalance} but need ${formattedNeed}. Add more ${safeTicker} or reduce the amount and try again.`,
           };
         }
 
@@ -3818,9 +3789,8 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
               currentLamports: solBalance,
               requiredLamports: minSolBuffer,
               reason: "Joining this game requires a SOL reserve for rent and transaction fees",
-              nextSteps: `Add ${this.formatLamportsForDisplay(
-                minSolBuffer - solBalance
-              )} or deposit additional ${gameData.token_ticker} to swap for fees before trying again.`,
+              nextSteps:
+                "Add more SOL or swap extra tokens for fees before trying again.",
             });
 
             return {
@@ -3879,9 +3849,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
                   currentLamports: refreshedLamports,
                   requiredLamports: minSolBuffer,
                   reason: "Just-in-time swap did not leave enough SOL for the rent and fee reserve",
-                  nextSteps: `Add ${this.formatLamportsForDisplay(
-                    minSolBuffer - refreshedLamports
-                  )} to continue.`,
+                nextSteps: "Add more SOL to continue.",
                 }),
               };
             }

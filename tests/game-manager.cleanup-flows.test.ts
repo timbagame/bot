@@ -304,7 +304,8 @@ describe("GameManager cleanup flows", () => {
     });
 
     expect(result.success).toBe(false);
-    expect((result as any).reason).toContain("Shortfall");
+    expect((result as any).reason).toContain("Not enough SOL to complete this");
+    expect((result as any).reason).toContain("Add more SOL to continue.");
     expect(swapCalls).toBe(1);
   });
 });

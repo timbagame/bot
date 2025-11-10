@@ -509,7 +509,7 @@ describe("Bot helper utilities", () => {
       );
 
       expect(replies).toHaveLength(1);
-      expect(replies[0]).toContain("Insufficient balance");
+      expect(replies[0]).toContain("Not enough SOL");
       expect(replies[0]).not.toContain("unwrap WSOL");
       expect(transactionCalls).toBe(0);
       expect(edits).toHaveLength(0);
@@ -1017,9 +1017,10 @@ describe("createGameViaCommand helper", () => {
     expect(createCalls.length).toBe(0);
     expect(ctx.__calls.length).toBe(1);
     const response = String(ctx.__calls[0]);
-    expect(response).toContain("SOL available natively");
-    expect(response).toContain("wrapped SOL");
-    expect(response).toContain("0.0005 SOL");
+    expect(response).toContain("Not enough SOL or wrapped SOL");
+    expect(response).toContain("You have 0.000200 SOL plus 0.000100 wrapped SOL");
+    expect(response).toContain("but the game needs 0.0005 SOL");
+    expect(response).toContain("Add more SOL or wrapped SOL and try again.");
   });
 
   test("reports combined SOL balance when WSOL specified but insufficient", async () => {
@@ -1059,7 +1060,9 @@ describe("createGameViaCommand helper", () => {
 
     expect(ctx.__calls.length).toBe(1);
     const response = String(ctx.__calls[0]);
-    expect(response).toContain("SOL available natively");
-    expect(response).toContain("wrapped SOL");
+    expect(response).toContain("Not enough SOL or wrapped SOL");
+    expect(response).toContain("You have 0.000200 SOL plus 0.000150 wrapped SOL");
+    expect(response).toContain("but the game needs 0.0006 WSOL");
+    expect(response).toContain("Add more SOL or wrapped SOL and try again.");
   });
 });

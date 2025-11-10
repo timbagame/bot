@@ -8,6 +8,7 @@
 
 // Re-export formatting functions (primary API)
 export {
+  buildFriendlyShortfallMessage,
   formatUserFriendlyError,
   parseTransactionError,
   truncateMessage,

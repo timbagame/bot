@@ -207,7 +207,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
           tokenMetadata.decimals
         );
         await ctx.reply(
-          `❌ Insufficient balance. You have ${formatted} ${parsedAmount.tokenTicker}, need ${parsedAmount.formattedAmount}.`
+          `❌ Not enough ${parsedAmount.tokenTicker}. You have ${formatted} but need ${parsedAmount.formattedAmount}. Add more tokens or try a smaller amount.`
         );
         return;
       }
@@ -227,7 +227,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
               ? "wrapped SOL"
               : parsedAmount.tokenTicker;
           await ctx.reply(
-            `❌ Insufficient balance. You have ${formattedSol} SOL available natively and ${formattedToken} ${wrappedLabel}, need ${parsedAmount.formattedAmount}.`
+            `❌ Not enough SOL or ${wrappedLabel}. You have ${formattedSol} SOL plus ${formattedToken} ${wrappedLabel}, but the game needs ${parsedAmount.formattedAmount}. Add more SOL or ${wrappedLabel} and try again.`
           );
           return;
         }

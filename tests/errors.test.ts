@@ -16,7 +16,8 @@ test("truncateMessage truncates long message and appends ellipsis", () => {
 test("parseTransactionError formats insufficient lamports message", () => {
   const error = new Error("insufficient lamports 100, need 200");
   const message = parseTransactionError(error);
-  expect(message).toContain("Insufficient SOL");
+  expect(message).toContain("Not enough SOL to complete this");
+  expect(message).toContain("You need about");
 });
 
 test("parseTransactionError handles transaction timeout with signature", () => {
@@ -38,7 +39,7 @@ test("parseTransactionError handles transaction timeout without signature", () =
 test("parseTransactionError handles Jupiter no route errors", () => {
   const error = new Error("Jupiter error: no route found");
   const message = parseTransactionError(error);
-  expect(message).toContain("No swap route available");
+  expect(message).toContain("Swap route missing");
 });
 
 test("parseTransactionError handles address lookup table errors", () => {
@@ -67,7 +68,7 @@ test("parseTransactionError handles Jupiter connectivity errors", () => {
   );
   const message = parseTransactionError(error);
   expect(message).toContain("Jupiter is temporarily unavailable");
-  expect(message).toContain("Try again in a moment");
+  expect(message).toContain("Wait a moment");
 });
 
 test("parseTransactionError returns default message for unknown errors", () => {

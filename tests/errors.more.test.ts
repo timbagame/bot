@@ -8,14 +8,15 @@ const walletStub = {
 describe("errors extras", () => {
   test("lamports error with wallet shows detailed balances", () => {
     const msg = parseTransactionError(new Error("insufficient lamports 100, need 200"), walletStub);
-    expect(msg).toContain("Current balance:");
-    expect(msg).toContain("Required reserve:");
-    expect(msg).toContain("Shortfall:");
+    expect(msg).toContain("Not enough SOL to complete this");
+    expect(msg).toContain("The action needs enough SOL for rent and fees");
+    expect(msg).toContain("You need about");
+    expect(msg).toContain("Add SOL or reduce the amount and try again.");
   });
 
   test("generic insufficient maps to helpful guidance", () => {
     const msg = parseTransactionError(new Error("insufficient funds for fee"));
-    expect(msg).toContain("Insufficient funds");
+    expect(msg).toContain("Not enough SOL for fees");
   });
 
   test("account missing maps to setup guidance", () => {
@@ -31,24 +32,24 @@ describe("errors extras", () => {
 
   test("quote unavailable maps to friendly retry guidance", () => {
     const msg = parseTransactionError(new Error("Jupiter quote failed: quote failed"));
-    expect(msg).toContain("Quote unavailable right now");
+    expect(msg).toContain("Quote unavailable.");
   });
 
   test("token not tradable surfaces actionable message", () => {
     const msg = parseTransactionError(new Error("token_not_tradable on Jupiter"));
-    expect(msg).toContain("Token not tradable");
-    expect(msg).toContain("liquidity");
+    expect(msg).toContain("Token not tradable.");
+    expect(msg).toContain("Jupiter can't swap this token yet.");
   });
 
   test("same token swap error explains restriction", () => {
     const msg = parseTransactionError(new Error("Jupiter: input and output mints are not allowed to be equal"));
-    expect(msg).toContain("Cannot swap same token");
+    expect(msg).toContain("Cannot swap the same token.");
   });
 
   test("percentage rounding guidance highlights fee buffer", () => {
     const msg = parseTransactionError(new Error("Percentage results in zero amount"));
-    expect(msg).toContain("Amount too small");
-    expect(msg).toContain("percentage rounds down to zero");
+    expect(msg).toContain("Amount too small.");
+    expect(msg).toContain("Try a larger percentage or type a custom amount.");
   });
 
   test("rent shortfall error explains SOL top up instead of dumping logs", () => {
@@ -63,8 +64,8 @@ describe("errors extras", () => {
     ];
 
     const msg = parseTransactionError(rentError, walletStub);
-    expect(msg).toContain("Rent-exempt account creation requires additional SOL");
-    expect(msg).toContain("Please top up");
+    expect(msg).toContain("Not enough SOL for rent-exempt accounts.");
+    expect(msg).toContain("Keep at least");
     expect(msg).not.toContain("InitializeImmutableOwner");
     expect(msg).not.toContain("SPL Token 2022");
   });

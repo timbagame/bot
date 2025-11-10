@@ -122,8 +122,9 @@ describe("GameManager.createGame", () => {
     } as any);
     const res = await gm.createGame("coinflip", { amount: 1_000_000, tokenMint: "M", tokenTicker: "TOK", isSol: false }, 2, 2, 60, 1n);
     expect(res.success).toBe(false);
-    expect(String(res.error)).toContain("Insufficient balance");
-    expect(String(res.error)).toContain("0.5 TOK");
+    const message = String(res.error);
+    expect(message).toContain("Not enough TOK");
+    expect(message).toContain("Add more TOK");
   });
 
   test("escapes token ticker in balance error messages", async () => {
