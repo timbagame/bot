@@ -4,6 +4,7 @@ import { createRebateAwareFetch } from "../src/utils/helius-rebate-fetch";
 type CallRecord = {
   input: string;
   init?: RequestInit | BunFetchRequestInit;
+  request?: Request;
 };
 
 function createSpyFetch(delayMs = 0): { fetch: typeof fetch; calls: CallRecord[] } {
@@ -22,7 +23,11 @@ function createSpyFetch(delayMs = 0): { fetch: typeof fetch; calls: CallRecord[]
           ? input.toString()
           : input.url;
 
-    calls.push({ input: url, init });
+    calls.push({
+      input: url,
+      init,
+      request: input instanceof Request ? input : undefined,
+    });
     return { ok: true } as Response;
   }) as typeof fetch;
 
@@ -73,6 +78,40 @@ describe("createRebateAwareFetch", () => {
     expect(calls).toHaveLength(1);
     const singleCall = calls[0]!;
     expect(singleCall.input).toContain("rebate-address=RebateAddr");
+  });
+  test("clones Request arguments without dropping init data", async () => {
+    const { fetch: spyFetch, calls } = createSpyFetch();
+    const rebateFetch = createRebateAwareFetch(spyFetch, "RebateAddr");
+
+    const originalBody = JSON.stringify({
+      method: "sendTransaction",
+      params: ["payload"],
+    });
+    const originalRequest = new Request(
+      "https://mainnet.helius-rpc.com/?api-key=badge",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Original": "yes",
+        },
+        body: originalBody,
+      },
+    );
+
+    await rebateFetch(originalRequest);
+
+    expect(calls).toHaveLength(1);
+    const call = calls[0]!;
+    expect(call.input).toContain("rebate-address=RebateAddr");
+    expect(call.request).toBeInstanceOf(Request);
+    const forwardedRequest = call.request!;
+    expect(forwardedRequest.method).toBe("POST");
+    expect(await forwardedRequest.clone().text()).toBe(originalBody);
+    expect(forwardedRequest.headers.get("Content-Type")).toBe(
+      "application/json",
+    );
+    expect(forwardedRequest.headers.get("X-Original")).toBe("yes");
   });
   test("concurrent sendTransaction calls keep rebate parameter per request", async () => {
     const { fetch: spyFetch, calls } = createSpyFetch(5);
