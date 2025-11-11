@@ -56,6 +56,7 @@ import {
   parseRpcEndpointList,
   type ActiveEndpointChange,
 } from "./rpc-endpoints";
+import { createRebateAwareFetch } from "./helius-rebate-fetch";
 
 // Lightweight dependency handles for testability
 type HttpFetch = (input: string, init?: any) => Promise<{
@@ -372,8 +373,14 @@ export class WalletManager {
       const endpoints = parseRpcEndpointList(process.env.SOLANA_NETWORK, {
         fallback: DEFAULT_MAINNET_ENDPOINT,
       });
+      const rebateAwareFetch = createRebateAwareFetch(
+        globalThis.fetch as typeof fetch,
+        process.env.HELIUS_REBATE_ADDRESS,
+      );
       this.rpcEndpointManager = new RpcEndpointManager(endpoints, {
         commitment: "confirmed",
+        connectionFactory: (endpoint, commitment) =>
+          new Connection(endpoint, { commitment, fetch: rebateAwareFetch }),
         logger: console,
       });
       this.connection = this.rpcEndpointManager.getConnection();

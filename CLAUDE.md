@@ -66,6 +66,7 @@ This is a Telegram bot for creating and playing coinflip and giveaway games on S
 - `TELEGRAM_TOKEN` - Bot token from BotFather
 - `MNEMONIC` - Wallet seed phrase for Solana operations
 - `SOLANA_NETWORK` - Ordered list of Solana RPC endpoints (JSON array or comma list) used for automatic fallback (defaults to mainnet-beta when unset)
+- `HELIUS_REBATE_ADDRESS` - Optional SOL address for Helius backrun rebates when sending transactions via a Helius mainnet endpoint
 - `ORACLE_API_URL` - Oracle service endpoint
 - `DEFAULT_TOKEN_MINT` / `DEFAULT_TOKEN_TICKER` - Optional overrides for the default staking token
 

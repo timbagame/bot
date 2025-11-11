@@ -24,6 +24,7 @@ TELEGRAM_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxx
 MNEMONIC="word1 word2 ... word24"
 SOLANA_NETWORK=["https://api.mainnet-beta.solana.com","https://rpc-backup.example.com"]
 ORACLE_API_URL=https://oracle.example.com
+HELIUS_REBATE_ADDRESS=<SOL-address>  # Optional: collect Helius backrun rebates when using a Helius mainnet RPC endpoint
 # Optional overrides if default detection is insufficient
 # DEFAULT_TOKEN_MINT=F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump
 # DEFAULT_TOKEN_TICKER=TIMBA
