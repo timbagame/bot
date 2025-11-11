@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createRebateAwareFetch } from "../src/utils/helius-rebate-fetch";
 
 type CallRecord = {
-  input: string;
+  url: string;
   init?: RequestInit | BunFetchRequestInit;
   request?: Request;
 };
@@ -24,7 +24,7 @@ function createSpyFetch(delayMs = 0): { fetch: typeof fetch; calls: CallRecord[]
           : input.url;
 
     calls.push({
-      input: url,
+      url,
       init,
       request: input instanceof Request ? input : undefined,
     });
@@ -49,8 +49,8 @@ describe("createRebateAwareFetch", () => {
     expect(calls).toHaveLength(2);
     const firstCall = calls[0]!;
     const secondCall = calls[1]!;
-    expect(firstCall.input).not.toContain("rebate-address");
-    expect(secondCall.input).toContain("rebate-address=RebateAddr");
+    expect(firstCall.url).not.toContain("rebate-address");
+    expect(secondCall.url).toContain("rebate-address=RebateAddr");
   });
 
   test("does not append rebate when payload lacks method", async () => {
@@ -63,7 +63,7 @@ describe("createRebateAwareFetch", () => {
 
     expect(calls).toHaveLength(1);
     const singleCall = calls[0]!;
-    expect(singleCall.input).not.toContain("rebate-address");
+    expect(singleCall.url).not.toContain("rebate-address");
   });
 
   test("handles URL objects by appending rebate query", async () => {
@@ -77,7 +77,7 @@ describe("createRebateAwareFetch", () => {
 
     expect(calls).toHaveLength(1);
     const singleCall = calls[0]!;
-    expect(singleCall.input).toContain("rebate-address=RebateAddr");
+    expect(singleCall.url).toContain("rebate-address=RebateAddr");
   });
   test("clones Request arguments without dropping init data", async () => {
     const { fetch: spyFetch, calls } = createSpyFetch();
@@ -103,7 +103,7 @@ describe("createRebateAwareFetch", () => {
 
     expect(calls).toHaveLength(1);
     const call = calls[0]!;
-    expect(call.input).toContain("rebate-address=RebateAddr");
+    expect(call.url).toContain("rebate-address=RebateAddr");
     expect(call.request).toBeInstanceOf(Request);
     const forwardedRequest = call.request!;
     expect(forwardedRequest.method).toBe("POST");
@@ -127,7 +127,7 @@ describe("createRebateAwareFetch", () => {
 
     expect(calls).toHaveLength(3);
     for (const call of calls) {
-      expect(call.input).toContain("rebate-address=RebateAddr");
+      expect(call.url).toContain("rebate-address=RebateAddr");
     }
   });
 
