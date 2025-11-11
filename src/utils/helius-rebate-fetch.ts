@@ -80,7 +80,7 @@ export function createRebateAwareFetch(
         // Ignore body parsing failures; the request may be streaming-only.
       }
     }
-    let requestInput: RequestInfo = input;
+    let requestInput: RequestInfo = input instanceof URL ? input.toString() : input;
     let requestInit: FetchInit | undefined = init;
     const rawUrl =
       typeof input === "string"
@@ -124,7 +124,7 @@ function cloneRequestWithUpdatedUrl(
     signal: request.signal,
   };
 
-  const requestAsAny = request as Record<string, unknown>;
+  const requestAsAny = request as unknown as Record<string, unknown>;
   for (const key of [
     "cache",
     "credentials",
