@@ -39,6 +39,6 @@
 - Docs: update `README.md` when commands, envs, or UX change.
 
 ## Security & Configuration Tips
-- Secrets: never commit real tokens/mnemonics. `.env` is git-ignored; set `TELEGRAM_TOKEN`, `SOLANA_NETWORK` (JSON array or comma list of RPC URLs), `MNEMONIC`, optional `TOKEN_MINT`/`TICKER`.
+- Secrets: never commit real tokens/mnemonics. `.env` is git-ignored; set `TELEGRAM_TOKEN`, `SOLANA_NETWORK` (JSON array or comma list of RPC URLs), `MNEMONIC`, optional `TOKEN_MINT`/`TICKER`, and `HELIUS_REBATE_ADDRESS` only when opt-ing into Helius rebates on mainnet.
 - Least logging: avoid printing private keys or full signatures; admin-only commands stay in private chat.
 - Databases: local `*.sqlite` are ephemeral; back up only if required.

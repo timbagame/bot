@@ -108,6 +108,8 @@ src/
    # Configure your environment variables
    ```
 
+   > Optional: set `HELIUS_REBATE_ADDRESS` in `.env` if you want Helius to pay you post-trade rebates when using a Helius mainnet RPC endpoint.
+
 2. **Install Dependencies**
 
    ```bash
