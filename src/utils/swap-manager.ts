@@ -734,13 +734,6 @@ export class SwapManager {
         lamportsReceived: selectedQuote.lamportsOut,
       };
     } catch (error: any) {
-      if (lentLamportsOutstanding > 0) {
-        try {
-          await this.refundLentFees(userKeypair, lentLamportsOutstanding);
-        } catch (refundError) {
-          console.error("Failed to refund lent swap fees:", refundError);
-        }
-      }
       console.error("Just-in-time SOL swap failed:", error);
       return {
         swapped: false,

@@ -172,14 +172,15 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(sendCall.signers[1]?.publicKey.equals(user.publicKey)).toBe(true);
     expect(sendCall.instructions.length).toBe(2);
 
-    const loanDecoded = SystemInstruction.decodeTransfer(sendCall.instructions[0]);
+    const loanIx = sendCall.instructions[0]!;
+    const refundIx = sendCall.instructions[1]!;
+
+    const loanDecoded = SystemInstruction.decodeTransfer(loanIx);
     expect(loanDecoded.fromPubkey.equals(admin.publicKey)).toBe(true);
     expect(loanDecoded.toPubkey.equals(user.publicKey)).toBe(true);
     expect(Number(loanDecoded.lamports)).toBe(TEST_JIT_BUFFER_LAMPORTS);
 
-    const refundDecoded = SystemInstruction.decodeTransfer(
-      sendCall.instructions[1]
-    );
+    const refundDecoded = SystemInstruction.decodeTransfer(refundIx);
     expect(refundDecoded.fromPubkey.equals(user.publicKey)).toBe(true);
     expect(refundDecoded.toPubkey.equals(admin.publicKey)).toBe(true);
     expect(Number(refundDecoded.lamports)).toBe(TEST_JIT_BUFFER_LAMPORTS);
