@@ -722,6 +722,9 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
+    const adminCompositeFailure = Keypair.generate();
+    (wallet as any).adminKeypair = adminCompositeFailure;
+    (wallet as any).getAdminKeypair = () => adminCompositeFailure;
 
     const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
     let balanceCall = 0;
@@ -838,8 +841,9 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
-    const admin = Keypair.generate();
-    (wallet as any).getAdminKeypair = () => admin;
+    const adminCompositeRefund = Keypair.generate();
+    (wallet as any).adminKeypair = adminCompositeRefund;
+    (wallet as any).getAdminKeypair = () => adminCompositeRefund;
 
     const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
     (swapManager as any).connection = {
