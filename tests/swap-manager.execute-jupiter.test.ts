@@ -173,9 +173,47 @@ describe("SwapManager.executeJupiterSwap", () => {
     (sm as any).createTokenAccountsIfNeeded = async () => [];
     (sm as any).connection.getBalance = async () => 0;
     (sm as any).ensureJupiterSwapFeeBudget = async () => 100_000;
+    const user = Keypair.generate();
+    const req = {
+      inputMint: "So11111111111111111111111111111111111111112",
+      outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      amount: "1000000",
+      userKeypair: user,
+      inputDecimals: 9,
+      outputDecimals: 6,
+      inputTicker: "WSOL",
+      outputTicker: "USDC",
+      slippageBps: 100,
+    } as const;
+
+    const quote = {
+      inputMint: req.inputMint,
+      outputMint: req.outputMint,
+      inputAmount: req.amount,
+      inputAmountRaw: req.amount,
+      outputAmount: "100",
+      estimatedRate: 0.0001,
+      slippage: 1,
+      provider: "jupiter" as const,
+    };
+
     (sm as any).executeJupiterTransaction = async () => ({
       signature: "SIG_JUP_FEE",
       estimatedFee: 150_000,
+    });
+    (sm as any).jupiterClient.getQuote = async () => ({
+      inputMint: req.inputMint,
+      outputMint: req.outputMint,
+      inAmount: req.amount,
+      outAmount: "900000",
+      otherAmountThreshold: "0",
+      swapMode: "ExactIn",
+      slippageBps: req.slippageBps,
+      priceImpactPct: "0",
+      routePlan: [],
+    });
+    (sm as any).jupiterClient.getSwapTransaction = async () => ({
+      swapTransaction: Buffer.from("fake").toString("base64"),
     });
 
     let refundCalled = false;
@@ -190,30 +228,6 @@ describe("SwapManager.executeJupiterSwap", () => {
     };
 
     try {
-      const user = Keypair.generate();
-      const req = {
-        inputMint: "So11111111111111111111111111111111111111112",
-        outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-        amount: "1000000",
-        userKeypair: user,
-        inputDecimals: 9,
-        outputDecimals: 6,
-        inputTicker: "WSOL",
-        outputTicker: "USDC",
-        slippageBps: 100,
-      } as const;
-
-      const quote = {
-        inputMint: req.inputMint,
-        outputMint: req.outputMint,
-        inputAmount: req.amount,
-        inputAmountRaw: req.amount,
-        outputAmount: "100",
-        estimatedRate: 0.0001,
-        slippage: 1,
-        provider: "jupiter" as const,
-      };
-
       const signature = await sm.executeJupiterSwap(req, quote);
       expect(signature).toBe("SIG_JUP_FEE");
     } finally {

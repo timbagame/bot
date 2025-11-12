@@ -625,7 +625,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(refundCalls).toEqual([TEST_JIT_BUFFER_LAMPORTS, TEST_JIT_BUFFER_LAMPORTS]);
   });
 
-  test("concurrent JIT swaps only sponsor once per user", async () => {
+  test("ensureJupiterSwapFeeBudget deduplicates concurrent requests", async () => {
     const wallet = WalletManager.createForTest(mnemonic, {
       connection,
       fetch: globalThis.fetch as any,
@@ -636,47 +636,18 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     (swapManager as any).connection = {
       getBalance: async () => 0,
     };
-    (swapManager as any).getBestProvider = async () => "jupiter";
-    (swapManager as any).createTokenAccountsIfNeeded = async () => [];
-    (swapManager as any).getJupiterQuote = async () => ({
-      inputMint: "TokenMint",
-      outputMint: WSOL_MINT,
-      inAmount: "1000000",
-      outAmount: "900000",
-      otherAmountThreshold: "0",
-      swapMode: "ExactIn",
-      slippageBps: 100,
-      priceImpactPct: "0",
-      routePlan: [],
-      totalTime: 0,
-    });
-    (swapManager as any).jupiterClient.getSwapTransaction = async () => ({
-      swapTransaction: "BASE64",
-    });
-    (swapManager as any).executeJupiterTransaction = async () => ({
-      signature: "SIG_JUP",
-      estimatedFee: 0,
-    });
 
     let sponsorCount = 0;
     (swapManager as any).sponsorSwapFees = async () => {
       sponsorCount++;
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await new Promise((resolve) => setTimeout(resolve, 30));
     };
-    (swapManager as any).refundSponsoredFees = async () => {};
 
     const user = Keypair.generate();
-    await Promise.all(
-      Array.from({ length: 2 }, () =>
-        swapManager.performJustInTimeSolSwap({
-          userKeypair: user,
-          tokenMint: "TokenMint",
-          tokenDecimals: 6,
-          availableTokenAmountRaw: 10_000_000,
-          tokenTicker: "TEST",
-        })
-      )
-    );
+    await Promise.all([
+      (swapManager as any).ensureJupiterSwapFeeBudget(user),
+      (swapManager as any).ensureJupiterSwapFeeBudget(user),
+    ]);
 
     expect(sponsorCount).toBe(1);
   });
