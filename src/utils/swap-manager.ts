@@ -470,24 +470,10 @@ export class SwapManager {
             quoteResponse: quote,
           });
 
-          const sponsorLamports = Math.max(jitFeeBuffer - currentLamports, 0);
-          if (sponsorLamports > 0) {
-            await this.sponsorSwapFees(userKeypair, sponsorLamports);
-            sponsoredLamportsOutstanding += sponsorLamports;
-          }
-
           const signature = await this.executeJupiterTransaction(
             swapResponse.swapTransaction,
             userKeypair
           );
-
-          if (sponsoredLamportsOutstanding > 0) {
-            await this.refundSponsoredFees(
-              userKeypair,
-              sponsoredLamportsOutstanding
-            );
-            sponsoredLamportsOutstanding = 0;
-          }
 
           lastJupiterError = null;
           return {
