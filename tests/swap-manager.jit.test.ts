@@ -177,6 +177,64 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(refundCalls).toEqual([TEST_JIT_BUFFER_LAMPORTS]);
   });
 
+  test("performs Jupiter swap when available tokens exactly meet the requirement", async () => {
+    const wallet = WalletManager.createForTest(mnemonic, {
+      connection,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
+    (swapManager as any).connection = {
+      getBalance: async () => 0,
+    };
+    (swapManager as any).getBestProvider = async () => "jupiter";
+
+    const availableRaw = 1_000_000;
+    (swapManager as any).getJupiterQuote = async () => ({
+      inputMint: "TokenMint",
+      outputMint: WSOL_MINT,
+      inAmount: availableRaw.toString(),
+      outAmount: "500000",
+      otherAmountThreshold: "0",
+      swapMode: "ExactIn",
+      slippageBps: 100,
+      priceImpactPct: "0",
+      routePlan: [],
+    });
+    (swapManager as any).jupiterClient.getSwapTransaction = async () => ({
+      swapTransaction: Buffer.from("fake").toString("base64"),
+    });
+    (swapManager as any).executeJupiterTransaction = async () => ({
+      signature: "SIG_BOUNDARY",
+      estimatedFee: 0,
+    });
+
+    const sponsorCalls: number[] = [];
+    const refundCalls: number[] = [];
+    (swapManager as any).sponsorSwapFees = async (_kp: Keypair, lamports: number) => {
+      sponsorCalls.push(lamports);
+    };
+    (swapManager as any).refundSponsoredFees = async (
+      _kp: Keypair,
+      lamports: number
+    ) => {
+      refundCalls.push(lamports);
+    };
+
+    const user = Keypair.generate();
+    const result = await swapManager.performJustInTimeSolSwap({
+      userKeypair: user,
+      tokenMint: "TokenMint",
+      tokenDecimals: 6,
+      availableTokenAmountRaw: availableRaw,
+      tokenTicker: "TEST",
+    });
+
+    expect(result.swapped).toBe(true);
+    expect(sponsorCalls).toEqual([expect.any(Number)]);
+    expect(refundCalls).toEqual([expect.any(Number)]);
+  });
+
   test("unwrap still executes when current SOL already exceeds swap target", async () => {
     const wallet = WalletManager.createForTest(mnemonic, {
       connection,
@@ -766,5 +824,226 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       swapManager.executeCompositePumpFunJupiterSwap(request, quote)
     ).rejects.toThrow("Jupiter leg failure");
     expect(pumpOps).toContain("Pump.fun leg");
+  });
+
+  test("composite swap logs but resolves when refund fails", async () => {
+    const wallet = WalletManager.createForTest(mnemonic, {
+      connection,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+    const admin = Keypair.generate();
+    (wallet as any).getAdminKeypair = () => admin;
+
+    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
+    (swapManager as any).connection = {
+      getBalance: async () => 0,
+    };
+
+    const sendCalls: {
+      instructions: TransactionInstruction[];
+      signers: Keypair[];
+    }[] = [];
+    (wallet as any).sendAndConfirmWithResubmits = async (
+      ixs: TransactionInstruction[],
+      signers: Keypair[]
+    ) => {
+      sendCalls.push({ instructions: ixs, signers });
+      return `SIG_${sendCalls.length}`;
+    };
+    (wallet as any).confirmTransaction = async () => {};
+
+    (swapManager as any).createTokenAccountsIfNeeded = async () => [];
+    (swapManager as any).pumpFunClient.createSwapTransaction = async () => [
+      {} as TransactionInstruction,
+    ];
+    (swapManager as any).jupiterClient.getQuote = async () => ({
+      inputMint: WSOL_MINT,
+      outputMint: "TARGET",
+      inAmount: "1000000",
+      outAmount: "5000",
+      otherAmountThreshold: "0",
+      swapMode: "ExactIn",
+      slippageBps: 100,
+      priceImpactPct: "0",
+      routePlan: [],
+      totalTime: 0,
+    });
+    (swapManager as any).jupiterClient.getSwapTransaction = async () => ({
+      swapTransaction: "BASE64",
+    });
+    (swapManager as any).executeJupiterTransaction = async () => ({
+      signature: "SIG_JUP",
+      estimatedFee: 0,
+    });
+
+    let sponsorCalls = 0;
+    (swapManager as any).sponsorSwapFees = async () => {
+      sponsorCalls += 1;
+    };
+
+    const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+
+    (swapManager as any).refundSponsoredFees = async () => {
+      throw new Error("refund failure");
+    };
+
+    const request = {
+      inputMint: "PUMP",
+      outputMint: "TARGET",
+      amount: "0",
+      userKeypair: Keypair.generate(),
+      slippageBps: 100,
+      inputDecimals: 6,
+      outputDecimals: 6,
+      inputTicker: "PUMP",
+      outputTicker: "TOK",
+    } as const;
+
+    const intermediateLamports = 3_200_000;
+    const pumpQuote: PumpFunQuote = {
+      inputMint: "PUMP",
+      outputMint: WSOL_MINT,
+      inputAmount: "100000",
+      inputAmountRaw: "100000",
+      outputAmount: intermediateLamports.toString(),
+      estimatedRate: 1,
+      slippage: 1,
+      isGraduated: true,
+    };
+
+    const jupiterQuote = {
+      inputMint: WSOL_MINT,
+      outputMint: "TARGET",
+      inAmount: (intermediateLamports - 10_000).toString(),
+      outAmount: "5000",
+      otherAmountThreshold: "0",
+      swapMode: "ExactIn",
+      slippageBps: 100,
+      priceImpactPct: "0",
+      routePlan: [],
+      totalTime: 0,
+    };
+
+    const composite: NonNullable<SwapQuote["composite"]> = {
+      flow: "pump-then-jupiter",
+      intermediateMint: WSOL_MINT,
+      intermediateAmount: intermediateLamports.toString(),
+      pumpQuote,
+      jupiterQuote,
+    };
+
+    const quote: SwapQuote = {
+      provider: "pump-fun+jupiter",
+      inputMint: request.inputMint,
+      outputMint: request.outputMint,
+      inputAmount: "0",
+      inputAmountRaw: "0",
+      outputAmount: "0",
+      estimatedRate: 0,
+      slippage: 1,
+      composite,
+    } satisfies SwapQuote;
+
+    const result = await swapManager.executeCompositePumpFunJupiterSwap(
+      request,
+      quote
+    );
+
+    expect(result.pumpSignature).toBe("SIG_1");
+    expect(result.jupiterSignature).toBe("SIG_JUP");
+    expect(errorSpy.mock.calls[0]?.[0]).toContain(
+      "Failed to refund sponsored swap fees after composite"
+    );
+    expect((swapManager as any).jupiterFeeSponsorships.size).toBe(0);
+    errorSpy.mockRestore();
+  });
+
+  test("concurrent JIT swaps across tokens sponsor separately", async () => {
+    const wallet = WalletManager.createForTest(mnemonic, {
+      connection,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
+    (swapManager as any).connection = {
+      getBalance: async () => 0,
+    };
+    (swapManager as any).getBestProvider = async () => "jupiter";
+    (swapManager as any).jupiterClient.getQuote = async ({
+      amount,
+    }: {
+      amount: string;
+    }) => ({
+      inputMint: "TOKEN",
+      outputMint: WSOL_MINT,
+      inAmount: amount,
+      outAmount: "1000",
+      otherAmountThreshold: "0",
+      swapMode: "ExactOut",
+      slippageBps: 100,
+      priceImpactPct: "0",
+      routePlan: [],
+    });
+    (swapManager as any).jupiterClient.getSwapTransaction = async () => ({
+      swapTransaction: Buffer.from("fake").toString("base64"),
+    });
+    (swapManager as any).executeJupiterTransaction = async () => ({
+      signature: "SIG_JUP",
+      estimatedFee: 0,
+    });
+
+    const sponsorCalls: number[] = [];
+    (swapManager as any).sponsorSwapFees = async (_kp: Keypair, lamports: number) => {
+      sponsorCalls.push(lamports);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    };
+
+    const refundCalls: number[] = [];
+    (swapManager as any).refundSponsoredFees = async (
+      _kp: Keypair,
+      lamports: number
+    ) => {
+      refundCalls.push(lamports);
+    };
+
+    const user = Keypair.generate();
+    const tokens = ["TOKEN_A", "TOKEN_B"];
+    const swapPromises = tokens.map((token) =>
+      swapManager.performJustInTimeSolSwap({
+        userKeypair: user,
+        tokenMint: token,
+        tokenDecimals: 6,
+        availableTokenAmountRaw: 12_000_000,
+        tokenTicker: "TEST",
+      })
+    );
+
+    const results = await Promise.all(swapPromises);
+    expect(results.every((result) => result.swapped)).toBe(true);
+    expect(sponsorCalls.length).toBe(tokens.length);
+    expect(refundCalls.length).toBe(tokens.length);
+  });
+
+  test("sensitive logging is suppressed when NODE_ENV=production", () => {
+    const wallet = WalletManager.createForTest(mnemonic, {
+      connection,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
+
+    const logSpy = spyOn(console, "log").mockImplementation(() => {});
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    (swapManager as any).logSensitive("secret");
+    expect(logSpy).not.toHaveBeenCalled();
+
+    process.env.NODE_ENV = "development";
+    (swapManager as any).logSensitive("secret");
+    expect(logSpy).toHaveBeenCalled();
+
+    logSpy.mockRestore();
+    process.env.NODE_ENV = originalEnv;
   });
 });

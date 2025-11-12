@@ -47,6 +47,9 @@ const KNOWN_MAJOR_TOKENS = new Set([
 
 export const MIN_JUPITER_SWAP_FEE_LAMPORTS = 10_000_000;
 export const JUPITER_FEE_SAFETY_MARGIN_LAMPORTS = 150_000;
+export const MAX_JUPITER_SPONSORSHIPS_PER_WINDOW = 3;
+export const JUPITER_SPONSORSHIP_WINDOW_MS = 60_000;
+type SponsorshipWindow = { count: number; windowStart: number };
 
 
 export class SwapManager {
@@ -58,6 +61,7 @@ export class SwapManager {
   private network: SolanaNetwork;
   private readonly quoteCache = new SwapQuoteCache();
   private readonly jupiterFeeSponsorships = new Map<string, Promise<number>>();
+  private readonly sponsorshipWindows = new Map<string, SponsorshipWindow>();
 
   constructor(
     connection: Connection,
@@ -71,6 +75,46 @@ export class SwapManager {
 
     this.jupiterClient = new JupiterClient();
     this.pumpFunClient = new PumpFunClient(connection);
+  }
+
+  private shouldLogSensitive(): boolean {
+    return process.env.NODE_ENV !== "production";
+  }
+
+  private logSensitive(...args: Parameters<typeof console.log>): void {
+    if (this.shouldLogSensitive()) {
+      console.log(...args);
+    }
+  }
+
+  private prepareSponsorshipWindow(key: string): SponsorshipWindow {
+    const now = Date.now();
+    const existing = this.sponsorshipWindows.get(key);
+    if (!existing || now - existing.windowStart >= JUPITER_SPONSORSHIP_WINDOW_MS) {
+      const reset = { count: 0, windowStart: now };
+      this.sponsorshipWindows.set(key, reset);
+      return reset;
+    }
+    return existing;
+  }
+
+  private ensureSponsorshipAllowed(key: string): SponsorshipWindow {
+    const window = this.prepareSponsorshipWindow(key);
+    if (window.count >= MAX_JUPITER_SPONSORSHIPS_PER_WINDOW) {
+      throw new Error(
+        "Too many Jupiter sponsorships initiated for this user; please wait a moment."
+      );
+    }
+    return window;
+  }
+
+  private recordSponsorshipSuccess(key: string): void {
+    const window = this.sponsorshipWindows.get(key);
+    if (!window) {
+      return;
+    }
+    window.count += 1;
+    this.sponsorshipWindows.set(key, window);
   }
 
   private isSolMint(mint: string): boolean {
@@ -413,9 +457,9 @@ export class SwapManager {
       );
 
       if (currentLamports >= targetLamports) {
-        console.log(
-          `💤 No just-in-time SOL swap needed for ${logContext}. Current balance ${currentLamports} ≥ target ${targetLamports}.`
-        );
+      this.logSensitive(
+        `💤 No just-in-time SOL swap needed for ${logContext}. Current balance ${currentLamports} ≥ target ${targetLamports}.`
+      );
         return { swapped: false };
       }
 
@@ -449,7 +493,7 @@ export class SwapManager {
             const needed = formatTokenUnits(requiredInput);
             const available = formatTokenUnits(availableInput);
             lastJupiterError = `Need ${needed} ${tokenTicker.toUpperCase()} available for swap but only ${available}. Top up your balance or add SOL manually.`;
-            console.log(
+            this.logSensitive(
               `⚠️ Jupiter route requires ${needed} ${tokenTicker.toUpperCase()} but only ${available} available.`
             );
             return null;
@@ -506,7 +550,7 @@ export class SwapManager {
           const message = attemptError?.message || String(attemptError);
           lastJupiterError =
             message || "Jupiter route unavailable. Try again or add SOL manually.";
-          console.log("⚠️ Jupiter swap attempt failed:", message);
+          this.logSensitive("⚠️ Jupiter swap attempt failed:", message);
           return null;
         }
       };
@@ -582,13 +626,13 @@ export class SwapManager {
           lastUnwrapError =
             message ||
             "Unable to unwrap WSOL automatically. Add SOL manually and try again.";
-          console.log("⚠️ WSOL unwrap attempt failed:", message);
+          this.logSensitive("⚠️ WSOL unwrap attempt failed:", message);
           return null;
         }
       };
 
       if (this.isSolMint(tokenMint)) {
-        console.log(
+        this.logSensitive(
           `⚡ Executing just-in-time WSOL unwrap for ${logContext}. Need ${lamportsShortfall} lamports (target ${swapTarget}).`
         );
 
@@ -612,7 +656,7 @@ export class SwapManager {
 
       const provider = await this.getBestProvider(tokenMint, SOL_MINT);
 
-      console.log(
+      this.logSensitive(
         `⚡ Executing just-in-time SOL swap for ${logContext} via ${provider}. Need ${lamportsShortfall} lamports (target ${swapTarget}).`
       );
 
@@ -646,7 +690,7 @@ export class SwapManager {
         };
       }
 
-      console.log(
+      this.logSensitive(
         `🔍 Pump.fun JIT context for ${logContext}: availableRaw=${availableRaw}, availableDecimal=${availableDecimal}, decimals=${tokenDecimals}, shortfall=${lamportsShortfall}, target=${swapTarget}, slippage=${slippageBps}bps`
       );
 
@@ -687,12 +731,12 @@ export class SwapManager {
           const lamportsOut = Number(quote.outputAmount);
           lastLamportsOut = lamportsOut;
 
-          console.log(
+          this.logSensitive(
             `   🔁 Pump.fun attempt ${attemptCount}: amount=${amountStr} (${attemptDecimal}) → lamports=${lamportsOut} (target ${targetLamports})`
           );
 
           if (lamportsOut >= targetLamports) {
-            console.log(
+            this.logSensitive(
               `   ✅ Pump.fun quote met target with ${lamportsOut} lamports using amount ${amountStr}`
             );
             return {
@@ -719,9 +763,9 @@ export class SwapManager {
           attemptDecimal = nextAttempt;
         }
 
-        console.log(
-          `   ❌ Exhausted pump.fun attempts (${attemptCount}) without reaching target. Last lamportsOut=${lastLamportsOut}.`
-        );
+          this.logSensitive(
+            `   ❌ Exhausted pump.fun attempts (${attemptCount}) without reaching target. Last lamportsOut=${lastLamportsOut}.`
+          );
         return null;
       };
 
@@ -732,15 +776,15 @@ export class SwapManager {
       if (!selectedQuote && lamportsShortfall > 0) {
         const fallbackTarget = Math.max(lamportsShortfall, 1);
         if (fallbackTarget < swapTarget) {
-          console.log(
-            `⚠️ Pump.fun liquidity could not cover target ${swapTarget} lamports. Retrying without buffer (target ${fallbackTarget}).`
-          );
+            this.logSensitive(
+              `⚠️ Pump.fun liquidity could not cover target ${swapTarget} lamports. Retrying without buffer (target ${fallbackTarget}).`
+            );
           selectedQuote = await tryPumpFunQuote(fallbackTarget);
         }
       }
 
       if (!selectedQuote) {
-        console.log(
+        this.logSensitive(
           `⚠️ Pump.fun swap did not yield the ${swapTarget} lamports needed for ${logContext}. availableDecimal=${availableDecimal}, remainingShortfall=${targetLamports - currentLamports}`
         );
         const missingSol = this.wallet.formatSolBalance(
@@ -902,7 +946,9 @@ export class SwapManager {
         }
 
         const sponsorship = requiredBalance - currentBalance;
+        this.ensureSponsorshipAllowed(key);
         await this.sponsorSwapFees(userKeypair, sponsorship);
+        this.recordSponsorshipSuccess(key);
         return sponsorship;
       })();
 
@@ -1076,6 +1122,23 @@ export class SwapManager {
 
     const flow = composite.flow ?? "pump-then-jupiter";
 
+    const refundCompositeSponsorship = async (
+      amount: number,
+      context: string
+    ): Promise<void> => {
+      if (amount <= 0) {
+        return;
+      }
+      try {
+        await this.refundSponsoredFees(userKeypair, amount);
+      } catch (refundError) {
+        console.error(
+          `Failed to refund sponsored swap fees after composite ${context}:`,
+          refundError
+        );
+      }
+    };
+
     let pumpSignature: string;
     let jupiterSignature: string;
 
@@ -1097,7 +1160,7 @@ export class SwapManager {
         [userKeypair],
         { operationLabel: "Pump.fun leg" }
       );
-      console.log(`Pump.fun leg submitted: ${pumpSignature}`);
+      this.logSensitive(`Pump.fun leg submitted: ${pumpSignature}`);
 
       const postBalance = await this.connection.getBalance(
         userKeypair.publicKey
@@ -1121,59 +1184,93 @@ export class SwapManager {
 
       const jupiterInputLamports = availableLamports - feeBuffer;
 
-      console.log(
+      this.logSensitive(
         `Jupiter leg will use ${jupiterInputLamports.toString()} lamports (keeping ${feeBuffer.toString()} for fees)`
       );
 
-      const jupiterQuote = await this.getJupiterQuote({
-        inputMint: SOL_MINT,
-        outputMint: quote.outputMint,
-        amount: jupiterInputLamports.toString(),
-        slippageBps,
-      });
-
-      const swapResponse = await this.jupiterClient.getSwapTransaction({
-        userPublicKey: userKeypair.publicKey.toBase58(),
-        quoteResponse: jupiterQuote,
-      });
-
-      const { signature: jupSignature } = await this.executeJupiterTransaction(
-        swapResponse.swapTransaction,
+      const jupiterSponsoredLamports = await this.ensureJupiterSwapFeeBudget(
         userKeypair
       );
-      jupiterSignature = jupSignature;
 
-      console.log(
-        `Jupiter leg submitted: ${jupiterSignature} (expected ~${formatAmount(
-          BigInt(jupiterQuote.outAmount),
-          outputDecimals,
-          { maxFractionDigits: Math.min(outputDecimals, 6), trim: true }
-        )} ${outputTicker.toUpperCase()})`
-      );
+      try {
+        const jupiterQuote = await this.getJupiterQuote({
+          inputMint: SOL_MINT,
+          outputMint: quote.outputMint,
+          amount: jupiterInputLamports.toString(),
+          slippageBps,
+        });
+
+        const swapResponse = await this.jupiterClient.getSwapTransaction({
+          userPublicKey: userKeypair.publicKey.toBase58(),
+          quoteResponse: jupiterQuote,
+        });
+
+        const { signature: jupSignature } = await this.executeJupiterTransaction(
+          swapResponse.swapTransaction,
+          userKeypair
+        );
+        jupiterSignature = jupSignature;
+
+        this.logSensitive(
+          `Jupiter leg submitted: ${jupiterSignature} (expected ~${formatAmount(
+            BigInt(jupiterQuote.outAmount),
+            outputDecimals,
+            { maxFractionDigits: Math.min(outputDecimals, 6), trim: true }
+          )} ${outputTicker.toUpperCase()})`
+        );
+
+        await refundCompositeSponsorship(
+          jupiterSponsoredLamports,
+          "pump-then-jupiter"
+        );
+      } catch (error) {
+        await refundCompositeSponsorship(
+          jupiterSponsoredLamports,
+          "pump-then-jupiter failure"
+        );
+        throw error;
+      }
     } else if (flow === "jupiter-then-pump") {
       const preBalance = await this.connection.getBalance(
         userKeypair.publicKey
       );
 
-      const jupiterQuote = await this.getJupiterQuote({
-        inputMint: quote.inputMint,
-        outputMint: SOL_MINT,
-        amount: quote.inputAmountRaw,
-        slippageBps,
-      });
-
-      const swapResponse = await this.jupiterClient.getSwapTransaction({
-        userPublicKey: userKeypair.publicKey.toBase58(),
-        quoteResponse: jupiterQuote,
-      });
-
-      const { signature: jupSignature } = await this.executeJupiterTransaction(
-        swapResponse.swapTransaction,
+      const jupiterSponsoredLamports = await this.ensureJupiterSwapFeeBudget(
         userKeypair
       );
-      jupiterSignature = jupSignature;
-      console.log(`Jupiter leg submitted: ${jupiterSignature}`);
-      await this.wallet.confirmTransaction(jupiterSignature);
+
+      try {
+        const jupiterQuote = await this.getJupiterQuote({
+          inputMint: quote.inputMint,
+          outputMint: SOL_MINT,
+          amount: quote.inputAmountRaw,
+          slippageBps,
+        });
+
+        const swapResponse = await this.jupiterClient.getSwapTransaction({
+          userPublicKey: userKeypair.publicKey.toBase58(),
+          quoteResponse: jupiterQuote,
+        });
+
+        const { signature: jupSignature } = await this.executeJupiterTransaction(
+          swapResponse.swapTransaction,
+          userKeypair
+        );
+        jupiterSignature = jupSignature;
+        this.logSensitive(`Jupiter leg submitted: ${jupiterSignature}`);
+        await this.wallet.confirmTransaction(jupiterSignature);
+
+        await refundCompositeSponsorship(
+          jupiterSponsoredLamports,
+          "jupiter-then-pump"
+        );
+      } catch (error) {
+        await refundCompositeSponsorship(
+          jupiterSponsoredLamports,
+          "jupiter-then-pump failure"
+        );
+        throw error;
+      }
 
       const postBalance = await this.connection.getBalance(
         userKeypair.publicKey

@@ -1,6 +1,11 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Connection, Keypair } from "@solana/web3.js";
-import { MIN_JUPITER_SWAP_FEE_LAMPORTS, JUPITER_FEE_SAFETY_MARGIN_LAMPORTS, SwapManager } from "../src/utils/swap-manager";
+import {
+  MIN_JUPITER_SWAP_FEE_LAMPORTS,
+  JUPITER_FEE_SAFETY_MARGIN_LAMPORTS,
+  MAX_JUPITER_SPONSORSHIPS_PER_WINDOW,
+  SwapManager,
+} from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
 import type { FeeBudgetProvider } from "../src/utils/fee-budget";
 
@@ -260,6 +265,33 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
     const signature = await sm.executeJupiterSwap(req, quote);
     expect(signature).toBe("SIG_JUP_FEE");
     expect(refundedAmount).toBe(sponsoredAmount);
+  });
+
+  test("throttles Jupiter sponsorships per user", async () => {
+    const connection = new Connection("http://localhost:8899", "confirmed");
+    const wallet = WalletManager.createForTest(
+      "test walk nut penalty hip pave soap entry language right filter choice",
+      { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    );
+    const sm = new SwapManager(connection, wallet, createFeeBudgetStub());
+
+    (sm as any).connection.getBalance = async () => 0;
+
+    let sponsorCalls = 0;
+    (sm as any).sponsorSwapFees = async () => {
+      sponsorCalls += 1;
+    };
+
+    const user = Keypair.generate();
+
+    for (let i = 0; i < MAX_JUPITER_SPONSORSHIPS_PER_WINDOW; i++) {
+      await (sm as any).ensureJupiterSwapFeeBudget(user);
+    }
+
+    await expect(
+      (sm as any).ensureJupiterSwapFeeBudget(user)
+    ).rejects.toThrow(/Too many Jupiter sponsorships/);
+    expect(sponsorCalls).toBe(MAX_JUPITER_SPONSORSHIPS_PER_WINDOW);
   });
 
   test("retries sponsorship after balance lookup fails", async () => {
