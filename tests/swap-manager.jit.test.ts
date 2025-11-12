@@ -691,6 +691,8 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
+    const admin = Keypair.generate();
+    (wallet as any).getAdminKeypair = () => admin;
 
     const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
     (swapManager as any).connection = {
