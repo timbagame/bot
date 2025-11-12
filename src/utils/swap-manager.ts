@@ -4,7 +4,6 @@ import {
   Keypair,
   TransactionInstruction,
   VersionedTransaction,
-  SystemProgram,
 } from "@solana/web3.js";
 import {
   JupiterClient,
@@ -44,6 +43,7 @@ export type {
 
 const SOL_MINT = WSOL_MINT;
 const SOL_DECIMALS = 9;
+const MIN_USER_INITIATED_FEE_LAMPORTS = 5_000;
 const KNOWN_MAJOR_TOKENS = new Set([
   "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
   "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
@@ -55,16 +55,6 @@ const KNOWN_MAJOR_TOKENS = new Set([
 
 export const MIN_JUPITER_SWAP_FEE_LAMPORTS = 10_000_000;
 export const JUPITER_FEE_SAFETY_MARGIN_LAMPORTS = 150_000;
-export const JUPITER_REFUND_HEADROOM_LAMPORTS = 20_000;
-
-type JupiterLendingRequirement = {
-  requiredBalance: number;
-  currentBalance: number;
-  loan: number;
-};
-export const MAX_JUPITER_LENDINGS_PER_WINDOW = 3;
-export const JUPITER_LENDING_WINDOW_MS = 60_000;
-type LendingWindow = { count: number; windowStart: number };
 
 export class SwapManager {
   private jupiterClient: JupiterClient;
@@ -74,8 +64,6 @@ export class SwapManager {
   private feeBudget: FeeBudgetProvider;
   private network: SolanaNetwork;
   private readonly quoteCache = new SwapQuoteCache();
-  private readonly jupiterFeeLoans = new Map<string, Promise<number>>();
-  private readonly lendingWindows = new Map<string, LendingWindow>();
 
   constructor(
     connection: Connection,
@@ -89,39 +77,6 @@ export class SwapManager {
 
     this.jupiterClient = new JupiterClient();
     this.pumpFunClient = new PumpFunClient(connection);
-  }
-
-  private prepareLendingWindow(key: string): LendingWindow {
-    const now = Date.now();
-    const existing = this.lendingWindows.get(key);
-    if (
-      !existing ||
-      now - existing.windowStart >= JUPITER_LENDING_WINDOW_MS
-    ) {
-      const reset = { count: 0, windowStart: now };
-      this.lendingWindows.set(key, reset);
-      return reset;
-    }
-    return existing;
-  }
-
-  private ensureLendingAllowed(key: string): LendingWindow {
-    const window = this.prepareLendingWindow(key);
-    if (window.count >= MAX_JUPITER_LENDINGS_PER_WINDOW) {
-      throw new Error(
-        "Too many Jupiter loans initiated for this user; please wait a moment."
-      );
-    }
-    return window;
-  }
-
-  private recordLendingSuccess(key: string): void {
-    const window = this.lendingWindows.get(key);
-    if (!window) {
-      return;
-    }
-    window.count += 1;
-    this.lendingWindows.set(key, window);
   }
 
   private isSolMint(mint: string): boolean {
@@ -461,9 +416,17 @@ export class SwapManager {
 
     const targetLamports = Math.max(desiredLamports ?? 0, minimumSolBuffer);
 
-    let loanedLamportsOutstanding = 0;
     let lastJupiterError: string | null = null;
     let lastUnwrapError: string | null = null;
+
+    const minUserInitiatedLamports = Math.max(
+      jitFeeBuffer,
+      MIN_USER_INITIATED_FEE_LAMPORTS
+    );
+
+    const minJupiterBalanceRequired =
+      Math.max(minUserInitiatedLamports, MIN_JUPITER_SWAP_FEE_LAMPORTS) +
+      JUPITER_FEE_SAFETY_MARGIN_LAMPORTS;
 
     try {
       const currentLamports = await this.connection.getBalance(
@@ -492,6 +455,15 @@ export class SwapManager {
         target: number
       ): Promise<JustInTimeSwapResult | null> => {
         try {
+          if (currentLamports < minJupiterBalanceRequired) {
+            lastJupiterError =
+              "Not enough SOL to cover Jupiter fees. Add SOL or swap tokens for SOL before retrying.";
+            console.log(
+              "⚠️ Skipping Jupiter swap: insufficient SOL to pay for fees."
+            );
+            return null;
+          }
+
           const quote = await this.getJupiterQuote({
             inputMint: tokenMint,
             outputMint: SOL_MINT,
@@ -518,24 +490,10 @@ export class SwapManager {
             quoteResponse: quote,
           });
 
-          const lendLamports = Math.max(jitFeeBuffer - currentLamports, 0);
-          if (lendLamports > 0) {
-            await this.lendSwapFees(userKeypair, lendLamports);
-            loanedLamportsOutstanding += lendLamports;
-          }
-
           const { signature } = await this.executeJupiterTransaction(
             swapResponse.swapTransaction,
             userKeypair
           );
-
-          if (loanedLamportsOutstanding > 0) {
-            await this.returnLoanedFees(
-              userKeypair,
-              loanedLamportsOutstanding
-            );
-            loanedLamportsOutstanding = 0;
-          }
 
           lastJupiterError = null;
           return {
@@ -545,22 +503,6 @@ export class SwapManager {
             lamportsReceived: target,
           };
         } catch (attemptError: any) {
-          if (loanedLamportsOutstanding > 0) {
-            try {
-              await this.returnLoanedFees(
-                userKeypair,
-                loanedLamportsOutstanding
-              );
-            } catch (refundError) {
-              console.error(
-                "Failed to return loaned swap fees after Jupiter attempt:",
-                refundError
-              );
-            } finally {
-              loanedLamportsOutstanding = 0;
-            }
-          }
-
           const message = attemptError?.message || String(attemptError);
           lastJupiterError =
             message ||
@@ -591,10 +533,13 @@ export class SwapManager {
         }
 
         try {
-          const lendLamports = Math.max(jitFeeBuffer - currentLamports, 0);
-          if (lendLamports > 0) {
-            await this.lendSwapFees(userKeypair, lendLamports);
-            loanedLamportsOutstanding += lendLamports;
+          if (currentLamports < minUserInitiatedLamports) {
+            lastUnwrapError =
+              "Not enough SOL to cover network fees for WSOL unwrap. Add SOL manually or convert tokens via pump.fun before retrying.";
+            console.log(
+              "⚠️ Skipping WSOL unwrap: insufficient SOL to pay transaction fees."
+            );
+            return null;
           }
 
           const { signature, lamportsReceived } = await this.unwrapWsolPortion({
@@ -602,14 +547,6 @@ export class SwapManager {
             unwrapLamports,
             logContext,
           });
-
-          if (loanedLamportsOutstanding > 0) {
-            await this.returnLoanedFees(
-              userKeypair,
-              loanedLamportsOutstanding
-            );
-            loanedLamportsOutstanding = 0;
-          }
 
           lastUnwrapError = null;
           return {
@@ -619,22 +556,6 @@ export class SwapManager {
             lamportsReceived,
           };
         } catch (attemptError: any) {
-          if (loanedLamportsOutstanding > 0) {
-            try {
-              await this.returnLoanedFees(
-                userKeypair,
-                loanedLamportsOutstanding
-              );
-            } catch (refundError) {
-              console.error(
-                "Failed to return loaned fees after WSOL unwrap attempt:",
-                refundError
-              );
-            } finally {
-              loanedLamportsOutstanding = 0;
-            }
-          }
-
           const message = attemptError?.message || String(attemptError);
           lastUnwrapError =
             message ||
@@ -837,20 +758,10 @@ export class SwapManager {
         lamportsReceived: selectedQuote.lamportsOut,
       };
     } catch (error: any) {
-      if (loanedLamportsOutstanding > 0) {
-        try {
-          await this.returnLoanedFees(
-            userKeypair,
-            loanedLamportsOutstanding
-          );
-        } catch (refundError) {
-          console.error("Failed to return loaned swap fees:", refundError);
-        }
-      }
       console.error("Just-in-time SOL swap failed:", error);
       return {
         swapped: false,
-        error: error.message || "Failed to perform SOL loan swap",
+        error: error.message || "Failed to perform SOL swap",
       };
     }
   }
@@ -909,96 +820,6 @@ export class SwapManager {
     };
   }
 
-  private async transferFees(
-    fromKeypair: Keypair,
-    toPublicKey: PublicKey,
-    lamports: number
-  ): Promise<void> {
-    if (lamports <= 0) {
-      return;
-    }
-
-    const transferIx = SystemProgram.transfer({
-      fromPubkey: fromKeypair.publicKey,
-      toPubkey: toPublicKey,
-      lamports,
-    });
-
-    await this.wallet.sendAndConfirmWithResubmits([transferIx], [fromKeypair], {
-      operationLabel: "Fee transfer",
-    });
-  }
-
-  private async lendSwapFees(
-    userKeypair: Keypair,
-    lamports: number
-  ): Promise<void> {
-    const adminKeypair = this.wallet.getAdminKeypair();
-    await this.transferFees(adminKeypair, userKeypair.publicKey, lamports);
-  }
-
-  private async returnLoanedFees(
-    userKeypair: Keypair,
-    lamports: number
-  ): Promise<void> {
-    const adminKeypair = this.wallet.getAdminKeypair();
-    await this.transferFees(userKeypair, adminKeypair.publicKey, lamports);
-  }
-
-  private async computeJupiterLendingRequirement(
-    userKeypair: Keypair
-  ): Promise<JupiterLendingRequirement> {
-    const requiredBalance =
-      Math.max(
-        await this.feeBudget.getJitSwapFeeBufferLamports(),
-        MIN_JUPITER_SWAP_FEE_LAMPORTS
-      ) + JUPITER_FEE_SAFETY_MARGIN_LAMPORTS;
-    const currentBalance = await this.connection.getBalance(
-      userKeypair.publicKey
-    );
-
-    return {
-      requiredBalance,
-      currentBalance,
-      loan: Math.max(requiredBalance - currentBalance, 0),
-    };
-  }
-
-  private async ensureJupiterSwapFeeBudget(
-    userKeypair: Keypair,
-    precomputed?: JupiterLendingRequirement
-  ): Promise<number> {
-    const key = userKeypair.publicKey.toBase58();
-    let pending = this.jupiterFeeLoans.get(key);
-    if (!pending) {
-      pending = (async () => {
-        const requirement =
-          precomputed ??
-          (await this.computeJupiterLendingRequirement(userKeypair));
-
-        if (requirement.currentBalance >= requirement.requiredBalance) {
-          return 0;
-        }
-
-        const loan = requirement.loan;
-        this.ensureLendingAllowed(key);
-        await this.lendSwapFees(userKeypair, loan);
-        this.recordLendingSuccess(key);
-        return loan;
-      })();
-
-      this.jupiterFeeLoans.set(key, pending);
-    }
-
-    try {
-      return await pending;
-    } finally {
-      if (this.jupiterFeeLoans.get(key) === pending) {
-        this.jupiterFeeLoans.delete(key);
-      }
-    }
-  }
-
   /**
    * Create swap transaction instructions
    */
@@ -1051,7 +872,22 @@ export class SwapManager {
     quote: SwapQuote
   ): Promise<string> {
     const { userKeypair, slippageBps = 500 } = request;
-    let loanedLamports = 0;
+
+    const requiredBalance =
+      Math.max(
+        await this.feeBudget.getJitSwapFeeBufferLamports(),
+        MIN_JUPITER_SWAP_FEE_LAMPORTS
+      ) + JUPITER_FEE_SAFETY_MARGIN_LAMPORTS;
+
+    const currentBalance = await this.connection.getBalance(
+      userKeypair.publicKey
+    );
+
+    if (currentBalance < requiredBalance) {
+      throw new Error(
+        "Not enough SOL to cover Jupiter fees. Add SOL or swap tokens for SOL before retrying."
+      );
+    }
 
     try {
       const jupiterQuote = await this.getJupiterQuote({
@@ -1060,28 +896,6 @@ export class SwapManager {
         amount: quote.inputAmountRaw,
         slippageBps,
       });
-
-      const requirement = await this.computeJupiterLendingRequirement(
-        userKeypair
-      );
-
-      if (
-        this.isSolMint(quote.outputMint) &&
-        requirement.loan > 0 &&
-        BigInt(jupiterQuote.outAmount) <
-          BigInt(
-            requirement.loan + JUPITER_REFUND_HEADROOM_LAMPORTS
-          )
-      ) {
-        throw new Error(
-          "Swap output does not leave enough SOL to return loaned fees; increase the input amount or add SOL manually."
-        );
-      }
-
-      loanedLamports = await this.ensureJupiterSwapFeeBudget(
-        userKeypair,
-        requirement
-      );
 
       const setupInstructions = await this.createTokenAccountsIfNeeded(
         userKeypair,
@@ -1113,30 +927,11 @@ export class SwapManager {
         userKeypair
       );
 
-      if (loanedLamports > 0) {
-        try {
-          await this.returnLoanedFees(userKeypair, loanedLamports);
-        } catch (error) {
-          console.error("Failed to return loaned swap fees:", error);
-        }
-      }
-
       return signature;
     } catch (error) {
-      if (loanedLamports > 0) {
-        try {
-          await this.returnLoanedFees(userKeypair, loanedLamports);
-        } catch (refundError) {
-          console.error(
-            "Failed to return loaned swap fees after Jupiter failure:",
-            refundError
-          );
-        }
-      }
       throw error;
     }
   }
-
   async executeCompositePumpFunJupiterSwap(
     request: SwapRequest,
     quote: SwapQuote
@@ -1150,12 +945,8 @@ export class SwapManager {
       throw new Error("Composite swap quote is not available");
     }
 
-    const {
-      userKeypair,
-      slippageBps = 500,
-      outputDecimals,
-      outputTicker,
-    } = request;
+    const { userKeypair, slippageBps = 500, outputDecimals, outputTicker } =
+      request;
 
     const setupInstructions = await this.createTokenAccountsIfNeeded(
       userKeypair,
@@ -1178,25 +969,26 @@ export class SwapManager {
 
     const flow = composite.flow ?? "pump-then-jupiter";
 
-    const refundCompositeSponsorship = async (
-      amount: number,
-      context: string
-    ): Promise<void> => {
-      if (amount <= 0) {
-        return;
-      }
-      try {
-        await this.returnLoanedFees(userKeypair, amount);
-      } catch (refundError) {
-        console.error(
-          `Failed to return loaned swap fees after composite ${context}:`,
-          refundError
+    let pumpSignature: string;
+    let jupiterSignature: string;
+
+    const requireSolBalance = async (minimum: number) => {
+      const currentBalance = await this.connection.getBalance(
+        userKeypair.publicKey
+      );
+
+      if (currentBalance < minimum) {
+        throw new Error(
+          "Not enough SOL to cover Jupiter fees. Add SOL or swap tokens for SOL before retrying."
         );
       }
     };
 
-    let pumpSignature: string;
-    let jupiterSignature: string;
+    const minJupiterBalance = async () =>
+      Math.max(
+        await this.feeBudget.getJitSwapFeeBufferLamports(),
+        MIN_JUPITER_SWAP_FEE_LAMPORTS
+      ) + JUPITER_FEE_SAFETY_MARGIN_LAMPORTS;
 
     if (flow === "pump-then-jupiter") {
       const preBalance = await this.connection.getBalance(
@@ -1240,95 +1032,63 @@ export class SwapManager {
 
       const jupiterInputLamports = availableLamports - feeBuffer;
 
+      await requireSolBalance(await minJupiterBalance());
+
       console.log(
         `Jupiter leg will use ${jupiterInputLamports.toString()} lamports (keeping ${feeBuffer.toString()} for fees)`
       );
 
-      const jupiterSponsoredLamports = await this.ensureJupiterSwapFeeBudget(
+      const jupiterQuote = await this.getJupiterQuote({
+        inputMint: SOL_MINT,
+        outputMint: quote.outputMint,
+        amount: jupiterInputLamports.toString(),
+        slippageBps,
+      });
+
+      const swapResponse = await this.jupiterClient.getSwapTransaction({
+        userPublicKey: userKeypair.publicKey.toBase58(),
+        quoteResponse: jupiterQuote,
+      });
+
+      const { signature: jupSignature } = await this.executeJupiterTransaction(
+        swapResponse.swapTransaction,
         userKeypair
       );
+      jupiterSignature = jupSignature;
 
-      try {
-        const jupiterQuote = await this.getJupiterQuote({
-          inputMint: SOL_MINT,
-          outputMint: quote.outputMint,
-          amount: jupiterInputLamports.toString(),
-          slippageBps,
-        });
-
-        const swapResponse = await this.jupiterClient.getSwapTransaction({
-          userPublicKey: userKeypair.publicKey.toBase58(),
-          quoteResponse: jupiterQuote,
-        });
-
-        const { signature: jupSignature } =
-          await this.executeJupiterTransaction(
-            swapResponse.swapTransaction,
-            userKeypair
-          );
-        jupiterSignature = jupSignature;
-
-        console.log(
-          `Jupiter leg submitted: ${jupiterSignature} (expected ~${formatAmount(
-            BigInt(jupiterQuote.outAmount),
-            outputDecimals,
-            { maxFractionDigits: Math.min(outputDecimals, 6), trim: true }
-          )} ${outputTicker.toUpperCase()})`
-        );
-
-        await refundCompositeSponsorship(
-          jupiterSponsoredLamports,
-          "pump-then-jupiter"
-        );
-      } catch (error) {
-        await refundCompositeSponsorship(
-          jupiterSponsoredLamports,
-          "pump-then-jupiter failure"
-        );
-        throw error;
-      }
+      console.log(
+        `Jupiter leg submitted: ${jupiterSignature} (expected ~${formatAmount(
+          BigInt(jupiterQuote.outAmount),
+          outputDecimals,
+          { maxFractionDigits: Math.min(outputDecimals, 6), trim: true }
+        )} ${outputTicker.toUpperCase()})`
+      );
     } else if (flow === "jupiter-then-pump") {
+      await requireSolBalance(await minJupiterBalance());
+
       const preBalance = await this.connection.getBalance(
         userKeypair.publicKey
       );
 
-      const jupiterSponsoredLamports = await this.ensureJupiterSwapFeeBudget(
+      const jupiterQuote = await this.getJupiterQuote({
+        inputMint: quote.inputMint,
+        outputMint: SOL_MINT,
+        amount: quote.inputAmountRaw,
+        slippageBps,
+      });
+
+      const swapResponse = await this.jupiterClient.getSwapTransaction({
+        userPublicKey: userKeypair.publicKey.toBase58(),
+        quoteResponse: jupiterQuote,
+      });
+
+      const { signature: jupSignature } = await this.executeJupiterTransaction(
+        swapResponse.swapTransaction,
         userKeypair
       );
-
-      try {
-        const jupiterQuote = await this.getJupiterQuote({
-          inputMint: quote.inputMint,
-          outputMint: SOL_MINT,
-          amount: quote.inputAmountRaw,
-          slippageBps,
-        });
-
-        const swapResponse = await this.jupiterClient.getSwapTransaction({
-          userPublicKey: userKeypair.publicKey.toBase58(),
-          quoteResponse: jupiterQuote,
-        });
-
-        const { signature: jupSignature } =
-          await this.executeJupiterTransaction(
-            swapResponse.swapTransaction,
-            userKeypair
-          );
-        jupiterSignature = jupSignature;
-        console.log(`Jupiter leg submitted: ${jupiterSignature}`);
-        await this.wallet.confirmTransaction(jupiterSignature);
-
-        await refundCompositeSponsorship(
-          jupiterSponsoredLamports,
-          "jupiter-then-pump"
-        );
-      } catch (error) {
-        await refundCompositeSponsorship(
-          jupiterSponsoredLamports,
-          "jupiter-then-pump failure"
-        );
-        throw error;
-      }
+      jupiterSignature = jupSignature;
+      console.log(`Jupiter leg submitted: ${jupiterSignature}`);
+      await this.wallet.confirmTransaction(jupiterSignature);
 
       const postBalance = await this.connection.getBalance(
         userKeypair.publicKey
@@ -1390,6 +1150,7 @@ export class SwapManager {
 
     return { pumpSignature, jupiterSignature };
   }
+
 
   /**
    * Format quote for display

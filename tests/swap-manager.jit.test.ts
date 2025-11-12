@@ -9,7 +9,11 @@ import {
 } from "@solana/web3.js";
 import * as splToken from "@solana/spl-token";
 
-import { SwapManager } from "../src/utils/swap-manager";
+import {
+  SwapManager,
+  MIN_JUPITER_SWAP_FEE_LAMPORTS,
+  JUPITER_FEE_SAFETY_MARGIN_LAMPORTS,
+} from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
 import { WSOL_MINT } from "../src/utils/constants";
 import { formatAmount } from "../src/utils/format-amount";
@@ -76,14 +80,14 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
-    const admin = Keypair.generate();
-    (wallet as any).getAdminKeypair = () => admin;
-    (wallet as any).sendTransaction = async () => "loaned";
-    (wallet as any).confirmTransaction = async () => {};
 
     const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
+    const desiredLamports =
+      MIN_JUPITER_SWAP_FEE_LAMPORTS +
+      JUPITER_FEE_SAFETY_MARGIN_LAMPORTS +
+      TEST_GAME_BUFFER_LAMPORTS;
     (swapManager as any).connection = {
-      getBalance: async () => 0,
+      getBalance: async () => desiredLamports - JUPITER_FEE_SAFETY_MARGIN_LAMPORTS,
     };
     (swapManager as any).getBestProvider = async () => "jupiter";
     (swapManager as any).jupiterClient.getQuote = async () => ({
@@ -109,6 +113,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       tokenDecimals: 6,
       availableTokenAmountRaw: availableRaw,
       tokenTicker: "TEST",
+      desiredLamports,
     });
 
     expect(result.swapped).toBe(false);
@@ -131,19 +136,10 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
 
     const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
     (swapManager as any).connection = {
-      getBalance: async () => 0,
+      getBalance: async () => TEST_JIT_BUFFER_LAMPORTS,
     };
     (swapManager as any).getBestProvider = async () => {
       throw new Error("Jupiter/Pump fun routing should be skipped for WSOL unwrap");
-    };
-
-    const lendCalls: number[] = [];
-    const refundCalls: number[] = [];
-    (swapManager as any).lendSwapFees = async (_kp: Keypair, lamports: number) => {
-      lendCalls.push(lamports);
-    };
-    (swapManager as any).returnLoanedFees = async (_kp: Keypair, lamports: number) => {
-      refundCalls.push(lamports);
     };
 
     let unwrapRequests: number[] = [];
@@ -171,14 +167,8 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(result.swapped).toBe(true);
     expect(result.provider).toBe("unwrap");
     expect(result.signature).toBe("SIG_UNWRAP");
-    expect(result.lamportsReceived).toBe(
-      TEST_GAME_BUFFER_LAMPORTS + TEST_JIT_BUFFER_LAMPORTS
-    );
-    expect(unwrapRequests).toEqual([
-      TEST_GAME_BUFFER_LAMPORTS + TEST_JIT_BUFFER_LAMPORTS,
-    ]);
-    expect(lendCalls).toEqual([TEST_JIT_BUFFER_LAMPORTS]);
-    expect(refundCalls).toEqual([TEST_JIT_BUFFER_LAMPORTS]);
+    expect(result.lamportsReceived).toBe(TEST_GAME_BUFFER_LAMPORTS);
+    expect(unwrapRequests).toEqual([TEST_GAME_BUFFER_LAMPORTS]);
   });
 
   test("performs Jupiter swap when available tokens exactly meet the requirement", async () => {
@@ -188,8 +178,11 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       timeNow: () => Date.now(),
     });
     const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
+    const feeFloor =
+      MIN_JUPITER_SWAP_FEE_LAMPORTS + JUPITER_FEE_SAFETY_MARGIN_LAMPORTS;
+    const desiredLamports = feeFloor + TEST_GAME_BUFFER_LAMPORTS;
     (swapManager as any).connection = {
-      getBalance: async () => 0,
+      getBalance: async () => feeFloor,
     };
     (swapManager as any).getBestProvider = async () => "jupiter";
 
@@ -213,18 +206,6 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       estimatedFee: 0,
     });
 
-    const lendCalls: number[] = [];
-    const refundCalls: number[] = [];
-    (swapManager as any).lendSwapFees = async (_kp: Keypair, lamports: number) => {
-      lendCalls.push(lamports);
-    };
-    (swapManager as any).returnLoanedFees = async (
-      _kp: Keypair,
-      lamports: number
-    ) => {
-      refundCalls.push(lamports);
-    };
-
     const user = Keypair.generate();
     const result = await swapManager.performJustInTimeSolSwap({
       userKeypair: user,
@@ -232,11 +213,10 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       tokenDecimals: 6,
       availableTokenAmountRaw: availableRaw,
       tokenTicker: "TEST",
+      desiredLamports,
     });
 
     expect(result.swapped).toBe(true);
-    expect(lendCalls).toEqual([expect.any(Number)]);
-    expect(refundCalls).toEqual([expect.any(Number)]);
   });
 
   test("unwrap still executes when current SOL already exceeds swap target", async () => {
@@ -270,21 +250,6 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       };
     };
 
-    const lendCalls: number[] = [];
-    (swapManager as any).lendSwapFees = async (
-      _kp: Keypair,
-      lamports: number
-    ) => {
-      lendCalls.push(lamports);
-    };
-    const refundCalls: number[] = [];
-    (swapManager as any).returnLoanedFees = async (
-      _kp: Keypair,
-      lamports: number
-    ) => {
-      refundCalls.push(lamports);
-    };
-
     const user = Keypair.generate();
     const availableRaw = 2_774_000; // ~0.002774 SOL wrapped
     const result = await swapManager.performJustInTimeSolSwap({
@@ -306,8 +271,6 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       TEST_GAME_BUFFER_LAMPORTS - currentLamports +
         TEST_JIT_BUFFER_LAMPORTS,
     ]);
-    expect(lendCalls).toEqual([]);
-    expect(refundCalls).toEqual([]);
   });
 
   test("returns helpful error when WSOL unwrap attempts fail", async () => {
@@ -321,16 +284,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
 
     const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
     (swapManager as any).connection = {
-      getBalance: async () => 0,
-    };
-
-    const lendCalls: number[] = [];
-    const refundCalls: number[] = [];
-    (swapManager as any).lendSwapFees = async (_kp: Keypair, lamports: number) => {
-      lendCalls.push(lamports);
-    };
-    (swapManager as any).returnLoanedFees = async (_kp: Keypair, lamports: number) => {
-      refundCalls.push(lamports);
+      getBalance: async () => TEST_JIT_BUFFER_LAMPORTS,
     };
 
     let unwrapAttempts = 0;
@@ -351,8 +305,6 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(result.swapped).toBe(false);
     expect(result.error).toContain("Unable to unwrap due to rent exempt requirement.");
     expect(unwrapAttempts).toBeGreaterThanOrEqual(1);
-    expect(lendCalls.length).toBe(unwrapAttempts);
-    expect(refundCalls.length).toBe(unwrapAttempts);
   });
 
   test("executes pump.fun swap with admin as fee payer", async () => {
@@ -401,31 +353,20 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(sendCalls[0]?.[1]?.publicKey.equals(user.publicKey)).toBe(true);
   });
 
-  test("refunds loaned lamports to admin after successful Jupiter swap", async () => {
+  test("executes Jupiter swap without lending when user has SOL for fees", async () => {
     const wallet = WalletManager.createForTest(mnemonic, {
       connection,
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
-    const admin = Keypair.generate();
-    (wallet as any).getAdminKeypair = () => admin;
-
-    const sendCalls: {
-      signers: Keypair[];
-      instructions: TransactionInstruction[];
-    }[] = [];
-    (wallet as any).sendTransaction = async (
-      ixs: TransactionInstruction[],
-      signers: Keypair[]
-    ) => {
-      sendCalls.push({ instructions: ixs, signers });
-      return `SIG_${sendCalls.length}`;
-    };
-    (wallet as any).confirmTransaction = async () => {};
-
     const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
+    const feeFloor =
+      MIN_JUPITER_SWAP_FEE_LAMPORTS + JUPITER_FEE_SAFETY_MARGIN_LAMPORTS;
+    const desiredLamports = feeFloor + TEST_GAME_BUFFER_LAMPORTS;
+    const expectedReceived =
+      desiredLamports - feeFloor + TEST_JIT_BUFFER_LAMPORTS;
     (swapManager as any).connection = {
-      getBalance: async () => 0,
+      getBalance: async () => feeFloor,
     };
     (swapManager as any).getBestProvider = async () => "jupiter";
     (swapManager as any).jupiterClient.getQuote = async () => ({
@@ -448,6 +389,17 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       estimatedFee: 0,
     });
 
+    let lendCalled = false;
+    let refundCalled = false;
+    (swapManager as any).lendSwapFees = async () => {
+      lendCalled = true;
+      throw new Error("lendSwapFees should not be called for Jupiter path");
+    };
+    (swapManager as any).returnLoanedFees = async () => {
+      refundCalled = true;
+      throw new Error("returnLoanedFees should not be called for Jupiter path");
+    };
+
     const user = Keypair.generate();
     const result = await swapManager.performJustInTimeSolSwap({
       userKeypair: user,
@@ -455,36 +407,15 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       tokenDecimals: 6,
       availableTokenAmountRaw: 10_000_000,
       tokenTicker: "TEST",
+      desiredLamports,
     });
 
     expect(result.swapped).toBe(true);
     expect(result.provider).toBe("jupiter");
     expect(result.signature).toBe("SIG_JUP");
-    expect(result.lamportsReceived).toBe(
-      TEST_GAME_BUFFER_LAMPORTS + TEST_JIT_BUFFER_LAMPORTS
-    );
-
-    expect(sendCalls.length).toBe(2);
-
-    const lendCall = sendCalls[0]!;
-    expect(
-      lendCall.signers[0]?.publicKey.equals(admin.publicKey)
-    ).toBe(true);
-    expect(
-      lendCall.instructions[0]?.keys[0]?.pubkey.equals(admin.publicKey)
-    ).toBe(true);
-    expect(
-      lendCall.instructions[0]?.keys[1]?.pubkey.equals(user.publicKey)
-    ).toBe(true);
-
-    const refundCall = sendCalls[1]!;
-    expect(refundCall.signers[0]?.publicKey.equals(user.publicKey)).toBe(true);
-    expect(
-      refundCall.instructions[0]?.keys[0]?.pubkey.equals(user.publicKey)
-    ).toBe(true);
-    expect(
-      refundCall.instructions[0]?.keys[1]?.pubkey.equals(admin.publicKey)
-    ).toBe(true);
+    expect(result.lamportsReceived).toBe(expectedReceived);
+    expect(lendCalled).toBe(false);
+    expect(refundCalled).toBe(false);
   });
 
   test("unwrapWsolPortion closes WSOL ATA and rewraps remaining balance", async () => {
@@ -624,18 +555,19 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(rawUnits > 0n).toBe(true);
   });
 
-  test("refunds loaned lamports when Jupiter swap fails", async () => {
+  test("surfaces Jupiter failure without lending when execution throws", async () => {
     const wallet = WalletManager.createForTest(mnemonic, {
       connection,
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
-    const admin = Keypair.generate();
-    (wallet as any).getAdminKeypair = () => admin;
 
     const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
+    const feeFloor =
+      MIN_JUPITER_SWAP_FEE_LAMPORTS + JUPITER_FEE_SAFETY_MARGIN_LAMPORTS;
+    const desiredLamports = feeFloor + TEST_GAME_BUFFER_LAMPORTS;
     (swapManager as any).connection = {
-      getBalance: async () => 0,
+      getBalance: async () => feeFloor,
     };
     (swapManager as any).getBestProvider = async () => "jupiter";
     (swapManager as any).jupiterClient.getQuote = async () => ({
@@ -657,19 +589,15 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       throw new Error("Jupiter execution failed");
     };
 
-    const lendCalls: number[] = [];
-    const refundCalls: number[] = [];
-    (swapManager as any).lendSwapFees = async (
-      _kp: Keypair,
-      lamports: number
-    ) => {
-      lendCalls.push(lamports);
+    let lendCalled = false;
+    let refundCalled = false;
+    (swapManager as any).lendSwapFees = async () => {
+      lendCalled = true;
+      throw new Error("lendSwapFees should not be used for Jupiter path");
     };
-    (swapManager as any).returnLoanedFees = async (
-      _kp: Keypair,
-      lamports: number
-    ) => {
-      refundCalls.push(lamports);
+    (swapManager as any).returnLoanedFees = async () => {
+      refundCalled = true;
+      throw new Error("returnLoanedFees should not be used for Jupiter path");
     };
 
     const user = Keypair.generate();
@@ -679,41 +607,13 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       tokenDecimals: 6,
       availableTokenAmountRaw: 5_000_000,
       tokenTicker: "TEST",
+      desiredLamports,
     });
 
     expect(result.swapped).toBe(false);
     expect(result.error).toMatch(/Jupiter execution failed/);
-    expect(lendCalls).toEqual([TEST_JIT_BUFFER_LAMPORTS, TEST_JIT_BUFFER_LAMPORTS]);
-    expect(refundCalls).toEqual([TEST_JIT_BUFFER_LAMPORTS, TEST_JIT_BUFFER_LAMPORTS]);
-  });
-
-  test("ensureJupiterSwapFeeBudget deduplicates concurrent requests", async () => {
-    const wallet = WalletManager.createForTest(mnemonic, {
-      connection,
-      fetch: globalThis.fetch as any,
-      timeNow: () => Date.now(),
-    });
-    const admin = Keypair.generate();
-    (wallet as any).getAdminKeypair = () => admin;
-
-    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
-    (swapManager as any).connection = {
-      getBalance: async () => 0,
-    };
-
-    let lendCount = 0;
-    (swapManager as any).lendSwapFees = async () => {
-      lendCount++;
-      await new Promise((resolve) => setTimeout(resolve, 30));
-    };
-
-    const user = Keypair.generate();
-    await Promise.all([
-      (swapManager as any).ensureJupiterSwapFeeBudget(user),
-      (swapManager as any).ensureJupiterSwapFeeBudget(user),
-    ]);
-
-    expect(lendCount).toBe(1);
+    expect(lendCalled).toBe(false);
+    expect(refundCalled).toBe(false);
   });
 
   test("composite pump.fun+jupiter surfaces Jupiter failure after pump leg", async () => {
@@ -728,7 +628,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
 
     const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
     let balanceCall = 0;
-    const intermediateLamports = 3_200_000;
+    const intermediateLamports = 20_000_000;
     (swapManager as any).createTokenAccountsIfNeeded = async () => [];
     (swapManager as any).connection = {
       getBalance: async () => {
@@ -833,206 +733,6 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       swapManager.executeCompositePumpFunJupiterSwap(request, quote)
     ).rejects.toThrow("Jupiter leg failure");
     expect(pumpOps).toContain("Pump.fun leg");
-  });
-
-  test("composite swap logs but resolves when refund fails", async () => {
-    const wallet = WalletManager.createForTest(mnemonic, {
-      connection,
-      fetch: globalThis.fetch as any,
-      timeNow: () => Date.now(),
-    });
-    const adminCompositeRefund = Keypair.generate();
-    (wallet as any).adminKeypair = adminCompositeRefund;
-    (wallet as any).getAdminKeypair = () => adminCompositeRefund;
-
-    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
-    (swapManager as any).connection = {
-      getBalance: async () => 0,
-    };
-
-    const sendCalls: {
-      instructions: TransactionInstruction[];
-      signers: Keypair[];
-    }[] = [];
-    (wallet as any).sendAndConfirmWithResubmits = async (
-      ixs: TransactionInstruction[],
-      signers: Keypair[]
-    ) => {
-      sendCalls.push({ instructions: ixs, signers });
-      return `SIG_${sendCalls.length}`;
-    };
-    (wallet as any).confirmTransaction = async () => {};
-
-    (swapManager as any).createTokenAccountsIfNeeded = async () => [];
-    (swapManager as any).pumpFunClient.createSwapTransaction = async () => [
-      {} as TransactionInstruction,
-    ];
-    (swapManager as any).jupiterClient.getQuote = async () => ({
-      inputMint: WSOL_MINT,
-      outputMint: "TARGET",
-      inAmount: "1000000",
-      outAmount: "5000",
-      otherAmountThreshold: "0",
-      swapMode: "ExactIn",
-      slippageBps: 100,
-      priceImpactPct: "0",
-      routePlan: [],
-      totalTime: 0,
-    });
-    (swapManager as any).jupiterClient.getSwapTransaction = async () => ({
-      swapTransaction: "BASE64",
-    });
-    (swapManager as any).executeJupiterTransaction = async () => ({
-      signature: "SIG_JUP",
-      estimatedFee: 0,
-    });
-
-    let lendCalls = 0;
-    (swapManager as any).lendSwapFees = async () => {
-      lendCalls += 1;
-    };
-
-    const errorSpy = spyOn(console, "error").mockImplementation(() => {});
-
-    (swapManager as any).returnLoanedFees = async () => {
-      throw new Error("refund failure");
-    };
-
-    const request = {
-      inputMint: "PUMP",
-      outputMint: "TARGET",
-      amount: "0",
-      userKeypair: Keypair.generate(),
-      slippageBps: 100,
-      inputDecimals: 6,
-      outputDecimals: 6,
-      inputTicker: "PUMP",
-      outputTicker: "TOK",
-    } as const;
-
-    const intermediateLamports = 3_200_000;
-    const pumpQuote: PumpFunQuote = {
-      inputMint: "PUMP",
-      outputMint: WSOL_MINT,
-      inputAmount: "100000",
-      inputAmountRaw: "100000",
-      outputAmount: intermediateLamports.toString(),
-      estimatedRate: 1,
-      slippage: 1,
-      isGraduated: true,
-    };
-
-    const jupiterQuote = {
-      inputMint: WSOL_MINT,
-      outputMint: "TARGET",
-      inAmount: (intermediateLamports - 10_000).toString(),
-      outAmount: "5000",
-      otherAmountThreshold: "0",
-      swapMode: "ExactIn",
-      slippageBps: 100,
-      priceImpactPct: "0",
-      routePlan: [],
-      totalTime: 0,
-    };
-
-    const composite: NonNullable<SwapQuote["composite"]> = {
-      flow: "pump-then-jupiter",
-      intermediateMint: WSOL_MINT,
-      intermediateAmount: intermediateLamports.toString(),
-      pumpQuote,
-      jupiterQuote,
-    };
-
-    const quote: SwapQuote = {
-      provider: "pump-fun+jupiter",
-      inputMint: request.inputMint,
-      outputMint: request.outputMint,
-      inputAmount: "0",
-      inputAmountRaw: "0",
-      outputAmount: "0",
-      estimatedRate: 0,
-      slippage: 1,
-      composite,
-    } satisfies SwapQuote;
-
-    const result = await swapManager.executeCompositePumpFunJupiterSwap(
-      request,
-      quote
-    );
-
-    expect(result.pumpSignature).toBe("SIG_1");
-    expect(result.jupiterSignature).toBe("SIG_JUP");
-    expect(errorSpy.mock.calls[0]?.[0]).toContain(
-      "Failed to return loaned swap fees after composite"
-    );
-    expect((swapManager as any).jupiterFeeLoans.size).toBe(0);
-    errorSpy.mockRestore();
-  });
-
-  test("concurrent JIT swaps across tokens lend separately", async () => {
-    const wallet = WalletManager.createForTest(mnemonic, {
-      connection,
-      fetch: globalThis.fetch as any,
-      timeNow: () => Date.now(),
-    });
-    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
-    (swapManager as any).connection = {
-      getBalance: async () => 0,
-    };
-    (swapManager as any).getBestProvider = async () => "jupiter";
-    (swapManager as any).jupiterClient.getQuote = async ({
-      amount,
-    }: {
-      amount: string;
-    }) => ({
-      inputMint: "TOKEN",
-      outputMint: WSOL_MINT,
-      inAmount: amount,
-      outAmount: "1000",
-      otherAmountThreshold: "0",
-      swapMode: "ExactOut",
-      slippageBps: 100,
-      priceImpactPct: "0",
-      routePlan: [],
-    });
-    (swapManager as any).jupiterClient.getSwapTransaction = async () => ({
-      swapTransaction: Buffer.from("fake").toString("base64"),
-    });
-    (swapManager as any).executeJupiterTransaction = async () => ({
-      signature: "SIG_JUP",
-      estimatedFee: 0,
-    });
-
-    const lendCalls: number[] = [];
-    (swapManager as any).lendSwapFees = async (_kp: Keypair, lamports: number) => {
-      lendCalls.push(lamports);
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    };
-
-    const refundCalls: number[] = [];
-    (swapManager as any).returnLoanedFees = async (
-      _kp: Keypair,
-      lamports: number
-    ) => {
-      refundCalls.push(lamports);
-    };
-
-    const user = Keypair.generate();
-    const tokens = ["TOKEN_A", "TOKEN_B"];
-    const swapPromises = tokens.map((token) =>
-      swapManager.performJustInTimeSolSwap({
-        userKeypair: user,
-        tokenMint: token,
-        tokenDecimals: 6,
-        availableTokenAmountRaw: 12_000_000,
-        tokenTicker: "TEST",
-      })
-    );
-
-    const results = await Promise.all(swapPromises);
-    expect(results.every((result) => result.swapped)).toBe(true);
-    expect(lendCalls.length).toBe(tokens.length);
-    expect(refundCalls.length).toBe(tokens.length);
   });
 
 });
