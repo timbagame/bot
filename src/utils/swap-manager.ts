@@ -57,14 +57,14 @@ export const MIN_JUPITER_SWAP_FEE_LAMPORTS = 10_000_000;
 export const JUPITER_FEE_SAFETY_MARGIN_LAMPORTS = 150_000;
 export const JUPITER_REFUND_HEADROOM_LAMPORTS = 20_000;
 
-type JupiterSponsorshipRequirement = {
+type JupiterLendingRequirement = {
   requiredBalance: number;
   currentBalance: number;
-  sponsorship: number;
+  loan: number;
 };
-export const MAX_JUPITER_SPONSORSHIPS_PER_WINDOW = 3;
-export const JUPITER_SPONSORSHIP_WINDOW_MS = 60_000;
-type SponsorshipWindow = { count: number; windowStart: number };
+export const MAX_JUPITER_LENDINGS_PER_WINDOW = 3;
+export const JUPITER_LENDING_WINDOW_MS = 60_000;
+type LendingWindow = { count: number; windowStart: number };
 
 export class SwapManager {
   private jupiterClient: JupiterClient;
@@ -74,8 +74,8 @@ export class SwapManager {
   private feeBudget: FeeBudgetProvider;
   private network: SolanaNetwork;
   private readonly quoteCache = new SwapQuoteCache();
-  private readonly jupiterFeeSponsorships = new Map<string, Promise<number>>();
-  private readonly sponsorshipWindows = new Map<string, SponsorshipWindow>();
+  private readonly jupiterFeeLoans = new Map<string, Promise<number>>();
+  private readonly lendingWindows = new Map<string, LendingWindow>();
 
   constructor(
     connection: Connection,
@@ -91,37 +91,37 @@ export class SwapManager {
     this.pumpFunClient = new PumpFunClient(connection);
   }
 
-  private prepareSponsorshipWindow(key: string): SponsorshipWindow {
+  private prepareLendingWindow(key: string): LendingWindow {
     const now = Date.now();
-    const existing = this.sponsorshipWindows.get(key);
+    const existing = this.lendingWindows.get(key);
     if (
       !existing ||
-      now - existing.windowStart >= JUPITER_SPONSORSHIP_WINDOW_MS
+      now - existing.windowStart >= JUPITER_LENDING_WINDOW_MS
     ) {
       const reset = { count: 0, windowStart: now };
-      this.sponsorshipWindows.set(key, reset);
+      this.lendingWindows.set(key, reset);
       return reset;
     }
     return existing;
   }
 
-  private ensureSponsorshipAllowed(key: string): SponsorshipWindow {
-    const window = this.prepareSponsorshipWindow(key);
-    if (window.count >= MAX_JUPITER_SPONSORSHIPS_PER_WINDOW) {
+  private ensureLendingAllowed(key: string): LendingWindow {
+    const window = this.prepareLendingWindow(key);
+    if (window.count >= MAX_JUPITER_LENDINGS_PER_WINDOW) {
       throw new Error(
-        "Too many Jupiter sponsorships initiated for this user; please wait a moment."
+        "Too many Jupiter loans initiated for this user; please wait a moment."
       );
     }
     return window;
   }
 
-  private recordSponsorshipSuccess(key: string): void {
-    const window = this.sponsorshipWindows.get(key);
+  private recordLendingSuccess(key: string): void {
+    const window = this.lendingWindows.get(key);
     if (!window) {
       return;
     }
     window.count += 1;
-    this.sponsorshipWindows.set(key, window);
+    this.lendingWindows.set(key, window);
   }
 
   private isSolMint(mint: string): boolean {
@@ -461,7 +461,7 @@ export class SwapManager {
 
     const targetLamports = Math.max(desiredLamports ?? 0, minimumSolBuffer);
 
-    let sponsoredLamportsOutstanding = 0;
+    let loanedLamportsOutstanding = 0;
     let lastJupiterError: string | null = null;
     let lastUnwrapError: string | null = null;
 
@@ -518,10 +518,10 @@ export class SwapManager {
             quoteResponse: quote,
           });
 
-          const sponsorLamports = Math.max(jitFeeBuffer - currentLamports, 0);
-          if (sponsorLamports > 0) {
-            await this.sponsorSwapFees(userKeypair, sponsorLamports);
-            sponsoredLamportsOutstanding += sponsorLamports;
+          const lendLamports = Math.max(jitFeeBuffer - currentLamports, 0);
+          if (lendLamports > 0) {
+            await this.lendSwapFees(userKeypair, lendLamports);
+            loanedLamportsOutstanding += lendLamports;
           }
 
           const { signature } = await this.executeJupiterTransaction(
@@ -529,12 +529,12 @@ export class SwapManager {
             userKeypair
           );
 
-          if (sponsoredLamportsOutstanding > 0) {
-            await this.refundSponsoredFees(
+          if (loanedLamportsOutstanding > 0) {
+            await this.returnLoanedFees(
               userKeypair,
-              sponsoredLamportsOutstanding
+              loanedLamportsOutstanding
             );
-            sponsoredLamportsOutstanding = 0;
+            loanedLamportsOutstanding = 0;
           }
 
           lastJupiterError = null;
@@ -545,19 +545,19 @@ export class SwapManager {
             lamportsReceived: target,
           };
         } catch (attemptError: any) {
-          if (sponsoredLamportsOutstanding > 0) {
+          if (loanedLamportsOutstanding > 0) {
             try {
-              await this.refundSponsoredFees(
+              await this.returnLoanedFees(
                 userKeypair,
-                sponsoredLamportsOutstanding
+                loanedLamportsOutstanding
               );
             } catch (refundError) {
               console.error(
-                "Failed to refund sponsored swap fees after Jupiter attempt:",
+                "Failed to return loaned swap fees after Jupiter attempt:",
                 refundError
               );
             } finally {
-              sponsoredLamportsOutstanding = 0;
+              loanedLamportsOutstanding = 0;
             }
           }
 
@@ -591,10 +591,10 @@ export class SwapManager {
         }
 
         try {
-          const sponsorLamports = Math.max(jitFeeBuffer - currentLamports, 0);
-          if (sponsorLamports > 0) {
-            await this.sponsorSwapFees(userKeypair, sponsorLamports);
-            sponsoredLamportsOutstanding += sponsorLamports;
+          const lendLamports = Math.max(jitFeeBuffer - currentLamports, 0);
+          if (lendLamports > 0) {
+            await this.lendSwapFees(userKeypair, lendLamports);
+            loanedLamportsOutstanding += lendLamports;
           }
 
           const { signature, lamportsReceived } = await this.unwrapWsolPortion({
@@ -603,12 +603,12 @@ export class SwapManager {
             logContext,
           });
 
-          if (sponsoredLamportsOutstanding > 0) {
-            await this.refundSponsoredFees(
+          if (loanedLamportsOutstanding > 0) {
+            await this.returnLoanedFees(
               userKeypair,
-              sponsoredLamportsOutstanding
+              loanedLamportsOutstanding
             );
-            sponsoredLamportsOutstanding = 0;
+            loanedLamportsOutstanding = 0;
           }
 
           lastUnwrapError = null;
@@ -619,19 +619,19 @@ export class SwapManager {
             lamportsReceived,
           };
         } catch (attemptError: any) {
-          if (sponsoredLamportsOutstanding > 0) {
+          if (loanedLamportsOutstanding > 0) {
             try {
-              await this.refundSponsoredFees(
+              await this.returnLoanedFees(
                 userKeypair,
-                sponsoredLamportsOutstanding
+                loanedLamportsOutstanding
               );
             } catch (refundError) {
               console.error(
-                "Failed to refund sponsored fees after WSOL unwrap attempt:",
+                "Failed to return loaned fees after WSOL unwrap attempt:",
                 refundError
               );
             } finally {
-              sponsoredLamportsOutstanding = 0;
+              loanedLamportsOutstanding = 0;
             }
           }
 
@@ -837,20 +837,20 @@ export class SwapManager {
         lamportsReceived: selectedQuote.lamportsOut,
       };
     } catch (error: any) {
-      if (sponsoredLamportsOutstanding > 0) {
+      if (loanedLamportsOutstanding > 0) {
         try {
-          await this.refundSponsoredFees(
+          await this.returnLoanedFees(
             userKeypair,
-            sponsoredLamportsOutstanding
+            loanedLamportsOutstanding
           );
         } catch (refundError) {
-          console.error("Failed to refund sponsored swap fees:", refundError);
+          console.error("Failed to return loaned swap fees:", refundError);
         }
       }
       console.error("Just-in-time SOL swap failed:", error);
       return {
         swapped: false,
-        error: error.message || "Failed to perform SOL sponsorship swap",
+        error: error.message || "Failed to perform SOL loan swap",
       };
     }
   }
@@ -929,7 +929,7 @@ export class SwapManager {
     });
   }
 
-  private async sponsorSwapFees(
+  private async lendSwapFees(
     userKeypair: Keypair,
     lamports: number
   ): Promise<void> {
@@ -937,7 +937,7 @@ export class SwapManager {
     await this.transferFees(adminKeypair, userKeypair.publicKey, lamports);
   }
 
-  private async refundSponsoredFees(
+  private async returnLoanedFees(
     userKeypair: Keypair,
     lamports: number
   ): Promise<void> {
@@ -945,9 +945,9 @@ export class SwapManager {
     await this.transferFees(userKeypair, adminKeypair.publicKey, lamports);
   }
 
-  private async computeJupiterSponsorshipRequirement(
+  private async computeJupiterLendingRequirement(
     userKeypair: Keypair
-  ): Promise<JupiterSponsorshipRequirement> {
+  ): Promise<JupiterLendingRequirement> {
     const requiredBalance =
       Math.max(
         await this.feeBudget.getJitSwapFeeBufferLamports(),
@@ -960,41 +960,41 @@ export class SwapManager {
     return {
       requiredBalance,
       currentBalance,
-      sponsorship: Math.max(requiredBalance - currentBalance, 0),
+      loan: Math.max(requiredBalance - currentBalance, 0),
     };
   }
 
   private async ensureJupiterSwapFeeBudget(
     userKeypair: Keypair,
-    precomputed?: JupiterSponsorshipRequirement
+    precomputed?: JupiterLendingRequirement
   ): Promise<number> {
     const key = userKeypair.publicKey.toBase58();
-    let pending = this.jupiterFeeSponsorships.get(key);
+    let pending = this.jupiterFeeLoans.get(key);
     if (!pending) {
       pending = (async () => {
         const requirement =
           precomputed ??
-          (await this.computeJupiterSponsorshipRequirement(userKeypair));
+          (await this.computeJupiterLendingRequirement(userKeypair));
 
         if (requirement.currentBalance >= requirement.requiredBalance) {
           return 0;
         }
 
-        const sponsorship = requirement.sponsorship;
-        this.ensureSponsorshipAllowed(key);
-        await this.sponsorSwapFees(userKeypair, sponsorship);
-        this.recordSponsorshipSuccess(key);
-        return sponsorship;
+        const loan = requirement.loan;
+        this.ensureLendingAllowed(key);
+        await this.lendSwapFees(userKeypair, loan);
+        this.recordLendingSuccess(key);
+        return loan;
       })();
 
-      this.jupiterFeeSponsorships.set(key, pending);
+      this.jupiterFeeLoans.set(key, pending);
     }
 
     try {
       return await pending;
     } finally {
-      if (this.jupiterFeeSponsorships.get(key) === pending) {
-        this.jupiterFeeSponsorships.delete(key);
+      if (this.jupiterFeeLoans.get(key) === pending) {
+        this.jupiterFeeLoans.delete(key);
       }
     }
   }
@@ -1051,7 +1051,7 @@ export class SwapManager {
     quote: SwapQuote
   ): Promise<string> {
     const { userKeypair, slippageBps = 500 } = request;
-    let sponsoredLamports = 0;
+    let loanedLamports = 0;
 
     try {
       const jupiterQuote = await this.getJupiterQuote({
@@ -1061,24 +1061,24 @@ export class SwapManager {
         slippageBps,
       });
 
-      const requirement = await this.computeJupiterSponsorshipRequirement(
+      const requirement = await this.computeJupiterLendingRequirement(
         userKeypair
       );
 
       if (
         this.isSolMint(quote.outputMint) &&
-        requirement.sponsorship > 0 &&
+        requirement.loan > 0 &&
         BigInt(jupiterQuote.outAmount) <
           BigInt(
-            requirement.sponsorship + JUPITER_REFUND_HEADROOM_LAMPORTS
+            requirement.loan + JUPITER_REFUND_HEADROOM_LAMPORTS
           )
       ) {
         throw new Error(
-          "Swap output does not leave enough SOL to refund sponsored fees; increase the input amount or add SOL manually."
+          "Swap output does not leave enough SOL to return loaned fees; increase the input amount or add SOL manually."
         );
       }
 
-      sponsoredLamports = await this.ensureJupiterSwapFeeBudget(
+      loanedLamports = await this.ensureJupiterSwapFeeBudget(
         userKeypair,
         requirement
       );
@@ -1113,22 +1113,22 @@ export class SwapManager {
         userKeypair
       );
 
-      if (sponsoredLamports > 0) {
+      if (loanedLamports > 0) {
         try {
-          await this.refundSponsoredFees(userKeypair, sponsoredLamports);
+          await this.returnLoanedFees(userKeypair, loanedLamports);
         } catch (error) {
-          console.error("Failed to refund sponsored swap fees:", error);
+          console.error("Failed to return loaned swap fees:", error);
         }
       }
 
       return signature;
     } catch (error) {
-      if (sponsoredLamports > 0) {
+      if (loanedLamports > 0) {
         try {
-          await this.refundSponsoredFees(userKeypair, sponsoredLamports);
+          await this.returnLoanedFees(userKeypair, loanedLamports);
         } catch (refundError) {
           console.error(
-            "Failed to refund sponsored swap fees after Jupiter failure:",
+            "Failed to return loaned swap fees after Jupiter failure:",
             refundError
           );
         }
@@ -1186,10 +1186,10 @@ export class SwapManager {
         return;
       }
       try {
-        await this.refundSponsoredFees(userKeypair, amount);
+        await this.returnLoanedFees(userKeypair, amount);
       } catch (refundError) {
         console.error(
-          `Failed to refund sponsored swap fees after composite ${context}:`,
+          `Failed to return loaned swap fees after composite ${context}:`,
           refundError
         );
       }

@@ -78,7 +78,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     });
     const admin = Keypair.generate();
     (wallet as any).getAdminKeypair = () => admin;
-    (wallet as any).sendTransaction = async () => "sponsored";
+    (wallet as any).sendTransaction = async () => "loaned";
     (wallet as any).confirmTransaction = async () => {};
 
     const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
@@ -137,12 +137,12 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       throw new Error("Jupiter/Pump fun routing should be skipped for WSOL unwrap");
     };
 
-    const sponsorCalls: number[] = [];
+    const lendCalls: number[] = [];
     const refundCalls: number[] = [];
-    (swapManager as any).sponsorSwapFees = async (_kp: Keypair, lamports: number) => {
-      sponsorCalls.push(lamports);
+    (swapManager as any).lendSwapFees = async (_kp: Keypair, lamports: number) => {
+      lendCalls.push(lamports);
     };
-    (swapManager as any).refundSponsoredFees = async (_kp: Keypair, lamports: number) => {
+    (swapManager as any).returnLoanedFees = async (_kp: Keypair, lamports: number) => {
       refundCalls.push(lamports);
     };
 
@@ -177,7 +177,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(unwrapRequests).toEqual([
       TEST_GAME_BUFFER_LAMPORTS + TEST_JIT_BUFFER_LAMPORTS,
     ]);
-    expect(sponsorCalls).toEqual([TEST_JIT_BUFFER_LAMPORTS]);
+    expect(lendCalls).toEqual([TEST_JIT_BUFFER_LAMPORTS]);
     expect(refundCalls).toEqual([TEST_JIT_BUFFER_LAMPORTS]);
   });
 
@@ -213,12 +213,12 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       estimatedFee: 0,
     });
 
-    const sponsorCalls: number[] = [];
+    const lendCalls: number[] = [];
     const refundCalls: number[] = [];
-    (swapManager as any).sponsorSwapFees = async (_kp: Keypair, lamports: number) => {
-      sponsorCalls.push(lamports);
+    (swapManager as any).lendSwapFees = async (_kp: Keypair, lamports: number) => {
+      lendCalls.push(lamports);
     };
-    (swapManager as any).refundSponsoredFees = async (
+    (swapManager as any).returnLoanedFees = async (
       _kp: Keypair,
       lamports: number
     ) => {
@@ -235,7 +235,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     });
 
     expect(result.swapped).toBe(true);
-    expect(sponsorCalls).toEqual([expect.any(Number)]);
+    expect(lendCalls).toEqual([expect.any(Number)]);
     expect(refundCalls).toEqual([expect.any(Number)]);
   });
 
@@ -270,15 +270,15 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       };
     };
 
-    const sponsorCalls: number[] = [];
-    (swapManager as any).sponsorSwapFees = async (
+    const lendCalls: number[] = [];
+    (swapManager as any).lendSwapFees = async (
       _kp: Keypair,
       lamports: number
     ) => {
-      sponsorCalls.push(lamports);
+      lendCalls.push(lamports);
     };
     const refundCalls: number[] = [];
-    (swapManager as any).refundSponsoredFees = async (
+    (swapManager as any).returnLoanedFees = async (
       _kp: Keypair,
       lamports: number
     ) => {
@@ -306,7 +306,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       TEST_GAME_BUFFER_LAMPORTS - currentLamports +
         TEST_JIT_BUFFER_LAMPORTS,
     ]);
-    expect(sponsorCalls).toEqual([]);
+    expect(lendCalls).toEqual([]);
     expect(refundCalls).toEqual([]);
   });
 
@@ -324,12 +324,12 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       getBalance: async () => 0,
     };
 
-    const sponsorCalls: number[] = [];
+    const lendCalls: number[] = [];
     const refundCalls: number[] = [];
-    (swapManager as any).sponsorSwapFees = async (_kp: Keypair, lamports: number) => {
-      sponsorCalls.push(lamports);
+    (swapManager as any).lendSwapFees = async (_kp: Keypair, lamports: number) => {
+      lendCalls.push(lamports);
     };
-    (swapManager as any).refundSponsoredFees = async (_kp: Keypair, lamports: number) => {
+    (swapManager as any).returnLoanedFees = async (_kp: Keypair, lamports: number) => {
       refundCalls.push(lamports);
     };
 
@@ -351,7 +351,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(result.swapped).toBe(false);
     expect(result.error).toContain("Unable to unwrap due to rent exempt requirement.");
     expect(unwrapAttempts).toBeGreaterThanOrEqual(1);
-    expect(sponsorCalls.length).toBe(unwrapAttempts);
+    expect(lendCalls.length).toBe(unwrapAttempts);
     expect(refundCalls.length).toBe(unwrapAttempts);
   });
 
@@ -401,7 +401,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(sendCalls[0]?.[1]?.publicKey.equals(user.publicKey)).toBe(true);
   });
 
-  test("refunds sponsored lamports to admin after successful Jupiter swap", async () => {
+  test("refunds loaned lamports to admin after successful Jupiter swap", async () => {
     const wallet = WalletManager.createForTest(mnemonic, {
       connection,
       fetch: globalThis.fetch as any,
@@ -466,15 +466,15 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
 
     expect(sendCalls.length).toBe(2);
 
-    const sponsorCall = sendCalls[0]!;
+    const lendCall = sendCalls[0]!;
     expect(
-      sponsorCall.signers[0]?.publicKey.equals(admin.publicKey)
+      lendCall.signers[0]?.publicKey.equals(admin.publicKey)
     ).toBe(true);
     expect(
-      sponsorCall.instructions[0]?.keys[0]?.pubkey.equals(admin.publicKey)
+      lendCall.instructions[0]?.keys[0]?.pubkey.equals(admin.publicKey)
     ).toBe(true);
     expect(
-      sponsorCall.instructions[0]?.keys[1]?.pubkey.equals(user.publicKey)
+      lendCall.instructions[0]?.keys[1]?.pubkey.equals(user.publicKey)
     ).toBe(true);
 
     const refundCall = sendCalls[1]!;
@@ -624,7 +624,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(rawUnits > 0n).toBe(true);
   });
 
-  test("refunds sponsored lamports when Jupiter swap fails", async () => {
+  test("refunds loaned lamports when Jupiter swap fails", async () => {
     const wallet = WalletManager.createForTest(mnemonic, {
       connection,
       fetch: globalThis.fetch as any,
@@ -657,15 +657,15 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       throw new Error("Jupiter execution failed");
     };
 
-    const sponsorCalls: number[] = [];
+    const lendCalls: number[] = [];
     const refundCalls: number[] = [];
-    (swapManager as any).sponsorSwapFees = async (
+    (swapManager as any).lendSwapFees = async (
       _kp: Keypair,
       lamports: number
     ) => {
-      sponsorCalls.push(lamports);
+      lendCalls.push(lamports);
     };
-    (swapManager as any).refundSponsoredFees = async (
+    (swapManager as any).returnLoanedFees = async (
       _kp: Keypair,
       lamports: number
     ) => {
@@ -683,7 +683,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
 
     expect(result.swapped).toBe(false);
     expect(result.error).toMatch(/Jupiter execution failed/);
-    expect(sponsorCalls).toEqual([TEST_JIT_BUFFER_LAMPORTS, TEST_JIT_BUFFER_LAMPORTS]);
+    expect(lendCalls).toEqual([TEST_JIT_BUFFER_LAMPORTS, TEST_JIT_BUFFER_LAMPORTS]);
     expect(refundCalls).toEqual([TEST_JIT_BUFFER_LAMPORTS, TEST_JIT_BUFFER_LAMPORTS]);
   });
 
@@ -701,9 +701,9 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       getBalance: async () => 0,
     };
 
-    let sponsorCount = 0;
-    (swapManager as any).sponsorSwapFees = async () => {
-      sponsorCount++;
+    let lendCount = 0;
+    (swapManager as any).lendSwapFees = async () => {
+      lendCount++;
       await new Promise((resolve) => setTimeout(resolve, 30));
     };
 
@@ -713,7 +713,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       (swapManager as any).ensureJupiterSwapFeeBudget(user),
     ]);
 
-    expect(sponsorCount).toBe(1);
+    expect(lendCount).toBe(1);
   });
 
   test("composite pump.fun+jupiter surfaces Jupiter failure after pump leg", async () => {
@@ -887,14 +887,14 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       estimatedFee: 0,
     });
 
-    let sponsorCalls = 0;
-    (swapManager as any).sponsorSwapFees = async () => {
-      sponsorCalls += 1;
+    let lendCalls = 0;
+    (swapManager as any).lendSwapFees = async () => {
+      lendCalls += 1;
     };
 
     const errorSpy = spyOn(console, "error").mockImplementation(() => {});
 
-    (swapManager as any).refundSponsoredFees = async () => {
+    (swapManager as any).returnLoanedFees = async () => {
       throw new Error("refund failure");
     };
 
@@ -963,13 +963,13 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(result.pumpSignature).toBe("SIG_1");
     expect(result.jupiterSignature).toBe("SIG_JUP");
     expect(errorSpy.mock.calls[0]?.[0]).toContain(
-      "Failed to refund sponsored swap fees after composite"
+      "Failed to return loaned swap fees after composite"
     );
-    expect((swapManager as any).jupiterFeeSponsorships.size).toBe(0);
+    expect((swapManager as any).jupiterFeeLoans.size).toBe(0);
     errorSpy.mockRestore();
   });
 
-  test("concurrent JIT swaps across tokens sponsor separately", async () => {
+  test("concurrent JIT swaps across tokens lend separately", async () => {
     const wallet = WalletManager.createForTest(mnemonic, {
       connection,
       fetch: globalThis.fetch as any,
@@ -1003,14 +1003,14 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       estimatedFee: 0,
     });
 
-    const sponsorCalls: number[] = [];
-    (swapManager as any).sponsorSwapFees = async (_kp: Keypair, lamports: number) => {
-      sponsorCalls.push(lamports);
+    const lendCalls: number[] = [];
+    (swapManager as any).lendSwapFees = async (_kp: Keypair, lamports: number) => {
+      lendCalls.push(lamports);
       await new Promise((resolve) => setTimeout(resolve, 5));
     };
 
     const refundCalls: number[] = [];
-    (swapManager as any).refundSponsoredFees = async (
+    (swapManager as any).returnLoanedFees = async (
       _kp: Keypair,
       lamports: number
     ) => {
@@ -1031,7 +1031,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
 
     const results = await Promise.all(swapPromises);
     expect(results.every((result) => result.swapped)).toBe(true);
-    expect(sponsorCalls.length).toBe(tokens.length);
+    expect(lendCalls.length).toBe(tokens.length);
     expect(refundCalls.length).toBe(tokens.length);
   });
 

@@ -3,7 +3,7 @@ import { Connection, Keypair } from "@solana/web3.js";
 import {
   MIN_JUPITER_SWAP_FEE_LAMPORTS,
   JUPITER_FEE_SAFETY_MARGIN_LAMPORTS,
-  MAX_JUPITER_SPONSORSHIPS_PER_WINDOW,
+  MAX_JUPITER_LENDINGS_PER_WINDOW,
   SwapManager,
 } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
@@ -42,11 +42,16 @@ const stubBalanceSequence = (connection: Connection, sequence: number[]) => {
 };
 describe("SwapManager.executeJupiterSwap", () => {
   let origNet: string | undefined;
+  const noopReturnLoanedFees = async () => {};
+  const originalReturnLoanedFees = (SwapManager.prototype as any)
+    .returnLoanedFees;
   beforeEach(() => {
     origNet = process.env.SOLANA_NETWORK;
     process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
+    (SwapManager.prototype as any).returnLoanedFees = noopReturnLoanedFees;
   });
   afterEach(() => {
+    (SwapManager.prototype as any).returnLoanedFees = originalReturnLoanedFees;
     process.env.SOLANA_NETWORK = origNet || process.env.SOLANA_NETWORK!;
   });
 
@@ -74,8 +79,8 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
 
     // Avoid network and account creation
     (sm as any).createTokenAccountsIfNeeded = async () => [];
-    (sm as any).sponsorSwapFees = async () => {};
-    (sm as any).refundSponsoredFees = async () => {};
+    (sm as any).lendSwapFees = async () => {};
+    (sm as any).returnLoanedFees = async () => {};
     // Stub Jupiter swap endpoint response
     (sm as any).jupiterClient.getSwapTransaction = async () => ({
       swapTransaction: Buffer.from("fake").toString("base64"),
@@ -126,7 +131,7 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
     expect(sig).toBe("SIG_JUP_123");
   });
 
-  test("does not sponsor when balance already meets requirement", async () => {
+  test("does not lend when balance already meets requirement", async () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
@@ -139,7 +144,7 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
     (sm as any).connection.getBalance = async () => requiredBalance;
 
     let sponsorCalls = 0;
-    (sm as any).sponsorSwapFees = async () => {
+    (sm as any).lendSwapFees = async () => {
       sponsorCalls += 1;
     };
 
@@ -162,14 +167,14 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
       throw new Error("account creation failed");
     };
 
-    let sponsoredAmount = 0;
-    (sm as any).sponsorSwapFees = async (_kp: any, lamports: number) => {
-      sponsoredAmount = lamports;
+    let loanedAmount = 0;
+    (sm as any).lendSwapFees = async (_kp: any, lamports: number) => {
+      loanedAmount = lamports;
     };
 
-    let refundedAmount = 0;
-    (sm as any).refundSponsoredFees = async (_kp: any, lamports: number) => {
-      refundedAmount = lamports;
+    let returnedAmount = 0;
+    (sm as any).returnLoanedFees = async (_kp: any, lamports: number) => {
+      returnedAmount = lamports;
     };
 
     const req = {
@@ -199,11 +204,11 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
       "account creation failed"
     );
 
-    expect(refundedAmount).toBe(sponsoredAmount);
-    expect(sponsoredAmount).toBeGreaterThan(0);
+    expect(returnedAmount).toBe(loanedAmount);
+    expect(loanedAmount).toBeGreaterThan(0);
   });
 
-  test("refunds entire sponsorship after swap", async () => {
+  test("returns entire loan after swap", async () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
@@ -214,8 +219,8 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
     (sm as any).connection.getBalance = async () => 0;
 
     (sm as any).createTokenAccountsIfNeeded = async () => [];
-    const sponsoredAmount = 100_000;
-    (sm as any).ensureJupiterSwapFeeBudget = async () => sponsoredAmount;
+    const loanedAmount = 100_000;
+    (sm as any).ensureJupiterSwapFeeBudget = async () => loanedAmount;
     const user = Keypair.generate();
     const req = {
       inputMint: "So11111111111111111111111111111111111111112",
@@ -259,17 +264,17 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
       swapTransaction: Buffer.from("fake").toString("base64"),
     });
 
-    let refundedAmount = 0;
-    (sm as any).refundSponsoredFees = async (_kp: Keypair, lamports: number) => {
-      refundedAmount = lamports;
+    let returnedAmount = 0;
+    (sm as any).returnLoanedFees = async (_kp: Keypair, lamports: number) => {
+      returnedAmount = lamports;
     };
 
     const signature = await sm.executeJupiterSwap(req, quote);
     expect(signature).toBe("SIG_JUP_FEE");
-    expect(refundedAmount).toBe(sponsoredAmount);
+    expect(returnedAmount).toBe(loanedAmount);
   });
 
-  test("throttles Jupiter sponsorships per user", async () => {
+  test("throttles Jupiter loans per user", async () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
@@ -280,23 +285,23 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
     (sm as any).connection.getBalance = async () => 0;
 
     let sponsorCalls = 0;
-    (sm as any).sponsorSwapFees = async () => {
+    (sm as any).lendSwapFees = async () => {
       sponsorCalls += 1;
     };
 
     const user = Keypair.generate();
 
-    for (let i = 0; i < MAX_JUPITER_SPONSORSHIPS_PER_WINDOW; i++) {
-      await (sm as any).ensureJupiterSwapFeeBudget(user);
-    }
+    for (let i = 0; i < MAX_JUPITER_LENDINGS_PER_WINDOW; i++) {
+    await (sm as any).ensureJupiterSwapFeeBudget(user);
+  }
 
-    await expect(
-      (sm as any).ensureJupiterSwapFeeBudget(user)
-    ).rejects.toThrow(/Too many Jupiter sponsorships/);
-    expect(sponsorCalls).toBe(MAX_JUPITER_SPONSORSHIPS_PER_WINDOW);
+  await expect(
+    (sm as any).ensureJupiterSwapFeeBudget(user)
+  ).rejects.toThrow(/Too many Jupiter loans/);
+    expect(sponsorCalls).toBe(MAX_JUPITER_LENDINGS_PER_WINDOW);
   });
 
-  test("retries sponsorship after balance lookup fails", async () => {
+  test("retries loaning after balance lookup fails", async () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
@@ -313,7 +318,7 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
       return 0;
     };
     let sponsorCount = 0;
-    (sm as any).sponsorSwapFees = async () => {
+    (sm as any).lendSwapFees = async () => {
       sponsorCount++;
     };
 
@@ -336,8 +341,8 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
     (sm as any).connection.getBalance = async () => 0;
 
     (sm as any).createTokenAccountsIfNeeded = async () => [];
-    const sponsoredAmount = 100_000;
-    (sm as any).ensureJupiterSwapFeeBudget = async () => sponsoredAmount;
+    const loanedAmount = 100_000;
+    (sm as any).ensureJupiterSwapFeeBudget = async () => loanedAmount;
     (sm as any).executeJupiterTransaction = async () => ({
       signature: "SIG_JUP_FEE",
       estimatedFee: 90_000,
@@ -357,9 +362,9 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
       swapTransaction: Buffer.from("fake").toString("base64"),
     });
 
-    let refundCalls = 0;
-    (sm as any).refundSponsoredFees = async (_kp: Keypair, _lamports: number) => {
-      refundCalls += 1;
+    let returnCalls = 0;
+    (sm as any).returnLoanedFees = async (_kp: Keypair, _lamports: number) => {
+      returnCalls += 1;
       throw new Error("insufficient funds to refund");
     };
 
@@ -388,7 +393,7 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
 
     const signature = await sm.executeJupiterSwap(req, quote);
     expect(signature).toBe("SIG_JUP_FEE");
-    expect(refundCalls).toBe(1);
+    expect(returnCalls).toBe(1);
   });
 
   test("rejects Jupiter swaps that do not yield enough SOL to refund sponsorship", async () => {
@@ -444,7 +449,7 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
     };
 
     await expect(sm.executeJupiterSwap(req, quote)).rejects.toThrow(
-      "Swap output does not leave enough SOL to refund sponsored fees"
+      "Swap output does not leave enough SOL to return loaned fees"
     );
   });
 });
