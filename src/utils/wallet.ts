@@ -59,7 +59,10 @@ import {
 import { createRebateAwareFetch } from "./helius-rebate-fetch";
 
 // Lightweight dependency handles for testability
-type HttpFetch = (input: string, init?: any) => Promise<{
+type HttpFetch = (
+  input: string,
+  init?: any
+) => Promise<{
   ok: boolean;
   status: number;
   json: () => Promise<any>;
@@ -244,9 +247,7 @@ export class WalletManager {
     ApprovedTokenBalance[]
   >(WALLET_RPC_CACHE_TTL_MS);
 
-  public __test_setKeypairCacheConfig(
-    config: KeypairCacheOptions = {}
-  ): void {
+  public __test_setKeypairCacheConfig(config: KeypairCacheOptions = {}): void {
     this.keypairCache = new KeypairCache(
       config.capacity ?? KEYPAIR_CACHE_MAX_ENTRIES,
       config.ttlMs ?? KEYPAIR_CACHE_TTL_MS,
@@ -275,7 +276,11 @@ export class WalletManager {
       );
     };
 
-    for (let attempt = 1; attempt <= this.postTimeoutProbeMaxAttempts; attempt++) {
+    for (
+      let attempt = 1;
+      attempt <= this.postTimeoutProbeMaxAttempts;
+      attempt++
+    ) {
       try {
         const tx = await this.connection.getTransaction(signature, {
           commitment: "confirmed",
@@ -301,7 +306,10 @@ export class WalletManager {
         const message =
           probeError instanceof Error ? probeError.message : String(probeError);
 
-        if (!isRetryableProbeError(probeError) || attempt === this.postTimeoutProbeMaxAttempts) {
+        if (
+          !isRetryableProbeError(probeError) ||
+          attempt === this.postTimeoutProbeMaxAttempts
+        ) {
           console.warn(
             `⚠️ getTransaction probe for ${signature} failed: ${message}`
           );
@@ -315,7 +323,11 @@ export class WalletManager {
       }
     }
 
-    for (let attempt = 1; attempt <= this.postTimeoutProbeMaxAttempts; attempt++) {
+    for (
+      let attempt = 1;
+      attempt <= this.postTimeoutProbeMaxAttempts;
+      attempt++
+    ) {
       try {
         const status = await this.connection.getSignatureStatus(signature, {
           searchTransactionHistory: true,
@@ -347,7 +359,10 @@ export class WalletManager {
             ? statusError.message
             : String(statusError);
 
-        if (!isRetryableProbeError(statusError) || attempt === this.postTimeoutProbeMaxAttempts) {
+        if (
+          !isRetryableProbeError(statusError) ||
+          attempt === this.postTimeoutProbeMaxAttempts
+        ) {
           console.warn(
             `⚠️ getSignatureStatus probe for ${signature} failed: ${message}`
           );
@@ -375,7 +390,7 @@ export class WalletManager {
       });
       const rebateAwareFetch = createRebateAwareFetch(
         globalThis.fetch as typeof fetch,
-        process.env.HELIUS_REBATE_ADDRESS,
+        process.env.HELIUS_REBATE_ADDRESS
       );
       this.rpcEndpointManager = new RpcEndpointManager(endpoints, {
         commitment: "confirmed",
@@ -395,7 +410,10 @@ export class WalletManager {
     this.loadAdminKeypair();
   }
 
-  public static getInstance(mnemonic: string, deps?: WalletDeps): WalletManager {
+  public static getInstance(
+    mnemonic: string,
+    deps?: WalletDeps
+  ): WalletManager {
     if (!this.instance) {
       this.instance = new WalletManager(mnemonic, deps);
     } else if (deps?.tokenMetadataResolver) {
@@ -405,7 +423,10 @@ export class WalletManager {
   }
 
   // For tests: create a non-singleton instance with injected dependencies
-  public static createForTest(mnemonic: string, deps: WalletDeps): WalletManager {
+  public static createForTest(
+    mnemonic: string,
+    deps: WalletDeps
+  ): WalletManager {
     return new WalletManager(mnemonic, deps);
   }
 
@@ -512,7 +533,10 @@ export class WalletManager {
 
     if (error && typeof error === "object" && "message" in error) {
       const message = (error as { message?: unknown }).message;
-      return typeof message === "string" && message.includes("could not find account");
+      return (
+        typeof message === "string" &&
+        message.includes("could not find account")
+      );
     }
 
     return false;
@@ -537,8 +561,7 @@ export class WalletManager {
       return error.logs.some((log: string) => {
         const lower = log.toLowerCase();
         return (
-          lower.includes("already in use") ||
-          lower.includes("account exists")
+          lower.includes("already in use") || lower.includes("account exists")
         );
       });
     }
@@ -552,7 +575,9 @@ export class WalletManager {
 
   public getKeyPair(index: bigint): Keypair {
     if (index === 0n) {
-      throw new Error("Missing Telegram id while deriving wallet – refusing to use fallback index 0");
+      throw new Error(
+        "Missing Telegram id while deriving wallet – refusing to use fallback index 0"
+      );
     }
     const cacheKey = index.toString();
     const cached = this.keypairCache.get(cacheKey);
@@ -614,7 +639,11 @@ export class WalletManager {
     telegramId: bigint,
     options: WalletFetchOptions = {}
   ): Promise<number> {
-    const { forceFresh = false, allowStaleOnError = false, cacheTtlMs } = options;
+    const {
+      forceFresh = false,
+      allowStaleOnError = false,
+      cacheTtlMs,
+    } = options;
     const cacheKey = this.getUserCacheKey(telegramId);
 
     if (!forceFresh) {
@@ -749,7 +778,11 @@ export class WalletManager {
     }>,
     options: WalletFetchOptions = {}
   ): Promise<ApprovedTokenBalance[]> {
-    const { forceFresh = false, allowStaleOnError = false, cacheTtlMs } = options;
+    const {
+      forceFresh = false,
+      allowStaleOnError = false,
+      cacheTtlMs,
+    } = options;
     const cacheKey = this.getUserCacheKey(telegramId);
 
     if (!forceFresh) {
@@ -823,7 +856,8 @@ export class WalletManager {
               }
               const mapEntry = approvedTokensMap.get(token.token_mint);
               if (mapEntry) {
-                mapEntry.token_program_id = programDetection.programId.toBase58();
+                mapEntry.token_program_id =
+                  programDetection.programId.toBase58();
               }
               token.token_program_id = programDetection.programId.toBase58();
             }
@@ -918,7 +952,8 @@ export class WalletManager {
 
       const now = this.timeNow?.() ?? Date.now();
       const discoveryKey = telegramId.toString();
-      const lastDiscovery = this.lastTokenDiscoveryByUser.get(discoveryKey) ?? 0;
+      const lastDiscovery =
+        this.lastTokenDiscoveryByUser.get(discoveryKey) ?? 0;
       const forceDiscovery = parsedAccounts.length === 0;
       const shouldDiscover =
         forceDiscovery || now - lastDiscovery >= TOKEN_DISCOVERY_COOLDOWN_MS;
@@ -1014,7 +1049,11 @@ export class WalletManager {
 
       const loadMetadataForMint = async (
         mint: string
-      ): Promise<{ decimals: number; symbol?: string; name?: string } | null> => {
+      ): Promise<{
+        decimals: number;
+        symbol?: string;
+        name?: string;
+      } | null> => {
         if (metadataCache.has(mint)) {
           return metadataCache.get(mint) ?? null;
         }
@@ -1163,7 +1202,10 @@ export class WalletManager {
               if (mint === WSOL_MINT) {
                 // Always show WSOL for the wrapped SOL mint
                 finalTicker = "WSOL";
-              } else if (fullMetadata?.symbol && fullMetadata.symbol !== "UNKNOWN") {
+              } else if (
+                fullMetadata?.symbol &&
+                fullMetadata.symbol !== "UNKNOWN"
+              ) {
                 finalTicker = fullMetadata.symbol;
                 console.log(
                   `✅ Updated ticker for ${mint}: ${finalApprovedToken.token_ticker} → ${finalTicker}`
@@ -1190,7 +1232,9 @@ export class WalletManager {
               rawBalance: rawAmount,
               lamports,
               formattedBalance,
-              decimalBalance: Number.isFinite(decimalBalance) ? decimalBalance : 0,
+              decimalBalance: Number.isFinite(decimalBalance)
+                ? decimalBalance
+                : 0,
               truncated,
             });
           }
@@ -1280,9 +1324,7 @@ export class WalletManager {
     );
   }
 
-  public clearCachedWalletData(
-    telegramId: bigint | number | string
-  ): void {
+  public clearCachedWalletData(telegramId: bigint | number | string): void {
     const cacheKey = this.getUserCacheKey(telegramId);
     this.nativeBalanceCache.delete(cacheKey);
     this.approvedTokenBalanceCache.delete(cacheKey);
@@ -1355,8 +1397,9 @@ export class WalletManager {
       const mintPublicKey = new PublicKey(tokenMint);
       let decimals: number | null = null;
 
-      const getParsedAccountInfo =
-        (this.connection as any).getParsedAccountInfo?.bind(this.connection);
+      const getParsedAccountInfo = (
+        this.connection as any
+      ).getParsedAccountInfo?.bind(this.connection);
 
       if (typeof getParsedAccountInfo === "function") {
         try {
@@ -1623,7 +1666,9 @@ export class WalletManager {
       tokenMintPubkey
     );
     console.log(
-      `🔍 Token ${tokenMint} is ${isToken2022 ? "Token-2022" : "SPL Token"}, using program ${programId.toBase58()}`
+      `🔍 Token ${tokenMint} is ${
+        isToken2022 ? "Token-2022" : "SPL Token"
+      }, using program ${programId.toBase58()}`
     );
 
     const [
@@ -1726,7 +1771,9 @@ export class WalletManager {
       lamports: 0,
     });
 
-    const feeWithTransfer = await this.estimateFee(payer, [placeholderTransfer]);
+    const feeWithTransfer = await this.estimateFee(payer, [
+      placeholderTransfer,
+    ]);
 
     console.log(
       `${debugPrefix} Estimated fee with transfer: ${formatLamports(
@@ -1749,9 +1796,7 @@ export class WalletManager {
     }
 
     console.log(
-      `${debugPrefix} Transfer plan: native ${formatLamports(
-        transferLamports
-      )}`
+      `${debugPrefix} Transfer plan: native ${formatLamports(transferLamports)}`
     );
 
     const transferInstruction = SystemProgram.transfer({
@@ -1766,9 +1811,7 @@ export class WalletManager {
       { operationLabel: "Withdraw SOL" }
     );
 
-    console.log(
-      `${debugPrefix} Sent withdraw-all transaction ${signature}`
-    );
+    console.log(`${debugPrefix} Sent withdraw-all transaction ${signature}`);
 
     return {
       signature,
@@ -1794,8 +1837,9 @@ export class WalletManager {
     const trackedSignature = this.pendingSignatures.get(signature);
     let lastBlockHeightCheck = startTime;
 
-    const boundGetSignatureStatuses = (this.connection as any)
-      ?.getSignatureStatuses?.bind(this.connection);
+    const boundGetSignatureStatuses = (
+      this.connection as any
+    )?.getSignatureStatuses?.bind(this.connection);
     const hasStatusesMethod = typeof boundGetSignatureStatuses === "function";
 
     const fetchStatus = async (useHistory: boolean) => {
@@ -1819,7 +1863,10 @@ export class WalletManager {
         return null;
       }
 
-      if (!force && now - lastBlockHeightCheck < BLOCK_HEIGHT_CHECK_INTERVAL_MS) {
+      if (
+        !force &&
+        now - lastBlockHeightCheck < BLOCK_HEIGHT_CHECK_INTERVAL_MS
+      ) {
         return null;
       }
 
@@ -1932,10 +1979,7 @@ export class WalletManager {
             );
           }
 
-          if (
-            currentStatus === "confirmed" ||
-            currentStatus === "finalized"
-          ) {
+          if (currentStatus === "confirmed" || currentStatus === "finalized") {
             console.log(
               `✅ Transaction ${signature} confirmed in ${elapsedAfterFetch}ms (${pollCount} polls, history=${
                 historyEnabledAt !== null
@@ -1968,7 +2012,9 @@ export class WalletManager {
         await this.sleep(pollInterval);
       }
 
-      console.log(`🔄 Performing final status check for ${signature} after ${pollCount} polls`);
+      console.log(
+        `🔄 Performing final status check for ${signature} after ${pollCount} polls`
+      );
       const finalStatus = await fetchStatus(true);
       const finalNow = Date.now();
 
@@ -1978,7 +2024,9 @@ export class WalletManager {
         }
         if (finalStatus.err) {
           console.error(`❌ Transaction ${signature} failed:`, finalStatus.err);
-          throw new Error(`Transaction failed: ${JSON.stringify(finalStatus.err)}`);
+          throw new Error(
+            `Transaction failed: ${JSON.stringify(finalStatus.err)}`
+          );
         }
 
         const finalStatusLabel = finalStatus.confirmationStatus || "unknown";
@@ -1993,7 +2041,9 @@ export class WalletManager {
         ) {
           console.log(
             `✅ Transaction ${signature} confirmed on final check (polls=${pollCount}, history=${
-              historyEnabledAt !== null ? `enabled@${historyEnabledAt}ms` : "not-used"
+              historyEnabledAt !== null
+                ? `enabled@${historyEnabledAt}ms`
+                : "not-used"
             }, firstStatus=${
               firstStatusObservedAt !== null
                 ? `${firstStatusObservedAt}ms`
@@ -2009,7 +2059,9 @@ export class WalletManager {
               ? ` (${finalConfirmations} confirmations)`
               : ""
           } (polls=${pollCount}, history=${
-            historyEnabledAt !== null ? `enabled@${historyEnabledAt}ms` : "not-used"
+            historyEnabledAt !== null
+              ? `enabled@${historyEnabledAt}ms`
+              : "not-used"
           }, firstStatus=${
             firstStatusObservedAt !== null
               ? `${firstStatusObservedAt}ms`
@@ -2126,7 +2178,9 @@ export class WalletManager {
     } = {}
   ): Promise<string> {
     if (instructions.length === 0) {
-      throw new Error("No instructions provided for sendAndConfirmWithResubmits");
+      throw new Error(
+        "No instructions provided for sendAndConfirmWithResubmits"
+      );
     }
 
     if (signers.length === 0) {
@@ -2214,7 +2268,10 @@ export class WalletManager {
         return fee;
       }
     } catch (error) {
-      console.warn("⚠️ Failed to estimate fee, falling back to default:", error);
+      console.warn(
+        "⚠️ Failed to estimate fee, falling back to default:",
+        error
+      );
     }
 
     return 5_000; // conservative fallback (~0.000005 SOL)
@@ -2244,9 +2301,7 @@ export class WalletManager {
         maxRetries: 5,
       });
 
-      console.log(
-        `📤 Serialized transaction sent: ${signature}`
-      );
+      console.log(`📤 Serialized transaction sent: ${signature}`);
       return signature;
     } catch (error: any) {
       console.error("Error signing and sending serialized transaction:", error);
@@ -2268,7 +2323,7 @@ export class WalletManager {
 
   private async sendVersionedTransactionWithRetry(
     tx: VersionedTransaction,
-    options: (SendOptions & { retryAttempts?: number }) = {}
+    options: SendOptions & { retryAttempts?: number } = {}
   ): Promise<string> {
     const { retryAttempts, ...sendOptionsInput } = options;
     const sendOptions: SendOptions = {
@@ -2411,5 +2466,4 @@ export class WalletManager {
 
     return { signature, amountLamports: unwrapPlan.unwrapLamports };
   }
-
 }

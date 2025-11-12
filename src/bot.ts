@@ -9,7 +9,10 @@ import { EventParser } from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
 import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
-import { GameDatabase, type LeaderboardStatsRecord } from "./utils/game-database";
+import {
+  GameDatabase,
+  type LeaderboardStatsRecord,
+} from "./utils/game-database";
 import { GameManager } from "./utils/game";
 import { PDAManager } from "./utils/pda";
 import { formatUserFriendlyError } from "./utils/errors";
@@ -60,7 +63,10 @@ import {
   createAmountSelectionKeyboard,
   getSuggestedStakeAmounts,
 } from "./utils/keyboards";
-import { showCustomAmountPrompt, persistInputPromptFromContext } from "./utils/wallet-ui";
+import {
+  showCustomAmountPrompt,
+  persistInputPromptFromContext,
+} from "./utils/wallet-ui";
 import { buildCustomTokenPrompt } from "./utils/swap/prompts";
 import {
   buildEmptyLeaderboardMessage,
@@ -69,10 +75,7 @@ import {
 } from "./utils/leaderboard-ui";
 import { formatAmount, escapeHtml, formatRate } from "./utils/format-amount";
 import { type PendingSwapTransaction } from "./bot/flows/sol-conversion";
-import {
-  onBalance,
-  type BalanceDeps,
-} from "./handlers/wallet";
+import { onBalance, type BalanceDeps } from "./handlers/wallet";
 import { inferMaxPlayers } from "./utils/arg-parsing";
 import type {
   GameData,
@@ -101,10 +104,7 @@ import { buildProcessingStatus } from "./utils/trade-ui";
 import { respondWithMenu } from "./utils/menu-response";
 import { parseDecimalAmount } from "./utils/amount";
 import { handleCoinflipCommand } from "./handlers/game";
-import {
-  createGameSetupModule,
-  GAME_SETUP_COPY,
-} from "./handlers/game-setup";
+import { createGameSetupModule, GAME_SETUP_COPY } from "./handlers/game-setup";
 import { createGameCommandsModule } from "./handlers/game-commands";
 import { createGameCallbacksModule } from "./handlers/game-callbacks";
 import {
@@ -128,17 +128,23 @@ export const bot = new Bot(process.env.TELEGRAM_TOKEN!);
 bot.catch((err) => {
   try {
     const ctx = err.ctx as Context | undefined;
-    const path = ctx?.update?.callback_query ? 'callback_query' : ctx?.update?.message ? 'message' : 'update';
+    const path = ctx?.update?.callback_query
+      ? "callback_query"
+      : ctx?.update?.message
+      ? "message"
+      : "update";
     console.error(`Bot error while handling ${path}:`, err.error || err);
   } catch (e) {
-    console.error('Bot error (logging failed):', err);
+    console.error("Bot error (logging failed):", err);
   }
 });
 
 // Ensure all new messages are replies to the triggering message by default,
 // and gracefully fall back if the reply target no longer exists.
 bot.use(async (ctx, next) => {
-  try { patchReplyBehavior(ctx); } catch {}
+  try {
+    patchReplyBehavior(ctx);
+  } catch {}
   await next();
 });
 
@@ -169,8 +175,7 @@ const walletRpcLimiter = new SlidingWindowRateLimiter(
 );
 const feeBudget = FeeBudgetManager.getInstance(wallet.getConnection());
 let SOL_FEE_BUFFER_LAMPORTS = feeBudget.getCachedSingleTransactionLamports();
-let SOL_WRAP_RENT_RESERVE_LAMPORTS =
-  feeBudget.getCachedWrapFeeBufferLamports();
+let SOL_WRAP_RENT_RESERVE_LAMPORTS = feeBudget.getCachedWrapFeeBufferLamports();
 export const __test_getSolFeeBufferLamports = (): number =>
   SOL_FEE_BUFFER_LAMPORTS;
 export const __test_setSolFeeBufferLamports = (value: number): void => {
@@ -215,7 +220,10 @@ void (async () => {
     );
     SOL_FEE_BUFFER_LAMPORTS = singleTransactionLamports;
   } catch (error) {
-    console.warn("Failed to refresh dynamic fee budgets during startup:", error);
+    console.warn(
+      "Failed to refresh dynamic fee budgets during startup:",
+      error
+    );
   }
 
   try {
@@ -244,7 +252,6 @@ const updateOracleMaxPlayers = (maybeMax: number) => {
     oracleMaxTickets = maybeMax;
   }
 };
-
 
 type CallbackHandler<TCtx extends Context = any> = (
   ctx: TCtx,
@@ -364,7 +371,10 @@ const parseOracleNumeric = (value: unknown): number | null => {
         return null;
       }
 
-      if (converted > Number.MAX_SAFE_INTEGER || converted < Number.MIN_SAFE_INTEGER) {
+      if (
+        converted > Number.MAX_SAFE_INTEGER ||
+        converted < Number.MIN_SAFE_INTEGER
+      ) {
         return null;
       }
 
@@ -415,9 +425,13 @@ export const __test_resetGameDatabase = () => {
 };
 
 // Test-only proxies for user-state helpers
-export const __test_setUserState = (userId: string, state: any) => setUserState(userId, state);
-export const __test_getUserState = (userId: string) => getUserState(userId, false);
-export const __test_clearUserState = (userId: string) => { getUserState(userId, true); };
+export const __test_setUserState = (userId: string, state: any) =>
+  setUserState(userId, state);
+export const __test_getUserState = (userId: string) =>
+  getUserState(userId, false);
+export const __test_clearUserState = (userId: string) => {
+  getUserState(userId, true);
+};
 
 // Main menu keyboard moved to utils/keyboards.ts
 
@@ -544,14 +558,21 @@ const formatTradeConfirmationSummary = ({
   quote,
   contractAddress,
 }: TradeConfirmationParams) => {
-  const receiveDisplay = formatAmount(quote.outputAmount ?? "0", receiveDecimals, {
-    maxFractionDigits: 6,
-    trim: true,
-  });
+  const receiveDisplay = formatAmount(
+    quote.outputAmount ?? "0",
+    receiveDecimals,
+    {
+      maxFractionDigits: 6,
+      trim: true,
+    }
+  );
 
-  const payAmountDecimal = payRawAmount > 0 ? payRawAmount / Math.pow(10, payDecimals) : 0;
-  const receiveAmountDecimal = Number(quote.outputAmount ?? "0") / Math.pow(10, receiveDecimals);
-  const rateValue = payAmountDecimal > 0 ? receiveAmountDecimal / payAmountDecimal : 0;
+  const payAmountDecimal =
+    payRawAmount > 0 ? payRawAmount / Math.pow(10, payDecimals) : 0;
+  const receiveAmountDecimal =
+    Number(quote.outputAmount ?? "0") / Math.pow(10, receiveDecimals);
+  const rateValue =
+    payAmountDecimal > 0 ? receiveAmountDecimal / payAmountDecimal : 0;
   const rateDisplay = formatRate(rateValue);
 
   const providerLabel = (() => {
@@ -609,7 +630,9 @@ const formatTradeConfirmationSummary = ({
   };
 };
 
-type TradeConfirmationSummary = ReturnType<typeof formatTradeConfirmationSummary>;
+type TradeConfirmationSummary = ReturnType<
+  typeof formatTradeConfirmationSummary
+>;
 
 const formatSlippageOptionLabel = (bps: number): string => {
   if (!Number.isFinite(bps)) {
@@ -639,9 +662,7 @@ const getUserSwapSlippageBps = (userId: string): number => {
 
 const setUserSwapSlippageBps = (userId: string, slippageBps: number): void => {
   const existing = getUserState(userId, false);
-  const sanitizedState: Record<string, any> = existing
-    ? { ...existing }
-    : {};
+  const sanitizedState: Record<string, any> = existing ? { ...existing } : {};
   Reflect.deleteProperty(sanitizedState, "timestamp");
   setUserState(userId, { ...sanitizedState, swapSlippageBps: slippageBps });
 };
@@ -664,7 +685,8 @@ const buildSwapConfirmationKeyboard = ({
 
   for (const option of SWAP_SLIPPAGE_OPTIONS_BPS) {
     const optionLabel = formatSlippageOptionLabel(option);
-    const displayLabel = option === selectedSlippageBps ? `• ${optionLabel}` : optionLabel;
+    const displayLabel =
+      option === selectedSlippageBps ? `• ${optionLabel}` : optionLabel;
     keyboard.text(displayLabel, `swap_slippage_${option}_${txId}`);
   }
 
@@ -681,7 +703,9 @@ const renderTradeQuoteError = ({
   error,
   retryCallback,
 }: TradeQuoteErrorParams) => {
-  const keyboard = new InlineKeyboard().text("← Try Again", retryCallback).row();
+  const keyboard = new InlineKeyboard()
+    .text("← Try Again", retryCallback)
+    .row();
   const userFriendly = formatUserFriendlyError(error, wallet);
   return {
     text: `❌ <b>Quote Error</b>\n\n${userFriendly}`,
@@ -694,7 +718,11 @@ type PrepareTradeQuoteParams = {
   spinnerText: string;
   summaryInput: Omit<TradeConfirmationParams, "quote">;
   quoteFetcher: () => Promise<SwapQuote>;
-  cacheQuote: (txId: string, quote: SwapQuote, summary: TradeConfirmationSummary) => void;
+  cacheQuote: (
+    txId: string,
+    quote: SwapQuote,
+    summary: TradeConfirmationSummary
+  ) => void;
   buildConfirmationKeyboard: (
     txId: string,
     summary: TradeConfirmationSummary,
@@ -843,11 +871,10 @@ const prepareTokenTradeQuote = async ({
     solBalance: snapshot.solBalance,
     tokenBalance: inputAsset.tokenBalance,
     formatSol: (lamports) => wallet.formatSolBalance(lamports),
-    formatToken: (value, decimals) => wallet.formatTokenBalance(value, decimals),
+    formatToken: (value, decimals) =>
+      wallet.formatTokenBalance(value, decimals),
     applySolFeeBuffer: shouldApplySolFeeBuffer,
-    ...(solFeeBufferLamports !== undefined
-      ? { solFeeBufferLamports }
-      : {}),
+    ...(solFeeBufferLamports !== undefined ? { solFeeBufferLamports } : {}),
   });
 
   const preparedContext: PreparedTradeQuoteContext = {
@@ -903,7 +930,6 @@ const prepareTokenTradeQuote = async ({
   });
 };
 
-
 /**
  * Check if the context is a private chat
  */
@@ -922,9 +948,6 @@ const isGroupChat = (ctx: Context): boolean => {
  * Track chats that have had their first interaction
  */
 const initiatedChats = new Set<number>();
-
-
-
 
 // These will be initialized in setupAnchor
 export let gameManager: GameManager;
@@ -987,7 +1010,8 @@ export const __test_resetInitiatedChats = () => initiatedChats.clear();
 export const __test_getInitiatedChats = () => new Set(initiatedChats);
 export const __test_presentSpendAmount = presentSpendAmount;
 export const __test_buildQuickAmountKeyboard = buildQuickAmountKeyboard;
-export const __test_formatTradeConfirmationSummary = formatTradeConfirmationSummary;
+export const __test_formatTradeConfirmationSummary =
+  formatTradeConfirmationSummary;
 
 /**
  * Update game message with proper error handling using simplified interface
@@ -1030,13 +1054,14 @@ export const __test_resetPrepareTokenTradeQuote = (): void => {
   prepareTokenTradeQuoteRunner = prepareTokenTradeQuote;
 };
 
-
 type GameMessageTarget = {
   chatId: number;
   messageId: number;
 };
 
-const getGameMessageTarget = (gameAddress: string): GameMessageTarget | null => {
+const getGameMessageTarget = (
+  gameAddress: string
+): GameMessageTarget | null => {
   let chatId: number | undefined;
   let messageId: number | undefined;
 
@@ -1052,7 +1077,6 @@ const getGameMessageTarget = (gameAddress: string): GameMessageTarget | null => 
       `Game manager not ready when resolving message target for ${gameAddress}`
     );
   }
-
 
   if (chatId === undefined || messageId === undefined) {
     const gameRecord = gameDb.getGame(gameAddress);
@@ -1088,9 +1112,7 @@ const getGameMessageTarget = (gameAddress: string): GameMessageTarget | null => 
     Number.isNaN(chatId) ||
     Number.isNaN(messageId)
   ) {
-    console.warn(
-      `Cannot find chat/message reference for game ${gameAddress}`
-    );
+    console.warn(`Cannot find chat/message reference for game ${gameAddress}`);
     return null;
   }
 
@@ -1211,7 +1233,10 @@ const processPlayerEventWithTarget = async (
       }
     }
   } catch (error) {
-    console.error(`Error processing ${eventName} for game ${gameAddress}:`, error);
+    console.error(
+      `Error processing ${eventName} for game ${gameAddress}:`,
+      error
+    );
   }
 };
 
@@ -1279,14 +1304,19 @@ async function flushPendingPlayerEvents(
   }
 
   for (const payload of state.events) {
-    await processPlayerEventWithTarget(payload.event, payload.eventName, target);
+    await processPlayerEventWithTarget(
+      payload.event,
+      payload.eventName,
+      target
+    );
   }
 }
 
 export const __test_processPlayerEventWithTarget = processPlayerEventWithTarget;
 export const __test_enqueuePendingPlayerEvent = enqueuePendingPlayerEvent;
 export const __test_flushPendingPlayerEvents = flushPendingPlayerEvents;
-export const __test_clearPendingPlayerEvents = () => pendingPlayerEvents.clear();
+export const __test_clearPendingPlayerEvents = () =>
+  pendingPlayerEvents.clear();
 export const __test_getPendingPlayerEventsState = (gameAddress: string) =>
   pendingPlayerEvents.get(gameAddress);
 
@@ -1383,7 +1413,9 @@ const processGameCompletion = async (
     }
   }
 
-  console.log(`✅ Processed game completion: ${gameAddress} with prize: ${totalPot}`);
+  console.log(
+    `✅ Processed game completion: ${gameAddress} with prize: ${totalPot}`
+  );
 };
 
 let processGameCompletionHandler = processGameCompletion;
@@ -1617,16 +1649,16 @@ const attachRpcEndpointFailoverHandler = (): void => {
       }
     );
   } catch (error) {
-    console.warn(
-      "⚠️ Unable to attach RPC endpoint failover handler:",
-      error
-    );
+    console.warn("⚠️ Unable to attach RPC endpoint failover handler:", error);
   }
 };
 
-export const __test_registerProgramEventListeners = registerProgramEventListeners;
-export const __test_unregisterProgramEventListeners = unregisterProgramEventListeners;
-export const __test_attachRpcEndpointFailoverHandler = attachRpcEndpointFailoverHandler;
+export const __test_registerProgramEventListeners =
+  registerProgramEventListeners;
+export const __test_unregisterProgramEventListeners =
+  unregisterProgramEventListeners;
+export const __test_attachRpcEndpointFailoverHandler =
+  attachRpcEndpointFailoverHandler;
 export const __test_getProgramEventListenerState = () => ({
   gameCompletedListenerId,
   playerJoinedListenerId,
@@ -1727,7 +1759,10 @@ const parseCompletionEventFromLogs = (
   const mutableLogs = [...logs];
 
   for (const event of parser.parseLogs(mutableLogs)) {
-    if (!event || (event.name !== "gameCompleted" && event.name !== "GameCompleted")) {
+    if (
+      !event ||
+      (event.name !== "gameCompleted" && event.name !== "GameCompleted")
+    ) {
       continue;
     }
 
@@ -1736,17 +1771,17 @@ const parseCompletionEventFromLogs = (
       continue;
     }
 
-  const eventGameAddress = toBase58String(data["gameKey"]);
+    const eventGameAddress = toBase58String(data["gameKey"]);
     if (!eventGameAddress || eventGameAddress !== expectedGameAddress) {
       continue;
     }
 
-  const winnerAddress = toBase58String(data["winner"]);
+    const winnerAddress = toBase58String(data["winner"]);
     if (!winnerAddress) {
       continue;
     }
 
-  const totalPot = bnLikeToNumber(data["winnerAmount"]);
+    const totalPot = bnLikeToNumber(data["winnerAmount"]);
 
     return {
       winnerAddress,
@@ -1863,9 +1898,8 @@ export const __test_parseCompletionEventFromLogs = (
   expectedGameAddress: string
 ) => parseCompletionEventFromLogs(logs, parser, expectedGameAddress);
 
-export const __test_fetchCompletionDetailsFromHistory = (
-  gameAddress: string
-) => fetchCompletionDetailsFromHistory(gameAddress);
+export const __test_fetchCompletionDetailsFromHistory = (gameAddress: string) =>
+  fetchCompletionDetailsFromHistory(gameAddress);
 
 export const __test_bnLikeToNumber = bnLikeToNumber;
 export const __test_toBase58String = toBase58String;
@@ -2020,8 +2054,11 @@ const gameCommandsModule = createGameCommandsModule({
   gameSetupCopy: GAME_SETUP_COPY,
 });
 
-const { createCoinflipDeps, handleGiveawayCommand, __test_createGameViaCommand } =
-  gameCommandsModule;
+const {
+  createCoinflipDeps,
+  handleGiveawayCommand,
+  __test_createGameViaCommand,
+} = gameCommandsModule;
 
 export { __test_createGameViaCommand };
 
@@ -2164,7 +2201,11 @@ const validateAndProcessTransaction = async (
 
     // Debug: Log transaction details when creating Solscan link
     if (showSolscanLink) {
-      console.log(`🔗 Solscan link requested. txString: "${txString}", length: ${txString?.length || 0}`);
+      console.log(
+        `🔗 Solscan link requested. txString: "${txString}", length: ${
+          txString?.length || 0
+        }`
+      );
     }
 
     const baseMessage = `${description} successful! 💸`;
@@ -2205,7 +2246,8 @@ const validateAndProcessTransaction = async (
   }
 };
 
-export const __test_validateAndProcessTransaction = validateAndProcessTransaction;
+export const __test_validateAndProcessTransaction =
+  validateAndProcessTransaction;
 
 // ================================
 // RESPONSE HELPERS
@@ -2275,10 +2317,7 @@ const initializeAnchorProvider = async () => {
   );
 
   anchor.setProvider(provider);
-  return new anchor.Program(
-    idl as Timba,
-    provider
-  ) as anchor.Program<Timba>;
+  return new anchor.Program(idl as Timba, provider) as anchor.Program<Timba>;
 };
 
 const setupAnchor = async () => {
@@ -2300,7 +2339,7 @@ const setupAnchor = async () => {
 
     await initializeTokensList();
     gameManager = GameManager.getInstance(program, wallet, gameDb);
-  gameManager.setGameMessageReadyListener(notifyGameMessageReady);
+    gameManager.setGameMessageReadyListener(notifyGameMessageReady);
 
     await checkOracleStatus();
     await checkGameTokenStatus();
@@ -2360,8 +2399,11 @@ const checkOracleStatus = async () => {
     if (bufferSeconds !== null) {
       const appliedBuffer = applyOracleBufferTime(bufferSeconds);
       const hours = appliedBuffer / 3600;
-      const hoursNote = hours >= 1 ? ` (~${hours.toFixed(hours >= 10 ? 1 : 2)} hours)` : "";
-      console.log(`Oracle buffer time set to ${appliedBuffer} seconds${hoursNote}`);
+      const hoursNote =
+        hours >= 1 ? ` (~${hours.toFixed(hours >= 10 ? 1 : 2)} hours)` : "";
+      console.log(
+        `Oracle buffer time set to ${appliedBuffer} seconds${hoursNote}`
+      );
     } else {
       console.warn(
         "Unable to determine oracle buffer time, keeping previous value",
@@ -2381,8 +2423,7 @@ export let getContractMinimumAmount = async (
   decimalsHint?: number
 ): Promise<{ formatted: number; raw: number; decimals: number }> => {
   let resolvedMint = tokenMint;
-  let decimals =
-    typeof decimalsHint === "number" ? decimalsHint : undefined;
+  let decimals = typeof decimalsHint === "number" ? decimalsHint : undefined;
 
   if (decimals === undefined) {
     try {
@@ -2472,7 +2513,6 @@ bot.command(["start", "balance"], async (ctx: Context) => {
   await onBalance(ctx as any, createBalanceDeps());
 });
 
-
 bot.command(["coinflip", "cf"], async (ctx) => {
   try {
     await handleCoinflipCommand(
@@ -2531,12 +2571,10 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
   const amountArgRaw = args[2]?.trim();
   const tokenArgRaw = args[3]?.trim();
   const isAllRequest =
-    amountArgRaw &&
-    ["all", "max"].includes(amountArgRaw.toLowerCase());
+    amountArgRaw && ["all", "max"].includes(amountArgRaw.toLowerCase());
 
   if (isAllRequest) {
-    const wantsSol =
-      !tokenArgRaw || tokenArgRaw.toUpperCase() === "SOL";
+    const wantsSol = !tokenArgRaw || tokenArgRaw.toUpperCase() === "SOL";
     if (!wantsSol) {
       return replyToMessage(
         ctx,
@@ -2561,17 +2599,11 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
         true,
         "SOL withdrawal",
         async () => {
-          const result = await wallet.withdrawAllSol(
-            telegramId,
-            toAddress
-          );
+          const result = await wallet.withdrawAllSol(telegramId, toAddress);
 
-          const totalText = wallet.formatSolBalance(
-            result.totalLamportsSent
-          );
+          const totalText = wallet.formatSolBalance(result.totalLamportsSent);
 
-          const message =
-            `<b>Withdrawal completed</b> 💸\n\nSent ${totalText} SOL`;
+          const message = `<b>Withdrawal completed</b> 💸\n\nSent ${totalText} SOL`;
 
           return { signature: result.signature, message };
         },
@@ -2588,7 +2620,10 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
   if (!parsed.success) {
     return replyToMessage(
       ctx,
-      formatParseAmountError(parsed, "Please provide a valid amount greater than 0.")
+      formatParseAmountError(
+        parsed,
+        "Please provide a valid amount greater than 0."
+      )
     );
   }
 
@@ -2623,7 +2658,6 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
     await handleCommandError(ctx, error, "withdraw");
   }
 });
-
 
 const TIP_USAGE_MESSAGE =
   "Usage: Reply to a user's message or use /tip @username &lt;amount&gt; [TOKEN]";
@@ -2667,10 +2701,7 @@ const getTipMentionTokenInfo = (
 };
 
 const handleTipCommand = async (ctx: Context): Promise<void> => {
-  const telegramId = await getRequiredTelegramIdForContext(
-    ctx,
-    "tip command"
-  );
+  const telegramId = await getRequiredTelegramIdForContext(ctx, "tip command");
   if (telegramId == null) {
     return;
   }
@@ -2772,7 +2803,11 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
     if (!mentionUsername && tokens.length > 1) {
       for (let i = 1; i < tokens.length; i++) {
         const token = tokens[i];
-        if (typeof token === "string" && token.startsWith("@") && token.length > 1) {
+        if (
+          typeof token === "string" &&
+          token.startsWith("@") &&
+          token.length > 1
+        ) {
           mentionUsername = token;
           mentionTokenIndex = i;
           mentionTokenLength = 1;
@@ -2917,10 +2952,7 @@ bot.command("tip", handleTipCommand);
 export const __test_handleTipCommand = handleTipCommand;
 
 bot.command("wrap", async (ctx: Context) => {
-  const telegramId = await getRequiredTelegramIdForContext(
-    ctx,
-    "wrap command"
-  );
+  const telegramId = await getRequiredTelegramIdForContext(ctx, "wrap command");
   if (telegramId == null) {
     return;
   }
@@ -3053,7 +3085,12 @@ bot.command("unwrap", async (ctx: Context) => {
         );
       },
       onError: async (error) => {
-        await handleTransactionError(ctx, error, processingMsg.message_id, wallet);
+        await handleTransactionError(
+          ctx,
+          error,
+          processingMsg.message_id,
+          wallet
+        );
       },
     });
   } catch (error) {
@@ -3112,9 +3149,7 @@ bot.command("default", async (ctx: Context) => {
         ctx,
         chatConfig.set_by_telegram_id
       );
-      const setByDisplay = setBy
-        ? `@${escapeHtml(setBy)}`
-        : "Unknown user";
+      const setByDisplay = setBy ? `@${escapeHtml(setBy)}` : "Unknown user";
       return replyToMessage(
         ctx,
         `📄 Current default token: ${escapeHtml(chatConfig.token_ticker)}\n` +
@@ -3180,7 +3215,7 @@ bot.command("default", async (ctx: Context) => {
       response += "📋 Known tokens:\n";
       for (const token of allTokens.slice(0, 10)) {
         // Show max 10 tokens
-          response += `• ${escapeHtml(token.token_ticker)}\n`;
+        response += `• ${escapeHtml(token.token_ticker)}\n`;
       }
       if (allTokens.length > 10) {
         response += `... and ${allTokens.length - 10} more.`;
@@ -3301,9 +3336,15 @@ bot.command("games", async (ctx: Context) => {
 
 const LEADERBOARD_PLAYER_LIMIT = 10;
 
-const resolveLeaderboardDisplayName = async (ctx: Context, telegramId: string): Promise<string> => {
+const resolveLeaderboardDisplayName = async (
+  ctx: Context,
+  telegramId: string
+): Promise<string> => {
   try {
-    const username = await gameManager.getUsernameFromTelegramId(ctx, telegramId);
+    const username = await gameManager.getUsernameFromTelegramId(
+      ctx,
+      telegramId
+    );
     if (username) {
       return username.startsWith("@") ? username : `@${username}`;
     }
@@ -3320,7 +3361,10 @@ const resolveLeaderboardPlayers = async (
 ): Promise<LeaderboardPlayerDisplay[]> => {
   const players = await Promise.all(
     stats.map(async (row) => {
-      const displayName = await resolveLeaderboardDisplayName(ctx, row.telegramId);
+      const displayName = await resolveLeaderboardDisplayName(
+        ctx,
+        row.telegramId
+      );
       const wins = Math.max(0, row.gamesWon);
       const totalGames = Math.max(0, row.totalGames);
       const losses = Math.max(totalGames - wins, 0);
@@ -3355,7 +3399,10 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
   try {
     console.log(`🏆 Generating leaderboard for chat ${chatId}`);
 
-    const leaderboardStats = gameDb.getLeaderboardStats(chatId, LEADERBOARD_PLAYER_LIMIT);
+    const leaderboardStats = gameDb.getLeaderboardStats(
+      chatId,
+      LEADERBOARD_PLAYER_LIMIT
+    );
 
     if (leaderboardStats.length === 0) {
       return ctx.reply(buildEmptyLeaderboardMessage(), {
@@ -3383,7 +3430,9 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
       reply_to_message_id: ctx.message?.message_id,
     });
 
-    console.log(`✅ Leaderboard generated for chat ${chatId} with ${players.length} players`);
+    console.log(
+      `✅ Leaderboard generated for chat ${chatId} with ${players.length} players`
+    );
   } catch (error) {
     console.error("Error generating leaderboard:", error);
     await handleCommandError(ctx, error, "leaderboard");
@@ -3426,9 +3475,6 @@ bot.command("oracle", async (ctx: Context) => {
     await handleCommandError(ctx, error, "oracle");
   }
 });
-
-
-
 
 const handlePlayerEvent = async (
   event: PlayerEvent,
@@ -3474,11 +3520,9 @@ const handlePlayerEvent = async (
   }
 };
 
-
 // ================================
 // MAIN MENU CALLBACK HANDLERS
 // ================================
-
 
 bot.callbackQuery(
   "cmd_privatekey",
@@ -3501,7 +3545,9 @@ bot.callbackQuery(
         return;
       }
       const keypair = wallet.getKeyPair(telegramId);
-      const privateKeyBase64 = Buffer.from(keypair.secretKey).toString("base64");
+      const privateKeyBase64 = Buffer.from(keypair.secretKey).toString(
+        "base64"
+      );
 
       const response = [
         `🔐 <b>Private Key</b>`,
@@ -3510,10 +3556,14 @@ bot.callbackQuery(
         `Never share your private key with anyone.`,
         `Store it securely offline.`,
         "",
-        `Wallet Address: <code>${escapeHtml(keypair.publicKey.toBase58())}</code>`,
+        `Wallet Address: <code>${escapeHtml(
+          keypair.publicKey.toBase58()
+        )}</code>`,
         "",
         `<b>Secret Key (Base64):</b>`,
-        `<span class="tg-spoiler"><code>${escapeHtml(privateKeyBase64)}</code></span>`,
+        `<span class="tg-spoiler"><code>${escapeHtml(
+          privateKeyBase64
+        )}</code></span>`,
         "",
         `You can import this key into Phantom, Solflare, or other Solana wallets.`,
       ];
@@ -3781,14 +3831,14 @@ bot.callbackQuery("start_bot", async (ctx) => {
   }
 });
 
-
 // ================================
 // HELP MENU CALLBACKS
 // ================================
 
 bot.callbackQuery("cmd_help", async (ctx) => {
   try {
-    const helpContent = "❓ <b>Help Center</b>\n\n" + "Choose a category to get detailed help:";
+    const helpContent =
+      "❓ <b>Help Center</b>\n\n" + "Choose a category to get detailed help:";
     const helpKeyboard = new InlineKeyboard()
       .text("💰 Wallet Commands", "help_wallet")
       .row()
@@ -3904,10 +3954,7 @@ const HELP_SECTIONS: Record<HelpSectionKey, HelpSectionConfig> = {
   },
 };
 
-const showHelpSection = async (
-  ctx: any,
-  section: HelpSectionKey
-) => {
+const showHelpSection = async (ctx: any, section: HelpSectionKey) => {
   const config = HELP_SECTIONS[section];
   const keyboard = new InlineKeyboard();
   for (const row of config.buttons) {
@@ -3963,14 +4010,9 @@ for (const { callback, section, errorAck } of HELP_SECTION_CALLBACKS) {
   });
 }
 
-
-
 // ================================
 // ADMIN MENU CALLBACKS
 // ================================
-
-
-
 
 // (Removed admin placeholder handlers)
 
@@ -4079,7 +4121,8 @@ registerCallbackPrefixHandler(
 
       const cachedEntry = transactionCache.get(toToken);
       if (isTokenSelectionCacheEntry(cachedEntry)) {
-        const displayToken = cachedEntry.tokenMetadata?.symbol ?? cachedEntry.targetToken;
+        const displayToken =
+          cachedEntry.tokenMetadata?.symbol ?? cachedEntry.targetToken;
         await showSwapAmountSelection(ctx, fromToken, displayToken, {
           toTokenIdentifier: toToken,
         });
@@ -4149,7 +4192,9 @@ registerCallbackPrefixHandler(
           userId,
           title: "✏️ <b>Custom Amount</b>",
           tokenLines: [
-            `<b>Swap:</b> ${escapeHtml(fromToken)} → ${escapeHtml(displayToToken)}`,
+            `<b>Swap:</b> ${escapeHtml(fromToken)} → ${escapeHtml(
+              displayToToken
+            )}`,
           ],
           instructions: [
             `Reply to this message with the amount of ${escapeHtml(
@@ -4302,7 +4347,8 @@ const showSwapQuoteAndConfirmation = async (
       },
       outputFactory: async () => {
         const outputMint =
-          overrides.toMint ?? (await tokenManager.resolveMintForTicker(toToken));
+          overrides.toMint ??
+          (await tokenManager.resolveMintForTicker(toToken));
         if (!outputMint) {
           throw new Error(`Unsupported token pair: ${fromToken} → ${toToken}`);
         }
@@ -4526,7 +4572,8 @@ bot.on("message:text", async (ctx, next) => {
     return;
   }
 
-  const lockerSuffix = ctx.message?.message_id ?? ctx.update?.update_id ?? Date.now();
+  const lockerSuffix =
+    ctx.message?.message_id ?? ctx.update?.update_id ?? Date.now();
   const lockerId = `${userId}:${lockerSuffix}`;
   const locked = markInputSessionProcessing(sessionKey, lockerId);
 
@@ -4715,8 +4762,7 @@ const handleSwapCustomAmountInput = async (
 
   if (!fromToken || !toTokenIdentifier) {
     await respondWithMenu(ctx, {
-      text:
-        "❌ <b>Swap session expired</b>\n\nPlease restart the swap flow.",
+      text: "❌ <b>Swap session expired</b>\n\nPlease restart the swap flow.",
       parseMode: "HTML",
       keyboard: createBackToWalletKeyboard(),
     });
@@ -4762,7 +4808,10 @@ const handleSwapCustomAmountInput = async (
         quoteOverrides.toMint ?? cachedTarget.targetTokenAddress;
       if (quoteOverrides.toDecimals === undefined) {
         const cachedDecimals = cachedTarget.tokenMetadata?.decimals;
-        if (typeof cachedDecimals === "number" && Number.isFinite(cachedDecimals)) {
+        if (
+          typeof cachedDecimals === "number" &&
+          Number.isFinite(cachedDecimals)
+        ) {
           quoteOverrides.toDecimals = cachedDecimals;
         }
       }
@@ -4774,8 +4823,7 @@ const handleSwapCustomAmountInput = async (
     !quoteOverrides.toMint
   ) {
     await respondWithMenu(ctx, {
-      text:
-        "❌ <b>Swap session expired</b>\n\nPlease reselect the token to continue.",
+      text: "❌ <b>Swap session expired</b>\n\nPlease reselect the token to continue.",
       parseMode: "HTML",
       keyboard: createCancelKeyboard("cmd_swap"),
     });
@@ -4817,247 +4865,252 @@ export const __test_handleSwapCustomAmountInput = handleSwapCustomAmountInput;
 export const __test_formatSlippageOptionLabel = formatSlippageOptionLabel;
 export const __test_getUserSwapSlippageBps = getUserSwapSlippageBps;
 export const __test_setUserSwapSlippageBps = setUserSwapSlippageBps;
-export const __test_buildSwapConfirmationKeyboard = buildSwapConfirmationKeyboard;
+export const __test_buildSwapConfirmationKeyboard =
+  buildSwapConfirmationKeyboard;
 export const __test_renderSolConversionSuccess = renderSolConversionSuccess;
 
 // Start the bot and setup Anchor (skip during tests)
 if (process.env.NODE_ENV !== "test") {
-setupAnchor()
-  .then(async () => {
-    console.log("Starting bot...");
+  setupAnchor()
+    .then(async () => {
+      console.log("Starting bot...");
 
-    // Reload game message mappings from database
-    await gameManager.reloadGameMessages();
-    console.log(`Reloaded game message mappings from database`);
+      // Reload game message mappings from database
+      await gameManager.reloadGameMessages();
+      console.log(`Reloaded game message mappings from database`);
 
+      await registerProgramEventListeners();
+      attachRpcEndpointFailoverHandler();
 
-    await registerProgramEventListeners();
-    attachRpcEndpointFailoverHandler();
-
-    /**
-     * Process expired game with cancellation
-     */
-    const processExpiredGame = async (game: any): Promise<void> => {
-      let gamePda: PublicKey;
-      try {
-        gamePda = new PublicKey(game.game_address);
-      } catch (error) {
-        console.error(`❌ Invalid game address in processExpiredGame: ${game.game_address}`);
-        return;
-      }
-      const gameAccount = await program.account.game.fetch(gamePda);
-
-      console.log(
-        `Processing expired game ${game.game_address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`
-      );
-
-      const result = await gameManager.handleExpiredGame(gamePda, gameAccount);
-      if (result) {
-        console.log(
-          `✅ Successfully processed expired game ${game.game_address}`
-        );
-        gameDb.completeGame(game.game_address, "cancelled", Date.now());
-        await updateGameMessageSafely(
-          game.game_address,
-          game,
-          "Completed",
-          "cancelled"
-        );
-      } else {
-        console.log(
-          `ℹ️ No cancellation yet for expired game ${game.game_address}; will retry`
-        );
-      }
-    };
-
-    /**
-     * Check if game is expired
-     */
-    const isGameExpired = async (gameAccount: any): Promise<boolean> => {
-      const blockTime = await wallet.getBlockchainTime();
-      if (typeof blockTime === "number" && Number.isFinite(blockTime)) {
-        return GameManager.isExpired(gameAccount, blockTime);
-      }
-      return GameManager.isExpired(gameAccount);
-    };
-
-    const MAX_EXPIRING_GAMES_PER_SCAN = 25;
-    // Start periodic check for expired games
-    setInterval(async () => {
-      try {
-        const nowMs = Date.now();
-        const cutoffMs = nowMs + EXPIRED_GAMES_CHECK_INTERVAL_MS;
-        const processedAddresses: string[] = [];
-        let batchCount = 0;
-        let expiringGames: GameData[] = [];
-
-        do {
-          expiringGames = gameDb.getGamesExpiringBefore(
-            cutoffMs,
-            MAX_EXPIRING_GAMES_PER_SCAN,
-            processedAddresses
+      /**
+       * Process expired game with cancellation
+       */
+      const processExpiredGame = async (game: any): Promise<void> => {
+        let gamePda: PublicKey;
+        try {
+          gamePda = new PublicKey(game.game_address);
+        } catch (error) {
+          console.error(
+            `❌ Invalid game address in processExpiredGame: ${game.game_address}`
           );
+          return;
+        }
+        const gameAccount = await program.account.game.fetch(gamePda);
 
-          if (expiringGames.length === 0) {
-            break;
-          }
+        console.log(
+          `Processing expired game ${game.game_address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`
+        );
 
-          for (const game of expiringGames) {
-            if (!game.game_address) {
-              console.log(`🗑️ Skipping game with null address`);
-              continue;
+        const result = await gameManager.handleExpiredGame(
+          gamePda,
+          gameAccount
+        );
+        if (result) {
+          console.log(
+            `✅ Successfully processed expired game ${game.game_address}`
+          );
+          gameDb.completeGame(game.game_address, "cancelled", Date.now());
+          await updateGameMessageSafely(
+            game.game_address,
+            game,
+            "Completed",
+            "cancelled"
+          );
+        } else {
+          console.log(
+            `ℹ️ No cancellation yet for expired game ${game.game_address}; will retry`
+          );
+        }
+      };
+
+      /**
+       * Check if game is expired
+       */
+      const isGameExpired = async (gameAccount: any): Promise<boolean> => {
+        const blockTime = await wallet.getBlockchainTime();
+        if (typeof blockTime === "number" && Number.isFinite(blockTime)) {
+          return GameManager.isExpired(gameAccount, blockTime);
+        }
+        return GameManager.isExpired(gameAccount);
+      };
+
+      const MAX_EXPIRING_GAMES_PER_SCAN = 25;
+      // Start periodic check for expired games
+      setInterval(async () => {
+        try {
+          const nowMs = Date.now();
+          const cutoffMs = nowMs + EXPIRED_GAMES_CHECK_INTERVAL_MS;
+          const processedAddresses: string[] = [];
+          let batchCount = 0;
+          let expiringGames: GameData[] = [];
+
+          do {
+            expiringGames = gameDb.getGamesExpiringBefore(
+              cutoffMs,
+              MAX_EXPIRING_GAMES_PER_SCAN,
+              processedAddresses
+            );
+
+            if (expiringGames.length === 0) {
+              break;
             }
 
-            processedAddresses.push(game.game_address);
-
-            if (game.game_address === DEFAULT_NULL_ADDRESS) {
-              console.log(
-                `🗑️ Skipping placeholder game address ${game.game_address}`
-              );
-              await cleanupOrphanedGame(game.game_address);
-              continue;
-            }
-
-            try {
-              let gamePda: PublicKey;
-              try {
-                gamePda = new PublicKey(game.game_address);
-              } catch (pkError) {
-                console.log(
-                  `🗑️ Skipping game with invalid address format: ${game.game_address}`
-                );
+            for (const game of expiringGames) {
+              if (!game.game_address) {
+                console.log(`🗑️ Skipping game with null address`);
                 continue;
               }
-              const gameAccount = await program.account.game.fetch(gamePda);
 
-              if (await isGameExpired(gameAccount)) {
-                await processExpiredGame(game);
-              }
-            } catch (error: any) {
-              const msg = (error as Error).message || "";
-              if (
-                msg.includes("Account does not exist") ||
-                msg.includes("Invalid account discriminator")
-              ) {
-                await cleanupOrphanedGame(game.game_address);
-              } else {
-                console.error(
-                  `Error processing game ${game.game_address}:`,
-                  error
+              processedAddresses.push(game.game_address);
+
+              if (game.game_address === DEFAULT_NULL_ADDRESS) {
+                console.log(
+                  `🗑️ Skipping placeholder game address ${game.game_address}`
                 );
+                await cleanupOrphanedGame(game.game_address);
+                continue;
+              }
+
+              try {
+                let gamePda: PublicKey;
+                try {
+                  gamePda = new PublicKey(game.game_address);
+                } catch (pkError) {
+                  console.log(
+                    `🗑️ Skipping game with invalid address format: ${game.game_address}`
+                  );
+                  continue;
+                }
+                const gameAccount = await program.account.game.fetch(gamePda);
+
+                if (await isGameExpired(gameAccount)) {
+                  await processExpiredGame(game);
+                }
+              } catch (error: any) {
+                const msg = (error as Error).message || "";
+                if (
+                  msg.includes("Account does not exist") ||
+                  msg.includes("Invalid account discriminator")
+                ) {
+                  await cleanupOrphanedGame(game.game_address);
+                } else {
+                  console.error(
+                    `Error processing game ${game.game_address}:`,
+                    error
+                  );
+                }
               }
             }
+
+            batchCount += 1;
+          } while (
+            expiringGames.length === MAX_EXPIRING_GAMES_PER_SCAN &&
+            batchCount < 10
+          );
+        } catch (error) {
+          console.error("Error in periodic game check:", error);
+        }
+      }, EXPIRED_GAMES_CHECK_INTERVAL_MS);
+
+      // Start the bot with concurrent processing
+      console.log("Starting bot with concurrent processing...");
+      const handle = run(bot, {
+        runner: {
+          fetch: {
+            // Only handle updates we actually process
+            allowed_updates: ["message", "callback_query"],
+          },
+        },
+      });
+
+      // ================================
+      // TEMPORARY: VIDEO/GIF ID GETTER (Private chats only)
+      // ================================
+      const logMediaDetails = (
+        label: string,
+        media: {
+          file_id: string;
+          file_name?: string | null;
+          duration?: number | null;
+          width?: number | null;
+          height?: number | null;
+        },
+        fallbackName: string
+      ) => {
+        const fileId = media.file_id;
+        const fileName = media.file_name || fallbackName;
+        const duration = media.duration || 0;
+        const width = media.width || 0;
+        const height = media.height || 0;
+
+        console.log(
+          `${label} received:\n` +
+            `   File ID: ${fileId}\n` +
+            `   Name: ${fileName}\n` +
+            `   Duration: ${duration}s\n` +
+            `   Size: ${width}x${height}`
+        );
+      };
+
+      const MEDIA_LOGGERS = [
+        {
+          kind: "video",
+          label: "🎥 Video",
+          fallbackName: "video",
+        },
+        {
+          kind: "animation",
+          label: "🎭 GIF/Animation",
+          fallbackName: "animation.gif",
+        },
+      ] as const;
+
+      for (const { kind, label, fallbackName } of MEDIA_LOGGERS) {
+        bot.on(`message:${kind}` as const, async (ctx) => {
+          if (ctx.chat?.type !== "private") {
+            return;
           }
 
-          batchCount += 1;
-        } while (
-          expiringGames.length === MAX_EXPIRING_GAMES_PER_SCAN &&
-          batchCount < 10
-        );
-      } catch (error) {
-        console.error("Error in periodic game check:", error);
-      }
-    }, EXPIRED_GAMES_CHECK_INTERVAL_MS);
+          const media = ctx.message[kind];
+          if (!media) {
+            return;
+          }
 
-    // Start the bot with concurrent processing
-    console.log("Starting bot with concurrent processing...");
-    const handle = run(bot, {
-      runner: {
-        fetch: {
-          // Only handle updates we actually process
-          allowed_updates: ["message", "callback_query"],
-        },
-      },
+          logMediaDetails(label, media, fallbackName);
+        });
+      }
+
+      // Set up graceful shutdown
+      const shutdown = async (signal: string) => {
+        console.log(`\n🛑 Received ${signal}, shutting down gracefully...`);
+        try {
+          rpcEndpointListenerCleanup?.();
+          rpcEndpointListenerCleanup = null;
+          await unregisterProgramEventListeners();
+          await handle?.stop();
+          console.log("✅ Bot stopped successfully");
+          process.exit(0);
+        } catch (error) {
+          console.error("❌ Error during shutdown:", error);
+          process.exit(1);
+        }
+      };
+
+      // Handle different shutdown signals
+      process.once("SIGINT", () => shutdown("SIGINT"));
+      process.once("SIGTERM", () => shutdown("SIGTERM"));
+
+      // Handle the runner task completion
+      handle
+        ?.task()
+        ?.then(() => {
+          console.log("🏁 Bot runner task completed");
+        })
+        .catch((error) => {
+          console.error("❌ Bot runner task failed:", error);
+        });
+    })
+    .catch((error) => {
+      console.error("Failed to setup Anchor:", error);
     });
-
-    // ================================
-    // TEMPORARY: VIDEO/GIF ID GETTER (Private chats only)
-    // ================================
-    const logMediaDetails = (
-      label: string,
-      media: {
-        file_id: string;
-        file_name?: string | null;
-        duration?: number | null;
-        width?: number | null;
-        height?: number | null;
-      },
-      fallbackName: string
-    ) => {
-      const fileId = media.file_id;
-      const fileName = media.file_name || fallbackName;
-      const duration = media.duration || 0;
-      const width = media.width || 0;
-      const height = media.height || 0;
-
-      console.log(
-        `${label} received:\n` +
-          `   File ID: ${fileId}\n` +
-          `   Name: ${fileName}\n` +
-          `   Duration: ${duration}s\n` +
-          `   Size: ${width}x${height}`
-      );
-    };
-
-    const MEDIA_LOGGERS = [
-      {
-        kind: "video",
-        label: "🎥 Video",
-        fallbackName: "video",
-      },
-      {
-        kind: "animation",
-        label: "🎭 GIF/Animation",
-        fallbackName: "animation.gif",
-      },
-    ] as const;
-
-    for (const { kind, label, fallbackName } of MEDIA_LOGGERS) {
-      bot.on(`message:${kind}` as const, async (ctx) => {
-        if (ctx.chat?.type !== "private") {
-          return;
-        }
-
-        const media = ctx.message[kind];
-        if (!media) {
-          return;
-        }
-
-        logMediaDetails(label, media, fallbackName);
-      });
-    }
-
-    // Set up graceful shutdown
-    const shutdown = async (signal: string) => {
-      console.log(`\n🛑 Received ${signal}, shutting down gracefully...`);
-      try {
-        rpcEndpointListenerCleanup?.();
-        rpcEndpointListenerCleanup = null;
-        await unregisterProgramEventListeners();
-        await handle?.stop();
-        console.log("✅ Bot stopped successfully");
-        process.exit(0);
-      } catch (error) {
-        console.error("❌ Error during shutdown:", error);
-        process.exit(1);
-      }
-    };
-
-    // Handle different shutdown signals
-    process.once("SIGINT", () => shutdown("SIGINT"));
-    process.once("SIGTERM", () => shutdown("SIGTERM"));
-
-    // Handle the runner task completion
-    handle
-      ?.task()
-      ?.then(() => {
-        console.log("🏁 Bot runner task completed");
-      })
-      .catch((error) => {
-        console.error("❌ Bot runner task failed:", error);
-      });
-  })
-  .catch((error) => {
-    console.error("Failed to setup Anchor:", error);
-  });
 }
