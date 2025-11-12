@@ -1,4 +1,4 @@
-import type { Context, InlineKeyboard } from "grammy";
+import type { Context } from "grammy";
 import type { CallbackError, ErrorHandlingOptions } from "../types";
 import { formatUserFriendlyError, truncateMessage } from "./errors";
 
@@ -153,88 +153,6 @@ export const getTelegramIdString = (
 ): string | undefined => {
   const id = getTelegramId(ctx);
   return id === 0n ? undefined : id.toString();
-};
-
-export type PrivateMessagePayload = {
-  text: string;
-  parseMode?: "HTML" | "Markdown" | "MarkdownV2";
-  replyMarkup?: InlineKeyboard;
-  disableLinkPreview?: boolean;
-};
-
-const buildPrivateMessageOptions = (payload: PrivateMessagePayload) => ({
-  parse_mode: payload.parseMode ?? "HTML",
-  reply_markup: payload.replyMarkup,
-  link_preview_options: {
-    is_disabled: payload.disableLinkPreview ?? true,
-  },
-});
-
-const notifyPrivateChatRequired = async (ctx: Context) => {
-  if (!ctx?.chat?.id || ctx.chat?.type === "private") {
-    return;
-  }
-
-  const botUsername = ctx?.me?.username;
-  const botMention = botUsername ? `@${botUsername}` : "the bot";
-  const startInstruction = botUsername
-    ? `Tap <a href="https://t.me/${botUsername}">${botMention}</a> and press <b>Start</b>, then try again.`
-    : "Open a private chat with the bot, tap <b>Start</b>, then try again.";
-
-  const lines = [
-    "❌ <b>I can’t DM you yet</b>",
-    "",
-    "Start a private chat with me so I can share your balance.",
-    startInstruction,
-  ].join("\n");
-
-  try {
-    await ctx.api.sendMessage(ctx.chat.id, lines, {
-      parse_mode: "HTML",
-      link_preview_options: { is_disabled: true },
-    });
-  } catch (notifyError) {
-    console.warn("Failed to notify private chat requirement:", notifyError);
-  }
-};
-
-export const sendPrivateMessage = async (
-  ctx: Context,
-  telegramId: bigint,
-  payload: PrivateMessagePayload
-): Promise<boolean> => {
-  if (!ctx?.api || telegramId === 0n) {
-    return false;
-  }
-
-  const chatId = telegramId.toString();
-  const options = buildPrivateMessageOptions(payload);
-  const currentChatId = ctx.chat?.id;
-
-  if (
-    ctx.chat?.type === "private" &&
-    typeof currentChatId !== "undefined" &&
-    String(currentChatId) === chatId
-  ) {
-    try {
-      await ctx.reply(payload.text, options);
-      return true;
-    } catch (replyError) {
-      console.warn(
-        "Private reply failed, falling back to API send:",
-        replyError
-      );
-    }
-  }
-
-  try {
-    await ctx.api.sendMessage(chatId, payload.text, options);
-    return true;
-  } catch (error) {
-    console.warn("Failed to send private message:", error);
-    await notifyPrivateChatRequired(ctx);
-    return false;
-  }
 };
 
 export const containsBalanceInfo = (text: string): boolean => {
