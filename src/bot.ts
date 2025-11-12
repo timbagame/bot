@@ -3334,7 +3334,7 @@ bot.command("games", async (ctx: Context) => {
   }
 });
 
-const LEADERBOARD_PLAYER_LIMIT = 10;
+const LEADERBOARD_PLAYER_LIMIT = 5;
 
 const resolveLeaderboardDisplayName = async (
   ctx: Context,
