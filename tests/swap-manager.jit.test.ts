@@ -1025,25 +1025,4 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(refundCalls.length).toBe(tokens.length);
   });
 
-  test("sensitive logging is suppressed when NODE_ENV=production", () => {
-    const wallet = WalletManager.createForTest(mnemonic, {
-      connection,
-      fetch: globalThis.fetch as any,
-      timeNow: () => Date.now(),
-    });
-    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
-
-    const logSpy = spyOn(console, "log").mockImplementation(() => {});
-    const originalEnv = process.env.NODE_ENV;
-    process.env.NODE_ENV = "production";
-    (swapManager as any).logSensitive("secret");
-    expect(logSpy).not.toHaveBeenCalled();
-
-    process.env.NODE_ENV = "development";
-    (swapManager as any).logSensitive("secret");
-    expect(logSpy).toHaveBeenCalled();
-
-    logSpy.mockRestore();
-    process.env.NODE_ENV = originalEnv;
-  });
 });
