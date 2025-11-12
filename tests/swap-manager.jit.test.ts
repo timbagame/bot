@@ -12,7 +12,11 @@ import * as splToken from "@solana/spl-token";
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
 import { WSOL_MINT } from "../src/utils/constants";
+import { formatAmount } from "../src/utils/format-amount";
 import type { FeeBudgetProvider } from "../src/utils/fee-budget";
+import type { SwapQuote } from "../src/utils/swap/types";
+import type { JupiterQuoteResponse } from "../src/utils/jupiter";
+import type { PumpFunQuote } from "../src/utils/pump-fun";
 
 describe("SwapManager.performJustInTimeSolSwap", () => {
   const mnemonic = "test walk nut penalty hip pave soap entry language right filter choice";
@@ -92,16 +96,24 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     });
 
     const user = Keypair.generate();
+    const tokenDecimals = 6;
+    const availableRaw = 1_000_000;
+    const requiredRaw = 2_000_000;
     const result = await swapManager.performJustInTimeSolSwap({
       userKeypair: user,
       tokenMint: "TokenMint",
       tokenDecimals: 6,
-      availableTokenAmountRaw: 1_000_000,
+      availableTokenAmountRaw: availableRaw,
       tokenTicker: "TEST",
     });
 
     expect(result.swapped).toBe(false);
-    expect(result.error).toMatch(/Need/);
+    expect(result.error).toBe(
+      `Need ${formatAmount(requiredRaw, tokenDecimals)} TEST available for swap but only ${formatAmount(
+        availableRaw,
+        tokenDecimals
+      )}. Top up your balance or add SOL manually.`
+    );
   });
 
   test("unwraps WSOL instead of swapping when token mint is SOL", async () => {
@@ -667,5 +679,121 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     );
 
     expect(sponsorCount).toBe(1);
+  });
+
+  test("composite pump.fun+jupiter surfaces Jupiter failure after pump leg", async () => {
+    const wallet = WalletManager.createForTest(mnemonic, {
+      connection,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+
+    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
+    let balanceCall = 0;
+    const intermediateLamports = 3_200_000;
+    (swapManager as any).createTokenAccountsIfNeeded = async () => [];
+    (swapManager as any).connection = {
+      getBalance: async () => {
+        const value = balanceCall === 0 ? 0 : intermediateLamports;
+        balanceCall = Math.min(balanceCall + 1, 1);
+        return value;
+      },
+    };
+    (swapManager as any).getBestProvider = async () => "jupiter";
+    (swapManager as any).pumpFunClient.createSwapTransaction = async () => [
+      {} as TransactionInstruction,
+    ];
+    const pumpOps: string[] = [];
+    (wallet as any).sendAndConfirmWithResubmits = async (
+      _ixs: TransactionInstruction[],
+      _signers: Keypair[],
+      opts: { operationLabel?: string }
+    ) => {
+      pumpOps.push(opts.operationLabel ?? "unknown");
+      return opts.operationLabel ?? "pump";
+    };
+
+    (swapManager as any).getJupiterQuote = async () => ({
+      inputMint: WSOL_MINT,
+      outputMint: "TARGET",
+      inAmount: (intermediateLamports - 10_000).toString(),
+      outAmount: "5000",
+      otherAmountThreshold: "0",
+      swapMode: "ExactIn",
+      slippageBps: 100,
+      priceImpactPct: "0",
+      routePlan: [],
+      totalTime: 0,
+    });
+
+    (swapManager as any).jupiterClient.getSwapTransaction = async () => ({
+      swapTransaction: "BASE64",
+    });
+
+    (swapManager as any).executeJupiterTransaction = async () => {
+      throw new Error("Jupiter leg failure");
+    };
+
+    const user = Keypair.generate();
+    const request = {
+      inputMint: "PUMP",
+      outputMint: "TARGET",
+      amount: "0",
+      userKeypair: user,
+      slippageBps: 100,
+      inputDecimals: 6,
+      outputDecimals: 6,
+      inputTicker: "PUMP",
+      outputTicker: "TOK",
+    } as const;
+
+    const pumpQuote: PumpFunQuote = {
+      inputMint: "PUMP",
+      outputMint: WSOL_MINT,
+      inputAmount: "100000",
+      inputAmountRaw: "100000",
+      outputAmount: "3200000",
+      estimatedRate: 1,
+      slippage: 1,
+      isGraduated: true,
+    };
+
+    const jupiterQuote: JupiterQuoteResponse = {
+      inputMint: WSOL_MINT,
+      outputMint: "TARGET",
+      inAmount: (intermediateLamports - 10_000).toString(),
+      outAmount: "5000",
+      otherAmountThreshold: "0",
+      swapMode: "ExactIn",
+      slippageBps: 100,
+      priceImpactPct: "0",
+      routePlan: [],
+      totalTime: 0,
+    };
+
+    const composite: NonNullable<SwapQuote["composite"]> = {
+      flow: "pump-then-jupiter",
+      intermediateMint: WSOL_MINT,
+      intermediateAmount: intermediateLamports.toString(),
+      pumpQuote,
+      jupiterQuote,
+    };
+
+    const quote: SwapQuote = {
+      provider: "pump-fun+jupiter" as const,
+      inputMint: request.inputMint,
+      outputMint: request.outputMint,
+      inputAmount: "0",
+      inputAmountRaw: "0",
+      outputAmount: "0",
+      estimatedRate: 0,
+      slippage: 1,
+      composite,
+    } satisfies SwapQuote;
+
+    await expect(
+      swapManager.executeCompositePumpFunJupiterSwap(request, quote)
+    ).rejects.toThrow("Jupiter leg failure");
+    expect(pumpOps).toContain("Pump.fun leg");
   });
 });
