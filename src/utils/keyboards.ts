@@ -35,7 +35,9 @@ export const createBackToWalletKeyboard = (): InlineKeyboard => {
 };
 
 export const createBackToSettingsKeyboard = (): InlineKeyboard => {
-  return new InlineKeyboard().text("← Back to Settings", "wallet_settings").row();
+  return new InlineKeyboard()
+    .text("← Back to Settings", "wallet_settings")
+    .row();
 };
 
 export const createCancelKeyboard = (
@@ -56,9 +58,7 @@ export const createWalletSettingsKeyboard = (): InlineKeyboard => {
   );
 };
 
-export const createConfirmWrapKeyboard = (
-  lamports: number
-): InlineKeyboard => {
+export const createConfirmWrapKeyboard = (lamports: number): InlineKeyboard => {
   return new InlineKeyboard()
     .text("✅ Confirm Wrap", `confirm_wrap_${String(lamports)}`)
     .row()
@@ -120,20 +120,27 @@ export const getFeeWarningMessage = (
   gameType: string,
   balance: number,
   contractMinimum: number = 20,
-  tokenTicker: string = DEFAULT_TOKEN_TICKER
+  tokenTicker: string = DEFAULT_TOKEN_TICKER,
+  options?: { includeBalanceInfo?: boolean }
 ): string => {
   const formattedGameType =
     typeof gameType === "string" && gameType.length > 0
       ? `${gameType.charAt(0).toUpperCase()}${gameType.slice(1)}`
       : "Game";
 
+  const includeBalance = options?.includeBalanceInfo ?? true;
+
   let message = `💰 <b>Select Amount - ${formattedGameType}</b>\n\n`;
 
-  if (balance < contractMinimum) {
+  if (includeBalance && balance < contractMinimum) {
     message += `⚠️ <b>Low Balance Warning</b>\n`;
     message += `Your balance: ${balance.toFixed(0)} ${tokenTicker}\n`;
     message += `Contract minimum: ${contractMinimum} ${tokenTicker}\n\n`;
     message += `<i>Oracle fees (~5-10%) will reduce winnings significantly with small bets.</i>\n\n`;
+  } else if (balance < contractMinimum) {
+    message += `⚠️ <b>Low Balance Warning</b>\n`;
+    message += `Contract minimum: ${contractMinimum} ${tokenTicker}\n\n`;
+    message += `<i>Oracle fees (~5-10%) can impact small bets.</i>\n\n`;
   }
 
   message += `Choose how much you want to play with:`;
@@ -227,10 +234,7 @@ export const createAmountSelectionKeyboard = (
       withCreatorSuffix(`custom_amount_${gameType}`, creatorId)
     )
     .row()
-    .text(
-      "❌ Cancel",
-      withCreatorSuffix("cancel_game_setup", creatorId)
-    )
+    .text("❌ Cancel", withCreatorSuffix("cancel_game_setup", creatorId))
     .row();
 
   return keyboard;
@@ -247,7 +251,11 @@ const PLAYER_SELECTION_LAYOUTS: Record<string, number[][]> = {
   ],
 };
 
-export const createPlayerSelectionKeyboard = (gameType: string, amount: string, creatorId?: string): InlineKeyboard => {
+export const createPlayerSelectionKeyboard = (
+  gameType: string,
+  amount: string,
+  creatorId?: string
+): InlineKeyboard => {
   const keyboard = new InlineKeyboard();
   const layout = PLAYER_SELECTION_LAYOUTS[gameType] ?? [];
 

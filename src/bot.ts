@@ -94,6 +94,7 @@ import {
   safeAnswerCallbackQuery,
   requireTelegramId,
   getRequiredTelegramIdForContext,
+  sendPrivateMessage,
   resolveTelegramIdOrRespond,
 } from "./utils/context-helpers";
 import { recentUpdateGuard } from "./utils/recent-update";
@@ -2169,12 +2170,24 @@ const validateAndProcessTransaction = async (
         )} ${DEFAULT_TOKEN_TICKER}`;
 
     const balanceLabel = isSol ? "SOL" : DEFAULT_TOKEN_TICKER;
-    await ctx.reply(
-      `❌ Not enough ${balanceLabel}. You have ${balanceStr} but need ${needStr}. Add more ${balanceLabel} or lower the amount and try again.`,
-      {
+    const privateText = `❌ Not enough ${balanceLabel}. You have ${balanceStr} but need ${needStr}. Add more ${balanceLabel} or lower the amount and try again.`;
+    const sanitizedText = `❌ Not enough ${balanceLabel}. I sent your balance privately—please adjust the amount.`;
+    const fallbackText = `❌ Not enough ${balanceLabel}. Please start a private chat with the bot so I can share your balance.`;
+    if (ctx.chat?.type === "private" || telegramId === 0n) {
+      await ctx.reply(privateText, {
         reply_to_message_id: ctx.message?.message_id,
-      }
-    );
+      });
+      return;
+    }
+
+    const dmSent = await sendPrivateMessage(ctx, telegramId, {
+      text: privateText,
+      parseMode: "HTML",
+    });
+    const displayText = dmSent ? sanitizedText : fallbackText;
+    await ctx.reply(displayText, {
+      reply_to_message_id: ctx.message?.message_id,
+    });
     return;
   }
 

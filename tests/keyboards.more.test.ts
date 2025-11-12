@@ -17,18 +17,27 @@ import {
 function extractCallbacks(kb: any): string[] {
   const grid = (kb && (kb.inline_keyboard || kb.keyboard)) as any[] | undefined;
   if (Array.isArray(grid)) {
-    return grid.flat().map((b: any) => b?.callback_data).filter(Boolean);
+    return grid
+      .flat()
+      .map((b: any) => b?.callback_data)
+      .filter(Boolean);
   }
   // Fallback for grammy's internal representation
   const rows = (kb as any).rows as any[] | undefined;
   if (Array.isArray(rows)) {
-    return rows.flat().map((b: any) => b?.callback_data).filter(Boolean);
+    return rows
+      .flat()
+      .map((b: any) => b?.callback_data)
+      .filter(Boolean);
   }
   try {
     const j = JSON.parse(JSON.stringify(kb));
     const arr = (j && (j.inline_keyboard || j.keyboard)) as any[] | undefined;
     if (Array.isArray(arr)) {
-      return arr.flat().map((b: any) => b?.callback_data).filter(Boolean);
+      return arr
+        .flat()
+        .map((b: any) => b?.callback_data)
+        .filter(Boolean);
     }
   } catch {}
   return [];
@@ -37,17 +46,26 @@ function extractCallbacks(kb: any): string[] {
 function extractTexts(kb: any): string[] {
   const grid = (kb && (kb.inline_keyboard || kb.keyboard)) as any[] | undefined;
   if (Array.isArray(grid)) {
-    return grid.flat().map((b: any) => b?.text).filter(Boolean);
+    return grid
+      .flat()
+      .map((b: any) => b?.text)
+      .filter(Boolean);
   }
   const rows = (kb as any).rows as any[] | undefined;
   if (Array.isArray(rows)) {
-    return rows.flat().map((b: any) => b?.text).filter(Boolean);
+    return rows
+      .flat()
+      .map((b: any) => b?.text)
+      .filter(Boolean);
   }
   try {
     const j = JSON.parse(JSON.stringify(kb));
     const arr = (j && (j.inline_keyboard || j.keyboard)) as any[] | undefined;
     if (Array.isArray(arr)) {
-      return arr.flat().map((b: any) => b?.text).filter(Boolean);
+      return arr
+        .flat()
+        .map((b: any) => b?.text)
+        .filter(Boolean);
     }
   } catch {}
   return [];
@@ -154,25 +172,33 @@ describe("keyboards: amount selection", () => {
 
   test("defaults to fixed contract minimum multiples when no balance", () => {
     const kb = createAmountSelectionKeyboard("coinflip");
-    const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
+    const callbacks = extractCallbacks(kb).filter((s) =>
+      s.startsWith("amount_coinflip_")
+    );
     expect(callbacks).toEqual(expectedDefaultCallbacks);
   });
 
   test("small balance still surfaces fixed contract minimum multiples", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 3);
-    const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
+    const callbacks = extractCallbacks(kb).filter((s) =>
+      s.startsWith("amount_coinflip_")
+    );
     expect(callbacks).toEqual(expectedDefaultCallbacks);
   });
 
   test("sub-unit balances still show contract minimum first and keep ordering", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 1.2);
-    const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
+    const callbacks = extractCallbacks(kb).filter((s) =>
+      s.startsWith("amount_coinflip_")
+    );
     expect(callbacks).toEqual(expectedDefaultCallbacks);
   });
 
   test("balance under 50 still starts from contract minimum", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 40);
-    const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("amount_coinflip_"));
+    const callbacks = extractCallbacks(kb).filter((s) =>
+      s.startsWith("amount_coinflip_")
+    );
     expect(callbacks[0]).toBe("amount_coinflip_20");
     expect(callbacks).toEqual(expectedDefaultCallbacks);
   });
@@ -180,35 +206,45 @@ describe("keyboards: amount selection", () => {
   test("amount buttons render two per row", () => {
     const kb = createAmountSelectionKeyboard("coinflip", 200);
     const rows =
-      (kb && (kb as any).inline_keyboard) ||
-      (kb && (kb as any).rows) ||
-      [];
+      (kb && (kb as any).inline_keyboard) || (kb && (kb as any).rows) || [];
     const amountRows = rows.filter((row: any[]) =>
       row.some((btn: any) => btn?.callback_data?.startsWith("amount_coinflip_"))
     );
-    const flattened = amountRows.flat().filter((btn: any) =>
-      btn?.callback_data?.startsWith("amount_coinflip_")
+    const flattened = amountRows
+      .flat()
+      .filter((btn: any) => btn?.callback_data?.startsWith("amount_coinflip_"));
+    expect(flattened.map((btn: any) => btn.callback_data)).toEqual(
+      expectedDefaultCallbacks
     );
-    expect(flattened.map((btn: any) => btn.callback_data)).toEqual(expectedDefaultCallbacks);
     expect(amountRows.every((row: any[]) => row.length === 2)).toBe(true);
   });
 
   test("creatorId is appended to callbacks when provided", () => {
     const kb = createAmountSelectionKeyboard("giveaway", 60, "999");
-    const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("amount_giveaway_"));
+    const callbacks = extractCallbacks(kb).filter((s) =>
+      s.startsWith("amount_giveaway_")
+    );
     expect(callbacks.every((s) => s.endsWith("_999"))).toBe(true);
   });
 
   test("amount buttons omit token ticker and show USD when price is known", () => {
-    const kb = createAmountSelectionKeyboard("coinflip", undefined, undefined, 20, {
-      decimals: 2,
-      tokenPriceUSD: 0.01,
-    });
+    const kb = createAmountSelectionKeyboard(
+      "coinflip",
+      undefined,
+      undefined,
+      20,
+      {
+        decimals: 2,
+        tokenPriceUSD: 0.01,
+      }
+    );
     const texts = extractTexts(kb).filter((text) => /^\d/.test(text));
     expect(texts.length).toBeGreaterThan(0);
     expect(texts.every((text) => !text.includes("TIMBA"))).toBe(true);
     expect(texts.every((text) => !text.includes("~"))).toBe(true);
-    expect(texts.every((text) => /\(\$[0-9,]+(?:\.\d+)?\)/.test(text))).toBe(true);
+    expect(texts.every((text) => /\(\$[0-9,]+(?:\.\d+)?\)/.test(text))).toBe(
+      true
+    );
   });
 
   test("fee warning message shows for low balance", () => {
@@ -216,12 +252,23 @@ describe("keyboards: amount selection", () => {
     expect(msg).toContain("Low Balance Warning");
     expect(msg).toContain("Contract minimum: 20 TIMBA");
   });
+
+  test("fee warning message can omit personal balance details", () => {
+    const msg = getFeeWarningMessage("coinflip", 5, 20, undefined, {
+      includeBalanceInfo: false,
+    });
+    expect(msg).toContain("Low Balance Warning");
+    expect(msg).toContain("Contract minimum: 20 TIMBA");
+    expect(msg).not.toContain("Your balance");
+  });
 });
 
 describe("keyboards: player selection and confirm", () => {
   test("player selection includes correct callbacks for coinflip", () => {
     const kb = createPlayerSelectionKeyboard("coinflip", "25");
-    const callbacks = extractCallbacks(kb).filter((s) => s?.startsWith("players_coinflip_25_"));
+    const callbacks = extractCallbacks(kb).filter((s) =>
+      s?.startsWith("players_coinflip_25_")
+    );
     expect(callbacks).toContain("players_coinflip_25_2");
     expect(callbacks).toContain("players_coinflip_25_3");
     expect(callbacks).toContain("players_coinflip_25_4");
@@ -236,7 +283,9 @@ describe("keyboards: player selection and confirm", () => {
 
   test("player selection for giveaway uses specific player options", () => {
     const kb = createPlayerSelectionKeyboard("giveaway", "10", "42");
-    const callbacks = extractCallbacks(kb).filter((s) => s?.startsWith("players_giveaway_10_"));
+    const callbacks = extractCallbacks(kb).filter((s) =>
+      s?.startsWith("players_giveaway_10_")
+    );
     expect(callbacks).toContain("players_giveaway_10_1_42");
     expect(callbacks).toContain("players_giveaway_10_2_42");
     expect(callbacks).toContain("players_giveaway_10_3_42");

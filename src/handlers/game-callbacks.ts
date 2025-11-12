@@ -1,9 +1,18 @@
-import { InlineKeyboard, type Bot, type Context, type MiddlewareFn } from "grammy";
+import {
+  InlineKeyboard,
+  type Bot,
+  type Context,
+  type MiddlewareFn,
+} from "grammy";
 import type { NextFunction } from "grammy";
 import { PublicKey } from "@solana/web3.js";
 import type { Program } from "@coral-xyz/anchor";
 
-import { DEFAULT_TOKEN_MINT, DEFAULT_TOKEN_TICKER, GAME_TIMEOUT } from "../utils/constants";
+import {
+  DEFAULT_TOKEN_MINT,
+  DEFAULT_TOKEN_TICKER,
+  GAME_TIMEOUT,
+} from "../utils/constants";
 import {
   createAmountSelectionKeyboard,
   createGameConfirmKeyboard,
@@ -17,6 +26,8 @@ import {
   getTelegramId,
   handleCallbackErrorSafe,
   safeAnswerCallbackQuery,
+  sendPrivateMessage,
+  containsBalanceInfo,
 } from "../utils/context-helpers";
 import { formatTokenDisplay, formatUsdValue } from "../utils/format-amount";
 import {
@@ -52,7 +63,10 @@ export type GameCallbacksModuleDeps = {
     tokenTicker: string;
   }) => Promise<number | null>;
   getProgram: () => Program<Timba>;
-  validateGameTokenData: (gameData: any) => { isValid: boolean; error?: string };
+  validateGameTokenData: (gameData: any) => {
+    isValid: boolean;
+    error?: string;
+  };
   gameSetupCopy: Record<"coinflip" | "giveaway", GameSetupCopy>;
 };
 
@@ -78,7 +92,10 @@ const toTitleCase = (value: string): string => {
   return value.charAt(0).toUpperCase() + value.slice(1);
 };
 
-const determineFractionDigits = (value: string, maxDecimals: number): number => {
+const determineFractionDigits = (
+  value: string,
+  maxDecimals: number
+): number => {
   const [_, fraction = ""] = value.split(".");
   if (!fraction) {
     return Math.min(6, maxDecimals);
@@ -214,6 +231,37 @@ const buildGameConfirmMenuConfig = ({
   } as const;
 };
 
+type CustomAmountPromptParams = {
+  ctx: Context;
+  gameType: "coinflip" | "giveaway";
+  tokenTicker: string;
+  contractMin: number;
+  creatorId?: string;
+};
+
+const presentCustomAmountPrompt = async (params: CustomAmountPromptParams) => {
+  const { ctx, gameType, tokenTicker, contractMin, creatorId } = params;
+
+  const formattedGameType = toTitleCase(gameType);
+  const keyboard = new InlineKeyboard()
+    .text("❌ Cancel", `cancel_game_setup_${creatorId}`)
+    .row();
+
+  const groupMessage = [
+    `✏️ <b>Type Custom Amount - ${formattedGameType}</b>`,
+    "",
+    "Please type the amount you want to use.",
+    "",
+    `Min: ${contractMin} ${tokenTicker}`,
+  ].join("\n");
+
+  await respondWithMenu(ctx, {
+    text: groupMessage,
+    parseMode: "HTML",
+    keyboard,
+  });
+};
+
 export const createGameCallbacksModule = (
   deps: GameCallbacksModuleDeps
 ): GameCallbacksModule => {
@@ -276,7 +324,10 @@ export const createGameCallbacksModule = (
       const from = ctx.from;
       if (!from) return null;
 
-      if (typeof from.username === "string" && from.username.trim().length > 0) {
+      if (
+        typeof from.username === "string" &&
+        from.username.trim().length > 0
+      ) {
         const normalizedHandle = from.username.trim().replace(/^@+/, "");
         return normalizedHandle.length > 0 ? `@${normalizedHandle}` : null;
       }
@@ -294,7 +345,11 @@ export const createGameCallbacksModule = (
     })();
 
     if (displayNameFromContext) {
-      gameManager.primeUsernameCache(ctx, telegramIdStr, displayNameFromContext);
+      gameManager.primeUsernameCache(
+        ctx,
+        telegramIdStr,
+        displayNameFromContext
+      );
     }
 
     try {
@@ -358,7 +413,10 @@ export const createGameCallbacksModule = (
         `✅ Joined! (${ticketCount}/${maxTickets})`
       );
     } catch (error) {
-      if (error instanceof Error && error.message.includes("Account does not exist")) {
+      if (
+        error instanceof Error &&
+        error.message.includes("Account does not exist")
+      ) {
         await safeAnswerCallbackQuery(ctx, "This game is no longer active!");
       } else {
         throw error;
@@ -375,7 +433,10 @@ export const createGameCallbacksModule = (
     const validation = deps.validateGameTokenData(gameData);
 
     if (!validation.isValid) {
-      await safeAnswerCallbackQuery(ctx, validation.error ?? "Invalid game data");
+      await safeAnswerCallbackQuery(
+        ctx,
+        validation.error ?? "Invalid game data"
+      );
       return;
     }
 
@@ -392,15 +453,14 @@ export const createGameCallbacksModule = (
       await program.account.game.fetch(gamePda);
 
       const gameManager = getGameManager();
-      await gameManager.updateGameMessageFromData(
-        ctx,
-        gameAddress,
-        "Active"
-      );
+      await gameManager.updateGameMessageFromData(ctx, gameAddress, "Active");
 
       await safeAnswerCallbackQuery(ctx, "Game status refreshed!");
     } catch (error) {
-      if (error instanceof Error && error.message.includes("Account does not exist")) {
+      if (
+        error instanceof Error &&
+        error.message.includes("Account does not exist")
+      ) {
         await safeAnswerCallbackQuery(ctx, "This game is no longer active!");
       } else {
         console.error(`Error refreshing game ${gameAddress}:`, error);
@@ -444,7 +504,9 @@ export const createGameCallbacksModule = (
       }
 
       const sessionSnapshot = { ...userSession };
-      const restoreSession = (overrides: Partial<GameSetupSessionState> = {}) => {
+      const restoreSession = (
+        overrides: Partial<GameSetupSessionState> = {}
+      ) => {
         upsertGameSetupSession(sessionKey, {
           ...sessionSnapshot,
           ...overrides,
@@ -454,7 +516,8 @@ export const createGameCallbacksModule = (
 
       const defaultMetadata = await deps.getDefaultTokenMetadata();
       const tokenTicker = userSession.tokenTicker ?? DEFAULT_TOKEN_TICKER;
-      const tokenDecimals = userSession.tokenDecimals ?? defaultMetadata.decimals;
+      const tokenDecimals =
+        userSession.tokenDecimals ?? defaultMetadata.decimals;
       const minAllowed =
         userSession.contractMinimum ??
         (
@@ -478,7 +541,11 @@ export const createGameCallbacksModule = (
           `🔍 Custom players input: "${inputText}" -> ${players} (gameType: ${userSession.gameType}, min: ${minPlayers}, max: ${maxPlayers})`
         );
 
-        if (Number.isNaN(players) || players < minPlayers || players > maxPlayers) {
+        if (
+          Number.isNaN(players) ||
+          players < minPlayers ||
+          players > maxPlayers
+        ) {
           const errorMessage = `❌ Invalid number of players. Please enter a number between ${minPlayers} and ${maxPlayers}.`;
           try {
             await ctx.api.editMessageText(
@@ -557,17 +624,36 @@ export const createGameCallbacksModule = (
       }
 
       if (amount > userSession.userBalance) {
-        const balanceMessage =
-          `❌ Amount too high. Your balance is ${userSession.userBalance.toFixed(2)} ${tokenTicker}. Please try again.`;
+        const balanceText = `❌ Amount too high. Your balance is ${userSession.userBalance.toFixed(
+          2
+        )} ${tokenTicker}. Please try again.`;
+        const groupText =
+          "❌ Amount too high. I sent your balance privately—please try again with a lower amount.";
+        const isPrivate = ctx.chat?.type === "private";
+
+        if (!isPrivate) {
+          const telegramId = await getRequiredTelegramIdForContext(
+            ctx,
+            "amount input"
+          );
+          if (telegramId != null) {
+            await sendPrivateMessage(ctx, telegramId, {
+              text: balanceText,
+              parseMode: "HTML",
+            });
+          }
+        }
+
+        const messageToShow = isPrivate ? balanceText : groupText;
         try {
           await ctx.api.editMessageText(
             userSession.chatId!,
             userSession.messageId!,
-            balanceMessage,
+            messageToShow,
             { parse_mode: "HTML" }
           );
         } catch (error) {
-          await ctx.reply(balanceMessage, { parse_mode: "HTML" });
+          await ctx.reply(messageToShow, { parse_mode: "HTML" });
         }
         restoreSession({ waitingFor: "amount_input" });
         return;
@@ -591,7 +677,10 @@ export const createGameCallbacksModule = (
 
       const amountFormatted = amount.toLocaleString("en-US", {
         minimumFractionDigits: 0,
-        maximumFractionDigits: determineFractionDigits(inputText, tokenDecimals),
+        maximumFractionDigits: determineFractionDigits(
+          inputText,
+          tokenDecimals
+        ),
       });
 
       const formattedGameTypeForPlayers = toTitleCase(userSession.gameType);
@@ -667,7 +756,10 @@ export const createGameCallbacksModule = (
           }
 
           if (shouldSkipGenericGameCallback(callbackData)) {
-            console.log("🔄 Calling next() for non-game callback:", callbackData);
+            console.log(
+              "🔄 Calling next() for non-game callback:",
+              callbackData
+            );
             await next();
             return;
           }
@@ -879,7 +971,8 @@ export const createGameCallbacksModule = (
             const chatId = ctx.chat?.id;
             const messageId = ctx.callbackQuery?.message?.message_id;
             let confirmMessageMissing = false;
-            const confirmationFallbackReplyTo = ctx.callbackQuery?.message?.reply_to_message?.message_id;
+            const confirmationFallbackReplyTo =
+              ctx.callbackQuery?.message?.reply_to_message?.message_id;
 
             deps.pendingGameCreations.add(creationKey);
 
@@ -899,9 +992,14 @@ export const createGameCallbacksModule = (
 
                 if (!confirmMessageMissing) {
                   try {
-                    await ctx.api.editMessageText(chatId, messageId, "⏳ Creating game…", {
-                      parse_mode: "HTML",
-                    });
+                    await ctx.api.editMessageText(
+                      chatId,
+                      messageId,
+                      "⏳ Creating game…",
+                      {
+                        parse_mode: "HTML",
+                      }
+                    );
                   } catch (textError) {
                     console.warn(
                       "Failed to set progress text before game creation:",
@@ -924,16 +1022,18 @@ export const createGameCallbacksModule = (
                 formattedAmount: amount.toString(),
                 tokenMint: tokenContext.tokenMint,
                 tokenTicker: tokenContext.tokenTicker,
-                tokenWasSpecified: tokenContext.tokenMint !== DEFAULT_TOKEN_MINT,
+                tokenWasSpecified:
+                  tokenContext.tokenMint !== DEFAULT_TOKEN_MINT,
               };
 
+              const callerTelegramId = getTelegramId(ctx);
               const result = await gameManager.createGame(
                 gameType,
                 gameData,
                 maxPlayers,
                 gameType === "coinflip" ? 2 : 1,
                 GAME_TIMEOUT,
-                getTelegramId(ctx),
+                callerTelegramId,
                 ctx.chat?.id,
                 ctx.callbackQuery?.message?.date != null
                   ? ctx.callbackQuery.message.date * 1_000
@@ -941,20 +1041,44 @@ export const createGameCallbacksModule = (
               );
 
               if (!result.success) {
+                const options = {
+                  allowContextEdit: !confirmMessageMissing,
+                  skipEdit: confirmMessageMissing,
+                  replyToMessageId: confirmMessageMissing
+                    ? confirmationFallbackReplyTo
+                    : undefined,
+                  logLabel: "confirm_game_error",
+                } as const;
+
+                const rawError = result.error || "Failed to create game";
+                let displayText = `❌ ${rawError}`;
+                const isPrivate = ctx.chat?.type === "private";
+                const hasBalanceInfo = containsBalanceInfo(rawError);
+
+                if (!isPrivate && hasBalanceInfo && callerTelegramId !== 0n) {
+                  const dmSent = await sendPrivateMessage(
+                    ctx,
+                    callerTelegramId,
+                    {
+                      text: displayText,
+                      parseMode: "HTML",
+                    }
+                  );
+                  displayText = dmSent
+                    ? "❌ Game creation failed (insufficient funds). Check your private chat for details."
+                    : "❌ Game creation failed. Start a private chat with the bot to see more details.";
+                } else if (!isPrivate && hasBalanceInfo) {
+                  displayText =
+                    "❌ Game creation failed. Start a private chat with the bot to see more details.";
+                }
+
                 await respondWithMenu(
                   ctx,
                   {
-                    text: `❌ ${result.error || "Failed to create game"}`,
+                    text: displayText,
                     parseMode: "HTML",
                   },
-                  {
-                    allowContextEdit: !confirmMessageMissing,
-                    skipEdit: confirmMessageMissing,
-                    replyToMessageId: confirmMessageMissing
-                      ? confirmationFallbackReplyTo
-                      : undefined,
-                    logLabel: "confirm_game_error",
-                  }
+                  options
                 );
                 return;
               }
@@ -982,9 +1106,8 @@ export const createGameCallbacksModule = (
                 ? `@${ctx.from.username}`
                 : "Unknown";
 
-              const replyToUserMessageId = ctx.callbackQuery?.message?.reply_to_message?.message_id as
-                | number
-                | undefined;
+              const replyToUserMessageId = ctx.callbackQuery?.message
+                ?.reply_to_message?.message_id as number | undefined;
 
               if (chatId && messageId && !confirmMessageMissing) {
                 try {
@@ -1134,32 +1257,12 @@ export const createGameCallbacksModule = (
                     tokenContext.tokenDecimals
                   );
 
-            const formattedGameType = toTitleCase(gameType);
-
-            const typeMessage = [
-              `✏️ <b>Type Custom Amount - ${formattedGameType}</b>`,
-              "",
-              `💰 Your balance: <b>${userBalance.toFixed(
-                Math.min(4, tokenContext.tokenDecimals)
-              )} ${tokenContext.tokenTicker}</b>`,
-              "",
-              "Please type the amount you want to use.",
-              "",
-              "<b>Example:</b>",
-              `• Type: <code>75</code> for 75 ${tokenContext.tokenTicker}`,
-              `• Type: <code>150.5</code> for 150.5 ${tokenContext.tokenTicker}`,
-              "",
-              `Min: ${contractMin} ${tokenContext.tokenTicker} • Max: ${userBalance.toFixed(
-                Math.min(2, tokenContext.tokenDecimals)
-              )} ${tokenContext.tokenTicker}`,
-            ].join("\n");
-
-            await respondWithMenu(ctx, {
-              text: typeMessage,
-              parseMode: "HTML",
-              keyboard: new InlineKeyboard()
-                .text("❌ Cancel", `cancel_game_setup_${creatorId}`)
-                .row(),
+            await presentCustomAmountPrompt({
+              ctx,
+              gameType,
+              tokenTicker: tokenContext.tokenTicker,
+              contractMin,
+              creatorId,
             });
 
             await safeAnswerCallbackQuery(ctx, "Type your amount...");
@@ -1174,7 +1277,10 @@ export const createGameCallbacksModule = (
               amount: session?.amount,
             });
           } catch (error) {
-            console.error("Error in creator-protected custom_amount callback:", error);
+            console.error(
+              "Error in creator-protected custom_amount callback:",
+              error
+            );
             await safeAnswerCallbackQuery(
               ctx,
               "❌ Error setting up text input"
@@ -1441,32 +1547,12 @@ export const createGameCallbacksModule = (
                     tokenContext.tokenDecimals
                   );
 
-            const formattedGameType = toTitleCase(gameType);
-
-            const typeMessage = [
-              `✏️ <b>Type Custom Amount - ${formattedGameType}</b>`,
-              "",
-              `💰 Your balance: <b>${userBalance.toFixed(
-                Math.min(4, tokenContext.tokenDecimals)
-              )} ${tokenContext.tokenTicker}</b>`,
-              "",
-              "Please type the amount you want to use.",
-              "",
-              "<b>Example:</b>",
-              `• Type: <code>75</code> for 75 ${tokenContext.tokenTicker}`,
-              `• Type: <code>150.5</code> for 150.5 ${tokenContext.tokenTicker}`,
-              "",
-              `Min: ${contractMin} ${tokenContext.tokenTicker} • Max: ${userBalance.toFixed(
-                Math.min(2, tokenContext.tokenDecimals)
-              )} ${tokenContext.tokenTicker}`,
-            ].join("\n");
-
-            await respondWithMenu(ctx, {
-              text: typeMessage,
-              parseMode: "HTML",
-              keyboard: new InlineKeyboard()
-                .text("❌ Cancel", `cancel_game_setup_${creatorId}`)
-                .row(),
+            await presentCustomAmountPrompt({
+              ctx,
+              gameType,
+              tokenTicker: tokenContext.tokenTicker,
+              contractMin,
+              creatorId,
             });
 
             await safeAnswerCallbackQuery(ctx, "Type your amount...");
@@ -1481,7 +1567,10 @@ export const createGameCallbacksModule = (
               amount: session?.amount,
             });
           } catch (error) {
-            console.error("Error in creator-protected type_amount callback:", error);
+            console.error(
+              "Error in creator-protected type_amount callback:",
+              error
+            );
             await safeAnswerCallbackQuery(
               ctx,
               "❌ Error setting up text input"
