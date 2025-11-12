@@ -49,8 +49,10 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       fetch: globalThis.fetch as any,
       timeNow: () => Date.now(),
     });
-    const admin = Keypair.generate();
-    (wallet as any).getAdminKeypair = () => admin;
+    const adminCompositePumpFailure = Keypair.generate();
+    (wallet as any).getAdminKeypair = () => adminCompositePumpFailure;
+    const adminCompositeRefund = Keypair.generate();
+    (wallet as any).getAdminKeypair = () => adminCompositeRefund;
     const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
     (swapManager as any).connection = {
       getBalance: async () => TEST_GAME_BUFFER_LAMPORTS,
