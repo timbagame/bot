@@ -1,12 +1,26 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Connection, Keypair } from "@solana/web3.js";
-import { SwapManager } from "../src/utils/swap-manager";
+import { MIN_JUPITER_SWAP_FEE_LAMPORTS, JUPITER_FEE_SAFETY_MARGIN_LAMPORTS, SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
+import type { FeeBudgetProvider } from "../src/utils/fee-budget";
 
 describe("SwapManager.executeJupiterSwap", () => {
   let origNet: string | undefined;
   beforeEach(() => { origNet = process.env.SOLANA_NETWORK; process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com"; });
   afterEach(() => { process.env.SOLANA_NETWORK = origNet || process.env.SOLANA_NETWORK!; });
+
+  const createFeeBudgetStub = (): FeeBudgetProvider => ({
+    getSingleTransactionLamports: async () => 0,
+    getWrapFeeBufferLamports: async () => 0,
+    getJitSwapFeeBufferLamports: async () => 0,
+    getGameSafetyBufferLamports: async () => 0,
+    getCachedSingleTransactionLamports: () => 0,
+    getCachedWrapFeeBufferLamports: () => 0,
+    getCachedGameSafetyBufferLamports: () => 0,
+    getDefaultSingleTransactionLamports: () => 0,
+    getDefaultWrapFeeBufferLamports: () => 0,
+    getDefaultGameSafetyBufferLamports: () => 0,
+  });
 
   test("executes serialized Jupiter transaction and returns signature", async () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
@@ -14,16 +28,22 @@ describe("SwapManager.executeJupiterSwap", () => {
       "test walk nut penalty hip pave soap entry language right filter choice",
       { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
     );
-    const sm = new SwapManager(connection, wallet);
+    const sm = new SwapManager(connection, wallet, createFeeBudgetStub());
 
     // Avoid network and account creation
     (sm as any).createTokenAccountsIfNeeded = async () => [];
+    (sm as any).connection.getBalance = async () => 0;
+    (sm as any).sponsorSwapFees = async () => {};
+    (sm as any).refundSponsoredFees = async () => {};
     // Stub Jupiter swap endpoint response
     (sm as any).jupiterClient.getSwapTransaction = async () => ({
       swapTransaction: Buffer.from("fake").toString("base64"),
     });
     // Short-circuit the internal executor to avoid deserialization
-    (sm as any).executeJupiterTransaction = async () => "SIG_JUP_123";
+    (sm as any).executeJupiterTransaction = async () => ({
+      signature: "SIG_JUP_123",
+      estimatedFee: 0,
+    });
 
     const user = Keypair.generate();
     const req = {
@@ -63,5 +83,146 @@ describe("SwapManager.executeJupiterSwap", () => {
 
     const sig = await sm.executeJupiterSwap(req, quote);
     expect(sig).toBe("SIG_JUP_123");
+  });
+
+  test("does not sponsor when balance already meets requirement", async () => {
+    const connection = new Connection("http://localhost:8899", "confirmed");
+    const wallet = WalletManager.createForTest(
+      "test walk nut penalty hip pave soap entry language right filter choice",
+      { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    );
+    const sm = new SwapManager(connection, wallet, createFeeBudgetStub());
+
+    const requiredBalance =
+      MIN_JUPITER_SWAP_FEE_LAMPORTS + JUPITER_FEE_SAFETY_MARGIN_LAMPORTS;
+    (sm as any).connection.getBalance = async () => requiredBalance;
+
+    let sponsorCalls = 0;
+    (sm as any).sponsorSwapFees = async () => {
+      sponsorCalls += 1;
+    };
+
+    const user = Keypair.generate();
+    const result = await (sm as any).ensureJupiterSwapFeeBudget(user);
+    expect(result).toBe(0);
+    expect(sponsorCalls).toBe(0);
+  });
+
+  test("refunds sponsors when account creation fails", async () => {
+    const connection = new Connection("http://localhost:8899", "confirmed");
+    const wallet = WalletManager.createForTest(
+      "test walk nut penalty hip pave soap entry language right filter choice",
+      { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    );
+    const sm = new SwapManager(connection, wallet, createFeeBudgetStub());
+
+    (sm as any).connection.getBalance = async () => 0;
+    (sm as any).createTokenAccountsIfNeeded = async () => {
+      throw new Error("account creation failed");
+    };
+
+    let sponsoredAmount = 0;
+    (sm as any).sponsorSwapFees = async (_kp: any, lamports: number) => {
+      sponsoredAmount = lamports;
+    };
+
+    let refundedAmount = 0;
+    (sm as any).refundSponsoredFees = async (_kp: any, lamports: number) => {
+      refundedAmount = lamports;
+    };
+
+    const req = {
+      inputMint: "So11111111111111111111111111111111111111112",
+      outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      amount: "1000000",
+      userKeypair: Keypair.generate(),
+      inputDecimals: 9,
+      outputDecimals: 6,
+      inputTicker: "WSOL",
+      outputTicker: "USDC",
+      slippageBps: 100,
+    } as const;
+
+    const quote = {
+      inputMint: req.inputMint,
+      outputMint: req.outputMint,
+      inputAmount: req.amount,
+      inputAmountRaw: req.amount,
+      outputAmount: "100",
+      estimatedRate: 0.0001,
+      slippage: 1,
+      provider: "jupiter" as const,
+    };
+
+    await expect(sm.executeJupiterSwap(req, quote)).rejects.toThrow(
+      "account creation failed"
+    );
+
+    expect(refundedAmount).toBe(sponsoredAmount);
+    expect(sponsoredAmount).toBeGreaterThan(0);
+  });
+
+  test("warns when estimated fee exceeds sponsorship", async () => {
+    const connection = new Connection("http://localhost:8899", "confirmed");
+    const wallet = WalletManager.createForTest(
+      "test walk nut penalty hip pave soap entry language right filter choice",
+      { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    );
+    const sm = new SwapManager(connection, wallet, createFeeBudgetStub());
+
+    (sm as any).createTokenAccountsIfNeeded = async () => [];
+    (sm as any).connection.getBalance = async () => 0;
+    (sm as any).ensureJupiterSwapFeeBudget = async () => 100_000;
+    (sm as any).executeJupiterTransaction = async () => ({
+      signature: "SIG_JUP_FEE",
+      estimatedFee: 150_000,
+    });
+
+    let refundCalled = false;
+    (sm as any).refundSponsoredFees = async () => {
+      refundCalled = true;
+    };
+
+    const logs: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    };
+
+    try {
+      const user = Keypair.generate();
+      const req = {
+        inputMint: "So11111111111111111111111111111111111111112",
+        outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        amount: "1000000",
+        userKeypair: user,
+        inputDecimals: 9,
+        outputDecimals: 6,
+        inputTicker: "WSOL",
+        outputTicker: "USDC",
+        slippageBps: 100,
+      } as const;
+
+      const quote = {
+        inputMint: req.inputMint,
+        outputMint: req.outputMint,
+        inputAmount: req.amount,
+        inputAmountRaw: req.amount,
+        outputAmount: "100",
+        estimatedRate: 0.0001,
+        slippage: 1,
+        provider: "jupiter" as const,
+      };
+
+      const signature = await sm.executeJupiterSwap(req, quote);
+      expect(signature).toBe("SIG_JUP_FEE");
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    expect(refundCalled).toBe(false);
+    expect(logs.some((entry) => entry.includes("exceeds sponsored buffer"))).toBe(
+      true
+    );
   });
 });

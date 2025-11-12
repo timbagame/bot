@@ -7,6 +7,7 @@ import type { FeeBudgetProvider } from "../src/utils/fee-budget";
 
 type MockConnection = {
   getLatestBlockhash: () => Promise<{ blockhash: string; lastValidBlockHeight: number }>;
+  getFeeForMessage: (message: TransactionMessage) => Promise<{ value: number | null; context: { slot: number } }>;
 };
 
 const BASE58_BLOCKHASH = "11111111111111111111111111111111";
@@ -62,12 +63,17 @@ describe("SwapManager Jupiter confirmation", () => {
         blockhash: UPDATED_BASE58_BLOCKHASH,
         lastValidBlockHeight: 999,
       }),
+      getFeeForMessage: async () => ({
+        value: 0,
+        context: { slot: 42 },
+      }),
     };
 
     const manager = new SwapManager(connection as any, walletStub, feeBudgetStub);
     const result = await (manager as any).executeJupiterTransaction(base64Tx, payer);
 
-    expect(result).toBe(SIGNATURE_OK);
+    expect(result.signature).toBe(SIGNATURE_OK);
+    expect(result.estimatedFee).toBe(0);
     expect(confirmed).not.toBeNull();
     expect(confirmed!).toBe(SIGNATURE_OK);
     expect(capturedTx).not.toBeNull();
@@ -87,11 +93,37 @@ describe("SwapManager Jupiter confirmation", () => {
         blockhash: BASE58_BLOCKHASH,
         lastValidBlockHeight: 42,
       }),
+      getFeeForMessage: async () => ({
+        value: 0,
+        context: { slot: 0 },
+      }),
     };
 
     const manager = new SwapManager(connection as any, walletStub, feeBudgetStub);
     await expect((manager as any).executeJupiterTransaction(base64Tx, payer)).rejects.toThrow(
       "RPC timeout"
+    );
+  });
+
+  test("surfaces fee estimation errors", async () => {
+    const walletStub = {
+      signAndSendSerializedTransaction: async () => SIGNATURE_OK,
+      confirmTransaction: async () => {},
+    } as unknown as WalletManager;
+
+    const connection: MockConnection = {
+      getLatestBlockhash: async () => ({
+        blockhash: BASE58_BLOCKHASH,
+        lastValidBlockHeight: 42,
+      }),
+      getFeeForMessage: async () => {
+        throw new Error("fee estimation failed");
+      },
+    };
+
+    const manager = new SwapManager(connection as any, walletStub, feeBudgetStub);
+    await expect((manager as any).executeJupiterTransaction(base64Tx, payer)).rejects.toThrow(
+      "fee estimation failed"
     );
   });
 });

@@ -45,6 +45,9 @@ const KNOWN_MAJOR_TOKENS = new Set([
   "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E", // BTC
 ]);
 
+export const MIN_JUPITER_SWAP_FEE_LAMPORTS = 10_000_000;
+export const JUPITER_FEE_SAFETY_MARGIN_LAMPORTS = 150_000;
+
 
 export class SwapManager {
   private jupiterClient: JupiterClient;
@@ -54,6 +57,7 @@ export class SwapManager {
   private feeBudget: FeeBudgetProvider;
   private network: SolanaNetwork;
   private readonly quoteCache = new SwapQuoteCache();
+  private readonly jupiterFeeSponsorships = new Map<string, Promise<number>>();
 
   constructor(
     connection: Connection,
@@ -462,7 +466,7 @@ export class SwapManager {
             sponsoredLamportsOutstanding += sponsorLamports;
           }
 
-          const signature = await this.executeJupiterTransaction(
+          const { signature } = await this.executeJupiterTransaction(
             swapResponse.swapTransaction,
             userKeypair
           );
@@ -881,6 +885,63 @@ export class SwapManager {
     await this.transferFees(userKeypair, adminKeypair.publicKey, lamports);
   }
 
+  private async ensureJupiterSwapFeeBudget(userKeypair: Keypair): Promise<number> {
+    const key = userKeypair.publicKey.toBase58();
+    let pending = this.jupiterFeeSponsorships.get(key);
+    if (!pending) {
+      pending = (async () => {
+        const requiredBalance =
+          Math.max(
+            await this.feeBudget.getJitSwapFeeBufferLamports(),
+            MIN_JUPITER_SWAP_FEE_LAMPORTS
+          ) + JUPITER_FEE_SAFETY_MARGIN_LAMPORTS;
+        const currentBalance = await this.connection.getBalance(userKeypair.publicKey);
+
+        if (currentBalance >= requiredBalance) {
+          return 0;
+        }
+
+        const sponsorship = requiredBalance - currentBalance;
+        await this.sponsorSwapFees(userKeypair, sponsorship);
+        return sponsorship;
+      })();
+
+      this.jupiterFeeSponsorships.set(key, pending);
+    }
+
+    try {
+      return await pending;
+    } finally {
+      if (this.jupiterFeeSponsorships.get(key) === pending) {
+        this.jupiterFeeSponsorships.delete(key);
+      }
+    }
+  }
+
+  private async refundSponsoredSwapFees(
+    userKeypair: Keypair,
+    sponsoredLamports: number,
+    estimatedFee: number
+  ): Promise<void> {
+    if (sponsoredLamports <= 0) {
+      return;
+    }
+
+    const refundAmount = Math.max(sponsoredLamports - estimatedFee, 0);
+    if (refundAmount <= 0) {
+      console.warn(
+        `Estimated Jupiter fee (${estimatedFee}) exceeds sponsored buffer (${sponsoredLamports}); no refund issued.`
+      );
+      return;
+    }
+
+    try {
+      await this.refundSponsoredFees(userKeypair, refundAmount);
+    } catch (error) {
+      console.error("Failed to refund sponsored swap fees:", error);
+    }
+  }
+
   /**
    * Create swap transaction instructions
    */
@@ -933,48 +994,71 @@ export class SwapManager {
     quote: SwapQuote
   ): Promise<string> {
     const { userKeypair, slippageBps = 500 } = request;
+    const sponsoredLamports = await this.ensureJupiterSwapFeeBudget(userKeypair);
 
-    // First, create token accounts if they don't exist
-    const setupInstructions = await this.createTokenAccountsIfNeeded(
-      userKeypair,
-      quote.inputMint,
-      quote.outputMint
-    );
-
-    // If we need to create token accounts, do that first
-    if (setupInstructions.length > 0) {
-      console.log(
-        `Creating ${setupInstructions.length} token accounts before Jupiter swap`
+    try {
+      // First, create token accounts if they don't exist
+      const setupInstructions = await this.createTokenAccountsIfNeeded(
+        userKeypair,
+        quote.inputMint,
+        quote.outputMint
       );
-      const setupTxid = await this.wallet.sendAndConfirmWithResubmits(
-        setupInstructions,
-        [userKeypair],
-        { operationLabel: "Create token accounts" }
-      );
-      console.log(`Token accounts created: ${setupTxid}`);
 
-      // Wait a bit for the accounts to be created
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // If we need to create token accounts, do that first
+      if (setupInstructions.length > 0) {
+        console.log(
+          `Creating ${setupInstructions.length} token accounts before Jupiter swap`
+        );
+        const setupTxid = await this.wallet.sendAndConfirmWithResubmits(
+          setupInstructions,
+          [userKeypair],
+          { operationLabel: "Create token accounts" }
+        );
+        console.log(`Token accounts created: ${setupTxid}`);
+
+        // Wait a bit for the accounts to be created
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+
+      // Get Jupiter quote and transaction
+      const jupiterQuote = await this.getJupiterQuote({
+        inputMint: quote.inputMint,
+        outputMint: quote.outputMint,
+        amount: quote.inputAmountRaw,
+        slippageBps,
+      });
+
+      const swapResponse = await this.jupiterClient.getSwapTransaction({
+        userPublicKey: userKeypair.publicKey.toString(),
+        quoteResponse: jupiterQuote,
+      });
+
+      // Execute the Jupiter transaction directly
+      const { signature, estimatedFee } = await this.executeJupiterTransaction(
+        swapResponse.swapTransaction,
+        userKeypair
+      );
+
+      await this.refundSponsoredSwapFees(
+        userKeypair,
+        sponsoredLamports,
+        estimatedFee
+      );
+
+      return signature;
+    } catch (error) {
+      if (sponsoredLamports > 0) {
+        try {
+          await this.refundSponsoredFees(userKeypair, sponsoredLamports);
+        } catch (refundError) {
+          console.error(
+            "Failed to refund sponsored swap fees after Jupiter failure:",
+            refundError
+          );
+        }
+      }
+      throw error;
     }
-
-    // Get Jupiter quote and transaction
-    const jupiterQuote = await this.getJupiterQuote({
-      inputMint: quote.inputMint,
-      outputMint: quote.outputMint,
-      amount: quote.inputAmountRaw,
-      slippageBps,
-    });
-
-    const swapResponse = await this.jupiterClient.getSwapTransaction({
-      userPublicKey: userKeypair.publicKey.toString(),
-      quoteResponse: jupiterQuote,
-    });
-
-    // Execute the Jupiter transaction directly
-    return await this.executeJupiterTransaction(
-      swapResponse.swapTransaction,
-      userKeypair
-    );
   }
 
   async executeCompositePumpFunJupiterSwap(
@@ -1075,10 +1159,11 @@ export class SwapManager {
         quoteResponse: jupiterQuote,
       });
 
-      jupiterSignature = await this.executeJupiterTransaction(
+      const { signature: jupSignature } = await this.executeJupiterTransaction(
         swapResponse.swapTransaction,
         userKeypair
       );
+      jupiterSignature = jupSignature;
 
       console.log(
         `Jupiter leg submitted: ${jupiterSignature} (expected ~${formatAmount(
@@ -1104,10 +1189,11 @@ export class SwapManager {
         quoteResponse: jupiterQuote,
       });
 
-      jupiterSignature = await this.executeJupiterTransaction(
+      const { signature: jupSignature } = await this.executeJupiterTransaction(
         swapResponse.swapTransaction,
         userKeypair
       );
+      jupiterSignature = jupSignature;
       console.log(`Jupiter leg submitted: ${jupiterSignature}`);
       await this.wallet.confirmTransaction(jupiterSignature);
 
@@ -1371,7 +1457,7 @@ export class SwapManager {
   private async executeJupiterTransaction(
     base64Transaction: string,
     userKeypair: Keypair
-  ): Promise<string> {
+  ): Promise<{ signature: string; estimatedFee: number }> {
     try {
       // Decode the base64 transaction so we can refresh the blockhash
       const transactionBuffer = Buffer.from(base64Transaction, "base64");
@@ -1379,6 +1465,11 @@ export class SwapManager {
 
       const latestBlockhash = await this.connection.getLatestBlockhash();
       versionedTx.message.recentBlockhash = latestBlockhash.blockhash;
+
+      const feeEstimateResponse = await this.connection.getFeeForMessage(
+        versionedTx.message
+      );
+      const estimatedFee = feeEstimateResponse?.value ?? 0;
 
       const refreshedBase64 = Buffer.from(
         versionedTx.serialize()
@@ -1391,7 +1482,7 @@ export class SwapManager {
 
       await this.wallet.confirmTransaction(signature);
 
-      return signature;
+      return { signature, estimatedFee };
     } catch (error: any) {
       console.error("Error executing Jupiter transaction:", error);
       throw new Error(
