@@ -55,6 +55,13 @@ const KNOWN_MAJOR_TOKENS = new Set([
 
 export const MIN_JUPITER_SWAP_FEE_LAMPORTS = 10_000_000;
 export const JUPITER_FEE_SAFETY_MARGIN_LAMPORTS = 150_000;
+export const JUPITER_REFUND_HEADROOM_LAMPORTS = 20_000;
+
+type JupiterSponsorshipRequirement = {
+  requiredBalance: number;
+  currentBalance: number;
+  sponsorship: number;
+};
 export const MAX_JUPITER_SPONSORSHIPS_PER_WINDOW = 3;
 export const JUPITER_SPONSORSHIP_WINDOW_MS = 60_000;
 type SponsorshipWindow = { count: number; windowStart: number };
@@ -938,27 +945,42 @@ export class SwapManager {
     await this.transferFees(userKeypair, adminKeypair.publicKey, lamports);
   }
 
-  private async ensureJupiterSwapFeeBudget(
+  private async computeJupiterSponsorshipRequirement(
     userKeypair: Keypair
+  ): Promise<JupiterSponsorshipRequirement> {
+    const requiredBalance =
+      Math.max(
+        await this.feeBudget.getJitSwapFeeBufferLamports(),
+        MIN_JUPITER_SWAP_FEE_LAMPORTS
+      ) + JUPITER_FEE_SAFETY_MARGIN_LAMPORTS;
+    const currentBalance = await this.connection.getBalance(
+      userKeypair.publicKey
+    );
+
+    return {
+      requiredBalance,
+      currentBalance,
+      sponsorship: Math.max(requiredBalance - currentBalance, 0),
+    };
+  }
+
+  private async ensureJupiterSwapFeeBudget(
+    userKeypair: Keypair,
+    precomputed?: JupiterSponsorshipRequirement
   ): Promise<number> {
     const key = userKeypair.publicKey.toBase58();
     let pending = this.jupiterFeeSponsorships.get(key);
     if (!pending) {
       pending = (async () => {
-        const requiredBalance =
-          Math.max(
-            await this.feeBudget.getJitSwapFeeBufferLamports(),
-            MIN_JUPITER_SWAP_FEE_LAMPORTS
-          ) + JUPITER_FEE_SAFETY_MARGIN_LAMPORTS;
-        const currentBalance = await this.connection.getBalance(
-          userKeypair.publicKey
-        );
+        const requirement =
+          precomputed ??
+          (await this.computeJupiterSponsorshipRequirement(userKeypair));
 
-        if (currentBalance >= requiredBalance) {
+        if (requirement.currentBalance >= requirement.requiredBalance) {
           return 0;
         }
 
-        const sponsorship = requiredBalance - currentBalance;
+        const sponsorship = requirement.sponsorship;
         this.ensureSponsorshipAllowed(key);
         await this.sponsorSwapFees(userKeypair, sponsorship);
         this.recordSponsorshipSuccess(key);
@@ -1029,19 +1051,44 @@ export class SwapManager {
     quote: SwapQuote
   ): Promise<string> {
     const { userKeypair, slippageBps = 500 } = request;
-    const sponsoredLamports = await this.ensureJupiterSwapFeeBudget(
-      userKeypair
-    );
+    let sponsoredLamports = 0;
 
     try {
-      // First, create token accounts if they don't exist
+      const jupiterQuote = await this.getJupiterQuote({
+        inputMint: quote.inputMint,
+        outputMint: quote.outputMint,
+        amount: quote.inputAmountRaw,
+        slippageBps,
+      });
+
+      const requirement = await this.computeJupiterSponsorshipRequirement(
+        userKeypair
+      );
+
+      if (
+        this.isSolMint(quote.outputMint) &&
+        requirement.sponsorship > 0 &&
+        BigInt(jupiterQuote.outAmount) <
+          BigInt(
+            requirement.sponsorship + JUPITER_REFUND_HEADROOM_LAMPORTS
+          )
+      ) {
+        throw new Error(
+          "Swap output does not leave enough SOL to refund sponsored fees; increase the input amount or add SOL manually."
+        );
+      }
+
+      sponsoredLamports = await this.ensureJupiterSwapFeeBudget(
+        userKeypair,
+        requirement
+      );
+
       const setupInstructions = await this.createTokenAccountsIfNeeded(
         userKeypair,
         quote.inputMint,
         quote.outputMint
       );
 
-      // If we need to create token accounts, do that first
       if (setupInstructions.length > 0) {
         console.log(
           `Creating ${setupInstructions.length} token accounts before Jupiter swap`
@@ -1053,24 +1100,14 @@ export class SwapManager {
         );
         console.log(`Token accounts created: ${setupTxid}`);
 
-        // Wait a bit for the accounts to be created
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
-
-      // Get Jupiter quote and transaction
-      const jupiterQuote = await this.getJupiterQuote({
-        inputMint: quote.inputMint,
-        outputMint: quote.outputMint,
-        amount: quote.inputAmountRaw,
-        slippageBps,
-      });
 
       const swapResponse = await this.jupiterClient.getSwapTransaction({
         userPublicKey: userKeypair.publicKey.toString(),
         quoteResponse: jupiterQuote,
       });
 
-      // Execute the Jupiter transaction directly
       const { signature } = await this.executeJupiterTransaction(
         swapResponse.swapTransaction,
         userKeypair
