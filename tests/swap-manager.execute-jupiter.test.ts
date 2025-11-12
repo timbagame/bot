@@ -4,13 +4,14 @@ import { MIN_JUPITER_SWAP_FEE_LAMPORTS, JUPITER_FEE_SAFETY_MARGIN_LAMPORTS, Swap
 import { WalletManager } from "../src/utils/wallet";
 import type { FeeBudgetProvider } from "../src/utils/fee-budget";
 
-const disabledFetch = globalThis.fetch;
 const fakeFetch = async () => ({
   ok: true,
   status: 200,
   statusText: "OK",
   json: async () => ({}),
 });
+
+globalThis.fetch = fakeFetch as unknown as typeof fetch;
 
 const fakeBlockhashResult = {
   blockhash: "11111111111111111111111111111111",
@@ -20,16 +21,28 @@ const fakeBlockhashResult = {
 (Connection.prototype as any).getLatestBlockhash = async function () {
   return fakeBlockhashResult;
 };
+
+(Connection.prototype as any).getLatestBlockhashAndContext = async function () {
+  return { value: fakeBlockhashResult, context: { slot: 1 } };
+};
+
+const stubBalanceSequence = (connection: Connection, sequence: number[]) => {
+  let idx = 0;
+  (connection as any).getBalance = async () => {
+    const value =
+      idx < sequence.length ? sequence[idx] : sequence[sequence.length - 1];
+    idx = Math.min(idx + 1, sequence.length);
+    return value;
+  };
+};
 describe("SwapManager.executeJupiterSwap", () => {
   let origNet: string | undefined;
   beforeEach(() => {
     origNet = process.env.SOLANA_NETWORK;
     process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
-    globalThis.fetch = fakeFetch as typeof fetch;
   });
   afterEach(() => {
     process.env.SOLANA_NETWORK = origNet || process.env.SOLANA_NETWORK!;
-    globalThis.fetch = disabledFetch;
   });
 
 const createFeeBudgetStub = (): FeeBudgetProvider => ({
@@ -47,6 +60,7 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
 
   test("executes serialized Jupiter transaction and returns signature", async () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
+    stubBalanceSequence(connection, [0, 200_000]);
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
       { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
@@ -55,11 +69,6 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
 
     // Avoid network and account creation
     (sm as any).createTokenAccountsIfNeeded = async () => [];
-    let balanceCalls = 0;
-    (sm as any).connection.getBalance = async () => {
-      balanceCalls++;
-      return balanceCalls === 1 ? 0 : 200_000;
-    };
     (sm as any).sponsorSwapFees = async () => {};
     (sm as any).refundSponsoredFees = async () => {};
     // Stub Jupiter swap endpoint response
@@ -198,7 +207,8 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
     const sm = new SwapManager(connection, wallet, createFeeBudgetStub());
 
     (sm as any).createTokenAccountsIfNeeded = async () => [];
-    (sm as any).connection.getBalance = async () => 0;
+    const sponsoredAmount = 100_000;
+    (sm as any).ensureJupiterSwapFeeBudget = async () => sponsoredAmount;
     const user = Keypair.generate();
     const req = {
       inputMint: "So11111111111111111111111111111111111111112",
@@ -249,7 +259,7 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
 
     const signature = await sm.executeJupiterSwap(req, quote);
     expect(signature).toBe("SIG_JUP_FEE");
-    expect(refundedAmount).toBe(100_000);
+    expect(refundedAmount).toBe(sponsoredAmount);
   });
 
   test("retries sponsorship after balance lookup fails", async () => {
@@ -281,7 +291,7 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
     expect(sponsorCount).toBe(1);
   });
 
-  test("caps refund to available balance", async () => {
+  test("logs and continues when refund fails after swap", async () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
@@ -290,12 +300,8 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
     const sm = new SwapManager(connection, wallet, createFeeBudgetStub());
 
     (sm as any).createTokenAccountsIfNeeded = async () => [];
-    let balanceCalls = 0;
-    (sm as any).connection.getBalance = async () => {
-      balanceCalls++;
-      return balanceCalls === 1 ? 0 : 25_000;
-    };
-    (sm as any).ensureJupiterSwapFeeBudget = async () => 100_000;
+    const sponsoredAmount = 100_000;
+    (sm as any).ensureJupiterSwapFeeBudget = async () => sponsoredAmount;
     (sm as any).executeJupiterTransaction = async () => ({
       signature: "SIG_JUP_FEE",
       estimatedFee: 90_000,
@@ -315,9 +321,10 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
       swapTransaction: Buffer.from("fake").toString("base64"),
     });
 
-    let refundedAmount = 0;
-    (sm as any).refundSponsoredFees = async (_kp: Keypair, lamports: number) => {
-      refundedAmount = lamports;
+    let refundCalls = 0;
+    (sm as any).refundSponsoredFees = async (_kp: Keypair, _lamports: number) => {
+      refundCalls += 1;
+      throw new Error("insufficient funds to refund");
     };
 
     const user = Keypair.generate();
@@ -343,7 +350,8 @@ const createFeeBudgetStub = (): FeeBudgetProvider => ({
       provider: "jupiter" as const,
     };
 
-    await sm.executeJupiterSwap(req, quote);
-    expect(refundedAmount).toBe(25_000);
+    const signature = await sm.executeJupiterSwap(req, quote);
+    expect(signature).toBe("SIG_JUP_FEE");
+    expect(refundCalls).toBe(1);
   });
 });

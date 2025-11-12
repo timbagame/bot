@@ -1017,14 +1017,7 @@ export class SwapManager {
 
       if (sponsoredLamports > 0) {
         try {
-          const balanceAfterSwap = await this.connection.getBalance(
-            userKeypair.publicKey
-          );
-          const refundAmount = Math.min(sponsoredLamports, balanceAfterSwap);
-
-          if (refundAmount > 0) {
-            await this.refundSponsoredFees(userKeypair, refundAmount);
-          }
+          await this.refundSponsoredFees(userKeypair, sponsoredLamports);
         } catch (error) {
           console.error("Failed to refund sponsored swap fees:", error);
         }
