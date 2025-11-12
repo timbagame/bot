@@ -413,7 +413,7 @@ export class SwapManager {
 
     const targetLamports = Math.max(desiredLamports ?? 0, minimumSolBuffer);
 
-    let sponsoredLamportsOutstanding = 0;
+    let lentLamportsOutstanding = 0;
     let lastJupiterError: string | null = null;
     let lastUnwrapError: string | null = null;
 
@@ -483,19 +483,19 @@ export class SwapManager {
             lamportsReceived: target,
           };
         } catch (attemptError: any) {
-          if (sponsoredLamportsOutstanding > 0) {
+          if (lentLamportsOutstanding > 0) {
             try {
-              await this.refundSponsoredFees(
+              await this.refundLentFees(
                 userKeypair,
-                sponsoredLamportsOutstanding
+                lentLamportsOutstanding
               );
             } catch (refundError) {
               console.error(
-                "Failed to refund sponsored swap fees after Jupiter attempt:",
+                "Failed to refund lent swap fees after Jupiter attempt:",
                 refundError
               );
             } finally {
-              sponsoredLamportsOutstanding = 0;
+              lentLamportsOutstanding = 0;
             }
           }
 
@@ -529,10 +529,10 @@ export class SwapManager {
         }
 
         try {
-          const sponsorLamports = Math.max(jitFeeBuffer - currentLamports, 0);
-          if (sponsorLamports > 0) {
-            await this.sponsorSwapFees(userKeypair, sponsorLamports);
-            sponsoredLamportsOutstanding += sponsorLamports;
+          const lendingLamports = Math.max(jitFeeBuffer - currentLamports, 0);
+          if (lendingLamports > 0) {
+            await this.lendSwapFees(userKeypair, lendingLamports);
+            lentLamportsOutstanding += lendingLamports;
           }
 
           const { signature, lamportsReceived } = await this.unwrapWsolPortion({
@@ -541,12 +541,12 @@ export class SwapManager {
             logContext,
           });
 
-          if (sponsoredLamportsOutstanding > 0) {
-            await this.refundSponsoredFees(
+          if (lentLamportsOutstanding > 0) {
+            await this.refundLentFees(
               userKeypair,
-              sponsoredLamportsOutstanding
+              lentLamportsOutstanding
             );
-            sponsoredLamportsOutstanding = 0;
+            lentLamportsOutstanding = 0;
           }
 
           lastUnwrapError = null;
@@ -557,19 +557,19 @@ export class SwapManager {
             lamportsReceived,
           };
         } catch (attemptError: any) {
-          if (sponsoredLamportsOutstanding > 0) {
+          if (lentLamportsOutstanding > 0) {
             try {
-              await this.refundSponsoredFees(
+              await this.refundLentFees(
                 userKeypair,
-                sponsoredLamportsOutstanding
+                lentLamportsOutstanding
               );
             } catch (refundError) {
               console.error(
-                "Failed to refund sponsored fees after WSOL unwrap attempt:",
+                "Failed to refund lent fees after WSOL unwrap attempt:",
                 refundError
               );
             } finally {
-              sponsoredLamportsOutstanding = 0;
+              lentLamportsOutstanding = 0;
             }
           }
 
@@ -775,20 +775,17 @@ export class SwapManager {
         lamportsReceived: selectedQuote.lamportsOut,
       };
     } catch (error: any) {
-      if (sponsoredLamportsOutstanding > 0) {
+      if (lentLamportsOutstanding > 0) {
         try {
-          await this.refundSponsoredFees(
-            userKeypair,
-            sponsoredLamportsOutstanding
-          );
+          await this.refundLentFees(userKeypair, lentLamportsOutstanding);
         } catch (refundError) {
-          console.error("Failed to refund sponsored swap fees:", refundError);
+          console.error("Failed to refund lent swap fees:", refundError);
         }
       }
       console.error("Just-in-time SOL swap failed:", error);
       return {
         swapped: false,
-        error: error.message || "Failed to perform SOL sponsorship swap",
+        error: error.message || "Failed to perform SOL lending swap",
       };
     }
   }
@@ -867,7 +864,7 @@ export class SwapManager {
     });
   }
 
-  private async sponsorSwapFees(
+  private async lendSwapFees(
     userKeypair: Keypair,
     lamports: number
   ): Promise<void> {
@@ -875,7 +872,7 @@ export class SwapManager {
     await this.transferFees(adminKeypair, userKeypair.publicKey, lamports);
   }
 
-  private async refundSponsoredFees(
+  private async refundLentFees(
     userKeypair: Keypair,
     lamports: number
   ): Promise<void> {
