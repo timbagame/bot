@@ -162,7 +162,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     expect(sponsoredAmount).toBeGreaterThan(0);
   });
 
-  test("warns when estimated fee exceeds sponsorship", async () => {
+  test("refunds entire sponsorship after swap", async () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
@@ -216,27 +216,13 @@ describe("SwapManager.executeJupiterSwap", () => {
       swapTransaction: Buffer.from("fake").toString("base64"),
     });
 
-    let refundCalled = false;
-    (sm as any).refundSponsoredFees = async () => {
-      refundCalled = true;
+    let refundedAmount = 0;
+    (sm as any).refundSponsoredFees = async (_kp: Keypair, lamports: number) => {
+      refundedAmount = lamports;
     };
 
-    const logs: string[] = [];
-    const originalWarn = console.warn;
-    console.warn = (...args: unknown[]) => {
-      logs.push(args.map(String).join(" "));
-    };
-
-    try {
-      const signature = await sm.executeJupiterSwap(req, quote);
-      expect(signature).toBe("SIG_JUP_FEE");
-    } finally {
-      console.warn = originalWarn;
-    }
-
-    expect(refundCalled).toBe(false);
-    expect(logs.some((entry) => entry.includes("exceeds sponsored buffer"))).toBe(
-      true
-    );
+    const signature = await sm.executeJupiterSwap(req, quote);
+    expect(signature).toBe("SIG_JUP_FEE");
+    expect(refundedAmount).toBe(100_000);
   });
 });

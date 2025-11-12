@@ -918,30 +918,6 @@ export class SwapManager {
     }
   }
 
-  private async refundSponsoredSwapFees(
-    userKeypair: Keypair,
-    sponsoredLamports: number,
-    estimatedFee: number
-  ): Promise<void> {
-    if (sponsoredLamports <= 0) {
-      return;
-    }
-
-    const refundAmount = Math.max(sponsoredLamports - estimatedFee, 0);
-    if (refundAmount <= 0) {
-      console.warn(
-        `Estimated Jupiter fee (${estimatedFee}) exceeds sponsored buffer (${sponsoredLamports}); no refund issued.`
-      );
-      return;
-    }
-
-    try {
-      await this.refundSponsoredFees(userKeypair, refundAmount);
-    } catch (error) {
-      console.error("Failed to refund sponsored swap fees:", error);
-    }
-  }
-
   /**
    * Create swap transaction instructions
    */
@@ -1034,16 +1010,18 @@ export class SwapManager {
       });
 
       // Execute the Jupiter transaction directly
-      const { signature, estimatedFee } = await this.executeJupiterTransaction(
+      const { signature } = await this.executeJupiterTransaction(
         swapResponse.swapTransaction,
         userKeypair
       );
 
-      await this.refundSponsoredSwapFees(
-        userKeypair,
-        sponsoredLamports,
-        estimatedFee
-      );
+      if (sponsoredLamports > 0) {
+        try {
+          await this.refundSponsoredFees(userKeypair, sponsoredLamports);
+        } catch (error) {
+          console.error("Failed to refund sponsored swap fees:", error);
+        }
+      }
 
       return signature;
     } catch (error) {
