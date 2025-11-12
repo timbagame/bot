@@ -26,7 +26,6 @@ import {
   getTelegramId,
   handleCallbackErrorSafe,
   safeAnswerCallbackQuery,
-  sendPrivateMessage,
   containsBalanceInfo,
 } from "../utils/context-helpers";
 import { formatTokenDisplay, formatUsdValue } from "../utils/format-amount";
@@ -624,36 +623,17 @@ export const createGameCallbacksModule = (
       }
 
       if (amount > userSession.userBalance) {
-        const balanceText = `❌ Amount too high. Your balance is ${userSession.userBalance.toFixed(
-          2
-        )} ${tokenTicker}. Please try again.`;
-        const groupText =
-          "❌ Amount too high. I sent your balance privately—please try again with a lower amount.";
-        const isPrivate = ctx.chat?.type === "private";
-
-        if (!isPrivate) {
-          const telegramId = await getRequiredTelegramIdForContext(
-            ctx,
-            "amount input"
-          );
-          if (telegramId != null) {
-            await sendPrivateMessage(ctx, telegramId, {
-              text: balanceText,
-              parseMode: "HTML",
-            });
-          }
-        }
-
-        const messageToShow = isPrivate ? balanceText : groupText;
+        const errorMessage =
+          "❌ Amount too high. Please try a lower amount.";
         try {
           await ctx.api.editMessageText(
             userSession.chatId!,
             userSession.messageId!,
-            messageToShow,
+            errorMessage,
             { parse_mode: "HTML" }
           );
         } catch (error) {
-          await ctx.reply(messageToShow, { parse_mode: "HTML" });
+          await ctx.reply(errorMessage, { parse_mode: "HTML" });
         }
         restoreSession({ waitingFor: "amount_input" });
         return;
@@ -1051,26 +1031,10 @@ export const createGameCallbacksModule = (
                 } as const;
 
                 const rawError = result.error || "Failed to create game";
-                let displayText = `❌ ${rawError}`;
-                const isPrivate = ctx.chat?.type === "private";
                 const hasBalanceInfo = containsBalanceInfo(rawError);
-
-                if (!isPrivate && hasBalanceInfo && callerTelegramId !== 0n) {
-                  const dmSent = await sendPrivateMessage(
-                    ctx,
-                    callerTelegramId,
-                    {
-                      text: displayText,
-                      parseMode: "HTML",
-                    }
-                  );
-                  displayText = dmSent
-                    ? "❌ Game creation failed (insufficient funds). Check your private chat for details."
-                    : "❌ Game creation failed. Start a private chat with the bot to see more details.";
-                } else if (!isPrivate && hasBalanceInfo) {
-                  displayText =
-                    "❌ Game creation failed. Start a private chat with the bot to see more details.";
-                }
+                const displayText = hasBalanceInfo
+                  ? "❌ Game creation failed (insufficient funds). Please add more funds and try again."
+                  : `❌ ${rawError}`;
 
                 await respondWithMenu(
                   ctx,

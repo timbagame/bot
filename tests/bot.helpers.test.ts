@@ -63,51 +63,66 @@ const originalEnv = {
   SOLANA_NETWORK: process.env.SOLANA_NETWORK,
 };
 
+const applyTestEnv = () => {
+  process.env.NODE_ENV = "test";
+  process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "test-token";
+  process.env.MNEMONIC =
+    process.env.MNEMONIC ||
+    "test test test test test test test test test test test junk";
+  process.env.SOLANA_NETWORK =
+    process.env.SOLANA_NETWORK || "http://localhost:8899";
+};
+
+const revertTestEnv = () => {
+  if (originalEnv.NODE_ENV === undefined) {
+    Reflect.deleteProperty(process.env, "NODE_ENV");
+  } else {
+    process.env.NODE_ENV = originalEnv.NODE_ENV;
+  }
+
+  if (originalEnv.TELEGRAM_TOKEN === undefined) {
+    Reflect.deleteProperty(process.env, "TELEGRAM_TOKEN");
+  } else {
+    process.env.TELEGRAM_TOKEN = originalEnv.TELEGRAM_TOKEN;
+  }
+
+  if (originalEnv.MNEMONIC === undefined) {
+    Reflect.deleteProperty(process.env, "MNEMONIC");
+  } else {
+    process.env.MNEMONIC = originalEnv.MNEMONIC;
+  }
+
+  if (originalEnv.SOLANA_NETWORK === undefined) {
+    Reflect.deleteProperty(process.env, "SOLANA_NETWORK");
+  } else {
+    process.env.SOLANA_NETWORK = originalEnv.SOLANA_NETWORK;
+  }
+};
+
+const ensureBotModuleLoaded = async () => {
+  if (botModule) {
+    return;
+  }
+  applyTestEnv();
+  botModule = await import("../src/bot");
+  (botModule.bot as any).botInfo = {
+    id: 0,
+    is_bot: true,
+    first_name: "test-bot",
+    username: "test_bot",
+    can_join_groups: true,
+    can_read_all_group_messages: false,
+    supports_inline_queries: false,
+  };
+};
+
 describe("Bot helper utilities", () => {
   beforeAll(async () => {
-    process.env.NODE_ENV = "test";
-    process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "test-token";
-    process.env.MNEMONIC =
-      process.env.MNEMONIC || "test test test test test test test test test test test junk";
-    process.env.SOLANA_NETWORK = process.env.SOLANA_NETWORK || "http://localhost:8899";
-
-    botModule = await import("../src/bot");
-
-    (botModule.bot as any).botInfo = {
-      id: 0,
-      is_bot: true,
-      first_name: "test-bot",
-      username: "test_bot",
-      can_join_groups: true,
-      can_read_all_group_messages: false,
-      supports_inline_queries: false,
-    };
+    await ensureBotModuleLoaded();
   });
 
   afterAll(() => {
-    if (originalEnv.NODE_ENV === undefined) {
-      Reflect.deleteProperty(process.env, "NODE_ENV");
-    } else {
-      process.env.NODE_ENV = originalEnv.NODE_ENV;
-    }
-
-    if (originalEnv.TELEGRAM_TOKEN === undefined) {
-      Reflect.deleteProperty(process.env, "TELEGRAM_TOKEN");
-    } else {
-      process.env.TELEGRAM_TOKEN = originalEnv.TELEGRAM_TOKEN;
-    }
-
-    if (originalEnv.MNEMONIC === undefined) {
-      Reflect.deleteProperty(process.env, "MNEMONIC");
-    } else {
-      process.env.MNEMONIC = originalEnv.MNEMONIC;
-    }
-
-    if (originalEnv.SOLANA_NETWORK === undefined) {
-      Reflect.deleteProperty(process.env, "SOLANA_NETWORK");
-    } else {
-      process.env.SOLANA_NETWORK = originalEnv.SOLANA_NETWORK;
-    }
+    revertTestEnv();
   });
 
   const expectTradeSummaryBasics = (
@@ -602,6 +617,13 @@ describe("Bot helper utilities", () => {
 });
 
 describe("createGameViaCommand helper", () => {
+  beforeAll(async () => {
+    await ensureBotModuleLoaded();
+  });
+
+  afterAll(() => {
+    revertTestEnv();
+  });
   const coinflipOptions: CreateGameViaCommandOptions = {
     gameType: "coinflip",
     usageMessage:
@@ -818,7 +840,7 @@ describe("createGameViaCommand helper", () => {
 
     expect(ctx.__calls.length).toBe(1);
     const response = String(ctx.__calls[0]);
-    expect(response).toContain("Failed to create game");
+    expect(response).toContain("Active game limit reached");
     expect(response).toContain("limit reached");
     expect(response).toContain(String(MAX_ACTIVE_GAMES_PER_CREATOR));
   });
@@ -847,7 +869,7 @@ describe("createGameViaCommand helper", () => {
 
     expect(ctx.__calls.length).toBe(1);
     const response = String(ctx.__calls[0]);
-    expect(response).toContain("Failed to create game");
+    expect(response).toContain("Game creation rate limit reached");
     expect(response.toLowerCase()).toContain("rate limit");
     expect(response).toContain(String(MAX_GAMES_PER_CREATOR_WINDOW));
     expect(response).toContain("Please wait");
@@ -1018,8 +1040,8 @@ describe("createGameViaCommand helper", () => {
     expect(ctx.__calls.length).toBe(1);
     const response = String(ctx.__calls[0]);
     expect(response).toContain("Not enough SOL or wrapped SOL");
-    expect(response).toContain("You have 0.000200 SOL plus 0.000100 wrapped SOL");
-    expect(response).toContain("but the game needs 0.0005 SOL");
+    expect(response).not.toContain("You have");
+    expect(response).not.toContain("but the game needs");
     expect(response).toContain("Add more SOL or wrapped SOL and try again.");
   });
 
@@ -1061,8 +1083,7 @@ describe("createGameViaCommand helper", () => {
     expect(ctx.__calls.length).toBe(1);
     const response = String(ctx.__calls[0]);
     expect(response).toContain("Not enough SOL or wrapped SOL");
-    expect(response).toContain("You have 0.000200 SOL plus 0.000150 wrapped SOL");
-    expect(response).toContain("but the game needs 0.0006 WSOL");
     expect(response).toContain("Add more SOL or wrapped SOL and try again.");
+    expect(response).not.toContain("You have");
   });
 });

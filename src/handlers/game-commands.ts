@@ -5,10 +5,7 @@ import type { GameManager } from "../utils/game";
 import type { ParseAmountResult } from "../types";
 import type { CoinflipDeps, GameTokenOverride } from "./game";
 import type { GameSetupCopy } from "./game-setup";
-import {
-  sendPrivateMessage,
-  containsBalanceInfo,
-} from "../utils/context-helpers";
+import { containsBalanceInfo } from "../utils/context-helpers";
 
 export type CreateGameViaCommandOptions = {
   gameType: "coinflip" | "giveaway";
@@ -78,32 +75,6 @@ export type GameCommandsModuleDeps = {
     label: string
   ) => Promise<bigint | null>;
   gameSetupCopy: Record<"coinflip" | "giveaway", GameSetupCopy>;
-};
-
-const sendBalanceAwareReply = async (
-  ctx: Context,
-  telegramId: bigint,
-  privateText: string,
-  sanitizedText: string,
-  fallbackText: string
-): Promise<void> => {
-  if (ctx.chat?.type === "private") {
-    await ctx.reply(privateText);
-    return;
-  }
-
-  if (telegramId === 0n) {
-    await ctx.reply(fallbackText);
-    return;
-  }
-
-  const dmSent = await sendPrivateMessage(ctx, telegramId, {
-    text: privateText,
-    parseMode: "HTML",
-  });
-
-  const textToShow = dmSent ? sanitizedText : fallbackText;
-  await ctx.reply(textToShow);
 };
 
 export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
@@ -231,46 +202,22 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
       }
 
       if (!needsNativeSolCheck && userBalance < parsedAmount.amount) {
-        const formatted = createDeps.wallet.formatTokenBalance(
-          userBalance,
-          tokenMetadata.decimals
-        );
-        const privateText = `❌ Not enough ${parsedAmount.tokenTicker}. You have ${formatted} but need ${parsedAmount.formattedAmount}. Add more tokens or try a smaller amount.`;
-        const sanitizedText = `❌ Not enough ${parsedAmount.tokenTicker}. I sent your balance privately—please adjust the amount.`;
-        const fallbackText = `❌ Not enough ${parsedAmount.tokenTicker}. Please start a private chat with the bot to view your balance.`;
-        await sendBalanceAwareReply(
-          ctx,
-          telegramId,
-          privateText,
-          sanitizedText,
-          fallbackText
-        );
+        const shortageMessage =
+          `❌ Not enough ${parsedAmount.tokenTicker}. Add more ${parsedAmount.tokenTicker} or try a smaller amount.`;
+        await ctx.reply(shortageMessage, { parse_mode: "HTML" });
         return;
       }
 
       if (needsNativeSolCheck) {
         const totalLamports = userBalance + nativeSolBalance;
         if (totalLamports < parsedAmount.amount) {
-          const formattedSol =
-            createDeps.wallet.formatSolBalance(nativeSolBalance);
-          const formattedToken = createDeps.wallet.formatTokenBalance(
-            userBalance,
-            tokenMetadata.decimals
-          );
           const wrappedLabel =
             parsedAmount.tokenMint === WSOL_MINT
               ? "wrapped SOL"
               : parsedAmount.tokenTicker;
-          const privateText = `❌ Not enough SOL or ${wrappedLabel}. You have ${formattedSol} SOL plus ${formattedToken} ${wrappedLabel}, but the game needs ${parsedAmount.formattedAmount}. Add more SOL or ${wrappedLabel} and try again.`;
-          const sanitizedText = `❌ Not enough SOL or ${wrappedLabel}. I sent your balance privately—please adjust your balance and try again.`;
-          const fallbackText = `❌ Not enough SOL or ${wrappedLabel}. Please start a private chat with the bot so I can share your balance.`;
-          await sendBalanceAwareReply(
-            ctx,
-            telegramId,
-            privateText,
-            sanitizedText,
-            fallbackText
-          );
+          const shortageMessage =
+            `❌ Not enough SOL or ${wrappedLabel}. Add more SOL or ${wrappedLabel} and try again.`;
+          await ctx.reply(shortageMessage, { parse_mode: "HTML" });
           return;
         }
       }
@@ -302,23 +249,11 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
 
       if (!gameResult.success) {
         const finalError = gameResult.error ?? "Failed to create game";
-        const privateText = `❌ Failed to create game: ${finalError}`;
         const hasBalanceInfo = containsBalanceInfo(finalError);
-        if (hasBalanceInfo) {
-          const sanitizedText =
-            "❌ Failed to create game: insufficient funds. Check your DM for details.";
-          const fallbackText =
-            "❌ Failed to create game. Start a private chat with the bot to see more info.";
-          await sendBalanceAwareReply(
-            ctx,
-            telegramId,
-            privateText,
-            sanitizedText,
-            fallbackText
-          );
-        } else {
-          await ctx.reply(privateText, { parse_mode: "HTML" });
-        }
+        const displayText = hasBalanceInfo
+          ? "❌ Failed to create game: insufficient funds. Please add more funds and try again."
+          : `❌ ${finalError}`;
+        await ctx.reply(displayText, { parse_mode: "HTML" });
         return;
       }
 
