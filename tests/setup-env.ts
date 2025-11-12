@@ -56,5 +56,7 @@ const disabledFetch = Object.assign(
   }
 ) as typeof fetch;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(globalThis as any).fetch = disabledFetch;
+if (!process.env["TEST_ALLOW_NETWORK"]) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (globalThis as any).fetch = disabledFetch;
+}

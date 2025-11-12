@@ -4,12 +4,35 @@ import { MIN_JUPITER_SWAP_FEE_LAMPORTS, JUPITER_FEE_SAFETY_MARGIN_LAMPORTS, Swap
 import { WalletManager } from "../src/utils/wallet";
 import type { FeeBudgetProvider } from "../src/utils/fee-budget";
 
+const disabledFetch = globalThis.fetch;
+const fakeFetch = async () => ({
+  ok: true,
+  status: 200,
+  statusText: "OK",
+  json: async () => ({}),
+});
+
+const fakeBlockhashResult = {
+  blockhash: "11111111111111111111111111111111",
+  lastValidBlockHeight: 1,
+};
+
+(Connection.prototype as any).getLatestBlockhash = async function () {
+  return fakeBlockhashResult;
+};
 describe("SwapManager.executeJupiterSwap", () => {
   let origNet: string | undefined;
-  beforeEach(() => { origNet = process.env.SOLANA_NETWORK; process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com"; });
-  afterEach(() => { process.env.SOLANA_NETWORK = origNet || process.env.SOLANA_NETWORK!; });
+  beforeEach(() => {
+    origNet = process.env.SOLANA_NETWORK;
+    process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
+    globalThis.fetch = fakeFetch as typeof fetch;
+  });
+  afterEach(() => {
+    process.env.SOLANA_NETWORK = origNet || process.env.SOLANA_NETWORK!;
+    globalThis.fetch = disabledFetch;
+  });
 
-  const createFeeBudgetStub = (): FeeBudgetProvider => ({
+const createFeeBudgetStub = (): FeeBudgetProvider => ({
     getSingleTransactionLamports: async () => 0,
     getWrapFeeBufferLamports: async () => 0,
     getJitSwapFeeBufferLamports: async () => 0,
@@ -32,7 +55,11 @@ describe("SwapManager.executeJupiterSwap", () => {
 
     // Avoid network and account creation
     (sm as any).createTokenAccountsIfNeeded = async () => [];
-    (sm as any).connection.getBalance = async () => 0;
+    let balanceCalls = 0;
+    (sm as any).connection.getBalance = async () => {
+      balanceCalls++;
+      return balanceCalls === 1 ? 0 : 200_000;
+    };
     (sm as any).sponsorSwapFees = async () => {};
     (sm as any).refundSponsoredFees = async () => {};
     // Stub Jupiter swap endpoint response
@@ -172,7 +199,6 @@ describe("SwapManager.executeJupiterSwap", () => {
 
     (sm as any).createTokenAccountsIfNeeded = async () => [];
     (sm as any).connection.getBalance = async () => 0;
-    (sm as any).ensureJupiterSwapFeeBudget = async () => 100_000;
     const user = Keypair.generate();
     const req = {
       inputMint: "So11111111111111111111111111111111111111112",
@@ -224,5 +250,100 @@ describe("SwapManager.executeJupiterSwap", () => {
     const signature = await sm.executeJupiterSwap(req, quote);
     expect(signature).toBe("SIG_JUP_FEE");
     expect(refundedAmount).toBe(100_000);
+  });
+
+  test("retries sponsorship after balance lookup fails", async () => {
+    const connection = new Connection("http://localhost:8899", "confirmed");
+    const wallet = WalletManager.createForTest(
+      "test walk nut penalty hip pave soap entry language right filter choice",
+      { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    );
+    const sm = new SwapManager(connection, wallet, createFeeBudgetStub());
+
+    let firstAttempt = true;
+    (sm as any).connection.getBalance = async () => {
+      if (firstAttempt) {
+        firstAttempt = false;
+        throw new Error("rpc fail");
+      }
+      return 0;
+    };
+    let sponsorCount = 0;
+    (sm as any).sponsorSwapFees = async () => {
+      sponsorCount++;
+    };
+
+    const user = Keypair.generate();
+    await expect(
+      (sm as any).ensureJupiterSwapFeeBudget(user)
+    ).rejects.toThrow("rpc fail");
+    await (sm as any).ensureJupiterSwapFeeBudget(user);
+    expect(sponsorCount).toBe(1);
+  });
+
+  test("caps refund to available balance", async () => {
+    const connection = new Connection("http://localhost:8899", "confirmed");
+    const wallet = WalletManager.createForTest(
+      "test walk nut penalty hip pave soap entry language right filter choice",
+      { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    );
+    const sm = new SwapManager(connection, wallet, createFeeBudgetStub());
+
+    (sm as any).createTokenAccountsIfNeeded = async () => [];
+    let balanceCalls = 0;
+    (sm as any).connection.getBalance = async () => {
+      balanceCalls++;
+      return balanceCalls === 1 ? 0 : 25_000;
+    };
+    (sm as any).ensureJupiterSwapFeeBudget = async () => 100_000;
+    (sm as any).executeJupiterTransaction = async () => ({
+      signature: "SIG_JUP_FEE",
+      estimatedFee: 90_000,
+    });
+    (sm as any).jupiterClient.getQuote = async () => ({
+      inputMint: "Input",
+      outputMint: "Output",
+      inAmount: "0",
+      outAmount: "0",
+      otherAmountThreshold: "0",
+      swapMode: "ExactIn",
+      slippageBps: 100,
+      priceImpactPct: "0",
+      routePlan: [],
+    });
+    (sm as any).jupiterClient.getSwapTransaction = async () => ({
+      swapTransaction: Buffer.from("fake").toString("base64"),
+    });
+
+    let refundedAmount = 0;
+    (sm as any).refundSponsoredFees = async (_kp: Keypair, lamports: number) => {
+      refundedAmount = lamports;
+    };
+
+    const user = Keypair.generate();
+    const req = {
+      inputMint: "A",
+      outputMint: "B",
+      amount: "0",
+      userKeypair: user,
+      inputDecimals: 6,
+      outputDecimals: 6,
+      inputTicker: "TOKEN",
+      outputTicker: "SOL",
+    } as const;
+
+    const quote = {
+      inputMint: req.inputMint,
+      outputMint: req.outputMint,
+      inputAmount: req.amount,
+      inputAmountRaw: req.amount,
+      outputAmount: "0",
+      estimatedRate: 0,
+      slippage: 1,
+      provider: "jupiter" as const,
+    };
+
+    await sm.executeJupiterSwap(req, quote);
+    expect(refundedAmount).toBe(25_000);
   });
 });
