@@ -470,4 +470,11 @@ describe("SwapManager pump.fun amount normalization", () => {
     }
     expect(amount as string).toBe("1000000");
   });
+
+  test("normalizePumpFunAmount preserves high-precision decimals", () => {
+    const highPrecision = "123456789012345678901234"; // 24 digits
+    const result = normalizePumpFunAmount(highPrecision, 24);
+    expect(result.probablyRawAmount).toBe(true);
+    expect(result.decimalAmount).toBe("0.123456789012345678901234");
+  });
 });

@@ -7,7 +7,10 @@ const walletStub = {
 
 describe("errors extras", () => {
   test("lamports error with wallet shows detailed balances", () => {
-    const msg = parseTransactionError(new Error("insufficient lamports 100, need 200"), walletStub);
+    const msg = parseTransactionError(
+      new Error("insufficient lamports 100, need 200"),
+      walletStub
+    );
     expect(msg).toContain("Not enough SOL to complete this");
     expect(msg).toContain("The action needs enough SOL for rent and fees");
     expect(msg).toContain("You need about");
@@ -25,29 +28,39 @@ describe("errors extras", () => {
   });
 
   test("simulation failure maps to fee guidance", () => {
-    const msg = parseTransactionError(new Error("simulation failed: custom program error: 0x1"));
+    const msg = parseTransactionError(
+      new Error("simulation failed: custom program error: 0x1")
+    );
     expect(msg).toContain("Transaction failed");
     expect(msg).toContain("network couldn't process");
   });
 
   test("quote unavailable maps to friendly retry guidance", () => {
-    const msg = parseTransactionError(new Error("Jupiter quote failed: quote failed"));
+    const msg = parseTransactionError(
+      new Error("Jupiter quote failed: quote failed")
+    );
     expect(msg).toContain("Quote unavailable.");
   });
 
   test("token not tradable surfaces actionable message", () => {
-    const msg = parseTransactionError(new Error("token_not_tradable on Jupiter"));
+    const msg = parseTransactionError(
+      new Error("token_not_tradable on Jupiter")
+    );
     expect(msg).toContain("Token not tradable.");
     expect(msg).toContain("Jupiter can't swap this token yet.");
   });
 
   test("same token swap error explains restriction", () => {
-    const msg = parseTransactionError(new Error("Jupiter: input and output mints are not allowed to be equal"));
+    const msg = parseTransactionError(
+      new Error("Jupiter: input and output mints are not allowed to be equal")
+    );
     expect(msg).toContain("Cannot swap the same token.");
   });
 
   test("percentage rounding guidance highlights fee buffer", () => {
-    const msg = parseTransactionError(new Error("Percentage results in zero amount"));
+    const msg = parseTransactionError(
+      new Error("Percentage results in zero amount")
+    );
     expect(msg).toContain("Amount too small.");
     expect(msg).toContain("Try a larger percentage or type a custom amount.");
   });
