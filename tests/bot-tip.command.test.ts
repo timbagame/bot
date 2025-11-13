@@ -201,3 +201,119 @@ test("handleTipCommand positions amount after multi-word text mention", async ()
   expect(replies).toHaveLength(1);
   expect(replies[0]).toContain("Please provide a valid amount greater than 0.");
 });
+
+test("handleTipCommand reports shortage using the specified token ticker", async () => {
+  const tokenManager = botModule.__test_getTokenManager();
+  tokenManager.parseAmount = async (
+    _args: string[],
+    _index: number,
+    _chatId: number | undefined,
+    _context: "game" | "tip" = "game"
+  ) => {
+    return {
+      success: true,
+      data: {
+        amount: 10,
+        isSol: false,
+        formattedAmount: "10 GLORP",
+        tokenMint: "GLORP_MINT",
+        tokenTicker: "GLORP",
+        tokenWasSpecified: true,
+        requestedNativeSol: false,
+      },
+    };
+  };
+
+  const originalTokenBalanceCall = botModule.wallet.getTokenBalance;
+  const originalSolBalanceCall = botModule.wallet.getBalance;
+  botModule.wallet.getTokenBalance = async (_telegramId: bigint, _mint: string) => 0;
+  botModule.wallet.getBalance = async (_telegramId: bigint) => 0;
+
+  try {
+    botModule.__test_setGameManager({ primeUsernameCache: () => {} } as any);
+
+    const replies: string[] = [];
+    const ctx: any = {
+      chat: { id: 55, type: "group" },
+      from: { id: 123, is_bot: false },
+      message: {
+        message_id: 1,
+        text: "/tip 5 GLORP",
+        reply_to_message: {
+          from: { id: 321, is_bot: false, first_name: "Target" },
+        },
+      },
+      reply: async (text: string) => {
+        replies.push(text);
+        return { message_id: 900 };
+      },
+      api: {},
+    };
+
+    await botModule.__test_handleTipCommand(ctx);
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toContain("Not enough GLORP");
+  } finally {
+    botModule.wallet.getTokenBalance = originalTokenBalanceCall;
+    botModule.wallet.getBalance = originalSolBalanceCall;
+  }
+});
+
+test("handleTipCommand reports shortage for SOL when tipping SOL", async () => {
+  const tokenManager = botModule.__test_getTokenManager();
+  tokenManager.parseAmount = async (
+    _args: string[],
+    _index: number,
+    _chatId: number | undefined,
+    _context: "game" | "tip" = "game"
+  ) => {
+    return {
+      success: true,
+      data: {
+        amount: 1,
+        isSol: true,
+        formattedAmount: "1 SOL",
+        tokenMint: "SOL",
+        tokenTicker: "SOL",
+        tokenWasSpecified: false,
+        requestedNativeSol: false,
+      },
+    };
+  };
+
+  const originalTokenBalanceCall = botModule.wallet.getTokenBalance;
+  const originalBalanceCall = botModule.wallet.getBalance;
+  botModule.wallet.getTokenBalance = async (_telegramId: bigint, _mint: string) => 0;
+  botModule.wallet.getBalance = async (_telegramId: bigint) => 0;
+
+  try {
+    botModule.__test_setGameManager({ primeUsernameCache: () => {} } as any);
+
+    const replies: string[] = [];
+    const ctx: any = {
+      chat: { id: 88, type: "group" },
+      from: { id: 444, is_bot: false },
+      message: {
+        message_id: 2,
+        text: "/tip 1",
+        reply_to_message: {
+          from: { id: 555, is_bot: false, first_name: "Friend" },
+        },
+      },
+      reply: async (text: string) => {
+        replies.push(text);
+        return { message_id: 901 };
+      },
+      api: {},
+    };
+
+    await botModule.__test_handleTipCommand(ctx);
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toContain("Not enough SOL");
+  } finally {
+    botModule.wallet.getTokenBalance = originalTokenBalanceCall;
+    botModule.wallet.getBalance = originalBalanceCall;
+  }
+});

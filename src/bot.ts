@@ -2136,6 +2136,12 @@ const isUserGroupAdmin = async (
 // TRANSACTION PROCESSING
 // ================================
 
+interface ValidateTransactionOptions {
+  showSolscanLink?: boolean;
+  tokenMint?: string;
+  balanceLabel?: string;
+}
+
 const validateAndProcessTransaction = async (
   ctx: Context,
   telegramId: bigint,
@@ -2145,16 +2151,25 @@ const validateAndProcessTransaction = async (
   transactionFn: (
     playerData: PlayerData
   ) => Promise<string | { signature: string; message?: string }>,
-  showSolscanLink: boolean = false
+  options?: ValidateTransactionOptions
 ): Promise<void> => {
-  const playerData = await getPlayerData(telegramId, undefined);
+  const {
+    showSolscanLink = false,
+    tokenMint,
+    balanceLabel,
+  } = options ?? {};
+  const playerData = await getPlayerData(
+    telegramId,
+    isSol ? undefined : tokenMint
+  );
   // Validate balance
   const totalBalance = isSol
     ? playerData.solBalance
     : playerData.tokenBalance + playerData.gameBalance;
   if (totalBalance < amount) {
-    const balanceLabel = isSol ? "SOL" : DEFAULT_TOKEN_TICKER;
-    const shortageMessage = `❌ Not enough ${balanceLabel}. Add more ${balanceLabel} or lower the amount and try again.`;
+    const shortageLabel =
+      balanceLabel ?? (isSol ? "SOL" : DEFAULT_TOKEN_TICKER);
+    const shortageMessage = `❌ Not enough ${shortageLabel}. Add more ${shortageLabel} or lower the amount and try again.`;
     await ctx.reply(shortageMessage, {
       reply_to_message_id: ctx.message?.message_id,
     });
@@ -2590,7 +2605,7 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
 
           return { signature: result.signature, message };
         },
-        true
+        { showSolscanLink: true }
       );
     } catch (error: any) {
       await handleCommandError(ctx, error, "withdraw");
@@ -2635,7 +2650,11 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
           );
         }
       },
-      true
+      {
+        showSolscanLink: true,
+        tokenMint: parsedAmount.isSol ? undefined : parsedAmount.tokenMint,
+        balanceLabel: parsedAmount.tokenTicker,
+      }
     );
   } catch (error: any) {
     await handleCommandError(ctx, error, "withdraw");
@@ -2923,7 +2942,10 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
           );
         }
       },
-      true
+      {
+        tokenMint: parsedAmount.isSol ? undefined : parsedAmount.tokenMint,
+        balanceLabel: parsedAmount.tokenTicker,
+      }
     );
   } catch (error: any) {
     await handleCommandError(ctx, error, "tip");
