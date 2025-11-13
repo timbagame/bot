@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { Connection, Keypair, PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
+import {
+  Connection,
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+} from "@solana/web3.js";
 import { AddressLookupTableAccount } from "@solana/web3.js";
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
@@ -17,12 +25,14 @@ function createLookupTableAccount(): AddressLookupTableAccount {
   });
 }
 
-function buildVersionedTxBase64(table: AddressLookupTableAccount): string {
+function buildVersionedTxBase64(
+  table: AddressLookupTableAccount,
+  programIdOverride: PublicKey = Keypair.generate().publicKey
+): string {
   const payer = Keypair.generate();
-  const programId = Keypair.generate().publicKey;
   const lookupKey = table.state.addresses[0]!;
   const instruction = new TransactionInstruction({
-    programId,
+    programId: programIdOverride,
     keys: [
       { pubkey: payer.publicKey, isSigner: true, isWritable: true },
       { pubkey: lookupKey, isSigner: false, isWritable: true },
@@ -102,5 +112,34 @@ describe("SwapManager Jupiter instruction extraction", () => {
     expect(keys[0].isWritable).toBe(true);
     expect(keys[1].isSigner).toBe(false);
     expect(keys[1].isWritable).toBe(true);
+  });
+
+  test("throws if a system program instruction is present", async () => {
+    const lookupTable = createLookupTableAccount();
+    const base64 = buildVersionedTxBase64(
+      lookupTable,
+      SystemProgram.programId
+    );
+
+    const connection: Partial<Connection> = {
+      async getAddressLookupTable(_pubkey: PublicKey) {
+        return { value: lookupTable } as any;
+      },
+      async getLatestBlockhash() {
+        return { blockhash: Keypair.generate().publicKey.toBase58(), lastValidBlockHeight: 1 } as any;
+      },
+    };
+
+    const wallet = WalletManager.createForTest(mnemonic, {
+      connection: connection as Connection,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+
+    const manager = new SwapManager(connection as Connection, wallet);
+
+    await expect(
+      (manager as any).extractJupiterInstructions(base64)
+    ).rejects.toThrow("Unsupported system program instruction in Jupiter swap");
   });
 });

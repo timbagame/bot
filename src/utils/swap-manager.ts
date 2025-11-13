@@ -1297,6 +1297,10 @@ export class SwapManager {
         throw new Error("Failed to resolve Jupiter program id");
       }
 
+      if (programId.equals(SystemProgram.programId)) {
+        throw new Error("Unsupported system program instruction in Jupiter swap");
+      }
+
       const keys = compiled.accountKeyIndexes.map((accountIndex) => {
         const pubkey = accountKeys.get(accountIndex);
         if (!pubkey) {
