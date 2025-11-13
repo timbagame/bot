@@ -1,5 +1,5 @@
 import { escapeHtml } from "./format-amount";
-import { sanitizeTelegramDisplayName } from "./telegram-display";
+import { sanitizeTelegramDisplayNameWithoutMention } from "./telegram-display";
 
 export type LeaderboardPlayerDisplay = {
   telegramId: string;
@@ -20,7 +20,9 @@ type BuildLeaderboardMessageArgs = {
 
 const MEDALS = ["🥇", "🥈", "🥉"] as const;
 
-export const sanitizeLeaderboardDisplayName = sanitizeTelegramDisplayName;
+export const sanitizeLeaderboardDisplayName = (
+  value: string | null | undefined
+): string => sanitizeTelegramDisplayNameWithoutMention(value);
 
 export const buildEmptyLeaderboardMessage = (): string =>
   [
@@ -46,7 +48,7 @@ export const buildLeaderboardMessage = ({ chatTitle, players }: BuildLeaderboard
 };
 
 const formatDisplayName = (value: string): string => {
-  const safeValue = sanitizeTelegramDisplayName(value);
+  const safeValue = sanitizeTelegramDisplayNameWithoutMention(value);
   return `<b>${escapeHtml(safeValue)}</b>`;
 };
 

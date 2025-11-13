@@ -60,7 +60,10 @@ import {
   buildParticipantsList,
   buildExpirationText,
 } from "./game-ui";
-import { sanitizeTelegramDisplayName } from "./telegram-display";
+import {
+  sanitizeTelegramDisplayName,
+  sanitizeTelegramDisplayNameWithoutMention,
+} from "./telegram-display";
 import { resolveTokenPriceUSD } from "./prices";
 import { NetworkDetector } from "./network-detector";
 import { SwapManager } from "./swap-manager";
@@ -2170,7 +2173,8 @@ export class GameManager {
     ctx: Context,
     status: string,
     winnerAddress?: string,
-    winnerSignature?: string
+    winnerSignature?: string,
+    suppressMentions: boolean = false
   ): Promise<string> {
     if (status.toLowerCase() !== "completed" || !winnerAddress) return "";
 
@@ -2183,9 +2187,10 @@ export class GameManager {
 
     const winnerUsername = await this.getPlayerUsername(ctx, winnerAddress);
     const solscanUrl = NetworkDetector.buildSolscanTxUrl(winnerSignature);
-    const safeWinner = escapeHtml(
-      sanitizeTelegramDisplayName(winnerUsername)
-    );
+    const sanitize = suppressMentions
+      ? sanitizeTelegramDisplayNameWithoutMention
+      : sanitizeTelegramDisplayName;
+    const safeWinner = escapeHtml(sanitize(winnerUsername));
     const linkLine = solscanUrl
       ? `\n\n<a href="${solscanUrl}">🔗 View transaction</a>`
       : "";
@@ -2292,8 +2297,13 @@ export class GameManager {
     tokenTicker: string,
     winnerAddress?: string,
     providedTotalPot?: number | bigint,
-    winnerSignature?: string
+    winnerSignature?: string,
+    options?: { suppressMentions?: boolean }
   ): Promise<GameMessageFormat> {
+    const suppressMentions = options?.suppressMentions === true;
+    const sanitizeDisplay = suppressMentions
+      ? sanitizeTelegramDisplayNameWithoutMention
+      : sanitizeTelegramDisplayName;
     const isCompleted = status.toLowerCase() === "completed";
 
     const amountLamports =
@@ -2349,12 +2359,13 @@ export class GameManager {
       ctx,
       status,
       winnerAddress,
-      winnerSignature
+      winnerSignature,
+      suppressMentions
     );
 
     const formattedTicketAmount = formatBalanceForDisplay(amountLamports);
 
-    const safeCreatorUsername = sanitizeTelegramDisplayName(creatorUsername);
+    const safeCreatorUsername = sanitizeDisplay(creatorUsername);
     const header = buildGameHeader(
       formatGameTypeWithEmoji(gameType),
       formattedTicketAmount,
@@ -2400,7 +2411,7 @@ export class GameManager {
           try {
             const username = await this.getUsernameFromTelegramId(ctx, telegramId);
             if (username) {
-              return sanitizeTelegramDisplayName(username);
+              return sanitizeDisplay(username);
             }
           } catch {
             // fall back to placeholder
@@ -2803,7 +2814,9 @@ export class GameManager {
         status,
         tokenTicker,
         gameData?.winner_address,
-        Number(gameAccount.totalAmount) || undefined
+        Number(gameAccount.totalAmount) || undefined,
+        undefined,
+        { suppressMentions: true }
       );
 
       return messageText;
@@ -2871,7 +2884,7 @@ export class GameManager {
         }
       }
       const creatorLabel = creatorUsername
-        ? sanitizeTelegramDisplayName(creatorUsername)
+        ? sanitizeTelegramDisplayNameWithoutMention(creatorUsername)
         : `Player ${String(gameData.creator_telegram_id).slice(0, 6)}...`;
 
       // Handle different winner states
@@ -2887,7 +2900,7 @@ export class GameManager {
           gameData.winner_address
         );
         const safeWinner = escapeHtml(
-          sanitizeTelegramDisplayName(winnerUsername)
+          sanitizeTelegramDisplayNameWithoutMention(winnerUsername)
         );
         winnerLine = `Winner: ${safeWinner}`;
       }
@@ -2911,7 +2924,7 @@ export class GameManager {
                 telegramId
               );
               return username
-                ? sanitizeTelegramDisplayName(username)
+                ? sanitizeTelegramDisplayNameWithoutMention(username)
                 : `Player ${telegramId.slice(0, 6)}...`;
             })
           );
