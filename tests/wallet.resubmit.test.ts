@@ -189,4 +189,36 @@ describe("WalletManager sendAndConfirmWithResubmits", () => {
 
     expect(seenLengths).toEqual([1, 1]);
   });
+
+  test("fails when lookup-table errors persist beyond resubmit limit", async () => {
+    const connection = new ResubmitConnection();
+    const wallet = WalletManager.createForTest(MNEMONIC, {
+      connection: connection as any,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+
+    (wallet as any).confirmTransaction = async () => {
+      throw new Error("Lookup table not found");
+    };
+
+    const lookupAccount = createLookupTableAccount();
+    const ix = new TransactionInstruction({
+      programId: Keypair.generate().publicKey,
+      keys: [
+        { pubkey: Keypair.generate().publicKey, isSigner: true, isWritable: true },
+      ],
+      data: Buffer.alloc(0),
+    });
+
+    await expect(
+      wallet.sendAndConfirmWithResubmits([ix], [Keypair.generate()], {
+        operationLabel: "Lookup fatal",
+        maxResubmits: 1,
+        addressLookupTableAccounts: [lookupAccount],
+      })
+    ).rejects.toThrow("Lookup table not found");
+
+    expect(connection.sendCalls).toBeGreaterThanOrEqual(1);
+  });
 });
