@@ -310,12 +310,15 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     });
     const admin = Keypair.generate();
     (wallet as any).getAdminKeypair = () => admin;
-    const sendCalls: Keypair[][] = [];
+    const sendCalls: Array<{
+      instructions: TransactionInstruction[];
+      signers: Keypair[];
+    }> = [];
     (wallet as any).sendTransaction = async (
-      _ixs: TransactionInstruction[],
+      instructions: TransactionInstruction[],
       signers: Keypair[]
     ) => {
-      sendCalls.push(signers);
+      sendCalls.push({ instructions, signers });
       return "SIG_PUMP";
     };
     (wallet as any).confirmTransaction = async () => {};
@@ -344,8 +347,23 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(result.swapped).toBe(true);
     expect(result.provider).toBe("pump-fun");
     expect(result.signature).toBe("SIG_PUMP");
-    expect(sendCalls[0]?.[0]?.publicKey.equals(admin.publicKey)).toBe(true);
-    expect(sendCalls[0]?.[1]?.publicKey.equals(user.publicKey)).toBe(true);
+    expect(sendCalls.length).toBe(1);
+    const sendCall = sendCalls[0]!;
+    expect(sendCall.signers[0]?.publicKey.equals(admin.publicKey)).toBe(true);
+    expect(sendCall.signers[1]?.publicKey.equals(user.publicKey)).toBe(true);
+
+    const loanIx = sendCall.instructions[0]!;
+    const refundIx = sendCall.instructions[sendCall.instructions.length - 1]!;
+
+    const loanDecoded = SystemInstruction.decodeTransfer(loanIx);
+    expect(loanDecoded.fromPubkey.equals(admin.publicKey)).toBe(true);
+    expect(loanDecoded.toPubkey.equals(user.publicKey)).toBe(true);
+    expect(Number(loanDecoded.lamports)).toBe(TEST_JIT_BUFFER_LAMPORTS);
+
+    const refundDecoded = SystemInstruction.decodeTransfer(refundIx);
+    expect(refundDecoded.fromPubkey.equals(user.publicKey)).toBe(true);
+    expect(refundDecoded.toPubkey.equals(admin.publicKey)).toBe(true);
+    expect(Number(refundDecoded.lamports)).toBe(TEST_JIT_BUFFER_LAMPORTS);
   });
 
   test("skips lending lamports for successful Jupiter swap", async () => {
@@ -485,7 +503,17 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     });
     const admin = Keypair.generate();
     (wallet as any).getAdminKeypair = () => admin;
-    (wallet as any).sendTransaction = async () => "SIG_PUMP_LOW_DEC";
+    const sendCalls: Array<{
+      instructions: TransactionInstruction[];
+      signers: Keypair[];
+    }> = [];
+    (wallet as any).sendTransaction = async (
+      instructions: TransactionInstruction[],
+      signers: Keypair[]
+    ) => {
+      sendCalls.push({ instructions, signers });
+      return "SIG_PUMP_LOW_DEC";
+    };
     (wallet as any).confirmTransaction = async () => {};
 
     const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
@@ -532,6 +560,21 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(firstAmount).not.toBe("0.00");
     const rawUnits = BigInt(firstAmount.replace(".", ""));
     expect(rawUnits > 0n).toBe(true);
+
+    expect(sendCalls.length).toBe(1);
+    const sendCall = sendCalls[0]!;
+    expect(sendCall.signers[0]?.publicKey.equals(admin.publicKey)).toBe(true);
+    expect(sendCall.signers[1]?.publicKey.equals(user.publicKey)).toBe(true);
+    const loanIx = sendCall.instructions[0]!;
+    const refundIx = sendCall.instructions[sendCall.instructions.length - 1]!;
+    const loanDecoded = SystemInstruction.decodeTransfer(loanIx);
+    expect(loanDecoded.fromPubkey.equals(admin.publicKey)).toBe(true);
+    expect(loanDecoded.toPubkey.equals(user.publicKey)).toBe(true);
+    expect(Number(loanDecoded.lamports)).toBe(TEST_JIT_BUFFER_LAMPORTS);
+    const refundDecoded = SystemInstruction.decodeTransfer(refundIx);
+    expect(refundDecoded.fromPubkey.equals(user.publicKey)).toBe(true);
+    expect(refundDecoded.toPubkey.equals(admin.publicKey)).toBe(true);
+    expect(Number(refundDecoded.lamports)).toBe(TEST_JIT_BUFFER_LAMPORTS);
   });
 
   test("skips lending lamports when Jupiter swap fails", async () => {

@@ -720,9 +720,34 @@ export class SwapManager {
         userKeypair,
       });
 
+      const lendingLamports = Math.max(jitFeeBuffer - currentLamports, 0);
       const adminKeypair = this.wallet.getAdminKeypair();
+      const instructions: TransactionInstruction[] = [];
+
+      if (lendingLamports > 0) {
+        instructions.push(
+          SystemProgram.transfer({
+            fromPubkey: adminKeypair.publicKey,
+            toPubkey: userKeypair.publicKey,
+            lamports: lendingLamports,
+          })
+        );
+      }
+
+      instructions.push(...swapInstructions);
+
+      if (lendingLamports > 0) {
+        instructions.push(
+          SystemProgram.transfer({
+            fromPubkey: userKeypair.publicKey,
+            toPubkey: adminKeypair.publicKey,
+            lamports: lendingLamports,
+          })
+        );
+      }
+
       const signature = await this.wallet.sendAndConfirmWithResubmits(
-        swapInstructions,
+        instructions,
         [adminKeypair, userKeypair],
         { operationLabel: "pump.fun JIT swap" }
       );
