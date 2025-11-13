@@ -988,10 +988,64 @@ export class SwapManager {
 
     const flow: CompositeFlow = composite.flow ?? "pump-then-jupiter";
 
+    const pumpInputLamports = (() => {
+      if (flow !== "jupiter-then-pump") {
+        return composite.pumpQuote.inputAmountRaw;
+      }
+
+      const quote = composite.jupiterQuote;
+      if (!quote) {
+        throw new Error("Composite swap quote is missing Jupiter leg details");
+      }
+
+      const fallbackIntermediate = (() => {
+        const candidates: (string | undefined)[] = [
+          quote.otherAmountThreshold,
+          composite.intermediateAmount,
+          quote.outAmount,
+        ];
+
+        for (const candidate of candidates) {
+          if (!candidate) {
+            continue;
+          }
+          try {
+            const value = BigInt(candidate);
+            if (value > 0n) {
+              return value;
+            }
+          } catch (error) {
+            console.warn(
+              "Failed to parse Jupiter composite minimum lamports as bigint:",
+              error
+            );
+          }
+        }
+
+        return 0n;
+      })();
+
+      if (fallbackIntermediate <= 0n) {
+        throw new Error(
+          "Jupiter leg could not guarantee any SOL for pump.fun swap"
+        );
+      }
+
+      const minIntermediateLamports = fallbackIntermediate.toString();
+
+      if (minIntermediateLamports !== composite.pumpQuote.inputAmountRaw) {
+        console.log(
+          `Replanning pump.fun leg with ${minIntermediateLamports} lamports (previously ${composite.pumpQuote.inputAmountRaw})`
+        );
+      }
+
+      return minIntermediateLamports;
+    })();
+
     const pumpPlan = await this.pumpFunClient.createSwapPlan({
       inputMint: composite.pumpQuote.inputMint,
       outputMint: composite.pumpQuote.outputMint,
-      amount: composite.pumpQuote.inputAmountRaw,
+      amount: pumpInputLamports,
       slippageBps,
       userKeypair,
     });
