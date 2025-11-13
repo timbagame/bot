@@ -1042,10 +1042,22 @@ export class SwapManager {
       return minIntermediateLamports;
     })();
 
+    const pumpPlanAmount = (() => {
+      if (flow === "jupiter-then-pump") {
+        if (this.isSolMint(composite.pumpQuote.inputMint)) {
+          return this.convertRawAmountToDecimal(
+            pumpInputLamports,
+            SOL_DECIMALS
+          );
+        }
+      }
+      return pumpInputLamports;
+    })();
+
     const pumpPlan = await this.pumpFunClient.createSwapPlan({
       inputMint: composite.pumpQuote.inputMint,
       outputMint: composite.pumpQuote.outputMint,
-      amount: pumpInputLamports,
+      amount: pumpPlanAmount,
       slippageBps,
       userKeypair,
     });
