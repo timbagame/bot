@@ -2239,7 +2239,8 @@ export class WalletManager {
           normalizedMessage.includes("timed out") ||
           normalizedMessage.includes("not confirmed") ||
           normalizedMessage.includes("expired before confirmation") ||
-          normalizedMessage.includes("last valid block height");
+          normalizedMessage.includes("last valid block height") ||
+          normalizedMessage.includes("lookup table not found");
 
         if (!isRecoverable || resubmitAttempts >= maxResubmits) {
           (error as any).lastSignature = currentSignature;
