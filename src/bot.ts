@@ -3632,7 +3632,6 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
       }
 
       let txSignature: string;
-      let pumpFunSignature: string | null = null;
       const keypair = wallet.getKeyPair(BigInt(transaction.userId));
       const parsedSlippageBps = Number((transaction as any).slippageBps);
       const slippageBps = Number.isFinite(parsedSlippageBps)
@@ -3684,9 +3683,10 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
           },
           quote
         );
-        console.log(`Pump.fun leg signature: ${result.pumpSignature}`);
-        pumpFunSignature = result.pumpSignature;
-        txSignature = result.jupiterSignature;
+        console.log(
+          `Composite swap submitted: ${result.signature} (flow=${result.flow})`
+        );
+        txSignature = result.signature;
       } else {
         // Use instruction-based approach for other providers
         const instructions = await swapManager.createSwapTransaction(
@@ -3731,28 +3731,15 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
 
       const linkLines: string[] = [];
 
-      if (pumpFunSignature) {
-        const { message: pumpLink } = buildTransactionLinkMessage({
-          signature: pumpFunSignature,
-          networkOverride: process.env["RPC_URL"],
-          label: "Pump.fun: ",
-          linkText: "🔗 View transaction",
-          format: "html",
-        });
-        if (pumpLink) {
-          linkLines.push(pumpLink);
-        }
-      }
-
-      const { message: jupiterLink } = buildTransactionLinkMessage({
+      const { message: swapLink } = buildTransactionLinkMessage({
         signature: txSignature,
         networkOverride: process.env["RPC_URL"],
-        label: pumpFunSignature ? "Jupiter: " : "",
+        label: "Swap: ",
         linkText: "🔗 View transaction",
         format: "html",
       });
-      if (jupiterLink) {
-        linkLines.push(jupiterLink);
+      if (swapLink) {
+        linkLines.push(swapLink);
       }
 
       if (linkLines.length > 0) {

@@ -1,5 +1,6 @@
 import { mnemonicToSeedSync } from "bip39";
 import {
+  AddressLookupTableAccount,
   Connection,
   Keypair,
   PublicKey,
@@ -2117,7 +2118,10 @@ export class WalletManager {
    */
   public async sendTransaction(
     instructions: TransactionInstruction[],
-    signers: Keypair[]
+    signers: Keypair[],
+    options?: {
+      addressLookupTableAccounts?: AddressLookupTableAccount[];
+    }
   ): Promise<string> {
     await this.throttle();
 
@@ -2130,7 +2134,7 @@ export class WalletManager {
       payerKey: signers[0]!.publicKey,
       recentBlockhash: latestBlockhash.blockhash,
       instructions: instructions,
-    }).compileToV0Message();
+    }).compileToV0Message(options?.addressLookupTableAccounts);
 
     const tx = new VersionedTransaction(message);
     tx.sign(signers);
@@ -2175,6 +2179,7 @@ export class WalletManager {
       operationLabel?: string;
       initialSignature?: string;
       skipConfirmation?: boolean;
+      addressLookupTableAccounts?: AddressLookupTableAccount[];
     } = {}
   ): Promise<string> {
     if (instructions.length === 0) {
@@ -2192,12 +2197,15 @@ export class WalletManager {
       operationLabel = "Transaction",
       initialSignature,
       skipConfirmation = false,
+      addressLookupTableAccounts,
     } = options;
 
     const startingSignature =
       typeof initialSignature === "string" && initialSignature.length > 0
         ? initialSignature
-        : await this.sendTransaction(instructions, signers);
+        : await this.sendTransaction(instructions, signers, {
+            addressLookupTableAccounts,
+          });
 
     if (skipConfirmation) {
       return startingSignature;
@@ -2241,7 +2249,9 @@ export class WalletManager {
           }`
         );
 
-        currentSignature = await this.sendTransaction(instructions, signers);
+        currentSignature = await this.sendTransaction(instructions, signers, {
+          addressLookupTableAccounts,
+        });
       }
     }
   }

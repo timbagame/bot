@@ -6,6 +6,10 @@ import {
   VersionedTransaction,
   SystemProgram,
 } from "@solana/web3.js";
+import type {
+  AddressLookupTableAccount,
+  MessageAddressTableLookup,
+} from "@solana/web3.js";
 import {
   JupiterClient,
   type JupiterQuoteResponse,
@@ -20,6 +24,7 @@ import type { FeeBudgetProvider } from "./fee-budget";
 import { formatAmount } from "./format-amount";
 import { WSOL_MINT } from "./token-registry";
 import type {
+  CompositeFlow,
   JustInTimeSwapResult,
   SwapQuote,
   SwapRequest,
@@ -950,7 +955,7 @@ export class SwapManager {
   async executeCompositePumpFunJupiterSwap(
     request: SwapRequest,
     quote: SwapQuote
-  ): Promise<{ pumpSignature: string; jupiterSignature: string }> {
+  ): Promise<{ signature: string; flow: CompositeFlow }> {
     if (quote.provider !== "pump-fun+jupiter") {
       throw new Error("Composite swap quote is not available");
     }
@@ -960,12 +965,7 @@ export class SwapManager {
       throw new Error("Composite swap quote is not available");
     }
 
-    const {
-      userKeypair,
-      slippageBps = 500,
-      outputDecimals,
-      outputTicker,
-    } = request;
+    const { userKeypair, slippageBps = 500 } = request;
 
     const setupInstructions = await this.createTokenAccountsIfNeeded(
       userKeypair,
@@ -980,170 +980,58 @@ export class SwapManager {
       const setupSig = await this.wallet.sendAndConfirmWithResubmits(
         setupInstructions,
         [userKeypair],
-        { operationLabel: "Create token accounts" }
+        { operationLabel: "Create token accounts before composite swap" }
       );
       console.log(`Token accounts created: ${setupSig}`);
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
-    const flow = composite.flow ?? "pump-then-jupiter";
+    const flow: CompositeFlow = composite.flow ?? "pump-then-jupiter";
 
-    let pumpSignature: string;
-    let jupiterSignature: string;
+    const pumpInstructions = await this.pumpFunClient.createSwapTransaction({
+      inputMint: composite.pumpQuote.inputMint,
+      outputMint: composite.pumpQuote.outputMint,
+      amount: composite.pumpQuote.inputAmountRaw,
+      slippageBps,
+      userKeypair,
+    });
 
-    if (flow === "pump-then-jupiter") {
-      const preBalance = await this.connection.getBalance(
-        userKeypair.publicKey
-      );
+    const jupiterResponse = await this.jupiterClient.getSwapTransaction({
+      userPublicKey: userKeypair.publicKey.toBase58(),
+      quoteResponse: composite.jupiterQuote,
+    });
 
-      const pumpInstructions = await this.pumpFunClient.createSwapTransaction({
-        inputMint: composite.pumpQuote.inputMint,
-        outputMint: composite.pumpQuote.outputMint,
-        amount: composite.pumpQuote.inputAmountRaw,
-        slippageBps,
-        userKeypair,
-      });
+    const {
+      instructions: jupiterInstructions,
+      addressLookupTableAccounts,
+    } = await this.extractJupiterInstructions(jupiterResponse.swapTransaction);
 
-      pumpSignature = await this.wallet.sendAndConfirmWithResubmits(
-        pumpInstructions,
-        [userKeypair],
-        { operationLabel: "Pump.fun leg" }
-      );
-      console.log(`Pump.fun leg submitted: ${pumpSignature}`);
+    const combinedInstructions = [
+      ...setupInstructions,
+      ...(flow === "pump-then-jupiter"
+        ? [...pumpInstructions, ...jupiterInstructions]
+        : [...jupiterInstructions, ...pumpInstructions]),
+    ];
 
-      const postBalance = await this.connection.getBalance(
-        userKeypair.publicKey
-      );
+    const operationLabel =
+      flow === "pump-then-jupiter"
+        ? "Pump.fun → Jupiter composite swap"
+        : "Jupiter → pump.fun composite swap";
 
-      const expectedLamports = BigInt(composite.intermediateAmount);
-      let availableLamports = BigInt(Math.max(postBalance - preBalance, 0));
-
-      if (availableLamports === 0n) {
-        availableLamports = expectedLamports;
-      } else if (availableLamports > expectedLamports) {
-        availableLamports = expectedLamports;
+    const signature = await this.wallet.sendAndConfirmWithResubmits(
+      combinedInstructions,
+      [userKeypair],
+      {
+        operationLabel,
+        addressLookupTableAccounts:
+          addressLookupTableAccounts.length > 0
+            ? addressLookupTableAccounts
+            : undefined,
       }
+    );
 
-      const feeBuffer = 10_000n;
-      if (availableLamports <= feeBuffer) {
-        throw new Error(
-          "Pump.fun leg completed but not enough SOL available for Jupiter leg"
-        );
-      }
-
-      const jupiterInputLamports = availableLamports - feeBuffer;
-
-      console.log(
-        `Jupiter leg will use ${jupiterInputLamports.toString()} lamports (keeping ${feeBuffer.toString()} for fees)`
-      );
-
-      const jupiterQuote = await this.getJupiterQuote({
-        inputMint: SOL_MINT,
-        outputMint: quote.outputMint,
-        amount: jupiterInputLamports.toString(),
-        slippageBps,
-      });
-
-      const swapResponse = await this.jupiterClient.getSwapTransaction({
-        userPublicKey: userKeypair.publicKey.toBase58(),
-        quoteResponse: jupiterQuote,
-      });
-
-      jupiterSignature = await this.executeJupiterTransaction(
-        swapResponse.swapTransaction,
-        userKeypair
-      );
-
-      console.log(
-        `Jupiter leg submitted: ${jupiterSignature} (expected ~${formatAmount(
-          BigInt(jupiterQuote.outAmount),
-          outputDecimals,
-          { maxFractionDigits: Math.min(outputDecimals, 6), trim: true }
-        )} ${outputTicker.toUpperCase()})`
-      );
-    } else if (flow === "jupiter-then-pump") {
-      const preBalance = await this.connection.getBalance(
-        userKeypair.publicKey
-      );
-
-      const jupiterQuote = await this.getJupiterQuote({
-        inputMint: quote.inputMint,
-        outputMint: SOL_MINT,
-        amount: quote.inputAmountRaw,
-        slippageBps,
-      });
-
-      const swapResponse = await this.jupiterClient.getSwapTransaction({
-        userPublicKey: userKeypair.publicKey.toBase58(),
-        quoteResponse: jupiterQuote,
-      });
-
-      jupiterSignature = await this.executeJupiterTransaction(
-        swapResponse.swapTransaction,
-        userKeypair
-      );
-      console.log(`Jupiter leg submitted: ${jupiterSignature}`);
-      await this.wallet.confirmTransaction(jupiterSignature);
-
-      const postBalance = await this.connection.getBalance(
-        userKeypair.publicKey
-      );
-
-      const expectedLamports = BigInt(composite.intermediateAmount);
-      let availableLamports = BigInt(Math.max(postBalance - preBalance, 0));
-
-      if (availableLamports === 0n) {
-        availableLamports = expectedLamports;
-      } else if (availableLamports > expectedLamports) {
-        availableLamports = expectedLamports;
-      }
-
-      const feeBuffer = 10_000n;
-      if (availableLamports <= feeBuffer) {
-        throw new Error(
-          "Jupiter leg completed but not enough SOL available for pump.fun leg"
-        );
-      }
-
-      const pumpInputLamports = availableLamports - feeBuffer;
-      const pumpInputDecimal = this.convertRawAmountToDecimal(
-        pumpInputLamports.toString(),
-        SOL_DECIMALS
-      );
-
-      const pumpQuote = await this.getPumpFunQuote({
-        inputMint: SOL_MINT,
-        outputMint: quote.outputMint,
-        amount: pumpInputDecimal,
-        inputDecimals: SOL_DECIMALS,
-        slippageBps,
-      });
-
-      const pumpInstructions = await this.pumpFunClient.createSwapTransaction({
-        inputMint: pumpQuote.inputMint,
-        outputMint: pumpQuote.outputMint,
-        amount: pumpQuote.inputAmountRaw,
-        slippageBps,
-        userKeypair,
-      });
-
-      pumpSignature = await this.wallet.sendAndConfirmWithResubmits(
-        pumpInstructions,
-        [userKeypair],
-        { operationLabel: "Pump.fun leg" }
-      );
-      console.log(
-        `Pump.fun leg submitted: ${pumpSignature} (expected ~${formatAmount(
-          BigInt(pumpQuote.outputAmount),
-          outputDecimals,
-          { maxFractionDigits: Math.min(outputDecimals, 6), trim: true }
-        )} ${outputTicker.toUpperCase()})`
-      );
-    } else {
-      throw new Error(`Unsupported composite flow: ${flow}`);
-    }
-
-    return { pumpSignature, jupiterSignature };
+    console.log(`${operationLabel} confirmed: ${signature}`);
+    return { signature, flow };
   }
 
   /**
@@ -1383,6 +1271,71 @@ export class SwapManager {
         `Failed to execute Jupiter transaction: ${error.message}`
       );
     }
+  }
+
+  private async extractJupiterInstructions(transactionBase64: string): Promise<{
+    instructions: TransactionInstruction[];
+    addressLookupTableAccounts: AddressLookupTableAccount[];
+  }> {
+    const transactionBuffer = Buffer.from(transactionBase64, "base64");
+    const versionedTx = VersionedTransaction.deserialize(transactionBuffer);
+    const message = versionedTx.message;
+
+    const lookupAccounts = message.addressTableLookups.length
+      ? await this.resolveAddressLookupTableAccounts(
+          message.addressTableLookups
+        )
+      : [];
+
+    const accountKeys = lookupAccounts.length
+      ? message.getAccountKeys({ addressLookupTableAccounts: lookupAccounts })
+      : message.getAccountKeys();
+
+    const instructions = message.compiledInstructions.map((compiled) => {
+      const programId = accountKeys.get(compiled.programIdIndex);
+      if (!programId) {
+        throw new Error("Failed to resolve Jupiter program id");
+      }
+
+      const keys = compiled.accountKeyIndexes.map((accountIndex) => {
+        const pubkey = accountKeys.get(accountIndex);
+        if (!pubkey) {
+          throw new Error(
+            `Failed to resolve account index ${accountIndex} in Jupiter transaction`
+          );
+        }
+        return {
+          pubkey,
+          isWritable: message.isAccountWritable(accountIndex),
+          isSigner: message.isAccountSigner(accountIndex),
+        };
+      });
+
+      return new TransactionInstruction({
+        programId,
+        keys,
+        data: Buffer.from(compiled.data),
+      });
+    });
+
+    return { instructions, addressLookupTableAccounts: lookupAccounts };
+  }
+
+  private async resolveAddressLookupTableAccounts(
+    lookups: MessageAddressTableLookup[]
+  ): Promise<AddressLookupTableAccount[]> {
+    const promises = lookups.map(async (lookup) => {
+      const response = await this.connection.getAddressLookupTable(
+        lookup.accountKey
+      );
+      if (!response.value) {
+        throw new Error(
+          `Lookup table ${lookup.accountKey.toBase58()} not found`
+        );
+      }
+      return response.value;
+    });
+    return await Promise.all(promises);
   }
 
   /**
