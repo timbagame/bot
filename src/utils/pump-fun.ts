@@ -40,6 +40,13 @@ export interface PumpFunSwapRequest {
   userKeypair: Keypair;
 }
 
+export interface PumpFunSwapPlan {
+  instructions: TransactionInstruction[];
+  direction: "buy" | "sell";
+  expectedOutputAmount: bigint | null;
+  minOutputAmount: bigint | null;
+}
+
 export interface PumpFunTokenMetadata {
   symbol: string;
   name: string;
@@ -446,9 +453,7 @@ export class PumpFunClient {
   /**
    * Create swap transaction for pump.fun token
    */
-  async createSwapTransaction(
-    request: PumpFunSwapRequest
-  ): Promise<TransactionInstruction[]> {
+  async createSwapPlan(request: PumpFunSwapRequest): Promise<PumpFunSwapPlan> {
     const {
       inputMint,
       outputMint,
@@ -498,6 +503,8 @@ export class PumpFunClient {
 
       // Create the swap instruction based on buy/sell
       let instructions: TransactionInstruction[] = [];
+      let expectedOutputAmount: bigint | null = null;
+      let minOutputAmount: bigint | null = null;
 
       if (isBuy) {
         // For buying: amount is in SOL lamports
@@ -546,6 +553,9 @@ export class PumpFunClient {
           slippage: slippageBps / 10000, // Use decimal format (e.g., 0.01 for 1%)
           tokenProgram: TOKEN_PROGRAM_ID,
         });
+
+        expectedOutputAmount = BigInt(Math.max(expectedTokenAmount, 0));
+        minOutputAmount = BigInt(Math.max(minTokensOut, 0));
       } else {
         // For selling: amount is in token units
         const tokenAmount = amountLamports;
@@ -606,6 +616,9 @@ export class PumpFunClient {
           tokenProgram: TOKEN_PROGRAM_ID,
           mayhemMode: false,
         });
+
+        expectedOutputAmount = expectedSolAmount;
+        minOutputAmount = minSolOut;
       }
 
       console.log(
@@ -613,13 +626,25 @@ export class PumpFunClient {
           isBuy ? "buy" : "sell"
         } instructions for pump.fun token ${pumpMint.toString()}`
       );
-      return instructions;
+      return {
+        instructions,
+        direction: isBuy ? "buy" : "sell",
+        expectedOutputAmount,
+        minOutputAmount,
+      };
     } catch (error) {
       console.error("Error creating pump.fun swap transaction:", error);
       throw new Error(
         `Failed to create pump.fun swap: ${(error as Error).message}`
       );
     }
+  }
+
+  async createSwapTransaction(
+    request: PumpFunSwapRequest
+  ): Promise<TransactionInstruction[]> {
+    const plan = await this.createSwapPlan(request);
+    return plan.instructions;
   }
 
   /**

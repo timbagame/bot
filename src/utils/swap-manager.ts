@@ -988,7 +988,7 @@ export class SwapManager {
 
     const flow: CompositeFlow = composite.flow ?? "pump-then-jupiter";
 
-    const pumpInstructions = await this.pumpFunClient.createSwapTransaction({
+    const pumpPlan = await this.pumpFunClient.createSwapPlan({
       inputMint: composite.pumpQuote.inputMint,
       outputMint: composite.pumpQuote.outputMint,
       amount: composite.pumpQuote.inputAmountRaw,
@@ -996,9 +996,61 @@ export class SwapManager {
       userKeypair,
     });
 
+    const pumpInstructions = pumpPlan.instructions;
+
+    let jupiterQuoteResponse = composite.jupiterQuote;
+
+    if (flow === "pump-then-jupiter") {
+      const fallbackIntermediate = (() => {
+        if (pumpPlan.minOutputAmount && pumpPlan.minOutputAmount > 0n) {
+          return pumpPlan.minOutputAmount;
+        }
+        try {
+          if (composite.intermediateAmount) {
+            return BigInt(composite.intermediateAmount);
+          }
+        } catch (error) {
+          console.warn(
+            "Failed to parse composite intermediate amount as bigint:",
+            error
+          );
+        }
+        try {
+          return BigInt(composite.pumpQuote.outputAmount);
+        } catch (error) {
+          console.warn(
+            "Failed to parse pump quote output amount as bigint:",
+            error
+          );
+        }
+        return 0n;
+      })();
+
+      if (fallbackIntermediate <= 0n) {
+        throw new Error(
+          "Pump.fun leg could not guarantee any SOL for Jupiter swap"
+        );
+      }
+
+      const minIntermediateLamports = fallbackIntermediate.toString();
+
+      if (minIntermediateLamports !== composite.jupiterQuote.inAmount) {
+        console.log(
+          `Requoting Jupiter leg with ${minIntermediateLamports} lamports (previously ${composite.jupiterQuote.inAmount})`
+        );
+
+        jupiterQuoteResponse = await this.getJupiterQuote({
+          inputMint: composite.jupiterQuote.inputMint,
+          outputMint: composite.jupiterQuote.outputMint,
+          amount: minIntermediateLamports,
+          slippageBps,
+        });
+      }
+    }
+
     const jupiterResponse = await this.jupiterClient.getSwapTransaction({
       userPublicKey: userKeypair.publicKey.toBase58(),
-      quoteResponse: composite.jupiterQuote,
+      quoteResponse: jupiterQuoteResponse,
     });
 
     const {
