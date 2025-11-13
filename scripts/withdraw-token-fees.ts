@@ -85,7 +85,9 @@ async function withdrawTokenFee(
   );
 
   console.log(
-    `➡️  Withdrawing ${formattedPending} ${config.ticker} to ${operatorBundle.anchor.publicKey.toBase58()}`
+    `➡️  Withdrawing ${formattedPending} ${
+      config.ticker
+    } to ${operatorBundle.anchor.publicKey.toBase58()}`
   );
 
   const instruction = await program.methods
@@ -109,7 +111,9 @@ async function withdrawTokenFee(
 
   if (operatorAtaCreated) {
     console.log(
-      `🔧 Created oracle operator ATA ${operatorAta.toBase58()} for ${config.ticker}`
+      `🔧 Created oracle operator ATA ${operatorAta.toBase58()} for ${
+        config.ticker
+      }`
     );
   }
 

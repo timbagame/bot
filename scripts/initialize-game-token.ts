@@ -21,7 +21,10 @@ import * as path from "path";
 import type { Timba } from "../idl/idlType";
 import { WalletManager } from "../src/utils/wallet";
 import { getSupportedTokens } from "../src/utils/token-registry";
-import { NetworkDetector, type SolanaNetwork } from "../src/utils/network-detector";
+import {
+  NetworkDetector,
+  type SolanaNetwork,
+} from "../src/utils/network-detector";
 import { resolvePrimaryRpcEndpoint } from "../src/utils/rpc-endpoints";
 import {
   loadKeypairFromPath,
@@ -126,9 +129,7 @@ const buildExplorerUrl = (
   const build = resolver[resource];
   const url = build(value, CONFIG.NETWORK);
 
-  return (
-    url ?? `Explorer not available for ${CONFIG.NETWORK_DISPLAY_NAME}`
-  );
+  return url ?? `Explorer not available for ${CONFIG.NETWORK_DISPLAY_NAME}`;
 };
 
 type BaseTokenInitializationResult = {
@@ -158,7 +159,6 @@ type TokenInitializationResult =
 // ================================
 // UTILITY FUNCTIONS
 // ================================
-
 
 type GameVaultAtaPlan = {
   address: PublicKey;
@@ -222,7 +222,6 @@ const prepareGameVaultAtaPlan = async ({
     instructions: [instruction],
   };
 };
-
 
 const lamportsToSol = (lamports: bigint): number =>
   Number(lamports) / LAMPORTS_PER_SOL;
@@ -347,20 +346,18 @@ const estimateInitializationCosts = async (
         minAmount: new anchor.BN(defaultMinAmount.toString()),
         enabled: true,
       })
-      .accounts(
-        {
-          gameToken: gameTokenPda,
-          tokenMint: mint,
-          gameVault: gameVaultPda,
-          gameTokenAccount,
-          oracle: oraclePda,
-          oracleOperator: oracleOperatorKeypair.publicKey,
-          systemProgram: SystemProgram.programId,
-          tokenProgram: mintProgramId,
-          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-          gameTokenCtx,
-        } as any
-      )
+      .accounts({
+        gameToken: gameTokenPda,
+        tokenMint: mint,
+        gameVault: gameVaultPda,
+        gameTokenAccount,
+        oracle: oraclePda,
+        oracleOperator: oracleOperatorKeypair.publicKey,
+        systemProgram: SystemProgram.programId,
+        tokenProgram: mintProgramId,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        gameTokenCtx,
+      } as any)
       .instruction();
 
     const initializeTx = new Transaction({
@@ -570,20 +567,18 @@ async function initializeToken(
       minAmount: new anchor.BN(defaultMinAmount.toString()),
       enabled: true,
     })
-    .accounts(
-      {
-        gameToken: gameTokenPda,
-        tokenMint: mint,
-        gameVault: gameVaultPda,
-        gameTokenAccount,
-        oracle: oraclePda,
-        oracleOperator: oracleOperatorKeypair.publicKey,
-        systemProgram: SystemProgram.programId,
-        tokenProgram: mintProgramId,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-        gameTokenCtx,
-      } as any
-    )
+    .accounts({
+      gameToken: gameTokenPda,
+      tokenMint: mint,
+      gameVault: gameVaultPda,
+      gameTokenAccount,
+      oracle: oraclePda,
+      oracleOperator: oracleOperatorKeypair.publicKey,
+      systemProgram: SystemProgram.programId,
+      tokenProgram: mintProgramId,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      gameTokenCtx,
+    } as any)
     .instruction();
 
   const tx = await wallet.sendAndConfirmWithResubmits(
@@ -648,7 +643,9 @@ async function initializeToken(
 // ================================
 
 async function initializeGameToken() {
-  const tokenSummary = TOKEN_CONFIGS.map((token) => token.tokenTicker).join(", ");
+  const tokenSummary = TOKEN_CONFIGS.map((token) => token.tokenTicker).join(
+    ", "
+  );
   console.log(`🚀 Initializing Game Tokens (${tokenSummary})...\n`);
 
   // Connect to network
@@ -707,9 +704,7 @@ async function initializeGameToken() {
       );
     }
     console.log(
-      `   → Total required: ${formatLamports(
-        costEstimate.totalLamports
-      )} SOL\n`
+      `   → Total required: ${formatLamports(costEstimate.totalLamports)} SOL\n`
     );
   } else {
     console.log("✅ All configured tokens are already initialized.");
@@ -725,7 +720,9 @@ async function initializeGameToken() {
   // Create wallet manager for transaction sending
   const mnemonic = process.env["MNEMONIC"]?.trim();
   if (!mnemonic) {
-    throw new Error("MNEMONIC env var must be set to initialize the wallet manager.");
+    throw new Error(
+      "MNEMONIC env var must be set to initialize the wallet manager."
+    );
   }
 
   if (!process.env["SOLANA_NETWORK"]) {
@@ -783,13 +780,23 @@ async function initializeGameToken() {
     results.forEach((result) => {
       if (!result.alreadyExists) {
         console.log(`\n${result.tokenTicker}:`);
-        console.log(`• Transaction: ${buildExplorerUrl("tx", result.transaction)}`);
-        console.log(`• Token Mint: ${buildExplorerUrl("token", result.tokenMint)}`);
         console.log(
-          `• Game Token PDA: ${buildExplorerUrl("account", result.gameTokenPda)}`
+          `• Transaction: ${buildExplorerUrl("tx", result.transaction)}`
         );
         console.log(
-          `• Game Token Account: ${buildExplorerUrl("account", result.gameTokenAccount)}`
+          `• Token Mint: ${buildExplorerUrl("token", result.tokenMint)}`
+        );
+        console.log(
+          `• Game Token PDA: ${buildExplorerUrl(
+            "account",
+            result.gameTokenPda
+          )}`
+        );
+        console.log(
+          `• Game Token Account: ${buildExplorerUrl(
+            "account",
+            result.gameTokenAccount
+          )}`
         );
       }
     });

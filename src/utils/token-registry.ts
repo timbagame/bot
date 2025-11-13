@@ -23,18 +23,21 @@ const BUILTIN_TOKEN_METADATA: BuiltinTokenMetadata[] = [
     decimals: 6,
   },
   {
-    mint: "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E",
+    mint: "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
     ticker: "WBTC",
     decimals: 8,
   },
   {
-    mint: "7vfCXTUXx5WJV5JADkE7LJ4LbA6DkBvj5Q5k4TtRtzfR",
+    mint: "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
     ticker: "ETH",
     decimals: 8,
   },
 ];
 
-const BUILTIN_TOKEN_METADATA_BY_TICKER = new Map<string, BuiltinTokenMetadata>();
+const BUILTIN_TOKEN_METADATA_BY_TICKER = new Map<
+  string,
+  BuiltinTokenMetadata
+>();
 const BUILTIN_TOKEN_METADATA_BY_MINT = new Map<string, BuiltinTokenMetadata>();
 
 for (const token of BUILTIN_TOKEN_METADATA) {
@@ -64,11 +67,11 @@ const REGISTERED_TOKENS: TokenConfig[] = [
     ticker: "USDT",
   },
   {
-    mint: "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E",
+    mint: "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
     ticker: "WBTC",
   },
   {
-    mint: "7vfCXTUXx5WJV5JADkE7LJ4LbA6DkBvj5Q5k4TtRtzfR",
+    mint: "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
     ticker: "ETH",
   },
   { mint: "A6rSPi9JmJgVkW6BatsA6MjFYLseizPM2Fnt92coFjf4", ticker: "MAGAIBA" },
@@ -100,13 +103,16 @@ export function resolveDefaultToken(options?: {
   ticker?: string | null;
   network?: SolanaNetwork;
 }): TokenConfig {
-  const mintOverride = options?.mint ?? process.env["DEFAULT_TOKEN_MINT"]?.trim();
-  const tickerOverride = options?.ticker ?? process.env["DEFAULT_TOKEN_TICKER"]?.trim();
+  const mintOverride =
+    options?.mint ?? process.env["DEFAULT_TOKEN_MINT"]?.trim();
+  const tickerOverride =
+    options?.ticker ?? process.env["DEFAULT_TOKEN_TICKER"]?.trim();
 
   if (mintOverride && mintOverride.length > 0) {
     return {
       mint: mintOverride,
-      ticker: tickerOverride && tickerOverride.length > 0 ? tickerOverride : "TOKEN",
+      ticker:
+        tickerOverride && tickerOverride.length > 0 ? tickerOverride : "TOKEN",
     };
   }
 
@@ -118,12 +124,15 @@ export function resolveDefaultToken(options?: {
 
   return (
     REGISTERED_TOKENS.find(
-      (token) => normalizeTicker(token.ticker) === normalizeTicker(defaultTicker)
+      (token) =>
+        normalizeTicker(token.ticker) === normalizeTicker(defaultTicker)
     ) ?? TIMBA_MAINNET_TOKEN
   );
 }
 
-export function buildTokenList(options: TokenRegistryOptions = {}): TokenConfig[] {
+export function buildTokenList(
+  options: TokenRegistryOptions = {}
+): TokenConfig[] {
   const network = options.network ?? NetworkDetector.getCurrentNetwork();
   const includeDefault = options.includeDefault ?? true;
   const defaultToken = includeDefault
@@ -139,7 +148,9 @@ export function buildTokenList(options: TokenRegistryOptions = {}): TokenConfig[
   return dedupeTokens(tokens);
 }
 
-export function getSupportedTokens(options: TokenRegistryOptions = {}): TokenConfig[] {
+export function getSupportedTokens(
+  options: TokenRegistryOptions = {}
+): TokenConfig[] {
   return buildTokenList(options);
 }
 
@@ -196,7 +207,9 @@ export function requireTokenByMint(
 ): TokenConfig {
   const token = getTokenByMint(mint, options);
   if (!token) {
-    throw new Error(`Token mint ${mint} is not configured in the token registry.`);
+    throw new Error(
+      `Token mint ${mint} is not configured in the token registry.`
+    );
   }
   return token;
 }
