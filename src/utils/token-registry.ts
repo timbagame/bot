@@ -17,6 +17,21 @@ const BUILTIN_TOKEN_METADATA: BuiltinTokenMetadata[] = [
     ticker: "USDC",
     decimals: 6,
   },
+  {
+    mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+    ticker: "USDT",
+    decimals: 6,
+  },
+  {
+    mint: "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E",
+    ticker: "WBTC",
+    decimals: 8,
+  },
+  {
+    mint: "7vfCXTUXx5WJV5JADkE7LJ4LbA6DkBvj5Q5k4TtRtzfR",
+    ticker: "ETH",
+    decimals: 8,
+  },
 ];
 
 const BUILTIN_TOKEN_METADATA_BY_TICKER = new Map<string, BuiltinTokenMetadata>();
@@ -43,6 +58,18 @@ const REGISTERED_TOKENS: TokenConfig[] = [
   {
     mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     ticker: "USDC",
+  },
+  {
+    mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+    ticker: "USDT",
+  },
+  {
+    mint: "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E",
+    ticker: "WBTC",
+  },
+  {
+    mint: "7vfCXTUXx5WJV5JADkE7LJ4LbA6DkBvj5Q5k4TtRtzfR",
+    ticker: "ETH",
   },
   { mint: "A6rSPi9JmJgVkW6BatsA6MjFYLseizPM2Fnt92coFjf4", ticker: "MAGAIBA" },
   { mint: "FkBF9u1upwEMUPxnXjcydxxVSxgr8f3k1YXbz7G7bmtA", ticker: "GLORP" },
