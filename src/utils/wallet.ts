@@ -2130,11 +2130,12 @@ export class WalletManager {
     }
 
     const latestBlockhash = await this.getLatestBlockhash();
+    const lookupTableAccounts = options?.addressLookupTableAccounts?.slice();
     const message = new TransactionMessage({
       payerKey: signers[0]!.publicKey,
       recentBlockhash: latestBlockhash.blockhash,
       instructions: instructions,
-    }).compileToV0Message(options?.addressLookupTableAccounts);
+    }).compileToV0Message(lookupTableAccounts);
 
     const tx = new VersionedTransaction(message);
     tx.sign(signers);
@@ -2200,12 +2201,15 @@ export class WalletManager {
       addressLookupTableAccounts,
     } = options;
 
+    const lookupTableAccountsSnapshot = addressLookupTableAccounts?.slice();
+    const sendOptions = {
+      addressLookupTableAccounts: lookupTableAccountsSnapshot,
+    };
+
     const startingSignature =
       typeof initialSignature === "string" && initialSignature.length > 0
         ? initialSignature
-        : await this.sendTransaction(instructions, signers, {
-            addressLookupTableAccounts,
-          });
+        : await this.sendTransaction(instructions, signers, sendOptions);
 
     if (skipConfirmation) {
       return startingSignature;
@@ -2249,9 +2253,7 @@ export class WalletManager {
           }`
         );
 
-        currentSignature = await this.sendTransaction(instructions, signers, {
-          addressLookupTableAccounts,
-        });
+        currentSignature = await this.sendTransaction(instructions, signers, sendOptions);
       }
     }
   }

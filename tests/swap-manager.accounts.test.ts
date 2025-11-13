@@ -103,4 +103,60 @@ describe("SwapManager token account setup", () => {
     const creationIxs = ensureCalls.flatMap((c) => c.result.instructions);
     expect(ix).toEqual(creationIxs);
   });
+
+  test("skips redundant ATA creation when accounts already exist", async () => {
+    const user = Keypair.generate();
+    const mint = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+    const connection = new FakeConnection({}) as any as Connection;
+    const wallet = WalletManager.createForTest(
+      "test walk nut penalty hip pave soap entry language right filter choice",
+      { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    );
+
+    const creationIx = new TransactionInstruction({
+      programId: Keypair.generate().publicKey,
+      keys: [],
+      data: Buffer.alloc(0),
+    });
+
+    const ensureResults = [
+      {
+        created: true,
+        instructions: [creationIx],
+        isToken2022: false,
+        programId: TOKEN_PROGRAM_ID,
+      },
+      {
+        created: false,
+        instructions: [],
+        isToken2022: false,
+        programId: TOKEN_PROGRAM_ID,
+      },
+    ];
+
+    let callIndex = 0;
+    wallet.ensureAssociatedTokenAccount = (
+      async () => {
+        const result = ensureResults[callIndex];
+        callIndex = Math.min(callIndex + 1, ensureResults.length - 1);
+        return result as any;
+      }
+    ) as WalletManager["ensureAssociatedTokenAccount"];
+
+    const manager = new SwapManager(connection, wallet);
+
+    const first = await (manager as any).createTokenAccountsIfNeeded(
+      user,
+      mint.toBase58(),
+      mint.toBase58()
+    );
+    expect(first).toEqual([creationIx]);
+
+    const second = await (manager as any).createTokenAccountsIfNeeded(
+      user,
+      mint.toBase58(),
+      mint.toBase58()
+    );
+    expect(second).toEqual([]);
+  });
 });

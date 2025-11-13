@@ -6,6 +6,7 @@ import { normalizePumpFunAmount } from "../src/utils/swap/pump-fun-amount";
 import type { JupiterQuoteResponse } from "../src/utils/jupiter";
 import type { PumpFunQuote } from "../src/utils/pump-fun";
 import { WSOL_MINT } from "../src/utils/token-registry";
+import { determineCompositeFlow } from "../src/utils/swap/pump-fun-support";
 
 describe("SwapManager pump.fun composite quotes", () => {
   const connection = new Connection("http://localhost:8899", "confirmed");
@@ -189,5 +190,49 @@ describe("SwapManager pump.fun composite quotes", () => {
     expect(quote.provider).toBe("pump-fun+jupiter");
     expect(quote.inputAmount).toBe("1");
     expect(quote.composite?.pumpQuote.inputAmount).toBe("1");
+  });
+
+  test("composite quote keeps Jupiter input aligned to pump output", async () => {
+    const manager = createManager();
+    const pumpOutputLamports = "1234";
+    (manager.pumpFunClient as any).getQuote = async () =>
+      stubPumpQuote({ outputAmount: pumpOutputLamports });
+    (manager as any).jupiterClient.getQuote = async (request: {
+      amount: string;
+    }) => {
+      expect(request.amount).toBe(pumpOutputLamports);
+      return stubJupiterQuote({ inAmount: pumpOutputLamports });
+    };
+
+    const quote = await manager.getQuote({
+      inputMint: pumpMint,
+      outputMint: usdcMint,
+      amount: "1",
+      inputDecimals: 6,
+      outputDecimals: 6,
+      userKeypair: Keypair.generate(),
+      inputTicker: "PUMP",
+      outputTicker: "USDC",
+      slippageBps: 50,
+    });
+
+    expect(quote.provider).toBe("pump-fun+jupiter");
+    expect(quote.composite?.pumpQuote.outputAmount).toBe(pumpOutputLamports);
+    expect(quote.composite?.jupiterQuote.inAmount).toBe(pumpOutputLamports);
+  });
+});
+
+describe("Composite flow boundaries", () => {
+  test("does not suggest composite routing when both sides are SOL", () => {
+    const isSolMint = (mint: string) => mint === WSOL_MINT || mint === "SOL";
+    expect(
+      determineCompositeFlow({
+        inputIsPump: false,
+        outputIsPump: false,
+        inputMint: WSOL_MINT,
+        outputMint: "SOL",
+        isSolMint,
+      })
+    ).toBeNull();
   });
 });
