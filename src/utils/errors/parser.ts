@@ -1,3 +1,5 @@
+import { Connection } from "@solana/web3.js";
+
 /**
  * Error parsing utilities for extracting structured information from error objects
  */
@@ -32,7 +34,8 @@ export const extractLamportsInfo = (
 
 export const collectErrorLogs = (
   error: unknown,
-  visited: Set<any> = new Set()
+  visited: Set<any> = new Set(),
+  connection?: Connection
 ): string[] => {
   if (!error || typeof error !== "object") return [];
   if (visited.has(error)) return [];
@@ -55,7 +58,10 @@ export const collectErrorLogs = (
   pushLogs(candidate.transactionLogs);
   if (typeof candidate.getLogs === "function") {
     try {
-      const extracted = candidate.getLogs();
+      const extracted =
+        connection && candidate.getLogs.length > 0
+          ? candidate.getLogs(connection)
+          : candidate.getLogs();
       pushLogs(extracted);
     } catch (logError) {
       console.debug("Failed to extract logs from error", logError);
@@ -63,22 +69,23 @@ export const collectErrorLogs = (
   }
 
   if (candidate.data) {
-    logs.push(...collectErrorLogs(candidate.data, visited));
+    logs.push(...collectErrorLogs(candidate.data, visited, connection));
   }
   if (candidate.error) {
-    logs.push(...collectErrorLogs(candidate.error, visited));
+    logs.push(...collectErrorLogs(candidate.error, visited, connection));
   }
   if (candidate.cause) {
-    logs.push(...collectErrorLogs(candidate.cause, visited));
+    logs.push(...collectErrorLogs(candidate.cause, visited, connection));
   }
 
   return logs;
 };
 
 export const extractLamportsInfoFromError = (
-  error: unknown
+  error: unknown,
+  connection?: Connection
 ): { current: number; needed: number } | null => {
-  const logs = collectErrorLogs(error);
+  const logs = collectErrorLogs(error, new Set(), connection);
   for (const log of logs) {
     const info = extractLamportsInfo(log);
     if (info) {

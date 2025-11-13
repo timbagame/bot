@@ -233,6 +233,7 @@ export const parseTransactionError = (
 ): string => {
   const errorMessage = error instanceof Error ? error.message : String(error);
   const lowerMessage = errorMessage.toLowerCase();
+  const walletConnection = walletManager?.getConnection?.();
 
   // Handle transaction timeout errors
   if (isTransactionTimeoutError(lowerMessage)) {
@@ -246,7 +247,8 @@ export const parseTransactionError = (
 
   // Check for specific lamports info (insufficient funds with details)
   const lamportsInfo =
-    extractLamportsInfo(errorMessage) || extractLamportsInfoFromError(error);
+    extractLamportsInfo(errorMessage) ||
+    extractLamportsInfoFromError(error, walletConnection);
   if (lamportsInfo) {
     return formatInsufficientFundsError(
       lamportsInfo.current,
@@ -258,9 +260,8 @@ export const parseTransactionError = (
   // Resolve fee budget for common error messages
   let feeBudget: FeeBudgetManager | null = null;
   try {
-    const connection = walletManager?.getConnection?.();
-    if (connection) {
-      feeBudget = FeeBudgetManager.getInstance(connection);
+    if (walletConnection) {
+      feeBudget = FeeBudgetManager.getInstance(walletConnection);
     }
   } catch (budgetError) {
     console.warn("Failed to resolve fee budget manager for error formatting:", budgetError);

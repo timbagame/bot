@@ -5,6 +5,7 @@ import {
   TransactionInstruction,
   VersionedTransaction,
   SystemProgram,
+  ComputeBudgetProgram,
 } from "@solana/web3.js";
 import type {
   AddressLookupTableAccount,
@@ -49,6 +50,9 @@ export type {
 
 const SOL_MINT = WSOL_MINT;
 const SOL_DECIMALS = 9;
+const COMPOSITE_MIN_COMPUTE_UNIT_LIMIT = 200_000;
+const COMPOSITE_PUMP_COMPUTE_BUFFER = 120_000;
+const COMPOSITE_MAX_COMPUTE_UNIT_LIMIT = 1_400_000;
 
 export class SwapManager {
   private jupiterClient: JupiterClient;
@@ -1124,10 +1128,50 @@ export class SwapManager {
       addressLookupTableAccounts,
     } = await this.extractJupiterInstructions(jupiterResponse.swapTransaction);
 
+    const {
+      sanitizedInstructions: sanitizedJupiterInstructions,
+      computeUnitLimit,
+      computePriceInstructions,
+    } = this.partitionJupiterComputeBudgetInstructions(jupiterInstructions);
+
+    const computeBudgetInstructions = this.buildCompositeComputeBudgetInstructions({
+      pumpInstructions,
+      computeUnitLimit,
+      computePriceInstructions,
+    });
+
     const combinedInstructions =
       flow === "pump-then-jupiter"
-        ? [...pumpInstructions, ...jupiterInstructions]
-        : [...jupiterInstructions, ...pumpInstructions];
+        ? [
+            ...computeBudgetInstructions,
+            ...pumpInstructions,
+            ...sanitizedJupiterInstructions,
+          ]
+        : [
+            ...computeBudgetInstructions,
+            ...sanitizedJupiterInstructions,
+            ...pumpInstructions,
+          ];
+
+    const userSigner = userKeypair.publicKey.toBase58();
+    const jupiterSignerPubkeys = this.collectSignerPubkeys(
+      sanitizedJupiterInstructions
+    );
+    const extraJupiterSigners = [...jupiterSignerPubkeys].filter(
+      (pubkey) => pubkey !== userSigner
+    );
+    if (extraJupiterSigners.length > 0) {
+      console.warn(
+        "⚠️ Jupiter composite swap requires additional signer(s); falling back to sequential execution:",
+        extraJupiterSigners
+      );
+      return await this.executeSequentialCompositeSwapFallback(
+        flow,
+        pumpInstructions,
+        jupiterResponse.swapTransaction,
+        userKeypair
+      );
+    }
 
     const operationLabel =
       flow === "pump-then-jupiter"
@@ -1437,6 +1481,72 @@ export class SwapManager {
     return { instructions, addressLookupTableAccounts: lookupAccounts };
   }
 
+  private partitionJupiterComputeBudgetInstructions(
+    instructions: TransactionInstruction[]
+  ): {
+    sanitizedInstructions: TransactionInstruction[];
+    computeUnitLimit?: number;
+    computePriceInstructions: TransactionInstruction[];
+  } {
+    const sanitizedInstructions: TransactionInstruction[] = [];
+    const computePriceInstructions: TransactionInstruction[] = [];
+    let computeUnitLimit: number | undefined;
+
+    for (const instruction of instructions) {
+      if (instruction.programId.equals(ComputeBudgetProgram.programId)) {
+        const kind = instruction.data?.[0];
+        if (kind === 2) {
+          computeUnitLimit = this.decodeComputeUnitLimit(instruction) ?? computeUnitLimit;
+          continue;
+        }
+        if (kind === 3) {
+          computePriceInstructions.push(instruction);
+          continue;
+        }
+      }
+      sanitizedInstructions.push(instruction);
+    }
+
+    return {
+      sanitizedInstructions,
+      computeUnitLimit,
+      computePriceInstructions,
+    };
+  }
+
+  private decodeComputeUnitLimit(
+    instruction: TransactionInstruction
+  ): number | undefined {
+    if (!instruction.data || instruction.data.length < 5) {
+      return undefined;
+    }
+    if (instruction.data[0] !== 2) {
+      return undefined;
+    }
+    return instruction.data.readUInt32LE(1);
+  }
+
+  private buildCompositeComputeBudgetInstructions(options: {
+    pumpInstructions: TransactionInstruction[];
+    computeUnitLimit?: number;
+    computePriceInstructions: TransactionInstruction[];
+  }): TransactionInstruction[] {
+    const pumpBuffer =
+      options.pumpInstructions.length > 0
+        ? COMPOSITE_PUMP_COMPUTE_BUFFER
+        : 0;
+    const baseLimit = options.computeUnitLimit ?? COMPOSITE_MIN_COMPUTE_UNIT_LIMIT;
+    const targetLimit = Math.min(
+      COMPOSITE_MAX_COMPUTE_UNIT_LIMIT,
+      Math.max(COMPOSITE_MIN_COMPUTE_UNIT_LIMIT, baseLimit + pumpBuffer)
+    );
+
+    return [
+      ComputeBudgetProgram.setComputeUnitLimit({ units: targetLimit }),
+      ...options.computePriceInstructions,
+    ];
+  }
+
   private async resolveAddressLookupTableAccounts(
     lookups: MessageAddressTableLookup[]
   ): Promise<AddressLookupTableAccount[]> {
@@ -1452,6 +1562,68 @@ export class SwapManager {
       return response.value;
     });
     return await Promise.all(promises);
+  }
+
+  private collectSignerPubkeys(
+    instructions: TransactionInstruction[]
+  ): Set<string> {
+    const signerSet = new Set<string>();
+    for (const instruction of instructions) {
+      for (const key of instruction.keys) {
+        if (key.isSigner) {
+          signerSet.add(key.pubkey.toBase58());
+        }
+      }
+    }
+    return signerSet;
+  }
+
+  private async executeSequentialCompositeSwapFallback(
+    flow: CompositeFlow,
+    pumpInstructions: TransactionInstruction[],
+    serializedJupiterTransaction: string,
+    userKeypair: Keypair
+  ): Promise<{ signature: string; flow: CompositeFlow }> {
+    const pumpLabel =
+      flow === "pump-then-jupiter"
+        ? "Pump.fun composite fallback (first leg)"
+        : "Pump.fun composite fallback (second leg)";
+    const jupiterLabel =
+      flow === "pump-then-jupiter"
+        ? "Jupiter composite fallback (second leg)"
+        : "Jupiter composite fallback (first leg)";
+
+    const sendPumpInstructions = async (): Promise<string | null> => {
+      if (pumpInstructions.length === 0) {
+        return null;
+      }
+      return await this.wallet.sendAndConfirmWithResubmits(
+        pumpInstructions,
+        [userKeypair],
+        { operationLabel: pumpLabel }
+      );
+    };
+
+    const sendJupiterSequentially = async (): Promise<string> => {
+      console.log(
+        `⚠️ ${jupiterLabel}: submitting fallback Jupiter transaction sequentially`
+      );
+      return await this.executeJupiterTransaction(
+        serializedJupiterTransaction,
+        userKeypair
+      );
+    };
+
+    let jupiterSignature: string;
+    if (flow === "pump-then-jupiter") {
+      await sendPumpInstructions();
+      jupiterSignature = await sendJupiterSequentially();
+    } else {
+      jupiterSignature = await sendJupiterSequentially();
+      await sendPumpInstructions();
+    }
+
+    return { signature: jupiterSignature, flow };
   }
 
   /**
