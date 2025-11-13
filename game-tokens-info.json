@@ -2,7 +2,7 @@
   "network": "mainnet",
   "programId": "32Jr4JnXWvqq9GqPQynkooHsszaucUUvZfNLh2hdX2L5",
   "authority": "4oRdwjBqMGjhh5octi4BLvtNGCgWdJDMv3bBr9Jpi5V8",
-  "initializedAt": "2025-10-27T16:14:43.022Z",
+  "initializedAt": "2025-11-13T03:32:47.981Z",
   "tokens": [
     {
       "ticker": "TIMBA",
@@ -23,6 +23,27 @@
       "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
       "gameTokenPda": "AaW23h2YkZtAWoWwUiz8nkuPR719tH9fYnVhShykGwGc",
       "gameVaultPda": "ATcbKVskCFUcbUWQKxhD2ukMRNkvEp2QKQh8UASyzu53",
+      "status": "already_existed"
+    },
+    {
+      "ticker": "USDT",
+      "mint": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+      "gameTokenPda": "5SQhrxpNu3hJuYG1xPBMxSHDpne6az54bEiMD1hjwgdf",
+      "gameVaultPda": "BsoFT7K9csu2WUeUHvpRws37YUkjsaxAYGsm6ytPv1rr",
+      "status": "already_existed"
+    },
+    {
+      "ticker": "WBTC",
+      "mint": "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
+      "gameTokenPda": "4zBCW6aSMKiprrYLb4JEhqpGpRAZxPSGpFcSGtXqEVZ1",
+      "gameVaultPda": "Cv3BsoHFKbpfa778qzvu72ie6Df6biPFU76LuXRY18uq",
+      "status": "already_existed"
+    },
+    {
+      "ticker": "ETH",
+      "mint": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+      "gameTokenPda": "2tQc2NagtKtG8T11g3MtPp7ciRBNyVEvcm7CckEnkGuc",
+      "gameVaultPda": "3H5rfGegEmsEXNbZeDuyybLiZtGhXe5t73X2UhBsiELg",
       "status": "already_existed"
     },
     {
