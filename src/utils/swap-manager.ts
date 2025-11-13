@@ -1006,12 +1006,10 @@ export class SwapManager {
       addressLookupTableAccounts,
     } = await this.extractJupiterInstructions(jupiterResponse.swapTransaction);
 
-    const combinedInstructions = [
-      ...setupInstructions,
-      ...(flow === "pump-then-jupiter"
+    const combinedInstructions =
+      flow === "pump-then-jupiter"
         ? [...pumpInstructions, ...jupiterInstructions]
-        : [...jupiterInstructions, ...pumpInstructions]),
-    ];
+        : [...jupiterInstructions, ...pumpInstructions];
 
     const operationLabel =
       flow === "pump-then-jupiter"
