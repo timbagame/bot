@@ -1,10 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { PublicKey } from "@solana/web3.js";
 import { GameManager } from "../src/utils/game";
-import {
-  sanitizeTelegramDisplayName,
-  sanitizeTelegramDisplayNameWithoutMention,
-} from "../src/utils/telegram-display";
+import { sanitizeTelegramDisplayNameWithoutMention } from "../src/utils/telegram-display";
 
 function resetGM() {
   GameManager.resetForTest();
