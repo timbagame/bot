@@ -44,14 +44,6 @@ export type {
 
 const SOL_MINT = WSOL_MINT;
 const SOL_DECIMALS = 9;
-const KNOWN_MAJOR_TOKENS = new Set([
-  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
-  "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
-  "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So", // mSOL
-  "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", // Bonk
-  "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", // ETH
-  "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E", // BTC
-]);
 
 export class SwapManager {
   private jupiterClient: JupiterClient;
@@ -78,10 +70,6 @@ export class SwapManager {
 
   private isSolMint(mint: string): boolean {
     return mint === SOL_MINT || mint === "SOL";
-  }
-
-  private isKnownMajorToken(mint: string): boolean {
-    return KNOWN_MAJOR_TOKENS.has(mint);
   }
 
   private convertRawAmountToDecimal(
@@ -170,7 +158,6 @@ export class SwapManager {
       outputMint,
       network: this.network,
       isSolMint: (mint) => this.isSolMint(mint),
-      isKnownMajorToken: (mint) => this.isKnownMajorToken(mint),
       log: true,
     });
 
@@ -1303,7 +1290,6 @@ export class SwapManager {
       outputMint,
       network: this.network,
       isSolMint: (mint) => this.isSolMint(mint),
-      isKnownMajorToken: (mint) => this.isKnownMajorToken(mint),
     });
 
     if (this.network === "mainnet" && hasNonGraduatedPumpFun) {

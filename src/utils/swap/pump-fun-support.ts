@@ -90,7 +90,6 @@ export async function detectPumpFunContext(options: {
   outputMint: string;
   network: SolanaNetwork;
   isSolMint: (mint: string) => boolean;
-  isKnownMajorToken: (mint: string) => boolean;
   log?: boolean;
 }): Promise<PumpFunContext> {
   const {
@@ -99,7 +98,6 @@ export async function detectPumpFunContext(options: {
     outputMint,
     network,
     isSolMint,
-    isKnownMajorToken,
     log = false,
   } = options;
 
@@ -120,10 +118,10 @@ export async function detectPumpFunContext(options: {
   ): Promise<PumpFunDetectionInfo> => {
     const label = role === "input" ? "Input" : "Output";
 
-    if (isSolMint(mint) || isKnownMajorToken(mint)) {
+    if (isSolMint(mint)) {
       if (log) {
         console.log(
-          `   ${label} token ${mint} skipped for pump.fun detection (SOL/major token)`
+          `   ${label} token ${mint} skipped for pump.fun detection (SOL)`
         );
       }
       return emptyInfo;
