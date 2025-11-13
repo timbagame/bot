@@ -413,7 +413,6 @@ export class SwapManager {
 
     const targetLamports = Math.max(desiredLamports ?? 0, minimumSolBuffer);
 
-    let lentLamportsOutstanding = 0;
     let lastJupiterError: string | null = null;
     let lastUnwrapError: string | null = null;
 
@@ -483,22 +482,6 @@ export class SwapManager {
             lamportsReceived: target,
           };
         } catch (attemptError: any) {
-          if (lentLamportsOutstanding > 0) {
-            try {
-              await this.refundLentFees(
-                userKeypair,
-                lentLamportsOutstanding
-              );
-            } catch (refundError) {
-              console.error(
-                "Failed to refund lent swap fees after Jupiter attempt:",
-                refundError
-              );
-            } finally {
-              lentLamportsOutstanding = 0;
-            }
-          }
-
           const message = attemptError?.message || String(attemptError);
           lastJupiterError =
             message ||
@@ -530,24 +513,16 @@ export class SwapManager {
 
         try {
           const lendingLamports = Math.max(jitFeeBuffer - currentLamports, 0);
-          if (lendingLamports > 0) {
-            await this.lendSwapFees(userKeypair, lendingLamports);
-            lentLamportsOutstanding += lendingLamports;
-          }
+          const adminKeypair =
+            lendingLamports > 0 ? this.wallet.getAdminKeypair() : undefined;
 
           const { signature, lamportsReceived } = await this.unwrapWsolPortion({
             userKeypair,
             unwrapLamports,
             logContext,
+            adminKeypair,
+            lendingLamports,
           });
-
-          if (lentLamportsOutstanding > 0) {
-            await this.refundLentFees(
-              userKeypair,
-              lentLamportsOutstanding
-            );
-            lentLamportsOutstanding = 0;
-          }
 
           lastUnwrapError = null;
           return {
@@ -557,22 +532,6 @@ export class SwapManager {
             lamportsReceived,
           };
         } catch (attemptError: any) {
-          if (lentLamportsOutstanding > 0) {
-            try {
-              await this.refundLentFees(
-                userKeypair,
-                lentLamportsOutstanding
-              );
-            } catch (refundError) {
-              console.error(
-                "Failed to refund lent fees after WSOL unwrap attempt:",
-                refundError
-              );
-            } finally {
-              lentLamportsOutstanding = 0;
-            }
-          }
-
           const message = attemptError?.message || String(attemptError);
           lastUnwrapError =
             message ||
@@ -761,9 +720,34 @@ export class SwapManager {
         userKeypair,
       });
 
+      const lendingLamports = Math.max(jitFeeBuffer - currentLamports, 0);
       const adminKeypair = this.wallet.getAdminKeypair();
+      const instructions: TransactionInstruction[] = [];
+
+      if (lendingLamports > 0) {
+        instructions.push(
+          SystemProgram.transfer({
+            fromPubkey: adminKeypair.publicKey,
+            toPubkey: userKeypair.publicKey,
+            lamports: lendingLamports,
+          })
+        );
+      }
+
+      instructions.push(...swapInstructions);
+
+      if (lendingLamports > 0) {
+        instructions.push(
+          SystemProgram.transfer({
+            fromPubkey: userKeypair.publicKey,
+            toPubkey: adminKeypair.publicKey,
+            lamports: lendingLamports,
+          })
+        );
+      }
+
       const signature = await this.wallet.sendAndConfirmWithResubmits(
-        swapInstructions,
+        instructions,
         [adminKeypair, userKeypair],
         { operationLabel: "pump.fun JIT swap" }
       );
@@ -775,13 +759,6 @@ export class SwapManager {
         lamportsReceived: selectedQuote.lamportsOut,
       };
     } catch (error: any) {
-      if (lentLamportsOutstanding > 0) {
-        try {
-          await this.refundLentFees(userKeypair, lentLamportsOutstanding);
-        } catch (refundError) {
-          console.error("Failed to refund lent swap fees:", refundError);
-        }
-      }
       console.error("Just-in-time SOL swap failed:", error);
       return {
         swapped: false,
@@ -794,8 +771,23 @@ export class SwapManager {
     userKeypair: Keypair;
     unwrapLamports: number;
     logContext: string;
+    adminKeypair?: Keypair;
+    lendingLamports?: number;
   }): Promise<{ signature: string; lamportsReceived: number }> {
-    const { userKeypair, unwrapLamports, logContext } = options;
+    const {
+      userKeypair,
+      unwrapLamports,
+      logContext,
+      adminKeypair,
+      lendingLamports = 0,
+    } = options;
+
+    const loanLamports = Math.max(0, Math.trunc(lendingLamports));
+    if (loanLamports > 0 && !adminKeypair) {
+      throw new Error(
+        "Admin keypair required when lending lamports for WSOL unwrap."
+      );
+    }
 
     if (!Number.isFinite(unwrapLamports) || unwrapLamports <= 0) {
       throw new Error("Unwrap amount must be greater than zero.");
@@ -832,9 +824,36 @@ export class SwapManager {
       `🧼 Unwrapping ${formattedUnwrap} WSOL for ${logContext}. Remaining WSOL after unwrap: ${formattedRemaining}.`
     );
 
+    const instructions: TransactionInstruction[] = [];
+
+    if (loanLamports > 0) {
+      instructions.push(
+        SystemProgram.transfer({
+          fromPubkey: adminKeypair!.publicKey,
+          toPubkey: owner,
+          lamports: loanLamports,
+        })
+      );
+    }
+
+    instructions.push(...unwrapPlan.instructions);
+
+    if (loanLamports > 0) {
+      instructions.push(
+        SystemProgram.transfer({
+          fromPubkey: owner,
+          toPubkey: adminKeypair!.publicKey,
+          lamports: loanLamports,
+        })
+      );
+    }
+
+    const signers: Keypair[] =
+      loanLamports > 0 ? [adminKeypair!, userKeypair] : [userKeypair];
+
     const signature = await this.wallet.sendAndConfirmWithResubmits(
-      unwrapPlan.instructions,
-      [userKeypair],
+      instructions,
+      signers,
       { operationLabel: "WSOL unwrap" }
     );
 
@@ -844,41 +863,6 @@ export class SwapManager {
     };
   }
 
-  private async transferFees(
-    fromKeypair: Keypair,
-    toPublicKey: PublicKey,
-    lamports: number
-  ): Promise<void> {
-    if (lamports <= 0) {
-      return;
-    }
-
-    const transferIx = SystemProgram.transfer({
-      fromPubkey: fromKeypair.publicKey,
-      toPubkey: toPublicKey,
-      lamports,
-    });
-
-    await this.wallet.sendAndConfirmWithResubmits([transferIx], [fromKeypair], {
-      operationLabel: "Fee transfer",
-    });
-  }
-
-  private async lendSwapFees(
-    userKeypair: Keypair,
-    lamports: number
-  ): Promise<void> {
-    const adminKeypair = this.wallet.getAdminKeypair();
-    await this.transferFees(adminKeypair, userKeypair.publicKey, lamports);
-  }
-
-  private async refundLentFees(
-    userKeypair: Keypair,
-    lamports: number
-  ): Promise<void> {
-    const adminKeypair = this.wallet.getAdminKeypair();
-    await this.transferFees(userKeypair, adminKeypair.publicKey, lamports);
-  }
 
   /**
    * Create swap transaction instructions

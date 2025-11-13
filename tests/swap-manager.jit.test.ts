@@ -121,15 +121,6 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       throw new Error("Jupiter/Pump fun routing should be skipped for WSOL unwrap");
     };
 
-    const lendCalls: number[] = [];
-    const refundCalls: number[] = [];
-    (swapManager as any).lendSwapFees = async (_kp: Keypair, lamports: number) => {
-      lendCalls.push(lamports);
-    };
-    (swapManager as any).refundLentFees = async (_kp: Keypair, lamports: number) => {
-      refundCalls.push(lamports);
-    };
-
     const unwrapRequests: number[] = [];
     const unwrapLamports = TEST_GAME_BUFFER_LAMPORTS + TEST_JIT_BUFFER_LAMPORTS;
     (wallet as any).buildUnwrapWsolPlan = async ({
@@ -144,7 +135,17 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
         remainingLamports: 0,
       };
     };
-    (wallet as any).sendAndConfirmWithResubmits = async () => "SIG_UNWRAP";
+    const sendCalls: Array<{
+      instructions: TransactionInstruction[];
+      signers: Keypair[];
+    }> = [];
+    (wallet as any).sendAndConfirmWithResubmits = async (
+      instructions: TransactionInstruction[],
+      signers: Keypair[]
+    ) => {
+      sendCalls.push({ instructions, signers });
+      return "SIG_UNWRAP";
+    };
 
     const user = Keypair.generate();
     const result = await swapManager.performJustInTimeSolSwap({
@@ -164,8 +165,25 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(unwrapRequests).toEqual([
       TEST_GAME_BUFFER_LAMPORTS + TEST_JIT_BUFFER_LAMPORTS,
     ]);
-    expect(lendCalls).toEqual([TEST_JIT_BUFFER_LAMPORTS]);
-    expect(refundCalls).toEqual([TEST_JIT_BUFFER_LAMPORTS]);
+    expect(sendCalls.length).toBe(1);
+    const sendCall = sendCalls[0]!;
+    expect(sendCall.signers.length).toBe(2);
+    expect(sendCall.signers[0]?.publicKey.equals(admin.publicKey)).toBe(true);
+    expect(sendCall.signers[1]?.publicKey.equals(user.publicKey)).toBe(true);
+    expect(sendCall.instructions.length).toBe(2);
+
+    const loanIx = sendCall.instructions[0]!;
+    const refundIx = sendCall.instructions[1]!;
+
+    const loanDecoded = SystemInstruction.decodeTransfer(loanIx);
+    expect(loanDecoded.fromPubkey.equals(admin.publicKey)).toBe(true);
+    expect(loanDecoded.toPubkey.equals(user.publicKey)).toBe(true);
+    expect(Number(loanDecoded.lamports)).toBe(TEST_JIT_BUFFER_LAMPORTS);
+
+    const refundDecoded = SystemInstruction.decodeTransfer(refundIx);
+    expect(refundDecoded.fromPubkey.equals(user.publicKey)).toBe(true);
+    expect(refundDecoded.toPubkey.equals(admin.publicKey)).toBe(true);
+    expect(Number(refundDecoded.lamports)).toBe(TEST_JIT_BUFFER_LAMPORTS);
   });
 
   test("unwrap still executes when current SOL already exceeds swap target", async () => {
@@ -186,18 +204,6 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       throw new Error("Routing should be skipped when unwrapping WSOL");
     };
 
-    const lendCalls: number[] = [];
-    const refundCalls: number[] = [];
-    (swapManager as any).lendSwapFees = async (_kp: Keypair, lamports: number) => {
-      lendCalls.push(lamports);
-    };
-    (swapManager as any).refundLentFees = async (
-      _kp: Keypair,
-      lamports: number
-    ) => {
-      refundCalls.push(lamports);
-    };
-
     const unwrapRequests: number[] = [];
     (wallet as any).buildUnwrapWsolPlan = async ({
       amountLamports,
@@ -211,8 +217,17 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
         remainingLamports: 0,
       };
     };
-    (wallet as any).sendAndConfirmWithResubmits = async () =>
-      "SIG_UNWRAP_OVER_BUFFER";
+    const sendCalls: Array<{
+      instructions: TransactionInstruction[];
+      signers: Keypair[];
+    }> = [];
+    (wallet as any).sendAndConfirmWithResubmits = async (
+      instructions: TransactionInstruction[],
+      signers: Keypair[]
+    ) => {
+      sendCalls.push({ instructions, signers });
+      return "SIG_UNWRAP_OVER_BUFFER";
+    };
 
     const user = Keypair.generate();
     const availableRaw = 2_774_000; // ~0.002774 SOL wrapped
@@ -233,8 +248,11 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(unwrapRequests).toEqual([
       TEST_GAME_BUFFER_LAMPORTS - currentLamports + TEST_JIT_BUFFER_LAMPORTS,
     ]);
-    expect(lendCalls).toEqual([]);
-    expect(refundCalls).toEqual([]);
+    expect(sendCalls.length).toBe(1);
+    const sendCall = sendCalls[0]!;
+    expect(sendCall.signers.length).toBe(1);
+    expect(sendCall.signers[0]?.publicKey.equals(user.publicKey)).toBe(true);
+    expect(sendCall.instructions).toEqual([]);
   });
 
   test("returns helpful error when WSOL unwrap attempts fail", async () => {
@@ -251,19 +269,22 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       getBalance: async () => 0,
     };
 
-    const lendCalls: number[] = [];
-    const refundCalls: number[] = [];
-    (swapManager as any).lendSwapFees = async (_kp: Keypair, lamports: number) => {
-      lendCalls.push(lamports);
-    };
-    (swapManager as any).refundLentFees = async (_kp: Keypair, lamports: number) => {
-      refundCalls.push(lamports);
-    };
-
     let unwrapAttempts = 0;
     (wallet as any).buildUnwrapWsolPlan = async () => {
       unwrapAttempts += 1;
       throw new Error("Unable to unwrap due to rent exempt requirement.");
+    };
+
+    const sendCalls: Array<{
+      instructions: TransactionInstruction[];
+      signers: Keypair[];
+    }> = [];
+    (wallet as any).sendAndConfirmWithResubmits = async (
+      instructions: TransactionInstruction[],
+      signers: Keypair[]
+    ) => {
+      sendCalls.push({ instructions, signers });
+      return "SIG_FAIL";
     };
 
     const user = Keypair.generate();
@@ -278,8 +299,7 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(result.swapped).toBe(false);
     expect(result.error).toContain("Unable to unwrap due to rent exempt requirement.");
     expect(unwrapAttempts).toBeGreaterThanOrEqual(1);
-    expect(lendCalls.length).toBe(unwrapAttempts);
-    expect(refundCalls.length).toBe(unwrapAttempts);
+    expect(sendCalls).toHaveLength(0);
   });
 
   test("executes pump.fun swap with admin as fee payer", async () => {
@@ -290,12 +310,15 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     });
     const admin = Keypair.generate();
     (wallet as any).getAdminKeypair = () => admin;
-    const sendCalls: Keypair[][] = [];
+    const sendCalls: Array<{
+      instructions: TransactionInstruction[];
+      signers: Keypair[];
+    }> = [];
     (wallet as any).sendTransaction = async (
-      _ixs: TransactionInstruction[],
+      instructions: TransactionInstruction[],
       signers: Keypair[]
     ) => {
-      sendCalls.push(signers);
+      sendCalls.push({ instructions, signers });
       return "SIG_PUMP";
     };
     (wallet as any).confirmTransaction = async () => {};
@@ -324,8 +347,260 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(result.swapped).toBe(true);
     expect(result.provider).toBe("pump-fun");
     expect(result.signature).toBe("SIG_PUMP");
-    expect(sendCalls[0]?.[0]?.publicKey.equals(admin.publicKey)).toBe(true);
-    expect(sendCalls[0]?.[1]?.publicKey.equals(user.publicKey)).toBe(true);
+    expect(sendCalls.length).toBe(1);
+    const sendCall = sendCalls[0]!;
+    expect(sendCall.signers[0]?.publicKey.equals(admin.publicKey)).toBe(true);
+    expect(sendCall.signers[1]?.publicKey.equals(user.publicKey)).toBe(true);
+
+    const loanIx = sendCall.instructions[0]!;
+    const refundIx = sendCall.instructions[sendCall.instructions.length - 1]!;
+
+    const loanDecoded = SystemInstruction.decodeTransfer(loanIx);
+    expect(loanDecoded.fromPubkey.equals(admin.publicKey)).toBe(true);
+    expect(loanDecoded.toPubkey.equals(user.publicKey)).toBe(true);
+    expect(Number(loanDecoded.lamports)).toBe(TEST_JIT_BUFFER_LAMPORTS);
+
+    const refundDecoded = SystemInstruction.decodeTransfer(refundIx);
+    expect(refundDecoded.fromPubkey.equals(user.publicKey)).toBe(true);
+    expect(refundDecoded.toPubkey.equals(admin.publicKey)).toBe(true);
+    expect(Number(refundDecoded.lamports)).toBe(TEST_JIT_BUFFER_LAMPORTS);
+  });
+
+  test("pump.fun swap skips lending when balance equals jit buffer", async () => {
+    const wallet = WalletManager.createForTest(mnemonic, {
+      connection,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+    const admin = Keypair.generate();
+    (wallet as any).getAdminKeypair = () => admin;
+
+    const sendCalls: Array<{
+      instructions: TransactionInstruction[];
+      signers: Keypair[];
+    }> = [];
+    (wallet as any).sendTransaction = async (
+      instructions: TransactionInstruction[],
+      signers: Keypair[]
+    ) => {
+      sendCalls.push({ instructions, signers });
+      return "SIG_PUMP_NO_LEND";
+    };
+    (wallet as any).confirmTransaction = async () => {};
+
+    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
+    (swapManager as any).connection = {
+      getBalance: async () => TEST_JIT_BUFFER_LAMPORTS,
+    };
+    (swapManager as any).getBestProvider = async () => "pump-fun";
+    (swapManager.pumpFunClient as any).getQuote = async () => ({
+      inputMint: "TokenMint",
+      outputMint: WSOL_MINT,
+      inputAmount: "1000000",
+      inputAmountRaw: "1000000",
+      outputAmount: "4000000",
+      estimatedRate: 1,
+      slippage: 2.5,
+      isGraduated: false,
+    });
+    const stubInstructions: TransactionInstruction[] = [{} as TransactionInstruction];
+    (swapManager.pumpFunClient as any).createSwapTransaction = async () =>
+      stubInstructions;
+
+    const user = Keypair.generate();
+    const result = await swapManager.performJustInTimeSolSwap({
+      userKeypair: user,
+      tokenMint: "TokenMint",
+      tokenDecimals: 6,
+      availableTokenAmountRaw: 10_000_000,
+      tokenTicker: "TEST",
+    });
+
+    expect(result.swapped).toBe(true);
+    expect(result.provider).toBe("pump-fun");
+    expect(sendCalls.length).toBe(1);
+    expect(sendCalls[0]?.instructions).toEqual(stubInstructions);
+  });
+
+  test("pump.fun swap surfaces sendAndConfirm failure", async () => {
+    const wallet = WalletManager.createForTest(mnemonic, {
+      connection,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+    const admin = Keypair.generate();
+    (wallet as any).getAdminKeypair = () => admin;
+    (wallet as any).sendAndConfirmWithResubmits = async () => {
+      throw new Error("pump failure");
+    };
+    (wallet as any).confirmTransaction = async () => {};
+
+    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
+    (swapManager as any).connection = {
+      getBalance: async () => 0,
+    };
+    (swapManager as any).getBestProvider = async () => "pump-fun";
+    (swapManager.pumpFunClient as any).getQuote = async () => ({
+      inputMint: "TokenMint",
+      outputMint: WSOL_MINT,
+      inputAmount: "1000000",
+      inputAmountRaw: "1000000",
+      outputAmount: "4000000",
+      estimatedRate: 1,
+      slippage: 2.5,
+      isGraduated: false,
+    });
+    (swapManager.pumpFunClient as any).createSwapTransaction = async () => [
+      {} as TransactionInstruction,
+    ];
+
+    const user = Keypair.generate();
+    const result = await swapManager.performJustInTimeSolSwap({
+      userKeypair: user,
+      tokenMint: "TokenMint",
+      tokenDecimals: 6,
+      availableTokenAmountRaw: 10_000_000,
+      tokenTicker: "TEST",
+    });
+
+    expect(result.swapped).toBe(false);
+    expect(result.error).toContain("pump failure");
+  });
+
+  test("pump.fun lending caps loan at jit buffer even when target large", async () => {
+    const wallet = WalletManager.createForTest(mnemonic, {
+      connection,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+    const admin = Keypair.generate();
+    (wallet as any).getAdminKeypair = () => admin;
+
+    const sendCalls: Array<{
+      instructions: TransactionInstruction[];
+      signers: Keypair[];
+    }> = [];
+    (wallet as any).sendTransaction = async (
+      instructions: TransactionInstruction[],
+      signers: Keypair[]
+    ) => {
+      sendCalls.push({ instructions, signers });
+      return "SIG_PUMP_BIG";
+    };
+    (wallet as any).confirmTransaction = async () => {};
+
+    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
+    (swapManager as any).connection = {
+      getBalance: async () => 0,
+    };
+    (swapManager as any).getBestProvider = async () => "pump-fun";
+    (swapManager.pumpFunClient as any).getQuote = async () => ({
+      inputMint: "TokenMint",
+      outputMint: WSOL_MINT,
+      inputAmount: "1000000",
+      inputAmountRaw: "1000000",
+      outputAmount: "4000000",
+      estimatedRate: 1,
+      slippage: 2.5,
+      isGraduated: false,
+    });
+    (swapManager.pumpFunClient as any).createSwapTransaction = async () => [
+      {} as TransactionInstruction,
+    ];
+
+    const user = Keypair.generate();
+    const result = await swapManager.performJustInTimeSolSwap({
+      userKeypair: user,
+      tokenMint: "TokenMint",
+      tokenDecimals: 6,
+      availableTokenAmountRaw: 10_000_000_000,
+      tokenTicker: "TEST",
+    });
+
+    expect(result.swapped).toBe(true);
+    expect(sendCalls.length).toBe(1);
+    const sendCall = sendCalls[0]!;
+    const loanIx = sendCall.instructions[0]!;
+    const refundIx = sendCall.instructions[sendCall.instructions.length - 1]!;
+    const loanDecoded = SystemInstruction.decodeTransfer(loanIx);
+    expect(Number(loanDecoded.lamports)).toBe(TEST_JIT_BUFFER_LAMPORTS);
+    const refundDecoded = SystemInstruction.decodeTransfer(refundIx);
+    expect(Number(refundDecoded.lamports)).toBe(TEST_JIT_BUFFER_LAMPORTS);
+  });
+
+  test("pump.fun lending handles concurrent swaps for the same user", async () => {
+    const wallet = WalletManager.createForTest(mnemonic, {
+      connection,
+      fetch: globalThis.fetch as any,
+      timeNow: () => Date.now(),
+    });
+    const admin = Keypair.generate();
+    (wallet as any).getAdminKeypair = () => admin;
+    const sendCalls: Array<{
+      instructions: TransactionInstruction[];
+      signers: Keypair[];
+    }> = [];
+    (wallet as any).sendAndConfirmWithResubmits = async (
+      instructions: TransactionInstruction[],
+      signers: Keypair[]
+    ) => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      sendCalls.push({ instructions, signers });
+      return `SIG_CONC_${sendCalls.length}`;
+    };
+    (wallet as any).confirmTransaction = async () => {};
+
+    const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
+    (swapManager as any).connection = {
+      getBalance: async () => 0,
+    };
+    (swapManager as any).getBestProvider = async () => "pump-fun";
+    (swapManager.pumpFunClient as any).getQuote = async () => ({
+      inputMint: "TokenMint",
+      outputMint: WSOL_MINT,
+      inputAmount: "1000000",
+      inputAmountRaw: "1000000",
+      outputAmount: "4000000",
+      estimatedRate: 1,
+      slippage: 2.5,
+      isGraduated: false,
+    });
+    (swapManager.pumpFunClient as any).createSwapTransaction = async () => [
+      {} as TransactionInstruction,
+    ];
+
+    const user = Keypair.generate();
+    const requests = await Promise.all([
+      swapManager.performJustInTimeSolSwap({
+        userKeypair: user,
+        tokenMint: "TokenMint",
+        tokenDecimals: 6,
+        availableTokenAmountRaw: 10_000_000,
+        tokenTicker: "TEST",
+      }),
+      swapManager.performJustInTimeSolSwap({
+        userKeypair: user,
+        tokenMint: "TokenMint",
+        tokenDecimals: 6,
+        availableTokenAmountRaw: 10_000_000,
+        tokenTicker: "TEST",
+      }),
+    ]);
+
+    expect(requests.every((r) => r.swapped)).toBe(true);
+    expect(sendCalls.length).toBe(2);
+    for (const sendCall of sendCalls) {
+      expect(sendCall.signers[0]?.publicKey.equals(admin.publicKey)).toBe(true);
+      expect(sendCall.signers[1]?.publicKey.equals(user.publicKey)).toBe(true);
+
+      const loanIx = sendCall.instructions[0]!;
+      const refundIx =
+        sendCall.instructions[sendCall.instructions.length - 1]!;
+      const loanDecoded = SystemInstruction.decodeTransfer(loanIx);
+      const refundDecoded = SystemInstruction.decodeTransfer(refundIx);
+      expect(Number(loanDecoded.lamports)).toBe(TEST_JIT_BUFFER_LAMPORTS);
+      expect(Number(refundDecoded.lamports)).toBe(TEST_JIT_BUFFER_LAMPORTS);
+    }
   });
 
   test("skips lending lamports for successful Jupiter swap", async () => {
@@ -340,17 +615,6 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
     (swapManager as any).connection = {
       getBalance: async () => 0,
-    };
-    const lendCalls: number[] = [];
-    const refundCalls: number[] = [];
-    (swapManager as any).lendSwapFees = async (_kp: Keypair, lamports: number) => {
-      lendCalls.push(lamports);
-    };
-    (swapManager as any).refundLentFees = async (
-      _kp: Keypair,
-      lamports: number
-    ) => {
-      refundCalls.push(lamports);
     };
     (swapManager as any).getBestProvider = async () => "jupiter";
     (swapManager as any).jupiterClient.getQuote = async () => ({
@@ -386,8 +650,6 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       TEST_GAME_BUFFER_LAMPORTS + TEST_JIT_BUFFER_LAMPORTS
     );
 
-    expect(lendCalls).toEqual([]);
-    expect(refundCalls).toEqual([]);
   });
 
   test("unwrapWsolPortion closes WSOL ATA and rewraps remaining balance", async () => {
@@ -478,7 +740,17 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     });
     const admin = Keypair.generate();
     (wallet as any).getAdminKeypair = () => admin;
-    (wallet as any).sendTransaction = async () => "SIG_PUMP_LOW_DEC";
+    const sendCalls: Array<{
+      instructions: TransactionInstruction[];
+      signers: Keypair[];
+    }> = [];
+    (wallet as any).sendTransaction = async (
+      instructions: TransactionInstruction[],
+      signers: Keypair[]
+    ) => {
+      sendCalls.push({ instructions, signers });
+      return "SIG_PUMP_LOW_DEC";
+    };
     (wallet as any).confirmTransaction = async () => {};
 
     const swapManager = new SwapManager(connection, wallet, createFeeBudgetStub());
@@ -525,6 +797,21 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
     expect(firstAmount).not.toBe("0.00");
     const rawUnits = BigInt(firstAmount.replace(".", ""));
     expect(rawUnits > 0n).toBe(true);
+
+    expect(sendCalls.length).toBe(1);
+    const sendCall = sendCalls[0]!;
+    expect(sendCall.signers[0]?.publicKey.equals(admin.publicKey)).toBe(true);
+    expect(sendCall.signers[1]?.publicKey.equals(user.publicKey)).toBe(true);
+    const loanIx = sendCall.instructions[0]!;
+    const refundIx = sendCall.instructions[sendCall.instructions.length - 1]!;
+    const loanDecoded = SystemInstruction.decodeTransfer(loanIx);
+    expect(loanDecoded.fromPubkey.equals(admin.publicKey)).toBe(true);
+    expect(loanDecoded.toPubkey.equals(user.publicKey)).toBe(true);
+    expect(Number(loanDecoded.lamports)).toBe(TEST_JIT_BUFFER_LAMPORTS);
+    const refundDecoded = SystemInstruction.decodeTransfer(refundIx);
+    expect(refundDecoded.fromPubkey.equals(user.publicKey)).toBe(true);
+    expect(refundDecoded.toPubkey.equals(admin.publicKey)).toBe(true);
+    expect(Number(refundDecoded.lamports)).toBe(TEST_JIT_BUFFER_LAMPORTS);
   });
 
   test("skips lending lamports when Jupiter swap fails", async () => {
@@ -560,17 +847,6 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
       throw new Error("Jupiter execution failed");
     };
 
-    const lendCalls: number[] = [];
-    const refundCalls: number[] = [];
-    (swapManager as any).lendSwapFees = async (_kp: Keypair, lamports: number) => {
-      lendCalls.push(lamports);
-    };
-    (swapManager as any).refundLentFees = async (
-      _kp: Keypair,
-      lamports: number
-    ) => {
-      refundCalls.push(lamports);
-    };
 
     const user = Keypair.generate();
     const result = await swapManager.performJustInTimeSolSwap({
@@ -583,7 +859,5 @@ describe("SwapManager.performJustInTimeSolSwap", () => {
 
     expect(result.swapped).toBe(false);
     expect(result.error).toMatch(/Jupiter execution failed/);
-    expect(lendCalls).toEqual([]);
-    expect(refundCalls).toEqual([]);
   });
 });
