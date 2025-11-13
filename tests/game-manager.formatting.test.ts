@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { PublicKey } from "@solana/web3.js";
 import { GameManager } from "../src/utils/game";
 import { formatAmount, formatCompactTokenDisplay } from "../src/utils/format-amount";
+import { sanitizeTelegramDisplayName } from "../src/utils/telegram-display";
 import {
   makeCtxStub,
   makeDbStub,
@@ -81,7 +82,9 @@ describe("GameManager.formatGameMessage", () => {
 
     const res = await gm.formatGameMessage(ctx, gamePda, "giveaway", amount, "@creator", "Completed", "WSOL", winner);
     expect(res.messageText).toContain("Winner:");
-    expect(res.messageText).toContain("@user999");
+    expect(res.messageText).toContain(
+      sanitizeTelegramDisplayName("@user999")
+    );
     // No keyboard for completed
     expect(res.keyboard.length).toBe(0);
   });

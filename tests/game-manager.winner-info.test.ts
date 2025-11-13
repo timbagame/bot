@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { GameManager } from "../src/utils/game";
+import { sanitizeTelegramDisplayName } from "../src/utils/telegram-display";
 
 function resetGM() {
   // @ts-ignore
@@ -33,9 +34,10 @@ describe("GameManager.getWinnerInfo", () => {
     const gm = GameManager.getInstance(programStub(), walletStub(), dbStub());
     (gm as any).getPlayerUsername = async () => "@champ";
     const ctx = { chat: { id: 1, type: "private" } } as any;
+    const sanitizedHandle = sanitizeTelegramDisplayName("@champ");
     const line = await (gm as any).getWinnerInfo(ctx, "Completed", "SomePubkey");
     expect(line).toContain("Winner:");
-    expect(line).toContain("@champ");
+    expect(line).toContain(sanitizedHandle);
   });
 
   test("adds Solscan link when transaction signature provided", async () => {
@@ -53,7 +55,7 @@ describe("GameManager.getWinnerInfo", () => {
         "sig123"
       );
       expect(line).toContain("Winner:");
-      expect(line).toContain("@champ");
+      expect(line).toContain(sanitizeTelegramDisplayName("@champ"));
       expect(line).toContain("https://solscan.io/tx/sig123");
     } finally {
       if (originalNetwork === undefined) {

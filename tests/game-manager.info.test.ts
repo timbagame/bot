@@ -1,6 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { PublicKey } from "@solana/web3.js";
 import { GameManager } from "../src/utils/game";
+import { sanitizeTelegramDisplayName } from "../src/utils/telegram-display";
 
 function resetGM() {
   GameManager.resetForTest();
@@ -61,7 +62,9 @@ describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
     const gm = GameManager.getInstance(programStub(gameAcc), walletStub({ blockTime: createdAt + 30 }), dbStub());
     const info = await gm.getGameInfo(ctxStub(), new PublicKey("11111111111111111111111111111111"));
     expect(info).toContain("<b>Coinflip • 1 TOK</b>");
-    expect(info).toContain("Creator: @user777");
+    expect(info).toContain(
+      `Creator: ${sanitizeTelegramDisplayName("@user777")}`
+    );
     expect(info).toContain("1/2 tickets");
     expect(info).toContain("Status:");
     expect(info).toContain("⏰ Expires in:");

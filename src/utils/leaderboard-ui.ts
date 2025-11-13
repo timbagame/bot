@@ -1,4 +1,5 @@
 import { escapeHtml } from "./format-amount";
+import { sanitizeTelegramDisplayName } from "./telegram-display";
 
 export type LeaderboardPlayerDisplay = {
   telegramId: string;
@@ -19,18 +20,7 @@ type BuildLeaderboardMessageArgs = {
 
 const MEDALS = ["🥇", "🥈", "🥉"] as const;
 
-const ZERO_WIDTH_WORD_JOINER = "\u2060";
-const DEFAULT_FALLBACK_NAME = "Player";
-
-export const sanitizeLeaderboardDisplayName = (value: string): string => {
-  const trimmed = value.trim();
-  const normalized = trimmed.length > 0 ? trimmed : DEFAULT_FALLBACK_NAME;
-  if (!normalized.includes("@")) {
-    return normalized;
-  }
-
-  return normalized.replace(/@+/g, (match) => `${match}${ZERO_WIDTH_WORD_JOINER}`);
-};
+export const sanitizeLeaderboardDisplayName = sanitizeTelegramDisplayName;
 
 export const buildEmptyLeaderboardMessage = (): string =>
   [
@@ -56,7 +46,7 @@ export const buildLeaderboardMessage = ({ chatTitle, players }: BuildLeaderboard
 };
 
 const formatDisplayName = (value: string): string => {
-  const safeValue = sanitizeLeaderboardDisplayName(value);
+  const safeValue = sanitizeTelegramDisplayName(value);
   return `<b>${escapeHtml(safeValue)}</b>`;
 };
 

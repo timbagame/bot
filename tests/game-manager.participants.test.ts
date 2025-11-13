@@ -1,6 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { GameManager } from "../src/utils/game";
+import { sanitizeTelegramDisplayName } from "../src/utils/telegram-display";
 
 function reset() {
   GameManager.resetForTest();
@@ -51,8 +52,12 @@ describe("GameManager participants rendering", () => {
     const ctx = makeCtx();
   const gamePda = new PublicKey("11111111111111111111111111111111");
     const res = await gm.formatGameMessage(ctx, gamePda, "coinflip", 1_000_000_000, "@creator", "Active", "TOK");
-    expect(res.messageText).toContain("@user111");
-    expect(res.messageText).toContain("@user222");
+    expect(res.messageText).toContain(
+      sanitizeTelegramDisplayName("@user111")
+    );
+    expect(res.messageText).toContain(
+      sanitizeTelegramDisplayName("@user222")
+    );
   });
 
   test("trims participant list to respect Telegram message limit", async () => {

@@ -60,6 +60,7 @@ import {
   buildParticipantsList,
   buildExpirationText,
 } from "./game-ui";
+import { sanitizeTelegramDisplayName } from "./telegram-display";
 import { resolveTokenPriceUSD } from "./prices";
 import { NetworkDetector } from "./network-detector";
 import { SwapManager } from "./swap-manager";
@@ -2182,7 +2183,9 @@ export class GameManager {
 
     const winnerUsername = await this.getPlayerUsername(ctx, winnerAddress);
     const solscanUrl = NetworkDetector.buildSolscanTxUrl(winnerSignature);
-    const safeWinner = escapeHtml(winnerUsername);
+    const safeWinner = escapeHtml(
+      sanitizeTelegramDisplayName(winnerUsername)
+    );
     const linkLine = solscanUrl
       ? `\n\n<a href="${solscanUrl}">🔗 View transaction</a>`
       : "";
@@ -2351,11 +2354,12 @@ export class GameManager {
 
     const formattedTicketAmount = formatBalanceForDisplay(amountLamports);
 
+    const safeCreatorUsername = sanitizeTelegramDisplayName(creatorUsername);
     const header = buildGameHeader(
       formatGameTypeWithEmoji(gameType),
       formattedTicketAmount,
       tokenTicker,
-      creatorUsername,
+      safeCreatorUsername,
       currentTickets,
       maxTickets,
       usdApproximation?.text
@@ -2396,7 +2400,7 @@ export class GameManager {
           try {
             const username = await this.getUsernameFromTelegramId(ctx, telegramId);
             if (username) {
-              return username.startsWith("@") ? username : `@${username}`;
+              return sanitizeTelegramDisplayName(username);
             }
           } catch {
             // fall back to placeholder
@@ -2867,7 +2871,7 @@ export class GameManager {
         }
       }
       const creatorLabel = creatorUsername
-        ? `@${creatorUsername}`
+        ? sanitizeTelegramDisplayName(creatorUsername)
         : `Player ${String(gameData.creator_telegram_id).slice(0, 6)}...`;
 
       // Handle different winner states
@@ -2882,7 +2886,9 @@ export class GameManager {
           ctx,
           gameData.winner_address
         );
-        const safeWinner = escapeHtml(winnerUsername);
+        const safeWinner = escapeHtml(
+          sanitizeTelegramDisplayName(winnerUsername)
+        );
         winnerLine = `Winner: ${safeWinner}`;
       }
 
@@ -2905,7 +2911,7 @@ export class GameManager {
                 telegramId
               );
               return username
-                ? `@${username}`
+                ? sanitizeTelegramDisplayName(username)
                 : `Player ${telegramId.slice(0, 6)}...`;
             })
           );
