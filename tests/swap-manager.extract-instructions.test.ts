@@ -114,7 +114,7 @@ describe("SwapManager Jupiter instruction extraction", () => {
     expect(keys[1].isWritable).toBe(true);
   });
 
-  test("throws if a system program instruction is present", async () => {
+  test("allows system program instructions in the serialized swap", async () => {
     const lookupTable = createLookupTableAccount();
     const base64 = buildVersionedTxBase64(
       lookupTable,
@@ -138,8 +138,13 @@ describe("SwapManager Jupiter instruction extraction", () => {
 
     const manager = new SwapManager(connection as Connection, wallet);
 
-    await expect(
-      (manager as any).extractJupiterInstructions(base64)
-    ).rejects.toThrow("Unsupported system program instruction in Jupiter swap");
+    const { instructions } = await (manager as any).extractJupiterInstructions(
+      base64
+    );
+
+    expect(instructions).toHaveLength(1);
+    expect(
+      instructions[0]?.programId.equals(SystemProgram.programId)
+    ).toBe(true);
   });
 });
