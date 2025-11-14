@@ -250,6 +250,7 @@ export async function buildPumpFunCompositeQuote(options: {
       outputMint,
       amount: pumpQuote.outputAmount,
       slippageBps,
+      onlyDirectRoutes: true,
     };
     const jupiterQuote = await quoteCache.getJupiterQuote(jupiterQuoteParams, () =>
       jupiterClient.getQuote(jupiterQuoteParams)
@@ -293,6 +294,7 @@ export async function buildPumpFunCompositeQuote(options: {
     outputMint: WSOL_MINT,
     amount: amountRaw,
     slippageBps,
+    onlyDirectRoutes: true,
   };
   const jupiterQuote = await quoteCache.getJupiterQuote(jupiterQuoteParams, () =>
     jupiterClient.getQuote(jupiterQuoteParams)

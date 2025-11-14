@@ -1114,6 +1114,7 @@ export class SwapManager {
           outputMint: composite.jupiterQuote.outputMint,
           amount: minIntermediateLamports,
           slippageBps,
+          onlyDirectRoutes: true,
         });
       }
     }
@@ -1162,14 +1163,11 @@ export class SwapManager {
     );
     if (extraJupiterSigners.length > 0) {
       console.warn(
-        "⚠️ Jupiter composite swap requires additional signer(s); falling back to sequential execution:",
+        "⚠️ Jupiter composite swap requires additional signer(s); aborting composite route:",
         extraJupiterSigners
       );
-      return await this.executeSequentialCompositeSwapFallback(
-        flow,
-        pumpInstructions,
-        jupiterResponse.swapTransaction,
-        userKeypair
+      throw new Error(
+        "Jupiter returned a route that needs an extra signer. Try a smaller amount or wait for a more direct path."
       );
     }
 
@@ -1576,54 +1574,6 @@ export class SwapManager {
       }
     }
     return signerSet;
-  }
-
-  private async executeSequentialCompositeSwapFallback(
-    flow: CompositeFlow,
-    pumpInstructions: TransactionInstruction[],
-    serializedJupiterTransaction: string,
-    userKeypair: Keypair
-  ): Promise<{ signature: string; flow: CompositeFlow }> {
-    const pumpLabel =
-      flow === "pump-then-jupiter"
-        ? "Pump.fun composite fallback (first leg)"
-        : "Pump.fun composite fallback (second leg)";
-    const jupiterLabel =
-      flow === "pump-then-jupiter"
-        ? "Jupiter composite fallback (second leg)"
-        : "Jupiter composite fallback (first leg)";
-
-    const sendPumpInstructions = async (): Promise<string | null> => {
-      if (pumpInstructions.length === 0) {
-        return null;
-      }
-      return await this.wallet.sendAndConfirmWithResubmits(
-        pumpInstructions,
-        [userKeypair],
-        { operationLabel: pumpLabel }
-      );
-    };
-
-    const sendJupiterSequentially = async (): Promise<string> => {
-      console.log(
-        `⚠️ ${jupiterLabel}: submitting fallback Jupiter transaction sequentially`
-      );
-      return await this.executeJupiterTransaction(
-        serializedJupiterTransaction,
-        userKeypair
-      );
-    };
-
-    let jupiterSignature: string;
-    if (flow === "pump-then-jupiter") {
-      await sendPumpInstructions();
-      jupiterSignature = await sendJupiterSequentially();
-    } else {
-      jupiterSignature = await sendJupiterSequentially();
-      await sendPumpInstructions();
-    }
-
-    return { signature: jupiterSignature, flow };
   }
 
   /**
