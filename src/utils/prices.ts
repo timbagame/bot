@@ -2,7 +2,6 @@ import {
   JUPITER_PRICE_URL,
   PRICES_CACHE_TTL_MS,
   PRICES_TIMEOUT_MS,
-  buildPumpFunCoinUrl,
 } from "./constants";
 import { WSOL_MINT } from "./token-registry";
 import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
@@ -56,10 +55,10 @@ async function withTimeout<T>(
   }
 }
 
-function toMintOrId(mintOrTicker: string): { jupId: string; forDex: string } {
+function toMintOrId(mintOrTicker: string): string {
   const key = normalizeKey(mintOrTicker);
-  if (key === "SOL") return { jupId: WSOL_MINT, forDex: WSOL_MINT };
-  return { jupId: mintOrTicker, forDex: mintOrTicker };
+  if (key === "SOL") return WSOL_MINT;
+  return mintOrTicker;
 }
 
 function pickValidPrice(
@@ -96,47 +95,6 @@ async function fetchFromJupiter(
   }
 }
 
-async function fetchFromPumpFun(
-  addr: string,
-  fetchImpl: FetchLike,
-  timeoutMs: number
-): Promise<number | null> {
-  try {
-    const url = buildPumpFunCoinUrl(addr);
-    const res = await withTimeout(
-      (signal) =>
-        fetchImpl(url, {
-          method: "GET",
-          headers: {
-            accept: "application/json",
-            // Generic user agent keeps requests from being flagged as automated.
-            "user-agent": "Mozilla/5.0",
-          },
-          signal,
-        }),
-      timeoutMs
-    );
-    if (!res.ok) return null;
-    const data = (await res.json()) as any;
-    return pickValidPrice([
-      data?.usdPrice,
-      data?.usd_price,
-      data?.usdValue,
-      data?.priceUsd,
-      data?.price_usd,
-      data?.usd_market_cap
-        ? Number(data?.usd_market_cap) /
-          Number(data?.supply ?? data?.supplyInTokens ?? 0)
-        : undefined,
-      data?.priceInSol && data?.solPrice
-        ? Number(data?.priceInSol) * Number(data?.solPrice)
-        : undefined,
-    ]);
-  } catch {
-    return null;
-  }
-}
-
 export async function getPriceUSD(
   mintOrTicker: string,
   fetchImpl: FetchLike = (globalThis.fetch as any)
@@ -161,7 +119,7 @@ export async function getPriceUSD(
   const pendingPromise = (async () => {
     let resolvedPrice = 0;
     try {
-      const { jupId, forDex } = toMintOrId(mintOrTicker);
+      const jupId = toMintOrId(mintOrTicker);
 
       // 1) Jupiter price endpoint
       const fromJup = await fetchFromJupiter(jupId, fetchImpl, PRICES_TIMEOUT_MS);
@@ -171,15 +129,7 @@ export async function getPriceUSD(
         return fromJup;
       }
 
-      // 2) Pump.fun fallback (requires address)
-      const fromPump = await fetchFromPumpFun(forDex, fetchImpl, PRICES_TIMEOUT_MS);
-      if (fromPump && fromPump > 0) {
-        resolvedPrice = fromPump;
-        priceCache.setWithTTL(key, { value: fromPump });
-        return fromPump;
-      }
-
-      // 3) Give up
+      // 2) Give up
       return 0;
     } finally {
       const latest = priceCache.peek(key);

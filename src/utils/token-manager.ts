@@ -2,7 +2,6 @@ import { PublicKey } from "@solana/web3.js";
 import { ChatDatabase } from "./chat-database";
 import { TokenDatabase } from "./token-database";
 import { WalletManager } from "./wallet";
-import { PumpFunClient, isPotentialPumpFunToken } from "./pump-fun";
 import type { ParseAmountResult, ChatTokenConfig, KnownToken } from "../types";
 import { WSOL_MINT, TOKEN_MANAGER_APPROVED_CACHE_TTL_MS } from "./constants";
 import {
@@ -56,7 +55,6 @@ const looksLikeTokenTicker = (candidate: string): boolean => {
 type ResolvedTokenMetadata = {
   ticker: string;
   decimals: number;
-  isPumpFun?: boolean;
   isNativeSol?: boolean;
 };
 
@@ -79,8 +77,6 @@ export class TokenManager {
   private wallet: WalletManager;
   private defaultTokenMint: string;
   private defaultTokenTicker: string;
-  private pumpFunClient?: PumpFunClient;
-  private static pumpFunClientFactory?: () => PumpFunClient;
   private approvedTokensCache:
     | {
         value: Array<{
@@ -132,29 +128,6 @@ export class TokenManager {
 
   public static resetForTesting(): void {
     TokenManager.singleton.reset();
-    TokenManager.pumpFunClientFactory = undefined;
-  }
-
-  public static setPumpFunClientFactoryForTesting(
-    factory?: () => PumpFunClient
-  ): void {
-    TokenManager.pumpFunClientFactory = factory;
-    const existing = TokenManager.singleton.peek();
-    if (existing) {
-      existing.pumpFunClient = undefined;
-    }
-  }
-
-  private getPumpFunClient(): PumpFunClient {
-    if (!this.pumpFunClient) {
-      if (TokenManager.pumpFunClientFactory) {
-        this.pumpFunClient = TokenManager.pumpFunClientFactory();
-      } else {
-        this.pumpFunClient = new PumpFunClient(this.wallet.getConnection());
-      }
-    }
-
-    return this.pumpFunClient;
   }
 
   private normalizeDecimals(value: number | null | undefined): number | null {
@@ -227,11 +200,9 @@ export class TokenManager {
     {
       tickerHint,
       metadataResolvers = [],
-      allowPumpFun = true,
     }: {
       tickerHint?: string;
       metadataResolvers?: TokenMetadataResolver[];
-      allowPumpFun?: boolean;
     } = {}
   ): Promise<ResolvedTokenMetadata | null> {
     const builtinMetadata = getBuiltinTokenMetadataByMint(mint);
@@ -241,7 +212,6 @@ export class TokenManager {
       | "hint"
       | "builtin"
       | "metadata"
-      | "pumpFun"
       | undefined = normalizedHint ? "hint" : undefined;
     let decimals = builtinMetadata?.decimals;
     const isNativeSol = builtinMetadata?.isNativeSol ?? false;
@@ -254,7 +224,7 @@ export class TokenManager {
         allowOverride = false,
         requireEmpty = false,
       }: {
-        source: "builtin" | "metadata" | "pumpFun";
+        source: "builtin" | "metadata";
         allowOverride?: boolean;
         requireEmpty?: boolean;
       }
@@ -295,48 +265,6 @@ export class TokenManager {
     if (!resolvedTicker && builtinMetadata?.ticker) {
       applyTicker(builtinMetadata.ticker, { source: "builtin" });
     }
-
-    let pumpFunMetadata:
-      | {
-          symbol?: string | null;
-          decimals?: number | null;
-          isPumpFun: boolean;
-        }
-      | null = null;
-
-    const ensurePumpFunMetadata = async () => {
-      if (!allowPumpFun || pumpFunMetadata || !isPotentialPumpFunToken(mint)) {
-        return pumpFunMetadata;
-      }
-
-      try {
-        const client = this.getPumpFunClient();
-        const metadata = await client.getTokenMetadata(mint);
-        if (metadata) {
-          pumpFunMetadata = {
-            symbol: metadata.symbol,
-            decimals: metadata.decimals,
-            isPumpFun: metadata.isPumpFun && !metadata.isGraduated,
-          };
-          return pumpFunMetadata;
-        }
-
-        const status = await client.isPumpFunToken(mint);
-        pumpFunMetadata = {
-          isPumpFun: status.isPumpFun && !status.isGraduated,
-          symbol: null,
-          decimals: null,
-        };
-        return pumpFunMetadata;
-      } catch (error) {
-        console.warn(
-          `[TokenManager] Pump.fun metadata lookup failed for ${mint}:`,
-          error
-        );
-        pumpFunMetadata = { isPumpFun: false, symbol: null, decimals: null };
-        return pumpFunMetadata;
-      }
-    };
 
     let fetchedMetadata:
       | { symbol?: string | null; decimals?: number | null }
@@ -411,23 +339,6 @@ export class TokenManager {
     }
 
     if (decimals === undefined) {
-      const pumpMetadata = await ensurePumpFunMetadata();
-      if (pumpMetadata) {
-        applyDecimals(pumpMetadata.decimals);
-      }
-    }
-
-    if (!resolvedTicker) {
-      const pumpMetadata = await ensurePumpFunMetadata();
-      if (pumpMetadata) {
-        applyTicker(pumpMetadata.symbol, {
-          source: "pumpFun",
-          requireEmpty: true,
-        });
-      }
-    }
-
-    if (decimals === undefined) {
       try {
         const metadata = await this.wallet.getTokenMetadata(mint);
         applyDecimals(metadata?.decimals);
@@ -452,12 +363,9 @@ export class TokenManager {
       resolvedTicker = `TOKEN_${mint.toUpperCase()}`;
     }
 
-    const pumpMetadata = await ensurePumpFunMetadata();
-
     return {
       ticker: resolvedTicker,
       decimals: sanitizedDecimals,
-      isPumpFun: pumpMetadata?.isPumpFun,
       isNativeSol,
     };
   }
@@ -922,7 +830,7 @@ export class TokenManager {
 
   public async autoDiscoverTokenInfo(
     tokenMint: string
-  ): Promise<{ ticker: string; decimals: number; isPumpFun?: boolean } | null> {
+  ): Promise<{ ticker: string; decimals: number } | null> {
     const metadata = await this.resolveMetadataForMint(tokenMint);
     if (!metadata) {
       return null;
@@ -936,7 +844,6 @@ export class TokenManager {
     return {
       ticker,
       decimals: metadata.decimals,
-      isPumpFun: metadata.isPumpFun,
     };
   }
 
@@ -944,7 +851,6 @@ export class TokenManager {
     tickerOrMint: string
   ): Promise<
     (KnownToken & {
-      isPumpFun?: boolean;
       isNativeSol?: boolean;
       newlyDiscovered?: boolean;
     })
@@ -1022,7 +928,6 @@ export class TokenManager {
           decimals: metadata.decimals,
           added_at: Date.now(),
           newlyDiscovered: true,
-          isPumpFun: metadata.isPumpFun,
           isNativeSol: false,
         };
       }
@@ -1050,28 +955,10 @@ export class TokenManager {
       token_ticker: ticker,
       decimals: discovered.decimals,
       added_at: Date.now(),
-      isPumpFun: discovered.isPumpFun,
       newlyDiscovered: true,
     };
   }
 
-  // ================================
-  // PUMP.FUN INTEGRATION
-  // ================================
-
-  public async checkPumpFunToken(
-    tokenMint: string
-  ): Promise<{ isPumpFun: boolean; isGraduated: boolean }> {
-    if (!isPotentialPumpFunToken(tokenMint)) {
-      return { isPumpFun: false, isGraduated: false };
-    }
-
-    try {
-      return await this.getPumpFunClient().isPumpFunToken(tokenMint);
-    } catch {
-      return { isPumpFun: false, isGraduated: false };
-    }
-  }
 }
 
 export function formatParseAmountError(

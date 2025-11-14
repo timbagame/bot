@@ -328,7 +328,7 @@ describe("Bot helper utilities", () => {
       outputAmount: "455090146672",
       estimatedRate: 0,
       slippage: 1,
-      provider: "pump-fun" as const,
+      provider: "jupiter" as const,
     };
 
     const summary = botModule.__test_formatTradeConfirmationSummary({
@@ -347,7 +347,7 @@ describe("Bot helper utilities", () => {
       payToken: "SOL",
       receiveDisplay: "455090.146672",
       receiveToken: "TIMBA",
-      providerLabel: "Pump.fun (Not graduated)",
+      providerLabel: "Jupiter",
       rateDisplay: "20959339.8734",
       slippageText: "1.0%",
       contractAddress: quote.outputMint,

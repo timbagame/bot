@@ -1,8 +1,4 @@
 import type { Keypair } from "@solana/web3.js";
-import type { JupiterQuoteResponse } from "../jupiter";
-import type { PumpFunQuote } from "../pump-fun";
-
-export type CompositeFlow = "pump-then-jupiter" | "jupiter-then-pump";
 
 export interface SwapQuote {
   inputMint: string;
@@ -12,16 +8,9 @@ export interface SwapQuote {
   outputAmount: string;
   estimatedRate: number;
   slippage: number;
-  provider: "jupiter" | "pump-fun" | "pump-fun+jupiter";
+  provider: "jupiter";
   priceImpact?: string;
   platformFee?: any;
-  composite?: {
-    flow: CompositeFlow;
-    intermediateMint: string;
-    intermediateAmount: string;
-    pumpQuote: PumpFunQuote;
-    jupiterQuote: JupiterQuoteResponse;
-  };
 }
 
 export interface SwapRequest {
@@ -38,7 +27,7 @@ export interface SwapRequest {
 
 export interface JustInTimeSwapResult {
   swapped: boolean;
-  provider?: "jupiter" | "pump-fun" | "unwrap";
+  provider?: "jupiter" | "unwrap";
   signature?: string;
   lamportsReceived?: number;
   error?: string;
