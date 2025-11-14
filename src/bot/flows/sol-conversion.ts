@@ -87,7 +87,6 @@ export type PendingSwapTransaction = {
   inputDecimals: number;
   outputDecimals: number;
   cancelCallback: string;
-  slippageBps: number;
   quote: SwapQuote;
 };
 

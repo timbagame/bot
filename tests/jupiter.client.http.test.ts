@@ -23,7 +23,6 @@ describe("JupiterClient HTTP", () => {
       inputMint: "So11111111111111111111111111111111111111112",
       outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
       amount: "1000",
-      slippageBps: 100,
     };
 
     await expect(jc.getQuote(req)).rejects.toThrow(

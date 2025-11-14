@@ -179,10 +179,6 @@ export const applyOracleBufferTime = (bufferSeconds: number): number => {
 
 export const JUPITER_DEFAULT_SLIPPAGE_BPS = 100; // 1%
 
-// Swap UI defaults
-export const SWAP_DEFAULT_SLIPPAGE_BPS = 100; // 1%
-export const SWAP_SLIPPAGE_OPTIONS_BPS = [2, 10, 50, 100] as const;
-
 // ================================
 // PRICES CONFIG
 // ================================

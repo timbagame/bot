@@ -6,7 +6,6 @@ const makeJupiterParams = (overrides: Partial<JupiterQuoteRequest> = {}): Jupite
   inputMint: "MintA",
   outputMint: "MintB",
   amount: "1000",
-  slippageBps: 50,
   ...overrides,
 });
 
@@ -20,7 +19,7 @@ const makeJupiterQuote = (
   outAmount: "2000",
   otherAmountThreshold: "0",
   swapMode: "ExactIn",
-  slippageBps: request.slippageBps ?? 0,
+  slippageBps: 50,
   priceImpactPct: "0",
   routePlan: [],
   totalTime: 0,
