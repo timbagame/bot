@@ -139,14 +139,6 @@ test("resolveSwapToken returns builtin SOL metadata", async () => {
 
 test("resolveSwapToken auto-discovers and registers unknown mints", async () => {
   const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
-  TokenManager.setPumpFunClientFactoryForTesting(() => ({
-    isPumpFunToken: async () => ({ isPumpFun: false, isGraduated: false }),
-    getTokenMetadata: async () => ({
-      symbol: "DISC",
-      name: "Discovered Token",
-      decimals: 6,
-    }),
-  }) as any);
 
   const mint = Keypair.generate().publicKey.toBase58();
   const info = await tm.resolveSwapToken(mint);

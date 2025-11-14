@@ -28,29 +28,18 @@ describe("price utilities fallbacks", () => {
     }
   });
 
-  test("pump.fun fallback derives price from market cap", async () => {
-    const fetchImpl = (async (url: string) => {
-      if (url.includes("jup.ag")) {
-        return { ok: false, async json() { return {}; } } as any;
-      }
-      return {
-        ok: true,
-        async json() {
-          return { usd_market_cap: "200", supply: "4" };
-        },
-      } as any;
+  test("returns zero when Jupiter fails to respond (market cap scenario)", async () => {
+    const fetchImpl = (async (_url: string) => {
+      return { ok: false, async json() { return {}; } } as any;
     }) as any;
 
     const module = await import(`../src/utils/prices.ts?cap=${Date.now()}`);
     const price = await module.getPriceUSD("CAP-TKN", fetchImpl);
-    expect(price).toBeCloseTo(50, 6);
+    expect(price).toBe(0);
   });
 
-  test("pump.fun fallback multiplies priceInSol and solPrice", async () => {
-    const fetchImpl = (async (url: string) => {
-      if (url.includes("jup.ag")) {
-        return { ok: false, async json() { return {}; } } as any;
-      }
+  test("returns zero when Jupiter returns formatted fallback data but no successful price", async () => {
+    const fetchImpl = (async (_url: string) => {
       return {
         ok: true,
         async json() {
@@ -61,7 +50,7 @@ describe("price utilities fallbacks", () => {
 
     const module = await import(`../src/utils/prices.ts?sol=${Date.now()}`);
     const price = await module.getPriceUSD("SOL-PRODUCT", fetchImpl);
-    expect(price).toBeCloseTo(60, 6);
+    expect(price).toBe(0);
   });
 
   test("resolveTokenPriceUSD returns null when no candidates succeed", async () => {

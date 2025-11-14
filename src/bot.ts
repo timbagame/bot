@@ -575,18 +575,7 @@ const formatTradeConfirmationSummary = ({
     payAmountDecimal > 0 ? receiveAmountDecimal / payAmountDecimal : 0;
   const rateDisplay = formatRate(rateValue);
 
-  const providerLabel = (() => {
-    switch (quote.provider) {
-      case "pump-fun":
-        return "Pump.fun (Not graduated)";
-      case "jupiter":
-        return "Jupiter";
-      case "pump-fun+jupiter":
-        return "Pump.fun → Jupiter";
-      default:
-        return quote.provider;
-    }
-  })();
+  const providerLabel = "Jupiter";
 
   const slippageText = formatSlippagePercent(
     quote.slippage !== undefined ? (quote.slippage as number) : 1
@@ -2333,7 +2322,7 @@ const setupAnchor = async () => {
     );
 
     swapManager = new SwapManager(wallet.getConnection(), wallet);
-    console.log("Initialized SwapManager with pump.fun integration");
+    console.log("Initialized SwapManager");
 
     await initializeTokensList();
     gameManager = GameManager.getInstance(program, wallet, gameDb);
@@ -3632,7 +3621,6 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
       }
 
       let txSignature: string;
-      let pumpFunSignature: string | null = null;
       const keypair = wallet.getKeyPair(BigInt(transaction.userId));
       const parsedSlippageBps = Number((transaction as any).slippageBps);
       const slippageBps = Number.isFinite(parsedSlippageBps)
@@ -3653,63 +3641,21 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
         ? inferredOutputDecimals
         : 9;
 
-      if (quote.provider === "jupiter") {
-        // Use Jupiter execution method (same as original implementation)
-        txSignature = await swapManager.executeJupiterSwap(
-          {
-            inputMint: quote.inputMint,
-            outputMint: quote.outputMint,
-            amount: quote.inputAmountRaw,
-            slippageBps,
-            userKeypair: keypair,
-            inputDecimals,
-            outputDecimals,
-            inputTicker: transaction.fromToken?.toUpperCase() || "UNKNOWN",
-            outputTicker: transaction.toToken?.toUpperCase() || "UNKNOWN",
-          },
-          quote
-        );
-      } else if (quote.provider === "pump-fun+jupiter") {
-        const result = await swapManager.executeCompositePumpFunJupiterSwap(
-          {
-            inputMint: quote.inputMint,
-            outputMint: quote.outputMint,
-            amount: quote.inputAmountRaw,
-            slippageBps,
-            userKeypair: keypair,
-            inputDecimals,
-            outputDecimals,
-            inputTicker: transaction.fromToken?.toUpperCase() || "UNKNOWN",
-            outputTicker: transaction.toToken?.toUpperCase() || "UNKNOWN",
-          },
-          quote
-        );
-        console.log(`Pump.fun leg signature: ${result.pumpSignature}`);
-        pumpFunSignature = result.pumpSignature;
-        txSignature = result.jupiterSignature;
-      } else {
-        // Use instruction-based approach for other providers
-        const instructions = await swapManager.createSwapTransaction(
-          {
-            inputMint: quote.inputMint,
-            outputMint: quote.outputMint,
-            amount: quote.inputAmountRaw,
-            slippageBps,
-            userKeypair: keypair,
-            inputDecimals,
-            outputDecimals,
-            inputTicker: transaction.fromToken?.toUpperCase() || "UNKNOWN",
-            outputTicker: transaction.toToken?.toUpperCase() || "UNKNOWN",
-          },
-          quote
-        );
-
-        txSignature = await wallet.sendAndConfirmWithResubmits(
-          instructions,
-          [keypair],
-          { operationLabel: "Swap transaction" }
-        );
-      }
+      // Use Jupiter execution method
+      txSignature = await swapManager.executeJupiterSwap(
+        {
+          inputMint: quote.inputMint,
+          outputMint: quote.outputMint,
+          amount: quote.inputAmountRaw,
+          slippageBps,
+          userKeypair: keypair,
+          inputDecimals,
+          outputDecimals,
+          inputTicker: transaction.fromToken?.toUpperCase() || "UNKNOWN",
+          outputTicker: transaction.toToken?.toUpperCase() || "UNKNOWN",
+        },
+        quote
+      );
 
       console.log(`🚀 Swap transaction submitted: ${txSignature}`);
 
@@ -3731,23 +3677,10 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
 
       const linkLines: string[] = [];
 
-      if (pumpFunSignature) {
-        const { message: pumpLink } = buildTransactionLinkMessage({
-          signature: pumpFunSignature,
-          networkOverride: process.env["RPC_URL"],
-          label: "Pump.fun: ",
-          linkText: "🔗 View transaction",
-          format: "html",
-        });
-        if (pumpLink) {
-          linkLines.push(pumpLink);
-        }
-      }
-
       const { message: jupiterLink } = buildTransactionLinkMessage({
         signature: txSignature,
         networkOverride: process.env["RPC_URL"],
-        label: pumpFunSignature ? "Jupiter: " : "",
+        label: "Jupiter: ",
         linkText: "🔗 View transaction",
         format: "html",
       });

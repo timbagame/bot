@@ -29,7 +29,7 @@ function makeWalletStub() {
   } as any;
 }
 
-test("autoDiscoverTokenInfo returns TOKEN_ prefix for non pump.fun", async () => {
+test("autoDiscoverTokenInfo returns TOKEN_ prefix for unknown mint", async () => {
   const tm = TokenManager.getInstance(makeWalletStub(), "DEF_MINT", "DEF");
   // Use a fake but valid base58 mint that is not in builtin tokens
   const mint = "FakeTokenMint1111111111111111111111111111111";
@@ -37,4 +37,3 @@ test("autoDiscoverTokenInfo returns TOKEN_ prefix for non pump.fun", async () =>
   expect(res?.ticker).toBe("DISC");
   expect(res?.decimals).toBe(6);
 });
-

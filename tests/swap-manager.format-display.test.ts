@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, spyOn } from "bun:test";
 import { Connection } from "@solana/web3.js";
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
@@ -11,65 +11,28 @@ describe("SwapManager.formatQuoteForDisplay", () => {
   );
   const sm = new SwapManager(connection, wallet);
 
-  test("formats via pump-fun client when provider is pump-fun", () => {
-    (sm as any).pumpFunClient.formatQuoteForDisplay = () => "PUMP_FMT";
-    const msg = sm.formatQuoteForDisplay(
-      {
-        provider: "pump-fun",
-        inputMint: "SOL",
-        outputMint: "PUMP",
-        inputAmount: "1",
-        inputAmountRaw: "1",
-        outputAmount: "2",
-        estimatedRate: 2,
-        slippage: 1,
-      } as any,
-      9,
-      6,
-      "SOL",
-      "PUMP"
-    );
-    expect(msg).toBe("PUMP_FMT");
-  });
+  test("delegates to Jupiter formatting with computed slippage", () => {
+    const stub = spyOn((sm as any).jupiterClient, "formatQuoteForDisplay").mockReturnValue("JUP_FMT");
+    const quote = {
+      provider: "jupiter",
+      inputMint: "So11111111111111111111111111111111111111112",
+      outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      inputAmount: "100000000",
+      inputAmountRaw: "100000000",
+      outputAmount: "50000000",
+      estimatedRate: 0.5,
+      slippage: 0.75,
+    } as any;
 
-  test("formats via jupiter client when provider is jupiter", () => {
-    (sm as any).jupiterClient.formatQuoteForDisplay = () => "JUP_FMT";
-    const msg = sm.formatQuoteForDisplay(
-      {
-        provider: "jupiter",
-        inputMint: "SOL",
-        outputMint: "USDC",
-        inputAmount: "1",
-        inputAmountRaw: "1",
-        outputAmount: "1",
-        estimatedRate: 1,
-        slippage: 1,
-      } as any,
-      9,
-      6,
-      "SOL",
-      "USDC"
-    );
-    expect(msg).toBe("JUP_FMT");
-  });
+    const result = sm.formatQuoteForDisplay(quote, 9, 6, "SOL", "USDC");
 
-  test("returns unsupported message for unknown provider", () => {
-    const msg = sm.formatQuoteForDisplay(
-      {
-        provider: "unknown",
-        inputMint: "SOL",
-        outputMint: "X",
-        inputAmount: "1",
-        inputAmountRaw: "1",
-        outputAmount: "1",
-        estimatedRate: 1,
-        slippage: 1,
-      } as any,
-      9,
-      6,
-      "SOL",
-      "X"
-    );
-    expect(msg).toContain("Unsupported provider");
+    expect(result).toBe("JUP_FMT");
+    expect(stub.mock.calls.length).toBe(1);
+    const maybeArgs = stub.mock.calls[0]?.[0];
+    if (!maybeArgs) {
+      throw new Error("Jupiter formatter was not called");
+    }
+    const callArgs = maybeArgs as { slippageBps: number };
+    expect(callArgs.slippageBps).toBe(75);
   });
 });

@@ -65,7 +65,7 @@ describe("price utilities resilience", () => {
     expect(calls).toBe(1);
   });
 
-  test("falls back to pump.fun pricing when Jupiter fails", async () => {
+  test("returns zero when Jupiter fails and no fallback exists", async () => {
     process.env["PRICES_ENABLED"] = "true";
     const token = `Mint${Date.now()}`;
     const fetchImpl = (async (url: string) => {
@@ -77,19 +77,11 @@ describe("price utilities resilience", () => {
           },
         } as any;
       }
-      if (url.includes(token)) {
-        return {
-          ok: true,
-          async json() {
-            return { priceUsd: "2.5" };
-          },
-        } as any;
-      }
       throw new Error(`unexpected url ${url}`);
     }) as any;
 
     const value = await getPriceUSD(token, fetchImpl);
-    expect(value).toBe(2.5);
+    expect(value).toBe(0);
   });
 
   test("resolveTokenPriceUSD iterates candidates and reports identifier", async () => {
@@ -159,7 +151,6 @@ describe("price utilities resilience", () => {
     process.env["PRICES_ENABLED"] = "true";
     const token = `RETRY-${Date.now()}`;
     let jupiterCalls = 0;
-    let pumpCalls = 0;
 
     const fetchImpl = (async (url: string) => {
       if (url.includes("jup.ag")) {
@@ -175,28 +166,16 @@ describe("price utilities resilience", () => {
         } as any;
       }
 
-      if (url.includes(token)) {
-        pumpCalls += 1;
-        return {
-          ok: false,
-          async json() {
-            return {};
-          },
-        } as any;
-      }
-
       throw new Error(`unexpected url ${url}`);
     }) as any;
 
     const firstAttempt = await getPriceUSD(token, fetchImpl);
     expect(firstAttempt).toBe(0);
-    expect(jupiterCalls).toBeGreaterThanOrEqual(1);
-    expect(pumpCalls).toBeGreaterThanOrEqual(1);
+    expect(jupiterCalls).toBe(1);
 
     const secondAttempt = await getPriceUSD(token, fetchImpl);
     expect(secondAttempt).toBe(7.77);
     expect(jupiterCalls).toBe(2);
-    expect(pumpCalls).toBe(1);
   });
 
   test("getPricesUSD aggregates values for mixed identifiers (property)", async () => {
@@ -218,14 +197,6 @@ describe("price utilities resilience", () => {
           const fetchImpl = (async (url: string) => {
             const parsed = new URL(url);
             const id = parsed.searchParams.get("ids") ?? parsed.pathname.split("/").pop()!;
-            if (url.includes("pump.fun")) {
-              return {
-                ok: true,
-                async json() {
-                  return { priceUsd: basePrice };
-                },
-              } as any;
-            }
             return {
               ok: true,
               async json() {

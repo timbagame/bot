@@ -318,17 +318,17 @@ describe("Bot helper utilities", () => {
     ).toThrow("Insufficient token balance");
   });
 
-  test("formatTradeConfirmationSummary renders pump.fun output with token decimals", () => {
+  test("formatTradeConfirmationSummary renders output with token decimals", () => {
     const rawAmount = 21_713_000; // 0.021713 SOL
     const quote = {
       inputMint: "So11111111111111111111111111111111111111112",
-      outputMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
+      outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
       inputAmount: rawAmount.toString(),
       inputAmountRaw: rawAmount.toString(),
       outputAmount: "455090146672",
       estimatedRate: 0,
       slippage: 1,
-      provider: "pump-fun" as const,
+      provider: "jupiter" as const,
     };
 
     const summary = botModule.__test_formatTradeConfirmationSummary({
@@ -347,7 +347,7 @@ describe("Bot helper utilities", () => {
       payToken: "SOL",
       receiveDisplay: "455090.146672",
       receiveToken: "TIMBA",
-      providerLabel: "Pump.fun (Not graduated)",
+      providerLabel: "Jupiter",
       rateDisplay: "20959339.8734",
       slippageText: "1.0%",
       contractAddress: quote.outputMint,
