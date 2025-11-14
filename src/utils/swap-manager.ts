@@ -1510,6 +1510,9 @@ export class SwapManager {
             this.decodeComputeUnitLimit(instruction) ?? computeUnitLimit;
           continue;
         }
+        if (kind === 3) {
+          continue;
+        }
       }
       sanitizedInstructions.push(instruction);
     }
