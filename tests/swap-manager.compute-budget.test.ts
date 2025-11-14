@@ -27,21 +27,24 @@ describe("SwapManager compute budget helper", () => {
       data: Buffer.from([]),
     });
 
-    const priceInstruction = ComputeBudgetProgram.setComputeUnitPrice({
-      microLamports: 1,
+    const budgetInstructions = (
+      manager as any
+    ).buildCompositeComputeBudgetInstructions({
+      pumpInstructions: [pumpInstruction],
+      computeUnitLimit: 1_350_000,
     });
 
-    const budgetInstructions = (manager as any).buildCompositeComputeBudgetInstructions(
-      {
-        pumpInstructions: [pumpInstruction],
-        computeUnitLimit: 1_350_000,
-        computePriceInstructions: [priceInstruction],
-      }
-    );
-
-    expect(budgetInstructions[0].programId.equals(ComputeBudgetProgram.programId)).toBe(true);
+    expect(
+      budgetInstructions[0].programId.equals(ComputeBudgetProgram.programId)
+    ).toBe(true);
     const limit = Buffer.from(budgetInstructions[0].data).readUInt32LE(1);
     expect(limit).toBe(600_000);
-    expect(budgetInstructions[1]).toBe(priceInstruction);
+    expect(
+      budgetInstructions[1].programId.equals(ComputeBudgetProgram.programId)
+    ).toBe(true);
+    const priceData = Buffer.from(budgetInstructions[1].data);
+    expect(priceData[0]).toBe(3);
+    const microLamports = priceData.readBigUInt64LE(1);
+    expect(Number(microLamports)).toBe(1);
   });
 });

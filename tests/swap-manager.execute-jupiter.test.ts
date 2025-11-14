@@ -1,12 +1,23 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { Connection, Keypair } from "@solana/web3.js";
+import {
+  ComputeBudgetProgram,
+  Connection,
+  Keypair,
+  SystemProgram,
+  TransactionInstruction,
+} from "@solana/web3.js";
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
 
 describe("SwapManager.executeJupiterSwap", () => {
   let origNet: string | undefined;
-  beforeEach(() => { origNet = process.env.SOLANA_NETWORK; process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com"; });
-  afterEach(() => { process.env.SOLANA_NETWORK = origNet || process.env.SOLANA_NETWORK!; });
+  beforeEach(() => {
+    origNet = process.env.SOLANA_NETWORK;
+    process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
+  });
+  afterEach(() => {
+    process.env.SOLANA_NETWORK = origNet || process.env.SOLANA_NETWORK!;
+  });
 
   test("executes serialized Jupiter transaction and returns signature", async () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
@@ -63,5 +74,73 @@ describe("SwapManager.executeJupiterSwap", () => {
 
     const sig = await sm.executeJupiterSwap(req, quote);
     expect(sig).toBe("SIG_JUP_123");
+  });
+
+  test("executeJupiterTransaction replaces compute budget with capped values", async () => {
+    const connection = new Connection("http://localhost:8899", "confirmed");
+    const wallet = WalletManager.createForTest(
+      "test walk nut penalty hip pave soap entry language right filter choice",
+      { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    );
+    const sm = new SwapManager(connection, wallet);
+
+    const limitIx = ComputeBudgetProgram.setComputeUnitLimit({
+      units: 900_000,
+    });
+    const priceIx = ComputeBudgetProgram.setComputeUnitPrice({
+      microLamports: 4_000_000,
+    });
+    const payloadIx = new TransactionInstruction({
+      programId: SystemProgram.programId,
+      keys: [
+        {
+          pubkey: Keypair.generate().publicKey,
+          isSigner: false,
+          isWritable: true,
+        },
+      ],
+      data: Buffer.alloc(0),
+    });
+
+    (sm as any).extractJupiterInstructions = async () => ({
+      instructions: [limitIx, priceIx, payloadIx],
+      addressLookupTableAccounts: [],
+    });
+
+    const sent: TransactionInstruction[][] = [];
+    const originalSend = wallet.sendAndConfirmWithResubmits;
+    (wallet as any).sendAndConfirmWithResubmits = async (
+      instructions: TransactionInstruction[]
+    ) => {
+      sent.push(instructions);
+      return "SIG_CLAMP";
+    };
+
+    const signature = await (sm as any).executeJupiterTransaction(
+      Buffer.from("dummy").toString("base64"),
+      Keypair.generate()
+    );
+    expect(signature).toBe("SIG_CLAMP");
+    expect(sent).toHaveLength(1);
+    const instructions = sent[0];
+    if (!instructions) {
+      throw new Error("Missing instruction payload");
+    }
+    expect(instructions.length).toBeGreaterThanOrEqual(3);
+    const derivedLimitIx = instructions[0]!;
+    expect(
+      derivedLimitIx.programId.equals(ComputeBudgetProgram.programId)
+    ).toBe(true);
+    const limit = Buffer.from(derivedLimitIx.data).readUInt32LE(1);
+    expect(limit).toBe(600_000);
+    const derivedPriceIx = instructions[1]!;
+    expect(
+      derivedPriceIx.programId.equals(ComputeBudgetProgram.programId)
+    ).toBe(true);
+    expect(Buffer.from(derivedPriceIx.data)[0]).toBe(3);
+    expect(Buffer.from(derivedPriceIx.data).readBigUInt64LE(1)).toBe(1n);
+    expect(instructions[2]).toBe(payloadIx);
+
+    (wallet as any).sendAndConfirmWithResubmits = originalSend;
   });
 });

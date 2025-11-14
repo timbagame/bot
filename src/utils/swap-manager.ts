@@ -53,6 +53,8 @@ const SOL_DECIMALS = 9;
 const COMPOSITE_MIN_COMPUTE_UNIT_LIMIT = 200_000;
 const COMPOSITE_PUMP_COMPUTE_BUFFER = 60_000;
 const COMPOSITE_MAX_COMPUTE_UNIT_LIMIT = 600_000;
+const COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 1;
+const MAX_JUPITER_ACCOUNTS = 24;
 
 export class SwapManager {
   private jupiterClient: JupiterClient;
@@ -110,8 +112,16 @@ export class SwapManager {
   private getJupiterQuote(
     params: JupiterQuoteRequest
   ): Promise<JupiterQuoteResponse> {
-    return this.quoteCache.getJupiterQuote(params, () =>
-      this.jupiterClient.getQuote(params)
+    const request: JupiterQuoteRequest = {
+      swapMode: params.swapMode ?? "ExactIn",
+      maxAccounts: params.maxAccounts ?? MAX_JUPITER_ACCOUNTS,
+      onlyDirectRoutes: params.onlyDirectRoutes ?? true,
+      asLegacyTransaction: params.asLegacyTransaction ?? true,
+      ...params,
+    };
+
+    return this.quoteCache.getJupiterQuote(request, () =>
+      this.jupiterClient.getQuote(request)
     );
   }
 
@@ -859,7 +869,6 @@ export class SwapManager {
     };
   }
 
-
   /**
    * Create swap transaction instructions
    */
@@ -1124,22 +1133,19 @@ export class SwapManager {
       quoteResponse: jupiterQuoteResponse,
     });
 
-    const {
-      instructions: jupiterInstructions,
-      addressLookupTableAccounts,
-    } = await this.extractJupiterInstructions(jupiterResponse.swapTransaction);
+    const { instructions: jupiterInstructions, addressLookupTableAccounts } =
+      await this.extractJupiterInstructions(jupiterResponse.swapTransaction);
 
     const {
       sanitizedInstructions: sanitizedJupiterInstructions,
       computeUnitLimit,
-      computePriceInstructions,
     } = this.partitionJupiterComputeBudgetInstructions(jupiterInstructions);
 
-    const computeBudgetInstructions = this.buildCompositeComputeBudgetInstructions({
-      pumpInstructions,
-      computeUnitLimit,
-      computePriceInstructions,
-    });
+    const computeBudgetInstructions =
+      this.buildCompositeComputeBudgetInstructions({
+        pumpInstructions,
+        computeUnitLimit,
+      });
 
     const combinedInstructions =
       flow === "pump-then-jupiter"
@@ -1404,23 +1410,31 @@ export class SwapManager {
     userKeypair: Keypair
   ): Promise<string> {
     try {
-      // Decode the base64 transaction so we can refresh the blockhash
-      const transactionBuffer = Buffer.from(base64Transaction, "base64");
-      const versionedTx = VersionedTransaction.deserialize(transactionBuffer);
+      const { instructions, addressLookupTableAccounts } =
+        await this.extractJupiterInstructions(base64Transaction);
 
-      const latestBlockhash = await this.connection.getLatestBlockhash();
-      versionedTx.message.recentBlockhash = latestBlockhash.blockhash;
+      const { sanitizedInstructions, computeUnitLimit } =
+        this.partitionJupiterComputeBudgetInstructions(instructions);
 
-      const refreshedBase64 = Buffer.from(versionedTx.serialize()).toString(
-        "base64"
+      const instructionSet = [
+        ...this.buildCompositeComputeBudgetInstructions({
+          pumpInstructions: [],
+          computeUnitLimit,
+        }),
+        ...sanitizedInstructions,
+      ];
+
+      const signature = await this.wallet.sendAndConfirmWithResubmits(
+        instructionSet,
+        [userKeypair],
+        {
+          operationLabel: "Jupiter swap",
+          addressLookupTableAccounts:
+            addressLookupTableAccounts.length > 0
+              ? addressLookupTableAccounts
+              : undefined,
+        }
       );
-
-      const signature = await this.wallet.signAndSendSerializedTransaction(
-        refreshedBase64,
-        userKeypair
-      );
-
-      await this.wallet.confirmTransaction(signature);
 
       return signature;
     } catch (error: any) {
@@ -1484,21 +1498,16 @@ export class SwapManager {
   ): {
     sanitizedInstructions: TransactionInstruction[];
     computeUnitLimit?: number;
-    computePriceInstructions: TransactionInstruction[];
   } {
     const sanitizedInstructions: TransactionInstruction[] = [];
-    const computePriceInstructions: TransactionInstruction[] = [];
     let computeUnitLimit: number | undefined;
 
     for (const instruction of instructions) {
       if (instruction.programId.equals(ComputeBudgetProgram.programId)) {
         const kind = instruction.data?.[0];
         if (kind === 2) {
-          computeUnitLimit = this.decodeComputeUnitLimit(instruction) ?? computeUnitLimit;
-          continue;
-        }
-        if (kind === 3) {
-          computePriceInstructions.push(instruction);
+          computeUnitLimit =
+            this.decodeComputeUnitLimit(instruction) ?? computeUnitLimit;
           continue;
         }
       }
@@ -1508,7 +1517,6 @@ export class SwapManager {
     return {
       sanitizedInstructions,
       computeUnitLimit,
-      computePriceInstructions,
     };
   }
 
@@ -1527,13 +1535,11 @@ export class SwapManager {
   private buildCompositeComputeBudgetInstructions(options: {
     pumpInstructions: TransactionInstruction[];
     computeUnitLimit?: number;
-    computePriceInstructions: TransactionInstruction[];
   }): TransactionInstruction[] {
     const pumpBuffer =
-      options.pumpInstructions.length > 0
-        ? COMPOSITE_PUMP_COMPUTE_BUFFER
-        : 0;
-    const baseLimit = options.computeUnitLimit ?? COMPOSITE_MIN_COMPUTE_UNIT_LIMIT;
+      options.pumpInstructions.length > 0 ? COMPOSITE_PUMP_COMPUTE_BUFFER : 0;
+    const baseLimit =
+      options.computeUnitLimit ?? COMPOSITE_MIN_COMPUTE_UNIT_LIMIT;
     const targetLimit = Math.min(
       COMPOSITE_MAX_COMPUTE_UNIT_LIMIT,
       Math.max(COMPOSITE_MIN_COMPUTE_UNIT_LIMIT, baseLimit + pumpBuffer)
@@ -1541,7 +1547,9 @@ export class SwapManager {
 
     return [
       ComputeBudgetProgram.setComputeUnitLimit({ units: targetLimit }),
-      ...options.computePriceInstructions,
+      ComputeBudgetProgram.setComputeUnitPrice({
+        microLamports: COMPUTE_UNIT_PRICE_MICRO_LAMPORTS,
+      }),
     ];
   }
 

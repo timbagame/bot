@@ -16,6 +16,7 @@ export interface JupiterQuoteRequest {
   platformFeeBps?: number;
   maxAccounts?: number;
   onlyDirectRoutes?: boolean;
+  asLegacyTransaction?: boolean;
   swapMode?: "ExactIn" | "ExactOut";
 }
 
@@ -82,6 +83,9 @@ interface JupiterOrderParams {
   slippageBps?: number;
   swapMode?: "ExactIn" | "ExactOut";
   taker?: string;
+  maxAccounts?: number;
+  onlyDirectRoutes?: boolean;
+  asLegacyTransaction?: boolean;
 }
 
 interface JupiterUltraOrderResponse {
@@ -122,16 +126,21 @@ export class JupiterClient {
   private baseUrl: string;
   private fetchFn: FetchLike;
 
-  constructor(baseUrl: string = "https://lite-api.jup.ag", fetchFn?: FetchLike) {
+  constructor(
+    baseUrl: string = "https://lite-api.jup.ag",
+    fetchFn?: FetchLike
+  ) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
-    this.fetchFn = fetchFn ?? ((globalThis.fetch as unknown) as FetchLike);
+    this.fetchFn = fetchFn ?? (globalThis.fetch as unknown as FetchLike);
   }
 
   private getOrderUrl(): string {
     return `${this.baseUrl}/ultra/v1/order`;
   }
 
-  private normalizeQuote(data: JupiterUltraOrderResponse): JupiterQuoteResponse {
+  private normalizeQuote(
+    data: JupiterUltraOrderResponse
+  ): JupiterQuoteResponse {
     const priceImpactPct =
       typeof data.priceImpactPct === "string"
         ? data.priceImpactPct
@@ -176,10 +185,27 @@ export class JupiterClient {
     if (params.taker) {
       url.searchParams.set("taker", params.taker);
     }
+    if (params.maxAccounts !== undefined) {
+      url.searchParams.set("maxAccounts", params.maxAccounts.toString());
+    }
+    if (params.onlyDirectRoutes !== undefined) {
+      url.searchParams.set(
+        "onlyDirectRoutes",
+        params.onlyDirectRoutes ? "true" : "false"
+      );
+    }
+    if (params.asLegacyTransaction !== undefined) {
+      url.searchParams.set(
+        "asLegacyTransaction",
+        params.asLegacyTransaction ? "true" : "false"
+      );
+    }
     return url;
   }
 
-  private async requestOrder(params: JupiterOrderParams): Promise<JupiterUltraOrderResponse> {
+  private async requestOrder(
+    params: JupiterOrderParams
+  ): Promise<JupiterUltraOrderResponse> {
     const url = this.buildOrderParams(params);
 
     try {
@@ -215,6 +241,9 @@ export class JupiterClient {
       amount: request.amount,
       slippageBps: request.slippageBps,
       swapMode: request.swapMode,
+      maxAccounts: request.maxAccounts,
+      onlyDirectRoutes: request.onlyDirectRoutes,
+      asLegacyTransaction: request.asLegacyTransaction,
     });
     return this.normalizeQuote(order);
   }
@@ -283,8 +312,12 @@ export class JupiterClient {
     const safeOutputTicker = escapeHtml(outputTicker);
 
     let message = `🔄 <b>Swap Preview</b>\n\n`;
-    message += `📥 <b>You pay:</b> ${inputAmount.toFixed(6)} ${safeInputTicker}\n`;
-    message += `📤 <b>You receive:</b> ${outputAmount.toFixed(6)} ${safeOutputTicker}\n`;
+    message += `📥 <b>You pay:</b> ${inputAmount.toFixed(
+      6
+    )} ${safeInputTicker}\n`;
+    message += `📤 <b>You receive:</b> ${outputAmount.toFixed(
+      6
+    )} ${safeOutputTicker}\n`;
     message += `💹 <b>Rate:</b> 1 ${safeInputTicker} = ${rate} ${safeOutputTicker}\n`;
     message += `📊 <b>Price Impact:</b> ${priceImpact.toFixed(2)}%\n`;
     message += `🎯 <b>Slippage:</b> ${slippage}%\n`;
@@ -292,14 +325,18 @@ export class JupiterClient {
     if (quote.platformFee) {
       const feeAmount =
         parseFloat(quote.platformFee.amount) / Math.pow(10, inputDecimals);
-      message += `💰 <b>Platform Fee:</b> ${feeAmount.toFixed(6)} ${safeInputTicker}\n`;
+      message += `💰 <b>Platform Fee:</b> ${feeAmount.toFixed(
+        6
+      )} ${safeInputTicker}\n`;
     }
 
     // Add route information
     if (quote.routePlan && quote.routePlan.length > 0) {
       const mainRoute = quote.routePlan[0];
       if (mainRoute && mainRoute.swapInfo) {
-        message += `🛣️ <b>Route:</b> ${escapeHtml(mainRoute.swapInfo.label || "Unknown")}\n`;
+        message += `🛣️ <b>Route:</b> ${escapeHtml(
+          mainRoute.swapInfo.label || "Unknown"
+        )}\n`;
       }
     }
 
@@ -423,7 +460,7 @@ export interface JupiterTokenMetadata {
 
 export async function fetchJupiterTokenMetadata(
   query: string,
-  fetchImpl: FetchLike = (globalThis.fetch as unknown) as FetchLike
+  fetchImpl: FetchLike = globalThis.fetch as unknown as FetchLike
 ): Promise<JupiterTokenMetadata | null> {
   if (!query || !query.trim()) {
     return null;
@@ -467,7 +504,8 @@ export async function fetchJupiterTokenMetadata(
     }
 
     const decimals =
-      typeof candidate.decimals === "number" && Number.isFinite(candidate.decimals)
+      typeof candidate.decimals === "number" &&
+      Number.isFinite(candidate.decimals)
         ? candidate.decimals
         : 6;
 
