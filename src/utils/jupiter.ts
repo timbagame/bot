@@ -12,7 +12,6 @@ export interface JupiterQuoteRequest {
   inputMint: string;
   outputMint: string;
   amount: string;
-  slippageBps?: number;
   platformFeeBps?: number;
   maxAccounts?: number;
   onlyDirectRoutes?: boolean;
@@ -61,7 +60,6 @@ export interface JupiterSwapRequest {
   userPublicKey: string;
   quoteResponse: JupiterQuoteResponse;
   amountOverride?: string;
-  slippageBpsOverride?: number;
 }
 
 export interface JupiterSwapResponse {
@@ -79,7 +77,6 @@ interface JupiterOrderParams {
   inputMint: string;
   outputMint: string;
   amount: string;
-  slippageBps?: number;
   swapMode?: "ExactIn" | "ExactOut";
   taker?: string;
 }
@@ -167,9 +164,6 @@ export class JupiterClient {
     url.searchParams.set("inputMint", params.inputMint);
     url.searchParams.set("outputMint", params.outputMint);
     url.searchParams.set("amount", params.amount);
-    if (params.slippageBps !== undefined) {
-      url.searchParams.set("slippageBps", params.slippageBps.toString());
-    }
     if (params.swapMode) {
       url.searchParams.set("swapMode", params.swapMode);
     }
@@ -213,7 +207,6 @@ export class JupiterClient {
       inputMint: request.inputMint,
       outputMint: request.outputMint,
       amount: request.amount,
-      slippageBps: request.slippageBps,
       swapMode: request.swapMode,
     });
     return this.normalizeQuote(order);
@@ -231,14 +224,11 @@ export class JupiterClient {
       (quoteResponse.swapMode === "ExactOut"
         ? quoteResponse.outAmount
         : quoteResponse.inAmount);
-    const slippageBps =
-      request.slippageBpsOverride ?? quoteResponse.slippageBps;
 
     const order = await this.requestOrder({
       inputMint: quoteResponse.inputMint,
       outputMint: quoteResponse.outputMint,
       amount,
-      slippageBps,
       swapMode: (quoteResponse.swapMode as "ExactIn" | "ExactOut") ?? "ExactIn",
       taker: userPublicKey,
     });

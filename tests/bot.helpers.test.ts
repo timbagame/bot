@@ -453,13 +453,6 @@ describe("Bot helper utilities", () => {
     expect(summary.message).toContain("Mint&lt;unsafe&gt;");
   });
 
-  test("formatSlippageOptionLabel formats bps cleanly", () => {
-    expect(botModule.__test_formatSlippageOptionLabel(2)).toBe("0.02%");
-    expect(botModule.__test_formatSlippageOptionLabel(10)).toBe("0.1%");
-    expect(botModule.__test_formatSlippageOptionLabel(50)).toBe("0.5%");
-    expect(botModule.__test_formatSlippageOptionLabel(100)).toBe("1%");
-  });
-
   test("parseOracleNumeric returns null for values above Number.MAX_SAFE_INTEGER", () => {
   const hugeResult = botModule.__test_parseOracleNumeric(2n ** 60n);
     expect(hugeResult).toBeNull();
@@ -538,46 +531,20 @@ describe("Bot helper utilities", () => {
     }
   });
 
-  test("swap slippage state defaults and persists per user", () => {
-    const userId = "slippage-user";
-    botModule.__test_clearUserState(userId);
-
-    expect(botModule.__test_getUserSwapSlippageBps(userId)).toBe(100);
-
-    botModule.__test_setUserSwapSlippageBps(userId, 100);
-    expect(botModule.__test_getUserSwapSlippageBps(userId)).toBe(100);
-
-    botModule.__test_setUserState(userId, { foo: "bar" });
-    botModule.__test_setUserSwapSlippageBps(userId, 10);
-
-    const state = botModule.__test_getUserState(userId);
-    expect(state?.foo).toBe("bar");
-    expect(state?.swapSlippageBps).toBe(10);
-    expect(botModule.__test_getUserSwapSlippageBps(userId)).toBe(10);
-
-    botModule.__test_clearUserState(userId);
-  });
-
-  test("buildSwapConfirmationKeyboard includes slippage options", () => {
-  const keyboard = botModule.__test_buildSwapConfirmationKeyboard({
-    txId: "tx_test",
-    cancelCallback: "swap_to_SOL_TIMBA",
-    selectedSlippageBps: 10,
-  });
+  test("buildSwapConfirmationKeyboard includes confirm and cancel actions", () => {
+    const keyboard = botModule.__test_buildSwapConfirmationKeyboard({
+      txId: "tx_test",
+      cancelCallback: "swap_to_SOL_TIMBA",
+    });
 
     const callbacks = extractCallbacks(keyboard);
     expect(callbacks).toContain("confirm_swap_tx_test");
     expect(callbacks).toContain("swap_to_SOL_TIMBA");
-    expect(callbacks).toContain("swap_slippage_2_tx_test");
-    expect(callbacks).toContain("swap_slippage_10_tx_test");
-    expect(callbacks).toContain("swap_slippage_50_tx_test");
-    expect(callbacks).toContain("swap_slippage_100_tx_test");
+    expect(callbacks.filter((cb) => cb?.startsWith("swap_slippage_")).length).toBe(0);
 
     const texts = extractTexts(keyboard);
     expect(texts).toContain("✅ Confirm Swap");
     expect(texts).toContain("❌ Cancel");
-    const selectedLabel = texts.find((t) => t.includes("0.1%"));
-    expect(selectedLabel?.startsWith("• ")).toBe(true);
   });
 
   test("swap amount keyboard routes back to swap_from handler", () => {

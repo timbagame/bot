@@ -33,8 +33,6 @@ import {
   TOKENS_LIST,
   WSOL_MINT,
   INPUT_TIMEOUT_HINT,
-  SWAP_DEFAULT_SLIPPAGE_BPS,
-  SWAP_SLIPPAGE_OPTIONS_BPS,
   USER_WALLET_RPC_WINDOW_MS,
   USER_WALLET_RPC_MAX_CALLS,
   applyOracleBufferTime,
@@ -44,7 +42,6 @@ import {
   setUserState,
   getUserState,
   storePendingTransaction,
-  getPendingTransaction,
   upsertGameSetupSession,
   getGameSetupSession,
   clearGameSetupSession,
@@ -623,47 +620,12 @@ type TradeConfirmationSummary = ReturnType<
   typeof formatTradeConfirmationSummary
 >;
 
-const formatSlippageOptionLabel = (bps: number): string => {
-  if (!Number.isFinite(bps)) {
-    return "0%";
-  }
-
-  if (bps < 10) {
-    return `${(bps / 100).toFixed(2)}%`;
-  }
-
-  if (bps < 100) {
-    return `${(bps / 100).toFixed(1)}%`;
-  }
-
-  const decimals = bps % 100 === 0 ? 0 : 1;
-  return `${(bps / 100).toFixed(decimals)}%`;
-};
-
-const getUserSwapSlippageBps = (userId: string): number => {
-  const state = getUserState<{ swapSlippageBps?: number }>(userId, false);
-  const candidate = state?.swapSlippageBps;
-  if (typeof candidate === "number" && Number.isFinite(candidate)) {
-    return candidate;
-  }
-  return SWAP_DEFAULT_SLIPPAGE_BPS;
-};
-
-const setUserSwapSlippageBps = (userId: string, slippageBps: number): void => {
-  const existing = getUserState(userId, false);
-  const sanitizedState: Record<string, any> = existing ? { ...existing } : {};
-  Reflect.deleteProperty(sanitizedState, "timestamp");
-  setUserState(userId, { ...sanitizedState, swapSlippageBps: slippageBps });
-};
-
 const buildSwapConfirmationKeyboard = ({
   txId,
   cancelCallback,
-  selectedSlippageBps,
 }: {
   txId: string;
   cancelCallback: string;
-  selectedSlippageBps: number;
 }): InlineKeyboard => {
   const keyboard = createTradeConfirmKeyboard({
     confirmLabel: "✅ Confirm Swap",
@@ -671,15 +633,6 @@ const buildSwapConfirmationKeyboard = ({
     cancelLabel: "❌ Cancel",
     cancelCallback,
   });
-
-  for (const option of SWAP_SLIPPAGE_OPTIONS_BPS) {
-    const optionLabel = formatSlippageOptionLabel(option);
-    const displayLabel =
-      option === selectedSlippageBps ? `• ${optionLabel}` : optionLabel;
-    keyboard.text(displayLabel, `swap_slippage_${option}_${txId}`);
-  }
-
-  keyboard.row();
   return keyboard;
 };
 
@@ -814,7 +767,6 @@ type PrepareTokenTradeQuoteParams = {
   summaryExtras?: (
     context: PreparedTradeQuoteContext
   ) => Partial<Omit<TradeConfirmationParams, "quote">>;
-  quoteOptions?: { slippageBps?: number };
   quoteErrorMessage?: string;
 };
 
@@ -829,7 +781,6 @@ const prepareTokenTradeQuote = async ({
   buildConfirmationKeyboard,
   onError,
   summaryExtras,
-  quoteOptions,
   quoteErrorMessage,
 }: PrepareTokenTradeQuoteParams) => {
   const snapshot = await getCachedWalletData(telegramId);
@@ -897,7 +848,6 @@ const prepareTokenTradeQuote = async ({
         inputMint: inputAsset.mint,
         outputMint: outputAsset.mint,
         amount: amountResolution.rawAmount.toString(),
-        slippageBps: quoteOptions?.slippageBps ?? SWAP_DEFAULT_SLIPPAGE_BPS,
         userKeypair: wallet.getKeyPair(telegramId),
         inputDecimals: inputAsset.decimals,
         outputDecimals: outputAsset.decimals,
@@ -3622,10 +3572,6 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
 
       let txSignature: string;
       const keypair = wallet.getKeyPair(BigInt(transaction.userId));
-      const parsedSlippageBps = Number((transaction as any).slippageBps);
-      const slippageBps = Number.isFinite(parsedSlippageBps)
-        ? parsedSlippageBps
-        : SWAP_DEFAULT_SLIPPAGE_BPS;
 
       const rawInputDecimals =
         (transaction as any).inputDecimals ?? (quote as any).inputDecimals;
@@ -3647,7 +3593,6 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
           amount: quote.inputAmountRaw,
-          slippageBps,
           userKeypair: keypair,
           inputDecimals,
           outputDecimals,
@@ -4247,7 +4192,6 @@ const showSwapQuoteAndConfirmation = async (
 ) => {
   const userId = telegramId || getTelegramId(ctx);
   const cancelCallback = `swap_to_${fromToken}_${toToken}`;
-  const selectedSlippageBps = getUserSwapSlippageBps(userId.toString());
 
   try {
     await prepareTokenTradeQuoteRunner({
@@ -4315,7 +4259,6 @@ const showSwapQuoteAndConfirmation = async (
           inputDecimals: context.input.decimals,
           outputDecimals: context.output.decimals,
           userId: userId.toString(),
-          slippageBps: selectedSlippageBps,
           quote,
         });
       },
@@ -4323,7 +4266,6 @@ const showSwapQuoteAndConfirmation = async (
         buildSwapConfirmationKeyboard({
           txId,
           cancelCallback,
-          selectedSlippageBps,
         }),
       onError: async (error) => {
         const { text, keyboard } = renderTradeQuoteError({
@@ -4332,7 +4274,6 @@ const showSwapQuoteAndConfirmation = async (
         });
         await respondWithMenu(ctx, { text, keyboard });
       },
-      quoteOptions: { slippageBps: selectedSlippageBps },
       quoteErrorMessage: `Cannot get quote for ${fromToken} → ${toToken}`,
     });
   } catch (error) {
@@ -4344,121 +4285,6 @@ const showSwapQuoteAndConfirmation = async (
     await respondWithMenu(ctx, { text, keyboard });
   }
 };
-
-bot.callbackQuery(/^swap_slippage_/, async (ctx) => {
-  const data = ctx.callbackQuery?.data ?? "";
-  const match = data.match(/^swap_slippage_(\d+)_([A-Za-z0-9_-]+)$/);
-
-  if (!match) {
-    await safeAnswerCallbackQuery(ctx, "❌ Invalid slippage option");
-    return;
-  }
-
-  const slippageBps = Number(match[1]);
-  const rawTxId = match[2];
-
-  if (!rawTxId) {
-    await safeAnswerCallbackQuery(ctx, "❌ Invalid transaction reference");
-    return;
-  }
-
-  const txId = rawTxId;
-
-  if (!SWAP_SLIPPAGE_OPTIONS_BPS.some((value) => value === slippageBps)) {
-    await safeAnswerCallbackQuery(ctx, "❌ Unsupported slippage option");
-    return;
-  }
-
-  const pendingEntry = getPendingTransaction<
-    PendingSwapTransaction & { timestamp?: number }
-  >(txId, false);
-
-  if (!pendingEntry || pendingEntry.type !== "swap") {
-    await safeAnswerCallbackQuery(ctx, "❌ Swap quote expired");
-    return;
-  }
-
-  const currentUserId = getTelegramIdString(ctx);
-  if (!currentUserId || pendingEntry.userId !== currentUserId) {
-    await safeAnswerCallbackQuery(ctx, "❌ Unauthorized");
-    return;
-  }
-
-  const pending = pendingEntry;
-
-  const pendingUserId: string = pending.userId;
-  const cancelCallback: string =
-    pending.cancelCallback ??
-    `swap_to_${pending.fromToken ?? "UNKNOWN"}_${pending.toToken ?? "UNKNOWN"}`;
-
-  try {
-    const previousQuote = pending.quote;
-    if (!previousQuote) {
-      await safeAnswerCallbackQuery(ctx, "❌ Quote unavailable");
-      return;
-    }
-
-    setUserSwapSlippageBps(pendingUserId, slippageBps);
-
-    const amountForQuote = pending.rawAmount ?? previousQuote.inputAmount;
-    if (!amountForQuote) {
-      await safeAnswerCallbackQuery(ctx, "❌ Invalid amount for quote");
-      return;
-    }
-
-    const quote = await swapManager.getQuote({
-      inputMint: previousQuote.inputMint,
-      outputMint: previousQuote.outputMint,
-      amount: amountForQuote,
-      slippageBps,
-      userKeypair: wallet.getKeyPair(BigInt(pendingUserId)),
-      inputDecimals: pending.inputDecimals ?? 9,
-      outputDecimals: pending.outputDecimals ?? 9,
-      inputTicker: (pending.fromToken ?? "UNKNOWN").toUpperCase(),
-      outputTicker: (pending.toToken ?? "UNKNOWN").toUpperCase(),
-    });
-
-    const summary = formatTradeConfirmationSummary({
-      payToken: pending.fromToken ?? quote.inputMint,
-      payDisplay: pending.amount ?? "0",
-      payRawAmount: Number(amountForQuote ?? 0),
-      payDecimals: pending.inputDecimals ?? 9,
-      receiveToken: pending.toToken ?? quote.outputMint,
-      receiveDecimals: pending.outputDecimals ?? 9,
-      quote,
-    });
-
-    const sanitizedPending: Record<string, any> = { ...pending };
-    Reflect.deleteProperty(sanitizedPending, "timestamp");
-
-    storePendingTransaction(txId, {
-      ...sanitizedPending,
-      userId: pendingUserId,
-      slippageBps,
-      quote,
-    });
-
-    const keyboard = buildSwapConfirmationKeyboard({
-      txId,
-      cancelCallback,
-      selectedSlippageBps: slippageBps,
-    });
-
-    await respondWithMenu(ctx, {
-      text: summary.message,
-      parseMode: "HTML",
-      keyboard,
-    });
-
-    await safeAnswerCallbackQuery(
-      ctx,
-      `Slippage set to ${formatSlippageOptionLabel(slippageBps)}`
-    );
-  } catch (error) {
-    console.error("Error updating swap slippage:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Failed to update slippage");
-  }
-});
 
 // ================================
 // ERROR HANDLING & BOT STARTUP
@@ -4800,9 +4626,6 @@ export const __test_handleCustomAmountInput = handleCustomAmountInput;
 export const __test_handleAddressInput = handleAddressInput;
 export const __test_handleWrapAmountInput = handleWrapAmountInput;
 export const __test_handleSwapCustomAmountInput = handleSwapCustomAmountInput;
-export const __test_formatSlippageOptionLabel = formatSlippageOptionLabel;
-export const __test_getUserSwapSlippageBps = getUserSwapSlippageBps;
-export const __test_setUserSwapSlippageBps = setUserSwapSlippageBps;
 export const __test_buildSwapConfirmationKeyboard =
   buildSwapConfirmationKeyboard;
 export const __test_renderSolConversionSuccess = renderSolConversionSuccess;

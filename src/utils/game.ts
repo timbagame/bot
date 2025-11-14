@@ -1805,7 +1805,6 @@ export class GameManager {
         tokenDecimals,
         availableTokenAmountRaw: Math.max(Math.floor(tokenBalance), 0),
         desiredLamports: minSolBuffer,
-        slippageBps: 300,
         tokenTicker,
         logContext,
       });
@@ -3143,7 +3142,6 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
           tokenDecimals: metadata.decimals,
           availableTokenAmountRaw: swapAllowanceRaw,
           desiredLamports: requiredSolReserveLamports,
-          slippageBps: 300,
           tokenTicker,
           logContext: `create ${gameType} game`,
         });
@@ -3829,7 +3827,6 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             tokenDecimals: metadata.decimals,
             availableTokenAmountRaw: swapAllowanceRaw,
             desiredLamports: minSolBuffer,
-            slippageBps: 300,
             tokenTicker: gameData.token_ticker,
             logContext: `join ${gameAddress}`,
           });

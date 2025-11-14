@@ -35,7 +35,6 @@ describe("SwapManager.executeJupiterSwap", () => {
       outputDecimals: 6,
       inputTicker: "WSOL",
       outputTicker: "USDC",
-      slippageBps: 100,
     } as const;
 
     const quote = {
@@ -56,7 +55,7 @@ describe("SwapManager.executeJupiterSwap", () => {
       outAmount: quote.outputAmount,
       otherAmountThreshold: "0",
       swapMode: "ExactIn",
-      slippageBps: req.slippageBps,
+      slippageBps: 100,
       priceImpactPct: "0",
       routePlan: [],
     });

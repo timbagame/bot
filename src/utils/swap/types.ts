@@ -17,7 +17,6 @@ export interface SwapRequest {
   inputMint: string;
   outputMint: string;
   amount: string;
-  slippageBps?: number;
   userKeypair: Keypair;
   inputDecimals: number;
   outputDecimals: number;

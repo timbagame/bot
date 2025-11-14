@@ -79,7 +79,6 @@ export class SwapManager {
       inputMint,
       outputMint,
       amount,
-      slippageBps = 500,
       inputTicker,
       outputTicker,
     } = request;
@@ -95,7 +94,6 @@ export class SwapManager {
       inputMint,
       outputMint,
       amount,
-      slippageBps,
     });
 
     const inAmount = parseFloat(jupiterQuote.inAmount);
@@ -122,7 +120,6 @@ export class SwapManager {
     tokenDecimals: number;
     availableTokenAmountRaw: number;
     desiredLamports?: number;
-    slippageBps?: number;
     tokenTicker?: string;
     logContext?: string;
   }): Promise<JustInTimeSwapResult> {
@@ -132,7 +129,6 @@ export class SwapManager {
       tokenDecimals,
       availableTokenAmountRaw,
       desiredLamports,
-      slippageBps = 250,
       tokenTicker = "token",
       logContext = "game",
     } = options;
@@ -178,7 +174,6 @@ export class SwapManager {
             inputMint: tokenMint,
             outputMint: SOL_MINT,
             amount: target.toString(),
-            slippageBps,
             swapMode: "ExactOut",
           });
 
@@ -428,7 +423,7 @@ export class SwapManager {
     request: SwapRequest,
     quote: SwapQuote
   ): Promise<string> {
-    const { userKeypair, slippageBps = 500 } = request;
+    const { userKeypair } = request;
 
     // First, create token accounts if they don't exist
     const setupInstructions = await this.createTokenAccountsIfNeeded(
@@ -458,7 +453,6 @@ export class SwapManager {
       inputMint: quote.inputMint,
       outputMint: quote.outputMint,
       amount: quote.inputAmountRaw,
-      slippageBps,
     });
 
     const swapResponse = await this.jupiterClient.getSwapTransaction({
