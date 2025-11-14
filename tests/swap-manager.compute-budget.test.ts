@@ -41,7 +41,7 @@ describe("SwapManager compute budget helper", () => {
 
     expect(budgetInstructions[0].programId.equals(ComputeBudgetProgram.programId)).toBe(true);
     const limit = Buffer.from(budgetInstructions[0].data).readUInt32LE(1);
-    expect(limit).toBe(1_400_000);
+    expect(limit).toBe(600_000);
     expect(budgetInstructions[1]).toBe(priceInstruction);
   });
 });
