@@ -2322,7 +2322,7 @@ const setupAnchor = async () => {
     );
 
     swapManager = new SwapManager(wallet.getConnection(), wallet);
-    console.log("Initialized SwapManager with pump.fun integration");
+    console.log("Initialized SwapManager");
 
     await initializeTokensList();
     gameManager = GameManager.getInstance(program, wallet, gameDb);

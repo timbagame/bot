@@ -318,11 +318,11 @@ describe("Bot helper utilities", () => {
     ).toThrow("Insufficient token balance");
   });
 
-  test("formatTradeConfirmationSummary renders pump.fun output with token decimals", () => {
+  test("formatTradeConfirmationSummary renders output with token decimals", () => {
     const rawAmount = 21_713_000; // 0.021713 SOL
     const quote = {
       inputMint: "So11111111111111111111111111111111111111112",
-      outputMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
+      outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
       inputAmount: rawAmount.toString(),
       inputAmountRaw: rawAmount.toString(),
       outputAmount: "455090146672",
