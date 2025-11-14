@@ -84,6 +84,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     );
     const sm = new SwapManager(connection, wallet);
 
+    const user = Keypair.generate();
     const limitIx = ComputeBudgetProgram.setComputeUnitLimit({
       units: 900_000,
     });
@@ -94,8 +95,8 @@ describe("SwapManager.executeJupiterSwap", () => {
       programId: SystemProgram.programId,
       keys: [
         {
-          pubkey: Keypair.generate().publicKey,
-          isSigner: false,
+          pubkey: user.publicKey,
+          isSigner: true,
           isWritable: true,
         },
       ],
@@ -118,7 +119,7 @@ describe("SwapManager.executeJupiterSwap", () => {
 
     const signature = await (sm as any).executeJupiterTransaction(
       Buffer.from("dummy").toString("base64"),
-      Keypair.generate()
+      user
     );
     expect(signature).toBe("SIG_CLAMP");
     expect(sent).toHaveLength(1);
@@ -142,5 +143,55 @@ describe("SwapManager.executeJupiterSwap", () => {
     expect(instructions[2]).toBe(payloadIx);
 
     (wallet as any).sendAndConfirmWithResubmits = originalSend;
+  });
+
+  test("executeJupiterTransaction falls back to serialized send when extra signers are present", async () => {
+    const connection = new Connection("http://localhost:8899", "confirmed");
+    const wallet = WalletManager.createForTest(
+      "test walk nut penalty hip pave soap entry language right filter choice",
+      { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    );
+    const sm = new SwapManager(connection, wallet);
+
+    const user = Keypair.generate();
+    const extraSigner = Keypair.generate();
+    const payloadIx = new TransactionInstruction({
+      programId: SystemProgram.programId,
+      keys: [
+        {
+          pubkey: extraSigner.publicKey,
+          isSigner: true,
+          isWritable: false,
+        },
+        {
+          pubkey: user.publicKey,
+          isSigner: true,
+          isWritable: true,
+        },
+      ],
+      data: Buffer.alloc(0),
+    });
+
+    (sm as any).extractJupiterInstructions = async () => ({
+      instructions: [payloadIx],
+      addressLookupTableAccounts: [],
+    });
+
+    let serializedCalls = 0;
+    (wallet as any).signAndSendSerializedTransaction = async () => {
+      serializedCalls += 1;
+      return "SIG_SERIAL";
+    };
+    (wallet as any).sendAndConfirmWithResubmits = async () => {
+      throw new Error("should not call capped compute path");
+    };
+
+    const signature = await (sm as any).executeJupiterTransaction(
+      Buffer.from("dummy").toString("base64"),
+      user
+    );
+
+    expect(signature).toBe("SIG_SERIAL");
+    expect(serializedCalls).toBe(1);
   });
 });
