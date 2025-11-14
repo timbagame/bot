@@ -145,7 +145,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     (wallet as any).sendAndConfirmWithResubmits = originalSend;
   });
 
-  test("executeJupiterTransaction falls back to serialized send when extra signers are present", async () => {
+  test("executeJupiterTransaction rejects when extra signers are present", async () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
@@ -177,21 +177,11 @@ describe("SwapManager.executeJupiterSwap", () => {
       addressLookupTableAccounts: [],
     });
 
-    let serializedCalls = 0;
-    (wallet as any).signAndSendSerializedTransaction = async () => {
-      serializedCalls += 1;
-      return "SIG_SERIAL";
-    };
-    (wallet as any).sendAndConfirmWithResubmits = async () => {
-      throw new Error("should not call capped compute path");
-    };
-
-    const signature = await (sm as any).executeJupiterTransaction(
-      Buffer.from("dummy").toString("base64"),
-      user
-    );
-
-    expect(signature).toBe("SIG_SERIAL");
-    expect(serializedCalls).toBe(1);
+    await expect(
+      (sm as any).executeJupiterTransaction(
+        Buffer.from("dummy").toString("base64"),
+        user
+      )
+    ).rejects.toThrow(/needs an extra signer/i);
   });
 });

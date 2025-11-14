@@ -1165,16 +1165,13 @@ export class SwapManager {
     );
     if (extraJupiterSigners.length > 0) {
       console.warn(
-        "⚠️ Jupiter composite swap requires additional signer(s); falling back to sequential execution:",
+        "⚠️ Jupiter composite swap requires additional signer(s); aborting composite route:",
         extraJupiterSigners
       );
 
-      return await this.executeSequentialCompositeSwapFallback({
-        flow,
-        pumpInstructions,
-        jupiterSerializedTransaction: jupiterResponse.swapTransaction,
-        userKeypair,
-      });
+      throw new Error(
+        "Jupiter returned a route that needs an extra signer. Try a smaller amount or wait for a more direct path."
+      );
     }
 
     const operationLabel =
@@ -1196,67 +1193,6 @@ export class SwapManager {
 
     console.log(`${operationLabel} confirmed: ${signature}`);
     return { signature, flow };
-  }
-
-  private async executeSequentialCompositeSwapFallback(options: {
-    flow: CompositeFlow;
-    pumpInstructions: TransactionInstruction[];
-    jupiterSerializedTransaction: string;
-    userKeypair: Keypair;
-  }): Promise<{ signature: string; flow: CompositeFlow }> {
-    const { flow, pumpInstructions, jupiterSerializedTransaction, userKeypair } =
-      options;
-
-    console.log(
-      "♻️ Executing sequential composite fallback due to multi-signer Jupiter route"
-    );
-
-    if (pumpInstructions.length === 0) {
-      throw new Error(
-        "Pump.fun instructions missing for sequential composite swap"
-      );
-    }
-
-    const executePumpLeg = async (label: string): Promise<string> => {
-      const computeBudgetInstructions =
-        this.buildCompositeComputeBudgetInstructions({
-          pumpInstructions,
-        });
-
-      const pumpSignature = await this.wallet.sendAndConfirmWithResubmits(
-        [...computeBudgetInstructions, ...pumpInstructions],
-        [userKeypair],
-        { operationLabel: label }
-      );
-
-      console.log(`${label} confirmed: ${pumpSignature}`);
-      return pumpSignature;
-    };
-
-    if (flow === "pump-then-jupiter") {
-      await executePumpLeg("Pump.fun leg (sequential composite fallback)");
-
-      const jupiterSignature = await this.executeJupiterTransaction(
-        jupiterSerializedTransaction,
-        userKeypair
-      );
-      console.log(
-        `Sequential composite Jupiter leg confirmed: ${jupiterSignature}`
-      );
-      return { signature: jupiterSignature, flow };
-    }
-
-    const jupiterSignature = await this.executeJupiterTransaction(
-      jupiterSerializedTransaction,
-      userKeypair
-    );
-    console.log(`Sequential composite Jupiter leg confirmed: ${jupiterSignature}`);
-
-    const pumpSignature = await executePumpLeg(
-      "Pump.fun leg (sequential composite fallback)"
-    );
-
-    return { signature: pumpSignature, flow };
   }
 
   /**
@@ -1482,12 +1418,11 @@ export class SwapManager {
 
       if (extraJupiterSigners.length > 0) {
         console.warn(
-          "⚠️ Jupiter transaction includes additional signer(s); sending serialized transaction as-is:",
+          "⚠️ Jupiter transaction includes additional signer(s); aborting swap:",
           extraJupiterSigners
         );
-        return await this.wallet.signAndSendSerializedTransaction(
-          base64Transaction,
-          userKeypair
+        throw new Error(
+          "Jupiter returned a route that needs an extra signer. Try a smaller amount or wait for a more direct path."
         );
       }
 
