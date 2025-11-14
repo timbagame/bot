@@ -42,7 +42,6 @@ import {
   setUserState,
   getUserState,
   storePendingTransaction,
-  getPendingTransaction,
   upsertGameSetupSession,
   getGameSetupSession,
   clearGameSetupSession,
