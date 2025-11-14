@@ -54,7 +54,6 @@ const COMPOSITE_MIN_COMPUTE_UNIT_LIMIT = 200_000;
 const COMPOSITE_PUMP_COMPUTE_BUFFER = 60_000;
 const COMPOSITE_MAX_COMPUTE_UNIT_LIMIT = 600_000;
 const COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 1;
-const MAX_JUPITER_ACCOUNTS = 24;
 
 export class SwapManager {
   private jupiterClient: JupiterClient;
@@ -113,11 +112,8 @@ export class SwapManager {
     params: JupiterQuoteRequest
   ): Promise<JupiterQuoteResponse> {
     const request: JupiterQuoteRequest = {
-      swapMode: params.swapMode ?? "ExactIn",
-      maxAccounts: params.maxAccounts ?? MAX_JUPITER_ACCOUNTS,
-      onlyDirectRoutes: params.onlyDirectRoutes ?? true,
-      asLegacyTransaction: params.asLegacyTransaction ?? true,
       ...params,
+      swapMode: params.swapMode ?? "ExactIn",
     };
 
     return this.quoteCache.getJupiterQuote(request, () =>
