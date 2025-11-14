@@ -595,17 +595,4 @@ export class SwapManager {
     }
   }
 
-  /**
-   * Check if swap is possible
-   */
-  async canSwap(
-    inputMint: string,
-    outputMint: string
-  ): Promise<{ canSwap: boolean; reason?: string; provider?: string }> {
-    try {
-      return { canSwap: true, provider: "jupiter" };
-    } catch (error: any) {
-      return { canSwap: false, reason: error.message };
-    }
-  }
 }

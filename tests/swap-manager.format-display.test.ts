@@ -28,7 +28,11 @@ describe("SwapManager.formatQuoteForDisplay", () => {
 
     expect(result).toBe("JUP_FMT");
     expect(stub.mock.calls.length).toBe(1);
-    const callArgs = stub.mock.calls[0][0];
+    const maybeArgs = stub.mock.calls[0]?.[0];
+    if (!maybeArgs) {
+      throw new Error("Jupiter formatter was not called");
+    }
+    const callArgs = maybeArgs as { slippageBps: number };
     expect(callArgs.slippageBps).toBe(75);
   });
 });

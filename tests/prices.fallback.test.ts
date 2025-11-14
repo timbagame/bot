@@ -29,7 +29,7 @@ describe("price utilities fallbacks", () => {
   });
 
   test("returns zero when Jupiter fails to respond (market cap scenario)", async () => {
-    const fetchImpl = (async (url: string) => {
+    const fetchImpl = (async (_url: string) => {
       return { ok: false, async json() { return {}; } } as any;
     }) as any;
 
@@ -39,7 +39,7 @@ describe("price utilities fallbacks", () => {
   });
 
   test("returns zero when Jupiter returns formatted fallback data but no successful price", async () => {
-    const fetchImpl = (async (url: string) => {
+    const fetchImpl = (async (_url: string) => {
       return {
         ok: true,
         async json() {
