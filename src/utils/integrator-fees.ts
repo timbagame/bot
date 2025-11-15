@@ -1,4 +1,8 @@
-import { LAMPORTS_PER_SOL, WSOL_MINT } from "./constants";
+import {
+  JUPITER_MIN_SOL_BALANCE_LAMPORTS,
+  LAMPORTS_PER_SOL,
+  WSOL_MINT,
+} from "./constants";
 import {
   DEFAULT_MAX_EXTRA_FEE_BPS,
   DEFAULT_REFERRAL_BASE_FEE_BPS,
@@ -90,7 +94,7 @@ export const resolveIntegratorSwapParams = async (
     inputAmountRaw,
     userPublicKey,
     availableSolLamports,
-    solFeeBufferLamports = 0,
+    solFeeBufferLamports,
   } = context;
 
   const referralConfig = getReferralTargetForPair(inputMint, outputMint);
@@ -98,14 +102,21 @@ export const resolveIntegratorSwapParams = async (
     return null;
   }
 
+  const requiresAdminPayer =
+    Boolean(referralConfig.adminPayer) &&
+    Boolean(referralConfig.adminCloseAuthority);
+
+  const effectiveSolFeeBufferLamports =
+    solFeeBufferLamports ??
+    (requiresAdminPayer ? JUPITER_MIN_SOL_BALANCE_LAMPORTS : 0);
+
   const baseFeeBps = clampBps(
     referralConfig.baseFeeBps ?? DEFAULT_REFERRAL_BASE_FEE_BPS
   );
 
   if (
-    availableSolLamports >= solFeeBufferLamports ||
-    !referralConfig.adminPayer ||
-    !referralConfig.adminCloseAuthority
+    availableSolLamports >= effectiveSolFeeBufferLamports ||
+    !requiresAdminPayer
   ) {
     return {
       referralAccount: referralConfig.referralAccount,
@@ -118,7 +129,7 @@ export const resolveIntegratorSwapParams = async (
 
   const shortfallLamports = Math.max(
     0,
-    solFeeBufferLamports - availableSolLamports
+    effectiveSolFeeBufferLamports - availableSolLamports
   );
   if (shortfallLamports <= 0) {
     return {
