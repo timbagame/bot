@@ -567,8 +567,17 @@ export class SwapManager {
       const transactionBuffer = Buffer.from(base64Transaction, "base64");
       const versionedTx = VersionedTransaction.deserialize(transactionBuffer);
 
-      const latestBlockhash = await this.connection.getLatestBlockhash();
-      versionedTx.message.recentBlockhash = latestBlockhash.blockhash;
+      const hasPreservedSignature = versionedTx.signatures.some(
+        (signature) =>
+          signature &&
+          signature.length > 0 &&
+          !signature.every((byte) => byte === 0)
+      );
+
+      if (!hasPreservedSignature) {
+        const latestBlockhash = await this.connection.getLatestBlockhash();
+        versionedTx.message.recentBlockhash = latestBlockhash.blockhash;
+      }
 
       const {
         transaction: signedTransaction,
