@@ -182,7 +182,7 @@ export const applyOracleBufferTime = (bufferSeconds: number): number => {
 
 export const JUPITER_MIN_SOL_BALANCE_LAMPORTS = parsePositiveInteger(
   "JUPITER_MIN_SOL_BALANCE_LAMPORTS",
-  4_000_000
+  5_000_000
 );
 
 // ================================
