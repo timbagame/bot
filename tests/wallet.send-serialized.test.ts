@@ -134,7 +134,9 @@ describe("WalletManager.signAndSendVersionedTransaction", () => {
       timeNow: () => Date.now(),
     });
 
-    const admin = multiWallet.getAdminKeypair();
+    const admin = Keypair.generate();
+    // avoid file access by injecting admin key manually
+    (multiWallet as any)["adminKeypair"] = admin;
     const user = Keypair.generate();
 
     const instruction = new TransactionInstruction({
