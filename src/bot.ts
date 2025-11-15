@@ -891,10 +891,7 @@ const prepareTokenTradeQuote = async ({
   }
 
   const shouldProbeGasless =
-    shouldApplySolFeeBuffer &&
-    inputAsset.ticker === "SOL" &&
-    snapshot.solBalance > 0 &&
-    snapshot.solBalance < JUPITER_MIN_SOL_BALANCE_LAMPORTS;
+    shouldApplySolFeeBuffer && inputAsset.ticker === "SOL";
 
   let gaslessOverride:
     | ReturnType<typeof presentSpendAmount>
@@ -914,34 +911,41 @@ const prepareTokenTradeQuote = async ({
       applySolFeeBuffer: false,
     });
 
-    let solPriceUsd = 0;
-    try {
-      const priceLookup = await resolveTokenPriceUSD({
-        tokenMint: inputAsset.mint,
-        tokenTicker: inputAsset.ticker,
-        isSol: true,
-      });
-      solPriceUsd = priceLookup?.price ?? 0;
-    } catch (priceError) {
-      console.warn(
-        "Failed to fetch SOL price for gasless eligibility check:",
-        priceError
-      );
-    }
+    const prospectiveBalance = Math.max(
+      0,
+      snapshot.solBalance - probe.rawAmount
+    );
+    const wouldLeaveBelowMinimum =
+      prospectiveBalance < JUPITER_MIN_SOL_BALANCE_LAMPORTS;
 
-    const tradeUsdValue =
-      solPriceUsd > 0
-        ? (probe.rawAmount / LAMPORTS_PER_SOL) * solPriceUsd
-        : 0;
+    if (wouldLeaveBelowMinimum) {
+      let solPriceUsd = 0;
+      try {
+        const priceLookup = await resolveTokenPriceUSD({
+          tokenMint: inputAsset.mint,
+          tokenTicker: inputAsset.ticker,
+          isSol: true,
+        });
+        solPriceUsd = priceLookup?.price ?? 0;
+      } catch (priceError) {
+        console.warn(
+          "Failed to fetch SOL price for gasless eligibility check:",
+          priceError
+        );
+      }
 
-    if (
-      solPriceUsd > 0 &&
-      tradeUsdValue >= JUPITER_GASLESS_MIN_TRADE_USD
-    ) {
-      shouldApplySolFeeBuffer = false;
-      gaslessOverride = probe;
-    } else {
-      gaslessInsufficientMessage = buildGaslessFeeRequirementMessage();
+      const meetsUsdThreshold =
+        solPriceUsd > 0
+          ? (probe.rawAmount / LAMPORTS_PER_SOL) * solPriceUsd >=
+            JUPITER_GASLESS_MIN_TRADE_USD
+          : true;
+
+      if (meetsUsdThreshold) {
+        shouldApplySolFeeBuffer = false;
+        gaslessOverride = probe;
+      } else {
+        gaslessInsufficientMessage = buildGaslessFeeRequirementMessage();
+      }
     }
   }
 
