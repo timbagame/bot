@@ -37,6 +37,16 @@ export type {
 
 const SOL_MINT = WSOL_MINT;
 const SOL_DECIMALS = 9;
+const JUPITER_QUOTE_EXPIRATION_MS_DEFAULT = 120_000;
+let jupiterQuoteExpirationMs = JUPITER_QUOTE_EXPIRATION_MS_DEFAULT;
+
+export const __test_setJupiterQuoteExpirationMs = (value: number): void => {
+  jupiterQuoteExpirationMs = value;
+};
+
+export const __test_resetJupiterQuoteExpirationMs = (): void => {
+  jupiterQuoteExpirationMs = JUPITER_QUOTE_EXPIRATION_MS_DEFAULT;
+};
 
 export class SwapManager {
   private jupiterClient: JupiterClient;
@@ -112,6 +122,7 @@ export class SwapManager {
       priceImpact: jupiterQuote.priceImpactPct,
       platformFee: jupiterQuote.platformFee,
       providerQuote: jupiterQuote,
+      providerQuoteTimestamp: Date.now(),
     };
   }
 
@@ -450,18 +461,36 @@ export class SwapManager {
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
-    const jupiterQuote =
-      quote.providerQuote ??
-      (await this.getJupiterQuote({
+    let jupiterQuote = quote.providerQuote;
+    const now = Date.now();
+    if (
+      jupiterQuote &&
+      (quote.providerQuoteTimestamp === undefined ||
+        now - quote.providerQuoteTimestamp > jupiterQuoteExpirationMs)
+    ) {
+      jupiterQuote = undefined;
+    }
+
+    if (!jupiterQuote) {
+      jupiterQuote = await this.getJupiterQuote({
         inputMint: quote.inputMint,
         outputMint: quote.outputMint,
         amount: quote.inputAmountRaw,
-      }));
+      });
+    }
 
     const swapResponse = await this.jupiterClient.getSwapTransaction({
       userPublicKey: userKeypair.publicKey.toString(),
       quoteResponse: jupiterQuote,
     });
+
+    if (
+      quote.providerQuote?.requestId &&
+      swapResponse.requestId &&
+      quote.providerQuote.requestId !== swapResponse.requestId
+    ) {
+      throw new Error("Jupiter requestId mismatch between quote and execution");
+    }
 
     // Execute the Jupiter transaction directly
     return await this.executeJupiterTransaction(

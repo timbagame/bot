@@ -176,7 +176,8 @@ let SOL_FEE_BUFFER_LAMPORTS = feeBudget.getCachedSingleTransactionLamports();
 let SOL_WRAP_RENT_RESERVE_LAMPORTS = feeBudget.getCachedWrapFeeBufferLamports();
 const SOL_WRAP_RENT_RESERVE_REFRESH_INTERVAL_MS = 5 * 60_000;
 let solWrapRentReserveLastFetched = 0;
-const TOKEN_METADATA_CACHE_TTL_MS = 5 * 60_000;
+const DEFAULT_TOKEN_METADATA_CACHE_TTL_MS = 5 * 60_000;
+let TOKEN_METADATA_CACHE_TTL_MS = DEFAULT_TOKEN_METADATA_CACHE_TTL_MS;
 type CachedTokenMetadata = {
   decimals: number;
   expiresAt: number;
@@ -218,10 +219,10 @@ const getSolWrapRentReserveLamports = async (): Promise<number> => {
     );
   }
 
-const fallback = feeBudget.getDefaultWrapFeeBufferLamports();
-SOL_WRAP_RENT_RESERVE_LAMPORTS = fallback;
-solWrapRentReserveLastFetched = now;
-return fallback;
+  const fallback = feeBudget.getDefaultWrapFeeBufferLamports();
+  SOL_WRAP_RENT_RESERVE_LAMPORTS = fallback;
+  solWrapRentReserveLastFetched = now;
+  return fallback;
 };
 
 const getCachedTokenMetadata = async (mint: string) => {
@@ -238,6 +239,15 @@ const getCachedTokenMetadata = async (mint: string) => {
   };
   cachedTokenMetadata.set(mint, entry);
   return entry;
+};
+
+export const __test_getCachedTokenMetadata = getCachedTokenMetadata;
+export const __test_clearTokenMetadataCache = () => cachedTokenMetadata.clear();
+export const __test_setTokenMetadataCacheTtlMs = (value: number) => {
+  TOKEN_METADATA_CACHE_TTL_MS = value;
+};
+export const __test_resetTokenMetadataCacheTtlMs = () => {
+  TOKEN_METADATA_CACHE_TTL_MS = DEFAULT_TOKEN_METADATA_CACHE_TTL_MS;
 };
 
 void (async () => {

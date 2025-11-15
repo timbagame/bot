@@ -118,4 +118,23 @@ describe("trade amount helpers share validation", () => {
       })
     ).toThrow("Insufficient SOL balance for this purchase");
   });
+
+  test("max SOL with balance equal to buffer throws helpful error", () => {
+    const solBalance = 1_000_000_000; // 1 SOL
+    const solFeeBufferLamports = 1_000_000_000;
+
+    expect(() =>
+      presentSpendAmount({
+        amount: "max",
+        assetTicker: "SOL",
+        decimals: 9,
+        solBalance,
+        tokenBalance: undefined,
+        formatSol: (lamports) => `${lamports} lamports`,
+        formatToken: () => "",
+        applySolFeeBuffer: true,
+        solFeeBufferLamports,
+      })
+    ).toThrow("Not enough SOL to cover purchase and fees");
+  });
 });

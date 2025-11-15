@@ -13,6 +13,7 @@ export interface SwapQuote {
   priceImpact?: string;
   platformFee?: any;
   providerQuote?: JupiterQuoteResponse;
+  providerQuoteTimestamp?: number;
 }
 
 export interface SwapRequest {
