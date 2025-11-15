@@ -144,6 +144,18 @@ export const createWalletMenuModule = (
   const normalizeTelegramId = (value: bigint | number | string): bigint =>
     typeof value === "bigint" ? value : BigInt(value);
 
+  const invalidateWalletSnapshot = (telegramId: bigint) => {
+    const cacheKey = getCacheKey(telegramId);
+    walletSnapshotCache.delete(cacheKey);
+    pendingWalletFetches.delete(cacheKey);
+    testApprovedTokenOverrides.delete(telegramId.toString());
+    cacheInvalidations.set(cacheKey, Date.now());
+  };
+
+  wallet.onWalletCacheCleared((telegramId) => {
+    invalidateWalletSnapshot(normalizeTelegramId(telegramId));
+  });
+
   const coerceApprovedTokenBalances = (
     entries: WalletSnapshotSeed["tokenBalances"]
   ): ApprovedTokenBalance[] =>
@@ -305,12 +317,8 @@ export const createWalletMenuModule = (
   };
 
   const clearWalletCache = (telegramId: bigint) => {
-    const cacheKey = getCacheKey(telegramId);
     wallet.clearCachedWalletData(telegramId);
-    walletSnapshotCache.delete(cacheKey);
-    pendingWalletFetches.delete(cacheKey);
-    testApprovedTokenOverrides.delete(telegramId.toString());
-    cacheInvalidations.set(cacheKey, Date.now());
+    invalidateWalletSnapshot(telegramId);
     console.log(`🗑️ Cleared wallet cache for user: ${telegramId}`);
   };
 

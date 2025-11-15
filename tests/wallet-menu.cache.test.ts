@@ -28,6 +28,7 @@ const createStubWallet = (
     staleNative: options.staleNative,
     staleTokens: options.staleTokens,
   };
+  const listeners: Array<(telegramId: bigint | number | string) => void> = [];
   const wallet = {
     connection: { rpcEndpoint: options.endpoint ?? "rpc" },
     getConnection() {
@@ -51,7 +52,22 @@ const createStubWallet = (
     peekCachedApprovedTokenBalances: () => state.staleTokens,
     setCachedNativeBalance: () => {},
     setCachedApprovedTokenBalances: () => {},
-    clearCachedWalletData: () => {},
+    clearCachedWalletData: (telegramId: bigint | number | string) => {
+      for (const listener of listeners) {
+        listener(telegramId);
+      }
+    },
+    onWalletCacheCleared: (
+      listener: (telegramId: bigint | number | string) => void,
+    ) => {
+      listeners.push(listener);
+      return () => {
+        const index = listeners.indexOf(listener);
+        if (index >= 0) {
+          listeners.splice(index, 1);
+        }
+      };
+    },
     getKeyPair: () => ({ publicKey: { toBase58: () => "W" } }),
     formatSolBalance: () => "sol",
     formatTokenBalance: () => "tok",
@@ -95,6 +111,19 @@ describe("wallet menu cache guards", () => {
     await module.getCachedWalletData(1n);
     module.clearWalletCache(1n);
     await module.getCachedWalletData(1n);
+
+    ensureBalanceCalled(state, 2);
+  });
+
+  test("wallet.clearCachedWalletData invalidates snapshot cache", async () => {
+    const { wallet, state } = createStubWallet();
+    const module = createModule(wallet);
+    module.__test_clearWalletSnapshotCache();
+    module.__test_resetWalletRpcCacheTtlMs();
+
+    await module.getCachedWalletData(3n);
+    wallet.clearCachedWalletData(3n);
+    await module.getCachedWalletData(3n);
 
     ensureBalanceCalled(state, 2);
   });

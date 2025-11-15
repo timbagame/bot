@@ -246,6 +246,9 @@ export class WalletManager {
   private approvedTokenBalanceCache = createExpiringCache<
     ApprovedTokenBalance[]
   >(WALLET_RPC_CACHE_TTL_MS);
+  private walletCacheListeners = new Set<
+    (telegramId: bigint | number | string) => void
+  >();
 
   public __test_setKeypairCacheConfig(config: KeypairCacheOptions = {}): void {
     this.keypairCache = new KeypairCache(
@@ -485,6 +488,21 @@ export class WalletManager {
     balances: ApprovedTokenBalance[]
   ): ApprovedTokenBalance[] {
     return balances.map((entry) => ({ ...entry }));
+  }
+
+  private notifyWalletCacheCleared(
+    telegramId: bigint | number | string
+  ): void {
+    for (const listener of this.walletCacheListeners) {
+      try {
+        listener(telegramId);
+      } catch (error) {
+        console.error(
+          "Error running wallet cache cleared listener:",
+          error
+        );
+      }
+    }
   }
 
   private applyProgramHintsToApprovedTokens(
@@ -1324,10 +1342,20 @@ export class WalletManager {
     );
   }
 
+  public onWalletCacheCleared(
+    listener: (telegramId: bigint | number | string) => void
+  ): () => void {
+    this.walletCacheListeners.add(listener);
+    return () => {
+      this.walletCacheListeners.delete(listener);
+    };
+  }
+
   public clearCachedWalletData(telegramId: bigint | number | string): void {
     const cacheKey = this.getUserCacheKey(telegramId);
     this.nativeBalanceCache.delete(cacheKey);
     this.approvedTokenBalanceCache.delete(cacheKey);
+    this.notifyWalletCacheCleared(telegramId);
   }
 
   public async getFullTokenMetadata(
