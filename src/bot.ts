@@ -174,6 +174,14 @@ const walletRpcLimiter = new SlidingWindowRateLimiter(
 const feeBudget = FeeBudgetManager.getInstance(wallet.getConnection());
 let SOL_FEE_BUFFER_LAMPORTS = feeBudget.getCachedSingleTransactionLamports();
 let SOL_WRAP_RENT_RESERVE_LAMPORTS = feeBudget.getCachedWrapFeeBufferLamports();
+const SOL_WRAP_RENT_RESERVE_REFRESH_INTERVAL_MS = 5 * 60_000;
+let solWrapRentReserveLastFetched = 0;
+const TOKEN_METADATA_CACHE_TTL_MS = 5 * 60_000;
+type CachedTokenMetadata = {
+  decimals: number;
+  expiresAt: number;
+};
+const cachedTokenMetadata = new Map<string, CachedTokenMetadata>();
 export const __test_getSolFeeBufferLamports = (): number =>
   SOL_FEE_BUFFER_LAMPORTS;
 export const __test_setSolFeeBufferLamports = (value: number): void => {
@@ -186,9 +194,12 @@ export const __test_setSolWrapRentReserveLamports = (value: number): void => {
 };
 
 const getSolWrapRentReserveLamports = async (): Promise<number> => {
+  const now = Date.now();
   if (
     Number.isFinite(SOL_WRAP_RENT_RESERVE_LAMPORTS) &&
-    SOL_WRAP_RENT_RESERVE_LAMPORTS > 0
+    SOL_WRAP_RENT_RESERVE_LAMPORTS > 0 &&
+    now - solWrapRentReserveLastFetched <
+      SOL_WRAP_RENT_RESERVE_REFRESH_INTERVAL_MS
   ) {
     return SOL_WRAP_RENT_RESERVE_LAMPORTS;
   }
@@ -197,6 +208,7 @@ const getSolWrapRentReserveLamports = async (): Promise<number> => {
     const wrapLamports = await feeBudget.getWrapFeeBufferLamports();
     if (Number.isFinite(wrapLamports) && wrapLamports > 0) {
       SOL_WRAP_RENT_RESERVE_LAMPORTS = wrapLamports;
+      solWrapRentReserveLastFetched = now;
       return wrapLamports;
     }
   } catch (error) {
@@ -206,9 +218,26 @@ const getSolWrapRentReserveLamports = async (): Promise<number> => {
     );
   }
 
-  const fallback = feeBudget.getDefaultWrapFeeBufferLamports();
-  SOL_WRAP_RENT_RESERVE_LAMPORTS = fallback;
-  return fallback;
+const fallback = feeBudget.getDefaultWrapFeeBufferLamports();
+SOL_WRAP_RENT_RESERVE_LAMPORTS = fallback;
+solWrapRentReserveLastFetched = now;
+return fallback;
+};
+
+const getCachedTokenMetadata = async (mint: string) => {
+  const now = Date.now();
+  const cached = cachedTokenMetadata.get(mint);
+  if (cached && cached.expiresAt > now) {
+    return cached;
+  }
+
+  const metadata = await wallet.getTokenMetadata(mint);
+  const entry: CachedTokenMetadata = {
+    decimals: metadata.decimals,
+    expiresAt: now + TOKEN_METADATA_CACHE_TTL_MS,
+  };
+  cachedTokenMetadata.set(mint, entry);
+  return entry;
 };
 
 void (async () => {
@@ -4221,7 +4250,7 @@ const showSwapQuoteAndConfirmation = async (
           (fromToken === "SOL"
             ? 9
             : balanceEntry?.decimals ??
-              (await wallet.getTokenMetadata(inputMint)).decimals);
+              (await getCachedTokenMetadata(inputMint)).decimals);
 
         return {
           ticker: fromToken,
@@ -4244,7 +4273,7 @@ const showSwapQuoteAndConfirmation = async (
           overrides.toDecimals ??
           (toToken === "SOL"
             ? 9
-            : (await wallet.getTokenMetadata(outputMint)).decimals);
+            : (await getCachedTokenMetadata(outputMint)).decimals);
 
         return {
           ticker: toToken,

@@ -113,6 +113,11 @@ interface JupiterUltraOrderResponse {
   errorMessage?: string;
 }
 
+interface JupiterOrderResult {
+  raw: JupiterUltraOrderResponse;
+  normalized: JupiterQuoteResponse;
+}
+
 interface JupiterExecuteRequest {
   requestId: string;
   signedTransaction: string;
@@ -198,7 +203,7 @@ export class JupiterClient {
     return url;
   }
 
-  private async requestOrder(params: JupiterOrderParams): Promise<JupiterUltraOrderResponse> {
+  private async fetchOrder(params: JupiterOrderParams): Promise<JupiterOrderResult> {
     const url = this.buildOrderParams(params);
 
     try {
@@ -225,7 +230,7 @@ export class JupiterClient {
         throw new Error(`Jupiter order error${codeSuffix}: ${errorMessage}`);
       }
 
-      return data;
+      return { raw: data, normalized: this.normalizeQuote(data) };
     } catch (error: any) {
       console.error("Error requesting Jupiter order:", error);
       throw new Error(`Failed to request Jupiter order: ${error.message}`);
@@ -236,13 +241,13 @@ export class JupiterClient {
    * Get a quote for a token swap
    */
   async getQuote(request: JupiterQuoteRequest): Promise<JupiterQuoteResponse> {
-    const order = await this.requestOrder({
+    const { normalized } = await this.fetchOrder({
       inputMint: request.inputMint,
       outputMint: request.outputMint,
       amount: request.amount,
       swapMode: request.swapMode,
     });
-    return this.normalizeQuote(order);
+    return normalized;
   }
 
   /**
@@ -258,7 +263,7 @@ export class JupiterClient {
         ? quoteResponse.outAmount
         : quoteResponse.inAmount);
 
-    const order = await this.requestOrder({
+    const { raw: order } = await this.fetchOrder({
       inputMint: quoteResponse.inputMint,
       outputMint: quoteResponse.outputMint,
       amount,

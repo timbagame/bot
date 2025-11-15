@@ -111,6 +111,7 @@ export class SwapManager {
       provider: "jupiter",
       priceImpact: jupiterQuote.priceImpactPct,
       platformFee: jupiterQuote.platformFee,
+      providerQuote: jupiterQuote,
     };
   }
 
@@ -449,12 +450,13 @@ export class SwapManager {
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
-    // Get Jupiter quote and transaction
-    const jupiterQuote = await this.getJupiterQuote({
-      inputMint: quote.inputMint,
-      outputMint: quote.outputMint,
-      amount: quote.inputAmountRaw,
-    });
+    const jupiterQuote =
+      quote.providerQuote ??
+      (await this.getJupiterQuote({
+        inputMint: quote.inputMint,
+        outputMint: quote.outputMint,
+        amount: quote.inputAmountRaw,
+      }));
 
     const swapResponse = await this.jupiterClient.getSwapTransaction({
       userPublicKey: userKeypair.publicKey.toString(),
@@ -594,9 +596,8 @@ export class SwapManager {
 
       return signature;
     } catch (error: any) {
-      console.error("Error executing Jupiter transaction:", error);
       throw new Error(
-        `Failed to execute Jupiter transaction: ${error.message || error}`
+        `Failed to execute Jupiter transaction: ${error?.message || error}`
       );
     }
   }
