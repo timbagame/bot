@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { parseTradeAmountInput } from "../src/utils/amount";
 import { __test_presentSpendAmount as presentSpendAmount } from "../src/bot";
+import { JUPITER_MIN_SOL_BALANCE_LAMPORTS } from "../src/utils/constants";
 
 describe("parseTradeAmountInput", () => {
   test("parses max input", () => {
@@ -8,13 +9,17 @@ describe("parseTradeAmountInput", () => {
   });
 
   test("parses percentage input", () => {
-    expect(parseTradeAmountInput("25%"))
-      .toEqual({ kind: "percentage", percentage: 25 });
+    expect(parseTradeAmountInput("25%")).toEqual({
+      kind: "percentage",
+      percentage: 25,
+    });
   });
 
   test("parses numeric input", () => {
-    expect(parseTradeAmountInput("  1.5 "))
-      .toEqual({ kind: "absolute", normalized: "1.5" });
+    expect(parseTradeAmountInput("  1.5 ")).toEqual({
+      kind: "absolute",
+      normalized: "1.5",
+    });
   });
 });
 
@@ -116,6 +121,47 @@ describe("trade amount helpers share validation", () => {
         applySolFeeBuffer: true,
         solFeeBufferLamports,
       })
-    ).toThrow("Insufficient SOL balance for this purchase");
+    ).toThrow(/Insufficient SOL balance for this purchase/);
+  });
+
+  test("max SOL with balance equal to buffer throws helpful error", () => {
+    const solBalance = 1_000_000_000; // 1 SOL
+    const solFeeBufferLamports = 1_000_000_000;
+
+    expect(() =>
+      presentSpendAmount({
+        amount: "max",
+        assetTicker: "SOL",
+        decimals: 9,
+        solBalance,
+        tokenBalance: undefined,
+        formatSol: (lamports) => `${lamports} lamports`,
+        formatToken: () => "",
+        applySolFeeBuffer: true,
+        solFeeBufferLamports,
+      })
+    ).toThrow(/Not enough SOL to cover purchase and fees \(keep ~/);
+  });
+
+  test("uses custom insufficient fee message when provided", () => {
+    const solBalance = JUPITER_MIN_SOL_BALANCE_LAMPORTS;
+
+    expect(() =>
+      presentSpendAmount({
+        amount: "max",
+        assetTicker: "SOL",
+        decimals: 9,
+        solBalance,
+        tokenBalance: undefined,
+        formatSol: (lamports) => `${lamports} lamports`,
+        formatToken: () => "",
+        applySolFeeBuffer: true,
+        solFeeBufferLamports: solBalance,
+        insufficientSolForFeesMessage: "Swaps under ~$10 need 0.01 SOL",
+        omitSolFeeBufferHint: true,
+      })
+    ).toThrow(
+      "Swaps under ~$10 need 0.01 SOL"
+    );
   });
 });

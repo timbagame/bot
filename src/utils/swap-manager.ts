@@ -37,6 +37,16 @@ export type {
 
 const SOL_MINT = WSOL_MINT;
 const SOL_DECIMALS = 9;
+const JUPITER_QUOTE_EXPIRATION_MS_DEFAULT = 120_000;
+let jupiterQuoteExpirationMs = JUPITER_QUOTE_EXPIRATION_MS_DEFAULT;
+
+export const __test_setJupiterQuoteExpirationMs = (value: number): void => {
+  jupiterQuoteExpirationMs = value;
+};
+
+export const __test_resetJupiterQuoteExpirationMs = (): void => {
+  jupiterQuoteExpirationMs = JUPITER_QUOTE_EXPIRATION_MS_DEFAULT;
+};
 
 export class SwapManager {
   private jupiterClient: JupiterClient;
@@ -111,6 +121,8 @@ export class SwapManager {
       provider: "jupiter",
       priceImpact: jupiterQuote.priceImpactPct,
       platformFee: jupiterQuote.platformFee,
+      providerQuote: jupiterQuote,
+      providerQuoteTimestamp: Date.now(),
     };
   }
 
@@ -197,6 +209,7 @@ export class SwapManager {
 
           const signature = await this.executeJupiterTransaction(
             swapResponse.swapTransaction,
+            swapResponse.requestId,
             userKeypair
           );
 
@@ -448,12 +461,23 @@ export class SwapManager {
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
-    // Get Jupiter quote and transaction
-    const jupiterQuote = await this.getJupiterQuote({
-      inputMint: quote.inputMint,
-      outputMint: quote.outputMint,
-      amount: quote.inputAmountRaw,
-    });
+    let jupiterQuote = quote.providerQuote;
+    const now = Date.now();
+    if (
+      jupiterQuote &&
+      (quote.providerQuoteTimestamp === undefined ||
+        now - quote.providerQuoteTimestamp > jupiterQuoteExpirationMs)
+    ) {
+      jupiterQuote = undefined;
+    }
+
+    if (!jupiterQuote) {
+      jupiterQuote = await this.getJupiterQuote({
+        inputMint: quote.inputMint,
+        outputMint: quote.outputMint,
+        amount: quote.inputAmountRaw,
+      });
+    }
 
     const swapResponse = await this.jupiterClient.getSwapTransaction({
       userPublicKey: userKeypair.publicKey.toString(),
@@ -463,6 +487,7 @@ export class SwapManager {
     // Execute the Jupiter transaction directly
     return await this.executeJupiterTransaction(
       swapResponse.swapTransaction,
+      swapResponse.requestId,
       userKeypair
     );
   }
@@ -559,32 +584,41 @@ export class SwapManager {
    */
   private async executeJupiterTransaction(
     base64Transaction: string,
+    requestId: string,
     userKeypair: Keypair
   ): Promise<string> {
     try {
-      // Decode the base64 transaction so we can refresh the blockhash
       const transactionBuffer = Buffer.from(base64Transaction, "base64");
       const versionedTx = VersionedTransaction.deserialize(transactionBuffer);
 
-      const latestBlockhash = await this.connection.getLatestBlockhash();
-      versionedTx.message.recentBlockhash = latestBlockhash.blockhash;
+      versionedTx.sign([userKeypair]);
 
-      const refreshedBase64 = Buffer.from(versionedTx.serialize()).toString(
+      const signedTransaction = Buffer.from(versionedTx.serialize()).toString(
         "base64"
       );
 
-      const signature = await this.wallet.signAndSendSerializedTransaction(
-        refreshedBase64,
-        userKeypair
-      );
+      const executeResponse = await this.jupiterClient.executeOrder({
+        requestId,
+        signedTransaction,
+      });
 
-      await this.wallet.confirmTransaction(signature);
+      if (executeResponse.status && executeResponse.status !== "Success") {
+        throw new Error(
+          executeResponse.errorMessage ||
+            executeResponse.error ||
+            `Jupiter execute returned status ${executeResponse.status}`
+        );
+      }
+
+      const signature = executeResponse.signature ?? executeResponse.txid;
+      if (!signature) {
+        throw new Error("Jupiter execute did not return a signature");
+      }
 
       return signature;
     } catch (error: any) {
-      console.error("Error executing Jupiter transaction:", error);
       throw new Error(
-        `Failed to execute Jupiter transaction: ${error.message}`
+        `Failed to execute Jupiter transaction: ${error?.message || error}`
       );
     }
   }

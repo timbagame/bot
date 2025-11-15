@@ -35,6 +35,8 @@ import {
   INPUT_TIMEOUT_HINT,
   USER_WALLET_RPC_WINDOW_MS,
   USER_WALLET_RPC_MAX_CALLS,
+  JUPITER_MIN_SOL_BALANCE_LAMPORTS,
+  JUPITER_GASLESS_MIN_TRADE_USD,
   applyOracleBufferTime,
 } from "./utils/constants";
 import { FeeBudgetManager } from "./utils/fee-budget";
@@ -173,6 +175,15 @@ const walletRpcLimiter = new SlidingWindowRateLimiter(
 const feeBudget = FeeBudgetManager.getInstance(wallet.getConnection());
 let SOL_FEE_BUFFER_LAMPORTS = feeBudget.getCachedSingleTransactionLamports();
 let SOL_WRAP_RENT_RESERVE_LAMPORTS = feeBudget.getCachedWrapFeeBufferLamports();
+const SOL_WRAP_RENT_RESERVE_REFRESH_INTERVAL_MS = 5 * 60_000;
+let solWrapRentReserveLastFetched = 0;
+const DEFAULT_TOKEN_METADATA_CACHE_TTL_MS = 5 * 60_000;
+let TOKEN_METADATA_CACHE_TTL_MS = DEFAULT_TOKEN_METADATA_CACHE_TTL_MS;
+type CachedTokenMetadata = {
+  decimals: number;
+  expiresAt: number;
+};
+const cachedTokenMetadata = new Map<string, CachedTokenMetadata>();
 export const __test_getSolFeeBufferLamports = (): number =>
   SOL_FEE_BUFFER_LAMPORTS;
 export const __test_setSolFeeBufferLamports = (value: number): void => {
@@ -185,9 +196,12 @@ export const __test_setSolWrapRentReserveLamports = (value: number): void => {
 };
 
 const getSolWrapRentReserveLamports = async (): Promise<number> => {
+  const now = Date.now();
   if (
     Number.isFinite(SOL_WRAP_RENT_RESERVE_LAMPORTS) &&
-    SOL_WRAP_RENT_RESERVE_LAMPORTS > 0
+    SOL_WRAP_RENT_RESERVE_LAMPORTS > 0 &&
+    now - solWrapRentReserveLastFetched <
+      SOL_WRAP_RENT_RESERVE_REFRESH_INTERVAL_MS
   ) {
     return SOL_WRAP_RENT_RESERVE_LAMPORTS;
   }
@@ -196,6 +210,7 @@ const getSolWrapRentReserveLamports = async (): Promise<number> => {
     const wrapLamports = await feeBudget.getWrapFeeBufferLamports();
     if (Number.isFinite(wrapLamports) && wrapLamports > 0) {
       SOL_WRAP_RENT_RESERVE_LAMPORTS = wrapLamports;
+      solWrapRentReserveLastFetched = now;
       return wrapLamports;
     }
   } catch (error) {
@@ -207,7 +222,33 @@ const getSolWrapRentReserveLamports = async (): Promise<number> => {
 
   const fallback = feeBudget.getDefaultWrapFeeBufferLamports();
   SOL_WRAP_RENT_RESERVE_LAMPORTS = fallback;
+  solWrapRentReserveLastFetched = now;
   return fallback;
+};
+
+const getCachedTokenMetadata = async (mint: string) => {
+  const now = Date.now();
+  const cached = cachedTokenMetadata.get(mint);
+  if (cached && cached.expiresAt > now) {
+    return cached;
+  }
+
+  const metadata = await wallet.getTokenMetadata(mint);
+  const entry: CachedTokenMetadata = {
+    decimals: metadata.decimals,
+    expiresAt: now + TOKEN_METADATA_CACHE_TTL_MS,
+  };
+  cachedTokenMetadata.set(mint, entry);
+  return entry;
+};
+
+export const __test_getCachedTokenMetadata = getCachedTokenMetadata;
+export const __test_clearTokenMetadataCache = () => cachedTokenMetadata.clear();
+export const __test_setTokenMetadataCacheTtlMs = (value: number) => {
+  TOKEN_METADATA_CACHE_TTL_MS = value;
+};
+export const __test_resetTokenMetadataCacheTtlMs = () => {
+  TOKEN_METADATA_CACHE_TTL_MS = DEFAULT_TOKEN_METADATA_CACHE_TTL_MS;
 };
 
 void (async () => {
@@ -330,6 +371,23 @@ const {
 } = walletTransactionsModule;
 
 registerWalletTransactionHandlers();
+
+const clampSolFeeBufferLamports = (
+  solBalanceLamports: number,
+  desiredBufferLamports: number
+): number => {
+  if (!Number.isFinite(desiredBufferLamports) || desiredBufferLamports <= 0) {
+    return 0;
+  }
+
+  const upperBound = Math.max(0, solBalanceLamports);
+
+  const limited = Math.min(desiredBufferLamports, upperBound);
+  const clamped = Math.max(limited, JUPITER_MIN_SOL_BALANCE_LAMPORTS);
+  return Math.min(clamped, Math.max(0, solBalanceLamports));
+};
+
+export const __test_clampSolFeeBufferLamports = clampSolFeeBufferLamports;
 
 const parseOracleNumeric = (value: unknown): number | null => {
   if (typeof value === "number") {
@@ -455,6 +513,26 @@ const createSwapAmountKeyboard = ({
   });
 
 export const __test_createSwapAmountKeyboard = createSwapAmountKeyboard;
+
+const formatUsdThresholdLabel = (value: number): string => {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "$0";
+  }
+
+  const needsCents = !Number.isInteger(value) && value < 1_000;
+  const formatted = needsCents
+    ? value.toFixed(2)
+    : value.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  return `$${formatted}`;
+};
+
+const buildGaslessFeeRequirementMessage = (): string => {
+  const usdLabel = formatUsdThresholdLabel(JUPITER_GASLESS_MIN_TRADE_USD);
+  const solBufferDisplay = wallet.formatSolBalance(
+    JUPITER_MIN_SOL_BALANCE_LAMPORTS
+  );
+  return `Swaps under ~${usdLabel} must keep at least ${solBufferDisplay} SOL for fees. Add SOL or try a larger swap.`;
+};
 
 type WalletBalanceEntry = {
   ticker: string;
@@ -791,7 +869,7 @@ const prepareTokenTradeQuote = async ({
     Promise.resolve(outputFactory(factoryContext)),
   ]);
 
-  const shouldApplySolFeeBuffer =
+  let shouldApplySolFeeBuffer =
     inputAsset.applySolFeeBuffer ?? inputAsset.ticker === "SOL";
 
   let solFeeBufferLamports: number | undefined;
@@ -800,22 +878,98 @@ const prepareTokenTradeQuote = async ({
 
     if (inputAsset.ticker === "SOL") {
       const rentReserveLamports = await getSolWrapRentReserveLamports();
-      solFeeBufferLamports += rentReserveLamports;
+      solFeeBufferLamports = clampSolFeeBufferLamports(
+        snapshot.solBalance,
+        solFeeBufferLamports + rentReserveLamports
+      );
+    } else {
+      solFeeBufferLamports = Math.max(
+        solFeeBufferLamports,
+        JUPITER_MIN_SOL_BALANCE_LAMPORTS
+      );
     }
   }
 
-  const amountResolution = presentSpendAmount({
-    amount: amountInput,
-    assetTicker: inputAsset.ticker,
-    decimals: inputAsset.decimals,
-    solBalance: snapshot.solBalance,
-    tokenBalance: inputAsset.tokenBalance,
-    formatSol: (lamports) => wallet.formatSolBalance(lamports),
-    formatToken: (value, decimals) =>
-      wallet.formatTokenBalance(value, decimals),
-    applySolFeeBuffer: shouldApplySolFeeBuffer,
-    ...(solFeeBufferLamports !== undefined ? { solFeeBufferLamports } : {}),
-  });
+  const shouldProbeGasless =
+    shouldApplySolFeeBuffer && inputAsset.ticker === "SOL";
+
+  let gaslessOverride:
+    | ReturnType<typeof presentSpendAmount>
+    | null = null;
+  let gaslessInsufficientMessage: string | undefined;
+
+  if (shouldProbeGasless) {
+    const probe = presentSpendAmount({
+      amount: amountInput,
+      assetTicker: inputAsset.ticker,
+      decimals: inputAsset.decimals,
+      solBalance: snapshot.solBalance,
+      tokenBalance: inputAsset.tokenBalance,
+      formatSol: (lamports) => wallet.formatSolBalance(lamports),
+      formatToken: (value, decimals) =>
+        wallet.formatTokenBalance(value, decimals),
+      applySolFeeBuffer: false,
+    });
+
+    const prospectiveBalance = Math.max(
+      0,
+      snapshot.solBalance - probe.rawAmount
+    );
+    const wouldLeaveBelowMinimum =
+      prospectiveBalance < JUPITER_MIN_SOL_BALANCE_LAMPORTS;
+
+    if (wouldLeaveBelowMinimum) {
+      let solPriceUsd = 0;
+      try {
+        const priceLookup = await resolveTokenPriceUSD({
+          tokenMint: inputAsset.mint,
+          tokenTicker: inputAsset.ticker,
+          isSol: true,
+        });
+        solPriceUsd = priceLookup?.price ?? 0;
+      } catch (priceError) {
+        console.warn(
+          "Failed to fetch SOL price for gasless eligibility check:",
+          priceError
+        );
+      }
+
+      const meetsUsdThreshold =
+        solPriceUsd > 0 &&
+        (probe.rawAmount / LAMPORTS_PER_SOL) * solPriceUsd >=
+          JUPITER_GASLESS_MIN_TRADE_USD;
+
+      if (meetsUsdThreshold) {
+        shouldApplySolFeeBuffer = false;
+        gaslessOverride = probe;
+      } else {
+        gaslessInsufficientMessage = buildGaslessFeeRequirementMessage();
+      }
+    }
+  }
+
+  const amountResolution =
+    gaslessOverride ??
+    presentSpendAmount({
+      amount: amountInput,
+      assetTicker: inputAsset.ticker,
+      decimals: inputAsset.decimals,
+      solBalance: snapshot.solBalance,
+      tokenBalance: inputAsset.tokenBalance,
+      formatSol: (lamports) => wallet.formatSolBalance(lamports),
+      formatToken: (value, decimals) =>
+        wallet.formatTokenBalance(value, decimals),
+      applySolFeeBuffer: shouldApplySolFeeBuffer,
+      ...(solFeeBufferLamports !== undefined
+        ? { solFeeBufferLamports }
+        : {}),
+      ...(gaslessInsufficientMessage
+        ? {
+            insufficientSolForFeesMessage: gaslessInsufficientMessage,
+            omitSolFeeBufferHint: true,
+          }
+        : {}),
+    });
 
   const preparedContext: PreparedTradeQuoteContext = {
     input: inputAsset,
@@ -2092,11 +2246,7 @@ const validateAndProcessTransaction = async (
   ) => Promise<string | { signature: string; message?: string }>,
   options?: ValidateTransactionOptions
 ): Promise<void> => {
-  const {
-    showSolscanLink = false,
-    tokenMint,
-    balanceLabel,
-  } = options ?? {};
+  const { showSolscanLink = false, tokenMint, balanceLabel } = options ?? {};
   const playerData = await getPlayerData(
     telegramId,
     isSol ? undefined : tokenMint
@@ -4215,7 +4365,7 @@ const showSwapQuoteAndConfirmation = async (
           (fromToken === "SOL"
             ? 9
             : balanceEntry?.decimals ??
-              (await wallet.getTokenMetadata(inputMint)).decimals);
+              (await getCachedTokenMetadata(inputMint)).decimals);
 
         return {
           ticker: fromToken,
@@ -4238,7 +4388,7 @@ const showSwapQuoteAndConfirmation = async (
           overrides.toDecimals ??
           (toToken === "SOL"
             ? 9
-            : (await wallet.getTokenMetadata(outputMint)).decimals);
+            : (await getCachedTokenMetadata(outputMint)).decimals);
 
         return {
           ticker: toToken,

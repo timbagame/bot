@@ -1,4 +1,5 @@
 import type { Keypair } from "@solana/web3.js";
+import type { JupiterQuoteResponse } from "../jupiter";
 
 export interface SwapQuote {
   inputMint: string;
@@ -11,6 +12,8 @@ export interface SwapQuote {
   provider: "jupiter";
   priceImpact?: string;
   platformFee?: any;
+  providerQuote?: JupiterQuoteResponse;
+  providerQuoteTimestamp?: number;
 }
 
 export interface SwapRequest {

@@ -1,6 +1,5 @@
 import { PublicKey } from "@solana/web3.js";
 import { escapeHtml, formatRate } from "./format-amount";
-import { JUPITER_DEFAULT_SLIPPAGE_BPS } from "./constants";
 import { WSOL_MINT } from "./token-registry";
 import type { FetchLike } from "../types";
 
@@ -64,7 +63,7 @@ export interface JupiterSwapRequest {
 
 export interface JupiterSwapResponse {
   swapTransaction: string; // Base64 encoded transaction
-  requestId?: string;
+  requestId: string;
   quoteId?: string;
   router?: string;
   expireAt?: string;
@@ -109,6 +108,33 @@ interface JupiterUltraOrderResponse {
   maker?: string;
   expireAt?: string;
   totalTime?: number;
+  error?: string;
+  errorCode?: number;
+  errorMessage?: string;
+}
+
+interface JupiterOrderResult {
+  raw: JupiterUltraOrderResponse;
+  normalized: JupiterQuoteResponse;
+}
+
+interface JupiterExecuteRequest {
+  requestId: string;
+  signedTransaction: string;
+}
+
+export interface JupiterExecuteResponse {
+  status?: string;
+  signature?: string;
+  txid?: string;
+  error?: string;
+  errorMessage?: string;
+  code?: number;
+  signatureStatus?: {
+    slot?: number;
+    confirmations?: number;
+    confirmationStatus?: string;
+  };
 }
 
 // ================================
@@ -126,6 +152,10 @@ export class JupiterClient {
 
   private getOrderUrl(): string {
     return `${this.baseUrl}/ultra/v1/order`;
+  }
+
+  private getExecuteUrl(): string {
+    return `${this.baseUrl}/ultra/v1/execute`;
   }
 
   private normalizeQuote(data: JupiterUltraOrderResponse): JupiterQuoteResponse {
@@ -173,7 +203,7 @@ export class JupiterClient {
     return url;
   }
 
-  private async requestOrder(params: JupiterOrderParams): Promise<JupiterUltraOrderResponse> {
+  private async fetchOrder(params: JupiterOrderParams): Promise<JupiterOrderResult> {
     const url = this.buildOrderParams(params);
 
     try {
@@ -192,7 +222,15 @@ export class JupiterClient {
       }
 
       const data = (await response.json()) as JupiterUltraOrderResponse;
-      return data;
+
+      if (data.error || data.errorMessage) {
+        const codeSuffix =
+          typeof data.errorCode === "number" ? ` (code ${data.errorCode})` : "";
+        const errorMessage = data.errorMessage || data.error || "Unknown Jupiter error";
+        throw new Error(`Jupiter order error${codeSuffix}: ${errorMessage}`);
+      }
+
+      return { raw: data, normalized: this.normalizeQuote(data) };
     } catch (error: any) {
       console.error("Error requesting Jupiter order:", error);
       throw new Error(`Failed to request Jupiter order: ${error.message}`);
@@ -203,13 +241,13 @@ export class JupiterClient {
    * Get a quote for a token swap
    */
   async getQuote(request: JupiterQuoteRequest): Promise<JupiterQuoteResponse> {
-    const order = await this.requestOrder({
+    const { normalized } = await this.fetchOrder({
       inputMint: request.inputMint,
       outputMint: request.outputMint,
       amount: request.amount,
       swapMode: request.swapMode,
     });
-    return this.normalizeQuote(order);
+    return normalized;
   }
 
   /**
@@ -225,7 +263,7 @@ export class JupiterClient {
         ? quoteResponse.outAmount
         : quoteResponse.inAmount);
 
-    const order = await this.requestOrder({
+    const { raw: order } = await this.fetchOrder({
       inputMint: quoteResponse.inputMint,
       outputMint: quoteResponse.outputMint,
       amount,
@@ -234,7 +272,17 @@ export class JupiterClient {
     });
 
     if (!order.transaction) {
-      throw new Error("Jupiter order did not return a swap transaction");
+      const detail =
+        order.errorMessage ||
+        order.error ||
+        (order.gasless
+          ? "Jupiter order switched to gasless mode and did not provide a transaction"
+          : "Jupiter order did not return a swap transaction");
+      throw new Error(detail);
+    }
+
+    if (!order.requestId) {
+      throw new Error("Jupiter order did not include a requestId");
     }
 
     return {
@@ -250,6 +298,51 @@ export class JupiterClient {
       priceImpact: order.priceImpact,
       routePlan: order.routePlan,
     };
+  }
+
+  async executeOrder(
+    request: JupiterExecuteRequest
+  ): Promise<JupiterExecuteResponse> {
+    try {
+      const response = await this.fetchFn(this.getExecuteUrl(), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          requestId: request.requestId,
+          signedTransaction: request.signedTransaction,
+        }),
+      });
+
+      const data = (await response.json()) as JupiterExecuteResponse;
+
+      if (!response.ok) {
+        const errorMessage =
+          data.errorMessage ||
+          data.error ||
+          `${response.status} ${response.statusText}`;
+        throw new Error(`Jupiter execute failed: ${errorMessage}`);
+      }
+
+      if (data.error || data.errorMessage) {
+        throw new Error(data.errorMessage || data.error || "Jupiter execute error");
+      }
+
+      if (data.status && data.status !== "Success") {
+        throw new Error(`Jupiter execute returned status ${data.status}`);
+      }
+
+      if (!data.signature && !data.txid) {
+        throw new Error("Jupiter execute response is missing a signature");
+      }
+
+      return data;
+    } catch (error: any) {
+      console.error("Error executing Jupiter order:", error);
+      throw new Error(`Failed to execute Jupiter order: ${error.message}`);
+    }
   }
 
   /**
@@ -331,15 +424,6 @@ export class JupiterClient {
     return { valid: true };
   }
 
-  /**
-   * Get default slippage based on token volatility
-   */
-  getDefaultSlippage(_inputMint: string, _outputMint: string): number {
-    // Default slippage in basis points (100 = 1%)
-    // Could add logic here to adjust slippage based on token pair
-    // For now, use a conservative default
-    return JUPITER_DEFAULT_SLIPPAGE_BPS;
-  }
 }
 
 // ================================
