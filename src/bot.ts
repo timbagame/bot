@@ -36,7 +36,7 @@ import {
   USER_WALLET_RPC_WINDOW_MS,
   USER_WALLET_RPC_MAX_CALLS,
   JUPITER_MIN_SOL_BALANCE_LAMPORTS,
-  JUPITER_SOL_BUFFER_MAX_RATIO,
+  JUPITER_SOL_BUFFER_MAX_LAMPORTS,
   applyOracleBufferTime,
 } from "./utils/constants";
 import { FeeBudgetManager } from "./utils/fee-budget";
@@ -380,18 +380,14 @@ const clampSolFeeBufferLamports = (
     return 0;
   }
 
-  const ratioCeilingRaw =
-    solBalanceLamports > 0
-      ? Math.floor(solBalanceLamports * JUPITER_SOL_BUFFER_MAX_RATIO)
-      : 0;
-
-  const ratioCeiling = Math.max(
-    JUPITER_MIN_SOL_BALANCE_LAMPORTS,
-    ratioCeilingRaw
+  const upperBound = Math.min(
+    JUPITER_SOL_BUFFER_MAX_LAMPORTS,
+    Math.max(0, solBalanceLamports)
   );
 
-  const limited = Math.min(desiredBufferLamports, ratioCeiling);
-  return Math.max(limited, JUPITER_MIN_SOL_BALANCE_LAMPORTS);
+  const limited = Math.min(desiredBufferLamports, upperBound);
+  const clamped = Math.max(limited, JUPITER_MIN_SOL_BALANCE_LAMPORTS);
+  return Math.min(clamped, Math.max(0, solBalanceLamports));
 };
 
 export const __test_clampSolFeeBufferLamports = clampSolFeeBufferLamports;
@@ -2165,11 +2161,7 @@ const validateAndProcessTransaction = async (
   ) => Promise<string | { signature: string; message?: string }>,
   options?: ValidateTransactionOptions
 ): Promise<void> => {
-  const {
-    showSolscanLink = false,
-    tokenMint,
-    balanceLabel,
-  } = options ?? {};
+  const { showSolscanLink = false, tokenMint, balanceLabel } = options ?? {};
   const playerData = await getPlayerData(
     telegramId,
     isSol ? undefined : tokenMint

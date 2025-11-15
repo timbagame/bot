@@ -8,13 +8,17 @@ describe("parseTradeAmountInput", () => {
   });
 
   test("parses percentage input", () => {
-    expect(parseTradeAmountInput("25%"))
-      .toEqual({ kind: "percentage", percentage: 25 });
+    expect(parseTradeAmountInput("25%")).toEqual({
+      kind: "percentage",
+      percentage: 25,
+    });
   });
 
   test("parses numeric input", () => {
-    expect(parseTradeAmountInput("  1.5 "))
-      .toEqual({ kind: "absolute", normalized: "1.5" });
+    expect(parseTradeAmountInput("  1.5 ")).toEqual({
+      kind: "absolute",
+      normalized: "1.5",
+    });
   });
 });
 
@@ -116,7 +120,7 @@ describe("trade amount helpers share validation", () => {
         applySolFeeBuffer: true,
         solFeeBufferLamports,
       })
-    ).toThrow("Insufficient SOL balance for this purchase");
+    ).toThrow(/Insufficient SOL balance for this purchase/);
   });
 
   test("max SOL with balance equal to buffer throws helpful error", () => {
@@ -135,6 +139,6 @@ describe("trade amount helpers share validation", () => {
         applySolFeeBuffer: true,
         solFeeBufferLamports,
       })
-    ).toThrow("Not enough SOL to cover purchase and fees");
+    ).toThrow(/Not enough SOL to cover purchase and fees/);
   });
 });

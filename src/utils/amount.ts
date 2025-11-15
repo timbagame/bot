@@ -22,10 +22,7 @@ function assertDecimals(decimals: number): asserts decimals is number {
   }
 }
 
-export function parseDecimalAmount(
-  value: string,
-  decimals: number
-): number;
+export function parseDecimalAmount(value: string, decimals: number): number;
 export function parseDecimalAmount(
   value: string,
   decimals: number,
@@ -50,9 +47,8 @@ export function parseDecimalAmount(
 
   const [intPartRaw = "0", fracPartRaw = ""] = normalized.split(".");
   const intPart = intPartRaw === "" ? "0" : intPartRaw;
-  const fraction = decimals > 0
-    ? (fracPartRaw + "0".repeat(decimals)).slice(0, decimals)
-    : "";
+  const fraction =
+    decimals > 0 ? (fracPartRaw + "0".repeat(decimals)).slice(0, decimals) : "";
 
   const base = 10n ** BigInt(decimals);
   const intComponent = BigInt(intPart) * base;
@@ -80,7 +76,9 @@ export type TradeAmountParseResult =
   | { kind: "percentage"; percentage: number }
   | { kind: "absolute"; normalized: string };
 
-export const parseTradeAmountInput = (amount: string): TradeAmountParseResult => {
+export const parseTradeAmountInput = (
+  amount: string
+): TradeAmountParseResult => {
   const trimmed = amount.trim();
 
   if (!trimmed) {
@@ -170,7 +168,14 @@ export const evaluateTradeAmount = ({
       : solBalance;
 
     if (spendable <= 0) {
-      throw new Error(insufficientSolForFeesMessage);
+      const bufferHint =
+        applySolFeeBuffer && solFeeBufferLamports > 0
+          ? ` (keep ~${
+              formatSol?.(solFeeBufferLamports) ??
+              `${solFeeBufferLamports} lamports`
+            } for fees)`
+          : "";
+      throw new Error(`${insufficientSolForFeesMessage}${bufferHint}`);
     }
 
     return spendable;
@@ -306,10 +311,14 @@ export const presentTradeAmount = (
       ? params.decimals
       : params.tokenBalance?.decimals ?? params.decimals;
 
-  const fallbackFormatted = formatAmount(evaluation.rawAmount, decimalsForFallback, {
-    maxFractionDigits: decimalsForFallback,
-    trim: true,
-  });
+  const fallbackFormatted = formatAmount(
+    evaluation.rawAmount,
+    decimalsForFallback,
+    {
+      maxFractionDigits: decimalsForFallback,
+      trim: true,
+    }
+  );
 
   const normalizedAmount =
     evaluation.normalizedAmount ??
