@@ -1,6 +1,5 @@
 import { PublicKey } from "@solana/web3.js";
 import { escapeHtml, formatRate } from "./format-amount";
-import { JUPITER_DEFAULT_SLIPPAGE_BPS } from "./constants";
 import { WSOL_MINT } from "./token-registry";
 import type { FetchLike } from "../types";
 
@@ -420,15 +419,6 @@ export class JupiterClient {
     return { valid: true };
   }
 
-  /**
-   * Get default slippage based on token volatility
-   */
-  getDefaultSlippage(_inputMint: string, _outputMint: string): number {
-    // Default slippage in basis points (100 = 1%)
-    // Could add logic here to adjust slippage based on token pair
-    // For now, use a conservative default
-    return JUPITER_DEFAULT_SLIPPAGE_BPS;
-  }
 }
 
 // ================================
