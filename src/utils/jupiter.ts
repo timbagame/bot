@@ -64,7 +64,7 @@ export interface JupiterSwapRequest {
 
 export interface JupiterSwapResponse {
   swapTransaction: string; // Base64 encoded transaction
-  requestId?: string;
+  requestId: string;
   quoteId?: string;
   router?: string;
   expireAt?: string;
@@ -109,6 +109,28 @@ interface JupiterUltraOrderResponse {
   maker?: string;
   expireAt?: string;
   totalTime?: number;
+  error?: string;
+  errorCode?: number;
+  errorMessage?: string;
+}
+
+interface JupiterExecuteRequest {
+  requestId: string;
+  signedTransaction: string;
+}
+
+export interface JupiterExecuteResponse {
+  status?: string;
+  signature?: string;
+  txid?: string;
+  error?: string;
+  errorMessage?: string;
+  code?: number;
+  signatureStatus?: {
+    slot?: number;
+    confirmations?: number;
+    confirmationStatus?: string;
+  };
 }
 
 // ================================
@@ -126,6 +148,10 @@ export class JupiterClient {
 
   private getOrderUrl(): string {
     return `${this.baseUrl}/ultra/v1/order`;
+  }
+
+  private getExecuteUrl(): string {
+    return `${this.baseUrl}/ultra/v1/execute`;
   }
 
   private normalizeQuote(data: JupiterUltraOrderResponse): JupiterQuoteResponse {
@@ -192,6 +218,14 @@ export class JupiterClient {
       }
 
       const data = (await response.json()) as JupiterUltraOrderResponse;
+
+      if (data.error || data.errorMessage) {
+        const codeSuffix =
+          typeof data.errorCode === "number" ? ` (code ${data.errorCode})` : "";
+        const errorMessage = data.errorMessage || data.error || "Unknown Jupiter error";
+        throw new Error(`Jupiter order error${codeSuffix}: ${errorMessage}`);
+      }
+
       return data;
     } catch (error: any) {
       console.error("Error requesting Jupiter order:", error);
@@ -234,7 +268,17 @@ export class JupiterClient {
     });
 
     if (!order.transaction) {
-      throw new Error("Jupiter order did not return a swap transaction");
+      const detail =
+        order.errorMessage ||
+        order.error ||
+        (order.gasless
+          ? "Jupiter order switched to gasless mode and did not provide a transaction"
+          : "Jupiter order did not return a swap transaction");
+      throw new Error(detail);
+    }
+
+    if (!order.requestId) {
+      throw new Error("Jupiter order did not include a requestId");
     }
 
     return {
@@ -250,6 +294,51 @@ export class JupiterClient {
       priceImpact: order.priceImpact,
       routePlan: order.routePlan,
     };
+  }
+
+  async executeOrder(
+    request: JupiterExecuteRequest
+  ): Promise<JupiterExecuteResponse> {
+    try {
+      const response = await this.fetchFn(this.getExecuteUrl(), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          requestId: request.requestId,
+          signedTransaction: request.signedTransaction,
+        }),
+      });
+
+      const data = (await response.json()) as JupiterExecuteResponse;
+
+      if (!response.ok) {
+        const errorMessage =
+          data.errorMessage ||
+          data.error ||
+          `${response.status} ${response.statusText}`;
+        throw new Error(`Jupiter execute failed: ${errorMessage}`);
+      }
+
+      if (data.error || data.errorMessage) {
+        throw new Error(data.errorMessage || data.error || "Jupiter execute error");
+      }
+
+      if (data.status && data.status !== "Success") {
+        throw new Error(`Jupiter execute returned status ${data.status}`);
+      }
+
+      if (!data.signature && !data.txid) {
+        throw new Error("Jupiter execute response is missing a signature");
+      }
+
+      return data;
+    } catch (error: any) {
+      console.error("Error executing Jupiter order:", error);
+      throw new Error(`Failed to execute Jupiter order: ${error.message}`);
+    }
   }
 
   /**

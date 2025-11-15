@@ -178,6 +178,10 @@ export const applyOracleBufferTime = (bufferSeconds: number): number => {
 // ================================
 
 export const JUPITER_DEFAULT_SLIPPAGE_BPS = 100; // 1%
+export const JUPITER_MIN_SOL_BALANCE_LAMPORTS = parsePositiveInteger(
+  "JUPITER_MIN_SOL_BALANCE_LAMPORTS",
+  10_000_000
+);
 
 // ================================
 // PRICES CONFIG

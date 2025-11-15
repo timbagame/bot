@@ -35,6 +35,7 @@ import {
   INPUT_TIMEOUT_HINT,
   USER_WALLET_RPC_WINDOW_MS,
   USER_WALLET_RPC_MAX_CALLS,
+  JUPITER_MIN_SOL_BALANCE_LAMPORTS,
   applyOracleBufferTime,
 } from "./utils/constants";
 import { FeeBudgetManager } from "./utils/fee-budget";
@@ -802,6 +803,11 @@ const prepareTokenTradeQuote = async ({
       const rentReserveLamports = await getSolWrapRentReserveLamports();
       solFeeBufferLamports += rentReserveLamports;
     }
+
+    solFeeBufferLamports = Math.max(
+      solFeeBufferLamports,
+      JUPITER_MIN_SOL_BALANCE_LAMPORTS
+    );
   }
 
   const amountResolution = presentSpendAmount({
