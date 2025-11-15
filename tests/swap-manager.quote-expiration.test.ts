@@ -47,6 +47,7 @@ describe("SwapManager quote expiration", () => {
       swapTransaction: Buffer.from("fake").toString("base64"),
       requestId: "req-123",
     });
+    (sm as any).executeJupiterTransaction = async () => "SIG";
 
     const quote = {
       inputMint: quoteResponse.inputMint,
