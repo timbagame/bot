@@ -75,13 +75,8 @@ export class SwapManager {
    * Get the best quote for a token swap across all providers
    */
   async getQuote(request: SwapRequest): Promise<SwapQuote> {
-    const {
-      inputMint,
-      outputMint,
-      amount,
-      inputTicker,
-      outputTicker,
-    } = request;
+    const { inputMint, outputMint, amount, inputTicker, outputTicker } =
+      request;
 
     console.log(`🔍 SwapManager.getQuote called:`);
     console.log(`   Input: ${inputMint} (${inputTicker})`);
@@ -415,7 +410,6 @@ export class SwapManager {
     };
   }
 
-
   /**
    * Execute Jupiter swap using the complete transaction
    */
@@ -463,7 +457,8 @@ export class SwapManager {
     // Execute the Jupiter transaction directly
     return await this.executeJupiterTransaction(
       swapResponse.swapTransaction,
-      userKeypair
+      userKeypair,
+      swapResponse.requestId
     );
   }
 
@@ -559,24 +554,58 @@ export class SwapManager {
    */
   private async executeJupiterTransaction(
     base64Transaction: string,
-    userKeypair: Keypair
+    userKeypair: Keypair,
+    requestId?: string
   ): Promise<string> {
     try {
-      // Decode the base64 transaction so we can refresh the blockhash
+      if (!requestId) {
+        throw new Error(
+          "Jupiter swap response missing requestId; cannot execute swap"
+        );
+      }
+
       const transactionBuffer = Buffer.from(base64Transaction, "base64");
       const versionedTx = VersionedTransaction.deserialize(transactionBuffer);
 
       const latestBlockhash = await this.connection.getLatestBlockhash();
       versionedTx.message.recentBlockhash = latestBlockhash.blockhash;
 
-      const refreshedBase64 = Buffer.from(versionedTx.serialize()).toString(
-        "base64"
-      );
-
-      const signature = await this.wallet.signAndSendSerializedTransaction(
-        refreshedBase64,
+      const {
+        transaction: signedTransaction,
+      } = await this.wallet.signVersionedTransactionOnly(
+        versionedTx,
         userKeypair
       );
+
+      const signedBase64 = Buffer.from(
+        signedTransaction.serialize()
+      ).toString("base64");
+
+      const executeResult = await this.jupiterClient.executeSwapTransaction({
+        requestId,
+        signedTransaction: signedBase64,
+      });
+
+      if (!executeResult || executeResult.status !== "Success") {
+        const errorMessage =
+          executeResult?.error ??
+          executeResult?.message ??
+          "Unknown Jupiter execution error";
+        throw new Error(
+          `Jupiter execution failed (${executeResult?.status ?? "Unknown"}): ${errorMessage}`
+        );
+      }
+
+      const signature =
+        executeResult.signature ??
+        executeResult.txid ??
+        "";
+
+      if (!signature) {
+        throw new Error(
+          "Jupiter execution did not return a transaction signature"
+        );
+      }
 
       await this.wallet.confirmTransaction(signature);
 
@@ -588,5 +617,4 @@ export class SwapManager {
       );
     }
   }
-
 }

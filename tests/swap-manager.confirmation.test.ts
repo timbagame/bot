@@ -1,12 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import { Buffer } from "buffer";
-import { Keypair, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
+import {
+  Keypair,
+  TransactionMessage,
+  VersionedTransaction,
+} from "@solana/web3.js";
 import { SwapManager } from "../src/utils/swap-manager";
 import type { WalletManager } from "../src/utils/wallet";
 import type { FeeBudgetProvider } from "../src/utils/fee-budget";
 
 type MockConnection = {
-  getLatestBlockhash: () => Promise<{ blockhash: string; lastValidBlockHeight: number }>;
+  getLatestBlockhash: () => Promise<{
+    blockhash: string;
+    lastValidBlockHeight: number;
+  }>;
 };
 
 const BASE58_BLOCKHASH = "11111111111111111111111111111111";
@@ -42,15 +49,22 @@ describe("SwapManager Jupiter confirmation", () => {
   const payer = Keypair.generate();
   const base64Tx = createBase64Transaction(payer);
 
-  test("invokes wallet helpers to sign, send, and confirm", async () => {
-    let capturedTx: string | null = null;
+  test("invokes wallet helpers to sign, execute, and confirm", async () => {
+    let capturedTx: VersionedTransaction | null = null;
     let confirmed: string | null = null;
 
     const walletStub = {
-      signAndSendSerializedTransaction: async (tx: string, signer: Keypair) => {
+      signVersionedTransactionOnly: async (
+        tx: VersionedTransaction,
+        signer: Keypair
+      ) => {
         capturedTx = tx;
         expect(signer).toBe(payer);
-        return SIGNATURE_OK;
+        return {
+          transaction: tx,
+          primarySignature: "",
+          signerPubkeys: [payer.publicKey.toBase58()],
+        };
       },
       confirmTransaction: async (signature: string) => {
         confirmed = signature;
@@ -64,19 +78,50 @@ describe("SwapManager Jupiter confirmation", () => {
       }),
     };
 
-    const manager = new SwapManager(connection as any, walletStub, feeBudgetStub);
-    const result = await (manager as any).executeJupiterTransaction(base64Tx, payer);
+    const manager = new SwapManager(
+      connection as any,
+      walletStub,
+      feeBudgetStub
+    );
+    (manager as any).jupiterClient = {
+      executeSwapTransaction: async ({
+        requestId,
+        signedTransaction,
+      }: {
+        requestId: string;
+        signedTransaction: string;
+      }) => {
+        expect(requestId).toBe("req-1");
+        expect(typeof signedTransaction).toBe("string");
+        return { status: "Success", signature: SIGNATURE_OK };
+      },
+    };
+    const result = await (manager as any).executeJupiterTransaction(
+      base64Tx,
+      payer,
+      "req-1"
+    );
 
     expect(result).toBe(SIGNATURE_OK);
     expect(confirmed).not.toBeNull();
     expect(confirmed!).toBe(SIGNATURE_OK);
     expect(capturedTx).not.toBeNull();
-    expect(capturedTx).not.toEqual(base64Tx);
+    expect(capturedTx!.message.recentBlockhash).toBe(UPDATED_BASE58_BLOCKHASH);
   });
 
   test("surfaces errors from confirmTransaction", async () => {
     const walletStub = {
-      signAndSendSerializedTransaction: async () => SIGNATURE_ERR,
+      signVersionedTransactionOnly: async () => ({
+        transaction: new VersionedTransaction(
+          new TransactionMessage({
+            payerKey: payer.publicKey,
+            recentBlockhash: BASE58_BLOCKHASH,
+            instructions: [],
+          }).compileToV0Message()
+        ),
+        primarySignature: SIGNATURE_ERR,
+        signerPubkeys: [payer.publicKey.toBase58()],
+      }),
       confirmTransaction: async () => {
         throw new Error("RPC timeout");
       },
@@ -89,9 +134,19 @@ describe("SwapManager Jupiter confirmation", () => {
       }),
     };
 
-    const manager = new SwapManager(connection as any, walletStub, feeBudgetStub);
-    await expect((manager as any).executeJupiterTransaction(base64Tx, payer)).rejects.toThrow(
-      "RPC timeout"
+    const manager = new SwapManager(
+      connection as any,
+      walletStub,
+      feeBudgetStub
     );
+    (manager as any).jupiterClient = {
+      executeSwapTransaction: async () => ({
+        status: "Success",
+        signature: SIGNATURE_ERR,
+      }),
+    };
+    await expect(
+      (manager as any).executeJupiterTransaction(base64Tx, payer, "req-2")
+    ).rejects.toThrow("RPC timeout");
   });
 });

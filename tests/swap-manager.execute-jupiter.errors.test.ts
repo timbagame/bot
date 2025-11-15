@@ -5,7 +5,7 @@ import { SwapManager } from "../src/utils/swap-manager";
 describe("SwapManager.executeJupiterTransaction errors", () => {
   test("throws friendly error when deserialization fails before wallet usage", async () => {
     const wallet = {
-      signAndSendSerializedTransaction: async () => {
+      signVersionedTransactionOnly: async () => {
         throw new Error("sign should not be called");
       },
       confirmTransaction: async () => {
@@ -16,7 +16,7 @@ describe("SwapManager.executeJupiterTransaction errors", () => {
     const sm = new SwapManager(connection, wallet);
     const user = Keypair.generate();
     await expect(
-      (sm as any).executeJupiterTransaction("not-base64-!!", user)
+      (sm as any).executeJupiterTransaction("not-base64-!!", user, "req-test")
     ).rejects.toThrow(/Failed to execute Jupiter transaction/);
   });
 });

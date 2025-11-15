@@ -73,6 +73,14 @@ export interface JupiterSwapResponse {
   routePlan?: JupiterQuoteResponse["routePlan"];
 }
 
+export interface JupiterExecuteResponse {
+  status: string;
+  signature?: string;
+  txid?: string;
+  error?: string;
+  message?: string;
+}
+
 interface JupiterOrderParams {
   inputMint: string;
   outputMint: string;
@@ -250,6 +258,42 @@ export class JupiterClient {
       priceImpact: order.priceImpact,
       routePlan: order.routePlan,
     };
+  }
+
+  async executeSwapTransaction(params: {
+    requestId: string;
+    signedTransaction: string;
+  }): Promise<JupiterExecuteResponse> {
+    const url = `${this.baseUrl}/ultra/v1/execute`;
+
+    try {
+      const response = await this.fetchFn(url, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          requestId: params.requestId,
+          signedTransaction: params.signedTransaction,
+        }),
+      });
+
+      const data = (await response.json()) as JupiterExecuteResponse;
+
+      if (!response.ok) {
+        const errorMessage =
+          data?.error ??
+          data?.message ??
+          `Jupiter execute failed with status ${response.status}`;
+        throw new Error(errorMessage);
+      }
+
+      return data;
+    } catch (error: any) {
+      console.error("Error executing Jupiter swap:", error);
+      throw new Error(`Failed to execute Jupiter swap: ${error.message}`);
+    }
   }
 
   /**

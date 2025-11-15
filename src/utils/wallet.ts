@@ -13,6 +13,7 @@ import {
   type SendOptions,
   type AccountInfo,
 } from "@solana/web3.js";
+import bs58 from "bs58";
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
@@ -473,6 +474,20 @@ export class WalletManager {
         this.pendingSignatures.delete(sig);
       }
     }
+  }
+
+  private registerPendingSignature(
+    signature: string,
+    blockhash: string,
+    lastValidBlockHeight: number
+  ): void {
+    const now = Date.now();
+    this.prunePendingSignatures(now);
+    this.pendingSignatures.set(signature, {
+      blockhash,
+      lastValidBlockHeight,
+      recordedAt: now,
+    });
   }
 
   private getUserCacheKey(telegramId: bigint | number | string): string {
@@ -2157,13 +2172,11 @@ export class WalletManager {
     }
 
     console.log(`📤 Transaction sent: ${signature}`);
-    const now = Date.now();
-    this.prunePendingSignatures(now);
-    this.pendingSignatures.set(signature, {
-      blockhash: latestBlockhash.blockhash,
-      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-      recordedAt: now,
-    });
+    this.registerPendingSignature(
+      signature,
+      latestBlockhash.blockhash,
+      latestBlockhash.lastValidBlockHeight
+    );
     return signature;
   }
 
@@ -2284,25 +2297,15 @@ export class WalletManager {
     serializedTxBase64: string,
     signer: Keypair
   ): Promise<string> {
-    await this.throttle();
-
     try {
-      // Deserialize the transaction
       const txBuffer = Buffer.from(serializedTxBase64, "base64");
       const tx = VersionedTransaction.deserialize(txBuffer);
 
-      // Sign the transaction
-      tx.sign([signer]);
-
-      // Send the transaction with more permissive settings for Jupiter transactions
-      const signature = await this.sendVersionedTransactionWithRetry(tx, {
-        skipPreflight: true, // Skip preflight for complex Jupiter transactions
+      return await this.signAndSendVersionedTransaction(tx, signer, {
+        skipPreflight: true,
         preflightCommitment: "processed",
         maxRetries: 5,
       });
-
-      console.log(`📤 Serialized transaction sent: ${signature}`);
-      return signature;
     } catch (error: any) {
       console.error("Error signing and sending serialized transaction:", error);
 
@@ -2319,6 +2322,157 @@ export class WalletManager {
 
       throw new Error(`Failed to send transaction: ${error.message}`);
     }
+  }
+
+  private async signTransactionWithAvailableKeys(
+    transaction: VersionedTransaction,
+    signer: Keypair,
+    options: { requirePayerSignature?: boolean } = {}
+  ): Promise<{
+    transaction: VersionedTransaction;
+    primarySignature: string;
+    signerPubkeys: string[];
+  }> {
+    await this.throttle();
+
+    const signerPubkeys = transaction.message.staticAccountKeys.slice(
+      0,
+      transaction.message.header.numRequiredSignatures
+    );
+
+    const signerIndex = signerPubkeys.findIndex((pubkey) =>
+      pubkey.equals(signer.publicKey)
+    );
+
+    if (signerIndex === -1) {
+      throw new Error(
+        "Provided signer does not match any required signer for this transaction"
+      );
+    }
+
+    const availableSigners = new Map<string, Keypair>();
+    availableSigners.set(signer.publicKey.toBase58(), signer);
+    if (this.adminKeypair) {
+      availableSigners.set(
+        this.adminKeypair.publicKey.toBase58(),
+        this.adminKeypair
+      );
+    }
+
+    const keypairsToUse: Keypair[] = [];
+    const signerIndexToKey = new Map<number, Keypair>();
+    signerPubkeys.forEach((pubkey, index) => {
+      const keypair = availableSigners.get(pubkey.toBase58());
+      if (keypair) {
+        signerIndexToKey.set(index, keypair);
+        if (!keypairsToUse.includes(keypair)) {
+          keypairsToUse.push(keypair);
+        }
+      }
+    });
+
+    if (keypairsToUse.length === 0) {
+      throw new Error(
+        "No local keypairs available to sign required transaction signers"
+      );
+    }
+
+    const originalSignatures: Uint8Array[] = transaction.signatures.map((sig) =>
+      sig && sig.length > 0 ? new Uint8Array(sig) : new Uint8Array(64)
+    );
+    transaction.sign(keypairsToUse);
+
+    for (let i = 0; i < signerPubkeys.length; i++) {
+      if (!signerIndexToKey.has(i)) {
+        transaction.signatures[i] = originalSignatures[i]!;
+      }
+    }
+
+    const primarySignatureBytes = transaction.signatures[0];
+    let primarySignature = "";
+    if (
+      primarySignatureBytes &&
+      primarySignatureBytes.length > 0 &&
+      !primarySignatureBytes.every((byte) => byte === 0)
+    ) {
+      primarySignature = bs58.encode(Buffer.from(primarySignatureBytes));
+    } else if (options.requirePayerSignature ?? true) {
+      throw new Error("Transaction is missing payer signature after signing");
+    }
+
+    return {
+      transaction,
+      primarySignature,
+      signerPubkeys: signerPubkeys.map((key) => key.toBase58()),
+    };
+  }
+
+  public async signVersionedTransactionOnly(
+    transaction: VersionedTransaction,
+    signer: Keypair
+  ): Promise<{
+    transaction: VersionedTransaction;
+    primarySignature: string;
+    signerPubkeys: string[];
+  }> {
+    return await this.signTransactionWithAvailableKeys(transaction, signer, {
+      requirePayerSignature: false,
+    });
+  }
+
+  public async signAndSendVersionedTransaction(
+    transaction: VersionedTransaction,
+    signer: Keypair,
+    options: SendOptions = {},
+    blockhashInfo?: {
+      blockhash: string;
+      lastValidBlockHeight: number;
+    }
+  ): Promise<string> {
+    const {
+      transaction: signedTransaction,
+      primarySignature,
+      signerPubkeys,
+    } = await this.signTransactionWithAvailableKeys(transaction, signer, {
+      requirePayerSignature: true,
+    });
+
+    if (!primarySignature) {
+      throw new Error("Transaction is missing payer signature after signing");
+    }
+
+    const sendOptions: SendOptions & { retryAttempts?: number } = {
+      skipPreflight: options.skipPreflight ?? true,
+      preflightCommitment: options.preflightCommitment ?? "processed",
+      maxRetries: options.maxRetries ?? 5,
+      minContextSlot: options.minContextSlot,
+    };
+
+    const rpcSignature = await this.sendVersionedTransactionWithRetry(
+      signedTransaction,
+      sendOptions
+    );
+
+    let effectiveSignature = primarySignature;
+
+    if (rpcSignature && rpcSignature !== primarySignature) {
+      console.warn(
+        `RPC returned signature ${rpcSignature}, but locally computed primary signature is ${primarySignature}. Using primary signature. requiredSigners=${
+          transaction.message.header.numRequiredSignatures
+        }, signers=${JSON.stringify(signerPubkeys)}`
+      );
+    }
+
+    if (blockhashInfo) {
+      this.registerPendingSignature(
+        effectiveSignature,
+        blockhashInfo.blockhash,
+        blockhashInfo.lastValidBlockHeight
+      );
+    }
+
+    console.log(`📤 Serialized transaction sent: ${effectiveSignature}`);
+    return effectiveSignature;
   }
 
   private async sendVersionedTransactionWithRetry(
