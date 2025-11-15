@@ -15,8 +15,10 @@ type WalletState = {
 };
 
 const createStubWallet = (
-  options: Partial<WalletState> &
-    { endpoint?: string; beforeBalance?: () => void } = {}
+  options: Partial<WalletState> & {
+    endpoint?: string;
+    beforeBalance?: () => void;
+  } = {}
 ) => {
   const state: WalletState = {
     balanceCalls: 0,
@@ -71,7 +73,7 @@ const ensureBalanceCalled = (state: WalletState, expected: number) =>
   expect(state.balanceCalls).toBe(expected);
 
 describe("wallet menu cache guards", () => {
-  test("B-001: zero TTL forces repeated RPC", async () => {
+  test("zero TTL forces repeated RPC calls", async () => {
     const { wallet, state } = createStubWallet();
     const module = createModule(wallet);
     module.__test_clearWalletSnapshotCache();
@@ -84,7 +86,7 @@ describe("wallet menu cache guards", () => {
     module.__test_resetWalletRpcCacheTtlMs();
   });
 
-  test("B-002: clearWalletCache forces re-fetch", async () => {
+  test("clearWalletCache causes a fresh RPC", async () => {
     const { wallet, state } = createStubWallet();
     const module = createModule(wallet);
     module.__test_clearWalletSnapshotCache();
@@ -97,7 +99,7 @@ describe("wallet menu cache guards", () => {
     ensureBalanceCalled(state, 2);
   });
 
-  test("B-003: RPC failure without stale data leaves cache empty", async () => {
+  test("RPC failure without fallback leaves cache empty", async () => {
     const { wallet, state } = createStubWallet({ fail: true });
     const module = createModule(wallet);
     module.__test_clearWalletSnapshotCache();
@@ -107,7 +109,7 @@ describe("wallet menu cache guards", () => {
     ensureBalanceCalled(state, 1);
   });
 
-  test("B-004: cache segregates by RPC endpoint", async () => {
+  test("cache keys include RPC endpoint", async () => {
     const { wallet, state } = createStubWallet({ endpoint: "foo" });
     const module = createModule(wallet);
     module.__test_clearWalletSnapshotCache();
@@ -123,7 +125,7 @@ describe("wallet menu cache guards", () => {
     ensureBalanceCalled(state, 2);
   });
 
-  test("B-005: concurrent fetch dedupes via pending map", async () => {
+  test("concurrent fetches dedupe via pending map", async () => {
     const { wallet, state } = createStubWallet({ delayMs: 30 });
     const module = createModule(wallet);
     module.__test_clearWalletSnapshotCache();
@@ -138,7 +140,7 @@ describe("wallet menu cache guards", () => {
     ensureBalanceCalled(state, 1);
   });
 
-  test("B-006: clearing while fetch in-flight prevents stale snapshot insertion", async () => {
+  test("clearing during in-flight fetch prevents stale snapshot insertion", async () => {
     let moduleRef: ReturnType<typeof createModule> | null = null;
     const { wallet } = createStubWallet({
       delayMs: 100,
@@ -154,7 +156,7 @@ describe("wallet menu cache guards", () => {
     expect(module.__test_getWalletSnapshotCacheKeys()).toEqual([]);
   });
 
-  test("B-007: TTL expiration triggers refetch", async () => {
+  test("TTL expiration triggers new RPC", async () => {
     const { wallet, state } = createStubWallet();
     const module = createModule(wallet);
     module.__test_clearWalletSnapshotCache();
