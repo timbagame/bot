@@ -36,6 +36,7 @@ import {
   USER_WALLET_RPC_WINDOW_MS,
   USER_WALLET_RPC_MAX_CALLS,
   JUPITER_MIN_SOL_BALANCE_LAMPORTS,
+  JUPITER_SOL_BUFFER_MAX_RATIO,
   applyOracleBufferTime,
 } from "./utils/constants";
 import { FeeBudgetManager } from "./utils/fee-budget";
@@ -370,6 +371,30 @@ const {
 } = walletTransactionsModule;
 
 registerWalletTransactionHandlers();
+
+const clampSolFeeBufferLamports = (
+  solBalanceLamports: number,
+  desiredBufferLamports: number
+): number => {
+  if (!Number.isFinite(desiredBufferLamports) || desiredBufferLamports <= 0) {
+    return 0;
+  }
+
+  const ratioCeilingRaw =
+    solBalanceLamports > 0
+      ? Math.floor(solBalanceLamports * JUPITER_SOL_BUFFER_MAX_RATIO)
+      : 0;
+
+  const ratioCeiling = Math.max(
+    JUPITER_MIN_SOL_BALANCE_LAMPORTS,
+    ratioCeilingRaw
+  );
+
+  const limited = Math.min(desiredBufferLamports, ratioCeiling);
+  return Math.max(limited, JUPITER_MIN_SOL_BALANCE_LAMPORTS);
+};
+
+export const __test_clampSolFeeBufferLamports = clampSolFeeBufferLamports;
 
 const parseOracleNumeric = (value: unknown): number | null => {
   if (typeof value === "number") {
@@ -840,13 +865,16 @@ const prepareTokenTradeQuote = async ({
 
     if (inputAsset.ticker === "SOL") {
       const rentReserveLamports = await getSolWrapRentReserveLamports();
-      solFeeBufferLamports += rentReserveLamports;
+      solFeeBufferLamports = clampSolFeeBufferLamports(
+        snapshot.solBalance,
+        solFeeBufferLamports + rentReserveLamports
+      );
+    } else {
+      solFeeBufferLamports = Math.max(
+        solFeeBufferLamports,
+        JUPITER_MIN_SOL_BALANCE_LAMPORTS
+      );
     }
-
-    solFeeBufferLamports = Math.max(
-      solFeeBufferLamports,
-      JUPITER_MIN_SOL_BALANCE_LAMPORTS
-    );
   }
 
   const amountResolution = presentSpendAmount({

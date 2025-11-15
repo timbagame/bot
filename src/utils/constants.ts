@@ -179,7 +179,25 @@ export const applyOracleBufferTime = (bufferSeconds: number): number => {
 
 export const JUPITER_MIN_SOL_BALANCE_LAMPORTS = parsePositiveInteger(
   "JUPITER_MIN_SOL_BALANCE_LAMPORTS",
-  10_000_000
+  5_000_000
+);
+
+const parseRatio = (key: string, fallback: number): number => {
+  const raw = process.env[key];
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 1) {
+    console.warn(
+      `[Config] ${key} must be a number between 0 and 1. Received '${raw}', using fallback ${fallback}.`
+    );
+    return fallback;
+  }
+  return parsed;
+};
+
+export const JUPITER_SOL_BUFFER_MAX_RATIO = parseRatio(
+  "JUPITER_SOL_BUFFER_MAX_RATIO",
+  0.3
 );
 
 // ================================
