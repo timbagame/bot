@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { parseTradeAmountInput } from "../src/utils/amount";
 import { __test_presentSpendAmount as presentSpendAmount } from "../src/bot";
+import { JUPITER_MIN_SOL_BALANCE_LAMPORTS } from "../src/utils/constants";
 
 describe("parseTradeAmountInput", () => {
   test("parses max input", () => {
@@ -139,6 +140,28 @@ describe("trade amount helpers share validation", () => {
         applySolFeeBuffer: true,
         solFeeBufferLamports,
       })
-    ).toThrow(/Not enough SOL to cover purchase and fees/);
+    ).toThrow(/Not enough SOL to cover purchase and fees \(keep ~/);
+  });
+
+  test("uses custom insufficient fee message when provided", () => {
+    const solBalance = JUPITER_MIN_SOL_BALANCE_LAMPORTS;
+
+    expect(() =>
+      presentSpendAmount({
+        amount: "max",
+        assetTicker: "SOL",
+        decimals: 9,
+        solBalance,
+        tokenBalance: undefined,
+        formatSol: (lamports) => `${lamports} lamports`,
+        formatToken: () => "",
+        applySolFeeBuffer: true,
+        solFeeBufferLamports: solBalance,
+        insufficientSolForFeesMessage: "Swaps under ~$10 need 0.01 SOL",
+        omitSolFeeBufferHint: true,
+      })
+    ).toThrow(
+      "Swaps under ~$10 need 0.01 SOL"
+    );
   });
 });

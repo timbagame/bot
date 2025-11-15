@@ -36,6 +36,7 @@ import {
   USER_WALLET_RPC_WINDOW_MS,
   USER_WALLET_RPC_MAX_CALLS,
   JUPITER_MIN_SOL_BALANCE_LAMPORTS,
+  JUPITER_GASLESS_MIN_TRADE_USD,
   applyOracleBufferTime,
 } from "./utils/constants";
 import { FeeBudgetManager } from "./utils/fee-budget";
@@ -513,6 +514,26 @@ const createSwapAmountKeyboard = ({
 
 export const __test_createSwapAmountKeyboard = createSwapAmountKeyboard;
 
+const formatUsdThresholdLabel = (value: number): string => {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "$0";
+  }
+
+  const needsCents = !Number.isInteger(value) && value < 1_000;
+  const formatted = needsCents
+    ? value.toFixed(2)
+    : value.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  return `$${formatted}`;
+};
+
+const buildGaslessFeeRequirementMessage = (): string => {
+  const usdLabel = formatUsdThresholdLabel(JUPITER_GASLESS_MIN_TRADE_USD);
+  const solBufferDisplay = wallet.formatSolBalance(
+    JUPITER_MIN_SOL_BALANCE_LAMPORTS
+  );
+  return `Swaps under ~${usdLabel} must keep at least ${solBufferDisplay} SOL for fees. Add SOL or try a larger swap.`;
+};
+
 type WalletBalanceEntry = {
   ticker: string;
   balance: number;
@@ -848,7 +869,7 @@ const prepareTokenTradeQuote = async ({
     Promise.resolve(outputFactory(factoryContext)),
   ]);
 
-  const shouldApplySolFeeBuffer =
+  let shouldApplySolFeeBuffer =
     inputAsset.applySolFeeBuffer ?? inputAsset.ticker === "SOL";
 
   let solFeeBufferLamports: number | undefined;
@@ -869,18 +890,83 @@ const prepareTokenTradeQuote = async ({
     }
   }
 
-  const amountResolution = presentSpendAmount({
-    amount: amountInput,
-    assetTicker: inputAsset.ticker,
-    decimals: inputAsset.decimals,
-    solBalance: snapshot.solBalance,
-    tokenBalance: inputAsset.tokenBalance,
-    formatSol: (lamports) => wallet.formatSolBalance(lamports),
-    formatToken: (value, decimals) =>
-      wallet.formatTokenBalance(value, decimals),
-    applySolFeeBuffer: shouldApplySolFeeBuffer,
-    ...(solFeeBufferLamports !== undefined ? { solFeeBufferLamports } : {}),
-  });
+  const shouldProbeGasless =
+    shouldApplySolFeeBuffer &&
+    inputAsset.ticker === "SOL" &&
+    snapshot.solBalance > 0 &&
+    snapshot.solBalance < JUPITER_MIN_SOL_BALANCE_LAMPORTS;
+
+  let gaslessOverride:
+    | ReturnType<typeof presentSpendAmount>
+    | null = null;
+  let gaslessInsufficientMessage: string | undefined;
+
+  if (shouldProbeGasless) {
+    const probe = presentSpendAmount({
+      amount: amountInput,
+      assetTicker: inputAsset.ticker,
+      decimals: inputAsset.decimals,
+      solBalance: snapshot.solBalance,
+      tokenBalance: inputAsset.tokenBalance,
+      formatSol: (lamports) => wallet.formatSolBalance(lamports),
+      formatToken: (value, decimals) =>
+        wallet.formatTokenBalance(value, decimals),
+      applySolFeeBuffer: false,
+    });
+
+    let solPriceUsd = 0;
+    try {
+      const priceLookup = await resolveTokenPriceUSD({
+        tokenMint: inputAsset.mint,
+        tokenTicker: inputAsset.ticker,
+        isSol: true,
+      });
+      solPriceUsd = priceLookup?.price ?? 0;
+    } catch (priceError) {
+      console.warn(
+        "Failed to fetch SOL price for gasless eligibility check:",
+        priceError
+      );
+    }
+
+    const tradeUsdValue =
+      solPriceUsd > 0
+        ? (probe.rawAmount / LAMPORTS_PER_SOL) * solPriceUsd
+        : 0;
+
+    if (
+      solPriceUsd > 0 &&
+      tradeUsdValue >= JUPITER_GASLESS_MIN_TRADE_USD
+    ) {
+      shouldApplySolFeeBuffer = false;
+      gaslessOverride = probe;
+    } else {
+      gaslessInsufficientMessage = buildGaslessFeeRequirementMessage();
+    }
+  }
+
+  const amountResolution =
+    gaslessOverride ??
+    presentSpendAmount({
+      amount: amountInput,
+      assetTicker: inputAsset.ticker,
+      decimals: inputAsset.decimals,
+      solBalance: snapshot.solBalance,
+      tokenBalance: inputAsset.tokenBalance,
+      formatSol: (lamports) => wallet.formatSolBalance(lamports),
+      formatToken: (value, decimals) =>
+        wallet.formatTokenBalance(value, decimals),
+      applySolFeeBuffer: shouldApplySolFeeBuffer,
+      ...(solFeeBufferLamports !== undefined
+        ? { solFeeBufferLamports }
+        : {}),
+      ...(gaslessInsufficientMessage
+        ? {
+            insufficientSolForFeesMessage: gaslessInsufficientMessage,
+            omitSolFeeBufferHint: true,
+          }
+        : {}),
+    });
 
   const preparedContext: PreparedTradeQuoteContext = {
     input: inputAsset,

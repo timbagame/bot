@@ -11,7 +11,7 @@ describe("clampSolFeeBufferLamports", () => {
   });
 
   test("never drops below minimum buffer", () => {
-    const solBalance = 5_000_000; // 0.005 SOL
+    const solBalance = JUPITER_MIN_SOL_BALANCE_LAMPORTS * 2;
     const desiredBuffer = 5_000; // low buffer
     const result = clampSolFeeBuffer(solBalance, desiredBuffer);
     expect(result).toBeGreaterThanOrEqual(JUPITER_MIN_SOL_BALANCE_LAMPORTS);

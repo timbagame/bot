@@ -119,6 +119,7 @@ export interface EvaluateTradeAmountParams {
   insufficientSolBalanceMessage?: string;
   formatSol?: (lamports: number) => string;
   formatToken?: (amount: number, decimals: number) => string;
+  omitSolFeeBufferHint?: boolean;
 }
 
 export interface EvaluateTradeAmountResult {
@@ -140,6 +141,7 @@ export const evaluateTradeAmount = ({
   insufficientSolBalanceMessage = applySolFeeBuffer
     ? "Insufficient SOL balance for this purchase"
     : "Insufficient SOL balance",
+  omitSolFeeBufferHint = false,
   formatSol,
   formatToken,
 }: EvaluateTradeAmountParams): EvaluateTradeAmountResult => {
@@ -169,7 +171,9 @@ export const evaluateTradeAmount = ({
 
     if (spendable <= 0) {
       const bufferHint =
-        applySolFeeBuffer && solFeeBufferLamports > 0
+        applySolFeeBuffer &&
+        solFeeBufferLamports > 0 &&
+        !omitSolFeeBufferHint
           ? ` (keep ~${
               formatSol?.(solFeeBufferLamports) ??
               `${solFeeBufferLamports} lamports`
