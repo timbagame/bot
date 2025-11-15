@@ -935,10 +935,9 @@ const prepareTokenTradeQuote = async ({
       }
 
       const meetsUsdThreshold =
-        solPriceUsd > 0
-          ? (probe.rawAmount / LAMPORTS_PER_SOL) * solPriceUsd >=
-            JUPITER_GASLESS_MIN_TRADE_USD
-          : true;
+        solPriceUsd > 0 &&
+        (probe.rawAmount / LAMPORTS_PER_SOL) * solPriceUsd >=
+          JUPITER_GASLESS_MIN_TRADE_USD;
 
       if (meetsUsdThreshold) {
         shouldApplySolFeeBuffer = false;
