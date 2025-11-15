@@ -36,7 +36,6 @@ import {
   USER_WALLET_RPC_WINDOW_MS,
   USER_WALLET_RPC_MAX_CALLS,
   JUPITER_MIN_SOL_BALANCE_LAMPORTS,
-  JUPITER_SOL_BUFFER_MAX_LAMPORTS,
   applyOracleBufferTime,
 } from "./utils/constants";
 import { FeeBudgetManager } from "./utils/fee-budget";
@@ -380,10 +379,7 @@ const clampSolFeeBufferLamports = (
     return 0;
   }
 
-  const upperBound = Math.min(
-    JUPITER_SOL_BUFFER_MAX_LAMPORTS,
-    Math.max(0, solBalanceLamports)
-  );
+  const upperBound = Math.max(0, solBalanceLamports);
 
   const limited = Math.min(desiredBufferLamports, upperBound);
   const clamped = Math.max(limited, JUPITER_MIN_SOL_BALANCE_LAMPORTS);
