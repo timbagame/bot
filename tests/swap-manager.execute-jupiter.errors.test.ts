@@ -48,8 +48,8 @@ describe("SwapManager.executeJupiterTransaction errors", () => {
   });
 });
 
-describe("SwapManager.executeJupiterSwap requestId guard", () => {
-  test("throws when swapResponse requestId differs from quote provider", async () => {
+describe("SwapManager.executeJupiterSwap requestId handling", () => {
+  test("continues when swapResponse requestId differs from quote provider", async () => {
     const connection = new Connection("http://localhost:8899", "confirmed");
     const wallet = WalletManager.createForTest(
       "test walk nut penalty hip pave soap entry language right filter choice",
@@ -102,6 +102,6 @@ describe("SwapManager.executeJupiterSwap requestId guard", () => {
         },
         quote
       )
-    ).rejects.toThrow("Jupiter requestId mismatch");
+    ).resolves.toBe("SIG");
   });
 });

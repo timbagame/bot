@@ -484,14 +484,6 @@ export class SwapManager {
       quoteResponse: jupiterQuote,
     });
 
-    if (
-      quote.providerQuote?.requestId &&
-      swapResponse.requestId &&
-      quote.providerQuote.requestId !== swapResponse.requestId
-    ) {
-      throw new Error("Jupiter requestId mismatch between quote and execution");
-    }
-
     // Execute the Jupiter transaction directly
     return await this.executeJupiterTransaction(
       swapResponse.swapTransaction,
