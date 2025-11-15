@@ -1,6 +1,11 @@
 import { Buffer } from "buffer";
 import { describe, test, expect } from "bun:test";
-import { Connection, Keypair, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
+import {
+  Connection,
+  Keypair,
+  TransactionMessage,
+  VersionedTransaction,
+} from "@solana/web3.js";
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
 
@@ -26,7 +31,7 @@ describe("SwapManager.executeJupiterTransaction errors", () => {
     };
 
     await expect(
-      (sm as any).executeJupiterTransaction("not-base64-!!", "req-1", user)
+      (sm as any).executeJupiterTransaction("not-base64-!!", "req-1", [user])
     ).rejects.toThrow(/Failed to execute Jupiter transaction/);
   });
 
@@ -43,7 +48,7 @@ describe("SwapManager.executeJupiterTransaction errors", () => {
     });
 
     await expect(
-      (sm as any).executeJupiterTransaction(base64Tx, "req-2", user)
+      (sm as any).executeJupiterTransaction(base64Tx, "req-2", [user])
     ).rejects.toThrow("Minimum $10 for gasless");
   });
 });

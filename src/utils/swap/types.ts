@@ -1,5 +1,6 @@
 import type { Keypair } from "@solana/web3.js";
 import type { JupiterQuoteResponse } from "../jupiter";
+import type { IntegratorSwapParams } from "../integrator-fees";
 
 export interface SwapQuote {
   inputMint: string;
@@ -14,6 +15,7 @@ export interface SwapQuote {
   platformFee?: any;
   providerQuote?: JupiterQuoteResponse;
   providerQuoteTimestamp?: number;
+  integrator?: IntegratorSwapParams | null;
 }
 
 export interface SwapRequest {
@@ -25,6 +27,7 @@ export interface SwapRequest {
   outputDecimals: number;
   inputTicker: string;
   outputTicker: string;
+  integrator?: IntegratorSwapParams | null;
 }
 
 export interface JustInTimeSwapResult {

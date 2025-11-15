@@ -97,6 +97,7 @@ import {
 } from "./utils/context-helpers";
 import { recentUpdateGuard } from "./utils/recent-update";
 import { resolveTokenPriceUSD } from "./utils/prices";
+import { resolveIntegratorSwapParams } from "./utils/integrator-fees";
 import { patchReplyBehavior } from "./utils/reply-patch";
 import { buildTransactionLinkMessage } from "./utils/network-detector";
 import { buildProcessingStatus } from "./utils/trade-ui";
@@ -890,12 +891,12 @@ const prepareTokenTradeQuote = async ({
     }
   }
 
+  const userKeypair = wallet.getKeyPair(telegramId);
+
   const shouldProbeGasless =
     shouldApplySolFeeBuffer && inputAsset.ticker === "SOL";
 
-  let gaslessOverride:
-    | ReturnType<typeof presentSpendAmount>
-    | null = null;
+  let gaslessOverride: ReturnType<typeof presentSpendAmount> | null = null;
   let gaslessInsufficientMessage: string | undefined;
 
   if (shouldProbeGasless) {
@@ -960,9 +961,7 @@ const prepareTokenTradeQuote = async ({
       formatToken: (value, decimals) =>
         wallet.formatTokenBalance(value, decimals),
       applySolFeeBuffer: shouldApplySolFeeBuffer,
-      ...(solFeeBufferLamports !== undefined
-        ? { solFeeBufferLamports }
-        : {}),
+      ...(solFeeBufferLamports !== undefined ? { solFeeBufferLamports } : {}),
       ...(gaslessInsufficientMessage
         ? {
             insufficientSolForFeesMessage: gaslessInsufficientMessage,
@@ -970,6 +969,17 @@ const prepareTokenTradeQuote = async ({
           }
         : {}),
     });
+
+  const integratorConfig = await resolveIntegratorSwapParams({
+    inputMint: inputAsset.mint,
+    outputMint: outputAsset.mint,
+    inputTicker: inputAsset.ticker,
+    inputDecimals: inputAsset.decimals,
+    inputAmountRaw: amountResolution.rawAmount,
+    userPublicKey: userKeypair.publicKey.toBase58(),
+    availableSolLamports: snapshot.solBalance,
+    solFeeBufferLamports,
+  });
 
   const preparedContext: PreparedTradeQuoteContext = {
     input: inputAsset,
@@ -1002,11 +1012,12 @@ const prepareTokenTradeQuote = async ({
         inputMint: inputAsset.mint,
         outputMint: outputAsset.mint,
         amount: amountResolution.rawAmount.toString(),
-        userKeypair: wallet.getKeyPair(telegramId),
+        userKeypair,
         inputDecimals: inputAsset.decimals,
         outputDecimals: outputAsset.decimals,
         inputTicker: inputAsset.ticker.toUpperCase(),
         outputTicker: outputAsset.ticker.toUpperCase(),
+        integrator: integratorConfig,
       });
       if (!quote) {
         throw new Error(
@@ -3748,6 +3759,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
           outputDecimals,
           inputTicker: transaction.fromToken?.toUpperCase() || "UNKNOWN",
           outputTicker: transaction.toToken?.toUpperCase() || "UNKNOWN",
+          integrator: quote.integrator ?? null,
         },
         quote
       );

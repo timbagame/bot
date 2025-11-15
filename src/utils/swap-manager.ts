@@ -85,13 +85,8 @@ export class SwapManager {
    * Get the best quote for a token swap across all providers
    */
   async getQuote(request: SwapRequest): Promise<SwapQuote> {
-    const {
-      inputMint,
-      outputMint,
-      amount,
-      inputTicker,
-      outputTicker,
-    } = request;
+    const { inputMint, outputMint, amount, inputTicker, outputTicker } =
+      request;
 
     console.log(`🔍 SwapManager.getQuote called:`);
     console.log(`   Input: ${inputMint} (${inputTicker})`);
@@ -100,11 +95,23 @@ export class SwapManager {
     console.log(`   Network: ${this.network}`);
 
     console.log(`   🚀 Using Jupiter for quote`);
-    const jupiterQuote = await this.getJupiterQuote({
+    const quoteRequest: JupiterQuoteRequest = {
       inputMint,
       outputMint,
       amount,
-    });
+    };
+
+    if (request.integrator) {
+      quoteRequest.referralAccount = request.integrator.referralAccount;
+      quoteRequest.referralFeeBps = request.integrator.referralFeeBps;
+      quoteRequest.payer = request.integrator.payer;
+      quoteRequest.closeAuthority = request.integrator.closeAuthority;
+      console.log(
+        `   🧾 Integrator fee ${request.integrator.referralFeeBps} bps via ${request.integrator.payerKind} payer`
+      );
+    }
+
+    const jupiterQuote = await this.getJupiterQuote(quoteRequest);
 
     const inAmount = parseFloat(jupiterQuote.inAmount);
     const outAmount = parseFloat(jupiterQuote.outAmount);
@@ -123,6 +130,7 @@ export class SwapManager {
       platformFee: jupiterQuote.platformFee,
       providerQuote: jupiterQuote,
       providerQuoteTimestamp: Date.now(),
+      integrator: request.integrator ?? null,
     };
   }
 
@@ -210,7 +218,7 @@ export class SwapManager {
           const signature = await this.executeJupiterTransaction(
             swapResponse.swapTransaction,
             swapResponse.requestId,
-            userKeypair
+            [userKeypair]
           );
 
           lastJupiterError = null;
@@ -428,7 +436,6 @@ export class SwapManager {
     };
   }
 
-
   /**
    * Execute Jupiter swap using the complete transaction
    */
@@ -472,11 +479,19 @@ export class SwapManager {
     }
 
     if (!jupiterQuote) {
-      jupiterQuote = await this.getJupiterQuote({
+      const refreshRequest: JupiterQuoteRequest = {
         inputMint: quote.inputMint,
         outputMint: quote.outputMint,
         amount: quote.inputAmountRaw,
-      });
+      };
+      if (quote.integrator) {
+        refreshRequest.referralAccount = quote.integrator.referralAccount;
+        refreshRequest.referralFeeBps = quote.integrator.referralFeeBps;
+        refreshRequest.payer = quote.integrator.payer;
+        refreshRequest.closeAuthority = quote.integrator.closeAuthority;
+      }
+
+      jupiterQuote = await this.getJupiterQuote(refreshRequest);
     }
 
     const swapResponse = await this.jupiterClient.getSwapTransaction({
@@ -485,10 +500,15 @@ export class SwapManager {
     });
 
     // Execute the Jupiter transaction directly
+    const needsAdminSigner = quote.integrator?.payerKind === "admin";
+    const signers = needsAdminSigner
+      ? [userKeypair, this.wallet.getAdminKeypair()]
+      : [userKeypair];
+
     return await this.executeJupiterTransaction(
       swapResponse.swapTransaction,
       swapResponse.requestId,
-      userKeypair
+      signers
     );
   }
 
@@ -585,13 +605,13 @@ export class SwapManager {
   private async executeJupiterTransaction(
     base64Transaction: string,
     requestId: string,
-    userKeypair: Keypair
+    signers: Keypair[]
   ): Promise<string> {
     try {
       const transactionBuffer = Buffer.from(base64Transaction, "base64");
       const versionedTx = VersionedTransaction.deserialize(transactionBuffer);
 
-      versionedTx.sign([userKeypair]);
+      versionedTx.sign(signers);
 
       const signedTransaction = Buffer.from(versionedTx.serialize()).toString(
         "base64"
@@ -622,5 +642,4 @@ export class SwapManager {
       );
     }
   }
-
 }
