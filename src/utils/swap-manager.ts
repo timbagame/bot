@@ -497,6 +497,10 @@ export class SwapManager {
     const swapResponse = await this.jupiterClient.getSwapTransaction({
       userPublicKey: userKeypair.publicKey.toString(),
       quoteResponse: jupiterQuote,
+      referralAccount: quote.integrator?.referralAccount,
+      referralFeeBps: quote.integrator?.referralFeeBps,
+      payer: quote.integrator?.payer,
+      closeAuthority: quote.integrator?.closeAuthority,
     });
 
     // Execute the Jupiter transaction directly

@@ -63,6 +63,10 @@ export interface JupiterSwapRequest {
   userPublicKey: string;
   quoteResponse: JupiterQuoteResponse;
   amountOverride?: string;
+  referralAccount?: string;
+  referralFeeBps?: number;
+  payer?: string;
+  closeAuthority?: string;
 }
 
 export interface JupiterSwapResponse {
@@ -274,6 +278,10 @@ export class JupiterClient {
       outputMint: request.outputMint,
       amount: request.amount,
       swapMode: request.swapMode,
+      referralAccount: request.referralAccount,
+      referralFeeBps: request.referralFeeBps,
+      payer: request.payer,
+      closeAuthority: request.closeAuthority,
     });
     return normalized;
   }
@@ -297,6 +305,10 @@ export class JupiterClient {
       amount,
       swapMode: (quoteResponse.swapMode as "ExactIn" | "ExactOut") ?? "ExactIn",
       taker: userPublicKey,
+      referralAccount: request.referralAccount,
+      referralFeeBps: request.referralFeeBps,
+      payer: request.payer,
+      closeAuthority: request.closeAuthority,
     });
 
     if (!order.transaction) {
