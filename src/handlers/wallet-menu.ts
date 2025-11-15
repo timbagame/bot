@@ -1,6 +1,11 @@
 import type { Bot } from "grammy";
 
-import { WSOL_MINT, getStartVideoId, USER_WALLET_RPC_MAX_CALLS } from "../utils/constants";
+import {
+  WSOL_MINT,
+  getStartVideoId,
+  USER_WALLET_RPC_MAX_CALLS,
+  WALLET_RPC_CACHE_TTL_MS,
+} from "../utils/constants";
 import {
   buildWalletCaption,
   buildWalletActionMenuForUser,
@@ -112,6 +117,10 @@ export const createWalletMenuModule = (
     1,
     rpcRateLimiter.maxRequests ?? USER_WALLET_RPC_MAX_CALLS
   );
+  const walletSnapshotCache = new Map<
+    string,
+    { expiresAt: number; snapshot: WalletBalancesSnapshot }
+  >();
 
   const testApprovedTokenOverrides = new Map<
     string,
@@ -167,6 +176,13 @@ export const createWalletMenuModule = (
   const getCachedWalletData = async (
     telegramId: bigint
   ): Promise<WalletBalancesSnapshot> => {
+    const cacheKey = telegramId.toString();
+    const now = Date.now();
+    const cachedSnapshot = walletSnapshotCache.get(cacheKey);
+    if (cachedSnapshot && cachedSnapshot.expiresAt > now) {
+      return cachedSnapshot.snapshot;
+    }
+
     enforceWalletBudget(telegramId);
 
     const tokenManager = getTokenManager();
@@ -197,13 +213,18 @@ export const createWalletMenuModule = (
       const wsolToken = tokenBalances.find((token) => token.mint === WSOL_MINT);
       const wsolBalance = wsolToken?.balance ?? 0;
 
-      return {
+      const snapshot: WalletBalancesSnapshot = {
         solBalance: nativeSolBalance,
         nativeSolBalance,
         wsolBalance,
         tokenBalances,
         approvedTokens,
       };
+      walletSnapshotCache.set(cacheKey, {
+        snapshot,
+        expiresAt: now + WALLET_RPC_CACHE_TTL_MS,
+      });
+      return snapshot;
     } catch (error) {
       if (allowStaleOnError) {
         const fallbackNative =
@@ -229,13 +250,18 @@ export const createWalletMenuModule = (
           );
           const wsolBalance = wsolToken?.balance ?? 0;
 
-          return {
+          const snapshot: WalletBalancesSnapshot = {
             solBalance: resolvedNative,
             nativeSolBalance: resolvedNative,
             wsolBalance,
             tokenBalances: resolvedTokens,
             approvedTokens,
           };
+          walletSnapshotCache.set(cacheKey, {
+            snapshot,
+            expiresAt: now + WALLET_RPC_CACHE_TTL_MS,
+          });
+          return snapshot;
         }
       }
 
@@ -245,6 +271,7 @@ export const createWalletMenuModule = (
 
   const clearWalletCache = (telegramId: bigint) => {
     wallet.clearCachedWalletData(telegramId);
+    walletSnapshotCache.delete(telegramId.toString());
     testApprovedTokenOverrides.delete(telegramId.toString());
     console.log(`🗑️ Cleared wallet cache for user: ${telegramId}`);
   };
