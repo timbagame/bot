@@ -229,11 +229,15 @@ export class JupiterClient {
     if (params.closeAuthority) {
       url.searchParams.set("closeAuthority", params.closeAuthority);
     }
+    if (params.referralAccount) {
+      console.debug("Jupiter order URL:", url.toString());
+    }
     return url;
   }
 
   private async fetchOrder(
-    params: JupiterOrderParams
+    params: JupiterOrderParams,
+    allowReferralFallback = true
   ): Promise<JupiterOrderResult> {
     const url = this.buildOrderParams(params);
 
@@ -247,6 +251,24 @@ export class JupiterClient {
 
       if (!response.ok) {
         const errorText = await response.text();
+        if (
+          allowReferralFallback &&
+          params.referralAccount &&
+          errorText.includes("Failed to get quotes")
+        ) {
+          console.warn(
+            "Integrator order failed, retrying without referral params",
+            { url: url.toString(), errorText }
+          );
+          const fallbackParams: JupiterOrderParams = {
+            inputMint: params.inputMint,
+            outputMint: params.outputMint,
+            amount: params.amount,
+            swapMode: params.swapMode,
+            taker: params.taker,
+          };
+          return this.fetchOrder(fallbackParams, false);
+        }
         throw new Error(
           `Jupiter order failed: ${response.status} ${response.statusText} - ${errorText}`
         );
