@@ -223,16 +223,18 @@ export function requireTokenByMint(
   return token;
 }
 
+const REFERRAL_ACCOUNT = "GPBNTRmo26MRoaLSvRXwhWaQZhYjwVWgEkgwRZVU6x9U";
+
 const REFERRAL_TOKEN_ENTRIES: ReferralTokenConfigEntry[] = [
-  // Add entries here for tokens you want to collect referral fees on.
-  // Example:
-  // {
-  //   mint: WSOL_MINT,
-  //   referralAccount: "Dkiqs...",
-  //   adminPayer: "BotAdminPubkey",
-  //   adminCloseAuthority: "BotAdminPubkey",
-  //   maxExtraFeeBps: 150,
-  // },
+  { mint: WSOL_MINT, referralAccount: REFERRAL_ACCOUNT },
+  { mint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump", referralAccount: REFERRAL_ACCOUNT },
+  { mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", referralAccount: REFERRAL_ACCOUNT },
+  { mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", referralAccount: REFERRAL_ACCOUNT },
+  { mint: "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh", referralAccount: REFERRAL_ACCOUNT },
+  { mint: "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", referralAccount: REFERRAL_ACCOUNT },
+  { mint: "A6rSPi9JmJgVkW6BatsA6MjFYLseizPM2Fnt92coFjf4", referralAccount: REFERRAL_ACCOUNT },
+  { mint: "FkBF9u1upwEMUPxnXjcydxxVSxgr8f3k1YXbz7G7bmtA", referralAccount: REFERRAL_ACCOUNT },
+  { mint: "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC", referralAccount: REFERRAL_ACCOUNT },
 ];
 
 const REFERRAL_CONFIG_MAP = new Map<string, ReferralTokenConfigEntry>();
@@ -248,4 +250,8 @@ export function getReferralConfigForMint(
 ): ReferralTokenConfigEntry | undefined {
   if (!mint) return undefined;
   return REFERRAL_CONFIG_MAP.get(mint.trim());
+}
+
+export function getReferralTokenEntries(): ReferralTokenConfigEntry[] {
+  return REFERRAL_TOKEN_ENTRIES;
 }

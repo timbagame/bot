@@ -6,6 +6,7 @@ import {
   SystemProgram,
   Transaction,
   TransactionInstruction,
+  sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import type { AccountInfo } from "@solana/web3.js";
 import {
@@ -33,6 +34,11 @@ import {
 } from "./utils/keypairs";
 import { createAnchorContext } from "./utils/anchor-context";
 import { readBigIntEnv } from "./utils/env";
+import { Buffer } from "buffer";
+
+const REFERRAL_TOKEN_ENTRIES = getReferralTokenEntries();
+import { ReferralProvider } from "@jup-ag/referral-sdk";
+import { getReferralTokenEntries } from "../src/utils/token-registry";
 
 // ================================
 // CONFIGURATION
@@ -155,6 +161,63 @@ type NewTokenInitializationResult = BaseTokenInitializationResult & {
 type TokenInitializationResult =
   | ExistingTokenInitializationResult
   | NewTokenInitializationResult;
+
+const buildReferralProvider = (connection: Connection): ReferralProvider =>
+  new ReferralProvider(connection);
+
+const ensureReferralTokenAccounts = async (
+  connection: Connection,
+  adminKeypair: Keypair
+) => {
+  if (REFERRAL_TOKEN_ENTRIES.length === 0) {
+    console.log("🧾 No referral token entries configured.");
+    return;
+  }
+
+  const provider = buildReferralProvider(connection);
+  console.log(
+    `🧾 Ensuring ${REFERRAL_TOKEN_ENTRIES.length} referral token account(s)`
+  );
+
+  for (const entry of REFERRAL_TOKEN_ENTRIES) {
+    try {
+      const mint = new PublicKey(entry.mint);
+      const referralAccount = new PublicKey(entry.referralAccount);
+      const transaction = await provider.initializeReferralTokenAccountV2({
+        payerPubKey: adminKeypair.publicKey,
+        referralAccountPubKey: referralAccount,
+        mint,
+      });
+
+      const accountInfo = await connection.getAccountInfo(
+        transaction.tokenAccount
+      );
+      if (accountInfo) {
+        console.log(
+          `✨ Referral token account already exists for ${entry.mint}: ${transaction.tokenAccount.toBase58()}`
+        );
+        continue;
+      }
+
+      const signature = await sendAndConfirmTransaction(
+        connection,
+        transaction.tx,
+        [adminKeypair]
+      );
+      console.log(
+        `✅ Created referral token account for ${entry.mint}: ${transaction.tokenAccount.toBase58()} (tx: ${signature})`
+      );
+    } catch (error: any) {
+      if (typeof error.message === "string" && error.message.includes("already in use")) {
+        continue;
+      }
+      console.warn(
+        `⚠️ Failed to initialize referral token account for ${entry.mint}:`,
+        error
+      );
+    }
+  }
+};
 
 // ================================
 // UTILITY FUNCTIONS
@@ -657,6 +720,8 @@ async function initializeGameToken() {
   // Load admin keypair
   const adminKeypair = loadKeypairFromPath(CONFIG.ADMIN_KEYPAIR_PATH);
   console.log(`🔑 Admin keypair loaded: ${adminKeypair.publicKey.toBase58()}`);
+
+  await ensureReferralTokenAccounts(connection, adminKeypair);
 
   const oracleOperatorKeypair = resolveOracleOperatorKeypair(adminKeypair);
 
