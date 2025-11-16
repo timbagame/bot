@@ -1,15 +1,5 @@
-import {
-  JUPITER_MIN_SOL_BALANCE_LAMPORTS,
-  LAMPORTS_PER_SOL,
-  WSOL_MINT,
-} from "./constants";
-import {
-  DEFAULT_MAX_EXTRA_FEE_BPS,
-  DEFAULT_REFERRAL_BASE_FEE_BPS,
-  MAX_REFERRAL_FEE_BPS,
-  getReferralConfigForMint,
-} from "./referral-config";
-import type { ReferralTokenConfigEntry } from "./referral-config";
+import { JUPITER_MIN_SOL_BALANCE_LAMPORTS, LAMPORTS_PER_SOL, WSOL_MINT } from "./constants";
+import { getReferralConfigForMint, type ReferralTokenConfigEntry } from "./token-registry";
 import { resolveTokenPriceUSD } from "./prices";
 
 export type IntegratorPayerKind = "user" | "admin";
@@ -32,6 +22,10 @@ export interface IntegratorFeeContext {
   availableSolLamports: number;
   solFeeBufferLamports?: number;
 }
+
+const DEFAULT_REFERRAL_BASE_FEE_BPS = 85;
+const MAX_REFERRAL_FEE_BPS = 255;
+const DEFAULT_MAX_EXTRA_FEE_BPS = 100;
 
 const clampBps = (value: number): number =>
   Math.max(50, Math.min(MAX_REFERRAL_FEE_BPS, Math.round(value)));

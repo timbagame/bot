@@ -7,6 +7,15 @@ export type BuiltinTokenMetadata = TokenConfig & {
   isNativeSol?: boolean;
 };
 
+export interface ReferralTokenConfigEntry {
+  mint: string;
+  referralAccount: string;
+  baseFeeBps?: number;
+  adminPayer?: string;
+  adminCloseAuthority?: string;
+  maxExtraFeeBps?: number;
+}
+
 export const WSOL_MINT = "So11111111111111111111111111111111111111112";
 
 const BUILTIN_TOKEN_METADATA: BuiltinTokenMetadata[] = [
@@ -212,4 +221,31 @@ export function requireTokenByMint(
     );
   }
   return token;
+}
+
+const REFERRAL_TOKEN_ENTRIES: ReferralTokenConfigEntry[] = [
+  // Add entries here for tokens you want to collect referral fees on.
+  // Example:
+  // {
+  //   mint: WSOL_MINT,
+  //   referralAccount: "Dkiqs...",
+  //   adminPayer: "BotAdminPubkey",
+  //   adminCloseAuthority: "BotAdminPubkey",
+  //   maxExtraFeeBps: 150,
+  // },
+];
+
+const REFERRAL_CONFIG_MAP = new Map<string, ReferralTokenConfigEntry>();
+
+for (const entry of REFERRAL_TOKEN_ENTRIES) {
+  const normalized = entry.mint.trim();
+  if (!normalized) continue;
+  REFERRAL_CONFIG_MAP.set(normalized, entry);
+}
+
+export function getReferralConfigForMint(
+  mint?: string | null
+): ReferralTokenConfigEntry | undefined {
+  if (!mint) return undefined;
+  return REFERRAL_CONFIG_MAP.get(mint.trim());
 }
