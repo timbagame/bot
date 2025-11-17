@@ -93,7 +93,7 @@ interface JupiterOrderParams {
   closeAuthority?: string;
 }
 
-interface JupiterUltraOrderResponse {
+export interface JupiterUltraOrderResponse {
   mode: string;
   inputMint: string;
   outputMint: string;
@@ -240,7 +240,11 @@ export class JupiterClient {
     params: JupiterOrderParams,
     allowReferralFallback = true
   ): Promise<JupiterOrderResult> {
-    const url = this.buildOrderParams(params);
+    const effectiveParams: JupiterOrderParams = { ...params };
+    if (!effectiveParams.taker && effectiveParams.payer) {
+      effectiveParams.taker = effectiveParams.payer;
+    }
+    const url = this.buildOrderParams(effectiveParams);
 
     try {
       const response = await this.fetchFn(url.toString(), {
@@ -262,11 +266,11 @@ export class JupiterClient {
             { url: url.toString(), errorText }
           );
           const fallbackParams: JupiterOrderParams = {
-            inputMint: params.inputMint,
-            outputMint: params.outputMint,
-            amount: params.amount,
-            swapMode: params.swapMode,
-            taker: params.taker,
+            inputMint: effectiveParams.inputMint,
+            outputMint: effectiveParams.outputMint,
+            amount: effectiveParams.amount,
+            swapMode: effectiveParams.swapMode,
+            taker: effectiveParams.taker,
           };
           return this.fetchOrder(fallbackParams, false);
         }

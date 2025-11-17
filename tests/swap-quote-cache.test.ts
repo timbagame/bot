@@ -68,4 +68,53 @@ describe("SwapQuoteCache", () => {
     expect(loaderCalls).toBe(2);
     expect(resolved.outAmount).toBe("3000");
   });
+ 
+  test("keeps referral and non-referral quotes separate", async () => {
+    const cache = new SwapQuoteCache({ ttlMs: 5_000 });
+    const baseParams = makeJupiterParams({ amount: "1500" });
+    const referralParams = {
+      ...baseParams,
+      referralAccount: "RefAccount",
+      referralFeeBps: 90,
+      payer: "PayerKey",
+      closeAuthority: "CloseKey",
+    };
+
+    let loaderCalls = 0;
+    const loader = async () => {
+      loaderCalls += 1;
+      return makeJupiterQuote(baseParams);
+    };
+
+    await cache.getJupiterQuote(baseParams, loader);
+    await cache.getJupiterQuote(referralParams, loader);
+
+    expect(loaderCalls).toBe(2);
+  });
+
+  test("deduplicates concurrent referral quote requests", async () => {
+    const cache = new SwapQuoteCache({ ttlMs: 5_000 });
+    const params = makeJupiterParams({
+      amount: "2000",
+      referralAccount: "AnotherRef",
+      referralFeeBps: 70,
+      payer: "PayerKey2",
+      closeAuthority: "CloseKey2",
+    });
+
+    let loaderCalls = 0;
+    const loader = async () => {
+      loaderCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return makeJupiterQuote(params);
+    };
+
+    const [first, second] = await Promise.all([
+      cache.getJupiterQuote(params, loader),
+      cache.getJupiterQuote(params, loader),
+    ]);
+
+    expect(loaderCalls).toBe(1);
+    expect(first).toEqual(second);
+  });
 });

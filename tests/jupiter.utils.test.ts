@@ -1,10 +1,14 @@
-import { expect, test, describe } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import {
   getJupiterMint,
   isPriceImpactTooHigh,
   validateSlippage,
 } from "../src/utils/jupiter";
-import { JupiterClient, type JupiterQuoteResponse } from "../src/utils/jupiter";
+import {
+  JupiterClient,
+  type JupiterQuoteResponse,
+  type JupiterUltraOrderResponse,
+} from "../src/utils/jupiter";
 
 describe("jupiter utils", () => {
   test("getJupiterMint maps SOL to WSOL mint", () => {
@@ -72,5 +76,170 @@ describe("JupiterClient helpers", () => {
     expect(msg).toContain("<b>You pay:</b> 1.000000 SOL");
     expect(msg).toContain("<b>You receive:</b> 1.000000 USDC");
     expect(msg).toContain("<b>Route:</b> JupiterAMM");
+  });
+});
+
+describe("JupiterClient referral URL params", () => {
+  const inputMint = "So11111111111111111111111111111111111111112";
+  const outputMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+  const amount = "1000000";
+  const referralAccount = "GPBNTRmo26MRoaLSvRXwhWaQZhYjwVWgEkgwRZVU6x9U";
+  const payer = "6HqDqk25HSbzsk1HJ8PMzhzD5ZNY9LqZhpGwbCLyzvC6";
+
+  let savedConsoleDebug: typeof console.debug;
+
+  beforeEach(() => {
+    savedConsoleDebug = console.debug;
+    console.debug = () => {};
+  });
+
+  afterEach(() => {
+    console.debug = savedConsoleDebug;
+  });
+
+  const createOrderResponse = (
+    overrides: Partial<JupiterUltraOrderResponse> = {}
+  ) => ({
+    mode: "ultra",
+    inputMint,
+    outputMint,
+    inAmount: amount,
+    outAmount: "100",
+    otherAmountThreshold: "0",
+    swapMode: "ExactIn",
+    slippageBps: 100,
+    priceImpactPct: "0",
+    routePlan: [
+      {
+        swapInfo: {
+          ammKey: "AMM",
+          label: "Jupiter",
+          inputMint,
+          outputMint,
+          inAmount: amount,
+          outAmount: "100",
+          feeAmount: "0",
+          feeMint: inputMint,
+        },
+        percent: 100,
+      },
+    ],
+    transaction: "AAAA",
+    requestId: "req-portal",
+    ...overrides,
+  });
+
+  const createStubFetch =
+    (
+      capture: { url?: string }
+    ): ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) =>
+    async (input) => {
+      capture.url = typeof input === "string" ? input : input.toString();
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => createOrderResponse(),
+        text: async () => JSON.stringify(createOrderResponse()),
+      } as unknown as Response;
+    };
+
+  test("falls back to payer for taker when missing", async () => {
+    const capture: { url?: string } = {};
+    const client = new JupiterClient(
+      "https://lite-api.jup.ag",
+      createStubFetch(capture)
+    );
+
+    await client.getQuote({
+      inputMint,
+      outputMint,
+      amount,
+      referralAccount,
+      referralFeeBps: 85,
+      payer,
+    });
+
+    expect(capture.url).toContain(`taker=${payer}`);
+  });
+
+  test("keeps explicit taker instead of overriding with payer", async () => {
+    const capture: { url?: string } = {};
+    const explicitTaker = "2DxM4Qf7RZwzE9HyfYDp2mjNgS8RX5UCb7Yiz2ZGsY2Q";
+    const client = new JupiterClient(
+      "https://lite-api.jup.ag",
+      createStubFetch(capture)
+    );
+
+    await client.getQuote({
+      inputMint,
+      outputMint,
+      amount,
+      referralAccount,
+      referralFeeBps: 85,
+      payer,
+      taker: explicitTaker,
+    });
+
+    expect(capture.url).toContain(`taker=${explicitTaker}`);
+    expect(capture.url).not.toContain(`taker=${payer}`);
+  });
+});
+
+describe("JupiterClient ExactOut handling", () => {
+  test("uses quote outAmount when swapMode is ExactOut", async () => {
+    const capture: { url?: string } = {};
+    const client = new JupiterClient(
+      "https://lite-api.jup.ag",
+      async (input) => {
+        capture.url = typeof input === "string" ? input : input.toString();
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () =>
+            ({
+              mode: "ultra",
+              inputMint: "So11111111111111111111111111111111111111112",
+              outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+              inAmount: "5000",
+              outAmount: "1234",
+              otherAmountThreshold: "0",
+              swapMode: "ExactOut",
+              slippageBps: 100,
+              priceImpactPct: "0",
+              routePlan: [],
+              transaction: "AAAA",
+              requestId: "req-exactout",
+            } as JupiterUltraOrderResponse),
+          text: async () =>
+            JSON.stringify({
+              mode: "ultra",
+              inputMint: "So11111111111111111111111111111111111111112",
+              outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+              amount: "1234",
+            }),
+        } as unknown as Response;
+      }
+    );
+
+    await client.getSwapTransaction({
+      userPublicKey: "UserTaker",
+      quoteResponse: {
+        inputMint: "So11111111111111111111111111111111111111112",
+        outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        inAmount: "5000",
+        outAmount: "1234",
+        otherAmountThreshold: "0",
+        swapMode: "ExactOut",
+        slippageBps: 100,
+        priceImpactPct: "0",
+        routePlan: [],
+        totalTime: 0,
+        platformFee: null,
+      },
+    });
+
+    expect(capture.url).toContain("amount=1234");
   });
 });

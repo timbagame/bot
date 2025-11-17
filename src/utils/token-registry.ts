@@ -252,6 +252,19 @@ export function getReferralConfigForMint(
   return REFERRAL_CONFIG_MAP.get(mint.trim());
 }
 
+export const __test_registerReferralEntry = (entry: ReferralTokenConfigEntry) => {
+  const normalized = entry.mint.trim();
+  if (!normalized) return;
+  REFERRAL_CONFIG_MAP.set(normalized, entry);
+};
+
+export const __test_resetReferralEntries = () => {
+  REFERRAL_CONFIG_MAP.clear();
+  for (const entry of REFERRAL_TOKEN_ENTRIES) {
+    REFERRAL_CONFIG_MAP.set(entry.mint.trim(), entry);
+  }
+};
+
 export function getReferralTokenEntries(): ReferralTokenConfigEntry[] {
   return REFERRAL_TOKEN_ENTRIES;
 }
