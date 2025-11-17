@@ -456,10 +456,8 @@ export class JupiterClient {
     message += `🎯 <b>Slippage:</b> ${slippage}%\n`;
 
     if (feeBps !== null) {
-      const feeAmount = (inputAmount * feeBps) / 10_000;
-      message += `💸 <b>Fee:</b> ${feeAmount.toFixed(
-        6
-      )} ${safeInputTicker} (${feeBps} bps)\n`;
+      const percent = (feeBps / 100).toFixed(2);
+      message += `💸 <b>Fee:</b> ${percent}%\n`;
     }
 
     if (quote.platformFee) {
