@@ -10,6 +10,8 @@ export interface IntegratorSwapParams {
   payer: string;
   closeAuthority: string;
   payerKind: IntegratorPayerKind;
+  adminBalanceLamports?: number;
+  adminRequiredLamports?: number;
 }
 
 export interface IntegratorFeeContext {

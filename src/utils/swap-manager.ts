@@ -525,11 +525,25 @@ export class SwapManager {
       ? [userKeypair, this.wallet.getAdminKeypair()]
       : [userKeypair];
 
-    return await this.executeJupiterTransaction(
-      swapResponse.swapTransaction,
-      swapResponse.requestId,
-      signers
-    );
+    try {
+      return await this.executeJupiterTransaction(
+        swapResponse.swapTransaction,
+        swapResponse.requestId,
+        signers
+      );
+    } catch (error: any) {
+      if (
+        typeof error.message === "string" &&
+        error.message.includes("insufficient funds for rent")
+      ) {
+        console.error("Jupiter execution failed for rent shortage", {
+          error: error.message,
+          integrator: quote.integrator,
+          providerQuote: jupiterQuote,
+        });
+      }
+      throw error;
+    }
   }
 
   /**

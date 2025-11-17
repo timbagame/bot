@@ -1076,6 +1076,8 @@ const prepareTokenTradeQuote = async ({
         payer: adminKey,
         closeAuthority: adminKey,
         payerKind: "admin",
+        adminBalanceLamports: adminBalance,
+        adminRequiredLamports: requiredLamports,
       };
       // Add a surcharge to reimburse the admin payer based on missing SOL buffer.
       try {
