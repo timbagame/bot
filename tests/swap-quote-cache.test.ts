@@ -117,4 +117,36 @@ describe("SwapQuoteCache", () => {
     expect(loaderCalls).toBe(1);
     expect(first).toEqual(second);
   });
+
+  test("B-007: admin and user payer races do not share same quote", async () => {
+    const cache = new SwapQuoteCache({ ttlMs: 5_000 });
+    const base = makeJupiterParams({ amount: "3000" });
+    const adminParams = {
+      ...base,
+      payer: "Admin",
+    };
+    const userParams = {
+      ...base,
+      payer: "User",
+    };
+
+    let loaders = 0;
+    const adminLoader = async () => {
+      loaders += 1;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return makeJupiterQuote(adminParams, { inAmount: "1" });
+    };
+    const userLoader = async () => {
+      loaders += 1;
+      return makeJupiterQuote(userParams, { inAmount: "2" });
+    };
+
+    const [adminQuote, userQuote] = await Promise.all([
+      cache.getJupiterQuote(adminParams, adminLoader),
+      cache.getJupiterQuote(userParams, userLoader),
+    ]);
+
+    expect(loaders).toBe(2);
+    expect(adminQuote.inAmount).not.toBe(userQuote.inAmount);
+  });
 });

@@ -266,3 +266,34 @@ describe("JupiterClient fee display", () => {
     expect(msg).toContain("1.20%");
   });
 });
+
+describe("JupiterClient error handling", () => {
+  test("propagates gasless minimum error code 3 clearly", async () => {
+    const client = new JupiterClient(
+      "https://lite-api.jup.ag",
+      async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({
+          errorCode: 3,
+          errorMessage: "Minimum $10 for gasless",
+        }),
+        text: async () =>
+          JSON.stringify({
+            errorCode: 3,
+            errorMessage: "Minimum $10 for gasless",
+          }),
+      } as unknown as Response)
+    );
+
+    await expect(
+      client.getQuote({
+        inputMint: "So11111111111111111111111111111111111111112",
+        outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        amount: "1000000",
+        taker: "Taker",
+      })
+    ).rejects.toThrow("Minimum $10 for gasless");
+  });
+});
