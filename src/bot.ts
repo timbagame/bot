@@ -710,6 +710,32 @@ type TradeConfirmationSummary = ReturnType<
   typeof formatTradeConfirmationSummary
 >;
 
+// ================================
+// TEST HELPERS
+// ================================
+
+type ReferralEntryLite = {
+  adminPayer?: string;
+  adminCloseAuthority?: string;
+};
+
+const shouldSkipSolFeeBuffer = (
+  inputAsset: ResolvedTradeAsset,
+  amountInput: string,
+  referralConfig?: ReferralEntryLite | null
+): boolean => {
+  if (inputAsset.ticker !== "SOL") return false;
+
+  const hasAdminReferralPayer = Boolean(
+    referralConfig?.adminPayer && referralConfig?.adminCloseAuthority
+  );
+  const wantsMax =
+    typeof amountInput === "string" &&
+    amountInput.trim().toLowerCase() === "max";
+
+  return hasAdminReferralPayer || wantsMax;
+};
+
 const buildSwapConfirmationKeyboard = ({
   txId,
   cancelCallback,
@@ -887,14 +913,7 @@ const prepareTokenTradeQuote = async ({
   // If SOL referral and we know an admin payer will cover gas (either registry says so or user picked MAX which we will force to admin payer), drop the buffer.
   if (shouldApplySolFeeBuffer && inputAsset.ticker === "SOL") {
     const referralConfig = getReferralConfigForMint(inputAsset.mint);
-    const hasAdminReferralPayer = Boolean(
-      referralConfig?.adminPayer && referralConfig?.adminCloseAuthority
-    );
-    const wantsMax =
-      typeof amountInput === "string" &&
-      amountInput.trim().toLowerCase() === "max";
-
-    if (hasAdminReferralPayer || wantsMax) {
+    if (shouldSkipSolFeeBuffer(inputAsset, amountInput, referralConfig)) {
       shouldApplySolFeeBuffer = false;
     }
   }
@@ -1182,6 +1201,7 @@ export const __test_presentSpendAmount = presentSpendAmount;
 export const __test_buildQuickAmountKeyboard = buildQuickAmountKeyboard;
 export const __test_formatTradeConfirmationSummary =
   formatTradeConfirmationSummary;
+export const __test_shouldSkipSolFeeBuffer = shouldSkipSolFeeBuffer;
 
 /**
  * Update game message with proper error handling using simplified interface
