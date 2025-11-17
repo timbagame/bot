@@ -532,16 +532,26 @@ export class SwapManager {
         signers
       );
     } catch (error: any) {
+      const contextLog = {
+        error: error.message,
+        integrator: quote.integrator,
+        providerQuote: jupiterQuote,
+        jupiterRequestId: swapResponse.requestId,
+        jupiterQuoteId: swapResponse.quoteId,
+        router: swapResponse.router,
+        adminBalance: quote.integrator?.adminBalanceLamports,
+        adminRequired: quote.integrator?.adminRequiredLamports,
+      };
+
       if (
         typeof error.message === "string" &&
         error.message.includes("insufficient funds for rent")
       ) {
-        console.error("Jupiter execution failed for rent shortage", {
-          error: error.message,
-          integrator: quote.integrator,
-          providerQuote: jupiterQuote,
-        });
+        console.error("Jupiter execution failed for rent shortage", contextLog);
+      } else {
+        console.error("Jupiter execution failed", contextLog);
       }
+
       throw error;
     }
   }
