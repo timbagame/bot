@@ -1010,6 +1010,31 @@ const prepareTokenTradeQuote = async ({
         closeAuthority: adminKey,
         payerKind: "admin",
       };
+      // Add a surcharge to reimburse the admin payer based on missing SOL buffer.
+      try {
+        const priceLookup = await resolveTokenPriceUSD({ isSol: true });
+        const solPrice = priceLookup?.price ?? 0;
+        if (solPrice > 0) {
+          const tradeUsd =
+            (amountResolution.rawAmount / LAMPORTS_PER_SOL) * solPrice;
+          const deficitLamports =
+            solFeeBufferLamports ?? JUPITER_MIN_SOL_BALANCE_LAMPORTS;
+          const deficitUsd = (deficitLamports / LAMPORTS_PER_SOL) * solPrice;
+          if (tradeUsd > 0 && deficitUsd > 0) {
+            const extraBps = Math.ceil((deficitUsd / tradeUsd) * 10_000);
+            const baseFee = integratorConfig.referralFeeBps ?? 85;
+            integratorConfig.referralFeeBps = Math.min(
+              255,
+              Math.max(50, baseFee + extraBps)
+            );
+          }
+        }
+      } catch (surchargeError) {
+        console.warn(
+          "Failed to compute admin payer surcharge, falling back to base referral fee",
+          surchargeError
+        );
+      }
     }
   }
 
