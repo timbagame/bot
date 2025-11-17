@@ -99,6 +99,7 @@ export class SwapManager {
       inputMint,
       outputMint,
       amount,
+      taker: request.userKeypair.publicKey.toBase58(),
     };
 
     if (request.integrator) {
@@ -195,6 +196,7 @@ export class SwapManager {
             outputMint: SOL_MINT,
             amount: target.toString(),
             swapMode: "ExactOut",
+            taker: userKeypair.publicKey.toBase58(),
           });
 
           const requiredInput = BigInt(quote.inAmount);
@@ -483,6 +485,7 @@ export class SwapManager {
         inputMint: quote.inputMint,
         outputMint: quote.outputMint,
         amount: quote.inputAmountRaw,
+        taker: userKeypair.publicKey.toBase58(),
       };
       if (quote.integrator) {
         refreshRequest.referralAccount = quote.integrator.referralAccount;

@@ -11,6 +11,7 @@ export interface JupiterQuoteRequest {
   inputMint: string;
   outputMint: string;
   amount: string;
+  taker?: string;
   platformFeeBps?: number;
   maxAccounts?: number;
   onlyDirectRoutes?: boolean;
