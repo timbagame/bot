@@ -301,6 +301,7 @@ export class JupiterClient {
       outputMint: request.outputMint,
       amount: request.amount,
       swapMode: request.swapMode,
+      taker: request.taker,
       referralAccount: request.referralAccount,
       referralFeeBps: request.referralFeeBps,
       payer: request.payer,
