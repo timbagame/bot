@@ -23,6 +23,7 @@ import type {
   SwapQuote,
   SwapRequest,
 } from "./swap/types";
+import type { IntegratorSwapParams } from "./integrator-fees";
 import { SwapQuoteCache } from "./swap/quote-cache";
 
 export type {
@@ -520,6 +521,14 @@ export class SwapManager {
     });
 
     // Execute the Jupiter transaction directly
+    if (integrator?.payerKind === "admin") {
+      await this.ensureAdminCanCoverRoute(
+        integrator,
+        jupiterQuote,
+        this.wallet.getAdminKeypair().publicKey
+      );
+    }
+
     const needsAdminSigner = integrator?.payerKind === "admin";
     const signers = needsAdminSigner
       ? [userKeypair, this.wallet.getAdminKeypair()]
@@ -687,6 +696,45 @@ export class SwapManager {
     } catch (error: any) {
       throw new Error(
         `Failed to execute Jupiter transaction: ${error?.message || error}`
+      );
+    }
+  }
+
+  private async ensureAdminCanCoverRoute(
+    integrator: IntegratorSwapParams | null | undefined,
+    quote: JupiterQuoteResponse,
+    adminPublicKey: PublicKey
+  ): Promise<void> {
+    if (integrator?.payerKind !== "admin") {
+      return;
+    }
+
+    const adminBalance = await this.wallet
+      .getConnection()
+      .getBalance(adminPublicKey);
+    const routeLamports =
+      (quote.rentFeeLamports ?? 0) +
+      (quote.prioritizationFeeLamports ?? 0) +
+      (quote.signatureFeeLamports ?? 0);
+    const requiredLamports =
+      (integrator.adminRequiredLamports ?? 0) + routeLamports;
+
+    integrator.adminRouteLamports = routeLamports;
+
+    console.log("Admin payer route check", {
+      adminBalance,
+      requiredLamports,
+      routeLamports,
+      routeRequestId: quote.requestId,
+    });
+
+    if (adminBalance < requiredLamports) {
+      throw new Error(
+        `Admin wallet (${this.wallet.formatSolBalance(
+          adminBalance
+        )}) cannot cover rent+priority (${this.wallet.formatSolBalance(
+          requiredLamports
+        )}) required by Jupiter route ${quote.requestId}`
       );
     }
   }

@@ -58,6 +58,9 @@ export interface JupiterQuoteResponse {
     amount: string;
     feeBps: number;
   } | null;
+  signatureFeeLamports?: number;
+  prioritizationFeeLamports?: number;
+  rentFeeLamports?: number;
   referralApplied?: boolean;
 }
 

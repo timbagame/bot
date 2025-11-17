@@ -12,6 +12,7 @@ export interface IntegratorSwapParams {
   payerKind: IntegratorPayerKind;
   adminBalanceLamports?: number;
   adminRequiredLamports?: number;
+  adminRouteLamports?: number;
 }
 
 export interface IntegratorFeeContext {
