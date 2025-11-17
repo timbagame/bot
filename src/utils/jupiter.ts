@@ -58,6 +58,7 @@ export interface JupiterQuoteResponse {
     amount: string;
     feeBps: number;
   } | null;
+  referralApplied?: boolean;
 }
 
 export interface JupiterSwapRequest {
@@ -129,6 +130,7 @@ export interface JupiterUltraOrderResponse {
 interface JupiterOrderResult {
   raw: JupiterUltraOrderResponse;
   normalized: JupiterQuoteResponse;
+  referralApplied: boolean;
 }
 
 interface JupiterExecuteRequest {
@@ -289,7 +291,13 @@ export class JupiterClient {
         throw new Error(`Jupiter order error${codeSuffix}: ${errorMessage}`);
       }
 
-      return { raw: data, normalized: this.normalizeQuote(data) };
+      const referralApplied = Boolean(effectiveParams.referralAccount);
+      const normalized = {
+        ...this.normalizeQuote(data),
+        referralApplied,
+      } satisfies JupiterQuoteResponse;
+
+      return { raw: data, normalized, referralApplied };
     } catch (error: any) {
       console.error("Error requesting Jupiter order:", error);
       throw new Error(`Failed to request Jupiter order: ${error.message}`);

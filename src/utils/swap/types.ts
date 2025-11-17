@@ -16,6 +16,7 @@ export interface SwapQuote {
   providerQuote?: JupiterQuoteResponse;
   providerQuoteTimestamp?: number;
   integrator?: IntegratorSwapParams | null;
+  integratorApplied?: boolean;
 }
 
 export interface SwapRequest {

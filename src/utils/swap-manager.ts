@@ -113,6 +113,9 @@ export class SwapManager {
     }
 
     const jupiterQuote = await this.getJupiterQuote(quoteRequest);
+    const integratorApplied = Boolean(
+      request.integrator && jupiterQuote.referralApplied
+    );
 
     const inAmount = parseFloat(jupiterQuote.inAmount);
     const outAmount = parseFloat(jupiterQuote.outAmount);
@@ -131,7 +134,8 @@ export class SwapManager {
       platformFee: jupiterQuote.platformFee,
       providerQuote: jupiterQuote,
       providerQuoteTimestamp: Date.now(),
-      integrator: request.integrator ?? null,
+      integrator: integratorApplied ? request.integrator ?? null : null,
+      integratorApplied,
     };
   }
 
@@ -470,6 +474,10 @@ export class SwapManager {
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
+    const cachedIntegrator = quote.integratorApplied
+      ? quote.integrator
+      : null;
+
     let jupiterQuote = quote.providerQuote;
     const now = Date.now();
     if (
@@ -487,27 +495,32 @@ export class SwapManager {
         amount: quote.inputAmountRaw,
         taker: userKeypair.publicKey.toBase58(),
       };
-      if (quote.integrator) {
-        refreshRequest.referralAccount = quote.integrator.referralAccount;
-        refreshRequest.referralFeeBps = quote.integrator.referralFeeBps;
-        refreshRequest.payer = quote.integrator.payer;
-        refreshRequest.closeAuthority = quote.integrator.closeAuthority;
+      if (cachedIntegrator) {
+        refreshRequest.referralAccount = cachedIntegrator.referralAccount;
+        refreshRequest.referralFeeBps = cachedIntegrator.referralFeeBps;
+        refreshRequest.payer = cachedIntegrator.payer;
+        refreshRequest.closeAuthority = cachedIntegrator.closeAuthority;
       }
 
       jupiterQuote = await this.getJupiterQuote(refreshRequest);
     }
 
+    const integratorApplied = Boolean(
+      cachedIntegrator && jupiterQuote?.referralApplied
+    );
+    const integrator = integratorApplied ? cachedIntegrator : null;
+
     const swapResponse = await this.jupiterClient.getSwapTransaction({
       userPublicKey: userKeypair.publicKey.toString(),
       quoteResponse: jupiterQuote,
-      referralAccount: quote.integrator?.referralAccount,
-      referralFeeBps: quote.integrator?.referralFeeBps,
-      payer: quote.integrator?.payer,
-      closeAuthority: quote.integrator?.closeAuthority,
+      referralAccount: integrator?.referralAccount,
+      referralFeeBps: integrator?.referralFeeBps,
+      payer: integrator?.payer,
+      closeAuthority: integrator?.closeAuthority,
     });
 
     // Execute the Jupiter transaction directly
-    const needsAdminSigner = quote.integrator?.payerKind === "admin";
+    const needsAdminSigner = integrator?.payerKind === "admin";
     const signers = needsAdminSigner
       ? [userKeypair, this.wallet.getAdminKeypair()]
       : [userKeypair];
