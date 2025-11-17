@@ -98,6 +98,7 @@ import {
 import { recentUpdateGuard } from "./utils/recent-update";
 import { resolveTokenPriceUSD } from "./utils/prices";
 import { resolveIntegratorSwapParams } from "./utils/integrator-fees";
+import { getReferralConfigForMint } from "./utils/token-registry";
 import { patchReplyBehavior } from "./utils/reply-patch";
 import { buildTransactionLinkMessage } from "./utils/network-detector";
 import { buildProcessingStatus } from "./utils/trade-ui";
@@ -872,6 +873,15 @@ const prepareTokenTradeQuote = async ({
 
   let shouldApplySolFeeBuffer =
     inputAsset.applySolFeeBuffer ?? inputAsset.ticker === "SOL";
+
+  // If the input mint has a referral config, allow gasless swaps without forcing a SOL buffer.
+  if (
+    shouldApplySolFeeBuffer &&
+    inputAsset.ticker === "SOL" &&
+    getReferralConfigForMint(inputAsset.mint)
+  ) {
+    shouldApplySolFeeBuffer = false;
+  }
 
   let solFeeBufferLamports: number | undefined;
   if (shouldApplySolFeeBuffer) {
