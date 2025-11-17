@@ -77,6 +77,38 @@ describe("Integrator fee calculations", () => {
     expect(spy).toHaveBeenCalled();
   });
 
+  test("applies extra referral fee to reimburse admin gas payer shortfall", async () => {
+    __test_registerReferralEntry({
+      mint: ADMIN_REF_MINT1,
+      referralAccount: REFERRAL_ACCOUNT,
+      adminPayer: "AdminPayer11111111111111111111111111111",
+      adminCloseAuthority:
+        "AdminCloseAuthority2222222222222222222222222222",
+      baseFeeBps: 85,
+    });
+
+    const priceSpy = vi
+      .spyOn(priceModule, "resolveTokenPriceUSD")
+      .mockResolvedValueOnce({ price: 1, identifier: "USDC" } as any)
+      .mockResolvedValueOnce({ price: 25, identifier: "SOL" } as any);
+
+    const result = await resolveIntegratorSwapParams({
+      inputMint: ADMIN_REF_MINT1,
+      outputMint: WSOL_MINT,
+      inputTicker: "USDC",
+      inputDecimals: 6,
+      inputAmountRaw: 1_000_000_000,
+      userPublicKey: "BufferlessUser",
+      availableSolLamports: 0,
+    });
+
+    expect(priceSpy).toHaveBeenCalledTimes(2);
+    expect(result).not.toBeNull();
+    expect(result?.payerKind).toBe("admin");
+    expect(result?.referralFeeBps).toBe(88);
+    expect(result?.payer).toBe("AdminPayer11111111111111111111111111111");
+  });
+
   test("returns admin payer and close authority when user lacks buffer", async () => {
     __test_registerReferralEntry({
       mint: ADMIN_REF_MINT2,
