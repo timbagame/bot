@@ -884,16 +884,17 @@ const prepareTokenTradeQuote = async ({
   let shouldApplySolFeeBuffer =
     inputAsset.applySolFeeBuffer ?? inputAsset.ticker === "SOL";
 
-  // If the input mint has a referral config with an admin payer, allow gasless swaps
-  // without forcing a SOL buffer. User-paid referral routes should still reserve SOL
-  // for transaction fees.
+  // If SOL referral and we know an admin payer will cover gas (either registry says so or user picked MAX which we will force to admin payer), drop the buffer.
   if (shouldApplySolFeeBuffer && inputAsset.ticker === "SOL") {
     const referralConfig = getReferralConfigForMint(inputAsset.mint);
     const hasAdminReferralPayer = Boolean(
       referralConfig?.adminPayer && referralConfig?.adminCloseAuthority
     );
+    const wantsMax =
+      typeof amountInput === "string" &&
+      amountInput.trim().toLowerCase() === "max";
 
-    if (hasAdminReferralPayer) {
+    if (hasAdminReferralPayer || wantsMax) {
       shouldApplySolFeeBuffer = false;
     }
   }
