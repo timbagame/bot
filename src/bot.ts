@@ -658,6 +658,13 @@ const formatTradeConfirmationSummary = ({
     quote.slippage !== undefined ? (quote.slippage as number) : 1
   );
 
+  const feeBps =
+    quote.providerQuote?.feeBps ?? quote.integrator?.referralFeeBps ?? 0;
+  const feeAmountValue =
+    feeBps && payAmountDecimal > 0
+      ? (payAmountDecimal * feeBps) / 10_000
+      : 0;
+
   const safePayDisplay = escapeHtml(payDisplay);
   const safePayToken = escapeHtml(payToken);
   const safeReceiveToken = escapeHtml(receiveToken);
@@ -680,6 +687,12 @@ const formatTradeConfirmationSummary = ({
     `<b>Provider:</b> ${safeProviderLabel}`,
     `<b>Slippage:</b> ${slippageText}`,
   ];
+
+  if (feeAmountValue > 0) {
+    lines.push(
+      `<b>Fee:</b> ${feeAmountValue.toFixed(6)} ${safePayToken} (${feeBps} bps)`
+    );
+  }
 
   if (safeContractAddress) {
     lines.push("", `🔗 <b>Contract:</b> <code>${safeContractAddress}</code>`);
