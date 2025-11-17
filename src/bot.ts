@@ -980,7 +980,7 @@ const prepareTokenTradeQuote = async ({
         : {}),
     });
 
-  const integratorConfig = await resolveIntegratorSwapParams({
+  let integratorConfig = await resolveIntegratorSwapParams({
     inputMint: inputAsset.mint,
     outputMint: outputAsset.mint,
     inputTicker: inputAsset.ticker,
@@ -990,6 +990,28 @@ const prepareTokenTradeQuote = async ({
     availableSolLamports: snapshot.solBalance,
     solFeeBufferLamports,
   });
+
+  // If swapping all SOL and the mint is referral-enabled, fall back to admin payer
+  // so the user can go gasless even when their own balance would hit zero.
+  if (
+    inputAsset.ticker === "SOL" &&
+    amountResolution.normalizedAmount === "max"
+  ) {
+    const referralConfig = getReferralConfigForMint(inputAsset.mint);
+    if (referralConfig) {
+      const adminKey = wallet.getAdminKeypair().publicKey.toBase58();
+      integratorConfig = {
+        referralAccount: referralConfig.referralAccount,
+        referralFeeBps:
+          integratorConfig?.referralFeeBps ??
+          referralConfig.baseFeeBps ??
+          85,
+        payer: adminKey,
+        closeAuthority: adminKey,
+        payerKind: "admin",
+      };
+    }
+  }
 
   const preparedContext: PreparedTradeQuoteContext = {
     input: inputAsset,
