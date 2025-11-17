@@ -1042,14 +1042,23 @@ const prepareTokenTradeQuote = async ({
         .getConnection()
         .getBalance(adminKeypair.publicKey);
       const rentReserveLamports = await getSolWrapRentReserveLamports();
+      const extraAtaLamports = rentReserveLamports; // approximate one more ATA
+      const priorityBufferLamports = Math.max(
+        200_000, // ~0.0002 SOL
+        Math.floor(JUPITER_MIN_SOL_BALANCE_LAMPORTS * 0.2)
+      );
       const requiredLamports = computeRequiredAdminLamports(
         JUPITER_MIN_SOL_BALANCE_LAMPORTS,
-        rentReserveLamports
+        rentReserveLamports,
+        extraAtaLamports,
+        priorityBufferLamports
       );
 
       if (adminBalance < requiredLamports) {
         throw new Error(
-          "Integrator gas payer is low on SOL. Top up the admin wallet to cover rent and fees."
+          `Integrator gas payer is low on SOL. Need at least ${wallet.formatSolBalance(
+            requiredLamports
+          )} in admin wallet to cover rent and fees.`
         );
       }
 

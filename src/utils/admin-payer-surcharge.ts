@@ -47,7 +47,14 @@ export function calculateAdminPayerFeeBps(
 
 export const computeRequiredAdminLamports = (
   minBalanceLamports: number,
-  rentReserveLamports: number
+  rentReserveLamports: number,
+  extraAtaLamports: number = 0,
+  priorityBufferLamports: number = 0
 ): number => {
-  return Math.max(0, minBalanceLamports) + Math.max(0, rentReserveLamports);
+  return (
+    Math.max(0, minBalanceLamports) +
+    Math.max(0, rentReserveLamports) +
+    Math.max(0, extraAtaLamports) +
+    Math.max(0, priorityBufferLamports)
+  );
 };

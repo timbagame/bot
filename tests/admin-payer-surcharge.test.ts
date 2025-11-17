@@ -47,8 +47,8 @@ describe("calculateAdminPayerFeeBps", () => {
     expect(result).toBe(255); // clamped
   });
 
-  test("computeRequiredAdminLamports sums min balance and rent reserve", () => {
-    expect(computeRequiredAdminLamports(10, 5)).toBe(15);
-    expect(computeRequiredAdminLamports(0, 7)).toBe(7);
+  test("computeRequiredAdminLamports sums min balance, rent, extra ATA and prio", () => {
+    expect(computeRequiredAdminLamports(10, 5, 2, 3)).toBe(20);
+    expect(computeRequiredAdminLamports(0, 7, 0, 4)).toBe(11);
   });
 });
