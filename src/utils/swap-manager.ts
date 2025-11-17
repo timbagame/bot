@@ -40,6 +40,7 @@ export type {
 const SOL_MINT = WSOL_MINT;
 const SOL_DECIMALS = 9;
 const JUPITER_QUOTE_EXPIRATION_MS_DEFAULT = 120_000;
+const ROUTE_LAMPORTS_BUFFER = 400_000;
 let jupiterQuoteExpirationMs = JUPITER_QUOTE_EXPIRATION_MS_DEFAULT;
 
 export const __test_setJupiterQuoteExpirationMs = (value: number): void => {
@@ -542,6 +543,12 @@ export class SwapManager {
         signers
       );
     } catch (error: any) {
+      const order = swapResponse.order;
+      const orderRouteLamports =
+        (order?.rentFeeLamports ?? 0) +
+        (order?.prioritizationFeeLamports ?? 0) +
+        (order?.signatureFeeLamports ?? 0);
+
       const contextLog = {
         error: error.message,
         integrator: quote.integrator,
@@ -549,8 +556,12 @@ export class SwapManager {
         jupiterRequestId: swapResponse.requestId,
         jupiterQuoteId: swapResponse.quoteId,
         router: swapResponse.router,
+        orderRouter: order?.router,
+        orderRequestId: order?.requestId,
+        orderRouteLamports,
         adminBalance: quote.integrator?.adminBalanceLamports,
         adminRequired: quote.integrator?.adminRequiredLamports,
+        adminRouteLamports: quote.integrator?.adminRouteLamports,
       };
 
       if (
@@ -717,18 +728,42 @@ export class SwapManager {
       (quote.rentFeeLamports ?? 0) +
       (quote.prioritizationFeeLamports ?? 0) +
       (quote.signatureFeeLamports ?? 0);
+    const routeSafetyPadding =
+      routeLamports > 0
+        ? Math.max(
+            ROUTE_LAMPORTS_BUFFER,
+            Math.round(routeLamports * 0.25)
+          )
+        : 0;
     const requiredLamports =
-      (integrator.adminRequiredLamports ?? 0) + routeLamports;
+      (integrator.adminRequiredLamports ?? 0) +
+      routeLamports +
+      routeSafetyPadding;
 
     integrator.adminRouteLamports = routeLamports;
 
-    console.log("Admin payer route check", {
+    const logDetails = {
       adminBalance,
       requiredLamports,
       routeLamports,
+      routeSafetyPadding,
       routeRequestId: quote.requestId,
       router: quote.router,
-    });
+      payerKind: integrator.payerKind,
+    };
+    const logLabel =
+      routeLamports > 0
+        ? "Admin payer route check (rent-heavy path)"
+        : "Admin payer route check";
+    console.log(logLabel, logDetails);
+
+    if (routeLamports > 0) {
+      const formattedRouteSol = this.wallet.formatSolBalance(routeLamports);
+      const formattedPadding = this.wallet.formatSolBalance(routeSafetyPadding);
+      console.log(
+        `Route ${quote.router ?? "unknown"} needs ${formattedRouteSol} SOL for rent/priority. Admin payer will cover it (adds ${formattedPadding} padding).`
+      );
+    }
 
     if (adminBalance < requiredLamports) {
       throw new Error(

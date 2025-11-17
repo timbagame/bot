@@ -190,6 +190,11 @@ export const JUPITER_GASLESS_MIN_TRADE_USD = parsePositiveDuration(
   10
 );
 
+export const USER_SOL_MAX_BUFFER_LAMPORTS = parsePositiveInteger(
+  "USER_SOL_MAX_BUFFER_LAMPORTS",
+  500_000
+);
+
 // ================================
 // PRICES CONFIG
 // ================================

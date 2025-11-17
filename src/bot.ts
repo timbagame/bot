@@ -37,6 +37,7 @@ import {
   USER_WALLET_RPC_MAX_CALLS,
   JUPITER_MIN_SOL_BALANCE_LAMPORTS,
   JUPITER_GASLESS_MIN_TRADE_USD,
+  USER_SOL_MAX_BUFFER_LAMPORTS,
   applyOracleBufferTime,
 } from "./utils/constants";
 import { FeeBudgetManager } from "./utils/fee-budget";
@@ -948,17 +949,18 @@ const prepareTokenTradeQuote = async ({
   let gaslessInsufficientMessage: string | undefined;
 
   if (shouldProbeGasless) {
-    const probe = presentSpendAmount({
-      amount: amountInput,
-      assetTicker: inputAsset.ticker,
-      decimals: inputAsset.decimals,
-      solBalance: snapshot.solBalance,
-      tokenBalance: inputAsset.tokenBalance,
-      formatSol: (lamports) => wallet.formatSolBalance(lamports),
-      formatToken: (value, decimals) =>
-        wallet.formatTokenBalance(value, decimals),
-      applySolFeeBuffer: false,
-    });
+      const probe = presentSpendAmount({
+        amount: amountInput,
+        assetTicker: inputAsset.ticker,
+        decimals: inputAsset.decimals,
+        solBalance: snapshot.solBalance,
+        tokenBalance: inputAsset.tokenBalance,
+        formatSol: (lamports) => wallet.formatSolBalance(lamports),
+        formatToken: (value, decimals) =>
+          wallet.formatTokenBalance(value, decimals),
+        applySolFeeBuffer: false,
+        userSolBufferLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
+      });
 
     const prospectiveBalance = Math.max(
       0,
@@ -997,22 +999,23 @@ const prepareTokenTradeQuote = async ({
     }
   }
 
-  const amountResolution =
-    gaslessOverride ??
-    presentSpendAmount({
-      amount: amountInput,
-      assetTicker: inputAsset.ticker,
-      decimals: inputAsset.decimals,
-      solBalance: snapshot.solBalance,
-      tokenBalance: inputAsset.tokenBalance,
-      formatSol: (lamports) => wallet.formatSolBalance(lamports),
-      formatToken: (value, decimals) =>
-        wallet.formatTokenBalance(value, decimals),
-      applySolFeeBuffer: shouldApplySolFeeBuffer,
-      ...(solFeeBufferLamports !== undefined ? { solFeeBufferLamports } : {}),
-      ...(gaslessInsufficientMessage
-        ? {
-            insufficientSolForFeesMessage: gaslessInsufficientMessage,
+    const amountResolution =
+      gaslessOverride ??
+      presentSpendAmount({
+        amount: amountInput,
+        assetTicker: inputAsset.ticker,
+        decimals: inputAsset.decimals,
+        solBalance: snapshot.solBalance,
+        tokenBalance: inputAsset.tokenBalance,
+        formatSol: (lamports) => wallet.formatSolBalance(lamports),
+        formatToken: (value, decimals) =>
+          wallet.formatTokenBalance(value, decimals),
+        applySolFeeBuffer: shouldApplySolFeeBuffer,
+        ...(solFeeBufferLamports !== undefined ? { solFeeBufferLamports } : {}),
+        userSolBufferLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
+        ...(gaslessInsufficientMessage
+          ? {
+              insufficientSolForFeesMessage: gaslessInsufficientMessage,
             omitSolFeeBufferHint: true,
           }
         : {}),
