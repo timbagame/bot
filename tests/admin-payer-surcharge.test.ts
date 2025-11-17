@@ -32,4 +32,15 @@ describe("calculateAdminPayerFeeBps", () => {
     });
     expect(result).toBe(90);
   });
+
+  test("adds proportional extra for tx+ATA rent sized deficit", () => {
+    // deficit: ~0.003 SOL at $25 => $0.075; trade: 0.01 SOL at $25 => $0.25 -> extra bps ~ ceil(0.075/0.25*10k)=3000bps, clamped to 255
+    const result = calculateAdminPayerFeeBps({
+      baseFeeBps: 85,
+      tradeLamports: 10_000_000, // 0.01 SOL
+      deficitLamports: 3_000_000, // 0.003 SOL (tx+ATA)
+      solPriceUsd: 25,
+    });
+    expect(result).toBe(255); // clamped
+  });
 });

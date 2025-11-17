@@ -70,4 +70,21 @@ describe("formatTradeConfirmationSummary", () => {
     });
     expect(summary.message).toContain("<b>Fee:</b> 0.90%");
   });
+
+  test("keeps user payer fee percent identical to integrator base", () => {
+    const summary = formatTradeConfirmationSummary({
+      ...baseInput,
+      quote: {
+        ...defaultQuote,
+        integrator: {
+          referralAccount: "dummy",
+          referralFeeBps: 85,
+          payer: "userPayer",
+          closeAuthority: "userPayer",
+          payerKind: "user",
+        },
+      },
+    });
+    expect(summary.message).toContain("<b>Fee:</b> 0.85%");
+  });
 });
