@@ -118,7 +118,7 @@ describe("SwapQuoteCache", () => {
     expect(first).toEqual(second);
   });
 
-  test("B-007: admin and user payer races do not share same quote", async () => {
+  test("admin and user payer races do not share same quote", async () => {
     const cache = new SwapQuoteCache({ ttlMs: 5_000 });
     const base = makeJupiterParams({ amount: "3000" });
     const adminParams = {
