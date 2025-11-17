@@ -44,3 +44,10 @@ export function calculateAdminPayerFeeBps(
 
   return clampBps(baseFeeBps + extraBps, minFeeBps, maxFeeBps);
 }
+
+export const computeRequiredAdminLamports = (
+  minBalanceLamports: number,
+  rentReserveLamports: number
+): number => {
+  return Math.max(0, minBalanceLamports) + Math.max(0, rentReserveLamports);
+};

@@ -1,5 +1,8 @@
 import { describe, test, expect } from "bun:test";
-import { calculateAdminPayerFeeBps } from "../src/utils/admin-payer-surcharge";
+import {
+  calculateAdminPayerFeeBps,
+  computeRequiredAdminLamports,
+} from "../src/utils/admin-payer-surcharge";
 
 describe("calculateAdminPayerFeeBps", () => {
   test("adds surcharge when deficit positive", () => {
@@ -42,5 +45,10 @@ describe("calculateAdminPayerFeeBps", () => {
       solPriceUsd: 25,
     });
     expect(result).toBe(255); // clamped
+  });
+
+  test("computeRequiredAdminLamports sums min balance and rent reserve", () => {
+    expect(computeRequiredAdminLamports(10, 5)).toBe(15);
+    expect(computeRequiredAdminLamports(0, 7)).toBe(7);
   });
 });

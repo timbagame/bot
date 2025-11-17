@@ -99,7 +99,10 @@ import { recentUpdateGuard } from "./utils/recent-update";
 import { resolveTokenPriceUSD } from "./utils/prices";
 import { resolveIntegratorSwapParams } from "./utils/integrator-fees";
 import { getReferralConfigForMint } from "./utils/token-registry";
-import { calculateAdminPayerFeeBps } from "./utils/admin-payer-surcharge";
+import {
+  calculateAdminPayerFeeBps,
+  computeRequiredAdminLamports,
+} from "./utils/admin-payer-surcharge";
 import { patchReplyBehavior } from "./utils/reply-patch";
 import { buildTransactionLinkMessage } from "./utils/network-detector";
 import { buildProcessingStatus } from "./utils/trade-ui";
@@ -1034,7 +1037,27 @@ const prepareTokenTradeQuote = async ({
   ) {
     const referralConfig = getReferralConfigForMint(inputAsset.mint);
     if (referralConfig) {
-      const adminKey = wallet.getAdminKeypair().publicKey.toBase58();
+      const adminKeypair = wallet.getAdminKeypair();
+      const adminBalance = await wallet
+        .getConnection()
+        .getBalance(adminKeypair.publicKey);
+      const rentReserveLamports = await getSolWrapRentReserveLamports();
+      const requiredLamports = computeRequiredAdminLamports(
+        JUPITER_MIN_SOL_BALANCE_LAMPORTS,
+        rentReserveLamports
+      );
+
+      if (adminBalance < requiredLamports) {
+        throw new Error(
+          "Integrator gas payer is low on SOL. Top up the admin wallet to cover rent and fees."
+        );
+      }
+
+      console.log(
+        `Using admin payer for SOL swap. Balance=${adminBalance} required=${requiredLamports}`
+      );
+
+      const adminKey = adminKeypair.publicKey.toBase58();
       integratorConfig = {
         referralAccount: referralConfig.referralAccount,
         referralFeeBps:
