@@ -884,13 +884,18 @@ const prepareTokenTradeQuote = async ({
   let shouldApplySolFeeBuffer =
     inputAsset.applySolFeeBuffer ?? inputAsset.ticker === "SOL";
 
-  // If the input mint has a referral config, allow gasless swaps without forcing a SOL buffer.
-  if (
-    shouldApplySolFeeBuffer &&
-    inputAsset.ticker === "SOL" &&
-    getReferralConfigForMint(inputAsset.mint)
-  ) {
-    shouldApplySolFeeBuffer = false;
+  // If the input mint has a referral config with an admin payer, allow gasless swaps
+  // without forcing a SOL buffer. User-paid referral routes should still reserve SOL
+  // for transaction fees.
+  if (shouldApplySolFeeBuffer && inputAsset.ticker === "SOL") {
+    const referralConfig = getReferralConfigForMint(inputAsset.mint);
+    const hasAdminReferralPayer = Boolean(
+      referralConfig?.adminPayer && referralConfig?.adminCloseAuthority
+    );
+
+    if (hasAdminReferralPayer) {
+      shouldApplySolFeeBuffer = false;
+    }
   }
 
   let solFeeBufferLamports: number | undefined;
