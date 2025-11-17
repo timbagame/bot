@@ -10,6 +10,7 @@ import {
   JupiterClient,
   type JupiterQuoteResponse,
   type JupiterQuoteRequest,
+  type JupiterUltraOrderResponse,
 } from "./jupiter";
 import { NetworkDetector } from "./network-detector";
 import type { SolanaNetwork } from "./network-detector";
@@ -524,7 +525,7 @@ export class SwapManager {
     if (integrator?.payerKind === "admin") {
       await this.ensureAdminCanCoverRoute(
         integrator,
-        jupiterQuote,
+        swapResponse.order,
         this.wallet.getAdminKeypair().publicKey
       );
     }
@@ -702,10 +703,10 @@ export class SwapManager {
 
   private async ensureAdminCanCoverRoute(
     integrator: IntegratorSwapParams | null | undefined,
-    quote: JupiterQuoteResponse,
+    quote: JupiterUltraOrderResponse | undefined,
     adminPublicKey: PublicKey
   ): Promise<void> {
-    if (integrator?.payerKind !== "admin") {
+    if (integrator?.payerKind !== "admin" || !quote) {
       return;
     }
 
@@ -726,6 +727,7 @@ export class SwapManager {
       requiredLamports,
       routeLamports,
       routeRequestId: quote.requestId,
+      router: quote.router,
     });
 
     if (adminBalance < requiredLamports) {

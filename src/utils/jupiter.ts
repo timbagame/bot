@@ -83,6 +83,7 @@ export interface JupiterSwapResponse {
   priceImpactPct?: string;
   priceImpact?: number;
   routePlan?: JupiterQuoteResponse["routePlan"];
+  order?: JupiterUltraOrderResponse;
 }
 
 interface JupiterOrderParams {
@@ -128,6 +129,10 @@ export interface JupiterUltraOrderResponse {
   error?: string;
   errorCode?: number;
   errorMessage?: string;
+  signatureFeeLamports?: number;
+  prioritizationFeeLamports?: number;
+  rentFeeLamports?: number;
+  referralApplied?: boolean;
 }
 
 interface JupiterOrderResult {
@@ -209,6 +214,10 @@ export class JupiterClient {
       inUsdValue: data.inUsdValue,
       outUsdValue: data.outUsdValue,
       platformFee: data.platformFee ?? null,
+      signatureFeeLamports: data.signatureFeeLamports,
+      prioritizationFeeLamports: data.prioritizationFeeLamports,
+      rentFeeLamports: data.rentFeeLamports,
+      referralApplied: data.referralApplied,
     };
   }
 
@@ -376,6 +385,7 @@ export class JupiterClient {
           : undefined,
       priceImpact: order.priceImpact,
       routePlan: order.routePlan,
+      order,
     };
   }
 
