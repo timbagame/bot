@@ -560,6 +560,10 @@ export class SwapManager {
         routePlan: [],
         totalTime: 0,
         platformFee: quote.platformFee ?? null,
+        feeBps:
+          quote.providerQuote?.feeBps ??
+          quote.integrator?.referralFeeBps ??
+          undefined,
       },
       inputDecimals,
       outputDecimals,
