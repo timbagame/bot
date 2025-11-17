@@ -243,3 +243,26 @@ describe("JupiterClient ExactOut handling", () => {
     expect(capture.url).toContain("amount=1234");
   });
 });
+
+describe("JupiterClient fee display", () => {
+  test("shows platform fee percent when feeBps missing", () => {
+    const client = new JupiterClient();
+    const quote = {
+      inputMint: "So11111111111111111111111111111111111111112",
+      inAmount: "1000000",
+      outputMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
+      outAmount: "10000",
+      otherAmountThreshold: "0",
+      swapMode: "ExactIn",
+      slippageBps: 100,
+      priceImpactPct: "0",
+      routePlan: [],
+      totalTime: 0,
+      platformFee: { amount: "1000", feeBps: 120 },
+    } as JupiterQuoteResponse;
+
+    const msg = client.formatQuoteForDisplay(quote, 9, 6, "SOL", "TIMBA");
+    expect(msg).toContain("Fee:");
+    expect(msg).toContain("1.20%");
+  });
+});

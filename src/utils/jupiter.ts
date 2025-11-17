@@ -442,7 +442,10 @@ export class JupiterClient {
     const rate = inputAmount > 0 ? formatRate(outputAmount / inputAmount) : "0";
     const safeInputTicker = escapeHtml(inputTicker);
     const safeOutputTicker = escapeHtml(outputTicker);
-    const feeBps = typeof quote.feeBps === "number" ? quote.feeBps : null;
+    const feeBps =
+      typeof quote.feeBps === "number"
+        ? quote.feeBps
+        : quote.platformFee?.feeBps ?? null;
 
     let message = `🔄 <b>Swap Preview</b>\n\n`;
     message += `📥 <b>You pay:</b> ${inputAmount.toFixed(

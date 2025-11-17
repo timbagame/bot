@@ -99,6 +99,7 @@ import { recentUpdateGuard } from "./utils/recent-update";
 import { resolveTokenPriceUSD } from "./utils/prices";
 import { resolveIntegratorSwapParams } from "./utils/integrator-fees";
 import { getReferralConfigForMint } from "./utils/token-registry";
+import { calculateAdminPayerFeeBps } from "./utils/admin-payer-surcharge";
 import { patchReplyBehavior } from "./utils/reply-patch";
 import { buildTransactionLinkMessage } from "./utils/network-detector";
 import { buildProcessingStatus } from "./utils/trade-ui";
@@ -1023,21 +1024,14 @@ const prepareTokenTradeQuote = async ({
       try {
         const priceLookup = await resolveTokenPriceUSD({ isSol: true });
         const solPrice = priceLookup?.price ?? 0;
-        if (solPrice > 0) {
-          const tradeUsd =
-            (amountResolution.rawAmount / LAMPORTS_PER_SOL) * solPrice;
-          const deficitLamports =
-            solFeeBufferLamports ?? JUPITER_MIN_SOL_BALANCE_LAMPORTS;
-          const deficitUsd = (deficitLamports / LAMPORTS_PER_SOL) * solPrice;
-          if (tradeUsd > 0 && deficitUsd > 0) {
-            const extraBps = Math.ceil((deficitUsd / tradeUsd) * 10_000);
-            const baseFee = integratorConfig.referralFeeBps ?? 85;
-            integratorConfig.referralFeeBps = Math.min(
-              255,
-              Math.max(50, baseFee + extraBps)
-            );
-          }
-        }
+        const deficitLamports =
+          solFeeBufferLamports ?? JUPITER_MIN_SOL_BALANCE_LAMPORTS;
+        integratorConfig.referralFeeBps = calculateAdminPayerFeeBps({
+          baseFeeBps: integratorConfig.referralFeeBps ?? 85,
+          tradeLamports: amountResolution.rawAmount,
+          deficitLamports,
+          solPriceUsd: solPrice,
+        });
       } catch (surchargeError) {
         console.warn(
           "Failed to compute admin payer surcharge, falling back to base referral fee",
