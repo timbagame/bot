@@ -745,10 +745,13 @@ type ReferralEntryLite = {
 
 const shouldSkipSolFeeBuffer = (
   inputAsset: ResolvedTradeAsset,
+  outputTicker: string,
   amountInput: string,
   referralConfig?: ReferralEntryLite | null
 ): boolean => {
   if (inputAsset.ticker !== "SOL") return false;
+
+  if (outputTicker !== "SOL") return false;
 
   const hasAdminReferralPayer = Boolean(
     referralConfig?.adminPayer && referralConfig?.adminCloseAuthority
@@ -931,6 +934,8 @@ const prepareTokenTradeQuote = async ({
     Promise.resolve(outputFactory(factoryContext)),
   ]);
 
+  const outputIsSol = outputAsset.ticker === "SOL";
+
   const referralConfig = getReferralConfigForMint(inputAsset.mint);
 
   let shouldApplySolFeeBuffer =
@@ -938,7 +943,14 @@ const prepareTokenTradeQuote = async ({
 
   // If SOL referral and we know an admin payer will cover gas (either registry says so or user picked MAX which we will force to admin payer), drop the buffer.
   if (shouldApplySolFeeBuffer && inputAsset.ticker === "SOL") {
-    if (shouldSkipSolFeeBuffer(inputAsset, amountInput, referralConfig)) {
+    if (
+      shouldSkipSolFeeBuffer(
+        inputAsset,
+        outputAsset.ticker,
+        amountInput,
+        referralConfig
+      )
+    ) {
       shouldApplySolFeeBuffer = false;
     }
   }
@@ -1065,6 +1077,7 @@ const prepareTokenTradeQuote = async ({
   // so the user can go gasless even when their own balance would hit zero.
   if (
     inputAsset.ticker === "SOL" &&
+    outputIsSol &&
     amountResolution.normalizedAmount === "max"
   ) {
     if (referralConfig) {
@@ -1085,6 +1098,7 @@ const prepareTokenTradeQuote = async ({
 
   const needsAdminPayer =
     referralConfig &&
+    outputIsSol &&
     snapshot.solBalance <
       Math.max(USER_SOL_MAX_BUFFER_LAMPORTS, JUPITER_MIN_SOL_BALANCE_LAMPORTS);
 
@@ -4091,7 +4105,18 @@ const buildAdminIntegratorConfig = async ({
   solFeeBufferLamports?: number;
 }): Promise<IntegratorSwapParams> => {
   const adminKeypair = wallet.getAdminKeypair();
-  const rentReserveLamports = await getSolWrapRentReserveLamports();
+  let rentReserveLamports: number;
+  try {
+    rentReserveLamports = await getSolWrapRentReserveLamports();
+  } catch (error) {
+    const fallback = feeBudget.getDefaultWrapFeeBufferLamports();
+    if (!Number.isFinite(fallback) || fallback <= 0) {
+      throw new Error(
+        "Wrap rent reserve unavailable; retry when fee cache refreshes."
+      );
+    }
+    rentReserveLamports = fallback;
+  }
   if (!Number.isFinite(rentReserveLamports) || rentReserveLamports <= 0) {
     throw new Error("Wrap rent reserve unavailable; retry when fee cache refreshes.");
   }

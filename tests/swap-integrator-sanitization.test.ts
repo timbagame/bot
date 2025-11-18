@@ -72,6 +72,28 @@ describe("prepareIntegratorForQuote", () => {
     expect(result?.adminRequiredLamports).toBeUndefined();
     expect(result?.adminRouteLamports).toBeUndefined();
   });
+
+  test("retains admin payer when swap outputs SOL", () => {
+    const integrator: IntegratorSwapParams = {
+      payerKind: "admin",
+      payer: "ADMIN",
+      closeAuthority: "ADMIN",
+      referralAccount: "REF",
+      referralFeeBps: 100,
+      adminBalanceLamports: 123,
+      adminRequiredLamports: 456,
+      adminRouteLamports: 789,
+    };
+
+    const result = prepareIntegratorForQuote(integrator, "SOL", "USER");
+
+    expect(result?.payerKind).toBe("admin");
+    expect(result?.payer).toBe("ADMIN");
+    expect(result?.closeAuthority).toBe("ADMIN");
+    expect(result?.adminBalanceLamports).toBe(123);
+    expect(result?.adminRequiredLamports).toBe(456);
+    expect(result?.adminRouteLamports).toBe(789);
+  });
 });
 
 describe("ensureUserSolBufferForSwap", () => {
@@ -156,7 +178,10 @@ describe("buildAdminIntegratorConfig", () => {
     const feeBudget = FeeBudgetManager.getInstance(wallet.getConnection());
     const wrapSpy = vi
       .spyOn(feeBudget, "getWrapFeeBufferLamports")
-      .mockRejectedValue(new Error("refresh failure"));
+      .mockResolvedValue(0);
+    const defaultSpy = vi
+      .spyOn(feeBudget, "getDefaultWrapFeeBufferLamports")
+      .mockReturnValue(500_000);
     const priceSpy = vi
       .spyOn(priceModule, "resolveTokenPriceUSD")
       .mockResolvedValue({ price: 1, identifier: "SOL" } as any);
@@ -178,6 +203,7 @@ describe("buildAdminIntegratorConfig", () => {
     expect(__test_getSolWrapRentReserveLamports()).toBeGreaterThan(0);
 
     wrapSpy.mockRestore();
+    defaultSpy.mockRestore();
     priceSpy.mockRestore();
     restoreConn();
     restoreAdmin();
@@ -188,6 +214,8 @@ describe("shouldSkipSolFeeBuffer", () => {
   test("skips buffer when admin referral payer present and amount is max", () => {
     const solAsset = { ticker: "SOL" } as any;
     const referral = { adminPayer: "ADMIN", adminCloseAuthority: "ADMIN" };
-    expect(shouldSkipSolFeeBuffer(solAsset, "max", referral)).toBe(true);
+    expect(shouldSkipSolFeeBuffer(solAsset, "SOL", "max", referral)).toBe(
+      true
+    );
   });
 });
