@@ -72,12 +72,14 @@ describe("buildAdminIntegratorConfig", () => {
     const originalWrapGetter = (fb as any).getWrapFeeBufferLamports;
     const originalDefaultWrap = (fb as any).getDefaultWrapFeeBufferLamports;
     const originalGetConnection = wallet.getConnection;
+    const originalGetAdminKeypair = (wallet as any).getAdminKeypair;
     // Force fee budget to return zero so the helper must bail
     (fb as any).getWrapFeeBufferLamports = async () => 0;
     (fb as any).getDefaultWrapFeeBufferLamports = () => 0;
     (wallet as any).getConnection = () => ({
       getBalance: async () => 1_000_000_000, // avoid network
     });
+    (wallet as any).getAdminKeypair = () => Keypair.generate();
 
     const configPromise = buildAdminIntegratorConfig({
       referralConfig: {
@@ -98,6 +100,7 @@ describe("buildAdminIntegratorConfig", () => {
       (fb as any).getDefaultWrapFeeBufferLamports = originalDefaultWrap;
     }
     (wallet as any).getConnection = originalGetConnection;
+    (wallet as any).getAdminKeypair = originalGetAdminKeypair;
   });
 });
 
