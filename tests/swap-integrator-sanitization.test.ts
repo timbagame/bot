@@ -9,8 +9,12 @@ import {
   wallet,
 } from "../src/bot";
 import type { IntegratorSwapParams } from "../src/utils/integrator-fees";
-import { FeeBudgetManager } from "../src/utils/fee-budget";
 import { __test_shouldSkipSolFeeBuffer as shouldSkipSolFeeBuffer } from "../src/bot";
+import {
+  stubWalletConnection,
+  stubAdminKeypair,
+  stubFeeBudgetWrapZero,
+} from "./helpers/test-stubs";
 
 // Minimal mock quote to exercise buffer checks
 const buildQuote = (inputMint: string, routeLamports: number, amountRaw: number) => ({
@@ -68,18 +72,9 @@ describe("ensureUserSolBufferForSwap", () => {
 describe("buildAdminIntegratorConfig", () => {
   test("fails fast when wrap rent reserve cache is empty", async () => {
     __test_setSolWrapRentReserveLamports(0);
-    const fb = FeeBudgetManager.getInstance(wallet.getConnection());
-    const originalWrapGetter = (fb as any).getWrapFeeBufferLamports;
-    const originalDefaultWrap = (fb as any).getDefaultWrapFeeBufferLamports;
-    const originalGetConnection = wallet.getConnection;
-    const originalGetAdminKeypair = (wallet as any).getAdminKeypair;
-    // Force fee budget to return zero so the helper must bail
-    (fb as any).getWrapFeeBufferLamports = async () => 0;
-    (fb as any).getDefaultWrapFeeBufferLamports = () => 0;
-    (wallet as any).getConnection = () => ({
-      getBalance: async () => 1_000_000_000, // avoid network
-    });
-    (wallet as any).getAdminKeypair = () => Keypair.generate();
+    const restoreConn = stubWalletConnection(1_000_000_000);
+    const restoreAdmin = stubAdminKeypair();
+    const restoreFb = stubFeeBudgetWrapZero();
 
     const configPromise = buildAdminIntegratorConfig({
       referralConfig: {
@@ -96,14 +91,9 @@ describe("buildAdminIntegratorConfig", () => {
 
     await expect(configPromise).rejects.toThrow(/wrap rent reserve unavailable/i);
 
-    if (originalWrapGetter) {
-      (fb as any).getWrapFeeBufferLamports = originalWrapGetter;
-    }
-    if (originalDefaultWrap) {
-      (fb as any).getDefaultWrapFeeBufferLamports = originalDefaultWrap;
-    }
-    (wallet as any).getConnection = originalGetConnection;
-    (wallet as any).getAdminKeypair = originalGetAdminKeypair;
+    restoreFb();
+    restoreConn();
+    restoreAdmin();
   });
 });
 

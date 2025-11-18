@@ -208,23 +208,32 @@ export const __test_setSolWrapRentReserveLamports = (value: number): void => {
 
 const getSolWrapRentReserveLamports = async (): Promise<number> => {
   const now = Date.now();
-  if (
+  const isCached =
     Number.isFinite(SOL_WRAP_RENT_RESERVE_LAMPORTS) &&
     SOL_WRAP_RENT_RESERVE_LAMPORTS > 0 &&
     now - solWrapRentReserveLastFetched <
-      SOL_WRAP_RENT_RESERVE_REFRESH_INTERVAL_MS
-  ) {
+      SOL_WRAP_RENT_RESERVE_REFRESH_INTERVAL_MS;
+
+  if (isCached) {
     return SOL_WRAP_RENT_RESERVE_LAMPORTS;
   }
 
-  try {
-    const wrapLamports = await feeBudget.getWrapFeeBufferLamports();
-    if (!Number.isFinite(wrapLamports) || wrapLamports <= 0) {
+  const fetchOrThrow = async (): Promise<number> => {
+    const value = await feeBudget.getWrapFeeBufferLamports();
+    if (!Number.isFinite(value) || value <= 0) {
       throw new Error("wrap rent reserve unavailable");
     }
-    SOL_WRAP_RENT_RESERVE_LAMPORTS = wrapLamports;
+    return value;
+  };
+
+  const fallback = feeBudget.getDefaultWrapFeeBufferLamports();
+  const fallbackValid = Number.isFinite(fallback) && fallback > 0;
+
+  try {
+    const fresh = await fetchOrThrow();
+    SOL_WRAP_RENT_RESERVE_LAMPORTS = fresh;
     solWrapRentReserveLastFetched = now;
-    return wrapLamports;
+    return fresh;
   } catch (error) {
     console.warn(
       "Failed to refresh SOL wrap rent reserve from fee budget:",
@@ -232,10 +241,10 @@ const getSolWrapRentReserveLamports = async (): Promise<number> => {
     );
   }
 
-  const fallback = feeBudget.getDefaultWrapFeeBufferLamports();
-  if (!Number.isFinite(fallback) || fallback <= 0) {
+  if (!fallbackValid) {
     throw new Error("wrap rent reserve unavailable");
   }
+
   SOL_WRAP_RENT_RESERVE_LAMPORTS = fallback;
   solWrapRentReserveLastFetched = now;
   return fallback;
@@ -1110,20 +1119,11 @@ const prepareTokenTradeQuote = async ({
       ...(summaryExtras?.(preparedContext) ?? {}),
     },
     quoteFetcher: async () => {
-  const integratorForQuote =
-    outputAsset.ticker === "SOL"
-      ? integratorConfig
-      : integratorConfig
-      ? {
-          ...integratorConfig,
-          payer: userKeypair.publicKey.toBase58(),
-          closeAuthority: userKeypair.publicKey.toBase58(),
-          payerKind: "user" as const,
-          adminBalanceLamports: undefined,
-          adminRequiredLamports: undefined,
-          adminRouteLamports: undefined,
-        }
-      : null;
+      const integratorForQuote = prepareIntegratorForQuote(
+        integratorConfig,
+        outputAsset.ticker,
+        userKeypair.publicKey.toBase58()
+      );
 
       const quote = await swapManager.getQuote({
         inputMint: inputAsset.mint,
@@ -4150,8 +4150,7 @@ const buildAdminIntegratorConfig = async ({
   };
 };
 
-// Expose helpers for tests
-export const __test_prepareIntegratorForQuote = (
+const prepareIntegratorForQuote = (
   integrator: IntegratorSwapParams | null,
   outputTicker: string,
   userPublicKey: string
@@ -4169,6 +4168,9 @@ export const __test_prepareIntegratorForQuote = (
         adminRouteLamports: undefined,
       }
     : null;
+
+// Expose helpers for tests
+export const __test_prepareIntegratorForQuote = prepareIntegratorForQuote;
 
 export const __test_ensureUserSolBufferForSwap = ensureUserSolBufferForSwap;
 export const __test_buildAdminIntegratorConfig = buildAdminIntegratorConfig;

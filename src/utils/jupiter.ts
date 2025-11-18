@@ -407,8 +407,9 @@ export class JupiterClient {
 
       const data = (await response.json()) as JupiterExecuteResponse;
 
+      const execLogPayload = JSON.stringify(data, null, 2);
       const logExec = () =>
-        console.error("Jupiter execute response", JSON.stringify(data, null, 2));
+        console.error("Jupiter execute response", execLogPayload);
 
       if (!response.ok) {
         logExec();

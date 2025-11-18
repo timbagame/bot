@@ -1,31 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { SwapQuoteCache } from "../src/utils/swap/quote-cache";
-import type { JupiterQuoteRequest, JupiterQuoteResponse } from "../src/utils/jupiter";
-
-const makeJupiterParams = (overrides: Partial<JupiterQuoteRequest> = {}): JupiterQuoteRequest => ({
-  inputMint: "MintA",
-  outputMint: "MintB",
-  amount: "1000",
-  ...overrides,
-});
-
-const makeJupiterQuote = (
-  request: JupiterQuoteRequest,
-  overrides: Partial<JupiterQuoteResponse> = {}
-): JupiterQuoteResponse => ({
-  inputMint: request.inputMint,
-  inAmount: request.amount,
-  outputMint: request.outputMint,
-  outAmount: "2000",
-  otherAmountThreshold: "0",
-  swapMode: "ExactIn",
-  slippageBps: 50,
-  priceImpactPct: "0",
-  routePlan: [],
-  totalTime: 0,
-  platformFee: null,
-  ...overrides,
-});
+import { makeJupiterParams, makeJupiterQuote } from "./helpers/jupiter-factories";
 
 describe("SwapQuoteCache", () => {
   test("coalesces concurrent Jupiter quote requests", async () => {
