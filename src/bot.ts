@@ -219,11 +219,12 @@ const getSolWrapRentReserveLamports = async (): Promise<number> => {
 
   try {
     const wrapLamports = await feeBudget.getWrapFeeBufferLamports();
-    if (Number.isFinite(wrapLamports) && wrapLamports > 0) {
-      SOL_WRAP_RENT_RESERVE_LAMPORTS = wrapLamports;
-      solWrapRentReserveLastFetched = now;
-      return wrapLamports;
+    if (!Number.isFinite(wrapLamports) || wrapLamports <= 0) {
+      throw new Error("wrap rent reserve unavailable");
     }
+    SOL_WRAP_RENT_RESERVE_LAMPORTS = wrapLamports;
+    solWrapRentReserveLastFetched = now;
+    return wrapLamports;
   } catch (error) {
     console.warn(
       "Failed to refresh SOL wrap rent reserve from fee budget:",
@@ -232,6 +233,9 @@ const getSolWrapRentReserveLamports = async (): Promise<number> => {
   }
 
   const fallback = feeBudget.getDefaultWrapFeeBufferLamports();
+  if (!Number.isFinite(fallback) || fallback <= 0) {
+    throw new Error("wrap rent reserve unavailable");
+  }
   SOL_WRAP_RENT_RESERVE_LAMPORTS = fallback;
   solWrapRentReserveLastFetched = now;
   return fallback;
@@ -1100,17 +1104,20 @@ const prepareTokenTradeQuote = async ({
       ...(summaryExtras?.(preparedContext) ?? {}),
     },
     quoteFetcher: async () => {
-      const integratorForQuote =
-        outputAsset.ticker === "SOL"
-          ? integratorConfig
-          : integratorConfig
-          ? {
-              ...integratorConfig,
-              payer: userKeypair.publicKey.toBase58(),
-              closeAuthority: userKeypair.publicKey.toBase58(),
-              payerKind: "user" as const,
-            }
-          : null;
+  const integratorForQuote =
+    outputAsset.ticker === "SOL"
+      ? integratorConfig
+      : integratorConfig
+      ? {
+          ...integratorConfig,
+          payer: userKeypair.publicKey.toBase58(),
+          closeAuthority: userKeypair.publicKey.toBase58(),
+          payerKind: "user" as const,
+          adminBalanceLamports: undefined,
+          adminRequiredLamports: undefined,
+          adminRouteLamports: undefined,
+        }
+      : null;
 
       const quote = await swapManager.getQuote({
         inputMint: inputAsset.mint,
@@ -4018,6 +4025,13 @@ const ensureUserSolBufferForSwap = async ({
   const amountLamports = quote.inputAmountRaw
     ? BigInt(quote.inputAmountRaw)
     : 0n;
+
+  if (userBalance < safeBigIntToNumber(amountLamports)) {
+    throw new Error(
+      `Insufficient balance to attempt this swap. Add SOL or reduce the amount.`
+    );
+  }
+
   const leftover = BigInt(userBalance) - amountLamports;
   const requiredLeftoverBig = BigInt(requiredLeftover);
 
@@ -4050,6 +4064,9 @@ const buildAdminIntegratorConfig = async ({
 }): Promise<IntegratorSwapParams> => {
   const adminKeypair = wallet.getAdminKeypair();
   const rentReserveLamports = await getSolWrapRentReserveLamports();
+  if (!Number.isFinite(rentReserveLamports) || rentReserveLamports <= 0) {
+    throw new Error("Wrap rent reserve unavailable; retry when fee cache refreshes.");
+  }
   const extraAtaLamports = rentReserveLamports;
   const priorityBufferLamports = Math.max(
     200_000,
@@ -4105,6 +4122,29 @@ const buildAdminIntegratorConfig = async ({
     adminRequiredLamports: requiredLamports,
   };
 };
+
+// Expose helpers for tests
+export const __test_prepareIntegratorForQuote = (
+  integrator: IntegratorSwapParams | null,
+  outputTicker: string,
+  userPublicKey: string
+): IntegratorSwapParams | null =>
+  outputTicker === "SOL"
+    ? integrator
+    : integrator
+    ? {
+        ...integrator,
+        payer: userPublicKey,
+        closeAuthority: userPublicKey,
+        payerKind: "user",
+        adminBalanceLamports: undefined,
+        adminRequiredLamports: undefined,
+        adminRouteLamports: undefined,
+      }
+    : null;
+
+export const __test_ensureUserSolBufferForSwap = ensureUserSolBufferForSwap;
+export const __test_buildAdminIntegratorConfig = buildAdminIntegratorConfig;
 
 // ================================
 // WALLET DATA CACHE
