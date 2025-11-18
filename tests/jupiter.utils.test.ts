@@ -184,6 +184,54 @@ describe("JupiterClient referral URL params", () => {
     expect(capture.url).toContain(`taker=${explicitTaker}`);
     expect(capture.url).not.toContain(`taker=${payer}`);
   });
+
+  test("strips payer and closeAuthority on referral fallback", async () => {
+    const urls: string[] = [];
+    const closeAuthority = "5mo3n3ed58N8LSnMSrhMfyQyw4MKWmNBp8QtUafpJwwt";
+    const client = new JupiterClient(
+      "https://lite-api.jup.ag",
+      (async (input) => {
+        const url = typeof input === "string" ? input : input.toString();
+        urls.push(url);
+
+        if (urls.length === 1) {
+          return {
+            ok: false,
+            status: 400,
+            statusText: "Bad Request",
+            text: async () => "Failed to get quotes",
+          } as unknown as Response;
+        }
+
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => createOrderResponse(),
+          text: async () => JSON.stringify(createOrderResponse()),
+        } as unknown as Response;
+      }) as any
+    );
+
+    await client.getQuote({
+      inputMint,
+      outputMint,
+      amount,
+      referralAccount,
+      referralFeeBps: 85,
+      payer,
+      closeAuthority,
+    });
+
+    expect(urls.length).toBe(2);
+    expect(urls[0]).toContain("referralAccount=");
+    expect(urls[0]).toContain(`payer=${payer}`);
+    expect(urls[0]).toContain(`closeAuthority=${closeAuthority}`);
+    expect(urls[1]).not.toContain("referralAccount=");
+    expect(urls[1]).not.toContain("referralFeeBps=");
+    expect(urls[1]).not.toContain("payer=");
+    expect(urls[1]).not.toContain("closeAuthority=");
+  });
 });
 
 describe("JupiterClient ExactOut handling", () => {
