@@ -18,6 +18,7 @@ import {
 } from "./utils/keypairs";
 import { createAnchorContext } from "./utils/anchor-context";
 import { resolvePrimaryRpcEndpoint } from "../src/utils/rpc-endpoints";
+import { resolveTokenPriceUSD } from "../src/utils/prices";
 
 const RPC_URL = resolvePrimaryRpcEndpoint(process.env.SOLANA_NETWORK);
 
@@ -65,6 +66,20 @@ async function withdrawTokenFee(
     Number(pendingFees),
     metadata.decimals
   );
+  const tokenAmount = Number(pendingFees) / 10 ** metadata.decimals;
+  const priceData = await resolveTokenPriceUSD({
+    tokenMint: config.mint,
+    tokenTicker: config.ticker,
+  });
+  const tokenUsdValue = tokenAmount * (priceData?.price ?? 0);
+  if (tokenUsdValue < 5) {
+    console.log(
+      `ℹ️  Skipping ${config.ticker} withdrawal: ${formattedPending} ≈ $${
+        tokenUsdValue.toFixed(2)
+      } (< $5).`
+    );
+    return;
+  }
 
   const {
     address: operatorAta,
