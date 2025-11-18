@@ -3,13 +3,14 @@ import {
   getAssociatedTokenAddressSync,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
-import { SystemProgram } from "@solana/web3.js";
+import { SystemProgram, PublicKey, Connection, sendAndConfirmRawTransaction } from "@solana/web3.js";
 import type { Timba } from "../idl/idlType";
 import { WalletManager } from "../src/utils/wallet";
 import {
   getSupportedTokens,
   type TokenConfig,
 } from "../src/utils/token-registry";
+import { getReferralTokenEntries } from "../src/utils/token-registry";
 import type { KeypairBundle } from "./utils/keypairs";
 import {
   bundleFromKeypair,
@@ -19,10 +20,12 @@ import {
 import { createAnchorContext } from "./utils/anchor-context";
 import { resolvePrimaryRpcEndpoint } from "../src/utils/rpc-endpoints";
 import { resolveTokenPriceUSD } from "../src/utils/prices";
+import { ReferralProvider } from "@jup-ag/referral-sdk";
 
 const RPC_URL = resolvePrimaryRpcEndpoint(process.env.SOLANA_NETWORK);
 
 const TOKENS: TokenConfig[] = getSupportedTokens();
+const REFERRAL_ENTRIES = getReferralTokenEntries();
 
 async function withdrawTokenFee(
   program: anchor.Program<Timba>,
@@ -141,6 +144,50 @@ async function withdrawTokenFee(
   console.log(`   ✅ Withdrawn. Transaction: ${tx}`);
 }
 
+async function withdrawReferralFees(
+  connection: anchor.web3.Connection,
+  adminBundle: KeypairBundle
+): Promise<void> {
+  if (REFERRAL_ENTRIES.length === 0) {
+    console.log("ℹ️  No referral entries configured; skipping referral claims.");
+    return;
+  }
+
+  const referralEntry = REFERRAL_ENTRIES[0];
+  if (!referralEntry?.referralAccount) {
+    console.log("ℹ️  No referral account configured; skipping referral claims.");
+    return;
+  }
+
+  const referralAccount = new PublicKey(referralEntry.referralAccount);
+  const provider = new ReferralProvider(connection as unknown as Connection);
+
+  console.log("💸 Collecting Jupiter referral fees...");
+
+  const transactions = await provider.claimAllV2({
+    payerPubKey: adminBundle.anchor.publicKey,
+    referralAccountPubKey: referralAccount,
+  });
+
+  if (!transactions.length) {
+    console.log("ℹ️  No referral fee transactions to claim.");
+    return;
+  }
+
+  console.log(`🧾 Found ${transactions.length} referral transaction(s). Processing...`);
+
+  for (let i = 0; i < transactions.length; i++) {
+    const tx = transactions[i];
+    if (!tx) continue;
+    tx.sign([adminBundle.anchor]);
+    const sig = await sendAndConfirmRawTransaction(
+      connection as unknown as Connection,
+      Buffer.from(tx.serialize())
+    );
+    console.log(`   ✅ Referral claim ${i + 1}/${transactions.length}: ${sig}`);
+  }
+}
+
 async function main() {
   console.log("💸 Collecting oracle fees for configured tokens...\n");
 
@@ -172,6 +219,12 @@ async function main() {
     } catch (error) {
       console.error(`❌ Failed withdrawing ${token.ticker}:`, error);
     }
+  }
+
+  try {
+    await withdrawReferralFees(connection, adminBundle);
+  } catch (error) {
+    console.error("❌ Failed withdrawing referral fees:", error);
   }
 
   console.log("\n🏁 Fee withdrawal run completed.");
