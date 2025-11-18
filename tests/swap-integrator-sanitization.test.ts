@@ -87,7 +87,10 @@ describe("buildAdminIntegratorConfig", () => {
         referralAccount: "REF",
       },
       baseFeeBps: 85,
-      tradeLamports: 1_000_000,
+      tradeAmountRaw: 1_000_000,
+      tradeMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
+      tradeTicker: "TIMBA",
+      tradeDecimals: 6,
       solFeeBufferLamports: undefined,
     });
 
