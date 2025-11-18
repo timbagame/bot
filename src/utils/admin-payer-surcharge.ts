@@ -2,7 +2,9 @@ import { LAMPORTS_PER_SOL } from "./constants";
 
 export interface AdminPayerSurchargeOptions {
   baseFeeBps: number;
-  tradeLamports: number;
+  tradeAmountRaw: number;
+  tradeDecimals: number;
+  tradePriceUsd: number;
   deficitLamports: number;
   solPriceUsd: number;
   minFeeBps?: number;
@@ -17,7 +19,9 @@ export function calculateAdminPayerFeeBps(
 ): number {
   const {
     baseFeeBps,
-    tradeLamports,
+    tradeAmountRaw,
+    tradeDecimals,
+    tradePriceUsd,
     deficitLamports,
     solPriceUsd,
     minFeeBps = 50,
@@ -25,7 +29,9 @@ export function calculateAdminPayerFeeBps(
   } = options;
 
   if (
-    tradeLamports <= 0 ||
+    tradeAmountRaw <= 0 ||
+    tradeDecimals < 0 ||
+    tradePriceUsd <= 0 ||
     deficitLamports <= 0 ||
     solPriceUsd <= 0 ||
     baseFeeBps <= 0
@@ -33,7 +39,8 @@ export function calculateAdminPayerFeeBps(
     return clampBps(baseFeeBps, minFeeBps, maxFeeBps);
   }
 
-  const tradeUsd = (tradeLamports / LAMPORTS_PER_SOL) * solPriceUsd;
+  const tradeUsd =
+    (tradeAmountRaw / Math.pow(10, tradeDecimals)) * tradePriceUsd;
   const deficitUsd = (deficitLamports / LAMPORTS_PER_SOL) * solPriceUsd;
 
   if (tradeUsd <= 0 || deficitUsd <= 0) {

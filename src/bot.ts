@@ -1054,7 +1054,10 @@ const prepareTokenTradeQuote = async ({
           integratorConfig?.referralFeeBps ??
           referralConfig.baseFeeBps ??
           85,
-        tradeLamports: amountResolution.rawAmount,
+        tradeAmountRaw: amountResolution.rawAmount,
+        tradeMint: inputAsset.mint,
+        tradeTicker: inputAsset.ticker,
+        tradeDecimals: inputAsset.decimals,
         solFeeBufferLamports: solFeeBufferLamports,
       });
     }
@@ -1072,7 +1075,10 @@ const prepareTokenTradeQuote = async ({
         integratorConfig?.referralFeeBps ??
         referralConfig.baseFeeBps ??
         85,
-      tradeLamports: amountResolution.rawAmount,
+      tradeAmountRaw: amountResolution.rawAmount,
+      tradeMint: inputAsset.mint,
+      tradeTicker: inputAsset.ticker,
+      tradeDecimals: inputAsset.decimals,
       solFeeBufferLamports,
     });
   }
@@ -4054,12 +4060,18 @@ const ensureUserSolBufferForSwap = async ({
 const buildAdminIntegratorConfig = async ({
   referralConfig,
   baseFeeBps,
-  tradeLamports,
+  tradeAmountRaw,
+  tradeMint,
+  tradeTicker,
+  tradeDecimals,
   solFeeBufferLamports,
 }: {
   referralConfig: ReferralTokenConfigEntry;
   baseFeeBps: number;
-  tradeLamports: number;
+  tradeAmountRaw: number;
+  tradeMint: string;
+  tradeTicker: string;
+  tradeDecimals: number;
   solFeeBufferLamports?: number;
 }): Promise<IntegratorSwapParams> => {
   const adminKeypair = wallet.getAdminKeypair();
@@ -4092,14 +4104,29 @@ const buildAdminIntegratorConfig = async ({
 
   let referralFeeBps = baseFeeBps;
   try {
-    const priceLookup = await resolveTokenPriceUSD({ isSol: true });
-    const solPrice = priceLookup?.price ?? 0;
+    const tradeIsSol =
+      tradeMint === WSOL_MINT || tradeTicker.trim().toUpperCase() === "SOL";
+    const [tradePriceLookup, solPriceLookup] = await Promise.all([
+      resolveTokenPriceUSD({
+        tokenMint: tradeMint,
+        tokenTicker: tradeTicker,
+        isSol: tradeIsSol,
+      }),
+      resolveTokenPriceUSD({ isSol: true }),
+    ]);
+    const tradePriceUsd = tradePriceLookup?.price ?? 0;
+    const solPrice =
+      (tradeIsSol ? tradePriceLookup?.price : undefined) ??
+      solPriceLookup?.price ??
+      0;
     const deficitLamports =
       solFeeBufferLamports ??
       Math.max(JUPITER_MIN_SOL_BALANCE_LAMPORTS, USER_SOL_MAX_BUFFER_LAMPORTS);
     referralFeeBps = calculateAdminPayerFeeBps({
       baseFeeBps: referralFeeBps,
-      tradeLamports,
+      tradeAmountRaw,
+      tradeDecimals,
+      tradePriceUsd,
       deficitLamports,
       solPriceUsd: solPrice,
     });
