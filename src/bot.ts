@@ -6,7 +6,7 @@ import { WalletManager } from "./utils/wallet";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import * as anchor from "@coral-xyz/anchor";
 import { EventParser } from "@coral-xyz/anchor";
-import { PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey } from "@solana/web3.js";
 import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
 import {
@@ -99,7 +99,11 @@ import {
 import { recentUpdateGuard } from "./utils/recent-update";
 import { resolveTokenPriceUSD } from "./utils/prices";
 import { resolveIntegratorSwapParams } from "./utils/integrator-fees";
-import { getReferralConfigForMint } from "./utils/token-registry";
+import type { IntegratorSwapParams } from "./utils/integrator-fees";
+import {
+  getReferralConfigForMint,
+  type ReferralTokenConfigEntry,
+} from "./utils/token-registry";
 import {
   calculateAdminPayerFeeBps,
   computeRequiredAdminLamports,
@@ -911,12 +915,13 @@ const prepareTokenTradeQuote = async ({
     Promise.resolve(outputFactory(factoryContext)),
   ]);
 
+  const referralConfig = getReferralConfigForMint(inputAsset.mint);
+
   let shouldApplySolFeeBuffer =
     inputAsset.applySolFeeBuffer ?? inputAsset.ticker === "SOL";
 
   // If SOL referral and we know an admin payer will cover gas (either registry says so or user picked MAX which we will force to admin payer), drop the buffer.
   if (shouldApplySolFeeBuffer && inputAsset.ticker === "SOL") {
-    const referralConfig = getReferralConfigForMint(inputAsset.mint);
     if (shouldSkipSolFeeBuffer(inputAsset, amountInput, referralConfig)) {
       shouldApplySolFeeBuffer = false;
     }
@@ -1038,69 +1043,34 @@ const prepareTokenTradeQuote = async ({
     inputAsset.ticker === "SOL" &&
     amountResolution.normalizedAmount === "max"
   ) {
-    const referralConfig = getReferralConfigForMint(inputAsset.mint);
     if (referralConfig) {
-      const adminKeypair = wallet.getAdminKeypair();
-      const adminBalance = await wallet
-        .getConnection()
-        .getBalance(adminKeypair.publicKey);
-      const rentReserveLamports = await getSolWrapRentReserveLamports();
-      const extraAtaLamports = rentReserveLamports; // approximate one more ATA
-      const priorityBufferLamports = Math.max(
-        200_000, // ~0.0002 SOL
-        Math.floor(JUPITER_MIN_SOL_BALANCE_LAMPORTS * 0.2)
-      );
-      const requiredLamports = computeRequiredAdminLamports(
-        JUPITER_MIN_SOL_BALANCE_LAMPORTS,
-        rentReserveLamports,
-        extraAtaLamports,
-        priorityBufferLamports
-      );
-
-      if (adminBalance < requiredLamports) {
-        throw new Error(
-          `Integrator gas payer is low on SOL. Need at least ${wallet.formatSolBalance(
-            requiredLamports
-          )} in admin wallet to cover rent and fees.`
-        );
-      }
-
-      console.log(
-        `Using admin payer for SOL swap. Balance=${adminBalance} required=${requiredLamports}`
-      );
-
-      const adminKey = adminKeypair.publicKey.toBase58();
-      integratorConfig = {
-        referralAccount: referralConfig.referralAccount,
-        referralFeeBps:
+      integratorConfig = await buildAdminIntegratorConfig({
+        referralConfig,
+        baseFeeBps:
           integratorConfig?.referralFeeBps ??
           referralConfig.baseFeeBps ??
           85,
-        payer: adminKey,
-        closeAuthority: adminKey,
-        payerKind: "admin",
-        adminBalanceLamports: adminBalance,
-        adminRequiredLamports: requiredLamports,
-      };
-      // Add a surcharge to reimburse the admin payer based on missing SOL buffer.
-      try {
-        const priceLookup = await resolveTokenPriceUSD({ isSol: true });
-        const solPrice = priceLookup?.price ?? 0;
-        const deficitLamports =
-          solFeeBufferLamports ?? JUPITER_MIN_SOL_BALANCE_LAMPORTS;
-        integratorConfig.referralFeeBps = calculateAdminPayerFeeBps({
-          baseFeeBps: integratorConfig.referralFeeBps ?? 85,
-          tradeLamports: amountResolution.rawAmount,
-          deficitLamports,
-          solPriceUsd: solPrice,
-        });
-      } catch (surchargeError) {
-        console.warn(
-          "Failed to compute admin payer surcharge, falling back to base referral fee",
-          surchargeError
-        );
-      }
+        tradeLamports: amountResolution.rawAmount,
+        solFeeBufferLamports: solFeeBufferLamports,
+      });
     }
+  }
+
+  const needsAdminPayer =
+    referralConfig &&
+    snapshot.solBalance <
+      Math.max(USER_SOL_MAX_BUFFER_LAMPORTS, JUPITER_MIN_SOL_BALANCE_LAMPORTS);
+
+  if (needsAdminPayer && integratorConfig?.payerKind !== "admin") {
+    integratorConfig = await buildAdminIntegratorConfig({
+      referralConfig,
+      baseFeeBps:
+        integratorConfig?.referralFeeBps ??
+        referralConfig.baseFeeBps ??
+        85,
+      tradeLamports: amountResolution.rawAmount,
+      solFeeBufferLamports,
+    });
   }
 
   const preparedContext: PreparedTradeQuoteContext = {
@@ -3871,6 +3841,11 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
         ? inferredOutputDecimals
         : 9;
 
+      await ensureUserSolBufferForSwap({
+        quote,
+        userKeypair: keypair,
+      });
+
       // Use Jupiter execution method
       txSignature = await swapManager.executeJupiterSwap(
         {
@@ -3976,9 +3951,148 @@ registerWalletActionMenuHandler({
         emptyLabel: "❌ No tokens available to swap",
       },
     },
-    successAck: "💱 Select token to swap from",
+  successAck: "💱 Select token to swap from",
   }),
 });
+
+const safeBigIntToNumber = (value: bigint): number => {
+  const maxSafe = BigInt(Number.MAX_SAFE_INTEGER);
+  const minSafe = BigInt(Number.MIN_SAFE_INTEGER);
+
+  if (value > maxSafe) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  if (value < minSafe) {
+    return Number.MIN_SAFE_INTEGER;
+  }
+  return Number(value);
+};
+
+const ensureUserSolBufferForSwap = async ({
+  quote,
+  userKeypair,
+}: {
+  quote: SwapQuote;
+  userKeypair: Keypair;
+}): Promise<void> => {
+  const providerQuote = quote.providerQuote;
+  if (!providerQuote) {
+    return;
+  }
+
+  if (quote.inputMint !== WSOL_MINT && quote.inputMint !== "SOL") {
+    return;
+  }
+
+  const routeLamports =
+    (providerQuote.rentFeeLamports ?? 0) +
+    (providerQuote.prioritizationFeeLamports ?? 0) +
+    (providerQuote.signatureFeeLamports ?? 0);
+
+  const slack = Math.ceil(routeLamports * 0.25) + 200_000;
+  const requiredLeftover = Math.max(
+    routeLamports,
+    slack,
+    USER_SOL_MAX_BUFFER_LAMPORTS
+  );
+
+  if (requiredLeftover <= 0) {
+    return;
+  }
+
+  const userBalance = await wallet
+    .getConnection()
+    .getBalance(userKeypair.publicKey);
+  const amountLamports = quote.inputAmountRaw
+    ? BigInt(quote.inputAmountRaw)
+    : 0n;
+  const leftover = BigInt(userBalance) - amountLamports;
+  const requiredLeftoverBig = BigInt(requiredLeftover);
+
+  if (leftover >= requiredLeftoverBig) {
+    return;
+  }
+
+  const deficitLamports = requiredLeftoverBig - leftover;
+  const formattedRequired = wallet.formatSolBalance(requiredLeftover);
+  const formattedRoute = wallet.formatSolBalance(routeLamports);
+  const formattedDeficit = wallet.formatSolBalance(
+    safeBigIntToNumber(deficitLamports)
+  );
+
+  throw new Error(
+    `This route (${providerQuote.router ?? "iris"}) needs ${formattedRoute} SOL for rent and expects you to keep ${formattedRequired} SOL in the wallet. Reduce the swap amount or keep ${formattedDeficit} more SOL before retrying.`
+  );
+};
+
+const buildAdminIntegratorConfig = async ({
+  referralConfig,
+  baseFeeBps,
+  tradeLamports,
+  solFeeBufferLamports,
+}: {
+  referralConfig: ReferralTokenConfigEntry;
+  baseFeeBps: number;
+  tradeLamports: number;
+  solFeeBufferLamports?: number;
+}): Promise<IntegratorSwapParams> => {
+  const adminKeypair = wallet.getAdminKeypair();
+  const rentReserveLamports = await getSolWrapRentReserveLamports();
+  const extraAtaLamports = rentReserveLamports;
+  const priorityBufferLamports = Math.max(
+    200_000,
+    Math.floor(JUPITER_MIN_SOL_BALANCE_LAMPORTS * 0.2)
+  );
+  const requiredLamports = computeRequiredAdminLamports(
+    JUPITER_MIN_SOL_BALANCE_LAMPORTS,
+    rentReserveLamports,
+    extraAtaLamports,
+    priorityBufferLamports
+  );
+  const adminBalance = await wallet
+    .getConnection()
+    .getBalance(adminKeypair.publicKey);
+
+  if (adminBalance < requiredLamports) {
+    throw new Error(
+      `Integrator gas payer is low on SOL. Need at least ${wallet.formatSolBalance(
+        requiredLamports
+      )} to cover rent and priority fees.`
+    );
+  }
+
+  let referralFeeBps = baseFeeBps;
+  try {
+    const priceLookup = await resolveTokenPriceUSD({ isSol: true });
+    const solPrice = priceLookup?.price ?? 0;
+    const deficitLamports =
+      solFeeBufferLamports ??
+      Math.max(JUPITER_MIN_SOL_BALANCE_LAMPORTS, USER_SOL_MAX_BUFFER_LAMPORTS);
+    referralFeeBps = calculateAdminPayerFeeBps({
+      baseFeeBps: referralFeeBps,
+      tradeLamports,
+      deficitLamports,
+      solPriceUsd: solPrice,
+    });
+  } catch (surchargeError) {
+    console.warn(
+      "Failed to compute admin payer surcharge, falling back to base referral fee",
+      surchargeError
+    );
+  }
+
+  const adminKey = adminKeypair.publicKey.toBase58();
+
+  return {
+    referralAccount: referralConfig.referralAccount,
+    referralFeeBps,
+    payer: adminKey,
+    closeAuthority: adminKey,
+    payerKind: "admin",
+    adminBalanceLamports: adminBalance,
+    adminRequiredLamports: requiredLamports,
+  };
+};
 
 // ================================
 // WALLET DATA CACHE
