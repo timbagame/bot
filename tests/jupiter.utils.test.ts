@@ -190,7 +190,7 @@ describe("JupiterClient referral URL params", () => {
     const closeAuthority = "5mo3n3ed58N8LSnMSrhMfyQyw4MKWmNBp8QtUafpJwwt";
     const client = new JupiterClient(
       "https://lite-api.jup.ag",
-      (async (input) => {
+      (async (input: RequestInfo) => {
         const url = typeof input === "string" ? input : input.toString();
         urls.push(url);
 
