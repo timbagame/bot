@@ -1100,6 +1100,18 @@ const prepareTokenTradeQuote = async ({
       ...(summaryExtras?.(preparedContext) ?? {}),
     },
     quoteFetcher: async () => {
+      const integratorForQuote =
+        outputAsset.ticker === "SOL"
+          ? integratorConfig
+          : integratorConfig
+          ? {
+              ...integratorConfig,
+              payer: userKeypair.publicKey.toBase58(),
+              closeAuthority: userKeypair.publicKey.toBase58(),
+              payerKind: "user" as const,
+            }
+          : null;
+
       const quote = await swapManager.getQuote({
         inputMint: inputAsset.mint,
         outputMint: outputAsset.mint,
@@ -1109,7 +1121,7 @@ const prepareTokenTradeQuote = async ({
         outputDecimals: outputAsset.decimals,
         inputTicker: inputAsset.ticker.toUpperCase(),
         outputTicker: outputAsset.ticker.toUpperCase(),
-        integrator: integratorConfig,
+        integrator: integratorForQuote,
       });
       if (!quote) {
         throw new Error(
