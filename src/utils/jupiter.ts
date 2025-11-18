@@ -303,8 +303,7 @@ export class JupiterClient {
         throw new Error(`Jupiter order error${codeSuffix}: ${errorMessage}`);
       }
 
-      const referralApplied =
-        data.referralApplied ?? Boolean(effectiveParams.referralAccount);
+      const referralApplied = Boolean(data.referralApplied);
       const normalized = {
         ...this.normalizeQuote(data),
         referralApplied,

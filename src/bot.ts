@@ -961,6 +961,14 @@ const prepareTokenTradeQuote = async ({
     }
   }
 
+  if (
+    solFeeBufferLamports === undefined &&
+    referralConfig &&
+    inputAsset.ticker !== "SOL"
+  ) {
+    solFeeBufferLamports = JUPITER_MIN_SOL_BALANCE_LAMPORTS;
+  }
+
   const userKeypair = wallet.getKeyPair(telegramId);
 
   const shouldProbeGasless =
@@ -4012,6 +4020,24 @@ const ensureUserSolBufferForSwap = async ({
     return;
   }
 
+  const userBalance = await wallet
+    .getConnection()
+    .getBalance(userKeypair.publicKey);
+
+  const amountLamports = quote.inputAmountRaw
+    ? BigInt(quote.inputAmountRaw)
+    : 0n;
+
+  if (userBalance < safeBigIntToNumber(amountLamports)) {
+    throw new Error(
+      `Insufficient balance to attempt this swap. Add SOL or reduce the amount.`
+    );
+  }
+
+  if (quote.integrator?.payerKind === "admin") {
+    return;
+  }
+
   const routeLamports =
     (providerQuote.rentFeeLamports ?? 0) +
     (providerQuote.prioritizationFeeLamports ?? 0) +
@@ -4026,19 +4052,6 @@ const ensureUserSolBufferForSwap = async ({
 
   if (requiredLeftover <= 0) {
     return;
-  }
-
-  const userBalance = await wallet
-    .getConnection()
-    .getBalance(userKeypair.publicKey);
-  const amountLamports = quote.inputAmountRaw
-    ? BigInt(quote.inputAmountRaw)
-    : 0n;
-
-  if (userBalance < safeBigIntToNumber(amountLamports)) {
-    throw new Error(
-      `Insufficient balance to attempt this swap. Add SOL or reduce the amount.`
-    );
   }
 
   const leftover = BigInt(userBalance) - amountLamports;
@@ -4117,11 +4130,16 @@ const buildAdminIntegratorConfig = async ({
       }),
       resolveTokenPriceUSD({ isSol: true }),
     ]);
-    const tradePriceUsd = tradePriceLookup?.price ?? 0;
-    const solPrice =
-      (tradeIsSol ? tradePriceLookup?.price : undefined) ??
-      solPriceLookup?.price ??
-      0;
+    const tradePriceUsd = tradeIsSol
+      ? tradePriceLookup?.price ?? 0
+      : tradePriceLookup &&
+          tradePriceLookup.identifier.toUpperCase() !== "SOL" &&
+          tradePriceLookup.identifier !== WSOL_MINT
+        ? tradePriceLookup.price
+        : 0;
+    const solPrice = tradeIsSol
+      ? tradePriceLookup?.price ?? solPriceLookup?.price ?? 0
+      : solPriceLookup?.price ?? 0;
     const deficitLamports =
       solFeeBufferLamports ??
       Math.max(JUPITER_MIN_SOL_BALANCE_LAMPORTS, USER_SOL_MAX_BUFFER_LAMPORTS);
