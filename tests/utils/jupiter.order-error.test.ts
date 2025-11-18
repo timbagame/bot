@@ -70,3 +70,23 @@ test("JupiterClient surfaces gasless order error message", async () => {
     })
   ).rejects.toThrow("Minimum $10 for gasless");
 });
+
+test("Jupiter executeOrder surfaces stringify failures without crashing", async () => {
+  const circular: any = { signature: "derp" };
+  circular.self = circular;
+  const client = new JupiterClient("https://lite-api.jup.ag", async () =>
+    ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => circular,
+    } as any)
+  );
+
+  await expect(
+    client.executeOrder({
+      requestId: "req",
+      signedTransaction: "tx",
+    })
+  ).rejects.toThrow(/Failed to execute Jupiter order:/);
+});

@@ -250,6 +250,9 @@ const getSolWrapRentReserveLamports = async (): Promise<number> => {
   return fallback;
 };
 
+export const __test_refreshSolWrapRentReserveLamports =
+  getSolWrapRentReserveLamports;
+
 const getCachedTokenMetadata = async (mint: string) => {
   const now = Date.now();
   const cached = cachedTokenMetadata.get(mint);

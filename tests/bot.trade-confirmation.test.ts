@@ -87,4 +87,21 @@ describe("formatTradeConfirmationSummary", () => {
     });
     expect(summary.message).toContain("<b>Fee:</b> 0.85%");
   });
+
+  test("formats large integrator fee bps correctly", () => {
+    const summary = formatTradeConfirmationSummary({
+      ...baseInput,
+      quote: {
+        ...defaultQuote,
+        integrator: {
+          referralAccount: "dummy",
+          referralFeeBps: 255,
+          payer: "user",
+          closeAuthority: "user",
+          payerKind: "user",
+        },
+      },
+    });
+    expect(summary.message).toContain("2.55%");
+  });
 });
