@@ -1080,7 +1080,7 @@ const prepareTokenTradeQuote = async ({
     outputIsSol &&
     amountResolution.normalizedAmount === "max"
   ) {
-    if (referralConfig) {
+    if (referralConfig && integratorConfig?.payerKind !== "admin") {
       integratorConfig = await buildAdminIntegratorConfig({
         referralConfig,
         baseFeeBps:
