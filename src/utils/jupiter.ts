@@ -285,6 +285,8 @@ export class JupiterClient {
             amount: effectiveParams.amount,
             swapMode: effectiveParams.swapMode,
             taker: effectiveParams.taker,
+            payer: effectiveParams.payer,
+            closeAuthority: effectiveParams.closeAuthority,
           };
           return this.fetchOrder(fallbackParams, false);
         }
