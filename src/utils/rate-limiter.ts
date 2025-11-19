@@ -25,6 +25,7 @@ export class SlidingWindowRateLimiter {
   private readonly windowMs: number;
   private readonly now: () => number;
   private readonly buckets = new Map<string, SlidingWindowEntry>();
+  private lastPruneAt = 0;
 
   constructor(windowMs: number = USER_WALLET_RPC_WINDOW_MS, now: () => number = () => Date.now()) {
     if (!Number.isFinite(windowMs) || windowMs <= 0) {
@@ -43,9 +44,13 @@ export class SlidingWindowRateLimiter {
     }
 
     const now = this.now();
+    this.pruneExpiredBuckets(now);
     const entry = this.buckets.get(normalizedKey);
 
     if (!entry || now - entry.windowStart >= this.windowMs) {
+      if (entry) {
+        this.buckets.delete(normalizedKey);
+      }
       this.buckets.set(normalizedKey, { windowStart: now, count: 1 });
       return {
         allowed: true,
@@ -75,6 +80,24 @@ export class SlidingWindowRateLimiter {
   }
 
   getActiveEntries(): number {
+    this.pruneExpiredBuckets(this.now());
     return this.buckets.size;
+  }
+
+  private pruneExpiredBuckets(currentTime: number): void {
+    if (this.buckets.size === 0) {
+      return;
+    }
+
+    if (currentTime - this.lastPruneAt < this.windowMs) {
+      return;
+    }
+
+    this.lastPruneAt = currentTime;
+    for (const [key, entry] of this.buckets.entries()) {
+      if (currentTime - entry.windowStart >= this.windowMs) {
+        this.buckets.delete(key);
+      }
+    }
   }
 }
