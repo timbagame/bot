@@ -1,6 +1,7 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { fetchJupiterTokenMetadata } from "./jupiter";
 import type { FetchLike } from "../types";
+import { deserializeMetadata } from "@metaplex-foundation/mpl-token-metadata";
 
 export interface TokenMetadataResult {
   decimals: number;
@@ -37,25 +38,21 @@ async function tryMetaplexMetadata(
   mintAddress: string,
   ensureDecimals: (value?: number | null) => Promise<number>
 ): Promise<TokenMetadataResult | null> {
-  try {
-    const mint = new PublicKey(mintAddress);
-    const metadataPda = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from("metadata"),
-        METAPLEX_PROGRAM_ID.toBuffer(),
-        mint.toBuffer(),
-      ],
-      METAPLEX_PROGRAM_ID
-    )[0];
+    try {
+      const mint = new PublicKey(mintAddress);
+      const metadataPda = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from("metadata"),
+          METAPLEX_PROGRAM_ID.toBuffer(),
+          mint.toBuffer(),
+        ],
+        METAPLEX_PROGRAM_ID
+      )[0];
 
-    const metadataAccount = await connection.getAccountInfo(metadataPda);
-    if (!metadataAccount?.data) {
-      return null;
-    }
-
-    const { deserializeMetadata } = await import(
-      "@metaplex-foundation/mpl-token-metadata"
-    );
+      const metadataAccount = await connection.getAccountInfo(metadataPda);
+      if (!metadataAccount?.data) {
+        return null;
+      }
     const metadata = deserializeMetadata(metadataAccount as any);
     const rawSymbol = (metadata as any).symbol ?? "";
     const rawName = (metadata as any).name ?? "";

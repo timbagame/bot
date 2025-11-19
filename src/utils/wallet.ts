@@ -50,6 +50,7 @@ import {
 } from "./token-programs";
 import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
 import { TokenDatabase } from "./token-database";
+import { TokenManager } from "./token-manager";
 import {
   DEFAULT_MAINNET_ENDPOINT,
   RpcEndpointManager,
@@ -1203,7 +1204,6 @@ export class WalletManager {
   ): Promise<void> {
     console.log(`🔄 Auto-registering unknown token with balance: ${mint}`);
     try {
-      const { TokenManager } = await import("./token-manager");
       const tokenManager = TokenManager.getInstance();
       const registration = await tokenManager.registerTokenIfNeeded({
         mint,
