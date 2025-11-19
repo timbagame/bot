@@ -64,4 +64,22 @@ describe("SlidingWindowRateLimiter", () => {
     expect(allowedCount).toBe(1);
     expect(results.some((result: any) => !result.allowed)).toBe(true);
   });
+
+  test("rejects invalid budgets before touching buckets", () => {
+    const windowMs = 5_000;
+    const limiter = new SlidingWindowRateLimiter(windowMs, () => 0);
+    const invalidBudgets = [0, -1, Number.NaN, Number.POSITIVE_INFINITY];
+
+    for (const invalid of invalidBudgets) {
+      const result = limiter.consume("user", invalid);
+      expect(result.allowed).toBe(false);
+      expect(result.remaining).toBe(0);
+      expect(result.resetInMs).toBe(windowMs);
+    }
+
+    expect(limiter.getActiveEntries()).toBe(0);
+
+    const valid = limiter.consume("user", 1);
+    expect(valid.allowed).toBe(true);
+  });
 });

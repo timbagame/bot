@@ -305,3 +305,7 @@ export async function resolveTokenPriceUSD({
 
   return null;
 }
+
+export function __test_resetPriceCache(): void {
+  priceCache.clear();
+}
