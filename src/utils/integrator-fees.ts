@@ -1,7 +1,13 @@
 import { JUPITER_MIN_SOL_BALANCE_LAMPORTS, LAMPORTS_PER_SOL, WSOL_MINT } from "./constants";
 import { getReferralConfigForMint, type ReferralTokenConfigEntry } from "./token-registry";
 import { resolveTokenPriceUSD } from "./prices";
-import { clampReferralFeeBps } from "./admin-payer-surcharge";
+import {
+  clampReferralFeeBps,
+  calculateReferralFeeBps,
+  DEFAULT_REFERRAL_BASE_FEE_BPS,
+  DEFAULT_MAX_EXTRA_FEE_BPS,
+  MAX_REFERRAL_FEE_BPS,
+} from "./admin-payer-surcharge";
 
 export type IntegratorPayerKind = "user" | "admin";
 
@@ -26,10 +32,6 @@ export interface IntegratorFeeContext {
   availableSolLamports: number;
   solFeeBufferLamports?: number;
 }
-
-const DEFAULT_REFERRAL_BASE_FEE_BPS = 85;
-const MAX_REFERRAL_FEE_BPS = 255;
-const DEFAULT_MAX_EXTRA_FEE_BPS = 100;
 
 const getReferralTargetForPair = (
   inputMint: string,
@@ -153,20 +155,12 @@ export const resolveIntegratorSwapParams = async (
     );
   }
 
-  const rawExtraBps = Math.ceil((deficitUsd / tradeUsd) * 10_000);
-  const maxExtraBps =
-    referralConfig.maxExtraFeeBps ?? DEFAULT_MAX_EXTRA_FEE_BPS;
-  if (rawExtraBps > maxExtraBps) {
-    throw new Error(
-      "Trade is too small to cover integrator gas payer reimbursement. Add SOL or increase trade size."
-    );
-  }
-
-  const referralFeeBps = clampReferralFeeBps(
-    baseFeeBps + rawExtraBps,
-    50,
-    MAX_REFERRAL_FEE_BPS
-  );
+  const referralFeeBps = calculateReferralFeeBps({
+    baseFeeBps,
+    tradeUsd,
+    deficitUsd,
+    maxExtraBps: referralConfig.maxExtraFeeBps ?? DEFAULT_MAX_EXTRA_FEE_BPS,
+  });
 
   return {
     referralAccount: referralConfig.referralAccount,

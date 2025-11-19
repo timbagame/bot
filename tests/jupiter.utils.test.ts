@@ -3,12 +3,11 @@ import {
   getJupiterMint,
   isPriceImpactTooHigh,
   validateSlippage,
-} from "../src/utils/jupiter";
-import {
   JupiterClient,
   type JupiterQuoteResponse,
   type JupiterUltraOrderResponse,
 } from "../src/utils/jupiter";
+import { createJupiterFetchStub } from "./helpers/test-stubs";
 
 describe("jupiter utils", () => {
   test("getJupiterMint maps SOL to WSOL mint", () => {
@@ -129,26 +128,19 @@ describe("JupiterClient referral URL params", () => {
     ...overrides,
   });
 
-  const createStubFetch =
-    (
-      capture: { url?: string }
-    ): ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) =>
-    async (input) => {
-      capture.url = typeof input === "string" ? input : input.toString();
-      return {
-        ok: true,
-        status: 200,
-        statusText: "OK",
-        json: async () => createOrderResponse(),
-        text: async () => JSON.stringify(createOrderResponse()),
-      } as unknown as Response;
-    };
+  const makeSuccessResponse = (
+    overrides?: Partial<JupiterUltraOrderResponse>
+  ) =>
+    new Response(JSON.stringify(createOrderResponse(overrides)), {
+      status: 200,
+      statusText: "OK",
+    });
 
   test("falls back to payer for taker when missing", async () => {
     const capture: { url?: string } = {};
     const client = new JupiterClient(
       "https://lite-api.jup.ag",
-      createStubFetch(capture)
+      createJupiterFetchStub(capture, async () => makeSuccessResponse())
     );
 
     await client.getQuote({
@@ -168,7 +160,7 @@ describe("JupiterClient referral URL params", () => {
     const explicitTaker = "2DxM4Qf7RZwzE9HyfYDp2mjNgS8RX5UCb7Yiz2ZGsY2Q";
     const client = new JupiterClient(
       "https://lite-api.jup.ag",
-      createStubFetch(capture)
+      createJupiterFetchStub(capture, async () => makeSuccessResponse())
     );
 
     await client.getQuote({
@@ -190,11 +182,8 @@ describe("JupiterClient referral URL params", () => {
     const closeAuthority = "5mo3n3ed58N8LSnMSrhMfyQyw4MKWmNBp8QtUafpJwwt";
     const client = new JupiterClient(
       "https://lite-api.jup.ag",
-      (async (input: RequestInfo) => {
-        const url = typeof input === "string" ? input : input.toString();
-        urls.push(url);
-
-        if (urls.length === 1) {
+      createJupiterFetchStub({ urls }, async (_, call) => {
+        if (call === 1) {
           return {
             ok: false,
             status: 400,
@@ -203,14 +192,8 @@ describe("JupiterClient referral URL params", () => {
           } as unknown as Response;
         }
 
-        return {
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => createOrderResponse(),
-          text: async () => JSON.stringify(createOrderResponse()),
-        } as unknown as Response;
-      }) as any
+        return makeSuccessResponse();
+      })
     );
 
     await client.getQuote({

@@ -54,14 +54,14 @@ const shouldWithdrawToken = async (
   return { shouldWithdraw: true, formattedPending, tokenUsdValue };
 };
 
-async function withdrawTokenFee(
+async function processTokenFee(
   program: anchor.Program<Timba>,
   connection: anchor.web3.Connection,
   wallet: WalletManager,
   adminBundle: KeypairBundle,
   operatorBundle: KeypairBundle,
   config: TokenConfig
-): Promise<void> {
+): Promise<boolean> {
   const mint = new anchor.web3.PublicKey(config.mint);
   const [oraclePda] = anchor.web3.PublicKey.findProgramAddressSync(
     [Buffer.from("oracle")],
@@ -81,14 +81,14 @@ async function withdrawTokenFee(
     console.warn(
       `⚠️  No game token configuration found for ${config.ticker}; skipping.`
     );
-    return;
+    return false;
   }
 
   const gameToken = await program.account.gameToken.fetch(gameTokenPda);
   const pendingFees = BigInt(gameToken.feeAmount.toString());
   if (pendingFees === 0n) {
     console.log(`ℹ️  No pending fees for ${config.ticker}; skipping.`);
-    return;
+    return false;
   }
 
   const metadata = await wallet.getTokenMetadata(config.mint);
@@ -98,7 +98,7 @@ async function withdrawTokenFee(
     pendingFees,
     metadata.decimals
   );
-  if (!shouldWithdraw) return;
+  if (!shouldWithdraw) return false;
 
   const {
     address: operatorAta,
@@ -158,9 +158,10 @@ async function withdrawTokenFee(
   );
 
   console.log(`   ✅ Withdrawn. Transaction: ${tx}`);
+  return true;
 }
 
-async function withdrawReferralFees(
+async function runReferralSweep(
   connection: anchor.web3.Connection,
   adminBundle: KeypairBundle
 ): Promise<void> {
@@ -224,7 +225,7 @@ async function main() {
 
   for (const token of TOKENS) {
     try {
-      await withdrawTokenFee(
+      await processTokenFee(
         program,
         connection,
         wallet,
@@ -238,7 +239,7 @@ async function main() {
   }
 
   try {
-    await withdrawReferralFees(connection, adminBundle);
+    await runReferralSweep(connection, adminBundle);
   } catch (error) {
     console.error("❌ Failed withdrawing referral fees:", error);
   }

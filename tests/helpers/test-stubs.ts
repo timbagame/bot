@@ -30,3 +30,28 @@ export const stubFeeBudgetWrapZero = () => {
     (fb as any).getDefaultWrapFeeBufferLamports = originalDefault;
   };
 };
+
+export type JupiterFetchHandler = (
+  url: string,
+  callCount: number,
+  init?: RequestInit
+) => Promise<Response>;
+
+export const createJupiterFetchStub = (
+  capture: { url?: string; urls?: string[] },
+  handler: JupiterFetchHandler
+) => {
+  let callCount = 0;
+  return async (
+    input: RequestInfo | URL,
+    init?: RequestInit
+  ): Promise<Response> => {
+    const url = typeof input === "string" ? input : input.toString();
+    capture.url = url;
+    if (capture.urls) {
+      capture.urls.push(url);
+    }
+    callCount += 1;
+    return handler(url, callCount, init);
+  };
+};
