@@ -17,6 +17,10 @@ export interface SwapQuote {
   providerQuoteTimestamp?: number;
   integrator?: IntegratorSwapParams | null;
   integratorApplied?: boolean;
+  inputDecimals?: number;
+  outputDecimals?: number;
+  inputTicker?: string;
+  outputTicker?: string;
 }
 
 export interface SwapRequest {

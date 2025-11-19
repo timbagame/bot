@@ -3,7 +3,6 @@ import { Keypair } from "@solana/web3.js";
 
 import {
   __test_prepareIntegratorForQuote as prepareIntegratorForQuote,
-  __test_ensureUserSolBufferForSwap as ensureUserSolBufferForSwap,
   __test_buildAdminIntegratorConfig as buildAdminIntegratorConfig,
   __test_setSolWrapRentReserveLamports,
   __test_getSolWrapRentReserveLamports,
@@ -15,6 +14,8 @@ import { stubWalletConnection, stubAdminKeypair } from "./helpers/test-stubs";
 import { USER_SOL_MAX_BUFFER_LAMPORTS, WSOL_MINT } from "../src/utils/constants";
 import { FeeBudgetManager } from "../src/utils/fee-budget";
 import * as priceModule from "../src/utils/prices";
+import { SwapService } from "../src/utils/swap/service";
+import type { SwapBackend } from "../src/utils/swap/service";
 
 // Minimal mock quote to exercise buffer checks
 const buildQuote = (inputMint: string, routeLamports: number, amountRaw: number) => ({
@@ -97,28 +98,45 @@ describe("prepareIntegratorForQuote", () => {
   });
 });
 
-describe("ensureUserSolBufferForSwap", () => {
+describe("SwapService.ensureFeeBuffer", () => {
+  const stubBackend: SwapBackend = {
+    getQuote: vi.fn(),
+    executeJupiterSwap: vi.fn(),
+  };
+  const service = new SwapService(wallet as any, stubBackend);
+
   test("throws clear error when swap amount exceeds balance (avoid BigInt underflow)", async () => {
     const user = Keypair.generate();
-    // Mock balance to 1 lamport
-    const originalGetConnection = wallet.getConnection;
-    (wallet as any).getConnection = () => ({ getBalance: async () => 1 });
+    const restoreConn = stubWalletConnection(1);
 
     const quote = buildQuote("So11111111111111111111111111111111111111112", 1000, 2);
 
     await expect(
-      ensureUserSolBufferForSwap({ quote: quote as any, userKeypair: user })
+      service.ensureFeeBuffer(quote as any, user)
     ).rejects.toThrow(/Insufficient balance/);
 
-    (wallet as any).getConnection = originalGetConnection;
+    restoreConn();
+  });
+
+  test("skips buffer enforcement for admin payer routes", async () => {
+    const user = Keypair.generate();
+    const restoreConn = stubWalletConnection(1);
+
+    const quote = {
+      ...buildQuote("So11111111111111111111111111111111111111112", 0, 1),
+      integrator: { payerKind: "admin" },
+    } as any;
+
+    await expect(
+      service.ensureFeeBuffer(quote as any, user)
+    ).resolves.toBeUndefined();
+
+    restoreConn();
   });
 
   test("enforces USER_SOL_MAX_BUFFER when provider quote lacks rent details", async () => {
     const user = Keypair.generate();
-    const originalGetConnection = wallet.getConnection;
-    (wallet as any).getConnection = () => ({
-      getBalance: async () => USER_SOL_MAX_BUFFER_LAMPORTS,
-    });
+    const restoreConn = stubWalletConnection(USER_SOL_MAX_BUFFER_LAMPORTS);
 
     const quote = {
       inputMint: WSOL_MINT,
@@ -129,12 +147,12 @@ describe("ensureUserSolBufferForSwap", () => {
     } as any;
 
     await expect(
-      ensureUserSolBufferForSwap({ quote, userKeypair: user })
+      service.ensureFeeBuffer(quote as any, user)
     ).rejects.toThrow(
       new RegExp(wallet.formatSolBalance(USER_SOL_MAX_BUFFER_LAMPORTS))
     );
 
-    (wallet as any).getConnection = originalGetConnection;
+    restoreConn();
   });
 });
 
