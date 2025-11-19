@@ -8,6 +8,7 @@ import {
   type JupiterUltraOrderResponse,
 } from "../src/utils/jupiter";
 import { createJupiterFetchStub } from "./helpers/test-stubs";
+import { makeJupiterOrderResponse } from "./helpers/jupiter-factories";
 
 describe("jupiter utils", () => {
   test("getJupiterMint maps SOL to WSOL mint", () => {
@@ -96,45 +97,39 @@ describe("JupiterClient referral URL params", () => {
     console.debug = savedConsoleDebug;
   });
 
-  const createOrderResponse = (
-    overrides: Partial<JupiterUltraOrderResponse> = {}
-  ) => ({
-    mode: "ultra",
-    inputMint,
-    outputMint,
-    inAmount: amount,
-    outAmount: "100",
-    otherAmountThreshold: "0",
-    swapMode: "ExactIn",
-    slippageBps: 100,
-    priceImpactPct: "0",
-    routePlan: [
+  const makeSuccessResponse = (overrides?: Partial<JupiterUltraOrderResponse>) =>
+    makeJupiterOrderResponse(
+      { inputMint, outputMint, amount },
       {
-        swapInfo: {
-          ammKey: "AMM",
-          label: "Jupiter",
-          inputMint,
-          outputMint,
-          inAmount: amount,
-          outAmount: "100",
-          feeAmount: "0",
-          feeMint: inputMint,
-        },
-        percent: 100,
-      },
-    ],
-    transaction: "AAAA",
-    requestId: "req-portal",
-    ...overrides,
-  });
-
-  const makeSuccessResponse = (
-    overrides?: Partial<JupiterUltraOrderResponse>
-  ) =>
-    new Response(JSON.stringify(createOrderResponse(overrides)), {
-      status: 200,
-      statusText: "OK",
-    });
+        mode: "ultra",
+        inputMint,
+        outputMint,
+        inAmount: amount,
+        outAmount: "100",
+        otherAmountThreshold: "0",
+        swapMode: "ExactIn",
+        slippageBps: 100,
+        priceImpactPct: "0",
+        routePlan: [
+          {
+            swapInfo: {
+              ammKey: "AMM",
+              label: "Jupiter",
+              inputMint,
+              outputMint,
+              inAmount: amount,
+              outAmount: "100",
+              feeAmount: "0",
+              feeMint: inputMint,
+            },
+            percent: 100,
+          },
+        ],
+        transaction: "AAAA",
+        requestId: "req-portal",
+        ...overrides,
+      }
+    );
 
   test("falls back to payer for taker when missing", async () => {
     const capture: { url?: string } = {};

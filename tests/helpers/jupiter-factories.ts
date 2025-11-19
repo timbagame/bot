@@ -26,3 +26,11 @@ export const makeJupiterQuote = (
   platformFee: null,
   ...overrides,
 });
+
+export const makeJupiterOrderResponse = (
+  quote: JupiterQuoteRequest,
+  overrides: Partial<JupiterQuoteResponse> = {}
+): Response => {
+  const body = makeJupiterQuote(quote, overrides);
+  return new Response(JSON.stringify(body), { status: 200, statusText: "OK" });
+};
