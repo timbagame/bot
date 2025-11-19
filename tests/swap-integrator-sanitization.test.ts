@@ -16,6 +16,7 @@ import { FeeBudgetManager } from "../src/utils/fee-budget";
 import * as priceModule from "../src/utils/prices";
 import { SwapService } from "../src/utils/swap/service";
 import type { SwapBackend } from "../src/utils/swap/service";
+import { calculateRouteCosts } from "../src/utils/swap/route-cost";
 
 // Minimal mock quote to exercise buffer checks
 const buildQuote = (inputMint: string, routeLamports: number, amountRaw: number) => ({
@@ -98,7 +99,7 @@ describe("prepareIntegratorForQuote", () => {
   });
 });
 
-describe("SwapService.ensureFeeBuffer", () => {
+describe("SwapService.ensureUserSolBufferForSwap", () => {
   const stubBackend: SwapBackend = {
     getQuote: vi.fn(),
     executeJupiterSwap: vi.fn(),
@@ -112,7 +113,7 @@ describe("SwapService.ensureFeeBuffer", () => {
     const quote = buildQuote("So11111111111111111111111111111111111111112", 1000, 2);
 
     await expect(
-      service.ensureFeeBuffer(quote as any, user)
+      service.ensureUserSolBufferForSwap(quote as any, user)
     ).rejects.toThrow(/Insufficient balance/);
 
     restoreConn();
@@ -128,7 +129,7 @@ describe("SwapService.ensureFeeBuffer", () => {
     } as any;
 
     await expect(
-      service.ensureFeeBuffer(quote as any, user)
+      service.ensureUserSolBufferForSwap(quote as any, user)
     ).resolves.toBeUndefined();
 
     restoreConn();
@@ -147,9 +148,40 @@ describe("SwapService.ensureFeeBuffer", () => {
     } as any;
 
     await expect(
-      service.ensureFeeBuffer(quote as any, user)
+      service.ensureUserSolBufferForSwap(quote as any, user)
     ).rejects.toThrow(
       new RegExp(wallet.formatSolBalance(USER_SOL_MAX_BUFFER_LAMPORTS))
+    );
+
+    restoreConn();
+  });
+
+  test("aligns rent-heavy enforcement with route cost helper", async () => {
+    const user = Keypair.generate();
+    const routeLamports = 2_400_000;
+    const amountLamports = 500_000;
+    const quote = buildQuote(
+      "So11111111111111111111111111111111111111112",
+      routeLamports,
+      amountLamports
+    );
+
+    const helperCosts = calculateRouteCosts(quote.providerQuote as any, {
+      paddingRatio: 0.25,
+      paddingExtraLamports: 200_000,
+      paddingRounding: "ceil",
+      baseRequiredLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
+      requiredStrategy: "max",
+    });
+
+    const restoreConn = stubWalletConnection(
+      amountLamports + helperCosts.requiredLamports - 1
+    );
+
+    await expect(
+      service.ensureUserSolBufferForSwap(quote as any, user)
+    ).rejects.toThrow(
+      new RegExp(wallet.formatSolBalance(helperCosts.requiredLamports))
     );
 
     restoreConn();
