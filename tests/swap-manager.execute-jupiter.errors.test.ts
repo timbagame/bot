@@ -145,7 +145,7 @@ describe("SwapManager.ensureAdminCanCoverRoute", () => {
 
   const baseIntegrator: IntegratorSwapParams = {
     referralAccount: "dummy",
-    referralFeeBps: 100,
+    referralFee: 100,
     payer: "payer",
     closeAuthority: "close",
     payerKind: "admin",

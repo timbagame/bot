@@ -39,7 +39,7 @@ export type {
 
 const SOL_MINT = WSOL_MINT;
 const SOL_DECIMALS = 9;
-// Jupiter often refuses ExactOut routes when the requested output is extremely
+// Jupiter often refuses routes when the requested SOL output is extremely
 // small. Floor JIT SOL requests to 0.01 SOL to stay above common liquidity /
 // per-route minimums.
 const MIN_JIT_SOL_OUT_LAMPORTS = 10_000_000;
@@ -111,11 +111,11 @@ export class SwapManager {
 
     if (request.integrator) {
       quoteRequest.referralAccount = request.integrator.referralAccount;
-      quoteRequest.referralFeeBps = request.integrator.referralFeeBps;
+      quoteRequest.referralFee = request.integrator.referralFee;
       quoteRequest.payer = request.integrator.payer;
       quoteRequest.closeAuthority = request.integrator.closeAuthority;
       console.log(
-        `   🧾 Integrator fee ${request.integrator.referralFeeBps} bps via ${request.integrator.payerKind} payer`
+        `   🧾 Integrator fee ${request.integrator.referralFee} bps via ${request.integrator.payerKind} payer`
       );
     }
 
@@ -158,7 +158,7 @@ export class SwapManager {
     const {
       userKeypair,
       tokenMint,
-      tokenDecimals,
+      tokenDecimals: _tokenDecimals,
       availableTokenAmountRaw,
       desiredLamports,
       tokenTicker = "token",
@@ -188,38 +188,44 @@ export class SwapManager {
       }
 
       const availableRaw = Math.max(Math.floor(availableTokenAmountRaw), 0);
-      const tokenDecimalsClamped = Math.max(tokenDecimals, 0);
-      const formatTokenUnits = (value: bigint | number) =>
-        formatAmount(
-          typeof value === "number" ? BigInt(Math.trunc(value)) : value,
-          tokenDecimalsClamped,
-          {
-            maxFractionDigits: Math.min(tokenDecimalsClamped, 6),
-            trim: true,
-          }
-        );
       const attemptJupiterSwap = async (
-        target: number
+        targetLamportsOut: number
       ): Promise<JustInTimeSwapResult | null> => {
         try {
-          const quote = await this.getJupiterQuote({
+          // Step 1: get a price signal with a small ExactIn quote
+          const priceProbeIn = Math.min(Math.max(1_000_000, availableRaw / 20), availableRaw); // ~1 token or 5% of balance
+          const probeQuote = await this.getJupiterQuote({
             inputMint: tokenMint,
             outputMint: SOL_MINT,
-            amount: target.toString(),
-            swapMode: "ExactOut",
+            amount: priceProbeIn.toString(),
             taker: userKeypair.publicKey.toBase58(),
           });
 
-          const requiredInput = BigInt(quote.inAmount);
-          const availableInput = BigInt(availableRaw);
+          const probeIn = BigInt(probeQuote.inAmount);
+          const probeOut = BigInt(probeQuote.outAmount);
+          if (probeOut === BigInt(0)) {
+            lastJupiterError =
+              "Jupiter returned zero output for probe quote. Route likely unavailable for this pair.";
+            return null;
+          }
 
-          if (requiredInput > availableInput) {
-            const needed = formatTokenUnits(requiredInput);
-            const available = formatTokenUnits(availableInput);
-            lastJupiterError = `Need ${needed} ${tokenTicker.toUpperCase()} available for swap but only ${available}. Top up your balance or add SOL manually.`;
-            console.log(
-              `⚠️ Jupiter route requires ${needed} ${tokenTicker.toUpperCase()} but only ${available} available.`
-            );
+          // Calculate required input (ceil) to cover the desired SOL, with 5% headroom to avoid underfunding
+          const requiredInput = ((BigInt(targetLamportsOut) * probeIn) * BigInt(105)) / (probeOut * BigInt(100));
+          const requiredInputClamped = requiredInput > BigInt(availableRaw)
+            ? BigInt(availableRaw)
+            : requiredInput;
+
+          const quote = await this.getJupiterQuote({
+            inputMint: tokenMint,
+            outputMint: SOL_MINT,
+            amount: requiredInputClamped.toString(),
+            taker: userKeypair.publicKey.toBase58(),
+          });
+
+          const outputLamports = BigInt(quote.outAmount);
+          if (outputLamports < BigInt(targetLamportsOut)) {
+            lastJupiterError =
+              "Jupiter could not provide enough SOL with available tokens. Add SOL manually.";
             return null;
           }
 
@@ -239,7 +245,7 @@ export class SwapManager {
             swapped: true,
             provider: "jupiter",
             signature,
-            lamportsReceived: target,
+            lamportsReceived: targetLamportsOut,
           };
         } catch (attemptError: any) {
           const message = attemptError?.message || String(attemptError);
@@ -261,7 +267,7 @@ export class SwapManager {
       const swapTarget = lamportsShortfall + jitFeeBuffer;
 
       // Keep JIT requests above Jupiter's tiny-amount floor. Extremely small
-      // ExactOut targets (e.g. ~0.002 SOL) routinely get "Failed to get quotes".
+      // SOL targets (e.g. ~0.002 SOL) routinely get "Failed to get quotes".
       const primaryTarget = Math.max(swapTarget, MIN_JIT_SOL_OUT_LAMPORTS);
       const secondaryTarget = Math.max(
         lamportsShortfall,
@@ -512,7 +518,7 @@ export class SwapManager {
       };
       if (cachedIntegrator) {
         refreshRequest.referralAccount = cachedIntegrator.referralAccount;
-        refreshRequest.referralFeeBps = cachedIntegrator.referralFeeBps;
+        refreshRequest.referralFee = cachedIntegrator.referralFee;
         refreshRequest.payer = cachedIntegrator.payer;
         refreshRequest.closeAuthority = cachedIntegrator.closeAuthority;
       }
@@ -529,7 +535,7 @@ export class SwapManager {
       userPublicKey: userKeypair.publicKey.toString(),
       quoteResponse: jupiterQuote,
       referralAccount: integrator?.referralAccount,
-      referralFeeBps: integrator?.referralFeeBps,
+      referralFee: integrator?.referralFee,
       payer: integrator?.payer,
       closeAuthority: integrator?.closeAuthority,
     });
@@ -633,7 +639,7 @@ export class SwapManager {
         platformFee: quote.platformFee ?? null,
         feeBps:
           quote.providerQuote?.feeBps ??
-          quote.integrator?.referralFeeBps ??
+          quote.integrator?.referralFee ??
           undefined,
       },
       inputDecimals,

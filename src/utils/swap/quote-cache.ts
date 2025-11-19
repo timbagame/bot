@@ -64,7 +64,7 @@ export class SwapQuoteCache {
       onlyDirectRoutes = false,
       swapMode = "ExactIn",
       referralAccount,
-      referralFeeBps,
+      referralFee,
       payer,
       closeAuthority,
     } = params;
@@ -79,7 +79,7 @@ export class SwapQuoteCache {
       onlyDirectRoutes,
       swapMode,
       referralAccount,
-      referralFeeBps,
+      referralFee,
       payer,
       closeAuthority,
     });

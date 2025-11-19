@@ -684,7 +684,7 @@ const formatTradeConfirmationSummary = ({
   );
 
   const feeBps =
-    quote.providerQuote?.feeBps ?? quote.integrator?.referralFeeBps ?? 0;
+    quote.providerQuote?.feeBps ?? quote.integrator?.referralFee ?? 0;
   const feePercentValue =
     feeBps && payAmountDecimal > 0 ? feeBps / 100 : 0;
 
@@ -4077,7 +4077,7 @@ const resolveAdminIntegratorConfig = async (
 
   let config = integratorConfig;
   const baseFeeBps =
-    config?.referralFeeBps ?? referralConfig.baseFeeBps ?? 85;
+    config?.referralFee ?? referralConfig.baseFeeBps ?? 85;
 
   const shouldForceAdminForMax =
     amountResolution.normalizedAmount === "max" &&
@@ -4217,7 +4217,7 @@ const buildAdminIntegratorConfig = async ({
 
   return {
     referralAccount: referralConfig.referralAccount,
-    referralFeeBps,
+    referralFee: referralFeeBps,
     payer: adminKey,
     closeAuthority: adminKey,
     payerKind: "admin",

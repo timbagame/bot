@@ -50,7 +50,7 @@ describe("SwapQuoteCache", () => {
     const referralParams = {
       ...baseParams,
       referralAccount: "RefAccount",
-      referralFeeBps: 90,
+      referralFee: 90,
       payer: "PayerKey",
       closeAuthority: "CloseKey",
     };
@@ -72,7 +72,7 @@ describe("SwapQuoteCache", () => {
     const params = makeJupiterParams({
       amount: "2000",
       referralAccount: "AnotherRef",
-      referralFeeBps: 70,
+      referralFee: 70,
       payer: "PayerKey2",
       closeAuthority: "CloseKey2",
     });

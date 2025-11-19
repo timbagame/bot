@@ -3,7 +3,7 @@ import { Keypair } from "@solana/web3.js";
 import { SwapManager } from "../src/utils/swap-manager";
 
 describe("SwapManager JIT floor", () => {
-  test("ExactOut requests are floored to 0.01 SOL for tiny shortfalls", async () => {
+  test("Tiny SOL top-ups are floored to 0.01 SOL", async () => {
     const user = Keypair.generate();
 
     // Keep buffers small so the natural target stays below the 0.01 SOL floor
@@ -22,17 +22,34 @@ describe("SwapManager JIT floor", () => {
     let requestedLamports = "0";
     (swapManager as any).getJupiterQuote = async (params: any) => {
       requestedLamports = params.amount;
+      // First call: probe (1,000,000 in -> 2,000,000 out)
+      if (params.amount === "1000000") {
+        return {
+          inputMint: params.inputMint,
+          outputMint: params.outputMint,
+          inAmount: "1000000",
+          outAmount: "2000000",
+          otherAmountThreshold: "0",
+          swapMode: "ExactIn",
+          slippageBps: 50,
+          priceImpactPct: "0",
+          routePlan: [],
+          requestId: "req-probe",
+        };
+      }
+
+      // Second call: final quote must exceed target (10,000,000)
       return {
         inputMint: params.inputMint,
         outputMint: params.outputMint,
-        inAmount: "5000000",
-        outAmount: params.amount,
+        inAmount: params.amount,
+        outAmount: "12000000",
         otherAmountThreshold: "0",
-        swapMode: "ExactOut",
+        swapMode: "ExactIn",
         slippageBps: 50,
         priceImpactPct: "0",
         routePlan: [],
-        requestId: "req-floor",
+        requestId: "req-final",
       };
     };
 
@@ -47,7 +64,7 @@ describe("SwapManager JIT floor", () => {
       userKeypair: user,
       tokenMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
       tokenDecimals: 6,
-      availableTokenAmountRaw: 1_000_000_000_000, // plenty
+      availableTokenAmountRaw: 2_000_000, // small balance to exercise probe path
       desiredLamports: 2_000_000, // 0.002 SOL shortfall
       tokenTicker: "TIMBA",
       logContext: "test",
@@ -55,6 +72,6 @@ describe("SwapManager JIT floor", () => {
 
     expect(result.swapped).toBeTrue();
     expect(result.lamportsReceived).toBe(10_000_000); // floored to 0.01 SOL
-    expect(requestedLamports).toBe("10000000");
+    expect(requestedLamports).toBe("2000000");
   });
 });

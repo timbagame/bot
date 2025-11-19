@@ -13,7 +13,7 @@ export type IntegratorPayerKind = "user" | "admin";
 
 export interface IntegratorSwapParams {
   referralAccount: string;
-  referralFeeBps: number;
+  referralFee: number;
   payer: string;
   closeAuthority: string;
   payerKind: IntegratorPayerKind;
@@ -119,7 +119,7 @@ export const resolveIntegratorSwapParams = async (
   ) {
     return {
       referralAccount: referralConfig.referralAccount,
-      referralFeeBps: baseFeeBps,
+      referralFee: baseFeeBps,
       payer: userPublicKey,
       closeAuthority: userPublicKey,
       payerKind: "user",
@@ -133,7 +133,7 @@ export const resolveIntegratorSwapParams = async (
   if (shortfallLamports <= 0) {
     return {
       referralAccount: referralConfig.referralAccount,
-      referralFeeBps: baseFeeBps,
+      referralFee: baseFeeBps,
       payer: userPublicKey,
       closeAuthority: userPublicKey,
       payerKind: "user",
@@ -164,7 +164,7 @@ export const resolveIntegratorSwapParams = async (
 
   return {
     referralAccount: referralConfig.referralAccount,
-    referralFeeBps,
+    referralFee: referralFeeBps,
     payer: referralConfig.adminPayer!,
     closeAuthority: referralConfig.adminCloseAuthority!,
     payerKind: "admin",

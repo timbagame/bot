@@ -105,7 +105,7 @@ describe("Integrator fee calculations", () => {
     expect(priceSpy).toHaveBeenCalledTimes(2);
     expect(result).not.toBeNull();
     expect(result?.payerKind).toBe("admin");
-    expect(result?.referralFeeBps).toBe(88);
+    expect(result?.referralFee).toBe(88);
     expect(result?.payer).toBe("AdminPayer11111111111111111111111111111");
   });
 
@@ -139,7 +139,7 @@ describe("Integrator fee calculations", () => {
       "AdminCloseAuthority33333333333333333333333333"
     );
     expect(result?.payerKind).toBe("admin");
-    expect(result?.referralFeeBps).toBeGreaterThan(85);
+    expect(result?.referralFee).toBeGreaterThan(85);
   });
 
   test("clamps referral fee floor to 50 bps when configured lower", async () => {
@@ -160,6 +160,6 @@ describe("Integrator fee calculations", () => {
     });
 
     expect(result).not.toBeNull();
-    expect(result?.referralFeeBps).toBe(50);
+    expect(result?.referralFee).toBe(50);
   });
 });

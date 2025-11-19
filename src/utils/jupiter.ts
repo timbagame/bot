@@ -17,7 +17,7 @@ export interface JupiterQuoteRequest {
   onlyDirectRoutes?: boolean;
   swapMode?: "ExactIn" | "ExactOut";
   referralAccount?: string;
-  referralFeeBps?: number;
+  referralFee?: number;
   payer?: string;
   closeAuthority?: string;
 }
@@ -69,7 +69,7 @@ export interface JupiterSwapRequest {
   quoteResponse: JupiterQuoteResponse;
   amountOverride?: string;
   referralAccount?: string;
-  referralFeeBps?: number;
+  referralFee?: number;
   payer?: string;
   closeAuthority?: string;
 }
@@ -90,10 +90,9 @@ interface JupiterOrderParams {
   inputMint: string;
   outputMint: string;
   amount: string;
-  swapMode?: "ExactIn" | "ExactOut";
   taker?: string;
   referralAccount?: string;
-  referralFeeBps?: number;
+  referralFee?: number;
   payer?: string;
   closeAuthority?: string;
 }
@@ -225,8 +224,8 @@ export class JupiterClient {
     if (params.referralAccount) {
       url.searchParams.set("referralAccount", params.referralAccount);
     }
-    if (params.referralFeeBps !== undefined) {
-      url.searchParams.set("referralFee", params.referralFeeBps.toString());
+    if (params.referralFee !== undefined) {
+      url.searchParams.set("referralFee", params.referralFee.toString());
     }
     if (params.payer) {
       url.searchParams.set("payer", params.payer);
@@ -241,9 +240,6 @@ export class JupiterClient {
     url.searchParams.set("inputMint", params.inputMint);
     url.searchParams.set("outputMint", params.outputMint);
     url.searchParams.set("amount", params.amount);
-    if (params.swapMode) {
-      url.searchParams.set("swapMode", params.swapMode);
-    }
     if (params.taker) {
       url.searchParams.set("taker", params.taker);
     }
@@ -287,7 +283,6 @@ export class JupiterClient {
             inputMint: effectiveParams.inputMint,
             outputMint: effectiveParams.outputMint,
             amount: effectiveParams.amount,
-            swapMode: effectiveParams.swapMode,
             taker: effectiveParams.taker,
           };
           return this.fetchOrder(fallbackParams, false);
@@ -328,10 +323,9 @@ export class JupiterClient {
       inputMint: request.inputMint,
       outputMint: request.outputMint,
       amount: request.amount,
-      swapMode: request.swapMode,
       taker: request.taker,
       referralAccount: request.referralAccount,
-      referralFeeBps: request.referralFeeBps,
+      referralFee: request.referralFee,
       payer: request.payer,
       closeAuthority: request.closeAuthority,
     });
@@ -345,20 +339,15 @@ export class JupiterClient {
     request: JupiterSwapRequest
   ): Promise<JupiterSwapResponse> {
     const { quoteResponse, userPublicKey } = request;
-    const amount =
-      request.amountOverride ??
-      (quoteResponse.swapMode === "ExactOut"
-        ? quoteResponse.outAmount
-        : quoteResponse.inAmount);
+    const amount = request.amountOverride ?? quoteResponse.inAmount;
 
     const { raw: order } = await this.fetchOrder({
       inputMint: quoteResponse.inputMint,
       outputMint: quoteResponse.outputMint,
       amount,
-      swapMode: (quoteResponse.swapMode as "ExactIn" | "ExactOut") ?? "ExactIn",
       taker: userPublicKey,
       referralAccount: request.referralAccount,
-      referralFeeBps: request.referralFeeBps,
+      referralFee: request.referralFee,
       payer: request.payer,
       closeAuthority: request.closeAuthority,
     });
