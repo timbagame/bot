@@ -522,19 +522,33 @@ export class SwapManager {
       closeAuthority: integrator?.closeAuthority,
     });
 
-    // Execute the Jupiter transaction directly
+    // Determine payer and required signer for admin-funded routes
+    let signers = [userKeypair];
     if (integrator?.payerKind === "admin") {
+      const adminKeypair = this.wallet.getAdminKeypair();
+      const payerMissing = !integrator.payer;
+      const payerMismatch =
+        integrator.payer &&
+        adminKeypair.publicKey.toBase58() !== integrator.payer;
+      const closeMismatch =
+        integrator.closeAuthority &&
+        adminKeypair.publicKey.toBase58() !== integrator.closeAuthority;
+
+      if (payerMissing || payerMismatch || closeMismatch) {
+        throw new Error(
+          `Integrator requires admin payer ${integrator.payer} / closeAuthority ${integrator.closeAuthority}, ` +
+            `but loaded admin keypair is ${adminKeypair.publicKey.toBase58()}`
+        );
+      }
+
       await this.ensureAdminCanCoverRoute(
         integrator,
         swapResponse.order,
-        this.wallet.getAdminKeypair().publicKey
+        adminKeypair.publicKey
       );
-    }
 
-    const needsAdminSigner = integrator?.payerKind === "admin";
-    const signers = needsAdminSigner
-      ? [userKeypair, this.wallet.getAdminKeypair()]
-      : [userKeypair];
+      signers = [userKeypair, adminKeypair];
+    }
 
     try {
       return await this.executeJupiterTransaction(
