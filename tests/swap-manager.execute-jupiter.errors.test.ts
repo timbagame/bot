@@ -1,6 +1,13 @@
 import { Buffer } from "buffer";
 import { describe, test, expect } from "bun:test";
-import { Connection, Keypair, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
+import {
+  Connection,
+  Keypair,
+  TransactionMessage,
+  VersionedTransaction,
+} from "@solana/web3.js";
+import type { IntegratorSwapParams } from "../src/utils/integrator-fees";
+import type { JupiterUltraOrderResponse } from "../src/utils/jupiter";
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
 
@@ -26,7 +33,7 @@ describe("SwapManager.executeJupiterTransaction errors", () => {
     };
 
     await expect(
-      (sm as any).executeJupiterTransaction("not-base64-!!", "req-1", user)
+      (sm as any).executeJupiterTransaction("not-base64-!!", "req-1", [user])
     ).rejects.toThrow(/Failed to execute Jupiter transaction/);
   });
 
@@ -43,7 +50,7 @@ describe("SwapManager.executeJupiterTransaction errors", () => {
     });
 
     await expect(
-      (sm as any).executeJupiterTransaction(base64Tx, "req-2", user)
+      (sm as any).executeJupiterTransaction(base64Tx, "req-2", [user])
     ).rejects.toThrow("Minimum $10 for gasless");
   });
 });
@@ -103,5 +110,100 @@ describe("SwapManager.executeJupiterSwap requestId handling", () => {
         quote
       )
     ).resolves.toBe("SIG");
+  });
+});
+
+describe("SwapManager.ensureAdminCanCoverRoute", () => {
+  const buildSwapManagerWithBalance = (balance: number): SwapManager => {
+    const walletStub = {
+      getConnection: () =>
+        ({
+          getBalance: async () => balance,
+        } as unknown as Connection),
+      formatSolBalance: (lamports: number) => `${lamports} lamports`,
+    } as unknown as WalletManager;
+    return new SwapManager({} as Connection, walletStub);
+  };
+
+  const buildBaseOrder = (
+    overrides?: Partial<JupiterUltraOrderResponse>
+  ): JupiterUltraOrderResponse => ({
+    mode: "ExactIn",
+    inputMint: "So11111111111111111111111111111111111111112",
+    outputMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
+    inAmount: "1000",
+    outAmount: "2000",
+    otherAmountThreshold: "0",
+    swapMode: "ExactIn",
+    slippageBps: 100,
+    priceImpactPct: "0",
+    routePlan: [],
+    requestId: "route-rent",
+    router: "iris",
+    ...overrides,
+  });
+
+  const baseIntegrator: IntegratorSwapParams = {
+    referralAccount: "dummy",
+    referralFeeBps: 100,
+    payer: "payer",
+    closeAuthority: "close",
+    payerKind: "admin",
+    adminRequiredLamports: 10_000_000,
+  };
+
+  test("allows admin to cover rent-heavy Jupiter routes when balanced", async () => {
+    const swapManager = buildSwapManagerWithBalance(13_000_000);
+    const integrator = { ...baseIntegrator };
+    const order = buildBaseOrder({
+      rentFeeLamports: 2_000_000,
+      prioritizationFeeLamports: 300_000,
+      signatureFeeLamports: 10_000,
+    });
+
+    await expect(
+      (swapManager as any).ensureAdminCanCoverRoute(
+        integrator,
+        order,
+        Keypair.generate().publicKey
+      )
+    ).resolves.toBeUndefined();
+  });
+
+  test("throws when the admin wallet balance is below the total requirement", async () => {
+    const swapManager = buildSwapManagerWithBalance(5_000_000);
+    const integrator = { ...baseIntegrator, adminRequiredLamports: 8_000_000 };
+    const order = buildBaseOrder({
+      rentFeeLamports: 0,
+      prioritizationFeeLamports: 0,
+      signatureFeeLamports: 0,
+    });
+
+    await expect(
+      (swapManager as any).ensureAdminCanCoverRoute(
+        integrator,
+        order,
+        Keypair.generate().publicKey
+      )
+    ).rejects.toThrow(/cannot cover rent\+priority/i);
+  });
+
+  test("throws when admin balance is insufficient for rent-heavy padded requirement", async () => {
+    const routeLamports = 2_000_000;
+    const swapManager = buildSwapManagerWithBalance(12_000_000);
+    const integrator = { ...baseIntegrator };
+    const order = buildBaseOrder({
+      rentFeeLamports: routeLamports,
+      prioritizationFeeLamports: 300_000,
+      signatureFeeLamports: 10_000,
+    });
+
+    await expect(
+      (swapManager as any).ensureAdminCanCoverRoute(
+        integrator,
+        order,
+        Keypair.generate().publicKey
+      )
+    ).rejects.toThrow(/cannot cover rent\+priority/i);
   });
 });

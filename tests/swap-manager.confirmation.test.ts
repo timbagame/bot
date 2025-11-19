@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { Buffer } from "buffer";
-import { Keypair, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
+import {
+  Keypair,
+  TransactionMessage,
+  VersionedTransaction,
+} from "@solana/web3.js";
 import { SwapManager } from "../src/utils/swap-manager";
 import type { FeeBudgetProvider } from "../src/utils/fee-budget";
 
@@ -34,11 +38,16 @@ describe("SwapManager Jupiter execution", () => {
   test("signs transaction and forwards payload to execute endpoint", async () => {
     const walletStub = {} as any;
     const connectionStub = {} as any;
-    const manager = new SwapManager(connectionStub as any, walletStub, feeBudgetStub);
+    const manager = new SwapManager(
+      connectionStub as any,
+      walletStub,
+      feeBudgetStub
+    );
     const payer = Keypair.generate();
     const base64Tx = createBase64Transaction(payer);
 
-    let captured: { requestId: string; signedTransaction: string } | null = null;
+    let captured: { requestId: string; signedTransaction: string } | null =
+      null;
     (manager as any).jupiterClient.executeOrder = async (payload: any) => {
       captured = payload;
       return { status: "Success", signature: SIGNATURE_OK };
@@ -47,7 +56,7 @@ describe("SwapManager Jupiter execution", () => {
     const result = await (manager as any).executeJupiterTransaction(
       base64Tx,
       "req-success",
-      payer
+      [payer]
     );
 
     expect(result).toBe(SIGNATURE_OK);
@@ -59,14 +68,22 @@ describe("SwapManager Jupiter execution", () => {
   test("throws when execute endpoint omits signature", async () => {
     const walletStub = {} as any;
     const connectionStub = {} as any;
-    const manager = new SwapManager(connectionStub as any, walletStub, feeBudgetStub);
+    const manager = new SwapManager(
+      connectionStub as any,
+      walletStub,
+      feeBudgetStub
+    );
     const payer = Keypair.generate();
     const base64Tx = createBase64Transaction(payer);
 
-    (manager as any).jupiterClient.executeOrder = async () => ({ status: "Success" });
+    (manager as any).jupiterClient.executeOrder = async () => ({
+      status: "Success",
+    });
 
     await expect(
-      (manager as any).executeJupiterTransaction(base64Tx, "req-missing", payer)
+      (manager as any).executeJupiterTransaction(base64Tx, "req-missing", [
+        payer,
+      ])
     ).rejects.toThrow(/did not return a signature/);
   });
 });

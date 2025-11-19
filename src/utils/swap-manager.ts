@@ -10,6 +10,7 @@ import {
   JupiterClient,
   type JupiterQuoteResponse,
   type JupiterQuoteRequest,
+  type JupiterUltraOrderResponse,
 } from "./jupiter";
 import { NetworkDetector } from "./network-detector";
 import type { SolanaNetwork } from "./network-detector";
@@ -23,6 +24,7 @@ import type {
   SwapQuote,
   SwapRequest,
 } from "./swap/types";
+import type { IntegratorSwapParams } from "./integrator-fees";
 import { SwapQuoteCache } from "./swap/quote-cache";
 
 export type {
@@ -38,6 +40,7 @@ export type {
 const SOL_MINT = WSOL_MINT;
 const SOL_DECIMALS = 9;
 const JUPITER_QUOTE_EXPIRATION_MS_DEFAULT = 120_000;
+const ROUTE_LAMPORTS_BUFFER = 400_000;
 let jupiterQuoteExpirationMs = JUPITER_QUOTE_EXPIRATION_MS_DEFAULT;
 
 export const __test_setJupiterQuoteExpirationMs = (value: number): void => {
@@ -85,13 +88,8 @@ export class SwapManager {
    * Get the best quote for a token swap across all providers
    */
   async getQuote(request: SwapRequest): Promise<SwapQuote> {
-    const {
-      inputMint,
-      outputMint,
-      amount,
-      inputTicker,
-      outputTicker,
-    } = request;
+    const { inputMint, outputMint, amount, inputTicker, outputTicker } =
+      request;
 
     console.log(`🔍 SwapManager.getQuote called:`);
     console.log(`   Input: ${inputMint} (${inputTicker})`);
@@ -100,11 +98,27 @@ export class SwapManager {
     console.log(`   Network: ${this.network}`);
 
     console.log(`   🚀 Using Jupiter for quote`);
-    const jupiterQuote = await this.getJupiterQuote({
+    const quoteRequest: JupiterQuoteRequest = {
       inputMint,
       outputMint,
       amount,
-    });
+      taker: request.userKeypair.publicKey.toBase58(),
+    };
+
+    if (request.integrator) {
+      quoteRequest.referralAccount = request.integrator.referralAccount;
+      quoteRequest.referralFeeBps = request.integrator.referralFeeBps;
+      quoteRequest.payer = request.integrator.payer;
+      quoteRequest.closeAuthority = request.integrator.closeAuthority;
+      console.log(
+        `   🧾 Integrator fee ${request.integrator.referralFeeBps} bps via ${request.integrator.payerKind} payer`
+      );
+    }
+
+    const jupiterQuote = await this.getJupiterQuote(quoteRequest);
+    const integratorApplied = Boolean(
+      request.integrator && jupiterQuote.referralApplied
+    );
 
     const inAmount = parseFloat(jupiterQuote.inAmount);
     const outAmount = parseFloat(jupiterQuote.outAmount);
@@ -123,6 +137,8 @@ export class SwapManager {
       platformFee: jupiterQuote.platformFee,
       providerQuote: jupiterQuote,
       providerQuoteTimestamp: Date.now(),
+      integrator: integratorApplied ? request.integrator ?? null : null,
+      integratorApplied,
     };
   }
 
@@ -187,6 +203,7 @@ export class SwapManager {
             outputMint: SOL_MINT,
             amount: target.toString(),
             swapMode: "ExactOut",
+            taker: userKeypair.publicKey.toBase58(),
           });
 
           const requiredInput = BigInt(quote.inAmount);
@@ -210,7 +227,7 @@ export class SwapManager {
           const signature = await this.executeJupiterTransaction(
             swapResponse.swapTransaction,
             swapResponse.requestId,
-            userKeypair
+            [userKeypair]
           );
 
           lastJupiterError = null;
@@ -428,7 +445,6 @@ export class SwapManager {
     };
   }
 
-
   /**
    * Execute Jupiter swap using the complete transaction
    */
@@ -461,6 +477,10 @@ export class SwapManager {
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
+    const cachedIntegrator = quote.integratorApplied
+      ? quote.integrator
+      : null;
+
     let jupiterQuote = quote.providerQuote;
     const now = Date.now();
     if (
@@ -472,24 +492,103 @@ export class SwapManager {
     }
 
     if (!jupiterQuote) {
-      jupiterQuote = await this.getJupiterQuote({
+      const refreshRequest: JupiterQuoteRequest = {
         inputMint: quote.inputMint,
         outputMint: quote.outputMint,
         amount: quote.inputAmountRaw,
-      });
+        taker: userKeypair.publicKey.toBase58(),
+      };
+      if (cachedIntegrator) {
+        refreshRequest.referralAccount = cachedIntegrator.referralAccount;
+        refreshRequest.referralFeeBps = cachedIntegrator.referralFeeBps;
+        refreshRequest.payer = cachedIntegrator.payer;
+        refreshRequest.closeAuthority = cachedIntegrator.closeAuthority;
+      }
+
+      jupiterQuote = await this.getJupiterQuote(refreshRequest);
     }
+
+    const integratorApplied = Boolean(
+      cachedIntegrator && jupiterQuote?.referralApplied
+    );
+    const integrator = integratorApplied ? cachedIntegrator : null;
 
     const swapResponse = await this.jupiterClient.getSwapTransaction({
       userPublicKey: userKeypair.publicKey.toString(),
       quoteResponse: jupiterQuote,
+      referralAccount: integrator?.referralAccount,
+      referralFeeBps: integrator?.referralFeeBps,
+      payer: integrator?.payer,
+      closeAuthority: integrator?.closeAuthority,
     });
 
-    // Execute the Jupiter transaction directly
-    return await this.executeJupiterTransaction(
-      swapResponse.swapTransaction,
-      swapResponse.requestId,
-      userKeypair
-    );
+    // Determine payer and required signer for admin-funded routes
+    let signers = [userKeypair];
+    if (integrator?.payerKind === "admin") {
+      const adminKeypair = this.wallet.getAdminKeypair();
+      const payerMissing = !integrator.payer;
+      const payerMismatch =
+        integrator.payer &&
+        adminKeypair.publicKey.toBase58() !== integrator.payer;
+      const closeMismatch =
+        integrator.closeAuthority &&
+        adminKeypair.publicKey.toBase58() !== integrator.closeAuthority;
+
+      if (payerMissing || payerMismatch || closeMismatch) {
+        throw new Error(
+          `Integrator requires admin payer ${integrator.payer} / closeAuthority ${integrator.closeAuthority}, ` +
+            `but loaded admin keypair is ${adminKeypair.publicKey.toBase58()}`
+        );
+      }
+
+      await this.ensureAdminCanCoverRoute(
+        integrator,
+        swapResponse.order,
+        adminKeypair.publicKey
+      );
+
+      signers = [userKeypair, adminKeypair];
+    }
+
+    try {
+      return await this.executeJupiterTransaction(
+        swapResponse.swapTransaction,
+        swapResponse.requestId,
+        signers
+      );
+    } catch (error: any) {
+      const order = swapResponse.order;
+      const orderRouteLamports =
+        (order?.rentFeeLamports ?? 0) +
+        (order?.prioritizationFeeLamports ?? 0) +
+        (order?.signatureFeeLamports ?? 0);
+
+      const contextLog = {
+        error: error.message,
+        integrator: quote.integrator,
+        providerQuote: jupiterQuote,
+        jupiterRequestId: swapResponse.requestId,
+        jupiterQuoteId: swapResponse.quoteId,
+        router: swapResponse.router,
+        orderRouter: order?.router,
+        orderRequestId: order?.requestId,
+        orderRouteLamports,
+        adminBalance: quote.integrator?.adminBalanceLamports,
+        adminRequired: quote.integrator?.adminRequiredLamports,
+        adminRouteLamports: quote.integrator?.adminRouteLamports,
+      };
+
+      if (
+        typeof error.message === "string" &&
+        error.message.includes("insufficient funds for rent")
+      ) {
+        console.error("Jupiter execution failed for rent shortage", contextLog);
+      } else {
+        console.error("Jupiter execution failed", contextLog);
+      }
+
+      throw error;
+    }
   }
 
   /**
@@ -520,6 +619,10 @@ export class SwapManager {
         routePlan: [],
         totalTime: 0,
         platformFee: quote.platformFee ?? null,
+        feeBps:
+          quote.providerQuote?.feeBps ??
+          quote.integrator?.referralFeeBps ??
+          undefined,
       },
       inputDecimals,
       outputDecimals,
@@ -585,13 +688,13 @@ export class SwapManager {
   private async executeJupiterTransaction(
     base64Transaction: string,
     requestId: string,
-    userKeypair: Keypair
+    signers: Keypair[]
   ): Promise<string> {
     try {
       const transactionBuffer = Buffer.from(base64Transaction, "base64");
       const versionedTx = VersionedTransaction.deserialize(transactionBuffer);
 
-      versionedTx.sign([userKeypair]);
+      versionedTx.sign(signers);
 
       const signedTransaction = Buffer.from(versionedTx.serialize()).toString(
         "base64"
@@ -623,4 +726,67 @@ export class SwapManager {
     }
   }
 
+  private async ensureAdminCanCoverRoute(
+    integrator: IntegratorSwapParams | null | undefined,
+    quote: JupiterUltraOrderResponse | undefined,
+    adminPublicKey: PublicKey
+  ): Promise<void> {
+    if (integrator?.payerKind !== "admin" || !quote) {
+      return;
+    }
+
+    const adminBalance = await this.wallet
+      .getConnection()
+      .getBalance(adminPublicKey);
+    const routeLamports =
+      (quote.rentFeeLamports ?? 0) +
+      (quote.prioritizationFeeLamports ?? 0) +
+      (quote.signatureFeeLamports ?? 0);
+    const routeSafetyPadding =
+      routeLamports > 0
+        ? Math.max(
+            ROUTE_LAMPORTS_BUFFER,
+            Math.round(routeLamports * 0.25)
+          )
+        : 0;
+    const requiredLamports =
+      (integrator.adminRequiredLamports ?? 0) +
+      routeLamports +
+      routeSafetyPadding;
+
+    integrator.adminRouteLamports = routeLamports;
+
+    const logDetails = {
+      adminBalance,
+      requiredLamports,
+      routeLamports,
+      routeSafetyPadding,
+      routeRequestId: quote.requestId,
+      router: quote.router,
+      payerKind: integrator.payerKind,
+    };
+    const logLabel =
+      routeLamports > 0
+        ? "Admin payer route check (rent-heavy path)"
+        : "Admin payer route check";
+    console.log(logLabel, logDetails);
+
+    if (routeLamports > 0) {
+      const formattedRouteSol = this.wallet.formatSolBalance(routeLamports);
+      const formattedPadding = this.wallet.formatSolBalance(routeSafetyPadding);
+      console.log(
+        `Route ${quote.router ?? "unknown"} needs ${formattedRouteSol} SOL for rent/priority. Admin payer will cover it (adds ${formattedPadding} padding).`
+      );
+    }
+
+    if (adminBalance < requiredLamports) {
+      throw new Error(
+        `Admin wallet (${this.wallet.formatSolBalance(
+          adminBalance
+        )}) cannot cover rent+priority (${this.wallet.formatSolBalance(
+          requiredLamports
+        )}) required by Jupiter route ${quote.requestId}`
+      );
+    }
+  }
 }

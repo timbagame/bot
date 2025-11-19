@@ -120,6 +120,8 @@ export interface EvaluateTradeAmountParams {
   formatSol?: (lamports: number) => string;
   formatToken?: (amount: number, decimals: number) => string;
   omitSolFeeBufferHint?: boolean;
+  userSolBufferLamports?: number;
+  insufficientSolMaxBufferMessage?: string;
 }
 
 export interface EvaluateTradeAmountResult {
@@ -144,6 +146,8 @@ export const evaluateTradeAmount = ({
   omitSolFeeBufferHint = false,
   formatSol,
   formatToken,
+  userSolBufferLamports = 0,
+  insufficientSolMaxBufferMessage,
 }: EvaluateTradeAmountParams): EvaluateTradeAmountResult => {
   const parsed = parseTradeAmountInput(amount);
   const isSolAsset = assetTicker === "SOL";
@@ -197,10 +201,22 @@ export const evaluateTradeAmount = ({
   if (parsed.kind === "max") {
     if (isSolAsset) {
       const spendableLamports = resolveSolSpendable();
+      const bufferLamports = Math.max(0, userSolBufferLamports ?? 0);
+      const availableLamports = Math.max(0, spendableLamports - bufferLamports);
+
+      if (bufferLamports >= spendableLamports || availableLamports <= 0) {
+        const formattedBuffer =
+          formatSol?.(bufferLamports) ?? `${bufferLamports} lamports`;
+        throw new Error(
+          insufficientSolMaxBufferMessage ??
+            `Not enough SOL to keep ${formattedBuffer} as a safety buffer when using max amount`
+        );
+      }
+
       return {
         kind: "max",
-        rawAmount: spendableLamports,
-        displayAmount: formatDisplayAmount(spendableLamports),
+        rawAmount: availableLamports,
+        displayAmount: formatDisplayAmount(availableLamports),
         normalizedAmount: "max",
       };
     }

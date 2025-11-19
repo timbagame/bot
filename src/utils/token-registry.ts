@@ -7,6 +7,15 @@ export type BuiltinTokenMetadata = TokenConfig & {
   isNativeSol?: boolean;
 };
 
+export interface ReferralTokenConfigEntry {
+  mint: string;
+  referralAccount: string;
+  baseFeeBps?: number;
+  adminPayer?: string;
+  adminCloseAuthority?: string;
+  maxExtraFeeBps?: number;
+}
+
 export const WSOL_MINT = "So11111111111111111111111111111111111111112";
 
 const BUILTIN_TOKEN_METADATA: BuiltinTokenMetadata[] = [
@@ -212,4 +221,50 @@ export function requireTokenByMint(
     );
   }
   return token;
+}
+
+const REFERRAL_ACCOUNT = "GPBNTRmo26MRoaLSvRXwhWaQZhYjwVWgEkgwRZVU6x9U";
+
+const REFERRAL_TOKEN_ENTRIES: ReferralTokenConfigEntry[] = [
+  { mint: WSOL_MINT, referralAccount: REFERRAL_ACCOUNT },
+  { mint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump", referralAccount: REFERRAL_ACCOUNT },
+  { mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", referralAccount: REFERRAL_ACCOUNT },
+  { mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", referralAccount: REFERRAL_ACCOUNT },
+  { mint: "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh", referralAccount: REFERRAL_ACCOUNT },
+  { mint: "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", referralAccount: REFERRAL_ACCOUNT },
+  { mint: "A6rSPi9JmJgVkW6BatsA6MjFYLseizPM2Fnt92coFjf4", referralAccount: REFERRAL_ACCOUNT },
+  { mint: "FkBF9u1upwEMUPxnXjcydxxVSxgr8f3k1YXbz7G7bmtA", referralAccount: REFERRAL_ACCOUNT },
+  { mint: "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC", referralAccount: REFERRAL_ACCOUNT },
+];
+
+const REFERRAL_CONFIG_MAP = new Map<string, ReferralTokenConfigEntry>();
+
+for (const entry of REFERRAL_TOKEN_ENTRIES) {
+  const normalized = entry.mint.trim();
+  if (!normalized) continue;
+  REFERRAL_CONFIG_MAP.set(normalized, entry);
+}
+
+export function getReferralConfigForMint(
+  mint?: string | null
+): ReferralTokenConfigEntry | undefined {
+  if (!mint) return undefined;
+  return REFERRAL_CONFIG_MAP.get(mint.trim());
+}
+
+export const __test_registerReferralEntry = (entry: ReferralTokenConfigEntry) => {
+  const normalized = entry.mint.trim();
+  if (!normalized) return;
+  REFERRAL_CONFIG_MAP.set(normalized, entry);
+};
+
+export const __test_resetReferralEntries = () => {
+  REFERRAL_CONFIG_MAP.clear();
+  for (const entry of REFERRAL_TOKEN_ENTRIES) {
+    REFERRAL_CONFIG_MAP.set(entry.mint.trim(), entry);
+  }
+};
+
+export function getReferralTokenEntries(): ReferralTokenConfigEntry[] {
+  return REFERRAL_TOKEN_ENTRIES;
 }

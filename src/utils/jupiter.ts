@@ -11,10 +11,15 @@ export interface JupiterQuoteRequest {
   inputMint: string;
   outputMint: string;
   amount: string;
+  taker?: string;
   platformFeeBps?: number;
   maxAccounts?: number;
   onlyDirectRoutes?: boolean;
   swapMode?: "ExactIn" | "ExactOut";
+  referralAccount?: string;
+  referralFeeBps?: number;
+  payer?: string;
+  closeAuthority?: string;
 }
 
 export interface JupiterQuoteResponse {
@@ -53,12 +58,20 @@ export interface JupiterQuoteResponse {
     amount: string;
     feeBps: number;
   } | null;
+  signatureFeeLamports?: number;
+  prioritizationFeeLamports?: number;
+  rentFeeLamports?: number;
+  referralApplied?: boolean;
 }
 
 export interface JupiterSwapRequest {
   userPublicKey: string;
   quoteResponse: JupiterQuoteResponse;
   amountOverride?: string;
+  referralAccount?: string;
+  referralFeeBps?: number;
+  payer?: string;
+  closeAuthority?: string;
 }
 
 export interface JupiterSwapResponse {
@@ -70,6 +83,7 @@ export interface JupiterSwapResponse {
   priceImpactPct?: string;
   priceImpact?: number;
   routePlan?: JupiterQuoteResponse["routePlan"];
+  order?: JupiterUltraOrderResponse;
 }
 
 interface JupiterOrderParams {
@@ -78,9 +92,13 @@ interface JupiterOrderParams {
   amount: string;
   swapMode?: "ExactIn" | "ExactOut";
   taker?: string;
+  referralAccount?: string;
+  referralFeeBps?: number;
+  payer?: string;
+  closeAuthority?: string;
 }
 
-interface JupiterUltraOrderResponse {
+export interface JupiterUltraOrderResponse {
   mode: string;
   inputMint: string;
   outputMint: string;
@@ -111,11 +129,16 @@ interface JupiterUltraOrderResponse {
   error?: string;
   errorCode?: number;
   errorMessage?: string;
+  signatureFeeLamports?: number;
+  prioritizationFeeLamports?: number;
+  rentFeeLamports?: number;
+  referralApplied?: boolean;
 }
 
 interface JupiterOrderResult {
   raw: JupiterUltraOrderResponse;
   normalized: JupiterQuoteResponse;
+  referralApplied: boolean;
 }
 
 interface JupiterExecuteRequest {
@@ -145,9 +168,12 @@ export class JupiterClient {
   private baseUrl: string;
   private fetchFn: FetchLike;
 
-  constructor(baseUrl: string = "https://lite-api.jup.ag", fetchFn?: FetchLike) {
+  constructor(
+    baseUrl: string = "https://lite-api.jup.ag",
+    fetchFn?: FetchLike
+  ) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
-    this.fetchFn = fetchFn ?? ((globalThis.fetch as unknown) as FetchLike);
+    this.fetchFn = fetchFn ?? (globalThis.fetch as unknown as FetchLike);
   }
 
   private getOrderUrl(): string {
@@ -158,7 +184,9 @@ export class JupiterClient {
     return `${this.baseUrl}/ultra/v1/execute`;
   }
 
-  private normalizeQuote(data: JupiterUltraOrderResponse): JupiterQuoteResponse {
+  private normalizeQuote(
+    data: JupiterUltraOrderResponse
+  ): JupiterQuoteResponse {
     const priceImpactPct =
       typeof data.priceImpactPct === "string"
         ? data.priceImpactPct
@@ -186,7 +214,26 @@ export class JupiterClient {
       inUsdValue: data.inUsdValue,
       outUsdValue: data.outUsdValue,
       platformFee: data.platformFee ?? null,
+      signatureFeeLamports: data.signatureFeeLamports,
+      prioritizationFeeLamports: data.prioritizationFeeLamports,
+      rentFeeLamports: data.rentFeeLamports,
+      referralApplied: data.referralApplied,
     };
+  }
+
+  private applyReferralParams(url: URL, params: JupiterOrderParams): void {
+    if (params.referralAccount) {
+      url.searchParams.set("referralAccount", params.referralAccount);
+    }
+    if (params.referralFeeBps !== undefined) {
+      url.searchParams.set("referralFee", params.referralFeeBps.toString());
+    }
+    if (params.payer) {
+      url.searchParams.set("payer", params.payer);
+    }
+    if (params.closeAuthority) {
+      url.searchParams.set("closeAuthority", params.closeAuthority);
+    }
   }
 
   private buildOrderParams(params: JupiterOrderParams): URL {
@@ -200,11 +247,22 @@ export class JupiterClient {
     if (params.taker) {
       url.searchParams.set("taker", params.taker);
     }
+    this.applyReferralParams(url, params);
+    if (params.referralAccount) {
+      console.debug("Jupiter order URL:", url.toString());
+    }
     return url;
   }
 
-  private async fetchOrder(params: JupiterOrderParams): Promise<JupiterOrderResult> {
-    const url = this.buildOrderParams(params);
+  private async fetchOrder(
+    params: JupiterOrderParams,
+    allowReferralFallback = true
+  ): Promise<JupiterOrderResult> {
+    const effectiveParams: JupiterOrderParams = { ...params };
+    if (!effectiveParams.taker && effectiveParams.payer) {
+      effectiveParams.taker = effectiveParams.payer;
+    }
+    const url = this.buildOrderParams(effectiveParams);
 
     try {
       const response = await this.fetchFn(url.toString(), {
@@ -216,6 +274,24 @@ export class JupiterClient {
 
       if (!response.ok) {
         const errorText = await response.text();
+        if (
+          allowReferralFallback &&
+          params.referralAccount &&
+          errorText.includes("Failed to get quotes")
+        ) {
+          console.warn(
+            "Integrator order failed, retrying without referral params",
+            { url: url.toString(), errorText }
+          );
+          const fallbackParams: JupiterOrderParams = {
+            inputMint: effectiveParams.inputMint,
+            outputMint: effectiveParams.outputMint,
+            amount: effectiveParams.amount,
+            swapMode: effectiveParams.swapMode,
+            taker: effectiveParams.taker,
+          };
+          return this.fetchOrder(fallbackParams, false);
+        }
         throw new Error(
           `Jupiter order failed: ${response.status} ${response.statusText} - ${errorText}`
         );
@@ -226,11 +302,18 @@ export class JupiterClient {
       if (data.error || data.errorMessage) {
         const codeSuffix =
           typeof data.errorCode === "number" ? ` (code ${data.errorCode})` : "";
-        const errorMessage = data.errorMessage || data.error || "Unknown Jupiter error";
+        const errorMessage =
+          data.errorMessage || data.error || "Unknown Jupiter error";
         throw new Error(`Jupiter order error${codeSuffix}: ${errorMessage}`);
       }
 
-      return { raw: data, normalized: this.normalizeQuote(data) };
+      const referralApplied = Boolean(data.referralApplied);
+      const normalized = {
+        ...this.normalizeQuote(data),
+        referralApplied,
+      } satisfies JupiterQuoteResponse;
+
+      return { raw: data, normalized, referralApplied };
     } catch (error: any) {
       console.error("Error requesting Jupiter order:", error);
       throw new Error(`Failed to request Jupiter order: ${error.message}`);
@@ -246,6 +329,11 @@ export class JupiterClient {
       outputMint: request.outputMint,
       amount: request.amount,
       swapMode: request.swapMode,
+      taker: request.taker,
+      referralAccount: request.referralAccount,
+      referralFeeBps: request.referralFeeBps,
+      payer: request.payer,
+      closeAuthority: request.closeAuthority,
     });
     return normalized;
   }
@@ -269,6 +357,10 @@ export class JupiterClient {
       amount,
       swapMode: (quoteResponse.swapMode as "ExactIn" | "ExactOut") ?? "ExactIn",
       taker: userPublicKey,
+      referralAccount: request.referralAccount,
+      referralFeeBps: request.referralFeeBps,
+      payer: request.payer,
+      closeAuthority: request.closeAuthority,
     });
 
     if (!order.transaction) {
@@ -297,6 +389,7 @@ export class JupiterClient {
           : undefined,
       priceImpact: order.priceImpact,
       routePlan: order.routePlan,
+      order,
     };
   }
 
@@ -318,7 +411,12 @@ export class JupiterClient {
 
       const data = (await response.json()) as JupiterExecuteResponse;
 
+      const execLogPayload = JSON.stringify(data, null, 2);
+      const logExec = () =>
+        console.error("Jupiter execute response", execLogPayload);
+
       if (!response.ok) {
+        logExec();
         const errorMessage =
           data.errorMessage ||
           data.error ||
@@ -327,7 +425,10 @@ export class JupiterClient {
       }
 
       if (data.error || data.errorMessage) {
-        throw new Error(data.errorMessage || data.error || "Jupiter execute error");
+        logExec();
+        throw new Error(
+          data.errorMessage || data.error || "Jupiter execute error"
+        );
       }
 
       if (data.status && data.status !== "Success") {
@@ -364,25 +465,42 @@ export class JupiterClient {
     const rate = inputAmount > 0 ? formatRate(outputAmount / inputAmount) : "0";
     const safeInputTicker = escapeHtml(inputTicker);
     const safeOutputTicker = escapeHtml(outputTicker);
+    const feeBps =
+      typeof quote.feeBps === "number"
+        ? quote.feeBps
+        : quote.platformFee?.feeBps ?? null;
 
     let message = `🔄 <b>Swap Preview</b>\n\n`;
-    message += `📥 <b>You pay:</b> ${inputAmount.toFixed(6)} ${safeInputTicker}\n`;
-    message += `📤 <b>You receive:</b> ${outputAmount.toFixed(6)} ${safeOutputTicker}\n`;
+    message += `📥 <b>You pay:</b> ${inputAmount.toFixed(
+      6
+    )} ${safeInputTicker}\n`;
+    message += `📤 <b>You receive:</b> ${outputAmount.toFixed(
+      6
+    )} ${safeOutputTicker}\n`;
     message += `💹 <b>Rate:</b> 1 ${safeInputTicker} = ${rate} ${safeOutputTicker}\n`;
     message += `📊 <b>Price Impact:</b> ${priceImpact.toFixed(2)}%\n`;
     message += `🎯 <b>Slippage:</b> ${slippage}%\n`;
 
+    if (feeBps !== null) {
+      const percent = (feeBps / 100).toFixed(2);
+      message += `💸 <b>Fee:</b> ${percent}%\n`;
+    }
+
     if (quote.platformFee) {
       const feeAmount =
         parseFloat(quote.platformFee.amount) / Math.pow(10, inputDecimals);
-      message += `💰 <b>Platform Fee:</b> ${feeAmount.toFixed(6)} ${safeInputTicker}\n`;
+      message += `💰 <b>Platform Fee:</b> ${feeAmount.toFixed(
+        6
+      )} ${safeInputTicker}\n`;
     }
 
     // Add route information
     if (quote.routePlan && quote.routePlan.length > 0) {
       const mainRoute = quote.routePlan[0];
       if (mainRoute && mainRoute.swapInfo) {
-        message += `🛣️ <b>Route:</b> ${escapeHtml(mainRoute.swapInfo.label || "Unknown")}\n`;
+        message += `🛣️ <b>Route:</b> ${escapeHtml(
+          mainRoute.swapInfo.label || "Unknown"
+        )}\n`;
       }
     }
 
@@ -423,7 +541,6 @@ export class JupiterClient {
 
     return { valid: true };
   }
-
 }
 
 // ================================
@@ -497,7 +614,7 @@ export interface JupiterTokenMetadata {
 
 export async function fetchJupiterTokenMetadata(
   query: string,
-  fetchImpl: FetchLike = (globalThis.fetch as unknown) as FetchLike
+  fetchImpl: FetchLike = globalThis.fetch as unknown as FetchLike
 ): Promise<JupiterTokenMetadata | null> {
   if (!query || !query.trim()) {
     return null;
@@ -541,7 +658,8 @@ export async function fetchJupiterTokenMetadata(
     }
 
     const decimals =
-      typeof candidate.decimals === "number" && Number.isFinite(candidate.decimals)
+      typeof candidate.decimals === "number" &&
+      Number.isFinite(candidate.decimals)
         ? candidate.decimals
         : 6;
 

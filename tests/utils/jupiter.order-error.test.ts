@@ -70,3 +70,57 @@ test("JupiterClient surfaces gasless order error message", async () => {
     })
   ).rejects.toThrow("Minimum $10 for gasless");
 });
+
+test("JupiterClient honors referralApplied returned by Jupiter", async () => {
+  const client = new JupiterClient("https://lite-api.jup.ag", async () =>
+    new Response(
+      JSON.stringify({
+        inputMint: "MintA",
+        outputMint: "MintB",
+        inAmount: "1000",
+        outAmount: "2000",
+        otherAmountThreshold: "0",
+        swapMode: "ExactIn",
+        slippageBps: 50,
+        priceImpactPct: "0",
+        routePlan,
+        router: "pump",
+        requestId: "req-123",
+        quoteId: "quote-123",
+        totalTime: 1,
+        platformFee: null,
+        referralApplied: false,
+      }),
+      { status: 200, statusText: "OK" }
+    )
+  );
+
+  const quote = await client.getQuote({
+    inputMint: "MintA",
+    outputMint: "MintB",
+    amount: "1000",
+    referralAccount: "REF-ACC",
+  });
+
+  expect(quote.referralApplied).toBe(false);
+});
+
+test("Jupiter executeOrder surfaces stringify failures without crashing", async () => {
+  const circular: any = { signature: "derp" };
+  circular.self = circular;
+  const client = new JupiterClient("https://lite-api.jup.ag", async () =>
+    ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => circular,
+    } as any)
+  );
+
+  await expect(
+    client.executeOrder({
+      requestId: "req",
+      signedTransaction: "tx",
+    })
+  ).rejects.toThrow(/Failed to execute Jupiter order:/);
+});

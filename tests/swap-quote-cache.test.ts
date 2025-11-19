@@ -1,31 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { SwapQuoteCache } from "../src/utils/swap/quote-cache";
-import type { JupiterQuoteRequest, JupiterQuoteResponse } from "../src/utils/jupiter";
-
-const makeJupiterParams = (overrides: Partial<JupiterQuoteRequest> = {}): JupiterQuoteRequest => ({
-  inputMint: "MintA",
-  outputMint: "MintB",
-  amount: "1000",
-  ...overrides,
-});
-
-const makeJupiterQuote = (
-  request: JupiterQuoteRequest,
-  overrides: Partial<JupiterQuoteResponse> = {}
-): JupiterQuoteResponse => ({
-  inputMint: request.inputMint,
-  inAmount: request.amount,
-  outputMint: request.outputMint,
-  outAmount: "2000",
-  otherAmountThreshold: "0",
-  swapMode: "ExactIn",
-  slippageBps: 50,
-  priceImpactPct: "0",
-  routePlan: [],
-  totalTime: 0,
-  platformFee: null,
-  ...overrides,
-});
+import { makeJupiterParams, makeJupiterQuote } from "./helpers/jupiter-factories";
 
 describe("SwapQuoteCache", () => {
   test("coalesces concurrent Jupiter quote requests", async () => {
@@ -67,5 +42,86 @@ describe("SwapQuoteCache", () => {
 
     expect(loaderCalls).toBe(2);
     expect(resolved.outAmount).toBe("3000");
+  });
+ 
+  test("keeps referral and non-referral quotes separate", async () => {
+    const cache = new SwapQuoteCache({ ttlMs: 5_000 });
+    const baseParams = makeJupiterParams({ amount: "1500" });
+    const referralParams = {
+      ...baseParams,
+      referralAccount: "RefAccount",
+      referralFeeBps: 90,
+      payer: "PayerKey",
+      closeAuthority: "CloseKey",
+    };
+
+    let loaderCalls = 0;
+    const loader = async () => {
+      loaderCalls += 1;
+      return makeJupiterQuote(baseParams);
+    };
+
+    await cache.getJupiterQuote(baseParams, loader);
+    await cache.getJupiterQuote(referralParams, loader);
+
+    expect(loaderCalls).toBe(2);
+  });
+
+  test("deduplicates concurrent referral quote requests", async () => {
+    const cache = new SwapQuoteCache({ ttlMs: 5_000 });
+    const params = makeJupiterParams({
+      amount: "2000",
+      referralAccount: "AnotherRef",
+      referralFeeBps: 70,
+      payer: "PayerKey2",
+      closeAuthority: "CloseKey2",
+    });
+
+    let loaderCalls = 0;
+    const loader = async () => {
+      loaderCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return makeJupiterQuote(params);
+    };
+
+    const [first, second] = await Promise.all([
+      cache.getJupiterQuote(params, loader),
+      cache.getJupiterQuote(params, loader),
+    ]);
+
+    expect(loaderCalls).toBe(1);
+    expect(first).toEqual(second);
+  });
+
+  test("admin and user payer races do not share same quote", async () => {
+    const cache = new SwapQuoteCache({ ttlMs: 5_000 });
+    const base = makeJupiterParams({ amount: "3000" });
+    const adminParams = {
+      ...base,
+      payer: "Admin",
+    };
+    const userParams = {
+      ...base,
+      payer: "User",
+    };
+
+    let loaders = 0;
+    const adminLoader = async () => {
+      loaders += 1;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return makeJupiterQuote(adminParams, { inAmount: "1" });
+    };
+    const userLoader = async () => {
+      loaders += 1;
+      return makeJupiterQuote(userParams, { inAmount: "2" });
+    };
+
+    const [adminQuote, userQuote] = await Promise.all([
+      cache.getJupiterQuote(adminParams, adminLoader),
+      cache.getJupiterQuote(userParams, userLoader),
+    ]);
+
+    expect(loaders).toBe(2);
+    expect(adminQuote.inAmount).not.toBe(userQuote.inAmount);
   });
 });

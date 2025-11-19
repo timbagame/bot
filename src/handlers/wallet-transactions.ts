@@ -70,6 +70,8 @@ type PresentSpendAmountParams = {
   insufficientSolForFeesMessage?: string;
   insufficientSolBalanceMessage?: string;
   omitSolFeeBufferHint?: boolean;
+  userSolBufferLamports?: number;
+  insufficientSolMaxBufferMessage?: string;
 };
 
 type SendAmountPromptParams = {
@@ -326,6 +328,8 @@ export const createWalletTransactionsModule = (
     solFeeBufferLamports = getSolFeeBufferLamports(),
     insufficientSolForFeesMessage,
     insufficientSolBalanceMessage,
+    userSolBufferLamports,
+    insufficientSolMaxBufferMessage,
     omitSolFeeBufferHint,
   }: PresentSpendAmountParams) => {
     const presentation = presentTradeAmount({
@@ -349,6 +353,8 @@ export const createWalletTransactionsModule = (
       ...(omitSolFeeBufferHint ? { omitSolFeeBufferHint } : {}),
       formatSol,
       formatToken,
+      userSolBufferLamports,
+      insufficientSolMaxBufferMessage,
     });
 
     return {

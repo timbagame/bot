@@ -1,10 +1,14 @@
-import { expect, test, describe } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import {
   getJupiterMint,
   isPriceImpactTooHigh,
   validateSlippage,
+  JupiterClient,
+  type JupiterQuoteResponse,
+  type JupiterUltraOrderResponse,
 } from "../src/utils/jupiter";
-import { JupiterClient, type JupiterQuoteResponse } from "../src/utils/jupiter";
+import { createJupiterFetchStub } from "./helpers/test-stubs";
+import { makeJupiterOrderResponse } from "./helpers/jupiter-factories";
 
 describe("jupiter utils", () => {
   test("getJupiterMint maps SOL to WSOL mint", () => {
@@ -72,5 +76,250 @@ describe("JupiterClient helpers", () => {
     expect(msg).toContain("<b>You pay:</b> 1.000000 SOL");
     expect(msg).toContain("<b>You receive:</b> 1.000000 USDC");
     expect(msg).toContain("<b>Route:</b> JupiterAMM");
+  });
+});
+
+describe("JupiterClient referral URL params", () => {
+  const inputMint = "So11111111111111111111111111111111111111112";
+  const outputMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+  const amount = "1000000";
+  const referralAccount = "GPBNTRmo26MRoaLSvRXwhWaQZhYjwVWgEkgwRZVU6x9U";
+  const payer = "6HqDqk25HSbzsk1HJ8PMzhzD5ZNY9LqZhpGwbCLyzvC6";
+
+  let savedConsoleDebug: typeof console.debug;
+
+  beforeEach(() => {
+    savedConsoleDebug = console.debug;
+    console.debug = () => {};
+  });
+
+  afterEach(() => {
+    console.debug = savedConsoleDebug;
+  });
+
+  const makeSuccessResponse = (overrides?: Partial<JupiterUltraOrderResponse>) =>
+    makeJupiterOrderResponse(
+      { inputMint, outputMint, amount },
+      {
+        mode: "ultra",
+        inputMint,
+        outputMint,
+        inAmount: amount,
+        outAmount: "100",
+        otherAmountThreshold: "0",
+        swapMode: "ExactIn",
+        slippageBps: 100,
+        priceImpactPct: "0",
+        routePlan: [
+          {
+            swapInfo: {
+              ammKey: "AMM",
+              label: "Jupiter",
+              inputMint,
+              outputMint,
+              inAmount: amount,
+              outAmount: "100",
+              feeAmount: "0",
+              feeMint: inputMint,
+            },
+            percent: 100,
+          },
+        ],
+        transaction: "AAAA",
+        requestId: "req-portal",
+        ...overrides,
+      }
+    );
+
+  test("falls back to payer for taker when missing", async () => {
+    const capture: { url?: string } = {};
+    const client = new JupiterClient(
+      "https://lite-api.jup.ag",
+      createJupiterFetchStub(capture, async () => makeSuccessResponse())
+    );
+
+    await client.getQuote({
+      inputMint,
+      outputMint,
+      amount,
+      referralAccount,
+      referralFeeBps: 85,
+      payer,
+    });
+
+    expect(capture.url).toContain(`taker=${payer}`);
+  });
+
+  test("keeps explicit taker instead of overriding with payer", async () => {
+    const capture: { url?: string } = {};
+    const explicitTaker = "2DxM4Qf7RZwzE9HyfYDp2mjNgS8RX5UCb7Yiz2ZGsY2Q";
+    const client = new JupiterClient(
+      "https://lite-api.jup.ag",
+      createJupiterFetchStub(capture, async () => makeSuccessResponse())
+    );
+
+    await client.getQuote({
+      inputMint,
+      outputMint,
+      amount,
+      referralAccount,
+      referralFeeBps: 85,
+      payer,
+      taker: explicitTaker,
+    });
+
+    expect(capture.url).toContain(`taker=${explicitTaker}`);
+    expect(capture.url).not.toContain(`taker=${payer}`);
+  });
+
+  test("strips payer and closeAuthority on referral fallback", async () => {
+    const urls: string[] = [];
+    const closeAuthority = "5mo3n3ed58N8LSnMSrhMfyQyw4MKWmNBp8QtUafpJwwt";
+    const client = new JupiterClient(
+      "https://lite-api.jup.ag",
+      createJupiterFetchStub({ urls }, async (_, call) => {
+        if (call === 1) {
+          return {
+            ok: false,
+            status: 400,
+            statusText: "Bad Request",
+            text: async () => "Failed to get quotes",
+          } as unknown as Response;
+        }
+
+        return makeSuccessResponse();
+      })
+    );
+
+    await client.getQuote({
+      inputMint,
+      outputMint,
+      amount,
+      referralAccount,
+      referralFeeBps: 85,
+      payer,
+      closeAuthority,
+    });
+
+    expect(urls.length).toBe(2);
+    expect(urls[0]).toContain("referralAccount=");
+    expect(urls[0]).toContain(`payer=${payer}`);
+    expect(urls[0]).toContain(`closeAuthority=${closeAuthority}`);
+    expect(urls[1]).not.toContain("referralAccount=");
+    expect(urls[1]).not.toContain("referralFeeBps=");
+    expect(urls[1]).not.toContain("payer=");
+    expect(urls[1]).not.toContain("closeAuthority=");
+  });
+});
+
+describe("JupiterClient ExactOut handling", () => {
+  test("uses quote outAmount when swapMode is ExactOut", async () => {
+    const capture: { url?: string } = {};
+    const client = new JupiterClient(
+      "https://lite-api.jup.ag",
+      async (input) => {
+        capture.url = typeof input === "string" ? input : input.toString();
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () =>
+            ({
+              mode: "ultra",
+              inputMint: "So11111111111111111111111111111111111111112",
+              outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+              inAmount: "5000",
+              outAmount: "1234",
+              otherAmountThreshold: "0",
+              swapMode: "ExactOut",
+              slippageBps: 100,
+              priceImpactPct: "0",
+              routePlan: [],
+              transaction: "AAAA",
+              requestId: "req-exactout",
+            } as JupiterUltraOrderResponse),
+          text: async () =>
+            JSON.stringify({
+              mode: "ultra",
+              inputMint: "So11111111111111111111111111111111111111112",
+              outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+              amount: "1234",
+            }),
+        } as unknown as Response;
+      }
+    );
+
+    await client.getSwapTransaction({
+      userPublicKey: "UserTaker",
+      quoteResponse: {
+        inputMint: "So11111111111111111111111111111111111111112",
+        outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        inAmount: "5000",
+        outAmount: "1234",
+        otherAmountThreshold: "0",
+        swapMode: "ExactOut",
+        slippageBps: 100,
+        priceImpactPct: "0",
+        routePlan: [],
+        totalTime: 0,
+        platformFee: null,
+      },
+    });
+
+    expect(capture.url).toContain("amount=1234");
+  });
+});
+
+describe("JupiterClient fee display", () => {
+  test("shows platform fee percent when feeBps missing", () => {
+    const client = new JupiterClient();
+    const quote = {
+      inputMint: "So11111111111111111111111111111111111111112",
+      inAmount: "1000000",
+      outputMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
+      outAmount: "10000",
+      otherAmountThreshold: "0",
+      swapMode: "ExactIn",
+      slippageBps: 100,
+      priceImpactPct: "0",
+      routePlan: [],
+      totalTime: 0,
+      platformFee: { amount: "1000", feeBps: 120 },
+    } as JupiterQuoteResponse;
+
+    const msg = client.formatQuoteForDisplay(quote, 9, 6, "SOL", "TIMBA");
+    expect(msg).toContain("Fee:");
+    expect(msg).toContain("1.20%");
+  });
+});
+
+describe("JupiterClient error handling", () => {
+  test("propagates gasless minimum error code 3 clearly", async () => {
+    const client = new JupiterClient(
+      "https://lite-api.jup.ag",
+      async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({
+          errorCode: 3,
+          errorMessage: "Minimum $10 for gasless",
+        }),
+        text: async () =>
+          JSON.stringify({
+            errorCode: 3,
+            errorMessage: "Minimum $10 for gasless",
+          }),
+      } as unknown as Response)
+    );
+
+    await expect(
+      client.getQuote({
+        inputMint: "So11111111111111111111111111111111111111112",
+        outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        amount: "1000000",
+        taker: "Taker",
+      })
+    ).rejects.toThrow("Minimum $10 for gasless");
   });
 });

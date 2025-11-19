@@ -3,13 +3,14 @@ import {
   getAssociatedTokenAddressSync,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
-import { SystemProgram } from "@solana/web3.js";
+import { SystemProgram, PublicKey, Connection, sendAndConfirmRawTransaction } from "@solana/web3.js";
 import type { Timba } from "../idl/idlType";
 import { WalletManager } from "../src/utils/wallet";
 import {
   getSupportedTokens,
   type TokenConfig,
 } from "../src/utils/token-registry";
+import { getReferralTokenEntries } from "../src/utils/token-registry";
 import type { KeypairBundle } from "./utils/keypairs";
 import {
   bundleFromKeypair,
@@ -18,19 +19,49 @@ import {
 } from "./utils/keypairs";
 import { createAnchorContext } from "./utils/anchor-context";
 import { resolvePrimaryRpcEndpoint } from "../src/utils/rpc-endpoints";
+import { resolveTokenPriceUSD } from "../src/utils/prices";
+import { ReferralProvider } from "@jup-ag/referral-sdk";
 
 const RPC_URL = resolvePrimaryRpcEndpoint(process.env.SOLANA_NETWORK);
 
 const TOKENS: TokenConfig[] = getSupportedTokens();
+const REFERRAL_ENTRIES = getReferralTokenEntries();
 
-async function withdrawTokenFee(
+const shouldWithdrawToken = async (
+  wallet: WalletManager,
+  config: TokenConfig,
+  pendingFees: bigint,
+  decimals: number
+) => {
+  const formattedPending = wallet.formatTokenBalance(
+    Number(pendingFees),
+    decimals
+  );
+  const tokenAmount = Number(pendingFees) / 10 ** decimals;
+  const priceData = await resolveTokenPriceUSD({
+    tokenMint: config.mint,
+    tokenTicker: config.ticker,
+  });
+  const tokenUsdValue = tokenAmount * (priceData?.price ?? 0);
+  if (tokenUsdValue < 5) {
+    console.log(
+      `ℹ️  Skipping ${config.ticker} withdrawal: ${formattedPending} ≈ $${
+        tokenUsdValue.toFixed(2)
+      } (< $5).`
+    );
+    return { shouldWithdraw: false, formattedPending, tokenUsdValue };
+  }
+  return { shouldWithdraw: true, formattedPending, tokenUsdValue };
+};
+
+async function processTokenFee(
   program: anchor.Program<Timba>,
   connection: anchor.web3.Connection,
   wallet: WalletManager,
   adminBundle: KeypairBundle,
   operatorBundle: KeypairBundle,
   config: TokenConfig
-): Promise<void> {
+): Promise<boolean> {
   const mint = new anchor.web3.PublicKey(config.mint);
   const [oraclePda] = anchor.web3.PublicKey.findProgramAddressSync(
     [Buffer.from("oracle")],
@@ -50,21 +81,24 @@ async function withdrawTokenFee(
     console.warn(
       `⚠️  No game token configuration found for ${config.ticker}; skipping.`
     );
-    return;
+    return false;
   }
 
   const gameToken = await program.account.gameToken.fetch(gameTokenPda);
   const pendingFees = BigInt(gameToken.feeAmount.toString());
   if (pendingFees === 0n) {
     console.log(`ℹ️  No pending fees for ${config.ticker}; skipping.`);
-    return;
+    return false;
   }
 
   const metadata = await wallet.getTokenMetadata(config.mint);
-  const formattedPending = wallet.formatTokenBalance(
-    Number(pendingFees),
+  const { shouldWithdraw, formattedPending } = await shouldWithdrawToken(
+    wallet,
+    config,
+    pendingFees,
     metadata.decimals
   );
+  if (!shouldWithdraw) return false;
 
   const {
     address: operatorAta,
@@ -124,6 +158,51 @@ async function withdrawTokenFee(
   );
 
   console.log(`   ✅ Withdrawn. Transaction: ${tx}`);
+  return true;
+}
+
+async function runReferralSweep(
+  connection: anchor.web3.Connection,
+  adminBundle: KeypairBundle
+): Promise<void> {
+  if (REFERRAL_ENTRIES.length === 0) {
+    console.log("ℹ️  No referral entries configured; skipping referral claims.");
+    return;
+  }
+
+  const referralEntry = REFERRAL_ENTRIES[0];
+  if (!referralEntry?.referralAccount) {
+    console.log("ℹ️  No referral account configured; skipping referral claims.");
+    return;
+  }
+
+  const referralAccount = new PublicKey(referralEntry.referralAccount);
+  const provider = new ReferralProvider(connection as unknown as Connection);
+
+  console.log("💸 Collecting Jupiter referral fees...");
+
+  const transactions = await provider.claimAllV2({
+    payerPubKey: adminBundle.anchor.publicKey,
+    referralAccountPubKey: referralAccount,
+  });
+
+  if (!transactions.length) {
+    console.log("ℹ️  No referral fee transactions to claim.");
+    return;
+  }
+
+  console.log(`🧾 Found ${transactions.length} referral transaction(s). Processing...`);
+
+  for (let i = 0; i < transactions.length; i++) {
+    const tx = transactions[i];
+    if (!tx) continue;
+    tx.sign([adminBundle.anchor]);
+    const sig = await sendAndConfirmRawTransaction(
+      connection as unknown as Connection,
+      Buffer.from(tx.serialize())
+    );
+    console.log(`   ✅ Referral claim ${i + 1}/${transactions.length}: ${sig}`);
+  }
 }
 
 async function main() {
@@ -146,7 +225,7 @@ async function main() {
 
   for (const token of TOKENS) {
     try {
-      await withdrawTokenFee(
+      await processTokenFee(
         program,
         connection,
         wallet,
@@ -157,6 +236,12 @@ async function main() {
     } catch (error) {
       console.error(`❌ Failed withdrawing ${token.ticker}:`, error);
     }
+  }
+
+  try {
+    await runReferralSweep(connection, adminBundle);
+  } catch (error) {
+    console.error("❌ Failed withdrawing referral fees:", error);
   }
 
   console.log("\n🏁 Fee withdrawal run completed.");

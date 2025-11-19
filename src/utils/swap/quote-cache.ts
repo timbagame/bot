@@ -11,13 +11,16 @@ const DEFAULT_TTL_MS = 5_000;
 
 export class SwapQuoteCache {
   private readonly ttlMs: number;
-  private readonly jupiterCache = createExpiringCache<JupiterQuoteResponse>(
-    DEFAULT_TTL_MS
-  );
-  private readonly pendingJupiter = new Map<string, Promise<JupiterQuoteResponse>>();
+  private readonly jupiterCache =
+    createExpiringCache<JupiterQuoteResponse>(DEFAULT_TTL_MS);
+  private readonly pendingJupiter = new Map<
+    string,
+    Promise<JupiterQuoteResponse>
+  >();
 
   constructor(options: QuoteCacheOptions = {}) {
-    this.ttlMs = options.ttlMs && options.ttlMs > 0 ? options.ttlMs : DEFAULT_TTL_MS;
+    this.ttlMs =
+      options.ttlMs && options.ttlMs > 0 ? options.ttlMs : DEFAULT_TTL_MS;
   }
 
   async getJupiterQuote(
@@ -55,20 +58,30 @@ export class SwapQuoteCache {
       inputMint,
       outputMint,
       amount,
+      taker,
       platformFeeBps = 0,
       maxAccounts = 0,
       onlyDirectRoutes = false,
       swapMode = "ExactIn",
+      referralAccount,
+      referralFeeBps,
+      payer,
+      closeAuthority,
     } = params;
 
     return JSON.stringify({
       inputMint,
       outputMint,
       amount,
+      taker,
       platformFeeBps,
       maxAccounts,
       onlyDirectRoutes,
       swapMode,
+      referralAccount,
+      referralFeeBps,
+      payer,
+      closeAuthority,
     });
   }
 }
