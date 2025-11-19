@@ -271,10 +271,18 @@ export class SwapManager {
             closeAuthority: integrator?.closeAuthority,
           });
 
+          const signers: Keypair[] = [userKeypair];
+          if (integrator?.payerKind === "admin") {
+            const adminKeypair = this.wallet.getAdminKeypair?.();
+            if (adminKeypair) {
+              signers.push(adminKeypair);
+            }
+          }
+
           const signature = await this.executeJupiterTransaction(
             swapResponse.swapTransaction,
             swapResponse.requestId,
-            [userKeypair]
+            signers
           );
 
           lastJupiterError = null;
