@@ -6,7 +6,7 @@ import { WalletManager } from "./utils/wallet";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import * as anchor from "@coral-xyz/anchor";
 import { EventParser } from "@coral-xyz/anchor";
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
 import {
@@ -21,6 +21,7 @@ import {
   handleCommandError as handleCommandErrorHelper,
 } from "./utils/bot-helpers/error-response";
 import { SwapManager, type SwapQuote } from "./utils/swap-manager";
+import { SwapService } from "./utils/swap/service";
 import { createExpiringCache } from "./utils/expiring-cache";
 import {
   LAMPORTS_PER_SOL,
@@ -1117,17 +1118,20 @@ const prepareTokenTradeQuote = async ({
         userKeypair.publicKey.toBase58()
       );
 
-      const quote = await swapManager.getQuote({
-        inputMint: inputAsset.mint,
-        outputMint: outputAsset.mint,
-        amount: amountResolution.rawAmount.toString(),
-        userKeypair,
-        inputDecimals: inputAsset.decimals,
-        outputDecimals: outputAsset.decimals,
-        inputTicker: inputAsset.ticker.toUpperCase(),
-        outputTicker: outputAsset.ticker.toUpperCase(),
-        integrator: integratorForQuote,
-      });
+      const quote = await swapService.prepareSwap(
+        {
+          inputMint: inputAsset.mint,
+          outputMint: outputAsset.mint,
+          amount: amountResolution.rawAmount.toString(),
+          userKeypair,
+          inputDecimals: inputAsset.decimals,
+          outputDecimals: outputAsset.decimals,
+          inputTicker: inputAsset.ticker.toUpperCase(),
+          outputTicker: outputAsset.ticker.toUpperCase(),
+          integrator: integratorForQuote,
+        },
+        integratorForQuote
+      );
       if (!quote) {
         throw new Error(
           quoteErrorMessage ??
@@ -1172,6 +1176,7 @@ export const __test_setTokenManager = (manager: TokenManager): void => {
   tokenManager = manager;
 };
 let swapManager: SwapManager;
+let swapService: SwapService;
 let gameCompletedListenerId: number | null = null;
 let playerJoinedListenerId: number | null = null;
 let playerUnjoinedListenerId: number | null = null;
@@ -2543,6 +2548,7 @@ const setupAnchor = async () => {
     );
 
     swapManager = new SwapManager(wallet.getConnection(), wallet);
+    swapService = new SwapService(wallet, swapManager);
     console.log("Initialized SwapManager");
 
     await initializeTokensList();
@@ -3841,43 +3847,16 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
         throw new Error("Quote not found for this transaction");
       }
 
-      let txSignature: string;
       const keypair = wallet.getKeyPair(BigInt(transaction.userId));
 
-      const rawInputDecimals =
-        (transaction as any).inputDecimals ?? (quote as any).inputDecimals;
-      const inferredInputDecimals = Number(rawInputDecimals);
-      const inputDecimals = Number.isFinite(inferredInputDecimals)
-        ? inferredInputDecimals
-        : 9;
-
       const rawOutputDecimals =
-        (transaction as any).outputDecimals ?? (quote as any).outputDecimals;
+        quote.outputDecimals ?? (transaction as any).outputDecimals;
       const inferredOutputDecimals = Number(rawOutputDecimals);
       const outputDecimals = Number.isFinite(inferredOutputDecimals)
         ? inferredOutputDecimals
         : 9;
 
-      await ensureUserSolBufferForSwap({
-        quote,
-        userKeypair: keypair,
-      });
-
-      // Use Jupiter execution method
-      txSignature = await swapManager.executeJupiterSwap(
-        {
-          inputMint: quote.inputMint,
-          outputMint: quote.outputMint,
-          amount: quote.inputAmountRaw,
-          userKeypair: keypair,
-          inputDecimals,
-          outputDecimals,
-          inputTicker: transaction.fromToken?.toUpperCase() || "UNKNOWN",
-          outputTicker: transaction.toToken?.toUpperCase() || "UNKNOWN",
-          integrator: quote.integrator ?? null,
-        },
-        quote
-      );
+      const txSignature = await swapService.execute(quote, keypair);
 
       console.log(`🚀 Swap transaction submitted: ${txSignature}`);
 
@@ -3971,88 +3950,6 @@ registerWalletActionMenuHandler({
   successAck: "💱 Select token to swap from",
   }),
 });
-
-const safeBigIntToNumber = (value: bigint): number => {
-  const maxSafe = BigInt(Number.MAX_SAFE_INTEGER);
-  const minSafe = BigInt(Number.MIN_SAFE_INTEGER);
-
-  if (value > maxSafe) {
-    return Number.MAX_SAFE_INTEGER;
-  }
-  if (value < minSafe) {
-    return Number.MIN_SAFE_INTEGER;
-  }
-  return Number(value);
-};
-
-const ensureUserSolBufferForSwap = async ({
-  quote,
-  userKeypair,
-}: {
-  quote: SwapQuote;
-  userKeypair: Keypair;
-}): Promise<void> => {
-  const providerQuote = quote.providerQuote;
-  if (!providerQuote) {
-    return;
-  }
-
-  if (quote.inputMint !== WSOL_MINT && quote.inputMint !== "SOL") {
-    return;
-  }
-
-  const userBalance = await wallet
-    .getConnection()
-    .getBalance(userKeypair.publicKey);
-
-  const amountLamports = quote.inputAmountRaw
-    ? BigInt(quote.inputAmountRaw)
-    : 0n;
-
-  if (userBalance < safeBigIntToNumber(amountLamports)) {
-    throw new Error(
-      `Insufficient balance to attempt this swap. Add SOL or reduce the amount.`
-    );
-  }
-
-  if (quote.integrator?.payerKind === "admin") {
-    return;
-  }
-
-  const routeLamports =
-    (providerQuote.rentFeeLamports ?? 0) +
-    (providerQuote.prioritizationFeeLamports ?? 0) +
-    (providerQuote.signatureFeeLamports ?? 0);
-
-  const slack = Math.ceil(routeLamports * 0.25) + 200_000;
-  const requiredLeftover = Math.max(
-    routeLamports,
-    slack,
-    USER_SOL_MAX_BUFFER_LAMPORTS
-  );
-
-  if (requiredLeftover <= 0) {
-    return;
-  }
-
-  const leftover = BigInt(userBalance) - amountLamports;
-  const requiredLeftoverBig = BigInt(requiredLeftover);
-
-  if (leftover >= requiredLeftoverBig) {
-    return;
-  }
-
-  const deficitLamports = requiredLeftoverBig - leftover;
-  const formattedRequired = wallet.formatSolBalance(requiredLeftover);
-  const formattedRoute = wallet.formatSolBalance(routeLamports);
-  const formattedDeficit = wallet.formatSolBalance(
-    safeBigIntToNumber(deficitLamports)
-  );
-
-  throw new Error(
-    `This route (${providerQuote.router ?? "iris"}) needs ${formattedRoute} SOL for rent and expects you to keep ${formattedRequired} SOL in the wallet. Reduce the swap amount or keep ${formattedDeficit} more SOL before retrying.`
-  );
-};
 
 type ResolveAdminIntegratorConfigOptions = {
   integratorConfig: IntegratorSwapParams | null;
@@ -4248,7 +4145,6 @@ const prepareIntegratorForQuote = (
 // Expose helpers for tests
 export const __test_prepareIntegratorForQuote = prepareIntegratorForQuote;
 
-export const __test_ensureUserSolBufferForSwap = ensureUserSolBufferForSwap;
 export const __test_buildAdminIntegratorConfig = buildAdminIntegratorConfig;
 
 // ================================

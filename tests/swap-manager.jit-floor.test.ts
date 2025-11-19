@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Keypair } from "@solana/web3.js";
 import { SwapManager } from "../src/utils/swap-manager";
+import type { WalletManager } from "../src/utils/wallet";
 
 describe("SwapManager JIT floor", () => {
   test("Tiny SOL top-ups are floored to 0.01 SOL", async () => {
@@ -16,7 +17,17 @@ describe("SwapManager JIT floor", () => {
       getBalance: async () => 0,
     } as any;
 
-    const swapManager = new SwapManager(connection, {} as any, feeBudget);
+    const walletStub = {
+      getConnection: () => connection,
+      formatSolBalance: (lamports: number) => `${lamports} lamports`,
+      ensureAssociatedTokenAccount: async () => ({
+        created: false,
+        instructions: [],
+        isToken2022: false,
+      }),
+    } as unknown as WalletManager;
+
+    const swapManager = new SwapManager(connection as any, walletStub, feeBudget);
 
     // Record the request amount Jupiter sees
     let requestedLamports = "0";

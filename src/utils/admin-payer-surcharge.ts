@@ -1,6 +1,6 @@
 import { LAMPORTS_PER_SOL } from "./constants";
 
-export const MAX_REFERRAL_FEE_BPS = 255;
+export const MAX_REFERRAL_FEE_BPS = 200;
 export const DEFAULT_REFERRAL_BASE_FEE_BPS = 85;
 export const DEFAULT_MAX_EXTRA_FEE_BPS = 100;
 
@@ -84,7 +84,7 @@ export function calculateAdminPayerFeeBps(
     deficitLamports,
     solPriceUsd,
     minFeeBps = 50,
-    maxFeeBps = 255,
+    maxFeeBps = MAX_REFERRAL_FEE_BPS,
   } = options;
 
   if (

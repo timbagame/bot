@@ -27,6 +27,7 @@ import type {
 import type { IntegratorSwapParams } from "./integrator-fees";
 import { SwapQuoteCache } from "./swap/quote-cache";
 import { getReferralConfigForMint, WSOL_MINT as REGISTRY_SOL } from "./token-registry";
+import { SwapService } from "./swap/service";
 
 export type {
   SwapQuote,
@@ -59,6 +60,7 @@ export class SwapManager {
   private feeBudget: FeeBudgetProvider;
   private network: SolanaNetwork;
   private readonly quoteCache = new SwapQuoteCache();
+  private readonly swapService: SwapService;
 
   constructor(
     connection: Connection,
@@ -71,6 +73,7 @@ export class SwapManager {
     this.feeBudget = feeBudget ?? FeeBudgetManager.getInstance(connection);
 
     this.jupiterClient = new JupiterClient();
+    this.swapService = new SwapService(this.wallet, this);
   }
 
   private isSolMint(mint: string): boolean {
@@ -137,6 +140,10 @@ export class SwapManager {
       providerQuoteTimestamp: Date.now(),
       integrator: request.integrator ?? null,
       integratorApplied: Boolean(request.integrator),
+      inputDecimals: request.inputDecimals,
+      outputDecimals: request.outputDecimals,
+      inputTicker: request.inputTicker,
+      outputTicker: request.outputTicker,
     };
   }
 
@@ -152,7 +159,7 @@ export class SwapManager {
     const {
       userKeypair,
       tokenMint,
-      tokenDecimals: _tokenDecimals,
+      tokenDecimals,
       availableTokenAmountRaw,
       desiredLamports,
       tokenTicker = "token",
@@ -245,45 +252,35 @@ export class SwapManager {
             return null;
           }
 
-          const quote = await this.getJupiterQuote({
-            inputMint: tokenMint,
-            outputMint: SOL_MINT,
-            amount: requiredInputClamped.toString(),
-            taker: userKeypair.publicKey.toBase58(),
-            referralAccount: integrator?.referralAccount,
-            referralFee: integrator?.referralFee,
-            payer: integrator?.payer,
-            closeAuthority: integrator?.closeAuthority,
-          });
+          const swapQuote = await this.swapService.prepareSwap(
+            {
+              inputMint: tokenMint,
+              outputMint: SOL_MINT,
+              amount: requiredInputClamped.toString(),
+              userKeypair,
+              inputDecimals: tokenDecimals,
+              outputDecimals: SOL_DECIMALS,
+              inputTicker: tokenTicker.toUpperCase(),
+              outputTicker: "SOL",
+              integrator,
+            },
+            integrator
+          );
 
-          const outputLamports = BigInt(quote.outAmount);
+          const outputLamports = BigInt(
+            swapQuote.providerQuote?.outAmount ??
+              swapQuote.outputAmount ??
+              "0"
+          );
           if (outputLamports < BigInt(targetLamportsOut)) {
             lastJupiterError =
               "Jupiter could not provide enough SOL with available tokens. Add SOL manually.";
             return null;
           }
 
-          const swapResponse = await this.jupiterClient.getSwapTransaction({
-            userPublicKey: userKeypair.publicKey.toBase58(),
-            quoteResponse: quote,
-            referralAccount: integrator?.referralAccount,
-            referralFee: integrator?.referralFee,
-            payer: integrator?.payer,
-            closeAuthority: integrator?.closeAuthority,
-          });
-
-          const signers: Keypair[] = [userKeypair];
-          if (integrator?.payerKind === "admin") {
-            const adminKeypair = this.wallet.getAdminKeypair?.();
-            if (adminKeypair) {
-              signers.push(adminKeypair);
-            }
-          }
-
-          const signature = await this.executeJupiterTransaction(
-            swapResponse.swapTransaction,
-            swapResponse.requestId,
-            signers
+          const signature = await this.swapService.execute(
+            swapQuote,
+            userKeypair
           );
 
           lastJupiterError = null;
