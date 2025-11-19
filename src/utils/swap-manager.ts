@@ -184,16 +184,20 @@ export class SwapManager {
       }
 
       const availableRaw = Math.max(Math.floor(availableTokenAmountRaw), 0);
+      const availableRawBig = BigInt(availableRaw);
       const attemptJupiterSwap = async (
         targetLamportsOut: number
       ): Promise<JustInTimeSwapResult | null> => {
         try {
-          // Step 1: get a price signal with a small ExactIn quote
-          const priceProbeIn = Math.min(Math.max(1_000_000, availableRaw / 20), availableRaw); // ~1 token or 5% of balance
+          // Step 1: get a price signal with a small ExactIn quote (integer math)
+          const minProbe = 1_000_000n;
+          const probeCandidate = availableRawBig / 20n; // ~5% of balance
+          const priceProbeInBig = probeCandidate < minProbe ? minProbe : probeCandidate;
+          const priceProbeInStr = priceProbeInBig.toString();
           const probeQuote = await this.getJupiterQuote({
             inputMint: tokenMint,
             outputMint: SOL_MINT,
-            amount: priceProbeIn.toString(),
+            amount: priceProbeInStr,
             taker: userKeypair.publicKey.toBase58(),
           });
 
@@ -206,10 +210,15 @@ export class SwapManager {
           }
 
           // Calculate required input (ceil) to cover the desired SOL, with 5% headroom to avoid underfunding
-          const requiredInput = ((BigInt(targetLamportsOut) * probeIn) * BigInt(105)) / (probeOut * BigInt(100));
-          const requiredInputClamped = requiredInput > BigInt(availableRaw)
-            ? BigInt(availableRaw)
+          const requiredInput = ((BigInt(targetLamportsOut) * probeIn) * 105n) / (probeOut * 100n);
+          const requiredInputClamped = requiredInput > availableRawBig
+            ? availableRawBig
             : requiredInput;
+
+          if (requiredInputClamped <= 0n) {
+            lastJupiterError = "Computed swap input was zero. Add SOL manually.";
+            return null;
+          }
 
           const quote = await this.getJupiterQuote({
             inputMint: tokenMint,
