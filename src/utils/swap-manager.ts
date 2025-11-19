@@ -186,8 +186,10 @@ export class SwapManager {
       this.feeBudget.getJitSwapFeeBufferLamports(),
     ]);
 
-    // Aim a bit higher than the bare game safety buffer to leave rent headroom.
-    const safetyTarget = minimumSolBuffer + ROUTE_LAMPORTS_BUFFER;
+    // Aim higher than the bare game buffer to cover rent for temporary game accounts.
+    const GAME_RENT_BUFFER_LAMPORTS = 1_000_000; // ~0.001 SOL extra cushion
+    const safetyTarget =
+      minimumSolBuffer + jitFeeBuffer + ROUTE_LAMPORTS_BUFFER + GAME_RENT_BUFFER_LAMPORTS;
     const targetLamports = Math.max(desiredLamports ?? 0, safetyTarget);
 
     let lastJupiterError: string | null = null;
