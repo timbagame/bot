@@ -117,9 +117,6 @@ export class SwapManager {
     }
 
     const jupiterQuote = await this.getJupiterQuote(quoteRequest);
-    const integratorApplied = Boolean(
-      request.integrator && jupiterQuote.referralApplied
-    );
 
     const inAmount = parseFloat(jupiterQuote.inAmount);
     const outAmount = parseFloat(jupiterQuote.outAmount);
@@ -138,8 +135,8 @@ export class SwapManager {
       platformFee: jupiterQuote.platformFee,
       providerQuote: jupiterQuote,
       providerQuoteTimestamp: Date.now(),
-      integrator: integratorApplied ? request.integrator ?? null : null,
-      integratorApplied,
+      integrator: request.integrator ?? null,
+      integratorApplied: Boolean(request.integrator),
     };
   }
 
@@ -539,9 +536,7 @@ export class SwapManager {
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
-    const cachedIntegrator = quote.integratorApplied
-      ? quote.integrator
-      : null;
+    const cachedIntegrator = quote.integrator ?? null;
 
     let jupiterQuote = quote.providerQuote;
     const now = Date.now();
