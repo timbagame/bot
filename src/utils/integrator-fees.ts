@@ -1,6 +1,7 @@
 import { JUPITER_MIN_SOL_BALANCE_LAMPORTS, LAMPORTS_PER_SOL, WSOL_MINT } from "./constants";
 import { getReferralConfigForMint, type ReferralTokenConfigEntry } from "./token-registry";
 import { resolveTokenPriceUSD } from "./prices";
+import { clampReferralFeeBps } from "./admin-payer-surcharge";
 
 export type IntegratorPayerKind = "user" | "admin";
 
@@ -29,9 +30,6 @@ export interface IntegratorFeeContext {
 const DEFAULT_REFERRAL_BASE_FEE_BPS = 85;
 const MAX_REFERRAL_FEE_BPS = 255;
 const DEFAULT_MAX_EXTRA_FEE_BPS = 100;
-
-const clampBps = (value: number): number =>
-  Math.max(50, Math.min(MAX_REFERRAL_FEE_BPS, Math.round(value)));
 
 const getReferralTargetForPair = (
   inputMint: string,
@@ -107,8 +105,10 @@ export const resolveIntegratorSwapParams = async (
     solFeeBufferLamports ??
     (requiresAdminPayer ? JUPITER_MIN_SOL_BALANCE_LAMPORTS : 0);
 
-  const baseFeeBps = clampBps(
-    referralConfig.baseFeeBps ?? DEFAULT_REFERRAL_BASE_FEE_BPS
+  const baseFeeBps = clampReferralFeeBps(
+    referralConfig.baseFeeBps ?? DEFAULT_REFERRAL_BASE_FEE_BPS,
+    50,
+    MAX_REFERRAL_FEE_BPS
   );
 
   if (
@@ -162,12 +162,11 @@ export const resolveIntegratorSwapParams = async (
     );
   }
 
-  const referralFeeBps = clampBps(baseFeeBps + rawExtraBps);
-  if (referralFeeBps > MAX_REFERRAL_FEE_BPS) {
-    throw new Error(
-      "Referral fee exceeds allowable limit. Add SOL or increase trade size."
-    );
-  }
+  const referralFeeBps = clampReferralFeeBps(
+    baseFeeBps + rawExtraBps,
+    50,
+    MAX_REFERRAL_FEE_BPS
+  );
 
   return {
     referralAccount: referralConfig.referralAccount,

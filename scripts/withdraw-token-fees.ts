@@ -27,6 +27,33 @@ const RPC_URL = resolvePrimaryRpcEndpoint(process.env.SOLANA_NETWORK);
 const TOKENS: TokenConfig[] = getSupportedTokens();
 const REFERRAL_ENTRIES = getReferralTokenEntries();
 
+const shouldWithdrawToken = async (
+  wallet: WalletManager,
+  config: TokenConfig,
+  pendingFees: bigint,
+  decimals: number
+) => {
+  const formattedPending = wallet.formatTokenBalance(
+    Number(pendingFees),
+    decimals
+  );
+  const tokenAmount = Number(pendingFees) / 10 ** decimals;
+  const priceData = await resolveTokenPriceUSD({
+    tokenMint: config.mint,
+    tokenTicker: config.ticker,
+  });
+  const tokenUsdValue = tokenAmount * (priceData?.price ?? 0);
+  if (tokenUsdValue < 5) {
+    console.log(
+      `ℹ️  Skipping ${config.ticker} withdrawal: ${formattedPending} ≈ $${
+        tokenUsdValue.toFixed(2)
+      } (< $5).`
+    );
+    return { shouldWithdraw: false, formattedPending, tokenUsdValue };
+  }
+  return { shouldWithdraw: true, formattedPending, tokenUsdValue };
+};
+
 async function withdrawTokenFee(
   program: anchor.Program<Timba>,
   connection: anchor.web3.Connection,
@@ -65,24 +92,13 @@ async function withdrawTokenFee(
   }
 
   const metadata = await wallet.getTokenMetadata(config.mint);
-  const formattedPending = wallet.formatTokenBalance(
-    Number(pendingFees),
+  const { shouldWithdraw, formattedPending } = await shouldWithdrawToken(
+    wallet,
+    config,
+    pendingFees,
     metadata.decimals
   );
-  const tokenAmount = Number(pendingFees) / 10 ** metadata.decimals;
-  const priceData = await resolveTokenPriceUSD({
-    tokenMint: config.mint,
-    tokenTicker: config.ticker,
-  });
-  const tokenUsdValue = tokenAmount * (priceData?.price ?? 0);
-  if (tokenUsdValue < 5) {
-    console.log(
-      `ℹ️  Skipping ${config.ticker} withdrawal: ${formattedPending} ≈ $${
-        tokenUsdValue.toFixed(2)
-      } (< $5).`
-    );
-    return;
-  }
+  if (!shouldWithdraw) return;
 
   const {
     address: operatorAta,

@@ -14,6 +14,12 @@ export interface AdminPayerSurchargeOptions {
 const clampBps = (value: number, min: number, max: number): number =>
   Math.max(min, Math.min(max, Math.round(value)));
 
+export const clampReferralFeeBps = (
+  value: number,
+  min: number = 50,
+  max: number = 255
+): number => clampBps(value, min, max);
+
 export function calculateAdminPayerFeeBps(
   options: AdminPayerSurchargeOptions
 ): number {

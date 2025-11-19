@@ -221,17 +221,7 @@ export class JupiterClient {
     };
   }
 
-  private buildOrderParams(params: JupiterOrderParams): URL {
-    const url = new URL(this.getOrderUrl());
-    url.searchParams.set("inputMint", params.inputMint);
-    url.searchParams.set("outputMint", params.outputMint);
-    url.searchParams.set("amount", params.amount);
-    if (params.swapMode) {
-      url.searchParams.set("swapMode", params.swapMode);
-    }
-    if (params.taker) {
-      url.searchParams.set("taker", params.taker);
-    }
+  private applyReferralParams(url: URL, params: JupiterOrderParams): void {
     if (params.referralAccount) {
       url.searchParams.set("referralAccount", params.referralAccount);
     }
@@ -244,6 +234,20 @@ export class JupiterClient {
     if (params.closeAuthority) {
       url.searchParams.set("closeAuthority", params.closeAuthority);
     }
+  }
+
+  private buildOrderParams(params: JupiterOrderParams): URL {
+    const url = new URL(this.getOrderUrl());
+    url.searchParams.set("inputMint", params.inputMint);
+    url.searchParams.set("outputMint", params.outputMint);
+    url.searchParams.set("amount", params.amount);
+    if (params.swapMode) {
+      url.searchParams.set("swapMode", params.swapMode);
+    }
+    if (params.taker) {
+      url.searchParams.set("taker", params.taker);
+    }
+    this.applyReferralParams(url, params);
     if (params.referralAccount) {
       console.debug("Jupiter order URL:", url.toString());
     }
