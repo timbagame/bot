@@ -49,6 +49,66 @@ const JUPITER_QUOTE_EXPIRATION_MS_DEFAULT = 120_000;
 const ROUTE_LAMPORTS_BUFFER = DEFAULT_ROUTE_LAMPORTS_PADDING;
 let jupiterQuoteExpirationMs = JUPITER_QUOTE_EXPIRATION_MS_DEFAULT;
 
+type HelperResult<TValue> =
+  | { ok: true; value: TValue }
+  | { ok: false; error: JitSwapError };
+
+type StepAttemptResult =
+  | { status: "success"; result: JustInTimeSwapResult }
+  | { status: "skipped" }
+  | { status: "error"; error: JitSwapError };
+
+type TargetComputationResult =
+  | {
+      status: "satisfied";
+      currentLamports: number;
+      targetLamports: number;
+    }
+  | {
+      status: "needs-funding";
+      currentLamports: number;
+      targetLamports: number;
+      lamportsShortfall: number;
+      swapTarget: number;
+      availableRaw: number;
+      availableRawBig: bigint;
+      jitFeeBuffer: number;
+    };
+
+enum JitRetryStrategy {
+  UnwrapFirst = "unwrap-first",
+  SwapFirst = "swap-first",
+}
+
+enum JitRetryPhase {
+  Primary = "primary",
+  Secondary = "secondary",
+}
+
+enum JitRetryAction {
+  Swap = "swap",
+  Unwrap = "unwrap",
+}
+
+interface RetryStep {
+  action: JitRetryAction;
+  phase: JitRetryPhase;
+  targetLamports: number;
+}
+
+interface JitSwapError {
+  type:
+    | "INSUFFICIENT_TOKENS"
+    | "ZERO_LIQUIDITY"
+    | "PROBE_FAILED"
+    | "INSUFFICIENT_INPUT"
+    | "SWAP_UNDERSIZED"
+    | "UNWRAP_FAILED"
+    | "SWAP_EXECUTION_FAILED";
+  message: string;
+  cause?: unknown;
+}
+
 export const __test_setJupiterQuoteExpirationMs = (value: number): void => {
   jupiterQuoteExpirationMs = value;
 };
@@ -170,241 +230,447 @@ export class SwapManager {
       logContext = "game",
     } = options;
 
-    // Derive an admin integrator (referral + payer) so Jupiter Iris routes don’t fall back to
-    // gasless $10 minimum. Falls back to null if no referral config exists.
-    const integrator: IntegratorSwapParams | null = (() => {
-      const ref =
-        getReferralConfigForMint(tokenMint) ||
-        getReferralConfigForMint(REGISTRY_SOL);
-      if (!ref?.referralAccount || !this.wallet.getAdminKeypair) return null;
-      const adminKeypair = this.wallet.getAdminKeypair();
-      if (!adminKeypair) return null;
-      const admin = adminKeypair.publicKey.toBase58();
-      return {
-        referralAccount: ref.referralAccount,
-        referralFee: ref.baseFeeBps ?? 85,
-        payer: ref.adminPayer ?? admin,
-        closeAuthority: ref.adminCloseAuthority ?? admin,
-        payerKind: "admin",
-      } as IntegratorSwapParams;
-    })();
-
-    const [minimumSolBuffer, jitFeeBuffer] = await Promise.all([
-      this.feeBudget.getGameSafetyBufferLamports(),
-      this.feeBudget.getJitSwapFeeBufferLamports(),
-    ]);
-
-    // Aim higher than the bare game buffer to cover rent for temporary game accounts.
-    const GAME_RENT_BUFFER_LAMPORTS = 1_000_000; // ~0.001 SOL extra cushion
-    const safetyTarget =
-      minimumSolBuffer + jitFeeBuffer + ROUTE_LAMPORTS_BUFFER + GAME_RENT_BUFFER_LAMPORTS;
-    const targetLamports = Math.max(desiredLamports ?? 0, safetyTarget);
-
-    let lastJupiterError: string | null = null;
-    let lastUnwrapError: string | null = null;
-
     try {
-      const currentLamports = await this.connection.getBalance(
-        userKeypair.publicKey
-      );
+      const ticker = tokenTicker.toUpperCase();
+      const integrator = this.buildIntegrator(tokenMint);
+      const targetResult = await this.computeTargets({
+        userKeypair,
+        availableTokenAmountRaw,
+        desiredLamports,
+        tokenTicker: ticker,
+      });
 
-      if (currentLamports >= targetLamports) {
+      if (!targetResult.ok) {
+        return { swapped: false, error: targetResult.error.message };
+      }
+
+      const targetState = targetResult.value;
+      if (targetState.status === "satisfied") {
         console.log(
-          `💤 No just-in-time SOL swap needed for ${logContext}. Current balance ${currentLamports} ≥ target ${targetLamports}.`
+          `💤 No just-in-time SOL swap needed for ${logContext}. Current balance ${targetState.currentLamports} ≥ target ${targetState.targetLamports}.`
         );
         return { swapped: false };
       }
 
-      const availableRaw = Math.max(Math.floor(availableTokenAmountRaw), 0);
-      const availableRawBig = BigInt(availableRaw);
-      const attemptJupiterSwap = async (
-        targetLamportsOut: number
-      ): Promise<JustInTimeSwapResult | null> => {
-        try {
-          // Step 1: get a price signal with a small ExactIn quote (integer math)
-          const minProbe = 1_000_000n;
-          const probeCandidate = availableRawBig / 20n; // ~5% of balance
-          const priceProbeInBig = probeCandidate < minProbe ? minProbe : probeCandidate;
-          const priceProbeInStr = priceProbeInBig.toString();
-          const probeQuote = await this.getJupiterQuote({
-            inputMint: tokenMint,
-            outputMint: SOL_MINT,
-            amount: priceProbeInStr,
-            taker: userKeypair.publicKey.toBase58(),
-            referralAccount: integrator?.referralAccount,
-            referralFee: integrator?.referralFee,
-            payer: integrator?.payer,
-            closeAuthority: integrator?.closeAuthority,
-          });
+      const {
+        currentLamports,
+        lamportsShortfall,
+        swapTarget,
+        availableRaw,
+        availableRawBig,
+        jitFeeBuffer,
+      } = targetState;
 
-          const probeIn = BigInt(probeQuote.inAmount);
-          const probeOut = BigInt(probeQuote.outAmount);
-          if (probeOut === BigInt(0)) {
-            lastJupiterError =
-              "Jupiter returned zero output for probe quote. Route likely unavailable for this pair.";
-            return null;
-          }
+      const strategy = this.isSolMint(tokenMint)
+        ? JitRetryStrategy.UnwrapFirst
+        : JitRetryStrategy.SwapFirst;
 
-          // Calculate required input (ceil) to cover the desired SOL, with 5% headroom to avoid underfunding
-          const requiredInput = ((BigInt(targetLamportsOut) * probeIn) * 105n) / (probeOut * 100n);
-          const requiredInputClamped = requiredInput > availableRawBig
-            ? availableRawBig
-            : requiredInput;
+      const retryAction =
+        strategy === JitRetryStrategy.UnwrapFirst
+          ? JitRetryAction.Unwrap
+          : JitRetryAction.Swap;
 
-          if (requiredInputClamped <= 0n) {
-            lastJupiterError = "Computed swap input was zero. Add SOL manually.";
-            return null;
-          }
+      const retrySteps: RetryStep[] = [
+        {
+          action: retryAction,
+          phase: JitRetryPhase.Primary,
+          targetLamports: swapTarget,
+        },
+      ];
 
-          const swapQuote = await this.swapService.prepareSwap(
-            {
-              inputMint: tokenMint,
-              outputMint: SOL_MINT,
-              amount: requiredInputClamped.toString(),
-              userKeypair,
-              inputDecimals: tokenDecimals,
-              outputDecimals: SOL_DECIMALS,
-              inputTicker: tokenTicker.toUpperCase(),
-              outputTicker: "SOL",
-              integrator,
-            },
-            integrator
-          );
-
-          const outputLamports = BigInt(
-            swapQuote.providerQuote?.outAmount ??
-              swapQuote.outputAmount ??
-              "0"
-          );
-          if (outputLamports < BigInt(targetLamportsOut)) {
-            lastJupiterError =
-              "Jupiter could not provide enough SOL with available tokens. Add SOL manually.";
-            return null;
-          }
-
-          const signature = await this.swapService.execute(
-            swapQuote,
-            userKeypair
-          );
-
-          lastJupiterError = null;
-          return {
-            swapped: true,
-            provider: "jupiter",
-            signature,
-            lamportsReceived: targetLamportsOut,
-          };
-        } catch (attemptError: any) {
-          const message = attemptError?.message || String(attemptError);
-          lastJupiterError =
-            message ||
-            "Jupiter route unavailable. Try again or add SOL manually.";
-          console.log("⚠️ Jupiter swap attempt failed:", message);
-          return null;
-        }
-      };
-      if (availableRaw <= 0) {
-        return {
-          swapped: false,
-          error: `Not enough ${tokenTicker.toUpperCase()} available to convert into SOL for fees. Add SOL manually or deposit additional tokens.`,
-        };
+      if (lamportsShortfall > 0 && swapTarget !== lamportsShortfall) {
+        retrySteps.push({
+          action: retryAction,
+          phase: JitRetryPhase.Secondary,
+          targetLamports: lamportsShortfall,
+        });
       }
 
-      const lamportsShortfall = targetLamports - currentLamports;
-      const swapTarget = lamportsShortfall + jitFeeBuffer;
-
-      const primaryTarget = swapTarget;
-      const secondaryTarget = lamportsShortfall;
-
-      const attemptWsolUnwrap = async (
-        target: number
-      ): Promise<JustInTimeSwapResult | null> => {
-        // `target` is the lamports we want to unwrap (shortfall + buffer phases)
-        const desiredUnwrapLamports = Math.max(target, 0);
-        const unwrapLamports = Math.min(availableRaw, desiredUnwrapLamports);
-
-        if (unwrapLamports <= 0) {
-          return null;
-        }
-
-        try {
-          const lendingLamports = Math.max(jitFeeBuffer - currentLamports, 0);
-          const adminKeypair =
-            lendingLamports > 0 ? this.wallet.getAdminKeypair() : undefined;
-
-          const { signature, lamportsReceived } = await this.unwrapWsolPortion({
-            userKeypair,
-            unwrapLamports,
-            logContext,
-            adminKeypair,
-            lendingLamports,
-          });
-
-          lastUnwrapError = null;
-          return {
-            swapped: true,
-            provider: "unwrap",
-            signature,
-            lamportsReceived,
-          };
-        } catch (attemptError: any) {
-          const message = attemptError?.message || String(attemptError);
-          lastUnwrapError =
-            message ||
-            "Unable to unwrap WSOL automatically. Add SOL manually and try again.";
-          console.log("⚠️ WSOL unwrap attempt failed:", message);
-          return null;
-        }
-      };
-
-      if (this.isSolMint(tokenMint)) {
-        console.log(
-          `⚡ Executing just-in-time WSOL unwrap for ${logContext}. Need ${lamportsShortfall} lamports (target ${swapTarget}).`
-        );
-
-        const unwrapResult =
-          (await attemptWsolUnwrap(swapTarget)) ||
-          (lamportsShortfall > 0
-            ? await attemptWsolUnwrap(lamportsShortfall)
-            : null);
-
-        if (unwrapResult) {
-          return unwrapResult;
-        }
-
-        return {
-          swapped: false,
-          error:
-            lastUnwrapError ||
-            "Unable to unwrap WSOL for SOL fees. Add SOL manually and try again.",
-        };
-      }
-
+      const actionLabel =
+        strategy === JitRetryStrategy.UnwrapFirst ? "WSOL unwrap" : "SOL swap";
       console.log(
-        `⚡ Executing just-in-time SOL swap for ${logContext}. Need ${lamportsShortfall} lamports (target ${swapTarget}).`
+        `⚡ Executing just-in-time ${actionLabel} for ${logContext}. Need ${lamportsShortfall} lamports (target ${swapTarget}).`
       );
 
-      const jupiterSwap =
-        (await attemptJupiterSwap(primaryTarget)) ||
-        (lamportsShortfall > 0
-          ? await attemptJupiterSwap(secondaryTarget)
-          : null);
+      let lastError: JitSwapError | null = null;
 
-      if (jupiterSwap) {
-        return jupiterSwap;
+      for (const step of retrySteps) {
+        const attemptResult =
+          step.action === JitRetryAction.Unwrap
+            ? await this.attemptWsolUnwrap({
+                target: step.targetLamports,
+                availableRaw,
+                currentLamports,
+                jitFeeBuffer,
+                userKeypair,
+                logContext,
+              })
+            : await this.attemptJupiterSwap({
+                targetLamportsOut: step.targetLamports,
+                availableRawBig,
+                userKeypair,
+                tokenMint,
+                tokenDecimals,
+                tokenTicker: ticker,
+                integrator,
+              });
+
+        if (attemptResult.status === "success") {
+          return attemptResult.result;
+        }
+
+        if (attemptResult.status === "error") {
+          lastError = attemptResult.error;
+          const stepLabel =
+            step.action === JitRetryAction.Unwrap ? "WSOL unwrap" : "Jupiter swap";
+          console.log(
+            `⚠️ ${stepLabel} (${step.phase}) failed: ${attemptResult.error.message}`
+          );
+        }
       }
+
+      const fallbackMessage =
+        strategy === JitRetryStrategy.UnwrapFirst
+          ? "Unable to unwrap WSOL for SOL fees. Add SOL manually and try again."
+          : "Unable to route swap on Jupiter. Add SOL manually and try again.";
 
       return {
         swapped: false,
-        error:
-          lastJupiterError ||
-          "Unable to route swap on Jupiter. Add SOL manually and try again.",
+        error: lastError?.message ?? fallbackMessage,
       };
     } catch (error: any) {
       console.error("Just-in-time SOL swap failed:", error);
       return {
         swapped: false,
         error: error.message || "Failed to perform SOL lending swap",
+      };
+    }
+  }
+
+  private buildIntegrator(tokenMint: string): IntegratorSwapParams | null {
+    const ref =
+      getReferralConfigForMint(tokenMint) ||
+      getReferralConfigForMint(REGISTRY_SOL);
+    if (!ref?.referralAccount || !this.wallet.getAdminKeypair) {
+      return null;
+    }
+
+    const adminKeypair = this.wallet.getAdminKeypair();
+    if (!adminKeypair) {
+      return null;
+    }
+
+    const admin = adminKeypair.publicKey.toBase58();
+    return {
+      referralAccount: ref.referralAccount,
+      referralFee: ref.baseFeeBps ?? 85,
+      payer: ref.adminPayer ?? admin,
+      closeAuthority: ref.adminCloseAuthority ?? admin,
+      payerKind: "admin",
+    } as IntegratorSwapParams;
+  }
+
+  private async computeTargets(options: {
+    userKeypair: Keypair;
+    availableTokenAmountRaw: number;
+    desiredLamports?: number;
+    tokenTicker: string;
+  }): Promise<HelperResult<TargetComputationResult>> {
+    const { userKeypair, availableTokenAmountRaw, desiredLamports, tokenTicker } =
+      options;
+
+    const [minimumSolBuffer, jitFeeBuffer] = await Promise.all([
+      this.feeBudget.getGameSafetyBufferLamports(),
+      this.feeBudget.getJitSwapFeeBufferLamports(),
+    ]);
+
+    const GAME_RENT_BUFFER_LAMPORTS = 1_000_000; // ~0.001 SOL extra cushion
+    const safetyTarget =
+      minimumSolBuffer + jitFeeBuffer + ROUTE_LAMPORTS_BUFFER + GAME_RENT_BUFFER_LAMPORTS;
+    const targetLamports = Math.max(desiredLamports ?? 0, safetyTarget);
+
+    const currentLamports = await this.connection.getBalance(
+      userKeypair.publicKey
+    );
+
+    if (currentLamports >= targetLamports) {
+      return {
+        ok: true,
+        value: {
+          status: "satisfied",
+          currentLamports,
+          targetLamports,
+        },
+      };
+    }
+
+    const availableRaw = Math.max(Math.floor(availableTokenAmountRaw), 0);
+    if (availableRaw <= 0) {
+      return {
+        ok: false,
+        error: {
+          type: "INSUFFICIENT_TOKENS",
+          message: `Not enough ${tokenTicker} available to convert into SOL for fees. Add SOL manually or deposit additional tokens.`,
+        },
+      };
+    }
+
+    const lamportsShortfall = targetLamports - currentLamports;
+    const swapTarget = lamportsShortfall + jitFeeBuffer;
+
+    return {
+      ok: true,
+      value: {
+        status: "needs-funding",
+        currentLamports,
+        targetLamports,
+        lamportsShortfall,
+        swapTarget,
+        availableRaw,
+        availableRawBig: BigInt(availableRaw),
+        jitFeeBuffer,
+      },
+    };
+  }
+
+  private async probePriceAndSizeInput(options: {
+    targetLamportsOut: number;
+    availableRawBig: bigint;
+    tokenMint: string;
+    tokenDecimals: number;
+    tokenTicker: string;
+    userKeypair: Keypair;
+    integrator: IntegratorSwapParams | null;
+  }): Promise<HelperResult<{ swapQuote: SwapQuote }>> {
+    const {
+      targetLamportsOut,
+      availableRawBig,
+      tokenMint,
+      tokenDecimals,
+      tokenTicker,
+      userKeypair,
+      integrator,
+    } = options;
+
+    try {
+      const minProbe = 1_000_000n;
+      const probeCandidate = availableRawBig / 20n; // ~5% of balance
+      const priceProbeInBig = probeCandidate < minProbe ? minProbe : probeCandidate;
+      const priceProbeInStr = priceProbeInBig.toString();
+      const probeQuote = await this.getJupiterQuote({
+        inputMint: tokenMint,
+        outputMint: SOL_MINT,
+        amount: priceProbeInStr,
+        taker: userKeypair.publicKey.toBase58(),
+        referralAccount: integrator?.referralAccount,
+        referralFee: integrator?.referralFee,
+        payer: integrator?.payer,
+        closeAuthority: integrator?.closeAuthority,
+      });
+
+      const probeIn = BigInt(probeQuote.inAmount);
+      const probeOut = BigInt(probeQuote.outAmount);
+      if (probeOut === BigInt(0)) {
+        return {
+          ok: false,
+          error: {
+            type: "ZERO_LIQUIDITY",
+            message:
+              "Jupiter returned zero output for probe quote. Route likely unavailable for this pair.",
+          },
+        };
+      }
+
+      const requiredInput = ((BigInt(targetLamportsOut) * probeIn) * 105n) /
+        (probeOut * 100n);
+      const requiredInputClamped =
+        requiredInput > availableRawBig ? availableRawBig : requiredInput;
+
+      if (requiredInputClamped <= 0n) {
+        return {
+          ok: false,
+          error: {
+            type: "INSUFFICIENT_INPUT",
+            message: "Computed swap input was zero. Add SOL manually.",
+          },
+        };
+      }
+
+      const swapQuote = await this.swapService.prepareSwap(
+        {
+          inputMint: tokenMint,
+          outputMint: SOL_MINT,
+          amount: requiredInputClamped.toString(),
+          userKeypair,
+          inputDecimals: tokenDecimals,
+          outputDecimals: SOL_DECIMALS,
+          inputTicker: tokenTicker,
+          outputTicker: "SOL",
+          integrator,
+        },
+        integrator
+      );
+
+      const outputLamports = BigInt(
+        swapQuote.providerQuote?.outAmount ?? swapQuote.outputAmount ?? "0"
+      );
+      if (outputLamports < BigInt(targetLamportsOut)) {
+        return {
+          ok: false,
+          error: {
+            type: "SWAP_UNDERSIZED",
+            message:
+              "Jupiter could not provide enough SOL with available tokens. Add SOL manually.",
+          },
+        };
+      }
+
+      return {
+        ok: true,
+        value: { swapQuote },
+      };
+    } catch (error: any) {
+      return {
+        ok: false,
+        error: {
+          type: "PROBE_FAILED",
+          message:
+            error?.message ||
+            "Jupiter route unavailable. Try again or add SOL manually.",
+          cause: error,
+        },
+      };
+    }
+  }
+
+  private async attemptWsolUnwrap(options: {
+    target: number;
+    availableRaw: number;
+    currentLamports: number;
+    jitFeeBuffer: number;
+    userKeypair: Keypair;
+    logContext: string;
+  }): Promise<StepAttemptResult> {
+    const {
+      target,
+      availableRaw,
+      currentLamports,
+      jitFeeBuffer,
+      userKeypair,
+      logContext,
+    } = options;
+
+    const desiredUnwrapLamports = Math.max(target, 0);
+    const unwrapLamports = Math.min(availableRaw, desiredUnwrapLamports);
+
+    if (unwrapLamports <= 0) {
+      return { status: "skipped" };
+    }
+
+    try {
+      const lendingLamports = Math.max(jitFeeBuffer - currentLamports, 0);
+      const adminKeypair =
+        lendingLamports > 0 ? this.wallet.getAdminKeypair() : undefined;
+
+      const { signature, lamportsReceived } = await this.unwrapWsolPortion({
+        userKeypair,
+        unwrapLamports,
+        logContext,
+        adminKeypair,
+        lendingLamports,
+      });
+
+      return {
+        status: "success",
+        result: {
+          swapped: true,
+          provider: "unwrap",
+          signature,
+          lamportsReceived,
+        },
+      };
+    } catch (error: any) {
+      return {
+        status: "error",
+        error: {
+          type: "UNWRAP_FAILED",
+          message:
+            error?.message ||
+            "Unable to unwrap WSOL automatically. Add SOL manually and try again.",
+          cause: error,
+        },
+      };
+    }
+  }
+
+  private async attemptJupiterSwap(options: {
+    targetLamportsOut: number;
+    availableRawBig: bigint;
+    userKeypair: Keypair;
+    tokenMint: string;
+    tokenDecimals: number;
+    tokenTicker: string;
+    integrator: IntegratorSwapParams | null;
+  }): Promise<StepAttemptResult> {
+    const {
+      targetLamportsOut,
+      availableRawBig,
+      userKeypair,
+      tokenMint,
+      tokenDecimals,
+      tokenTicker,
+      integrator,
+    } = options;
+
+    const probeResult = await this.probePriceAndSizeInput({
+      targetLamportsOut,
+      availableRawBig,
+      tokenMint,
+      tokenDecimals,
+      tokenTicker,
+      userKeypair,
+      integrator,
+    });
+
+    if (!probeResult.ok) {
+      return { status: "error", error: probeResult.error };
+    }
+
+    return this.executeSwap({
+      swapQuote: probeResult.value.swapQuote,
+      userKeypair,
+      targetLamportsOut,
+    });
+  }
+
+  private async executeSwap(options: {
+    swapQuote: SwapQuote;
+    userKeypair: Keypair;
+    targetLamportsOut: number;
+  }): Promise<StepAttemptResult> {
+    const { swapQuote, userKeypair, targetLamportsOut } = options;
+
+    try {
+      const signature = await this.swapService.execute(swapQuote, userKeypair);
+      return {
+        status: "success",
+        result: {
+          swapped: true,
+          provider: "jupiter",
+          signature,
+          lamportsReceived: targetLamportsOut,
+        },
+      };
+    } catch (error: any) {
+      return {
+        status: "error",
+        error: {
+          type: "SWAP_EXECUTION_FAILED",
+          message:
+            error?.message ||
+            "Jupiter route unavailable. Try again or add SOL manually.",
+          cause: error,
+        },
       };
     }
   }
