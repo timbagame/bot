@@ -15,7 +15,7 @@ describe("calculateAdminPayerFeeBps", () => {
       solPriceUsd: 20,
     });
     expect(result).toBeGreaterThan(85);
-    expect(result).toBeLessThanOrEqual(255);
+    expect(result).toBeLessThanOrEqual(200);
   });
 
   test("uses token decimals and price for non-SOL trades", () => {
@@ -39,7 +39,7 @@ describe("calculateAdminPayerFeeBps", () => {
       deficitLamports: 1_000_000_000,
       solPriceUsd: 100,
     });
-    expect(result).toBe(255);
+    expect(result).toBe(200);
   });
 
   test("returns base when deficit or price zero", () => {
@@ -55,7 +55,7 @@ describe("calculateAdminPayerFeeBps", () => {
   });
 
   test("adds proportional extra for tx+ATA rent sized deficit", () => {
-    // deficit: ~0.003 SOL at $25 => $0.075; trade: 0.01 SOL at $25 => $0.25 -> extra bps ~ ceil(0.075/0.25*10k)=3000bps, clamped to 255
+    // deficit: ~0.003 SOL at $25 => $0.075; trade: 0.01 SOL at $25 => $0.25 -> extra bps ~ ceil(0.075/0.25*10k)=3000bps, clamped to 200
     const result = calculateAdminPayerFeeBps({
       baseFeeBps: 85,
       tradeAmountRaw: 10_000_000, // 0.01 SOL
@@ -64,7 +64,7 @@ describe("calculateAdminPayerFeeBps", () => {
       deficitLamports: 3_000_000, // 0.003 SOL (tx+ATA)
       solPriceUsd: 25,
     });
-    expect(result).toBe(255); // clamped
+    expect(result).toBe(200); // clamped
   });
 
   test("computeRequiredAdminLamports sums min balance, rent, extra ATA and prio", () => {

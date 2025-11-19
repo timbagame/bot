@@ -136,5 +136,3 @@ export class SwapService {
     return this.backend.executeJupiterSwap(request, quote);
   }
 }
-
-export type { SwapBackend };
