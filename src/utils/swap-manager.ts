@@ -186,7 +186,9 @@ export class SwapManager {
       this.feeBudget.getJitSwapFeeBufferLamports(),
     ]);
 
-    const targetLamports = Math.max(desiredLamports ?? 0, minimumSolBuffer);
+    // Aim a bit higher than the bare game safety buffer to leave rent headroom.
+    const safetyTarget = minimumSolBuffer + ROUTE_LAMPORTS_BUFFER;
+    const targetLamports = Math.max(desiredLamports ?? 0, safetyTarget);
 
     let lastJupiterError: string | null = null;
     let lastUnwrapError: string | null = null;
