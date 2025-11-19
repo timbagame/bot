@@ -28,6 +28,10 @@ import type { IntegratorSwapParams } from "./integrator-fees";
 import { SwapQuoteCache } from "./swap/quote-cache";
 import { getReferralConfigForMint, WSOL_MINT as REGISTRY_SOL } from "./token-registry";
 import { SwapService } from "./swap/service";
+import {
+  calculateRouteCosts,
+  DEFAULT_ROUTE_LAMPORTS_PADDING,
+} from "./swap/route-cost";
 
 export type {
   SwapQuote,
@@ -42,7 +46,7 @@ export type {
 const SOL_MINT = WSOL_MINT;
 const SOL_DECIMALS = 9;
 const JUPITER_QUOTE_EXPIRATION_MS_DEFAULT = 120_000;
-const ROUTE_LAMPORTS_BUFFER = 400_000;
+const ROUTE_LAMPORTS_BUFFER = DEFAULT_ROUTE_LAMPORTS_PADDING;
 let jupiterQuoteExpirationMs = JUPITER_QUOTE_EXPIRATION_MS_DEFAULT;
 
 export const __test_setJupiterQuoteExpirationMs = (value: number): void => {
@@ -791,21 +795,14 @@ export class SwapManager {
     const adminBalance = await this.wallet
       .getConnection()
       .getBalance(adminPublicKey);
-    const routeLamports =
-      (quote.rentFeeLamports ?? 0) +
-      (quote.prioritizationFeeLamports ?? 0) +
-      (quote.signatureFeeLamports ?? 0);
-    const routeSafetyPadding =
-      routeLamports > 0
-        ? Math.max(
-            ROUTE_LAMPORTS_BUFFER,
-            Math.round(routeLamports * 0.25)
-          )
-        : 0;
-    const requiredLamports =
-      (integrator.adminRequiredLamports ?? 0) +
-      routeLamports +
-      routeSafetyPadding;
+    const { routeLamports, paddingLamports, requiredLamports } =
+      calculateRouteCosts(quote, {
+        paddingRatio: 0.25,
+        paddingRounding: "round",
+        minPaddingLamports: ROUTE_LAMPORTS_BUFFER,
+        baseRequiredLamports: integrator.adminRequiredLamports ?? 0,
+        requiredStrategy: "sum",
+      });
 
     integrator.adminRouteLamports = routeLamports;
 
@@ -813,7 +810,7 @@ export class SwapManager {
       adminBalance,
       requiredLamports,
       routeLamports,
-      routeSafetyPadding,
+      paddingLamports,
       routeRequestId: quote.requestId,
       router: quote.router,
       payerKind: integrator.payerKind,
@@ -826,7 +823,7 @@ export class SwapManager {
 
     if (routeLamports > 0) {
       const formattedRouteSol = this.wallet.formatSolBalance(routeLamports);
-      const formattedPadding = this.wallet.formatSolBalance(routeSafetyPadding);
+      const formattedPadding = this.wallet.formatSolBalance(paddingLamports);
       console.log(
         `Route ${quote.router ?? "unknown"} needs ${formattedRouteSol} SOL for rent/priority. Admin payer will cover it (adds ${formattedPadding} padding).`
       );

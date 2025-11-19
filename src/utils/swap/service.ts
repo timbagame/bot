@@ -7,6 +7,7 @@ import {
 import type { IntegratorSwapParams } from "../integrator-fees";
 import type { WalletManager } from "../wallet";
 import type { SwapQuote, SwapRequest } from "./types";
+import { calculateRouteCosts } from "./route-cost";
 
 export interface SwapBackend {
   getQuote(
@@ -52,7 +53,7 @@ export class SwapService {
     };
   }
 
-  async ensureFeeBuffer(
+  async ensureUserSolBufferForSwap(
     quote: SwapQuote,
     userKeypair: Keypair
   ): Promise<void> {
@@ -83,31 +84,30 @@ export class SwapService {
       );
     }
 
-    const routeLamports =
-      (providerQuote.rentFeeLamports ?? 0) +
-      (providerQuote.prioritizationFeeLamports ?? 0) +
-      (providerQuote.signatureFeeLamports ?? 0);
-
-    const slack = Math.ceil(routeLamports * 0.25) + 200_000;
-    const requiredLeftover = Math.max(
-      routeLamports,
-      slack,
-      USER_SOL_MAX_BUFFER_LAMPORTS
+    const { routeLamports, requiredLamports } = calculateRouteCosts(
+      providerQuote,
+      {
+        paddingRatio: 0.25,
+        paddingExtraLamports: 200_000,
+        paddingRounding: "ceil",
+        baseRequiredLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
+        requiredStrategy: "max",
+      }
     );
 
-    if (requiredLeftover <= 0) {
+    if (requiredLamports <= 0) {
       return;
     }
 
     const leftover = BigInt(userBalance) - amountLamports;
-    const requiredLeftoverBig = BigInt(requiredLeftover);
+    const requiredLeftoverBig = BigInt(requiredLamports);
 
     if (leftover >= requiredLeftoverBig) {
       return;
     }
 
     const deficitLamports = requiredLeftoverBig - leftover;
-    const formattedRequired = this.wallet.formatSolBalance(requiredLeftover);
+    const formattedRequired = this.wallet.formatSolBalance(requiredLamports);
     const formattedRoute = this.wallet.formatSolBalance(routeLamports);
     const formattedDeficit = this.wallet.formatSolBalance(
       safeBigIntToNumber(deficitLamports)
@@ -119,7 +119,7 @@ export class SwapService {
   }
 
   async execute(quote: SwapQuote, userKeypair: Keypair): Promise<string> {
-    await this.ensureFeeBuffer(quote, userKeypair);
+    await this.ensureUserSolBufferForSwap(quote, userKeypair);
 
     const request: SwapRequest = {
       inputMint: quote.inputMint,

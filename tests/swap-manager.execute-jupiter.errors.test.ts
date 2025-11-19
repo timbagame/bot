@@ -10,6 +10,10 @@ import type { IntegratorSwapParams } from "../src/utils/integrator-fees";
 import type { JupiterUltraOrderResponse } from "../src/utils/jupiter";
 import { SwapManager } from "../src/utils/swap-manager";
 import { WalletManager } from "../src/utils/wallet";
+import {
+  calculateRouteCosts,
+  DEFAULT_ROUTE_LAMPORTS_PADDING,
+} from "../src/utils/swap/route-cost";
 
 const buildBase64Tx = (payer: Keypair): string => {
   const message = new TransactionMessage({
@@ -168,6 +172,16 @@ describe("SwapManager.ensureAdminCanCoverRoute", () => {
         Keypair.generate().publicKey
       )
     ).resolves.toBeUndefined();
+
+    const helperCosts = calculateRouteCosts(order, {
+      paddingRatio: 0.25,
+      paddingRounding: "round",
+      minPaddingLamports: DEFAULT_ROUTE_LAMPORTS_PADDING,
+      baseRequiredLamports: integrator.adminRequiredLamports ?? 0,
+      requiredStrategy: "sum",
+    });
+
+    expect(integrator.adminRouteLamports).toBe(helperCosts.routeLamports);
   });
 
   test("throws when the admin wallet balance is below the total requirement", async () => {
@@ -179,23 +193,12 @@ describe("SwapManager.ensureAdminCanCoverRoute", () => {
       signatureFeeLamports: 0,
     });
 
-    await expect(
-      (swapManager as any).ensureAdminCanCoverRoute(
-        integrator,
-        order,
-        Keypair.generate().publicKey
-      )
-    ).rejects.toThrow(/cannot cover rent\+priority/i);
-  });
-
-  test("throws when admin balance is insufficient for rent-heavy padded requirement", async () => {
-    const routeLamports = 2_000_000;
-    const swapManager = buildSwapManagerWithBalance(12_000_000);
-    const integrator = { ...baseIntegrator };
-    const order = buildBaseOrder({
-      rentFeeLamports: routeLamports,
-      prioritizationFeeLamports: 300_000,
-      signatureFeeLamports: 10_000,
+    const helperCosts = calculateRouteCosts(order, {
+      paddingRatio: 0.25,
+      paddingRounding: "round",
+      minPaddingLamports: DEFAULT_ROUTE_LAMPORTS_PADDING,
+      baseRequiredLamports: integrator.adminRequiredLamports ?? 0,
+      requiredStrategy: "sum",
     });
 
     await expect(
@@ -204,6 +207,40 @@ describe("SwapManager.ensureAdminCanCoverRoute", () => {
         order,
         Keypair.generate().publicKey
       )
-    ).rejects.toThrow(/cannot cover rent\+priority/i);
+    ).rejects.toThrow(
+      new RegExp(`${helperCosts.requiredLamports} lamports`)
+    );
+  });
+
+  test("throws when admin balance is insufficient for rent-heavy padded requirement", async () => {
+    const routeLamports = 2_000_000;
+    const integrator = { ...baseIntegrator };
+    const order = buildBaseOrder({
+      rentFeeLamports: routeLamports,
+      prioritizationFeeLamports: 300_000,
+      signatureFeeLamports: 10_000,
+    });
+
+    const helperCosts = calculateRouteCosts(order, {
+      paddingRatio: 0.25,
+      paddingRounding: "round",
+      minPaddingLamports: DEFAULT_ROUTE_LAMPORTS_PADDING,
+      baseRequiredLamports: integrator.adminRequiredLamports ?? 0,
+      requiredStrategy: "sum",
+    });
+
+    const swapManager = buildSwapManagerWithBalance(
+      helperCosts.requiredLamports - 1
+    );
+
+    await expect(
+      (swapManager as any).ensureAdminCanCoverRoute(
+        integrator,
+        order,
+        Keypair.generate().publicKey
+      )
+    ).rejects.toThrow(
+      new RegExp(`${helperCosts.requiredLamports} lamports`)
+    );
   });
 });
