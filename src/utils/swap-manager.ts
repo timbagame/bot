@@ -39,10 +39,8 @@ export type {
 
 const SOL_MINT = WSOL_MINT;
 const SOL_DECIMALS = 9;
-// Jupiter often refuses routes when the requested SOL output is extremely
-// small. Floor JIT SOL requests to 0.01 SOL to stay above common liquidity /
-// per-route minimums.
-const MIN_JIT_SOL_OUT_LAMPORTS = 10_000_000;
+// Allow JIT SOL targets to match the actual shortfall; no enforced floor.
+const MIN_JIT_SOL_OUT_LAMPORTS = 0;
 const JUPITER_QUOTE_EXPIRATION_MS_DEFAULT = 120_000;
 const ROUTE_LAMPORTS_BUFFER = 400_000;
 let jupiterQuoteExpirationMs = JUPITER_QUOTE_EXPIRATION_MS_DEFAULT;
@@ -266,8 +264,6 @@ export class SwapManager {
       const lamportsShortfall = targetLamports - currentLamports;
       const swapTarget = lamportsShortfall + jitFeeBuffer;
 
-      // Keep JIT requests above Jupiter's tiny-amount floor. Extremely small
-      // SOL targets (e.g. ~0.002 SOL) routinely get "Failed to get quotes".
       const primaryTarget = Math.max(swapTarget, MIN_JIT_SOL_OUT_LAMPORTS);
       const secondaryTarget = Math.max(
         lamportsShortfall,
@@ -339,7 +335,7 @@ export class SwapManager {
       }
 
       console.log(
-        `⚡ Executing just-in-time SOL swap for ${logContext}. Need ${lamportsShortfall} lamports (target ${swapTarget}, floor ${MIN_JIT_SOL_OUT_LAMPORTS}).`
+        `⚡ Executing just-in-time SOL swap for ${logContext}. Need ${lamportsShortfall} lamports (target ${swapTarget}).`
       );
 
       const jupiterSwap =

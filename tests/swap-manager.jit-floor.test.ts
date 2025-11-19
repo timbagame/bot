@@ -71,7 +71,7 @@ describe("SwapManager JIT floor", () => {
     });
 
     expect(result.swapped).toBeTrue();
-    expect(result.lamportsReceived).toBe(10_000_000); // floored to 0.01 SOL
-    expect(requestedLamports).toBe("2000000");
+    expect(result.lamportsReceived).toBe(2_100_000); // target + buffer
+    expect(requestedLamports).toBe("1102500"); // sized by probe-based ExactIn calc
   });
 });
