@@ -26,6 +26,7 @@ import type {
 } from "./swap/types";
 import type { IntegratorSwapParams } from "./integrator-fees";
 import { SwapQuoteCache } from "./swap/quote-cache";
+import { getReferralConfigForMint, WSOL_MINT as REGISTRY_SOL } from "./token-registry";
 
 export type {
   SwapQuote,
@@ -161,6 +162,25 @@ export class SwapManager {
       logContext = "game",
     } = options;
 
+    // Derive an admin integrator (referral + payer) so Jupiter Iris routes don’t fall back to
+    // gasless $10 minimum. Falls back to null if no referral config exists.
+    const integrator: IntegratorSwapParams | null = (() => {
+      const ref =
+        getReferralConfigForMint(tokenMint) ||
+        getReferralConfigForMint(REGISTRY_SOL);
+      if (!ref?.referralAccount || !this.wallet.getAdminKeypair) return null;
+      const adminKeypair = this.wallet.getAdminKeypair();
+      if (!adminKeypair) return null;
+      const admin = adminKeypair.publicKey.toBase58();
+      return {
+        referralAccount: ref.referralAccount,
+        referralFee: ref.baseFeeBps ?? 85,
+        payer: ref.adminPayer ?? admin,
+        closeAuthority: ref.adminCloseAuthority ?? admin,
+        payerKind: "admin",
+      } as IntegratorSwapParams;
+    })();
+
     const [minimumSolBuffer, jitFeeBuffer] = await Promise.all([
       this.feeBudget.getGameSafetyBufferLamports(),
       this.feeBudget.getJitSwapFeeBufferLamports(),
@@ -199,6 +219,10 @@ export class SwapManager {
             outputMint: SOL_MINT,
             amount: priceProbeInStr,
             taker: userKeypair.publicKey.toBase58(),
+            referralAccount: integrator?.referralAccount,
+            referralFee: integrator?.referralFee,
+            payer: integrator?.payer,
+            closeAuthority: integrator?.closeAuthority,
           });
 
           const probeIn = BigInt(probeQuote.inAmount);
@@ -225,6 +249,10 @@ export class SwapManager {
             outputMint: SOL_MINT,
             amount: requiredInputClamped.toString(),
             taker: userKeypair.publicKey.toBase58(),
+            referralAccount: integrator?.referralAccount,
+            referralFee: integrator?.referralFee,
+            payer: integrator?.payer,
+            closeAuthority: integrator?.closeAuthority,
           });
 
           const outputLamports = BigInt(quote.outAmount);
@@ -237,6 +265,10 @@ export class SwapManager {
           const swapResponse = await this.jupiterClient.getSwapTransaction({
             userPublicKey: userKeypair.publicKey.toBase58(),
             quoteResponse: quote,
+            referralAccount: integrator?.referralAccount,
+            referralFee: integrator?.referralFee,
+            payer: integrator?.payer,
+            closeAuthority: integrator?.closeAuthority,
           });
 
           const signature = await this.executeJupiterTransaction(
