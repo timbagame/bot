@@ -8,6 +8,7 @@ import {
   __test_clearUserState,
   __test_getRawPending,
 } from "../src/utils/user-state";
+import { INPUT_TIMEOUT_MS } from "../src/utils/constants";
 
 test("user-state set/get with clear option", () => {
   setUserState("u1", { type: "x", messageId: 1 });
@@ -69,5 +70,28 @@ test("storePendingTransaction drops expired entries on new insert", () => {
     getPendingTransaction("current", true);
   } finally {
     Date.now = originalNow;
+  }
+});
+
+test("getters drop expired state without requiring new writes", () => {
+  const originalNow = Date.now;
+  try {
+    let now = 1_000;
+    Date.now = () => now;
+
+    setUserState("reader", { flow: "send" });
+    storePendingTransaction("pending", { intent: "swap" });
+
+    now += INPUT_TIMEOUT_MS + 1;
+    Date.now = () => now;
+
+    expect(getUserState<any>("reader", false)).toBeUndefined();
+    expect(__test_getRawUserState("reader")).toBeUndefined();
+
+    expect(getPendingTransaction<any>("pending", false)).toBeUndefined();
+    expect(__test_getRawPending("pending")).toBeUndefined();
+  } finally {
+    Date.now = originalNow;
+    __test_clearUserState("reader");
   }
 });

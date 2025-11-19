@@ -161,6 +161,7 @@ export class FeeBudgetManager implements FeeBudgetProvider {
   private readonly config: FeeBudgetConfig;
   private readonly cache: ExpiringCache<number>;
   private readonly stubPayer: PublicKey;
+  private readonly inflightComputations = new Map<CacheKey, Promise<number>>();
 
   constructor(connection: Connection, config?: Partial<FeeBudgetConfig>) {
     this.connection = connection;
@@ -326,19 +327,33 @@ export class FeeBudgetManager implements FeeBudgetProvider {
       return cached;
     }
 
-    const value = await compute();
-    if (Number.isFinite(value) && value > 0) {
-      this.cache.setWithTTL(key, value);
-      return value;
+    const inflight = this.inflightComputations.get(key);
+    if (inflight) {
+      return inflight;
     }
 
-    const stale = this.cache.peek(key);
-    if (stale !== undefined) {
-      this.cache.setWithTTL(key, stale);
-      return stale;
-    }
+    const computation = (async () => {
+      try {
+        const value = await compute();
+        if (Number.isFinite(value) && value > 0) {
+          this.cache.setWithTTL(key, value);
+          return value;
+        }
 
-    return this.getFallbackForKey(key);
+        const stale = this.cache.peek(key);
+        if (stale !== undefined) {
+          this.cache.setWithTTL(key, stale);
+          return stale;
+        }
+
+        return this.getFallbackForKey(key);
+      } finally {
+        this.inflightComputations.delete(key);
+      }
+    })();
+
+    this.inflightComputations.set(key, computation);
+    return computation;
   }
 
   private getFallbackForKey(key: CacheKey): number {

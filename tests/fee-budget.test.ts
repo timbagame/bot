@@ -248,4 +248,35 @@ describe("FeeBudgetManager", () => {
     const result = await (manager as any).computeSingleTransaction();
     expect(result).toBe(1_200);
   });
+
+  test("deduplicates concurrent computations and clears inflight failures", async () => {
+    const connection = createConnectionStub();
+    const manager = FeeBudgetManager.createForTest(connection, { cacheTtlMs: 10_000 });
+
+    const computeSpy = spyOn(manager as any, "computeSingleTransaction").mockImplementation(
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        return 123_456;
+      }
+    );
+
+    const concurrent = await Promise.all(
+      Array.from({ length: 5 }, () => manager.getSingleTransactionLamports())
+    );
+    expect(new Set(concurrent)).toEqual(new Set([123_456]));
+    expect(computeSpy).toHaveBeenCalledTimes(1);
+
+    const failingManager = FeeBudgetManager.createForTest(connection, { cacheTtlMs: 5_000 });
+    const failingSpy = spyOn(
+      failingManager as any,
+      "computeSingleTransaction"
+    ).mockRejectedValueOnce(new Error("boom"));
+    failingSpy.mockResolvedValueOnce(654_321);
+
+    await expect(failingManager.getSingleTransactionLamports()).rejects.toThrow("boom");
+
+    const recovered = await failingManager.getSingleTransactionLamports();
+    expect(recovered).toBe(654_321);
+    expect(failingSpy).toHaveBeenCalledTimes(2);
+  });
 });

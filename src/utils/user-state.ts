@@ -72,10 +72,26 @@ export function setUserState(userId: string, state: Record<string, any>): void {
   userStates.set(userId, { ...state, timestamp: now });
 }
 
-export function getUserState<T = any>(userId: string, clear = false): (T & { timestamp: number }) | undefined {
-  const st = userStates.get(userId) as any;
-  if (clear && st) userStates.delete(userId);
-  return st as any;
+export function getUserState<T = any>(
+  userId: string,
+  clear = false
+): (T & { timestamp: number }) | undefined {
+  const entry = userStates.get(userId) as (T & { timestamp: number }) | undefined;
+  if (!entry) {
+    return undefined;
+  }
+
+  const now = Date.now();
+  if (now - entry.timestamp > USER_STATE_TIMEOUT) {
+    userStates.delete(userId);
+    return undefined;
+  }
+
+  if (clear) {
+    userStates.delete(userId);
+  }
+
+  return entry;
 }
 
 export function storePendingTransaction(txId: string, transaction: Record<string, any>): void {
@@ -84,10 +100,26 @@ export function storePendingTransaction(txId: string, transaction: Record<string
   pendingTransactions.set(txId, { ...transaction, timestamp: now });
 }
 
-export function getPendingTransaction<T = any>(txId: string, remove = true): (T & { timestamp: number }) | undefined {
-  const tx = pendingTransactions.get(txId) as any;
-  if (remove && tx) pendingTransactions.delete(txId);
-  return tx as any;
+export function getPendingTransaction<T = any>(
+  txId: string,
+  remove = true
+): (T & { timestamp: number }) | undefined {
+  const tx = pendingTransactions.get(txId) as (T & { timestamp: number }) | undefined;
+  if (!tx) {
+    return undefined;
+  }
+
+  const now = Date.now();
+  if (now - tx.timestamp > USER_STATE_TIMEOUT) {
+    pendingTransactions.delete(txId);
+    return undefined;
+  }
+
+  if (remove) {
+    pendingTransactions.delete(txId);
+  }
+
+  return tx;
 }
 
 export type GameSetupSessionState = {

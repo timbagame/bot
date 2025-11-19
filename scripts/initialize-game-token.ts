@@ -21,7 +21,10 @@ import * as fs from "fs";
 import * as path from "path";
 import type { Timba } from "../idl/idlType";
 import { WalletManager } from "../src/utils/wallet";
-import { getSupportedTokens } from "../src/utils/token-registry";
+import {
+  getReferralTokenEntries,
+  getSupportedTokens,
+} from "../src/utils/token-registry";
 import {
   NetworkDetector,
   type SolanaNetwork,
@@ -35,10 +38,9 @@ import {
 import { createAnchorContext } from "./utils/anchor-context";
 import { readBigIntEnv } from "./utils/env";
 import { Buffer } from "buffer";
+import { ReferralProvider } from "@jup-ag/referral-sdk";
 
 const REFERRAL_TOKEN_ENTRIES = getReferralTokenEntries();
-import { ReferralProvider } from "@jup-ag/referral-sdk";
-import { getReferralTokenEntries } from "../src/utils/token-registry";
 
 // ================================
 // CONFIGURATION

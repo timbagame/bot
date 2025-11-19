@@ -50,6 +50,7 @@ import {
 } from "./token-programs";
 import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
 import { TokenDatabase } from "./token-database";
+import { TokenManager } from "./token-manager";
 import {
   DEFAULT_MAINNET_ENDPOINT,
   RpcEndpointManager,
@@ -154,6 +155,13 @@ export type WalletFetchOptions = {
   cacheTtlMs?: number;
 };
 
+export type ApprovedTokenDefinition = {
+  token_mint: string;
+  token_ticker: string;
+  decimals: number;
+  token_program_id?: string | null;
+};
+
 export type ApprovedTokenBalance = {
   mint: string;
   ticker: string;
@@ -171,12 +179,30 @@ export type WalletBalancesSnapshot = {
   nativeSolBalance: number;
   wsolBalance: number;
   tokenBalances: ApprovedTokenBalance[];
-  approvedTokens: Array<{
-    token_mint: string;
-    token_ticker: string;
-    decimals: number;
-    token_program_id?: string | null;
-  }>;
+  approvedTokens: ApprovedTokenDefinition[];
+};
+
+type ParsedTokenAccount = {
+  mint: string;
+  tokenAmount: { amount: string; decimals: number };
+};
+
+type AtaLookupPlan = {
+  address: PublicKey;
+  mint: string;
+  programId: PublicKey;
+  decimals: number;
+};
+
+type MetadataRecord = {
+  decimals: number;
+  symbol?: string;
+  name?: string;
+} | null;
+
+type MetadataLoader = {
+  load: (mint: string) => Promise<MetadataRecord>;
+  prefetch: (mints: Iterable<string>) => Promise<void>;
 };
 
 // ================================
@@ -788,12 +814,7 @@ export class WalletManager {
    */
   public async getAllApprovedTokenBalances(
     telegramId: bigint,
-    approvedTokens: Array<{
-      token_mint: string;
-      token_ticker: string;
-      decimals: number;
-      token_program_id?: string | null;
-    }>,
+    approvedTokens: ApprovedTokenDefinition[],
     options: WalletFetchOptions = {}
   ): Promise<ApprovedTokenBalance[]> {
     const {
@@ -814,7 +835,6 @@ export class WalletManager {
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
 
-    // Early return if no approved tokens
     if (approvedTokens.length === 0) {
       return [];
     }
@@ -824,444 +844,55 @@ export class WalletManager {
         `🔍 Getting token accounts for user: ${telegramId}, pubkey: ${pubkey.toBase58()}`
       );
 
-      // Create a map of approved token mints for O(1) lookup
       const approvedTokensMap = new Map(
         approvedTokens.map((token) => [token.token_mint, token])
       );
-
-      const parsedAccounts: Array<{
-        mint: string;
-        tokenAmount: { amount: string; decimals: number };
-      }> = [];
-      const metadataPrefetchMints = new Set<string>();
       const seenAccounts = new Set<string>();
+      const metadataPrefetchMints = new Set<string>();
+      const parsedAccounts: ParsedTokenAccount[] = [];
 
-      const ataLookup = new Map<
-        string,
-        {
-          address: PublicKey;
-          mint: string;
-          programId: PublicKey;
-          decimals: number;
-        }
-      >();
-
-      const ataPlans = await Promise.all(
-        approvedTokens.map(async (token) => {
-          try {
-            const mintKey = new PublicKey(token.token_mint);
-            const hintedProgram = token.token_program_id;
-            let programDetection: TokenProgramDetection;
-            if (hintedProgram) {
-              const hintedId = new PublicKey(hintedProgram);
-              programDetection = {
-                programId: hintedId,
-                isToken2022: hintedId.equals(TOKEN_2022_PROGRAM_ID),
-              };
-              this.mintProgramCache.set(mintKey.toBase58(), programDetection);
-            } else {
-              programDetection = await this.resolveTokenProgram(mintKey);
-              try {
-                this.tokenDb.setTokenProgramId(
-                  token.token_mint,
-                  programDetection.programId.toBase58()
-                );
-              } catch (programPersistError) {
-                console.error(
-                  `Failed to persist token program for ${token.token_mint}:`,
-                  programPersistError
-                );
-              }
-              const mapEntry = approvedTokensMap.get(token.token_mint);
-              if (mapEntry) {
-                mapEntry.token_program_id =
-                  programDetection.programId.toBase58();
-              }
-              token.token_program_id = programDetection.programId.toBase58();
-            }
-
-            const ata = await getAssociatedTokenAddress(
-              mintKey,
-              pubkey,
-              false,
-              programDetection.programId
-            );
-
-            return {
-              address: ata,
-              mint: token.token_mint,
-              programId: programDetection.programId,
-              decimals: token.decimals,
-            };
-          } catch (error) {
-            console.error(
-              `❌ Failed to derive associated token address for ${token.token_mint}:`,
-              error
-            );
-            return null;
-          }
-        })
+      const ataLookup = await this.buildAtaLookupForApprovedTokens(
+        pubkey,
+        approvedTokens,
+        approvedTokensMap
       );
+      const ataResult = await this.loadApprovedTokenAccounts(
+        ataLookup,
+        seenAccounts
+      );
+      ataResult.metadataPrefetchMints.forEach((mint) =>
+        metadataPrefetchMints.add(mint)
+      );
+      parsedAccounts.push(...ataResult.accounts);
 
-      for (const plan of ataPlans) {
-        if (!plan) {
-          continue;
-        }
-        ataLookup.set(plan.address.toBase58(), plan);
-      }
-
-      const ataEntries = Array.from(ataLookup.values());
-      let fetchedAtaAccounts = 0;
-
-      if (ataEntries.length > 0) {
-        const CHUNK_SIZE = 100;
-        for (let i = 0; i < ataEntries.length; i += CHUNK_SIZE) {
-          const chunk = ataEntries.slice(i, i + CHUNK_SIZE);
-          const infos = await this.connection.getMultipleAccountsInfo(
-            chunk.map((item) => item.address)
-          );
-
-          infos.forEach((info, index) => {
-            const lookup = chunk[index];
-            if (!info || !lookup) {
-              return;
-            }
-
-            try {
-              const account = unpackAccount(
-                lookup.address,
-                info as AccountInfo<Buffer>,
-                lookup.programId
-              );
-              const amount = account.amount ?? 0n;
-
-              parsedAccounts.push({
-                mint: lookup.mint,
-                tokenAmount: {
-                  amount: amount.toString(),
-                  decimals: lookup.decimals,
-                },
-              });
-
-              if (amount > 0n) {
-                metadataPrefetchMints.add(lookup.mint);
-              }
-
-              seenAccounts.add(lookup.address.toBase58());
-              fetchedAtaAccounts += 1;
-            } catch (error) {
-              if (
-                !(error instanceof TokenAccountNotFoundError) &&
-                !(error instanceof TokenInvalidAccountOwnerError)
-              ) {
-                console.error(
-                  `❌ Error unpacking token account ${lookup.address.toBase58()}:`,
-                  error
-                );
-              }
-            }
-          });
-        }
-
-        console.log(
-          `📦 Loaded ${fetchedAtaAccounts} approved token accounts via ATA lookups`
-        );
-      }
-
-      const now = this.timeNow?.() ?? Date.now();
-      const discoveryKey = telegramId.toString();
-      const lastDiscovery =
-        this.lastTokenDiscoveryByUser.get(discoveryKey) ?? 0;
-      const forceDiscovery = parsedAccounts.length === 0;
-      const shouldDiscover =
-        forceDiscovery || now - lastDiscovery >= TOKEN_DISCOVERY_COOLDOWN_MS;
-
-      if (shouldDiscover) {
-        const [splTokenAccounts, token2022Accounts] = await Promise.all([
-          this.connection.getParsedTokenAccountsByOwner(pubkey, {
-            programId: new PublicKey(
-              "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-            ), // SPL Token program
-          }),
-          this.connection.getParsedTokenAccountsByOwner(pubkey, {
-            programId: new PublicKey(
-              "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
-            ), // Token-2022 program
-          }),
-        ]);
-
-        this.lastTokenDiscoveryByUser.set(discoveryKey, now);
-
-        const allTokenAccounts = [
-          ...(splTokenAccounts.value || []),
-          ...(token2022Accounts.value || []),
-        ];
-
-        console.log(
-          `📡 Token discovery fetched ${
-            splTokenAccounts.value?.length || 0
-          } SPL and ${
-            token2022Accounts.value?.length || 0
-          } Token-2022 accounts (${allTokenAccounts.length} total)`
-        );
-
-        for (const accountInfo of allTokenAccounts) {
-          const accountPubkey = accountInfo.pubkey?.toBase58?.();
-          if (accountPubkey) {
-            if (seenAccounts.has(accountPubkey)) {
-              continue;
-            }
-            seenAccounts.add(accountPubkey);
-          }
-
-          try {
-            const parsedData = accountInfo.account.data.parsed;
-            const tokenAmount = parsedData.info.tokenAmount;
-            const mint = parsedData.info.mint;
-
-            const rawAmount = tokenAmount.amount;
-            let lamports: bigint;
-            try {
-              lamports = BigInt(rawAmount);
-            } catch (parseError) {
-              console.error(
-                `❌ Invalid lamport amount for ${mint}: ${rawAmount}`,
-                parseError
-              );
-              continue;
-            }
-
-            parsedAccounts.push({ mint, tokenAmount });
-
-            if (lamports > 0n) {
-              metadataPrefetchMints.add(mint);
-            }
-          } catch (error) {
-            console.error(
-              `❌ Error parsing token account for user ${telegramId}:`,
-              error
-            );
-          }
-        }
-      } else {
-        console.log(
-          `⏭️ Skipping token discovery (cooldown ${TOKEN_DISCOVERY_COOLDOWN_MS}ms active)`
-        );
-      }
+      const discoveryResult = await this.discoverAdditionalTokenAccounts(
+        pubkey,
+        telegramId,
+        parsedAccounts.length,
+        seenAccounts
+      );
+      discoveryResult.metadataPrefetchMints.forEach((mint) =>
+        metadataPrefetchMints.add(mint)
+      );
+      parsedAccounts.push(...discoveryResult.accounts);
 
       if (parsedAccounts.length === 0) {
         console.log(`❌ No token accounts found for user ${telegramId}`);
         return [];
       }
 
+      const metadataLoader = this.createMetadataLoader();
+      await metadataLoader.prefetch(metadataPrefetchMints);
+
       const results: ApprovedTokenBalance[] = [];
-
-      const metadataCache = new Map<
-        string,
-        { decimals: number; symbol?: string; name?: string } | null
-      >();
-      const metadataPromises = new Map<
-        string,
-        Promise<{ decimals: number; symbol?: string; name?: string } | null>
-      >();
-
-      const loadMetadataForMint = async (
-        mint: string
-      ): Promise<{
-        decimals: number;
-        symbol?: string;
-        name?: string;
-      } | null> => {
-        if (metadataCache.has(mint)) {
-          return metadataCache.get(mint) ?? null;
-        }
-
-        if (!metadataPromises.has(mint)) {
-          const promise = this.getFullTokenMetadata(mint)
-            .then((metadata) => {
-              console.log(`📋 Full metadata result for ${mint}:`, metadata);
-              metadataCache.set(mint, metadata);
-              return metadata;
-            })
-            .catch((metadataError) => {
-              console.error(
-                `❌ Error fetching metadata for ${mint}:`,
-                metadataError
-              );
-              metadataCache.delete(mint);
-              return null;
-            })
-            .finally(() => {
-              metadataPromises.delete(mint);
-            });
-          metadataPromises.set(mint, promise);
-        }
-
-        const metadata = await metadataPromises.get(mint)!;
-        return metadata ?? null;
-      };
-
-      await Promise.all(
-        [...metadataPrefetchMints].map((mint) => loadMetadataForMint(mint))
-      );
-
-      for (const { mint, tokenAmount } of parsedAccounts) {
-        try {
-          const approvedToken = approvedTokensMap.get(mint);
-          console.log(
-            `🔍 Token found: ${mint}, approved: ${!!approvedToken}, ticker: ${
-              approvedToken?.token_ticker
-            }, raw amount: ${tokenAmount.amount}, decimals: ${
-              tokenAmount.decimals
-            }`
-          );
-
-          const loadFullMetadata = async () => loadMetadataForMint(mint);
-
-          const rawAmount = tokenAmount.amount;
-          let lamports: bigint;
-          try {
-            lamports = BigInt(rawAmount);
-          } catch (parseError) {
-            console.error(
-              `❌ Invalid lamport amount for ${mint}: ${rawAmount}`,
-              parseError
-            );
-            continue;
-          }
-
-          // Auto-register tokens with non-zero balance that aren't approved
-          if (!approvedToken && lamports > 0n) {
-            console.log(
-              `🔄 Auto-registering unknown token with balance: ${mint}`
-            );
-
-            try {
-              const { TokenManager } = await import("./token-manager");
-              const tokenManager = TokenManager.getInstance();
-
-              const registration = await tokenManager.registerTokenIfNeeded({
-                mint,
-                source: "wallet:auto",
-                metadataResolvers: [
-                  async () => {
-                    try {
-                      return await loadFullMetadata();
-                    } catch (metadataError) {
-                      console.error(
-                        `❌ Error fetching metadata for ${mint}:`,
-                        metadataError
-                      );
-                      return null;
-                    }
-                  },
-                ],
-              });
-
-              if (!registration.token) {
-                console.log(
-                  `❌ Failed to auto-register: ${
-                    registration.resolvedTicker ?? mint
-                  }`
-                );
-                continue;
-              }
-
-              approvedTokensMap.set(mint, {
-                token_mint: registration.token.token_mint,
-                token_ticker: registration.token.token_ticker,
-                decimals: registration.token.decimals,
-                token_program_id: registration.token.token_program_id ?? null,
-              });
-            } catch (regError) {
-              console.error(
-                `❌ Error auto-registering token ${mint}:`,
-                regError
-              );
-              continue;
-            }
-          }
-
-          const finalApprovedToken = approvedTokensMap.get(mint);
-          if (finalApprovedToken && lamports > 0n) {
-            const formattedBalance = this.formatTokenBalance(
-              lamports,
-              tokenAmount.decimals
-            );
-            const decimalBalance = Number.parseFloat(
-              formatAmount(lamports, tokenAmount.decimals, {
-                maxFractionDigits: Math.min(tokenAmount.decimals, 12),
-                trim: false,
-              })
-            );
-            let balanceNumber = 0;
-            let truncated = false;
-            if (lamports > BigInt(Number.MAX_SAFE_INTEGER)) {
-              balanceNumber = Number.MAX_SAFE_INTEGER;
-              truncated = true;
-              console.warn(
-                `⚠️ Token ${mint} balance ${lamports.toString()} exceeds JS safe integer; clamping numeric balance`
-              );
-            } else {
-              balanceNumber = Number(lamports);
-            }
-
-            // Try to get real ticker from metadata, fallback to approved ticker
-            let finalTicker = finalApprovedToken.token_ticker;
-            console.log(
-              `🔍 Attempting to get metadata for token ${mint} (current ticker: ${finalTicker})`
-            );
-
-            try {
-              const fullMetadata = await loadFullMetadata();
-
-              // Preserve WSOL ticker for the wrapped SOL mint to avoid
-              // confusing duplication with native SOL balances
-              if (mint === WSOL_MINT) {
-                // Always show WSOL for the wrapped SOL mint
-                finalTicker = "WSOL";
-              } else if (
-                fullMetadata?.symbol &&
-                fullMetadata.symbol !== "UNKNOWN"
-              ) {
-                finalTicker = fullMetadata.symbol;
-                console.log(
-                  `✅ Updated ticker for ${mint}: ${finalApprovedToken.token_ticker} → ${finalTicker}`
-                );
-              } else {
-                console.log(`⚠️ No valid symbol found in metadata for ${mint}`);
-              }
-            } catch (error) {
-              // Use fallback ticker
-              console.log(
-                `❌ Error getting metadata for ${mint}, using fallback ticker: ${finalTicker}`,
-                error
-              );
-            }
-
-            console.log(
-              `✅ Adding token: ${finalTicker}, lamports: ${lamports.toString()}, formatted: ${formattedBalance}`
-            );
-            results.push({
-              mint,
-              ticker: finalTicker,
-              balance: balanceNumber,
-              decimals: tokenAmount.decimals,
-              rawBalance: rawAmount,
-              lamports,
-              formattedBalance,
-              decimalBalance: Number.isFinite(decimalBalance)
-                ? decimalBalance
-                : 0,
-              truncated,
-            });
-          }
-        } catch (error) {
-          // Skip malformed token accounts
-          console.error(
-            `❌ Error processing token account for user ${telegramId}:`,
-            error
-          );
+      for (const account of parsedAccounts) {
+        const entry = await this.processParsedTokenAccount({
+          account,
+          approvedTokensMap,
+          metadataLoader,
+        });
+        if (entry) {
+          results.push(entry);
         }
       }
 
@@ -1273,7 +904,6 @@ export class WalletManager {
       );
       return results;
     } catch (error: any) {
-      // Handle the case where user has no token accounts gracefully
       if (
         error?.message?.includes("could not find account") ||
         error?.message?.includes("Invalid param")
@@ -1300,6 +930,393 @@ export class WalletManager {
       );
       return [];
     }
+  }
+
+  private async buildAtaLookupForApprovedTokens(
+    pubkey: PublicKey,
+    approvedTokens: ApprovedTokenDefinition[],
+    approvedTokensMap: Map<string, ApprovedTokenDefinition>
+  ): Promise<Map<string, AtaLookupPlan>> {
+    const lookup = new Map<string, AtaLookupPlan>();
+    const plans = await Promise.all(
+      approvedTokens.map(async (token) => {
+        try {
+          const mintKey = new PublicKey(token.token_mint);
+          const hintedProgram = token.token_program_id;
+          let programDetection: TokenProgramDetection;
+
+          if (hintedProgram) {
+            const hintedId = new PublicKey(hintedProgram);
+            programDetection = {
+              programId: hintedId,
+              isToken2022: hintedId.equals(TOKEN_2022_PROGRAM_ID),
+            };
+            this.mintProgramCache.set(mintKey.toBase58(), programDetection);
+          } else {
+            programDetection = await this.resolveTokenProgram(mintKey);
+            try {
+              this.tokenDb.setTokenProgramId(
+                token.token_mint,
+                programDetection.programId.toBase58()
+              );
+            } catch (programPersistError) {
+              console.error(
+                `Failed to persist token program for ${token.token_mint}:`,
+                programPersistError
+              );
+            }
+            const mapEntry = approvedTokensMap.get(token.token_mint);
+            if (mapEntry) {
+              mapEntry.token_program_id = programDetection.programId.toBase58();
+            }
+            token.token_program_id = programDetection.programId.toBase58();
+          }
+
+          const ata = await getAssociatedTokenAddress(
+            mintKey,
+            pubkey,
+            false,
+            programDetection.programId
+          );
+
+          return {
+            address: ata,
+            mint: token.token_mint,
+            programId: programDetection.programId,
+            decimals: token.decimals,
+          } satisfies AtaLookupPlan;
+        } catch (error) {
+          console.error(
+            `❌ Failed to derive associated token address for ${token.token_mint}:`,
+            error
+          );
+          return null;
+        }
+      })
+    );
+
+    for (const plan of plans) {
+      if (!plan) {
+        continue;
+      }
+      lookup.set(plan.address.toBase58(), plan);
+    }
+
+    return lookup;
+  }
+
+  private async loadApprovedTokenAccounts(
+    ataLookup: Map<string, AtaLookupPlan>,
+    seenAccounts: Set<string>
+  ): Promise<{ accounts: ParsedTokenAccount[]; metadataPrefetchMints: Set<string> }> {
+    const accounts: ParsedTokenAccount[] = [];
+    const metadataPrefetchMints = new Set<string>();
+    const ataEntries = Array.from(ataLookup.values());
+    let fetchedAtaAccounts = 0;
+
+    if (ataEntries.length === 0) {
+      return { accounts, metadataPrefetchMints };
+    }
+
+    const CHUNK_SIZE = 100;
+    for (let i = 0; i < ataEntries.length; i += CHUNK_SIZE) {
+      const chunk = ataEntries.slice(i, i + CHUNK_SIZE);
+      const infos = await this.connection.getMultipleAccountsInfo(
+        chunk.map((item) => item.address)
+      );
+
+      infos.forEach((info, index) => {
+        const lookup = chunk[index];
+        if (!info || !lookup) {
+          return;
+        }
+
+        try {
+          const account = unpackAccount(
+            lookup.address,
+            info as AccountInfo<Buffer>,
+            lookup.programId
+          );
+          const amount = account.amount ?? 0n;
+          accounts.push({
+            mint: lookup.mint,
+            tokenAmount: {
+              amount: amount.toString(),
+              decimals: lookup.decimals,
+            },
+          });
+
+          if (amount > 0n) {
+            metadataPrefetchMints.add(lookup.mint);
+          }
+
+          seenAccounts.add(lookup.address.toBase58());
+          fetchedAtaAccounts += 1;
+        } catch (error) {
+          if (
+            !(error instanceof TokenAccountNotFoundError) &&
+            !(error instanceof TokenInvalidAccountOwnerError)
+          ) {
+            console.error(
+              `❌ Error unpacking token account ${lookup.address.toBase58()}:`,
+              error
+            );
+          }
+        }
+      });
+    }
+
+    console.log(
+      `📦 Loaded ${fetchedAtaAccounts} approved token accounts via ATA lookups`
+    );
+
+    return { accounts, metadataPrefetchMints };
+  }
+
+  private async discoverAdditionalTokenAccounts(
+    pubkey: PublicKey,
+    telegramId: bigint,
+    existingAccountCount: number,
+    seenAccounts: Set<string>
+  ): Promise<{ accounts: ParsedTokenAccount[]; metadataPrefetchMints: Set<string> }> {
+    const now = this.timeNow?.() ?? Date.now();
+    const discoveryKey = telegramId.toString();
+    const lastDiscovery = this.lastTokenDiscoveryByUser.get(discoveryKey) ?? 0;
+    const forceDiscovery = existingAccountCount === 0;
+    const shouldDiscover =
+      forceDiscovery || now - lastDiscovery >= TOKEN_DISCOVERY_COOLDOWN_MS;
+
+    if (!shouldDiscover) {
+      console.log(
+        `⏭️ Skipping token discovery (cooldown ${TOKEN_DISCOVERY_COOLDOWN_MS}ms active)`
+      );
+      return { accounts: [], metadataPrefetchMints: new Set<string>() };
+    }
+
+    const [splTokenAccounts, token2022Accounts] = await Promise.all([
+      this.connection.getParsedTokenAccountsByOwner(pubkey, {
+        programId: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+      }),
+      this.connection.getParsedTokenAccountsByOwner(pubkey, {
+        programId: new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"),
+      }),
+    ]);
+
+    this.lastTokenDiscoveryByUser.set(discoveryKey, now);
+
+    const allTokenAccounts = [
+      ...(splTokenAccounts.value || []),
+      ...(token2022Accounts.value || []),
+    ];
+
+    console.log(
+      `📡 Token discovery fetched ${
+        splTokenAccounts.value?.length || 0
+      } SPL and ${token2022Accounts.value?.length || 0} Token-2022 accounts (${allTokenAccounts.length} total)`
+    );
+
+    const accounts: ParsedTokenAccount[] = [];
+    const metadataPrefetchMints = new Set<string>();
+
+    for (const accountInfo of allTokenAccounts) {
+      const accountPubkey = accountInfo.pubkey?.toBase58?.();
+      if (accountPubkey) {
+        if (seenAccounts.has(accountPubkey)) {
+          continue;
+        }
+        seenAccounts.add(accountPubkey);
+      }
+
+      try {
+        const parsedData = accountInfo.account.data.parsed;
+        const tokenAmount = parsedData.info.tokenAmount;
+        const mint = parsedData.info.mint;
+        const lamports = this.parseLamports(tokenAmount.amount, mint);
+        if (lamports === null) {
+          continue;
+        }
+
+        accounts.push({ mint, tokenAmount });
+        if (lamports > 0n) {
+          metadataPrefetchMints.add(mint);
+        }
+      } catch (error) {
+        console.error(
+          `❌ Error parsing token account for user ${telegramId}:`,
+          error
+        );
+      }
+    }
+
+    return { accounts, metadataPrefetchMints };
+  }
+
+  private createMetadataLoader(): MetadataLoader {
+    const metadataCache = new Map<string, MetadataRecord>();
+    const metadataPromises = new Map<string, Promise<MetadataRecord>>();
+
+    const load = async (mint: string): Promise<MetadataRecord> => {
+      if (metadataCache.has(mint)) {
+        return metadataCache.get(mint) ?? null;
+      }
+
+      if (!metadataPromises.has(mint)) {
+        const promise = this.getFullTokenMetadata(mint)
+          .then((metadata) => {
+            metadataCache.set(mint, metadata ?? null);
+            return metadata ?? null;
+          })
+          .catch((metadataError) => {
+            console.error(`❌ Error fetching metadata for ${mint}:`, metadataError);
+            metadataCache.delete(mint);
+            return null;
+          })
+          .finally(() => {
+            metadataPromises.delete(mint);
+          });
+        metadataPromises.set(mint, promise);
+      }
+
+      return metadataPromises.get(mint)!;
+    };
+
+    const prefetch = async (mints: Iterable<string>) => {
+      const uniqueMints = Array.from(new Set(mints));
+      await Promise.all(uniqueMints.map((mint) => load(mint)));
+    };
+
+    return { load, prefetch };
+  }
+
+  private parseLamports(rawAmount: string, mint: string): bigint | null {
+    try {
+      return BigInt(rawAmount);
+    } catch (error) {
+      console.error(`❌ Invalid lamport amount for ${mint}: ${rawAmount}`, error);
+      return null;
+    }
+  }
+
+  private async autoRegisterTokenForBalance(
+    mint: string,
+    approvedTokensMap: Map<string, ApprovedTokenDefinition>,
+    metadataLoader: MetadataLoader
+  ): Promise<void> {
+    console.log(`🔄 Auto-registering unknown token with balance: ${mint}`);
+    try {
+      const tokenManager = TokenManager.getInstance();
+      const registration = await tokenManager.registerTokenIfNeeded({
+        mint,
+        source: "wallet:auto",
+        metadataResolvers: [
+          async () => {
+            const metadata = await metadataLoader.load(mint);
+            return metadata;
+          },
+        ],
+      });
+
+      if (!registration.token) {
+        console.log(
+          `❌ Failed to auto-register: ${registration.resolvedTicker ?? mint}`
+        );
+        return;
+      }
+
+      approvedTokensMap.set(mint, {
+        token_mint: registration.token.token_mint,
+        token_ticker: registration.token.token_ticker,
+        decimals: registration.token.decimals,
+        token_program_id: registration.token.token_program_id ?? null,
+      });
+    } catch (error) {
+      console.error(`❌ Error auto-registering token ${mint}:`, error);
+    }
+  }
+
+  private async processParsedTokenAccount({
+    account,
+    approvedTokensMap,
+    metadataLoader,
+  }: {
+    account: ParsedTokenAccount;
+    approvedTokensMap: Map<string, ApprovedTokenDefinition>;
+    metadataLoader: MetadataLoader;
+  }): Promise<ApprovedTokenBalance | null> {
+    const { mint, tokenAmount } = account;
+    const lamports = this.parseLamports(tokenAmount.amount, mint);
+    if (lamports === null || lamports <= 0n) {
+      return null;
+    }
+
+    let approvedToken = approvedTokensMap.get(mint);
+    if (!approvedToken) {
+      await this.autoRegisterTokenForBalance(mint, approvedTokensMap, metadataLoader);
+      approvedToken = approvedTokensMap.get(mint);
+    }
+
+    if (!approvedToken) {
+      return null;
+    }
+
+    return this.buildApprovedTokenBalanceEntry(
+      mint,
+      tokenAmount,
+      lamports,
+      approvedToken,
+      metadataLoader
+    );
+  }
+
+  private async buildApprovedTokenBalanceEntry(
+    mint: string,
+    tokenAmount: { amount: string; decimals: number },
+    lamports: bigint,
+    approvedToken: ApprovedTokenDefinition,
+    metadataLoader: MetadataLoader
+  ): Promise<ApprovedTokenBalance> {
+    const formattedBalance = this.formatTokenBalance(
+      lamports,
+      tokenAmount.decimals
+    );
+    const decimalBalance = Number.parseFloat(
+      formatAmount(lamports, tokenAmount.decimals, {
+        maxFractionDigits: Math.min(tokenAmount.decimals, 12),
+        trim: false,
+      })
+    );
+
+    let balanceNumber = 0;
+    let truncated = false;
+    if (lamports > BigInt(Number.MAX_SAFE_INTEGER)) {
+      balanceNumber = Number.MAX_SAFE_INTEGER;
+      truncated = true;
+      console.warn(
+        `⚠️ Token ${mint} balance ${lamports.toString()} exceeds JS safe integer; clamping numeric balance`
+      );
+    } else {
+      balanceNumber = Number(lamports);
+    }
+
+    let finalTicker = approvedToken.token_ticker;
+    const metadata = await metadataLoader.load(mint);
+    if (mint === WSOL_MINT) {
+      finalTicker = "WSOL";
+    } else if (metadata?.symbol && metadata.symbol !== "UNKNOWN") {
+      finalTicker = metadata.symbol;
+    }
+
+    return {
+      mint,
+      ticker: finalTicker,
+      balance: balanceNumber,
+      decimals: tokenAmount.decimals,
+      rawBalance: tokenAmount.amount,
+      lamports,
+      formattedBalance,
+      decimalBalance: Number.isFinite(decimalBalance) ? decimalBalance : 0,
+      truncated,
+    };
   }
 
   /**

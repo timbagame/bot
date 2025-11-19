@@ -9,6 +9,7 @@ import {
 } from "@solana/spl-token";
 import { WalletManager } from "../src/utils/wallet";
 import type { TokenDatabase } from "../src/utils/token-database";
+import { TOKEN_DISCOVERY_COOLDOWN_MS } from "../src/utils/constants";
 
 type MockAccountEntry = {
   owner: PublicKey;
@@ -339,5 +340,48 @@ describe("WalletManager.getAllApprovedTokenBalances", () => {
 
     expect(persisted).toEqual([[splMint.toBase58(), TOKEN_PROGRAM_ID.toBase58()]]);
     expect(approved[0]?.token_program_id).toBe(TOKEN_PROGRAM_ID.toBase58());
+  });
+
+  test("token discovery respects cooldown when accounts already known", async () => {
+    const discoveryCalls: string[] = [];
+    let now = 1_000;
+    const discoveryConnection = {
+      getParsedTokenAccountsByOwner: async (
+        _owner: PublicKey,
+        filter: { programId: PublicKey }
+      ) => {
+        discoveryCalls.push(filter.programId.toBase58());
+        return { value: [] } as any;
+      },
+    } as Partial<Connection>;
+
+    const wm = WalletManager.createForTest(
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      {
+        connection: discoveryConnection as Connection,
+        fetch: globalThis.fetch as any,
+        timeNow: () => now,
+      }
+    );
+
+    const owner = wm.getPublicKey(1n);
+    const seenAccounts = new Set<string>();
+    const discoveryFn = (wm as any).discoverAdditionalTokenAccounts.bind(wm);
+    const discoveryMap = (wm as any).lastTokenDiscoveryByUser as Map<string, number>;
+    const key = "1";
+
+    await discoveryFn(owner, 1n, 0, seenAccounts);
+    expect(discoveryCalls).toHaveLength(2);
+    expect(discoveryMap.get(key)).toBe(now);
+
+    discoveryCalls.length = 0;
+    await discoveryFn(owner, 1n, 1, seenAccounts);
+    expect(discoveryCalls).toHaveLength(0);
+    expect(discoveryMap.get(key)).toBe(now);
+
+    now += TOKEN_DISCOVERY_COOLDOWN_MS + 1;
+    await discoveryFn(owner, 1n, 1, seenAccounts);
+    expect(discoveryCalls).toHaveLength(2);
+    expect(discoveryMap.get(key)).toBe(now);
   });
 });

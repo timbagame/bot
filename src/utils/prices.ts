@@ -95,6 +95,41 @@ async function fetchFromJupiter(
   }
 }
 
+async function fetchBatchFromJupiter(
+  ids: string[],
+  fetchImpl: FetchLike,
+  timeoutMs: number
+): Promise<Record<string, number | null>> {
+  const uniqueIds = Array.from(new Set(ids.map((id) => id.trim()).filter(Boolean)));
+  if (uniqueIds.length === 0) {
+    return {};
+  }
+
+  try {
+    const url = new URL(JUPITER_PRICE_URL);
+    url.searchParams.set("ids", uniqueIds.join(","));
+    const res = await withTimeout(
+      (signal) => fetchImpl(url.toString(), { method: "GET", signal }),
+      timeoutMs
+    );
+    if (!res.ok) {
+      return {};
+    }
+
+    const data = (await res.json()) as any;
+    const container = data?.data ?? data ?? {};
+    return uniqueIds.reduce<Record<string, number | null>>((acc, requestId) => {
+      const entry = container?.[requestId];
+      acc[requestId] = entry
+        ? pickValidPrice([entry?.price, entry?.usdPrice, entry?.usd_price])
+        : null;
+      return acc;
+    }, {});
+  } catch {
+    return {};
+  }
+}
+
 export async function getPriceUSD(
   mintOrTicker: string,
   fetchImpl: FetchLike = (globalThis.fetch as any)
@@ -155,6 +190,63 @@ export async function getPricesUSD(
   ids: string[],
   fetchImpl: FetchLike = (globalThis.fetch as any)
 ): Promise<Record<string, number>> {
+  if (!isPricesEnabled()) {
+    return Object.fromEntries(ids.map((id) => [id, 0]));
+  }
+
+  const batchTargets = new Map<
+    string,
+    { requestId: string; normalizedKeys: Set<string> }
+  >();
+
+  for (const id of ids) {
+    const normalizedKey = normalizeKey(id);
+    const liveEntry = priceCache.get(normalizedKey);
+    if (liveEntry?.value !== undefined) {
+      continue;
+    }
+
+    const cachedOrPending = priceCache.peek(normalizedKey);
+    if (cachedOrPending?.value !== undefined || cachedOrPending?.inflight) {
+      continue;
+    }
+
+    const requestId = toMintOrId(id).trim();
+    if (!requestId) {
+      continue;
+    }
+
+    const canonical = normalizeKey(requestId);
+    const target = batchTargets.get(canonical);
+    if (target) {
+      target.normalizedKeys.add(normalizedKey);
+    } else {
+      batchTargets.set(canonical, {
+        requestId,
+        normalizedKeys: new Set([normalizedKey]),
+      });
+    }
+  }
+
+  if (batchTargets.size > 0) {
+    const requests = Array.from(batchTargets.values());
+    const fetched = await fetchBatchFromJupiter(
+      requests.map((item) => item.requestId),
+      fetchImpl,
+      PRICES_TIMEOUT_MS
+    );
+
+    for (const target of requests) {
+      const price = fetched[target.requestId];
+      if (!price || !Number.isFinite(price) || price <= 0) {
+        continue;
+      }
+      for (const normalizedKey of target.normalizedKeys) {
+        priceCache.setWithTTL(normalizedKey, { value: price });
+      }
+    }
+  }
+
   const entries = await Promise.all(
     ids.map(async (id) => [id, await getPriceUSD(id, fetchImpl)] as const)
   );
@@ -212,4 +304,8 @@ export async function resolveTokenPriceUSD({
   }
 
   return null;
+}
+
+export function __test_resetPriceCache(): void {
+  priceCache.clear();
 }
