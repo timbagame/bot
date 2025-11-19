@@ -1073,47 +1073,18 @@ const prepareTokenTradeQuote = async ({
     solFeeBufferLamports,
   });
 
-  // If swapping all SOL and the mint is referral-enabled, fall back to admin payer
-  // so the user can go gasless even when their own balance would hit zero.
   if (
-    inputAsset.ticker === "SOL" &&
-    outputIsSol &&
-    amountResolution.normalizedAmount === "max"
-  ) {
-    if (referralConfig && integratorConfig?.payerKind !== "admin") {
-      integratorConfig = await buildAdminIntegratorConfig({
-        referralConfig,
-        baseFeeBps:
-          integratorConfig?.referralFeeBps ??
-          referralConfig.baseFeeBps ??
-          85,
-        tradeAmountRaw: amountResolution.rawAmount,
-        tradeMint: inputAsset.mint,
-        tradeTicker: inputAsset.ticker,
-        tradeDecimals: inputAsset.decimals,
-        solFeeBufferLamports: solFeeBufferLamports,
-      });
-    }
-  }
-
-  const needsAdminPayer =
     referralConfig &&
     outputIsSol &&
-    snapshot.solBalance <
-      Math.max(USER_SOL_MAX_BUFFER_LAMPORTS, JUPITER_MIN_SOL_BALANCE_LAMPORTS);
-
-  if (needsAdminPayer && integratorConfig?.payerKind !== "admin") {
-    integratorConfig = await buildAdminIntegratorConfig({
+    inputAsset.ticker === "SOL"
+  ) {
+    integratorConfig = await resolveAdminIntegratorConfig({
+      integratorConfig,
       referralConfig,
-      baseFeeBps:
-        integratorConfig?.referralFeeBps ??
-        referralConfig.baseFeeBps ??
-        85,
-      tradeAmountRaw: amountResolution.rawAmount,
-      tradeMint: inputAsset.mint,
-      tradeTicker: inputAsset.ticker,
-      tradeDecimals: inputAsset.decimals,
+      amountResolution,
+      inputAsset,
       solFeeBufferLamports,
+      snapshot,
     });
   }
 
@@ -4085,6 +4056,69 @@ const ensureUserSolBufferForSwap = async ({
   throw new Error(
     `This route (${providerQuote.router ?? "iris"}) needs ${formattedRoute} SOL for rent and expects you to keep ${formattedRequired} SOL in the wallet. Reduce the swap amount or keep ${formattedDeficit} more SOL before retrying.`
   );
+};
+
+type ResolveAdminIntegratorConfigOptions = {
+  integratorConfig: IntegratorSwapParams | null;
+  referralConfig: ReferralTokenConfigEntry;
+  amountResolution: ReturnType<typeof presentSpendAmount>;
+  inputAsset: ResolvedTradeAsset;
+  solFeeBufferLamports?: number;
+  snapshot: WalletCacheSnapshot;
+};
+
+const resolveAdminIntegratorConfig = async (
+  options: ResolveAdminIntegratorConfigOptions
+): Promise<IntegratorSwapParams | null> => {
+  const {
+    integratorConfig,
+    referralConfig,
+    amountResolution,
+    inputAsset,
+    solFeeBufferLamports,
+    snapshot,
+  } = options;
+
+  let config = integratorConfig;
+  const baseFeeBps =
+    config?.referralFeeBps ?? referralConfig.baseFeeBps ?? 85;
+
+  const shouldForceAdminForMax =
+    amountResolution.normalizedAmount === "max" &&
+    inputAsset.ticker === "SOL" &&
+    config?.payerKind !== "admin";
+
+  if (shouldForceAdminForMax) {
+    config = await buildAdminIntegratorConfig({
+      referralConfig,
+      baseFeeBps,
+      tradeAmountRaw: amountResolution.rawAmount,
+      tradeMint: inputAsset.mint,
+      tradeTicker: inputAsset.ticker,
+      tradeDecimals: inputAsset.decimals,
+      solFeeBufferLamports,
+    });
+  }
+
+  const bufferThreshold = Math.max(
+    USER_SOL_MAX_BUFFER_LAMPORTS,
+    JUPITER_MIN_SOL_BALANCE_LAMPORTS
+  );
+  const needsAdminPayer = snapshot.solBalance < bufferThreshold;
+
+  if (needsAdminPayer && config?.payerKind !== "admin") {
+    config = await buildAdminIntegratorConfig({
+      referralConfig,
+      baseFeeBps,
+      tradeAmountRaw: amountResolution.rawAmount,
+      tradeMint: inputAsset.mint,
+      tradeTicker: inputAsset.ticker,
+      tradeDecimals: inputAsset.decimals,
+      solFeeBufferLamports,
+    });
+  }
+
+  return config;
 };
 
 const buildAdminIntegratorConfig = async ({
