@@ -570,10 +570,9 @@ export class SwapManager {
       jupiterQuote = await this.getJupiterQuote(refreshRequest);
     }
 
-    const integratorApplied = Boolean(
-      cachedIntegrator && jupiterQuote?.referralApplied
-    );
-    const integrator = integratorApplied ? cachedIntegrator : null;
+    // Keep integrator/payer even if Jupiter could not apply referral fees (referralApplied=false);
+    // payer must remain so Ultra does not fall back to gasless $10 minimum.
+    const integrator = cachedIntegrator;
 
     const swapResponse = await this.jupiterClient.getSwapTransaction({
       userPublicKey: userKeypair.publicKey.toString(),
