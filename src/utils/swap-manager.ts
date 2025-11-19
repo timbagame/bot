@@ -39,8 +39,6 @@ export type {
 
 const SOL_MINT = WSOL_MINT;
 const SOL_DECIMALS = 9;
-// Allow JIT SOL targets to match the actual shortfall; no enforced floor.
-const MIN_JIT_SOL_OUT_LAMPORTS = 0;
 const JUPITER_QUOTE_EXPIRATION_MS_DEFAULT = 120_000;
 const ROUTE_LAMPORTS_BUFFER = 400_000;
 let jupiterQuoteExpirationMs = JUPITER_QUOTE_EXPIRATION_MS_DEFAULT;
@@ -264,11 +262,8 @@ export class SwapManager {
       const lamportsShortfall = targetLamports - currentLamports;
       const swapTarget = lamportsShortfall + jitFeeBuffer;
 
-      const primaryTarget = Math.max(swapTarget, MIN_JIT_SOL_OUT_LAMPORTS);
-      const secondaryTarget = Math.max(
-        lamportsShortfall,
-        MIN_JIT_SOL_OUT_LAMPORTS
-      );
+      const primaryTarget = swapTarget;
+      const secondaryTarget = lamportsShortfall;
 
       const attemptWsolUnwrap = async (
         target: number
