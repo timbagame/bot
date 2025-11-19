@@ -1073,11 +1073,7 @@ const prepareTokenTradeQuote = async ({
     solFeeBufferLamports,
   });
 
-  if (
-    referralConfig &&
-    outputIsSol &&
-    inputAsset.ticker === "SOL"
-  ) {
+  if (referralConfig && outputIsSol) {
     integratorConfig = await resolveAdminIntegratorConfig({
       integratorConfig,
       referralConfig,
