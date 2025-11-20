@@ -455,7 +455,10 @@ export class TokenManager {
         /^[0-9]+(?:\.[0-9]+)?$/.test(normalizedCandidate);
 
       if (!isNumericCandidate) {
-        const resolvedToken = await this.resolveSwapToken(normalizedCandidate);
+        const resolvedToken = await this.resolveSwapToken(normalizedCandidate, {
+          allowAutoDiscover: context !== "game",
+          persistDiscovered: context !== "game",
+        });
         if (resolvedToken) {
           tokenWasSpecified = true;
           tokenDecimals = resolvedToken.decimals;
@@ -901,7 +904,11 @@ export class TokenManager {
   }
 
   public async resolveSwapToken(
-    tickerOrMint: string
+    tickerOrMint: string,
+    options: {
+      allowAutoDiscover?: boolean;
+      persistDiscovered?: boolean;
+    } = {}
   ): Promise<
     (KnownToken & {
       isNativeSol?: boolean;
@@ -909,6 +916,9 @@ export class TokenManager {
     })
     | null
   > {
+    const allowAutoDiscover = options.allowAutoDiscover ?? true;
+    const persistDiscovered = options.persistDiscovered ?? true;
+
     const candidate = tickerOrMint.trim();
     if (!candidate) {
       return null;
@@ -973,8 +983,14 @@ export class TokenManager {
 
       if (metadata) {
         const ticker = metadata.ticker.toUpperCase();
-        this.tokenDb.addKnownToken(registryMint.mint, ticker, metadata.decimals);
-        this.invalidateApprovedTokensCache();
+        if (persistDiscovered) {
+          this.tokenDb.addKnownToken(
+            registryMint.mint,
+            ticker,
+            metadata.decimals
+          );
+          this.invalidateApprovedTokensCache();
+        }
         return {
           token_mint: registryMint.mint,
           token_ticker: ticker,
@@ -994,14 +1010,20 @@ export class TokenManager {
       return builtinMint;
     }
 
+    if (!allowAutoDiscover) {
+      return null;
+    }
+
     const discovered = await this.autoDiscoverTokenInfo(normalizedMint);
     if (!discovered) {
       return null;
     }
 
     const ticker = discovered.ticker.toUpperCase();
-    this.tokenDb.addKnownToken(normalizedMint, ticker, discovered.decimals);
-    this.invalidateApprovedTokensCache();
+    if (persistDiscovered) {
+      this.tokenDb.addKnownToken(normalizedMint, ticker, discovered.decimals);
+      this.invalidateApprovedTokensCache();
+    }
 
     return {
       token_mint: normalizedMint,
