@@ -475,7 +475,11 @@ export class TokenManager {
           // persisting them so unsupported mints remain blocked.
           persistDiscovered: context !== "game",
         });
-        const metadataFailure = this.lastMetadataFailure;
+        const metadataFailure: { reason: "invalid_decimals"; mint: string } | null =
+          this.lastMetadataFailure;
+        const hadInvalidDecimals = Boolean(
+          metadataFailure || this.lastMetadataFailure
+        );
         if (resolvedToken) {
           tokenWasSpecified = true;
           tokenDecimals = resolvedToken.decimals;
@@ -498,10 +502,7 @@ export class TokenManager {
               resolvedTokenTicker = "SOL";
             }
           }
-        } else if (
-          metadataFailure?.reason === "invalid_decimals" ||
-          this.lastMetadataFailure?.reason === "invalid_decimals"
-        ) {
+        } else if (hadInvalidDecimals) {
           return {
             success: false,
             error: "unsupported_token",
