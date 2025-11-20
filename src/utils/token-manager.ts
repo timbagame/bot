@@ -455,10 +455,7 @@ export class TokenManager {
         /^[0-9]+(?:\.[0-9]+)?$/.test(normalizedCandidate);
 
       if (!isNumericCandidate) {
-        const resolvedToken = await this.resolveSwapToken(normalizedCandidate, {
-          allowAutoDiscover: context !== "game",
-          persistDiscovered: context !== "game",
-        });
+        const resolvedToken = await this.resolveSwapToken(normalizedCandidate);
         if (resolvedToken) {
           tokenWasSpecified = true;
           tokenDecimals = resolvedToken.decimals;
