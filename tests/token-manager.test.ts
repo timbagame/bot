@@ -114,18 +114,20 @@ test("parseAmount accepts token mint addresses when provided", async () => {
   expect(data.tokenWasSpecified).toBe(true);
 });
 
-test("parseAmount treats valid mint strings as explicit tokens even when unknown", async () => {
+test("parseAmount rejects valid mint strings for unsupported game tokens", async () => {
   const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
   const mint = "BPFLoader1111111111111111111111111111111111";
 
   const res = await tm.parseAmount(["/cf", "4", mint], 1, 321, "game");
-  if (!res.success) {
-    throw new Error(`expected success, got ${res.error}`);
+
+  expect(res.success).toBe(false);
+  if (res.success) {
+    throw new Error("expected unsupported token failure");
   }
-  const data = res.data;
-  expect(data.tokenMint).toBe(mint);
-  expect(data.tokenTicker).toBe("DISC");
-  expect(data.tokenWasSpecified).toBe(true);
+
+  expect(res.error).toBe("unsupported_token");
+  expect(res.unknownToken).toBe("DISC");
+  expect(tm.getKnownTokenByMint(mint)).toBeNull();
 });
 
 test("parseAmount rejects unsupported mints even when ticker is whitelisted", async () => {

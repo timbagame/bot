@@ -456,7 +456,8 @@ export class TokenManager {
 
       if (!isNumericCandidate) {
         const resolvedToken = await this.resolveSwapToken(normalizedCandidate, {
-          allowAutoDiscover: context !== "game",
+          // Allow metadata discovery for explicit tokens in games, but avoid
+          // persisting them so unsupported mints remain blocked.
           persistDiscovered: context !== "game",
         });
         if (resolvedToken) {
