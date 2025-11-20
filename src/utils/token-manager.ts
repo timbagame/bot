@@ -431,6 +431,8 @@ export class TokenManager {
     chatId?: number,
     context: "game" | "tip" = "game"
   ): Promise<ParseAmountResult> {
+    this.lastMetadataFailure = null;
+
     if (!args || args.length <= argIndex) {
       return { success: false, error: "invalid_amount" };
     }

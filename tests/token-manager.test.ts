@@ -299,6 +299,39 @@ test("parseAmount surfaces invalid decimal metadata as unsupported", async () =>
   expect(tm.getKnownTokenByMint(invalidMint)).toBeNull();
 });
 
+test("parseAmount clears stale metadata failures between parses", async () => {
+  const invalidMint = Keypair.generate().publicKey.toBase58();
+  const wallet = makeWalletStub();
+
+  wallet.getTokenMetadata = async (mint: string) => ({
+    decimals: mint === invalidMint ? 19 : 6,
+  });
+
+  wallet.getFullTokenMetadata = async (mint: string) => ({
+    decimals: mint === invalidMint ? 19 : 6,
+    symbol: "BAD",
+    name: `Token ${mint.slice(0, 4).toUpperCase()}`,
+  });
+
+  const tm = TokenManager.getInstance(wallet as any, "DEFAULT_MINT", "DEF");
+  await tm.addToken("DEFAULT_MINT", "DEF", 6);
+
+  const first = await tm.parseAmount(["/cf", "2", invalidMint], 1, 100, "game");
+  expect(first.success).toBe(false);
+  if (first.success) {
+    throw new Error("expected unsupported token for invalid metadata");
+  }
+  expect(first.error).toBe("unsupported_token");
+
+  const second = await tm.parseAmount(["/cf", "2", "UNKN"], 1, 100, "game");
+  expect(second.success).toBe(false);
+  if (second.success) {
+    throw new Error("expected unknown token after metadata failure reset");
+  }
+  expect(second.error).toBe("unknown_token");
+  expect(second.unknownToken).toBe("UNKN");
+});
+
 test("parseAmount ignores numeric trailing arguments when resolving tokens", async () => {
   const tm = TokenManager.getInstance(makeWalletStub(), "DEFAULT_MINT", "DEF");
   const res = await tm.parseAmount(["/cf", "10", "5"], 1, 22, "game");
