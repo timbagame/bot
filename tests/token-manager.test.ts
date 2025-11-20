@@ -332,6 +332,60 @@ test("parseAmount clears stale metadata failures between parses", async () => {
   expect(second.unknownToken).toBe("UNKN");
 });
 
+test("parseAmount does not share metadata failures across concurrent parses", async () => {
+  const invalidMint = Keypair.generate().publicKey.toBase58();
+  const validMint = Keypair.generate().publicKey.toBase58();
+  const wallet = makeWalletStub();
+
+  wallet.getTokenMetadata = async (mint: string) => ({
+    decimals: mint === invalidMint ? 19 : 6,
+  });
+
+  wallet.getFullTokenMetadata = async (mint: string) => {
+    if (mint === validMint) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return {
+        decimals: 6,
+        symbol: "GOOD",
+        name: "Good Token",
+      };
+    }
+
+    if (mint === invalidMint) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return {
+        decimals: 19,
+        symbol: "BAD",
+        name: "Bad Token",
+      };
+    }
+
+    return {
+      decimals: 6,
+      symbol: "GEN",
+      name: "Generic Token",
+    };
+  };
+
+  const tm = TokenManager.getInstance(wallet as any, "DEFAULT_MINT", "DEF");
+
+  const [validResult, invalidResult] = await Promise.all([
+    tm.parseAmount(["/cf", "2", validMint], 1, 120, "tip"),
+    tm.parseAmount(["/cf", "2", invalidMint], 1, 120, "tip"),
+  ]);
+
+  expect(validResult.success).toBe(true);
+  if (!validResult.success) {
+    throw new Error(`expected valid mint to succeed, got ${validResult.error}`);
+  }
+
+  expect(invalidResult.success).toBe(false);
+  if (invalidResult.success) {
+    throw new Error("expected invalid decimals to fail");
+  }
+  expect(invalidResult.error).toBe("unsupported_token");
+});
+
 test("parseAmount ignores numeric trailing arguments when resolving tokens", async () => {
   const tm = TokenManager.getInstance(makeWalletStub(), "DEFAULT_MINT", "DEF");
   const res = await tm.parseAmount(["/cf", "10", "5"], 1, 22, "game");

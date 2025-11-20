@@ -62,6 +62,8 @@ type ResolvedTokenMetadata = {
   isNativeSol?: boolean;
 };
 
+type MetadataFailure = { reason: "invalid_decimals"; mint: string };
+
 const MAX_SUPPORTED_TOKEN_DECIMALS = 18;
 const SUPPORTED_TOKEN_MINTS = new Set(
   TOKENS_LIST.map((token) => token.mint.trim())
@@ -246,12 +248,17 @@ export class TokenManager {
     {
       tickerHint,
       metadataResolvers = [],
+      metadataFailureSink,
     }: {
       tickerHint?: string;
       metadataResolvers?: TokenMetadataResolver[];
+      metadataFailureSink?: { value: MetadataFailure | null };
     } = {}
   ): Promise<ResolvedTokenMetadata | null> {
     this.lastMetadataFailure = null;
+    if (metadataFailureSink) {
+      metadataFailureSink.value = null;
+    }
     const builtinMetadata = getBuiltinTokenMetadataByMint(mint);
     const normalizedHint = tickerHint?.trim().toUpperCase();
     let resolvedTicker = normalizedHint;
@@ -301,7 +308,11 @@ export class TokenManager {
     ) => {
       const normalized = this.normalizeDecimals(value ?? undefined);
       if (normalized === null) {
-        this.lastMetadataFailure = { reason: "invalid_decimals", mint };
+        const failure: MetadataFailure = { reason: "invalid_decimals", mint };
+        this.lastMetadataFailure = failure;
+        if (metadataFailureSink) {
+          metadataFailureSink.value = failure;
+        }
         return;
       }
 
@@ -404,7 +415,11 @@ export class TokenManager {
 
     const sanitizedDecimals = this.normalizeDecimals(decimals);
     if (sanitizedDecimals === null) {
-      this.lastMetadataFailure = { reason: "invalid_decimals", mint };
+      const failure: MetadataFailure = { reason: "invalid_decimals", mint };
+      this.lastMetadataFailure = failure;
+      if (metadataFailureSink) {
+        metadataFailureSink.value = failure;
+      }
       return null;
     }
 
@@ -413,6 +428,9 @@ export class TokenManager {
     }
 
     this.lastMetadataFailure = null;
+    if (metadataFailureSink) {
+      metadataFailureSink.value = null;
+    }
     return {
       ticker: resolvedTicker,
       decimals: sanitizedDecimals,
@@ -456,6 +474,9 @@ export class TokenManager {
     let requestedNativeSol = false;
 
     const candidate = tokenArg?.trim();
+    const metadataFailureSink: { value: MetadataFailure | null } = {
+      value: null,
+    };
     if (candidate) {
       const normalizedCandidate = candidate.trim();
       const candidateUpper = normalizedCandidate.toUpperCase();
@@ -474,12 +495,9 @@ export class TokenManager {
           // Allow metadata discovery for explicit tokens in games, but avoid
           // persisting them so unsupported mints remain blocked.
           persistDiscovered: context !== "game",
+          metadataFailureSink,
         });
-        const metadataFailure: { reason: "invalid_decimals"; mint: string } | null =
-          this.lastMetadataFailure;
-        const hadInvalidDecimals = Boolean(
-          metadataFailure || this.lastMetadataFailure
-        );
+        const hadInvalidDecimals = Boolean(metadataFailureSink.value);
         if (resolvedToken) {
           tokenWasSpecified = true;
           tokenDecimals = resolvedToken.decimals;
@@ -941,6 +959,7 @@ export class TokenManager {
     options: {
       allowAutoDiscover?: boolean;
       persistDiscovered?: boolean;
+      metadataFailureSink?: { value: MetadataFailure | null };
     } = {}
   ): Promise<
     (KnownToken & {
@@ -951,7 +970,8 @@ export class TokenManager {
   > {
     const allowAutoDiscover = options.allowAutoDiscover ?? true;
     const persistDiscovered = options.persistDiscovered ?? true;
-    let metadataFailure: { reason: "invalid_decimals"; mint: string } | null = null;
+    const metadataFailureSink = options.metadataFailureSink;
+    let metadataFailure: MetadataFailure | null = metadataFailureSink?.value ?? null;
 
     const candidate = tickerOrMint.trim();
     if (!candidate) {
@@ -1013,8 +1033,13 @@ export class TokenManager {
     if (registryMint) {
       const metadata = await this.resolveMetadataForMint(registryMint.mint, {
         tickerHint: registryMint.ticker,
+        metadataFailureSink,
       });
-      metadataFailure = this.lastMetadataFailure ?? metadataFailure;
+      metadataFailure =
+        metadataFailureSink?.value ?? this.lastMetadataFailure ?? metadataFailure;
+      if (metadataFailureSink) {
+        metadataFailureSink.value = metadataFailure;
+      }
 
       if (metadata) {
         const ticker = metadata.ticker.toUpperCase();
@@ -1046,12 +1071,20 @@ export class TokenManager {
     }
 
     if (!allowAutoDiscover) {
-      this.lastMetadataFailure = metadataFailure;
+      const failure = metadataFailureSink?.value ?? metadataFailure;
+      this.lastMetadataFailure = failure;
+      if (metadataFailureSink) {
+        metadataFailureSink.value = failure;
+      }
       return null;
     }
 
     const discovered = await this.autoDiscoverTokenInfo(normalizedMint);
-    metadataFailure = this.lastMetadataFailure ?? metadataFailure;
+    metadataFailure =
+      metadataFailureSink?.value ?? this.lastMetadataFailure ?? metadataFailure;
+    if (metadataFailureSink) {
+      metadataFailureSink.value = metadataFailure;
+    }
     if (!discovered) {
       this.lastMetadataFailure = metadataFailure;
       return null;
