@@ -66,9 +66,6 @@ const MAX_SUPPORTED_TOKEN_DECIMALS = 18;
 const SUPPORTED_TOKEN_MINTS = new Set(
   TOKENS_LIST.map((token) => token.mint.trim())
 );
-const SUPPORTED_TOKEN_TICKERS = new Set(
-  TOKENS_LIST.map((token) => token.ticker.trim().toUpperCase())
-);
 
 // ================================
 // MULTI-TOKEN MANAGER
@@ -159,7 +156,6 @@ export class TokenManager {
 
   private isTokenSupportedForGames(
     tokenMint: string,
-    tokenTicker?: string | null,
     isSol?: boolean,
     options?: { chatId?: number }
   ): boolean {
@@ -190,18 +186,7 @@ export class TokenManager {
       return true;
     }
 
-    if (SUPPORTED_TOKEN_MINTS.has(normalizedMint)) {
-      return true;
-    }
-
-    if (tokenTicker) {
-      const normalizedTicker = tokenTicker.trim().toUpperCase();
-      if (SUPPORTED_TOKEN_TICKERS.has(normalizedTicker)) {
-        return true;
-      }
-    }
-
-    return false;
+    return SUPPORTED_TOKEN_MINTS.has(normalizedMint);
   }
 
   private snapshotApprovedTokens(
@@ -519,12 +504,7 @@ export class TokenManager {
 
     if (
       context === "game" &&
-      !this.isTokenSupportedForGames(
-        resolvedTokenMint,
-        resolvedTokenTicker,
-        isSol,
-        { chatId }
-      )
+      !this.isTokenSupportedForGames(resolvedTokenMint, isSol, { chatId })
     ) {
       return {
         success: false,

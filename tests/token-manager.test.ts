@@ -128,6 +128,29 @@ test("parseAmount treats valid mint strings as explicit tokens even when unknown
   expect(data.tokenWasSpecified).toBe(true);
 });
 
+test("parseAmount rejects unsupported mints even when ticker is whitelisted", async () => {
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const spoofMint = Keypair.generate().publicKey.toBase58();
+
+  const originalResolveSwapToken = tm.resolveSwapToken.bind(tm);
+  (tm as any).resolveSwapToken = async () => ({
+    token_mint: spoofMint,
+    token_ticker: "USDC",
+    decimals: 6,
+    added_at: Date.now(),
+  });
+
+  const res = await tm.parseAmount(["/cf", "5", spoofMint], 1, 9, "game");
+  (tm as any).resolveSwapToken = originalResolveSwapToken;
+
+  expect(res.success).toBe(false);
+  if (res.success) {
+    throw new Error("expected unsupported token failure");
+  }
+  expect(res.error).toBe("unsupported_token");
+  expect(res.unknownToken).toBe("USDC");
+});
+
 test("resolveSwapToken returns builtin SOL metadata", async () => {
   const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
   const solInfo = await tm.resolveSwapToken("SOL");
