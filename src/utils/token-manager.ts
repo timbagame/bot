@@ -160,7 +160,8 @@ export class TokenManager {
   private isTokenSupportedForGames(
     tokenMint: string,
     tokenTicker?: string | null,
-    isSol?: boolean
+    isSol?: boolean,
+    options?: { chatId?: number }
   ): boolean {
     if (isSol) {
       return true;
@@ -171,7 +172,21 @@ export class TokenManager {
       return false;
     }
 
-    if (normalizedMint === WSOL_MINT) {
+    const chatDefaultMint = options?.chatId
+      ? this.chatDb.getChatDefaultToken(options.chatId)?.token_mint
+      : null;
+
+    const normalizedChatMint = chatDefaultMint?.trim();
+
+    if (
+      normalizedMint === WSOL_MINT ||
+      normalizedMint === this.defaultTokenMint.trim() ||
+      normalizedMint === normalizedChatMint
+    ) {
+      return true;
+    }
+
+    if (this.tokenDb.getKnownTokenByMint(normalizedMint)) {
       return true;
     }
 
@@ -507,7 +522,8 @@ export class TokenManager {
       !this.isTokenSupportedForGames(
         resolvedTokenMint,
         resolvedTokenTicker,
-        isSol
+        isSol,
+        { chatId }
       )
     ) {
       return {
