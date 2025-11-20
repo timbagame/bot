@@ -73,7 +73,7 @@ export type ParseAmountResult =
   | { success: true; data: ParsedAmount }
   | {
       success: false;
-      error: "invalid_amount" | "unknown_token";
+      error: "invalid_amount" | "unknown_token" | "unsupported_token";
       unknownToken?: string;
     };
 

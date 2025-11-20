@@ -3,7 +3,11 @@ import { ChatDatabase } from "./chat-database";
 import { TokenDatabase } from "./token-database";
 import { WalletManager } from "./wallet";
 import type { ParseAmountResult, ChatTokenConfig, KnownToken } from "../types";
-import { WSOL_MINT, TOKEN_MANAGER_APPROVED_CACHE_TTL_MS } from "./constants";
+import {
+  TOKENS_LIST,
+  WSOL_MINT,
+  TOKEN_MANAGER_APPROVED_CACHE_TTL_MS,
+} from "./constants";
 import {
   getBuiltinTokenMetadataByMint,
   getBuiltinTokenMetadataByTicker,
@@ -59,6 +63,12 @@ type ResolvedTokenMetadata = {
 };
 
 const MAX_SUPPORTED_TOKEN_DECIMALS = 18;
+const SUPPORTED_TOKEN_MINTS = new Set(
+  TOKENS_LIST.map((token) => token.mint.trim())
+);
+const SUPPORTED_TOKEN_TICKERS = new Set(
+  TOKENS_LIST.map((token) => token.ticker.trim().toUpperCase())
+);
 
 // ================================
 // MULTI-TOKEN MANAGER
@@ -145,6 +155,38 @@ export class TokenManager {
     }
 
     return integer;
+  }
+
+  private isTokenSupportedForGames(
+    tokenMint: string,
+    tokenTicker?: string | null,
+    isSol?: boolean
+  ): boolean {
+    if (isSol) {
+      return true;
+    }
+
+    const normalizedMint = tokenMint?.trim();
+    if (!normalizedMint) {
+      return false;
+    }
+
+    if (normalizedMint === WSOL_MINT) {
+      return true;
+    }
+
+    if (SUPPORTED_TOKEN_MINTS.has(normalizedMint)) {
+      return true;
+    }
+
+    if (tokenTicker) {
+      const normalizedTicker = tokenTicker.trim().toUpperCase();
+      if (SUPPORTED_TOKEN_TICKERS.has(normalizedTicker)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private snapshotApprovedTokens(
@@ -458,6 +500,21 @@ export class TokenManager {
         tokenDecimals = knownMint.decimals;
         resolvedTokenTicker = knownMint.token_ticker;
       }
+    }
+
+    if (
+      context === "game" &&
+      !this.isTokenSupportedForGames(
+        resolvedTokenMint,
+        resolvedTokenTicker,
+        isSol
+      )
+    ) {
+      return {
+        success: false,
+        error: "unsupported_token",
+        unknownToken: resolvedTokenTicker ?? resolvedTokenMint,
+      };
     }
 
     let amount: number;
@@ -974,6 +1031,12 @@ export function formatParseAmountError(
       return result.unknownToken
         ? `❌ Unknown token <code>${escapeHtml(result.unknownToken)}</code>`
         : fallbackMessage;
+    case "unsupported_token": {
+      const tokenLabel = result.unknownToken
+        ? `<code>${escapeHtml(result.unknownToken)}</code>`
+        : "This token";
+      return `❌ ${tokenLabel} is not supported yet. Contact an admin if you'd like it added.`;
+    }
     default:
       return fallbackMessage;
   }
