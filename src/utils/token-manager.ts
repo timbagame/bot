@@ -182,10 +182,6 @@ export class TokenManager {
       return true;
     }
 
-    if (this.tokenDb.getKnownTokenByMint(normalizedMint)) {
-      return true;
-    }
-
     return SUPPORTED_TOKEN_MINTS.has(normalizedMint);
   }
 
