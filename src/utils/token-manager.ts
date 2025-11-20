@@ -94,9 +94,12 @@ export class TokenManager {
         expiresAt: number;
       }
     | null = null;
+  private approvedTokensCacheVersion: number | null = null;
   private readonly approvedTokensCacheTtlMs =
     TOKEN_MANAGER_APPROVED_CACHE_TTL_MS;
   private readonly maxSupportedDecimals = MAX_SUPPORTED_TOKEN_DECIMALS;
+  private lastMetadataFailure: { reason: "invalid_decimals"; mint: string } | null =
+    null;
 
   private constructor(
     wallet: WalletManager,
@@ -164,6 +167,7 @@ export class TokenManager {
     }
 
     const normalizedMint = tokenMint?.trim();
+    const normalizedDefaultMint = this.defaultTokenMint.trim();
     if (!normalizedMint) {
       return false;
     }
@@ -176,10 +180,13 @@ export class TokenManager {
 
     if (
       normalizedMint === WSOL_MINT ||
-      normalizedMint === this.defaultTokenMint.trim() ||
-      normalizedMint === normalizedChatMint
+      normalizedMint === normalizedDefaultMint
     ) {
       return true;
+    }
+
+    if (normalizedMint === normalizedChatMint) {
+      return SUPPORTED_TOKEN_MINTS.has(normalizedMint);
     }
 
     return SUPPORTED_TOKEN_MINTS.has(normalizedMint);
@@ -205,6 +212,7 @@ export class TokenManager {
 
   private invalidateApprovedTokensCache(): void {
     this.approvedTokensCache = null;
+    this.approvedTokensCacheVersion = null;
   }
 
   private resolveBuiltinMintToken(
@@ -243,6 +251,7 @@ export class TokenManager {
       metadataResolvers?: TokenMetadataResolver[];
     } = {}
   ): Promise<ResolvedTokenMetadata | null> {
+    this.lastMetadataFailure = null;
     const builtinMetadata = getBuiltinTokenMetadataByMint(mint);
     const normalizedHint = tickerHint?.trim().toUpperCase();
     let resolvedTicker = normalizedHint;
@@ -292,6 +301,7 @@ export class TokenManager {
     ) => {
       const normalized = this.normalizeDecimals(value ?? undefined);
       if (normalized === null) {
+        this.lastMetadataFailure = { reason: "invalid_decimals", mint };
         return;
       }
 
@@ -394,6 +404,7 @@ export class TokenManager {
 
     const sanitizedDecimals = this.normalizeDecimals(decimals);
     if (sanitizedDecimals === null) {
+      this.lastMetadataFailure = { reason: "invalid_decimals", mint };
       return null;
     }
 
@@ -401,6 +412,7 @@ export class TokenManager {
       resolvedTicker = `TOKEN_${mint.toUpperCase()}`;
     }
 
+    this.lastMetadataFailure = null;
     return {
       ticker: resolvedTicker,
       decimals: sanitizedDecimals,
@@ -446,9 +458,14 @@ export class TokenManager {
       const normalizedCandidate = candidate.trim();
       const candidateUpper = normalizedCandidate.toUpperCase();
       const candidateLooksLikeTicker = looksLikeTokenTicker(normalizedCandidate);
-      const isNumericCandidate =
-        normalizedCandidate.length <= 18 &&
-        /^[0-9]+(?:\.[0-9]+)?$/.test(normalizedCandidate);
+      const isNumericCandidate = /^[0-9]+(?:\.[0-9]+)?$/.test(normalizedCandidate);
+      const numericDigitCount = normalizedCandidate.replace(/\D/g, "").length;
+
+      if (isNumericCandidate) {
+        if (numericDigitCount > 18) {
+          return { success: false, error: "invalid_amount" };
+        }
+      }
 
       if (!isNumericCandidate) {
         const resolvedToken = await this.resolveSwapToken(normalizedCandidate, {
@@ -456,6 +473,7 @@ export class TokenManager {
           // persisting them so unsupported mints remain blocked.
           persistDiscovered: context !== "game",
         });
+        const metadataFailure = this.lastMetadataFailure;
         if (resolvedToken) {
           tokenWasSpecified = true;
           tokenDecimals = resolvedToken.decimals;
@@ -478,6 +496,15 @@ export class TokenManager {
               resolvedTokenTicker = "SOL";
             }
           }
+        } else if (
+          metadataFailure?.reason === "invalid_decimals" ||
+          this.lastMetadataFailure?.reason === "invalid_decimals"
+        ) {
+          return {
+            success: false,
+            error: "unsupported_token",
+            unknownToken: candidateUpper,
+          };
         } else if (candidateLooksLikeTicker) {
           return {
             success: false,
@@ -837,8 +864,13 @@ export class TokenManager {
     token_program_id?: string | null;
   }> {
     const now = Date.now();
+    const tokenCount = this.tokenDb.getTokenCount();
     const cache = this.approvedTokensCache;
-    if (cache && cache.expiresAt > now) {
+    if (
+      cache &&
+      cache.expiresAt > now &&
+      this.approvedTokensCacheVersion === tokenCount
+    ) {
       return cache.value;
     }
 
@@ -848,6 +880,7 @@ export class TokenManager {
       value: snapshot,
       expiresAt: now + this.approvedTokensCacheTtlMs,
     };
+    this.approvedTokensCacheVersion = tokenCount;
     return snapshot;
   }
 
@@ -915,6 +948,7 @@ export class TokenManager {
   > {
     const allowAutoDiscover = options.allowAutoDiscover ?? true;
     const persistDiscovered = options.persistDiscovered ?? true;
+    let metadataFailure: { reason: "invalid_decimals"; mint: string } | null = null;
 
     const candidate = tickerOrMint.trim();
     if (!candidate) {
@@ -977,6 +1011,7 @@ export class TokenManager {
       const metadata = await this.resolveMetadataForMint(registryMint.mint, {
         tickerHint: registryMint.ticker,
       });
+      metadataFailure = this.lastMetadataFailure ?? metadataFailure;
 
       if (metadata) {
         const ticker = metadata.ticker.toUpperCase();
@@ -1008,11 +1043,14 @@ export class TokenManager {
     }
 
     if (!allowAutoDiscover) {
+      this.lastMetadataFailure = metadataFailure;
       return null;
     }
 
     const discovered = await this.autoDiscoverTokenInfo(normalizedMint);
+    metadataFailure = this.lastMetadataFailure ?? metadataFailure;
     if (!discovered) {
+      this.lastMetadataFailure = metadataFailure;
       return null;
     }
 

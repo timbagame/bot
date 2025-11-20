@@ -86,17 +86,48 @@ test("parseAmount reports unknown token tickers distinctly", async () => {
   expect(res.unknownToken).toBe("UNKN");
 });
 
+test("parseAmount rejects 19-digit numeric token arguments as invalid", async () => {
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const res = await tm.parseAmount(
+    ["/cf", "10", "123456789012345678901"],
+    1,
+    2,
+    "game"
+  );
+
+  expect(res.success).toBe(false);
+  if (res.success) {
+    throw new Error("expected invalid amount failure");
+  }
+  expect(res.error).toBe("invalid_amount");
+});
+
 test("parseAmount uses chat default token when none specified", async () => {
   const tm = TokenManager.getInstance(makeWalletStub(), "DEF_MINT", "DEF");
   // set chat default token to override
-  tm.setChatDefaultToken(7, "CHAT_MINT", "CHAT", "userZ");
+  tm.setChatDefaultToken(7, "DEF_MINT", "CHAT", "userZ");
   const res = await tm.parseAmount(["/cf", "2"], 1, 7, "game");
   if (!res.success) {
     throw new Error(`expected success, got ${res.error}`);
   }
   const d = res.data;
-  expect(d.tokenMint).toBe("CHAT_MINT");
+  expect(d.tokenMint).toBe("DEF_MINT");
   expect(d.tokenTicker).toBe("CHAT");
+});
+
+test("parseAmount rejects unsupported chat default tokens for games", async () => {
+  const tm = TokenManager.getInstance(makeWalletStub(), "DEF_MINT", "DEF");
+  const unsupportedMint = Keypair.generate().publicKey.toBase58();
+  tm.setChatDefaultToken(321, unsupportedMint, "CHAT", "userZ");
+
+  const res = await tm.parseAmount(["/cf", "1"], 1, 321, "game");
+
+  expect(res.success).toBe(false);
+  if (res.success) {
+    throw new Error("expected chat default unsupported failure");
+  }
+  expect(res.error).toBe("unsupported_token");
+  expect(res.unknownToken).toBe("CHAT");
 });
 
 test("parseAmount accepts token mint addresses when provided", async () => {
@@ -151,6 +182,34 @@ test("parseAmount rejects unsupported mints even when ticker is whitelisted", as
   }
   expect(res.error).toBe("unsupported_token");
   expect(res.unknownToken).toBe("USDC");
+});
+
+test("games reject chat default tokens discovered via tips", async () => {
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const discoveredMint = Keypair.generate().publicKey.toBase58();
+
+  const tipResult = await tm.parseAmount(
+    ["/tip", "1", discoveredMint],
+    1,
+    999,
+    "tip"
+  );
+
+  if (!tipResult.success) {
+    throw new Error(`expected tip success, got ${tipResult.error}`);
+  }
+
+  tm.setChatDefaultToken(999, discoveredMint, "DISC", "userZ");
+
+  const gameResult = await tm.parseAmount(["/cf", "1"], 1, 999, "game");
+
+  expect(gameResult.success).toBe(false);
+  if (gameResult.success) {
+    throw new Error("expected unsupported token for discovered chat default");
+  }
+  expect(gameResult.error).toBe("unsupported_token");
+  expect(gameResult.unknownToken).toBe("DISC");
+  expect(tm.getKnownTokenByMint(discoveredMint)).not.toBeNull();
 });
 
 test("resolveSwapToken returns builtin SOL metadata", async () => {
@@ -211,6 +270,33 @@ test("parseAmount fails when explicit mint metadata cannot be fetched", async ()
   expect(res.error).toBe("unknown_token");
   expect(res.unknownToken).toBe(explicitMint.toUpperCase());
   expect(metadataCalls).toEqual([explicitMint]);
+});
+
+test("parseAmount surfaces invalid decimal metadata as unsupported", async () => {
+  const invalidMint = Keypair.generate().publicKey.toBase58();
+  const wallet = makeWalletStub();
+
+  wallet.getTokenMetadata = async (mint: string) => ({
+    decimals: mint === invalidMint ? 19 : 6,
+  });
+
+  wallet.getFullTokenMetadata = async (mint: string) => ({
+    decimals: mint === invalidMint ? 19 : 6,
+    symbol: "ODD",
+    name: `Token ${mint.slice(0, 4).toUpperCase()}`,
+  });
+
+  const tm = TokenManager.getInstance(wallet as any, "DEFAULT_MINT", "DEF");
+  const res = await tm.parseAmount(["/cf", "2", invalidMint], 1, 33, "game");
+
+  expect(res.success).toBe(false);
+  if (res.success) {
+    throw new Error("expected invalid decimals failure");
+  }
+  expect(res.error).toBe("unsupported_token");
+  const unknown = res.unknownToken ?? "";
+  expect([invalidMint.toUpperCase(), "ODD"]).toContain(unknown);
+  expect(tm.getKnownTokenByMint(invalidMint)).toBeNull();
 });
 
 test("parseAmount ignores numeric trailing arguments when resolving tokens", async () => {
@@ -282,6 +368,23 @@ test("registerTokenIfNeeded ignores excessive decimal metadata", async () => {
   expect(stored?.decimals).toBe(6);
 });
 
+test("registerTokenIfNeeded handles concurrent registration requests", async () => {
+  TokenManager.resetForTesting();
+  const tm = TokenManager.getInstance(makeWalletStub(), "DEF_MINT", "DEF");
+  const mint = Keypair.generate().publicKey.toBase58();
+
+  const [first, second] = await Promise.all([
+    tm.registerTokenIfNeeded({ mint, tickerHint: "DISC" }),
+    tm.registerTokenIfNeeded({ mint, tickerHint: "DISC" }),
+  ]);
+
+  expect([first.status, second.status]).toContain("registered");
+  const stored = tm.getKnownTokenByMint(mint);
+  expect(stored).not.toBeNull();
+  expect(stored?.token_ticker).toBe("DISC");
+  expect(tm.getTokenCount()).toBe(1);
+});
+
 test("resolveSwapToken treats explicit WSOL mint as SPL token metadata", async () => {
   const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
   const info = await tm.resolveSwapToken(WSOL_MINT);
@@ -338,6 +441,35 @@ test("getAllApprovedTokensWithMetadata caches results and invalidates on changes
     expect(afterRemove.some((token) => token.token_mint === newMint)).toBe(false);
   } finally {
     tokenDb.getAllKnownTokens = originalGetter;
+    Date.now = originalNow;
+  }
+});
+
+test("getAllApprovedTokensWithMetadata refreshes cache when tokens removed externally", async () => {
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tokenDb = TokenDatabase.getInstance();
+  const originalNow = Date.now;
+  let now = 10_000;
+  Date.now = () => now;
+
+  const mintA = Keypair.generate().publicKey.toBase58();
+  const mintB = Keypair.generate().publicKey.toBase58();
+
+  await tm.addToken(mintA, "AAA", 6);
+  await tm.addToken(mintB, "BBB", 6);
+
+  try {
+    const initial = tm.getAllApprovedTokensWithMetadata();
+    expect(initial.some((token) => token.token_mint === mintA)).toBe(true);
+    expect(initial.some((token) => token.token_mint === mintB)).toBe(true);
+
+    now += TOKEN_MANAGER_APPROVED_CACHE_TTL_MS / 2;
+    tokenDb.removeKnownToken(mintA);
+
+    const afterRemoval = tm.getAllApprovedTokensWithMetadata();
+    expect(afterRemoval.some((token) => token.token_mint === mintA)).toBe(false);
+    expect(afterRemoval.some((token) => token.token_mint === mintB)).toBe(true);
+  } finally {
     Date.now = originalNow;
   }
 });
