@@ -443,6 +443,26 @@ export const createWalletMenuModule = (
       ttlOverrideMs
     );
 
+    const cacheTtl = Math.max(1, ttlOverrideMs ?? walletRpcCacheTtlMs);
+    const cacheKey = getCacheKey(normalizedId);
+    const wsolBalance =
+      data.wsolBalance ??
+      coercedTokenBalances.find((token) => token.mint === WSOL_MINT)?.balance ??
+      0;
+
+    walletSnapshotCache.set(cacheKey, {
+      expiresAt: Date.now() + cacheTtl,
+      snapshot: {
+        solBalance: nativeBalance,
+        nativeSolBalance: nativeBalance,
+        wsolBalance,
+        tokenBalances: coercedTokenBalances,
+        approvedTokens: data.approvedTokens ?? [],
+      },
+    });
+    pendingWalletFetches.delete(cacheKey);
+    cacheInvalidations.delete(cacheKey);
+
     if (data.approvedTokens) {
       testApprovedTokenOverrides.set(
         normalizedId.toString(),
