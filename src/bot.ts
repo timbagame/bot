@@ -5159,8 +5159,8 @@ const handleSwapCustomAmountInput = async (
     telegramId,
     {
       ...quoteOverrides,
-      inputSelectionTicker: rawFromToken,
-      outputSelectionTicker: rawToToken,
+      inputSelectionTicker: fromTokenRaw,
+      outputSelectionTicker: toTokenRaw,
     }
   );
 };
