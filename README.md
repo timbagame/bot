@@ -45,7 +45,6 @@ src/
 
 ### Wallet Commands
 
-- `/wrap <amount>` - Convert SOL to WSOL
 - `/withdraw <address> <amount>` - Withdraw tokens to external wallet
 - `/tip @username <amount>` - Tip tokens by replying or tagging a user
 
