@@ -622,6 +622,18 @@ const resolveSolLikeConversionDirection = (
   return rawTicker.trim().toUpperCase() === "WSOL" ? "unwrap" : "wrap";
 };
 
+let presentSpendAmountRunner = presentSpendAmount;
+
+export const __test_setPresentSpendAmount = (
+  fn: typeof presentSpendAmount
+): void => {
+  presentSpendAmountRunner = fn;
+};
+
+export const __test_resetPresentSpendAmount = (): void => {
+  presentSpendAmountRunner = presentSpendAmount;
+};
+
 const executeSolLikeSwapConversion = async ({
   ctx,
   telegramId,
@@ -1091,10 +1103,6 @@ const prepareTokenTradeQuote = async ({
 }: PrepareTokenTradeQuoteParams) => {
   const snapshot = await getCachedWalletData(telegramId);
   const nativeSolBalance = snapshot.nativeSolBalance ?? snapshot.solBalance;
-  const combinedSolBalance = combineSolBalances(
-    nativeSolBalance,
-    snapshot.wsolBalance
-  );
   const factoryContext: TradeAssetFactoryContext = { telegramId, ...snapshot };
 
   const [inputAsset, outputAsset] = await Promise.all([
@@ -1133,7 +1141,7 @@ const prepareTokenTradeQuote = async ({
     if (inputIsSolLike) {
       const rentReserveLamports = await getSolWrapRentReserveLamports();
       solFeeBufferLamports = clampSolFeeBufferLamports(
-        combinedSolBalance,
+        nativeSolBalance,
         solFeeBufferLamports + rentReserveLamports
       );
     } else {
@@ -1156,23 +1164,36 @@ const prepareTokenTradeQuote = async ({
 
   const shouldProbeGasless = shouldApplySolFeeBuffer && inputIsSolLike;
 
-  const inputTokenBalance: TokenBalanceLike | undefined = inputIsSolLike
+  const selectedTicker =
+    (inputAsset.metadata as { selectedTicker?: unknown } | undefined)
+      ?.selectedTicker;
+  const normalizedSelectedTicker =
+    typeof selectedTicker === "string"
+      ? selectedTicker.trim().toUpperCase()
+      : null;
+  const prefersWsol =
+    normalizedSelectedTicker === "WSOL" ||
+    (!normalizedSelectedTicker &&
+      (inputAsset.ticker.trim().toUpperCase() === "WSOL" ||
+        inputAsset.mint === WSOL_MINT));
+
+  const tradeAmountTicker = prefersWsol ? "WSOL" : inputAsset.ticker;
+
+  const inputTokenBalance: TokenBalanceLike | undefined = prefersWsol
     ? { balance: snapshot.wsolBalance, decimals: inputAsset.decimals }
     : inputAsset.tokenBalance;
 
-  const solLikeSpendableBalance = inputIsSolLike
-    ? combinedSolBalance
-    : nativeSolBalance;
+  const solSpendableBalance = nativeSolBalance;
 
   let gaslessOverride: ReturnType<typeof presentSpendAmount> | null = null;
   let gaslessInsufficientMessage: string | undefined;
 
   if (shouldProbeGasless) {
-    const probe = presentSpendAmount({
+    const probe = presentSpendAmountRunner({
       amount: amountInput,
-      assetTicker: inputAsset.ticker,
+      assetTicker: tradeAmountTicker,
       decimals: inputAsset.decimals,
-      solBalance: solLikeSpendableBalance,
+      solBalance: solSpendableBalance,
       solFeePayerBalance: nativeSolBalance,
       tokenBalance: inputTokenBalance,
       formatSol: (lamports) => wallet.formatSolBalance(lamports),
@@ -1182,10 +1203,7 @@ const prepareTokenTradeQuote = async ({
       userSolBufferLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
     });
 
-    const prospectiveBalance = Math.max(
-      0,
-      combinedSolBalance - probe.rawAmount
-    );
+    const prospectiveBalance = Math.max(0, nativeSolBalance - probe.rawAmount);
     const wouldLeaveBelowMinimum =
       prospectiveBalance < JUPITER_MIN_SOL_BALANCE_LAMPORTS;
 
@@ -1221,11 +1239,11 @@ const prepareTokenTradeQuote = async ({
 
   const amountResolution =
     gaslessOverride ??
-    presentSpendAmount({
+    presentSpendAmountRunner({
       amount: amountInput,
-      assetTicker: inputAsset.ticker,
+      assetTicker: tradeAmountTicker,
       decimals: inputAsset.decimals,
-      solBalance: solLikeSpendableBalance,
+      solBalance: solSpendableBalance,
       solFeePayerBalance: nativeSolBalance,
       tokenBalance: inputTokenBalance,
       formatSol: (lamports) => wallet.formatSolBalance(lamports),
@@ -1370,6 +1388,11 @@ export const __test_setTokenManager = (manager: TokenManager): void => {
 };
 let swapManager: SwapManager;
 let swapService: SwapService;
+export const __test_setSwapService = (service: SwapService): void => {
+  swapService = service;
+};
+
+export const __test_getSwapService = (): SwapService => swapService;
 let gameCompletedListenerId: number | null = null;
 let playerJoinedListenerId: number | null = null;
 let playerUnjoinedListenerId: number | null = null;
@@ -1420,6 +1443,7 @@ export const __test_validateGameTokenData = validateGameTokenData;
 export const __test_resetInitiatedChats = () => initiatedChats.clear();
 export const __test_getInitiatedChats = () => new Set(initiatedChats);
 export const __test_presentSpendAmount = presentSpendAmount;
+export const __test_prepareTokenTradeQuote = prepareTokenTradeQuote;
 export const __test_buildQuickAmountKeyboard = buildQuickAmountKeyboard;
 export const __test_formatTradeConfirmationSummary =
   formatTradeConfirmationSummary;
