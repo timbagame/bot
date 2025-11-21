@@ -1,0 +1,112 @@
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+
+import * as menuResponse from "../src/utils/menu-response";
+import * as contextHelpers from "../src/utils/context-helpers";
+const botModule = await import("../src/bot");
+
+const TELEGRAM_ID = 424242n;
+
+const createMockCtx = () => ({
+  from: { id: Number(TELEGRAM_ID) },
+  chat: { id: 777 },
+  callbackQuery: {
+    id: "cb-id",
+    message: { message_id: 999, chat: { id: 777 } },
+  },
+  api: {
+    editMessageText: async () => {
+      /* no-op */
+    },
+    editMessageCaption: async () => {
+      /* no-op */
+    },
+    editMessageReplyMarkup: async () => {
+      /* no-op */
+    },
+    answerCallbackQuery: async () => {
+      /* no-op */
+    },
+  },
+});
+
+describe("SOL-like swap conversions", () => {
+  let respondSpy: ReturnType<typeof spyOn>;
+  let answerSpy: ReturnType<typeof spyOn>;
+  let wrapSpy: ReturnType<typeof spyOn>;
+  let unwrapSpy: ReturnType<typeof spyOn>;
+  let balanceSpy: ReturnType<typeof spyOn>;
+  let confirmSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    botModule.__test_resetPrepareTokenTradeQuote();
+    botModule.__test_clearTransactionCache();
+    botModule.__test_clearWalletCache(TELEGRAM_ID);
+
+    respondSpy = spyOn(menuResponse, "respondWithMenu").mockResolvedValue({
+      chatId: null,
+      messageId: null,
+      respondedWithReply: false,
+    });
+    answerSpy = spyOn(contextHelpers, "safeAnswerCallbackQuery").mockResolvedValue();
+    balanceSpy = spyOn(botModule.wallet, "getBalance").mockResolvedValue(
+      10_000_000_000
+    );
+    wrapSpy = spyOn(botModule.wallet, "wrapSol").mockResolvedValue(
+      "wrap-signature"
+    );
+    unwrapSpy = spyOn(botModule.wallet, "unwrapSol").mockResolvedValue({
+      signature: "unwrap-signature",
+      amountLamports: 0,
+    });
+    confirmSpy = spyOn(botModule.wallet, "confirmTransaction").mockResolvedValue();
+  });
+
+  afterEach(() => {
+    botModule.__test_resetPrepareTokenTradeQuote();
+    botModule.__test_clearTransactionCache();
+    botModule.__test_clearWalletCache(TELEGRAM_ID);
+
+    respondSpy.mockRestore();
+    answerSpy.mockRestore();
+    balanceSpy.mockRestore();
+    wrapSpy.mockRestore();
+    unwrapSpy.mockRestore();
+    confirmSpy.mockRestore();
+  });
+
+  test("wraps SOL when swap pair normalizes to WSOL", async () => {
+    const ctx = createMockCtx() as any;
+
+    const handled = await botModule.__test_executeSolLikeSwapConversion({
+      ctx,
+      telegramId: TELEGRAM_ID,
+      amountLamports: 1_000_000_000,
+      direction: "wrap",
+    });
+
+    expect(handled).toBe(true);
+    expect(wrapSpy).toHaveBeenCalledTimes(1);
+    expect(wrapSpy).toHaveBeenCalledWith(TELEGRAM_ID, 1_000_000_000);
+    expect(unwrapSpy).not.toHaveBeenCalled();
+    expect(respondSpy).toHaveBeenCalled();
+    expect(answerSpy).toHaveBeenCalled();
+  });
+
+  test("unwraps WSOL even when SOL balance is sufficient", async () => {
+    const ctx = createMockCtx() as any;
+
+    const handled = await botModule.__test_executeSolLikeSwapConversion({
+      ctx,
+      telegramId: TELEGRAM_ID,
+      amountLamports: 2_500_000_000,
+      direction: "unwrap",
+    });
+
+    expect(handled).toBe(true);
+    expect(unwrapSpy).toHaveBeenCalledTimes(1);
+    expect(unwrapSpy).toHaveBeenCalledWith(TELEGRAM_ID, 2_500_000_000);
+    expect(wrapSpy).not.toHaveBeenCalled();
+    expect(respondSpy).toHaveBeenCalled();
+    expect(answerSpy).toHaveBeenCalled();
+  });
+});

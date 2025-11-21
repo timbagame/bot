@@ -731,6 +731,9 @@ const executeSolLikeSwapConversion = async ({
   return true;
 };
 
+export const __test_executeSolLikeSwapConversion =
+  executeSolLikeSwapConversion;
+
 interface TokenSelectionCacheEntry {
   targetToken: string;
   targetTokenAddress: string;
