@@ -1155,6 +1155,10 @@ const prepareTokenTradeQuote = async ({
     ? { balance: snapshot.wsolBalance, decimals: inputAsset.decimals }
     : inputAsset.tokenBalance;
 
+  const solLikeSpendableBalance = inputIsSolLike
+    ? combinedSolBalance
+    : snapshot.solBalance;
+
   let gaslessOverride: ReturnType<typeof presentSpendAmount> | null = null;
   let gaslessInsufficientMessage: string | undefined;
 
@@ -1163,8 +1167,8 @@ const prepareTokenTradeQuote = async ({
       amount: amountInput,
       assetTicker: inputAsset.ticker,
       decimals: inputAsset.decimals,
-      solBalance: snapshot.solBalance,
-      solFeePayerBalance: snapshot.solBalance,
+      solBalance: solLikeSpendableBalance,
+      solFeePayerBalance: solLikeSpendableBalance,
       tokenBalance: inputTokenBalance,
       formatSol: (lamports) => wallet.formatSolBalance(lamports),
       formatToken: (value, decimals) =>
@@ -1216,8 +1220,8 @@ const prepareTokenTradeQuote = async ({
       amount: amountInput,
       assetTicker: inputAsset.ticker,
       decimals: inputAsset.decimals,
-      solBalance: snapshot.solBalance,
-      solFeePayerBalance: snapshot.solBalance,
+      solBalance: solLikeSpendableBalance,
+      solFeePayerBalance: solLikeSpendableBalance,
       tokenBalance: inputTokenBalance,
       formatSol: (lamports) => wallet.formatSolBalance(lamports),
       formatToken: (value, decimals) =>
