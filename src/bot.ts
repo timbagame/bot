@@ -1151,17 +1151,21 @@ const prepareTokenTradeQuote = async ({
 
   const shouldProbeGasless = shouldApplySolFeeBuffer && inputIsSolLike;
 
+  const inputTokenBalance: TokenBalanceLike | undefined = inputIsSolLike
+    ? { balance: snapshot.wsolBalance, decimals: inputAsset.decimals }
+    : inputAsset.tokenBalance;
+
   let gaslessOverride: ReturnType<typeof presentSpendAmount> | null = null;
   let gaslessInsufficientMessage: string | undefined;
 
   if (shouldProbeGasless) {
     const probe = presentSpendAmount({
       amount: amountInput,
-      assetTicker: inputIsSolLike ? "SOL" : inputAsset.ticker,
+      assetTicker: inputAsset.ticker,
       decimals: inputAsset.decimals,
       solBalance: snapshot.solBalance,
       solFeePayerBalance: snapshot.solBalance,
-      tokenBalance: inputIsSolLike ? undefined : inputAsset.tokenBalance,
+      tokenBalance: inputTokenBalance,
       formatSol: (lamports) => wallet.formatSolBalance(lamports),
       formatToken: (value, decimals) =>
         wallet.formatTokenBalance(value, decimals),
@@ -1210,11 +1214,11 @@ const prepareTokenTradeQuote = async ({
     gaslessOverride ??
     presentSpendAmount({
       amount: amountInput,
-      assetTicker: inputIsSolLike ? "SOL" : inputAsset.ticker,
+      assetTicker: inputAsset.ticker,
       decimals: inputAsset.decimals,
       solBalance: snapshot.solBalance,
       solFeePayerBalance: snapshot.solBalance,
-      tokenBalance: inputIsSolLike ? undefined : inputAsset.tokenBalance,
+      tokenBalance: inputTokenBalance,
       formatSol: (lamports) => wallet.formatSolBalance(lamports),
       formatToken: (value, decimals) =>
         wallet.formatTokenBalance(value, decimals),
