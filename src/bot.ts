@@ -1168,7 +1168,7 @@ const prepareTokenTradeQuote = async ({
       assetTicker: inputAsset.ticker,
       decimals: inputAsset.decimals,
       solBalance: solLikeSpendableBalance,
-      solFeePayerBalance: solLikeSpendableBalance,
+      solFeePayerBalance: snapshot.solBalance,
       tokenBalance: inputTokenBalance,
       formatSol: (lamports) => wallet.formatSolBalance(lamports),
       formatToken: (value, decimals) =>
@@ -1221,7 +1221,7 @@ const prepareTokenTradeQuote = async ({
       assetTicker: inputAsset.ticker,
       decimals: inputAsset.decimals,
       solBalance: solLikeSpendableBalance,
-      solFeePayerBalance: solLikeSpendableBalance,
+      solFeePayerBalance: snapshot.solBalance,
       tokenBalance: inputTokenBalance,
       formatSol: (lamports) => wallet.formatSolBalance(lamports),
       formatToken: (value, decimals) =>
