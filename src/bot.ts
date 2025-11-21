@@ -608,32 +608,16 @@ const executeSolLikeSwapConversion = async ({
   ctx,
   telegramId,
   amountLamports,
-  snapshot,
+  direction,
 }: {
   ctx: Context;
   telegramId: bigint;
   amountLamports: number;
-  snapshot: WalletCacheSnapshot;
+  direction: "wrap" | "unwrap";
 }): Promise<boolean> => {
   const amountDisplay = wallet.formatSolBalance(amountLamports);
 
-  let wrapRentReserveLamports = SOL_WRAP_RENT_RESERVE_LAMPORTS;
-  try {
-    const refreshed = await getSolWrapRentReserveLamports();
-    if (Number.isFinite(refreshed) && refreshed > 0) {
-      wrapRentReserveLamports = refreshed;
-    }
-  } catch (error) {
-    console.warn("Failed to refresh wrap rent reserve for SOL-like swap:", error);
-  }
-
-  const hasSolForWrap =
-    snapshot.solBalance >= amountLamports + Math.max(0, wrapRentReserveLamports);
-  const hasWsolForUnwrap = snapshot.wsolBalance >= amountLamports;
-
-  const shouldWrap = hasSolForWrap || !hasWsolForUnwrap;
-
-  if (shouldWrap) {
+  if (direction === "wrap") {
     const result = await executeWrapFlow(telegramId, amountLamports, {
       onProcessing: async (formattedAmount) => {
         const amountLabel = escapeHtml(formattedAmount ?? amountDisplay);
@@ -1229,7 +1213,7 @@ const prepareTokenTradeQuote = async ({
       ctx,
       telegramId,
       amountLamports: amountResolution.rawAmount,
-      snapshot,
+      direction: inputAsset.ticker === "SOL" ? "wrap" : "unwrap",
     });
 
     if (handled) {
