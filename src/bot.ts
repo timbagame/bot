@@ -568,15 +568,28 @@ type WalletBalanceEntry = {
   decimals: number;
 };
 
+const isSolLikeTicker = (ticker: string): boolean =>
+  ticker.trim().toUpperCase() === "SOL" || ticker.trim().toUpperCase() === "WSOL";
+
+const normalizeSolTicker = (ticker: string): string =>
+  ticker.trim().toUpperCase() === "WSOL" ? "SOL" : ticker.trim().toUpperCase();
+
+const combineSolBalances = (
+  solLamports: number,
+  wsolLamports?: number | null
+): number => solLamports + Math.max(0, wsolLamports ?? 0);
+
 const resolveFormattedBalance = (
   ticker: string,
   solBalance: number,
-  tokenBalances: WalletBalanceEntry[]
+  tokenBalances: WalletBalanceEntry[],
+  wsolBalance?: number
 ): { decimalBalance: number; formattedBalance: string } => {
-  if (ticker === "SOL") {
+  if (isSolLikeTicker(ticker)) {
+    const combinedLamports = combineSolBalances(solBalance, wsolBalance);
     return {
-      decimalBalance: solBalance / LAMPORTS_PER_SOL,
-      formattedBalance: wallet.formatSolBalance(solBalance),
+      decimalBalance: combinedLamports / LAMPORTS_PER_SOL,
+      formattedBalance: wallet.formatSolBalance(combinedLamports),
     };
   }
 
@@ -590,6 +603,149 @@ const resolveFormattedBalance = (
     decimalBalance,
     formattedBalance: wallet.formatTokenBalance(entry.balance, entry.decimals),
   };
+};
+
+const executeSolLikeSwapConversion = async ({
+  ctx,
+  telegramId,
+  amountLamports,
+  snapshot,
+}: {
+  ctx: Context;
+  telegramId: bigint;
+  amountLamports: number;
+  snapshot: WalletCacheSnapshot;
+}): Promise<boolean> => {
+  const amountDisplay = wallet.formatSolBalance(amountLamports);
+
+  let wrapRentReserveLamports = SOL_WRAP_RENT_RESERVE_LAMPORTS;
+  try {
+    const refreshed = await getSolWrapRentReserveLamports();
+    if (Number.isFinite(refreshed) && refreshed > 0) {
+      wrapRentReserveLamports = refreshed;
+    }
+  } catch (error) {
+    console.warn("Failed to refresh wrap rent reserve for SOL-like swap:", error);
+  }
+
+  const hasSolForWrap =
+    snapshot.solBalance >= amountLamports + Math.max(0, wrapRentReserveLamports);
+  const hasWsolForUnwrap = snapshot.wsolBalance >= amountLamports;
+
+  const shouldWrap = hasSolForWrap || !hasWsolForUnwrap;
+
+  if (shouldWrap) {
+    const result = await executeWrapFlow(telegramId, amountLamports, {
+      onProcessing: async (formattedAmount) => {
+        const amountLabel = escapeHtml(formattedAmount ?? amountDisplay);
+        await respondWithMenu(ctx, {
+          text:
+            `🔄 <b>Wrapping SOL</b>\n\n${amountLabel} SOL → WSOL\n\n<i>Please wait...</i>`,
+          parseMode: "HTML",
+          keyboard: createBackToWalletKeyboard(),
+        });
+      },
+      onInsufficientBalance: async (formattedAmount) => {
+        const amountLabel = escapeHtml(formattedAmount ?? amountDisplay);
+        await respondWithMenu(ctx, {
+          text:
+            `❌ <b>Wrap Failed</b>\n\nNot enough SOL to wrap ${amountLabel}.\nKeep at least ${MIN_SOL_FOR_TX} SOL for fees and try again.`,
+          parseMode: "HTML",
+          keyboard: createBackToWalletKeyboard(),
+        });
+      },
+      onSuccess: async ({ signature, formattedAmount }) => {
+        const successView = renderSolConversionSuccess({
+          kind: "wrap",
+          formattedAmount,
+          signature,
+        });
+
+        await respondWithMenu(ctx, {
+          text: successView.text,
+          parseMode: "HTML",
+          keyboard: createBackToWalletKeyboard(),
+          disableLinkPreview: successView.disablePreview,
+        });
+      },
+      onError: async (error, formattedAmount) => {
+        const userFriendlyError = formatUserFriendlyError(error, wallet);
+        const amountLabel = escapeHtml(formattedAmount ?? amountDisplay ?? "0");
+
+        await respondWithMenu(ctx, {
+          text:
+            `❌ <b>Wrap Failed</b>\n\n${amountLabel} SOL not wrapped.\n\n${escapeHtml(userFriendlyError)}`,
+          parseMode: "HTML",
+          keyboard: createBackToWalletKeyboard(),
+        });
+      },
+    });
+
+    if (result.status === "success") {
+      await safeAnswerCallbackQuery(ctx, "✅ SOL wrapped to WSOL");
+    } else if (result.status === "insufficient") {
+      await safeAnswerCallbackQuery(ctx, "❌ Not enough SOL to wrap");
+    } else {
+      await safeAnswerCallbackQuery(ctx, "❌ Wrap failed");
+    }
+
+    return true;
+  }
+
+  const result = await executeUnwrapFlow(telegramId, {
+    expectedAmountLamports: amountLamports,
+    onProcessing: async (formattedAmount) => {
+      const amountLabel = escapeHtml(formattedAmount ?? amountDisplay ?? "0");
+      await respondWithMenu(ctx, {
+        text:
+          `🔄 <b>Unwrapping WSOL</b>\n\n${amountLabel} WSOL → SOL\n\n<i>Please wait...</i>`,
+        parseMode: "HTML",
+        keyboard: createBackToWalletKeyboard(),
+      });
+    },
+    onNoBalance: async () => {
+      await respondWithMenu(ctx, {
+        text:
+          `❌ <b>Unwrap Failed</b>\n\nNo WSOL available to unwrap ${escapeHtml(
+            amountDisplay
+          )}.`,
+        parseMode: "HTML",
+        keyboard: createBackToWalletKeyboard(),
+      });
+    },
+    onSuccess: async ({ signature, formattedAmount }) => {
+      const successView = renderSolConversionSuccess({
+        kind: "unwrap",
+        formattedAmount,
+        signature,
+      });
+
+      await respondWithMenu(ctx, {
+        text: successView.text,
+        parseMode: "HTML",
+        keyboard: createBackToWalletKeyboard(),
+        disableLinkPreview: successView.disablePreview,
+      });
+    },
+    onError: async (error) => {
+      const userFriendlyError = formatUserFriendlyError(error, wallet);
+      await respondWithMenu(ctx, {
+        text: `❌ <b>Unwrap Failed</b>\n\n${escapeHtml(userFriendlyError)}`,
+        parseMode: "HTML",
+        keyboard: createBackToWalletKeyboard(),
+      });
+    },
+  });
+
+  if (result.status === "success") {
+    await safeAnswerCallbackQuery(ctx, "✅ WSOL unwrapped to SOL");
+  } else if (result.status === "empty") {
+    await safeAnswerCallbackQuery(ctx, "ℹ️ No WSOL to unwrap");
+  } else {
+    await safeAnswerCallbackQuery(ctx, "❌ Unwrap failed");
+  }
+
+  return true;
 };
 
 interface TokenSelectionCacheEntry {
@@ -750,9 +906,9 @@ const shouldSkipSolFeeBuffer = (
   amountInput: string,
   referralConfig?: ReferralEntryLite | null
 ): boolean => {
-  if (inputAsset.ticker !== "SOL") return false;
+  if (!isSolLikeTicker(inputAsset.ticker)) return false;
 
-  if (outputTicker !== "SOL") return false;
+  if (!isSolLikeTicker(outputTicker)) return false;
 
   const hasAdminReferralPayer = Boolean(
     referralConfig?.adminPayer && referralConfig?.adminCloseAuthority
@@ -928,6 +1084,10 @@ const prepareTokenTradeQuote = async ({
   quoteErrorMessage,
 }: PrepareTokenTradeQuoteParams) => {
   const snapshot = await getCachedWalletData(telegramId);
+  const combinedSolBalance = combineSolBalances(
+    snapshot.solBalance,
+    snapshot.wsolBalance
+  );
   const factoryContext: TradeAssetFactoryContext = { telegramId, ...snapshot };
 
   const [inputAsset, outputAsset] = await Promise.all([
@@ -935,15 +1095,18 @@ const prepareTokenTradeQuote = async ({
     Promise.resolve(outputFactory(factoryContext)),
   ]);
 
-  const outputIsSol = outputAsset.ticker === "SOL";
+  const inputIsSolLike = inputAsset.mint === WSOL_MINT;
+  const outputIsSolLike = outputAsset.mint === WSOL_MINT;
+
+  const outputIsSol = outputAsset.ticker === "SOL" || outputIsSolLike;
 
   const referralConfig = getReferralConfigForMint(inputAsset.mint);
 
   let shouldApplySolFeeBuffer =
-    inputAsset.applySolFeeBuffer ?? inputAsset.ticker === "SOL";
+    inputAsset.applySolFeeBuffer ?? inputIsSolLike;
 
   // If SOL referral and we know an admin payer will cover gas (either registry says so or user picked MAX which we will force to admin payer), drop the buffer.
-  if (shouldApplySolFeeBuffer && inputAsset.ticker === "SOL") {
+  if (shouldApplySolFeeBuffer && inputIsSolLike) {
     if (
       shouldSkipSolFeeBuffer(
         inputAsset,
@@ -960,10 +1123,10 @@ const prepareTokenTradeQuote = async ({
   if (shouldApplySolFeeBuffer) {
     solFeeBufferLamports = SOL_FEE_BUFFER_LAMPORTS;
 
-    if (inputAsset.ticker === "SOL") {
+    if (inputIsSolLike) {
       const rentReserveLamports = await getSolWrapRentReserveLamports();
       solFeeBufferLamports = clampSolFeeBufferLamports(
-        snapshot.solBalance,
+        combinedSolBalance,
         solFeeBufferLamports + rentReserveLamports
       );
     } else {
@@ -984,29 +1147,28 @@ const prepareTokenTradeQuote = async ({
 
   const userKeypair = wallet.getKeyPair(telegramId);
 
-  const shouldProbeGasless =
-    shouldApplySolFeeBuffer && inputAsset.ticker === "SOL";
+  const shouldProbeGasless = shouldApplySolFeeBuffer && inputIsSolLike;
 
   let gaslessOverride: ReturnType<typeof presentSpendAmount> | null = null;
   let gaslessInsufficientMessage: string | undefined;
 
   if (shouldProbeGasless) {
-      const probe = presentSpendAmount({
-        amount: amountInput,
-        assetTicker: inputAsset.ticker,
-        decimals: inputAsset.decimals,
-        solBalance: snapshot.solBalance,
-        tokenBalance: inputAsset.tokenBalance,
-        formatSol: (lamports) => wallet.formatSolBalance(lamports),
-        formatToken: (value, decimals) =>
-          wallet.formatTokenBalance(value, decimals),
-        applySolFeeBuffer: false,
-        userSolBufferLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
-      });
+    const probe = presentSpendAmount({
+      amount: amountInput,
+      assetTicker: inputIsSolLike ? "SOL" : inputAsset.ticker,
+      decimals: inputAsset.decimals,
+      solBalance: inputIsSolLike ? combinedSolBalance : snapshot.solBalance,
+      tokenBalance: inputIsSolLike ? undefined : inputAsset.tokenBalance,
+      formatSol: (lamports) => wallet.formatSolBalance(lamports),
+      formatToken: (value, decimals) =>
+        wallet.formatTokenBalance(value, decimals),
+      applySolFeeBuffer: false,
+      userSolBufferLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
+    });
 
     const prospectiveBalance = Math.max(
       0,
-      snapshot.solBalance - probe.rawAmount
+      combinedSolBalance - probe.rawAmount
     );
     const wouldLeaveBelowMinimum =
       prospectiveBalance < JUPITER_MIN_SOL_BALANCE_LAMPORTS;
@@ -1041,27 +1203,40 @@ const prepareTokenTradeQuote = async ({
     }
   }
 
-    const amountResolution =
-      gaslessOverride ??
-      presentSpendAmount({
-        amount: amountInput,
-        assetTicker: inputAsset.ticker,
-        decimals: inputAsset.decimals,
-        solBalance: snapshot.solBalance,
-        tokenBalance: inputAsset.tokenBalance,
-        formatSol: (lamports) => wallet.formatSolBalance(lamports),
-        formatToken: (value, decimals) =>
-          wallet.formatTokenBalance(value, decimals),
-        applySolFeeBuffer: shouldApplySolFeeBuffer,
-        ...(solFeeBufferLamports !== undefined ? { solFeeBufferLamports } : {}),
-        userSolBufferLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
-        ...(gaslessInsufficientMessage
-          ? {
-              insufficientSolForFeesMessage: gaslessInsufficientMessage,
+  const amountResolution =
+    gaslessOverride ??
+    presentSpendAmount({
+      amount: amountInput,
+      assetTicker: inputIsSolLike ? "SOL" : inputAsset.ticker,
+      decimals: inputAsset.decimals,
+      solBalance: inputIsSolLike ? combinedSolBalance : snapshot.solBalance,
+      tokenBalance: inputIsSolLike ? undefined : inputAsset.tokenBalance,
+      formatSol: (lamports) => wallet.formatSolBalance(lamports),
+      formatToken: (value, decimals) =>
+        wallet.formatTokenBalance(value, decimals),
+      applySolFeeBuffer: shouldApplySolFeeBuffer,
+      ...(solFeeBufferLamports !== undefined ? { solFeeBufferLamports } : {}),
+      userSolBufferLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
+      ...(gaslessInsufficientMessage
+        ? {
+            insufficientSolForFeesMessage: gaslessInsufficientMessage,
             omitSolFeeBufferHint: true,
           }
         : {}),
     });
+
+  if (inputIsSolLike && outputIsSolLike) {
+    const handled = await executeSolLikeSwapConversion({
+      ctx,
+      telegramId,
+      amountLamports: amountResolution.rawAmount,
+      snapshot,
+    });
+
+    if (handled) {
+      return;
+    }
+  }
 
   let integratorConfig = await resolveIntegratorSwapParams({
     inputMint: inputAsset.mint,
@@ -1070,7 +1245,7 @@ const prepareTokenTradeQuote = async ({
     inputDecimals: inputAsset.decimals,
     inputAmountRaw: amountResolution.rawAmount,
     userPublicKey: userKeypair.publicKey.toBase58(),
-    availableSolLamports: snapshot.solBalance,
+    availableSolLamports: combinedSolBalance,
     solFeeBufferLamports,
   });
 
@@ -3946,6 +4121,20 @@ registerWalletActionMenuHandler({
         },
         emptyLabel: "❌ No tokens available to swap",
       },
+      prepareBalances: ({ solBalance, tokenBalances }) => {
+        const wsolToken = tokenBalances.find(
+          (token) => token.mint === WSOL_MINT || token.ticker === "WSOL"
+        );
+        const filteredTokens = tokenBalances.filter(
+          (token) =>
+            token.mint !== WSOL_MINT && normalizeSolTicker(token.ticker) !== "SOL"
+        );
+
+        return {
+          solBalanceLamports: combineSolBalances(solBalance, wsolToken?.balance),
+          tokenBalances: filteredTokens,
+        };
+      },
     },
   successAck: "💱 Select token to swap from",
   }),
@@ -4359,7 +4548,8 @@ for (const { callback, section, errorAck } of HELP_SECTION_CALLBACKS) {
 registerCallbackPrefixHandler(
   "swap_from_",
   async (ctx, { payload: fromToken }) => {
-    console.log("🔔 Swap FROM token selected:", fromToken);
+    const normalizedFromToken = normalizeSolTicker(fromToken);
+    console.log("🔔 Swap FROM token selected:", normalizedFromToken);
 
     try {
       const telegramId = await resolveTelegramIdOrRespond(
@@ -4376,7 +4566,7 @@ registerCallbackPrefixHandler(
       await getCachedWalletData(telegramId);
 
       const response = [
-        `💱 <b>Swap ${fromToken}</b>`,
+        `💱 <b>Swap ${normalizedFromToken}</b>`,
         "",
         `<b>From:</b> <code>${walletAddressHtml}</code>`,
         "",
@@ -4385,18 +4575,18 @@ registerCallbackPrefixHandler(
 
       const keyboard = new InlineKeyboard();
 
-      if (fromToken !== "SOL") {
-        keyboard.text(`SOL`, `swap_to_${fromToken}_SOL`).row();
+      if (normalizedFromToken !== "SOL") {
+        keyboard.text(`SOL`, `swap_to_${normalizedFromToken}_SOL`).row();
       }
 
-      const popularTokens = ["USDC", "WSOL", "TIMBA"];
+      const popularTokens = ["USDC", "TIMBA"];
       for (const token of popularTokens) {
-        if (token !== fromToken) {
-          keyboard.text(`${token}`, `swap_to_${fromToken}_${token}`).row();
+        if (token !== normalizedFromToken) {
+          keyboard.text(`${token}`, `swap_to_${normalizedFromToken}_${token}`).row();
         }
       }
 
-      keyboard.text("🔍 Other Token", `swap_to_${fromToken}_OTHER`).row();
+      keyboard.text("🔍 Other Token", `swap_to_${normalizedFromToken}_OTHER`).row();
       keyboard.text("← Back to Swap", "cmd_swap").row();
 
       await respondWithMenu(ctx, {
@@ -4423,8 +4613,15 @@ registerCallbackPrefixHandler(
       return;
     }
 
-    const fromToken = parts[0];
-    const toToken = parts.slice(1).join("_");
+    const rawFromToken = parts[0];
+    const rawToToken = parts.slice(1).join("_");
+
+    const fromToken = isSolLikeTicker(rawFromToken)
+      ? normalizeSolTicker(rawFromToken)
+      : rawFromToken;
+    const toToken = isSolLikeTicker(rawToToken)
+      ? normalizeSolTicker(rawToToken)
+      : rawToToken;
 
     if (!fromToken || !toToken) {
       await safeAnswerCallbackQuery(ctx, "❌ Invalid swap pair");
@@ -4456,8 +4653,13 @@ registerCallbackPrefixHandler(
 
       const cachedEntry = transactionCache.get(toToken);
       if (isTokenSelectionCacheEntry(cachedEntry)) {
-        const displayToken =
+        const displayTokenRaw =
           cachedEntry.tokenMetadata?.symbol ?? cachedEntry.targetToken;
+        const displayToken =
+          cachedEntry.targetTokenAddress === WSOL_MINT ||
+          isSolLikeTicker(displayTokenRaw)
+            ? "SOL"
+            : displayTokenRaw;
         await showSwapAmountSelection(ctx, fromToken, displayToken, {
           toTokenIdentifier: toToken,
         });
@@ -4465,7 +4667,9 @@ registerCallbackPrefixHandler(
         return;
       }
 
-      const normalizedTarget = toToken.toUpperCase();
+      const normalizedTarget = isSolLikeTicker(toToken)
+        ? normalizeSolTicker(toToken)
+        : toToken;
       await showSwapAmountSelection(ctx, fromToken, normalizedTarget, {
         toTokenIdentifier: normalizedTarget,
       });
@@ -4488,8 +4692,10 @@ registerCallbackPrefixHandler(
       return;
     }
 
-    const fromToken = parts[0];
-    const toTokenIdentifier = parts[1];
+    const fromToken = normalizeSolTicker(parts[0]);
+    const toTokenIdentifier = isSolLikeTicker(parts[1])
+      ? normalizeSolTicker(parts[1])
+      : parts[1];
     const amount = parts.slice(2).join("_");
 
     if (!fromToken || !toTokenIdentifier || !amount) {
@@ -4504,9 +4710,20 @@ registerCallbackPrefixHandler(
     try {
       const cachedTarget = transactionCache.get(toTokenIdentifier);
       const isCachedSelection = isTokenSelectionCacheEntry(cachedTarget);
-      const displayToToken = isCachedSelection
-        ? cachedTarget.tokenMetadata?.symbol ?? cachedTarget.targetToken
-        : toTokenIdentifier.toUpperCase();
+      const displayToToken = (() => {
+        if (isCachedSelection && cachedTarget) {
+          const displayTokenRaw =
+            cachedTarget.tokenMetadata?.symbol ?? cachedTarget.targetToken;
+          return cachedTarget.targetTokenAddress === WSOL_MINT ||
+            isSolLikeTicker(displayTokenRaw)
+            ? "SOL"
+            : displayTokenRaw;
+        }
+
+        return isSolLikeTicker(toTokenIdentifier)
+          ? "SOL"
+          : toTokenIdentifier;
+      })();
 
       const quoteOverrides: {
         toMint?: string;
@@ -4596,10 +4813,11 @@ const showSwapAmountSelection = async (
   const telegramId = requireTelegramId(ctx, "swap amount selection");
 
   // Get balance for the FROM token
-  const { solBalance, tokenBalances } = await getCachedWalletData(telegramId);
+  const { solBalance, wsolBalance, tokenBalances } =
+    await getCachedWalletData(telegramId);
 
   const { decimalBalance: balanceDecimal, formattedBalance } =
-    resolveFormattedBalance(fromToken, solBalance, tokenBalances);
+    resolveFormattedBalance(fromToken, solBalance, tokenBalances, wsolBalance);
 
   const response = [
     `💱 <b>Swap Amount</b>`,

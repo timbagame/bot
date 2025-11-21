@@ -272,7 +272,8 @@ export const createSolConversionUtilities = ({
 
         return { status: "ok" } as const;
       },
-      perform: async () => wallet.unwrapSol(telegramId),
+      perform: async () =>
+        wallet.unwrapSol(telegramId, handlers.expectedAmountLamports),
       onProcessing: handlers.onProcessing,
       onSuccess: handlers.onSuccess,
       onEmpty: handlers.onNoBalance,
