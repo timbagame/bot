@@ -3,7 +3,11 @@ import { ChatDatabase } from "./chat-database";
 import { TokenDatabase } from "./token-database";
 import { WalletManager } from "./wallet";
 import type { ParseAmountResult, ChatTokenConfig, KnownToken } from "../types";
-import { WSOL_MINT, TOKEN_MANAGER_APPROVED_CACHE_TTL_MS } from "./constants";
+import {
+  TOKENS_LIST,
+  WSOL_MINT,
+  TOKEN_MANAGER_APPROVED_CACHE_TTL_MS,
+} from "./constants";
 import {
   getBuiltinTokenMetadataByMint,
   getBuiltinTokenMetadataByTicker,
@@ -58,7 +62,12 @@ type ResolvedTokenMetadata = {
   isNativeSol?: boolean;
 };
 
+type MetadataFailure = { reason: "invalid_decimals"; mint: string };
+
 const MAX_SUPPORTED_TOKEN_DECIMALS = 18;
+const SUPPORTED_TOKEN_MINTS = new Set(
+  TOKENS_LIST.map((token) => token.mint.trim())
+);
 
 // ================================
 // MULTI-TOKEN MANAGER
@@ -87,9 +96,12 @@ export class TokenManager {
         expiresAt: number;
       }
     | null = null;
+  private approvedTokensCacheVersion: number | null = null;
   private readonly approvedTokensCacheTtlMs =
     TOKEN_MANAGER_APPROVED_CACHE_TTL_MS;
   private readonly maxSupportedDecimals = MAX_SUPPORTED_TOKEN_DECIMALS;
+  private lastMetadataFailure: { reason: "invalid_decimals"; mint: string } | null =
+    null;
 
   private constructor(
     wallet: WalletManager,
@@ -147,6 +159,41 @@ export class TokenManager {
     return integer;
   }
 
+  private isTokenSupportedForGames(
+    tokenMint: string,
+    isSol?: boolean,
+    options?: { chatId?: number }
+  ): boolean {
+    if (isSol) {
+      return true;
+    }
+
+    const normalizedMint = tokenMint?.trim();
+    const normalizedDefaultMint = this.defaultTokenMint.trim();
+    if (!normalizedMint) {
+      return false;
+    }
+
+    const chatDefaultMint = options?.chatId
+      ? this.chatDb.getChatDefaultToken(options.chatId)?.token_mint
+      : null;
+
+    const normalizedChatMint = chatDefaultMint?.trim();
+
+    if (
+      normalizedMint === WSOL_MINT ||
+      normalizedMint === normalizedDefaultMint
+    ) {
+      return true;
+    }
+
+    if (normalizedMint === normalizedChatMint) {
+      return SUPPORTED_TOKEN_MINTS.has(normalizedMint);
+    }
+
+    return SUPPORTED_TOKEN_MINTS.has(normalizedMint);
+  }
+
   private snapshotApprovedTokens(
     tokens: KnownToken[]
   ): Array<{
@@ -167,6 +214,7 @@ export class TokenManager {
 
   private invalidateApprovedTokensCache(): void {
     this.approvedTokensCache = null;
+    this.approvedTokensCacheVersion = null;
   }
 
   private resolveBuiltinMintToken(
@@ -200,11 +248,17 @@ export class TokenManager {
     {
       tickerHint,
       metadataResolvers = [],
+      metadataFailureSink,
     }: {
       tickerHint?: string;
       metadataResolvers?: TokenMetadataResolver[];
+      metadataFailureSink?: { value: MetadataFailure | null };
     } = {}
   ): Promise<ResolvedTokenMetadata | null> {
+    this.lastMetadataFailure = null;
+    if (metadataFailureSink) {
+      metadataFailureSink.value = null;
+    }
     const builtinMetadata = getBuiltinTokenMetadataByMint(mint);
     const normalizedHint = tickerHint?.trim().toUpperCase();
     let resolvedTicker = normalizedHint;
@@ -254,6 +308,11 @@ export class TokenManager {
     ) => {
       const normalized = this.normalizeDecimals(value ?? undefined);
       if (normalized === null) {
+        const failure: MetadataFailure = { reason: "invalid_decimals", mint };
+        this.lastMetadataFailure = failure;
+        if (metadataFailureSink) {
+          metadataFailureSink.value = failure;
+        }
         return;
       }
 
@@ -356,6 +415,11 @@ export class TokenManager {
 
     const sanitizedDecimals = this.normalizeDecimals(decimals);
     if (sanitizedDecimals === null) {
+      const failure: MetadataFailure = { reason: "invalid_decimals", mint };
+      this.lastMetadataFailure = failure;
+      if (metadataFailureSink) {
+        metadataFailureSink.value = failure;
+      }
       return null;
     }
 
@@ -363,6 +427,10 @@ export class TokenManager {
       resolvedTicker = `TOKEN_${mint.toUpperCase()}`;
     }
 
+    this.lastMetadataFailure = null;
+    if (metadataFailureSink) {
+      metadataFailureSink.value = null;
+    }
     return {
       ticker: resolvedTicker,
       decimals: sanitizedDecimals,
@@ -381,6 +449,8 @@ export class TokenManager {
     chatId?: number,
     context: "game" | "tip" = "game"
   ): Promise<ParseAmountResult> {
+    this.lastMetadataFailure = null;
+
     if (!args || args.length <= argIndex) {
       return { success: false, error: "invalid_amount" };
     }
@@ -404,16 +474,30 @@ export class TokenManager {
     let requestedNativeSol = false;
 
     const candidate = tokenArg?.trim();
+    const metadataFailureSink: { value: MetadataFailure | null } = {
+      value: null,
+    };
     if (candidate) {
       const normalizedCandidate = candidate.trim();
       const candidateUpper = normalizedCandidate.toUpperCase();
       const candidateLooksLikeTicker = looksLikeTokenTicker(normalizedCandidate);
-      const isNumericCandidate =
-        normalizedCandidate.length <= 18 &&
-        /^[0-9]+(?:\.[0-9]+)?$/.test(normalizedCandidate);
+      const isNumericCandidate = /^[0-9]+(?:\.[0-9]+)?$/.test(normalizedCandidate);
+      const numericDigitCount = normalizedCandidate.replace(/\D/g, "").length;
+
+      if (isNumericCandidate) {
+        if (numericDigitCount > 18) {
+          return { success: false, error: "invalid_amount" };
+        }
+      }
 
       if (!isNumericCandidate) {
-        const resolvedToken = await this.resolveSwapToken(normalizedCandidate);
+        const resolvedToken = await this.resolveSwapToken(normalizedCandidate, {
+          // Allow metadata discovery for explicit tokens in games, but avoid
+          // persisting them so unsupported mints remain blocked.
+          persistDiscovered: context !== "game",
+          metadataFailureSink,
+        });
+        const hadInvalidDecimals = Boolean(metadataFailureSink.value);
         if (resolvedToken) {
           tokenWasSpecified = true;
           tokenDecimals = resolvedToken.decimals;
@@ -436,6 +520,12 @@ export class TokenManager {
               resolvedTokenTicker = "SOL";
             }
           }
+        } else if (hadInvalidDecimals) {
+          return {
+            success: false,
+            error: "unsupported_token",
+            unknownToken: candidateUpper,
+          };
         } else if (candidateLooksLikeTicker) {
           return {
             success: false,
@@ -458,6 +548,17 @@ export class TokenManager {
         tokenDecimals = knownMint.decimals;
         resolvedTokenTicker = knownMint.token_ticker;
       }
+    }
+
+    if (
+      context === "game" &&
+      !this.isTokenSupportedForGames(resolvedTokenMint, isSol, { chatId })
+    ) {
+      return {
+        success: false,
+        error: "unsupported_token",
+        unknownToken: resolvedTokenTicker ?? resolvedTokenMint,
+      };
     }
 
     let amount: number;
@@ -784,8 +885,13 @@ export class TokenManager {
     token_program_id?: string | null;
   }> {
     const now = Date.now();
+    const tokenCount = this.tokenDb.getTokenCount();
     const cache = this.approvedTokensCache;
-    if (cache && cache.expiresAt > now) {
+    if (
+      cache &&
+      cache.expiresAt > now &&
+      this.approvedTokensCacheVersion === tokenCount
+    ) {
       return cache.value;
     }
 
@@ -795,6 +901,7 @@ export class TokenManager {
       value: snapshot,
       expiresAt: now + this.approvedTokensCacheTtlMs,
     };
+    this.approvedTokensCacheVersion = tokenCount;
     return snapshot;
   }
 
@@ -848,7 +955,12 @@ export class TokenManager {
   }
 
   public async resolveSwapToken(
-    tickerOrMint: string
+    tickerOrMint: string,
+    options: {
+      allowAutoDiscover?: boolean;
+      persistDiscovered?: boolean;
+      metadataFailureSink?: { value: MetadataFailure | null };
+    } = {}
   ): Promise<
     (KnownToken & {
       isNativeSol?: boolean;
@@ -856,6 +968,11 @@ export class TokenManager {
     })
     | null
   > {
+    const allowAutoDiscover = options.allowAutoDiscover ?? true;
+    const persistDiscovered = options.persistDiscovered ?? true;
+    const metadataFailureSink = options.metadataFailureSink;
+    let metadataFailure: MetadataFailure | null = metadataFailureSink?.value ?? null;
+
     const candidate = tickerOrMint.trim();
     if (!candidate) {
       return null;
@@ -916,12 +1033,24 @@ export class TokenManager {
     if (registryMint) {
       const metadata = await this.resolveMetadataForMint(registryMint.mint, {
         tickerHint: registryMint.ticker,
+        metadataFailureSink,
       });
+      metadataFailure =
+        metadataFailureSink?.value ?? this.lastMetadataFailure ?? metadataFailure;
+      if (metadataFailureSink) {
+        metadataFailureSink.value = metadataFailure;
+      }
 
       if (metadata) {
         const ticker = metadata.ticker.toUpperCase();
-        this.tokenDb.addKnownToken(registryMint.mint, ticker, metadata.decimals);
-        this.invalidateApprovedTokensCache();
+        if (persistDiscovered) {
+          this.tokenDb.addKnownToken(
+            registryMint.mint,
+            ticker,
+            metadata.decimals
+          );
+          this.invalidateApprovedTokensCache();
+        }
         return {
           token_mint: registryMint.mint,
           token_ticker: ticker,
@@ -941,14 +1070,31 @@ export class TokenManager {
       return builtinMint;
     }
 
+    if (!allowAutoDiscover) {
+      const failure = metadataFailureSink?.value ?? metadataFailure;
+      this.lastMetadataFailure = failure;
+      if (metadataFailureSink) {
+        metadataFailureSink.value = failure;
+      }
+      return null;
+    }
+
     const discovered = await this.autoDiscoverTokenInfo(normalizedMint);
+    metadataFailure =
+      metadataFailureSink?.value ?? this.lastMetadataFailure ?? metadataFailure;
+    if (metadataFailureSink) {
+      metadataFailureSink.value = metadataFailure;
+    }
     if (!discovered) {
+      this.lastMetadataFailure = metadataFailure;
       return null;
     }
 
     const ticker = discovered.ticker.toUpperCase();
-    this.tokenDb.addKnownToken(normalizedMint, ticker, discovered.decimals);
-    this.invalidateApprovedTokensCache();
+    if (persistDiscovered) {
+      this.tokenDb.addKnownToken(normalizedMint, ticker, discovered.decimals);
+      this.invalidateApprovedTokensCache();
+    }
 
     return {
       token_mint: normalizedMint,
@@ -974,6 +1120,12 @@ export function formatParseAmountError(
       return result.unknownToken
         ? `❌ Unknown token <code>${escapeHtml(result.unknownToken)}</code>`
         : fallbackMessage;
+    case "unsupported_token": {
+      const tokenLabel = result.unknownToken
+        ? `<code>${escapeHtml(result.unknownToken)}</code>`
+        : "This token";
+      return `❌ ${tokenLabel} is not supported yet. Contact an admin if you'd like it added.`;
+    }
     default:
       return fallbackMessage;
   }
