@@ -62,6 +62,7 @@ type PresentSpendAmountParams = {
   assetTicker: string;
   decimals: number;
   solBalance: number;
+  solFeePayerBalance?: number;
   tokenBalance?: TokenBalanceLike;
   formatSol: (lamports: number) => string;
   formatToken: (amount: number, decimals: number) => string;
@@ -324,6 +325,7 @@ export const createWalletTransactionsModule = (
     tokenBalance,
     formatSol,
     formatToken,
+    solFeePayerBalance,
     applySolFeeBuffer = true,
     solFeeBufferLamports = getSolFeeBufferLamports(),
     insufficientSolForFeesMessage,
@@ -337,6 +339,7 @@ export const createWalletTransactionsModule = (
       assetTicker,
       decimals,
       solBalance,
+      solFeePayerBalance,
       tokenBalance,
       applySolFeeBuffer,
       ...(applySolFeeBuffer

@@ -112,6 +112,7 @@ export interface EvaluateTradeAmountParams {
   assetTicker: string;
   decimals: number;
   solBalance: number;
+  solFeePayerBalance?: number;
   tokenBalance?: TradeTokenBalanceSnapshot;
   applySolFeeBuffer?: boolean;
   solFeeBufferLamports?: number;
@@ -136,6 +137,7 @@ export const evaluateTradeAmount = ({
   assetTicker,
   decimals,
   solBalance,
+  solFeePayerBalance,
   tokenBalance,
   applySolFeeBuffer = false,
   solFeeBufferLamports = 0,
@@ -151,6 +153,7 @@ export const evaluateTradeAmount = ({
 }: EvaluateTradeAmountParams): EvaluateTradeAmountResult => {
   const parsed = parseTradeAmountInput(amount);
   const isSolAsset = assetTicker === "SOL";
+  const feePayerBalance = solFeePayerBalance ?? solBalance;
 
   const ensureTokenBalance = (): TradeTokenBalanceSnapshot => {
     if (!tokenBalance || tokenBalance.balance <= 0) {
@@ -169,20 +172,25 @@ export const evaluateTradeAmount = ({
   };
 
   const resolveSolSpendable = (): number => {
+    const bufferHint =
+      applySolFeeBuffer &&
+      solFeeBufferLamports > 0 &&
+      !omitSolFeeBufferHint
+        ? ` (keep ~${
+            formatSol?.(solFeeBufferLamports) ??
+            `${solFeeBufferLamports} lamports`
+          } for fees)`
+        : "";
+
+    if (applySolFeeBuffer && feePayerBalance < solFeeBufferLamports) {
+      throw new Error(`${insufficientSolForFeesMessage}${bufferHint}`);
+    }
+
     const spendable = applySolFeeBuffer
       ? Math.max(0, solBalance - solFeeBufferLamports)
       : solBalance;
 
     if (spendable <= 0) {
-      const bufferHint =
-        applySolFeeBuffer &&
-        solFeeBufferLamports > 0 &&
-        !omitSolFeeBufferHint
-          ? ` (keep ~${
-              formatSol?.(solFeeBufferLamports) ??
-              `${solFeeBufferLamports} lamports`
-            } for fees)`
-          : "";
       throw new Error(`${insufficientSolForFeesMessage}${bufferHint}`);
     }
 
@@ -289,7 +297,30 @@ export const evaluateTradeAmount = ({
 
   if (isSolAsset) {
     const feeBuffer = applySolFeeBuffer ? solFeeBufferLamports : 0;
-    if (rawAmount + feeBuffer > solBalance) {
+    const bufferHint =
+      applySolFeeBuffer &&
+      solFeeBufferLamports > 0 &&
+      !omitSolFeeBufferHint
+        ? ` (keep ~${
+            formatSol?.(solFeeBufferLamports) ??
+            `${solFeeBufferLamports} lamports`
+          } for fees)`
+        : "";
+
+    if (applySolFeeBuffer && feePayerBalance < solFeeBufferLamports) {
+      throw new Error(`${insufficientSolForFeesMessage}${bufferHint}`);
+    }
+
+    if (rawAmount > solBalance) {
+      throw new Error(insufficientSolBalanceMessage);
+    }
+
+    const requiresNativeFeeHeadroom = solBalance <= feePayerBalance;
+    if (
+      requiresNativeFeeHeadroom &&
+      feeBuffer > 0 &&
+      rawAmount + feeBuffer > feePayerBalance
+    ) {
       throw new Error(insufficientSolBalanceMessage);
     }
 
