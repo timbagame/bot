@@ -607,6 +607,10 @@ const resolveFormattedBalance = (
 const resolveSolLikeConversionDirection = (
   inputAsset: ResolvedTradeAsset
 ): "wrap" | "unwrap" => {
+  if ((inputAsset.mint as string | undefined) === WSOL_MINT) {
+    return "unwrap";
+  }
+
   const selectedTicker =
     (inputAsset.metadata as { selectedTicker?: unknown } | undefined)
       ?.selectedTicker;
@@ -1086,8 +1090,9 @@ const prepareTokenTradeQuote = async ({
   quoteErrorMessage,
 }: PrepareTokenTradeQuoteParams) => {
   const snapshot = await getCachedWalletData(telegramId);
+  const nativeSolBalance = snapshot.nativeSolBalance ?? snapshot.solBalance;
   const combinedSolBalance = combineSolBalances(
-    snapshot.solBalance,
+    nativeSolBalance,
     snapshot.wsolBalance
   );
   const factoryContext: TradeAssetFactoryContext = { telegramId, ...snapshot };
@@ -1157,7 +1162,7 @@ const prepareTokenTradeQuote = async ({
 
   const solLikeSpendableBalance = inputIsSolLike
     ? combinedSolBalance
-    : snapshot.solBalance;
+    : nativeSolBalance;
 
   let gaslessOverride: ReturnType<typeof presentSpendAmount> | null = null;
   let gaslessInsufficientMessage: string | undefined;
@@ -1168,7 +1173,7 @@ const prepareTokenTradeQuote = async ({
       assetTicker: inputAsset.ticker,
       decimals: inputAsset.decimals,
       solBalance: solLikeSpendableBalance,
-      solFeePayerBalance: snapshot.solBalance,
+      solFeePayerBalance: nativeSolBalance,
       tokenBalance: inputTokenBalance,
       formatSol: (lamports) => wallet.formatSolBalance(lamports),
       formatToken: (value, decimals) =>
@@ -1221,7 +1226,7 @@ const prepareTokenTradeQuote = async ({
       assetTicker: inputAsset.ticker,
       decimals: inputAsset.decimals,
       solBalance: solLikeSpendableBalance,
-      solFeePayerBalance: snapshot.solBalance,
+      solFeePayerBalance: nativeSolBalance,
       tokenBalance: inputTokenBalance,
       formatSol: (lamports) => wallet.formatSolBalance(lamports),
       formatToken: (value, decimals) =>
@@ -1258,7 +1263,7 @@ const prepareTokenTradeQuote = async ({
     inputDecimals: inputAsset.decimals,
     inputAmountRaw: amountResolution.rawAmount,
     userPublicKey: userKeypair.publicKey.toBase58(),
-    availableSolLamports: snapshot.solBalance,
+    availableSolLamports: nativeSolBalance,
     solFeeBufferLamports,
   });
 

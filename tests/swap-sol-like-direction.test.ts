@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 
 import * as menuResponse from "../src/utils/menu-response";
 import * as contextHelpers from "../src/utils/context-helpers";
+import { WSOL_MINT } from "../src/utils/token-registry";
 const botModule = await import("../src/bot");
 
 const TELEGRAM_ID = 424242n;
@@ -116,6 +117,17 @@ describe("SOL-like swap conversions", () => {
       mint: "wsol-mint",
       decimals: 9,
       metadata: { selectedTicker: "WSOL" },
+    } as any);
+
+    expect(direction).toBe("unwrap");
+  });
+
+  test("unwraps when mint is WSOL even without metadata hint", () => {
+    const direction = botModule.__test_resolveSolLikeConversionDirection({
+      ticker: "SOL",
+      mint: WSOL_MINT,
+      decimals: 9,
+      metadata: {},
     } as any);
 
     expect(direction).toBe("unwrap");
