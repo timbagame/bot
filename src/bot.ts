@@ -604,6 +604,20 @@ const resolveFormattedBalance = (
   };
 };
 
+const resolveSolLikeConversionDirection = (
+  inputAsset: ResolvedTradeAsset
+): "wrap" | "unwrap" => {
+  const selectedTicker =
+    (inputAsset.metadata as { selectedTicker?: unknown } | undefined)
+      ?.selectedTicker;
+  const rawTicker =
+    typeof selectedTicker === "string" && selectedTicker.trim().length > 0
+      ? selectedTicker
+      : inputAsset.ticker;
+
+  return rawTicker.trim().toUpperCase() === "WSOL" ? "unwrap" : "wrap";
+};
+
 const executeSolLikeSwapConversion = async ({
   ctx,
   telegramId,
@@ -733,6 +747,8 @@ const executeSolLikeSwapConversion = async ({
 
 export const __test_executeSolLikeSwapConversion =
   executeSolLikeSwapConversion;
+export const __test_resolveSolLikeConversionDirection =
+  resolveSolLikeConversionDirection;
 
 interface TokenSelectionCacheEntry {
   targetToken: string;
@@ -1214,11 +1230,12 @@ const prepareTokenTradeQuote = async ({
     });
 
   if (inputIsSolLike && outputIsSolLike) {
+    const conversionDirection = resolveSolLikeConversionDirection(inputAsset);
     const handled = await executeSolLikeSwapConversion({
       ctx,
       telegramId,
       amountLamports: amountResolution.rawAmount,
-      direction: inputAsset.ticker === "SOL" ? "wrap" : "unwrap",
+      direction: conversionDirection,
     });
 
     if (handled) {
@@ -1233,7 +1250,7 @@ const prepareTokenTradeQuote = async ({
     inputDecimals: inputAsset.decimals,
     inputAmountRaw: amountResolution.rawAmount,
     userPublicKey: userKeypair.publicKey.toBase58(),
-    availableSolLamports: combinedSolBalance,
+    availableSolLamports: snapshot.solBalance,
     solFeeBufferLamports,
   });
 
@@ -4564,6 +4581,8 @@ registerCallbackPrefixHandler(
       const quoteOverrides: {
         toMint?: string;
         toDecimals?: number;
+        inputSelectionTicker?: string;
+        outputSelectionTicker?: string;
       } = {};
 
       if (isCachedSelection && cachedTarget) {
@@ -4602,6 +4621,8 @@ registerCallbackPrefixHandler(
             toTokenDisplay: displayToToken,
             toMintOverride: quoteOverrides.toMint,
             toDecimalsOverride: quoteOverrides.toDecimals,
+            fromTokenRaw: rawFromToken,
+            toTokenRaw: rawToToken,
           },
         });
 
@@ -4626,6 +4647,8 @@ registerCallbackPrefixHandler(
         {
           toMint: quoteOverrides.toMint,
           toDecimals: quoteOverrides.toDecimals,
+          inputSelectionTicker: rawFromToken,
+          outputSelectionTicker: rawToToken,
         }
       );
       await safeAnswerCallbackQuery(ctx, "Getting swap quote...");
@@ -4694,6 +4717,8 @@ const showSwapQuoteAndConfirmation = async (
     fromDecimals?: number;
     toMint?: string;
     toDecimals?: number;
+    inputSelectionTicker?: string;
+    outputSelectionTicker?: string;
   } = {}
 ) => {
   const userId = telegramId || getTelegramId(ctx);
@@ -4731,6 +4756,7 @@ const showSwapQuoteAndConfirmation = async (
             ? { balance: balanceEntry.balance, decimals: balanceEntry.decimals }
             : undefined,
           applySolFeeBuffer: fromToken === "SOL",
+          metadata: { selectedTicker: overrides.inputSelectionTicker ?? fromToken },
         };
       },
       outputFactory: async () => {
@@ -4750,6 +4776,7 @@ const showSwapQuoteAndConfirmation = async (
           ticker: toToken,
           mint: outputMint,
           decimals,
+          metadata: { selectedTicker: overrides.outputSelectionTicker ?? toToken },
         };
       },
       spinnerText: ({ displayAmount }) =>
@@ -5027,8 +5054,16 @@ const handleSwapCustomAmountInput = async (
 ) => {
   const fromToken =
     typeof userState.fromToken === "string" ? userState.fromToken : undefined;
+  const fromTokenRaw =
+    typeof userState.fromTokenRaw === "string"
+      ? userState.fromTokenRaw
+      : fromToken;
   const toTokenIdentifier =
     typeof userState.toToken === "string" ? userState.toToken : undefined;
+  const toTokenRaw =
+    typeof userState.toTokenRaw === "string"
+      ? userState.toTokenRaw
+      : toTokenIdentifier;
 
   if (!fromToken || !toTokenIdentifier) {
     await respondWithMenu(ctx, {
@@ -5050,6 +5085,8 @@ const handleSwapCustomAmountInput = async (
   const quoteOverrides: {
     toMint?: string;
     toDecimals?: number;
+    inputSelectionTicker?: string;
+    outputSelectionTicker?: string;
   } = {};
 
   if (
@@ -5062,6 +5099,9 @@ const handleSwapCustomAmountInput = async (
   if (typeof userState.toDecimalsOverride === "number") {
     quoteOverrides.toDecimals = userState.toDecimalsOverride;
   }
+
+  quoteOverrides.inputSelectionTicker = fromTokenRaw;
+  quoteOverrides.outputSelectionTicker = toTokenRaw;
 
   let displayToToken =
     typeof userState.toTokenDisplay === "string" &&
@@ -5117,7 +5157,11 @@ const handleSwapCustomAmountInput = async (
     displayToToken,
     normalizedAmount,
     telegramId,
-    quoteOverrides
+    {
+      ...quoteOverrides,
+      inputSelectionTicker: rawFromToken,
+      outputSelectionTicker: rawToToken,
+    }
   );
 };
 

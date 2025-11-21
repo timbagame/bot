@@ -109,4 +109,26 @@ describe("SOL-like swap conversions", () => {
     expect(respondSpy).toHaveBeenCalled();
     expect(answerSpy).toHaveBeenCalled();
   });
+
+  test("unwraps when original selection was WSOL even if ticker is normalized", () => {
+    const direction = botModule.__test_resolveSolLikeConversionDirection({
+      ticker: "SOL",
+      mint: "wsol-mint",
+      decimals: 9,
+      metadata: { selectedTicker: "WSOL" },
+    } as any);
+
+    expect(direction).toBe("unwrap");
+  });
+
+  test("wraps when selection was SOL", () => {
+    const direction = botModule.__test_resolveSolLikeConversionDirection({
+      ticker: "SOL",
+      mint: "wsol-mint",
+      decimals: 9,
+      metadata: { selectedTicker: "SOL" },
+    } as any);
+
+    expect(direction).toBe("wrap");
+  });
 });
