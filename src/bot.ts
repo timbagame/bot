@@ -607,19 +607,37 @@ const resolveFormattedBalance = (
 const resolveSolLikeConversionDirection = (
   inputAsset: ResolvedTradeAsset
 ): "wrap" | "unwrap" => {
-  if ((inputAsset.mint as string | undefined) === WSOL_MINT) {
-    return "unwrap";
-  }
-
   const selectedTicker =
     (inputAsset.metadata as { selectedTicker?: unknown } | undefined)
       ?.selectedTicker;
-  const rawTicker =
+  const normalizedSelected =
     typeof selectedTicker === "string" && selectedTicker.trim().length > 0
-      ? selectedTicker
-      : inputAsset.ticker;
+      ? selectedTicker.trim().toUpperCase()
+      : null;
 
-  return rawTicker.trim().toUpperCase() === "WSOL" ? "unwrap" : "wrap";
+  if (normalizedSelected === "SOL") {
+    return "wrap";
+  }
+
+  if (normalizedSelected === "WSOL") {
+    return "unwrap";
+  }
+
+  const normalizedTicker = inputAsset.ticker.trim().toUpperCase();
+
+  if (normalizedTicker === "WSOL") {
+    return "unwrap";
+  }
+
+  if (normalizedTicker === "SOL") {
+    return (inputAsset.mint as string | undefined) === WSOL_MINT
+      ? "unwrap"
+      : "wrap";
+  }
+
+  return (inputAsset.mint as string | undefined) === WSOL_MINT
+    ? "unwrap"
+    : "wrap";
 };
 
 let presentSpendAmountRunner = presentSpendAmount;
