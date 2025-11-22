@@ -4455,8 +4455,10 @@ for (const { callback, section, errorAck } of HELP_SECTION_CALLBACKS) {
 registerCallbackPrefixHandler(
   "swap_from_",
   async (ctx, { payload: fromToken }) => {
-    const normalizedFromToken = normalizeSolTicker(fromToken);
-    console.log("🔔 Swap FROM token selected:", normalizedFromToken);
+    const displayFromToken = normalizeSolTicker(fromToken);
+    const callbackFromToken = fromToken.trim().toUpperCase();
+
+    console.log("🔔 Swap FROM token selected:", displayFromToken);
 
     try {
       const telegramId = await resolveTelegramIdOrRespond(
@@ -4473,7 +4475,7 @@ registerCallbackPrefixHandler(
       await getCachedWalletData(telegramId);
 
       const response = [
-        `💱 <b>Swap ${normalizedFromToken}</b>`,
+        `💱 <b>Swap ${displayFromToken}</b>`,
         "",
         `<b>From:</b> <code>${walletAddressHtml}</code>`,
         "",
@@ -4482,18 +4484,18 @@ registerCallbackPrefixHandler(
 
       const keyboard = new InlineKeyboard();
 
-      if (normalizedFromToken !== "SOL") {
-        keyboard.text(`SOL`, `swap_to_${normalizedFromToken}_SOL`).row();
+      if (displayFromToken !== "SOL") {
+        keyboard.text(`SOL`, `swap_to_${callbackFromToken}_SOL`).row();
       }
 
       const popularTokens = ["USDC", "TIMBA"];
       for (const token of popularTokens) {
-        if (token !== normalizedFromToken) {
-          keyboard.text(`${token}`, `swap_to_${normalizedFromToken}_${token}`).row();
+        if (token !== callbackFromToken) {
+          keyboard.text(`${token}`, `swap_to_${callbackFromToken}_${token}`).row();
         }
       }
 
-      keyboard.text("🔍 Other Token", `swap_to_${normalizedFromToken}_OTHER`).row();
+      keyboard.text("🔍 Other Token", `swap_to_${callbackFromToken}_OTHER`).row();
       keyboard.text("← Back to Swap", "cmd_swap").row();
 
       await respondWithMenu(ctx, {
@@ -4523,12 +4525,8 @@ registerCallbackPrefixHandler(
     const rawFromToken = parts[0]!;
     const rawToToken = parts.slice(1).join("_");
 
-    const fromToken = isSolLikeTicker(rawFromToken)
-      ? normalizeSolTicker(rawFromToken)
-      : rawFromToken;
-    const toToken = isSolLikeTicker(rawToToken)
-      ? normalizeSolTicker(rawToToken)
-      : rawToToken;
+    const fromToken = rawFromToken.trim().toUpperCase();
+    const toToken = rawToToken.trim().toUpperCase();
 
     if (!fromToken || !toToken) {
       await safeAnswerCallbackQuery(ctx, "❌ Invalid swap pair");
@@ -4600,10 +4598,10 @@ registerCallbackPrefixHandler(
     }
 
     const [rawFromToken, rawToToken, ...amountParts] = parts;
-    const fromToken = normalizeSolTicker(rawFromToken!);
+    const fromToken = rawFromToken!.trim().toUpperCase();
     const toTokenIdentifier = isSolLikeTicker(rawToToken!)
       ? normalizeSolTicker(rawToToken!)
-      : rawToToken!;
+      : rawToToken!.trim().toUpperCase();
     const amount = amountParts.join("_");
 
     if (!fromToken || !toTokenIdentifier || !amount) {
