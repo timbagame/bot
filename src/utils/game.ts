@@ -8,7 +8,7 @@ import {
 import {
   getAssociatedTokenAddress,
   ASSOCIATED_TOKEN_PROGRAM_ID,
-  createAssociatedTokenAccountInstruction,
+  createAssociatedTokenAccountIdempotentInstruction,
 } from "@solana/spl-token";
 import { Context } from "grammy";
 import * as anchor from "@coral-xyz/anchor";
@@ -830,7 +830,7 @@ export class GameManager {
       );
       if (!accountInfo) {
         setupInstructions.push(
-          createAssociatedTokenAccountInstruction(
+          createAssociatedTokenAccountIdempotentInstruction(
             player,
             playerTokenAccount,
             player,
@@ -846,7 +846,7 @@ export class GameManager {
         error
       );
       setupInstructions.push(
-        createAssociatedTokenAccountInstruction(
+        createAssociatedTokenAccountIdempotentInstruction(
           player,
           playerTokenAccount,
           player,
