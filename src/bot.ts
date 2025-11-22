@@ -573,22 +573,26 @@ const isSolLikeTicker = (ticker: string): boolean =>
 const normalizeSolTicker = (ticker: string): string =>
   ticker.trim().toUpperCase() === "WSOL" ? "SOL" : ticker.trim().toUpperCase();
 
-const combineSolBalances = (
-  solLamports: number,
-  wsolLamports?: number | null
-): number => solLamports + Math.max(0, wsolLamports ?? 0);
-
 const resolveFormattedBalance = (
   ticker: string,
   solBalance: number,
   tokenBalances: WalletBalanceEntry[],
   wsolBalance?: number
 ): { decimalBalance: number; formattedBalance: string } => {
-  if (isSolLikeTicker(ticker)) {
-    const combinedLamports = combineSolBalances(solBalance, wsolBalance);
+  const normalizedTicker = ticker.trim().toUpperCase();
+
+  if (normalizedTicker === "SOL") {
     return {
-      decimalBalance: combinedLamports / LAMPORTS_PER_SOL,
-      formattedBalance: wallet.formatSolBalance(combinedLamports),
+      decimalBalance: solBalance / LAMPORTS_PER_SOL,
+      formattedBalance: wallet.formatSolBalance(solBalance),
+    };
+  }
+
+  if (normalizedTicker === "WSOL") {
+    const lamports = Math.max(0, wsolBalance ?? 0);
+    return {
+      decimalBalance: lamports / LAMPORTS_PER_SOL,
+      formattedBalance: wallet.formatSolBalance(lamports),
     };
   }
 
@@ -611,21 +615,53 @@ const resolveSolLikeConversionDirection = (
   const selectedTicker =
     (inputAsset.metadata as { selectedTicker?: unknown } | undefined)
       ?.selectedTicker;
-  const normalizedSelected =
+  const selectedOutputTicker =
+    (outputAsset?.metadata as { selectedTicker?: unknown } | undefined)
+      ?.selectedTicker;
+
+  const normalizedInputSelection =
     typeof selectedTicker === "string" && selectedTicker.trim().length > 0
       ? selectedTicker.trim().toUpperCase()
       : null;
-
-  if (normalizedSelected === "SOL") {
-    return "wrap";
-  }
-
-  if (normalizedSelected === "WSOL") {
-    return "unwrap";
-  }
+  const normalizedOutputSelection =
+    typeof selectedOutputTicker === "string" &&
+    selectedOutputTicker.trim().length > 0
+      ? selectedOutputTicker.trim().toUpperCase()
+      : null;
 
   const normalizedTicker = inputAsset.ticker.trim().toUpperCase();
   const normalizedOutputTicker = outputAsset?.ticker?.trim().toUpperCase();
+
+  if (normalizedInputSelection === "SOL") {
+    return "wrap";
+  }
+
+  if (normalizedInputSelection === "WSOL") {
+    return "unwrap";
+  }
+
+  if (normalizedOutputSelection === "WSOL") {
+    return "wrap";
+  }
+
+  if (normalizedOutputSelection === "SOL") {
+    return "unwrap";
+  }
+
+  if (normalizedTicker === "WSOL") {
+    return "unwrap";
+  }
+
+  if (
+    normalizedTicker === "SOL" &&
+    (inputAsset.mint as string | undefined) === WSOL_MINT
+  ) {
+    return "unwrap";
+  }
+
+  if ((outputAsset?.mint as string | undefined) === WSOL_MINT) {
+    return "wrap";
+  }
 
   if (normalizedOutputTicker === "WSOL") {
     return "wrap";
@@ -635,19 +671,7 @@ const resolveSolLikeConversionDirection = (
     return "unwrap";
   }
 
-  if (normalizedTicker === "WSOL") {
-    return "unwrap";
-  }
-
-  if (normalizedTicker === "SOL") {
-    return (inputAsset.mint as string | undefined) === WSOL_MINT
-      ? "unwrap"
-      : "wrap";
-  }
-
-  return (inputAsset.mint as string | undefined) === WSOL_MINT
-    ? "unwrap"
-    : "wrap";
+  return "wrap";
 };
 
 let presentSpendAmountRunner = presentSpendAmount;
@@ -1138,10 +1162,10 @@ const prepareTokenTradeQuote = async ({
     Promise.resolve(outputFactory(factoryContext)),
   ]);
 
-    const inputIsSolLike =
-      isSolLikeTicker(inputAsset.ticker) || inputAsset.mint === WSOL_MINT;
-    const outputIsSolLike =
-      isSolLikeTicker(outputAsset.ticker) || outputAsset.mint === WSOL_MINT;
+  const inputIsSolLike =
+    isSolLikeTicker(inputAsset.ticker) || inputAsset.mint === WSOL_MINT;
+  const outputIsSolLike =
+    isSolLikeTicker(outputAsset.ticker) || outputAsset.mint === WSOL_MINT;
 
   const outputIsSol = outputAsset.ticker === "SOL" || outputIsSolLike;
 
@@ -1207,23 +1231,13 @@ const prepareTokenTradeQuote = async ({
       (inputAsset.ticker.trim().toUpperCase() === "WSOL" ||
         inputAsset.mint === WSOL_MINT));
 
-    const solLikeConversionDirection =
-      inputIsSolLike && outputIsSolLike
-        ? resolveSolLikeConversionDirection(inputAsset, outputAsset)
-        : null;
-
   const tradeAmountTicker = prefersWsol ? "WSOL" : inputAsset.ticker;
 
   const inputTokenBalance: TokenBalanceLike | undefined = prefersWsol
     ? { balance: snapshot.wsolBalance, decimals: inputAsset.decimals }
     : inputAsset.tokenBalance;
 
-  const solSpendableBalance =
-    solLikeConversionDirection === "wrap"
-      ? nativeSolBalance
-      : normalizeSolTicker(tradeAmountTicker) === "SOL"
-        ? combineSolBalances(nativeSolBalance, snapshot.wsolBalance)
-        : nativeSolBalance;
+  const solSpendableBalance = nativeSolBalance;
 
   let gaslessOverride: ReturnType<typeof presentSpendAmount> | null = null;
   let gaslessInsufficientMessage: string | undefined;
@@ -1300,11 +1314,11 @@ const prepareTokenTradeQuote = async ({
         : {}),
     });
 
-    if (inputIsSolLike && outputIsSolLike) {
-      const conversionDirection = resolveSolLikeConversionDirection(
-        inputAsset,
-        outputAsset
-      );
+  if (inputIsSolLike && outputIsSolLike) {
+    const conversionDirection = resolveSolLikeConversionDirection(
+      inputAsset,
+      outputAsset
+    );
     const handled = await executeSolLikeSwapConversion({
       ctx,
       telegramId,
@@ -4057,20 +4071,10 @@ registerWalletActionMenuHandler({
         },
         emptyLabel: "❌ No tokens available to swap",
       },
-      prepareBalances: ({ solBalance, tokenBalances }) => {
-        const wsolToken = tokenBalances.find(
-          (token) => token.mint === WSOL_MINT || token.ticker === "WSOL"
-        );
-        const filteredTokens = tokenBalances.filter(
-          (token) =>
-            token.mint !== WSOL_MINT && normalizeSolTicker(token.ticker) !== "SOL"
-        );
-
-        return {
-          solBalanceLamports: combineSolBalances(solBalance, wsolToken?.balance),
-          tokenBalances: filteredTokens,
-        };
-      },
+      prepareBalances: ({ solBalance, tokenBalances }) => ({
+        solBalanceLamports: solBalance,
+        tokenBalances,
+      }),
     },
   successAck: "💱 Select token to swap from",
   }),
