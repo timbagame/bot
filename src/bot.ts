@@ -605,7 +605,8 @@ const resolveFormattedBalance = (
 };
 
 const resolveSolLikeConversionDirection = (
-  inputAsset: ResolvedTradeAsset
+  inputAsset: ResolvedTradeAsset,
+  outputAsset?: ResolvedTradeAsset
 ): "wrap" | "unwrap" => {
   const selectedTicker =
     (inputAsset.metadata as { selectedTicker?: unknown } | undefined)
@@ -624,6 +625,15 @@ const resolveSolLikeConversionDirection = (
   }
 
   const normalizedTicker = inputAsset.ticker.trim().toUpperCase();
+  const normalizedOutputTicker = outputAsset?.ticker?.trim().toUpperCase();
+
+  if (normalizedOutputTicker === "WSOL") {
+    return "wrap";
+  }
+
+  if (normalizedOutputTicker === "SOL") {
+    return "unwrap";
+  }
 
   if (normalizedTicker === "WSOL") {
     return "unwrap";
@@ -1128,8 +1138,10 @@ const prepareTokenTradeQuote = async ({
     Promise.resolve(outputFactory(factoryContext)),
   ]);
 
-  const inputIsSolLike = inputAsset.mint === WSOL_MINT;
-  const outputIsSolLike = outputAsset.mint === WSOL_MINT;
+    const inputIsSolLike =
+      isSolLikeTicker(inputAsset.ticker) || inputAsset.mint === WSOL_MINT;
+    const outputIsSolLike =
+      isSolLikeTicker(outputAsset.ticker) || outputAsset.mint === WSOL_MINT;
 
   const outputIsSol = outputAsset.ticker === "SOL" || outputIsSolLike;
 
@@ -1195,10 +1207,10 @@ const prepareTokenTradeQuote = async ({
       (inputAsset.ticker.trim().toUpperCase() === "WSOL" ||
         inputAsset.mint === WSOL_MINT));
 
-  const solLikeConversionDirection =
-    inputIsSolLike && outputIsSolLike
-      ? resolveSolLikeConversionDirection(inputAsset)
-      : null;
+    const solLikeConversionDirection =
+      inputIsSolLike && outputIsSolLike
+        ? resolveSolLikeConversionDirection(inputAsset, outputAsset)
+        : null;
 
   const tradeAmountTicker = prefersWsol ? "WSOL" : inputAsset.ticker;
 
@@ -1288,8 +1300,11 @@ const prepareTokenTradeQuote = async ({
         : {}),
     });
 
-  if (inputIsSolLike && outputIsSolLike) {
-    const conversionDirection = resolveSolLikeConversionDirection(inputAsset);
+    if (inputIsSolLike && outputIsSolLike) {
+      const conversionDirection = resolveSolLikeConversionDirection(
+        inputAsset,
+        outputAsset
+      );
     const handled = await executeSolLikeSwapConversion({
       ctx,
       telegramId,

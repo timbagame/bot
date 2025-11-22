@@ -98,7 +98,58 @@ describe("SOL-like swap amount resolution", () => {
       expect(call.solBalance).toBe(1_200_000_000);
       expect(call.solFeePayerBalance).toBe(200_000_000);
     }
+  });
 
+  test("limits wrap spendable balance to native SOL when WSOL exists", async () => {
+    const presentCalls: any[] = [];
+
+    botModule.__test_setPresentSpendAmount((params: any) => {
+      presentCalls.push(params);
+      throw new Error("present-stop");
+    });
+
+    botModule.__test_setWalletCache(TELEGRAM_ID, {
+      solBalance: 1_100_000_000,
+      nativeSolBalance: 100_000_000,
+      wsolBalance: 1_000_000_000,
+      tokenBalances: [
+        { ticker: "WSOL", balance: 1_000_000_000, decimals: 9, mint: WSOL_MINT },
+      ],
+    });
+
+    await expect(
+      botModule.__test_prepareTokenTradeQuote({
+        ctx,
+        telegramId: TELEGRAM_ID,
+        amountInput: "max",
+        inputFactory: () => ({
+          ticker: "SOL",
+          mint: "So11111111111111111111111111111111111111112",
+          decimals: 9,
+          applySolFeeBuffer: true,
+        }),
+        outputFactory: () => ({
+          ticker: "WSOL",
+          mint: WSOL_MINT,
+          decimals: 9,
+        }),
+        spinnerText: () => "spinner",
+        cacheQuote: () => {
+          /* noop */
+        },
+        buildConfirmationKeyboard: () => new InlineKeyboard(),
+        onError: () => {
+          throw new Error("unexpected error");
+        },
+      } as any)
+    ).rejects.toThrow("present-stop");
+
+    expect(presentCalls).not.toHaveLength(0);
+    for (const call of presentCalls) {
+      expect(call.assetTicker).toBe("WSOL");
+      expect(call.solBalance).toBe(100_000_000);
+      expect(call.solFeePayerBalance).toBe(100_000_000);
+    }
   });
 
   test("routes WSOL inputs through WSOL balances when ticker is normalized", async () => {
