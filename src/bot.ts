@@ -1155,8 +1155,6 @@ const prepareTokenTradeQuote = async ({
 }: PrepareTokenTradeQuoteParams) => {
   const snapshot = await getCachedWalletData(telegramId);
   const nativeSolBalance = snapshot.nativeSolBalance ?? snapshot.solBalance;
-  const combinedSolLikeBalance =
-    Math.max(0, nativeSolBalance) + Math.max(0, snapshot.wsolBalance ?? 0);
   const factoryContext: TradeAssetFactoryContext = { telegramId, ...snapshot };
 
   const [inputAsset, outputAsset] = await Promise.all([
@@ -1276,11 +1274,8 @@ const prepareTokenTradeQuote = async ({
 
     return {
       tradeAmountTicker: "SOL",
-      tokenBalance: {
-        balance: combinedSolLikeBalance,
-        decimals: inputAsset.decimals,
-      },
-      solBalance: combinedSolLikeBalance,
+      tokenBalance: inputAsset.tokenBalance,
+      solBalance: nativeSolBalance,
       solFeePayerBalance: nativeSolBalance,
     } satisfies {
       tradeAmountTicker: string;
