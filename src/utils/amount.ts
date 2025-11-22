@@ -315,12 +315,7 @@ export const evaluateTradeAmount = ({
       throw new Error(insufficientSolBalanceMessage);
     }
 
-    const requiresNativeFeeHeadroom = solBalance <= feePayerBalance;
-    if (
-      requiresNativeFeeHeadroom &&
-      feeBuffer > 0 &&
-      rawAmount + feeBuffer > feePayerBalance
-    ) {
+    if (applySolFeeBuffer && feeBuffer > 0 && rawAmount + feeBuffer > feePayerBalance) {
       throw new Error(insufficientSolBalanceMessage);
     }
 
