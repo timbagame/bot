@@ -1201,7 +1201,10 @@ const prepareTokenTradeQuote = async ({
     ? { balance: snapshot.wsolBalance, decimals: inputAsset.decimals }
     : inputAsset.tokenBalance;
 
-  const solSpendableBalance = nativeSolBalance;
+  const solSpendableBalance =
+    normalizeSolTicker(tradeAmountTicker) === "SOL"
+      ? combineSolBalances(nativeSolBalance, snapshot.wsolBalance)
+      : nativeSolBalance;
 
   let gaslessOverride: ReturnType<typeof presentSpendAmount> | null = null;
   let gaslessInsufficientMessage: string | undefined;
