@@ -8,6 +8,7 @@ import {
 import {
   getAssociatedTokenAddress,
   ASSOCIATED_TOKEN_PROGRAM_ID,
+  createAssociatedTokenAccountIdempotentInstruction,
 } from "@solana/spl-token";
 import { Context } from "grammy";
 import * as anchor from "@coral-xyz/anchor";
@@ -809,7 +810,10 @@ export class GameManager {
     gameAccount: any,
     player: PublicKey,
     oracleOperator?: PublicKey
-  ): Promise<Record<string, unknown>> {
+  ): Promise<{
+    accounts: Record<string, unknown>;
+    setupInstructions: TransactionInstruction[];
+  }> {
     const tokenMint = new PublicKey(gameAccount.tokenMint);
     const tokenAccounts = await this.resolveGameTokenAccounts(tokenMint);
     const gameTokenCtx = this.buildGameTokenContext(tokenMint, tokenAccounts);
@@ -818,6 +822,40 @@ export class GameManager {
       player,
       tokenAccounts.tokenProgram
     );
+
+    const setupInstructions: TransactionInstruction[] = [];
+    try {
+      const accountInfo = await this.getConnection().getAccountInfo(
+        playerTokenAccount
+      );
+      if (!accountInfo) {
+        setupInstructions.push(
+          createAssociatedTokenAccountIdempotentInstruction(
+            player,
+            playerTokenAccount,
+            player,
+            tokenMint,
+            tokenAccounts.tokenProgram,
+            ASSOCIATED_TOKEN_PROGRAM_ID
+          )
+        );
+      }
+    } catch (error) {
+      console.warn(
+        "Failed to check player ATA existence, defaulting to creation:",
+        error
+      );
+      setupInstructions.push(
+        createAssociatedTokenAccountIdempotentInstruction(
+          player,
+          playerTokenAccount,
+          player,
+          tokenMint,
+          tokenAccounts.tokenProgram,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        )
+      );
+    }
 
     const accounts: Record<string, unknown> = {
       game: gamePda,
@@ -832,7 +870,7 @@ export class GameManager {
       accounts["oracleOperator"] = oracleOperator;
     }
 
-    return accounts;
+    return { accounts, setupInstructions };
   }
 
   private async buildUnjoinAccounts(
@@ -841,7 +879,11 @@ export class GameManager {
     player: PublicKey,
     authority: PublicKey
   ): Promise<Record<string, unknown>> {
-    const accounts = await this.buildJoinAccounts(gamePda, gameAccount, player);
+    const { accounts } = await this.buildJoinAccounts(
+      gamePda,
+      gameAccount,
+      player
+    );
     accounts["authority"] = authority;
     return accounts;
   }
@@ -3394,23 +3436,28 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         const maxJoinAttempts = 2;
 
         for (let attempt = 0; attempt < maxJoinAttempts; attempt++) {
+          let setupInstructions: TransactionInstruction[] = [];
+          let joinInstructions: TransactionInstruction[] = [];
           try {
             if (attempt > 0) {
               gameAccount = await this.program.account.game.fetch(gamePda);
             }
 
-            const joinAccounts = await this.buildJoinAccounts(
-              gamePda,
-              gameAccount,
-              playerKp.publicKey
-            );
+            const { accounts: joinAccounts, setupInstructions: setupIxs = [] } =
+              await this.buildJoinAccounts(
+                gamePda,
+                gameAccount,
+                playerKp.publicKey
+              );
+            setupInstructions = setupIxs;
             const joinInstruction = await this.program.methods
               .joinGame()
               .accounts(joinAccounts as any)
               .instruction();
+            joinInstructions = [...setupInstructions, joinInstruction];
 
             joinTx = await this.wallet.sendTransaction(
-              [joinInstruction],
+              joinInstructions,
               [playerKp]
             );
 
@@ -3434,7 +3481,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
               async () => {
                 const resendJoinTransaction = async () => {
                   return await this.sendInstructionsWithFallback(
-                    [joinInstruction],
+                    joinInstructions,
                     [playerKp],
                     "Player join transaction"
                   );
@@ -3462,6 +3509,12 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
           } catch (joinError: any) {
             const message = joinError?.message ?? "";
             const normalized = message.toLowerCase();
+            const needsAtaCreation = (setupInstructions ?? []).length > 0;
+            const isAtaInitFailure =
+              needsAtaCreation &&
+              (normalized.includes("associated token account") ||
+                normalized.includes("accountnotinitialized") ||
+                normalized.includes("uninitialized"));
             const isTimeout =
               normalized.includes("timeout") ||
               normalized.includes("not confirmed");
@@ -3486,6 +3539,12 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
                   `timed out or expired; retrying with a fresh blockhash.`
               );
               continue;
+            }
+
+            if (isAtaInitFailure) {
+              throw new Error(
+                "Failed to initialize your token account for this game. Please try again or ensure you have enough SOL for fees."
+              );
             }
 
             throw joinError;
@@ -3914,19 +3973,24 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       } else {
         const maxAttempts = 2;
         for (let attempt = 0; attempt < maxAttempts && !joinConfirmed; attempt++) {
+          let setupInstructions: TransactionInstruction[] = [];
+          let joinInstructions: TransactionInstruction[] = [];
           try {
-            const joinAccounts = await this.buildJoinAccounts(
-              gamePda,
-              gameAccount,
-              playerKp.publicKey
-            );
+            const { accounts: joinAccounts, setupInstructions: setupIxs } =
+              await this.buildJoinAccounts(
+                gamePda,
+                gameAccount,
+                playerKp.publicKey
+              );
+            setupInstructions = setupIxs;
             const joinInstruction = await this.program.methods
               .joinGame()
               .accounts(joinAccounts as any)
               .instruction();
+            joinInstructions = [...setupInstructions, joinInstruction];
 
             joinTx = await this.wallet.sendTransaction(
-              [joinInstruction],
+              joinInstructions,
               [playerKp]
             );
             this.gameDb.saveGameParticipant(
@@ -3949,7 +4013,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
               async () => {
                 const resendJoinTransaction = async () => {
                   return await this.sendInstructionsWithFallback(
-                    [joinInstruction],
+                    joinInstructions,
                     [playerKp],
                     "Player join transaction"
                   );
@@ -3974,9 +4038,15 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             joinConfirmed = true;
           } catch (joinError: any) {
             const message = joinError?.message ?? "";
+            const normalized = message.toLowerCase();
+            const needsAtaCreation = setupInstructions.length > 0;
+            const isAtaInitFailure =
+              needsAtaCreation &&
+              (normalized.includes("associated token account") ||
+                normalized.includes("accountnotinitialized") ||
+                normalized.includes("uninitialized"));
             const isTimeout =
-              message.includes("timeout") ||
-              message.includes("not confirmed");
+              normalized.includes("timeout") || normalized.includes("not confirmed");
             const isLastAttempt = attempt === maxAttempts - 1;
 
             if (isTimeout && !isLastAttempt) {
@@ -3994,6 +4064,12 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
                 `⚠️ Player join attempt ${attempt + 1} for ${gameAddress} timed out; retrying with a fresh blockhash.`
               );
               continue;
+            }
+
+            if (isAtaInitFailure) {
+              throw new Error(
+                "Failed to initialize your token account for this game. Please try again or ensure you have enough SOL for fees."
+              );
             }
 
             throw joinError;
@@ -4418,6 +4494,8 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       let lastSignature: string | undefined;
 
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        let setupInstructions: TransactionInstruction[] = [];
+        let joinInstructions: TransactionInstruction[] = [];
         try {
           if (attempt > 0) {
             gameAccount = await loadGameAccount();
@@ -4429,20 +4507,23 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             }
           }
 
-          const joinAccounts = await this.buildJoinAccounts(
-            gamePda,
-            gameAccount,
-            playerKp.publicKey,
-            adminKp.publicKey
-          );
+          const { accounts: joinAccounts, setupInstructions: setupIxs = [] } =
+            await this.buildJoinAccounts(
+              gamePda,
+              gameAccount,
+              playerKp.publicKey,
+              adminKp.publicKey
+            );
+          setupInstructions = setupIxs;
 
           const joinInstruction = await this.program.methods
             .joinGame()
             .accounts(joinAccounts as any)
             .instruction();
+          joinInstructions = [...setupInstructions, joinInstruction];
 
           lastSignature = await this.wallet.sendTransaction(
-            [joinInstruction],
+            joinInstructions,
             [playerKp, adminKp]
           );
 
@@ -4453,11 +4534,11 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             playerKp.publicKey,
             async () => {
               const resendJoinTransaction = async () => {
-                  return await this.sendInstructionsWithFallback(
-                    [joinInstruction],
-                    [playerKp, adminKp],
-                    "Player join transaction"
-                  );
+                return await this.sendInstructionsWithFallback(
+                  joinInstructions,
+                  [playerKp, adminKp],
+                  "Player join transaction"
+                );
               };
 
               return await resendJoinTransaction();
@@ -4477,6 +4558,12 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           }
 
           const normalized = message.toLowerCase();
+          const needsAtaCreation = (setupInstructions ?? []).length > 0;
+          const isAtaInitFailure =
+            needsAtaCreation &&
+            (normalized.includes("associated token account") ||
+              normalized.includes("accountnotinitialized") ||
+              normalized.includes("uninitialized"));
           const isTimeout =
             normalized.includes("timeout") ||
             normalized.includes("not confirmed");
@@ -4500,6 +4587,12 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
                 `timed out or expired; retrying with a fresh blockhash.`
             );
             continue;
+          }
+
+          if (isAtaInitFailure) {
+            throw new Error(
+              "Failed to initialize your token account for this game. Please try again or ensure you have enough SOL for fees."
+            );
           }
 
           throw joinError;
