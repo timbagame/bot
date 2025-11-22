@@ -1236,6 +1236,9 @@ const prepareTokenTradeQuote = async ({
       (inputAsset.ticker.trim().toUpperCase() === "WSOL" ||
         inputAsset.mint === WSOL_MINT));
 
+  const combinedSolLikeBalance =
+    Math.max(0, nativeSolBalance) + Math.max(0, snapshot.wsolBalance ?? 0);
+
   const solLikeTradeConfig = (() => {
     if (!inputIsSolLike) {
       return null;
@@ -1275,7 +1278,7 @@ const prepareTokenTradeQuote = async ({
     return {
       tradeAmountTicker: "SOL",
       tokenBalance: inputAsset.tokenBalance,
-      solBalance: nativeSolBalance,
+      solBalance: combinedSolLikeBalance,
       solFeePayerBalance: nativeSolBalance,
     } satisfies {
       tradeAmountTicker: string;
