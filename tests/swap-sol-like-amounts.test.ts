@@ -143,14 +143,11 @@ describe("SOL-like swap amount resolution", () => {
           throw new Error("unexpected error");
         },
       } as any)
-    ).rejects.toThrow("present-stop");
+    ).rejects.toThrow(
+      "You need native SOL to cover transaction fees. Add SOL or unwrap WSOL first."
+    );
 
-    expect(presentCalls).not.toHaveLength(0);
-    for (const call of presentCalls) {
-      expect(call.assetTicker).toBe("SOL");
-      expect(call.solBalance).toBe(1_500_000_000);
-      expect(call.solFeePayerBalance).toBe(0);
-    }
+    expect(presentCalls).toHaveLength(0);
   });
 
   test("wrap spendable balance stays limited to native SOL when WSOL exists", async () => {
@@ -313,14 +310,10 @@ describe("SOL-like swap amount resolution", () => {
           throw new Error("unexpected error");
         },
       } as any)
-    ).rejects.toThrow("present-stop");
+    ).rejects.toThrow(
+      "You need native SOL to cover transaction fees. Add SOL or unwrap WSOL first."
+    );
 
-    expect(presentCalls).not.toHaveLength(0);
-    for (const call of presentCalls) {
-      expect(call.assetTicker).toBe("SOL");
-      expect(call.solBalance).toBe(2_500_000_000);
-      expect(call.solFeePayerBalance).toBe(0);
-      expect(call.tokenBalance).toBeUndefined();
-    }
+    expect(presentCalls).toHaveLength(0);
   });
 });
