@@ -577,19 +577,19 @@ const resolveFormattedBalance = (
   ticker: string,
   solBalance: number,
   tokenBalances: WalletBalanceEntry[],
-  wsolBalance?: number
+  wsolBalance?: number,
+  options: { combineSolLikeBalances?: boolean } = {}
 ): { decimalBalance: number; formattedBalance: string } => {
   const normalizedTicker = ticker.trim().toUpperCase();
+  const combineSolLikeBalances = Boolean(options.combineSolLikeBalances);
 
-  if (normalizedTicker === "SOL") {
-    return {
-      decimalBalance: solBalance / LAMPORTS_PER_SOL,
-      formattedBalance: wallet.formatSolBalance(solBalance),
-    };
-  }
+  if (normalizedTicker === "SOL" || normalizedTicker === "WSOL") {
+    const lamports = combineSolLikeBalances
+      ? Math.max(0, solBalance) + Math.max(0, wsolBalance ?? 0)
+      : normalizedTicker === "SOL"
+      ? Math.max(0, solBalance)
+      : Math.max(0, wsolBalance ?? 0);
 
-  if (normalizedTicker === "WSOL") {
-    const lamports = Math.max(0, wsolBalance ?? 0);
     return {
       decimalBalance: lamports / LAMPORTS_PER_SOL,
       formattedBalance: wallet.formatSolBalance(lamports),
@@ -648,6 +648,14 @@ const resolveSolLikeConversionDirection = (
     return "unwrap";
   }
 
+  if ((outputAsset?.mint as string | undefined) === WSOL_MINT) {
+    return "wrap";
+  }
+
+  if (normalizedOutputTicker === "WSOL") {
+    return "wrap";
+  }
+
   if (normalizedTicker === "WSOL") {
     return "unwrap";
   }
@@ -657,14 +665,6 @@ const resolveSolLikeConversionDirection = (
     (inputAsset.mint as string | undefined) === WSOL_MINT
   ) {
     return "unwrap";
-  }
-
-  if ((outputAsset?.mint as string | undefined) === WSOL_MINT) {
-    return "wrap";
-  }
-
-  if (normalizedOutputTicker === "WSOL") {
-    return "wrap";
   }
 
   if (normalizedOutputTicker === "SOL") {
@@ -1155,6 +1155,8 @@ const prepareTokenTradeQuote = async ({
 }: PrepareTokenTradeQuoteParams) => {
   const snapshot = await getCachedWalletData(telegramId);
   const nativeSolBalance = snapshot.nativeSolBalance ?? snapshot.solBalance;
+  const combinedSolLikeBalance =
+    Math.max(0, nativeSolBalance) + Math.max(0, snapshot.wsolBalance ?? 0);
   const factoryContext: TradeAssetFactoryContext = { telegramId, ...snapshot };
 
   const [inputAsset, outputAsset] = await Promise.all([
@@ -1166,6 +1168,11 @@ const prepareTokenTradeQuote = async ({
     isSolLikeTicker(inputAsset.ticker) || inputAsset.mint === WSOL_MINT;
   const outputIsSolLike =
     isSolLikeTicker(outputAsset.ticker) || outputAsset.mint === WSOL_MINT;
+
+  const isSolWsolConversion = inputIsSolLike && outputIsSolLike;
+  const solLikeConversionDirection = isSolWsolConversion
+    ? resolveSolLikeConversionDirection(inputAsset, outputAsset)
+    : null;
 
   const outputIsSol = outputAsset.ticker === "SOL" || outputIsSolLike;
 
@@ -1231,13 +1238,73 @@ const prepareTokenTradeQuote = async ({
       (inputAsset.ticker.trim().toUpperCase() === "WSOL" ||
         inputAsset.mint === WSOL_MINT));
 
-  const tradeAmountTicker = prefersWsol ? "WSOL" : inputAsset.ticker;
+  const solLikeTradeConfig = (() => {
+    if (!inputIsSolLike) {
+      return null;
+    }
 
-  const inputTokenBalance: TokenBalanceLike | undefined = prefersWsol
-    ? { balance: snapshot.wsolBalance, decimals: inputAsset.decimals }
-    : inputAsset.tokenBalance;
+    if (solLikeConversionDirection === "unwrap") {
+      return {
+        tradeAmountTicker: "WSOL",
+        tokenBalance: {
+          balance: snapshot.wsolBalance,
+          decimals: inputAsset.decimals,
+        },
+        solBalance: Math.max(0, snapshot.wsolBalance ?? 0),
+        solFeePayerBalance: nativeSolBalance,
+      } satisfies {
+        tradeAmountTicker: string;
+        tokenBalance?: TokenBalanceLike;
+        solBalance: number;
+        solFeePayerBalance: number;
+      };
+    }
 
-  const solSpendableBalance = nativeSolBalance;
+    if (solLikeConversionDirection === "wrap") {
+      return {
+        tradeAmountTicker: "SOL",
+        tokenBalance: inputAsset.tokenBalance,
+        solBalance: nativeSolBalance,
+        solFeePayerBalance: nativeSolBalance,
+      } satisfies {
+        tradeAmountTicker: string;
+        tokenBalance?: TokenBalanceLike;
+        solBalance: number;
+        solFeePayerBalance: number;
+      };
+    }
+
+    return {
+      tradeAmountTicker: "SOL",
+      tokenBalance: {
+        balance: combinedSolLikeBalance,
+        decimals: inputAsset.decimals,
+      },
+      solBalance: combinedSolLikeBalance,
+      solFeePayerBalance: nativeSolBalance,
+    } satisfies {
+      tradeAmountTicker: string;
+      tokenBalance?: TokenBalanceLike;
+      solBalance: number;
+      solFeePayerBalance: number;
+    };
+  })();
+
+  const tradeAmountTicker =
+    solLikeTradeConfig?.tradeAmountTicker ??
+    (prefersWsol ? "WSOL" : inputAsset.ticker);
+
+  const inputTokenBalance: TokenBalanceLike | undefined =
+    solLikeTradeConfig?.tokenBalance ??
+    (prefersWsol
+      ? { balance: snapshot.wsolBalance, decimals: inputAsset.decimals }
+      : inputAsset.tokenBalance);
+
+  const solSpendableBalance =
+    solLikeTradeConfig?.solBalance ?? nativeSolBalance;
+
+  const solFeePayerBalance =
+    solLikeTradeConfig?.solFeePayerBalance ?? nativeSolBalance;
 
   let gaslessOverride: ReturnType<typeof presentSpendAmount> | null = null;
   let gaslessInsufficientMessage: string | undefined;
@@ -1248,7 +1315,7 @@ const prepareTokenTradeQuote = async ({
       assetTicker: tradeAmountTicker,
       decimals: inputAsset.decimals,
       solBalance: solSpendableBalance,
-      solFeePayerBalance: nativeSolBalance,
+      solFeePayerBalance,
       tokenBalance: inputTokenBalance,
       formatSol: (lamports) => wallet.formatSolBalance(lamports),
       formatToken: (value, decimals) =>
@@ -1257,7 +1324,7 @@ const prepareTokenTradeQuote = async ({
       userSolBufferLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
     });
 
-    const prospectiveBalance = Math.max(0, nativeSolBalance - probe.rawAmount);
+    const prospectiveBalance = Math.max(0, solFeePayerBalance - probe.rawAmount);
     const wouldLeaveBelowMinimum =
       prospectiveBalance < JUPITER_MIN_SOL_BALANCE_LAMPORTS;
 
@@ -1298,7 +1365,7 @@ const prepareTokenTradeQuote = async ({
       assetTicker: tradeAmountTicker,
       decimals: inputAsset.decimals,
       solBalance: solSpendableBalance,
-      solFeePayerBalance: nativeSolBalance,
+      solFeePayerBalance,
       tokenBalance: inputTokenBalance,
       formatSol: (lamports) => wallet.formatSolBalance(lamports),
       formatToken: (value, decimals) =>
@@ -1315,10 +1382,9 @@ const prepareTokenTradeQuote = async ({
     });
 
   if (inputIsSolLike && outputIsSolLike) {
-    const conversionDirection = resolveSolLikeConversionDirection(
-      inputAsset,
-      outputAsset
-    );
+    const conversionDirection =
+      solLikeConversionDirection ??
+      resolveSolLikeConversionDirection(inputAsset, outputAsset);
     const handled = await executeSolLikeSwapConversion({
       ctx,
       telegramId,
@@ -4757,8 +4823,15 @@ const showSwapAmountSelection = async (
   const { solBalance, wsolBalance, tokenBalances } =
     await getCachedWalletData(telegramId);
 
+  const toTokenIdentifier = options.toTokenIdentifier ?? toToken;
+
+  const shouldCombineSolLikeBalance =
+    isSolLikeTicker(fromToken) && !isSolLikeTicker(toTokenIdentifier);
+
   const { decimalBalance: balanceDecimal, formattedBalance } =
-    resolveFormattedBalance(fromToken, solBalance, tokenBalances, wsolBalance);
+    resolveFormattedBalance(fromToken, solBalance, tokenBalances, wsolBalance, {
+      combineSolLikeBalances: shouldCombineSolLikeBalance,
+    });
 
   const response = [
     `💱 <b>Swap Amount</b>`,
@@ -4770,8 +4843,6 @@ const showSwapAmountSelection = async (
   ];
 
   const canTrade = balanceDecimal > 0;
-
-  const toTokenIdentifier = options.toTokenIdentifier ?? toToken;
 
   const keyboard = createSwapAmountKeyboard({
     fromToken,

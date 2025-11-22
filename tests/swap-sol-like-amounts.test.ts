@@ -49,7 +49,7 @@ describe("SOL-like swap amount resolution", () => {
     }
   });
 
-  test("uses native SOL only for SOL swap spend and fee checks", async () => {
+  test("combines SOL-like balance for SOL swaps while using native SOL for fees", async () => {
     const presentCalls: any[] = [];
 
     botModule.__test_setPresentSpendAmount((params: any) => {
@@ -95,12 +95,12 @@ describe("SOL-like swap amount resolution", () => {
     expect(presentCalls).not.toHaveLength(0);
     for (const call of presentCalls) {
       expect(call.assetTicker).toBe("SOL");
-      expect(call.solBalance).toBe(200_000_000);
+      expect(call.solBalance).toBe(1_200_000_000);
       expect(call.solFeePayerBalance).toBe(200_000_000);
     }
   });
 
-  test("limits wrap spendable balance to native SOL when WSOL exists", async () => {
+  test("wrap spendable balance stays limited to native SOL when WSOL exists", async () => {
     const presentCalls: any[] = [];
 
     botModule.__test_setPresentSpendAmount((params: any) => {
@@ -146,7 +146,7 @@ describe("SOL-like swap amount resolution", () => {
 
     expect(presentCalls).not.toHaveLength(0);
     for (const call of presentCalls) {
-      expect(call.assetTicker).toBe("WSOL");
+      expect(call.assetTicker).toBe("SOL");
       expect(call.solBalance).toBe(100_000_000);
       expect(call.solFeePayerBalance).toBe(100_000_000);
     }
@@ -207,12 +207,12 @@ describe("SOL-like swap amount resolution", () => {
     for (const call of presentCalls) {
       expect(call.assetTicker).toBe("WSOL");
       expect(call.tokenBalance?.balance).toBe(1_200_000_000);
-      expect(call.solBalance).toBe(0);
+      expect(call.solBalance).toBe(1_200_000_000);
       expect(call.solFeePayerBalance).toBe(0);
     }
 
   });
-  test("does not combine WSOL with SOL spendable balance when SOL is selected", async () => {
+  test("combines WSOL with SOL spendable balance when SOL is selected for swaps", async () => {
     const presentCalls: any[] = [];
 
     botModule.__test_setPresentSpendAmount((params: any) => {
@@ -265,9 +265,9 @@ describe("SOL-like swap amount resolution", () => {
     expect(presentCalls).not.toHaveLength(0);
     for (const call of presentCalls) {
       expect(call.assetTicker).toBe("SOL");
-      expect(call.solBalance).toBe(0);
+      expect(call.solBalance).toBe(2_500_000_000);
       expect(call.solFeePayerBalance).toBe(0);
-      expect(call.tokenBalance).toBeUndefined();
+      expect(call.tokenBalance?.balance).toBe(2_500_000_000);
     }
   });
 });
