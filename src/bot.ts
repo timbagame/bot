@@ -1304,6 +1304,16 @@ const prepareTokenTradeQuote = async ({
   const solFeePayerBalance =
     solLikeTradeConfig?.solFeePayerBalance ?? nativeSolBalance;
 
+  if (
+    tradeAmountTicker === "SOL" &&
+    solSpendableBalance > 0 &&
+    solFeePayerBalance <= 0
+  ) {
+    throw new Error(
+      "You need native SOL to cover transaction fees. Add SOL or unwrap WSOL first."
+    );
+  }
+
   let gaslessOverride: ReturnType<typeof presentSpendAmount> | null = null;
   let gaslessInsufficientMessage: string | undefined;
 
