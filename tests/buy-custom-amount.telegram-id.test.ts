@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
+import { WSOL_MINT } from "../src/utils/token-registry";
+
 const botModule = await import("../src/bot");
 
 const TELEGRAM_ID = 987654321n;
@@ -8,13 +10,13 @@ describe("swap custom amount telegram id propagation", () => {
   beforeEach(() => {
     botModule.__test_resetPrepareTokenTradeQuote();
     botModule.__test_clearTransactionCache();
-  botModule.__test_clearWalletCache(TELEGRAM_ID);
+    botModule.__test_clearWalletCache(TELEGRAM_ID);
   });
 
   afterEach(() => {
     botModule.__test_resetPrepareTokenTradeQuote();
     botModule.__test_clearTransactionCache();
-  botModule.__test_clearWalletCache(TELEGRAM_ID);
+    botModule.__test_clearWalletCache(TELEGRAM_ID);
   });
 
   test("handleSwapCustomAmountInput forwards the caller telegram id", async () => {
@@ -168,5 +170,74 @@ describe("swap custom amount telegram id propagation", () => {
       mint: tokenMint,
       decimals: 8,
     });
+  });
+
+  test("handleSwapCustomAmountInput preserves WSOL selection balances", async () => {
+    const capturedInputs: any[] = [];
+
+    const originalTokenManager = botModule.__test_getTokenManager();
+    botModule.__test_setTokenManager({
+      resolveMintForTicker: async (ticker: string) =>
+        ticker.trim().toUpperCase() === "WSOL"
+          ? WSOL_MINT
+          : "So11111111111111111111111111111111111111112",
+    } as any);
+
+    try {
+      botModule.__test_setPrepareTokenTradeQuote(async (params) => {
+        const snapshot = await botModule.__test_getCachedWalletData(TELEGRAM_ID);
+        const context = { telegramId: TELEGRAM_ID, ...snapshot } as any;
+        capturedInputs.push(await params.inputFactory(context));
+        return null as any;
+      });
+
+      botModule.__test_setWalletCache(TELEGRAM_ID, {
+        solBalance: 0,
+        wsolBalance: 4_200_000_000,
+        tokenBalances: [
+          {
+            mint: WSOL_MINT,
+            ticker: "WSOL",
+            balance: 4_200_000_000,
+            decimals: 9,
+          },
+        ],
+      });
+
+      const ctx: any = {
+        from: { id: Number(TELEGRAM_ID) },
+        chat: { id: 24680 },
+        api: {
+          editMessageText: async () => {
+            /* noop */
+          },
+          editMessageCaption: async () => {
+            /* noop */
+          },
+        },
+      };
+
+      const userState = {
+        type: "swap_custom_amount" as const,
+        fromToken: "WSOL",
+        fromTokenRaw: "WSOL",
+        toToken: "SOL",
+        toTokenRaw: "SOL",
+        messageId: 555,
+        chatId: ctx.chat.id,
+      };
+
+      await botModule.__test_handleSwapCustomAmountInput(ctx, userState, "1");
+
+      expect(capturedInputs).toHaveLength(1);
+      expect(capturedInputs[0]).toMatchObject({
+        ticker: "WSOL",
+        tokenBalance: { balance: 4_200_000_000, decimals: 9 },
+        applySolFeeBuffer: false,
+        metadata: { selectedTicker: "WSOL" },
+      });
+    } finally {
+      botModule.__test_setTokenManager(originalTokenManager);
+    }
   });
 });
