@@ -1195,6 +1195,11 @@ const prepareTokenTradeQuote = async ({
       (inputAsset.ticker.trim().toUpperCase() === "WSOL" ||
         inputAsset.mint === WSOL_MINT));
 
+  const solLikeConversionDirection =
+    inputIsSolLike && outputIsSolLike
+      ? resolveSolLikeConversionDirection(inputAsset)
+      : null;
+
   const tradeAmountTicker = prefersWsol ? "WSOL" : inputAsset.ticker;
 
   const inputTokenBalance: TokenBalanceLike | undefined = prefersWsol
@@ -1202,9 +1207,11 @@ const prepareTokenTradeQuote = async ({
     : inputAsset.tokenBalance;
 
   const solSpendableBalance =
-    normalizeSolTicker(tradeAmountTicker) === "SOL"
-      ? combineSolBalances(nativeSolBalance, snapshot.wsolBalance)
-      : nativeSolBalance;
+    solLikeConversionDirection === "wrap"
+      ? nativeSolBalance
+      : normalizeSolTicker(tradeAmountTicker) === "SOL"
+        ? combineSolBalances(nativeSolBalance, snapshot.wsolBalance)
+        : nativeSolBalance;
 
   let gaslessOverride: ReturnType<typeof presentSpendAmount> | null = null;
   let gaslessInsufficientMessage: string | undefined;
