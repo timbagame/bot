@@ -3443,7 +3443,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
               gameAccount = await this.program.account.game.fetch(gamePda);
             }
 
-            const { accounts: joinAccounts, setupInstructions: setupIxs } =
+            const { accounts: joinAccounts, setupInstructions: setupIxs = [] } =
               await this.buildJoinAccounts(
                 gamePda,
                 gameAccount,
@@ -3509,7 +3509,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
           } catch (joinError: any) {
             const message = joinError?.message ?? "";
             const normalized = message.toLowerCase();
-            const needsAtaCreation = setupInstructions.length > 0;
+            const needsAtaCreation = (setupInstructions ?? []).length > 0;
             const isAtaInitFailure =
               needsAtaCreation &&
               (normalized.includes("associated token account") ||
@@ -4507,7 +4507,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             }
           }
 
-          const { accounts: joinAccounts, setupInstructions: setupIxs } =
+          const { accounts: joinAccounts, setupInstructions: setupIxs = [] } =
             await this.buildJoinAccounts(
               gamePda,
               gameAccount,
@@ -4558,7 +4558,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           }
 
           const normalized = message.toLowerCase();
-          const needsAtaCreation = setupInstructions.length > 0;
+          const needsAtaCreation = (setupInstructions ?? []).length > 0;
           const isAtaInitFailure =
             needsAtaCreation &&
             (normalized.includes("associated token account") ||
