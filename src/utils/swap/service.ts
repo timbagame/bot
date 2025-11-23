@@ -6,8 +6,9 @@ import {
 } from "../constants";
 import type { IntegratorSwapParams } from "../integrator-fees";
 import type { WalletManager } from "../wallet";
+import { FeeBudgetManager } from "../fee-budget";
 import type { SwapQuote, SwapRequest } from "./types";
-import { calculateRouteCosts } from "./route-cost";
+import { calculateRouteCosts, type RouteLikeCosts } from "./route-cost";
 
 export interface SwapBackend {
   getQuote(
@@ -35,7 +36,14 @@ export class SwapService {
   constructor(
     private readonly wallet: WalletManager,
     private readonly backend: SwapBackend
-  ) {}
+  ) {
+    const connection = (wallet as any)?.getConnection?.();
+    this.feeBudget = connection
+      ? FeeBudgetManager.getInstance(connection)
+      : null;
+  }
+
+  private readonly feeBudget: FeeBudgetManager | null;
 
   async prepareSwap(
     request: SwapRequest,
@@ -81,8 +89,28 @@ export class SwapService {
       );
     }
 
+    let providerCosts: RouteLikeCosts | undefined = quote.providerQuote;
+
+    if (!providerCosts && quote.provider === "wrap" && this.feeBudget) {
+      const wrapLamports = await this.feeBudget
+        .getWrapFeeBufferLamports()
+        .catch(() => 0);
+      const fallbackWrapLamports = this.feeBudget
+        .getDefaultWrapFeeBufferLamports()
+        .valueOf();
+
+      const rentFeeLamports = Math.max(wrapLamports, fallbackWrapLamports);
+      if (Number.isFinite(rentFeeLamports) && rentFeeLamports > 0) {
+        providerCosts = {
+          rentFeeLamports,
+          prioritizationFeeLamports: 0,
+          signatureFeeLamports: 0,
+        };
+      }
+    }
+
     const { routeLamports, requiredLamports } = calculateRouteCosts(
-      quote.providerQuote,
+      providerCosts,
       {
         paddingRatio: 0.25,
         paddingExtraLamports: 200_000,

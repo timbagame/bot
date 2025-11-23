@@ -144,6 +144,51 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
     restoreConn();
   });
 
+  test("adds wrap rent reserve to buffer when provider quote is missing", async () => {
+    const user = Keypair.generate();
+    const wrapRentLamports = 2_000_000;
+    const amountLamports = 500_000;
+
+    const feeBudgetMock = {
+      getWrapFeeBufferLamports: vi.fn().mockResolvedValue(wrapRentLamports),
+      getDefaultWrapFeeBufferLamports: vi.fn().mockReturnValue(500_000),
+    } as unknown as FeeBudgetManager;
+
+    const feeSpy = vi
+      .spyOn(FeeBudgetManager, "getInstance")
+      .mockReturnValue(feeBudgetMock);
+
+    const serviceWithMockBudget = new SwapService(wallet as any, stubBackend);
+    const providerCosts = { rentFeeLamports: wrapRentLamports } as any;
+    const helperCosts = calculateRouteCosts(providerCosts, {
+      paddingRatio: 0.25,
+      paddingExtraLamports: 200_000,
+      paddingRounding: "ceil",
+      baseRequiredLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
+      requiredStrategy: "max",
+    });
+
+    const restoreConn = stubWalletConnection(
+      amountLamports + helperCosts.requiredLamports - 1
+    );
+
+    const quote = {
+      inputMint: "SOL",
+      outputMint: WSOL_MINT,
+      inputAmountRaw: String(amountLamports),
+      provider: "wrap" as const,
+    } as any;
+
+    await expect(
+      serviceWithMockBudget.ensureUserSolBufferForSwap(quote as any, user)
+    ).rejects.toThrow(
+      new RegExp(wallet.formatSolBalance(helperCosts.requiredLamports))
+    );
+
+    feeSpy.mockRestore();
+    restoreConn();
+  });
+
   test("skips buffer enforcement for admin payer routes", async () => {
     const user = Keypair.generate();
     const restoreConn = stubWalletConnection(1);
