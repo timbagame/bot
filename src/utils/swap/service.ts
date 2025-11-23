@@ -94,7 +94,7 @@ export class SwapService {
 
     let providerCosts: RouteLikeCosts | undefined = quote.providerQuote;
 
-    if (!providerCosts && quote.provider === "wrap" && this.feeBudget) {
+    if (quote.provider === "wrap" && this.feeBudget) {
       const wrapLamports = await this.feeBudget
         .getWrapFeeBufferLamports()
         .catch(() => 0);
@@ -105,9 +105,13 @@ export class SwapService {
       const rentFeeLamports = Math.max(wrapLamports, fallbackWrapLamports);
       if (Number.isFinite(rentFeeLamports) && rentFeeLamports > 0) {
         providerCosts = {
-          rentFeeLamports,
-          prioritizationFeeLamports: 0,
-          signatureFeeLamports: 0,
+          rentFeeLamports: Math.max(
+            providerCosts?.rentFeeLamports ?? 0,
+            rentFeeLamports
+          ),
+          prioritizationFeeLamports:
+            providerCosts?.prioritizationFeeLamports ?? 0,
+          signatureFeeLamports: providerCosts?.signatureFeeLamports ?? 0,
         };
       }
     }
