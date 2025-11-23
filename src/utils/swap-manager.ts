@@ -190,7 +190,7 @@ export class SwapManager {
 
       const integrator =
         isUnwrapSwap && request.integrator?.payerKind === "admin"
-          ? { ...request.integrator }
+          ? { ...request.integrator, referralFee: 0 }
           : null;
 
       const syntheticQuote: SwapQuote = {

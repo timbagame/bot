@@ -97,7 +97,7 @@ describe("SwapManager.getQuote SOL/WSOL handling", () => {
       payer: "ADMIN",
       closeAuthority: "ADMIN_CLOSE",
       referralAccount: "REF",
-      referralFee: 50,
+      referralFee: 0,
     });
     expect(quote.integratorApplied).toBe(false);
     expect(jupiterSpy).not.toHaveBeenCalled();
