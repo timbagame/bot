@@ -249,7 +249,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
 
     await expect(
       service.ensureUserSolBufferForSwap(quote as any, user)
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(0n);
 
     restoreConn();
   });
@@ -266,7 +266,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
 
     await expect(
       service.ensureUserSolBufferForSwap(quote as any, user)
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(0n);
 
     restoreConn();
   });
@@ -290,7 +290,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
     restoreConn();
   });
 
-  test("requires base buffer for unwrap providers even when integrator payer is admin", async () => {
+  test("returns required buffer shortfall for admin unwrap providers", async () => {
     const user = Keypair.generate();
     const restoreConn = stubWalletConnection(1);
 
@@ -304,9 +304,7 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
 
     await expect(
       service.ensureUserSolBufferForSwap(quote as any, user)
-    ).rejects.toThrow(
-      new RegExp(wallet.formatSolBalance(USER_SOL_MAX_BUFFER_LAMPORTS))
-    );
+    ).resolves.toBe(BigInt(USER_SOL_MAX_BUFFER_LAMPORTS - 1));
 
     restoreConn();
   });
@@ -416,7 +414,34 @@ describe("SwapService.execute", () => {
 
     expect(txid).toBe("unwrap-tx");
     expect(backend.executeUnwrapSwap).toHaveBeenCalledTimes(1);
+    expect(backend.executeUnwrapSwap).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ provider: "unwrap" }),
+      0n
+    );
     expect(backend.executeJupiterSwap).not.toHaveBeenCalled();
+  });
+
+  test("passes admin top-up for unwrap providers when SOL buffer is short", async () => {
+    restoreConn?.();
+    restoreConn = stubWalletConnection(0);
+
+    const unwrapQuote = {
+      ...baseQuote,
+      provider: "unwrap" as const,
+      inputMint: WSOL_MINT,
+      outputMint: "SOL",
+      integrator: { payerKind: "admin" },
+    };
+
+    const txid = await service.execute(unwrapQuote as any, user);
+
+    expect(txid).toBe("unwrap-tx");
+    expect(backend.executeUnwrapSwap).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ provider: "unwrap" }),
+      BigInt(USER_SOL_MAX_BUFFER_LAMPORTS)
+    );
   });
 
   test("defaults to Jupiter executor for routed quotes", async () => {

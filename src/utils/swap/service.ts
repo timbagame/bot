@@ -16,7 +16,11 @@ export interface SwapBackend {
   ): Promise<SwapQuote>;
   executeJupiterSwap(request: SwapRequest, quote: SwapQuote): Promise<string>;
   executeWrapSwap(request: SwapRequest, quote: SwapQuote): Promise<string>;
-  executeUnwrapSwap(request: SwapRequest, quote: SwapQuote): Promise<string>;
+  executeUnwrapSwap(
+    request: SwapRequest,
+    quote: SwapQuote,
+    adminTopUpLamports?: bigint
+  ): Promise<string>;
 }
 
 const safeBigIntToNumber = (value: bigint): number => {
@@ -66,16 +70,16 @@ export class SwapService {
   async ensureUserSolBufferForSwap(
     quote: SwapQuote,
     userKeypair: Keypair
-  ): Promise<void> {
+  ): Promise<bigint> {
     if (quote.inputMint !== WSOL_MINT && quote.inputMint !== "SOL") {
-      return;
+      return 0n;
     }
 
     const isSyntheticSolWrap = quote.provider === "wrap";
     const isSyntheticSolUnwrap = quote.provider === "unwrap";
 
     if (quote.integrator?.payerKind === "admin" && !isSyntheticSolWrap && !isSyntheticSolUnwrap) {
-      return;
+      return 0n;
     }
 
     const userBalance = await this.wallet
@@ -131,17 +135,20 @@ export class SwapService {
     );
 
     if (requiredLamports <= 0) {
-      return;
+      return 0n;
     }
 
     const leftover = BigInt(userBalance) - amountLamports;
     const requiredLeftoverBig = BigInt(requiredLamports);
 
     if (leftover >= requiredLeftoverBig) {
-      return;
+      return 0n;
     }
 
     const deficitLamports = requiredLeftoverBig - leftover;
+    if (isSyntheticSolUnwrap && quote.integrator?.payerKind === "admin") {
+      return deficitLamports;
+    }
     const formattedRequired = this.wallet.formatSolBalance(requiredLamports);
     const formattedRoute = this.wallet.formatSolBalance(routeLamports);
     const formattedDeficit = this.wallet.formatSolBalance(
@@ -154,7 +161,10 @@ export class SwapService {
   }
 
   async execute(quote: SwapQuote, userKeypair: Keypair): Promise<string> {
-    await this.ensureUserSolBufferForSwap(quote, userKeypair);
+    const adminTopUpLamports = await this.ensureUserSolBufferForSwap(
+      quote,
+      userKeypair
+    );
 
     const request: SwapRequest = {
       inputMint: quote.inputMint,
@@ -173,7 +183,11 @@ export class SwapService {
     }
 
     if (quote.provider === "unwrap") {
-      return this.backend.executeUnwrapSwap(request, quote);
+      return this.backend.executeUnwrapSwap(
+        request,
+        quote,
+        adminTopUpLamports
+      );
     }
 
     return this.backend.executeJupiterSwap(request, quote);

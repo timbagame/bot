@@ -857,7 +857,8 @@ export class SwapManager {
 
   async executeUnwrapSwap(
     request: SwapRequest,
-    quote: SwapQuote
+    quote: SwapQuote,
+    adminTopUpLamports: bigint = 0n
   ): Promise<string> {
     const lamports = BigInt(quote.inputAmountRaw ?? quote.inputAmount ?? "0");
     if (lamports <= 0) {
@@ -870,15 +871,46 @@ export class SwapManager {
     }
 
     const { userKeypair } = request;
+    const loanLamports = Math.max(0, Math.trunc(Number(adminTopUpLamports)));
+    const adminKeypair =
+      loanLamports > 0 ? this.wallet.getAdminKeypair() : undefined;
+
+    const instructions: TransactionInstruction[] = [];
+
+    if (loanLamports > 0) {
+      instructions.push(
+        SystemProgram.transfer({
+          fromPubkey: adminKeypair!.publicKey,
+          toPubkey: userKeypair.publicKey,
+          lamports: loanLamports,
+        })
+      );
+    }
+
     const unwrapPlan = await this.wallet.buildUnwrapWsolPlan({
       owner: userKeypair.publicKey,
       payer: userKeypair,
       amountLamports: lamportsNumber,
     });
 
+    instructions.push(...unwrapPlan.instructions);
+
+    if (loanLamports > 0) {
+      instructions.push(
+        SystemProgram.transfer({
+          fromPubkey: userKeypair.publicKey,
+          toPubkey: adminKeypair!.publicKey,
+          lamports: loanLamports,
+        })
+      );
+    }
+
+    const signers: Keypair[] =
+      loanLamports > 0 ? [adminKeypair!, userKeypair] : [userKeypair];
+
     return this.wallet.sendAndConfirmWithResubmits(
-      unwrapPlan.instructions,
-      [userKeypair],
+      instructions,
+      signers,
       { operationLabel: "Unwrap WSOL" }
     );
   }
