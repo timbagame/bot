@@ -95,9 +95,7 @@ export const resolveIntegratorSwapParams = async (
   } = context;
 
   const isUnwrappingSol = inputMint === WSOL_MINT && outputMint === "SOL";
-  const availableForFeesLamports = isUnwrappingSol
-    ? availableSolLamports + inputAmountRaw
-    : availableSolLamports;
+  const availableForFeesLamports = availableSolLamports;
 
   const referralConfig = getReferralTargetForPair(inputMint, outputMint);
   if (!referralConfig) {
@@ -160,12 +158,20 @@ export const resolveIntegratorSwapParams = async (
     );
   }
 
-  const referralFeeBps = calculateReferralFeeBps({
-    baseFeeBps,
-    tradeUsd,
-    deficitUsd,
-    maxExtraBps: referralConfig.maxExtraFeeBps ?? DEFAULT_MAX_EXTRA_FEE_BPS,
-  });
+  const maxExtraBps = referralConfig.maxExtraFeeBps ?? DEFAULT_MAX_EXTRA_FEE_BPS;
+  const rawExtraBps = Math.ceil((deficitUsd / tradeUsd) * 10_000);
+  const referralFeeBps = isUnwrappingSol
+    ? clampReferralFeeBps(
+        baseFeeBps + Math.min(rawExtraBps, maxExtraBps),
+        50,
+        MAX_REFERRAL_FEE_BPS
+      )
+    : calculateReferralFeeBps({
+        baseFeeBps,
+        tradeUsd,
+        deficitUsd,
+        maxExtraBps,
+      });
 
   return {
     referralAccount: referralConfig.referralAccount,

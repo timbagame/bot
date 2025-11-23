@@ -79,7 +79,7 @@ describe("Integrator fee calculations", () => {
 
   test("applies extra referral fee to reimburse admin gas payer shortfall", async () => {
     __test_registerReferralEntry({
-      mint: ADMIN_REF_MINT1,
+      mint: WSOL_MINT,
       referralAccount: REFERRAL_ACCOUNT,
       adminPayer: "AdminPayer11111111111111111111111111111",
       adminCloseAuthority:
@@ -109,7 +109,7 @@ describe("Integrator fee calculations", () => {
     expect(result?.payer).toBe("AdminPayer11111111111111111111111111111");
   });
 
-  test("treats unwrap as user-funded when it restores the SOL buffer", async () => {
+  test("treats unwrap as user-funded when SOL buffer is already present", async () => {
     __test_registerReferralEntry({
       mint: ADMIN_REF_MINT1,
       referralAccount: REFERRAL_ACCOUNT,
@@ -123,15 +123,49 @@ describe("Integrator fee calculations", () => {
       outputMint: "SOL",
       inputTicker: "SOL",
       inputDecimals: 9,
-      inputAmountRaw: JUPITER_MIN_SOL_BALANCE_LAMPORTS,
+      inputAmountRaw: 250_000_000,
       userPublicKey: "RecoveredUser",
-      availableSolLamports: 0,
+      availableSolLamports: JUPITER_MIN_SOL_BALANCE_LAMPORTS,
     });
 
     expect(result).not.toBeNull();
     expect(result?.payerKind).toBe("user");
     expect(result?.payer).toBe("RecoveredUser");
     expect(result?.closeAuthority).toBe("RecoveredUser");
+  });
+
+  test("uses admin payer for unwrap when user lacks upfront SOL buffer", async () => {
+    __test_registerReferralEntry({
+      mint: WSOL_MINT,
+      referralAccount: REFERRAL_ACCOUNT,
+      adminPayer: "AdminPayer11111111111111111111111111111",
+      adminCloseAuthority:
+        "AdminCloseAuthority2222222222222222222222222222",
+      baseFeeBps: 85,
+    });
+
+    const priceSpy = vi
+      .spyOn(priceModule, "resolveTokenPriceUSD")
+      .mockResolvedValueOnce({ price: 20, identifier: "SOL" } as any)
+      .mockResolvedValueOnce({ price: 20, identifier: "SOL" } as any);
+
+    const result = await resolveIntegratorSwapParams({
+      inputMint: WSOL_MINT,
+      outputMint: "SOL",
+      inputTicker: "SOL",
+      inputDecimals: 9,
+      inputAmountRaw: JUPITER_MIN_SOL_BALANCE_LAMPORTS,
+      userPublicKey: "BufferlessUnwrapper",
+      availableSolLamports: 0,
+    });
+
+    expect(priceSpy).toHaveBeenCalledTimes(2);
+    expect(result).not.toBeNull();
+    expect(result?.payerKind).toBe("admin");
+    expect(result?.payer).toBe("AdminPayer11111111111111111111111111111");
+    expect(result?.closeAuthority).toBe(
+      "AdminCloseAuthority2222222222222222222222222222"
+    );
   });
 
   test("returns admin payer and close authority when user lacks buffer", async () => {
