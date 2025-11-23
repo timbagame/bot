@@ -4,9 +4,7 @@ import {
   Keypair,
   TransactionInstruction,
   VersionedTransaction,
-  SystemProgram,
 } from "@solana/web3.js";
-import { createSyncNativeInstruction } from "@solana/spl-token";
 import {
   JupiterClient,
   type JupiterQuoteResponse,
@@ -759,14 +757,16 @@ export class SwapManager {
     }
 
     const owner = userKeypair.publicKey;
-    const unwrapPlan = await this.wallet.buildUnwrapWsolPlan({
+    const unwrapResult = await this.wallet.unwrapSolWithKeypair({
       owner,
       payer: userKeypair,
       amountLamports: unwrapLamports,
+      adminTopUpLamports: loanLamports,
+      adminKeypair,
     });
 
     const formattedUnwrap = formatAmount(
-      BigInt(unwrapPlan.unwrapLamports),
+      BigInt(unwrapResult.amountLamports),
       SOL_DECIMALS,
       {
         maxFractionDigits: SOL_DECIMALS,
@@ -774,7 +774,7 @@ export class SwapManager {
       }
     );
     const formattedRemaining = formatAmount(
-      BigInt(Math.max(unwrapPlan.remainingLamports, 0)),
+      BigInt(Math.max(unwrapResult.remainingLamports, 0)),
       SOL_DECIMALS,
       {
         maxFractionDigits: SOL_DECIMALS,
@@ -786,42 +786,9 @@ export class SwapManager {
       `🧼 Unwrapping ${formattedUnwrap} WSOL for ${logContext}. Remaining WSOL after unwrap: ${formattedRemaining}.`
     );
 
-    const instructions: TransactionInstruction[] = [];
-
-    if (loanLamports > 0) {
-      instructions.push(
-        SystemProgram.transfer({
-          fromPubkey: adminKeypair!.publicKey,
-          toPubkey: owner,
-          lamports: loanLamports,
-        })
-      );
-    }
-
-    instructions.push(...unwrapPlan.instructions);
-
-    if (loanLamports > 0) {
-      instructions.push(
-        SystemProgram.transfer({
-          fromPubkey: owner,
-          toPubkey: adminKeypair!.publicKey,
-          lamports: loanLamports,
-        })
-      );
-    }
-
-    const signers: Keypair[] =
-      loanLamports > 0 ? [adminKeypair!, userKeypair] : [userKeypair];
-
-    const signature = await this.wallet.sendAndConfirmWithResubmits(
-      instructions,
-      signers,
-      { operationLabel: "WSOL unwrap" }
-    );
-
     return {
-      signature,
-      lamportsReceived: unwrapPlan.unwrapLamports,
+      signature: unwrapResult.signature,
+      lamportsReceived: unwrapResult.amountLamports,
     };
   }
 
@@ -836,28 +803,11 @@ export class SwapManager {
       throw new Error("Wrap amount must be a safe integer in lamports.");
     }
 
-    const { userKeypair } = request;
-    const { address, instructions: setupInstructions } =
-      await this.wallet.ensureAssociatedTokenAccount(
-        userKeypair.publicKey,
-        new PublicKey(WSOL_MINT),
-        userKeypair
-      );
-
-    const transferInstructions = [
-      SystemProgram.transfer({
-        fromPubkey: userKeypair.publicKey,
-        toPubkey: address,
-        lamports: lamportsNumber,
-      }),
-      createSyncNativeInstruction(address),
-    ];
-
-    return this.wallet.sendAndConfirmWithResubmits(
-      [...setupInstructions, ...transferInstructions],
-      [userKeypair],
-      { operationLabel: "Wrap SOL" }
-    );
+    return this.wallet.wrapSolWithKeypair({
+      owner: request.userKeypair.publicKey,
+      payer: request.userKeypair,
+      amountLamports: lamportsNumber,
+    });
   }
 
   async executeUnwrapSwap(
@@ -880,44 +830,15 @@ export class SwapManager {
     const adminKeypair =
       loanLamports > 0 ? this.wallet.getAdminKeypair() : undefined;
 
-    const instructions: TransactionInstruction[] = [];
-
-    if (loanLamports > 0) {
-      instructions.push(
-        SystemProgram.transfer({
-          fromPubkey: adminKeypair!.publicKey,
-          toPubkey: userKeypair.publicKey,
-          lamports: loanLamports,
-        })
-      );
-    }
-
-    const unwrapPlan = await this.wallet.buildUnwrapWsolPlan({
+    const { signature } = await this.wallet.unwrapSolWithKeypair({
       owner: userKeypair.publicKey,
       payer: userKeypair,
       amountLamports: lamportsNumber,
+      adminTopUpLamports: loanLamports,
+      adminKeypair,
     });
 
-    instructions.push(...unwrapPlan.instructions);
-
-    if (loanLamports > 0) {
-      instructions.push(
-        SystemProgram.transfer({
-          fromPubkey: userKeypair.publicKey,
-          toPubkey: adminKeypair!.publicKey,
-          lamports: loanLamports,
-        })
-      );
-    }
-
-    const signers: Keypair[] =
-      loanLamports > 0 ? [adminKeypair!, userKeypair] : [userKeypair];
-
-    return this.wallet.sendAndConfirmWithResubmits(
-      instructions,
-      signers,
-      { operationLabel: "Unwrap WSOL" }
-    );
+    return signature;
   }
 
   /**
