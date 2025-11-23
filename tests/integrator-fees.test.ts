@@ -109,6 +109,31 @@ describe("Integrator fee calculations", () => {
     expect(result?.payer).toBe("AdminPayer11111111111111111111111111111");
   });
 
+  test("treats unwrap as user-funded when it restores the SOL buffer", async () => {
+    __test_registerReferralEntry({
+      mint: ADMIN_REF_MINT1,
+      referralAccount: REFERRAL_ACCOUNT,
+      adminPayer: "AdminPayer11111111111111111111111111111",
+      adminCloseAuthority: "AdminCloseAuthority2222222222222222222222222222",
+      baseFeeBps: 85,
+    });
+
+    const result = await resolveIntegratorSwapParams({
+      inputMint: WSOL_MINT,
+      outputMint: "SOL",
+      inputTicker: "SOL",
+      inputDecimals: 9,
+      inputAmountRaw: JUPITER_MIN_SOL_BALANCE_LAMPORTS,
+      userPublicKey: "RecoveredUser",
+      availableSolLamports: 0,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.payerKind).toBe("user");
+    expect(result?.payer).toBe("RecoveredUser");
+    expect(result?.closeAuthority).toBe("RecoveredUser");
+  });
+
   test("returns admin payer and close authority when user lacks buffer", async () => {
     __test_registerReferralEntry({
       mint: ADMIN_REF_MINT2,

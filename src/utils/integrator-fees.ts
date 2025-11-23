@@ -94,6 +94,11 @@ export const resolveIntegratorSwapParams = async (
     solFeeBufferLamports,
   } = context;
 
+  const isUnwrappingSol = inputMint === WSOL_MINT && outputMint === "SOL";
+  const availableForFeesLamports = isUnwrappingSol
+    ? availableSolLamports + inputAmountRaw
+    : availableSolLamports;
+
   const referralConfig = getReferralTargetForPair(inputMint, outputMint);
   if (!referralConfig) {
     return null;
@@ -114,7 +119,7 @@ export const resolveIntegratorSwapParams = async (
   );
 
   if (
-    availableSolLamports >= effectiveSolFeeBufferLamports ||
+    availableForFeesLamports >= effectiveSolFeeBufferLamports ||
     !requiresAdminPayer
   ) {
     return {
@@ -128,7 +133,7 @@ export const resolveIntegratorSwapParams = async (
 
   const shortfallLamports = Math.max(
     0,
-    effectiveSolFeeBufferLamports - availableSolLamports
+    effectiveSolFeeBufferLamports - availableForFeesLamports
   );
   if (shortfallLamports <= 0) {
     return {
