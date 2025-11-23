@@ -145,6 +145,32 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
     restoreConn();
   });
 
+  test("skips wrap rent reserve when WSOL ATA already exists", async () => {
+    const user = Keypair.generate();
+    const amountLamports = 1_000_000;
+    const restoreConn = stubWalletConnection(
+      amountLamports + USER_SOL_MAX_BUFFER_LAMPORTS
+    );
+
+    const accountSpy = vi
+      .spyOn(splToken, "getAccount")
+      .mockResolvedValue({ amount: 0n } as any);
+
+    const quote = {
+      inputMint: "SOL",
+      outputMint: WSOL_MINT,
+      inputAmountRaw: String(amountLamports),
+      provider: "wrap" as const,
+    } as any;
+
+    await expect(
+      service.ensureUserSolBufferForSwap(quote as any, user)
+    ).resolves.toBe(0n);
+
+    accountSpy.mockRestore();
+    restoreConn();
+  });
+
   test("adds wrap rent reserve to buffer when provider quote is missing", async () => {
     const user = Keypair.generate();
     const wrapRentLamports = 2_000_000;

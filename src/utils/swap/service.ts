@@ -103,15 +103,21 @@ export class SwapService {
     let providerCosts: RouteLikeCosts | undefined = quote.providerQuote;
 
     const shouldIncludeWrapRentBuffer = async (): Promise<boolean> => {
-      if (!isSyntheticSolUnwrap) {
-        return quote.provider === "wrap";
-      }
-
       try {
         const wsolAta = await getAssociatedTokenAddress(
           new PublicKey(WSOL_MINT),
           userKeypair.publicKey
         );
+
+        if (isSyntheticSolWrap) {
+          await getAccount(this.wallet.getConnection(), wsolAta);
+          return false;
+        }
+
+        if (!isSyntheticSolUnwrap) {
+          return false;
+        }
+
         const account = await getAccount(this.wallet.getConnection(), wsolAta);
         const currentBalance = BigInt(account.amount);
         if (!quote.inputAmountRaw) {
@@ -120,7 +126,7 @@ export class SwapService {
 
         return BigInt(quote.inputAmountRaw) < currentBalance;
       } catch {
-        return false;
+        return isSyntheticSolWrap;
       }
     };
 
