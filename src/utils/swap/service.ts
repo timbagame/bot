@@ -1,4 +1,5 @@
-import type { Keypair } from "@solana/web3.js";
+import { PublicKey, type Keypair } from "@solana/web3.js";
+import { getAccount, getAssociatedTokenAddress } from "@solana/spl-token";
 
 import {
   USER_SOL_MAX_BUFFER_LAMPORTS,
@@ -101,7 +102,29 @@ export class SwapService {
 
     let providerCosts: RouteLikeCosts | undefined = quote.providerQuote;
 
-    if (quote.provider === "wrap" && this.feeBudget) {
+    const shouldIncludeWrapRentBuffer = async (): Promise<boolean> => {
+      if (!isSyntheticSolUnwrap) {
+        return quote.provider === "wrap";
+      }
+
+      try {
+        const wsolAta = await getAssociatedTokenAddress(
+          new PublicKey(WSOL_MINT),
+          userKeypair.publicKey
+        );
+        const account = await getAccount(this.wallet.getConnection(), wsolAta);
+        const currentBalance = BigInt(account.amount);
+        if (!quote.inputAmountRaw) {
+          return false;
+        }
+
+        return BigInt(quote.inputAmountRaw) < currentBalance;
+      } catch {
+        return false;
+      }
+    };
+
+    if (this.feeBudget && (await shouldIncludeWrapRentBuffer())) {
       const wrapLamports = await this.feeBudget
         .getWrapFeeBufferLamports()
         .catch(() => 0);
