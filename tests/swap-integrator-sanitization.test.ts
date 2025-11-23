@@ -281,11 +281,11 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
     restoreConn();
   });
 
-  test("includes ATA rent when partial unwrap would recreate WSOL account", async () => {
-    const user = Keypair.generate();
-    const unwrapLamports = 1_000_000;
-    const existingWsolLamports = 3_000_000;
-    const wrapRentLamports = 2_039_280;
+    test("includes ATA rent when partial unwrap would recreate WSOL account", async () => {
+      const user = Keypair.generate();
+      const unwrapLamports = 1_000_000;
+      const existingWsolLamports = 3_000_000;
+      const wrapRentLamports = 2_039_280;
 
     const feeBudgetMock = {
       getWrapFeeBufferLamports: vi.fn().mockResolvedValue(wrapRentLamports),
@@ -327,8 +327,56 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
 
     accountSpy.mockRestore();
     restoreConn();
-    feeSpy.mockRestore();
-  });
+      feeSpy.mockRestore();
+    });
+
+    test("uses WSOL rent rebate to satisfy partial unwrap buffer when SOL is short", async () => {
+      const user = Keypair.generate();
+      const unwrapLamports = 1_000_000;
+      const existingWsolLamports = 3_000_000;
+      const wrapRentLamports = 2_039_280;
+
+      const feeBudgetMock = {
+        getWrapFeeBufferLamports: vi.fn().mockResolvedValue(wrapRentLamports),
+        getDefaultWrapFeeBufferLamports: vi.fn().mockReturnValue(wrapRentLamports),
+      } as unknown as FeeBudgetManager;
+
+      const feeSpy = vi
+        .spyOn(FeeBudgetManager, "getInstance")
+        .mockReturnValue(feeBudgetMock);
+
+      const serviceWithMockBudget = new SwapService(wallet as any, stubBackend);
+
+      const providerCosts = { rentFeeLamports: wrapRentLamports } as any;
+      const helperCosts = calculateRouteCosts(providerCosts, {
+        paddingRatio: 0.25,
+        paddingExtraLamports: 200_000,
+        paddingRounding: "ceil",
+        baseRequiredLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
+        requiredStrategy: "max",
+      });
+
+      const restoreConn = stubWalletConnection(helperCosts.requiredLamports - 1);
+      const accountSpy = vi.spyOn(splToken, "getAccount").mockResolvedValue({
+        amount: BigInt(existingWsolLamports),
+        rentExemptReserve: BigInt(wrapRentLamports),
+      } as any);
+
+      const quote = {
+        inputMint: WSOL_MINT,
+        outputMint: "SOL",
+        inputAmountRaw: String(unwrapLamports),
+        provider: "unwrap" as const,
+      } as any;
+
+      await expect(
+        serviceWithMockBudget.ensureUserSolBufferForSwap(quote as any, user)
+      ).resolves.toBe(0n);
+
+      accountSpy.mockRestore();
+      restoreConn();
+      feeSpy.mockRestore();
+    });
 
   test("skips buffer enforcement for admin payer routes", async () => {
     const user = Keypair.generate();

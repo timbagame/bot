@@ -101,6 +101,7 @@ export class SwapService {
     }
 
     let providerCosts: RouteLikeCosts | undefined = quote.providerQuote;
+    let rentRebateLamports = 0n;
 
     const shouldIncludeWrapRentBuffer = async (): Promise<boolean> => {
       try {
@@ -124,7 +125,14 @@ export class SwapService {
           return false;
         }
 
-        return BigInt(quote.inputAmountRaw) < currentBalance;
+        const willLeaveRemainingBalance =
+          BigInt(quote.inputAmountRaw) < currentBalance;
+
+        if (willLeaveRemainingBalance) {
+          rentRebateLamports = BigInt(account.rentExemptReserve ?? 0n);
+        }
+
+        return willLeaveRemainingBalance;
       } catch {
         return isSyntheticSolWrap;
       }
@@ -167,7 +175,7 @@ export class SwapService {
       return 0n;
     }
 
-    const leftover = BigInt(userBalance) - amountLamports;
+    const leftover = BigInt(userBalance) + rentRebateLamports - amountLamports;
     const requiredLeftoverBig = BigInt(requiredLamports);
 
     if (leftover >= requiredLeftoverBig) {
