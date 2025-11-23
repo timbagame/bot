@@ -189,6 +189,25 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
     restoreConn();
   });
 
+  test("allows unwrap providers when SOL balance is below WSOL input amount", async () => {
+    const user = Keypair.generate();
+    const amountLamports = 2_000_000;
+    const restoreConn = stubWalletConnection(USER_SOL_MAX_BUFFER_LAMPORTS + 50_000);
+
+    const quote = {
+      inputMint: WSOL_MINT,
+      outputMint: "SOL",
+      inputAmountRaw: String(amountLamports),
+      provider: "unwrap" as const,
+    } as any;
+
+    await expect(
+      service.ensureUserSolBufferForSwap(quote as any, user)
+    ).resolves.toBeUndefined();
+
+    restoreConn();
+  });
+
   test("skips buffer enforcement for admin payer routes", async () => {
     const user = Keypair.generate();
     const restoreConn = stubWalletConnection(1);

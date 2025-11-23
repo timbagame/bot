@@ -79,11 +79,14 @@ export class SwapService {
       .getConnection()
       .getBalance(userKeypair.publicKey);
 
-    const amountLamports = quote.inputAmountRaw
-      ? BigInt(quote.inputAmountRaw)
-      : 0n;
+    const amountLamports =
+      quote.provider === "unwrap"
+        ? 0n
+        : quote.inputAmountRaw
+          ? BigInt(quote.inputAmountRaw)
+          : 0n;
 
-    if (userBalance < safeBigIntToNumber(amountLamports)) {
+    if (amountLamports > 0 && userBalance < safeBigIntToNumber(amountLamports)) {
       throw new Error(
         `Insufficient balance to attempt this swap. Add SOL or reduce the amount.`
       );
