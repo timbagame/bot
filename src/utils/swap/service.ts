@@ -14,6 +14,8 @@ export interface SwapBackend {
     request: SwapRequest & { integrator?: IntegratorSwapParams | null }
   ): Promise<SwapQuote>;
   executeJupiterSwap(request: SwapRequest, quote: SwapQuote): Promise<string>;
+  executeWrapSwap(request: SwapRequest, quote: SwapQuote): Promise<string>;
+  executeUnwrapSwap(request: SwapRequest, quote: SwapQuote): Promise<string>;
 }
 
 const safeBigIntToNumber = (value: bigint): number => {
@@ -132,6 +134,14 @@ export class SwapService {
       outputTicker: quote.outputTicker ?? "TOKEN",
       integrator: quote.integrator ?? null,
     };
+
+    if (quote.provider === "wrap") {
+      return this.backend.executeWrapSwap(request, quote);
+    }
+
+    if (quote.provider === "unwrap") {
+      return this.backend.executeUnwrapSwap(request, quote);
+    }
 
     return this.backend.executeJupiterSwap(request, quote);
   }

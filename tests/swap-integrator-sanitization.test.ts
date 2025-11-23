@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "bun:test";
+import { beforeEach, describe, expect, test, vi } from "bun:test";
 import { Keypair } from "@solana/web3.js";
 
 import {
@@ -103,6 +103,8 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
   const stubBackend: SwapBackend = {
     getQuote: vi.fn(),
     executeJupiterSwap: vi.fn(),
+    executeWrapSwap: vi.fn(),
+    executeUnwrapSwap: vi.fn(),
   };
   const service = new SwapService(wallet as any, stubBackend);
 
@@ -185,6 +187,65 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
     );
 
     restoreConn();
+  });
+});
+
+describe("SwapService.execute", () => {
+  const user = Keypair.generate();
+  const backend: SwapBackend = {
+    getQuote: vi.fn(),
+    executeJupiterSwap: vi.fn().mockResolvedValue("jupiter-tx"),
+    executeWrapSwap: vi.fn().mockResolvedValue("wrap-tx"),
+    executeUnwrapSwap: vi.fn().mockResolvedValue("unwrap-tx"),
+  };
+  const service = new SwapService(wallet as any, backend);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const baseQuote = {
+    inputMint: "SOL",
+    outputMint: WSOL_MINT,
+    inputAmount: "1000",
+    inputAmountRaw: "1000",
+    outputAmount: "1000",
+    estimatedRate: 1,
+    slippage: 0,
+  };
+
+  test("routes wrap provider to wrap executor", async () => {
+    const wrapQuote = { ...baseQuote, provider: "wrap" as const };
+
+    const txid = await service.execute(wrapQuote as any, user);
+
+    expect(txid).toBe("wrap-tx");
+    expect(backend.executeWrapSwap).toHaveBeenCalledTimes(1);
+    expect(backend.executeJupiterSwap).not.toHaveBeenCalled();
+  });
+
+  test("routes unwrap provider to unwrap executor", async () => {
+    const unwrapQuote = {
+      ...baseQuote,
+      provider: "unwrap" as const,
+      inputMint: WSOL_MINT,
+      outputMint: "SOL",
+    };
+
+    const txid = await service.execute(unwrapQuote as any, user);
+
+    expect(txid).toBe("unwrap-tx");
+    expect(backend.executeUnwrapSwap).toHaveBeenCalledTimes(1);
+    expect(backend.executeJupiterSwap).not.toHaveBeenCalled();
+  });
+
+  test("defaults to Jupiter executor for routed quotes", async () => {
+    const jupiterQuote = { ...baseQuote, provider: "jupiter" as const };
+
+    const txid = await service.execute(jupiterQuote as any, user);
+
+    expect(txid).toBe("jupiter-tx");
+    expect(backend.executeJupiterSwap).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -6,6 +6,7 @@ import {
   VersionedTransaction,
   SystemProgram,
 } from "@solana/web3.js";
+import { createSyncNativeInstruction } from "@solana/spl-token";
 import {
   JupiterClient,
   type JupiterQuoteResponse,
@@ -817,6 +818,69 @@ export class SwapManager {
       signature,
       lamportsReceived: unwrapPlan.unwrapLamports,
     };
+  }
+
+  async executeWrapSwap(request: SwapRequest, quote: SwapQuote): Promise<string> {
+    const lamports = BigInt(quote.inputAmountRaw ?? quote.inputAmount ?? "0");
+    if (lamports <= 0) {
+      throw new Error("Wrap amount must be greater than zero.");
+    }
+
+    const lamportsNumber = Number(lamports);
+    if (!Number.isSafeInteger(lamportsNumber)) {
+      throw new Error("Wrap amount must be a safe integer in lamports.");
+    }
+
+    const { userKeypair } = request;
+    const { address, instructions: setupInstructions } =
+      await this.wallet.ensureAssociatedTokenAccount(
+        userKeypair.publicKey,
+        new PublicKey(WSOL_MINT),
+        userKeypair
+      );
+
+    const transferInstructions = [
+      SystemProgram.transfer({
+        fromPubkey: userKeypair.publicKey,
+        toPubkey: address,
+        lamports: lamportsNumber,
+      }),
+      createSyncNativeInstruction(address),
+    ];
+
+    return this.wallet.sendAndConfirmWithResubmits(
+      [...setupInstructions, ...transferInstructions],
+      [userKeypair],
+      { operationLabel: "Wrap SOL" }
+    );
+  }
+
+  async executeUnwrapSwap(
+    request: SwapRequest,
+    quote: SwapQuote
+  ): Promise<string> {
+    const lamports = BigInt(quote.inputAmountRaw ?? quote.inputAmount ?? "0");
+    if (lamports <= 0) {
+      throw new Error("Unwrap amount must be greater than zero.");
+    }
+
+    const lamportsNumber = Number(lamports);
+    if (!Number.isSafeInteger(lamportsNumber)) {
+      throw new Error("Unwrap amount must be a safe integer in lamports.");
+    }
+
+    const { userKeypair } = request;
+    const unwrapPlan = await this.wallet.buildUnwrapWsolPlan({
+      owner: userKeypair.publicKey,
+      payer: userKeypair,
+      amountLamports: lamportsNumber,
+    });
+
+    return this.wallet.sendAndConfirmWithResubmits(
+      unwrapPlan.instructions,
+      [userKeypair],
+      { operationLabel: "Unwrap WSOL" }
+    );
   }
 
   /**
