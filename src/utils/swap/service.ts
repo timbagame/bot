@@ -71,7 +71,10 @@ export class SwapService {
       return;
     }
 
-    if (quote.integrator?.payerKind === "admin") {
+    const isSyntheticSolWrap = quote.provider === "wrap";
+    const isSyntheticSolUnwrap = quote.provider === "unwrap";
+
+    if (quote.integrator?.payerKind === "admin" && !isSyntheticSolWrap && !isSyntheticSolUnwrap) {
       return;
     }
 

@@ -261,11 +261,52 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
     const quote = {
       ...buildQuote("So11111111111111111111111111111111111111112", 0, 1),
       integrator: { payerKind: "admin" },
+      provider: "jupiter" as const,
     } as any;
 
     await expect(
       service.ensureUserSolBufferForSwap(quote as any, user)
     ).resolves.toBeUndefined();
+
+    restoreConn();
+  });
+
+  test("enforces buffer for wrap providers even when integrator payer is admin", async () => {
+    const user = Keypair.generate();
+    const restoreConn = stubWalletConnection(1);
+
+    const quote = {
+      inputMint: "SOL",
+      outputMint: WSOL_MINT,
+      inputAmountRaw: "2",
+      provider: "wrap" as const,
+      integrator: { payerKind: "admin" },
+    } as any;
+
+    await expect(
+      service.ensureUserSolBufferForSwap(quote as any, user)
+    ).rejects.toThrow(/Insufficient balance/);
+
+    restoreConn();
+  });
+
+  test("requires base buffer for unwrap providers even when integrator payer is admin", async () => {
+    const user = Keypair.generate();
+    const restoreConn = stubWalletConnection(1);
+
+    const quote = {
+      inputMint: WSOL_MINT,
+      outputMint: "SOL",
+      inputAmountRaw: "1000000",
+      provider: "unwrap" as const,
+      integrator: { payerKind: "admin" },
+    } as any;
+
+    await expect(
+      service.ensureUserSolBufferForSwap(quote as any, user)
+    ).rejects.toThrow(
+      new RegExp(wallet.formatSolBalance(USER_SOL_MAX_BUFFER_LAMPORTS))
+    );
 
     restoreConn();
   });
