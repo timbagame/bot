@@ -444,6 +444,28 @@ describe("SwapService.execute", () => {
     );
   });
 
+  test("does not borrow from admin when unwrap buffer is already satisfied", async () => {
+    restoreConn?.();
+    restoreConn = stubWalletConnection(USER_SOL_MAX_BUFFER_LAMPORTS * 10);
+
+    const unwrapQuote = {
+      ...baseQuote,
+      provider: "unwrap" as const,
+      inputMint: WSOL_MINT,
+      outputMint: "SOL",
+      integrator: { payerKind: "admin" },
+    };
+
+    const txid = await service.execute(unwrapQuote as any, user);
+
+    expect(txid).toBe("unwrap-tx");
+    expect(backend.executeUnwrapSwap).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ provider: "unwrap" }),
+      0n
+    );
+  });
+
   test("defaults to Jupiter executor for routed quotes", async () => {
     const jupiterQuote = { ...baseQuote, provider: "jupiter" as const };
 
