@@ -166,6 +166,54 @@ export class SwapManager {
     console.log(`   Network: ${this.network}`);
 
     console.log(`   🚀 Using Jupiter for quote`);
+
+    const normalizedInputTicker = inputTicker?.toUpperCase();
+    const normalizedOutputTicker = outputTicker?.toUpperCase();
+    const inputIsSolMint = this.isSolMint(inputMint);
+    const outputIsSolMint = this.isSolMint(outputMint);
+    const isWrapSwap =
+      inputIsSolMint &&
+      outputIsSolMint &&
+      normalizedInputTicker === "SOL" &&
+      normalizedOutputTicker === "WSOL";
+    const isUnwrapSwap =
+      inputIsSolMint &&
+      outputIsSolMint &&
+      normalizedInputTicker === "WSOL" &&
+      normalizedOutputTicker === "SOL";
+
+    if (isWrapSwap || isUnwrapSwap) {
+      console.log(
+        `   🧊 Handling ${isWrapSwap ? "wrap" : "unwrap"} without Jupiter`
+      );
+
+      const syntheticQuote: SwapQuote = {
+        inputMint,
+        outputMint,
+        inputAmount: amount,
+        inputAmountRaw: amount,
+        outputAmount: amount,
+        estimatedRate: 1,
+        slippage: 0,
+        provider: isWrapSwap ? "wrap" : "unwrap",
+        priceImpact: "0",
+        platformFee: null,
+        providerQuoteTimestamp: Date.now(),
+        integrator: request.integrator ?? null,
+        integratorApplied: Boolean(request.integrator),
+        inputDecimals: request.inputDecimals,
+        outputDecimals: request.outputDecimals,
+        inputTicker,
+        outputTicker,
+      };
+
+      return syntheticQuote;
+    }
+
+    if (inputMint === outputMint) {
+      throw new Error("Cannot swap the same token");
+    }
+
     const quoteRequest: JupiterQuoteRequest = {
       inputMint,
       outputMint,
