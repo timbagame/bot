@@ -87,10 +87,11 @@ describe("SwapManager wrap/unwrap helpers", () => {
     );
   });
 
-  test("executeUnwrapSwap includes admin signer when payerKind is admin", async () => {
+  test("executeUnwrapSwap skips admin signer when payerKind is admin and no loan required", async () => {
     const wallet = createWalletStub();
-    const adminKeypair = Keypair.generate();
-    wallet.getAdminKeypair = vi.fn().mockReturnValue(adminKeypair);
+    wallet.getAdminKeypair = vi.fn(() => {
+      throw new Error("should not request admin keypair");
+    });
     const manager = createManager(wallet);
 
     const signature = await manager.executeUnwrapSwap(
@@ -106,7 +107,7 @@ describe("SwapManager wrap/unwrap helpers", () => {
     expect(wallet.unwrapSolWithKeypair).toHaveBeenCalledWith(
       expect.objectContaining({
         adminTopUpLamports: 0,
-        adminKeypair,
+        adminKeypair: undefined,
       })
     );
   });
