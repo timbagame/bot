@@ -113,7 +113,6 @@ import { patchReplyBehavior } from "./utils/reply-patch";
 import { buildTransactionLinkMessage } from "./utils/network-detector";
 import { buildProcessingStatus } from "./utils/trade-ui";
 import { respondWithMenu } from "./utils/menu-response";
-import { parseDecimalAmount } from "./utils/amount";
 import { handleCoinflipCommand } from "./handlers/game";
 import { createGameSetupModule, GAME_SETUP_COPY } from "./handlers/game-setup";
 import { createGameCommandsModule } from "./handlers/game-commands";
@@ -3172,153 +3171,6 @@ bot.command("tip", handleTipCommand);
 
 export const __test_handleTipCommand = handleTipCommand;
 
-bot.command("wrap", async (ctx: Context) => {
-  const telegramId = await getRequiredTelegramIdForContext(ctx, "wrap command");
-  if (telegramId == null) {
-    return;
-  }
-  const args = ctx.message?.text?.split(" ");
-
-  if (!args) return;
-
-  const amountArg = args[1];
-  if (!amountArg) {
-    return replyUsageError(
-      ctx,
-      "Usage: /wrap &lt;amount&gt;\nExample: /wrap 0.1"
-    );
-  }
-
-  let amount: number;
-  try {
-    amount = parseDecimalAmount(amountArg, 9, { returnType: "number" });
-  } catch {
-    return replyUsageError(
-      ctx,
-      "Usage: /wrap &lt;amount&gt;\nExample: /wrap 0.1"
-    );
-  }
-
-  let processingMessageId: number | null = null;
-
-  try {
-    const result = await executeWrapFlow(telegramId, amount, {
-      onProcessing: async (formattedAmount) => {
-        const message = await ctx.reply(
-          `Processing Wrapping ${formattedAmount} SOL to WSOL...`,
-          {
-            reply_to_message_id: ctx.message?.message_id,
-          }
-        );
-        processingMessageId = message.message_id;
-      },
-      onInsufficientBalance: async (formattedAmount) => {
-        await replyToMessage(
-          ctx,
-          `❌ <b>Wrap Failed</b>\n\nNot enough SOL to wrap ${formattedAmount}.\nKeep at least ${MIN_SOL_FOR_TX} SOL for fees and try again.`
-        );
-      },
-      onSuccess: async ({ signature, formattedAmount }) => {
-        if (processingMessageId == null) {
-          return;
-        }
-
-        const successView = renderSolConversionSuccess({
-          kind: "wrap",
-          formattedAmount,
-          signature,
-        });
-
-        await ctx.api.editMessageText(
-          ctx.chat!.id,
-          processingMessageId,
-          successView.text,
-          {
-            parse_mode: "HTML",
-            link_preview_options: { is_disabled: successView.disablePreview },
-          }
-        );
-      },
-      onError: async (error) => {
-        if (processingMessageId != null) {
-          await handleTransactionError(ctx, error, processingMessageId, wallet);
-        } else {
-          const userFriendlyError = formatUserFriendlyError(error, wallet);
-          await replyToMessage(ctx, userFriendlyError);
-          if (error && typeof error === "object") {
-            (error as any).__alreadyNotified = true;
-          }
-        }
-      },
-    });
-
-    if (result.status === "insufficient" && processingMessageId != null) {
-      try {
-        await ctx.api.deleteMessage(ctx.chat!.id, processingMessageId);
-      } catch {}
-    }
-  } catch (error: any) {
-    await handleCommandError(ctx, error, "wrap");
-  }
-});
-
-bot.command("unwrap", async (ctx: Context) => {
-  const telegramId = await getRequiredTelegramIdForContext(
-    ctx,
-    "unwrap command"
-  );
-  if (telegramId == null) {
-    return;
-  }
-
-  const processingMsg = await ctx.reply("Processing unwrap...", {
-    reply_to_message_id: ctx.message?.message_id,
-  });
-
-  try {
-    await executeUnwrapFlow(telegramId, {
-      onProcessing: async () => {},
-      onNoBalance: async () => {
-        await ctx.api.editMessageText(
-          ctx.chat!.id,
-          processingMsg.message_id,
-          `❌ <b>Unwrap Failed</b>\n\nYour WSOL account is already empty.`,
-          { parse_mode: "HTML" }
-        );
-      },
-      onSuccess: async ({ signature, formattedAmount }) => {
-        const { message: linkLine } = buildTransactionLinkMessage({
-          signature,
-          networkOverride: process.env["RPC_URL"],
-          linkText: "🔗 View transaction",
-          format: "html",
-        });
-        const linkSuffix = linkLine ? `\n\n${linkLine}` : "";
-
-        await ctx.api.editMessageText(
-          ctx.chat!.id,
-          processingMsg.message_id,
-          `✅ <b>Unwrap Completed</b>\n\nUnwrapped ${formattedAmount} WSOL to SOL${linkSuffix}`,
-          {
-            parse_mode: "HTML",
-            link_preview_options: { is_disabled: Boolean(linkLine) },
-          }
-        );
-      },
-      onError: async (error) => {
-        await handleTransactionError(
-          ctx,
-          error,
-          processingMsg.message_id,
-          wallet
-        );
-      },
-    });
-  } catch (error) {
-    await handleTransactionError(ctx, error, processingMsg.message_id, wallet);
-  }
-});
-
 // Transaction cache for trade operations with TTL
 const TRANSACTION_CACHE_TTL_MS = 5 * 60 * 1000;
 const transactionCache = createExpiringCache<TransactionCacheEntry>(
@@ -3472,8 +3324,6 @@ bot.command("help", async (ctx: Context) => {
     "",
     "<b>💰 Wallet Commands:</b>",
     "/start, /balance - Show your wallet address and balances",
-    "/wrap &lt;amount&gt; - Convert SOL to WSOL",
-    "/unwrap - Convert your entire WSOL balance back to SOL",
     "/withdraw &lt;address&gt; &lt;amount&gt; [TOKEN] - Withdraw tokens to external wallet",
     "/wh &lt;address&gt; &lt;amount&gt; [TOKEN] - Shorthand for withdraw command",
     "/tip @username &lt;amount&gt; [TOKEN] - Reply to a message or include @username to tip",
@@ -3798,6 +3648,157 @@ bot.callbackQuery(
     { action: "cmd_privatekey", errorAck: "❌ Error showing private key" }
   )
 );
+
+type SolWsolSwapDeps = {
+  executeWrapFlow: typeof executeWrapFlow;
+  executeUnwrapFlow: typeof executeUnwrapFlow;
+  respondWithMenu: typeof respondWithMenu;
+  safeAnswerCallbackQuery: typeof safeAnswerCallbackQuery;
+  renderSolConversionSuccess: typeof renderSolConversionSuccess;
+  formatUserFriendlyError: typeof formatUserFriendlyError;
+  wallet: WalletManager;
+};
+
+const handleSolWsolSwap = async (
+  ctx: Context,
+  transaction: PendingSwapTransaction,
+  amountLamports: number,
+  deps: Partial<SolWsolSwapDeps> = {}
+): Promise<"success" | "insufficient" | "empty" | "error"> => {
+  const resolvedDeps: SolWsolSwapDeps = {
+    executeWrapFlow,
+    executeUnwrapFlow,
+    respondWithMenu,
+    safeAnswerCallbackQuery,
+    renderSolConversionSuccess,
+    formatUserFriendlyError,
+    wallet,
+    ...deps,
+  };
+
+  const telegramId = BigInt(transaction.userId);
+  const fallbackAmountLabel = resolvedDeps.wallet.formatSolBalance(amountLamports);
+
+  if (
+    transaction.fromToken === "SOL" &&
+    transaction.toToken === "WSOL"
+  ) {
+    const result = await resolvedDeps.executeWrapFlow(telegramId, amountLamports, {
+      onProcessing: async (formattedAmount) => {
+        const amountLabel = escapeHtml(
+          formattedAmount ?? fallbackAmountLabel
+        );
+        await resolvedDeps.respondWithMenu(ctx, {
+          text: `🔄 <b>Processing Wrap</b>\n\nWrapping ${amountLabel} SOL to WSOL...\n\n<i>Please wait...</i>`,
+          keyboard: new InlineKeyboard(),
+        });
+      },
+      onInsufficientBalance: async (formattedAmount) => {
+        await resolvedDeps.respondWithMenu(ctx, {
+          text: `❌ <b>Wrap Failed</b>\n\nNot enough SOL to wrap ${escapeHtml(
+            formattedAmount
+          )}.\nKeep at least ${MIN_SOL_FOR_TX} SOL for fees and try again.`,
+          keyboard: createBackToWalletKeyboard(),
+        });
+      },
+      onSuccess: async ({ signature, formattedAmount }) => {
+        const successView = resolvedDeps.renderSolConversionSuccess({
+          kind: "wrap",
+          formattedAmount,
+          signature,
+        });
+
+        await resolvedDeps.respondWithMenu(ctx, {
+          text: successView.text,
+          keyboard: createBackToWalletKeyboard(),
+          disableLinkPreview: successView.disablePreview,
+        });
+      },
+      onError: async (error) => {
+        const userFriendlyError = resolvedDeps.formatUserFriendlyError(
+          error,
+          resolvedDeps.wallet
+        );
+        await resolvedDeps.respondWithMenu(ctx, {
+          text: userFriendlyError,
+          keyboard: createBackToWalletKeyboard(),
+        });
+      },
+    });
+
+    if (result.status === "success") {
+      await resolvedDeps.safeAnswerCallbackQuery(
+        ctx,
+        "✅ Wrapped SOL to WSOL"
+      );
+    } else if (result.status === "insufficient") {
+      await resolvedDeps.safeAnswerCallbackQuery(ctx, "❌ Not enough SOL");
+    } else {
+      await resolvedDeps.safeAnswerCallbackQuery(ctx, "❌ Wrap failed");
+    }
+
+    return result.status;
+  }
+
+  const result = await resolvedDeps.executeUnwrapFlow(telegramId, {
+    expectedAmountLamports: amountLamports,
+    unwrapLamports: amountLamports,
+    onProcessing: async (formattedAmount) => {
+      const amountLabel = escapeHtml(
+        formattedAmount ?? fallbackAmountLabel
+      );
+      await resolvedDeps.respondWithMenu(ctx, {
+        text: `🔄 <b>Processing Unwrap</b>\n\nUnwrapping ${amountLabel} WSOL to SOL...\n\n<i>Please wait...</i>`,
+        keyboard: new InlineKeyboard(),
+      });
+    },
+    onNoBalance: async () => {
+      await resolvedDeps.respondWithMenu(ctx, {
+        text: `❌ <b>Unwrap Failed</b>\n\nYour WSOL account is already empty.`,
+        keyboard: createBackToWalletKeyboard(),
+      });
+    },
+    onSuccess: async ({ signature, formattedAmount }) => {
+      const successView = resolvedDeps.renderSolConversionSuccess({
+        kind: "unwrap",
+        formattedAmount,
+        signature,
+      });
+
+      await resolvedDeps.respondWithMenu(ctx, {
+        text: successView.text,
+        keyboard: createBackToWalletKeyboard(),
+        disableLinkPreview: successView.disablePreview,
+      });
+    },
+    onError: async (error) => {
+      const userFriendlyError = resolvedDeps.formatUserFriendlyError(
+        error,
+        resolvedDeps.wallet
+      );
+      await resolvedDeps.respondWithMenu(ctx, {
+        text: userFriendlyError,
+        keyboard: createBackToWalletKeyboard(),
+      });
+    },
+  });
+
+  if (result.status === "success") {
+    await resolvedDeps.safeAnswerCallbackQuery(
+      ctx,
+      "✅ Unwrapped WSOL to SOL"
+    );
+  } else if (result.status === "empty") {
+    await resolvedDeps.safeAnswerCallbackQuery(ctx, "ℹ️ No WSOL to unwrap");
+  } else {
+    await resolvedDeps.safeAnswerCallbackQuery(ctx, "❌ Unwrap failed");
+  }
+
+  return result.status;
+};
+
+export const __test_handleSolWsolSwap = handleSolWsolSwap;
+
 // Handle swap confirmation
 bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
   try {
@@ -3839,6 +3840,21 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
       parseMode: "HTML",
       keyboard,
     });
+
+    const amountLamports = Number(transaction.rawAmount);
+    const isSolWrapSwap =
+      transaction.fromToken === "SOL" && transaction.toToken === "WSOL";
+    const isSolUnwrapSwap =
+      transaction.fromToken === "WSOL" && transaction.toToken === "SOL";
+
+    if (
+      (isSolWrapSwap || isSolUnwrapSwap) &&
+      Number.isSafeInteger(amountLamports) &&
+      amountLamports > 0
+    ) {
+      await handleSolWsolSwap(ctx, transaction, amountLamports);
+      return;
+    }
 
     // Execute actual swap transaction
     try {
@@ -4209,8 +4225,6 @@ const HELP_SECTIONS: Record<HelpSectionKey, HelpSectionConfig> = {
       "💰 <b>Wallet Commands</b>\n\n" +
       "<code>/start</code> - Show your wallet info\n" +
       "<code>/balance</code> - Show detailed balances\n" +
-      "<code>/wrap &lt;amount&gt;</code> - Convert SOL to WSOL\n" +
-      "<code>/unwrap</code> - Convert WSOL back to SOL\n" +
       "<code>/withdraw &lt;address&gt; &lt;amount&gt;</code> - Send tokens\n" +
       "<code>/tip @username &lt;amount&gt;</code> - Tip a user (reply or @mention)\n\n" +
       "💡 <i>All wallet commands work with different tokens</i>",
@@ -4269,9 +4283,7 @@ const HELP_SECTIONS: Record<HelpSectionKey, HelpSectionConfig> = {
     text:
       "📋 <b>Command Examples</b>\n\n" +
       "<b>💰 Wallet Examples:</b>\n" +
-      "<code>/withdraw [address] 50 TIMBA</code>\n" +
-      "<code>/wrap 1</code> (converts 1 SOL to WSOL)\n\n" +
-      "<code>/unwrap</code> (convert your entire WSOL balance back to SOL)\n\n" +
+      "<code>/withdraw [address] 50 TIMBA</code>\n\n" +
       "<b>🎮 Game Examples:</b>\n" +
       "<code>/coinflip 100 TIMBA 2</code> (2-player, 100 TIMBA each)\n" +
       "<code>/giveaway 500 TIMBA 5</code> (5 players, 500 TIMBA prize)\n\n" +

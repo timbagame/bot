@@ -2495,12 +2495,14 @@ export class WalletManager {
   }
 
   public async unwrapSol(
-    telegramId: bigint
+    telegramId: bigint,
+    amountLamports?: number
   ): Promise<{ signature: string; amountLamports: number }> {
     const userKeypair = this.getKeyPair(telegramId);
     const unwrapPlan = await this.buildUnwrapWsolPlan({
       owner: userKeypair.publicKey,
       payer: userKeypair,
+      amountLamports,
     });
 
     const signature = await this.sendAndConfirmWithResubmits(

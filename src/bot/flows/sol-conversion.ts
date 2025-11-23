@@ -55,6 +55,7 @@ export type UnwrapFlowResult = {
 
 export type UnwrapFlowHandlers = {
   expectedAmountLamports?: number;
+  unwrapLamports?: number;
   onProcessing: (formattedAmount?: string) => Promise<void>;
   onNoBalance: () => Promise<void>;
   onSuccess: (
@@ -254,6 +255,8 @@ export const createSolConversionUtilities = ({
     telegramId: bigint,
     handlers: UnwrapFlowHandlers
   ): Promise<UnwrapFlowResult> => {
+    const targetLamports = handlers.unwrapLamports ?? handlers.expectedAmountLamports;
+
     const result = await executeSolConversionFlow({
       telegramId,
       formatAmount: (lamports) => wallet.formatSolBalance(lamports),
@@ -272,7 +275,7 @@ export const createSolConversionUtilities = ({
 
         return { status: "ok" } as const;
       },
-      perform: async () => wallet.unwrapSol(telegramId),
+      perform: async () => wallet.unwrapSol(telegramId, targetLamports),
       onProcessing: handlers.onProcessing,
       onSuccess: handlers.onSuccess,
       onEmpty: handlers.onNoBalance,
