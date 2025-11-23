@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import { Keypair } from "@solana/web3.js";
 
 import {
@@ -121,6 +121,29 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
     restoreConn();
   });
 
+  test("requires fee buffer even when wrap quotes omit provider details", async () => {
+    const user = Keypair.generate();
+    const amountLamports = 1_000_000;
+    const restoreConn = stubWalletConnection(
+      amountLamports + USER_SOL_MAX_BUFFER_LAMPORTS - 1
+    );
+
+    const quote = {
+      inputMint: "SOL",
+      outputMint: WSOL_MINT,
+      inputAmountRaw: String(amountLamports),
+      provider: "wrap",
+    } as any;
+
+    await expect(
+      service.ensureUserSolBufferForSwap(quote as any, user)
+    ).rejects.toThrow(
+      new RegExp(wallet.formatSolBalance(USER_SOL_MAX_BUFFER_LAMPORTS))
+    );
+
+    restoreConn();
+  });
+
   test("skips buffer enforcement for admin payer routes", async () => {
     const user = Keypair.generate();
     const restoreConn = stubWalletConnection(1);
@@ -199,9 +222,15 @@ describe("SwapService.execute", () => {
     executeUnwrapSwap: vi.fn().mockResolvedValue("unwrap-tx"),
   };
   const service = new SwapService(wallet as any, backend);
+  let restoreConn: (() => void) | undefined;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    restoreConn = stubWalletConnection(1_000_000_000);
+  });
+
+  afterEach(() => {
+    restoreConn?.();
   });
 
   const baseQuote = {

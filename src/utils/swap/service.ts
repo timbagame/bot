@@ -59,11 +59,6 @@ export class SwapService {
     quote: SwapQuote,
     userKeypair: Keypair
   ): Promise<void> {
-    const providerQuote = quote.providerQuote;
-    if (!providerQuote) {
-      return;
-    }
-
     if (quote.inputMint !== WSOL_MINT && quote.inputMint !== "SOL") {
       return;
     }
@@ -87,7 +82,7 @@ export class SwapService {
     }
 
     const { routeLamports, requiredLamports } = calculateRouteCosts(
-      providerQuote,
+      quote.providerQuote,
       {
         paddingRatio: 0.25,
         paddingExtraLamports: 200_000,
@@ -116,7 +111,7 @@ export class SwapService {
     );
 
     throw new Error(
-      `This route (${providerQuote.router ?? "iris"}) needs ${formattedRoute} SOL for rent and expects you to keep ${formattedRequired} SOL in the wallet. Reduce the swap amount or keep ${formattedDeficit} more SOL before retrying.`
+      `This route (${quote.providerQuote?.router ?? quote.provider ?? "iris"}) needs ${formattedRoute} SOL for rent and expects you to keep ${formattedRequired} SOL in the wallet. Reduce the swap amount or keep ${formattedDeficit} more SOL before retrying.`
     );
   }
 
