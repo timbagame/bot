@@ -188,6 +188,11 @@ export class SwapManager {
         `   🧊 Handling ${isWrapSwap ? "wrap" : "unwrap"} without Jupiter`
       );
 
+      const integrator =
+        isUnwrapSwap && request.integrator?.payerKind === "admin"
+          ? { ...request.integrator }
+          : null;
+
       const syntheticQuote: SwapQuote = {
         inputMint,
         outputMint,
@@ -200,7 +205,7 @@ export class SwapManager {
         priceImpact: "0",
         platformFee: null,
         providerQuoteTimestamp: Date.now(),
-        integrator: null,
+        integrator,
         integratorApplied: false,
         inputDecimals: request.inputDecimals,
         outputDecimals: request.outputDecimals,
