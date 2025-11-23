@@ -87,6 +87,30 @@ describe("SwapManager wrap/unwrap helpers", () => {
     );
   });
 
+  test("executeUnwrapSwap includes admin signer when payerKind is admin", async () => {
+    const wallet = createWalletStub();
+    const adminKeypair = Keypair.generate();
+    wallet.getAdminKeypair = vi.fn().mockReturnValue(adminKeypair);
+    const manager = createManager(wallet);
+
+    const signature = await manager.executeUnwrapSwap(
+      baseRequest as any,
+      {
+        inputAmountRaw: "5000",
+        provider: "unwrap",
+        integrator: { payerKind: "admin" },
+      } as any
+    );
+
+    expect(signature).toBe("UNWRAP_SIG");
+    expect(wallet.unwrapSolWithKeypair).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adminTopUpLamports: 0,
+        adminKeypair,
+      })
+    );
+  });
+
   test("jit unwrap helper reuses wallet unwrap implementation", async () => {
     const wallet = createWalletStub();
     const adminKeypair = Keypair.generate();

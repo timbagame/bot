@@ -1778,7 +1778,13 @@ export class WalletManager {
       await this.buildUnwrapWsolPlan({ owner, payer, amountLamports });
 
     const instructions: TransactionInstruction[] = [];
-    const signers: Keypair[] = loanLamports > 0 ? [adminKeypair!, payer] : [payer];
+    const signers: Keypair[] = [];
+
+    if (adminKeypair) {
+      signers.push(adminKeypair);
+    }
+
+    signers.push(payer);
 
     if (loanLamports > 0) {
       instructions.push(
