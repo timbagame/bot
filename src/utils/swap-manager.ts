@@ -762,7 +762,7 @@ export class SwapManager {
       payer: userKeypair,
       amountLamports: unwrapLamports,
       adminTopUpLamports: loanLamports,
-      adminKeypair,
+      adminKeypair: loanLamports > 0 ? adminKeypair : undefined,
     });
 
     const formattedUnwrap = formatAmount(
@@ -827,9 +827,10 @@ export class SwapManager {
 
     const { userKeypair } = request;
     const loanLamports = Math.max(0, Math.trunc(Number(adminTopUpLamports)));
-    const adminKeypair = quote.integrator?.payerKind === "admin"
-      ? this.wallet.getAdminKeypair()
-      : undefined;
+    const adminKeypair =
+      loanLamports > 0 && quote.integrator?.payerKind === "admin"
+        ? this.wallet.getAdminKeypair()
+        : undefined;
     const payer = adminKeypair ?? userKeypair;
 
     const { signature } = await this.wallet.unwrapSolWithKeypair({

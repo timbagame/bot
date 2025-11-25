@@ -91,10 +91,9 @@ describe("SwapManager wrap/unwrap helpers", () => {
     );
   });
 
-  test("executeUnwrapSwap honors admin payer even when no loan is required", async () => {
+  test("executeUnwrapSwap uses user payer when no loan is required", async () => {
     const wallet = createWalletStub();
-    const adminKeypair = Keypair.generate();
-    wallet.getAdminKeypair = vi.fn().mockReturnValue(adminKeypair);
+    wallet.getAdminKeypair = vi.fn();
     const manager = createManager(wallet);
 
     const signature = await manager.executeUnwrapSwap(
@@ -107,12 +106,11 @@ describe("SwapManager wrap/unwrap helpers", () => {
     );
 
     expect(signature).toBe("UNWRAP_SIG");
-    expect(wallet.getAdminKeypair).toHaveBeenCalled();
     expect(wallet.unwrapSolWithKeypair).toHaveBeenCalledWith(
       expect.objectContaining({
-        payer: adminKeypair,
+        payer: baseRequest.userKeypair,
         adminTopUpLamports: 0,
-        adminKeypair,
+        adminKeypair: undefined,
       })
     );
   });

@@ -1780,15 +1780,15 @@ export class WalletManager {
     const instructions: TransactionInstruction[] = [];
     const signers: Keypair[] = [];
 
-    if (adminKeypair) {
-      signers.push(adminKeypair);
-    }
-
-    if (!signers.some((signer) => signer === payer)) {
-      signers.push(payer);
-    }
-
     if (loanLamports > 0) {
+      if (adminKeypair) {
+        signers.push(adminKeypair);
+      }
+
+      if (!signers.some((signer) => signer === payer)) {
+        signers.push(payer);
+      }
+
       instructions.push(
         SystemProgram.transfer({
           fromPubkey: adminKeypair!.publicKey,
@@ -1796,6 +1796,8 @@ export class WalletManager {
           lamports: loanLamports,
         })
       );
+    } else if (!signers.some((signer) => signer === payer)) {
+      signers.push(payer);
     }
 
     instructions.push(...unwrapInstructions);
