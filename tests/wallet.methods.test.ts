@@ -1,6 +1,12 @@
 import { expect, test, vi } from "bun:test";
 import { Buffer } from "buffer";
-import { Connection, Keypair, PublicKey } from "@solana/web3.js";
+import {
+  Connection,
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  TransactionInstruction,
+} from "@solana/web3.js";
 import { WalletManager } from "../src/utils/wallet";
 
 class ConnFailTime implements Partial<Connection> {
@@ -144,6 +150,54 @@ test("unwrapSolWithKeypair skips admin signer when no loan is required", async (
     signature: "UNWRAP_SIG",
     amountLamports: 1_000,
     remainingLamports: 0,
+  });
+});
+
+test("unwrapSolWithKeypair keeps user as payer when admin lends fees", async () => {
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  const payer = Keypair.generate();
+  const adminKeypair = Keypair.generate();
+  const unwrapPlan = {
+    instructions: [
+      new TransactionInstruction({
+        keys: [],
+        programId: SystemProgram.programId,
+        data: Buffer.alloc(0),
+      }),
+    ],
+    unwrapLamports: 2_000,
+    remainingLamports: 500,
+  };
+
+  (wm as any).buildUnwrapWsolPlan = vi.fn().mockResolvedValue(unwrapPlan);
+  const sendSpy = vi
+    .spyOn(wm as any, "sendAndConfirmWithResubmits")
+    .mockResolvedValue("UNWRAP_SIG");
+
+  const result = await wm.unwrapSolWithKeypair({
+    owner: payer.publicKey,
+    payer,
+    adminKeypair,
+    adminTopUpLamports: 750,
+    amountLamports: 2_000,
+  });
+
+  expect(sendSpy).toHaveBeenCalledTimes(1);
+  const [ixs, signers, options] = sendSpy.mock.calls[0]!;
+
+  expect(signers).toEqual([payer, adminKeypair]);
+  expect(ixs[0]!.keys[0]!.pubkey).toEqual(adminKeypair.publicKey);
+  expect(ixs[ixs.length - 1]!.keys[0]!.pubkey).toEqual(payer.publicKey);
+  expect(options).toEqual({ operationLabel: "Unwrap WSOL" });
+
+  expect(result).toEqual({
+    signature: "UNWRAP_SIG",
+    amountLamports: 2_000,
+    remainingLamports: 500,
   });
 });
 

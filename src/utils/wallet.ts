@@ -1778,15 +1778,11 @@ export class WalletManager {
       await this.buildUnwrapWsolPlan({ owner, payer, amountLamports });
 
     const instructions: TransactionInstruction[] = [];
-    const signers: Keypair[] = [];
+    const signers: Keypair[] = [payer];
 
     if (loanLamports > 0) {
       if (adminKeypair) {
         signers.push(adminKeypair);
-      }
-
-      if (!signers.some((signer) => signer === payer)) {
-        signers.push(payer);
       }
 
       instructions.push(
@@ -1796,11 +1792,6 @@ export class WalletManager {
           lamports: loanLamports,
         })
       );
-    } else {
-      // When no admin loan is required, do not request an admin signature.
-      if (!signers.some((signer) => signer === payer)) {
-        signers.push(payer);
-      }
     }
 
     instructions.push(...unwrapInstructions);
