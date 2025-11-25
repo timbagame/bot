@@ -1796,8 +1796,11 @@ export class WalletManager {
           lamports: loanLamports,
         })
       );
-    } else if (!signers.some((signer) => signer === payer)) {
-      signers.push(payer);
+    } else {
+      // When no admin loan is required, do not request an admin signature.
+      if (!signers.some((signer) => signer === payer)) {
+        signers.push(payer);
+      }
     }
 
     instructions.push(...unwrapInstructions);

@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test, vi } from "bun:test";
 import { Buffer } from "buffer";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { WalletManager } from "../src/utils/wallet";
@@ -108,6 +108,43 @@ test("wrapSol rejects non-positive amounts", async () => {
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
   );
   await expect(wm.wrapSol(1n, 0)).rejects.toThrow(/greater than zero/);
+});
+
+test("unwrapSolWithKeypair skips admin signer when no loan is required", async () => {
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  const payer = Keypair.generate();
+  const adminKeypair = Keypair.generate();
+  const unwrapPlan = {
+    instructions: ["UNWRAP"] as any,
+    unwrapLamports: 1_000,
+    remainingLamports: 0,
+  };
+
+  (wm as any).buildUnwrapWsolPlan = vi.fn().mockResolvedValue(unwrapPlan);
+  const sendSpy = vi
+    .spyOn(wm as any, "sendAndConfirmWithResubmits")
+    .mockResolvedValue("UNWRAP_SIG");
+
+  const result = await wm.unwrapSolWithKeypair({
+    owner: payer.publicKey,
+    payer,
+    adminKeypair,
+    adminTopUpLamports: 0,
+    amountLamports: 1_000,
+  });
+
+  expect(sendSpy).toHaveBeenCalledWith(unwrapPlan.instructions, [payer], {
+    operationLabel: "Unwrap WSOL",
+  });
+  expect(result).toEqual({
+    signature: "UNWRAP_SIG",
+    amountLamports: 1_000,
+    remainingLamports: 0,
+  });
 });
 
 test("transferSol preserves lamports for dust transfers", async () => {
