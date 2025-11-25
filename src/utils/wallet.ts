@@ -1784,7 +1784,9 @@ export class WalletManager {
       signers.push(adminKeypair);
     }
 
-    signers.push(payer);
+    if (!signers.some((signer) => signer === payer)) {
+      signers.push(payer);
+    }
 
     if (loanLamports > 0) {
       instructions.push(
