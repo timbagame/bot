@@ -1618,9 +1618,15 @@ const processGameCompletion = async (
           }
         }
         const safeWinnerDisplay = escapeHtml(winnerDisplay);
+        const gameTypeLabel =
+          gameData?.game_type === "coinflip"
+            ? "coinflip"
+            : gameData?.game_type === "giveaway"
+            ? "giveaway"
+            : "game";
         await sendReplyToGameMessage(
           target,
-          `🏆 <b>${safeWinnerDisplay}</b> won the game!${prizeDetails}`
+          `🏆 <b>${safeWinnerDisplay}</b> won the ${gameTypeLabel}!${prizeDetails}`
         );
       } catch (winnerAnnouncementError) {
         console.error(
