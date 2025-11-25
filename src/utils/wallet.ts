@@ -1766,6 +1766,10 @@ export class WalletManager {
     amountLamports: number;
     remainingLamports: number;
   }> {
+    // When an admin lends lamports for the unwrap fee, we still keep the user
+    // (payer) as the transaction fee payer. The admin funds are front-loaded
+    // via a transfer, the unwrap instructions run with the user payer, and the
+    // same transaction returns the loaned lamports back to the admin.
     const loanLamports = Math.max(0, Math.trunc(Number(adminTopUpLamports)));
 
     if (loanLamports > 0 && !adminKeypair) {
