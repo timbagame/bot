@@ -831,7 +831,7 @@ export class SwapManager {
       loanLamports > 0 && quote.integrator?.payerKind === "admin"
         ? this.wallet.getAdminKeypair()
         : undefined;
-    const payer = adminKeypair ?? userKeypair;
+    const payer = userKeypair;
 
     const { signature } = await this.wallet.unwrapSolWithKeypair({
       owner: userKeypair.publicKey,

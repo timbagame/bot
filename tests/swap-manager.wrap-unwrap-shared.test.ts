@@ -83,7 +83,7 @@ describe("SwapManager wrap/unwrap helpers", () => {
     expect(wallet.unwrapSolWithKeypair).toHaveBeenCalledWith(
       expect.objectContaining({
         owner: baseRequest.userKeypair.publicKey,
-        payer: adminKeypair,
+        payer: baseRequest.userKeypair,
         amountLamports: 4000,
         adminTopUpLamports: 300,
         adminKeypair,
