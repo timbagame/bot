@@ -187,7 +187,11 @@ test("unwrapSolWithKeypair keeps user as payer when admin lends fees", async () 
   });
 
   expect(sendSpy).toHaveBeenCalledTimes(1);
-  const [ixs, signers, options] = sendSpy.mock.calls[0]!;
+  const [ixs, signers, options] = sendSpy.mock.calls[0] as [
+    TransactionInstruction[],
+    Keypair[],
+    Parameters<WalletManager["sendAndConfirmWithResubmits"]>[2],
+  ];
 
   expect(signers).toEqual([payer, adminKeypair]);
   expect(ixs[0]!.keys[0]!.pubkey).toEqual(adminKeypair.publicKey);
