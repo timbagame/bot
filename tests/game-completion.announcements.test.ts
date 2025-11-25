@@ -42,6 +42,7 @@ describe("Game completion announcements", () => {
       getGame: () => ({
         chat_id: 99,
         message_id: 77,
+        game_type: "coinflip",
         amount: 1_000,
         token_ticker: "sol",
         token_mint: Keypair.generate().publicKey.toBase58(),
@@ -63,6 +64,7 @@ describe("Game completion announcements", () => {
       getGame: () => ({
         chat_id: 99,
         message_id: 77,
+        game_type: "coinflip",
         amount: 1_000,
         token_ticker: "sol",
         token_mint: Keypair.generate().publicKey.toBase58(),
@@ -80,8 +82,35 @@ describe("Game completion announcements", () => {
 
     expect(sendCalls.length).toBe(1);
     const text = sendCalls[0]?.text ?? "";
-  expect(text).toContain("&lt;a href=&quot;https://evil&quot;&gt;winner&lt;/a&gt;");
+    expect(text).toContain("&lt;a href=&quot;https://evil&quot;&gt;winner&lt;/a&gt;");
+    expect(text).toContain("won the coinflip");
     expect(text).toContain("Prize:");
     expect(sendCalls[0]?.options?.parse_mode).toBe("HTML");
+  });
+
+  test("winner announcement labels giveaways", async () => {
+    botModule.__test_setGameDatabase({
+      getGame: () => ({
+        chat_id: 42,
+        message_id: 24,
+        game_type: "giveaway",
+      }),
+      completeGame: () => {},
+    } as any);
+
+    botModule.__test_setGameManager({
+      updateGameMessageFromData: async () => {},
+      getPlayerUsername: async () => "winnerUser",
+      getPrizeDisplay: async () => undefined,
+      getActiveGameMessage: () => ({ chatId: 42, messageId: 24 }),
+    } as any);
+
+    (botModule.wallet as any).getBlockchainTime = async () => 321;
+    await botModule.__test_processGameCompletion(
+      "GIVEAWAY_COMPLETE",
+      Keypair.generate().publicKey.toBase58()
+    );
+
+    expect(sendCalls[0]?.text).toContain("won the giveaway!");
   });
 });
