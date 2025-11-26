@@ -8,6 +8,8 @@ import {
   TransactionInstruction,
 } from "@solana/web3.js";
 import { WalletManager } from "../src/utils/wallet";
+import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+
 
 class ConnFailTime implements Partial<Connection> {
   async getSlot(_cfg?: any): Promise<number> { throw new Error("rpc down"); }
@@ -317,6 +319,150 @@ test("unwrapSolWithKeypair lends, unwraps, and repays within one transaction", a
     amountLamports: 5_000,
     remainingLamports: 2_000,
   });
+});
+
+test("buildUnwrapWsolPlan throws when no WSOL account found", async () => {
+  const connection = {
+    getAccountInfo: vi.fn().mockResolvedValue(null),
+  };
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  const owner = Keypair.generate().publicKey;
+  const payer = Keypair.generate();
+
+  await expect(
+    wm.buildUnwrapWsolPlan({ owner, payer })
+  ).rejects.toThrow("No WSOL account found to unwrap.");
+});
+
+test("buildUnwrapWsolPlan throws when WSOL account is empty", async () => {
+  const accountData = Buffer.alloc(165);
+  accountData.writeBigUInt64LE(0n, 64); // Amount at offset 64
+  const connection = {
+    getAccountInfo: vi.fn().mockResolvedValue({
+      data: accountData,
+      owner: TOKEN_PROGRAM_ID,
+      lamports: 0,
+    }),
+  };
+
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  const owner = Keypair.generate().publicKey;
+  const payer = Keypair.generate();
+
+  await expect(
+    wm.buildUnwrapWsolPlan({ owner, payer })
+  ).rejects.toThrow("Your WSOL account is already empty.");
+});
+
+test("buildUnwrapWsolPlan throws when unwrap amount exceeds balance", async () => {
+  const accountData = Buffer.alloc(165);
+  accountData.writeBigUInt64LE(1000n, 64); // Amount = 1000
+  const connection = {
+    getAccountInfo: vi.fn().mockResolvedValue({
+      data: accountData,
+      owner: TOKEN_PROGRAM_ID,
+    }),
+  };
+
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  const owner = Keypair.generate().publicKey;
+  const payer = Keypair.generate();
+
+  await expect(
+    wm.buildUnwrapWsolPlan({ owner, payer, amountLamports: 2000 })
+  ).rejects.toThrow(/exceeds current balance/);
+});
+
+test("buildUnwrapWsolPlan throws for invalid unwrap amounts", async () => {
+  const accountData = Buffer.alloc(165);
+  accountData.writeBigUInt64LE(1000n, 64); // Amount = 1000
+  const connection = {
+    getAccountInfo: vi.fn().mockResolvedValue({
+      data: accountData,
+      owner: TOKEN_PROGRAM_ID,
+    }),
+  };
+
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  const owner = Keypair.generate().publicKey;
+  const payer = Keypair.generate();
+
+  await expect(
+    wm.buildUnwrapWsolPlan({ owner, payer, amountLamports: -100 })
+  ).rejects.toThrow("Unwrap amount must be greater than zero.");
+
+  await expect(
+    wm.buildUnwrapWsolPlan({ owner, payer, amountLamports: 1.5 })
+  ).rejects.toThrow("Unwrap amount must be a safe integer in lamports.");
+});
+
+test("unwrapSolWithKeypair throws if admin lending is requested without admin keypair", async () => {
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  const owner = Keypair.generate().publicKey;
+  const payer = Keypair.generate();
+
+  await expect(
+    wm.unwrapSolWithKeypair({
+      owner,
+      payer,
+      adminTopUpLamports: 1000,
+      // No adminKeypair provided
+    })
+  ).rejects.toThrow("Admin keypair required when lending lamports");
+});
+
+test("unwrapSolWithKeypair handles bigint for adminTopUpLamports", async () => {
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  const payer = Keypair.generate();
+  const adminKeypair = Keypair.generate();
+  const unwrapPlan = {
+    instructions: [],
+    unwrapLamports: 1000,
+    remainingLamports: 0,
+  };
+
+  (wm as any).buildUnwrapWsolPlan = vi.fn().mockResolvedValue(unwrapPlan);
+  const sendSpy = vi
+    .spyOn(wm as any, "sendAndConfirmWithResubmits")
+    .mockResolvedValue("SIG");
+
+  await wm.unwrapSolWithKeypair({
+    owner: payer.publicKey,
+    payer,
+    adminKeypair,
+    adminTopUpLamports: 500n, // Pass as bigint
+    amountLamports: 1000,
+  });
+
+  const [ixs] = sendSpy.mock.calls[0] as [TransactionInstruction[]];
+  // Check that transfer instruction was created with correct amount
+  const transferIx = ixs[0];
+  const lamports = Number((transferIx!.data as Buffer).readBigUInt64LE(4));
+  expect(lamports).toBe(500);
 });
 
 test("transferSol preserves lamports for dust transfers", async () => {
