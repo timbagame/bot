@@ -378,6 +378,32 @@ describe("SwapService.ensureUserSolBufferForSwap", () => {
       feeSpy.mockRestore();
     });
 
+    test("applies rent rebate when fully unwrapping WSOL with no SOL on hand", async () => {
+      const user = Keypair.generate();
+      const unwrapLamports = 3_000_000;
+      const wrapRentLamports = 2_039_280;
+
+      const restoreConn = stubWalletConnection(0);
+      const accountSpy = vi.spyOn(splToken, "getAccount").mockResolvedValue({
+        amount: BigInt(unwrapLamports),
+        rentExemptReserve: BigInt(wrapRentLamports),
+      } as any);
+
+      const quote = {
+        inputMint: WSOL_MINT,
+        outputMint: "SOL",
+        inputAmountRaw: String(unwrapLamports),
+        provider: "unwrap" as const,
+      } as any;
+
+      await expect(
+        service.ensureUserSolBufferForSwap(quote as any, user)
+      ).resolves.toBe(0n);
+
+      accountSpy.mockRestore();
+      restoreConn();
+    });
+
   test("skips buffer enforcement for admin payer routes", async () => {
     const user = Keypair.generate();
     const restoreConn = stubWalletConnection(1);

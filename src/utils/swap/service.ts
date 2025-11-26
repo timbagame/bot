@@ -125,14 +125,16 @@ export class SwapService {
           return false;
         }
 
+        rentRebateLamports = BigInt(account.rentExemptReserve ?? 0n);
+
         const willLeaveRemainingBalance =
           BigInt(quote.inputAmountRaw) < currentBalance;
 
-        if (willLeaveRemainingBalance) {
-          rentRebateLamports = BigInt(account.rentExemptReserve ?? 0n);
+        if (!willLeaveRemainingBalance) {
+          return false;
         }
 
-        return willLeaveRemainingBalance;
+        return true;
       } catch {
         return isSyntheticSolWrap;
       }
