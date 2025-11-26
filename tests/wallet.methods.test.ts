@@ -153,6 +153,26 @@ test("unwrapSolWithKeypair skips admin signer when no loan is required", async (
   });
 });
 
+test("unwrapSolWithKeypair rejects admin payer and keeps user as fee payer", async () => {
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  const user = Keypair.generate();
+  const adminKeypair = Keypair.generate();
+
+  await expect(
+    wm.unwrapSolWithKeypair({
+      owner: user.publicKey,
+      payer: adminKeypair,
+      adminKeypair,
+      adminTopUpLamports: 500,
+      amountLamports: 1_000,
+    })
+  ).rejects.toThrow(/payer must match the wsol owner/i);
+});
+
 test("unwrapSolWithKeypair keeps user as payer when admin lends fees", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",

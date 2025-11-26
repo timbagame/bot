@@ -1778,6 +1778,12 @@ export class WalletManager {
       );
     }
 
+    if (!owner.equals(payer.publicKey)) {
+      throw new Error(
+        "Unwrap payer must match the WSOL owner; admin funds are lent via transfer, not as the fee payer."
+      );
+    }
+
     const { instructions: unwrapInstructions, unwrapLamports, remainingLamports } =
       await this.buildUnwrapWsolPlan({ owner, payer, amountLamports });
 
