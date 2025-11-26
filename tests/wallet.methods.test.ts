@@ -153,6 +153,42 @@ test("unwrapSolWithKeypair skips admin signer when no loan is required", async (
   });
 });
 
+test("unwrapSolWithKeypair defaults missing admin top-up to zero", async () => {
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  const payer = Keypair.generate();
+  const adminKeypair = Keypair.generate();
+  const unwrapPlan = {
+    instructions: ["UNWRAP"] as any,
+    unwrapLamports: 1_000,
+    remainingLamports: 0,
+  };
+
+  (wm as any).buildUnwrapWsolPlan = vi.fn().mockResolvedValue(unwrapPlan);
+  const sendSpy = vi
+    .spyOn(wm as any, "sendAndConfirmWithResubmits")
+    .mockResolvedValue("UNWRAP_SIG");
+
+  const result = await wm.unwrapSolWithKeypair({
+    owner: payer.publicKey,
+    payer,
+    adminKeypair,
+    amountLamports: 1_000,
+  });
+
+  expect(sendSpy).toHaveBeenCalledWith(unwrapPlan.instructions, [payer], {
+    operationLabel: "Unwrap WSOL",
+  });
+  expect(result).toEqual({
+    signature: "UNWRAP_SIG",
+    amountLamports: 1_000,
+    remainingLamports: 0,
+  });
+});
+
 test("unwrapSolWithKeypair rejects admin payer and keeps user as fee payer", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",

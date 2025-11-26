@@ -1770,7 +1770,10 @@ export class WalletManager {
     // (payer) as the transaction fee payer. The admin funds are front-loaded
     // via a transfer, the unwrap instructions run with the user payer, and the
     // same transaction returns the loaned lamports back to the admin.
-    const loanLamports = Math.max(0, Math.trunc(Number(adminTopUpLamports)));
+    const loanLamports =
+      typeof adminTopUpLamports === "bigint"
+        ? Number(adminTopUpLamports > 0n ? adminTopUpLamports : 0n)
+        : Math.max(0, Math.trunc(adminTopUpLamports ?? 0));
 
     if (loanLamports > 0 && !adminKeypair) {
       throw new Error(
