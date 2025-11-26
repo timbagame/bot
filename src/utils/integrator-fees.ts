@@ -94,7 +94,7 @@ export const resolveIntegratorSwapParams = async (
     solFeeBufferLamports,
   } = context;
 
-  const isUnwrappingSol = inputMint === WSOL_MINT && outputMint === "SOL";
+  const isUnwrappingSol = inputMint === WSOL_MINT && isSolMint(outputMint);
   const availableForFeesLamports = availableSolLamports;
 
   const referralConfig = getReferralTargetForPair(inputMint, outputMint);
