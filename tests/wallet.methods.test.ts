@@ -225,6 +225,64 @@ test("unwrapSolWithKeypair keeps user as payer when admin lends fees", async () 
   });
 });
 
+test("unwrapSolWithKeypair lends, unwraps, and repays within one transaction", async () => {
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  const payer = Keypair.generate();
+  const adminKeypair = Keypair.generate();
+  const unwrapInstruction = new TransactionInstruction({
+    keys: [
+      { pubkey: payer.publicKey, isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    programId: SystemProgram.programId,
+    data: Buffer.alloc(0),
+  });
+
+  (wm as any).buildUnwrapWsolPlan = vi.fn().mockResolvedValue({
+    instructions: [unwrapInstruction],
+    unwrapLamports: 5_000,
+    remainingLamports: 2_000,
+  });
+
+  const sendSpy = vi
+    .spyOn(wm as any, "sendAndConfirmWithResubmits")
+    .mockResolvedValue("UNWRAP_TX");
+
+  const result = await wm.unwrapSolWithKeypair({
+    owner: payer.publicKey,
+    payer,
+    adminKeypair,
+    adminTopUpLamports: 750,
+    amountLamports: 5_000,
+  });
+
+  expect(sendSpy).toHaveBeenCalledTimes(1);
+  const [ixs, signers, options] = sendSpy.mock.calls[0] as [
+    TransactionInstruction[],
+    Keypair[],
+    Parameters<WalletManager["sendAndConfirmWithResubmits"]>[2],
+  ];
+
+  expect(signers).toEqual([payer, adminKeypair]);
+  expect(ixs).toHaveLength(3);
+  expect(ixs[0]!.keys[0]!.pubkey).toEqual(adminKeypair.publicKey);
+  expect(ixs[0]!.keys[1]!.pubkey).toEqual(payer.publicKey);
+  expect(ixs[1]).toBe(unwrapInstruction);
+  expect(ixs[2]!.keys[0]!.pubkey).toEqual(payer.publicKey);
+  expect(ixs[2]!.keys[1]!.pubkey).toEqual(adminKeypair.publicKey);
+  expect(options).toEqual({ operationLabel: "Unwrap WSOL" });
+
+  expect(result).toEqual({
+    signature: "UNWRAP_TX",
+    amountLamports: 5_000,
+    remainingLamports: 2_000,
+  });
+});
+
 test("transferSol preserves lamports for dust transfers", async () => {
   const connection: any = {
     getLatestBlockhash: async () => ({ blockhash: "BH", lastValidBlockHeight: 1 }),
