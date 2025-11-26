@@ -168,6 +168,41 @@ describe("Integrator fee calculations", () => {
     );
   });
 
+  test("treats WSOL output unwraps as SOL for admin surcharge calculations", async () => {
+    __test_registerReferralEntry({
+      mint: WSOL_MINT,
+      referralAccount: REFERRAL_ACCOUNT,
+      adminPayer: "AdminPayer11111111111111111111111111111",
+      adminCloseAuthority:
+        "AdminCloseAuthority2222222222222222222222222222",
+      baseFeeBps: 85,
+      maxExtraFeeBps: 100,
+    });
+
+    const priceSpy = vi
+      .spyOn(priceModule, "resolveTokenPriceUSD")
+      .mockResolvedValueOnce({ price: 150, identifier: "SOL" } as any)
+      .mockResolvedValueOnce({ price: 150, identifier: "SOL" } as any);
+
+    const result = await resolveIntegratorSwapParams({
+      inputMint: WSOL_MINT,
+      outputMint: WSOL_MINT,
+      inputTicker: "SOL",
+      inputDecimals: 9,
+      inputAmountRaw: JUPITER_MIN_SOL_BALANCE_LAMPORTS,
+      userPublicKey: "ProductionUnwrapper",
+      availableSolLamports: 0,
+    });
+
+    expect(priceSpy).toHaveBeenCalledTimes(2);
+    expect(result?.payerKind).toBe("admin");
+    expect(result?.referralFee).toBe(185);
+    expect(result?.payer).toBe("AdminPayer11111111111111111111111111111");
+    expect(result?.closeAuthority).toBe(
+      "AdminCloseAuthority2222222222222222222222222222"
+    );
+  });
+
   test("uses admin top-up when provided SOL buffer is below minimum", async () => {
     __test_registerReferralEntry({
       mint: ADMIN_REF_MINT1,
