@@ -168,6 +168,41 @@ describe("Integrator fee calculations", () => {
     );
   });
 
+  test("uses admin payer when provided SOL buffer is below minimum", async () => {
+    __test_registerReferralEntry({
+      mint: ADMIN_REF_MINT1,
+      referralAccount: REFERRAL_ACCOUNT,
+      adminPayer: "AdminPayer11111111111111111111111111111",
+      adminCloseAuthority:
+        "AdminCloseAuthority2222222222222222222222222222",
+      baseFeeBps: 85,
+    });
+
+    const priceSpy = vi
+      .spyOn(priceModule, "resolveTokenPriceUSD")
+      .mockResolvedValueOnce({ price: 20, identifier: "SOL" } as any)
+      .mockResolvedValueOnce({ price: 20, identifier: "SOL" } as any);
+
+    const result = await resolveIntegratorSwapParams({
+      inputMint: ADMIN_REF_MINT1,
+      outputMint: WSOL_MINT,
+      inputTicker: "SOL",
+      inputDecimals: 9,
+      inputAmountRaw: 2_000_000_000,
+      userPublicKey: "UnderBufferedUser",
+      availableSolLamports: 0,
+      solFeeBufferLamports: 0,
+    });
+
+    expect(priceSpy).toHaveBeenCalledTimes(2);
+    expect(result?.payerKind).toBe("admin");
+    expect(result?.payer).toBe("AdminPayer11111111111111111111111111111");
+    expect(result?.closeAuthority).toBe(
+      "AdminCloseAuthority2222222222222222222222222222"
+    );
+    expect(result?.referralFee).toBeGreaterThan(85);
+  });
+
   test("returns admin payer and close authority when user lacks buffer", async () => {
     __test_registerReferralEntry({
       mint: ADMIN_REF_MINT2,

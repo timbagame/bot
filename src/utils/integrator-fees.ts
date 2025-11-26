@@ -106,9 +106,9 @@ export const resolveIntegratorSwapParams = async (
     Boolean(referralConfig.adminPayer) &&
     Boolean(referralConfig.adminCloseAuthority);
 
-  const effectiveSolFeeBufferLamports =
-    solFeeBufferLamports ??
-    (requiresAdminPayer ? JUPITER_MIN_SOL_BALANCE_LAMPORTS : 0);
+  const effectiveSolFeeBufferLamports = requiresAdminPayer
+    ? Math.max(solFeeBufferLamports ?? 0, JUPITER_MIN_SOL_BALANCE_LAMPORTS)
+    : solFeeBufferLamports ?? 0;
 
   const baseFeeBps = clampReferralFeeBps(
     referralConfig.baseFeeBps ?? DEFAULT_REFERRAL_BASE_FEE_BPS,
