@@ -173,6 +173,8 @@ export const resolveIntegratorSwapParams = async (
         maxExtraBps,
       });
 
+  // For unwrap flows, admin-linked metadata still indicates the user remains the
+  // transaction payer while the admin only fronts temporary lamports.
   return {
     referralAccount: referralConfig.referralAccount,
     referralFee: referralFeeBps,

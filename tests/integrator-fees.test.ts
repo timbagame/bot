@@ -134,7 +134,7 @@ describe("Integrator fee calculations", () => {
     expect(result?.closeAuthority).toBe("RecoveredUser");
   });
 
-  test("uses admin payer for unwrap when user lacks upfront SOL buffer", async () => {
+  test("uses admin top-up for unwrap when user lacks upfront SOL buffer", async () => {
     __test_registerReferralEntry({
       mint: WSOL_MINT,
       referralAccount: REFERRAL_ACCOUNT,
@@ -168,7 +168,7 @@ describe("Integrator fee calculations", () => {
     );
   });
 
-  test("uses admin payer when provided SOL buffer is below minimum", async () => {
+  test("uses admin top-up when provided SOL buffer is below minimum", async () => {
     __test_registerReferralEntry({
       mint: ADMIN_REF_MINT1,
       referralAccount: REFERRAL_ACCOUNT,
