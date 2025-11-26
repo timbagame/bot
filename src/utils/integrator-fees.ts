@@ -94,6 +94,9 @@ export const resolveIntegratorSwapParams = async (
     solFeeBufferLamports,
   } = context;
 
+  const isUnwrappingSol = inputMint === WSOL_MINT && isSolMint(outputMint);
+  const availableForFeesLamports = availableSolLamports;
+
   const referralConfig = getReferralTargetForPair(inputMint, outputMint);
   if (!referralConfig) {
     return null;
@@ -103,9 +106,9 @@ export const resolveIntegratorSwapParams = async (
     Boolean(referralConfig.adminPayer) &&
     Boolean(referralConfig.adminCloseAuthority);
 
-  const effectiveSolFeeBufferLamports =
-    solFeeBufferLamports ??
-    (requiresAdminPayer ? JUPITER_MIN_SOL_BALANCE_LAMPORTS : 0);
+  const effectiveSolFeeBufferLamports = requiresAdminPayer
+    ? Math.max(solFeeBufferLamports ?? 0, JUPITER_MIN_SOL_BALANCE_LAMPORTS)
+    : solFeeBufferLamports ?? 0;
 
   const baseFeeBps = clampReferralFeeBps(
     referralConfig.baseFeeBps ?? DEFAULT_REFERRAL_BASE_FEE_BPS,
@@ -114,7 +117,7 @@ export const resolveIntegratorSwapParams = async (
   );
 
   if (
-    availableSolLamports >= effectiveSolFeeBufferLamports ||
+    availableForFeesLamports >= effectiveSolFeeBufferLamports ||
     !requiresAdminPayer
   ) {
     return {
@@ -128,7 +131,7 @@ export const resolveIntegratorSwapParams = async (
 
   const shortfallLamports = Math.max(
     0,
-    effectiveSolFeeBufferLamports - availableSolLamports
+    effectiveSolFeeBufferLamports - availableForFeesLamports
   );
   if (shortfallLamports <= 0) {
     return {
@@ -155,13 +158,23 @@ export const resolveIntegratorSwapParams = async (
     );
   }
 
-  const referralFeeBps = calculateReferralFeeBps({
-    baseFeeBps,
-    tradeUsd,
-    deficitUsd,
-    maxExtraBps: referralConfig.maxExtraFeeBps ?? DEFAULT_MAX_EXTRA_FEE_BPS,
-  });
+  const maxExtraBps = referralConfig.maxExtraFeeBps ?? DEFAULT_MAX_EXTRA_FEE_BPS;
+  const rawExtraBps = Math.ceil((deficitUsd / tradeUsd) * 10_000);
+  const referralFeeBps = isUnwrappingSol
+    ? clampReferralFeeBps(
+        baseFeeBps + Math.min(rawExtraBps, maxExtraBps),
+        50,
+        MAX_REFERRAL_FEE_BPS
+      )
+    : calculateReferralFeeBps({
+        baseFeeBps,
+        tradeUsd,
+        deficitUsd,
+        maxExtraBps,
+      });
 
+  // For unwrap flows, admin-linked metadata still indicates the user remains the
+  // transaction payer while the admin only fronts temporary lamports.
   return {
     referralAccount: referralConfig.referralAccount,
     referralFee: referralFeeBps,

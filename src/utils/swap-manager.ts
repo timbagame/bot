@@ -4,7 +4,6 @@ import {
   Keypair,
   TransactionInstruction,
   VersionedTransaction,
-  SystemProgram,
 } from "@solana/web3.js";
 import {
   JupiterClient,
@@ -166,6 +165,59 @@ export class SwapManager {
     console.log(`   Network: ${this.network}`);
 
     console.log(`   🚀 Using Jupiter for quote`);
+
+    const normalizedInputTicker = inputTicker?.toUpperCase();
+    const normalizedOutputTicker = outputTicker?.toUpperCase();
+    const inputIsSolMint = this.isSolMint(inputMint);
+    const outputIsSolMint = this.isSolMint(outputMint);
+    const isWrapSwap =
+      inputIsSolMint &&
+      outputIsSolMint &&
+      normalizedInputTicker === "SOL" &&
+      normalizedOutputTicker === "WSOL";
+    const isUnwrapSwap =
+      inputIsSolMint &&
+      outputIsSolMint &&
+      normalizedInputTicker === "WSOL" &&
+      normalizedOutputTicker === "SOL";
+
+    if (isWrapSwap || isUnwrapSwap) {
+      console.log(
+        `   🧊 Handling ${isWrapSwap ? "wrap" : "unwrap"} without Jupiter`
+      );
+
+      const integrator =
+        isUnwrapSwap && request.integrator?.payerKind === "admin"
+          ? { ...request.integrator, referralFee: 0 }
+          : null;
+
+      const syntheticQuote: SwapQuote = {
+        inputMint,
+        outputMint,
+        inputAmount: amount,
+        inputAmountRaw: amount,
+        outputAmount: amount,
+        estimatedRate: 1,
+        slippage: 0,
+        provider: isWrapSwap ? "wrap" : "unwrap",
+        priceImpact: "0",
+        platformFee: null,
+        providerQuoteTimestamp: Date.now(),
+        integrator,
+        integratorApplied: false,
+        inputDecimals: request.inputDecimals,
+        outputDecimals: request.outputDecimals,
+        inputTicker,
+        outputTicker,
+      };
+
+      return syntheticQuote;
+    }
+
+    if (inputMint === outputMint) {
+      throw new Error("Cannot swap the same token");
+    }
+
     const quoteRequest: JupiterQuoteRequest = {
       inputMint,
       outputMint,
@@ -705,14 +757,16 @@ export class SwapManager {
     }
 
     const owner = userKeypair.publicKey;
-    const unwrapPlan = await this.wallet.buildUnwrapWsolPlan({
+    const unwrapResult = await this.wallet.unwrapSolWithKeypair({
       owner,
       payer: userKeypair,
       amountLamports: unwrapLamports,
+      adminTopUpLamports: loanLamports,
+      adminKeypair: loanLamports > 0 ? adminKeypair : undefined,
     });
 
     const formattedUnwrap = formatAmount(
-      BigInt(unwrapPlan.unwrapLamports),
+      BigInt(unwrapResult.amountLamports),
       SOL_DECIMALS,
       {
         maxFractionDigits: SOL_DECIMALS,
@@ -720,7 +774,7 @@ export class SwapManager {
       }
     );
     const formattedRemaining = formatAmount(
-      BigInt(Math.max(unwrapPlan.remainingLamports, 0)),
+      BigInt(Math.max(unwrapResult.remainingLamports, 0)),
       SOL_DECIMALS,
       {
         maxFractionDigits: SOL_DECIMALS,
@@ -732,43 +786,62 @@ export class SwapManager {
       `🧼 Unwrapping ${formattedUnwrap} WSOL for ${logContext}. Remaining WSOL after unwrap: ${formattedRemaining}.`
     );
 
-    const instructions: TransactionInstruction[] = [];
-
-    if (loanLamports > 0) {
-      instructions.push(
-        SystemProgram.transfer({
-          fromPubkey: adminKeypair!.publicKey,
-          toPubkey: owner,
-          lamports: loanLamports,
-        })
-      );
-    }
-
-    instructions.push(...unwrapPlan.instructions);
-
-    if (loanLamports > 0) {
-      instructions.push(
-        SystemProgram.transfer({
-          fromPubkey: owner,
-          toPubkey: adminKeypair!.publicKey,
-          lamports: loanLamports,
-        })
-      );
-    }
-
-    const signers: Keypair[] =
-      loanLamports > 0 ? [adminKeypair!, userKeypair] : [userKeypair];
-
-    const signature = await this.wallet.sendAndConfirmWithResubmits(
-      instructions,
-      signers,
-      { operationLabel: "WSOL unwrap" }
-    );
-
     return {
-      signature,
-      lamportsReceived: unwrapPlan.unwrapLamports,
+      signature: unwrapResult.signature,
+      lamportsReceived: unwrapResult.amountLamports,
     };
+  }
+
+  async executeWrapSwap(request: SwapRequest, quote: SwapQuote): Promise<string> {
+    const lamports = BigInt(quote.inputAmountRaw ?? quote.inputAmount ?? "0");
+    if (lamports <= 0) {
+      throw new Error("Wrap amount must be greater than zero.");
+    }
+
+    const lamportsNumber = Number(lamports);
+    if (!Number.isSafeInteger(lamportsNumber)) {
+      throw new Error("Wrap amount must be a safe integer in lamports.");
+    }
+
+    return this.wallet.wrapSolWithKeypair({
+      owner: request.userKeypair.publicKey,
+      payer: request.userKeypair,
+      amountLamports: lamportsNumber,
+    });
+  }
+
+  async executeUnwrapSwap(
+    request: SwapRequest,
+    quote: SwapQuote,
+    adminTopUpLamports: bigint = 0n
+  ): Promise<string> {
+    const lamports = BigInt(quote.inputAmountRaw ?? quote.inputAmount ?? "0");
+    if (lamports <= 0) {
+      throw new Error("Unwrap amount must be greater than zero.");
+    }
+
+    const lamportsNumber = Number(lamports);
+    if (!Number.isSafeInteger(lamportsNumber)) {
+      throw new Error("Unwrap amount must be a safe integer in lamports.");
+    }
+
+    const { userKeypair } = request;
+    const loanLamports = Math.max(0, Math.trunc(Number(adminTopUpLamports)));
+    const adminKeypair =
+      loanLamports > 0 && quote.integrator?.payerKind === "admin"
+        ? this.wallet.getAdminKeypair()
+        : undefined;
+    const payer = userKeypair;
+
+    const { signature } = await this.wallet.unwrapSolWithKeypair({
+      owner: userKeypair.publicKey,
+      payer,
+      amountLamports: lamportsNumber,
+      adminTopUpLamports: loanLamports,
+      adminKeypair,
+    });
+
+    return signature;
   }
 
   /**

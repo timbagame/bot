@@ -10,7 +10,7 @@ export interface SwapQuote {
   outputAmount: string;
   estimatedRate: number;
   slippage: number;
-  provider: "jupiter";
+  provider: "jupiter" | "wrap" | "unwrap";
   priceImpact?: string;
   platformFee?: any;
   providerQuote?: JupiterQuoteResponse;

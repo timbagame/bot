@@ -1695,6 +1695,143 @@ export class WalletManager {
     };
   }
 
+  public async wrapSolWithKeypair({
+    owner,
+    payer,
+    amountLamports,
+  }: {
+    owner: PublicKey;
+    payer: Keypair;
+    amountLamports: number;
+  }): Promise<string> {
+    if (!Number.isFinite(amountLamports) || amountLamports <= 0) {
+      throw new Error("Wrap amount must be greater than zero");
+    }
+
+    if (!Number.isSafeInteger(amountLamports)) {
+      throw new Error("Wrap amount must be a safe integer in lamports.");
+    }
+
+    const wsolMint = new PublicKey(WSOL_MINT);
+
+    const sendWrap = async (): Promise<string> => {
+      const plan = await this.findOrCreateAssociatedTokenAccount(
+        owner,
+        wsolMint,
+        payer,
+        TOKEN_PROGRAM_ID
+      );
+
+      const transferInstructions = [
+        SystemProgram.transfer({
+          fromPubkey: payer.publicKey,
+          toPubkey: plan.address,
+          lamports: amountLamports,
+        }),
+        createSyncNativeInstruction(plan.address),
+      ];
+
+      return await this.sendAndConfirmWithResubmits(
+        [...plan.instructions, ...transferInstructions],
+        [payer],
+        { operationLabel: "Wrap SOL" }
+      );
+    };
+
+    try {
+      return await sendWrap();
+    } catch (error) {
+      if (this.isAtaAlreadyExistsError(error)) {
+        return await sendWrap();
+      }
+
+      throw error;
+    }
+  }
+
+  public async unwrapSolWithKeypair({
+    owner,
+    payer,
+    amountLamports,
+    adminTopUpLamports = 0,
+    adminKeypair,
+  }: {
+    owner: PublicKey;
+    payer: Keypair;
+    amountLamports?: number;
+    adminTopUpLamports?: number | bigint;
+    adminKeypair?: Keypair;
+  }): Promise<{
+    signature: string;
+    amountLamports: number;
+    remainingLamports: number;
+  }> {
+    // When an admin lends lamports for the unwrap fee, we still keep the user
+    // (payer) as the transaction fee payer. The admin funds are front-loaded
+    // via a transfer, the unwrap instructions run with the user payer, and the
+    // same transaction returns the loaned lamports back to the admin.
+    const loanLamports =
+      typeof adminTopUpLamports === "bigint"
+        ? Number(adminTopUpLamports > 0n ? adminTopUpLamports : 0n)
+        : Math.max(0, Math.trunc(adminTopUpLamports ?? 0));
+
+    if (loanLamports > 0 && !adminKeypair) {
+      throw new Error(
+        "Admin keypair required when lending lamports for WSOL unwrap."
+      );
+    }
+
+    if (!owner.equals(payer.publicKey)) {
+      throw new Error(
+        "Unwrap payer must match the WSOL owner; admin funds are lent via transfer, not as the fee payer."
+      );
+    }
+
+    const { instructions: unwrapInstructions, unwrapLamports, remainingLamports } =
+      await this.buildUnwrapWsolPlan({ owner, payer, amountLamports });
+
+    const instructions: TransactionInstruction[] = [];
+    const signers: Keypair[] = [payer];
+
+    if (loanLamports > 0) {
+      if (adminKeypair) {
+        signers.push(adminKeypair);
+      }
+
+      instructions.push(
+        SystemProgram.transfer({
+          fromPubkey: adminKeypair!.publicKey,
+          toPubkey: payer.publicKey,
+          lamports: loanLamports,
+        })
+      );
+    }
+
+    instructions.push(...unwrapInstructions);
+
+    if (loanLamports > 0) {
+      instructions.push(
+        SystemProgram.transfer({
+          fromPubkey: payer.publicKey,
+          toPubkey: adminKeypair!.publicKey,
+          lamports: loanLamports,
+        })
+      );
+    }
+
+    const signature = await this.sendAndConfirmWithResubmits(
+      instructions,
+      signers,
+      { operationLabel: "Unwrap WSOL" }
+    );
+
+    return {
+      signature,
+      amountLamports: unwrapLamports,
+      remainingLamports,
+    };
+  }
+
   public async transferToken(
     fromTelegramId: bigint,
     toAddress: PublicKey,
@@ -2441,57 +2578,13 @@ export class WalletManager {
     telegramId: bigint,
     amountLamports: number
   ): Promise<string> {
-    if (amountLamports <= 0) {
-      throw new Error("Wrap amount must be greater than zero");
-    }
-
     const userKeypair = this.getKeyPair(telegramId);
-    const wsolMint = new PublicKey(WSOL_MINT);
 
-    const sendWrap = async (
-      planInstructions: TransactionInstruction[],
-      ata: PublicKey
-    ): Promise<string> => {
-      const transferInstructions = [
-        SystemProgram.transfer({
-          fromPubkey: userKeypair.publicKey,
-          toPubkey: ata,
-          lamports: amountLamports,
-        }),
-        createSyncNativeInstruction(ata),
-      ];
-      return await this.sendAndConfirmWithResubmits(
-        [...planInstructions, ...transferInstructions],
-        [userKeypair],
-        { operationLabel: "Wrap SOL" }
-      );
-    };
-
-    const initialPlan = await this.findOrCreateAssociatedTokenAccount(
-      userKeypair.publicKey,
-      wsolMint,
-      userKeypair,
-      TOKEN_PROGRAM_ID
-    );
-
-    try {
-      return await sendWrap(initialPlan.instructions, initialPlan.address);
-    } catch (error) {
-      if (
-        initialPlan.instructions.length > 0 &&
-        this.isAtaAlreadyExistsError(error)
-      ) {
-        const retryPlan = await this.findOrCreateAssociatedTokenAccount(
-          userKeypair.publicKey,
-          wsolMint,
-          userKeypair,
-          TOKEN_PROGRAM_ID
-        );
-        return await sendWrap(retryPlan.instructions, retryPlan.address);
-      }
-
-      throw error;
-    }
+    return this.wrapSolWithKeypair({
+      owner: userKeypair.publicKey,
+      payer: userKeypair,
+      amountLamports,
+    });
   }
 
   public async unwrapSol(
@@ -2499,18 +2592,16 @@ export class WalletManager {
     amountLamports?: number
   ): Promise<{ signature: string; amountLamports: number }> {
     const userKeypair = this.getKeyPair(telegramId);
-    const unwrapPlan = await this.buildUnwrapWsolPlan({
+
+    const result = await this.unwrapSolWithKeypair({
       owner: userKeypair.publicKey,
       payer: userKeypair,
       amountLamports,
     });
 
-    const signature = await this.sendAndConfirmWithResubmits(
-      unwrapPlan.instructions,
-      [userKeypair],
-      { operationLabel: "Unwrap WSOL" }
-    );
-
-    return { signature, amountLamports: unwrapPlan.unwrapLamports };
+    return {
+      signature: result.signature,
+      amountLamports: result.amountLamports,
+    };
   }
 }

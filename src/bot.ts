@@ -677,7 +677,16 @@ const formatTradeConfirmationSummary = ({
     payAmountDecimal > 0 ? receiveAmountDecimal / payAmountDecimal : 0;
   const rateDisplay = formatRate(rateValue);
 
-  const providerLabel = "Jupiter";
+  const providerLabel = (() => {
+    switch (quote.provider) {
+      case "wrap":
+        return "Wrap";
+      case "unwrap":
+        return "Unwrap";
+      default:
+        return "Jupiter";
+    }
+  })();
 
   const slippageText = formatSlippagePercent(
     quote.slippage !== undefined ? (quote.slippage as number) : 1
