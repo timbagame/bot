@@ -2039,12 +2039,8 @@ export class WalletManager {
         };
     } catch (error: any) {
         if (error?.message?.includes("insufficient funds") || error?.message?.includes("0x1")) {
-             // Balance might have changed, retry once
+             // Balance might have changed, retry once with fresh balance
              console.log(`${debugPrefix} Insufficient funds, retrying with fresh balance...`);
-             // We can recurse once or just copy logic. Recursing is risky if infinite loop.
-             // Let's just re-fetch and retry logic once.
-             // Actually, simplest is to let the caller handle it, but the requirement is to fix it here.
-             // Let's retry logic:
              const freshBalance = await this.connection.getBalance(payer);
              if (freshBalance < nativeLamports) {
                  // Balance dropped
