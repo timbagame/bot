@@ -259,6 +259,10 @@ export class WalletManager {
     string,
     { blockhash: string; lastValidBlockHeight: number; recordedAt: number }
   >();
+  private pendingAtaCreations = new Map<
+    string,
+    Promise<{ address: PublicKey; instructions: TransactionInstruction[] }>
+  >();
   private lastTokenDiscoveryByUser = new Map<string, number>();
   private postTimeoutProbeBackoffMs = 2000;
   private postTimeoutProbeRetryDelayMs = 250;
@@ -301,7 +305,9 @@ export class WalletManager {
         normalized.includes("429") ||
         normalized.includes("too many requests") ||
         normalized.includes("rate limit") ||
-        normalized.includes("timeout")
+        normalized.includes("timeout") ||
+        normalized.includes("503") ||
+        normalized.includes("service unavailable")
       );
     };
 
@@ -1525,20 +1531,42 @@ export class WalletManager {
     payer: Keypair,
     programId: PublicKey = TOKEN_PROGRAM_ID
   ): Promise<{ address: PublicKey; instructions: TransactionInstruction[] }> {
-    const associatedTokenAddress = await getAssociatedTokenAddress(
-      tokenMint,
-      owner,
-      false,
-      programId
-    );
-    const instructions: TransactionInstruction[] = [];
+    // Deduplicate concurrent ATA creation requests
+    const cacheKey = `${owner.toBase58()}-${tokenMint.toBase58()}`;
+    const pending = this.pendingAtaCreations.get(cacheKey);
+    if (pending) {
+      return pending;
+    }
 
-    try {
-      await this.throttle();
-      const accountInfo = await this.connection.getAccountInfo(
-        associatedTokenAddress
+    const promise = (async () => {
+      const associatedTokenAddress = await getAssociatedTokenAddress(
+        tokenMint,
+        owner,
+        false,
+        programId
       );
-      if (!accountInfo) {
+      const instructions: TransactionInstruction[] = [];
+
+      try {
+        await this.throttle();
+        const accountInfo = await this.connection.getAccountInfo(
+          associatedTokenAddress
+        );
+        if (!accountInfo) {
+          instructions.push(
+            createAssociatedTokenAccountInstruction(
+              payer.publicKey,
+              associatedTokenAddress,
+              owner,
+              tokenMint,
+              programId
+            )
+          );
+        }
+      } catch (error) {
+        console.error(
+          `Error checking token account ${associatedTokenAddress.toBase58()}: ${error}`
+        );
         instructions.push(
           createAssociatedTokenAccountInstruction(
             payer.publicKey,
@@ -1549,22 +1577,16 @@ export class WalletManager {
           )
         );
       }
-    } catch (error) {
-      console.error(
-        `Error checking token account ${associatedTokenAddress.toBase58()}: ${error}`
-      );
-      instructions.push(
-        createAssociatedTokenAccountInstruction(
-          payer.publicKey,
-          associatedTokenAddress,
-          owner,
-          tokenMint,
-          programId
-        )
-      );
-    }
 
-    return { address: associatedTokenAddress, instructions };
+      return { address: associatedTokenAddress, instructions };
+    })();
+
+    this.pendingAtaCreations.set(cacheKey, promise);
+    try {
+      return await promise;
+    } finally {
+      this.pendingAtaCreations.delete(cacheKey);
+    }
   }
 
   public async ensureAssociatedTokenAccount(
@@ -1712,6 +1734,15 @@ export class WalletManager {
       throw new Error("Wrap amount must be a safe integer in lamports.");
     }
 
+    // Check balance first
+    // We can use connection.getBalance directly.
+    const nativeBalance = await this.connection.getBalance(owner);
+    // Estimate fee? We can't easily without building tx.
+    // But we should at least check if we have enough for the amount.
+    if (nativeBalance < amountLamports) {
+       throw new Error(`Insufficient SOL balance to wrap. Have ${nativeBalance}, need ${amountLamports} + fees.`);
+    }
+
     const wsolMint = new PublicKey(WSOL_MINT);
 
     const sendWrap = async (): Promise<string> => {
@@ -1774,6 +1805,10 @@ export class WalletManager {
       typeof adminTopUpLamports === "bigint"
         ? Number(adminTopUpLamports > 0n ? adminTopUpLamports : 0n)
         : Math.max(0, Math.trunc(adminTopUpLamports ?? 0));
+
+    if (!Number.isFinite(loanLamports)) {
+        throw new Error("Invalid adminTopUpLamports: must be a finite number");
+    }
 
     if (loanLamports > 0 && !adminKeypair) {
       throw new Error(
@@ -1987,20 +2022,56 @@ export class WalletManager {
       lamports: transferLamports,
     });
 
-    const signature = await this.sendAndConfirmWithResubmits(
-      [transferInstruction],
-      [userKeypair],
-      { operationLabel: "Withdraw SOL" }
-    );
+    try {
+        const signature = await this.sendAndConfirmWithResubmits(
+          [transferInstruction],
+          [userKeypair],
+          { operationLabel: "Withdraw SOL" }
+        );
 
-    console.log(`${debugPrefix} Sent withdraw-all transaction ${signature}`);
+        console.log(`${debugPrefix} Sent withdraw-all transaction ${signature}`);
 
-    return {
-      signature,
-      nativeLamportsSent: transferLamports,
-      wsolLamportsSent: 0,
-      totalLamportsSent: transferLamports,
-    };
+        return {
+          signature,
+          nativeLamportsSent: transferLamports,
+          wsolLamportsSent: 0,
+          totalLamportsSent: transferLamports,
+        };
+    } catch (error: any) {
+        if (error?.message?.includes("insufficient funds") || error?.message?.includes("0x1")) {
+             // Balance might have changed, retry once
+             console.log(`${debugPrefix} Insufficient funds, retrying with fresh balance...`);
+             // We can recurse once or just copy logic. Recursing is risky if infinite loop.
+             // Let's just re-fetch and retry logic once.
+             // Actually, simplest is to let the caller handle it, but the requirement is to fix it here.
+             // Let's retry logic:
+             const freshBalance = await this.connection.getBalance(payer);
+             if (freshBalance < nativeLamports) {
+                 // Balance dropped
+                 const newFee = await this.estimateFee(payer, [placeholderTransfer]);
+                 const newTransfer = freshBalance - newFee;
+                 if (newTransfer > 0) {
+                     const newIx = SystemProgram.transfer({
+                          fromPubkey: payer,
+                          toPubkey: destination,
+                          lamports: newTransfer,
+                        });
+                     const sig = await this.sendAndConfirmWithResubmits(
+                          [newIx],
+                          [userKeypair],
+                          { operationLabel: "Withdraw SOL (Retry)" }
+                        );
+                     return {
+                          signature: sig,
+                          nativeLamportsSent: newTransfer,
+                          wsolLamportsSent: 0,
+                          totalLamportsSent: newTransfer,
+                        };
+                 }
+             }
+        }
+        throw error;
+    }
   }
 
   public async confirmTransaction(signature: string): Promise<void> {
@@ -2422,6 +2493,20 @@ export class WalletManager {
             error?.message ?? error
           }`
         );
+
+        // Check if the previous signature actually confirmed despite the error
+        if (currentSignature) {
+            try {
+                const status = await this.connection.getSignatureStatuses([currentSignature]);
+                const confirmation = status.value?.[0]?.confirmationStatus;
+                if (confirmation === "confirmed" || confirmation === "finalized") {
+                    console.log(`✅ Previous signature ${currentSignature} confirmed despite error, returning it.`);
+                    return currentSignature;
+                }
+            } catch (statusError) {
+                console.warn(`Failed to check status of ${currentSignature} before resubmit:`, statusError);
+            }
+        }
 
         currentSignature = await this.sendTransaction(instructions, signers);
       }
