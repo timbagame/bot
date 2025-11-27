@@ -555,7 +555,7 @@ test("withdrawAllSol refreshes balance instead of using stale cache", async () =
   expect(lamportTransfers[0]).toBe(995_000);
 });
 
-test("B-001: withdrawAllSol leaves dust if balance increases between fetch and send", async () => {
+test("withdrawAllSol leaves dust if balance increases between fetch and send", async () => {
   const connection: any = {
     getBalance: vi.fn()
       .mockResolvedValueOnce(1_000_000) // Initial fetch
@@ -588,7 +588,7 @@ test("B-001: withdrawAllSol leaves dust if balance increases between fetch and s
   expect(connection.getBalance).toHaveBeenCalledTimes(1); // Should have only called once
 });
 
-test("B-002: transferToken handles unsafe integer amounts by losing precision", async () => {
+test("transferToken handles unsafe integer amounts by losing precision", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
@@ -629,7 +629,7 @@ test("B-002: transferToken handles unsafe integer amounts by losing precision", 
   expect(capturedAmount).not.toBe(intendedAmount);
 });
 
-test("B-003: unwrapSolWithKeypair fails when payer has 0 SOL even with admin loan covering exact amount", async () => {
+test("unwrapSolWithKeypair fails when payer has 0 SOL even with admin loan covering exact amount", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
@@ -676,7 +676,7 @@ test("B-003: unwrapSolWithKeypair fails when payer has 0 SOL even with admin loa
   // This confirms the logic tries to send back exactly what was lent, ignoring fees paid by payer.
 });
 
-test("B-004: findOrCreateAssociatedTokenAccount tries to create account on arbitrary RPC error", async () => {
+test("findOrCreateAssociatedTokenAccount tries to create account on arbitrary RPC error", async () => {
   const connection = {
     getAccountInfo: vi.fn().mockRejectedValue(new Error("Network Error - 503 Service Unavailable")),
   };
@@ -697,7 +697,7 @@ test("B-004: findOrCreateAssociatedTokenAccount tries to create account on arbit
   expect(res.instructions.length).toBe(1);
 });
 
-test("B-005: unwrapSolWithKeypair loses precision for large adminTopUpLamports", async () => {
+test("unwrapSolWithKeypair loses precision for large adminTopUpLamports", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
@@ -735,7 +735,7 @@ test("B-005: unwrapSolWithKeypair loses precision for large adminTopUpLamports",
   expect(capturedAmount).not.toBe(largeVal);
 });
 
-test("B-006: withdrawAllSol fails if actual fee is higher than estimated", async () => {
+test("withdrawAllSol fails if actual fee is higher than estimated", async () => {
   const connection: any = {
     getBalance: async () => 1_000_000,
   };
@@ -764,7 +764,7 @@ test("B-006: withdrawAllSol fails if actual fee is higher than estimated", async
   expect(sentLamports).toBe(995_000);
 });
 
-test("B-007: sendAndConfirmWithResubmits retries without checking history first", async () => {
+test("sendAndConfirmWithResubmits retries without checking history first", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
     { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
