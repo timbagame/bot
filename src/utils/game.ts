@@ -25,6 +25,7 @@ import {
   formatAmount,
   escapeHtml,
 } from "./format-amount";
+import { coerceLamportValue, MAX_SAFE_LAMPORTS } from "./amount";
 import {
   DEFAULT_NULL_ADDRESS,
   GAME_CREATION_RATE_LIMIT_WINDOW_MS,
@@ -159,61 +160,7 @@ type GameTokenContextAccounts = {
 const DEFAULT_FRIENDLY_ERROR_MESSAGE =
   "❌ Something went wrong. Please try again in a moment.";
 
-const INTEGER_PATTERN = /^-?\d+$/;
 
-const MAX_SAFE_LAMPORTS = BigInt(Number.MAX_SAFE_INTEGER);
-
-const coerceLamportValue = (value: unknown): bigint | null => {
-  if (typeof value === "bigint") {
-    return value;
-  }
-
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) {
-      return null;
-    }
-    return BigInt(Math.trunc(value));
-  }
-
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!INTEGER_PATTERN.test(trimmed)) {
-      return null;
-    }
-    try {
-      return BigInt(trimmed);
-    } catch {
-      return null;
-    }
-  }
-
-  if (value && typeof value === "object") {
-    const candidate = (value as { toString?: () => string; toNumber?: () => number }) ?? {};
-    if (typeof candidate.toString === "function") {
-      const stringified = candidate.toString();
-      if (INTEGER_PATTERN.test(stringified.trim())) {
-        try {
-          return BigInt(stringified.trim());
-        } catch {
-          // fall through
-        }
-      }
-    }
-
-    if (typeof candidate.toNumber === "function") {
-      try {
-        const asNumber = candidate.toNumber();
-        if (Number.isFinite(asNumber)) {
-          return BigInt(Math.trunc(asNumber));
-        }
-      } catch {
-        // swallow and fall through to null return
-      }
-    }
-  }
-
-  return null;
-};
 
 const logAndFormatError = (
   error: unknown,

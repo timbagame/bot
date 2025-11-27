@@ -327,3 +327,24 @@ export const handleCallbackErrorSafe = async (
   });
   await safeAnswerCallbackQuery(ctx, truncatedMessage);
 };
+
+export const replyToMessage = async (
+  ctx: Context,
+  text: string,
+  options: any = {}
+): Promise<void> => {
+  await ctx.reply(text, {
+    reply_to_message_id: ctx.message?.message_id,
+    ...options,
+  });
+};
+
+export const replyUsageError = async (
+  ctx: Context,
+  text: string
+): Promise<void> => {
+  await ctx.reply(text, {
+    parse_mode: "HTML",
+    reply_to_message_id: ctx.message?.message_id,
+  });
+};

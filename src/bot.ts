@@ -3,7 +3,7 @@ import { Bot, Context, InlineKeyboard } from "grammy";
 import type { NextFunction } from "grammy";
 import { run, sequentialize } from "@grammyjs/runner";
 import { WalletManager } from "./utils/wallet";
-import { TokenManager, formatParseAmountError } from "./utils/token-manager";
+import { TokenManager } from "./utils/token-manager";
 import * as anchor from "@coral-xyz/anchor";
 import { EventParser } from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
@@ -11,7 +11,6 @@ import type { Timba } from "../idl/idlType";
 import idl from "../idl/idl.json";
 import {
   GameDatabase,
-  type LeaderboardStatsRecord,
 } from "./utils/game-database";
 import { GameManager } from "./utils/game";
 import { PDAManager } from "./utils/pda";
@@ -69,14 +68,10 @@ import {
   persistInputPromptFromContext,
 } from "./utils/wallet-ui";
 import { buildCustomTokenPrompt } from "./utils/swap/prompts";
-import {
-  buildEmptyLeaderboardMessage,
-  buildLeaderboardMessage,
-  type LeaderboardPlayerDisplay,
-} from "./utils/leaderboard-ui";
+
 import { formatAmount, escapeHtml, formatRate } from "./utils/format-amount";
 import { type PendingSwapTransaction } from "./bot/flows/sol-conversion";
-import { onBalance, type BalanceDeps } from "./handlers/wallet";
+
 import { inferMaxPlayers } from "./utils/arg-parsing";
 import type {
   GameData,
@@ -113,10 +108,11 @@ import { patchReplyBehavior } from "./utils/reply-patch";
 import { buildTransactionLinkMessage } from "./utils/network-detector";
 import { buildProcessingStatus } from "./utils/trade-ui";
 import { respondWithMenu } from "./utils/menu-response";
-import { handleCoinflipCommand } from "./handlers/game";
+
 import { createGameSetupModule, GAME_SETUP_COPY } from "./handlers/game-setup";
 import { createGameCommandsModule } from "./handlers/game-commands";
 import { createGameCallbacksModule } from "./handlers/game-callbacks";
+import { createWalletCommandsModule } from "./handlers/wallet-commands";
 import {
   createWalletMenuModule,
   type WalletCacheSnapshot as WalletCacheSnapshotData,
@@ -2275,7 +2271,13 @@ const gameCommandsModule = createGameCommandsModule({
   gameManager: {
     createGame: (...args) => gameManager.createGame(...args),
     createGameMessage: (...args) => gameManager.createGameMessage(...args),
+    getUserGames: (...args) => gameManager.getUserGames(...args),
+    getUsernameFromTelegramId: (...args) =>
+      gameManager.getUsernameFromTelegramId(...args),
   },
+  gameDb,
+  handleCommandError: (ctx, error, name) =>
+    handleCommandErrorHelper(ctx, error, name, wallet),
   getOracleMaxPlayers,
   isGroupChat,
   startInteractiveGameSetup: (ctx, telegramId, copy, tokenOverride) =>
@@ -2287,9 +2289,9 @@ const gameCommandsModule = createGameCommandsModule({
   gameSetupCopy: GAME_SETUP_COPY,
 });
 
+
+
 const {
-  createCoinflipDeps,
-  handleGiveawayCommand,
   __test_createGameViaCommand,
 } = gameCommandsModule;
 
@@ -2476,6 +2478,27 @@ const validateAndProcessTransaction = async (
 export const __test_validateAndProcessTransaction =
   validateAndProcessTransaction;
 
+const walletCommandsModule = createWalletCommandsModule({
+  wallet,
+  getTokenManager: () => tokenManager,
+  getGameManager: () => gameManager,
+  handleCommandError: (ctx, error, name) =>
+    handleCommandErrorHelper(ctx, error, name, wallet),
+  validateAndProcessTransaction,
+  showWalletUI,
+  clearWalletCache,
+  isPrivateChat,
+});
+
+const {
+  handleTipCommand: __test_handleTipCommand,
+} = walletCommandsModule;
+
+export { __test_handleTipCommand };
+
+gameCommandsModule.registerHandlers(bot);
+walletCommandsModule.registerHandlers(bot);
+
 // ================================
 // RESPONSE HELPERS
 // ================================
@@ -2499,12 +2522,7 @@ const replyToMessage = async (
   });
 };
 
-const replyUsageError = async (
-  ctx: Context,
-  message: string
-): Promise<void> => {
-  return replyToMessage(ctx, message);
-};
+
 
 const formatDefaultTokenSetMessage = (
   tokenTicker: string,
@@ -2726,465 +2744,7 @@ const checkGameTokenStatus = async () => {
   }
 };
 
-const createBalanceDeps = (): BalanceDeps => ({
-  isPrivateChat,
-  clearWalletCache,
-  showWalletUI,
-  handleCommandError,
-});
 
-bot.command(["start", "balance"], async (ctx: Context) => {
-  if (ctx.chat?.id) {
-    initiatedChats.add(ctx.chat.id);
-  }
-
-  await onBalance(ctx as any, createBalanceDeps());
-});
-
-bot.command(["coinflip", "cf"], async (ctx) => {
-  try {
-    await handleCoinflipCommand(
-      ctx as Context & { message?: any },
-      createCoinflipDeps()
-    );
-  } catch (error) {
-    console.error("Error in coinflip command:", error);
-    await ctx.reply("❌ Error setting up coinflip game. Please try again.");
-  }
-});
-
-bot.command(["giveaway", "ga"], async (ctx) => {
-  await handleGiveawayCommand(ctx as Context & { message?: any });
-});
-
-// ================================
-// WALLET COMMANDS
-// ================================
-
-bot.command(["withdraw", "wh"], async (ctx: Context) => {
-  const telegramId = await getRequiredTelegramIdForContext(
-    ctx,
-    "withdraw command"
-  );
-  if (telegramId == null) {
-    return;
-  }
-  const args = ctx.message?.text?.split(" ");
-
-  if (!args || args.length < 3) {
-    return replyUsageError(
-      ctx,
-      "Usage: /withdraw &lt;address&gt; &lt;amount&gt; [TOKEN] or /withdraw &lt;address&gt; &lt;amount&gt; SOL"
-    );
-  }
-
-  const addressArg = args[1];
-  if (!addressArg) {
-    return replyToMessage(
-      ctx,
-      "Invalid wallet address. Please provide a valid Solana address."
-    );
-  }
-
-  let toAddress: PublicKey;
-  try {
-    toAddress = new PublicKey(addressArg);
-  } catch {
-    return replyToMessage(
-      ctx,
-      "Invalid wallet address. Please provide a valid Solana address."
-    );
-  }
-
-  const amountArgRaw = args[2]?.trim();
-  const tokenArgRaw = args[3]?.trim();
-  const isAllRequest =
-    amountArgRaw && ["all", "max"].includes(amountArgRaw.toLowerCase());
-
-  if (isAllRequest) {
-    const wantsSol = !tokenArgRaw || tokenArgRaw.toUpperCase() === "SOL";
-    if (!wantsSol) {
-      return replyToMessage(
-        ctx,
-        "Use a numeric amount when withdrawing SPL tokens. `all` is only supported for SOL."
-      );
-    }
-
-    try {
-      const nativeLamports = await wallet.getBalance(telegramId);
-
-      if (nativeLamports <= 0) {
-        return replyToMessage(
-          ctx,
-          "Your wallet has no SOL available to withdraw."
-        );
-      }
-
-      await validateAndProcessTransaction(
-        ctx,
-        telegramId,
-        nativeLamports,
-        true,
-        "SOL withdrawal",
-        async () => {
-          const result = await wallet.withdrawAllSol(telegramId, toAddress);
-
-          const totalText = wallet.formatSolBalance(result.totalLamportsSent);
-
-          const message = `<b>Withdrawal completed</b> 💸\n\nSent ${totalText} SOL`;
-
-          return { signature: result.signature, message };
-        },
-        { showSolscanLink: true }
-      );
-    } catch (error: any) {
-      await handleCommandError(ctx, error, "withdraw");
-    }
-    return;
-  }
-
-  // Allow SOL withdrawals by parsing in a non-game context
-  const parsed = await tokenManager.parseAmount(args, 2, ctx.chat?.id, "tip");
-  if (!parsed.success) {
-    return replyToMessage(
-      ctx,
-      formatParseAmountError(
-        parsed,
-        "Please provide a valid amount greater than 0."
-      )
-    );
-  }
-
-  const parsedAmount = parsed.data;
-
-  try {
-    await validateAndProcessTransaction(
-      ctx,
-      telegramId,
-      parsedAmount.amount,
-      parsedAmount.isSol,
-      `Withdrawal of ${parsedAmount.formattedAmount}`,
-      async (_playerData) => {
-        if (parsedAmount.isSol) {
-          return await wallet.transferSol(
-            telegramId,
-            toAddress,
-            parsedAmount.amount
-          );
-        } else {
-          return await wallet.transferToken(
-            telegramId,
-            toAddress,
-            parsedAmount.amount,
-            parsedAmount.tokenMint
-          );
-        }
-      },
-      {
-        showSolscanLink: true,
-        tokenMint: parsedAmount.isSol ? undefined : parsedAmount.tokenMint,
-        balanceLabel: parsedAmount.tokenTicker,
-      }
-    );
-  } catch (error: any) {
-    await handleCommandError(ctx, error, "withdraw");
-  }
-});
-
-const TIP_USAGE_MESSAGE =
-  "Usage: Reply to a user's message or use /tip @username &lt;amount&gt; [TOKEN]";
-
-type TipMentionTokenInfo = {
-  index: number | null;
-  length: number | null;
-};
-
-const getTipMentionTokenInfo = (
-  entity: { offset?: number; length?: number },
-  text: string
-): TipMentionTokenInfo => {
-  if (typeof entity.offset !== "number" || entity.offset < 0) {
-    return { index: null, length: null };
-  }
-
-  const before = text.slice(0, entity.offset);
-  const trimmedBefore = before.trim();
-  const index =
-    trimmedBefore.length === 0 ? 0 : trimmedBefore.split(/\s+/).length;
-
-  if (typeof entity.length !== "number" || entity.length <= 0) {
-    return { index, length: null };
-  }
-
-  const mentionText = text
-    .slice(entity.offset, entity.offset + entity.length)
-    .trim();
-
-  if (mentionText.length === 0) {
-    return { index, length: null };
-  }
-
-  const tokens = mentionText.split(/\s+/).filter((part) => part.length > 0);
-
-  return {
-    index,
-    length: tokens.length > 0 ? tokens.length : null,
-  };
-};
-
-const handleTipCommand = async (ctx: Context): Promise<void> => {
-  const telegramId = await getRequiredTelegramIdForContext(ctx, "tip command");
-  if (telegramId == null) {
-    return;
-  }
-
-  const message = ctx.message;
-  const repliedMessage = message?.reply_to_message;
-  const messageText = message?.text ?? "";
-  const args =
-    messageText.trim().length > 0 ? messageText.trim().split(/\s+/) : [];
-
-  if (!repliedMessage?.from && args.length < 2) {
-    return replyUsageError(ctx, TIP_USAGE_MESSAGE);
-  }
-
-  let recipientTelegramId: bigint | null = null;
-  let recipientName = "User";
-  let amountArgIndex = 1;
-
-  if (repliedMessage?.from) {
-    const fromUser = repliedMessage.from;
-
-    if (fromUser.is_bot) {
-      return replyToMessage(ctx, "You cannot tip bots!");
-    }
-
-    recipientTelegramId = BigInt(fromUser.id);
-    if (recipientTelegramId === telegramId) {
-      return replyToMessage(ctx, "You can't tip yourself!");
-    }
-
-    if (fromUser.username) {
-      gameManager.primeUsernameCache(
-        ctx,
-        String(fromUser.id),
-        `@${fromUser.username}`
-      );
-      recipientName = `@${fromUser.username}`;
-    } else if (fromUser.first_name) {
-      recipientName = fromUser.first_name;
-    }
-
-    amountArgIndex = 1;
-  } else {
-    const tokens = args;
-    const entities = Array.isArray(message?.entities)
-      ? (message?.entities as Array<any>)
-      : [];
-
-    let mentionTokenIndex: number | null = null;
-    let mentionUsername: string | null = null;
-    let mentionLabel: string | null = null;
-    let mentionUser: any = null;
-    let mentionIsBot: boolean | null = null;
-    let mentionTokenLength: number | null = null;
-
-    for (const entity of entities) {
-      if (!entity || typeof entity.type !== "string") {
-        continue;
-      }
-
-      if (entity.type === "text_mention" && entity.user) {
-        mentionUser = entity.user;
-        mentionIsBot = entity.user.is_bot === true;
-        const slice =
-          typeof entity.offset === "number" && typeof entity.length === "number"
-            ? messageText.slice(entity.offset, entity.offset + entity.length)
-            : null;
-        if (entity.user.username) {
-          mentionUsername = `@${entity.user.username}`;
-        } else if (slice?.startsWith("@")) {
-          mentionUsername = slice;
-        }
-        mentionLabel =
-          slice && slice.trim().length > 0
-            ? slice
-            : entity.user.first_name ?? null;
-        const info = getTipMentionTokenInfo(entity, messageText);
-        mentionTokenIndex = info.index;
-        mentionTokenLength = info.length;
-        break;
-      }
-
-      if (entity.type === "mention") {
-        const slice =
-          typeof entity.offset === "number" && typeof entity.length === "number"
-            ? messageText.slice(entity.offset, entity.offset + entity.length)
-            : null;
-        if (slice) {
-          mentionUsername = slice;
-          mentionLabel = slice;
-          const info = getTipMentionTokenInfo(entity, messageText);
-          mentionTokenIndex = info.index;
-          mentionTokenLength = info.length;
-          break;
-        }
-      }
-    }
-
-    if (!mentionUsername && tokens.length > 1) {
-      for (let i = 1; i < tokens.length; i++) {
-        const token = tokens[i];
-        if (
-          typeof token === "string" &&
-          token.startsWith("@") &&
-          token.length > 1
-        ) {
-          mentionUsername = token;
-          mentionTokenIndex = i;
-          mentionTokenLength = 1;
-          break;
-        }
-      }
-    }
-
-    let resolvedId: string | null = null;
-
-    if (mentionUser?.id !== undefined) {
-      resolvedId = String(mentionUser.id);
-    }
-
-    if (!resolvedId) {
-      if (!mentionUsername) {
-        return replyUsageError(ctx, TIP_USAGE_MESSAGE);
-      }
-
-      const lookedUpId = gameManager.findTelegramIdByUsername(mentionUsername);
-      if (!lookedUpId) {
-        return replyToMessage(
-          ctx,
-          `Unable to resolve <code>${escapeHtml(
-            mentionUsername
-          )}</code>. Ask them to start a chat with the bot first.`
-        );
-      }
-      resolvedId = lookedUpId;
-    }
-
-    let recipientIdBigInt: bigint;
-    try {
-      recipientIdBigInt = BigInt(resolvedId);
-    } catch {
-      return replyToMessage(
-        ctx,
-        "Unable to resolve the specified user. Please try replying to their message instead."
-      );
-    }
-
-    if (recipientIdBigInt === telegramId) {
-      return replyToMessage(ctx, "You can't tip yourself!");
-    }
-
-    if (
-      mentionIsBot !== true &&
-      ctx.chat?.id &&
-      typeof ctx.api?.getChatMember === "function"
-    ) {
-      const candidate = Number(resolvedId);
-      if (Number.isSafeInteger(candidate)) {
-        try {
-          const member = await ctx.api.getChatMember(ctx.chat.id, candidate);
-          if (member?.user?.is_bot) {
-            mentionIsBot = true;
-          }
-          if (!mentionUsername && member?.user?.username) {
-            mentionUsername = `@${member.user.username}`;
-          }
-          if (!mentionLabel && member?.user?.first_name) {
-            mentionLabel = member.user.first_name;
-          }
-        } catch {
-          // Ignore errors from getChatMember lookup
-        }
-      }
-    }
-
-    if (mentionIsBot) {
-      return replyToMessage(ctx, "You cannot tip bots!");
-    }
-
-    recipientTelegramId = recipientIdBigInt;
-    recipientName =
-      mentionUsername ?? mentionLabel ?? mentionUser?.first_name ?? "User";
-
-    if (mentionUsername && resolvedId) {
-      gameManager.primeUsernameCache(ctx, resolvedId, mentionUsername);
-    }
-
-    const tokensConsumed =
-      mentionTokenLength && mentionTokenLength > 0 ? mentionTokenLength : 1;
-    amountArgIndex = (mentionTokenIndex ?? 1) + tokensConsumed;
-  }
-
-  if (recipientTelegramId === null) {
-    return replyUsageError(ctx, TIP_USAGE_MESSAGE);
-  }
-
-  const parsed = await tokenManager.parseAmount(
-    args,
-    amountArgIndex,
-    ctx.chat?.id,
-    "tip"
-  );
-  if (!parsed.success) {
-    return replyToMessage(
-      ctx,
-      formatParseAmountError(
-        parsed,
-        "Please provide a valid amount greater than 0."
-      )
-    );
-  }
-
-  const parsedAmount = parsed.data;
-
-  try {
-    const recipientPubKey = wallet.getPublicKey(recipientTelegramId);
-    await validateAndProcessTransaction(
-      ctx,
-      telegramId,
-      parsedAmount.amount,
-      parsedAmount.isSol,
-      `Tip of ${parsedAmount.formattedAmount} to ${recipientName}`,
-      async (_playerData) => {
-        if (parsedAmount.isSol) {
-          return await wallet.transferSol(
-            telegramId,
-            recipientPubKey,
-            parsedAmount.amount
-          );
-        } else {
-          return await wallet.transferToken(
-            telegramId,
-            recipientPubKey,
-            parsedAmount.amount,
-            parsedAmount.tokenMint
-          );
-        }
-      },
-      {
-        tokenMint: parsedAmount.isSol ? undefined : parsedAmount.tokenMint,
-        balanceLabel: parsedAmount.tokenTicker,
-      }
-    );
-  } catch (error: any) {
-    await handleCommandError(ctx, error, "tip");
-  }
-};
-
-bot.command("tip", handleTipCommand);
-
-export const __test_handleTipCommand = handleTipCommand;
 
 // Transaction cache for trade operations with TTL
 const TRANSACTION_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -3375,155 +2935,8 @@ bot.command("help", async (ctx: Context) => {
   });
 });
 
-bot.command("active", async (ctx: Context) => {
-  const telegramId = await getRequiredTelegramIdForContext(
-    ctx,
-    "active command"
-  );
-  if (telegramId == null) {
-    return;
-  }
 
-  try {
-    const { activeGames } = await gameManager.getUserGames(ctx, telegramId);
 
-    let response = activeGames || "You don't have any active games.";
-
-    await ctx.reply(response, {
-      parse_mode: "HTML",
-      reply_to_message_id: ctx.message?.message_id,
-    });
-  } catch (error) {
-    await handleCommandError(ctx, error, "active");
-  }
-});
-
-bot.command("games", async (ctx: Context) => {
-  const telegramId = await getRequiredTelegramIdForContext(
-    ctx,
-    "games command"
-  );
-  if (telegramId == null) {
-    return;
-  }
-
-  try {
-    const { recentGames } = await gameManager.getUserGames(ctx, telegramId);
-    const response = recentGames || "You don't have any recent games.";
-
-    await ctx.reply(response, {
-      parse_mode: "HTML",
-      reply_to_message_id: ctx.message?.message_id,
-    });
-  } catch (error) {
-    await handleCommandError(ctx, error, "games");
-  }
-});
-
-const LEADERBOARD_PLAYER_LIMIT = 5;
-
-const resolveLeaderboardDisplayName = async (
-  ctx: Context,
-  telegramId: string
-): Promise<string> => {
-  try {
-    const username = await gameManager.getUsernameFromTelegramId(
-      ctx,
-      telegramId
-    );
-    if (username) {
-      return username.startsWith("@") ? username : `@${username}`;
-    }
-  } catch (error) {
-    console.warn(`Could not get username for ${telegramId}:`, error);
-  }
-
-  return `Player ${telegramId}`;
-};
-
-const resolveLeaderboardPlayers = async (
-  ctx: Context,
-  stats: LeaderboardStatsRecord[]
-): Promise<LeaderboardPlayerDisplay[]> => {
-  const players = await Promise.all(
-    stats.map(async (row) => {
-      const displayName = await resolveLeaderboardDisplayName(
-        ctx,
-        row.telegramId
-      );
-      const wins = Math.max(0, row.gamesWon);
-      const totalGames = Math.max(0, row.totalGames);
-      const losses = Math.max(totalGames - wins, 0);
-
-      return {
-        telegramId: row.telegramId,
-        displayName,
-        totalGames,
-        wins,
-        losses,
-        winRate: Math.max(0, row.winRate),
-        gamesCreated: Math.max(0, row.gamesCreated),
-        gamesJoined: Math.max(0, row.gamesJoined),
-        totalVolume: Math.max(0, row.totalVolume),
-      } satisfies LeaderboardPlayerDisplay;
-    })
-  );
-
-  return players.filter((player) => player.totalGames > 0);
-};
-
-bot.command(["leaderboard", "lb"], async (ctx: Context) => {
-  if (!isGroupChat(ctx)) {
-    return ctx.reply("❌ Leaderboard is only available in group chats.");
-  }
-
-  const chatId = ctx.chat?.id;
-  if (!chatId) {
-    return ctx.reply("❌ Could not load chat information.");
-  }
-
-  try {
-    console.log(`🏆 Generating leaderboard for chat ${chatId}`);
-
-    const leaderboardStats = gameDb.getLeaderboardStats(
-      chatId,
-      LEADERBOARD_PLAYER_LIMIT
-    );
-
-    if (leaderboardStats.length === 0) {
-      return ctx.reply(buildEmptyLeaderboardMessage(), {
-        parse_mode: "HTML",
-        reply_to_message_id: ctx.message?.message_id,
-      });
-    }
-
-    const players = await resolveLeaderboardPlayers(ctx, leaderboardStats);
-
-    if (players.length === 0) {
-      return ctx.reply(buildEmptyLeaderboardMessage(), {
-        parse_mode: "HTML",
-        reply_to_message_id: ctx.message?.message_id,
-      });
-    }
-
-    const leaderboardText = buildLeaderboardMessage({
-      chatTitle: ctx.chat?.title ?? null,
-      players,
-    });
-
-    await ctx.reply(leaderboardText, {
-      parse_mode: "HTML",
-      reply_to_message_id: ctx.message?.message_id,
-    });
-
-    console.log(
-      `✅ Leaderboard generated for chat ${chatId} with ${players.length} players`
-    );
-  } catch (error) {
-    console.error("Error generating leaderboard:", error);
-    await handleCommandError(ctx, error, "leaderboard");
-  }
-});
 
 // ================================
 // SECURE COMMANDS
@@ -4183,19 +3596,7 @@ export const __test_buildAdminIntegratorConfig = buildAdminIntegratorConfig;
 // ================================
 
 // Handle "GET STARTED" button from bot info screen - triggers /start
-bot.callbackQuery("start_bot", async (ctx) => {
-  try {
-    if (ctx.chat?.id) {
-      initiatedChats.add(ctx.chat.id);
-    }
 
-    await onBalance(ctx as any, createBalanceDeps());
-    await safeAnswerCallbackQuery(ctx, "🚀 Welcome to TIMBA!");
-  } catch (error) {
-    console.error("Error in start_bot:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error loading main menu");
-  }
-});
 
 // ================================
 // HELP MENU CALLBACKS

@@ -1,9 +1,9 @@
-import type { Context } from "grammy";
+import type { Context, Bot } from "grammy";
 import { formatParseAmountError } from "../utils/token-manager";
 import { WSOL_MINT } from "../utils/constants";
 import type { GameManager } from "../utils/game";
 import type { ParseAmountResult } from "../types";
-import type { CoinflipDeps, GameTokenOverride } from "./game";
+import { type CoinflipDeps, type GameTokenOverride, handleCoinflipCommand } from "./game";
 import type { GameSetupCopy } from "./game-setup";
 import { containsBalanceInfo } from "../utils/context-helpers";
 
@@ -52,12 +52,34 @@ type CreateGameViaCommandDeps = {
   };
 };
 
+import {
+  buildEmptyLeaderboardMessage,
+  buildLeaderboardMessage,
+  type LeaderboardPlayerDisplay,
+} from "../utils/leaderboard-ui";
+import type { GameDatabase, LeaderboardStatsRecord } from "../utils/game-database";
+
 export type GameCommandsModuleDeps = {
   parseAmount: CreateGameViaCommandDeps["parseAmount"];
   inferMaxPlayers: CreateGameViaCommandDeps["inferMaxPlayers"];
   wallet: CreateGameViaCommandDeps["wallet"];
   getContractMinimumAmount: CreateGameViaCommandDeps["getContractMinimumAmount"];
-  gameManager: CreateGameViaCommandDeps["gameManager"];
+  gameManager: {
+    createGame: (
+      ...args: Parameters<GameManager["createGame"]>
+    ) => ReturnType<GameManager["createGame"]>;
+    createGameMessage: (
+      ...args: Parameters<GameManager["createGameMessage"]>
+    ) => ReturnType<GameManager["createGameMessage"]>;
+    getUserGames: (
+      ...args: Parameters<GameManager["getUserGames"]>
+    ) => ReturnType<GameManager["getUserGames"]>;
+    getUsernameFromTelegramId: (
+      ...args: Parameters<GameManager["getUsernameFromTelegramId"]>
+    ) => ReturnType<GameManager["getUsernameFromTelegramId"]>;
+  };
+  gameDb: GameDatabase;
+  handleCommandError: (ctx: any, error: any, name: string) => Promise<void>;
   getOracleMaxPlayers: () => number;
   isGroupChat: (ctx: Context) => boolean;
   startInteractiveGameSetup: (
@@ -360,12 +382,168 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
     }
   };
 
+  const LEADERBOARD_PLAYER_LIMIT = 5;
+
+  const resolveLeaderboardDisplayName = async (
+    ctx: Context,
+    telegramId: string
+  ): Promise<string> => {
+    try {
+      const username = await deps.gameManager.getUsernameFromTelegramId(
+        ctx,
+        telegramId
+      );
+      if (username) {
+        return username.startsWith("@") ? username : `@${username}`;
+      }
+    } catch (error) {
+      console.warn(`Could not get username for ${telegramId}:`, error);
+    }
+
+    return `Player ${telegramId}`;
+  };
+
+  const resolveLeaderboardPlayers = async (
+    ctx: Context,
+    stats: LeaderboardStatsRecord[]
+  ): Promise<LeaderboardPlayerDisplay[]> => {
+    const players = await Promise.all(
+      stats.map(async (row) => {
+        const displayName = await resolveLeaderboardDisplayName(
+          ctx,
+          row.telegramId
+        );
+        const wins = Math.max(0, row.gamesWon);
+        const totalGames = Math.max(0, row.totalGames);
+        const losses = Math.max(totalGames - wins, 0);
+
+        return {
+          telegramId: row.telegramId,
+          displayName,
+          totalGames,
+          wins,
+          losses,
+          winRate: Math.max(0, row.winRate),
+          gamesCreated: Math.max(0, row.gamesCreated),
+          gamesJoined: Math.max(0, row.gamesJoined),
+          totalVolume: Math.max(0, row.totalVolume),
+        } satisfies LeaderboardPlayerDisplay;
+      })
+    );
+
+    return players.filter((player) => player.totalGames > 0);
+  };
+
   return {
     COINFLIP_COMMAND_OPTIONS,
     GIVEAWAY_COMMAND_OPTIONS,
     createGameViaCommand,
     createCoinflipDeps,
     handleGiveawayCommand,
+    registerHandlers: (bot: Bot) => {
+      bot.command(["coinflip", "cf"], async (ctx) => {
+        try {
+          await handleCoinflipCommand(
+            ctx as Context & { message?: any },
+            createCoinflipDeps()
+          );
+        } catch (error) {
+          console.error("Error in coinflip command:", error);
+          await ctx.reply("❌ Error setting up coinflip game. Please try again.");
+        }
+      });
+
+      bot.command(["giveaway", "ga"], async (ctx) => {
+        await handleGiveawayCommand(ctx as Context & { message?: any });
+      });
+
+      bot.command("active", async (ctx: Context) => {
+        const telegramId = await deps.getRequiredTelegramIdForContext(
+          ctx,
+          "active command"
+        );
+        if (telegramId == null) return;
+
+        try {
+          const { activeGames } = await deps.gameManager.getUserGames(ctx, telegramId);
+          let response = activeGames || "You don't have any active games.";
+          await ctx.reply(response, {
+            parse_mode: "HTML",
+            reply_to_message_id: ctx.message?.message_id,
+          });
+        } catch (error) {
+          await deps.handleCommandError(ctx, error, "active");
+        }
+      });
+
+      bot.command("games", async (ctx: Context) => {
+        const telegramId = await deps.getRequiredTelegramIdForContext(
+          ctx,
+          "games command"
+        );
+        if (telegramId == null) return;
+
+        try {
+          const { recentGames } = await deps.gameManager.getUserGames(ctx, telegramId);
+          const response = recentGames || "You don't have any recent games.";
+          await ctx.reply(response, {
+            parse_mode: "HTML",
+            reply_to_message_id: ctx.message?.message_id,
+          });
+        } catch (error) {
+          await deps.handleCommandError(ctx, error, "games");
+        }
+      });
+
+      bot.command(["leaderboard", "lb"], async (ctx: Context) => {
+        if (!deps.isGroupChat(ctx)) {
+          return ctx.reply("❌ Leaderboard is only available in group chats.");
+        }
+
+        const chatId = ctx.chat?.id;
+        if (!chatId) {
+          return ctx.reply("❌ Could not load chat information.");
+        }
+
+        try {
+          console.log(`🏆 Generating leaderboard for chat ${chatId}`);
+
+          const leaderboardStats = deps.gameDb.getLeaderboardStats(
+            chatId,
+            LEADERBOARD_PLAYER_LIMIT
+          );
+
+          if (leaderboardStats.length === 0) {
+            return ctx.reply(buildEmptyLeaderboardMessage(), {
+              parse_mode: "HTML",
+              reply_to_message_id: ctx.message?.message_id,
+            });
+          }
+
+          const players = await resolveLeaderboardPlayers(ctx, leaderboardStats);
+
+          if (players.length === 0) {
+            return ctx.reply(buildEmptyLeaderboardMessage(), {
+              parse_mode: "HTML",
+              reply_to_message_id: ctx.message?.message_id,
+            });
+          }
+
+          const leaderboardText = buildLeaderboardMessage({
+            chatTitle: ctx.chat?.title ?? null,
+            players,
+          });
+
+          await ctx.reply(leaderboardText, {
+            parse_mode: "HTML",
+            reply_to_message_id: ctx.message?.message_id,
+          });
+        } catch (error) {
+          console.error("Error generating leaderboard:", error);
+          await ctx.reply("❌ Error generating leaderboard.");
+        }
+      });
+    },
     __test_createGameViaCommand: createGameViaCommand,
   };
 };
