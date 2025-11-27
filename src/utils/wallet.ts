@@ -619,6 +619,27 @@ export class WalletManager {
     return false;
   }
 
+  private isInsufficientFundsError(error: unknown): boolean {
+    const extractMessage = (err: unknown): string => {
+      if (err instanceof Error) return err.message;
+      if (typeof err === "string") return err;
+      return "";
+    };
+
+    const message = extractMessage(error).toLowerCase();
+    if (message.includes("insufficient funds")) return true;
+    if (message.includes("insufficient lamports")) return true;
+    if (message.includes("insufficient balance")) return true;
+
+    if (error instanceof SendTransactionError && Array.isArray(error.logs)) {
+      return error.logs.some((log) =>
+        log.toLowerCase().includes("insufficient funds")
+      );
+    }
+
+    return false;
+  }
+
   // ================================
   // PUBLIC METHODS
   // ================================
@@ -1532,7 +1553,7 @@ export class WalletManager {
     programId: PublicKey = TOKEN_PROGRAM_ID
   ): Promise<{ address: PublicKey; instructions: TransactionInstruction[] }> {
     // Deduplicate concurrent ATA creation requests
-    const cacheKey = `${owner.toBase58()}-${tokenMint.toBase58()}`;
+    const cacheKey = `${owner.toBase58()}-${tokenMint.toBase58()}-${programId.toBase58()}`;
     const pending = this.pendingAtaCreations.get(cacheKey);
     if (pending) {
       return pending;
@@ -1738,7 +1759,7 @@ export class WalletManager {
     await this.throttle();
     // Check balance first
     // We can use connection.getBalance directly.
-    const nativeBalance = await this.connection.getBalance(owner);
+    const nativeBalance = await this.connection.getBalance(payer.publicKey);
     // Estimate fee? We can't easily without building tx.
     // But we should at least check if we have enough for the amount.
     if (nativeBalance < amountLamports) {
@@ -2058,7 +2079,7 @@ export class WalletManager {
           totalLamportsSent: transferLamports,
         };
     } catch (error: any) {
-        if (error?.message?.includes("insufficient funds") || error?.message?.includes("0x1")) {
+        if (this.isInsufficientFundsError(error)) {
              // Balance might have changed, retry once with fresh balance
              console.log(`${debugPrefix} Insufficient funds, retrying with fresh balance...`);
              const freshBalance = await this.connection.getBalance(payer);
