@@ -45,7 +45,7 @@ test("findOrCreateAssociatedTokenAccount returns create instruction when missing
 test("wrapSol builds instructions and forwards to sendTransaction", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection: { getBalance: async () => 10_000_000_000 } as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
   );
   const ata = Keypair.generate().publicKey;
   const sendCalls: any[] = [];
@@ -72,7 +72,7 @@ test("wrapSol builds instructions and forwards to sendTransaction", async () => 
 test("wrapSol retries without ATA creation when account already exists", async () => {
   const wm = WalletManager.createForTest(
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+    { connection: { getBalance: async () => 10_000_000_000 } as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
   );
   const ata = Keypair.generate().publicKey;
   let planCalls = 0;
