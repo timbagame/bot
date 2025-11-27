@@ -1734,6 +1734,8 @@ export class WalletManager {
       throw new Error("Wrap amount must be a safe integer in lamports.");
     }
 
+    // Respect wallet RPC throttling before balance lookup
+    await this.throttle();
     // Check balance first
     // We can use connection.getBalance directly.
     const nativeBalance = await this.connection.getBalance(owner);
@@ -1888,45 +1890,63 @@ export class WalletManager {
       }, using program ${programId.toBase58()}`
     );
 
-    const [
-      { address: fromTokenAccount, instructions: fromInstructions },
-      { address: toTokenAccount, instructions: toInstructions },
-    ] = await Promise.all([
-      this.findOrCreateAssociatedTokenAccount(
+    const buildTransferPlan = async () => {
+      const [
+        { address: fromTokenAccount, instructions: fromInstructions },
+        { address: toTokenAccount, instructions: toInstructions },
+      ] = await Promise.all([
+        this.findOrCreateAssociatedTokenAccount(
+          fromKeypair.publicKey,
+          tokenMintPubkey,
+          fromKeypair,
+          programId
+        ),
+        this.findOrCreateAssociatedTokenAccount(
+          toAddress,
+          tokenMintPubkey,
+          fromKeypair,
+          programId
+        ),
+      ]);
+
+      const transferInstruction = createTransferCheckedInstruction(
+        fromTokenAccount,
+        tokenMintPubkey,
+        toTokenAccount,
         fromKeypair.publicKey,
-        tokenMintPubkey,
-        fromKeypair,
+        amount,
+        decimals,
+        [],
         programId
-      ),
-      this.findOrCreateAssociatedTokenAccount(
-        toAddress,
-        tokenMintPubkey,
-        fromKeypair,
-        programId
-      ),
-    ]);
+      );
 
-    const transferInstruction = createTransferCheckedInstruction(
-      fromTokenAccount,
-      tokenMintPubkey,
-      toTokenAccount,
-      fromKeypair.publicKey,
-      amount,
-      decimals,
-      [],
-      programId
-    );
+      return [
+        ...fromInstructions,
+        ...toInstructions,
+        transferInstruction,
+      ] as TransactionInstruction[];
+    };
 
-    const allInstructions = [
-      ...fromInstructions,
-      ...toInstructions,
-      transferInstruction,
-    ];
-    return await this.sendAndConfirmWithResubmits(
-      allInstructions,
-      [fromKeypair],
-      { operationLabel: "Token transfer" }
-    );
+    const sendPlan = async (
+      instructions: TransactionInstruction[],
+      label: string
+    ) =>
+      await this.sendAndConfirmWithResubmits(instructions, [fromKeypair], {
+        operationLabel: label,
+      });
+
+    try {
+      const plan = await buildTransferPlan();
+      return await sendPlan(plan, "Token transfer");
+    } catch (error) {
+      if (this.isAtaAlreadyExistsError(error)) {
+        console.warn("ATA already exists, retrying transfer without creation");
+        const retryPlan = await buildTransferPlan();
+        return await sendPlan(retryPlan, "Token transfer (retry)");
+      }
+
+      throw error;
+    }
   }
 
   public async transferSol(
