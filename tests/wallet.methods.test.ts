@@ -554,3 +554,243 @@ test("withdrawAllSol refreshes balance instead of using stale cache", async () =
   expect(result.totalLamportsSent).toBe(995_000);
   expect(lamportTransfers[0]).toBe(995_000);
 });
+
+test("B-001: withdrawAllSol leaves dust if balance increases between fetch and send", async () => {
+  const connection: any = {
+    getBalance: vi.fn()
+      .mockResolvedValueOnce(1_000_000) // Initial fetch
+      .mockResolvedValueOnce(2_000_000), // Updated balance (simulating incoming transfer)
+    getLatestBlockhash: async () => ({ blockhash: "BH", lastValidBlockHeight: 1 }),
+  };
+
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  (wm as any).estimateFee = async () => 5_000;
+
+  const lamportTransfers: number[] = [];
+  (wm as any).sendAndConfirmWithResubmits = async (ixs: any[]) => {
+    const instruction = ixs[0]!;
+    const lamports = Number((instruction.data as Buffer).readBigUInt64LE(4));
+    lamportTransfers.push(lamports);
+    return "WITHDRAW_SIG";
+  };
+
+  const destination = Keypair.generate().publicKey;
+  await wm.withdrawAllSol(1n, destination);
+
+  // We expect it to send 1_000_000 - 5_000 = 995_000
+  // Even though the balance is now 2_000_000
+  // This confirms the race condition/staleness
+  expect(lamportTransfers[0]).toBe(995_000);
+  expect(connection.getBalance).toHaveBeenCalledTimes(1); // Should have only called once
+});
+
+test("B-002: transferToken handles unsafe integer amounts by losing precision", async () => {
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  const intendedAmount = BigInt(Number.MAX_SAFE_INTEGER) + 2n; // Odd number > 2^53, definitely loses precision in double
+  const unsafeAmount = Number(intendedAmount); // This will lose precision
+
+  const fromKeypair = Keypair.generate();
+  const toAddress = Keypair.generate().publicKey;
+  const tokenMint = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+
+  // Mock getAccountInfo for detectTokenProgram
+  (wm as any).connection.getAccountInfo = async () => ({
+    data: Buffer.alloc(0),
+    owner: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+    lamports: 0,
+  });
+
+  (wm as any).getKeyPair = () => fromKeypair;
+  (wm as any).getTokenMetadata = async () => ({ decimals: 6 });
+  (wm as any).findOrCreateAssociatedTokenAccount = async () => ({
+    address: Keypair.generate().publicKey,
+    instructions: [],
+  });
+
+  let capturedAmount: bigint = 0n;
+  (wm as any).sendAndConfirmWithResubmits = async (ixs: any[]) => {
+    const transferIx = ixs[0];
+    // TransferChecked instruction layout: [instruction (1), amount (8), decimals (1)]
+    capturedAmount = (transferIx.data as Buffer).readBigUInt64LE(1);
+    return "SIG";
+  };
+
+  await wm.transferToken(1n, toAddress, unsafeAmount, tokenMint.toBase58());
+
+  // We expect the captured amount (derived from number) to NOT match the intended amount
+  expect(capturedAmount).not.toBe(intendedAmount);
+});
+
+test("B-003: unwrapSolWithKeypair fails when payer has 0 SOL even with admin loan covering exact amount", async () => {
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  const payer = Keypair.generate();
+  const adminKeypair = Keypair.generate();
+
+  // Admin lends 5000.
+  // We need to pay transaction fees.
+  // If payer has 0, and we transfer 5000, and we try to send back 5000.
+  // The transaction fee will eat into the 5000.
+  // So the transfer back of 5000 will fail (insufficient funds).
+
+  (wm as any).buildUnwrapWsolPlan = async () => ({
+    instructions: [],
+    unwrapLamports: 1000,
+    remainingLamports: 0,
+  });
+
+  const instructions: TransactionInstruction[] = [];
+  (wm as any).sendAndConfirmWithResubmits = async (ixs: any[]) => {
+    instructions.push(...ixs);
+    return "SIG";
+  };
+
+  await wm.unwrapSolWithKeypair({
+    owner: payer.publicKey,
+    payer,
+    adminKeypair,
+    adminTopUpLamports: 5000,
+    amountLamports: 1000,
+  });
+
+  // Verify the instructions sequence
+  // 1. Transfer Admin -> Payer (5000)
+  // 2. Unwrap ...
+  // 3. Transfer Payer -> Admin (5000)
+
+  const transferBack = instructions[instructions.length - 1];
+  const amountBack = Number((transferBack!.data as Buffer).readBigUInt64LE(4));
+
+  expect(amountBack).toBe(5000);
+  // This confirms the logic tries to send back exactly what was lent, ignoring fees paid by payer.
+});
+
+test("B-004: findOrCreateAssociatedTokenAccount tries to create account on arbitrary RPC error", async () => {
+  const connection = {
+    getAccountInfo: vi.fn().mockRejectedValue(new Error("Network Error - 503 Service Unavailable")),
+  };
+
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: connection as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  const owner = Keypair.generate().publicKey;
+  const mint = Keypair.generate().publicKey;
+  const payer = Keypair.generate();
+
+  const res = await wm.findOrCreateAssociatedTokenAccount(owner, mint, payer);
+
+  // It should NOT have instructions if it's a network error (we don't know if it exists)
+  // But the bug is that it DOES return create instruction
+  expect(res.instructions.length).toBe(1);
+});
+
+test("B-005: unwrapSolWithKeypair loses precision for large adminTopUpLamports", async () => {
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  const payer = Keypair.generate();
+  const adminKeypair = Keypair.generate();
+
+  // Use a value that is safe in BigInt but unsafe in Number
+  // 2^53 + 1 is the first odd number greater than 2^53, which is not representable in double
+  const largeVal = BigInt(Number.MAX_SAFE_INTEGER) + 2n;
+
+  (wm as any).buildUnwrapWsolPlan = async () => ({
+    instructions: [],
+    unwrapLamports: 1000,
+    remainingLamports: 0,
+  });
+
+  let capturedAmount: bigint = 0n;
+  (wm as any).sendAndConfirmWithResubmits = async (ixs: any[]) => {
+    const transferIx = ixs[0]; // Admin -> Payer
+    capturedAmount = (transferIx!.data as Buffer).readBigUInt64LE(4);
+    return "SIG";
+  };
+
+  await wm.unwrapSolWithKeypair({
+    owner: payer.publicKey,
+    payer,
+    adminKeypair,
+    adminTopUpLamports: largeVal,
+    amountLamports: 1000,
+  });
+
+  // The code converts to Number, so it should lose precision
+  expect(capturedAmount).not.toBe(largeVal);
+});
+
+test("B-006: withdrawAllSol fails if actual fee is higher than estimated", async () => {
+  const connection: any = {
+    getBalance: async () => 1_000_000,
+  };
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  // Estimate fee says 5000
+  (wm as any).estimateFee = async () => 5_000;
+
+  let sentLamports = 0;
+  (wm as any).sendAndConfirmWithResubmits = async (ixs: any[]) => {
+    const instruction = ixs[0]!;
+    sentLamports = Number((instruction.data as Buffer).readBigUInt64LE(4));
+    return "SIG";
+  };
+
+  await wm.withdrawAllSol(1n, Keypair.generate().publicKey);
+
+  // We send 995,000.
+  // If actual fee is 5001, Total needed = 995,000 + 5,001 = 1,000,001.
+  // Available = 1,000,000.
+  // Transaction fails.
+  // The test confirms we send exactly Balance - EstimatedFee.
+  expect(sentLamports).toBe(995_000);
+});
+
+test("B-007: sendAndConfirmWithResubmits retries without checking history first", async () => {
+  const wm = WalletManager.createForTest(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    { connection: {} as any, fetch: globalThis.fetch as any, timeNow: () => Date.now() }
+  );
+
+  const sendCalls: string[] = [];
+  (wm as any).sendTransaction = async () => {
+    sendCalls.push("call");
+    return "SIG123";
+  };
+
+  let confirmAttempts = 0;
+  (wm as any).confirmTransaction = async () => {
+    confirmAttempts++;
+    if (confirmAttempts === 1) {
+      throw new Error("Timeout");
+    }
+    return; // Success on second try
+  };
+
+  // We want to see if it calls sendTransaction again on timeout
+  await wm.sendAndConfirmWithResubmits(
+    [new TransactionInstruction({ keys: [], programId: SystemProgram.programId, data: Buffer.alloc(0) })],
+    [Keypair.generate()]
+  );
+
+  // It should have called sendTransaction twice (initial + retry)
+  expect(sendCalls.length).toBe(2);
+});
