@@ -253,18 +253,18 @@ export type BalanceDeps = {
 export async function onBalance(ctx: any, deps: BalanceDeps) {
   const { isPrivateChat, clearWalletCache, showWalletUI, handleCommandError } = deps;
 
-  const resolveTelegramId = (): bigint => {
-    try {
-      if (ctx?.from?.id != null) {
-        return BigInt(ctx.from.id);
-      }
-    } catch (e) {
-      console.error("Error parsing telegramId in onBalance:", e);
+  let telegramId = 0n;
+  try {
+    if (ctx?.from?.id != null) {
+      telegramId = BigInt(ctx.from.id);
     }
-    return getTelegramId(ctx);
-  };
+  } catch (e) {
+    console.error("Error parsing telegramId in onBalance:", e);
+  }
 
-  const telegramId = resolveTelegramId();
+  if (telegramId === 0n) {
+    telegramId = getTelegramId(ctx);
+  }
 
   console.log(`onBalance debug: telegramId=${telegramId}, ctx.from=${JSON.stringify(ctx?.from)}`);
 
@@ -278,29 +278,23 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     return;
   }
 
-  const callShowWalletUI = async (targetCtx: any) => {
-    try {
-      clearWalletCache(telegramId);
-    } catch (cacheError) {
-      console.warn("clearWalletCache failed in onBalance:", cacheError);
-    }
-
-    try {
-      console.log("onBalance debug: calling showWalletUI", {
-        privateChat: targetCtx?.chat?.type === "private",
-      });
-      await showWalletUI(targetCtx);
-    } catch (error) {
-      console.error("onBalance debug: error while showing wallet UI", error);
-      await handleCommandError(ctx, error, "balance");
-    }
-  };
+  try {
+    clearWalletCache(telegramId);
+  } catch (cacheError) {
+    console.warn("clearWalletCache failed in onBalance:", cacheError);
+  }
 
   const isPrivate = isPrivateChat(ctx);
   console.log(`onBalance debug: isPrivateChat=${isPrivate}`);
 
   if (isPrivate) {
-    await callShowWalletUI(ctx);
+    try {
+      console.log("onBalance debug: calling showWalletUI (private)");
+      await showWalletUI(ctx);
+    } catch (error) {
+      console.error("onBalance debug: error while showing wallet UI", error);
+      await handleCommandError(ctx, error, "balance");
+    }
     return;
   }
 
@@ -330,5 +324,11 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     editMessageText: undefined,
   } as typeof ctx;
 
-  await callShowWalletUI(dmContext);
+  try {
+    console.log("onBalance debug: calling showWalletUI (dm)");
+    await showWalletUI(dmContext);
+  } catch (error) {
+    console.error("onBalance debug: error while showing wallet UI (dm)", error);
+    await handleCommandError(ctx, error, "balance");
+  }
 }
