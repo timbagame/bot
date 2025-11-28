@@ -267,6 +267,8 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     telegramId = getTelegramId(ctx);
   }
 
+  console.log(`onBalance debug: telegramId=${telegramId}, ctx.from=${JSON.stringify(ctx?.from)}`);
+
   if (telegramId === 0n) {
     console.log("onBalance: telegramId is 0n. ctx.from:", JSON.stringify(ctx?.from));
     if (typeof ctx?.reply === "function") {
@@ -277,11 +279,16 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     return;
   }
 
-  if (isPrivateChat(ctx)) {
+  const isPrivate = isPrivateChat(ctx);
+  console.log(`onBalance debug: isPrivateChat=${isPrivate}`);
+
+  if (isPrivate) {
     try {
       try { clearWalletCache(telegramId); } catch {}
+      console.log("onBalance debug: calling showWalletUI (private)");
       await showWalletUI(ctx);
     } catch (error) {
+      console.error("onBalance debug: error in private chat handler", error);
       await handleCommandError(ctx, error, "balance");
     }
     return;
