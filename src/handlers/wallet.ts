@@ -253,18 +253,7 @@ export type BalanceDeps = {
 export async function onBalance(ctx: any, deps: BalanceDeps) {
   const { isPrivateChat, clearWalletCache, showWalletUI, handleCommandError } = deps;
 
-  let telegramId = 0n;
-  try {
-    if (ctx?.from?.id != null) {
-      telegramId = BigInt(ctx.from.id);
-    }
-  } catch (e) {
-    console.error("Error parsing telegramId in onBalance:", e);
-  }
-
-  if (telegramId === 0n) {
-    telegramId = getTelegramId(ctx);
-  }
+  const telegramId = getTelegramId(ctx);
 
   console.log(`onBalance debug: telegramId=${telegramId}, ctx.from=${JSON.stringify(ctx?.from)}`);
 
@@ -278,23 +267,26 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     return;
   }
 
-  try {
-    clearWalletCache(telegramId);
-  } catch (cacheError) {
-    console.warn("clearWalletCache failed in onBalance:", cacheError);
-  }
+  const callFlow = async (targetCtx: any) => {
+    try {
+      clearWalletCache(telegramId);
+    } catch (cacheError) {
+      console.warn("clearWalletCache failed in onBalance:", cacheError);
+    }
+
+    try {
+      await showWalletUI(targetCtx);
+    } catch (error) {
+      await handleCommandError(ctx, error, "balance");
+    }
+  };
 
   const isPrivate = isPrivateChat(ctx);
   console.log(`onBalance debug: isPrivateChat=${isPrivate}`);
 
   if (isPrivate) {
-    try {
-      console.log("onBalance debug: calling showWalletUI (private)");
-      await showWalletUI(ctx);
-    } catch (error) {
-      console.error("onBalance debug: error while showing wallet UI", error);
-      await handleCommandError(ctx, error, "balance");
-    }
+    console.log("onBalance debug: calling showWalletUI (private)");
+    await callFlow(ctx);
     return;
   }
 
@@ -324,11 +316,6 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     editMessageText: undefined,
   } as typeof ctx;
 
-  try {
-    console.log("onBalance debug: calling showWalletUI (dm)");
-    await showWalletUI(dmContext);
-  } catch (error) {
-    console.error("onBalance debug: error while showing wallet UI (dm)", error);
-    await handleCommandError(ctx, error, "balance");
-  }
+  console.log("onBalance debug: calling showWalletUI (dm)");
+  await callFlow(dmContext);
 }
