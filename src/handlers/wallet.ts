@@ -253,19 +253,18 @@ export type BalanceDeps = {
 export async function onBalance(ctx: any, deps: BalanceDeps) {
   const { isPrivateChat, clearWalletCache, showWalletUI, handleCommandError } = deps;
 
-  let telegramId = 0n;
-  try {
-    if (ctx?.from?.id) {
-      telegramId = BigInt(ctx.from.id);
+  const resolveTelegramId = (): bigint => {
+    try {
+      if (ctx?.from?.id != null) {
+        return BigInt(ctx.from.id);
+      }
+    } catch (e) {
+      console.error("Error parsing telegramId in onBalance:", e);
     }
-  } catch (e) {
-    console.error("Error parsing telegramId in onBalance:", e);
-  }
+    return getTelegramId(ctx);
+  };
 
-  // Fallback to helper if inline extraction failed
-  if (telegramId === 0n) {
-    telegramId = getTelegramId(ctx);
-  }
+  const telegramId = resolveTelegramId();
 
   console.log(`onBalance debug: telegramId=${telegramId}, ctx.from=${JSON.stringify(ctx?.from)}`);
 
@@ -279,57 +278,57 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     return;
   }
 
+  const callShowWalletUI = async (targetCtx: any) => {
+    try {
+      clearWalletCache(telegramId);
+    } catch (cacheError) {
+      console.warn("clearWalletCache failed in onBalance:", cacheError);
+    }
+
+    try {
+      console.log("onBalance debug: calling showWalletUI", {
+        privateChat: targetCtx?.chat?.type === "private",
+      });
+      await showWalletUI(targetCtx);
+    } catch (error) {
+      console.error("onBalance debug: error while showing wallet UI", error);
+      await handleCommandError(ctx, error, "balance");
+    }
+  };
+
   const isPrivate = isPrivateChat(ctx);
   console.log(`onBalance debug: isPrivateChat=${isPrivate}`);
 
   if (isPrivate) {
-    try {
-      try { clearWalletCache(telegramId); } catch {}
-      console.log("onBalance debug: calling showWalletUI (private)");
-      await showWalletUI(ctx);
-    } catch (error) {
-      console.error("onBalance debug: error in private chat handler", error);
-      await handleCommandError(ctx, error, "balance");
-    }
+    await callShowWalletUI(ctx);
     return;
   }
 
   // If it's not a private chat, send the same wallet UI privately to the user
-  try {
-    try { clearWalletCache(telegramId); } catch {}
+  const dmTarget = telegramId.toString();
 
-    const dmTargetBigInt = telegramId;
-    if (dmTargetBigInt === 0n) {
-      throw new Error("Unable to determine DM recipient");
-    }
+  const dmContext = {
+    ...ctx,
+    from: ctx.from,
+    chat: { id: dmTarget, type: "private" } as any,
+    message: undefined,
+    callbackQuery: undefined,
+    __originChatId: ctx.chat?.id,
+    reply: (text: string, options: any = {}) =>
+      ctx.api.sendMessage(dmTarget, text, {
+        reply_to_message_id: undefined,
+        link_preview_options: { is_disabled: true },
+        ...options,
+      }),
+    replyWithVideo: (fileId: string, options: any = {}) =>
+      ctx.api.sendVideo(dmTarget, fileId, {
+        reply_to_message_id: undefined,
+        ...options,
+      }),
+    editMessageMedia: undefined,
+    editMessageCaption: undefined,
+    editMessageText: undefined,
+  } as typeof ctx;
 
-    const dmTarget = dmTargetBigInt.toString();
-
-    const dmContext = {
-      ...ctx,
-      from: ctx.from,
-      chat: { id: dmTarget, type: "private" } as any,
-      message: undefined,
-      callbackQuery: undefined,
-      __originChatId: ctx.chat?.id,
-      reply: (text: string, options: any = {}) =>
-        ctx.api.sendMessage(dmTarget, text, {
-          reply_to_message_id: undefined,
-          link_preview_options: { is_disabled: true },
-          ...options,
-        }),
-      replyWithVideo: (fileId: string, options: any = {}) =>
-        ctx.api.sendVideo(dmTarget, fileId, {
-          reply_to_message_id: undefined,
-          ...options,
-        }),
-      editMessageMedia: undefined,
-      editMessageCaption: undefined,
-      editMessageText: undefined,
-    } as typeof ctx;
-
-    await showWalletUI(dmContext);
-  } catch (error) {
-    await handleCommandError(ctx, error, "balance");
-  }
+  await callShowWalletUI(dmContext);
 }
