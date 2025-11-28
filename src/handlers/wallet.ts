@@ -253,19 +253,22 @@ export type BalanceDeps = {
 export async function onBalance(ctx: any, deps: BalanceDeps) {
   const { isPrivateChat, clearWalletCache, showWalletUI, handleCommandError } = deps;
 
-  let telegramId = getTelegramId(ctx);
-
-  // Fallback for cases where getTelegramId might fail in some environments
-  if (telegramId === 0n) {
-    const rawId = ctx?.from?.id;
-    if (rawId) {
-      try {
-        telegramId = BigInt(rawId);
-      } catch {}
+  let telegramId = 0n;
+  try {
+    if (ctx?.from?.id) {
+      telegramId = BigInt(ctx.from.id);
     }
+  } catch (e) {
+    console.error("Error parsing telegramId in onBalance:", e);
+  }
+
+  // Fallback to helper if inline extraction failed
+  if (telegramId === 0n) {
+    telegramId = getTelegramId(ctx);
   }
 
   if (telegramId === 0n) {
+    console.log("onBalance: telegramId is 0n. ctx.from:", JSON.stringify(ctx?.from));
     if (typeof ctx?.reply === "function") {
       await ctx.reply(MISSING_TELEGRAM_ID_MESSAGE, {
         reply_to_message_id: ctx.message?.message_id,
