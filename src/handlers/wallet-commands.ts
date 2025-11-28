@@ -35,6 +35,7 @@ export type WalletCommandsModuleDeps = {
   showWalletUI: (ctx: any) => Promise<void>;
   clearWalletCache: (telegramId: bigint) => void;
   isPrivateChat: (ctx: any) => boolean;
+  onChatInitiated?: (chatId: number) => void;
 };
 
 const TIP_USAGE_MESSAGE =
@@ -483,6 +484,9 @@ export const createWalletCommandsModule = (deps: WalletCommandsModuleDeps) => {
     handleTipCommand,
     registerHandlers: (bot: Bot) => {
       bot.command(["start", "balance"], async (ctx) => {
+        if (ctx.chat?.id && deps.onChatInitiated) {
+          deps.onChatInitiated(ctx.chat.id);
+        }
         await onBalance(
           ctx as Context & { message?: any },
           createBalanceDeps()
@@ -495,6 +499,9 @@ export const createWalletCommandsModule = (deps: WalletCommandsModuleDeps) => {
 
       bot.callbackQuery("start_bot", async (ctx) => {
         try {
+          if (ctx.chat?.id && deps.onChatInitiated) {
+            deps.onChatInitiated(ctx.chat.id);
+          }
           await onBalance(ctx as any, createBalanceDeps());
           await safeAnswerCallbackQuery(ctx, "🚀 Welcome to TIMBA!");
         } catch (error) {

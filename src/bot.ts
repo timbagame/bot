@@ -2488,6 +2488,7 @@ const walletCommandsModule = createWalletCommandsModule({
   showWalletUI,
   clearWalletCache,
   isPrivateChat,
+  onChatInitiated: (chatId: number) => initiatedChats.add(chatId),
 });
 
 const {
