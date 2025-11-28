@@ -15,4 +15,21 @@ describe("/withdraw command", () => {
       content.replace(/\s+/g, " ")
     ).toContain(needle);
   });
+
+  test("usage text is HTML-escaped", () => {
+    const handlerPath = path.join(process.cwd(), "src", "handlers", "wallet-commands.ts");
+    const content = fs.readFileSync(handlerPath, "utf-8");
+
+    expect(content).toContain("Usage: /withdraw &lt;address&gt; &lt;amount&gt;");
+    expect(content).toContain("/tip @username &lt;amount&gt; [TOKEN]");
+  });
+
+  test("withdraw-all path fetches fresh SOL balance", () => {
+    const handlerPath = path.join(process.cwd(), "src", "handlers", "wallet-commands.ts");
+    const compact = fs.readFileSync(handlerPath, "utf-8").replace(/\s+/g, "");
+
+    expect(compact).toContain(
+      "getBalance(telegramId,{forceFresh:true,allowStaleOnError:true,});"
+    );
+  });
 });
