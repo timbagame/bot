@@ -8,7 +8,6 @@ import {
   getRequiredTelegramIdForContext,
   MISSING_TELEGRAM_ID_MESSAGE,
   safeAnswerCallbackQuery,
-  MISSING_TELEGRAM_ID_MESSAGE,
 } from "../utils/context-helpers";
 import { RateLimitExceededError } from "../utils/rate-limiter";
 import { isBotInitiationForbidden } from "../utils/telegram-errors";
