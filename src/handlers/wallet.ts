@@ -253,7 +253,19 @@ export type BalanceDeps = {
 export async function onBalance(ctx: any, deps: BalanceDeps) {
   const { isPrivateChat, clearWalletCache, showWalletUI, handleCommandError } = deps;
 
-  const telegramId = getTelegramId(ctx);
+  let telegramId = 0n;
+  try {
+    const rawId = ctx?.from?.id;
+    if (rawId != null) {
+      telegramId = BigInt(rawId);
+    }
+  } catch (e) {
+    console.error("Error parsing telegramId in onBalance:", e);
+  }
+
+  if (telegramId === 0n) {
+    telegramId = getTelegramId(ctx);
+  }
 
   console.log(`onBalance debug: telegramId=${telegramId}, ctx.from=${JSON.stringify(ctx?.from)}`);
 
