@@ -252,10 +252,21 @@ export type BalanceDeps = {
 export async function onBalance(ctx: any, deps: BalanceDeps) {
   const { isPrivateChat, clearWalletCache, showWalletUI, handleCommandError } = deps;
 
-  const telegramId = await getRequiredTelegramIdForContext(
+  let telegramId = await getRequiredTelegramIdForContext(
     ctx,
     "balance command"
   );
+
+  // Some CI environments have shown `getRequiredTelegramIdForContext` returning
+  // null even when a usable `from.id` is present (e.g. when BigInt parsing is
+  // over‑zealous). Fall back to the raw id to avoid silently skipping the
+  // handler in those cases.
+  if (telegramId == null) {
+    const fallbackId = getTelegramId(ctx);
+    if (fallbackId !== 0n) {
+      telegramId = fallbackId;
+    }
+  }
 
   if (telegramId == null) {
     return;
