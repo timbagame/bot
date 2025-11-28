@@ -257,6 +257,13 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
 
   console.log(`onBalance debug: telegramId=${telegramId}, ctx.from=${JSON.stringify(ctx?.from)}`);
 
+  // Always attempt to clear cache once per command, regardless of chat type.
+  try {
+    clearWalletCache(telegramId);
+  } catch (cacheError) {
+    console.warn("clearWalletCache failed in onBalance:", cacheError);
+  }
+
   if (telegramId === 0n) {
     console.log("onBalance: telegramId is 0n. ctx.from:", JSON.stringify(ctx?.from));
     if (typeof ctx?.reply === "function") {
@@ -267,26 +274,16 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     return;
   }
 
-  const callFlow = async (targetCtx: any) => {
-    try {
-      clearWalletCache(telegramId);
-    } catch (cacheError) {
-      console.warn("clearWalletCache failed in onBalance:", cacheError);
-    }
-
-    try {
-      await showWalletUI(targetCtx);
-    } catch (error) {
-      await handleCommandError(ctx, error, "balance");
-    }
-  };
-
   const isPrivate = isPrivateChat(ctx);
   console.log(`onBalance debug: isPrivateChat=${isPrivate}`);
 
   if (isPrivate) {
     console.log("onBalance debug: calling showWalletUI (private)");
-    await callFlow(ctx);
+    try {
+      await showWalletUI(ctx);
+    } catch (error) {
+      await handleCommandError(ctx, error, "balance");
+    }
     return;
   }
 
@@ -317,5 +314,9 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
   } as typeof ctx;
 
   console.log("onBalance debug: calling showWalletUI (dm)");
-  await callFlow(dmContext);
+  try {
+    await showWalletUI(dmContext);
+  } catch (error) {
+    await handleCommandError(ctx, error, "balance");
+  }
 }
