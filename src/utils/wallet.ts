@@ -1553,7 +1553,7 @@ export class WalletManager {
     programId: PublicKey = TOKEN_PROGRAM_ID
   ): Promise<{ address: PublicKey; instructions: TransactionInstruction[] }> {
     // Deduplicate concurrent ATA creation requests
-    const cacheKey = `${owner.toBase58()}-${tokenMint.toBase58()}-${programId.toBase58()}`;
+    const cacheKey = `${owner.toBase58()}-${tokenMint.toBase58()}-${programId.toBase58()}-${payer.publicKey.toBase58()}`;
     const pending = this.pendingAtaCreations.get(cacheKey);
     if (pending) {
       return pending;

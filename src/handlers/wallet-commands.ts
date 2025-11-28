@@ -38,7 +38,7 @@ export type WalletCommandsModuleDeps = {
 };
 
 const TIP_USAGE_MESSAGE =
-  "Usage: Reply to a user's message or use /tip @username <amount> [TOKEN]";
+  "Usage: Reply to a user's message or use /tip @username &lt;amount&gt; [TOKEN]";
 
 type TipMentionTokenInfo = {
   index: number | null;
@@ -100,7 +100,7 @@ export const createWalletCommandsModule = (deps: WalletCommandsModuleDeps) => {
     if (!args || args.length < 3) {
       return replyUsageError(
         ctx,
-        "Usage: /withdraw <address> <amount> [TOKEN] or /withdraw <address> <amount> SOL"
+        "Usage: /withdraw &lt;address&gt; &lt;amount&gt; [TOKEN] or /withdraw &lt;address&gt; &lt;amount&gt; SOL"
       );
     }
 
@@ -137,7 +137,10 @@ export const createWalletCommandsModule = (deps: WalletCommandsModuleDeps) => {
       }
 
       try {
-        const nativeLamports = await deps.wallet.getBalance(telegramId);
+        const nativeLamports = await deps.wallet.getBalance(telegramId, {
+          forceFresh: true,
+          allowStaleOnError: true,
+        });
 
         if (nativeLamports <= 0) {
           return replyToMessage(
