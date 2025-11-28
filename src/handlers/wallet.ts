@@ -7,6 +7,7 @@ import {
   getTelegramId,
   getRequiredTelegramIdForContext,
   safeAnswerCallbackQuery,
+  MISSING_TELEGRAM_ID_MESSAGE,
 } from "../utils/context-helpers";
 import { RateLimitExceededError } from "../utils/rate-limiter";
 import { isBotInitiationForbidden } from "../utils/telegram-errors";
@@ -252,23 +253,24 @@ export type BalanceDeps = {
 export async function onBalance(ctx: any, deps: BalanceDeps) {
   const { isPrivateChat, clearWalletCache, showWalletUI, handleCommandError } = deps;
 
-  let telegramId = await getRequiredTelegramIdForContext(
-    ctx,
-    "balance command"
-  );
+  let telegramId = getTelegramId(ctx);
 
-  // Some CI environments have shown `getRequiredTelegramIdForContext` returning
-  // null even when a usable `from.id` is present (e.g. when BigInt parsing is
-  // over‑zealous). Fall back to the raw id to avoid silently skipping the
-  // handler in those cases.
-  if (telegramId == null) {
-    const fallbackId = getTelegramId(ctx);
-    if (fallbackId !== 0n) {
-      telegramId = fallbackId;
+  // Fallback for cases where getTelegramId might fail in some environments
+  if (telegramId === 0n) {
+    const rawId = ctx?.from?.id;
+    if (rawId) {
+      try {
+        telegramId = BigInt(rawId);
+      } catch {}
     }
   }
 
-  if (telegramId == null) {
+  if (telegramId === 0n) {
+    if (typeof ctx?.reply === "function") {
+      await ctx.reply(MISSING_TELEGRAM_ID_MESSAGE, {
+        reply_to_message_id: ctx.message?.message_id,
+      });
+    }
     return;
   }
 
