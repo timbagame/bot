@@ -269,18 +269,6 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
 
   console.log(`onBalance debug: telegramId=${telegramId}, ctx.from=${JSON.stringify(ctx?.from)}`);
 
-  // Always attempt to clear cache once per command, regardless of chat type.
-  try {
-    clearWalletCache(telegramId);
-  } catch (cacheError) {
-    console.warn("clearWalletCache failed in onBalance:", cacheError);
-  }
-
-  // CI guard: ensure the cache clear is observable even if downstream branches return early.
-  if ((clearWalletCache as any).__ci_probe) {
-    (clearWalletCache as any).__ci_probe(telegramId);
-  }
-
   if (telegramId === 0n) {
     console.log("onBalance: telegramId is 0n. ctx.from:", JSON.stringify(ctx?.from));
     if (typeof ctx?.reply === "function") {
@@ -291,14 +279,19 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     return;
   }
 
+  // Clear cache once per command after we have a valid ID.
+  try {
+    clearWalletCache(telegramId);
+  } catch (cacheError) {
+    console.warn("clearWalletCache failed in onBalance:", cacheError);
+  }
+
   const isPrivate = isPrivateChat(ctx);
   console.log(`onBalance debug: isPrivateChat=${isPrivate}`);
 
   if (isPrivate) {
     console.log("onBalance debug: calling showWalletUI (private)");
     try {
-      // Re-clear inside the branch to satisfy contexts where early cache clear was skipped.
-      clearWalletCache(telegramId);
       await showWalletUI(ctx);
     } catch (error) {
       await handleCommandError(ctx, error, "balance");
@@ -334,7 +327,6 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
 
   console.log("onBalance debug: calling showWalletUI (dm)");
   try {
-    clearWalletCache(telegramId);
     await showWalletUI(dmContext);
   } catch (error) {
     await handleCommandError(ctx, error, "balance");
