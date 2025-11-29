@@ -292,6 +292,7 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
   if (isPrivate) {
     console.log("onBalance debug: calling showWalletUI (private)");
     try {
+      clearWalletCache(telegramId);
       await showWalletUI(ctx);
     } catch (error) {
       await handleCommandError(ctx, error, "balance");
@@ -327,6 +328,7 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
 
   console.log("onBalance debug: calling showWalletUI (dm)");
   try {
+    clearWalletCache(telegramId);
     await showWalletUI(dmContext);
   } catch (error) {
     await handleCommandError(ctx, error, "balance");
