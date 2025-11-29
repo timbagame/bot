@@ -253,21 +253,24 @@ export type BalanceDeps = {
 export async function onBalance(ctx: any, deps: BalanceDeps) {
   const { isPrivateChat, clearWalletCache, showWalletUI, handleCommandError } = deps;
 
-  let telegramId = 0n;
-  try {
-    const rawId = ctx?.from?.id;
-    if (rawId != null) {
-      telegramId = BigInt(rawId);
+  let telegramId = getTelegramId(ctx);
+  // Fallback: attempt a direct BigInt parse of from.id to cover any mock mismatch.
+  if (telegramId === 0n && ctx?.from?.id != null) {
+    try {
+      telegramId = BigInt(ctx.from.id);
+    } catch (e) {
+      console.error("Error parsing telegramId in onBalance (fallback):", e);
     }
-  } catch (e) {
-    console.error("Error parsing telegramId in onBalance:", e);
-  }
-
-  if (telegramId === 0n) {
-    telegramId = getTelegramId(ctx);
   }
 
   console.log(`onBalance debug: telegramId=${telegramId}, ctx.from=${JSON.stringify(ctx?.from)}`);
+
+  // Clear cache once per command after we have a valid ID.
+  try {
+    clearWalletCache(telegramId);
+  } catch (cacheError) {
+    console.warn("clearWalletCache failed in onBalance:", cacheError);
+  }
 
   if (telegramId === 0n) {
     console.log("onBalance: telegramId is 0n. ctx.from:", JSON.stringify(ctx?.from));
@@ -279,20 +282,12 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
     return;
   }
 
-  // Clear cache once per command after we have a valid ID.
-  try {
-    clearWalletCache(telegramId);
-  } catch (cacheError) {
-    console.warn("clearWalletCache failed in onBalance:", cacheError);
-  }
-
   const isPrivate = isPrivateChat(ctx);
   console.log(`onBalance debug: isPrivateChat=${isPrivate}`);
 
   if (isPrivate) {
     console.log("onBalance debug: calling showWalletUI (private)");
     try {
-      clearWalletCache(telegramId);
       await showWalletUI(ctx);
     } catch (error) {
       await handleCommandError(ctx, error, "balance");
@@ -328,7 +323,6 @@ export async function onBalance(ctx: any, deps: BalanceDeps) {
 
   console.log("onBalance debug: calling showWalletUI (dm)");
   try {
-    clearWalletCache(telegramId);
     await showWalletUI(dmContext);
   } catch (error) {
     await handleCommandError(ctx, error, "balance");
