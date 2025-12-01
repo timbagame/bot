@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { __test_shouldWithdrawToken } from "../src/services/fee-sweeper";
+import { Keypair, PublicKey } from "@solana/web3.js";
+import {
+  __test_shouldSwapTokenBalance,
+  __test_shouldWithdrawToken,
+  __test_sweepTokensToSol,
+} from "../src/services/fee-sweeper";
+import type { SwapRequest } from "../src/utils/swap/types";
 
 describe("fee sweeper helpers", () => {
   const wallet = {
@@ -9,7 +15,7 @@ describe("fee sweeper helpers", () => {
   const tokenConfig = { mint: "mint", ticker: "TEST" };
 
   test("skips withdrawals when below $5 threshold", async () => {
-    const priceResolver = async () => ({ price: 1 });
+    const priceResolver = async () => ({ price: 1, identifier: "AAA" });
     const result = await __test_shouldWithdrawToken(
       wallet,
       tokenConfig,
@@ -35,6 +41,87 @@ describe("fee sweeper helpers", () => {
 
     expect(result.shouldWithdraw).toBe(true);
     expect(result.tokenUsdValue).toBeCloseTo(5);
+  });
+});
+
+describe("token to SOL sweep helpers", () => {
+  const tokenConfig = { mint: "mint", ticker: "TEST" };
+
+  test("skips swaps when under $5", async () => {
+    const priceResolver = async () => ({ price: 1 });
+    const result = await __test_shouldSwapTokenBalance(
+      tokenConfig as any,
+      2_000_000_000n,
+      9,
+      priceResolver as any
+    );
+
+    expect(result.shouldSwap).toBe(false);
+    expect(result.usdValue).toBeCloseTo(2);
+  });
+
+  test("allows swaps at or above $5", async () => {
+    const priceResolver = async () => ({ price: 2.5 });
+    const result = await __test_shouldSwapTokenBalance(
+      tokenConfig as any,
+      2_000_000_000n,
+      9,
+      priceResolver as any
+    );
+
+    expect(result.shouldSwap).toBe(true);
+    expect(result.usdValue).toBeCloseTo(5);
+  });
+});
+
+describe("sweeping tokens to SOL", () => {
+  test("sends swaps for balances above $5", async () => {
+    const admin = Keypair.generate();
+    const tokens: [
+      { mint: string; ticker: string },
+      { mint: string; ticker: string }
+    ] = [
+      { mint: Keypair.generate().publicKey.toBase58(), ticker: "AAA" },
+      { mint: Keypair.generate().publicKey.toBase58(), ticker: "BBB" },
+    ];
+    const [tokenA, tokenB] = tokens;
+
+    const wallet = {
+      getAdminKeypair: () => admin,
+      getTokenMetadata: async () => ({ decimals: 9 }),
+    } as any;
+
+    const balances: Record<string, bigint> = {
+      [tokenA.mint]: 6_000_000_000n,
+      [tokenB.mint]: 2_000_000_000n,
+    };
+
+    const swapRequests: SwapRequest[] = [];
+    const swapManagerFactory = () => ({
+      getQuote: async (request: SwapRequest) => ({ request } as any),
+      executeJupiterSwap: async (request: SwapRequest) => {
+        swapRequests.push(request);
+        return "sig";
+      },
+    });
+
+    const priceResolver = async () => ({ price: 1, identifier: "AAA" });
+    const balanceFetcher = async (
+      _connection: any,
+      _owner: PublicKey,
+      mint: PublicKey
+    ) => balances[mint.toBase58()] ?? 0n;
+
+    await __test_sweepTokensToSol(
+      wallet,
+      {} as any,
+      tokens,
+      swapManagerFactory,
+      priceResolver,
+      balanceFetcher
+    );
+
+    expect(swapRequests.map((r) => r.inputMint)).toEqual([tokenA.mint]);
   });
 });
 

@@ -65,7 +65,7 @@ bun run scripts/update-token-min-bets.ts
 
 Override per-token thresholds with `TIMBA_MIN_COMPLETION_FEE_LAMPORTS`, `WSOL_MIN_COMPLETION_FEE_LAMPORTS`, etc., as needed. Values are expressed in raw token units (e.g., lamports for 9-decimal tokens).
 
-Collect any accrued protocol fees to the oracle operator wallet when needed:
+Collect any accrued protocol fees to the oracle operator wallet when needed (the sweep also swaps non-SOL balances over $5 to SOL):
 
 ```bash
 ORACLE_OPERATOR_KEYPAIR_PATH=/path/to/oracle-operator.json \\
@@ -74,7 +74,7 @@ bun run scripts/withdraw-token-fees.ts
 
 These scripts reuse the admin wallet for signing and honour `ORACLE_OPERATOR_KEYPAIR_PATH`.
 
-The bot runs fee sweeps automatically every hour by default. Disable the job with `ENABLE_FEE_SWEEPER=false` or adjust the cadence (milliseconds) with `FEE_SWEEP_INTERVAL_MS`. Failures are logged without bringing down the bot. Keep the manual script handy for ad-hoc or one-off sweeps.
+The bot runs fee sweeps automatically every hour by default, withdrawing oracle fees, claiming Jupiter referrals, and swapping collected tokens to SOL when the balance exceeds $5. Disable the job with `ENABLE_FEE_SWEEPER=false` or adjust the cadence (milliseconds) with `FEE_SWEEP_INTERVAL_MS`. Failures are logged without bringing down the bot. Keep the manual script handy for ad-hoc or one-off sweeps.
 
 ## 4. Run the Bot
 
