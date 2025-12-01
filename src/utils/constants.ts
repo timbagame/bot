@@ -77,7 +77,7 @@ export const FEE_SWEEP_INTERVAL_MS = parsePositiveDuration(
 ); // Default 1 hour
 export const ENABLE_FEE_SWEEPER = (() => {
   const raw = process.env.ENABLE_FEE_SWEEPER;
-  if (raw === undefined) return false;
+  if (raw === undefined) return true;
   const normalized = raw.trim().toLowerCase();
   return normalized === "true" || normalized === "1";
 })();

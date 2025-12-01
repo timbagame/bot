@@ -31,8 +31,8 @@ HELIUS_REBATE_ADDRESS=<SOL-address>  # Optional: collect Helius backrun rebates 
 # Optional: specify dedicated oracle operator keys for scripts
 # ORACLE_OPERATOR_KEYPAIR_PATH=/path/to/oracle-operator.json
 # NEW_ORACLE_OPERATOR_KEYPAIR_PATH=/path/to/new-operator.json
-# Optional: run automated fee sweeps inside the bot
-# ENABLE_FEE_SWEEPER=true
+# Automated fee sweeps run by default inside the bot; disable with:
+# ENABLE_FEE_SWEEPER=false
 # FEE_SWEEP_INTERVAL_MS=3600000
 ```
 
@@ -74,7 +74,7 @@ bun run scripts/withdraw-token-fees.ts
 
 These scripts reuse the admin wallet for signing and honour `ORACLE_OPERATOR_KEYPAIR_PATH`.
 
-To automate fee collection from the running bot, set `ENABLE_FEE_SWEEPER=true`. The sweeper runs every hour by default; override the cadence (milliseconds) with `FEE_SWEEP_INTERVAL_MS`. Failures are logged without bringing down the bot. Keep the manual script handy for ad-hoc or one-off sweeps.
+The bot runs fee sweeps automatically every hour by default. Disable the job with `ENABLE_FEE_SWEEPER=false` or adjust the cadence (milliseconds) with `FEE_SWEEP_INTERVAL_MS`. Failures are logged without bringing down the bot. Keep the manual script handy for ad-hoc or one-off sweeps.
 
 ## 4. Run the Bot
 

@@ -40,18 +40,21 @@ export interface FeeSweepResult {
   referralClaims: number;
 }
 
+type PriceResolver = typeof resolveTokenPriceUSD;
+
 const shouldWithdrawToken = async (
   wallet: WalletManager,
   config: TokenConfig,
   pendingFees: bigint,
-  decimals: number
+  decimals: number,
+  priceResolver: PriceResolver = resolveTokenPriceUSD
 ) => {
   const formattedPending = wallet.formatTokenBalance(
     Number(pendingFees),
     decimals
   );
   const tokenAmount = Number(pendingFees) / 10 ** decimals;
-  const priceData = await resolveTokenPriceUSD({
+  const priceData = await priceResolver({
     tokenMint: config.mint,
     tokenTicker: config.ticker,
   });
@@ -279,3 +282,5 @@ export const sweepFees = async (
 
   return { tokenWithdrawals, referralClaims };
 };
+
+export const __test_shouldWithdrawToken = shouldWithdrawToken;
