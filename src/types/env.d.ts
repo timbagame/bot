@@ -17,6 +17,8 @@ declare global {
       MIN_BET_MARGIN_MULTIPLIER?: string;
       COMPLETION_COMPUTE_UNITS?: string;
       COMPLETION_SIGNATURES?: string;
+      ENABLE_FEE_SWEEPER?: string;
+      FEE_SWEEP_INTERVAL_MS?: string;
     }
   }
 }

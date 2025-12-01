@@ -40,6 +40,8 @@ import {
   JUPITER_GASLESS_MIN_TRADE_USD,
   USER_SOL_MAX_BUFFER_LAMPORTS,
   applyOracleBufferTime,
+  ENABLE_FEE_SWEEPER,
+  FEE_SWEEP_INTERVAL_MS,
 } from "./utils/constants";
 import { FeeBudgetManager } from "./utils/fee-budget";
 import {
@@ -126,6 +128,7 @@ import { generateTransactionId } from "./utils/transaction-id";
 import type { TokenBalanceLike } from "./types/wallet";
 import { refreshDynamicFeeBudgets } from "./utils/fee-budget-refresh";
 import { SlidingWindowRateLimiter } from "./utils/rate-limiter";
+import { sweepFees } from "./services/fee-sweeper";
 export type { CreateGameViaCommandOptions } from "./handlers/game-commands";
 
 // ================================
@@ -5121,6 +5124,34 @@ if (process.env.NODE_ENV !== "test") {
 
       await registerProgramEventListeners();
       attachRpcEndpointFailoverHandler();
+
+      const scheduleFeeSweeper = () => {
+        if (!ENABLE_FEE_SWEEPER) {
+          console.log(
+            "ℹ️ Automated fee sweeper disabled; skipping scheduled runs."
+          );
+          return;
+        }
+
+        const runSweep = async () => {
+          try {
+            await sweepFees({ walletManager: wallet });
+          } catch (error) {
+            console.error("❌ Automated fee sweep failed:", error);
+          }
+        };
+
+        console.log(
+          `🧹 Automated fee sweeper enabled (interval: ${Math.round(
+            FEE_SWEEP_INTERVAL_MS / 60_000
+          )} min)`
+        );
+
+        runSweep();
+        setInterval(runSweep, FEE_SWEEP_INTERVAL_MS);
+      };
+
+      scheduleFeeSweeper();
 
       /**
        * Process expired game with cancellation
