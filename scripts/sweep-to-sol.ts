@@ -4,6 +4,7 @@ import { getSupportedTokens, WSOL_MINT } from "../src/utils/token-registry";
 import { resolveTokenPriceUSD } from "../src/utils/prices";
 import { SwapManager } from "../src/utils/swap-manager";
 import type { SwapRequest } from "../src/utils/swap/types";
+import { unwrapWsolBalance } from "../src/services/fee-sweeper";
 
 async function getTotalTokenBalanceLamports(
   connection: ReturnType<WalletManager["getConnection"]>,
@@ -89,6 +90,14 @@ async function main() {
   }
 
   console.log("\n🏁 Sweep complete.");
+
+  await unwrapWsolBalance(
+    wallet,
+    connection,
+    admin.publicKey,
+    admin,
+    resolveTokenPriceUSD
+  );
 }
 
 main().catch((error) => {

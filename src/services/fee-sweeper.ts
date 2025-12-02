@@ -61,6 +61,7 @@ type TokenBalanceFetcher = (
 ) => Promise<bigint>;
 
 const MIN_USD_THRESHOLD = 5;
+const SOL_DECIMALS = 9;
 
 const shouldWithdrawToken = async (
   wallet: WalletManager,
@@ -128,6 +129,62 @@ const shouldSwapTokenBalance = async (
   }
 
   return { shouldSwap: true, amountDecimal, usdValue };
+};
+
+const unwrapWsolBalance = async (
+  wallet: WalletManager,
+  connection: anchor.web3.Connection,
+  owner: PublicKey,
+  payer: anchor.web3.Keypair,
+  priceResolver: PriceResolver = resolveTokenPriceUSD,
+  balanceFetcher: TokenBalanceFetcher = getTotalTokenBalanceLamports
+) => {
+  const wsolMint = new PublicKey(WSOL_MINT);
+  const wsolBalanceLamports = await balanceFetcher(connection, owner, wsolMint);
+
+  if (wsolBalanceLamports === 0n) {
+    console.log("ℹ️  No WSOL balance to unwrap; skipping.");
+    return;
+  }
+
+  const metadata = await wallet.getTokenMetadata(WSOL_MINT);
+  const amountDecimal = Number(wsolBalanceLamports) / 10 ** metadata.decimals;
+  const price = await priceResolver({ tokenMint: WSOL_MINT, tokenTicker: "SOL" });
+  const usdValue = amountDecimal * (price?.price ?? 0);
+
+  if (usdValue < MIN_USD_THRESHOLD) {
+    console.log(
+      `ℹ️  WSOL balance ${amountDecimal.toFixed(6)} ≈ $${usdValue.toFixed(
+        2
+      )}; skipping unwrap (<$${MIN_USD_THRESHOLD}).`
+    );
+    return;
+  }
+
+  if (!Number.isSafeInteger(Number(wsolBalanceLamports))) {
+    console.warn("⚠️  WSOL balance exceeds safe integer range; skipping unwrap.");
+    return;
+  }
+
+  console.log(
+    `➡️  Unwrapping ${amountDecimal.toFixed(6)} WSOL (~$${usdValue.toFixed(
+      2
+    )}) to SOL`
+  );
+
+  const { signature, remainingLamports } = await wallet.unwrapSolWithKeypair({
+    owner,
+    payer,
+    amountLamports: Number(wsolBalanceLamports),
+  });
+
+  const remainingDecimal = remainingLamports / 10 ** SOL_DECIMALS;
+
+  console.log(
+    `   ✅ Unwrapped WSOL. Remaining WSOL: ${remainingDecimal.toFixed(
+      6
+    )}. Signature: ${signature}`
+  );
 };
 
 async function processTokenFee(
@@ -439,6 +496,14 @@ export const sweepFees = async (
         priceResolver,
         balanceFetcher
       );
+      await unwrapWsolBalance(
+        wallet,
+        connection,
+        adminBundle.root.publicKey,
+        adminBundle.root,
+        priceResolver,
+        balanceFetcher
+      );
     } catch (error) {
       console.error("❌ Failed to sweep tokens to SOL:", error);
     }
@@ -454,3 +519,5 @@ export const sweepFees = async (
 export const __test_shouldWithdrawToken = shouldWithdrawToken;
 export const __test_shouldSwapTokenBalance = shouldSwapTokenBalance;
 export const __test_sweepTokensToSol = sweepTokensToSol;
+export const __test_unwrapWsolBalance = unwrapWsolBalance;
+export { unwrapWsolBalance };
