@@ -4,6 +4,7 @@ import {
   __test_shouldSwapTokenBalance,
   __test_shouldWithdrawToken,
   __test_sweepTokensToSol,
+  __test_unwrapWsolBalance,
   sweepFees,
 } from "../src/services/fee-sweeper";
 import type { SwapRequest } from "../src/utils/swap/types";
@@ -72,6 +73,84 @@ describe("token to SOL sweep helpers", () => {
 
     expect(result.shouldSwap).toBe(true);
     expect(result.usdValue).toBeCloseTo(5);
+  });
+});
+
+describe("WSOL unwrap helper", () => {
+  const owner = Keypair.generate();
+  const payer = Keypair.generate();
+  const priceResolver = async () => ({ price: 1 });
+
+  const buildWallet = (onUnwrap?: (lamports: number) => void) => ({
+    getTokenMetadata: async () => ({ decimals: 9 }),
+    unwrapSolWithKeypair: async ({ amountLamports }: { amountLamports: number }) => {
+      onUnwrap?.(amountLamports);
+      return { signature: "sig", remainingLamports: 0 };
+    },
+  });
+
+  test("skips when balance is zero", async () => {
+    const unwrapCalls: number[] = [];
+    const balanceFetcher = async () => 0n;
+
+    await __test_unwrapWsolBalance(
+      buildWallet((lamports) => unwrapCalls.push(lamports)) as any,
+      {} as any,
+      owner.publicKey,
+      payer,
+      priceResolver as any,
+      balanceFetcher
+    );
+
+    expect(unwrapCalls).toHaveLength(0);
+  });
+
+  test("skips when value is under $5", async () => {
+    const unwrapCalls: number[] = [];
+    const balanceFetcher = async () => 2_000_000_000n;
+
+    await __test_unwrapWsolBalance(
+      buildWallet((lamports) => unwrapCalls.push(lamports)) as any,
+      {} as any,
+      owner.publicKey,
+      payer,
+      priceResolver as any,
+      balanceFetcher
+    );
+
+    expect(unwrapCalls).toHaveLength(0);
+  });
+
+  test("unwraps when balance meets threshold", async () => {
+    const unwrapCalls: number[] = [];
+    const balanceFetcher = async () => 6_000_000_000n;
+
+    await __test_unwrapWsolBalance(
+      buildWallet((lamports) => unwrapCalls.push(lamports)) as any,
+      {} as any,
+      owner.publicKey,
+      payer,
+      priceResolver as any,
+      balanceFetcher
+    );
+
+    expect(unwrapCalls).toEqual([6_000_000_000]);
+  });
+
+  test("skips unwrap when lamports exceed safe integer range", async () => {
+    const unwrapCalls: number[] = [];
+    const balanceFetcher = async () => BigInt(Number.MAX_SAFE_INTEGER) + 100n;
+
+    await __test_unwrapWsolBalance(
+      buildWallet((lamports) => unwrapCalls.push(lamports)) as any,
+      {} as any,
+      owner.publicKey,
+      payer,
+      priceResolver as any,
+      balanceFetcher
+    );
+
+    expect(unwrapCalls).toHaveLength(0);
   });
 });
 
