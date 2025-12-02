@@ -39,5 +39,12 @@ export function inferMaxPlayers(
     }
   }
 
+  if (defaultPlayers < minPlayers || defaultPlayers > maxPlayers) {
+    return {
+      ok: false,
+      error: `Players must be between ${minPlayers}-${maxPlayers}.`,
+    };
+  }
+
   return { ok: true, value: defaultPlayers, source: "default" };
 }

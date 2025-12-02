@@ -1,7 +1,8 @@
-const RANDOM_SEGMENT_LENGTH = 9;
+import { randomBytes } from "node:crypto";
+
+const RANDOM_BYTES = 16;
 
 export const generateTransactionId = (): string => {
-  return `tx_${Date.now()}_${Math.random()
-    .toString(36)
-    .slice(2, 2 + RANDOM_SEGMENT_LENGTH)}`;
+  const randomSegment = randomBytes(RANDOM_BYTES).toString("base64url");
+  return `tx_${Date.now()}_${randomSegment}`;
 };

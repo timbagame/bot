@@ -1,15 +1,18 @@
 import { describe, test, expect } from "bun:test";
 import { PublicKey } from "@solana/web3.js";
-import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import { detectTokenProgram } from "../src/utils/token-programs";
 
 class StubConnection {
-  constructor(private readonly owners: Record<string, PublicKey | null>) {}
+  constructor(private readonly owners: Record<string, PublicKey | null | undefined>) {}
 
   async getAccountInfo(pubkey: PublicKey) {
     const owner = this.owners[pubkey.toBase58()];
-    if (!owner) {
+    if (owner === null) {
       return null;
+    }
+    if (typeof owner === "undefined") {
+      return {};
     }
     return { owner } as any;
   }
@@ -25,13 +28,13 @@ describe("detectTokenProgram", () => {
     expect(result.programId.equals(TOKEN_2022_PROGRAM_ID)).toBe(true);
   });
 
-  test("defaults to legacy token program when mint owner missing", async () => {
+  test("throws when mint owner is missing", async () => {
     const mint = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
     const conn = new StubConnection({});
 
-    const result = await detectTokenProgram(conn as any, mint);
-    expect(result.isToken2022).toBe(false);
-    expect(result.programId.equals(TOKEN_PROGRAM_ID)).toBe(true);
+    await expect(detectTokenProgram(conn as any, mint)).rejects.toThrow(
+      /missing an owner/
+    );
   });
 
   test("uses provided account info without RPC lookup", async () => {
@@ -50,5 +53,15 @@ describe("detectTokenProgram", () => {
 
     expect(result.isToken2022).toBe(true);
     expect(result.programId.equals(TOKEN_2022_PROGRAM_ID)).toBe(true);
+  });
+
+  test("throws when mint is owned by a non-token program", async () => {
+    const mint = new PublicKey("7VFso2duJhy3ACRfjmqRriFwHjpRpPR4Kn6gdVd7FFzW");
+    const randomOwner = new PublicKey("11111111111111111111111111111111");
+    const conn = new StubConnection({ [mint.toBase58()]: randomOwner });
+
+    await expect(detectTokenProgram(conn as any, mint)).rejects.toThrow(
+      /unknown program/
+    );
   });
 });

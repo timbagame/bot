@@ -8,6 +8,8 @@ import {
   type ActiveEndpointChange,
 } from "../src/utils/rpc-endpoints";
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 class FakeConnection {
   public constructor(
     public readonly rpcEndpoint: string,
@@ -117,5 +119,46 @@ describe("RpcEndpointManager", () => {
       previousEndpoint: "https://rpc-primary",
       previousIndex: 0,
     });
+  });
+
+  test("maintains promoted endpoint across concurrent fallbacks", async () => {
+    const endpoints = ["https://rpc-primary", "https://rpc-secondary"];
+
+    class FlakyConnection {
+      private readonly failureDelays = [0, 25];
+
+      public constructor(
+        public readonly rpcEndpoint: string,
+        public readonly commitment: string,
+      ) {}
+
+      public async getSlot(): Promise<number> {
+        if (this.rpcEndpoint === endpoints[0]) {
+          const delay = this.failureDelays.shift() ?? 0;
+          await sleep(delay);
+          const error = new Error("ECONNRESET: simulated failure");
+          (error as { code?: string }).code = "ECONNRESET";
+          throw error;
+        }
+
+        await sleep(5);
+        return 99;
+      }
+    }
+
+    const manager = new RpcEndpointManager(endpoints, {
+      commitment: "confirmed",
+      connectionFactory: (endpoint: string, commitment: string) =>
+        new FlakyConnection(endpoint, commitment) as unknown as Connection,
+    });
+
+    const connection = manager.getConnection();
+    const firstCall = connection.getSlot();
+    const secondCall = connection.getSlot();
+
+    const results = await Promise.all([firstCall, secondCall]);
+
+    expect(results).toEqual([99, 99]);
+    expect(manager.getActiveEndpoint()).toBe("https://rpc-secondary");
   });
 });
