@@ -193,11 +193,17 @@ const SOL_WRAP_RENT_RESERVE_REFRESH_INTERVAL_MS = 5 * 60_000;
 let solWrapRentReserveLastFetched = 0;
 const DEFAULT_TOKEN_METADATA_CACHE_TTL_MS = 5 * 60_000;
 let TOKEN_METADATA_CACHE_TTL_MS = DEFAULT_TOKEN_METADATA_CACHE_TTL_MS;
+const DEFAULT_TOKEN_METADATA_CACHE_MAX_ENTRIES = 200;
+let TOKEN_METADATA_CACHE_MAX_ENTRIES = DEFAULT_TOKEN_METADATA_CACHE_MAX_ENTRIES;
 type CachedTokenMetadata = {
   decimals: number;
   expiresAt: number;
 };
 const cachedTokenMetadata = new Map<string, CachedTokenMetadata>();
+const inflightTokenMetadataFetches = new Map<
+  string,
+  Promise<CachedTokenMetadata>
+>();
 export const __test_getSolFeeBufferLamports = (): number =>
   SOL_FEE_BUFFER_LAMPORTS;
 export const __test_setSolFeeBufferLamports = (value: number): void => {
@@ -256,29 +262,93 @@ const getSolWrapRentReserveLamports = async (): Promise<number> => {
 export const __test_refreshSolWrapRentReserveLamports =
   getSolWrapRentReserveLamports;
 
+const pruneExpiredTokenMetadata = (now: number): void => {
+  for (const [mint, entry] of cachedTokenMetadata.entries()) {
+    if (entry.expiresAt > now) {
+      continue;
+    }
+    cachedTokenMetadata.delete(mint);
+  }
+};
+
+const setTokenMetadataCacheEntry = (
+  mint: string,
+  entry: CachedTokenMetadata
+): void => {
+  cachedTokenMetadata.delete(mint);
+  cachedTokenMetadata.set(mint, entry);
+
+  while (cachedTokenMetadata.size > TOKEN_METADATA_CACHE_MAX_ENTRIES) {
+    const oldestKey = cachedTokenMetadata.keys().next().value;
+    if (!oldestKey) {
+      break;
+    }
+    cachedTokenMetadata.delete(oldestKey);
+  }
+};
+
 const getCachedTokenMetadata = async (mint: string) => {
+  const normalizedMint = mint?.trim();
+  if (!normalizedMint) {
+    throw new Error("token mint is required");
+  }
+
   const now = Date.now();
-  const cached = cachedTokenMetadata.get(mint);
+  pruneExpiredTokenMetadata(now);
+
+  const cached = cachedTokenMetadata.get(normalizedMint);
   if (cached && cached.expiresAt > now) {
+    cachedTokenMetadata.delete(normalizedMint);
+    cachedTokenMetadata.set(normalizedMint, cached);
     return cached;
   }
 
-  const metadata = await wallet.getTokenMetadata(mint);
-  const entry: CachedTokenMetadata = {
-    decimals: metadata.decimals,
-    expiresAt: now + TOKEN_METADATA_CACHE_TTL_MS,
-  };
-  cachedTokenMetadata.set(mint, entry);
-  return entry;
+  const existingFetch = inflightTokenMetadataFetches.get(normalizedMint);
+  if (existingFetch) {
+    return existingFetch;
+  }
+
+  const fetchPromise = (async () => {
+    try {
+      const metadata = await wallet.getTokenMetadata(normalizedMint);
+      if (!metadata || typeof metadata.decimals !== "number") {
+        throw new Error("Token metadata missing decimals");
+      }
+      const entry: CachedTokenMetadata = {
+        decimals: metadata.decimals,
+        expiresAt: Date.now() + TOKEN_METADATA_CACHE_TTL_MS,
+      };
+      setTokenMetadataCacheEntry(normalizedMint, entry);
+      return entry;
+    } catch (error) {
+      throw new Error(
+        `Token metadata unavailable for ${normalizedMint}: ${String(error)}`
+      );
+    } finally {
+      inflightTokenMetadataFetches.delete(normalizedMint);
+    }
+  })();
+
+  inflightTokenMetadataFetches.set(normalizedMint, fetchPromise);
+  return fetchPromise;
 };
 
 export const __test_getCachedTokenMetadata = getCachedTokenMetadata;
-export const __test_clearTokenMetadataCache = () => cachedTokenMetadata.clear();
+export const __test_clearTokenMetadataCache = () => {
+  cachedTokenMetadata.clear();
+  inflightTokenMetadataFetches.clear();
+};
 export const __test_setTokenMetadataCacheTtlMs = (value: number) => {
   TOKEN_METADATA_CACHE_TTL_MS = value;
 };
 export const __test_resetTokenMetadataCacheTtlMs = () => {
   TOKEN_METADATA_CACHE_TTL_MS = DEFAULT_TOKEN_METADATA_CACHE_TTL_MS;
+};
+export const __test_setTokenMetadataCacheMaxEntries = (value: number) => {
+  TOKEN_METADATA_CACHE_MAX_ENTRIES = value;
+};
+export const __test_resetTokenMetadataCacheMaxEntries = () => {
+  TOKEN_METADATA_CACHE_MAX_ENTRIES = DEFAULT_TOKEN_METADATA_CACHE_MAX_ENTRIES;
 };
 
 void (async () => {
