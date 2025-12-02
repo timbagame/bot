@@ -42,6 +42,10 @@ export interface FeeSweepOptions {
     | Pick<SwapManager, "getQuote" | "executeJupiterSwap">;
   priceResolver?: PriceResolver;
   balanceFetcher?: TokenBalanceFetcher;
+  tokenFeeProcessor?: typeof processTokenFee;
+  referralSweeper?: typeof runReferralSweep;
+  tokenToSolSweeper?: typeof sweepTokensToSol;
+  contextFactory?: typeof createAnchorContext;
 }
 
 export interface FeeSweepResult {
@@ -383,8 +387,12 @@ export const sweepFees = async (
   const balanceFetcher =
     options.balanceFetcher ?? getTotalTokenBalanceLamports;
   const enableSwapToSol = options.enableSwapToSol ?? true;
+  const tokenFeeProcessor = options.tokenFeeProcessor ?? processTokenFee;
+  const referralSweeper = options.referralSweeper ?? runReferralSweep;
+  const tokenToSolSweeper = options.tokenToSolSweeper ?? sweepTokensToSol;
+  const contextFactory = options.contextFactory ?? createAnchorContext;
 
-  const { provider, program } = createAnchorContext(adminBundle.root, {
+  const { provider, program } = contextFactory(adminBundle.root, {
     rpcUrl,
   });
   const connection = provider.connection;
@@ -397,7 +405,7 @@ export const sweepFees = async (
   let tokenWithdrawals = 0;
   for (const token of tokens) {
     try {
-      const withdrawn = await processTokenFee(
+      const withdrawn = await tokenFeeProcessor(
         program,
         connection,
         wallet,
@@ -416,14 +424,14 @@ export const sweepFees = async (
 
   let referralClaims = 0;
   try {
-    referralClaims = await runReferralSweep(connection, adminBundle, referralEntries);
+    referralClaims = await referralSweeper(connection, adminBundle, referralEntries);
   } catch (error) {
     console.error("❌ Failed withdrawing referral fees:", error);
   }
 
   if (enableSwapToSol) {
     try {
-      await sweepTokensToSol(
+      await tokenToSolSweeper(
         wallet,
         connection,
         tokens,

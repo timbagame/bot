@@ -4,6 +4,7 @@ import {
   __test_shouldSwapTokenBalance,
   __test_shouldWithdrawToken,
   __test_sweepTokensToSol,
+  sweepFees,
 } from "../src/services/fee-sweeper";
 import type { SwapRequest } from "../src/utils/swap/types";
 
@@ -145,5 +146,78 @@ describe("ENABLE_FEE_SWEEPER config", () => {
     expect(moduleZero.ENABLE_FEE_SWEEPER).toBe(false);
 
     delete process.env.ENABLE_FEE_SWEEPER;
+  });
+});
+
+describe("sweepFees integration hooks", () => {
+  const admin = Keypair.generate();
+  const wallet = {
+    getAdminKeypair: () => admin,
+  } as any;
+
+  const tokens = [
+    { mint: Keypair.generate().publicKey.toBase58(), ticker: "AAA" },
+    { mint: Keypair.generate().publicKey.toBase58(), ticker: "BBB" },
+  ];
+
+  const fakeContext = () => ({
+    provider: { connection: {} },
+    program: { programId: { toBase58: () => "test-program" } },
+  });
+
+  test("defaults enable swaps after withdrawals and referrals", async () => {
+    const withdrawn: string[] = [];
+    let referralClaims = 0;
+    let swapRuns = 0;
+
+    const result = await sweepFees({
+      walletManager: wallet,
+      tokenConfigs: tokens,
+      referralEntries: [],
+      contextFactory: fakeContext as any,
+      tokenFeeProcessor: async (
+        _program,
+        _connection,
+        _wallet,
+        _adminBundle,
+        _operatorBundle,
+        config
+      ) => {
+        withdrawn.push(config.ticker);
+        return config.ticker === "AAA";
+      },
+      referralSweeper: async () => {
+        referralClaims += 2;
+        return 2;
+      },
+      tokenToSolSweeper: async () => {
+        swapRuns += 1;
+      },
+    });
+
+    expect(result.tokenWithdrawals).toBe(1);
+    expect(result.referralClaims).toBe(2);
+    expect(referralClaims).toBe(2);
+    expect(withdrawn).toEqual(["AAA", "BBB"]);
+    expect(swapRuns).toBe(1);
+  });
+
+  test("can disable swaps explicitly", async () => {
+    let swapRuns = 0;
+
+    await sweepFees({
+      walletManager: wallet,
+      tokenConfigs: tokens,
+      referralEntries: [],
+      enableSwapToSol: false,
+      contextFactory: fakeContext as any,
+      tokenFeeProcessor: async () => true,
+      referralSweeper: async () => 0,
+      tokenToSolSweeper: async () => {
+        swapRuns += 1;
+      },
+    });
+
+    expect(swapRuns).toBe(0);
   });
 });
