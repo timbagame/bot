@@ -129,7 +129,35 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
       args
     );
 
+    let creationMessageInfo: { chatId: number; messageId: number } | null = null;
+
+    const deleteCreationMessage = async () => {
+      if (!creationMessageInfo || !ctx.api?.deleteMessage) {
+        return;
+      }
+
+      try {
+        await ctx.api.deleteMessage(
+          creationMessageInfo.chatId,
+          creationMessageInfo.messageId
+        );
+      } catch (deleteError) {
+        console.warn(
+          "Failed to delete game creation acknowledgement:",
+          deleteError
+        );
+      }
+    };
+
     try {
+      const creationMessage = await ctx.reply("Creating game...");
+      if (creationMessage?.chat?.id != null && creationMessage?.message_id != null) {
+        creationMessageInfo = {
+          chatId: creationMessage.chat.id,
+          messageId: creationMessage.message_id,
+        };
+      }
+
       const parsed = await createDeps.parseAmount(args, 1, ctx.chat?.id);
       if (!parsed.success) {
         await ctx.reply(formatParseAmountError(parsed, options.usageMessage), {
@@ -280,6 +308,8 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
     } catch (error) {
       console.error(`Error in command-based ${options.gameType}:`, error);
       await ctx.reply(options.errorMessage);
+    } finally {
+      await deleteCreationMessage();
     }
   };
 
