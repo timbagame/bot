@@ -200,9 +200,10 @@ export class RpcEndpointManager {
   private async invokeWithFallback(prop: string | symbol, args: unknown[]): Promise<any> {
     let lastError: unknown;
     const total = this.endpoints.length;
+    const startIndex = this.activeIndex;
 
     for (let offset = 0; offset < total; offset++) {
-      const index = (this.activeIndex + offset) % total;
+      const index = (startIndex + offset) % total;
       const connection = this.ensureConnection(index);
       const method = Reflect.get(connection, prop, connection);
 

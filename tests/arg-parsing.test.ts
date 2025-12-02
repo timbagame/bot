@@ -135,3 +135,9 @@ test("accepts exact boundaries (min/max)", () => {
   expect(maxOk.ok).toBe(true);
   if (maxOk.ok) expect(maxOk.value).toBe(100);
 });
+
+test("rejects defaults that fall outside allowed bounds", () => {
+  const res = inferMaxPlayers(["/cf", "10"], 1, false, 150, 2, 100);
+  expect(res.ok).toBe(false);
+  if (!res.ok) expect(res.error).toContain("2-100");
+});

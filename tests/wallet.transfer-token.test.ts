@@ -8,13 +8,14 @@ const MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abando
 describe("WalletManager.transferToken", () => {
 
   test("sends SPL token transfer with ATA creations when missing", async () => {
+    const usdcMint = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
     const conn: any = {
-      // Mint owner is SPL program
-      getAccountInfo: async (_pk: PublicKey) => ({ owner: TOKEN_PROGRAM_ID }),
+      // Mint owner is SPL program; ATAs are treated as missing (findOrCreate will add them)
+      getAccountInfo: async (pk: PublicKey) => {
+        if (pk.equals(usdcMint)) return { owner: TOKEN_PROGRAM_ID };
+        return null;
+      },
     } as Partial<Connection> as any;
-
-    // Ensure ATAs are treated as missing (findOrCreate will add them)
-    conn.getAccountInfo = async (_pk: PublicKey) => null;
 
     const wm = WalletManager.createForTest(MNEMONIC, {
       connection: conn as any,
@@ -30,7 +31,6 @@ describe("WalletManager.transferToken", () => {
 
     const fromId = 1n;
     const to = Keypair.generate().publicKey;
-    const usdcMint = new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
     const sig = await wm.transferToken(fromId, to, 1000, usdcMint.toBase58());
     expect(sig).toBe("SIG_SPL");
   });

@@ -23,8 +23,12 @@ export async function detectTokenProgram(
     const accountInfo =
       preloadedAccountInfo ?? ((await connection.getAccountInfo(mintKey)) as AccountInfoLike | null);
 
-    if (!accountInfo || !accountInfo.owner) {
-      return { programId: TOKEN_PROGRAM_ID, isToken2022: false };
+    if (!accountInfo) {
+      throw new Error(`Token mint ${mintKey.toBase58()} was not found`);
+    }
+
+    if (!accountInfo.owner) {
+      throw new Error(`Token mint ${mintKey.toBase58()} is missing an owner`);
     }
 
     const owner = accountInfo.owner as PublicKey & {
@@ -35,6 +39,19 @@ export async function detectTokenProgram(
       owner && typeof owner.equals === "function" && owner.equals(TOKEN_2022_PROGRAM_ID)
     );
 
+    if (!isToken2022) {
+      const isLegacy = Boolean(
+        owner && typeof owner.equals === "function" && owner.equals(TOKEN_PROGRAM_ID)
+      );
+
+      if (!isLegacy) {
+        const ownerLabel = typeof owner.toBase58 === "function" ? owner.toBase58() : String(owner);
+        throw new Error(
+          `Token mint ${mintKey.toBase58()} is owned by an unknown program (${ownerLabel})`
+        );
+      }
+    }
+
     return {
       programId: isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID,
       isToken2022,
@@ -42,6 +59,6 @@ export async function detectTokenProgram(
   } catch (error) {
     const mintAddress = typeof mint === "string" ? mint : mint.toBase58();
     console.log(`Error checking token program for ${mintAddress}:`, error);
-    return { programId: TOKEN_PROGRAM_ID, isToken2022: false };
+    throw error;
   }
 }

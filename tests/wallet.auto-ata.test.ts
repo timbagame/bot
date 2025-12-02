@@ -85,6 +85,9 @@ test("getTokenBalance waits for confirmation before returning new ATA balance", 
 
   const connection = {
     async getAccountInfo(pubkey: PublicKey) {
+      if (pubkey.equals(mint)) {
+        return { owner: TOKEN_PROGRAM_ID, data: Buffer.alloc(0) };
+      }
       if (!accountCreated || !expectedAta || !pubkey.equals(expectedAta)) {
         return null;
       }

@@ -9,15 +9,15 @@ export async function checkServiceHealth(
   timeout = 5000,
   fetchImpl: FetchLike = fetch as any
 ): Promise<boolean> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
-
     const response = await fetchImpl(url, { method: "HEAD", signal: controller.signal });
-
-    clearTimeout(timeoutId);
     return response.ok;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
