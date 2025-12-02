@@ -71,6 +71,16 @@ export const TRANSACTION_RESUBMIT_ATTEMPTS = 2; // Number of times to rebuild an
 // ================================
 
 export const EXPIRED_GAMES_CHECK_INTERVAL_MS = 60000; // 1 minute
+export const FEE_SWEEP_INTERVAL_MS = parsePositiveDuration(
+  "FEE_SWEEP_INTERVAL_MS",
+  60 * 60_000
+); // Default 1 hour
+export const ENABLE_FEE_SWEEPER = (() => {
+  const raw = process.env.ENABLE_FEE_SWEEPER;
+  if (raw === undefined) return true;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === "true" || normalized === "1";
+})();
 
 // ================================
 // CACHE DURATIONS (in milliseconds)
