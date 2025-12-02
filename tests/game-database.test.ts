@@ -218,6 +218,24 @@ test("getGamesExpiringBefore can paginate large batches by excluding processed e
   expect(seen.size).toBe(total);
 });
 
+test("getGamesExpiringBefore honors excludes and fills with oldest non-expiring", () => {
+  const db = GameDatabase.getInstance();
+  const now = Date.now();
+
+  db.saveGame("exp-1", "creator", 50, "coinflip", undefined, undefined, undefined, undefined, undefined, 15, now + 500);
+  db.saveGame("exp-2", "creator", 50, "coinflip", undefined, undefined, undefined, undefined, undefined, 15, now + 800);
+  db.saveGame("no-exp-1", "creator", 50, "coinflip");
+  db.saveGame("no-exp-2", "creator", 50, "coinflip");
+
+  const results = db.getGamesExpiringBefore(now + 1_000, 3, ["exp-1"]);
+
+  expect(results.map((g) => g.game_address)).toEqual([
+    "exp-2",
+    "no-exp-1",
+    "no-exp-2",
+  ]);
+});
+
 test("findTelegramIdByUsername normalizes usernames", () => {
   const db = GameDatabase.getInstance();
 

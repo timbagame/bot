@@ -590,6 +590,11 @@ export class GameDatabase extends BaseDatabase {
         [],
         "ensuring games expires_at index"
       );
+      this.run(
+        "CREATE INDEX IF NOT EXISTS idx_games_status_expires_created ON games (status, expires_at, created_at)",
+        [],
+        "ensuring games status/expires_at/created_at index"
+      );
     } catch (error) {
       console.error("Failed to ensure games schema:", error);
     }
