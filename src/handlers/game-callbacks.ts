@@ -188,9 +188,11 @@ const NON_GAME_CALLBACK_PREFIXES = [
   "custom_players_",
   "slider_",
   "back_to_amounts_",
+  "back_to_confirm_",
   "type_amount_",
   "admin_",
   "info_",
+  "advanced_",
 ] as const;
 
 const shouldSkipGenericGameCallback = (callbackData: string): boolean => {
