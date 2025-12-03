@@ -1570,7 +1570,7 @@ export const createGameCallbacksModule = (
     );
 
     deps.bot.callbackQuery(
-      /^confirm_game_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)_(\d+)_(public|private)_(\d+)$/,
+      /^confirm_game_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)(?:_(\d+)_(\d+)_(public|private))?_(\d+)$/,
       deps.withCreatorContext(
         {
           name: "confirm_game",
@@ -1584,15 +1584,17 @@ export const createGameCallbacksModule = (
             const amount = Number.parseFloat(ctx.match![2]!);
             const players = Number.parseInt(ctx.match![3]!, 10);
             const timeoutSeconds = clampTimeoutSeconds(
-              Number.parseInt(ctx.match![4]!, 10)
+              Number.parseInt(ctx.match![4] ?? "", 10)
             );
             const minPlayersSelected = clampMinPlayers(
               gameType,
-              Number.parseInt(ctx.match![5]!, 10),
+              ctx.match?.[5] ? Number.parseInt(ctx.match[5]!, 10) : undefined,
               players,
               deps.getOracleMaxPlayers()
             );
-            const visibility = ctx.match![6] as "public" | "private";
+            const visibility =
+              (ctx.match?.[6] as "public" | "private" | undefined) ??
+              "private";
             const isPrivate = visibility !== "public";
 
             if (Number.isNaN(amount) || Number.isNaN(players)) {
