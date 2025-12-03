@@ -777,8 +777,17 @@ describe("createGameViaCommand helper", () => {
     expect(ctx.__calls[0]).toBe("Creating game...");
     expect(createCalls.length).toBe(1);
 
-    const [gameType, gameData, maxPlayers, minPlayers, timeout, telegramId, chatId] =
-      createCalls[0];
+      const [
+        gameType,
+        gameData,
+        maxPlayers,
+        minPlayers,
+        timeout,
+        telegramId,
+        optionsArg,
+        chatId,
+        requestTimestamp,
+      ] = createCalls[0];
     expect(gameType).toBe("coinflip");
     expect(gameData).toEqual({
       amount: baseParsedAmount.amount,
@@ -787,11 +796,13 @@ describe("createGameViaCommand helper", () => {
       isSol: baseParsedAmount.isSol,
       requestedNativeSol: baseParsedAmount.requestedNativeSol,
     });
-    expect(maxPlayers).toBe(3);
-    expect(minPlayers).toBe(coinflipOptions.minPlayers);
-    expect(timeout).toBe(coinflipOptions.timeoutSeconds);
-    expect(telegramId).toBe(1n);
-    expect(chatId).toBe(ctx.chat.id);
+      expect(maxPlayers).toBe(3);
+      expect(minPlayers).toBe(coinflipOptions.minPlayers);
+      expect(timeout).toBe(coinflipOptions.timeoutSeconds);
+      expect(telegramId).toBe(1n);
+      expect(optionsArg).toEqual({ isPrivate: true });
+      expect(chatId).toBe(ctx.chat.id);
+      expect(requestTimestamp).toBeUndefined();
 
     expect(messageCalls.length).toBe(1);
     const messageArgs = messageCalls[0];

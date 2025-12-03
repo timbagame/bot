@@ -24,6 +24,7 @@ import {
   createPlayerSelectionKeyboard,
   getFeeWarningMessage,
   getSuggestedStakeAmounts,
+  withCreatorSuffix,
 } from "../utils/keyboards";
 import { respondWithMenu } from "../utils/menu-response";
 import {
@@ -299,14 +300,12 @@ const buildGameConfirmMenuConfig = ({
 };
 
 const buildAdvancedOptionsMessage = ({
-  gameType,
   amount,
   players,
   tokenTicker,
   tokenDecimals,
   advanced,
 }: {
-  gameType: "coinflip" | "giveaway";
   amount: string;
   players: number;
   tokenTicker: string;
@@ -351,7 +350,6 @@ const presentAdvancedMenu = async (params: {
 }): Promise<void> => {
   const { ctx, gameType, amount, players, tokenTicker, tokenDecimals, creatorId, advanced, logLabel } = params;
   const text = buildAdvancedOptionsMessage({
-    gameType,
     amount,
     players,
     tokenTicker,

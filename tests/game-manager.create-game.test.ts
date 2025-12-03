@@ -281,6 +281,7 @@ describe("GameManager.createGame", () => {
       2,
       60,
       1n,
+      undefined,
       0,
       sharedTimestamp,
     ];
@@ -348,6 +349,7 @@ describe("GameManager.createGame", () => {
         2,
         60,
         1n,
+        undefined,
         0,
         staleTimestamp
       );
@@ -403,13 +405,14 @@ describe("GameManager.createGame", () => {
             tokenTicker: "TOK",
             isSol: false,
           },
-          2,
-          2,
-          60,
-          1n,
-          0,
-          ts
-        );
+        2,
+        2,
+        60,
+        1n,
+        undefined,
+        0,
+        ts
+      );
 
         expect(res.success).toBe(false);
         expect(String(res.error ?? "")).toContain("Something went wrong");
@@ -514,6 +517,7 @@ describe("GameManager.createGame", () => {
         2,
         60,
         1n,
+        undefined,
         0,
         futureTimestamp
       );
@@ -706,6 +710,7 @@ describe("GameManager.createGame", () => {
       2,
       60,
       1n,
+      undefined,
       100
     );
     expect(res.success).toBe(true);
