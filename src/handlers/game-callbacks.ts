@@ -899,12 +899,12 @@ export const createGameCallbacksModule = (
 
       if (userSession.waitingFor === "min_players_input") {
         const gameType = userSession.gameType as "coinflip" | "giveaway";
-        const maxPlayers = Math.max(
-          getMinPlayersFloor(gameType),
-          userSession.players ?? getMinPlayersFloor(gameType),
-          userSession.maxPlayersLimit ?? deps.getOracleMaxPlayers()
-        );
         const minPlayersFloor = getMinPlayersFloor(gameType);
+        const players = Math.max(
+          userSession.players ?? minPlayersFloor,
+          minPlayersFloor
+        );
+        const maxPlayers = players;
         const requestedMinPlayers = Number.parseInt(inputText, 10);
 
         if (
@@ -927,7 +927,6 @@ export const createGameCallbacksModule = (
           return;
         }
 
-        const players = userSession.players ?? maxPlayers;
         const advanced = resolveAdvancedOptions(
           gameType,
           players,

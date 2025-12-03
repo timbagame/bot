@@ -225,6 +225,46 @@ describe("game setup typed input handling", () => {
     expect(restored.creatorId).toBe("creator-2");
   });
 
+  test("rejects minimum players above the selected player count", async () => {
+    const session = {
+      waitingFor: "min_players_input",
+      gameType: "coinflip",
+      players: 4,
+      maxPlayersLimit: 20,
+      userBalance: 75,
+      messageId: 41_000,
+      chatId: CHAT_ID,
+      amount: "2",
+      creatorId: "creator-3",
+      tokenMint: "MintCoinflip333",
+      tokenTicker: "SOL",
+      tokenDecimals: 9,
+      contractMinimum: 0.1,
+    } as any;
+
+    upsertGameSetupSession(`${CHAT_ID}_${session.messageId}`, session);
+
+    const ctx = createMockCtx("6", {
+      reply_to_message: { message_id: session.messageId },
+    });
+
+    let nextCalled = false;
+    const next = async () => {
+      nextCalled = true;
+    };
+
+    await __test_handleGameSetupTextInput(ctx as any, next);
+
+    expect(nextCalled).toBe(false);
+
+    const edits = ctx.__calls.filter(isEditCall);
+    expect(edits).toHaveLength(1);
+    expect(String(edits[0]!.text)).toContain("between 2 and 4");
+
+    const restored = getGameSetupSession(`${CHAT_ID}_${session.messageId}`) as any;
+    expect(restored.waitingFor).toBe("min_players_input");
+  });
+
   test("startInteractiveGameSetup respects token override context", async () => {
     const ctx = createMockCtx("/cf");
     const balanceSpy = spyOn(wallet, "getTokenBalance").mockResolvedValue(
