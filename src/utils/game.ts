@@ -3008,6 +3008,7 @@ export class GameManager {
     minTickets: number,
     timeout: number,
     telegramId: bigint,
+    options?: { isPrivate?: boolean },
     chatId?: number,
     requestTimestampMs: number = Date.now()
   ): Promise<{
@@ -3026,6 +3027,7 @@ export class GameManager {
     }
 
     const telegramIdStr = telegramId.toString();
+    const isPrivate = options?.isPrivate ?? true;
     const inFlightCount = this.getInFlightCreations(telegramIdStr);
     const activeGameCount = this.gameDb.countActiveGamesByCreator(
       telegramIdStr
@@ -3274,7 +3276,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         minTickets: minTickets,
         // u64 must be BN
         timeout: new anchor.BN(timeout),
-        isPrivate: true,
+        isPrivate,
       };
 
       const tokenMintPubkey = new PublicKey(tokenMint);

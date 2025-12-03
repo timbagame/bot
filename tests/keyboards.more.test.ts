@@ -297,7 +297,8 @@ describe("keyboards: player selection and confirm", () => {
   test("confirm keyboard includes confirm and back with creatorId", () => {
     const kb = createGameConfirmKeyboard("coinflip", "30", "4", "abc");
     const callbacks = extractCallbacks(kb);
-    expect(callbacks).toContain("confirm_game_coinflip_30_4_abc");
+    expect(callbacks).toContain("confirm_game_coinflip_30_4_3600_2_private_abc");
     expect(callbacks).toContain("amount_coinflip_30_abc");
+    expect(callbacks).toContain("advanced_options_coinflip_30_4_abc");
   });
 });

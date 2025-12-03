@@ -147,7 +147,7 @@ test(
           date: Math.floor(Date.now() / 1000),
           chat: { id: chatId, type: "private" },
         } as any,
-        data: `confirm_game_coinflip_1.5_2_${userId}`,
+        data: `confirm_game_coinflip_1.5_2_3600_2_private_${userId}`,
       },
     } as any);
 
@@ -216,7 +216,7 @@ test(
           date: Math.floor(Date.now() / 1000),
           chat: { id: chatId, type: "private" },
         } as any,
-        data: `confirm_game_coinflip_2_2_${userId}`,
+        data: `confirm_game_coinflip_2_2_3600_2_private_${userId}`,
       },
     } as any);
 
@@ -290,7 +290,7 @@ test(
           date: Math.floor(Date.now() / 1000),
           chat: { id: chatId, type: "private" },
         } as any,
-        data: `confirm_game_coinflip_3_2_${userId}`,
+        data: `confirm_game_coinflip_3_2_3600_2_private_${userId}`,
       },
     } as any);
 

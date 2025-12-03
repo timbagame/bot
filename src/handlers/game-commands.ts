@@ -271,6 +271,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         options.minPlayers,
         options.timeoutSeconds,
         telegramId,
+        { isPrivate: true },
         ctx.chat?.id || 0,
         messageTimestampMs
       );

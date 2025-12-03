@@ -129,12 +129,16 @@ export type GameSetupSessionState = {
   messageId?: number;
   chatId?: number;
   amount?: string;
+  players?: number;
   creatorId?: string;
   tokenMint?: string;
   tokenTicker?: string;
   tokenDecimals?: number;
   contractMinimum?: number;
   maxPlayersLimit?: number;
+  timeoutSeconds?: number;
+  minPlayers?: number;
+  isPrivate?: boolean;
 };
 
 const GAME_SETUP_NAMESPACE = "game_setup";
