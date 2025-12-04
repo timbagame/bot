@@ -260,9 +260,8 @@ export const createAmountSelectionKeyboard = (
   const minUsdText =
     tokenPriceUSD !== undefined
       ? ` ($${formatUsdValue(contractMinimum * tokenPriceUSD, {
-          minimumFractionDigits: 1,
-          maximumFractionDigits: 1,
-          fallback: "0.0",
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 2,
         })})`
       : "";
 
@@ -294,16 +293,14 @@ export const createAmountSelectionKeyboard = (
     let usdText = "";
     if (usdTarget !== undefined) {
       const usdFormatted = formatUsdValue(usdTarget, {
-        minimumFractionDigits: 1,
-        maximumFractionDigits: 1,
-        fallback: "0.0",
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
       });
       usdText = ` ($${usdFormatted})`;
     } else if (tokenPriceUSD !== undefined) {
       const usdFormatted = formatUsdValue(amount * tokenPriceUSD, {
-        minimumFractionDigits: 1,
-        maximumFractionDigits: 1,
-        fallback: "0.0",
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
       });
       usdText = ` ($${usdFormatted})`;
     }
