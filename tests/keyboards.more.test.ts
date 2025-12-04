@@ -189,13 +189,17 @@ describe("keyboards: misc menus", () => {
 describe("keyboards: amount selection", () => {
   const expectedDefaultCallbacks = [
     "amount_coinflip_20",
+    "amount_coinflip_50",
     "amount_coinflip_100",
     "amount_coinflip_200",
-    "amount_coinflip_300",
     "amount_coinflip_400",
-    "amount_coinflip_500",
-    "amount_coinflip_700",
+    "amount_coinflip_600",
     "amount_coinflip_1000",
+    "amount_coinflip_1500",
+    "amount_coinflip_2000",
+    "amount_coinflip_3000",
+    "amount_coinflip_4000",
+    "amount_coinflip_5000",
   ];
 
   test("defaults to fixed contract minimum multiples when no balance", () => {

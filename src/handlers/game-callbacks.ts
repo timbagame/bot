@@ -2079,7 +2079,8 @@ export const createGameCallbacksModule = (
 
             const suggestedAmounts = getSuggestedStakeAmounts(
               contractMin,
-              userBalance
+              userBalance,
+              tokenPriceUSD ?? undefined
             );
 
             clearSession();
@@ -2096,12 +2097,19 @@ export const createGameCallbacksModule = (
 
             if (suggestionLabel && suggestedAmounts.length > 0) {
               warningMessage += `\n\n${suggestionLabel}:\n`;
-              for (const amount of suggestedAmounts) {
+              for (const { amount, usdTarget } of suggestedAmounts) {
                 const amountDisplay = formatTokenDisplay(amount, {
                   decimals: tokenContext.tokenDecimals,
                 });
                 warningMessage += `• ${amountDisplay} ${tokenContext.tokenTicker}`;
-                if (tokenPriceUSD) {
+                if (usdTarget !== undefined) {
+                  const usdFormatted = formatUsdValue(usdTarget, {
+                    minimumFractionDigits: 1,
+                    maximumFractionDigits: 1,
+                    fallback: "0.0",
+                  });
+                  warningMessage += ` ($${usdFormatted})`;
+                } else if (tokenPriceUSD) {
                   const usdFormatted = formatUsdValue(amount * tokenPriceUSD, {
                     minimumFractionDigits: 1,
                     maximumFractionDigits: 1,

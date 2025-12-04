@@ -216,7 +216,8 @@ export const createGameSetupModule = (
 
     const suggestedAmounts = deps.getSuggestedStakeAmounts(
       contractMin,
-      userBalance
+      userBalance,
+      tokenPriceUSD ?? undefined
     );
 
     let message = `${copy.heading}\n\n`;
@@ -235,12 +236,19 @@ export const createGameSetupModule = (
 
     if (copy.suggestionLabel && suggestedAmounts.length > 0) {
       message += `\n\n${copy.suggestionLabel}:\n`;
-      for (const amount of suggestedAmounts) {
+      for (const { amount, usdTarget } of suggestedAmounts) {
         const amountDisplay = formatTokenDisplay(amount, {
           decimals: tokenInfo.decimals,
         });
         message += `• ${amountDisplay} ${tokenInfo.tokenTicker}`;
-        if (tokenPriceUSD) {
+        if (usdTarget !== undefined) {
+          const usdFormatted = formatUsdValue(usdTarget, {
+            minimumFractionDigits: 1,
+            maximumFractionDigits: 1,
+            fallback: "0.0",
+          });
+          message += ` ($${usdFormatted})`;
+        } else if (tokenPriceUSD) {
           const usdFormatted = formatUsdValue(amount * tokenPriceUSD, {
             minimumFractionDigits: 1,
             maximumFractionDigits: 1,

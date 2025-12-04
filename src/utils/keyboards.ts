@@ -153,29 +153,75 @@ export const getFeeWarningMessage = (
   return message;
 };
 
-const SUGGESTION_MULTIPLIERS = [1, 5, 10, 15, 20, 25, 35, 50] as const;
+const SUGGESTION_MULTIPLIERS = [
+  1,
+  2.5,
+  5,
+  10,
+  20,
+  30,
+  50,
+  75,
+  100,
+  150,
+  200,
+  250,
+] as const;
+const USD_STAKE_TARGETS = [
+  0.25,
+  0.5,
+  1,
+  2,
+  3,
+  5,
+  7.5,
+  10,
+  15,
+  20,
+  25,
+] as const;
+
+type StakeSuggestion = {
+  amount: number;
+  usdTarget?: number;
+};
 
 export const getSuggestedStakeAmounts = (
   contractMinimum: number,
-  _balance?: number
-): number[] => {
+  _balance?: number,
+  tokenPriceUSD?: number
+): StakeSuggestion[] => {
   const min = Math.max(contractMinimum, 0);
 
-  const suggestions = SUGGESTION_MULTIPLIERS.map((multiplier) =>
-    roundToPrecision(min * multiplier, 6)
-  );
+  const hasValidPrice =
+    typeof tokenPriceUSD === "number" &&
+    Number.isFinite(tokenPriceUSD) &&
+    tokenPriceUSD > 0;
 
-  const unique: number[] = [];
+  const suggestions = hasValidPrice
+    ? USD_STAKE_TARGETS.map((usdTarget) => ({
+        amount: roundToPrecision(usdTarget / tokenPriceUSD, 6),
+        usdTarget,
+      }))
+    : SUGGESTION_MULTIPLIERS.map((multiplier) => ({
+        amount: roundToPrecision(min * multiplier, 6),
+      }));
+
+  const unique: StakeSuggestion[] = [];
   const eps = 1e-6;
-  for (const value of suggestions) {
+  for (const suggestion of suggestions) {
+    const value = suggestion.amount;
     if (value <= 0) continue;
-    const exists = unique.some((item) => Math.abs(item - value) < eps);
+    const exists = unique.some((item) => Math.abs(item.amount - value) < eps);
     if (!exists) {
-      unique.push(Number(value.toFixed(6)));
+      unique.push({
+        ...suggestion,
+        amount: Number(value.toFixed(6)),
+      });
     }
   }
 
-  return unique.length > 0 ? unique : [min];
+  return unique.length > 0 ? unique : [{ amount: min }];
 };
 
 export const createAmountSelectionKeyboard = (
@@ -203,11 +249,40 @@ export const createAmountSelectionKeyboard = (
       ? options.tokenPriceUSD
       : undefined;
 
-  const amounts = getSuggestedStakeAmounts(contractMinimum, balance);
+  const amounts = getSuggestedStakeAmounts(
+    contractMinimum,
+    balance,
+    tokenPriceUSD
+  );
 
   const keyboard = new InlineKeyboard();
 
-  amounts.forEach((amount, index) => {
+  const minUsdText =
+    tokenPriceUSD !== undefined
+      ? ` ($${formatUsdValue(contractMinimum * tokenPriceUSD, {
+          minimumFractionDigits: 1,
+          maximumFractionDigits: 1,
+          fallback: "0.0",
+        })})`
+      : "";
+
+  const amountButtons: { text: string; callback: string }[] = [];
+
+  amountButtons.push({
+    text: `⚡ Minimum bet: ${formatCompactTokenDisplay(
+      formatTokenDisplay(contractMinimum, { decimals })
+    )}${minUsdText}`,
+    callback: withCreatorSuffix(
+      `amount_${gameType}_${contractMinimum}`,
+      creatorId
+    ),
+  });
+
+  const filteredAmounts = amounts.filter(
+    ({ amount }) => Math.abs(amount - contractMinimum) >= 1e-6
+  );
+
+  filteredAmounts.forEach(({ amount, usdTarget }) => {
     const callbackData = withCreatorSuffix(
       `amount_${gameType}_${amount}`,
       creatorId
@@ -215,7 +290,14 @@ export const createAmountSelectionKeyboard = (
     const fullDisplay = formatTokenDisplay(amount, { decimals });
     const display = formatCompactTokenDisplay(fullDisplay);
     let usdText = "";
-    if (tokenPriceUSD !== undefined) {
+    if (usdTarget !== undefined) {
+      const usdFormatted = formatUsdValue(usdTarget, {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+        fallback: "0.0",
+      });
+      usdText = ` ($${usdFormatted})`;
+    } else if (tokenPriceUSD !== undefined) {
       const usdFormatted = formatUsdValue(amount * tokenPriceUSD, {
         minimumFractionDigits: 1,
         maximumFractionDigits: 1,
@@ -223,9 +305,14 @@ export const createAmountSelectionKeyboard = (
       });
       usdText = ` ($${usdFormatted})`;
     }
-    keyboard.text(`${display}${usdText}`, callbackData);
+
+    amountButtons.push({ text: `${display}${usdText}`, callback: callbackData });
+  });
+
+  amountButtons.forEach(({ text, callback }, index) => {
+    keyboard.text(text, callback);
     const isEndOfPair = index % 2 === 1;
-    const isLast = index === amounts.length - 1;
+    const isLast = index === amountButtons.length - 1;
     if (isEndOfPair && !isLast) {
       keyboard.row();
     }
