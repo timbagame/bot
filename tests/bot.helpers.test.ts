@@ -605,15 +605,16 @@ describe("createGameViaCommand helper", () => {
     errorMessage: "❌ Error creating coinflip game. Please try again.",
   };
 
-  const baseParsedAmount = {
-    amount: 1_000_000,
-    tokenMint: "mint",
-    tokenTicker: "TOK",
-    isSol: false,
-    formattedAmount: "1 TOK",
-    tokenWasSpecified: true,
-    requestedNativeSol: false,
-  };
+    const baseParsedAmount = {
+      amount: 1_000_000,
+      tokenMint: "mint",
+      tokenTicker: "TOK",
+      isSol: false,
+      formattedAmount: "1 TOK",
+      decimals: 6,
+      tokenWasSpecified: true,
+      requestedNativeSol: false,
+    };
 
   const formatWindowForTests = (ms: number): string => {
     if (!Number.isFinite(ms) || ms <= 0) {
@@ -888,6 +889,7 @@ describe("createGameViaCommand helper", () => {
           tokenMint: WSOL_MINT,
           tokenTicker: "SOL",
           formattedAmount: "0.0006 SOL",
+          decimals: 9,
           requestedNativeSol: true,
         },
       }),
@@ -948,6 +950,7 @@ describe("createGameViaCommand helper", () => {
           tokenMint: WSOL_MINT,
           tokenTicker: "WSOL",
           formattedAmount: "0.0006 WSOL",
+          decimals: 9,
           requestedNativeSol: false,
           tokenWasSpecified: true,
         },
@@ -1010,6 +1013,7 @@ describe("createGameViaCommand helper", () => {
           tokenMint: WSOL_MINT,
           tokenTicker: "SOL",
           formattedAmount: "0.0005 SOL",
+          decimals: 9,
           requestedNativeSol: true,
         },
       }),
@@ -1062,6 +1066,7 @@ describe("createGameViaCommand helper", () => {
           tokenMint: WSOL_MINT,
           tokenTicker: "WSOL",
           formattedAmount: "0.0006 WSOL",
+          decimals: 9,
           requestedNativeSol: false,
           tokenWasSpecified: true,
         },

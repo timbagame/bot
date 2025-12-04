@@ -563,13 +563,13 @@ export class TokenManager {
 
     let amount: number;
     let formattedAmount: string;
+    const decimals = isSol ? 9 : tokenDecimals ?? 0;
 
     try {
       if (isSol) {
-        amount = parseDecimalAmount(amountArg, 9, { returnType: "number" });
+        amount = parseDecimalAmount(amountArg, decimals, { returnType: "number" });
         formattedAmount = `${this.wallet.formatSolBalance(amount)} SOL`;
       } else {
-        const decimals = tokenDecimals ?? 0;
         amount = parseDecimalAmount(amountArg, decimals, {
           returnType: "number",
         });
@@ -590,6 +590,7 @@ export class TokenManager {
         formattedAmount,
         tokenMint: isSol ? "SOL" : resolvedTokenMint,
         tokenTicker: isSol ? "SOL" : resolvedTokenTicker,
+        decimals,
         tokenWasSpecified,
         requestedNativeSol,
       },

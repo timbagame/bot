@@ -64,6 +64,7 @@ export interface ParsedAmount {
   formattedAmount: string;
   tokenMint: string;
   tokenTicker: string;
+  decimals: number;
   tokenWasSpecified: boolean;
   requestedNativeSol?: boolean;
   useAllSolBalance?: boolean;
