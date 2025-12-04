@@ -330,10 +330,11 @@ describe("keyboards: amount selection", () => {
     );
 
     const texts = extractTexts(kb);
-    const minButton = texts.find((text) => text.startsWith("⚡ Minimum bet"));
+    const minButton = texts.find((text) => text.startsWith("20"));
 
     expect(minButton).toBeDefined();
-    expect(minButton).toContain("$1.0");
+    expect(minButton).toContain("$1");
+    expect(minButton).not.toContain("$1.0");
   });
 
   test("fee warning message shows for low balance", () => {
