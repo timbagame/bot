@@ -231,9 +231,9 @@ describe("game setup typed input handling", () => {
     expect(restored.creatorId).toBe("creator-2");
   });
 
-  test("rejects timeout input outside the allowed minute range", async () => {
+  test("ignores timeout text replies now that timeout adjustments are button-driven", async () => {
     const session = {
-      waitingFor: "timeout_input",
+      waitingFor: "setup",
       gameType: "coinflip",
       players: 2,
       messageId: 38_500,
@@ -259,14 +259,12 @@ describe("game setup typed input handling", () => {
 
     await __test_handleGameSetupTextInput(ctx as any, next);
 
-    expect(nextCalled).toBe(false);
-
-    const edits = ctx.__calls.filter(isEditCall);
-    expect(edits).toHaveLength(1);
-    expect(String(edits[0]!.text)).toContain("between 5 and 1440");
+    expect(nextCalled).toBe(true);
+    expect(ctx.__calls.filter(isEditCall)).toHaveLength(0);
+    expect(ctx.__calls.filter(isReplyCall)).toHaveLength(0);
 
     const restored = getGameSetupSession(`${CHAT_ID}_${session.messageId}`) as any;
-    expect(restored.waitingFor).toBe("timeout_input");
+    expect(restored.waitingFor).toBe("setup");
   });
 
   test("rejects minimum players above the selected player count", async () => {
@@ -309,9 +307,9 @@ describe("game setup typed input handling", () => {
     expect(restored.waitingFor).toBe("min_players_input");
   });
 
-  test("timeout input keeps visibility and min players choices", async () => {
+  test("timeout replies do not override existing advanced selections", async () => {
     const session = {
-      waitingFor: "timeout_input",
+      waitingFor: "setup",
       gameType: "giveaway",
       players: 5,
       messageId: 55_500,
@@ -339,8 +337,8 @@ describe("game setup typed input handling", () => {
     expect(updated.waitingFor).toBe("setup");
     expect(updated.isPrivate).toBe(false);
     expect(updated.minPlayers).toBe(3);
-    expect(updated.timeoutSeconds).toBe(45 * 60);
-    expect(respondSpy).toHaveBeenCalled();
+    expect(updated.timeoutSeconds).toBe(900);
+    expect(respondSpy).not.toHaveBeenCalled();
   });
 
   test("minimum players input keeps visibility and timeout choices", async () => {
