@@ -225,6 +225,44 @@ describe("game setup typed input handling", () => {
     expect(restored.creatorId).toBe("creator-2");
   });
 
+  test("rejects timeout input outside the allowed minute range", async () => {
+    const session = {
+      waitingFor: "timeout_input",
+      gameType: "coinflip",
+      players: 2,
+      messageId: 38_500,
+      chatId: CHAT_ID,
+      amount: "3",
+      creatorId: "creator-timeout",
+      tokenMint: "MintTimeout111",
+      tokenTicker: "SOL",
+      tokenDecimals: 9,
+      contractMinimum: 0.1,
+    } as any;
+
+    upsertGameSetupSession(`${CHAT_ID}_${session.messageId}`, session);
+
+    const ctx = createMockCtx("5000", {
+      reply_to_message: { message_id: session.messageId },
+    });
+
+    let nextCalled = false;
+    const next = async () => {
+      nextCalled = true;
+    };
+
+    await __test_handleGameSetupTextInput(ctx as any, next);
+
+    expect(nextCalled).toBe(false);
+
+    const edits = ctx.__calls.filter(isEditCall);
+    expect(edits).toHaveLength(1);
+    expect(String(edits[0]!.text)).toContain("between 5 and 1440");
+
+    const restored = getGameSetupSession(`${CHAT_ID}_${session.messageId}`) as any;
+    expect(restored.waitingFor).toBe("timeout_input");
+  });
+
   test("rejects minimum players above the selected player count", async () => {
     const session = {
       waitingFor: "min_players_input",

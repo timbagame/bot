@@ -845,11 +845,7 @@ export const createGameCallbacksModule = (
           return;
         }
 
-        const timeoutSeconds = clampTimeoutSeconds(minutes * 60);
-        if (
-          timeoutSeconds < MIN_GAME_TIMEOUT ||
-          timeoutSeconds > MAX_GAME_TIMEOUT
-        ) {
+        if (minutes < minMinutes || minutes > maxMinutes) {
           const errorMessage = `❌ Timeout must be between ${minMinutes} and ${maxMinutes} minutes.`;
           try {
             await ctx.api.editMessageText(
@@ -864,6 +860,8 @@ export const createGameCallbacksModule = (
           restoreSession({ waitingFor: "timeout_input" });
           return;
         }
+
+        const timeoutSeconds = clampTimeoutSeconds(minutes * 60);
 
         const gameType = userSession.gameType as "coinflip" | "giveaway";
         const players =
