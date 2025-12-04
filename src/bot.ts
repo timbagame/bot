@@ -3215,12 +3215,17 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
     "tip"
   );
   if (!parsed.success) {
+    const errorMessage =
+      parsed.error === "amount_too_large"
+        ? "Amount is too large; please use a smaller value."
+        : formatParseAmountError(
+            parsed,
+            "Please provide a valid amount greater than 0."
+          );
+
     return replyToMessage(
       ctx,
-      formatParseAmountError(
-        parsed,
-        "Please provide a valid amount greater than 0."
-      )
+      errorMessage
     );
   }
 

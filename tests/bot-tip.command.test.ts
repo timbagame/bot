@@ -202,6 +202,46 @@ test("handleTipCommand positions amount after multi-word text mention", async ()
   expect(replies[0]).toContain("Please provide a valid amount greater than 0.");
 });
 
+test("handleTipCommand surfaces overflow message when amount is too large", async () => {
+  const tokenManager = botModule.__test_getTokenManager();
+  tokenManager.parseAmount = async (
+    _args: string[],
+    _index: number,
+    _chatId: number | undefined,
+    _context: "game" | "tip" = "game"
+  ) => ({ success: false, error: "amount_too_large" } as const);
+
+  botModule.__test_setGameManager({
+    findTelegramIdByUsername: () => ({ telegram_id: 5678n, username: "target" }),
+    primeUsernameCache: () => {},
+  } as any);
+
+  const replies: string[] = [];
+  const ctx: any = {
+    chat: { id: 22, type: "group" },
+    from: { id: 1111, is_bot: false },
+    message: {
+      message_id: 303,
+      text: "/tip 9999999999999999",
+      reply_to_message: {
+        from: { id: 2222, is_bot: false, first_name: "Target" },
+      },
+    },
+    reply: async (text: string) => {
+      replies.push(text);
+      return { message_id: 404 };
+    },
+    api: {
+      getChatMember: async () => ({ user: { is_bot: false } }),
+    },
+  };
+
+  await botModule.__test_handleTipCommand(ctx);
+
+  expect(replies).toHaveLength(1);
+  expect(replies[0]).toContain("Amount is too large; please use a smaller value.");
+});
+
 test("handleTipCommand reports shortage using the specified token ticker", async () => {
   const tokenManager = botModule.__test_getTokenManager();
   tokenManager.parseAmount = async (

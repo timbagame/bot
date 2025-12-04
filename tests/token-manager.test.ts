@@ -102,6 +102,19 @@ test("parseAmount rejects 19-digit numeric token arguments as invalid", async ()
   expect(res.error).toBe("invalid_amount");
 });
 
+test("parseAmount surfaces overflow from parseDecimalAmount", async () => {
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const oversized = (BigInt(Number.MAX_SAFE_INTEGER) + 1n).toString();
+
+  const res = await tm.parseAmount(["/tip", oversized], 1, 77, "tip");
+
+  expect(res.success).toBe(false);
+  if (res.success) {
+    throw new Error("expected amount_too_large failure");
+  }
+  expect(res.error).toBe("amount_too_large");
+});
+
 test("parseAmount uses chat default token when none specified", async () => {
   const tm = TokenManager.getInstance(makeWalletStub(), "DEF_MINT", "DEF");
   // set chat default token to override
