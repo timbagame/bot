@@ -76,7 +76,12 @@ import {
   buildLeaderboardMessage,
   type LeaderboardPlayerDisplay,
 } from "./utils/leaderboard-ui";
-import { formatAmount, escapeHtml, formatRate } from "./utils/format-amount";
+import {
+  formatAmount,
+  escapeHtml,
+  formatRate,
+  formatUsdValue,
+} from "./utils/format-amount";
 import { type PendingSwapTransaction } from "./bot/flows/sol-conversion";
 import { onBalance, type BalanceDeps } from "./handlers/wallet";
 import { inferMaxPlayers } from "./utils/arg-parsing";
@@ -3221,6 +3226,31 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
 
   const parsedAmount = parsed.data;
 
+  let usdSuffix = "";
+  try {
+    const priceLookup = await resolveTokenPriceUSD({
+      tokenMint: parsedAmount.tokenMint,
+      tokenTicker: parsedAmount.tokenTicker,
+      isSol: parsedAmount.isSol,
+    });
+
+    if (priceLookup?.price && Number.isFinite(priceLookup.price)) {
+      const decimalAmount =
+        parsedAmount.decimals > 0
+          ? parsedAmount.amount / Math.pow(10, parsedAmount.decimals)
+          : parsedAmount.amount;
+      const usdValue = decimalAmount * priceLookup.price;
+
+      if (Number.isFinite(usdValue) && usdValue > 0) {
+        usdSuffix = ` ($${formatUsdValue(usdValue)})`;
+      }
+    }
+  } catch (priceError) {
+    console.warn("Failed to fetch token price for tip:", priceError);
+  }
+
+  const tipDescription = `Tip of ${parsedAmount.formattedAmount}${usdSuffix} to ${recipientName}`;
+
   try {
     const recipientPubKey = wallet.getPublicKey(recipientTelegramId);
     await validateAndProcessTransaction(
@@ -3228,7 +3258,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
       telegramId,
       parsedAmount.amount,
       parsedAmount.isSol,
-      `Tip of ${parsedAmount.formattedAmount} to ${recipientName}`,
+      tipDescription,
       async (_playerData) => {
         if (parsedAmount.isSol) {
           return await wallet.transferSol(
