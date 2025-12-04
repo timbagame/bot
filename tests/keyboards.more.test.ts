@@ -170,19 +170,26 @@ describe("keyboards: misc menus", () => {
     const callbacks = extractCallbacks(kb);
     const texts = extractTexts(kb);
 
-    expect(texts).toContain("⏱️ Timeout: 45m");
-    expect(texts).toContain("🌐 Public");
-    expect(texts).toContain("👥 Min players: 3");
-    expect(callbacks).toContain(
-      "advanced_timeout_coinflip_1.5_4_creator123"
-    );
-    expect(callbacks).toContain(
-      "advanced_visibility_coinflip_1.5_4_private_creator123"
-    );
-    expect(callbacks).toContain(
-      "advanced_min_players_coinflip_1.5_4_creator123"
-    );
-    expect(callbacks).toContain("back_to_confirm_coinflip_1.5_4_creator123");
+    expect(texts).toEqual([
+      "-15m",
+      "-5m",
+      "⏱️ 45m",
+      "+5m",
+      "+15m",
+      "🌐 Public",
+      "👥 Min players: 3",
+      "⬅️ Back",
+    ]);
+    expect(callbacks).toEqual([
+      "advanced_timeout_coinflip_1.5_4_-15_creator123",
+      "advanced_timeout_coinflip_1.5_4_-5_creator123",
+      "noop",
+      "advanced_timeout_coinflip_1.5_4_5_creator123",
+      "advanced_timeout_coinflip_1.5_4_15_creator123",
+      "advanced_visibility_coinflip_1.5_4_private_creator123",
+      "advanced_min_players_coinflip_1.5_4_creator123",
+      "back_to_confirm_coinflip_1.5_4_creator123",
+    ]);
   });
 });
 

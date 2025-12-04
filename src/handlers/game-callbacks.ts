@@ -721,7 +721,6 @@ export const createGameCallbacksModule = (
         !userSession ||
         (userSession.waitingFor !== "amount_input" &&
           userSession.waitingFor !== "players_input" &&
-          userSession.waitingFor !== "timeout_input" &&
           userSession.waitingFor !== "min_players_input")
       ) {
         await next();
@@ -836,78 +835,6 @@ export const createGameCallbacksModule = (
           tokenTicker,
           tokenDecimals,
           contractMinimum: minAllowed,
-          timeoutSeconds: advanced.timeoutSeconds,
-          minPlayers: advanced.minPlayers,
-          isPrivate: advanced.isPrivate,
-        });
-        return;
-      }
-
-      if (userSession.waitingFor === "timeout_input") {
-        const minutes = Number.parseFloat(inputText);
-        const minMinutes = Math.ceil(MIN_GAME_TIMEOUT / 60);
-        const maxMinutes = Math.floor(MAX_GAME_TIMEOUT / 60);
-
-        if (!Number.isFinite(minutes) || minutes <= 0) {
-          const errorMessage =
-            "❌ Invalid timeout. Please enter the number of minutes.";
-          try {
-            await ctx.api.editMessageText(
-              userSession.chatId!,
-              userSession.messageId!,
-              errorMessage,
-              { parse_mode: "HTML" }
-            );
-          } catch (error) {
-            await ctx.reply(errorMessage, { parse_mode: "HTML" });
-          }
-          restoreSession({ waitingFor: "timeout_input" });
-          return;
-        }
-
-        if (minutes < minMinutes || minutes > maxMinutes) {
-          const errorMessage = `❌ Timeout must be between ${minMinutes} and ${maxMinutes} minutes.`;
-          try {
-            await ctx.api.editMessageText(
-              userSession.chatId!,
-              userSession.messageId!,
-              errorMessage,
-              { parse_mode: "HTML" }
-            );
-          } catch (error) {
-            await ctx.reply(errorMessage, { parse_mode: "HTML" });
-          }
-          restoreSession({ waitingFor: "timeout_input" });
-          return;
-        }
-
-        const timeoutSeconds = clampTimeoutSeconds(minutes * 60);
-
-        const gameType = userSession.gameType as "coinflip" | "giveaway";
-        const players =
-          userSession.players ?? getMinPlayersFloor(gameType);
-        const advanced = resolveAdvancedOptions(
-          gameType,
-          players,
-          { ...userSession, timeoutSeconds },
-          userSession.maxPlayersLimit ?? deps.getOracleMaxPlayers()
-        );
-
-        await presentAdvancedMenu({
-          ctx,
-          gameType,
-          amount: userSession.amount ?? "0",
-          players,
-          tokenTicker,
-          tokenDecimals,
-          creatorId: userSession.creatorId,
-          advanced,
-          logLabel: "advanced_timeout_update",
-        });
-
-        upsertGameSetupSession(sessionKey, {
-          ...userSession,
-          waitingFor: "setup",
           timeoutSeconds: advanced.timeoutSeconds,
           minPlayers: advanced.minPlayers,
           isPrivate: advanced.isPrivate,
@@ -1413,59 +1340,64 @@ export const createGameCallbacksModule = (
     );
 
     deps.bot.callbackQuery(
-      /^advanced_timeout_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/,
+      /^advanced_timeout_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(-?\d+)_([0-9]+)$/,
       deps.wrapCallbackHandler(
         deps.withCreatorContext(
           {
             name: "advanced_timeout",
-            resolveCreatorId: (ctx) => ctx.match?.[4],
+            resolveCreatorId: (ctx) => ctx.match?.[5],
             failureText:
               "🚫 Only the game creator can set a custom timeout!",
           },
-          async (ctx, { session, updateSession, creatorId }) => {
+          async (ctx, { session, tokenContext, updateSession, creatorId }) => {
             const gameType = ctx.match![1] as "coinflip" | "giveaway";
             const amount = ctx.match![2] as string;
             const players = Number.parseInt(ctx.match![3] as string, 10);
-            const minMinutes = Math.ceil(MIN_GAME_TIMEOUT / 60);
-            const maxMinutes = Math.floor(MAX_GAME_TIMEOUT / 60);
+            const deltaMinutes = Number.parseInt(ctx.match![4] as string, 10);
 
-            const prompt = [
-              "⏱️ <b>Custom Timeout</b>",
-              "",
-              "Enter the game timeout in minutes.",
-              "",
-              `Range: ${minMinutes}-${maxMinutes} minutes`,
-            ].join("\n");
+            const nextTimeoutSeconds = clampTimeoutSeconds(
+              (session?.timeoutSeconds ?? DEFAULT_GAME_TIMEOUT) +
+                deltaMinutes * 60
+            );
 
-            const keyboard = new InlineKeyboard()
-              .text(
-                "❌ Cancel",
-                withCreatorSuffix("cancel_game_setup", creatorId)
-              )
-              .row();
+            const advanced = resolveAdvancedOptions(
+              gameType,
+              players,
+              { ...session, timeoutSeconds: nextTimeoutSeconds },
+              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers()
+            );
 
-            await respondWithMenu(ctx, {
-              text: prompt,
-              parseMode: "HTML",
-              keyboard,
+            await presentAdvancedMenu({
+              ctx,
+              gameType,
+              amount,
+              players,
+              tokenTicker: tokenContext.tokenTicker,
+              tokenDecimals: tokenContext.tokenDecimals,
+              creatorId,
+              advanced,
+              logLabel: "advanced_timeout_update",
             });
 
             updateSession({
               ...(session ?? {}),
-              waitingFor: "timeout_input",
+              waitingFor: "setup",
               gameType,
               userBalance: session?.userBalance ?? 0,
-              messageId: ctx.callbackQuery?.message?.message_id || 0,
-              chatId: ctx.chat?.id || 0,
+              messageId:
+                ctx.callbackQuery?.message?.message_id ?? session?.messageId,
+              chatId: ctx.chat?.id ?? session?.chatId ?? 0,
               amount,
               players,
-              creatorId,
+              timeoutSeconds: advanced.timeoutSeconds,
+              minPlayers: advanced.minPlayers,
+              isPrivate: advanced.isPrivate,
             });
 
-            await safeAnswerCallbackQuery(ctx, "Type the timeout in minutes...");
+            await safeAnswerCallbackQuery(ctx);
           }
         ),
-        { action: "advanced_timeout", errorAck: "❌ Error requesting timeout" }
+        { action: "advanced_timeout", errorAck: "❌ Error updating timeout" }
       )
     );
 

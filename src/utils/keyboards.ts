@@ -402,11 +402,35 @@ export const createAdvancedOptionsKeyboard = (
   options: GameAdvancedOptions,
   creatorId?: string
 ): InlineKeyboard => {
+  const timeoutLabel = formatTimeoutLabel(options.timeoutSeconds);
+
   return new InlineKeyboard()
     .text(
-      `⏱️ Timeout: ${formatTimeoutLabel(options.timeoutSeconds)}`,
+      "-15m",
       withCreatorSuffix(
-        `advanced_timeout_${gameType}_${amount}_${players}`,
+        `advanced_timeout_${gameType}_${amount}_${players}_-15`,
+        creatorId
+      )
+    )
+    .text(
+      "-5m",
+      withCreatorSuffix(
+        `advanced_timeout_${gameType}_${amount}_${players}_-5`,
+        creatorId
+      )
+    )
+    .text(`⏱️ ${timeoutLabel}`.trim(), "noop")
+    .text(
+      "+5m",
+      withCreatorSuffix(
+        `advanced_timeout_${gameType}_${amount}_${players}_5`,
+        creatorId
+      )
+    )
+    .text(
+      "+15m",
+      withCreatorSuffix(
+        `advanced_timeout_${gameType}_${amount}_${players}_15`,
         creatorId
       )
     )

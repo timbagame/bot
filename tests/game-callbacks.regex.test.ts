@@ -13,7 +13,7 @@ const ADVANCED_VISIBILITY_CB = new RegExp(
   `^advanced_visibility_(coinflip|giveaway)_${AMOUNT_DECIMAL}_(\\d+)_(public|private)_(\\d+)$`
 );
 const ADVANCED_TIMEOUT_CB = new RegExp(
-  `^advanced_timeout_(coinflip|giveaway)_${AMOUNT_DECIMAL}_(\\d+)_(\\d+)$`
+  `^advanced_timeout_(coinflip|giveaway)_${AMOUNT_DECIMAL}_(\\d+)_(-?\\d+)_(\\d+)$`
 );
 const ADVANCED_MIN_PLAYERS_CB = new RegExp(
   `^advanced_min_players_(coinflip|giveaway)_${AMOUNT_DECIMAL}_(\\d+)_(\\d+)$`
@@ -87,12 +87,13 @@ test("advanced visibility regex captures choice and creator", () => {
 });
 
 test("advanced timeout regex captures creator id", () => {
-  const s = "advanced_timeout_giveaway_0.25_8_999";
+  const s = "advanced_timeout_giveaway_0.25_8_-15_999";
   const m = s.match(ADVANCED_TIMEOUT_CB)!;
   expect(m[1]).toBe("giveaway");
   expect(m[2]).toBe("0.25");
   expect(m[3]).toBe("8");
-  expect(m[4]).toBe("999");
+  expect(m[4]).toBe("-15");
+  expect(m[5]).toBe("999");
 });
 
 test("advanced min players regex captures creator id", () => {
