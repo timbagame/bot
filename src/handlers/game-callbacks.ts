@@ -91,6 +91,7 @@ export type GameCallbacksModule = {
   ) => Promise<void>;
   __test_shouldSkipGenericGameCallback: (callbackData: string) => boolean;
   __test_handleJoinGame: HandleJoinGameFn;
+  __test_buildAdvancedMinPlayersPrompt: typeof buildAdvancedMinPlayersPrompt;
 };
 
 const toTitleCase = (value: string): string => {
@@ -156,6 +157,25 @@ const resolveAdvancedOptions = (
   const isPrivate = session?.isPrivate ?? true;
 
   return { timeoutSeconds, minPlayers, isPrivate };
+};
+
+const buildAdvancedMinPlayersPrompt = (
+  gameType: "coinflip" | "giveaway",
+  players: number
+) => {
+  const minPlayers = getMinPlayersFloor(gameType);
+  const maxPlayers = Math.max(minPlayers, players);
+
+  const prompt = [
+    "👥 <b>Minimum Players</b>",
+    "",
+    `Current players: ${players}`,
+    `Range: ${minPlayers}-${maxPlayers}`,
+    "",
+    "Enter the minimum players required to start.",
+  ].join("\n");
+
+  return { prompt, maxPlayers };
 };
 
 const NON_GAME_CALLBACK_NAMES = [
@@ -1463,21 +1483,10 @@ export const createGameCallbacksModule = (
             const amount = ctx.match![2] as string;
             const players = Number.parseInt(ctx.match![3] as string, 10);
 
-            const minPlayers = getMinPlayersFloor(gameType);
-            const maxPlayers = Math.max(
-              minPlayers,
-              players,
-              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers()
+            const { prompt, maxPlayers } = buildAdvancedMinPlayersPrompt(
+              gameType,
+              players
             );
-
-            const prompt = [
-              "👥 <b>Minimum Players</b>",
-              "",
-              `Current players: ${players}`,
-              `Range: ${minPlayers}-${maxPlayers}`,
-              "",
-              "Enter the minimum players required to start.",
-            ].join("\n");
 
             const keyboard = new InlineKeyboard()
               .text(
@@ -2225,5 +2234,6 @@ export const createGameCallbacksModule = (
     __test_handleGameSetupTextInput: handleGameSetupTextInput,
     __test_handleJoinGame: handleJoinGame,
     __test_shouldSkipGenericGameCallback: shouldSkipGenericGameCallback,
+    __test_buildAdvancedMinPlayersPrompt: buildAdvancedMinPlayersPrompt,
   };
 };
