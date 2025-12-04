@@ -165,7 +165,7 @@ test("buildWalletTokenLines batches price lookups and reuses cached values", asy
   const tokenLineB = lines[2]!;
   const stablecoinLine = lines[3]!;
   expect(tokenLine.usdValue).toBe("1");
-  expect(tokenLineB.usdValue).toBe("1.50");
+  expect(tokenLineB.usdValue).toBe("1.5");
   expect(stablecoinLine.usdValue).toBe("10");
 });
 

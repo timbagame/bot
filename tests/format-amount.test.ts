@@ -98,15 +98,15 @@ test("formatCompactTokenDisplay falls back to raw string for invalid numbers", (
   expect(formatCompactTokenDisplay(" ")).toBe("0");
 });
 
-test("formatUsdValue omits decimals when value is an integer", () => {
+test("formatUsdValue omits trailing decimals for integer values", () => {
   expect(formatUsdValue(1250)).toBe("1,250");
 });
 
-test("formatUsdValue retains decimals for non-integer values", () => {
-  expect(formatUsdValue(12.5)).toBe("12.50");
+test("formatUsdValue keeps significant decimals for non-integer values", () => {
+  expect(formatUsdValue(12.5)).toBe("12.5");
 });
 
-test("formatUsdValue formats approximate amounts with trimmed decimals", () => {
+test("formatUsdValue formats approximate amounts without padding", () => {
   expect(formatUsdValue(42, { approximate: true })).toBe("≈ $42");
 });
 

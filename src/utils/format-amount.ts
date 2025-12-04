@@ -210,7 +210,7 @@ export function formatUsdValue(
 ): string {
   const {
     approximate = false,
-    minimumFractionDigits = 2,
+    minimumFractionDigits = 0,
     maximumFractionDigits = 2,
     fallback,
   } = options;
@@ -227,17 +227,7 @@ export function formatUsdValue(
     maximumFractionDigits,
   });
 
-  let normalized = formatted;
-  const decimalSeparatorIndex = normalized.indexOf(".");
-
-  if (decimalSeparatorIndex >= 0) {
-    const fractionalPart = normalized.slice(decimalSeparatorIndex + 1);
-    if (/^0+$/.test(fractionalPart)) {
-      normalized = normalized.slice(0, decimalSeparatorIndex);
-    }
-  }
-
-  return approximate ? `≈ $${normalized}` : normalized;
+  return approximate ? `≈ $${formatted}` : formatted;
 }
 
 export function formatRate(value: number): string {

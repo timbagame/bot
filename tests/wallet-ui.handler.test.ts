@@ -307,7 +307,7 @@ test("buildWalletTokenLines formats balances and skips empty tokens", async () =
 
   expect(lines).toEqual([
     { ticker: "SOL", amount: "2.000000", usdValue: "40", unit: "SOL" },
-    { ticker: "AAA", amount: "1.500", usdValue: "7.50" },
+    { ticker: "AAA", amount: "1.500", usdValue: "7.5" },
   ]);
 });
 
