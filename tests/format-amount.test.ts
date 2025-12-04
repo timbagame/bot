@@ -98,16 +98,16 @@ test("formatCompactTokenDisplay falls back to raw string for invalid numbers", (
   expect(formatCompactTokenDisplay(" ")).toBe("0");
 });
 
-test("formatUsdValue omits decimals when value is an integer", () => {
-  expect(formatUsdValue(1250)).toBe("1,250");
+test("formatUsdValue preserves decimals when value is an integer", () => {
+  expect(formatUsdValue(1250)).toBe("1,250.00");
 });
 
 test("formatUsdValue retains decimals for non-integer values", () => {
   expect(formatUsdValue(12.5)).toBe("12.50");
 });
 
-test("formatUsdValue formats approximate amounts with trimmed decimals", () => {
-  expect(formatUsdValue(42, { approximate: true })).toBe("≈ $42");
+test("formatUsdValue formats approximate amounts with decimals", () => {
+  expect(formatUsdValue(42, { approximate: true })).toBe("≈ $42.00");
 });
 
 test("formatUsdValue uses fallback when input is not finite", () => {

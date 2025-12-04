@@ -80,15 +80,15 @@ test("buildWalletCaption formats address and token lines", () => {
   try {
     const caption = buildWalletCaption("AbCdEf", [
       { ticker: "SOL", amount: "1.234567", usdValue: "123.46", unit: "SOL" },
-      { ticker: "TIMBA", amount: "123", usdValue: "6,150" },
-      { ticker: "USDC", amount: "10.00", usdValue: "10" },
+      { ticker: "TIMBA", amount: "123", usdValue: "6,150.00" },
+      { ticker: "USDC", amount: "10.00", usdValue: "10.00" },
     ]);
 
     expect(caption).toContain("Solana Address · <a href=\"https://solscan.io/account/AbCdEf\">🅴</a>");
     expect(caption).toContain("<code>AbCdEf</code> (Tap to copy)");
     expect(caption).toContain("SOL: 1.234567 SOL ($123.46)");
-    expect(caption).toContain("TIMBA: 123 ($6,150)");
-    expect(caption).toContain("USDC: 10.00 ($10)");
+    expect(caption).toContain("TIMBA: 123 ($6,150.00)");
+    expect(caption).toContain("USDC: 10.00 ($10.00)");
   } finally {
     if (originalNetwork === undefined) {
       Reflect.deleteProperty(process.env, "SOLANA_NETWORK");
@@ -158,15 +158,15 @@ test("buildWalletTokenLines batches price lookups and reuses cached values", asy
   expect(lines[0]).toEqual({
     ticker: "SOL",
     amount: "2 SOL",
-    usdValue: "50",
+    usdValue: "50.00",
     unit: "SOL",
   });
   const tokenLine = lines[1]!;
   const tokenLineB = lines[2]!;
   const stablecoinLine = lines[3]!;
-  expect(tokenLine.usdValue).toBe("1");
+  expect(tokenLine.usdValue).toBe("1.00");
   expect(tokenLineB.usdValue).toBe("1.50");
-  expect(stablecoinLine.usdValue).toBe("10");
+  expect(stablecoinLine.usdValue).toBe("10.00");
 });
 
 test("showCustomAmountPrompt formats send custom amount flow", async () => {
