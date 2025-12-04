@@ -1451,6 +1451,7 @@ export const createGameCallbacksModule = (
             });
 
             updateSession({
+              ...(session ?? {}),
               waitingFor: "timeout_input",
               gameType,
               userBalance: session?.userBalance ?? 0,
@@ -1502,6 +1503,7 @@ export const createGameCallbacksModule = (
             });
 
             updateSession({
+              ...(session ?? {}),
               waitingFor: "min_players_input",
               gameType,
               userBalance: session?.userBalance ?? 0,
