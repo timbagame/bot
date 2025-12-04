@@ -189,14 +189,32 @@ describe("keyboards: misc menus", () => {
 describe("keyboards: amount selection", () => {
   const expectedDefaultCallbacks = [
     "amount_coinflip_20",
+    "amount_coinflip_50",
     "amount_coinflip_100",
     "amount_coinflip_200",
-    "amount_coinflip_300",
     "amount_coinflip_400",
-    "amount_coinflip_500",
-    "amount_coinflip_700",
+    "amount_coinflip_600",
     "amount_coinflip_1000",
+    "amount_coinflip_1500",
+    "amount_coinflip_2000",
+    "amount_coinflip_3000",
+    "amount_coinflip_4000",
+    "amount_coinflip_5000",
   ];
+
+  const usdTargets = [
+    0.25,
+    0.5,
+    1,
+    2,
+    3,
+    5,
+    7.5,
+    10,
+    15,
+    20,
+    25,
+  ] as const;
 
   test("defaults to fixed contract minimum multiples when no balance", () => {
     const kb = createAmountSelectionKeyboard("coinflip");
@@ -273,6 +291,49 @@ describe("keyboards: amount selection", () => {
     expect(texts.every((text) => /\(\$[0-9,]+(?:\.\d+)?\)/.test(text))).toBe(
       true
     );
+  });
+
+  test("amount callbacks follow USD tiers when token price is known", () => {
+    const tokenPriceUSD = 0.01;
+    const kb = createAmountSelectionKeyboard(
+      "coinflip",
+      5000,
+      undefined,
+      20,
+      {
+        decimals: 2,
+        tokenPriceUSD,
+      }
+    );
+
+    const callbacks = extractCallbacks(kb).filter((s) =>
+      s.startsWith("amount_coinflip_")
+    );
+
+    const expected = [
+      "amount_coinflip_20",
+      ...usdTargets.map((usd) =>
+        `amount_coinflip_${Number((usd / tokenPriceUSD).toFixed(6))}`
+      ),
+    ];
+
+    expect(callbacks).toEqual(expected);
+  });
+
+  test("minimum bet button renders USD equivalent when price is provided", () => {
+    const kb = createAmountSelectionKeyboard(
+      "coinflip",
+      undefined,
+      undefined,
+      20,
+      { decimals: 2, tokenPriceUSD: 0.05 }
+    );
+
+    const texts = extractTexts(kb);
+    const minButton = texts.find((text) => text.startsWith("⚡ Minimum bet"));
+
+    expect(minButton).toBeDefined();
+    expect(minButton).toContain("$1.0");
   });
 
   test("fee warning message shows for low balance", () => {

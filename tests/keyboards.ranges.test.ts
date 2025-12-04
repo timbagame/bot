@@ -24,13 +24,17 @@ function extractCallbacks(kb: any): string[] {
 describe("createAmountSelectionKeyboard ranges", () => {
   const expectedAmounts = [
     "amount_coinflip_20",
+    "amount_coinflip_50",
     "amount_coinflip_100",
     "amount_coinflip_200",
-    "amount_coinflip_300",
     "amount_coinflip_400",
-    "amount_coinflip_500",
-    "amount_coinflip_700",
+    "amount_coinflip_600",
     "amount_coinflip_1000",
+    "amount_coinflip_1500",
+    "amount_coinflip_2000",
+    "amount_coinflip_3000",
+    "amount_coinflip_4000",
+    "amount_coinflip_5000",
   ];
 
   test("medium balance (between 50 and 200) still uses fixed contract minimum multiples", () => {
