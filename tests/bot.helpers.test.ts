@@ -722,7 +722,7 @@ describe("createGameViaCommand helper", () => {
     );
 
     expect(ctx.__calls.length).toBe(2);
-    expect(ctx.__calls[0]).toBe("Creating game...");
+    expect(ctx.__calls[0]).toBe("⏳ Creating game...");
     expect(String(ctx.__calls[1])).toContain("Usage");
     expect(ctx.__deleted?.length).toBe(1);
   });
@@ -742,7 +742,7 @@ describe("createGameViaCommand helper", () => {
     );
 
     expect(ctx.__calls.length).toBe(2);
-    expect(ctx.__calls[0]).toBe("Creating game...");
+    expect(ctx.__calls[0]).toBe("⏳ Creating game...");
     expect(String(ctx.__calls[1])).toContain("Coinflip players must be between 2-100");
     expect(ctx.__deleted?.length).toBe(1);
   });
@@ -774,7 +774,7 @@ describe("createGameViaCommand helper", () => {
     );
 
     expect(ctx.__calls.length).toBe(1);
-    expect(ctx.__calls[0]).toBe("Creating game...");
+    expect(ctx.__calls[0]).toBe("⏳ Creating game...");
     expect(createCalls.length).toBe(1);
 
       const [
@@ -833,7 +833,7 @@ describe("createGameViaCommand helper", () => {
     );
 
     expect(ctx.__calls.length).toBe(2);
-    expect(ctx.__calls[0]).toBe("Creating game...");
+    expect(ctx.__calls[0]).toBe("⏳ Creating game...");
     const response = String(ctx.__calls[1]);
     expect(response).toContain("Active game limit reached");
     expect(response).toContain("limit reached");
@@ -864,7 +864,7 @@ describe("createGameViaCommand helper", () => {
     );
 
     expect(ctx.__calls.length).toBe(2);
-    expect(ctx.__calls[0]).toBe("Creating game...");
+    expect(ctx.__calls[0]).toBe("⏳ Creating game...");
     const response = String(ctx.__calls[1]);
     expect(response).toContain("Game creation rate limit reached");
     expect(response.toLowerCase()).toContain("rate limit");
@@ -920,7 +920,7 @@ describe("createGameViaCommand helper", () => {
     );
 
     expect(ctx.__calls.length).toBe(1);
-    expect(ctx.__calls[0]).toBe("Creating game...");
+    expect(ctx.__calls[0]).toBe("⏳ Creating game...");
     expect(createCalls.length).toBe(1);
     expect(messageCalls.length).toBe(1);
 
@@ -984,7 +984,7 @@ describe("createGameViaCommand helper", () => {
     );
 
     expect(ctx.__calls.length).toBe(1);
-    expect(ctx.__calls[0]).toBe("Creating game...");
+    expect(ctx.__calls[0]).toBe("⏳ Creating game...");
     expect(createCalls.length).toBe(1);
     expect(messageCalls.length).toBe(1);
     expect(balanceChecks).toBeGreaterThan(0);
@@ -1040,7 +1040,7 @@ describe("createGameViaCommand helper", () => {
 
     expect(createCalls.length).toBe(0);
     expect(ctx.__calls.length).toBe(2);
-    expect(ctx.__calls[0]).toBe("Creating game...");
+    expect(ctx.__calls[0]).toBe("⏳ Creating game...");
     const response = String(ctx.__calls[1]);
     expect(response).toContain("Not enough SOL or wrapped SOL");
     expect(response).not.toContain("You have");
@@ -1085,7 +1085,7 @@ describe("createGameViaCommand helper", () => {
     );
 
     expect(ctx.__calls.length).toBe(2);
-    expect(ctx.__calls[0]).toBe("Creating game...");
+    expect(ctx.__calls[0]).toBe("⏳ Creating game...");
     const response = String(ctx.__calls[1]);
     expect(response).toContain("Not enough SOL or wrapped SOL");
     expect(response).toContain("Add more SOL or wrapped SOL and try again.");
