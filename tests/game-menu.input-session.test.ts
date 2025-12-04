@@ -267,9 +267,9 @@ describe("game setup typed input handling", () => {
     expect(restored.waitingFor).toBe("setup");
   });
 
-  test("rejects minimum players above the selected player count", async () => {
+  test("accepts valid player counts when replying to the setup message", async () => {
     const session = {
-      waitingFor: "min_players_input",
+      waitingFor: "players_input",
       gameType: "coinflip",
       players: 4,
       maxPlayersLimit: 20,
@@ -299,12 +299,9 @@ describe("game setup typed input handling", () => {
 
     expect(nextCalled).toBe(false);
 
-    const edits = ctx.__calls.filter(isEditCall);
-    expect(edits).toHaveLength(1);
-    expect(String(edits[0]!.text)).toContain("between 2 and 4");
-
-    const restored = getGameSetupSession(`${CHAT_ID}_${session.messageId}`) as any;
-    expect(restored.waitingFor).toBe("min_players_input");
+    const updated = getGameSetupSession(`${CHAT_ID}_${session.messageId}`) as any;
+    expect(updated.waitingFor).toBe("setup");
+    expect(updated.players).toBe(6);
   });
 
   test("timeout replies do not override existing advanced selections", async () => {
@@ -341,9 +338,9 @@ describe("game setup typed input handling", () => {
     expect(respondSpy).not.toHaveBeenCalled();
   });
 
-  test("minimum players input keeps visibility and timeout choices", async () => {
+  test("player input keeps visibility and timeout choices", async () => {
     const session = {
-      waitingFor: "min_players_input",
+      waitingFor: "players_input",
       gameType: "coinflip",
       players: 4,
       messageId: 66_600,
@@ -371,8 +368,8 @@ describe("game setup typed input handling", () => {
     expect(updated.waitingFor).toBe("setup");
     expect(updated.isPrivate).toBe(false);
     expect(updated.timeoutSeconds).toBe(1800);
-    expect(updated.minPlayers).toBe(3);
-    expect(respondSpy).toHaveBeenCalled();
+    expect(updated.minPlayers).toBe(2);
+    expect(respondSpy).not.toHaveBeenCalled();
   });
 
   test("startInteractiveGameSetup respects token override context", async () => {

@@ -402,6 +402,14 @@ export const createAdvancedOptionsKeyboard = (
   options: GameAdvancedOptions,
   creatorId?: string
 ): InlineKeyboard => {
+  const playersCount = Number.parseInt(players, 10);
+  const minPlayersFloor =
+    gameType === "coinflip" ? MIN_COINFLIP_PLAYERS : MIN_GIVEAWAY_PLAYERS;
+  const maxMinPlayers = Number.isFinite(playersCount)
+    ? Math.max(minPlayersFloor, playersCount)
+    : minPlayersFloor;
+  const canDecrement = options.minPlayers > minPlayersFloor;
+  const canIncrement = options.minPlayers < maxMinPlayers;
   const timeoutLabel = formatTimeoutLabel(options.timeoutSeconds);
 
   return new InlineKeyboard()
@@ -444,11 +452,23 @@ export const createAdvancedOptionsKeyboard = (
     )
     .row()
     .text(
-      `👥 Min players: ${options.minPlayers}`,
-      withCreatorSuffix(
-        `advanced_min_players_${gameType}_${amount}_${players}`,
-        creatorId
-      )
+      "➖",
+      canDecrement
+        ? withCreatorSuffix(
+            `advanced_min_players_${gameType}_${amount}_${players}_-1`,
+            creatorId
+          )
+        : "noop"
+    )
+    .text(`👥 Min players: ${options.minPlayers}`, "noop")
+    .text(
+      "➕",
+      canIncrement
+        ? withCreatorSuffix(
+            `advanced_min_players_${gameType}_${amount}_${players}_1`,
+            creatorId
+          )
+        : "noop"
     )
     .row()
     .text(
