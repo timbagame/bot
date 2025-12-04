@@ -268,10 +268,12 @@ export const createAmountSelectionKeyboard = (
 
   const amountButtons: { text: string; callback: string }[] = [];
 
+  const minDisplay = formatCompactTokenDisplay(
+    formatTokenDisplay(contractMinimum, { decimals })
+  );
+
   amountButtons.push({
-    text: `⚡ Minimum bet: ${formatCompactTokenDisplay(
-      formatTokenDisplay(contractMinimum, { decimals })
-    )}${minUsdText}`,
+    text: `${minDisplay}${minUsdText}`,
     callback: withCreatorSuffix(
       `amount_${gameType}_${contractMinimum}`,
       creatorId
