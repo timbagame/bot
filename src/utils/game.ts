@@ -152,6 +152,12 @@ type GameTokenContextAccounts = {
   associatedTokenProgram: PublicKey;
 };
 
+type ActiveGameInfo = {
+  gameAddress: string;
+  gameType: string;
+  messageText: string;
+};
+
 // ================================
 // UTILITY FUNCTIONS
 // ================================
@@ -4629,7 +4635,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     ctx: Context,
     telegramId: bigint
   ): Promise<{
-    activeGames: string;
+    activeGames: ActiveGameInfo[];
     recentGames: string;
   }> {
     const telegramIdStr = telegramId.toString();
@@ -4646,10 +4652,6 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       ctx,
       activeGamesData
     );
-    const activeGamesSection =
-      validActiveGames.length > 0
-        ? "<b>Active Games</b>\n\n" + validActiveGames.join("\n\n")
-        : "";
 
     // Recent games
     const validRecentGames = await this.processRecentGames(
@@ -4679,7 +4681,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       .join("\n");
 
     return {
-      activeGames: activeGamesSection,
+      activeGames: validActiveGames,
       recentGames: recentGamesSections,
     };
   }
@@ -4687,7 +4689,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
   private async processActiveGames(
     ctx: Context,
     activeGamesData: any[]
-  ): Promise<string[]> {
+  ): Promise<ActiveGameInfo[]> {
     const activeGames = await Promise.all(
       activeGamesData.map(async (gameData) => {
         try {
@@ -4704,7 +4706,17 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             return null;
           }
 
-          return this.getGameInfo(ctx, gamePda);
+          const messageText = await this.getGameInfo(ctx, gamePda);
+          const gameType =
+            typeof gameData.game_type === "string"
+              ? gameData.game_type
+              : "unknown";
+
+          return {
+            gameAddress: gamePda.toBase58(),
+            gameType,
+            messageText,
+          };
         } catch (error) {
           console.error(`Error fetching game ${gameData.game_address}:`, error);
           return null;
@@ -4712,7 +4724,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       })
     );
 
-    return activeGames.filter((game): game is string => game !== null);
+    return activeGames.filter((game): game is ActiveGameInfo => game !== null);
   }
 
   private async processRecentGames(

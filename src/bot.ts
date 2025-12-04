@@ -3495,12 +3495,32 @@ bot.command("active", async (ctx: Context) => {
   try {
     const { activeGames } = await gameManager.getUserGames(ctx, telegramId);
 
-    let response = activeGames || "You don't have any active games.";
+    if (!activeGames || activeGames.length === 0) {
+      await ctx.reply("You don't have any active games.", {
+        parse_mode: "HTML",
+        reply_to_message_id: ctx.message?.message_id,
+      });
+      return;
+    }
 
-    await ctx.reply(response, {
-      parse_mode: "HTML",
-      reply_to_message_id: ctx.message?.message_id,
-    });
+    const replyToMessageId = ctx.message?.message_id;
+
+    for (const [index, game] of activeGames.entries()) {
+      const keyboard = new InlineKeyboard()
+        .text("🎮 Join", `join_${game.gameAddress}`)
+        .text("🔄 Refresh", `refresh_${game.gameAddress}`);
+
+      const prefix =
+        activeGames.length > 1
+          ? `<b>Active Game ${index + 1}/${activeGames.length}</b>\n\n`
+          : "";
+
+      await ctx.reply(`${prefix}${game.messageText}`, {
+        parse_mode: "HTML",
+        reply_markup: keyboard,
+        reply_to_message_id: index === 0 ? replyToMessageId : undefined,
+      });
+    }
   } catch (error) {
     await handleCommandError(ctx, error, "active");
   }

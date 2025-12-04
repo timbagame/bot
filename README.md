@@ -42,6 +42,7 @@ src/
 
 - `/coinflip <amount> [maxPlayers]` - Create a coinflip game
 - `/giveaway <amount> [maxPlayers]` - Create a giveaway game
+- `/active` - View your active games with quick join buttons
 
 ### Wallet Commands
 

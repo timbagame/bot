@@ -8,7 +8,7 @@ function resetGM() {
 }
 
 describe("GameManager.getUserGames categorization and sections", () => {
-  test("groups recent games into won/lost/created/cancelled and lists active", async () => {
+  test("groups recent games into won/lost/created/cancelled and returns active metadata", async () => {
     resetGM();
     // Stub program not used (we will stub getGameInfo)
     const program = { account: { game: { fetch: async () => ({}) } } } as any;
@@ -19,8 +19,14 @@ describe("GameManager.getUserGames categorization and sections", () => {
       formatTokenBalance: (n: number, d: number) => (n / Math.pow(10, d)).toFixed(0),
     } as any;
     const playerPkStr = player.publicKey.toBase58();
+    const activeGameAddress = new PublicKey(
+      "BPFLoader1111111111111111111111111111111111"
+    ).toBase58();
+
     const db = {
-      getActiveGames: async (_id: string) => [{ game_address: new PublicKey("BPFLoader1111111111111111111111111111111111").toBase58() }],
+      getActiveGames: async (_id: string) => [
+        { game_address: activeGameAddress, game_type: "coinflip" },
+      ],
       getRecentGames: async (_id: string, _limit: number) => [
         { game_address: "wonGame", winner_address: playerPkStr, creator_telegram_id: "777", completed_at: Date.now() },
         { game_address: "lostGame", winner_address: new PublicKey("BPFLoader2111111111111111111111111111111111").toBase58(), creator_telegram_id: "888", completed_at: Date.now() },
@@ -39,7 +45,10 @@ describe("GameManager.getUserGames categorization and sections", () => {
     const ctx = { chat: { id: 1, type: "private" }, api: { getChatMember: async () => ({ user: { username: "user777" } }) } } as any;
     const out = await gm.getUserGames(ctx, BigInt(12345));
 
-    expect(out.activeGames).toContain("Active Games");
+    expect(out.activeGames.length).toBe(1);
+    expect(out.activeGames[0].gameAddress).toBe(activeGameAddress);
+    expect(out.activeGames[0].gameType).toBe("coinflip");
+    expect(out.activeGames[0].messageText).toBe("Active Game Info");
     expect(out.recentGames).toContain("Won Games");
     expect(out.recentGames).toContain("Lost Games");
     expect(out.recentGames).toContain("Created Games");
