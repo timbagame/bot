@@ -24,7 +24,6 @@ import {
   createPlayerSelectionKeyboard,
   getFeeWarningMessage,
   getSuggestedStakeAmounts,
-  withCreatorSuffix,
 } from "../utils/keyboards";
 import { respondWithMenu } from "../utils/menu-response";
 import {
@@ -91,7 +90,6 @@ export type GameCallbacksModule = {
   ) => Promise<void>;
   __test_shouldSkipGenericGameCallback: (callbackData: string) => boolean;
   __test_handleJoinGame: HandleJoinGameFn;
-  __test_buildAdvancedMinPlayersPrompt: typeof buildAdvancedMinPlayersPrompt;
 };
 
 const toTitleCase = (value: string): string => {
@@ -157,25 +155,6 @@ const resolveAdvancedOptions = (
   const isPrivate = session?.isPrivate ?? true;
 
   return { timeoutSeconds, minPlayers, isPrivate };
-};
-
-const buildAdvancedMinPlayersPrompt = (
-  gameType: "coinflip" | "giveaway",
-  players: number
-) => {
-  const minPlayers = getMinPlayersFloor(gameType);
-  const maxPlayers = Math.max(minPlayers, players);
-
-  const prompt = [
-    "👥 <b>Minimum Players</b>",
-    "",
-    `Current players: ${players}`,
-    `Range: ${minPlayers}-${maxPlayers}`,
-    "",
-    "Enter the minimum players required to start.",
-  ].join("\n");
-
-  return { prompt, maxPlayers };
 };
 
 const NON_GAME_CALLBACK_NAMES = [
@@ -720,8 +699,7 @@ export const createGameCallbacksModule = (
       if (
         !userSession ||
         (userSession.waitingFor !== "amount_input" &&
-          userSession.waitingFor !== "players_input" &&
-          userSession.waitingFor !== "min_players_input")
+          userSession.waitingFor !== "players_input")
       ) {
         await next();
         return;
@@ -838,66 +816,6 @@ export const createGameCallbacksModule = (
           timeoutSeconds: advanced.timeoutSeconds,
           minPlayers: advanced.minPlayers,
           isPrivate: advanced.isPrivate,
-        });
-        return;
-      }
-
-      if (userSession.waitingFor === "min_players_input") {
-        const gameType = userSession.gameType as "coinflip" | "giveaway";
-        const minPlayersFloor = getMinPlayersFloor(gameType);
-        const players = Math.max(
-          userSession.players ?? minPlayersFloor,
-          minPlayersFloor
-        );
-        const maxPlayers = players;
-        const requestedMinPlayers = Number.parseInt(inputText, 10);
-
-        if (
-          Number.isNaN(requestedMinPlayers) ||
-          requestedMinPlayers < minPlayersFloor ||
-          requestedMinPlayers > maxPlayers
-        ) {
-          const errorMessage = `❌ Invalid minimum players. Please enter a number between ${minPlayersFloor} and ${maxPlayers}.`;
-          try {
-            await ctx.api.editMessageText(
-              userSession.chatId!,
-              userSession.messageId!,
-              errorMessage,
-              { parse_mode: "HTML" }
-            );
-          } catch (error) {
-            await ctx.reply(errorMessage, { parse_mode: "HTML" });
-          }
-          restoreSession({ waitingFor: "min_players_input" });
-          return;
-        }
-
-        const advanced = resolveAdvancedOptions(
-          gameType,
-          players,
-          { ...userSession, minPlayers: requestedMinPlayers },
-          userSession.maxPlayersLimit ?? deps.getOracleMaxPlayers()
-        );
-
-        await presentAdvancedMenu({
-          ctx,
-          gameType,
-          amount: userSession.amount ?? "0",
-          players,
-          tokenTicker,
-          tokenDecimals,
-          creatorId: userSession.creatorId,
-          advanced,
-          logLabel: "advanced_min_players_update",
-        });
-
-        upsertGameSetupSession(sessionKey, {
-          ...userSession,
-          waitingFor: "setup",
-          minPlayers: advanced.minPlayers,
-          timeoutSeconds: advanced.timeoutSeconds,
-          isPrivate: advanced.isPrivate,
-          players,
         });
         return;
       }
@@ -1402,12 +1320,12 @@ export const createGameCallbacksModule = (
     );
 
     deps.bot.callbackQuery(
-      /^advanced_min_players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/,
+      /^advanced_min_players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(-?\d+)_([0-9]+)$/,
       deps.wrapCallbackHandler(
         deps.withCreatorContext(
           {
             name: "advanced_min_players",
-            resolveCreatorId: (ctx) => ctx.match?.[4],
+            resolveCreatorId: (ctx) => ctx.match?.[5],
             failureText:
               "🚫 Only the game creator can adjust minimum players!",
           },
@@ -1415,44 +1333,60 @@ export const createGameCallbacksModule = (
             const gameType = ctx.match![1] as "coinflip" | "giveaway";
             const amount = ctx.match![2] as string;
             const players = Number.parseInt(ctx.match![3] as string, 10);
+            const delta = Number.parseInt(ctx.match![4] as string, 10);
 
-            const { prompt, maxPlayers } = buildAdvancedMinPlayersPrompt(
+            const minPlayersFloor = getMinPlayersFloor(gameType);
+            const currentMinPlayers = clampMinPlayers(
               gameType,
-              players
+              session?.minPlayers ?? minPlayersFloor,
+              players,
+              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers()
+            );
+            const nextMinPlayers = clampMinPlayers(
+              gameType,
+              currentMinPlayers + delta,
+              players,
+              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers()
             );
 
-            const keyboard = new InlineKeyboard()
-              .text(
-                "❌ Cancel",
-                withCreatorSuffix("cancel_game_setup", creatorId)
-              )
-              .row();
-
-            await respondWithMenu(ctx, {
-              text: prompt,
-              parseMode: "HTML",
-              keyboard,
-            });
-
-            updateSession({
-              ...(session ?? {}),
-              waitingFor: "min_players_input",
+            const advanced = resolveAdvancedOptions(
               gameType,
-              userBalance: session?.userBalance ?? 0,
-              messageId: ctx.callbackQuery?.message?.message_id || 0,
-              chatId: ctx.chat?.id || 0,
+              players,
+              { ...session, minPlayers: nextMinPlayers },
+              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers()
+            );
+
+            await presentAdvancedMenu({
+              ctx,
+              gameType,
               amount,
               players,
               tokenTicker: tokenContext.tokenTicker,
               tokenDecimals: tokenContext.tokenDecimals,
               creatorId,
-              maxPlayersLimit: maxPlayers,
+              advanced,
+              logLabel: "advanced_min_players_update",
             });
 
-            await safeAnswerCallbackQuery(ctx, "Type the minimum players...");
+            updateSession({
+              ...(session ?? {}),
+              waitingFor: "setup",
+              gameType,
+              userBalance: session?.userBalance ?? 0,
+              messageId:
+                ctx.callbackQuery?.message?.message_id ?? session?.messageId,
+              chatId: ctx.chat?.id ?? session?.chatId ?? 0,
+              amount,
+              players,
+              timeoutSeconds: advanced.timeoutSeconds,
+              minPlayers: advanced.minPlayers,
+              isPrivate: advanced.isPrivate,
+            });
+
+            await safeAnswerCallbackQuery(ctx);
           }
         ),
-        { action: "advanced_min_players", errorAck: "❌ Error requesting minimum players" }
+        { action: "advanced_min_players", errorAck: "❌ Error updating minimum players" }
       )
     );
 
@@ -2176,6 +2110,5 @@ export const createGameCallbacksModule = (
     __test_handleGameSetupTextInput: handleGameSetupTextInput,
     __test_handleJoinGame: handleJoinGame,
     __test_shouldSkipGenericGameCallback: shouldSkipGenericGameCallback,
-    __test_buildAdvancedMinPlayersPrompt: buildAdvancedMinPlayersPrompt,
   };
 };

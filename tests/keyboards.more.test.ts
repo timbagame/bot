@@ -177,7 +177,9 @@ describe("keyboards: misc menus", () => {
       "+5m",
       "+15m",
       "🌐 Public",
+      "➖",
       "👥 Min players: 3",
+      "➕",
       "⬅️ Back",
     ]);
     expect(callbacks).toEqual([
@@ -187,7 +189,9 @@ describe("keyboards: misc menus", () => {
       "advanced_timeout_coinflip_1.5_4_5_creator123",
       "advanced_timeout_coinflip_1.5_4_15_creator123",
       "advanced_visibility_coinflip_1.5_4_private_creator123",
-      "advanced_min_players_coinflip_1.5_4_creator123",
+      "advanced_min_players_coinflip_1.5_4_-1_creator123",
+      "noop",
+      "advanced_min_players_coinflip_1.5_4_1_creator123",
       "back_to_confirm_coinflip_1.5_4_creator123",
     ]);
   });
