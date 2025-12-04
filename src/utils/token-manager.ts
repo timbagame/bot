@@ -578,7 +578,10 @@ export class TokenManager {
           " " +
           resolvedTokenTicker;
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("too large")) {
+        return { success: false, error: "amount_too_large" };
+      }
       return { success: false, error: "invalid_amount" };
     }
 
@@ -1117,6 +1120,8 @@ export function formatParseAmountError(
   }
 
   switch (result.error) {
+    case "amount_too_large":
+      return "Amount is too large; please use a smaller value.";
     case "unknown_token":
       return result.unknownToken
         ? `❌ Unknown token <code>${escapeHtml(result.unknownToken)}</code>`
