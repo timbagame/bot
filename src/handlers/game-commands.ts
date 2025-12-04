@@ -129,7 +129,8 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
       args
     );
 
-    let creationMessageInfo: { chatId: number; messageId: number } | null = null;
+    let creationMessageInfo: { chatId: number; messageId: number } | null =
+      null;
 
     const deleteCreationMessage = async () => {
       if (!creationMessageInfo || !ctx.api?.deleteMessage) {
@@ -150,8 +151,11 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
     };
 
     try {
-      const creationMessage = await ctx.reply("Creating game...");
-      if (creationMessage?.chat?.id != null && creationMessage?.message_id != null) {
+      const creationMessage = await ctx.reply("⏳ Creating game...");
+      if (
+        creationMessage?.chat?.id != null &&
+        creationMessage?.message_id != null
+      ) {
         creationMessageInfo = {
           chatId: creationMessage.chat.id,
           messageId: creationMessage.message_id,
@@ -230,8 +234,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
       }
 
       if (!needsNativeSolCheck && userBalance < parsedAmount.amount) {
-        const shortageMessage =
-          `❌ Not enough ${parsedAmount.tokenTicker}. Add more ${parsedAmount.tokenTicker} or try a smaller amount.`;
+        const shortageMessage = `❌ Not enough ${parsedAmount.tokenTicker}. Add more ${parsedAmount.tokenTicker} or try a smaller amount.`;
         await ctx.reply(shortageMessage, { parse_mode: "HTML" });
         return;
       }
@@ -243,8 +246,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
             parsedAmount.tokenMint === WSOL_MINT
               ? "wrapped SOL"
               : parsedAmount.tokenTicker;
-          const shortageMessage =
-            `❌ Not enough SOL or ${wrappedLabel}. Add more SOL or ${wrappedLabel} and try again.`;
+          const shortageMessage = `❌ Not enough SOL or ${wrappedLabel}. Add more SOL or ${wrappedLabel} and try again.`;
           await ctx.reply(shortageMessage, { parse_mode: "HTML" });
           return;
         }
@@ -271,6 +273,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         options.minPlayers,
         options.timeoutSeconds,
         telegramId,
+        { isPrivate: true },
         ctx.chat?.id || 0,
         messageTimestampMs
       );

@@ -1,5 +1,10 @@
 import { InlineKeyboard } from "grammy";
-import { DEFAULT_TOKEN_TICKER } from "./constants";
+import {
+  DEFAULT_GAME_TIMEOUT,
+  DEFAULT_TOKEN_TICKER,
+  MIN_COINFLIP_PLAYERS,
+  MIN_GIVEAWAY_PLAYERS,
+} from "./constants";
 import {
   formatCompactTokenDisplay,
   formatTokenDisplay,
@@ -286,17 +291,94 @@ export const createPlayerSelectionKeyboard = (
   return keyboard;
 };
 
-export const createGameConfirmKeyboard = (
+type GameAdvancedOptions = {
+  timeoutSeconds: number;
+  minPlayers: number;
+  isPrivate: boolean;
+};
+
+const visibilityLabel = (isPrivate: boolean): string =>
+  isPrivate ? "🔒 Private" : "🌐 Public";
+
+const formatTimeoutLabel = (timeoutSeconds: number): string => {
+  const minutes = Math.round(timeoutSeconds / 60);
+  if (minutes >= 120) {
+    const hours = minutes / 60;
+    return `${hours.toFixed(hours % 1 === 0 ? 0 : 1)}h`;
+  }
+  return `${Math.max(1, minutes)}m`;
+};
+
+export const createAdvancedOptionsKeyboard = (
   gameType: string,
   amount: string,
   players: string,
+  options: GameAdvancedOptions,
   creatorId?: string
 ): InlineKeyboard => {
   return new InlineKeyboard()
     .text(
+      `⏱️ Timeout: ${formatTimeoutLabel(options.timeoutSeconds)}`,
+      withCreatorSuffix(
+        `advanced_timeout_${gameType}_${amount}_${players}`,
+        creatorId
+      )
+    )
+    .row()
+    .text(
+      `${visibilityLabel(options.isPrivate)}`,
+      withCreatorSuffix(
+        `advanced_visibility_${gameType}_${amount}_${players}_${options.isPrivate ? "public" : "private"}`,
+        creatorId
+      )
+    )
+    .row()
+    .text(
+      `👥 Min players: ${options.minPlayers}`,
+      withCreatorSuffix(
+        `advanced_min_players_${gameType}_${amount}_${players}`,
+        creatorId
+      )
+    )
+    .row()
+    .text(
+      "⬅️ Back",
+      withCreatorSuffix(
+        `back_to_confirm_${gameType}_${amount}_${players}`,
+        creatorId
+      )
+    )
+    .row();
+};
+
+export const createGameConfirmKeyboard = (
+  gameType: string,
+  amount: string,
+  players: string,
+  creatorId?: string,
+  options?: Partial<GameAdvancedOptions>
+): InlineKeyboard => {
+  const fallbackMinPlayers =
+    gameType === "coinflip" ? MIN_COINFLIP_PLAYERS : MIN_GIVEAWAY_PLAYERS;
+  const advanced: GameAdvancedOptions = {
+    timeoutSeconds: options?.timeoutSeconds ?? DEFAULT_GAME_TIMEOUT,
+    minPlayers: options?.minPlayers ?? fallbackMinPlayers,
+    isPrivate: options?.isPrivate ?? true,
+  };
+
+  return new InlineKeyboard()
+    .text(
       "✅ Create Game",
       withCreatorSuffix(
-        `confirm_game_${gameType}_${amount}_${players}`,
+        `confirm_game_${gameType}_${amount}_${players}_${advanced.timeoutSeconds}_${advanced.minPlayers}_${advanced.isPrivate ? "private" : "public"}`,
+        creatorId
+      )
+    )
+    .row()
+    .text(
+      "⚙️ Advanced options",
+      withCreatorSuffix(
+        `advanced_options_${gameType}_${amount}_${players}`,
         creatorId
       )
     )

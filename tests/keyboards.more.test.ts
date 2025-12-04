@@ -10,6 +10,7 @@ import {
   createAmountSelectionKeyboard,
   createPlayerSelectionKeyboard,
   createGameConfirmKeyboard,
+  createAdvancedOptionsKeyboard,
   getFeeWarningMessage,
 } from "../src/utils/keyboards";
 
@@ -156,6 +157,33 @@ describe("keyboards: misc menus", () => {
     expect(texts).toContain("✅ Confirm");
     expect(texts).toContain("❌ Back");
   });
+
+  test("advanced options keyboard reflects visibility, timeout, and min players", () => {
+    const kb = createAdvancedOptionsKeyboard(
+      "coinflip",
+      "1.5",
+      "4",
+      { timeoutSeconds: 2700, minPlayers: 3, isPrivate: false },
+      "creator123"
+    );
+
+    const callbacks = extractCallbacks(kb);
+    const texts = extractTexts(kb);
+
+    expect(texts).toContain("⏱️ Timeout: 45m");
+    expect(texts).toContain("🌐 Public");
+    expect(texts).toContain("👥 Min players: 3");
+    expect(callbacks).toContain(
+      "advanced_timeout_coinflip_1.5_4_creator123"
+    );
+    expect(callbacks).toContain(
+      "advanced_visibility_coinflip_1.5_4_private_creator123"
+    );
+    expect(callbacks).toContain(
+      "advanced_min_players_coinflip_1.5_4_creator123"
+    );
+    expect(callbacks).toContain("back_to_confirm_coinflip_1.5_4_creator123");
+  });
 });
 
 describe("keyboards: amount selection", () => {
@@ -297,7 +325,8 @@ describe("keyboards: player selection and confirm", () => {
   test("confirm keyboard includes confirm and back with creatorId", () => {
     const kb = createGameConfirmKeyboard("coinflip", "30", "4", "abc");
     const callbacks = extractCallbacks(kb);
-    expect(callbacks).toContain("confirm_game_coinflip_30_4_abc");
+    expect(callbacks).toContain("confirm_game_coinflip_30_4_3600_2_private_abc");
     expect(callbacks).toContain("amount_coinflip_30_abc");
+    expect(callbacks).toContain("advanced_options_coinflip_30_4_abc");
   });
 });

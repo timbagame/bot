@@ -11,6 +11,7 @@ import {
   __test_startInteractiveGameSetup,
   wallet,
 } from "../src/bot";
+import * as menuResponse from "../src/utils/menu-response";
 import {
   upsertGameSetupSession,
   getGameSetupSession,
@@ -117,6 +118,7 @@ const createMockCtx = (text: string, options: MockCtxOptions = {}): MockCtx => {
 
 describe("game setup typed input handling", () => {
   let metadataSpy: ReturnType<typeof spyOn>;
+  let respondSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     clearAllGameSetupSessions();
@@ -124,10 +126,14 @@ describe("game setup typed input handling", () => {
       symbol: "SOL",
       decimals: 9,
     } as any);
+    respondSpy = spyOn(menuResponse, "respondWithMenu").mockResolvedValue(
+      undefined as any
+    );
   });
 
   afterEach(() => {
     metadataSpy.mockRestore();
+    respondSpy.mockRestore();
     clearAllGameSetupSessions();
   });
 
@@ -223,6 +229,152 @@ describe("game setup typed input handling", () => {
     expect(restored.tokenTicker).toBe("USDC");
     expect(restored.tokenMint).toBe("MintGiveaway222");
     expect(restored.creatorId).toBe("creator-2");
+  });
+
+  test("rejects timeout input outside the allowed minute range", async () => {
+    const session = {
+      waitingFor: "timeout_input",
+      gameType: "coinflip",
+      players: 2,
+      messageId: 38_500,
+      chatId: CHAT_ID,
+      amount: "3",
+      creatorId: "creator-timeout",
+      tokenMint: "MintTimeout111",
+      tokenTicker: "SOL",
+      tokenDecimals: 9,
+      contractMinimum: 0.1,
+    } as any;
+
+    upsertGameSetupSession(`${CHAT_ID}_${session.messageId}`, session);
+
+    const ctx = createMockCtx("5000", {
+      reply_to_message: { message_id: session.messageId },
+    });
+
+    let nextCalled = false;
+    const next = async () => {
+      nextCalled = true;
+    };
+
+    await __test_handleGameSetupTextInput(ctx as any, next);
+
+    expect(nextCalled).toBe(false);
+
+    const edits = ctx.__calls.filter(isEditCall);
+    expect(edits).toHaveLength(1);
+    expect(String(edits[0]!.text)).toContain("between 5 and 1440");
+
+    const restored = getGameSetupSession(`${CHAT_ID}_${session.messageId}`) as any;
+    expect(restored.waitingFor).toBe("timeout_input");
+  });
+
+  test("rejects minimum players above the selected player count", async () => {
+    const session = {
+      waitingFor: "min_players_input",
+      gameType: "coinflip",
+      players: 4,
+      maxPlayersLimit: 20,
+      userBalance: 75,
+      messageId: 41_000,
+      chatId: CHAT_ID,
+      amount: "2",
+      creatorId: "creator-3",
+      tokenMint: "MintCoinflip333",
+      tokenTicker: "SOL",
+      tokenDecimals: 9,
+      contractMinimum: 0.1,
+    } as any;
+
+    upsertGameSetupSession(`${CHAT_ID}_${session.messageId}`, session);
+
+    const ctx = createMockCtx("6", {
+      reply_to_message: { message_id: session.messageId },
+    });
+
+    let nextCalled = false;
+    const next = async () => {
+      nextCalled = true;
+    };
+
+    await __test_handleGameSetupTextInput(ctx as any, next);
+
+    expect(nextCalled).toBe(false);
+
+    const edits = ctx.__calls.filter(isEditCall);
+    expect(edits).toHaveLength(1);
+    expect(String(edits[0]!.text)).toContain("between 2 and 4");
+
+    const restored = getGameSetupSession(`${CHAT_ID}_${session.messageId}`) as any;
+    expect(restored.waitingFor).toBe("min_players_input");
+  });
+
+  test("timeout input keeps visibility and min players choices", async () => {
+    const session = {
+      waitingFor: "timeout_input",
+      gameType: "giveaway",
+      players: 5,
+      messageId: 55_500,
+      chatId: CHAT_ID,
+      amount: "2",
+      creatorId: "creator-visibility",
+      tokenMint: "MintGiveaway444",
+      tokenTicker: "SOL",
+      tokenDecimals: 9,
+      contractMinimum: 0.1,
+      minPlayers: 3,
+      isPrivate: false,
+      timeoutSeconds: 900,
+    } as any;
+
+    upsertGameSetupSession(`${CHAT_ID}_${session.messageId}`, session);
+
+    const ctx = createMockCtx("45", {
+      reply_to_message: { message_id: session.messageId },
+    });
+
+    await __test_handleGameSetupTextInput(ctx as any, async () => {});
+
+    const updated = getGameSetupSession(`${CHAT_ID}_${session.messageId}`) as any;
+    expect(updated.waitingFor).toBe("setup");
+    expect(updated.isPrivate).toBe(false);
+    expect(updated.minPlayers).toBe(3);
+    expect(updated.timeoutSeconds).toBe(45 * 60);
+    expect(respondSpy).toHaveBeenCalled();
+  });
+
+  test("minimum players input keeps visibility and timeout choices", async () => {
+    const session = {
+      waitingFor: "min_players_input",
+      gameType: "coinflip",
+      players: 4,
+      messageId: 66_600,
+      chatId: CHAT_ID,
+      amount: "1.5",
+      creatorId: "creator-public",
+      tokenMint: "MintCoinflip555",
+      tokenTicker: "SOL",
+      tokenDecimals: 9,
+      contractMinimum: 0.1,
+      minPlayers: 2,
+      timeoutSeconds: 1800,
+      isPrivate: false,
+    } as any;
+
+    upsertGameSetupSession(`${CHAT_ID}_${session.messageId}`, session);
+
+    const ctx = createMockCtx("3", {
+      reply_to_message: { message_id: session.messageId },
+    });
+
+    await __test_handleGameSetupTextInput(ctx as any, async () => {});
+
+    const updated = getGameSetupSession(`${CHAT_ID}_${session.messageId}`) as any;
+    expect(updated.waitingFor).toBe("setup");
+    expect(updated.isPrivate).toBe(false);
+    expect(updated.timeoutSeconds).toBe(1800);
+    expect(updated.minPlayers).toBe(3);
+    expect(respondSpy).toHaveBeenCalled();
   });
 
   test("startInteractiveGameSetup respects token override context", async () => {

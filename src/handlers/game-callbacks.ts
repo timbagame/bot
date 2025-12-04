@@ -9,16 +9,22 @@ import { PublicKey } from "@solana/web3.js";
 import type { Program } from "@coral-xyz/anchor";
 
 import {
+  DEFAULT_GAME_TIMEOUT,
   DEFAULT_TOKEN_MINT,
   DEFAULT_TOKEN_TICKER,
-  GAME_TIMEOUT,
+  MAX_GAME_TIMEOUT,
+  MIN_COINFLIP_PLAYERS,
+  MIN_GAME_TIMEOUT,
+  MIN_GIVEAWAY_PLAYERS,
 } from "../utils/constants";
 import {
   createAmountSelectionKeyboard,
   createGameConfirmKeyboard,
+  createAdvancedOptionsKeyboard,
   createPlayerSelectionKeyboard,
   getFeeWarningMessage,
   getSuggestedStakeAmounts,
+  withCreatorSuffix,
 } from "../utils/keyboards";
 import { respondWithMenu } from "../utils/menu-response";
 import {
@@ -85,6 +91,7 @@ export type GameCallbacksModule = {
   ) => Promise<void>;
   __test_shouldSkipGenericGameCallback: (callbackData: string) => boolean;
   __test_handleJoinGame: HandleJoinGameFn;
+  __test_buildAdvancedMinPlayersPrompt: typeof buildAdvancedMinPlayersPrompt;
 };
 
 const toTitleCase = (value: string): string => {
@@ -100,6 +107,75 @@ const determineFractionDigits = (
     return Math.min(6, maxDecimals);
   }
   return Math.min(fraction.length, maxDecimals, 6);
+};
+
+type AdvancedOptionState = {
+  timeoutSeconds: number;
+  minPlayers: number;
+  isPrivate: boolean;
+};
+
+const getMinPlayersFloor = (gameType: "coinflip" | "giveaway"): number =>
+  gameType === "coinflip" ? MIN_COINFLIP_PLAYERS : MIN_GIVEAWAY_PLAYERS;
+
+const clampTimeoutSeconds = (timeout?: number): number => {
+  if (!Number.isFinite(timeout)) return DEFAULT_GAME_TIMEOUT;
+  const rounded = Math.round(timeout!);
+  return Math.min(Math.max(rounded, MIN_GAME_TIMEOUT), MAX_GAME_TIMEOUT);
+};
+
+const clampMinPlayers = (
+  gameType: "coinflip" | "giveaway",
+  candidate: number | undefined,
+  maxPlayers: number,
+  maxPlayersLimit?: number
+): number => {
+  const floor = getMinPlayersFloor(gameType);
+  const ceiling = Math.max(
+    floor,
+    Math.min(maxPlayers, maxPlayersLimit ?? maxPlayers)
+  );
+  if (!Number.isFinite(candidate)) return floor;
+  const rounded = Math.round(candidate!);
+  return Math.min(Math.max(rounded, floor), ceiling);
+};
+
+const resolveAdvancedOptions = (
+  gameType: "coinflip" | "giveaway",
+  players: number,
+  session?: Partial<GameSetupSessionState>,
+  maxPlayersLimit?: number
+): AdvancedOptionState => {
+  const maxPlayersCeil = Math.max(players, getMinPlayersFloor(gameType));
+  const timeoutSeconds = clampTimeoutSeconds(session?.timeoutSeconds);
+  const minPlayers = clampMinPlayers(
+    gameType,
+    session?.minPlayers,
+    maxPlayersCeil,
+    maxPlayersLimit
+  );
+  const isPrivate = session?.isPrivate ?? true;
+
+  return { timeoutSeconds, minPlayers, isPrivate };
+};
+
+const buildAdvancedMinPlayersPrompt = (
+  gameType: "coinflip" | "giveaway",
+  players: number
+) => {
+  const minPlayers = getMinPlayersFloor(gameType);
+  const maxPlayers = Math.max(minPlayers, players);
+
+  const prompt = [
+    "👥 <b>Minimum Players</b>",
+    "",
+    `Current players: ${players}`,
+    `Range: ${minPlayers}-${maxPlayers}`,
+    "",
+    "Enter the minimum players required to start.",
+  ].join("\n");
+
+  return { prompt, maxPlayers };
 };
 
 const NON_GAME_CALLBACK_NAMES = [
@@ -132,9 +208,11 @@ const NON_GAME_CALLBACK_PREFIXES = [
   "custom_players_",
   "slider_",
   "back_to_amounts_",
+  "back_to_confirm_",
   "type_amount_",
   "admin_",
   "info_",
+  "advanced_",
 ] as const;
 
 const shouldSkipGenericGameCallback = (callbackData: string): boolean => {
@@ -160,12 +238,14 @@ const buildGameConfirmationMessage = ({
   players,
   tokenTicker,
   tokenDecimals,
+  advanced,
 }: {
   gameType: "coinflip" | "giveaway";
   amount: string;
   players: number;
   tokenTicker: string;
   tokenDecimals: number;
+  advanced: AdvancedOptionState;
 }): string => {
   const parsedAmount = Number(amount);
   const amountNumber = Number.isFinite(parsedAmount) ? parsedAmount : 0;
@@ -184,6 +264,10 @@ const buildGameConfirmationMessage = ({
 
   const formattedGameType = toTitleCase(gameType);
 
+  const timeoutMinutes = Math.round(advanced.timeoutSeconds / 60);
+  const visibilityLabel = advanced.isPrivate ? "Private" : "Public";
+  const minPlayersLabel = `${advanced.minPlayers}/${players}`;
+
   return [
     `<b>Confirm ${formattedGameType}</b>`,
     "",
@@ -193,6 +277,10 @@ const buildGameConfirmationMessage = ({
     gameType === "coinflip"
       ? `• Total prize pool: <b>${totalPotFormatted} ${tokenTicker}</b>`
       : `• Prize for winner: <b>${amountFormatted} ${tokenTicker}</b>`,
+    "",
+    `Visibility: <b>${visibilityLabel}</b>`,
+    `Min players to start: <b>${minPlayersLabel}</b>`,
+    `Timeout: <b>${timeoutMinutes} min</b>`,
     "",
     `⚠️ Make sure you have enough ${tokenTicker} in your wallet!`,
     "",
@@ -205,17 +293,20 @@ const buildGameConfirmMenuConfig = ({
   amount,
   players,
   creatorId,
+  advanced,
 }: {
   gameType: "coinflip" | "giveaway";
   amount: string;
   players: number;
   creatorId?: string;
+  advanced: AdvancedOptionState;
 }) => {
   const keyboard = createGameConfirmKeyboard(
     gameType,
     amount,
     players.toString(),
-    creatorId
+    creatorId,
+    advanced
   );
 
   return {
@@ -228,6 +319,139 @@ const buildGameConfirmMenuConfig = ({
       reply_markup: keyboard,
     },
   } as const;
+};
+
+const buildAdvancedOptionsMessage = ({
+  amount,
+  players,
+  tokenTicker,
+  tokenDecimals,
+  advanced,
+}: {
+  amount: string;
+  players: number;
+  tokenTicker: string;
+  tokenDecimals: number;
+  advanced: AdvancedOptionState;
+}): string => {
+  const parsedAmount = Number(amount);
+  const amountNumber = Number.isFinite(parsedAmount) ? parsedAmount : 0;
+  const amountFormatted = amountNumber.toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: determineFractionDigits(
+      amount ?? amountNumber.toString(),
+      tokenDecimals
+    ),
+  });
+
+  const timeoutMinutes = Math.round(advanced.timeoutSeconds / 60);
+  return [
+    "⚙️ <b>Advanced Options</b>",
+    "",
+    `Amount: <b>${amountFormatted} ${tokenTicker}</b>`,
+    `Players: <b>${players}</b>`,
+    "",
+    `Visibility: <b>${advanced.isPrivate ? "Private" : "Public"}</b>`,
+    `Min players to start: <b>${advanced.minPlayers}/${players}</b>`,
+    `Timeout: <b>${timeoutMinutes} min</b>`,
+    "",
+    "Adjust options below or go back to confirm.",
+  ].join("\n");
+};
+
+const presentAdvancedMenu = async (params: {
+  ctx: Context;
+  gameType: "coinflip" | "giveaway";
+  amount: string;
+  players: number;
+  tokenTicker: string;
+  tokenDecimals: number;
+  creatorId?: string;
+  advanced: AdvancedOptionState;
+  logLabel?: string;
+}): Promise<void> => {
+  const { ctx, gameType, amount, players, tokenTicker, tokenDecimals, creatorId, advanced, logLabel } = params;
+  const text = buildAdvancedOptionsMessage({
+    amount,
+    players,
+    tokenTicker,
+    tokenDecimals,
+    advanced,
+  });
+
+  const keyboard = createAdvancedOptionsKeyboard(
+    gameType,
+    amount,
+    players.toString(),
+    advanced,
+    creatorId
+  );
+
+  await respondWithMenu(
+    ctx,
+    {
+      text,
+      parseMode: "HTML",
+      keyboard,
+    },
+    {
+      allowContextEdit: true,
+      logLabel: logLabel ?? "advanced_options",
+    }
+  );
+};
+
+const presentConfirmMenu = async (params: {
+  ctx: Context;
+  gameType: "coinflip" | "giveaway";
+  amount: string;
+  players: number;
+  tokenTicker: string;
+  tokenDecimals: number;
+  creatorId?: string;
+  advanced: AdvancedOptionState;
+  logLabel?: string;
+}): Promise<void> => {
+  const {
+    ctx,
+    gameType,
+    amount,
+    players,
+    tokenTicker,
+    tokenDecimals,
+    creatorId,
+    advanced,
+    logLabel,
+  } = params;
+
+  const confirmMessage = buildGameConfirmationMessage({
+    gameType,
+    amount,
+    players,
+    tokenTicker,
+    tokenDecimals,
+    advanced,
+  });
+
+  const confirmMenu = buildGameConfirmMenuConfig({
+    gameType,
+    amount,
+    players,
+    creatorId,
+    advanced,
+  });
+
+  await respondWithMenu(
+    ctx,
+    {
+      text: confirmMessage,
+      ...confirmMenu.menu,
+    },
+    {
+      allowContextEdit: true,
+      logLabel: logLabel ?? "confirm_menu",
+    }
+  );
 };
 
 type CustomAmountPromptParams = {
@@ -496,7 +720,9 @@ export const createGameCallbacksModule = (
       if (
         !userSession ||
         (userSession.waitingFor !== "amount_input" &&
-          userSession.waitingFor !== "players_input")
+          userSession.waitingFor !== "players_input" &&
+          userSession.waitingFor !== "timeout_input" &&
+          userSession.waitingFor !== "min_players_input")
       ) {
         await next();
         return;
@@ -530,7 +756,9 @@ export const createGameCallbacksModule = (
 
       if (userSession.waitingFor === "players_input") {
         const players = Number.parseInt(inputText, 10);
-        const minPlayers = userSession.gameType === "coinflip" ? 2 : 1;
+        const minPlayers = getMinPlayersFloor(
+          userSession.gameType as "coinflip" | "giveaway"
+        );
         const maxPlayers = Math.max(
           minPlayers,
           userSession.maxPlayersLimit ?? deps.getOracleMaxPlayers()
@@ -561,12 +789,19 @@ export const createGameCallbacksModule = (
         }
 
         const amountValue = userSession.amount ?? "0";
+        const advanced = resolveAdvancedOptions(
+          userSession.gameType as "coinflip" | "giveaway",
+          players,
+          userSession,
+          userSession.maxPlayersLimit ?? deps.getOracleMaxPlayers()
+        );
         const confirmMessage = buildGameConfirmationMessage({
           gameType: userSession.gameType as "coinflip" | "giveaway",
           amount: amountValue,
           players,
           tokenTicker,
           tokenDecimals,
+          advanced,
         });
 
         const confirmMenu = buildGameConfirmMenuConfig({
@@ -574,6 +809,7 @@ export const createGameCallbacksModule = (
           amount: amountValue,
           players,
           creatorId: userSession.creatorId,
+          advanced,
         });
 
         try {
@@ -594,11 +830,147 @@ export const createGameCallbacksModule = (
           messageId: userSession.messageId,
           chatId: userSession.chatId,
           amount: userSession.amount,
+          players,
           creatorId: userSession.creatorId,
           tokenMint: userSession.tokenMint,
           tokenTicker,
           tokenDecimals,
           contractMinimum: minAllowed,
+          timeoutSeconds: advanced.timeoutSeconds,
+          minPlayers: advanced.minPlayers,
+          isPrivate: advanced.isPrivate,
+        });
+        return;
+      }
+
+      if (userSession.waitingFor === "timeout_input") {
+        const minutes = Number.parseFloat(inputText);
+        const minMinutes = Math.ceil(MIN_GAME_TIMEOUT / 60);
+        const maxMinutes = Math.floor(MAX_GAME_TIMEOUT / 60);
+
+        if (!Number.isFinite(minutes) || minutes <= 0) {
+          const errorMessage =
+            "❌ Invalid timeout. Please enter the number of minutes.";
+          try {
+            await ctx.api.editMessageText(
+              userSession.chatId!,
+              userSession.messageId!,
+              errorMessage,
+              { parse_mode: "HTML" }
+            );
+          } catch (error) {
+            await ctx.reply(errorMessage, { parse_mode: "HTML" });
+          }
+          restoreSession({ waitingFor: "timeout_input" });
+          return;
+        }
+
+        if (minutes < minMinutes || minutes > maxMinutes) {
+          const errorMessage = `❌ Timeout must be between ${minMinutes} and ${maxMinutes} minutes.`;
+          try {
+            await ctx.api.editMessageText(
+              userSession.chatId!,
+              userSession.messageId!,
+              errorMessage,
+              { parse_mode: "HTML" }
+            );
+          } catch (error) {
+            await ctx.reply(errorMessage, { parse_mode: "HTML" });
+          }
+          restoreSession({ waitingFor: "timeout_input" });
+          return;
+        }
+
+        const timeoutSeconds = clampTimeoutSeconds(minutes * 60);
+
+        const gameType = userSession.gameType as "coinflip" | "giveaway";
+        const players =
+          userSession.players ?? getMinPlayersFloor(gameType);
+        const advanced = resolveAdvancedOptions(
+          gameType,
+          players,
+          { ...userSession, timeoutSeconds },
+          userSession.maxPlayersLimit ?? deps.getOracleMaxPlayers()
+        );
+
+        await presentAdvancedMenu({
+          ctx,
+          gameType,
+          amount: userSession.amount ?? "0",
+          players,
+          tokenTicker,
+          tokenDecimals,
+          creatorId: userSession.creatorId,
+          advanced,
+          logLabel: "advanced_timeout_update",
+        });
+
+        upsertGameSetupSession(sessionKey, {
+          ...userSession,
+          waitingFor: "setup",
+          timeoutSeconds: advanced.timeoutSeconds,
+          minPlayers: advanced.minPlayers,
+          isPrivate: advanced.isPrivate,
+        });
+        return;
+      }
+
+      if (userSession.waitingFor === "min_players_input") {
+        const gameType = userSession.gameType as "coinflip" | "giveaway";
+        const minPlayersFloor = getMinPlayersFloor(gameType);
+        const players = Math.max(
+          userSession.players ?? minPlayersFloor,
+          minPlayersFloor
+        );
+        const maxPlayers = players;
+        const requestedMinPlayers = Number.parseInt(inputText, 10);
+
+        if (
+          Number.isNaN(requestedMinPlayers) ||
+          requestedMinPlayers < minPlayersFloor ||
+          requestedMinPlayers > maxPlayers
+        ) {
+          const errorMessage = `❌ Invalid minimum players. Please enter a number between ${minPlayersFloor} and ${maxPlayers}.`;
+          try {
+            await ctx.api.editMessageText(
+              userSession.chatId!,
+              userSession.messageId!,
+              errorMessage,
+              { parse_mode: "HTML" }
+            );
+          } catch (error) {
+            await ctx.reply(errorMessage, { parse_mode: "HTML" });
+          }
+          restoreSession({ waitingFor: "min_players_input" });
+          return;
+        }
+
+        const advanced = resolveAdvancedOptions(
+          gameType,
+          players,
+          { ...userSession, minPlayers: requestedMinPlayers },
+          userSession.maxPlayersLimit ?? deps.getOracleMaxPlayers()
+        );
+
+        await presentAdvancedMenu({
+          ctx,
+          gameType,
+          amount: userSession.amount ?? "0",
+          players,
+          tokenTicker,
+          tokenDecimals,
+          creatorId: userSession.creatorId,
+          advanced,
+          logLabel: "advanced_min_players_update",
+        });
+
+        upsertGameSetupSession(sessionKey, {
+          ...userSession,
+          waitingFor: "setup",
+          minPlayers: advanced.minPlayers,
+          timeoutSeconds: advanced.timeoutSeconds,
+          isPrivate: advanced.isPrivate,
+          players,
         });
         return;
       }
@@ -880,12 +1252,20 @@ export const createGameCallbacksModule = (
             const amount = ctx.match![2] as string;
             const players = Number.parseInt(ctx.match![3] as string, 10);
 
+            const advanced = resolveAdvancedOptions(
+              gameType,
+              players,
+              session,
+              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers()
+            );
+
             const confirmMessage = buildGameConfirmationMessage({
               gameType,
               amount,
               players,
               tokenTicker: tokenContext.tokenTicker,
               tokenDecimals: tokenContext.tokenDecimals,
+              advanced,
             });
 
             const confirmMenu = buildGameConfirmMenuConfig({
@@ -893,6 +1273,7 @@ export const createGameCallbacksModule = (
               amount,
               players,
               creatorId,
+              advanced,
             });
 
             await respondWithMenu(ctx, {
@@ -908,6 +1289,10 @@ export const createGameCallbacksModule = (
                 ctx.callbackQuery?.message?.message_id ?? session?.messageId,
               chatId: ctx.chat?.id ?? session?.chatId ?? 0,
               amount,
+              players,
+              timeoutSeconds: advanced.timeoutSeconds,
+              minPlayers: advanced.minPlayers,
+              isPrivate: advanced.isPrivate,
             });
 
             await safeAnswerCallbackQuery(ctx);
@@ -918,11 +1303,286 @@ export const createGameCallbacksModule = (
     );
 
     deps.bot.callbackQuery(
-      /^confirm_game_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/,
+      /^advanced_options_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/,
+      deps.wrapCallbackHandler(
+        deps.withCreatorContext(
+          {
+            name: "advanced_options",
+            resolveCreatorId: (ctx) => ctx.match?.[4],
+            failureText:
+              "🚫 Only the game creator can adjust advanced options!",
+          },
+          async (ctx, { session, tokenContext, updateSession, creatorId }) => {
+            const gameType = ctx.match![1] as "coinflip" | "giveaway";
+            const amount = ctx.match![2] as string;
+            const players = Number.parseInt(ctx.match![3] as string, 10);
+
+            const advanced = resolveAdvancedOptions(
+              gameType,
+              players,
+              session,
+              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers()
+            );
+
+            await presentAdvancedMenu({
+              ctx,
+              gameType,
+              amount,
+              players,
+              tokenTicker: tokenContext.tokenTicker,
+              tokenDecimals: tokenContext.tokenDecimals,
+              creatorId,
+              advanced,
+              logLabel: "advanced_options_open",
+            });
+
+            updateSession({
+              waitingFor: "setup",
+              gameType,
+              userBalance: session?.userBalance ?? 0,
+              messageId: ctx.callbackQuery?.message?.message_id ?? session?.messageId,
+              chatId: ctx.chat?.id ?? session?.chatId ?? 0,
+              amount,
+              players,
+              timeoutSeconds: advanced.timeoutSeconds,
+              minPlayers: advanced.minPlayers,
+              isPrivate: advanced.isPrivate,
+            });
+
+            await safeAnswerCallbackQuery(ctx);
+          }
+        ),
+        { action: "advanced_options", errorAck: "❌ Error opening options" }
+      )
+    );
+
+    deps.bot.callbackQuery(
+      /^advanced_visibility_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(public|private)_(\d+)$/,
+      deps.wrapCallbackHandler(
+        deps.withCreatorContext(
+          {
+            name: "advanced_visibility",
+            resolveCreatorId: (ctx) => ctx.match?.[5],
+            failureText:
+              "🚫 Only the game creator can adjust visibility!",
+          },
+          async (ctx, { session, tokenContext, updateSession, creatorId }) => {
+            const gameType = ctx.match![1] as "coinflip" | "giveaway";
+            const amount = ctx.match![2] as string;
+            const players = Number.parseInt(ctx.match![3] as string, 10);
+            const visibilityChoice = ctx.match![4] as "public" | "private";
+
+            const isPrivate = visibilityChoice !== "public";
+            const advanced = resolveAdvancedOptions(
+              gameType,
+              players,
+              { ...session, isPrivate },
+              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers()
+            );
+
+            await presentAdvancedMenu({
+              ctx,
+              gameType,
+              amount,
+              players,
+              tokenTicker: tokenContext.tokenTicker,
+              tokenDecimals: tokenContext.tokenDecimals,
+              creatorId,
+              advanced,
+              logLabel: "advanced_visibility_toggle",
+            });
+
+            updateSession({
+              waitingFor: "setup",
+              gameType,
+              userBalance: session?.userBalance ?? 0,
+              messageId: ctx.callbackQuery?.message?.message_id ?? session?.messageId,
+              chatId: ctx.chat?.id ?? session?.chatId ?? 0,
+              amount,
+              players,
+              timeoutSeconds: advanced.timeoutSeconds,
+              minPlayers: advanced.minPlayers,
+              isPrivate: advanced.isPrivate,
+            });
+
+            await safeAnswerCallbackQuery(ctx);
+          }
+        ),
+        { action: "advanced_visibility", errorAck: "❌ Error updating visibility" }
+      )
+    );
+
+    deps.bot.callbackQuery(
+      /^advanced_timeout_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/,
+      deps.wrapCallbackHandler(
+        deps.withCreatorContext(
+          {
+            name: "advanced_timeout",
+            resolveCreatorId: (ctx) => ctx.match?.[4],
+            failureText:
+              "🚫 Only the game creator can set a custom timeout!",
+          },
+          async (ctx, { session, updateSession, creatorId }) => {
+            const gameType = ctx.match![1] as "coinflip" | "giveaway";
+            const amount = ctx.match![2] as string;
+            const players = Number.parseInt(ctx.match![3] as string, 10);
+            const minMinutes = Math.ceil(MIN_GAME_TIMEOUT / 60);
+            const maxMinutes = Math.floor(MAX_GAME_TIMEOUT / 60);
+
+            const prompt = [
+              "⏱️ <b>Custom Timeout</b>",
+              "",
+              "Enter the game timeout in minutes.",
+              "",
+              `Range: ${minMinutes}-${maxMinutes} minutes`,
+            ].join("\n");
+
+            const keyboard = new InlineKeyboard()
+              .text(
+                "❌ Cancel",
+                withCreatorSuffix("cancel_game_setup", creatorId)
+              )
+              .row();
+
+            await respondWithMenu(ctx, {
+              text: prompt,
+              parseMode: "HTML",
+              keyboard,
+            });
+
+            updateSession({
+              ...(session ?? {}),
+              waitingFor: "timeout_input",
+              gameType,
+              userBalance: session?.userBalance ?? 0,
+              messageId: ctx.callbackQuery?.message?.message_id || 0,
+              chatId: ctx.chat?.id || 0,
+              amount,
+              players,
+              creatorId,
+            });
+
+            await safeAnswerCallbackQuery(ctx, "Type the timeout in minutes...");
+          }
+        ),
+        { action: "advanced_timeout", errorAck: "❌ Error requesting timeout" }
+      )
+    );
+
+    deps.bot.callbackQuery(
+      /^advanced_min_players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/,
+      deps.wrapCallbackHandler(
+        deps.withCreatorContext(
+          {
+            name: "advanced_min_players",
+            resolveCreatorId: (ctx) => ctx.match?.[4],
+            failureText:
+              "🚫 Only the game creator can adjust minimum players!",
+          },
+          async (ctx, { session, tokenContext, updateSession, creatorId }) => {
+            const gameType = ctx.match![1] as "coinflip" | "giveaway";
+            const amount = ctx.match![2] as string;
+            const players = Number.parseInt(ctx.match![3] as string, 10);
+
+            const { prompt, maxPlayers } = buildAdvancedMinPlayersPrompt(
+              gameType,
+              players
+            );
+
+            const keyboard = new InlineKeyboard()
+              .text(
+                "❌ Cancel",
+                withCreatorSuffix("cancel_game_setup", creatorId)
+              )
+              .row();
+
+            await respondWithMenu(ctx, {
+              text: prompt,
+              parseMode: "HTML",
+              keyboard,
+            });
+
+            updateSession({
+              ...(session ?? {}),
+              waitingFor: "min_players_input",
+              gameType,
+              userBalance: session?.userBalance ?? 0,
+              messageId: ctx.callbackQuery?.message?.message_id || 0,
+              chatId: ctx.chat?.id || 0,
+              amount,
+              players,
+              tokenTicker: tokenContext.tokenTicker,
+              tokenDecimals: tokenContext.tokenDecimals,
+              creatorId,
+              maxPlayersLimit: maxPlayers,
+            });
+
+            await safeAnswerCallbackQuery(ctx, "Type the minimum players...");
+          }
+        ),
+        { action: "advanced_min_players", errorAck: "❌ Error requesting minimum players" }
+      )
+    );
+
+    deps.bot.callbackQuery(
+      /^back_to_confirm_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/,
+      deps.wrapCallbackHandler(
+        deps.withCreatorContext(
+          {
+            name: "back_to_confirm",
+            resolveCreatorId: (ctx) => ctx.match?.[4],
+            failureText: "🚫 Only the game creator can modify this game setup!",
+          },
+          async (ctx, { session, tokenContext, updateSession, creatorId }) => {
+            const gameType = ctx.match![1] as "coinflip" | "giveaway";
+            const amount = ctx.match![2] as string;
+            const players = Number.parseInt(ctx.match![3] as string, 10);
+
+            const advanced = resolveAdvancedOptions(
+              gameType,
+              players,
+              session,
+              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers()
+            );
+
+            await presentConfirmMenu({
+              ctx,
+              gameType,
+              amount,
+              players,
+              tokenTicker: tokenContext.tokenTicker,
+              tokenDecimals: tokenContext.tokenDecimals,
+              creatorId,
+              advanced,
+              logLabel: "advanced_back_to_confirm",
+            });
+
+            updateSession({
+              waitingFor: "setup",
+              gameType,
+              userBalance: session?.userBalance ?? 0,
+              messageId: ctx.callbackQuery?.message?.message_id ?? session?.messageId,
+              chatId: ctx.chat?.id ?? session?.chatId ?? 0,
+              amount,
+              players,
+              timeoutSeconds: advanced.timeoutSeconds,
+              minPlayers: advanced.minPlayers,
+              isPrivate: advanced.isPrivate,
+            });
+
+            await safeAnswerCallbackQuery(ctx);
+          }
+        ),
+        { action: "back_to_confirm", errorAck: "❌ Error returning" }
+      )
+    );
+
+    deps.bot.callbackQuery(
+      /^confirm_game_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)(?:_(\d+)_(\d+)_(public|private))?_(\d+)$/,
       deps.withCreatorContext(
         {
           name: "confirm_game",
-          resolveCreatorId: (ctx) => ctx.match?.[4],
+          resolveCreatorId: (ctx) => ctx.match?.[7],
           failureText: "❌ Only the game creator can confirm this setup!",
         },
         async (ctx, { tokenContext, clearSession, creatorId }) => {
@@ -931,6 +1591,19 @@ export const createGameCallbacksModule = (
             const gameType = ctx.match![1] as "coinflip" | "giveaway";
             const amount = Number.parseFloat(ctx.match![2]!);
             const players = Number.parseInt(ctx.match![3]!, 10);
+            const timeoutSeconds = clampTimeoutSeconds(
+              Number.parseInt(ctx.match![4] ?? "", 10)
+            );
+            const minPlayersSelected = clampMinPlayers(
+              gameType,
+              ctx.match?.[5] ? Number.parseInt(ctx.match[5]!, 10) : undefined,
+              players,
+              deps.getOracleMaxPlayers()
+            );
+            const visibility =
+              (ctx.match?.[6] as "public" | "private" | undefined) ??
+              "private";
+            const isPrivate = visibility !== "public";
 
             if (Number.isNaN(amount) || Number.isNaN(players)) {
               await safeAnswerCallbackQuery(ctx, "Invalid game configuration");
@@ -1011,9 +1684,10 @@ export const createGameCallbacksModule = (
                 gameType,
                 gameData,
                 maxPlayers,
-                gameType === "coinflip" ? 2 : 1,
-                GAME_TIMEOUT,
+                minPlayersSelected,
+                timeoutSeconds,
                 callerTelegramId,
+                { isPrivate },
                 ctx.chat?.id,
                 ctx.callbackQuery?.message?.date != null
                   ? ctx.callbackQuery.message.date * 1_000
@@ -1562,5 +2236,6 @@ export const createGameCallbacksModule = (
     __test_handleGameSetupTextInput: handleGameSetupTextInput,
     __test_handleJoinGame: handleJoinGame,
     __test_shouldSkipGenericGameCallback: shouldSkipGenericGameCallback,
+    __test_buildAdvancedMinPlayersPrompt: buildAdvancedMinPlayersPrompt,
   };
 };
