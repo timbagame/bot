@@ -210,7 +210,7 @@ export function formatUsdValue(
 ): string {
   const {
     approximate = false,
-    minimumFractionDigits = 2,
+    minimumFractionDigits = 0,
     maximumFractionDigits = 2,
     fallback,
   } = options;
