@@ -174,7 +174,7 @@ const unwrapWsolBalance = async (
 
   const { signature, remainingLamports } = await wallet.unwrapSolWithKeypair({
     owner,
-    payer,
+    payer: payer as any,
     amountLamports: Number(wsolBalanceLamports),
   });
 
@@ -500,7 +500,7 @@ export const sweepFees = async (
         wallet,
         connection,
         adminBundle.root.publicKey,
-        adminBundle.root,
+        adminBundle.root as any,
         priceResolver,
         balanceFetcher
       );

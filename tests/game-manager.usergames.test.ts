@@ -46,9 +46,9 @@ describe("GameManager.getUserGames categorization and sections", () => {
     const out = await gm.getUserGames(ctx, BigInt(12345));
 
     expect(out.activeGames.length).toBe(1);
-    expect(out.activeGames[0].gameAddress).toBe(activeGameAddress);
-    expect(out.activeGames[0].gameType).toBe("coinflip");
-    expect(out.activeGames[0].messageText).toBe("Active Game Info");
+    expect(out.activeGames[0]!.gameAddress).toBe(activeGameAddress);
+    expect(out.activeGames[0]!.gameType).toBe("coinflip");
+    expect(out.activeGames[0]!.messageText).toBe("Active Game Info");
     expect(out.recentGames).toContain("Won Games");
     expect(out.recentGames).toContain("Lost Games");
     expect(out.recentGames).toContain("Created Games");

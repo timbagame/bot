@@ -93,9 +93,9 @@ async function main() {
 
   await unwrapWsolBalance(
     wallet,
-    connection,
+    connection as any,
     admin.publicKey,
-    admin,
+    admin as any,
     resolveTokenPriceUSD
   );
 }

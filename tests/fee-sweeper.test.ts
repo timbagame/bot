@@ -97,7 +97,7 @@ describe("WSOL unwrap helper", () => {
       buildWallet((lamports) => unwrapCalls.push(lamports)) as any,
       {} as any,
       owner.publicKey,
-      payer,
+      payer as any,
       priceResolver as any,
       balanceFetcher
     );
@@ -113,7 +113,7 @@ describe("WSOL unwrap helper", () => {
       buildWallet((lamports) => unwrapCalls.push(lamports)) as any,
       {} as any,
       owner.publicKey,
-      payer,
+      payer as any,
       priceResolver as any,
       balanceFetcher
     );
@@ -129,7 +129,7 @@ describe("WSOL unwrap helper", () => {
       buildWallet((lamports) => unwrapCalls.push(lamports)) as any,
       {} as any,
       owner.publicKey,
-      payer,
+      payer as any,
       priceResolver as any,
       balanceFetcher
     );
@@ -145,7 +145,7 @@ describe("WSOL unwrap helper", () => {
       buildWallet((lamports) => unwrapCalls.push(lamports)) as any,
       {} as any,
       owner.publicKey,
-      payer,
+      payer as any,
       priceResolver as any,
       balanceFetcher
     );

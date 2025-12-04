@@ -18,7 +18,13 @@ describe("GameManager processActiveGames/processRecentGames", () => {
       { game_address: "invalid" },
       { game_address: new PublicKey("BPFLoader1111111111111111111111111111111111").toBase58() },
     ]);
-    expect(out).toEqual(["OK"]);
+    expect(out).toEqual([
+      {
+        gameAddress: new PublicKey("BPFLoader1111111111111111111111111111111111").toBase58(),
+        gameType: "unknown",
+        messageText: "OK",
+      },
+    ]);
   });
 
   test("processRecentGames filters out entries on formatter error", async () => {
@@ -42,4 +48,3 @@ describe("GameManager processActiveGames/processRecentGames", () => {
     expect(out[0]?.gameInfo).toBe("Good");
   });
 });
-
