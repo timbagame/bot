@@ -233,7 +233,7 @@ describe("game setup typed input handling", () => {
 
   test("ignores timeout text replies now that timeout adjustments are button-driven", async () => {
     const session = {
-      waitingFor: "timeout_input",
+      waitingFor: "setup",
       gameType: "coinflip",
       players: 2,
       messageId: 38_500,
@@ -264,7 +264,7 @@ describe("game setup typed input handling", () => {
     expect(ctx.__calls.filter(isReplyCall)).toHaveLength(0);
 
     const restored = getGameSetupSession(`${CHAT_ID}_${session.messageId}`) as any;
-    expect(restored.waitingFor).toBe("timeout_input");
+    expect(restored.waitingFor).toBe("setup");
   });
 
   test("rejects minimum players above the selected player count", async () => {
@@ -309,7 +309,7 @@ describe("game setup typed input handling", () => {
 
   test("timeout replies do not override existing advanced selections", async () => {
     const session = {
-      waitingFor: "timeout_input",
+      waitingFor: "setup",
       gameType: "giveaway",
       players: 5,
       messageId: 55_500,
@@ -334,7 +334,7 @@ describe("game setup typed input handling", () => {
     await __test_handleGameSetupTextInput(ctx as any, async () => {});
 
     const updated = getGameSetupSession(`${CHAT_ID}_${session.messageId}`) as any;
-    expect(updated.waitingFor).toBe("timeout_input");
+    expect(updated.waitingFor).toBe("setup");
     expect(updated.isPrivate).toBe(false);
     expect(updated.minPlayers).toBe(3);
     expect(updated.timeoutSeconds).toBe(900);
