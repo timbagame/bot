@@ -24,7 +24,6 @@ import {
   createPlayerSelectionKeyboard,
   getFeeWarningMessage,
   getSuggestedStakeAmounts,
-  withCreatorSuffix,
 } from "../utils/keyboards";
 import { respondWithMenu } from "../utils/menu-response";
 import {
