@@ -1,6 +1,7 @@
 import "./utils/logging";
 import { Bot, Context, InlineKeyboard } from "grammy";
-import type { InlineKeyboardButton, NextFunction } from "grammy";
+import type { NextFunction } from "grammy";
+import type { InlineKeyboardButton } from "grammy/types";
 import { run, sequentialize } from "@grammyjs/runner";
 import { WalletManager } from "./utils/wallet";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
@@ -3534,7 +3535,20 @@ bot.command("active", async (ctx: Context) => {
         keyboard: cloneInlineKeyboard(game.keyboard ?? []),
       }));
 
+      if (normalizedGames.length === 0) {
+        await ctx.reply("No active games in this chat.", {
+          reply_to_message_id: ctx.message?.message_id,
+        });
+        return;
+      }
+
       const firstGame = normalizedGames[0];
+      if (!firstGame) {
+        await ctx.reply("No active games in this chat.", {
+          reply_to_message_id: ctx.message?.message_id,
+        });
+        return;
+      }
       const inlineKeyboard = buildActiveNavigationKeyboard(
         firstGame.keyboard,
         sessionId,
@@ -3669,6 +3683,10 @@ bot.callbackQuery(/^active_nav:/, async (ctx: Context) => {
     saveActiveGamesSession(updatedSession);
 
     const selectedGame = session.games[nextIndex];
+    if (!selectedGame) {
+      await safeAnswerCallbackQuery(ctx, "❌ Could not load game");
+      return;
+    }
     const replyMarkup = buildActiveNavigationKeyboard(
       selectedGame.keyboard ?? [],
       sessionId,
