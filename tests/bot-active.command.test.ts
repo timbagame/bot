@@ -1,0 +1,170 @@
+import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "bun:test";
+import type { InlineKeyboardButton } from "grammy/types";
+
+const originalNodeEnv = process.env.NODE_ENV;
+const originalToken = process.env.TELEGRAM_TOKEN;
+const originalMnemonic = process.env.MNEMONIC;
+const originalSolanaNetwork = process.env.SOLANA_NETWORK;
+
+if (originalNodeEnv === undefined) {
+  process.env.NODE_ENV = "test";
+}
+if (originalToken === undefined) {
+  process.env.TELEGRAM_TOKEN = "test-token";
+}
+if (originalMnemonic === undefined) {
+  process.env.MNEMONIC =
+    "test test test test test test test test test test test junk";
+}
+if (originalSolanaNetwork === undefined) {
+  process.env.SOLANA_NETWORK = "http://localhost:8899";
+}
+
+describe("/active command in group chats", () => {
+  let botModule: typeof import("../src/bot");
+  let originalGameManager: any;
+
+  beforeAll(async () => {
+    botModule = await import("../src/bot");
+    originalGameManager = botModule.gameManager;
+  });
+
+  afterEach(() => {
+    botModule.__test_setGameManager(originalGameManager as any);
+  });
+
+  afterAll(() => {
+    botModule.__test_setGameManager(originalGameManager as any);
+
+    if (originalNodeEnv === undefined) {
+      Reflect.deleteProperty(process.env, "NODE_ENV");
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+
+    if (originalToken === undefined) {
+      Reflect.deleteProperty(process.env, "TELEGRAM_TOKEN");
+    } else {
+      process.env.TELEGRAM_TOKEN = originalToken;
+    }
+
+    if (originalMnemonic === undefined) {
+      Reflect.deleteProperty(process.env, "MNEMONIC");
+    } else {
+      process.env.MNEMONIC = originalMnemonic;
+    }
+
+    if (originalSolanaNetwork === undefined) {
+      Reflect.deleteProperty(process.env, "SOLANA_NETWORK");
+    } else {
+      process.env.SOLANA_NETWORK = originalSolanaNetwork;
+    }
+  });
+
+  test("renders condensed active game rows while keeping action buttons", async () => {
+    const firstKeyboard: InlineKeyboardButton[][] = [
+      [{ text: "🎮 Join #1", callback_data: "join_first" }],
+      [{ text: "🔄 Refresh", callback_data: "refresh_first" }],
+    ];
+    const secondKeyboard: InlineKeyboardButton[][] = [
+      [{ text: "🎮 Join #2", callback_data: "join_second" }],
+      [{ text: "🔄 Refresh", callback_data: "refresh_second" }],
+    ];
+
+    const mockGames = [
+      {
+        messageText: "<b>First Game</b>\nDetails",
+        keyboard: firstKeyboard,
+        gameAddress: "addr1",
+      },
+      {
+        messageText: "<i>Second Game</i>\nMore",
+        keyboard: secondKeyboard,
+        gameAddress: "addr2",
+      },
+    ];
+
+    const stubGameManager = {
+      getChatActiveGames: vi.fn(async () => mockGames),
+    } as any;
+
+    botModule.__test_setGameManager(stubGameManager);
+
+    const reply = vi.fn(async (text: string, options: any) => ({ text, ...options }));
+
+    await botModule.__test_handleActiveCommand({
+      chat: { id: -100, type: "supergroup" },
+      from: { id: 1234, is_bot: false, first_name: "Tester" },
+      message: {
+        message_id: 10,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: -100, type: "supergroup" },
+        text: "/active",
+      },
+      reply,
+    } as any);
+
+    expect(stubGameManager.getChatActiveGames).toHaveBeenCalledTimes(1);
+    expect(reply).toHaveBeenCalledTimes(1);
+
+    const [text, options] = reply.mock.calls[0]!;
+    expect(text).toContain("Active games (2)");
+    expect(text).toContain("#1 First Game");
+    expect(text).toContain("#2 Second Game");
+
+    const inlineKeyboard = options?.reply_markup?.inline_keyboard as
+      | InlineKeyboardButton[][]
+      | undefined;
+    expect(inlineKeyboard).toBeDefined();
+    expect(inlineKeyboard?.length).toBeGreaterThanOrEqual(6);
+
+    const headerCallback =
+      botModule.__test_ACTIVE_LIST_HEADER_CALLBACK_DATA;
+    expect(inlineKeyboard?.[0]?.[0]).toMatchObject({
+      text: "#1 First Game",
+      callback_data: headerCallback,
+    });
+    expect(inlineKeyboard?.[3]?.[0]).toMatchObject({
+      text: "#2 Second Game",
+      callback_data: headerCallback,
+    });
+
+    expect(inlineKeyboard?.[1]?.[0]).toMatchObject({
+      text: "🎮 Join #1",
+      callback_data: "join_first",
+    });
+    expect(inlineKeyboard?.[2]?.[0]).toMatchObject({
+      text: "🔄 Refresh",
+      callback_data: "refresh_first",
+    });
+    expect(inlineKeyboard?.[4]?.[0]).toMatchObject({
+      text: "🎮 Join #2",
+      callback_data: "join_second",
+    });
+    expect(inlineKeyboard?.[5]?.[0]).toMatchObject({
+      text: "🔄 Refresh",
+      callback_data: "refresh_second",
+    });
+
+    expect(inlineKeyboard?.[1]?.[0]).not.toBe(firstKeyboard[0]?.[0]);
+    expect(inlineKeyboard?.[4]?.[0]).not.toBe(secondKeyboard[0]?.[0]);
+  });
+});
+
+describe("active game keyboard helpers", () => {
+  let helpers: typeof import("../src/bot");
+
+  beforeAll(async () => {
+    helpers = await import("../src/bot");
+  });
+
+  test("extractCondensedGameLabel strips markup and truncates long names", () => {
+    const longName = `<b>${"A".repeat(80)}</b>`;
+    const label = helpers.__test_extractCondensedGameLabel(longName, 2);
+
+    expect(label.startsWith("#3 ")).toBe(true);
+    expect(label).not.toContain("<b>");
+    expect(label.endsWith("…")).toBe(true);
+    expect(label.length).toBeLessThanOrEqual(60);
+  });
+});

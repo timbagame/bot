@@ -1320,6 +1320,11 @@ const buildActiveGamesKeyboard = (
   return inlineKeyboard;
 };
 
+export const __test_extractCondensedGameLabel = extractCondensedGameLabel;
+export const __test_buildActiveGamesKeyboard = buildActiveGamesKeyboard;
+export const __test_ACTIVE_LIST_HEADER_CALLBACK_DATA =
+  ACTIVE_LIST_HEADER_CALLBACK_DATA;
+
 // These will be initialized in setupAnchor
 export let gameManager: GameManager;
 export let program: anchor.Program<Timba>;
@@ -3458,7 +3463,7 @@ bot.command("help", async (ctx: Context) => {
   });
 });
  
-bot.command("active", async (ctx: Context) => {
+const handleActiveCommand = async (ctx: Context) => {
   const telegramId = await getRequiredTelegramIdForContext(
     ctx,
     "active command"
@@ -3528,7 +3533,9 @@ bot.command("active", async (ctx: Context) => {
   } catch (error) {
     await handleCommandError(ctx, error, "active");
   }
-});
+};
+
+bot.command("active", handleActiveCommand);
 
 bot.command("games", async (ctx: Context) => {
   const telegramId = await getRequiredTelegramIdForContext(
@@ -3551,6 +3558,8 @@ bot.command("games", async (ctx: Context) => {
     await handleCommandError(ctx, error, "games");
   }
 });
+
+export const __test_handleActiveCommand = handleActiveCommand;
 
 bot.callbackQuery(ACTIVE_LIST_HEADER_CALLBACK_DATA, async (ctx: Context) => {
   try {
