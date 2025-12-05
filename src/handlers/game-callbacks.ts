@@ -1994,16 +1994,14 @@ export const createGameCallbacksModule = (
                 warningMessage += `• ${amountDisplay} ${tokenContext.tokenTicker}`;
                 if (usdTarget !== undefined) {
                   const usdFormatted = formatUsdValue(usdTarget, {
-                    minimumFractionDigits: 1,
-                    maximumFractionDigits: 1,
-                    fallback: "0.0",
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 2,
                   });
                   warningMessage += ` ($${usdFormatted})`;
                 } else if (tokenPriceUSD) {
                   const usdFormatted = formatUsdValue(amount * tokenPriceUSD, {
-                    minimumFractionDigits: 1,
-                    maximumFractionDigits: 1,
-                    fallback: "0.0",
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 2,
                   });
                   warningMessage += ` ($${usdFormatted})`;
                 }
