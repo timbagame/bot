@@ -884,14 +884,14 @@ type TradeQuoteErrorParams = {
   retryCallback: string;
 };
 
-const renderTradeQuoteError = ({
+const renderTradeQuoteError = async ({
   error,
   retryCallback,
 }: TradeQuoteErrorParams) => {
   const keyboard = new InlineKeyboard()
     .text("← Try Again", retryCallback)
     .row();
-  const userFriendly = formatUserFriendlyError(error, wallet);
+  const userFriendly = await formatUserFriendlyError(error, wallet);
   return {
     text: `❌ <b>Quote Error</b>\n\n${userFriendly}`,
     keyboard,
@@ -3786,7 +3786,7 @@ const handleSolWsolSwap = async (
         });
       },
       onError: async (error) => {
-        const userFriendlyError = resolvedDeps.formatUserFriendlyError(
+        const userFriendlyError = await resolvedDeps.formatUserFriendlyError(
           error,
           resolvedDeps.wallet
         );
@@ -3843,7 +3843,7 @@ const handleSolWsolSwap = async (
       });
     },
     onError: async (error) => {
-      const userFriendlyError = resolvedDeps.formatUserFriendlyError(
+      const userFriendlyError = await resolvedDeps.formatUserFriendlyError(
         error,
         resolvedDeps.wallet
       );
@@ -3988,7 +3988,10 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
       });
     } catch (swapError) {
       console.error("Swap transaction failed:", swapError);
-      const userFriendlyError = formatUserFriendlyError(swapError, wallet);
+      const userFriendlyError = await formatUserFriendlyError(
+        swapError,
+        wallet
+      );
       await respondWithMenu(ctx, {
         text: `❌ <b>Swap Failed</b>\n\n${escapeHtml(userFriendlyError)}`,
         parseMode: "HTML",
@@ -4803,7 +4806,7 @@ const showSwapQuoteAndConfirmation = async (
           cancelCallback,
         }),
       onError: async (error) => {
-        const { text, keyboard } = renderTradeQuoteError({
+        const { text, keyboard } = await renderTradeQuoteError({
           error,
           retryCallback: cancelCallback,
         });
@@ -4813,7 +4816,7 @@ const showSwapQuoteAndConfirmation = async (
     });
   } catch (error) {
     console.error("Error getting swap quote:", error);
-    const { text, keyboard } = renderTradeQuoteError({
+    const { text, keyboard } = await renderTradeQuoteError({
       error,
       retryCallback: cancelCallback,
     });

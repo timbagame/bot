@@ -2,6 +2,7 @@
  * Error formatting utilities for user-friendly error messages
  */
 
+import type { Connection } from "@solana/web3.js";
 import type { WalletManager } from "../wallet";
 import {
   LAMPORTS_PER_SOL,
@@ -234,10 +235,11 @@ const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: E
   },
 ];
 
-export const parseTransactionError = (
+export const parseTransactionError = async (
   error: unknown,
-  walletManager?: WalletManager
-): string => {
+  walletManager?: WalletManager,
+  connection?: Connection
+): Promise<string> => {
   const errorMessage = error instanceof Error ? error.message : String(error);
   const lowerMessage = errorMessage.toLowerCase();
 
@@ -253,7 +255,11 @@ export const parseTransactionError = (
 
   // Check for specific lamports info (insufficient funds with details)
   const lamportsInfo =
-    extractLamportsInfo(errorMessage) || extractLamportsInfoFromError(error);
+    extractLamportsInfo(errorMessage) ||
+    (await extractLamportsInfoFromError(
+      error,
+      connection ?? walletManager?.getConnection?.()
+    ));
   if (lamportsInfo) {
     return formatInsufficientFundsError(
       lamportsInfo.current,
@@ -304,11 +310,16 @@ export const parseTransactionError = (
   );
 };
 
-export const formatUserFriendlyError = (
+export const formatUserFriendlyError = async (
   error: unknown,
-  walletManager?: WalletManager
-): string => {
-  return parseTransactionError(error, walletManager);
+  walletManager?: WalletManager,
+  connection?: Connection
+): Promise<string> => {
+  return parseTransactionError(
+    error,
+    walletManager,
+    connection ?? walletManager?.getConnection?.()
+  );
 };
 
 export interface TruncateOptions {
