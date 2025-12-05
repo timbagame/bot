@@ -109,8 +109,8 @@ describe("/active command in group chats", () => {
 
     const [text, options] = reply.mock.calls[0]!;
     expect(text).toContain("Active games (2)");
-    expect(text).toContain("#1 First Game");
-    expect(text).toContain("#2 Second Game");
+    expect(text).not.toContain("#1 First Game");
+    expect(text).not.toContain("#2 Second Game");
 
     const inlineKeyboard = options?.reply_markup?.inline_keyboard as
       | InlineKeyboardButton[][]

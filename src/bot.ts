@@ -3504,15 +3504,7 @@ const handleActiveCommand = async (ctx: Context) => {
       }
 
       const inlineKeyboard = buildActiveGamesKeyboard(normalizedGames);
-      const summaryLines = normalizedGames.map((game, index) =>
-        escapeHtml(extractCondensedGameLabel(game.messageText, index))
-      );
-      const summaryText = [
-        `<b>Active games (${normalizedGames.length})</b>`,
-        summaryLines.join("\n"),
-      ]
-        .filter(Boolean)
-        .join("\n\n");
+      const summaryText = `<b>Active games (${normalizedGames.length})</b>`;
 
       await ctx.reply(summaryText, {
         parse_mode: "HTML",
