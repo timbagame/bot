@@ -116,7 +116,7 @@ describe("/active command in group chats", () => {
       | InlineKeyboardButton[][]
       | undefined;
     expect(inlineKeyboard).toBeDefined();
-    expect(inlineKeyboard?.length).toBeGreaterThanOrEqual(6);
+    expect(inlineKeyboard?.length).toBe(4);
 
     const headerCallback =
       botModule.__test_ACTIVE_LIST_HEADER_CALLBACK_DATA;
@@ -124,7 +124,7 @@ describe("/active command in group chats", () => {
       text: "#1 First Game",
       callback_data: headerCallback,
     });
-    expect(inlineKeyboard?.[3]?.[0]).toMatchObject({
+    expect(inlineKeyboard?.[2]?.[0]).toMatchObject({
       text: "#2 Second Game",
       callback_data: headerCallback,
     });
@@ -133,21 +133,25 @@ describe("/active command in group chats", () => {
       text: "🎮 Join #1",
       callback_data: "join_first",
     });
-    expect(inlineKeyboard?.[2]?.[0]).toMatchObject({
-      text: "🔄 Refresh",
-      callback_data: "refresh_first",
-    });
-    expect(inlineKeyboard?.[4]?.[0]).toMatchObject({
+    expect(inlineKeyboard?.[3]?.[0]).toMatchObject({
       text: "🎮 Join #2",
       callback_data: "join_second",
     });
-    expect(inlineKeyboard?.[5]?.[0]).toMatchObject({
+    expect(inlineKeyboard?.[2]).not.toMatchObject({
       text: "🔄 Refresh",
-      callback_data: "refresh_second",
     });
 
+    const hasRefreshButton = inlineKeyboard
+      ?.flat()
+      ?.some(
+        (button) =>
+          "callback_data" in button &&
+          button.callback_data?.toString().startsWith("refresh_")
+      );
+    expect(hasRefreshButton).toBe(false);
+
     expect(inlineKeyboard?.[1]?.[0]).not.toBe(firstKeyboard[0]?.[0]);
-    expect(inlineKeyboard?.[4]?.[0]).not.toBe(secondKeyboard[0]?.[0]);
+    expect(inlineKeyboard?.[3]?.[0]).not.toBe(secondKeyboard[0]?.[0]);
   });
 });
 

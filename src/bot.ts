@@ -1283,6 +1283,23 @@ const cloneInlineKeyboard = (
   keyboard: InlineKeyboardButton[][]
 ): InlineKeyboardButton[][] => keyboard.map((row) => cloneInlineKeyboardRow(row));
 
+const filterActiveGameKeyboardRows = (
+  keyboard: InlineKeyboardButton[][]
+): InlineKeyboardButton[][] =>
+  keyboard
+    .map((row) =>
+      row.filter(
+        (button) =>
+          !(
+            "callback_data" in button &&
+            (button as InlineKeyboardButton & { callback_data: string }).callback_data?.startsWith(
+              "refresh_"
+            )
+          )
+      )
+    )
+    .filter((row) => row.length > 0);
+
 const extractCondensedGameLabel = (
   messageText: string,
   index: number
@@ -1312,7 +1329,7 @@ const buildActiveGamesKeyboard = (
       },
     ]);
 
-    (game.keyboard ?? []).forEach((row) => {
+    filterActiveGameKeyboardRows(game.keyboard ?? []).forEach((row) => {
       inlineKeyboard.push(cloneInlineKeyboardRow(row));
     });
   });
