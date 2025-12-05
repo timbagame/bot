@@ -429,7 +429,16 @@ describe("GameManager confirm/reload helpers", () => {
     } as any;
 
     const { gm } = setupGameManager({ wallet, program, gameDb });
-    (gm as any).buildJoinAccounts = async () => ({});
+    let capturedOracleOperator: PublicKey | undefined;
+    (gm as any).buildJoinAccounts = async (
+      _gamePda: PublicKey,
+      _gameAccount: any,
+      _player: PublicKey,
+      oracleOperator?: PublicKey,
+    ) => {
+      capturedOracleOperator = oracleOperator;
+      return { accounts: {}, setupInstructions: [] };
+    };
     (gm as any).verifyParticipantJoin = async () => true;
 
     let confirmCalls = 0;
@@ -459,6 +468,7 @@ describe("GameManager confirm/reload helpers", () => {
     expect(sendCalls).toBe(2);
     expect(fetchCalls).toBeGreaterThanOrEqual(2);
     expect(participantSaves.length).toBeGreaterThanOrEqual(2);
+    expect(capturedOracleOperator?.toBase58()).toBe(player.publicKey.toBase58());
   });
 
   test("confirmTransactionWithRecovery rethrows non-timeout errors", async () => {

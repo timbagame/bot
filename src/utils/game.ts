@@ -3449,6 +3449,10 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
               await this.buildJoinAccounts(
                 gamePda,
                 gameAccount,
+                playerKp.publicKey,
+                // Provide a signer for the optional oracleOperator slot to avoid
+                // Anchor inserting the default pubkey as a required (unsigned) signer
+                // which triggers signature verification failures on public joins.
                 playerKp.publicKey
               );
             setupInstructions = setupIxs;
@@ -3982,6 +3986,9 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
               await this.buildJoinAccounts(
                 gamePda,
                 gameAccount,
+                playerKp.publicKey,
+                // Explicitly fill the optional oracleOperator signer slot with the player
+                // so Anchor doesn't require a signature from the default (all-zeros) key.
                 playerKp.publicKey
               );
             setupInstructions = setupIxs;
