@@ -359,7 +359,7 @@ export const createPlayerSelectionKeyboard = (
 
     for (const count of row) {
       keyboard.text(
-        `👥 ${count} Players`,
+        `👥 ${count}`,
         withCreatorSuffix(`players_${gameType}_${amount}_${count}`, creatorId)
       );
     }
