@@ -21,6 +21,8 @@ describe("GameManager.generateGameKeyboard", () => {
     const callbacks = fl.map((b) => b.callback_data);
     expect(callbacks.some((s) => String(s).startsWith("join_"))).toBe(true);
     expect(callbacks.some((s) => String(s).startsWith("refresh_"))).toBe(true);
+
+    const joinButton = fl.find((b) => String(b.callback_data).startsWith("join_"));
+    expect(joinButton?.text).toBe("🎮 Join");
   });
 });
-

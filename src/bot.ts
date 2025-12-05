@@ -1,6 +1,7 @@
 import "./utils/logging";
 import { Bot, Context, InlineKeyboard } from "grammy";
 import type { NextFunction } from "grammy";
+import type { InlineKeyboardButton } from "grammy/types";
 import { run, sequentialize } from "@grammyjs/runner";
 import { WalletManager } from "./utils/wallet";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
@@ -1264,6 +1265,157 @@ const isGroupChat = (ctx: Context): boolean => {
  * Track chats that have had their first interaction
  */
 const initiatedChats = new Set<number>();
+
+type ActiveGameListing = {
+  messageText: string;
+  keyboard: InlineKeyboardButton[][];
+  gameAddress: string;
+  currentTickets?: number;
+  maxTickets?: number;
+  minTickets?: number;
+};
+
+const ACTIVE_LIST_HEADER_CALLBACK_DATA = "active_list:noop";
+const ACTIVE_GAME_LABEL_MAX_LENGTH = 60;
+
+const cloneInlineKeyboardRow = (
+  row: InlineKeyboardButton[]
+): InlineKeyboardButton[] => row.map((button) => ({ ...button }));
+
+const cloneInlineKeyboard = (
+  keyboard: InlineKeyboardButton[][]
+): InlineKeyboardButton[][] => keyboard.map((row) => cloneInlineKeyboardRow(row));
+
+const filterActiveGameKeyboardRows = (
+  keyboard: InlineKeyboardButton[][]
+): InlineKeyboardButton[][] =>
+  keyboard
+    .map((row) =>
+      row.filter(
+        (button) =>
+          !(
+            "callback_data" in button &&
+            (button as InlineKeyboardButton & { callback_data: string }).callback_data?.startsWith(
+              "refresh_"
+            )
+          )
+      )
+    )
+    .filter((row) => row.length > 0);
+
+const parseActiveGameHeader = (
+  messageText: string
+): {
+  gameType: string;
+  ticker: string | null;
+  amountPart: string | null;
+} => {
+  const firstLine = messageText
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  const sanitized = firstLine?.replace(/<[^>]*>/g, "").trim() ?? "";
+  const [left, right] = sanitized.split("•").map((part) => part.trim());
+  const gameType = left || "Game";
+  const amountPart = right || null;
+
+  let ticker: string | null = null;
+  if (right) {
+    const withoutUsd = right.replace(/\([^)]*\)\s*$/, "").trim();
+    const tokens = withoutUsd.split(/\s+/).filter(Boolean);
+    ticker = (tokens.length > 0 ? tokens[tokens.length - 1] : null) ?? null;
+  }
+
+  return { gameType, ticker, amountPart };
+};
+
+const extractCondensedGameLabel = (
+  messageText: string,
+  currentTickets?: number,
+  maxTickets?: number
+): string => {
+  const { gameType, ticker } = parseActiveGameHeader(messageText);
+  const hasMax = Number.isFinite(maxTickets) && (maxTickets as number) > 0;
+  const counts = ` (${Math.max(0, Math.trunc(currentTickets ?? 0))}/${
+    hasMax ? Math.trunc(maxTickets as number) : "∞"
+  })`;
+  const baseLabel = `${gameType}${counts}${ticker ? ` • ${ticker}` : ""}`;
+  if (baseLabel.length <= ACTIVE_GAME_LABEL_MAX_LENGTH) {
+    return baseLabel;
+  }
+  return `${baseLabel.slice(0, ACTIVE_GAME_LABEL_MAX_LENGTH - 1)}…`;
+};
+
+const escapeRegex = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const formatActiveJoinLabel = (
+  amountPart?: string | null,
+  ticker?: string | null
+): string => {
+  let cleanedAmount = amountPart ?? null;
+  if (cleanedAmount && ticker) {
+    cleanedAmount = cleanedAmount.replace(
+      new RegExp(`\\s*${escapeRegex(ticker)}(?![\\w])`),
+      ""
+    );
+    cleanedAmount = cleanedAmount.replace(/\s{2,}/g, " ").trim();
+  }
+  const amountSegment = cleanedAmount ? ` • ${cleanedAmount}` : "";
+  return `🎮 Join${amountSegment}`;
+};
+
+const rewriteJoinButtons = (
+  row: InlineKeyboardButton[],
+  game: ActiveGameListing
+): InlineKeyboardButton[] =>
+  row.map((button) => {
+    if (
+      "callback_data" in button &&
+      (button as InlineKeyboardButton & { callback_data: string }).callback_data?.startsWith(
+        "join_"
+      )
+    ) {
+      return {
+        ...button,
+        text: formatActiveJoinLabel(
+          parseActiveGameHeader(game.messageText).amountPart,
+          parseActiveGameHeader(game.messageText).ticker
+        ),
+      };
+    }
+    return { ...button };
+  });
+
+const buildActiveGamesKeyboard = (
+  games: ActiveGameListing[]
+): InlineKeyboardButton[][] => {
+  const inlineKeyboard: InlineKeyboardButton[][] = [];
+
+  games.forEach((game) => {
+    inlineKeyboard.push([
+      {
+        text: extractCondensedGameLabel(
+          game.messageText,
+          game.currentTickets,
+          game.maxTickets
+        ),
+        callback_data: ACTIVE_LIST_HEADER_CALLBACK_DATA,
+      },
+    ]);
+
+    filterActiveGameKeyboardRows(game.keyboard ?? []).forEach((row) => {
+      inlineKeyboard.push(rewriteJoinButtons(cloneInlineKeyboardRow(row), game));
+    });
+  });
+
+  return inlineKeyboard;
+};
+
+export const __test_extractCondensedGameLabel = extractCondensedGameLabel;
+export const __test_buildActiveGamesKeyboard = buildActiveGamesKeyboard;
+export const __test_ACTIVE_LIST_HEADER_CALLBACK_DATA =
+  ACTIVE_LIST_HEADER_CALLBACK_DATA;
 
 // These will be initialized in setupAnchor
 export let gameManager: GameManager;
@@ -3402,8 +3554,8 @@ bot.command("help", async (ctx: Context) => {
     reply_to_message_id: ctx.message?.message_id,
   });
 });
-
-bot.command("active", async (ctx: Context) => {
+ 
+const handleActiveCommand = async (ctx: Context) => {
   const telegramId = await getRequiredTelegramIdForContext(
     ctx,
     "active command"
@@ -3431,13 +3583,26 @@ bot.command("active", async (ctx: Context) => {
         return;
       }
 
-      for (const game of chatActiveGames) {
-        await ctx.reply(game.messageText, {
-          parse_mode: "HTML",
-          reply_markup: { inline_keyboard: game.keyboard },
+      const normalizedGames: ActiveGameListing[] = chatActiveGames.map((game) => ({
+        ...game,
+        keyboard: cloneInlineKeyboard(game.keyboard ?? []),
+      }));
+
+      if (normalizedGames.length === 0) {
+        await ctx.reply("No active games in this chat.", {
           reply_to_message_id: ctx.message?.message_id,
         });
+        return;
       }
+
+      const inlineKeyboard = buildActiveGamesKeyboard(normalizedGames);
+      const summaryText = `<b>Active games (${normalizedGames.length})</b>`;
+
+      await ctx.reply(summaryText, {
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: inlineKeyboard },
+        reply_to_message_id: ctx.message?.message_id,
+      });
       return;
     }
 
@@ -3452,7 +3617,9 @@ bot.command("active", async (ctx: Context) => {
   } catch (error) {
     await handleCommandError(ctx, error, "active");
   }
-});
+};
+
+bot.command("active", handleActiveCommand);
 
 bot.command("games", async (ctx: Context) => {
   const telegramId = await getRequiredTelegramIdForContext(
@@ -3473,6 +3640,19 @@ bot.command("games", async (ctx: Context) => {
     });
   } catch (error) {
     await handleCommandError(ctx, error, "games");
+  }
+});
+
+export const __test_handleActiveCommand = handleActiveCommand;
+
+bot.callbackQuery(ACTIVE_LIST_HEADER_CALLBACK_DATA, async (ctx: Context) => {
+  try {
+    await safeAnswerCallbackQuery(
+      ctx,
+      "Select a join button below to enter a game."
+    );
+  } catch (error) {
+    await handleCallbackErrorSafe(ctx, error, "active games header");
   }
 });
 

@@ -2238,7 +2238,10 @@ export class GameManager {
     return `\n\nWinner: ${safeWinner}${linkLine}`;
   }
 
-  private generateGameKeyboard(status: string, gamePda: PublicKey) {
+  private generateGameKeyboard(
+    status: string,
+    gamePda: PublicKey
+  ) {
     if (status.toLowerCase() === "completed") return [];
 
     const keyboard = [
@@ -2516,7 +2519,10 @@ export class GameManager {
         messageText.slice(0, TELEGRAM_MESSAGE_CHAR_LIMIT - 1) + "…";
     }
 
-    const keyboard = this.generateGameKeyboard(status, gamePda);
+    const keyboard = this.generateGameKeyboard(
+      status,
+      gamePda
+    );
 
     return { messageText, keyboard };
   }
@@ -4699,11 +4705,22 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       messageText: string;
       keyboard: any[];
       gameAddress: string;
+      currentTickets?: number;
+      maxTickets?: number;
+      minTickets?: number;
     }>
   > {
+    type ActiveGameRow = {
+      messageText: string;
+      keyboard: any[];
+      gameAddress: string;
+      currentTickets?: number;
+      maxTickets?: number;
+      minTickets?: number;
+    };
     const activeGamesData = this.gameDb.getActiveGamesByChat(chatId);
 
-    const formattedGames = await Promise.all(
+    const formattedGames: Array<ActiveGameRow | null> = await Promise.all(
       activeGamesData.map(async (gameData) => {
         if (!gameData?.game_address) {
           return null;
@@ -4735,15 +4752,34 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           undefined,
           { suppressMentions: true }
         );
+        let currentTickets: number | undefined;
+        let maxTickets: number | undefined;
+        let minTickets: number | undefined;
+        try {
+          const stats = await this.getActiveGameStats(
+            gamePda,
+            Number(gameData.amount) || 0,
+            undefined
+          );
+          currentTickets = stats?.currentTickets;
+          maxTickets = stats?.maxTickets;
+          minTickets = stats?.minTickets;
+        } catch (statError) {
+          console.warn("Failed to fetch game stats for active list:", statError);
+        }
 
-        return { messageText, keyboard, gameAddress: gameData.game_address };
+        return {
+          messageText,
+          keyboard,
+          gameAddress: gameData.game_address,
+          currentTickets,
+          maxTickets,
+          minTickets,
+        };
       })
     );
 
-    return formattedGames.filter(
-      (game): game is { messageText: string; keyboard: any[]; gameAddress: string } =>
-        game !== null
-    );
+    return formattedGames.filter((game): game is ActiveGameRow => game !== null);
   }
 
   private async processActiveGames(
