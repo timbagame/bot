@@ -1,4 +1,5 @@
 import { mnemonicToSeedSync } from "bip39";
+import nacl from "tweetnacl";
 import {
   Connection,
   Keypair,
@@ -2310,18 +2311,25 @@ export class WalletManager {
     let lastError: unknown;
 
     for (let attempt = 0; attempt < 2; attempt++) {
+      const signerMap = new Map<string, Keypair>();
+      for (const signer of signers) {
+        signerMap.set(signer.publicKey.toBase58(), signer);
+      }
+      const uniqueSigners = Array.from(signerMap.values());
+
       const latestBlockhash = await this.getLatestBlockhash(attempt > 0);
       const message = new TransactionMessage({
-        payerKey: signers[0]!.publicKey,
+        payerKey: uniqueSigners[0]!.publicKey,
         recentBlockhash: latestBlockhash.blockhash,
         instructions: instructions,
       }).compileToV0Message();
 
       const tx = new VersionedTransaction(message);
-      tx.sign(signers);
+      tx.sign(uniqueSigners);
 
       const requiredSignatures = tx.message.header.numRequiredSignatures;
       const accountKeys = tx.message.getAccountKeys().staticAccountKeys;
+      const messageBytes = tx.message.serialize();
 
       const missingSigners: string[] = [];
       for (let i = 0; i < requiredSignatures; i += 1) {
@@ -2333,8 +2341,19 @@ export class WalletManager {
           signature.length === 0 ||
           signature.every((byte) => byte === 0);
 
-        if (isMissing || !pubkey) {
-          missingSigners.push(pubkey ? pubkey.toBase58() : `index-${i}`);
+        if (isMissing && pubkey) {
+          const signerForPubkey = signerMap.get(pubkey.toBase58());
+          if (signerForPubkey) {
+            const signed = nacl.sign.detached(messageBytes, signerForPubkey.secretKey);
+            tx.signatures[i] = signed;
+            continue;
+          }
+        }
+
+        if ((isMissing || !pubkey) && pubkey) {
+          missingSigners.push(pubkey.toBase58());
+        } else if (!pubkey) {
+          missingSigners.push(`index-${i}`);
         }
       }
 
