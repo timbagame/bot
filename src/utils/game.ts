@@ -1376,16 +1376,12 @@ export class GameManager {
     }
 
     const formatted = formatUsdValueText(usdValue, {
-      minimumFractionDigits: 2,
+      minimumFractionDigits: 0,
       maximumFractionDigits: 2,
-      fallback: "0.00",
+      fallback: "0",
     });
 
-    const trimmed = formatted
-      .replace(/(\.\d*?[1-9])0+$/, "$1")
-      .replace(/\.0+$/, "");
-
-    return `$${trimmed}`;
+    return `$${formatted}`;
   }
 
   private async getUsdApproximation(
