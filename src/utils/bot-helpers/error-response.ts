@@ -12,7 +12,7 @@ export async function handleTransactionError(
   processingMessageId: number,
   wallet: WalletManager
 ): Promise<void> {
-  const userFriendlyError = formatUserFriendlyError(error, wallet);
+  const userFriendlyError = await formatUserFriendlyError(error, wallet);
   await ctx.api.editMessageText(
     ctx.chat!.id,
     processingMessageId,
@@ -38,7 +38,7 @@ export async function handleCommandError(
   if (error && typeof error === "object" && (error as any).__alreadyNotified) {
     return;
   }
-  const userFriendlyError = formatUserFriendlyError(error, wallet);
+  const userFriendlyError = await formatUserFriendlyError(error, wallet);
   await ctx.reply(userFriendlyError, {
     parse_mode: "HTML",
     reply_to_message_id: ctx.message?.message_id,

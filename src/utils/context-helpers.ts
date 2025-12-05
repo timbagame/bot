@@ -317,7 +317,7 @@ export const handleCallbackErrorSafe = async (
   }
 
   // Format without wallet context; formatter handles this gracefully
-  const errorMessage = formatUserFriendlyError(error);
+  const errorMessage = await formatUserFriendlyError(error);
 
   const { maxLength = 180 } = options;
   const truncatedMessage = truncateMessage(errorMessage, {

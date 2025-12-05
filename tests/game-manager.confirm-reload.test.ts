@@ -380,7 +380,7 @@ describe("GameManager confirm/reload helpers", () => {
       expect((error.cause as Error).message).toContain(
         "Game account not found after timeout"
       );
-      const friendly = formatUserFriendlyError(error);
+      const friendly = await formatUserFriendlyError(error);
       expect(friendly).toContain("Transaction confirmation timed out");
     }
   });

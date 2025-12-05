@@ -215,14 +215,14 @@ const coerceLamportValue = (value: unknown): bigint | null => {
   return null;
 };
 
-const logAndFormatError = (
+const logAndFormatError = async (
   error: unknown,
   operation: string,
   walletManager?: WalletManager
-): string => {
+): Promise<string> => {
   console.error(`Error in ${operation}:`, error);
   try {
-    return formatUserFriendlyError(error, walletManager);
+    return await formatUserFriendlyError(error, walletManager);
   } catch (formatError) {
     console.error(
       `Failed to format user-friendly error for ${operation}:`,
@@ -1698,7 +1698,7 @@ export class GameManager {
         `✅ Wrap transaction submitted (${context}): signature=${wrapSignature}`
       );
     } catch (error) {
-      const friendly = formatUserFriendlyError(error, this.wallet);
+      const friendly = await formatUserFriendlyError(error, this.wallet);
       console.error(
         `❌ Wrap failed for ${context}: ${friendly}. deficit=${this.wallet.formatSolBalance(
           deficit
@@ -2862,7 +2862,7 @@ export class GameManager {
 
       return messageText;
     } catch (error: any) {
-      const userFriendlyError = logAndFormatError(
+      const userFriendlyError = await logAndFormatError(
         error,
         `fetching game info for ${gamePda.toBase58()}`,
         this.wallet
@@ -3374,7 +3374,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         autoJoinResult,
       };
     } catch (error: any) {
-      const userFriendlyError = logAndFormatError(
+      const userFriendlyError = await logAndFormatError(
         error,
         `creating ${gameType} game`,
         this.wallet
@@ -3588,7 +3588,7 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
       } catch (_) {
         // ignore cleanup errors
       }
-      const errorMsg = logAndFormatError(
+      const errorMsg = await logAndFormatError(
         joinError,
         `auto-joining creator to ${gameType} game`,
         this.wallet
@@ -4123,7 +4123,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       } catch (_) {
         // ignore cleanup errors
       }
-      const userFriendlyError = logAndFormatError(
+      const userFriendlyError = await logAndFormatError(
         error,
         `joining game ${gameAddress}`,
         this.wallet
@@ -4612,7 +4612,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       if (error?.message?.includes("Account does not exist")) {
         return { success: false, error: this.completedGameErrorMessage };
       }
-      const userFriendlyError = logAndFormatError(
+      const userFriendlyError = await logAndFormatError(
         error,
         "joining private game",
         this.wallet

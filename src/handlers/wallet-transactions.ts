@@ -918,7 +918,10 @@ export const createWalletTransactionsModule = (
           },
           onError: async (error) => {
             console.error("Error in unwrap confirmation:", error);
-            const userFriendlyError = formatUserFriendlyError(error, wallet);
+            const userFriendlyError = await formatUserFriendlyError(
+              error,
+              wallet
+            );
             await respondWithMenu(ctx, {
               text: userFriendlyError,
               keyboard: createBackToWalletKeyboard(),
@@ -935,7 +938,7 @@ export const createWalletTransactionsModule = (
         }
       } catch (error) {
         console.error("Error in unwrap confirmation:", error);
-        const userFriendlyError = formatUserFriendlyError(error, wallet);
+        const userFriendlyError = await formatUserFriendlyError(error, wallet);
         await respondWithMenu(ctx, {
           text: userFriendlyError,
           keyboard: createBackToWalletKeyboard(),
@@ -992,7 +995,10 @@ export const createWalletTransactionsModule = (
           },
           onError: async (error) => {
             console.error("Error in wrap confirmation:", error);
-            const userFriendlyError = formatUserFriendlyError(error, wallet);
+            const userFriendlyError = await formatUserFriendlyError(
+              error,
+              wallet
+            );
             await respondWithMenu(ctx, {
               text: userFriendlyError,
               keyboard: createBackToWalletKeyboard(),
@@ -1008,7 +1014,7 @@ export const createWalletTransactionsModule = (
         }
       } catch (error) {
         console.error("Error in wrap confirmation:", error);
-        const userFriendlyError = formatUserFriendlyError(error, wallet);
+        const userFriendlyError = await formatUserFriendlyError(error, wallet);
         await respondWithMenu(ctx, {
           text: userFriendlyError,
           keyboard: createBackToWalletKeyboard(),
@@ -1307,7 +1313,10 @@ export const createWalletTransactionsModule = (
           await safeAnswerCallbackQuery(ctx, "✅ Transaction submitted");
         } catch (txError) {
           console.error("Transaction failed:", txError);
-          const userFriendlyError = formatUserFriendlyError(txError, wallet);
+          const userFriendlyError = await formatUserFriendlyError(
+            txError,
+            wallet
+          );
           await respondWithMenu(ctx, {
             text: `❌ <b>Transaction Failed</b>\n\n${escapeHtml(
               userFriendlyError
