@@ -1,6 +1,6 @@
 import "./utils/logging";
 import { Bot, Context, InlineKeyboard } from "grammy";
-import type { NextFunction } from "grammy";
+import type { InlineKeyboardButton, NextFunction } from "grammy";
 import { run, sequentialize } from "@grammyjs/runner";
 import { WalletManager } from "./utils/wallet";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
@@ -1264,6 +1264,103 @@ const isGroupChat = (ctx: Context): boolean => {
  * Track chats that have had their first interaction
  */
 const initiatedChats = new Set<number>();
+
+type ActiveGameListing = {
+  messageText: string;
+  keyboard: InlineKeyboardButton[][];
+  gameAddress: string;
+};
+
+type ActiveGamesSession = {
+  sessionId: string;
+  chatId: number;
+  messageId: number;
+  games: ActiveGameListing[];
+  index: number;
+  expiresAt: number;
+};
+
+const ACTIVE_GAMES_SESSION_TTL_MS = 10 * 60_000;
+const ACTIVE_GAMES_SESSION_CLEANUP_INTERVAL_MS = 60_000;
+const ACTIVE_NAVIGATION_CALLBACK_PREFIX = "active_nav:";
+const activeGamesSessions = new Map<string, ActiveGamesSession>();
+
+const cleanupExpiredActiveGamesSessions = (): void => {
+  const now = Date.now();
+  for (const [sessionId, session] of activeGamesSessions.entries()) {
+    if (session.expiresAt <= now) {
+      activeGamesSessions.delete(sessionId);
+    }
+  }
+};
+
+setInterval(
+  cleanupExpiredActiveGamesSessions,
+  ACTIVE_GAMES_SESSION_CLEANUP_INTERVAL_MS
+).unref();
+
+const createActiveSessionId = (chatId: number): string => {
+  const randomSuffix = Math.random().toString(36).slice(2, 10);
+  return `${chatId}:${Date.now()}:${randomSuffix}`;
+};
+
+const cloneInlineKeyboard = (
+  keyboard: InlineKeyboardButton[][]
+): InlineKeyboardButton[][] =>
+  keyboard.map((row) => row.map((button) => ({ ...button })));
+
+const buildActiveNavigationKeyboard = (
+  keyboard: InlineKeyboardButton[][],
+  sessionId: string,
+  currentIndex: number,
+  totalGames: number
+): InlineKeyboardButton[][] => {
+  const navigationRow: InlineKeyboardButton[] = [
+    {
+      text: "⬅️ Prev",
+      callback_data: `${ACTIVE_NAVIGATION_CALLBACK_PREFIX}${sessionId}:prev`,
+    },
+    {
+      text: `Page ${currentIndex + 1}/${Math.max(totalGames, 1)}`,
+      callback_data: `${ACTIVE_NAVIGATION_CALLBACK_PREFIX}${sessionId}:noop`,
+    },
+    {
+      text: "Next ➡️",
+      callback_data: `${ACTIVE_NAVIGATION_CALLBACK_PREFIX}${sessionId}:next`,
+    },
+  ];
+
+  const baseKeyboard = cloneInlineKeyboard(keyboard);
+  baseKeyboard.push(navigationRow);
+  return baseKeyboard;
+};
+
+const getActiveGamesSession = (
+  sessionId: string
+): ActiveGamesSession | null => {
+  cleanupExpiredActiveGamesSessions();
+  const session = activeGamesSessions.get(sessionId);
+  if (!session) {
+    return null;
+  }
+
+  if (session.expiresAt <= Date.now()) {
+    activeGamesSessions.delete(sessionId);
+    return null;
+  }
+
+  return session;
+};
+
+const saveActiveGamesSession = (
+  session: Omit<ActiveGamesSession, "expiresAt">
+): void => {
+  cleanupExpiredActiveGamesSessions();
+  activeGamesSessions.set(session.sessionId, {
+    ...session,
+    expiresAt: Date.now() + ACTIVE_GAMES_SESSION_TTL_MS,
+  });
+};
 
 // These will be initialized in setupAnchor
 export let gameManager: GameManager;
@@ -3431,11 +3528,33 @@ bot.command("active", async (ctx: Context) => {
         return;
       }
 
-      for (const game of chatActiveGames) {
-        await ctx.reply(game.messageText, {
-          parse_mode: "HTML",
-          reply_markup: { inline_keyboard: game.keyboard },
-          reply_to_message_id: ctx.message?.message_id,
+      const sessionId = createActiveSessionId(ctx.chat.id);
+      const normalizedGames: ActiveGameListing[] = chatActiveGames.map((game) => ({
+        ...game,
+        keyboard: cloneInlineKeyboard(game.keyboard ?? []),
+      }));
+
+      const firstGame = normalizedGames[0];
+      const inlineKeyboard = buildActiveNavigationKeyboard(
+        firstGame.keyboard,
+        sessionId,
+        0,
+        normalizedGames.length
+      );
+
+      const sentMessage = await ctx.reply(firstGame.messageText, {
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: inlineKeyboard },
+        reply_to_message_id: ctx.message?.message_id,
+      });
+
+      if (sentMessage?.chat?.id != null && sentMessage.message_id != null) {
+        saveActiveGamesSession({
+          sessionId,
+          chatId: sentMessage.chat.id,
+          messageId: sentMessage.message_id,
+          games: normalizedGames,
+          index: 0,
         });
       }
       return;
@@ -3473,6 +3592,98 @@ bot.command("games", async (ctx: Context) => {
     });
   } catch (error) {
     await handleCommandError(ctx, error, "games");
+  }
+});
+
+bot.callbackQuery(/^active_nav:/, async (ctx: Context) => {
+  try {
+    const callbackData = ctx.callbackQuery?.data;
+    const message = ctx.callbackQuery?.message;
+    if (!callbackData || !message?.chat?.id || message.message_id == null) {
+      await safeAnswerCallbackQuery(ctx, "❌ Invalid navigation request");
+      return;
+    }
+
+    const payload = callbackData.slice(ACTIVE_NAVIGATION_CALLBACK_PREFIX.length);
+    const separatorIndex = payload.lastIndexOf(":");
+    if (separatorIndex <= 0) {
+      await safeAnswerCallbackQuery(ctx, "❌ Invalid navigation payload");
+      return;
+    }
+
+    const sessionId = payload.slice(0, separatorIndex);
+    const direction = payload.slice(separatorIndex + 1);
+
+    const session = getActiveGamesSession(sessionId);
+    if (!session) {
+      await safeAnswerCallbackQuery(ctx, "❌ Active games list expired");
+      return;
+    }
+
+    if (
+      session.chatId !== message.chat.id ||
+      session.messageId !== message.message_id
+    ) {
+      await safeAnswerCallbackQuery(ctx, "❌ Active games message changed");
+      return;
+    }
+
+    if (direction === "noop") {
+      await safeAnswerCallbackQuery(ctx);
+      return;
+    }
+
+    if (session.games.length === 0) {
+      await safeAnswerCallbackQuery(ctx, "❌ No games to navigate");
+      return;
+    }
+
+    if (session.games.length === 1) {
+      saveActiveGamesSession({
+        sessionId: session.sessionId,
+        chatId: session.chatId,
+        messageId: session.messageId,
+        games: session.games,
+        index: session.index,
+      });
+      await safeAnswerCallbackQuery(ctx);
+      return;
+    }
+
+    const totalGames = session.games.length;
+    const offset = direction === "prev" ? -1 : direction === "next" ? 1 : 0;
+
+    if (offset === 0) {
+      await safeAnswerCallbackQuery(ctx, "❌ Unknown navigation action");
+      return;
+    }
+
+    const nextIndex = (session.index + offset + totalGames) % totalGames;
+    const updatedSession: Omit<ActiveGamesSession, "expiresAt"> = {
+      sessionId: session.sessionId,
+      chatId: session.chatId,
+      messageId: session.messageId,
+      games: session.games,
+      index: nextIndex,
+    };
+    saveActiveGamesSession(updatedSession);
+
+    const selectedGame = session.games[nextIndex];
+    const replyMarkup = buildActiveNavigationKeyboard(
+      selectedGame.keyboard ?? [],
+      sessionId,
+      nextIndex,
+      totalGames
+    );
+
+    await ctx.editMessageText(selectedGame.messageText, {
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: replyMarkup },
+    });
+
+    await safeAnswerCallbackQuery(ctx);
+  } catch (error) {
+    await handleCallbackErrorSafe(ctx, error, "active navigation");
   }
 });
 
