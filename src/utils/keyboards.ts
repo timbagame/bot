@@ -359,7 +359,7 @@ export const createPlayerSelectionKeyboard = (
 
     for (const count of row) {
       keyboard.text(
-        `👥 ${count} Players`,
+        `👥 ${count}`,
         withCreatorSuffix(`players_${gameType}_${amount}_${count}`, creatorId)
       );
     }
@@ -454,7 +454,7 @@ export const createAdvancedOptionsKeyboard = (
     )
     .row()
     .text(
-      "➖",
+      "-",
       canDecrement
         ? withCreatorSuffix(
             `advanced_min_players_${gameType}_${amount}_${players}_-1`,
@@ -462,9 +462,9 @@ export const createAdvancedOptionsKeyboard = (
           )
         : "noop"
     )
-    .text(`👥 Min players: ${options.minPlayers}`, "noop")
+    .text(`👥 Min: ${options.minPlayers}`, "noop")
     .text(
-      "➕",
+      "+",
       canIncrement
         ? withCreatorSuffix(
             `advanced_min_players_${gameType}_${amount}_${players}_1`,

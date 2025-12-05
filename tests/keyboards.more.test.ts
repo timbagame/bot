@@ -177,9 +177,9 @@ describe("keyboards: misc menus", () => {
       "+5m",
       "+15m",
       "🌐 Public",
-      "➖",
-      "👥 Min players: 3",
-      "➕",
+      "-",
+      "👥 Min: 3",
+      "+",
       "⬅️ Back",
     ]);
     expect(callbacks).toEqual([

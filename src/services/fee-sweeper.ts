@@ -6,6 +6,7 @@ import {
 import {
   PublicKey,
   SystemProgram,
+  Keypair,
   sendAndConfirmRawTransaction,
   type Connection,
 } from "@solana/web3.js";
@@ -37,9 +38,10 @@ export interface FeeSweepOptions {
   tokenConfigs?: TokenConfig[];
   referralEntries?: ReferralTokenConfigEntry[];
   enableSwapToSol?: boolean;
-  swapManagerFactory?: (connection: anchor.web3.Connection, wallet: WalletManager) =>
-    | SwapManager
-    | Pick<SwapManager, "getQuote" | "executeJupiterSwap">;
+  swapManagerFactory?: (
+    connection: Connection,
+    wallet: WalletManager
+  ) => SwapManager | Pick<SwapManager, "getQuote" | "executeJupiterSwap">;
   priceResolver?: PriceResolver;
   balanceFetcher?: TokenBalanceFetcher;
   tokenFeeProcessor?: typeof processTokenFee;
@@ -55,7 +57,7 @@ export interface FeeSweepResult {
 
 type PriceResolver = typeof resolveTokenPriceUSD;
 type TokenBalanceFetcher = (
-  connection: anchor.web3.Connection,
+  connection: Connection,
   owner: PublicKey,
   mint: PublicKey
 ) => Promise<bigint>;
@@ -133,9 +135,9 @@ const shouldSwapTokenBalance = async (
 
 const unwrapWsolBalance = async (
   wallet: WalletManager,
-  connection: anchor.web3.Connection,
+  connection: Connection,
   owner: PublicKey,
-  payer: anchor.web3.Keypair,
+  payer: Keypair,
   priceResolver: PriceResolver = resolveTokenPriceUSD,
   balanceFetcher: TokenBalanceFetcher = getTotalTokenBalanceLamports
 ) => {
@@ -189,23 +191,23 @@ const unwrapWsolBalance = async (
 
 async function processTokenFee(
   program: anchor.Program<Timba>,
-  connection: anchor.web3.Connection,
+  connection: Connection,
   wallet: WalletManager,
   adminBundle: KeypairBundle,
   operatorBundle: KeypairBundle,
   config: TokenConfig,
   priceResolver: PriceResolver
 ): Promise<boolean> {
-  const mint = new anchor.web3.PublicKey(config.mint);
-  const [oraclePda] = anchor.web3.PublicKey.findProgramAddressSync(
+  const mint = new PublicKey(config.mint);
+  const [oraclePda] = PublicKey.findProgramAddressSync(
     [Buffer.from("oracle")],
     program.programId
   );
-  const [gameTokenPda] = anchor.web3.PublicKey.findProgramAddressSync(
+  const [gameTokenPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("game_token"), mint.toBuffer()],
     program.programId
   );
-  const [gameVaultPda] = anchor.web3.PublicKey.findProgramAddressSync(
+  const [gameVaultPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("game_vault"), mint.toBuffer()],
     program.programId
   );
@@ -297,7 +299,7 @@ async function processTokenFee(
 }
 
 async function runReferralSweep(
-  connection: anchor.web3.Connection,
+  connection: Connection,
   adminBundle: KeypairBundle,
   referralEntries: ReferralTokenConfigEntry[]
 ): Promise<number> {
@@ -347,7 +349,7 @@ async function runReferralSweep(
 
 async function sweepTokensToSol(
   wallet: WalletManager,
-  connection: anchor.web3.Connection,
+  connection: Connection,
   tokens: TokenConfig[],
   swapManagerFactory: Required<FeeSweepOptions>["swapManagerFactory"],
   priceResolver: PriceResolver = resolveTokenPriceUSD,
@@ -439,7 +441,7 @@ export const sweepFees = async (
   const priceResolver = options.priceResolver ?? resolveTokenPriceUSD;
   const swapManagerFactory =
     options.swapManagerFactory ??
-    ((connection: anchor.web3.Connection, walletManager: WalletManager) =>
+    ((connection: Connection, walletManager: WalletManager) =>
       new SwapManager(connection as any, walletManager));
   const balanceFetcher =
     options.balanceFetcher ?? getTotalTokenBalanceLamports;
@@ -452,7 +454,7 @@ export const sweepFees = async (
   const { provider, program } = contextFactory(adminBundle.root, {
     rpcUrl,
   });
-  const connection = provider.connection;
+  const connection = provider.connection as unknown as Connection;
 
   console.log(`Program ID: ${program.programId.toBase58()}`);
   console.log(

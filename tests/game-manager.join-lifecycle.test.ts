@@ -123,6 +123,10 @@ describe("GameManager join lifecycle", () => {
     expect(
       capturedJoinAccounts.playerTokenAccount.toBase58(),
     ).toBe(playerTokenAccount.toBase58());
+    // Optional signer should be populated so Anchor doesn't inject the default null signer
+    expect(capturedJoinAccounts.oracleOperator?.toBase58()).toBe(
+      playerKp.publicKey.toBase58(),
+    );
     expect(capturedJoinAccounts.tokenMint).toBeUndefined();
     expect(capturedJoinAccounts.tokenProgram).toBeUndefined();
     expect(capturedJoinAccounts.gameToken).toBeUndefined();
