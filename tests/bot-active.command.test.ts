@@ -64,11 +64,11 @@ describe("/active command in group chats", () => {
 
   test("renders condensed active game rows while keeping action buttons", async () => {
     const firstKeyboard: InlineKeyboardButton[][] = [
-      [{ text: "🎮 Join #1", callback_data: "join_first" }],
+      [{ text: "🎮 Join (1/4)", callback_data: "join_first" }],
       [{ text: "🔄 Refresh", callback_data: "refresh_first" }],
     ];
     const secondKeyboard: InlineKeyboardButton[][] = [
-      [{ text: "🎮 Join #2", callback_data: "join_second" }],
+      [{ text: "🎮 Join (2/4)", callback_data: "join_second" }],
       [{ text: "🔄 Refresh", callback_data: "refresh_second" }],
     ];
 
@@ -122,20 +122,20 @@ describe("/active command in group chats", () => {
     const headerCallback =
       botModule.__test_ACTIVE_LIST_HEADER_CALLBACK_DATA;
     expect(inlineKeyboard?.[0]?.[0]).toMatchObject({
-      text: "#1 First Game",
+      text: "First Game",
       callback_data: headerCallback,
     });
     expect(inlineKeyboard?.[2]?.[0]).toMatchObject({
-      text: "#2 Second Game",
+      text: "Second Game",
       callback_data: headerCallback,
     });
 
     expect(inlineKeyboard?.[1]?.[0]).toMatchObject({
-      text: "🎮 Join #1",
+      text: "🎮 Join (1/4)",
       callback_data: "join_first",
     });
     expect(inlineKeyboard?.[3]?.[0]).toMatchObject({
-      text: "🎮 Join #2",
+      text: "🎮 Join (2/4)",
       callback_data: "join_second",
     });
     expect(inlineKeyboard?.[2]).not.toMatchObject({
@@ -165,9 +165,9 @@ describe("active game keyboard helpers", () => {
 
   test("extractCondensedGameLabel strips markup and truncates long names", () => {
     const longName = `<b>${"A".repeat(80)}</b>`;
-    const label = helpers.__test_extractCondensedGameLabel(longName, 2);
+    const label = helpers.__test_extractCondensedGameLabel(longName);
 
-    expect(label.startsWith("#3 ")).toBe(true);
+    expect(label.startsWith("A")).toBe(true);
     expect(label).not.toContain("<b>");
     expect(label.endsWith("…")).toBe(true);
     expect(label.length).toBeLessThanOrEqual(60);

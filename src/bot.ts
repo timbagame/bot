@@ -1301,19 +1301,17 @@ const filterActiveGameKeyboardRows = (
     .filter((row) => row.length > 0);
 
 const extractCondensedGameLabel = (
-  messageText: string,
-  index: number
+  messageText: string
 ): string => {
   const firstLine = messageText
     .split("\n")
     .map((line) => line.trim())
     .find((line) => line.length > 0);
   const sanitized = firstLine?.replace(/<[^>]*>/g, "").trim() ?? "Game";
-  const label = `#${index + 1} ${sanitized}`;
-  if (label.length <= ACTIVE_GAME_LABEL_MAX_LENGTH) {
-    return label;
+  if (sanitized.length <= ACTIVE_GAME_LABEL_MAX_LENGTH) {
+    return sanitized;
   }
-  return `${label.slice(0, ACTIVE_GAME_LABEL_MAX_LENGTH - 1)}…`;
+  return `${sanitized.slice(0, ACTIVE_GAME_LABEL_MAX_LENGTH - 1)}…`;
 };
 
 const buildActiveGamesKeyboard = (
@@ -1321,10 +1319,10 @@ const buildActiveGamesKeyboard = (
 ): InlineKeyboardButton[][] => {
   const inlineKeyboard: InlineKeyboardButton[][] = [];
 
-  games.forEach((game, index) => {
+  games.forEach((game) => {
     inlineKeyboard.push([
       {
-        text: extractCondensedGameLabel(game.messageText, index),
+        text: extractCondensedGameLabel(game.messageText),
         callback_data: ACTIVE_LIST_HEADER_CALLBACK_DATA,
       },
     ]);

@@ -2238,12 +2238,38 @@ export class GameManager {
     return `\n\nWinner: ${safeWinner}${linkLine}`;
   }
 
-  private generateGameKeyboard(status: string, gamePda: PublicKey) {
+  private buildJoinButtonLabel(
+    currentTickets?: number,
+    maxTickets?: number
+  ): string {
+    const current = Number.isFinite(currentTickets)
+      ? Math.max(0, Math.trunc(currentTickets as number))
+      : null;
+    const hasMax = Number.isFinite(maxTickets) && (maxTickets as number) > 0;
+    const max = hasMax ? Math.trunc(maxTickets as number) : null;
+
+    if (current !== null || max !== null) {
+      const currentDisplay = current ?? 0;
+      const maxDisplay = max ?? "∞";
+      return `🎮 Join (${currentDisplay}/${maxDisplay})`;
+    }
+
+    return "🎮 Join";
+  }
+
+  private generateGameKeyboard(
+    status: string,
+    gamePda: PublicKey,
+    currentTickets?: number,
+    maxTickets?: number
+  ) {
     if (status.toLowerCase() === "completed") return [];
+
+    const joinLabel = this.buildJoinButtonLabel(currentTickets, maxTickets);
 
     const keyboard = [
       [
-        { text: "🎮 Join", callback_data: `join_${gamePda.toBase58()}` },
+        { text: joinLabel, callback_data: `join_${gamePda.toBase58()}` },
         { text: "🔄 Refresh", callback_data: `refresh_${gamePda.toBase58()}` },
       ],
     ];
@@ -2516,7 +2542,12 @@ export class GameManager {
         messageText.slice(0, TELEGRAM_MESSAGE_CHAR_LIMIT - 1) + "…";
     }
 
-    const keyboard = this.generateGameKeyboard(status, gamePda);
+    const keyboard = this.generateGameKeyboard(
+      status,
+      gamePda,
+      currentTickets,
+      maxTickets
+    );
 
     return { messageText, keyboard };
   }
