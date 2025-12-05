@@ -215,17 +215,22 @@ export function formatUsdValue(
     fallback,
   } = options;
 
+  const formatterOptions = {
+    minimumFractionDigits,
+    maximumFractionDigits,
+  } as const;
+
   const resolvedFallback =
-    fallback ?? (approximate ? "≈ $0" : "0");
+    fallback ??
+    (approximate
+      ? `≈ $${(0).toLocaleString("en-US", formatterOptions)}`
+      : (0).toLocaleString("en-US", formatterOptions));
 
   if (!Number.isFinite(value)) {
     return resolvedFallback;
   }
 
-  const formatted = value.toLocaleString("en-US", {
-    minimumFractionDigits,
-    maximumFractionDigits,
-  });
+  const formatted = value.toLocaleString("en-US", formatterOptions);
 
   return approximate ? `≈ $${formatted}` : formatted;
 }

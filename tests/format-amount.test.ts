@@ -114,6 +114,25 @@ test("formatUsdValue uses fallback when input is not finite", () => {
   expect(formatUsdValue(Number.NaN, { fallback: "n/a" })).toBe("n/a");
 });
 
+test("formatUsdValue default fallback respects fractional digit options", () => {
+  expect(
+    formatUsdValue(Number.NaN, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  ).toBe("0.00");
+});
+
+test("formatUsdValue approximate fallback includes currency and fraction digits", () => {
+  expect(
+    formatUsdValue(Number.POSITIVE_INFINITY, {
+      approximate: true,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  ).toBe("≈ $0.00");
+});
+
 test("formatRate renders tiny values without scientific notation", () => {
   expect(formatRate(8e-12)).toBe("0.000000000008");
   expect(formatRate(3.456e-9)).toBe("0.000000003456");
