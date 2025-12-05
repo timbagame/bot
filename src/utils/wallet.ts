@@ -2320,11 +2320,28 @@ export class WalletManager {
       const tx = new VersionedTransaction(message);
       tx.sign(signers);
 
-      const missingSignature = tx.signatures.some(
-        (sig) => !sig || sig.length === 0
-      );
-      if (missingSignature) {
-        throw new Error("Transaction signatures could not be verified before send");
+      const requiredSignatures = tx.message.header.numRequiredSignatures;
+      const accountKeys = tx.message.getAccountKeys().staticAccountKeys;
+
+      const missingSigners: string[] = [];
+      for (let i = 0; i < requiredSignatures; i += 1) {
+        const signature = tx.signatures[i];
+        const pubkey = accountKeys[i];
+
+        const isMissing =
+          !signature ||
+          signature.length === 0 ||
+          signature.every((byte) => byte === 0);
+
+        if (isMissing || !pubkey) {
+          missingSigners.push(pubkey ? pubkey.toBase58() : `index-${i}`);
+        }
+      }
+
+      if (missingSigners.length > 0) {
+        throw new Error(
+          `Transaction signatures missing for: ${missingSigners.join(", ")}`
+        );
       }
 
       try {
