@@ -39,3 +39,28 @@ test("ChatDatabase manages chat token configs", () => {
   db.removeChatDefaultToken(123);
   expect(db.getChatDefaultToken(123)).toBeNull();
 });
+
+test("ChatDatabase stores chat game settings", () => {
+  db = ChatDatabase.getInstance();
+
+  const stored = db.upsertChatGameSettings(42, {
+    coinflip_max_players: 5,
+    set_by_telegram_id: "admin",
+  });
+
+  expect(stored.coinflip_max_players).toBe(5);
+  expect(stored.giveaway_max_players).toBeNull();
+  expect(stored.timeout_seconds).toBeNull();
+
+  const updated = db.upsertChatGameSettings(42, {
+    giveaway_max_players: 10,
+    timeout_seconds: 1800,
+  });
+
+  expect(updated.coinflip_max_players).toBe(5);
+  expect(updated.giveaway_max_players).toBe(10);
+  expect(updated.timeout_seconds).toBe(1800);
+
+  db.clearChatGameSettings(42);
+  expect(db.getChatGameSettings(42)).toBeNull();
+});

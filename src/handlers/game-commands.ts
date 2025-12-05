@@ -1,8 +1,17 @@
 import type { Context } from "grammy";
 import { formatParseAmountError } from "../utils/token-manager";
-import { WSOL_MINT } from "../utils/constants";
+import {
+  DEFAULT_COINFLIP_MAX_PLAYERS,
+  DEFAULT_GAME_TIMEOUT,
+  DEFAULT_GIVEAWAY_MAX_PLAYERS,
+  WSOL_MINT,
+} from "../utils/constants";
+import {
+  resolveChatDefaultPlayers,
+  resolveChatTimeout,
+} from "../utils/chat-settings";
 import type { GameManager } from "../utils/game";
-import type { ParseAmountResult } from "../types";
+import type { ChatGameSettings, ParseAmountResult } from "../types";
 import type { CoinflipDeps, GameTokenOverride } from "./game";
 import type { GameSetupCopy } from "./game-setup";
 import { containsBalanceInfo } from "../utils/context-helpers";
@@ -75,6 +84,7 @@ export type GameCommandsModuleDeps = {
     label: string
   ) => Promise<bigint | null>;
   gameSetupCopy: Record<"coinflip" | "giveaway", GameSetupCopy>;
+  getChatGameSettings?: (chatId: number) => ChatGameSettings | null;
 };
 
 export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
@@ -89,9 +99,9 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
     gameType: "coinflip",
     usageMessage:
       "❌ Please provide a valid amount greater than 0.\n\nUsage: <code>/cf &lt;amount&gt;</code> or <code>/cf &lt;amount&gt; &lt;maxPlayers&gt;</code>",
-    defaultMaxPlayers: 2,
+    defaultMaxPlayers: DEFAULT_COINFLIP_MAX_PLAYERS,
     minPlayers: 2,
-    timeoutSeconds: 60 * 60,
+    timeoutSeconds: DEFAULT_GAME_TIMEOUT,
     gameLabel: "Coinflip",
     inferErrorLabel: "Coinflip",
     logPrefix: "🪙",
@@ -102,9 +112,9 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
     gameType: "giveaway",
     usageMessage:
       "❌ Please provide a valid amount greater than 0.\n\nUsage: <code>/ga &lt;amount&gt;</code> or <code>/ga &lt;amount&gt; &lt;maxPlayers&gt;</code>",
-    defaultMaxPlayers: 10,
+    defaultMaxPlayers: DEFAULT_GIVEAWAY_MAX_PLAYERS,
     minPlayers: 1,
-    timeoutSeconds: 60 * 60,
+    timeoutSeconds: DEFAULT_GAME_TIMEOUT,
     gameLabel: "Giveaway",
     inferErrorLabel: "Giveaway",
     logPrefix: "🎁",
@@ -171,14 +181,21 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
       }
 
       const parsedAmount = parsed.data;
+      const chatSettings = ctx.chat?.id
+        ? deps.getChatGameSettings?.(ctx.chat.id) ?? null
+        : null;
       const maxPlayersLimit = Math.max(
         options.minPlayers,
         options.getMaxPlayers()
       );
-      const defaultMaxPlayers = Math.min(
-        options.defaultMaxPlayers,
-        maxPlayersLimit
-      );
+      const defaultMaxPlayers = chatSettings
+        ? resolveChatDefaultPlayers(
+            chatSettings,
+            options.gameType,
+            options.defaultMaxPlayers,
+            maxPlayersLimit
+          )
+        : Math.min(options.defaultMaxPlayers, maxPlayersLimit);
       const inferred = createDeps.inferMaxPlayers(
         args,
         1,
@@ -260,6 +277,11 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
       const messageTimestampMs =
         ctx.message?.date != null ? ctx.message.date * 1_000 : undefined;
 
+      const gameTimeoutSeconds = resolveChatTimeout(
+        chatSettings as ChatGameSettings | null,
+        options.timeoutSeconds
+      );
+
       const gameResult = await createDeps.gameManager.createGame(
         options.gameType,
         {
@@ -271,7 +293,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         },
         maxPlayers,
         options.minPlayers,
-        options.timeoutSeconds,
+        gameTimeoutSeconds,
         telegramId,
         { isPrivate: true },
         ctx.chat?.id || 0,

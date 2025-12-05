@@ -46,6 +46,15 @@ export interface ChatTokenConfig {
   set_at: number;
 }
 
+export interface ChatGameSettings {
+  chat_id: number;
+  coinflip_max_players?: number | null;
+  giveaway_max_players?: number | null;
+  timeout_seconds?: number | null;
+  set_by_telegram_id?: string | null;
+  updated_at: number;
+}
+
 export interface KnownToken {
   token_mint: string;
   token_ticker: string;
