@@ -80,7 +80,8 @@ describe("chat defaults module", () => {
       getGameManager: () => ({
         getUsernameFromTelegramId: async () => "alice",
       }) as any,
-      wrapCallbackHandler: (handler) => handler,
+      wrapCallbackHandler: (handler) => async (ctx, next) =>
+        await handler(ctx, next),
       getOracleMaxPlayers: () => 50,
       isUserGroupAdmin: async () => true,
       replyToMessage: async () => {},
@@ -103,7 +104,8 @@ describe("chat defaults module", () => {
       getGameManager: () => ({
         getUsernameFromTelegramId: async () => null,
       }) as any,
-      wrapCallbackHandler: (handler) => handler,
+      wrapCallbackHandler: (handler) => async (ctx, next) =>
+        await handler(ctx, next),
       getOracleMaxPlayers: () => 25,
       isUserGroupAdmin: async () => true,
       replyToMessage: async (_ctx, text) => {

@@ -2413,6 +2413,31 @@ const {
   __test_shouldSkipGenericGameCallback: shouldSkipGenericGameCallbackTest,
 } = gameCallbacksModule;
 
+const isUserGroupAdmin = async (
+  ctx: Context,
+  userId: number
+): Promise<boolean> => {
+  try {
+    if (!ctx.chat || ctx.chat.type === "private") return false;
+    const member = await ctx.api.getChatMember(ctx.chat.id, userId);
+    return member.status === "administrator" || member.status === "creator";
+  } catch (error) {
+    console.warn(`Error checking admin status for user ${userId}:`, error);
+    return false;
+  }
+};
+
+const replyToMessage = async (
+  ctx: Context,
+  text: string,
+  parseMode: "HTML" | "MarkdownV2" = "HTML"
+): Promise<void> => {
+  await ctx.reply(text, {
+    parse_mode: parseMode,
+    reply_to_message_id: ctx.message?.message_id,
+  });
+};
+
 const chatDefaultsModule = createChatDefaultsModule({
   bot,
   chatDb,
@@ -2453,20 +2478,6 @@ const getPlayerData = async (
   const gameBalance = 0;
 
   return { keypair, tokenBalance, solBalance, wsolBalance, gameBalance };
-};
-
-const isUserGroupAdmin = async (
-  ctx: Context,
-  userId: number
-): Promise<boolean> => {
-  try {
-    if (!ctx.chat || ctx.chat.type === "private") return false;
-    const member = await ctx.api.getChatMember(ctx.chat.id, userId);
-    return member.status === "administrator" || member.status === "creator";
-  } catch (error) {
-    console.warn(`Error checking admin status for user ${userId}:`, error);
-    return false;
-  }
 };
 
 // ================================
@@ -2590,17 +2601,6 @@ const handleCommandError = async (
   commandName: string
 ): Promise<void> => {
   await handleCommandErrorHelper(ctx, error, commandName, wallet);
-};
-
-const replyToMessage = async (
-  ctx: Context,
-  text: string,
-  parseMode: "HTML" | "MarkdownV2" = "HTML"
-): Promise<void> => {
-  await ctx.reply(text, {
-    parse_mode: parseMode,
-    reply_to_message_id: ctx.message?.message_id,
-  });
 };
 
 const replyUsageError = async (

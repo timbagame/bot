@@ -149,7 +149,7 @@ const resolveAdvancedOptions = (
 ): AdvancedOptionState => {
   const maxPlayersCeil = Math.max(players, getMinPlayersFloor(gameType));
   const timeoutSeconds = clampTimeoutSeconds(
-    session?.timeoutSeconds ?? chatSettings?.timeout_seconds
+    session?.timeoutSeconds ?? chatSettings?.timeout_seconds ?? undefined
   );
   const minPlayers = clampMinPlayers(
     gameType,

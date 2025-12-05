@@ -187,7 +187,7 @@ const handleTokenChange = async (
   const tokenManager = deps.getTokenManager();
   const knownToken = tokenManager.getKnownTokenByTicker(tokenInput);
   if (!knownToken) {
-    const allTokens = deps.tokenManager.getAllKnownTokens();
+    const allTokens = tokenManager.getAllKnownTokens();
     const escapedTokenInput = escapeHtml(tokenInput.toUpperCase());
     let response = `❌ Token "${escapedTokenInput}" not found.\n\n`;
 
@@ -398,7 +398,7 @@ export const createChatDefaultsModule = (
       tokenInput.toUpperCase() === "CLEAR" ||
       tokenInput.toUpperCase() === "REMOVE"
     ) {
-      deps.tokenManager.removeChatDefaultToken(ctx.chat!.id);
+      deps.getTokenManager().removeChatDefaultToken(ctx.chat!.id);
       await deps.replyToMessage(
         ctx,
         "✅ Default token cleared for this chat. Using bot default token now."
@@ -458,16 +458,18 @@ export const createChatDefaultsModule = (
       return true;
     }
 
-    if (session.setting === "token") {
+    const setting = session["setting"] as SettingsTarget | undefined;
+
+    if (setting === "token") {
       await handleTokenChange(ctx, userMessage, deps);
-    } else if (session.setting === "timeout") {
+    } else if (setting === "timeout") {
       await handleTimeoutUpdate(ctx, deps, userMessage);
     } else {
       await handlePlayersUpdate(
         ctx,
         deps,
         userMessage,
-        session.setting as Exclude<SettingsTarget, "token" | "timeout">
+        setting as Exclude<SettingsTarget, "token" | "timeout">
       );
     }
 
