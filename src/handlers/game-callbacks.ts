@@ -197,6 +197,7 @@ const NON_GAME_CALLBACK_PREFIXES = [
   "admin_",
   "info_",
   "advanced_",
+  "active_list",
 ] as const;
 
 const shouldSkipGenericGameCallback = (callbackData: string): boolean => {

@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "bun:test";
 import type { InlineKeyboardButton } from "grammy/types";
+import { createGameCallbacksModule } from "../src/handlers/game-callbacks";
 
 const originalNodeEnv = process.env.NODE_ENV;
 const originalToken = process.env.TELEGRAM_TOKEN;
@@ -170,5 +171,34 @@ describe("active game keyboard helpers", () => {
     expect(label).not.toContain("<b>");
     expect(label.endsWith("…")).toBe(true);
     expect(label.length).toBeLessThanOrEqual(60);
+  });
+
+  test("active list header callbacks bypass generic game handler", () => {
+    const callbacksModule = createGameCallbacksModule({
+      bot: {} as any,
+      wallet: {} as any,
+      getGameManager: () => ({} as any),
+      gameDb: {} as any,
+      wrapCallbackHandler: (handler: any) => handler,
+      withCreatorContext: (handler: any) => handler,
+      pendingGameCreations: new Set<string>(),
+      getOracleMaxPlayers: () => 0,
+      getDefaultTokenMetadata: async () => ({ decimals: 6 }),
+      getContractMinimumAmount: async () => ({
+        formatted: 0,
+        raw: 0,
+        decimals: 6,
+      }),
+      fetchTokenPriceUSD: async () => null,
+      getProgram: () => ({} as any),
+      validateGameTokenData: () => ({ isValid: true }),
+      gameSetupCopy: { coinflip: {} as any, giveaway: {} as any },
+      getChatGameSettings: () => null,
+    });
+
+    const shouldSkip =
+      callbacksModule.__test_shouldSkipGenericGameCallback("active_list:noop");
+
+    expect(shouldSkip).toBe(true);
   });
 });
