@@ -110,8 +110,52 @@ test("formatUsdValue formats approximate amounts without padding", () => {
   expect(formatUsdValue(42, { approximate: true })).toBe("≈ $42");
 });
 
+test("formatUsdValue uses the same rounding when marked approximate", () => {
+  expect(
+    formatUsdValue(0.345, {
+      approximate: true,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    })
+  ).toBe("≈ $0.35");
+});
+
+test("formatUsdValue respects maximum fractional digits with trimming", () => {
+  expect(
+    formatUsdValue(1.234, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    })
+  ).toBe("1.23");
+  expect(
+    formatUsdValue(1.2, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    })
+  ).toBe("1.2");
+});
+
 test("formatUsdValue uses fallback when input is not finite", () => {
   expect(formatUsdValue(Number.NaN, { fallback: "n/a" })).toBe("n/a");
+});
+
+test("formatUsdValue default fallback respects fractional digit options", () => {
+  expect(
+    formatUsdValue(Number.NaN, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  ).toBe("0.00");
+});
+
+test("formatUsdValue approximate fallback includes currency and fraction digits", () => {
+  expect(
+    formatUsdValue(Number.POSITIVE_INFINITY, {
+      approximate: true,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  ).toBe("≈ $0.00");
 });
 
 test("formatRate renders tiny values without scientific notation", () => {

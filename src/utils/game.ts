@@ -1376,9 +1376,9 @@ export class GameManager {
     }
 
     const formatted = formatUsdValueText(usdValue, {
-      minimumFractionDigits: 1,
-      maximumFractionDigits: 1,
-      fallback: "0.0",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+      fallback: "0",
     });
 
     return `$${formatted}`;
