@@ -734,6 +734,18 @@ export class GameDatabase extends BaseDatabase {
     );
   }
 
+  public getActiveGamesByChat(chatId: number): GameData[] {
+    return this.all<GameData>(
+      `
+        SELECT g.* FROM games g
+        WHERE g.status = 'active' AND g.chat_id = ?
+        ORDER BY g.created_at DESC
+      `,
+      [chatId],
+      "getting active games by chat"
+    );
+  }
+
   public countActiveGamesByCreator(telegramId: string): number {
     const result = this.get<{ active_count: number }>(
       `
