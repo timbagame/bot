@@ -98,6 +98,21 @@ const toTitleCase = (value: string): string => {
   return value.charAt(0).toUpperCase() + value.slice(1);
 };
 
+const buildPlayerSelectionMessage = (
+  gameType: "coinflip" | "giveaway",
+  formattedAmount: string,
+  tokenTicker: string
+): string => {
+  const formattedGameType = toTitleCase(gameType);
+  return [
+    `<b>${formattedGameType} - Choose Maximum Players</b>`,
+    "",
+    `Amount: <b>${formattedAmount} ${tokenTicker}</b>`,
+    "",
+    "Select the number of players:",
+  ].join("\n");
+};
+
 const determineFractionDigits = (
   value: string,
   maxDecimals: number
@@ -896,14 +911,11 @@ export const createGameCallbacksModule = (
         ),
       });
 
-      const formattedGameTypeForPlayers = toTitleCase(userSession.gameType);
-      const playerMessage = [
-        `<b>${formattedGameTypeForPlayers} - Choose Maximum Players</b>`,
-        "",
-        `Amount: <b>${amountFormatted} ${tokenTicker}</b>`,
-        "",
-        "Select the number of players:",
-      ].join("\n");
+      const playerMessage = buildPlayerSelectionMessage(
+        userSession.gameType as "coinflip" | "giveaway",
+        amountFormatted,
+        tokenTicker
+      );
 
       try {
         await ctx.api.editMessageText(
@@ -1050,15 +1062,11 @@ export const createGameCallbacksModule = (
               ),
             });
 
-            const formattedGameType = toTitleCase(gameType);
-
-    const playerMessage = [
-      `<b>${formattedGameType} - Choose Maximum Players</b>`,
-      "",
-      `Amount: <b>${formattedAmount} ${tokenContext.tokenTicker}</b>`,
-      "",
-      "Select the number of players:",
-    ].join("\n");
+            const playerMessage = buildPlayerSelectionMessage(
+              gameType,
+              formattedAmount,
+              tokenContext.tokenTicker
+            );
 
             await respondWithMenu(ctx, {
               text: playerMessage,
