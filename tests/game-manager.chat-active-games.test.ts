@@ -43,10 +43,11 @@ describe("GameManager.getChatActiveGames", () => {
 
     expect(gameDb.getActiveGamesByChat).toHaveBeenCalledWith(-100);
     expect(games).toHaveLength(1);
-    const callbacks = (
-      games[0].keyboard.flat ? games[0].keyboard.flat() : games[0].keyboard[0]
-    ).map((b: any) => b.callback_data);
+
+    const firstGame = games[0]!;
+    const callbacks = firstGame.keyboard.flat().map((b: any) => b.callback_data);
+
     expect(callbacks).toContain(`join_${gameAddress}`);
-    expect(games[0].messageText).toContain("Game summary");
+    expect(firstGame.messageText).toContain("Game summary");
   });
 });
