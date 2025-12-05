@@ -2320,6 +2320,13 @@ export class WalletManager {
       const tx = new VersionedTransaction(message);
       tx.sign(signers);
 
+      const missingSignature = tx.signatures.some(
+        (sig) => !sig || sig.length === 0
+      );
+      if (missingSignature) {
+        throw new Error("Transaction signatures could not be verified before send");
+      }
+
       try {
         const signature = await this.sendVersionedTransactionWithRetry(tx, {
           skipPreflight: false,
@@ -2347,6 +2354,20 @@ export class WalletManager {
             }
           } catch (logError) {
             console.error("Failed to fetch transaction logs:", logError);
+            try {
+              const simulation = await this.connection.simulateTransaction(tx, {
+                sigVerify: false,
+              });
+              const simLogs = simulation.value?.logs ?? [];
+              if (simLogs.length > 0) {
+                console.error("Fallback simulation logs:", simLogs.join("\n"));
+              }
+              if (simulation.value?.err) {
+                console.error("Fallback simulation error:", simulation.value.err);
+              }
+            } catch (simulateError) {
+              console.error("Failed to run fallback simulation:", simulateError);
+            }
           }
 
           const normalizedMessage = error?.message?.toLowerCase?.() ?? "";
