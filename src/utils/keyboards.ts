@@ -334,11 +334,13 @@ export const createAmountSelectionKeyboard = (
 const PLAYER_SELECTION_LAYOUTS: Record<string, number[][]> = {
   coinflip: [
     [2, 3, 4],
-    [5, 10, 20],
+    [5, 10, 15],
+    [20, 25, 50],
   ],
   giveaway: [
     [1, 2, 3],
-    [5, 10, 20],
+    [5, 10, 15],
+    [20, 25, 50],
   ],
 };
 
