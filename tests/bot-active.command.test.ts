@@ -64,24 +64,30 @@ describe("/active command in group chats", () => {
 
   test("renders condensed active game rows while keeping action buttons", async () => {
     const firstKeyboard: InlineKeyboardButton[][] = [
-      [{ text: "🎮 Join (1/4)", callback_data: "join_first" }],
+      [{ text: "🎮 Join", callback_data: "join_first" }],
       [{ text: "🔄 Refresh", callback_data: "refresh_first" }],
     ];
     const secondKeyboard: InlineKeyboardButton[][] = [
-      [{ text: "🎮 Join (2/4)", callback_data: "join_second" }],
+      [{ text: "🎮 Join", callback_data: "join_second" }],
       [{ text: "🔄 Refresh", callback_data: "refresh_second" }],
     ];
 
     const mockGames = [
       {
-        messageText: "<b>First Game</b>\nDetails",
+        messageText: "<b>Coinflip • 62.5k TIMBA ($0.5)</b>\nDetails",
         keyboard: firstKeyboard,
         gameAddress: "addr1",
+        currentTickets: 1,
+        maxTickets: 4,
+        minTickets: 2,
       },
       {
-        messageText: "<i>Second Game</i>\nMore",
+        messageText: "<i>Coinflip • 62.5k TIMBA ($0.5)</i>\nMore",
         keyboard: secondKeyboard,
         gameAddress: "addr2",
+        currentTickets: 2,
+        maxTickets: 4,
+        minTickets: 2,
       },
     ];
 
@@ -122,20 +128,20 @@ describe("/active command in group chats", () => {
     const headerCallback =
       botModule.__test_ACTIVE_LIST_HEADER_CALLBACK_DATA;
     expect(inlineKeyboard?.[0]?.[0]).toMatchObject({
-      text: "First Game",
+      text: "Coinflip (1/4) • TIMBA",
       callback_data: headerCallback,
     });
     expect(inlineKeyboard?.[2]?.[0]).toMatchObject({
-      text: "Second Game",
+      text: "Coinflip (2/4) • TIMBA",
       callback_data: headerCallback,
     });
 
     expect(inlineKeyboard?.[1]?.[0]).toMatchObject({
-      text: "🎮 Join (1/4)",
+      text: "🎮 Join • 62.5k ($0.5)",
       callback_data: "join_first",
     });
     expect(inlineKeyboard?.[3]?.[0]).toMatchObject({
-      text: "🎮 Join (2/4)",
+      text: "🎮 Join • 62.5k ($0.5)",
       callback_data: "join_second",
     });
     expect(inlineKeyboard?.[2]).not.toMatchObject({

@@ -12,17 +12,17 @@ describe("GameManager.generateGameKeyboard", () => {
     resetGM();
     const gm = GameManager.getInstance({} as any, {} as any, {} as any);
     const addr = new PublicKey("BPFLoader1111111111111111111111111111111111");
-    const empty = (gm as any).generateGameKeyboard("Completed", addr, 2, 4);
+    const empty = (gm as any).generateGameKeyboard("Completed", addr);
     expect(Array.isArray(empty)).toBe(true);
     expect(empty.length).toBe(0);
 
-    const kb = (gm as any).generateGameKeyboard("Active", addr, 2, 4);
+    const kb = (gm as any).generateGameKeyboard("Active", addr);
     const fl = (kb.flat ? kb.flat() : kb[0]) as any[];
     const callbacks = fl.map((b) => b.callback_data);
     expect(callbacks.some((s) => String(s).startsWith("join_"))).toBe(true);
     expect(callbacks.some((s) => String(s).startsWith("refresh_"))).toBe(true);
 
     const joinButton = fl.find((b) => String(b.callback_data).startsWith("join_"));
-    expect(joinButton?.text).toBe("🎮 Join (2/4)");
+    expect(joinButton?.text).toBe("🎮 Join");
   });
 });

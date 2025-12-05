@@ -2238,38 +2238,15 @@ export class GameManager {
     return `\n\nWinner: ${safeWinner}${linkLine}`;
   }
 
-  private buildJoinButtonLabel(
-    currentTickets?: number,
-    maxTickets?: number
-  ): string {
-    const current = Number.isFinite(currentTickets)
-      ? Math.max(0, Math.trunc(currentTickets as number))
-      : null;
-    const hasMax = Number.isFinite(maxTickets) && (maxTickets as number) > 0;
-    const max = hasMax ? Math.trunc(maxTickets as number) : null;
-
-    if (current !== null || max !== null) {
-      const currentDisplay = current ?? 0;
-      const maxDisplay = max ?? "∞";
-      return `🎮 Join (${currentDisplay}/${maxDisplay})`;
-    }
-
-    return "🎮 Join";
-  }
-
   private generateGameKeyboard(
     status: string,
-    gamePda: PublicKey,
-    currentTickets?: number,
-    maxTickets?: number
+    gamePda: PublicKey
   ) {
     if (status.toLowerCase() === "completed") return [];
 
-    const joinLabel = this.buildJoinButtonLabel(currentTickets, maxTickets);
-
     const keyboard = [
       [
-        { text: joinLabel, callback_data: `join_${gamePda.toBase58()}` },
+        { text: "🎮 Join", callback_data: `join_${gamePda.toBase58()}` },
         { text: "🔄 Refresh", callback_data: `refresh_${gamePda.toBase58()}` },
       ],
     ];
@@ -2544,9 +2521,7 @@ export class GameManager {
 
     const keyboard = this.generateGameKeyboard(
       status,
-      gamePda,
-      currentTickets,
-      maxTickets
+      gamePda
     );
 
     return { messageText, keyboard };
@@ -4730,11 +4705,22 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       messageText: string;
       keyboard: any[];
       gameAddress: string;
+      currentTickets?: number;
+      maxTickets?: number;
+      minTickets?: number;
     }>
   > {
+    type ActiveGameRow = {
+      messageText: string;
+      keyboard: any[];
+      gameAddress: string;
+      currentTickets?: number;
+      maxTickets?: number;
+      minTickets?: number;
+    };
     const activeGamesData = this.gameDb.getActiveGamesByChat(chatId);
 
-    const formattedGames = await Promise.all(
+    const formattedGames: Array<ActiveGameRow | null> = await Promise.all(
       activeGamesData.map(async (gameData) => {
         if (!gameData?.game_address) {
           return null;
@@ -4766,15 +4752,34 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           undefined,
           { suppressMentions: true }
         );
+        let currentTickets: number | undefined;
+        let maxTickets: number | undefined;
+        let minTickets: number | undefined;
+        try {
+          const stats = await this.getActiveGameStats(
+            gamePda,
+            Number(gameData.amount) || 0,
+            undefined
+          );
+          currentTickets = stats?.currentTickets;
+          maxTickets = stats?.maxTickets;
+          minTickets = stats?.minTickets;
+        } catch (statError) {
+          console.warn("Failed to fetch game stats for active list:", statError);
+        }
 
-        return { messageText, keyboard, gameAddress: gameData.game_address };
+        return {
+          messageText,
+          keyboard,
+          gameAddress: gameData.game_address,
+          currentTickets,
+          maxTickets,
+          minTickets,
+        };
       })
     );
 
-    return formattedGames.filter(
-      (game): game is { messageText: string; keyboard: any[]; gameAddress: string } =>
-        game !== null
-    );
+    return formattedGames.filter((game): game is ActiveGameRow => game !== null);
   }
 
   private async processActiveGames(

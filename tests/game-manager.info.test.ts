@@ -127,6 +127,6 @@ describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
     });
 
     expect(message).not.toContain("NaN");
-    expect(message).toContain("• 0 TOK");
+    expect(message).toContain("Coinflip • 0 TOK");
   });
 });

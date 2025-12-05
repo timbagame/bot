@@ -1270,6 +1270,9 @@ type ActiveGameListing = {
   messageText: string;
   keyboard: InlineKeyboardButton[][];
   gameAddress: string;
+  currentTickets?: number;
+  maxTickets?: number;
+  minTickets?: number;
 };
 
 const ACTIVE_LIST_HEADER_CALLBACK_DATA = "active_list:noop";
@@ -1300,19 +1303,89 @@ const filterActiveGameKeyboardRows = (
     )
     .filter((row) => row.length > 0);
 
-const extractCondensedGameLabel = (
+const parseActiveGameHeader = (
   messageText: string
-): string => {
+): {
+  gameType: string;
+  ticker: string | null;
+  amountPart: string | null;
+} => {
   const firstLine = messageText
     .split("\n")
     .map((line) => line.trim())
     .find((line) => line.length > 0);
-  const sanitized = firstLine?.replace(/<[^>]*>/g, "").trim() ?? "Game";
-  if (sanitized.length <= ACTIVE_GAME_LABEL_MAX_LENGTH) {
-    return sanitized;
+  const sanitized = firstLine?.replace(/<[^>]*>/g, "").trim() ?? "";
+  const [left, right] = sanitized.split("•").map((part) => part.trim());
+  const gameType = left || "Game";
+  const amountPart = right || null;
+
+  let ticker: string | null = null;
+  if (right) {
+    const withoutUsd = right.replace(/\([^)]*\)\s*$/, "").trim();
+    const tokens = withoutUsd.split(/\s+/).filter(Boolean);
+    ticker = (tokens.length > 0 ? tokens[tokens.length - 1] : null) ?? null;
   }
-  return `${sanitized.slice(0, ACTIVE_GAME_LABEL_MAX_LENGTH - 1)}…`;
+
+  return { gameType, ticker, amountPart };
 };
+
+const extractCondensedGameLabel = (
+  messageText: string,
+  currentTickets?: number,
+  maxTickets?: number
+): string => {
+  const { gameType, ticker } = parseActiveGameHeader(messageText);
+  const hasMax = Number.isFinite(maxTickets) && (maxTickets as number) > 0;
+  const counts = ` (${Math.max(0, Math.trunc(currentTickets ?? 0))}/${
+    hasMax ? Math.trunc(maxTickets as number) : "∞"
+  })`;
+  const baseLabel = `${gameType}${counts}${ticker ? ` • ${ticker}` : ""}`;
+  if (baseLabel.length <= ACTIVE_GAME_LABEL_MAX_LENGTH) {
+    return baseLabel;
+  }
+  return `${baseLabel.slice(0, ACTIVE_GAME_LABEL_MAX_LENGTH - 1)}…`;
+};
+
+const escapeRegex = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const formatActiveJoinLabel = (
+  amountPart?: string | null,
+  ticker?: string | null
+): string => {
+  let cleanedAmount = amountPart ?? null;
+  if (cleanedAmount && ticker) {
+    cleanedAmount = cleanedAmount.replace(
+      new RegExp(`\\s*${escapeRegex(ticker)}(?![\\w])`),
+      ""
+    );
+    cleanedAmount = cleanedAmount.replace(/\s{2,}/g, " ").trim();
+  }
+  const amountSegment = cleanedAmount ? ` • ${cleanedAmount}` : "";
+  return `🎮 Join${amountSegment}`;
+};
+
+const rewriteJoinButtons = (
+  row: InlineKeyboardButton[],
+  game: ActiveGameListing
+): InlineKeyboardButton[] =>
+  row.map((button) => {
+    if (
+      "callback_data" in button &&
+      (button as InlineKeyboardButton & { callback_data: string }).callback_data?.startsWith(
+        "join_"
+      )
+    ) {
+      return {
+        ...button,
+        text: formatActiveJoinLabel(
+          parseActiveGameHeader(game.messageText).amountPart,
+          parseActiveGameHeader(game.messageText).ticker
+        ),
+      };
+    }
+    return { ...button };
+  });
 
 const buildActiveGamesKeyboard = (
   games: ActiveGameListing[]
@@ -1322,13 +1395,17 @@ const buildActiveGamesKeyboard = (
   games.forEach((game) => {
     inlineKeyboard.push([
       {
-        text: extractCondensedGameLabel(game.messageText),
+        text: extractCondensedGameLabel(
+          game.messageText,
+          game.currentTickets,
+          game.maxTickets
+        ),
         callback_data: ACTIVE_LIST_HEADER_CALLBACK_DATA,
       },
     ]);
 
     filterActiveGameKeyboardRows(game.keyboard ?? []).forEach((row) => {
-      inlineKeyboard.push(cloneInlineKeyboardRow(row));
+      inlineKeyboard.push(rewriteJoinButtons(cloneInlineKeyboardRow(row), game));
     });
   });
 
