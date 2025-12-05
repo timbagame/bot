@@ -26,7 +26,7 @@ describe("advanced minimum players controls", () => {
     expect(getCallbackData(minPlayersRow[0])).toBe(
       "advanced_min_players_coinflip_1_4_-1"
     );
-    expect(minPlayersRow[1]?.text).toContain("Min players: 3");
+    expect(minPlayersRow[1]?.text).toContain("Min: 3");
     expect(getCallbackData(minPlayersRow[2])).toBe(
       "advanced_min_players_coinflip_1_4_1"
     );
