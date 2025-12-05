@@ -1381,7 +1381,11 @@ export class GameManager {
       fallback: "0.00",
     });
 
-    return `$${formatted}`;
+    const trimmed = formatted
+      .replace(/(\.\d*?[1-9])0+$/, "$1")
+      .replace(/\.0+$/, "");
+
+    return `$${trimmed}`;
   }
 
   private async getUsdApproximation(
