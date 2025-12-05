@@ -13,6 +13,7 @@ import {
   GameDatabase,
   type LeaderboardStatsRecord,
 } from "./utils/game-database";
+import { ChatDatabase } from "./utils/chat-database";
 import { GameManager } from "./utils/game";
 import { PDAManager } from "./utils/pda";
 import { formatUserFriendlyError } from "./utils/errors";
@@ -124,6 +125,7 @@ import { handleCoinflipCommand } from "./handlers/game";
 import { createGameSetupModule, GAME_SETUP_COPY } from "./handlers/game-setup";
 import { createGameCommandsModule } from "./handlers/game-commands";
 import { createGameCallbacksModule } from "./handlers/game-callbacks";
+import { createChatDefaultsModule } from "./handlers/chat-defaults";
 import {
   createWalletMenuModule,
   type WalletCacheSnapshot as WalletCacheSnapshotData,
@@ -383,6 +385,7 @@ void (async () => {
       feeBudget.getDefaultWrapFeeBufferLamports();
   }
 })();
+let chatDb = ChatDatabase.getInstance();
 let gameDb = GameDatabase.getInstance();
 const pendingGameCreations = new Set<string>();
 
@@ -573,6 +576,16 @@ export const __test_setGameManager = (manager: GameManager): void => {
 
 export const __test_getPendingGameCreations = (): Set<string> =>
   new Set(pendingGameCreations);
+
+export const __test_getChatDatabase = () => chatDb;
+
+export const __test_setChatDatabase = (db: ChatDatabase) => {
+  chatDb = db;
+};
+
+export const __test_resetChatDatabase = () => {
+  chatDb = ChatDatabase.getInstance();
+};
 
 export const __test_getGameDatabase = () => gameDb;
 
@@ -2363,6 +2376,7 @@ const gameCommandsModule = createGameCommandsModule({
   getRequiredTelegramIdForContext: (ctx, label) =>
     getRequiredTelegramIdForContext(ctx, label),
   gameSetupCopy: GAME_SETUP_COPY,
+  getChatGameSettings: (chatId) => chatDb.getChatGameSettings(chatId),
 });
 
 const {
@@ -2389,6 +2403,7 @@ const gameCallbacksModule = createGameCallbacksModule({
   getProgram: () => program,
   validateGameTokenData: (gameData) => validateGameTokenData(gameData),
   gameSetupCopy: GAME_SETUP_COPY,
+  getChatGameSettings: (chatId) => chatDb.getChatGameSettings(chatId),
 });
 
 const {
@@ -2397,6 +2412,42 @@ const {
   __test_handleGameSetupTextInput: handleGameSetupTextInputTest,
   __test_shouldSkipGenericGameCallback: shouldSkipGenericGameCallbackTest,
 } = gameCallbacksModule;
+
+const isUserGroupAdmin = async (
+  ctx: Context,
+  userId: number
+): Promise<boolean> => {
+  try {
+    if (!ctx.chat || ctx.chat.type === "private") return false;
+    const member = await ctx.api.getChatMember(ctx.chat.id, userId);
+    return member.status === "administrator" || member.status === "creator";
+  } catch (error) {
+    console.warn(`Error checking admin status for user ${userId}:`, error);
+    return false;
+  }
+};
+
+const replyToMessage = async (
+  ctx: Context,
+  text: string,
+  parseMode: "HTML" | "MarkdownV2" = "HTML"
+): Promise<void> => {
+  await ctx.reply(text, {
+    parse_mode: parseMode,
+    reply_to_message_id: ctx.message?.message_id,
+  });
+};
+
+const chatDefaultsModule = createChatDefaultsModule({
+  bot,
+  chatDb,
+  getTokenManager: () => tokenManager,
+  getGameManager: () => gameManager,
+  wrapCallbackHandler,
+  getOracleMaxPlayers,
+  isUserGroupAdmin,
+  replyToMessage,
+});
 
 registerGameCallbackHandlers();
 
@@ -2427,20 +2478,6 @@ const getPlayerData = async (
   const gameBalance = 0;
 
   return { keypair, tokenBalance, solBalance, wsolBalance, gameBalance };
-};
-
-const isUserGroupAdmin = async (
-  ctx: Context,
-  userId: number
-): Promise<boolean> => {
-  try {
-    if (!ctx.chat || ctx.chat.type === "private") return false;
-    const member = await ctx.api.getChatMember(ctx.chat.id, userId);
-    return member.status === "administrator" || member.status === "creator";
-  } catch (error) {
-    console.warn(`Error checking admin status for user ${userId}:`, error);
-    return false;
-  }
 };
 
 // ================================
@@ -2564,17 +2601,6 @@ const handleCommandError = async (
   commandName: string
 ): Promise<void> => {
   await handleCommandErrorHelper(ctx, error, commandName, wallet);
-};
-
-const replyToMessage = async (
-  ctx: Context,
-  text: string,
-  parseMode: "HTML" | "MarkdownV2" = "HTML"
-): Promise<void> => {
-  await ctx.reply(text, {
-    parse_mode: parseMode,
-    reply_to_message_id: ctx.message?.message_id,
-  });
 };
 
 const replyUsageError = async (
@@ -3325,116 +3351,10 @@ export const __test_clearTransactionCache = (): void => {
 // ================================
 
 bot.command("default", async (ctx: Context) => {
-  if (!ctx.from) return;
-
-  // Check if this is a private chat
-  if (ctx.chat?.type === "private") {
-    return replyToMessage(
-      ctx,
-      "🚫 Default tokens can only be set in groups or channels."
-    );
-  }
+  if (!ctx.from || !ctx.chat) return;
 
   const args = ctx.message?.text?.split(" ");
-
-  if (!args || args.length < 2) {
-    // Show current default token (anyone can view)
-    const chatConfig = tokenManager.getChatDefaultToken(ctx.chat!.id);
-    if (chatConfig) {
-      const setBy = await gameManager.getUsernameFromTelegramId(
-        ctx,
-        chatConfig.set_by_telegram_id
-      );
-      const setByDisplay = setBy ? `@${escapeHtml(setBy)}` : "Unknown user";
-      return replyToMessage(
-        ctx,
-        `📄 Current default token: ${escapeHtml(chatConfig.token_ticker)}\n` +
-          `🏷️ Token mint: <code>${escapeHtml(chatConfig.token_mint)}</code>\n` +
-          `👤 Set by: ${setByDisplay}\n` +
-          `📅 Set at: ${new Date(chatConfig.set_at).toLocaleString()}\n\n` +
-          `Use /default &lt;TOKEN_TICKER&gt; to change or /default clear to remove.`
-      );
-    } else {
-      const defaultToken = tokenManager.getDefaultToken();
-      return replyToMessage(
-        ctx,
-        `📄 No default token set for this chat.\n` +
-          `🔄 Using bot default: ${escapeHtml(defaultToken.tokenTicker)}\n\n` +
-          `Use /default &lt;TOKEN_TICKER&gt; to set a default token for this chat.`
-      );
-    }
-  }
-
-  // For changing the default token, check admin permissions
-  const telegramId = getTelegramId(ctx);
-  if (telegramId === 0n) {
-    return replyToMessage(
-      ctx,
-      "🔒 Unable to verify permissions for this user."
-    );
-  }
-
-  const isAdmin = await isUserGroupAdmin(ctx, Number(telegramId));
-  if (!isAdmin) {
-    return replyToMessage(
-      ctx,
-      "🔒 Only group administrators can change the default token.\n\n" +
-        "💡 Contact a group admin to set or change the default token for this chat."
-    );
-  }
-
-  const tokenInput = args[1];
-  if (!tokenInput) {
-    return replyToMessage(ctx, "Please provide a token ticker.");
-  }
-
-  // Handle clear command
-  if (
-    tokenInput.toUpperCase() === "CLEAR" ||
-    tokenInput.toUpperCase() === "REMOVE"
-  ) {
-    tokenManager.removeChatDefaultToken(ctx.chat!.id);
-    return replyToMessage(
-      ctx,
-      "✅ Default token cleared for this chat. Using bot default token now."
-    );
-  }
-
-  // Try to find the token
-  const knownToken = tokenManager.getKnownTokenByTicker(tokenInput);
-  if (!knownToken) {
-    const allTokens = tokenManager.getAllKnownTokens();
-    const escapedTokenInput = escapeHtml(tokenInput.toUpperCase());
-    let response = `❌ Token "${escapedTokenInput}" not found.\n\n`;
-
-    if (allTokens.length > 0) {
-      response += "📋 Known tokens:\n";
-      for (const token of allTokens.slice(0, 10)) {
-        // Show max 10 tokens
-        response += `• ${escapeHtml(token.token_ticker)}\n`;
-      }
-      if (allTokens.length > 10) {
-        response += `... and ${allTokens.length - 10} more.`;
-      }
-    } else {
-      response += "💡 Contact the bot administrator to add new tokens.";
-    }
-
-    return replyToMessage(ctx, response);
-  }
-
-  // Set the default token
-  tokenManager.setChatDefaultToken(
-    ctx.chat!.id,
-    knownToken.token_mint,
-    knownToken.token_ticker,
-    getTelegramId(ctx).toString()
-  );
-
-  return replyToMessage(
-    ctx,
-    formatDefaultTokenSetMessage(knownToken.token_ticker, knownToken.token_mint)
-  );
+  await chatDefaultsModule.handleDefaultCommand(ctx, args);
 });
 
 // ================================
@@ -3464,7 +3384,7 @@ bot.command("help", async (ctx: Context) => {
     "/lb - Shorthand for leaderboard command",
     "",
     "<b>🪙 Token Management:</b>",
-    "/default [TOKEN] - Show/set default token for this chat (admin only to set)",
+    "/default - View chat defaults (token, players, timeout)",
     "",
     "<b>🔧 Utility Commands:</b>",
     "/oracle - Check Oracle configuration",
@@ -3472,7 +3392,7 @@ bot.command("help", async (ctx: Context) => {
     "<b>ℹ️ Important:</b> ",
     "• Your player balance account will be automatically initialized when needed",
     "• Specify token after amount: /coinflip 100 TIMBA 2 or /tip @user 50 SOL",
-    "• Group admins can set default tokens with /default &lt;TOKEN&gt;",
+    "• Group admins can set chat defaults (token, limits, timeout) via /default",
 
     "• Contact bot administrator to add support for new SPL tokens",
   ];
@@ -4387,7 +4307,7 @@ const HELP_SECTIONS: Record<HelpSectionKey, HelpSectionConfig> = {
     text:
       "🔧 <b>Utility Commands</b>\n\n" +
       "<code>/oracle</code> - Check oracle status\n" +
-      "<code>/default [TOKEN]</code> - Show/set chat default token\n\n" +
+      "<code>/default</code> - Manage chat defaults (token, players, timeout)\n\n" +
       "🔐 <b>Security:</b>\n" +
       "• Some commands are private-chat only\n" +
       "• Admin commands require permissions\n" +
@@ -4947,6 +4867,12 @@ bot.on("message:text", async (ctx, next) => {
       await handleSwapToTokenInput(ctx, inputSession, userMessage);
     } else if (inputSession.type === "swap_custom_amount") {
       await handleSwapCustomAmountInput(ctx, inputSession, userMessage);
+    } else if (inputSession.type === "chat_defaults") {
+      await chatDefaultsModule.handleSettingsInput(
+        ctx,
+        inputSession,
+        userMessage
+      );
     }
 
     const updatedSession = getInputSession(sessionKey);

@@ -1,4 +1,4 @@
-import type { ChatTokenConfig } from "../types";
+import type { ChatGameSettings, ChatTokenConfig } from "../types";
 import { BaseDatabase, initializeDatabaseSingleton } from "./base-database";
 
 /**
@@ -28,6 +28,14 @@ export class ChatDatabase extends BaseDatabase {
           chat_title TEXT,
           chat_type TEXT,
           created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )`,
+        `CREATE TABLE IF NOT EXISTS chat_game_settings (
+          chat_id INTEGER PRIMARY KEY,
+          coinflip_max_players INTEGER,
+          giveaway_max_players INTEGER,
+          timeout_seconds INTEGER,
+          set_by_telegram_id TEXT,
           updated_at INTEGER NOT NULL
         )`,
       ],
@@ -73,6 +81,92 @@ export class ChatDatabase extends BaseDatabase {
       "SELECT * FROM chat_token_configs ORDER BY set_at DESC",
       [],
       "getting all chat token configs"
+    );
+  }
+
+  // ================================
+  // CHAT GAME SETTINGS METHODS
+  // ================================
+
+  public upsertChatGameSettings(
+    chatId: number,
+    settings: Partial<Omit<ChatGameSettings, "chat_id" | "updated_at">> & {
+      set_by_telegram_id?: string | null;
+    }
+  ): ChatGameSettings {
+    const existing = this.getChatGameSettings(chatId);
+    const now = Date.now();
+
+    const hasCoinflip = Object.prototype.hasOwnProperty.call(
+      settings,
+      "coinflip_max_players"
+    );
+    const hasGiveaway = Object.prototype.hasOwnProperty.call(
+      settings,
+      "giveaway_max_players"
+    );
+    const hasTimeout = Object.prototype.hasOwnProperty.call(
+      settings,
+      "timeout_seconds"
+    );
+    const hasSetBy = Object.prototype.hasOwnProperty.call(
+      settings,
+      "set_by_telegram_id"
+    );
+
+    const next: ChatGameSettings = {
+      chat_id: chatId,
+      coinflip_max_players: hasCoinflip
+        ? settings.coinflip_max_players ?? null
+        : existing?.coinflip_max_players ?? null,
+      giveaway_max_players: hasGiveaway
+        ? settings.giveaway_max_players ?? null
+        : existing?.giveaway_max_players ?? null,
+      timeout_seconds: hasTimeout
+        ? settings.timeout_seconds ?? null
+        : existing?.timeout_seconds ?? null,
+      set_by_telegram_id: hasSetBy
+        ? settings.set_by_telegram_id ?? null
+        : existing?.set_by_telegram_id ?? null,
+      updated_at: now,
+    };
+
+    this.run(
+      `INSERT OR REPLACE INTO chat_game_settings (
+          chat_id,
+          coinflip_max_players,
+          giveaway_max_players,
+          timeout_seconds,
+          set_by_telegram_id,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        next.chat_id,
+        next.coinflip_max_players ?? null,
+        next.giveaway_max_players ?? null,
+        next.timeout_seconds ?? null,
+        next.set_by_telegram_id ?? null,
+        next.updated_at,
+      ],
+      "saving chat game settings"
+    );
+
+    return next;
+  }
+
+  public getChatGameSettings(chatId: number): ChatGameSettings | null {
+    return this.get<ChatGameSettings>(
+      "SELECT * FROM chat_game_settings WHERE chat_id = ?",
+      [chatId],
+      "getting chat game settings"
+    );
+  }
+
+  public clearChatGameSettings(chatId: number): void {
+    this.run(
+      "DELETE FROM chat_game_settings WHERE chat_id = ?",
+      [chatId],
+      "clearing chat game settings"
     );
   }
 

@@ -40,6 +40,7 @@ import {
   upsertGameSetupSession,
   type GameSetupSessionState,
 } from "../utils/user-state";
+import type { ChatGameSettings } from "../types";
 import { isMessageMissing } from "../utils/telegram-errors";
 import type { WalletManager } from "../utils/wallet";
 import type { GameManager } from "../utils/game";
@@ -72,6 +73,7 @@ export type GameCallbacksModuleDeps = {
     error?: string;
   };
   gameSetupCopy: Record<"coinflip" | "giveaway", GameSetupCopy>;
+  getChatGameSettings?: (chatId: number) => ChatGameSettings | null;
 };
 
 type HandleJoinGameFn = (
@@ -142,10 +144,13 @@ const resolveAdvancedOptions = (
   gameType: "coinflip" | "giveaway",
   players: number,
   session?: Partial<GameSetupSessionState>,
-  maxPlayersLimit?: number
+  maxPlayersLimit?: number,
+  chatSettings?: ChatGameSettings | null
 ): AdvancedOptionState => {
   const maxPlayersCeil = Math.max(players, getMinPlayersFloor(gameType));
-  const timeoutSeconds = clampTimeoutSeconds(session?.timeoutSeconds);
+  const timeoutSeconds = clampTimeoutSeconds(
+    session?.timeoutSeconds ?? chatSettings?.timeout_seconds ?? undefined
+  );
   const minPlayers = clampMinPlayers(
     gameType,
     session?.minPlayers,
@@ -469,6 +474,15 @@ export const createGameCallbacksModule = (
 ): GameCallbacksModule => {
   const getGameManager = () => deps.getGameManager();
 
+  const resolveChatSettingsForContext = (
+    ctx: Context,
+    session?: GameSetupSessionState
+  ): ChatGameSettings | null => {
+    const chatId = session?.chatId ?? ctx.chat?.id;
+    if (typeof chatId !== "number") return null;
+    return deps.getChatGameSettings?.(chatId) ?? null;
+  };
+
   const handleCallbackError = async (
     ctx: Context,
     error: unknown,
@@ -766,11 +780,13 @@ export const createGameCallbacksModule = (
         }
 
         const amountValue = userSession.amount ?? "0";
+        const chatSettings = resolveChatSettingsForContext(ctx, userSession);
         const advanced = resolveAdvancedOptions(
           userSession.gameType as "coinflip" | "giveaway",
           players,
           userSession,
-          userSession.maxPlayersLimit ?? deps.getOracleMaxPlayers()
+          userSession.maxPlayersLimit ?? deps.getOracleMaxPlayers(),
+          chatSettings
         );
         const confirmMessage = buildGameConfirmationMessage({
           gameType: userSession.gameType as "coinflip" | "giveaway",
@@ -1097,11 +1113,13 @@ export const createGameCallbacksModule = (
             const amount = ctx.match![2] as string;
             const players = Number.parseInt(ctx.match![3] as string, 10);
 
+            const chatSettings = resolveChatSettingsForContext(ctx, session);
             const advanced = resolveAdvancedOptions(
               gameType,
               players,
               session,
-              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers()
+              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers(),
+              chatSettings
             );
 
             const confirmMessage = buildGameConfirmationMessage({
@@ -1162,11 +1180,13 @@ export const createGameCallbacksModule = (
             const amount = ctx.match![2] as string;
             const players = Number.parseInt(ctx.match![3] as string, 10);
 
+            const chatSettings = resolveChatSettingsForContext(ctx, session);
             const advanced = resolveAdvancedOptions(
               gameType,
               players,
               session,
-              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers()
+              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers(),
+              chatSettings
             );
 
             await presentAdvancedMenu({
@@ -1222,7 +1242,8 @@ export const createGameCallbacksModule = (
               gameType,
               players,
               { ...session, isPrivate },
-              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers()
+              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers(),
+              resolveChatSettingsForContext(ctx, session)
             );
 
             await presentAdvancedMenu({
@@ -1282,7 +1303,8 @@ export const createGameCallbacksModule = (
               gameType,
               players,
               { ...session, timeoutSeconds: nextTimeoutSeconds },
-              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers()
+              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers(),
+              resolveChatSettingsForContext(ctx, session)
             );
 
             await presentAdvancedMenu({
@@ -1353,7 +1375,8 @@ export const createGameCallbacksModule = (
               gameType,
               players,
               { ...session, minPlayers: nextMinPlayers },
-              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers()
+              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers(),
+              resolveChatSettingsForContext(ctx, session)
             );
 
             await presentAdvancedMenu({
@@ -1408,7 +1431,8 @@ export const createGameCallbacksModule = (
               gameType,
               players,
               session,
-              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers()
+              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers(),
+              resolveChatSettingsForContext(ctx, session)
             );
 
             await presentConfirmMenu({
