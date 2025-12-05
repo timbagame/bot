@@ -34,6 +34,8 @@ test("GameDatabase: CRUD for games, mappings, participants, and slot updates", (
   const withMsg = db.getGame("gameA")!;
   expect(withMsg.message_id).toBe(777);
   expect(withMsg.chat_id).toBe(999);
+  const activeByChat = db.getActiveGamesByChat(999);
+  expect(activeByChat.map((g) => g.game_address)).toContain("gameA");
   db.clearGameMessage("gameA");
   const clearedMsg = db.getGame("gameA")!;
   expect(clearedMsg.message_id).toBeNull();
@@ -64,6 +66,7 @@ test("GameDatabase: CRUD for games, mappings, participants, and slot updates", (
   // Active and Recent queries
   const activeForCreator = db.getActiveGames("tg_creator");
   expect(activeForCreator.length).toBe(1);
+  expect(db.getActiveGamesByChat(98765).length).toBe(0);
 
   // Add mapping for participant and mark completion; query recents with mapping
   db.savePlayerMapping("pub_p2", "tg_p2");

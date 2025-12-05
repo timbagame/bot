@@ -4684,6 +4684,61 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     };
   }
 
+  public async getChatActiveGames(
+    ctx: Context,
+    chatId: number
+  ): Promise<
+    Array<{
+      messageText: string;
+      keyboard: any[];
+      gameAddress: string;
+    }>
+  > {
+    const activeGamesData = this.gameDb.getActiveGamesByChat(chatId);
+
+    const formattedGames = await Promise.all(
+      activeGamesData.map(async (gameData) => {
+        if (!gameData?.game_address) {
+          return null;
+        }
+
+        let gamePda: PublicKey;
+        try {
+          gamePda = new PublicKey(gameData.game_address);
+        } catch (error) {
+          console.error(`Invalid game address: ${gameData.game_address}`, error);
+          return null;
+        }
+
+        const creatorUsername = await this.getGameCreatorUsername(
+          ctx,
+          gameData.game_address
+        );
+
+        const { messageText, keyboard } = await this.formatGameMessage(
+          ctx,
+          gamePda,
+          gameData.game_type || "game",
+          Number(gameData.amount) || 0,
+          creatorUsername,
+          gameData.status || "active",
+          gameData.token_ticker || gameData.token_mint || DEFAULT_TOKEN_TICKER,
+          gameData.winner_address,
+          undefined,
+          undefined,
+          { suppressMentions: true }
+        );
+
+        return { messageText, keyboard, gameAddress: gameData.game_address };
+      })
+    );
+
+    return formattedGames.filter(
+      (game): game is { messageText: string; keyboard: any[]; gameAddress: string } =>
+        game !== null
+    );
+  }
+
   private async processActiveGames(
     ctx: Context,
     activeGamesData: any[]

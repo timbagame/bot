@@ -3378,7 +3378,7 @@ bot.command("help", async (ctx: Context) => {
     "/giveaway &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Create a new giveaway",
     "/ga &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Shorthand for giveaway command",
 
-    "/active - Show your active games",
+    "/active - Show active games in this chat",
     "/games - Show your recent games",
     "/leaderboard - Show top 10 players in this group (groups only)",
     "/lb - Shorthand for leaderboard command",
@@ -3413,9 +3413,37 @@ bot.command("active", async (ctx: Context) => {
   }
 
   try {
+    if (isGroupChat(ctx)) {
+      if (ctx.chat?.id == null) {
+        await ctx.reply("Unable to determine chat for this command.");
+        return;
+      }
+
+      const chatActiveGames = await gameManager.getChatActiveGames(
+        ctx,
+        ctx.chat.id
+      );
+
+      if (chatActiveGames.length === 0) {
+        await ctx.reply("No active games in this chat.", {
+          reply_to_message_id: ctx.message?.message_id,
+        });
+        return;
+      }
+
+      for (const game of chatActiveGames) {
+        await ctx.reply(game.messageText, {
+          parse_mode: "HTML",
+          reply_markup: { inline_keyboard: game.keyboard },
+          reply_to_message_id: ctx.message?.message_id,
+        });
+      }
+      return;
+    }
+
     const { activeGames } = await gameManager.getUserGames(ctx, telegramId);
 
-    let response = activeGames || "You don't have any active games.";
+    const response = activeGames || "You don't have any active games.";
 
     await ctx.reply(response, {
       parse_mode: "HTML",
