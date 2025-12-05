@@ -2307,46 +2307,67 @@ export class WalletManager {
       throw new Error("No signers provided");
     }
 
-    const latestBlockhash = await this.getLatestBlockhash();
-    const message = new TransactionMessage({
-      payerKey: signers[0]!.publicKey,
-      recentBlockhash: latestBlockhash.blockhash,
-      instructions: instructions,
-    }).compileToV0Message();
+    let lastError: unknown;
 
-    const tx = new VersionedTransaction(message);
-    tx.sign(signers);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const latestBlockhash = await this.getLatestBlockhash(attempt > 0);
+      const message = new TransactionMessage({
+        payerKey: signers[0]!.publicKey,
+        recentBlockhash: latestBlockhash.blockhash,
+        instructions: instructions,
+      }).compileToV0Message();
 
-    let signature: string;
-    try {
-      signature = await this.sendVersionedTransactionWithRetry(tx, {
-        skipPreflight: false,
-        preflightCommitment: "confirmed",
-        maxRetries: 3,
-      });
-    } catch (error: any) {
-      if (error instanceof SendTransactionError) {
-        try {
-          const logs = await error.getLogs(this.connection);
-          if (logs && logs.length > 0) {
-            console.error("Transaction simulation logs:", logs.join("\n"));
+      const tx = new VersionedTransaction(message);
+      tx.sign(signers);
+
+      try {
+        const signature = await this.sendVersionedTransactionWithRetry(tx, {
+          skipPreflight: false,
+          preflightCommitment: "confirmed",
+          maxRetries: 3,
+        });
+
+        console.log(`📤 Transaction sent: ${signature}`);
+        const now = Date.now();
+        this.prunePendingSignatures(now);
+        this.pendingSignatures.set(signature, {
+          blockhash: latestBlockhash.blockhash,
+          lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+          recordedAt: now,
+        });
+        return signature;
+      } catch (error: any) {
+        lastError = error;
+
+        if (error instanceof SendTransactionError) {
+          try {
+            const logs = await error.getLogs(this.connection);
+            if (logs && logs.length > 0) {
+              console.error("Transaction simulation logs:", logs.join("\n"));
+            }
+          } catch (logError) {
+            console.error("Failed to fetch transaction logs:", logError);
           }
-        } catch (logError) {
-          console.error("Failed to fetch transaction logs:", logError);
+
+          const normalizedMessage = error?.message?.toLowerCase?.() ?? "";
+          const isSignatureFailure = normalizedMessage.includes(
+            "signature verification failure"
+          );
+
+          if (isSignatureFailure && attempt === 0) {
+            console.warn(
+              "⚠️ Signature verification failed; retrying send with a fresh blockhash"
+            );
+            this.clearBlockhashCache();
+            continue;
+          }
         }
+
+        throw error;
       }
-      throw error;
     }
 
-    console.log(`📤 Transaction sent: ${signature}`);
-    const now = Date.now();
-    this.prunePendingSignatures(now);
-    this.pendingSignatures.set(signature, {
-      blockhash: latestBlockhash.blockhash,
-      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-      recordedAt: now,
-    });
-    return signature;
+    throw lastError ?? new Error("Failed to send transaction");
   }
 
   public async sendAndConfirmWithResubmits(
@@ -2541,12 +2562,13 @@ export class WalletManager {
     }
   }
 
-  public async getLatestBlockhash(): Promise<{
+  public async getLatestBlockhash(forceRefresh = false): Promise<{
     blockhash: string;
     lastValidBlockHeight: number;
   }> {
     const now = Date.now();
     if (
+      !forceRefresh &&
       this.blockhashCache &&
       now - this.blockhashCache.timestamp < BLOCKHASH_CACHE_DURATION
     ) {
@@ -2603,5 +2625,9 @@ export class WalletManager {
       signature: result.signature,
       amountLamports: result.amountLamports,
     };
+  }
+
+  private clearBlockhashCache(): void {
+    this.blockhashCache = null;
   }
 }
