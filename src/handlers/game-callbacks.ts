@@ -898,17 +898,11 @@ export const createGameCallbacksModule = (
 
       const formattedGameTypeForPlayers = toTitleCase(userSession.gameType);
       const playerMessage = [
-        `<b>${formattedGameTypeForPlayers} - Choose Players</b>`,
+        `<b>${formattedGameTypeForPlayers} - Choose Maximum Players</b>`,
         "",
         `Amount: <b>${amountFormatted} ${tokenTicker}</b>`,
         "",
         "Select the number of players:",
-        "",
-        userSession.gameType === "coinflip"
-          ? "• All players compete for the total stakes"
-          : "• More players = higher chance for everyone",
-        "",
-        "Choose number of players:",
       ].join("\n");
 
       try {
@@ -1058,19 +1052,13 @@ export const createGameCallbacksModule = (
 
             const formattedGameType = toTitleCase(gameType);
 
-            const playerMessage = [
-              `<b>${formattedGameType} - Choose Players</b>`,
-              "",
-              `Amount: <b>${formattedAmount} ${tokenContext.tokenTicker}</b>`,
-              "",
-              "Select the number of players:",
-              "",
-              gameType === "coinflip"
-                ? "• All players compete for the total stakes"
-                : "• More players = higher chance for everyone",
-              "",
-              "Choose number of players:",
-            ].join("\n");
+    const playerMessage = [
+      `<b>${formattedGameType} - Choose Maximum Players</b>`,
+      "",
+      `Amount: <b>${formattedAmount} ${tokenContext.tokenTicker}</b>`,
+      "",
+      "Select the number of players:",
+    ].join("\n");
 
             await respondWithMenu(ctx, {
               text: playerMessage,
