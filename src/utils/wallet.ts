@@ -2604,4 +2604,17 @@ export class WalletManager {
       amountLamports: result.amountLamports,
     };
   }
+  public getFriendlyErrorMessage(error: any): string {
+    const message = error?.message || String(error);
+    if (message.includes("Account does not exist")) {
+      return "Game account not found or has expired.";
+    }
+    if (message.includes("insufficient funds")) {
+      return "Insufficient funds to join the game.";
+    }
+    if (message.includes("0x1771")) {
+      return "Slippage tolerance exceeded.";
+    }
+    return "An error occurred while joining the game. Please try again.";
+  }
 }
