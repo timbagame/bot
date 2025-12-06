@@ -3532,6 +3532,7 @@ bot.command("help", async (ctx: Context) => {
     "/ga &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Shorthand for giveaway command",
 
     "/active - Show active games in this chat",
+    "/public - Show all active public games",
     "/games - Show your recent games",
     "/leaderboard - Show top 10 players in this group (groups only)",
     "/lb - Shorthand for leaderboard command",
