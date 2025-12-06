@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { Bot } from "grammy";
 import { createChatDefaultsModule, __test_buildSettingsSummary } from "../src/handlers/chat-defaults";
 import { ChatDatabase } from "../src/utils/chat-database";
+import { GameDatabase } from "../src/utils/game-database";
 import { resetTestDatabase } from "./helpers/database";
 import type { InputSessionState } from "../src/utils/user-state";
 
@@ -57,11 +58,15 @@ const buildMockContext = () => {
 
 describe("chat defaults module", () => {
   let chatDb: ChatDatabase;
+  let gameDb: GameDatabase;
 
   beforeEach(() => {
     resetTestDatabase("chat-settings.sqlite");
+    resetTestDatabase("games.sqlite");
     ChatDatabase.resetForTesting();
+    GameDatabase.resetForTesting();
     chatDb = ChatDatabase.getInstance();
+    gameDb = GameDatabase.getInstance();
   });
 
   test("builds summary with chat overrides", async () => {
@@ -76,6 +81,7 @@ describe("chat defaults module", () => {
     const summary = await __test_buildSettingsSummary(99, {
       bot,
       chatDb,
+      gameDb,
       getTokenManager: () => tokenManager,
       getGameManager: () => ({
         getUsernameFromTelegramId: async () => "alice",
@@ -100,6 +106,7 @@ describe("chat defaults module", () => {
     const module = createChatDefaultsModule({
       bot,
       chatDb,
+      gameDb,
       getTokenManager: () => tokenManager,
       getGameManager: () => ({
         getUsernameFromTelegramId: async () => null,
@@ -129,5 +136,179 @@ describe("chat defaults module", () => {
     const updated = chatDb.getChatGameSettings(99)!;
     expect(updated.timeout_seconds).toBe(7200);
     expect(replies.some((text) => text.includes("Default game timeout"))).toBe(true);
+  });
+
+  test("displays username from gameDb when available", async () => {
+    const tokenManager = baseTokenManager();
+    tokenManager.setChatDefaultToken(99, "mint", "AAA", "12345");
+
+    // Save player mapping with display name
+    gameDb.savePlayerMapping("pubkey123", "12345", "@alice");
+
+    const summary = await __test_buildSettingsSummary(99, {
+      bot,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (ctx, next) =>
+        await handler(ctx, next),
+      getOracleMaxPlayers: () => 50,
+      isUserGroupAdmin: async () => true,
+      replyToMessage: async () => {},
+    });
+
+    expect(summary).toContain("set by @alice");
+    expect(summary).not.toContain("User 12345");
+  });
+
+  test("displays username with @ prefix when display name lacks it", async () => {
+    const tokenManager = baseTokenManager();
+    tokenManager.setChatDefaultToken(99, "mint", "AAA", "12345");
+
+    // Save player mapping with display name without @ prefix
+    gameDb.savePlayerMapping("pubkey123", "12345", "bob");
+
+    const summary = await __test_buildSettingsSummary(99, {
+      bot,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (ctx, next) =>
+        await handler(ctx, next),
+      getOracleMaxPlayers: () => 50,
+      isUserGroupAdmin: async () => true,
+      replyToMessage: async () => {},
+    });
+
+    expect(summary).toContain("set by @bob");
+  });
+
+  test("falls back to telegram ID when no display name in gameDb", async () => {
+    const tokenManager = baseTokenManager();
+    tokenManager.setChatDefaultToken(99, "mint", "AAA", "999888");
+    // No player mapping saved for this telegram ID
+
+    const summary = await __test_buildSettingsSummary(99, {
+      bot,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (ctx, next) =>
+        await handler(ctx, next),
+      getOracleMaxPlayers: () => 50,
+      isUserGroupAdmin: async () => true,
+      replyToMessage: async () => {},
+    });
+
+    expect(summary).toContain("set by User 999888");
+    expect(summary).not.toContain("Unknown user");
+  });
+
+  test("handleSettingsInput clears token when input is 'clear'", async () => {
+    const tokenManager = baseTokenManager();
+    tokenManager.setChatDefaultToken(99, "mint", "AAA", "123");
+    const { ctx, replies } = buildMockContext();
+
+    const module = createChatDefaultsModule({
+      bot,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (ctx, next) =>
+        await handler(ctx, next),
+      getOracleMaxPlayers: () => 25,
+      isUserGroupAdmin: async () => true,
+      replyToMessage: async (_ctx, text) => {
+        replies.push(text);
+      },
+    });
+
+    const session: InputSessionState = {
+      type: "chat_defaults",
+      chatId: 99,
+      messageId: 11,
+      setting: "token",
+    } as any;
+
+    await module.handleSettingsInput(ctx as any, session, "clear");
+
+    expect(tokenManager.getChatDefaultToken()).toBeNull();
+    expect(replies.some((text) => text.includes("Default token cleared"))).toBe(true);
+  });
+
+  test("handleSettingsInput clears token when input is 'REMOVE' (case insensitive)", async () => {
+    const tokenManager = baseTokenManager();
+    tokenManager.setChatDefaultToken(99, "mint", "AAA", "123");
+    const { ctx, replies } = buildMockContext();
+
+    const module = createChatDefaultsModule({
+      bot,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (ctx, next) =>
+        await handler(ctx, next),
+      getOracleMaxPlayers: () => 25,
+      isUserGroupAdmin: async () => true,
+      replyToMessage: async (_ctx, text) => {
+        replies.push(text);
+      },
+    });
+
+    const session: InputSessionState = {
+      type: "chat_defaults",
+      chatId: 99,
+      messageId: 11,
+      setting: "token",
+    } as any;
+
+    await module.handleSettingsInput(ctx as any, session, "REMOVE");
+
+    expect(tokenManager.getChatDefaultToken()).toBeNull();
+    expect(replies.some((text) => text.includes("Default token cleared"))).toBe(true);
+  });
+
+  test("handleSettingsInput shows supported tokens list for unknown token", async () => {
+    const tokenManager = baseTokenManager();
+    tokenManager.getSupportedGameTokens = () => [
+      { mint: "m1", ticker: "TIMBA" },
+      { mint: "m2", ticker: "SOL" },
+    ];
+    const { ctx, replies } = buildMockContext();
+
+    const module = createChatDefaultsModule({
+      bot,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (ctx, next) =>
+        await handler(ctx, next),
+      getOracleMaxPlayers: () => 25,
+      isUserGroupAdmin: async () => true,
+      replyToMessage: async (_ctx, text) => {
+        replies.push(text);
+      },
+    });
+
+    const session: InputSessionState = {
+      type: "chat_defaults",
+      chatId: 99,
+      messageId: 11,
+      setting: "token",
+    } as any;
+
+    await module.handleSettingsInput(ctx as any, session, "UNKNOWN");
+
+    const errorReply = replies.find((text) => text.includes("not found"));
+    expect(errorReply).toBeDefined();
+    expect(errorReply).toContain("Supported tokens");
+    expect(errorReply).toContain("TIMBA");
+    expect(errorReply).toContain("SOL");
   });
 });

@@ -842,6 +842,17 @@ export class TokenManager {
     this.chatDb.removeChatDefaultToken(chatId);
   }
 
+  /**
+   * Get the list of hardcoded tokens that are supported for games.
+   * This returns only the pre-configured tokens, not tokens discovered via trading.
+   */
+  public getSupportedGameTokens(): Array<{ mint: string; ticker: string }> {
+    return [
+      { mint: this.defaultTokenMint, ticker: this.defaultTokenTicker },
+      ...TOKENS_LIST.filter(t => t.mint !== this.defaultTokenMint),
+    ];
+  }
+
   public getAllKnownTokens(): KnownToken[] {
     return this.tokenDb.getAllKnownTokens();
   }

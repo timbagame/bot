@@ -2594,6 +2594,7 @@ const replyToMessage = async (
 const chatDefaultsModule = createChatDefaultsModule({
   bot,
   chatDb,
+  gameDb,
   getTokenManager: () => tokenManager,
   getGameManager: () => gameManager,
   wrapCallbackHandler,

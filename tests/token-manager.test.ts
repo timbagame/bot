@@ -573,3 +573,38 @@ test("getAllApprovedTokensWithMetadata refreshes cache when tokens removed exter
     Date.now = originalNow;
   }
 });
+
+test("getSupportedGameTokens returns hardcoded tokens including default", () => {
+  const tm = TokenManager.getInstance(makeWalletStub(), "MY_DEFAULT_MINT", "MYDEF");
+
+  const supported = tm.getSupportedGameTokens();
+
+  // Should include the default token
+  expect(supported.some((t) => t.mint === "MY_DEFAULT_MINT" && t.ticker === "MYDEF")).toBe(true);
+
+  // Should have multiple tokens from TOKENS_LIST
+  expect(supported.length).toBeGreaterThan(1);
+
+  // Each entry should have mint and ticker
+  for (const token of supported) {
+    expect(typeof token.mint).toBe("string");
+    expect(typeof token.ticker).toBe("string");
+    expect(token.mint.length).toBeGreaterThan(0);
+    expect(token.ticker.length).toBeGreaterThan(0);
+  }
+});
+
+test("getSupportedGameTokens does not include dynamically discovered tokens", async () => {
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const discoveredMint = Keypair.generate().publicKey.toBase58();
+
+  // Discover a token via tip parsing
+  await tm.parseAmount(["/tip", "1", discoveredMint], 1, 999, "tip");
+
+  // Verify it was added to known tokens
+  expect(tm.getKnownTokenByMint(discoveredMint)).not.toBeNull();
+
+  // But it should NOT appear in supported game tokens
+  const supported = tm.getSupportedGameTokens();
+  expect(supported.some((t) => t.mint === discoveredMint)).toBe(false);
+});

@@ -1,4 +1,5 @@
 import { InlineKeyboard, type Bot, type Context } from "grammy";
+import { GameDatabase } from "../utils/game-database";
 
 import {
   DEFAULT_COINFLIP_MAX_PLAYERS,
@@ -66,6 +67,7 @@ type SettingsTarget = "token" | "coinflip" | "giveaway" | "timeout";
 type ChatDefaultsModuleDeps = {
   bot: Bot;
   chatDb: ChatDatabase;
+  gameDb: GameDatabase;
   getTokenManager: () => TokenManager;
   getGameManager: () => GameManager;
   wrapCallbackHandler: WrapCallbackHandler;
@@ -103,16 +105,15 @@ const buildSettingsSummary = async (
   const chatToken = tokenManager.getChatDefaultToken(chatId);
   const defaultToken = tokenManager.getDefaultToken();
   const chatSettings = deps.chatDb.getChatGameSettings(chatId);
-  const gameManager = deps.getGameManager();
 
   let tokenLine = `🪙 Default token: ${escapeHtml(DEFAULT_TOKEN_TICKER)} (bot default)`;
 
   if (chatToken) {
-    const setBy = await gameManager.getUsernameFromTelegramId(
-      undefined as any,
-      chatToken.set_by_telegram_id
-    );
-    const setByDisplay = setBy ? `@${escapeHtml(setBy)}` : "Unknown user";
+    // Look up display name from game database (username mappings)
+    const setByDisplayName = deps.gameDb.getPlayerDisplayName(chatToken.set_by_telegram_id);
+    const setByDisplay = setByDisplayName
+      ? (setByDisplayName.startsWith('@') ? escapeHtml(setByDisplayName) : `@${escapeHtml(setByDisplayName)}`)
+      : `User ${chatToken.set_by_telegram_id}`;
     tokenLine =
       `🪙 Default token: ${escapeHtml(chatToken.token_ticker)} (set by ${setByDisplay})` +
       `\n🏷️ Mint: <code>${escapeHtml(chatToken.token_mint)}</code>`;
@@ -184,17 +185,27 @@ const handleTokenChange = async (
   tokenInput: string,
   deps: ChatDefaultsModuleDeps
 ): Promise<void> => {
+  // Handle 'clear' command to remove chat default token
+  if (/^(clear|remove)$/i.test(tokenInput.trim())) {
+    deps.getTokenManager().removeChatDefaultToken(ctx.chat!.id);
+    await deps.replyToMessage(
+      ctx,
+      "✅ Default token cleared for this chat. Using bot default token now."
+    );
+    return;
+  }
+
   const tokenManager = deps.getTokenManager();
   const knownToken = tokenManager.getKnownTokenByTicker(tokenInput);
   if (!knownToken) {
-    const allTokens = tokenManager.getAllKnownTokens();
+    const allTokens = tokenManager.getSupportedGameTokens();
     const escapedTokenInput = escapeHtml(tokenInput.toUpperCase());
     let response = `❌ Token "${escapedTokenInput}" not found.\n\n`;
 
     if (allTokens.length > 0) {
-      response += "📋 Known tokens:\n";
+      response += "📋 Supported tokens:\n";
       for (const token of allTokens.slice(0, 10)) {
-        response += `• ${escapeHtml(token.token_ticker)}\n`;
+        response += `• ${escapeHtml(token.ticker)}\n`;
       }
       if (allTokens.length > 10) {
         response += `... and ${allTokens.length - 10} more.`;
