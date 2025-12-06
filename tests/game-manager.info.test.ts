@@ -61,7 +61,7 @@ describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
     };
     const gm = GameManager.getInstance(programStub(gameAcc), walletStub({ blockTime: createdAt + 30 }), dbStub());
     const info = await gm.getGameInfo(ctxStub(), new PublicKey("11111111111111111111111111111111"));
-    expect(info).toContain("<b>Coinflip • 1 TOK</b>");
+    expect(info).toContain("<b>🪙 Coinflip • 1 TOK</b>");
     expect(info).toContain(
       `Creator: ${sanitizeTelegramDisplayNameWithoutMention("@user777")}`
     );
@@ -84,7 +84,7 @@ describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
     });
     expect(out).toContain("Winner:");
     expect(out).toContain("user999");
-    expect(out).toContain("Giveaway");
+    expect(out).toContain("🎁 Giveaway");
   });
 
   test("getCompletedGameInfo keeps original max ticket count", async () => {
@@ -127,6 +127,6 @@ describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
     });
 
     expect(message).not.toContain("NaN");
-    expect(message).toContain("Coinflip • 0 TOK");
+    expect(message).toContain("🪙 Coinflip • 0 TOK");
   });
 });
