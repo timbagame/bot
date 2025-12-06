@@ -4816,7 +4816,41 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       minTickets?: number;
     }>
   > {
-    const activeGamesData = this.gameDb.getAllActivePublicGames();
+    // Fetch all games from the blockchain
+    const allGames = await this.program.account.game.all();
+
+    // Filter for public games
+    const publicGames = allGames.filter((game) => !game.account.isPrivate);
+
+    // Map to GameData-like structure
+    const activeGamesData = await Promise.all(
+      publicGames.map(async (game) => {
+        const account = game.account;
+        const gameType = Object.keys(account.gameType)[0] || "game";
+        const tokenMint = account.tokenMint.toBase58();
+
+        let tokenTicker = DEFAULT_TOKEN_TICKER;
+        try {
+          const metadata = await this.wallet.getTokenMetadata(tokenMint);
+          if (metadata?.symbol) {
+            tokenTicker = metadata.symbol;
+          }
+        } catch (e) {
+          // Ignore metadata fetch errors
+        }
+
+        return {
+          game_address: game.publicKey.toBase58(),
+          game_type: gameType,
+          amount: Number(account.ticketAmount),
+          token_mint: tokenMint,
+          token_ticker: tokenTicker,
+          status: "active", // Assumed active if account exists
+          winner_address: undefined, // Not in Game account
+        };
+      })
+    );
+
     return this.formatActiveGamesList(ctx, activeGamesData);
   }
 
