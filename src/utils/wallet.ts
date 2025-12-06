@@ -24,7 +24,6 @@ import {
   TOKEN_2022_PROGRAM_ID,
   TokenAccountNotFoundError,
   TokenInvalidAccountOwnerError,
-  unpackMint,
   unpackAccount,
 } from "@solana/spl-token";
 import * as fs from "fs";
@@ -143,7 +142,7 @@ type WalletDeps = {
   timeNow?: () => number;
   tokenMetadataResolver?: (
     mint: string
-  ) => Promise<{ decimals: number } | null> | { decimals: number } | null;
+  ) => Promise<{ decimals: number; symbol?: string; name?: string } | null> | { decimals: number; symbol?: string; name?: string } | null;
   tokenDb?: TokenDatabase;
 };
 
@@ -249,7 +248,7 @@ export class WalletManager {
 
   // Simplified caching
   private keypairCache = new KeypairCache();
-  private tokenMetadataCache: ExpiringCache<number>;
+  private tokenMetadataCache: ExpiringCache<{ decimals: number; symbol?: string; name?: string }>;
   private blockhashCache: {
     blockhash: string;
     lastValidBlockHeight: number;
@@ -432,7 +431,7 @@ export class WalletManager {
     this.fetchFn = deps?.fetch ?? (globalThis.fetch as any);
     this.timeNow = deps?.timeNow;
     this.tokenMetadataResolver = deps?.tokenMetadataResolver;
-    this.tokenMetadataCache = createExpiringCache<number>(
+    this.tokenMetadataCache = createExpiringCache<{ decimals: number; symbol?: string; name?: string }>(
       TOKEN_METADATA_CACHE_DURATION_MS
     );
     this.tokenDb = deps?.tokenDb ?? TokenDatabase.getInstance();
@@ -1407,21 +1406,21 @@ export class WalletManager {
 
   public async getTokenMetadata(
     tokenMint: string
-  ): Promise<{ decimals: number }> {
+  ): Promise<{ decimals: number; symbol?: string; name?: string }> {
     const cached = this.tokenMetadataCache.get(tokenMint);
     if (cached !== undefined) {
-      return { decimals: cached };
+      return cached;
     }
 
-    const resolveLocally = async (): Promise<number | null> => {
+    const resolveLocally = async (): Promise<{ decimals: number; symbol?: string; name?: string } | null> => {
       if (!this.tokenMetadataResolver) {
         return null;
       }
       try {
         const result = await this.tokenMetadataResolver(tokenMint);
         if (result && typeof result.decimals === "number") {
-          this.tokenMetadataCache.setWithTTL(tokenMint, result.decimals);
-          return result.decimals;
+          this.tokenMetadataCache.setWithTTL(tokenMint, result);
+          return result;
         }
       } catch (resolverError) {
         console.warn(
@@ -1433,80 +1432,20 @@ export class WalletManager {
     };
 
     const locallyResolved = await resolveLocally();
-    if (locallyResolved !== null) {
-      return { decimals: locallyResolved };
+    if (locallyResolved !== null && typeof locallyResolved === 'object') {
+      return locallyResolved;
     }
 
-    await this.throttle();
     try {
-      const mintPublicKey = new PublicKey(tokenMint);
-      let decimals: number | null = null;
-
-      const getParsedAccountInfo = (
-        this.connection as any
-      ).getParsedAccountInfo?.bind(this.connection);
-
-      if (typeof getParsedAccountInfo === "function") {
-        try {
-          const parsedInfo = await getParsedAccountInfo(mintPublicKey);
-          const parsedDecimals =
-            parsedInfo?.value?.data?.parsed?.info?.decimals ?? null;
-          if (typeof parsedDecimals === "number") {
-            decimals = parsedDecimals;
-          }
-        } catch (parsedError) {
-          console.warn(
-            `Parsed account metadata unavailable for ${tokenMint}:`,
-            parsedError
-          );
-        }
-      }
-
-      if (decimals === null) {
-        const getAccountInfo = this.connection.getAccountInfo?.bind(
-          this.connection
-        );
-        if (typeof getAccountInfo !== "function") {
-          throw new Error(
-            "RPC connection does not support getAccountInfo for mint metadata"
-          );
-        }
-
-        const accountInfo = await getAccountInfo(mintPublicKey);
-        if (!accountInfo) {
-          throw new Error("Token mint account not found or has no data");
-        }
-
-        const { programId } = await detectTokenProgram(
-          this.connection,
-          mintPublicKey,
-          accountInfo as any
-        );
-
-        const mint = unpackMint(mintPublicKey, accountInfo, programId);
-        decimals = mint.decimals;
-      }
-
-      if (decimals === null) {
-        throw new Error("Unable to determine mint decimals");
-      }
-
-      this.tokenMetadataCache.setWithTTL(tokenMint, decimals);
-      return { decimals };
+      const metadata = await resolveTokenMetadata({
+        connection: this.connection,
+        mintAddress: tokenMint,
+        fetch: this.fetchFn as any,
+      });
+      this.tokenMetadataCache.setWithTTL(tokenMint, { decimals: metadata.decimals });
+      return { decimals: metadata.decimals };
     } catch (error) {
       console.error(`Error getting token metadata for ${tokenMint}:`, error);
-
-      const fallbackDecimals = await resolveLocally();
-      if (fallbackDecimals !== null) {
-        return { decimals: fallbackDecimals };
-      }
-
-      const stale = this.tokenMetadataCache.peek(tokenMint);
-      if (stale !== undefined) {
-        this.tokenMetadataCache.setWithTTL(tokenMint, stale);
-        return { decimals: stale };
-      }
-
       throw new Error(
         `Failed to get token metadata: ${
           error instanceof Error ? error.message : "Unknown error"
@@ -2603,5 +2542,18 @@ export class WalletManager {
       signature: result.signature,
       amountLamports: result.amountLamports,
     };
+  }
+  public getFriendlyErrorMessage(error: any): string {
+    const message = error?.message || String(error);
+    if (message.includes("Account does not exist")) {
+      return "Game account not found or has expired.";
+    }
+    if (message.includes("insufficient funds")) {
+      return "Insufficient funds to join the game.";
+    }
+    if (message.includes("0x1771")) {
+      return "Slippage tolerance exceeded.";
+    }
+    return "An error occurred while joining the game. Please try again.";
   }
 }

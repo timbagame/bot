@@ -4439,7 +4439,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         );
       } catch (error) {
         console.warn(
-          `⚠️ Failed to remove participant ${resolvedTelegramId} from local DB for ${gameAddress}:`,
+          "⚠️ Failed to remove participant " + resolvedTelegramId + " from local DB for " + gameAddress + ":",
           error
         );
       }
@@ -4621,15 +4621,14 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         tx: lastSignature,
       };
     } catch (error: any) {
-      console.error(`Error joining private game:`, error);
+      console.error("Error joining private game:", error);
       if (error?.message?.includes("Account does not exist")) {
-        return { success: false, error: this.completedGameErrorMessage };
+        return {
+          success: false,
+          error: "Game not found or has expired.",
+        };
       }
-      const userFriendlyError = await logAndFormatError(
-        error,
-        "joining private game",
-        this.wallet
-      );
+      const userFriendlyError = this.wallet.getFriendlyErrorMessage(error);
       return { success: false, error: userFriendlyError };
     }
   }
@@ -4638,12 +4637,16 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
   // USER GAMES
   // ================================
 
+
+
+
+
   public async getUserGames(
     ctx: Context,
     telegramId: bigint
   ): Promise<{
-    activeGames: string;
-    recentGames: string;
+    activeGames: string | null;
+    recentGames: string | null;
   }> {
     const telegramIdStr = telegramId.toString();
     const playerKp = this.wallet.getKeyPair(telegramId);
@@ -4697,9 +4700,9 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     };
   }
 
-  public async getChatActiveGames(
+  private async formatActiveGamesList(
     ctx: Context,
-    chatId: number
+    activeGamesData: any[]
   ): Promise<
     Array<{
       messageText: string;
@@ -4718,7 +4721,6 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       maxTickets?: number;
       minTickets?: number;
     };
-    const activeGamesData = this.gameDb.getActiveGamesByChat(chatId);
 
     const formattedGames: Array<ActiveGameRow | null> = await Promise.all(
       activeGamesData.map(async (gameData) => {
@@ -4730,7 +4732,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         try {
           gamePda = new PublicKey(gameData.game_address);
         } catch (error) {
-          console.error(`Invalid game address: ${gameData.game_address}`, error);
+          console.error("Invalid game address", gameData.game_address, error);
           return null;
         }
 
@@ -4765,7 +4767,10 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           maxTickets = stats?.maxTickets;
           minTickets = stats?.minTickets;
         } catch (statError) {
-          console.warn("Failed to fetch game stats for active list:", statError);
+          console.warn(
+            "Failed to fetch game stats for active list:",
+            statError
+          );
         }
 
         return {
@@ -4779,8 +4784,76 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       })
     );
 
-    return formattedGames.filter((game): game is ActiveGameRow => game !== null);
+    return formattedGames.filter(
+      (game): game is ActiveGameRow => game !== null
+    );
   }
+
+  public async getChatActiveGames(
+    ctx: Context,
+    chatId: number
+  ): Promise<
+    Array<{
+      messageText: string;
+      keyboard: any[];
+      gameAddress: string;
+      currentTickets?: number;
+      maxTickets?: number;
+      minTickets?: number;
+    }>
+  > {
+    const activeGamesData = this.gameDb.getActiveGamesByChat(chatId);
+    return this.formatActiveGamesList(ctx, activeGamesData);
+  }
+
+  public async getAllActivePublicGames(ctx: Context): Promise<
+    Array<{
+      messageText: string;
+      keyboard: any[];
+      gameAddress: string;
+      currentTickets?: number;
+      maxTickets?: number;
+      minTickets?: number;
+    }>
+  > {
+    // Fetch all games from the blockchain
+    const allGames = await this.program.account.game.all();
+
+    // Filter for public games
+    const publicGames = allGames.filter((game) => !game.account.isPrivate);
+
+    // Map to GameData-like structure
+    const activeGamesData = await Promise.all(
+      publicGames.map(async (game) => {
+        const account = game.account;
+        const gameType = Object.keys(account.gameType)[0] || "game";
+        const tokenMint = account.tokenMint.toBase58();
+
+        let tokenTicker = DEFAULT_TOKEN_TICKER;
+        try {
+          const metadata = await this.wallet.getTokenMetadata(tokenMint);
+          if (metadata?.symbol) {
+            tokenTicker = metadata.symbol;
+          }
+        } catch (e) {
+          // Ignore metadata fetch errors
+        }
+
+        return {
+          game_address: game.publicKey.toBase58(),
+          game_type: gameType,
+          amount: Number(account.ticketAmount),
+          token_mint: tokenMint,
+          token_ticker: tokenTicker,
+          status: "active", // Assumed active if account exists
+          winner_address: undefined, // Not in Game account
+        };
+      })
+    );
+
+    return this.formatActiveGamesList(ctx, activeGamesData);
+  }
+
 
   private async processActiveGames(
     ctx: Context,
@@ -4790,7 +4863,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       activeGamesData.map(async (gameData) => {
         try {
           if (!gameData.game_address) {
-            console.error(`Game data missing address:`, gameData);
+            console.error("Game data missing address:", gameData);
             return null;
           }
 
@@ -4798,13 +4871,13 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           try {
             gamePda = new PublicKey(gameData.game_address);
           } catch (pkError) {
-            console.error(`Invalid game address format: ${gameData.game_address}`);
+            console.error("Invalid game address format:", gameData.game_address);
             return null;
           }
 
           return this.getGameInfo(ctx, gamePda);
         } catch (error) {
-          console.error(`Error fetching game ${gameData.game_address}:`, error);
+          console.error("Error fetching game " + gameData.game_address + ":", error);
           return null;
         }
       })
@@ -4831,7 +4904,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           return { category, gameInfo, completedAt: gameData.completed_at };
         } catch (error) {
           console.error(
-            `Error processing game ${gameData.game_address}:`,
+            "Error processing game " + gameData.game_address + ":",
             error
           );
           return null;
@@ -4852,9 +4925,9 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     const limitedGames = games.slice(0, limit);
 
     for (const game of limitedGames) {
-      lines.push(`${game.gameInfo}`);
+      lines.push(game.gameInfo);
       if (game.completedAt) {
-        lines.push(`📅 ${formatDate(game.completedAt)}`);
+        lines.push("📅 " + formatDate(game.completedAt));
       }
       lines.push("");
     }
@@ -4865,7 +4938,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
     if (games.length > limit) {
       const remaining = games.length - limit;
-      lines.push("", `<i>+${remaining} more game${remaining === 1 ? "" : "s"} not shown</i>`);
+      lines.push("", "<i>+" + remaining + " more game" + (remaining === 1 ? "" : "s") + " not shown</i>");
     }
 
     return lines.join("\n") + "\n";
@@ -4886,7 +4959,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           });
         }
       }
-      debugLog(`Reloaded ${this.activeGameMessages.size} game messages`);
+      debugLog("Reloaded " + this.activeGameMessages.size + " game messages");
     } catch (error) {
       console.error("Error reloading game messages:", error);
     }
@@ -4901,7 +4974,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       debugLog("🔍 Starting blockchain scan for orphaned games...");
 
       const orphanedGames = await this.findOrphanedGames();
-      debugLog(`🚨 Found ${orphanedGames.length} orphaned games`);
+      debugLog("🚨 Found " + orphanedGames.length + " orphaned games");
 
       let cancelledCount = 0;
       for (const { address } of orphanedGames) {
@@ -4910,7 +4983,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       }
 
       debugLog(
-        `🏁 Blockchain scan completed. Cancelled ${cancelledCount}/${orphanedGames.length} orphaned games`
+        "🏁 Blockchain scan completed. Cancelled " + cancelledCount + "/" + orphanedGames.length + " orphaned games"
       );
     } catch (error) {
       console.error("❌ Error during blockchain scan:", error);
@@ -4932,7 +5005,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         // Check if this game is in our database
         if (!this.gameDb.gameExists(gameAddress)) {
           debugLog(
-            `🔍 Found orphaned game: ${gameAddress} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`
+            "🔍 Found orphaned game: " + gameAddress + " (" + gameAccount.ticketsCount + "/" + gameAccount.maxTickets + ")"
           );
           orphanedGames.push({ address: gameAddress, account: gameAccount });
         }
@@ -4951,7 +5024,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
       const expired = GameManager.isExpired(gameAccount);
       if (!expired) {
-        debugLog(`⏰ Game ${address} not expired yet, skipping`);
+        debugLog("⏰ Game " + address + " not expired yet, skipping");
         return false;
       }
 
@@ -4961,7 +5034,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
       const gameType = this.getGameType(gameAccount);
       debugLog(
-        `🔄 Processing expired ${gameType} game ${address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`
+        "🔄 Processing expired " + gameType + " game " + address + " (" + gameAccount.ticketsCount + "/" + gameAccount.maxTickets + ")"
       );
 
       if (!bufferElapsed && ticketsCount >= minTickets && minTickets > 0) {
@@ -5014,11 +5087,11 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
   private handleGameProcessingError(error: any, address: string): boolean {
     if (error.message?.includes("Account does not exist")) {
-      debugLog(`ℹ️ Orphaned game ${address} was already closed`);
+      debugLog("ℹ️ Orphaned game " + address + " was already closed");
       return true;
     } else {
       console.error(
-        `❌ Error processing orphaned game ${address}:`,
+        "❌ Error processing orphaned game " + address + ":",
         error.message
       );
       return false;
@@ -5039,7 +5112,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         gameType
       );
       if (immediateResult.success) {
-        debugLog(`✅ Successfully handled expired giveaway: ${address}`);
+        debugLog("✅ Successfully handled expired giveaway: " + address);
         return true;
       }
       return false;
@@ -5050,12 +5123,12 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     }
 
     debugLog(
-      `🔄 Processing expired ${gameType} game ${address} (${gameAccount.ticketsCount}/${gameAccount.maxTickets})`
+      "🔄 Processing expired " + gameType + " game " + address + " (" + gameAccount.ticketsCount + "/" + gameAccount.maxTickets + ")"
     );
 
     const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
     if (result.success) {
-      debugLog(`✅ Successfully handled expired giveaway: ${address}`);
+      debugLog("✅ Successfully handled expired giveaway: " + address);
       return true;
     }
 
@@ -5082,18 +5155,18 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       playerKeyInfo.dbParticipantCount ?? dbParticipantsSnapshot.length;
 
     debugLog(
-      `🪙 Coinflip ${address}: ${playerKeyInfo.available.length}/${playerKeyInfo.total} player keys available (on-chain tickets: ${effectiveOnChainTickets}, on-chain hashes: ${effectiveOnChainHashes}, db participants: ${effectiveDbParticipants})`
+      "🪙 Coinflip " + address + ": " + playerKeyInfo.available.length + "/" + playerKeyInfo.total + " player keys available (on-chain tickets: " + effectiveOnChainTickets + ", on-chain hashes: " + effectiveOnChainHashes + ", db participants: " + effectiveDbParticipants + ")"
     );
 
     if (effectiveOnChainTickets !== effectiveOnChainHashes) {
       console.warn(
-        `⚠️ Participant hash mismatch for ${address}: on-chain tickets ${effectiveOnChainTickets}, hash list length ${effectiveOnChainHashes}`
+        "⚠️ Participant hash mismatch for " + address + ": on-chain tickets " + effectiveOnChainTickets + ", hash list length " + effectiveOnChainHashes
       );
     }
 
     if (effectiveOnChainTickets !== effectiveDbParticipants) {
       console.warn(
-        `⚠️ Database mismatch for ${address}: on-chain tickets ${effectiveOnChainTickets}, local participants ${effectiveDbParticipants}`
+        "⚠️ Database mismatch for " + address + ": on-chain tickets " + effectiveOnChainTickets + ", local participants " + effectiveDbParticipants
       );
     }
 
@@ -5102,7 +5175,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       playerKeyInfo.unmatchedHashes.length > 0
     ) {
       console.warn(
-        `⚠️ Unable to map ${playerKeyInfo.unmatchedHashes.length} participant hash(es) for ${address}`
+        "⚠️ Unable to map " + playerKeyInfo.unmatchedHashes.length + " participant hash(es) for " + address
       );
     }
 
@@ -5110,14 +5183,14 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       const staleParticipants = this.gameDb.getGameParticipants(address);
       if (staleParticipants.length > 0) {
         console.warn(
-          `⚠️ Clearing ${staleParticipants.length} stale participant(s) from local DB for ${address}`
+          "⚠️ Clearing " + staleParticipants.length + " stale participant(s) from local DB for " + address
         );
         for (const telegramId of staleParticipants) {
           try {
             this.gameDb.removeGameParticipant(address, telegramId);
           } catch (error) {
             console.warn(
-              `⚠️ Failed to remove participant ${telegramId} from local DB for ${address}:`,
+              "⚠️ Failed to remove participant " + telegramId + " from local DB for " + address + ":",
               error
             );
           }
@@ -5159,7 +5232,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
       if (!creatorTelegramId) {
         console.warn(
-          `⚠️ Cannot cancel ${address}: creator Telegram ID is missing from local data`
+          "⚠️ Cannot cancel " + address + ": creator Telegram ID is missing from local data"
         );
         return false;
       }
@@ -5221,12 +5294,12 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           participantTelegramIds.add(creatorTelegramId);
         } else {
           console.warn(
-            `⚠️ Unable to resolve creator Telegram ID for orphaned game ${gameAddress}`
+            "⚠️ Unable to resolve creator Telegram ID for orphaned game " + gameAddress
           );
         }
       } catch (error) {
         console.warn(
-          `⚠️ Failed to look up creator Telegram ID for ${gameAddress}:`,
+          "⚠️ Failed to look up creator Telegram ID for " + gameAddress + ":",
           error
         );
       }
@@ -5283,7 +5356,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
     if (unmatchedHashes.length > 0) {
       for (const hash of unmatchedHashes) {
-        unavailable.push(`hash:${hash}`);
+        unavailable.push("hash:" + hash);
       }
     }
 
@@ -5320,7 +5393,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     address: string
   ): Promise<boolean> {
     debugLog(
-      `🔧 Strategy 1: Complete cleanup - unjoin all ${playerKeyInfo.available.length} players, then cancel`
+      "🔧 Strategy 1: Complete cleanup - unjoin all " + playerKeyInfo.available.length + " players, then cancel"
     );
 
     // Unjoin ALL players including creator for coinflip games
@@ -5334,7 +5407,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     // Only proceed if all players were successfully unjoined
     if (unjoinedCount !== playerKeyInfo.available.length) {
       debugLog(
-        `❌ Could only unjoin ${unjoinedCount}/${playerKeyInfo.available.length} players from coinflip ${address}, skipping cancellation`
+        "❌ Could only unjoin " + unjoinedCount + "/" + playerKeyInfo.available.length + " players from coinflip " + address + ", skipping cancellation"
       );
       return false;
     }
@@ -5356,7 +5429,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     address: string
   ): Promise<boolean> {
     debugLog(
-      `🔧 Strategy 2: Partial cleanup - unjoin ${playerKeyInfo.available.length} available players`
+      "🔧 Strategy 2: Partial cleanup - unjoin " + playerKeyInfo.available.length + " available players"
     );
 
     const unjoinedCount = await this.unjoinPlayers(
@@ -5366,7 +5439,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       playerKeyInfo.creator?.telegramId
     );
     debugLog(
-      `📊 Unjoined ${unjoinedCount}/${playerKeyInfo.available.length} players from coinflip ${address}`
+      "📊 Unjoined " + unjoinedCount + "/" + playerKeyInfo.available.length + " players from coinflip " + address
     );
 
     return unjoinedCount > 0;
@@ -5384,7 +5457,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
   ): Promise<number> {
     let unjoinedCount = 0;
     const gameAddress = gamePda.toBase58();
-    const logContext = `unjoin ${gameAddress}`;
+    const logContext = "unjoin " + gameAddress;
 
     const resolvePublicKeyString = (value: any): string | null => {
       if (!value) {
@@ -5422,7 +5495,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         tokenDecimals = typeof metadata.decimals === "number" ? metadata.decimals : 0;
       } catch (error) {
         console.warn(
-          `⚠️ Failed to load token metadata for ${tokenMintStr} during unjoin cleanup:`,
+          "⚠️ Failed to load token metadata for " + tokenMintStr + " during unjoin cleanup:",
           error
         );
       }
@@ -5475,11 +5548,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
               canUsePlayer = false;
             }
             console.warn(
-              `⚠️ Player ${player.pubkey.toBase58()} lacks SOL for unjoin: ${preparation.reason}${
-                fallbackAvailable
-                  ? " Falling back to creator authority."
-                  : " Attempting with remaining balance."
-              }`
+              "⚠️ Player " + player.pubkey.toBase58() + " lacks SOL for unjoin: " + preparation.reason + (fallbackAvailable ? " Falling back to creator authority." : " Attempting with remaining balance.")
             );
           }
         }
@@ -5494,22 +5563,20 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
               { skipDbCheck: true }
             );
             debugLog(
-              `➡️ Unjoined ${
-                player.isCreator ? "creator" : "player"
-              } ${player.pubkey.toBase58()}`
+              "➡️ Unjoined " + (player.isCreator ? "creator" : "player") + " " + player.pubkey.toBase58()
             );
             unjoinedCount++;
             playerSucceeded = true;
           } catch (error) {
             console.error(
-              `Failed to unjoin ${player.pubkey.toBase58()} with player authority:`,
+              "Failed to unjoin " + player.pubkey.toBase58() + " with player authority:",
               error
             );
           }
         }
       } else {
         console.error(
-          `Failed to unjoin ${player.pubkey.toBase58()}: missing signing authority`
+          "Failed to unjoin " + player.pubkey.toBase58() + ": missing signing authority"
         );
       }
 
@@ -5530,7 +5597,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
           if (!creatorPrep.success) {
             console.warn(
-              `⚠️ Creator fallback lacks SOL for unjoin: ${creatorPrep.reason} Attempting with current balance.`
+              "⚠️ Creator fallback lacks SOL for unjoin: " + creatorPrep.reason + " Attempting with current balance."
             );
           }
         }
@@ -5544,13 +5611,13 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             { skipDbCheck: true }
           );
           debugLog(
-            `➡️ Unjoined player ${player.pubkey.toBase58()} using creator authority`
+            "➡️ Unjoined player " + player.pubkey.toBase58() + " using creator authority"
           );
           unjoinedCount++;
           continue;
         } catch (fallbackError) {
           console.error(
-            `Failed to unjoin ${player.pubkey.toBase58()} using creator authority:`,
+            "Failed to unjoin " + player.pubkey.toBase58() + " using creator authority:",
             fallbackError
           );
         }
@@ -5572,9 +5639,9 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       gameAccount,
       creatorTelegramId,
       gameType,
-      attemptLog: `🎁 Closing expired ${gameType} ${address} with cleanup`,
-      successPrefix: `✅ Successfully closed expired ${gameType}`,
-      failurePrefix: `❌ Failed to close expired ${gameType}`,
+      attemptLog: "🎁 Closing expired " + gameType + " " + address + " with cleanup",
+      successPrefix: "✅ Successfully closed expired " + gameType,
+      failurePrefix: "❌ Failed to close expired " + gameType,
     });
     return result.success;
   }

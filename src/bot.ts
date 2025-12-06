@@ -1414,6 +1414,7 @@ const buildActiveGamesKeyboard = (
 
 export const __test_extractCondensedGameLabel = extractCondensedGameLabel;
 export const __test_buildActiveGamesKeyboard = buildActiveGamesKeyboard;
+
 export const __test_ACTIVE_LIST_HEADER_CALLBACK_DATA =
   ACTIVE_LIST_HEADER_CALLBACK_DATA;
 
@@ -3554,7 +3555,7 @@ bot.command("help", async (ctx: Context) => {
     reply_to_message_id: ctx.message?.message_id,
   });
 });
- 
+
 const handleActiveCommand = async (ctx: Context) => {
   const telegramId = await getRequiredTelegramIdForContext(
     ctx,
@@ -3620,6 +3621,55 @@ const handleActiveCommand = async (ctx: Context) => {
 };
 
 bot.command("active", handleActiveCommand);
+
+const handlePublicCommand = async (ctx: Context) => {
+  const telegramId = await getRequiredTelegramIdForContext(
+    ctx,
+    "public command"
+  );
+  if (telegramId == null) {
+    return;
+  }
+
+  try {
+    const publicActiveGames = await gameManager.getAllActivePublicGames(ctx);
+
+    if (publicActiveGames.length === 0) {
+      await ctx.reply("No active public games found.", {
+        reply_to_message_id: ctx.message?.message_id,
+      });
+      return;
+    }
+
+    const normalizedGames: ActiveGameListing[] = publicActiveGames.map(
+      (game) => ({
+        ...game,
+        keyboard: cloneInlineKeyboard(game.keyboard ?? []),
+      })
+    );
+
+    if (normalizedGames.length === 0) {
+      await ctx.reply("No active public games found.", {
+        reply_to_message_id: ctx.message?.message_id,
+      });
+      return;
+    }
+
+    const inlineKeyboard = buildActiveGamesKeyboard(normalizedGames);
+    const summaryText = `<b>Active Public Games (${normalizedGames.length})</b>`;
+
+    await ctx.reply(summaryText, {
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: inlineKeyboard },
+      reply_to_message_id: ctx.message?.message_id,
+    });
+  } catch (error) {
+    await handleCommandError(ctx, error, "public");
+  }
+};
+
+bot.command("public", handlePublicCommand);
+export const __test_handlePublicCommand = handlePublicCommand;
 
 bot.command("games", async (ctx: Context) => {
   const telegramId = await getRequiredTelegramIdForContext(
