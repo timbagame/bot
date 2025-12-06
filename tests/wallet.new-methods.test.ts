@@ -1,6 +1,26 @@
 import { describe, expect, test, vi, beforeEach } from "bun:test";
 import { WalletManager } from "../src/utils/wallet";
 
+// Mock token metadata resolver to observe how decimals are sourced
+let resolveTokenMetadataMock: any;
+vi.mock("../src/utils/token-metadata", () => {
+  resolveTokenMetadataMock = vi.fn(async (params: any) => {
+    let decimals = params.defaultDecimals ?? 0;
+    if (params.getDecimals) {
+      try {
+        const resolved = await params.getDecimals();
+        if (typeof resolved === "number" && Number.isFinite(resolved)) {
+          decimals = resolved;
+        }
+      } catch (_) {
+        // fall back to defaultDecimals
+      }
+    }
+    return { decimals, symbol: "MOCK", name: "Mock Token" };
+  });
+  return { resolveTokenMetadata: resolveTokenMetadataMock };
+});
+
 // Mock dependencies
 const mockConnection = {
   getAccountInfo: vi.fn(),
@@ -69,7 +89,34 @@ describe("WalletManager New Methods", () => {
       expect(result).toEqual(cached);
     });
 
-    // We can't easily test the full resolution logic without mocking resolveTokenMetadata which is imported.
-    // But we can test that it returns the expected structure if we mock the resolver.
+    test("fetches decimals on-chain when not cached and caches full metadata", async () => {
+      const mint = "mint-chain";
+      mockConnection.getParsedAccountInfo.mockResolvedValueOnce({
+        value: { data: { parsed: { info: { decimals: 6 } } } },
+      });
+
+      const result = await walletManager.getTokenMetadata(mint);
+
+      expect(resolveTokenMetadataMock).toHaveBeenCalledTimes(1);
+      expect(result.decimals).toBe(6);
+      expect(result.symbol).toBe("MOCK");
+
+      // Second call should hit cache and not call resolver again
+      mockConnection.getParsedAccountInfo.mockClear();
+      await walletManager.getTokenMetadata(mint);
+      expect(resolveTokenMetadataMock).toHaveBeenCalledTimes(1);
+      expect(mockConnection.getParsedAccountInfo).not.toHaveBeenCalled();
+    });
+
+    test("falls back to default decimals when on-chain metadata missing", async () => {
+      const mint = "mint-missing";
+      mockConnection.getParsedAccountInfo.mockResolvedValueOnce({ value: null });
+      mockConnection.getAccountInfo.mockResolvedValueOnce(null);
+
+      const result = await walletManager.getTokenMetadata(mint);
+
+      expect(result.decimals).toBe(6); // defaultDecimals from wallet implementation
+      expect(resolveTokenMetadataMock).toHaveBeenCalledTimes(1);
+    });
   });
 });

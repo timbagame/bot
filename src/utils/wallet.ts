@@ -24,6 +24,7 @@ import {
   TOKEN_2022_PROGRAM_ID,
   TokenAccountNotFoundError,
   TokenInvalidAccountOwnerError,
+  unpackMint,
   unpackAccount,
 } from "@solana/spl-token";
 import * as fs from "fs";
@@ -1412,7 +1413,9 @@ export class WalletManager {
       return cached;
     }
 
-    const resolveLocally = async (): Promise<{ decimals: number; symbol?: string; name?: string } | null> => {
+    const resolveLocally = async (): Promise<
+      { decimals: number; symbol?: string; name?: string } | null
+    > => {
       if (!this.tokenMetadataResolver) {
         return null;
       }
@@ -1441,9 +1444,14 @@ export class WalletManager {
         connection: this.connection,
         mintAddress: tokenMint,
         fetch: this.fetchFn as any,
+        getDecimals: async () => {
+          await this.throttle();
+          return await this.fetchMintDecimals(tokenMint);
+        },
+        defaultDecimals: 6,
       });
-      this.tokenMetadataCache.setWithTTL(tokenMint, { decimals: metadata.decimals });
-      return { decimals: metadata.decimals };
+      this.tokenMetadataCache.setWithTTL(tokenMint, metadata);
+      return metadata;
     } catch (error) {
       console.error(`Error getting token metadata for ${tokenMint}:`, error);
       throw new Error(
@@ -1452,6 +1460,61 @@ export class WalletManager {
         }`
       );
     }
+  }
+
+  private async fetchMintDecimals(tokenMint: string): Promise<number> {
+    const mintPublicKey = new PublicKey(tokenMint);
+    let decimals: number | null = null;
+
+    const getParsedAccountInfo =
+      (this.connection as any).getParsedAccountInfo?.bind(this.connection);
+
+    if (typeof getParsedAccountInfo === "function") {
+      try {
+        const parsedInfo = await getParsedAccountInfo(mintPublicKey);
+        const parsedDecimals =
+          parsedInfo?.value?.data?.parsed?.info?.decimals ?? null;
+        if (typeof parsedDecimals === "number") {
+          decimals = parsedDecimals;
+        }
+      } catch (parsedError) {
+        console.warn(
+          `Parsed account metadata unavailable for ${tokenMint}:`,
+          parsedError
+        );
+      }
+    }
+
+    if (decimals === null) {
+      const getAccountInfo = this.connection.getAccountInfo?.bind(
+        this.connection
+      );
+      if (typeof getAccountInfo !== "function") {
+        throw new Error(
+          "RPC connection does not support getAccountInfo for mint metadata"
+        );
+      }
+
+      const accountInfo = await getAccountInfo(mintPublicKey);
+      if (!accountInfo) {
+        throw new Error("Token mint account not found or has no data");
+      }
+
+      const { programId } = await detectTokenProgram(
+        this.connection,
+        mintPublicKey,
+        accountInfo as any
+      );
+
+      const mint = unpackMint(mintPublicKey, accountInfo, programId);
+      decimals = mint.decimals;
+    }
+
+    if (decimals === null) {
+      throw new Error("Unable to determine mint decimals");
+    }
+
+    return decimals;
   }
 
   // ================================
