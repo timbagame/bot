@@ -62,7 +62,7 @@ const formatTimeoutLine = (timeoutSeconds: number, isDefault: boolean): string =
   return `⏱️ Game timeout: ${timeoutSeconds}s (${minutes}m) ${suffix}`;
 };
 
-type SettingsTarget = "token" | "coinflip" | "giveaway" | "timeout";
+type SettingsTarget = "token" | "coinflip" | "giveaway" | "timeout" | "privacy";
 
 type ChatDefaultsModuleDeps = {
   bot: Bot;
@@ -94,6 +94,8 @@ const buildMenuKeyboard = (): InlineKeyboard => {
     .text("🎁 Giveaway max players", "chat_defaults_giveaway")
     .row()
     .text("⏱️ Game timeout", "chat_defaults_timeout")
+    .row()
+    .text("👁️ Default privacy", "chat_defaults_privacy")
     .row();
 };
 
@@ -141,6 +143,9 @@ const buildSettingsSummary = async (
     DEFAULT_GAME_TIMEOUT
   );
 
+  const privacy = chatSettings?.default_privacy;
+  const privacyLine = `👁️ Default privacy: ${privacy === "private" ? "Private 🔒" : "Public 🌍"} ${privacy ? "(chat default)" : "(bot default)"}`;
+
   return [
     "<b>Chat defaults</b>",
     "",
@@ -156,6 +161,7 @@ const buildSettingsSummary = async (
       giveawayPlayers
     ),
     formatTimeoutLine(timeoutSeconds, chatSettings?.timeout_seconds == null),
+    privacyLine,
     "",
     "Use the buttons below to update chat defaults.",
   ].join("\n");
@@ -421,7 +427,7 @@ export const createChatDefaultsModule = (
   };
 
   deps.bot.callbackQuery(
-    /^chat_defaults_(token|coinflip|giveaway|timeout)$/,
+    /^chat_defaults_(token|coinflip|giveaway|timeout|privacy)$/,
     deps.wrapCallbackHandler(async (ctx) => {
       if (!ctx.chat) return;
       const action = ctx.match?.[1] as SettingsTarget | undefined;
@@ -436,8 +442,56 @@ export const createChatDefaultsModule = (
         return;
       }
 
-      await promptForSetting(ctx, deps, action);
+      if (action === "privacy") {
+        await respondWithMenu(ctx, {
+          text: "Choose the default privacy setting for new games.",
+          keyboard: new InlineKeyboard()
+            .text("🌍 Public", "chat_defaults_set_privacy_public")
+            .text("🔒 Private", "chat_defaults_set_privacy_private")
+            .row()
+            .text("❌ Clear (Reset)", "chat_defaults_set_privacy_clear")
+            .row()
+            .text("🔙 Cancel", "chat_defaults_cancel"),
+        });
+      } else {
+        await promptForSetting(ctx, deps, action);
+      }
       await safeAnswerCallbackQuery(ctx);
+    })
+  );
+
+  deps.bot.callbackQuery(
+    /^chat_defaults_set_privacy_(public|private|clear)$/,
+    deps.wrapCallbackHandler(async (ctx) => {
+      if (!ctx.chat) return;
+
+      const allowed = await ensureAdmin(ctx, deps);
+      if (!allowed) {
+        await safeAnswerCallbackQuery(
+          ctx,
+          "Only admins can change chat defaults"
+        );
+        return;
+      }
+
+      const value = ctx.match![1];
+      const telegramId = getTelegramId(ctx);
+      let newPrivacy: "public" | "private" | undefined | null = null;
+
+      if (value === "public") newPrivacy = "public";
+      else if (value === "private") newPrivacy = "private";
+      else if (value === "clear") newPrivacy = null;
+
+      deps.chatDb.upsertChatGameSettings(ctx.chat.id, {
+        default_privacy: newPrivacy,
+        set_by_telegram_id: telegramId.toString(),
+      });
+
+      await renderMenu(ctx);
+      await safeAnswerCallbackQuery(
+        ctx,
+        value === "clear" ? "Privacy setting reset" : "Privacy setting updated"
+      );
     })
   );
 

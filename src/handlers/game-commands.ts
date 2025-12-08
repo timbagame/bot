@@ -282,6 +282,8 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         options.timeoutSeconds
       );
 
+      const isPrivate = chatSettings?.default_privacy === "private";
+
       const gameResult = await createDeps.gameManager.createGame(
         options.gameType,
         {
@@ -295,7 +297,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         options.minPlayers,
         gameTimeoutSeconds,
         telegramId,
-        { isPrivate: true },
+        { isPrivate },
         ctx.chat?.id || 0,
         messageTimestampMs
       );
