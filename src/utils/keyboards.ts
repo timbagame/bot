@@ -10,6 +10,7 @@ import {
   formatTokenDisplay,
   formatUsdValue,
 } from "./format-amount";
+import { formatDuration } from "./format-time";
 
 export const createMainMenuKeyboard = (): InlineKeyboard => {
   return new InlineKeyboard()
@@ -389,12 +390,7 @@ const visibilityLabel = (isPrivate: boolean): string =>
   isPrivate ? "🔒 Private" : "🌐 Public";
 
 const formatTimeoutLabel = (timeoutSeconds: number): string => {
-  const minutes = Math.round(timeoutSeconds / 60);
-  if (minutes >= 120) {
-    const hours = minutes / 60;
-    return `${hours.toFixed(hours % 1 === 0 ? 0 : 1)}h`;
-  }
-  return `${Math.max(1, minutes)}m`;
+  return formatDuration(timeoutSeconds);
 };
 
 export const createAdvancedOptionsKeyboard = (
