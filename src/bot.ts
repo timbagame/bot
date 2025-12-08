@@ -3890,6 +3890,45 @@ const resolveLeaderboardPlayers = async (
   ctx: Context,
   stats: LeaderboardStatsRecord[]
 ): Promise<LeaderboardPlayerDisplay[]> => {
+  // Get unique token mints from all players' netAmountByToken
+  const tokenMints = new Set<string>();
+  for (const row of stats) {
+    for (const mint of Object.keys(row.netAmountByToken)) {
+      tokenMints.add(mint);
+    }
+  }
+
+  // Fetch prices and decimals for all tokens in parallel
+  const priceMap = new Map<string, { price: number; decimals: number }>();
+
+  await Promise.all(
+    Array.from(tokenMints).map(async (mint) => {
+      try {
+        const isSol = mint === "SOL" || mint === WSOL_MINT;
+
+        // Get token decimals - default to 9 for SOL/WSOL, fetch metadata for others
+        let decimals = 9;
+        if (!isSol) {
+          const metadata = await wallet.getTokenMetadata(mint);
+          if (metadata?.decimals != null) {
+            decimals = metadata.decimals;
+          }
+        }
+
+        const lookup = await resolveTokenPriceUSD({
+          tokenMint: isSol ? undefined : mint,
+          isSol,
+        });
+
+        if (lookup?.price && Number.isFinite(lookup.price) && lookup.price > 0) {
+          priceMap.set(mint, { price: lookup.price, decimals });
+        }
+      } catch (error) {
+        console.warn(`Could not get price for token ${mint}:`, error);
+      }
+    })
+  );
+
   const players = await Promise.all(
     stats.map(async (row) => {
       const displayName = await resolveLeaderboardDisplayName(
@@ -3899,6 +3938,17 @@ const resolveLeaderboardPlayers = async (
       const wins = Math.max(0, row.gamesWon);
       const totalGames = Math.max(0, row.totalGames);
       const losses = Math.max(totalGames - wins, 0);
+
+      // Calculate net USD from per-token amounts
+      let netWonUsd = 0;
+      for (const [mint, rawAmount] of Object.entries(row.netAmountByToken)) {
+        const tokenInfo = priceMap.get(mint);
+        if (tokenInfo) {
+          const { price, decimals } = tokenInfo;
+          const normalizedAmount = rawAmount / Math.pow(10, decimals);
+          netWonUsd += normalizedAmount * price;
+        }
+      }
 
       return {
         telegramId: row.telegramId,
@@ -3910,11 +3960,15 @@ const resolveLeaderboardPlayers = async (
         gamesCreated: Math.max(0, row.gamesCreated),
         gamesJoined: Math.max(0, row.gamesJoined),
         totalVolume: Math.max(0, row.totalVolume),
+        netWonUsd,
       } satisfies LeaderboardPlayerDisplay;
     })
   );
 
-  return players.filter((player) => player.totalGames > 0);
+  // Filter players with games and sort by net USD descending
+  return players
+    .filter((player) => player.totalGames > 0)
+    .sort((a, b) => b.netWonUsd - a.netWonUsd);
 };
 
 bot.command(["leaderboard", "lb"], async (ctx: Context) => {

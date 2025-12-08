@@ -138,4 +138,67 @@ describe("GameDatabase Leaderboard", () => {
     expect(playerStats?.totalGames).toBe(1);
     expect(playerStats?.totalVolume).toBe(5_000_000);
   });
+
+  test("should calculate net amount per token (positive for wins, negative for losses)", () => {
+    const chatId = 88801;
+    const playerId = "NET1";
+    const playerPk = "PKNET1";
+
+    gameDb.savePlayerMapping(playerPk, playerId);
+
+    // Win 1000 TIMBA
+    gameDb.saveGame("NET_WIN1", playerId, 1_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGameParticipant("NET_WIN1", "OTHER1", "PKOTHER1");
+    gameDb.completeGame("NET_WIN1", playerPk);
+
+    // Lose 500 TIMBA (other player wins)
+    gameDb.saveGame("NET_LOSE1", playerId, 500_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGameParticipant("NET_LOSE1", "OTHER2", "PKOTHER2");
+    gameDb.savePlayerMapping("PKOTHER2", "OTHER2");
+    gameDb.completeGame("NET_LOSE1", "PKOTHER2");
+
+    const stats = gameDb.getLeaderboardStats(chatId, 10);
+    const playerStats = stats.find((s) => s.telegramId === playerId);
+
+    expect(playerStats).toBeDefined();
+    expect(playerStats?.netAmountByToken).toBeDefined();
+    // Net = +1000 - 500 = +500 (in raw units: 1_000_000 - 500_000 = 500_000)
+    expect(playerStats?.netAmountByToken["TIMBA_MINT"]).toBe(500_000);
+  });
+
+  test("should track net amounts per token separately for multi-token games", () => {
+    const chatId = 88802;
+    const playerId = "NET2";
+    const playerPk = "PKNET2";
+
+    gameDb.savePlayerMapping(playerPk, playerId);
+
+    // Win 100 TIMBA
+    gameDb.saveGame("MULTI_WIN_TIMBA", playerId, 100_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGameParticipant("MULTI_WIN_TIMBA", "OTH1", "PKOTH1");
+    gameDb.completeGame("MULTI_WIN_TIMBA", playerPk);
+
+    // Win 0.5 SOL (no token_mint = SOL)
+    gameDb.saveGame("MULTI_WIN_SOL", playerId, 500_000_000, "coinflip", undefined, "SOL", 2, 2, chatId);
+    gameDb.saveGameParticipant("MULTI_WIN_SOL", "OTH2", "PKOTH2");
+    gameDb.completeGame("MULTI_WIN_SOL", playerPk);
+
+    // Lose 200 TIMBA
+    gameDb.saveGame("MULTI_LOSE_TIMBA", playerId, 200_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGameParticipant("MULTI_LOSE_TIMBA", "OTH3", "PKOTH3");
+    gameDb.savePlayerMapping("PKOTH3", "OTH3");
+    gameDb.completeGame("MULTI_LOSE_TIMBA", "PKOTH3");
+
+    const stats = gameDb.getLeaderboardStats(chatId, 10);
+    const playerStats = stats.find((s) => s.telegramId === playerId);
+
+    expect(playerStats).toBeDefined();
+    expect(playerStats?.netAmountByToken).toBeDefined();
+
+    // TIMBA: +100 - 200 = -100 (raw: 100_000 - 200_000 = -100_000)
+    expect(playerStats?.netAmountByToken["TIMBA_MINT"]).toBe(-100_000);
+
+    // SOL: +0.5 (raw: 500_000_000)
+    expect(playerStats?.netAmountByToken["SOL"]).toBe(500_000_000);
+  });
 });

@@ -9,6 +9,8 @@ export interface LeaderboardStatsRecord {
   gamesJoined: number;
   totalVolume: number;
   winRate: number;
+  /** Net amount per token: positive = won, negative = lost. Key is token_mint or 'SOL' */
+  netAmountByToken: Record<string, number>;
 }
 
 /**
@@ -959,7 +961,8 @@ export class GameDatabase extends BaseDatabase {
    */
   public getLeaderboardStats(chatId: number, limit: number = 10): LeaderboardStatsRecord[] {
     try {
-      const rows = this.all<any>(
+      // First query: get aggregate stats per player
+      const aggregateRows = this.all<any>(
         `
         WITH relevant_games AS (
           SELECT *
@@ -972,6 +975,7 @@ export class GameDatabase extends BaseDatabase {
             rg.status,
             rg.amount,
             rg.winner_address,
+            rg.token_mint,
             rg.creator_telegram_id AS telegram_id,
             'creator' AS role
           FROM relevant_games rg
@@ -984,6 +988,7 @@ export class GameDatabase extends BaseDatabase {
             rg.status,
             rg.amount,
             rg.winner_address,
+            rg.token_mint,
             gp.telegram_id AS telegram_id,
             'participant' AS role
           FROM relevant_games rg
@@ -999,6 +1004,7 @@ export class GameDatabase extends BaseDatabase {
             rg.status,
             rg.amount,
             rg.winner_address,
+            rg.token_mint,
             pm.telegram_id AS telegram_id,
             'winner' AS role
           FROM relevant_games rg
@@ -1012,12 +1018,13 @@ export class GameDatabase extends BaseDatabase {
             game_address,
             status,
             amount,
+            token_mint,
             MAX(CASE WHEN role = 'creator' THEN 1 ELSE 0 END) AS is_creator,
             MAX(CASE WHEN role = 'participant' THEN 1 ELSE 0 END) AS is_participant,
             MAX(CASE WHEN role = 'winner' THEN 1 ELSE 0 END) AS is_winner,
             MAX(CASE WHEN LOWER(winner_address) = 'cancelled' THEN 1 ELSE 0 END) AS is_cancelled
           FROM player_game_roles
-          GROUP BY telegram_id, game_address, status, amount
+          GROUP BY telegram_id, game_address, status, amount, token_mint
         )
         SELECT
           pgs.telegram_id,
@@ -1040,14 +1047,115 @@ export class GameDatabase extends BaseDatabase {
         FROM player_game_summary pgs
         GROUP BY pgs.telegram_id
         HAVING COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_cancelled = 0 THEN pgs.game_address END) > 0
-        ORDER BY games_won DESC, win_rate DESC, total_volume DESC
         LIMIT ?
       `,
-        [chatId, limit],
-        "getting leaderboard stats"
+        [chatId, limit * 3], // Fetch extra to ensure we have enough after USD conversion and re-sorting
+        "getting leaderboard aggregate stats"
       );
 
-      return rows
+      if (aggregateRows.length === 0) {
+        return [];
+      }
+
+      const telegramIds = aggregateRows
+        .map((row: any) => String(row.telegram_id ?? "").trim())
+        .filter((id: string) => id.length > 0);
+
+      if (telegramIds.length === 0) {
+        return [];
+      }
+
+      // Second query: get per-token net amounts for each player
+      const placeholders = telegramIds.map(() => "?").join(",");
+      const netAmountRows = this.all<any>(
+        `
+        WITH relevant_games AS (
+          SELECT *
+          FROM games
+          WHERE chat_id = ?
+            AND status = 'completed'
+            AND LOWER(winner_address) != 'cancelled'
+        ),
+        player_game_roles AS (
+          SELECT
+            rg.game_address,
+            rg.amount,
+            rg.token_mint,
+            rg.creator_telegram_id AS telegram_id,
+            'creator' AS role
+          FROM relevant_games rg
+          WHERE rg.creator_telegram_id IS NOT NULL
+
+          UNION
+
+          SELECT
+            rg.game_address,
+            rg.amount,
+            rg.token_mint,
+            gp.telegram_id AS telegram_id,
+            'participant' AS role
+          FROM relevant_games rg
+          JOIN game_participants gp
+            ON gp.game_address = rg.game_address
+           AND gp.status = 'confirmed'
+          WHERE gp.telegram_id IS NOT NULL
+
+          UNION
+
+          SELECT
+            rg.game_address,
+            rg.amount,
+            rg.token_mint,
+            pm.telegram_id AS telegram_id,
+            'winner' AS role
+          FROM relevant_games rg
+          JOIN player_mappings pm
+            ON pm.public_key = rg.winner_address
+          WHERE pm.telegram_id IS NOT NULL
+        ),
+        player_game_summary AS (
+          SELECT
+            telegram_id,
+            game_address,
+            amount,
+            token_mint,
+            MAX(CASE WHEN role = 'winner' THEN 1 ELSE 0 END) AS is_winner
+          FROM player_game_roles
+          GROUP BY telegram_id, game_address, amount, token_mint
+        )
+        SELECT
+          pgs.telegram_id,
+          COALESCE(pgs.token_mint, 'SOL') AS token_mint,
+          SUM(
+            CASE
+              WHEN pgs.is_winner = 1 THEN pgs.amount
+              ELSE -pgs.amount
+            END
+          ) AS net_amount
+        FROM player_game_summary pgs
+        WHERE pgs.telegram_id IN (${placeholders})
+        GROUP BY pgs.telegram_id, COALESCE(pgs.token_mint, 'SOL')
+      `,
+        [chatId, ...telegramIds],
+        "getting leaderboard net amounts per token"
+      );
+
+      // Build a map of telegram_id -> { token_mint -> net_amount }
+      const netAmountMap = new Map<string, Record<string, number>>();
+      for (const row of netAmountRows) {
+        const telegramId = String(row.telegram_id ?? "").trim();
+        const tokenMint = String(row.token_mint ?? "SOL").trim();
+        const netAmount = Number(row.net_amount ?? 0);
+
+        if (!telegramId) continue;
+
+        if (!netAmountMap.has(telegramId)) {
+          netAmountMap.set(telegramId, {});
+        }
+        netAmountMap.get(telegramId)![tokenMint] = netAmount;
+      }
+
+      return aggregateRows
         .map((row: any) => {
           const telegramId = String(row.telegram_id ?? "").trim();
           if (!telegramId) {
@@ -1062,6 +1170,7 @@ export class GameDatabase extends BaseDatabase {
             gamesJoined: Number(row.games_joined ?? 0),
             totalVolume: Number(row.total_volume ?? 0),
             winRate: Number(row.win_rate ?? 0),
+            netAmountByToken: netAmountMap.get(telegramId) ?? {},
           } satisfies LeaderboardStatsRecord;
         })
         .filter((row): row is LeaderboardStatsRecord => row !== null);

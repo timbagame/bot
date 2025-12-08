@@ -11,6 +11,8 @@ export type LeaderboardPlayerDisplay = {
   gamesCreated: number;
   gamesJoined: number;
   totalVolume: number;
+  /** Net winnings in USD (positive = profit, negative = loss) */
+  netWonUsd: number;
 };
 
 type BuildLeaderboardMessageArgs = {
@@ -56,11 +58,12 @@ const formatLeaderboardRow = (player: LeaderboardPlayerDisplay, position: number
   const rank = `${position + 1}.`.padStart(3, " ");
   const medal = MEDALS[position] ?? "";
   const displayName = formatDisplayName(player.displayName);
+  const netUsdFormatted = formatNetUsd(player.netWonUsd);
 
   const detailSegments = [
+    netUsdFormatted,
     formatWinCount(player.wins),
     formatLossCount(player.losses),
-    `${formatWinRate(player.winRate)}% win rate`,
   ];
 
   const detailLine = detailSegments.join(" • ");
@@ -124,4 +127,19 @@ const formatWinCount = (wins: number): string => {
 const formatLossCount = (losses: number): string => {
   const safeLosses = Math.max(0, losses);
   return `${safeLosses} ${safeLosses === 1 ? "loss" : "losses"}`;
+};
+
+export const formatNetUsd = (value: number): string => {
+  if (!Number.isFinite(value) || value === 0) {
+    return "$0";
+  }
+
+  const absValue = Math.abs(value);
+  const formatted = absValue >= 1000
+    ? `$${(absValue / 1000).toFixed(1)}k`
+    : absValue >= 1
+    ? `$${absValue.toFixed(2)}`
+    : `$${absValue.toFixed(4)}`;
+
+  return value > 0 ? `+${formatted}` : `-${formatted}`;
 };

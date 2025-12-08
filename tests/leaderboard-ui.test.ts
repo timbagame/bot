@@ -3,6 +3,7 @@ import fc from "fast-check";
 import {
   buildEmptyLeaderboardMessage,
   buildLeaderboardMessage,
+  formatNetUsd,
   sanitizeLeaderboardDisplayName,
   type LeaderboardPlayerDisplay,
 } from "../src/utils/leaderboard-ui";
@@ -38,6 +39,7 @@ describe("leaderboard UI rendering", () => {
         gamesCreated: 10,
         gamesJoined: 40,
         totalVolume: 0,
+        netWonUsd: 150.50,
       },
       {
         telegramId: "2",
@@ -49,6 +51,7 @@ describe("leaderboard UI rendering", () => {
         gamesCreated: 5,
         gamesJoined: 75,
         totalVolume: 0,
+        netWonUsd: 75.25,
       },
       {
         telegramId: "3",
@@ -60,6 +63,7 @@ describe("leaderboard UI rendering", () => {
         gamesCreated: 60,
         gamesJoined: 30,
         totalVolume: 0,
+        netWonUsd: -25.00,
       },
     ];
 
@@ -87,6 +91,7 @@ describe("leaderboard UI rendering", () => {
         gamesCreated: 0,
         gamesJoined: 0,
         totalVolume: 0,
+        netWonUsd: 0,
       },
       {
         telegramId: "2",
@@ -98,6 +103,7 @@ describe("leaderboard UI rendering", () => {
         gamesCreated: 0,
         gamesJoined: 10,
         totalVolume: 0,
+        netWonUsd: -50,
       },
     ];
 
@@ -128,6 +134,7 @@ describe("leaderboard UI rendering", () => {
           gamesCreated: 0,
           gamesJoined: 1,
           totalVolume: 0,
+          netWonUsd: 10,
         },
       ],
     });
@@ -161,6 +168,7 @@ describe("leaderboard UI rendering", () => {
                  gamesCreated: entry.gamesCreated,
                  gamesJoined: entry.gamesJoined,
                  totalVolume: 0,
+                 netWonUsd: 0,
                })
              );
 
@@ -173,5 +181,29 @@ describe("leaderboard UI rendering", () => {
       ),
       { seed: 4242, numRuns: 30 }
     );
+  });
+});
+
+describe("formatNetUsd", () => {
+  test("formats positive values with + prefix", () => {
+    expect(formatNetUsd(100.50)).toBe("+$100.50");
+    expect(formatNetUsd(1234.56)).toBe("+$1.2k");
+    expect(formatNetUsd(0.0025)).toBe("+$0.0025");
+  });
+
+  test("formats negative values with - prefix", () => {
+    expect(formatNetUsd(-50.00)).toBe("-$50.00");
+    expect(formatNetUsd(-2500)).toBe("-$2.5k");
+    expect(formatNetUsd(-0.005)).toBe("-$0.0050");
+  });
+
+  test("formats zero as $0", () => {
+    expect(formatNetUsd(0)).toBe("$0");
+  });
+
+  test("handles non-finite values as $0", () => {
+    expect(formatNetUsd(NaN)).toBe("$0");
+    expect(formatNetUsd(Infinity)).toBe("$0");
+    expect(formatNetUsd(-Infinity)).toBe("$0");
   });
 });
