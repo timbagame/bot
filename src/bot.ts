@@ -4045,18 +4045,14 @@ bot.command("oracle", async (ctx: Context) => {
       "",
       `Operator: <code>${oracleAccount.operator.toString()}</code>`,
       `Fee Percentage: ${oracleAccount.feePercentage}%`,
-      `Min Timeout: ${oracleAccount.minTimeout} seconds (${
-        oracleAccount.minTimeout.toNumber() / 60
-      } minutes)`,
-      `Max Timeout: ${oracleAccount.maxTimeout} seconds (${
-        oracleAccount.maxTimeout.toNumber() / 60
-      } minutes)`,
+      `Min Timeout: ${oracleAccount.minTimeout.toNumber() / 60} minutes`,
+      `Max Timeout: ${oracleAccount.maxTimeout.toNumber() / 60} minutes`,
       `Max Tickets: ${oracleAccount.maxTickets}`,
-      `Oracle Buffer Time: ${oracleAccount.oracleBufferTime} seconds`,
+      `Oracle Buffer Time: ${
+        oracleAccount.oracleBufferTime.toNumber() / 60
+      } minutes`,
       "",
-      `Current Game Timeout: ${GAME_TIMEOUT} seconds (${
-        GAME_TIMEOUT / 60
-      } minutes)`,
+      `Current Game Timeout: ${GAME_TIMEOUT / 60} minutes`,
     ].join("\n");
 
     await ctx.reply(response, {
