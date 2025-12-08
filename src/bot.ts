@@ -3599,7 +3599,7 @@ const handleActiveCommand = async (ctx: Context) => {
       }
 
       const inlineKeyboard = buildActiveGamesKeyboard(normalizedGames);
-      const summaryText = `<b>Active games (${normalizedGames.length})</b>`;
+      const summaryText = `🎮 <b>Active games (${normalizedGames.length})</b>`;
 
       await ctx.reply(summaryText, {
         parse_mode: "HTML",
@@ -3658,7 +3658,7 @@ const handlePublicCommand = async (ctx: Context) => {
     }
 
     const inlineKeyboard = buildActiveGamesKeyboard(normalizedGames);
-    const summaryText = `<b>Active Public Games (${normalizedGames.length})</b>`;
+    const summaryText = `🌐 <b>Active Public Games (${normalizedGames.length})</b>`;
 
     await ctx.reply(summaryText, {
       parse_mode: "HTML",

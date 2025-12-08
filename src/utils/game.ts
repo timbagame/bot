@@ -235,9 +235,9 @@ const logAndFormatError = async (
 const formatGameTypeWithEmoji = (gameType: string): string => {
   switch (gameType.toLowerCase()) {
     case "coinflip":
-      return "Coinflip";
+      return "🪙 Coinflip";
     case "giveaway":
-      return "Giveaway";
+      return "🎁 Giveaway";
 
     default:
       return `${gameType.charAt(0).toUpperCase() + gameType.slice(1)}`;
@@ -4664,7 +4664,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     );
     const activeGamesSection =
       validActiveGames.length > 0
-        ? "<b>Active Games</b>\n\n" + validActiveGames.join("\n\n")
+        ? "🎮 <b>Active Games</b>\n\n" + validActiveGames.join("\n\n")
         : "";
 
     // Recent games
@@ -4686,10 +4686,10 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     const formatSection = this.formatGameSection.bind(this);
 
     const recentGamesSections = [
-      formatSection(categories.won, "<b>Won Games</b>"),
-      formatSection(categories.lost, "<b>Lost Games</b>"),
-      formatSection(categories.created, "<b>Created Games</b>"),
-      formatSection(categories.cancelled, "<b>Cancelled Games</b>"),
+      formatSection(categories.won, "🏆 <b>Won Games</b>"),
+      formatSection(categories.lost, "💀 <b>Lost Games</b>"),
+      formatSection(categories.created, "📝 <b>Created Games</b>"),
+      formatSection(categories.cancelled, "🚫 <b>Cancelled Games</b>"),
     ]
       .filter((section) => section !== "")
       .join("\n");
