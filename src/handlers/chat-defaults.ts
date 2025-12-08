@@ -291,7 +291,7 @@ const handlePlayersUpdate = async (
   ctx: Context,
   deps: ChatDefaultsModuleDeps,
   input: string,
-  target: Exclude<SettingsTarget, "token" | "timeout">
+  target: "coinflip" | "giveaway"
 ): Promise<void> => {
   const chatId = ctx.chat?.id;
   if (chatId == null) return;
@@ -529,13 +529,8 @@ export const createChatDefaultsModule = (
       await handleTokenChange(ctx, userMessage, deps);
     } else if (setting === "timeout") {
       await handleTimeoutUpdate(ctx, deps, userMessage);
-    } else {
-      await handlePlayersUpdate(
-        ctx,
-        deps,
-        userMessage,
-        setting as Exclude<SettingsTarget, "token" | "timeout">
-      );
+    } else if (setting === "coinflip" || setting === "giveaway") {
+      await handlePlayersUpdate(ctx, deps, userMessage, setting);
     }
 
     await renderMenu(ctx);
