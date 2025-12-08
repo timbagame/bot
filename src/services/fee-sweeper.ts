@@ -301,7 +301,8 @@ async function processTokenFee(
 async function runReferralSweep(
   connection: Connection,
   adminBundle: KeypairBundle,
-  referralEntries: ReferralTokenConfigEntry[]
+  referralEntries: ReferralTokenConfigEntry[],
+  priceResolver: PriceResolver = resolveTokenPriceUSD
 ): Promise<number> {
   if (referralEntries.length === 0) {
     console.log("ℹ️  No referral entries configured; skipping referral claims.");
@@ -317,7 +318,53 @@ async function runReferralSweep(
   const referralAccount = new PublicKey(referralEntry.referralAccount);
   const provider = new ReferralProvider(connection as unknown as Connection);
 
-  console.log("💸 Collecting Jupiter referral fees...");
+  console.log("💸 Checking Jupiter referral fees...");
+
+  // Get all referral token accounts and calculate total USD value
+  const referralTokenAccountsResult = await provider.getReferralTokenAccounts(
+    referralAccount.toBase58()
+  );
+  const allTokenAccounts = [
+    ...referralTokenAccountsResult.tokenAccounts,
+    ...referralTokenAccountsResult.token2022Accounts,
+  ];
+
+  if (!allTokenAccounts.length) {
+    console.log("ℹ️  No referral token accounts found.");
+    return 0;
+  }
+
+  let totalUsdValue = 0;
+  for (const tokenAccount of allTokenAccounts) {
+    const mint = tokenAccount.account.mint.toBase58();
+    const amount = tokenAccount.account.amount;
+    if (amount === 0n) continue;
+
+    // Try to get price for this token
+    const priceData = await priceResolver({ tokenMint: mint, tokenTicker: "" });
+    if (!priceData?.price) continue;
+
+    // Fetch decimals for this token
+    const mintInfo = await connection.getParsedAccountInfo(tokenAccount.account.mint);
+    const decimals =
+      mintInfo.value &&
+      "parsed" in mintInfo.value.data &&
+      mintInfo.value.data.parsed?.info?.decimals != null
+        ? mintInfo.value.data.parsed.info.decimals
+        : 9;
+
+    const tokenAmount = Number(amount) / 10 ** decimals;
+    totalUsdValue += tokenAmount * priceData.price;
+  }
+
+  if (totalUsdValue < MIN_USD_THRESHOLD) {
+    console.log(
+      `ℹ️  Skipping referral claim: total value ≈ $${totalUsdValue.toFixed(2)} (< $${MIN_USD_THRESHOLD}).`
+    );
+    return 0;
+  }
+
+  console.log(`💸 Collecting Jupiter referral fees (~$${totalUsdValue.toFixed(2)})...`);
 
   const transactions = await provider.claimAllV2({
     payerPubKey: adminBundle.anchor.publicKey,
@@ -483,7 +530,7 @@ export const sweepFees = async (
 
   let referralClaims = 0;
   try {
-    referralClaims = await referralSweeper(connection, adminBundle, referralEntries);
+    referralClaims = await referralSweeper(connection, adminBundle, referralEntries, priceResolver);
   } catch (error) {
     console.error("❌ Failed withdrawing referral fees:", error);
   }
@@ -522,4 +569,5 @@ export const __test_shouldWithdrawToken = shouldWithdrawToken;
 export const __test_shouldSwapTokenBalance = shouldSwapTokenBalance;
 export const __test_sweepTokensToSol = sweepTokensToSol;
 export const __test_unwrapWsolBalance = unwrapWsolBalance;
+export const __test_runReferralSweep = runReferralSweep;
 export { unwrapWsolBalance };
