@@ -1066,6 +1066,7 @@ export class GameDatabase extends BaseDatabase {
       }
 
       // Second query: get per-token net amounts for each player
+      // For giveaways, only the creator can lose (participants don't risk money)
       const placeholders = telegramIds.map(() => "?").join(",");
       const netAmountRows = this.all<any>(
         `
@@ -1081,8 +1082,10 @@ export class GameDatabase extends BaseDatabase {
             rg.game_address,
             rg.amount,
             rg.token_mint,
+            rg.game_type,
             rg.creator_telegram_id AS telegram_id,
-            'creator' AS role
+            'creator' AS role,
+            1 AS is_creator
           FROM relevant_games rg
           WHERE rg.creator_telegram_id IS NOT NULL
 
@@ -1092,8 +1095,10 @@ export class GameDatabase extends BaseDatabase {
             rg.game_address,
             rg.amount,
             rg.token_mint,
+            rg.game_type,
             gp.telegram_id AS telegram_id,
-            'participant' AS role
+            'participant' AS role,
+            CASE WHEN rg.creator_telegram_id = gp.telegram_id THEN 1 ELSE 0 END AS is_creator
           FROM relevant_games rg
           JOIN game_participants gp
             ON gp.game_address = rg.game_address
@@ -1106,8 +1111,10 @@ export class GameDatabase extends BaseDatabase {
             rg.game_address,
             rg.amount,
             rg.token_mint,
+            rg.game_type,
             pm.telegram_id AS telegram_id,
-            'winner' AS role
+            'winner' AS role,
+            CASE WHEN rg.creator_telegram_id = pm.telegram_id THEN 1 ELSE 0 END AS is_creator
           FROM relevant_games rg
           JOIN player_mappings pm
             ON pm.public_key = rg.winner_address
@@ -1119,9 +1126,11 @@ export class GameDatabase extends BaseDatabase {
             game_address,
             amount,
             token_mint,
-            MAX(CASE WHEN role = 'winner' THEN 1 ELSE 0 END) AS is_winner
+            game_type,
+            MAX(CASE WHEN role = 'winner' THEN 1 ELSE 0 END) AS is_winner,
+            MAX(is_creator) AS is_creator
           FROM player_game_roles
-          GROUP BY telegram_id, game_address, amount, token_mint
+          GROUP BY telegram_id, game_address, amount, token_mint, game_type
         )
         SELECT
           pgs.telegram_id,
@@ -1129,6 +1138,8 @@ export class GameDatabase extends BaseDatabase {
           SUM(
             CASE
               WHEN pgs.is_winner = 1 THEN pgs.amount
+              -- For giveaways, only the creator loses money (participants don't risk anything)
+              WHEN pgs.game_type = 'giveaway' AND pgs.is_creator = 0 THEN 0
               ELSE -pgs.amount
             END
           ) AS net_amount

@@ -3965,10 +3965,11 @@ const resolveLeaderboardPlayers = async (
     })
   );
 
-  // Filter players with games and sort by net USD descending
+  // Filter players with games, sort by net USD descending, and apply limit
   return players
     .filter((player) => player.totalGames > 0)
-    .sort((a, b) => b.netWonUsd - a.netWonUsd);
+    .sort((a, b) => b.netWonUsd - a.netWonUsd)
+    .slice(0, LEADERBOARD_PLAYER_LIMIT);
 };
 
 bot.command(["leaderboard", "lb"], async (ctx: Context) => {

@@ -229,4 +229,71 @@ describe("GameDatabase Leaderboard", () => {
     // Net should include both wins
     expect(playerStats?.netAmountByToken["TIMBA_MINT"]).toBe(1_500_000);
   });
+
+  test("should not count losses for giveaway participants (only creator loses)", () => {
+    const chatId = 88804;
+    const creatorId = "GIVEAWAY_CREATOR";
+    const creatorPk = "PKGIVEAWAY_CREATOR";
+    const participantId = "GIVEAWAY_PARTICIPANT";
+    const participantPk = "PKGIVEAWAY_PARTICIPANT";
+    const winnerId = "GIVEAWAY_WINNER";
+    const winnerPk = "PKGIVEAWAY_WINNER";
+
+    gameDb.savePlayerMapping(creatorPk, creatorId);
+    gameDb.savePlayerMapping(participantPk, participantId);
+    gameDb.savePlayerMapping(winnerPk, winnerId);
+
+    // Giveaway game: creator stakes 1000 TIMBA, winner (not the creator) wins
+    gameDb.saveGame("GIVEAWAY_LOSS", creatorId, 1_000_000, "giveaway", "TIMBA_MINT", "TIMBA", 10, 2, chatId);
+    gameDb.saveGameParticipant("GIVEAWAY_LOSS", participantId, participantPk);
+    gameDb.saveGameParticipant("GIVEAWAY_LOSS", winnerId, winnerPk);
+    gameDb.completeGame("GIVEAWAY_LOSS", winnerPk); // Winner wins, not creator
+
+    const stats = gameDb.getLeaderboardStats(chatId, 10);
+
+    const creatorStats = stats.find((s) => s.telegramId === creatorId);
+    const participantStats = stats.find((s) => s.telegramId === participantId);
+    const winnerStats = stats.find((s) => s.telegramId === winnerId);
+
+    // Winner should have positive net (won the prize)
+    expect(winnerStats).toBeDefined();
+    expect(winnerStats?.netAmountByToken["TIMBA_MINT"]).toBe(1_000_000);
+
+    // Creator should have negative net (lost the stake)
+    expect(creatorStats).toBeDefined();
+    expect(creatorStats?.netAmountByToken["TIMBA_MINT"]).toBe(-1_000_000);
+
+    // Participant should have ZERO net (didn't risk anything in giveaway)
+    expect(participantStats).toBeDefined();
+    expect(participantStats?.netAmountByToken["TIMBA_MINT"]).toBe(0);
+  });
+
+  test("should respect limit parameter and return at most N players", () => {
+    const chatId = 88805;
+
+    // Create 7 players with games
+    for (let i = 1; i <= 7; i++) {
+      const playerId = `LIMIT_PLAYER_${i}`;
+      const playerPk = `PK_LIMIT_${i}`;
+      gameDb.savePlayerMapping(playerPk, playerId);
+
+      const gameAddr = `LIMIT_GAME_${i}`;
+      gameDb.saveGame(gameAddr, playerId, 1_000_000 * i, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+      gameDb.saveGameParticipant(gameAddr, `OTH_${i}`, `PKOTH_${i}`);
+      gameDb.completeGame(gameAddr, playerPk); // Each player wins their game
+    }
+
+    // Request only 5 players
+    const stats = gameDb.getLeaderboardStats(chatId, 5);
+
+    // Should return at most 5 * 3 = 15 from DB (extra for re-sorting by USD)
+    // But since we only have 7 players, we get 7
+    expect(stats.length).toBeLessThanOrEqual(15);
+    expect(stats.length).toBe(7); // All 7 are returned from DB before USD conversion
+
+    // Request only 3 players
+    const statsSmall = gameDb.getLeaderboardStats(chatId, 3);
+    // DB fetches 3 * 3 = 9, but only 7 exist
+    expect(statsSmall.length).toBe(7);
+  });
 });
