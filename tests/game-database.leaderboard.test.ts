@@ -202,19 +202,19 @@ describe("GameDatabase Leaderboard", () => {
     expect(playerStats?.netAmountByToken["SOL"]).toBe(500_000_000);
   });
 
-  test("should include giveaway games in leaderboard stats", () => {
+  test("should exclude giveaway games from leaderboard stats", () => {
     const chatId = 88803;
     const playerId = "GIVEAWAY_TEST";
     const playerPk = "PKGIVEAWAY";
 
     gameDb.savePlayerMapping(playerPk, playerId);
 
-    // Giveaway game (should be included)
+    // Giveaway game (should be EXCLUDED)
     gameDb.saveGame("GIVEAWAY1", playerId, 1_000_000, "giveaway", "TIMBA_MINT", "TIMBA", 10, 2, chatId);
     gameDb.saveGameParticipant("GIVEAWAY1", "GA_OTHER", "PKGA_OTHER");
     gameDb.completeGame("GIVEAWAY1", playerPk);
 
-    // Coinflip game (should be included)
+    // Coinflip game (should be INCLUDED)
     gameDb.saveGame("COINFLIP1", playerId, 500_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
     gameDb.saveGameParticipant("COINFLIP1", "CF_OTHER", "PKCF_OTHER");
     gameDb.completeGame("COINFLIP1", playerPk);
@@ -223,49 +223,30 @@ describe("GameDatabase Leaderboard", () => {
     const playerStats = stats.find((s) => s.telegramId === playerId);
 
     expect(playerStats).toBeDefined();
-    // Both games should count
-    expect(playerStats?.totalGames).toBe(2);
-    expect(playerStats?.gamesWon).toBe(2);
-    // Net should include both wins
-    expect(playerStats?.netAmountByToken["TIMBA_MINT"]).toBe(1_500_000);
+    // Only coinflip game should count (giveaway excluded)
+    expect(playerStats?.totalGames).toBe(1);
+    expect(playerStats?.gamesWon).toBe(1);
+    // Net should only include coinflip win (giveaway excluded)
+    expect(playerStats?.netAmountByToken["TIMBA_MINT"]).toBe(500_000);
   });
 
-  test("should not count losses for giveaway participants (only creator loses)", () => {
+  test("should not show players who only played giveaways", () => {
     const chatId = 88804;
-    const creatorId = "GIVEAWAY_CREATOR";
-    const creatorPk = "PKGIVEAWAY_CREATOR";
-    const participantId = "GIVEAWAY_PARTICIPANT";
-    const participantPk = "PKGIVEAWAY_PARTICIPANT";
-    const winnerId = "GIVEAWAY_WINNER";
-    const winnerPk = "PKGIVEAWAY_WINNER";
+    const giveawayOnlyPlayer = "GIVEAWAY_ONLY";
+    const giveawayOnlyPk = "PKGIVEAWAY_ONLY";
 
-    gameDb.savePlayerMapping(creatorPk, creatorId);
-    gameDb.savePlayerMapping(participantPk, participantId);
-    gameDb.savePlayerMapping(winnerPk, winnerId);
+    gameDb.savePlayerMapping(giveawayOnlyPk, giveawayOnlyPlayer);
 
-    // Giveaway game: creator stakes 1000 TIMBA, winner (not the creator) wins
-    gameDb.saveGame("GIVEAWAY_LOSS", creatorId, 1_000_000, "giveaway", "TIMBA_MINT", "TIMBA", 10, 2, chatId);
-    gameDb.saveGameParticipant("GIVEAWAY_LOSS", participantId, participantPk);
-    gameDb.saveGameParticipant("GIVEAWAY_LOSS", winnerId, winnerPk);
-    gameDb.completeGame("GIVEAWAY_LOSS", winnerPk); // Winner wins, not creator
+    // Only giveaway games - player should not appear on leaderboard
+    gameDb.saveGame("GIVEAWAY_ONLY1", giveawayOnlyPlayer, 1_000_000, "giveaway", "TIMBA_MINT", "TIMBA", 10, 2, chatId);
+    gameDb.saveGameParticipant("GIVEAWAY_ONLY1", "PART1", "PKPART1");
+    gameDb.completeGame("GIVEAWAY_ONLY1", giveawayOnlyPk);
 
     const stats = gameDb.getLeaderboardStats(chatId, 10);
+    const playerStats = stats.find((s) => s.telegramId === giveawayOnlyPlayer);
 
-    const creatorStats = stats.find((s) => s.telegramId === creatorId);
-    const participantStats = stats.find((s) => s.telegramId === participantId);
-    const winnerStats = stats.find((s) => s.telegramId === winnerId);
-
-    // Winner should have positive net (won the prize)
-    expect(winnerStats).toBeDefined();
-    expect(winnerStats?.netAmountByToken["TIMBA_MINT"]).toBe(1_000_000);
-
-    // Creator should have negative net (lost the stake)
-    expect(creatorStats).toBeDefined();
-    expect(creatorStats?.netAmountByToken["TIMBA_MINT"]).toBe(-1_000_000);
-
-    // Participant should have ZERO net (didn't risk anything in giveaway)
-    expect(participantStats).toBeDefined();
-    expect(participantStats?.netAmountByToken["TIMBA_MINT"]).toBe(0);
+    // Player should NOT appear since they only have giveaway games
+    expect(playerStats).toBeUndefined();
   });
 
   test("should respect limit parameter and return at most N*3 players (for USD re-sorting)", () => {
