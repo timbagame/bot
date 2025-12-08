@@ -51,7 +51,6 @@ export interface ChatGameSettings {
   coinflip_max_players?: number | null;
   giveaway_max_players?: number | null;
   timeout_seconds?: number | null;
-  default_privacy?: "public" | "private" | null; // Deprecated
   coinflip_default_privacy?: "public" | "private" | null;
   giveaway_default_privacy?: "public" | "private" | null;
   set_by_telegram_id?: string | null;

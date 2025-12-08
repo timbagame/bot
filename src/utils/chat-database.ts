@@ -35,7 +35,6 @@ export class ChatDatabase extends BaseDatabase {
           coinflip_max_players INTEGER,
           giveaway_max_players INTEGER,
           timeout_seconds INTEGER,
-          default_privacy TEXT,
           coinflip_default_privacy TEXT,
           giveaway_default_privacy TEXT,
           set_by_telegram_id TEXT,
@@ -44,12 +43,6 @@ export class ChatDatabase extends BaseDatabase {
       ],
       "Chat"
     );
-
-    try {
-      this.run("ALTER TABLE chat_game_settings ADD COLUMN default_privacy TEXT");
-    } catch {
-      // Ignore error if column already exists
-    }
 
     try {
       this.run(
@@ -134,10 +127,6 @@ export class ChatDatabase extends BaseDatabase {
       settings,
       "timeout_seconds"
     );
-    const hasPrivacy = Object.prototype.hasOwnProperty.call(
-      settings,
-      "default_privacy"
-    );
     const hasCoinflipPrivacy = Object.prototype.hasOwnProperty.call(
       settings,
       "coinflip_default_privacy"
@@ -162,9 +151,6 @@ export class ChatDatabase extends BaseDatabase {
       timeout_seconds: hasTimeout
         ? settings.timeout_seconds ?? null
         : existing?.timeout_seconds ?? null,
-      default_privacy: hasPrivacy
-        ? settings.default_privacy ?? null
-        : existing?.default_privacy ?? null,
       coinflip_default_privacy: hasCoinflipPrivacy
         ? settings.coinflip_default_privacy ?? null
         : existing?.coinflip_default_privacy ?? null,
@@ -183,18 +169,16 @@ export class ChatDatabase extends BaseDatabase {
           coinflip_max_players,
           giveaway_max_players,
           timeout_seconds,
-          default_privacy,
           coinflip_default_privacy,
           giveaway_default_privacy,
           set_by_telegram_id,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         next.chat_id,
         next.coinflip_max_players ?? null,
         next.giveaway_max_players ?? null,
         next.timeout_seconds ?? null,
-        next.default_privacy ?? null,
         next.coinflip_default_privacy ?? null,
         next.giveaway_default_privacy ?? null,
         next.set_by_telegram_id ?? null,
