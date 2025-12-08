@@ -366,7 +366,7 @@ describe("chat defaults module", () => {
       gameDb,
       getTokenManager: () => tokenManager,
       getGameManager: () => ({}) as any,
-      wrapCallbackHandler: (handler) => async (ctx) => await handler(ctx),
+      wrapCallbackHandler: (handler) => async (ctx) => await handler(ctx, async () => {}),
       getOracleMaxPlayers: () => 50,
       isUserGroupAdmin: async () => true,
       replyToMessage: async (_ctx, text) => {
