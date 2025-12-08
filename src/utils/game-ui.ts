@@ -77,19 +77,13 @@ export function buildParticipantsList(usernames: string[]): string {
 
 /**
  * Format remaining time until expiration as a human-friendly string.
- * Examples: "⏰ Expires in: 45m", "⏰ Expires in: 1h 20m"
+ * Examples: "⏰ Expires in: 45 minutes", "⏰ Expires in: 80 minutes (1.3 hours)"
  */
 export function buildExpirationText(
   secondsRemaining: number,
   prefix: string = ""
 ): string {
-  const minutes = Math.floor(secondsRemaining / 60);
-  const hours = Math.floor(minutes / 60);
-  if (hours > 0) {
-    const remMin = minutes % 60;
-    return `${prefix}Expires in: ${hours}h ${remMin}m`;
-  }
-  return `${prefix}Expires in: ${minutes}m`;
+  return `${prefix}Expires in: ${formatDurationVerbose(secondsRemaining)}`;
 }
 
 /**
