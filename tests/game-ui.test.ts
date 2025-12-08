@@ -14,3 +14,20 @@ test("buildGameStatus after minimum but not full", () => {
 test("buildGameStatus full", () => {
   expect(buildGameStatus(5, 2, 5)).toBe("Full - starting soon!");
 });
+
+import { formatDuration, buildExpirationText } from "../src/utils/game-ui";
+
+test("formatDuration", () => {
+  expect(formatDuration(10)).toBe("10s");
+  expect(formatDuration(45 * 60)).toBe("45m");
+  expect(formatDuration(80 * 60)).toBe("1h 20m");
+  expect(formatDuration(60 * 60)).toBe("1h"); // Exactly 1h
+  expect(formatDuration(3 * 24 * 60 * 60)).toBe("3d");
+  expect(formatDuration(3 * 24 * 60 * 60 + 5 * 60 * 60)).toBe("3d 5h");
+});
+
+test("buildExpirationText", () => {
+  expect(buildExpirationText(42 * 60)).toBe("Expires in: 42m");
+  expect(buildExpirationText(80 * 60)).toBe("Expires in: 1h 20m");
+  expect(buildExpirationText(3 * 24 * 60 * 60)).toBe("Expires in: 3d");
+});
