@@ -282,7 +282,8 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         options.timeoutSeconds
       );
 
-      const isPrivate = chatSettings?.default_privacy === "private";
+      // Default to private if not explicitly public
+      const isPrivate = chatSettings?.default_privacy !== "public";
 
       const gameResult = await createDeps.gameManager.createGame(
         options.gameType,

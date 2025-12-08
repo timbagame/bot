@@ -172,7 +172,8 @@ const resolveAdvancedOptions = (
     maxPlayersCeil,
     maxPlayersLimit
   );
-  const defaultPrivacy = chatSettings?.default_privacy === "private";
+  // Default to private if not explicitly public
+  const defaultPrivacy = chatSettings?.default_privacy !== "public";
   const isPrivate = session?.isPrivate ?? defaultPrivacy;
 
   return { timeoutSeconds, minPlayers, isPrivate };
