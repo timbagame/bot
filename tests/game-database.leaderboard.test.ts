@@ -201,4 +201,32 @@ describe("GameDatabase Leaderboard", () => {
     // SOL: +0.5 (raw: 500_000_000)
     expect(playerStats?.netAmountByToken["SOL"]).toBe(500_000_000);
   });
+
+  test("should include giveaway games in leaderboard stats", () => {
+    const chatId = 88803;
+    const playerId = "GIVEAWAY_TEST";
+    const playerPk = "PKGIVEAWAY";
+
+    gameDb.savePlayerMapping(playerPk, playerId);
+
+    // Giveaway game (should be included)
+    gameDb.saveGame("GIVEAWAY1", playerId, 1_000_000, "giveaway", "TIMBA_MINT", "TIMBA", 10, 2, chatId);
+    gameDb.saveGameParticipant("GIVEAWAY1", "GA_OTHER", "PKGA_OTHER");
+    gameDb.completeGame("GIVEAWAY1", playerPk);
+
+    // Coinflip game (should be included)
+    gameDb.saveGame("COINFLIP1", playerId, 500_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGameParticipant("COINFLIP1", "CF_OTHER", "PKCF_OTHER");
+    gameDb.completeGame("COINFLIP1", playerPk);
+
+    const stats = gameDb.getLeaderboardStats(chatId, 10);
+    const playerStats = stats.find((s) => s.telegramId === playerId);
+
+    expect(playerStats).toBeDefined();
+    // Both games should count
+    expect(playerStats?.totalGames).toBe(2);
+    expect(playerStats?.gamesWon).toBe(2);
+    // Net should include both wins
+    expect(playerStats?.netAmountByToken["TIMBA_MINT"]).toBe(1_500_000);
+  });
 });
