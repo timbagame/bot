@@ -371,3 +371,47 @@ test("countRecentGamesByCreator respects rate-limit window boundaries", () => {
   );
   expect(afterWindowCount).toBe(1);
 });
+
+test("cleanupOldGames deletes games and participants older than specified days", () => {
+  const db = GameDatabase.getInstance();
+  const sqlite: any = (db as any).db;
+
+  const now = Date.now();
+  const thirtyOneDaysAgo = now - 31 * 24 * 60 * 60 * 1000;
+  const twentyNineDaysAgo = now - 29 * 24 * 60 * 60 * 1000;
+
+  // Create old game (31 days ago)
+  db.saveGame("old_game", "creator_old", 100, "coinflip");
+  db.saveGameParticipant("old_game", "participant_old", "pk_old");
+  sqlite
+    .prepare("UPDATE games SET created_at = ? WHERE game_address = ?")
+    .run(thirtyOneDaysAgo, "old_game");
+
+  // Create recent game (29 days ago)
+  db.saveGame("recent_game", "creator_recent", 200, "coinflip");
+  db.saveGameParticipant("recent_game", "participant_recent", "pk_recent");
+  sqlite
+    .prepare("UPDATE games SET created_at = ? WHERE game_address = ?")
+    .run(twentyNineDaysAgo, "recent_game");
+
+  // Verify both exist before cleanup
+  expect(db.gameExists("old_game")).toBe(true);
+  expect(db.gameExists("recent_game")).toBe(true);
+  expect(db.getGameParticipants("old_game").length).toBe(1);
+  expect(db.getGameParticipants("recent_game").length).toBe(1);
+
+  // Run cleanup for 30 days
+  const result = db.cleanupOldGames(30);
+
+  // Old game should be deleted
+  expect(db.gameExists("old_game")).toBe(false);
+  expect(db.getGameParticipants("old_game").length).toBe(0);
+
+  // Recent game should still exist
+  expect(db.gameExists("recent_game")).toBe(true);
+  expect(db.getGameParticipants("recent_game").length).toBe(1);
+
+  // Verify returned counts
+  expect(result.gamesDeleted).toBe(1);
+  expect(result.participantsDeleted).toBe(1);
+});

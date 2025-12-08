@@ -5659,6 +5659,34 @@ if (process.env.NODE_ENV !== "test") {
 
       scheduleFeeSweeper();
 
+      // Schedule daily database cleanup
+      const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+      const CLEANUP_DAYS_OLD = 30;
+
+      const scheduleDatabaseCleanup = () => {
+        const runCleanup = () => {
+          try {
+            const result = gameDb.cleanupOldGames(CLEANUP_DAYS_OLD);
+            if (result.gamesDeleted > 0 || result.participantsDeleted > 0) {
+              console.log(
+                `🧹 Database cleanup: removed ${result.gamesDeleted} games and ${result.participantsDeleted} participants older than ${CLEANUP_DAYS_OLD} days`
+              );
+            }
+          } catch (error) {
+            console.error("❌ Database cleanup failed:", error);
+          }
+        };
+
+        console.log(
+          `🗑️ Database cleanup scheduled (interval: 24h, threshold: ${CLEANUP_DAYS_OLD} days)`
+        );
+
+        runCleanup();
+        setInterval(runCleanup, CLEANUP_INTERVAL_MS);
+      };
+
+      scheduleDatabaseCleanup();
+
       /**
        * Process expired game with cancellation
        */

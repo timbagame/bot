@@ -154,6 +154,43 @@ export class GameDatabase extends BaseDatabase {
     return this.all<GameData>("SELECT * FROM games", [], "getting all games");
   }
 
+  /**
+   * Delete games and their participants older than the specified number of days.
+   * @param daysOld Number of days old (default: 30)
+   * @returns Object with counts of deleted games and participants
+   */
+  public cleanupOldGames(daysOld: number = 30): { gamesDeleted: number; participantsDeleted: number } {
+    const cutoffMs = Date.now() - daysOld * 24 * 60 * 60 * 1000;
+
+    // First delete participants for old games (due to FK constraint)
+    const participantsResult = this.run(
+      `DELETE FROM game_participants
+       WHERE game_address IN (
+         SELECT game_address FROM games WHERE created_at < ?
+       )`,
+      [cutoffMs],
+      "deleting old game participants"
+    );
+
+    // Then delete the games themselves
+    const gamesResult = this.run(
+      "DELETE FROM games WHERE created_at < ?",
+      [cutoffMs],
+      "deleting old games"
+    );
+
+    const participantsDeleted = participantsResult?.changes ?? 0;
+    const gamesDeleted = gamesResult?.changes ?? 0;
+
+    if (gamesDeleted > 0 || participantsDeleted > 0) {
+      console.log(
+        `🧹 Cleaned up ${gamesDeleted} games and ${participantsDeleted} participants older than ${daysOld} days`
+      );
+    }
+
+    return { gamesDeleted, participantsDeleted };
+  }
+
   public getGamesExpiringBefore(
     cutoffMs: number,
     limit = 25,
