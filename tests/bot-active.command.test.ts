@@ -208,3 +208,257 @@ describe("active game keyboard helpers", () => {
     expect(shouldSkip).toBe(true);
   });
 });
+
+describe("/active command pagination", () => {
+  let botModule: typeof import("../src/bot");
+  let originalGameManager: any;
+
+  beforeAll(async () => {
+    botModule = await import("../src/bot");
+    originalGameManager = botModule.gameManager;
+  });
+
+  afterEach(() => {
+    botModule.__test_setGameManager(originalGameManager as any);
+  });
+
+  const createMockGame = (index: number): any => ({
+    messageText: `<b>Coinflip • ${index}k TIMBA ($${index})</b>\nDetails`,
+    keyboard: [[{ text: "🎮 Join", callback_data: `join_${index}` }]],
+    gameAddress: `addr${index}`,
+    currentTickets: 1,
+    maxTickets: 4,
+    minTickets: 2,
+  });
+
+  test("paginates active games with max 5 per page", async () => {
+    const mockGames = Array.from({ length: 8 }, (_, i) => createMockGame(i + 1));
+
+    const stubGameManager = {
+      getChatActiveGames: vi.fn(async () => mockGames),
+    } as any;
+
+    botModule.__test_setGameManager(stubGameManager);
+
+    const reply = vi.fn(async (text: string, options: any) => ({ text, ...options }));
+
+    await botModule.__test_handleActiveCommand({
+      chat: { id: -100, type: "supergroup" },
+      from: { id: 1234, is_bot: false, first_name: "Tester" },
+      message: {
+        message_id: 10,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: -100, type: "supergroup" },
+        text: "/active",
+      },
+      reply,
+    } as any);
+
+    expect(reply).toHaveBeenCalledTimes(1);
+
+    const [text, options] = reply.mock.calls[0]!;
+    expect(text).toContain("Active games (8)");
+    expect(text).toContain("Page 1/2");
+
+    const inlineKeyboard = options?.reply_markup?.inline_keyboard as InlineKeyboardButton[][] | undefined;
+    expect(inlineKeyboard).toBeDefined();
+
+    // Check for pagination nav row (last row)
+    const lastRow = inlineKeyboard?.[inlineKeyboard.length - 1];
+    expect(lastRow).toBeDefined();
+
+    // Should have page indicator and Next button (no Prev on first page)
+    const hasNextButton = lastRow?.some(btn => btn.text === "Next →");
+    const hasPrevButton = lastRow?.some(btn => btn.text === "← Prev");
+    const hasPageIndicator = lastRow?.some(btn => btn.text === "1/2");
+
+    expect(hasNextButton).toBe(true);
+    expect(hasPrevButton).toBe(false);
+    expect(hasPageIndicator).toBe(true);
+  });
+
+  test("shows all games without pagination when under limit", async () => {
+    const mockGames = Array.from({ length: 3 }, (_, i) => createMockGame(i + 1));
+
+    const stubGameManager = {
+      getChatActiveGames: vi.fn(async () => mockGames),
+    } as any;
+
+    botModule.__test_setGameManager(stubGameManager);
+
+    const reply = vi.fn(async (text: string, options: any) => ({ text, ...options }));
+
+    await botModule.__test_handleActiveCommand({
+      chat: { id: -100, type: "supergroup" },
+      from: { id: 1234, is_bot: false, first_name: "Tester" },
+      message: {
+        message_id: 10,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: -100, type: "supergroup" },
+        text: "/active",
+      },
+      reply,
+    } as any);
+
+    const [text, options] = reply.mock.calls[0]!;
+    expect(text).toContain("Active games (3)");
+    expect(text).not.toContain("Page");
+
+    const inlineKeyboard = options?.reply_markup?.inline_keyboard as InlineKeyboardButton[][] | undefined;
+
+    // No pagination buttons - check that last row is a game button, not navigation
+    const lastRow = inlineKeyboard?.[inlineKeyboard.length - 1];
+    const hasNavButtons = lastRow?.some(btn => btn.text === "Next →" || btn.text === "← Prev");
+    expect(hasNavButtons).toBeFalsy();
+  });
+
+  test("buildActiveGamesKeyboard adds navigation buttons correctly", () => {
+    const games = Array.from({ length: 3 }, (_, i) => createMockGame(i + 1));
+
+    // Test first page of multi-page list
+    const keyboard = botModule.__test_buildActiveGamesKeyboard(games, {
+      page: 0,
+      totalGames: 12,
+      callbackPrefix: "active_page:",
+    });
+
+    const lastRow = keyboard[keyboard.length - 1]!;
+    expect(lastRow.some(btn => btn.text === "1/3")).toBe(true);
+    expect(lastRow.some(btn => btn.text === "Next →")).toBe(true);
+    expect(lastRow.some(btn => btn.text === "← Prev")).toBe(false);
+  });
+
+  test("buildActiveGamesKeyboard shows both nav buttons on middle page", () => {
+    const games = Array.from({ length: 3 }, (_, i) => createMockGame(i + 1));
+
+    const keyboard = botModule.__test_buildActiveGamesKeyboard(games, {
+      page: 1,
+      totalGames: 12,
+      callbackPrefix: "active_page:",
+    });
+
+    const lastRow = keyboard[keyboard.length - 1]!;
+    expect(lastRow.some(btn => btn.text === "2/3")).toBe(true);
+    expect(lastRow.some(btn => btn.text === "Next →")).toBe(true);
+    expect(lastRow.some(btn => btn.text === "← Prev")).toBe(true);
+  });
+
+  test("buildActiveGamesKeyboard hides next button on last page", () => {
+    const games = Array.from({ length: 2 }, (_, i) => createMockGame(i + 1));
+
+    const keyboard = botModule.__test_buildActiveGamesKeyboard(games, {
+      page: 2,
+      totalGames: 12,
+      callbackPrefix: "active_page:",
+    });
+
+    const lastRow = keyboard[keyboard.length - 1]!;
+    expect(lastRow.some(btn => btn.text === "3/3")).toBe(true);
+    expect(lastRow.some(btn => btn.text === "Next →")).toBe(false);
+    expect(lastRow.some(btn => btn.text === "← Prev")).toBe(true);
+  });
+
+  test("pagination callbacks use correct prefix format", () => {
+    const activePrefix = botModule.__test_ACTIVE_PAGE_CALLBACK_PREFIX;
+    const publicPrefix = botModule.__test_PUBLIC_PAGE_CALLBACK_PREFIX;
+
+    expect(activePrefix).toBe("active_page:");
+    expect(publicPrefix).toBe("public_page:");
+    expect(botModule.__test_ACTIVE_GAMES_PER_PAGE).toBe(5);
+  });
+});
+
+describe("/public command pagination", () => {
+  let botModule: typeof import("../src/bot");
+  let originalGameManager: any;
+
+  beforeAll(async () => {
+    botModule = await import("../src/bot");
+    originalGameManager = botModule.gameManager;
+  });
+
+  afterEach(() => {
+    botModule.__test_setGameManager(originalGameManager as any);
+  });
+
+  const createMockGame = (index: number): any => ({
+    messageText: `<b>Coinflip • ${index}k TIMBA ($${index})</b>\nDetails`,
+    keyboard: [[{ text: "🎮 Join", callback_data: `join_${index}` }]],
+    gameAddress: `addr${index}`,
+    currentTickets: 1,
+    maxTickets: 4,
+    minTickets: 2,
+  });
+
+  test("paginates public games with max 5 per page", async () => {
+    const mockGames = Array.from({ length: 7 }, (_, i) => createMockGame(i + 1));
+
+    const stubGameManager = {
+      getAllActivePublicGames: vi.fn(async () => mockGames),
+    } as any;
+
+    botModule.__test_setGameManager(stubGameManager);
+
+    const reply = vi.fn(async (text: string, options: any) => ({ text, ...options }));
+
+    await botModule.__test_handlePublicCommand({
+      chat: { id: 123, type: "private" },
+      from: { id: 1234, is_bot: false, first_name: "Tester" },
+      message: {
+        message_id: 10,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: 123, type: "private" },
+        text: "/public",
+      },
+      reply,
+    } as any);
+
+    expect(reply).toHaveBeenCalledTimes(1);
+
+    const [text, options] = reply.mock.calls[0]!;
+    expect(text).toContain("Active Public Games (7)");
+    expect(text).toContain("Page 1/2");
+
+    const inlineKeyboard = options?.reply_markup?.inline_keyboard as InlineKeyboardButton[][] | undefined;
+    const lastRow = inlineKeyboard?.[inlineKeyboard.length - 1];
+
+    expect(lastRow?.some(btn => btn.text === "Next →")).toBe(true);
+    expect(lastRow?.some(btn =>
+      "callback_data" in btn && btn.callback_data === "public_page:1"
+    )).toBe(true);
+  });
+
+  test("shows no pagination for single page of public games", async () => {
+    const mockGames = Array.from({ length: 4 }, (_, i) => createMockGame(i + 1));
+
+    const stubGameManager = {
+      getAllActivePublicGames: vi.fn(async () => mockGames),
+    } as any;
+
+    botModule.__test_setGameManager(stubGameManager);
+
+    const reply = vi.fn(async (text: string, options: any) => ({ text, ...options }));
+
+    await botModule.__test_handlePublicCommand({
+      chat: { id: 123, type: "private" },
+      from: { id: 1234, is_bot: false, first_name: "Tester" },
+      message: {
+        message_id: 10,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: 123, type: "private" },
+        text: "/public",
+      },
+      reply,
+    } as any);
+
+    const [text, options] = reply.mock.calls[0]!;
+    expect(text).toContain("Active Public Games (4)");
+    expect(text).not.toContain("Page");
+
+    const inlineKeyboard = options?.reply_markup?.inline_keyboard as InlineKeyboardButton[][] | undefined;
+    const lastRow = inlineKeyboard?.[inlineKeyboard.length - 1];
+
+    const hasNavButtons = lastRow?.some(btn => btn.text === "Next →" || btn.text === "← Prev");
+    expect(hasNavButtons).toBeFalsy();
+  });
+});

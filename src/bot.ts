@@ -1276,6 +1276,9 @@ type ActiveGameListing = {
 };
 
 const ACTIVE_LIST_HEADER_CALLBACK_DATA = "active_list:noop";
+const ACTIVE_GAMES_PER_PAGE = 5;
+const ACTIVE_PAGE_CALLBACK_PREFIX = "active_page:";
+const PUBLIC_PAGE_CALLBACK_PREFIX = "public_page:";
 const ACTIVE_GAME_LABEL_MAX_LENGTH = 60;
 
 const cloneInlineKeyboardRow = (
@@ -1387,8 +1390,15 @@ const rewriteJoinButtons = (
     return { ...button };
   });
 
+type PaginationOptions = {
+  page: number;
+  totalGames: number;
+  callbackPrefix: string;
+};
+
 const buildActiveGamesKeyboard = (
-  games: ActiveGameListing[]
+  games: ActiveGameListing[],
+  pagination?: PaginationOptions
 ): InlineKeyboardButton[][] => {
   const inlineKeyboard: InlineKeyboardButton[][] = [];
 
@@ -1409,6 +1419,35 @@ const buildActiveGamesKeyboard = (
     });
   });
 
+  // Add pagination navigation buttons if multiple pages exist
+  if (pagination) {
+    const totalPages = Math.ceil(pagination.totalGames / ACTIVE_GAMES_PER_PAGE);
+    if (totalPages > 1) {
+      const navRow: InlineKeyboardButton[] = [];
+
+      if (pagination.page > 0) {
+        navRow.push({
+          text: "← Prev",
+          callback_data: `${pagination.callbackPrefix}${pagination.page - 1}`,
+        });
+      }
+
+      navRow.push({
+        text: `${pagination.page + 1}/${totalPages}`,
+        callback_data: ACTIVE_LIST_HEADER_CALLBACK_DATA,
+      });
+
+      if (pagination.page < totalPages - 1) {
+        navRow.push({
+          text: "Next →",
+          callback_data: `${pagination.callbackPrefix}${pagination.page + 1}`,
+        });
+      }
+
+      inlineKeyboard.push(navRow);
+    }
+  }
+
   return inlineKeyboard;
 };
 
@@ -1417,6 +1456,9 @@ export const __test_buildActiveGamesKeyboard = buildActiveGamesKeyboard;
 
 export const __test_ACTIVE_LIST_HEADER_CALLBACK_DATA =
   ACTIVE_LIST_HEADER_CALLBACK_DATA;
+export const __test_ACTIVE_GAMES_PER_PAGE = ACTIVE_GAMES_PER_PAGE;
+export const __test_ACTIVE_PAGE_CALLBACK_PREFIX = ACTIVE_PAGE_CALLBACK_PREFIX;
+export const __test_PUBLIC_PAGE_CALLBACK_PREFIX = PUBLIC_PAGE_CALLBACK_PREFIX;
 
 // These will be initialized in setupAnchor
 export let gameManager: GameManager;
@@ -3598,8 +3640,18 @@ const handleActiveCommand = async (ctx: Context) => {
         return;
       }
 
-      const inlineKeyboard = buildActiveGamesKeyboard(normalizedGames);
-      const summaryText = `🎮 <b>Active games (${normalizedGames.length})</b>`;
+      const page = 0;
+      const totalGames = normalizedGames.length;
+      const totalPages = Math.ceil(totalGames / ACTIVE_GAMES_PER_PAGE);
+      const pageGames = normalizedGames.slice(0, ACTIVE_GAMES_PER_PAGE);
+
+      const inlineKeyboard = buildActiveGamesKeyboard(pageGames, {
+        page,
+        totalGames,
+        callbackPrefix: ACTIVE_PAGE_CALLBACK_PREFIX,
+      });
+      const pageInfo = totalPages > 1 ? ` • Page 1/${totalPages}` : "";
+      const summaryText = `🎮 <b>Active games (${totalGames})</b>${pageInfo}`;
 
       await ctx.reply(summaryText, {
         parse_mode: "HTML",
@@ -3657,8 +3709,18 @@ const handlePublicCommand = async (ctx: Context) => {
       return;
     }
 
-    const inlineKeyboard = buildActiveGamesKeyboard(normalizedGames);
-    const summaryText = `🌐 <b>Active Public Games (${normalizedGames.length})</b>`;
+    const page = 0;
+    const totalGames = normalizedGames.length;
+    const totalPages = Math.ceil(totalGames / ACTIVE_GAMES_PER_PAGE);
+    const pageGames = normalizedGames.slice(0, ACTIVE_GAMES_PER_PAGE);
+
+    const inlineKeyboard = buildActiveGamesKeyboard(pageGames, {
+      page,
+      totalGames,
+      callbackPrefix: PUBLIC_PAGE_CALLBACK_PREFIX,
+    });
+    const pageInfo = totalPages > 1 ? ` • Page 1/${totalPages}` : "";
+    const summaryText = `🌐 <b>Active Public Games (${totalGames})</b>${pageInfo}`;
 
     await ctx.reply(summaryText, {
       parse_mode: "HTML",
@@ -3705,6 +3767,101 @@ bot.callbackQuery(ACTIVE_LIST_HEADER_CALLBACK_DATA, async (ctx: Context) => {
     );
   } catch (error) {
     await handleCallbackErrorSafe(ctx, error, "active games header");
+  }
+});
+
+// Pagination callback for /active command
+bot.callbackQuery(/^active_page:(\d+)$/, async (ctx: Context) => {
+  try {
+    const match = ctx.callbackQuery?.data?.match(/^active_page:(\d+)$/);
+    if (!match || !match[1]) {
+      await safeAnswerCallbackQuery(ctx, "Invalid page request.");
+      return;
+    }
+    const page = parseInt(match[1], 10);
+
+    if (!ctx.chat?.id || !isGroupChat(ctx)) {
+      await safeAnswerCallbackQuery(ctx, "This only works in group chats.");
+      return;
+    }
+
+    const chatActiveGames = await gameManager.getChatActiveGames(ctx, ctx.chat.id);
+    const normalizedGames: ActiveGameListing[] = chatActiveGames.map((game) => ({
+      ...game,
+      keyboard: cloneInlineKeyboard(game.keyboard ?? []),
+    }));
+
+    const totalGames = normalizedGames.length;
+    const totalPages = Math.ceil(totalGames / ACTIVE_GAMES_PER_PAGE);
+
+    if (page < 0 || page >= totalPages) {
+      await safeAnswerCallbackQuery(ctx, "Invalid page.");
+      return;
+    }
+
+    const start = page * ACTIVE_GAMES_PER_PAGE;
+    const pageGames = normalizedGames.slice(start, start + ACTIVE_GAMES_PER_PAGE);
+
+    const inlineKeyboard = buildActiveGamesKeyboard(pageGames, {
+      page,
+      totalGames,
+      callbackPrefix: ACTIVE_PAGE_CALLBACK_PREFIX,
+    });
+    const pageInfo = totalPages > 1 ? ` • Page ${page + 1}/${totalPages}` : "";
+    const summaryText = `🎮 <b>Active games (${totalGames})</b>${pageInfo}`;
+
+    await ctx.editMessageText(summaryText, {
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: inlineKeyboard },
+    });
+    await safeAnswerCallbackQuery(ctx, `Page ${page + 1}`);
+  } catch (error) {
+    await handleCallbackErrorSafe(ctx, error, "active page navigation");
+  }
+});
+
+// Pagination callback for /public command
+bot.callbackQuery(/^public_page:(\d+)$/, async (ctx: Context) => {
+  try {
+    const match = ctx.callbackQuery?.data?.match(/^public_page:(\d+)$/);
+    if (!match || !match[1]) {
+      await safeAnswerCallbackQuery(ctx, "Invalid page request.");
+      return;
+    }
+    const page = parseInt(match[1], 10);
+
+    const publicActiveGames = await gameManager.getAllActivePublicGames(ctx);
+    const normalizedGames: ActiveGameListing[] = publicActiveGames.map((game) => ({
+      ...game,
+      keyboard: cloneInlineKeyboard(game.keyboard ?? []),
+    }));
+
+    const totalGames = normalizedGames.length;
+    const totalPages = Math.ceil(totalGames / ACTIVE_GAMES_PER_PAGE);
+
+    if (page < 0 || page >= totalPages) {
+      await safeAnswerCallbackQuery(ctx, "Invalid page.");
+      return;
+    }
+
+    const start = page * ACTIVE_GAMES_PER_PAGE;
+    const pageGames = normalizedGames.slice(start, start + ACTIVE_GAMES_PER_PAGE);
+
+    const inlineKeyboard = buildActiveGamesKeyboard(pageGames, {
+      page,
+      totalGames,
+      callbackPrefix: PUBLIC_PAGE_CALLBACK_PREFIX,
+    });
+    const pageInfo = totalPages > 1 ? ` • Page ${page + 1}/${totalPages}` : "";
+    const summaryText = `🌐 <b>Active Public Games (${totalGames})</b>${pageInfo}`;
+
+    await ctx.editMessageText(summaryText, {
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: inlineKeyboard },
+    });
+    await safeAnswerCallbackQuery(ctx, `Page ${page + 1}`);
+  } catch (error) {
+    await handleCallbackErrorSafe(ctx, error, "public page navigation");
   }
 });
 
