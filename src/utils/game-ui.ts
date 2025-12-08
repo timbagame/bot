@@ -77,28 +77,39 @@ export function buildParticipantsList(usernames: string[]): string {
 
 /**
  * Format remaining time until expiration as a human-friendly string.
- * Examples: "⏰ Expires in: 45 minutes", "⏰ Expires in: 80 minutes (1.3 hours)"
+ * Examples: "⏰ Expires in: 45m", "⏰ Expires in: 1h 20m"
  */
 export function buildExpirationText(
   secondsRemaining: number,
   prefix: string = ""
 ): string {
-  return `${prefix}Expires in: ${formatDurationVerbose(secondsRemaining)}`;
+  return `${prefix}Expires in: ${formatDuration(secondsRemaining)}`;
 }
 
 /**
- * Format a duration in seconds to a verbose string.
- * Example: "120 minutes (2 hours)"
+ * Format a duration in seconds to a compact string.
+ * Examples: "10s", "45m", "1h 20m", "3d"
  */
-export function formatDurationVerbose(seconds: number): string {
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) {
-    return `${minutes} minutes`;
+export function formatDuration(seconds: number): string {
+  if (seconds < 60) {
+    return `${Math.max(0, Math.floor(seconds))}s`;
   }
-  const hours = minutes / 60;
-  const hoursFormatted = Number.isInteger(hours)
-    ? hours.toString()
-    : hours.toFixed(1).replace(/\.0$/, "");
-  const hourLabel = hoursFormatted === "1" ? "hour" : "hours";
-  return `${minutes} minutes (${hoursFormatted} ${hourLabel})`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours < 24) {
+    if (remainingMinutes > 0) {
+      return `${hours}h ${remainingMinutes}m`;
+    }
+    return `${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  if (remainingHours > 0) {
+    return `${days}d ${remainingHours}h`;
+  }
+  return `${days}d`;
 }

@@ -78,7 +78,7 @@ import {
   buildLeaderboardMessage,
   type LeaderboardPlayerDisplay,
 } from "./utils/leaderboard-ui";
-import { formatDurationVerbose } from "./utils/game-ui";
+import { formatDuration } from "./utils/game-ui";
 import {
   formatAmount,
   escapeHtml,
@@ -4046,18 +4046,14 @@ bot.command("oracle", async (ctx: Context) => {
       "",
       `Operator: <code>${oracleAccount.operator.toString()}</code>`,
       `Fee Percentage: ${oracleAccount.feePercentage}%`,
-      `Min Timeout: ${formatDurationVerbose(
-        oracleAccount.minTimeout.toNumber()
-      )}`,
-      `Max Timeout: ${formatDurationVerbose(
-        oracleAccount.maxTimeout.toNumber()
-      )}`,
+      `Min Timeout: ${formatDuration(oracleAccount.minTimeout.toNumber())}`,
+      `Max Timeout: ${formatDuration(oracleAccount.maxTimeout.toNumber())}`,
       `Max Tickets: ${oracleAccount.maxTickets}`,
-      `Oracle Buffer Time: ${formatDurationVerbose(
+      `Oracle Buffer Time: ${formatDuration(
         oracleAccount.oracleBufferTime.toNumber()
       )}`,
       "",
-      `Current Game Timeout: ${formatDurationVerbose(GAME_TIMEOUT)}`,
+      `Current Game Timeout: ${formatDuration(GAME_TIMEOUT)}`,
     ].join("\n");
 
     await ctx.reply(response, {
