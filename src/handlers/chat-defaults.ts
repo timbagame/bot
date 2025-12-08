@@ -62,7 +62,7 @@ const formatTimeoutLine = (timeoutSeconds: number, isDefault: boolean): string =
   return `⏱️ Game timeout: ${formatted} ${suffix}`;
 };
 
-type SettingsTarget = "token" | "coinflip" | "giveaway" | "timeout" | "privacy";
+type SettingsTarget = "token" | "coinflip" | "giveaway" | "timeout" | "privacy_coinflip" | "privacy_giveaway";
 
 type ChatDefaultsModuleDeps = {
   bot: Bot;
@@ -95,7 +95,9 @@ const buildMenuKeyboard = (): InlineKeyboard => {
     .row()
     .text("⏱️ Game timeout", "chat_defaults_timeout")
     .row()
-    .text("👁️ Default privacy", "chat_defaults_privacy")
+    .text("👁️ Coinflip privacy", "chat_defaults_privacy_coinflip")
+    .row()
+    .text("👁️ Giveaway privacy", "chat_defaults_privacy_giveaway")
     .row();
 };
 
@@ -143,9 +145,15 @@ const buildSettingsSummary = async (
     DEFAULT_GAME_TIMEOUT
   );
 
-  const privacy = chatSettings?.default_privacy;
-  const isPrivate = privacy === "private" || !privacy;
-  const privacyLine = `👁️ Default privacy: ${isPrivate ? "Private 🔒" : "Public 🌍"} ${privacy ? "(chat default)" : "(bot default)"}`;
+  const coinflipPrivacy = chatSettings?.coinflip_default_privacy;
+  const isCoinflipPrivate = coinflipPrivacy !== "public";
+  const coinflipSuffix = coinflipPrivacy ? "(chat default)" : "(bot default)";
+  const coinflipPrivacyLine = `👁️ Coinflip privacy: ${isCoinflipPrivate ? "Private 🔒" : "Public 🌍"} ${coinflipSuffix}`;
+
+  const giveawayPrivacy = chatSettings?.giveaway_default_privacy;
+  const isGiveawayPrivate = giveawayPrivacy !== "public";
+  const giveawaySuffix = giveawayPrivacy ? "(chat default)" : "(bot default)";
+  const giveawayPrivacyLine = `👁️ Giveaway privacy: ${isGiveawayPrivate ? "Private 🔒" : "Public 🌍"} ${giveawaySuffix}`;
 
   return [
     "<b>Chat defaults</b>",
@@ -162,7 +170,8 @@ const buildSettingsSummary = async (
       giveawayPlayers
     ),
     formatTimeoutLine(timeoutSeconds, chatSettings?.timeout_seconds == null),
-    privacyLine,
+    coinflipPrivacyLine,
+    giveawayPrivacyLine,
     "",
     "Use the buttons below to update chat defaults.",
   ].join("\n");
@@ -483,7 +492,7 @@ export const createChatDefaultsModule = (
   );
 
   deps.bot.callbackQuery(
-    /^chat_defaults_(token|coinflip|giveaway|timeout|privacy)$/,
+    /^chat_defaults_(token|coinflip|giveaway|timeout|privacy_coinflip|privacy_giveaway)$/,
     deps.wrapCallbackHandler(async (ctx) => {
       if (!ctx.chat) return;
       const action = ctx.match?.[1] as SettingsTarget | undefined;
@@ -498,14 +507,25 @@ export const createChatDefaultsModule = (
         return;
       }
 
-      if (action === "privacy") {
+      if (action === "privacy_coinflip") {
         await respondWithMenu(ctx, {
-          text: "Choose the default privacy setting for new games.",
+          text: "Choose the default privacy setting for new Coinflip games.",
           keyboard: new InlineKeyboard()
-            .text("🌍 Public", "chat_defaults_set_privacy_public")
-            .text("🔒 Private", "chat_defaults_set_privacy_private")
+            .text("🌍 Public", "chat_defaults_set_privacy_coinflip_public")
+            .text("🔒 Private", "chat_defaults_set_privacy_coinflip_private")
             .row()
-            .text("❌ Clear (Reset)", "chat_defaults_set_privacy_clear")
+            .text("❌ Clear (Reset)", "chat_defaults_set_privacy_coinflip_clear")
+            .row()
+            .text("🔙 Cancel", "chat_defaults_cancel"),
+        });
+      } else if (action === "privacy_giveaway") {
+        await respondWithMenu(ctx, {
+          text: "Choose the default privacy setting for new Giveaway games.",
+          keyboard: new InlineKeyboard()
+            .text("🌍 Public", "chat_defaults_set_privacy_giveaway_public")
+            .text("🔒 Private", "chat_defaults_set_privacy_giveaway_private")
+            .row()
+            .text("❌ Clear (Reset)", "chat_defaults_set_privacy_giveaway_clear")
             .row()
             .text("🔙 Cancel", "chat_defaults_cancel"),
         });
@@ -517,7 +537,7 @@ export const createChatDefaultsModule = (
   );
 
   deps.bot.callbackQuery(
-    /^chat_defaults_set_privacy_(public|private|clear)$/,
+    /^chat_defaults_set_privacy_(coinflip|giveaway)_(public|private|clear)$/,
     deps.wrapCallbackHandler(async (ctx) => {
       if (!ctx.chat) return;
 
@@ -530,7 +550,8 @@ export const createChatDefaultsModule = (
         return;
       }
 
-      const value = ctx.match![1];
+      const target = ctx.match![1] as "coinflip" | "giveaway";
+      const value = ctx.match![2];
       const telegramId = getTelegramId(ctx);
       let newPrivacy: "public" | "private" | undefined | null = null;
 
@@ -538,10 +559,17 @@ export const createChatDefaultsModule = (
       else if (value === "private") newPrivacy = "private";
       else if (value === "clear") newPrivacy = null;
 
-      deps.chatDb.upsertChatGameSettings(ctx.chat.id, {
-        default_privacy: newPrivacy,
+      const updateData: any = {
         set_by_telegram_id: telegramId.toString(),
-      });
+      };
+
+      if (target === "coinflip") {
+        updateData.coinflip_default_privacy = newPrivacy;
+      } else if (target === "giveaway") {
+        updateData.giveaway_default_privacy = newPrivacy;
+      }
+
+      deps.chatDb.upsertChatGameSettings(ctx.chat.id, updateData);
 
       await renderMenu(ctx);
       await safeAnswerCallbackQuery(

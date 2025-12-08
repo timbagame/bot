@@ -283,7 +283,11 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
       );
 
       // Default to private if not explicitly public
-      const isPrivate = chatSettings?.default_privacy !== "public";
+      const specificPrivacy =
+        options.gameType === "coinflip"
+          ? chatSettings?.coinflip_default_privacy
+          : chatSettings?.giveaway_default_privacy;
+      const isPrivate = specificPrivacy !== "public";
 
       const gameResult = await createDeps.gameManager.createGame(
         options.gameType,
