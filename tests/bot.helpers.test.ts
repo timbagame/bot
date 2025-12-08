@@ -802,7 +802,7 @@ describe("createGameViaCommand helper", () => {
       expect(minPlayers).toBe(coinflipOptions.minPlayers);
       expect(timeout).toBe(coinflipOptions.timeoutSeconds);
       expect(telegramId).toBe(1n);
-      expect(optionsArg).toEqual({ isPrivate: false });
+      expect(optionsArg).toEqual({ isPrivate: true });
       expect(chatId).toBe(ctx.chat.id);
       expect(requestTimestamp).toBeUndefined();
 

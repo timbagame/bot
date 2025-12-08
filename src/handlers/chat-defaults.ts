@@ -21,7 +21,6 @@ import {
 } from "../utils/chat-settings";
 import { escapeHtml } from "../utils/format-amount";
 import { respondWithMenu } from "../utils/menu-response";
-import { createCancelKeyboard } from "../utils/keyboards";
 import {
   getTelegramId,
   getTelegramIdString,
