@@ -18,6 +18,8 @@ export type LeaderboardPlayerDisplay = {
 type BuildLeaderboardMessageArgs = {
   chatTitle?: string | null;
   players: LeaderboardPlayerDisplay[];
+  /** Optional: all players for highlights calculation (defaults to players if not provided) */
+  allPlayers?: LeaderboardPlayerDisplay[];
 };
 
 const MEDALS = ["🥇", "🥈", "🥉"] as const;
@@ -33,7 +35,7 @@ export const buildEmptyLeaderboardMessage = (): string =>
     "No statistics available yet - play a coinflip to appear here.",
   ].join("\n\n");
 
-export const buildLeaderboardMessage = ({ chatTitle, players }: BuildLeaderboardMessageArgs): string => {
+export const buildLeaderboardMessage = ({ chatTitle, players, allPlayers }: BuildLeaderboardMessageArgs): string => {
   const heading = chatTitle
     ? `🏆 <b>${escapeHtml(chatTitle.trim())}</b>`
     : "🏆 <b>Leaderboard</b>";
@@ -44,7 +46,10 @@ export const buildLeaderboardMessage = ({ chatTitle, players }: BuildLeaderboard
     .map((player, index) => formatLeaderboardRow(player, index))
     .join("\n\n");
 
-  const highlights = buildLeaderboardHighlights(players);
+  // Use allPlayers for highlights if provided, otherwise use displayed players
+  const highlightsSource = allPlayers ?? players;
+  const champion = players[0]; // Champion is from displayed players
+  const highlights = buildLeaderboardHighlights(highlightsSource, champion);
 
   return [heading, legend, rows, highlights].filter(Boolean).join("\n\n");
 };
@@ -74,30 +79,34 @@ const formatLeaderboardRow = (player: LeaderboardPlayerDisplay, position: number
   return `${headerLine}\n${detailLine}`;
 };
 
-const buildLeaderboardHighlights = (players: LeaderboardPlayerDisplay[]): string | null => {
+const buildLeaderboardHighlights = (
+  players: LeaderboardPlayerDisplay[],
+  champion?: LeaderboardPlayerDisplay
+): string | null => {
   if (players.length < 2) {
     return null;
   }
 
-  const champion = players[0]!;
+  // Use provided champion or default to first player
+  const leaderboardChampion = champion ?? players[0]!;
 
   const highestWinRate = players.reduce((best, current) => {
     return current.winRate > best.winRate ? current : best;
-  }, champion);
+  }, leaderboardChampion);
 
   const mostGames = players.reduce((best, current) => {
     return current.totalGames > best.totalGames ? current : best;
-  }, champion);
+  }, leaderboardChampion);
 
   const highlights: string[] = [];
 
-  if (highestWinRate.telegramId !== champion.telegramId) {
+  if (highestWinRate.telegramId !== leaderboardChampion.telegramId) {
     highlights.push(
       `• Best win rate: ${formatDisplayName(highestWinRate.displayName)} (${formatWinRate(highestWinRate.winRate)}%)`
     );
   }
 
-  if (mostGames.telegramId !== champion.telegramId) {
+  if (mostGames.telegramId !== leaderboardChampion.telegramId) {
     highlights.push(
       `• Most games played: ${formatDisplayName(mostGames.displayName)} (${mostGames.totalGames})`
     );

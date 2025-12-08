@@ -70,6 +70,12 @@ describe("Pending player events", () => {
     const target = { chatId: 77, messageId: 301 };
     const event = makePlayerEvent(Keypair.generate().publicKey, 5, 10);
 
+    botModule.__test_setGameDatabase({
+      getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
+      getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
+      getGame: () => ({ game_type: "coinflip" }),
+    } as any);
+
     await botModule.__test_processPlayerEventWithTarget(
       event,
       "PlayerJoined",
@@ -79,6 +85,58 @@ describe("Pending player events", () => {
     expect(sendCalls.length).toBe(1);
     expect(sendCalls[0]?.text).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     expect(sendCalls[0]?.options?.parse_mode).toBe("HTML");
+  });
+
+  test("player join announcements show game type (coinflip)", async () => {
+    const target = { chatId: 77, messageId: 301 };
+    const event = makePlayerEvent(Keypair.generate().publicKey, 5, 10);
+
+    botModule.__test_setGameManager({
+      updateGameMessageFromData: async () => {},
+      getPlayerUsername: async () => "TestPlayer",
+      getActiveGameMessage: () => ({ chatId: 77, messageId: 301 }),
+    } as any);
+
+    botModule.__test_setGameDatabase({
+      getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
+      getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
+      getGame: () => ({ game_type: "coinflip" }),
+    } as any);
+
+    await botModule.__test_processPlayerEventWithTarget(
+      event,
+      "PlayerJoined",
+      target
+    );
+
+    expect(sendCalls.length).toBe(1);
+    expect(sendCalls[0]?.text).toContain("joined the coinflip!");
+  });
+
+  test("player join announcements show game type (giveaway)", async () => {
+    const target = { chatId: 77, messageId: 301 };
+    const event = makePlayerEvent(Keypair.generate().publicKey, 5, 10);
+
+    botModule.__test_setGameManager({
+      updateGameMessageFromData: async () => {},
+      getPlayerUsername: async () => "TestPlayer",
+      getActiveGameMessage: () => ({ chatId: 77, messageId: 301 }),
+    } as any);
+
+    botModule.__test_setGameDatabase({
+      getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
+      getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
+      getGame: () => ({ game_type: "giveaway" }),
+    } as any);
+
+    await botModule.__test_processPlayerEventWithTarget(
+      event,
+      "PlayerJoined",
+      target
+    );
+
+    expect(sendCalls.length).toBe(1);
+    expect(sendCalls[0]?.text).toContain("joined the giveaway!");
   });
 
   test("auto-join for game creator is not announced", async () => {
@@ -118,6 +176,12 @@ describe("Pending player events", () => {
       getPlayerUsername: async (_ctx: any, pubkey: string) =>
         names.get(pubkey) ?? "Unknown",
       getActiveGameMessage: () => ({ chatId: 77, messageId: 301 }),
+    } as any);
+
+    botModule.__test_setGameDatabase({
+      getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
+      getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
+      getGame: () => ({ game_type: "coinflip" }),
     } as any);
 
     let enqueueTriggered = false;

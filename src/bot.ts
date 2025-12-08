@@ -1735,7 +1735,11 @@ const processPlayerEventWithTarget = async (
             playerPublicKey
           );
           const safeDisplayName = escapeHtml(displayName);
-          const announcement = `👤 <b>${safeDisplayName}</b> joined the game!`;
+
+          // Get game type for the announcement
+          const gameData = gameDb.getGame(gameAddress);
+          const gameType = gameData?.game_type || "game";
+          const announcement = `👤 <b>${safeDisplayName}</b> joined the ${gameType}!`;
           await sendReplyToGameMessage(target, announcement);
         } catch (announcementError) {
           console.error(
@@ -3965,11 +3969,10 @@ const resolveLeaderboardPlayers = async (
     })
   );
 
-  // Filter players with games, sort by net USD descending, and apply limit
+  // Filter players with games and sort by net USD descending
   return players
     .filter((player) => player.totalGames > 0)
-    .sort((a, b) => b.netWonUsd - a.netWonUsd)
-    .slice(0, LEADERBOARD_PLAYER_LIMIT);
+    .sort((a, b) => b.netWonUsd - a.netWonUsd);
 };
 
 bot.command(["leaderboard", "lb"], async (ctx: Context) => {
@@ -3985,30 +3988,33 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
   try {
     console.log(`🏆 Generating leaderboard for chat ${chatId}`);
 
-    const leaderboardStats = gameDb.getLeaderboardStats(
-      chatId,
-      LEADERBOARD_PLAYER_LIMIT
-    );
+    // Fetch all players for accurate highlights calculation
+    const allStats = gameDb.getLeaderboardStats(chatId, 1000);
 
-    if (leaderboardStats.length === 0) {
+    if (allStats.length === 0) {
       return ctx.reply(buildEmptyLeaderboardMessage(), {
         parse_mode: "HTML",
         reply_to_message_id: ctx.message?.message_id,
       });
     }
 
-    const players = await resolveLeaderboardPlayers(ctx, leaderboardStats);
+    // Resolve all players for highlights
+    const allPlayers = await resolveLeaderboardPlayers(ctx, allStats);
 
-    if (players.length === 0) {
+    if (allPlayers.length === 0) {
       return ctx.reply(buildEmptyLeaderboardMessage(), {
         parse_mode: "HTML",
         reply_to_message_id: ctx.message?.message_id,
       });
     }
+
+    // Top 5 are for display (already sliced in resolveLeaderboardPlayers)
+    const displayedPlayers = allPlayers.slice(0, LEADERBOARD_PLAYER_LIMIT);
 
     const leaderboardText = buildLeaderboardMessage({
       chatTitle: ctx.chat?.title ?? null,
-      players,
+      players: displayedPlayers,
+      allPlayers, // Pass all players for accurate highlights
     });
 
     await ctx.reply(leaderboardText, {
@@ -4017,7 +4023,7 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
     });
 
     console.log(
-      `✅ Leaderboard generated for chat ${chatId} with ${players.length} players`
+      `✅ Leaderboard generated for chat ${chatId} with ${displayedPlayers.length} players (${allPlayers.length} total)`
     );
   } catch (error) {
     console.error("Error generating leaderboard:", error);
