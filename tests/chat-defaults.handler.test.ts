@@ -8,6 +8,31 @@ import type { InputSessionState } from "../src/utils/user-state";
 
 const bot = new Bot("test-token");
 
+const createMockBot = () => {
+  const listeners: Array<{ trigger: RegExp | string; handler: any }> = [];
+  return {
+    callbackQuery: (trigger: RegExp | string, handler: any) => {
+      listeners.push({ trigger, handler });
+    },
+    dispatch: async (callbackData: string, ctx: any) => {
+      for (const listener of listeners) {
+        if (listener.trigger instanceof RegExp) {
+          const match = callbackData.match(listener.trigger);
+          if (match) {
+            ctx.match = match;
+            await listener.handler(ctx);
+            return true;
+          }
+        } else if (listener.trigger === callbackData) {
+          await listener.handler(ctx);
+          return true;
+        }
+      }
+      return false;
+    },
+  };
+};
+
 const baseTokenManager = () => {
   let chatDefault: any = null;
   return {
@@ -310,5 +335,78 @@ describe("chat defaults module", () => {
     expect(errorReply).toContain("Supported tokens");
     expect(errorReply).toContain("TIMBA");
     expect(errorReply).toContain("SOL");
+  });
+
+  test("privacy setting flow updates database and UI", async () => {
+    const mockBot = createMockBot();
+    const tokenManager = baseTokenManager();
+    const { ctx, replies } = buildMockContext();
+    ctx.callbackQuery = {
+      data: "chat_defaults_privacy",
+      message: { message_id: 11, chat: { id: 99 } },
+    };
+    ctx.chat = { id: 99 };
+
+    let lastMenu: any = null;
+    ctx.api.editMessageText = async (
+      _chatId: number,
+      _msgId: number,
+      text: string,
+      options: any
+    ) => {
+      lastMenu = { text, options };
+    };
+    ctx.reply = async (text: string, options: any) => {
+      lastMenu = { text, options };
+    };
+
+    createChatDefaultsModule({
+      bot: mockBot as any,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (ctx) => await handler(ctx, async () => {}),
+      getOracleMaxPlayers: () => 50,
+      isUserGroupAdmin: async () => true,
+      replyToMessage: async (_ctx, text) => {
+        replies.push(text);
+      },
+    });
+
+    // 1. Click "Default privacy"
+    await mockBot.dispatch("chat_defaults_privacy", ctx);
+
+    expect(lastMenu.text).toContain("Choose the default privacy");
+    expect(JSON.stringify(lastMenu.options)).toContain(
+      "chat_defaults_set_privacy_public"
+    );
+
+    // 2. Click "Public"
+    ctx.callbackQuery.data = "chat_defaults_set_privacy_public";
+    await mockBot.dispatch("chat_defaults_set_privacy_public", ctx);
+
+    const settingsPublic = chatDb.getChatGameSettings(99);
+    expect(settingsPublic?.default_privacy).toBe("public");
+
+    expect(lastMenu.text).toContain("Chat defaults");
+    expect(lastMenu.text).toContain("Public 🌍 (chat default)");
+
+    // 3. Click "Private"
+    ctx.callbackQuery.data = "chat_defaults_set_privacy_private";
+    await mockBot.dispatch("chat_defaults_set_privacy_private", ctx);
+
+    const settingsPrivate = chatDb.getChatGameSettings(99);
+    expect(settingsPrivate?.default_privacy).toBe("private");
+    expect(lastMenu.text).toContain("Private 🔒 (chat default)");
+
+    // 4. Click "Clear"
+    ctx.callbackQuery.data = "chat_defaults_set_privacy_clear";
+    await mockBot.dispatch("chat_defaults_set_privacy_clear", ctx);
+
+    const settingsClear = chatDb.getChatGameSettings(99);
+    expect(settingsClear?.default_privacy).toBeNull();
+    // Default is Public (bot default)
+    expect(lastMenu.text).toContain("Public 🌍 (bot default)");
   });
 });

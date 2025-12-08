@@ -35,12 +35,19 @@ export class ChatDatabase extends BaseDatabase {
           coinflip_max_players INTEGER,
           giveaway_max_players INTEGER,
           timeout_seconds INTEGER,
+          default_privacy TEXT,
           set_by_telegram_id TEXT,
           updated_at INTEGER NOT NULL
         )`,
       ],
       "Chat"
     );
+
+    try {
+      this.run("ALTER TABLE chat_game_settings ADD COLUMN default_privacy TEXT");
+    } catch {
+      // Ignore error if column already exists
+    }
   }
 
   // ================================
@@ -109,6 +116,10 @@ export class ChatDatabase extends BaseDatabase {
       settings,
       "timeout_seconds"
     );
+    const hasPrivacy = Object.prototype.hasOwnProperty.call(
+      settings,
+      "default_privacy"
+    );
     const hasSetBy = Object.prototype.hasOwnProperty.call(
       settings,
       "set_by_telegram_id"
@@ -125,6 +136,9 @@ export class ChatDatabase extends BaseDatabase {
       timeout_seconds: hasTimeout
         ? settings.timeout_seconds ?? null
         : existing?.timeout_seconds ?? null,
+      default_privacy: hasPrivacy
+        ? settings.default_privacy ?? null
+        : existing?.default_privacy ?? null,
       set_by_telegram_id: hasSetBy
         ? settings.set_by_telegram_id ?? null
         : existing?.set_by_telegram_id ?? null,
@@ -137,14 +151,16 @@ export class ChatDatabase extends BaseDatabase {
           coinflip_max_players,
           giveaway_max_players,
           timeout_seconds,
+          default_privacy,
           set_by_telegram_id,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         next.chat_id,
         next.coinflip_max_players ?? null,
         next.giveaway_max_players ?? null,
         next.timeout_seconds ?? null,
+        next.default_privacy ?? null,
         next.set_by_telegram_id ?? null,
         next.updated_at,
       ],

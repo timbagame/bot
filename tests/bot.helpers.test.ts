@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { createGameCommandsModule } from "../src/handlers/game-commands";
 import {
   GAME_CREATION_RATE_LIMIT_WINDOW_MS,
   LAMPORTS_PER_SOL,
@@ -801,7 +802,7 @@ describe("createGameViaCommand helper", () => {
       expect(minPlayers).toBe(coinflipOptions.minPlayers);
       expect(timeout).toBe(coinflipOptions.timeoutSeconds);
       expect(telegramId).toBe(1n);
-      expect(optionsArg).toEqual({ isPrivate: true });
+      expect(optionsArg).toEqual({ isPrivate: false });
       expect(chatId).toBe(ctx.chat.id);
       expect(requestTimestamp).toBeUndefined();
 
@@ -1096,5 +1097,101 @@ describe("createGameViaCommand helper", () => {
     expect(response).toContain("Add more SOL or wrapped SOL and try again.");
     expect(response).not.toContain("You have");
     expect(ctx.__deleted?.length).toBe(1);
+  });
+
+  test("creates a private game when chat setting is private", async () => {
+    const ctx: any = makeCtx();
+    const createCalls: any[] = [];
+
+    const moduleDeps = {
+      getChatGameSettings: () => ({ default_privacy: "private" }),
+      getOracleMaxPlayers: () => 100,
+      parseAmount: () => {},
+      inferMaxPlayers: () => {},
+      wallet: {},
+      getContractMinimumAmount: () => {},
+      gameManager: {},
+      isGroupChat: () => true,
+      startInteractiveGameSetup: () => {},
+      resolveCommandTokenOverride: () => {},
+      getRequiredTelegramIdForContext: () => {},
+      gameSetupCopy: { coinflip: {}, giveaway: {} },
+    } as any;
+
+    const module = createGameCommandsModule(moduleDeps);
+
+    const deps = makeDeps({
+      gameManager: {
+        createGame: async (...args) => {
+          createCalls.push(args);
+          return {
+            success: true,
+            gameAddress: "ADDR",
+            autoJoinResult: { success: true },
+          };
+        },
+        createGameMessage: async () => 99,
+      },
+    });
+
+    await module.createGameViaCommand(
+      ctx,
+      ["/cf", "5"],
+      1n,
+      module.COINFLIP_COMMAND_OPTIONS,
+      deps
+    );
+
+    expect(createCalls.length).toBe(1);
+    const optionsArg = createCalls[0][6];
+    expect(optionsArg).toEqual({ isPrivate: true });
+  });
+
+  test("creates a public game when chat setting is public", async () => {
+    const ctx: any = makeCtx();
+    const createCalls: any[] = [];
+
+    const moduleDeps = {
+      getChatGameSettings: () => ({ default_privacy: "public" }),
+      getOracleMaxPlayers: () => 100,
+      parseAmount: () => {},
+      inferMaxPlayers: () => {},
+      wallet: {},
+      getContractMinimumAmount: () => {},
+      gameManager: {},
+      isGroupChat: () => true,
+      startInteractiveGameSetup: () => {},
+      resolveCommandTokenOverride: () => {},
+      getRequiredTelegramIdForContext: () => {},
+      gameSetupCopy: { coinflip: {}, giveaway: {} },
+    } as any;
+
+    const module = createGameCommandsModule(moduleDeps);
+
+    const deps = makeDeps({
+      gameManager: {
+        createGame: async (...args) => {
+          createCalls.push(args);
+          return {
+            success: true,
+            gameAddress: "ADDR",
+            autoJoinResult: { success: true },
+          };
+        },
+        createGameMessage: async () => 99,
+      },
+    });
+
+    await module.createGameViaCommand(
+      ctx,
+      ["/cf", "5"],
+      1n,
+      module.COINFLIP_COMMAND_OPTIONS,
+      deps
+    );
+
+    expect(createCalls.length).toBe(1);
+    const optionsArg = createCalls[0][6];
+    expect(optionsArg).toEqual({ isPrivate: false });
   });
 });
