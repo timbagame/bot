@@ -96,7 +96,7 @@ describe("chat defaults module", () => {
     expect(summary).toContain("AAA");
     expect(summary).toContain("7 (chat default)");
     expect(summary).toContain("20 (chat default)");
-    expect(summary).toContain("1800s");
+    expect(summary).toContain("30m");
   });
 
   test("updates settings via text input handler", async () => {

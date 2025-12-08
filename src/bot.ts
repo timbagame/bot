@@ -137,6 +137,7 @@ import type { TokenBalanceLike } from "./types/wallet";
 import { refreshDynamicFeeBudgets } from "./utils/fee-budget-refresh";
 import { SlidingWindowRateLimiter } from "./utils/rate-limiter";
 import { sweepFees } from "./services/fee-sweeper";
+import { formatDuration } from "./utils/format-time";
 export type { CreateGameViaCommandOptions } from "./handlers/game-commands";
 
 // ================================
@@ -2930,11 +2931,10 @@ const checkOracleStatus = async () => {
     const bufferSeconds = parseOracleNumeric(oracleAccount.oracleBufferTime);
     if (bufferSeconds !== null) {
       const appliedBuffer = applyOracleBufferTime(bufferSeconds);
-      const hours = appliedBuffer / 3600;
-      const hoursNote =
-        hours >= 1 ? ` (~${hours.toFixed(hours >= 10 ? 1 : 2)} hours)` : "";
       console.log(
-        `Oracle buffer time set to ${appliedBuffer} seconds${hoursNote}`
+        `Oracle buffer time set to ${appliedBuffer} seconds (~${formatDuration(
+          appliedBuffer
+        )})`
       );
     } else {
       console.warn(
@@ -4035,19 +4035,6 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
 // SECURE COMMANDS
 // ================================
 
-const formatDurationMinutes = (seconds: number): string => {
-  const minutes = seconds / 60;
-  if (minutes < 60) {
-    return `${minutes} minutes`;
-  }
-  const hours = minutes / 60;
-  const hoursFormatted = Number.isInteger(hours)
-    ? hours.toString()
-    : hours.toFixed(1).replace(/\.0$/, "");
-  const hourLabel = hoursFormatted === "1" ? "hour" : "hours";
-  return `${minutes} minutes (${hoursFormatted} ${hourLabel})`;
-};
-
 bot.command("oracle", async (ctx: Context) => {
   try {
     const oraclePda = PDAManager.getOraclePDA(program.programId);
@@ -4058,18 +4045,14 @@ bot.command("oracle", async (ctx: Context) => {
       "",
       `Operator: <code>${oracleAccount.operator.toString()}</code>`,
       `Fee Percentage: ${oracleAccount.feePercentage}%`,
-      `Min Timeout: ${formatDurationMinutes(
-        oracleAccount.minTimeout.toNumber()
-      )}`,
-      `Max Timeout: ${formatDurationMinutes(
-        oracleAccount.maxTimeout.toNumber()
-      )}`,
+      `Min Timeout: ${formatDuration(oracleAccount.minTimeout.toNumber())}`,
+      `Max Timeout: ${formatDuration(oracleAccount.maxTimeout.toNumber())}`,
       `Max Tickets: ${oracleAccount.maxTickets}`,
-      `Oracle Buffer Time: ${formatDurationMinutes(
+      `Oracle Buffer Time: ${formatDuration(
         oracleAccount.oracleBufferTime.toNumber()
       )}`,
       "",
-      `Current Game Timeout: ${formatDurationMinutes(GAME_TIMEOUT)}`,
+      `Current Game Timeout: ${formatDuration(GAME_TIMEOUT)}`,
     ].join("\n");
 
     await ctx.reply(response, {

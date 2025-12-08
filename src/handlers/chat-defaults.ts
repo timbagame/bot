@@ -1,5 +1,6 @@
 import { InlineKeyboard, type Bot, type Context } from "grammy";
 import { GameDatabase } from "../utils/game-database";
+import { formatDuration } from "../utils/format-time";
 
 import {
   DEFAULT_COINFLIP_MAX_PLAYERS,
@@ -57,9 +58,9 @@ const formatPlayersLine = (
 };
 
 const formatTimeoutLine = (timeoutSeconds: number, isDefault: boolean): string => {
-  const minutes = Math.round(timeoutSeconds / 60);
+  const formatted = formatDuration(timeoutSeconds);
   const suffix = isDefault ? "(bot default)" : "(chat default)";
-  return `⏱️ Game timeout: ${timeoutSeconds}s (${minutes}m) ${suffix}`;
+  return `⏱️ Game timeout: ${formatted} ${suffix}`;
 };
 
 type SettingsTarget = "token" | "coinflip" | "giveaway" | "timeout";
@@ -359,7 +360,7 @@ const handleTimeoutUpdate = async (
 
   await deps.replyToMessage(
     ctx,
-    `✅ Default game timeout set to ${clamped} seconds.`
+    `✅ Default game timeout set to ${formatDuration(clamped)}.`
   );
 };
 

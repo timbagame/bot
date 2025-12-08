@@ -1,4 +1,5 @@
 import { escapeHtml, formatCompactTokenDisplay } from "./format-amount";
+import { formatDuration } from "./format-time";
 
 /**
  * Build the status text line for a game based on tickets.
@@ -83,11 +84,5 @@ export function buildExpirationText(
   secondsRemaining: number,
   prefix: string = ""
 ): string {
-  const minutes = Math.floor(secondsRemaining / 60);
-  const hours = Math.floor(minutes / 60);
-  if (hours > 0) {
-    const remMin = minutes % 60;
-    return `${prefix}Expires in: ${hours}h ${remMin}m`;
-  }
-  return `${prefix}Expires in: ${minutes}m`;
+  return `${prefix}Expires in: ${formatDuration(secondsRemaining)}`;
 }

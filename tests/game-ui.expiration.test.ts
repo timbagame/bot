@@ -10,5 +10,5 @@ test("buildExpirationText hours-and-minutes", () => {
 });
 
 test("buildExpirationText custom prefix", () => {
-  expect(buildExpirationText(3600, "⏳ ")).toBe("⏳ Expires in: 1h 0m");
+  expect(buildExpirationText(3600, "⏳ ")).toBe("⏳ Expires in: 1h");
 });
