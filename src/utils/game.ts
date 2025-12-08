@@ -25,6 +25,7 @@ import {
   formatAmount,
   escapeHtml,
 } from "./format-amount";
+import { formatDuration } from "./format-time";
 import {
   DEFAULT_NULL_ADDRESS,
   GAME_CREATION_RATE_LIMIT_WINDOW_MS,
@@ -124,23 +125,7 @@ const formatRateLimitWindow = (windowMs: number): string => {
     return `${rounded}ms`;
   }
 
-  const seconds = Math.ceil(windowMs / 1_000);
-  if (seconds < 60) {
-    return `${seconds} second${seconds === 1 ? "" : "s"}`;
-  }
-
-  const minutes = Math.ceil(seconds / 60);
-  if (minutes < 60) {
-    return `${minutes} minute${minutes === 1 ? "" : "s"}`;
-  }
-
-  const hours = Math.ceil(minutes / 60);
-  if (hours < 24) {
-    return `${hours} hour${hours === 1 ? "" : "s"}`;
-  }
-
-  const days = Math.ceil(hours / 24);
-  return `${days} day${days === 1 ? "" : "s"}`;
+  return formatDuration(windowMs / 1000);
 };
 
 type GameTokenContextAccounts = {
