@@ -268,11 +268,11 @@ describe("GameDatabase Leaderboard", () => {
     expect(participantStats?.netAmountByToken["TIMBA_MINT"]).toBe(0);
   });
 
-  test("should respect limit parameter and return at most N players", () => {
+  test("should respect limit parameter and return at most N*3 players (for USD re-sorting)", () => {
     const chatId = 88805;
 
-    // Create 7 players with games
-    for (let i = 1; i <= 7; i++) {
+    // Create 20 players with games (more than any reasonable limit*3)
+    for (let i = 1; i <= 20; i++) {
       const playerId = `LIMIT_PLAYER_${i}`;
       const playerPk = `PK_LIMIT_${i}`;
       gameDb.savePlayerMapping(playerPk, playerId);
@@ -283,17 +283,17 @@ describe("GameDatabase Leaderboard", () => {
       gameDb.completeGame(gameAddr, playerPk); // Each player wins their game
     }
 
-    // Request only 5 players
+    // Request only 5 players: DB should return 5 * 3 = 15 players (for re-sorting by USD)
     const stats = gameDb.getLeaderboardStats(chatId, 5);
+    expect(stats.length).toBe(15);
 
-    // Should return at most 5 * 3 = 15 from DB (extra for re-sorting by USD)
-    // But since we only have 7 players, we get 7
-    expect(stats.length).toBeLessThanOrEqual(15);
-    expect(stats.length).toBe(7); // All 7 are returned from DB before USD conversion
-
-    // Request only 3 players
+    // Request only 3 players: DB should return 3 * 3 = 9 players
     const statsSmall = gameDb.getLeaderboardStats(chatId, 3);
-    // DB fetches 3 * 3 = 9, but only 7 exist
-    expect(statsSmall.length).toBe(7);
+    expect(statsSmall.length).toBe(9);
+
+    // All players should have their netAmountByToken populated
+    for (const stat of stats) {
+      expect(stat.netAmountByToken).toBeDefined();
+    }
   });
 });
