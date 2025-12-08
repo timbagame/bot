@@ -146,27 +146,13 @@ const buildSettingsSummary = async (
   );
 
   const coinflipPrivacy = chatSettings?.coinflip_default_privacy;
-  // Fallback to legacy default_privacy if specific one not set
-  const effectiveCoinflipPrivacy =
-    coinflipPrivacy ?? chatSettings?.default_privacy;
-  const isCoinflipPrivate = effectiveCoinflipPrivacy !== "public";
-  const coinflipSuffix = coinflipPrivacy
-    ? "(chat default)"
-    : chatSettings?.default_privacy
-    ? "(legacy default)"
-    : "(bot default)";
+  const isCoinflipPrivate = coinflipPrivacy !== "public";
+  const coinflipSuffix = coinflipPrivacy ? "(chat default)" : "(bot default)";
   const coinflipPrivacyLine = `👁️ Coinflip privacy: ${isCoinflipPrivate ? "Private 🔒" : "Public 🌍"} ${coinflipSuffix}`;
 
   const giveawayPrivacy = chatSettings?.giveaway_default_privacy;
-  // Fallback to legacy default_privacy if specific one not set
-  const effectiveGiveawayPrivacy =
-    giveawayPrivacy ?? chatSettings?.default_privacy;
-  const isGiveawayPrivate = effectiveGiveawayPrivacy !== "public";
-  const giveawaySuffix = giveawayPrivacy
-    ? "(chat default)"
-    : chatSettings?.default_privacy
-    ? "(legacy default)"
-    : "(bot default)";
+  const isGiveawayPrivate = giveawayPrivacy !== "public";
+  const giveawaySuffix = giveawayPrivacy ? "(chat default)" : "(bot default)";
   const giveawayPrivacyLine = `👁️ Giveaway privacy: ${isGiveawayPrivate ? "Private 🔒" : "Public 🌍"} ${giveawaySuffix}`;
 
   return [

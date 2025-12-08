@@ -1104,7 +1104,7 @@ describe("createGameViaCommand helper", () => {
     const createCalls: any[] = [];
 
     const moduleDeps = {
-      getChatGameSettings: () => ({ default_privacy: "private" }),
+      getChatGameSettings: () => ({ coinflip_default_privacy: "private" }),
       getOracleMaxPlayers: () => 100,
       parseAmount: () => {},
       inferMaxPlayers: () => {},
@@ -1152,7 +1152,7 @@ describe("createGameViaCommand helper", () => {
     const createCalls: any[] = [];
 
     const moduleDeps = {
-      getChatGameSettings: () => ({ default_privacy: "public" }),
+      getChatGameSettings: () => ({ coinflip_default_privacy: "public" }),
       getOracleMaxPlayers: () => 100,
       parseAmount: () => {},
       inferMaxPlayers: () => {},

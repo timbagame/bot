@@ -177,10 +177,8 @@ const resolveAdvancedOptions = (
     gameType === "coinflip"
       ? chatSettings?.coinflip_default_privacy
       : chatSettings?.giveaway_default_privacy;
-  const fallbackPrivacy = chatSettings?.default_privacy; // Deprecated fallback
-  const effectivePrivacy = specificPrivacy ?? fallbackPrivacy ?? "private";
 
-  const defaultIsPrivate = effectivePrivacy !== "public";
+  const defaultIsPrivate = specificPrivacy !== "public";
   const isPrivate = session?.isPrivate ?? defaultIsPrivate;
 
   return { timeoutSeconds, minPlayers, isPrivate };

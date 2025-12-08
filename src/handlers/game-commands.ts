@@ -287,9 +287,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         options.gameType === "coinflip"
           ? chatSettings?.coinflip_default_privacy
           : chatSettings?.giveaway_default_privacy;
-      const fallbackPrivacy = chatSettings?.default_privacy; // Deprecated fallback
-      const effectivePrivacy = specificPrivacy ?? fallbackPrivacy ?? "private";
-      const isPrivate = effectivePrivacy !== "public";
+      const isPrivate = specificPrivacy !== "public";
 
       const gameResult = await createDeps.gameManager.createGame(
         options.gameType,
