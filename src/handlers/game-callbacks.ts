@@ -173,8 +173,15 @@ const resolveAdvancedOptions = (
     maxPlayersLimit
   );
   // Default to private if not explicitly public
-  const defaultPrivacy = chatSettings?.default_privacy !== "public";
-  const isPrivate = session?.isPrivate ?? defaultPrivacy;
+  const specificPrivacy =
+    gameType === "coinflip"
+      ? chatSettings?.coinflip_default_privacy
+      : chatSettings?.giveaway_default_privacy;
+  const fallbackPrivacy = chatSettings?.default_privacy; // Deprecated fallback
+  const effectivePrivacy = specificPrivacy ?? fallbackPrivacy ?? "private";
+
+  const defaultIsPrivate = effectivePrivacy !== "public";
+  const isPrivate = session?.isPrivate ?? defaultIsPrivate;
 
   return { timeoutSeconds, minPlayers, isPrivate };
 };

@@ -342,7 +342,7 @@ describe("chat defaults module", () => {
     const tokenManager = baseTokenManager();
     const { ctx, replies } = buildMockContext();
     ctx.callbackQuery = {
-      data: "chat_defaults_privacy",
+      data: "chat_defaults_privacy_coinflip",
       message: { message_id: 11, chat: { id: 99 } },
     };
     ctx.chat = { id: 99 };
@@ -374,39 +374,65 @@ describe("chat defaults module", () => {
       },
     });
 
-    // 1. Click "Default privacy"
-    await mockBot.dispatch("chat_defaults_privacy", ctx);
+    // 1. Click "Coinflip privacy"
+    await mockBot.dispatch("chat_defaults_privacy_coinflip", ctx);
 
-    expect(lastMenu.text).toContain("Choose the default privacy");
+    expect(lastMenu.text).toContain("Choose the default privacy setting for new Coinflip games");
     expect(JSON.stringify(lastMenu.options)).toContain(
-      "chat_defaults_set_privacy_public"
+      "chat_defaults_set_privacy_coinflip_public"
     );
 
-    // 2. Click "Public"
-    ctx.callbackQuery.data = "chat_defaults_set_privacy_public";
-    await mockBot.dispatch("chat_defaults_set_privacy_public", ctx);
+    // 2. Click "Public" for Coinflip
+    ctx.callbackQuery.data = "chat_defaults_set_privacy_coinflip_public";
+    await mockBot.dispatch("chat_defaults_set_privacy_coinflip_public", ctx);
 
     const settingsPublic = chatDb.getChatGameSettings(99);
-    expect(settingsPublic?.default_privacy).toBe("public");
+    expect(settingsPublic?.coinflip_default_privacy).toBe("public");
 
     expect(lastMenu.text).toContain("Chat defaults");
-    expect(lastMenu.text).toContain("Public 🌍 (chat default)");
+    expect(lastMenu.text).toContain("Coinflip privacy: Public 🌍 (chat default)");
 
-    // 3. Click "Private"
-    ctx.callbackQuery.data = "chat_defaults_set_privacy_private";
-    await mockBot.dispatch("chat_defaults_set_privacy_private", ctx);
+    // 3. Click "Private" for Coinflip
+    ctx.callbackQuery.data = "chat_defaults_set_privacy_coinflip_private";
+    await mockBot.dispatch("chat_defaults_set_privacy_coinflip_private", ctx);
 
     const settingsPrivate = chatDb.getChatGameSettings(99);
-    expect(settingsPrivate?.default_privacy).toBe("private");
-    expect(lastMenu.text).toContain("Private 🔒 (chat default)");
+    expect(settingsPrivate?.coinflip_default_privacy).toBe("private");
+    expect(lastMenu.text).toContain("Coinflip privacy: Private 🔒 (chat default)");
 
-    // 4. Click "Clear"
-    ctx.callbackQuery.data = "chat_defaults_set_privacy_clear";
-    await mockBot.dispatch("chat_defaults_set_privacy_clear", ctx);
+    // 4. Click "Clear" for Coinflip
+    ctx.callbackQuery.data = "chat_defaults_set_privacy_coinflip_clear";
+    await mockBot.dispatch("chat_defaults_set_privacy_coinflip_clear", ctx);
 
     const settingsClear = chatDb.getChatGameSettings(99);
-    expect(settingsClear?.default_privacy).toBeNull();
+    expect(settingsClear?.coinflip_default_privacy).toBeNull();
     // Default is Private (bot default)
-    expect(lastMenu.text).toContain("Private 🔒 (bot default)");
+    expect(lastMenu.text).toContain("Coinflip privacy: Private 🔒 (bot default)");
+
+    // 5. Test Giveaway Privacy (briefly)
+    ctx.callbackQuery.data = "chat_defaults_privacy_giveaway";
+    await mockBot.dispatch("chat_defaults_privacy_giveaway", ctx);
+
+    expect(lastMenu.text).toContain("Choose the default privacy setting for new Giveaway games");
+
+    ctx.callbackQuery.data = "chat_defaults_set_privacy_giveaway_public";
+    await mockBot.dispatch("chat_defaults_set_privacy_giveaway_public", ctx);
+
+    const settingsGiveaway = chatDb.getChatGameSettings(99);
+    expect(settingsGiveaway?.giveaway_default_privacy).toBe("public");
+    expect(lastMenu.text).toContain("Giveaway privacy: Public 🌍 (chat default)");
+
+    // 6. Verify distinct settings persistence (Regression Test)
+    // Set Coinflip to Public
+    ctx.callbackQuery.data = "chat_defaults_set_privacy_coinflip_public";
+    await mockBot.dispatch("chat_defaults_set_privacy_coinflip_public", ctx);
+
+    // Set Giveaway to Private
+    ctx.callbackQuery.data = "chat_defaults_set_privacy_giveaway_private";
+    await mockBot.dispatch("chat_defaults_set_privacy_giveaway_private", ctx);
+
+    const settingsDual = chatDb.getChatGameSettings(99);
+    expect(settingsDual?.coinflip_default_privacy).toBe("public");
+    expect(settingsDual?.giveaway_default_privacy).toBe("private");
   });
 });
