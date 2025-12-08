@@ -406,7 +406,7 @@ describe("chat defaults module", () => {
 
     const settingsClear = chatDb.getChatGameSettings(99);
     expect(settingsClear?.default_privacy).toBeNull();
-    // Default is Public (bot default)
-    expect(lastMenu.text).toContain("Public 🌍 (bot default)");
+    // Default is Private (bot default)
+    expect(lastMenu.text).toContain("Private 🔒 (bot default)");
   });
 });

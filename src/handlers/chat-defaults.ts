@@ -21,7 +21,6 @@ import {
 } from "../utils/chat-settings";
 import { escapeHtml } from "../utils/format-amount";
 import { respondWithMenu } from "../utils/menu-response";
-import { createCancelKeyboard } from "../utils/keyboards";
 import {
   getTelegramId,
   getTelegramIdString,
@@ -145,7 +144,8 @@ const buildSettingsSummary = async (
   );
 
   const privacy = chatSettings?.default_privacy;
-  const privacyLine = `👁️ Default privacy: ${privacy === "private" ? "Private 🔒" : "Public 🌍"} ${privacy ? "(chat default)" : "(bot default)"}`;
+  const isPrivate = privacy === "private" || !privacy;
+  const privacyLine = `👁️ Default privacy: ${isPrivate ? "Private 🔒" : "Public 🌍"} ${privacy ? "(chat default)" : "(bot default)"}`;
 
   return [
     "<b>Chat defaults</b>",
@@ -247,7 +247,6 @@ const promptForSetting = async (
   if (target === "token") {
     messageLines.push(
       "Send the SPL token ticker you want to set as the chat default.",
-      "Use 'clear' to remove the chat default token.",
       "",
       INPUT_TIMEOUT_HINT
     );
@@ -263,16 +262,20 @@ const promptForSetting = async (
     messageLines.push(
       "Send the default maximum players for new games.",
       `Must be between ${minPlayers}-${deps.getOracleMaxPlayers()} players.`,
-      "Use 'clear' to reset to bot default.",
       "",
       INPUT_TIMEOUT_HINT
     );
   }
 
+  const keyboard = new InlineKeyboard()
+    .text("❌ Clear (Reset)", `chat_defaults_clear_${target}`)
+    .row()
+    .text("🔙 Cancel", "chat_defaults_cancel");
+
   const { messageId, chatId } = await respondWithMenu(ctx, {
     text: messageLines.join("\n"),
     parseMode: "HTML",
-    keyboard: createCancelKeyboard("chat_defaults_cancel"),
+    keyboard,
   });
 
   if (messageId == null || chatId == null) {
@@ -426,6 +429,58 @@ export const createChatDefaultsModule = (
 
     await handleTokenChange(ctx, tokenInput, deps);
   };
+
+  deps.bot.callbackQuery(
+    /^chat_defaults_clear_(token|coinflip|giveaway|timeout)$/,
+    deps.wrapCallbackHandler(async (ctx) => {
+      if (!ctx.chat) return;
+      const target = ctx.match?.[1] as
+        | "token"
+        | "coinflip"
+        | "giveaway"
+        | "timeout";
+      if (!target) return;
+
+      const allowed = await ensureAdmin(ctx, deps);
+      if (!allowed) {
+        await safeAnswerCallbackQuery(
+          ctx,
+          "Only admins can change chat defaults"
+        );
+        return;
+      }
+
+      const chatId = ctx.chat.id;
+      const telegramId = getTelegramId(ctx);
+
+      if (target === "token") {
+        deps.getTokenManager().removeChatDefaultToken(chatId);
+      } else if (target === "timeout") {
+        deps.chatDb.upsertChatGameSettings(chatId, {
+          timeout_seconds: null,
+          set_by_telegram_id: telegramId.toString(),
+        });
+      } else if (target === "coinflip") {
+        deps.chatDb.upsertChatGameSettings(chatId, {
+          coinflip_max_players: null,
+          set_by_telegram_id: telegramId.toString(),
+        });
+      } else if (target === "giveaway") {
+        deps.chatDb.upsertChatGameSettings(chatId, {
+          giveaway_max_players: null,
+          set_by_telegram_id: telegramId.toString(),
+        });
+      }
+
+      // Clear input session if any
+      clearInputSession(
+        `${ctx.chat.id}_${ctx.callbackQuery?.message?.message_id}`
+      );
+
+      await renderMenu(ctx);
+      await safeAnswerCallbackQuery(ctx, "Setting reset to default");
+    })
+  );
 
   deps.bot.callbackQuery(
     /^chat_defaults_(token|coinflip|giveaway|timeout|privacy)$/,
