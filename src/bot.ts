@@ -4035,6 +4035,19 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
 // SECURE COMMANDS
 // ================================
 
+const formatDurationMinutes = (seconds: number): string => {
+  const minutes = seconds / 60;
+  if (minutes < 60) {
+    return `${minutes} minutes`;
+  }
+  const hours = minutes / 60;
+  const hoursFormatted = Number.isInteger(hours)
+    ? hours.toString()
+    : hours.toFixed(1).replace(/\.0$/, "");
+  const hourLabel = hoursFormatted === "1" ? "hour" : "hours";
+  return `${minutes} minutes (${hoursFormatted} ${hourLabel})`;
+};
+
 bot.command("oracle", async (ctx: Context) => {
   try {
     const oraclePda = PDAManager.getOraclePDA(program.programId);
@@ -4045,14 +4058,18 @@ bot.command("oracle", async (ctx: Context) => {
       "",
       `Operator: <code>${oracleAccount.operator.toString()}</code>`,
       `Fee Percentage: ${oracleAccount.feePercentage}%`,
-      `Min Timeout: ${oracleAccount.minTimeout.toNumber() / 60} minutes`,
-      `Max Timeout: ${oracleAccount.maxTimeout.toNumber() / 60} minutes`,
+      `Min Timeout: ${formatDurationMinutes(
+        oracleAccount.minTimeout.toNumber()
+      )}`,
+      `Max Timeout: ${formatDurationMinutes(
+        oracleAccount.maxTimeout.toNumber()
+      )}`,
       `Max Tickets: ${oracleAccount.maxTickets}`,
-      `Oracle Buffer Time: ${
-        oracleAccount.oracleBufferTime.toNumber() / 60
-      } minutes`,
+      `Oracle Buffer Time: ${formatDurationMinutes(
+        oracleAccount.oracleBufferTime.toNumber()
+      )}`,
       "",
-      `Current Game Timeout: ${GAME_TIMEOUT / 60} minutes`,
+      `Current Game Timeout: ${formatDurationMinutes(GAME_TIMEOUT)}`,
     ].join("\n");
 
     await ctx.reply(response, {
