@@ -91,3 +91,20 @@ export function buildExpirationText(
   }
   return `${prefix}Expires in: ${minutes}m`;
 }
+
+/**
+ * Format a duration in seconds to a verbose string.
+ * Example: "120 minutes (2 hours)"
+ */
+export function formatDurationVerbose(seconds: number): string {
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes} minutes`;
+  }
+  const hours = minutes / 60;
+  const hoursFormatted = Number.isInteger(hours)
+    ? hours.toString()
+    : hours.toFixed(1).replace(/\.0$/, "");
+  const hourLabel = hoursFormatted === "1" ? "hour" : "hours";
+  return `${minutes} minutes (${hoursFormatted} ${hourLabel})`;
+}

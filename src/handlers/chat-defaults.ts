@@ -19,6 +19,7 @@ import {
   resolveChatTimeout,
 } from "../utils/chat-settings";
 import { escapeHtml } from "../utils/format-amount";
+import { formatDurationVerbose } from "../utils/game-ui";
 import { respondWithMenu } from "../utils/menu-response";
 import { createCancelKeyboard } from "../utils/keyboards";
 import {
@@ -57,9 +58,9 @@ const formatPlayersLine = (
 };
 
 const formatTimeoutLine = (timeoutSeconds: number, isDefault: boolean): string => {
-  const minutes = Math.round(timeoutSeconds / 60);
+  const duration = formatDurationVerbose(timeoutSeconds);
   const suffix = isDefault ? "(bot default)" : "(chat default)";
-  return `⏱️ Game timeout: ${timeoutSeconds}s (${minutes}m) ${suffix}`;
+  return `⏱️ Game timeout: ${timeoutSeconds}s (${duration}) ${suffix}`;
 };
 
 type SettingsTarget = "token" | "coinflip" | "giveaway" | "timeout";
