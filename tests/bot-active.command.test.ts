@@ -128,11 +128,11 @@ describe("/active command in group chats", () => {
     const headerCallback =
       botModule.__test_ACTIVE_LIST_HEADER_CALLBACK_DATA;
     expect(inlineKeyboard?.[0]?.[0]).toMatchObject({
-      text: "Coinflip (1/4) • TIMBA",
+      text: "1. Coinflip (1/4) • TIMBA",
       callback_data: headerCallback,
     });
     expect(inlineKeyboard?.[2]?.[0]).toMatchObject({
-      text: "Coinflip (2/4) • TIMBA",
+      text: "2. Coinflip (2/4) • TIMBA",
       callback_data: headerCallback,
     });
 
