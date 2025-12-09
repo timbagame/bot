@@ -81,8 +81,15 @@ async function fetchFromJupiter(
   try {
     const url = new URL(JUPITER_PRICE_URL);
     url.searchParams.set("ids", id);
+    const apiKey = process.env.JUPITER_API_KEY;
+
     const res = await withTimeout(
-      (signal) => fetchImpl(url.toString(), { method: "GET", signal }),
+      (signal) =>
+        fetchImpl(url.toString(), {
+          method: "GET",
+          headers: apiKey ? { "x-api-key": apiKey } : undefined,
+          signal,
+        }),
       timeoutMs
     );
     if (!res.ok) return null;
@@ -100,7 +107,9 @@ async function fetchBatchFromJupiter(
   fetchImpl: FetchLike,
   timeoutMs: number
 ): Promise<Record<string, number | null>> {
-  const uniqueIds = Array.from(new Set(ids.map((id) => id.trim()).filter(Boolean)));
+  const uniqueIds = Array.from(
+    new Set(ids.map((id) => id.trim()).filter(Boolean))
+  );
   if (uniqueIds.length === 0) {
     return {};
   }
@@ -108,8 +117,15 @@ async function fetchBatchFromJupiter(
   try {
     const url = new URL(JUPITER_PRICE_URL);
     url.searchParams.set("ids", uniqueIds.join(","));
+    const apiKey = process.env.JUPITER_API_KEY;
+
     const res = await withTimeout(
-      (signal) => fetchImpl(url.toString(), { method: "GET", signal }),
+      (signal) =>
+        fetchImpl(url.toString(), {
+          method: "GET",
+          headers: apiKey ? { "x-api-key": apiKey } : undefined,
+          signal,
+        }),
       timeoutMs
     );
     if (!res.ok) {

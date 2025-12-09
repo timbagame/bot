@@ -166,13 +166,16 @@ export interface JupiterExecuteResponse {
 export class JupiterClient {
   private baseUrl: string;
   private fetchFn: FetchLike;
+  private apiKey?: string;
 
   constructor(
-    baseUrl: string = "https://lite-api.jup.ag",
-    fetchFn?: FetchLike
+    baseUrl: string = "https://api.jup.ag",
+    fetchFn?: FetchLike,
+    apiKey?: string
   ) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.fetchFn = fetchFn ?? (globalThis.fetch as unknown as FetchLike);
+    this.apiKey = apiKey ?? process.env.JUPITER_API_KEY;
   }
 
   private getOrderUrl(): string {
@@ -265,6 +268,7 @@ export class JupiterClient {
         method: "GET",
         headers: {
           Accept: "application/json",
+          ...(this.apiKey ? { "x-api-key": this.apiKey } : {}),
         },
       });
 
@@ -391,6 +395,7 @@ export class JupiterClient {
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
+          ...(this.apiKey ? { "x-api-key": this.apiKey } : {}),
         },
         body: JSON.stringify({
           requestId: request.requestId,
@@ -610,11 +615,17 @@ export async function fetchJupiterTokenMetadata(
   }
 
   try {
-    const url = new URL("https://lite-api.jup.ag/tokens/v2/search");
+    const url = new URL("https://api.jup.ag/tokens/v2/search");
     url.searchParams.set("query", query.trim());
+
+    const apiKey = process.env.JUPITER_API_KEY;
+
     const response = await fetchImpl(url.toString(), {
       method: "GET",
-      headers: { Accept: "application/json" },
+      headers: {
+        Accept: "application/json",
+        ...(apiKey ? { "x-api-key": apiKey } : {}),
+      },
     });
 
     if (!response.ok) {

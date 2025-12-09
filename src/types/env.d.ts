@@ -19,6 +19,7 @@ declare global {
       COMPLETION_SIGNATURES?: string;
       ENABLE_FEE_SWEEPER?: string;
       FEE_SWEEP_INTERVAL_MS?: string;
+      JUPITER_API_KEY?: string;
     }
   }
 }

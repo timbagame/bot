@@ -19,7 +19,7 @@ const makeResponse = (ok: boolean, status: number, body: any) => ({
 function makeMockFetch() {
   return async (input: string) => {
     const url = String(input);
-    if (url.includes("lite-api.jup.ag/tokens/v2/search")) {
+    if (url.includes("api.jup.ag/tokens/v2/search")) {
       return makeResponse(true, 200, [
         {
           id: "11111111111111111111111111111111",
