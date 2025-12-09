@@ -1402,21 +1402,29 @@ const buildActiveGamesKeyboard = (
   pagination?: PaginationOptions
 ): InlineKeyboardButton[][] => {
   const inlineKeyboard: InlineKeyboardButton[][] = [];
+  const startIndex = pagination
+    ? pagination.page * ACTIVE_GAMES_PER_PAGE + 1
+    : 1;
 
-  games.forEach((game) => {
+  games.forEach((game, index) => {
+    const gameLabel = extractCondensedGameLabel(
+      game.messageText,
+      game.currentTickets,
+      game.maxTickets
+    );
+    const numberedLabel = `${startIndex + index}. ${gameLabel}`;
+
     inlineKeyboard.push([
       {
-        text: extractCondensedGameLabel(
-          game.messageText,
-          game.currentTickets,
-          game.maxTickets
-        ),
+        text: numberedLabel,
         callback_data: ACTIVE_LIST_HEADER_CALLBACK_DATA,
       },
     ]);
 
     filterActiveGameKeyboardRows(game.keyboard ?? []).forEach((row) => {
-      inlineKeyboard.push(rewriteJoinButtons(cloneInlineKeyboardRow(row), game));
+      inlineKeyboard.push(
+        rewriteJoinButtons(cloneInlineKeyboardRow(row), game)
+      );
     });
   });
 
