@@ -83,6 +83,7 @@ const makeCtx = (username?: string) => ({
     : { first_name: "", last_name: "" },
   api: {
     answerCallbackQuery: vi.fn(),
+    sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }),
   },
 });
 
@@ -235,5 +236,85 @@ describe("Game callback helpers", () => {
     expect(gameDb.savePlayerMapping).toHaveBeenCalledTimes(2);
     expect(gameManager.joinGame).toHaveBeenCalledTimes(2);
     expect(gameManager.primeUsernameCache).toHaveBeenCalledTimes(2);
+  });
+
+  test("cross-group join sends DM notification", async () => {
+    const { module } = makeDeps();
+    const ctx = makeCtx("@alice");
+    // User is in chat 999, but game was created in chat 123
+    ctx.chat = { id: 999, type: "supergroup" } as any;
+    ctx.api.sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+
+    await module.__test_handleJoinGame(
+      ctx as unknown as Context,
+      new PublicKey(Keypair.generate().publicKey),
+      456n,
+      {
+        game_address: "game-cross",
+        status: "active",
+        chat_id: 123, // Different from ctx.chat.id
+        game_type: "coinflip",
+        amount: 100,
+        token_ticker: "SOL",
+      }
+    );
+
+    // Should have sent DM to the user
+    expect(ctx.api.sendMessage).toHaveBeenCalledWith(
+      "456",
+      expect.stringContaining("Joined Coinflip"),
+      expect.objectContaining({ parse_mode: "HTML" })
+    );
+  });
+
+  test("same-chat join does NOT send DM", async () => {
+    const { module } = makeDeps();
+    const ctx = makeCtx("@bob");
+    // User is in same chat as game
+    ctx.chat = { id: 123, type: "supergroup" } as any;
+    ctx.api.sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+
+    await module.__test_handleJoinGame(
+      ctx as unknown as Context,
+      new PublicKey(Keypair.generate().publicKey),
+      789n,
+      {
+        game_address: "game-same",
+        status: "active",
+        chat_id: 123, // Same as ctx.chat.id
+        game_type: "giveaway",
+        amount: 50,
+        token_ticker: "USDC",
+      }
+    );
+
+    // Should NOT have sent DM (same chat)
+    expect(ctx.api.sendMessage).not.toHaveBeenCalled();
+  });
+
+  test("cross-group DM failure does not break join flow", async () => {
+    const { module, gameManager } = makeDeps();
+    const ctx = makeCtx("@charlie");
+    ctx.chat = { id: 999, type: "supergroup" } as any;
+    // Simulate DM send failure (user hasn't started chat with bot)
+    ctx.api.sendMessage = vi.fn().mockRejectedValue(new Error("Forbidden: bot can't initiate conversation"));
+
+    // Should not throw
+    await module.__test_handleJoinGame(
+      ctx as unknown as Context,
+      new PublicKey(Keypair.generate().publicKey),
+      101n,
+      {
+        game_address: "game-dm-fail",
+        status: "active",
+        chat_id: 123,
+        game_type: "coinflip",
+        amount: 25,
+        token_ticker: "SOL",
+      }
+    );
+
+    // Join should still have succeeded
+    expect(gameManager.joinGame).toHaveBeenCalled();
   });
 });

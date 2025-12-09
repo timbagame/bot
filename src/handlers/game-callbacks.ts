@@ -318,6 +318,36 @@ export const createGameCallbacksModule = (
         ctx,
         `✅ Joined! (${ticketCount}/${maxTickets})`
       );
+
+      // Send DM if user joined from a different chat than where the game was created
+      const gameChatId = game.chat_id;
+      const currentChatId = ctx.chat?.id;
+      const isCrossGroupJoin =
+        gameChatId && currentChatId && gameChatId !== currentChatId;
+
+      if (isCrossGroupJoin) {
+        try {
+          const gameTypeLabel = toTitleCase(game.game_type || "game");
+          const amountDisplay = game.amount ?? "?";
+          const tokenDisplay = game.token_ticker || "tokens";
+
+          await ctx.api.sendMessage(
+            telegramId.toString(),
+            [
+              `✅ <b>Joined ${gameTypeLabel}!</b>`,
+              ``,
+              `Amount: <b>${amountDisplay} ${tokenDisplay}</b>`,
+              `Players: <b>${ticketCount}/${maxTickets}</b>`,
+              ``,
+              `You'll be notified here when the game completes.`,
+            ].join("\n"),
+            { parse_mode: "HTML" }
+          );
+        } catch (dmError) {
+          // User may not have started a DM with bot - that's ok
+          console.warn("Failed to DM cross-group join notification:", dmError);
+        }
+      }
     } catch (error) {
       if (
         error instanceof Error &&

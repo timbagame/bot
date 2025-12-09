@@ -113,4 +113,83 @@ describe("Game completion announcements", () => {
 
     expect(sendCalls[0]?.text).toContain("won the giveaway!");
   });
+
+  test("winner DM notification sent to non-creator", async () => {
+    const winnerPubkey = Keypair.generate().publicKey.toBase58();
+
+    botModule.__test_setGameDatabase({
+      getGame: () => ({
+        chat_id: 42,
+        message_id: 24,
+        game_type: "coinflip",
+        creator_telegram_id: "999", // Different from winner
+        amount: 500,
+        token_ticker: "SOL",
+      }),
+      completeGame: () => {},
+      getPlayerTelegramId: (pubkey: string) =>
+        pubkey === winnerPubkey ? "123" : null, // Winner's telegram ID
+    } as any);
+
+    botModule.__test_setGameManager({
+      updateGameMessageFromData: async () => {},
+      getPlayerUsername: async () => "@winner",
+      getPrizeDisplay: async () => ({
+        formattedAmount: "500",
+        tokenTicker: "SOL",
+        usdApproximation: "$75",
+      }),
+      getActiveGameMessage: () => ({ chatId: 42, messageId: 24 }),
+    } as any);
+
+    (botModule.wallet as any).getBlockchainTime = async () => 555;
+    await botModule.__test_processGameCompletion(
+      "GAME_WINNER_DM",
+      winnerPubkey,
+      500,
+      "SIG_WINNER"
+    );
+
+    // Should have sent: 1 announcement + 1 DM to winner
+    expect(sendCalls.length).toBe(2);
+
+    // Second call should be DM to winner
+    const dmCall = sendCalls[1];
+    expect(dmCall?.chatId).toBe(123); // Winner's telegram ID as number
+    expect(dmCall?.text).toContain("You won the coinflip!");
+  });
+
+  test("creator does NOT receive winner DM", async () => {
+    const creatorPubkey = Keypair.generate().publicKey.toBase58();
+
+    botModule.__test_setGameDatabase({
+      getGame: () => ({
+        chat_id: 42,
+        message_id: 24,
+        game_type: "coinflip",
+        creator_telegram_id: "777", // Same as winner
+      }),
+      completeGame: () => {},
+      getPlayerTelegramId: (pubkey: string) =>
+        pubkey === creatorPubkey ? "777" : null, // Creator is the winner
+    } as any);
+
+    botModule.__test_setGameManager({
+      updateGameMessageFromData: async () => {},
+      getPlayerUsername: async () => "@creator_winner",
+      getPrizeDisplay: async () => undefined,
+      getActiveGameMessage: () => ({ chatId: 42, messageId: 24 }),
+    } as any);
+
+    (botModule.wallet as any).getBlockchainTime = async () => 666;
+    await botModule.__test_processGameCompletion(
+      "CREATOR_WINS",
+      creatorPubkey,
+      100
+    );
+
+    // Should only have 1 call (announcement), no DM since creator always sees the game
+    expect(sendCalls.length).toBe(1);
+    expect(sendCalls[0]?.text).toContain("won the coinflip");
+  });
 });
