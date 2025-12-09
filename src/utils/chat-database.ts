@@ -44,20 +44,22 @@ export class ChatDatabase extends BaseDatabase {
       "Chat"
     );
 
+    // Migration: add privacy columns if they don't exist
+    // Use db.run directly to avoid logging expected "column already exists" errors
     try {
-      this.run(
+      this.db.run(
         "ALTER TABLE chat_game_settings ADD COLUMN coinflip_default_privacy TEXT"
       );
     } catch {
-      // Ignore error if column already exists
+      // Column already exists - expected on existing databases
     }
 
     try {
-      this.run(
+      this.db.run(
         "ALTER TABLE chat_game_settings ADD COLUMN giveaway_default_privacy TEXT"
       );
     } catch {
-      // Ignore error if column already exists
+      // Column already exists - expected on existing databases
     }
   }
 
