@@ -615,4 +615,110 @@ describe("GameDatabase Leaderboard", () => {
     const stats = gameDb.getLeaderboardStats(emptyChat, 10);
     expect(stats).toEqual([]);
   });
+
+  // ========================================
+  // Participant Count Calculation Tests
+  // ========================================
+
+  test("multi-player games without total_amount use actual participant count", () => {
+    const chatId = 99903;
+    const ticketAmount = 1000;
+    const creatorId = "MULTI_NO_TOTAL_CREATOR";
+    const player2Id = "MULTI_NO_TOTAL_P2";
+    const player3Id = "MULTI_NO_TOTAL_P3";
+    const player4Id = "MULTI_NO_TOTAL_P4";
+    const gameAddress = "MULTI_NO_TOTAL_GAME";
+
+    // 4-player game WITHOUT total_amount (simulating legacy game)
+    gameDb.saveGame(
+      gameAddress,
+      creatorId,
+      ticketAmount,
+      "coinflip",
+      "SOL",
+      "SOL",
+      4,
+      4,
+      chatId
+    );
+
+    // Add all 4 participants
+    gameDb.saveGameParticipant(gameAddress, creatorId, "PK_MNT_CREATOR", { status: "confirmed" });
+    gameDb.saveGameParticipant(gameAddress, player2Id, "PK_MNT_P2", { status: "confirmed" });
+    gameDb.saveGameParticipant(gameAddress, player3Id, "PK_MNT_P3", { status: "confirmed" });
+    gameDb.saveGameParticipant(gameAddress, player4Id, "PK_MNT_P4", { status: "confirmed" });
+
+    // Complete WITHOUT passing total_amount - should use participant count
+    gameDb.completeGame(gameAddress, "PK_MNT_CREATOR");
+
+    gameDb.savePlayerMapping("PK_MNT_CREATOR", creatorId);
+    gameDb.savePlayerMapping("PK_MNT_P2", player2Id);
+    gameDb.savePlayerMapping("PK_MNT_P3", player3Id);
+    gameDb.savePlayerMapping("PK_MNT_P4", player4Id);
+
+    const stats = gameDb.getLeaderboardStats(chatId);
+
+    // Winner profit: (4 * 1000) - 1000 = 3000 (uses actual 4 participants, not 2)
+    const creatorStats = stats.find(s => s.telegramId === creatorId);
+    expect(creatorStats).toBeDefined();
+    expect(creatorStats!.netAmountByToken["SOL"]).toBe(3000);
+
+    // Losers each lose their ticket amount
+    const p2Stats = stats.find(s => s.telegramId === player2Id);
+    expect(p2Stats!.netAmountByToken["SOL"]).toBe(-1000);
+  });
+
+  test("global leaderboard uses actual participant count for net amount", () => {
+    const chatA = -1007777777777;
+
+    const player = "GLOBAL_MULTI_P";
+    const playerPk = "PK_GLOBAL_MULTI";
+    gameDb.savePlayerMapping(playerPk, player);
+
+    // 3-player game in Chat A (no total_amount)
+    gameDb.saveGame("GLOBAL_MULTI_A", player, 500, "coinflip", "TIMBA_MINT", "TIMBA", 3, 3, chatA);
+    gameDb.saveGameParticipant("GLOBAL_MULTI_A", player, playerPk, { status: "confirmed" });
+    gameDb.saveGameParticipant("GLOBAL_MULTI_A", "OTHER_GM_A1", "PK_OTHER_GM_A1", { status: "confirmed" });
+    gameDb.saveGameParticipant("GLOBAL_MULTI_A", "OTHER_GM_A2", "PK_OTHER_GM_A2", { status: "confirmed" });
+    gameDb.completeGame("GLOBAL_MULTI_A", playerPk); // No total_amount
+
+    // Get global stats - should use 3 participants
+    const globalStats = gameDb.getGlobalLeaderboardStats(10);
+    const playerStats = globalStats.find(s => s.telegramId === player);
+
+    expect(playerStats).toBeDefined();
+    // Profit = (3 * 500) - 500 = 1000
+    expect(playerStats!.netAmountByToken["TIMBA_MINT"]).toBe(1000);
+  });
+
+  test("participant count fallback to 2 when no participants in table", () => {
+    const chatId = 99904;
+    const creatorId = "NO_PARTICIPANTS_CREATOR";
+    const gameAddress = "NO_PARTICIPANTS_GAME";
+
+    // Create game but DON'T add any participants to game_participants table
+    // This simulates very old legacy games that might not have participant records
+    gameDb.saveGame(
+      gameAddress,
+      creatorId,
+      1000,
+      "coinflip",
+      "SOL",
+      "SOL",
+      2,
+      2,
+      chatId
+    );
+
+    // Complete game directly (no participants added)
+    gameDb.savePlayerMapping("PK_NP_CREATOR", creatorId);
+    gameDb.completeGame(gameAddress, "PK_NP_CREATOR");
+
+    const stats = gameDb.getLeaderboardStats(chatId);
+
+    // Should fallback to 2 participants: (2 * 1000) - 1000 = 1000
+    const creatorStats = stats.find(s => s.telegramId === creatorId);
+    expect(creatorStats).toBeDefined();
+    expect(creatorStats!.netAmountByToken["SOL"]).toBe(1000);
+  });
 });
