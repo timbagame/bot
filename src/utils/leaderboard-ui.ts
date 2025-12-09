@@ -31,7 +31,7 @@ export const sanitizeLeaderboardDisplayName = (
 export const buildEmptyLeaderboardMessage = (): string =>
   [
     "🏆 <b>Leaderboard</b>",
-    "Top players in this group",
+    "Top players in this group (last 30 days)",
     "No statistics available yet - play a coinflip to appear here.",
   ].join("\n\n");
 
@@ -40,7 +40,7 @@ export const buildLeaderboardMessage = ({ chatTitle, players, allPlayers }: Buil
     ? `🏆 <b>${escapeHtml(chatTitle.trim())}</b>`
     : "🏆 <b>Leaderboard</b>";
 
-  const legend = "Top players in this group";
+  const legend = "Top players in this group (last 30 days)";
 
   const rows = players
     .map((player, index) => formatLeaderboardRow(player, index))
