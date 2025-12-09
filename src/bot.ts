@@ -1940,8 +1940,9 @@ const processGameCompletion = async (
               const prizeMessage = prizeDetails
                 ? `\n\nPrize:${prizeDetails}`
                 : "";
+              const winnerChatId = Number(winnerTelegramId);
               await bot.api.sendMessage(
-                winnerTelegramId,
+                winnerChatId,
                 [
                   `🎉 <b>You won the ${gameTypeLabel}!</b>`,
                   prizeMessage,
