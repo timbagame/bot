@@ -140,7 +140,7 @@ describe("/public command", () => {
       botModule.__test_ACTIVE_LIST_HEADER_CALLBACK_DATA;
 
     expect(inlineKeyboard?.[0]?.[0]).toMatchObject({
-      text: "Coinflip (1/4) • TIMBA",
+      text: "1. Coinflip (1/4) • TIMBA",
       callback_data: headerCallback,
     });
   });

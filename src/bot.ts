@@ -1336,14 +1336,16 @@ const parseActiveGameHeader = (
 const extractCondensedGameLabel = (
   messageText: string,
   currentTickets?: number,
-  maxTickets?: number
+  maxTickets?: number,
+  index?: number
 ): string => {
   const { gameType, ticker } = parseActiveGameHeader(messageText);
   const hasMax = Number.isFinite(maxTickets) && (maxTickets as number) > 0;
   const counts = ` (${Math.max(0, Math.trunc(currentTickets ?? 0))}/${
     hasMax ? Math.trunc(maxTickets as number) : "∞"
   })`;
-  const baseLabel = `${gameType}${counts}${ticker ? ` • ${ticker}` : ""}`;
+  const indexPrefix = index ? `${index}. ` : "";
+  const baseLabel = `${indexPrefix}${gameType}${counts}${ticker ? ` • ${ticker}` : ""}`;
   if (baseLabel.length <= ACTIVE_GAME_LABEL_MAX_LENGTH) {
     return baseLabel;
   }
@@ -1402,14 +1404,17 @@ const buildActiveGamesKeyboard = (
   pagination?: PaginationOptions
 ): InlineKeyboardButton[][] => {
   const inlineKeyboard: InlineKeyboardButton[][] = [];
+  const startIndex = pagination ? pagination.page * ACTIVE_GAMES_PER_PAGE : 0;
 
-  games.forEach((game) => {
+  games.forEach((game, i) => {
+    const globalIndex = startIndex + i + 1;
     inlineKeyboard.push([
       {
         text: extractCondensedGameLabel(
           game.messageText,
           game.currentTickets,
-          game.maxTickets
+          game.maxTickets,
+          globalIndex
         ),
         callback_data: ACTIVE_LIST_HEADER_CALLBACK_DATA,
       },
