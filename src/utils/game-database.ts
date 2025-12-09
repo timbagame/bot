@@ -308,10 +308,10 @@ export class GameDatabase extends BaseDatabase {
     messageId: number,
     chatId: number
   ): void {
-    // Legacy update
+    // Legacy update - only update message_id, preserve origin chat_id
     this.run(
-      "UPDATE games SET message_id = ?, chat_id = ? WHERE game_address = ?",
-      [messageId, chatId, gameAddress],
+      "UPDATE games SET message_id = ? WHERE game_address = ?",
+      [messageId, gameAddress],
       "saving game message"
     );
 
@@ -333,8 +333,9 @@ export class GameDatabase extends BaseDatabase {
   }
 
   public clearGameMessage(gameAddress: string): void {
+    // Only clear message_id, preserve origin chat_id
     this.run(
-      "UPDATE games SET message_id = NULL, chat_id = NULL WHERE game_address = ?",
+      "UPDATE games SET message_id = NULL WHERE game_address = ?",
       [gameAddress],
       "clearing game message"
     );

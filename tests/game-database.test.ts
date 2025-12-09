@@ -29,17 +29,17 @@ test("GameDatabase: CRUD for games, mappings, participants, and slot updates", (
   expect(game.creator_telegram_id).toBe("tg_creator");
   expect(db.getCreatorTelegramId("gameA")).toBe("tg_creator");
 
-  // Save message/chat ids
+  // Save message/chat ids - chat_id should be preserved from creation
   db.saveGameMessage("gameA", 777, 999);
   const withMsg = db.getGame("gameA")!;
   expect(withMsg.message_id).toBe(777);
-  expect(withMsg.chat_id).toBe(999);
-  const activeByChat = db.getActiveGamesByChat(999);
+  expect(withMsg.chat_id).toBe(12345); // Origin chat_id preserved, not overwritten to 999
+  const activeByChat = db.getActiveGamesByChat(12345); // Query by origin chat_id
   expect(activeByChat.map((g) => g.game_address)).toContain("gameA");
   db.clearGameMessage("gameA");
   const clearedMsg = db.getGame("gameA")!;
   expect(clearedMsg.message_id).toBeNull();
-  expect(clearedMsg.chat_id).toBeNull();
+  expect(clearedMsg.chat_id).toBe(12345); // chat_id preserved after clear
 
   // Player mapping roundtrip
   db.savePlayerMapping("pub_creator", "tg_creator", "@astro");
@@ -95,6 +95,34 @@ test("GameDatabase: CRUD for games, mappings, participants, and slot updates", (
   // Remove participant and ensure list shrinks
   db.removeGameParticipant("gameA", "tg_p2");
   expect(db.getGameParticipants("gameA")).toEqual(["tg_creator"]);
+});
+
+test("saveGameMessage preserves origin chat_id when message created in different chat", () => {
+  const db = GameDatabase.getInstance();
+
+  // Create game in chat A (simulating game creation in group A)
+  const originalChatId = -1001111111111;
+  db.saveGame("game_origin", "creator_origin", 100, "coinflip", "mint", "TOK", 4, 2, originalChatId);
+
+  // Verify game appears in /active for chat A
+  const activeInChatA = db.getActiveGamesByChat(originalChatId);
+  expect(activeInChatA.map((g) => g.game_address)).toContain("game_origin");
+
+  // Simulate joining from /public in chat B - creates message in different chat
+  const differentChatId = -1002222222222;
+  db.saveGameMessage("game_origin", 999, differentChatId);
+
+  // Game should still appear in /active for chat A (origin)
+  const stillActiveInChatA = db.getActiveGamesByChat(originalChatId);
+  expect(stillActiveInChatA.map((g) => g.game_address)).toContain("game_origin");
+
+  // Game should NOT appear in /active for chat B (not created there)
+  const notInChatB = db.getActiveGamesByChat(differentChatId);
+  expect(notInChatB.map((g) => g.game_address)).not.toContain("game_origin");
+
+  // The game_messages table should track the new message location
+  const messages = db.getGameMessages("game_origin");
+  expect(messages.some((m) => m.chatId === differentChatId && m.messageId === 999)).toBe(true);
 });
 
 test("updateGameLastSlotWithTimestamp accepts equal timestamp updates", () => {
