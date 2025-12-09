@@ -76,10 +76,10 @@ describe("Pending player events", () => {
       getGame: () => ({ game_type: "coinflip" }),
     } as any);
 
-    await botModule.__test_processPlayerEventWithTarget(
+    await botModule.__test_processPlayerEvent(
       event,
       "PlayerJoined",
-      target
+      [target]
     );
 
     expect(sendCalls.length).toBe(1);
@@ -103,10 +103,10 @@ describe("Pending player events", () => {
       getGame: () => ({ game_type: "coinflip" }),
     } as any);
 
-    await botModule.__test_processPlayerEventWithTarget(
+    await botModule.__test_processPlayerEvent(
       event,
       "PlayerJoined",
-      target
+      [target]
     );
 
     expect(sendCalls.length).toBe(1);
@@ -129,10 +129,10 @@ describe("Pending player events", () => {
       getGame: () => ({ game_type: "giveaway" }),
     } as any);
 
-    await botModule.__test_processPlayerEventWithTarget(
+    await botModule.__test_processPlayerEvent(
       event,
       "PlayerJoined",
-      target
+      [target]
     );
 
     expect(sendCalls.length).toBe(1);
@@ -152,10 +152,10 @@ describe("Pending player events", () => {
       }),
     } as any);
 
-    await botModule.__test_processPlayerEventWithTarget(
+    await botModule.__test_processPlayerEvent(
       event,
       "PlayerJoined",
-      target
+      [target]
     );
 
     expect(sendCalls.length).toBe(0);
