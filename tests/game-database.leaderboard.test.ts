@@ -162,7 +162,10 @@ describe("GameDatabase Leaderboard", () => {
 
     expect(playerStats).toBeDefined();
     expect(playerStats?.netAmountByToken).toBeDefined();
-    // Net = +1000 - 500 = +500 (in raw units: 1_000_000 - 500_000 = 500_000)
+
+    // Net profit for win is: totalPot (amount * 2) - amount = 1_000_000 (legacy default)
+    // Loss is -amount = -500_000
+    // Total net = 1_000_000 - 500_000 = 500_000
     expect(playerStats?.netAmountByToken["TIMBA_MINT"]).toBe(500_000);
   });
 
@@ -276,5 +279,86 @@ describe("GameDatabase Leaderboard", () => {
     for (const stat of stats) {
       expect(stat.netAmountByToken).toBeDefined();
     }
+  });
+
+  test("should calculate correct net profit for multi-player games using total_amount", () => {
+    const chatId = 99901;
+    const ticketAmount = 1_000;
+    const creatorId = "MP_CREATOR";
+    const player2Id = "MP_P2";
+    const player3Id = "MP_P3";
+    const gameAddress = "MP_GAME";
+
+    gameDb.saveGame(
+      gameAddress,
+      creatorId,
+      ticketAmount,
+      "coinflip",
+      "SOL",
+      "SOL",
+      3,
+      2,
+      chatId,
+      30
+    );
+
+    gameDb.saveGameParticipant(gameAddress, creatorId, "PK_CREATOR", { status: "confirmed" });
+    gameDb.saveGameParticipant(gameAddress, player2Id, "PK_P2", { status: "confirmed" });
+    gameDb.saveGameParticipant(gameAddress, player3Id, "PK_P3", { status: "confirmed" });
+
+    // Winner gets entire pot (3 players * 1000 = 3000)
+    // Profit = 3000 - 1000 = 2000
+    const totalPot = ticketAmount * 3;
+    gameDb.completeGame(gameAddress, "PK_CREATOR", Date.now(), totalPot);
+
+    gameDb.savePlayerMapping("PK_CREATOR", creatorId, "@Creator");
+    gameDb.savePlayerMapping("PK_P2", player2Id, "@Player2");
+    gameDb.savePlayerMapping("PK_P3", player3Id, "@Player3");
+
+    const stats = gameDb.getLeaderboardStats(chatId);
+
+    const creatorStats = stats.find(s => s.telegramId === creatorId);
+    expect(creatorStats).toBeDefined();
+    expect(creatorStats!.gamesWon).toBe(1);
+    expect(creatorStats!.netAmountByToken["SOL"]).toBe(2000);
+
+    const p2Stats = stats.find(s => s.telegramId === player2Id);
+    expect(p2Stats!.netAmountByToken["SOL"]).toBe(-1000);
+  });
+
+  test("should fallback to assumed 2-player profit for legacy games without total_amount", () => {
+    const chatId = 99902;
+    const ticketAmount = 500;
+    const creatorId = "LEGACY_CREATOR";
+    const player2Id = "LEGACY_P2";
+    const gameAddress = "LEGACY_GAME";
+
+    gameDb.saveGame(
+      gameAddress,
+      creatorId,
+      ticketAmount,
+      "coinflip",
+      "SOL",
+      "SOL",
+      2,
+      2,
+      chatId
+    );
+
+    gameDb.saveGameParticipant(gameAddress, creatorId, "PK_L_CREATOR", { status: "confirmed" });
+    gameDb.saveGameParticipant(gameAddress, player2Id, "PK_L_P2", { status: "confirmed" });
+
+    // Complete WITHOUT passing totalPot (simulating old data)
+    gameDb.completeGame(gameAddress, "PK_L_CREATOR", Date.now());
+
+    gameDb.savePlayerMapping("PK_L_CREATOR", creatorId);
+    gameDb.savePlayerMapping("PK_L_P2", player2Id);
+
+    const stats = gameDb.getLeaderboardStats(chatId);
+
+    // Expected profit: (ticket * 2) - ticket = ticket
+    const creatorStats = stats.find(s => s.telegramId === creatorId);
+    expect(creatorStats).toBeDefined();
+    expect(creatorStats!.netAmountByToken["SOL"]).toBe(ticketAmount);
   });
 });
