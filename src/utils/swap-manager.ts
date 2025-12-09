@@ -703,7 +703,9 @@ export class SwapManager {
     const { swapQuote, userKeypair, targetLamportsOut } = options;
 
     try {
+      console.log(`🔄 JIT swap: executing swap via SwapService.execute...`);
       const signature = await this.swapService.execute(swapQuote, userKeypair);
+      console.log(`✅ JIT swap: execution complete, signature=${signature}`);
       return {
         status: "success",
         result: {
@@ -947,11 +949,14 @@ export class SwapManager {
     }
 
     try {
-      return await this.executeJupiterTransaction(
+      console.log(`🔄 JIT swap: calling executeJupiterTransaction with requestId=${swapResponse.requestId}`);
+      const sig = await this.executeJupiterTransaction(
         swapResponse.swapTransaction,
         swapResponse.requestId,
         signers
       );
+      console.log(`✅ JIT swap: Jupiter transaction executed, signature=${sig}`);
+      return sig;
     } catch (error: any) {
       const order = swapResponse.order;
       const orderRouteLamports =
@@ -1087,9 +1092,11 @@ export class SwapManager {
     signers: Keypair[]
   ): Promise<string> {
     try {
+      console.log(`🔄 JIT swap: deserializing Jupiter transaction...`);
       const transactionBuffer = Buffer.from(base64Transaction, "base64");
       const versionedTx = VersionedTransaction.deserialize(transactionBuffer);
 
+      console.log(`🔄 JIT swap: signing transaction with ${signers.length} signers...`);
       versionedTx.sign(signers);
 
       const signedTransaction = Buffer.from(versionedTx.serialize()).toString(
