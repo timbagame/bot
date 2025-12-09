@@ -114,7 +114,7 @@ describe("Game completion announcements", () => {
     expect(sendCalls[0]?.text).toContain("won the giveaway!");
   });
 
-  test("winner DM notification sent to non-creator", async () => {
+  test("winner does NOT receive DM notification (deprecated)", async () => {
     const winnerPubkey = Keypair.generate().publicKey.toBase58();
 
     botModule.__test_setGameDatabase({
@@ -150,13 +150,9 @@ describe("Game completion announcements", () => {
       "SIG_WINNER"
     );
 
-    // Should have sent: 1 announcement + 1 DM to winner
-    expect(sendCalls.length).toBe(2);
-
-    // Second call should be DM to winner
-    const dmCall = sendCalls[1];
-    expect(dmCall?.chatId).toBe(123); // Winner's telegram ID as number
-    expect(dmCall?.text).toContain("You won the coinflip!");
+    // Should have sent: 1 announcement only
+    expect(sendCalls.length).toBe(1);
+    expect(sendCalls[0]?.text).toContain("won the coinflip");
   });
 
   test("creator does NOT receive winner DM", async () => {
