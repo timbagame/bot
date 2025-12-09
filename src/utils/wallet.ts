@@ -2327,15 +2327,36 @@ export class WalletManager {
         maxRetries: 3,
       });
     } catch (error: any) {
-      if (error instanceof SendTransactionError) {
+      // Enhanced error handling for transaction failures
+      const isSendTransactionError =
+        error instanceof SendTransactionError ||
+        (error?.constructor?.name === "SendTransactionError") ||
+        typeof error?.getLogs === "function";
+
+      if (isSendTransactionError) {
         try {
-          const logs = await error.getLogs(this.connection);
+          // Attempt to get logs if the method exists
+          let logs: string[] | undefined;
+
+          if (typeof error.getLogs === "function") {
+             logs = await error.getLogs(this.connection);
+          } else if (error.logs) {
+             logs = error.logs;
+          }
+
           if (logs && logs.length > 0) {
-            console.error("Transaction simulation logs:", logs.join("\n"));
+            console.error("\n========================================");
+            console.error("🔍 TRANSACTION SIMULATION LOGS found:");
+            console.error(logs.join("\n"));
+            console.error("========================================\n");
+          } else {
+             console.warn("⚠️ SendTransactionError caught but no logs returned from getLogs()");
           }
         } catch (logError) {
-          console.error("Failed to fetch transaction logs:", logError);
+          console.error("❌ Failed to fetch transaction logs during error handling:", logError);
         }
+      } else {
+          console.log(`ℹ️ Caught error in sendTransaction is NOT SendTransactionError (Type: ${error?.constructor?.name})`);
       }
       throw error;
     }
