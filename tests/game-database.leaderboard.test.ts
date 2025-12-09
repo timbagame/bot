@@ -463,4 +463,149 @@ describe("GameDatabase Leaderboard", () => {
     const stats = gameDb.getGlobalLeaderboardStats(10);
     expect(stats).toEqual([]);
   });
+
+  // ========================================
+  // Tests for getLeaderboardStats (global stats for group members)
+  // ========================================
+
+  test("getLeaderboardStats shows global stats for players who played in the chat", () => {
+    const chatA = -1001111111111;
+    const chatB = -1002222222222;
+
+    // Player 1 plays in BOTH chats
+    const player1 = "CROSS_CHAT_P1";
+    const player1Pk = "PK_CROSS_CHAT_P1";
+    gameDb.savePlayerMapping(player1Pk, player1, "@CrossChatPlayer1");
+
+    // Game in Chat A (player1 is creator and winner)
+    gameDb.saveGame("CROSS_GAME_A1", player1, 1_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatA);
+    gameDb.saveGameParticipant("CROSS_GAME_A1", player1, player1Pk, { status: "confirmed" });
+    gameDb.saveGameParticipant("CROSS_GAME_A1", "OTHER_A1", "PK_OTHER_A1", { status: "confirmed" });
+    gameDb.completeGame("CROSS_GAME_A1", player1Pk);
+
+    // Game in Chat B (player1 is creator and winner)
+    gameDb.saveGame("CROSS_GAME_B1", player1, 2_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatB);
+    gameDb.saveGameParticipant("CROSS_GAME_B1", player1, player1Pk, { status: "confirmed" });
+    gameDb.saveGameParticipant("CROSS_GAME_B1", "OTHER_B1", "PK_OTHER_B1", { status: "confirmed" });
+    gameDb.completeGame("CROSS_GAME_B1", player1Pk);
+
+    // Get leaderboard for Chat A - should include player1's global stats (from both chats)
+    const statsA = gameDb.getLeaderboardStats(chatA, 10);
+    const player1StatsInA = statsA.find((s) => s.telegramId === player1);
+
+    expect(player1StatsInA).toBeDefined();
+    // Should count BOTH games (from A and B)
+    expect(player1StatsInA?.totalGames).toBe(2);
+    expect(player1StatsInA?.gamesWon).toBe(2);
+  });
+
+  test("getLeaderboardStats excludes players who never played in the requested chat", () => {
+    const chatA = -1001111111112;
+    const chatB = -1002222222223;
+
+    // Player 1 only plays in Chat A
+    const player1 = "CHATONLY_P1";
+    const player1Pk = "PK_CHATONLY_P1";
+    gameDb.savePlayerMapping(player1Pk, player1);
+    gameDb.saveGame("CHATONLY_GAME_A", player1, 1_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatA);
+    gameDb.saveGameParticipant("CHATONLY_GAME_A", player1, player1Pk, { status: "confirmed" });
+    gameDb.saveGameParticipant("CHATONLY_GAME_A", "OTHER1", "PK_OTHER1", { status: "confirmed" });
+    gameDb.completeGame("CHATONLY_GAME_A", player1Pk);
+
+    // Player 2 only plays in Chat B
+    const player2 = "CHATONLY_P2";
+    const player2Pk = "PK_CHATONLY_P2";
+    gameDb.savePlayerMapping(player2Pk, player2);
+    gameDb.saveGame("CHATONLY_GAME_B", player2, 2_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatB);
+    gameDb.saveGameParticipant("CHATONLY_GAME_B", player2, player2Pk, { status: "confirmed" });
+    gameDb.saveGameParticipant("CHATONLY_GAME_B", "OTHER2", "PK_OTHER2", { status: "confirmed" });
+    gameDb.completeGame("CHATONLY_GAME_B", player2Pk);
+
+    // Get leaderboard for Chat A - should NOT include player2
+    const statsA = gameDb.getLeaderboardStats(chatA, 10);
+    const player1InA = statsA.find((s) => s.telegramId === player1);
+    const player2InA = statsA.find((s) => s.telegramId === player2);
+
+    expect(player1InA).toBeDefined();
+    expect(player2InA).toBeUndefined(); // Player 2 never played in Chat A
+
+    // Get leaderboard for Chat B - should NOT include player1
+    const statsB = gameDb.getLeaderboardStats(chatB, 10);
+    const player1InB = statsB.find((s) => s.telegramId === player1);
+    const player2InB = statsB.find((s) => s.telegramId === player2);
+
+    expect(player2InB).toBeDefined();
+    expect(player1InB).toBeUndefined(); // Player 1 never played in Chat B
+  });
+
+  test("getLeaderboardStats includes participant who joined (not created) in chat", () => {
+    const chatA = -1001111111113;
+    const chatB = -1002222222224;
+
+    // Player creates game in Chat B
+    const joinerPlayer = "JOINER_PLAYER";
+    const joinerPk = "PK_JOINER";
+    gameDb.savePlayerMapping(joinerPk, joinerPlayer);
+
+    const creatorPlayer = "CREATOR_PLAYER";
+    const creatorPk = "PK_CREATOR";
+    gameDb.savePlayerMapping(creatorPk, creatorPlayer);
+
+    // Creator makes a game in Chat A, joiner joins
+    gameDb.saveGame("JOIN_TEST_GAME_A", creatorPlayer, 1_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatA);
+    gameDb.saveGameParticipant("JOIN_TEST_GAME_A", creatorPlayer, creatorPk, { status: "confirmed" });
+    gameDb.saveGameParticipant("JOIN_TEST_GAME_A", joinerPlayer, joinerPk, { status: "confirmed" });
+    gameDb.completeGame("JOIN_TEST_GAME_A", joinerPk); // Joiner wins
+
+    // Joiner also plays in Chat B (to have cross-chat stats)
+    gameDb.saveGame("JOIN_TEST_GAME_B", joinerPlayer, 500_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatB);
+    gameDb.saveGameParticipant("JOIN_TEST_GAME_B", joinerPlayer, joinerPk, { status: "confirmed" });
+    gameDb.saveGameParticipant("JOIN_TEST_GAME_B", "OTHER_B", "PK_OTHER_B", { status: "confirmed" });
+    gameDb.completeGame("JOIN_TEST_GAME_B", joinerPk);
+
+    // Chat A leaderboard should include joiner (they joined a game there)
+    // and show their GLOBAL stats (2 wins total)
+    const statsA = gameDb.getLeaderboardStats(chatA, 10);
+    const joinerStats = statsA.find((s) => s.telegramId === joinerPlayer);
+
+    expect(joinerStats).toBeDefined();
+    expect(joinerStats?.totalGames).toBe(2); // Both games (A + B)
+    expect(joinerStats?.gamesWon).toBe(2);
+  });
+
+  test("getLeaderboardStats calculates global net amounts for group members", () => {
+    const chatA = -1001111111114;
+    const chatB = -1002222222225;
+
+    const player = "NET_GLOBAL_P1";
+    const playerPk = "PK_NET_GLOBAL";
+    gameDb.savePlayerMapping(playerPk, player);
+
+    // Win 1000 TIMBA in Chat A
+    gameDb.saveGame("NET_GLOBAL_WIN_A", player, 1_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatA);
+    gameDb.saveGameParticipant("NET_GLOBAL_WIN_A", player, playerPk, { status: "confirmed" });
+    gameDb.saveGameParticipant("NET_GLOBAL_WIN_A", "LOSER_A", "PK_LOSER_A", { status: "confirmed" });
+    gameDb.completeGame("NET_GLOBAL_WIN_A", playerPk);
+
+    // Win 2000 TIMBA in Chat B
+    gameDb.saveGame("NET_GLOBAL_WIN_B", player, 2_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatB);
+    gameDb.saveGameParticipant("NET_GLOBAL_WIN_B", player, playerPk, { status: "confirmed" });
+    gameDb.saveGameParticipant("NET_GLOBAL_WIN_B", "LOSER_B", "PK_LOSER_B", { status: "confirmed" });
+    gameDb.completeGame("NET_GLOBAL_WIN_B", playerPk);
+
+    // Get Chat A leaderboard - net amount should include BOTH wins
+    const statsA = gameDb.getLeaderboardStats(chatA, 10);
+    const playerStats = statsA.find((s) => s.telegramId === player);
+
+    expect(playerStats).toBeDefined();
+    expect(playerStats?.totalGames).toBe(2);
+    // Net = 1_000_000 (win A) + 2_000_000 (win B) = 3_000_000
+    expect(playerStats?.netAmountByToken["TIMBA_MINT"]).toBe(3_000_000);
+  });
+
+  test("getLeaderboardStats returns empty when no one has played in the chat", () => {
+    const emptyChat = -1009999999999;
+    const stats = gameDb.getLeaderboardStats(emptyChat, 10);
+    expect(stats).toEqual([]);
+  });
 });

@@ -1071,64 +1071,115 @@ export class GameDatabase extends BaseDatabase {
   }
 
   /**
-   * Get leaderboard statistics for players in a specific chat
+   * Get leaderboard statistics for players who have played in a specific chat,
+   * but aggregate their stats GLOBALLY across all chats.
    */
   public getLeaderboardStats(chatId: number, limit: number = 10): LeaderboardStatsRecord[] {
     try {
-      // First query: get aggregate stats per player
-      const aggregateRows = this.all<any>(
+      // Step 1: Find all telegram_ids that have participated in games in this chat
+      const chatMembersRows = this.all<any>(
         `
-        WITH relevant_games AS (
-          SELECT *
+        WITH chat_games AS (
+          SELECT game_address, creator_telegram_id
           FROM games
           WHERE chat_id = ?
-            AND game_type != 'giveaway'
+        )
+        SELECT DISTINCT telegram_id FROM (
+          -- Creators of games in this chat
+          SELECT creator_telegram_id AS telegram_id
+          FROM chat_games
+          WHERE creator_telegram_id IS NOT NULL
+
+          UNION
+
+          -- Participants who joined games in this chat
+          SELECT gp.telegram_id
+          FROM game_participants gp
+          JOIN chat_games cg ON gp.game_address = cg.game_address
+          WHERE gp.telegram_id IS NOT NULL AND gp.status = 'confirmed'
+
+          UNION
+
+          -- Winners of games in this chat (via player_mappings)
+          SELECT pm.telegram_id
+          FROM games g
+          JOIN player_mappings pm ON pm.public_key = g.winner_address
+          WHERE g.chat_id = ? AND pm.telegram_id IS NOT NULL
+        )
+      `,
+        [chatId, chatId],
+        "getting chat member telegram ids"
+      );
+
+      if (chatMembersRows.length === 0) {
+        return [];
+      }
+
+      const chatMemberIds = chatMembersRows
+        .map((row: any) => String(row.telegram_id ?? "").trim())
+        .filter((id: string) => id.length > 0);
+
+      if (chatMemberIds.length === 0) {
+        return [];
+      }
+
+      // Step 2: Get GLOBAL stats for these players (no chat_id filter on games)
+      const memberPlaceholders = chatMemberIds.map(() => "?").join(",");
+      const aggregateRows = this.all<any>(
+        `
+        WITH all_games AS (
+          SELECT *
+          FROM games
+          WHERE game_type != 'giveaway'
         ),
         player_game_roles AS (
           SELECT
-            rg.game_address,
-            rg.status,
-            rg.amount,
-            rg.total_amount,
-            rg.winner_address,
-            rg.token_mint,
-            rg.creator_telegram_id AS telegram_id,
+            ag.game_address,
+            ag.status,
+            ag.amount,
+            ag.total_amount,
+            ag.winner_address,
+            ag.token_mint,
+            ag.creator_telegram_id AS telegram_id,
             'creator' AS role
-          FROM relevant_games rg
-          WHERE rg.creator_telegram_id IS NOT NULL
+          FROM all_games ag
+          WHERE ag.creator_telegram_id IS NOT NULL
+            AND ag.creator_telegram_id IN (${memberPlaceholders})
 
           UNION
 
           SELECT
-            rg.game_address,
-            rg.status,
-            rg.amount,
-            rg.total_amount,
-            rg.winner_address,
-            rg.token_mint,
+            ag.game_address,
+            ag.status,
+            ag.amount,
+            ag.total_amount,
+            ag.winner_address,
+            ag.token_mint,
             gp.telegram_id AS telegram_id,
             'participant' AS role
-          FROM relevant_games rg
+          FROM all_games ag
           JOIN game_participants gp
-            ON gp.game_address = rg.game_address
+            ON gp.game_address = ag.game_address
            AND gp.status = 'confirmed'
           WHERE gp.telegram_id IS NOT NULL
+            AND gp.telegram_id IN (${memberPlaceholders})
 
           UNION
 
           SELECT
-            rg.game_address,
-            rg.status,
-            rg.amount,
-            rg.total_amount,
-            rg.winner_address,
-            rg.token_mint,
+            ag.game_address,
+            ag.status,
+            ag.amount,
+            ag.total_amount,
+            ag.winner_address,
+            ag.token_mint,
             pm.telegram_id AS telegram_id,
             'winner' AS role
-          FROM relevant_games rg
+          FROM all_games ag
           JOIN player_mappings pm
-            ON pm.public_key = rg.winner_address
+            ON pm.public_key = ag.winner_address
           WHERE pm.telegram_id IS NOT NULL
+            AND pm.telegram_id IN (${memberPlaceholders})
         ),
         player_game_summary AS (
           SELECT
@@ -1168,8 +1219,8 @@ export class GameDatabase extends BaseDatabase {
         HAVING COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_cancelled = 0 THEN pgs.game_address END) > 0
         LIMIT ?
       `,
-        [chatId, limit * 3], // Fetch extra to ensure we have enough after USD conversion and re-sorting
-        "getting leaderboard aggregate stats"
+        [...chatMemberIds, ...chatMemberIds, ...chatMemberIds, limit * 3],
+        "getting leaderboard aggregate stats (global for chat members)"
       );
 
       if (aggregateRows.length === 0) {
@@ -1184,57 +1235,55 @@ export class GameDatabase extends BaseDatabase {
         return [];
       }
 
-      // Second query: get per-token net amounts for each player
-      // For giveaways, only the creator can lose (participants don't risk money)
+      // Step 3: Get per-token net amounts GLOBALLY for each player
       const placeholders = telegramIds.map(() => "?").join(",");
       const netAmountRows = this.all<any>(
         `
-        WITH relevant_games AS (
+        WITH all_games AS (
           SELECT *
           FROM games
-          WHERE chat_id = ?
-            AND status = 'completed'
+          WHERE status = 'completed'
             AND LOWER(winner_address) != 'cancelled'
             AND game_type != 'giveaway'
         ),
         player_game_roles AS (
           SELECT
-            rg.game_address,
-            rg.amount,
-            rg.total_amount,
-            rg.token_mint,
-            rg.creator_telegram_id AS telegram_id,
+            ag.game_address,
+            ag.amount,
+            ag.total_amount,
+            ag.token_mint,
+            ag.creator_telegram_id AS telegram_id,
             'creator' AS role
-          FROM relevant_games rg
-          WHERE rg.creator_telegram_id IS NOT NULL
+          FROM all_games ag
+          WHERE ag.creator_telegram_id IS NOT NULL
 
           UNION
 
           SELECT
-            rg.game_address,
-            rg.amount,
-            rg.total_amount,
-            rg.token_mint,
+            ag.game_address,
+            ag.amount,
+            ag.total_amount,
+            ag.token_mint,
             gp.telegram_id AS telegram_id,
             'participant' AS role
-          FROM relevant_games rg
+          FROM all_games ag
           JOIN game_participants gp
-            ON gp.game_address = rg.game_address
+            ON gp.game_address = ag.game_address
            AND gp.status = 'confirmed'
           WHERE gp.telegram_id IS NOT NULL
 
           UNION
 
           SELECT
-            rg.game_address,
-            rg.amount,
-            rg.total_amount,
-            rg.token_mint,
+            ag.game_address,
+            ag.amount,
+            ag.total_amount,
+            ag.token_mint,
             pm.telegram_id AS telegram_id,
             'winner' AS role
-          FROM relevant_games rg
+          FROM all_games ag
           JOIN player_mappings pm
-            ON pm.public_key = rg.winner_address
+            ON pm.public_key = ag.winner_address
           WHERE pm.telegram_id IS NOT NULL
         ),
         player_game_summary AS (
@@ -1261,8 +1310,8 @@ export class GameDatabase extends BaseDatabase {
         WHERE pgs.telegram_id IN (${placeholders})
         GROUP BY pgs.telegram_id, COALESCE(pgs.token_mint, 'SOL')
       `,
-        [chatId, ...telegramIds],
-        "getting leaderboard net amounts per token"
+        [...telegramIds],
+        "getting leaderboard net amounts per token (global)"
       );
 
       // Build a map of telegram_id -> { token_mint -> net_amount }
