@@ -18,7 +18,7 @@ const routePlan = [
 ];
 
 test("JupiterClient surfaces HTTP errors without error payload", async () => {
-  const client = new JupiterClient("https://lite-api.jup.ag", async () =>
+  const client = new JupiterClient("https://api.jup.ag", async () =>
     new Response("rate-limited", {
       status: 429,
       statusText: "Too Many Requests",
@@ -56,7 +56,7 @@ test("JupiterClient surfaces gasless order error message", async () => {
     errorMessage: "Minimum $10 for gasless",
   };
 
-  const client = new JupiterClient("https://lite-api.jup.ag", async () =>
+  const client = new JupiterClient("https://api.jup.ag", async () =>
     new Response(JSON.stringify(orderPayload), {
       status: 200,
       statusText: "OK",
@@ -72,7 +72,7 @@ test("JupiterClient surfaces gasless order error message", async () => {
 });
 
 test("JupiterClient honors referralApplied returned by Jupiter", async () => {
-  const client = new JupiterClient("https://lite-api.jup.ag", async () =>
+  const client = new JupiterClient("https://api.jup.ag", async () =>
     new Response(
       JSON.stringify({
         inputMint: "MintA",
@@ -108,7 +108,7 @@ test("JupiterClient honors referralApplied returned by Jupiter", async () => {
 test("Jupiter executeOrder surfaces stringify failures without crashing", async () => {
   const circular: any = { signature: "derp" };
   circular.self = circular;
-  const client = new JupiterClient("https://lite-api.jup.ag", async () =>
+  const client = new JupiterClient("https://api.jup.ag", async () =>
     ({
       ok: true,
       status: 200,

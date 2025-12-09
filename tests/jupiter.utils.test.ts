@@ -134,7 +134,7 @@ describe("JupiterClient referral URL params", () => {
   test("falls back to payer for taker when missing", async () => {
     const capture: { url?: string } = {};
     const client = new JupiterClient(
-      "https://lite-api.jup.ag",
+      "https://api.jup.ag",
       createJupiterFetchStub(capture, async () => makeSuccessResponse())
     );
 
@@ -154,7 +154,7 @@ describe("JupiterClient referral URL params", () => {
     const capture: { url?: string } = {};
     const explicitTaker = "2DxM4Qf7RZwzE9HyfYDp2mjNgS8RX5UCb7Yiz2ZGsY2Q";
     const client = new JupiterClient(
-      "https://lite-api.jup.ag",
+      "https://api.jup.ag",
       createJupiterFetchStub(capture, async () => makeSuccessResponse())
     );
 
@@ -176,7 +176,7 @@ describe("JupiterClient referral URL params", () => {
     const urls: string[] = [];
     const closeAuthority = "5mo3n3ed58N8LSnMSrhMfyQyw4MKWmNBp8QtUafpJwwt";
     const client = new JupiterClient(
-      "https://lite-api.jup.ag",
+      "https://api.jup.ag",
       createJupiterFetchStub({ urls }, async (_, call) => {
         if (call === 1) {
           return {
@@ -238,7 +238,7 @@ describe("JupiterClient fee display", () => {
 describe("JupiterClient error handling", () => {
   test("propagates gasless minimum error code 3 clearly", async () => {
     const client = new JupiterClient(
-      "https://lite-api.jup.ag",
+      "https://api.jup.ag",
       async () => ({
         ok: true,
         status: 200,

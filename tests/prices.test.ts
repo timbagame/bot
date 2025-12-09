@@ -3,7 +3,7 @@ import { getPriceUSD } from "../src/utils/prices";
 
 const jupOkFetch = (price: number) => async (input: RequestInfo | URL) => {
   const url = typeof input === "string" ? input : input.toString();
-  if (url.includes("lite-api.jup.ag")) {
+  if (url.includes("api.jup.ag")) {
     const id = new URL(url).searchParams.get("ids")!;
     return new Response(
       JSON.stringify({ [id]: { id, usdPrice: price } }),
@@ -15,7 +15,7 @@ const jupOkFetch = (price: number) => async (input: RequestInfo | URL) => {
 
 const jupFailFetch = async (input: RequestInfo | URL) => {
   const url = typeof input === "string" ? input : input.toString();
-  if (url.includes("lite-api.jup.ag")) {
+  if (url.includes("api.jup.ag")) {
     return new Response("oops", { status: 500 });
   }
   return new Response("not used", { status: 404 });
