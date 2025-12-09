@@ -646,7 +646,13 @@ export class GameManager {
   private async recreateMissingGameMessage(
     ctx: Context,
     gameAddress: string,
-    options: { chatId?: number; messageText: string; inlineKeyboard?: any }
+    options: {
+      chatId?: number;
+      messageText: string;
+      inlineKeyboard?: any;
+      gameType?: string;
+      replyToMessageId?: number;
+    }
   ): Promise<void> {
     const fallbackChatId =
       options.chatId ??
@@ -661,19 +667,43 @@ export class GameManager {
       return;
     }
 
-    // Only clear the specific message if needed, but here we are recreating it
-    // so we overwrite it.
+    // Get the reply_to ID from callback context if not provided
+    const replyToMessageId =
+      options.replyToMessageId ??
+      (ctx as any).callbackQuery?.message?.message_id ??
+      undefined;
 
     try {
-      const sentMessage = await ctx.api.sendMessage(
-        fallbackChatId,
-        options.messageText,
-        {
-          parse_mode: "HTML",
-          reply_markup: options.inlineKeyboard,
-          link_preview_options: { is_disabled: true },
-        }
-      );
+      const videoId = options.gameType
+        ? resolveGameVideoId(options.gameType)
+        : undefined;
+
+      const replyMarkup = options.inlineKeyboard;
+
+      const sendResult = await sendMediaWithFallback({
+        videoFileId: videoId ?? null,
+        logLabel: "recreate game message",
+        sendText: () =>
+          ctx.api.sendMessage(fallbackChatId, options.messageText, {
+            parse_mode: "HTML",
+            reply_markup: replyMarkup,
+            reply_to_message_id: replyToMessageId,
+            link_preview_options: { is_disabled: true },
+          }),
+        sendVideo:
+          videoId && typeof ctx.api.sendVideo === "function"
+            ? () =>
+                ctx.api.sendVideo(fallbackChatId, videoId, {
+                  caption: options.messageText,
+                  parse_mode: "HTML",
+                  reply_markup: replyMarkup,
+                  reply_to_message_id: replyToMessageId,
+                })
+            : undefined,
+      });
+
+      const sentMessage: any = sendResult.result;
+      const usesVideo = sendResult.usedVideo;
 
       this.gameDb.saveGameMessage(
         gameAddress,
@@ -687,7 +717,7 @@ export class GameManager {
       existing.set(sentMessage.chat.id, {
         messageId: sentMessage.message_id,
         chatId: sentMessage.chat.id,
-        usesVideo: false,
+        usesVideo,
       });
       this.activeGameMessages.set(gameAddress, existing);
 
@@ -2777,6 +2807,7 @@ export class GameManager {
                 chatId: gameMessage.chatId,
                 messageText: messageTextValue,
                 inlineKeyboard: inlineKeyboardValue,
+                gameType,
               });
             } finally {
               this.messageRecreationLocks.delete(lockKey);

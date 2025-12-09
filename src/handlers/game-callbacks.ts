@@ -242,6 +242,9 @@ export const createGameCallbacksModule = (
               game.game_type.slice(1)
             : "Game";
 
+          // Use the callback message ID so the recreated message replies to the /active or /public list
+          const replyToMessageId = ctx.callbackQuery?.message?.message_id;
+
           await gameManager.createGameMessage(
             ctx,
             game.game_address,
@@ -249,7 +252,8 @@ export const createGameCallbacksModule = (
             game.amount,
             creatorUsername,
             game.token_ticker || "TOKENS",
-            "Active"
+            "Active",
+            replyToMessageId
           );
         } catch (err) {
           console.warn("Failed to recreate game message:", err);

@@ -109,7 +109,7 @@ describe("Game Join Message Recreation", () => {
       }
     );
 
-    // Should have called createGameMessage
+    // Should have called createGameMessage with the callback message ID for reply
     expect(gameManager.createGameMessage).toHaveBeenCalledWith(
         ctx,
         gameAddress,
@@ -117,7 +117,8 @@ describe("Game Join Message Recreation", () => {
         100,
         "@creator",
         "TOK",
-        "Active"
+        "Active",
+        42 // The callback message ID from ctx.callbackQuery.message.message_id
     );
   });
 
