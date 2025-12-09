@@ -852,8 +852,10 @@ export class GameDatabase extends BaseDatabase {
   public getActiveGamesByChat(chatId: number): GameData[] {
     return this.all<GameData>(
       `
-        SELECT g.* FROM games g
-        WHERE g.status = 'active' AND g.chat_id = ?
+        SELECT DISTINCT g.*
+        FROM games g
+        JOIN game_messages gm ON g.game_address = gm.game_address
+        WHERE g.status = 'active' AND gm.chat_id = ?
         ORDER BY g.created_at DESC
       `,
       [chatId],
