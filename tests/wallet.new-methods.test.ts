@@ -16,7 +16,20 @@ vi.mock("../src/utils/token-metadata", () => {
         // fall back to defaultDecimals
       }
     }
-    return { decimals, symbol: "MOCK", name: "Mock Token" };
+
+    const mint = params.mintAddress;
+    // Specific logic for New Methods tests
+    if (mint === "mint-chain" || mint === "mint-missing") {
+       return { decimals, symbol: "MOCK", name: "Mock Token" };
+    }
+
+    // Specific logic for Injection tests (Jupiter Token)
+    if (mint === "11111111111111111111111111111111") {
+        return { decimals: 9, symbol: "JUPSYM", name: "Jupiter Token" };
+    }
+
+    // Default: return decimals but NO symbol so we don't override approved tickers
+    return { decimals };
   });
   return { resolveTokenMetadata: resolveTokenMetadataMock };
 });
