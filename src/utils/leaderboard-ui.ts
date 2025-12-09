@@ -35,6 +35,28 @@ export const buildEmptyLeaderboardMessage = (): string =>
     "No statistics available yet - play a coinflip to appear here.",
   ].join("\n\n");
 
+export const buildEmptyGlobalLeaderboardMessage = (): string =>
+  [
+    "🌐 <b>Global Leaderboard</b>",
+    "Top players across all groups (last 30 days)",
+    "No statistics available yet - play a coinflip to appear here.",
+  ].join("\n\n");
+
+export const buildGlobalLeaderboardMessage = ({ players, allPlayers }: Omit<BuildLeaderboardMessageArgs, "chatTitle">): string => {
+  const heading = "🌐 <b>Global Leaderboard</b>";
+  const legend = "Top players across all groups (last 30 days)";
+
+  const rows = players
+    .map((player, index) => formatLeaderboardRow(player, index))
+    .join("\n\n");
+
+  const highlightsSource = allPlayers ?? players;
+  const champion = players[0];
+  const highlights = buildLeaderboardHighlights(highlightsSource, champion);
+
+  return [heading, legend, rows, highlights].filter(Boolean).join("\n\n");
+};
+
 export const buildLeaderboardMessage = ({ chatTitle, players, allPlayers }: BuildLeaderboardMessageArgs): string => {
   const heading = chatTitle
     ? `🏆 <b>${escapeHtml(chatTitle.trim())}</b>`

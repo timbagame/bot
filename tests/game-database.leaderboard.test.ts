@@ -361,4 +361,106 @@ describe("GameDatabase Leaderboard", () => {
     expect(creatorStats).toBeDefined();
     expect(creatorStats!.netAmountByToken["SOL"]).toBe(ticketAmount);
   });
+
+  test("getGlobalLeaderboardStats aggregates players across all chats", () => {
+    // Create players in different chats
+    const chatA = -1001111111111;
+    const chatB = -1002222222222;
+    const chatC = -1003333333333;
+
+    // Player 1 plays in chat A
+    const player1 = "GLOBAL_P1";
+    const player1Pk = "PK_GLOBAL_P1";
+    gameDb.savePlayerMapping(player1Pk, player1, "@Player1");
+    gameDb.saveGame("GLOBAL_GAME_A1", player1, 1_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatA);
+    gameDb.saveGameParticipant("GLOBAL_GAME_A1", player1, player1Pk, { status: "confirmed" });
+    gameDb.saveGameParticipant("GLOBAL_GAME_A1", "OTHER_A1", "PK_OTHER_A1", { status: "confirmed" });
+    gameDb.completeGame("GLOBAL_GAME_A1", player1Pk);
+
+    // Player 2 plays in chat B
+    const player2 = "GLOBAL_P2";
+    const player2Pk = "PK_GLOBAL_P2";
+    gameDb.savePlayerMapping(player2Pk, player2, "@Player2");
+    gameDb.saveGame("GLOBAL_GAME_B1", player2, 2_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatB);
+    gameDb.saveGameParticipant("GLOBAL_GAME_B1", player2, player2Pk, { status: "confirmed" });
+    gameDb.saveGameParticipant("GLOBAL_GAME_B1", "OTHER_B1", "PK_OTHER_B1", { status: "confirmed" });
+    gameDb.completeGame("GLOBAL_GAME_B1", player2Pk);
+
+    // Player 3 plays in chat C
+    const player3 = "GLOBAL_P3";
+    const player3Pk = "PK_GLOBAL_P3";
+    gameDb.savePlayerMapping(player3Pk, player3, "@Player3");
+    gameDb.saveGame("GLOBAL_GAME_C1", player3, 3_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatC);
+    gameDb.saveGameParticipant("GLOBAL_GAME_C1", player3, player3Pk, { status: "confirmed" });
+    gameDb.saveGameParticipant("GLOBAL_GAME_C1", "OTHER_C1", "PK_OTHER_C1", { status: "confirmed" });
+    gameDb.completeGame("GLOBAL_GAME_C1", player3Pk);
+
+    // Global leaderboard should include all players from all chats
+    const globalStats = gameDb.getGlobalLeaderboardStats(100);
+
+    // Should include our 3 winners (losers may also appear)
+    expect(globalStats.length).toBeGreaterThanOrEqual(3);
+    expect(globalStats.some((s) => s.telegramId === player1)).toBe(true);
+    expect(globalStats.some((s) => s.telegramId === player2)).toBe(true);
+    expect(globalStats.some((s) => s.telegramId === player3)).toBe(true);
+
+    // Check individual stats for winners
+    const p1Stats = globalStats.find((s) => s.telegramId === player1);
+    expect(p1Stats?.gamesWon).toBe(1);
+    expect(p1Stats?.totalGames).toBe(1);
+
+    const p3Stats = globalStats.find((s) => s.telegramId === player3);
+    expect(p3Stats?.gamesWon).toBe(1);
+    expect(p3Stats?.totalGames).toBe(1);
+  });
+
+  test("getGlobalLeaderboardStats respects limit parameter", () => {
+    const chatId = -100999888;
+
+    // Create many players
+    for (let i = 1; i <= 10; i++) {
+      const playerId = `GB_LIMIT_${i}`;
+      const playerPk = `PKGB_LIMIT_${i}`;
+      gameDb.savePlayerMapping(playerPk, playerId);
+      gameDb.saveGame(`GB_LIMIT_GAME_${i}`, playerId, 100_000 * i, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+      gameDb.saveGameParticipant(`GB_LIMIT_GAME_${i}`, `GB_OTH_${i}`, `PK_GB_OTH_${i}`);
+      gameDb.completeGame(`GB_LIMIT_GAME_${i}`, playerPk);
+    }
+
+    // Request limit of 3 (should return 3*3=9 for re-sorting by USD)
+    const stats = gameDb.getGlobalLeaderboardStats(3);
+    expect(stats.length).toBe(9);
+  });
+
+  test("getGlobalLeaderboardStats excludes giveaways like regular leaderboard", () => {
+    const chatId = -100777666;
+    const playerId = "GB_GIVEAWAY_TEST";
+    const playerPk = "PK_GB_GIVEAWAY";
+
+    gameDb.savePlayerMapping(playerPk, playerId);
+
+    // Giveaway (excluded)
+    gameDb.saveGame("GB_GIVEAWAY1", playerId, 1_000_000, "giveaway", "TIMBA_MINT", "TIMBA", 10, 2, chatId);
+    gameDb.saveGameParticipant("GB_GIVEAWAY1", playerId, playerPk, { status: "confirmed" });
+    gameDb.saveGameParticipant("GB_GIVEAWAY1", "GB_GA_OTH", "PK_GB_GA_OTH");
+    gameDb.completeGame("GB_GIVEAWAY1", playerPk);
+
+    // Coinflip (included)
+    gameDb.saveGame("GB_COINFLIP1", playerId, 500_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
+    gameDb.saveGameParticipant("GB_COINFLIP1", playerId, playerPk, { status: "confirmed" });
+    gameDb.saveGameParticipant("GB_COINFLIP1", "GB_CF_OTH", "PK_GB_CF_OTH", { status: "confirmed" });
+    gameDb.completeGame("GB_COINFLIP1", playerPk);
+
+    const globalStats = gameDb.getGlobalLeaderboardStats(100);
+    const playerStats = globalStats.find((s) => s.telegramId === playerId);
+
+    expect(playerStats).toBeDefined();
+    expect(playerStats?.totalGames).toBe(1); // Only coinflip (giveaway excluded)
+    expect(playerStats?.gamesWon).toBe(1);
+  });
+
+  test("getGlobalLeaderboardStats returns empty array when no games exist", () => {
+    const stats = gameDb.getGlobalLeaderboardStats(10);
+    expect(stats).toEqual([]);
+  });
 });

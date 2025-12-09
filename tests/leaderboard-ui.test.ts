@@ -3,6 +3,8 @@ import fc from "fast-check";
 import {
   buildEmptyLeaderboardMessage,
   buildLeaderboardMessage,
+  buildEmptyGlobalLeaderboardMessage,
+  buildGlobalLeaderboardMessage,
   formatNetUsd,
   sanitizeLeaderboardDisplayName,
   type LeaderboardPlayerDisplay,
@@ -205,5 +207,82 @@ describe("formatNetUsd", () => {
     expect(formatNetUsd(NaN)).toBe("$0");
     expect(formatNetUsd(Infinity)).toBe("$0");
     expect(formatNetUsd(-Infinity)).toBe("$0");
+  });
+});
+
+describe("global leaderboard UI rendering", () => {
+  test("empty global leaderboard message shows correct heading", () => {
+    const message = buildEmptyGlobalLeaderboardMessage();
+    expect(message).toContain("Global Leaderboard");
+    expect(message).toContain("Top players across all groups");
+    expect(message).toContain("play a coinflip");
+    expect(message).not.toContain("in this group");
+  });
+
+  test("buildGlobalLeaderboardMessage shows global header and legend", () => {
+    const players: LeaderboardPlayerDisplay[] = [
+      {
+        telegramId: "1",
+        displayName: "GlobalChamp",
+        totalGames: 100,
+        wins: 60,
+        losses: 40,
+        winRate: 60,
+        gamesCreated: 30,
+        gamesJoined: 70,
+        totalVolume: 0,
+        netWonUsd: 500.00,
+      },
+    ];
+
+    const output = buildGlobalLeaderboardMessage({ players });
+
+    expect(output).toContain("Global Leaderboard");
+    expect(output).toContain("Top players across all groups");
+    expect(output).toContain("🥇");
+    expect(output).toContain("GlobalChamp");
+  });
+
+  test("buildGlobalLeaderboardMessage uses allPlayers for highlights", () => {
+    const displayedPlayers: LeaderboardPlayerDisplay[] = [
+      {
+        telegramId: "1",
+        displayName: "TopEarner",
+        totalGames: 10,
+        wins: 8,
+        losses: 2,
+        winRate: 80,
+        gamesCreated: 5,
+        gamesJoined: 5,
+        totalVolume: 0,
+        netWonUsd: 1000.00,
+      },
+    ];
+
+    const allPlayers: LeaderboardPlayerDisplay[] = [
+      ...displayedPlayers,
+      {
+        telegramId: "2",
+        displayName: "MostGamesPlayer",
+        totalGames: 200,
+        wins: 100,
+        losses: 100,
+        winRate: 50,
+        gamesCreated: 50,
+        gamesJoined: 150,
+        totalVolume: 0,
+        netWonUsd: 0,
+      },
+    ];
+
+    const output = buildGlobalLeaderboardMessage({
+      players: displayedPlayers,
+      allPlayers,
+    });
+
+    expect(output).toContain("Global Leaderboard");
+    expect(output).toContain("Highlights");
+    expect(output).toContain("Most games played");
+    expect(output).toContain("MostGamesPlayer");
   });
 });

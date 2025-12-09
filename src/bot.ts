@@ -76,6 +76,8 @@ import { buildCustomTokenPrompt } from "./utils/swap/prompts";
 import {
   buildEmptyLeaderboardMessage,
   buildLeaderboardMessage,
+  buildEmptyGlobalLeaderboardMessage,
+  buildGlobalLeaderboardMessage,
   type LeaderboardPlayerDisplay,
 } from "./utils/leaderboard-ui";
 import {
@@ -4031,6 +4033,52 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
   } catch (error) {
     console.error("Error generating leaderboard:", error);
     await handleCommandError(ctx, error, "leaderboard");
+  }
+});
+
+bot.command(["globalboard", "gb"], async (ctx: Context) => {
+  try {
+    console.log("🌐 Generating global leaderboard");
+
+    // Fetch all players globally for accurate highlights calculation
+    const allStats = gameDb.getGlobalLeaderboardStats(1000);
+
+    if (allStats.length === 0) {
+      return ctx.reply(buildEmptyGlobalLeaderboardMessage(), {
+        parse_mode: "HTML",
+        reply_to_message_id: ctx.message?.message_id,
+      });
+    }
+
+    // Resolve all players for highlights
+    const allPlayers = await resolveLeaderboardPlayers(ctx, allStats);
+
+    if (allPlayers.length === 0) {
+      return ctx.reply(buildEmptyGlobalLeaderboardMessage(), {
+        parse_mode: "HTML",
+        reply_to_message_id: ctx.message?.message_id,
+      });
+    }
+
+    // Top 5 are for display
+    const displayedPlayers = allPlayers.slice(0, LEADERBOARD_PLAYER_LIMIT);
+
+    const leaderboardText = buildGlobalLeaderboardMessage({
+      players: displayedPlayers,
+      allPlayers,
+    });
+
+    await ctx.reply(leaderboardText, {
+      parse_mode: "HTML",
+      reply_to_message_id: ctx.message?.message_id,
+    });
+
+    console.log(
+      `✅ Global leaderboard generated with ${displayedPlayers.length} players (${allPlayers.length} total)`
+    );
+  } catch (error) {
+    console.error("Error generating global leaderboard:", error);
+    await handleCommandError(ctx, error, "globalboard");
   }
 });
 
