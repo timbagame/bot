@@ -530,6 +530,7 @@ describe("GameManager confirm/reload helpers", () => {
         { game_address: "ADDR1", message_id: 10, chat_id: 100 },
         { game_address: "ADDR2", message_id: 20, chat_id: 200 },
       ],
+      getGameMessages: () => [],
     } as any;
     const { gm } = setupGameManager({
       wallet: {} as any,
@@ -537,7 +538,7 @@ describe("GameManager confirm/reload helpers", () => {
       gameDb: db,
     });
     await gm.reloadGameMessages();
-    expect(gm.getActiveGameMessage("ADDR1")?.messageId).toBe(10);
-    expect(gm.getActiveGameMessage("ADDR2")?.chatId).toBe(200);
+    expect(gm.getActiveGameMessages("ADDR1")?.get(100)?.messageId).toBe(10);
+    expect(gm.getActiveGameMessages("ADDR2")?.get(200)?.chatId).toBe(200);
   });
 });

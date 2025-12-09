@@ -167,6 +167,7 @@ export function makeDbStub(options: DbStubOptions = {}): any {
     clearGameMessage: (address: string) => {
       clearedMessages.push(address);
     },
+    getGameMessages: () => [],
     __savedMessages: savedMessages,
     __clearedMessages: clearedMessages,
     ...extra,

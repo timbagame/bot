@@ -280,7 +280,7 @@ export class GameManager {
     wallet: WalletManager;
     gameDb: GameDatabase;
   };
-  private activeGameMessages = new Map<string, GameMessage>();
+  private activeGameMessages = new Map<string, Map<number, GameMessage>>();
   private cachedConnection?: Connection;
   private tokenProgramCache = new Map<string, PublicKey>();
   private gameRentLamports: number | null = null;
@@ -661,16 +661,8 @@ export class GameManager {
       return;
     }
 
-    try {
-      this.gameDb.clearGameMessage(gameAddress);
-    } catch (clearError) {
-      console.warn(
-        `Failed to clear stale message mapping for ${gameAddress}:`,
-        clearError
-      );
-    }
-
-    this.activeGameMessages.delete(gameAddress);
+    // Only clear the specific message if needed, but here we are recreating it
+    // so we overwrite it.
 
     try {
       const sentMessage = await ctx.api.sendMessage(
@@ -688,11 +680,17 @@ export class GameManager {
         sentMessage.message_id,
         sentMessage.chat.id
       );
-      this.activeGameMessages.set(gameAddress, {
+
+      const existing =
+        this.activeGameMessages.get(gameAddress) ??
+        new Map<number, GameMessage>();
+      existing.set(sentMessage.chat.id, {
         messageId: sentMessage.message_id,
         chatId: sentMessage.chat.id,
         usesVideo: false,
       });
+      this.activeGameMessages.set(gameAddress, existing);
+
       this.gameMessageReadyListener?.(gameAddress);
     } catch (sendError) {
       console.error(
@@ -2056,7 +2054,9 @@ export class GameManager {
   // GAME MESSAGE MANAGEMENT
   // ================================
 
-  public getActiveGameMessage(gameAddress: string): GameMessage | undefined {
+  public getActiveGameMessages(
+    gameAddress: string
+  ): Map<number, GameMessage> | undefined {
     return this.activeGameMessages.get(gameAddress);
   }
 
@@ -2305,11 +2305,16 @@ export class GameManager {
       message.message_id,
       message.chat.id
     );
-    this.activeGameMessages.set(gameAddress, {
+
+    const existing =
+      this.activeGameMessages.get(gameAddress) ??
+      new Map<number, GameMessage>();
+    existing.set(message.chat.id, {
       messageId: message.message_id,
       chatId: message.chat.id,
       usesVideo,
     });
+    this.activeGameMessages.set(gameAddress, existing);
 
     this.gameMessageReadyListener?.(gameAddress);
 
@@ -2622,11 +2627,16 @@ export class GameManager {
       message.message_id,
       message.chat.id
     );
-    this.activeGameMessages.set(gameAddress, {
+
+    const existing =
+      this.activeGameMessages.get(gameAddress) ??
+      new Map<number, GameMessage>();
+    existing.set(message.chat.id, {
       messageId: message.message_id,
       chatId: message.chat.id,
       usesVideo,
     });
+    this.activeGameMessages.set(gameAddress, existing);
 
     this.gameMessageReadyListener?.(gameAddress);
 
@@ -2645,8 +2655,8 @@ export class GameManager {
     totalPot?: number,
     winnerSignature?: string
   ): Promise<void> {
-    const gameMessage = this.activeGameMessages.get(gameAddress);
-    if (!gameMessage) return;
+    const messageMap = this.activeGameMessages.get(gameAddress);
+    if (!messageMap || messageMap.size === 0) return;
 
     let messageTextValue = "";
     let inlineKeyboardValue: any;
@@ -2670,96 +2680,117 @@ export class GameManager {
         keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined;
       inlineKeyboardValue = inlineKeyboard;
       const lowerStatus = status.toLowerCase();
-      const supportsVideo = gameMessage.usesVideo !== false;
       const winnerVideoId = resolveGameVideoId(gameType);
 
-      const editAsText = () =>
-        ctx.api.editMessageText(
-          gameMessage.chatId,
-          gameMessage.messageId,
-          messageText,
-          {
-            parse_mode: "HTML",
-            reply_markup: inlineKeyboard,
-          }
-        );
+      for (const gameMessage of messageMap.values()) {
+        try {
+          const supportsVideo = gameMessage.usesVideo !== false;
 
-      if (winnerVideoId && supportsVideo) {
-        const isCompleted = lowerStatus === "completed";
-        const { usedFallback, skipped } = await editMediaWithFallback({
-          edit: () =>
-            isCompleted
-              ? ctx.api.editMessageMedia(
-                  gameMessage.chatId,
-                  gameMessage.messageId,
-                  {
-                    type: "video",
-                    media: winnerVideoId,
-                    caption: messageText,
-                    parse_mode: "HTML",
-                  },
-                  { reply_markup: inlineKeyboard }
-                )
-              : ctx.api.editMessageCaption(
-                  gameMessage.chatId,
-                  gameMessage.messageId,
-                  {
-                    caption: messageText,
-                    parse_mode: "HTML",
-                    reply_markup: inlineKeyboard,
-                  }
-                ),
-          fallback: () => editAsText(),
-          logLabel: "game media update",
-          onFallback: () => {
-            this.activeGameMessages.set(gameAddress, {
-              ...gameMessage,
-              usesVideo: false,
+          const editAsText = () =>
+            ctx.api.editMessageText(
+              gameMessage.chatId,
+              gameMessage.messageId,
+              messageText,
+              {
+                parse_mode: "HTML",
+                reply_markup: inlineKeyboard,
+              }
+            );
+
+          if (winnerVideoId && supportsVideo) {
+            const isCompleted = lowerStatus === "completed";
+            const { usedFallback, skipped } = await editMediaWithFallback({
+              edit: () =>
+                isCompleted
+                  ? ctx.api.editMessageMedia(
+                      gameMessage.chatId,
+                      gameMessage.messageId,
+                      {
+                        type: "video",
+                        media: winnerVideoId,
+                        caption: messageText,
+                        parse_mode: "HTML",
+                      },
+                      { reply_markup: inlineKeyboard }
+                    )
+                  : ctx.api.editMessageCaption(
+                      gameMessage.chatId,
+                      gameMessage.messageId,
+                      {
+                        caption: messageText,
+                        parse_mode: "HTML",
+                        reply_markup: inlineKeyboard,
+                      }
+                    ),
+              fallback: () => editAsText(),
+              logLabel: `game media update (${gameMessage.chatId})`,
+              onFallback: () => {
+                const current =
+                  this.activeGameMessages.get(gameAddress) ??
+                  new Map<number, GameMessage>();
+                current.set(gameMessage.chatId, {
+                  ...gameMessage,
+                  usesVideo: false,
+                });
+                this.activeGameMessages.set(gameAddress, current);
+              },
             });
-          },
-        });
 
-        if (skipped) {
-          return;
-        }
+            if (skipped) {
+              continue;
+            }
 
-        if (!usedFallback) {
-          this.activeGameMessages.set(gameAddress, {
-            ...gameMessage,
-            usesVideo: true,
+            if (!usedFallback) {
+              const current =
+                this.activeGameMessages.get(gameAddress) ??
+                new Map<number, GameMessage>();
+              current.set(gameMessage.chatId, {
+                ...gameMessage,
+                usesVideo: true,
+              });
+              this.activeGameMessages.set(gameAddress, current);
+            }
+
+            continue;
+          }
+
+          const { skipped } = await editMediaWithFallback({
+            edit: () => editAsText(),
+            logLabel: `game text update (${gameMessage.chatId})`,
           });
+
+          if (skipped) {
+            continue;
+          }
+        } catch (error) {
+          if (messageTextValue && isMessageMissing(error)) {
+            // Only lock/recreate for this specific message instance
+            // We use a composite key for the lock to avoid blocking updates to other chats
+            const lockKey = `${gameAddress}:${gameMessage.chatId}`;
+            if (this.messageRecreationLocks.has(lockKey)) {
+              continue;
+            }
+
+            this.messageRecreationLocks.add(lockKey);
+            try {
+              await this.recreateMissingGameMessage(ctx, gameAddress, {
+                chatId: gameMessage.chatId,
+                messageText: messageTextValue,
+                inlineKeyboard: inlineKeyboardValue,
+              });
+            } finally {
+              this.messageRecreationLocks.delete(lockKey);
+            }
+            continue;
+          }
+          console.error(
+            `Error in updateGameMessage for chat ${gameMessage.chatId}:`,
+            error
+          );
         }
-
-        return;
-      }
-
-      const { skipped } = await editMediaWithFallback({
-        edit: () => editAsText(),
-        logLabel: "game text update",
-      });
-
-      if (skipped) {
-        return;
       }
     } catch (error) {
-      if (messageTextValue && isMessageMissing(error)) {
-        if (this.messageRecreationLocks.has(gameAddress)) {
-          return;
-        }
-
-        this.messageRecreationLocks.add(gameAddress);
-        try {
-          await this.recreateMissingGameMessage(ctx, gameAddress, {
-            chatId: gameMessage.chatId,
-            messageText: messageTextValue,
-            inlineKeyboard: inlineKeyboardValue,
-          });
-        } finally {
-          this.messageRecreationLocks.delete(gameAddress);
-        }
-        return;
-      }
-      console.error("Error in updateGameMessage:", error);
+      console.error("Error in updateGameMessage (preparation):", error);
     }
   }
 
@@ -4936,15 +4967,40 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
   public async reloadGameMessages(): Promise<void> {
     const allGames = this.gameDb.getAllGames();
     try {
+      let count = 0;
       for (const game of allGames) {
-        if (game.message_id && game.chat_id) {
-          this.activeGameMessages.set(game.game_address, {
+        const messageMap = new Map<number, GameMessage>();
+        const messages = this.gameDb.getGameMessages(game.game_address);
+
+        if (messages.length > 0) {
+          for (const msg of messages) {
+            messageMap.set(msg.chatId, {
+              messageId: msg.messageId,
+              chatId: msg.chatId,
+              usesVideo: false, // Default assumption, will correct on update if needed
+            });
+          }
+        } else if (game.message_id && game.chat_id) {
+          // Fallback to legacy
+          messageMap.set(game.chat_id, {
             messageId: game.message_id,
             chatId: game.chat_id,
+            usesVideo: false,
           });
         }
+
+        if (messageMap.size > 0) {
+          this.activeGameMessages.set(game.game_address, messageMap);
+          count += messageMap.size;
+        }
       }
-      debugLog("Reloaded " + this.activeGameMessages.size + " game messages");
+      debugLog(
+        "Reloaded " +
+          count +
+          " game messages for " +
+          allGames.length +
+          " games"
+      );
     } catch (error) {
       console.error("Error reloading game messages:", error);
     }

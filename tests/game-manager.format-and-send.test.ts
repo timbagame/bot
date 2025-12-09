@@ -38,7 +38,7 @@ describe("GameManager.formatAndSendGameMessage", () => {
     const pda = new PublicKey("BPFLoader1111111111111111111111111111111111");
     await gm.formatAndSendGameMessage(ctx as any, pda, "coinflip", 1_000_000_000, "@creator", "Active", "TOK");
     expect((ctx as any).__calls[0][0]).toBe("video");
-    const saved = gm.getActiveGameMessage(pda.toBase58());
+    const saved = gm.getActiveGameMessages(pda.toBase58())?.get(1);
     expect(saved?.messageId).toBe(101);
     expect(saved?.usesVideo).toBe(true);
   });
@@ -53,7 +53,7 @@ describe("GameManager.formatAndSendGameMessage", () => {
     const pda = new PublicKey("BPFLoader2111111111111111111111111111111111");
     await gm.formatAndSendGameMessage(ctx as any, pda, "giveaway", 1_000_000_000, "@creator", "Active", "TOK");
     expect((ctx as any).__calls[0][0]).toBe("video");
-    const saved = gm.getActiveGameMessage(pda.toBase58());
+    const saved = gm.getActiveGameMessages(pda.toBase58())?.get(1);
     expect(saved?.messageId).toBe(101);
     expect(saved?.usesVideo).toBe(true);
   });
@@ -70,7 +70,7 @@ describe("GameManager.formatAndSendGameMessage", () => {
     const calls = (ctx as any).__calls;
     expect(calls[0][0]).toBe("video");
     expect(calls[1][0]).toBe("text");
-    const saved = gm.getActiveGameMessage(pda.toBase58());
+    const saved = gm.getActiveGameMessages(pda.toBase58())?.get(2);
     expect(saved?.usesVideo).toBe(false);
   });
 });

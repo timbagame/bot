@@ -62,6 +62,14 @@ export class GameDatabase extends BaseDatabase {
           PRIMARY KEY (game_address, telegram_id),
           FOREIGN KEY (game_address) REFERENCES games(game_address)
         )`,
+        `CREATE TABLE IF NOT EXISTS game_messages (
+          game_address TEXT NOT NULL,
+          chat_id INTEGER NOT NULL,
+          message_id INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (game_address, chat_id),
+          FOREIGN KEY (game_address) REFERENCES games(game_address)
+        )`,
       ],
       "Game"
     );
@@ -70,6 +78,7 @@ export class GameDatabase extends BaseDatabase {
     this.ensurePlayerMappingSchema();
     this.ensureUsernameMappingSchema();
     this.ensureGameSchema();
+    this.ensureGameMessagesSchema();
   }
 
   // Game methods
@@ -286,11 +295,28 @@ export class GameDatabase extends BaseDatabase {
     messageId: number,
     chatId: number
   ): void {
+    // Legacy update
     this.run(
       "UPDATE games SET message_id = ?, chat_id = ? WHERE game_address = ?",
       [messageId, chatId, gameAddress],
       "saving game message"
     );
+
+    // New table upsert
+    this.run(
+      "INSERT OR REPLACE INTO game_messages (game_address, chat_id, message_id, created_at) VALUES (?, ?, ?, ?)",
+      [gameAddress, chatId, messageId, Date.now()],
+      "saving game message to new table"
+    );
+  }
+
+  public getGameMessages(gameAddress: string): Array<{ chatId: number; messageId: number }> {
+    const rows = this.all<{ chat_id: number; message_id: number }>(
+      "SELECT chat_id, message_id FROM game_messages WHERE game_address = ?",
+      [gameAddress],
+      "getting game messages"
+    );
+    return rows.map((r) => ({ chatId: r.chat_id, messageId: r.message_id }));
   }
 
   public clearGameMessage(gameAddress: string): void {
@@ -298,6 +324,11 @@ export class GameDatabase extends BaseDatabase {
       "UPDATE games SET message_id = NULL, chat_id = NULL WHERE game_address = ?",
       [gameAddress],
       "clearing game message"
+    );
+    this.run(
+      "DELETE FROM game_messages WHERE game_address = ?",
+      [gameAddress],
+      "clearing all game messages"
     );
   }
 
@@ -636,6 +667,30 @@ export class GameDatabase extends BaseDatabase {
       );
     } catch (error) {
       console.error("Failed to ensure games schema:", error);
+    }
+  }
+
+  private ensureGameMessagesSchema(): void {
+    try {
+      const count =
+        this.get<{ count: number }>(
+          "SELECT COUNT(*) as count FROM game_messages",
+          [],
+          "counting game messages"
+        )?.count ?? 0;
+
+      if (count === 0) {
+        this.run(
+          `INSERT INTO game_messages (game_address, chat_id, message_id, created_at)
+           SELECT game_address, chat_id, message_id, ?
+           FROM games
+           WHERE chat_id IS NOT NULL AND message_id IS NOT NULL`,
+          [Date.now()],
+          "migrating game messages"
+        );
+      }
+    } catch (error) {
+      console.error("Failed to ensure game_messages schema:", error);
     }
   }
 

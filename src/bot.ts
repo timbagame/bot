@@ -1578,64 +1578,49 @@ type GameMessageTarget = {
   messageId: number;
 };
 
-const getGameMessageTarget = (
-  gameAddress: string
-): GameMessageTarget | null => {
-  let chatId: number | undefined;
-  let messageId: number | undefined;
+const getGameMessageTargets = (gameAddress: string): GameMessageTarget[] => {
+  const uniqueTargets = new Map<number, GameMessageTarget>();
 
   try {
-    const activeMessage = gameManager.getActiveGameMessage(gameAddress);
-    if (activeMessage) {
-      chatId = activeMessage.chatId;
-      messageId = activeMessage.messageId;
+    const activeMessages = gameManager.getActiveGameMessages(gameAddress);
+    if (activeMessages) {
+      for (const msg of activeMessages.values()) {
+        uniqueTargets.set(msg.chatId, {
+          chatId: msg.chatId,
+          messageId: msg.messageId,
+        });
+      }
     }
   } catch (error) {
-    // gameManager might not be initialized yet; fall back to database record
     console.warn(
-      `Game manager not ready when resolving message target for ${gameAddress}`
+      `Game manager not ready when resolving message targets for ${gameAddress}`
     );
   }
 
-  if (chatId === undefined || messageId === undefined) {
-    const gameRecord = gameDb.getGame(gameAddress);
-    if (gameRecord) {
-      if (chatId === undefined) {
-        const rawChatId = gameRecord.chat_id;
-        if (typeof rawChatId === "number") {
-          chatId = rawChatId;
-        } else if (typeof rawChatId === "string") {
-          const parsedChatId = Number(rawChatId);
-          if (!Number.isNaN(parsedChatId)) {
-            chatId = parsedChatId;
-          }
-        }
+  // Check DB for any missing ones
+  try {
+    const dbMessages = gameDb.getGameMessages(gameAddress);
+    for (const msg of dbMessages) {
+      if (!uniqueTargets.has(msg.chatId)) {
+        uniqueTargets.set(msg.chatId, msg);
       }
-      if (messageId === undefined) {
-        const rawMessageId = gameRecord.message_id;
-        if (typeof rawMessageId === "number") {
-          messageId = rawMessageId;
-        } else if (typeof rawMessageId === "string") {
-          const parsedMessageId = Number(rawMessageId);
-          if (!Number.isNaN(parsedMessageId)) {
-            messageId = parsedMessageId;
-          }
-        }
-      }
+    }
+  } catch (error) {
+    console.warn(`Error getting game messages from DB for ${gameAddress}`, error);
+  }
+
+  // Check legacy fallback
+  const gameRecord = gameDb.getGame(gameAddress);
+  if (gameRecord && gameRecord.chat_id && gameRecord.message_id) {
+    if (!uniqueTargets.has(gameRecord.chat_id)) {
+      uniqueTargets.set(gameRecord.chat_id, {
+        chatId: gameRecord.chat_id,
+        messageId: gameRecord.message_id,
+      });
     }
   }
 
-  if (
-    typeof chatId !== "number" ||
-    typeof messageId !== "number" ||
-    Number.isNaN(chatId) ||
-    Number.isNaN(messageId)
-  ) {
-    console.warn(`Cannot find chat/message reference for game ${gameAddress}`);
-    return null;
-  }
-
-  return { chatId, messageId };
+  return Array.from(uniqueTargets.values());
 };
 
 const PENDING_PLAYER_EVENT_FLUSH_INTERVAL_MS = 1000;
@@ -1685,15 +1670,20 @@ const enqueuePendingPlayerEvent = (
   schedulePendingPlayerEventFlush(gameAddress);
 };
 
-const processPlayerEventWithTarget = async (
+const processPlayerEvent = async (
   event: PlayerEvent,
   eventName: string,
-  target: GameMessageTarget
+  targets: GameMessageTarget[]
 ): Promise<void> => {
   if (!gameManager) {
     console.warn(
       `Game manager not ready to process ${eventName} event for ${event.gameKey.toString()}`
     );
+    return;
+  }
+
+  if (targets.length === 0) {
+    console.warn(`No message targets for ${eventName} event`);
     return;
   }
 
@@ -1714,7 +1704,8 @@ const processPlayerEventWithTarget = async (
   }
 
   try {
-    const apiCtx = createApiContext(target.chatId, bot.api);
+    // Use the first target to create context for updating all messages
+    const apiCtx = createApiContext(targets[0]!.chatId, bot.api);
     await gameManager.updateGameMessageFromData(
       apiCtx,
       gameAddress,
@@ -1746,7 +1737,12 @@ const processPlayerEventWithTarget = async (
           const gameData = gameDb.getGame(gameAddress);
           const gameType = gameData?.game_type || "game";
           const announcement = `👤 <b>${safeDisplayName}</b> joined the ${gameType}!`;
-          await sendReplyToGameMessage(target, announcement);
+
+          await Promise.all(
+            targets.map((target) =>
+              sendReplyToGameMessage(target, announcement)
+            )
+          );
         } catch (announcementError) {
           console.error(
             `Error announcing player join for game ${gameAddress}:`,
@@ -1799,8 +1795,8 @@ async function flushPendingPlayerEvents(
   }
   state.timer = undefined;
 
-  const target = getGameMessageTarget(gameAddress);
-  if (!target) {
+  const targets = getGameMessageTargets(gameAddress);
+  if (targets.length === 0) {
     state.events = prunePendingPlayerEvents(state);
 
     if (state.events.length === 0) {
@@ -1811,7 +1807,7 @@ async function flushPendingPlayerEvents(
     pendingPlayerEvents.set(gameAddress, state);
     if (reason === "notify") {
       console.warn(
-        `⚠️ Message target still unavailable for ${gameAddress}; will retry pending events`
+        `⚠️ Message targets still unavailable for ${gameAddress}; will retry pending events`
       );
     }
     schedulePendingPlayerEventFlush(gameAddress);
@@ -1827,15 +1823,11 @@ async function flushPendingPlayerEvents(
   }
 
   for (const payload of state.events) {
-    await processPlayerEventWithTarget(
-      payload.event,
-      payload.eventName,
-      target
-    );
+    await processPlayerEvent(payload.event, payload.eventName, targets);
   }
 }
 
-export const __test_processPlayerEventWithTarget = processPlayerEventWithTarget;
+export const __test_processPlayerEvent = processPlayerEvent;
 export const __test_enqueuePendingPlayerEvent = enqueuePendingPlayerEvent;
 export const __test_flushPendingPlayerEvents = flushPendingPlayerEvents;
 export const __test_clearPendingPlayerEvents = () =>
@@ -1887,10 +1879,10 @@ const processGameCompletion = async (
     winnerAddress !== "cancelled" &&
     winnerAddress !== DEFAULT_NULL_ADDRESS
   ) {
-    const target = getGameMessageTarget(gameAddress);
-    if (target) {
+    const targets = getGameMessageTargets(gameAddress);
+    if (targets.length > 0) {
       try {
-        const apiCtx = createApiContext(target.chatId, bot.api);
+        const apiCtx = createApiContext(targets[0]!.chatId, bot.api);
         const winnerDisplay = await gameManager.getPlayerUsername(
           apiCtx,
           winnerAddress
@@ -1929,9 +1921,14 @@ const processGameCompletion = async (
             : gameData?.game_type === "giveaway"
             ? "giveaway"
             : "game";
-        await sendReplyToGameMessage(
-          target,
-          `🏆 <b>${safeWinnerDisplay}</b> won the ${gameTypeLabel}!${prizeDetails}`
+
+        await Promise.all(
+          targets.map((target) =>
+            sendReplyToGameMessage(
+              target,
+              `🏆 <b>${safeWinnerDisplay}</b> won the ${gameTypeLabel}!${prizeDetails}`
+            )
+          )
         );
 
         // DM the winner if they joined from a different chat
@@ -4119,13 +4116,13 @@ const handlePlayerEvent = async (
     );
 
     if (slotWasUpdated) {
-      const target = getGameMessageTarget(gameAddress);
+      const targets = getGameMessageTargets(gameAddress);
 
-      if (target) {
+      if (targets.length > 0) {
         if (pendingPlayerEvents.has(gameAddress)) {
           await flushPendingPlayerEvents(gameAddress, "notify");
         }
-        await processPlayerEventWithTarget(event, eventName, target);
+        await processPlayerEvent(event, eventName, targets);
       } else {
         enqueuePendingPlayerEvent(gameAddress, {
           event,

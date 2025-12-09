@@ -39,7 +39,7 @@ describe("GameManager.createGameMessage", () => {
     const id = await gm.createGameMessage(ctx as any, addr, "coinflip", 1_000_000_000, "@creator", "Active", "TOK");
     expect(id).toBe(333);
     expect((ctx as any).__calls[0][0]).toBe("video");
-    const active = gm.getActiveGameMessage(addr);
+    const active = gm.getActiveGameMessages(addr)?.get(3);
     expect(active?.messageId).toBe(333);
     expect(active?.usesVideo).toBe(true);
   });
@@ -55,7 +55,7 @@ describe("GameManager.createGameMessage", () => {
     const id = await gm.createGameMessage(ctx as any, addr, "giveaway", 1_000_000_000, "@creator", "Active", "TOK");
     expect(id).toBe(333);
     expect((ctx as any).__calls[0][0]).toBe("video");
-    const active = gm.getActiveGameMessage(addr);
+    const active = gm.getActiveGameMessages(addr)?.get(3);
     expect(active?.messageId).toBe(333);
     expect(active?.usesVideo).toBe(true);
   });
@@ -75,7 +75,7 @@ describe("GameManager.createGameMessage", () => {
     const calls = (ctx as any).__calls;
     expect(calls[0][0]).toBe("video");
     expect(calls[1][0]).toBe("text");
-    const active = gm.getActiveGameMessage(addr);
+    const active = gm.getActiveGameMessages(addr)?.get(4);
     expect(active?.usesVideo).toBe(false);
   });
 });

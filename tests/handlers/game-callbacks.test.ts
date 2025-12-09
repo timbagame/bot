@@ -5,7 +5,7 @@ import { BN } from "bn.js";
 import type { GameManager } from "../../src/utils/game";
 import {
   bot,
-  __test_processPlayerEventWithTarget,
+  __test_processPlayerEvent,
   __test_resetGameDatabase,
   __test_setGameDatabase,
   __test_setGameManager,
@@ -34,6 +34,9 @@ const makeDeps = () => {
     joinGame: vi.fn(async () => ({ success: true })),
     updateGameMessageFromData: vi.fn(),
     getPlayerUsername: vi.fn(async () => "@player"),
+    createGameMessage: vi.fn(),
+    getActiveGameMessages: vi.fn(() => new Map()),
+    getGameCreatorUsername: vi.fn(async () => "@creator"),
   } as unknown as GameManager;
 
   const wallet = {
@@ -111,7 +114,11 @@ describe("Game callback helpers", () => {
     __test_setGameManager({
       updateGameMessageFromData: async () => {},
       getPlayerUsername: async () => "@player",
-      getActiveGameMessage: () => ({ chatId: 2, messageId: 6 }),
+      getActiveGameMessages: () => {
+        const m = new Map();
+        m.set(2, { chatId: 2, messageId: 6 });
+        return m;
+      },
     } as any);
     __test_setGameDatabase({
       getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
@@ -176,10 +183,10 @@ describe("Game callback helpers", () => {
     event.timestamp = new BN(0);
     const target = { chatId: 1, messageId: 5 };
 
-    await __test_processPlayerEventWithTarget(
+    await __test_processPlayerEvent(
       event,
       "PlayerJoined",
-      target
+      [target]
     );
 
     expect(sendMessageSpy).not.toHaveBeenCalled();
@@ -189,15 +196,19 @@ describe("Game callback helpers", () => {
     __test_setGameManager({
       updateGameMessageFromData: async () => {},
       getPlayerUsername: async () => "<script>alert(1)</script>",
-      getActiveGameMessage: () => ({ chatId: 2, messageId: 6 }),
+      getActiveGameMessages: () => {
+        const m = new Map();
+        m.set(2, { chatId: 2, messageId: 6 });
+        return m;
+      },
     } as any);
     const event = makeEvent();
     const target = { chatId: 2, messageId: 6 };
 
-    await __test_processPlayerEventWithTarget(
+    await __test_processPlayerEvent(
       event,
       "PlayerJoined",
-      target
+      [target]
     );
 
     expect(sendMessageSpy).toHaveBeenCalledWith(
@@ -238,7 +249,7 @@ describe("Game callback helpers", () => {
     expect(gameManager.primeUsernameCache).toHaveBeenCalledTimes(2);
   });
 
-  test("cross-group join sends DM notification", async () => {
+  test("cross-group join does NOT send DM", async () => {
     const { module } = makeDeps();
     const ctx = makeCtx("@alice");
     // User is in chat 999, but game was created in chat 123
@@ -259,11 +270,11 @@ describe("Game callback helpers", () => {
       }
     );
 
-    // Should have sent DM to the user
-    expect(ctx.api.sendMessage).toHaveBeenCalledWith(
+    // Should NOT send DM
+    expect(ctx.api.sendMessage).not.toHaveBeenCalledWith(
       "456",
-      expect.stringContaining("Joined Coinflip"),
-      expect.objectContaining({ parse_mode: "HTML" })
+      expect.anything(),
+      expect.anything()
     );
   });
 
@@ -290,31 +301,5 @@ describe("Game callback helpers", () => {
 
     // Should NOT have sent DM (same chat)
     expect(ctx.api.sendMessage).not.toHaveBeenCalled();
-  });
-
-  test("cross-group DM failure does not break join flow", async () => {
-    const { module, gameManager } = makeDeps();
-    const ctx = makeCtx("@charlie");
-    ctx.chat = { id: 999, type: "supergroup" } as any;
-    // Simulate DM send failure (user hasn't started chat with bot)
-    ctx.api.sendMessage = vi.fn().mockRejectedValue(new Error("Forbidden: bot can't initiate conversation"));
-
-    // Should not throw
-    await module.__test_handleJoinGame(
-      ctx as unknown as Context,
-      new PublicKey(Keypair.generate().publicKey),
-      101n,
-      {
-        game_address: "game-dm-fail",
-        status: "active",
-        chat_id: 123,
-        game_type: "coinflip",
-        amount: 25,
-        token_ticker: "SOL",
-      }
-    );
-
-    // Join should still have succeeded
-    expect(gameManager.joinGame).toHaveBeenCalled();
   });
 });

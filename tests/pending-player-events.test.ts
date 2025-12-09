@@ -35,11 +35,16 @@ describe("Pending player events", () => {
     botModule.__test_setGameManager({
       updateGameMessageFromData: async () => {},
       getPlayerUsername: async () => "<script>alert(1)</script>",
-      getActiveGameMessage: () => ({ chatId: 77, messageId: 301 }),
+      getActiveGameMessages: () => {
+        const m = new Map();
+        m.set(77, { chatId: 77, messageId: 301 });
+        return m;
+      },
     } as any);
     botModule.__test_setGameDatabase({
       getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
       getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
+      getGameMessages: () => [],
     } as any);
   });
 
@@ -76,10 +81,10 @@ describe("Pending player events", () => {
       getGame: () => ({ game_type: "coinflip" }),
     } as any);
 
-    await botModule.__test_processPlayerEventWithTarget(
+    await botModule.__test_processPlayerEvent(
       event,
       "PlayerJoined",
-      target
+      [target]
     );
 
     expect(sendCalls.length).toBe(1);
@@ -94,19 +99,24 @@ describe("Pending player events", () => {
     botModule.__test_setGameManager({
       updateGameMessageFromData: async () => {},
       getPlayerUsername: async () => "TestPlayer",
-      getActiveGameMessage: () => ({ chatId: 77, messageId: 301 }),
+      getActiveGameMessages: () => {
+        const m = new Map();
+        m.set(77, { chatId: 77, messageId: 301 });
+        return m;
+      },
     } as any);
 
     botModule.__test_setGameDatabase({
       getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
       getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
       getGame: () => ({ game_type: "coinflip" }),
+      getGameMessages: () => [],
     } as any);
 
-    await botModule.__test_processPlayerEventWithTarget(
+    await botModule.__test_processPlayerEvent(
       event,
       "PlayerJoined",
-      target
+      [target]
     );
 
     expect(sendCalls.length).toBe(1);
@@ -120,19 +130,24 @@ describe("Pending player events", () => {
     botModule.__test_setGameManager({
       updateGameMessageFromData: async () => {},
       getPlayerUsername: async () => "TestPlayer",
-      getActiveGameMessage: () => ({ chatId: 77, messageId: 301 }),
+      getActiveGameMessages: () => {
+        const m = new Map();
+        m.set(77, { chatId: 77, messageId: 301 });
+        return m;
+      },
     } as any);
 
     botModule.__test_setGameDatabase({
       getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
       getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
       getGame: () => ({ game_type: "giveaway" }),
+      getGameMessages: () => [],
     } as any);
 
-    await botModule.__test_processPlayerEventWithTarget(
+    await botModule.__test_processPlayerEvent(
       event,
       "PlayerJoined",
-      target
+      [target]
     );
 
     expect(sendCalls.length).toBe(1);
@@ -152,10 +167,10 @@ describe("Pending player events", () => {
       }),
     } as any);
 
-    await botModule.__test_processPlayerEventWithTarget(
+    await botModule.__test_processPlayerEvent(
       event,
       "PlayerJoined",
-      target
+      [target]
     );
 
     expect(sendCalls.length).toBe(0);
@@ -175,13 +190,18 @@ describe("Pending player events", () => {
       updateGameMessageFromData: async () => {},
       getPlayerUsername: async (_ctx: any, pubkey: string) =>
         names.get(pubkey) ?? "Unknown",
-      getActiveGameMessage: () => ({ chatId: 77, messageId: 301 }),
+      getActiveGameMessages: () => {
+        const m = new Map();
+        m.set(77, { chatId: 77, messageId: 301 });
+        return m;
+      },
     } as any);
 
     botModule.__test_setGameDatabase({
       getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
       getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
       getGame: () => ({ game_type: "coinflip" }),
+      getGameMessages: () => [],
     } as any);
 
     let enqueueTriggered = false;
@@ -237,13 +257,19 @@ describe("Pending player events", () => {
       updateGameMessageFromData: async () => {},
       getPlayerUsername: async (_ctx: any, pubkey: string) =>
         names.get(pubkey) ?? "Unknown",
-      getActiveGameMessage: () => (targetReady ? target : null),
+      getActiveGameMessages: () => {
+        if (!targetReady) return null;
+        const m = new Map();
+        m.set(target.chatId, target);
+        return m;
+      },
     } as any);
 
     botModule.__test_setGameDatabase({
       getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
       getGame: () => dbRecord,
       getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
+      getGameMessages: () => [],
     } as any);
 
     const eventReceivedAt = Date.now() - (15_000 - 100);
@@ -287,13 +313,14 @@ describe("Pending player events", () => {
       botModule.__test_setGameManager({
         updateGameMessageFromData: async () => {},
         getPlayerUsername: async () => "Late", // unused
-        getActiveGameMessage: () => null,
+        getActiveGameMessages: () => null,
       } as any);
 
       botModule.__test_setGameDatabase({
         getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
         getGame: () => null,
         getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
+        getGameMessages: () => [],
       } as any);
 
       botModule.__test_enqueuePendingPlayerEvent(gameAddress, {
