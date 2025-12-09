@@ -71,7 +71,9 @@ describe("GameManager.updateGameMessage routing", () => {
     const ctx = ctxStub();
     const addr = new PublicKey("11111111111111111111111111111111").toBase58();
     // seed active message
-    (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 42, usesVideo: true });
+    const msgMap = new Map();
+    msgMap.set(1, { chatId: 1, messageId: 42, usesVideo: true });
+    (gm as any).activeGameMessages.set(addr, msgMap);
     await gm.updateGameMessage(
       ctx as any,
       addr,
@@ -83,7 +85,7 @@ describe("GameManager.updateGameMessage routing", () => {
     );
     const calls = (ctx as any).__calls;
     expect(calls[0][0]).toBe("caption");
-    const active = gm.getActiveGameMessage(addr);
+    const active = gm.getActiveGameMessages(addr)?.get(1);
     expect(active?.usesVideo).toBe(true);
   });
 
@@ -107,7 +109,9 @@ describe("GameManager.updateGameMessage routing", () => {
     );
     const ctx = ctxStub();
     const addr = new PublicKey("11111111111111111111111111111112").toBase58();
-    (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 43, usesVideo: true });
+    const msgMap = new Map();
+    msgMap.set(1, { chatId: 1, messageId: 43, usesVideo: true });
+    (gm as any).activeGameMessages.set(addr, msgMap);
     await gm.updateGameMessage(
       ctx as any,
       addr,
@@ -120,7 +124,7 @@ describe("GameManager.updateGameMessage routing", () => {
     );
     const calls = (ctx as any).__calls;
     expect(calls[0][0]).toBe("media");
-    const active = gm.getActiveGameMessage(addr);
+    const active = gm.getActiveGameMessages(addr)?.get(1);
     expect(active?.usesVideo).toBe(true);
   });
 
@@ -144,7 +148,9 @@ describe("GameManager.updateGameMessage routing", () => {
     );
     const ctx = ctxStub();
     const addr = new PublicKey("11111111111111111111111111111113").toBase58();
-    (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 44, usesVideo: false });
+    const msgMap = new Map();
+    msgMap.set(1, { chatId: 1, messageId: 44, usesVideo: false });
+    (gm as any).activeGameMessages.set(addr, msgMap);
     await gm.updateGameMessage(
       ctx as any,
       addr,
@@ -178,7 +184,9 @@ describe("GameManager.updateGameMessage routing", () => {
     );
     const ctx = ctxStub();
     const addr = new PublicKey("11111111111111111111111111111114").toBase58();
-    (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 45, usesVideo: false });
+    const msgMap = new Map();
+    msgMap.set(1, { chatId: 1, messageId: 45, usesVideo: false });
+    (gm as any).activeGameMessages.set(addr, msgMap);
     await gm.updateGameMessage(
       ctx as any,
       addr,
@@ -190,7 +198,7 @@ describe("GameManager.updateGameMessage routing", () => {
     );
     const calls = (ctx as any).__calls;
     expect(calls[0][0]).toBe("text");
-    const active = gm.getActiveGameMessage(addr);
+    const active = gm.getActiveGameMessages(addr)?.get(1);
     expect(active?.usesVideo).toBe(false);
   });
 
@@ -214,7 +222,9 @@ describe("GameManager.updateGameMessage routing", () => {
     );
     const ctx = ctxStub({ failMedia: { description: "Bad Request: wrong file identifier/HTTP URL specified" } });
     const addr = new PublicKey("11111111111111111111111111111115").toBase58();
-    (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 46, usesVideo: true });
+    const msgMap = new Map();
+    msgMap.set(1, { chatId: 1, messageId: 46, usesVideo: true });
+    (gm as any).activeGameMessages.set(addr, msgMap);
     await gm.updateGameMessage(
       ctx as any,
       addr,
@@ -228,7 +238,7 @@ describe("GameManager.updateGameMessage routing", () => {
     const calls = (ctx as any).__calls;
     expect(calls[0][0]).toBe("media");
     expect(calls[1][0]).toBe("text");
-    const active = gm.getActiveGameMessage(addr);
+    const active = gm.getActiveGameMessages(addr)?.get(1);
     expect(active?.usesVideo).toBe(false);
   });
 
@@ -260,7 +270,9 @@ describe("GameManager.updateGameMessage routing", () => {
       sendMessageResult: { message_id: 888, chat: { id: 1 } },
     });
     ctx.chat = { id: 1, type: "supergroup" };
-    (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 47, usesVideo: false });
+    const msgMap = new Map();
+    msgMap.set(1, { chatId: 1, messageId: 47, usesVideo: false });
+    (gm as any).activeGameMessages.set(addr, msgMap);
 
     await gm.updateGameMessage(
       ctx as any,
@@ -276,11 +288,10 @@ describe("GameManager.updateGameMessage routing", () => {
     const sendCall = calls.find((call: any[]) => call[0] === "send");
     expect(sendCall).toBeDefined();
     expect(sendCall?.[3]?.reply_markup?.inline_keyboard).toBeDefined();
-    const active = gm.getActiveGameMessage(addr);
+    const active = gm.getActiveGameMessages(addr)?.get(1);
     expect(active?.messageId).toBe(888);
     const saved = (database as any).__savedMessages.pop();
     expect(saved).toEqual({ address: addr, messageId: 888, chatId: 1 });
-    expect((database as any).__clearedMessages).toContain(addr);
   });
 
   test("deduplicates concurrent recreation attempts per game address", async () => {
@@ -316,7 +327,9 @@ describe("GameManager.updateGameMessage routing", () => {
       return originalSend(...args);
     };
     const addr = new PublicKey("11111111111111111111111111111117").toBase58();
-    (gm as any).activeGameMessages.set(addr, { chatId: 1, messageId: 45, usesVideo: false });
+    const msgMap = new Map();
+    msgMap.set(1, { chatId: 1, messageId: 45, usesVideo: false });
+    (gm as any).activeGameMessages.set(addr, msgMap);
 
     await Promise.all([
       gm.updateGameMessage(

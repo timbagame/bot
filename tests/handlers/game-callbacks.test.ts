@@ -114,7 +114,11 @@ describe("Game callback helpers", () => {
     __test_setGameManager({
       updateGameMessageFromData: async () => {},
       getPlayerUsername: async () => "@player",
-      getActiveGameMessage: () => ({ chatId: 2, messageId: 6 }),
+      getActiveGameMessages: () => {
+        const m = new Map();
+        m.set(2, { chatId: 2, messageId: 6 });
+        return m;
+      },
     } as any);
     __test_setGameDatabase({
       getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
@@ -192,7 +196,11 @@ describe("Game callback helpers", () => {
     __test_setGameManager({
       updateGameMessageFromData: async () => {},
       getPlayerUsername: async () => "<script>alert(1)</script>",
-      getActiveGameMessage: () => ({ chatId: 2, messageId: 6 }),
+      getActiveGameMessages: () => {
+        const m = new Map();
+        m.set(2, { chatId: 2, messageId: 6 });
+        return m;
+      },
     } as any);
     const event = makeEvent();
     const target = { chatId: 2, messageId: 6 };

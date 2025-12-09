@@ -2060,15 +2060,6 @@ export class GameManager {
     return this.activeGameMessages.get(gameAddress);
   }
 
-  /**
-   * @deprecated Use getActiveGameMessages instead. Returns the first available message.
-   */
-  public getActiveGameMessage(gameAddress: string): GameMessage | undefined {
-    const map = this.activeGameMessages.get(gameAddress);
-    if (!map || map.size === 0) return undefined;
-    return map.values().next().value;
-  }
-
   private async getActiveGameStats(
     gamePda: PublicKey,
     amountLamportsInput: number | bigint,
