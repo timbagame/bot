@@ -1931,31 +1931,6 @@ const processGameCompletion = async (
           )
         );
 
-        // DM the winner if they joined from a different chat
-        const winnerTelegramId = gameDb.getPlayerTelegramId(winnerAddress);
-        if (winnerTelegramId) {
-          // Check if winner is the creator (creator always sees the game)
-          const isCreator = gameData?.creator_telegram_id === winnerTelegramId;
-          if (!isCreator) {
-            // DM the cross-group winner about their win
-            try {
-              const prizeMessage = prizeDetails
-                ? `\n\nPrize:${prizeDetails}`
-                : "";
-              const winnerChatId = Number(winnerTelegramId);
-              await bot.api.sendMessage(
-                winnerChatId,
-                [
-                  `🎉 <b>You won the ${gameTypeLabel}!</b>`,
-                  prizeMessage,
-                ].join(""),
-                { parse_mode: "HTML" }
-              );
-            } catch (dmError) {
-              console.warn("Failed to DM winner notification:", dmError);
-            }
-          }
-        }
       } catch (winnerAnnouncementError) {
         console.error(
           `Error announcing winner for game ${gameAddress}:`,
