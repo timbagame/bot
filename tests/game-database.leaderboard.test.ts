@@ -146,14 +146,16 @@ describe("GameDatabase Leaderboard", () => {
 
     gameDb.savePlayerMapping(playerPk, playerId);
 
-    // Win 1000 TIMBA
+    // Win 1000 TIMBA (2 players: creator + other)
     gameDb.saveGame("NET_WIN1", playerId, 1_000_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
-    gameDb.saveGameParticipant("NET_WIN1", "OTHER1", "PKOTHER1");
+    gameDb.saveGameParticipant("NET_WIN1", playerId, playerPk, { status: "confirmed" }); // Creator as participant
+    gameDb.saveGameParticipant("NET_WIN1", "OTHER1", "PKOTHER1", { status: "confirmed" });
     gameDb.completeGame("NET_WIN1", playerPk);
 
-    // Lose 500 TIMBA (other player wins)
+    // Lose 500 TIMBA (other player wins), 2 players
     gameDb.saveGame("NET_LOSE1", playerId, 500_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
-    gameDb.saveGameParticipant("NET_LOSE1", "OTHER2", "PKOTHER2");
+    gameDb.saveGameParticipant("NET_LOSE1", playerId, playerPk, { status: "confirmed" }); // Creator as participant
+    gameDb.saveGameParticipant("NET_LOSE1", "OTHER2", "PKOTHER2", { status: "confirmed" });
     gameDb.savePlayerMapping("PKOTHER2", "OTHER2");
     gameDb.completeGame("NET_LOSE1", "PKOTHER2");
 
@@ -163,7 +165,7 @@ describe("GameDatabase Leaderboard", () => {
     expect(playerStats).toBeDefined();
     expect(playerStats?.netAmountByToken).toBeDefined();
 
-    // Net profit for win is: totalPot (amount * 2) - amount = 1_000_000 (legacy default)
+    // Net profit for win is: totalPot (amount * 2) - amount = 1_000_000
     // Loss is -amount = -500_000
     // Total net = 1_000_000 - 500_000 = 500_000
     expect(playerStats?.netAmountByToken["TIMBA_MINT"]).toBe(500_000);
@@ -176,19 +178,22 @@ describe("GameDatabase Leaderboard", () => {
 
     gameDb.savePlayerMapping(playerPk, playerId);
 
-    // Win 100 TIMBA
+    // Win 100 TIMBA (2 players)
     gameDb.saveGame("MULTI_WIN_TIMBA", playerId, 100_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
-    gameDb.saveGameParticipant("MULTI_WIN_TIMBA", "OTH1", "PKOTH1");
+    gameDb.saveGameParticipant("MULTI_WIN_TIMBA", playerId, playerPk, { status: "confirmed" });
+    gameDb.saveGameParticipant("MULTI_WIN_TIMBA", "OTH1", "PKOTH1", { status: "confirmed" });
     gameDb.completeGame("MULTI_WIN_TIMBA", playerPk);
 
-    // Win 0.5 SOL (no token_mint = SOL)
+    // Win 0.5 SOL (no token_mint = SOL), 2 players
     gameDb.saveGame("MULTI_WIN_SOL", playerId, 500_000_000, "coinflip", undefined, "SOL", 2, 2, chatId);
-    gameDb.saveGameParticipant("MULTI_WIN_SOL", "OTH2", "PKOTH2");
+    gameDb.saveGameParticipant("MULTI_WIN_SOL", playerId, playerPk, { status: "confirmed" });
+    gameDb.saveGameParticipant("MULTI_WIN_SOL", "OTH2", "PKOTH2", { status: "confirmed" });
     gameDb.completeGame("MULTI_WIN_SOL", playerPk);
 
-    // Lose 200 TIMBA
+    // Lose 200 TIMBA (2 players)
     gameDb.saveGame("MULTI_LOSE_TIMBA", playerId, 200_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
-    gameDb.saveGameParticipant("MULTI_LOSE_TIMBA", "OTH3", "PKOTH3");
+    gameDb.saveGameParticipant("MULTI_LOSE_TIMBA", playerId, playerPk, { status: "confirmed" });
+    gameDb.saveGameParticipant("MULTI_LOSE_TIMBA", "OTH3", "PKOTH3", { status: "confirmed" });
     gameDb.savePlayerMapping("PKOTH3", "OTH3");
     gameDb.completeGame("MULTI_LOSE_TIMBA", "PKOTH3");
 
@@ -212,14 +217,16 @@ describe("GameDatabase Leaderboard", () => {
 
     gameDb.savePlayerMapping(playerPk, playerId);
 
-    // Giveaway game (should be EXCLUDED)
+    // Giveaway game (should be EXCLUDED from stats)
     gameDb.saveGame("GIVEAWAY1", playerId, 1_000_000, "giveaway", "TIMBA_MINT", "TIMBA", 10, 2, chatId);
-    gameDb.saveGameParticipant("GIVEAWAY1", "GA_OTHER", "PKGA_OTHER");
+    gameDb.saveGameParticipant("GIVEAWAY1", playerId, playerPk, { status: "confirmed" });
+    gameDb.saveGameParticipant("GIVEAWAY1", "GA_OTHER", "PKGA_OTHER", { status: "confirmed" });
     gameDb.completeGame("GIVEAWAY1", playerPk);
 
-    // Coinflip game (should be INCLUDED)
+    // Coinflip game (should be INCLUDED), 2 players
     gameDb.saveGame("COINFLIP1", playerId, 500_000, "coinflip", "TIMBA_MINT", "TIMBA", 2, 2, chatId);
-    gameDb.saveGameParticipant("COINFLIP1", "CF_OTHER", "PKCF_OTHER");
+    gameDb.saveGameParticipant("COINFLIP1", playerId, playerPk, { status: "confirmed" });
+    gameDb.saveGameParticipant("COINFLIP1", "CF_OTHER", "PKCF_OTHER", { status: "confirmed" });
     gameDb.completeGame("COINFLIP1", playerPk);
 
     const stats = gameDb.getLeaderboardStats(chatId, 10);

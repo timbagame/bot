@@ -1237,6 +1237,7 @@ export class GameDatabase extends BaseDatabase {
       }
 
       // Step 3: Get per-token net amounts GLOBALLY for each player
+      // Uses actual participant count instead of assuming 2 players for total_amount fallback
       const placeholders = telegramIds.map(() => "?").join(",");
       const netAmountRows = this.all<any>(
         `
@@ -1247,15 +1248,25 @@ export class GameDatabase extends BaseDatabase {
             AND LOWER(winner_address) != 'cancelled'
             AND game_type != 'giveaway'
         ),
+        game_participant_counts AS (
+          SELECT
+            game_address,
+            COUNT(*) AS participant_count
+          FROM game_participants
+          WHERE status = 'confirmed'
+          GROUP BY game_address
+        ),
         player_game_roles AS (
           SELECT
             ag.game_address,
             ag.amount,
             ag.total_amount,
             ag.token_mint,
+            COALESCE(gpc.participant_count, 2) AS participant_count,
             ag.creator_telegram_id AS telegram_id,
             'creator' AS role
           FROM all_games ag
+          LEFT JOIN game_participant_counts gpc ON gpc.game_address = ag.game_address
           WHERE ag.creator_telegram_id IS NOT NULL
 
           UNION
@@ -1265,9 +1276,11 @@ export class GameDatabase extends BaseDatabase {
             ag.amount,
             ag.total_amount,
             ag.token_mint,
+            COALESCE(gpc.participant_count, 2) AS participant_count,
             gp.telegram_id AS telegram_id,
             'participant' AS role
           FROM all_games ag
+          LEFT JOIN game_participant_counts gpc ON gpc.game_address = ag.game_address
           JOIN game_participants gp
             ON gp.game_address = ag.game_address
            AND gp.status = 'confirmed'
@@ -1280,9 +1293,11 @@ export class GameDatabase extends BaseDatabase {
             ag.amount,
             ag.total_amount,
             ag.token_mint,
+            COALESCE(gpc.participant_count, 2) AS participant_count,
             pm.telegram_id AS telegram_id,
             'winner' AS role
           FROM all_games ag
+          LEFT JOIN game_participant_counts gpc ON gpc.game_address = ag.game_address
           JOIN player_mappings pm
             ON pm.public_key = ag.winner_address
           WHERE pm.telegram_id IS NOT NULL
@@ -1294,16 +1309,17 @@ export class GameDatabase extends BaseDatabase {
             amount,
             total_amount,
             token_mint,
+            participant_count,
             MAX(CASE WHEN role = 'winner' THEN 1 ELSE 0 END) AS is_winner
           FROM player_game_roles
-          GROUP BY telegram_id, game_address, amount, total_amount, token_mint
+          GROUP BY telegram_id, game_address, amount, total_amount, token_mint, participant_count
         )
         SELECT
           pgs.telegram_id,
           COALESCE(pgs.token_mint, 'SOL') AS token_mint,
           SUM(
             CASE
-              WHEN pgs.is_winner = 1 THEN (COALESCE(pgs.total_amount, pgs.amount * 2) - pgs.amount)
+              WHEN pgs.is_winner = 1 THEN (COALESCE(pgs.total_amount, pgs.amount * pgs.participant_count) - pgs.amount)
               ELSE -pgs.amount
             END
           ) AS net_amount
@@ -1468,6 +1484,7 @@ export class GameDatabase extends BaseDatabase {
       }
 
       // Second query: get per-token net amounts for each player (no chat_id filter)
+      // Uses actual participant count instead of assuming 2 players for total_amount fallback
       const placeholders = telegramIds.map(() => "?").join(",");
       const netAmountRows = this.all<any>(
         `
@@ -1478,15 +1495,25 @@ export class GameDatabase extends BaseDatabase {
             AND LOWER(winner_address) != 'cancelled'
             AND game_type != 'giveaway'
         ),
+        game_participant_counts AS (
+          SELECT
+            game_address,
+            COUNT(*) AS participant_count
+          FROM game_participants
+          WHERE status = 'confirmed'
+          GROUP BY game_address
+        ),
         player_game_roles AS (
           SELECT
             rg.game_address,
             rg.amount,
             rg.total_amount,
             rg.token_mint,
+            COALESCE(gpc.participant_count, 2) AS participant_count,
             rg.creator_telegram_id AS telegram_id,
             'creator' AS role
           FROM relevant_games rg
+          LEFT JOIN game_participant_counts gpc ON gpc.game_address = rg.game_address
           WHERE rg.creator_telegram_id IS NOT NULL
 
           UNION
@@ -1496,9 +1523,11 @@ export class GameDatabase extends BaseDatabase {
             rg.amount,
             rg.total_amount,
             rg.token_mint,
+            COALESCE(gpc.participant_count, 2) AS participant_count,
             gp.telegram_id AS telegram_id,
             'participant' AS role
           FROM relevant_games rg
+          LEFT JOIN game_participant_counts gpc ON gpc.game_address = rg.game_address
           JOIN game_participants gp
             ON gp.game_address = rg.game_address
            AND gp.status = 'confirmed'
@@ -1511,9 +1540,11 @@ export class GameDatabase extends BaseDatabase {
             rg.amount,
             rg.total_amount,
             rg.token_mint,
+            COALESCE(gpc.participant_count, 2) AS participant_count,
             pm.telegram_id AS telegram_id,
             'winner' AS role
           FROM relevant_games rg
+          LEFT JOIN game_participant_counts gpc ON gpc.game_address = rg.game_address
           JOIN player_mappings pm
             ON pm.public_key = rg.winner_address
           WHERE pm.telegram_id IS NOT NULL
@@ -1525,16 +1556,17 @@ export class GameDatabase extends BaseDatabase {
             amount,
             total_amount,
             token_mint,
+            participant_count,
             MAX(CASE WHEN role = 'winner' THEN 1 ELSE 0 END) AS is_winner
           FROM player_game_roles
-          GROUP BY telegram_id, game_address, amount, total_amount, token_mint
+          GROUP BY telegram_id, game_address, amount, total_amount, token_mint, participant_count
         )
         SELECT
           pgs.telegram_id,
           COALESCE(pgs.token_mint, 'SOL') AS token_mint,
           SUM(
             CASE
-              WHEN pgs.is_winner = 1 THEN (COALESCE(pgs.total_amount, pgs.amount) - pgs.amount)
+              WHEN pgs.is_winner = 1 THEN (COALESCE(pgs.total_amount, pgs.amount * pgs.participant_count) - pgs.amount)
               ELSE -pgs.amount
             END
           ) AS net_amount
