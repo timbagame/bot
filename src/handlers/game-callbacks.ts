@@ -1200,7 +1200,9 @@ export const createGameCallbacksModule = (
             const visibility =
               (ctx.match?.[6] as "public" | "private" | undefined) ??
               "private";
-            const isPrivate = visibility !== "public";
+            // Force public visibility for DM-created games
+            const isFromDM = ctx.chat?.type === "private";
+            const isPrivate = isFromDM ? false : visibility !== "public";
 
             if (Number.isNaN(amount) || Number.isNaN(players)) {
               await safeAnswerCallbackQuery(ctx, "Invalid game configuration");

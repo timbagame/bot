@@ -26,7 +26,7 @@ const makeCtx = (text: string, chatType: ChatType = "group"): TestContext => {
 };
 
 describe("game handler: coinflip command", () => {
-  test("rejects in private chat", async () => {
+  test("allows game creation in private chat (forced public)", async () => {
     const ctx: any = makeCtx("/cf 10", "private");
     const interactiveCalls: any[] = [];
     const commandCalls: any[] = [];
@@ -44,10 +44,10 @@ describe("game handler: coinflip command", () => {
 
     await handleCoinflipCommand(ctx, deps);
 
-    expect(ctx.__calls.length).toBe(1);
-    expect(String(ctx.__calls[0][1])).toContain("only be created in groups");
+    // DM games are now allowed - should proceed to command handler
+    expect(ctx.__calls.length).toBe(0);
     expect(interactiveCalls.length).toBe(0);
-    expect(commandCalls.length).toBe(0);
+    expect(commandCalls.length).toBe(1);
   });
 
   test("no args opens interactive setup", async () => {

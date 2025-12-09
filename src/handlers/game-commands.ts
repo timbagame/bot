@@ -283,7 +283,9 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         options.timeoutSeconds
       );
 
-      const isPrivate = resolveGamePrivacy(options.gameType, chatSettings);
+      // Force public visibility for DM-created games
+      const isFromDM = ctx.chat?.type === "private";
+      const isPrivate = isFromDM ? false : resolveGamePrivacy(options.gameType, chatSettings);
 
       const gameResult = await createDeps.gameManager.createGame(
         options.gameType,
@@ -363,10 +365,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
 
   const handleGiveawayCommand = async (ctx: Context & { message?: any }) => {
     try {
-      if (!deps.isGroupChat(ctx)) {
-        await ctx.reply("❌ Giveaway games can only be created in groups!");
-        return;
-      }
+      // DM games are allowed but will be forced to public visibility
 
       const telegramId = await deps.getRequiredTelegramIdForContext(
         ctx,

@@ -29,10 +29,7 @@ export async function handleCoinflipCommand(
   ctx: Context & { message?: any },
   deps: CoinflipDeps
 ) {
-  if (!deps.isGroupChat(ctx)) {
-    await ctx.reply("❌ Coinflip games can only be created in groups!");
-    return;
-  }
+  // DM games are allowed but will be forced to public visibility
 
   const telegramId = await getRequiredTelegramIdForContext(
     ctx,
