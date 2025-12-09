@@ -138,11 +138,11 @@ describe("/active command in group chats", () => {
 
     expect(inlineKeyboard?.[1]?.[0]).toMatchObject({
       text: "🎮 Join • 62.5k ($0.5)",
-      callback_data: "join_first",
+      callback_data: "join_first_ix1",
     });
     expect(inlineKeyboard?.[3]?.[0]).toMatchObject({
       text: "🎮 Join • 62.5k ($0.5)",
-      callback_data: "join_second",
+      callback_data: "join_second_ix2",
     });
     expect(inlineKeyboard?.[2]).not.toMatchObject({
       text: "🔄 Refresh",

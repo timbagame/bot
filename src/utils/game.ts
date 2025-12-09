@@ -969,7 +969,15 @@ export class GameManager {
     gamePda: PublicKey,
     playerPubkey: PublicKey,
     telegramId: string,
-    options: { joinSignature?: string | null; maxAttempts?: number } = {}
+    options: {
+      joinSignature?: string | null;
+      maxAttempts?: number;
+      sourceInfo?: {
+        sourceChatId?: number;
+        sourceMessageId?: number;
+        gameIndex?: number;
+      };
+    } = {}
   ): Promise<boolean> {
     const maxAttempts = options.maxAttempts ?? 5;
     const delays = [0, 500, 1_000, 2_000, 4_000];
@@ -984,11 +992,17 @@ export class GameManager {
 
       const isOnChain = await this.isPlayerInGame(gamePda, playerPubkey);
       if (isOnChain) {
-        this.gameDb.saveGameParticipant(gameAddress, telegramId, playerPubkeyStr, {
-          status: "confirmed",
-          joinSignature: options.joinSignature,
-          lastVerifiedAt: Date.now(),
-        });
+        this.gameDb.saveGameParticipant(
+          gameAddress,
+          telegramId,
+          playerPubkeyStr,
+          {
+            status: "confirmed",
+            joinSignature: options.joinSignature,
+            lastVerifiedAt: Date.now(),
+            ...options.sourceInfo,
+          }
+        );
         return true;
       }
     }
@@ -3737,7 +3751,12 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
     gameAddress: string,
     telegramId: bigint,
     chatId?: number,
-    displayName?: string | null
+    displayName?: string | null,
+    sourceInfo?: {
+      sourceChatId?: number;
+      sourceMessageId?: number;
+      gameIndex?: number;
+    }
   ): Promise<{ success: boolean; error?: string; isRoll?: boolean }> {
     try {
       const gamePda = new PublicKey(gameAddress);
@@ -3960,11 +3979,17 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           };
         }
         joinTx = result.tx;
-        this.gameDb.saveGameParticipant(gameAddress, telegramIdStr, playerPubkey, {
-          status: "pending",
-          joinSignature: joinTx ?? null,
-          lastVerifiedAt: null,
-        });
+        this.gameDb.saveGameParticipant(
+          gameAddress,
+          telegramIdStr,
+          playerPubkey,
+          {
+            status: "pending",
+            joinSignature: joinTx ?? null,
+            lastVerifiedAt: null,
+            ...sourceInfo,
+          }
+        );
         pendingRecorded = true;
         joinConfirmed = true;
       } else {
@@ -4102,7 +4127,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         gamePda,
         playerKp.publicKey,
         telegramIdStr,
-        { joinSignature: joinTx ?? null }
+        { joinSignature: joinTx ?? null, sourceInfo }
       );
 
       if (!verified) {

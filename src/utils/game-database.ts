@@ -59,6 +59,9 @@ export class GameDatabase extends BaseDatabase {
           status TEXT NOT NULL DEFAULT 'confirmed',
           join_signature TEXT,
           last_verified_at INTEGER,
+          source_chat_id INTEGER,
+          source_message_id INTEGER,
+          game_index INTEGER,
           PRIMARY KEY (game_address, telegram_id),
           FOREIGN KEY (game_address) REFERENCES games(game_address)
         )`,
@@ -519,6 +522,30 @@ export class GameDatabase extends BaseDatabase {
         );
       }
 
+      if (!columnNames.has("source_chat_id")) {
+        this.run(
+          "ALTER TABLE game_participants ADD COLUMN source_chat_id INTEGER",
+          [],
+          "adding source_chat_id column to game_participants"
+        );
+      }
+
+      if (!columnNames.has("source_message_id")) {
+        this.run(
+          "ALTER TABLE game_participants ADD COLUMN source_message_id INTEGER",
+          [],
+          "adding source_message_id column to game_participants"
+        );
+      }
+
+      if (!columnNames.has("game_index")) {
+        this.run(
+          "ALTER TABLE game_participants ADD COLUMN game_index INTEGER",
+          [],
+          "adding game_index column to game_participants"
+        );
+      }
+
       this.run(
         "UPDATE game_participants SET status = 'confirmed' WHERE status IS NULL",
         [],
@@ -647,6 +674,9 @@ export class GameDatabase extends BaseDatabase {
       status?: "pending" | "confirmed";
       joinSignature?: string | null;
       lastVerifiedAt?: number | null;
+      sourceChatId?: number | null;
+      sourceMessageId?: number | null;
+      gameIndex?: number | null;
     }
   ): void {
     const status = options?.status ?? "confirmed";
@@ -660,6 +690,9 @@ export class GameDatabase extends BaseDatabase {
         : status === "confirmed"
         ? Date.now()
         : null;
+    const sourceChatId = options?.sourceChatId ?? null;
+    const sourceMessageId = options?.sourceMessageId ?? null;
+    const gameIndex = options?.gameIndex ?? null;
 
     this.run(
       `
@@ -670,9 +703,12 @@ export class GameDatabase extends BaseDatabase {
           joined_at,
           status,
           join_signature,
-          last_verified_at
+          last_verified_at,
+          source_chat_id,
+          source_message_id,
+          game_index
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(game_address, telegram_id) DO UPDATE SET
           public_key = excluded.public_key,
           status = CASE
@@ -688,7 +724,10 @@ export class GameDatabase extends BaseDatabase {
               game_participants.status = 'confirmed' AND excluded.status = 'pending'
             ) THEN game_participants.last_verified_at
             ELSE COALESCE(excluded.last_verified_at, game_participants.last_verified_at)
-          END
+          END,
+          source_chat_id = COALESCE(excluded.source_chat_id, game_participants.source_chat_id),
+          source_message_id = COALESCE(excluded.source_message_id, game_participants.source_message_id),
+          game_index = COALESCE(excluded.game_index, game_participants.game_index)
       `,
       [
         gameAddress,
@@ -698,6 +737,9 @@ export class GameDatabase extends BaseDatabase {
         status,
         joinSignature,
         lastVerifiedAt,
+        sourceChatId,
+        sourceMessageId,
+        gameIndex,
       ],
       "saving game participant"
     );
@@ -715,6 +757,40 @@ export class GameDatabase extends BaseDatabase {
       "getting game participants"
     );
     return results.map((r) => r.telegram_id);
+  }
+
+  public getGameParticipantDetails(
+    gameAddress: string,
+    telegramId: string
+  ): {
+    telegramId: string;
+    sourceChatId?: number;
+    sourceMessageId?: number;
+    gameIndex?: number;
+  } | null {
+    const result = this.get<{
+      telegram_id: string;
+      source_chat_id: number | null;
+      source_message_id: number | null;
+      game_index: number | null;
+    }>(
+      `
+        SELECT telegram_id, source_chat_id, source_message_id, game_index
+        FROM game_participants
+        WHERE game_address = ? AND telegram_id = ?
+      `,
+      [gameAddress, telegramId],
+      "getting game participant details"
+    );
+
+    if (!result) return null;
+
+    return {
+      telegramId: result.telegram_id,
+      sourceChatId: result.source_chat_id ?? undefined,
+      sourceMessageId: result.source_message_id ?? undefined,
+      gameIndex: result.game_index ?? undefined,
+    };
   }
 
   public getPendingParticipants(gameAddress: string): Array<{

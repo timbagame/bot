@@ -1373,7 +1373,8 @@ const formatActiveJoinLabel = (
 
 const rewriteJoinButtons = (
   row: InlineKeyboardButton[],
-  game: ActiveGameListing
+  game: ActiveGameListing,
+  index?: number
 ): InlineKeyboardButton[] =>
   row.map((button) => {
     if (
@@ -1382,12 +1383,17 @@ const rewriteJoinButtons = (
         "join_"
       )
     ) {
+      const baseCallback = (button as InlineKeyboardButton & {
+        callback_data: string;
+      }).callback_data;
+      const newCallback = index ? `${baseCallback}_ix${index}` : baseCallback;
       return {
         ...button,
         text: formatActiveJoinLabel(
           parseActiveGameHeader(game.messageText).amountPart,
           parseActiveGameHeader(game.messageText).ticker
         ),
+        callback_data: newCallback,
       };
     }
     return { ...button };
@@ -1421,7 +1427,9 @@ const buildActiveGamesKeyboard = (
     ]);
 
     filterActiveGameKeyboardRows(game.keyboard ?? []).forEach((row) => {
-      inlineKeyboard.push(rewriteJoinButtons(cloneInlineKeyboardRow(row), game));
+      inlineKeyboard.push(
+        rewriteJoinButtons(cloneInlineKeyboardRow(row), game, globalIndex)
+      );
     });
   });
 
@@ -1934,28 +1942,77 @@ const processGameCompletion = async (
           `🏆 <b>${safeWinnerDisplay}</b> won the ${gameTypeLabel}!${prizeDetails}`
         );
 
-        // DM the winner if they joined from a different chat
+        // DM the winner if they joined from a different chat or reply to source message
         const winnerTelegramId = gameDb.getPlayerTelegramId(winnerAddress);
         if (winnerTelegramId) {
           // Check if winner is the creator (creator always sees the game)
           const isCreator = gameData?.creator_telegram_id === winnerTelegramId;
           if (!isCreator) {
-            // DM the cross-group winner about their win
-            try {
-              const prizeMessage = prizeDetails
-                ? `\n\nPrize:${prizeDetails}`
-                : "";
-              const winnerChatId = Number(winnerTelegramId);
-              await bot.api.sendMessage(
-                winnerChatId,
-                [
-                  `🎉 <b>You won the ${gameTypeLabel}!</b>`,
-                  prizeMessage,
-                ].join(""),
-                { parse_mode: "HTML" }
-              );
-            } catch (dmError) {
-              console.warn("Failed to DM winner notification:", dmError);
+            const participantDetails = gameDb.getGameParticipantDetails(
+              gameAddress,
+              winnerTelegramId
+            );
+
+            const prizeMessage = prizeDetails ? `\n\nPrize:${prizeDetails}` : "";
+
+            if (
+              participantDetails?.sourceChatId &&
+              participantDetails?.sourceMessageId
+            ) {
+              // Reply to the source message in the group where they joined
+              try {
+                const indexPrefix = participantDetails.gameIndex
+                  ? `${participantDetails.gameIndex}. `
+                  : "";
+                await bot.api.sendMessage(
+                  participantDetails.sourceChatId,
+                  [
+                    `🏆 <b>${indexPrefix}${safeWinnerDisplay} won the ${gameTypeLabel}!</b>`,
+                    prizeMessage,
+                  ].join(""),
+                  {
+                    parse_mode: "HTML",
+                    reply_to_message_id: participantDetails.sourceMessageId,
+                  }
+                );
+              } catch (replyError) {
+                console.warn(
+                  "Failed to reply to source message for winner:",
+                  replyError
+                );
+                // Fallback to DM if reply fails
+                try {
+                  const winnerChatId = Number(winnerTelegramId);
+                  await bot.api.sendMessage(
+                    winnerChatId,
+                    [
+                      `🎉 <b>You won the ${gameTypeLabel}!</b>`,
+                      prizeMessage,
+                    ].join(""),
+                    { parse_mode: "HTML" }
+                  );
+                } catch (dmError) {
+                  console.warn(
+                    "Failed to DM winner notification (fallback):",
+                    dmError
+                  );
+                }
+              }
+            } else {
+              // DM the cross-group winner about their win (legacy behavior)
+              try {
+                const winnerChatId = Number(winnerTelegramId);
+                await bot.api.sendMessage(
+                  winnerChatId,
+                  [
+                    `🎉 <b>You won the ${gameTypeLabel}!</b>`,
+                    prizeMessage,
+                  ].join(""),
+                  { parse_mode: "HTML" }
+                );
+              } catch (dmError) {
+                console.warn("Failed to DM winner notification:", dmError);
+              }
             }
           }
         }

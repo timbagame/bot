@@ -43,7 +43,11 @@ import {
   safeAnswerCallbackQuery,
   containsBalanceInfo,
 } from "../utils/context-helpers";
-import { formatTokenDisplay, formatUsdValue } from "../utils/format-amount";
+import {
+  formatTokenDisplay,
+  formatUsdValue,
+  escapeHtml,
+} from "../utils/format-amount";
 import {
   clearGameSetupSession,
   getGameSetupSession,
@@ -225,6 +229,10 @@ export const createGameCallbacksModule = (
       return;
     }
 
+    const callbackData = ctx.callbackQuery?.data || "";
+    const indexMatch = callbackData.match(/_ix(\d+)$/);
+    const gameIndex = indexMatch ? parseInt(indexMatch[1]!, 10) : undefined;
+
     const telegramIdStr = telegramId.toString();
     const displayNameFromContext = (() => {
       const from = ctx.from;
@@ -279,7 +287,12 @@ export const createGameCallbacksModule = (
         game.game_address,
         telegramId,
         ctx.chat?.id,
-        displayNameFromContext
+        displayNameFromContext,
+        {
+          sourceChatId: ctx.chat?.id,
+          sourceMessageId: ctx.callbackQuery?.message?.message_id,
+          gameIndex,
+        }
       );
 
       if (!result.success) {
@@ -319,7 +332,7 @@ export const createGameCallbacksModule = (
         `✅ Joined! (${ticketCount}/${maxTickets})`
       );
 
-      // Send DM if user joined from a different chat than where the game was created
+      // Reply to interaction message if user joined from a different chat than where the game was created
       const gameChatId = game.chat_id;
       const currentChatId = ctx.chat?.id;
       const isCrossGroupJoin =
@@ -330,22 +343,25 @@ export const createGameCallbacksModule = (
           const gameTypeLabel = toTitleCase(game.game_type || "game");
           const amountDisplay = game.amount ?? "?";
           const tokenDisplay = game.token_ticker || "tokens";
+          const indexPrefix = gameIndex ? `${gameIndex}. ` : "";
 
-          await ctx.api.sendMessage(
-            telegramId.toString(),
+          const safeDisplayName = escapeHtml(displayNameFromContext || "Player");
+          await ctx.reply(
             [
-              `✅ <b>Joined ${gameTypeLabel}!</b>`,
+              `✅ <b>${indexPrefix}${safeDisplayName} joined ${gameTypeLabel}!</b>`,
               ``,
               `Amount: <b>${amountDisplay} ${tokenDisplay}</b>`,
               `Players: <b>${ticketCount}/${maxTickets}</b>`,
               ``,
               `You'll be notified here when the game completes.`,
             ].join("\n"),
-            { parse_mode: "HTML" }
+            {
+              parse_mode: "HTML",
+              reply_to_message_id: ctx.callbackQuery?.message?.message_id,
+            }
           );
-        } catch (dmError) {
-          // User may not have started a DM with bot - that's ok
-          console.warn("Failed to DM cross-group join notification:", dmError);
+        } catch (replyError) {
+          console.warn("Failed to reply to cross-group join:", replyError);
         }
       }
     } catch (error) {
