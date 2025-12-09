@@ -44,7 +44,8 @@ export class GameDatabase extends BaseDatabase {
           max_players INTEGER,
           min_players INTEGER,
           last_slot TEXT,
-          last_slot_timestamp INTEGER
+          last_slot_timestamp INTEGER,
+          total_amount INTEGER
         )`,
         `CREATE TABLE IF NOT EXISTS player_mappings (
           public_key TEXT PRIMARY KEY,
@@ -149,12 +150,24 @@ export class GameDatabase extends BaseDatabase {
   public completeGame(
     gameAddress: string,
     winnerAddress: string,
-    completedAt?: number
+    completedAt?: number,
+    totalPot?: number
   ): void {
     const timestamp = completedAt || Date.now();
+    const params: any[] = [winnerAddress, timestamp, "completed"];
+    let sql = "UPDATE games SET winner_address = ?, completed_at = ?, status = ?";
+
+    if (totalPot !== undefined) {
+      sql += ", total_amount = ?";
+      params.push(totalPot);
+    }
+
+    sql += " WHERE game_address = ?";
+    params.push(gameAddress);
+
     this.run(
-      "UPDATE games SET winner_address = ?, completed_at = ?, status = ? WHERE game_address = ?",
-      [winnerAddress, timestamp, "completed", gameAddress],
+      sql,
+      params,
       "completing game"
     );
   }
@@ -640,6 +653,14 @@ export class GameDatabase extends BaseDatabase {
         );
       }
 
+      if (!columnNames.has("total_amount")) {
+        this.run(
+          "ALTER TABLE games ADD COLUMN total_amount INTEGER",
+          [],
+          "adding total_amount column to games"
+        );
+      }
+
       this.run(
         "CREATE INDEX IF NOT EXISTS idx_games_chat_id ON games (chat_id)",
         [],
@@ -1067,6 +1088,7 @@ export class GameDatabase extends BaseDatabase {
             rg.game_address,
             rg.status,
             rg.amount,
+            rg.total_amount,
             rg.winner_address,
             rg.token_mint,
             rg.creator_telegram_id AS telegram_id,
@@ -1080,6 +1102,7 @@ export class GameDatabase extends BaseDatabase {
             rg.game_address,
             rg.status,
             rg.amount,
+            rg.total_amount,
             rg.winner_address,
             rg.token_mint,
             gp.telegram_id AS telegram_id,
@@ -1096,6 +1119,7 @@ export class GameDatabase extends BaseDatabase {
             rg.game_address,
             rg.status,
             rg.amount,
+            rg.total_amount,
             rg.winner_address,
             rg.token_mint,
             pm.telegram_id AS telegram_id,
@@ -1111,13 +1135,14 @@ export class GameDatabase extends BaseDatabase {
             game_address,
             status,
             amount,
+            total_amount,
             token_mint,
             MAX(CASE WHEN role = 'creator' THEN 1 ELSE 0 END) AS is_creator,
             MAX(CASE WHEN role = 'participant' THEN 1 ELSE 0 END) AS is_participant,
             MAX(CASE WHEN role = 'winner' THEN 1 ELSE 0 END) AS is_winner,
             MAX(CASE WHEN LOWER(winner_address) = 'cancelled' THEN 1 ELSE 0 END) AS is_cancelled
           FROM player_game_roles
-          GROUP BY telegram_id, game_address, status, amount, token_mint
+          GROUP BY telegram_id, game_address, status, amount, total_amount, token_mint
         )
         SELECT
           pgs.telegram_id,
@@ -1175,6 +1200,7 @@ export class GameDatabase extends BaseDatabase {
           SELECT
             rg.game_address,
             rg.amount,
+            rg.total_amount,
             rg.token_mint,
             rg.creator_telegram_id AS telegram_id,
             'creator' AS role
@@ -1186,6 +1212,7 @@ export class GameDatabase extends BaseDatabase {
           SELECT
             rg.game_address,
             rg.amount,
+            rg.total_amount,
             rg.token_mint,
             gp.telegram_id AS telegram_id,
             'participant' AS role
@@ -1200,6 +1227,7 @@ export class GameDatabase extends BaseDatabase {
           SELECT
             rg.game_address,
             rg.amount,
+            rg.total_amount,
             rg.token_mint,
             pm.telegram_id AS telegram_id,
             'winner' AS role
@@ -1213,17 +1241,18 @@ export class GameDatabase extends BaseDatabase {
             telegram_id,
             game_address,
             amount,
+            total_amount,
             token_mint,
             MAX(CASE WHEN role = 'winner' THEN 1 ELSE 0 END) AS is_winner
           FROM player_game_roles
-          GROUP BY telegram_id, game_address, amount, token_mint
+          GROUP BY telegram_id, game_address, amount, total_amount, token_mint
         )
         SELECT
           pgs.telegram_id,
           COALESCE(pgs.token_mint, 'SOL') AS token_mint,
           SUM(
             CASE
-              WHEN pgs.is_winner = 1 THEN pgs.amount
+              WHEN pgs.is_winner = 1 THEN (COALESCE(pgs.total_amount, pgs.amount * 2) - pgs.amount)
               ELSE -pgs.amount
             END
           ) AS net_amount

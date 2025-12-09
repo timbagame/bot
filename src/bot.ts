@@ -1861,7 +1861,7 @@ const processGameCompletion = async (
 ): Promise<void> => {
   // Update database
   const blockTime = await wallet.getBlockchainTime();
-  gameDb.completeGame(gameAddress, winnerAddress, blockTime * 1000);
+  gameDb.completeGame(gameAddress, winnerAddress, blockTime * 1000, totalPot);
 
   // Update game message
   const gameData = gameDb.getGame(gameAddress);
