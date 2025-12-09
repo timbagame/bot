@@ -4004,7 +4004,63 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
     }
 
     // Resolve all players for highlights
-    const allPlayers = await resolveLeaderboardPlayers(ctx, allStats);
+    const allPlayersUnfiltered = await resolveLeaderboardPlayers(ctx, allStats);
+
+    if (allPlayersUnfiltered.length === 0) {
+      return ctx.reply(buildEmptyLeaderboardMessage(), {
+        parse_mode: "HTML",
+        reply_to_message_id: ctx.message?.message_id,
+      });
+    }
+
+    // Filter to only include actual group members (with caching)
+    const MEMBERSHIP_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+    const telegramIds = allPlayersUnfiltered.map((p) => p.telegramId);
+
+    // Check cache first for all players
+    const cachedMemberships = gameDb.getCachedMemberships(chatId, telegramIds, MEMBERSHIP_CACHE_TTL_MS);
+
+    // Separate into cached and uncached
+    const playersNeedingCheck = allPlayersUnfiltered.filter(
+      (p) => !cachedMemberships.has(p.telegramId)
+    );
+
+    console.log(`📊 Membership cache: ${cachedMemberships.size} cached, ${playersNeedingCheck.length} need API check`);
+
+    // Check membership via API for uncached players
+    const membershipChecks = await Promise.all(
+      playersNeedingCheck.map(async (player) => {
+        try {
+          const member = await ctx.api.getChatMember(chatId, Number(player.telegramId));
+          // member, administrator, creator are valid members; left, kicked, restricted (without is_member) are not
+          const isMember = ["member", "administrator", "creator"].includes(member.status) ||
+            (member.status === "restricted" && member.is_member);
+
+          // Save to cache
+          gameDb.saveMembershipCache(chatId, player.telegramId, isMember);
+
+          return { player, isMember };
+        } catch (error) {
+          // If we can't check membership (e.g., user never interacted with bot), exclude them
+          console.warn(`Could not check membership for ${player.telegramId}:`, error);
+          // Cache the failure as non-member
+          gameDb.saveMembershipCache(chatId, player.telegramId, false);
+          return { player, isMember: false };
+        }
+      })
+    );
+
+    // Combine cached results with fresh API results
+    const allPlayers = allPlayersUnfiltered.filter((player) => {
+      // Check if in cache
+      const cachedResult = cachedMemberships.get(player.telegramId);
+      if (cachedResult !== undefined) {
+        return cachedResult;
+      }
+      // Otherwise check fresh results
+      const freshResult = membershipChecks.find((c) => c.player.telegramId === player.telegramId);
+      return freshResult?.isMember ?? false;
+    });
 
     if (allPlayers.length === 0) {
       return ctx.reply(buildEmptyLeaderboardMessage(), {
@@ -4013,13 +4069,13 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
       });
     }
 
-    // Top 5 are for display (already sliced in resolveLeaderboardPlayers)
+    // Top 5 are for display
     const displayedPlayers = allPlayers.slice(0, LEADERBOARD_PLAYER_LIMIT);
 
     const leaderboardText = buildLeaderboardMessage({
       chatTitle: ctx.chat?.title ?? null,
       players: displayedPlayers,
-      allPlayers, // Pass all players for accurate highlights
+      allPlayers, // Pass all members for accurate highlights
     });
 
     await ctx.reply(leaderboardText, {
@@ -4028,7 +4084,7 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
     });
 
     console.log(
-      `✅ Leaderboard generated for chat ${chatId} with ${displayedPlayers.length} players (${allPlayers.length} total)`
+      `✅ Leaderboard generated for chat ${chatId} with ${displayedPlayers.length} players (${allPlayers.length} members, ${playersNeedingCheck.length} API checks, ${allPlayersUnfiltered.length} candidates)`
     );
   } catch (error) {
     console.error("Error generating leaderboard:", error);

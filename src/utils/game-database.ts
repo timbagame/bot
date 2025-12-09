@@ -80,6 +80,7 @@ export class GameDatabase extends BaseDatabase {
     this.ensureUsernameMappingSchema();
     this.ensureGameSchema();
     this.ensureGameMessagesSchema();
+    this.ensureMembershipCacheSchema();
   }
 
   // Game methods
@@ -1581,6 +1582,136 @@ export class GameDatabase extends BaseDatabase {
         .filter((row): row is LeaderboardStatsRecord => row !== null);
     } catch (error) {
       return this.handleError("getting global leaderboard stats", error);
+    }
+  }
+
+  // ================================
+  // MEMBERSHIP CACHE METHODS
+  // ================================
+
+  private ensureMembershipCacheSchema(): void {
+    try {
+      this.run(
+        `CREATE TABLE IF NOT EXISTS chat_membership_cache (
+          chat_id INTEGER NOT NULL,
+          telegram_id TEXT NOT NULL,
+          is_member INTEGER NOT NULL,
+          checked_at INTEGER NOT NULL,
+          PRIMARY KEY (chat_id, telegram_id)
+        )`,
+        [],
+        "ensuring membership cache schema"
+      );
+      this.run(
+        "CREATE INDEX IF NOT EXISTS idx_membership_cache_checked_at ON chat_membership_cache (checked_at)",
+        [],
+        "creating membership cache index"
+      );
+    } catch (error) {
+      console.error("Failed to ensure membership cache schema:", error);
+    }
+  }
+
+  /**
+   * Get cached membership status for a user in a chat
+   * @param chatId The chat ID
+   * @param telegramId The user's telegram ID
+   * @param maxAgeMs Maximum age of cache entry in milliseconds (default: 30 minutes)
+   * @returns boolean | null - true/false if cached, null if no valid cache exists
+   */
+  public getCachedMembership(
+    chatId: number,
+    telegramId: string,
+    maxAgeMs: number = 30 * 60 * 1000
+  ): boolean | null {
+    try {
+      const minCheckedAt = Date.now() - maxAgeMs;
+      const row = this.get<{ is_member: number }>(
+        `SELECT is_member FROM chat_membership_cache
+         WHERE chat_id = ? AND telegram_id = ? AND checked_at >= ?`,
+        [chatId, telegramId, minCheckedAt],
+        "getting cached membership"
+      );
+      return row ? row.is_member === 1 : null;
+    } catch (error) {
+      console.error("Error getting cached membership:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Save membership status to cache
+   * @param chatId The chat ID
+   * @param telegramId The user's telegram ID
+   * @param isMember Whether the user is a member
+   */
+  public saveMembershipCache(
+    chatId: number,
+    telegramId: string,
+    isMember: boolean
+  ): void {
+    try {
+      this.run(
+        `INSERT OR REPLACE INTO chat_membership_cache (chat_id, telegram_id, is_member, checked_at)
+         VALUES (?, ?, ?, ?)`,
+        [chatId, telegramId, isMember ? 1 : 0, Date.now()],
+        "saving membership cache"
+      );
+    } catch (error) {
+      console.error("Error saving membership cache:", error);
+    }
+  }
+
+  /**
+   * Get cached membership for multiple users at once
+   * @param chatId The chat ID
+   * @param telegramIds List of telegram IDs to check
+   * @param maxAgeMs Maximum age of cache entry in milliseconds
+   * @returns Map of telegramId -> isMember (only includes cached entries)
+   */
+  public getCachedMemberships(
+    chatId: number,
+    telegramIds: string[],
+    maxAgeMs: number = 30 * 60 * 1000
+  ): Map<string, boolean> {
+    const result = new Map<string, boolean>();
+    if (telegramIds.length === 0) return result;
+
+    try {
+      const minCheckedAt = Date.now() - maxAgeMs;
+      const placeholders = telegramIds.map(() => "?").join(",");
+      const rows = this.all<{ telegram_id: string; is_member: number }>(
+        `SELECT telegram_id, is_member FROM chat_membership_cache
+         WHERE chat_id = ? AND telegram_id IN (${placeholders}) AND checked_at >= ?`,
+        [chatId, ...telegramIds, minCheckedAt],
+        "getting cached memberships"
+      );
+      for (const row of rows) {
+        result.set(row.telegram_id, row.is_member === 1);
+      }
+    } catch (error) {
+      console.error("Error getting cached memberships:", error);
+    }
+    return result;
+  }
+
+  /**
+   * Clean up old membership cache entries
+   * @param maxAgeMs Maximum age of cache entries to keep (default: 24 hours)
+   * @returns Number of entries deleted
+   */
+  public cleanupMembershipCache(maxAgeMs: number = 24 * 60 * 60 * 1000): number {
+    try {
+      const cutoff = Date.now() - maxAgeMs;
+      const result = this.run(
+        "DELETE FROM chat_membership_cache WHERE checked_at < ?",
+        [cutoff],
+        "cleaning up membership cache"
+      );
+      return result.changes;
+    } catch (error) {
+      console.error("Error cleaning up membership cache:", error);
+      return 0;
     }
   }
 }
