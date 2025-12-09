@@ -179,21 +179,10 @@ const buildSettingsSummary = async (
 
 const ensureAdmin = async (ctx: Context, deps: ChatDefaultsModuleDeps) => {
   const telegramId = getTelegramId(ctx);
-  if (telegramId === 0n) {
-    await deps.replyToMessage(ctx, "🔒 Unable to verify permissions for this user.");
-    return false;
-  }
+  if (telegramId === 0n) return false;
 
   const isAdmin = await deps.isUserGroupAdmin(ctx, Number(telegramId));
-  if (!isAdmin) {
-    await deps.replyToMessage(
-      ctx,
-      "🔒 Only group administrators can update chat defaults.\n\n💡 Contact a group admin to change these settings."
-    );
-    return false;
-  }
-
-  return true;
+  return isAdmin;
 };
 
 const handleTokenChange = async (

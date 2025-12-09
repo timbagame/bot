@@ -12,19 +12,29 @@ import {
   DEFAULT_GAME_TIMEOUT,
   DEFAULT_TOKEN_MINT,
   DEFAULT_TOKEN_TICKER,
-  MAX_GAME_TIMEOUT,
-  MIN_COINFLIP_PLAYERS,
-  MIN_GAME_TIMEOUT,
-  MIN_GIVEAWAY_PLAYERS,
 } from "../utils/constants";
 import {
+  clampMinPlayers,
+  clampTimeoutSeconds,
+  getMinPlayersFloor,
+  resolveAdvancedOptions,
+} from "../utils/game-settings";
+import {
   createAmountSelectionKeyboard,
-  createGameConfirmKeyboard,
-  createAdvancedOptionsKeyboard,
   createPlayerSelectionKeyboard,
   getFeeWarningMessage,
   getSuggestedStakeAmounts,
 } from "../utils/keyboards";
+import {
+  buildPlayerSelectionMessage,
+  buildGameConfirmationMessage,
+  buildGameConfirmMenuConfig,
+  presentAdvancedMenu,
+  presentConfirmMenu,
+  presentCustomAmountPrompt,
+  determineFractionDigits,
+  toTitleCase,
+} from "./game-callbacks/ui-builders";
 import { respondWithMenu } from "../utils/menu-response";
 import {
   getRequiredTelegramIdForContext,
@@ -94,96 +104,6 @@ export type GameCallbacksModule = {
   __test_handleJoinGame: HandleJoinGameFn;
 };
 
-const toTitleCase = (value: string): string => {
-  return value.charAt(0).toUpperCase() + value.slice(1);
-};
-
-const buildPlayerSelectionMessage = (
-  gameType: "coinflip" | "giveaway",
-  formattedAmount: string,
-  tokenTicker: string
-): string => {
-  const formattedGameType = toTitleCase(gameType);
-  return [
-    `<b>${formattedGameType} - Choose Maximum Players</b>`,
-    "",
-    `Amount: <b>${formattedAmount} ${tokenTicker}</b>`,
-    "",
-    "Select the number of players:",
-  ].join("\n");
-};
-
-const determineFractionDigits = (
-  value: string,
-  maxDecimals: number
-): number => {
-  const [_, fraction = ""] = value.split(".");
-  if (!fraction) {
-    return Math.min(6, maxDecimals);
-  }
-  return Math.min(fraction.length, maxDecimals, 6);
-};
-
-type AdvancedOptionState = {
-  timeoutSeconds: number;
-  minPlayers: number;
-  isPrivate: boolean;
-};
-
-const getMinPlayersFloor = (gameType: "coinflip" | "giveaway"): number =>
-  gameType === "coinflip" ? MIN_COINFLIP_PLAYERS : MIN_GIVEAWAY_PLAYERS;
-
-const clampTimeoutSeconds = (timeout?: number): number => {
-  if (!Number.isFinite(timeout)) return DEFAULT_GAME_TIMEOUT;
-  const rounded = Math.round(timeout!);
-  return Math.min(Math.max(rounded, MIN_GAME_TIMEOUT), MAX_GAME_TIMEOUT);
-};
-
-const clampMinPlayers = (
-  gameType: "coinflip" | "giveaway",
-  candidate: number | undefined,
-  maxPlayers: number,
-  maxPlayersLimit?: number
-): number => {
-  const floor = getMinPlayersFloor(gameType);
-  const ceiling = Math.max(
-    floor,
-    Math.min(maxPlayers, maxPlayersLimit ?? maxPlayers)
-  );
-  if (!Number.isFinite(candidate)) return floor;
-  const rounded = Math.round(candidate!);
-  return Math.min(Math.max(rounded, floor), ceiling);
-};
-
-const resolveAdvancedOptions = (
-  gameType: "coinflip" | "giveaway",
-  players: number,
-  session?: Partial<GameSetupSessionState>,
-  maxPlayersLimit?: number,
-  chatSettings?: ChatGameSettings | null
-): AdvancedOptionState => {
-  const maxPlayersCeil = Math.max(players, getMinPlayersFloor(gameType));
-  const timeoutSeconds = clampTimeoutSeconds(
-    session?.timeoutSeconds ?? chatSettings?.timeout_seconds ?? undefined
-  );
-  const minPlayers = clampMinPlayers(
-    gameType,
-    session?.minPlayers,
-    maxPlayersCeil,
-    maxPlayersLimit
-  );
-  // Default to private if not explicitly public
-  const specificPrivacy =
-    gameType === "coinflip"
-      ? chatSettings?.coinflip_default_privacy
-      : chatSettings?.giveaway_default_privacy;
-
-  const defaultIsPrivate = specificPrivacy !== "public";
-  const isPrivate = session?.isPrivate ?? defaultIsPrivate;
-
-  return { timeoutSeconds, minPlayers, isPrivate };
-};
-
 const NON_GAME_CALLBACK_NAMES = [
   "main_wallet",
   "wallet_refresh",
@@ -237,259 +157,6 @@ const shouldSkipGenericGameCallback = (callbackData: string): boolean => {
   return NON_GAME_CALLBACK_PREFIXES.some((prefix) =>
     callbackData.startsWith(prefix)
   );
-};
-
-const buildGameConfirmationMessage = ({
-  gameType,
-  amount,
-  players,
-  tokenTicker,
-  tokenDecimals,
-  advanced,
-}: {
-  gameType: "coinflip" | "giveaway";
-  amount: string;
-  players: number;
-  tokenTicker: string;
-  tokenDecimals: number;
-  advanced: AdvancedOptionState;
-}): string => {
-  const parsedAmount = Number(amount);
-  const amountNumber = Number.isFinite(parsedAmount) ? parsedAmount : 0;
-  const amountSource = amount ?? amountNumber.toString();
-
-  const amountFormatted = amountNumber.toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: determineFractionDigits(amountSource, tokenDecimals),
-  });
-
-  const totalPot = amountNumber * players;
-  const totalPotFormatted = totalPot.toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: Math.min(tokenDecimals, 6),
-  });
-
-  const formattedGameType = toTitleCase(gameType);
-
-  const timeoutMinutes = Math.round(advanced.timeoutSeconds / 60);
-  const visibilityLabel = advanced.isPrivate ? "Private" : "Public";
-  const minPlayersLabel = `${advanced.minPlayers}/${players}`;
-
-  return [
-    `<b>Confirm ${formattedGameType}</b>`,
-    "",
-    `Amount: <b>${amountFormatted} ${tokenTicker}</b>`,
-    `Players: <b>${players}</b>`,
-    "",
-    gameType === "coinflip"
-      ? `• Total prize pool: <b>${totalPotFormatted} ${tokenTicker}</b>`
-      : `• Prize for winner: <b>${amountFormatted} ${tokenTicker}</b>`,
-    "",
-    `Visibility: <b>${visibilityLabel}</b>`,
-    `Min players to start: <b>${minPlayersLabel}</b>`,
-    `Timeout: <b>${timeoutMinutes} min</b>`,
-    "",
-    `⚠️ Make sure you have enough ${tokenTicker} in your wallet!`,
-    "",
-    "Ready to create this game?",
-  ].join("\n");
-};
-
-const buildGameConfirmMenuConfig = ({
-  gameType,
-  amount,
-  players,
-  creatorId,
-  advanced,
-}: {
-  gameType: "coinflip" | "giveaway";
-  amount: string;
-  players: number;
-  creatorId?: string;
-  advanced: AdvancedOptionState;
-}) => {
-  const keyboard = createGameConfirmKeyboard(
-    gameType,
-    amount,
-    players.toString(),
-    creatorId,
-    advanced
-  );
-
-  return {
-    menu: {
-      parseMode: "HTML" as const,
-      keyboard,
-    },
-    replyMarkup: {
-      parse_mode: "HTML" as const,
-      reply_markup: keyboard,
-    },
-  } as const;
-};
-
-const buildAdvancedOptionsMessage = ({
-  amount,
-  players,
-  tokenTicker,
-  tokenDecimals,
-  advanced,
-}: {
-  amount: string;
-  players: number;
-  tokenTicker: string;
-  tokenDecimals: number;
-  advanced: AdvancedOptionState;
-}): string => {
-  const parsedAmount = Number(amount);
-  const amountNumber = Number.isFinite(parsedAmount) ? parsedAmount : 0;
-  const amountFormatted = amountNumber.toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: determineFractionDigits(
-      amount ?? amountNumber.toString(),
-      tokenDecimals
-    ),
-  });
-
-  const timeoutMinutes = Math.round(advanced.timeoutSeconds / 60);
-  return [
-    "⚙️ <b>Advanced Options</b>",
-    "",
-    `Amount: <b>${amountFormatted} ${tokenTicker}</b>`,
-    `Players: <b>${players}</b>`,
-    "",
-    `Visibility: <b>${advanced.isPrivate ? "Private" : "Public"}</b>`,
-    `Min players to start: <b>${advanced.minPlayers}/${players}</b>`,
-    `Timeout: <b>${timeoutMinutes} min</b>`,
-    "",
-    "Adjust options below or go back to confirm.",
-  ].join("\n");
-};
-
-const presentAdvancedMenu = async (params: {
-  ctx: Context;
-  gameType: "coinflip" | "giveaway";
-  amount: string;
-  players: number;
-  tokenTicker: string;
-  tokenDecimals: number;
-  creatorId?: string;
-  advanced: AdvancedOptionState;
-  logLabel?: string;
-}): Promise<void> => {
-  const { ctx, gameType, amount, players, tokenTicker, tokenDecimals, creatorId, advanced, logLabel } = params;
-  const text = buildAdvancedOptionsMessage({
-    amount,
-    players,
-    tokenTicker,
-    tokenDecimals,
-    advanced,
-  });
-
-  const keyboard = createAdvancedOptionsKeyboard(
-    gameType,
-    amount,
-    players.toString(),
-    advanced,
-    creatorId
-  );
-
-  await respondWithMenu(
-    ctx,
-    {
-      text,
-      parseMode: "HTML",
-      keyboard,
-    },
-    {
-      allowContextEdit: true,
-      logLabel: logLabel ?? "advanced_options",
-    }
-  );
-};
-
-const presentConfirmMenu = async (params: {
-  ctx: Context;
-  gameType: "coinflip" | "giveaway";
-  amount: string;
-  players: number;
-  tokenTicker: string;
-  tokenDecimals: number;
-  creatorId?: string;
-  advanced: AdvancedOptionState;
-  logLabel?: string;
-}): Promise<void> => {
-  const {
-    ctx,
-    gameType,
-    amount,
-    players,
-    tokenTicker,
-    tokenDecimals,
-    creatorId,
-    advanced,
-    logLabel,
-  } = params;
-
-  const confirmMessage = buildGameConfirmationMessage({
-    gameType,
-    amount,
-    players,
-    tokenTicker,
-    tokenDecimals,
-    advanced,
-  });
-
-  const confirmMenu = buildGameConfirmMenuConfig({
-    gameType,
-    amount,
-    players,
-    creatorId,
-    advanced,
-  });
-
-  await respondWithMenu(
-    ctx,
-    {
-      text: confirmMessage,
-      ...confirmMenu.menu,
-    },
-    {
-      allowContextEdit: true,
-      logLabel: logLabel ?? "confirm_menu",
-    }
-  );
-};
-
-type CustomAmountPromptParams = {
-  ctx: Context;
-  gameType: "coinflip" | "giveaway";
-  tokenTicker: string;
-  contractMin: number;
-  creatorId?: string;
-};
-
-const presentCustomAmountPrompt = async (params: CustomAmountPromptParams) => {
-  const { ctx, gameType, tokenTicker, contractMin, creatorId } = params;
-
-  const formattedGameType = toTitleCase(gameType);
-  const keyboard = new InlineKeyboard()
-    .text("❌ Cancel", `cancel_game_setup_${creatorId}`)
-    .row();
-
-  const groupMessage = [
-    `✏️ <b>Type Custom Amount - ${formattedGameType}</b>`,
-    "",
-    "Please type the amount you want to use.",
-    "",
-    `Min: ${contractMin} ${tokenTicker}`,
-  ].join("\n");
-
-  await respondWithMenu(ctx, {
-    text: groupMessage,
-    parseMode: "HTML",
-    keyboard,
-  });
 };
 
 export const createGameCallbacksModule = (

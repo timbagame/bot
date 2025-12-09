@@ -10,6 +10,7 @@ import {
   resolveChatDefaultPlayers,
   resolveChatTimeout,
 } from "../utils/chat-settings";
+import { resolveGamePrivacy } from "../utils/game-settings";
 import type { GameManager } from "../utils/game";
 import type { ChatGameSettings, ParseAmountResult } from "../types";
 import type { CoinflipDeps, GameTokenOverride } from "./game";
@@ -282,12 +283,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         options.timeoutSeconds
       );
 
-      // Default to private if not explicitly public
-      const specificPrivacy =
-        options.gameType === "coinflip"
-          ? chatSettings?.coinflip_default_privacy
-          : chatSettings?.giveaway_default_privacy;
-      const isPrivate = specificPrivacy !== "public";
+      const isPrivate = resolveGamePrivacy(options.gameType, chatSettings);
 
       const gameResult = await createDeps.gameManager.createGame(
         options.gameType,
