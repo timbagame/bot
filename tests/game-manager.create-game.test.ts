@@ -927,4 +927,243 @@ describe("GameManager.createGame", () => {
     expect(res.success).toBe(false);
     expect(String(res.error)).toContain("Something went wrong");
   });
+
+  test("calculates game rent based on maxTickets", async () => {
+    resetGM();
+    const capturedRentCalls: number[] = [];
+    const connection = {
+      ...createConnectionStub(),
+      getMinimumBalanceForRentExemption: async (size: number) => {
+        capturedRentCalls.push(size);
+        // Return rent proportional to size (approx 6.96 lamports/byte)
+        return Math.ceil(size * 6.96);
+      },
+    };
+    const wallet = makeWallet({
+      connection,
+      getConnection: () => connection,
+      getTokenMetadata: async () => ({ decimals: 6 }),
+      getTokenBalance: async () => 10_000_000,
+      getBalance: async () => 10_000_000,
+      sendTransaction: async () => "SIG",
+    });
+    const db = {
+      savePlayerMapping: () => {},
+      saveGame: () => {},
+      countActiveGamesByCreator: () => 0,
+      countRecentGamesByCreator: () => 0,
+    } as any;
+    const program = makeProgram(connection);
+    const gm = GameManager.getInstance(program, wallet, db);
+    (gm as any).oracleClient = {
+      isHealthy: async () => true,
+      generateGameSecrets: async () => ({ randomHash: "a".repeat(64) }),
+      hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
+    };
+    (gm as any).resolveGameTokenAccounts = async () => ({
+      tokenProgram: TOKEN_PROGRAM_ID,
+      gameToken: Keypair.generate().publicKey,
+      gameVault: Keypair.generate().publicKey,
+      gameTokenAccount: Keypair.generate().publicKey,
+    });
+    (gm as any).deriveAta = async () => Keypair.generate().publicKey;
+    (gm as any).confirmTransactionWithRecovery = async () => "CONFIRMED";
+    (gm as any).handleGameAutoJoinPure = async () => ({ success: true });
+    const originalGetGamePda = (PDAManager as any).getGamePDA;
+    (PDAManager as any).getGamePDA = () => new PublicKey("11111111111111111111111111111111");
+
+    try {
+      // Create game with 2 players
+      await gm.createGame(
+        "coinflip",
+        { amount: 100_000, tokenMint: "11111111111111111111111111111111", tokenTicker: "TOK", isSol: false },
+        2, // maxTickets = 2
+        2,
+        60,
+        1n
+      );
+
+      // Base size = 126 bytes + 8 bytes per participant
+      // For 2 players: 126 + 16 = 142 bytes
+      const expectedSize2Players = 126 + (2 * 8);
+      expect(capturedRentCalls).toContain(expectedSize2Players);
+
+      // Reset for next test
+      capturedRentCalls.length = 0;
+      resetGM();
+
+      const gm2 = GameManager.getInstance(program, wallet, db);
+      (gm2 as any).oracleClient = (gm as any).oracleClient;
+      (gm2 as any).resolveGameTokenAccounts = (gm as any).resolveGameTokenAccounts;
+      (gm2 as any).deriveAta = (gm as any).deriveAta;
+      (gm2 as any).confirmTransactionWithRecovery = (gm as any).confirmTransactionWithRecovery;
+      (gm2 as any).handleGameAutoJoinPure = (gm as any).handleGameAutoJoinPure;
+
+      // Create game with 50 players
+      await gm2.createGame(
+        "giveaway",
+        { amount: 100_000, tokenMint: "11111111111111111111111111111111", tokenTicker: "TOK", isSol: false },
+        50, // maxTickets = 50
+        1,
+        60,
+        2n
+      );
+
+      // For 50 players: 126 + 400 = 526 bytes
+      const expectedSize50Players = 126 + (50 * 8);
+      expect(capturedRentCalls).toContain(expectedSize50Players);
+    } finally {
+      (PDAManager as any).getGamePDA = originalGetGamePda;
+      resetGM();
+    }
+  });
+
+  test("includes native account rent in required reserve calculation", async () => {
+    resetGM();
+    // Native account rent exemption is 890,880 lamports
+    const NATIVE_RENT = 890_880;
+    const minSolBuffer = 400_000;
+    // For 2 players: 142 bytes * 6.96 ≈ 988 lamports
+    const gameRent = 988;
+    const requiredReserve = minSolBuffer + gameRent + NATIVE_RENT;
+
+    // Set SOL balance just below the required reserve to trigger JIT swap check
+    const belowRequiredBalance = requiredReserve - 100;
+
+    let jitSwapCalled = false;
+    let desiredLamportsArg: number | undefined;
+
+    const wallet = makeWallet({
+      getTokenMetadata: async () => ({ decimals: 6 }),
+      getTokenBalance: async () => 5_000_000, // Enough tokens
+      getBalance: async () => belowRequiredBalance,
+    });
+    const db = {
+      savePlayerMapping: () => {},
+      countActiveGamesByCreator: () => 0,
+      countRecentGamesByCreator: () => 0,
+    } as any;
+    const program = makeProgram(wallet.connection);
+    const gm = GameManager.getInstance(program, wallet, db);
+
+    // Mock feeBudget
+    (gm as any).feeBudget = {
+      getGameSafetyBufferLamports: async () => minSolBuffer,
+    };
+
+    // Mock getGameCreationRentLamports to return a fixed value
+    (gm as any).getGameCreationRentLamports = async () => gameRent;
+
+    // Mock swapManager to capture the call
+    (gm as any).swapManager = {
+      performJustInTimeSolSwap: async (options: any) => {
+        jitSwapCalled = true;
+        desiredLamportsArg = options.desiredLamports;
+        return { swapped: false, error: "Mock swap disabled" };
+      },
+    };
+
+    try {
+      // Attempt to create game - should fail but trigger JIT swap attempt
+      await gm.createGame(
+        "coinflip",
+        { amount: 100_000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
+        2, 2, 60, 1n
+      );
+    } catch {
+      // Expected to fail
+    }
+
+    // Verify JIT swap was called with correct desiredLamports
+    expect(jitSwapCalled).toBe(true);
+    // The desired lamports should include minSolBuffer + gameRent + nativeRent
+    expect(desiredLamportsArg).toBe(minSolBuffer + gameRent + NATIVE_RENT);
+
+    resetGM();
+  });
+
+  test("successful game creation with higher player count requires more SOL reserve", async () => {
+    resetGM();
+    const minSolBuffer = 400_000;
+
+    // Track JIT swap calls with different player counts
+    const jitSwapCalls: { maxTickets: number; desiredLamports: number }[] = [];
+
+    const createTestGM = (maxTickets: number) => {
+      resetGM();
+      const wallet = makeWallet({
+        getTokenMetadata: async () => ({ decimals: 6 }),
+        getTokenBalance: async () => 10_000_000,
+        getBalance: async () => 100_000, // Low balance to trigger JIT swap
+      });
+      const db = {
+        savePlayerMapping: () => {},
+        countActiveGamesByCreator: () => 0,
+        countRecentGamesByCreator: () => 0,
+      } as any;
+      const program = makeProgram(wallet.connection);
+      const gm = GameManager.getInstance(program, wallet, db);
+
+      (gm as any).feeBudget = {
+        getGameSafetyBufferLamports: async () => minSolBuffer,
+      };
+
+      // Use actual rent calculation
+      const baseSize = 126;
+      const bytesPerParticipant = 8;
+      const accountSize = baseSize + (maxTickets * bytesPerParticipant);
+      const estimatedRent = Math.ceil(accountSize * 6.96);
+      (gm as any).getGameCreationRentLamports = async () => estimatedRent;
+
+      (gm as any).swapManager = {
+        performJustInTimeSolSwap: async (options: any) => {
+          jitSwapCalls.push({
+            maxTickets,
+            desiredLamports: options.desiredLamports,
+          });
+          return { swapped: false, error: "Mock" };
+        },
+      };
+
+      return gm;
+    };
+
+    // Test with 2 players
+    const gm2 = createTestGM(2);
+    await gm2.createGame(
+      "coinflip",
+      { amount: 100_000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
+      2, 2, 60, 1n
+    );
+
+    // Test with 50 players
+    const gm50 = createTestGM(50);
+    await gm50.createGame(
+      "giveaway",
+      { amount: 100_000, tokenMint: "M", tokenTicker: "TOK", isSol: false },
+      50, 1, 60, 2n
+    );
+
+    expect(jitSwapCalls.length).toBe(2);
+
+    const call2Players = jitSwapCalls.find(c => c.maxTickets === 2);
+    const call50Players = jitSwapCalls.find(c => c.maxTickets === 50);
+
+    expect(call2Players).toBeDefined();
+    expect(call50Players).toBeDefined();
+
+    // 50 player game should require more SOL than 2 player game
+    // Difference should be approximately (50 - 2) * 8 * 6.96 = 2,670 lamports
+    expect(call50Players!.desiredLamports).toBeGreaterThan(call2Players!.desiredLamports);
+
+    // Verify the difference is proportional to player count difference
+    const rentDifference = call50Players!.desiredLamports - call2Players!.desiredLamports;
+    const playerDifference = 50 - 2;
+    const expectedRentDifference = Math.ceil(playerDifference * 8 * 6.96);
+    // Allow some tolerance for rounding
+    expect(rentDifference).toBeGreaterThanOrEqual(expectedRentDifference - 10);
+    expect(rentDifference).toBeLessThanOrEqual(expectedRentDifference + 10);
+
+    resetGM();
+  });
 });
