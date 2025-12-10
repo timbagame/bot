@@ -79,7 +79,8 @@ describe("GameManager.createGame", () => {
     const wallet = makeWallet({
       getTokenMetadata: async () => ({ decimals: 9 }),
       getTokenBalance: async () => 0,
-      getBalance: async () => 2_000_000,
+      // Enough to cover wrap amount + native rent, but not both + safety buffer
+      getBalance: async () => 3_000_000,
       wrapSol: async () => {
         throw new Error("should not wrap");
       },
@@ -750,7 +751,8 @@ describe("GameManager.createGame", () => {
     resetGM();
     const playerKp = Keypair.generate();
     const initialLamports = 100_000;
-    const refreshedLamports = 900_000;
+    // Must be >= minSolBuffer (800k) + gameRent (0) + nativeRentExemption (890,880) = 1,690,880
+    const refreshedLamports = 1_800_000;
     const telegramId = 1n;
     const balanceCalls: Array<{ forceFresh: boolean }> = [];
     const clearedIds: bigint[] = [];

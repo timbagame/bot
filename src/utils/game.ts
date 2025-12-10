@@ -101,6 +101,10 @@ const getWrapBalanceRetryDelays = (): number[] => {
 
 const TELEGRAM_MESSAGE_CHAR_LIMIT = 4096;
 
+// Minimum balance required to keep a native SOL account rent-exempt (0-byte data account).
+// After game creation, the user's native account must retain at least this balance.
+const NATIVE_ACCOUNT_RENT_LAMPORTS = 890_880;
+
 const PLAYER_TELEGRAM_ID_POLL_INTERVAL_MS =
   process.env.NODE_ENV === "test" ? 1 : 40;
 const PLAYER_TELEGRAM_ID_POLL_ATTEMPTS = 5;
@@ -283,7 +287,6 @@ export class GameManager {
   private activeGameMessages = new Map<string, Map<number, GameMessage>>();
   private cachedConnection?: Connection;
   private tokenProgramCache = new Map<string, PublicKey>();
-  private gameRentLamports: number | null = null;
   private inFlightGameCreations = new Map<string, number>();
   private pendingCreationRequests = new Map<string, number[]>();
   private readonly completedGameErrorMessage =
@@ -1606,27 +1609,58 @@ export class GameManager {
     return signature;
   }
 
-  private async getGameCreationRentLamports(): Promise<number> {
-    if (this.gameRentLamports !== null) {
-      return this.gameRentLamports;
-    }
+  /**
+   * Calculate game account rent based on maxTickets.
+   * Game account structure (from IDL):
+   * - 8 bytes discriminator
+   * - 32 bytes creator (pubkey)
+   * - 1 byte game_type (enum)
+   * - 8 bytes ticket_amount (u64)
+   * - 4 bytes max_tickets (u32)
+   * - 4 bytes tickets_count (u32)
+   * - 32 bytes token_mint (pubkey)
+   * - 8 bytes created_at (u64)
+   * - 8 bytes timeout (u64)
+   * - 8 bytes last_slot (u64)
+   * - 1 byte is_private (bool)
+   * - 8 bytes total_amount (u64)
+   * - 4 bytes participant_hashes vec length
+   * - 8 bytes per participant_hash (u64)
+   */
+  private async getGameCreationRentLamports(maxTickets: number): Promise<number> {
+    // Calculate game account size dynamically
+    const BASE_GAME_ACCOUNT_SIZE =
+      8 +   // discriminator
+      32 +  // creator
+      1 +   // game_type
+      8 +   // ticket_amount
+      4 +   // max_tickets
+      4 +   // tickets_count
+      32 +  // token_mint
+      8 +   // created_at
+      8 +   // timeout
+      8 +   // last_slot
+      1 +   // is_private
+      8 +   // total_amount
+      4;    // participant_hashes vec length prefix
+
+    const BYTES_PER_PARTICIPANT = 8; // u64 hash per participant
+
+    const safeMaxTickets = Math.max(0, Math.trunc(maxTickets) || 0);
+    const accountSize = BASE_GAME_ACCOUNT_SIZE + (safeMaxTickets * BYTES_PER_PARTICIPANT);
 
     try {
-      const size = (this.program.account as any)?.game?.size;
-      if (typeof size === "number" && size > 0) {
-        const connection = this.getConnection();
-        const rent = await connection.getMinimumBalanceForRentExemption(size);
-        if (Number.isFinite(rent) && rent > 0) {
-          this.gameRentLamports = rent;
-          return rent;
-        }
+      const connection = this.getConnection();
+      const rent = await connection.getMinimumBalanceForRentExemption(accountSize);
+      if (Number.isFinite(rent) && rent > 0) {
+        return rent;
       }
     } catch (error) {
-      console.warn("⚠️ Failed to determine game account rent lamports, falling back to zero:", error);
+      console.warn("⚠️ Failed to determine game account rent lamports:", error);
     }
 
-    this.gameRentLamports = 0;
-    return 0;
+    // Fallback: estimate rent at ~6.96 lamports per byte (standard rate)
+    return Math.ceil(accountSize * 6.96);
   }
 
   private async ensureWrappedSolBalance(
@@ -3151,9 +3185,10 @@ export class GameManager {
       const playerKp = this.wallet.getKeyPair(telegramId);
       const [minSolBuffer, gameRentLamports] = await Promise.all([
         this.feeBudget.getGameSafetyBufferLamports(),
-        this.getGameCreationRentLamports(),
+        this.getGameCreationRentLamports(maxTickets),
       ]);
-      const requiredSolReserveLamports = minSolBuffer + gameRentLamports;
+      // Include native account rent-exemption so user remains rent-exempt after game creation
+      const requiredSolReserveLamports = minSolBuffer + gameRentLamports + NATIVE_ACCOUNT_RENT_LAMPORTS;
 
       let [tokenBalance, solBalance] = await Promise.all([
         this.wallet.getTokenBalance(telegramId, tokenMint),
