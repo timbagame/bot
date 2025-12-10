@@ -28,6 +28,8 @@ import {
 import { formatDuration } from "./format-time";
 import {
   DEFAULT_NULL_ADDRESS,
+  GAME_ACCOUNT_RENT_EXEMPTION_FALLBACK_LAMPORTS,
+  GAME_ACCOUNT_SIZE_BYTES,
   GAME_CREATION_RATE_LIMIT_WINDOW_MS,
   GAME_INFO_LIMIT,
   GAME_EXPIRATION_BUFFER_TIME,
@@ -1606,27 +1608,74 @@ export class GameManager {
     return signature;
   }
 
+  private tryGetGameAccountSizeFromCoder(): number | null {
+    const coder = (this.program as any)?.coder;
+    const sizeFn = coder?.accounts?.size;
+    if (typeof sizeFn !== "function") {
+      return null;
+    }
+
+    for (const accountName of ["game", "Game"]) {
+      try {
+        const candidateSize = sizeFn.call(coder.accounts, accountName);
+        if (typeof candidateSize === "number" && candidateSize > 0) {
+          return candidateSize;
+        }
+      } catch (error) {
+        console.warn(
+          `⚠️ Unable to determine ${accountName} account size via coder:`,
+          error
+        );
+      }
+    }
+
+    return null;
+  }
+
+  private getGameAccountSizeBytes(): number {
+    const programDefinedSize = (this.program.account as any)?.game?.size;
+    if (typeof programDefinedSize === "number" && programDefinedSize > 0) {
+      return programDefinedSize;
+    }
+
+    const coderSize = this.tryGetGameAccountSizeFromCoder();
+    if (coderSize !== null) {
+      return coderSize;
+    }
+
+    return GAME_ACCOUNT_SIZE_BYTES;
+  }
+
   private async getGameCreationRentLamports(): Promise<number> {
     if (this.gameRentLamports !== null) {
       return this.gameRentLamports;
     }
 
+    const accountSizeBytes = this.getGameAccountSizeBytes();
+    const connection = this.getConnection();
+
     try {
-      const size = (this.program.account as any)?.game?.size;
-      if (typeof size === "number" && size > 0) {
-        const connection = this.getConnection();
-        const rent = await connection.getMinimumBalanceForRentExemption(size);
-        if (Number.isFinite(rent) && rent > 0) {
-          this.gameRentLamports = rent;
-          return rent;
-        }
+      const rent = await connection.getMinimumBalanceForRentExemption(
+        accountSizeBytes
+      );
+      if (Number.isFinite(rent) && rent > 0) {
+        this.gameRentLamports = rent;
+        return rent;
       }
+
+      console.warn(
+        `⚠️ Invalid rent exemption value (${rent}) for game account. Using fallback estimate.`,
+        accountSizeBytes
+      );
     } catch (error) {
-      console.warn("⚠️ Failed to determine game account rent lamports, falling back to zero:", error);
+      console.warn(
+        "⚠️ Failed to determine game account rent lamports, using fallback estimate:",
+        error
+      );
     }
 
-    this.gameRentLamports = 0;
-    return 0;
+    this.gameRentLamports = GAME_ACCOUNT_RENT_EXEMPTION_FALLBACK_LAMPORTS;
+    return GAME_ACCOUNT_RENT_EXEMPTION_FALLBACK_LAMPORTS;
   }
 
   private async ensureWrappedSolBalance(

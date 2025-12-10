@@ -18,13 +18,22 @@ function resetGM() {
   GameManager["instance"] = undefined;
 }
 
-function createConnectionStub(owner: PublicKey = TOKEN_PROGRAM_ID) {
+function createConnectionStub(
+  owner: PublicKey = TOKEN_PROGRAM_ID,
+  rentExemption: number = 1_000_000
+) {
+  let rentCalls = 0;
   return {
     getAccountInfo: async () => ({ owner }),
     getAccountInfoAndContext: async () => ({ value: null }),
     getParsedAccountInfo: async () => ({
       value: { data: { parsed: { info: { decimals: 6 } } } },
     }),
+    getMinimumBalanceForRentExemption: async () => {
+      rentCalls += 1;
+      return rentExemption;
+    },
+    __rentCalls: () => rentCalls,
   } as any;
 }
 
@@ -105,7 +114,9 @@ describe("GameManager.createGame", () => {
       1n
     );
     expect(res.success).toBe(false);
-    expect(String(res.error)).toContain("Failed to wrap SOL automatically");
+    const errorMessage = String(res.error);
+    expect(errorMessage).toContain("Not enough SOL to complete this");
+    expect(errorMessage).toContain("rent and fees");
   });
 
   test("errors on insufficient balance with formatted message", async () => {
@@ -835,6 +846,95 @@ describe("GameManager.createGame", () => {
       expect(clearedIds).toContain(telegramId);
       const cachedBalance = await wallet.getBalance(telegramId);
       expect(cachedBalance).toBe(refreshedLamports);
+    } finally {
+      (PDAManager as any).getGamePDA = originalGetGamePda;
+      resetGM();
+    }
+  });
+
+  test("reserves rent when swapping SOL for a zero-balance creator", async () => {
+    resetGM();
+    const rentLamports = 2_500_000;
+    const minSolBuffer = 800_000;
+    const desiredReserve = rentLamports + minSolBuffer;
+    const connection = createConnectionStub(TOKEN_PROGRAM_ID, rentLamports);
+    let lamports = 0;
+    const balanceChecks: boolean[] = [];
+    const wallet = makeWallet({
+      connection,
+      getTokenMetadata: async () => ({ decimals: 6 }),
+      getTokenBalance: async () => 2_000_000,
+      getBalance: async (_id: bigint, options: any = {}) => {
+        balanceChecks.push(options?.forceFresh === true);
+        return lamports;
+      },
+      clearCachedWalletData: () => {},
+      sendTransaction: async () => "SIG",
+    });
+    const saved: any[] = [];
+    const db = {
+      savePlayerMapping: () => {},
+      saveGame: (...args: any[]) => saved.push(args),
+      countActiveGamesByCreator: () => 0,
+      countRecentGamesByCreator: () => 0,
+    } as any;
+    const program = makeProgram(wallet.connection);
+    const gm = GameManager.getInstance(program, wallet, db);
+    (gm as any).feeBudget = {
+      getGameSafetyBufferLamports: async () => minSolBuffer,
+    };
+    let swapRequest: any;
+    (gm as any).swapManager = {
+      performJustInTimeSolSwap: async (request: any) => {
+        swapRequest = request;
+        lamports = desiredReserve + 100_000;
+        return { swapped: true, lamportsReceived: lamports };
+      },
+    };
+    (gm as any).oracleClient = {
+      isHealthy: async () => true,
+      generateGameSecrets: async () => ({ randomHash: "cafebabe" }),
+      hexToBuffer: (hex: string) => Buffer.from(hex, "hex"),
+    };
+    const gameToken = Keypair.generate().publicKey;
+    const gameVault = Keypair.generate().publicKey;
+    const gameTokenAccount = Keypair.generate().publicKey;
+    const creatorTokenAccount = Keypair.generate().publicKey;
+    (gm as any).resolveGameTokenAccounts = async () => ({
+      tokenProgram: TOKEN_PROGRAM_ID,
+      gameToken,
+      gameVault,
+      gameTokenAccount,
+    });
+    (gm as any).deriveAta = async () => creatorTokenAccount;
+    const originalGetGamePda = (PDAManager as any).getGamePDA;
+    const fixedPda = new PublicKey("11111111111111111111111111111111");
+    (PDAManager as any).getGamePDA = () => fixedPda;
+    (gm as any).confirmTransactionWithRecovery = async () => "CONFIRMED";
+
+    try {
+      const result = await gm.createGame(
+        "giveaway",
+        {
+          amount: 1_000_000,
+          tokenMint: "11111111111111111111111111111111",
+          tokenTicker: "TOK",
+          isSol: false,
+        },
+        5,
+        1,
+        60,
+        2n
+      );
+
+      expect(result.success).toBe(true);
+      expect(swapRequest?.desiredLamports).toBe(desiredReserve);
+      expect(lamports).toBeGreaterThanOrEqual(desiredReserve);
+      expect(connection.__rentCalls?.()).toBe(1);
+      await (gm as any).getGameCreationRentLamports();
+      expect(connection.__rentCalls?.()).toBe(1);
+      expect(balanceChecks.some((fresh) => fresh === true)).toBe(true);
+      expect(saved.length).toBe(1);
     } finally {
       (PDAManager as any).getGamePDA = originalGetGamePda;
       resetGM();

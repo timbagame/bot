@@ -62,6 +62,10 @@ export const MIN_GAME_TIMEOUT = 300; // 5 minutes
 export const MAX_GAME_TIMEOUT = 86_400; // 24 hours
 export const DEFAULT_GAME_TIMEOUT = 3600; // 1 hour
 export const GAME_TIMEOUT = DEFAULT_GAME_TIMEOUT;
+export const GAME_ACCOUNT_SIZE_BYTES = 127;
+export const GAME_ACCOUNT_RENT_EXEMPTION_FALLBACK_LAMPORTS = Math.ceil(
+  0.003 * LAMPORTS_PER_SOL
+);
 export const DEFAULT_COINFLIP_MAX_PLAYERS = 2;
 export const DEFAULT_GIVEAWAY_MAX_PLAYERS = 10;
 export const MIN_COINFLIP_PLAYERS = 2;
