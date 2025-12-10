@@ -10,6 +10,8 @@ import {
   GAME_CREATION_RATE_LIMIT_WINDOW_MS,
   MAX_ACTIVE_GAMES_PER_CREATOR,
   MAX_GAMES_PER_CREATOR_WINDOW,
+  GAME_ACCOUNT_BASE_SIZE_BYTES,
+  GAME_ACCOUNT_PARTICIPANT_ENTRY_BYTES,
   WSOL_MINT,
 } from "../src/utils/constants";
 
@@ -23,17 +25,20 @@ function createConnectionStub(
   rentExemption: number = 1_000_000
 ) {
   let rentCalls = 0;
+  const rentSizes: number[] = [];
   return {
     getAccountInfo: async () => ({ owner }),
     getAccountInfoAndContext: async () => ({ value: null }),
     getParsedAccountInfo: async () => ({
       value: { data: { parsed: { info: { decimals: 6 } } } },
     }),
-    getMinimumBalanceForRentExemption: async () => {
+    getMinimumBalanceForRentExemption: async (size: number) => {
       rentCalls += 1;
+      rentSizes.push(size);
       return rentExemption;
     },
     __rentCalls: () => rentCalls,
+    __rentSizes: () => rentSizes,
   } as any;
 }
 
@@ -797,7 +802,7 @@ describe("GameManager.createGame", () => {
     (gm as any).feeBudget = {
       getGameSafetyBufferLamports: async () => 800_000,
     };
-    (gm as any).getGameCreationRentLamports = async () => 0;
+    (gm as any).getGameCreationRentLamports = async (_maxTickets?: number) => 0;
     let swapCalls = 0;
     (gm as any).swapManager = {
       performJustInTimeSolSwap: async () => {
@@ -931,7 +936,7 @@ describe("GameManager.createGame", () => {
       expect(swapRequest?.desiredLamports).toBe(desiredReserve);
       expect(lamports).toBeGreaterThanOrEqual(desiredReserve);
       expect(connection.__rentCalls?.()).toBe(1);
-      await (gm as any).getGameCreationRentLamports();
+      await (gm as any).getGameCreationRentLamports(5);
       expect(connection.__rentCalls?.()).toBe(1);
       expect(balanceChecks.some((fresh) => fresh === true)).toBe(true);
       expect(saved.length).toBe(1);
@@ -939,6 +944,42 @@ describe("GameManager.createGame", () => {
       (PDAManager as any).getGamePDA = originalGetGamePda;
       resetGM();
     }
+  });
+
+  test("scales rent lookups with the max ticket count and caches by size", async () => {
+    resetGM();
+    const connection = createConnectionStub(TOKEN_PROGRAM_ID, 1_100_000);
+    const wallet = makeWallet({
+      connection,
+      getTokenMetadata: async () => ({ decimals: 6 }),
+      getTokenBalance: async () => 2_000_000,
+      getBalance: async () => 3_000_000,
+    });
+
+    const gm = GameManager.getInstance(makeProgram(wallet.connection), wallet, {
+      savePlayerMapping: () => {},
+      countActiveGamesByCreator: () => 0,
+      countRecentGamesByCreator: () => 0,
+    } as any);
+
+    const sizeForTen = await (gm as any).getGameCreationRentLamports(10);
+    const sizeForTenCached = await (gm as any).getGameCreationRentLamports(10);
+    const sizeForOne = await (gm as any).getGameCreationRentLamports(1);
+
+    expect(sizeForTen).toBe(1_100_000);
+    expect(sizeForTenCached).toBe(sizeForTen);
+    expect(sizeForOne).toBe(1_100_000);
+
+    const expectedSizeForTen =
+      GAME_ACCOUNT_BASE_SIZE_BYTES + 10 * GAME_ACCOUNT_PARTICIPANT_ENTRY_BYTES;
+    const expectedSizeForOne =
+      GAME_ACCOUNT_BASE_SIZE_BYTES + 1 * GAME_ACCOUNT_PARTICIPANT_ENTRY_BYTES;
+
+    expect(connection.__rentSizes?.()).toEqual([
+      expectedSizeForTen,
+      expectedSizeForOne,
+    ]);
+    expect(connection.__rentCalls?.()).toBe(2);
   });
 
   test("prevents concurrent creations from exceeding active game cap", async () => {

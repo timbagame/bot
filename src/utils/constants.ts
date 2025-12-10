@@ -62,7 +62,10 @@ export const MIN_GAME_TIMEOUT = 300; // 5 minutes
 export const MAX_GAME_TIMEOUT = 86_400; // 24 hours
 export const DEFAULT_GAME_TIMEOUT = 3600; // 1 hour
 export const GAME_TIMEOUT = DEFAULT_GAME_TIMEOUT;
-export const GAME_ACCOUNT_SIZE_BYTES = 127;
+// Game account sizing: 8-byte discriminator + fixed fields + 4-byte vec len
+// for participant hashes. Each participant hash entry is a u64 (8 bytes).
+export const GAME_ACCOUNT_BASE_SIZE_BYTES = 130;
+export const GAME_ACCOUNT_PARTICIPANT_ENTRY_BYTES = 8;
 export const GAME_ACCOUNT_RENT_EXEMPTION_FALLBACK_LAMPORTS = Math.ceil(
   0.003 * LAMPORTS_PER_SOL
 );

@@ -29,7 +29,8 @@ import { formatDuration } from "./format-time";
 import {
   DEFAULT_NULL_ADDRESS,
   GAME_ACCOUNT_RENT_EXEMPTION_FALLBACK_LAMPORTS,
-  GAME_ACCOUNT_SIZE_BYTES,
+  GAME_ACCOUNT_BASE_SIZE_BYTES,
+  GAME_ACCOUNT_PARTICIPANT_ENTRY_BYTES,
   GAME_CREATION_RATE_LIMIT_WINDOW_MS,
   GAME_INFO_LIMIT,
   GAME_EXPIRATION_BUFFER_TIME,
@@ -285,7 +286,8 @@ export class GameManager {
   private activeGameMessages = new Map<string, Map<number, GameMessage>>();
   private cachedConnection?: Connection;
   private tokenProgramCache = new Map<string, PublicKey>();
-  private gameRentLamports: number | null = null;
+  private gameAccountBaseSizeBytes: number | null = null;
+  private gameRentLamportsBySize = new Map<number, number>();
   private inFlightGameCreations = new Map<string, number>();
   private pendingCreationRequests = new Map<string, number[]>();
   private readonly completedGameErrorMessage =
@@ -1632,26 +1634,49 @@ export class GameManager {
     return null;
   }
 
-  private getGameAccountSizeBytes(): number {
-    const programDefinedSize = (this.program.account as any)?.game?.size;
-    if (typeof programDefinedSize === "number" && programDefinedSize > 0) {
-      return programDefinedSize;
+  private getGameAccountBaseSizeBytes(): number {
+    if (this.gameAccountBaseSizeBytes !== null) {
+      return this.gameAccountBaseSizeBytes;
     }
+
+    const programDefinedSize = (this.program.account as any)?.game?.size;
+    const safeProgramSize =
+      typeof programDefinedSize === "number" && programDefinedSize > 0
+        ? programDefinedSize
+        : 0;
 
     const coderSize = this.tryGetGameAccountSizeFromCoder();
-    if (coderSize !== null) {
-      return coderSize;
-    }
+    const resolvedBase = Math.max(
+      safeProgramSize,
+      coderSize ?? 0,
+      GAME_ACCOUNT_BASE_SIZE_BYTES
+    );
 
-    return GAME_ACCOUNT_SIZE_BYTES;
+    this.gameAccountBaseSizeBytes = resolvedBase;
+    return resolvedBase;
   }
 
-  private async getGameCreationRentLamports(): Promise<number> {
-    if (this.gameRentLamports !== null) {
-      return this.gameRentLamports;
+  private getGameAccountSizeBytes(maxTickets?: number): number {
+    const baseSize = this.getGameAccountBaseSizeBytes();
+    const normalizedMaxTickets =
+      typeof maxTickets === "number" && Number.isFinite(maxTickets)
+        ? Math.max(Math.ceil(maxTickets), 0)
+        : 0;
+
+    return (
+      baseSize + normalizedMaxTickets * GAME_ACCOUNT_PARTICIPANT_ENTRY_BYTES
+    );
+  }
+
+  private async getGameCreationRentLamports(
+    maxTickets?: number
+  ): Promise<number> {
+    const accountSizeBytes = this.getGameAccountSizeBytes(maxTickets);
+    const cachedRent = this.gameRentLamportsBySize.get(accountSizeBytes);
+    if (typeof cachedRent === "number") {
+      return cachedRent;
     }
 
-    const accountSizeBytes = this.getGameAccountSizeBytes();
     const connection = this.getConnection();
 
     try {
@@ -1659,12 +1684,12 @@ export class GameManager {
         accountSizeBytes
       );
       if (Number.isFinite(rent) && rent > 0) {
-        this.gameRentLamports = rent;
+        this.gameRentLamportsBySize.set(accountSizeBytes, rent);
         return rent;
       }
 
       console.warn(
-        `⚠️ Invalid rent exemption value (${rent}) for game account. Using fallback estimate.`,
+        `⚠️ Invalid rent exemption value (${rent}) for game account of size ${accountSizeBytes}. Using fallback estimate.`,
         accountSizeBytes
       );
     } catch (error) {
@@ -1674,8 +1699,17 @@ export class GameManager {
       );
     }
 
-    this.gameRentLamports = GAME_ACCOUNT_RENT_EXEMPTION_FALLBACK_LAMPORTS;
-    return GAME_ACCOUNT_RENT_EXEMPTION_FALLBACK_LAMPORTS;
+    const baseSize = this.getGameAccountBaseSizeBytes();
+    const scaledFallback = Math.max(
+      GAME_ACCOUNT_RENT_EXEMPTION_FALLBACK_LAMPORTS,
+      Math.ceil(
+        GAME_ACCOUNT_RENT_EXEMPTION_FALLBACK_LAMPORTS *
+          (accountSizeBytes / baseSize)
+      )
+    );
+
+    this.gameRentLamportsBySize.set(accountSizeBytes, scaledFallback);
+    return scaledFallback;
   }
 
   private async ensureWrappedSolBalance(
@@ -3200,7 +3234,7 @@ export class GameManager {
       const playerKp = this.wallet.getKeyPair(telegramId);
       const [minSolBuffer, gameRentLamports] = await Promise.all([
         this.feeBudget.getGameSafetyBufferLamports(),
-        this.getGameCreationRentLamports(),
+        this.getGameCreationRentLamports(maxTickets),
       ]);
       const requiredSolReserveLamports = minSolBuffer + gameRentLamports;
 
