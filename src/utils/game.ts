@@ -38,6 +38,7 @@ import {
   getCoinflipVideoId,
   getGiveawayVideoId,
   TELEGRAM_USERNAME_CACHE_TTL_MS,
+  CHAT_MEDIA_DISABLED_SENTINEL,
 } from "./constants";
 import { ChatDatabase } from "./chat-database";
 import {
@@ -91,12 +92,14 @@ const resolveGameMedia = (
     
     if (lower === "coinflip") {
       // Check chat-specific setting
-      // null = explicitly disabled (no media)
+      // "__DISABLED__" = explicitly disabled (no media)
+      // null = not set (use bot default) - for existing rows before migration
       // empty string "" = cleared (use bot default)  
       // any other value = custom media
-      if (chatSettings && Object.prototype.hasOwnProperty.call(chatSettings, "coinflip_video_id")) {
+      if (chatSettings) {
         const videoId = chatSettings.coinflip_video_id;
-        if (videoId === null) {
+        // Check for sentinel value indicating explicitly disabled
+        if (videoId === CHAT_MEDIA_DISABLED_SENTINEL) {
           // Explicitly disabled - don't send any media
           return undefined;
         }
@@ -107,16 +110,19 @@ const resolveGameMedia = (
           const mediaType = (chatSettings.coinflip_media_type as "photo" | "video" | "animation") || "video";
           return { fileId: videoId, mediaType };
         }
+        // If videoId is null, treat as "not set" and fall through to bot default
       }
     }
     if (lower === "giveaway") {
       // Check chat-specific setting
-      // null = explicitly disabled (no media)
+      // "__DISABLED__" = explicitly disabled (no media)
+      // null = not set (use bot default) - for existing rows before migration
       // empty string "" = cleared (use bot default)
       // any other value = custom media
-      if (chatSettings && Object.prototype.hasOwnProperty.call(chatSettings, "giveaway_video_id")) {
+      if (chatSettings) {
         const videoId = chatSettings.giveaway_video_id;
-        if (videoId === null) {
+        // Check for sentinel value indicating explicitly disabled
+        if (videoId === CHAT_MEDIA_DISABLED_SENTINEL) {
           // Explicitly disabled - don't send any media
           return undefined;
         }
@@ -127,6 +133,7 @@ const resolveGameMedia = (
           const mediaType = (chatSettings.giveaway_media_type as "photo" | "video" | "animation") || "video";
           return { fileId: videoId, mediaType };
         }
+        // If videoId is null, treat as "not set" and fall through to bot default
       }
     }
   }

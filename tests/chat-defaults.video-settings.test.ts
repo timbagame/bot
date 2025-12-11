@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { ChatDatabase } from "../src/utils/chat-database";
+import { CHAT_MEDIA_DISABLED_SENTINEL } from "../src/utils/constants";
 import { resetTestDatabase } from "./helpers/database";
 
 describe("Chat defaults video settings isolation", () => {
@@ -49,7 +50,7 @@ describe("Chat defaults video settings isolation", () => {
 
     // Disable giveaway video
     chatDb.upsertChatGameSettings(99, {
-      giveaway_video_id: null,
+      giveaway_video_id: CHAT_MEDIA_DISABLED_SENTINEL,
       giveaway_media_type: null,
       set_by_telegram_id: "admin",
     });
@@ -57,7 +58,7 @@ describe("Chat defaults video settings isolation", () => {
     const settings = chatDb.getChatGameSettings(99);
     expect(settings?.coinflip_video_id).toBe("coinflip_custom_photo");
     expect(settings?.coinflip_media_type).toBe("photo");
-    expect(settings?.giveaway_video_id).toBeNull();
+    expect(settings?.giveaway_video_id).toBe(CHAT_MEDIA_DISABLED_SENTINEL);
     expect(settings?.giveaway_media_type).toBeNull();
   });
 
@@ -71,7 +72,7 @@ describe("Chat defaults video settings isolation", () => {
 
     // Disable coinflip video
     chatDb.upsertChatGameSettings(99, {
-      coinflip_video_id: null,
+      coinflip_video_id: CHAT_MEDIA_DISABLED_SENTINEL,
       coinflip_media_type: null,
       set_by_telegram_id: "admin",
     });
@@ -79,7 +80,7 @@ describe("Chat defaults video settings isolation", () => {
     const settings = chatDb.getChatGameSettings(99);
     expect(settings?.giveaway_video_id).toBe("giveaway_custom_video");
     expect(settings?.giveaway_media_type).toBe("video");
-    expect(settings?.coinflip_video_id).toBeNull();
+    expect(settings?.coinflip_video_id).toBe(CHAT_MEDIA_DISABLED_SENTINEL);
     expect(settings?.coinflip_media_type).toBeNull();
   });
 
@@ -165,7 +166,7 @@ describe("Chat defaults video settings isolation", () => {
 
     // Disable giveaway
     chatDb.upsertChatGameSettings(99, {
-      giveaway_video_id: null,
+      giveaway_video_id: CHAT_MEDIA_DISABLED_SENTINEL,
       giveaway_media_type: null,
       set_by_telegram_id: "admin",
     });
@@ -173,7 +174,7 @@ describe("Chat defaults video settings isolation", () => {
     const settings = chatDb.getChatGameSettings(99);
     expect(settings?.coinflip_video_id).toBe("custom_photo_id");
     expect(settings?.coinflip_media_type).toBe("photo");
-    expect(settings?.giveaway_video_id).toBeNull();
+    expect(settings?.giveaway_video_id).toBe(CHAT_MEDIA_DISABLED_SENTINEL);
     expect(settings?.giveaway_media_type).toBeNull();
 
     // Clear coinflip (use bot default)
@@ -187,7 +188,7 @@ describe("Chat defaults video settings isolation", () => {
     expect(settings2?.coinflip_video_id).toBe("");
     expect(settings2?.coinflip_media_type).toBeNull();
     // Giveaway should still be disabled
-    expect(settings2?.giveaway_video_id).toBeNull();
+    expect(settings2?.giveaway_video_id).toBe(CHAT_MEDIA_DISABLED_SENTINEL);
     expect(settings2?.giveaway_media_type).toBeNull();
   });
 });

@@ -12,6 +12,7 @@ import {
   MIN_COINFLIP_PLAYERS,
   MIN_GAME_TIMEOUT,
   MIN_GIVEAWAY_PLAYERS,
+  CHAT_MEDIA_DISABLED_SENTINEL,
 } from "../utils/constants";
 import {
   clampChatPlayers,
@@ -163,7 +164,7 @@ const buildSettingsSummary = async (
   let coinflipVideoDisplay = "Using bot default";
   if (chatSettings && Object.prototype.hasOwnProperty.call(chatSettings, "coinflip_video_id")) {
     const videoId = chatSettings.coinflip_video_id;
-    if (videoId === null) {
+    if (videoId === CHAT_MEDIA_DISABLED_SENTINEL) {
       coinflipVideoSuffix = "(disabled)";
       coinflipVideoDisplay = "Disabled - text only";
     } else if (videoId === "") {
@@ -180,7 +181,7 @@ const buildSettingsSummary = async (
   let giveawayVideoDisplay = "Using bot default";
   if (chatSettings && Object.prototype.hasOwnProperty.call(chatSettings, "giveaway_video_id")) {
     const videoId = chatSettings.giveaway_video_id;
-    if (videoId === null) {
+    if (videoId === CHAT_MEDIA_DISABLED_SENTINEL) {
       giveawayVideoSuffix = "(disabled)";
       giveawayVideoDisplay = "Disabled - text only";
     } else if (videoId === "") {
@@ -733,10 +734,10 @@ export const createChatDefaultsModule = (
         set_by_telegram_id: telegramId.toString(),
       };
       if (target === "video_coinflip") {
-        updateData.coinflip_video_id = null;
+        updateData.coinflip_video_id = CHAT_MEDIA_DISABLED_SENTINEL;
         updateData.coinflip_media_type = null;
       } else {
-        updateData.giveaway_video_id = null;
+        updateData.giveaway_video_id = CHAT_MEDIA_DISABLED_SENTINEL;
         updateData.giveaway_media_type = null;
       }
       deps.chatDb.upsertChatGameSettings(chatId, updateData);
