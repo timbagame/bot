@@ -77,7 +77,6 @@ describe("keyboards: main and wallet", () => {
     const kb = createMainMenuKeyboard();
     const callbacks = extractCallbacks(kb);
     expect(callbacks).toContain("main_wallet");
-    expect(callbacks).toContain("cmd_help");
   });
 
   test("wallet keyboard contains swap/withdraw/refresh and settings", () => {

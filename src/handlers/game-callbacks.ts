@@ -108,7 +108,6 @@ const NON_GAME_CALLBACK_NAMES = [
   "main_wallet",
   "wallet_refresh",
   "wallet_settings",
-  "cmd_help",
   "cmd_balance",
   "cmd_withdraw",
   "chat_defaults_cancel",
@@ -117,10 +116,6 @@ const NON_GAME_CALLBACK_NAMES = [
   "cmd_unwrap",
   "cmd_privatekey",
   "unwrap_confirm",
-  "help_wallet",
-  "help_games",
-  "help_utility",
-  "help_examples",
 ] as const;
 
 const NON_GAME_CALLBACK_PREFIXES = [

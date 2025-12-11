@@ -15,8 +15,6 @@ import { formatDuration } from "./format-time";
 export const createMainMenuKeyboard = (): InlineKeyboard => {
   return new InlineKeyboard()
     .text("💳 Wallet", "main_wallet")
-    .row()
-    .text("❓ Help", "cmd_help")
     .row();
 };
 
