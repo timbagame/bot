@@ -815,6 +815,20 @@ export const createChatDefaultsModule = (
   ): Promise<boolean> => {
     if (session.type !== "chat_defaults") return false;
 
+    const initiatorId = session.initiatorId;
+    const currentUserId = getTelegramIdString(ctx);
+    if (
+      typeof initiatorId === "string" &&
+      initiatorId.length > 0 &&
+      initiatorId !== currentUserId
+    ) {
+      await deps.replyToMessage(
+        ctx,
+        "❌ <b>This prompt is no longer active for you.</b>\n\nOpen the defaults menu again to continue."
+      );
+      return true;
+    }
+
     const telegramId = getTelegramId(ctx);
     const admin = await deps.isUserGroupAdmin(ctx, Number(telegramId));
     if (!admin) {
