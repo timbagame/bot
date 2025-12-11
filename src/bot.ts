@@ -5553,19 +5553,15 @@ const handleMediaForChatDefaults = async (ctx: any, mediaType: "video" | "photo"
       // Use the largest photo
       fileId = message.photo[message.photo.length - 1].file_id;
     } else if (mediaType === "document" && message?.document) {
-      // For documents, try to determine if it's an image/video
-      const mimeType = message.document.mime_type?.toLowerCase() || "";
-      if (mimeType.startsWith("image/")) {
-        fileId = message.document.file_id;
-        // Update mediaType to photo for images
-        (ctx as any).__detectedMediaType = "photo";
-      } else if (mimeType.startsWith("video/")) {
-        fileId = message.document.file_id;
-        (ctx as any).__detectedMediaType = "video";
-      } else {
-        fileId = message.document.file_id;
-        (ctx as any).__detectedMediaType = "video"; // default
-      }
+      // Reject all documents - only accept direct photos, videos, and animations
+      await ctx.reply(
+        "❌ <b>Please send media directly</b>\n\n" +
+        "Only <b>photos</b>, <b>videos</b>, or <b>GIFs</b> sent directly are accepted.\n\n" +
+        "Files sent as documents are not supported.",
+        { parse_mode: "HTML" }
+      );
+      clearInputSession(sessionKey);
+      return;
     }
 
     if (fileId) {
