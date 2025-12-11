@@ -1,8 +1,8 @@
 import { LAMPORTS_PER_SOL } from "./constants";
 
-export const MAX_REFERRAL_FEE_BPS = 200;
+export const MAX_REFERRAL_FEE_BPS = 255;
 export const DEFAULT_REFERRAL_BASE_FEE_BPS = 85;
-export const DEFAULT_MAX_EXTRA_FEE_BPS = 100;
+export const DEFAULT_MAX_EXTRA_FEE_BPS = 170; // 255 max - 85 base = 170 max extra
 
 export interface AdminPayerSurchargeOptions {
   baseFeeBps: number;

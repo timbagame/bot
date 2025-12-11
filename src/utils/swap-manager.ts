@@ -17,13 +17,14 @@ import { WalletManager } from "./wallet";
 import { FeeBudgetManager } from "./fee-budget";
 import type { FeeBudgetProvider } from "./fee-budget";
 import { formatAmount } from "./format-amount";
-import { WSOL_MINT } from "./token-registry";
+import { WSOL_MINT } from "./constants";
 import type {
   JustInTimeSwapResult,
   SwapQuote,
   SwapRequest,
 } from "./swap/types";
 import type { IntegratorSwapParams } from "./integrator-fees";
+import { calculateDynamicReferralFee } from "./integrator-fees";
 import { SwapQuoteCache } from "./swap/quote-cache";
 import { getReferralConfigForMint, WSOL_MINT as REGISTRY_SOL } from "./token-registry";
 import { SwapService } from "./swap/service";
@@ -31,6 +32,10 @@ import {
   calculateRouteCosts,
   DEFAULT_ROUTE_LAMPORTS_PADDING,
 } from "./swap/route-cost";
+import {
+  DEFAULT_REFERRAL_BASE_FEE_BPS,
+  DEFAULT_MAX_EXTRA_FEE_BPS,
+} from "./admin-payer-surcharge";
 
 export type {
   SwapQuote,
@@ -284,7 +289,6 @@ export class SwapManager {
 
     try {
       const ticker = tokenTicker.toUpperCase();
-      const integrator = this.buildIntegrator(tokenMint);
       const targetResult = await this.computeTargets({
         userKeypair,
         availableTokenAmountRaw,
@@ -312,6 +316,15 @@ export class SwapManager {
         availableRawBig,
         jitFeeBuffer,
       } = targetState;
+
+      // Build integrator with dynamic fee based on shortfall
+      const integrator = await this.buildJitIntegrator({
+        tokenMint,
+        tokenDecimals,
+        availableTokenAmountRaw,
+        shortfallLamports: lamportsShortfall,
+        tokenTicker: ticker,
+      });
 
       const strategy = this.isSolMint(tokenMint)
         ? JitRetryStrategy.UnwrapFirst
@@ -399,7 +412,25 @@ export class SwapManager {
     }
   }
 
-  private buildIntegrator(tokenMint: string): IntegratorSwapParams | null {
+  /**
+   * Build integrator params for JIT swaps with dynamic fee calculation.
+   * Uses the unified calculateDynamicReferralFee to ensure consistent fee logic.
+   */
+  private async buildJitIntegrator(options: {
+    tokenMint: string;
+    tokenDecimals: number;
+    availableTokenAmountRaw: number;
+    shortfallLamports: number;
+    tokenTicker: string;
+  }): Promise<IntegratorSwapParams | null> {
+    const {
+      tokenMint,
+      tokenDecimals,
+      availableTokenAmountRaw,
+      shortfallLamports,
+      tokenTicker,
+    } = options;
+
     const ref =
       getReferralConfigForMint(tokenMint) ||
       getReferralConfigForMint(REGISTRY_SOL);
@@ -413,9 +444,24 @@ export class SwapManager {
     }
 
     const admin = adminKeypair.publicKey.toBase58();
+    const baseFeeBps = ref.baseFeeBps ?? DEFAULT_REFERRAL_BASE_FEE_BPS;
+    const maxExtraBps = ref.maxExtraFeeBps ?? DEFAULT_MAX_EXTRA_FEE_BPS;
+
+    // Use unified fee calculation
+    const referralFeeBps = await calculateDynamicReferralFee({
+      inputMint: tokenMint,
+      inputTicker: tokenTicker,
+      inputDecimals: tokenDecimals,
+      inputAmountRaw: availableTokenAmountRaw,
+      shortfallLamports,
+      baseFeeBps,
+      maxExtraBps,
+      throwOnPriceFailure: false,
+    });
+
     return {
       referralAccount: ref.referralAccount,
-      referralFee: ref.baseFeeBps ?? 85,
+      referralFee: referralFeeBps,
       payer: ref.adminPayer ?? admin,
       closeAuthority: ref.adminCloseAuthority ?? admin,
       payerKind: "admin",
