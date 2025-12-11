@@ -3588,6 +3588,8 @@ bot.command("help", async (ctx: Context) => {
     "/games - Show your recent games",
     "/leaderboard - Show top 10 players in this group (groups only)",
     "/lb - Shorthand for leaderboard command",
+    "/globalboard - Show global leaderboard",
+    "/gb - Shorthand for globalboard command",
     "",
     "<b>🪙 Token Management:</b>",
     "/default - View chat defaults (token, players, privacy, media, timeout)",
@@ -4872,7 +4874,8 @@ const HELP_SECTIONS: Record<HelpSectionKey, HelpSectionConfig> = {
       "<code>/giveaway &lt;amount&gt; [TOKEN] &lt;players&gt;</code> - Create giveaway\n" +
       "<code>/active</code> - Show active games\n" +
       "<code>/games</code> - Show your game history\n" +
-      "<code>/leaderboard</code> - Show top 10 players (groups only)\n\n" +
+      "<code>/leaderboard</code> - Show top 10 players (groups only)\n" +
+      "<code>/globalboard</code> - Show global leaderboard\n\n" +
       "🪙 <b>Game Types:</b>\n" +
       "• <b>Coinflip:</b> Players pay to join, winner takes all\n" +
       "• <b>Giveaway:</b> Free to join, you fund the prize\n\n" +
