@@ -3590,7 +3590,7 @@ bot.command("help", async (ctx: Context) => {
     "/lb - Shorthand for leaderboard command",
     "",
     "<b>🪙 Token Management:</b>",
-    "/default - View chat defaults (token, players, timeout)",
+    "/default - View chat defaults (token, players, privacy, media, timeout)",
     "",
     "<b>🔧 Utility Commands:</b>",
     "/oracle - Check Oracle configuration",
@@ -3598,7 +3598,7 @@ bot.command("help", async (ctx: Context) => {
     "<b>ℹ️ Important:</b> ",
     "• Your player balance account will be automatically initialized when needed",
     "• Specify token after amount: /coinflip 100 TIMBA 2 or /tip @user 50 SOL",
-    "• Group admins can set chat defaults (token, limits, timeout) via /default",
+    "• Group admins can set chat defaults (token, limits, privacy, media, timeout) via /default",
 
     "• Contact bot administrator to add support for new SPL tokens",
   ];
@@ -4891,7 +4891,7 @@ const HELP_SECTIONS: Record<HelpSectionKey, HelpSectionConfig> = {
     text:
       "🔧 <b>Utility Commands</b>\n\n" +
       "<code>/oracle</code> - Check oracle status\n" +
-      "<code>/default</code> - Manage chat defaults (token, players, timeout)\n\n" +
+      "<code>/default</code> - Manage chat defaults (token, players, privacy, media, timeout)\n\n" +
       "🔐 <b>Security:</b>\n" +
       "• Some commands are private-chat only\n" +
       "• Admin commands require permissions\n" +

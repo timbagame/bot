@@ -1,24 +1,15 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { ChatDatabase } from "../src/utils/chat-database";
 import { __test_resolveGameMedia as resolveGameMedia } from "../src/utils/game";
-import { CHAT_MEDIA_DISABLED_SENTINEL } from "../src/utils/constants";
+import {
+  CHAT_MEDIA_DISABLED_SENTINEL,
+  getCoinflipVideoId,
+  getGiveawayVideoId,
+} from "../src/utils/constants";
 import { resetTestDatabase } from "./helpers/database";
 
-// Mock the constants to provide test video IDs
-mock.module("../src/utils/constants", () => ({
-  CHAT_MEDIA_DISABLED_SENTINEL: "__DISABLED__",
-  getCoinflipVideoId: () => "default_coinflip_video_id",
-  getGiveawayVideoId: () => "default_giveaway_video_id",
-  TELEGRAM_USERNAME_CACHE_TTL_MS: 60000,
-  GAME_CREATION_RATE_LIMIT_WINDOW_MS: 60000,
-  GAME_INFO_LIMIT: 10,
-  GAME_EXPIRATION_BUFFER_TIME: 300,
-  MAX_ACTIVE_GAMES_PER_CREATOR: 5,
-  MAX_GAMES_PER_CREATOR_WINDOW: 10,
-  WSOL_MINT: "So11111111111111111111111111111111111111112",
-  DEFAULT_NULL_ADDRESS: "11111111111111111111111111111111",
-  DEFAULT_TOKEN_TICKER: "TIMBA",
-}));
+const defaultCoinflipVideoId = getCoinflipVideoId();
+const defaultGiveawayVideoId = getGiveawayVideoId();
 
 describe("resolveGameMedia", () => {
   let chatDb: ChatDatabase;
@@ -33,7 +24,7 @@ describe("resolveGameMedia", () => {
     test("returns bot default video for coinflip", () => {
       const result = resolveGameMedia("coinflip", undefined);
       expect(result).toEqual({
-        fileId: "default_coinflip_video_id",
+        fileId: defaultCoinflipVideoId,
         mediaType: "video",
       });
     });
@@ -41,7 +32,7 @@ describe("resolveGameMedia", () => {
     test("returns bot default video for giveaway", () => {
       const result = resolveGameMedia("giveaway", undefined);
       expect(result).toEqual({
-        fileId: "default_giveaway_video_id",
+        fileId: defaultGiveawayVideoId,
         mediaType: "video",
       });
     });
@@ -53,11 +44,11 @@ describe("resolveGameMedia", () => {
 
     test("is case insensitive for game type", () => {
       expect(resolveGameMedia("COINFLIP", undefined)).toEqual({
-        fileId: "default_coinflip_video_id",
+        fileId: defaultCoinflipVideoId,
         mediaType: "video",
       });
       expect(resolveGameMedia("GIVEAWAY", undefined)).toEqual({
-        fileId: "default_giveaway_video_id",
+        fileId: defaultGiveawayVideoId,
         mediaType: "video",
       });
     });
@@ -184,7 +175,7 @@ describe("resolveGameMedia", () => {
 
       const result = resolveGameMedia("coinflip", 123);
       expect(result).toEqual({
-        fileId: "default_coinflip_video_id",
+        fileId: defaultCoinflipVideoId,
         mediaType: "video",
       });
     });
@@ -198,7 +189,7 @@ describe("resolveGameMedia", () => {
 
       const result = resolveGameMedia("giveaway", 123);
       expect(result).toEqual({
-        fileId: "default_giveaway_video_id",
+        fileId: defaultGiveawayVideoId,
         mediaType: "video",
       });
     });
@@ -214,7 +205,7 @@ describe("resolveGameMedia", () => {
 
       const result = resolveGameMedia("coinflip", 123);
       expect(result).toEqual({
-        fileId: "default_coinflip_video_id",
+        fileId: defaultCoinflipVideoId,
         mediaType: "video",
       });
     });
@@ -233,7 +224,7 @@ describe("resolveGameMedia", () => {
         mediaType: "photo",
       });
       expect(resolveGameMedia("giveaway", 123)).toEqual({
-        fileId: "default_giveaway_video_id",
+        fileId: defaultGiveawayVideoId,
         mediaType: "video",
       });
     });
@@ -246,7 +237,7 @@ describe("resolveGameMedia", () => {
       });
 
       expect(resolveGameMedia("coinflip", 123)).toEqual({
-        fileId: "default_coinflip_video_id",
+        fileId: defaultCoinflipVideoId,
         mediaType: "video",
       });
       expect(resolveGameMedia("giveaway", 123)).toEqual({
@@ -289,7 +280,7 @@ describe("resolveGameMedia", () => {
 
       // Chat 200 has no settings
       expect(resolveGameMedia("coinflip", 200)).toEqual({
-        fileId: "default_coinflip_video_id",
+        fileId: defaultCoinflipVideoId,
         mediaType: "video",
       });
     });
