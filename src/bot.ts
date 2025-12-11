@@ -5492,6 +5492,122 @@ bot.on("message:text", async (ctx, next) => {
   }
 });
 
+// Handle media messages (video, photo, animation) for chat defaults video ID settings
+const handleMediaForChatDefaults = async (ctx: any, mediaType: "video" | "photo" | "animation" | "document") => {
+  const userId = getTelegramIdString(ctx);
+  if (!userId) {
+    return;
+  }
+
+  // Check if the message is a reply to a prompting message
+  const replyToMessageId = ctx.message?.reply_to_message?.message_id;
+  if (!replyToMessageId) {
+    return;
+  }
+
+  // Construct session key from chat and message ID
+  const sessionKey = `${ctx.chat?.id || 0}_${replyToMessageId}`;
+
+  // Check for input session
+  const inputSession = getInputSession(sessionKey);
+  if (!inputSession || inputSession.type !== "chat_defaults") {
+    return; // Not waiting for video ID input
+  }
+
+  const setting = inputSession["setting"] as string | undefined;
+  if (setting !== "video_coinflip" && setting !== "video_giveaway") {
+    return; // Not a video ID setting
+  }
+
+  if (
+    typeof inputSession.initiatorId === "string" &&
+    inputSession.initiatorId.length > 0 &&
+    inputSession.initiatorId !== userId
+  ) {
+    await ctx.reply(
+      "❌ <b>This prompt is no longer active for you.</b>\n\nOpen the defaults menu again to continue.",
+      {
+        parse_mode: "HTML",
+      }
+    );
+    return;
+  }
+
+  const lockerSuffix = ctx.message?.message_id ?? ctx.update?.update_id ?? Date.now();
+  const lockerId = `${userId}:${lockerSuffix}`;
+  const locked = markInputSessionProcessing(sessionKey, lockerId);
+
+  if (!locked) {
+    return;
+  }
+
+  try {
+    let fileId: string | undefined;
+    const message = ctx.message;
+
+    if (mediaType === "video" && message?.video) {
+      fileId = message.video.file_id;
+    } else if (mediaType === "animation" && message?.animation) {
+      fileId = message.animation.file_id;
+    } else if (mediaType === "photo" && message?.photo && message.photo.length > 0) {
+      // Use the largest photo
+      fileId = message.photo[message.photo.length - 1].file_id;
+    } else if (mediaType === "document" && message?.document) {
+      // For documents, try to determine if it's an image/video
+      const mimeType = message.document.mime_type?.toLowerCase() || "";
+      if (mimeType.startsWith("image/")) {
+        fileId = message.document.file_id;
+        // Update mediaType to photo for images
+        (ctx as any).__detectedMediaType = "photo";
+      } else if (mimeType.startsWith("video/")) {
+        fileId = message.document.file_id;
+        (ctx as any).__detectedMediaType = "video";
+      } else {
+        fileId = message.document.file_id;
+        (ctx as any).__detectedMediaType = "video"; // default
+      }
+    }
+
+    if (fileId) {
+      // Store the media type in context so handleVideoIdUpdate can access it
+      (ctx as any).__mediaType = mediaType === "document" ? ((ctx as any).__detectedMediaType || "video") : mediaType;
+      await chatDefaultsModule.handleSettingsInput(ctx, inputSession, "");
+    } else {
+      await ctx.reply("❌ Could not extract file ID from the media. Please try again.");
+    }
+
+    clearInputSession(sessionKey);
+  } catch (error) {
+    clearInputSession(sessionKey);
+    console.error("Error handling media input for chat defaults:", error);
+    await ctx.reply("❌ <b>Error processing media</b>\n\nPlease try again.", {
+      parse_mode: "HTML",
+    });
+  } finally {
+    clearInputSessionProcessing(sessionKey);
+  }
+};
+
+bot.on("message:video", async (ctx, next) => {
+  await handleMediaForChatDefaults(ctx, "video");
+  await next();
+});
+
+bot.on("message:photo", async (ctx, next) => {
+  await handleMediaForChatDefaults(ctx, "photo");
+  await next();
+});
+
+bot.on("message:animation", async (ctx, next) => {
+  await handleMediaForChatDefaults(ctx, "animation");
+  await next();
+});
+
+bot.on("message:document", async (ctx, next) => {
+  await handleMediaForChatDefaults(ctx, "document");
+  await next();
+});
+
 /**
  * Handle swap token input (when user sends token mint or symbol)
  */

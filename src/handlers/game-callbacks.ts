@@ -111,6 +111,7 @@ const NON_GAME_CALLBACK_NAMES = [
   "cmd_help",
   "cmd_balance",
   "cmd_withdraw",
+  "chat_defaults_cancel",
   "cmd_swap",
   "cmd_wrap",
   "cmd_unwrap",
@@ -140,6 +141,7 @@ const NON_GAME_CALLBACK_PREFIXES = [
   "info_",
   "advanced_",
   "active_list",
+  "chat_defaults_",
 ] as const;
 
 const shouldSkipGenericGameCallback = (callbackData: string): boolean => {

@@ -39,6 +39,7 @@ import {
   getGiveawayVideoId,
   TELEGRAM_USERNAME_CACHE_TTL_MS,
 } from "./constants";
+import { ChatDatabase } from "./chat-database";
 import {
   editMediaWithFallback,
   isRecoverableMediaError,
@@ -77,15 +78,71 @@ import {
   resolvePrimaryRpcEndpoint,
 } from "./rpc-endpoints";
 
-const resolveGameVideoId = (gameType: string): string | undefined => {
+const resolveGameMedia = (
+  gameType: string,
+  chatId?: number
+): { fileId: string; mediaType: "photo" | "video" | "animation" } | undefined => {
   const lower = gameType.toLowerCase();
+  
+  // Check for chat-specific media first
+  if (chatId != null) {
+    const chatDb = ChatDatabase.getInstance();
+    const chatSettings = chatDb.getChatGameSettings(chatId);
+    
+    if (lower === "coinflip") {
+      // Check chat-specific setting
+      // null = explicitly disabled (no media)
+      // empty string "" = cleared (use bot default)  
+      // any other value = custom media
+      if (chatSettings && Object.prototype.hasOwnProperty.call(chatSettings, "coinflip_video_id")) {
+        const videoId = chatSettings.coinflip_video_id;
+        if (videoId === null) {
+          // Explicitly disabled - don't send any media
+          return undefined;
+        }
+        if (videoId === "") {
+          // Cleared - use bot default (fall through)
+        } else if (videoId && videoId.length > 0) {
+          // Custom media
+          const mediaType = (chatSettings.coinflip_media_type as "photo" | "video" | "animation") || "video";
+          return { fileId: videoId, mediaType };
+        }
+      }
+    }
+    if (lower === "giveaway") {
+      // Check chat-specific setting
+      // null = explicitly disabled (no media)
+      // empty string "" = cleared (use bot default)
+      // any other value = custom media
+      if (chatSettings && Object.prototype.hasOwnProperty.call(chatSettings, "giveaway_video_id")) {
+        const videoId = chatSettings.giveaway_video_id;
+        if (videoId === null) {
+          // Explicitly disabled - don't send any media
+          return undefined;
+        }
+        if (videoId === "") {
+          // Cleared - use bot default (fall through)
+        } else if (videoId && videoId.length > 0) {
+          // Custom media
+          const mediaType = (chatSettings.giveaway_media_type as "photo" | "video" | "animation") || "video";
+          return { fileId: videoId, mediaType };
+        }
+      }
+    }
+  }
+  
+  // Fall back to global defaults (always video)
   if (lower === "coinflip") {
     const id = getCoinflipVideoId();
-    return id && id.length > 0 ? id : undefined;
+    if (id && id.length > 0) {
+      return { fileId: id, mediaType: "video" };
+    }
   }
   if (lower === "giveaway") {
     const id = getGiveawayVideoId();
-    return id && id.length > 0 ? id : undefined;
+    if (id && id.length > 0) {
+      return { fileId: id, mediaType: "video" };
+    }
   }
   return undefined;
 };
@@ -677,14 +734,14 @@ export class GameManager {
       undefined;
 
     try {
-      const videoId = options.gameType
-        ? resolveGameVideoId(options.gameType)
+      const media = options.gameType
+        ? resolveGameMedia(options.gameType, fallbackChatId)
         : undefined;
 
       const replyMarkup = options.inlineKeyboard;
 
       const sendResult = await sendMediaWithFallback({
-        videoFileId: videoId ?? null,
+        videoFileId: media?.fileId ?? null,
         logLabel: "recreate game message",
         sendText: () =>
           ctx.api.sendMessage(fallbackChatId, options.messageText, {
@@ -694,14 +751,31 @@ export class GameManager {
             link_preview_options: { is_disabled: true },
           }),
         sendVideo:
-          videoId && typeof ctx.api.sendVideo === "function"
-            ? () =>
-                ctx.api.sendVideo(fallbackChatId, videoId, {
-                  caption: options.messageText,
-                  parse_mode: "HTML",
-                  reply_markup: replyMarkup,
-                  reply_to_message_id: replyToMessageId,
-                })
+          media && typeof ctx.api.sendVideo === "function"
+            ? () => {
+                if (media.mediaType === "photo") {
+                  return ctx.api.sendPhoto(fallbackChatId, media.fileId, {
+                    caption: options.messageText,
+                    parse_mode: "HTML",
+                    reply_markup: replyMarkup,
+                    reply_to_message_id: replyToMessageId,
+                  });
+                } else if (media.mediaType === "animation") {
+                  return ctx.api.sendAnimation(fallbackChatId, media.fileId, {
+                    caption: options.messageText,
+                    parse_mode: "HTML",
+                    reply_markup: replyMarkup,
+                    reply_to_message_id: replyToMessageId,
+                  });
+                } else {
+                  return ctx.api.sendVideo(fallbackChatId, media.fileId, {
+                    caption: options.messageText,
+                    parse_mode: "HTML",
+                    reply_markup: replyMarkup,
+                    reply_to_message_id: replyToMessageId,
+                  });
+                }
+              }
             : undefined,
       });
 
@@ -2329,7 +2403,8 @@ export class GameManager {
       winnerSignature
     );
 
-    const videoId = resolveGameVideoId(gameType);
+    const chatId = ctx.chat?.id;
+    const media = resolveGameMedia(gameType, chatId);
     const replyMarkup = { inline_keyboard: formatted.keyboard };
     let message: any;
     let usesVideo = false;
@@ -2340,18 +2415,32 @@ export class GameManager {
         reply_markup: replyMarkup,
       });
 
-    if (videoId) {
+    if (media) {
       try {
-        message = await ctx.replyWithVideo(videoId, {
-          caption: formatted.messageText,
-          parse_mode: "HTML",
-          reply_markup: replyMarkup,
-        });
+        if (media.mediaType === "photo") {
+          message = await ctx.replyWithPhoto(media.fileId, {
+            caption: formatted.messageText,
+            parse_mode: "HTML",
+            reply_markup: replyMarkup,
+          });
+        } else if (media.mediaType === "animation") {
+          message = await ctx.replyWithAnimation(media.fileId, {
+            caption: formatted.messageText,
+            parse_mode: "HTML",
+            reply_markup: replyMarkup,
+          });
+        } else {
+          message = await ctx.replyWithVideo(media.fileId, {
+            caption: formatted.messageText,
+            parse_mode: "HTML",
+            reply_markup: replyMarkup,
+          });
+        }
         usesVideo = true;
       } catch (error) {
         if (isRecoverableMediaError(error)) {
           console.warn(
-            "Falling back to text announcement after video send failure:",
+            "Falling back to text announcement after media send failure:",
             error
           );
           message = await sendText();
@@ -2660,10 +2749,11 @@ export class GameManager {
     );
 
     const replyTo = replyToMessageId ?? (ctx as any).message?.message_id;
-    const videoId = resolveGameVideoId(gameType);
+    const chatId = ctx.chat?.id;
+    const media = resolveGameMedia(gameType, chatId);
     const replyMarkup = { inline_keyboard: keyboard };
     const sendResult = await sendMediaWithFallback({
-      videoFileId: videoId ?? null,
+      videoFileId: media?.fileId ?? null,
       logLabel: "game video",
       sendText: () =>
         ctx.reply(messageText, {
@@ -2672,14 +2762,31 @@ export class GameManager {
           reply_to_message_id: replyTo,
         }),
       sendVideo:
-        videoId && typeof (ctx as any).replyWithVideo === "function"
-          ? () =>
-              ctx.replyWithVideo(videoId, {
-                caption: messageText,
-                parse_mode: "HTML",
-                reply_markup: replyMarkup,
-                reply_to_message_id: replyTo,
-              })
+        media && typeof (ctx as any).replyWithVideo === "function"
+          ? () => {
+              if (media.mediaType === "photo") {
+                return ctx.replyWithPhoto(media.fileId, {
+                  caption: messageText,
+                  parse_mode: "HTML",
+                  reply_markup: replyMarkup,
+                  reply_to_message_id: replyTo,
+                });
+              } else if (media.mediaType === "animation") {
+                return ctx.replyWithAnimation(media.fileId, {
+                  caption: messageText,
+                  parse_mode: "HTML",
+                  reply_markup: replyMarkup,
+                  reply_to_message_id: replyTo,
+                });
+              } else {
+                return ctx.replyWithVideo(media.fileId, {
+                  caption: messageText,
+                  parse_mode: "HTML",
+                  reply_markup: replyMarkup,
+                  reply_to_message_id: replyTo,
+                });
+              }
+            }
           : undefined,
     });
 
@@ -2744,9 +2851,9 @@ export class GameManager {
         keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined;
       inlineKeyboardValue = inlineKeyboard;
       const lowerStatus = status.toLowerCase();
-      const winnerVideoId = resolveGameVideoId(gameType);
 
       for (const gameMessage of messageMap.values()) {
+        const winnerMedia = resolveGameMedia(gameType, gameMessage.chatId);
         try {
           const supportsVideo = gameMessage.usesVideo !== false;
 
@@ -2761,7 +2868,7 @@ export class GameManager {
               }
             );
 
-          if (winnerVideoId && supportsVideo) {
+          if (winnerMedia && supportsVideo) {
             const isCompleted = lowerStatus === "completed";
             const { usedFallback, skipped } = await editMediaWithFallback({
               edit: () =>
@@ -2770,8 +2877,8 @@ export class GameManager {
                       gameMessage.chatId,
                       gameMessage.messageId,
                       {
-                        type: "video",
-                        media: winnerVideoId,
+                        type: winnerMedia.mediaType,
+                        media: winnerMedia.fileId,
                         caption: messageText,
                         parse_mode: "HTML",
                       },

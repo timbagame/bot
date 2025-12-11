@@ -53,6 +53,10 @@ export interface ChatGameSettings {
   timeout_seconds?: number | null;
   coinflip_default_privacy?: "public" | "private" | null;
   giveaway_default_privacy?: "public" | "private" | null;
+  coinflip_video_id?: string | null; // null = disabled, "" = use bot default, string = custom
+  giveaway_video_id?: string | null; // null = disabled, "" = use bot default, string = custom
+  coinflip_media_type?: "photo" | "video" | "animation" | null;
+  giveaway_media_type?: "photo" | "video" | "animation" | null;
   set_by_telegram_id?: string | null;
   updated_at: number;
 }
