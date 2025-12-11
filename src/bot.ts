@@ -5716,9 +5716,12 @@ const handleSwapToTokenInput = async (
       fromToken,
       messageId: userState.messageId,
       chatId: userState.chatId,
+      initiatorId: getTelegramIdString(ctx),
     });
-  }
-};
+	  }
+	};
+
+export const __test_handleSwapToTokenInput = handleSwapToTokenInput;
 
 /**
  * Handle swap custom amount input

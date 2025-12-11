@@ -337,6 +337,77 @@ describe("chat defaults module", () => {
     expect(errorReply).toContain("SOL");
   });
 
+  test("handleSettingsInput rejects replies from non-initiators", async () => {
+    const tokenManager = baseTokenManager();
+    const { ctx, replies } = buildMockContext();
+    ctx.from.id = 222;
+
+    const module = createChatDefaultsModule({
+      bot,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (ctx, next) =>
+        await handler(ctx, next),
+      getOracleMaxPlayers: () => 25,
+      isUserGroupAdmin: async () => true,
+      replyToMessage: async (_ctx, text) => {
+        replies.push(text);
+      },
+    });
+
+    const session: InputSessionState = {
+      type: "chat_defaults",
+      chatId: 99,
+      messageId: 11,
+      setting: "token",
+      initiatorId: "111",
+    } as any;
+
+    await module.handleSettingsInput(ctx as any, session, "AAA");
+
+    expect(tokenManager.getChatDefaultToken()).toBeNull();
+    expect(
+      replies.some((text) => text.includes("prompt is no longer active"))
+    ).toBe(true);
+  });
+
+  test("handleSettingsInput requires initiator to be admin", async () => {
+    const tokenManager = baseTokenManager();
+    const { ctx, replies } = buildMockContext();
+
+    const module = createChatDefaultsModule({
+      bot,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (ctx, next) =>
+        await handler(ctx, next),
+      getOracleMaxPlayers: () => 25,
+      isUserGroupAdmin: async () => false,
+      replyToMessage: async (_ctx, text) => {
+        replies.push(text);
+      },
+    });
+
+    const session: InputSessionState = {
+      type: "chat_defaults",
+      chatId: 99,
+      messageId: 11,
+      setting: "token",
+      initiatorId: String(ctx.from.id),
+    } as any;
+
+    await module.handleSettingsInput(ctx as any, session, "AAA");
+
+    expect(tokenManager.getChatDefaultToken()).toBeNull();
+    expect(
+      replies.some((text) => text.includes("Only group administrators"))
+    ).toBe(true);
+  });
+
   test("privacy setting flow updates database and UI", async () => {
     const mockBot = createMockBot();
     const tokenManager = baseTokenManager();
