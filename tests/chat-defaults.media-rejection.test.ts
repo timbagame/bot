@@ -49,7 +49,7 @@ describe("Chat defaults media rejection", () => {
     // by checking that documents would be rejected
     const session = getInputSession("99_11");
     expect(session).toBeDefined();
-    expect(session?.setting).toBe("video_coinflip");
+    expect(session?.["setting"]).toBe("video_coinflip");
 
     // The actual rejection happens in bot.ts handleMediaForChatDefaults
     // This test validates the session exists and would trigger the rejection
@@ -94,7 +94,7 @@ describe("Chat defaults media rejection", () => {
     // Photo messages should be accepted (not rejected)
     const session = getInputSession("99_11");
     expect(session).toBeDefined();
-    expect(session?.setting).toBe("video_coinflip");
+    expect(session?.["setting"]).toBe("video_coinflip");
 
     // Photo is direct media, not a document
     const isDocument = mockCtx.message?.document != null;
@@ -133,7 +133,7 @@ describe("Chat defaults media rejection", () => {
     // Video messages should be accepted (not rejected)
     const session = getInputSession("99_11");
     expect(session).toBeDefined();
-    expect(session?.setting).toBe("video_giveaway");
+    expect(session?.["setting"]).toBe("video_giveaway");
 
     const isDocument = mockCtx.message?.document != null;
     const isVideo = mockCtx.message?.video != null;
@@ -171,7 +171,7 @@ describe("Chat defaults media rejection", () => {
     // Animation messages should be accepted (not rejected)
     const session = getInputSession("99_11");
     expect(session).toBeDefined();
-    expect(session?.setting).toBe("video_coinflip");
+    expect(session?.["setting"]).toBe("video_coinflip");
 
     const isDocument = mockCtx.message?.document != null;
     const isAnimation = mockCtx.message?.animation != null;
