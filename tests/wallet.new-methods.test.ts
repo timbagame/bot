@@ -1,37 +1,52 @@
-import { describe, expect, test, vi, beforeEach } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from "bun:test";
 import { WalletManager } from "../src/utils/wallet";
+import * as tokenMetadata from "../src/utils/token-metadata";
 
 // Mock token metadata resolver to observe how decimals are sourced
-let resolveTokenMetadataMock: any;
-vi.mock("../src/utils/token-metadata", () => {
-  resolveTokenMetadataMock = vi.fn(async (params: any) => {
-    let decimals = params.defaultDecimals ?? 0;
-    if (params.getDecimals) {
-      try {
-        const resolved = await params.getDecimals();
-        if (typeof resolved === "number" && Number.isFinite(resolved)) {
-          decimals = resolved;
-        }
-      } catch (_) {
-        // fall back to defaultDecimals
+const resolveTokenMetadataMock = vi.fn(async (params: any) => {
+  let decimals = params.defaultDecimals ?? 0;
+  if (params.getDecimals) {
+    try {
+      const resolved = await params.getDecimals();
+      if (typeof resolved === "number" && Number.isFinite(resolved)) {
+        decimals = resolved;
       }
+    } catch (_) {
+      // fall back to defaultDecimals
     }
+  }
 
-    const mint = params.mintAddress;
-    // Specific logic for New Methods tests
-    if (mint === "mint-chain" || mint === "mint-missing") {
-       return { decimals, symbol: "MOCK", name: "Mock Token" };
-    }
+  const mint = params.mintAddress;
+  // Specific logic for New Methods tests
+  if (mint === "mint-chain" || mint === "mint-missing") {
+    return { decimals, symbol: "MOCK", name: "Mock Token" };
+  }
 
-    // Specific logic for Injection tests (Jupiter Token)
-    if (mint === "11111111111111111111111111111111") {
-        return { decimals: 9, symbol: "JUPSYM", name: "Jupiter Token" };
-    }
+  // Specific logic for Injection tests (Jupiter Token)
+  if (mint === "11111111111111111111111111111111") {
+    return { decimals: 9, symbol: "JUPSYM", name: "Jupiter Token" };
+  }
 
-    // Default: return decimals but NO symbol so we don't override approved tickers
-    return { decimals };
-  });
-  return { resolveTokenMetadata: resolveTokenMetadataMock };
+  // Default: return decimals but NO symbol so we don't override approved tickers
+  return { decimals };
+});
+
+beforeEach(() => {
+  resolveTokenMetadataMock.mockClear();
+  vi.spyOn(tokenMetadata, "resolveTokenMetadata").mockImplementation(
+    resolveTokenMetadataMock as any
+  );
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 // Mock dependencies

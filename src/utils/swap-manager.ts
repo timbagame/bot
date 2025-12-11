@@ -373,11 +373,13 @@ export class SwapManager {
             : await this.attemptJupiterSwap({
                 targetLamportsOut: step.targetLamports,
                 availableRawBig,
+                availableTokenAmountRaw: availableRaw,
                 userKeypair,
                 tokenMint,
                 tokenDecimals,
                 tokenTicker: ticker,
                 integrator,
+                shortfallLamports: lamportsShortfall,
               });
 
         if (attemptResult.status === "success") {
@@ -422,6 +424,7 @@ export class SwapManager {
     availableTokenAmountRaw: number;
     shortfallLamports: number;
     tokenTicker: string;
+    inputAmountRawOverride?: number;
   }): Promise<IntegratorSwapParams | null> {
     const {
       tokenMint,
@@ -429,6 +432,7 @@ export class SwapManager {
       availableTokenAmountRaw,
       shortfallLamports,
       tokenTicker,
+      inputAmountRawOverride,
     } = options;
 
     const ref =
@@ -452,7 +456,7 @@ export class SwapManager {
       inputMint: tokenMint,
       inputTicker: tokenTicker,
       inputDecimals: tokenDecimals,
-      inputAmountRaw: availableTokenAmountRaw,
+      inputAmountRaw: inputAmountRawOverride ?? availableTokenAmountRaw,
       shortfallLamports,
       baseFeeBps,
       maxExtraBps,
@@ -534,20 +538,24 @@ export class SwapManager {
   private async probePriceAndSizeInput(options: {
     targetLamportsOut: number;
     availableRawBig: bigint;
+    availableTokenAmountRaw: number;
     tokenMint: string;
     tokenDecimals: number;
     tokenTicker: string;
     userKeypair: Keypair;
     integrator: IntegratorSwapParams | null;
+    shortfallLamports: number;
   }): Promise<HelperResult<{ swapQuote: SwapQuote }>> {
     const {
       targetLamportsOut,
       availableRawBig,
+      availableTokenAmountRaw,
       tokenMint,
       tokenDecimals,
       tokenTicker,
       userKeypair,
       integrator,
+      shortfallLamports,
     } = options;
 
     try {
@@ -584,6 +592,21 @@ export class SwapManager {
       const requiredInputClamped =
         requiredInput > availableRawBig ? availableRawBig : requiredInput;
 
+      const swapFeeInputRaw = Number(requiredInputClamped);
+
+      const sizedIntegrator =
+        integrator &&
+        (await this.buildJitIntegrator({
+          tokenMint,
+          tokenDecimals,
+          availableTokenAmountRaw,
+          shortfallLamports,
+          tokenTicker,
+          inputAmountRawOverride: swapFeeInputRaw,
+        }));
+
+      const integratorForSwap = sizedIntegrator ?? integrator;
+
       if (requiredInputClamped <= 0n) {
         return {
           ok: false,
@@ -604,9 +627,9 @@ export class SwapManager {
           outputDecimals: SOL_DECIMALS,
           inputTicker: tokenTicker,
           outputTicker: "SOL",
-          integrator,
+          integrator: integratorForSwap,
         },
-        integrator
+        integratorForSwap
       );
 
       const outputLamports = BigInt(
@@ -704,30 +727,36 @@ export class SwapManager {
   private async attemptJupiterSwap(options: {
     targetLamportsOut: number;
     availableRawBig: bigint;
+    availableTokenAmountRaw: number;
     userKeypair: Keypair;
     tokenMint: string;
     tokenDecimals: number;
     tokenTicker: string;
     integrator: IntegratorSwapParams | null;
+    shortfallLamports: number;
   }): Promise<StepAttemptResult> {
     const {
       targetLamportsOut,
       availableRawBig,
+      availableTokenAmountRaw,
       userKeypair,
       tokenMint,
       tokenDecimals,
       tokenTicker,
       integrator,
+      shortfallLamports,
     } = options;
 
     const probeResult = await this.probePriceAndSizeInput({
       targetLamportsOut,
       availableRawBig,
+      availableTokenAmountRaw,
       tokenMint,
       tokenDecimals,
       tokenTicker,
       userKeypair,
       integrator,
+      shortfallLamports,
     });
 
     if (!probeResult.ok) {

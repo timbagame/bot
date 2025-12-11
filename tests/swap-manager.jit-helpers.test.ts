@@ -92,11 +92,13 @@ describe("SwapManager JIT helpers", () => {
     const result = await (manager as any).probePriceAndSizeInput({
       targetLamportsOut: 1_000_000,
       availableRawBig: 20_000_000n,
+      availableTokenAmountRaw: 20_000_000,
       tokenMint: "mint",
       tokenDecimals: 6,
       tokenTicker: "TKN",
       userKeypair: user,
       integrator: null,
+      shortfallLamports: 500_000,
     });
 
     expect(result.ok).toBeFalse();
@@ -193,16 +195,80 @@ describe("SwapManager JIT helpers", () => {
     const result = await (manager as any).attemptJupiterSwap({
       targetLamportsOut: targetLamports,
       availableRawBig: 20_000_000n,
+      availableTokenAmountRaw: 20_000_000,
       userKeypair: user,
       tokenMint: "mint",
       tokenDecimals: 6,
       tokenTicker: "TKN",
       integrator: null,
+      shortfallLamports: targetLamports,
     });
 
     expect(result.status).toBe("success");
     expect(result.result.signature).toBe("SIG_EXEC");
     expect(result.result.lamportsReceived).toBe(targetLamports);
+  });
+
+  test("probePriceAndSizeInput recalculates fee using sized swap input", async () => {
+    const user = Keypair.generate();
+    const connection = createConnection(0);
+    const wallet = createWallet(connection, Keypair.generate());
+    const manager = createSwapManager(connection, wallet);
+
+    const integrator = {
+      referralAccount: "referral",
+      referralFee: 85,
+      payer: "payer",
+      closeAuthority: "payer",
+      payerKind: "admin" as const,
+    };
+
+    const recalculatedFees: any[] = [];
+    (manager as any).buildJitIntegrator = async (args: any) => {
+      recalculatedFees.push(args);
+      return { ...integrator, referralFee: 200 };
+    };
+
+    (manager as any).getJupiterQuote = async () => ({
+      inputMint: "TOKEN",
+      outputMint: "SOL",
+      inAmount: "1000000",
+      outAmount: "2000000",
+      otherAmountThreshold: "0",
+      swapMode: "ExactIn",
+      slippageBps: 50,
+      priceImpactPct: "0",
+      routePlan: [],
+      requestId: "req-probe",
+    });
+
+    let usedIntegrator: any = null;
+    (manager as any).swapService = {
+      prepareSwap: async (_params: any, integratorArg: any) => {
+        usedIntegrator = integratorArg;
+        return {
+          providerQuote: { outAmount: "2000000" },
+          outputAmount: "2000000",
+        };
+      },
+    };
+
+    const result = await (manager as any).probePriceAndSizeInput({
+      targetLamportsOut: 2_000_000,
+      availableRawBig: 10_000_000n,
+      availableTokenAmountRaw: 10_000_000,
+      tokenMint: "mint",
+      tokenDecimals: 6,
+      tokenTicker: "TKN",
+      userKeypair: user,
+      integrator,
+      shortfallLamports: 1_500_000,
+    });
+
+    expect(result.ok).toBeTrue();
+    expect(recalculatedFees).toHaveLength(1);
+    expect(recalculatedFees[0].inputAmountRawOverride).toBe(1_050_000);
+    expect(usedIntegrator?.referralFee).toBe(200);
   });
 
   test("buildJitIntegrator calculates dynamic fee based on shortfall vs trade value", async () => {
