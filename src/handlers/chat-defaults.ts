@@ -439,7 +439,6 @@ const handleVideoIdUpdate = async (
   const chatId = ctx.chat?.id;
   if (chatId == null) return;
   const telegramId = getTelegramId(ctx);
-  const gameType = target === "video_coinflip" ? "coinflip" : "giveaway";
 
   if (/^(clear|remove)$/i.test(input.trim())) {
     // Clear means use bot default - set to empty string to indicate "use default"

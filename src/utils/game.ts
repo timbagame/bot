@@ -740,7 +740,7 @@ export class GameManager {
 
       const replyMarkup = options.inlineKeyboard;
 
-      const sendResult = await sendMediaWithFallback({
+      const sendResult = await sendMediaWithFallback<any, any>({
         videoFileId: media?.fileId ?? null,
         logLabel: "recreate game message",
         sendText: () =>
@@ -759,21 +759,21 @@ export class GameManager {
                     parse_mode: "HTML",
                     reply_markup: replyMarkup,
                     reply_to_message_id: replyToMessageId,
-                  });
+                  }) as any;
                 } else if (media.mediaType === "animation") {
                   return ctx.api.sendAnimation(fallbackChatId, media.fileId, {
                     caption: options.messageText,
                     parse_mode: "HTML",
                     reply_markup: replyMarkup,
                     reply_to_message_id: replyToMessageId,
-                  });
+                  }) as any;
                 } else {
                   return ctx.api.sendVideo(fallbackChatId, media.fileId, {
                     caption: options.messageText,
                     parse_mode: "HTML",
                     reply_markup: replyMarkup,
                     reply_to_message_id: replyToMessageId,
-                  });
+                  }) as any;
                 }
               }
             : undefined,
@@ -2752,7 +2752,7 @@ export class GameManager {
     const chatId = ctx.chat?.id;
     const media = resolveGameMedia(gameType, chatId);
     const replyMarkup = { inline_keyboard: keyboard };
-    const sendResult = await sendMediaWithFallback({
+    const sendResult = await sendMediaWithFallback<any, any>({
       videoFileId: media?.fileId ?? null,
       logLabel: "game video",
       sendText: () =>
@@ -2770,21 +2770,21 @@ export class GameManager {
                   parse_mode: "HTML",
                   reply_markup: replyMarkup,
                   reply_to_message_id: replyTo,
-                });
+                }) as any;
               } else if (media.mediaType === "animation") {
                 return ctx.replyWithAnimation(media.fileId, {
                   caption: messageText,
                   parse_mode: "HTML",
                   reply_markup: replyMarkup,
                   reply_to_message_id: replyTo,
-                });
+                }) as any;
               } else {
                 return ctx.replyWithVideo(media.fileId, {
                   caption: messageText,
                   parse_mode: "HTML",
                   reply_markup: replyMarkup,
                   reply_to_message_id: replyTo,
-                });
+                }) as any;
               }
             }
           : undefined,
