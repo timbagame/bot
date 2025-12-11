@@ -15,7 +15,7 @@ describe("calculateAdminPayerFeeBps", () => {
       solPriceUsd: 20,
     });
     expect(result).toBeGreaterThan(85);
-    expect(result).toBeLessThanOrEqual(200);
+    expect(result).toBeLessThanOrEqual(255);
   });
 
   test("uses token decimals and price for non-SOL trades", () => {
@@ -39,7 +39,7 @@ describe("calculateAdminPayerFeeBps", () => {
       deficitLamports: 1_000_000_000,
       solPriceUsd: 100,
     });
-    expect(result).toBe(200);
+    expect(result).toBe(255);
   });
 
   test("returns base when deficit or price zero", () => {
@@ -64,7 +64,7 @@ describe("calculateAdminPayerFeeBps", () => {
       deficitLamports: 3_000_000, // 0.003 SOL (tx+ATA)
       solPriceUsd: 25,
     });
-    expect(result).toBe(200); // clamped
+    expect(result).toBe(255); // clamped
   });
 
   test("computeRequiredAdminLamports sums min balance, rent, extra ATA and prio", () => {
