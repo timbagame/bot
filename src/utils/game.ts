@@ -84,17 +84,17 @@ const resolveGameMedia = (
   chatId?: number
 ): { fileId: string; mediaType: "photo" | "video" | "animation" } | undefined => {
   const lower = gameType.toLowerCase();
-  
+
   // Check for chat-specific media first
   if (chatId != null) {
     const chatDb = ChatDatabase.getInstance();
     const chatSettings = chatDb.getChatGameSettings(chatId);
-    
+
     if (lower === "coinflip") {
       // Check chat-specific setting
       // "__DISABLED__" = explicitly disabled (no media)
       // null = not set (use bot default) - for existing rows before migration
-      // empty string "" = cleared (use bot default)  
+      // empty string "" = cleared (use bot default)
       // any other value = custom media
       if (chatSettings) {
         const videoId = chatSettings.coinflip_video_id;
@@ -137,7 +137,7 @@ const resolveGameMedia = (
       }
     }
   }
-  
+
   // Fall back to global defaults (always video)
   if (lower === "coinflip") {
     const id = getCoinflipVideoId();
@@ -5867,3 +5867,5 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     return result.success;
   }
 }
+
+export const __test_resolveGameMedia = resolveGameMedia;

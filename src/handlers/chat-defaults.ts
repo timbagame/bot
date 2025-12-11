@@ -162,35 +162,39 @@ const buildSettingsSummary = async (
 
   let coinflipVideoSuffix = "(bot default)";
   let coinflipVideoDisplay = "Using bot default";
-  if (chatSettings && Object.prototype.hasOwnProperty.call(chatSettings, "coinflip_video_id")) {
+  if (chatSettings) {
     const videoId = chatSettings.coinflip_video_id;
     if (videoId === CHAT_MEDIA_DISABLED_SENTINEL) {
       coinflipVideoSuffix = "(disabled)";
       coinflipVideoDisplay = "Disabled - text only";
     } else if (videoId === "") {
+      // Explicitly cleared - use bot default
       coinflipVideoSuffix = "(bot default)";
       coinflipVideoDisplay = "Using bot default";
     } else if (videoId && videoId.length > 0) {
       coinflipVideoSuffix = "(chat default)";
       coinflipVideoDisplay = `${escapeHtml(videoId.substring(0, 20))}...`;
     }
+    // If videoId is null, it means not set yet - use bot default (default values already set)
   }
   const coinflipVideoLine = `🎬 Coinflip video: ${coinflipVideoDisplay} ${coinflipVideoSuffix}`;
 
   let giveawayVideoSuffix = "(bot default)";
   let giveawayVideoDisplay = "Using bot default";
-  if (chatSettings && Object.prototype.hasOwnProperty.call(chatSettings, "giveaway_video_id")) {
+  if (chatSettings) {
     const videoId = chatSettings.giveaway_video_id;
     if (videoId === CHAT_MEDIA_DISABLED_SENTINEL) {
       giveawayVideoSuffix = "(disabled)";
       giveawayVideoDisplay = "Disabled - text only";
     } else if (videoId === "") {
+      // Explicitly cleared - use bot default
       giveawayVideoSuffix = "(bot default)";
       giveawayVideoDisplay = "Using bot default";
     } else if (videoId && videoId.length > 0) {
       giveawayVideoSuffix = "(chat default)";
       giveawayVideoDisplay = `${escapeHtml(videoId.substring(0, 20))}...`;
     }
+    // If videoId is null, it means not set yet - use bot default (default values already set)
   }
   const giveawayVideoLine = `🎬 Giveaway video: ${giveawayVideoDisplay} ${giveawayVideoSuffix}`;
 
@@ -471,7 +475,7 @@ const handleVideoIdUpdate = async (
   // Determine media type from context if available
   const message = (ctx as any).message;
   let mediaType: "photo" | "video" | "animation" = "video"; // default to video
-  
+
   // Check if media type was stored in context (from media message handler)
   if ((ctx as any).__mediaType) {
     mediaType = (ctx as any).__mediaType;
@@ -827,8 +831,9 @@ export const createChatDefaultsModule = (
     if (setting === "video_coinflip" || setting === "video_giveaway") {
       const message = (ctx as any).message;
       let fileId: string | undefined;
-      
+
       // Try to extract file ID from various media types
+      // Note: Documents are rejected by the dedicated message:document handler in bot.ts
       if (message?.video) {
         fileId = message.video.file_id;
       } else if (message?.animation) {
@@ -836,10 +841,8 @@ export const createChatDefaultsModule = (
       } else if (message?.photo && message.photo.length > 0) {
         // Use the largest photo
         fileId = message.photo[message.photo.length - 1].file_id;
-      } else if (message?.document) {
-        fileId = message.document.file_id;
       }
-      
+
       // Use file ID from media if available, otherwise use text input
       const videoIdInput = fileId || userMessage;
       await handleVideoIdUpdate(ctx, deps, videoIdInput, setting);

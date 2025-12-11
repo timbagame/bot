@@ -5566,7 +5566,7 @@ const handleMediaForChatDefaults = async (ctx: any, mediaType: "video" | "photo"
 
     if (fileId) {
       // Store the media type in context so handleVideoIdUpdate can access it
-      (ctx as any).__mediaType = mediaType === "document" ? ((ctx as any).__detectedMediaType || "video") : mediaType;
+      (ctx as any).__mediaType = mediaType;
       await chatDefaultsModule.handleSettingsInput(ctx, inputSession, "");
     } else {
       await ctx.reply("❌ Could not extract file ID from the media. Please try again.");
