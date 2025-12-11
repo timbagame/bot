@@ -12,7 +12,7 @@ import {
   __test_resetReferralEntries,
   WSOL_MINT,
 } from "../src/utils/token-registry";
-import { resolveIntegratorSwapParams } from "../src/utils/integrator-fees";
+import { resolveIntegratorSwapParams, calculateDynamicReferralFee } from "../src/utils/integrator-fees";
 import * as priceModule from "../src/utils/prices";
 
 const REFERRAL_ACCOUNT = "GPBNTRmo26MRoaLSvRXwhWaQZhYjwVWgEkgwRZVU6x9U";
@@ -290,5 +290,164 @@ describe("Integrator fee calculations", () => {
 
     expect(result).not.toBeNull();
     expect(result?.referralFee).toBe(50);
+  });
+});
+
+describe("calculateDynamicReferralFee", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("returns base fee when shortfallLamports is zero", async () => {
+    const result = await calculateDynamicReferralFee({
+      inputMint: "SomeMint111111111111111111111111111111111",
+      inputTicker: "TKN",
+      inputDecimals: 6,
+      inputAmountRaw: 1_000_000,
+      shortfallLamports: 0,
+      baseFeeBps: 85,
+    });
+
+    expect(result).toBe(85);
+  });
+
+  test("returns base fee when shortfallLamports is negative", async () => {
+    const result = await calculateDynamicReferralFee({
+      inputMint: "SomeMint111111111111111111111111111111111",
+      inputTicker: "TKN",
+      inputDecimals: 6,
+      inputAmountRaw: 1_000_000,
+      shortfallLamports: -100,
+      baseFeeBps: 85,
+    });
+
+    expect(result).toBe(85);
+  });
+
+  test("calculates dynamic fee based on deficit/trade ratio", async () => {
+    vi.spyOn(priceModule, "resolveTokenPriceUSD").mockImplementation(
+      async (opts: any) => {
+        if (opts?.isSol) return { price: 200, source: "mock", identifier: "SOL" };
+        return { price: 1, source: "mock", identifier: "TKN" };
+      }
+    );
+
+    // Trade: 10 tokens @ $1 = $10, Shortfall: 0.01 SOL @ $200 = $2
+    const result = await calculateDynamicReferralFee({
+      inputMint: "SomeMint111111111111111111111111111111111",
+      inputTicker: "TKN",
+      inputDecimals: 6,
+      inputAmountRaw: 10_000_000,
+      shortfallLamports: 10_000_000,
+      baseFeeBps: 85,
+      maxExtraBps: 170,
+    });
+
+    expect(result).toBe(255); // 85 + 170 (capped)
+  });
+
+  test("scales fee proportionally for small shortfalls", async () => {
+    vi.spyOn(priceModule, "resolveTokenPriceUSD").mockImplementation(
+      async (opts: any) => {
+        if (opts?.isSol) return { price: 200, source: "mock", identifier: "SOL" };
+        return { price: 1, source: "mock", identifier: "TKN" };
+      }
+    );
+
+    // Trade: 100 tokens @ $1 = $100, Shortfall: 0.001 SOL @ $200 = $0.20
+    const result = await calculateDynamicReferralFee({
+      inputMint: "SomeMint111111111111111111111111111111111",
+      inputTicker: "TKN",
+      inputDecimals: 6,
+      inputAmountRaw: 100_000_000,
+      shortfallLamports: 1_000_000,
+      baseFeeBps: 85,
+      maxExtraBps: 170,
+    });
+
+    expect(result).toBe(105); // 85 + 20
+  });
+
+  test("clamps fee to MAX_REFERRAL_FEE_BPS of 255", async () => {
+    vi.spyOn(priceModule, "resolveTokenPriceUSD").mockImplementation(
+      async (opts: any) => {
+        if (opts?.isSol) return { price: 200, source: "mock", identifier: "SOL" };
+        return { price: 1, source: "mock", identifier: "TKN" };
+      }
+    );
+
+    const result = await calculateDynamicReferralFee({
+      inputMint: "SomeMint111111111111111111111111111111111",
+      inputTicker: "TKN",
+      inputDecimals: 6,
+      inputAmountRaw: 1_000_000,
+      shortfallLamports: 100_000_000,
+      baseFeeBps: 85,
+      maxExtraBps: 500,
+    });
+
+    expect(result).toBe(255);
+  });
+
+  test("returns base fee when prices unavailable", async () => {
+    vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue(null);
+
+    const result = await calculateDynamicReferralFee({
+      inputMint: "SomeMint111111111111111111111111111111111",
+      inputTicker: "TKN",
+      inputDecimals: 6,
+      inputAmountRaw: 10_000_000,
+      shortfallLamports: 5_000_000,
+      baseFeeBps: 85,
+      throwOnPriceFailure: false,
+    });
+
+    expect(result).toBe(85);
+  });
+
+  test("throws when throwOnPriceFailure is true", async () => {
+    vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue(null);
+
+    await expect(
+      calculateDynamicReferralFee({
+        inputMint: "SomeMint111111111111111111111111111111111",
+        inputTicker: "TKN",
+        inputDecimals: 6,
+        inputAmountRaw: 10_000_000,
+        shortfallLamports: 5_000_000,
+        baseFeeBps: 85,
+        throwOnPriceFailure: true,
+      })
+    ).rejects.toThrow("Cannot estimate referral surcharge for gas payer.");
+  });
+
+  test("uses default baseFeeBps of 85 when not specified", async () => {
+    const result = await calculateDynamicReferralFee({
+      inputMint: "SomeMint111111111111111111111111111111111",
+      inputTicker: "TKN",
+      inputDecimals: 6,
+      inputAmountRaw: 1_000_000,
+      shortfallLamports: 0,
+    });
+
+    expect(result).toBe(85);
+  });
+
+  test("returns base fee when price resolution throws", async () => {
+    vi.spyOn(priceModule, "resolveTokenPriceUSD").mockRejectedValue(
+      new Error("Network error")
+    );
+
+    const result = await calculateDynamicReferralFee({
+      inputMint: "SomeMint111111111111111111111111111111111",
+      inputTicker: "TKN",
+      inputDecimals: 6,
+      inputAmountRaw: 10_000_000,
+      shortfallLamports: 5_000_000,
+      baseFeeBps: 100,
+      throwOnPriceFailure: false,
+    });
+
+    expect(result).toBe(100);
   });
 });
