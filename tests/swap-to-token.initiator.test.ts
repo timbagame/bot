@@ -10,7 +10,7 @@ const originalEnv = {
   TELEGRAM_TOKEN: process.env.TELEGRAM_TOKEN,
   MNEMONIC: process.env.MNEMONIC,
   SOLANA_NETWORK: process.env.SOLANA_NETWORK,
-  PRICES_ENABLED: process.env.PRICES_ENABLED,
+  PRICES_ENABLED: process.env["PRICES_ENABLED"],
 };
 
 let botModule: Awaited<typeof import("../src/bot")>;
@@ -23,7 +23,7 @@ beforeAll(async () => {
     "test test test test test test test test test test test junk";
   process.env.SOLANA_NETWORK =
     process.env.SOLANA_NETWORK || "http://localhost:8899";
-  process.env.PRICES_ENABLED = "false";
+  process.env["PRICES_ENABLED"] = "false";
 
   botModule = await import("../src/bot");
 });
@@ -56,7 +56,7 @@ afterAll(() => {
   if (originalEnv.PRICES_ENABLED === undefined) {
     Reflect.deleteProperty(process.env, "PRICES_ENABLED");
   } else {
-    process.env.PRICES_ENABLED = originalEnv.PRICES_ENABLED;
+    process.env["PRICES_ENABLED"] = originalEnv.PRICES_ENABLED;
   }
 });
 
@@ -65,6 +65,19 @@ beforeEach(() => {
 });
 
 test("swap_to_token reprompt keeps initiatorId ownership", async () => {
+  const originalTokenManager = botModule.__test_getTokenManager();
+  const createdTokenManagerStub = originalTokenManager
+    ? undefined
+    : {
+        resolveSwapToken: async () => {
+          throw new Error("Token not found");
+        },
+      };
+
+  if (createdTokenManagerStub) {
+    botModule.__test_setTokenManager(createdTokenManagerStub as any);
+  }
+
   const tokenManager = botModule.__test_getTokenManager();
   expect(tokenManager).toBeTruthy();
   const originalResolveSwapToken = tokenManager.resolveSwapToken;
@@ -126,6 +139,10 @@ test("swap_to_token reprompt keeps initiatorId ownership", async () => {
     expect(stored?.initiatorId).toBe(initiatorId);
   } finally {
     tokenManager.resolveSwapToken = originalResolveSwapToken;
+    if (originalTokenManager) {
+      botModule.__test_setTokenManager(originalTokenManager as any);
+    } else if (createdTokenManagerStub) {
+      botModule.__test_setTokenManager(undefined as any);
+    }
   }
 });
-
