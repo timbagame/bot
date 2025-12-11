@@ -85,55 +85,35 @@ const resolveGameMedia = (
 ): { fileId: string; mediaType: "photo" | "video" | "animation" } | undefined => {
   const lower = gameType.toLowerCase();
 
-  // Check for chat-specific media first
+  // Check for chat-specific media first.
+  // CHAT_MEDIA_DISABLED_SENTINEL = explicitly disabled (text-only)
+  // null/undefined = not set (use bot default)
+  // "" = cleared (use bot default)
+  // otherwise = custom Telegram file_id
   if (chatId != null) {
     const chatDb = ChatDatabase.getInstance();
     const chatSettings = chatDb.getChatGameSettings(chatId);
 
-    if (lower === "coinflip") {
-      // Check chat-specific setting
-      // "__DISABLED__" = explicitly disabled (no media)
-      // null = not set (use bot default) - for existing rows before migration
-      // empty string "" = cleared (use bot default)
-      // any other value = custom media
-      if (chatSettings) {
-        const videoId = chatSettings.coinflip_video_id;
-        // Check for sentinel value indicating explicitly disabled
-        if (videoId === CHAT_MEDIA_DISABLED_SENTINEL) {
-          // Explicitly disabled - don't send any media
-          return undefined;
-        }
-        if (videoId === "") {
-          // Cleared - use bot default (fall through)
-        } else if (videoId && videoId.length > 0) {
-          // Custom media
-          const mediaType = (chatSettings.coinflip_media_type as "photo" | "video" | "animation") || "video";
-          return { fileId: videoId, mediaType };
-        }
-        // If videoId is null, treat as "not set" and fall through to bot default
+    if (chatSettings && (lower === "coinflip" || lower === "giveaway")) {
+      const { videoId, mediaType } =
+        lower === "coinflip"
+          ? {
+              videoId: chatSettings.coinflip_video_id,
+              mediaType: chatSettings.coinflip_media_type,
+            }
+          : {
+              videoId: chatSettings.giveaway_video_id,
+              mediaType: chatSettings.giveaway_media_type,
+            };
+
+      if (videoId === CHAT_MEDIA_DISABLED_SENTINEL) {
+        return undefined;
       }
-    }
-    if (lower === "giveaway") {
-      // Check chat-specific setting
-      // "__DISABLED__" = explicitly disabled (no media)
-      // null = not set (use bot default) - for existing rows before migration
-      // empty string "" = cleared (use bot default)
-      // any other value = custom media
-      if (chatSettings) {
-        const videoId = chatSettings.giveaway_video_id;
-        // Check for sentinel value indicating explicitly disabled
-        if (videoId === CHAT_MEDIA_DISABLED_SENTINEL) {
-          // Explicitly disabled - don't send any media
-          return undefined;
-        }
-        if (videoId === "") {
-          // Cleared - use bot default (fall through)
-        } else if (videoId && videoId.length > 0) {
-          // Custom media
-          const mediaType = (chatSettings.giveaway_media_type as "photo" | "video" | "animation") || "video";
-          return { fileId: videoId, mediaType };
-        }
-        // If videoId is null, treat as "not set" and fall through to bot default
+
+      if (videoId && videoId.length > 0) {
+        const effectiveType =
+          (mediaType as "photo" | "video" | "animation") || "video";
+        return { fileId: videoId, mediaType: effectiveType };
       }
     }
   }

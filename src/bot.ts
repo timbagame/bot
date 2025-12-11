@@ -5538,13 +5538,13 @@ const handleSwapToTokenInput = async (
       keyboard: createCancelKeyboard(`swap_to_${fromToken}_OTHER`),
     });
 
-    setInputSession(`${userState.chatId}_${userState.messageId}`, {
-      type: "swap_to_token",
-      fromToken,
-      messageId: userState.messageId,
-      chatId: userState.chatId,
-      initiatorId: getTelegramIdString(ctx),
-    });
+	    setInputSession(`${userState.chatId}_${userState.messageId}`, {
+	      type: "swap_to_token",
+	      fromToken,
+	      messageId: userState.messageId,
+	      chatId: userState.chatId,
+	      initiatorId: getTelegramIdString(ctx),
+	    });
 	  }
 	};
 

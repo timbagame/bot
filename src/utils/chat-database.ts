@@ -48,54 +48,25 @@ export class ChatDatabase extends BaseDatabase {
       "Chat"
     );
 
-    // Migration: add privacy columns if they don't exist
-    // Use db.run directly to avoid logging expected "column already exists" errors
-    try {
-      this.db.run(
-        "ALTER TABLE chat_game_settings ADD COLUMN coinflip_default_privacy TEXT"
-      );
-    } catch {
-      // Column already exists - expected on existing databases
-    }
+    // Migration: add new columns if they don't exist.
+    // Use db.run directly to avoid logging expected "column already exists" errors.
+    const columnsToAdd = [
+      "coinflip_default_privacy TEXT",
+      "giveaway_default_privacy TEXT",
+      "coinflip_video_id TEXT",
+      "giveaway_video_id TEXT",
+      "coinflip_media_type TEXT",
+      "giveaway_media_type TEXT",
+    ] as const;
 
-    try {
-      this.db.run(
-        "ALTER TABLE chat_game_settings ADD COLUMN giveaway_default_privacy TEXT"
-      );
-    } catch {
-      // Column already exists - expected on existing databases
-    }
-
-    try {
-      this.db.run(
-        "ALTER TABLE chat_game_settings ADD COLUMN coinflip_video_id TEXT"
-      );
-    } catch {
-      // Column already exists - expected on existing databases
-    }
-
-    try {
-      this.db.run(
-        "ALTER TABLE chat_game_settings ADD COLUMN giveaway_video_id TEXT"
-      );
-    } catch {
-      // Column already exists - expected on existing databases
-    }
-
-    try {
-      this.db.run(
-        "ALTER TABLE chat_game_settings ADD COLUMN coinflip_media_type TEXT"
-      );
-    } catch {
-      // Column already exists - expected on existing databases
-    }
-
-    try {
-      this.db.run(
-        "ALTER TABLE chat_game_settings ADD COLUMN giveaway_media_type TEXT"
-      );
-    } catch {
-      // Column already exists - expected on existing databases
+    for (const column of columnsToAdd) {
+      try {
+        this.db.run(
+          `ALTER TABLE chat_game_settings ADD COLUMN ${column}`
+        );
+      } catch {
+        // Column already exists - expected on existing databases
+      }
     }
   }
 
