@@ -110,7 +110,6 @@ const NON_GAME_CALLBACK_NAMES = [
   "wallet_settings",
   "cmd_balance",
   "cmd_withdraw",
-  "chat_defaults_cancel",
   "cmd_swap",
   "cmd_wrap",
   "cmd_unwrap",

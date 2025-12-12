@@ -5320,7 +5320,10 @@ bot.on("message:text", async (ctx, next) => {
 });
 
 // Handle media messages (video, photo, animation) for chat defaults video ID settings
-const handleMediaForChatDefaults = async (ctx: any, mediaType: "video" | "photo" | "animation" | "document") => {
+const handleMediaForChatDefaults = async (
+  ctx: any,
+  mediaType: "video" | "photo" | "animation" | "document"
+) => {
   const userId = getTelegramIdString(ctx);
   if (!userId) {
     return;
@@ -5369,17 +5372,9 @@ const handleMediaForChatDefaults = async (ctx: any, mediaType: "video" | "photo"
   }
 
   try {
-    let fileId: string | undefined;
     const message = ctx.message;
 
-    if (mediaType === "video" && message?.video) {
-      fileId = message.video.file_id;
-    } else if (mediaType === "animation" && message?.animation) {
-      fileId = message.animation.file_id;
-    } else if (mediaType === "photo" && message?.photo && message.photo.length > 0) {
-      // Use the largest photo
-      fileId = message.photo[message.photo.length - 1].file_id;
-    } else if (mediaType === "document" && message?.document) {
+    if (mediaType === "document" && message?.document) {
       // Reject all documents - only accept direct photos, videos, and animations
       await ctx.reply(
         "❌ <b>Please send media directly</b>\n\n" +
@@ -5391,13 +5386,22 @@ const handleMediaForChatDefaults = async (ctx: any, mediaType: "video" | "photo"
       return;
     }
 
-    if (fileId) {
-      // Store the media type in context so handleVideoIdUpdate can access it
-      (ctx as any).__mediaType = mediaType;
-      await chatDefaultsModule.handleSettingsInput(ctx, inputSession, "");
-    } else {
-      await ctx.reply("❌ Could not extract file ID from the media. Please try again.");
+    const hasMedia =
+      (mediaType === "video" && !!message?.video) ||
+      (mediaType === "animation" && !!message?.animation) ||
+      (mediaType === "photo" &&
+        Array.isArray(message?.photo) &&
+        message.photo.length > 0);
+
+    if (!hasMedia) {
+      await ctx.reply("❌ Could not read that media. Please try again.");
+      clearInputSession(sessionKey);
+      return;
     }
+
+    // Store the media type in context so handleVideoIdUpdate can access it
+    (ctx as any).__mediaType = mediaType;
+    await chatDefaultsModule.handleSettingsInput(ctx, inputSession, "");
 
     clearInputSession(sessionKey);
   } catch (error) {
@@ -5538,15 +5542,15 @@ const handleSwapToTokenInput = async (
       keyboard: createCancelKeyboard(`swap_to_${fromToken}_OTHER`),
     });
 
-	    setInputSession(`${userState.chatId}_${userState.messageId}`, {
-	      type: "swap_to_token",
-	      fromToken,
-	      messageId: userState.messageId,
-	      chatId: userState.chatId,
-	      initiatorId: getTelegramIdString(ctx),
-	    });
-	  }
-	};
+    setInputSession(`${userState.chatId}_${userState.messageId}`, {
+      type: "swap_to_token",
+      fromToken,
+      messageId: userState.messageId,
+      chatId: userState.chatId,
+      initiatorId: getTelegramIdString(ctx),
+    });
+  }
+};
 
 export const __test_handleSwapToTokenInput = handleSwapToTokenInput;
 
