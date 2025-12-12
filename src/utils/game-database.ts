@@ -95,7 +95,8 @@ export class GameDatabase extends BaseDatabase {
     minPlayers?: number,
     chatId?: number,
     timeoutSeconds?: number,
-    expiresAtMs?: number
+    expiresAtMs?: number,
+    createdAtMsOverride?: number
   ): void {
     const normalizedTimeoutSeconds =
       typeof timeoutSeconds === "number" && Number.isFinite(timeoutSeconds)
@@ -106,6 +107,12 @@ export class GameDatabase extends BaseDatabase {
       typeof expiresAtMs === "number" && Number.isFinite(expiresAtMs)
         ? expiresAtMs
         : null;
+
+    const normalizedCreatedAtMs =
+      typeof createdAtMsOverride === "number" &&
+      Number.isFinite(createdAtMsOverride)
+        ? createdAtMsOverride
+        : Date.now();
 
     this.run(
       `INSERT INTO games (
@@ -126,7 +133,7 @@ export class GameDatabase extends BaseDatabase {
         gameAddress,
         creatorTelegramId,
         amount,
-        Date.now(),
+        normalizedCreatedAtMs,
         gameType,
         tokenMint || null,
         tokenTicker || null,

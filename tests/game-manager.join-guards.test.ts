@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, vi } from "bun:test";
 import { PublicKey, Keypair } from "@solana/web3.js";
 import { GameManager } from "../src/utils/game";
 import {
@@ -47,6 +47,180 @@ describe("GameManager.joinGame guards", () => {
     const res = await gm.joinGame(new PublicKey("BPFLoader1111111111111111111111111111111111").toBase58(), 1n);
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/Game not found/i);
+  });
+
+  test("hydrates missing public game from chain", async () => {
+    resetGM();
+    const now = Math.floor(Date.now() / 1000);
+    const gameAddress = Keypair.generate().publicKey.toBase58();
+    const creator = Keypair.generate().publicKey;
+    const tokenMint = Keypair.generate().publicKey;
+
+    const gameAccount = {
+      creator,
+      tokenMint,
+      gameType: { coinflip: {} },
+      ticketAmount: 1_000_000_000,
+      maxTickets: 4,
+      minTickets: 2,
+      ticketsCount: 0,
+      createdAt: now,
+      timeout: 3600,
+      isPrivate: false,
+    };
+
+    const store = new Map<string, any>();
+    const gameDb = {
+      getGame: (addr: string) => store.get(addr) ?? null,
+      saveGame: (
+        addr: string,
+        creatorTelegramId: string,
+        amount: number,
+        gameType: string,
+        tokenMintStr?: string,
+        tokenTicker?: string,
+        maxPlayers?: number,
+        minPlayers?: number,
+        chatId?: number,
+        timeoutSeconds?: number,
+        expiresAtMs?: number,
+        createdAtMsOverride?: number
+      ) => {
+        store.set(addr, {
+          game_address: addr,
+          creator_telegram_id: creatorTelegramId,
+          amount,
+          created_at: createdAtMsOverride ?? Date.now(),
+          status: "active",
+          game_type: gameType,
+          token_mint: tokenMintStr,
+          token_ticker: tokenTicker,
+          max_players: maxPlayers,
+          min_players: minPlayers,
+          chat_id: chatId,
+          timeout_seconds: timeoutSeconds,
+          expires_at: expiresAtMs,
+        });
+      },
+      savePlayerMapping: () => {},
+      getPlayerTelegramId: () => null,
+    } as any;
+
+    const gm = GameManager.getInstance(
+      baseProgram(gameAccount),
+      baseWallet({
+        getTokenMetadata: async () => ({ symbol: "TOK", decimals: 9 }),
+      }),
+      gameDb
+    );
+
+    const hydrated = await gm.ensureGameDataFromChain(gameAddress);
+    expect(hydrated).not.toBeNull();
+    expect(store.has(gameAddress)).toBe(true);
+    expect((hydrated as any)?.token_mint).toBe(tokenMint.toBase58());
+  });
+
+  test("ensureGameDataFromChain returns null for expired chain game", async () => {
+    resetGM();
+    const now = Math.floor(Date.now() / 1000);
+    const gameAddress = Keypair.generate().publicKey.toBase58();
+    const creator = Keypair.generate().publicKey;
+    const tokenMint = Keypair.generate().publicKey;
+
+    const expiredAccount = {
+      creator,
+      tokenMint,
+      gameType: { coinflip: {} },
+      ticketAmount: 1_000_000_000,
+      maxTickets: 4,
+      minTickets: 2,
+      ticketsCount: 0,
+      createdAt: now - 7200,
+      timeout: 10,
+      isPrivate: false,
+    };
+
+    const saveGame = vi.fn();
+    const gameDb = {
+      getGame: () => null,
+      saveGame,
+      savePlayerMapping: () => {},
+      getPlayerTelegramId: () => null,
+    } as any;
+
+    const gm = GameManager.getInstance(
+      baseProgram(expiredAccount),
+      baseWallet(),
+      gameDb
+    );
+
+    const hydrated = await gm.ensureGameDataFromChain(gameAddress);
+    expect(hydrated).toBeNull();
+    expect(saveGame).not.toHaveBeenCalled();
+  });
+
+  test("ensureGameDataFromChain returns null when token mint missing", async () => {
+    resetGM();
+    const now = Math.floor(Date.now() / 1000);
+    const gameAddress = Keypair.generate().publicKey.toBase58();
+
+    const badAccount = {
+      creator: Keypair.generate().publicKey,
+      tokenMint: null,
+      gameType: { coinflip: {} },
+      ticketAmount: 1_000_000_000,
+      maxTickets: 4,
+      minTickets: 2,
+      ticketsCount: 0,
+      createdAt: now,
+      timeout: 3600,
+      isPrivate: false,
+    };
+
+    const saveGame = vi.fn();
+    const gameDb = {
+      getGame: () => null,
+      saveGame,
+      savePlayerMapping: () => {},
+      getPlayerTelegramId: () => null,
+    } as any;
+
+    const gm = GameManager.getInstance(
+      baseProgram(badAccount),
+      baseWallet(),
+      gameDb
+    );
+
+    const hydrated = await gm.ensureGameDataFromChain(gameAddress);
+    expect(hydrated).toBeNull();
+    expect(saveGame).not.toHaveBeenCalled();
+  });
+
+  test("ensureGameDataFromChain returns null when chain account missing", async () => {
+    resetGM();
+    const gameAddress = Keypair.generate().publicKey.toBase58();
+
+    const program = {
+      account: {
+        game: {
+          fetchNullable: async () => null,
+        },
+      },
+    } as any;
+
+    const saveGame = vi.fn();
+    const gameDb = {
+      getGame: () => null,
+      saveGame,
+      savePlayerMapping: () => {},
+      getPlayerTelegramId: () => null,
+    } as any;
+
+    const gm = GameManager.getInstance(program, baseWallet(), gameDb);
+
+    const hydrated = await gm.ensureGameDataFromChain(gameAddress);
+    expect(hydrated).toBeNull();
+    expect(saveGame).not.toHaveBeenCalled();
   });
 
   test("returns error when game not active", async () => {

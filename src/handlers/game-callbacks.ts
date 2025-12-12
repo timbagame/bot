@@ -102,6 +102,10 @@ export type GameCallbacksModule = {
   ) => Promise<void>;
   __test_shouldSkipGenericGameCallback: (callbackData: string) => boolean;
   __test_handleJoinGame: HandleJoinGameFn;
+  __test_handleGenericGameCallback: (
+    ctx: Context,
+    next: NextFunction
+  ) => Promise<void>;
 };
 
 const NON_GAME_CALLBACK_NAMES = [
@@ -668,81 +672,100 @@ export const createGameCallbacksModule = (
     }
   };
 
+  const handleGenericGameCallbackQuery = async (
+    ctx: Context,
+    next: NextFunction
+  ) => {
+    const callbackData = ctx.callbackQuery?.data ?? "";
+    console.log("📢 Generic callback handler received:", callbackData);
+
+    if (!callbackData || !ctx.from) {
+      await next();
+      return;
+    }
+
+    if (shouldSkipGenericGameCallback(callbackData)) {
+      console.log(
+        "🔄 Calling next() for non-game callback:",
+        callbackData
+      );
+      await next();
+      return;
+    }
+
+    const splitData = callbackData.split("_");
+    if (splitData.length < 2) {
+      await next();
+      return;
+    }
+
+    const [action, gameAddress] = splitData;
+    if (!action || !gameAddress) {
+      await next();
+      return;
+    }
+
+    const gameManager = getGameManager();
+    let game = deps.gameDb.getGame(gameAddress);
+    if (!game && (action === "join" || action === "refresh")) {
+      try {
+        game = await gameManager.ensureGameDataFromChain(gameAddress);
+      } catch (hydrateError) {
+        console.warn(
+          `Failed to hydrate game ${gameAddress} for callback ${action}:`,
+          hydrateError
+        );
+      }
+    }
+    if (!game) {
+      await safeAnswerCallbackQuery(
+        ctx,
+        "Game not found or has expired."
+      );
+      return;
+    }
+
+    if (game.status === "completed") {
+      await handleCompletedGameCallback(ctx, game);
+      return;
+    }
+
+    try {
+      const telegramId = await getRequiredTelegramIdForContext(
+        ctx,
+        "game callback"
+      );
+      if (telegramId == null) {
+        await safeAnswerCallbackQuery(
+          ctx,
+          "Unable to identify user. Please try again."
+        );
+        return;
+      }
+
+      const gamePda = new PublicKey(gameAddress);
+
+      switch (action) {
+        case "join":
+          await handleJoinGame(ctx, gamePda, telegramId, game);
+          break;
+        case "refresh":
+          await handleRefreshGameCallback(ctx, gamePda, gameAddress);
+          break;
+        default:
+          await next();
+          break;
+      }
+    } catch (error) {
+      await handleCallbackError(ctx, error, action);
+    }
+  };
+
   const registerHandlers = () => {
     deps.bot.on(
       "callback_query",
       deps.wrapCallbackHandler(
-        async (ctx, next) => {
-          const callbackData = ctx.callbackQuery?.data ?? "";
-          console.log("📢 Generic callback handler received:", callbackData);
-
-          if (!callbackData || !ctx.from) {
-            await next();
-            return;
-          }
-
-          if (shouldSkipGenericGameCallback(callbackData)) {
-            console.log(
-              "🔄 Calling next() for non-game callback:",
-              callbackData
-            );
-            await next();
-            return;
-          }
-
-          const splitData = callbackData.split("_");
-          if (splitData.length < 2) {
-            await next();
-            return;
-          }
-
-          const [action, gameAddress] = splitData;
-          if (!action || !gameAddress) {
-            await next();
-            return;
-          }
-
-          const game = deps.gameDb.getGame(gameAddress);
-          if (!game) {
-            await safeAnswerCallbackQuery(ctx, "Game not found!");
-            return;
-          }
-
-          if (game.status === "completed") {
-            await handleCompletedGameCallback(ctx, game);
-            return;
-          }
-
-          try {
-            const telegramId = await getRequiredTelegramIdForContext(
-              ctx,
-              "game callback"
-            );
-            if (telegramId == null) {
-              await safeAnswerCallbackQuery(
-                ctx,
-                "Unable to identify user. Please try again."
-              );
-              return;
-            }
-
-            const gamePda = new PublicKey(gameAddress);
-
-            switch (action) {
-              case "join":
-                await handleJoinGame(ctx, gamePda, telegramId, game);
-                break;
-              case "refresh":
-                await handleRefreshGameCallback(ctx, gamePda, gameAddress);
-                break;
-              default:
-                await next();
-                break;
-            }
-          } catch (error) {
-            await handleCallbackError(ctx, error, action);
-          }
-        },
+        handleGenericGameCallbackQuery,
         { action: "generic game callback" }
       )
     );
@@ -1836,6 +1859,7 @@ export const createGameCallbacksModule = (
     createTextInputMiddleware,
     __test_handleGameSetupTextInput: handleGameSetupTextInput,
     __test_handleJoinGame: handleJoinGame,
+    __test_handleGenericGameCallback: handleGenericGameCallbackQuery,
     __test_shouldSkipGenericGameCallback: shouldSkipGenericGameCallback,
   };
 };

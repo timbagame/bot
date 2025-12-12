@@ -50,6 +50,7 @@ import { isMessageMissing } from "./telegram-errors";
 import { FeeBudgetManager } from "./fee-budget";
 import type { FeeBudgetProvider } from "./fee-budget";
 import type {
+  GameData,
   GameMessage,
   GameCancellationResult,
   GameMessageFormat,
@@ -2108,7 +2109,10 @@ export class GameManager {
     }
 
     // If we have telegram ID, try to get username
-    if (creatorInfo.telegramId) {
+    if (
+      creatorInfo.telegramId &&
+      /^\d+$/.test(creatorInfo.telegramId.trim())
+    ) {
       const username = await this.getUsernameFromTelegramId(
         ctx,
         creatorInfo.telegramId
@@ -3935,9 +3939,15 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
       const playerKp = this.wallet.getKeyPair(telegramId);
 
       // Get game data and validate
-      const gameData = this.gameDb.getGame(gameAddress);
+      let gameData = this.gameDb.getGame(gameAddress);
       if (!gameData) {
-        return { success: false, error: "Game not found!" };
+        gameData = await this.ensureGameDataFromChain(gameAddress);
+      }
+      if (!gameData) {
+        return {
+          success: false,
+          error: "Game not found or has expired.",
+        };
       }
 
       if (gameData.status !== "active") {
@@ -4995,8 +5005,25 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     // Fetch all games from the blockchain
     const allGames = await this.program.account.game.all();
 
-    // Filter for public games
-    const publicGames = allGames.filter((game) => !game.account.isPrivate);
+    // Filter for public (non-private) games that are still joinable.
+    const publicGames = allGames.filter((game) => {
+      const account = game.account as any;
+      if (account?.isPrivate) return false;
+
+      const createdAt = Number(account?.createdAt ?? 0);
+      const timeout = Number(account?.timeout ?? 0);
+      const hasTiming =
+        Number.isFinite(createdAt) &&
+        createdAt > 0 &&
+        Number.isFinite(timeout) &&
+        timeout > 0;
+
+      if (hasTiming && GameManager.isExpired(account)) {
+        return false;
+      }
+
+      return true;
+    });
 
     // Map to GameData-like structure
     const activeGamesData = await Promise.all(
@@ -5028,6 +5055,123 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     );
 
     return this.formatActiveGamesList(ctx, activeGamesData);
+  }
+
+  /**
+   * Ensure local DB contains minimal data for an on-chain game.
+   * Used for /public joins where this bot may not have tracked the game yet.
+   */
+  public async ensureGameDataFromChain(
+    gameAddress: string
+  ): Promise<GameData | null> {
+    const existing = this.gameDb.getGame(gameAddress);
+    if (existing) {
+      return existing;
+    }
+
+    let gameAccount: any | null = null;
+    try {
+      const gamePda = new PublicKey(gameAddress);
+      const accountApi = this.program.account.game as any;
+      const fetchNullable = accountApi?.fetchNullable?.bind(accountApi);
+      gameAccount = fetchNullable
+        ? await fetchNullable(gamePda)
+        : await accountApi.fetch(gamePda);
+    } catch (error: any) {
+      const message = error?.message ?? "";
+      if (message.includes("Account does not exist")) {
+        return null;
+      }
+      throw error;
+    }
+
+    if (!gameAccount) {
+      return null;
+    }
+
+    const createdAtSeconds = Number(gameAccount.createdAt ?? 0);
+    const timeoutSeconds = Number(gameAccount.timeout ?? 0);
+    const hasTiming =
+      Number.isFinite(createdAtSeconds) &&
+      createdAtSeconds > 0 &&
+      Number.isFinite(timeoutSeconds) &&
+      timeoutSeconds > 0;
+
+    if (hasTiming && GameManager.isExpired(gameAccount)) {
+      return null;
+    }
+
+    const tokenMint =
+      typeof gameAccount.tokenMint?.toBase58 === "function"
+        ? gameAccount.tokenMint.toBase58()
+        : null;
+    if (!tokenMint) {
+      return null;
+    }
+
+    let tokenTicker = DEFAULT_TOKEN_TICKER;
+    try {
+      const metadata = await this.wallet.getTokenMetadata(tokenMint);
+      if (metadata?.symbol) {
+        tokenTicker = metadata.symbol;
+      }
+    } catch {
+      // ignore metadata errors
+    }
+
+    const creatorPubkey =
+      typeof gameAccount.creator?.toBase58 === "function"
+        ? gameAccount.creator.toBase58()
+        : String(gameAccount.creator ?? "");
+
+    const creatorTelegramId =
+      (creatorPubkey
+        ? this.gameDb.getPlayerTelegramId(creatorPubkey)
+        : null) ?? creatorPubkey;
+
+    if (creatorPubkey && creatorTelegramId) {
+      try {
+        this.gameDb.savePlayerMapping(creatorPubkey, creatorTelegramId);
+      } catch (error) {
+        console.warn(
+          `Failed to persist creator mapping for hydrated game ${gameAddress}:`,
+          error
+        );
+      }
+    }
+
+    const amount = Number(gameAccount.ticketAmount ?? 0);
+    const maxPlayers = Number(gameAccount.maxTickets ?? 0) || undefined;
+    const minPlayers = Number(gameAccount.minTickets ?? 0) || undefined;
+
+    const createdAtMs = hasTiming ? createdAtSeconds * 1000 : Date.now();
+    const expiresAtMs = hasTiming
+      ? (createdAtSeconds + timeoutSeconds) * 1000
+      : undefined;
+
+    try {
+      this.gameDb.saveGame(
+        gameAddress,
+        creatorTelegramId || "unknown",
+        Number.isFinite(amount) && amount > 0 ? amount : 0,
+        this.getGameType(gameAccount),
+        tokenMint,
+        tokenTicker,
+        maxPlayers,
+        minPlayers,
+        undefined,
+        hasTiming ? timeoutSeconds : undefined,
+        expiresAtMs,
+        createdAtMs
+      );
+    } catch (error) {
+      console.warn(
+        `Failed to hydrate game ${gameAddress} into local DB:`,
+        error
+      );
+    }
+
+    return this.gameDb.getGame(gameAddress);
   }
 
 

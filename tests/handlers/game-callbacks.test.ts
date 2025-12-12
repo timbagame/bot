@@ -172,6 +172,46 @@ describe("Game callback helpers", () => {
     );
   });
 
+  test("generic join callback hydrates missing game then joins", async () => {
+    const { module, gameManager, gameDb } = makeDeps();
+    const gameAddress = Keypair.generate().publicKey.toBase58();
+
+    (gameDb.getGame as any) = vi.fn(() => null);
+    (gameManager.ensureGameDataFromChain as any) = vi.fn(async () => ({
+      game_address: gameAddress,
+      status: "active",
+      amount: 1000,
+      game_type: "coinflip",
+      token_ticker: "TOK",
+      token_mint: "MINT",
+    }));
+
+    const ctx = {
+      chat: { id: 1, type: "private" },
+      callbackQuery: {
+        id: "q",
+        data: `join_${gameAddress}`,
+        message: { message_id: 42 },
+      },
+      from: {
+        id: 999,
+        is_bot: false,
+        username: "player",
+        first_name: "Tester",
+        last_name: "",
+      },
+      api: {
+        answerCallbackQuery: vi.fn(),
+        sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }),
+      },
+    } as any;
+
+    await module.__test_handleGenericGameCallback(ctx as Context, async () => {});
+
+    expect(gameManager.ensureGameDataFromChain).toHaveBeenCalledWith(gameAddress);
+    expect(gameManager.joinGame).toHaveBeenCalled();
+  });
+
   test("stale player events do not send announcements", async () => {
     const { gameDb } = makeDeps();
     (gameDb.getGameLastSlotWithTimestamp as any).mockReturnValue({

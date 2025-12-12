@@ -42,6 +42,7 @@ describe("GameManager Public Games", () => {
     const game2 = Keypair.generate().publicKey;
     const tokenMint1 = Keypair.generate().publicKey;
     const tokenMint2 = Keypair.generate().publicKey;
+    const now = Math.floor(Date.now() / 1000);
 
     const mockGames = [
       {
@@ -51,6 +52,8 @@ describe("GameManager Public Games", () => {
           gameType: { coinflip: {} },
           ticketAmount: 1000,
           tokenMint: tokenMint1,
+          createdAt: now,
+          timeout: 3600,
         },
       },
       {
@@ -60,6 +63,8 @@ describe("GameManager Public Games", () => {
           gameType: { giveaway: {} },
           ticketAmount: 2000,
           tokenMint: tokenMint2,
+          createdAt: now,
+          timeout: 3600,
         },
       },
     ];
@@ -87,6 +92,7 @@ describe("GameManager Public Games", () => {
   test("getAllActivePublicGames handles missing token metadata", async () => {
     const game1 = Keypair.generate().publicKey;
     const tokenMint1 = Keypair.generate().publicKey;
+    const now = Math.floor(Date.now() / 1000);
 
     const mockGames = [
       {
@@ -96,6 +102,8 @@ describe("GameManager Public Games", () => {
           gameType: { coinflip: {} },
           ticketAmount: 1000,
           tokenMint: tokenMint1,
+          createdAt: now,
+          timeout: 3600,
         },
       },
     ];
@@ -110,5 +118,50 @@ describe("GameManager Public Games", () => {
 
     const filteredGames = formatSpy.mock.calls[0]![1] as any[];
     expect(filteredGames[0].token_ticker).toBe("TIMBA"); // Default ticker
+  });
+
+  test("getAllActivePublicGames skips expired games", async () => {
+    const activeGame = Keypair.generate().publicKey;
+    const expiredGame = Keypair.generate().publicKey;
+    const tokenMint1 = Keypair.generate().publicKey;
+    const tokenMint2 = Keypair.generate().publicKey;
+    const now = Math.floor(Date.now() / 1000);
+
+    const mockGames = [
+      {
+        publicKey: activeGame,
+        account: {
+          isPrivate: false,
+          gameType: { coinflip: {} },
+          ticketAmount: 1000,
+          tokenMint: tokenMint1,
+          createdAt: now,
+          timeout: 3600,
+        },
+      },
+      {
+        publicKey: expiredGame,
+        account: {
+          isPrivate: false,
+          gameType: { coinflip: {} },
+          ticketAmount: 2000,
+          tokenMint: tokenMint2,
+          createdAt: now - 7200,
+          timeout: 10,
+        },
+      },
+    ];
+
+    mockProgram.account.game.all.mockResolvedValue(mockGames);
+    mockWallet.getTokenMetadata.mockResolvedValue({ symbol: "TEST" });
+
+    const formatSpy = vi.spyOn(gameManager as any, "formatActiveGamesList");
+    formatSpy.mockImplementation((_ctx: any, games: any) => games);
+
+    await gameManager.getAllActivePublicGames({} as any);
+
+    const filteredGames = formatSpy.mock.calls[0]![1] as any[];
+    expect(filteredGames).toHaveLength(1);
+    expect(filteredGames[0].game_address).toBe(activeGame.toBase58());
   });
 });
