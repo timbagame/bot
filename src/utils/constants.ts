@@ -296,3 +296,6 @@ export const getCoinflipVideoId = () =>
 // Giveaway start video - for giveaway announcements
 export const getGiveawayVideoId = () =>
   "CgACAgEAAxkBAAMDaQ0M13GXsOvS-Sbb3E_QntmacWoAAsQGAAKOMNBHC0hnpwojqy82BA";
+
+// Sentinel value to indicate explicitly disabled media (instead of null which could mean "not set")
+export const CHAT_MEDIA_DISABLED_SENTINEL = "__DISABLED__";

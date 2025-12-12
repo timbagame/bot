@@ -1,6 +1,5 @@
 import { expect, test, describe } from "bun:test";
 import {
-  createMainMenuKeyboard,
   createWalletKeyboard,
   createWalletSettingsKeyboard,
   createBackToSettingsKeyboard,
@@ -73,13 +72,6 @@ function extractTexts(kb: any): string[] {
 }
 
 describe("keyboards: main and wallet", () => {
-  test("main menu contains expected actions", () => {
-    const kb = createMainMenuKeyboard();
-    const callbacks = extractCallbacks(kb);
-    expect(callbacks).toContain("main_wallet");
-    expect(callbacks).toContain("cmd_help");
-  });
-
   test("wallet keyboard contains swap/withdraw/refresh and settings", () => {
     const kb = createWalletKeyboard();
     const callbacks = extractCallbacks(kb);

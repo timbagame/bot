@@ -3588,9 +3588,11 @@ bot.command("help", async (ctx: Context) => {
     "/games - Show your recent games",
     "/leaderboard - Show top 10 players in this group (groups only)",
     "/lb - Shorthand for leaderboard command",
+    "/globalboard - Show global leaderboard",
+    "/gb - Shorthand for globalboard command",
     "",
     "<b>🪙 Token Management:</b>",
-    "/default - View chat defaults (token, players, timeout)",
+    "/default - View chat defaults (token, players, privacy, media, timeout)",
     "",
     "<b>🔧 Utility Commands:</b>",
     "/oracle - Check Oracle configuration",
@@ -3598,7 +3600,7 @@ bot.command("help", async (ctx: Context) => {
     "<b>ℹ️ Important:</b> ",
     "• Your player balance account will be automatically initialized when needed",
     "• Specify token after amount: /coinflip 100 TIMBA 2 or /tip @user 50 SOL",
-    "• Group admins can set chat defaults (token, limits, timeout) via /default",
+    "• Group admins can set chat defaults (token, limits, privacy, media, timeout) via /default",
 
     "• Contact bot administrator to add support for new SPL tokens",
   ];
@@ -4810,181 +4812,6 @@ bot.callbackQuery("start_bot", async (ctx) => {
 });
 
 // ================================
-// HELP MENU CALLBACKS
-// ================================
-
-bot.callbackQuery("cmd_help", async (ctx) => {
-  try {
-    const helpContent =
-      "❓ <b>Help Center</b>\n\n" + "Choose a category to get detailed help:";
-    const helpKeyboard = new InlineKeyboard()
-      .text("💰 Wallet Commands", "help_wallet")
-      .row()
-      .text("🎮 Game Commands", "help_games")
-      .row()
-      .text("🔧 Utility Commands", "help_utility")
-      .row()
-      .text("📋 Examples", "help_examples")
-      .row();
-
-    await respondWithMenu(ctx, {
-      text: helpContent,
-      keyboard: helpKeyboard,
-    });
-    await safeAnswerCallbackQuery(ctx, "❓ Help Center");
-  } catch (error) {
-    console.error("Error in cmd_help:", error);
-    await safeAnswerCallbackQuery(ctx, "❌ Error loading help");
-  }
-});
-
-type HelpSectionKey = "wallet" | "games" | "utility" | "examples";
-
-type HelpSectionConfig = {
-  text: string;
-  ack: string;
-  buttons: Array<Array<{ label: string; callback: string }>>;
-};
-
-const HELP_SECTIONS: Record<HelpSectionKey, HelpSectionConfig> = {
-  wallet: {
-    text:
-      "💰 <b>Wallet Commands</b>\n\n" +
-      "<code>/start</code> - Show your wallet info\n" +
-      "<code>/balance</code> - Show detailed balances\n" +
-      "<code>/withdraw &lt;address&gt; &lt;amount&gt;</code> - Send tokens\n" +
-      "<code>/tip @username &lt;amount&gt;</code> - Tip a user (reply or @mention)\n\n" +
-      "💡 <i>All wallet commands work with different tokens</i>",
-    ack: "💰 Wallet Commands",
-    buttons: [
-      [
-        { label: "🎮 Games", callback: "help_games" },
-        { label: "🔧 Utility", callback: "help_utility" },
-      ],
-      [{ label: "📋 Examples", callback: "help_examples" }],
-      [{ label: "⬅️ Help Menu", callback: "cmd_help" }],
-    ],
-  },
-  games: {
-    text:
-      "🎮 <b>Game Commands</b>\n\n" +
-      "<code>/coinflip &lt;amount&gt; [TOKEN] &lt;players&gt;</code> - Create coinflip\n" +
-      "<code>/giveaway &lt;amount&gt; [TOKEN] &lt;players&gt;</code> - Create giveaway\n" +
-      "<code>/active</code> - Show active games\n" +
-      "<code>/games</code> - Show your game history\n" +
-      "<code>/leaderboard</code> - Show top 10 players (groups only)\n\n" +
-      "🪙 <b>Game Types:</b>\n" +
-      "• <b>Coinflip:</b> Players pay to join, winner takes all\n" +
-      "• <b>Giveaway:</b> Free to join, you fund the prize\n\n" +
-      "⏱️ <i>Games expire after 1 hour if not filled</i>",
-    ack: "🎮 Game Commands",
-    buttons: [
-      [
-        { label: "💰 Wallet", callback: "help_wallet" },
-        { label: "🔧 Utility", callback: "help_utility" },
-      ],
-      [{ label: "📋 Examples", callback: "help_examples" }],
-      [{ label: "⬅️ Help Menu", callback: "cmd_help" }],
-    ],
-  },
-  utility: {
-    text:
-      "🔧 <b>Utility Commands</b>\n\n" +
-      "<code>/oracle</code> - Check oracle status\n" +
-      "<code>/default</code> - Manage chat defaults (token, players, timeout)\n\n" +
-      "🔐 <b>Security:</b>\n" +
-      "• Some commands are private-chat only\n" +
-      "• Admin commands require permissions\n" +
-      "• Your keys never leave your wallet",
-    ack: "🔧 Utility Commands",
-    buttons: [
-      [
-        { label: "💰 Wallet", callback: "help_wallet" },
-        { label: "🎮 Games", callback: "help_games" },
-      ],
-      [{ label: "📋 Examples", callback: "help_examples" }],
-      [{ label: "⬅️ Help Menu", callback: "cmd_help" }],
-    ],
-  },
-  examples: {
-    text:
-      "📋 <b>Command Examples</b>\n\n" +
-      "<b>💰 Wallet Examples:</b>\n" +
-      "<code>/withdraw [address] 50 TIMBA</code>\n\n" +
-      "<b>🎮 Game Examples:</b>\n" +
-      "<code>/coinflip 100 TIMBA 2</code> (2-player, 100 TIMBA each)\n" +
-      "<code>/giveaway 500 TIMBA 5</code> (5 players, 500 TIMBA prize)\n\n" +
-      "<b>🔧 Utility Examples:</b>\n" +
-      "<code>/default USDC</code> (set chat default token)",
-    ack: "📋 Command Examples",
-    buttons: [
-      [
-        { label: "💰 Wallet", callback: "help_wallet" },
-        { label: "🎮 Games", callback: "help_games" },
-      ],
-      [{ label: "🔧 Utility", callback: "help_utility" }],
-      [{ label: "⬅️ Help Menu", callback: "cmd_help" }],
-    ],
-  },
-};
-
-const showHelpSection = async (ctx: any, section: HelpSectionKey) => {
-  const config = HELP_SECTIONS[section];
-  const keyboard = new InlineKeyboard();
-  for (const row of config.buttons) {
-    for (const button of row) {
-      keyboard.text(button.label, button.callback);
-    }
-    keyboard.row();
-  }
-
-  await respondWithMenu(ctx, {
-    text: config.text,
-    parseMode: "HTML",
-    keyboard,
-  });
-  await safeAnswerCallbackQuery(ctx, config.ack);
-};
-
-const HELP_SECTION_CALLBACKS: Array<{
-  callback: string;
-  section: HelpSectionKey;
-  errorAck: string;
-}> = [
-  {
-    callback: "help_wallet",
-    section: "wallet",
-    errorAck: "❌ Error loading wallet help",
-  },
-  {
-    callback: "help_games",
-    section: "games",
-    errorAck: "❌ Error loading games help",
-  },
-  {
-    callback: "help_utility",
-    section: "utility",
-    errorAck: "❌ Error loading utility help",
-  },
-  {
-    callback: "help_examples",
-    section: "examples",
-    errorAck: "❌ Error loading examples",
-  },
-];
-
-for (const { callback, section, errorAck } of HELP_SECTION_CALLBACKS) {
-  bot.callbackQuery(callback, async (ctx) => {
-    try {
-      await showHelpSection(ctx, section);
-    } catch (error) {
-      console.error(`Error in ${callback}:`, error);
-      await safeAnswerCallbackQuery(ctx, errorAck);
-    }
-  });
-}
-
-// ================================
 // ADMIN MENU CALLBACKS
 // ================================
 
@@ -5492,6 +5319,122 @@ bot.on("message:text", async (ctx, next) => {
   }
 });
 
+// Handle media messages (video, photo, animation) for chat defaults video ID settings
+const handleMediaForChatDefaults = async (
+  ctx: any,
+  mediaType: "video" | "photo" | "animation" | "document"
+) => {
+  const userId = getTelegramIdString(ctx);
+  if (!userId) {
+    return;
+  }
+
+  // Check if the message is a reply to a prompting message
+  const replyToMessageId = ctx.message?.reply_to_message?.message_id;
+  if (!replyToMessageId) {
+    return;
+  }
+
+  // Construct session key from chat and message ID
+  const sessionKey = `${ctx.chat?.id || 0}_${replyToMessageId}`;
+
+  // Check for input session
+  const inputSession = getInputSession(sessionKey);
+  if (!inputSession || inputSession.type !== "chat_defaults") {
+    return; // Not waiting for video ID input
+  }
+
+  const setting = inputSession["setting"] as string | undefined;
+  if (setting !== "video_coinflip" && setting !== "video_giveaway") {
+    return; // Not a video ID setting
+  }
+
+  if (
+    typeof inputSession.initiatorId === "string" &&
+    inputSession.initiatorId.length > 0 &&
+    inputSession.initiatorId !== userId
+  ) {
+    await ctx.reply(
+      "❌ <b>This prompt is no longer active for you.</b>\n\nOpen the defaults menu again to continue.",
+      {
+        parse_mode: "HTML",
+      }
+    );
+    return;
+  }
+
+  const lockerSuffix = ctx.message?.message_id ?? ctx.update?.update_id ?? Date.now();
+  const lockerId = `${userId}:${lockerSuffix}`;
+  const locked = markInputSessionProcessing(sessionKey, lockerId);
+
+  if (!locked) {
+    return;
+  }
+
+  try {
+    const message = ctx.message;
+
+    if (mediaType === "document" && message?.document) {
+      // Reject all documents - only accept direct photos, videos, and animations
+      await ctx.reply(
+        "❌ <b>Please send media directly</b>\n\n" +
+        "Only <b>photos</b>, <b>videos</b>, or <b>GIFs</b> sent directly are accepted.\n\n" +
+        "Files sent as documents are not supported.",
+        { parse_mode: "HTML" }
+      );
+      clearInputSession(sessionKey);
+      return;
+    }
+
+    const hasMedia =
+      (mediaType === "video" && !!message?.video) ||
+      (mediaType === "animation" && !!message?.animation) ||
+      (mediaType === "photo" &&
+        Array.isArray(message?.photo) &&
+        message.photo.length > 0);
+
+    if (!hasMedia) {
+      await ctx.reply("❌ Could not read that media. Please try again.");
+      clearInputSession(sessionKey);
+      return;
+    }
+
+    // Store the media type in context so handleVideoIdUpdate can access it
+    (ctx as any).__mediaType = mediaType;
+    await chatDefaultsModule.handleSettingsInput(ctx, inputSession, "");
+
+    clearInputSession(sessionKey);
+  } catch (error) {
+    clearInputSession(sessionKey);
+    console.error("Error handling media input for chat defaults:", error);
+    await ctx.reply("❌ <b>Error processing media</b>\n\nPlease try again.", {
+      parse_mode: "HTML",
+    });
+  } finally {
+    clearInputSessionProcessing(sessionKey);
+  }
+};
+
+bot.on("message:video", async (ctx, next) => {
+  await handleMediaForChatDefaults(ctx, "video");
+  await next();
+});
+
+bot.on("message:photo", async (ctx, next) => {
+  await handleMediaForChatDefaults(ctx, "photo");
+  await next();
+});
+
+bot.on("message:animation", async (ctx, next) => {
+  await handleMediaForChatDefaults(ctx, "animation");
+  await next();
+});
+
+bot.on("message:document", async (ctx, next) => {
+  await handleMediaForChatDefaults(ctx, "document");
+  await next();
+});
+
 /**
  * Handle swap token input (when user sends token mint or symbol)
  */
@@ -5604,9 +5547,12 @@ const handleSwapToTokenInput = async (
       fromToken,
       messageId: userState.messageId,
       chatId: userState.chatId,
+      initiatorId: getTelegramIdString(ctx),
     });
   }
 };
+
+export const __test_handleSwapToTokenInput = handleSwapToTokenInput;
 
 /**
  * Handle swap custom amount input

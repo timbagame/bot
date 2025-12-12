@@ -37,6 +37,10 @@ export class ChatDatabase extends BaseDatabase {
           timeout_seconds INTEGER,
           coinflip_default_privacy TEXT,
           giveaway_default_privacy TEXT,
+          coinflip_video_id TEXT,
+          giveaway_video_id TEXT,
+          coinflip_media_type TEXT,
+          giveaway_media_type TEXT,
           set_by_telegram_id TEXT,
           updated_at INTEGER NOT NULL
         )`,
@@ -44,22 +48,25 @@ export class ChatDatabase extends BaseDatabase {
       "Chat"
     );
 
-    // Migration: add privacy columns if they don't exist
-    // Use db.run directly to avoid logging expected "column already exists" errors
-    try {
-      this.db.run(
-        "ALTER TABLE chat_game_settings ADD COLUMN coinflip_default_privacy TEXT"
-      );
-    } catch {
-      // Column already exists - expected on existing databases
-    }
+    // Migration: add new columns if they don't exist.
+    // Use db.run directly to avoid logging expected "column already exists" errors.
+    const columnsToAdd = [
+      "coinflip_default_privacy TEXT",
+      "giveaway_default_privacy TEXT",
+      "coinflip_video_id TEXT",
+      "giveaway_video_id TEXT",
+      "coinflip_media_type TEXT",
+      "giveaway_media_type TEXT",
+    ] as const;
 
-    try {
-      this.db.run(
-        "ALTER TABLE chat_game_settings ADD COLUMN giveaway_default_privacy TEXT"
-      );
-    } catch {
-      // Column already exists - expected on existing databases
+    for (const column of columnsToAdd) {
+      try {
+        this.db.run(
+          `ALTER TABLE chat_game_settings ADD COLUMN ${column}`
+        );
+      } catch {
+        // Column already exists - expected on existing databases
+      }
     }
   }
 
@@ -137,6 +144,22 @@ export class ChatDatabase extends BaseDatabase {
       settings,
       "giveaway_default_privacy"
     );
+    const hasCoinflipVideoId = Object.prototype.hasOwnProperty.call(
+      settings,
+      "coinflip_video_id"
+    );
+    const hasGiveawayVideoId = Object.prototype.hasOwnProperty.call(
+      settings,
+      "giveaway_video_id"
+    );
+    const hasCoinflipMediaType = Object.prototype.hasOwnProperty.call(
+      settings,
+      "coinflip_media_type"
+    );
+    const hasGiveawayMediaType = Object.prototype.hasOwnProperty.call(
+      settings,
+      "giveaway_media_type"
+    );
     const hasSetBy = Object.prototype.hasOwnProperty.call(
       settings,
       "set_by_telegram_id"
@@ -159,6 +182,18 @@ export class ChatDatabase extends BaseDatabase {
       giveaway_default_privacy: hasGiveawayPrivacy
         ? settings.giveaway_default_privacy ?? null
         : existing?.giveaway_default_privacy ?? null,
+      coinflip_video_id: hasCoinflipVideoId
+        ? settings.coinflip_video_id ?? null
+        : existing?.coinflip_video_id ?? null,
+      giveaway_video_id: hasGiveawayVideoId
+        ? settings.giveaway_video_id ?? null
+        : existing?.giveaway_video_id ?? null,
+      coinflip_media_type: hasCoinflipMediaType
+        ? settings.coinflip_media_type ?? null
+        : existing?.coinflip_media_type ?? null,
+      giveaway_media_type: hasGiveawayMediaType
+        ? settings.giveaway_media_type ?? null
+        : existing?.giveaway_media_type ?? null,
       set_by_telegram_id: hasSetBy
         ? settings.set_by_telegram_id ?? null
         : existing?.set_by_telegram_id ?? null,
@@ -173,9 +208,13 @@ export class ChatDatabase extends BaseDatabase {
           timeout_seconds,
           coinflip_default_privacy,
           giveaway_default_privacy,
+          coinflip_video_id,
+          giveaway_video_id,
+          coinflip_media_type,
+          giveaway_media_type,
           set_by_telegram_id,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         next.chat_id,
         next.coinflip_max_players ?? null,
@@ -183,6 +222,10 @@ export class ChatDatabase extends BaseDatabase {
         next.timeout_seconds ?? null,
         next.coinflip_default_privacy ?? null,
         next.giveaway_default_privacy ?? null,
+        next.coinflip_video_id ?? null,
+        next.giveaway_video_id ?? null,
+        next.coinflip_media_type ?? null,
+        next.giveaway_media_type ?? null,
         next.set_by_telegram_id ?? null,
         next.updated_at,
       ],

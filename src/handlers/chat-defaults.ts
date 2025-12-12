@@ -12,6 +12,7 @@ import {
   MIN_COINFLIP_PLAYERS,
   MIN_GAME_TIMEOUT,
   MIN_GIVEAWAY_PLAYERS,
+  CHAT_MEDIA_DISABLED_SENTINEL,
 } from "../utils/constants";
 import {
   clampChatPlayers,
@@ -62,7 +63,7 @@ const formatTimeoutLine = (timeoutSeconds: number, isDefault: boolean): string =
   return `⏱️ Game timeout: ${formatted} ${suffix}`;
 };
 
-type SettingsTarget = "token" | "coinflip" | "giveaway" | "timeout" | "privacy_coinflip" | "privacy_giveaway";
+type SettingsTarget = "token" | "coinflip" | "giveaway" | "timeout" | "privacy_coinflip" | "privacy_giveaway" | "video_coinflip" | "video_giveaway";
 
 type ChatDefaultsModuleDeps = {
   bot: Bot;
@@ -98,6 +99,10 @@ const buildMenuKeyboard = (): InlineKeyboard => {
     .text("👁️ Coinflip privacy", "chat_defaults_privacy_coinflip")
     .row()
     .text("👁️ Giveaway privacy", "chat_defaults_privacy_giveaway")
+    .row()
+    .text("🎬 Coinflip video", "chat_defaults_video_coinflip")
+    .row()
+    .text("🎬 Giveaway video", "chat_defaults_video_giveaway")
     .row();
 };
 
@@ -155,6 +160,44 @@ const buildSettingsSummary = async (
   const giveawaySuffix = giveawayPrivacy ? "(chat default)" : "(bot default)";
   const giveawayPrivacyLine = `👁️ Giveaway privacy: ${isGiveawayPrivate ? "Private 🔒" : "Public 🌍"} ${giveawaySuffix}`;
 
+  let coinflipVideoSuffix = "(bot default)";
+  let coinflipVideoDisplay = "Using bot default";
+  if (chatSettings) {
+    const videoId = chatSettings.coinflip_video_id;
+    if (videoId === CHAT_MEDIA_DISABLED_SENTINEL) {
+      coinflipVideoSuffix = "(disabled)";
+      coinflipVideoDisplay = "Disabled - text only";
+    } else if (videoId === "") {
+      // Explicitly cleared - use bot default
+      coinflipVideoSuffix = "(bot default)";
+      coinflipVideoDisplay = "Using bot default";
+    } else if (videoId && videoId.length > 0) {
+      coinflipVideoSuffix = "(chat default)";
+      coinflipVideoDisplay = `${escapeHtml(videoId.substring(0, 20))}...`;
+    }
+    // If videoId is null, it means not set yet - use bot default (default values already set)
+  }
+  const coinflipVideoLine = `🎬 Coinflip video: ${coinflipVideoDisplay} ${coinflipVideoSuffix}`;
+
+  let giveawayVideoSuffix = "(bot default)";
+  let giveawayVideoDisplay = "Using bot default";
+  if (chatSettings) {
+    const videoId = chatSettings.giveaway_video_id;
+    if (videoId === CHAT_MEDIA_DISABLED_SENTINEL) {
+      giveawayVideoSuffix = "(disabled)";
+      giveawayVideoDisplay = "Disabled - text only";
+    } else if (videoId === "") {
+      // Explicitly cleared - use bot default
+      giveawayVideoSuffix = "(bot default)";
+      giveawayVideoDisplay = "Using bot default";
+    } else if (videoId && videoId.length > 0) {
+      giveawayVideoSuffix = "(chat default)";
+      giveawayVideoDisplay = `${escapeHtml(videoId.substring(0, 20))}...`;
+    }
+    // If videoId is null, it means not set yet - use bot default (default values already set)
+  }
+  const giveawayVideoLine = `🎬 Giveaway video: ${giveawayVideoDisplay} ${giveawayVideoSuffix}`;
+
   return [
     "<b>Chat defaults</b>",
     "",
@@ -172,6 +215,8 @@ const buildSettingsSummary = async (
     formatTimeoutLine(timeoutSeconds, chatSettings?.timeout_seconds == null),
     coinflipPrivacyLine,
     giveawayPrivacyLine,
+    coinflipVideoLine,
+    giveawayVideoLine,
     "",
     "Use the buttons below to update chat defaults.",
   ].join("\n");
@@ -255,6 +300,15 @@ const promptForSetting = async (
       "",
       INPUT_TIMEOUT_HINT
     );
+  } else if (target === "video_coinflip" || target === "video_giveaway") {
+    const gameType = target === "video_coinflip" ? "coinflip" : "giveaway";
+    messageLines.push(
+      `Send a video, image, or GIF for the ${gameType} game.`,
+      "",
+      "Send the media directly (video, photo, or GIF).",
+      "",
+      INPUT_TIMEOUT_HINT
+    );
   } else {
     const minPlayers = target === "coinflip" ? MIN_COINFLIP_PLAYERS : MIN_GIVEAWAY_PLAYERS;
     messageLines.push(
@@ -302,11 +356,16 @@ const handlePlayersUpdate = async (
   const minValue = target === "coinflip" ? MIN_COINFLIP_PLAYERS : MIN_GIVEAWAY_PLAYERS;
 
   if (/^(clear|remove)$/i.test(input.trim())) {
-    deps.chatDb.upsertChatGameSettings(chatId, {
-      coinflip_max_players: target === "coinflip" ? null : undefined,
-      giveaway_max_players: target === "giveaway" ? null : undefined,
+    // Only update the target field, don't touch the other one
+    const updateData: any = {
       set_by_telegram_id: telegramId.toString(),
-    });
+    };
+    if (target === "coinflip") {
+      updateData.coinflip_max_players = null;
+    } else {
+      updateData.giveaway_max_players = null;
+    }
+    deps.chatDb.upsertChatGameSettings(chatId, updateData);
     await deps.replyToMessage(ctx, "✅ Reset to bot default.");
     return;
   }
@@ -321,11 +380,16 @@ const handlePlayersUpdate = async (
     return;
   }
 
-  deps.chatDb.upsertChatGameSettings(chatId, {
-    coinflip_max_players: target === "coinflip" ? clamped : undefined,
-    giveaway_max_players: target === "giveaway" ? clamped : undefined,
+  // Only update the target field, don't touch the other one
+  const updateData: any = {
     set_by_telegram_id: telegramId.toString(),
-  });
+  };
+  if (target === "coinflip") {
+    updateData.coinflip_max_players = clamped;
+  } else {
+    updateData.giveaway_max_players = clamped;
+  }
+  deps.chatDb.upsertChatGameSettings(chatId, updateData);
 
   await deps.replyToMessage(
     ctx,
@@ -368,6 +432,80 @@ const handleTimeoutUpdate = async (
   await deps.replyToMessage(
     ctx,
     `✅ Default game timeout set to ${formatDuration(clamped)}.`
+  );
+};
+
+const handleVideoIdUpdate = async (
+  ctx: Context,
+  deps: ChatDefaultsModuleDeps,
+  input: string,
+  target: "video_coinflip" | "video_giveaway"
+): Promise<void> => {
+  const chatId = ctx.chat?.id;
+  if (chatId == null) return;
+  const telegramId = getTelegramId(ctx);
+
+  if (/^(clear|remove)$/i.test(input.trim())) {
+    // Clear means use bot default - set to empty string to indicate "use default"
+    // Only update the target field, don't touch the other one
+    const updateData: any = {
+      set_by_telegram_id: telegramId.toString(),
+    };
+    if (target === "video_coinflip") {
+      updateData.coinflip_video_id = "";
+      updateData.coinflip_media_type = null;
+    } else {
+      updateData.giveaway_video_id = "";
+      updateData.giveaway_media_type = null;
+    }
+    deps.chatDb.upsertChatGameSettings(chatId, updateData);
+    await deps.replyToMessage(ctx, "✅ Reset to bot default.");
+    return;
+  }
+
+  const videoId = input.trim();
+  if (!videoId || videoId.length < 5) {
+    await deps.replyToMessage(
+      ctx,
+      "❌ Invalid file ID. Please send a valid Telegram file ID."
+    );
+    return;
+  }
+
+  // Determine media type from context if available
+  const message = (ctx as any).message;
+  let mediaType: "photo" | "video" | "animation" = "video"; // default to video
+
+  // Check if media type was stored in context (from media message handler)
+  if ((ctx as any).__mediaType) {
+    mediaType = (ctx as any).__mediaType;
+  } else if (message?.video) {
+    mediaType = "video";
+  } else if (message?.photo && message.photo.length > 0) {
+    mediaType = "photo";
+  } else if (message?.animation) {
+    mediaType = "animation";
+  }
+
+  // Only update the target field, don't touch the other one
+  const updateData: any = {
+    set_by_telegram_id: telegramId.toString(),
+  };
+  if (target === "video_coinflip") {
+    updateData.coinflip_video_id = videoId;
+    updateData.coinflip_media_type = mediaType;
+  } else {
+    updateData.giveaway_video_id = videoId;
+    updateData.giveaway_media_type = mediaType;
+  }
+  deps.chatDb.upsertChatGameSettings(chatId, updateData);
+
+  const mediaTypeLabel = mediaType === "photo" ? "image" : mediaType === "animation" ? "GIF" : "video";
+  await deps.replyToMessage(
+    ctx,
+    target === "video_coinflip"
+      ? `✅ Default coinflip ${mediaTypeLabel} set. New games will use this ${mediaTypeLabel}.`
+      : `✅ Default giveaway ${mediaTypeLabel} set. New games will use this ${mediaTypeLabel}.`
   );
 };
 
@@ -429,14 +567,16 @@ export const createChatDefaultsModule = (
   };
 
   deps.bot.callbackQuery(
-    /^chat_defaults_clear_(token|coinflip|giveaway|timeout)$/,
+    /^chat_defaults_clear_(token|coinflip|giveaway|timeout|video_coinflip|video_giveaway)$/,
     deps.wrapCallbackHandler(async (ctx) => {
       if (!ctx.chat) return;
       const target = ctx.match?.[1] as
         | "token"
         | "coinflip"
         | "giveaway"
-        | "timeout";
+        | "timeout"
+        | "video_coinflip"
+        | "video_giveaway";
       if (!target) return;
 
       const allowed = await ensureAdmin(ctx, deps);
@@ -468,6 +608,20 @@ export const createChatDefaultsModule = (
           giveaway_max_players: null,
           set_by_telegram_id: telegramId.toString(),
         });
+      } else if (target === "video_coinflip") {
+        // Clear means use bot default - set to empty string to indicate "use default"
+        deps.chatDb.upsertChatGameSettings(chatId, {
+          coinflip_video_id: "",
+          coinflip_media_type: null,
+          set_by_telegram_id: telegramId.toString(),
+        });
+      } else if (target === "video_giveaway") {
+        // Clear means use bot default - set to empty string to indicate "use default"
+        deps.chatDb.upsertChatGameSettings(chatId, {
+          giveaway_video_id: "",
+          giveaway_media_type: null,
+          set_by_telegram_id: telegramId.toString(),
+        });
       }
 
       // Clear input session if any
@@ -481,7 +635,7 @@ export const createChatDefaultsModule = (
   );
 
   deps.bot.callbackQuery(
-    /^chat_defaults_(token|coinflip|giveaway|timeout|privacy_coinflip|privacy_giveaway)$/,
+    /^chat_defaults_(token|coinflip|giveaway|timeout|privacy_coinflip|privacy_giveaway|video_coinflip|video_giveaway)$/,
     deps.wrapCallbackHandler(async (ctx) => {
       if (!ctx.chat) return;
       const action = ctx.match?.[1] as SettingsTarget | undefined;
@@ -518,10 +672,85 @@ export const createChatDefaultsModule = (
             .row()
             .text("🔙 Cancel", "chat_defaults_cancel"),
         });
+      } else if (action === "video_coinflip" || action === "video_giveaway") {
+        const gameType = action === "video_coinflip" ? "coinflip" : "giveaway";
+        await respondWithMenu(ctx, {
+          text: `Choose an option for the ${gameType} game media.`,
+          keyboard: new InlineKeyboard()
+            .text("📤 Set custom media", `chat_defaults_set_${action}`)
+            .row()
+            .text("🚫 Disable (no media)", `chat_defaults_disable_${action}`)
+            .row()
+            .text("❌ Clear (Use bot default)", `chat_defaults_clear_${action}`)
+            .row()
+            .text("🔙 Cancel", "chat_defaults_cancel"),
+        });
       } else {
         await promptForSetting(ctx, deps, action);
       }
       await safeAnswerCallbackQuery(ctx);
+    })
+  );
+
+  deps.bot.callbackQuery(
+    /^chat_defaults_set_(video_coinflip|video_giveaway)$/,
+    deps.wrapCallbackHandler(async (ctx) => {
+      if (!ctx.chat) return;
+      const target = ctx.match?.[1] as "video_coinflip" | "video_giveaway";
+      if (!target) return;
+
+      const allowed = await ensureAdmin(ctx, deps);
+      if (!allowed) {
+        await safeAnswerCallbackQuery(
+          ctx,
+          "Only admins can change chat defaults"
+        );
+        return;
+      }
+
+      await promptForSetting(ctx, deps, target);
+      await safeAnswerCallbackQuery(ctx);
+    })
+  );
+
+  deps.bot.callbackQuery(
+    /^chat_defaults_disable_(video_coinflip|video_giveaway)$/,
+    deps.wrapCallbackHandler(async (ctx) => {
+      if (!ctx.chat) return;
+      const target = ctx.match?.[1] as "video_coinflip" | "video_giveaway";
+      if (!target) return;
+
+      const allowed = await ensureAdmin(ctx, deps);
+      if (!allowed) {
+        await safeAnswerCallbackQuery(
+          ctx,
+          "Only admins can change chat defaults"
+        );
+        return;
+      }
+
+      const chatId = ctx.chat.id;
+      const telegramId = getTelegramId(ctx);
+      const gameType = target === "video_coinflip" ? "coinflip" : "giveaway";
+
+      // Only update the target field, don't touch the other one
+      const updateData: any = {
+        set_by_telegram_id: telegramId.toString(),
+      };
+      if (target === "video_coinflip") {
+        updateData.coinflip_video_id = CHAT_MEDIA_DISABLED_SENTINEL;
+        updateData.coinflip_media_type = null;
+      } else {
+        updateData.giveaway_video_id = CHAT_MEDIA_DISABLED_SENTINEL;
+        updateData.giveaway_media_type = null;
+      }
+      deps.chatDb.upsertChatGameSettings(chatId, updateData);
+
+      await renderMenu(ctx);
+      await safeAnswerCallbackQuery(
+        ctx,
+        `${gameType} media disabled - games will send text only`
+      );
     })
   );
 
@@ -586,6 +815,20 @@ export const createChatDefaultsModule = (
   ): Promise<boolean> => {
     if (session.type !== "chat_defaults") return false;
 
+    const initiatorId = session.initiatorId;
+    const currentUserId = getTelegramIdString(ctx);
+    if (
+      typeof initiatorId === "string" &&
+      initiatorId.length > 0 &&
+      initiatorId !== currentUserId
+    ) {
+      await deps.replyToMessage(
+        ctx,
+        "❌ <b>This prompt is no longer active for you.</b>\n\nOpen the defaults menu again to continue."
+      );
+      return true;
+    }
+
     const telegramId = getTelegramId(ctx);
     const admin = await deps.isUserGroupAdmin(ctx, Number(telegramId));
     if (!admin) {
@@ -598,7 +841,26 @@ export const createChatDefaultsModule = (
 
     const setting = session["setting"] as SettingsTarget | undefined;
 
-    if (setting === "token") {
+    // Check if user sent media for video ID settings
+    if (setting === "video_coinflip" || setting === "video_giveaway") {
+      const message = (ctx as any).message;
+      let fileId: string | undefined;
+
+      // Try to extract file ID from various media types
+      // Note: Documents are rejected by the dedicated message:document handler in bot.ts
+      if (message?.video) {
+        fileId = message.video.file_id;
+      } else if (message?.animation) {
+        fileId = message.animation.file_id;
+      } else if (message?.photo && message.photo.length > 0) {
+        // Use the largest photo
+        fileId = message.photo[message.photo.length - 1].file_id;
+      }
+
+      // Use file ID from media if available, otherwise use text input
+      const videoIdInput = fileId || userMessage;
+      await handleVideoIdUpdate(ctx, deps, videoIdInput, setting);
+    } else if (setting === "token") {
       await handleTokenChange(ctx, userMessage, deps);
     } else if (setting === "timeout") {
       await handleTimeoutUpdate(ctx, deps, userMessage);

@@ -53,6 +53,15 @@ export interface ChatGameSettings {
   timeout_seconds?: number | null;
   coinflip_default_privacy?: "public" | "private" | null;
   giveaway_default_privacy?: "public" | "private" | null;
+  // Media settings:
+  // - CHAT_MEDIA_DISABLED_SENTINEL ("__DISABLED__") = explicitly disabled (text-only)
+  // - null/undefined = not set (use bot default)
+  // - "" = cleared (use bot default)
+  // - any other string = custom Telegram file_id
+  coinflip_video_id?: string | null;
+  giveaway_video_id?: string | null;
+  coinflip_media_type?: "photo" | "video" | "animation" | null;
+  giveaway_media_type?: "photo" | "video" | "animation" | null;
   set_by_telegram_id?: string | null;
   updated_at: number;
 }

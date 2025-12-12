@@ -369,6 +369,29 @@ test("persistInputPromptFromContext overwrites session with latest prompt", asyn
   expect(session?.["payload"]).toBe(2);
 });
 
+test("persistInputPromptFromContext stores initiatorId by default", async () => {
+  const edits: EditCall[] = [];
+  const ctx = createMockContext(edits, {
+    overrides: {
+      from: { id: 111 },
+    },
+  });
+
+  const keyboard = new InlineKeyboard().text("Cancel", "cancel");
+
+  await persistInputPromptFromContext({
+    ctx,
+    text: "Prompt",
+    keyboard,
+    session: { type: "send_custom_amount" },
+    logLabel: "initiator-default",
+  });
+
+  const sessionKey = "654_321";
+  const session = getInputSession(sessionKey);
+  expect(session?.initiatorId).toBe("111");
+});
+
 test("buildWalletActionMenuForUser assembles menu using shared dependencies", async () => {
   const keyboard = new InlineKeyboard();
   const balancesCalls: bigint[] = [];

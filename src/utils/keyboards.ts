@@ -12,14 +12,6 @@ import {
 } from "./format-amount";
 import { formatDuration } from "./format-time";
 
-export const createMainMenuKeyboard = (): InlineKeyboard => {
-  return new InlineKeyboard()
-    .text("💳 Wallet", "main_wallet")
-    .row()
-    .text("❓ Help", "cmd_help")
-    .row();
-};
-
 export const createWalletKeyboard = (): InlineKeyboard => {
   return new InlineKeyboard()
     .text("🔄 Swap", "cmd_swap")
@@ -30,7 +22,7 @@ export const createWalletKeyboard = (): InlineKeyboard => {
     .row();
 };
 
-export const appendBackToWalletButton = (
+const appendBackToWalletButton = (
   keyboard: InlineKeyboard
 ): InlineKeyboard => {
   return keyboard.text("← Back to Wallet", "main_wallet").row();
@@ -116,7 +108,7 @@ const roundToPrecision = (value: number, precision: number): number => {
   return Math.round(value * factor) / factor;
 };
 
-export const withCreatorSuffix = (base: string, creatorId?: string): string =>
+const withCreatorSuffix = (base: string, creatorId?: string): string =>
   creatorId ? `${base}_${creatorId}` : base;
 
 /**
