@@ -12,6 +12,7 @@ import {
   createAdvancedOptionsKeyboard,
   getFeeWarningMessage,
 } from "../src/utils/keyboards";
+import { MAX_GAME_TIMEOUT, MIN_GAME_TIMEOUT } from "../src/utils/constants";
 
 // Helper to extract callback_data strings from InlineKeyboard
 function extractCallbacks(kb: any): string[] {
@@ -186,6 +187,38 @@ describe("keyboards: misc menus", () => {
       "advanced_min_players_coinflip_1.5_4_1_creator123",
       "back_to_confirm_coinflip_1.5_4_creator123",
     ]);
+  });
+
+  test("advanced timeout buttons disable at minimum", () => {
+    const kb = createAdvancedOptionsKeyboard(
+      "coinflip",
+      "1.5",
+      "4",
+      { timeoutSeconds: MIN_GAME_TIMEOUT, minPlayers: 2, isPrivate: true }
+    );
+
+    const callbacks = extractCallbacks(kb);
+
+    expect(callbacks[0]).toBe("noop");
+    expect(callbacks[1]).toBe("noop");
+    expect(callbacks[3]).toBe("advanced_timeout_coinflip_1.5_4_5");
+    expect(callbacks[4]).toBe("advanced_timeout_coinflip_1.5_4_15");
+  });
+
+  test("advanced timeout buttons disable at maximum", () => {
+    const kb = createAdvancedOptionsKeyboard(
+      "coinflip",
+      "1.5",
+      "4",
+      { timeoutSeconds: MAX_GAME_TIMEOUT, minPlayers: 2, isPrivate: true }
+    );
+
+    const callbacks = extractCallbacks(kb);
+
+    expect(callbacks[0]).toBe("advanced_timeout_coinflip_1.5_4_-15");
+    expect(callbacks[1]).toBe("advanced_timeout_coinflip_1.5_4_-5");
+    expect(callbacks[3]).toBe("noop");
+    expect(callbacks[4]).toBe("noop");
   });
 });
 

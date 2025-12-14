@@ -2,7 +2,9 @@ import { InlineKeyboard } from "grammy";
 import {
   DEFAULT_GAME_TIMEOUT,
   DEFAULT_TOKEN_TICKER,
+  MAX_GAME_TIMEOUT,
   MIN_COINFLIP_PLAYERS,
+  MIN_GAME_TIMEOUT,
   MIN_GIVEAWAY_PLAYERS,
 } from "./constants";
 import {
@@ -400,37 +402,47 @@ export const createAdvancedOptionsKeyboard = (
     : minPlayersFloor;
   const canDecrement = options.minPlayers > minPlayersFloor;
   const canIncrement = options.minPlayers < maxMinPlayers;
+  const canDecreaseTimeout = options.timeoutSeconds > MIN_GAME_TIMEOUT;
+  const canIncreaseTimeout = options.timeoutSeconds < MAX_GAME_TIMEOUT;
   const timeoutLabel = formatTimeoutLabel(options.timeoutSeconds);
 
   return new InlineKeyboard()
     .text(
       "-15m",
-      withCreatorSuffix(
-        `advanced_timeout_${gameType}_${amount}_${players}_-15`,
-        creatorId
-      )
+      canDecreaseTimeout
+        ? withCreatorSuffix(
+            `advanced_timeout_${gameType}_${amount}_${players}_-15`,
+            creatorId
+          )
+        : "noop"
     )
     .text(
       "-5m",
-      withCreatorSuffix(
-        `advanced_timeout_${gameType}_${amount}_${players}_-5`,
-        creatorId
-      )
+      canDecreaseTimeout
+        ? withCreatorSuffix(
+            `advanced_timeout_${gameType}_${amount}_${players}_-5`,
+            creatorId
+          )
+        : "noop"
     )
     .text(`⏱️ ${timeoutLabel}`.trim(), "noop")
     .text(
       "+5m",
-      withCreatorSuffix(
-        `advanced_timeout_${gameType}_${amount}_${players}_5`,
-        creatorId
-      )
+      canIncreaseTimeout
+        ? withCreatorSuffix(
+            `advanced_timeout_${gameType}_${amount}_${players}_5`,
+            creatorId
+          )
+        : "noop"
     )
     .text(
       "+15m",
-      withCreatorSuffix(
-        `advanced_timeout_${gameType}_${amount}_${players}_15`,
-        creatorId
-      )
+      canIncreaseTimeout
+        ? withCreatorSuffix(
+            `advanced_timeout_${gameType}_${amount}_${players}_15`,
+            creatorId
+          )
+        : "noop"
     )
     .row()
     .text(
