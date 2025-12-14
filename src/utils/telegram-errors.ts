@@ -64,6 +64,19 @@ export const isMissingEditableContent = (error: unknown): boolean =>
 export const isDuplicateContent = (error: unknown): boolean =>
   matchesAny(error, ["message with the same content already exists"]);
 
+export const isRateLimited = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const code = (error as any).error_code;
+  if (code === 429) {
+    return true;
+  }
+
+  return matchesAny(error, ["too many requests", "retry after"]);
+};
+
 export const shouldFallbackToReply = (error: unknown): boolean =>
   isMessageMissing(error) ||
   isEditProhibited(error) ||

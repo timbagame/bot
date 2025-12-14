@@ -10,6 +10,7 @@ const basePayload = {
 type MakeCtxOptions = {
   message?: Record<string, unknown>;
   replyResult?: Record<string, unknown>;
+  api?: Record<string, unknown>;
 };
 
 const makeCtx = (options: MakeCtxOptions = {}) => {
@@ -31,6 +32,15 @@ const makeCtx = (options: MakeCtxOptions = {}) => {
     callbackQuery: {
       message,
     },
+    api: Object.assign(
+      {
+        editMessageText: async (_chatId: number, _messageId: number, _text: string, opts: any) => {
+          calls.push({ type: "api_text", args: [_chatId, _messageId, _text, opts] });
+          return { ok: true };
+        },
+      },
+      options.api ?? {}
+    ),
     editMessageCaption: async (opts: any) => {
       calls.push({ type: "caption", args: [opts] });
       return { ok: true };
@@ -95,6 +105,55 @@ describe("respondWithMenu", () => {
       chatId: 900,
       respondedWithReply: true,
     });
+  });
+
+  test("does not reply when edit fails due to Telegram rate limits", async () => {
+    const ctx = makeCtx();
+
+    ctx.editMessageText = async () => {
+      const err: any = new Error("Too Many Requests");
+      err.error_code = 429;
+      err.description = "Too Many Requests: retry after 33";
+      throw err;
+    };
+
+    const result = await respondWithMenu(ctx as any, basePayload);
+
+    expect(result).toEqual({
+      messageId: 99,
+      chatId: 42,
+      respondedWithReply: false,
+    });
+
+    const replies = ctx.__calls.filter((c: any) => c.type === "reply");
+    expect(replies.length).toBe(0);
+  });
+
+  test("does not reply when explicit target edits are rate limited", async () => {
+    const ctx = makeCtx({
+      api: {
+        editMessageText: async () => {
+          const err: any = new Error("Too Many Requests");
+          err.error_code = 429;
+          err.description = "Too Many Requests: retry after 10";
+          throw err;
+        },
+      },
+    });
+
+    const result = await respondWithMenu(ctx as any, basePayload, {
+      targetChatId: 777,
+      targetMessageId: 888,
+    });
+
+    expect(result).toEqual({
+      messageId: 888,
+      chatId: 777,
+      respondedWithReply: false,
+    });
+
+    const replies = ctx.__calls.filter((c: any) => c.type === "reply");
+    expect(replies.length).toBe(0);
   });
 
   test("edits text when caption not supported", async () => {
@@ -191,6 +250,30 @@ describe("respondWithMenu", () => {
       chatId: 777,
       respondedWithReply: false,
     });
+  });
+
+  test("does not reply when adapter target edits are rate limited", async () => {
+    const ctx = makeCtx();
+    ctx.callbackQuery = undefined;
+    ctx.__editAdapterTarget = { chatId: 321, messageId: 654 };
+
+    ctx.editMessageText = async () => {
+      const err: any = new Error("Too Many Requests");
+      err.error_code = 429;
+      err.description = "Too Many Requests: retry after 25";
+      throw err;
+    };
+
+    const result = await respondWithMenu(ctx as any, basePayload);
+
+    expect(result).toEqual({
+      messageId: 654,
+      chatId: 321,
+      respondedWithReply: false,
+    });
+
+    const replies = ctx.__calls.filter((c: any) => c.type === "reply");
+    expect(replies.length).toBe(0);
   });
 
   test("falls back to reply when adapter edits cannot proceed", async () => {

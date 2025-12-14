@@ -5,6 +5,7 @@ import {
   createGameConfirmKeyboard,
 } from "../../utils/keyboards";
 import { respondWithMenu } from "../../utils/menu-response";
+import { formatDuration } from "../../utils/format-time";
 import type { AdvancedGameOptions } from "../../utils/game-settings";
 import type { GameType } from "../../types";
 
@@ -84,9 +85,9 @@ export const buildGameConfirmationMessage = ({
 
   const formattedGameType = toTitleCase(gameType);
 
-  const timeoutMinutes = Math.round(advanced.timeoutSeconds / 60);
   const visibilityLabel = advanced.isPrivate ? "Private" : "Public";
   const minPlayersLabel = `${advanced.minPlayers}/${players}`;
+  const timeoutLabel = formatDuration(advanced.timeoutSeconds);
 
   return [
     `<b>Confirm ${formattedGameType}</b>`,
@@ -100,7 +101,7 @@ export const buildGameConfirmationMessage = ({
     "",
     `Visibility: <b>${visibilityLabel}</b>`,
     `Min players to start: <b>${minPlayersLabel}</b>`,
-    `Timeout: <b>${timeoutMinutes} min</b>`,
+    `Timeout: <b>${timeoutLabel}</b>`,
     "",
     `⚠️ Make sure you have enough ${tokenTicker} in your wallet!`,
     "",
@@ -163,8 +164,6 @@ export const buildAdvancedOptionsMessage = ({
       tokenDecimals
     ),
   });
-
-  const timeoutMinutes = Math.round(advanced.timeoutSeconds / 60);
   return [
     "⚙️ <b>Advanced Options</b>",
     "",
@@ -173,7 +172,7 @@ export const buildAdvancedOptionsMessage = ({
     "",
     `Visibility: <b>${advanced.isPrivate ? "Private" : "Public"}</b>`,
     `Min players to start: <b>${advanced.minPlayers}/${players}</b>`,
-    `Timeout: <b>${timeoutMinutes} min</b>`,
+    `Timeout: <b>${formatDuration(advanced.timeoutSeconds)}</b>`,
     "",
     "Adjust options below or go back to confirm.",
   ].join("\n");
