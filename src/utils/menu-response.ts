@@ -1,6 +1,10 @@
 import type { Context, InlineKeyboard } from "grammy";
 import { awaitTelegramRetry } from "./media";
-import { isMessageNotModified, shouldFallbackToReply } from "./telegram-errors";
+import {
+  isMessageNotModified,
+  isRateLimited,
+  shouldFallbackToReply,
+} from "./telegram-errors";
 
 export type MenuPayload = {
   text: string;
@@ -45,7 +49,7 @@ const buildMenuTextOptions = (payload: MenuPayload) => ({
 type MenuEditKind = "text" | "caption";
 
 type EditAttemptResult = {
-  status: "edited" | "skipped" | "fallback" | "error";
+  status: "edited" | "skipped" | "fallback" | "error" | "rate_limited";
   error?: unknown;
 };
 
@@ -70,6 +74,9 @@ const attemptEdit = async (
   } catch (error) {
     if (isMessageNotModified(error)) {
       return { status: "skipped" };
+    }
+    if (isRateLimited(error)) {
+      return { status: "rate_limited", error };
     }
     if (shouldFallbackToReply(error)) {
       return { status: "fallback", error };
@@ -235,6 +242,21 @@ export const respondWithMenu = async (
       for (const attempt of target.attempts) {
         const result = await attempt.invoke();
         if (result.status === "edited" || result.status === "skipped") {
+          return {
+            messageId: target.messageId,
+            chatId: target.chatId,
+            respondedWithReply: false,
+          };
+        }
+
+        if (result.status === "rate_limited") {
+          if (result.error) {
+            console.warn(
+              `${logLabel}: editMessage throttled, keeping current message`,
+              result.error
+            );
+          }
+
           return {
             messageId: target.messageId,
             chatId: target.chatId,

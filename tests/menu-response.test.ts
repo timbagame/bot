@@ -97,6 +97,28 @@ describe("respondWithMenu", () => {
     });
   });
 
+  test("does not reply when edit fails due to Telegram rate limits", async () => {
+    const ctx = makeCtx();
+
+    ctx.editMessageText = async () => {
+      const err: any = new Error("Too Many Requests");
+      err.error_code = 429;
+      err.description = "Too Many Requests: retry after 33";
+      throw err;
+    };
+
+    const result = await respondWithMenu(ctx as any, basePayload);
+
+    expect(result).toEqual({
+      messageId: 99,
+      chatId: 42,
+      respondedWithReply: false,
+    });
+
+    const replies = ctx.__calls.filter((c: any) => c.type === "reply");
+    expect(replies.length).toBe(0);
+  });
+
   test("edits text when caption not supported", async () => {
     const ctx = makeCtx();
 
