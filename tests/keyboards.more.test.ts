@@ -12,7 +12,11 @@ import {
   createAdvancedOptionsKeyboard,
   getFeeWarningMessage,
 } from "../src/utils/keyboards";
-import { MAX_GAME_TIMEOUT, MIN_GAME_TIMEOUT } from "../src/utils/constants";
+import {
+  MAX_GAME_TIMEOUT,
+  MIN_COINFLIP_PLAYERS,
+  MIN_GAME_TIMEOUT,
+} from "../src/utils/constants";
 
 // Helper to extract callback_data strings from InlineKeyboard
 function extractCallbacks(kb: any): string[] {
@@ -219,6 +223,34 @@ describe("keyboards: misc menus", () => {
     expect(callbacks[1]).toBe("advanced_timeout_coinflip_1.5_4_-5");
     expect(callbacks[3]).toBe("noop");
     expect(callbacks[4]).toBe("noop");
+  });
+
+  test("advanced min players decrement disables at floor", () => {
+    const kb = createAdvancedOptionsKeyboard(
+      "coinflip",
+      "2.5",
+      "4",
+      { timeoutSeconds: 3600, minPlayers: MIN_COINFLIP_PLAYERS, isPrivate: true }
+    );
+
+    const callbacks = extractCallbacks(kb);
+
+    expect(callbacks[6]).toBe("noop");
+    expect(callbacks[8]).toBe("advanced_min_players_coinflip_2.5_4_1");
+  });
+
+  test("advanced min players increment disables at selected player count", () => {
+    const kb = createAdvancedOptionsKeyboard(
+      "coinflip",
+      "2.5",
+      "4",
+      { timeoutSeconds: 3600, minPlayers: 4, isPrivate: true }
+    );
+
+    const callbacks = extractCallbacks(kb);
+
+    expect(callbacks[6]).toBe("advanced_min_players_coinflip_2.5_4_-1");
+    expect(callbacks[8]).toBe("noop");
   });
 });
 
