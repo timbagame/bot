@@ -5479,8 +5479,15 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
   }
 
   private getGameType(gameAccount: any): string {
-    const gameTypeKeys = Object.keys(gameAccount.gameType);
-    return gameTypeKeys[0] || "unknown";
+    const type = gameAccount?.gameType;
+    if (!type || typeof type !== "object") {
+      return "game";
+    }
+    const gameTypeKeys = Object.keys(type);
+    if (gameTypeKeys.length === 0) {
+      return "unknown";
+    }
+    return gameTypeKeys[0] || "game";
   }
 
   private handleGameProcessingError(error: any, address: string): boolean {
