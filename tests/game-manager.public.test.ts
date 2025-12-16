@@ -120,6 +120,39 @@ describe("GameManager Public Games", () => {
     expect(filteredGames[0].token_ticker).toBe("TIMBA"); // Default ticker
   });
 
+  test("getAllActivePublicGames uses totalAmount for giveaway display", async () => {
+    const giveawayGame = Keypair.generate().publicKey;
+    const tokenMint = Keypair.generate().publicKey;
+    const now = Math.floor(Date.now() / 1000);
+
+    const mockGames = [
+      {
+        publicKey: giveawayGame,
+        account: {
+          isPrivate: false,
+          gameType: { giveaway: {} },
+          ticketAmount: 0,
+          totalAmount: 42_000_000,
+          tokenMint,
+          createdAt: now,
+          timeout: 3600,
+        },
+      },
+    ];
+
+    mockProgram.account.game.all.mockResolvedValue(mockGames);
+    mockWallet.getTokenMetadata.mockResolvedValue({ symbol: "GIVE" });
+
+    const formatSpy = vi.spyOn(gameManager as any, "formatActiveGamesList");
+    formatSpy.mockImplementation((_ctx: any, games: any) => games);
+
+    await gameManager.getAllActivePublicGames({} as any);
+
+    const filteredGames = formatSpy.mock.calls[0]![1] as any[];
+    expect(filteredGames[0].amount).toBe(42_000_000);
+    expect(filteredGames[0].game_type).toBe("giveaway");
+  });
+
   test("getAllActivePublicGames skips expired games", async () => {
     const activeGame = Keypair.generate().publicKey;
     const expiredGame = Keypair.generate().publicKey;
