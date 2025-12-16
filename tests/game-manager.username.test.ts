@@ -430,6 +430,26 @@ describe("GameManager Username Resolution", () => {
   });
 
   describe("getLeaderboardDisplayName", () => {
+    test("returns telegram handle when available", async () => {
+      resetGM();
+      const gm = GameManager.getInstance(
+        makeProgramStub(),
+        makeWalletStub(),
+        makeDbStub()
+      );
+      const ctx = {
+        chat: { id: 55, type: "group" },
+        api: {
+          getChatMember: async () => ({
+            user: { username: "leaderboarder" },
+          }),
+        },
+      } as any;
+
+      const result = await gm.getLeaderboardDisplayName(ctx, "22222");
+      expect(result).toBe("@leaderboarder");
+    });
+
     test("prefers full name fallback without forcing @ prefix", async () => {
       resetGM();
       const gm = GameManager.getInstance(
