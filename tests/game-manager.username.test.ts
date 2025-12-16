@@ -22,16 +22,23 @@ describe("GameManager Username Resolution", () => {
       expect(res).toBeNull();
     });
 
-    test("falls back to first_name when username missing", async () => {
+    test("falls back to full name when username missing", async () => {
       resetGM();
       const gm = GameManager.getInstance(
         makeProgramStub(),
         makeWalletStub(),
         makeDbStub()
       );
-      const ctx = { chat: { id: 1, type: "private" }, api: { getChatMember: async () => ({ user: { first_name: "Alice" } }) } } as any;
+      const ctx = {
+        chat: { id: 1, type: "private" },
+        api: {
+          getChatMember: async () => ({
+            user: { first_name: "Fictional", last_name: "User" },
+          }),
+        },
+      } as any;
       const res = await gm.getUsernameFromTelegramId(ctx, "777");
-      expect(res).toBe("Alice");
+      expect(res).toBe("Fictional User");
     });
 
     test("memoizes usernames per chat", async () => {
@@ -419,6 +426,61 @@ describe("GameManager Username Resolution", () => {
       const label = await gm.getPlayerUsername(ctx, "LazyPublicKey");
       expect(label).toBe("@delayed");
       expect(attempts).toBeGreaterThan(1);
+    });
+  });
+
+  describe("getLeaderboardDisplayName", () => {
+    test("returns telegram handle when available", async () => {
+      resetGM();
+      const gm = GameManager.getInstance(
+        makeProgramStub(),
+        makeWalletStub(),
+        makeDbStub()
+      );
+      const ctx = {
+        chat: { id: 55, type: "group" },
+        api: {
+          getChatMember: async () => ({
+            user: { username: "leaderboarder" },
+          }),
+        },
+      } as any;
+
+      const result = await gm.getLeaderboardDisplayName(ctx, "22222");
+      expect(result).toBe("@leaderboarder");
+    });
+
+    test("prefers full name fallback without forcing @ prefix", async () => {
+      resetGM();
+      const gm = GameManager.getInstance(
+        makeProgramStub(),
+        makeWalletStub(),
+        makeDbStub()
+      );
+      const ctx = {
+        chat: { id: 10, type: "group" },
+        api: {
+          getChatMember: async () => ({
+            user: { first_name: "Sample", last_name: "Player" },
+          }),
+        },
+      } as any;
+
+      const result = await gm.getLeaderboardDisplayName(ctx, "54321");
+      expect(result).toBe("Sample Player");
+    });
+
+    test("falls back to generic player label when username cannot be resolved", async () => {
+      resetGM();
+      const gm = GameManager.getInstance(
+        makeProgramStub(),
+        makeWalletStub(),
+        makeDbStub()
+      );
+      const ctx = { chat: { id: 5, type: "group" }, api: {} } as any;
+
+      const result = await gm.getLeaderboardDisplayName(ctx, "INVALID_ID");
+      expect(result).toBe("Player INVALID_ID");
     });
   });
 });
