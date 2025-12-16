@@ -120,6 +120,77 @@ describe("GameManager.joinGame guards", () => {
     expect((hydrated as any)?.token_mint).toBe(tokenMint.toBase58());
   });
 
+  test("hydrates giveaway amount from totalAmount when ticketAmount is zero", async () => {
+    resetGM();
+    const now = Math.floor(Date.now() / 1000);
+    const gameAddress = Keypair.generate().publicKey.toBase58();
+    const creator = Keypair.generate().publicKey;
+    const tokenMint = Keypair.generate().publicKey;
+
+    const gameAccount = {
+      creator,
+      tokenMint,
+      gameType: { giveaway: {} },
+      ticketAmount: 0,
+      totalAmount: 5_000_000,
+      maxTickets: 10,
+      minTickets: 1,
+      ticketsCount: 0,
+      createdAt: now,
+      timeout: 3600,
+      isPrivate: false,
+    };
+
+    const store = new Map<string, any>();
+    const gameDb = {
+      getGame: (addr: string) => store.get(addr) ?? null,
+      saveGame: (
+        addr: string,
+        creatorTelegramId: string,
+        amount: number,
+        gameType: string,
+        tokenMintStr?: string,
+        tokenTicker?: string,
+        maxPlayers?: number,
+        minPlayers?: number,
+        chatId?: number,
+        timeoutSeconds?: number,
+        expiresAtMs?: number,
+        createdAtMsOverride?: number
+      ) => {
+        store.set(addr, {
+          game_address: addr,
+          creator_telegram_id: creatorTelegramId,
+          amount,
+          created_at: createdAtMsOverride ?? Date.now(),
+          status: "active",
+          game_type: gameType,
+          token_mint: tokenMintStr,
+          token_ticker: tokenTicker,
+          max_players: maxPlayers,
+          min_players: minPlayers,
+          chat_id: chatId,
+          timeout_seconds: timeoutSeconds,
+          expires_at: expiresAtMs,
+        });
+      },
+      savePlayerMapping: () => {},
+      getPlayerTelegramId: () => null,
+    } as any;
+
+    const gm = GameManager.getInstance(
+      baseProgram(gameAccount),
+      baseWallet({
+        getTokenMetadata: async () => ({ symbol: "TOK", decimals: 9 }),
+      }),
+      gameDb
+    );
+
+    const hydrated = await gm.ensureGameDataFromChain(gameAddress);
+    expect(hydrated?.amount).toBe(5_000_000);
+    expect(store.get(gameAddress)?.amount).toBe(5_000_000);
+  });
+
   test("ensureGameDataFromChain returns null for expired chain game", async () => {
     resetGM();
     const now = Math.floor(Date.now() / 1000);
@@ -221,6 +292,56 @@ describe("GameManager.joinGame guards", () => {
     const hydrated = await gm.ensureGameDataFromChain(gameAddress);
     expect(hydrated).toBeNull();
     expect(saveGame).not.toHaveBeenCalled();
+  });
+
+  test("getGameInfo uses totalAmount for giveaway display", async () => {
+    resetGM();
+    const gamePda = Keypair.generate().publicKey;
+    const creator = Keypair.generate().publicKey;
+    const tokenMint = Keypair.generate().publicKey;
+    const gameAccount = {
+      creator,
+      tokenMint,
+      gameType: { giveaway: {} },
+      ticketAmount: 0,
+      totalAmount: 7_500_000,
+    };
+
+    const program = {
+      account: {
+        game: {
+          fetch: async () => gameAccount,
+        },
+      },
+    } as any;
+
+    const formatSpy = vi.fn().mockResolvedValue({
+      messageText: "formatted message",
+      keyboard: [],
+    });
+
+    const gm = GameManager.getInstance(
+      program,
+      baseWallet(),
+      baseDb({
+        getGame: () => ({
+          status: "active",
+          token_mint: tokenMint.toBase58(),
+          token_ticker: "TOK",
+        }),
+      })
+    );
+
+    vi.spyOn(gm as any, "formatGameMessage").mockImplementation(formatSpy);
+    vi.spyOn(gm as any, "getGameCreatorUsername").mockResolvedValue("Creator");
+
+    const message = await gm.getGameInfo({} as any, gamePda);
+
+    expect(message).toBe("formatted message");
+    expect(formatSpy).toHaveBeenCalledTimes(1);
+    const callArgs = formatSpy.mock.calls[0];
+    expect(callArgs?.[2]).toBe("giveaway");
+    expect(callArgs?.[3]).toBe(7_500_000);
   });
 
   test("returns error when game not active", async () => {
