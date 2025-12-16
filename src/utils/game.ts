@@ -2064,7 +2064,18 @@ export class GameManager {
               userRecord.username.trim().length > 0
                 ? `@${userRecord.username.trim()}`
                 : null;
-            const resolved = handle ?? userRecord.first_name ?? null;
+            const firstName =
+              typeof userRecord.first_name === "string"
+                ? userRecord.first_name.trim()
+                : "";
+            const lastName =
+              typeof userRecord.last_name === "string"
+                ? userRecord.last_name.trim()
+                : "";
+            const fullName = [firstName, lastName]
+              .filter((name) => name.length > 0)
+              .join(" ");
+            const resolved = handle || (fullName.length > 0 ? fullName : null);
             if (resolved) {
               this.rememberTelegramUsername(trimmedId, resolved);
             }
@@ -2093,6 +2104,21 @@ export class GameManager {
       );
       return null;
     }
+  }
+
+  /**
+   * Resolve display name for leaderboards with graceful fallback
+   */
+  public async getLeaderboardDisplayName(
+    ctx: Context,
+    telegramId: string
+  ): Promise<string> {
+    const username = await this.getUsernameFromTelegramId(ctx, telegramId);
+    if (username) {
+      return username;
+    }
+
+    return `Player ${telegramId}`;
   }
 
   /**

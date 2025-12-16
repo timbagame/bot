@@ -3883,13 +3883,7 @@ const resolveLeaderboardDisplayName = async (
   telegramId: string
 ): Promise<string> => {
   try {
-    const username = await gameManager.getUsernameFromTelegramId(
-      ctx,
-      telegramId
-    );
-    if (username) {
-      return username.startsWith("@") ? username : `@${username}`;
-    }
+    return await gameManager.getLeaderboardDisplayName(ctx, telegramId);
   } catch (error) {
     console.warn(`Could not get username for ${telegramId}:`, error);
   }
