@@ -3035,7 +3035,11 @@ export class GameManager {
   public async getGameInfo(ctx: Context, gamePda: PublicKey): Promise<string> {
     try {
       let gameAccount = await this.program.account.game.fetch(gamePda);
-      const amount = Number(gameAccount.ticketAmount);
+      const rawGameType = this.getGameType(gameAccount);
+      const amount = this.getDisplayAmountFromAccount(
+        gameAccount,
+        rawGameType
+      );
 
       // Get token info from database
       const gameData = this.gameDb.getGame(gamePda.toBase58());
@@ -3045,7 +3049,6 @@ export class GameManager {
 
       const tokenTicker = gameData.token_ticker;
       const creatorPubkey = gameAccount.creator.toString();
-      const rawGameType = this.getGameType(gameAccount);
 
       const creatorUsername = await this.getGameCreatorUsername(
         ctx,
@@ -5055,8 +5058,9 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     const activeGamesData = await Promise.all(
       publicGames.map(async (game) => {
         const account = game.account;
-        const gameType = Object.keys(account.gameType)[0] || "game";
+        const gameType = this.getGameType(account);
         const tokenMint = account.tokenMint.toBase58();
+        const amount = this.getDisplayAmountFromAccount(account, gameType);
 
         let tokenTicker = DEFAULT_TOKEN_TICKER;
         try {
@@ -5071,7 +5075,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         return {
           game_address: game.publicKey.toBase58(),
           game_type: gameType,
-          amount: Number(account.ticketAmount),
+          amount,
           token_mint: tokenMint,
           token_ticker: tokenTicker,
           status: "active", // Assumed active if account exists
@@ -5166,7 +5170,8 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       }
     }
 
-    const amount = Number(gameAccount.ticketAmount ?? 0);
+    const gameType = this.getGameType(gameAccount);
+    const amount = this.getDisplayAmountFromAccount(gameAccount, gameType);
     const maxPlayers = Number(gameAccount.maxTickets ?? 0) || undefined;
     const minPlayers = Number(gameAccount.minTickets ?? 0) || undefined;
 
@@ -5180,7 +5185,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         gameAddress,
         creatorTelegramId || "unknown",
         Number.isFinite(amount) && amount > 0 ? amount : 0,
-        this.getGameType(gameAccount),
+        gameType,
         tokenMint,
         tokenTicker,
         maxPlayers,
@@ -5451,9 +5456,38 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     return GameManager.isExpiredWithBuffer(gameAccount);
   }
 
+  private getDisplayAmountFromAccount(
+    gameAccount: any,
+    gameTypeOverride?: string
+  ): number {
+    const gameType = gameTypeOverride ?? this.getGameType(gameAccount);
+    const ticketAmount = Number(gameAccount?.ticketAmount ?? 0);
+    const totalAmount = Number(gameAccount?.totalAmount ?? 0);
+
+    const safeTicketAmount = Number.isFinite(ticketAmount)
+      ? ticketAmount
+      : 0;
+    const safeTotalAmount = Number.isFinite(totalAmount)
+      ? totalAmount
+      : 0;
+
+    if (gameType === "giveaway") {
+      return safeTotalAmount > 0 ? safeTotalAmount : safeTicketAmount;
+    }
+
+    return safeTicketAmount;
+  }
+
   private getGameType(gameAccount: any): string {
-    const gameTypeKeys = Object.keys(gameAccount.gameType);
-    return gameTypeKeys[0] || "unknown";
+    const type = gameAccount?.gameType;
+    if (!type || typeof type !== "object") {
+      return "game";
+    }
+    const gameTypeKeys = Object.keys(type);
+    if (gameTypeKeys.length === 0) {
+      return "unknown";
+    }
+    return gameTypeKeys[0] || "game";
   }
 
   private handleGameProcessingError(error: any, address: string): boolean {
