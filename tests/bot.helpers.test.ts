@@ -954,14 +954,12 @@ describe("createGameViaCommand helper", () => {
           const cached = getCachedPriceLookup({
             tokenMint: "MINT",
             tokenTicker: "TOK",
-            chatId: ctx.chat.id,
           });
           expect(priceHint?.price).toBe(2);
           expect(cached?.price).toBe(2);
           const resolved = await resolvePriceWithCache({
             tokenMint: "MINT",
             tokenTicker: "TOK",
-            chatId: ctx.chat.id,
           });
           expect(resolved?.price).toBe(2);
           return 0;

@@ -522,7 +522,6 @@ export class TokenManager {
           tokenMint: resolvedTokenMint,
           tokenTicker: resolvedTokenTicker,
           isSol,
-          chatId,
         });
 
         const scaledPrice = Math.round((priceLookup?.price ?? 0) * 1_000_000);
@@ -656,7 +655,6 @@ export class TokenManager {
         tokenMint: resolvedTokenMint,
         tokenTicker: resolvedTokenTicker,
         isSol,
-        chatId,
       });
 
       const scaledPrice = Math.round((priceLookup?.price ?? 0) * 1_000_000);

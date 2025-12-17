@@ -6,12 +6,11 @@ import {
   type PriceLookupResult,
 } from "./prices";
 
-type PriceCacheLookupRequest = PriceLookupOptions & { chatId?: number };
+type PriceCacheLookupRequest = PriceLookupOptions;
 
 export type CachedPriceLookup = PriceLookupResult & {
   tokenMint?: string;
   tokenTicker?: string;
-  chatId?: number;
   resolvedAt: number;
 };
 
@@ -30,20 +29,13 @@ const buildCacheKeys = (request: PriceCacheLookupRequest): string[] => {
   const keys = new Set<string>();
   const normalizedMint = normalize(request.tokenMint);
   const normalizedTicker = normalize(request.tokenTicker);
-  const chatSuffix = request.chatId != null ? `#${request.chatId}` : "";
 
   if (normalizedMint) {
     keys.add(normalizedMint);
-    if (chatSuffix) {
-      keys.add(`${normalizedMint}${chatSuffix}`);
-    }
   }
 
   if (normalizedTicker) {
     keys.add(normalizedTicker);
-    if (chatSuffix) {
-      keys.add(`${normalizedTicker}${chatSuffix}`);
-    }
   }
 
   return Array.from(keys.values());
@@ -57,7 +49,6 @@ export function rememberPriceLookup(
     ...lookup,
     tokenMint: request.tokenMint?.trim() || undefined,
     tokenTicker: request.tokenTicker?.trim() || undefined,
-    chatId: request.chatId,
     resolvedAt: Date.now(),
   };
 

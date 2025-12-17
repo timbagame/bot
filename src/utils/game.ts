@@ -70,7 +70,12 @@ import {
   sanitizeTelegramDisplayName,
   sanitizeTelegramDisplayNameWithoutMention,
 } from "./telegram-display";
-import { resolvePriceWithCache, getCachedPriceLookup, rememberPriceLookup, type CachedPriceLookup } from "./token-price-cache";
+import {
+  resolvePriceWithCache,
+  getCachedPriceLookup,
+  rememberPriceLookup,
+  type CachedPriceLookup,
+} from "./token-price-cache";
 import { NetworkDetector } from "./network-detector";
 import { SwapManager } from "./swap-manager";
 import { confirmTransactionWithRecovery, type TransactionProbe } from "./transaction-runner";
@@ -1473,8 +1478,7 @@ export class GameManager {
     tokenMint?: string,
     tokenTicker?: string,
     isSol?: boolean,
-    priceHint?: CachedPriceLookup | null,
-    chatId?: number
+    priceHint?: CachedPriceLookup | null
   ): Promise<{ text: string; price: number } | null> {
     const reference = isSol ? "SOL" : tokenMint || tokenTicker;
     if (!reference) return null;
@@ -1485,15 +1489,14 @@ export class GameManager {
 
     try {
       const cachedHint = priceHint
-        ? rememberPriceLookup(priceHint, { tokenMint, tokenTicker, chatId })
-        : getCachedPriceLookup({ tokenMint, tokenTicker, chatId });
+        ? rememberPriceLookup(priceHint, { tokenMint, tokenTicker })
+        : getCachedPriceLookup({ tokenMint, tokenTicker });
       const lookup =
         cachedHint ??
         (await resolvePriceWithCache({
           tokenMint,
           tokenTicker,
           isSol,
-          chatId,
         }));
       if (!lookup) {
         return null;
@@ -2518,11 +2521,10 @@ export class GameManager {
     options?: {
       suppressMentions?: boolean;
       priceHint?: CachedPriceLookup | null;
-      chatId?: number;
     }
   ): Promise<GameMessageFormat> {
     const suppressMentions = options?.suppressMentions === true;
-    const chatId = options?.chatId ?? ctx.chat?.id;
+    const chatId = ctx.chat?.id;
     const cachedGamePrice =
       options?.priceHint ?? this.gamePriceCache.get(gamePda.toBase58()) ?? null;
     const sanitizeDisplay = suppressMentions
@@ -2577,8 +2579,7 @@ export class GameManager {
       tokenMint,
       tokenTicker,
       isSol,
-      cachedGamePrice,
-      chatId
+      cachedGamePrice
     );
 
     const winnerInfo = await this.getWinnerInfo(
@@ -2616,8 +2617,7 @@ export class GameManager {
         tokenMint,
         tokenTicker,
         isSol,
-        cachedGamePrice,
-        chatId
+        cachedGamePrice
       );
       prizeUsdApproximation = computedPrizeUsd?.text ?? null;
     }
@@ -2736,7 +2736,6 @@ export class GameManager {
         storedGame?.token_ticker ??
         (storedGame?.token_mint === "SOL" ? "SOL" : "");
       const resolvedMint = tokenMintHint ?? storedGame?.token_mint ?? undefined;
-      const chatId = storedGame?.chat_id ?? undefined;
       const priceHint = this.gamePriceCache.get(gameAddress) ?? null;
 
       const { formatBalance, decimals, tokenMint, isSol } =
@@ -2753,8 +2752,7 @@ export class GameManager {
         tokenMint,
         resolvedTicker,
         isSol,
-        priceHint,
-        chatId
+        priceHint
       );
 
       const displayTicker = resolvedTicker || (isSol ? "SOL" : "");
@@ -2799,7 +2797,6 @@ export class GameManager {
       undefined,
       {
         priceHint: cachedPrice,
-        chatId: ctx.chat?.id,
       }
     );
 
@@ -3622,7 +3619,6 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         const cachedPrice = rememberPriceLookup(parsedAmount.priceLookup, {
           tokenMint,
           tokenTicker,
-          chatId,
         });
         this.gamePriceCache.setWithTTL(gamePda.toBase58(), cachedPrice);
       }
