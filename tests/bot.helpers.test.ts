@@ -818,7 +818,8 @@ describe("createGameViaCommand helper", () => {
       expect(telegramId).toBe(1n);
       expect(optionsArg).toEqual({ isPrivate: true });
       expect(chatId).toBe(ctx.chat.id);
-      expect(requestTimestamp).toBeUndefined();
+      expect(typeof requestTimestamp).toBe("number");
+      expect(Number.isFinite(requestTimestamp)).toBe(true);
 
     expect(messageCalls.length).toBe(1);
     const messageArgs = messageCalls[0];
