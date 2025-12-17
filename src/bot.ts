@@ -38,6 +38,8 @@ import {
   INPUT_TIMEOUT_HINT,
   USER_WALLET_RPC_WINDOW_MS,
   USER_WALLET_RPC_MAX_CALLS,
+  GAME_MESSAGE_UPDATE_DEBOUNCE_MS,
+  JOIN_ANNOUNCEMENT_MAX_TICKETS,
   JUPITER_MIN_SOL_BALANCE_LAMPORTS,
   JUPITER_GASLESS_MIN_TRADE_USD,
   USER_SOL_MAX_BUFFER_LAMPORTS,
@@ -1641,6 +1643,133 @@ type PendingPlayerEventState = {
 
 const pendingPlayerEvents = new Map<string, PendingPlayerEventState>();
 
+type PendingGameMessageUpdateState = {
+  pending: boolean;
+  running: boolean;
+  timer?: ReturnType<typeof setTimeout>;
+  referenceChatId?: number;
+  latestTotalPot?: number;
+};
+
+const pendingGameMessageUpdates = new Map<string, PendingGameMessageUpdateState>();
+
+let gameMessageUpdateDebounceMs = GAME_MESSAGE_UPDATE_DEBOUNCE_MS;
+let joinAnnouncementMaxTickets = JOIN_ANNOUNCEMENT_MAX_TICKETS;
+
+export const __test_setGameMessageUpdateDebounceMs = (ms: number): void => {
+  if (!Number.isFinite(ms) || ms < 0) {
+    throw new Error("Debounce ms must be a finite non-negative number");
+  }
+  gameMessageUpdateDebounceMs = Math.trunc(ms);
+};
+
+export const __test_resetGameMessageUpdateDebounceMs = (): void => {
+  gameMessageUpdateDebounceMs = GAME_MESSAGE_UPDATE_DEBOUNCE_MS;
+};
+
+export const __test_setJoinAnnouncementMaxTickets = (max: number): void => {
+  if (!Number.isFinite(max) || max < 0) {
+    throw new Error("Max tickets must be a finite non-negative number");
+  }
+  joinAnnouncementMaxTickets = Math.trunc(max);
+};
+
+export const __test_resetJoinAnnouncementMaxTickets = (): void => {
+  joinAnnouncementMaxTickets = JOIN_ANNOUNCEMENT_MAX_TICKETS;
+};
+
+const shouldAnnounceJoinForTickets = (ticketsCount: unknown): boolean => {
+  const normalized = Number(ticketsCount);
+  if (!Number.isFinite(normalized) || normalized < 0) {
+    // If we can't confidently determine size, default to announcing (small games UX).
+    return joinAnnouncementMaxTickets !== 0;
+  }
+
+  if (joinAnnouncementMaxTickets === 0) {
+    return false;
+  }
+
+  return normalized <= joinAnnouncementMaxTickets;
+};
+
+const scheduleGameMessageUpdate = (
+  gameAddress: string,
+  referenceChatId: number,
+  totalPot?: number
+): void => {
+  const state =
+    pendingGameMessageUpdates.get(gameAddress) ?? {
+      pending: false,
+      running: false,
+    };
+
+  state.referenceChatId = referenceChatId;
+
+  if (typeof totalPot === "number" && Number.isFinite(totalPot)) {
+    state.latestTotalPot = totalPot;
+  }
+
+  state.pending = true;
+  pendingGameMessageUpdates.set(gameAddress, state);
+
+  if (state.running || state.timer) {
+    return;
+  }
+
+  state.timer = setTimeout(async () => {
+    state.timer = undefined;
+
+    if (!state.pending) {
+      if (pendingGameMessageUpdates.get(gameAddress) === state) {
+        pendingGameMessageUpdates.delete(gameAddress);
+      }
+      return;
+    }
+
+    state.pending = false;
+    state.running = true;
+    pendingGameMessageUpdates.set(gameAddress, state);
+
+    try {
+      if (!gameManager) {
+        return;
+      }
+
+      const chatId = state.referenceChatId;
+      if (chatId == null) {
+        return;
+      }
+
+      const apiCtx = createApiContext(chatId, bot.api);
+      await gameManager.updateGameMessageFromData(
+        apiCtx,
+        gameAddress,
+        "Active",
+        undefined,
+        state.latestTotalPot
+      );
+    } catch (error) {
+      console.error(`Error updating game message for ${gameAddress}:`, error);
+    } finally {
+      state.running = false;
+      if (state.pending && !state.timer) {
+        scheduleGameMessageUpdate(
+          gameAddress,
+          state.referenceChatId ?? referenceChatId,
+          state.latestTotalPot
+        );
+        return;
+      }
+
+      if (pendingGameMessageUpdates.get(gameAddress) === state) {
+        pendingGameMessageUpdates.delete(gameAddress);
+      }
+    }
+  }, gameMessageUpdateDebounceMs);
+
+  pendingGameMessageUpdates.set(gameAddress, state);
+};
+
 const prunePendingPlayerEvents = (
   state: PendingPlayerEventState
 ): PendingPlayerEventPayload[] => {
@@ -1706,17 +1835,15 @@ const processPlayerEvent = async (
   }
 
   try {
-    // Use the first target to create context for updating all messages
-    const apiCtx = createApiContext(targets[0]!.chatId, bot.api);
-    await gameManager.updateGameMessageFromData(
-      apiCtx,
-      gameAddress,
-      "Active",
-      undefined,
-      totalPot
-    );
+    // Coalesce high-volume join/unjoin traffic into a bounded update rate.
+    scheduleGameMessageUpdate(gameAddress, targets[0]!.chatId, totalPot);
 
     if (eventName === "PlayerJoined") {
+      if (!shouldAnnounceJoinForTickets((event as any).ticketsCount)) {
+        return;
+      }
+
+      const apiCtx = createApiContext(targets[0]!.chatId, bot.api);
       const playerPublicKey = event.player.toString();
       const creatorPublicKey =
         typeof gameDb?.getCreatorInfo === "function"

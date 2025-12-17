@@ -150,6 +150,24 @@ export const MAX_GAMES_PER_CREATOR_WINDOW = parsePositiveInteger(
   "MAX_GAMES_PER_CREATOR_WINDOW",
   3
 );
+
+// ================================
+// HIGH-VOLUME GAME SAFETY
+// ================================
+
+// Throttle game message edits to avoid Telegram rate limits during large games.
+// This is a coalescing window: bursts of joins/unjoins are merged into a single update.
+export const GAME_MESSAGE_UPDATE_DEBOUNCE_MS = parsePositiveDuration(
+  "GAME_MESSAGE_UPDATE_DEBOUNCE_MS",
+  5_000
+);
+
+// Disable per-join announcements once a game grows beyond this ticket count.
+// Set to 0 to disable join announcements entirely.
+export const JOIN_ANNOUNCEMENT_MAX_TICKETS = parseNonNegativeInteger(
+  "JOIN_ANNOUNCEMENT_MAX_TICKETS",
+  50
+);
 // ================================
 // DEFAULTS
 // ================================
@@ -278,6 +296,30 @@ function parsePositiveInteger(key: string, fallback: number): number {
       `[Config] ${key} must be > 0. Received ${parsed}, clamping to ${clamped}.`
     );
     return clamped;
+  }
+
+  return Math.floor(parsed);
+}
+
+function parseNonNegativeInteger(key: string, fallback: number): number {
+  const raw = process.env[key];
+  if (raw === undefined) {
+    return fallback;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    console.warn(
+      `[Config] ${key} must be a non-negative integer. Received '${raw}', using fallback ${fallback}.`
+    );
+    return fallback;
+  }
+
+  if (parsed < 0) {
+    console.warn(
+      `[Config] ${key} must be >= 0. Received ${parsed}, clamping to 0.`
+    );
+    return 0;
   }
 
   return Math.floor(parsed);

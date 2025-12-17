@@ -52,6 +52,8 @@ describe("Pending player events", () => {
     const module = await botModulePromise;
     (module.bot.api as any).sendMessage = originalSendMessage;
     module.__test_clearPendingPlayerEvents();
+    module.__test_resetGameMessageUpdateDebounceMs?.();
+    module.__test_resetJoinAnnouncementMaxTickets?.();
     module.__test_resetGameDatabase?.();
   });
 
@@ -152,6 +154,95 @@ describe("Pending player events", () => {
 
     expect(sendCalls.length).toBe(1);
     expect(sendCalls[0]?.text).toContain("joined the giveaway!");
+  });
+
+  test("player join announcements are disabled above ticket threshold", async () => {
+    const target = { chatId: 77, messageId: 301 };
+    const player = Keypair.generate().publicKey;
+
+    botModule.__test_setJoinAnnouncementMaxTickets(1);
+
+    botModule.__test_setGameManager({
+      updateGameMessageFromData: async () => {},
+      getPlayerUsername: async () => "TestPlayer",
+      getActiveGameMessages: () => {
+        const m = new Map();
+        m.set(77, { chatId: 77, messageId: 301 });
+        return m;
+      },
+    } as any);
+
+    botModule.__test_setGameDatabase({
+      getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
+      getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
+      getGame: () => ({ game_type: "coinflip" }),
+      getGameMessages: () => [],
+    } as any);
+
+    await botModule.__test_processPlayerEvent(
+      { ...makePlayerEvent(player, 5, 10), ticketsCount: 2 } as any,
+      "PlayerJoined",
+      [target]
+    );
+
+    expect(sendCalls.length).toBe(0);
+  });
+
+  test("player event message updates are coalesced per game", async () => {
+    const isolatedModule = await import(`../src/bot?debounce-test=${Date.now()}`);
+
+    const target = { chatId: 77, messageId: 301 };
+    const player = Keypair.generate().publicKey;
+
+    isolatedModule.__test_setJoinAnnouncementMaxTickets(0);
+    isolatedModule.__test_setGameMessageUpdateDebounceMs(10);
+
+    const updateCalls: Array<{ gameAddress: string; totalPot?: number }> = [];
+    isolatedModule.__test_setGameManager({
+      updateGameMessageFromData: async (
+        _ctx: any,
+        gameAddress: string,
+        _status: string,
+        _winner?: any,
+        totalPot?: number
+      ) => {
+        updateCalls.push({ gameAddress, totalPot });
+      },
+      getPlayerUsername: async () => "TestPlayer",
+      getActiveGameMessages: () => {
+        const m = new Map();
+        m.set(77, { chatId: 77, messageId: 301 });
+        return m;
+      },
+    } as any);
+
+    isolatedModule.__test_setGameDatabase({
+      getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
+      getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
+      getGameMessages: () => [],
+    } as any);
+
+    const eventA = { ...makePlayerEvent(player, 5, 10), totalAmount: new BN(1000) };
+    const eventB = { ...makePlayerEvent(player, 6, 11), totalAmount: new BN(2000) };
+    const eventC = { ...makePlayerEvent(player, 7, 12), totalAmount: new BN(3000) };
+
+    await isolatedModule.__test_processPlayerEvent(eventA as any, "PlayerUnjoined", [
+      target,
+    ]);
+    await isolatedModule.__test_processPlayerEvent(eventB as any, "PlayerUnjoined", [
+      target,
+    ]);
+    await isolatedModule.__test_processPlayerEvent(eventC as any, "PlayerUnjoined", [
+      target,
+    ]);
+
+    expect(updateCalls.length).toBe(0);
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    expect(updateCalls.length).toBe(1);
+    expect(updateCalls[0]?.gameAddress).toBe(baseGameKey.toBase58());
+    expect(updateCalls[0]?.totalPot).toBe(3000);
   });
 
   test("auto-join for game creator is not announced", async () => {
