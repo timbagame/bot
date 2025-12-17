@@ -633,7 +633,9 @@ export class TokenManager {
       }
     }
 
-    if (!tokenWasSpecified && amountHasFiatPrefix) {
+    // "$10" style amounts are treated as USD and converted into the resolved token,
+    // even when an explicit token is provided (e.g. "/cf $10 WBTC").
+    if (amountHasFiatPrefix) {
       const targetDecimals = isSol ? 9 : tokenDecimals ?? defaultDecimals ?? 0;
 
       let usdMicros: bigint;

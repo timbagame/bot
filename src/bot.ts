@@ -3657,6 +3657,7 @@ bot.command("help", async (ctx: Context) => {
     "• Your player balance account will be automatically initialized when needed",
     "• Specify token after amount: /coinflip 100 TIMBA 2 or /tip @user 50 SOL",
     "• Use USD in the token slot to auto-convert: /cf 12 USD",
+    "• Use $ to specify USD with an explicit token: /cf $10 WBTC",
     "• Group admins can set chat defaults (token, limits, privacy, media, timeout) via /default",
 
     "• Contact bot administrator to add support for new SPL tokens",

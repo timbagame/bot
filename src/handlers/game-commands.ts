@@ -99,7 +99,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
   const COINFLIP_COMMAND_OPTIONS = createOptions({
     gameType: "coinflip",
     usageMessage:
-      "❌ Please provide a valid amount greater than 0.\n\nUsage: <code>/cf &lt;amount&gt; [USD|TOKEN]</code> or <code>/cf &lt;amount&gt; [USD|TOKEN] &lt;maxPlayers&gt;</code>",
+      "❌ Please provide a valid amount greater than 0.\n\nUsage: <code>/cf &lt;amount&gt; [TOKEN]</code>, <code>/cf &lt;amount&gt; USD</code>, or <code>/cf $&lt;usd&gt; [TOKEN]</code>",
     defaultMaxPlayers: DEFAULT_COINFLIP_MAX_PLAYERS,
     minPlayers: 2,
     timeoutSeconds: DEFAULT_GAME_TIMEOUT,
