@@ -2093,33 +2093,77 @@ const programEventDescriptors: ProgramEventDescriptor[] = [
   },
 ];
 
-const unregisterProgramEventListeners = async (): Promise<void> => {
+const EVENT_LISTENER_REMOVAL_BACKOFF_MS = 200;
+const EVENT_LISTENER_REMOVAL_MAX_ATTEMPTS = 3;
+
+const defaultSleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+let sleep = defaultSleep;
+
+export const __test_setSleepImplementation = (
+  implementation: (ms: number) => Promise<void>
+): void => {
+  sleep = implementation;
+};
+
+const hasActiveProgramEventListenerHandles = (): boolean =>
+  programEventDescriptors.some(({ getId }) => getId() !== null);
+
+const unregisterProgramEventListeners = async (): Promise<boolean> => {
   if (!program) {
-    return;
+    return true;
   }
 
-  await Promise.all(
-    programEventDescriptors.map(async (descriptor) => {
-      const id = descriptor.getId();
-      if (id === null) {
-        return;
-      }
+  let allListenersRemoved = true;
 
+  for (const descriptor of programEventDescriptors) {
+    const id = descriptor.getId();
+    if (id === null) {
+      continue;
+    }
+
+    let removed = false;
+
+    for (let attempt = 1; attempt <= EVENT_LISTENER_REMOVAL_MAX_ATTEMPTS; attempt++) {
       try {
         await program.removeEventListener(id);
         console.log(`🔌 Removed ${descriptor.label} event listener`);
+        removed = true;
+        break;
       } catch (error) {
         console.warn(
-          `⚠️ Failed to remove ${descriptor.label} event listener (id=${id}):`,
+          `⚠️ Failed to remove ${descriptor.label} event listener (id=${id}) on attempt ${attempt}/${EVENT_LISTENER_REMOVAL_MAX_ATTEMPTS}:`,
           error
         );
-      } finally {
-        descriptor.setId(null);
+
+        if (attempt < EVENT_LISTENER_REMOVAL_MAX_ATTEMPTS) {
+          const delayMs = EVENT_LISTENER_REMOVAL_BACKOFF_MS * 2 ** (attempt - 1);
+          console.warn(
+            `⏳ Retrying ${descriptor.label} event listener removal in ${delayMs}ms (id=${id})`
+          );
+          await sleep(delayMs);
+        }
       }
-    })
-  );
+    }
+
+    if (removed) {
+      descriptor.setId(null);
+    } else {
+      allListenersRemoved = false;
+      console.error(
+        `❌ Exhausted retries removing ${descriptor.label} event listener (id=${id}); retaining listener handle to avoid duplicate subscriptions.`
+      );
+    }
+  }
+
+  if (!allListenersRemoved) {
+    console.warn(
+      "⚠️ One or more program event listeners could not be removed; aborting re-registration to prevent duplicate subscriptions."
+    );
+  }
 
   programEventListenersReady = false;
+  return allListenersRemoved;
 };
 
 const registerProgramEventListeners = async (): Promise<void> => {
@@ -2127,10 +2171,20 @@ const registerProgramEventListeners = async (): Promise<void> => {
     return;
   }
 
-  await unregisterProgramEventListeners();
+  const listenersRemoved = await unregisterProgramEventListeners();
+  if (!listenersRemoved) {
+    return;
+  }
 
   try {
     for (const descriptor of programEventDescriptors) {
+      if (descriptor.getId() !== null) {
+        console.warn(
+          `⚠️ Skipping ${descriptor.label} event listener registration because an active listener handle is still present (id=${descriptor.getId()}).`
+        );
+        continue;
+      }
+
       console.log(`Setting up ${descriptor.label} event listener...`);
       const listenerId = (await program.addEventListener(
         descriptor.eventName,
@@ -2154,7 +2208,8 @@ const attachRpcEndpointFailoverHandler = (): void => {
   try {
     rpcEndpointListenerCleanup = wallet.onRpcEndpointChange(
       ({ endpoint, previousEndpoint }) => {
-        if (!programEventListenersReady || !program) {
+        const hasActiveListeners = hasActiveProgramEventListenerHandles();
+        if ((!programEventListenersReady && !hasActiveListeners) || !program) {
           return;
         }
 
@@ -2199,6 +2254,7 @@ export const __test_resetProgramEventState = async (): Promise<void> => {
   rpcEndpointListenerCleanup?.();
   rpcEndpointListenerCleanup = null;
   programEventListenersReady = false;
+  sleep = defaultSleep;
 };
 
 const COMPLETION_SIGNATURE_LOOKBACK = 25;

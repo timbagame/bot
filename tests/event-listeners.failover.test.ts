@@ -9,15 +9,17 @@ import {
   __test_attachRpcEndpointFailoverHandler,
   __test_getProgramEventListenerState,
   __test_resetProgramEventState,
+  __test_setSleepImplementation,
 } from "../src/bot";
 
 describe("program event listener management", () => {
   let originalOnRpcEndpointChange: typeof wallet.onRpcEndpointChange;
-let addCalls: string[];
-let removeCalls: number[];
-let nextListenerId: number;
+  let addCalls: string[];
+  let removeCalls: number[];
+  let nextListenerId: number;
 
   beforeEach(() => {
+    __test_setSleepImplementation(async () => {});
     addCalls = [];
     removeCalls = [];
     nextListenerId = 1;
@@ -88,6 +90,110 @@ let nextListenerId: number;
     expect(removeCalls).toEqual([1]);
     const state = __test_getProgramEventListenerState();
     expect(state.programEventListenersReady).toBe(false);
+  });
+
+  test("retries removal and retains failed listener handles", async () => {
+    await __test_registerProgramEventListeners();
+
+    const removalFailures = new Set([1]);
+    __test_setProgram({
+      addEventListener: async (eventName: string) => {
+        addCalls.push(eventName);
+        return nextListenerId++;
+      },
+      removeEventListener: async (id: number) => {
+        removeCalls.push(id);
+        if (removalFailures.has(id)) {
+          throw new Error("remove failed");
+        }
+      },
+    } as any);
+
+    const removed = await __test_unregisterProgramEventListeners();
+    expect(removed).toBe(false);
+    expect(removeCalls).toEqual([1, 1, 1, 2, 3]);
+    const state = __test_getProgramEventListenerState();
+    expect(state.gameCompletedListenerId).toBe(1);
+    expect(state.playerJoinedListenerId).toBeNull();
+    expect(state.playerUnjoinedListenerId).toBeNull();
+    expect(state.programEventListenersReady).toBe(false);
+  });
+
+  test("retries failover restart when cleanup previously failed", async () => {
+    const callbacks: Array<(change: ActiveEndpointChange) => void> = [];
+    let failCleanup = true;
+
+    (wallet as any).onRpcEndpointChange = (
+      listener: (change: ActiveEndpointChange) => void,
+    ) => {
+      callbacks.push(listener);
+      return () => {
+        const index = callbacks.indexOf(listener);
+        if (index >= 0) {
+          callbacks.splice(index, 1);
+        }
+      };
+    };
+
+    await __test_registerProgramEventListeners();
+    expect(addCalls).toEqual([
+      "gameCompleted",
+      "playerJoined",
+      "playerUnjoined",
+    ]);
+    addCalls = [];
+    removeCalls = [];
+
+    __test_setProgram({
+      addEventListener: async (eventName: string) => {
+        addCalls.push(eventName);
+        return nextListenerId++;
+      },
+      removeEventListener: async (id: number) => {
+        removeCalls.push(id);
+        if (failCleanup && id === 1) {
+          throw new Error("remove failed");
+        }
+      },
+    } as any);
+
+    __test_attachRpcEndpointFailoverHandler();
+
+    const change: ActiveEndpointChange = {
+      endpoint: "https://rpc-secondary",
+      index: 1,
+      previousEndpoint: "https://rpc-primary",
+      previousIndex: 0,
+    };
+    const failoverCallback = callbacks[0];
+    expect(failoverCallback).toBeDefined();
+    failoverCallback?.(change);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(removeCalls).toEqual([1, 1, 1, 2, 3]);
+    expect(addCalls).toEqual([]);
+    const afterFailedRestart = __test_getProgramEventListenerState();
+    expect(afterFailedRestart.programEventListenersReady).toBe(false);
+    expect(afterFailedRestart.gameCompletedListenerId).toBe(1);
+    expect(afterFailedRestart.playerJoinedListenerId).toBeNull();
+    expect(afterFailedRestart.playerUnjoinedListenerId).toBeNull();
+
+    failCleanup = false;
+    failoverCallback?.(change);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(removeCalls).toEqual([1, 1, 1, 2, 3, 1]);
+    expect(addCalls).toEqual([
+      "gameCompleted",
+      "playerJoined",
+      "playerUnjoined",
+    ]);
+    const afterRecovery = __test_getProgramEventListenerState();
+    expect(afterRecovery.gameCompletedListenerId).toBe(4);
+    expect(afterRecovery.playerJoinedListenerId).toBe(5);
+    expect(afterRecovery.playerUnjoinedListenerId).toBe(6);
+    expect(afterRecovery.programEventListenersReady).toBe(true);
   });
 
   test("restarts listeners when RPC endpoint changes", async () => {
