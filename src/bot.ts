@@ -2096,8 +2096,18 @@ const programEventDescriptors: ProgramEventDescriptor[] = [
 const EVENT_LISTENER_REMOVAL_BACKOFF_MS = 200;
 const EVENT_LISTENER_REMOVAL_MAX_ATTEMPTS = 3;
 
-const sleep = (ms: number): Promise<void> =>
+const defaultSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
+let sleep = defaultSleep;
+
+export const __test_setSleepImplementation = (
+  implementation: (ms: number) => Promise<void>
+): void => {
+  sleep = implementation;
+};
+
+const hasActiveProgramEventListenerHandles = (): boolean =>
+  programEventDescriptors.some(({ getId }) => getId() !== null);
 
 const unregisterProgramEventListeners = async (): Promise<boolean> => {
   if (!program) {
@@ -2198,7 +2208,8 @@ const attachRpcEndpointFailoverHandler = (): void => {
   try {
     rpcEndpointListenerCleanup = wallet.onRpcEndpointChange(
       ({ endpoint, previousEndpoint }) => {
-        if (!programEventListenersReady || !program) {
+        const hasActiveListeners = hasActiveProgramEventListenerHandles();
+        if ((!programEventListenersReady && !hasActiveListeners) || !program) {
           return;
         }
 
@@ -2243,6 +2254,7 @@ export const __test_resetProgramEventState = async (): Promise<void> => {
   rpcEndpointListenerCleanup?.();
   rpcEndpointListenerCleanup = null;
   programEventListenersReady = false;
+  sleep = defaultSleep;
 };
 
 const COMPLETION_SIGNATURE_LOOKBACK = 25;
