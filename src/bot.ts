@@ -3633,8 +3633,8 @@ bot.command("help", async (ctx: Context) => {
     "/tip @username &lt;amount&gt; [TOKEN] - Reply to a message or include @username to tip",
     "",
     "<b>🎮 Game Commands:</b>",
-    "/coinflip &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Create a new coinflip game",
-    "/cf &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Shorthand for coinflip command",
+    "/coinflip &lt;amount&gt; [USD|TOKEN] &lt;maxTickets&gt; - Create a new coinflip game",
+    "/cf &lt;amount&gt; [USD|TOKEN] &lt;maxTickets&gt; - Shorthand for coinflip command",
 
     "/giveaway &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Create a new giveaway",
     "/ga &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Shorthand for giveaway command",
@@ -3656,6 +3656,7 @@ bot.command("help", async (ctx: Context) => {
     "<b>ℹ️ Important:</b> ",
     "• Your player balance account will be automatically initialized when needed",
     "• Specify token after amount: /coinflip 100 TIMBA 2 or /tip @user 50 SOL",
+    "• Use USD in the token slot to auto-convert: /cf 12 USD",
     "• Group admins can set chat defaults (token, limits, privacy, media, timeout) via /default",
 
     "• Contact bot administrator to add support for new SPL tokens",

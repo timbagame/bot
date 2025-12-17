@@ -100,6 +100,7 @@ export type ParseAmountResult =
         | "unknown_token"
         | "unsupported_token";
       unknownToken?: string;
+      reason?: "fiat_pricing_unavailable" | "fiat_amount_too_small";
     };
 
 export interface PlayerData {
