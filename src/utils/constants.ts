@@ -74,6 +74,20 @@ export const BLOCK_HEIGHT_EXPIRATION_GRACE = 2; // Allow a couple of blocks past
 export const TRANSACTION_RESUBMIT_ATTEMPTS = 2; // Number of times to rebuild and resend transactions on expiry/timeout
 
 // ================================
+// TELEGRAM MESSAGE RENDERING
+// ================================
+
+// Upper bound on how many participant rows we even attempt to render before falling back to "… and N more".
+// This keeps message formatting O(1) even if a game has thousands of participants.
+export const GAME_MESSAGE_PARTICIPANTS_PREVIEW_LIMIT = 250;
+
+// Concurrency for Telegram username lookups when we decide to do network lookups.
+export const GAME_MESSAGE_USERNAME_LOOKUP_CONCURRENCY = 8;
+
+// If a game has more than this many participants, avoid network lookups (use cached/DB display names only).
+export const GAME_MESSAGE_NETWORK_LOOKUP_MAX_PARTICIPANTS = 100;
+
+// ================================
 // INTERVALS
 // ================================
 

@@ -2,6 +2,7 @@ import { describe, test, expect } from "bun:test";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { GameManager } from "../src/utils/game";
 import { sanitizeTelegramDisplayName } from "../src/utils/telegram-display";
+import { GAME_MESSAGE_PARTICIPANTS_PREVIEW_LIMIT } from "../src/utils/constants";
 
 function reset() {
   GameManager.resetForTest();
@@ -99,6 +100,54 @@ describe("GameManager participants rendering", () => {
     );
 
     expect(res.messageText.length).toBeLessThanOrEqual(4096);
+    expect(res.messageText).toMatch(/\n… and \d+ more/);
+  });
+
+  test("caps participant processing for huge games", async () => {
+    reset();
+    const participantIds = Array.from(
+      { length: GAME_MESSAGE_PARTICIPANTS_PREVIEW_LIMIT + 5000 },
+      (_, i) => String(10_000 + i)
+    );
+    const program = makeProgram({
+      ticketsCount: participantIds.length,
+      maxTickets: participantIds.length,
+      minTickets: 2,
+      totalAmount: 0,
+      createdAt: 1_000_000,
+      timeout: 60,
+      gameType: { coinflip: {} },
+    });
+    const gm = GameManager.getInstance(
+      program,
+      makeWallet(),
+      {
+        getGameParticipants: () => participantIds,
+        getGame: () => ({ token_mint: "M", token_ticker: "TOK" }),
+      } as any
+    );
+    let calls = 0;
+    (gm as any).getUsernameFromTelegramId = async (_ctx: any, _id: string) => {
+      calls += 1;
+      return "@u";
+    };
+    const ctx = {
+      chat: { id: 1, type: "group" },
+      api: {},
+    } as any;
+    const gamePda = Keypair.generate().publicKey;
+
+    const res = await gm.formatGameMessage(
+      ctx,
+      gamePda,
+      "coinflip",
+      1_000_000_000,
+      "@creator",
+      "Active",
+      "TOK"
+    );
+
+    expect(calls).toBeLessThanOrEqual(GAME_MESSAGE_PARTICIPANTS_PREVIEW_LIMIT);
     expect(res.messageText).toMatch(/\n… and \d+ more/);
   });
 });

@@ -40,6 +40,9 @@ import {
   getGiveawayVideoId,
   TELEGRAM_USERNAME_CACHE_TTL_MS,
   CHAT_MEDIA_DISABLED_SENTINEL,
+  GAME_MESSAGE_PARTICIPANTS_PREVIEW_LIMIT,
+  GAME_MESSAGE_USERNAME_LOOKUP_CONCURRENCY,
+  GAME_MESSAGE_NETWORK_LOOKUP_MAX_PARTICIPANTS,
 } from "./constants";
 import { ChatDatabase } from "./chat-database";
 import {
@@ -253,6 +256,35 @@ const coerceLamportValue = (value: unknown): bigint | null => {
   }
 
   return null;
+};
+
+const mapWithConcurrency = async <TItem, TResult>(
+  items: TItem[],
+  limit: number,
+  mapper: (item: TItem, index: number) => Promise<TResult>
+): Promise<TResult[]> => {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const safeLimit = Number.isFinite(limit) ? Math.trunc(limit) : 0;
+  const workerCount = Math.max(1, Math.min(items.length, safeLimit || 1));
+  const results = new Array<TResult>(items.length);
+  let nextIndex = 0;
+
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) {
+        return;
+      }
+      results[index] = await mapper(items[index]!, index);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
 };
 
 const logAndFormatError = async (
@@ -2033,7 +2065,8 @@ export class GameManager {
    */
   public async getUsernameFromTelegramId(
     ctx: Context,
-    telegramId: string
+    telegramId: string,
+    options?: { allowNetworkLookup?: boolean }
   ): Promise<string | null> {
     try {
       const trimmedId = telegramId.trim();
@@ -2060,6 +2093,11 @@ export class GameManager {
       const fallbackCandidate = hinted ?? persistedDisplayName ?? null;
       if (persistedDisplayName && !hinted) {
         this.rememberTelegramUsername(trimmedId, persistedDisplayName);
+      }
+
+      if (options?.allowNetworkLookup === false) {
+        this.setCachedUsername(cacheKey, fallbackCandidate);
+        return fallbackCandidate;
       }
 
       this.usernameCache.delete(cacheKey);
@@ -2637,21 +2675,37 @@ export class GameManager {
     const baseBeforeParticipants = header + prize;
 
     const participantDisplayNames: string[] = [];
+    let totalParticipants = 0;
     if (currentTickets > 0) {
       try {
         const participants = this.getGamePlayers(gamePda.toBase58());
-        const lookups = participants.map(async (telegramId) => {
-          try {
-            const username = await this.getUsernameFromTelegramId(ctx, telegramId);
-            if (username) {
-              return sanitizeDisplay(username);
+        totalParticipants = participants.length;
+        const previewIds = participants.slice(
+          0,
+          Math.max(0, GAME_MESSAGE_PARTICIPANTS_PREVIEW_LIMIT)
+        );
+        const allowNetworkLookup =
+          totalParticipants <= GAME_MESSAGE_NETWORK_LOOKUP_MAX_PARTICIPANTS;
+
+        const resolved = await mapWithConcurrency(
+          previewIds,
+          GAME_MESSAGE_USERNAME_LOOKUP_CONCURRENCY,
+          async (telegramId) => {
+            try {
+              const username = await this.getUsernameFromTelegramId(
+                ctx,
+                telegramId,
+                { allowNetworkLookup }
+              );
+              if (username) {
+                return sanitizeDisplay(username);
+              }
+            } catch {
+              // fall through to placeholder
             }
-          } catch {
-            // fall back to placeholder
+            return `Player ${telegramId.slice(0, 6)}...`;
           }
-          return `Player ${telegramId.slice(0, 6)}...`;
-        });
-        const resolved = await Promise.all(lookups);
+        );
         participantDisplayNames.push(...resolved);
       } catch (error) {
         console.error("Error getting player list:", error);
@@ -2684,14 +2738,17 @@ export class GameManager {
       return message;
     };
 
-    let messageText = composeMessage(participantDisplayNames, 0);
+    let messageText = composeMessage(
+      participantDisplayNames,
+      Math.max(0, totalParticipants - participantDisplayNames.length)
+    );
 
     if (
       messageText.length > TELEGRAM_MESSAGE_CHAR_LIMIT &&
       participantDisplayNames.length > 0
     ) {
       for (let keep = participantDisplayNames.length; keep >= 0; keep -= 1) {
-        const omitted = participantDisplayNames.length - keep;
+        const omitted = Math.max(0, totalParticipants - keep);
         const candidate = composeMessage(
           participantDisplayNames.slice(0, keep),
           omitted
@@ -3278,26 +3335,36 @@ export class GameManager {
       let message =
         `${gameTypeText} • ${safeAmountDisplay} ${safeTicker}` +
         `\nCreator: ${safeCreator} • ${safePlayerCount} tickets`;
-      if (participants.length > 0) {
+      const totalParticipants = participants.length;
+      const allowNetworkLookup =
+        totalParticipants <= GAME_MESSAGE_NETWORK_LOOKUP_MAX_PARTICIPANTS;
+      const previewIds = participants.slice(
+        0,
+        Math.max(0, GAME_MESSAGE_PARTICIPANTS_PREVIEW_LIMIT)
+      );
+
+      let participantNames: string[] = [];
+      if (previewIds.length > 0) {
         try {
-          const participantNames = await Promise.all(
-            participants.map(async (telegramId) => {
-              const username = await this.getUsernameFromTelegramId(
-                ctx,
-                telegramId
-              );
-              return username
-                ? sanitizeTelegramDisplayNameWithoutMention(username)
-                : `Player ${telegramId.slice(0, 6)}...`;
-            })
-          );
-          const participantsList = buildParticipantsList(participantNames);
-          if (participantsList) {
-            message += participantsList;
-            if (message.endsWith("\n")) {
-              message = message.slice(0, -1);
+          participantNames = await mapWithConcurrency(
+            previewIds,
+            GAME_MESSAGE_USERNAME_LOOKUP_CONCURRENCY,
+            async (telegramId) => {
+              try {
+                const username = await this.getUsernameFromTelegramId(
+                  ctx,
+                  telegramId,
+                  { allowNetworkLookup }
+                );
+                if (username) {
+                  return sanitizeTelegramDisplayNameWithoutMention(username);
+                }
+              } catch {
+                // fall through to placeholder
+              }
+              return `Player ${telegramId.slice(0, 6)}...`;
             }
-          }
+          );
         } catch (participantError) {
           console.error(
             "Error retrieving participants for completed game:",
@@ -3306,11 +3373,50 @@ export class GameManager {
         }
       }
 
-      if (winnerLine) {
-        message += `\n\n${winnerLine}`;
+      const winnerSection = winnerLine ? `\n\n${winnerLine}` : "";
+      const compose = (names: string[], omitted: number) => {
+        const participantsList = buildParticipantsList(names);
+        let composed = message;
+        if (participantsList) {
+          composed += participantsList;
+          if (composed.endsWith("\n")) {
+            composed = composed.slice(0, -1);
+          }
+        }
+        if (omitted > 0) {
+          composed += `\n… and ${omitted} more`;
+        }
+        composed += winnerSection;
+        return composed;
+      };
+
+      let composed = compose(
+        participantNames,
+        Math.max(0, totalParticipants - participantNames.length)
+      );
+
+      if (
+        composed.length > TELEGRAM_MESSAGE_CHAR_LIMIT &&
+        participantNames.length > 0
+      ) {
+        for (let keep = participantNames.length; keep >= 0; keep -= 1) {
+          const candidate = compose(
+            participantNames.slice(0, keep),
+            Math.max(0, totalParticipants - keep)
+          );
+          if (candidate.length <= TELEGRAM_MESSAGE_CHAR_LIMIT || keep === 0) {
+            composed = candidate;
+            break;
+          }
+        }
       }
 
-      return message;
+      if (composed.length > TELEGRAM_MESSAGE_CHAR_LIMIT) {
+        composed =
+          composed.slice(0, TELEGRAM_MESSAGE_CHAR_LIMIT - 1) + "…";
+      }
+
+      return composed;
     } catch (error) {
       console.error("Error formatting completed game info:", error);
       return "❌ Error loading game details";
