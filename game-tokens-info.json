@@ -2,7 +2,7 @@
   "network": "mainnet",
   "programId": "32Jr4JnXWvqq9GqPQynkooHsszaucUUvZfNLh2hdX2L5",
   "authority": "4oRdwjBqMGjhh5octi4BLvtNGCgWdJDMv3bBr9Jpi5V8",
-  "initializedAt": "2025-11-13T03:32:47.981Z",
+  "initializedAt": "2025-12-17T05:23:15.460Z",
   "tokens": [
     {
       "ticker": "TIMBA",
@@ -47,27 +47,6 @@
       "status": "already_existed"
     },
     {
-      "ticker": "MAGAIBA",
-      "mint": "A6rSPi9JmJgVkW6BatsA6MjFYLseizPM2Fnt92coFjf4",
-      "gameTokenPda": "JE196rerASsxmHmKpda8thCxkmpi6XudJAFs7LwkjMgq",
-      "gameVaultPda": "9h18P2jzE5LdrhkryKtfvWSUxcridLhPr2oAFitvPoA5",
-      "status": "already_existed"
-    },
-    {
-      "ticker": "GLORP",
-      "mint": "FkBF9u1upwEMUPxnXjcydxxVSxgr8f3k1YXbz7G7bmtA",
-      "gameTokenPda": "HzsFvYjGcwSL4cPed2BWPo4z3hSMVcuYdve7Q3gwt6RZ",
-      "gameVaultPda": "9ZqTBD8suRP43kiiHQUXvCs7puLhHdasFrg5SLsGAYth",
-      "status": "already_existed"
-    },
-    {
-      "ticker": "AI16Z",
-      "mint": "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC",
-      "gameTokenPda": "H2wNQaHMg7giXmCixxviyHBxVzTcYzWiyQ8rHCCLnLvT",
-      "gameVaultPda": "FjTeMeptVDtD7cbDTPKv3huSLUmvMG8LSr6xedrbfEbg",
-      "status": "already_existed"
-    },
-    {
       "ticker": "cbBTC",
       "mint": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
       "gameTokenPda": "HBSbPsnzFVo9NgfWcDrtxE3TNqMxYcH1ny2DxP4CJxce",
@@ -93,6 +72,27 @@
       "mint": "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN",
       "gameTokenPda": "F5tGxDQWB7sgebzAFGMxsFWFGKeZd1VfhYHoRNg3UMGf",
       "gameVaultPda": "47AUpvmK3N983cLhWfa1TPF9UxewSonBPoQsHzyTFLoW",
+      "status": "already_existed"
+    },
+    {
+      "ticker": "MAGAIBA",
+      "mint": "A6rSPi9JmJgVkW6BatsA6MjFYLseizPM2Fnt92coFjf4",
+      "gameTokenPda": "JE196rerASsxmHmKpda8thCxkmpi6XudJAFs7LwkjMgq",
+      "gameVaultPda": "9h18P2jzE5LdrhkryKtfvWSUxcridLhPr2oAFitvPoA5",
+      "status": "already_existed"
+    },
+    {
+      "ticker": "GLORP",
+      "mint": "FkBF9u1upwEMUPxnXjcydxxVSxgr8f3k1YXbz7G7bmtA",
+      "gameTokenPda": "HzsFvYjGcwSL4cPed2BWPo4z3hSMVcuYdve7Q3gwt6RZ",
+      "gameVaultPda": "9ZqTBD8suRP43kiiHQUXvCs7puLhHdasFrg5SLsGAYth",
+      "status": "already_existed"
+    },
+    {
+      "ticker": "AI16Z",
+      "mint": "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC",
+      "gameTokenPda": "H2wNQaHMg7giXmCixxviyHBxVzTcYzWiyQ8rHCCLnLvT",
+      "gameVaultPda": "FjTeMeptVDtD7cbDTPKv3huSLUmvMG8LSr6xedrbfEbg",
       "status": "already_existed"
     }
   ]

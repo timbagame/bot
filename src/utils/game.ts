@@ -3853,9 +3853,14 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
       })`
     );
 
-    // Giveaway: close only if no participants; otherwise wait for oracle completion
+    // Giveaway:
+    // - If expired and minimum tickets were NOT reached, close immediately (participants don't need refunds).
+    // - If minimum tickets were reached, wait for oracle completion.
     if (gameType === "giveaway") {
-      if (ticketsCount === 0) {
+      const shouldCancel =
+        ticketsCount === 0 || (minTickets > 0 && !hasEnoughTickets);
+
+      if (shouldCancel) {
         try {
           const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
           if (result.success) {
@@ -5510,8 +5515,13 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
   ): Promise<boolean> {
     const gameType = this.getGameType(gameAccount);
     const ticketsCount = Number(gameAccount.ticketsCount ?? 0);
+    const minTickets = Number(gameAccount.minTickets ?? 0);
+    const hasEnoughTickets = ticketsCount >= minTickets;
 
-    if (ticketsCount === 0) {
+    const shouldCancelImmediately =
+      ticketsCount === 0 || (minTickets > 0 && !hasEnoughTickets);
+
+    if (shouldCancelImmediately) {
       const immediateResult = await this.cancelGameWithPlayerKeys(
         gamePda,
         gameType

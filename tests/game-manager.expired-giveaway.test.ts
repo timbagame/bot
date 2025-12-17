@@ -1,0 +1,78 @@
+import { describe, expect, test } from "bun:test";
+import { PublicKey } from "@solana/web3.js";
+import { GameManager } from "../src/utils/game";
+
+function resetGameManager() {
+  // @ts-ignore
+  GameManager["instance"] = undefined;
+}
+
+function stubProgram() {
+  return { account: { game: { fetch: async () => ({}) } } } as any;
+}
+
+describe("GameManager expired giveaway handler", () => {
+  test("closes immediately when expired and minimum tickets not reached", async () => {
+    resetGameManager();
+    const gm = GameManager.getInstance(stubProgram(), {} as any, {} as any);
+
+    const gamePda = new PublicKey("BPFLoader1111111111111111111111111111111111");
+    const creator = new PublicKey("BPFLoader2111111111111111111111111111111111");
+
+    const calls: any[] = [];
+    (gm as any).cancelGameWithPlayerKeys = async (...args: any[]) => {
+      calls.push(args);
+      return { success: true, tx: "TX_CLOSE" };
+    };
+
+    const result = await gm.handleExpiredGame(gamePda, {
+      gameType: { giveaway: {} },
+      ticketsCount: 22,
+      minTickets: 99,
+      maxTickets: 100,
+      createdAt: 0,
+      timeout: 0,
+      ticketAmount: 123,
+      creator,
+    });
+
+    expect(calls.length).toBe(1);
+    expect(calls[0][0]).toBe(gamePda);
+    expect(calls[0][1]).toBe("giveaway");
+    expect(result).toEqual({
+      cancelled: true,
+      amount: 123,
+      creator: creator.toBase58(),
+      tx: "TX_CLOSE",
+    });
+  });
+
+  test("does not close when expired and minimum tickets reached (waits for oracle)", async () => {
+    resetGameManager();
+    const gm = GameManager.getInstance(stubProgram(), {} as any, {} as any);
+
+    const gamePda = new PublicKey("BPFLoader3111111111111111111111111111111111");
+    const creator = new PublicKey("BPFLoader4111111111111111111111111111111111");
+
+    let cancelCalled = false;
+    (gm as any).cancelGameWithPlayerKeys = async () => {
+      cancelCalled = true;
+      return { success: true, tx: "TX_CLOSE" };
+    };
+
+    const result = await gm.handleExpiredGame(gamePda, {
+      gameType: { giveaway: {} },
+      ticketsCount: 99,
+      minTickets: 99,
+      maxTickets: 100,
+      createdAt: 0,
+      timeout: 0,
+      ticketAmount: 123,
+      creator,
+    });
+
+    expect(cancelCalled).toBe(false);
+    expect(result).toBe(false);
+  });
+});
+
