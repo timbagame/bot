@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll, vi } from "bun:test";
 import { createGameCommandsModule } from "../src/handlers/game-commands";
 import {
   GAME_CREATION_RATE_LIMIT_WINDOW_MS,
@@ -9,6 +9,13 @@ import {
   WSOL_MINT,
 } from "../src/utils/constants";
 import { parseDecimalAmount } from "../src/utils/amount";
+import { TokenManager } from "../src/utils/token-manager";
+import * as priceModule from "../src/utils/prices";
+import {
+  __test_clearTokenPriceCache,
+  getCachedPriceLookup,
+  resolvePriceWithCache,
+} from "../src/utils/token-price-cache";
 
 const extractCallbacks = (kb: any): string[] => {
   const grid = (kb && (kb.inline_keyboard || kb.keyboard)) as any[] | undefined;
@@ -903,6 +910,80 @@ describe("createGameViaCommand helper", () => {
     expect(inferCalls[0].args).toEqual(["/ga", "$10", "WBTC", "5"]);
     expect(inferCalls[0].tokenSpecified).toBe(true);
     expect(inferCalls[0].amountIndex).toBe(1);
+  });
+
+  test("/cf $1 reuses cached USD pricing for conversion and initial render", async () => {
+    TokenManager.resetForTesting();
+    __test_clearTokenPriceCache();
+    const priceSpy = vi
+      .spyOn(priceModule, "resolveTokenPriceUSD")
+      .mockResolvedValue({ price: 2, identifier: "TOK" });
+    const ctx: any = makeCtx();
+
+    const sharedWalletStub = {
+      getTokenBalance: async () => 2_000_000,
+      getTokenMetadata: async () => ({ decimals: 6 }),
+      formatTokenBalance: (amount: number, decimals: number) =>
+        (amount / Math.pow(10, decimals)).toString(),
+      getBalance: async () => 0,
+      formatSolBalance: () => "0",
+    };
+
+    const tokenManager = TokenManager.getInstance(
+      sharedWalletStub as any,
+      "MINT",
+      "TOK"
+    );
+    await tokenManager.addToken("MINT", "TOK", 6);
+
+    const creationCalls: any[] = [];
+    const messageCalls: any[] = [];
+
+    const deps = makeDeps({
+      parseAmount: (args, index, chatId) =>
+        tokenManager.parseAmount(args, index, chatId, "game"),
+      wallet: sharedWalletStub,
+      gameManager: {
+        createGame: async (...args) => {
+          creationCalls.push(args);
+          return { success: true, gameAddress: "ADDR", autoJoinResult: { success: true } };
+        },
+        createGameMessage: async (...args) => {
+          messageCalls.push(args);
+          const priceHint = args[8]?.priceHint;
+          const cached = getCachedPriceLookup({
+            tokenMint: "MINT",
+            tokenTicker: "TOK",
+          });
+          expect(priceHint?.price).toBe(2);
+          expect(cached?.price).toBe(2);
+          const resolved = await resolvePriceWithCache({
+            tokenMint: "MINT",
+            tokenTicker: "TOK",
+          });
+          expect(resolved?.price).toBe(2);
+          return 0;
+        },
+      },
+    });
+
+    try {
+      await botModule.__test_createGameViaCommand(
+        ctx,
+        ["/cf", "$1"],
+        1n,
+        coinflipOptions,
+        deps
+      );
+
+      expect(priceSpy).toHaveBeenCalledTimes(1);
+      expect(creationCalls[0][1].priceLookup?.price).toBe(2);
+      expect(messageCalls[0][8]?.priceHint?.identifier).toBe("TOK");
+    } finally {
+      TokenManager.resetForTesting();
+      __test_clearTokenPriceCache();
+      vi.restoreAllMocks();
+    }
   });
 
   test("relays active game limit failures from GameManager", async () => {

@@ -9,6 +9,7 @@ import {
   TOKEN_MANAGER_APPROVED_CACHE_TTL_MS,
 } from "../src/utils/constants";
 import * as priceModule from "../src/utils/prices";
+import { __test_clearTokenPriceCache } from "../src/utils/token-price-cache";
 
 // Clean DBs and singletons before each test
 beforeEach(() => {
@@ -17,6 +18,7 @@ beforeEach(() => {
   ChatDatabase.resetForTesting();
   TokenDatabase.resetForTesting();
   TokenManager.resetForTesting();
+  __test_clearTokenPriceCache();
   vi.restoreAllMocks();
 });
 
