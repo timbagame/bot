@@ -2524,7 +2524,6 @@ export class GameManager {
     }
   ): Promise<GameMessageFormat> {
     const suppressMentions = options?.suppressMentions === true;
-    const chatId = ctx.chat?.id;
     const cachedGamePrice =
       options?.priceHint ?? this.gamePriceCache.get(gamePda.toBase58()) ?? null;
     const sanitizeDisplay = suppressMentions
