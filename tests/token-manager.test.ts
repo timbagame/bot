@@ -108,6 +108,25 @@ test("parseAmount converts USD hints using chat/default token pricing", async ()
   expect(res.data.formattedAmount).toContain("TOK");
 });
 
+test("parseAmount supports USD hints for tips and withdrawals (argIndex != 1)", async () => {
+  vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue({
+    price: 0.5,
+    identifier: "TOK",
+  });
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  await tm.addToken("MINT", "TOK", 6);
+
+  const res = await tm.parseAmount(["/withdraw", "ADDR", "10", "USD"], 2, 1, "tip");
+  if (!res.success) {
+    throw new Error(`expected success, got ${res.error}`);
+  }
+
+  expect(res.data.amount).toBe(20_000_000);
+  expect(res.data.tokenMint).toBe("MINT");
+  expect(res.data.tokenTicker).toBe("TOK");
+  expect(res.data.tokenWasSpecified).toBe(true);
+});
+
 test("parseAmount supports $-prefixed USD amounts without explicit token", async () => {
   vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue({
     price: 2,
@@ -124,6 +143,27 @@ test("parseAmount supports $-prefixed USD amounts without explicit token", async
   expect(res.data.amount).toBe(5_000_000);
   expect(res.data.tokenMint).toBe("MINT");
   expect(res.data.tokenWasSpecified).toBe(false);
+});
+
+test("parseAmount supports $-prefixed USD amounts for tips and withdrawals (argIndex != 1)", async () => {
+  const wbtcMint = "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh";
+  vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue({
+    price: 2,
+    identifier: "WBTC",
+  });
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  await tm.addToken("MINT", "TOK", 6);
+  await tm.addToken(wbtcMint, "WBTC", 8);
+
+  const res = await tm.parseAmount(["/tip", "@bob", "$10", "WBTC"], 2, 1, "tip");
+  if (!res.success) {
+    throw new Error(`expected success, got ${res.error}`);
+  }
+
+  expect(res.data.amount).toBe(500_000_000);
+  expect(res.data.tokenMint).toBe(wbtcMint);
+  expect(res.data.tokenTicker).toBe("WBTC");
+  expect(res.data.tokenWasSpecified).toBe(true);
 });
 
 test("parseAmount fails gracefully when USD pricing is unavailable", async () => {

@@ -853,6 +853,58 @@ describe("createGameViaCommand helper", () => {
     expect(createCalls.length).toBe(1);
   });
 
+  test("handles $-prefixed USD amounts with explicit token for giveaway while inferring max players", async () => {
+    const ctx: any = makeCtx();
+    const inferCalls: any[] = [];
+
+    const giveawayOptions: CreateGameViaCommandOptions = {
+      gameType: "giveaway",
+      usageMessage: "usage",
+      defaultMaxPlayers: 10,
+      minPlayers: 1,
+      getMaxPlayers: () => 100,
+      timeoutSeconds: 60 * 60,
+      gameLabel: "Giveaway",
+      inferErrorLabel: "Giveaway",
+      logPrefix: "🎁",
+      errorMessage: "❌ Error creating giveaway game. Please try again.",
+    };
+
+    const deps = makeDeps({
+      parseAmount: async () => ({
+        success: true,
+        data: {
+          ...baseParsedAmount,
+          tokenMint: "wbtcMint",
+          tokenTicker: "WBTC",
+          formattedAmount: "0.1 WBTC",
+          tokenWasSpecified: true,
+        },
+      }),
+      inferMaxPlayers: (args, amountIndex, tokenSpecified, defaultMax, minPlayers, maxPlayers) => {
+        inferCalls.push({ args, amountIndex, tokenSpecified, defaultMax, minPlayers, maxPlayers });
+        return { ok: true, value: 5, source: "arg" };
+      },
+      gameManager: {
+        createGame: async () => ({ success: true, gameAddress: "ADDR", autoJoinResult: { success: true } }),
+        createGameMessage: async () => 0,
+      },
+    });
+
+    await botModule.__test_createGameViaCommand(
+      ctx,
+      ["/ga", "$10", "WBTC", "5"],
+      1n,
+      giveawayOptions,
+      deps
+    );
+
+    expect(inferCalls.length).toBe(1);
+    expect(inferCalls[0].args).toEqual(["/ga", "$10", "WBTC", "5"]);
+    expect(inferCalls[0].tokenSpecified).toBe(true);
+    expect(inferCalls[0].amountIndex).toBe(1);
+  });
+
   test("relays active game limit failures from GameManager", async () => {
     const ctx: any = makeCtx();
     const limitMessage = `Active game limit reached. You currently have ${MAX_ACTIVE_GAMES_PER_CREATOR} active games (maximum ${MAX_ACTIVE_GAMES_PER_CREATOR}). Finish or cancel an existing game before creating a new one.`;

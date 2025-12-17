@@ -112,7 +112,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
   const GIVEAWAY_COMMAND_OPTIONS = createOptions({
     gameType: "giveaway",
     usageMessage:
-      "❌ Please provide a valid amount greater than 0.\n\nUsage: <code>/ga &lt;amount&gt;</code> or <code>/ga &lt;amount&gt; &lt;maxPlayers&gt;</code>",
+      "❌ Please provide a valid amount greater than 0.\n\nUsage: <code>/ga &lt;amount&gt; [TOKEN]</code>, <code>/ga &lt;amount&gt; USD</code>, or <code>/ga $&lt;usd&gt; [TOKEN]</code>",
     defaultMaxPlayers: DEFAULT_GIVEAWAY_MAX_PLAYERS,
     minPlayers: 1,
     timeoutSeconds: DEFAULT_GAME_TIMEOUT,

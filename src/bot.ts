@@ -3139,7 +3139,7 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
   if (!args || args.length < 3) {
     return replyUsageError(
       ctx,
-      "Usage: /withdraw &lt;address&gt; &lt;amount&gt; [TOKEN] or /withdraw &lt;address&gt; &lt;amount&gt; SOL"
+      "Usage: /withdraw &lt;address&gt; &lt;amount&gt; [TOKEN|USD] (or use $ for USD, e.g. /withdraw &lt;address&gt; $10 WBTC)"
     );
   }
 
@@ -3257,7 +3257,7 @@ bot.command(["withdraw", "wh"], async (ctx: Context) => {
 });
 
 const TIP_USAGE_MESSAGE =
-  "Usage: Reply to a user's message or use /tip @username &lt;amount&gt; [TOKEN]";
+  "Usage: Reply to a user's message or use /tip @username &lt;amount&gt; [TOKEN|USD] (or use $ for USD, e.g. /tip @username $10 WBTC)";
 
 type TipMentionTokenInfo = {
   index: number | null;
@@ -3628,16 +3628,16 @@ bot.command("help", async (ctx: Context) => {
     "",
     "<b>💰 Wallet Commands:</b>",
     "/start, /balance - Show your wallet address and balances",
-    "/withdraw &lt;address&gt; &lt;amount&gt; [TOKEN] - Withdraw tokens to external wallet",
-    "/wh &lt;address&gt; &lt;amount&gt; [TOKEN] - Shorthand for withdraw command",
-    "/tip @username &lt;amount&gt; [TOKEN] - Reply to a message or include @username to tip",
+    "/withdraw &lt;address&gt; &lt;amount&gt; [TOKEN|USD] - Withdraw tokens to external wallet",
+    "/wh &lt;address&gt; &lt;amount&gt; [TOKEN|USD] - Shorthand for withdraw command",
+    "/tip @username &lt;amount&gt; [TOKEN|USD] - Reply to a message or include @username to tip",
     "",
     "<b>🎮 Game Commands:</b>",
     "/coinflip &lt;amount&gt; [USD|TOKEN] &lt;maxTickets&gt; - Create a new coinflip game",
     "/cf &lt;amount&gt; [USD|TOKEN] &lt;maxTickets&gt; - Shorthand for coinflip command",
 
-    "/giveaway &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Create a new giveaway",
-    "/ga &lt;amount&gt; [TOKEN] &lt;maxTickets&gt; - Shorthand for giveaway command",
+    "/giveaway &lt;amount&gt; [USD|TOKEN] &lt;maxTickets&gt; - Create a new giveaway",
+    "/ga &lt;amount&gt; [USD|TOKEN] &lt;maxTickets&gt; - Shorthand for giveaway command",
 
     "/active - Show active games in this chat",
     "/public - Show all active public games",
@@ -3658,6 +3658,7 @@ bot.command("help", async (ctx: Context) => {
     "• Specify token after amount: /coinflip 100 TIMBA 2 or /tip @user 50 SOL",
     "• Use USD in the token slot to auto-convert: /cf 12 USD",
     "• Use $ to specify USD with an explicit token: /cf $10 WBTC",
+    "• Works for tips/withdrawals too: /tip @user $10 WBTC or /withdraw &lt;addr&gt; 10 USD",
     "• Group admins can set chat defaults (token, limits, privacy, media, timeout) via /default",
 
     "• Contact bot administrator to add support for new SPL tokens",
