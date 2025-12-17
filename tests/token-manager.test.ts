@@ -158,6 +158,22 @@ test("parseAmount supports $-prefixed USD amounts without explicit token", async
   expect(res.data.tokenWasSpecified).toBe(false);
 });
 
+test("parseAmount USD conversion keeps precision for low-priced tokens", async () => {
+  vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(
+    mockPriceLookup(0.00000654, "TOK")
+  );
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
+  await tm.addToken("MINT", "TOK", 0);
+
+  const res = await tm.parseAmount(["/cf", "$0.15"], 1, 1, "game");
+  if (!res.success) {
+    throw new Error(`expected success, got ${res.error}`);
+  }
+
+  // $0.15 / $0.00000654 ≈ 22,935.779... tokens, floored to 22,935
+  expect(res.data.amount).toBe(22_935);
+});
+
 test("parseAmount supports $-prefixed USD amounts for tips and withdrawals (argIndex != 1)", async () => {
   const wbtcMint = "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh";
   vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(

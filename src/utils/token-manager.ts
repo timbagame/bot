@@ -656,14 +656,48 @@ export class TokenManager {
         isSol,
       });
 
-      const scaledPrice = Math.round((priceLookup?.price ?? 0) * 1_000_000);
-      if (!priceLookup?.price || !Number.isFinite(scaledPrice) || scaledPrice <= 0) {
+      const price = priceLookup?.price ?? 0;
+      const USD_MICROS = 1_000_000n;
+      const MAX_SAFE = Number.MAX_SAFE_INTEGER;
+      const PRICE_SCALE_CANDIDATES = [
+        1_000_000_000_000_000,
+        100_000_000_000_000,
+        10_000_000_000_000,
+        1_000_000_000_000,
+        100_000_000_000,
+        10_000_000_000,
+        1_000_000_000,
+        100_000_000,
+        10_000_000,
+        1_000_000,
+        100_000,
+        10_000,
+        1_000,
+        100,
+        10,
+        1,
+      ] as const;
+
+      if (!priceLookup?.price || !Number.isFinite(price) || price <= 0) {
+        return { ok: false, reason: "unsupported_token" };
+      }
+
+      const selectedScale =
+        PRICE_SCALE_CANDIDATES.find((candidate) => {
+          const scaled = price * candidate;
+          return Number.isFinite(scaled) && scaled > 0 && scaled <= MAX_SAFE;
+        }) ?? 1;
+
+      const scaledPriceNumber = Math.round(price * selectedScale);
+      if (!Number.isFinite(scaledPriceNumber) || scaledPriceNumber <= 0) {
         return { ok: false, reason: "unsupported_token" };
       }
 
       const scaledDecimals = BigInt(Math.max(0, targetDecimals));
       const decimalsFactor = 10n ** scaledDecimals;
-      const rawAmountBigInt = (usdMicros * decimalsFactor) / BigInt(scaledPrice);
+      const rawAmountBigInt =
+        (usdMicros * decimalsFactor * BigInt(selectedScale)) /
+        (BigInt(scaledPriceNumber) * USD_MICROS);
       if (rawAmountBigInt <= 0n) {
         return { ok: false, reason: "invalid_amount", detail: "fiat_amount_too_small" };
       }
