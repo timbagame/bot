@@ -814,6 +814,45 @@ describe("createGameViaCommand helper", () => {
     expect(ctx.__deleted?.length).toBe(1);
   });
 
+  test("handles USD token hints while inferring max players", async () => {
+    const ctx: any = makeCtx();
+    const inferCalls: any[] = [];
+    const createCalls: any[] = [];
+
+    const deps = makeDeps({
+      parseAmount: async () => ({
+        success: true,
+        data: { ...baseParsedAmount, tokenWasSpecified: true, formattedAmount: "24 TOK" },
+      }),
+      inferMaxPlayers: (args, amountIndex, tokenSpecified, defaultMax, minPlayers, maxPlayers) => {
+        inferCalls.push({ args, amountIndex, tokenSpecified, defaultMax, minPlayers, maxPlayers });
+        return { ok: true, value: 4, source: "arg" };
+      },
+      gameManager: {
+        createGame: async (...args) => {
+          createCalls.push(args);
+          return { success: true, gameAddress: "ADDR", autoJoinResult: { success: true } };
+        },
+        createGameMessage: async () => 0,
+      },
+    });
+
+    await botModule.__test_createGameViaCommand(
+      ctx,
+      ["/cf", "12", "USD", "4"],
+      1n,
+      coinflipOptions,
+      deps
+    );
+
+    expect(inferCalls.length).toBe(1);
+    expect(inferCalls[0].args).toEqual(["/cf", "12", "USD", "4"]);
+    expect(inferCalls[0].tokenSpecified).toBe(true);
+    expect(inferCalls[0].amountIndex).toBe(1);
+    expect(inferCalls[0].defaultMax).toBe(coinflipOptions.defaultMaxPlayers);
+    expect(createCalls.length).toBe(1);
+  });
+
   test("relays active game limit failures from GameManager", async () => {
     const ctx: any = makeCtx();
     const limitMessage = `Active game limit reached. You currently have ${MAX_ACTIVE_GAMES_PER_CREATOR} active games (maximum ${MAX_ACTIVE_GAMES_PER_CREATOR}). Finish or cancel an existing game before creating a new one.`;
