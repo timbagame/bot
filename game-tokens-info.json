@@ -66,6 +66,34 @@
       "gameTokenPda": "H2wNQaHMg7giXmCixxviyHBxVzTcYzWiyQ8rHCCLnLvT",
       "gameVaultPda": "FjTeMeptVDtD7cbDTPKv3huSLUmvMG8LSr6xedrbfEbg",
       "status": "already_existed"
+    },
+    {
+      "ticker": "cbBTC",
+      "mint": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+      "gameTokenPda": "HBSbPsnzFVo9NgfWcDrtxE3TNqMxYcH1ny2DxP4CJxce",
+      "gameVaultPda": "26awf3qThPHysybztQAKCUPMND15akzE6GVwDjsMyriQ",
+      "status": "already_existed"
+    },
+    {
+      "ticker": "JLP",
+      "mint": "27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4",
+      "gameTokenPda": "CSAgJozJtBjF7guNWD9wyrKwtD1raQEDJK5q3AMvPzt9",
+      "gameVaultPda": "ErRr8hkiRWnqmeozZW3owao9bpNoAXJKcaLp9LbgauLP",
+      "status": "already_existed"
+    },
+    {
+      "ticker": "JUP",
+      "mint": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+      "gameTokenPda": "92k37VGNRaX42cU7yMcYJaUCbz19seEUeJze6xt1FV8T",
+      "gameVaultPda": "By2TbGrQSdXw14vcvTQgGEHf6yULMNajL5MFNT87osiY",
+      "status": "already_existed"
+    },
+    {
+      "ticker": "TRUMP",
+      "mint": "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN",
+      "gameTokenPda": "F5tGxDQWB7sgebzAFGMxsFWFGKeZd1VfhYHoRNg3UMGf",
+      "gameVaultPda": "47AUpvmK3N983cLhWfa1TPF9UxewSonBPoQsHzyTFLoW",
+      "status": "already_existed"
     }
   ]
 }
