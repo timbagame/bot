@@ -163,6 +163,7 @@ export const createGameCallbacksModule = (
   deps: GameCallbacksModuleDeps
 ): GameCallbacksModule => {
   const getGameManager = () => deps.getGameManager();
+  const isFromDM = (ctx: Context): boolean => ctx.chat?.type === "private";
 
   const resolveChatSettingsForContext = (
     ctx: Context,
@@ -171,6 +172,25 @@ export const createGameCallbacksModule = (
     const chatId = session?.chatId ?? ctx.chat?.id;
     if (typeof chatId !== "number") return null;
     return deps.getChatGameSettings?.(chatId) ?? null;
+  };
+
+  const resolveAdvancedOptionsForContext = (
+    ctx: Context,
+    gameType: "coinflip" | "giveaway",
+    players: number,
+    session: Parameters<typeof resolveAdvancedOptions>[2],
+    maxPlayersLimit: number,
+    chatSettings: ChatGameSettings | null
+  ): ReturnType<typeof resolveAdvancedOptions> => {
+    const advanced = resolveAdvancedOptions(
+      gameType,
+      players,
+      session,
+      maxPlayersLimit,
+      chatSettings
+    );
+
+    return isFromDM(ctx) ? { ...advanced, isPrivate: false } : advanced;
   };
 
   const handleCallbackError = async (
@@ -507,7 +527,8 @@ export const createGameCallbacksModule = (
 
         const amountValue = userSession.amount ?? "0";
         const chatSettings = resolveChatSettingsForContext(ctx, userSession);
-        const advanced = resolveAdvancedOptions(
+        const advanced = resolveAdvancedOptionsForContext(
+          ctx,
           userSession.gameType as "coinflip" | "giveaway",
           players,
           userSession,
@@ -840,7 +861,8 @@ export const createGameCallbacksModule = (
             const players = Number.parseInt(ctx.match![3] as string, 10);
 
             const chatSettings = resolveChatSettingsForContext(ctx, session);
-            const advanced = resolveAdvancedOptions(
+            const advanced = resolveAdvancedOptionsForContext(
+              ctx,
               gameType,
               players,
               session,
@@ -848,26 +870,16 @@ export const createGameCallbacksModule = (
               chatSettings
             );
 
-            const confirmMessage = buildGameConfirmationMessage({
+            await presentConfirmMenu({
+              ctx,
               gameType,
               amount,
               players,
               tokenTicker: tokenContext.tokenTicker,
               tokenDecimals: tokenContext.tokenDecimals,
-              advanced,
-            });
-
-            const confirmMenu = buildGameConfirmMenuConfig({
-              gameType,
-              amount,
-              players,
               creatorId,
               advanced,
-            });
-
-            await respondWithMenu(ctx, {
-              text: confirmMessage,
-              ...confirmMenu.menu,
+              logLabel: "players_confirm_menu",
             });
 
             updateSession({
@@ -907,7 +919,8 @@ export const createGameCallbacksModule = (
             const players = Number.parseInt(ctx.match![3] as string, 10);
 
             const chatSettings = resolveChatSettingsForContext(ctx, session);
-            const advanced = resolveAdvancedOptions(
+            const advanced = resolveAdvancedOptionsForContext(
+              ctx,
               gameType,
               players,
               session,
@@ -964,7 +977,8 @@ export const createGameCallbacksModule = (
             const visibilityChoice = ctx.match![4] as "public" | "private";
 
             const isPrivate = visibilityChoice !== "public";
-            const advanced = resolveAdvancedOptions(
+            const advanced = resolveAdvancedOptionsForContext(
+              ctx,
               gameType,
               players,
               { ...session, isPrivate },
@@ -1025,7 +1039,8 @@ export const createGameCallbacksModule = (
                 deltaMinutes * 60
             );
 
-            const advanced = resolveAdvancedOptions(
+            const advanced = resolveAdvancedOptionsForContext(
+              ctx,
               gameType,
               players,
               { ...session, timeoutSeconds: nextTimeoutSeconds },
@@ -1097,7 +1112,8 @@ export const createGameCallbacksModule = (
               session?.maxPlayersLimit ?? deps.getOracleMaxPlayers()
             );
 
-            const advanced = resolveAdvancedOptions(
+            const advanced = resolveAdvancedOptionsForContext(
+              ctx,
               gameType,
               players,
               { ...session, minPlayers: nextMinPlayers },
@@ -1153,7 +1169,8 @@ export const createGameCallbacksModule = (
             const amount = ctx.match![2] as string;
             const players = Number.parseInt(ctx.match![3] as string, 10);
 
-            const advanced = resolveAdvancedOptions(
+            const advanced = resolveAdvancedOptionsForContext(
+              ctx,
               gameType,
               players,
               session,

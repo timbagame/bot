@@ -204,6 +204,7 @@ export const presentAdvancedMenu = async (params: {
     advanced,
     logLabel,
   } = params;
+  const isFromDM = ctx.chat?.type === "private";
   const text = buildAdvancedOptionsMessage({
     amount,
     players,
@@ -217,7 +218,8 @@ export const presentAdvancedMenu = async (params: {
     amount,
     players.toString(),
     advanced,
-    creatorId
+    creatorId,
+    isFromDM ? { lockVisibilityToPublic: true } : undefined
   );
 
   await respondWithMenu(

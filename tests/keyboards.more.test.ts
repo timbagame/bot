@@ -193,6 +193,29 @@ describe("keyboards: misc menus", () => {
     ]);
   });
 
+  test("advanced options keyboard can lock visibility to public (DM)", () => {
+    const kb = createAdvancedOptionsKeyboard(
+      "coinflip",
+      "1.5",
+      "4",
+      { timeoutSeconds: 2700, minPlayers: 3, isPrivate: true },
+      "creator123",
+      { lockVisibilityToPublic: true }
+    );
+
+    const callbacks = extractCallbacks(kb);
+    const texts = extractTexts(kb);
+
+    expect(texts).toContain("🌐 Public");
+    expect(callbacks).toContain("noop");
+    expect(callbacks).not.toContain(
+      "advanced_visibility_coinflip_1.5_4_public_creator123"
+    );
+    expect(callbacks).not.toContain(
+      "advanced_visibility_coinflip_1.5_4_private_creator123"
+    );
+  });
+
   test("advanced timeout buttons disable at minimum", () => {
     const kb = createAdvancedOptionsKeyboard(
       "coinflip",

@@ -392,8 +392,11 @@ export const createAdvancedOptionsKeyboard = (
   amount: string,
   players: string,
   options: GameAdvancedOptions,
-  creatorId?: string
+  creatorId?: string,
+  ui?: { lockVisibilityToPublic?: boolean }
 ): InlineKeyboard => {
+  const lockVisibilityToPublic = ui?.lockVisibilityToPublic === true;
+  const effectiveIsPrivate = lockVisibilityToPublic ? false : options.isPrivate;
   const playersCount = Number.parseInt(players, 10);
   const minPlayersFloor =
     gameType === "coinflip" ? MIN_COINFLIP_PLAYERS : MIN_GIVEAWAY_PLAYERS;
@@ -446,11 +449,13 @@ export const createAdvancedOptionsKeyboard = (
     )
     .row()
     .text(
-      `${visibilityLabel(options.isPrivate)}`,
-      withCreatorSuffix(
-        `advanced_visibility_${gameType}_${amount}_${players}_${options.isPrivate ? "public" : "private"}`,
-        creatorId
-      )
+      `${visibilityLabel(effectiveIsPrivate)}`,
+      lockVisibilityToPublic
+        ? "noop"
+        : withCreatorSuffix(
+            `advanced_visibility_${gameType}_${amount}_${players}_${effectiveIsPrivate ? "public" : "private"}`,
+            creatorId
+          )
     )
     .row()
     .text(
