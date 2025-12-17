@@ -142,6 +142,7 @@ import { refreshDynamicFeeBudgets } from "./utils/fee-budget-refresh";
 import { SlidingWindowRateLimiter } from "./utils/rate-limiter";
 import { sweepFees } from "./services/fee-sweeper";
 import { formatDuration } from "./utils/format-time";
+import { getRetryAfterSeconds, isRateLimited } from "./utils/telegram-errors";
 export type { CreateGameViaCommandOptions } from "./handlers/game-commands";
 
 // ================================
@@ -1649,6 +1650,7 @@ type PendingGameMessageUpdateState = {
   timer?: ReturnType<typeof setTimeout>;
   referenceChatId?: number;
   latestTotalPot?: number;
+  nextDelayMs?: number;
 };
 
 const pendingGameMessageUpdates = new Map<string, PendingGameMessageUpdateState>();
@@ -1695,7 +1697,8 @@ const shouldAnnounceJoinForTickets = (ticketsCount: unknown): boolean => {
 const scheduleGameMessageUpdate = (
   gameAddress: string,
   referenceChatId: number,
-  totalPot?: number
+  totalPot?: number,
+  options: { delayMs?: number } = {}
 ): void => {
   const state =
     pendingGameMessageUpdates.get(gameAddress) ?? {
@@ -1704,6 +1707,9 @@ const scheduleGameMessageUpdate = (
     };
 
   state.referenceChatId = referenceChatId;
+  if (typeof options.delayMs === "number" && Number.isFinite(options.delayMs)) {
+    state.nextDelayMs = Math.max(0, Math.trunc(options.delayMs));
+  }
 
   if (typeof totalPot === "number" && Number.isFinite(totalPot)) {
     state.latestTotalPot = totalPot;
@@ -1715,6 +1721,14 @@ const scheduleGameMessageUpdate = (
   if (state.running || state.timer) {
     return;
   }
+
+  const delayMs = Math.max(
+    0,
+    typeof state.nextDelayMs === "number" && Number.isFinite(state.nextDelayMs)
+      ? state.nextDelayMs
+      : gameMessageUpdateDebounceMs
+  );
+  state.nextDelayMs = undefined;
 
   state.timer = setTimeout(async () => {
     state.timer = undefined;
@@ -1749,6 +1763,16 @@ const scheduleGameMessageUpdate = (
         state.latestTotalPot
       );
     } catch (error) {
+      if (isRateLimited(error)) {
+        const retryAfterSeconds = getRetryAfterSeconds(error);
+        if (retryAfterSeconds !== null) {
+          state.pending = true;
+          state.nextDelayMs = Math.max(
+            gameMessageUpdateDebounceMs,
+            Math.max(0, Math.trunc(retryAfterSeconds * 1000))
+          );
+        }
+      }
       console.error(`Error updating game message for ${gameAddress}:`, error);
     } finally {
       state.running = false;
@@ -1765,7 +1789,7 @@ const scheduleGameMessageUpdate = (
         pendingGameMessageUpdates.delete(gameAddress);
       }
     }
-  }, gameMessageUpdateDebounceMs);
+  }, delayMs);
 
   pendingGameMessageUpdates.set(gameAddress, state);
 };

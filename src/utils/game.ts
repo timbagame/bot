@@ -1049,9 +1049,20 @@ export class GameManager {
       );
 
       if (playerTelegramId) {
-        const participants = this.gameDb.getGameParticipants(gameAddress);
-        if (participants.includes(playerTelegramId)) {
-          return true;
+        const hasParticipant =
+          (this.gameDb as any).isGameParticipant?.bind(this.gameDb) as
+            | ((game: string, telegramId: string) => boolean)
+            | undefined;
+
+        if (typeof hasParticipant === "function") {
+          if (hasParticipant(gameAddress, playerTelegramId)) {
+            return true;
+          }
+        } else {
+          const participants = this.gameDb.getGameParticipants(gameAddress);
+          if (participants.includes(playerTelegramId)) {
+            return true;
+          }
         }
       }
     } catch (error) {
@@ -2678,12 +2689,16 @@ export class GameManager {
     let totalParticipants = 0;
     if (currentTickets > 0) {
       try {
-        const participants = this.getGamePlayers(gamePda.toBase58());
-        totalParticipants = participants.length;
-        const previewIds = participants.slice(
-          0,
-          Math.max(0, GAME_MESSAGE_PARTICIPANTS_PREVIEW_LIMIT)
-        );
+        totalParticipants = Math.max(0, Number(currentTickets) || 0);
+        const previewLimit = Math.max(0, GAME_MESSAGE_PARTICIPANTS_PREVIEW_LIMIT);
+        const getPreview =
+          (this.gameDb as any).getGameParticipantsPreview?.bind(this.gameDb) as
+            | ((game: string, limit: number) => string[])
+            | undefined;
+        const previewIds =
+          typeof getPreview === "function"
+            ? getPreview(gamePda.toBase58(), previewLimit)
+            : this.getGamePlayers(gamePda.toBase58()).slice(0, previewLimit);
         const allowNetworkLookup =
           totalParticipants <= GAME_MESSAGE_NETWORK_LOOKUP_MAX_PARTICIPANTS;
 
@@ -3265,18 +3280,41 @@ export class GameManager {
       );
       const rawAmount = Number(gameData.amount);
       const amount = Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : 0;
-      let participants: string[] = [];
-      if (gameData.game_address) {
+      const gameAddress = gameData.game_address as string | undefined;
+      const getCount =
+        (this.gameDb as any).getGameParticipantsCount?.bind(this.gameDb) as
+          | ((address: string) => number)
+          | undefined;
+      const getPreview =
+        (this.gameDb as any).getGameParticipantsPreview?.bind(this.gameDb) as
+          | ((address: string, limit: number) => string[])
+          | undefined;
+
+      let currentTickets = 0;
+      let previewIds: string[] = [];
+
+      if (gameAddress) {
         try {
-          participants = this.gameDb.getGameParticipants(gameData.game_address) ?? [];
+          if (typeof getCount === "function") {
+            currentTickets = Math.max(0, Math.trunc(getCount(gameAddress)));
+          } else {
+            currentTickets = (this.gameDb.getGameParticipants(gameAddress) ?? []).length;
+          }
         } catch (participantError) {
-          console.error(
-            "Error retrieving participants for completed game:",
-            participantError
-          );
+          console.error("Error retrieving participant count for completed game:", participantError);
+        }
+
+        try {
+          const previewLimit = Math.max(0, GAME_MESSAGE_PARTICIPANTS_PREVIEW_LIMIT);
+          if (typeof getPreview === "function") {
+            previewIds = getPreview(gameAddress, previewLimit);
+          } else {
+            previewIds = (this.gameDb.getGameParticipants(gameAddress) ?? []).slice(0, previewLimit);
+          }
+        } catch (participantError) {
+          console.error("Error retrieving participant preview for completed game:", participantError);
         }
       }
-      const currentTickets = participants.length;
       const storedMax = Number(gameData.max_players);
       const maxTickets = Number.isFinite(storedMax) && storedMax > 0
         ? storedMax
@@ -3288,10 +3326,10 @@ export class GameManager {
       const tokenTicker = gameData.token_ticker || "WSOL";
       let formatBalanceForDisplay = (value: number) =>
         this.wallet.formatTokenBalance(value, 6);
-      if (gameData.game_address) {
+      if (gameAddress) {
         try {
           const resolver = await this.resolveTokenFormattingInfo(
-            new PublicKey(gameData.game_address),
+            new PublicKey(gameAddress),
             tokenTicker,
             gameData.token_mint
           );
@@ -3335,13 +3373,9 @@ export class GameManager {
       let message =
         `${gameTypeText} • ${safeAmountDisplay} ${safeTicker}` +
         `\nCreator: ${safeCreator} • ${safePlayerCount} tickets`;
-      const totalParticipants = participants.length;
+      const totalParticipants = currentTickets;
       const allowNetworkLookup =
         totalParticipants <= GAME_MESSAGE_NETWORK_LOOKUP_MAX_PARTICIPANTS;
-      const previewIds = participants.slice(
-        0,
-        Math.max(0, GAME_MESSAGE_PARTICIPANTS_PREVIEW_LIMIT)
-      );
 
       let participantNames: string[] = [];
       if (previewIds.length > 0) {

@@ -245,6 +245,51 @@ describe("Pending player events", () => {
     expect(updateCalls[0]?.totalPot).toBe(3000);
   });
 
+  test("game message updates retry after Telegram rate limits", async () => {
+    const isolatedModule = await import(`../src/bot?rate-limit-test=${Date.now()}`);
+
+    const target = { chatId: 77, messageId: 301 };
+    const player = Keypair.generate().publicKey;
+
+    isolatedModule.__test_setJoinAnnouncementMaxTickets(0);
+    isolatedModule.__test_setGameMessageUpdateDebounceMs(1);
+
+    let updateAttempts = 0;
+    isolatedModule.__test_setGameManager({
+      updateGameMessageFromData: async () => {
+        updateAttempts += 1;
+        if (updateAttempts === 1) {
+          const err: any = new Error("Too Many Requests");
+          err.error_code = 429;
+          err.parameters = { retry_after: 0 };
+          throw err;
+        }
+      },
+      getPlayerUsername: async () => "TestPlayer",
+      getActiveGameMessages: () => {
+        const m = new Map();
+        m.set(77, { chatId: 77, messageId: 301 });
+        return m;
+      },
+    } as any);
+
+    isolatedModule.__test_setGameDatabase({
+      getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
+      getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
+      getGameMessages: () => [],
+    } as any);
+
+    await isolatedModule.__test_processPlayerEvent(
+      { ...makePlayerEvent(player, 5, 10), totalAmount: new BN(1000) } as any,
+      "PlayerUnjoined",
+      [target]
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(updateAttempts).toBeGreaterThanOrEqual(2);
+  });
+
   test("auto-join for game creator is not announced", async () => {
     const target = { chatId: 77, messageId: 301 };
     const creatorKeypair = Keypair.generate();

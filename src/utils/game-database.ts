@@ -585,6 +585,12 @@ export class GameDatabase extends BaseDatabase {
       );
 
       this.run(
+        "CREATE INDEX IF NOT EXISTS idx_game_participants_game_status_joined ON game_participants (game_address, status, joined_at)",
+        [],
+        "ensuring game participants index on game, status, joined_at"
+      );
+
+      this.run(
         "CREATE INDEX IF NOT EXISTS idx_game_participants_telegram_status ON game_participants (telegram_id, status)",
         [],
         "ensuring game participants index on telegram and status"
@@ -802,6 +808,53 @@ export class GameDatabase extends BaseDatabase {
     return results.map((r) => r.telegram_id);
   }
 
+  public getGameParticipantsCount(gameAddress: string): number {
+    const result = this.get<{ count: number }>(
+      `
+        SELECT COUNT(*) as count
+        FROM game_participants
+        WHERE game_address = ? AND status = 'confirmed'
+      `,
+      [gameAddress],
+      "counting game participants"
+    );
+    return result?.count ?? 0;
+  }
+
+  public getGameParticipantsPreview(gameAddress: string, limit: number): string[] {
+    const normalizedLimit = Math.max(0, Math.trunc(limit));
+    if (normalizedLimit === 0) {
+      return [];
+    }
+
+    const results = this.all<{ telegram_id: string }>(
+      `
+        SELECT telegram_id
+        FROM game_participants
+        WHERE game_address = ? AND status = 'confirmed'
+        ORDER BY joined_at ASC
+        LIMIT ?
+      `,
+      [gameAddress, normalizedLimit],
+      "getting game participant preview"
+    );
+    return results.map((r) => r.telegram_id);
+  }
+
+  public isGameParticipant(gameAddress: string, telegramId: string): boolean {
+    const result = this.get<{ one: number }>(
+      `
+        SELECT 1 as one
+        FROM game_participants
+        WHERE game_address = ? AND telegram_id = ? AND status = 'confirmed'
+        LIMIT 1
+      `,
+      [gameAddress, telegramId],
+      "checking game participant membership"
+    );
+    return Boolean(result?.one);
+  }
+
   public getPendingParticipants(gameAddress: string): Array<{
     telegram_id: string;
     public_key: string | null;
@@ -953,33 +1006,24 @@ export class GameDatabase extends BaseDatabase {
     timestamp: number
   ): boolean {
     try {
-      const current = this.get<{
-        last_slot_timestamp: number | null;
-      }>(
-        "SELECT last_slot_timestamp FROM games WHERE game_address = ?",
-        [gameAddress],
-        "reading game last slot timestamp"
+      const result = this.run(
+        `
+          UPDATE games
+          SET last_slot = ?, last_slot_timestamp = ?
+          WHERE game_address = ?
+            AND (last_slot_timestamp IS NULL OR ? >= last_slot_timestamp)
+        `,
+        [lastSlot, timestamp, gameAddress, timestamp],
+        "updating game last slot timestamp"
       );
 
-      if (
-        !current?.last_slot_timestamp ||
-        timestamp >= current.last_slot_timestamp
-      ) {
-        this.run(
-          "UPDATE games SET last_slot = ?, last_slot_timestamp = ? WHERE game_address = ?",
-          [lastSlot, timestamp, gameAddress],
-          "updating game last slot timestamp"
-        );
+      const didUpdate = typeof result?.changes === "number" && result.changes > 0;
+      if (didUpdate && (process.env["TIMBA_DEBUG"] ?? "").toLowerCase() === "true") {
         console.log(
           `🕐 Updated lastSlot for game ${gameAddress} to ${lastSlot} (timestamp: ${timestamp})`
         );
-        return true;
       }
-
-      console.log(
-        `⏰ Skipped outdated slot update for game ${gameAddress} (current: ${current.last_slot_timestamp}, received: ${timestamp})`
-      );
-      return false;
+      return didUpdate;
     } catch {
       return false;
     }

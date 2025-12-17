@@ -77,6 +77,36 @@ export const isRateLimited = (error: unknown): boolean => {
   return matchesAny(error, ["too many requests", "retry after"]);
 };
 
+export const getRetryAfterSeconds = (error: unknown): number | null => {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const parameters = (error as any).parameters;
+  const retryAfter =
+    (parameters && typeof parameters.retry_after === "number"
+      ? parameters.retry_after
+      : undefined) ??
+    (typeof (error as any).retry_after === "number"
+      ? (error as any).retry_after
+      : undefined);
+
+  if (typeof retryAfter === "number" && Number.isFinite(retryAfter)) {
+    return Math.max(0, retryAfter);
+  }
+
+  const description = getErrorString(error);
+  const match = description.match(/retry after (\d+)/i);
+  if (match && match[1]) {
+    const parsed = Number.parseInt(match[1], 10);
+    if (!Number.isNaN(parsed)) {
+      return Math.max(0, parsed);
+    }
+  }
+
+  return null;
+};
+
 export const shouldFallbackToReply = (error: unknown): boolean =>
   isMessageMissing(error) ||
   isEditProhibited(error) ||

@@ -60,6 +60,14 @@ test("GameDatabase: CRUD for games, mappings, participants, and slot updates", (
     status: "pending",
   });
   expect(db.getGameParticipants("gameA")).toEqual(["tg_creator", "tg_p2"]);
+  expect(db.getGameParticipantsCount("gameA")).toBe(2);
+  expect(db.getGameParticipantsPreview("gameA", 1)).toEqual(["tg_creator"]);
+  expect(db.getGameParticipantsPreview("gameA", 100)).toEqual([
+    "tg_creator",
+    "tg_p2",
+  ]);
+  expect(db.isGameParticipant("gameA", "tg_creator")).toBe(true);
+  expect(db.isGameParticipant("gameA", "tg_pending")).toBe(false);
   expect(db.getPlayerParticipatedGames("tg_p2")).toEqual(["gameA"]);
   expect(db.getPlayerTelegramId("pub_pending")).toBe("tg_pending");
 
