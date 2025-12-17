@@ -10,12 +10,14 @@ import {
 } from "../src/utils/constants";
 import { parseDecimalAmount } from "../src/utils/amount";
 import { TokenManager } from "../src/utils/token-manager";
-import * as priceModule from "../src/utils/prices";
+import * as priceService from "../src/utils/price-service";
 import {
-  __test_clearTokenPriceCache,
+  __test_clearPriceServiceCache,
   getCachedPriceLookup,
-  resolvePriceWithCache,
-} from "../src/utils/token-price-cache";
+  getUsdPrice,
+  rememberPriceLookup,
+} from "../src/utils/price-service";
+import { createTelegramContext } from "./helpers/fixtures";
 
 const extractCallbacks = (kb: any): string[] => {
   const grid = (kb && (kb.inline_keyboard || kb.keyboard)) as any[] | undefined;
@@ -694,11 +696,16 @@ describe("createGameViaCommand helper", () => {
   };
 
   const makeCtx = () => {
-    const calls: any[] = [];
+    const baseCtx = createTelegramContext("", "group", {
+      chat: { id: 42, type: "group" } as any,
+      from: { id: 1, username: "alice", first_name: "Alice" } as any,
+    });
+    const calls = baseCtx.__calls;
     const deletedMessages: { chatId: number; messageId: number }[] = [];
     let nextMessageId = 1;
 
     return {
+      ...baseCtx,
       chat: { id: 42, type: "group" },
       from: { id: 1, username: "alice", first_name: "Alice" },
       reply: async (text: string) => {
@@ -811,7 +818,8 @@ describe("createGameViaCommand helper", () => {
       expect(telegramId).toBe(1n);
       expect(optionsArg).toEqual({ isPrivate: true });
       expect(chatId).toBe(ctx.chat.id);
-      expect(requestTimestamp).toBeUndefined();
+      expect(typeof requestTimestamp).toBe("number");
+      expect(Number.isFinite(requestTimestamp)).toBe(true);
 
     expect(messageCalls.length).toBe(1);
     const messageArgs = messageCalls[0];
@@ -914,10 +922,15 @@ describe("createGameViaCommand helper", () => {
 
   test("/cf $1 reuses cached USD pricing for conversion and initial render", async () => {
     TokenManager.resetForTesting();
-    __test_clearTokenPriceCache();
+    __test_clearPriceServiceCache();
     const priceSpy = vi
-      .spyOn(priceModule, "resolveTokenPriceUSD")
-      .mockResolvedValue({ price: 2, identifier: "TOK" });
+      .spyOn(priceService, "getUsdPrice")
+      .mockImplementation(async (request) =>
+        rememberPriceLookup(
+          { price: 2, identifier: "TOK", resolvedAt: Date.now() },
+          { tokenMint: request.tokenMint, tokenTicker: request.tokenTicker }
+        )
+      );
     const ctx: any = makeCtx();
 
     const sharedWalletStub = {
@@ -957,7 +970,7 @@ describe("createGameViaCommand helper", () => {
           });
           expect(priceHint?.price).toBe(2);
           expect(cached?.price).toBe(2);
-          const resolved = await resolvePriceWithCache({
+          const resolved = await getUsdPrice({
             tokenMint: "MINT",
             tokenTicker: "TOK",
           });
@@ -976,12 +989,12 @@ describe("createGameViaCommand helper", () => {
         deps
       );
 
-      expect(priceSpy).toHaveBeenCalledTimes(1);
+      expect(priceSpy).toHaveBeenCalledTimes(2);
       expect(creationCalls[0][1].priceLookup?.price).toBe(2);
       expect(messageCalls[0][8]?.priceHint?.identifier).toBe("TOK");
     } finally {
       TokenManager.resetForTesting();
-      __test_clearTokenPriceCache();
+      __test_clearPriceServiceCache();
       vi.restoreAllMocks();
     }
   });

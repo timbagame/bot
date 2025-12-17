@@ -71,11 +71,10 @@ import {
   sanitizeTelegramDisplayNameWithoutMention,
 } from "./telegram-display";
 import {
-  resolvePriceWithCache,
-  getCachedPriceLookup,
+  getUsdPrice,
   rememberPriceLookup,
   type CachedPriceLookup,
-} from "./token-price-cache";
+} from "./price-service";
 import { NetworkDetector } from "./network-detector";
 import { SwapManager } from "./swap-manager";
 import { confirmTransactionWithRecovery, type TransactionProbe } from "./transaction-runner";
@@ -1478,7 +1477,8 @@ export class GameManager {
     tokenMint?: string,
     tokenTicker?: string,
     isSol?: boolean,
-    priceHint?: CachedPriceLookup | null
+    priceHint?: CachedPriceLookup | null,
+    priceCacheKey?: string
   ): Promise<{ text: string; price: number } | null> {
     const reference = isSol ? "SOL" : tokenMint || tokenTicker;
     if (!reference) return null;
@@ -1488,16 +1488,15 @@ export class GameManager {
     if (process.env.NODE_ENV === "test") return null;
 
     try {
-      const cachedHint = priceHint
-        ? rememberPriceLookup(priceHint, { tokenMint, tokenTicker })
-        : getCachedPriceLookup({ tokenMint, tokenTicker });
-      const lookup =
-        cachedHint ??
-        (await resolvePriceWithCache({
-          tokenMint,
-          tokenTicker,
-          isSol,
-        }));
+      const hintToUse =
+        priceHint ??
+        (priceCacheKey ? this.gamePriceCache.get(priceCacheKey) ?? null : null);
+      const lookup = await getUsdPrice({
+        tokenMint,
+        tokenTicker,
+        isSol,
+        hint: hintToUse,
+      });
       if (!lookup) {
         return null;
       }
@@ -1505,6 +1504,10 @@ export class GameManager {
       const usdText = this.formatUsdValue(lamports, decimals, lookup.price);
       if (!usdText) {
         return null;
+      }
+
+      if (priceCacheKey) {
+        this.gamePriceCache.setWithTTL(priceCacheKey, lookup);
       }
 
       return { text: usdText, price: lookup.price };
@@ -2530,6 +2533,7 @@ export class GameManager {
       ? sanitizeTelegramDisplayNameWithoutMention
       : sanitizeTelegramDisplayName;
     const isCompleted = status.toLowerCase() === "completed";
+    const gameCacheKey = gamePda.toBase58();
 
     const amountLamports =
       typeof amount === "bigint" ? amount : BigInt(Math.trunc(amount));
@@ -2578,7 +2582,8 @@ export class GameManager {
       tokenMint,
       tokenTicker,
       isSol,
-      cachedGamePrice
+      cachedGamePrice,
+      gameCacheKey
     );
 
     const winnerInfo = await this.getWinnerInfo(
@@ -2616,7 +2621,8 @@ export class GameManager {
         tokenMint,
         tokenTicker,
         isSol,
-        cachedGamePrice
+        cachedGamePrice,
+        gameCacheKey
       );
       prizeUsdApproximation = computedPrizeUsd?.text ?? null;
     }
@@ -2710,6 +2716,52 @@ export class GameManager {
     return { messageText, keyboard };
   }
 
+  private async buildGameMessagePayload(
+    ctx: Context,
+    params: {
+      gameAddress: string;
+      gameType: string;
+      amount: number;
+      creatorUsername: string;
+      status: string;
+      tokenTicker: string;
+      winnerAddress?: string;
+      totalPot?: number;
+      winnerSignature?: string;
+      chatId?: number;
+      options?: { priceHint?: CachedPriceLookup | null; suppressMentions?: boolean };
+    },
+    formatted?: GameMessageFormat
+  ): Promise<{
+    text: string;
+    keyboard: GameMessageFormat["keyboard"];
+    media?: { fileId: string; mediaType: "photo" | "video" | "animation" };
+  }> {
+    const formatResult =
+      formatted ??
+      (await this.formatGameMessage(
+        ctx,
+        new PublicKey(params.gameAddress),
+        params.gameType,
+        params.amount,
+        params.creatorUsername,
+        params.status,
+        params.tokenTicker,
+        params.winnerAddress,
+        params.totalPot,
+        params.winnerSignature,
+        params.options
+      ));
+
+    const media = resolveGameMedia(params.gameType, params.chatId ?? ctx.chat?.id);
+
+    return {
+      text: formatResult.messageText,
+      keyboard: formatResult.keyboard,
+      media,
+    };
+  }
+
   public async getPrizeDisplay(
     gameAddress: string,
     totalPot: number,
@@ -2751,7 +2803,8 @@ export class GameManager {
         tokenMint,
         resolvedTicker,
         isSol,
-        priceHint
+        priceHint,
+        gameAddress
       );
 
       const displayTicker = resolvedTicker || (isSol ? "SOL" : "");
@@ -2783,31 +2836,31 @@ export class GameManager {
   ): Promise<number> {
     const cachedPrice =
       options?.priceHint ?? this.gamePriceCache.get(gameAddress) ?? null;
-    const { messageText, keyboard } = await this.formatGameMessage(
+    const payload = await this.buildGameMessagePayload(
       ctx,
-      new PublicKey(gameAddress),
-      gameType,
-      amount,
-      creatorUsername,
-      status,
-      tokenTicker,
-      undefined,
-      undefined,
-      undefined,
       {
-        priceHint: cachedPrice,
+        gameAddress,
+        gameType,
+        amount,
+        creatorUsername,
+        status,
+        tokenTicker,
+        chatId: ctx.chat?.id,
+        options: { priceHint: cachedPrice },
       }
     );
 
     const replyTo = replyToMessageId ?? (ctx as any).message?.message_id;
-    const chatId = ctx.chat?.id;
-    const media = resolveGameMedia(gameType, chatId);
-    const replyMarkup = { inline_keyboard: keyboard };
+    const replyMarkup =
+      payload.keyboard.length > 0
+        ? { inline_keyboard: payload.keyboard }
+        : undefined;
+    const media = payload.media;
     const sendResult = await sendMediaWithFallback<any, any>({
       videoFileId: media?.fileId ?? null,
       logLabel: "game video",
       sendText: () =>
-        ctx.reply(messageText, {
+        ctx.reply(payload.text, {
           parse_mode: "HTML",
           reply_markup: replyMarkup,
           reply_to_message_id: replyTo,
@@ -2817,21 +2870,21 @@ export class GameManager {
           ? () => {
               if (media.mediaType === "photo") {
                 return ctx.replyWithPhoto(media.fileId, {
-                  caption: messageText,
+                  caption: payload.text,
                   parse_mode: "HTML",
                   reply_markup: replyMarkup,
                   reply_to_message_id: replyTo,
                 }) as any;
               } else if (media.mediaType === "animation") {
                 return ctx.replyWithAnimation(media.fileId, {
-                  caption: messageText,
+                  caption: payload.text,
                   parse_mode: "HTML",
                   reply_markup: replyMarkup,
                   reply_to_message_id: replyTo,
                 }) as any;
               } else {
                 return ctx.replyWithVideo(media.fileId, {
-                  caption: messageText,
+                  caption: payload.text,
                   parse_mode: "HTML",
                   reply_markup: replyMarkup,
                   reply_to_message_id: replyTo,
@@ -2884,7 +2937,8 @@ export class GameManager {
     let inlineKeyboardValue: any;
 
     try {
-      const { messageText, keyboard } = await this.formatGameMessage(
+      const priceHint = this.gamePriceCache.get(gameAddress) ?? null;
+      const formatted = await this.formatGameMessage(
         ctx,
         new PublicKey(gameAddress),
         gameType,
@@ -2894,17 +2948,37 @@ export class GameManager {
         tokenTicker,
         winnerAddress,
         totalPot,
-        winnerSignature
+        winnerSignature,
+        { priceHint }
       );
-      messageTextValue = messageText;
+      messageTextValue = formatted.messageText;
 
       const inlineKeyboard =
-        keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined;
+        formatted.keyboard.length > 0
+          ? { inline_keyboard: formatted.keyboard }
+          : undefined;
       inlineKeyboardValue = inlineKeyboard;
       const lowerStatus = status.toLowerCase();
 
       for (const gameMessage of messageMap.values()) {
-        const winnerMedia = resolveGameMedia(gameType, gameMessage.chatId);
+        const payload = await this.buildGameMessagePayload(
+          ctx,
+          {
+            gameAddress,
+            gameType,
+            amount,
+            creatorUsername,
+            status,
+            tokenTicker,
+            winnerAddress,
+            totalPot,
+            winnerSignature,
+            chatId: gameMessage.chatId,
+            options: { priceHint },
+          },
+          formatted
+        );
+        const winnerMedia = payload.media;
         try {
           const supportsVideo = gameMessage.usesVideo !== false;
 
@@ -2912,7 +2986,7 @@ export class GameManager {
             ctx.api.editMessageText(
               gameMessage.chatId,
               gameMessage.messageId,
-              messageText,
+              payload.text,
               {
                 parse_mode: "HTML",
                 reply_markup: inlineKeyboard,
@@ -2930,7 +3004,7 @@ export class GameManager {
                       {
                         type: winnerMedia.mediaType,
                         media: winnerMedia.fileId,
-                        caption: messageText,
+                        caption: payload.text,
                         parse_mode: "HTML",
                       },
                       { reply_markup: inlineKeyboard }
@@ -2939,7 +3013,7 @@ export class GameManager {
                       gameMessage.chatId,
                       gameMessage.messageId,
                       {
-                        caption: messageText,
+                        caption: payload.text,
                         parse_mode: "HTML",
                         reply_markup: inlineKeyboard,
                       }

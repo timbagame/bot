@@ -3,44 +3,29 @@ import { Keypair } from "@solana/web3.js";
 import { TokenManager } from "../src/utils/token-manager";
 import { ChatDatabase } from "../src/utils/chat-database";
 import { TokenDatabase } from "../src/utils/token-database";
-import { resetTestDatabase } from "./helpers/database";
 import {
   WSOL_MINT,
   TOKEN_MANAGER_APPROVED_CACHE_TTL_MS,
 } from "../src/utils/constants";
-import * as priceModule from "../src/utils/prices";
-import { __test_clearTokenPriceCache } from "../src/utils/token-price-cache";
+import * as priceService from "../src/utils/price-service";
+import { __test_clearPriceServiceCache } from "../src/utils/price-service";
+import { createWalletStub, resetTokenManagerState } from "./helpers/fixtures";
 
 // Clean DBs and singletons before each test
 beforeEach(() => {
-  resetTestDatabase("chat-settings.sqlite");
-  resetTestDatabase("tokens.sqlite");
-  ChatDatabase.resetForTesting();
-  TokenDatabase.resetForTesting();
-  TokenManager.resetForTesting();
-  __test_clearTokenPriceCache();
+  resetTokenManagerState();
+  __test_clearPriceServiceCache();
   vi.restoreAllMocks();
 });
 
-function makeWalletStub() {
-  return {
-    getTokenMetadata: async (_mint: string) => ({ decimals: 6 }),
-    getFullTokenMetadata: async (mint: string) => ({
-      decimals: 6,
-      symbol: "DISC",
-      name: `Token ${mint.slice(0, 4).toUpperCase()}`,
-    }),
-    formatTokenBalance: (amount: number, decimals: number) => {
-      const v = amount / Math.pow(10, decimals);
-      return v.toFixed(6).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
-    },
-    formatSolBalance: (lamports: number) => (lamports / 1_000_000_000).toFixed(6),
-    getConnection: () => ({}) as any,
-  } as any;
-}
+const mockPriceLookup = (price: number, identifier: string) => ({
+  price,
+  identifier,
+  resolvedAt: Date.now(),
+});
 
 test("parseAmount maps SOL to WSOL for game context", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const res = await tm.parseAmount(["/cf", "1", "SOL"], 1, 123, "game");
   if (!res.success) {
     throw new Error(`expected success, got ${res.error}`);
@@ -54,13 +39,42 @@ test("parseAmount maps SOL to WSOL for game context", async () => {
   expect(await tm.resolveMintForTicker("wsol")).toBe(WSOL_MINT);
 });
 
+test("resolveGameTokenContext falls back to chat defaults", async () => {
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
+  const chatDb = ChatDatabase.getInstance();
+  chatDb.setChatDefaultToken(555, WSOL_MINT, "WSOL", "999");
+  await tm.addToken(WSOL_MINT, "WSOL", 9);
+
+  const resolved = await tm.resolveGameTokenContext(555);
+  if (!resolved.success) {
+    throw new Error("expected chat token resolution to succeed");
+  }
+
+  expect(resolved.tokenMint).toBe(WSOL_MINT);
+  expect(resolved.tokenTicker).toBe("WSOL");
+  expect(resolved.decimals).toBe(9);
+});
+
+test("resolveGameTokenContext rejects unsupported game tokens", async () => {
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
+  const unsupportedMint = Keypair.generate().publicKey.toBase58();
+  await tm.addToken(unsupportedMint, "SIDE", 6);
+
+  const resolved = await tm.resolveGameTokenContext(123, "SIDE", "game");
+  expect(resolved.success).toBe(false);
+  if (resolved.success) {
+    throw new Error("expected failure for unsupported game token");
+  }
+  expect(resolved.error).toBe("unsupported_token");
+});
+
 test("resolveMintForTicker returns default token mint for default ticker", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "DEFAULT_MINT", "DEF");
+  const tm = TokenManager.getInstance(createWalletStub(), "DEFAULT_MINT", "DEF");
   expect(await tm.resolveMintForTicker("def")).toBe("DEFAULT_MINT");
 });
 
 test("resolveMintForTicker prefers known tokens over built-ins", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const overrideBonkMint = "TokenMint11111111111111111111111111111111";
   // Register BONK with a synthetic mint to ensure DB lookup wins over alias map
   await tm.addToken(overrideBonkMint, "BONK");
@@ -68,7 +82,7 @@ test("resolveMintForTicker prefers known tokens over built-ins", async () => {
 });
 
 test("parseAmount accepts SOL for tips and formats as SOL", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const res = await tm.parseAmount(["/tip", "1.5", "SOL"], 1, 42, "tip");
   if (!res.success) {
     throw new Error(`expected success, got ${res.error}`);
@@ -81,7 +95,7 @@ test("parseAmount accepts SOL for tips and formats as SOL", async () => {
 });
 
 test("parseAmount reports unknown token tickers distinctly", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const res = await tm.parseAmount(["/cf", "10", "UNKN"], 1, 1, "game");
   if (res.success) {
     throw new Error("expected unknown token failure");
@@ -91,11 +105,10 @@ test("parseAmount reports unknown token tickers distinctly", async () => {
 });
 
 test("parseAmount converts USD hints using chat/default token pricing", async () => {
-  vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue({
-    price: 0.5,
-    identifier: "TOK",
-  });
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(
+    mockPriceLookup(0.5, "TOK")
+  );
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   await tm.addToken("MINT", "TOK", 6);
 
   const res = await tm.parseAmount(["/cf", "12", "USD"], 1, 1, "game");
@@ -111,11 +124,10 @@ test("parseAmount converts USD hints using chat/default token pricing", async ()
 });
 
 test("parseAmount supports USD hints for tips and withdrawals (argIndex != 1)", async () => {
-  vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue({
-    price: 0.5,
-    identifier: "TOK",
-  });
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(
+    mockPriceLookup(0.5, "TOK")
+  );
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   await tm.addToken("MINT", "TOK", 6);
 
   const res = await tm.parseAmount(["/withdraw", "ADDR", "10", "USD"], 2, 1, "tip");
@@ -130,11 +142,10 @@ test("parseAmount supports USD hints for tips and withdrawals (argIndex != 1)", 
 });
 
 test("parseAmount supports $-prefixed USD amounts without explicit token", async () => {
-  vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue({
-    price: 2,
-    identifier: "TOK",
-  });
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(
+    mockPriceLookup(2, "TOK")
+  );
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   await tm.addToken("MINT", "TOK", 6);
 
   const res = await tm.parseAmount(["/cf", "$10"], 1, 1, "game");
@@ -149,11 +160,10 @@ test("parseAmount supports $-prefixed USD amounts without explicit token", async
 
 test("parseAmount supports $-prefixed USD amounts for tips and withdrawals (argIndex != 1)", async () => {
   const wbtcMint = "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh";
-  vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue({
-    price: 2,
-    identifier: "WBTC",
-  });
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(
+    mockPriceLookup(2, "WBTC")
+  );
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   await tm.addToken("MINT", "TOK", 6);
   await tm.addToken(wbtcMint, "WBTC", 8);
 
@@ -169,8 +179,8 @@ test("parseAmount supports $-prefixed USD amounts for tips and withdrawals (argI
 });
 
 test("parseAmount fails gracefully when USD pricing is unavailable", async () => {
-  vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue(null);
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(null);
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
 
   const res = await tm.parseAmount(["/cf", "10", "USD"], 1, 1, "game");
 
@@ -184,11 +194,10 @@ test("parseAmount fails gracefully when USD pricing is unavailable", async () =>
 });
 
 test("parseAmount converts $-prefixed USD amounts when explicit token is provided", async () => {
-  const priceSpy = vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue({
-    price: 2,
-    identifier: "WSOL",
-  });
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const priceSpy = vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(
+    mockPriceLookup(2, "WSOL")
+  );
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   await tm.addToken(WSOL_MINT, "WSOL", 9);
 
   const res = await tm.parseAmount(["/cf", "$10", "WSOL"], 1, 1, "game");
@@ -205,11 +214,10 @@ test("parseAmount converts $-prefixed USD amounts when explicit token is provide
 
 test("parseAmount converts $-prefixed USD amounts into the requested token", async () => {
   const wbtcMint = "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh";
-  const priceSpy = vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue({
-    price: 2,
-    identifier: "WBTC",
-  });
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const priceSpy = vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(
+    mockPriceLookup(2, "WBTC")
+  );
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   await tm.addToken(wbtcMint, "WBTC", 8);
 
   const res = await tm.parseAmount(["/cf", "$10", "WBTC"], 1, 1, "game");
@@ -226,7 +234,7 @@ test("parseAmount converts $-prefixed USD amounts into the requested token", asy
 });
 
 test("parseAmount rejects 19-digit numeric token arguments as invalid", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const res = await tm.parseAmount(
     ["/cf", "10", "123456789012345678901"],
     1,
@@ -242,7 +250,7 @@ test("parseAmount rejects 19-digit numeric token arguments as invalid", async ()
 });
 
 test("parseAmount surfaces overflow from parseDecimalAmount", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const oversized = (BigInt(Number.MAX_SAFE_INTEGER) + 1n).toString();
 
   const res = await tm.parseAmount(["/tip", oversized], 1, 77, "tip");
@@ -255,7 +263,7 @@ test("parseAmount surfaces overflow from parseDecimalAmount", async () => {
 });
 
 test("parseAmount uses chat default token when none specified", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "DEF_MINT", "DEF");
+  const tm = TokenManager.getInstance(createWalletStub(), "DEF_MINT", "DEF");
   // set chat default token to override
   tm.setChatDefaultToken(7, "DEF_MINT", "CHAT", "userZ");
   const res = await tm.parseAmount(["/cf", "2"], 1, 7, "game");
@@ -268,7 +276,7 @@ test("parseAmount uses chat default token when none specified", async () => {
 });
 
 test("parseAmount rejects unsupported chat default tokens for games", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "DEF_MINT", "DEF");
+  const tm = TokenManager.getInstance(createWalletStub(), "DEF_MINT", "DEF");
   const unsupportedMint = Keypair.generate().publicKey.toBase58();
   tm.setChatDefaultToken(321, unsupportedMint, "CHAT", "userZ");
 
@@ -283,7 +291,7 @@ test("parseAmount rejects unsupported chat default tokens for games", async () =
 });
 
 test("parseAmount accepts token mint addresses when provided", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
   expect(await tm.addToken(usdcMint, "USDC")).toBe(true);
 
@@ -298,7 +306,7 @@ test("parseAmount accepts token mint addresses when provided", async () => {
 });
 
 test("parseAmount rejects valid mint strings for unsupported game tokens", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const mint = "BPFLoader1111111111111111111111111111111111";
 
   const res = await tm.parseAmount(["/cf", "4", mint], 1, 321, "game");
@@ -314,7 +322,7 @@ test("parseAmount rejects valid mint strings for unsupported game tokens", async
 });
 
 test("parseAmount rejects unsupported mints even when ticker is whitelisted", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const spoofMint = Keypair.generate().publicKey.toBase58();
 
   const originalResolveSwapToken = tm.resolveSwapToken.bind(tm);
@@ -337,7 +345,7 @@ test("parseAmount rejects unsupported mints even when ticker is whitelisted", as
 });
 
 test("games reject chat default tokens discovered via tips", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const discoveredMint = Keypair.generate().publicKey.toBase58();
 
   const tipResult = await tm.parseAmount(
@@ -365,7 +373,7 @@ test("games reject chat default tokens discovered via tips", async () => {
 });
 
 test("resolveSwapToken returns builtin SOL metadata", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const solInfo = await tm.resolveSwapToken("SOL");
   expect(solInfo).not.toBeNull();
   expect(solInfo?.token_mint).toBe(WSOL_MINT);
@@ -374,7 +382,7 @@ test("resolveSwapToken returns builtin SOL metadata", async () => {
 });
 
 test("resolveSwapToken auto-discovers and registers unknown mints", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
 
   const mint = Keypair.generate().publicKey.toBase58();
   const info = await tm.resolveSwapToken(mint);
@@ -390,7 +398,7 @@ test("resolveSwapToken auto-discovers and registers unknown mints", async () => 
 
 test("parseAmount fails when explicit mint metadata cannot be fetched", async () => {
   const explicitMint = Keypair.generate().publicKey.toBase58();
-  const wallet = makeWalletStub();
+  const wallet = createWalletStub();
   const metadataCalls: string[] = [];
 
   wallet.getTokenMetadata = async (mint: string) => {
@@ -426,7 +434,7 @@ test("parseAmount fails when explicit mint metadata cannot be fetched", async ()
 
 test("parseAmount surfaces invalid decimal metadata as unsupported", async () => {
   const invalidMint = Keypair.generate().publicKey.toBase58();
-  const wallet = makeWalletStub();
+  const wallet = createWalletStub();
 
   wallet.getTokenMetadata = async (mint: string) => ({
     decimals: mint === invalidMint ? 19 : 6,
@@ -453,7 +461,7 @@ test("parseAmount surfaces invalid decimal metadata as unsupported", async () =>
 
 test("parseAmount clears stale metadata failures between parses", async () => {
   const invalidMint = Keypair.generate().publicKey.toBase58();
-  const wallet = makeWalletStub();
+  const wallet = createWalletStub();
 
   wallet.getTokenMetadata = async (mint: string) => ({
     decimals: mint === invalidMint ? 19 : 6,
@@ -487,7 +495,7 @@ test("parseAmount clears stale metadata failures between parses", async () => {
 test("parseAmount does not share metadata failures across concurrent parses", async () => {
   const invalidMint = Keypair.generate().publicKey.toBase58();
   const validMint = Keypair.generate().publicKey.toBase58();
-  const wallet = makeWalletStub();
+  const wallet = createWalletStub();
 
   wallet.getTokenMetadata = async (mint: string) => ({
     decimals: mint === invalidMint ? 19 : 6,
@@ -539,7 +547,7 @@ test("parseAmount does not share metadata failures across concurrent parses", as
 });
 
 test("parseAmount ignores numeric trailing arguments when resolving tokens", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "DEFAULT_MINT", "DEF");
+  const tm = TokenManager.getInstance(createWalletStub(), "DEFAULT_MINT", "DEF");
   const res = await tm.parseAmount(["/cf", "10", "5"], 1, 22, "game");
 
   if (!res.success) {
@@ -553,7 +561,7 @@ test("parseAmount ignores numeric trailing arguments when resolving tokens", asy
 });
 
 test("parseAmount preserves explicit WSOL mint without switching to SOL", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const res = await tm.parseAmount(["/tip", "1", WSOL_MINT], 1, 11, "tip");
 
   if (!res.success) {
@@ -571,7 +579,7 @@ test("parseAmount preserves explicit WSOL mint without switching to SOL", async 
 test("registerTokenIfNeeded fails when metadata decimals invalid", async () => {
   TokenManager.resetForTesting();
   const invalidDecimalsWallet = {
-    ...makeWalletStub(),
+    ...createWalletStub(),
     getTokenMetadata: async () => ({ decimals: -1 }),
     getFullTokenMetadata: async () => ({ symbol: "BAD", decimals: -1 }),
   };
@@ -592,7 +600,7 @@ test("registerTokenIfNeeded fails when metadata decimals invalid", async () => {
 test("registerTokenIfNeeded ignores excessive decimal metadata", async () => {
   TokenManager.resetForTesting();
   const wallet = {
-    ...makeWalletStub(),
+    ...createWalletStub(),
     getTokenMetadata: async () => ({ decimals: 99 }),
     getFullTokenMetadata: async () => ({ symbol: "DISC", decimals: 6 }),
   };
@@ -609,7 +617,7 @@ test("registerTokenIfNeeded ignores excessive decimal metadata", async () => {
 
 test("registerTokenIfNeeded handles concurrent registration requests", async () => {
   TokenManager.resetForTesting();
-  const tm = TokenManager.getInstance(makeWalletStub(), "DEF_MINT", "DEF");
+  const tm = TokenManager.getInstance(createWalletStub(), "DEF_MINT", "DEF");
   const mint = Keypair.generate().publicKey.toBase58();
 
   const [first, second] = await Promise.all([
@@ -625,7 +633,7 @@ test("registerTokenIfNeeded handles concurrent registration requests", async () 
 });
 
 test("resolveSwapToken treats explicit WSOL mint as SPL token metadata", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const info = await tm.resolveSwapToken(WSOL_MINT);
 
   expect(info).not.toBeNull();
@@ -635,7 +643,7 @@ test("resolveSwapToken treats explicit WSOL mint as SPL token metadata", async (
 });
 
 test("validateTokenMint validates base58 and metadata path", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   // Valid base58 (USDC) should pass
   expect(await tm.validateTokenMint("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")).toBe(true);
   // Clearly invalid should fail
@@ -643,7 +651,7 @@ test("validateTokenMint validates base58 and metadata path", async () => {
 });
 
 test("getAllApprovedTokensWithMetadata caches results and invalidates on changes", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const tokenDb = TokenDatabase.getInstance();
   const originalGetter = tokenDb.getAllKnownTokens.bind(tokenDb);
   let calls = 0;
@@ -657,15 +665,15 @@ test("getAllApprovedTokensWithMetadata caches results and invalidates on changes
   Date.now = () => now;
 
   try {
-    expect(tm.getAllApprovedTokensWithMetadata()).toEqual([]);
+    const initial = tm.getAllApprovedTokensWithMetadata();
     expect(calls).toBe(1);
 
     now += TOKEN_MANAGER_APPROVED_CACHE_TTL_MS - 10;
-    expect(tm.getAllApprovedTokensWithMetadata()).toEqual([]);
+    expect(tm.getAllApprovedTokensWithMetadata()).toEqual(initial);
     expect(calls).toBe(1);
 
     now += 20;
-    expect(tm.getAllApprovedTokensWithMetadata()).toEqual([]);
+    expect(tm.getAllApprovedTokensWithMetadata()).toEqual(initial);
     expect(calls).toBe(2);
 
     const newMint = Keypair.generate().publicKey.toBase58();
@@ -685,7 +693,7 @@ test("getAllApprovedTokensWithMetadata caches results and invalidates on changes
 });
 
 test("getAllApprovedTokensWithMetadata refreshes cache when tokens removed externally", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const tokenDb = TokenDatabase.getInstance();
   const originalNow = Date.now;
   let now = 10_000;
@@ -714,7 +722,7 @@ test("getAllApprovedTokensWithMetadata refreshes cache when tokens removed exter
 });
 
 test("getSupportedGameTokens returns hardcoded tokens including default", () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "MY_DEFAULT_MINT", "MYDEF");
+  const tm = TokenManager.getInstance(createWalletStub(), "MY_DEFAULT_MINT", "MYDEF");
 
   const supported = tm.getSupportedGameTokens();
 
@@ -734,7 +742,7 @@ test("getSupportedGameTokens returns hardcoded tokens including default", () => 
 });
 
 test("getSupportedGameTokens does not include dynamically discovered tokens", async () => {
-  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
   const discoveredMint = Keypair.generate().publicKey.toBase58();
 
   // Discover a token via tip parsing

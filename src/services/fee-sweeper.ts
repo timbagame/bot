@@ -21,7 +21,7 @@ import {
   WSOL_MINT,
 } from "../utils/token-registry";
 import { resolvePrimaryRpcEndpoint } from "../utils/rpc-endpoints";
-import { resolveTokenPriceUSD } from "../utils/prices";
+import { getUsdPrice } from "../utils/price-service";
 import {
   bundleFromKeypair,
   resolveOracleOperatorBundle,
@@ -55,7 +55,7 @@ export interface FeeSweepResult {
   referralClaims: number;
 }
 
-type PriceResolver = typeof resolveTokenPriceUSD;
+type PriceResolver = typeof getUsdPrice;
 type TokenBalanceFetcher = (
   connection: Connection,
   owner: PublicKey,
@@ -70,7 +70,7 @@ const shouldWithdrawToken = async (
   config: TokenConfig,
   pendingFees: bigint,
   decimals: number,
-  priceResolver: PriceResolver = resolveTokenPriceUSD
+  priceResolver: PriceResolver = getUsdPrice
 ) => {
   const formattedPending = wallet.formatTokenBalance(
     Number(pendingFees),
@@ -113,7 +113,7 @@ const shouldSwapTokenBalance = async (
   config: TokenConfig,
   lamports: bigint,
   decimals: number,
-  priceResolver: PriceResolver = resolveTokenPriceUSD
+  priceResolver: PriceResolver = getUsdPrice
 ) => {
   const amountDecimal = Number(lamports) / 10 ** decimals;
   const price = await priceResolver({
@@ -138,7 +138,7 @@ const unwrapWsolBalance = async (
   connection: Connection,
   owner: PublicKey,
   payer: Keypair,
-  priceResolver: PriceResolver = resolveTokenPriceUSD,
+  priceResolver: PriceResolver = getUsdPrice,
   balanceFetcher: TokenBalanceFetcher = getTotalTokenBalanceLamports
 ) => {
   const wsolMint = new PublicKey(WSOL_MINT);
@@ -302,7 +302,7 @@ async function runReferralSweep(
   connection: Connection,
   adminBundle: KeypairBundle,
   referralEntries: ReferralTokenConfigEntry[],
-  priceResolver: PriceResolver = resolveTokenPriceUSD
+  priceResolver: PriceResolver = getUsdPrice
 ): Promise<number> {
   if (referralEntries.length === 0) {
     console.log("ℹ️  No referral entries configured; skipping referral claims.");
@@ -399,7 +399,7 @@ async function sweepTokensToSol(
   connection: Connection,
   tokens: TokenConfig[],
   swapManagerFactory: Required<FeeSweepOptions>["swapManagerFactory"],
-  priceResolver: PriceResolver = resolveTokenPriceUSD,
+  priceResolver: PriceResolver = getUsdPrice,
   balanceFetcher: TokenBalanceFetcher = getTotalTokenBalanceLamports
 ) {
   const admin = wallet.getAdminKeypair();
@@ -485,7 +485,7 @@ export const sweepFees = async (
   const rpcUrl = resolvePrimaryRpcEndpoint(
     options.rpcUrl ?? process.env.SOLANA_NETWORK
   );
-  const priceResolver = options.priceResolver ?? resolveTokenPriceUSD;
+  const priceResolver = options.priceResolver ?? getUsdPrice;
   const swapManagerFactory =
     options.swapManagerFactory ??
     ((connection: Connection, walletManager: WalletManager) =>

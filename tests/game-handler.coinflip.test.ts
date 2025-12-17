@@ -1,33 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { handleCoinflipCommand } from "../src/handlers/game";
-
-type ChatType = "private" | "group" | "supergroup";
-
-type TestContext = {
-  from: { id: number; username?: string; first_name?: string };
-  chat: { id: number; type: ChatType };
-  message: { text: string };
-  reply: (...args: any[]) => Promise<any>;
-  __calls: any[];
-};
-
-const makeCtx = (text: string, chatType: ChatType = "group"): TestContext => {
-  const calls: any[] = [];
-  return {
-    from: { id: 1, username: "alice", first_name: "Alice" },
-    chat: { id: 100, type: chatType },
-    message: { text },
-    reply: async (...args: any[]) => {
-      calls.push(["reply", ...args]);
-      return { ok: true } as any;
-    },
-    __calls: calls,
-  };
-};
+import { createTelegramContext } from "./helpers/fixtures";
 
 describe("game handler: coinflip command", () => {
   test("allows game creation in private chat (forced public)", async () => {
-    const ctx: any = makeCtx("/cf 10", "private");
+    const ctx: any = createTelegramContext("/cf 10", "private");
     const interactiveCalls: any[] = [];
     const commandCalls: any[] = [];
 
@@ -51,7 +28,7 @@ describe("game handler: coinflip command", () => {
   });
 
   test("no args opens interactive setup", async () => {
-    const ctx: any = makeCtx("/cf");
+    const ctx: any = createTelegramContext("/cf");
     const interactiveCalls: any[] = [];
     const commandCalls: any[] = [];
 
@@ -76,7 +53,7 @@ describe("game handler: coinflip command", () => {
   });
 
   test("arguments delegate to command handler", async () => {
-    const ctx: any = makeCtx("/cf 25");
+    const ctx: any = createTelegramContext("/cf 25");
     const interactiveCalls: any[] = [];
     const commandCalls: any[] = [];
 
@@ -109,7 +86,7 @@ describe("game handler: coinflip command", () => {
   });
 
   test("token-only argument opens interactive setup with override", async () => {
-    const ctx: any = makeCtx("/cf TIMBA");
+    const ctx: any = createTelegramContext("/cf TIMBA");
     const interactiveCalls: any[] = [];
     const commandCalls: any[] = [];
 

@@ -16,7 +16,7 @@ import {
 import { parseDecimalAmount } from "./amount";
 import { escapeHtml } from "./format-amount";
 import { createSingleton } from "./singleton";
-import { resolvePriceWithCache } from "./token-price-cache";
+import { getUsdPrice, type CachedPriceLookup } from "./price-service";
 
 type TokenMetadataResolverResult =
   | { symbol?: string | null; decimals?: number | null }
@@ -443,283 +443,102 @@ export class TokenManager {
   // ================================
   // TOKEN PARSING WITH MULTI-TOKEN SUPPORT
   // ================================
-
-  public async parseAmount(
-    args: string[],
-    argIndex: number = 1,
+  public async resolveGameTokenContext(
     chatId?: number,
+    explicitToken?: string,
     context: "game" | "tip" = "game"
-  ): Promise<ParseAmountResult> {
+  ): Promise<
+    | {
+        success: true;
+        tokenMint: string;
+        tokenTicker: string;
+        decimals: number;
+        isSol: boolean;
+        tokenWasSpecified: boolean;
+        requestedNativeSol?: boolean;
+      }
+    | {
+        success: false;
+        error: "unknown_token" | "unsupported_token";
+        unknownToken?: string;
+      }
+  > {
     this.lastMetadataFailure = null;
-
-    if (!args || args.length <= argIndex) {
-      return { success: false, error: "invalid_amount" };
-    }
-
-    const { tokenMint, tokenTicker, decimals: defaultDecimals } =
-      await this.resolveTokenForChat(chatId);
-
-    const amountArg = args[argIndex];
-    if (!amountArg) {
-      return { success: false, error: "invalid_amount" };
-    }
-    const amountHasFiatPrefix = /^\$/.test(amountArg.trim());
-    const normalizedAmountArg = amountHasFiatPrefix
-      ? amountArg.trim().replace(/^\$/, "").trim()
-      : amountArg;
-
-    if (!normalizedAmountArg) {
-      return { success: false, error: "invalid_amount" };
-    }
-
-    // Check if the argument after amount is a token ticker
-    const tokenArg = args[argIndex + 1]?.trim();
-
-    let resolvedTokenMint = tokenMint;
-    let resolvedTokenTicker = tokenTicker;
-    let tokenDecimals: number | undefined = defaultDecimals;
-    let isSol = false;
+    const base = await this.resolveTokenForChat(chatId);
+    let resolvedTokenMint = base.tokenMint;
+    let resolvedTokenTicker = base.tokenTicker;
+    let tokenDecimals = base.decimals ?? 0;
     let tokenWasSpecified = false;
     let requestedNativeSol = false;
+    let isSol = resolvedTokenMint === "SOL" || resolvedTokenTicker === "SOL";
 
-    const candidate = tokenArg?.trim();
-    const metadataFailureSink: { value: MetadataFailure | null } = {
-      value: null,
-    };
+    const candidate = explicitToken?.trim();
     if (candidate) {
-      const normalizedCandidate = candidate.trim();
-      const candidateUpper = normalizedCandidate.toUpperCase();
-      const candidateLooksLikeTicker = looksLikeTokenTicker(normalizedCandidate);
-      const isNumericCandidate = /^[0-9]+(?:\.[0-9]+)?$/.test(normalizedCandidate);
-      const numericDigitCount = normalizedCandidate.replace(/\D/g, "").length;
-      const isFiatHint =
-        !isNumericCandidate &&
-        (candidateUpper === "USD" || candidateUpper === "$" || candidateUpper === "US$");
+      const numericCandidate = /^[0-9]+(?:\.[0-9]+)?$/.test(candidate);
+      if (!numericCandidate) {
+        const normalizedCandidate = candidate.trim();
+        const candidateUpper = normalizedCandidate.toUpperCase();
+        const candidateLooksLikeTicker = looksLikeTokenTicker(normalizedCandidate);
+        const metadataFailureSink: { value: MetadataFailure | null } = {
+          value: null,
+        };
 
-      if (isNumericCandidate) {
-        if (numericDigitCount > 18) {
-          return { success: false, error: "invalid_amount" };
-        }
-      }
-
-      if (isFiatHint) {
-        tokenWasSpecified = true;
-        const targetDecimals = isSol ? 9 : tokenDecimals ?? defaultDecimals ?? 0;
-
-        let usdMicros: bigint;
         try {
-          usdMicros = parseDecimalAmount(normalizedAmountArg, 6, {
-            returnType: "bigint",
-          }) as bigint;
-        } catch (error) {
-          if (error instanceof Error && error.message.includes("too large")) {
-            return { success: false, error: "amount_too_large" };
-          }
-          return { success: false, error: "invalid_amount" };
-        }
+          const resolvedToken = await this.resolveSwapToken(normalizedCandidate, {
+            persistDiscovered: context !== "game",
+            metadataFailureSink,
+          });
+          const hadInvalidDecimals = Boolean(metadataFailureSink.value);
+          if (resolvedToken) {
+            tokenWasSpecified = true;
+            tokenDecimals = resolvedToken.decimals;
+            resolvedTokenMint = resolvedToken.token_mint;
+            resolvedTokenTicker = resolvedToken.token_ticker;
 
-        const priceLookup = await resolvePriceWithCache({
-          tokenMint: resolvedTokenMint,
-          tokenTicker: resolvedTokenTicker,
-          isSol,
-        });
+            const requestedNativeSolByTicker =
+              resolvedToken.isNativeSol &&
+              candidateLooksLikeTicker &&
+              candidateUpper === "SOL";
 
-        const scaledPrice = Math.round((priceLookup?.price ?? 0) * 1_000_000);
-        if (!priceLookup?.price || !Number.isFinite(scaledPrice) || scaledPrice <= 0) {
-          return {
-            success: false,
-            error: "unsupported_token",
-            unknownToken: "USD",
-            reason: "fiat_pricing_unavailable",
-          };
-        }
-
-        const scaledDecimals = BigInt(Math.max(0, targetDecimals));
-        const decimalsFactor = 10n ** scaledDecimals;
-        const rawAmountBigInt = (usdMicros * decimalsFactor) / BigInt(scaledPrice);
-        if (rawAmountBigInt <= 0n) {
-          return {
-            success: false,
-            error: "invalid_amount",
-            reason: "fiat_amount_too_small",
-          };
-        }
-
-        if (rawAmountBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
-          return { success: false, error: "amount_too_large" };
-        }
-
-        const amount = Number(rawAmountBigInt);
-        if (
-          context === "game" &&
-          !this.isTokenSupportedForGames(resolvedTokenMint, isSol, { chatId })
-        ) {
-          return {
-            success: false,
-            error: "unsupported_token",
-            unknownToken: resolvedTokenTicker ?? resolvedTokenMint,
-          };
-        }
-
-        const formattedAmount =
-          this.wallet.formatTokenBalance(amount, targetDecimals) +
-          " " +
-          resolvedTokenTicker;
-
-        return {
-          success: true,
-          data: {
-            amount,
-            isSol,
-            formattedAmount,
-            tokenMint: resolvedTokenMint,
-            tokenTicker: resolvedTokenTicker,
-            decimals: targetDecimals,
-            tokenWasSpecified,
-            requestedNativeSol,
-            priceLookup: priceLookup ?? undefined,
-          },
-        };
-      }
-
-      if (!isNumericCandidate) {
-        const resolvedToken = await this.resolveSwapToken(normalizedCandidate, {
-          // Allow metadata discovery for explicit tokens in games, but avoid
-          // persisting them so unsupported mints remain blocked.
-          persistDiscovered: context !== "game",
-          metadataFailureSink,
-        });
-        const hadInvalidDecimals = Boolean(metadataFailureSink.value);
-        if (resolvedToken) {
-          tokenWasSpecified = true;
-          tokenDecimals = resolvedToken.decimals;
-          resolvedTokenMint = resolvedToken.token_mint;
-          resolvedTokenTicker = resolvedToken.token_ticker;
-
-          const requestedNativeSolByTicker =
-            resolvedToken.isNativeSol &&
-            candidateLooksLikeTicker &&
-            candidateUpper === "SOL";
-
-          if (requestedNativeSolByTicker) {
-            requestedNativeSol = true;
-            if (context === "tip") {
-              isSol = true;
-              resolvedTokenMint = "SOL";
-              resolvedTokenTicker = "SOL";
-              tokenDecimals = 9;
-            } else {
-              resolvedTokenTicker = "SOL";
+            if (requestedNativeSolByTicker) {
+              requestedNativeSol = true;
+              if (context === "tip") {
+                isSol = true;
+                resolvedTokenMint = "SOL";
+                resolvedTokenTicker = "SOL";
+                tokenDecimals = 9;
+              } else {
+                resolvedTokenTicker = "SOL";
+              }
             }
+          } else if (hadInvalidDecimals) {
+            this.lastMetadataFailure = metadataFailureSink.value;
+            return {
+              success: false,
+              error: "unsupported_token",
+              unknownToken: candidateUpper,
+            };
+          } else if (candidateLooksLikeTicker) {
+            return {
+              success: false,
+              error: "unknown_token",
+              unknownToken: candidateUpper,
+            };
+          } else {
+            return {
+              success: false,
+              error: "unknown_token",
+              unknownToken: candidateUpper,
+            };
           }
-        } else if (hadInvalidDecimals) {
-          return {
-            success: false,
-            error: "unsupported_token",
-            unknownToken: candidateUpper,
-          };
-        } else if (candidateLooksLikeTicker) {
-          return {
-            success: false,
-            error: "unknown_token",
-            unknownToken: candidateUpper,
-          };
-        } else {
+        } catch (error) {
+          console.warn(`[TokenManager] Failed to resolve token ${candidate}:`, error);
           return {
             success: false,
             error: "unknown_token",
             unknownToken: candidateUpper,
           };
         }
-      }
-    }
-
-    // "$10" style amounts are treated as USD and converted into the resolved token,
-    // even when an explicit token is provided (e.g. "/cf $10 WBTC").
-    if (amountHasFiatPrefix) {
-      const targetDecimals = isSol ? 9 : tokenDecimals ?? defaultDecimals ?? 0;
-
-      let usdMicros: bigint;
-      try {
-        usdMicros = parseDecimalAmount(normalizedAmountArg, 6, {
-          returnType: "bigint",
-        }) as bigint;
-      } catch (error) {
-        if (error instanceof Error && error.message.includes("too large")) {
-          return { success: false, error: "amount_too_large" };
-        }
-        return { success: false, error: "invalid_amount" };
-      }
-
-      const priceLookup = await resolvePriceWithCache({
-        tokenMint: resolvedTokenMint,
-        tokenTicker: resolvedTokenTicker,
-        isSol,
-      });
-
-      const scaledPrice = Math.round((priceLookup?.price ?? 0) * 1_000_000);
-      if (!priceLookup?.price || !Number.isFinite(scaledPrice) || scaledPrice <= 0) {
-        return {
-          success: false,
-          error: "unsupported_token",
-          unknownToken: "USD",
-          reason: "fiat_pricing_unavailable",
-        };
-      }
-
-      const scaledDecimals = BigInt(Math.max(0, targetDecimals));
-      const decimalsFactor = 10n ** scaledDecimals;
-      const rawAmountBigInt = (usdMicros * decimalsFactor) / BigInt(scaledPrice);
-      if (rawAmountBigInt <= 0n) {
-        return {
-          success: false,
-          error: "invalid_amount",
-          reason: "fiat_amount_too_small",
-        };
-      }
-
-      if (rawAmountBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
-        return { success: false, error: "amount_too_large" };
-      }
-
-      const amount = Number(rawAmountBigInt);
-      if (
-        context === "game" &&
-        !this.isTokenSupportedForGames(resolvedTokenMint, isSol, { chatId })
-      ) {
-        return {
-          success: false,
-          error: "unsupported_token",
-          unknownToken: resolvedTokenTicker ?? resolvedTokenMint,
-        };
-      }
-
-      const formattedAmount =
-        this.wallet.formatTokenBalance(amount, targetDecimals) +
-        " " +
-        resolvedTokenTicker;
-
-      return {
-        success: true,
-        data: {
-          amount,
-          isSol,
-          formattedAmount,
-          tokenMint: resolvedTokenMint,
-          tokenTicker: resolvedTokenTicker,
-          decimals: targetDecimals,
-          tokenWasSpecified,
-          requestedNativeSol,
-          priceLookup: priceLookup ?? undefined,
-        },
-      };
-    }
-
-    if (!tokenWasSpecified) {
-      const knownMint = this.tokenDb.getKnownTokenByMint(resolvedTokenMint);
-      if (knownMint) {
-        tokenDecimals = knownMint.decimals;
-        resolvedTokenTicker = knownMint.token_ticker;
       }
     }
 
@@ -734,22 +553,223 @@ export class TokenManager {
       };
     }
 
+    const normalizedDecimals = isSol ? 9 : tokenDecimals;
+
+    return {
+      success: true,
+      tokenMint: isSol ? "SOL" : resolvedTokenMint,
+      tokenTicker: isSol ? "SOL" : resolvedTokenTicker,
+      decimals: normalizedDecimals,
+      isSol,
+      tokenWasSpecified,
+      requestedNativeSol,
+    };
+  }
+
+  public async parseAmount(
+    args: string[],
+    argIndex: number = 1,
+    chatId?: number,
+    context: "game" | "tip" = "game"
+  ): Promise<ParseAmountResult> {
+    this.lastMetadataFailure = null;
+
+    if (!args || args.length <= argIndex) {
+      return { success: false, error: "invalid_amount" };
+    }
+
+    const amountArg = args[argIndex];
+    if (!amountArg) {
+      return { success: false, error: "invalid_amount" };
+    }
+    const amountHasFiatPrefix = /^\$/.test(amountArg.trim());
+    const normalizedAmountArg = amountHasFiatPrefix
+      ? amountArg.trim().replace(/^\$/, "").trim()
+      : amountArg;
+
+    if (!normalizedAmountArg) {
+      return { success: false, error: "invalid_amount" };
+    }
+
+    const tokenCandidate = args[argIndex + 1]?.trim();
+    const candidateUpper = tokenCandidate?.toUpperCase() ?? "";
+    const isNumericCandidate = tokenCandidate
+      ? /^[0-9]+(?:\.[0-9]+)?$/.test(tokenCandidate)
+      : false;
+    const numericDigitCount = tokenCandidate ? tokenCandidate.replace(/\D/g, "").length : 0;
+    if (isNumericCandidate && numericDigitCount > 18) {
+      return { success: false, error: "invalid_amount" };
+    }
+
+    const isFiatHint =
+      !!tokenCandidate &&
+      !isNumericCandidate &&
+      (candidateUpper === "USD" || candidateUpper === "$" || candidateUpper === "US$");
+
+    const tokenResolution = await this.resolveGameTokenContext(
+      chatId,
+      isFiatHint || isNumericCandidate ? undefined : tokenCandidate,
+      context
+    );
+
+    if (!tokenResolution.success) {
+      return {
+        success: false,
+        error: tokenResolution.error,
+        unknownToken: tokenResolution.unknownToken,
+      };
+    }
+
+    const tokenWasSpecified =
+      tokenResolution.tokenWasSpecified || isFiatHint;
+    const { tokenMint, tokenTicker, decimals, isSol, requestedNativeSol } =
+      tokenResolution;
+    const targetDecimals = isSol ? 9 : decimals ?? 0;
+
+    const toRawAmountFromUsd = async (): Promise<
+      | {
+          ok: true;
+          amount: number;
+          priceLookup?: CachedPriceLookup;
+        }
+      | {
+          ok: false;
+          reason: "amount_too_large" | "invalid_amount" | "unsupported_token";
+          detail?: "fiat_amount_too_small";
+        }
+    > => {
+      let usdMicros: bigint;
+      try {
+        usdMicros = parseDecimalAmount(normalizedAmountArg, 6, {
+          returnType: "bigint",
+        }) as bigint;
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("too large")) {
+          return { ok: false, reason: "amount_too_large" };
+        }
+        return { ok: false, reason: "invalid_amount" };
+      }
+
+      const priceLookup = await getUsdPrice({
+        tokenMint,
+        tokenTicker,
+        isSol,
+      });
+
+      const scaledPrice = Math.round((priceLookup?.price ?? 0) * 1_000_000);
+      if (!priceLookup?.price || !Number.isFinite(scaledPrice) || scaledPrice <= 0) {
+        return { ok: false, reason: "unsupported_token" };
+      }
+
+      const scaledDecimals = BigInt(Math.max(0, targetDecimals));
+      const decimalsFactor = 10n ** scaledDecimals;
+      const rawAmountBigInt = (usdMicros * decimalsFactor) / BigInt(scaledPrice);
+      if (rawAmountBigInt <= 0n) {
+        return { ok: false, reason: "invalid_amount", detail: "fiat_amount_too_small" };
+      }
+
+      if (rawAmountBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
+        return { ok: false, reason: "amount_too_large" };
+      }
+
+      return { ok: true, amount: Number(rawAmountBigInt), priceLookup };
+    };
+
+    if (isFiatHint) {
+      const usdResult = await toRawAmountFromUsd();
+      if (!usdResult.ok) {
+        if (usdResult.reason === "unsupported_token") {
+          return {
+            success: false,
+            error: "unsupported_token",
+            unknownToken: "USD",
+            reason: "fiat_pricing_unavailable",
+          };
+        }
+        return {
+          success: false,
+          error: usdResult.reason,
+          reason: usdResult.detail,
+        };
+      }
+
+      const formattedAmount =
+        this.wallet.formatTokenBalance(usdResult.amount, targetDecimals) +
+        " " +
+        tokenTicker;
+
+      return {
+        success: true,
+        data: {
+          amount: usdResult.amount,
+          isSol,
+          formattedAmount,
+          tokenMint,
+          tokenTicker,
+          decimals: targetDecimals,
+          tokenWasSpecified,
+          requestedNativeSol,
+          priceLookup: usdResult.priceLookup,
+        },
+      };
+    }
+
+    if (amountHasFiatPrefix) {
+      const usdResult = await toRawAmountFromUsd();
+      if (!usdResult.ok) {
+        if (usdResult.reason === "unsupported_token") {
+          return {
+            success: false,
+            error: "unsupported_token",
+            unknownToken: "USD",
+            reason: "fiat_pricing_unavailable",
+          };
+        }
+        return {
+          success: false,
+          error: usdResult.reason,
+          reason: usdResult.detail,
+        };
+      }
+
+      const formattedAmount =
+        this.wallet.formatTokenBalance(usdResult.amount, targetDecimals) +
+        " " +
+        tokenTicker;
+
+      return {
+        success: true,
+        data: {
+          amount: usdResult.amount,
+          isSol,
+          formattedAmount,
+          tokenMint,
+          tokenTicker,
+          decimals: targetDecimals,
+          tokenWasSpecified,
+          requestedNativeSol,
+          priceLookup: usdResult.priceLookup,
+        },
+      };
+    }
+
     let amount: number;
     let formattedAmount: string;
-    const decimals = isSol ? 9 : tokenDecimals ?? 0;
 
     try {
       if (isSol) {
-        amount = parseDecimalAmount(normalizedAmountArg, decimals, { returnType: "number" });
+        amount = parseDecimalAmount(normalizedAmountArg, targetDecimals, {
+          returnType: "number",
+        });
         formattedAmount = `${this.wallet.formatSolBalance(amount)} SOL`;
       } else {
-        amount = parseDecimalAmount(normalizedAmountArg, decimals, {
+        amount = parseDecimalAmount(normalizedAmountArg, targetDecimals, {
           returnType: "number",
         });
         formattedAmount =
-          this.wallet.formatTokenBalance(amount, decimals) +
+          this.wallet.formatTokenBalance(amount, targetDecimals) +
           " " +
-          resolvedTokenTicker;
+          tokenTicker;
       }
     } catch (error) {
       if (error instanceof Error && error.message.includes("too large")) {
@@ -764,9 +784,9 @@ export class TokenManager {
         amount,
         isSol,
         formattedAmount,
-        tokenMint: isSol ? "SOL" : resolvedTokenMint,
-        tokenTicker: isSol ? "SOL" : resolvedTokenTicker,
-        decimals,
+        tokenMint,
+        tokenTicker,
+        decimals: targetDecimals,
         tokenWasSpecified,
         requestedNativeSol,
       },

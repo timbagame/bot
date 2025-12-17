@@ -1,5 +1,5 @@
 import { PublicKey, Keypair } from "@solana/web3.js";
-import type { CachedPriceLookup } from "../utils/token-price-cache";
+import type { CachedPriceLookup } from "../utils/price-service";
 type BN = any;
 
 // ================================

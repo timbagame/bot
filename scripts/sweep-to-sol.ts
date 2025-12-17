@@ -1,7 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 import { WalletManager } from "../src/utils/wallet";
 import { getSupportedTokens, WSOL_MINT } from "../src/utils/token-registry";
-import { resolveTokenPriceUSD } from "../src/utils/prices";
+import { getUsdPrice } from "../src/utils/price-service";
 import { SwapManager } from "../src/utils/swap-manager";
 import type { SwapRequest } from "../src/utils/swap/types";
 import { unwrapWsolBalance } from "../src/services/fee-sweeper";
@@ -50,7 +50,7 @@ async function main() {
 
       const metadata = await wallet.getTokenMetadata(token.mint);
       const amountDecimal = Number(balance) / 10 ** metadata.decimals;
-      const price = await resolveTokenPriceUSD({
+      const price = await getUsdPrice({
         tokenMint: token.mint,
         tokenTicker: token.ticker,
       });
@@ -96,7 +96,7 @@ async function main() {
     connection,
     admin.publicKey,
     admin,
-    resolveTokenPriceUSD
+    getUsdPrice
   );
 }
 

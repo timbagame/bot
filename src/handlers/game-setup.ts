@@ -124,7 +124,8 @@ export type GameSetupModule = {
     tokenOverride?: GameTokenOverride
   ) => Promise<void>;
   resolveCommandTokenOverride: (
-    tokenInput: string
+    tokenInput: string,
+    chatId?: number
   ) => Promise<GameTokenOverride | null>;
   buildTokenContext: (
     session: GameSetupSession | undefined,
@@ -161,19 +162,31 @@ export const createGameSetupModule = (
     }
 
     try {
-      return await manager.resolveTokenForChat(chatId);
+      const resolved = await manager.resolveGameTokenContext(chatId);
+      if (resolved.success) {
+        return {
+          tokenMint: resolved.tokenMint,
+          tokenTicker: resolved.tokenTicker,
+          decimals: resolved.decimals,
+        };
+      }
+
+      console.warn(
+        `[GameSetup] Failed to resolve chat token ${resolved.unknownToken ?? "unknown"}, using default token`
+      );
     } catch (error) {
       console.warn(
         "⚠️ Could not resolve chat token configuration, using default token",
         error
       );
-      const fallbackMetadata = await getDefaultTokenMetadata();
-      return {
-        tokenMint: DEFAULT_TOKEN_MINT,
-        tokenTicker: DEFAULT_TOKEN_TICKER,
-        decimals: fallbackMetadata.decimals,
-      };
     }
+
+    const fallbackMetadata = await getDefaultTokenMetadata();
+    return {
+      tokenMint: DEFAULT_TOKEN_MINT,
+      tokenTicker: DEFAULT_TOKEN_TICKER,
+      decimals: fallbackMetadata.decimals,
+    };
   };
 
   const startInteractiveGameSetup = async (
@@ -288,7 +301,8 @@ export const createGameSetupModule = (
   };
 
   const resolveCommandTokenOverride = async (
-    tokenInput: string
+    tokenInput: string,
+    chatId?: number
   ): Promise<GameTokenOverride | null> => {
     const manager = deps.getTokenManager();
     if (!manager) {
@@ -305,25 +319,19 @@ export const createGameSetupModule = (
     }
 
     try {
-      const resolved = await manager.resolveSwapToken(candidate);
-      if (!resolved) {
+      const resolved = await manager.resolveGameTokenContext(
+        chatId,
+        candidate,
+        "game"
+      );
+      if (!resolved.success) {
         return null;
       }
-
-      const decimals = resolved.decimals;
-      if (!Number.isFinite(decimals) || decimals < 0) {
-        console.warn(
-          `⚠️ ResolveSwapToken returned invalid decimals for override ${candidate}`
-        );
-        return null;
-      }
-
-      const tokenTicker = resolved.isNativeSol ? "SOL" : resolved.token_ticker;
 
       return {
-        tokenMint: resolved.token_mint,
-        tokenTicker,
-        tokenDecimals: decimals,
+        tokenMint: resolved.tokenMint,
+        tokenTicker: resolved.tokenTicker,
+        tokenDecimals: resolved.decimals,
       };
     } catch (error) {
       console.warn(`⚠️ Could not resolve token override ${candidate}`, error);
