@@ -40,9 +40,42 @@ const originalFetch = globalThis.fetch?.bind(globalThis);
   __TEST_ORIGINAL_FETCH__: originalFetch,
 }) as any);
 
+const buildJsonResponse = (data: unknown, status = 200) =>
+  new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+
 // Disable outbound requests by default. Tests must stub fetch explicitly.
 const disabledFetch = Object.assign(
-  async function disabledFetch(..._args: Parameters<typeof fetch>) {
+  async function disabledFetch(input: RequestInfo | URL, init?: RequestInit) {
+    const url = typeof input === "string" ? input : input.toString();
+    const body = typeof init?.body === "string" ? init.body : null;
+    let rpcMethod: string | null = null;
+
+    if (body) {
+      try {
+        const parsed = JSON.parse(body);
+        rpcMethod = parsed?.method ?? null;
+      } catch {
+        // ignore body parse failures
+      }
+    }
+
+    if (/jup.ag/.test(url)) {
+      return buildJsonResponse({ data: {} });
+    }
+
+    if (/localhost:8899|solana/i.test(url) || rpcMethod) {
+      if (rpcMethod === "getAccountInfo") {
+        return buildJsonResponse({ result: { value: null } });
+      }
+      if (rpcMethod === "getBalance") {
+        return buildJsonResponse({ result: 0 });
+      }
+      return buildJsonResponse({ result: null });
+    }
+
     throw new Error(
       "Network access is disabled in tests. Provide a mock for globalThis.fetch."
     );

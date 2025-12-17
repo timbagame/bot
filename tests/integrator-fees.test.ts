@@ -13,12 +13,17 @@ import {
   WSOL_MINT,
 } from "../src/utils/token-registry";
 import { resolveIntegratorSwapParams, calculateDynamicReferralFee } from "../src/utils/integrator-fees";
-import * as priceModule from "../src/utils/prices";
+import * as priceService from "../src/utils/price-service";
 
 const REFERRAL_ACCOUNT = "GPBNTRmo26MRoaLSvRXwhWaQZhYjwVWgEkgwRZVU6x9U";
 const ADMIN_REF_MINT1 = "AdminMintExample11111111111111111111111111";
 const ADMIN_REF_MINT2 = "AdminMintExample22222222222222222222222222";
 const CLAMP_REF_MINT = "ClampMintExample111111111111111111111111";
+const priceLookup = (price: number, identifier: string) => ({
+  price,
+  identifier,
+  resolvedAt: Date.now(),
+});
 
 describe("Integrator fee calculations", () => {
   beforeEach(() => {
@@ -56,9 +61,9 @@ describe("Integrator fee calculations", () => {
     });
 
     const spy = vi
-      .spyOn(priceModule, "resolveTokenPriceUSD")
-      .mockResolvedValueOnce({ price: 1, identifier: "SOL" } as any)
-      .mockResolvedValueOnce({ price: 100, identifier: "SOL" } as any);
+      .spyOn(priceService, "getUsdPrice")
+      .mockResolvedValueOnce(priceLookup(1, "SOL") as any)
+      .mockResolvedValueOnce(priceLookup(100, "SOL") as any);
 
     await expect(
       resolveIntegratorSwapParams({
@@ -88,9 +93,9 @@ describe("Integrator fee calculations", () => {
     });
 
     const priceSpy = vi
-      .spyOn(priceModule, "resolveTokenPriceUSD")
-      .mockResolvedValueOnce({ price: 1, identifier: "USDC" } as any)
-      .mockResolvedValueOnce({ price: 25, identifier: "SOL" } as any);
+      .spyOn(priceService, "getUsdPrice")
+      .mockResolvedValueOnce(priceLookup(1, "USDC") as any)
+      .mockResolvedValueOnce(priceLookup(25, "SOL") as any);
 
     const result = await resolveIntegratorSwapParams({
       inputMint: ADMIN_REF_MINT1,
@@ -145,9 +150,9 @@ describe("Integrator fee calculations", () => {
     });
 
     const priceSpy = vi
-      .spyOn(priceModule, "resolveTokenPriceUSD")
-      .mockResolvedValueOnce({ price: 20, identifier: "SOL" } as any)
-      .mockResolvedValueOnce({ price: 20, identifier: "SOL" } as any);
+      .spyOn(priceService, "getUsdPrice")
+      .mockResolvedValueOnce(priceLookup(20, "SOL") as any)
+      .mockResolvedValueOnce(priceLookup(20, "SOL") as any);
 
     const result = await resolveIntegratorSwapParams({
       inputMint: WSOL_MINT,
@@ -180,9 +185,9 @@ describe("Integrator fee calculations", () => {
     });
 
     const priceSpy = vi
-      .spyOn(priceModule, "resolveTokenPriceUSD")
-      .mockResolvedValueOnce({ price: 150, identifier: "SOL" } as any)
-      .mockResolvedValueOnce({ price: 150, identifier: "SOL" } as any);
+      .spyOn(priceService, "getUsdPrice")
+      .mockResolvedValueOnce(priceLookup(150, "SOL") as any)
+      .mockResolvedValueOnce(priceLookup(150, "SOL") as any);
 
     const result = await resolveIntegratorSwapParams({
       inputMint: WSOL_MINT,
@@ -214,9 +219,9 @@ describe("Integrator fee calculations", () => {
     });
 
     const priceSpy = vi
-      .spyOn(priceModule, "resolveTokenPriceUSD")
-      .mockResolvedValueOnce({ price: 20, identifier: "SOL" } as any)
-      .mockResolvedValueOnce({ price: 20, identifier: "SOL" } as any);
+      .spyOn(priceService, "getUsdPrice")
+      .mockResolvedValueOnce(priceLookup(20, "SOL") as any)
+      .mockResolvedValueOnce(priceLookup(20, "SOL") as any);
 
     const result = await resolveIntegratorSwapParams({
       inputMint: ADMIN_REF_MINT1,
@@ -248,9 +253,9 @@ describe("Integrator fee calculations", () => {
       baseFeeBps: 85,
     });
 
-    vi.spyOn(priceModule, "resolveTokenPriceUSD")
-      .mockResolvedValueOnce({ price: 100, identifier: "SOL" } as any)
-      .mockResolvedValueOnce({ price: 50, identifier: "SOL" } as any);
+    vi.spyOn(priceService, "getUsdPrice")
+      .mockResolvedValueOnce(priceLookup(100, "SOL") as any)
+      .mockResolvedValueOnce(priceLookup(50, "SOL") as any);
 
     const result = await resolveIntegratorSwapParams({
       inputMint: ADMIN_REF_MINT2,
@@ -325,7 +330,7 @@ describe("calculateDynamicReferralFee", () => {
   });
 
   test("calculates dynamic fee based on deficit/trade ratio", async () => {
-    vi.spyOn(priceModule, "resolveTokenPriceUSD").mockImplementation(
+    vi.spyOn(priceService, "getUsdPrice").mockImplementation(
       async (opts: any) => {
         if (opts?.isSol) return { price: 200, source: "mock", identifier: "SOL" };
         return { price: 1, source: "mock", identifier: "TKN" };
@@ -347,7 +352,7 @@ describe("calculateDynamicReferralFee", () => {
   });
 
   test("scales fee proportionally for small shortfalls", async () => {
-    vi.spyOn(priceModule, "resolveTokenPriceUSD").mockImplementation(
+    vi.spyOn(priceService, "getUsdPrice").mockImplementation(
       async (opts: any) => {
         if (opts?.isSol) return { price: 200, source: "mock", identifier: "SOL" };
         return { price: 1, source: "mock", identifier: "TKN" };
@@ -369,7 +374,7 @@ describe("calculateDynamicReferralFee", () => {
   });
 
   test("clamps fee to MAX_REFERRAL_FEE_BPS of 255", async () => {
-    vi.spyOn(priceModule, "resolveTokenPriceUSD").mockImplementation(
+    vi.spyOn(priceService, "getUsdPrice").mockImplementation(
       async (opts: any) => {
         if (opts?.isSol) return { price: 200, source: "mock", identifier: "SOL" };
         return { price: 1, source: "mock", identifier: "TKN" };
@@ -390,7 +395,7 @@ describe("calculateDynamicReferralFee", () => {
   });
 
   test("returns base fee when prices unavailable", async () => {
-    vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue(null);
+    vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(null);
 
     const result = await calculateDynamicReferralFee({
       inputMint: "SomeMint111111111111111111111111111111111",
@@ -406,7 +411,7 @@ describe("calculateDynamicReferralFee", () => {
   });
 
   test("throws when throwOnPriceFailure is true", async () => {
-    vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue(null);
+    vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(null);
 
     await expect(
       calculateDynamicReferralFee({
@@ -434,7 +439,7 @@ describe("calculateDynamicReferralFee", () => {
   });
 
   test("returns base fee when price resolution throws", async () => {
-    vi.spyOn(priceModule, "resolveTokenPriceUSD").mockRejectedValue(
+    vi.spyOn(priceService, "getUsdPrice").mockRejectedValue(
       new Error("Network error")
     );
 

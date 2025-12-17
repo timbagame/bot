@@ -1,6 +1,6 @@
 import { JUPITER_MIN_SOL_BALANCE_LAMPORTS, LAMPORTS_PER_SOL, WSOL_MINT } from "./constants";
 import { getReferralConfigForMint, type ReferralTokenConfigEntry } from "./token-registry";
-import { resolveTokenPriceUSD } from "./prices";
+import { getUsdPrice } from "./price-service";
 import {
   clampReferralFeeBps,
   calculateReferralFeeBps,
@@ -60,7 +60,7 @@ const estimateTradeUsdValue = async (
   const amountDecimal = toDecimalAmount(amountRaw, decimals);
   if (amountDecimal <= 0) return 0;
 
-  const lookup = await resolveTokenPriceUSD({
+  const lookup = await getUsdPrice({
     tokenMint: mint,
     tokenTicker: ticker,
     isSol,
@@ -75,7 +75,7 @@ const estimateTradeUsdValue = async (
 
 const estimateSolUsdValue = async (lamports: number): Promise<number> => {
   if (lamports <= 0) return 0;
-  const lookup = await resolveTokenPriceUSD({ isSol: true });
+  const lookup = await getUsdPrice({ isSol: true });
   if (!lookup || lookup.price <= 0) return 0;
   return (lamports / LAMPORTS_PER_SOL) * lookup.price;
 };

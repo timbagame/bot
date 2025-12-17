@@ -14,7 +14,7 @@ import { __test_shouldSkipSolFeeBuffer as shouldSkipSolFeeBuffer } from "../src/
 import { stubWalletConnection, stubAdminKeypair } from "./helpers/test-stubs";
 import { USER_SOL_MAX_BUFFER_LAMPORTS, WSOL_MINT } from "../src/utils/constants";
 import { FeeBudgetManager } from "../src/utils/fee-budget";
-import * as priceModule from "../src/utils/prices";
+import * as priceService from "../src/utils/price-service";
 import { SwapService } from "../src/utils/swap/service";
 import type { SwapBackend } from "../src/utils/swap/service";
 import { calculateRouteCosts } from "../src/utils/swap/route-cost";
@@ -672,8 +672,8 @@ describe("buildAdminIntegratorConfig", () => {
       .spyOn(feeBudget, "getDefaultWrapFeeBufferLamports")
       .mockReturnValue(500_000);
     const priceSpy = vi
-      .spyOn(priceModule, "resolveTokenPriceUSD")
-      .mockResolvedValue({ price: 1, identifier: "SOL" } as any);
+      .spyOn(priceService, "getUsdPrice")
+      .mockResolvedValue({ price: 1, identifier: "SOL", resolvedAt: Date.now() } as any);
 
     const config = await buildAdminIntegratorConfig({
       referralConfig: {

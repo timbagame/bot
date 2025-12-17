@@ -109,7 +109,7 @@ import {
   resolveTelegramIdOrRespond,
 } from "./utils/context-helpers";
 import { recentUpdateGuard } from "./utils/recent-update";
-import { resolveTokenPriceUSD } from "./utils/prices";
+import { getUsdPrice } from "./utils/price-service";
 import { resolveIntegratorSwapParams } from "./utils/integrator-fees";
 import type { IntegratorSwapParams } from "./utils/integrator-fees";
 import {
@@ -1117,7 +1117,7 @@ const prepareTokenTradeQuote = async ({
     if (wouldLeaveBelowMinimum) {
       let solPriceUsd = 0;
       try {
-        const priceLookup = await resolveTokenPriceUSD({
+        const priceLookup = await getUsdPrice({
           tokenMint: inputAsset.mint,
           tokenTicker: inputAsset.ticker,
           isSol: true,
@@ -2576,7 +2576,7 @@ const fetchTokenPriceUSD = async ({
   tokenMint: string;
   tokenTicker: string;
 }): Promise<number | null> => {
-  const lookup = await resolveTokenPriceUSD({
+  const lookup = await getUsdPrice({
     tokenMint,
     tokenTicker,
   });
@@ -2632,8 +2632,8 @@ const gameCommandsModule = createGameCommandsModule({
   isGroupChat,
   startInteractiveGameSetup: (ctx, telegramId, copy, tokenOverride) =>
     startInteractiveGameSetup(ctx, telegramId, copy, tokenOverride),
-  resolveCommandTokenOverride: (tokenInput, _chatId) =>
-    resolveGameCommandTokenOverride(tokenInput),
+  resolveCommandTokenOverride: (tokenInput, chatId) =>
+    resolveGameCommandTokenOverride(tokenInput, chatId),
   getRequiredTelegramIdForContext: (ctx, label) =>
     getRequiredTelegramIdForContext(ctx, label),
   gameSetupCopy: GAME_SETUP_COPY,
@@ -3520,10 +3520,11 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
 
   let usdSuffix = "";
   try {
-    const priceLookup = await resolveTokenPriceUSD({
+    const priceLookup = await getUsdPrice({
       tokenMint: parsedAmount.tokenMint,
       tokenTicker: parsedAmount.tokenTicker,
       isSol: parsedAmount.isSol,
+      hint: parsedAmount.priceLookup,
     });
 
     if (priceLookup?.price && Number.isFinite(priceLookup.price)) {
@@ -3979,7 +3980,7 @@ const resolveLeaderboardPlayers = async (
           }
         }
 
-        const lookup = await resolveTokenPriceUSD({
+        const lookup = await getUsdPrice({
           tokenMint: isSol ? undefined : mint,
           isSol,
         });
@@ -4773,12 +4774,12 @@ const buildAdminIntegratorConfig = async ({
     const tradeIsSol =
       tradeMint === WSOL_MINT || tradeTicker.trim().toUpperCase() === "SOL";
     const [tradePriceLookup, solPriceLookup] = await Promise.all([
-      resolveTokenPriceUSD({
+      getUsdPrice({
         tokenMint: tradeMint,
         tokenTicker: tradeTicker,
         isSol: tradeIsSol,
       }),
-      resolveTokenPriceUSD({ isSol: true }),
+      getUsdPrice({ isSol: true }),
     ]);
     const tradePriceUsd = tradeIsSol
       ? tradePriceLookup?.price ?? 0

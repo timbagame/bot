@@ -1,19 +1,19 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import {
-  __test_clearTokenPriceCache,
+  __test_clearPriceServiceCache,
   rememberPriceLookup,
-  resolvePriceWithCache,
-} from "../src/utils/token-price-cache";
+  getUsdPrice,
+} from "../src/utils/price-service";
 import * as priceModule from "../src/utils/prices";
 
 describe("token price cache", () => {
   beforeEach(() => {
-    __test_clearTokenPriceCache();
+    __test_clearPriceServiceCache();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
-    __test_clearTokenPriceCache();
+    __test_clearPriceServiceCache();
   });
 
   test("uses cached token price instead of SOL fallback", async () => {
@@ -27,7 +27,7 @@ describe("token price cache", () => {
       .spyOn(priceModule, "resolveTokenPriceUSD")
       .mockResolvedValue({ price: 0.01, identifier: "SOL" });
 
-    const resolved = await resolvePriceWithCache({
+    const resolved = await getUsdPrice({
       tokenMint,
       tokenTicker: "WBTC",
     });
@@ -43,13 +43,13 @@ describe("token price cache", () => {
       { tokenMint: "AAA", tokenTicker: "AAA" }
     );
 
-    __test_clearTokenPriceCache();
+    __test_clearPriceServiceCache();
 
     const priceSpy = vi
       .spyOn(priceModule, "resolveTokenPriceUSD")
       .mockResolvedValue({ price: 2, identifier: "AAA" });
 
-    const refreshed = await resolvePriceWithCache({
+    const refreshed = await getUsdPrice({
       tokenMint: "AAA",
       tokenTicker: "AAA",
     });
