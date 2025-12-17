@@ -295,6 +295,7 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
           tokenTicker: tokenTickerForGame,
           isSol: parsedAmount.isSol,
           requestedNativeSol: parsedAmount.requestedNativeSol,
+          priceLookup: parsedAmount.priceLookup,
         },
         maxPlayers,
         options.minPlayers,
@@ -333,7 +334,9 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
         parsedAmount.amount,
         creatorUsername,
         tokenTickerForGame,
-        "Active"
+        "Active",
+        undefined,
+        { priceHint: parsedAmount.priceLookup }
       );
     } catch (error) {
       console.error(`Error in command-based ${options.gameType}:`, error);

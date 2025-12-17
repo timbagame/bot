@@ -16,7 +16,7 @@ import {
 import { parseDecimalAmount } from "./amount";
 import { escapeHtml } from "./format-amount";
 import { createSingleton } from "./singleton";
-import { resolveTokenPriceUSD } from "./prices";
+import { resolvePriceWithCache } from "./token-price-cache";
 
 type TokenMetadataResolverResult =
   | { symbol?: string | null; decimals?: number | null }
@@ -518,10 +518,11 @@ export class TokenManager {
           return { success: false, error: "invalid_amount" };
         }
 
-        const priceLookup = await resolveTokenPriceUSD({
+        const priceLookup = await resolvePriceWithCache({
           tokenMint: resolvedTokenMint,
           tokenTicker: resolvedTokenTicker,
           isSol,
+          chatId,
         });
 
         const scaledPrice = Math.round((priceLookup?.price ?? 0) * 1_000_000);
@@ -577,6 +578,7 @@ export class TokenManager {
             decimals: targetDecimals,
             tokenWasSpecified,
             requestedNativeSol,
+            priceLookup: priceLookup ?? undefined,
           },
         };
       }
@@ -650,10 +652,11 @@ export class TokenManager {
         return { success: false, error: "invalid_amount" };
       }
 
-      const priceLookup = await resolveTokenPriceUSD({
+      const priceLookup = await resolvePriceWithCache({
         tokenMint: resolvedTokenMint,
         tokenTicker: resolvedTokenTicker,
         isSol,
+        chatId,
       });
 
       const scaledPrice = Math.round((priceLookup?.price ?? 0) * 1_000_000);
@@ -709,6 +712,7 @@ export class TokenManager {
           decimals: targetDecimals,
           tokenWasSpecified,
           requestedNativeSol,
+          priceLookup: priceLookup ?? undefined,
         },
       };
     }

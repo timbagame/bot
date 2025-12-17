@@ -35,6 +35,7 @@ import {
   MAX_GAMES_PER_CREATOR_WINDOW,
   WSOL_MINT,
   DEFAULT_TOKEN_TICKER,
+  TOKEN_PRICE_CACHE_TTL_MS,
   getCoinflipVideoId,
   getGiveawayVideoId,
   TELEGRAM_USERNAME_CACHE_TTL_MS,
@@ -69,7 +70,7 @@ import {
   sanitizeTelegramDisplayName,
   sanitizeTelegramDisplayNameWithoutMention,
 } from "./telegram-display";
-import { resolveTokenPriceUSD } from "./prices";
+import { resolvePriceWithCache, getCachedPriceLookup, rememberPriceLookup, type CachedPriceLookup } from "./token-price-cache";
 import { NetworkDetector } from "./network-detector";
 import { SwapManager } from "./swap-manager";
 import { confirmTransactionWithRecovery, type TransactionProbe } from "./transaction-runner";
@@ -79,6 +80,7 @@ import {
   DEFAULT_MAINNET_ENDPOINT,
   resolvePrimaryRpcEndpoint,
 } from "./rpc-endpoints";
+import type { ParsedAmount } from "../types";
 
 const resolveGameMedia = (
   gameType: string,
@@ -348,6 +350,9 @@ export class GameManager {
   );
   private readonly usernameToIdCacheKeys: string[] = [];
   private readonly messageRecreationLocks = new Set<string>();
+  private readonly gamePriceCache = createExpiringCache<CachedPriceLookup>(
+    TOKEN_PRICE_CACHE_TTL_MS
+  );
   private usernameLookupPromises = new Map<string, Promise<string | null>>();
   private gameMessageReadyListener?: (gameAddress: string) => void;
 
@@ -1467,7 +1472,9 @@ export class GameManager {
     decimals: number,
     tokenMint?: string,
     tokenTicker?: string,
-    isSol?: boolean
+    isSol?: boolean,
+    priceHint?: CachedPriceLookup | null,
+    chatId?: number
   ): Promise<{ text: string; price: number } | null> {
     const reference = isSol ? "SOL" : tokenMint || tokenTicker;
     if (!reference) return null;
@@ -1477,11 +1484,17 @@ export class GameManager {
     if (process.env.NODE_ENV === "test") return null;
 
     try {
-      const lookup = await resolveTokenPriceUSD({
-        tokenMint,
-        tokenTicker,
-        isSol,
-      });
+      const cachedHint = priceHint
+        ? rememberPriceLookup(priceHint, { tokenMint, tokenTicker, chatId })
+        : getCachedPriceLookup({ tokenMint, tokenTicker, chatId });
+      const lookup =
+        cachedHint ??
+        (await resolvePriceWithCache({
+          tokenMint,
+          tokenTicker,
+          isSol,
+          chatId,
+        }));
       if (!lookup) {
         return null;
       }
@@ -2502,9 +2515,16 @@ export class GameManager {
     winnerAddress?: string,
     providedTotalPot?: number | bigint,
     winnerSignature?: string,
-    options?: { suppressMentions?: boolean }
+    options?: {
+      suppressMentions?: boolean;
+      priceHint?: CachedPriceLookup | null;
+      chatId?: number;
+    }
   ): Promise<GameMessageFormat> {
     const suppressMentions = options?.suppressMentions === true;
+    const chatId = options?.chatId ?? ctx.chat?.id;
+    const cachedGamePrice =
+      options?.priceHint ?? this.gamePriceCache.get(gamePda.toBase58()) ?? null;
     const sanitizeDisplay = suppressMentions
       ? sanitizeTelegramDisplayNameWithoutMention
       : sanitizeTelegramDisplayName;
@@ -2556,7 +2576,9 @@ export class GameManager {
       decimals,
       tokenMint,
       tokenTicker,
-      isSol
+      isSol,
+      cachedGamePrice,
+      chatId
     );
 
     const winnerInfo = await this.getWinnerInfo(
@@ -2593,7 +2615,9 @@ export class GameManager {
         decimals,
         tokenMint,
         tokenTicker,
-        isSol
+        isSol,
+        cachedGamePrice,
+        chatId
       );
       prizeUsdApproximation = computedPrizeUsd?.text ?? null;
     }
@@ -2712,6 +2736,8 @@ export class GameManager {
         storedGame?.token_ticker ??
         (storedGame?.token_mint === "SOL" ? "SOL" : "");
       const resolvedMint = tokenMintHint ?? storedGame?.token_mint ?? undefined;
+      const chatId = storedGame?.chat_id ?? undefined;
+      const priceHint = this.gamePriceCache.get(gameAddress) ?? null;
 
       const { formatBalance, decimals, tokenMint, isSol } =
         await this.resolveTokenFormattingInfo(
@@ -2726,7 +2752,9 @@ export class GameManager {
         decimals,
         tokenMint,
         resolvedTicker,
-        isSol
+        isSol,
+        priceHint,
+        chatId
       );
 
       const displayTicker = resolvedTicker || (isSol ? "SOL" : "");
@@ -2753,8 +2781,11 @@ export class GameManager {
     creatorUsername: string,
     tokenTicker: string,
     status: string = "Active",
-    replyToMessageId?: number
+    replyToMessageId?: number,
+    options?: { priceHint?: CachedPriceLookup | null }
   ): Promise<number> {
+    const cachedPrice =
+      options?.priceHint ?? this.gamePriceCache.get(gameAddress) ?? null;
     const { messageText, keyboard } = await this.formatGameMessage(
       ctx,
       new PublicKey(gameAddress),
@@ -2762,7 +2793,14 @@ export class GameManager {
       amount,
       creatorUsername,
       status,
-      tokenTicker
+      tokenTicker,
+      undefined,
+      undefined,
+      undefined,
+      {
+        priceHint: cachedPrice,
+        chatId: ctx.chat?.id,
+      }
     );
 
     const replyTo = replyToMessageId ?? (ctx as any).message?.message_id;
@@ -3211,13 +3249,10 @@ export class GameManager {
 
   public async createGame(
     gameType: GameType,
-    parsedAmount: {
-      amount: number;
-      tokenMint: string;
-      tokenTicker: string;
-      isSol: boolean;
-      requestedNativeSol?: boolean;
-    },
+    parsedAmount: Pick<
+      ParsedAmount,
+      "amount" | "tokenMint" | "tokenTicker" | "isSol" | "requestedNativeSol" | "priceLookup"
+    >,
     maxTickets: number,
     minTickets: number,
     timeout: number,
@@ -3581,6 +3616,15 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
             gameType.charAt(0).toUpperCase() + gameType.slice(1)
           } game ${gamePda.toBase58()} created - creator not auto-joined`
         );
+      }
+
+      if (parsedAmount.priceLookup) {
+        const cachedPrice = rememberPriceLookup(parsedAmount.priceLookup, {
+          tokenMint,
+          tokenTicker,
+          chatId,
+        });
+        this.gamePriceCache.setWithTTL(gamePda.toBase58(), cachedPrice);
       }
 
       return {

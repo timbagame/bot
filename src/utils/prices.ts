@@ -269,7 +269,7 @@ export async function getPricesUSD(
   return Object.fromEntries(entries);
 }
 
-type PriceLookupOptions = {
+export type PriceLookupOptions = {
   tokenMint?: string;
   tokenTicker?: string;
   isSol?: boolean;

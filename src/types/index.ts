@@ -1,4 +1,5 @@
 import { PublicKey, Keypair } from "@solana/web3.js";
+import type { CachedPriceLookup } from "../utils/token-price-cache";
 type BN = any;
 
 // ================================
@@ -88,6 +89,7 @@ export interface ParsedAmount {
   tokenWasSpecified: boolean;
   requestedNativeSol?: boolean;
   useAllSolBalance?: boolean;
+  priceLookup?: CachedPriceLookup;
 }
 
 export type ParseAmountResult =
