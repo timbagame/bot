@@ -332,8 +332,9 @@ describe("calculateDynamicReferralFee", () => {
   test("calculates dynamic fee based on deficit/trade ratio", async () => {
     vi.spyOn(priceService, "getUsdPrice").mockImplementation(
       async (opts: any) => {
-        if (opts?.isSol) return { price: 200, source: "mock", identifier: "SOL" };
-        return { price: 1, source: "mock", identifier: "TKN" };
+        const resolvedAt = Date.now();
+        if (opts?.isSol) return { price: 200, source: "mock", identifier: "SOL", resolvedAt };
+        return { price: 1, source: "mock", identifier: "TKN", resolvedAt };
       }
     );
 
@@ -354,8 +355,9 @@ describe("calculateDynamicReferralFee", () => {
   test("scales fee proportionally for small shortfalls", async () => {
     vi.spyOn(priceService, "getUsdPrice").mockImplementation(
       async (opts: any) => {
-        if (opts?.isSol) return { price: 200, source: "mock", identifier: "SOL" };
-        return { price: 1, source: "mock", identifier: "TKN" };
+        const resolvedAt = Date.now();
+        if (opts?.isSol) return { price: 200, source: "mock", identifier: "SOL", resolvedAt };
+        return { price: 1, source: "mock", identifier: "TKN", resolvedAt };
       }
     );
 
@@ -376,8 +378,9 @@ describe("calculateDynamicReferralFee", () => {
   test("clamps fee to MAX_REFERRAL_FEE_BPS of 255", async () => {
     vi.spyOn(priceService, "getUsdPrice").mockImplementation(
       async (opts: any) => {
-        if (opts?.isSol) return { price: 200, source: "mock", identifier: "SOL" };
-        return { price: 1, source: "mock", identifier: "TKN" };
+        const resolvedAt = Date.now();
+        if (opts?.isSol) return { price: 200, source: "mock", identifier: "SOL", resolvedAt };
+        return { price: 1, source: "mock", identifier: "TKN", resolvedAt };
       }
     );
 

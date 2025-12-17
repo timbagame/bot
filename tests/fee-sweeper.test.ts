@@ -18,7 +18,11 @@ describe("fee sweeper helpers", () => {
   const tokenConfig = { mint: "mint", ticker: "TEST" };
 
   test("skips withdrawals when below $5 threshold", async () => {
-    const priceResolver = async () => ({ price: 1, identifier: "AAA" });
+    const priceResolver = async () => ({
+      price: 1,
+      identifier: "AAA",
+      resolvedAt: Date.now(),
+    });
     const result = await __test_shouldWithdrawToken(
       wallet,
       tokenConfig,
@@ -186,7 +190,11 @@ describe("sweeping tokens to SOL", () => {
       },
     });
 
-    const priceResolver = async () => ({ price: 1, identifier: "AAA" });
+    const priceResolver = async () => ({
+      price: 1,
+      identifier: "AAA",
+      resolvedAt: Date.now(),
+    });
     const balanceFetcher = async (
       _connection: any,
       _owner: PublicKey,
@@ -232,7 +240,7 @@ describe("Jupiter referral sweep threshold", () => {
       buildConnection(),
       adminBundle,
       [],
-      async () => ({ price: 100, identifier: "test" })
+      async () => ({ price: 100, identifier: "test", resolvedAt: Date.now() })
     );
 
     expect(result).toBe(0);
@@ -243,7 +251,7 @@ describe("Jupiter referral sweep threshold", () => {
       buildConnection(),
       adminBundle,
       [{ mint: "test", referralAccount: undefined as any }],
-      async () => ({ price: 100, identifier: "test" })
+      async () => ({ price: 100, identifier: "test", resolvedAt: Date.now() })
     );
 
     expect(result).toBe(0);
@@ -318,9 +326,10 @@ describe("Jupiter referral sweep threshold", () => {
       referralEntries: [{ mint: "test", referralAccount: "someAccount" }],
       priceResolver: async ({ tokenMint }) => {
         // Return different prices for different tokens
-        if (tokenMint === "tokenA") return { price: 2, identifier: "A" };
-        if (tokenMint === "tokenB") return { price: 3, identifier: "B" };
-        return { price: 1, identifier: "default" };
+        const now = Date.now();
+        if (tokenMint === "tokenA") return { price: 2, identifier: "A", resolvedAt: now };
+        if (tokenMint === "tokenB") return { price: 3, identifier: "B", resolvedAt: now };
+        return { price: 1, identifier: "default", resolvedAt: now };
       },
       contextFactory: () =>
         ({

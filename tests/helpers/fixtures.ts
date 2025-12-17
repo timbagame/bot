@@ -6,13 +6,9 @@ import { resetTestDatabase } from "./database";
 
 export type ChatType = "private" | "group" | "supergroup";
 
-export type TestContext = {
-  from: { id: number; username?: string; first_name?: string };
-  chat: { id: number; type: ChatType };
-  message: { text: string };
-  reply: (...args: any[]) => Promise<any>;
+export type TestContext = Partial<Context> & {
   __calls: any[];
-} & Partial<Context>;
+};
 
 export const createTelegramContext = (
   text: string,
@@ -21,9 +17,9 @@ export const createTelegramContext = (
 ): TestContext => {
   const calls: any[] = [];
   return {
-    from: { id: 1, username: "alice", first_name: "Alice" },
-    chat: { id: 100, type: chatType },
-    message: { text },
+    from: { id: 1, is_bot: false, username: "alice", first_name: "Alice" } as any,
+    chat: { id: 100, type: chatType, title: "test" } as any,
+    message: { text, message_id: 1, date: Date.now() / 1000, chat: { id: 100 } } as any,
     reply: async (...args: any[]) => {
       calls.push(["reply", ...args]);
       return { ok: true } as any;

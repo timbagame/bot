@@ -2855,8 +2855,9 @@ export class GameManager {
       payload.keyboard.length > 0
         ? { inline_keyboard: payload.keyboard }
         : undefined;
+    const media = payload.media;
     const sendResult = await sendMediaWithFallback<any, any>({
-      videoFileId: payload.media?.fileId ?? null,
+      videoFileId: media?.fileId ?? null,
       logLabel: "game video",
       sendText: () =>
         ctx.reply(payload.text, {
@@ -2865,24 +2866,24 @@ export class GameManager {
           reply_to_message_id: replyTo,
         }),
       sendVideo:
-        payload.media && typeof (ctx as any).replyWithVideo === "function"
+        media && typeof (ctx as any).replyWithVideo === "function"
           ? () => {
-              if (payload.media?.mediaType === "photo") {
-                return ctx.replyWithPhoto(payload.media.fileId, {
+              if (media.mediaType === "photo") {
+                return ctx.replyWithPhoto(media.fileId, {
                   caption: payload.text,
                   parse_mode: "HTML",
                   reply_markup: replyMarkup,
                   reply_to_message_id: replyTo,
                 }) as any;
-              } else if (payload.media?.mediaType === "animation") {
-                return ctx.replyWithAnimation(payload.media.fileId, {
+              } else if (media.mediaType === "animation") {
+                return ctx.replyWithAnimation(media.fileId, {
                   caption: payload.text,
                   parse_mode: "HTML",
                   reply_markup: replyMarkup,
                   reply_to_message_id: replyTo,
                 }) as any;
               } else {
-                return ctx.replyWithVideo(payload.media.fileId, {
+                return ctx.replyWithVideo(media.fileId, {
                   caption: payload.text,
                   parse_mode: "HTML",
                   reply_markup: replyMarkup,

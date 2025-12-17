@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { handleCoinflipCommand } from "../src/handlers/game";
-import {
-  createTelegramContext,
-  type ChatType,
-  type TestContext,
-} from "./helpers/fixtures";
+import { createTelegramContext } from "./helpers/fixtures";
 
 describe("game handler: coinflip command", () => {
   test("allows game creation in private chat (forced public)", async () => {
