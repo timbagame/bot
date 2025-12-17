@@ -1,4 +1,4 @@
-import { beforeEach, expect, test } from "bun:test";
+import { beforeEach, expect, test, vi } from "bun:test";
 import { Keypair } from "@solana/web3.js";
 import { TokenManager } from "../src/utils/token-manager";
 import { ChatDatabase } from "../src/utils/chat-database";
@@ -8,6 +8,7 @@ import {
   WSOL_MINT,
   TOKEN_MANAGER_APPROVED_CACHE_TTL_MS,
 } from "../src/utils/constants";
+import * as priceModule from "../src/utils/prices";
 
 // Clean DBs and singletons before each test
 beforeEach(() => {
@@ -16,6 +17,7 @@ beforeEach(() => {
   ChatDatabase.resetForTesting();
   TokenDatabase.resetForTesting();
   TokenManager.resetForTesting();
+  vi.restoreAllMocks();
 });
 
 function makeWalletStub() {
@@ -84,6 +86,75 @@ test("parseAmount reports unknown token tickers distinctly", async () => {
   }
   expect(res.error).toBe("unknown_token");
   expect(res.unknownToken).toBe("UNKN");
+});
+
+test("parseAmount converts USD hints using chat/default token pricing", async () => {
+  vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue({
+    price: 0.5,
+    identifier: "TOK",
+  });
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  await tm.addToken("MINT", "TOK", 6);
+
+  const res = await tm.parseAmount(["/cf", "12", "USD"], 1, 1, "game");
+  if (!res.success) {
+    throw new Error(`expected success, got ${res.error}`);
+  }
+
+  expect(res.data.amount).toBe(24_000_000);
+  expect(res.data.tokenMint).toBe("MINT");
+  expect(res.data.tokenTicker).toBe("TOK");
+  expect(res.data.tokenWasSpecified).toBe(true);
+  expect(res.data.formattedAmount).toContain("TOK");
+});
+
+test("parseAmount supports $-prefixed USD amounts without explicit token", async () => {
+  vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue({
+    price: 2,
+    identifier: "TOK",
+  });
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  await tm.addToken("MINT", "TOK", 6);
+
+  const res = await tm.parseAmount(["/cf", "$10"], 1, 1, "game");
+  if (!res.success) {
+    throw new Error(`expected success, got ${res.error}`);
+  }
+
+  expect(res.data.amount).toBe(5_000_000);
+  expect(res.data.tokenMint).toBe("MINT");
+  expect(res.data.tokenWasSpecified).toBe(false);
+});
+
+test("parseAmount fails gracefully when USD pricing is unavailable", async () => {
+  vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue(null);
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+
+  const res = await tm.parseAmount(["/cf", "10", "USD"], 1, 1, "game");
+
+  expect(res.success).toBe(false);
+  if (res.success) {
+    throw new Error("expected failure when USD pricing missing");
+  }
+  expect(res.error).toBe("unsupported_token");
+  expect(res.reason).toBe("fiat_pricing_unavailable");
+  expect(res.unknownToken).toBe("USD");
+});
+
+test("parseAmount strips $ prefix when explicit token override is provided", async () => {
+  const priceSpy = vi.spyOn(priceModule, "resolveTokenPriceUSD");
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  await tm.addToken(WSOL_MINT, "WSOL", 9);
+
+  const res = await tm.parseAmount(["/cf", "$10", "WSOL"], 1, 1, "game");
+  if (!res.success) {
+    throw new Error(`expected success, got ${res.error}`);
+  }
+
+  expect(res.data.tokenMint).toBe(WSOL_MINT);
+  expect(res.data.tokenTicker).toBe("WSOL");
+  expect(res.data.amount).toBe(10_000_000_000);
+  expect(priceSpy).not.toHaveBeenCalled();
 });
 
 test("parseAmount rejects 19-digit numeric token arguments as invalid", async () => {
