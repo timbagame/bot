@@ -108,6 +108,24 @@ test("parseAmount converts USD hints using chat/default token pricing", async ()
   expect(res.data.formattedAmount).toContain("TOK");
 });
 
+test("parseAmount supports $-prefixed USD amounts without explicit token", async () => {
+  vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue({
+    price: 2,
+    identifier: "TOK",
+  });
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  await tm.addToken("MINT", "TOK", 6);
+
+  const res = await tm.parseAmount(["/cf", "$10"], 1, 1, "game");
+  if (!res.success) {
+    throw new Error(`expected success, got ${res.error}`);
+  }
+
+  expect(res.data.amount).toBe(5_000_000);
+  expect(res.data.tokenMint).toBe("MINT");
+  expect(res.data.tokenWasSpecified).toBe(false);
+});
+
 test("parseAmount fails gracefully when USD pricing is unavailable", async () => {
   vi.spyOn(priceModule, "resolveTokenPriceUSD").mockResolvedValue(null);
   const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
@@ -121,6 +139,22 @@ test("parseAmount fails gracefully when USD pricing is unavailable", async () =>
   expect(res.error).toBe("unsupported_token");
   expect(res.reason).toBe("fiat_pricing_unavailable");
   expect(res.unknownToken).toBe("USD");
+});
+
+test("parseAmount strips $ prefix when explicit token override is provided", async () => {
+  const priceSpy = vi.spyOn(priceModule, "resolveTokenPriceUSD");
+  const tm = TokenManager.getInstance(makeWalletStub(), "MINT", "TOK");
+  await tm.addToken(WSOL_MINT, "WSOL", 9);
+
+  const res = await tm.parseAmount(["/cf", "$10", "WSOL"], 1, 1, "game");
+  if (!res.success) {
+    throw new Error(`expected success, got ${res.error}`);
+  }
+
+  expect(res.data.tokenMint).toBe(WSOL_MINT);
+  expect(res.data.tokenTicker).toBe("WSOL");
+  expect(res.data.amount).toBe(10_000_000_000);
+  expect(priceSpy).not.toHaveBeenCalled();
 });
 
 test("parseAmount rejects 19-digit numeric token arguments as invalid", async () => {
