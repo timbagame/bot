@@ -826,7 +826,7 @@ describe("createGameViaCommand helper", () => {
       }),
       inferMaxPlayers: (args, amountIndex, tokenSpecified, defaultMax, minPlayers, maxPlayers) => {
         inferCalls.push({ args, amountIndex, tokenSpecified, defaultMax, minPlayers, maxPlayers });
-        return { ok: true, value: 4, source: "explicit" };
+        return { ok: true, value: 4, source: "arg" };
       },
       gameManager: {
         createGame: async (...args) => {
