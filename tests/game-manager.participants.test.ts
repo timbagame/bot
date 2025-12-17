@@ -61,6 +61,52 @@ describe("GameManager participants rendering", () => {
     );
   });
 
+  test("uses DB preview fetch for huge games and uses on-chain ticket count for omitted total", async () => {
+    reset();
+    const previewCalls: number[] = [];
+    const program = makeProgram({
+      ticketsCount: 10_000,
+      maxTickets: 10_000,
+      minTickets: 2,
+      totalAmount: 0,
+      createdAt: 1_000_000,
+      timeout: 60,
+      gameType: { coinflip: {} },
+    });
+
+    const gm = GameManager.getInstance(program, makeWallet(), {
+      getGameParticipants: () => {
+        throw new Error("should not load full participant list");
+      },
+      getGameParticipantsPreview: (_addr: string, limit: number) => {
+        previewCalls.push(limit);
+        return ["111", "222"];
+      },
+      getGame: () => ({ token_mint: "M", token_ticker: "TOK" }),
+    } as any);
+
+    (gm as any).getUsernameFromTelegramId = async (_ctx: any, telegramId: string) =>
+      `@user${telegramId}`;
+
+    const ctx = { chat: { id: 1, type: "group" }, api: {} } as any;
+    const gamePda = new PublicKey("11111111111111111111111111111111");
+
+    const res = await gm.formatGameMessage(
+      ctx,
+      gamePda,
+      "coinflip",
+      1_000_000_000,
+      "@creator",
+      "Active",
+      "TOK"
+    );
+
+    expect(previewCalls.length).toBe(1);
+    expect(res.messageText).toContain(sanitizeTelegramDisplayName("@user111"));
+    expect(res.messageText).toContain(sanitizeTelegramDisplayName("@user222"));
+    expect(res.messageText).toContain("\n… and 9998 more");
+  });
+
   test("trims participant list to respect Telegram message limit", async () => {
     reset();
     const participantIds = Array.from({ length: 120 }, (_, i) => String(10_000 + i));

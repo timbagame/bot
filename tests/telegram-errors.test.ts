@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   getErrorDescription,
+  getRetryAfterSeconds,
   isChatInaccessible,
   isDuplicateContent,
   isEditProhibited,
@@ -8,6 +9,7 @@ import {
   isMessageMissing,
   isMessageNotModified,
   isMissingEditableContent,
+  isRateLimited,
   shouldFallbackToReply,
 } from "../src/utils/telegram-errors";
 
@@ -63,5 +65,20 @@ describe("telegram error helpers", () => {
         description: "Forbidden: bot was blocked by the user",
       })
     ).toBe(true);
+  });
+
+  test("isRateLimited detects 429 and retry-after messages", () => {
+    expect(isRateLimited({ error_code: 429, description: "Too Many Requests" })).toBe(true);
+    expect(isRateLimited({ description: "Too Many Requests: retry after 3" })).toBe(true);
+    expect(isRateLimited("retry after 1")).toBe(true);
+    expect(isRateLimited("not a rate limit")).toBe(false);
+  });
+
+  test("getRetryAfterSeconds reads retry_after from Telegram error objects and descriptions", () => {
+    expect(getRetryAfterSeconds({ error_code: 429, parameters: { retry_after: 7 } })).toBe(7);
+    expect(getRetryAfterSeconds({ retry_after: 2 })).toBe(2);
+    expect(getRetryAfterSeconds({ description: "Too Many Requests: retry after 4" })).toBe(4);
+    expect(getRetryAfterSeconds({ description: "Too Many Requests" })).toBeNull();
+    expect(getRetryAfterSeconds("retry after 9")).toBeNull();
   });
 });
