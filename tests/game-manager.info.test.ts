@@ -61,13 +61,51 @@ describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
     };
     const gm = GameManager.getInstance(programStub(gameAcc), walletStub({ blockTime: createdAt + 30 }), dbStub());
     const info = await gm.getGameInfo(ctxStub(), new PublicKey("11111111111111111111111111111111"));
-    expect(info).toContain("<b>🪙 Coinflip • 1 TOK</b>");
+    expect(info).toContain("<b>🪙 Coinflip 🅴 • 1 TOK</b>");
     expect(info).toContain(
       `Creator: ${sanitizeTelegramDisplayNameWithoutMention("@user777")}`
     );
     expect(info).toContain("1/2 tickets");
     expect(info).toContain("Status:");
     expect(info).toContain("⏰ Expires in:");
+  });
+
+  test("getGameInfo includes explorer link when network supports Solscan", async () => {
+    resetGM();
+    const originalNetwork = process.env.SOLANA_NETWORK;
+    process.env.SOLANA_NETWORK = "https://api.mainnet-beta.solana.com";
+    try {
+      const createdAt = 1_000_000;
+      const timeout = 60;
+      const gameAcc = {
+        ticketAmount: 1_000_000_000,
+        ticketsCount: 1,
+        maxTickets: 2,
+        createdAt,
+        timeout,
+        creator: new PublicKey("11111111111111111111111111111111"),
+        gameType: { coinflip: {} },
+      };
+      const gm = GameManager.getInstance(
+        programStub(gameAcc),
+        walletStub({ blockTime: createdAt + 30 }),
+        dbStub()
+      );
+      const info = await gm.getGameInfo(
+        ctxStub(),
+        new PublicKey("11111111111111111111111111111111")
+      );
+      expect(info).toContain(
+        '<b>🪙 Coinflip <a href="https://solscan.io/account/11111111111111111111111111111111">🅴</a> • 1 TOK</b>'
+      );
+    } finally {
+      resetGM();
+      if (originalNetwork === undefined) {
+        Reflect.deleteProperty(process.env, "SOLANA_NETWORK");
+      } else {
+        process.env.SOLANA_NETWORK = originalNetwork;
+      }
+    }
   });
 
   test("getCompletedGameInfo shows winner line", async () => {
@@ -127,6 +165,6 @@ describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
     });
 
     expect(message).not.toContain("NaN");
-    expect(message).toContain("🪙 Coinflip • 0 TOK");
+    expect(message).toContain("🪙 Coinflip 🅴 • 0 TOK");
   });
 });
