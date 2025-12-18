@@ -21,7 +21,7 @@ describe("advanced minimum players controls", () => {
       { timeoutSeconds: 600, minPlayers: 3, isPrivate: true }
     );
 
-    const minPlayersRow = keyboard.inline_keyboard[2]!;
+    const minPlayersRow = keyboard.inline_keyboard[3]!;
 
     expect(getCallbackData(minPlayersRow[0])).toBe(
       "advanced_min_players_coinflip_1_4_-1"
@@ -40,7 +40,7 @@ describe("advanced minimum players controls", () => {
       { timeoutSeconds: 600, minPlayers: 3, isPrivate: false }
     );
 
-    const minPlayersRow = keyboard.inline_keyboard[2]!;
+    const minPlayersRow = keyboard.inline_keyboard[3]!;
 
     expect(getCallbackData(minPlayersRow[0])).toBe(
       "advanced_min_players_giveaway_0.5_3_-1"

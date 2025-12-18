@@ -77,12 +77,6 @@ export const buildGameConfirmationMessage = ({
     maximumFractionDigits: determineFractionDigits(amountSource, tokenDecimals),
   });
 
-  const totalPot = amountNumber * players;
-  const totalPotFormatted = totalPot.toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: Math.min(tokenDecimals, 6),
-  });
-
   const formattedGameType = toTitleCase(gameType);
 
   const visibilityLabel = advanced.isPrivate ? "Private" : "Public";
@@ -95,17 +89,9 @@ export const buildGameConfirmationMessage = ({
     `Amount: <b>${amountFormatted} ${tokenTicker}</b>`,
     `Players: <b>${players}</b>`,
     "",
-    gameType === "coinflip"
-      ? `• Total prize pool: <b>${totalPotFormatted} ${tokenTicker}</b>`
-      : `• Prize for winner: <b>${amountFormatted} ${tokenTicker}</b>`,
-    "",
     `Visibility: <b>${visibilityLabel}</b>`,
     `Min players to start: <b>${minPlayersLabel}</b>`,
     `Timeout: <b>${timeoutLabel}</b>`,
-    "",
-    `⚠️ Make sure you have enough ${tokenTicker} in your wallet!`,
-    "",
-    "Ready to create this game?",
   ].join("\n");
 };
 

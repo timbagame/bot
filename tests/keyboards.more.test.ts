@@ -168,11 +168,15 @@ describe("keyboards: misc menus", () => {
     const texts = extractTexts(kb);
 
     expect(texts).toEqual([
-      "-15m",
-      "-5m",
-      "⏱️ 45m",
-      "+5m",
-      "+15m",
+      "-50%",
+      "-25%",
+      "(⏱️ 45m)",
+      "+50%",
+      "+100%",
+      "1h",
+      "6h",
+      "12h",
+      "24h",
       "🌐 Public",
       "-",
       "👥 Min: 3",
@@ -180,11 +184,15 @@ describe("keyboards: misc menus", () => {
       "⬅️ Back",
     ]);
     expect(callbacks).toEqual([
+      "advanced_timeout_coinflip_1.5_4_-25_creator123",
       "advanced_timeout_coinflip_1.5_4_-15_creator123",
-      "advanced_timeout_coinflip_1.5_4_-5_creator123",
       "noop",
-      "advanced_timeout_coinflip_1.5_4_5_creator123",
       "advanced_timeout_coinflip_1.5_4_15_creator123",
+      "advanced_timeout_coinflip_1.5_4_45_creator123",
+      "advanced_timeout_coinflip_1.5_4_15_creator123",
+      "advanced_timeout_coinflip_1.5_4_315_creator123",
+      "advanced_timeout_coinflip_1.5_4_675_creator123",
+      "advanced_timeout_coinflip_1.5_4_1395_creator123",
       "advanced_visibility_coinflip_1.5_4_private_creator123",
       "advanced_min_players_coinflip_1.5_4_-1_creator123",
       "noop",
@@ -226,10 +234,11 @@ describe("keyboards: misc menus", () => {
 
     const callbacks = extractCallbacks(kb);
 
+    // Percent row (decrements should clamp back to MIN => noop)
     expect(callbacks[0]).toBe("noop");
     expect(callbacks[1]).toBe("noop");
     expect(callbacks[3]).toBe("advanced_timeout_coinflip_1.5_4_5");
-    expect(callbacks[4]).toBe("advanced_timeout_coinflip_1.5_4_15");
+    expect(callbacks[4]).toBe("advanced_timeout_coinflip_1.5_4_5");
   });
 
   test("advanced timeout buttons disable at maximum", () => {
@@ -242,8 +251,8 @@ describe("keyboards: misc menus", () => {
 
     const callbacks = extractCallbacks(kb);
 
-    expect(callbacks[0]).toBe("advanced_timeout_coinflip_1.5_4_-15");
-    expect(callbacks[1]).toBe("advanced_timeout_coinflip_1.5_4_-5");
+    expect(callbacks[0]).toBe("advanced_timeout_coinflip_1.5_4_-720");
+    expect(callbacks[1]).toBe("advanced_timeout_coinflip_1.5_4_-360");
     expect(callbacks[3]).toBe("noop");
     expect(callbacks[4]).toBe("noop");
   });
@@ -256,10 +265,11 @@ describe("keyboards: misc menus", () => {
       { timeoutSeconds: 3600, minPlayers: MIN_COINFLIP_PLAYERS, isPrivate: true }
     );
 
-    const callbacks = extractCallbacks(kb);
-
-    expect(callbacks[6]).toBe("noop");
-    expect(callbacks[8]).toBe("advanced_min_players_coinflip_2.5_4_1");
+    const minPlayersRow = (kb as any).inline_keyboard?.[3] as any[] | undefined;
+    expect(minPlayersRow?.[0]?.callback_data).toBe("noop");
+    expect(minPlayersRow?.[2]?.callback_data).toBe(
+      "advanced_min_players_coinflip_2.5_4_1"
+    );
   });
 
   test("advanced min players increment disables at selected player count", () => {
@@ -270,10 +280,11 @@ describe("keyboards: misc menus", () => {
       { timeoutSeconds: 3600, minPlayers: 4, isPrivate: true }
     );
 
-    const callbacks = extractCallbacks(kb);
-
-    expect(callbacks[6]).toBe("advanced_min_players_coinflip_2.5_4_-1");
-    expect(callbacks[8]).toBe("noop");
+    const minPlayersRow = (kb as any).inline_keyboard?.[3] as any[] | undefined;
+    expect(minPlayersRow?.[0]?.callback_data).toBe(
+      "advanced_min_players_coinflip_2.5_4_-1"
+    );
+    expect(minPlayersRow?.[2]?.callback_data).toBe("noop");
   });
 });
 
@@ -456,10 +467,10 @@ describe("keyboards: player selection and confirm", () => {
     expect(callbacks).toContain("players_coinflip_25_5");
     expect(callbacks).toContain("players_coinflip_25_10");
     expect(callbacks).toContain("players_coinflip_25_20");
-    // Also includes custom and cancel
+    // Also includes custom and back-to-amount
     const all = extractCallbacks(kb);
     expect(all).toContain("custom_players_coinflip_25");
-    expect(all).toContain("cancel_game_setup");
+    expect(all).toContain("back_to_amounts_coinflip");
   });
 
   test("player selection for giveaway uses specific player options", () => {

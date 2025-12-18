@@ -7,6 +7,7 @@ import {
   MIN_GAME_TIMEOUT,
   MIN_GIVEAWAY_PLAYERS,
 } from "./constants";
+import { clampTimeoutSeconds } from "./game-settings";
 import {
   formatCompactTokenDisplay,
   formatTokenDisplay,
@@ -368,7 +369,10 @@ export const createPlayerSelectionKeyboard = (
       withCreatorSuffix(`custom_players_${gameType}_${amount}`, creatorId)
     )
     .row()
-    .text("❌ Cancel", withCreatorSuffix("cancel_game_setup", creatorId))
+    .text(
+      "⬅️ Back to Amount",
+      withCreatorSuffix(`back_to_amounts_${gameType}`, creatorId)
+    )
     .row();
 
   return keyboard;
@@ -385,6 +389,49 @@ const visibilityLabel = (isPrivate: boolean): string =>
 
 const formatTimeoutLabel = (timeoutSeconds: number): string => {
   return formatDuration(timeoutSeconds);
+};
+
+const TIMEOUT_SNAP_LADDER_SECONDS = [
+  // Minutes
+  5 * 60,
+  10 * 60,
+  15 * 60,
+  20 * 60,
+  30 * 60,
+  45 * 60,
+  // Hours (including 1h30m)
+  1 * 60 * 60,
+  90 * 60,
+  2 * 60 * 60,
+  3 * 60 * 60,
+  4 * 60 * 60,
+  6 * 60 * 60,
+  8 * 60 * 60,
+  12 * 60 * 60,
+  18 * 60 * 60,
+  24 * 60 * 60,
+] as const;
+
+const snapTimeoutSeconds = (candidateSeconds: number): number => {
+  const clamped = clampTimeoutSeconds(candidateSeconds);
+  const ladder = TIMEOUT_SNAP_LADDER_SECONDS.filter(
+    (seconds) => seconds >= MIN_GAME_TIMEOUT && seconds <= MAX_GAME_TIMEOUT
+  );
+
+  if (ladder.length === 0) return clamped;
+
+  let best = ladder[0]!;
+  let bestDiff = Math.abs(clamped - best);
+
+  for (const seconds of ladder) {
+    const diff = Math.abs(clamped - seconds);
+    if (diff < bestDiff || (diff === bestDiff && seconds > best)) {
+      best = seconds;
+      bestDiff = diff;
+    }
+  }
+
+  return best;
 };
 
 export const createAdvancedOptionsKeyboard = (
@@ -405,48 +452,59 @@ export const createAdvancedOptionsKeyboard = (
     : minPlayersFloor;
   const canDecrement = options.minPlayers > minPlayersFloor;
   const canIncrement = options.minPlayers < maxMinPlayers;
-  const canDecreaseTimeout = options.timeoutSeconds > MIN_GAME_TIMEOUT;
-  const canIncreaseTimeout = options.timeoutSeconds < MAX_GAME_TIMEOUT;
   const timeoutLabel = formatTimeoutLabel(options.timeoutSeconds);
+
+  const timeoutDeltaCallback = (deltaMinutes: number): string => {
+    const nextTimeout = clampTimeoutSeconds(options.timeoutSeconds + deltaMinutes * 60);
+    if (nextTimeout === options.timeoutSeconds || deltaMinutes === 0) return "noop";
+    return withCreatorSuffix(
+      `advanced_timeout_${gameType}_${amount}_${players}_${String(deltaMinutes)}`,
+      creatorId
+    );
+  };
+
+  const timeoutMultiplierCallback = (multiplier: number): string => {
+    if (!Number.isFinite(multiplier) || multiplier <= 0) return "noop";
+
+    const targetTimeoutSeconds = snapTimeoutSeconds(
+      options.timeoutSeconds * multiplier
+    );
+    const deltaMinutes = Math.round(
+      (targetTimeoutSeconds - options.timeoutSeconds) / 60
+    );
+
+    return timeoutDeltaCallback(deltaMinutes);
+  };
+
+  const timeoutPresetCallback = (targetSeconds: number): string => {
+    const snapped = snapTimeoutSeconds(targetSeconds);
+    const deltaMinutes = Math.round((snapped - options.timeoutSeconds) / 60);
+    return timeoutDeltaCallback(deltaMinutes);
+  };
 
   return new InlineKeyboard()
     .text(
-      "-15m",
-      canDecreaseTimeout
-        ? withCreatorSuffix(
-            `advanced_timeout_${gameType}_${amount}_${players}_-15`,
-            creatorId
-          )
-        : "noop"
+      "-50%",
+      timeoutMultiplierCallback(0.5)
     )
     .text(
-      "-5m",
-      canDecreaseTimeout
-        ? withCreatorSuffix(
-            `advanced_timeout_${gameType}_${amount}_${players}_-5`,
-            creatorId
-          )
-        : "noop"
+      "-25%",
+      timeoutMultiplierCallback(0.75)
     )
-    .text(`⏱️ ${timeoutLabel}`.trim(), "noop")
+    .text(`(⏱️ ${timeoutLabel})`, "noop")
     .text(
-      "+5m",
-      canIncreaseTimeout
-        ? withCreatorSuffix(
-            `advanced_timeout_${gameType}_${amount}_${players}_5`,
-            creatorId
-          )
-        : "noop"
+      "+50%",
+      timeoutMultiplierCallback(1.5)
     )
     .text(
-      "+15m",
-      canIncreaseTimeout
-        ? withCreatorSuffix(
-            `advanced_timeout_${gameType}_${amount}_${players}_15`,
-            creatorId
-          )
-        : "noop"
+      "+100%",
+      timeoutMultiplierCallback(2)
     )
+    .row()
+    .text("1h", timeoutPresetCallback(1 * 60 * 60))
+    .text("6h", timeoutPresetCallback(6 * 60 * 60))
+    .text("12h", timeoutPresetCallback(12 * 60 * 60))
+    .text("24h", timeoutPresetCallback(24 * 60 * 60))
     .row()
     .text(
       `${visibilityLabel(effectiveIsPrivate)}`,
