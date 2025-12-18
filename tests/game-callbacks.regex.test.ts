@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 const AMOUNT_DECIMAL = '([0-9]+(?:\\.[0-9]+)?)';
 const PLAYERS_NEW_CB = new RegExp(`^players_(coinflip|giveaway)_${AMOUNT_DECIMAL}_(\\d+)_(\\d+)$`);
 const CONFIRM_NEW_CB = new RegExp(
-  `^confirm_game_(coinflip|giveaway)_${AMOUNT_DECIMAL}_(\\d+)(?:_(\\d+)_(\\d+)_(public|private))?_(\\d+)$`
+  `^confirm_game_(coinflip|giveaway)_${AMOUNT_DECIMAL}_(\\d+)_(\\d+)_(\\d+)_(public|private)_(\\d+)$`
 );
 const CONFIRM_VISIBILITY_CB = new RegExp(
   `^confirm_visibility_(coinflip|giveaway)_${AMOUNT_DECIMAL}_(\\d+)_(public|private)_(\\d+)$`
@@ -37,20 +37,6 @@ test("confirm callback regex accepts decimals and captures groups", () => {
   expect(m[5]).toBe("1");
   expect(m[6]).toBe("private");
   expect(m[7]).toBe("999");
-});
-
-test("confirm callback regex remains backward compatible with legacy payloads", () => {
-  const s = "confirm_game_coinflip_2_2_12345";
-  const m = s.match(CONFIRM_NEW_CB)!;
-
-  expect(!!m).toBe(true);
-  expect(m[1]).toBe("coinflip");
-  expect(m[2]).toBe("2");
-  expect(m[3]).toBe("2");
-  expect(m[4]).toBeUndefined();
-  expect(m[5]).toBeUndefined();
-  expect(m[6]).toBeUndefined();
-  expect(m[7]).toBe("12345");
 });
 
 test("confirm visibility regex captures choice and creator", () => {

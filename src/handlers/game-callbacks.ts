@@ -132,11 +132,9 @@ const NON_GAME_CALLBACK_PREFIXES = [
   "custom_players_",
   "slider_",
   "back_to_amounts_",
-  "back_to_confirm_",
   "type_amount_",
   "admin_",
   "info_",
-  "advanced_",
   "active_list",
   "chat_defaults_",
 ] as const;
@@ -903,13 +901,6 @@ export const createGameCallbacksModule = (
       )
     );
 
-    deps.bot.callbackQuery(/^advanced_/, async (ctx) => {
-      await safeAnswerCallbackQuery(
-        ctx,
-        "This menu has been updated — use the options on the confirm screen."
-      );
-    });
-
     deps.bot.callbackQuery(
       /^confirm_visibility_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(public|private)_(\d+)$/,
       deps.wrapCallbackHandler(
@@ -1110,15 +1101,8 @@ export const createGameCallbacksModule = (
       )
     );
 
-    deps.bot.callbackQuery(/^back_to_confirm_/, async (ctx) => {
-      await safeAnswerCallbackQuery(
-        ctx,
-        "This menu has been updated — use the options on the confirm screen."
-      );
-    });
-
     deps.bot.callbackQuery(
-      /^confirm_game_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)(?:_(\d+)_(\d+)_(public|private))?_(\d+)$/,
+      /^confirm_game_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)_(\d+)_(public|private)_(\d+)$/,
       deps.withCreatorContext(
         {
           name: "confirm_game",
@@ -1132,17 +1116,15 @@ export const createGameCallbacksModule = (
             const amount = Number.parseFloat(ctx.match![2]!);
             const players = Number.parseInt(ctx.match![3]!, 10);
             const timeoutSeconds = clampTimeoutSeconds(
-              Number.parseInt(ctx.match![4] ?? "", 10)
+              Number.parseInt(ctx.match![4]!, 10)
             );
             const minPlayersSelected = clampMinPlayers(
               gameType,
-              ctx.match?.[5] ? Number.parseInt(ctx.match[5]!, 10) : undefined,
+              Number.parseInt(ctx.match![5]!, 10),
               players,
               deps.getOracleMaxPlayers()
             );
-            const visibility =
-              (ctx.match?.[6] as "public" | "private" | undefined) ??
-              "private";
+            const visibility = ctx.match![6] as "public" | "private";
             // Force public visibility for DM-created games
             const isFromDM = ctx.chat?.type === "private";
             const isPrivate = isFromDM ? false : visibility !== "public";
