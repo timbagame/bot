@@ -3093,105 +3093,165 @@ export class GameManager {
             );
 
           if (winnerMedia && supportsVideo) {
-            const isCompleted = lowerStatus === "completed";
-            const { usedFallback, skipped } = await editMediaWithFallback({
-              edit: () =>
-                isCompleted
-                  ? ctx.api.editMessageMedia(
-                      gameMessage.chatId,
-                      gameMessage.messageId,
-                      {
-                        type: winnerMedia.mediaType,
-                        media: winnerMedia.fileId,
-                        caption: payload.text,
-                        parse_mode: "HTML",
-                      },
-                      { reply_markup: inlineKeyboard }
-                    )
-                  : ctx.api.editMessageCaption(
-                      gameMessage.chatId,
-                      gameMessage.messageId,
-                      {
-                        caption: payload.text,
-                        parse_mode: "HTML",
-                        reply_markup: inlineKeyboard,
-                      }
-                    ),
-              fallback: () => editAsText(),
-              logLabel: `game media update (${gameMessage.chatId})`,
-              onFallback: () => {
+            try {
+              const isCompleted = lowerStatus === "completed";
+              const { usedFallback, skipped } = await editMediaWithFallback({
+                edit: () =>
+                  isCompleted
+                    ? ctx.api.editMessageMedia(
+                        gameMessage.chatId,
+                        gameMessage.messageId,
+                        {
+                          type: winnerMedia.mediaType,
+                          media: winnerMedia.fileId,
+                          caption: payload.text,
+                          parse_mode: "HTML",
+                        },
+                        { reply_markup: inlineKeyboard }
+                      )
+                    : ctx.api.editMessageCaption(
+                        gameMessage.chatId,
+                        gameMessage.messageId,
+                        {
+                          caption: payload.text,
+                          parse_mode: "HTML",
+                          reply_markup: inlineKeyboard,
+                        }
+                      ),
+                fallback: async () => {
+                  // Media/caption failed - try text as last resort
+                  try {
+                    return await editAsText();
+                  } catch (textError) {
+                    // Both media/caption and text failed - message might be deleted or inaccessible
+                    console.warn(
+                      `Both media and text edits failed for game ${gameAddress} chat ${gameMessage.chatId}:`,
+                      textError
+                    );
+                    // Mark as not using video since we couldn't edit it
+                    const current =
+                      this.activeGameMessages.get(gameAddress) ??
+                      new Map<number, GameMessage>();
+                    current.set(gameMessage.chatId, {
+                      ...gameMessage,
+                      usesVideo: false,
+                    });
+                    this.activeGameMessages.set(gameAddress, current);
+                    return null;
+                  }
+                },
+                logLabel: `game media update (${gameMessage.chatId})`,
+                onFallback: () => {
+                  const current =
+                    this.activeGameMessages.get(gameAddress) ??
+                    new Map<number, GameMessage>();
+                  current.set(gameMessage.chatId, {
+                    ...gameMessage,
+                    usesVideo: false,
+                  });
+                  this.activeGameMessages.set(gameAddress, current);
+                },
+              });
+
+              if (skipped) {
+                continue;
+              }
+
+              if (!usedFallback) {
                 const current =
                   this.activeGameMessages.get(gameAddress) ??
                   new Map<number, GameMessage>();
                 current.set(gameMessage.chatId, {
                   ...gameMessage,
-                  usesVideo: false,
+                  usesVideo: true,
                 });
                 this.activeGameMessages.set(gameAddress, current);
-              },
-            });
+              }
 
-            if (skipped) {
+              continue;
+            } catch (mediaError) {
+              // If we get here, something unexpected happened
+              console.warn(
+                `Unexpected error in media edit path for game ${gameAddress} chat ${gameMessage.chatId}:`,
+                mediaError
+              );
               continue;
             }
-
-            if (!usedFallback) {
-              const current =
-                this.activeGameMessages.get(gameAddress) ??
-                new Map<number, GameMessage>();
-              current.set(gameMessage.chatId, {
-                ...gameMessage,
-                usesVideo: true,
-              });
-              this.activeGameMessages.set(gameAddress, current);
-            }
-
-            continue;
           }
 
           // Message has video but no winnerMedia (e.g. restored from DB) - try caption edit first
           if (supportsVideo) {
-            const { usedFallback, skipped } = await editMediaWithFallback({
-              edit: () =>
-                ctx.api.editMessageCaption(
-                  gameMessage.chatId,
-                  gameMessage.messageId,
-                  {
-                    caption: payload.text,
-                    parse_mode: "HTML",
-                    reply_markup: inlineKeyboard,
+            try {
+              const { usedFallback, skipped } = await editMediaWithFallback({
+                edit: () =>
+                  ctx.api.editMessageCaption(
+                    gameMessage.chatId,
+                    gameMessage.messageId,
+                    {
+                      caption: payload.text,
+                      parse_mode: "HTML",
+                      reply_markup: inlineKeyboard,
+                    }
+                  ),
+                fallback: async () => {
+                  // Caption failed - try text as last resort
+                  try {
+                    return await editAsText();
+                  } catch (textError) {
+                    // Both caption and text failed - message might be deleted or inaccessible
+                    console.warn(
+                      `Both caption and text edits failed for game ${gameAddress} chat ${gameMessage.chatId}:`,
+                      textError
+                    );
+                    // Mark as not using video since we couldn't edit it
+                    const current =
+                      this.activeGameMessages.get(gameAddress) ??
+                      new Map<number, GameMessage>();
+                    current.set(gameMessage.chatId, {
+                      ...gameMessage,
+                      usesVideo: false,
+                    });
+                    this.activeGameMessages.set(gameAddress, current);
+                    return null;
                   }
-                ),
-              fallback: () => editAsText(),
-              logLabel: `game caption update (${gameMessage.chatId})`,
-              onFallback: () => {
+                },
+                logLabel: `game caption update (${gameMessage.chatId})`,
+                onFallback: () => {
+                  const current =
+                    this.activeGameMessages.get(gameAddress) ??
+                    new Map<number, GameMessage>();
+                  current.set(gameMessage.chatId, {
+                    ...gameMessage,
+                    usesVideo: false,
+                  });
+                  this.activeGameMessages.set(gameAddress, current);
+                },
+              });
+
+              if (skipped) {
+                continue;
+              }
+
+              if (!usedFallback) {
                 const current =
                   this.activeGameMessages.get(gameAddress) ??
                   new Map<number, GameMessage>();
                 current.set(gameMessage.chatId, {
                   ...gameMessage,
-                  usesVideo: false,
+                  usesVideo: true,
                 });
                 this.activeGameMessages.set(gameAddress, current);
-              },
-            });
+              }
 
-            if (skipped) {
+              continue;
+            } catch (captionError) {
+              // If we get here, something unexpected happened
+              console.warn(
+                `Unexpected error in caption edit path for game ${gameAddress} chat ${gameMessage.chatId}:`,
+                captionError
+              );
               continue;
             }
-
-            if (!usedFallback) {
-              const current =
-                this.activeGameMessages.get(gameAddress) ??
-                new Map<number, GameMessage>();
-              current.set(gameMessage.chatId, {
-                ...gameMessage,
-                usesVideo: true,
-              });
-              this.activeGameMessages.set(gameAddress, current);
-            }
-
-            continue;
           }
 
           const { skipped } = await editMediaWithFallback({
