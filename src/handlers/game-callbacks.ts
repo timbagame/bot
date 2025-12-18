@@ -136,6 +136,8 @@ const NON_GAME_CALLBACK_PREFIXES = [
   "admin_",
   "info_",
   "active_list",
+  "active_page:",
+  "public_page:",
   "chat_defaults_",
 ] as const;
 
