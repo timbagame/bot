@@ -244,4 +244,80 @@ describe("GameManager restart fallback", () => {
     const restoredMap = gm.getActiveGameMessages(gameAddress);
     expect(restoredMap?.get(chatId)?.usesVideo).toBe(false);
   });
+
+  test("updateGameMessage falls back from text to caption when message is actually media", async () => {
+    resetGM();
+
+    const gameAddress = "Stake11111111111111111111111111111111111111";
+    const chatId = 222333;
+    const messageId = 4455;
+
+    // Mock Database
+    const mockGetGameMessages = mock(() => [{ chatId, messageId }]);
+    const mockGetGame = mock(() => ({
+      game_address: gameAddress,
+      game_type: "coinflip",
+      amount: 1_000_000_000,
+      token_ticker: "TOK",
+      token_mint: "MINT",
+      creator_telegram_id: "111",
+      status: "active"
+    }));
+
+    const db = {
+      getGameMessages: mockGetGameMessages,
+      getGame: mockGetGame,
+      getGameParticipants: () => [],
+      saveGameMessage: () => {},
+      getPlayerDisplayName: () => "User111",
+      getPlayerUsername: () => "user111"
+    } as any;
+
+    // Mock Bot Context / API - text edit fails (message has media), caption succeeds
+    const mockEditMessageCaption = mock(async () => ({}));
+    const mockEditMessageText = mock(async () => {
+      const error = new Error("Bad Request: there is no text in the message to edit");
+      (error as any).error_code = 400;
+      throw error;
+    });
+
+    const ctx = {
+      chat: { id: chatId },
+      api: {
+        editMessageText: mockEditMessageText,
+        editMessageCaption: mockEditMessageCaption,
+        editMessageMedia: mock(async () => ({})),
+        getChatMember: async () => ({ user: { username: "user111" } })
+      }
+    } as any;
+
+    const gm = GameManager.getInstance(programStub(), walletStub(), db);
+
+    // Since usesVideo defaults to true after restart, caption edit will be tried first
+    // This test simulates if somehow usesVideo was set to false but message has media
+    // Force usesVideo to false to test the fallback path
+    const messageMap = new Map();
+    messageMap.set(chatId, { chatId, messageId, usesVideo: false });
+    (gm as any).activeGameMessages.set(gameAddress, messageMap);
+
+    await gm.updateGameMessage(
+      ctx,
+      gameAddress,
+      "Coinflip",
+      1_000_000_000,
+      "user111",
+      "Active",
+      "TOK"
+    );
+
+    // Text edit was attempted first (since usesVideo: false)
+    expect(mockEditMessageText).toHaveBeenCalled();
+
+    // Then caption edit was called as fallback
+    expect(mockEditMessageCaption).toHaveBeenCalled();
+
+    // After fallback succeeded, usesVideo should be set to true
+    const restoredMap = gm.getActiveGameMessages(gameAddress);
+    expect(restoredMap?.get(chatId)?.usesVideo).toBe(true);
+  });
 });

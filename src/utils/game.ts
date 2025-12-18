@@ -3254,10 +3254,47 @@ export class GameManager {
             }
           }
 
-          const { skipped } = await editMediaWithFallback({
+          const { skipped, usedFallback: textUsedFallback } = await editMediaWithFallback({
             edit: () => editAsText(),
+            fallback: async () => {
+              // Text edit failed - try caption as fallback (message might actually be media)
+              try {
+                return await ctx.api.editMessageCaption(
+                  gameMessage.chatId,
+                  gameMessage.messageId,
+                  {
+                    caption: payload.text,
+                    parse_mode: "HTML",
+                    reply_markup: inlineKeyboard,
+                  }
+                );
+              } catch (captionError) {
+                // Both text and caption failed - message might be deleted or inaccessible
+                console.warn(
+                  `Both text and caption edits failed for game ${gameAddress} chat ${gameMessage.chatId}:`,
+                  captionError
+                );
+                return null;
+              }
+            },
             logLabel: `game text update (${gameMessage.chatId})`,
+            onFallback: () => {
+              // Text failed but caption worked - message is actually media
+              const current =
+                this.activeGameMessages.get(gameAddress) ??
+                new Map<number, GameMessage>();
+              current.set(gameMessage.chatId, {
+                ...gameMessage,
+                usesVideo: true,
+              });
+              this.activeGameMessages.set(gameAddress, current);
+            },
           });
+
+          if (textUsedFallback) {
+            // Text failed but caption worked - already marked usesVideo: true
+            continue;
+          }
 
           if (skipped) {
             continue;
@@ -5754,7 +5791,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             messageMap.set(msg.chatId, {
               messageId: msg.messageId,
               chatId: msg.chatId,
-              usesVideo: false, // Default assumption, will correct on update if needed
+              usesVideo: true, // Default to true (caption edit) as games typically have media
             });
           }
         } else if (game.message_id && game.chat_id) {
@@ -5762,7 +5799,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           messageMap.set(game.chat_id, {
             messageId: game.message_id,
             chatId: game.chat_id,
-            usesVideo: false,
+            usesVideo: true, // Default to true (caption edit) as games typically have media
           });
         }
 
