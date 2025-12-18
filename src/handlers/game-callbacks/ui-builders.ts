@@ -1,9 +1,6 @@
 import type { Context } from "grammy";
 import { InlineKeyboard } from "grammy";
-import {
-  createAdvancedOptionsKeyboard,
-  createGameConfirmKeyboard,
-} from "../../utils/keyboards";
+import { createGameConfirmKeyboard } from "../../utils/keyboards";
 import { respondWithMenu } from "../../utils/menu-response";
 import { formatDuration } from "../../utils/format-time";
 import type { AdvancedGameOptions } from "../../utils/game-settings";
@@ -101,19 +98,22 @@ export const buildGameConfirmMenuConfig = ({
   players,
   creatorId,
   advanced,
+  ui,
 }: {
   gameType: GameType;
   amount: string;
   players: number;
   creatorId?: string;
   advanced: AdvancedOptionState;
+  ui?: { lockVisibilityToPublic?: boolean };
 }) => {
   const keyboard = createGameConfirmKeyboard(
     gameType,
     amount,
     players.toString(),
     creatorId,
-    advanced
+    advanced,
+    ui
   );
 
   return {
@@ -128,99 +128,9 @@ export const buildGameConfirmMenuConfig = ({
   } as const;
 };
 
-export const buildAdvancedOptionsMessage = ({
-  amount,
-  players,
-  tokenTicker,
-  tokenDecimals,
-  advanced,
-}: {
-  amount: string;
-  players: number;
-  tokenTicker: string;
-  tokenDecimals: number;
-  advanced: AdvancedOptionState;
-}): string => {
-  const parsedAmount = Number(amount);
-  const amountNumber = Number.isFinite(parsedAmount) ? parsedAmount : 0;
-  const amountFormatted = amountNumber.toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: determineFractionDigits(
-      amount ?? amountNumber.toString(),
-      tokenDecimals
-    ),
-  });
-  return [
-    "⚙️ <b>Advanced Options</b>",
-    "",
-    `Amount: <b>${amountFormatted} ${tokenTicker}</b>`,
-    `Players: <b>${players}</b>`,
-    "",
-    `Visibility: <b>${advanced.isPrivate ? "Private" : "Public"}</b>`,
-    `Min players to start: <b>${advanced.minPlayers}/${players}</b>`,
-    `Timeout: <b>${formatDuration(advanced.timeoutSeconds)}</b>`,
-    "",
-    "Adjust options below or go back to confirm.",
-  ].join("\n");
-};
-
 // ================================
 // MENU PRESENTERS
 // ================================
-
-export const presentAdvancedMenu = async (params: {
-  ctx: Context;
-  gameType: GameType;
-  amount: string;
-  players: number;
-  tokenTicker: string;
-  tokenDecimals: number;
-  creatorId?: string;
-  advanced: AdvancedOptionState;
-  logLabel?: string;
-}): Promise<void> => {
-  const {
-    ctx,
-    gameType,
-    amount,
-    players,
-    tokenTicker,
-    tokenDecimals,
-    creatorId,
-    advanced,
-    logLabel,
-  } = params;
-  const isFromDM = ctx.chat?.type === "private";
-  const text = buildAdvancedOptionsMessage({
-    amount,
-    players,
-    tokenTicker,
-    tokenDecimals,
-    advanced,
-  });
-
-  const keyboard = createAdvancedOptionsKeyboard(
-    gameType,
-    amount,
-    players.toString(),
-    advanced,
-    creatorId,
-    isFromDM ? { lockVisibilityToPublic: true } : undefined
-  );
-
-  await respondWithMenu(
-    ctx,
-    {
-      text,
-      parseMode: "HTML",
-      keyboard,
-    },
-    {
-      allowContextEdit: true,
-      logLabel: logLabel ?? "advanced_options",
-    }
-  );
-};
 
 export const presentConfirmMenu = async (params: {
   ctx: Context;
@@ -245,6 +155,7 @@ export const presentConfirmMenu = async (params: {
     logLabel,
   } = params;
 
+  const isFromDM = ctx.chat?.type === "private";
   const confirmMessage = buildGameConfirmationMessage({
     gameType,
     amount,
@@ -260,6 +171,7 @@ export const presentConfirmMenu = async (params: {
     players,
     creatorId,
     advanced,
+    ui: isFromDM ? { lockVisibilityToPublic: true } : undefined,
   });
 
   await respondWithMenu(

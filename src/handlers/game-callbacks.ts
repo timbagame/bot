@@ -29,7 +29,6 @@ import {
   buildPlayerSelectionMessage,
   buildGameConfirmationMessage,
   buildGameConfirmMenuConfig,
-  presentAdvancedMenu,
   presentConfirmMenu,
   presentCustomAmountPrompt,
   determineFractionDigits,
@@ -550,6 +549,7 @@ export const createGameCallbacksModule = (
           players,
           creatorId: userSession.creatorId,
           advanced,
+          ui: ctx.chat?.type === "private" ? { lockVisibilityToPublic: true } : undefined,
         });
 
         try {
@@ -903,69 +903,19 @@ export const createGameCallbacksModule = (
       )
     );
 
+    deps.bot.callbackQuery(/^advanced_/, async (ctx) => {
+      await safeAnswerCallbackQuery(
+        ctx,
+        "This menu has been updated — use the options on the confirm screen."
+      );
+    });
+
     deps.bot.callbackQuery(
-      /^advanced_options_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/,
+      /^confirm_visibility_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(public|private)_(\d+)$/,
       deps.wrapCallbackHandler(
         deps.withCreatorContext(
           {
-            name: "advanced_options",
-            resolveCreatorId: (ctx) => ctx.match?.[4],
-            failureText:
-              "🚫 Only the game creator can adjust advanced options!",
-          },
-          async (ctx, { session, tokenContext, updateSession, creatorId }) => {
-            const gameType = ctx.match![1] as "coinflip" | "giveaway";
-            const amount = ctx.match![2] as string;
-            const players = Number.parseInt(ctx.match![3] as string, 10);
-
-            const chatSettings = resolveChatSettingsForContext(ctx, session);
-            const advanced = resolveAdvancedOptionsForContext(
-              ctx,
-              gameType,
-              players,
-              session,
-              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers(),
-              chatSettings
-            );
-
-            await presentAdvancedMenu({
-              ctx,
-              gameType,
-              amount,
-              players,
-              tokenTicker: tokenContext.tokenTicker,
-              tokenDecimals: tokenContext.tokenDecimals,
-              creatorId,
-              advanced,
-              logLabel: "advanced_options_open",
-            });
-
-            updateSession({
-              waitingFor: "setup",
-              gameType,
-              userBalance: session?.userBalance ?? 0,
-              messageId: ctx.callbackQuery?.message?.message_id ?? session?.messageId,
-              chatId: ctx.chat?.id ?? session?.chatId ?? 0,
-              amount,
-              players,
-              timeoutSeconds: advanced.timeoutSeconds,
-              minPlayers: advanced.minPlayers,
-              isPrivate: advanced.isPrivate,
-            });
-
-            await safeAnswerCallbackQuery(ctx);
-          }
-        ),
-        { action: "advanced_options", errorAck: "❌ Error opening options" }
-      )
-    );
-
-    deps.bot.callbackQuery(
-      /^advanced_visibility_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(public|private)_(\d+)$/,
-      deps.wrapCallbackHandler(
-        deps.withCreatorContext(
-          {
-            name: "advanced_visibility",
+            name: "confirm_visibility",
             resolveCreatorId: (ctx) => ctx.match?.[5],
             failureText:
               "🚫 Only the game creator can adjust visibility!",
@@ -986,7 +936,7 @@ export const createGameCallbacksModule = (
               resolveChatSettingsForContext(ctx, session)
             );
 
-            await presentAdvancedMenu({
+            await presentConfirmMenu({
               ctx,
               gameType,
               amount,
@@ -995,14 +945,16 @@ export const createGameCallbacksModule = (
               tokenDecimals: tokenContext.tokenDecimals,
               creatorId,
               advanced,
-              logLabel: "advanced_visibility_toggle",
+              logLabel: "confirm_visibility_toggle",
             });
 
             updateSession({
+              ...(session ?? {}),
               waitingFor: "setup",
               gameType,
               userBalance: session?.userBalance ?? 0,
-              messageId: ctx.callbackQuery?.message?.message_id ?? session?.messageId,
+              messageId:
+                ctx.callbackQuery?.message?.message_id ?? session?.messageId,
               chatId: ctx.chat?.id ?? session?.chatId ?? 0,
               amount,
               players,
@@ -1014,16 +966,16 @@ export const createGameCallbacksModule = (
             await safeAnswerCallbackQuery(ctx);
           }
         ),
-        { action: "advanced_visibility", errorAck: "❌ Error updating visibility" }
+        { action: "confirm_visibility", errorAck: "❌ Error updating visibility" }
       )
     );
 
     deps.bot.callbackQuery(
-      /^advanced_timeout_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(-?\d+)_([0-9]+)$/,
+      /^confirm_timeout_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(-?\d+)_([0-9]+)$/,
       deps.wrapCallbackHandler(
         deps.withCreatorContext(
           {
-            name: "advanced_timeout",
+            name: "confirm_timeout",
             resolveCreatorId: (ctx) => ctx.match?.[5],
             failureText:
               "🚫 Only the game creator can set a custom timeout!",
@@ -1048,7 +1000,7 @@ export const createGameCallbacksModule = (
               resolveChatSettingsForContext(ctx, session)
             );
 
-            await presentAdvancedMenu({
+            await presentConfirmMenu({
               ctx,
               gameType,
               amount,
@@ -1057,7 +1009,7 @@ export const createGameCallbacksModule = (
               tokenDecimals: tokenContext.tokenDecimals,
               creatorId,
               advanced,
-              logLabel: "advanced_timeout_update",
+              logLabel: "confirm_timeout_update",
             });
 
             updateSession({
@@ -1078,16 +1030,16 @@ export const createGameCallbacksModule = (
             await safeAnswerCallbackQuery(ctx);
           }
         ),
-        { action: "advanced_timeout", errorAck: "❌ Error updating timeout" }
+        { action: "confirm_timeout", errorAck: "❌ Error updating timeout" }
       )
     );
 
     deps.bot.callbackQuery(
-      /^advanced_min_players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(-?\d+)_([0-9]+)$/,
+      /^confirm_min_players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(-?\d+)_([0-9]+)$/,
       deps.wrapCallbackHandler(
         deps.withCreatorContext(
           {
-            name: "advanced_min_players",
+            name: "confirm_min_players",
             resolveCreatorId: (ctx) => ctx.match?.[5],
             failureText:
               "🚫 Only the game creator can adjust minimum players!",
@@ -1121,7 +1073,7 @@ export const createGameCallbacksModule = (
               resolveChatSettingsForContext(ctx, session)
             );
 
-            await presentAdvancedMenu({
+            await presentConfirmMenu({
               ctx,
               gameType,
               amount,
@@ -1130,7 +1082,7 @@ export const createGameCallbacksModule = (
               tokenDecimals: tokenContext.tokenDecimals,
               creatorId,
               advanced,
-              logLabel: "advanced_min_players_update",
+              logLabel: "confirm_min_players_update",
             });
 
             updateSession({
@@ -1151,64 +1103,19 @@ export const createGameCallbacksModule = (
             await safeAnswerCallbackQuery(ctx);
           }
         ),
-        { action: "advanced_min_players", errorAck: "❌ Error updating minimum players" }
+        {
+          action: "confirm_min_players",
+          errorAck: "❌ Error updating minimum players",
+        }
       )
     );
 
-    deps.bot.callbackQuery(
-      /^back_to_confirm_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/,
-      deps.wrapCallbackHandler(
-        deps.withCreatorContext(
-          {
-            name: "back_to_confirm",
-            resolveCreatorId: (ctx) => ctx.match?.[4],
-            failureText: "🚫 Only the game creator can modify this game setup!",
-          },
-          async (ctx, { session, tokenContext, updateSession, creatorId }) => {
-            const gameType = ctx.match![1] as "coinflip" | "giveaway";
-            const amount = ctx.match![2] as string;
-            const players = Number.parseInt(ctx.match![3] as string, 10);
-
-            const advanced = resolveAdvancedOptionsForContext(
-              ctx,
-              gameType,
-              players,
-              session,
-              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers(),
-              resolveChatSettingsForContext(ctx, session)
-            );
-
-            await presentConfirmMenu({
-              ctx,
-              gameType,
-              amount,
-              players,
-              tokenTicker: tokenContext.tokenTicker,
-              tokenDecimals: tokenContext.tokenDecimals,
-              creatorId,
-              advanced,
-              logLabel: "advanced_back_to_confirm",
-            });
-
-            updateSession({
-              waitingFor: "setup",
-              gameType,
-              userBalance: session?.userBalance ?? 0,
-              messageId: ctx.callbackQuery?.message?.message_id ?? session?.messageId,
-              chatId: ctx.chat?.id ?? session?.chatId ?? 0,
-              amount,
-              players,
-              timeoutSeconds: advanced.timeoutSeconds,
-              minPlayers: advanced.minPlayers,
-              isPrivate: advanced.isPrivate,
-            });
-
-            await safeAnswerCallbackQuery(ctx);
-          }
-        ),
-        { action: "back_to_confirm", errorAck: "❌ Error returning" }
-      )
-    );
+    deps.bot.callbackQuery(/^back_to_confirm_/, async (ctx) => {
+      await safeAnswerCallbackQuery(
+        ctx,
+        "This menu has been updated — use the options on the confirm screen."
+      );
+    });
 
     deps.bot.callbackQuery(
       /^confirm_game_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)(?:_(\d+)_(\d+)_(public|private))?_(\d+)$/,

@@ -38,5 +38,6 @@ test("game confirm keyboard embeds decimal amount and creatorId", () => {
   const confirm = callbacks.find(s => s?.startsWith("confirm_game_giveaway_"))!;
   expect(confirm).toBeTruthy();
   expect(/confirm_game_giveaway_0\.75_10_3600_1_private_999$/.test(confirm)).toBe(true);
-  expect(callbacks.some((s) => s === "advanced_options_giveaway_0.75_10_999")).toBe(true);
+  expect(callbacks.some((s) => s === "confirm_timeout_giveaway_0.75_10_-30_999")).toBe(true);
+  expect(callbacks.some((s) => s === "confirm_visibility_giveaway_0.75_10_public_999")).toBe(true);
 });

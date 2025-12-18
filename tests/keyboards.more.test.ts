@@ -9,14 +9,8 @@ import {
   createAmountSelectionKeyboard,
   createPlayerSelectionKeyboard,
   createGameConfirmKeyboard,
-  createAdvancedOptionsKeyboard,
   getFeeWarningMessage,
 } from "../src/utils/keyboards";
-import {
-  MAX_GAME_TIMEOUT,
-  MIN_COINFLIP_PLAYERS,
-  MIN_GAME_TIMEOUT,
-} from "../src/utils/constants";
 
 // Helper to extract callback_data strings from InlineKeyboard
 function extractCallbacks(kb: any): string[] {
@@ -153,138 +147,6 @@ describe("keyboards: misc menus", () => {
     expect(callbacks).toContain("cmd_back");
     expect(texts).toContain("✅ Confirm");
     expect(texts).toContain("❌ Back");
-  });
-
-  test("advanced options keyboard reflects visibility, timeout, and min players", () => {
-    const kb = createAdvancedOptionsKeyboard(
-      "coinflip",
-      "1.5",
-      "4",
-      { timeoutSeconds: 2700, minPlayers: 3, isPrivate: false },
-      "creator123"
-    );
-
-    const callbacks = extractCallbacks(kb);
-    const texts = extractTexts(kb);
-
-    expect(texts).toEqual([
-      "-50%",
-      "-25%",
-      "(⏱️ 45m)",
-      "+50%",
-      "+100%",
-      "1h",
-      "6h",
-      "12h",
-      "24h",
-      "🌐 Public",
-      "-",
-      "👥 Min: 3",
-      "+",
-      "⬅️ Back",
-    ]);
-    expect(callbacks).toEqual([
-      "advanced_timeout_coinflip_1.5_4_-25_creator123",
-      "advanced_timeout_coinflip_1.5_4_-15_creator123",
-      "noop",
-      "advanced_timeout_coinflip_1.5_4_15_creator123",
-      "advanced_timeout_coinflip_1.5_4_45_creator123",
-      "advanced_timeout_coinflip_1.5_4_15_creator123",
-      "advanced_timeout_coinflip_1.5_4_315_creator123",
-      "advanced_timeout_coinflip_1.5_4_675_creator123",
-      "advanced_timeout_coinflip_1.5_4_1395_creator123",
-      "advanced_visibility_coinflip_1.5_4_private_creator123",
-      "advanced_min_players_coinflip_1.5_4_-1_creator123",
-      "noop",
-      "advanced_min_players_coinflip_1.5_4_1_creator123",
-      "back_to_confirm_coinflip_1.5_4_creator123",
-    ]);
-  });
-
-  test("advanced options keyboard can lock visibility to public (DM)", () => {
-    const kb = createAdvancedOptionsKeyboard(
-      "coinflip",
-      "1.5",
-      "4",
-      { timeoutSeconds: 2700, minPlayers: 3, isPrivate: true },
-      "creator123",
-      { lockVisibilityToPublic: true }
-    );
-
-    const callbacks = extractCallbacks(kb);
-    const texts = extractTexts(kb);
-
-    expect(texts).toContain("🌐 Public");
-    expect(callbacks).toContain("noop");
-    expect(callbacks).not.toContain(
-      "advanced_visibility_coinflip_1.5_4_public_creator123"
-    );
-    expect(callbacks).not.toContain(
-      "advanced_visibility_coinflip_1.5_4_private_creator123"
-    );
-  });
-
-  test("advanced timeout buttons disable at minimum", () => {
-    const kb = createAdvancedOptionsKeyboard(
-      "coinflip",
-      "1.5",
-      "4",
-      { timeoutSeconds: MIN_GAME_TIMEOUT, minPlayers: 2, isPrivate: true }
-    );
-
-    const callbacks = extractCallbacks(kb);
-
-    // Percent row (decrements should clamp back to MIN => noop)
-    expect(callbacks[0]).toBe("noop");
-    expect(callbacks[1]).toBe("noop");
-    expect(callbacks[3]).toBe("advanced_timeout_coinflip_1.5_4_5");
-    expect(callbacks[4]).toBe("advanced_timeout_coinflip_1.5_4_5");
-  });
-
-  test("advanced timeout buttons disable at maximum", () => {
-    const kb = createAdvancedOptionsKeyboard(
-      "coinflip",
-      "1.5",
-      "4",
-      { timeoutSeconds: MAX_GAME_TIMEOUT, minPlayers: 2, isPrivate: true }
-    );
-
-    const callbacks = extractCallbacks(kb);
-
-    expect(callbacks[0]).toBe("advanced_timeout_coinflip_1.5_4_-720");
-    expect(callbacks[1]).toBe("advanced_timeout_coinflip_1.5_4_-360");
-    expect(callbacks[3]).toBe("noop");
-    expect(callbacks[4]).toBe("noop");
-  });
-
-  test("advanced min players decrement disables at floor", () => {
-    const kb = createAdvancedOptionsKeyboard(
-      "coinflip",
-      "2.5",
-      "4",
-      { timeoutSeconds: 3600, minPlayers: MIN_COINFLIP_PLAYERS, isPrivate: true }
-    );
-
-    const minPlayersRow = (kb as any).inline_keyboard?.[3] as any[] | undefined;
-    expect(minPlayersRow?.[0]?.callback_data).toBe("noop");
-    expect(minPlayersRow?.[2]?.callback_data).toBe(
-      "advanced_min_players_coinflip_2.5_4_1"
-    );
-  });
-
-  test("advanced min players increment disables at selected player count", () => {
-    const kb = createAdvancedOptionsKeyboard(
-      "coinflip",
-      "2.5",
-      "4",
-      { timeoutSeconds: 3600, minPlayers: 4, isPrivate: true }
-    );
-
-    const minPlayersRow = (kb as any).inline_keyboard?.[3] as any[] | undefined;
-    expect(minPlayersRow?.[0]?.callback_data).toBe(
-      "advanced_min_players_coinflip_2.5_4_-1"
-    );
-    expect(minPlayersRow?.[2]?.callback_data).toBe("noop");
   });
 });
 
@@ -491,6 +353,11 @@ describe("keyboards: player selection and confirm", () => {
     const callbacks = extractCallbacks(kb);
     expect(callbacks).toContain("confirm_game_coinflip_30_4_3600_2_private_abc");
     expect(callbacks).toContain("amount_coinflip_30_abc");
-    expect(callbacks).toContain("advanced_options_coinflip_30_4_abc");
+    expect(callbacks).toContain("confirm_timeout_coinflip_30_4_-30_abc");
+    expect(callbacks).toContain("confirm_timeout_coinflip_30_4_-15_abc");
+    expect(callbacks).toContain("confirm_timeout_coinflip_30_4_30_abc");
+    expect(callbacks).toContain("confirm_timeout_coinflip_30_4_60_abc");
+    expect(callbacks).toContain("confirm_visibility_coinflip_30_4_public_abc");
+    expect(callbacks).toContain("confirm_min_players_coinflip_30_4_1_abc");
   });
 });

@@ -434,124 +434,13 @@ const snapTimeoutSeconds = (candidateSeconds: number): number => {
   return best;
 };
 
-export const createAdvancedOptionsKeyboard = (
-  gameType: string,
-  amount: string,
-  players: string,
-  options: GameAdvancedOptions,
-  creatorId?: string,
-  ui?: { lockVisibilityToPublic?: boolean }
-): InlineKeyboard => {
-  const lockVisibilityToPublic = ui?.lockVisibilityToPublic === true;
-  const effectiveIsPrivate = lockVisibilityToPublic ? false : options.isPrivate;
-  const playersCount = Number.parseInt(players, 10);
-  const minPlayersFloor =
-    gameType === "coinflip" ? MIN_COINFLIP_PLAYERS : MIN_GIVEAWAY_PLAYERS;
-  const maxMinPlayers = Number.isFinite(playersCount)
-    ? Math.max(minPlayersFloor, playersCount)
-    : minPlayersFloor;
-  const canDecrement = options.minPlayers > minPlayersFloor;
-  const canIncrement = options.minPlayers < maxMinPlayers;
-  const timeoutLabel = formatTimeoutLabel(options.timeoutSeconds);
-
-  const timeoutDeltaCallback = (deltaMinutes: number): string => {
-    const nextTimeout = clampTimeoutSeconds(options.timeoutSeconds + deltaMinutes * 60);
-    if (nextTimeout === options.timeoutSeconds || deltaMinutes === 0) return "noop";
-    return withCreatorSuffix(
-      `advanced_timeout_${gameType}_${amount}_${players}_${String(deltaMinutes)}`,
-      creatorId
-    );
-  };
-
-  const timeoutMultiplierCallback = (multiplier: number): string => {
-    if (!Number.isFinite(multiplier) || multiplier <= 0) return "noop";
-
-    const targetTimeoutSeconds = snapTimeoutSeconds(
-      options.timeoutSeconds * multiplier
-    );
-    const deltaMinutes = Math.round(
-      (targetTimeoutSeconds - options.timeoutSeconds) / 60
-    );
-
-    return timeoutDeltaCallback(deltaMinutes);
-  };
-
-  const timeoutPresetCallback = (targetSeconds: number): string => {
-    const snapped = snapTimeoutSeconds(targetSeconds);
-    const deltaMinutes = Math.round((snapped - options.timeoutSeconds) / 60);
-    return timeoutDeltaCallback(deltaMinutes);
-  };
-
-  return new InlineKeyboard()
-    .text(
-      "-50%",
-      timeoutMultiplierCallback(0.5)
-    )
-    .text(
-      "-25%",
-      timeoutMultiplierCallback(0.75)
-    )
-    .text(`(⏱️ ${timeoutLabel})`, "noop")
-    .text(
-      "+50%",
-      timeoutMultiplierCallback(1.5)
-    )
-    .text(
-      "+100%",
-      timeoutMultiplierCallback(2)
-    )
-    .row()
-    .text("1h", timeoutPresetCallback(1 * 60 * 60))
-    .text("6h", timeoutPresetCallback(6 * 60 * 60))
-    .text("12h", timeoutPresetCallback(12 * 60 * 60))
-    .text("24h", timeoutPresetCallback(24 * 60 * 60))
-    .row()
-    .text(
-      `${visibilityLabel(effectiveIsPrivate)}`,
-      lockVisibilityToPublic
-        ? "noop"
-        : withCreatorSuffix(
-            `advanced_visibility_${gameType}_${amount}_${players}_${effectiveIsPrivate ? "public" : "private"}`,
-            creatorId
-          )
-    )
-    .row()
-    .text(
-      "-",
-      canDecrement
-        ? withCreatorSuffix(
-            `advanced_min_players_${gameType}_${amount}_${players}_-1`,
-            creatorId
-          )
-        : "noop"
-    )
-    .text(`👥 Min: ${options.minPlayers}`, "noop")
-    .text(
-      "+",
-      canIncrement
-        ? withCreatorSuffix(
-            `advanced_min_players_${gameType}_${amount}_${players}_1`,
-            creatorId
-          )
-        : "noop"
-    )
-    .row()
-    .text(
-      "⬅️ Back",
-      withCreatorSuffix(
-        `back_to_confirm_${gameType}_${amount}_${players}`,
-        creatorId
-      )
-    )
-    .row();
-};
-
 export const createGameConfirmKeyboard = (
   gameType: string,
   amount: string,
   players: string,
   creatorId?: string,
-  options?: Partial<GameAdvancedOptions>
+  options?: Partial<GameAdvancedOptions>,
+  ui?: { lockVisibilityToPublic?: boolean }
 ): InlineKeyboard => {
   const fallbackMinPlayers =
     gameType === "coinflip" ? MIN_COINFLIP_PLAYERS : MIN_GIVEAWAY_PLAYERS;
@@ -561,21 +450,97 @@ export const createGameConfirmKeyboard = (
     isPrivate: options?.isPrivate ?? true,
   };
 
-  return new InlineKeyboard()
+  const lockVisibilityToPublic = ui?.lockVisibilityToPublic === true;
+  const effectiveIsPrivate = lockVisibilityToPublic ? false : advanced.isPrivate;
+
+  const timeoutDeltaCallback = (deltaMinutes: number): string => {
+    if (!creatorId) return "noop";
+    const nextTimeout = clampTimeoutSeconds(
+      advanced.timeoutSeconds + deltaMinutes * 60
+    );
+    if (nextTimeout === advanced.timeoutSeconds || deltaMinutes === 0) {
+      return "noop";
+    }
+    return withCreatorSuffix(
+      `confirm_timeout_${gameType}_${amount}_${players}_${String(deltaMinutes)}`,
+      creatorId
+    );
+  };
+
+  const timeoutMultiplierCallback = (multiplier: number): string => {
+    if (!Number.isFinite(multiplier) || multiplier <= 0) return "noop";
+    const targetTimeoutSeconds = snapTimeoutSeconds(
+      advanced.timeoutSeconds * multiplier
+    );
+    const deltaMinutes = Math.round(
+      (targetTimeoutSeconds - advanced.timeoutSeconds) / 60
+    );
+    return timeoutDeltaCallback(deltaMinutes);
+  };
+
+  const timeoutPresetCallback = (targetSeconds: number): string => {
+    const snapped = snapTimeoutSeconds(targetSeconds);
+    const deltaMinutes = Math.round((snapped - advanced.timeoutSeconds) / 60);
+    return timeoutDeltaCallback(deltaMinutes);
+  };
+
+  const minPlayersFloor =
+    gameType === "coinflip" ? MIN_COINFLIP_PLAYERS : MIN_GIVEAWAY_PLAYERS;
+  const playersCount = Number.parseInt(players, 10);
+  const maxMinPlayers = Number.isFinite(playersCount)
+    ? Math.max(minPlayersFloor, playersCount)
+    : minPlayersFloor;
+  const canDecrement = advanced.minPlayers > minPlayersFloor;
+  const canIncrement = advanced.minPlayers < maxMinPlayers;
+
+  const keyboard = new InlineKeyboard()
     .text(
       "✅ Create Game",
       withCreatorSuffix(
-        `confirm_game_${gameType}_${amount}_${players}_${advanced.timeoutSeconds}_${advanced.minPlayers}_${advanced.isPrivate ? "private" : "public"}`,
+        `confirm_game_${gameType}_${amount}_${players}_${advanced.timeoutSeconds}_${advanced.minPlayers}_${effectiveIsPrivate ? "private" : "public"}`,
         creatorId
       )
     )
     .row()
+    .text("-50%", timeoutMultiplierCallback(0.5))
+    .text("-25%", timeoutMultiplierCallback(0.75))
+    .text(`⏱️ ${formatTimeoutLabel(advanced.timeoutSeconds)}`, "noop")
+    .text("+50%", timeoutMultiplierCallback(1.5))
+    .text("+100%", timeoutMultiplierCallback(2))
+    .row()
+    .text("1h", timeoutPresetCallback(1 * 60 * 60))
+    .text("6h", timeoutPresetCallback(6 * 60 * 60))
+    .text("12h", timeoutPresetCallback(12 * 60 * 60))
+    .text("24h", timeoutPresetCallback(24 * 60 * 60))
+    .row()
     .text(
-      "⚙️ Advanced options",
-      withCreatorSuffix(
-        `advanced_options_${gameType}_${amount}_${players}`,
-        creatorId
-      )
+      `${visibilityLabel(effectiveIsPrivate)}`,
+      !creatorId || lockVisibilityToPublic
+        ? "noop"
+        : withCreatorSuffix(
+            `confirm_visibility_${gameType}_${amount}_${players}_${effectiveIsPrivate ? "public" : "private"}`,
+            creatorId
+          )
+    )
+    .row()
+    .text(
+      "-",
+      creatorId && canDecrement
+        ? withCreatorSuffix(
+            `confirm_min_players_${gameType}_${amount}_${players}_-1`,
+            creatorId
+          )
+        : "noop"
+    )
+    .text(`👥 Min: ${advanced.minPlayers}`, "noop")
+    .text(
+      "+",
+      creatorId && canIncrement
+        ? withCreatorSuffix(
+            `confirm_min_players_${gameType}_${amount}_${players}_1`,
+            creatorId
+          )
+        : "noop"
     )
     .row()
     .text(
@@ -583,4 +548,6 @@ export const createGameConfirmKeyboard = (
       withCreatorSuffix(`amount_${gameType}_${amount}`, creatorId)
     )
     .row();
+
+  return keyboard;
 };

@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  buildAdvancedOptionsMessage,
   buildGameConfirmationMessage,
 } from "../src/handlers/game-callbacks/ui-builders";
 
@@ -11,18 +10,6 @@ const baseAdvancedState = {
 };
 
 describe("ui builders", () => {
-  test("advanced options message formats timeout with duration helper", () => {
-    const message = buildAdvancedOptionsMessage({
-      amount: "13000",
-      players: 2,
-      tokenTicker: "TIMBA",
-      tokenDecimals: 9,
-      advanced: { ...baseAdvancedState, timeoutSeconds: 600 * 60 },
-    });
-
-    expect(message).toContain("Timeout: <b>10h</b>");
-  });
-
   test("game confirmation message uses compact duration formatting", () => {
     const message = buildGameConfirmationMessage({
       gameType: "coinflip",
