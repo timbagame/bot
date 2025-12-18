@@ -3006,7 +3006,30 @@ export class GameManager {
     totalPot?: number,
     winnerSignature?: string
   ): Promise<void> {
-    const messageMap = this.activeGameMessages.get(gameAddress);
+    let messageMap = this.activeGameMessages.get(gameAddress);
+    if (!messageMap || messageMap.size === 0) {
+      // Fallback: Check database for any existing messages for this game
+      try {
+        const dbMessages = this.gameDb.getGameMessages(gameAddress);
+        if (dbMessages && dbMessages.length > 0) {
+          messageMap = new Map<number, GameMessage>();
+          for (const msg of dbMessages) {
+            messageMap.set(msg.chatId, {
+              messageId: msg.messageId,
+              chatId: msg.chatId,
+              usesVideo: true, // Default to true as a safe bet for media update logic
+            });
+          }
+          this.activeGameMessages.set(gameAddress, messageMap);
+          console.log(
+            `♻️ Restored ${messageMap.size} message target(s) from DB for game ${gameAddress}`
+          );
+        }
+      } catch (dbError) {
+        console.warn(`Error loading message targets from DB for ${gameAddress}:`, dbError);
+      }
+    }
+
     if (!messageMap || messageMap.size === 0) return;
 
     let messageTextValue = "";
