@@ -2644,6 +2644,9 @@ export class GameManager {
     );
 
     const formattedTicketAmount = formatBalanceForDisplay(amountLamports);
+    const explorerUrl = NetworkDetector.buildSolscanAccountUrl(
+      gamePda.toBase58()
+    );
 
     const safeCreatorUsername = sanitizeDisplay(creatorUsername);
     const header = buildGameHeader(
@@ -2653,7 +2656,8 @@ export class GameManager {
       safeCreatorUsername,
       currentTickets,
       maxTickets,
-      usdApproximation?.text
+      usdApproximation?.text,
+      explorerUrl
     );
     // Show current prize if different from base amount
     let prizeUsdApproximation: string | null = null;
@@ -3324,6 +3328,13 @@ export class GameManager {
         : `${currentTickets}`;
       const gameTypeText = formatGameTypeWithEmoji(gameData.game_type);
       const tokenTicker = gameData.token_ticker || "WSOL";
+      const explorerUrl = gameAddress
+        ? NetworkDetector.buildSolscanAccountUrl(gameAddress)
+        : null;
+      const gameExplorerIcon = explorerUrl
+        ? `<a href="${escapeHtml(explorerUrl)}">🅴</a>`
+        : "🅴";
+      const gameLabel = `${escapeHtml(gameTypeText)} ${gameExplorerIcon}`;
       let formatBalanceForDisplay = (value: number) =>
         this.wallet.formatTokenBalance(value, 6);
       if (gameAddress) {
@@ -3371,7 +3382,7 @@ export class GameManager {
       const safeCreator = escapeHtml(creatorLabel);
       const safePlayerCount = escapeHtml(playerCountDisplay);
       let message =
-        `${gameTypeText} • ${safeAmountDisplay} ${safeTicker}` +
+        `${gameLabel} • ${safeAmountDisplay} ${safeTicker}` +
         `\nCreator: ${safeCreator} • ${safePlayerCount} tickets`;
       const totalParticipants = currentTickets;
       const allowNetworkLookup =

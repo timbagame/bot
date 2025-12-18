@@ -31,18 +31,23 @@ export function buildGameHeader(
   creatorUsername: string,
   currentTickets: number,
   maxTickets: number,
-  usdApproximation?: string | null
+  usdApproximation?: string | null,
+  explorerUrl?: string | null
 ): string {
   const usdSegment = usdApproximation
     ? ` (${escapeHtml(usdApproximation)})`
     : "";
+  const gameExplorerIcon = explorerUrl
+    ? `<a href="${escapeHtml(explorerUrl)}">🅴</a>`
+    : "🅴";
+  const gameLabel = `${escapeHtml(gameTypeLabel)} ${gameExplorerIcon}`;
   const amountDisplay = escapeHtml(
     formatCompactTokenDisplay(amountFormatted)
   );
   const tickerDisplay = escapeHtml(tokenTicker);
   const creatorDisplay = escapeHtml(creatorUsername);
   return (
-    `<b>${gameTypeLabel} • ${amountDisplay} ${tickerDisplay}${usdSegment}</b>\n` +
+    `<b>${gameLabel} • ${amountDisplay} ${tickerDisplay}${usdSegment}</b>\n` +
     `Creator: ${creatorDisplay} • ${currentTickets}/${maxTickets} tickets`
   );
 }

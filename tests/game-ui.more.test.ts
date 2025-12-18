@@ -14,7 +14,7 @@ test("buildGameHeader formats header line", () => {
     1,
     2
   );
-  expect(header).toContain("🪙 Coinflip • 10 TIMBA");
+  expect(header).toContain("🪙 Coinflip 🅴 • 10 TIMBA");
   expect(header).toContain("Creator: @user • 1/2 tickets");
 });
 
@@ -29,6 +29,22 @@ test("buildGameHeader includes USD approximation when provided", () => {
     "$12.3"
   );
   expect(header).toContain("($12.3)");
+});
+
+test("buildGameHeader links explorer icon when URL provided", () => {
+  const header = buildGameHeader(
+    "🪙 Coinflip",
+    "10.000000",
+    "TIMBA",
+    "@user",
+    1,
+    2,
+    "$12.3",
+    "https://solscan.io/account/AbCdEf"
+  );
+  expect(header).toContain(
+    '🪙 Coinflip <a href="https://solscan.io/account/AbCdEf">🅴</a> • 10 TIMBA'
+  );
 });
 
 test("buildPrizeLine shows only when flag true", () => {
@@ -58,7 +74,7 @@ test("buildGameHeader escapes ticker markup", () => {
     1,
     2
   );
-  expect(header).toContain("🪙 Coinflip • 10");
+  expect(header).toContain("🪙 Coinflip 🅴 • 10");
   expect(header).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
   expect(header).not.toContain("<script>alert(1)</script>");
 });
