@@ -78,4 +78,13 @@ describe("Game callback guard", () => {
       botModule.__test_shouldSkipGenericGameCallback("cancel_game_123")
     ).toBe(true);
   });
+
+  test("skips pagination callbacks", () => {
+    expect(
+      botModule.__test_shouldSkipGenericGameCallback("active_page:1")
+    ).toBe(true);
+    expect(
+      botModule.__test_shouldSkipGenericGameCallback("public_page:2")
+    ).toBe(true);
+  });
 });
