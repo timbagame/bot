@@ -123,7 +123,7 @@ import {
   computeRequiredAdminLamports,
 } from "./utils/admin-payer-surcharge";
 import { patchReplyBehavior } from "./utils/reply-patch";
-import { buildTransactionLinkMessage } from "./utils/network-detector";
+import { buildTransactionLinkMessage, NetworkDetector } from "./utils/network-detector";
 import { buildProcessingStatus } from "./utils/trade-ui";
 import { respondWithMenu } from "./utils/menu-response";
 import { handleCoinflipCommand } from "./handlers/game";
@@ -1413,17 +1413,20 @@ const buildActiveGamesKeyboard = (
 
   games.forEach((game, i) => {
     const globalIndex = startIndex + i + 1;
-    inlineKeyboard.push([
-      {
-        text: extractCondensedGameLabel(
-          game.messageText,
-          game.currentTickets,
-          game.maxTickets,
-          globalIndex
-        ),
-        callback_data: ACTIVE_LIST_HEADER_CALLBACK_DATA,
-      },
-    ]);
+    const solscanUrl = NetworkDetector.buildSolscanAccountUrl(game.gameAddress);
+    const labelText = extractCondensedGameLabel(
+      game.messageText,
+      game.currentTickets,
+      game.maxTickets,
+      globalIndex
+    );
+
+    // Use URL button if Solscan URL is available, otherwise fall back to callback
+    const titleButton: InlineKeyboardButton = solscanUrl
+      ? { text: labelText, url: solscanUrl }
+      : { text: labelText, callback_data: ACTIVE_LIST_HEADER_CALLBACK_DATA };
+
+    inlineKeyboard.push([titleButton]);
 
     filterActiveGameKeyboardRows(game.keyboard ?? []).forEach((row) => {
       inlineKeyboard.push(rewriteJoinButtons(cloneInlineKeyboardRow(row), game));

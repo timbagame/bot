@@ -125,15 +125,14 @@ describe("/active command in group chats", () => {
     expect(inlineKeyboard).toBeDefined();
     expect(inlineKeyboard?.length).toBe(4);
 
-    const headerCallback =
-      botModule.__test_ACTIVE_LIST_HEADER_CALLBACK_DATA;
+    // Game title buttons now link to Solscan account pages
     expect(inlineKeyboard?.[0]?.[0]).toMatchObject({
       text: "1. Coinflip (1/4) • TIMBA",
-      callback_data: headerCallback,
+      url: expect.stringContaining("solscan.io/account/addr1"),
     });
     expect(inlineKeyboard?.[2]?.[0]).toMatchObject({
       text: "2. Coinflip (2/4) • TIMBA",
-      callback_data: headerCallback,
+      url: expect.stringContaining("solscan.io/account/addr2"),
     });
 
     expect(inlineKeyboard?.[1]?.[0]).toMatchObject({
