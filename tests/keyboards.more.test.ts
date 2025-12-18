@@ -361,7 +361,7 @@ describe("keyboards: player selection and confirm", () => {
     expect(callbacks).toContain("confirm_visibility_coinflip_30_4_public_abc");
     expect(callbacks).toContain("confirm_min_players_coinflip_30_4_1_abc");
     expect(callbacks).toContain("confirm_min_players_coinflip_30_4_2_abc");
-    expect(texts).toContain("👥 Min: 2");
+    expect(texts).toContain("Min 2");
     expect(texts).toContain("MAX");
   });
 });
