@@ -1323,7 +1323,7 @@ const parseActiveGameHeader = (
     .split("\n")
     .map((line) => line.trim())
     .find((line) => line.length > 0);
-  const sanitized = firstLine?.replace(/<[^>]*>/g, "").trim() ?? "";
+  const sanitized = firstLine?.replace(/<[^>]*>/g, "").replace(/🅴/g, "").trim() ?? "";
   const [left, right] = sanitized.split("•").map((part) => part.trim());
   const gameType = left || "Game";
   const amountPart = right || null;

@@ -1,7 +1,9 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { PublicKey } from "@solana/web3.js";
 import { GameManager } from "../src/utils/game";
 import { sanitizeTelegramDisplayNameWithoutMention } from "../src/utils/telegram-display";
+
+let originalSolanaNetwork: string | undefined;
 
 function resetGM() {
   GameManager.resetForTest();
@@ -46,6 +48,18 @@ function ctxStub() {
 }
 
 describe("GameManager.getGameInfo & getCompletedGameInfo", () => {
+  beforeAll(() => {
+    originalSolanaNetwork = process.env.SOLANA_NETWORK;
+    process.env.SOLANA_NETWORK = "http://localhost:8899";
+  });
+
+  afterAll(() => {
+    if (originalSolanaNetwork === undefined) {
+      Reflect.deleteProperty(process.env, "SOLANA_NETWORK");
+    } else {
+      process.env.SOLANA_NETWORK = originalSolanaNetwork;
+    }
+  });
   test("getGameInfo formats active coinflip with creator", async () => {
     resetGM();
     const createdAt = 1_000_000;
