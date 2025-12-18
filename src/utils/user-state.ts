@@ -136,6 +136,7 @@ export type GameSetupSessionState = {
   tokenDecimals?: number;
   contractMinimum?: number;
   maxPlayersLimit?: number;
+  tokenPriceUSD?: number;
   timeoutSeconds?: number;
   minPlayers?: number;
   isPrivate?: boolean;

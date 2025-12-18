@@ -219,6 +219,7 @@ describe("game setup typed input handling", () => {
       expect(firstEdit.messageId).toBe(session.messageId);
       expect(String(firstEdit.text)).toContain("Choose Maximum Players");
       expect(String(firstEdit.text)).toContain("Amount: <b>20 BONK</b>");
+      expect(String(firstEdit.text)).toContain("($10)");
 
       const updated = getGameSetupSession(`${CHAT_ID}_${session.messageId}`) as any;
       expect(updated.waitingFor).toBe("setup");

@@ -38,13 +38,15 @@ export const determineFractionDigits = (
 export const buildPlayerSelectionMessage = (
   gameType: GameType,
   formattedAmount: string,
-  tokenTicker: string
+  tokenTicker: string,
+  usdApproximation?: string | null
 ): string => {
   const formattedGameType = toTitleCase(gameType);
+  const usdSegment = usdApproximation ? ` (${usdApproximation})` : "";
   return [
     `<b>${formattedGameType} - Choose Maximum Players</b>`,
     "",
-    `Amount: <b>${formattedAmount} ${tokenTicker}</b>`,
+    `Amount: <b>${formattedAmount} ${tokenTicker}</b>${usdSegment}`,
     "",
     "Select the number of players:",
   ].join("\n");
@@ -57,6 +59,7 @@ export const buildGameConfirmationMessage = ({
   tokenTicker,
   tokenDecimals,
   advanced,
+  usdApproximation,
 }: {
   gameType: GameType;
   amount: string;
@@ -64,6 +67,7 @@ export const buildGameConfirmationMessage = ({
   tokenTicker: string;
   tokenDecimals: number;
   advanced: AdvancedOptionState;
+  usdApproximation?: string | null;
 }): string => {
   const parsedAmount = Number(amount);
   const amountNumber = Number.isFinite(parsedAmount) ? parsedAmount : 0;
@@ -79,11 +83,12 @@ export const buildGameConfirmationMessage = ({
   const visibilityLabel = advanced.isPrivate ? "Private" : "Public";
   const minPlayersLabel = `${advanced.minPlayers}/${players}`;
   const timeoutLabel = formatDuration(advanced.timeoutSeconds);
+  const usdSegment = usdApproximation ? ` (${usdApproximation})` : "";
 
   return [
     `<b>Confirm ${formattedGameType}</b>`,
     "",
-    `Amount: <b>${amountFormatted} ${tokenTicker}</b>`,
+    `Amount: <b>${amountFormatted} ${tokenTicker}</b>${usdSegment}`,
     `Players: <b>${players}</b>`,
     "",
     `Timeout: <b>${timeoutLabel}</b>`,
@@ -141,6 +146,7 @@ export const presentConfirmMenu = async (params: {
   tokenDecimals: number;
   creatorId?: string;
   advanced: AdvancedOptionState;
+  usdApproximation?: string | null;
   logLabel?: string;
 }): Promise<void> => {
   const {
@@ -152,6 +158,7 @@ export const presentConfirmMenu = async (params: {
     tokenDecimals,
     creatorId,
     advanced,
+    usdApproximation,
     logLabel,
   } = params;
 
@@ -163,6 +170,7 @@ export const presentConfirmMenu = async (params: {
     tokenTicker,
     tokenDecimals,
     advanced,
+    usdApproximation,
   });
 
   const confirmMenu = buildGameConfirmMenuConfig({

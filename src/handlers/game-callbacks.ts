@@ -162,6 +162,44 @@ export const createGameCallbacksModule = (
   const getGameManager = () => deps.getGameManager();
   const isFromDM = (ctx: Context): boolean => ctx.chat?.type === "private";
 
+  const resolveTokenPriceUSDForSetup = async (input: {
+    tokenMint: string;
+    tokenTicker: string;
+    sessionPrice?: number;
+  }): Promise<number | null> => {
+    const { tokenMint, tokenTicker, sessionPrice } = input;
+    if (typeof sessionPrice === "number" && Number.isFinite(sessionPrice) && sessionPrice > 0) {
+      return sessionPrice;
+    }
+    if (process.env.NODE_ENV === "test") {
+      return null;
+    }
+    try {
+      return await deps.fetchTokenPriceUSD({ tokenMint, tokenTicker });
+    } catch {
+      return null;
+    }
+  };
+
+  const formatUsdApproximation = (
+    amountNumber: number,
+    tokenPriceUSD: number | null
+  ): string | null => {
+    if (!Number.isFinite(amountNumber) || amountNumber <= 0) return null;
+    if (!Number.isFinite(tokenPriceUSD ?? NaN) || (tokenPriceUSD ?? 0) <= 0) {
+      return null;
+    }
+    const usdValue = amountNumber * tokenPriceUSD!;
+    if (!Number.isFinite(usdValue) || usdValue <= 0) return null;
+    const formatted = formatUsdValue(usdValue, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+      fallback: "0",
+    });
+    if (!formatted) return null;
+    return `$${formatted}`;
+  };
+
   const resolveChatSettingsForContext = (
     ctx: Context,
     session?: GameSetupSessionState
@@ -532,6 +570,16 @@ export const createGameCallbacksModule = (
           userSession.maxPlayersLimit ?? deps.getOracleMaxPlayers(),
           chatSettings
         );
+
+        const priceForConfirm = await resolveTokenPriceUSDForSetup({
+          tokenMint: userSession.tokenMint ?? DEFAULT_TOKEN_MINT,
+          tokenTicker,
+          sessionPrice: userSession.tokenPriceUSD,
+        });
+        const usdApproximation = formatUsdApproximation(
+          Number(amountValue),
+          priceForConfirm
+        );
         const confirmMessage = buildGameConfirmationMessage({
           gameType: userSession.gameType as "coinflip" | "giveaway",
           amount: amountValue,
@@ -539,6 +587,7 @@ export const createGameCallbacksModule = (
           tokenTicker,
           tokenDecimals,
           advanced,
+          usdApproximation,
         });
 
         const confirmMenu = buildGameConfirmMenuConfig({
@@ -574,6 +623,7 @@ export const createGameCallbacksModule = (
           tokenTicker,
           tokenDecimals,
           contractMinimum: minAllowed,
+          tokenPriceUSD: priceForConfirm ?? undefined,
           timeoutSeconds: advanced.timeoutSeconds,
           minPlayers: advanced.minPlayers,
           isPrivate: advanced.isPrivate,
@@ -591,6 +641,7 @@ export const createGameCallbacksModule = (
 
       let resolvedAmount = amount;
       let amountPrecisionSource = inputText;
+      let tokenPriceUSD: number | null = null;
 
       if (isUsdInput) {
         if (digits > 18 || usdAmount! <= 0) {
@@ -610,7 +661,7 @@ export const createGameCallbacksModule = (
           return;
         }
 
-        const tokenPriceUSD = await deps.fetchTokenPriceUSD({
+        tokenPriceUSD = await deps.fetchTokenPriceUSD({
           tokenMint: userSession.tokenMint ?? DEFAULT_TOKEN_MINT,
           tokenTicker,
         });
@@ -635,6 +686,14 @@ export const createGameCallbacksModule = (
         const precision = Math.min(tokenDecimals, 6);
         resolvedAmount = Number.parseFloat(converted.toFixed(precision));
         amountPrecisionSource = resolvedAmount.toString();
+      }
+
+      if (!tokenPriceUSD) {
+        tokenPriceUSD = await resolveTokenPriceUSDForSetup({
+          tokenMint: userSession.tokenMint ?? DEFAULT_TOKEN_MINT,
+          tokenTicker,
+          sessionPrice: sessionSnapshot?.tokenPriceUSD,
+        });
       }
 
       if (Number.isNaN(resolvedAmount) || resolvedAmount <= 0) {
@@ -695,10 +754,12 @@ export const createGameCallbacksModule = (
         ),
       });
 
+      const usdApproximation = formatUsdApproximation(resolvedAmount, tokenPriceUSD);
       const playerMessage = buildPlayerSelectionMessage(
         userSession.gameType as "coinflip" | "giveaway",
         amountFormatted,
-        tokenTicker
+        tokenTicker,
+        usdApproximation
       );
 
       try {
@@ -738,6 +799,7 @@ export const createGameCallbacksModule = (
         tokenTicker,
         tokenDecimals,
         contractMinimum: minAllowed,
+        tokenPriceUSD: tokenPriceUSD ?? undefined,
       });
     } catch (error) {
       console.error("Error in text input handler:", error);
@@ -865,10 +927,21 @@ export const createGameCallbacksModule = (
               ),
             });
 
+            const tokenPriceUSD = await resolveTokenPriceUSDForSetup({
+              tokenMint: tokenContext.tokenMint,
+              tokenTicker: tokenContext.tokenTicker,
+              sessionPrice: session?.tokenPriceUSD,
+            });
+            const usdApproximation = formatUsdApproximation(
+              amountNumber,
+              tokenPriceUSD
+            );
+
             const playerMessage = buildPlayerSelectionMessage(
               gameType,
               formattedAmount,
-              tokenContext.tokenTicker
+              tokenContext.tokenTicker,
+              usdApproximation
             );
 
             await respondWithMenu(ctx, {
@@ -889,6 +962,7 @@ export const createGameCallbacksModule = (
                 ctx.callbackQuery?.message?.message_id ?? session?.messageId,
               chatId: ctx.chat?.id ?? session?.chatId ?? 0,
               amount,
+              tokenPriceUSD: tokenPriceUSD ?? undefined,
             });
 
             await safeAnswerCallbackQuery(ctx);
@@ -922,6 +996,16 @@ export const createGameCallbacksModule = (
               chatSettings
             );
 
+            const tokenPriceUSD = await resolveTokenPriceUSDForSetup({
+              tokenMint: tokenContext.tokenMint,
+              tokenTicker: tokenContext.tokenTicker,
+              sessionPrice: session?.tokenPriceUSD,
+            });
+            const usdApproximation = formatUsdApproximation(
+              Number(amount),
+              tokenPriceUSD
+            );
+
             await presentConfirmMenu({
               ctx,
               gameType,
@@ -931,6 +1015,7 @@ export const createGameCallbacksModule = (
               tokenDecimals: tokenContext.tokenDecimals,
               creatorId,
               advanced,
+              usdApproximation,
               logLabel: "players_confirm_menu",
             });
 
@@ -943,6 +1028,7 @@ export const createGameCallbacksModule = (
               chatId: ctx.chat?.id ?? session?.chatId ?? 0,
               amount,
               players,
+              tokenPriceUSD: tokenPriceUSD ?? undefined,
               timeoutSeconds: advanced.timeoutSeconds,
               minPlayers: advanced.minPlayers,
               isPrivate: advanced.isPrivate,
@@ -981,6 +1067,16 @@ export const createGameCallbacksModule = (
               resolveChatSettingsForContext(ctx, session)
             );
 
+            const tokenPriceUSD = await resolveTokenPriceUSDForSetup({
+              tokenMint: tokenContext.tokenMint,
+              tokenTicker: tokenContext.tokenTicker,
+              sessionPrice: session?.tokenPriceUSD,
+            });
+            const usdApproximation = formatUsdApproximation(
+              Number(amount),
+              tokenPriceUSD
+            );
+
             await presentConfirmMenu({
               ctx,
               gameType,
@@ -990,6 +1086,7 @@ export const createGameCallbacksModule = (
               tokenDecimals: tokenContext.tokenDecimals,
               creatorId,
               advanced,
+              usdApproximation,
               logLabel: "confirm_visibility_toggle",
             });
 
@@ -1003,6 +1100,7 @@ export const createGameCallbacksModule = (
               chatId: ctx.chat?.id ?? session?.chatId ?? 0,
               amount,
               players,
+              tokenPriceUSD: tokenPriceUSD ?? undefined,
               timeoutSeconds: advanced.timeoutSeconds,
               minPlayers: advanced.minPlayers,
               isPrivate: advanced.isPrivate,
@@ -1045,6 +1143,16 @@ export const createGameCallbacksModule = (
               resolveChatSettingsForContext(ctx, session)
             );
 
+            const tokenPriceUSD = await resolveTokenPriceUSDForSetup({
+              tokenMint: tokenContext.tokenMint,
+              tokenTicker: tokenContext.tokenTicker,
+              sessionPrice: session?.tokenPriceUSD,
+            });
+            const usdApproximation = formatUsdApproximation(
+              Number(amount),
+              tokenPriceUSD
+            );
+
             await presentConfirmMenu({
               ctx,
               gameType,
@@ -1054,6 +1162,7 @@ export const createGameCallbacksModule = (
               tokenDecimals: tokenContext.tokenDecimals,
               creatorId,
               advanced,
+              usdApproximation,
               logLabel: "confirm_timeout_update",
             });
 
@@ -1067,6 +1176,7 @@ export const createGameCallbacksModule = (
               chatId: ctx.chat?.id ?? session?.chatId ?? 0,
               amount,
               players,
+              tokenPriceUSD: tokenPriceUSD ?? undefined,
               timeoutSeconds: advanced.timeoutSeconds,
               minPlayers: advanced.minPlayers,
               isPrivate: advanced.isPrivate,
@@ -1118,6 +1228,16 @@ export const createGameCallbacksModule = (
               resolveChatSettingsForContext(ctx, session)
             );
 
+            const tokenPriceUSD = await resolveTokenPriceUSDForSetup({
+              tokenMint: tokenContext.tokenMint,
+              tokenTicker: tokenContext.tokenTicker,
+              sessionPrice: session?.tokenPriceUSD,
+            });
+            const usdApproximation = formatUsdApproximation(
+              Number(amount),
+              tokenPriceUSD
+            );
+
             await presentConfirmMenu({
               ctx,
               gameType,
@@ -1127,6 +1247,7 @@ export const createGameCallbacksModule = (
               tokenDecimals: tokenContext.tokenDecimals,
               creatorId,
               advanced,
+              usdApproximation,
               logLabel: "confirm_min_players_update",
             });
 
@@ -1140,6 +1261,7 @@ export const createGameCallbacksModule = (
               chatId: ctx.chat?.id ?? session?.chatId ?? 0,
               amount,
               players,
+              tokenPriceUSD: tokenPriceUSD ?? undefined,
               timeoutSeconds: advanced.timeoutSeconds,
               minPlayers: advanced.minPlayers,
               isPrivate: advanced.isPrivate,
