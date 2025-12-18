@@ -181,6 +181,53 @@ describe("game setup typed input handling", () => {
     expect(restored.creatorId).toBe("creator-1");
   });
 
+  test("custom amount input accepts $-prefixed USD and converts using pricing", async () => {
+    const session = {
+      waitingFor: "amount_input",
+      gameType: "coinflip",
+      userBalance: 1000,
+      messageId: 21_050,
+      chatId: CHAT_ID,
+      amount: undefined,
+      creatorId: "creator-usd",
+      tokenMint: "MintUsd111",
+      tokenTicker: "BONK",
+      tokenDecimals: 5,
+      contractMinimum: 0.25,
+    } as any;
+
+    const priceSpy = spyOn(prices, "resolveTokenPriceUSD").mockResolvedValue({
+      price: 0.5,
+      identifier: "BONK",
+    } as any);
+
+    try {
+      upsertGameSetupSession(`${CHAT_ID}_${session.messageId}`, session);
+
+      const ctx = createMockCtx("$10", {
+        reply_to_message: { message_id: session.messageId },
+      });
+
+      await __test_handleGameSetupTextInput(ctx as any, async () => {});
+
+      expect(priceSpy).toHaveBeenCalled();
+
+      const edits = ctx.__calls.filter(isEditCall);
+      expect(edits).toHaveLength(1);
+      const firstEdit = edits[0]!;
+      expect(firstEdit.chatId).toBe(CHAT_ID);
+      expect(firstEdit.messageId).toBe(session.messageId);
+      expect(String(firstEdit.text)).toContain("Choose Maximum Players");
+      expect(String(firstEdit.text)).toContain("Amount: <b>20 BONK</b>");
+
+      const updated = getGameSetupSession(`${CHAT_ID}_${session.messageId}`) as any;
+      expect(updated.waitingFor).toBe("setup");
+      expect(updated.amount).toBe("20");
+    } finally {
+      priceSpy.mockRestore();
+    }
+  });
+
   test("restores session after invalid players input even when edit fails", async () => {
     const session = {
       waitingFor: "players_input",

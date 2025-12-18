@@ -582,8 +582,62 @@ export const createGameCallbacksModule = (
       }
 
       const amount = Number.parseFloat(inputText);
+      const usdMatch =
+        inputText.match(/^\$\s*([0-9]+(?:\.[0-9]+)?)$/) ??
+        inputText.match(/^([0-9]+(?:\.[0-9]+)?)\s*USD$/i);
+      const usdAmount = usdMatch ? Number.parseFloat(usdMatch[1]!) : null;
+      const isUsdInput = usdAmount != null && Number.isFinite(usdAmount);
+      const digits = isUsdInput ? usdMatch![1]!.replace(/\D/g, "").length : 0;
 
-      if (Number.isNaN(amount) || amount <= 0) {
+      let resolvedAmount = amount;
+      let amountPrecisionSource = inputText;
+
+      if (isUsdInput) {
+        if (digits > 18 || usdAmount! <= 0) {
+          const errorMessage =
+            "❌ Invalid USD amount. Try something like <code>$10</code>.";
+          try {
+            await ctx.api.editMessageText(
+              userSession.chatId!,
+              userSession.messageId!,
+              errorMessage,
+              { parse_mode: "HTML" }
+            );
+          } catch (error) {
+            await ctx.reply(errorMessage, { parse_mode: "HTML" });
+          }
+          restoreSession({ waitingFor: "amount_input" });
+          return;
+        }
+
+        const tokenPriceUSD = await deps.fetchTokenPriceUSD({
+          tokenMint: userSession.tokenMint ?? DEFAULT_TOKEN_MINT,
+          tokenTicker,
+        });
+
+        if (!tokenPriceUSD || !Number.isFinite(tokenPriceUSD) || tokenPriceUSD <= 0) {
+          const errorMessage = `❌ USD pricing unavailable for ${tokenTicker}. Please enter the amount in ${tokenTicker}.`;
+          try {
+            await ctx.api.editMessageText(
+              userSession.chatId!,
+              userSession.messageId!,
+              errorMessage,
+              { parse_mode: "HTML" }
+            );
+          } catch (error) {
+            await ctx.reply(errorMessage, { parse_mode: "HTML" });
+          }
+          restoreSession({ waitingFor: "amount_input" });
+          return;
+        }
+
+        const converted = usdAmount! / tokenPriceUSD;
+        const precision = Math.min(tokenDecimals, 6);
+        resolvedAmount = Number.parseFloat(converted.toFixed(precision));
+        amountPrecisionSource = resolvedAmount.toString();
+      }
+
+      if (Number.isNaN(resolvedAmount) || resolvedAmount <= 0) {
         const errorMessage =
           "❌ Invalid amount. Please use /coinflip or /giveaway to try again.";
         try {
@@ -600,7 +654,7 @@ export const createGameCallbacksModule = (
         return;
       }
 
-      if (amount > userSession.userBalance) {
+      if (resolvedAmount > userSession.userBalance) {
         const errorMessage =
           "❌ Amount too high. Please try a lower amount.";
         try {
@@ -617,7 +671,7 @@ export const createGameCallbacksModule = (
         return;
       }
 
-      if (amount < minAllowed) {
+      if (resolvedAmount < minAllowed) {
         const errorMessage = `❌ Amount below contract minimum of ${minAllowed} ${tokenTicker}.`;
         try {
           await ctx.api.editMessageText(
@@ -633,10 +687,10 @@ export const createGameCallbacksModule = (
         return;
       }
 
-      const amountFormatted = amount.toLocaleString("en-US", {
+      const amountFormatted = resolvedAmount.toLocaleString("en-US", {
         minimumFractionDigits: 0,
         maximumFractionDigits: determineFractionDigits(
-          inputText,
+          amountPrecisionSource,
           tokenDecimals
         ),
       });
@@ -656,7 +710,7 @@ export const createGameCallbacksModule = (
             parse_mode: "HTML",
             reply_markup: createPlayerSelectionKeyboard(
               userSession.gameType,
-              amount.toString(),
+              resolvedAmount.toString(),
               userSession.creatorId
             ),
           }
@@ -666,7 +720,7 @@ export const createGameCallbacksModule = (
           parse_mode: "HTML",
           reply_markup: createPlayerSelectionKeyboard(
             userSession.gameType,
-            amount.toString(),
+            resolvedAmount.toString(),
             userSession.creatorId
           ),
         });
@@ -678,7 +732,7 @@ export const createGameCallbacksModule = (
         userBalance: userSession.userBalance,
         messageId: userSession.messageId,
         chatId: userSession.chatId,
-        amount: amount.toString(),
+        amount: resolvedAmount.toString(),
         creatorId: userSession.creatorId,
         tokenMint: userSession.tokenMint,
         tokenTicker,

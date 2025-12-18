@@ -86,9 +86,9 @@ export const buildGameConfirmationMessage = ({
     `Amount: <b>${amountFormatted} ${tokenTicker}</b>`,
     `Players: <b>${players}</b>`,
     "",
+    `Timeout: <b>${timeoutLabel}</b>`,
     `Visibility: <b>${visibilityLabel}</b>`,
     `Min players to start: <b>${minPlayersLabel}</b>`,
-    `Timeout: <b>${timeoutLabel}</b>`,
   ].join("\n");
 };
 
