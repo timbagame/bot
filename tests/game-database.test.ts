@@ -150,6 +150,23 @@ test("updateGameLastSlotWithTimestamp accepts equal timestamp updates", () => {
   expect(last.timestamp).toBe(now);
 });
 
+test("updateGameLastSlotWithTimestamp ignores duplicate slot updates", () => {
+  const db = GameDatabase.getInstance();
+
+  db.saveGame("dupSlotGame", "creator_dup", 100, "coinflip");
+  const now = Date.now();
+
+  const firstUpdate = db.updateGameLastSlotWithTimestamp("dupSlotGame", "555", now);
+  expect(firstUpdate).toBe(true);
+
+  const duplicateUpdate = db.updateGameLastSlotWithTimestamp("dupSlotGame", "555", now);
+  expect(duplicateUpdate).toBe(false);
+
+  const last = db.getGameLastSlotWithTimestamp("dupSlotGame");
+  expect(last.lastSlot).toBe("555");
+  expect(last.timestamp).toBe(now);
+});
+
 test("savePlayerMapping normalizes inputs and ignores blanks", () => {
   const db = GameDatabase.getInstance();
   const sqlite: any = (db as any).db;
