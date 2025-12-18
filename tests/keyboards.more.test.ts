@@ -351,6 +351,7 @@ describe("keyboards: player selection and confirm", () => {
   test("confirm keyboard includes confirm and back with creatorId", () => {
     const kb = createGameConfirmKeyboard("coinflip", "30", "4", "abc");
     const callbacks = extractCallbacks(kb);
+    const texts = extractTexts(kb);
     expect(callbacks).toContain("confirm_game_coinflip_30_4_3600_2_private_abc");
     expect(callbacks).toContain("amount_coinflip_30_abc");
     expect(callbacks).toContain("confirm_timeout_coinflip_30_4_-30_abc");
@@ -359,5 +360,7 @@ describe("keyboards: player selection and confirm", () => {
     expect(callbacks).toContain("confirm_timeout_coinflip_30_4_60_abc");
     expect(callbacks).toContain("confirm_visibility_coinflip_30_4_public_abc");
     expect(callbacks).toContain("confirm_min_players_coinflip_30_4_1_abc");
+    expect(callbacks).toContain("confirm_min_players_coinflip_30_4_2_abc");
+    expect(texts).toContain("MAX");
   });
 });

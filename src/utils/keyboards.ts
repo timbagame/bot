@@ -7,13 +7,14 @@ import {
   MIN_GAME_TIMEOUT,
   MIN_GIVEAWAY_PLAYERS,
 } from "./constants";
-import { clampTimeoutSeconds } from "./game-settings";
+import { clampMinPlayers, clampTimeoutSeconds } from "./game-settings";
 import {
   formatCompactTokenDisplay,
   formatTokenDisplay,
   formatUsdValue,
 } from "./format-amount";
 import { formatDuration } from "./format-time";
+import type { GameType } from "../types";
 
 export const createWalletKeyboard = (): InlineKeyboard => {
   return new InlineKeyboard()
@@ -487,11 +488,39 @@ export const createGameConfirmKeyboard = (
   const minPlayersFloor =
     gameType === "coinflip" ? MIN_COINFLIP_PLAYERS : MIN_GIVEAWAY_PLAYERS;
   const playersCount = Number.parseInt(players, 10);
-  const maxMinPlayers = Number.isFinite(playersCount)
-    ? Math.max(minPlayersFloor, playersCount)
+  const typedGameType = gameType as GameType;
+  const maxPlayersForMinPlayers = Number.isFinite(playersCount)
+    ? playersCount
     : minPlayersFloor;
-  const canDecrement = advanced.minPlayers > minPlayersFloor;
-  const canIncrement = advanced.minPlayers < maxMinPlayers;
+
+  const currentMinPlayers = clampMinPlayers(
+    typedGameType,
+    advanced.minPlayers,
+    maxPlayersForMinPlayers,
+    maxPlayersForMinPlayers
+  );
+
+  const minPlayersDeltaCallback = (deltaPlayers: number): string => {
+    if (!creatorId) return "noop";
+    if (!Number.isFinite(deltaPlayers) || deltaPlayers === 0) return "noop";
+    return withCreatorSuffix(
+      `confirm_min_players_${gameType}_${amount}_${players}_${String(deltaPlayers)}`,
+      creatorId
+    );
+  };
+
+  const minPlayersTargetCallback = (candidate: number): string => {
+    if (!creatorId) return "noop";
+    const target = clampMinPlayers(
+      typedGameType,
+      candidate,
+      maxPlayersForMinPlayers,
+      maxPlayersForMinPlayers
+    );
+    const delta = target - currentMinPlayers;
+    if (delta === 0) return "noop";
+    return minPlayersDeltaCallback(delta);
+  };
 
   const keyboard = new InlineKeyboard()
     .text(
@@ -523,25 +552,18 @@ export const createGameConfirmKeyboard = (
           )
     )
     .row()
-    .text(
-      "-",
-      creatorId && canDecrement
-        ? withCreatorSuffix(
-            `confirm_min_players_${gameType}_${amount}_${players}_-1`,
-            creatorId
-          )
-        : "noop"
-    )
-    .text(`👥 Min: ${advanced.minPlayers}`, "noop")
-    .text(
-      "+",
-      creatorId && canIncrement
-        ? withCreatorSuffix(
-            `confirm_min_players_${gameType}_${amount}_${players}_1`,
-            creatorId
-          )
-        : "noop"
-    )
+    .text("-50%", (() => {
+      return minPlayersTargetCallback(Math.floor(currentMinPlayers * 0.5));
+    })())
+    .text("-25%", (() => {
+      return minPlayersTargetCallback(Math.floor(currentMinPlayers * 0.75));
+    })())
+    .text("+50%", (() => {
+      return minPlayersTargetCallback(Math.ceil(currentMinPlayers * 1.5));
+    })())
+    .text("MAX", (() => {
+      return minPlayersTargetCallback(maxPlayersForMinPlayers);
+    })())
     .row()
     .text(
       "🔙 Back to Players",
