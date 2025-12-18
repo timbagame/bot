@@ -1651,9 +1651,32 @@ type PendingGameMessageUpdateState = {
   referenceChatId?: number;
   latestTotalPot?: number;
   nextDelayMs?: number;
+  cancelled?: boolean;
 };
 
 const pendingGameMessageUpdates = new Map<string, PendingGameMessageUpdateState>();
+
+const normalizeTotalPot = (value: unknown): number | undefined => {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : undefined;
+};
+
+const cancelPendingGameMessageUpdate = (gameAddress: string): void => {
+  const state = pendingGameMessageUpdates.get(gameAddress);
+  if (!state) {
+    return;
+  }
+
+  if (state.timer) {
+    clearTimeout(state.timer);
+  }
+
+  state.pending = false;
+  state.cancelled = true;
+  state.timer = undefined;
+
+  pendingGameMessageUpdates.delete(gameAddress);
+};
 
 let gameMessageUpdateDebounceMs = GAME_MESSAGE_UPDATE_DEBOUNCE_MS;
 let joinAnnouncementMaxTickets = JOIN_ANNOUNCEMENT_MAX_TICKETS;
@@ -1715,6 +1738,8 @@ const scheduleGameMessageUpdate = (
     state.latestTotalPot = totalPot;
   }
 
+  state.cancelled = false;
+
   state.pending = true;
   pendingGameMessageUpdates.set(gameAddress, state);
 
@@ -1744,6 +1769,14 @@ const scheduleGameMessageUpdate = (
     state.running = true;
     pendingGameMessageUpdates.set(gameAddress, state);
 
+    if (state.cancelled) {
+      state.running = false;
+      if (pendingGameMessageUpdates.get(gameAddress) === state) {
+        pendingGameMessageUpdates.delete(gameAddress);
+      }
+      return;
+    }
+
     try {
       if (!gameManager) {
         return;
@@ -1754,13 +1787,40 @@ const scheduleGameMessageUpdate = (
         return;
       }
 
+      const gameData =
+        typeof gameDb?.getGame === "function"
+          ? gameDb.getGame(gameAddress)
+          : null;
+      const normalizedStatus =
+        typeof gameData?.status === "string"
+          ? gameData.status.toLowerCase()
+          : null;
+      const isCompleted =
+        normalizedStatus === "completed" || !!gameData?.winner_address;
       const apiCtx = createApiContext(chatId, bot.api);
+
+      if (isCompleted) {
+        const completionTotalPot =
+          normalizeTotalPot(state.latestTotalPot) ??
+          normalizeTotalPot((gameData as any)?.total_amount) ??
+          normalizeTotalPot((gameData as any)?.amount);
+
+        await gameManager.updateGameMessageFromData(
+          apiCtx,
+          gameAddress,
+          "Completed",
+          gameData?.winner_address ?? undefined,
+          completionTotalPot
+        );
+        return;
+      }
+
       await gameManager.updateGameMessageFromData(
         apiCtx,
         gameAddress,
         "Active",
         undefined,
-        state.latestTotalPot
+        normalizeTotalPot(state.latestTotalPot)
       );
     } catch (error) {
       if (isRateLimited(error)) {
@@ -2012,6 +2072,8 @@ const processGameCompletion = async (
   totalPot?: number,
   winnerTxSignature?: string
 ): Promise<void> => {
+  cancelPendingGameMessageUpdate(gameAddress);
+
   // Update database
   const blockTime = await wallet.getBlockchainTime();
   gameDb.completeGame(gameAddress, winnerAddress, blockTime * 1000, totalPot);
@@ -2118,6 +2180,8 @@ const runProcessGameCompletion = async (
 ): Promise<boolean> => {
   const now = Date.now();
   pruneStaleCompletionJob(gameAddress, now);
+
+  cancelPendingGameMessageUpdate(gameAddress);
 
   if (inFlightCompletionJobs.has(gameAddress)) {
     console.log(
