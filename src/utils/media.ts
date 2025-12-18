@@ -87,7 +87,9 @@ export const isRecoverableMediaError = (error: any): boolean => {
     normalized.includes("wrong file id") ||
     normalized.includes("http url specified") ||
     normalized.includes("file reference") ||
-    normalized.includes("message is not a media message")
+    normalized.includes("message is not a media message") ||
+    normalized.includes("there is no text in the message") ||
+    normalized.includes("there is no caption in the message")
   );
 };
 

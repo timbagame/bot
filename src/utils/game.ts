@@ -3149,6 +3149,51 @@ export class GameManager {
             continue;
           }
 
+          // Message has video but no winnerMedia (e.g. restored from DB) - try caption edit first
+          if (supportsVideo) {
+            const { usedFallback, skipped } = await editMediaWithFallback({
+              edit: () =>
+                ctx.api.editMessageCaption(
+                  gameMessage.chatId,
+                  gameMessage.messageId,
+                  {
+                    caption: payload.text,
+                    parse_mode: "HTML",
+                    reply_markup: inlineKeyboard,
+                  }
+                ),
+              fallback: () => editAsText(),
+              logLabel: `game caption update (${gameMessage.chatId})`,
+              onFallback: () => {
+                const current =
+                  this.activeGameMessages.get(gameAddress) ??
+                  new Map<number, GameMessage>();
+                current.set(gameMessage.chatId, {
+                  ...gameMessage,
+                  usesVideo: false,
+                });
+                this.activeGameMessages.set(gameAddress, current);
+              },
+            });
+
+            if (skipped) {
+              continue;
+            }
+
+            if (!usedFallback) {
+              const current =
+                this.activeGameMessages.get(gameAddress) ??
+                new Map<number, GameMessage>();
+              current.set(gameMessage.chatId, {
+                ...gameMessage,
+                usesVideo: true,
+              });
+              this.activeGameMessages.set(gameAddress, current);
+            }
+
+            continue;
+          }
+
           const { skipped } = await editMediaWithFallback({
             edit: () => editAsText(),
             logLabel: `game text update (${gameMessage.chatId})`,
