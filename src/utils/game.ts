@@ -4277,13 +4277,58 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
       return false;
     }
 
-    // Has enough tickets -> wait for oracle completion, do not attempt close
+    // Has enough tickets -> wait for oracle completion during buffer period
     if (!bufferElapsed) {
       debugLog("⏳ Game has minimum tickets; waiting for oracle to complete.");
       return false;
     }
 
-    debugLog("⌛ Buffer elapsed; waiting for oracle completion.");
+    // Buffer elapsed and oracle didn't complete -> force cleanup
+    debugLog(`⏰ Buffer elapsed for ${gameType} with ${ticketsCount} tickets; forcing cleanup...`);
+
+    if (gameType === "coinflip") {
+      const didCleanup = await this.handleExpiredCoinflip(
+        gamePda,
+        gameAccount,
+        gamePda.toBase58()
+      );
+      if (!didCleanup) return false;
+
+      // After cleanup, check if game can now be closed
+      try {
+        const refreshed = await this.program.account.game.fetch(gamePda);
+        const remaining = Number(refreshed.ticketsCount || 0);
+        if (remaining === 0) {
+          const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
+          if (result.success) {
+            return {
+              cancelled: true,
+              amount: Number(refreshed.ticketAmount),
+              creator: refreshed.creator.toBase58(),
+              tx: result.tx!,
+            };
+          }
+        }
+      } catch (error: any) {
+        if (error.message?.includes("Account does not exist")) {
+          debugLog("✅ Game account already closed successfully after buffer cleanup");
+        } else {
+          console.error("Post-buffer cleanup close attempt failed:", error);
+        }
+      }
+      return false;
+    }
+
+    // For giveaways with buffer elapsed, force close
+    const result = await this.cancelGameWithPlayerKeys(gamePda, gameType);
+    if (result.success) {
+      return {
+        cancelled: true,
+        amount: Number(gameAccount.ticketAmount),
+        creator: gameAccount.creator.toBase58(),
+        tx: result.tx!,
+      };
+    }
     return false;
   }
 

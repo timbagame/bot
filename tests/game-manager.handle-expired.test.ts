@@ -174,4 +174,62 @@ describe("GameManager.handleExpiredGame", () => {
     expect(result).toBe(false);
     expect(cancelCalled).toBe(false);
   });
+
+  test("coinflip with minimum players force-cancels after buffer elapses", async () => {
+    resetGM();
+    const refreshedCreator = new PublicKey("BPFLoader6511111111111111111111111111111111");
+    const gm = GameManager.getInstance(baseProgram(), baseWallet(), baseDb());
+
+    let cleanupCalled = false;
+    (gm as any).handleExpiredCoinflip = async () => {
+      cleanupCalled = true;
+      return true;
+    };
+
+    let cancelArgs: any[] | null = null;
+    (gm as any).cancelGameWithPlayerKeys = async (...args: any[]) => {
+      cancelArgs = args;
+      return { success: true, tx: "buffer-cleanup-tx" };
+    };
+
+    (gm as any).program = {
+      account: {
+        game: {
+          fetch: async () => ({
+            ticketsCount: 0,
+            ticketAmount: 75,
+            creator: refreshedCreator,
+          }),
+        },
+      },
+    } as any;
+
+    const now = Math.floor(Date.now() / 1000);
+    const timeout = 300;
+    // Buffer is 86400 seconds (24 hours) - set createdAt well past both timeout and buffer
+    const gameAccount = {
+      gameType: { coinflip: {} },
+      createdAt: now - (timeout + 86400 + 100),
+      timeout,
+      ticketsCount: 2,
+      minTickets: 2,
+      maxTickets: 5,
+      ticketAmount: 75,
+      creator: new PublicKey("BPFLoader6611111111111111111111111111111111"),
+    };
+
+    const result = await (gm as any).handleExpiredGame(
+      new PublicKey("BPFLoader6711111111111111111111111111111111"),
+      gameAccount
+    );
+
+    expect(cleanupCalled).toBe(true);
+    expect(cancelArgs).not.toBeNull();
+    expect(result).toEqual({
+      cancelled: true,
+      amount: 75,
+      creator: refreshedCreator.toBase58(),
+      tx: "buffer-cleanup-tx",
+    });
+  });
 });
