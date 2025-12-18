@@ -63,6 +63,10 @@ describe("/active command in group chats", () => {
   });
 
   test("renders condensed active game rows while keeping action buttons", async () => {
+    // Use devnet so Solscan URLs are generated (localhost doesn't support Solscan)
+    const savedNetwork = process.env.SOLANA_NETWORK;
+    process.env.SOLANA_NETWORK = "https://api.devnet.solana.com";
+
     const firstKeyboard: InlineKeyboardButton[][] = [
       [{ text: "🎮 Join", callback_data: "join_first" }],
       [{ text: "🔄 Refresh", callback_data: "refresh_first" }],
@@ -158,6 +162,9 @@ describe("/active command in group chats", () => {
 
     expect(inlineKeyboard?.[1]?.[0]).not.toBe(firstKeyboard[0]?.[0]);
     expect(inlineKeyboard?.[3]?.[0]).not.toBe(secondKeyboard[0]?.[0]);
+
+    // Restore original network
+    process.env.SOLANA_NETWORK = savedNetwork;
   });
 });
 

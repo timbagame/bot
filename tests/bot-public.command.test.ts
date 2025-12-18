@@ -62,6 +62,10 @@ describe("/public command", () => {
   });
 
   test("renders condensed public game rows", async () => {
+    // Use devnet so Solscan URLs are generated (localhost doesn't support Solscan)
+    const savedNetwork = process.env.SOLANA_NETWORK;
+    process.env.SOLANA_NETWORK = "https://api.devnet.solana.com";
+
     const firstKeyboard: InlineKeyboardButton[][] = [
       [{ text: "🎮 Join", callback_data: "join_first" }],
     ];
@@ -141,6 +145,9 @@ describe("/public command", () => {
       text: "1. Coinflip (1/4) • TIMBA",
       url: expect.stringContaining("solscan.io/account/addr1"),
     });
+
+    // Restore original network
+    process.env.SOLANA_NETWORK = savedNetwork;
   });
 
   test("handles no active public games", async () => {
