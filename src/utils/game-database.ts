@@ -1011,9 +1011,13 @@ export class GameDatabase extends BaseDatabase {
           UPDATE games
           SET last_slot = ?, last_slot_timestamp = ?
           WHERE game_address = ?
-            AND (last_slot_timestamp IS NULL OR ? >= last_slot_timestamp)
+            AND (
+              last_slot_timestamp IS NULL
+              OR ? > last_slot_timestamp
+              OR (? = last_slot_timestamp AND (last_slot IS NULL OR last_slot <> ?))
+            )
         `,
-        [lastSlot, timestamp, gameAddress, timestamp],
+        [lastSlot, timestamp, gameAddress, timestamp, timestamp, lastSlot],
         "updating game last slot timestamp"
       );
 
