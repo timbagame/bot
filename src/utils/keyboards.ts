@@ -558,6 +558,7 @@ export const createGameConfirmKeyboard = (
     .text("-25%", (() => {
       return minPlayersTargetCallback(Math.floor(currentMinPlayers * 0.75));
     })())
+    .text(`👥 Min: ${currentMinPlayers}`, "noop")
     .text("+50%", (() => {
       return minPlayersTargetCallback(Math.ceil(currentMinPlayers * 1.5));
     })())
