@@ -5665,12 +5665,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         const k = value / 1000;
         return k >= 10 ? `$${Math.round(k)}k` : `$${k.toFixed(1)}k`;
       }
-      if (value >= 10) {
-        return `$${Math.round(value)}`;
-      }
-      if (value >= 1) {
-        return `$${value.toFixed(1)}`;
-      }
+      // Always show 2 decimal places for consistency with leaderboard
       return `$${value.toFixed(2)}`;
     };
 
