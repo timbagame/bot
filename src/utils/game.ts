@@ -43,6 +43,8 @@ import {
   GAME_MESSAGE_PARTICIPANTS_PREVIEW_LIMIT,
   GAME_MESSAGE_USERNAME_LOOKUP_CONCURRENCY,
   GAME_MESSAGE_NETWORK_LOOKUP_MAX_PARTICIPANTS,
+  GAMES_HISTORY_LIMIT,
+  GAMES_PER_PAGE,
 } from "./constants";
 import { ChatDatabase } from "./chat-database";
 import {
@@ -353,6 +355,81 @@ const categorizeGame = (
   if (winnerAddress && winnerAddress !== playerPublicKey) return "lost";
   if (isCreator) return "created";
   return "lost";
+};
+
+// ================================
+// GAME HISTORY TYPES (for /games command)
+// ================================
+
+/**
+ * A single game entry for the /games command history view.
+ */
+export interface GameHistoryEntry {
+  gameAddress: string;
+  amount: number;
+  tokenTicker: string;
+  tokenMint: string;
+  tokenDecimals: number;
+  ticketCount: number;
+  maxTickets: number;
+  /** Creator username (formatted with @) or fallback display */
+  creatorDisplay: string;
+  /** Opponent username for losses, or empty */
+  opponentDisplay: string;
+  completedAt: number;
+  explorerUrl: string | null;
+  category: "won" | "lost" | "cancelled";
+}
+
+/**
+ * Structured result from getUserGamesHistory for the /games command.
+ */
+export interface GameHistoryResult {
+  won: { games: GameHistoryEntry[]; totalAmount: number; totalUsd: number };
+  lost: { games: GameHistoryEntry[]; totalAmount: number; totalUsd: number };
+  cancelled: { games: GameHistoryEntry[]; count: number };
+  /** Primary token ticker for display (most common token or first encountered) */
+  primaryTicker: string;
+  /** Primary token decimals */
+  primaryDecimals: number;
+}
+
+/**
+ * Tab identifier for /games pagination.
+ */
+export type GamesTab = "won" | "lost" | "cancelled" | "all";
+
+/**
+ * Format a timestamp as a compact date: "19 Dec 00:02"
+ */
+const formatCompactDate = (timestamp: number): string => {
+  return new Date(timestamp)
+    .toLocaleString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    })
+    .replace(",", "");
+};
+
+/**
+ * Format an amount with k/M suffix for compact display.
+ * e.g., 151100 -> "151.1k", 14000 -> "14.0k"
+ */
+const formatCompactAmount = (amount: number, decimals: number = 0): string => {
+  const value = decimals > 0 ? amount / Math.pow(10, decimals) : amount;
+
+  if (value >= 1_000_000) {
+    const m = value / 1_000_000;
+    return m >= 10 ? `${Math.round(m)}M` : `${m.toFixed(1)}M`;
+  }
+  if (value >= 1_000) {
+    const k = value / 1_000;
+    return k >= 10 ? `${Math.round(k)}k` : `${k.toFixed(1)}k`;
+  }
+  return value >= 10 ? `${Math.round(value)}` : value.toFixed(1);
 };
 
 // ================================
@@ -5309,6 +5386,419 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       recentGames: recentGamesSections,
     };
   }
+
+  /**
+   * Get structured game history for the improved /games command.
+   * Returns categorized games with amounts for summary calculation.
+   */
+  public async getUserGamesHistory(
+    ctx: Context,
+    telegramId: bigint
+  ): Promise<GameHistoryResult> {
+    const telegramIdStr = telegramId.toString();
+    const playerKp = this.wallet.getKeyPair(telegramId);
+    const playerPublicKey = playerKp.publicKey.toString();
+
+    const recentGamesData = await this.gameDb.getRecentGames(
+      telegramIdStr,
+      GAMES_HISTORY_LIMIT
+    );
+
+    const entries: GameHistoryEntry[] = [];
+    const tickerCounts = new Map<string, number>();
+    const tickerInfo = new Map<string, { mint: string; decimals: number }>();
+
+    for (const gameData of recentGamesData) {
+      try {
+        const category = categorizeGame(gameData, telegramIdStr, playerPublicKey);
+
+        // Skip "created" games (not useful for history)
+        if (category === "created") continue;
+
+        const gameAddress = gameData.game_address as string;
+        const rawAmount = Number(gameData.amount);
+        const amount = Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : 0;
+        const tokenTicker = gameData.token_ticker || "TOKENS";
+        const tokenMint = gameData.token_mint || "";
+        const completedAt = gameData.completed_at || Date.now();
+
+        // Get decimals for the token
+        let tokenDecimals = 6; // default
+        try {
+          if (tokenMint) {
+            const meta = await this.wallet.getTokenMetadata(tokenMint);
+            if (meta?.decimals != null) {
+              tokenDecimals = meta.decimals;
+            }
+          }
+        } catch {
+          // ignore
+        }
+
+        // Track token frequency and info
+        tickerCounts.set(tokenTicker, (tickerCounts.get(tokenTicker) || 0) + 1);
+        if (!tickerInfo.has(tokenTicker)) {
+          tickerInfo.set(tokenTicker, { mint: tokenMint, decimals: tokenDecimals });
+        }
+
+        // Get participant count
+        let ticketCount = 0;
+        let maxTickets = 0;
+        try {
+          const getCount = (this.gameDb as any).getGameParticipantsCount?.bind(this.gameDb);
+          if (typeof getCount === "function") {
+            ticketCount = Math.max(0, Math.trunc(getCount(gameAddress)));
+          } else {
+            ticketCount = (this.gameDb.getGameParticipants(gameAddress) ?? []).length;
+          }
+          const storedMax = Number(gameData.max_players);
+          maxTickets = Number.isFinite(storedMax) && storedMax > 0
+            ? storedMax
+            : Math.max(ticketCount, 0);
+        } catch {
+          // ignore
+        }
+
+        // Get creator display
+        let creatorDisplay = "";
+        try {
+          const creatorUsername = await this.getUsernameFromTelegramId(
+            ctx,
+            gameData.creator_telegram_id
+          );
+          creatorDisplay = creatorUsername
+            ? sanitizeTelegramDisplayNameWithoutMention(creatorUsername)
+            : `Player ${String(gameData.creator_telegram_id).slice(0, 6)}...`;
+        } catch {
+          creatorDisplay = `Player ${String(gameData.creator_telegram_id).slice(0, 6)}...`;
+        }
+
+        // Get opponent display (winner for losses)
+        let opponentDisplay = "";
+        if (category === "lost" && gameData.winner_address) {
+          try {
+            const winnerUsername = await this.getPlayerUsername(ctx, gameData.winner_address);
+            opponentDisplay = winnerUsername
+              ? sanitizeTelegramDisplayNameWithoutMention(winnerUsername)
+              : "";
+          } catch {
+            // ignore
+          }
+        }
+
+        const explorerUrl = gameAddress
+          ? NetworkDetector.buildSolscanAccountUrl(gameAddress)
+          : null;
+
+        entries.push({
+          gameAddress,
+          amount,
+          tokenTicker,
+          tokenMint,
+          tokenDecimals,
+          ticketCount,
+          maxTickets,
+          creatorDisplay,
+          opponentDisplay,
+          completedAt,
+          explorerUrl,
+          category,
+        });
+      } catch (error) {
+        console.error(`Error processing game ${gameData.game_address}:`, error);
+      }
+    }
+
+    // Determine primary ticker
+    let primaryTicker = "TOKENS";
+    let primaryDecimals = 6;
+    let maxCount = 0;
+    for (const [ticker, count] of tickerCounts) {
+      if (count > maxCount) {
+        maxCount = count;
+        primaryTicker = ticker;
+        primaryDecimals = tickerInfo.get(ticker)?.decimals ?? 6;
+      }
+    }
+
+    // Get USD prices for all unique tokens
+    const tokenPrices = new Map<string, number>();
+    for (const [ticker, info] of tickerInfo) {
+      if (info.mint) {
+        try {
+          const priceResult = await getUsdPrice({
+            tokenMint: info.mint,
+            tokenTicker: ticker,
+          });
+          if (priceResult?.price != null && priceResult.price > 0) {
+            tokenPrices.set(ticker, priceResult.price);
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    // Categorize
+    const won = entries.filter((e) => e.category === "won");
+    const lost = entries.filter((e) => e.category === "lost");
+    const cancelled = entries.filter((e) => e.category === "cancelled");
+
+    // Calculate totals in raw token units (per-token) and USD
+    const wonTotal = won.reduce((sum, g) => sum + g.amount, 0);
+    const lostTotal = lost.reduce((sum, g) => sum + g.amount, 0);
+
+    // Calculate USD totals by summing each game's USD value independently
+    const calculateUsdTotal = (games: GameHistoryEntry[]): number => {
+      return games.reduce((sum, g) => {
+        const price = tokenPrices.get(g.tokenTicker);
+        if (price == null || price <= 0) return sum;
+        const divisor = Math.pow(10, g.tokenDecimals);
+        return sum + (g.amount / divisor) * price;
+      }, 0);
+    };
+
+    const wonUsd = calculateUsdTotal(won);
+    const lostUsd = calculateUsdTotal(lost);
+
+    return {
+      won: {
+        games: won,
+        totalAmount: wonTotal,
+        totalUsd: wonUsd,
+      },
+      lost: {
+        games: lost,
+        totalAmount: lostTotal,
+        totalUsd: lostUsd,
+      },
+      cancelled: {
+        games: cancelled,
+        count: cancelled.length,
+      },
+      primaryTicker,
+      primaryDecimals,
+    };
+  }
+
+  /**
+   * Format a single game line for the compact /games output.
+   * ✅ 151.1k TIMBA 🅴 • 2/2 • by @seebaacs • 19 Dec 00:02
+   * ❌ 154.0k TIMBA 🅴 • 7/10 • vs @ThrasherMagazinee • 19 Dec 00:00
+   * 🚫 14.0k TIMBA 🅴 • 0/2 • 19 Dec 00:44
+   */
+  public formatCompactGameLine(game: GameHistoryEntry): string {
+    const emoji =
+      game.category === "won" ? "✅" :
+      game.category === "lost" ? "❌" : "🚫";
+
+    const amountStr = formatCompactAmount(game.amount, game.tokenDecimals);
+    const ticketsStr = `${game.ticketCount}/${game.maxTickets}`;
+    const dateStr = formatCompactDate(game.completedAt);
+    const ticker = escapeHtml(game.tokenTicker);
+
+    // Build the person reference
+    let personPart = "";
+    if (game.category === "won" || game.category === "cancelled") {
+      // Show creator ("by @user")
+      if (game.creatorDisplay) {
+        personPart = ` • by ${escapeHtml(game.creatorDisplay)}`;
+      }
+    } else if (game.category === "lost") {
+      // Show opponent/winner ("vs @user")
+      if (game.opponentDisplay) {
+        personPart = ` • vs ${escapeHtml(game.opponentDisplay)}`;
+      }
+    }
+
+    // Build explorer link with 🅴 emoji (like game messages)
+    const explorerIcon = game.explorerUrl
+      ? `<a href="${escapeHtml(game.explorerUrl)}">🅴</a>`
+      : "";
+
+    return `${emoji} ${escapeHtml(amountStr)} ${ticker} ${explorerIcon}• ${ticketsStr}${personPart} • ${dateStr}`;
+  }
+
+  /**
+   * Build the summary header for /games command.
+   * 🎲 Games — @username
+   * Last 30 days
+   * Net: <code>+$13.00</code> (Won <code>$21.00</code> • Lost <code>$8.00</code>)
+   * ────────
+   */
+  public formatGamesHeader(
+    username: string,
+    result: GameHistoryResult
+  ): string {
+    const formatUsd = (value: number): string => {
+      if (value >= 1000) {
+        const k = value / 1000;
+        return k >= 10 ? `$${Math.round(k)}k` : `$${k.toFixed(1)}k`;
+      }
+      if (value >= 10) {
+        return `$${Math.round(value)}`;
+      }
+      if (value >= 1) {
+        return `$${value.toFixed(1)}`;
+      }
+      return `$${value.toFixed(2)}`;
+    };
+
+    // Always show USD - games can be in multiple tokens so we can't show token amounts
+    const wonUsd = formatUsd(result.won.totalUsd);
+    const lostUsd = formatUsd(result.lost.totalUsd);
+    const netUsd = result.won.totalUsd - result.lost.totalUsd;
+    const netSign = netUsd >= 0 ? "+" : "-";
+    const netStr = formatUsd(Math.abs(netUsd));
+    // Remove the $ from netStr since we'll add it with the sign
+    const summaryLine = `Net: <code>${netSign}$${netStr.replace("$", "")}</code> (Won <code>${wonUsd}</code> • Lost <code>${lostUsd}</code>)`;
+
+    const lines = [
+      `🎲 <b>Games</b> — ${escapeHtml(username)}  <code>30D</code>`,
+      summaryLine,
+      "────────",
+    ];
+
+    return lines.join("\n");
+  }
+
+  /**
+   * Format a full /games message for a specific tab and page.
+   */
+  public formatGamesMessage(
+    username: string,
+    result: GameHistoryResult,
+    tab: GamesTab,
+    page: number
+  ): string {
+    const header = this.formatGamesHeader(username, result);
+
+    // Determine which games to show
+    let games: GameHistoryEntry[];
+    let sectionTitle: string;
+
+    switch (tab) {
+      case "won":
+        games = result.won.games;
+        sectionTitle = `✅ Won (${games.length})`;
+        break;
+      case "lost":
+        games = result.lost.games;
+        sectionTitle = `❌ Lost (${games.length})`;
+        break;
+      case "cancelled":
+        games = result.cancelled.games;
+        sectionTitle = `🚫 Cancelled (${games.length})`;
+        break;
+      case "all":
+      default:
+        // Merge all and sort by date
+        games = [
+          ...result.won.games,
+          ...result.lost.games,
+          ...result.cancelled.games,
+        ].sort((a, b) => b.completedAt - a.completedAt);
+        sectionTitle = `All (${games.length})`;
+        break;
+    }
+
+    if (games.length === 0) {
+      return `${header}\n\n<i>No games in this category.</i>`;
+    }
+
+    // Paginate
+    const totalPages = Math.ceil(games.length / GAMES_PER_PAGE);
+    const safePage = Math.max(0, Math.min(page, totalPages - 1));
+    const start = safePage * GAMES_PER_PAGE;
+    const pageGames = games.slice(start, start + GAMES_PER_PAGE);
+
+    // Format game lines
+    const gameLines = pageGames
+      .map((g) => `• ${this.formatCompactGameLine(g)}`)
+      .join("\n");
+
+    const pageInfo = totalPages > 1 ? ` • Page ${safePage + 1}/${totalPages}` : "";
+
+    return `${header}\n${sectionTitle}${pageInfo}\n${gameLines}`;
+  }
+
+  /**
+   * Build inline keyboard for /games tabs and pagination.
+   */
+  public buildGamesKeyboard(
+    telegramId: string,
+    result: GameHistoryResult,
+    currentTab: GamesTab,
+    currentPage: number
+  ): any[][] {
+    const keyboard: any[][] = [];
+
+    // Row 1: Tabs
+    const tabs: Array<{ label: string; tab: GamesTab; count: number }> = [
+      { label: "Won", tab: "won", count: result.won.games.length },
+      { label: "Lost", tab: "lost", count: result.lost.games.length },
+      { label: "Canc", tab: "cancelled", count: result.cancelled.games.length },
+      { label: "All", tab: "all", count: result.won.games.length + result.lost.games.length + result.cancelled.games.length },
+    ];
+
+    const tabRow = tabs.map(({ label, tab, count }) => {
+      const isActive = tab === currentTab;
+      const displayLabel = isActive ? `[${label} (${count})]` : `${label} (${count})`;
+      return {
+        text: displayLabel,
+        callback_data: `games_tab:${tab}:0:${telegramId}`,
+      };
+    });
+    keyboard.push(tabRow);
+
+    // Row 2: Pagination (if needed)
+    const games = currentTab === "all"
+      ? [...result.won.games, ...result.lost.games, ...result.cancelled.games]
+      : currentTab === "won"
+        ? result.won.games
+        : currentTab === "lost"
+          ? result.lost.games
+          : result.cancelled.games;
+
+    const totalPages = Math.ceil(games.length / GAMES_PER_PAGE);
+
+    if (totalPages > 1) {
+      const navRow: any[] = [];
+
+      // Prev button
+      if (currentPage > 0) {
+        navRow.push({
+          text: "◀ Prev",
+          callback_data: `games_tab:${currentTab}:${currentPage - 1}:${telegramId}`,
+        });
+      }
+
+      // Refresh button
+      navRow.push({
+        text: "↻ Refresh",
+        callback_data: `games_refresh:${telegramId}`,
+      });
+
+      // Next button
+      if (currentPage < totalPages - 1) {
+        navRow.push({
+          text: "Next ▶",
+          callback_data: `games_tab:${currentTab}:${currentPage + 1}:${telegramId}`,
+        });
+      }
+
+      keyboard.push(navRow);
+    } else {
+      // Just refresh button
+      keyboard.push([{
+        text: "↻ Refresh",
+        callback_data: `games_refresh:${telegramId}`,
+      }]);
+    }
+
+    return keyboard;
+  }
+
 
   private async formatActiveGamesList(
     ctx: Context,

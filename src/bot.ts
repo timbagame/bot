@@ -15,7 +15,7 @@ import {
   type LeaderboardStatsRecord,
 } from "./utils/game-database";
 import { ChatDatabase } from "./utils/chat-database";
-import { GameManager } from "./utils/game";
+import { GameManager, type GamesTab } from "./utils/game";
 import { PDAManager } from "./utils/pda";
 import { formatUserFriendlyError } from "./utils/errors";
 import {
@@ -4034,16 +4034,122 @@ bot.command("games", async (ctx: Context) => {
   }
 
   try {
-    const { recentGames } = await gameManager.getUserGames(ctx, telegramId);
-    const response = recentGames || "You don't have any recent games.";
+    const result = await gameManager.getUserGamesHistory(ctx, telegramId);
 
-    await ctx.reply(response, {
+    // Get username for header
+    const username = ctx.from?.username
+      ? `@${ctx.from.username}`
+      : ctx.from?.first_name || "Player";
+
+    const totalGames = result.won.games.length + result.lost.games.length + result.cancelled.games.length;
+
+    if (totalGames === 0) {
+      await ctx.reply("You don't have any recent games.", {
+        reply_to_message_id: ctx.message?.message_id,
+      });
+      return;
+    }
+
+    // Default to "all" tab, page 0
+    const tab: GamesTab = "all";
+    const page = 0;
+    const telegramIdStr = telegramId.toString();
+
+    const messageText = gameManager.formatGamesMessage(username, result, tab, page);
+    const keyboard = gameManager.buildGamesKeyboard(telegramIdStr, result, tab, page);
+
+    await ctx.reply(messageText, {
       parse_mode: "HTML",
+      reply_markup: { inline_keyboard: keyboard },
       reply_to_message_id: ctx.message?.message_id,
       link_preview_options: { is_disabled: true },
     });
   } catch (error) {
     await handleCommandError(ctx, error, "games");
+  }
+});
+
+// Tab/pagination callback for /games command
+bot.callbackQuery(/^games_tab:(won|lost|cancelled|all):(\d+):(\d+)$/, async (ctx: Context) => {
+  try {
+    const match = ctx.callbackQuery?.data?.match(/^games_tab:(won|lost|cancelled|all):(\d+):(\d+)$/);
+    if (!match || !match[1] || !match[2] || !match[3]) {
+      await safeAnswerCallbackQuery(ctx, "Invalid request.");
+      return;
+    }
+
+    const tab = match[1] as GamesTab;
+    const page = parseInt(match[2], 10);
+    const ownerId = match[3];
+
+    // Verify this is the owner
+    const callerId = ctx.from?.id?.toString();
+    if (callerId !== ownerId) {
+      await safeAnswerCallbackQuery(ctx, "This isn't your games list.");
+      return;
+    }
+
+    const telegramId = BigInt(ownerId);
+    const result = await gameManager.getUserGamesHistory(ctx, telegramId);
+
+    const username = ctx.from?.username
+      ? `@${ctx.from.username}`
+      : ctx.from?.first_name || "Player";
+
+    const messageText = gameManager.formatGamesMessage(username, result, tab, page);
+    const keyboard = gameManager.buildGamesKeyboard(ownerId, result, tab, page);
+
+    await ctx.editMessageText(messageText, {
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: keyboard },
+      link_preview_options: { is_disabled: true },
+    });
+    await safeAnswerCallbackQuery(ctx);
+  } catch (error) {
+    await handleCallbackErrorSafe(ctx, error, "games tab");
+  }
+});
+
+// Refresh callback for /games command
+bot.callbackQuery(/^games_refresh:(\d+)$/, async (ctx: Context) => {
+  try {
+    const match = ctx.callbackQuery?.data?.match(/^games_refresh:(\d+)$/);
+    if (!match || !match[1]) {
+      await safeAnswerCallbackQuery(ctx, "Invalid request.");
+      return;
+    }
+
+    const ownerId = match[1];
+
+    // Verify this is the owner
+    const callerId = ctx.from?.id?.toString();
+    if (callerId !== ownerId) {
+      await safeAnswerCallbackQuery(ctx, "This isn't your games list.");
+      return;
+    }
+
+    const telegramId = BigInt(ownerId);
+    const result = await gameManager.getUserGamesHistory(ctx, telegramId);
+
+    const username = ctx.from?.username
+      ? `@${ctx.from.username}`
+      : ctx.from?.first_name || "Player";
+
+    // Refresh defaults back to "all" tab, page 0
+    const tab: GamesTab = "all";
+    const page = 0;
+
+    const messageText = gameManager.formatGamesMessage(username, result, tab, page);
+    const keyboard = gameManager.buildGamesKeyboard(ownerId, result, tab, page);
+
+    await ctx.editMessageText(messageText, {
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: keyboard },
+      link_preview_options: { is_disabled: true },
+    });
+    await safeAnswerCallbackQuery(ctx, "Refreshed!");
+  } catch (error) {
+    await handleCallbackErrorSafe(ctx, error, "games refresh");
   }
 });
 

@@ -138,6 +138,8 @@ export const USER_WALLET_RPC_MAX_CALLS = parsePositiveInteger(
 );
 export const CALLBACK_MESSAGE_MAX_LENGTH = 180;
 export const GAME_INFO_LIMIT = 5;
+export const GAMES_PER_PAGE = 5; // Games per page in /games command output
+export const GAMES_HISTORY_LIMIT = 50; // Max games to fetch for history
 export const MAX_ACTIVE_GAMES_PER_CREATOR = parsePositiveInteger(
   "MAX_ACTIVE_GAMES_PER_CREATOR",
   10
