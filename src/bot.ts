@@ -4040,6 +4040,7 @@ bot.command("games", async (ctx: Context) => {
     await ctx.reply(response, {
       parse_mode: "HTML",
       reply_to_message_id: ctx.message?.message_id,
+      link_preview_options: { is_disabled: true },
     });
   } catch (error) {
     await handleCommandError(ctx, error, "games");

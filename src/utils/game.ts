@@ -320,10 +320,9 @@ const formatDate = (timestamp: number): string => {
   return new Date(timestamp).toLocaleString("en-GB", {
     day: "2-digit",
     month: "2-digit",
-    year: "numeric",
+    year: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    second: "2-digit",
     hour12: false,
   });
 };
@@ -3454,13 +3453,8 @@ export class GameManager {
         (this.gameDb as any).getGameParticipantsCount?.bind(this.gameDb) as
           | ((address: string) => number)
           | undefined;
-      const getPreview =
-        (this.gameDb as any).getGameParticipantsPreview?.bind(this.gameDb) as
-          | ((address: string, limit: number) => string[])
-          | undefined;
 
       let currentTickets = 0;
-      let previewIds: string[] = [];
 
       if (gameAddress) {
         try {
@@ -3471,17 +3465,6 @@ export class GameManager {
           }
         } catch (participantError) {
           console.error("Error retrieving participant count for completed game:", participantError);
-        }
-
-        try {
-          const previewLimit = Math.max(0, GAME_MESSAGE_PARTICIPANTS_PREVIEW_LIMIT);
-          if (typeof getPreview === "function") {
-            previewIds = getPreview(gameAddress, previewLimit);
-          } else {
-            previewIds = (this.gameDb.getGameParticipants(gameAddress) ?? []).slice(0, previewLimit);
-          }
-        } catch (participantError) {
-          console.error("Error retrieving participant preview for completed game:", participantError);
         }
       }
       const storedMax = Number(gameData.max_players);
@@ -3546,80 +3529,13 @@ export class GameManager {
       const safeTicker = escapeHtml(tokenTicker);
       const safeCreator = escapeHtml(creatorLabel);
       const safePlayerCount = escapeHtml(playerCountDisplay);
-      let message =
+      const message =
         `${gameLabel} • ${safeAmountDisplay} ${safeTicker}` +
         `\nCreator: ${safeCreator} • ${safePlayerCount} tickets`;
-      const totalParticipants = currentTickets;
-      const allowNetworkLookup =
-        totalParticipants <= GAME_MESSAGE_NETWORK_LOOKUP_MAX_PARTICIPANTS;
 
-      let participantNames: string[] = [];
-      if (previewIds.length > 0) {
-        try {
-          participantNames = await mapWithConcurrency(
-            previewIds,
-            GAME_MESSAGE_USERNAME_LOOKUP_CONCURRENCY,
-            async (telegramId) => {
-              try {
-                const username = await this.getUsernameFromTelegramId(
-                  ctx,
-                  telegramId,
-                  { allowNetworkLookup }
-                );
-                if (username) {
-                  return sanitizeTelegramDisplayNameWithoutMention(username);
-                }
-              } catch {
-                // fall through to placeholder
-              }
-              return `Player ${telegramId.slice(0, 6)}...`;
-            }
-          );
-        } catch (participantError) {
-          console.error(
-            "Error retrieving participants for completed game:",
-            participantError
-          );
-        }
-      }
-
+      // Build simple message without participants list
       const winnerSection = winnerLine ? `\n\n${winnerLine}` : "";
-      const compose = (names: string[], omitted: number) => {
-        const participantsList = buildParticipantsList(names);
-        let composed = message;
-        if (participantsList) {
-          composed += participantsList;
-          if (composed.endsWith("\n")) {
-            composed = composed.slice(0, -1);
-          }
-        }
-        if (omitted > 0) {
-          composed += `\n… and ${omitted} more`;
-        }
-        composed += winnerSection;
-        return composed;
-      };
-
-      let composed = compose(
-        participantNames,
-        Math.max(0, totalParticipants - participantNames.length)
-      );
-
-      if (
-        composed.length > TELEGRAM_MESSAGE_CHAR_LIMIT &&
-        participantNames.length > 0
-      ) {
-        for (let keep = participantNames.length; keep >= 0; keep -= 1) {
-          const candidate = compose(
-            participantNames.slice(0, keep),
-            Math.max(0, totalParticipants - keep)
-          );
-          if (candidate.length <= TELEGRAM_MESSAGE_CHAR_LIMIT || keep === 0) {
-            composed = candidate;
-            break;
-          }
-        }
-      }
+      let composed = message + winnerSection;
 
       if (composed.length > TELEGRAM_MESSAGE_CHAR_LIMIT) {
         composed =
