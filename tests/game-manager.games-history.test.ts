@@ -71,6 +71,18 @@ describe("GameManager.getUserGamesHistory", () => {
       getGame: (_: string) => ({ token_mint: "MINT", token_ticker: "TIMBA" }),
       getCreatorInfo: (_: string) => ({ telegramId: "777" }),
       getGameParticipants: () => [{ telegram_id: "12345" }, { telegram_id: "777" }],
+      getPlayerGlobalStats: (_: string) => ({
+        telegramId: "12345",
+        totalGames: 4,
+        gamesWon: 2,
+        gamesCreated: 0,
+        gamesJoined: 4,
+        totalVolume: 333000000,
+        winRate: 50,
+        netAmountByToken: {
+          "TIMBA_MINT": 11_100_000, // Net win amount in raw units
+        },
+      }),
     } as any;
 
     gm = GameManager.getInstance(program, wallet, db);

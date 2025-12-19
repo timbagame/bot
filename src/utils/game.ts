@@ -5543,27 +5543,53 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       }
     }
 
-    // Categorize
+    // Categorize entries for the game list display
     const won = entries.filter((e) => e.category === "won");
     const lost = entries.filter((e) => e.category === "lost");
     const cancelled = entries.filter((e) => e.category === "cancelled");
 
-    // Calculate totals in raw token units (per-token) and USD
+    // For display list, use the limited entries
     const wonTotal = won.reduce((sum, g) => sum + g.amount, 0);
     const lostTotal = lost.reduce((sum, g) => sum + g.amount, 0);
 
-    // Calculate USD totals by summing each game's USD value independently
-    const calculateUsdTotal = (games: GameHistoryEntry[]): number => {
-      return games.reduce((sum, g) => {
-        const price = tokenPrices.get(g.tokenTicker);
-        if (price == null || price <= 0) return sum;
-        const divisor = Math.pow(10, g.tokenDecimals);
-        return sum + (g.amount / divisor) * price;
-      }, 0);
-    };
+    // Get ACCURATE stats from database aggregation (same as leaderboard)
+    // This ensures /games and /lb show matching numbers
+    const playerStats = this.gameDb.getPlayerGlobalStats(telegramIdStr);
 
-    const wonUsd = calculateUsdTotal(won);
-    const lostUsd = calculateUsdTotal(lost);
+    let wonUsd = 0;
+    let lostUsd = 0;
+
+    if (playerStats?.netAmountByToken) {
+      // Convert per-token net amounts to USD
+      for (const [tokenMint, netAmount] of Object.entries(playerStats.netAmountByToken)) {
+        try {
+          // Get token metadata for decimals
+          let decimals = 9; // Default
+          try {
+            const meta = await this.wallet.getTokenMetadata(tokenMint);
+            if (meta?.decimals != null) decimals = meta.decimals;
+          } catch {
+            // ignore
+          }
+
+          // Get USD price
+          const priceResult = await getUsdPrice({ tokenMint, tokenTicker: "" });
+          if (priceResult?.price && priceResult.price > 0) {
+            const divisor = Math.pow(10, decimals);
+            const usdValue = (netAmount / divisor) * priceResult.price;
+
+            // Net amount is positive for wins, negative for losses
+            if (usdValue > 0) {
+              wonUsd += usdValue;
+            } else {
+              lostUsd += Math.abs(usdValue);
+            }
+          }
+        } catch {
+          // ignore price lookup failures
+        }
+      }
+    }
 
     return {
       won: {

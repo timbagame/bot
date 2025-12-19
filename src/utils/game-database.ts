@@ -1127,6 +1127,221 @@ export class GameDatabase extends BaseDatabase {
   }
 
   /**
+   * Get global stats for a single player (for /games command header).
+   * Returns the same data structure as leaderboard but for one player.
+   */
+  public getPlayerGlobalStats(telegramId: string): LeaderboardStatsRecord | null {
+    try {
+      const playerKey = this.getPlayerPublicKey(telegramId);
+
+      // First query: get aggregate stats for this player
+      const aggregateRow = this.get<any>(
+        `
+        WITH relevant_games AS (
+          SELECT *
+          FROM games
+          WHERE game_type != 'giveaway'
+        ),
+        player_game_roles AS (
+          SELECT
+            rg.game_address,
+            rg.status,
+            rg.amount,
+            rg.total_amount,
+            rg.winner_address,
+            rg.token_mint,
+            rg.creator_telegram_id AS telegram_id,
+            'creator' AS role
+          FROM relevant_games rg
+          WHERE rg.creator_telegram_id = ?
+
+          UNION
+
+          SELECT
+            rg.game_address,
+            rg.status,
+            rg.amount,
+            rg.total_amount,
+            rg.winner_address,
+            rg.token_mint,
+            gp.telegram_id AS telegram_id,
+            'participant' AS role
+          FROM relevant_games rg
+          JOIN game_participants gp
+            ON gp.game_address = rg.game_address
+           AND gp.status = 'confirmed'
+          WHERE gp.telegram_id = ?
+
+          UNION
+
+          SELECT
+            rg.game_address,
+            rg.status,
+            rg.amount,
+            rg.total_amount,
+            rg.winner_address,
+            rg.token_mint,
+            ? AS telegram_id,
+            'winner' AS role
+          FROM relevant_games rg
+          WHERE rg.winner_address = ?
+        ),
+        player_game_summary AS (
+          SELECT
+            telegram_id,
+            game_address,
+            status,
+            amount,
+            total_amount,
+            token_mint,
+            MAX(CASE WHEN role = 'creator' THEN 1 ELSE 0 END) AS is_creator,
+            MAX(CASE WHEN role = 'participant' THEN 1 ELSE 0 END) AS is_participant,
+            MAX(CASE WHEN role = 'winner' THEN 1 ELSE 0 END) AS is_winner,
+            MAX(CASE WHEN LOWER(winner_address) = 'cancelled' THEN 1 ELSE 0 END) AS is_cancelled
+          FROM player_game_roles
+          GROUP BY telegram_id, game_address, status, amount, total_amount, token_mint
+        )
+        SELECT
+          COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_cancelled = 0 THEN pgs.game_address END) AS total_games,
+          COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_cancelled = 0 AND pgs.is_winner = 1 THEN pgs.game_address END) AS games_won,
+          COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_cancelled = 0 AND pgs.is_creator = 1 THEN pgs.game_address END) AS games_created,
+          COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_cancelled = 0 AND pgs.is_participant = 1 THEN pgs.game_address END) AS games_joined,
+          COALESCE(SUM(CASE WHEN pgs.status = 'completed' AND pgs.is_cancelled = 0 THEN pgs.amount ELSE 0 END), 0) AS total_volume,
+          ROUND(
+            CASE
+              WHEN COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_cancelled = 0 THEN pgs.game_address END) > 0
+              THEN (
+                COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_cancelled = 0 AND pgs.is_winner = 1 THEN pgs.game_address END) * 100.0
+              ) /
+              COUNT(DISTINCT CASE WHEN pgs.status = 'completed' AND pgs.is_cancelled = 0 THEN pgs.game_address END)
+              ELSE 0
+            END,
+            1
+          ) AS win_rate
+        FROM player_game_summary pgs
+      `,
+        [telegramId, telegramId, telegramId, playerKey ?? ""],
+        "getting player global stats"
+      );
+
+      if (!aggregateRow || aggregateRow.total_games === 0) {
+        return null;
+      }
+
+      // Second query: get per-token net amounts for this player
+      const netAmountRows = this.all<any>(
+        `
+        WITH relevant_games AS (
+          SELECT *
+          FROM games
+          WHERE status = 'completed'
+            AND LOWER(winner_address) != 'cancelled'
+            AND game_type != 'giveaway'
+        ),
+        game_participant_counts AS (
+          SELECT
+            game_address,
+            COUNT(*) AS participant_count
+          FROM game_participants
+          WHERE status = 'confirmed'
+          GROUP BY game_address
+        ),
+        player_game_roles AS (
+          SELECT
+            rg.game_address,
+            rg.amount,
+            rg.total_amount,
+            rg.token_mint,
+            COALESCE(gpc.participant_count, 2) AS participant_count,
+            rg.creator_telegram_id AS telegram_id,
+            'creator' AS role
+          FROM relevant_games rg
+          LEFT JOIN game_participant_counts gpc ON gpc.game_address = rg.game_address
+          WHERE rg.creator_telegram_id = ?
+
+          UNION
+
+          SELECT
+            rg.game_address,
+            rg.amount,
+            rg.total_amount,
+            rg.token_mint,
+            COALESCE(gpc.participant_count, 2) AS participant_count,
+            gp.telegram_id AS telegram_id,
+            'participant' AS role
+          FROM relevant_games rg
+          LEFT JOIN game_participant_counts gpc ON gpc.game_address = rg.game_address
+          JOIN game_participants gp
+            ON gp.game_address = rg.game_address
+           AND gp.status = 'confirmed'
+          WHERE gp.telegram_id = ?
+
+          UNION
+
+          SELECT
+            rg.game_address,
+            rg.amount,
+            rg.total_amount,
+            rg.token_mint,
+            COALESCE(gpc.participant_count, 2) AS participant_count,
+            ? AS telegram_id,
+            'winner' AS role
+          FROM relevant_games rg
+          LEFT JOIN game_participant_counts gpc ON gpc.game_address = rg.game_address
+          WHERE rg.winner_address = ?
+        ),
+        player_game_summary AS (
+          SELECT
+            telegram_id,
+            game_address,
+            amount,
+            total_amount,
+            token_mint,
+            participant_count,
+            MAX(CASE WHEN role = 'winner' THEN 1 ELSE 0 END) AS is_winner
+          FROM player_game_roles
+          GROUP BY telegram_id, game_address, amount, total_amount, token_mint, participant_count
+        )
+        SELECT
+          COALESCE(pgs.token_mint, 'SOL') AS token_mint,
+          SUM(
+            CASE
+              WHEN pgs.is_winner = 1 THEN (COALESCE(pgs.total_amount, pgs.amount * pgs.participant_count) - pgs.amount)
+              ELSE -pgs.amount
+            END
+          ) AS net_amount
+        FROM player_game_summary pgs
+        GROUP BY COALESCE(pgs.token_mint, 'SOL')
+      `,
+        [telegramId, telegramId, telegramId, playerKey ?? ""],
+        "getting player net amounts per token"
+      );
+
+      // Build netAmountByToken map
+      const netAmountByToken: Record<string, number> = {};
+      for (const row of netAmountRows) {
+        const tokenMint = String(row.token_mint ?? "SOL").trim();
+        const netAmount = Number(row.net_amount ?? 0);
+        netAmountByToken[tokenMint] = netAmount;
+      }
+
+      return {
+        telegramId,
+        totalGames: Number(aggregateRow.total_games ?? 0),
+        gamesWon: Number(aggregateRow.games_won ?? 0),
+        gamesCreated: Number(aggregateRow.games_created ?? 0),
+        gamesJoined: Number(aggregateRow.games_joined ?? 0),
+        totalVolume: Number(aggregateRow.total_volume ?? 0),
+        winRate: Number(aggregateRow.win_rate ?? 0),
+        netAmountByToken,
+      };
+    } catch (error) {
+      return this.handleError("getting player global stats", error);
+    }
+  }
+
+
+  /**
    * Get leaderboard statistics for players who have played in a specific chat,
    * but aggregate their stats GLOBALLY across all chats.
    */
