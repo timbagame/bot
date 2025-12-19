@@ -5654,7 +5654,7 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     const summaryLine = `Net: <code>${netSign}$${netStr.replace("$", "")}</code> (Won <code>${wonUsd}</code> • Lost <code>${lostUsd}</code>)`;
 
     const lines = [
-      `🎲 <b>Games</b> — ${escapeHtml(username)}  <code>30D</code>`,
+      `🎲 <b>Games</b> — ${escapeHtml(username)} <code>[30D]</code>`,
       summaryLine,
       "────────",
     ];
@@ -5712,9 +5712,33 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     const start = safePage * GAMES_PER_PAGE;
     const pageGames = games.slice(start, start + GAMES_PER_PAGE);
 
-    // Format game lines
-    const gameLines = pageGames
-      .map((g) => `• ${this.formatCompactGameLine(g)}`)
+    // Deduplicate identical games (same amount, tickets, creator, date minute)
+    // Collapse to "×N" suffix
+    const deduped: { game: GameHistoryEntry; count: number }[] = [];
+    for (const game of pageGames) {
+      // Create a key based on: category, amount, tickets, creator, date (rounded to minute)
+      const dateMinute = Math.floor(game.completedAt / 60000);
+      const key = `${game.category}|${game.amount}|${game.ticketCount}/${game.maxTickets}|${game.creatorDisplay}|${dateMinute}`;
+
+      const existing = deduped.find((d) => {
+        const dMin = Math.floor(d.game.completedAt / 60000);
+        const dKey = `${d.game.category}|${d.game.amount}|${d.game.ticketCount}/${d.game.maxTickets}|${d.game.creatorDisplay}|${dMin}`;
+        return dKey === key;
+      });
+
+      if (existing) {
+        existing.count++;
+      } else {
+        deduped.push({ game, count: 1 });
+      }
+    }
+
+    // Format game lines with optional ×N suffix
+    const gameLines = deduped
+      .map(({ game, count }) => {
+        const line = this.formatCompactGameLine(game);
+        return count > 1 ? `• ${line} ×${count}` : `• ${line}`;
+      })
       .join("\n");
 
     const pageInfo = totalPages > 1 ? ` • Page ${safePage + 1}/${totalPages}` : "";
