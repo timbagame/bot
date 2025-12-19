@@ -5410,6 +5410,10 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
     for (const gameData of recentGamesData) {
       try {
+        // Skip giveaways - they're free to join, not wins/losses
+        const gameType = (gameData.game_type as string)?.toLowerCase();
+        if (gameType === "giveaway") continue;
+
         const category = categorizeGame(gameData, telegramIdStr, playerPublicKey);
 
         // Skip "created" games (not useful for history)
