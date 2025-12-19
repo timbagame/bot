@@ -5559,35 +5559,43 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     let wonUsd = 0;
     let lostUsd = 0;
 
-    if (playerStats?.netAmountByToken) {
-      // Convert per-token net amounts to USD
-      for (const [tokenMint, netAmount] of Object.entries(playerStats.netAmountByToken)) {
+    // Convert won amounts to USD
+    if (playerStats?.wonAmountByToken) {
+      for (const [tokenMint, wonAmount] of Object.entries(playerStats.wonAmountByToken)) {
+        if (wonAmount <= 0) continue;
         try {
-          // Get token metadata for decimals
-          let decimals = 9; // Default
+          let decimals = 9;
           try {
             const meta = await this.wallet.getTokenMetadata(tokenMint);
             if (meta?.decimals != null) decimals = meta.decimals;
-          } catch {
-            // ignore
-          }
+          } catch { /* ignore */ }
 
-          // Get USD price
           const priceResult = await getUsdPrice({ tokenMint, tokenTicker: "" });
           if (priceResult?.price && priceResult.price > 0) {
             const divisor = Math.pow(10, decimals);
-            const usdValue = (netAmount / divisor) * priceResult.price;
-
-            // Net amount is positive for wins, negative for losses
-            if (usdValue > 0) {
-              wonUsd += usdValue;
-            } else {
-              lostUsd += Math.abs(usdValue);
-            }
+            wonUsd += (wonAmount / divisor) * priceResult.price;
           }
-        } catch {
-          // ignore price lookup failures
-        }
+        } catch { /* ignore */ }
+      }
+    }
+
+    // Convert lost amounts to USD
+    if (playerStats?.lostAmountByToken) {
+      for (const [tokenMint, lostAmount] of Object.entries(playerStats.lostAmountByToken)) {
+        if (lostAmount <= 0) continue;
+        try {
+          let decimals = 9;
+          try {
+            const meta = await this.wallet.getTokenMetadata(tokenMint);
+            if (meta?.decimals != null) decimals = meta.decimals;
+          } catch { /* ignore */ }
+
+          const priceResult = await getUsdPrice({ tokenMint, tokenTicker: "" });
+          if (priceResult?.price && priceResult.price > 0) {
+            const divisor = Math.pow(10, decimals);
+            lostUsd += (lostAmount / divisor) * priceResult.price;
+          }
+        } catch { /* ignore */ }
       }
     }
 

@@ -11,6 +11,10 @@ export interface LeaderboardStatsRecord {
   winRate: number;
   /** Net amount per token: positive = won, negative = lost. Key is token_mint or 'SOL' */
   netAmountByToken: Record<string, number>;
+  /** Won amount per token (profit from wins). Optional, only returned by getPlayerGlobalStats */
+  wonAmountByToken?: Record<string, number>;
+  /** Lost amount per token (losses). Optional, only returned by getPlayerGlobalStats */
+  lostAmountByToken?: Record<string, number>;
 }
 
 /**
@@ -1307,22 +1311,33 @@ export class GameDatabase extends BaseDatabase {
           SUM(
             CASE
               WHEN pgs.is_winner = 1 THEN (COALESCE(pgs.total_amount, pgs.amount * pgs.participant_count) - pgs.amount)
-              ELSE -pgs.amount
+              ELSE 0
             END
-          ) AS net_amount
+          ) AS won_amount,
+          SUM(
+            CASE
+              WHEN pgs.is_winner = 0 THEN pgs.amount
+              ELSE 0
+            END
+          ) AS lost_amount
         FROM player_game_summary pgs
         GROUP BY COALESCE(pgs.token_mint, 'SOL')
       `,
         [telegramId, telegramId, telegramId, playerKey ?? ""],
-        "getting player net amounts per token"
+        "getting player won/lost amounts per token"
       );
 
-      // Build netAmountByToken map
+      // Build wonAmountByToken and lostAmountByToken maps
+      const wonAmountByToken: Record<string, number> = {};
+      const lostAmountByToken: Record<string, number> = {};
       const netAmountByToken: Record<string, number> = {};
       for (const row of netAmountRows) {
         const tokenMint = String(row.token_mint ?? "SOL").trim();
-        const netAmount = Number(row.net_amount ?? 0);
-        netAmountByToken[tokenMint] = netAmount;
+        const wonAmount = Number(row.won_amount ?? 0);
+        const lostAmount = Number(row.lost_amount ?? 0);
+        wonAmountByToken[tokenMint] = wonAmount;
+        lostAmountByToken[tokenMint] = lostAmount;
+        netAmountByToken[tokenMint] = wonAmount - lostAmount;
       }
 
       return {
@@ -1334,6 +1349,8 @@ export class GameDatabase extends BaseDatabase {
         totalVolume: Number(aggregateRow.total_volume ?? 0),
         winRate: Number(aggregateRow.win_rate ?? 0),
         netAmountByToken,
+        wonAmountByToken,
+        lostAmountByToken,
       };
     } catch (error) {
       return this.handleError("getting player global stats", error);

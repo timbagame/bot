@@ -80,7 +80,13 @@ describe("GameManager.getUserGamesHistory", () => {
         totalVolume: 333000000,
         winRate: 50,
         netAmountByToken: {
-          "TIMBA_MINT": 11_100_000, // Net win amount in raw units
+          "TIMBA_MINT": 11_100_000,
+        },
+        wonAmountByToken: {
+          "TIMBA_MINT": 165_100_000, // Raw won amount
+        },
+        lostAmountByToken: {
+          "TIMBA_MINT": 154_000_000, // Raw lost amount
         },
       }),
     } as any;
