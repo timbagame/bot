@@ -656,4 +656,237 @@ describe("chat defaults module", () => {
     // Should NOT re-render menu or anything else visible
     expect(messagesReplied).toHaveLength(0);
   });
+  test("join notification settings flow updates database and UI", async () => {
+    const mockBot = createMockBot();
+    const tokenManager = baseTokenManager();
+    const { ctx, replies } = buildMockContext();
+    ctx.callbackQuery = {
+      data: "chat_defaults_join_notifications",
+      message: { message_id: 11, chat: { id: 99 } },
+    };
+    ctx.chat = { id: 99 };
+
+    let lastMenu: any = null;
+    ctx.api.editMessageText = async (
+      _chatId: number,
+      _msgId: number,
+      text: string,
+      options: any
+    ) => {
+      lastMenu = { text, options };
+    };
+    ctx.reply = async (text: string, options: any) => {
+      lastMenu = { text, options };
+    };
+
+    const module = createChatDefaultsModule({
+      bot: mockBot as any,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (ctx) => await handler(ctx, async () => {}),
+      getOracleMaxPlayers: () => 50,
+      isUserGroupAdmin: async () => true,
+      replyToMessage: async (_ctx, text) => {
+        replies.push(text);
+      },
+    });
+
+    // 1. Open Join Notifications Menu
+    await mockBot.dispatch("chat_defaults_join_notifications", ctx);
+    expect(lastMenu.text).toContain("Join Notification Settings");
+    expect(lastMenu.text).toContain("External: Off"); // Default
+    expect(lastMenu.text).toContain("5/min"); // Default
+
+    // 2. Enable External Notifications
+    ctx.callbackQuery.data = "chat_defaults_set_join_external_on";
+    await mockBot.dispatch("chat_defaults_set_join_external_on", ctx);
+
+    const settingsExt = chatDb.getChatGameSettings(99);
+    expect(settingsExt?.join_notifications_external).toBeTruthy();
+    // Actually chat-db.ts usually returns number for boolean columns if not mapped.
+    // But let's assume the getter does what it says. If strictly mapped:
+    // checking functionality directly via re-render check:
+    expect(lastMenu.text).toContain("External ✅ On");
+
+    // 3. Set Rate Limit to 5
+    ctx.callbackQuery.data = "chat_defaults_set_join_rate_5";
+    await mockBot.dispatch("chat_defaults_set_join_rate_5", ctx);
+
+    const settingsRate = chatDb.getChatGameSettings(99);
+    expect(settingsRate?.join_notifications_per_minute).toBe(5);
+    expect(lastMenu.text).toContain("5/min");
+
+    // 4. Custom Rate Limit Input Flow
+    ctx.callbackQuery.data = "chat_defaults_set_join_rate_custom";
+    await mockBot.dispatch("chat_defaults_set_join_rate_custom", ctx);
+    expect(lastMenu.text).toContain("Enter a custom rate limit");
+
+    // User sends "25"
+    const session: InputSessionState = {
+        type: "chat_defaults",
+        chatId: 99,
+        messageId: 11,
+        target: "join_rate_custom",
+        initiatorId: "123", // matches ctx.from.id
+      } as any;
+
+    await module.handleSettingsInput(ctx, session, "25");
+
+    const settingsCustom = chatDb.getChatGameSettings(99);
+    expect(settingsCustom?.join_notifications_per_minute).toBe(25);
+    expect(replies.some((text) => text.includes("Rate limit set to 25/min"))).toBe(true);
+
+    // 5. Clear/Restore Defaults
+    ctx.callbackQuery.data = "chat_defaults_clear_join_notifications";
+    await mockBot.dispatch("chat_defaults_clear_join_notifications", ctx);
+
+    const settingsClear = chatDb.getChatGameSettings(99);
+    expect(settingsClear?.join_notifications_external).toBeNull();
+    expect(settingsClear?.join_notifications_per_minute).toBeNull();
+    expect(lastMenu.text).toContain("External ❌ Off"); // back to default
+    expect(lastMenu.text).toContain("5/min"); // back to default
+  });
+
+  test("video settings flow updates database and UI", async () => {
+    const mockBot = createMockBot();
+    const tokenManager = baseTokenManager();
+    const { ctx, replies } = buildMockContext();
+    ctx.chat = { id: 99 };
+    // Start with Coinflip Video menu
+    ctx.callbackQuery = {
+      data: "chat_defaults_video_coinflip",
+      message: { message_id: 11, chat: { id: 99 } },
+      from: { id: 123 },
+    };
+    ctx.answerCallbackQuery = async () => {};
+
+    let lastMenu: any = null;
+    ctx.api.editMessageText = async (
+      _chatId: number,
+      _msgId: number,
+      text: string,
+      options: any
+    ) => {
+      lastMenu = { text, options };
+    };
+    ctx.reply = async (text: string, options: any) => {
+      lastMenu = { text, options };
+    };
+
+    const module = createChatDefaultsModule({
+      bot: mockBot as any,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (ctx) => await handler(ctx, async () => {}),
+      getOracleMaxPlayers: () => 50,
+      isUserGroupAdmin: async () => true,
+      replyToMessage: async (_ctx, text) => {
+        replies.push(text);
+      },
+    });
+
+    // 1. Open Video Menu
+    await mockBot.dispatch("chat_defaults_video_coinflip", ctx);
+    expect(lastMenu.text).toContain("Choose an option for the coinflip game media");
+
+    // 2. Disable Media
+    ctx.callbackQuery.data = "chat_defaults_disable_video_coinflip";
+    await mockBot.dispatch("chat_defaults_disable_video_coinflip", ctx);
+
+    let settings = chatDb.getChatGameSettings(99);
+    expect(settings?.coinflip_video_id).toBe("__DISABLED__");
+    expect(lastMenu.text).toContain("Disabled - text only");
+
+    // 3. Clear/Restore Defaults
+    ctx.callbackQuery.data = "chat_defaults_clear_video_coinflip";
+    await mockBot.dispatch("chat_defaults_clear_video_coinflip", ctx);
+
+    settings = chatDb.getChatGameSettings(99);
+    expect(settings?.coinflip_video_id).toBe(""); // empty string means "use bot default" as per logic? Or null?
+    // Logic says: Clear means use bot default -> set to empty string on db upsert
+    expect(lastMenu.text).toContain("Using bot default");
+
+    // 4. Set Custom Media (Input)
+    // Simulate flow: User clicks "Set custom", then sends a file
+    ctx.callbackQuery.data = "chat_defaults_set_video_coinflip";
+    await mockBot.dispatch("chat_defaults_set_video_coinflip", ctx);
+    expect(lastMenu.text).toContain("Send a video, image, or GIF");
+
+    const session: InputSessionState = {
+        type: "chat_defaults",
+        chatId: 99,
+        messageId: 11,
+        setting: "video_coinflip",
+        initiatorId: "123",
+      } as any;
+
+    // Simulate sending a video message
+    ctx.message = {
+        video: { file_id: "VIDEO_123" }
+    };
+    await module.handleSettingsInput(ctx, session, ""); // text is empty, has attachment
+
+    settings = chatDb.getChatGameSettings(99);
+    expect(settings?.coinflip_video_id).toBe("VIDEO_123");
+    expect(settings?.coinflip_media_type).toBe("video");
+    expect(replies.some((text) => text.includes("Default coinflip video set"))).toBe(true);
+  });
+
+  test("non-admin cannot access new settings", async () => {
+    const mockBot = createMockBot();
+    const tokenManager = baseTokenManager();
+    const headers: string[] = [];
+
+    const ctx: any = {
+      chat: { id: 99, type: "supergroup" },
+      from: { id: 456 },
+      callbackQuery: {
+        id: "cb123",
+        data: "",
+        message: { message_id: 11, chat: { id: 99 } },
+      },
+      answerCallbackQuery: async (text?: string) => {
+        if (text) headers.push(text);
+      },
+      reply: async () => ({ message_id: 12 }),
+      api: { editMessageText: async () => ({}) },
+    };
+
+    createChatDefaultsModule({
+      bot: mockBot as any,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (ctx) => await handler(ctx, async () => {}),
+      getOracleMaxPlayers: () => 50,
+      isUserGroupAdmin: async () => false, // NOT admin
+      replyToMessage: async () => {},
+    });
+
+    // List of restricted actions
+    const restrictedActions = [
+        "chat_defaults_join_notifications",
+        "chat_defaults_set_join_external_on",
+        "chat_defaults_set_join_rate_5",
+        "chat_defaults_clear_join_notifications",
+        "chat_defaults_video_coinflip",
+        "chat_defaults_disable_video_coinflip",
+        "chat_defaults_clear_video_coinflip",
+        "chat_defaults_clear_timeout",
+        "chat_defaults_clear_coinflip",
+    ];
+
+    for (const action of restrictedActions) {
+        ctx.callbackQuery.data = action;
+        await mockBot.dispatch(action, ctx);
+        expect(headers).toContain("Only admins can change chat defaults");
+        // Reset for next
+        while(headers.length > 0) headers.pop();
+    }
+  });
 });
