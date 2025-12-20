@@ -6354,63 +6354,6 @@ if (process.env.NODE_ENV !== "test") {
         },
       });
 
-      // ================================
-      // TEMPORARY: VIDEO/GIF ID GETTER (Private chats only)
-      // ================================
-      const logMediaDetails = (
-        label: string,
-        media: {
-          file_id: string;
-          file_name?: string | null;
-          duration?: number | null;
-          width?: number | null;
-          height?: number | null;
-        },
-        fallbackName: string
-      ) => {
-        const fileId = media.file_id;
-        const fileName = media.file_name || fallbackName;
-        const duration = media.duration || 0;
-        const width = media.width || 0;
-        const height = media.height || 0;
-
-        console.log(
-          `${label} received:\n` +
-            `   File ID: ${fileId}\n` +
-            `   Name: ${fileName}\n` +
-            `   Duration: ${duration}s\n` +
-            `   Size: ${width}x${height}`
-        );
-      };
-
-      const MEDIA_LOGGERS = [
-        {
-          kind: "video",
-          label: "🎥 Video",
-          fallbackName: "video",
-        },
-        {
-          kind: "animation",
-          label: "🎭 GIF/Animation",
-          fallbackName: "animation.gif",
-        },
-      ] as const;
-
-      for (const { kind, label, fallbackName } of MEDIA_LOGGERS) {
-        bot.on(`message:${kind}` as const, async (ctx) => {
-          if (ctx.chat?.type !== "private") {
-            return;
-          }
-
-          const media = ctx.message[kind];
-          if (!media) {
-            return;
-          }
-
-          logMediaDetails(label, media, fallbackName);
-        });
-      }
-
       // Set up graceful shutdown
       const shutdown = async (signal: string) => {
         console.log(`\n🛑 Received ${signal}, shutting down gracefully...`);
