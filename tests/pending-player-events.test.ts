@@ -80,7 +80,7 @@ describe("Pending player events", () => {
     botModule.__test_setGameDatabase({
       getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
       getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
-      getGame: () => ({ game_type: "coinflip" }),
+      getGame: () => ({ game_type: "coinflip", chat_id: 77 }),
     } as any);
 
     await botModule.__test_processPlayerEvent(
@@ -111,7 +111,7 @@ describe("Pending player events", () => {
     botModule.__test_setGameDatabase({
       getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
       getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
-      getGame: () => ({ game_type: "coinflip" }),
+      getGame: () => ({ game_type: "coinflip", chat_id: 77 }),
       getGameMessages: () => [],
     } as any);
 
@@ -142,7 +142,7 @@ describe("Pending player events", () => {
     botModule.__test_setGameDatabase({
       getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
       getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
-      getGame: () => ({ game_type: "giveaway" }),
+      getGame: () => ({ game_type: "giveaway", chat_id: 77 }),
       getGameMessages: () => [],
     } as any);
 
@@ -336,7 +336,7 @@ describe("Pending player events", () => {
     botModule.__test_setGameDatabase({
       getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
       getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
-      getGame: () => ({ game_type: "coinflip" }),
+      getGame: () => ({ game_type: "coinflip", chat_id: 77 }),
       getGameMessages: () => [],
     } as any);
 

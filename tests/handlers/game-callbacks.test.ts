@@ -242,6 +242,11 @@ describe("Game callback helpers", () => {
         return m;
       },
     } as any);
+    __test_setGameDatabase({
+      getGameLastSlotWithTimestamp: () => ({ lastSlot: null, timestamp: null }),
+      getCreatorInfo: () => ({ telegramId: null, publicKey: null }),
+      getGame: () => ({ game_type: "coinflip", chat_id: 2 }),
+    } as any);
     const event = makeEvent();
     const target = { chatId: 2, messageId: 6 };
 

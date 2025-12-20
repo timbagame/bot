@@ -65,7 +65,7 @@ export interface ChatGameSettings {
   giveaway_media_type?: "photo" | "video" | "animation" | null;
   // Join notification settings:
   // - join_notifications_external: whether to show notifications for games created in other chats
-  // - join_notifications_per_minute: rate limit (0 = disabled, -1 = unlimited, null = use default)
+  // - join_notifications_per_minute: rate limit (0 = disabled, null = use default)
   join_notifications_external?: boolean | null;
   join_notifications_per_minute?: number | null;
   set_by_telegram_id?: string | null;
