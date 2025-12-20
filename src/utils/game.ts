@@ -4499,78 +4499,93 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         return { success: false, error: "This game is already full!" };
       }
 
-      // Balance validation for paid games
+      // Pre-flight balance validation for ALL game types (coinflip, giveaway, etc.)
+      // This prevents the confusing "Attempt to debit an account but found no record of a prior credit" error
       const currentGameType = Object.keys(gameAccount.gameType)[0];
-      if (currentGameType === "coinflip") {
-        const gameAmount = Number(gameAccount.ticketAmount);
-        const metadata = await this.wallet.getTokenMetadata(
-          gameData.token_mint
+      const gameAmount = Number(gameAccount.ticketAmount);
+      const metadata = await this.wallet.getTokenMetadata(
+        gameData.token_mint
+      );
+      const minSolBuffer = await this.feeBudget.getGameSafetyBufferLamports();
+
+      let [tokenBalance, solBalance] = await Promise.all([
+        this.wallet.getTokenBalance(telegramId, gameData.token_mint),
+        this.wallet.getBalance(telegramId),
+      ]);
+
+      const normalizedTicker =
+        gameData.token_ticker?.toUpperCase?.() ?? "";
+      const isSolBackedGame =
+        gameData.token_mint === WSOL_MINT &&
+        (normalizedTicker === "SOL" || normalizedTicker === "WSOL");
+
+      // Handle SOL-backed games (WSOL wrapping)
+      if (isSolBackedGame) {
+        const ensured = await this.ensureWrappedSolBalance(
+          telegramId,
+          gameAmount,
+          tokenBalance,
+          solBalance,
+          "join"
         );
-        const minSolBuffer = await this.feeBudget.getGameSafetyBufferLamports();
 
-        let [tokenBalance, solBalance] = await Promise.all([
-          this.wallet.getTokenBalance(telegramId, gameData.token_mint),
-          this.wallet.getBalance(telegramId),
-        ]);
-
-        const normalizedTicker =
-          gameData.token_ticker?.toUpperCase?.() ?? "";
-        const isSolBackedGame =
-          gameData.token_mint === WSOL_MINT &&
-          (normalizedTicker === "SOL" || normalizedTicker === "WSOL");
-
-        if (isSolBackedGame) {
-          const ensured = await this.ensureWrappedSolBalance(
-            telegramId,
-            gameAmount,
-            tokenBalance,
-            solBalance,
-            "join"
-          );
-
-          if (!ensured.success) {
-            return { success: false, error: ensured.error };
-          }
-
-          tokenBalance = ensured.tokenBalance;
-          solBalance = ensured.solBalance;
+        if (!ensured.success) {
+          return { success: false, error: ensured.error };
         }
 
-        if (tokenBalance < gameAmount) {
-          const formattedBalance = this.wallet.formatTokenBalance(
-            tokenBalance,
-            metadata.decimals
-          );
-          const formattedNeed = this.wallet.formatTokenBalance(
-            gameAmount,
-            metadata.decimals
-          );
-          const safeTicker = escapeHtml(gameData.token_ticker);
+        tokenBalance = ensured.tokenBalance;
+        solBalance = ensured.solBalance;
+      }
+
+      // Check if user has enough tokens to cover the game stake
+      if (tokenBalance < gameAmount) {
+        const formattedBalance = this.wallet.formatTokenBalance(
+          tokenBalance,
+          metadata.decimals
+        );
+        const formattedNeed = this.wallet.formatTokenBalance(
+          gameAmount,
+          metadata.decimals
+        );
+        const safeTicker = escapeHtml(gameData.token_ticker);
+
+        // Check if user has no token account at all (balance = 0)
+        if (tokenBalance === 0) {
           return {
             success: false,
-            error: `❌ Not enough ${safeTicker}. You have ${formattedBalance} but need ${formattedNeed}. Add more ${safeTicker} or reduce the amount and try again.`,
+            error: `❌ You don't have any ${safeTicker} tokens. You need ${formattedNeed} ${safeTicker} to join this game. Use /balance to check your address and transfer tokens.`,
           };
         }
 
-        const reservedTicketAmount = gameAmount;
-        const swapAllowanceRaw = Math.max(tokenBalance - reservedTicketAmount, 0);
+        return {
+          success: false,
+          error: `❌ Not enough ${safeTicker}. You have ${formattedBalance} but need ${formattedNeed}. Add more ${safeTicker} or reduce the amount and try again.`,
+        };
+      }
 
-        let lamportsBalance = solBalance;
-        if (lamportsBalance < minSolBuffer) {
-          if (swapAllowanceRaw <= 0) {
+      // SOL fee reserve check and JIT swap (for all game types - even giveaways need SOL for tx fees)
+      // For coinflip: reservedTicketAmount is the stake, so we can only swap spare tokens
+      // For giveaway: reservedTicketAmount is always 0 because giveaways are free to join
+      // (the creator funds the entire pot, participants don't stake anything)
+      const reservedTicketAmount = currentGameType === "coinflip" ? gameAmount : 0;
+      const swapAllowanceRaw = Math.max(tokenBalance - reservedTicketAmount, 0);
+
+      let lamportsBalance = solBalance;
+      if (lamportsBalance < minSolBuffer) {
+        if (swapAllowanceRaw <= 0) {
+          const shortfallMessage = this.buildSolShortfallMessage({
+            currentLamports: solBalance,
+            requiredLamports: minSolBuffer,
+            reason: "Joining this game requires SOL for transaction fees",
+            nextSteps:
+              "Add more SOL before trying again.",
+          });
+
+          if (currentGameType === "coinflip") {
             const formattedStake = this.wallet.formatTokenBalance(
-              reservedTicketAmount,
+              gameAmount,
               metadata.decimals
             );
-
-            const shortfallMessage = this.buildSolShortfallMessage({
-              currentLamports: solBalance,
-              requiredLamports: minSolBuffer,
-              reason: "Joining this game requires a SOL reserve for rent and transaction fees",
-              nextSteps:
-                "Add more SOL or swap extra tokens for fees before trying again.",
-            });
-
             return {
               success: false,
               error: `${shortfallMessage}
@@ -4579,57 +4594,63 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             };
           }
 
-          const jitResult = await this.swapManager.performJustInTimeSolSwap({
-            userKeypair: playerKp,
-            tokenMint: gameData.token_mint,
-            tokenDecimals: metadata.decimals,
-            availableTokenAmountRaw: swapAllowanceRaw,
-            desiredLamports: minSolBuffer,
-            tokenTicker: gameData.token_ticker,
-            logContext: `join ${gameAddress}`,
-          });
+          return {
+            success: false,
+            error: shortfallMessage,
+          };
+        }
 
-          if (!jitResult.swapped && jitResult.error) {
-            return { success: false, error: jitResult.error };
+        const jitResult = await this.swapManager.performJustInTimeSolSwap({
+          userKeypair: playerKp,
+          tokenMint: gameData.token_mint,
+          tokenDecimals: metadata.decimals,
+          availableTokenAmountRaw: swapAllowanceRaw,
+          desiredLamports: minSolBuffer,
+          tokenTicker: gameData.token_ticker,
+          logContext: `join ${gameAddress}`,
+        });
+
+        if (!jitResult.swapped && jitResult.error) {
+          return { success: false, error: jitResult.error };
+        }
+
+        if (jitResult.swapped) {
+          tokenBalance = await this.wallet.getTokenBalance(
+            telegramId,
+            gameData.token_mint
+          );
+
+          // Only check token balance after swap for coinflip (giveaway doesn't require tokens)
+          if (currentGameType === "coinflip" && tokenBalance < gameAmount) {
+            return {
+              success: false,
+              error: `Swap completed but only ${this.wallet.formatTokenBalance(
+                tokenBalance,
+                metadata.decimals
+              )} ${gameData.token_ticker} remain, which is below the required ${this.wallet.formatTokenBalance(
+                gameAmount,
+                metadata.decimals
+              )}. Please top up your tokens and try again.`,
+            };
           }
 
-          if (jitResult.swapped) {
-            tokenBalance = await this.wallet.getTokenBalance(
-              telegramId,
-              gameData.token_mint
-            );
+          this.wallet.clearCachedWalletData?.(telegramId);
 
-            if (tokenBalance < gameAmount) {
-              return {
-                success: false,
-                error: `Swap completed but only ${this.wallet.formatTokenBalance(
-                  tokenBalance,
-                  metadata.decimals
-                )} ${gameData.token_ticker} remain, which is below the required ${this.wallet.formatTokenBalance(
-                  gameAmount,
-                  metadata.decimals
-                )}. Please top up your tokens and try again.`,
-              };
-            }
-
-            this.wallet.clearCachedWalletData?.(telegramId);
-
-            const refreshedLamports = await this.wallet.getBalance(telegramId, {
-              forceFresh: true,
-            });
-            lamportsBalance = refreshedLamports;
-            solBalance = refreshedLamports;
-            if (refreshedLamports < minSolBuffer) {
-              return {
-                success: false,
-                error: this.buildSolShortfallMessage({
-                  currentLamports: refreshedLamports,
-                  requiredLamports: minSolBuffer,
-                  reason: "Just-in-time swap did not leave enough SOL for the rent and fee reserve",
-                nextSteps: "Add more SOL to continue.",
-                }),
-              };
-            }
+          const refreshedLamports = await this.wallet.getBalance(telegramId, {
+            forceFresh: true,
+          });
+          lamportsBalance = refreshedLamports;
+          solBalance = refreshedLamports;
+          if (refreshedLamports < minSolBuffer) {
+            return {
+              success: false,
+              error: this.buildSolShortfallMessage({
+                currentLamports: refreshedLamports,
+                requiredLamports: minSolBuffer,
+                reason: "Just-in-time swap did not leave enough SOL for transaction fees",
+              nextSteps: "Add more SOL to continue.",
+              }),
+            };
           }
         }
       }

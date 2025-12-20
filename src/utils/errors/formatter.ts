@@ -172,6 +172,15 @@ const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: E
       `We couldn't convert SOL to WSOL. Unwrap any stuck WSOL or contact an admin if the issue keeps happening.`,
   },
   {
+    // Must come before "simulation failed" handler since it's more specific
+    matcher: (ctx) =>
+      ctx.lowerMessage.includes("no record of a prior credit") ||
+      ctx.lowerMessage.includes("attempt to debit an account"),
+    handler: () =>
+      `💰 Insufficient token balance.\n` +
+      `Your wallet doesn't have enough tokens to complete this action. Use /balance to check your balance and add tokens before trying again.`,
+  },
+  {
     matcher: (ctx) => ctx.lowerMessage.includes("simulation failed") || ctx.lowerMessage.includes("custom program error"),
     handler: () =>
       `❌ Transaction failed.\n` +
