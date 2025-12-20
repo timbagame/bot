@@ -30,18 +30,18 @@ export const sanitizeLeaderboardDisplayName = (
 
 export const buildEmptyLeaderboardMessage = (): string =>
   [
-    "🏆 <b>Leaderboard</b> <code>[30D]</code>",
+    "🏆 <b>Leaderboard</b> [30D]",
     "No statistics available yet - play a coinflip to appear here.",
   ].join("\n\n");
 
 export const buildEmptyGlobalLeaderboardMessage = (): string =>
   [
-    "🌐 <b>Global Leaderboard</b> <code>[30D]</code>",
+    "🌐 <b>Global Leaderboard</b> [30D]",
     "No statistics available yet - play a coinflip to appear here.",
   ].join("\n\n");
 
 export const buildGlobalLeaderboardMessage = ({ players, allPlayers }: Omit<BuildLeaderboardMessageArgs, "chatTitle">): string => {
-  const heading = "🌐 <b>Global Leaderboard</b> <code>[30D]</code>";
+  const heading = "🌐 <b>Global Leaderboard</b> [30D]";
 
   const rows = players
     .map((player, index) => formatLeaderboardRow(player, index))
@@ -56,8 +56,8 @@ export const buildGlobalLeaderboardMessage = ({ players, allPlayers }: Omit<Buil
 
 export const buildLeaderboardMessage = ({ chatTitle, players, allPlayers }: BuildLeaderboardMessageArgs): string => {
   const heading = chatTitle
-    ? `🏆 <b>${escapeHtml(chatTitle.trim())}</b> <code>[30D]</code>`
-    : "🏆 <b>Leaderboard</b> <code>[30D]</code>";
+    ? `🏆 <b>${escapeHtml(chatTitle.trim())}</b> [30D]`
+    : "🏆 <b>Leaderboard</b> [30D]";
 
   const rows = players
     .map((player, index) => formatLeaderboardRow(player, index))
