@@ -77,3 +77,20 @@ test("parseTransactionError returns default message for unknown errors", async (
   expect(message).toContain("Something went wrong");
   expect(message).toContain("Please try again");
 });
+
+test("parseTransactionError handles 'no record of prior credit' Solana error", async () => {
+  const error = new Error(
+    "Transaction simulation failed: Attempt to debit an account but found no record of a prior credit."
+  );
+  const message = await parseTransactionError(error);
+  expect(message).toContain("Insufficient token balance");
+  expect(message).toContain("/balance");
+});
+
+test("parseTransactionError handles 'attempt to debit' variant", async () => {
+  const error = new Error(
+    "Simulation failed. Message: Attempt to debit an account."
+  );
+  const message = await parseTransactionError(error);
+  expect(message).toContain("Insufficient token balance");
+});

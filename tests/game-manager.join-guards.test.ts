@@ -431,4 +431,165 @@ describe("GameManager.joinGame guards", () => {
     expect(res.error).toMatch(/Not enough SOL to complete this/i);
     expect(res.error).toMatch(/no spare tokens to convert into SOL fees/i);
   });
+
+  test("returns error on zero token balance with helpful message", async () => {
+    resetGM();
+    const program = baseProgram({ ticketsCount: 0, maxTickets: 2, gameType: { coinflip: {} }, ticketAmount: 1_000_000_000 });
+    const gm = GameManager.getInstance(
+      program,
+      baseWallet({ getTokenBalance: async () => 0 }),
+      baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "TOK" }) })
+    );
+    (gm as any).isPlayerInGame = async () => false;
+    const res = await gm.joinGame(new PublicKey("BPFLoader8111111111111111111111111111111111").toBase58(), 1n);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/don't have any TOK tokens/i);
+    expect(res.error).toMatch(/\/balance/i);
+  });
+
+  test("returns error on insufficient balance for giveaway", async () => {
+    resetGM();
+    // Giveaway with ticketAmount > 0 (some giveaways require entry fee)
+    const program = baseProgram({ ticketsCount: 0, maxTickets: 10, gameType: { giveaway: {} }, ticketAmount: 500_000_000 });
+    const gm = GameManager.getInstance(
+      program,
+      baseWallet({ getTokenBalance: async () => 100_000_000 }),
+      baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "GIFT" }) })
+    );
+    (gm as any).isPlayerInGame = async () => false;
+    const res = await gm.joinGame(new PublicKey("BPFLoader9111111111111111111111111111111111").toBase58(), 1n);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/Not enough GIFT/i);
+  });
+
+  test("returns SOL shortfall error for giveaway when no tokens to swap", async () => {
+    resetGM();
+    // Free giveaway (ticketAmount = 0) but user has no SOL for tx fees
+    const program = baseProgram({
+      ticketsCount: 0,
+      maxTickets: 10,
+      gameType: { giveaway: {} },
+      ticketAmount: 0,
+      totalAmount: 1_000_000_000,
+    });
+    const wallet = baseWallet({
+      getTokenBalance: async () => 0, // No tokens to swap
+      getBalance: async () => 0, // No SOL for tx fees
+    });
+    const gm = GameManager.getInstance(
+      program,
+      wallet,
+      baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "GIFT", amount: 1_000_000_000 }) })
+    );
+    (gm as any).isPlayerInGame = async () => false;
+    (gm as any).swapManager = {
+      performJustInTimeSolSwap: () => {
+        throw new Error("swap should not be attempted without tokens");
+      },
+    };
+
+    const res = await gm.joinGame(new PublicKey("BPFLoaderA111111111111111111111111111111111").toBase58(), 1n);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/Not enough SOL/i);
+    expect(res.error).toMatch(/transaction fees/i);
+  });
+
+  test("attempts JIT swap for giveaway when user has tokens but no SOL", async () => {
+    resetGM();
+    const program = baseProgram({
+      ticketsCount: 0,
+      maxTickets: 10,
+      gameType: { giveaway: {} },
+      ticketAmount: 0,
+      totalAmount: 1_000_000_000,
+    });
+
+    let jitSwapCalled = false;
+    const wallet = baseWallet({
+      getTokenBalance: async () => 500_000_000, // Has tokens to swap
+      getBalance: async () => 0, // No SOL for tx fees
+    });
+    const gm = GameManager.getInstance(
+      program,
+      wallet,
+      baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "GIFT", amount: 1_000_000_000 }) })
+    );
+    (gm as any).isPlayerInGame = async () => false;
+    (gm as any).swapManager = {
+      performJustInTimeSolSwap: async () => {
+        jitSwapCalled = true;
+        return { swapped: false, error: "Test: swap failed" };
+      },
+    };
+
+    const res = await gm.joinGame(new PublicKey("BPFLoaderB111111111111111111111111111111111").toBase58(), 1n);
+    expect(jitSwapCalled).toBe(true);
+    expect(res.success).toBe(false);
+    expect(res.error).toBe("Test: swap failed");
+  });
+
+  test("giveaway allows all tokens for JIT swap since no stake needed", async () => {
+    resetGM();
+    const program = baseProgram({
+      ticketsCount: 0,
+      maxTickets: 10,
+      gameType: { giveaway: {} },
+      ticketAmount: 0,
+      totalAmount: 1_000_000_000,
+    });
+
+    let swapAllowance = 0;
+    const wallet = baseWallet({
+      getTokenBalance: async () => 1_000_000_000, // 1B tokens
+      getBalance: async () => 0, // No SOL
+    });
+    const gm = GameManager.getInstance(
+      program,
+      wallet,
+      baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "GIFT", amount: 1_000_000_000 }) })
+    );
+    (gm as any).isPlayerInGame = async () => false;
+    (gm as any).swapManager = {
+      performJustInTimeSolSwap: async (params: any) => {
+        swapAllowance = params.availableTokenAmountRaw;
+        return { swapped: false, error: "Test error" };
+      },
+    };
+
+    await gm.joinGame(new PublicKey("BPFLoaderC111111111111111111111111111111111").toBase58(), 1n);
+    // For giveaway, all tokens should be available for swap (no reservation)
+    expect(swapAllowance).toBe(1_000_000_000);
+  });
+
+  test("coinflip reserves ticket amount and only swaps spare tokens", async () => {
+    resetGM();
+    const program = baseProgram({
+      ticketsCount: 0,
+      maxTickets: 2,
+      gameType: { coinflip: {} },
+      ticketAmount: 600_000_000, // 600M needed for stake
+    });
+
+    let swapAllowance = 0;
+    const wallet = baseWallet({
+      getTokenBalance: async () => 1_000_000_000, // 1B tokens (400M spare)
+      getBalance: async () => 0, // No SOL
+    });
+    const gm = GameManager.getInstance(
+      program,
+      wallet,
+      baseDb({ getGame: () => ({ status: "active", token_mint: "M", token_ticker: "TOK", amount: 600_000_000 }) })
+    );
+    (gm as any).isPlayerInGame = async () => false;
+    (gm as any).swapManager = {
+      performJustInTimeSolSwap: async (params: any) => {
+        swapAllowance = params.availableTokenAmountRaw;
+        return { swapped: false, error: "Test error" };
+      },
+    };
+
+    await gm.joinGame(new PublicKey("BPFLoaderD111111111111111111111111111111111").toBase58(), 1n);
+    // For coinflip, only spare tokens (1B - 600M = 400M) should be available
+    expect(swapAllowance).toBe(400_000_000);
+  });
 });
