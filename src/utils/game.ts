@@ -4565,7 +4565,8 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
 
       // SOL fee reserve check and JIT swap (for all game types - even giveaways need SOL for tx fees)
       // For coinflip: reservedTicketAmount is the stake, so we can only swap spare tokens
-      // For giveaway: reservedTicketAmount is typically 0, so all tokens are available for swap
+      // For giveaway: reservedTicketAmount is always 0 because giveaways are free to join
+      // (the creator funds the entire pot, participants don't stake anything)
       const reservedTicketAmount = currentGameType === "coinflip" ? gameAmount : 0;
       const swapAllowanceRaw = Math.max(tokenBalance - reservedTicketAmount, 0);
 
