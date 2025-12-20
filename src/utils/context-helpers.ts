@@ -1,6 +1,13 @@
 import type { Context } from "grammy";
 import type { CallbackError, ErrorHandlingOptions } from "../types";
 import { formatUserFriendlyError, truncateMessage } from "./errors";
+import {
+  getCallbackQueue,
+  getRateLimiter,
+  extractRetryAfter,
+  isRateLimitError,
+  isCallbackExpiredError,
+} from "./telegram-rate-limiter";
 
 // ================================
 // ERROR HANDLING UTILITIES
@@ -214,8 +221,29 @@ export const categorizeError = (error: any): CallbackError => {
  */
 export const safeAnswerCallbackQuery = async (
   ctx: any,
-  text?: string
+  text?: string,
+  options: { useQueue?: boolean } = {}
 ): Promise<void> => {
+  const callbackId = ctx?.callbackQuery?.id;
+  const chatId = ctx?.chat?.id;
+
+  // Check if we should use the throttled queue
+  const queue = getCallbackQueue();
+  if (options.useQueue && queue && callbackId) {
+    queue.enqueue(callbackId, text);
+    return;
+  }
+
+  // Check rate limit status before attempting
+  const rateLimiter = getRateLimiter();
+  if (chatId && rateLimiter.isLimited(chatId)) {
+    const waitMs = rateLimiter.getWaitTimeMs(chatId);
+    console.warn(
+      `⏳ Chat ${chatId} is rate limited, skipping callback answer (${Math.ceil(waitMs / 1000)}s remaining)`
+    );
+    return;
+  }
+
   try {
     const hasText = typeof text === "string" && text.length > 0;
 
@@ -227,8 +255,6 @@ export const safeAnswerCallbackQuery = async (
       }
       return;
     }
-
-    const callbackId = ctx?.callbackQuery?.id;
 
     if (ctx?.api && callbackId) {
       const payload = hasText ? { text } : {};
@@ -243,6 +269,27 @@ export const safeAnswerCallbackQuery = async (
 
     console.warn("Unable to answer callback query - invalid context");
   } catch (error: any) {
+    // Handle rate limit errors - record for future proactive skipping
+    if (isRateLimitError(error)) {
+      const retryAfter = extractRetryAfter(error);
+      if (retryAfter !== null && chatId) {
+        rateLimiter.recordRateLimit(retryAfter, chatId);
+        console.warn(
+          `🚫 Chat ${chatId} rate limited for ${retryAfter}s on callback answer`
+        );
+      }
+      return;
+    }
+
+    // Handle expired callback queries gracefully
+    if (isCallbackExpiredError(error)) {
+      const rawText = text ?? "";
+      const preview =
+        rawText.length > 50 ? `${rawText.substring(0, 50)}...` : rawText;
+      console.warn(`⚠️ Callback query timeout: ${preview}`);
+      return;
+    }
+
     const description = String(error?.description ?? "");
     if (
       description.includes("query is too old") ||
@@ -258,6 +305,18 @@ export const safeAnswerCallbackQuery = async (
 
     console.error("Failed to answer callback query:", error);
   }
+};
+
+/**
+ * Throttled version of safeAnswerCallbackQuery.
+ * Uses the callback queue to prevent burst of answers causing rate limits.
+ * Falls back to immediate answer if queue is not initialized.
+ */
+export const safeAnswerCallbackQueryThrottled = async (
+  ctx: any,
+  text?: string
+): Promise<void> => {
+  await safeAnswerCallbackQuery(ctx, text, { useQueue: true });
 };
 
 export const respondMissingIdentity = async (
