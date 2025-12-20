@@ -607,4 +607,53 @@ describe("chat defaults module", () => {
     const settings = chatDb.getChatGameSettings(99);
     expect(settings?.coinflip_default_privacy).toBeUndefined();
   });
+
+  test("non-admin cancel callback shows toast only", async () => {
+    const mockBot = createMockBot();
+    const tokenManager = baseTokenManager();
+    const messagesReplied: string[] = [];
+    const callbackAnswers: string[] = [];
+
+    const ctx: any = {
+      chat: { id: 99, type: "supergroup" },
+      from: { id: 456 },
+      callbackQuery: {
+        id: "cb123",
+        data: "chat_defaults_cancel",
+        message: { message_id: 11, chat: { id: 99 } },
+      },
+      answerCallbackQuery: async (text?: string) => {
+        if (text) callbackAnswers.push(text);
+      },
+      reply: async (text: string) => {
+        messagesReplied.push(text);
+        return { message_id: 12 };
+      },
+      api: {
+        editMessageText: async () => ({}),
+      },
+    };
+
+    createChatDefaultsModule({
+      bot: mockBot as any,
+      chatDb,
+      gameDb,
+      getTokenManager: () => tokenManager,
+      getGameManager: () => ({}) as any,
+      wrapCallbackHandler: (handler) => async (ctx) => await handler(ctx, async () => {}),
+      getOracleMaxPlayers: () => 50,
+      isUserGroupAdmin: async () => false, // NOT admin
+      replyToMessage: async (_ctx, text) => {
+        messagesReplied.push(text);
+      },
+    });
+
+    // Try to cancel as non-admin
+    await mockBot.dispatch("chat_defaults_cancel", ctx);
+
+    // Should only get toast notification
+    expect(callbackAnswers).toContain("Only admins can change chat defaults");
+    // Should NOT re-render menu or anything else visible
+    expect(messagesReplied).toHaveLength(0);
+  });
 });

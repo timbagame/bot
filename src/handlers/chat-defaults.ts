@@ -337,9 +337,9 @@ const promptForSetting = async (
   }
 
   const keyboard = new InlineKeyboard()
-    .text("❌ Clear (Reset)", `chat_defaults_clear_${target}`)
+    .text("❌ Restore defaults", `chat_defaults_clear_${target}`)
     .row()
-    .text("🔙 Cancel", "chat_defaults_cancel");
+    .text("🔙 Back", "chat_defaults_cancel");
 
   const { messageId, chatId } = await respondWithMenu(ctx, {
     text: messageLines.join("\n"),
@@ -674,9 +674,9 @@ export const createChatDefaultsModule = (
             .text("🌍 Public", "chat_defaults_set_privacy_coinflip_public")
             .text("🔒 Private", "chat_defaults_set_privacy_coinflip_private")
             .row()
-            .text("❌ Clear (Reset)", "chat_defaults_set_privacy_coinflip_clear")
+            .text("❌ Restore defaults", "chat_defaults_set_privacy_coinflip_clear")
             .row()
-            .text("🔙 Cancel", "chat_defaults_cancel"),
+            .text("🔙 Back", "chat_defaults_cancel"),
         });
       } else if (action === "privacy_giveaway") {
         await respondWithMenu(ctx, {
@@ -685,9 +685,9 @@ export const createChatDefaultsModule = (
             .text("🌍 Public", "chat_defaults_set_privacy_giveaway_public")
             .text("🔒 Private", "chat_defaults_set_privacy_giveaway_private")
             .row()
-            .text("❌ Clear (Reset)", "chat_defaults_set_privacy_giveaway_clear")
+            .text("❌ Restore defaults", "chat_defaults_set_privacy_giveaway_clear")
             .row()
-            .text("🔙 Cancel", "chat_defaults_cancel"),
+            .text("🔙 Back", "chat_defaults_cancel"),
         });
       } else if (action === "video_coinflip" || action === "video_giveaway") {
         const gameType = action === "video_coinflip" ? "coinflip" : "giveaway";
@@ -698,9 +698,9 @@ export const createChatDefaultsModule = (
             .row()
             .text("🚫 Disable (no media)", `chat_defaults_disable_${action}`)
             .row()
-            .text("❌ Clear (Use bot default)", `chat_defaults_clear_${action}`)
+            .text("❌ Restore defaults", `chat_defaults_clear_${action}`)
             .row()
-            .text("🔙 Cancel", "chat_defaults_cancel"),
+            .text("🔙 Back", "chat_defaults_cancel"),
         });
       } else if (action === "join_notifications") {
         const chatSettings = deps.chatDb.getChatGameSettings(ctx.chat.id);
@@ -732,7 +732,7 @@ export const createChatDefaultsModule = (
             .row()
             .text("✏️ Custom", "chat_defaults_set_join_rate_custom")
             .row()
-            .text("❌ Reset to Defaults", "chat_defaults_clear_join_notifications")
+            .text("❌ Restore defaults", "chat_defaults_clear_join_notifications")
             .row()
             .text("🔙 Back", "chat_defaults_cancel"),
         });
@@ -924,7 +924,7 @@ export const createChatDefaultsModule = (
         return;
       }
 
-      const keyboard = new InlineKeyboard().text("🔙 Cancel", "chat_defaults_cancel");
+      const keyboard = new InlineKeyboard().text("🔙 Back", "chat_defaults_cancel");
       await respondWithMenu(ctx, {
         text: `Enter a custom rate limit (0-${MAX_JOIN_NOTIFICATIONS_PER_MINUTE} per minute):`,
         keyboard,
@@ -973,11 +973,22 @@ export const createChatDefaultsModule = (
   deps.bot.callbackQuery(
     "chat_defaults_cancel",
     deps.wrapCallbackHandler(async (ctx) => {
+      if (!ctx.chat) return; // ensure chat context
+
+      const allowed = await ensureAdmin(ctx, deps);
+      if (!allowed) {
+        await safeAnswerCallbackQuery(
+          ctx,
+          "Only admins can change chat defaults"
+        );
+        return;
+      }
+
       clearInputSession(
         `${ctx.chat?.id || 0}_${ctx.callbackQuery?.message?.message_id}`
       );
       await renderMenu(ctx);
-      await safeAnswerCallbackQuery(ctx, "Cancelled");
+      await safeAnswerCallbackQuery(ctx);
     })
   );
 
