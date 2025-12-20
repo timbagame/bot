@@ -5713,10 +5713,10 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     const winRateStr = winRate > 0 ? (Number.isInteger(winRate) ? winRate.toFixed(0) : winRate.toFixed(1)) : "0";
 
     // Remove the $ from netStr since we'll add it with the sign
-    const summaryLine = `Net: <code>${netSign}$${netStr.replace("$", "")}</code> (Won <code>${wonUsd}</code> • Lost <code>${lostUsd}</code>)`;
+    const summaryLine = `Net: ${netSign}$${netStr.replace("$", "")} (Won ${wonUsd} • Lost ${lostUsd})`;
 
     const lines = [
-      `🎲 <b>Games</b> — ${escapeHtml(username)} <code>[30D]</code>`,
+      `🎲 <b>Games</b> — ${escapeHtml(username)} [30D]`,
       summaryLine,
       `${wins} wins • ${losses} losses • ${winRateStr}% WR`,
       "────────",
