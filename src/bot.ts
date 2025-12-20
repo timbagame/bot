@@ -6099,7 +6099,6 @@ if (process.env.NODE_ENV !== "test") {
           )} min)`
         );
 
-        runSweep();
         setInterval(runSweep, FEE_SWEEP_INTERVAL_MS);
       };
 
@@ -6127,7 +6126,6 @@ if (process.env.NODE_ENV !== "test") {
           `🗑️ Database cleanup scheduled (interval: 24h, threshold: ${CLEANUP_DAYS_OLD} days)`
         );
 
-        runCleanup();
         setInterval(runCleanup, CLEANUP_INTERVAL_MS);
       };
 
