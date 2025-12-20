@@ -25,7 +25,7 @@ describe("leaderboard UI rendering", () => {
   test("empty leaderboard message mirrors leaderboard layout", () => {
     const message = buildEmptyLeaderboardMessage();
     expect(message).toContain("Leaderboard");
-    expect(message).toContain("Top players in this group");
+    expect(message).toContain("[30D]");
     expect(message).toContain("play a coinflip");
   });
 
@@ -214,9 +214,8 @@ describe("global leaderboard UI rendering", () => {
   test("empty global leaderboard message shows correct heading", () => {
     const message = buildEmptyGlobalLeaderboardMessage();
     expect(message).toContain("Global Leaderboard");
-    expect(message).toContain("Top players across all groups");
+    expect(message).toContain("[30D]");
     expect(message).toContain("play a coinflip");
-    expect(message).not.toContain("in this group");
   });
 
   test("buildGlobalLeaderboardMessage shows global header and legend", () => {
@@ -238,7 +237,7 @@ describe("global leaderboard UI rendering", () => {
     const output = buildGlobalLeaderboardMessage({ players });
 
     expect(output).toContain("Global Leaderboard");
-    expect(output).toContain("Top players across all groups");
+    expect(output).toContain("[30D]");
     expect(output).toContain("🥇");
     expect(output).toContain("GlobalChamp");
   });

@@ -5683,12 +5683,21 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     const netUsd = result.won.totalUsd - result.lost.totalUsd;
     const netSign = netUsd >= 0 ? "+" : "-";
     const netStr = formatUsd(Math.abs(netUsd));
+
+    // Calculate win rate from game counts
+    const wins = result.won.games.length;
+    const losses = result.lost.games.length;
+    const totalGames = wins + losses;
+    const winRate = totalGames > 0 ? (wins / totalGames) * 100 : 0;
+    const winRateStr = winRate > 0 ? (Number.isInteger(winRate) ? winRate.toFixed(0) : winRate.toFixed(1)) : "0";
+
     // Remove the $ from netStr since we'll add it with the sign
     const summaryLine = `Net: <code>${netSign}$${netStr.replace("$", "")}</code> (Won <code>${wonUsd}</code> • Lost <code>${lostUsd}</code>)`;
 
     const lines = [
       `🎲 <b>Games</b> — ${escapeHtml(username)} <code>[30D]</code>`,
       summaryLine,
+      `${wins} wins • ${losses} losses • ${winRateStr}% WR`,
       "────────",
     ];
 
