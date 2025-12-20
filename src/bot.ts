@@ -3,6 +3,7 @@ import { Bot, Context, InlineKeyboard } from "grammy";
 import type { NextFunction } from "grammy";
 import type { InlineKeyboardButton } from "grammy/types";
 import { run, sequentialize } from "@grammyjs/runner";
+import { autoRetry } from "@grammyjs/auto-retry";
 import { WalletManager } from "./utils/wallet";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import * as anchor from "@coral-xyz/anchor";
@@ -151,6 +152,17 @@ export type { CreateGameViaCommandOptions } from "./handlers/game-commands";
 
 // Module-level exports for use by utility modules
 export const bot = new Bot(process.env.TELEGRAM_TOKEN!);
+
+// Configure auto-retry for handling Telegram rate limits (429 errors)
+// This will automatically retry failed requests with exponential backoff
+bot.api.config.use(
+  autoRetry({
+    maxRetryAttempts: 3,
+    maxDelaySeconds: 60,
+    rethrowInternalServerErrors: false,
+  })
+);
+
 // Global error boundary for unhandled middleware errors
 bot.catch((err) => {
   try {

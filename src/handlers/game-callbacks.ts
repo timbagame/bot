@@ -57,6 +57,10 @@ import type { GameDatabase } from "../utils/game-database";
 import type { WrapCallbackHandler } from "../utils/callback-registry";
 import type { GameSetupCopy, GameSetupModule } from "./game-setup";
 import type { Timba } from "../../idl/idlType";
+import {
+  createNextGuard,
+  getGameOperationQueue,
+} from "../utils/telegram-rate-limiter";
 
 export type GameCallbacksModuleDeps = {
   bot: Bot;
@@ -886,7 +890,10 @@ export const createGameCallbacksModule = (
 
       switch (action) {
         case "join":
-          await handleJoinGame(ctx, gamePda, telegramId, game);
+          // Serialize join operations for the same game to prevent race conditions
+          await getGameOperationQueue().withLock(gameAddress, async () => {
+            await handleJoinGame(ctx, gamePda, telegramId, game);
+          });
           break;
         case "refresh":
           await handleRefreshGameCallback(ctx, gamePda, gameAddress);
@@ -1931,12 +1938,15 @@ export const createGameCallbacksModule = (
 
   const createTextInputMiddleware = (): MiddlewareFn<Context> => {
     return async (ctx, next) => {
+      // Guard next() to prevent "next already called" errors from concurrent callbacks
+      const guardedNext = createNextGuard(next, "game-setup-text-input");
+
       if (ctx.message?.text === undefined) {
-        await next();
+        await guardedNext();
         return;
       }
 
-      await handleGameSetupTextInput(ctx, next);
+      await handleGameSetupTextInput(ctx, guardedNext);
     };
   };
 
