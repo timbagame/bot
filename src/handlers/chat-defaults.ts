@@ -13,6 +13,9 @@ import {
   MIN_GAME_TIMEOUT,
   MIN_GIVEAWAY_PLAYERS,
   CHAT_MEDIA_DISABLED_SENTINEL,
+  DEFAULT_JOIN_NOTIFICATIONS_EXTERNAL,
+  DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE,
+  MAX_JOIN_NOTIFICATIONS_PER_MINUTE,
 } from "../utils/constants";
 import {
   clampChatPlayers,
@@ -103,6 +106,8 @@ const buildMenuKeyboard = (): InlineKeyboard => {
     .text("🎬 Coinflip video", "chat_defaults_video_coinflip")
     .row()
     .text("🎬 Giveaway video", "chat_defaults_video_giveaway")
+    .row()
+    .text("📢 Join notifications", "chat_defaults_join_notifications")
     .row();
 };
 
@@ -198,6 +203,17 @@ const buildSettingsSummary = async (
   }
   const giveawayVideoLine = `🎬 Giveaway video: ${giveawayVideoDisplay} ${giveawayVideoSuffix}`;
 
+  // Join notification settings
+  const joinNotificationsExternal = chatSettings?.join_notifications_external ?? DEFAULT_JOIN_NOTIFICATIONS_EXTERNAL;
+  const joinNotificationsPerMinute = chatSettings?.join_notifications_per_minute ?? DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE;
+  const externalSuffix = chatSettings?.join_notifications_external != null ? "(chat default)" : "(bot default)";
+  const rateSuffix = chatSettings?.join_notifications_per_minute != null ? "(chat default)" : "(bot default)";
+
+  const externalDisplay = joinNotificationsExternal ? "✅ On" : "❌ Off";
+  const rateDisplay = joinNotificationsPerMinute === 0 ? "Disabled" : `${joinNotificationsPerMinute}/min`;
+
+  const joinNotificationsLine = `📢 Join notifications: External ${externalDisplay} ${externalSuffix} | Rate: ${rateDisplay} ${rateSuffix}`;
+
   return [
     "<b>Chat defaults</b>",
     "",
@@ -217,6 +233,7 @@ const buildSettingsSummary = async (
     giveawayPrivacyLine,
     coinflipVideoLine,
     giveawayVideoLine,
+    joinNotificationsLine,
     "",
     "Use the buttons below to update chat defaults.",
   ].join("\n");
@@ -635,10 +652,10 @@ export const createChatDefaultsModule = (
   );
 
   deps.bot.callbackQuery(
-    /^chat_defaults_(token|coinflip|giveaway|timeout|privacy_coinflip|privacy_giveaway|video_coinflip|video_giveaway)$/,
+    /^chat_defaults_(token|coinflip|giveaway|timeout|privacy_coinflip|privacy_giveaway|video_coinflip|video_giveaway|join_notifications)$/,
     deps.wrapCallbackHandler(async (ctx) => {
       if (!ctx.chat) return;
-      const action = ctx.match?.[1] as SettingsTarget | undefined;
+      const action = ctx.match?.[1] as SettingsTarget | "join_notifications" | undefined;
       if (!action) return;
 
       const allowed = await ensureAdmin(ctx, deps);
@@ -684,6 +701,40 @@ export const createChatDefaultsModule = (
             .text("❌ Clear (Use bot default)", `chat_defaults_clear_${action}`)
             .row()
             .text("🔙 Cancel", "chat_defaults_cancel"),
+        });
+      } else if (action === "join_notifications") {
+        const chatSettings = deps.chatDb.getChatGameSettings(ctx.chat.id);
+        const currentExternal = chatSettings?.join_notifications_external ?? DEFAULT_JOIN_NOTIFICATIONS_EXTERNAL;
+        const currentRate = chatSettings?.join_notifications_per_minute ?? DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE;
+
+        const externalLabel = currentExternal ? "✅ External: On" : "❌ External: Off";
+        const rateLabel = currentRate === 0 ? "Disabled" : `${currentRate}/min`;
+
+        await respondWithMenu(ctx, {
+          text: [
+            "<b>Join Notification Settings</b>",
+            "",
+            "<b>External notifications:</b> Show join messages for games created in other groups",
+            `Current: ${externalLabel}`,
+            "",
+            `<b>Rate limit:</b> Max join notifications per minute (max ${MAX_JOIN_NOTIFICATIONS_PER_MINUTE})`,
+            `Current: ${rateLabel}`,
+          ].join("\n"),
+          parseMode: "HTML",
+          keyboard: new InlineKeyboard()
+            .text(currentExternal ? "🔕 Disable External" : "🔔 Enable External",
+              currentExternal ? "chat_defaults_set_join_external_off" : "chat_defaults_set_join_external_on")
+            .row()
+            .text("0", "chat_defaults_set_join_rate_0")
+            .text("1", "chat_defaults_set_join_rate_1")
+            .text("5", "chat_defaults_set_join_rate_5")
+            .text("10", "chat_defaults_set_join_rate_10")
+            .row()
+            .text("✏️ Custom", "chat_defaults_set_join_rate_custom")
+            .row()
+            .text("❌ Reset to Defaults", "chat_defaults_clear_join_notifications")
+            .row()
+            .text("🔙 Back", "chat_defaults_cancel"),
         });
       } else {
         await promptForSetting(ctx, deps, action);
@@ -797,6 +848,128 @@ export const createChatDefaultsModule = (
     })
   );
 
+  // Join notification external toggle handler
+  deps.bot.callbackQuery(
+    /^chat_defaults_set_join_external_(on|off)$/,
+    deps.wrapCallbackHandler(async (ctx) => {
+      if (!ctx.chat) return;
+
+      const allowed = await ensureAdmin(ctx, deps);
+      if (!allowed) {
+        await safeAnswerCallbackQuery(
+          ctx,
+          "Only admins can change chat defaults"
+        );
+        return;
+      }
+
+      const value = ctx.match![1] === "on";
+      const telegramId = getTelegramId(ctx);
+
+      deps.chatDb.upsertChatGameSettings(ctx.chat.id, {
+        join_notifications_external: value,
+        set_by_telegram_id: telegramId.toString(),
+      });
+
+      await renderMenu(ctx);
+      await safeAnswerCallbackQuery(
+        ctx,
+        value ? "External notifications enabled" : "External notifications disabled"
+      );
+    })
+  );
+
+  // Join notification rate limit handler (preset values)
+  deps.bot.callbackQuery(
+    /^chat_defaults_set_join_rate_(0|1|5|10)$/,
+    deps.wrapCallbackHandler(async (ctx) => {
+      if (!ctx.chat) return;
+
+      const allowed = await ensureAdmin(ctx, deps);
+      if (!allowed) {
+        await safeAnswerCallbackQuery(
+          ctx,
+          "Only admins can change chat defaults"
+        );
+        return;
+      }
+
+      const rateString = ctx.match?.[1] ?? "5";
+      const rate = parseInt(rateString, 10);
+      const telegramId = getTelegramId(ctx);
+
+      deps.chatDb.upsertChatGameSettings(ctx.chat.id, {
+        join_notifications_per_minute: rate,
+        set_by_telegram_id: telegramId.toString(),
+      });
+
+      const rateLabel = rate === 0 ? "disabled" : `${rate}/min`;
+      await renderMenu(ctx);
+      await safeAnswerCallbackQuery(ctx, `Rate limit set to ${rateLabel}`);
+    })
+  );
+
+  // Join notification custom rate handler - prompt for input
+  deps.bot.callbackQuery(
+    "chat_defaults_set_join_rate_custom",
+    deps.wrapCallbackHandler(async (ctx) => {
+      if (!ctx.chat) return;
+
+      const allowed = await ensureAdmin(ctx, deps);
+      if (!allowed) {
+        await safeAnswerCallbackQuery(
+          ctx,
+          "Only admins can change chat defaults"
+        );
+        return;
+      }
+
+      const keyboard = new InlineKeyboard().text("🔙 Cancel", "chat_defaults_cancel");
+      await respondWithMenu(ctx, {
+        text: `Enter a custom rate limit (0-${MAX_JOIN_NOTIFICATIONS_PER_MINUTE} per minute):`,
+        keyboard,
+      });
+
+      const telegramIdStr = getTelegramIdString(ctx);
+      setInputSession(`${ctx.chat.id}_${ctx.callbackQuery?.message?.message_id}`, {
+        type: "chat_defaults",
+        target: "join_rate_custom",
+        chatId: ctx.chat.id,
+        messageId: ctx.callbackQuery?.message?.message_id,
+        initiatorId: telegramIdStr,
+      });
+      await safeAnswerCallbackQuery(ctx);
+    })
+  );
+
+  // Join notification clear/reset handler
+  deps.bot.callbackQuery(
+    "chat_defaults_clear_join_notifications",
+    deps.wrapCallbackHandler(async (ctx) => {
+      if (!ctx.chat) return;
+
+      const allowed = await ensureAdmin(ctx, deps);
+      if (!allowed) {
+        await safeAnswerCallbackQuery(
+          ctx,
+          "Only admins can change chat defaults"
+        );
+        return;
+      }
+
+      const telegramId = getTelegramId(ctx);
+
+      deps.chatDb.upsertChatGameSettings(ctx.chat.id, {
+        join_notifications_external: null,
+        join_notifications_per_minute: null,
+        set_by_telegram_id: telegramId.toString(),
+      });
+
+      await renderMenu(ctx);
+      await safeAnswerCallbackQuery(ctx, "Join notifications reset to defaults");
+    })
+  );
+
   deps.bot.callbackQuery(
     "chat_defaults_cancel",
     deps.wrapCallbackHandler(async (ctx) => {
@@ -840,6 +1013,35 @@ export const createChatDefaultsModule = (
     }
 
     const setting = session["setting"] as SettingsTarget | undefined;
+    const target = session["target"] as string | undefined;
+
+    // Handle custom join rate input
+    if (target === "join_rate_custom") {
+      const chatId = session.chatId;
+      if (typeof chatId !== "number") {
+        await deps.replyToMessage(ctx, "❌ Session expired. Please try again.");
+        return true;
+      }
+
+      const rate = parseInt(userMessage.trim(), 10);
+      if (isNaN(rate) || rate < 0 || rate > MAX_JOIN_NOTIFICATIONS_PER_MINUTE) {
+        await deps.replyToMessage(
+          ctx,
+          `❌ Invalid rate. Please enter a number between 0 and ${MAX_JOIN_NOTIFICATIONS_PER_MINUTE}.`
+        );
+        return true;
+      }
+
+      deps.chatDb.upsertChatGameSettings(chatId, {
+        join_notifications_per_minute: rate,
+        set_by_telegram_id: telegramId.toString(),
+      });
+
+      const rateLabel = rate === 0 ? "disabled" : `${rate}/min`;
+      await deps.replyToMessage(ctx, `✅ Rate limit set to ${rateLabel}`);
+      await renderMenu(ctx);
+      return true;
+    }
 
     // Check if user sent media for video ID settings
     if (setting === "video_coinflip" || setting === "video_giveaway") {

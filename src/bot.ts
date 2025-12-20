@@ -47,6 +47,8 @@ import {
   applyOracleBufferTime,
   ENABLE_FEE_SWEEPER,
   FEE_SWEEP_INTERVAL_MS,
+  DEFAULT_JOIN_NOTIFICATIONS_EXTERNAL,
+  DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE,
 } from "./utils/constants";
 import { FeeBudgetManager } from "./utils/fee-budget";
 import {
@@ -1732,6 +1734,63 @@ const shouldAnnounceJoinForTickets = (ticketsCount: unknown): boolean => {
   return normalized <= joinAnnouncementMaxTickets;
 };
 
+// ================================
+// JOIN NOTIFICATION RATE LIMITING
+// ================================
+
+type JoinNotificationBucket = {
+  count: number;
+  windowStart: number;
+};
+
+const joinNotificationBuckets = new Map<number, JoinNotificationBucket>();
+
+const canSendJoinNotification = (chatId: number): boolean => {
+  const chatSettings = chatDb.getChatGameSettings(chatId);
+  const limit = chatSettings?.join_notifications_per_minute ?? DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE;
+
+  // Rate limit disabled (0) - no notifications
+  if (limit === 0) {
+    return false;
+  }
+
+  const now = Date.now();
+  const bucket = joinNotificationBuckets.get(chatId);
+
+  // Start new window
+  if (!bucket || now - bucket.windowStart >= 60_000) {
+    joinNotificationBuckets.set(chatId, { count: 1, windowStart: now });
+    return true;
+  }
+
+  // Check if we've hit the limit
+  if (bucket.count >= limit) {
+    return false;
+  }
+
+  bucket.count++;
+  return true;
+};
+
+const shouldReceiveJoinNotification = (
+  targetChatId: number,
+  gameOriginChatId: number | null | undefined
+): boolean => {
+  // Always allow origin chat to receive notifications (subject to rate limiting)
+  if (targetChatId === gameOriginChatId) {
+    return true;
+  }
+
+  // For other chats, check if external notifications are enabled
+  const chatSettings = chatDb.getChatGameSettings(targetChatId);
+  const allowExternal = chatSettings?.join_notifications_external ?? DEFAULT_JOIN_NOTIFICATIONS_EXTERNAL;
+
+  return allowExternal;
+};
+
+export const __test_clearJoinNotificationBuckets = () => joinNotificationBuckets.clear();
+export const __test_getJoinNotificationBucket = (chatId: number) => joinNotificationBuckets.get(chatId);
+
 const scheduleGameMessageUpdate = (
   gameAddress: string,
   referenceChatId: number,
@@ -1961,16 +2020,39 @@ const processPlayerEvent = async (
           );
           const safeDisplayName = escapeHtml(displayName);
 
-          // Get game type for the announcement
+          // Get game data for origin chat and type
           const gameData = gameDb.getGame(gameAddress);
           const gameType = gameData?.game_type || "game";
+          const gameOriginChatId = gameData?.chat_id;
           const announcement = `👤 <b>${safeDisplayName}</b> joined the ${gameType}!`;
 
-          await Promise.all(
-            targets.map((target) =>
-              sendReplyToGameMessage(target, announcement)
-            )
-          );
+          // Filter targets based on:
+          // 1. Origin chat or external notifications enabled
+          // 2. Rate limiting per chat
+          const notifiableTargets = targets.filter((target) => {
+            // Check if this chat should receive join notifications for this game
+            if (!shouldReceiveJoinNotification(target.chatId, gameOriginChatId)) {
+              return false;
+            }
+
+            // Check rate limiting
+            if (!canSendJoinNotification(target.chatId)) {
+              console.debug(
+                `Rate limited join notification for chat ${target.chatId} in game ${gameAddress}`
+              );
+              return false;
+            }
+
+            return true;
+          });
+
+          if (notifiableTargets.length > 0) {
+            await Promise.all(
+              notifiableTargets.map((target) =>
+                sendReplyToGameMessage(target, announcement)
+              )
+            );
+          }
         } catch (announcementError) {
           console.error(
             `Error announcing player join for game ${gameAddress}:`,

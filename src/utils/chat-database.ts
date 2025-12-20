@@ -57,6 +57,8 @@ export class ChatDatabase extends BaseDatabase {
       "giveaway_video_id TEXT",
       "coinflip_media_type TEXT",
       "giveaway_media_type TEXT",
+      "join_notifications_external INTEGER",
+      "join_notifications_per_minute INTEGER",
     ] as const;
 
     for (const column of columnsToAdd) {
@@ -160,6 +162,14 @@ export class ChatDatabase extends BaseDatabase {
       settings,
       "giveaway_media_type"
     );
+    const hasJoinNotificationsExternal = Object.prototype.hasOwnProperty.call(
+      settings,
+      "join_notifications_external"
+    );
+    const hasJoinNotificationsPerMinute = Object.prototype.hasOwnProperty.call(
+      settings,
+      "join_notifications_per_minute"
+    );
     const hasSetBy = Object.prototype.hasOwnProperty.call(
       settings,
       "set_by_telegram_id"
@@ -194,6 +204,12 @@ export class ChatDatabase extends BaseDatabase {
       giveaway_media_type: hasGiveawayMediaType
         ? settings.giveaway_media_type ?? null
         : existing?.giveaway_media_type ?? null,
+      join_notifications_external: hasJoinNotificationsExternal
+        ? settings.join_notifications_external ?? null
+        : existing?.join_notifications_external != null ? Boolean(existing.join_notifications_external) : null,
+      join_notifications_per_minute: hasJoinNotificationsPerMinute
+        ? settings.join_notifications_per_minute ?? null
+        : existing?.join_notifications_per_minute ?? null,
       set_by_telegram_id: hasSetBy
         ? settings.set_by_telegram_id ?? null
         : existing?.set_by_telegram_id ?? null,
@@ -212,9 +228,11 @@ export class ChatDatabase extends BaseDatabase {
           giveaway_video_id,
           coinflip_media_type,
           giveaway_media_type,
+          join_notifications_external,
+          join_notifications_per_minute,
           set_by_telegram_id,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         next.chat_id,
         next.coinflip_max_players ?? null,
@@ -226,6 +244,8 @@ export class ChatDatabase extends BaseDatabase {
         next.giveaway_video_id ?? null,
         next.coinflip_media_type ?? null,
         next.giveaway_media_type ?? null,
+        next.join_notifications_external === true ? 1 : next.join_notifications_external === false ? 0 : null,
+        next.join_notifications_per_minute ?? null,
         next.set_by_telegram_id ?? null,
         next.updated_at,
       ],

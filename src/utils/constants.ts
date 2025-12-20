@@ -170,6 +170,11 @@ export const JOIN_ANNOUNCEMENT_MAX_TICKETS = parseNonNegativeInteger(
   "JOIN_ANNOUNCEMENT_MAX_TICKETS",
   50
 );
+
+// Default settings for per-chat join notification controls
+export const DEFAULT_JOIN_NOTIFICATIONS_EXTERNAL = false; // By default, only origin chat receives join notifications
+export const DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE = 5; // Default rate limit per minute
+export const MAX_JOIN_NOTIFICATIONS_PER_MINUTE = 30; // Maximum allowed rate limit
 // ================================
 // DEFAULTS
 // ================================
