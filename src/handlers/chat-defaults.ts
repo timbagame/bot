@@ -247,6 +247,52 @@ const ensureAdmin = async (ctx: Context, deps: ChatDefaultsModuleDeps) => {
   return isAdmin;
 };
 
+const checkCallbackAdmin = async (ctx: Context, deps: ChatDefaultsModuleDeps): Promise<boolean> => {
+  if (!ctx.chat) return false;
+  const isAdmin = await ensureAdmin(ctx, deps);
+  if (!isAdmin) {
+    await safeAnswerCallbackQuery(ctx, "Only admins can change chat defaults");
+    return false;
+  }
+  return true;
+};
+
+const buildJoinNotificationsMenu = (ctx: Context, deps: ChatDefaultsModuleDeps) => {
+  const chatSettings = deps.chatDb.getChatGameSettings(ctx.chat!.id);
+  const currentExternal = chatSettings?.join_notifications_external ?? DEFAULT_JOIN_NOTIFICATIONS_EXTERNAL;
+  const currentRate = chatSettings?.join_notifications_per_minute ?? DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE;
+
+  const externalLabel = currentExternal ? "✅ External: On" : "❌ External: Off";
+  const rateLabel = currentRate === 0 ? "Disabled" : `${currentRate}/min`;
+
+  return {
+    text: [
+      "<b>Join Notification Settings</b>",
+      "",
+      "<b>External notifications:</b> Show join messages for games created in other groups",
+      `Current: ${externalLabel}`,
+      "",
+      `<b>Rate limit:</b> Max join notifications per minute (max ${MAX_JOIN_NOTIFICATIONS_PER_MINUTE})`,
+      `Current: ${rateLabel}`,
+    ].join("\n"),
+    parseMode: "HTML" as const,
+    keyboard: new InlineKeyboard()
+      .text(currentExternal ? "🔕 Disable External" : "🔔 Enable External",
+        currentExternal ? "chat_defaults_set_join_external_off" : "chat_defaults_set_join_external_on")
+      .row()
+      .text("0", "chat_defaults_set_join_rate_0")
+      .text("1", "chat_defaults_set_join_rate_1")
+      .text("5", "chat_defaults_set_join_rate_5")
+      .text("10", "chat_defaults_set_join_rate_10")
+      .row()
+      .text("✏️ Custom", "chat_defaults_set_join_rate_custom")
+      .row()
+      .text("❌ Restore defaults", "chat_defaults_clear_join_notifications")
+      .row()
+      .text("🔙 Back", "chat_defaults_cancel"),
+  };
+};
+
 const handleTokenChange = async (
   ctx: Context,
   tokenInput: string,
@@ -596,14 +642,7 @@ export const createChatDefaultsModule = (
         | "video_giveaway";
       if (!target) return;
 
-      const allowed = await ensureAdmin(ctx, deps);
-      if (!allowed) {
-        await safeAnswerCallbackQuery(
-          ctx,
-          "Only admins can change chat defaults"
-        );
-        return;
-      }
+      if (!(await checkCallbackAdmin(ctx, deps))) return;
 
       const chatId = ctx.chat.id;
       const telegramId = getTelegramId(ctx);
@@ -658,14 +697,7 @@ export const createChatDefaultsModule = (
       const action = ctx.match?.[1] as SettingsTarget | "join_notifications" | undefined;
       if (!action) return;
 
-      const allowed = await ensureAdmin(ctx, deps);
-      if (!allowed) {
-        await safeAnswerCallbackQuery(
-          ctx,
-          "Only admins can change chat defaults"
-        );
-        return;
-      }
+      if (!(await checkCallbackAdmin(ctx, deps))) return;
 
       if (action === "privacy_coinflip") {
         await respondWithMenu(ctx, {
@@ -703,38 +735,8 @@ export const createChatDefaultsModule = (
             .text("🔙 Back", "chat_defaults_cancel"),
         });
       } else if (action === "join_notifications") {
-        const chatSettings = deps.chatDb.getChatGameSettings(ctx.chat.id);
-        const currentExternal = chatSettings?.join_notifications_external ?? DEFAULT_JOIN_NOTIFICATIONS_EXTERNAL;
-        const currentRate = chatSettings?.join_notifications_per_minute ?? DEFAULT_JOIN_NOTIFICATIONS_PER_MINUTE;
-
-        const externalLabel = currentExternal ? "✅ External: On" : "❌ External: Off";
-        const rateLabel = currentRate === 0 ? "Disabled" : `${currentRate}/min`;
-
         await respondWithMenu(ctx, {
-          text: [
-            "<b>Join Notification Settings</b>",
-            "",
-            "<b>External notifications:</b> Show join messages for games created in other groups",
-            `Current: ${externalLabel}`,
-            "",
-            `<b>Rate limit:</b> Max join notifications per minute (max ${MAX_JOIN_NOTIFICATIONS_PER_MINUTE})`,
-            `Current: ${rateLabel}`,
-          ].join("\n"),
-          parseMode: "HTML",
-          keyboard: new InlineKeyboard()
-            .text(currentExternal ? "🔕 Disable External" : "🔔 Enable External",
-              currentExternal ? "chat_defaults_set_join_external_off" : "chat_defaults_set_join_external_on")
-            .row()
-            .text("0", "chat_defaults_set_join_rate_0")
-            .text("1", "chat_defaults_set_join_rate_1")
-            .text("5", "chat_defaults_set_join_rate_5")
-            .text("10", "chat_defaults_set_join_rate_10")
-            .row()
-            .text("✏️ Custom", "chat_defaults_set_join_rate_custom")
-            .row()
-            .text("❌ Restore defaults", "chat_defaults_clear_join_notifications")
-            .row()
-            .text("🔙 Back", "chat_defaults_cancel"),
+          ...buildJoinNotificationsMenu(ctx, deps),
         });
       } else {
         await promptForSetting(ctx, deps, action);
@@ -750,14 +752,7 @@ export const createChatDefaultsModule = (
       const target = ctx.match?.[1] as "video_coinflip" | "video_giveaway";
       if (!target) return;
 
-      const allowed = await ensureAdmin(ctx, deps);
-      if (!allowed) {
-        await safeAnswerCallbackQuery(
-          ctx,
-          "Only admins can change chat defaults"
-        );
-        return;
-      }
+      if (!(await checkCallbackAdmin(ctx, deps))) return;
 
       await promptForSetting(ctx, deps, target);
       await safeAnswerCallbackQuery(ctx);
@@ -810,14 +805,7 @@ export const createChatDefaultsModule = (
     deps.wrapCallbackHandler(async (ctx) => {
       if (!ctx.chat) return;
 
-      const allowed = await ensureAdmin(ctx, deps);
-      if (!allowed) {
-        await safeAnswerCallbackQuery(
-          ctx,
-          "Only admins can change chat defaults"
-        );
-        return;
-      }
+      if (!(await checkCallbackAdmin(ctx, deps))) return;
 
       const target = ctx.match![1] as "coinflip" | "giveaway";
       const value = ctx.match![2];
@@ -854,14 +842,7 @@ export const createChatDefaultsModule = (
     deps.wrapCallbackHandler(async (ctx) => {
       if (!ctx.chat) return;
 
-      const allowed = await ensureAdmin(ctx, deps);
-      if (!allowed) {
-        await safeAnswerCallbackQuery(
-          ctx,
-          "Only admins can change chat defaults"
-        );
-        return;
-      }
+      if (!(await checkCallbackAdmin(ctx, deps))) return;
 
       const value = ctx.match![1] === "on";
       const telegramId = getTelegramId(ctx);
@@ -885,14 +866,7 @@ export const createChatDefaultsModule = (
     deps.wrapCallbackHandler(async (ctx) => {
       if (!ctx.chat) return;
 
-      const allowed = await ensureAdmin(ctx, deps);
-      if (!allowed) {
-        await safeAnswerCallbackQuery(
-          ctx,
-          "Only admins can change chat defaults"
-        );
-        return;
-      }
+      if (!(await checkCallbackAdmin(ctx, deps))) return;
 
       const rateString = ctx.match?.[1] ?? "5";
       const rate = parseInt(rateString, 10);
@@ -915,14 +889,7 @@ export const createChatDefaultsModule = (
     deps.wrapCallbackHandler(async (ctx) => {
       if (!ctx.chat) return;
 
-      const allowed = await ensureAdmin(ctx, deps);
-      if (!allowed) {
-        await safeAnswerCallbackQuery(
-          ctx,
-          "Only admins can change chat defaults"
-        );
-        return;
-      }
+      if (!(await checkCallbackAdmin(ctx, deps))) return;
 
       const keyboard = new InlineKeyboard().text("🔙 Back", "chat_defaults_cancel");
       await respondWithMenu(ctx, {
@@ -948,14 +915,7 @@ export const createChatDefaultsModule = (
     deps.wrapCallbackHandler(async (ctx) => {
       if (!ctx.chat) return;
 
-      const allowed = await ensureAdmin(ctx, deps);
-      if (!allowed) {
-        await safeAnswerCallbackQuery(
-          ctx,
-          "Only admins can change chat defaults"
-        );
-        return;
-      }
+      if (!(await checkCallbackAdmin(ctx, deps))) return;
 
       const telegramId = getTelegramId(ctx);
 
@@ -975,14 +935,7 @@ export const createChatDefaultsModule = (
     deps.wrapCallbackHandler(async (ctx) => {
       if (!ctx.chat) return; // ensure chat context
 
-      const allowed = await ensureAdmin(ctx, deps);
-      if (!allowed) {
-        await safeAnswerCallbackQuery(
-          ctx,
-          "Only admins can change chat defaults"
-        );
-        return;
-      }
+      if (!(await checkCallbackAdmin(ctx, deps))) return;
 
       clearInputSession(
         `${ctx.chat?.id || 0}_${ctx.callbackQuery?.message?.message_id}`
