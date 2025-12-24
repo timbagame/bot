@@ -1060,6 +1060,46 @@ describe("createGameViaCommand helper", () => {
     expect(ctx.__deleted?.length).toBe(1);
   });
 
+  test("sends only one rate limit notice per window", async () => {
+    const recentCount = MAX_GAMES_PER_CREATOR_WINDOW;
+    const windowLabel = formatWindowForTests(GAME_CREATION_RATE_LIMIT_WINDOW_MS);
+    const rateLimitMessage = `Game creation rate limit reached. You have created ${recentCount} games in the last ${windowLabel} (maximum ${MAX_GAMES_PER_CREATOR_WINDOW}). Please wait before creating a new game.`;
+    const deps = makeDeps({
+      gameManager: {
+        createGame: async () => ({ success: false, error: rateLimitMessage }),
+        createGameMessage: async () => {
+          throw new Error("should not send message when creation fails");
+        },
+      },
+    });
+
+    const firstCtx: any = makeCtx();
+    const telegramId = 99n;
+
+    await botModule.__test_createGameViaCommand(
+      firstCtx,
+      ["/cf", "5"],
+      telegramId,
+      coinflipOptions,
+      deps
+    );
+
+    expect(firstCtx.__calls.length).toBe(2);
+    expect(String(firstCtx.__calls[1])).toContain("rate limit");
+
+    const secondCtx: any = makeCtx();
+    await botModule.__test_createGameViaCommand(
+      secondCtx,
+      ["/cf", "5"],
+      telegramId,
+      coinflipOptions,
+      deps
+    );
+
+    expect(secondCtx.__calls.length).toBe(1);
+    expect(secondCtx.__deleted?.length).toBe(1);
+  });
+
   test("allows SOL games when native balance covers deficit", async () => {
     const ctx: any = makeCtx();
     const createCalls: any[] = [];

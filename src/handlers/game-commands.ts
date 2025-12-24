@@ -4,6 +4,7 @@ import {
   DEFAULT_COINFLIP_MAX_PLAYERS,
   DEFAULT_GAME_TIMEOUT,
   DEFAULT_GIVEAWAY_MAX_PLAYERS,
+  GAME_CREATION_RATE_LIMIT_WINDOW_MS,
   WSOL_MINT,
 } from "../utils/constants";
 import {
@@ -95,6 +96,23 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
     ...options,
     getMaxPlayers: () => deps.getOracleMaxPlayers(),
   });
+
+  const gameCreationRateLimitNotices = new Map<string, number>();
+
+  const shouldSendGameCreationRateLimitNotice = (
+    telegramId: bigint,
+    nowMs: number = Date.now()
+  ): boolean => {
+    const key = telegramId.toString();
+    const lastNotice = gameCreationRateLimitNotices.get(key);
+
+    if (lastNotice != null && nowMs - lastNotice < GAME_CREATION_RATE_LIMIT_WINDOW_MS) {
+      return false;
+    }
+
+    gameCreationRateLimitNotices.set(key, nowMs);
+    return true;
+  };
 
   const COINFLIP_COMMAND_OPTIONS = createOptions({
     gameType: "coinflip",
@@ -308,6 +326,12 @@ export const createGameCommandsModule = (deps: GameCommandsModuleDeps) => {
 
       if (!gameResult.success) {
         const finalError = gameResult.error ?? "Failed to create game";
+        const isCreationRateLimit = /game creation rate limit/i.test(finalError);
+
+        if (isCreationRateLimit && !shouldSendGameCreationRateLimitNotice(telegramId)) {
+          return;
+        }
+
         const hasBalanceInfo = containsBalanceInfo(finalError);
         const displayText = hasBalanceInfo
           ? "❌ Failed to create game: insufficient funds. Please add more funds and try again."
