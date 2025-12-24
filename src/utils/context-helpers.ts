@@ -166,9 +166,33 @@ export const containsBalanceInfo = (text: string): boolean => {
   if (typeof text !== "string" || text.length === 0) {
     return false;
   }
-  const balancePattern = /Your balance/i;
-  const youHavePattern = /You have\s+[0-9]/i;
-  return balancePattern.test(text) || youHavePattern.test(text);
+  const normalized = text.toLowerCase();
+
+  if (normalized.includes("your balance")) {
+    return true;
+  }
+
+  if (normalized.includes("insufficient funds")) {
+    return true;
+  }
+
+  const youHaveBalancePattern =
+    /you have\s+[0-9][\d.,]*\s+(?:sol|lamports?|tokens?|coins?)/i;
+  if (youHaveBalancePattern.test(normalized)) {
+    return true;
+  }
+
+  const youHaveTickerPattern = /you have\s+[0-9][\d.,]*\s+[A-Z]{2,10}\b/;
+  if (youHaveTickerPattern.test(text)) {
+    return true;
+  }
+
+  const hasNotEnoughPrefix =
+    normalized.includes("not enough") && /you have\s+[0-9]/i.test(text);
+  const hasNeedQualifier =
+    /you have\s+[0-9]/i.test(text) && /need/i.test(text);
+
+  return hasNotEnoughPrefix || hasNeedQualifier;
 };
 
 /**
