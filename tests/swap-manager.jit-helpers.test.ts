@@ -44,7 +44,14 @@ const createSwapManager = (
   connection: any,
   wallet: WalletManager,
   feeBudget: FeeBudgetStub = defaultFeeBudget
-) => new SwapManager(connection as any, wallet, feeBudget as any);
+) =>
+  new SwapManager(connection as any, wallet, feeBudget as any, {
+    priceResolver: async () =>
+      ({
+        price: 0,
+        resolvedAt: Date.now(),
+      } as any),
+  });
 
 describe("SwapManager JIT helpers", () => {
   test("computeTargets fails when no tokens are available", async () => {
