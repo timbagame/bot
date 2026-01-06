@@ -3627,8 +3627,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
 
   let recipientTelegramId: bigint | null = null;
   let recipientName = "User";
-  let amountArgIndex = 1;
-  let mentionAfterAmount = false;
+  let amountArgs = args;
 
   if (repliedMessage?.from) {
     const fromUser = repliedMessage.from;
@@ -3653,7 +3652,6 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
       recipientName = fromUser.first_name;
     }
 
-    amountArgIndex = 1;
   } else {
     const tokens = args;
     const entities = Array.isArray(message?.entities)
@@ -3799,34 +3797,33 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
       gameManager.primeUsernameCache(ctx, resolvedId, mentionUsername);
     }
 
-    const tokensConsumed =
-      mentionTokenLength && mentionTokenLength > 0 ? mentionTokenLength : 1;
-    amountArgIndex = (mentionTokenIndex ?? 1) + tokensConsumed;
+    const mentionStart = mentionTokenIndex;
+    const mentionTokenCount =
+      mentionStart !== null && mentionStart >= 0
+        ? Math.max(1, mentionTokenLength ?? 1)
+        : 0;
 
-    mentionAfterAmount =
-      mentionTokenIndex !== null &&
-      mentionTokenIndex > 1 &&
-      tokens
-        .slice(1, mentionTokenIndex)
-        .some((token) => /^\$?\d+(?:\.\d+)?$/.test(token.trim()));
+    amountArgs =
+      mentionStart === null || mentionStart < 1
+        ? args
+        : args.filter(
+            (_token, idx) =>
+              idx < mentionStart || idx >= mentionStart + mentionTokenCount
+          );
   }
 
   if (recipientTelegramId === null) {
     return replyUsageError(ctx, TIP_USAGE_MESSAGE);
   }
 
-  if (amountArgIndex >= args.length) {
-    if (mentionAfterAmount) {
-      return replyToMessage(
-        ctx,
-        "Place the username immediately after /tip, followed by the amount (e.g. /tip @username 5)."
-      );
-    }
+  const amountArgIndex = 1;
+
+  if (amountArgIndex >= amountArgs.length) {
     return replyUsageError(ctx, TIP_USAGE_MESSAGE);
   }
 
   const parsed = await tokenManager.parseAmount(
-    args,
+    amountArgs,
     amountArgIndex,
     ctx.chat?.id,
     "tip"
