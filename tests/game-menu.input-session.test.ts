@@ -62,20 +62,21 @@ type MockCtx = {
 type MockCtxOptions = {
   editError?: Error;
   reply_to_message?: { message_id: number };
+  fromId?: number;
 };
 
 const isEditCall = (call: CallLog): call is EditCall => call.type === "edit";
 const isReplyCall = (call: CallLog): call is ReplyCall => call.type === "reply";
 
 const createMockCtx = (text: string, options: MockCtxOptions = {}): MockCtx => {
-  const { editError, reply_to_message } = options;
+  const { editError, reply_to_message, fromId } = options;
   const calls: CallLog[] = [];
   let replyId = 50_000;
 
   return {
     __calls: calls,
     chat: { id: CHAT_ID },
-    from: { id: TELEGRAM_USER_ID },
+    from: { id: fromId ?? TELEGRAM_USER_ID },
     message: {
       message_id: 12_345,
       text,
@@ -145,7 +146,7 @@ describe("game setup typed input handling", () => {
       messageId: 21_000,
       chatId: CHAT_ID,
       amount: undefined,
-      creatorId: "creator-1",
+      creatorId: TELEGRAM_USER_ID.toString(),
       tokenMint: "MintCoinflip111",
       tokenTicker: "BONK",
       tokenDecimals: 5,
@@ -178,7 +179,47 @@ describe("game setup typed input handling", () => {
     expect(restored.waitingFor).toBe("amount_input");
     expect(restored.tokenTicker).toBe("BONK");
     expect(restored.tokenMint).toBe("MintCoinflip111");
-    expect(restored.creatorId).toBe("creator-1");
+    expect(restored.creatorId).toBe(TELEGRAM_USER_ID.toString());
+  });
+
+  test("rejects non-creator input while preserving the session", async () => {
+    const session = {
+      waitingFor: "amount_input",
+      gameType: "coinflip",
+      userBalance: 100,
+      messageId: 22_000,
+      chatId: CHAT_ID,
+      amount: undefined,
+      creatorId: TELEGRAM_USER_ID.toString(),
+      tokenMint: "MintCreator999",
+      tokenTicker: "BONK",
+      tokenDecimals: 5,
+      contractMinimum: 0.25,
+    } as any;
+
+    upsertGameSetupSession(`${CHAT_ID}_${session.messageId}`, session);
+
+    const ctx = createMockCtx("5", {
+      reply_to_message: { message_id: session.messageId },
+      fromId: TELEGRAM_USER_ID + 1,
+    });
+
+    let nextCalled = false;
+    const next = async () => {
+      nextCalled = true;
+    };
+
+    await __test_handleGameSetupTextInput(ctx as any, next);
+
+    expect(nextCalled).toBe(false);
+    expect(metadataSpy).not.toHaveBeenCalled();
+
+    const edits = ctx.__calls.filter(isEditCall);
+    expect(edits).toHaveLength(1);
+    expect(edits[0]!.text).toBe("Only the game creator can update this setup");
+
+    const updated = getGameSetupSession(`${CHAT_ID}_${session.messageId}`) as any;
+    expect(updated).toEqual(session);
   });
 
   test("custom amount input accepts $-prefixed USD and converts using pricing", async () => {
@@ -189,7 +230,7 @@ describe("game setup typed input handling", () => {
       messageId: 21_050,
       chatId: CHAT_ID,
       amount: undefined,
-      creatorId: "creator-usd",
+      creatorId: TELEGRAM_USER_ID.toString(),
       tokenMint: "MintUsd111",
       tokenTicker: "BONK",
       tokenDecimals: 5,
@@ -237,7 +278,7 @@ describe("game setup typed input handling", () => {
       messageId: 31_200,
       chatId: CHAT_ID,
       amount: "5",
-      creatorId: "creator-2",
+      creatorId: TELEGRAM_USER_ID.toString(),
       tokenMint: "MintGiveaway222",
       tokenTicker: "USDC",
       tokenDecimals: 6,
@@ -276,7 +317,7 @@ describe("game setup typed input handling", () => {
     expect(restored.waitingFor).toBe("setup");
     expect(restored.tokenTicker).toBe("USDC");
     expect(restored.tokenMint).toBe("MintGiveaway222");
-    expect(restored.creatorId).toBe("creator-2");
+    expect(restored.creatorId).toBe(TELEGRAM_USER_ID.toString());
   });
 
   test("ignores timeout text replies now that timeout adjustments are button-driven", async () => {
@@ -325,7 +366,7 @@ describe("game setup typed input handling", () => {
       messageId: 41_000,
       chatId: CHAT_ID,
       amount: "2",
-      creatorId: "creator-3",
+      creatorId: TELEGRAM_USER_ID.toString(),
       tokenMint: "MintCoinflip333",
       tokenTicker: "SOL",
       tokenDecimals: 9,
@@ -394,7 +435,7 @@ describe("game setup typed input handling", () => {
       messageId: 66_600,
       chatId: CHAT_ID,
       amount: "1.5",
-      creatorId: "creator-public",
+      creatorId: TELEGRAM_USER_ID.toString(),
       tokenMint: "MintCoinflip555",
       tokenTicker: "SOL",
       tokenDecimals: 9,

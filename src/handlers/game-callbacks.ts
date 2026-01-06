@@ -479,8 +479,8 @@ export const createGameCallbacksModule = (
     next: NextFunction
   ): Promise<void> => {
     try {
-      const telegramIdNumeric = Number(getTelegramId(ctx));
-      if (telegramIdNumeric === 0) {
+      const telegramId = getTelegramId(ctx);
+      if (telegramId === 0n) {
         await next();
         return;
       }
@@ -505,6 +505,30 @@ export const createGameCallbacksModule = (
           userSession.waitingFor !== "players_input")
       ) {
         await next();
+        return;
+      }
+
+      if (
+        userSession.creatorId &&
+        userSession.creatorId !== telegramId.toString()
+      ) {
+        const errorMessage = "Only the game creator can update this setup";
+        try {
+          if (
+            typeof userSession.chatId === "number" &&
+            typeof userSession.messageId === "number"
+          ) {
+            await ctx.api.editMessageText(
+              userSession.chatId,
+              userSession.messageId,
+              errorMessage
+            );
+          } else {
+            await ctx.reply(errorMessage);
+          }
+        } catch {
+          await ctx.reply(errorMessage);
+        }
         return;
       }
 
