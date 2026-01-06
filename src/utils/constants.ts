@@ -252,6 +252,8 @@ export const USER_SOL_MAX_BUFFER_LAMPORTS = parsePositiveInteger(
   500_000
 );
 
+export const JIT_SWAP_SOL_USD_THRESHOLD = 15;
+
 // ================================
 // PRICES CONFIG
 // ================================

@@ -27,7 +27,13 @@ describe("SwapManager JIT floor", () => {
       }),
     } as unknown as WalletManager;
 
-    const swapManager = new SwapManager(connection as any, walletStub, feeBudget);
+    const swapManager = new SwapManager(connection as any, walletStub, feeBudget, {
+      priceResolver: async () =>
+        ({
+          price: 0,
+          resolvedAt: Date.now(),
+        } as any),
+    });
 
     // Record the request amount Jupiter sees
     let requestedLamports = "0";

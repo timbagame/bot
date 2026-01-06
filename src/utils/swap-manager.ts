@@ -16,8 +16,12 @@ import type { SolanaNetwork } from "./network-detector";
 import { WalletManager } from "./wallet";
 import { FeeBudgetManager } from "./fee-budget";
 import type { FeeBudgetProvider } from "./fee-budget";
+import {
+  JIT_SWAP_SOL_USD_THRESHOLD,
+  LAMPORTS_PER_SOL,
+  WSOL_MINT,
+} from "./constants";
 import { formatAmount } from "./format-amount";
-import { WSOL_MINT } from "./constants";
 import type {
   JustInTimeSwapResult,
   SwapQuote,
@@ -36,6 +40,11 @@ import {
   DEFAULT_REFERRAL_BASE_FEE_BPS,
   DEFAULT_MAX_EXTRA_FEE_BPS,
 } from "./admin-payer-surcharge";
+import {
+  getUsdPrice,
+  type CachedPriceLookup,
+  type PriceLookupRequest,
+} from "./price-service";
 
 export type {
   SwapQuote,
@@ -126,6 +135,9 @@ export class SwapManager {
   private connection: Connection;
   private wallet: WalletManager;
   private feeBudget: FeeBudgetProvider;
+  private readonly priceResolver: (
+    request: PriceLookupRequest
+  ) => Promise<CachedPriceLookup | null>;
   private network: SolanaNetwork;
   private readonly quoteCache = new SwapQuoteCache();
   private readonly swapService: SwapService;
@@ -133,12 +145,16 @@ export class SwapManager {
   constructor(
     connection: Connection,
     wallet: WalletManager,
-    feeBudget?: FeeBudgetProvider
+    feeBudget?: FeeBudgetProvider,
+    options?: {
+      priceResolver?: (request: PriceLookupRequest) => Promise<CachedPriceLookup | null>;
+    }
   ) {
     this.connection = connection;
     this.wallet = wallet;
     this.network = NetworkDetector.getCurrentNetwork();
     this.feeBudget = feeBudget ?? FeeBudgetManager.getInstance(connection);
+    this.priceResolver = options?.priceResolver ?? getUsdPrice;
 
     this.jupiterClient = new JupiterClient();
     this.swapService = new SwapService(this.wallet, this);
@@ -481,9 +497,10 @@ export class SwapManager {
     const { userKeypair, availableTokenAmountRaw, desiredLamports, tokenTicker } =
       options;
 
-    const [minimumSolBuffer, jitFeeBuffer] = await Promise.all([
+    const [minimumSolBuffer, jitFeeBuffer, solBalance] = await Promise.all([
       this.feeBudget.getGameSafetyBufferLamports(),
       this.feeBudget.getJitSwapFeeBufferLamports(),
+      this.connection.getBalance(userKeypair.publicKey),
     ]);
 
     const GAME_RENT_BUFFER_LAMPORTS = 1_000_000; // ~0.001 SOL extra cushion
@@ -491,11 +508,13 @@ export class SwapManager {
       minimumSolBuffer + jitFeeBuffer + ROUTE_LAMPORTS_BUFFER + GAME_RENT_BUFFER_LAMPORTS;
     const targetLamports = Math.max(desiredLamports ?? 0, safetyTarget);
 
-    const currentLamports = await this.connection.getBalance(
-      userKeypair.publicKey
-    );
+    const currentLamports = solBalance;
 
-    if (currentLamports >= targetLamports) {
+    const hasSufficientSolBalance =
+      currentLamports >= targetLamports ||
+      (await this.isSolBalanceAboveUsdThreshold(currentLamports));
+
+    if (hasSufficientSolBalance) {
       return {
         ok: true,
         value: {
@@ -518,7 +537,11 @@ export class SwapManager {
     }
 
     const lamportsShortfall = targetLamports - currentLamports;
-    const swapTarget = lamportsShortfall + jitFeeBuffer;
+    const softBuffer = Math.min(
+      jitFeeBuffer,
+      Math.ceil(lamportsShortfall * 0.5)
+    );
+    const swapTarget = lamportsShortfall + softBuffer;
 
     return {
       ok: true,
@@ -533,6 +556,25 @@ export class SwapManager {
         jitFeeBuffer,
       },
     };
+  }
+
+  private async isSolBalanceAboveUsdThreshold(
+    lamportsBalance: number
+  ): Promise<boolean> {
+    try {
+      const priceResult = await this.priceResolver({ isSol: true });
+      const solPrice = priceResult?.price ?? 0;
+      if (!solPrice || !Number.isFinite(solPrice)) {
+        return false;
+      }
+
+      const solBalance = lamportsBalance / LAMPORTS_PER_SOL;
+      const balanceUsd = solBalance * solPrice;
+      return balanceUsd >= JIT_SWAP_SOL_USD_THRESHOLD;
+    } catch (error) {
+      console.warn("Failed to resolve SOL price for JIT threshold check", error);
+      return false;
+    }
   }
 
   private async probePriceAndSizeInput(options: {
