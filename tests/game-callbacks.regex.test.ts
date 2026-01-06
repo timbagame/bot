@@ -3,11 +3,15 @@ import {
   decodeGameConfirmPayload,
   decodeMinPlayersChangePayload,
   decodeAmountSelectionPayload,
+  decodeCustomPlayersPayload,
+  decodePlayersSelectionPayload,
   decodeTimeoutChangePayload,
   decodeVisibilityPayload,
   encodeGameConfirmPayload,
   encodeAmountSelectionPayload,
+  encodeCustomPlayersPayload,
   encodeMinPlayersChangePayload,
+  encodePlayersSelectionPayload,
   encodeTimeoutChangePayload,
   encodeVisibilityPayload,
 } from "../src/utils/callback-data";
@@ -107,4 +111,36 @@ test("amount selection callback stays compact", () => {
   expect(decoded.gameType).toBe("coinflip");
   expect(decoded.amount).toBe("12345.67");
   expect(decoded.creatorId).toBe("12345");
+});
+
+test("player selection callback stays compact", () => {
+  const encoded =
+    encodePlayersSelectionPayload({
+      gameType: "giveaway",
+      amount: "99999.123456",
+      players: 25,
+      creatorId: "abc123",
+    }) ?? "";
+  expect(encoded.startsWith("gp|")).toBe(true);
+  expect(Buffer.byteLength(encoded, "utf-8")).toBeLessThanOrEqual(TELEGRAM_CALLBACK_LIMIT);
+  const decoded = decodePlayersSelectionPayload(encoded)!;
+  expect(decoded.gameType).toBe("giveaway");
+  expect(decoded.amount).toBe("99999.123456");
+  expect(decoded.players).toBe(25);
+  expect(decoded.creatorId).toBe("abc123");
+});
+
+test("custom players callback stays compact", () => {
+  const encoded =
+    encodeCustomPlayersPayload({
+      gameType: "coinflip",
+      amount: "1234567890.5",
+      creatorId: "creator999",
+    }) ?? "";
+  expect(encoded.startsWith("gcp|")).toBe(true);
+  expect(Buffer.byteLength(encoded, "utf-8")).toBeLessThanOrEqual(TELEGRAM_CALLBACK_LIMIT);
+  const decoded = decodeCustomPlayersPayload(encoded)!;
+  expect(decoded.gameType).toBe("coinflip");
+  expect(decoded.amount).toBe("1234567890.5");
+  expect(decoded.creatorId).toBe("creator999");
 });

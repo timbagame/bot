@@ -11,9 +11,11 @@ import { clampMinPlayers, clampTimeoutSeconds } from "./game-settings";
 import {
   CALLBACK_DATA_LIMIT,
   decodeGameConfirmPayload,
+  encodeCustomPlayersPayload,
   encodeAmountSelectionPayload,
   encodeGameConfirmPayload,
   encodeMinPlayersChangePayload,
+  encodePlayersSelectionPayload,
   encodeTimeoutChangePayload,
   encodeVisibilityPayload,
   isCallbackSafeLength,
@@ -124,6 +126,23 @@ const roundToPrecision = (value: number, precision: number): number => {
 
 const withCreatorSuffix = (base: string, creatorId?: string): string =>
   creatorId ? `${base}_${creatorId}` : base;
+
+const createOverflowKeyboard = (message = "⚠️ Unable to render options") => {
+  return new InlineKeyboard().text(message, "noop").row();
+};
+
+const createCallbackGuard = () => {
+  let overflowDetected = false;
+  const guard = (callback: string | null | undefined): string => {
+    if (callback === "noop") return callback;
+    if (!callback || !isCallbackSafeLength(callback)) {
+      overflowDetected = true;
+      return "noop";
+    }
+    return callback;
+  };
+  return { guard, hasOverflow: () => overflowDetected };
+};
 
 /**
  * Generate fee warning message for low balance users
@@ -241,6 +260,9 @@ export const createAmountSelectionKeyboard = (
     tokenPriceUSD?: number;
   }
 ): InlineKeyboard => {
+  const typedGameType = gameType as GameType;
+  const { guard, hasOverflow } = createCallbackGuard();
+
   const balance =
     typeof userBalance === "number" && Number.isFinite(userBalance)
       ? Math.max(userBalance, 0)
@@ -280,9 +302,18 @@ export const createAmountSelectionKeyboard = (
 
   amountButtons.push({
     text: `${minDisplay}${minUsdText}`,
-    callback: withCreatorSuffix(
-      `amount_${gameType}_${contractMinimum}`,
-      creatorId
+    callback: guard(
+      creatorId != null
+        ? encodeAmountSelectionPayload({
+            gameType: typedGameType,
+            amount: String(contractMinimum),
+            creatorId,
+          }) ??
+          withCreatorSuffix(
+            `amount_${gameType}_${contractMinimum}`,
+            creatorId
+          )
+        : `amount_${gameType}_${contractMinimum}`
     ),
   });
 
@@ -291,10 +322,15 @@ export const createAmountSelectionKeyboard = (
   );
 
   filteredAmounts.forEach(({ amount, usdTarget }) => {
-    const callbackData = withCreatorSuffix(
-      `amount_${gameType}_${amount}`,
-      creatorId
-    );
+    const callbackData =
+      creatorId != null
+        ? encodeAmountSelectionPayload({
+            gameType: typedGameType,
+            amount: String(amount),
+            creatorId,
+          }) ??
+          withCreatorSuffix(`amount_${gameType}_${amount}`, creatorId)
+        : `amount_${gameType}_${amount}`;
     const fullDisplay = formatTokenDisplay(amount, { decimals });
     const display = formatCompactTokenDisplay(fullDisplay);
     let usdText = "";
@@ -312,7 +348,10 @@ export const createAmountSelectionKeyboard = (
       usdText = ` ($${usdFormatted})`;
     }
 
-    amountButtons.push({ text: `${display}${usdText}`, callback: callbackData });
+    amountButtons.push({
+      text: `${display}${usdText}`,
+      callback: guard(callbackData),
+    });
   });
 
   amountButtons.forEach(({ text, callback }, index) => {
@@ -329,11 +368,15 @@ export const createAmountSelectionKeyboard = (
   keyboard
     .text(
       "✏️ Custom Amount",
-      withCreatorSuffix(`custom_amount_${gameType}`, creatorId)
+      guard(withCreatorSuffix(`custom_amount_${gameType}`, creatorId))
     )
     .row()
-    .text("❌ Cancel", withCreatorSuffix("cancel_game_setup", creatorId))
+    .text("❌ Cancel", guard(withCreatorSuffix("cancel_game_setup", creatorId)))
     .row();
+
+  if (hasOverflow()) {
+    return createOverflowKeyboard();
+  }
 
   return keyboard;
 };
@@ -357,6 +400,8 @@ export const createPlayerSelectionKeyboard = (
   creatorId?: string
 ): InlineKeyboard => {
   const keyboard = new InlineKeyboard();
+  const typedGameType = gameType as GameType;
+  const { guard, hasOverflow } = createCallbackGuard();
   const layout = PLAYER_SELECTION_LAYOUTS[gameType] ?? [];
 
   for (const row of layout) {
@@ -367,7 +412,20 @@ export const createPlayerSelectionKeyboard = (
     for (const count of row) {
       keyboard.text(
         `👥 ${count}`,
-        withCreatorSuffix(`players_${gameType}_${amount}_${count}`, creatorId)
+        guard(
+          creatorId != null
+            ? encodePlayersSelectionPayload({
+                gameType: typedGameType,
+                amount,
+                players: count,
+                creatorId,
+              }) ??
+              withCreatorSuffix(
+                `players_${gameType}_${amount}_${count}`,
+                creatorId
+              )
+            : `players_${gameType}_${amount}_${count}`
+        )
       );
     }
 
@@ -377,14 +435,27 @@ export const createPlayerSelectionKeyboard = (
   keyboard
     .text(
       "📊 Custom Players",
-      withCreatorSuffix(`custom_players_${gameType}_${amount}`, creatorId)
+      guard(
+        creatorId != null
+          ? encodeCustomPlayersPayload({
+              gameType: typedGameType,
+              amount,
+              creatorId,
+            }) ??
+            withCreatorSuffix(`custom_players_${gameType}_${amount}`, creatorId)
+          : `custom_players_${gameType}_${amount}`
+      )
     )
     .row()
     .text(
       "⬅️ Back to Amount",
-      withCreatorSuffix(`back_to_amounts_${gameType}`, creatorId)
+      guard(withCreatorSuffix(`back_to_amounts_${gameType}`, creatorId))
     )
     .row();
+
+  if (hasOverflow()) {
+    return createOverflowKeyboard();
+  }
 
   return keyboard;
 };
@@ -453,12 +524,6 @@ export const createGameConfirmKeyboard = (
   options?: Partial<GameAdvancedOptions>,
   ui?: { lockVisibilityToPublic?: boolean }
 ): InlineKeyboard => {
-  const createOverflowKeyboard = (): InlineKeyboard => {
-    return new InlineKeyboard()
-      .text("⚠️ Unable to render options", "noop")
-      .row();
-  };
-
   const fallbackMinPlayers =
     gameType === "coinflip" ? MIN_COINFLIP_PLAYERS : MIN_GIVEAWAY_PLAYERS;
   const advanced: GameAdvancedOptions = {
@@ -470,7 +535,7 @@ export const createGameConfirmKeyboard = (
   const lockVisibilityToPublic = ui?.lockVisibilityToPublic === true;
   const effectiveIsPrivate = lockVisibilityToPublic ? false : advanced.isPrivate;
 
-  const timeoutDeltaCallback = (deltaMinutes: number): string | null => {
+  const timeoutDeltaCallback = (deltaMinutes: number): string => {
     if (!creatorId) return "noop";
     const nextTimeout = clampTimeoutSeconds(
       advanced.timeoutSeconds + deltaMinutes * 60
@@ -485,11 +550,11 @@ export const createGameConfirmKeyboard = (
         players: maxPlayersForMinPlayers,
         deltaMinutes,
         creatorId,
-      })
+      }) ?? "noop"
     );
   };
 
-  const timeoutMultiplierCallback = (multiplier: number): string | null => {
+  const timeoutMultiplierCallback = (multiplier: number): string => {
     if (!Number.isFinite(multiplier) || multiplier <= 0) return "noop";
     const targetTimeoutSeconds = snapTimeoutSeconds(
       advanced.timeoutSeconds * multiplier
@@ -521,7 +586,7 @@ export const createGameConfirmKeyboard = (
     maxPlayersForMinPlayers
   );
 
-  const minPlayersDeltaCallback = (deltaPlayers: number): string | null => {
+  const minPlayersDeltaCallback = (deltaPlayers: number): string => {
     if (!creatorId) return "noop";
     if (!Number.isFinite(deltaPlayers) || deltaPlayers === 0) return "noop";
     return (
@@ -531,7 +596,7 @@ export const createGameConfirmKeyboard = (
         players: maxPlayersForMinPlayers,
         deltaPlayers,
         creatorId,
-      })
+      }) ?? "noop"
     );
   };
 
@@ -557,7 +622,7 @@ export const createGameConfirmKeyboard = (
         minPlayers: currentMinPlayers,
         isPrivate: effectiveIsPrivate,
         creatorId,
-      })
+      }) ?? "noop"
     : "noop";
 
   const timeoutCallbacks = [
@@ -581,7 +646,7 @@ export const createGameConfirmKeyboard = (
           players: maxPlayersForMinPlayers,
           isPrivate: !effectiveIsPrivate,
           creatorId,
-        });
+        }) ?? "noop";
 
   const minPlayersCallbacks = [
     minPlayersTargetCallback(Math.floor(currentMinPlayers * 0.5)),

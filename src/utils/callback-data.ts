@@ -12,6 +12,8 @@ const CALLBACK_PREFIX = {
   visibility: "cv",
   minPlayersChange: "cm",
   amountSelection: "ga",
+  playersSelection: "gp",
+  customPlayers: "gcp",
 } as const;
 
 type CallbackPrefix = (typeof CALLBACK_PREFIX)[keyof typeof CALLBACK_PREFIX];
@@ -74,7 +76,7 @@ const normalizeAmount = (
   if (typeof amount !== "string") return null;
   const trimmed = amount.trim();
   if (!/^\d+(?:\.\d+)?$/.test(trimmed)) return null;
-  const [intPartRaw, fractionRaw = ""] = trimmed.split(".");
+  const [intPartRaw = "0", fractionRaw = ""] = trimmed.split(".");
   const intPart = intPartRaw.replace(/^0+(?=\d)/, "") || "0";
   const fraction = fractionRaw.replace(/0+$/, "");
   const scale = fraction.length;
@@ -426,6 +428,99 @@ export const decodeAmountSelectionPayload = (
   data: string | undefined
 ): EncodedAmountSelectionPayload | null => {
   const parts = parseCallbackParts(data, CALLBACK_PREFIX.amountSelection, 4);
+  if (!parts) return null;
+  const gameType = fromGameTypeCode(parts[1]!);
+  const amount = decodeAmount(parts[2]!);
+  const creatorId = decodeCreatorId(parts[3]!);
+
+  if (!gameType || amount === null || !creatorId) {
+    return null;
+  }
+
+  return {
+    gameType,
+    amount,
+    creatorId,
+  };
+};
+
+export type EncodedPlayersSelectionPayload = {
+  gameType: GameType;
+  amount: string;
+  players: number;
+  creatorId: string;
+};
+
+export const encodePlayersSelectionPayload = (
+  payload: EncodedPlayersSelectionPayload
+) => {
+  const amountPart = encodeAmount(payload.amount);
+  const creatorPart = encodeCreatorId(payload.creatorId);
+  const playersPart = encodeUnsigned(payload.players);
+
+  if (!amountPart || !creatorPart || !playersPart) {
+    return null;
+  }
+
+  return buildCallback([
+    CALLBACK_PREFIX.playersSelection,
+    toGameTypeCode(payload.gameType),
+    amountPart,
+    playersPart,
+    creatorPart,
+  ]);
+};
+
+export const decodePlayersSelectionPayload = (
+  data: string | undefined
+): EncodedPlayersSelectionPayload | null => {
+  const parts = parseCallbackParts(data, CALLBACK_PREFIX.playersSelection, 5);
+  if (!parts) return null;
+  const gameType = fromGameTypeCode(parts[1]!);
+  const amount = decodeAmount(parts[2]!);
+  const players = decodeUnsigned(parts[3]!);
+  const creatorId = decodeCreatorId(parts[4]!);
+
+  if (!gameType || amount === null || players === null || !creatorId) {
+    return null;
+  }
+
+  return {
+    gameType,
+    amount,
+    players,
+    creatorId,
+  };
+};
+
+export type EncodedCustomPlayersPayload = {
+  gameType: GameType;
+  amount: string;
+  creatorId: string;
+};
+
+export const encodeCustomPlayersPayload = (
+  payload: EncodedCustomPlayersPayload
+) => {
+  const amountPart = encodeAmount(payload.amount);
+  const creatorPart = encodeCreatorId(payload.creatorId);
+
+  if (!amountPart || !creatorPart) {
+    return null;
+  }
+
+  return buildCallback([
+    CALLBACK_PREFIX.customPlayers,
+    toGameTypeCode(payload.gameType),
+    amountPart,
+    creatorPart,
+  ]);
+};
+
+export const decodeCustomPlayersPayload = (
+  data: string | undefined
+): EncodedCustomPlayersPayload | null => {
+  const parts = parseCallbackParts(data, CALLBACK_PREFIX.customPlayers, 4);
   if (!parts) return null;
   const gameType = fromGameTypeCode(parts[1]!);
   const amount = decodeAmount(parts[2]!);

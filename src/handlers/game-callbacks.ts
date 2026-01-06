@@ -23,6 +23,8 @@ import {
   decodeGameConfirmPayload,
   decodeMinPlayersChangePayload,
   decodeAmountSelectionPayload,
+  decodeCustomPlayersPayload,
+  decodePlayersSelectionPayload,
   decodeTimeoutChangePayload,
   decodeVisibilityPayload,
 } from "../utils/callback-data";
@@ -145,6 +147,8 @@ const NON_GAME_CALLBACK_PREFIXES = [
   "cv|",
   "cm|",
   "ga|",
+  "gp|",
+  "gcp|",
   "amount_",
   "players_",
   "cancel_game_",
@@ -1060,6 +1064,82 @@ export const createGameCallbacksModule = (
     );
 
     deps.bot.callbackQuery(
+      /^gp\|/,
+      deps.wrapCallbackHandler(
+        deps.withCreatorContext(
+          {
+            name: "players_compact",
+            resolveCreatorId: (ctx) =>
+              decodePlayersSelectionPayload(ctx.callbackQuery?.data)?.creatorId,
+            failureText: "🚫 Only the game creator can modify this game setup!",
+          },
+          async (ctx, { session, tokenContext, updateSession, creatorId }) => {
+            const payload = decodePlayersSelectionPayload(
+              ctx.callbackQuery?.data
+            );
+            if (!payload) {
+              await safeAnswerCallbackQuery(ctx, "❌ Invalid player selection");
+              return;
+            }
+
+            const { gameType, amount, players } = payload;
+
+            const chatSettings = resolveChatSettingsForContext(ctx, session);
+            const advanced = resolveAdvancedOptionsForContext(
+              ctx,
+              gameType,
+              players,
+              session,
+              session?.maxPlayersLimit ?? deps.getOracleMaxPlayers(),
+              chatSettings
+            );
+
+            const tokenPriceUSD = await resolveTokenPriceUSDForSetup({
+              tokenMint: tokenContext.tokenMint,
+              tokenTicker: tokenContext.tokenTicker,
+              sessionPrice: session?.tokenPriceUSD,
+            });
+            const usdApproximation = formatUsdApproximation(
+              Number(amount),
+              tokenPriceUSD
+            );
+
+            await presentConfirmMenu({
+              ctx,
+              gameType,
+              amount,
+              players,
+              tokenTicker: tokenContext.tokenTicker,
+              tokenDecimals: tokenContext.tokenDecimals,
+              creatorId,
+              advanced,
+              usdApproximation,
+              logLabel: "players_confirm_menu",
+            });
+
+            updateSession({
+              waitingFor: "setup",
+              gameType,
+              userBalance: session?.userBalance ?? 0,
+              messageId:
+                ctx.callbackQuery?.message?.message_id ?? session?.messageId,
+              chatId: ctx.chat?.id ?? session?.chatId ?? 0,
+              amount,
+              players,
+              tokenPriceUSD: tokenPriceUSD ?? undefined,
+              timeoutSeconds: advanced.timeoutSeconds,
+              minPlayers: advanced.minPlayers,
+              isPrivate: advanced.isPrivate,
+            });
+
+            await safeAnswerCallbackQuery(ctx);
+          }
+        ),
+        { action: "players_compact", errorAck: "❌ Error selecting players" }
+      )
+    );
+
+    deps.bot.callbackQuery(
       /^players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)$/,
       deps.wrapCallbackHandler(
         deps.withCreatorContext(
@@ -1803,7 +1883,12 @@ export const createGameCallbacksModule = (
               messageId: ctx.callbackQuery?.message?.message_id || 0,
               chatId: ctx.chat?.id || 0,
               contractMinimum: session?.contractMinimum,
+              tokenMint: session?.tokenMint,
+              tokenTicker: session?.tokenTicker,
+              tokenDecimals: session?.tokenDecimals,
               maxPlayersLimit: maxPlayers,
+              timeoutSeconds: session?.timeoutSeconds ?? DEFAULT_GAME_TIMEOUT,
+              isPrivate: session?.isPrivate ?? false,
             });
           } catch (error) {
             console.error(
@@ -1815,6 +1900,68 @@ export const createGameCallbacksModule = (
               "❌ Error setting up players input"
             );
           }
+        }
+      )
+    );
+
+    deps.bot.callbackQuery(
+      /^gcp\|/,
+      deps.withCreatorContext(
+        {
+          name: "custom_players_compact",
+          resolveCreatorId: (ctx) =>
+            decodeCustomPlayersPayload(ctx.callbackQuery?.data)?.creatorId,
+          failureText: "❌ Only the game creator can modify this setup!",
+        },
+        async (ctx, creatorContext) => {
+          const payload = decodeCustomPlayersPayload(ctx.callbackQuery?.data);
+          if (!payload) {
+            await safeAnswerCallbackQuery(ctx, "❌ Invalid custom player entry");
+            return;
+          }
+
+          const { gameType, amount } = payload;
+          const amountNumber = Number(amount);
+          const formattedAmount = amountNumber.toLocaleString("en-US", {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: determineFractionDigits(
+              amount,
+              creatorContext.tokenContext.tokenDecimals
+            ),
+          });
+
+          const formattedGameType = toTitleCase(gameType);
+          const minPlayers = gameType === "coinflip" ? 2 : 1;
+          const maxPlayers = Math.max(minPlayers, deps.getOracleMaxPlayers());
+
+          const playersMessage = [
+            `👥 <b>Type Custom Players - ${formattedGameType}</b>`,
+            "",
+            `Amount: <b>${formattedAmount} ${creatorContext.tokenContext.tokenTicker}</b>`,
+            "",
+            "Please type the number of players for this game.",
+            "",
+            `Range: ${minPlayers}-${maxPlayers} players`,
+          ].join("\n");
+
+          await respondWithMenu(ctx, {
+            text: playersMessage,
+            parseMode: "HTML",
+            keyboard: new InlineKeyboard()
+              .text("❌ Cancel", `cancel_game_setup_${creatorContext.creatorId}`)
+              .row(),
+          });
+
+          await safeAnswerCallbackQuery(ctx, "Type the number of players...");
+
+          creatorContext.updateSession({
+            ...(creatorContext.session ?? {}),
+            waitingFor: "players_input",
+            gameType,
+            amount,
+            minPlayers,
+            maxPlayersLimit: maxPlayers,
+          });
         }
       )
     );

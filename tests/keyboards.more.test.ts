@@ -15,6 +15,7 @@ import {
   decodeGameConfirmPayload,
   decodeAmountSelectionPayload,
   decodeMinPlayersChangePayload,
+  decodePlayersSelectionPayload,
   decodeTimeoutChangePayload,
   decodeVisibilityPayload,
 } from "../src/utils/callback-data";
@@ -238,10 +239,15 @@ describe("keyboards: amount selection", () => {
 
   test("creatorId is appended to callbacks when provided", () => {
     const kb = createAmountSelectionKeyboard("giveaway", 60, "999");
-    const callbacks = extractCallbacks(kb).filter((s) =>
-      s.startsWith("amount_giveaway_")
-    );
-    expect(callbacks.every((s) => s.endsWith("_999"))).toBe(true);
+    const callbacks = extractCallbacks(kb).filter((s) => s.startsWith("ga|"));
+    expect(callbacks.length).toBeGreaterThan(0);
+    const decoded = callbacks
+      .map((cb) => decodeAmountSelectionPayload(cb))
+      .filter(Boolean);
+    expect(decoded.every((d) => d?.creatorId === "999")).toBe(true);
+    expect(
+      callbacks.every((cb) => Buffer.byteLength(cb, "utf-8") <= 64)
+    ).toBe(true);
   });
 
   test("amount buttons omit token ticker and show USD when price is known", () => {
@@ -262,6 +268,20 @@ describe("keyboards: amount selection", () => {
     expect(texts.every((text) => /\(\$[0-9,]+(?:\.\d+)?\)/.test(text))).toBe(
       true
     );
+  });
+
+  test("amount callbacks stay within Telegram limits for large inputs", () => {
+    const kb = createAmountSelectionKeyboard(
+      "coinflip",
+      10_000_000_000_000,
+      "123456789012345678901234567890",
+      20
+    );
+    const callbacks = extractCallbacks(kb);
+    expect(callbacks.length).toBeGreaterThan(0);
+    expect(
+      callbacks.every((cb) => Buffer.byteLength(cb, "utf-8") <= 64)
+    ).toBe(true);
   });
 
   test("amount callbacks follow USD tiers when token price is known", () => {
@@ -336,6 +356,9 @@ describe("keyboards: player selection and confirm", () => {
     expect(callbacks).toContain("players_coinflip_25_5");
     expect(callbacks).toContain("players_coinflip_25_10");
     expect(callbacks).toContain("players_coinflip_25_20");
+    expect(callbacks.every((cb) => Buffer.byteLength(cb, "utf-8") <= 64)).toBe(
+      true
+    );
     // Also includes custom and back-to-amount
     const all = extractCallbacks(kb);
     expect(all).toContain("custom_players_coinflip_25");
@@ -344,15 +367,17 @@ describe("keyboards: player selection and confirm", () => {
 
   test("player selection for giveaway uses specific player options", () => {
     const kb = createPlayerSelectionKeyboard("giveaway", "10", "42");
-    const callbacks = extractCallbacks(kb).filter((s) =>
-      s?.startsWith("players_giveaway_10_")
+    const callbacks = extractCallbacks(kb).filter((s) => s?.startsWith("gp|"));
+    const decoded = callbacks
+      .map((cb) => decodePlayersSelectionPayload(cb))
+      .filter(Boolean);
+    const playerCounts = decoded.map((d) => d?.players);
+    expect(playerCounts).toEqual(
+      expect.arrayContaining([1, 2, 3, 5, 10, 20])
     );
-    expect(callbacks).toContain("players_giveaway_10_1_42");
-    expect(callbacks).toContain("players_giveaway_10_2_42");
-    expect(callbacks).toContain("players_giveaway_10_3_42");
-    expect(callbacks).toContain("players_giveaway_10_5_42");
-    expect(callbacks).toContain("players_giveaway_10_10_42");
-    expect(callbacks).toContain("players_giveaway_10_20_42");
+    expect(
+      callbacks.every((cb) => Buffer.byteLength(cb, "utf-8") <= 64)
+    ).toBe(true);
   });
 
   test("confirm keyboard includes confirm and back with creatorId", () => {

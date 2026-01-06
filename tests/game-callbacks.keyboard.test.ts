@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { createPlayerSelectionKeyboard, createGameConfirmKeyboard } from "../src/utils/keyboards";
 import {
   decodeGameConfirmPayload,
+  decodePlayersSelectionPayload,
   decodeTimeoutChangePayload,
   decodeVisibilityPayload,
 } from "../src/utils/callback-data";
@@ -32,9 +33,15 @@ function extractCallbacks(kb: any): string[] {
 test("player selection keyboard embeds decimal amount in callbacks when creatorId present", () => {
   const kb = createPlayerSelectionKeyboard("coinflip", "150.5", "12345");
   const callbacks = extractCallbacks(kb);
-  expect(callbacks.some(s => s?.startsWith("players_coinflip_150.5_"))).toBe(true);
-  // Must include creatorId at end
-  expect(callbacks.some(s => /players_coinflip_150\.5_\d+_12345$/.test(s))).toBe(true);
+  const encoded = callbacks.find((cb) => cb.startsWith("gp|"))!;
+  const decoded = decodePlayersSelectionPayload(encoded);
+  expect(decoded).toMatchObject({
+    gameType: "coinflip",
+    amount: "150.5",
+    players: 2,
+    creatorId: "12345",
+  });
+  expect(Buffer.byteLength(encoded, "utf-8")).toBeLessThanOrEqual(64);
 });
 
 test("game confirm keyboard embeds decimal amount and creatorId", () => {
@@ -75,4 +82,19 @@ test("long inputs still keep confirm callbacks within Telegram limits", () => {
   expect(
     callbacks.every((cb) => Buffer.byteLength(cb, "utf-8") <= 64)
   ).toBe(true);
+});
+
+test("player selection remains compact for large numbers and creator IDs", () => {
+  const kb = createPlayerSelectionKeyboard(
+    "giveaway",
+    "98765432109876543210.987654",
+    "123456789012345678901234567890"
+  );
+  const callbacks = extractCallbacks(kb);
+  const encoded = callbacks.find((cb) => cb.startsWith("gp|"))!;
+  expect(encoded).toBeTruthy();
+  expect(Buffer.byteLength(encoded, "utf-8")).toBeLessThanOrEqual(64);
+  const decoded = decodePlayersSelectionPayload(encoded);
+  expect(decoded?.players).toBeGreaterThan(0);
+  expect(decoded?.creatorId).toBe("123456789012345678901234567890");
 });
