@@ -537,10 +537,11 @@ export class SwapManager {
     }
 
     const lamportsShortfall = targetLamports - currentLamports;
-    const swapTarget = Math.max(
-      targetLamports + Math.floor(jitFeeBuffer * 0.5),
-      lamportsShortfall + jitFeeBuffer
+    const softBuffer = Math.min(
+      jitFeeBuffer,
+      Math.ceil(lamportsShortfall * 0.5)
     );
+    const swapTarget = lamportsShortfall + softBuffer;
 
     return {
       ok: true,

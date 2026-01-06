@@ -382,4 +382,23 @@ describe("SwapManager JIT helpers", () => {
     expect(result.value.targetLamports).toBe(desiredLamports);
     expect(JIT_SWAP_SOL_USD_THRESHOLD).toBeGreaterThan(0);
   });
+
+  test("computeTargets sizes swap close to shortfall when already near target", async () => {
+    const user = Keypair.generate();
+    const connection = createConnection(2_800_000); // Only slightly below target
+    const wallet = createWallet(connection, null);
+    const manager = createSwapManager(connection, wallet);
+
+    const result = await (manager as any).computeTargets({
+      userKeypair: user,
+      availableTokenAmountRaw: 1_000_000,
+      desiredLamports: 2_900_000,
+      tokenTicker: "SOL",
+    });
+
+    expect(result.ok).toBeTrue();
+    expect(result.value.status).toBe("needs-funding");
+    expect(result.value.lamportsShortfall).toBe(100_000);
+    expect(result.value.swapTarget).toBe(150_000);
+  });
 });
