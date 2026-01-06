@@ -3168,6 +3168,31 @@ export class GameManager {
               }
             );
 
+          const recreateMissingMessage = async (err: unknown): Promise<boolean> => {
+            if (!messageTextValue || !isMessageMissing(err)) {
+              return false;
+            }
+
+            const lockKey = `${gameAddress}:${gameMessage.chatId}`;
+            if (this.messageRecreationLocks.has(lockKey)) {
+              return true;
+            }
+
+            this.messageRecreationLocks.add(lockKey);
+            try {
+              await this.recreateMissingGameMessage(ctx, gameAddress, {
+                chatId: gameMessage.chatId,
+                messageText: messageTextValue,
+                inlineKeyboard: inlineKeyboardValue,
+                gameType,
+              });
+            } finally {
+              this.messageRecreationLocks.delete(lockKey);
+            }
+
+            return true;
+          };
+
           if (winnerMedia && supportsVideo) {
             try {
               const isCompleted = lowerStatus === "completed";
@@ -3247,10 +3272,13 @@ export class GameManager {
               continue;
             } catch (mediaError) {
               // If we get here, something unexpected happened
-              console.warn(
-                `Unexpected error in media edit path for game ${gameAddress} chat ${gameMessage.chatId}:`,
-                mediaError
-              );
+              const recreated = await recreateMissingMessage(mediaError);
+              if (!recreated) {
+                console.warn(
+                  `Unexpected error in media edit path for game ${gameAddress} chat ${gameMessage.chatId}:`,
+                  mediaError
+                );
+              }
               continue;
             }
           }
@@ -3322,10 +3350,13 @@ export class GameManager {
               continue;
             } catch (captionError) {
               // If we get here, something unexpected happened
-              console.warn(
-                `Unexpected error in caption edit path for game ${gameAddress} chat ${gameMessage.chatId}:`,
-                captionError
-              );
+              const recreated = await recreateMissingMessage(captionError);
+              if (!recreated) {
+                console.warn(
+                  `Unexpected error in caption edit path for game ${gameAddress} chat ${gameMessage.chatId}:`,
+                  captionError
+                );
+              }
               continue;
             }
           }
