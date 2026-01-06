@@ -136,8 +136,8 @@ test("handleTipCommand resolves username mentions via game manager lookup", asyn
   expect(gameManagerCalls).toEqual(["@TargetUser"]);
   expect(chatMemberCalls).toEqual([{ chatId: 99, userId: 987654321 }]);
   expect(parseCalls).toHaveLength(1);
-  expect(parseCalls[0]?.args).toEqual(["/tip", "@TargetUser", "5"]);
-  expect(parseCalls[0]?.index).toBe(2);
+  expect(parseCalls[0]?.args).toEqual(["/tip", "5"]);
+  expect(parseCalls[0]?.index).toBe(1);
   expect(parseCalls[0]?.context).toBe("tip");
   expect(replies).toHaveLength(1);
   expect(replies[0]).toContain("Please provide a valid amount greater than 0.");
@@ -195,8 +195,111 @@ test("handleTipCommand positions amount after multi-word text mention", async ()
 
   expect(chatMemberCalls).toEqual([{ chatId: 55, userId: 9999 }]);
   expect(parseCalls).toHaveLength(1);
-  expect(parseCalls[0]?.args).toEqual(["/tip", "John", "Doe", "5"]);
-  expect(parseCalls[0]?.index).toBe(3);
+  expect(parseCalls[0]?.args).toEqual(["/tip", "5"]);
+  expect(parseCalls[0]?.index).toBe(1);
+  expect(parseCalls[0]?.context).toBe("tip");
+  expect(replies).toHaveLength(1);
+  expect(replies[0]).toContain("Please provide a valid amount greater than 0.");
+});
+
+test("handleTipCommand allows mentions after the amount", async () => {
+  const tokenManager = botModule.__test_getTokenManager();
+  const parseCalls: Array<{ args: string[]; index: number; context: "game" | "tip" }> = [];
+  tokenManager.parseAmount = async (
+    args: string[],
+    index: number,
+    _chatId: number | undefined,
+    context: "game" | "tip" = "game"
+  ) => {
+    parseCalls.push({ args, index, context });
+    return { success: false, error: "invalid_amount" } as const;
+  };
+
+  botModule.__test_setGameManager({
+    findTelegramIdByUsername: (username: string) => (username === "@TargetUser" ? "987654321" : null),
+    primeUsernameCache: () => {},
+  } as any);
+
+  const replies: string[] = [];
+  const chatMemberCalls: Array<{ chatId: number; userId: number }> = [];
+  const ctx: any = {
+    chat: { id: 77, type: "supergroup" },
+    from: { id: 333, is_bot: false },
+    message: {
+      message_id: 303,
+      text: "/tip 1 @TargetUser",
+      entities: [
+        { type: "bot_command", offset: 0, length: 4 },
+        { type: "mention", offset: 7, length: 11 },
+      ],
+    },
+    reply: async (text: string) => {
+      replies.push(text);
+      return { message_id: 808 };
+    },
+    api: {
+      getChatMember: async (chatId: number, userId: number) => {
+        chatMemberCalls.push({ chatId, userId });
+        return { user: { is_bot: false } };
+      },
+    },
+  };
+
+  await botModule.__test_handleTipCommand(ctx);
+
+  expect(chatMemberCalls).toEqual([{ chatId: 77, userId: 987654321 }]);
+  expect(parseCalls).toHaveLength(1);
+  expect(parseCalls[0]?.args).toEqual(["/tip", "1"]);
+  expect(parseCalls[0]?.index).toBe(1);
+  expect(parseCalls[0]?.context).toBe("tip");
+  expect(replies).toHaveLength(1);
+  expect(replies[0]).toContain("Please provide a valid amount greater than 0.");
+});
+
+test("handleTipCommand keeps token hints when mention is last", async () => {
+  const tokenManager = botModule.__test_getTokenManager();
+  const parseCalls: Array<{ args: string[]; index: number; context: "game" | "tip" }> = [];
+  tokenManager.parseAmount = async (
+    args: string[],
+    index: number,
+    _chatId: number | undefined,
+    context: "game" | "tip" = "game"
+  ) => {
+    parseCalls.push({ args, index, context });
+    return { success: false, error: "invalid_amount" } as const;
+  };
+
+  botModule.__test_setGameManager({
+    findTelegramIdByUsername: (username: string) => (username === "@TargetUser" ? "222222" : null),
+    primeUsernameCache: () => {},
+  } as any);
+
+  const replies: string[] = [];
+  const ctx: any = {
+    chat: { id: 66, type: "group" },
+    from: { id: 444, is_bot: false },
+    message: {
+      message_id: 404,
+      text: "/tip 1 SOL @TargetUser",
+      entities: [
+        { type: "bot_command", offset: 0, length: 4 },
+        { type: "mention", offset: 11, length: 11 },
+      ],
+    },
+    reply: async (text: string) => {
+      replies.push(text);
+      return { message_id: 909 };
+    },
+    api: {
+      getChatMember: async () => ({ user: { is_bot: false } }),
+    },
+  };
+
+  await botModule.__test_handleTipCommand(ctx);
+
+  expect(parseCalls).toHaveLength(1);
+  expect(parseCalls[0]?.args).toEqual(["/tip", "1", "SOL"]);
+  expect(parseCalls[0]?.index).toBe(1);
   expect(parseCalls[0]?.context).toBe("tip");
   expect(replies).toHaveLength(1);
   expect(replies[0]).toContain("Please provide a valid amount greater than 0.");
