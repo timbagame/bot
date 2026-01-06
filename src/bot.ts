@@ -3628,6 +3628,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
   let recipientTelegramId: bigint | null = null;
   let recipientName = "User";
   let amountArgIndex = 1;
+  let mentionAfterAmount = false;
 
   if (repliedMessage?.from) {
     const fromUser = repliedMessage.from;
@@ -3801,9 +3802,26 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
     const tokensConsumed =
       mentionTokenLength && mentionTokenLength > 0 ? mentionTokenLength : 1;
     amountArgIndex = (mentionTokenIndex ?? 1) + tokensConsumed;
+
+    mentionAfterAmount =
+      mentionTokenIndex !== null &&
+      mentionTokenIndex > 1 &&
+      tokens
+        .slice(1, mentionTokenIndex)
+        .some((token) => /^\$?\d+(?:\.\d+)?$/.test(token.trim()));
   }
 
   if (recipientTelegramId === null) {
+    return replyUsageError(ctx, TIP_USAGE_MESSAGE);
+  }
+
+  if (amountArgIndex >= args.length) {
+    if (mentionAfterAmount) {
+      return replyToMessage(
+        ctx,
+        "Place the username immediately after /tip, followed by the amount (e.g. /tip @username 5)."
+      );
+    }
     return replyUsageError(ctx, TIP_USAGE_MESSAGE);
   }
 
