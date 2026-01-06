@@ -1,5 +1,9 @@
 import { beforeAll, beforeEach, afterEach, expect, test } from "bun:test";
-import { upsertGameSetupSession, clearAllGameSetupSessions } from "../src/utils/user-state";
+import {
+  upsertGameSetupSession,
+  clearAllGameSetupSessions,
+} from "../src/utils/user-state";
+import { encodeGameConfirmPayload } from "../src/utils/callback-data";
 
 process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
 process.env.MNEMONIC =
@@ -137,6 +141,17 @@ test(
       updateGameMessageFromData: async () => {},
     } as any);
 
+    const confirmPayload =
+      encodeGameConfirmPayload({
+        gameType: "coinflip",
+        amount: "1.5",
+        players: 2,
+        timeoutSeconds: 3600,
+        minPlayers: 2,
+        isPrivate: true,
+        creatorId: String(userId),
+      }) ?? "";
+
     await bot.handleUpdate({
       update_id: 1,
       callback_query: {
@@ -147,7 +162,7 @@ test(
           date: Math.floor(Date.now() / 1000),
           chat: { id: chatId, type: "private" },
         } as any,
-        data: `confirm_game_coinflip_1.5_2_3600_2_private_${userId}`,
+        data: confirmPayload,
       },
     } as any);
 
@@ -206,6 +221,17 @@ test(
       updateGameMessageFromData: async () => {},
     } as any);
 
+    const confirmPayload =
+      encodeGameConfirmPayload({
+        gameType: "coinflip",
+        amount: "2",
+        players: 2,
+        timeoutSeconds: 3600,
+        minPlayers: 2,
+        isPrivate: true,
+        creatorId: String(userId),
+      }) ?? "";
+
     await bot.handleUpdate({
       update_id: 2,
       callback_query: {
@@ -216,7 +242,7 @@ test(
           date: Math.floor(Date.now() / 1000),
           chat: { id: chatId, type: "private" },
         } as any,
-        data: `confirm_game_coinflip_2_2_3600_2_private_${userId}`,
+        data: confirmPayload,
       },
     } as any);
 
@@ -280,6 +306,17 @@ test(
 
     expect(botModule.__test_getPendingGameCreations().size).toBe(0);
 
+    const confirmPayload =
+      encodeGameConfirmPayload({
+        gameType: "coinflip",
+        amount: "3",
+        players: 2,
+        timeoutSeconds: 3600,
+        minPlayers: 2,
+        isPrivate: true,
+        creatorId: String(userId),
+      }) ?? "";
+
     await bot.handleUpdate({
       update_id: 3,
       callback_query: {
@@ -290,7 +327,7 @@ test(
           date: Math.floor(Date.now() / 1000),
           chat: { id: chatId, type: "private" },
         } as any,
-        data: `confirm_game_coinflip_3_2_3600_2_private_${userId}`,
+        data: confirmPayload,
       },
     } as any);
 

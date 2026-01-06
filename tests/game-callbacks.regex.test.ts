@@ -1,70 +1,146 @@
 import { expect, test } from "bun:test";
+import {
+  decodeGameConfirmPayload,
+  decodeMinPlayersChangePayload,
+  decodeAmountSelectionPayload,
+  decodeCustomPlayersPayload,
+  decodePlayersSelectionPayload,
+  decodeTimeoutChangePayload,
+  decodeVisibilityPayload,
+  encodeGameConfirmPayload,
+  encodeAmountSelectionPayload,
+  encodeCustomPlayersPayload,
+  encodeMinPlayersChangePayload,
+  encodePlayersSelectionPayload,
+  encodeTimeoutChangePayload,
+  encodeVisibilityPayload,
+} from "../src/utils/callback-data";
 
-// New formats: decimal-capable amount and creator protection
-const AMOUNT_DECIMAL = '([0-9]+(?:\\.[0-9]+)?)';
-const PLAYERS_NEW_CB = new RegExp(`^players_(coinflip|giveaway)_${AMOUNT_DECIMAL}_(\\d+)_(\\d+)$`);
-const CONFIRM_NEW_CB = new RegExp(
-  `^confirm_game_(coinflip|giveaway)_${AMOUNT_DECIMAL}_(\\d+)_(\\d+)_(\\d+)_(public|private)_(\\d+)$`
-);
-const CONFIRM_VISIBILITY_CB = new RegExp(
-  `^confirm_visibility_(coinflip|giveaway)_${AMOUNT_DECIMAL}_(\\d+)_(public|private)_(\\d+)$`
-);
-const CONFIRM_TIMEOUT_CB = new RegExp(
-  `^confirm_timeout_(coinflip|giveaway)_${AMOUNT_DECIMAL}_(\\d+)_(-?\\d+)_(\\d+)$`
-);
-const CONFIRM_MIN_PLAYERS_CB = new RegExp(
-  `^confirm_min_players_(coinflip|giveaway)_${AMOUNT_DECIMAL}_(\\d+)_(-?\\d+)_(\\d+)$`
-);
+const TELEGRAM_CALLBACK_LIMIT = 64;
 
-test("players callback regex accepts decimals and captures groups", () => {
-  const s = "players_coinflip_150.5_3_12345";
-  const m = s.match(PLAYERS_NEW_CB)!;
-  expect(!!m).toBe(true);
-  expect(m[1]).toBe("coinflip");
-  expect(m[2]).toBe("150.5");
-  expect(m[3]).toBe("3");
-  expect(m[4]).toBe("12345");
+test("confirm callback decoding stays compact and captures values", () => {
+  const encoded =
+    encodeGameConfirmPayload({
+      gameType: "giveaway",
+      amount: "0.75",
+      players: 10,
+      timeoutSeconds: 3600,
+      minPlayers: 1,
+      isPrivate: true,
+      creatorId: "999",
+    }) ?? "";
+  expect(encoded.startsWith("cg|")).toBe(true);
+  expect(Buffer.byteLength(encoded, "utf-8")).toBeLessThanOrEqual(TELEGRAM_CALLBACK_LIMIT);
+  const decoded = decodeGameConfirmPayload(encoded)!;
+  expect(decoded.gameType).toBe("giveaway");
+  expect(decoded.amount).toBe("0.75");
+  expect(decoded.players).toBe(10);
+  expect(decoded.timeoutSeconds).toBe(3600);
+  expect(decoded.minPlayers).toBe(1);
+  expect(decoded.isPrivate).toBe(true);
+  expect(decoded.creatorId).toBe("999");
 });
 
-test("confirm callback regex accepts decimals and captures groups", () => {
-  const s = "confirm_game_giveaway_0.75_10_3600_1_private_999";
-  const m = s.match(CONFIRM_NEW_CB)!;
-  expect(!!m).toBe(true);
-  expect(m[1]).toBe("giveaway");
-  expect(m[2]).toBe("0.75");
-  expect(m[3]).toBe("10");
-  expect(m[4]).toBe("3600");
-  expect(m[5]).toBe("1");
-  expect(m[6]).toBe("private");
-  expect(m[7]).toBe("999");
+test("visibility callback encodes toggle and decodes to target visibility", () => {
+  const encoded =
+    encodeVisibilityPayload({
+      gameType: "coinflip",
+      amount: "1.5",
+      players: 4,
+      isPrivate: false,
+      creatorId: "777",
+    }) ?? "";
+  expect(encoded.startsWith("cv|")).toBe(true);
+  expect(Buffer.byteLength(encoded, "utf-8")).toBeLessThanOrEqual(TELEGRAM_CALLBACK_LIMIT);
+  const decoded = decodeVisibilityPayload(encoded)!;
+  expect(decoded.gameType).toBe("coinflip");
+  expect(decoded.amount).toBe("1.5");
+  expect(decoded.players).toBe(4);
+  expect(decoded.isPrivate).toBe(false);
+  expect(decoded.creatorId).toBe("777");
 });
 
-test("confirm visibility regex captures choice and creator", () => {
-  const s = "confirm_visibility_coinflip_1.5_4_public_777";
-  const m = s.match(CONFIRM_VISIBILITY_CB)!;
-  expect(m[1]).toBe("coinflip");
-  expect(m[2]).toBe("1.5");
-  expect(m[3]).toBe("4");
-  expect(m[4]).toBe("public");
-  expect(m[5]).toBe("777");
+test("timeout callback captures delta minutes", () => {
+  const encoded =
+    encodeTimeoutChangePayload({
+      gameType: "giveaway",
+      amount: "0.25",
+      players: 8,
+      deltaMinutes: -15,
+      creatorId: "999",
+    }) ?? "";
+  expect(encoded.startsWith("ct|")).toBe(true);
+  expect(Buffer.byteLength(encoded, "utf-8")).toBeLessThanOrEqual(TELEGRAM_CALLBACK_LIMIT);
+  const decoded = decodeTimeoutChangePayload(encoded)!;
+  expect(decoded.gameType).toBe("giveaway");
+  expect(decoded.amount).toBe("0.25");
+  expect(decoded.players).toBe(8);
+  expect(decoded.deltaMinutes).toBe(-15);
+  expect(decoded.creatorId).toBe("999");
 });
 
-test("confirm timeout regex captures delta and creator id", () => {
-  const s = "confirm_timeout_giveaway_0.25_8_-15_999";
-  const m = s.match(CONFIRM_TIMEOUT_CB)!;
-  expect(m[1]).toBe("giveaway");
-  expect(m[2]).toBe("0.25");
-  expect(m[3]).toBe("8");
-  expect(m[4]).toBe("-15");
-  expect(m[5]).toBe("999");
+test("min player callback captures deltas", () => {
+  const encoded =
+    encodeMinPlayersChangePayload({
+      gameType: "coinflip",
+      amount: "2",
+      players: 6,
+      deltaPlayers: 1,
+      creatorId: "111",
+    }) ?? "";
+  expect(encoded.startsWith("cm|")).toBe(true);
+  expect(Buffer.byteLength(encoded, "utf-8")).toBeLessThanOrEqual(TELEGRAM_CALLBACK_LIMIT);
+  const decoded = decodeMinPlayersChangePayload(encoded)!;
+  expect(decoded.gameType).toBe("coinflip");
+  expect(decoded.amount).toBe("2");
+  expect(decoded.players).toBe(6);
+  expect(decoded.deltaPlayers).toBe(1);
+  expect(decoded.creatorId).toBe("111");
 });
 
-test("confirm min players regex captures delta and creator id", () => {
-  const s = "confirm_min_players_coinflip_2_6_1_111";
-  const m = s.match(CONFIRM_MIN_PLAYERS_CB)!;
-  expect(m[1]).toBe("coinflip");
-  expect(m[2]).toBe("2");
-  expect(m[3]).toBe("6");
-  expect(m[4]).toBe("1");
-  expect(m[5]).toBe("111");
+test("amount selection callback stays compact", () => {
+  const encoded =
+    encodeAmountSelectionPayload({
+      gameType: "coinflip",
+      amount: "12345.67",
+      creatorId: "12345",
+    }) ?? "";
+  expect(encoded.startsWith("ga|")).toBe(true);
+  expect(Buffer.byteLength(encoded, "utf-8")).toBeLessThanOrEqual(TELEGRAM_CALLBACK_LIMIT);
+  const decoded = decodeAmountSelectionPayload(encoded)!;
+  expect(decoded.gameType).toBe("coinflip");
+  expect(decoded.amount).toBe("12345.67");
+  expect(decoded.creatorId).toBe("12345");
+});
+
+test("player selection callback stays compact", () => {
+  const encoded =
+    encodePlayersSelectionPayload({
+      gameType: "giveaway",
+      amount: "99999.123456",
+      players: 25,
+      creatorId: "abc123",
+    }) ?? "";
+  expect(encoded.startsWith("gp|")).toBe(true);
+  expect(Buffer.byteLength(encoded, "utf-8")).toBeLessThanOrEqual(TELEGRAM_CALLBACK_LIMIT);
+  const decoded = decodePlayersSelectionPayload(encoded)!;
+  expect(decoded.gameType).toBe("giveaway");
+  expect(decoded.amount).toBe("99999.123456");
+  expect(decoded.players).toBe(25);
+  expect(decoded.creatorId).toBe("abc123");
+});
+
+test("custom players callback stays compact", () => {
+  const encoded =
+    encodeCustomPlayersPayload({
+      gameType: "coinflip",
+      amount: "1234567890.5",
+      creatorId: "creator999",
+    }) ?? "";
+  expect(encoded.startsWith("gcp|")).toBe(true);
+  expect(Buffer.byteLength(encoded, "utf-8")).toBeLessThanOrEqual(TELEGRAM_CALLBACK_LIMIT);
+  const decoded = decodeCustomPlayersPayload(encoded)!;
+  expect(decoded.gameType).toBe("coinflip");
+  expect(decoded.amount).toBe("1234567890.5");
+  expect(decoded.creatorId).toBe("creator999");
 });
