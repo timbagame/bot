@@ -1,5 +1,10 @@
 import { expect, test } from "bun:test";
 import { createPlayerSelectionKeyboard, createGameConfirmKeyboard } from "../src/utils/keyboards";
+import {
+  decodeGameConfirmPayload,
+  decodeTimeoutChangePayload,
+  decodeVisibilityPayload,
+} from "../src/utils/callback-data";
 
 // Helper to extract callback_data strings from InlineKeyboard
 function extractCallbacks(kb: any): string[] {
@@ -35,9 +40,39 @@ test("player selection keyboard embeds decimal amount in callbacks when creatorI
 test("game confirm keyboard embeds decimal amount and creatorId", () => {
   const kb = createGameConfirmKeyboard("giveaway", "0.75", "10", "999");
   const callbacks = extractCallbacks(kb);
-  const confirm = callbacks.find(s => s?.startsWith("confirm_game_giveaway_"))!;
+  const confirm = callbacks.find((s) => s?.startsWith("cg|"))!;
   expect(confirm).toBeTruthy();
-  expect(/confirm_game_giveaway_0\.75_10_3600_1_private_999$/.test(confirm)).toBe(true);
-  expect(callbacks.some((s) => s === "confirm_timeout_giveaway_0.75_10_-30_999")).toBe(true);
-  expect(callbacks.some((s) => s === "confirm_visibility_giveaway_0.75_10_public_999")).toBe(true);
+  const decoded = decodeGameConfirmPayload(confirm);
+  expect(decoded).toMatchObject({
+    gameType: "giveaway",
+    amount: "0.75",
+    players: 10,
+    timeoutSeconds: 3600,
+    minPlayers: 1,
+    isPrivate: true,
+    creatorId: "999",
+  });
+  expect(Buffer.byteLength(confirm, "utf-8")).toBeLessThanOrEqual(64);
+  const timeoutChange = callbacks.find((s) => s?.startsWith("ct|"))!;
+  const decodedTimeout = decodeTimeoutChangePayload(timeoutChange);
+  expect(decodedTimeout?.deltaMinutes).toBe(-30);
+  expect(Buffer.byteLength(timeoutChange, "utf-8")).toBeLessThanOrEqual(64);
+  const visibility = callbacks.find((s) => s?.startsWith("cv|"))!;
+  const decodedVisibility = decodeVisibilityPayload(visibility);
+  expect(decodedVisibility?.isPrivate).toBe(false);
+  expect(Buffer.byteLength(visibility, "utf-8")).toBeLessThanOrEqual(64);
+});
+
+test("long inputs still keep confirm callbacks within Telegram limits", () => {
+  const kb = createGameConfirmKeyboard(
+    "coinflip",
+    "12345678901234567890.123456",
+    "25",
+    "123456789012345678901234567890"
+  );
+  const callbacks = extractCallbacks(kb);
+  expect(callbacks.some((cb) => cb.startsWith("cg|"))).toBe(true);
+  expect(
+    callbacks.every((cb) => Buffer.byteLength(cb, "utf-8") <= 64)
+  ).toBe(true);
 });

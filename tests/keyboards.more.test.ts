@@ -11,6 +11,13 @@ import {
   createGameConfirmKeyboard,
   getFeeWarningMessage,
 } from "../src/utils/keyboards";
+import {
+  decodeGameConfirmPayload,
+  decodeAmountSelectionPayload,
+  decodeMinPlayersChangePayload,
+  decodeTimeoutChangePayload,
+  decodeVisibilityPayload,
+} from "../src/utils/callback-data";
 
 // Helper to extract callback_data strings from InlineKeyboard
 function extractCallbacks(kb: any): string[] {
@@ -352,15 +359,37 @@ describe("keyboards: player selection and confirm", () => {
     const kb = createGameConfirmKeyboard("coinflip", "30", "4", "abc");
     const callbacks = extractCallbacks(kb);
     const texts = extractTexts(kb);
-    expect(callbacks).toContain("confirm_game_coinflip_30_4_3600_2_private_abc");
-    expect(callbacks).toContain("amount_coinflip_30_abc");
-    expect(callbacks).toContain("confirm_timeout_coinflip_30_4_-30_abc");
-    expect(callbacks).toContain("confirm_timeout_coinflip_30_4_-15_abc");
-    expect(callbacks).toContain("confirm_timeout_coinflip_30_4_30_abc");
-    expect(callbacks).toContain("confirm_timeout_coinflip_30_4_60_abc");
-    expect(callbacks).toContain("confirm_visibility_coinflip_30_4_public_abc");
-    expect(callbacks).toContain("confirm_min_players_coinflip_30_4_1_abc");
-    expect(callbacks).toContain("confirm_min_players_coinflip_30_4_2_abc");
+    const confirm = callbacks.find((s) => s.startsWith("cg|"))!;
+    const decodedConfirm = decodeGameConfirmPayload(confirm);
+    expect(decodedConfirm).toMatchObject({
+      gameType: "coinflip",
+      amount: "30",
+      players: 4,
+      minPlayers: 2,
+      isPrivate: true,
+      creatorId: "abc",
+    });
+    expect(Buffer.byteLength(confirm, "utf-8")).toBeLessThanOrEqual(64);
+    const backToAmount =
+      callbacks.find((s) => s.startsWith("ga|")) ??
+      callbacks.find((s) => s.startsWith("amount_coinflip_"));
+    const decodedAmountPayload = backToAmount
+      ? decodeAmountSelectionPayload(backToAmount)
+      : null;
+    expect(decodedAmountPayload?.gameType).toBe("coinflip");
+    expect(decodedAmountPayload?.amount).toBe("30");
+    expect(decodedAmountPayload?.creatorId).toBe("abc");
+    const timeoutDeltas = callbacks
+      .filter((s) => s.startsWith("ct|"))
+      .map((s) => decodeTimeoutChangePayload(s)?.deltaMinutes);
+    expect(timeoutDeltas).toEqual(expect.arrayContaining([-30, -15, 30, 60]));
+    const visibility = callbacks.find((s) => s.startsWith("cv|"))!;
+    const decodedVisibility = decodeVisibilityPayload(visibility);
+    expect(decodedVisibility?.isPrivate).toBe(false);
+    const minPlayersDeltas = callbacks
+      .filter((s) => s.startsWith("cm|"))
+      .map((s) => decodeMinPlayersChangePayload(s)?.deltaPlayers);
+    expect(minPlayersDeltas).toEqual(expect.arrayContaining([1, 2]));
     expect(texts).toContain("Min 2");
     expect(texts).toContain("MAX");
   });

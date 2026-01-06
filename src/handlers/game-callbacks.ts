@@ -20,6 +20,13 @@ import {
   resolveAdvancedOptions,
 } from "../utils/game-settings";
 import {
+  decodeGameConfirmPayload,
+  decodeMinPlayersChangePayload,
+  decodeAmountSelectionPayload,
+  decodeTimeoutChangePayload,
+  decodeVisibilityPayload,
+} from "../utils/callback-data";
+import {
   createAmountSelectionKeyboard,
   createPlayerSelectionKeyboard,
   getFeeWarningMessage,
@@ -55,7 +62,11 @@ import type { WalletManager } from "../utils/wallet";
 import type { GameManager } from "../utils/game";
 import type { GameDatabase } from "../utils/game-database";
 import type { WrapCallbackHandler } from "../utils/callback-registry";
-import type { GameSetupCopy, GameSetupModule } from "./game-setup";
+import type {
+  CreatorCallbackContext,
+  GameSetupCopy,
+  GameSetupModule,
+} from "./game-setup";
 import type { Timba } from "../../idl/idlType";
 import {
   createNextGuard,
@@ -129,6 +140,11 @@ const NON_GAME_CALLBACK_PREFIXES = [
   "swap_",
   "wrap_",
   "confirm_",
+  "cg|",
+  "ct|",
+  "cv|",
+  "cm|",
+  "ga|",
   "amount_",
   "players_",
   "cancel_game_",
@@ -931,6 +947,59 @@ export const createGameCallbacksModule = (
     }
   };
 
+  const handleAmountSelection = async (
+    ctx: Context,
+    creatorContext: CreatorCallbackContext,
+    params: { gameType: "coinflip" | "giveaway"; amount: string }
+  ) => {
+    const { gameType, amount } = params;
+    const { session, tokenContext, updateSession, creatorId } = creatorContext;
+
+    const amountNumber = Number(amount);
+    const formattedAmount = amountNumber.toLocaleString("en-US", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: determineFractionDigits(
+        amount,
+        tokenContext.tokenDecimals
+      ),
+    });
+
+    const tokenPriceUSD = await resolveTokenPriceUSDForSetup({
+      tokenMint: tokenContext.tokenMint,
+      tokenTicker: tokenContext.tokenTicker,
+      sessionPrice: session?.tokenPriceUSD,
+    });
+    const usdApproximation = formatUsdApproximation(
+      amountNumber,
+      tokenPriceUSD
+    );
+
+    const playerMessage = buildPlayerSelectionMessage(
+      gameType,
+      formattedAmount,
+      tokenContext.tokenTicker,
+      usdApproximation
+    );
+
+    await respondWithMenu(ctx, {
+      text: playerMessage,
+      parseMode: "HTML",
+      keyboard: createPlayerSelectionKeyboard(gameType, amount, creatorId),
+    });
+
+    updateSession({
+      waitingFor: "setup",
+      gameType,
+      userBalance: session?.userBalance ?? 0,
+      messageId: ctx.callbackQuery?.message?.message_id ?? session?.messageId,
+      chatId: ctx.chat?.id ?? session?.chatId ?? 0,
+      amount,
+      tokenPriceUSD: tokenPriceUSD ?? undefined,
+    });
+
+    await safeAnswerCallbackQuery(ctx);
+  };
+
   const registerHandlers = () => {
     deps.bot.on(
       "callback_query",
@@ -949,61 +1018,44 @@ export const createGameCallbacksModule = (
             resolveCreatorId: (ctx) => ctx.match?.[3],
             failureText: "🚫 Only the game creator can modify this game setup!",
           },
-          async (ctx, { session, tokenContext, updateSession, creatorId }) => {
+          async (ctx, creatorContext) => {
             const gameType = ctx.match![1] as "coinflip" | "giveaway";
             const amount = ctx.match![2] as string;
-
-            const amountNumber = Number(amount);
-            const formattedAmount = amountNumber.toLocaleString("en-US", {
-              minimumFractionDigits: 0,
-              maximumFractionDigits: determineFractionDigits(
-                amount,
-                tokenContext.tokenDecimals
-              ),
-            });
-
-            const tokenPriceUSD = await resolveTokenPriceUSDForSetup({
-              tokenMint: tokenContext.tokenMint,
-              tokenTicker: tokenContext.tokenTicker,
-              sessionPrice: session?.tokenPriceUSD,
-            });
-            const usdApproximation = formatUsdApproximation(
-              amountNumber,
-              tokenPriceUSD
-            );
-
-            const playerMessage = buildPlayerSelectionMessage(
+            await handleAmountSelection(ctx, creatorContext, {
               gameType,
-              formattedAmount,
-              tokenContext.tokenTicker,
-              usdApproximation
-            );
-
-            await respondWithMenu(ctx, {
-              text: playerMessage,
-              parseMode: "HTML",
-              keyboard: createPlayerSelectionKeyboard(
-                gameType,
-                amount,
-                creatorId
-              ),
-            });
-
-            updateSession({
-              waitingFor: "setup",
-              gameType,
-              userBalance: session?.userBalance ?? 0,
-              messageId:
-                ctx.callbackQuery?.message?.message_id ?? session?.messageId,
-              chatId: ctx.chat?.id ?? session?.chatId ?? 0,
               amount,
-              tokenPriceUSD: tokenPriceUSD ?? undefined,
             });
-
-            await safeAnswerCallbackQuery(ctx);
           }
         ),
         { action: "amount", errorAck: "❌ Error selecting amount" }
+      )
+    );
+
+    deps.bot.callbackQuery(
+      /^ga\|/,
+      deps.wrapCallbackHandler(
+        deps.withCreatorContext(
+          {
+            name: "amount_compact",
+            resolveCreatorId: (ctx) =>
+              decodeAmountSelectionPayload(ctx.callbackQuery?.data)?.creatorId,
+            failureText: "🚫 Only the game creator can modify this game setup!",
+          },
+          async (ctx, creatorContext) => {
+            const payload = decodeAmountSelectionPayload(
+              ctx.callbackQuery?.data
+            );
+            if (!payload) {
+              await safeAnswerCallbackQuery(ctx, "❌ Invalid amount selection");
+              return;
+            }
+            await handleAmountSelection(ctx, creatorContext, {
+              gameType: payload.gameType,
+              amount: payload.amount,
+            });
+          }
+        ),
+        { action: "amount_compact", errorAck: "❌ Error selecting amount" }
       )
     );
 
@@ -1077,22 +1129,30 @@ export const createGameCallbacksModule = (
     );
 
     deps.bot.callbackQuery(
-      /^confirm_visibility_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(public|private)_(\d+)$/,
+      /^cv\|/,
       deps.wrapCallbackHandler(
         deps.withCreatorContext(
           {
             name: "confirm_visibility",
-            resolveCreatorId: (ctx) => ctx.match?.[5],
+            resolveCreatorId: (ctx) =>
+              decodeVisibilityPayload(ctx.callbackQuery?.data)?.creatorId,
             failureText:
               "🚫 Only the game creator can adjust visibility!",
           },
           async (ctx, { session, tokenContext, updateSession, creatorId }) => {
-            const gameType = ctx.match![1] as "coinflip" | "giveaway";
-            const amount = ctx.match![2] as string;
-            const players = Number.parseInt(ctx.match![3] as string, 10);
-            const visibilityChoice = ctx.match![4] as "public" | "private";
+            const payload = decodeVisibilityPayload(
+              ctx.callbackQuery?.data
+            );
+            if (!payload) {
+              await safeAnswerCallbackQuery(
+                ctx,
+                "❌ Invalid visibility selection"
+              );
+              return;
+            }
 
-            const isPrivate = visibilityChoice !== "public";
+            const { gameType, amount, players } = payload;
+            const isPrivate = payload.isPrivate;
             const advanced = resolveAdvancedOptionsForContext(
               ctx,
               gameType,
@@ -1149,20 +1209,29 @@ export const createGameCallbacksModule = (
     );
 
     deps.bot.callbackQuery(
-      /^confirm_timeout_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(-?\d+)_([0-9]+)$/,
+      /^ct\|/,
       deps.wrapCallbackHandler(
         deps.withCreatorContext(
           {
             name: "confirm_timeout",
-            resolveCreatorId: (ctx) => ctx.match?.[5],
+            resolveCreatorId: (ctx) =>
+              decodeTimeoutChangePayload(ctx.callbackQuery?.data)?.creatorId,
             failureText:
               "🚫 Only the game creator can set a custom timeout!",
           },
           async (ctx, { session, tokenContext, updateSession, creatorId }) => {
-            const gameType = ctx.match![1] as "coinflip" | "giveaway";
-            const amount = ctx.match![2] as string;
-            const players = Number.parseInt(ctx.match![3] as string, 10);
-            const deltaMinutes = Number.parseInt(ctx.match![4] as string, 10);
+            const payload = decodeTimeoutChangePayload(
+              ctx.callbackQuery?.data
+            );
+            if (!payload) {
+              await safeAnswerCallbackQuery(
+                ctx,
+                "❌ Invalid timeout update"
+              );
+              return;
+            }
+
+            const { gameType, amount, players, deltaMinutes } = payload;
 
             const nextTimeoutSeconds = clampTimeoutSeconds(
               (session?.timeoutSeconds ?? DEFAULT_GAME_TIMEOUT) +
@@ -1225,20 +1294,30 @@ export const createGameCallbacksModule = (
     );
 
     deps.bot.callbackQuery(
-      /^confirm_min_players_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(-?\d+)_([0-9]+)$/,
+      /^cm\|/,
       deps.wrapCallbackHandler(
         deps.withCreatorContext(
           {
             name: "confirm_min_players",
-            resolveCreatorId: (ctx) => ctx.match?.[5],
+            resolveCreatorId: (ctx) =>
+              decodeMinPlayersChangePayload(ctx.callbackQuery?.data)
+                ?.creatorId,
             failureText:
               "🚫 Only the game creator can adjust minimum players!",
           },
           async (ctx, { session, tokenContext, updateSession, creatorId }) => {
-            const gameType = ctx.match![1] as "coinflip" | "giveaway";
-            const amount = ctx.match![2] as string;
-            const players = Number.parseInt(ctx.match![3] as string, 10);
-            const delta = Number.parseInt(ctx.match![4] as string, 10);
+            const payload = decodeMinPlayersChangePayload(
+              ctx.callbackQuery?.data
+            );
+            if (!payload) {
+              await safeAnswerCallbackQuery(
+                ctx,
+                "❌ Invalid minimum player update"
+              );
+              return;
+            }
+
+            const { gameType, amount, players, deltaPlayers: delta } = payload;
 
             const minPlayersFloor = getMinPlayersFloor(gameType);
             const currentMinPlayers = clampMinPlayers(
@@ -1313,32 +1392,39 @@ export const createGameCallbacksModule = (
     );
 
     deps.bot.callbackQuery(
-      /^confirm_game_(coinflip|giveaway)_([0-9]+(?:\.[0-9]+)?)_(\d+)_(\d+)_(\d+)_(public|private)_(\d+)$/,
+      /^cg\|/,
       deps.withCreatorContext(
         {
           name: "confirm_game",
-          resolveCreatorId: (ctx) => ctx.match?.[7],
+          resolveCreatorId: (ctx) =>
+            decodeGameConfirmPayload(ctx.callbackQuery?.data)?.creatorId,
           failureText: "❌ Only the game creator can confirm this setup!",
         },
         async (ctx, { tokenContext, clearSession, creatorId }) => {
           try {
+            const payload = decodeGameConfirmPayload(ctx.callbackQuery?.data);
+            if (!payload) {
+              await safeAnswerCallbackQuery(
+                ctx,
+                "❌ Invalid confirmation payload"
+              );
+              return;
+            }
+
             const gameManager = getGameManager();
-            const gameType = ctx.match![1] as "coinflip" | "giveaway";
-            const amount = Number.parseFloat(ctx.match![2]!);
-            const players = Number.parseInt(ctx.match![3]!, 10);
-            const timeoutSeconds = clampTimeoutSeconds(
-              Number.parseInt(ctx.match![4]!, 10)
-            );
+            const gameType = payload.gameType;
+            const amount = Number.parseFloat(payload.amount);
+            const players = payload.players;
+            const timeoutSeconds = clampTimeoutSeconds(payload.timeoutSeconds);
             const minPlayersSelected = clampMinPlayers(
               gameType,
-              Number.parseInt(ctx.match![5]!, 10),
+              payload.minPlayers,
               players,
               deps.getOracleMaxPlayers()
             );
-            const visibility = ctx.match![6] as "public" | "private";
             // Force public visibility for DM-created games
             const isFromDM = ctx.chat?.type === "private";
-            const isPrivate = isFromDM ? false : visibility !== "public";
+            const isPrivate = isFromDM ? false : payload.isPrivate;
 
             if (Number.isNaN(amount) || Number.isNaN(players)) {
               await safeAnswerCallbackQuery(ctx, "Invalid game configuration");
