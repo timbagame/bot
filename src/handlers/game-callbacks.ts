@@ -417,6 +417,19 @@ export const createGameCallbacksModule = (
               updateError
             );
           }
+        } else if (errorMessage.toLowerCase().includes("already joined")) {
+          try {
+            await gameManager.updateGameMessageFromData(
+              ctx,
+              game.game_address,
+              "Active"
+            );
+          } catch (updateError) {
+            console.warn(
+              `Error recreating missing game message for ${game.game_address} after duplicate join:`,
+              updateError
+            );
+          }
         }
 
         await safeAnswerCallbackQuery(ctx, errorMessage);

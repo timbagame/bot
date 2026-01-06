@@ -152,4 +152,46 @@ describe("Game Join Message Recreation", () => {
     // Should NOT have called createGameMessage
     expect(gameManager.createGameMessage).not.toHaveBeenCalled();
   });
+
+  test("updates game message when joiner is already in the game", async () => {
+    const { module, gameManager } = makeDeps();
+    const ctx = makeCtx("@joiner");
+    ctx.chat = { id: 999, type: "supergroup" } as any;
+    ctx.api.answerCallbackQuery = vi.fn();
+
+    const gameAddress = "game-addr-3";
+    const gamePda = new PublicKey(Keypair.generate().publicKey);
+
+    const activeMap = new Map();
+    activeMap.set(999, { messageId: 77, chatId: 999 });
+    (gameManager.getActiveGameMessages as any).mockReturnValue(activeMap);
+
+    (gameManager.joinGame as any).mockResolvedValue({
+      success: false,
+      error: "You have already joined this game!",
+    });
+
+    await module.__test_handleJoinGame(
+      ctx as unknown as Context,
+      gamePda,
+      456n,
+      {
+        game_address: gameAddress,
+        status: "active",
+        chat_id: 999,
+        amount: 50,
+        game_type: "coinflip",
+        token_ticker: "TOK",
+      }
+    );
+
+    expect(gameManager.updateGameMessageFromData).toHaveBeenCalledWith(
+      ctx,
+      gameAddress,
+      "Active"
+    );
+    expect(ctx.api.answerCallbackQuery).toHaveBeenCalledWith("q", {
+      text: "You have already joined this game!",
+    });
+  });
 });
