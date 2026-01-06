@@ -2,6 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { Keypair } from "@solana/web3.js";
 
 import { SwapManager } from "../src/utils/swap-manager";
+import {
+  JIT_SWAP_SOL_USD_THRESHOLD,
+  LAMPORTS_PER_SOL,
+} from "../src/utils/constants";
 import type { WalletManager } from "../src/utils/wallet";
 
 type FeeBudgetStub = {
@@ -43,12 +47,13 @@ const defaultFeeBudget: FeeBudgetStub = {
 const createSwapManager = (
   connection: any,
   wallet: WalletManager,
-  feeBudget: FeeBudgetStub = defaultFeeBudget
+  feeBudget: FeeBudgetStub = defaultFeeBudget,
+  solPriceUsd = 0
 ) =>
   new SwapManager(connection as any, wallet, feeBudget as any, {
     priceResolver: async () =>
       ({
-        price: 0,
+        price: solPriceUsd,
         resolvedAt: Date.now(),
       } as any),
   });
@@ -298,7 +303,6 @@ describe("SwapManager JIT helpers", () => {
     const tokenDecimals = 6;
     const availableTokenAmountRaw = 10_000_000; // 10 tokens
     const shortfallLamports = 3_000_000; // 0.003 SOL
-    const LAMPORTS_PER_SOL = 1_000_000_000;
 
     const tokenAmount = availableTokenAmountRaw / Math.pow(10, tokenDecimals);
     const tradeUsd = tokenAmount * tokenPrice; // 10 * 0.10 = $1.00
@@ -323,7 +327,6 @@ describe("SwapManager JIT helpers", () => {
     // Test different shortfall scenarios to verify fee scaling
     const baseFeeBps = 85;
     const maxExtraBps = 100;
-    const LAMPORTS_PER_SOL = 1_000_000_000;
 
     // Scenario 1: Large trade, small shortfall = low extra fee
     const scenario1 = (() => {
@@ -356,5 +359,27 @@ describe("SwapManager JIT helpers", () => {
     expect(scenario2.deficitUsd).toBeCloseTo(0.75);
     expect(scenario2.rawExtraBps).toBe(15000); // 150% extra (uncapped)
     expect(scenario2.fee).toBe(185); // 85 + 100 (capped)
+  });
+
+  test("computeTargets skips JIT when SOL balance exceeds USD threshold", async () => {
+    const user = Keypair.generate();
+    const connection = createConnection(2 * LAMPORTS_PER_SOL);
+    const wallet = createWallet(connection, null);
+    const manager = createSwapManager(connection, wallet, defaultFeeBudget, 10);
+
+    const desiredLamports = 6 * LAMPORTS_PER_SOL; // Larger than current lamports to ensure USD check is used
+
+    const result = await (manager as any).computeTargets({
+      userKeypair: user,
+      availableTokenAmountRaw: 0,
+      desiredLamports,
+      tokenTicker: "SOL",
+    });
+
+    expect(result.ok).toBeTrue();
+    expect(result.value.status).toBe("satisfied");
+    expect(result.value.currentLamports).toBe(2 * LAMPORTS_PER_SOL);
+    expect(result.value.targetLamports).toBe(desiredLamports);
+    expect(JIT_SWAP_SOL_USD_THRESHOLD).toBeGreaterThan(0);
   });
 });
