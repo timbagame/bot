@@ -174,6 +174,7 @@ describe("sweeping tokens to SOL", () => {
     const wallet = {
       getAdminKeypair: () => admin,
       getTokenMetadata: async () => ({ decimals: 9 }),
+      formatSolBalance: (lamports: number | bigint | string) => `${lamports}`,
     } as any;
 
     const balances: Record<string, bigint> = {
@@ -223,6 +224,7 @@ describe("sweeping tokens to SOL", () => {
     const wallet = {
       getAdminKeypair: () => admin,
       getTokenMetadata: async () => ({ decimals: 9 }),
+      formatSolBalance: (lamports: number | bigint | string) => `${lamports}`,
     } as any;
 
     const swapRequests: SwapRequest[] = [];
@@ -241,6 +243,44 @@ describe("sweeping tokens to SOL", () => {
     await __test_sweepTokensToSol(
       wallet,
       { getBalance: async () => 0 } as any,
+      tokens,
+      swapManagerFactory,
+      15,
+      priceResolver as any,
+      balanceFetcher
+    );
+
+    expect(swapRequests).toHaveLength(0);
+  });
+
+  test("skips swaps when SOL balance meets USD threshold", async () => {
+    const admin = Keypair.generate();
+    const tokens = [
+      { mint: Keypair.generate().publicKey.toBase58(), ticker: "AAA" },
+    ];
+
+    const wallet = {
+      getAdminKeypair: () => admin,
+      getTokenMetadata: async () => ({ decimals: 9 }),
+      formatSolBalance: (lamports: number | bigint | string) => `${lamports}`,
+    } as any;
+
+    const swapRequests: SwapRequest[] = [];
+    const swapManagerFactory = () => ({
+      getQuote: async (request: SwapRequest) => ({ request } as any),
+      executeJupiterSwap: async (request: SwapRequest) => {
+        swapRequests.push(request);
+        return "sig";
+      },
+    });
+
+    const priceResolver = async (request: { isSol?: boolean }) =>
+      request.isSol ? { price: 30, identifier: "SOL", resolvedAt: Date.now() } : { price: 1, identifier: "AAA", resolvedAt: Date.now() };
+    const balanceFetcher = async () => 6_000_000_000n;
+
+    await __test_sweepTokensToSol(
+      wallet,
+      { getBalance: async () => 1_000_000_000 } as any,
       tokens,
       swapManagerFactory,
       15,
@@ -483,6 +523,7 @@ describe("sweepFees integration hooks", () => {
   const admin = Keypair.generate();
   const wallet = {
     getAdminKeypair: () => admin,
+    formatSolBalance: (lamports: number | bigint | string) => `${lamports}`,
   } as any;
 
   const tokens = [
@@ -535,6 +576,33 @@ describe("sweepFees integration hooks", () => {
     expect(referralClaims).toBe(2);
     expect(withdrawn).toEqual(["AAA", "BBB"]);
     expect(swapRuns).toBe(1);
+  });
+
+  test("skips swaps when SOL balance exceeds threshold", async () => {
+    let swapRuns = 0;
+
+    await sweepFees({
+      walletManager: wallet,
+      tokenConfigs: tokens,
+      referralEntries: [],
+      solUsdThreshold: 15,
+      priceResolver: async () => ({
+        price: 30,
+        identifier: "SOL",
+        resolvedAt: Date.now(),
+      }),
+      contextFactory: (() => ({
+        provider: { connection: { getBalance: async () => 1_000_000_000 } },
+        program: { programId: { toBase58: () => "test-program" } },
+      })) as any,
+      tokenFeeProcessor: async () => true,
+      referralSweeper: async () => 0,
+      tokenToSolSweeper: async () => {
+        swapRuns += 1;
+      },
+    });
+
+    expect(swapRuns).toBe(0);
   });
 
   test("can disable swaps explicitly", async () => {
