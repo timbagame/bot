@@ -23,6 +23,10 @@ import {
 import { resolvePrimaryRpcEndpoint } from "../utils/rpc-endpoints";
 import { getUsdPrice } from "../utils/price-service";
 import {
+  FEE_SWEEP_SOL_USD_THRESHOLD,
+  LAMPORTS_PER_SOL,
+} from "../utils/constants";
+import {
   bundleFromKeypair,
   resolveOracleOperatorBundle,
   uniqueSigners,
@@ -38,6 +42,7 @@ export interface FeeSweepOptions {
   tokenConfigs?: TokenConfig[];
   referralEntries?: ReferralTokenConfigEntry[];
   enableSwapToSol?: boolean;
+  solUsdThreshold?: number;
   swapManagerFactory?: (
     connection: Connection,
     wallet: WalletManager
@@ -64,6 +69,56 @@ type TokenBalanceFetcher = (
 
 const MIN_USD_THRESHOLD = 5;
 const SOL_DECIMALS = 9;
+
+const getSolBalanceUsdValue = async (
+  connection: Connection,
+  owner: PublicKey,
+  priceResolver: PriceResolver = getUsdPrice
+) => {
+  const [lamports, solPriceData] = await Promise.all([
+    connection.getBalance(owner),
+    priceResolver({ isSol: true }),
+  ]);
+  const solPrice = solPriceData?.price ?? 0;
+  const usdValue =
+    lamports > 0 && solPrice > 0
+      ? (lamports / LAMPORTS_PER_SOL) * solPrice
+      : 0;
+  return { lamports, usdValue, solPrice };
+};
+
+const shouldSkipTokenToSolSweeps = async (options: {
+  connection: Connection;
+  wallet: WalletManager;
+  owner: PublicKey;
+  solUsdThreshold: number;
+  priceResolver?: PriceResolver;
+}): Promise<boolean> => {
+  const { connection, wallet, owner, solUsdThreshold, priceResolver } = options;
+  const { lamports, usdValue, solPrice } = await getSolBalanceUsdValue(
+    connection,
+    owner,
+    priceResolver
+  );
+
+  if (solPrice <= 0) {
+    console.warn(
+      "⚠️  Unable to resolve SOL price; skipping token-to-SOL sweeps."
+    );
+    return true;
+  }
+
+  if (usdValue >= solUsdThreshold) {
+    console.log(
+      `ℹ️  SOL balance ${wallet.formatSolBalance(
+        lamports
+      )} ≈ $${usdValue.toFixed(2)} (>= $${solUsdThreshold}); skipping token-to-SOL sweeps.`
+    );
+    return true;
+  }
+
+  return false;
+};
 
 const shouldWithdrawToken = async (
   wallet: WalletManager,
@@ -399,6 +454,7 @@ async function sweepTokensToSol(
   connection: Connection,
   tokens: TokenConfig[],
   swapManagerFactory: Required<FeeSweepOptions>["swapManagerFactory"],
+  solUsdThreshold: number,
   priceResolver: PriceResolver = getUsdPrice,
   balanceFetcher: TokenBalanceFetcher = getTotalTokenBalanceLamports
 ) {
@@ -410,6 +466,17 @@ async function sweepTokensToSol(
 
   if (sweepableTokens.length === 0) {
     console.log("ℹ️  No sweepable tokens configured; skipping swaps.");
+    return;
+  }
+
+  const shouldSkip = await shouldSkipTokenToSolSweeps({
+    connection,
+    wallet,
+    owner: admin.publicKey,
+    solUsdThreshold,
+    priceResolver,
+  });
+  if (shouldSkip) {
     return;
   }
 
@@ -497,6 +564,12 @@ export const sweepFees = async (
   const referralSweeper = options.referralSweeper ?? runReferralSweep;
   const tokenToSolSweeper = options.tokenToSolSweeper ?? sweepTokensToSol;
   const contextFactory = options.contextFactory ?? createAnchorContext;
+  const solUsdThreshold =
+    typeof options.solUsdThreshold === "number" &&
+    Number.isFinite(options.solUsdThreshold) &&
+    options.solUsdThreshold > 0
+      ? options.solUsdThreshold
+      : FEE_SWEEP_SOL_USD_THRESHOLD;
 
   const { provider, program } = contextFactory(adminBundle.root, {
     rpcUrl,
@@ -537,22 +610,32 @@ export const sweepFees = async (
 
   if (enableSwapToSol) {
     try {
-      await tokenToSolSweeper(
-        wallet,
+      const shouldSkip = await shouldSkipTokenToSolSweeps({
         connection,
-        tokens,
-        swapManagerFactory,
-        priceResolver,
-        balanceFetcher
-      );
-      await unwrapWsolBalance(
         wallet,
-        connection,
-        adminBundle.root.publicKey,
-        adminBundle.root,
+        owner: adminBundle.root.publicKey,
+        solUsdThreshold,
         priceResolver,
-        balanceFetcher
-      );
+      });
+      if (!shouldSkip) {
+        await tokenToSolSweeper(
+          wallet,
+          connection,
+          tokens,
+          swapManagerFactory,
+          solUsdThreshold,
+          priceResolver,
+          balanceFetcher
+        );
+        await unwrapWsolBalance(
+          wallet,
+          connection,
+          adminBundle.root.publicKey,
+          adminBundle.root,
+          priceResolver,
+          balanceFetcher
+        );
+      }
     } catch (error) {
       console.error("❌ Failed to sweep tokens to SOL:", error);
     }

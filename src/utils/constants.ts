@@ -102,6 +102,10 @@ export const ENABLE_FEE_SWEEPER = (() => {
   const normalized = raw.trim().toLowerCase();
   return normalized === "true" || normalized === "1";
 })();
+export const FEE_SWEEP_SOL_USD_THRESHOLD = parsePositiveDuration(
+  "FEE_SWEEP_SOL_USD_THRESHOLD",
+  15
+);
 
 // ================================
 // CACHE DURATIONS (in milliseconds)
