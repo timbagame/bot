@@ -203,14 +203,52 @@ describe("sweeping tokens to SOL", () => {
 
     await __test_sweepTokensToSol(
       wallet,
-      {} as any,
+      { getBalance: async () => 0 } as any,
       tokens,
       swapManagerFactory,
+      15,
       priceResolver,
       balanceFetcher
     );
 
     expect(swapRequests.map((r) => r.inputMint)).toEqual([tokenA.mint]);
+  });
+
+  test("skips swaps when SOL price is unavailable", async () => {
+    const admin = Keypair.generate();
+    const tokens = [
+      { mint: Keypair.generate().publicKey.toBase58(), ticker: "AAA" },
+    ];
+
+    const wallet = {
+      getAdminKeypair: () => admin,
+      getTokenMetadata: async () => ({ decimals: 9 }),
+    } as any;
+
+    const swapRequests: SwapRequest[] = [];
+    const swapManagerFactory = () => ({
+      getQuote: async (request: SwapRequest) => ({ request } as any),
+      executeJupiterSwap: async (request: SwapRequest) => {
+        swapRequests.push(request);
+        return "sig";
+      },
+    });
+
+    const priceResolver = async (request: { isSol?: boolean }) =>
+      request.isSol ? null : { price: 1, identifier: "AAA", resolvedAt: Date.now() };
+    const balanceFetcher = async () => 6_000_000_000n;
+
+    await __test_sweepTokensToSol(
+      wallet,
+      { getBalance: async () => 0 } as any,
+      tokens,
+      swapManagerFactory,
+      15,
+      priceResolver as any,
+      balanceFetcher
+    );
+
+    expect(swapRequests).toHaveLength(0);
   });
 });
 
@@ -453,7 +491,7 @@ describe("sweepFees integration hooks", () => {
   ];
 
   const fakeContext = () => ({
-    provider: { connection: {} },
+    provider: { connection: { getBalance: async () => 0 } },
     program: { programId: { toBase58: () => "test-program" } },
   });
 
@@ -466,6 +504,11 @@ describe("sweepFees integration hooks", () => {
       walletManager: wallet,
       tokenConfigs: tokens,
       referralEntries: [],
+      priceResolver: async () => ({
+        price: 1,
+        identifier: "SOL",
+        resolvedAt: Date.now(),
+      }),
       contextFactory: fakeContext as any,
       tokenFeeProcessor: async (
         _program,

@@ -103,9 +103,9 @@ const shouldSkipTokenToSolSweeps = async (options: {
 
   if (solPrice <= 0) {
     console.warn(
-      "⚠️  Unable to resolve SOL price; proceeding with token-to-SOL sweeps."
+      "⚠️  Unable to resolve SOL price; skipping token-to-SOL sweeps."
     );
-    return false;
+    return true;
   }
 
   if (usdValue >= solUsdThreshold) {
