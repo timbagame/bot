@@ -197,4 +197,63 @@ describe("GameManager Public Games", () => {
     expect(filteredGames).toHaveLength(1);
     expect(filteredGames[0].game_address).toBe(activeGame.toBase58());
   });
+
+  test("getAllActivePublicGames orders by soonest expiry", async () => {
+    const soonGame = Keypair.generate().publicKey;
+    const laterGame = Keypair.generate().publicKey;
+    const noExpiryGame = Keypair.generate().publicKey;
+    const tokenMint = Keypair.generate().publicKey;
+    const now = Math.floor(Date.now() / 1000);
+
+    const mockGames = [
+      {
+        publicKey: noExpiryGame,
+        account: {
+          isPrivate: false,
+          gameType: { coinflip: {} },
+          ticketAmount: 3000,
+          tokenMint,
+          createdAt: now,
+          timeout: 0,
+        },
+      },
+      {
+        publicKey: laterGame,
+        account: {
+          isPrivate: false,
+          gameType: { coinflip: {} },
+          ticketAmount: 2000,
+          tokenMint,
+          createdAt: now,
+          timeout: 3600,
+        },
+      },
+      {
+        publicKey: soonGame,
+        account: {
+          isPrivate: false,
+          gameType: { coinflip: {} },
+          ticketAmount: 1000,
+          tokenMint,
+          createdAt: now,
+          timeout: 600,
+        },
+      },
+    ];
+
+    mockProgram.account.game.all.mockResolvedValue(mockGames);
+    mockWallet.getTokenMetadata.mockResolvedValue({ symbol: "TEST" });
+
+    const formatSpy = vi.spyOn(gameManager as any, "formatActiveGamesList");
+    formatSpy.mockImplementation((_ctx: any, games: any) => games);
+
+    await gameManager.getAllActivePublicGames({} as any);
+
+    const filteredGames = formatSpy.mock.calls[0]![1] as any[];
+    expect(filteredGames.map((game) => game.game_address)).toEqual([
+      soonGame.toBase58(),
+      laterGame.toBase58(),
+      noExpiryGame.toBase58(),
+    ]);
+  });
 });

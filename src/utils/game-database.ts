@@ -920,7 +920,10 @@ export class GameDatabase extends BaseDatabase {
       `
         SELECT g.* FROM games g
         WHERE g.status = 'active' AND g.chat_id = ?
-        ORDER BY g.created_at DESC
+        ORDER BY
+          CASE WHEN g.expires_at IS NULL THEN 1 ELSE 0 END ASC,
+          g.expires_at ASC,
+          g.created_at ASC
       `,
       [chatId],
       "getting active games by chat"
@@ -932,7 +935,10 @@ export class GameDatabase extends BaseDatabase {
       `
         SELECT g.* FROM games g
         WHERE g.status = 'active' AND g.chat_id < 0
-        ORDER BY g.created_at DESC
+        ORDER BY
+          CASE WHEN g.expires_at IS NULL THEN 1 ELSE 0 END ASC,
+          g.expires_at ASC,
+          g.created_at ASC
       `,
       [],
       "getting all active public games"
