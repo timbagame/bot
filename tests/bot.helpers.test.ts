@@ -1419,4 +1419,52 @@ describe("createGameViaCommand helper", () => {
     const optionsArg = createCalls[0][6];
     expect(optionsArg).toEqual({ isPrivate: false });
   });
+
+  test("defaults to public games when chat privacy is unset", async () => {
+    const ctx: any = makeCtx();
+    const createCalls: any[] = [];
+
+    const moduleDeps = {
+      getChatGameSettings: () => ({}),
+      getOracleMaxPlayers: () => 100,
+      parseAmount: () => {},
+      inferMaxPlayers: () => {},
+      wallet: {},
+      getContractMinimumAmount: () => {},
+      gameManager: {},
+      isGroupChat: () => true,
+      startInteractiveGameSetup: () => {},
+      resolveCommandTokenOverride: () => {},
+      getRequiredTelegramIdForContext: () => {},
+      gameSetupCopy: { coinflip: {}, giveaway: {} },
+    } as any;
+
+    const module = createGameCommandsModule(moduleDeps);
+
+    const deps = makeDeps({
+      gameManager: {
+        createGame: async (...args) => {
+          createCalls.push(args);
+          return {
+            success: true,
+            gameAddress: "ADDR",
+            autoJoinResult: { success: true },
+          };
+        },
+        createGameMessage: async () => 99,
+      },
+    });
+
+    await module.createGameViaCommand(
+      ctx,
+      ["/cf", "5"],
+      1n,
+      module.COINFLIP_COMMAND_OPTIONS,
+      deps
+    );
+
+    expect(createCalls.length).toBe(1);
+    const optionsArg = createCalls[0][6];
+    expect(optionsArg).toEqual({ isPrivate: false });
+  });
 });

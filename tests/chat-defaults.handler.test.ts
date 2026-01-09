@@ -477,8 +477,8 @@ describe("chat defaults module", () => {
 
     const settingsClear = chatDb.getChatGameSettings(99);
     expect(settingsClear?.coinflip_default_privacy).toBeNull();
-    // Default is Private (bot default)
-    expect(lastMenu.text).toContain("Coinflip privacy: Private 🔒 (bot default)");
+    // Default is Public (bot default)
+    expect(lastMenu.text).toContain("Coinflip privacy: Public 🌍 (bot default)");
 
     // 5. Test Giveaway Privacy (briefly)
     ctx.callbackQuery.data = "chat_defaults_privacy_giveaway";
