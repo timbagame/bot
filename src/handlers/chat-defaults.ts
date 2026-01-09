@@ -156,7 +156,9 @@ const buildSettingsSummary = async (
   );
 
   const coinflipPrivacy = chatSettings?.coinflip_default_privacy;
-  const isCoinflipPrivate = coinflipPrivacy !== "public";
+  const isCoinflipPrivate = coinflipPrivacy
+    ? coinflipPrivacy !== "public"
+    : false;
   const coinflipSuffix = coinflipPrivacy ? "(chat default)" : "(bot default)";
   const coinflipPrivacyLine = `👁️ Coinflip privacy: ${isCoinflipPrivate ? "Private 🔒" : "Public 🌍"} ${coinflipSuffix}`;
 

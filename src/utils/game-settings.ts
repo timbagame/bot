@@ -79,8 +79,12 @@ export const resolveGamePrivacy = (
       ? chatSettings?.coinflip_default_privacy
       : chatSettings?.giveaway_default_privacy;
 
-  // Default to private if not explicitly public
-  return specificPrivacy !== "public";
+  if (specificPrivacy) {
+    return specificPrivacy !== "public";
+  }
+
+  // Coinflips default to public, giveaways default to private.
+  return gameType !== "coinflip";
 };
 
 // ================================
