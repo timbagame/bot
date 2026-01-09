@@ -133,6 +133,93 @@ test("saveGameMessage preserves origin chat_id when message created in different
   expect(messages.some((m) => m.chatId === differentChatId && m.messageId === 999)).toBe(true);
 });
 
+test("GameDatabase orders active game listings by earliest expiration first", () => {
+  const db = GameDatabase.getInstance();
+  const now = Date.now();
+  const chatId = 123;
+  const publicChatId = -999;
+
+  db.saveGame(
+    "gameSoon",
+    "creator_1",
+    100,
+    "coinflip",
+    "mint",
+    "TOK",
+    4,
+    2,
+    chatId,
+    undefined,
+    now + 10_000
+  );
+  db.saveGame(
+    "gameLater",
+    "creator_2",
+    200,
+    "coinflip",
+    "mint",
+    "TOK",
+    4,
+    2,
+    chatId,
+    undefined,
+    now + 20_000
+  );
+  db.saveGame("gameNoExpiry", "creator_3", 300, "coinflip", "mint", "TOK", 4, 2, chatId);
+
+  const activeInChat = db.getActiveGamesByChat(chatId);
+  expect(activeInChat.map((game) => game.game_address)).toEqual([
+    "gameSoon",
+    "gameLater",
+    "gameNoExpiry",
+  ]);
+
+  db.saveGame(
+    "publicSoon",
+    "creator_4",
+    400,
+    "coinflip",
+    "mint",
+    "TOK",
+    4,
+    2,
+    publicChatId,
+    undefined,
+    now + 5_000
+  );
+  db.saveGame(
+    "publicLater",
+    "creator_5",
+    500,
+    "coinflip",
+    "mint",
+    "TOK",
+    4,
+    2,
+    publicChatId,
+    undefined,
+    now + 15_000
+  );
+  db.saveGame(
+    "publicNoExpiry",
+    "creator_6",
+    600,
+    "coinflip",
+    "mint",
+    "TOK",
+    4,
+    2,
+    publicChatId
+  );
+
+  const activePublic = db.getAllActivePublicGames();
+  expect(activePublic.map((game) => game.game_address)).toEqual([
+    "publicSoon",
+    "publicLater",
+    "publicNoExpiry",
+  ]);
+});
+
 test("updateGameLastSlotWithTimestamp accepts equal timestamp updates", () => {
   const db = GameDatabase.getInstance();
 
