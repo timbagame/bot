@@ -6057,6 +6057,28 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       return true;
     });
 
+    const getExpiryTimestamp = (account: any): number => {
+      const createdAt = Number(account?.createdAt ?? 0);
+      const timeout = Number(account?.timeout ?? 0);
+      if (Number.isFinite(createdAt) && Number.isFinite(timeout) && timeout > 0) {
+        return createdAt + timeout;
+      }
+
+      return Number.POSITIVE_INFINITY;
+    };
+
+    publicGames.sort((left, right) => {
+      const leftExpiry = getExpiryTimestamp(left.account);
+      const rightExpiry = getExpiryTimestamp(right.account);
+      if (leftExpiry !== rightExpiry) {
+        return leftExpiry - rightExpiry;
+      }
+
+      const leftCreatedAt = Number(left.account?.createdAt ?? 0);
+      const rightCreatedAt = Number(right.account?.createdAt ?? 0);
+      return leftCreatedAt - rightCreatedAt;
+    });
+
     // Map to GameData-like structure
     const activeGamesData = await Promise.all(
       publicGames.map(async (game) => {
