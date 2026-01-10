@@ -17,14 +17,14 @@ export async function detectTokenProgram(
   connection: AccountInfoLoader,
   mint: string | PublicKey,
   preloadedAccountInfo?: AccountInfoLike | null
-): Promise<TokenProgramDetection> {
+): Promise<TokenProgramDetection | null> {
   try {
     const mintKey = typeof mint === "string" ? new PublicKey(mint) : mint;
     const accountInfo =
       preloadedAccountInfo ?? ((await connection.getAccountInfo(mintKey)) as AccountInfoLike | null);
 
     if (!accountInfo) {
-      throw new Error(`Token mint ${mintKey.toBase58()} was not found`);
+      return null;
     }
 
     if (!accountInfo.owner) {
@@ -58,6 +58,18 @@ export async function detectTokenProgram(
     };
   } catch (error) {
     const mintAddress = typeof mint === "string" ? mint : mint.toBase58();
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+        ? error
+        : "";
+    if (
+      message.toLowerCase().includes("could not find account") ||
+      message.toLowerCase().includes("not found")
+    ) {
+      return null;
+    }
     console.log(`Error checking token program for ${mintAddress}:`, error);
     throw error;
   }

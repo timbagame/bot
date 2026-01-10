@@ -40,6 +40,7 @@ import {
   TRANSACTION_RESUBMIT_ATTEMPTS,
   TOKEN_DISCOVERY_COOLDOWN_MS,
   WALLET_RPC_CACHE_TTL_MS,
+  TOKEN_MINT_NOT_FOUND_LOG_COOLDOWN_MS,
 } from "./constants";
 import { formatAmount } from "./format-amount";
 import { WSOL_MINT } from "./token-registry";
@@ -265,7 +266,8 @@ export class WalletManager {
   private postTimeoutProbeMaxAttempts = 3;
   private confirmationTimeoutMs = CONFIRMATION_TIMEOUT_MS;
   private signaturePollIntervalMs = 1000;
-  private mintProgramCache = new Map<string, TokenProgramDetection>();
+  private mintProgramCache = new Map<string, TokenProgramDetection | null>();
+  private missingMintWarnings = new Map<string, number>();
   private nativeBalanceCache = createExpiringCache<number>(
     WALLET_RPC_CACHE_TTL_MS
   );
@@ -547,17 +549,32 @@ export class WalletManager {
 
   private async resolveTokenProgram(
     mint: PublicKey | string
-  ): Promise<TokenProgramDetection> {
+  ): Promise<TokenProgramDetection | null> {
     const mintKey = typeof mint === "string" ? new PublicKey(mint) : mint;
     const cacheKey = mintKey.toBase58();
     const cached = this.mintProgramCache.get(cacheKey);
-    if (cached) {
+    if (cached !== undefined) {
       return cached;
     }
 
     const detection = await detectTokenProgram(this.connection, mintKey);
+    if (!detection) {
+      this.logMissingMintWarning(cacheKey);
+      this.mintProgramCache.set(cacheKey, null);
+      return null;
+    }
     this.mintProgramCache.set(cacheKey, detection);
     return detection;
+  }
+
+  private logMissingMintWarning(mint: string): void {
+    const now = this.timeNow?.() ?? Date.now();
+    const lastWarned = this.missingMintWarnings.get(mint) ?? 0;
+    if (now - lastWarned < TOKEN_MINT_NOT_FOUND_LOG_COOLDOWN_MS) {
+      return;
+    }
+    this.missingMintWarnings.set(mint, now);
+    console.warn(`⚠️ Unsupported token mint detected: ${mint}`);
   }
 
   private isMissingTokenAccountError(error: unknown): boolean {
@@ -728,7 +745,11 @@ export class WalletManager {
     await this.throttle();
     const pubkey = this.getPublicKey(telegramId);
     const mintPubkey = new PublicKey(tokenMint);
-    const { programId } = await this.resolveTokenProgram(mintPubkey);
+    const programDetection = await this.resolveTokenProgram(mintPubkey);
+    if (!programDetection) {
+      return 0;
+    }
+    const { programId } = programDetection;
     const ata = await getAssociatedTokenAddress(
       mintPubkey,
       pubkey,
@@ -758,8 +779,13 @@ export class WalletManager {
           const payer = this.getKeyPair(telegramId);
 
           try {
-            const { programId: refreshedProgramId } =
-              await this.resolveTokenProgram(mintPubkey);
+            const refreshedDetection = await this.resolveTokenProgram(
+              mintPubkey
+            );
+            if (!refreshedDetection) {
+              return 0;
+            }
+            const { programId: refreshedProgramId } = refreshedDetection;
             const { instructions } =
               await this.findOrCreateAssociatedTokenAccount(
                 pubkey,
@@ -943,7 +969,7 @@ export class WalletManager {
         try {
           const mintKey = new PublicKey(token.token_mint);
           const hintedProgram = token.token_program_id;
-          let programDetection: TokenProgramDetection;
+          let programDetection: TokenProgramDetection | null;
 
           if (hintedProgram) {
             const hintedId = new PublicKey(hintedProgram);
@@ -954,6 +980,9 @@ export class WalletManager {
             this.mintProgramCache.set(mintKey.toBase58(), programDetection);
           } else {
             programDetection = await this.resolveTokenProgram(mintKey);
+            if (!programDetection) {
+              return null;
+            }
             try {
               this.tokenDb.setTokenProgramId(
                 token.token_mint,
@@ -1500,13 +1529,17 @@ export class WalletManager {
         throw new Error("Token mint account not found or has no data");
       }
 
-      const { programId } = await detectTokenProgram(
+      const detection = await detectTokenProgram(
         this.connection,
         mintPublicKey,
         accountInfo as any
       );
+      if (!detection) {
+        this.logMissingMintWarning(tokenMint);
+        throw new Error("Token mint account not found or has no data");
+      }
 
-      const mint = unpackMint(mintPublicKey, accountInfo, programId);
+      const mint = unpackMint(mintPublicKey, accountInfo, detection.programId);
       decimals = mint.decimals;
     }
 
@@ -1580,10 +1613,12 @@ export class WalletManager {
     isToken2022: boolean;
     created: boolean;
   }> {
-    const { programId, isToken2022 } = await detectTokenProgram(
-      this.connection,
-      tokenMint
-    );
+    const detection = await detectTokenProgram(this.connection, tokenMint);
+    if (!detection) {
+      this.logMissingMintWarning(tokenMint.toBase58());
+      throw new Error(`Token mint ${tokenMint.toBase58()} was not found`);
+    }
+    const { programId, isToken2022 } = detection;
 
     const { address, instructions } =
       await this.findOrCreateAssociatedTokenAccount(
@@ -1845,10 +1880,15 @@ export class WalletManager {
     const { decimals } = await this.getTokenMetadata(tokenMint);
 
     // Detect if this is a Token-2022 token
-    const { isToken2022, programId } = await detectTokenProgram(
+    const detection = await detectTokenProgram(
       this.connection,
       tokenMintPubkey
     );
+    if (!detection) {
+      this.logMissingMintWarning(tokenMint);
+      throw new Error(`Token mint ${tokenMint} was not found`);
+    }
+    const { isToken2022, programId } = detection;
     console.log(
       `🔍 Token ${tokenMint} is ${
         isToken2022 ? "Token-2022" : "SPL Token"
