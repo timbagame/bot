@@ -160,6 +160,7 @@ export const MAX_GAMES_PER_CREATOR_WINDOW = parsePositiveInteger(
   "MAX_GAMES_PER_CREATOR_WINDOW",
   3
 );
+export const JOIN_CALLBACK_ANSWER_SUPPRESS_MS = 7_000;
 
 // ================================
 // HIGH-VOLUME GAME SAFETY
