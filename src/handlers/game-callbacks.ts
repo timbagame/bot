@@ -394,11 +394,16 @@ export const createGameCallbacksModule = (
     }
 
     try {
-      const result = await gameManager.joinGame(
+      const result = await getGameOperationQueue().withLock(
         game.game_address,
-        telegramId,
-        ctx.chat?.id,
-        displayNameFromContext
+        "player join",
+        async () =>
+          gameManager.joinGame(
+            game.game_address,
+            telegramId,
+            ctx.chat?.id,
+            displayNameFromContext
+          )
       );
 
       if (!result.success) {
@@ -947,10 +952,7 @@ export const createGameCallbacksModule = (
 
       switch (action) {
         case "join":
-          // Serialize join operations for the same game to prevent race conditions
-          await getGameOperationQueue().withLock(gameAddress, async () => {
-            await handleJoinGame(ctx, gamePda, telegramId, game);
-          });
+          await handleJoinGame(ctx, gamePda, telegramId, game);
           break;
         case "refresh":
           await handleRefreshGameCallback(ctx, gamePda, gameAddress);
