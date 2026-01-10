@@ -24,8 +24,9 @@ describe("detectTokenProgram", () => {
     const conn = new StubConnection({ [mint.toBase58()]: TOKEN_2022_PROGRAM_ID });
 
     const result = await detectTokenProgram(conn as any, mint);
-    expect(result.isToken2022).toBe(true);
-    expect(result.programId.equals(TOKEN_2022_PROGRAM_ID)).toBe(true);
+    expect(result).not.toBeNull();
+    expect(result!.isToken2022).toBe(true);
+    expect(result!.programId.equals(TOKEN_2022_PROGRAM_ID)).toBe(true);
   });
 
   test("throws when mint owner is missing", async () => {
@@ -51,8 +52,17 @@ describe("detectTokenProgram", () => {
       { owner: TOKEN_2022_PROGRAM_ID }
     );
 
-    expect(result.isToken2022).toBe(true);
-    expect(result.programId.equals(TOKEN_2022_PROGRAM_ID)).toBe(true);
+    expect(result).not.toBeNull();
+    expect(result!.isToken2022).toBe(true);
+    expect(result!.programId.equals(TOKEN_2022_PROGRAM_ID)).toBe(true);
+  });
+
+  test("returns null when mint account is missing", async () => {
+    const mint = new PublicKey("2zsB6q5fkvMS4L7HhQTF19EaiqRkJWhGXZ6Q3A1tqhzd");
+    const conn = new StubConnection({ [mint.toBase58()]: null });
+
+    const result = await detectTokenProgram(conn as any, mint);
+    expect(result).toBeNull();
   });
 
   test("throws when mint is owned by a non-token program", async () => {

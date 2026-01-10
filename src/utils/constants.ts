@@ -126,6 +126,10 @@ export const WALLET_RPC_CACHE_TTL_MS = parsePositiveDuration(
   "WALLET_RPC_CACHE_TTL_MS",
   20_000
 );
+export const TOKEN_MINT_NOT_FOUND_LOG_COOLDOWN_MS = parsePositiveDuration(
+  "TOKEN_MINT_NOT_FOUND_LOG_COOLDOWN_MS",
+  5 * 60_000
+);
 
 // ================================
 // LIMITS
