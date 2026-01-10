@@ -48,6 +48,75 @@ const parseRetryAfterSeconds = (error: any): number => {
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, ms)));
 
+type QueuedEditResult<T> = {
+  result: T | null;
+  skipped: boolean;
+};
+
+type QueuedEditTask<T> = {
+  run: () => Promise<T>;
+  resolve: (value: QueuedEditResult<T>) => void;
+  reject: (error: unknown) => void;
+};
+
+type QueuedEditState = {
+  inFlight: boolean;
+  pending?: QueuedEditTask<any>;
+};
+
+const messageMediaEditQueue = new Map<string, QueuedEditState>();
+
+const runQueuedMediaEdit = async <T>(
+  key: string,
+  task: QueuedEditTask<T>
+): Promise<void> => {
+  try {
+    const result = await task.run();
+    task.resolve({ result, skipped: false });
+  } catch (error) {
+    task.reject(error);
+  }
+
+  const state = messageMediaEditQueue.get(key);
+  if (!state) {
+    return;
+  }
+
+  if (state.pending) {
+    const nextTask = state.pending;
+    state.pending = undefined;
+    await runQueuedMediaEdit(key, nextTask);
+    return;
+  }
+
+  state.inFlight = false;
+  messageMediaEditQueue.delete(key);
+};
+
+export const enqueueMessageMediaEdit = <T>(
+  key: string,
+  run: () => Promise<T>
+): Promise<QueuedEditResult<T>> => {
+  const state = messageMediaEditQueue.get(key);
+  if (!state) {
+    const nextState: QueuedEditState = { inFlight: true };
+    messageMediaEditQueue.set(key, nextState);
+
+    return new Promise<QueuedEditResult<T>>((resolve, reject) => {
+      const task: QueuedEditTask<T> = { run, resolve, reject };
+      void runQueuedMediaEdit(key, task);
+    });
+  }
+
+  if (state.pending) {
+    state.pending.resolve({ result: null, skipped: true });
+  }
+
+  return new Promise<QueuedEditResult<T>>((resolve, reject) => {
+    state.pending = { run, resolve, reject };
+  });
+};
+
 export const awaitTelegramRetry = async <T>(
   operation: () => Promise<T>,
   options: { maxAttempts?: number } = {}
