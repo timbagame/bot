@@ -286,6 +286,7 @@ interface LockState {
   holder: Promise<void>;
   resolver: () => void;
   timestamp: number;
+  operation: string;
 }
 
 /**
@@ -304,7 +305,11 @@ export class GameOperationQueue {
    * Execute a function with an exclusive lock on a game.
    * Concurrent calls for the same game will wait in queue.
    */
-  async withLock<T>(gameAddress: string, fn: () => Promise<T>): Promise<T> {
+  async withLock<T>(
+    gameAddress: string,
+    operation: string,
+    fn: () => Promise<T>
+  ): Promise<T> {
     // Wait for any existing lock
     const existingLock = this.locks.get(gameAddress);
     if (existingLock) {
@@ -321,14 +326,16 @@ export class GameOperationQueue {
       holder,
       resolver,
       timestamp: Date.now(),
+      operation,
     };
 
     this.locks.set(gameAddress, lockState);
 
     // Set up timeout to prevent deadlocks
     const timeoutId = setTimeout(() => {
+      const elapsedMs = Date.now() - lockState.timestamp;
       console.warn(
-        `Game operation lock timeout for ${gameAddress} after ${this.timeoutMs}ms`
+        `Game operation lock timeout for ${gameAddress} (${operation}) after ${elapsedMs}ms`
       );
       this.release(gameAddress, lockState);
     }, this.timeoutMs);

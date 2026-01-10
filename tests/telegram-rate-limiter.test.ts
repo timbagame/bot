@@ -214,7 +214,7 @@ describe("GameOperationQueue", () => {
   });
 
   it("executes operations immediately when no lock", async () => {
-    const result = await queue.withLock("game1", async () => "success");
+    const result = await queue.withLock("game1", "test op", async () => "success");
     expect(result).toBe("success");
     expect(queue.isLocked("game1")).toBe(false);
   });
@@ -222,13 +222,13 @@ describe("GameOperationQueue", () => {
   it("serializes operations on the same game", async () => {
     const order: number[] = [];
 
-    const op1 = queue.withLock("game1", async () => {
+    const op1 = queue.withLock("game1", "op1", async () => {
       await new Promise((r) => setTimeout(r, 50));
       order.push(1);
       return 1;
     });
 
-    const op2 = queue.withLock("game1", async () => {
+    const op2 = queue.withLock("game1", "op2", async () => {
       order.push(2);
       return 2;
     });
@@ -242,12 +242,12 @@ describe("GameOperationQueue", () => {
   it("allows parallel operations on different games", async () => {
     const order: string[] = [];
 
-    const op1 = queue.withLock("game1", async () => {
+    const op1 = queue.withLock("game1", "op1", async () => {
       await new Promise((r) => setTimeout(r, 30));
       order.push("game1");
     });
 
-    const op2 = queue.withLock("game2", async () => {
+    const op2 = queue.withLock("game2", "op2", async () => {
       order.push("game2");
     });
 
@@ -259,7 +259,7 @@ describe("GameOperationQueue", () => {
 
   it("releases lock after error", async () => {
     try {
-      await queue.withLock("game1", async () => {
+      await queue.withLock("game1", "error op", async () => {
         throw new Error("Test error");
       });
     } catch {
@@ -271,7 +271,7 @@ describe("GameOperationQueue", () => {
   it("reports active locks count", async () => {
     expect(queue.activeLocks).toBe(0);
 
-    const op = queue.withLock("game1", async () => {
+    const op = queue.withLock("game1", "count op", async () => {
       expect(queue.activeLocks).toBe(1);
       await new Promise((r) => setTimeout(r, 20));
     });
@@ -284,10 +284,10 @@ describe("GameOperationQueue", () => {
   });
 
   it("clears all locks", async () => {
-    const op1 = queue.withLock("game1", async () => {
+    const op1 = queue.withLock("game1", "clear op1", async () => {
       await new Promise((r) => setTimeout(r, 100));
     });
-    const op2 = queue.withLock("game2", async () => {
+    const op2 = queue.withLock("game2", "clear op2", async () => {
       await new Promise((r) => setTimeout(r, 100));
     });
 
@@ -303,7 +303,7 @@ describe("GameOperationQueue", () => {
     const fastQueue = new GameOperationQueue({ timeoutMs: 50 });
 
     let completed = false;
-    const op = fastQueue.withLock("game1", async () => {
+    const op = fastQueue.withLock("game1", "timeout op", async () => {
       await new Promise((r) => setTimeout(r, 200));
       completed = true;
     });
