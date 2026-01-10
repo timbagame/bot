@@ -49,6 +49,7 @@ import {
 import { ChatDatabase } from "./chat-database";
 import {
   editMediaWithFallback,
+  enqueueMessageMediaEdit,
   isRecoverableMediaError,
   sendMediaWithFallback,
 } from "./media";
@@ -3196,10 +3197,49 @@ export class GameManager {
           if (winnerMedia && supportsVideo) {
             try {
               const isCompleted = lowerStatus === "completed";
-              const { usedFallback, skipped } = await editMediaWithFallback({
-                edit: () =>
-                  isCompleted
-                    ? ctx.api.editMessageMedia(
+              const runEditWithFallback = (edit: () => Promise<any>) =>
+                editMediaWithFallback({
+                  edit,
+                  fallback: async () => {
+                    // Media/caption failed - try text as last resort
+                    try {
+                      return await editAsText();
+                    } catch (textError) {
+                      // Both media/caption and text failed - message might be deleted or inaccessible
+                      console.warn(
+                        `Both media and text edits failed for game ${gameAddress} chat ${gameMessage.chatId}:`,
+                        textError
+                      );
+                      // Mark as not using video since we couldn't edit it
+                      const current =
+                        this.activeGameMessages.get(gameAddress) ??
+                        new Map<number, GameMessage>();
+                      current.set(gameMessage.chatId, {
+                        ...gameMessage,
+                        usesVideo: false,
+                      });
+                      this.activeGameMessages.set(gameAddress, current);
+                      return null;
+                    }
+                  },
+                  logLabel: `game media update (${gameMessage.chatId})`,
+                  onFallback: () => {
+                    const current =
+                      this.activeGameMessages.get(gameAddress) ??
+                      new Map<number, GameMessage>();
+                    current.set(gameMessage.chatId, {
+                      ...gameMessage,
+                      usesVideo: false,
+                    });
+                    this.activeGameMessages.set(gameAddress, current);
+                  },
+                });
+
+              const queueKey = `${gameMessage.chatId}:${gameMessage.messageId}`;
+              const queuedEditResult = isCompleted
+                ? await enqueueMessageMediaEdit(queueKey, () =>
+                    runEditWithFallback(() =>
+                      ctx.api.editMessageMedia(
                         gameMessage.chatId,
                         gameMessage.messageId,
                         {
@@ -3210,7 +3250,11 @@ export class GameManager {
                         },
                         { reply_markup: inlineKeyboard }
                       )
-                    : ctx.api.editMessageCaption(
+                    )
+                  )
+                : {
+                    result: await runEditWithFallback(() =>
+                      ctx.api.editMessageCaption(
                         gameMessage.chatId,
                         gameMessage.messageId,
                         {
@@ -3218,41 +3262,16 @@ export class GameManager {
                           parse_mode: "HTML",
                           reply_markup: inlineKeyboard,
                         }
-                      ),
-                fallback: async () => {
-                  // Media/caption failed - try text as last resort
-                  try {
-                    return await editAsText();
-                  } catch (textError) {
-                    // Both media/caption and text failed - message might be deleted or inaccessible
-                    console.warn(
-                      `Both media and text edits failed for game ${gameAddress} chat ${gameMessage.chatId}:`,
-                      textError
-                    );
-                    // Mark as not using video since we couldn't edit it
-                    const current =
-                      this.activeGameMessages.get(gameAddress) ??
-                      new Map<number, GameMessage>();
-                    current.set(gameMessage.chatId, {
-                      ...gameMessage,
-                      usesVideo: false,
-                    });
-                    this.activeGameMessages.set(gameAddress, current);
-                    return null;
-                  }
-                },
-                logLabel: `game media update (${gameMessage.chatId})`,
-                onFallback: () => {
-                  const current =
-                    this.activeGameMessages.get(gameAddress) ??
-                    new Map<number, GameMessage>();
-                  current.set(gameMessage.chatId, {
-                    ...gameMessage,
-                    usesVideo: false,
-                  });
-                  this.activeGameMessages.set(gameAddress, current);
-                },
-              });
+                      )
+                    ),
+                    skipped: false,
+                  };
+
+              if (queuedEditResult.skipped || !queuedEditResult.result) {
+                continue;
+              }
+
+              const { usedFallback, skipped } = queuedEditResult.result;
 
               if (skipped) {
                 continue;
