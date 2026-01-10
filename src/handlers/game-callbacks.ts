@@ -12,6 +12,7 @@ import {
   DEFAULT_GAME_TIMEOUT,
   DEFAULT_TOKEN_MINT,
   DEFAULT_TOKEN_TICKER,
+  JOIN_CALLBACK_ANSWER_SUPPRESS_MS,
 } from "../utils/constants";
 import {
   clampMinPlayers,
@@ -296,15 +297,64 @@ export const createGameCallbacksModule = (
     }
   };
 
+  const recentJoinCallbackAnswers = new Map<string, number>();
+  const shouldSuppressJoinCallbackAnswer = (
+    gameAddress: string,
+    telegramIdStr: string
+  ): boolean => {
+    const now = Date.now();
+    const key = `${gameAddress}:${telegramIdStr}`;
+    const lastAnsweredAt = recentJoinCallbackAnswers.get(key);
+    if (lastAnsweredAt && now - lastAnsweredAt < JOIN_CALLBACK_ANSWER_SUPPRESS_MS) {
+      return true;
+    }
+    recentJoinCallbackAnswers.set(key, now);
+    for (const [entryKey, timestamp] of recentJoinCallbackAnswers) {
+      if (now - timestamp >= JOIN_CALLBACK_ANSWER_SUPPRESS_MS) {
+        recentJoinCallbackAnswers.delete(entryKey);
+      }
+    }
+    return false;
+  };
+
+  const answerJoinCallbackOnce = async (
+    ctx: Context,
+    gameAddress: string,
+    telegramIdStr: string,
+    message: string
+  ): Promise<void> => {
+    if (shouldSuppressJoinCallbackAnswer(gameAddress, telegramIdStr)) {
+      return;
+    }
+    await safeAnswerCallbackQuery(ctx, message);
+  };
+
   const handleJoinGame = async (
     ctx: Context,
     gamePda: PublicKey,
     telegramId: bigint,
     game: any
   ) => {
+    const telegramIdStr = telegramId.toString();
+    const gameState = deps.gameDb.getGame(game.game_address);
+    if (gameState?.status === "completed") {
+      await answerJoinCallbackOnce(
+        ctx,
+        game.game_address,
+        telegramIdStr,
+        "This game has already been completed!"
+      );
+      return;
+    }
+
     const gameManager = getGameManager();
     if (game.status !== "active") {
-      await safeAnswerCallbackQuery(ctx, "This game is no longer active!");
+      await answerJoinCallbackOnce(
+        ctx,
+        game.game_address,
+        telegramIdStr,
+        "This game is no longer active!"
+      );
       return;
     }
 
@@ -344,7 +394,6 @@ export const createGameCallbacksModule = (
       }
     }
 
-    const telegramIdStr = telegramId.toString();
     const displayNameFromContext = (() => {
       const from = ctx.from;
       if (!from) return null;
@@ -405,18 +454,13 @@ export const createGameCallbacksModule = (
         const errorMessage = result.error || "Failed to join game";
 
         if (errorMessage.includes("already completed")) {
-          try {
-            await gameManager.updateGameMessageFromData(
-              ctx,
-              game.game_address,
-              "Completed"
-            );
-          } catch (updateError) {
-            console.error(
-              `Error syncing completed game message for ${game.game_address}:`,
-              updateError
-            );
-          }
+          await answerJoinCallbackOnce(
+            ctx,
+            game.game_address,
+            telegramIdStr,
+            "This game has already been completed!"
+          );
+          return;
         } else if (errorMessage.toLowerCase().includes("already joined")) {
           try {
             await gameManager.updateGameMessageFromData(
@@ -432,7 +476,12 @@ export const createGameCallbacksModule = (
           }
         }
 
-        await safeAnswerCallbackQuery(ctx, errorMessage);
+        await answerJoinCallbackOnce(
+          ctx,
+          game.game_address,
+          telegramIdStr,
+          errorMessage
+        );
         return;
       }
 
@@ -446,8 +495,10 @@ export const createGameCallbacksModule = (
       const updatedGameAccount = await program.account.game.fetch(gamePda);
       const ticketCount = updatedGameAccount.ticketsCount;
       const maxTickets = updatedGameAccount.maxTickets;
-      await safeAnswerCallbackQuery(
+      await answerJoinCallbackOnce(
         ctx,
+        game.game_address,
+        telegramIdStr,
         `✅ Joined! (${ticketCount}/${maxTickets})`
       );
     } catch (error) {
@@ -455,7 +506,12 @@ export const createGameCallbacksModule = (
         error instanceof Error &&
         error.message.includes("Account does not exist")
       ) {
-        await safeAnswerCallbackQuery(ctx, "This game is no longer active!");
+        await answerJoinCallbackOnce(
+          ctx,
+          game.game_address,
+          telegramIdStr,
+          "This game is no longer active!"
+        );
       } else {
         throw error;
       }
