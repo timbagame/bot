@@ -158,6 +158,23 @@ test("parseAmount supports $-prefixed USD amounts without explicit token", async
   expect(res.data.tokenWasSpecified).toBe(false);
 });
 
+test("parseAmount supports $-suffixed USD amounts without explicit token", async () => {
+  vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(
+    mockPriceLookup(2, "TOK")
+  );
+  const tm = TokenManager.getInstance(createWalletStub(), "MINT", "TOK");
+  await tm.addToken("MINT", "TOK", 6);
+
+  const res = await tm.parseAmount(["/ga", "1$"], 1, 1, "game");
+  if (!res.success) {
+    throw new Error(`expected success, got ${res.error}`);
+  }
+
+  expect(res.data.amount).toBe(500_000);
+  expect(res.data.tokenMint).toBe("MINT");
+  expect(res.data.tokenWasSpecified).toBe(false);
+});
+
 test("parseAmount USD conversion keeps precision for low-priced tokens", async () => {
   vi.spyOn(priceService, "getUsdPrice").mockResolvedValue(
     mockPriceLookup(0.00000654, "TOK")

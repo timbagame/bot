@@ -582,9 +582,12 @@ export class TokenManager {
     if (!amountArg) {
       return { success: false, error: "invalid_amount" };
     }
-    const amountHasFiatPrefix = /^\$/.test(amountArg.trim());
-    const normalizedAmountArg = amountHasFiatPrefix
-      ? amountArg.trim().replace(/^\$/, "").trim()
+    const trimmedAmountArg = amountArg.trim();
+    const amountHasFiatPrefix = trimmedAmountArg.startsWith("$");
+    const amountHasFiatSuffix = trimmedAmountArg.endsWith("$");
+    const amountHasFiatMarker = amountHasFiatPrefix || amountHasFiatSuffix;
+    const normalizedAmountArg = amountHasFiatMarker
+      ? trimmedAmountArg.replace(/^\$/, "").replace(/\$$/, "").trim()
       : amountArg;
 
     if (!normalizedAmountArg) {
@@ -748,7 +751,7 @@ export class TokenManager {
       };
     }
 
-    if (amountHasFiatPrefix) {
+    if (amountHasFiatMarker) {
       const usdResult = await toRawAmountFromUsd();
       if (!usdResult.ok) {
         if (usdResult.reason === "unsupported_token") {
