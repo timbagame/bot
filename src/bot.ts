@@ -1111,18 +1111,18 @@ const prepareTokenTradeQuote = async ({
   let gaslessInsufficientMessage: string | undefined;
 
   if (shouldProbeGasless) {
-      const probe = presentSpendAmount({
-        amount: amountInput,
-        assetTicker: inputAsset.ticker,
-        decimals: inputAsset.decimals,
-        solBalance: snapshot.solBalance,
-        tokenBalance: inputAsset.tokenBalance,
-        formatSol: (lamports) => wallet.formatSolBalance(lamports),
-        formatToken: (value, decimals) =>
-          wallet.formatTokenBalance(value, decimals),
-        applySolFeeBuffer: false,
-        userSolBufferLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
-      });
+    const probe = presentSpendAmount({
+      amount: amountInput,
+      assetTicker: inputAsset.ticker,
+      decimals: inputAsset.decimals,
+      solBalance: snapshot.solBalance,
+      tokenBalance: inputAsset.tokenBalance,
+      formatSol: (lamports) => wallet.formatSolBalance(lamports),
+      formatToken: (value, decimals) =>
+        wallet.formatTokenBalance(value, decimals),
+      applySolFeeBuffer: false,
+      userSolBufferLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
+    });
 
     const prospectiveBalance = Math.max(
       0,
@@ -1161,7 +1161,9 @@ const prepareTokenTradeQuote = async ({
     }
   }
 
-    const amountResolution =
+  let amountResolution: ReturnType<typeof presentSpendAmount>;
+  try {
+    amountResolution =
       gaslessOverride ??
       presentSpendAmount({
         amount: amountInput,
@@ -1181,7 +1183,11 @@ const prepareTokenTradeQuote = async ({
             omitSolFeeBufferHint: true,
           }
         : {}),
-    });
+      });
+  } catch (error) {
+    await onError(error);
+    return;
+  }
 
   let integratorConfig = await resolveIntegratorSwapParams({
     inputMint: inputAsset.mint,
