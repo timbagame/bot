@@ -85,6 +85,12 @@ describe("message input sessions", () => {
     (wallet as any).getAllApprovedTokenBalances = async () => [];
 
     (bot as any).api.config.use(async (_prev: any, method: string, payload: any) => {
+      if (method === "editMessageCaption") {
+        const error: any = new Error("no caption");
+        error.description = "Bad Request: there is no caption in the message to edit";
+        throw error;
+      }
+
       if (method === "editMessageText") {
         editCalls.push({
           chatId: payload.chat_id,
