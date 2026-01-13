@@ -2,6 +2,7 @@ import type { Context, InlineKeyboard } from "grammy";
 import { awaitTelegramRetry } from "./media";
 import {
   isMessageNotModified,
+  isMissingEditableContent,
   isRateLimited,
   shouldFallbackToReply,
 } from "./telegram-errors";
@@ -57,6 +58,7 @@ type EditTargetAttempt = {
   invoke: () => Promise<EditAttemptResult>;
   continueOnFailure?: boolean;
   onFailure?: (result: EditAttemptResult) => void;
+  shouldContinue?: (result: EditAttemptResult) => boolean;
 };
 
 type EditTarget = {
@@ -124,31 +126,67 @@ export const respondWithMenu = async (
       typeof targetChatId === "number" && typeof targetMessageId === "number";
 
     if (hasExplicitTarget) {
+      const shouldContinueOnMissingContent = (result: EditAttemptResult) =>
+        result.status === "fallback" &&
+        Boolean(result.error && isMissingEditableContent(result.error));
+
+      const attempts: EditTargetAttempt[] = [];
+
+      if (typeof ctx.api?.editMessageCaption === "function") {
+        attempts.push({
+          invoke: () =>
+            attemptEdit(() =>
+              ctx.api.editMessageCaption(targetChatId, targetMessageId, {
+                caption: payload.text,
+                parse_mode: payload.parseMode ?? "HTML",
+                reply_markup: payload.keyboard,
+              })
+            ),
+          shouldContinue: shouldContinueOnMissingContent,
+          onFailure: (result) => {
+            if (!result.error) {
+              return;
+            }
+            if (isMissingEditableContent(result.error)) {
+              console.warn(
+                `${logLabel}: editMessageCaption failed (missing caption), attempting text edit:`,
+                result.error
+              );
+              return;
+            }
+            console.warn(
+              `${logLabel}: editMessageCaption failed for explicit target, replying instead:`,
+              result.error
+            );
+          },
+        });
+      }
+
+      attempts.push({
+        invoke: () =>
+          attemptEdit(() =>
+            ctx.api.editMessageText(
+              targetChatId,
+              targetMessageId,
+              payload.text,
+              buildMenuTextOptions(payload)
+            )
+          ),
+        continueOnFailure: false,
+        onFailure: (result) => {
+          if (result.error) {
+            console.warn(
+              `${logLabel}: editMessageText failed for explicit target, replying instead:`,
+              result.error
+            );
+          }
+        },
+      });
+
       editTargets.push({
         messageId: targetMessageId,
         chatId: targetChatId,
-        attempts: [
-          {
-            invoke: () =>
-              attemptEdit(() =>
-                ctx.api.editMessageText(
-                  targetChatId,
-                  targetMessageId,
-                  payload.text,
-                  buildMenuTextOptions(payload)
-                )
-              ),
-            continueOnFailure: false,
-            onFailure: (result) => {
-              if (result.error) {
-                console.warn(
-                  `${logLabel}: editMessageText failed for explicit target, replying instead:`,
-                  result.error
-                );
-              }
-            },
-          },
-        ],
+        attempts,
       });
     }
 
@@ -268,7 +306,11 @@ export const respondWithMenu = async (
           attempt.onFailure(result);
         }
 
-        if (attempt.continueOnFailure === false) {
+        const shouldContinue = attempt.shouldContinue
+          ? attempt.shouldContinue(result)
+          : attempt.continueOnFailure !== false;
+
+        if (!shouldContinue) {
           break;
         }
       }
