@@ -29,7 +29,6 @@ import { createExpiringCache } from "./utils/expiring-cache";
 import {
   LAMPORTS_PER_SOL,
   MIN_SOL_FOR_TX,
-  GAME_TIMEOUT,
   EXPIRED_GAMES_CHECK_INTERVAL_MS,
   DEFAULT_NULL_ADDRESS,
   DEFAULT_TOKEN_MINT,
