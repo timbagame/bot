@@ -4654,8 +4654,6 @@ bot.command("oracle", async (ctx: Context) => {
       `Oracle Buffer Time: ${formatDuration(
         oracleAccount.oracleBufferTime.toNumber()
       )}`,
-      "",
-      `Current Game Timeout: ${formatDuration(GAME_TIMEOUT)}`,
     ].join("\n");
 
     await ctx.reply(response, {
