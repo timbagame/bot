@@ -145,7 +145,7 @@ const getSolBalanceUsdValue = async (
 ) => {
   const [lamports, solPriceData] = await Promise.all([
     connection.getBalance(owner),
-    priceResolver({ isSol: true }),
+    priceResolver({ tokenMint: WSOL_MINT }),
   ]);
   const solPrice = solPriceData?.price ?? 0;
   const usdValue =
@@ -163,7 +163,7 @@ const shouldSkipTokenToSolSweeps = async (options: {
   priceResolver?: PriceResolver;
 }): Promise<boolean> => {
   const { connection, wallet, owner, solUsdThreshold, priceResolver } = options;
-  const cachedSolPrice = getCachedPriceLookup({ isSol: true });
+  const cachedSolPrice = getCachedPriceLookup({ tokenMint: WSOL_MINT });
   const { lamports, usdValue, solPriceData } = await getSolBalanceUsdValue(
     connection,
     owner,
@@ -210,7 +210,6 @@ const shouldWithdrawToken = async (
   const tokenAmount = Number(pendingFees) / 10 ** decimals;
   const priceData = await priceResolver({
     tokenMint: config.mint,
-    tokenTicker: config.ticker,
   });
   const tokenUsdValue = tokenAmount * (priceData?.price ?? 0);
   if (tokenUsdValue < MIN_USD_THRESHOLD) {
@@ -249,7 +248,6 @@ const shouldSwapTokenBalance = async (
   const amountDecimal = Number(lamports) / 10 ** decimals;
   const price = await priceResolver({
     tokenMint: config.mint,
-    tokenTicker: config.ticker,
   });
   const usdValue = amountDecimal * (price?.price ?? 0);
   if (usdValue < MIN_USD_THRESHOLD) {
@@ -282,7 +280,7 @@ const unwrapWsolBalance = async (
 
   const metadata = await wallet.getTokenMetadata(WSOL_MINT);
   const amountDecimal = Number(wsolBalanceLamports) / 10 ** metadata.decimals;
-  const price = await priceResolver({ tokenMint: WSOL_MINT, tokenTicker: "SOL" });
+  const price = await priceResolver({ tokenMint: WSOL_MINT });
   const usdValue = amountDecimal * (price?.price ?? 0);
 
   if (usdValue < MIN_USD_THRESHOLD) {
@@ -472,7 +470,7 @@ async function runReferralSweep(
     if (amount === 0n) continue;
 
     // Try to get price for this token
-    const priceData = await priceResolver({ tokenMint: mint, tokenTicker: "" });
+    const priceData = await priceResolver({ tokenMint: mint });
     if (!priceData?.price) continue;
 
     // Fetch decimals for this token

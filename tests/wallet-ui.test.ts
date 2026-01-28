@@ -7,7 +7,7 @@ import {
   showCustomAmountPrompt,
   persistInputPromptFromContext,
 } from "../src/utils/wallet-ui";
-import { INPUT_TIMEOUT_HINT, LAMPORTS_PER_SOL } from "../src/utils/constants";
+import { INPUT_TIMEOUT_HINT, LAMPORTS_PER_SOL, WSOL_MINT } from "../src/utils/constants";
 import { getInputSession, clearAllInputSessions } from "../src/utils/user-state";
 
 type EditCall = { text: string; options: any };
@@ -126,7 +126,12 @@ test("buildWalletTokenLines batches price lookups and reuses cached values", asy
     tokenBalances: [
       { mint: "mint-1", ticker: "TOKEN", balance: 2_000_000, decimals: 6 },
       { mint: "mint-1", ticker: "TOKEN-B", balance: 3_000_000, decimals: 6 },
-      { mint: "", ticker: "USDC", balance: 10_000_000, decimals: 6 },
+      {
+        mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        ticker: "USDC",
+        balance: 10_000_000,
+        decimals: 6,
+      },
     ],
     formatSolBalance: (lamports) => `${lamports / LAMPORTS_PER_SOL} SOL`,
     formatTokenBalance: (balance, decimals) =>
@@ -136,13 +141,13 @@ test("buildWalletTokenLines batches price lookups and reuses cached values", asy
       for (const reference of references) {
         calls.push(reference);
         switch (reference) {
-          case "SOL":
+          case WSOL_MINT:
             record[reference] = 25;
             break;
           case "mint-1":
             record[reference] = 0.5;
             break;
-          case "USDC":
+          case "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v":
             record[reference] = 1;
             break;
           default:
@@ -153,7 +158,11 @@ test("buildWalletTokenLines batches price lookups and reuses cached values", asy
     },
   });
 
-  expect(calls).toEqual(["SOL", "mint-1", "USDC"]);
+  expect(calls).toEqual([
+    WSOL_MINT,
+    "mint-1",
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  ]);
   expect(lines).toHaveLength(4);
   expect(lines[0]).toEqual({
     ticker: "SOL",

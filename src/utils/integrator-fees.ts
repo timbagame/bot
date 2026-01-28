@@ -54,16 +54,13 @@ const estimateTradeUsdValue = async (
   amountRaw: number,
   decimals: number,
   mint: string,
-  ticker: string,
   isSol: boolean
 ): Promise<number> => {
   const amountDecimal = toDecimalAmount(amountRaw, decimals);
   if (amountDecimal <= 0) return 0;
 
   const lookup = await getUsdPrice({
-    tokenMint: mint,
-    tokenTicker: ticker,
-    isSol,
+    tokenMint: isSol ? WSOL_MINT : mint,
   });
 
   if (!lookup || lookup.price <= 0) {
@@ -75,7 +72,7 @@ const estimateTradeUsdValue = async (
 
 const estimateSolUsdValue = async (lamports: number): Promise<number> => {
   if (lamports <= 0) return 0;
-  const lookup = await getUsdPrice({ isSol: true });
+  const lookup = await getUsdPrice({ tokenMint: WSOL_MINT });
   if (!lookup || lookup.price <= 0) return 0;
   return (lamports / LAMPORTS_PER_SOL) * lookup.price;
 };
@@ -116,7 +113,6 @@ export async function calculateDynamicReferralFee(
 ): Promise<number> {
   const {
     inputMint,
-    inputTicker,
     inputDecimals,
     inputAmountRaw,
     shortfallLamports,
@@ -137,7 +133,6 @@ export async function calculateDynamicReferralFee(
       inputAmountRaw,
       inputDecimals,
       inputMint,
-      inputTicker,
       isSolMint(inputMint)
     );
     const deficitUsd = await estimateSolUsdValue(shortfallLamports);
@@ -257,7 +252,6 @@ export const resolveIntegratorSwapParams = async (
           inputAmountRaw,
           inputDecimals,
           inputMint,
-          inputTicker,
           isSolMint(inputMint)
         );
         const deficitUsd = await estimateSolUsdValue(shortfallLamports);

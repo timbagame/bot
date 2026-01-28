@@ -333,7 +333,9 @@ describe("calculateDynamicReferralFee", () => {
     vi.spyOn(priceService, "getUsdPrice").mockImplementation(
       async (opts: any) => {
         const resolvedAt = Date.now();
-        if (opts?.isSol) return { price: 200, source: "mock", identifier: "SOL", resolvedAt };
+        if (opts?.tokenMint === WSOL_MINT) {
+          return { price: 200, source: "mock", identifier: WSOL_MINT, resolvedAt };
+        }
         return { price: 1, source: "mock", identifier: "TKN", resolvedAt };
       }
     );
@@ -356,7 +358,9 @@ describe("calculateDynamicReferralFee", () => {
     vi.spyOn(priceService, "getUsdPrice").mockImplementation(
       async (opts: any) => {
         const resolvedAt = Date.now();
-        if (opts?.isSol) return { price: 200, source: "mock", identifier: "SOL", resolvedAt };
+        if (opts?.tokenMint === WSOL_MINT) {
+          return { price: 200, source: "mock", identifier: WSOL_MINT, resolvedAt };
+        }
         return { price: 1, source: "mock", identifier: "TKN", resolvedAt };
       }
     );
@@ -379,7 +383,9 @@ describe("calculateDynamicReferralFee", () => {
     vi.spyOn(priceService, "getUsdPrice").mockImplementation(
       async (opts: any) => {
         const resolvedAt = Date.now();
-        if (opts?.isSol) return { price: 200, source: "mock", identifier: "SOL", resolvedAt };
+        if (opts?.tokenMint === WSOL_MINT) {
+          return { price: 200, source: "mock", identifier: WSOL_MINT, resolvedAt };
+        }
         return { price: 1, source: "mock", identifier: "TKN", resolvedAt };
       }
     );

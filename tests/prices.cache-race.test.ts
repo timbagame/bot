@@ -7,7 +7,7 @@ test("getPriceUSD retains resolved price when TTL expires during fetch", async (
   process.env["PRICES_CACHE_TTL_MS"] = "5";
   process.env["PRICES_ENABLED"] = "true";
 
-  const symbol = `RACE-${Date.now()}`.toUpperCase();
+  const symbol = "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs";
   const pricesModule = await import(`../src/utils/prices?ttlRace=${Date.now()}`);
 
   let calls = 0;

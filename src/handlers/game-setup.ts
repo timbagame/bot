@@ -73,7 +73,6 @@ type GetContractMinimumAmount = (
 
 type FetchTokenPriceUSD = (input: {
   tokenMint: string;
-  tokenTicker: string;
 }) => Promise<number | null>;
 
 type GetDefaultTokenMetadata = () => Promise<DefaultTokenMetadata>;
@@ -224,7 +223,6 @@ export const createGameSetupModule = (
 
     const tokenPriceUSD = await deps.fetchTokenPriceUSD({
       tokenMint: tokenInfo.tokenMint,
-      tokenTicker: tokenInfo.tokenTicker,
     });
 
     const suggestedAmounts = deps.getSuggestedStakeAmounts(

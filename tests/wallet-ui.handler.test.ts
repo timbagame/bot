@@ -7,6 +7,7 @@ import {
   buildWalletActionMenu,
 } from "../src/utils/wallet-ui";
 import { __test_buildQuickAmountKeyboard } from "../src/bot";
+import { WSOL_MINT } from "../src/utils/constants";
 
 process.env.TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || "TEST_TOKEN";
 process.env.MNEMONIC =
@@ -286,7 +287,7 @@ test("buildWalletTokenLines formats balances and skips empty tokens", async () =
   const lines = await buildWalletTokenLines({
     solBalanceLamports: 2_000_000_000,
     tokenBalances: [
-      { mint: "mint-sol", ticker: "SOL", balance: 1, decimals: 9 },
+      { mint: WSOL_MINT, ticker: "SOL", balance: 1, decimals: 9 },
       { mint: "mint-aaa", ticker: "AAA", balance: 1_500_000, decimals: 6 },
       { mint: "mint-bbb", ticker: "BBB", balance: 0, decimals: 6 },
     ],
@@ -295,7 +296,7 @@ test("buildWalletTokenLines formats balances and skips empty tokens", async () =
     fetchPricesUSD: async (references: string[]) => {
       const record: Record<string, number> = {};
       for (const reference of references) {
-        if (reference === "SOL") {
+        if (reference === WSOL_MINT) {
           record[reference] = 20;
         } else {
           record[reference] = 5;

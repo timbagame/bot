@@ -17,7 +17,10 @@ describe("price utilities fallbacks", () => {
           },
         } as any;
       }) as any;
-      const price = await module.getPriceUSD("SLOW-TOKEN", slowFetch);
+      const price = await module.getPriceUSD(
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        slowFetch
+      );
       expect(price).toBe(0);
     } finally {
       if (originalTimeout === undefined) {
@@ -34,7 +37,10 @@ describe("price utilities fallbacks", () => {
     }) as any;
 
     const module = await import(`../src/utils/prices.ts?cap=${Date.now()}`);
-    const price = await module.getPriceUSD("CAP-TKN", fetchImpl);
+    const price = await module.getPriceUSD(
+      "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+      fetchImpl
+    );
     expect(price).toBe(0);
   });
 
@@ -49,7 +55,10 @@ describe("price utilities fallbacks", () => {
     }) as any;
 
     const module = await import(`../src/utils/prices.ts?sol=${Date.now()}`);
-    const price = await module.getPriceUSD("SOL-PRODUCT", fetchImpl);
+    const price = await module.getPriceUSD(
+      "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
+      fetchImpl
+    );
     expect(price).toBe(0);
   });
 
@@ -57,27 +66,27 @@ describe("price utilities fallbacks", () => {
     const fetchImpl = (async () => ({ ok: true, async json() { return { data: {} }; } })) as any;
     const module = await import(`../src/utils/prices.ts?null=${Date.now()}`);
     const result = await module.resolveTokenPriceUSD({
-      tokenMint: "unknown",
-      tokenTicker: "???",
+      tokenMint: "invalid",
       fetchImpl,
     });
     expect(result).toBeNull();
   });
 
-  test("toMintOrId prefers WSOL for SOL inputs", async () => {
+  test("getPriceUSD ignores non-mint inputs", async () => {
     const module = await import(`../src/utils/prices.ts?solmint=${Date.now()}`);
-    const fetchImpl = (async (url: string) => {
-      const parsed = new URL(url);
-      const id = parsed.searchParams.get("ids") ?? "";
+    let fetchCalls = 0;
+    const fetchImpl = (async () => {
+      fetchCalls += 1;
       return {
         ok: true,
         async json() {
-          return { data: { [id]: { price: id === WSOL_MINT ? 123 : 0 } } };
+          return { data: { [WSOL_MINT]: { price: 123 } } };
         },
       } as any;
     }) as any;
 
     const price = await module.getPriceUSD("sol", fetchImpl);
-    expect(price).toBe(123);
+    expect(price).toBe(0);
+    expect(fetchCalls).toBe(0);
   });
 });

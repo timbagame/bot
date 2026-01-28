@@ -654,9 +654,7 @@ export class TokenManager {
       }
 
       const priceLookup = await getUsdPrice({
-        tokenMint,
-        tokenTicker,
-        isSol,
+        tokenMint: isSol ? WSOL_MINT : tokenMint,
       });
 
       const price = priceLookup?.price ?? 0;

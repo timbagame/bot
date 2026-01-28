@@ -1,6 +1,6 @@
 import { InlineKeyboard, type Context } from "grammy";
 import { escapeHtml, formatUsdValue } from "./format-amount";
-import { INPUT_TIMEOUT_HINT, LAMPORTS_PER_SOL } from "./constants";
+import { INPUT_TIMEOUT_HINT, LAMPORTS_PER_SOL, WSOL_MINT } from "./constants";
 import { respondWithMenu } from "./menu-response";
 import { setInputSession, type InputSessionState } from "./user-state";
 import { getTelegramIdString } from "./context-helpers";
@@ -46,9 +46,11 @@ export async function buildWalletTokenLines({
     return true;
   });
 
-  const priceReferences = new Set<string>(["SOL"]);
+  const priceReferences = new Set<string>([WSOL_MINT]);
   for (const token of filteredBalances) {
-    priceReferences.add(token.mint || token.ticker);
+    if (token.mint) {
+      priceReferences.add(token.mint);
+    }
   }
 
   const references = Array.from(priceReferences);
@@ -58,7 +60,7 @@ export async function buildWalletTokenLines({
   const getPriceFor = (reference: string) => priceRecord?.[reference] ?? 0;
 
   const solFormatted = formatSolBalance(solBalanceLamports);
-  const solPriceUSD = getPriceFor("SOL");
+  const solPriceUSD = getPriceFor(WSOL_MINT);
   const solDecimalBalance = solBalanceLamports / LAMPORTS_PER_SOL;
 
   const lines: TokenDisplayLine[] = [
@@ -79,8 +81,7 @@ export async function buildWalletTokenLines({
       ? formatTokenBalance(token.balance, token.decimals)
       : String(token.balance / Math.pow(10, token.decimals));
 
-    const reference = token.mint || token.ticker;
-    const tokenPriceUSD = getPriceFor(reference);
+    const tokenPriceUSD = getPriceFor(token.mint);
     const tokenDecimalBalance = token.balance / Math.pow(10, token.decimals);
 
     const line: TokenDisplayLine = {
