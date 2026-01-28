@@ -39,7 +39,7 @@ const buildCacheKeys = (request: PriceLookupRequest): string[] => {
   }
 
   if (request.isSol && keys.size === 0) {
-    keys.add("SOL");
+    keys.add("NATIVE_SOL");
   }
 
   return Array.from(keys.values());

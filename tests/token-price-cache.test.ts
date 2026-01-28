@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import {
   __test_clearPriceServiceCache,
+  getCachedPriceLookup,
   rememberPriceLookup,
   getUsdPrice,
 } from "../src/utils/price-service";
@@ -56,5 +57,16 @@ describe("token price cache", () => {
 
     expect(refreshed?.price).toBe(2);
     expect(priceSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not mix native SOL cache with ticker-only SOL entries", () => {
+    rememberPriceLookup(
+      { price: 123, identifier: "SOLX" },
+      { tokenMint: "SOLX_MINT", tokenTicker: "SOL" }
+    );
+
+    const cachedSol = getCachedPriceLookup({ isSol: true });
+
+    expect(cachedSol).toBeNull();
   });
 });
