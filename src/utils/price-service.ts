@@ -38,6 +38,10 @@ const buildCacheKeys = (request: PriceLookupRequest): string[] => {
     keys.add(normalizedTicker);
   }
 
+  if (request.isSol && keys.size === 0) {
+    keys.add("SOL");
+  }
+
   return Array.from(keys.values());
 };
 
