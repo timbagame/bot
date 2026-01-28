@@ -114,6 +114,14 @@ export const FEE_SWEEP_SOL_USD_THRESHOLD = parsePositiveDuration(
 export const BLOCKHASH_CACHE_DURATION = 10 * 1000; // 10 seconds
 export const TOKEN_MANAGER_APPROVED_CACHE_TTL_MS = 60 * 1000; // 60 seconds
 export const TOKEN_PRICE_CACHE_TTL_MS = 60 * 1000; // 60 seconds
+export const FEE_SWEEP_SOL_PRICE_MAX_AGE_MS = parsePositiveDuration(
+  "FEE_SWEEP_SOL_PRICE_MAX_AGE_MS",
+  TOKEN_PRICE_CACHE_TTL_MS
+);
+export const FEE_SWEEP_SOL_PRICE_MAX_DRIFT_RATIO = parseNonNegativeFloat(
+  "FEE_SWEEP_SOL_PRICE_MAX_DRIFT_RATIO",
+  0.2
+);
 export const TELEGRAM_USERNAME_CACHE_TTL_MS = parsePositiveDuration(
   "TELEGRAM_USERNAME_CACHE_TTL_MS",
   5 * 60_000
@@ -339,6 +347,30 @@ function parseNonNegativeInteger(key: string, fallback: number): number {
   }
 
   return Math.floor(parsed);
+}
+
+function parseNonNegativeFloat(key: string, fallback: number): number {
+  const raw = process.env[key];
+  if (raw === undefined) {
+    return fallback;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    console.warn(
+      `[Config] ${key} must be a non-negative number. Received '${raw}', using fallback ${fallback}.`
+    );
+    return fallback;
+  }
+
+  if (parsed < 0) {
+    console.warn(
+      `[Config] ${key} must be >= 0. Received ${parsed}, clamping to 0.`
+    );
+    return 0;
+  }
+
+  return parsed;
 }
 
 // Cache TTL (ms) for token prices

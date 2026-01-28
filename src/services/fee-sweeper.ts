@@ -21,10 +21,12 @@ import {
   WSOL_MINT,
 } from "../utils/token-registry";
 import { resolvePrimaryRpcEndpoint } from "../utils/rpc-endpoints";
-import { getUsdPrice } from "../utils/price-service";
+import { getCachedPriceLookup, getUsdPrice } from "../utils/price-service";
 import {
   FEE_SWEEP_SOL_USD_THRESHOLD,
   LAMPORTS_PER_SOL,
+  FEE_SWEEP_SOL_PRICE_MAX_AGE_MS,
+  FEE_SWEEP_SOL_PRICE_MAX_DRIFT_RATIO,
 } from "../utils/constants";
 import {
   bundleFromKeypair,
@@ -67,8 +69,74 @@ type TokenBalanceFetcher = (
   mint: PublicKey
 ) => Promise<bigint>;
 
+type SolPriceData = {
+  price?: number;
+  resolvedAt?: number;
+  timestamp?: number;
+};
+
 const MIN_USD_THRESHOLD = 5;
 const SOL_DECIMALS = 9;
+
+const normalizeTimestampMs = (timestamp: number): number => {
+  if (!Number.isFinite(timestamp)) return timestamp;
+  return timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp;
+};
+
+const validateSolPriceData = (
+  priceData: SolPriceData | null | undefined,
+  options: {
+    maxAgeMs?: number;
+    previousPrice?: number;
+    maxDriftRatio?: number;
+  } = {}
+): { isValid: boolean; reason?: string } => {
+  const solPrice = priceData?.price ?? 0;
+  if (!Number.isFinite(solPrice) || solPrice <= 0) {
+    return { isValid: false, reason: "missing or non-positive price" };
+  }
+
+  const timestamp =
+    typeof priceData?.resolvedAt === "number"
+      ? priceData.resolvedAt
+      : typeof priceData?.timestamp === "number"
+        ? priceData.timestamp
+        : null;
+
+  if (timestamp === null) {
+    return { isValid: false, reason: "missing timestamp" };
+  }
+
+  const { maxAgeMs, previousPrice, maxDriftRatio } = options;
+  if (maxAgeMs) {
+    const now = Date.now();
+    const normalizedTimestamp = normalizeTimestampMs(timestamp);
+    if (now - normalizedTimestamp > maxAgeMs) {
+      return { isValid: false, reason: "stale timestamp" };
+    }
+  }
+
+  if (
+    typeof previousPrice === "number" &&
+    Number.isFinite(previousPrice) &&
+    previousPrice > 0 &&
+    typeof maxDriftRatio === "number" &&
+    Number.isFinite(maxDriftRatio) &&
+    maxDriftRatio > 0
+  ) {
+    const driftRatio = Math.abs(solPrice - previousPrice) / previousPrice;
+    if (driftRatio > maxDriftRatio) {
+      return {
+        isValid: false,
+        reason: `price drift ${(driftRatio * 100).toFixed(2)}% exceeds ${(
+          maxDriftRatio * 100
+        ).toFixed(2)}%`,
+      };
+    }
+  }
+
+  return { isValid: true };
+};
 
 const getSolBalanceUsdValue = async (
   connection: Connection,
@@ -84,7 +152,7 @@ const getSolBalanceUsdValue = async (
     lamports > 0 && solPrice > 0
       ? (lamports / LAMPORTS_PER_SOL) * solPrice
       : 0;
-  return { lamports, usdValue, solPrice };
+  return { lamports, usdValue, solPrice, solPriceData };
 };
 
 const shouldSkipTokenToSolSweeps = async (options: {
@@ -95,15 +163,23 @@ const shouldSkipTokenToSolSweeps = async (options: {
   priceResolver?: PriceResolver;
 }): Promise<boolean> => {
   const { connection, wallet, owner, solUsdThreshold, priceResolver } = options;
-  const { lamports, usdValue, solPrice } = await getSolBalanceUsdValue(
+  const cachedSolPrice = getCachedPriceLookup({ isSol: true });
+  const { lamports, usdValue, solPriceData } = await getSolBalanceUsdValue(
     connection,
     owner,
     priceResolver
   );
 
-  if (solPrice <= 0) {
+  const { isValid, reason } = validateSolPriceData(solPriceData, {
+    maxAgeMs: FEE_SWEEP_SOL_PRICE_MAX_AGE_MS,
+    previousPrice: cachedSolPrice?.price,
+    maxDriftRatio: FEE_SWEEP_SOL_PRICE_MAX_DRIFT_RATIO,
+  });
+  if (!isValid) {
     console.warn(
-      "⚠️  Unable to resolve SOL price; skipping token-to-SOL sweeps."
+      `⚠️  skipping due to unreliable SOL price${
+        reason ? ` (${reason})` : ""
+      }; skipping token-to-SOL sweeps.`
     );
     return true;
   }
