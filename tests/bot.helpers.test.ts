@@ -927,8 +927,8 @@ describe("createGameViaCommand helper", () => {
       .spyOn(priceService, "getUsdPrice")
       .mockImplementation(async (request) =>
         rememberPriceLookup(
-          { price: 2, identifier: "TOK", resolvedAt: Date.now() },
-          { tokenMint: request.tokenMint, tokenTicker: request.tokenTicker }
+          { price: 2, identifier: "MINT", resolvedAt: Date.now() },
+          { tokenMint: request.tokenMint }
         )
       );
     const ctx: any = makeCtx();
@@ -966,13 +966,11 @@ describe("createGameViaCommand helper", () => {
           const priceHint = args[8]?.priceHint;
           const cached = getCachedPriceLookup({
             tokenMint: "MINT",
-            tokenTicker: "TOK",
           });
           expect(priceHint?.price).toBe(2);
           expect(cached?.price).toBe(2);
           const resolved = await getUsdPrice({
             tokenMint: "MINT",
-            tokenTicker: "TOK",
           });
           expect(resolved?.price).toBe(2);
           return 0;
@@ -991,7 +989,7 @@ describe("createGameViaCommand helper", () => {
 
       expect(priceSpy).toHaveBeenCalledTimes(2);
       expect(creationCalls[0][1].priceLookup?.price).toBe(2);
-      expect(messageCalls[0][8]?.priceHint?.identifier).toBe("TOK");
+      expect(messageCalls[0][8]?.priceHint?.identifier).toBe("MINT");
     } finally {
       TokenManager.resetForTesting();
       __test_clearPriceServiceCache();

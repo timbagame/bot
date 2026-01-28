@@ -4,12 +4,15 @@ import {
   getPriceUSD,
   getPricesUSD,
   resolveTokenPriceUSD,
+  __test_resetPriceCache,
 } from "../src/utils/prices";
+import { WSOL_MINT } from "../src/utils/token-registry";
 
 const originalEnv = process.env["PRICES_ENABLED"];
 const originalTimeout = process.env["PRICES_TIMEOUT_MS"];
 
 afterEach(() => {
+  __test_resetPriceCache();
   if (originalEnv === undefined) {
     delete process.env["PRICES_ENABLED"];
   } else {
@@ -32,14 +35,14 @@ describe("price utilities resilience", () => {
       throw new Error("fetch should not be invoked when disabled");
     }) as any;
 
-    const value = await getPriceUSD("SOL", neverCalledFetch);
+    const value = await getPriceUSD(WSOL_MINT, neverCalledFetch);
     expect(value).toBe(0);
     expect(fetchCalls).toBe(0);
   });
 
   test("deduplicates inflight requests and caches successful result", async () => {
     process.env["PRICES_ENABLED"] = "true";
-    const token = `TOKEN-${Date.now()}`;
+    const token = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
     let calls = 0;
     const fetchImpl = (async (url: string) => {
       calls += 1;
@@ -67,7 +70,7 @@ describe("price utilities resilience", () => {
 
   test("returns zero when Jupiter fails and no fallback exists", async () => {
     process.env["PRICES_ENABLED"] = "true";
-    const token = `Mint${Date.now()}`;
+    const token = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
     const fetchImpl = (async (url: string) => {
       if (url.includes("jup.ag")) {
         return {
@@ -84,12 +87,10 @@ describe("price utilities resilience", () => {
     expect(value).toBe(0);
   });
 
-  test("resolveTokenPriceUSD iterates candidates and reports identifier", async () => {
+  test("resolveTokenPriceUSD reports identifier", async () => {
     process.env["PRICES_ENABLED"] = "true";
     const attempts: string[] = [];
-    const now = Date.now();
-    const tokenMint = `mint-${now}`;
-    const tokenTicker = `T${now}`;
+    const tokenMint = "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh";
     const fetchImpl = (async (url: string) => {
       const idParam = new URL(url).searchParams.get("ids");
       if (idParam) {
@@ -100,9 +101,7 @@ describe("price utilities resilience", () => {
         async json() {
           return {
             data: {
-              [idParam as string]: {
-                price: idParam === tokenTicker ? 2.34 : 0,
-              },
+              [idParam as string]: { price: 2.34 },
             },
           };
         },
@@ -111,18 +110,17 @@ describe("price utilities resilience", () => {
 
     const result = await resolveTokenPriceUSD({
       tokenMint,
-      tokenTicker,
       fetchImpl,
     });
 
     expect(result?.price).toBeCloseTo(2.34, 6);
-    expect(result?.identifier).toBe(tokenTicker);
-    expect(attempts).toEqual([tokenMint, tokenTicker]);
+    expect(result?.identifier).toBe(tokenMint);
+    expect(attempts).toEqual([tokenMint]);
   });
 
   test("getPriceUSD preserves stale cache when downstream returns zero", async () => {
     process.env["PRICES_ENABLED"] = "true";
-    const token = `STALE-${Date.now()}`;
+    const token = "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs";
     let call = 0;
     const fetchImpl = (async () => {
       call += 1;
@@ -149,7 +147,7 @@ describe("price utilities resilience", () => {
 
   test("getPriceUSD retries after synchronous upstream failure", async () => {
     process.env["PRICES_ENABLED"] = "true";
-    const token = `RETRY-${Date.now()}`;
+    const token = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
     let jupiterCalls = 0;
 
     const fetchImpl = (async (url: string) => {
@@ -180,38 +178,51 @@ describe("price utilities resilience", () => {
 
   test("getPricesUSD aggregates values for mixed identifiers (property)", async () => {
     process.env["PRICES_ENABLED"] = "true";
+    const mintPool = [
+      WSOL_MINT,
+      "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+      "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
+      "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+    ];
 
     await fc.assert(
-        fc.asyncProperty(
-          fc.subarray(["AAA", "BBB", "CCC", "DDD", "EEE", "FFF", "GGG"], {
-            minLength: 1,
-            maxLength: 5,
-          }),
-          fc.integer({ min: 1, max: 100 }),
-          async (tokens: string[], basePriceInteger: number) => {
-            const basePrice = basePriceInteger;
-            const uniqueTokens = tokens.map((token: string, index: number) =>
-              `${token}${basePriceInteger}${index}`
-            );
+      fc.asyncProperty(
+        fc.subarray(mintPool, {
+          minLength: 1,
+          maxLength: 5,
+        }),
+        fc.integer({ min: 1, max: 100 }),
+        async (tokens: string[], basePriceInteger: number) => {
+          const basePrice = basePriceInteger;
 
           const fetchImpl = (async (url: string) => {
             const parsed = new URL(url);
-            const id = parsed.searchParams.get("ids") ?? parsed.pathname.split("/").pop()!;
+            const idsParam =
+              parsed.searchParams.get("ids") ?? parsed.pathname.split("/").pop()!;
+            const ids = idsParam ? idsParam.split(",") : [];
             return {
               ok: true,
               async json() {
-                return { data: { [id]: { price: basePrice } } };
+                const data = ids.reduce<Record<string, { price: number }>>(
+                  (acc, id) => {
+                    acc[id] = { price: basePrice };
+                    return acc;
+                  },
+                  {}
+                );
+                return { data };
               },
             } as any;
           }) as any;
 
-          const ids = [...uniqueTokens];
+          const ids = [...tokens];
           const results = await getPricesUSD(ids, fetchImpl);
-             for (const id of ids) {
-               expect(results[id]).toBe(basePrice);
-             }
-           }
-         ),
+          for (const id of ids) {
+            expect(results[id]).toBe(basePrice);
+          }
+        }
+      ),
       { seed: 12345, numRuns: 25 }
     );
   });
@@ -239,7 +250,7 @@ describe("price utilities resilience", () => {
     }) as any;
 
     try {
-      const price = await module.getPriceUSD("SOL", fetchImpl);
+      const price = await module.getPriceUSD(WSOL_MINT, fetchImpl);
       expect(price).toBe(7.5);
       expect(calls).toBe(1);
     } finally {

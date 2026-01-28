@@ -9,6 +9,7 @@ import {
   sweepFees,
 } from "../src/services/fee-sweeper";
 import type { SwapRequest } from "../src/utils/swap/types";
+import { WSOL_MINT } from "../src/utils/constants";
 
 describe("fee sweeper helpers", () => {
   const wallet = {
@@ -236,8 +237,10 @@ describe("sweeping tokens to SOL", () => {
       },
     });
 
-    const priceResolver = async (request: { isSol?: boolean }) =>
-      request.isSol ? null : { price: 1, identifier: "AAA", resolvedAt: Date.now() };
+    const priceResolver = async (request: { tokenMint?: string }) =>
+      request.tokenMint === WSOL_MINT
+        ? null
+        : { price: 1, identifier: "AAA", resolvedAt: Date.now() };
     const balanceFetcher = async () => 6_000_000_000n;
 
     await __test_sweepTokensToSol(
@@ -274,8 +277,10 @@ describe("sweeping tokens to SOL", () => {
       },
     });
 
-    const priceResolver = async (request: { isSol?: boolean }) =>
-      request.isSol ? { price: 30, identifier: "SOL", resolvedAt: Date.now() } : { price: 1, identifier: "AAA", resolvedAt: Date.now() };
+    const priceResolver = async (request: { tokenMint?: string }) =>
+      request.tokenMint === WSOL_MINT
+        ? { price: 30, identifier: WSOL_MINT, resolvedAt: Date.now() }
+        : { price: 1, identifier: "AAA", resolvedAt: Date.now() };
     const balanceFetcher = async () => 6_000_000_000n;
 
     await __test_sweepTokensToSol(
@@ -479,7 +484,7 @@ describe("Jupiter referral sweep threshold", () => {
       tokenFeeProcessor: async () => false,
       referralSweeper: async (_conn, _admin, _entries, priceResolver) => {
         // Tokens without price data should be skipped in USD calculation
-        const priceData = priceResolver ? await priceResolver({ tokenMint: "unknown", tokenTicker: "" }) : null;
+        const priceData = priceResolver ? await priceResolver({ tokenMint: "unknown" }) : null;
         if (!priceData?.price) {
           // No value can be calculated, total stays 0, below threshold
           claimsReturned = 0;

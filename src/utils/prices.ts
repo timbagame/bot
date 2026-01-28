@@ -3,6 +3,7 @@ import {
   PRICES_CACHE_TTL_MS,
   PRICES_TIMEOUT_MS,
 } from "./constants";
+import { PublicKey } from "@solana/web3.js";
 import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
 import type { FetchLike } from "../types";
 
@@ -30,6 +31,15 @@ function isPricesEnabled(): boolean {
 
 function normalizeKey(id: string): string {
   return id.trim();
+}
+
+function isValidMintAddress(value: string): boolean {
+  if (!value) return false;
+  try {
+    return new PublicKey(value).toBase58() === value;
+  } catch {
+    return false;
+  }
 }
 
 async function withTimeout<T>(
@@ -145,7 +155,7 @@ export async function getPriceUSD(
 ): Promise<number> {
   if (!isPricesEnabled()) return 0;
   const key = normalizeKey(mintAddress);
-  if (!key) return 0;
+  if (!key || !isValidMintAddress(key)) return 0;
 
   const liveEntry = priceCache.get(key);
   if (liveEntry?.value !== undefined) {
@@ -213,16 +223,7 @@ export async function getPricesUSD(
 
   for (const id of ids) {
     const normalizedKey = normalizeKey(id);
-    if (!normalizedKey) {
-      continue;
-    }
-    const liveEntry = priceCache.get(normalizedKey);
-    if (liveEntry?.value !== undefined) {
-      continue;
-    }
-
-    const cachedOrPending = priceCache.peek(normalizedKey);
-    if (cachedOrPending?.value !== undefined || cachedOrPending?.inflight) {
+    if (!normalizedKey || !isValidMintAddress(normalizedKey)) {
       continue;
     }
 

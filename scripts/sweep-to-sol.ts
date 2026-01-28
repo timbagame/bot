@@ -52,7 +52,6 @@ async function main() {
       const amountDecimal = Number(balance) / 10 ** metadata.decimals;
       const price = await getUsdPrice({
         tokenMint: token.mint,
-        tokenTicker: token.ticker,
       });
       const usdValue = amountDecimal * (price?.price ?? 0);
       if (usdValue < 5) {

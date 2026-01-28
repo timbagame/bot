@@ -1,5 +1,10 @@
-import { describe, test, expect } from "bun:test";
-import { getPriceUSD } from "../src/utils/prices";
+import { describe, test, expect, afterEach } from "bun:test";
+import { getPriceUSD, __test_resetPriceCache } from "../src/utils/prices";
+import { WSOL_MINT } from "../src/utils/token-registry";
+
+afterEach(() => {
+  __test_resetPriceCache();
+});
 
 const jupOkFetch = (price: number) => async (input: RequestInfo | URL) => {
   const url = typeof input === "string" ? input : input.toString();
@@ -22,12 +27,12 @@ const jupFailFetch = async (input: RequestInfo | URL) => {
 };
 describe("prices util", () => {
   test("gets SOL price from Jupiter", async () => {
-    const price = await getPriceUSD("SOL", jupOkFetch(123.45) as any);
+    const price = await getPriceUSD(WSOL_MINT, jupOkFetch(123.45) as any);
     expect(price).toBe(123.45);
   });
 
   test("returns zero when Jupiter fails", async () => {
-    const price = await getPriceUSD("So11111111111111111111111111111111111111112", jupFailFetch as any);
+    const price = await getPriceUSD(WSOL_MINT, jupFailFetch as any);
     expect(price).toBe(0);
   });
 
@@ -43,8 +48,9 @@ describe("prices util", () => {
       );
     }) as any;
 
-    const a = await getPriceUSD("SOL_CACHE", fetchImpl);
-    const b = await getPriceUSD("SOL_CACHE", fetchImpl);
+    const tokenMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+    const a = await getPriceUSD(tokenMint, fetchImpl);
+    const b = await getPriceUSD(tokenMint, fetchImpl);
     expect(a).toBe(1.23);
     expect(b).toBe(1.23);
     expect(calls).toBe(1);
@@ -58,7 +64,7 @@ describe("prices util", () => {
       const module = await import(
         `../src/utils/prices?ttl=${Date.now()}`
       );
-      const price = await module.getPriceUSD("SOL", jupOkFetch(9.99) as any);
+      const price = await module.getPriceUSD(WSOL_MINT, jupOkFetch(9.99) as any);
       expect(price).toBe(9.99);
     } finally {
       if (previousTtl === undefined) {

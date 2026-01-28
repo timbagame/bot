@@ -113,7 +113,6 @@ export async function calculateDynamicReferralFee(
 ): Promise<number> {
   const {
     inputMint,
-    inputTicker,
     inputDecimals,
     inputAmountRaw,
     shortfallLamports,
