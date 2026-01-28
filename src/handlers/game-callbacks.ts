@@ -92,7 +92,6 @@ export type GameCallbacksModuleDeps = {
   ) => Promise<{ formatted: number; raw: number; decimals: number }>;
   fetchTokenPriceUSD: (input: {
     tokenMint: string;
-    tokenTicker: string;
   }) => Promise<number | null>;
   getProgram: () => Program<Timba>;
   validateGameTokenData: (gameData: any) => {
@@ -193,10 +192,9 @@ export const createGameCallbacksModule = (
 
   const resolveTokenPriceUSDForSetup = async (input: {
     tokenMint: string;
-    tokenTicker: string;
     sessionPrice?: number;
   }): Promise<number | null> => {
-    const { tokenMint, tokenTicker, sessionPrice } = input;
+    const { tokenMint, sessionPrice } = input;
     if (typeof sessionPrice === "number" && Number.isFinite(sessionPrice) && sessionPrice > 0) {
       return sessionPrice;
     }
@@ -204,7 +202,7 @@ export const createGameCallbacksModule = (
       return null;
     }
     try {
-      return await deps.fetchTokenPriceUSD({ tokenMint, tokenTicker });
+      return await deps.fetchTokenPriceUSD({ tokenMint });
     } catch {
       return null;
     }
@@ -699,7 +697,6 @@ export const createGameCallbacksModule = (
 
         const priceForConfirm = await resolveTokenPriceUSDForSetup({
           tokenMint: userSession.tokenMint ?? DEFAULT_TOKEN_MINT,
-          tokenTicker,
           sessionPrice: userSession.tokenPriceUSD,
         });
         const usdApproximation = formatUsdApproximation(
@@ -789,7 +786,6 @@ export const createGameCallbacksModule = (
 
         tokenPriceUSD = await deps.fetchTokenPriceUSD({
           tokenMint: userSession.tokenMint ?? DEFAULT_TOKEN_MINT,
-          tokenTicker,
         });
 
         if (!tokenPriceUSD || !Number.isFinite(tokenPriceUSD) || tokenPriceUSD <= 0) {
@@ -817,7 +813,6 @@ export const createGameCallbacksModule = (
       if (!tokenPriceUSD) {
         tokenPriceUSD = await resolveTokenPriceUSDForSetup({
           tokenMint: userSession.tokenMint ?? DEFAULT_TOKEN_MINT,
-          tokenTicker,
           sessionPrice: sessionSnapshot?.tokenPriceUSD,
         });
       }
@@ -1041,7 +1036,6 @@ export const createGameCallbacksModule = (
 
     const tokenPriceUSD = await resolveTokenPriceUSDForSetup({
       tokenMint: tokenContext.tokenMint,
-      tokenTicker: tokenContext.tokenTicker,
       sessionPrice: session?.tokenPriceUSD,
     });
     const usdApproximation = formatUsdApproximation(
@@ -1167,7 +1161,6 @@ export const createGameCallbacksModule = (
 
             const tokenPriceUSD = await resolveTokenPriceUSDForSetup({
               tokenMint: tokenContext.tokenMint,
-              tokenTicker: tokenContext.tokenTicker,
               sessionPrice: session?.tokenPriceUSD,
             });
             const usdApproximation = formatUsdApproximation(
@@ -1236,7 +1229,6 @@ export const createGameCallbacksModule = (
 
             const tokenPriceUSD = await resolveTokenPriceUSDForSetup({
               tokenMint: tokenContext.tokenMint,
-              tokenTicker: tokenContext.tokenTicker,
               sessionPrice: session?.tokenPriceUSD,
             });
             const usdApproximation = formatUsdApproximation(
@@ -1315,7 +1307,6 @@ export const createGameCallbacksModule = (
 
             const tokenPriceUSD = await resolveTokenPriceUSDForSetup({
               tokenMint: tokenContext.tokenMint,
-              tokenTicker: tokenContext.tokenTicker,
               sessionPrice: session?.tokenPriceUSD,
             });
             const usdApproximation = formatUsdApproximation(
@@ -1400,7 +1391,6 @@ export const createGameCallbacksModule = (
 
             const tokenPriceUSD = await resolveTokenPriceUSDForSetup({
               tokenMint: tokenContext.tokenMint,
-              tokenTicker: tokenContext.tokenTicker,
               sessionPrice: session?.tokenPriceUSD,
             });
             const usdApproximation = formatUsdApproximation(
@@ -1495,7 +1485,6 @@ export const createGameCallbacksModule = (
 
             const tokenPriceUSD = await resolveTokenPriceUSDForSetup({
               tokenMint: tokenContext.tokenMint,
-              tokenTicker: tokenContext.tokenTicker,
               sessionPrice: session?.tokenPriceUSD,
             });
             const usdApproximation = formatUsdApproximation(
@@ -2113,7 +2102,6 @@ export const createGameCallbacksModule = (
 
             const tokenPriceUSD = await deps.fetchTokenPriceUSD({
               tokenMint: tokenContext.tokenMint,
-              tokenTicker: tokenContext.tokenTicker,
             });
 
             const suggestedAmounts = getSuggestedStakeAmounts(

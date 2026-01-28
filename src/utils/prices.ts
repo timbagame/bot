@@ -3,7 +3,6 @@ import {
   PRICES_CACHE_TTL_MS,
   PRICES_TIMEOUT_MS,
 } from "./constants";
-import { WSOL_MINT } from "./token-registry";
 import { createExpiringCache, type ExpiringCache } from "./expiring-cache";
 import type { FetchLike } from "../types";
 
@@ -30,7 +29,7 @@ function isPricesEnabled(): boolean {
 }
 
 function normalizeKey(id: string): string {
-  return id.trim().toUpperCase();
+  return id.trim();
 }
 
 async function withTimeout<T>(
@@ -53,12 +52,6 @@ async function withTimeout<T>(
   } finally {
     clearTimeout(timer);
   }
-}
-
-function toMintOrId(mintOrTicker: string): string {
-  const key = normalizeKey(mintOrTicker);
-  if (key === "SOL") return WSOL_MINT;
-  return mintOrTicker;
 }
 
 function pickValidPrice(
@@ -147,11 +140,12 @@ async function fetchBatchFromJupiter(
 }
 
 export async function getPriceUSD(
-  mintOrTicker: string,
+  mintAddress: string,
   fetchImpl: FetchLike = (globalThis.fetch as any)
 ): Promise<number> {
   if (!isPricesEnabled()) return 0;
-  const key = normalizeKey(mintOrTicker);
+  const key = normalizeKey(mintAddress);
+  if (!key) return 0;
 
   const liveEntry = priceCache.get(key);
   if (liveEntry?.value !== undefined) {
@@ -170,10 +164,12 @@ export async function getPriceUSD(
   const pendingPromise = (async () => {
     let resolvedPrice = 0;
     try {
-      const jupId = toMintOrId(mintOrTicker);
-
       // 1) Jupiter price endpoint
-      const fromJup = await fetchFromJupiter(jupId, fetchImpl, PRICES_TIMEOUT_MS);
+      const fromJup = await fetchFromJupiter(
+        key,
+        fetchImpl,
+        PRICES_TIMEOUT_MS
+      );
       if (fromJup && fromJup > 0) {
         resolvedPrice = fromJup;
         priceCache.setWithTTL(key, { value: fromJup });
@@ -217,6 +213,9 @@ export async function getPricesUSD(
 
   for (const id of ids) {
     const normalizedKey = normalizeKey(id);
+    if (!normalizedKey) {
+      continue;
+    }
     const liveEntry = priceCache.get(normalizedKey);
     if (liveEntry?.value !== undefined) {
       continue;
@@ -227,18 +226,12 @@ export async function getPricesUSD(
       continue;
     }
 
-    const requestId = toMintOrId(id).trim();
-    if (!requestId) {
-      continue;
-    }
-
-    const canonical = normalizeKey(requestId);
-    const target = batchTargets.get(canonical);
+    const target = batchTargets.get(normalizedKey);
     if (target) {
       target.normalizedKeys.add(normalizedKey);
     } else {
-      batchTargets.set(canonical, {
-        requestId,
+      batchTargets.set(normalizedKey, {
+        requestId: normalizedKey,
         normalizedKeys: new Set([normalizedKey]),
       });
     }
@@ -271,8 +264,6 @@ export async function getPricesUSD(
 
 export type PriceLookupOptions = {
   tokenMint?: string;
-  tokenTicker?: string;
-  isSol?: boolean;
   fetchImpl?: FetchLike;
 };
 
@@ -283,40 +274,13 @@ export type PriceLookupResult = {
 
 export async function resolveTokenPriceUSD({
   tokenMint,
-  tokenTicker,
-  isSol,
   fetchImpl,
 }: PriceLookupOptions): Promise<PriceLookupResult | null> {
-  const seen = new Set<string>();
-  const candidates: string[] = [];
-
-  const pushCandidate = (candidate?: string) => {
-    if (!candidate) return;
-    const trimmed = candidate.trim();
-    if (!trimmed) return;
-    const normalized = normalizeKey(trimmed);
-    if (seen.has(normalized)) return;
-    seen.add(normalized);
-    candidates.push(trimmed);
-  };
-
-  if (isSol) {
-    pushCandidate("SOL");
-    pushCandidate(WSOL_MINT);
-  } else {
-    pushCandidate(tokenMint);
-    pushCandidate(tokenTicker);
-  }
-
-  // Always fall back to SOL pricing if token-specific lookups fail.
-  pushCandidate("SOL");
-  pushCandidate(WSOL_MINT);
-
-  for (const candidate of candidates) {
-    const price = await getPriceUSD(candidate, fetchImpl);
-    if (price && Number.isFinite(price) && price > 0) {
-      return { price, identifier: candidate };
-    }
+  const candidate = tokenMint?.trim();
+  if (!candidate) return null;
+  const price = await getPriceUSD(candidate, fetchImpl);
+  if (price && Number.isFinite(price) && price > 0) {
+    return { price, identifier: candidate };
   }
 
   return null;

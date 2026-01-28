@@ -10,7 +10,6 @@ export type PriceLookupRequest = PriceLookupOptions;
 
 export type CachedPriceLookup = PriceLookupResult & {
   tokenMint?: string;
-  tokenTicker?: string;
   resolvedAt: number;
 };
 
@@ -22,20 +21,15 @@ const normalize = (value?: string | null): string | null => {
   if (!value) return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
-  return trimmed.toUpperCase();
+  return trimmed;
 };
 
 const buildCacheKeys = (request: PriceLookupRequest): string[] => {
   const keys = new Set<string>();
   const normalizedMint = normalize(request.tokenMint);
-  const normalizedTicker = normalize(request.tokenTicker);
 
   if (normalizedMint) {
     keys.add(normalizedMint);
-  }
-
-  if (normalizedTicker) {
-    keys.add(normalizedTicker);
   }
 
   return Array.from(keys.values());
@@ -54,7 +48,6 @@ const matchesRequest = (
   const hintKeys = new Set(
     buildCacheKeys({
       tokenMint: hint.tokenMint,
-      tokenTicker: hint.tokenTicker,
     })
   );
 
@@ -72,7 +65,6 @@ export function rememberPriceLookup(
   const entry: CachedPriceLookup = {
     ...lookup,
     tokenMint: request.tokenMint?.trim() || (lookup as CachedPriceLookup).tokenMint,
-    tokenTicker: request.tokenTicker?.trim() || (lookup as CachedPriceLookup).tokenTicker,
     resolvedAt:
       (lookup as CachedPriceLookup).resolvedAt ?? Date.now(),
   };
@@ -114,8 +106,6 @@ export async function getUsdPrice(
 ): Promise<CachedPriceLookup | null> {
   const request: PriceLookupRequest = {
     tokenMint: input.tokenMint,
-    tokenTicker: input.tokenTicker,
-    isSol: input.isSol,
     fetchImpl: input.fetchImpl,
   };
 

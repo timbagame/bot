@@ -1595,12 +1595,11 @@ export class GameManager {
     amount: number | bigint | string,
     decimals: number,
     tokenMint?: string,
-    tokenTicker?: string,
     isSol?: boolean,
     priceHint?: CachedPriceLookup | null,
     priceCacheKey?: string
   ): Promise<{ text: string; price: number } | null> {
-    const reference = isSol ? "SOL" : tokenMint || tokenTicker;
+    const reference = isSol ? WSOL_MINT : tokenMint;
     if (!reference) return null;
     const lamports = coerceLamportValue(amount);
     if (lamports === null || lamports <= 0n) return null;
@@ -1612,9 +1611,7 @@ export class GameManager {
         priceHint ??
         (priceCacheKey ? this.gamePriceCache.get(priceCacheKey) ?? null : null);
       const lookup = await getUsdPrice({
-        tokenMint,
-        tokenTicker,
-        isSol,
+        tokenMint: reference,
         hint: hintToUse,
       });
       if (!lookup) {
@@ -2706,7 +2703,6 @@ export class GameManager {
       amountLamports,
       decimals,
       tokenMint,
-      tokenTicker,
       isSol,
       cachedGamePrice,
       gameCacheKey
@@ -2749,7 +2745,6 @@ export class GameManager {
         totalPot,
         decimals,
         tokenMint,
-        tokenTicker,
         isSol,
         cachedGamePrice,
         gameCacheKey
@@ -2954,7 +2949,6 @@ export class GameManager {
         totalPot,
         decimals,
         tokenMint,
-        resolvedTicker,
         isSol,
         priceHint,
         gameAddress
@@ -4048,9 +4042,9 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
       }
 
       if (parsedAmount.priceLookup) {
+        const priceMint = parsedAmount.isSol ? WSOL_MINT : tokenMint;
         const cachedPrice = rememberPriceLookup(parsedAmount.priceLookup, {
-          tokenMint,
-          tokenTicker,
+          tokenMint: priceMint,
         });
         this.gamePriceCache.setWithTTL(gamePda.toBase58(), cachedPrice);
       }
@@ -5601,9 +5595,9 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     for (const [ticker, info] of tickerInfo) {
       if (info.mint) {
         try {
+          const priceMint = info.mint === "SOL" ? WSOL_MINT : info.mint;
           const priceResult = await getUsdPrice({
-            tokenMint: info.mint,
-            tokenTicker: ticker,
+            tokenMint: priceMint,
           });
           if (priceResult?.price != null && priceResult.price > 0) {
             tokenPrices.set(ticker, priceResult.price);
@@ -5641,7 +5635,9 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             if (meta?.decimals != null) decimals = meta.decimals;
           } catch { /* ignore */ }
 
-          const priceResult = await getUsdPrice({ tokenMint, tokenTicker: "" });
+          const priceResult = await getUsdPrice({
+            tokenMint: tokenMint === "SOL" ? WSOL_MINT : tokenMint,
+          });
           if (priceResult?.price && priceResult.price > 0) {
             const divisor = Math.pow(10, decimals);
             wonUsd += (wonAmount / divisor) * priceResult.price;
@@ -5661,7 +5657,9 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
             if (meta?.decimals != null) decimals = meta.decimals;
           } catch { /* ignore */ }
 
-          const priceResult = await getUsdPrice({ tokenMint, tokenTicker: "" });
+          const priceResult = await getUsdPrice({
+            tokenMint: tokenMint === "SOL" ? WSOL_MINT : tokenMint,
+          });
           if (priceResult?.price && priceResult.price > 0) {
             const divisor = Math.pow(10, decimals);
             lostUsd += (lostAmount / divisor) * priceResult.price;

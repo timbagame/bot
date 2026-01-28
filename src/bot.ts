@@ -1133,10 +1133,12 @@ const prepareTokenTradeQuote = async ({
     if (wouldLeaveBelowMinimum) {
       let solPriceUsd = 0;
       try {
+        const priceMint =
+          inputAsset.mint === "SOL" || inputAsset.ticker === "SOL"
+            ? WSOL_MINT
+            : inputAsset.mint;
         const priceLookup = await getUsdPrice({
-          tokenMint: inputAsset.mint,
-          tokenTicker: inputAsset.ticker,
-          isSol: true,
+          tokenMint: priceMint,
         });
         solPriceUsd = priceLookup?.price ?? 0;
       } catch (priceError) {
@@ -2888,14 +2890,11 @@ const getDefaultTokenMetadata = async () => {
 
 const fetchTokenPriceUSD = async ({
   tokenMint,
-  tokenTicker,
 }: {
   tokenMint: string;
-  tokenTicker: string;
 }): Promise<number | null> => {
   const lookup = await getUsdPrice({
-    tokenMint,
-    tokenTicker,
+    tokenMint: tokenMint === "SOL" ? WSOL_MINT : tokenMint,
   });
   return lookup?.price ?? null;
 };
@@ -3853,9 +3852,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
   let usdSuffix = "";
   try {
     const priceLookup = await getUsdPrice({
-      tokenMint: parsedAmount.tokenMint,
-      tokenTicker: parsedAmount.tokenTicker,
-      isSol: parsedAmount.isSol,
+      tokenMint: parsedAmount.isSol ? WSOL_MINT : parsedAmount.tokenMint,
       hint: parsedAmount.priceLookup,
     });
 
@@ -4409,6 +4406,7 @@ const resolveLeaderboardPlayers = async (
     Array.from(tokenMints).map(async (mint) => {
       try {
         const isSol = mint === "SOL" || mint === WSOL_MINT;
+        const priceMint = isSol ? WSOL_MINT : mint;
 
         // Get token decimals - default to 9 for SOL/WSOL, fetch metadata for others
         let decimals = 9;
@@ -4420,8 +4418,7 @@ const resolveLeaderboardPlayers = async (
         }
 
         const lookup = await getUsdPrice({
-          tokenMint: isSol ? undefined : mint,
-          isSol,
+          tokenMint: priceMint,
         });
 
         if (lookup?.price && Number.isFinite(lookup.price) && lookup.price > 0) {
@@ -5210,21 +5207,16 @@ const buildAdminIntegratorConfig = async ({
   try {
     const tradeIsSol =
       tradeMint === WSOL_MINT || tradeTicker.trim().toUpperCase() === "SOL";
+    const tradePriceMint = tradeIsSol ? WSOL_MINT : tradeMint;
     const [tradePriceLookup, solPriceLookup] = await Promise.all([
       getUsdPrice({
-        tokenMint: tradeMint,
-        tokenTicker: tradeTicker,
-        isSol: tradeIsSol,
+        tokenMint: tradePriceMint,
       }),
-      getUsdPrice({ isSol: true }),
+      getUsdPrice({ tokenMint: WSOL_MINT }),
     ]);
     const tradePriceUsd = tradeIsSol
       ? tradePriceLookup?.price ?? 0
-      : tradePriceLookup &&
-          tradePriceLookup.identifier.toUpperCase() !== "SOL" &&
-          tradePriceLookup.identifier !== WSOL_MINT
-        ? tradePriceLookup.price
-        : 0;
+      : tradePriceLookup?.price ?? 0;
     const solPrice = tradeIsSol
       ? tradePriceLookup?.price ?? solPriceLookup?.price ?? 0
       : solPriceLookup?.price ?? 0;
