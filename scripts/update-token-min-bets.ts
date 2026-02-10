@@ -9,6 +9,7 @@ import { LAMPORTS_PER_SOL } from "../src/utils/constants";
 import {
   getSupportedTokens,
   type TokenConfig,
+  WSOL_MINT,
 } from "../src/utils/token-registry";
 import {
   bundleFromKeypair,
@@ -30,10 +31,41 @@ const DEFAULT_COMPLETION_SIGNATURES = BigInt(
 const DEFAULT_MARGIN_MULTIPLIER = Number(
   process.env["MIN_BET_MARGIN_MULTIPLIER"] ?? "1.5"
 );
+const HARD_MIN_BET_USD_FLOOR = 0.1;
+
+function resolveMinBetUsdFloor(): number {
+  const configured = Number(process.env["MIN_BET_USD_FLOOR"] ?? "0.10");
+  if (!Number.isFinite(configured) || configured <= 0) {
+    return HARD_MIN_BET_USD_FLOOR;
+  }
+  return Math.max(configured, HARD_MIN_BET_USD_FLOOR);
+}
+
+const MIN_BET_USD_FLOOR = resolveMinBetUsdFloor();
 
 type TokenTarget = TokenConfig & {
   minCompletionFeeLamports?: bigint;
 };
+
+type PriceResolver = (identifier: string) => Promise<number>;
+
+export function computeMinBetUsdFloorRaw(
+  tokenPriceUSD: number,
+  decimals: number,
+  minBetUsdFloor: number = MIN_BET_USD_FLOOR
+): bigint {
+  if (!Number.isFinite(tokenPriceUSD) || tokenPriceUSD <= 0) {
+    return 0n;
+  }
+  const normalizedFloor =
+    !Number.isFinite(minBetUsdFloor) || minBetUsdFloor <= 0
+      ? HARD_MIN_BET_USD_FLOOR
+      : Math.max(minBetUsdFloor, HARD_MIN_BET_USD_FLOOR);
+  const rawAmount = Math.ceil(
+    (normalizedFloor / tokenPriceUSD) * Math.pow(10, decimals)
+  );
+  return rawAmount > 0 ? BigInt(rawAmount) : 0n;
+}
 
 const buildCompletionFeeEnvKey = (ticker: string): string =>
   `${ticker.toUpperCase()}_MIN_COMPLETION_FEE_LAMPORTS`;
@@ -179,6 +211,13 @@ async function buildProposal(
   );
 
   let requiredMinAmount = BigInt(Math.ceil(roundedRequiredMinNumber));
+  const minBetUsdFloorRaw = computeMinBetUsdFloorRaw(
+    tokenPriceUSD,
+    metadata.decimals
+  );
+  if (minBetUsdFloorRaw > requiredMinAmount) {
+    requiredMinAmount = minBetUsdFloorRaw;
+  }
 
   if (requiredMinAmount >= scale && scale > 0n) {
     const remainder = requiredMinAmount % scale;
@@ -212,6 +251,18 @@ async function confirm(prompt: string): Promise<boolean> {
   }
 }
 
+export async function resolveRequiredSolPriceUSD(
+  resolvePrice: PriceResolver = getPriceUSD
+): Promise<number> {
+  const solPriceUSD = await resolvePrice(WSOL_MINT);
+  if (!Number.isFinite(solPriceUSD) || solPriceUSD <= 0) {
+    throw new Error(
+      `Failed to fetch SOL price for ${WSOL_MINT}. Aborting to avoid zero minimum bet updates.`
+    );
+  }
+  return solPriceUSD;
+}
+
 async function main() {
   console.log("⚙️  Calibrating minimum bet sizes...\n");
 
@@ -233,7 +284,7 @@ async function main() {
   const completionCostLamports = await estimateCompletionCostLamports(
     connection
   );
-  const solPriceUSD = await getPriceUSD("SOL");
+  const solPriceUSD = await resolveRequiredSolPriceUSD();
   const completionCostSOL = Number(completionCostLamports) / LAMPORTS_PER_SOL;
   const completionCostUSD = completionCostSOL * solPriceUSD;
 
@@ -248,6 +299,7 @@ async function main() {
     `   Estimated USD cost per completion: $${completionCostUSD.toFixed(4)}`
   );
   console.log(`   Margin multiplier: x${DEFAULT_MARGIN_MULTIPLIER}`);
+  console.log(`   Minimum bet USD floor: $${MIN_BET_USD_FLOOR.toFixed(2)}`);
 
   const [oraclePda] = anchor.web3.PublicKey.findProgramAddressSync(
     [Buffer.from("oracle")],
@@ -379,7 +431,9 @@ async function main() {
   console.log("\n🎉 Minimum bet calibration complete.");
 }
 
-main().catch((error) => {
-  console.error("❌ Failed to update minimum bets:", error);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((error) => {
+    console.error("❌ Failed to update minimum bets:", error);
+    process.exit(1);
+  });
+}
