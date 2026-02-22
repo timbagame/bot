@@ -145,7 +145,7 @@ import { SlidingWindowRateLimiter } from "./utils/rate-limiter";
 import { sweepFees } from "./services/fee-sweeper";
 import { formatDuration } from "./utils/format-time";
 import { getRetryAfterSeconds, isRateLimited } from "./utils/telegram-errors";
-import { normalizeLeadingCommand } from "./utils/command-normalizer";
+import { normalizeBotCommandEntity } from "./utils/command-normalizer";
 export type { CreateGameViaCommandOptions } from "./handlers/game-commands";
 
 // ================================
@@ -190,11 +190,28 @@ bot.use(async (ctx, next) => {
 });
 
 bot.use(async (ctx, next) => {
-  const textMessage = ctx.message?.text;
-  if (typeof textMessage === "string" && textMessage.startsWith("/")) {
-    const normalizedText = normalizeLeadingCommand(textMessage);
-    if (normalizedText !== textMessage && ctx.message) {
-      (ctx.message as any).text = normalizedText;
+  const message = ctx.message ?? ctx.channelPost;
+  const body = message?.text ?? message?.caption;
+  const entities = message?.text ? message.entities : message?.caption_entities;
+
+  if (typeof body === "string" && Array.isArray(entities)) {
+    const botCommandEntity = entities.find(
+      (entity) => entity?.type === "bot_command" && entity?.offset === 0
+    );
+
+    if (botCommandEntity && Number.isInteger(botCommandEntity.length)) {
+      const normalizedBody = normalizeBotCommandEntity(
+        body,
+        botCommandEntity.length
+      );
+
+      if (normalizedBody !== body) {
+        if (message?.text != null) {
+          (message as any).text = normalizedBody;
+        } else if (message?.caption != null) {
+          (message as any).caption = normalizedBody;
+        }
+      }
     }
   }
 
