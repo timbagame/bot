@@ -145,6 +145,7 @@ import { SlidingWindowRateLimiter } from "./utils/rate-limiter";
 import { sweepFees } from "./services/fee-sweeper";
 import { formatDuration } from "./utils/format-time";
 import { getRetryAfterSeconds, isRateLimited } from "./utils/telegram-errors";
+import { normalizeLeadingCommand } from "./utils/command-normalizer";
 export type { CreateGameViaCommandOptions } from "./handlers/game-commands";
 
 // ================================
@@ -189,6 +190,14 @@ bot.use(async (ctx, next) => {
 });
 
 bot.use(async (ctx, next) => {
+  const textMessage = ctx.message?.text;
+  if (typeof textMessage === "string" && textMessage.startsWith("/")) {
+    const normalizedText = normalizeLeadingCommand(textMessage);
+    if (normalizedText !== textMessage && ctx.message) {
+      (ctx.message as any).text = normalizedText;
+    }
+  }
+
   const from = ctx.from;
   if (
     gameManager &&
