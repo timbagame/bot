@@ -4,6 +4,7 @@ import type { NextFunction } from "grammy";
 import type { InlineKeyboardButton } from "grammy/types";
 import { run, sequentialize } from "@grammyjs/runner";
 import { autoRetry } from "@grammyjs/auto-retry";
+import { CommandGroup } from "@grammyjs/commands";
 import { WalletManager } from "./utils/wallet";
 import { TokenManager, formatParseAmountError } from "./utils/token-manager";
 import * as anchor from "@coral-xyz/anchor";
@@ -3414,7 +3415,22 @@ const createBalanceDeps = (): BalanceDeps => ({
   handleCommandError,
 });
 
-bot.command(["start", "balance"], async (ctx: Context) => {
+const caseInsensitiveCommands = new CommandGroup<Context>({
+  ignoreCase: true,
+});
+bot.use(caseInsensitiveCommands);
+
+const registerCaseInsensitiveCommand = (
+  command: string | string[],
+  handler: (ctx: Context) => Promise<unknown> | unknown
+) => {
+  const commands = Array.isArray(command) ? command : [command];
+  for (const commandName of commands) {
+    caseInsensitiveCommands.command(commandName, "", handler);
+  }
+};
+
+registerCaseInsensitiveCommand(["start", "balance"], async (ctx: Context) => {
   if (ctx.chat?.id) {
     initiatedChats.add(ctx.chat.id);
   }
@@ -3422,7 +3438,7 @@ bot.command(["start", "balance"], async (ctx: Context) => {
   await onBalance(ctx as any, createBalanceDeps());
 });
 
-bot.command(["coinflip", "cf"], async (ctx) => {
+registerCaseInsensitiveCommand(["coinflip", "cf"], async (ctx) => {
   try {
     await handleCoinflipCommand(
       ctx as Context & { message?: any },
@@ -3434,7 +3450,7 @@ bot.command(["coinflip", "cf"], async (ctx) => {
   }
 });
 
-bot.command(["giveaway", "ga"], async (ctx) => {
+registerCaseInsensitiveCommand(["giveaway", "ga"], async (ctx) => {
   await handleGiveawayCommand(ctx as Context & { message?: any });
 });
 
@@ -3442,7 +3458,7 @@ bot.command(["giveaway", "ga"], async (ctx) => {
 // WALLET COMMANDS
 // ================================
 
-bot.command(["withdraw", "wh"], async (ctx: Context) => {
+registerCaseInsensitiveCommand(["withdraw", "wh"], async (ctx: Context) => {
   const telegramId = await getRequiredTelegramIdForContext(
     ctx,
     "withdraw command"
@@ -3907,7 +3923,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
   }
 };
 
-bot.command("tip", handleTipCommand);
+registerCaseInsensitiveCommand("tip", handleTipCommand);
 
 export const __test_handleTipCommand = handleTipCommand;
 
@@ -3941,7 +3957,7 @@ export const __test_clearTransactionCache = (): void => {
 // TOKEN MANAGEMENT COMMANDS
 // ================================
 
-bot.command("default", async (ctx: Context) => {
+registerCaseInsensitiveCommand("default", async (ctx: Context) => {
   if (!ctx.from || !ctx.chat) return;
 
   const args = ctx.message?.text?.split(" ");
@@ -3952,7 +3968,7 @@ bot.command("default", async (ctx: Context) => {
 // INFORMATION COMMANDS
 // ================================
 
-bot.command("help", async (ctx: Context) => {
+registerCaseInsensitiveCommand("help", async (ctx: Context) => {
   const helpSections = [
     "<b>📝 Available Commands:</b>",
     "",
@@ -4074,7 +4090,7 @@ const handleActiveCommand = async (ctx: Context) => {
   }
 };
 
-bot.command("active", handleActiveCommand);
+registerCaseInsensitiveCommand("active", handleActiveCommand);
 
 const handlePublicCommand = async (ctx: Context) => {
   const telegramId = await getRequiredTelegramIdForContext(
@@ -4132,10 +4148,10 @@ const handlePublicCommand = async (ctx: Context) => {
   }
 };
 
-bot.command("public", handlePublicCommand);
+registerCaseInsensitiveCommand("public", handlePublicCommand);
 export const __test_handlePublicCommand = handlePublicCommand;
 
-bot.command("games", async (ctx: Context) => {
+registerCaseInsensitiveCommand("games", async (ctx: Context) => {
   const telegramId = await getRequiredTelegramIdForContext(
     ctx,
     "games command"
@@ -4472,7 +4488,7 @@ const resolveLeaderboardPlayers = async (
     .sort((a, b) => b.netWonUsd - a.netWonUsd);
 };
 
-bot.command(["leaderboard", "lb"], async (ctx: Context) => {
+registerCaseInsensitiveCommand(["leaderboard", "lb"], async (ctx: Context) => {
   if (!isGroupChat(ctx)) {
     return ctx.reply("❌ Leaderboard is only available in group chats.");
   }
@@ -4584,7 +4600,7 @@ bot.command(["leaderboard", "lb"], async (ctx: Context) => {
   }
 });
 
-bot.command(["globalboard", "gb"], async (ctx: Context) => {
+registerCaseInsensitiveCommand(["globalboard", "gb"], async (ctx: Context) => {
   try {
     console.log("🌐 Generating global leaderboard");
 
@@ -4634,7 +4650,7 @@ bot.command(["globalboard", "gb"], async (ctx: Context) => {
 // SECURE COMMANDS
 // ================================
 
-bot.command("oracle", async (ctx: Context) => {
+registerCaseInsensitiveCommand("oracle", async (ctx: Context) => {
   try {
     const oraclePda = PDAManager.getOraclePDA(program.programId);
     const oracleAccount = await program.account.oracle.fetch(oraclePda);
