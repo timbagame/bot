@@ -1696,9 +1696,6 @@ export class WalletManager {
     }
 
     const remainingLamports = availableLamports - unwrapLamports;
-    if (remainingLamports < 0) {
-      throw new Error("Unwrap would reduce WSOL balance below zero.");
-    }
 
     const instructions: TransactionInstruction[] = [
       createSyncNativeInstruction(wsolAta),
@@ -2012,12 +2009,6 @@ export class WalletManager {
     }
 
     const transferLamports = nativeLamports - feeWithTransfer;
-
-    if (transferLamports <= 0) {
-      throw new Error(
-        "Not enough SOL to withdraw after paying transaction fees."
-      );
-    }
 
     console.log(
       `${debugPrefix} Transfer plan: native ${formatLamports(transferLamports)}`

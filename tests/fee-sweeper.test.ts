@@ -357,12 +357,7 @@ describe("Jupiter referral sweep threshold", () => {
       tokenFeeProcessor: async () => false,
       referralSweeper: async () => {
         // Simulate the threshold check - total value $2 (below $5)
-        const totalUsdValue = 2;
-        if (totalUsdValue < 5) {
-          return 0;
-        }
-        claimAttempted = true;
-        return 1;
+        return 0;
       },
       tokenToSolSweeper: async () => {},
     });
@@ -386,10 +381,6 @@ describe("Jupiter referral sweep threshold", () => {
       tokenFeeProcessor: async () => false,
       referralSweeper: async () => {
         // Simulate the threshold check - total value $10 (above $5)
-        const totalUsdValue = 10;
-        if (totalUsdValue < 5) {
-          return 0;
-        }
         claimAttempted = true;
         return 3;
       },
@@ -457,10 +448,7 @@ describe("Jupiter referral sweep threshold", () => {
         // Simulate: tokenA has 0 balance, tokenB has $3 value
         // Only tokenB should count, so total is $3 (below threshold)
         totalCalculated = 3; // tokenB only
-        if (totalCalculated < 5) {
-          return 0;
-        }
-        return 1;
+        return 0;
       },
       tokenToSolSweeper: async () => {},
     });

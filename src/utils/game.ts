@@ -1900,13 +1900,6 @@ export class GameManager {
     }
 
     const deficit = requiredLamports - currentTokenBalance;
-    if (deficit <= 0) {
-      return {
-        success: true,
-        tokenBalance: currentTokenBalance,
-        solBalance: currentSolBalance,
-      };
-    }
 
     const projectedRemaining = currentSolBalance - deficit - wrapFeeBuffer;
     if (projectedRemaining < minSolBuffer) {
