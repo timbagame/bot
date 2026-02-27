@@ -1713,9 +1713,7 @@ export const createGameCallbacksModule = (
                   await ctx.api.deleteMessage(chatId, messageId);
                 } catch (error) {
                   console.warn("Could not delete confirmation message:", error);
-                  if (isMessageMissing(error)) {
-                    confirmMessageMissing = true;
-                  } else {
+                  if (!isMessageMissing(error)) {
                     try {
                       await ctx.api.editMessageText(
                         chatId,
@@ -1728,9 +1726,6 @@ export const createGameCallbacksModule = (
                         "Failed to mark confirmation message as processed:",
                         fallbackError
                       );
-                      if (isMessageMissing(fallbackError)) {
-                        confirmMessageMissing = true;
-                      }
                     }
                   }
                 }

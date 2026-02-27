@@ -113,7 +113,6 @@ export const confirmTransactionWithRecovery = async (
       normalizedMessage.includes("last valid block height");
 
     let lastRecoveryError: Error | undefined;
-    let lastObservationError: Error | undefined;
 
     if ((isTimeout || isExpiration) && resubmit) {
       for (
@@ -194,7 +193,6 @@ export const confirmTransactionWithRecovery = async (
                 `❌ Probe "${probe.label}" failed during ${operationLabel} retry ${attemptLabel}`,
                 normalizedProbeError
               );
-              lastObservationError = normalizedProbeError;
               throw normalizedProbeError;
             }
           }
@@ -239,7 +237,7 @@ export const confirmTransactionWithRecovery = async (
         (timeoutError as any).recoveryErrors = recoveryErrors;
       }
 
-      const preferredCause = lastObservationError ?? lastRecoveryError;
+      const preferredCause = lastRecoveryError;
       if (preferredCause && (timeoutError as any).cause === undefined) {
         (timeoutError as any).cause = preferredCause;
       }

@@ -3903,7 +3903,6 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         lamportsBalance = await this.wallet.getBalance(telegramId, {
           forceFresh: true,
         });
-        solBalance = lamportsBalance;
         if (lamportsBalance < requiredSolReserveLamports) {
           return {
             success: false,
@@ -3983,14 +3982,14 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
         )
         .instruction();
 
-      let tx = await this.wallet.sendTransaction([
+      const creationTx = await this.wallet.sendTransaction([
         gameInstruction,
       ], [playerKp]);
 
       debugLog(`📍 Game address: ${gamePda.toBase58()}`);
 
-      tx = await this.confirmTransactionWithRecovery(
-        tx,
+      await this.confirmTransactionWithRecovery(
+        creationTx,
         gamePda,
         "Game creation",
         undefined,
@@ -4683,8 +4682,6 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
           const refreshedLamports = await this.wallet.getBalance(telegramId, {
             forceFresh: true,
           });
-          lamportsBalance = refreshedLamports;
-          solBalance = refreshedLamports;
           if (refreshedLamports < minSolBuffer) {
             return {
               success: false,
@@ -5163,10 +5160,10 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       );
     };
 
-    let tx = await sendUnjoinTransaction();
+    const unjoinTx = await sendUnjoinTransaction();
 
-    tx = await this.confirmTransactionWithRecovery(
-      tx,
+    await this.confirmTransactionWithRecovery(
+      unjoinTx,
       gamePda,
       "Player unjoin",
       playerPubkey,

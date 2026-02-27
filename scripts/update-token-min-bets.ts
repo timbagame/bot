@@ -184,7 +184,7 @@ async function buildProposal(
       ? 0
       : (Number(tokenCompletionCostLamports) / LAMPORTS_PER_SOL) * solPriceUSD;
 
-  let costInTokenRaw = 0n;
+  let costInTokenRaw: bigint;
   if (tokenPriceUSD > 0) {
     const costInToken = effectiveCompletionCostUSD / tokenPriceUSD; // token amount
     const raw = Math.ceil(costInToken * Math.pow(10, metadata.decimals));
