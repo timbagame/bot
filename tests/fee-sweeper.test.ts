@@ -11,6 +11,15 @@ import {
 import type { SwapRequest } from "../src/utils/swap/types";
 import { WSOL_MINT, parseEnableFeeSweeperFlag } from "../src/utils/constants";
 
+type TestPriceResolver = (input: {
+  tokenMint: string;
+  tokenTicker?: string;
+}) => Promise<{
+  price?: number;
+  identifier?: string;
+  resolvedAt?: number;
+} | null>;
+
 const buildPriceResolver = (price: number, identifier: string = "AAA") =>
   async () => ({
     price,
@@ -196,14 +205,12 @@ describe("WSOL unwrap helper", () => {
 describe("sweeping tokens to SOL", () => {
   test("sends swaps for balances above $5", async () => {
     const admin = Keypair.generate();
-    const tokens: [
-      { mint: string; ticker: string },
-      { mint: string; ticker: string }
-    ] = [
+    const tokens = [
       { mint: Keypair.generate().publicKey.toBase58(), ticker: "AAA" },
       { mint: Keypair.generate().publicKey.toBase58(), ticker: "BBB" },
     ];
-    const [tokenA, tokenB] = tokens;
+    const tokenA = tokens[0]!;
+    const tokenB = tokens[1]!;
 
     const wallet = {
       getAdminKeypair: () => admin,
@@ -390,13 +397,7 @@ describe("Jupiter referral sweep threshold", () => {
   test("accumulates value across multiple token accounts for threshold", async () => {
     const TOKEN_A_MINT = "test-token-a-mint";
     const TOKEN_B_MINT = "test-token-b-mint";
-    let receivedPriceResolver:
-      | ((input: { tokenMint: string; tokenTicker?: string }) => Promise<{
-          price?: number;
-          identifier?: string;
-          resolvedAt?: number;
-        } | null>)
-      | undefined;
+    let receivedPriceResolver: TestPriceResolver | undefined;
 
     await sweepFees({
       walletManager: { getAdminKeypair: () => adminKeypair } as any,
@@ -421,7 +422,7 @@ describe("Jupiter referral sweep threshold", () => {
         _entries,
         priceResolver
       ) => {
-        receivedPriceResolver = priceResolver;
+        receivedPriceResolver = priceResolver as TestPriceResolver;
         return 0;
       },
       tokenToSolSweeper: async () => {},
@@ -470,7 +471,7 @@ describe("Jupiter referral sweep threshold", () => {
       walletManager: { getAdminKeypair: () => adminKeypair } as any,
       tokenConfigs: [],
       referralEntries: [{ mint: "test", referralAccount: "someAccount" }],
-      priceResolver: async (_params: { tokenMint?: string }): Promise<null> =>
+      priceResolver: async (_params: { tokenMint?: string }) =>
         null, // No price data
       contextFactory: () =>
         ({
