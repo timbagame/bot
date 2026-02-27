@@ -11,6 +11,34 @@ import {
 import type { SwapRequest } from "../src/utils/swap/types";
 import { WSOL_MINT, parseEnableFeeSweeperFlag } from "../src/utils/constants";
 
+const buildPriceResolver = (price: number, identifier: string = "AAA") =>
+  async () => ({
+    price,
+    identifier,
+    resolvedAt: Date.now(),
+  });
+
+const createSwapManagerFactory = (swapRequests: SwapRequest[]) => () => ({
+  getQuote: async (request: SwapRequest) => ({ request } as any),
+  executeJupiterSwap: async (request: SwapRequest) => {
+    swapRequests.push(request);
+    return "sig";
+  },
+});
+
+const buildConnection = () =>
+  ({
+    getParsedAccountInfo: async () => ({
+      value: {
+        data: {
+          parsed: { info: { decimals: 9 } },
+        },
+      },
+    }),
+    getAccountInfo: async () => null,
+    getProgramAccounts: async () => [],
+  }) as any;
+
 describe("fee sweeper helpers", () => {
   const wallet = {
     formatTokenBalance: (raw: number, decimals: number) =>
@@ -19,11 +47,7 @@ describe("fee sweeper helpers", () => {
   const tokenConfig = { mint: "mint", ticker: "TEST" };
 
   test("skips withdrawals when below $5 threshold", async () => {
-    const priceResolver = async () => ({
-      price: 1,
-      identifier: "AAA",
-      resolvedAt: Date.now(),
-    });
+    const priceResolver = buildPriceResolver(1);
     const result = await __test_shouldWithdrawToken(
       wallet,
       tokenConfig,
@@ -38,11 +62,7 @@ describe("fee sweeper helpers", () => {
   });
 
   test("allows withdrawals at or above the $5 threshold", async () => {
-    const priceResolver = async () => ({
-      price: 5,
-      identifier: "AAA",
-      resolvedAt: Date.now(),
-    });
+    const priceResolver = buildPriceResolver(5);
     const result = await __test_shouldWithdrawToken(
       wallet,
       tokenConfig,
@@ -60,11 +80,7 @@ describe("token to SOL sweep helpers", () => {
   const tokenConfig = { mint: "mint", ticker: "TEST" };
 
   test("skips swaps when under $5", async () => {
-    const priceResolver = async () => ({
-      price: 1,
-      identifier: "AAA",
-      resolvedAt: Date.now(),
-    });
+    const priceResolver = buildPriceResolver(1);
     const result = await __test_shouldSwapTokenBalance(
       tokenConfig as any,
       2_000_000_000n,
@@ -77,11 +93,7 @@ describe("token to SOL sweep helpers", () => {
   });
 
   test("allows swaps at or above $5", async () => {
-    const priceResolver = async () => ({
-      price: 2.5,
-      identifier: "AAA",
-      resolvedAt: Date.now(),
-    });
+    const priceResolver = buildPriceResolver(2.5);
     const result = await __test_shouldSwapTokenBalance(
       tokenConfig as any,
       2_000_000_000n,
@@ -97,11 +109,7 @@ describe("token to SOL sweep helpers", () => {
 describe("WSOL unwrap helper", () => {
   const owner = Keypair.generate();
   const payer = Keypair.generate();
-  const priceResolver = async () => ({
-    price: 1,
-    identifier: "WSOL/USD",
-    resolvedAt: Date.now(),
-  });
+  const priceResolver = buildPriceResolver(1, "WSOL/USD");
 
   const buildWallet = (onUnwrap?: (lamports: number) => void) => ({
     getTokenMetadata: async () => ({ decimals: 9 }),
@@ -209,19 +217,8 @@ describe("sweeping tokens to SOL", () => {
     };
 
     const swapRequests: SwapRequest[] = [];
-    const swapManagerFactory = () => ({
-      getQuote: async (request: SwapRequest) => ({ request } as any),
-      executeJupiterSwap: async (request: SwapRequest) => {
-        swapRequests.push(request);
-        return "sig";
-      },
-    });
-
-    const priceResolver = async () => ({
-      price: 1,
-      identifier: "AAA",
-      resolvedAt: Date.now(),
-    });
+    const swapManagerFactory = createSwapManagerFactory(swapRequests);
+    const priceResolver = buildPriceResolver(1);
     const balanceFetcher = async (
       _connection: any,
       _owner: PublicKey,
@@ -254,13 +251,7 @@ describe("sweeping tokens to SOL", () => {
     } as any;
 
     const swapRequests: SwapRequest[] = [];
-    const swapManagerFactory = () => ({
-      getQuote: async (request: SwapRequest) => ({ request } as any),
-      executeJupiterSwap: async (request: SwapRequest) => {
-        swapRequests.push(request);
-        return "sig";
-      },
-    });
+    const swapManagerFactory = createSwapManagerFactory(swapRequests);
 
     const priceResolver = async (request: { tokenMint?: string }) =>
       request.tokenMint === WSOL_MINT
@@ -294,13 +285,7 @@ describe("sweeping tokens to SOL", () => {
     } as any;
 
     const swapRequests: SwapRequest[] = [];
-    const swapManagerFactory = () => ({
-      getQuote: async (request: SwapRequest) => ({ request } as any),
-      executeJupiterSwap: async (request: SwapRequest) => {
-        swapRequests.push(request);
-        return "sig";
-      },
-    });
+    const swapManagerFactory = createSwapManagerFactory(swapRequests);
 
     const priceResolver = async (request: { tokenMint?: string }) =>
       request.tokenMint === WSOL_MINT
@@ -328,20 +313,6 @@ describe("Jupiter referral sweep threshold", () => {
     root: adminKeypair,
     anchor: adminKeypair,
   } as any;
-
-  // Helper to build a mock connection with getParsedAccountInfo
-  const buildConnection = () =>
-    ({
-      getParsedAccountInfo: async () => ({
-        value: {
-          data: {
-            parsed: { info: { decimals: 9 } },
-          },
-        },
-      }),
-      getAccountInfo: async () => null,
-      getProgramAccounts: async () => [],
-    }) as any;
 
   test("returns 0 when no referral entries configured", async () => {
     const result = await __test_runReferralSweep(
