@@ -38,7 +38,11 @@ describe("fee sweeper helpers", () => {
   });
 
   test("allows withdrawals at or above the $5 threshold", async () => {
-    const priceResolver = async () => ({ price: 5 });
+    const priceResolver = async () => ({
+      price: 5,
+      identifier: "AAA",
+      resolvedAt: Date.now(),
+    });
     const result = await __test_shouldWithdrawToken(
       wallet,
       tokenConfig,
@@ -56,7 +60,11 @@ describe("token to SOL sweep helpers", () => {
   const tokenConfig = { mint: "mint", ticker: "TEST" };
 
   test("skips swaps when under $5", async () => {
-    const priceResolver = async () => ({ price: 1 });
+    const priceResolver = async () => ({
+      price: 1,
+      identifier: "AAA",
+      resolvedAt: Date.now(),
+    });
     const result = await __test_shouldSwapTokenBalance(
       tokenConfig as any,
       2_000_000_000n,
@@ -69,7 +77,11 @@ describe("token to SOL sweep helpers", () => {
   });
 
   test("allows swaps at or above $5", async () => {
-    const priceResolver = async () => ({ price: 2.5 });
+    const priceResolver = async () => ({
+      price: 2.5,
+      identifier: "AAA",
+      resolvedAt: Date.now(),
+    });
     const result = await __test_shouldSwapTokenBalance(
       tokenConfig as any,
       2_000_000_000n,
@@ -85,7 +97,11 @@ describe("token to SOL sweep helpers", () => {
 describe("WSOL unwrap helper", () => {
   const owner = Keypair.generate();
   const payer = Keypair.generate();
-  const priceResolver = async () => ({ price: 1 });
+  const priceResolver = async () => ({
+    price: 1,
+    identifier: "WSOL/USD",
+    resolvedAt: Date.now(),
+  });
 
   const buildWallet = (onUnwrap?: (lamports: number) => void) => ({
     getTokenMetadata: async () => ({ decimals: 9 }),
