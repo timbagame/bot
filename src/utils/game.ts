@@ -2463,15 +2463,15 @@ export class GameManager {
       if (storedTotal !== null && storedTotal > 0n) {
         totalPot = storedTotal;
       } else {
-      const gameType = gameData?.game_type || "coinflip"; // default to coinflip if not found
+        const gameType = gameData?.game_type || "coinflip"; // default to coinflip if not found
 
-      if (gameType === "giveaway") {
-        // For giveaways, totalPot is just the amount (prize from creator)
+        if (gameType === "giveaway") {
+          // For giveaways, totalPot is just the amount (prize from creator)
           totalPot = baseAmountLamports;
-      } else {
-        // For coinflips, totalPot = amount * participants
+        } else {
+          // For coinflips, totalPot = amount * participants
           totalPot = baseAmountLamports * BigInt(Math.max(currentTickets, 0));
-      }
+        }
       }
     }
 
