@@ -21,6 +21,11 @@ type ConfirmTransactionWithRecoveryOptions = {
   wallet: WalletManager;
   initialSignature: string;
   operationLabel: string;
+  /**
+   * Optional callback to resubmit the transaction.
+   *
+   * `attempt` is zero-based: the first resubmission call receives `0`.
+   */
   resubmit?: (attempt: number, previousSignature: string) => Promise<string>;
   probes?: TransactionProbe[];
   retryDelays?: number[];
@@ -30,13 +35,26 @@ type ConfirmTransactionWithRecoveryOptions = {
 const sleep = (ms: number) =>
   ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
 
+type SignatureStatusLike = {
+  err?: unknown;
+  confirmationStatus?: string;
+  confirmations?: number | null;
+};
+
+type SignatureStatusConnectionLike = {
+  getSignatureStatuses?: (
+    signatures: string[],
+    config?: { searchTransactionHistory?: boolean }
+  ) => Promise<{ value?: Array<SignatureStatusLike | null> } | null | undefined>;
+};
+
 const isSignatureConfirmedFromHistory = async (
   wallet: WalletManager,
   signature: string
 ): Promise<boolean> => {
-  const connection = wallet.getConnection();
-  const getSignatureStatuses = (connection as any)
-    ?.getSignatureStatuses?.bind(connection);
+  const connection =
+    wallet.getConnection() as unknown as SignatureStatusConnectionLike;
+  const getSignatureStatuses = connection.getSignatureStatuses?.bind(connection);
 
   if (typeof getSignatureStatuses !== "function") {
     return false;
