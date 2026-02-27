@@ -1464,7 +1464,7 @@ export class WalletManager {
     };
 
     const locallyResolved = await resolveLocally();
-    if (locallyResolved !== null && typeof locallyResolved === 'object') {
+    if (locallyResolved !== null) {
       return locallyResolved;
     }
 
@@ -2495,7 +2495,8 @@ export class WalletManager {
         instructions,
       }).compileToV0Message();
 
-      const fee = await this.connection.getFeeForMessage(message);
+      const feeResponse = await this.connection.getFeeForMessage(message);
+      const fee = feeResponse?.value;
       if (typeof fee === "number" && Number.isFinite(fee)) {
         return fee;
       }

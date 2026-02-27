@@ -9,7 +9,7 @@ import {
   sweepFees,
 } from "../src/services/fee-sweeper";
 import type { SwapRequest } from "../src/utils/swap/types";
-import { WSOL_MINT } from "../src/utils/constants";
+import { WSOL_MINT, parseEnableFeeSweeperFlag } from "../src/utils/constants";
 
 describe("fee sweeper helpers", () => {
   const wallet = {
@@ -392,7 +392,15 @@ describe("Jupiter referral sweep threshold", () => {
   });
 
   test("accumulates value across multiple token accounts for threshold", async () => {
-    let receivedPriceResolver: any;
+    const TOKEN_A_MINT = "test-token-a-mint";
+    const TOKEN_B_MINT = "test-token-b-mint";
+    let receivedPriceResolver:
+      | ((input: { tokenMint: string; tokenTicker?: string }) => Promise<{
+          price?: number;
+          identifier?: string;
+          resolvedAt?: number;
+        } | null>)
+      | undefined;
 
     await sweepFees({
       walletManager: { getAdminKeypair: () => adminKeypair } as any,
@@ -401,8 +409,8 @@ describe("Jupiter referral sweep threshold", () => {
       priceResolver: async ({ tokenMint }) => {
         // Return different prices for different tokens
         const now = Date.now();
-        if (tokenMint === "tokenA") return { price: 2, identifier: "A", resolvedAt: now };
-        if (tokenMint === "tokenB") return { price: 3, identifier: "B", resolvedAt: now };
+        if (tokenMint === TOKEN_A_MINT) return { price: 2, identifier: "A", resolvedAt: now };
+        if (tokenMint === TOKEN_B_MINT) return { price: 3, identifier: "B", resolvedAt: now };
         return { price: 1, identifier: "default", resolvedAt: now };
       },
       contextFactory: () =>
@@ -425,8 +433,11 @@ describe("Jupiter referral sweep threshold", () => {
 
     // Verify that priceResolver is passed correctly
     expect(receivedPriceResolver).toBeDefined();
-    const priceA = await receivedPriceResolver({ tokenMint: "tokenA", tokenTicker: "" });
-    const priceB = await receivedPriceResolver({ tokenMint: "tokenB", tokenTicker: "" });
+    const priceA = await receivedPriceResolver!({ tokenMint: TOKEN_A_MINT, tokenTicker: "" });
+    const priceB = await receivedPriceResolver!({ tokenMint: TOKEN_B_MINT, tokenTicker: "" });
+    if (!priceA || !priceB) {
+      throw new Error("Expected mocked price resolver to return price data");
+    }
     expect(priceA.price).toBe(2);
     expect(priceB.price).toBe(3);
   });
@@ -463,7 +474,8 @@ describe("Jupiter referral sweep threshold", () => {
       walletManager: { getAdminKeypair: () => adminKeypair } as any,
       tokenConfigs: [],
       referralEntries: [{ mint: "test", referralAccount: "someAccount" }],
-      priceResolver: async () => null as any, // No price data
+      priceResolver: async (_params: { tokenMint?: string }): Promise<null> =>
+        null, // No price data
       contextFactory: () =>
         ({
           provider: { connection: {} },
@@ -490,25 +502,13 @@ describe("Jupiter referral sweep threshold", () => {
 });
 
 describe("ENABLE_FEE_SWEEPER config", () => {
-  const importConstants = async () =>
-    await import(`../src/utils/constants.ts?test=${Date.now()}`);
-
-  test("defaults to enabled when unset", async () => {
-    delete process.env.ENABLE_FEE_SWEEPER;
-    const module = await importConstants();
-    expect(module.ENABLE_FEE_SWEEPER).toBe(true);
+  test("defaults to enabled when unset", () => {
+    expect(parseEnableFeeSweeperFlag(undefined)).toBe(true);
   });
 
-  test("honours explicit false-like values", async () => {
-    process.env.ENABLE_FEE_SWEEPER = "false";
-    const moduleFalse = await importConstants();
-    expect(moduleFalse.ENABLE_FEE_SWEEPER).toBe(false);
-
-    process.env.ENABLE_FEE_SWEEPER = "0";
-    const moduleZero = await importConstants();
-    expect(moduleZero.ENABLE_FEE_SWEEPER).toBe(false);
-
-    delete process.env.ENABLE_FEE_SWEEPER;
+  test("honors explicit false-like values", () => {
+    expect(parseEnableFeeSweeperFlag("false")).toBe(false);
+    expect(parseEnableFeeSweeperFlag("0")).toBe(false);
   });
 });
 

@@ -12,6 +12,16 @@ export const getConfirmationRetryDelays = (): number[] => {
   return CONFIRMATION_RETRY_DELAYS_MS;
 };
 
+type ErrorWithCause = Error & { cause?: unknown };
+type ErrorWithLastSignature = Error & { lastSignature?: string };
+type TimeoutErrorWithRecovery = ErrorWithCause & { recoveryErrors?: Error[] };
+
+const hasLastSignature = (error: unknown): error is ErrorWithLastSignature =>
+  typeof error === "object" &&
+  error !== null &&
+  "lastSignature" in error &&
+  typeof (error as { lastSignature?: unknown }).lastSignature === "string";
+
 export type TransactionProbe = {
   label: string;
   check: () => Promise<boolean>;
@@ -73,8 +83,9 @@ const isSignatureConfirmedFromHistory = async (
     const error = new Error(
       `Transaction ${signature} failed: ${JSON.stringify(status.err)}`
     );
-    (error as any).cause = status.err;
-    throw error;
+    const errorWithCause = error as ErrorWithCause;
+    errorWithCause.cause = status.err;
+    throw errorWithCause;
   }
 
   if (
@@ -153,7 +164,7 @@ export const confirmTransactionWithRecovery = async (
 
           currentSignature = resubmittedSignature;
           logDebug(
-            `✅ ${operationLabel} transaction confirmed via resubmission ${attemptLabel}: ${currentSignature}`
+            `✅ ${operationLabel} transaction resubmitted successfully ${attemptLabel}, obtained signature: ${currentSignature}`
           );
           return currentSignature;
         } catch (resubmitError) {
@@ -161,10 +172,9 @@ export const confirmTransactionWithRecovery = async (
             resubmitError instanceof Error
               ? resubmitError
               : new Error(String(resubmitError));
-          const latestSignature =
-            typeof (normalizedError as any)?.lastSignature === "string"
-              ? (normalizedError as any).lastSignature
-              : undefined;
+          const latestSignature = hasLastSignature(normalizedError)
+            ? normalizedError.lastSignature
+            : undefined;
           if (latestSignature) {
             currentSignature = latestSignature;
           }
@@ -247,17 +257,17 @@ export const confirmTransactionWithRecovery = async (
         }
       }
 
-      const timeoutError =
+      const timeoutError: TimeoutErrorWithRecovery =
         confirmError instanceof Error
           ? confirmError
           : new Error(String(confirmError));
       if (recoveryErrors.length > 0) {
-        (timeoutError as any).recoveryErrors = recoveryErrors;
+        timeoutError.recoveryErrors = recoveryErrors;
       }
 
       const preferredCause = lastRecoveryError;
-      if (preferredCause && (timeoutError as any).cause === undefined) {
-        (timeoutError as any).cause = preferredCause;
+      if (preferredCause && timeoutError.cause === undefined) {
+        timeoutError.cause = preferredCause;
       }
 
       console.warn(

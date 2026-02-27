@@ -2457,8 +2457,9 @@ export class GameManager {
     // Get game type from database to calculate totalPot correctly
     let totalPot = providedTotalPot ?? null;
     if (totalPot === null) {
+      // Prefer canonical `totalPot` and fall back to legacy `total_amount` for older rows.
       const storedTotal = coerceLamportValue(
-        (gameData as any)?.total_amount ?? (gameData as any)?.totalPot
+        (gameData as any)?.totalPot ?? (gameData as any)?.total_amount
       );
       if (storedTotal !== null && storedTotal > 0n) {
         totalPot = storedTotal;
@@ -3765,8 +3766,11 @@ export class GameManager {
         this.feeBudget.getGameSafetyBufferLamports(),
         this.getGameCreationRentLamports(maxTickets),
       ]);
-      // Include native account rent-exemption so user remains rent-exempt after game creation
-      const requiredSolReserveLamports = minSolBuffer + gameRentLamports + NATIVE_ACCOUNT_RENT_LAMPORTS;
+      // Include native SOL account rent-exemption so the user remains rent-exempt after game creation.
+      // This keeps at least `NATIVE_ACCOUNT_RENT_LAMPORTS` in the user's main SOL account after
+      // paying both the game account rent and the transaction safety buffer.
+      const requiredSolReserveLamports =
+        minSolBuffer + gameRentLamports + NATIVE_ACCOUNT_RENT_LAMPORTS;
 
       let [tokenBalance, solBalance] = await Promise.all([
         this.wallet.getTokenBalance(telegramId, tokenMint),
@@ -4601,8 +4605,9 @@ You currently have ${safeStake} ${safeTicker} reserved for the ticket and no spa
 
       // SOL fee reserve check and JIT swap (for all game types - even giveaways need SOL for tx fees)
       // For coinflip: reservedTicketAmount is the stake, so we can only swap spare tokens
-      // For giveaway: reservedTicketAmount is always 0 because giveaways are free to join
-      // (the creator funds the entire pot, participants don't stake anything)
+      // For giveaway: reservedTicketAmount is always 0 because giveaways are free to join.
+      // `availableTokenAmountRaw` is an upper bound only; the JIT swap targets `desiredLamports`
+      // and should consume only what is needed to cover SOL fees.
       const reservedTicketAmount = currentGameType === "coinflip" ? gameAmount : 0;
       const swapAllowanceRaw = Math.max(tokenBalance - reservedTicketAmount, 0);
 
@@ -5815,16 +5820,23 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
 
     // Deduplicate identical games (same amount, tickets, creator, date minute)
     // Collapse to "×N" suffix
+    const dedupeKeyForGame = (game: GameHistoryEntry): string =>
+      JSON.stringify({
+        category: game.category,
+        amount: game.amount,
+        ticketCount: game.ticketCount,
+        maxTickets: game.maxTickets,
+        creatorDisplay: game.creatorDisplay,
+        dateMinute: Math.floor(game.completedAt / 60000),
+      });
+
     const deduped: { game: GameHistoryEntry; count: number }[] = [];
     for (const game of pageGames) {
       // Create a key based on: category, amount, tickets, creator, date (rounded to minute)
-      const dateMinute = Math.floor(game.completedAt / 60000);
-      const key = `${game.category}|${game.amount}|${game.ticketCount}/${game.maxTickets}|${game.creatorDisplay}|${dateMinute}`;
+      const key = dedupeKeyForGame(game);
 
       const existing = deduped.find((d) => {
-        const dMin = Math.floor(d.game.completedAt / 60000);
-        const dKey = `${d.game.category}|${d.game.amount}|${d.game.ticketCount}/${d.game.maxTickets}|${d.game.creatorDisplay}|${dMin}`;
-        return dKey === key;
+        return dedupeKeyForGame(d.game) === key;
       });
 
       if (existing) {

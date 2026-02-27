@@ -811,8 +811,9 @@ export const createGameCallbacksModule = (
 
         const converted = usdAmount! / tokenPriceUSD;
         const precision = Math.min(tokenDecimals, 6);
-        resolvedAmount = Number.parseFloat(converted.toFixed(precision));
-        amountPrecisionSource = resolvedAmount.toString();
+        const formatted = converted.toFixed(precision);
+        resolvedAmount = Number.parseFloat(formatted);
+        amountPrecisionSource = formatted;
       }
 
       if (!tokenPriceUSD) {
@@ -1634,7 +1635,23 @@ export const createGameCallbacksModule = (
               await safeAnswerCallbackQuery(ctx, "Creating game...");
 
               const decimals = tokenContext.tokenDecimals;
-              const amountRaw = Math.round(amount * Math.pow(10, decimals));
+              const amountFixed = amount.toFixed(decimals);
+              const [wholePart = "0", fractionalPartRaw = ""] =
+                amountFixed.split(".");
+              const fractionalPart = fractionalPartRaw
+                .padEnd(decimals, "0")
+                .slice(0, decimals);
+              const amountRawBigInt =
+                BigInt(wholePart) * 10n ** BigInt(decimals) +
+                BigInt(fractionalPart || "0");
+              if (amountRawBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
+                await safeAnswerCallbackQuery(
+                  ctx,
+                  "Amount is too large; please enter a smaller value."
+                );
+                return;
+              }
+              const amountRaw = Number(amountRawBigInt);
               const gameData = {
                 amount: amountRaw,
                 isSol: false,

@@ -96,12 +96,14 @@ export const FEE_SWEEP_INTERVAL_MS = parsePositiveDuration(
   "FEE_SWEEP_INTERVAL_MS",
   60 * 60_000
 ); // Default 1 hour
-export const ENABLE_FEE_SWEEPER = (() => {
-  const raw = process.env.ENABLE_FEE_SWEEPER;
+export const parseEnableFeeSweeperFlag = (raw: string | undefined): boolean => {
   if (raw === undefined) return true;
   const normalized = raw.trim().toLowerCase();
   return normalized === "true" || normalized === "1";
-})();
+};
+export const ENABLE_FEE_SWEEPER = parseEnableFeeSweeperFlag(
+  process.env.ENABLE_FEE_SWEEPER
+);
 export const FEE_SWEEP_SOL_USD_THRESHOLD = parsePositiveDuration(
   "FEE_SWEEP_SOL_USD_THRESHOLD",
   15
