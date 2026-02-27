@@ -2260,9 +2260,7 @@ export class WalletManager {
                 ? `enabled@${historyEnabledAt}ms`
                 : "not-used"
             }, firstStatus=${
-              firstStatusObservedAt !== null
-                ? `${firstStatusObservedAt}ms`
-                : "none"
+              `${firstStatusObservedAt}ms`
             }, networkRetries=${networkRetryCount})`
           );
           return;
@@ -2278,9 +2276,7 @@ export class WalletManager {
               ? `enabled@${historyEnabledAt}ms`
               : "not-used"
           }, firstStatus=${
-            firstStatusObservedAt !== null
-              ? `${firstStatusObservedAt}ms`
-              : "none"
+            `${firstStatusObservedAt}ms`
           }, networkRetries=${networkRetryCount})`
         );
       }

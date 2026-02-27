@@ -1956,7 +1956,7 @@ export class GameManager {
 
     const retryDelays = getWrapBalanceRetryDelays();
 
-    for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
+    for (let attempt = 0; ; attempt++) {
       [updatedTokenBalance, updatedSolBalance] = await Promise.all([
         this.wallet.getTokenBalance(telegramId, WSOL_MINT),
         this.wallet.getBalance(telegramId),
@@ -1966,10 +1966,10 @@ export class GameManager {
         break;
       }
 
-      const delay = retryDelays[attempt];
-      if (delay === undefined) {
+      if (attempt >= retryDelays.length) {
         break;
       }
+      const delay = retryDelays[attempt] ?? 0;
 
       debugLog(
         `⏳ Waiting for WSOL balance propagation (attempt ${attempt + 1}/${
