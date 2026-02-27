@@ -233,8 +233,8 @@ const coerceLamportValue = (value: unknown): bigint | null => {
     }
   }
 
-  if (value && typeof value === "object") {
-    const candidate = (value as { toString?: () => string; toNumber?: () => number }) ?? {};
+  if (typeof value === "object" && value !== null) {
+    const candidate = value as { toString?: () => string; toNumber?: () => number };
     if (typeof candidate.toString === "function") {
       const stringified = candidate.toString();
       if (INTEGER_PATTERN.test(stringified.trim())) {

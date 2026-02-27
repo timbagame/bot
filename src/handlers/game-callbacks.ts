@@ -1591,7 +1591,7 @@ export const createGameCallbacksModule = (
             deps.pendingGameCreations.add(creationKey);
 
             try {
-              if (chatId && messageId && !confirmMessageMissing) {
+              if (chatId && messageId) {
                 try {
                   await ctx.api.editMessageReplyMarkup(chatId, messageId);
                 } catch (markError) {

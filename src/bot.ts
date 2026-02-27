@@ -3813,7 +3813,7 @@ const handleTipCommand = async (ctx: Context): Promise<void> => {
     recipientName =
       mentionUsername ?? mentionLabel ?? mentionUser?.first_name ?? "User";
 
-    if (mentionUsername && resolvedId) {
+    if (mentionUsername) {
       gameManager.primeUsernameCache(ctx, resolvedId, mentionUsername);
     }
 
