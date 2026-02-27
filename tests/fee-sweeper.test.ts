@@ -90,8 +90,17 @@ describe("WSOL unwrap helper", () => {
   const buildWallet = (onUnwrap?: (lamports: number) => void) => ({
     getTokenMetadata: async () => ({ decimals: 9 }),
     unwrapSolWithKeypair: async ({ amountLamports }: { amountLamports: number }) => {
+      if (
+        typeof amountLamports !== "number" ||
+        !Number.isFinite(amountLamports) ||
+        !Number.isSafeInteger(amountLamports)
+      ) {
+        throw new Error(
+          "Invalid amountLamports: must be a finite, safe integer number"
+        );
+      }
       onUnwrap?.(amountLamports);
-      return { signature: "sig", remainingLamports: 0 };
+      return { signature: "sig", amountLamports, remainingLamports: 0 };
     },
   });
 
