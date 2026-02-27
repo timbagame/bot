@@ -195,7 +195,7 @@ export const createGameCallbacksModule = (
     sessionPrice?: number;
   }): Promise<number | null> => {
     const { tokenMint, sessionPrice } = input;
-    if (typeof sessionPrice === "number" && Number.isFinite(sessionPrice) && sessionPrice > 0) {
+    if (sessionPrice != null && Number.isFinite(sessionPrice) && sessionPrice > 0) {
       return sessionPrice;
     }
     if (process.env.NODE_ENV === "test") {
@@ -213,10 +213,10 @@ export const createGameCallbacksModule = (
     tokenPriceUSD: number | null
   ): string | null => {
     if (!Number.isFinite(amountNumber) || amountNumber <= 0) return null;
-    if (!Number.isFinite(tokenPriceUSD ?? NaN) || (tokenPriceUSD ?? 0) <= 0) {
+    if (tokenPriceUSD == null || !Number.isFinite(tokenPriceUSD) || tokenPriceUSD <= 0) {
       return null;
     }
-    const usdValue = amountNumber * tokenPriceUSD!;
+    const usdValue = amountNumber * tokenPriceUSD;
     if (!Number.isFinite(usdValue) || usdValue <= 0) return null;
     const formatted = formatUsdValue(usdValue, {
       minimumFractionDigits: 0,
@@ -719,6 +719,7 @@ export const createGameCallbacksModule = (
           players,
           creatorId: userSession.creatorId,
           advanced,
+          // In private (DM) chats, hide/lock the visibility controls to public-only.
           ui: ctx.chat?.type === "private" ? { lockVisibilityToPublic: true } : undefined,
         });
 
@@ -788,7 +789,11 @@ export const createGameCallbacksModule = (
           tokenMint: userSession.tokenMint ?? DEFAULT_TOKEN_MINT,
         });
 
-        if (!tokenPriceUSD || !Number.isFinite(tokenPriceUSD) || tokenPriceUSD <= 0) {
+        if (
+          tokenPriceUSD == null ||
+          !Number.isFinite(tokenPriceUSD) ||
+          tokenPriceUSD <= 0
+        ) {
           const errorMessage = `❌ USD pricing unavailable for ${tokenTicker}. Please enter the amount in ${tokenTicker}.`;
           try {
             await ctx.api.editMessageText(
