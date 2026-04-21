@@ -2214,11 +2214,14 @@ const processGameCompletion = async (
           winnerAddress
         );
         let prizeDetails = "";
+        const participantCount = gameDb.getGameParticipantsCount(gameAddress);
         const prizePot =
           typeof totalPot === "number"
             ? totalPot
-            : typeof gameData?.amount === "number"
-            ? gameData.amount
+            : typeof gameData?.total_amount === "number"
+            ? gameData.total_amount
+            : typeof gameData?.amount === "number" && participantCount > 0
+            ? gameData.amount * participantCount
             : null;
         if (typeof prizePot === "number" && prizePot > 0) {
           const prizeInfo = await gameManager.getPrizeDisplay(

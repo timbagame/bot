@@ -32,6 +32,7 @@ export interface GameData {
   min_players?: number;
   timeout_seconds?: number;
   expires_at?: number;
+  total_amount?: number;
 }
 
 export interface PlayerMapping {
