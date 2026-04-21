@@ -145,7 +145,7 @@ import { refreshDynamicFeeBudgets } from "./utils/fee-budget-refresh";
 import { SlidingWindowRateLimiter } from "./utils/rate-limiter";
 import { sweepFees } from "./services/fee-sweeper";
 import { formatDuration } from "./utils/format-time";
-import { getRetryAfterSeconds, isRateLimited } from "./utils/telegram-errors";
+import { getRetryAfterSeconds, isMessageNotModified, isRateLimited } from "./utils/telegram-errors";
 export type { CreateGameViaCommandOptions } from "./handlers/game-commands";
 
 // ================================
@@ -4226,11 +4226,19 @@ bot.callbackQuery(/^games_tab:(won|lost|cancelled|all):(\d+):(\d+)$/, async (ctx
     const messageText = gameManager.formatGamesMessage(username, result, tab, page);
     const keyboard = gameManager.buildGamesKeyboard(ownerId, result, tab, page);
 
-    await ctx.editMessageText(messageText, {
-      parse_mode: "HTML",
-      reply_markup: { inline_keyboard: keyboard },
-      link_preview_options: { is_disabled: true },
-    });
+    try {
+      await ctx.editMessageText(messageText, {
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: keyboard },
+        link_preview_options: { is_disabled: true },
+      });
+    } catch (editError) {
+      if (isMessageNotModified(editError)) {
+        // Silently ignore - user clicked on already-selected tab
+      } else {
+        throw editError;
+      }
+    }
     await safeAnswerCallbackQuery(ctx);
   } catch (error) {
     await handleCallbackErrorSafe(ctx, error, "games tab");
