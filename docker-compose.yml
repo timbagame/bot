@@ -1,8 +1,6 @@
 services:
-  app:
+  bot:
     image: ghcr.io/timbagame/bot:main
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     ports:
       - "3000:3000"
       - "3002:3002"
@@ -19,3 +17,10 @@ services:
       - ./chat-settings.sqlite:/app/chat-settings.sqlite
       - ./games.sqlite:/app/games.sqlite
       - ./tokens.sqlite:/app/tokens.sqlite
+    networks:
+      - timba
+
+networks:
+  timba:
+    name: timba
+    driver: bridge
