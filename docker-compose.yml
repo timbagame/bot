@@ -8,8 +8,7 @@ services:
       TELEGRAM_TOKEN: ${TELEGRAM_TOKEN}
       SOLANA_NETWORK: ${SOLANA_NETWORK}
       MNEMONIC: ${MNEMONIC}
-      ORACLE_API_URL: ${ORACLE_API_URL:-http://host.docker.internal:3001}
-      BOT_INTERNAL_PORT: ${BOT_INTERNAL_PORT:-3002}
+      ORACLE_API_URL: ${ORACLE_API_URL:-http://oracle:3001}
     volumes:
       # Read-only keypair for on-chain interactions
       - ./admin-keypair.json:/app/admin-keypair.json:ro
