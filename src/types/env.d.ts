@@ -20,6 +20,7 @@ declare global {
       ENABLE_FEE_SWEEPER?: string;
       FEE_SWEEP_INTERVAL_MS?: string;
       JUPITER_API_KEY?: string;
+      BOT_INTERNAL_PORT?: string;
     }
   }
 }

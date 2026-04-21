@@ -2179,6 +2179,12 @@ const processGameCompletion = async (
 ): Promise<void> => {
   cancelPendingGameMessageUpdate(gameAddress);
 
+  const existing = gameDb.getGame(gameAddress);
+  if (existing?.status === "completed") {
+    console.log(`Game ${gameAddress} already completed; skipping duplicate processing`);
+    return;
+  }
+
   // Update database
   const blockTime = await wallet.getBlockchainTime();
   gameDb.completeGame(gameAddress, winnerAddress, blockTime * 1000, totalPot);
@@ -6381,6 +6387,33 @@ if (process.env.NODE_ENV !== "test") {
         }
       }, EXPIRED_GAMES_CHECK_INTERVAL_MS);
 
+      const botInternalPort = parseInt(process.env["BOT_INTERNAL_PORT"] || "3002", 10);
+      const internalServer = Bun.serve({
+        port: botInternalPort,
+        async fetch(request) {
+          const url = new URL(request.url);
+          if (url.pathname === "/internal/completed" && request.method === "POST") {
+            try {
+              const body = (await request.json()) as Record<string, unknown>;
+              const gameAddress = typeof body["gameAddress"] === "string" ? body["gameAddress"] : "";
+              const winnerAddress = typeof body["winnerAddress"] === "string" ? body["winnerAddress"] : "";
+              const winnerTxSignature = typeof body["winnerTxSignature"] === "string" ? body["winnerTxSignature"] : undefined;
+              const totalPot = typeof body["totalPot"] === "number" ? body["totalPot"] : undefined;
+              if (!gameAddress || !winnerAddress) {
+                return new Response(JSON.stringify({ error: "Missing gameAddress or winnerAddress" }), { status: 400 });
+              }
+              await runProcessGameCompletion(gameAddress, winnerAddress, totalPot, winnerTxSignature);
+              return new Response(JSON.stringify({ success: true }), { status: 200 });
+            } catch (error) {
+              console.error("Error handling /internal/completed:", error);
+              return new Response(JSON.stringify({ error: "Internal server error" }), { status: 500 });
+            }
+          }
+          return new Response(JSON.stringify({ error: "Not found" }), { status: 404 });
+        },
+      });
+      console.log(`🤖 Bot internal API listening on port ${botInternalPort}`);
+
       // Start the bot with concurrent processing
       console.log("Starting bot with concurrent processing...");
       const handle = run(bot, {
@@ -6400,6 +6433,7 @@ if (process.env.NODE_ENV !== "test") {
           rpcEndpointListenerCleanup = null;
           await unregisterProgramEventListeners();
           await handle?.stop();
+          internalServer?.stop();
           console.log("✅ Bot stopped successfully");
           process.exit(0);
         } catch (error) {
