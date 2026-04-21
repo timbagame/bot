@@ -47,6 +47,9 @@ describe("Game completion announcements", () => {
         token_ticker: "sol",
         token_mint: Keypair.generate().publicKey.toBase58(),
       }),
+      completeGame: () => {},
+      getGameParticipantsCount: () => 2,
+      getGameMessages: () => [],
     } as any);
 
     botModule.__test_setGameManager({
@@ -58,18 +61,6 @@ describe("Game completion announcements", () => {
         usdApproximation: "$150",
       }),
       getActiveGameMessage: () => ({ chatId: 99, messageId: 77 }),
-    } as any);
-
-    botModule.__test_setGameDatabase({
-      getGame: () => ({
-        chat_id: 99,
-        message_id: 77,
-        game_type: "coinflip",
-        amount: 1_000,
-        token_ticker: "sol",
-        token_mint: Keypair.generate().publicKey.toBase58(),
-      }),
-      completeGame: () => {},
     } as any);
 
     (botModule.wallet as any).getBlockchainTime = async () => 123;
@@ -96,6 +87,8 @@ describe("Game completion announcements", () => {
         game_type: "giveaway",
       }),
       completeGame: () => {},
+      getGameParticipantsCount: () => 2,
+      getGameMessages: () => [],
     } as any);
 
     botModule.__test_setGameManager({
@@ -129,6 +122,8 @@ describe("Game completion announcements", () => {
       completeGame: () => {},
       getPlayerTelegramId: (pubkey: string) =>
         pubkey === winnerPubkey ? "123" : null, // Winner's telegram ID
+      getGameParticipantsCount: () => 2,
+      getGameMessages: () => [],
     } as any);
 
     botModule.__test_setGameManager({
@@ -168,6 +163,8 @@ describe("Game completion announcements", () => {
       completeGame: () => {},
       getPlayerTelegramId: (pubkey: string) =>
         pubkey === creatorPubkey ? "777" : null, // Creator is the winner
+      getGameParticipantsCount: () => 2,
+      getGameMessages: () => [],
     } as any);
 
     botModule.__test_setGameManager({
@@ -187,5 +184,127 @@ describe("Game completion announcements", () => {
     // Should only have 1 call (announcement), no DM since creator always sees the game
     expect(sendCalls.length).toBe(1);
     expect(sendCalls[0]?.text).toContain("won the coinflip");
+  });
+
+  test("prize calculation uses totalPot when provided", async () => {
+    const winnerPubkey = Keypair.generate().publicKey.toBase58();
+
+    botModule.__test_setGameDatabase({
+      getGame: () => ({
+        chat_id: 42,
+        message_id: 24,
+        game_type: "coinflip",
+        amount: 500,
+        token_ticker: "TIMBA",
+      }),
+      completeGame: () => {},
+      getGameParticipantsCount: () => 2,
+      getGameMessages: () => [{ chat_id: 42, message_id: 24 }],
+    } as any);
+
+    let receivedPot: number | undefined;
+    botModule.__test_setGameManager({
+      updateGameMessageFromData: async () => {},
+      getPlayerUsername: async () => "winner",
+      getPrizeDisplay: async (_addr: string, pot: number) => {
+        receivedPot = pot;
+        return {
+          formattedAmount: String(pot),
+          tokenTicker: "TIMBA",
+          usdApproximation: null,
+        };
+      },
+      getActiveGameMessage: () => ({ chatId: 42, messageId: 24 }),
+    } as any);
+
+    (botModule.wallet as any).getBlockchainTime = async () => 100;
+    await botModule.__test_processGameCompletion(
+      "GAME_WITH_TOTAL_POT",
+      winnerPubkey,
+      1_000
+    );
+
+    expect(receivedPot).toBe(1_000);
+  });
+
+  test("prize calculation falls back to total_amount when totalPot not provided", async () => {
+    const winnerPubkey = Keypair.generate().publicKey.toBase58();
+
+    botModule.__test_setGameDatabase({
+      getGame: () => ({
+        chat_id: 42,
+        message_id: 24,
+        game_type: "coinflip",
+        amount: 500,
+        total_amount: 1_500,
+        token_ticker: "TIMBA",
+      }),
+      completeGame: () => {},
+      getGameParticipantsCount: () => 3,
+      getGameMessages: () => [{ chat_id: 42, message_id: 24 }],
+    } as any);
+
+    let receivedPot: number | undefined;
+    botModule.__test_setGameManager({
+      updateGameMessageFromData: async () => {},
+      getPlayerUsername: async () => "winner",
+      getPrizeDisplay: async (_addr: string, pot: number) => {
+        receivedPot = pot;
+        return {
+          formattedAmount: String(pot),
+          tokenTicker: "TIMBA",
+          usdApproximation: null,
+        };
+      },
+      getActiveGameMessage: () => ({ chatId: 42, messageId: 24 }),
+    } as any);
+
+    (botModule.wallet as any).getBlockchainTime = async () => 100;
+    await botModule.__test_processGameCompletion(
+      "GAME_WITH_TOTAL_AMOUNT",
+      winnerPubkey
+    );
+
+    expect(receivedPot).toBe(1_500);
+  });
+
+  test("prize calculation falls back to amount * participants when total_amount missing", async () => {
+    const winnerPubkey = Keypair.generate().publicKey.toBase58();
+
+    botModule.__test_setGameDatabase({
+      getGame: () => ({
+        chat_id: 42,
+        message_id: 24,
+        game_type: "coinflip",
+        amount: 500,
+        token_ticker: "TIMBA",
+      }),
+      completeGame: () => {},
+      getGameParticipantsCount: () => 4,
+      getGameMessages: () => [{ chat_id: 42, message_id: 24 }],
+    } as any);
+
+    let receivedPot: number | undefined;
+    botModule.__test_setGameManager({
+      updateGameMessageFromData: async () => {},
+      getPlayerUsername: async () => "winner",
+      getPrizeDisplay: async (_addr: string, pot: number) => {
+        receivedPot = pot;
+        return {
+          formattedAmount: String(pot),
+          tokenTicker: "TIMBA",
+          usdApproximation: null,
+        };
+      },
+      getActiveGameMessage: () => ({ chatId: 42, messageId: 24 }),
+    } as any);
+
+    (botModule.wallet as any).getBlockchainTime = async () => 100;
+    await botModule.__test_processGameCompletion(
+      "GAME_WITH_AMOUNT_ONLY",
+      winnerPubkey
+    );
+
+    expect(receivedPot).toBe(2_000);
   });
 });
