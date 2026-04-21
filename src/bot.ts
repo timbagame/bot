@@ -4259,8 +4259,6 @@ bot.callbackQuery(/^games_refresh:(\d+)$/, async (ctx: Context) => {
     }
 
     const ownerId = match[1];
-
-    // Verify this is the owner
     const callerId = ctx.from?.id?.toString();
     if (callerId !== ownerId) {
       await safeAnswerCallbackQuery(ctx, "This isn't your games list.");
@@ -4269,17 +4267,12 @@ bot.callbackQuery(/^games_refresh:(\d+)$/, async (ctx: Context) => {
 
     const telegramId = BigInt(ownerId);
     const result = await gameManager.getUserGamesHistory(ctx, telegramId);
-
     const username = ctx.from?.username
       ? `@${ctx.from.username}`
       : ctx.from?.first_name || "Player";
 
-    // Refresh defaults back to "all" tab, page 0
-    const tab: GamesTab = "all";
-    const page = 0;
-
-    const messageText = gameManager.formatGamesMessage(username, result, tab, page);
-    const keyboard = gameManager.buildGamesKeyboard(ownerId, result, tab, page);
+    const messageText = gameManager.formatGamesMessage(username, result, "all", 0);
+    const keyboard = gameManager.buildGamesKeyboard(ownerId, result, "all", 0);
 
     try {
       await ctx.editMessageText(messageText, {
