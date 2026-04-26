@@ -2221,7 +2221,9 @@ const processGameCompletion = async (
             : typeof gameData?.total_amount === "number"
             ? gameData.total_amount
             : typeof gameData?.amount === "number" && participantCount > 0
-            ? gameData.amount * participantCount
+            ? gameData.game_type === "giveaway"
+              ? gameData.amount
+              : gameData.amount * participantCount
             : null;
         if (typeof prizePot === "number" && prizePot > 0) {
           const prizeInfo = await gameManager.getPrizeDisplay(
