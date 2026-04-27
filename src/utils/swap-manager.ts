@@ -1171,8 +1171,10 @@ export class SwapManager {
       const transactionBuffer = Buffer.from(base64Transaction, "base64");
       const versionedTx = VersionedTransaction.deserialize(transactionBuffer);
 
-      console.log(`🔄 JIT swap: signing transaction with ${signers.length} signers...`);
-      versionedTx.sign(signers);
+      const messageAccountKeys = versionedTx.message.staticAccountKeys.map((k) => k.toBase58());
+      const relevantSigners = signers.filter((s) => messageAccountKeys.includes(s.publicKey.toBase58()));
+      console.log(`🔄 JIT swap: signing transaction with ${relevantSigners.length}/${signers.length} signers...`);
+      versionedTx.sign(relevantSigners);
 
       const signedTransaction = Buffer.from(versionedTx.serialize()).toString(
         "base64"

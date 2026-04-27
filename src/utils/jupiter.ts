@@ -230,12 +230,6 @@ export class JupiterClient {
     if (params.referralFee !== undefined) {
       url.searchParams.set("referralFee", params.referralFee.toString());
     }
-    if (params.payer) {
-      url.searchParams.set("payer", params.payer);
-    }
-    if (params.closeAuthority) {
-      url.searchParams.set("closeAuthority", params.closeAuthority);
-    }
   }
 
   private buildOrderParams(params: JupiterOrderParams): URL {
