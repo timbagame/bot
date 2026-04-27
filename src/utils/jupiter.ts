@@ -62,6 +62,9 @@ export interface JupiterQuoteResponse {
   prioritizationFeeLamports?: number;
   rentFeeLamports?: number;
   referralApplied?: boolean;
+  payerApplied?: boolean;
+  integratorFallback?: boolean;
+  integratorFallbackReason?: string;
 }
 
 export interface JupiterSwapRequest {
@@ -132,6 +135,9 @@ export interface JupiterUltraOrderResponse {
   prioritizationFeeLamports?: number;
   rentFeeLamports?: number;
   referralApplied?: boolean;
+  payerApplied?: boolean;
+  integratorFallback?: boolean;
+  integratorFallbackReason?: string;
 }
 
 interface JupiterOrderResult {
@@ -220,6 +226,9 @@ export class JupiterClient {
       prioritizationFeeLamports: data.prioritizationFeeLamports,
       rentFeeLamports: data.rentFeeLamports,
       referralApplied: data.referralApplied,
+      payerApplied: data.payerApplied,
+      integratorFallback: data.integratorFallback,
+      integratorFallbackReason: data.integratorFallbackReason,
     };
   }
 
@@ -289,7 +298,16 @@ export class JupiterClient {
             amount: effectiveParams.amount,
             taker: effectiveParams.taker,
           };
-          return this.fetchOrder(fallbackParams, false);
+          const fallback = await this.fetchOrder(fallbackParams, false);
+          fallback.raw.referralApplied = false;
+          fallback.raw.payerApplied = false;
+          fallback.raw.integratorFallback = true;
+          fallback.raw.integratorFallbackReason = "Failed to get quotes";
+          fallback.normalized.referralApplied = false;
+          fallback.normalized.payerApplied = false;
+          fallback.normalized.integratorFallback = true;
+          fallback.normalized.integratorFallbackReason = "Failed to get quotes";
+          return fallback;
         }
         throw new Error(
           `Jupiter order failed: ${response.status} ${response.statusText} - ${errorText}`
@@ -307,11 +325,14 @@ export class JupiterClient {
       }
 
       const referralApplied = Boolean(data.referralApplied);
+      const payerApplied = Boolean(params.payer && !data.integratorFallback);
       const normalized = {
         ...this.normalizeQuote(data),
         referralApplied,
+        payerApplied,
       } satisfies JupiterQuoteResponse;
 
+      data.payerApplied = payerApplied;
       return { raw: data, normalized, referralApplied };
     } catch (error: any) {
       console.error("Error requesting Jupiter order:", error);

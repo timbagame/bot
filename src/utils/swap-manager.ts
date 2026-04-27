@@ -17,7 +17,7 @@ import { WalletManager } from "./wallet";
 import { FeeBudgetManager } from "./fee-budget";
 import type { FeeBudgetProvider } from "./fee-budget";
 import { formatAmount } from "./format-amount";
-import { WSOL_MINT } from "./constants";
+import { USER_SOL_MAX_BUFFER_LAMPORTS, WSOL_MINT } from "./constants";
 import type {
   JustInTimeSwapResult,
   SwapQuote,
@@ -995,9 +995,40 @@ export class SwapManager {
       closeAuthority: integrator?.closeAuthority,
     });
 
+    const adminPayerApplied =
+      integrator?.payerKind === "admin" &&
+      swapResponse.order?.integratorFallback !== true &&
+      swapResponse.order?.payerApplied !== false;
+
+    if (integrator?.payerKind === "admin" && !adminPayerApplied) {
+      const userBalance = await this.connection.getBalance(userKeypair.publicKey);
+      const { requiredLamports } = calculateRouteCosts(swapResponse.order, {
+        paddingRatio: 0.25,
+        paddingExtraLamports: 200_000,
+        paddingRounding: "ceil",
+        baseRequiredLamports: USER_SOL_MAX_BUFFER_LAMPORTS,
+        requiredStrategy: "max",
+      });
+      const inputLamports = this.isSolMint(quote.inputMint)
+        ? Number(BigInt(quote.inputAmountRaw ?? quote.inputAmount ?? "0"))
+        : 0;
+      const requiredUserLamports = inputLamports + requiredLamports;
+
+      if (userBalance < requiredUserLamports) {
+        throw new Error(
+          "Jupiter admin payer fallback requires user-paid SOL fees, but the user balance is too low."
+        );
+      }
+
+      console.warn("Jupiter admin payer unavailable; executing user-paid fallback", {
+        requestId: swapResponse.requestId,
+        fallbackReason: swapResponse.order?.integratorFallbackReason,
+      });
+    }
+
     // Determine payer and required signer for admin-funded routes
     let signers = [userKeypair];
-    if (integrator?.payerKind === "admin") {
+    if (adminPayerApplied) {
       const adminKeypair = this.wallet.getAdminKeypair();
       const payerMissing = !integrator.payer;
       const payerMismatch =

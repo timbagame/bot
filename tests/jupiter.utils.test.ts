@@ -191,7 +191,7 @@ describe("JupiterClient referral URL params", () => {
       })
     );
 
-    await client.getQuote({
+    const quote = await client.getQuote({
       inputMint,
       outputMint,
       amount,
@@ -209,6 +209,10 @@ describe("JupiterClient referral URL params", () => {
     expect(urls[1]).not.toContain("referralFee=");
     expect(urls[1]).not.toContain("payer=");
     expect(urls[1]).not.toContain("closeAuthority=");
+    expect(quote.referralApplied).toBe(false);
+    expect(quote.payerApplied).toBe(false);
+    expect(quote.integratorFallback).toBe(true);
+    expect(quote.integratorFallbackReason).toBe("Failed to get quotes");
   });
 });
 
