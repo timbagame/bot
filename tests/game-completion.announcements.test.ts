@@ -307,4 +307,44 @@ describe("Game completion announcements", () => {
 
     expect(receivedPot).toBe(2_000);
   });
+
+  test("giveaway prize calculation uses amount directly when total_amount missing", async () => {
+    const winnerPubkey = Keypair.generate().publicKey.toBase58();
+
+    botModule.__test_setGameDatabase({
+      getGame: () => ({
+        chat_id: 42,
+        message_id: 24,
+        game_type: "giveaway",
+        amount: 1_000,
+        token_ticker: "TIMBA",
+      }),
+      completeGame: () => {},
+      getGameParticipantsCount: () => 10,
+      getGameMessages: () => [{ chat_id: 42, message_id: 24 }],
+    } as any);
+
+    let receivedPot: number | undefined;
+    botModule.__test_setGameManager({
+      updateGameMessageFromData: async () => {},
+      getPlayerUsername: async () => "winner",
+      getPrizeDisplay: async (_addr: string, pot: number) => {
+        receivedPot = pot;
+        return {
+          formattedAmount: String(pot),
+          tokenTicker: "TIMBA",
+          usdApproximation: null,
+        };
+      },
+      getActiveGameMessage: () => ({ chatId: 42, messageId: 24 }),
+    } as any);
+
+    (botModule.wallet as any).getBlockchainTime = async () => 100;
+    await botModule.__test_processGameCompletion(
+      "GIVEAWAY_WITH_AMOUNT_ONLY",
+      winnerPubkey
+    );
+
+    expect(receivedPot).toBe(1_000);
+  });
 });

@@ -65,6 +65,46 @@ describe("SwapManager Jupiter execution", () => {
     expect(captured!.signedTransaction).not.toEqual(base64Tx);
   });
 
+  test("filters out signers not present in transaction account keys", async () => {
+    const walletStub = {} as any;
+    const connectionStub = {} as any;
+    const manager = new SwapManager(
+      connectionStub as any,
+      walletStub,
+      feeBudgetStub
+    );
+    const payer = Keypair.generate();
+    const extraSigner = Keypair.generate();
+    const base64Tx = createBase64Transaction(payer);
+
+    let captured: { requestId: string; signedTransaction: string } | null =
+      null;
+    (manager as any).jupiterClient.executeOrder = async (payload: any) => {
+      captured = payload;
+      return { status: "Success", signature: SIGNATURE_OK };
+    };
+
+    const result = await (manager as any).executeJupiterTransaction(
+      base64Tx,
+      "req-filtered-signers",
+      [payer, extraSigner]
+    );
+
+    expect(result).toBe(SIGNATURE_OK);
+    expect(captured).not.toBeNull();
+    expect(captured!.requestId).toBe("req-filtered-signers");
+
+    const signedTx = VersionedTransaction.deserialize(
+      Buffer.from(captured!.signedTransaction, "base64")
+    );
+
+    expect(signedTx.message.staticAccountKeys.map((key) => key.toBase58())).toEqual([
+      payer.publicKey.toBase58(),
+    ]);
+    expect(signedTx.signatures).toHaveLength(1);
+    expect(signedTx.signatures[0]).not.toEqual(new Uint8Array(64));
+  });
+
   test("throws when execute endpoint omits signature", async () => {
     const walletStub = {} as any;
     const connectionStub = {} as any;

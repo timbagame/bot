@@ -172,7 +172,7 @@ describe("JupiterClient referral URL params", () => {
     expect(capture.url).not.toContain(`taker=${payer}`);
   });
 
-  test("strips payer and closeAuthority on referral fallback", async () => {
+  test("never sends payer or closeAuthority to Jupiter Ultra order", async () => {
     const urls: string[] = [];
     const closeAuthority = "5mo3n3ed58N8LSnMSrhMfyQyw4MKWmNBp8QtUafpJwwt";
     const client = new JupiterClient(
@@ -203,8 +203,8 @@ describe("JupiterClient referral URL params", () => {
 
     expect(urls.length).toBe(2);
     expect(urls[0]).toContain("referralAccount=");
-    expect(urls[0]).toContain(`payer=${payer}`);
-    expect(urls[0]).toContain(`closeAuthority=${closeAuthority}`);
+    expect(urls[0]).not.toContain("payer=");
+    expect(urls[0]).not.toContain("closeAuthority=");
     expect(urls[1]).not.toContain("referralAccount=");
     expect(urls[1]).not.toContain("referralFee=");
     expect(urls[1]).not.toContain("payer=");
