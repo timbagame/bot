@@ -69,7 +69,7 @@ export function formatAmount(
   decimals: number,
   opts: FormatOptions = {}
 ): string {
-  const { maxFractionDigits = 6, trim = true } = opts;
+  const { maxFractionDigits = decimals, trim = true } = opts;
   const { sign, digits } = toBigIntString(raw);
 
   // Pad digits so we can slice integer/fraction reliably

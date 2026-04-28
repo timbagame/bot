@@ -42,10 +42,10 @@ test("formatTokenBalance handles amounts under one token", () => {
   expect(manager.formatTokenBalance(123, 3)).toBe("0.123");
 });
 
-test("formatTokenBalance caps precision for large amounts", () => {
+test("formatTokenBalance shows full precision by default", () => {
   WalletManager.resetForTest();
   const manager = WalletManager.getInstance(mnemonic);
-  expect(manager.formatTokenBalance(1234567890, 9)).toBe("1.234568");
+  expect(manager.formatTokenBalance(1234567890, 9)).toBe("1.23456789");
 });
 
 test("getKeyPair remains consistent under concurrent cache evictions", async () => {

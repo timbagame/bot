@@ -1497,10 +1497,7 @@ export class GameManager {
         const lamports = coerceLamportValue(value);
         if (lamports !== null) {
           if (lamports > MAX_SAFE_LAMPORTS) {
-            return formatAmount(lamports, decimals, {
-              maxFractionDigits: 6,
-              trim: true,
-            });
+            return formatAmount(lamports, decimals, { trim: true });
           }
           return formatWithWallet(Number(lamports));
         }
@@ -1516,10 +1513,7 @@ export class GameManager {
           }
         }
 
-        return formatAmount(0, decimals, {
-          maxFractionDigits: 6,
-          trim: true,
-        });
+        return formatAmount(0, decimals, { trim: true });
       };
     };
 

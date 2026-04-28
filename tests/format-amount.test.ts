@@ -47,6 +47,18 @@ test("formatAmount rounds fractional carry when integer part is empty", () => {
   expect(formatAmount(5, 3, { maxFractionDigits: 2 })).toBe("0.01");
 });
 
+test("formatAmount shows tiny non-zero values with full precision by default", () => {
+  expect(formatAmount(1, 9)).toBe("0.000000001");
+  expect(formatAmount(5, 9)).toBe("0.000000005");
+  expect(formatAmount(1234, 9)).toBe("0.000001234");
+});
+
+test("formatAmount default maxFractionDigits equals decimals", () => {
+  expect(formatAmount(1500000000, 9)).toBe("1.5");
+  expect(formatAmount(1000000, 6)).toBe("1");
+  expect(formatAmount(1, 18)).toBe("0.000000000000000001");
+});
+
 test("formatTokenDisplay respects provided decimals", () => {
   expect(
     formatTokenDisplay(1.2, {

@@ -2614,7 +2614,7 @@ export class WalletManager {
   }
 
   public formatSolBalance(lamports: number | bigint | string): string {
-    return formatAmount(lamports, 9, { maxFractionDigits: 6, trim: true });
+    return formatAmount(lamports, 9, { trim: true });
   }
 
   public formatTokenBalance(
@@ -2622,7 +2622,7 @@ export class WalletManager {
     decimals: number
   ): string {
     // Use shared formatter for consistent rounding and trimming
-    return formatAmount(amount, decimals, { maxFractionDigits: 6, trim: true });
+    return formatAmount(amount, decimals, { trim: true });
   }
 
   public async wrapSol(

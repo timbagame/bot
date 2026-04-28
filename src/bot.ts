@@ -776,7 +776,7 @@ const formatTradeConfirmationSummary = ({
     quote.outputAmount ?? "0",
     receiveDecimals,
     {
-      maxFractionDigits: 6,
+      maxFractionDigits: receiveDecimals,
       trim: true,
     }
   );
@@ -5033,7 +5033,7 @@ bot.callbackQuery(/^confirm_swap_/, async (ctx) => {
         quote.outputAmount ?? "0",
         outputDecimals,
         {
-          maxFractionDigits: Math.min(outputDecimals, 6),
+          maxFractionDigits: outputDecimals,
           trim: true,
         }
       );
