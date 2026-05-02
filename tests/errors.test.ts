@@ -42,6 +42,15 @@ test("parseTransactionError handles Jupiter no route errors", async () => {
   expect(message).toContain("Swap route missing");
 });
 
+test("parseTransactionError handles Jupiter failed quote errors", async () => {
+  const error = new Error(
+    'Jupiter order failed: 400 Bad Request - {"requestId":"req","error":"Failed to get quotes"}'
+  );
+  const message = await parseTransactionError(error);
+  expect(message).toContain("Swap route missing");
+  expect(message).toContain("Keep some SOL");
+});
+
 test("parseTransactionError handles address lookup table errors", async () => {
   const error = new Error(
     "Jupiter: address table account not found in AddressTableLookup"

@@ -187,10 +187,14 @@ const errorHandlers: Array<{ matcher: (ctx: ErrorContext) => boolean; handler: E
       `The network couldn't process this action. Try again shortly or contact an admin if it keeps happening.`,
   },
   {
-    matcher: (ctx) => ctx.lowerMessage.includes("no route found") || ctx.lowerMessage.includes("no routes"),
+    matcher: (ctx) =>
+      ctx.lowerMessage.includes("no route found") ||
+      ctx.lowerMessage.includes("no routes") ||
+      ctx.lowerMessage.includes("failed to get quotes"),
     handler: () =>
       `🛣️ Swap route missing.\n` +
-      `Jupiter could not find a path for this pair. Try a different token pair, a smaller amount, or retry later.`,
+      `Jupiter could not find a path for this pair. Try a different token pair, a smaller amount, or retry later.\n` +
+      `Keep some SOL in the wallet for route fees before trying again.`,
   },
   {
     matcher: (ctx) => ctx.lowerMessage.includes("slippage"),
