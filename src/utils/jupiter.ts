@@ -185,11 +185,11 @@ export class JupiterClient {
   }
 
   private getOrderUrl(): string {
-    return `${this.baseUrl}/ultra/v1/order`;
+    return `${this.baseUrl}/swap/v2/order`;
   }
 
   private getExecuteUrl(): string {
-    return `${this.baseUrl}/ultra/v1/execute`;
+    return `${this.baseUrl}/swap/v2/execute`;
   }
 
   private normalizeQuote(

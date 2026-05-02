@@ -8,6 +8,105 @@ afterEach(() => {
 });
 
 describe("JupiterClient HTTP", () => {
+  test("getQuote uses Swap V2 order endpoint", async () => {
+    let capturedUrl = "";
+    globalThis.fetch = (async (url: string) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        json: async () => ({
+          inputMint: "A",
+          outputMint: "B",
+          inAmount: "10",
+          outAmount: "20",
+          otherAmountThreshold: "9",
+          swapMode: "ExactIn",
+          slippageBps: 100,
+          priceImpactPct: "0.10",
+          routePlan: [],
+          totalTime: 1,
+        }),
+      };
+    }) as any;
+
+    const jc = new JupiterClient("https://api.jup.ag", globalThis.fetch as any);
+
+    await jc.getQuote({
+      inputMint: "A",
+      outputMint: "B",
+      amount: "10",
+    });
+
+    expect(capturedUrl).toContain("https://api.jup.ag/swap/v2/order");
+  });
+
+  test("getSwapTransaction uses Swap V2 order endpoint", async () => {
+    let capturedUrl = "";
+    globalThis.fetch = (async (url: string) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        json: async () => ({
+          inputMint: "A",
+          outputMint: "B",
+          inAmount: "10",
+          outAmount: "20",
+          otherAmountThreshold: "9",
+          swapMode: "ExactIn",
+          slippageBps: 100,
+          priceImpactPct: "0.10",
+          routePlan: [],
+          totalTime: 1,
+          transaction: "AAAA",
+          requestId: "req-123",
+        }),
+      };
+    }) as any;
+
+    const jc = new JupiterClient("https://api.jup.ag", globalThis.fetch as any);
+
+    await jc.getSwapTransaction({
+      userPublicKey: "user",
+      quoteResponse: {
+        inputMint: "A",
+        outputMint: "B",
+        inAmount: "10",
+        outAmount: "20",
+        otherAmountThreshold: "9",
+        swapMode: "ExactIn",
+        slippageBps: 100,
+        priceImpactPct: "0.10",
+        routePlan: [],
+        totalTime: 1,
+      },
+    });
+
+    expect(capturedUrl).toContain("https://api.jup.ag/swap/v2/order");
+  });
+
+  test("executeOrder uses Swap V2 execute endpoint", async () => {
+    let capturedUrl = "";
+    globalThis.fetch = (async (url: string) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        json: async () => ({
+          status: "Success",
+          signature: "sig",
+        }),
+      };
+    }) as any;
+
+    const jc = new JupiterClient("https://api.jup.ag", globalThis.fetch as any);
+
+    await jc.executeOrder({
+      requestId: "req-123",
+      signedTransaction: "tx",
+    });
+
+    expect(capturedUrl).toContain("https://api.jup.ag/swap/v2/execute");
+  });
+
   test("getQuote throws with non-ok response and includes status", async () => {
     // Mock fetch to return non-ok
     globalThis.fetch = (async () => ({
@@ -90,4 +189,3 @@ describe("JupiterClient HTTP", () => {
     );
   });
 });
-
