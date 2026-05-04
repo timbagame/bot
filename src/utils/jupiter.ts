@@ -151,6 +151,20 @@ interface JupiterExecuteRequest {
   signedTransaction: string;
 }
 
+const extractJupiterErrorMessage = (errorText: string): string => {
+  try {
+    const parsed = JSON.parse(errorText) as { error?: unknown; errorMessage?: unknown };
+    const message = parsed.errorMessage ?? parsed.error;
+    if (typeof message === "string" && message.trim().length > 0) {
+      return message.trim();
+    }
+  } catch {
+    // Jupiter can return either plain text or JSON. Plain text is handled below.
+  }
+
+  return errorText.trim() || "Unknown Jupiter error";
+};
+
 export interface JupiterExecuteResponse {
   status?: string;
   signature?: string;
@@ -283,10 +297,11 @@ export class JupiterClient {
 
       if (!response.ok) {
         const errorText = await response.text();
+        const errorMessage = extractJupiterErrorMessage(errorText);
         if (
           allowReferralFallback &&
           params.referralAccount &&
-          errorText.includes("Failed to get quotes")
+          errorMessage.includes("Failed to get quotes")
         ) {
           console.warn(
             "Integrator order failed, retrying without referral params",
@@ -310,7 +325,7 @@ export class JupiterClient {
           return fallback;
         }
         throw new Error(
-          `Jupiter order failed: ${response.status} ${response.statusText} - ${errorText}`
+          `Jupiter order failed: ${response.status} ${response.statusText} - ${errorMessage}`
         );
       }
 

@@ -268,4 +268,31 @@ describe("JupiterClient error handling", () => {
       })
     ).rejects.toThrow("Minimum $10 for gasless");
   });
+
+  test("does not expose raw Jupiter error JSON", async () => {
+    const client = new JupiterClient(
+      "https://api.jup.ag",
+      async () => ({
+        ok: false,
+        status: 400,
+        statusText: "Bad Request",
+        text: async () =>
+          JSON.stringify({
+            requestId: "109df427-11b0-75bc-8bee-0283dbcd2d1f",
+            error: "Failed to get quotes",
+          }),
+      } as unknown as Response)
+    );
+
+    await expect(
+      client.getQuote({
+        inputMint: "So11111111111111111111111111111111111111112",
+        outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        amount: "1000000",
+        taker: "Taker",
+      })
+    ).rejects.toThrow(
+      "Failed to request Jupiter order: Jupiter order failed: 400 Bad Request - Failed to get quotes"
+    );
+  });
 });
