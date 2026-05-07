@@ -428,4 +428,330 @@ describe("SwapManager.executeJupiterSwap", () => {
     );
     expect(compiledPrograms.at(-1)).toBe(SystemProgram.programId.toBase58());
   });
+
+  test("build fallback throws when simulation fails", async () => {
+    const connection = new Connection("http://localhost:8899", "confirmed");
+    const wallet = WalletManager.createForTest(
+      "test walk nut penalty hip pave soap entry language right filter choice",
+      { connection, timeNow: () => Date.now() }
+    );
+    const sm = new SwapManager(connection, wallet);
+
+    const user = Keypair.generate();
+    const admin = Keypair.generate();
+    const quote = {
+      inputMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
+      outputMint: "So11111111111111111111111111111111111111112",
+      inputAmount: "1000000",
+      inputAmountRaw: "1000000",
+      outputAmount: "750000",
+      estimatedRate: 0.75,
+      slippage: 1,
+      provider: "jupiter" as const,
+      providerQuote: {
+        inputMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
+        outputMint: "So11111111111111111111111111111111111111112",
+        inAmount: "1000000",
+        outAmount: "750000",
+        otherAmountThreshold: "0",
+        swapMode: "ExactIn",
+        slippageBps: 100,
+        priceImpactPct: "0",
+        routePlan: [],
+      },
+      integrator: {
+        referralAccount: "referral",
+        referralFee: 85,
+        payer: admin.publicKey.toBase58(),
+        closeAuthority: admin.publicKey.toBase58(),
+        payerKind: "admin" as const,
+      },
+    };
+
+    Reflect.set(sm, "createTokenAccountsIfNeeded", async () => []);
+    Reflect.set(wallet, "getAdminKeypair", () => admin);
+    Object.assign(connection, {
+      getBalance: async (address: PublicKey) =>
+        address.equals(user.publicKey) ? 0 : 10_000_000,
+      simulateTransaction: async () => ({ value: { err: "SimulationFailed", unitsConsumed: null } }),
+    });
+
+    Reflect.get(sm, "jupiterClient").getSwapTransaction = async () => ({
+      swapTransaction: buildBase64Tx(user),
+      requestId: "req-sim-fail",
+      order: {
+        requestId: "req-sim-fail",
+        integratorFallback: true,
+        integratorFallbackReason: "Failed to get quotes",
+        payerApplied: false,
+        referralApplied: false,
+        signatureFeeLamports: 5000,
+      },
+    });
+    Reflect.get(sm, "jupiterClient").getBuildInstructions = async () => ({
+      inputMint: quote.inputMint,
+      outputMint: quote.outputMint,
+      inAmount: quote.inputAmountRaw,
+      outAmount: quote.outputAmount,
+      otherAmountThreshold: "0",
+      swapMode: "ExactIn",
+      slippageBps: 100,
+      routePlan: [],
+      computeBudgetInstructions: [],
+      setupInstructions: [],
+      swapInstruction: apiInstruction(
+        new TransactionInstruction({
+          programId: Keypair.generate().publicKey,
+          keys: [{ pubkey: user.publicKey, isSigner: true, isWritable: true }],
+          data: Buffer.from([1]),
+        })
+      ),
+      cleanupInstruction: null,
+      otherInstructions: [],
+      tipInstruction: null,
+      addressesByLookupTableAddress: null,
+      blockhashWithMetadata: {
+        blockhash: Array.from(Buffer.alloc(32)),
+        lastValidBlockHeight: 123,
+      },
+    });
+
+    try {
+      await sm.executeJupiterSwap(
+        {
+          inputMint: quote.inputMint,
+          outputMint: quote.outputMint,
+          amount: quote.inputAmountRaw,
+          userKeypair: user,
+          inputDecimals: 6,
+          outputDecimals: 9,
+          inputTicker: "TIMBA",
+          outputTicker: "SOL",
+        },
+        quote
+      );
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(/simulation failed/i);
+    }
+  });
+
+  test("build fallback throws when output is too small to reimburse admin", async () => {
+    const connection = new Connection("http://localhost:8899", "confirmed");
+    const wallet = WalletManager.createForTest(
+      "test walk nut penalty hip pave soap entry language right filter choice",
+      { connection, timeNow: () => Date.now() }
+    );
+    const sm = new SwapManager(connection, wallet);
+
+    const user = Keypair.generate();
+    const admin = Keypair.generate();
+    const quote = {
+      inputMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
+      outputMint: "So11111111111111111111111111111111111111112",
+      inputAmount: "1000000",
+      inputAmountRaw: "1000000",
+      outputAmount: "1",
+      estimatedRate: 0.000001,
+      slippage: 1,
+      provider: "jupiter" as const,
+      providerQuote: {
+        inputMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
+        outputMint: "So11111111111111111111111111111111111111112",
+        inAmount: "1000000",
+        outAmount: "1",
+        otherAmountThreshold: "0",
+        swapMode: "ExactIn",
+        slippageBps: 100,
+        priceImpactPct: "0",
+        routePlan: [],
+      },
+      integrator: {
+        referralAccount: "referral",
+        referralFee: 85,
+        payer: admin.publicKey.toBase58(),
+        closeAuthority: admin.publicKey.toBase58(),
+        payerKind: "admin" as const,
+      },
+    };
+
+    Reflect.set(sm, "createTokenAccountsIfNeeded", async () => []);
+    Reflect.set(wallet, "getAdminKeypair", () => admin);
+    Object.assign(connection, {
+      getBalance: async (address: PublicKey) =>
+        address.equals(user.publicKey) ? 0 : 10_000_000,
+      simulateTransaction: async () => ({ value: { err: null, unitsConsumed: 200_000 } }),
+    });
+
+    Reflect.get(sm, "jupiterClient").getSwapTransaction = async () => ({
+      swapTransaction: buildBase64Tx(user),
+      requestId: "req-small-output",
+      order: {
+        requestId: "req-small-output",
+        integratorFallback: true,
+        integratorFallbackReason: "Failed to get quotes",
+        payerApplied: false,
+        referralApplied: false,
+        signatureFeeLamports: 5000,
+      },
+    });
+    Reflect.get(sm, "jupiterClient").getBuildInstructions = async () => ({
+      inputMint: quote.inputMint,
+      outputMint: quote.outputMint,
+      inAmount: quote.inputAmountRaw,
+      outAmount: "1",
+      otherAmountThreshold: "0",
+      swapMode: "ExactIn",
+      slippageBps: 100,
+      routePlan: [],
+      computeBudgetInstructions: [],
+      setupInstructions: [],
+      swapInstruction: apiInstruction(
+        new TransactionInstruction({
+          programId: Keypair.generate().publicKey,
+          keys: [{ pubkey: user.publicKey, isSigner: true, isWritable: true }],
+          data: Buffer.from([1]),
+        })
+      ),
+      cleanupInstruction: null,
+      otherInstructions: [],
+      tipInstruction: null,
+      addressesByLookupTableAddress: null,
+      blockhashWithMetadata: {
+        blockhash: Array.from(Buffer.alloc(32)),
+        lastValidBlockHeight: 123,
+      },
+    });
+
+    try {
+      await sm.executeJupiterSwap(
+        {
+          inputMint: quote.inputMint,
+          outputMint: quote.outputMint,
+          amount: quote.inputAmountRaw,
+          userKeypair: user,
+          inputDecimals: 6,
+          outputDecimals: 9,
+          inputTicker: "TIMBA",
+          outputTicker: "SOL",
+        },
+        quote
+      );
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(/too small to reimburse/i);
+    }
+  });
+
+  test("build fallback throws when confirmed transaction has on-chain error", async () => {
+    const connection = new Connection("http://localhost:8899", "confirmed");
+    const wallet = WalletManager.createForTest(
+      "test walk nut penalty hip pave soap entry language right filter choice",
+      { connection, timeNow: () => Date.now() }
+    );
+    const sm = new SwapManager(connection, wallet);
+
+    const user = Keypair.generate();
+    const admin = Keypair.generate();
+    const quote = {
+      inputMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
+      outputMint: "So11111111111111111111111111111111111111112",
+      inputAmount: "1000000",
+      inputAmountRaw: "1000000",
+      outputAmount: "750000",
+      estimatedRate: 0.75,
+      slippage: 1,
+      provider: "jupiter" as const,
+      providerQuote: {
+        inputMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
+        outputMint: "So11111111111111111111111111111111111111112",
+        inAmount: "1000000",
+        outAmount: "750000",
+        otherAmountThreshold: "0",
+        swapMode: "ExactIn",
+        slippageBps: 100,
+        priceImpactPct: "0",
+        routePlan: [],
+      },
+      integrator: {
+        referralAccount: "referral",
+        referralFee: 85,
+        payer: admin.publicKey.toBase58(),
+        closeAuthority: admin.publicKey.toBase58(),
+        payerKind: "admin" as const,
+      },
+    };
+
+    Reflect.set(sm, "createTokenAccountsIfNeeded", async () => []);
+    Reflect.set(wallet, "getAdminKeypair", () => admin);
+    Object.assign(connection, {
+      getBalance: async (address: PublicKey) =>
+        address.equals(user.publicKey) ? 0 : 10_000_000,
+      simulateTransaction: async () => ({ value: { err: null, unitsConsumed: 200_000 } }),
+      sendTransaction: async () => "SIG_ERR",
+      confirmTransaction: async () => ({ value: { err: "InsufficientFundsForRent" } }),
+    });
+
+    Reflect.get(sm, "jupiterClient").getSwapTransaction = async () => ({
+      swapTransaction: buildBase64Tx(user),
+      requestId: "req-confirm-fail",
+      order: {
+        requestId: "req-confirm-fail",
+        integratorFallback: true,
+        integratorFallbackReason: "Failed to get quotes",
+        payerApplied: false,
+        referralApplied: false,
+        signatureFeeLamports: 5000,
+      },
+    });
+    Reflect.get(sm, "jupiterClient").getBuildInstructions = async () => ({
+      inputMint: quote.inputMint,
+      outputMint: quote.outputMint,
+      inAmount: quote.inputAmountRaw,
+      outAmount: quote.outputAmount,
+      otherAmountThreshold: "0",
+      swapMode: "ExactIn",
+      slippageBps: 100,
+      routePlan: [],
+      computeBudgetInstructions: [],
+      setupInstructions: [],
+      swapInstruction: apiInstruction(
+        new TransactionInstruction({
+          programId: Keypair.generate().publicKey,
+          keys: [{ pubkey: user.publicKey, isSigner: true, isWritable: true }],
+          data: Buffer.from([1]),
+        })
+      ),
+      cleanupInstruction: null,
+      otherInstructions: [],
+      tipInstruction: null,
+      addressesByLookupTableAddress: null,
+      blockhashWithMetadata: {
+        blockhash: Array.from(Buffer.alloc(32)),
+        lastValidBlockHeight: 123,
+      },
+    });
+
+    try {
+      await sm.executeJupiterSwap(
+        {
+          inputMint: quote.inputMint,
+          outputMint: quote.outputMint,
+          amount: quote.inputAmountRaw,
+          userKeypair: user,
+          inputDecimals: 6,
+          outputDecimals: 9,
+          inputTicker: "TIMBA",
+          outputTicker: "SOL",
+        },
+        quote
+      );
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(/confirmed with error/i);
+    }
+  });
 });
