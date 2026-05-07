@@ -1436,7 +1436,7 @@ export class SwapManager {
 
     const computeUnitLimit = simulationResult.value.unitsConsumed
       ? Math.min(
-          Math.ceil(simulationResult.value.unitsConsumed * 1.2),
+          Math.ceil(Number(simulationResult.value.unitsConsumed) * 1.2),
           JUPITER_BUILD_COMPUTE_UNIT_LIMIT_MAX
         )
       : JUPITER_BUILD_COMPUTE_UNIT_LIMIT_MAX;
