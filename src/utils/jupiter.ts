@@ -89,6 +89,38 @@ export interface JupiterSwapResponse {
   order?: JupiterUltraOrderResponse;
 }
 
+export interface JupiterBuildInstruction {
+  programId: string;
+  accounts: Array<{
+    pubkey: string;
+    isSigner: boolean;
+    isWritable: boolean;
+  }>;
+  data: string;
+}
+
+export interface JupiterBuildResponse {
+  inputMint: string;
+  outputMint: string;
+  inAmount: string;
+  outAmount: string;
+  otherAmountThreshold: string;
+  swapMode: string;
+  slippageBps: number;
+  routePlan: JupiterQuoteResponse["routePlan"];
+  computeBudgetInstructions: JupiterBuildInstruction[];
+  setupInstructions: JupiterBuildInstruction[];
+  swapInstruction: JupiterBuildInstruction;
+  cleanupInstruction: JupiterBuildInstruction | null;
+  otherInstructions: JupiterBuildInstruction[];
+  tipInstruction: JupiterBuildInstruction | null;
+  addressesByLookupTableAddress: Record<string, string[]> | null;
+  blockhashWithMetadata: {
+    blockhash: number[];
+    lastValidBlockHeight: number;
+  };
+}
+
 interface JupiterOrderParams {
   inputMint: string;
   outputMint: string;
@@ -204,6 +236,10 @@ export class JupiterClient {
 
   private getExecuteUrl(): string {
     return `${this.baseUrl}/swap/v2/execute`;
+  }
+
+  private getBuildUrl(): string {
+    return `${this.baseUrl}/swap/v2/build`;
   }
 
   private normalizeQuote(
@@ -420,6 +456,43 @@ export class JupiterClient {
       routePlan: order.routePlan,
       order,
     };
+  }
+
+  async getBuildInstructions(
+    request: JupiterQuoteRequest
+  ): Promise<JupiterBuildResponse> {
+    const url = new URL(this.getBuildUrl());
+    url.searchParams.set("inputMint", request.inputMint);
+    url.searchParams.set("outputMint", request.outputMint);
+    url.searchParams.set("amount", request.amount);
+    if (request.taker) {
+      url.searchParams.set("taker", request.taker);
+    }
+    if (request.payer) {
+      url.searchParams.set("payer", request.payer);
+    }
+
+    try {
+      const response = await this.fetchFn(url.toString(), {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          ...(this.apiKey ? { "x-api-key": this.apiKey } : {}),
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `Jupiter build failed: ${response.status} ${response.statusText} - ${extractJupiterErrorMessage(errorText)}`
+        );
+      }
+
+      return (await response.json()) as JupiterBuildResponse;
+    } catch (error: any) {
+      console.error("Error requesting Jupiter build:", error);
+      throw new Error(`Failed to request Jupiter build: ${error.message}`);
+    }
   }
 
   async executeOrder(

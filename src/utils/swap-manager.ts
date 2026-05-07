@@ -1,14 +1,20 @@
 import {
+  AddressLookupTableAccount,
+  ComputeBudgetProgram,
   Connection,
   PublicKey,
   Keypair,
+  SystemProgram,
   TransactionInstruction,
+  TransactionMessage,
   VersionedTransaction,
 } from "@solana/web3.js";
 import {
   JupiterClient,
   type JupiterQuoteResponse,
   type JupiterQuoteRequest,
+  type JupiterBuildInstruction,
+  type JupiterBuildResponse,
   type JupiterUltraOrderResponse,
 } from "./jupiter";
 import { NetworkDetector } from "./network-detector";
@@ -51,6 +57,7 @@ const SOL_MINT = WSOL_MINT;
 const SOL_DECIMALS = 9;
 const JUPITER_QUOTE_EXPIRATION_MS_DEFAULT = 120_000;
 const ROUTE_LAMPORTS_BUFFER = DEFAULT_ROUTE_LAMPORTS_PADDING;
+const JUPITER_BUILD_COMPUTE_UNIT_LIMIT_MAX = 1_400_000;
 let jupiterQuoteExpirationMs = JUPITER_QUOTE_EXPIRATION_MS_DEFAULT;
 
 type HelperResult<TValue> =
@@ -1015,6 +1022,19 @@ export class SwapManager {
       const requiredUserLamports = inputLamports + requiredLamports;
 
       if (userBalance < requiredUserLamports) {
+        if (this.canUseAtomicBuildFallback(request, quote)) {
+          const adminKeypair = this.wallet.getAdminKeypair();
+          if (integrator.payer === adminKeypair.publicKey.toBase58()) {
+            return this.executeAtomicBuildFallback({
+              request,
+              quote,
+              jupiterQuote,
+              adminKeypair,
+              reimbursementLamports: requiredLamports,
+            });
+          }
+        }
+
         throw new Error(
           "Jupiter admin payer fallback requires user-paid SOL fees, but the user balance is too low."
         );
@@ -1235,6 +1255,202 @@ export class SwapManager {
         `Failed to execute Jupiter transaction: ${error?.message || error}`
       );
     }
+  }
+
+  private canUseAtomicBuildFallback(
+    request: SwapRequest,
+    quote: SwapQuote
+  ): boolean {
+    return (
+      quote.integrator?.payerKind === "admin" &&
+      !this.isSolMint(quote.inputMint) &&
+      this.isSolMint(quote.outputMint) &&
+      this.isSolMint(request.outputMint)
+    );
+  }
+
+  private toJupiterBuildInstruction(
+    instruction: JupiterBuildInstruction
+  ): TransactionInstruction {
+    return new TransactionInstruction({
+      programId: new PublicKey(instruction.programId),
+      keys: instruction.accounts.map((account) => ({
+        pubkey: new PublicKey(account.pubkey),
+        isSigner: account.isSigner,
+        isWritable: account.isWritable,
+      })),
+      data: Buffer.from(instruction.data, "base64"),
+    });
+  }
+
+  private getJupiterBuildInstructions(
+    build: JupiterBuildResponse,
+    reimbursementInstruction: TransactionInstruction
+  ): TransactionInstruction[] {
+    return [
+      ...build.setupInstructions.map((instruction) =>
+        this.toJupiterBuildInstruction(instruction)
+      ),
+      this.toJupiterBuildInstruction(build.swapInstruction),
+      ...(build.cleanupInstruction
+        ? [this.toJupiterBuildInstruction(build.cleanupInstruction)]
+        : []),
+      reimbursementInstruction,
+      ...build.otherInstructions.map((instruction) =>
+        this.toJupiterBuildInstruction(instruction)
+      ),
+      ...(build.tipInstruction
+        ? [this.toJupiterBuildInstruction(build.tipInstruction)]
+        : []),
+    ];
+  }
+
+  private getJupiterBuildLookupTables(
+    build: JupiterBuildResponse
+  ): AddressLookupTableAccount[] {
+    if (!build.addressesByLookupTableAddress) {
+      return [];
+    }
+
+    return Object.entries(build.addressesByLookupTableAddress).map(
+      ([key, addresses]) =>
+        new AddressLookupTableAccount({
+          key: new PublicKey(key),
+          state: {
+            deactivationSlot: BigInt("18446744073709551615"),
+            lastExtendedSlot: 0,
+            lastExtendedSlotStartIndex: 0,
+            addresses: addresses.map((address) => new PublicKey(address)),
+          },
+        })
+    );
+  }
+
+  private getJupiterBuildBlockhash(build: JupiterBuildResponse): string {
+    return new PublicKey(
+      Uint8Array.from(build.blockhashWithMetadata.blockhash)
+    ).toBase58();
+  }
+
+  private async executeAtomicBuildFallback(options: {
+    request: SwapRequest;
+    quote: SwapQuote;
+    jupiterQuote: JupiterQuoteResponse;
+    adminKeypair: Keypair;
+    reimbursementLamports: number;
+  }): Promise<string> {
+    const { request, quote, jupiterQuote, adminKeypair } = options;
+    const reimbursementLamports = Math.max(
+      0,
+      Math.trunc(options.reimbursementLamports)
+    );
+
+    if (!Number.isSafeInteger(reimbursementLamports)) {
+      throw new Error("Jupiter build reimbursement must be a safe integer.");
+    }
+
+    const integrator = quote.integrator;
+    if (
+      !integrator?.payer ||
+      integrator.payer !== adminKeypair.publicKey.toBase58()
+    ) {
+      throw new Error(
+        `Integrator admin payer does not match loaded admin keypair ${adminKeypair.publicKey.toBase58()}`
+      );
+    }
+
+    await this.ensureAdminCanCoverRoute(
+      integrator,
+      {
+        ...jupiterQuote,
+        mode: "build",
+      },
+      adminKeypair.publicKey
+    );
+
+    const build = await this.jupiterClient.getBuildInstructions({
+      inputMint: quote.inputMint,
+      outputMint: quote.outputMint,
+      amount: quote.inputAmountRaw,
+      taker: request.userKeypair.publicKey.toBase58(),
+      payer: adminKeypair.publicKey.toBase58(),
+    });
+    const expectedOutputLamports = Number(BigInt(build.outAmount));
+    if (reimbursementLamports > expectedOutputLamports) {
+      throw new Error(
+        "Jupiter build fallback output is too small to reimburse admin fees atomically."
+      );
+    }
+    const recentBlockhash = this.getJupiterBuildBlockhash(build);
+    const lookupTables = this.getJupiterBuildLookupTables(build);
+    const reimbursementInstruction = SystemProgram.transfer({
+      fromPubkey: request.userKeypair.publicKey,
+      toPubkey: adminKeypair.publicKey,
+      lamports: reimbursementLamports,
+    });
+    const swapInstructions = this.getJupiterBuildInstructions(
+      build,
+      reimbursementInstruction
+    );
+    const simulationMessage = new TransactionMessage({
+      payerKey: adminKeypair.publicKey,
+      recentBlockhash,
+      instructions: [
+        ComputeBudgetProgram.setComputeUnitLimit({
+          units: JUPITER_BUILD_COMPUTE_UNIT_LIMIT_MAX,
+        }),
+        ...swapInstructions,
+      ],
+    }).compileToV0Message(lookupTables);
+    const simulationTx = new VersionedTransaction(simulationMessage);
+    const simulationResult = await this.connection.simulateTransaction(
+      simulationTx,
+      { replaceRecentBlockhash: true }
+    );
+
+    if (simulationResult.value.err) {
+      throw new Error(
+        `Jupiter build fallback simulation failed: ${JSON.stringify(
+          simulationResult.value.err
+        )}`
+      );
+    }
+
+    const computeUnitLimit = simulationResult.value.unitsConsumed
+      ? Math.min(
+          Math.ceil(simulationResult.value.unitsConsumed * 1.2),
+          JUPITER_BUILD_COMPUTE_UNIT_LIMIT_MAX
+        )
+      : JUPITER_BUILD_COMPUTE_UNIT_LIMIT_MAX;
+    const finalMessage = new TransactionMessage({
+      payerKey: adminKeypair.publicKey,
+      recentBlockhash,
+      instructions: [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnitLimit }),
+        ...build.computeBudgetInstructions.map((instruction) =>
+          this.toJupiterBuildInstruction(instruction)
+        ),
+        ...swapInstructions,
+      ],
+    }).compileToV0Message(lookupTables);
+    const transaction = new VersionedTransaction(finalMessage);
+    transaction.sign([adminKeypair, request.userKeypair]);
+
+    const signature = await this.connection.sendTransaction(transaction, {
+      skipPreflight: false,
+      preflightCommitment: "confirmed",
+      maxRetries: 3,
+    });
+    await this.connection.confirmTransaction(
+      {
+        signature,
+        blockhash: recentBlockhash,
+        lastValidBlockHeight: build.blockhashWithMetadata.lastValidBlockHeight,
+      },
+      "confirmed"
+    );
+
+    return signature;
   }
 
   private async ensureAdminCanCoverRoute(
