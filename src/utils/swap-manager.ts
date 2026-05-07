@@ -1459,7 +1459,7 @@ export class SwapManager {
       preflightCommitment: "confirmed",
       maxRetries: 3,
     });
-    await this.connection.confirmTransaction(
+    const confirmation = await this.connection.confirmTransaction(
       {
         signature,
         blockhash: recentBlockhash,
@@ -1467,6 +1467,12 @@ export class SwapManager {
       },
       "confirmed"
     );
+
+    if (confirmation.value.err) {
+      throw new Error(
+        `Jupiter build fallback transaction confirmed with error: ${JSON.stringify(confirmation.value.err)}`
+      );
+    }
 
     return signature;
   }
