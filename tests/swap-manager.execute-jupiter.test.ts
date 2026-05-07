@@ -199,6 +199,9 @@ describe("SwapManager.executeJupiterSwap", () => {
 
     Object.assign(connection, { getBalance: async () => 0 });
     Reflect.set(sm, "createTokenAccountsIfNeeded", async () => []);
+    Reflect.set(wallet, "getAdminKeypair", () => {
+      throw new Error("admin keypair should not be loaded for invalid payer fallback");
+    });
     Reflect.get(sm, "jupiterClient").getSwapTransaction = async () => ({
       swapTransaction: base64Tx,
       requestId: "req-low-sol-fallback",
@@ -258,9 +261,13 @@ describe("SwapManager.executeJupiterSwap", () => {
       },
     };
 
-    await expect(sm.executeJupiterSwap(req, quote)).rejects.toThrow(
-      /user-paid SOL fees/
-    );
+    try {
+      await sm.executeJupiterSwap(req, quote);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(/user-paid SOL fees/);
+    }
     expect(executeCalled).toBe(false);
   });
 
@@ -275,6 +282,7 @@ describe("SwapManager.executeJupiterSwap", () => {
     const user = Keypair.generate();
     const admin = Keypair.generate();
     const swapProgram = Keypair.generate().publicKey;
+    const cleanupProgram = Keypair.generate().publicKey;
     const quote = {
       inputMint: "F3A1baCgv4TF79TSjdMTvpMDtNv8DJvHZwNc9DG8pump",
       outputMint: "So11111111111111111111111111111111111111112",
@@ -339,7 +347,10 @@ describe("SwapManager.executeJupiterSwap", () => {
       executeCalled = true;
       return { status: "Success", signature: "SIG_SHOULD_NOT_RUN" };
     };
-    Reflect.get(sm, "jupiterClient").getBuildInstructions = async () => ({
+    let capturedBuildRequest: Record<string, unknown> | null = null;
+    Reflect.get(sm, "jupiterClient").getBuildInstructions = async (payload: Record<string, unknown>) => {
+      capturedBuildRequest = payload;
+      return {
       inputMint: quote.inputMint,
       outputMint: quote.outputMint,
       inAmount: quote.inputAmountRaw,
@@ -357,7 +368,13 @@ describe("SwapManager.executeJupiterSwap", () => {
           data: Buffer.from([1, 2, 3]),
         })
       ),
-      cleanupInstruction: null,
+      cleanupInstruction: apiInstruction(
+        new TransactionInstruction({
+          programId: cleanupProgram,
+          keys: [{ pubkey: user.publicKey, isSigner: true, isWritable: true }],
+          data: Buffer.from([4, 5, 6]),
+        })
+      ),
       otherInstructions: [],
       tipInstruction: null,
       addressesByLookupTableAddress: null,
@@ -365,7 +382,8 @@ describe("SwapManager.executeJupiterSwap", () => {
         blockhash: Array.from(Buffer.alloc(32)),
         lastValidBlockHeight: 123,
       },
-    });
+    };
+    };
 
     let capturedTx: VersionedTransaction | null = null;
     const sig = await sm.executeJupiterSwap(
@@ -384,6 +402,15 @@ describe("SwapManager.executeJupiterSwap", () => {
 
     expect(sig).toBe("SIG_BUILD_FALLBACK");
     expect(executeCalled).toBe(false);
+    expect(capturedBuildRequest).toMatchObject({
+      inputMint: quote.inputMint,
+      outputMint: quote.outputMint,
+      amount: quote.inputAmountRaw,
+      taker: user.publicKey.toBase58(),
+      payer: admin.publicKey.toBase58(),
+      swapMode: "ExactIn",
+      slippageBps: 100,
+    });
     expect(capturedTx).not.toBeNull();
     const message = capturedTx!.message;
     expect(message.staticAccountKeys[0]!.toBase58()).toBe(admin.publicKey.toBase58());
@@ -393,6 +420,12 @@ describe("SwapManager.executeJupiterSwap", () => {
       (ix) => message.staticAccountKeys[ix.programIdIndex]!.toBase58()
     );
     expect(compiledPrograms).toContain(swapProgram.toBase58());
+    expect(compiledPrograms.indexOf(swapProgram.toBase58())).toBeLessThan(
+      compiledPrograms.indexOf(cleanupProgram.toBase58())
+    );
+    expect(compiledPrograms.indexOf(cleanupProgram.toBase58())).toBeLessThan(
+      compiledPrograms.lastIndexOf(SystemProgram.programId.toBase58())
+    );
     expect(compiledPrograms.at(-1)).toBe(SystemProgram.programId.toBase58());
   });
 });

@@ -20,6 +20,7 @@ export interface JupiterQuoteRequest {
   referralFee?: number;
   payer?: string;
   closeAuthority?: string;
+  slippageBps?: number;
 }
 
 export interface JupiterQuoteResponse {
@@ -119,6 +120,12 @@ export interface JupiterBuildResponse {
     blockhash: number[];
     lastValidBlockHeight: number;
   };
+}
+
+interface JupiterBuildErrorResponse {
+  error?: string;
+  errorCode?: number;
+  errorMessage?: string;
 }
 
 interface JupiterOrderParams {
@@ -471,6 +478,18 @@ export class JupiterClient {
     if (request.payer) {
       url.searchParams.set("payer", request.payer);
     }
+    if (request.swapMode) {
+      url.searchParams.set("swapMode", request.swapMode);
+    }
+    if (request.slippageBps !== undefined) {
+      url.searchParams.set("slippageBps", request.slippageBps.toString());
+    }
+    if (request.maxAccounts !== undefined) {
+      url.searchParams.set("maxAccounts", request.maxAccounts.toString());
+    }
+    if (request.platformFeeBps !== undefined) {
+      url.searchParams.set("platformFeeBps", request.platformFeeBps.toString());
+    }
 
     try {
       const response = await this.fetchFn(url.toString(), {
@@ -488,7 +507,18 @@ export class JupiterClient {
         );
       }
 
-      return (await response.json()) as JupiterBuildResponse;
+      const data = (await response.json()) as JupiterBuildResponse &
+        JupiterBuildErrorResponse;
+
+      if (data.error || data.errorMessage) {
+        const codeSuffix =
+          typeof data.errorCode === "number" ? ` (code ${data.errorCode})` : "";
+        const errorMessage =
+          data.errorMessage || data.error || "Unknown Jupiter error";
+        throw new Error(`Jupiter build error${codeSuffix}: ${errorMessage}`);
+      }
+
+      return data;
     } catch (error: any) {
       console.error("Error requesting Jupiter build:", error);
       throw new Error(`Failed to request Jupiter build: ${error.message}`);

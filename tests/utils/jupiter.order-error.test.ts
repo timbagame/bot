@@ -25,13 +25,17 @@ test("JupiterClient surfaces HTTP errors without error payload", async () => {
     })
   );
 
-  await expect(
-    client.getQuote({
+  try {
+    await client.getQuote({
       inputMint: "So11111111111111111111111111111111111111112",
       outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
       amount: "1000000",
-    })
-  ).rejects.toThrow(/429 Too Many Requests/);
+    });
+    expect.unreachable();
+  } catch (error) {
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/429 Too Many Requests/);
+  }
 });
 
 test("JupiterClient surfaces gasless order error message", async () => {
@@ -63,12 +67,16 @@ test("JupiterClient surfaces gasless order error message", async () => {
     })
   );
 
-  await expect(
-    client.getSwapTransaction({
+  try {
+    await client.getSwapTransaction({
       userPublicKey: "test",
       quoteResponse: baseQuote,
-    })
-  ).rejects.toThrow("Minimum $10 for gasless");
+    });
+    expect.unreachable();
+  } catch (error) {
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("Minimum $10 for gasless");
+  }
 });
 
 test("JupiterClient honors referralApplied returned by Jupiter", async () => {
@@ -117,10 +125,39 @@ test("Jupiter executeOrder surfaces stringify failures without crashing", async 
     } as any)
   );
 
-  await expect(
-    client.executeOrder({
+  try {
+    await client.executeOrder({
       requestId: "req",
       signedTransaction: "tx",
-    })
-  ).rejects.toThrow(/Failed to execute Jupiter order:/);
+    });
+    expect.unreachable();
+  } catch (error) {
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/Failed to execute Jupiter order:/);
+  }
+});
+
+test("Jupiter build surfaces 200 error payloads", async () => {
+  const client = new JupiterClient("https://api.jup.ag", async () =>
+    new Response(
+      JSON.stringify({
+        error: "Failed to get quotes",
+        errorCode: 1,
+      }),
+      { status: 200, statusText: "OK" }
+    )
+  );
+
+  try {
+    await client.getBuildInstructions({
+      inputMint: "MintA",
+      outputMint: "MintB",
+      amount: "1000",
+      taker: "Taker",
+    });
+    expect.unreachable();
+  } catch (error) {
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("Failed to get quotes");
+  }
 });

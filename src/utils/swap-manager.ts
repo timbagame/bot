@@ -1023,15 +1023,18 @@ export class SwapManager {
 
       if (userBalance < requiredUserLamports) {
         if (this.canUseAtomicBuildFallback(request, quote)) {
-          const adminKeypair = this.wallet.getAdminKeypair();
-          if (integrator.payer === adminKeypair.publicKey.toBase58()) {
-            return this.executeAtomicBuildFallback({
-              request,
-              quote,
-              jupiterQuote,
-              adminKeypair,
-              reimbursementLamports: requiredLamports,
-            });
+          const payerPublicKey = this.tryParsePublicKey(integrator.payer);
+          if (payerPublicKey) {
+            const adminKeypair = this.wallet.getAdminKeypair();
+            if (payerPublicKey.equals(adminKeypair.publicKey)) {
+              return this.executeAtomicBuildFallback({
+                request,
+                quote,
+                jupiterQuote,
+                adminKeypair,
+                reimbursementLamports: requiredLamports,
+              });
+            }
           }
         }
 
@@ -1269,6 +1272,18 @@ export class SwapManager {
     );
   }
 
+  private tryParsePublicKey(value: string | undefined): PublicKey | null {
+    if (!value) {
+      return null;
+    }
+
+    try {
+      return new PublicKey(value);
+    } catch {
+      return null;
+    }
+  }
+
   private toJupiterBuildInstruction(
     instruction: JupiterBuildInstruction
   ): TransactionInstruction {
@@ -1374,9 +1389,12 @@ export class SwapManager {
       amount: quote.inputAmountRaw,
       taker: request.userKeypair.publicKey.toBase58(),
       payer: adminKeypair.publicKey.toBase58(),
+      swapMode:
+        jupiterQuote.swapMode === "ExactOut" ? "ExactOut" : "ExactIn",
+      slippageBps: quote.providerQuote?.slippageBps ?? jupiterQuote.slippageBps,
     });
-    const expectedOutputLamports = Number(BigInt(build.outAmount));
-    if (reimbursementLamports > expectedOutputLamports) {
+    const expectedOutputLamports = BigInt(build.outAmount);
+    if (BigInt(reimbursementLamports) > expectedOutputLamports) {
       throw new Error(
         "Jupiter build fallback output is too small to reimburse admin fees atomically."
       );
