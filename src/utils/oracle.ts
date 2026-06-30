@@ -123,6 +123,31 @@ export class OracleClient {
     }
   }
 
+  public async requestGameCompletion(gameAddress: string): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.oracleApiUrl}/games/complete-now`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ gameAddress }),
+        signal: AbortSignal.timeout(3000),
+      });
+
+      if (!response.ok) {
+        console.warn(
+          `Oracle completion wake-up failed for ${gameAddress}: ${response.status} ${response.statusText}`
+        );
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.warn(`Oracle completion wake-up failed for ${gameAddress}:`, error);
+      return false;
+    }
+  }
+
   // ================================
   // PRIVATE GAME AUTHORIZATION (kept for private games)
   // ================================

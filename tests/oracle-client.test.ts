@@ -74,6 +74,35 @@ describe("OracleClient", () => {
     expect(await oc.getStats()).toBeNull();
   });
 
+  test("requestGameCompletion posts to complete-now endpoint", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    // @ts-ignore
+    globalThis.fetch = async (url: string, init?: RequestInit) => {
+      requests.push({ url, init });
+      return { ok: true, status: 200, statusText: "OK" };
+    };
+
+    const oc = OracleClient.getInstance();
+    oc.setOracleUrl(ORACLE_URL);
+    const success = await oc.requestGameCompletion("game123");
+
+    expect(success).toBe(true);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe(`${ORACLE_URL}/games/complete-now`);
+    expect(requests[0]?.init?.method).toBe("POST");
+    expect(requests[0]?.init?.body).toBe(JSON.stringify({ gameAddress: "game123" }));
+  });
+
+  test("requestGameCompletion returns false on request failure", async () => {
+    // @ts-ignore
+    globalThis.fetch = async () => ({ ok: false, status: 409, statusText: "Conflict" });
+
+    const oc = OracleClient.getInstance();
+    oc.setOracleUrl(ORACLE_URL);
+
+    expect(await oc.requestGameCompletion("game123")).toBe(false);
+  });
+
   test("hexToBuffer converts hex string correctly", () => {
     const oc = OracleClient.getInstance();
     const buf = oc.hexToBuffer("ff00aa");

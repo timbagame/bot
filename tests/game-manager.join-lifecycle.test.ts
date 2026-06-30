@@ -243,6 +243,108 @@ describe("GameManager join lifecycle", () => {
     expect(capturedJoinAccounts.gameTokenAccount).toBeUndefined();
   });
 
+  test("joinGame asks oracle to complete when verified join fills the game", async () => {
+    resetGM();
+
+    const playerKp = Keypair.generate();
+    const tokenMint = new PublicKey(
+      "So11111111111111111111111111111111111111112"
+    );
+    const gameAccounts = [
+      {
+        isPrivate: false,
+        ticketsCount: 1,
+        maxTickets: 2,
+        gameType: { coinflip: {} },
+        ticketAmount: 1_000_000_000,
+        tokenMint,
+      },
+      {
+        isPrivate: false,
+        ticketsCount: 2,
+        maxTickets: 2,
+        gameType: { coinflip: {} },
+        ticketAmount: 1_000_000_000,
+        tokenMint,
+      },
+    ];
+    let fetchCount = 0;
+
+    const program = {
+      programId: new PublicKey("32Jr4JnXWvqq9GqPQynkooHsszaucUUvZfNLh2hdX2L5"),
+      account: {
+        game: {
+          fetch: async () => gameAccounts[Math.min(fetchCount++, gameAccounts.length - 1)],
+        },
+      },
+      methods: {
+        joinGame: () => ({
+          accounts: () => ({
+            instruction: async () => ({}),
+          }),
+        }),
+      },
+    } as any;
+
+    const wallet = {
+      getKeyPair: () => playerKp,
+      getTokenMetadata: async () => ({ decimals: 9 }),
+      getTokenBalance: async () => 5_000_000_000,
+      getBalance: async () => 5_000_000_000,
+      sendTransaction: async () => "SIG123",
+    } as any;
+
+    const participantCalls: any[] = [];
+    const gameDb = {
+      getGame: () => ({
+        status: "active",
+        token_mint: tokenMint.toBase58(),
+        token_ticker: "TOK",
+      }),
+      savePlayerMapping: () => {},
+      saveGameParticipant: (...args: any[]) => participantCalls.push(args),
+      removeGameParticipant: () => {},
+      getGameParticipants: () => [],
+      getPlayerTelegramId: () => null,
+    } as any;
+
+    const gm = GameManager.getInstance(program, wallet, gameDb);
+    (gm as any).swapManager = {
+      performJustInTimeSolSwap: async () => ({ swapped: false }),
+    };
+    (gm as any).confirmTransactionWithRecovery = async () => "SIG123";
+    (gm as any).isPlayerInGame = async () => false;
+    (gm as any).verifyParticipantJoin = async () => true;
+    const completionRequests: string[] = [];
+    (gm as any).oracleClient = {
+      requestGameCompletion: async (gameAddress: string) => {
+        completionRequests.push(gameAddress);
+        return true;
+      },
+    };
+
+    const gameToken = Keypair.generate().publicKey;
+    const gameVault = Keypair.generate().publicKey;
+    const gameTokenAccount = Keypair.generate().publicKey;
+    const playerTokenAccount = Keypair.generate().publicKey;
+    (gm as any).resolveGameTokenAccounts = async () => ({
+      tokenProgram: TOKEN_PROGRAM_ID,
+      gameToken,
+      gameVault,
+      gameTokenAccount,
+    });
+    (gm as any).deriveAta = async () => playerTokenAccount;
+
+    const gameAddress = new PublicKey(
+      "BPFLoader1111111111111111111111111111111111"
+    ).toBase58();
+    const result = await gm.joinGame(gameAddress, 3n);
+
+    expect(result.success).toBe(true);
+    expect(completionRequests).toEqual([gameAddress]);
+    expect(participantCalls.length).toBe(1);
+  });
+
   test("verifyParticipantJoin promotes pending entry when player appears on-chain", async () => {
     resetGM();
 

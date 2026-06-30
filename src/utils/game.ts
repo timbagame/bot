@@ -4869,6 +4869,26 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
         };
       }
 
+      try {
+        const updatedGameAccount = await this.program.account.game.fetch(gamePda);
+        const ticketsCount = Number(updatedGameAccount.ticketsCount ?? 0);
+        const maxTickets = Number(updatedGameAccount.maxTickets ?? 0);
+        const requestCompletion = this.oracleClient.requestGameCompletion;
+
+        if (
+          maxTickets > 0 &&
+          ticketsCount >= maxTickets &&
+          typeof requestCompletion === "function"
+        ) {
+          void requestCompletion.call(this.oracleClient, gameAddress);
+        }
+      } catch (completionWakeError) {
+        console.warn(
+          `Failed to request oracle completion for ${gameAddress}:`,
+          completionWakeError
+        );
+      }
+
       return { success: true };
     } catch (error: any) {
       console.error(`Error joining game ${gameAddress}:`, error);
