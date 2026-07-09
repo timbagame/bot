@@ -1,4 +1,4 @@
-import * as anchor from "@coral-xyz/anchor";
+import * as anchor from "@anchor-lang/core";
 import { Keypair as Web3Keypair } from "@solana/web3.js";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";

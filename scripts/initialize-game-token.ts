@@ -16,7 +16,7 @@ import {
   unpackMint,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
-import * as anchor from "@coral-xyz/anchor";
+import * as anchor from "@anchor-lang/core";
 import * as fs from "fs";
 import * as path from "path";
 import type { Timba } from "../idl/idlType";

@@ -11,7 +11,7 @@ import {
   createAssociatedTokenAccountIdempotentInstruction,
 } from "@solana/spl-token";
 import { Context } from "grammy";
-import * as anchor from "@coral-xyz/anchor";
+import * as anchor from "@anchor-lang/core";
 import { createHash } from "crypto";
 
 import { WalletManager } from "./wallet";

@@ -5,7 +5,7 @@
     "": {
       "name": "timba-bot",
       "dependencies": {
-        "@coral-xyz/anchor": "^0.32.1",
+        "@anchor-lang/core": "1.1.2",
         "@grammyjs/auto-retry": "^2.0.2",
         "@grammyjs/commands": "^1.3.2",
         "@grammyjs/runner": "^2.0.3",
@@ -14,12 +14,12 @@
         "@solana/spl-token": "^0.4.14",
         "@solana/web3.js": "^1.98.4",
         "bip39": "^3.1.0",
-        "bn.js": "^5.2.3",
-        "grammy": "^1.42.0",
+        "bn.js": "^5.2.4",
+        "grammy": "^1.44.0",
       },
       "devDependencies": {
-        "@types/bun": "^1.3.12",
-        "fast-check": "^4.7.0",
+        "@types/bun": "^1.3.14",
+        "fast-check": "^4.9.0",
       },
       "peerDependencies": {
         "typescript": "^6.0.3",
@@ -27,13 +27,17 @@
     },
   },
   "packages": {
+    "@anchor-lang/borsh": ["@anchor-lang/borsh@1.1.2", "", { "dependencies": { "bn.js": "^5.2.3", "buffer-layout": "^1.2.0" }, "peerDependencies": { "@solana/web3.js": "^1.69.1" } }, "sha512-ilYszz4tZjBc2Kszdq/HIaiYozZuAl8ESUI/PvrHl5PvgaD5WPThVe44aDRcDDDY5Cz2Rdbqa+rlGwWW5i25cQ=="],
+
+    "@anchor-lang/core": ["@anchor-lang/core@1.1.2", "", { "dependencies": { "@anchor-lang/borsh": "^1.1.2", "@anchor-lang/errors": "^1.1.2", "@noble/hashes": "^1.3.1", "@solana/web3.js": "^1.69.1", "bn.js": "^5.2.3", "bs58": "^4.0.1", "buffer-layout": "^1.2.2", "eventemitter3": "^4.0.7", "pako": "^2.0.3", "superstruct": "^0.15.4", "toml": "^3.0.0" } }, "sha512-rUG9qzxoK1avDtwYBuufiwMm2t18nVt4eU9T35NT8ZzIZ2k9wbUgW9PQ9lEjteem2t/ozyfvjapsLj4algi4pA=="],
+
+    "@anchor-lang/errors": ["@anchor-lang/errors@1.1.2", "", {}, "sha512-+l5fLYF79t7LAYz+YbjjLzmjj6U1za6Q0cH4GBMWx4vUijlPTkm9Oj/cyDPLJG6Hsx+VFxceh7/+qbca5nnEmg=="],
+
     "@babel/runtime": ["@babel/runtime@7.28.4", "", {}, "sha512-Q/N6JNWvIvPnLDvjlE1OUBLPQHH6l3CltCEsHIujp45zQUSSh8K+gHnaEX45yAT1nyngnINhvWtzN+Nb9D8RAQ=="],
 
-    "@coral-xyz/anchor": ["@coral-xyz/anchor@0.32.1", "", { "dependencies": { "@coral-xyz/anchor-errors": "^0.31.1", "@coral-xyz/borsh": "^0.31.1", "@noble/hashes": "^1.3.1", "@solana/web3.js": "^1.69.0", "bn.js": "^5.1.2", "bs58": "^4.0.1", "buffer-layout": "^1.2.2", "camelcase": "^6.3.0", "cross-fetch": "^3.1.5", "eventemitter3": "^4.0.7", "pako": "^2.0.3", "superstruct": "^0.15.4", "toml": "^3.0.0" } }, "sha512-zAyxFtfeje2FbMA1wzgcdVs7Hng/MijPKpRijoySPCicnvcTQs/+dnPZ/cR+LcXM9v9UYSyW81uRNYZtN5G4yg=="],
+    "@coral-xyz/anchor": ["@coral-xyz/anchor@0.28.1-beta.2", "", { "dependencies": { "@coral-xyz/borsh": "^0.28.0", "@noble/hashes": "^1.3.1", "@solana/web3.js": "^1.68.0", "base64-js": "^1.5.1", "bn.js": "^5.1.2", "bs58": "^4.0.1", "buffer-layout": "^1.2.2", "camelcase": "^6.3.0", "cross-fetch": "^3.1.5", "crypto-hash": "^1.3.0", "eventemitter3": "^4.0.7", "pako": "^2.0.3", "snake-case": "^3.0.4", "superstruct": "^0.15.4", "toml": "^3.0.0" } }, "sha512-xreUcOFF8+IQKWOBUrDKJbIw2ftpRVybFlEPVrbSlOBCbreCWrQ5754Gt9cHIcuBDAzearCDiBqzsGQdNgPJiw=="],
 
-    "@coral-xyz/anchor-errors": ["@coral-xyz/anchor-errors@0.31.1", "", {}, "sha512-NhNEku4F3zzUSBtrYz84FzYWm48+9OvmT1Hhnwr6GnPQry2dsEqH/ti/7ASjjpoFTWRnPXrjAIT1qM6Isop+LQ=="],
-
-    "@coral-xyz/borsh": ["@coral-xyz/borsh@0.31.1", "", { "dependencies": { "bn.js": "^5.1.2", "buffer-layout": "^1.2.0" }, "peerDependencies": { "@solana/web3.js": "^1.69.0" } }, "sha512-9N8AU9F0ubriKfNE3g1WF0/4dtlGXoBN/hd1PvbNBamBNwRgHxH4P+o3Zt7rSEloW1HUs6LfZEchlx9fW7POYw=="],
+    "@coral-xyz/borsh": ["@coral-xyz/borsh@0.28.0", "", { "dependencies": { "bn.js": "^5.1.2", "buffer-layout": "^1.2.0" }, "peerDependencies": { "@solana/web3.js": "^1.68.0" } }, "sha512-/u1VTzw7XooK7rqeD7JLUSwOyRSesPUk0U37BV9zK0axJc1q0nRbKFGFLYCQ16OtdOJTTwGfGp11Lx9B45bRCQ=="],
 
     "@grammyjs/auto-retry": ["@grammyjs/auto-retry@2.0.2", "", { "dependencies": { "debug": "^4.3.4" }, "peerDependencies": { "grammy": "^1.10.0" } }, "sha512-b4A4p5jlYDiQtW0c0FXYe11WMkYoiW+5rvOaDMCOk1h7Pu2SDl7B7gmFF8cthWCx2+M2nWLOsBxAgbBG4kKWYg=="],
 
@@ -235,8 +239,6 @@
 
     "@coral-xyz/borsh/bn.js": ["bn.js@5.2.2", "", {}, "sha512-v2YAxEmKaBLahNwE1mjp4WON6huMNeuDvagFZW+ASCuA/ku0bXR9hSMw0XpiqMoA3+rmnyck/tPRSFQkoC9Cuw=="],
 
-    "@jup-ag/referral-sdk/@coral-xyz/anchor": ["@coral-xyz/anchor@0.28.1-beta.2", "", { "dependencies": { "@coral-xyz/borsh": "^0.28.0", "@noble/hashes": "^1.3.1", "@solana/web3.js": "^1.68.0", "base64-js": "^1.5.1", "bn.js": "^5.1.2", "bs58": "^4.0.1", "buffer-layout": "^1.2.2", "camelcase": "^6.3.0", "cross-fetch": "^3.1.5", "crypto-hash": "^1.3.0", "eventemitter3": "^4.0.7", "pako": "^2.0.3", "snake-case": "^3.0.4", "superstruct": "^0.15.4", "toml": "^3.0.0" } }, "sha512-xreUcOFF8+IQKWOBUrDKJbIw2ftpRVybFlEPVrbSlOBCbreCWrQ5754Gt9cHIcuBDAzearCDiBqzsGQdNgPJiw=="],
-
     "@jup-ag/referral-sdk/@solana/spl-token": ["@solana/spl-token@0.3.8", "", { "dependencies": { "@solana/buffer-layout": "^4.0.0", "@solana/buffer-layout-utils": "^0.2.0", "buffer": "^6.0.3" }, "peerDependencies": { "@solana/web3.js": "^1.47.4" } }, "sha512-ogwGDcunP9Lkj+9CODOWMiVJEdRtqHAtX2rWF62KxnnSWtMZtV9rDhTrZFshiyJmxDnRL/1nKE1yJHg4jjs3gg=="],
 
     "@solana/codecs/@solana/codecs-core": ["@solana/codecs-core@2.0.0-rc.1", "", { "dependencies": { "@solana/errors": "2.0.0-rc.1" }, "peerDependencies": { "typescript": ">=5" } }, "sha512-bauxqMfSs8EHD0JKESaNmNuNvkvHSuN3bbWAF5RjOfDu2PugxHrvRebmYauvSumZ3cTfQ4HJJX6PG5rN852qyQ=="],
@@ -276,10 +278,6 @@
     "rpc-websockets/eventemitter3": ["eventemitter3@5.0.1", "", {}, "sha512-GWkBvjiSZK87ELrYOSESUYeVIc9mvLLf/nXalMOS5dYrgZq9o5OVkbZAVM06CVxYsCwH9BDZFPlQTlPA1j4ahA=="],
 
     "rpc-websockets/ws": ["ws@8.18.3", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-PEIGCY5tSlUt50cqyMXfCzX+oOPqN0vuGqWzbcJ2xvnkzkq46oOpz7dQaTDBdfICb4N14+GARUDw2XV2N4tvzg=="],
-
-    "@jup-ag/referral-sdk/@coral-xyz/anchor/@coral-xyz/borsh": ["@coral-xyz/borsh@0.28.0", "", { "dependencies": { "bn.js": "^5.1.2", "buffer-layout": "^1.2.0" }, "peerDependencies": { "@solana/web3.js": "^1.68.0" } }, "sha512-/u1VTzw7XooK7rqeD7JLUSwOyRSesPUk0U37BV9zK0axJc1q0nRbKFGFLYCQ16OtdOJTTwGfGp11Lx9B45bRCQ=="],
-
-    "@jup-ag/referral-sdk/@coral-xyz/anchor/bn.js": ["bn.js@5.2.2", "", {}, "sha512-v2YAxEmKaBLahNwE1mjp4WON6huMNeuDvagFZW+ASCuA/ku0bXR9hSMw0XpiqMoA3+rmnyck/tPRSFQkoC9Cuw=="],
 
     "@solana/codecs-data-structures/@solana/errors/commander": ["commander@12.1.0", "", {}, "sha512-Vw8qHK3bZM9y/P10u3Vib8o/DdkvA2OtPtZvD871QKjy74Wj1WSKFILMPRPSdUSx5RFK1arlJzEtA4PkFgnbuA=="],
 

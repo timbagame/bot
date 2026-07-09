@@ -1,4 +1,4 @@
-import * as anchor from "@coral-xyz/anchor";
+import * as anchor from "@anchor-lang/core";
 import type { Timba } from "../idl/idlType";
 import { WalletManager } from "../src/utils/wallet";
 import { getSupportedTokens } from "../src/utils/token-registry";

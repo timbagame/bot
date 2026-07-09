@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as anchor from "@coral-xyz/anchor";
+import * as anchor from "@anchor-lang/core";
 import { Keypair } from "@solana/web3.js";
 
 export const ORACLE_OPERATOR_KEYPAIR_ENV = "ORACLE_OPERATOR_KEYPAIR_PATH";

@@ -6,7 +6,7 @@ import {
 } from "grammy";
 import type { NextFunction } from "grammy";
 import { PublicKey } from "@solana/web3.js";
-import type { Program } from "@coral-xyz/anchor";
+import type { Program } from "@anchor-lang/core";
 
 import {
   DEFAULT_GAME_TIMEOUT,
