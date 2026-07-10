@@ -27,7 +27,7 @@ describe("GameManager private auto-join recovery", () => {
 
     const gamePda = new PublicKey("BPFLoader1111111111111111111111111111111111");
 
-    const gameAccount: any = { isPrivate: true, participantHashes: [] };
+    const gameAccount: any = { isPrivate: true, participants: [] };
     const program = {
       provider: {},
       account: {
@@ -66,15 +66,7 @@ describe("GameManager private auto-join recovery", () => {
     };
     (gm as any).buildJoinAccounts = async () => ({});
 
-    const participantHashFirst = (gm as any).computeParticipantHash(
-      gamePda,
-      playerKp.publicKey
-    );
-    gameAccount.participantHashes = [
-      {
-        toString: () => participantHashFirst,
-      },
-    ];
+    gameAccount.participants = [playerKp.publicKey];
     const originalSetTimeout = globalThis.setTimeout;
     (globalThis as any).setTimeout = (
       handler: (...args: any[]) => void,
@@ -138,7 +130,7 @@ describe("GameManager private auto-join recovery", () => {
 
     const gamePda = new PublicKey("BPFLoader1111111111111111111111111111111111");
 
-    const gameAccount: any = { isPrivate: false, participantHashes: [] };
+    const gameAccount: any = { isPrivate: false, participants: [] };
     const program = {
       provider: {},
       account: {
@@ -177,15 +169,7 @@ describe("GameManager private auto-join recovery", () => {
     };
     (gm as any).buildJoinAccounts = async () => ({});
 
-    const participantHashSecond = (gm as any).computeParticipantHash(
-      gamePda,
-      playerKp.publicKey
-    );
-    gameAccount.participantHashes = [
-      {
-        toString: () => participantHashSecond,
-      },
-    ];
+    gameAccount.participants = [playerKp.publicKey];
     (gm as any).isPlayerInGame = async () => statusCalls >= 3;
 
     const originalSetTimeout = globalThis.setTimeout;

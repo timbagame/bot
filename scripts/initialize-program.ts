@@ -38,6 +38,10 @@ const initializeOracle = async (
     // Get admin keypair from JSON file
     const adminKeypair = wallet.getAdminKeypair();
     const oracleOperatorKeypair = resolveOracleOperatorKeypair(adminKeypair);
+    const [programData] = PublicKey.findProgramAddressSync(
+      [program.programId.toBuffer()],
+      new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111")
+    );
 
     // Initialize Oracle
     const oracleConfig = createOracleConfig();
@@ -49,6 +53,8 @@ const initializeOracle = async (
       .initializeOracle(oracleConfig)
       .accounts({
         oracleOperator: oracleOperatorKeypair.publicKey,
+        upgradeAuthority: adminKeypair.publicKey,
+        programData,
       })
       .instruction();
 

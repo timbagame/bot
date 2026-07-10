@@ -12,7 +12,6 @@ import {
 } from "@solana/spl-token";
 import { Context } from "grammy";
 import * as anchor from "@anchor-lang/core";
-import { createHash } from "crypto";
 
 import { WalletManager } from "./wallet";
 import { GameDatabase } from "./game-database";
@@ -1163,17 +1162,14 @@ export class GameManager {
         return false;
       }
 
-      const rawHashes = (gameAccount as any)?.participantHashes;
-      if (!Array.isArray(rawHashes) || rawHashes.length === 0) {
+      const participants = (gameAccount as any)?.participants;
+      if (!Array.isArray(participants) || participants.length === 0) {
         return false;
       }
 
-      const playerHash = this.computeParticipantHash(gamePda, playerPubkey);
-
-      return rawHashes.some((value: any) => {
+      return participants.some((value: any) => {
         try {
-          const normalized = value?.toString?.();
-          return normalized === playerHash;
+          return new PublicKey(value).equals(playerPubkey);
         } catch {
           return false;
         }
@@ -1297,59 +1293,34 @@ export class GameManager {
     return this.gameDb.getGameParticipants(gameAddress);
   }
 
-  private computeParticipantHash(
-    gamePda: PublicKey,
-    participant: PublicKey
-  ): string {
-    const digest = createHash("sha256")
-      .update(Buffer.from("timba:part:v1"))
-      .update(gamePda.toBuffer())
-      .update(participant.toBuffer())
-      .digest();
-
-    const value = digest.subarray(0, 8).readBigUInt64LE(0);
-    return value.toString();
-  }
-
-  private recoverParticipantsFromHashes(
+  private recoverParticipantsFromChain(
     gamePda: PublicKey,
     gameAccount: any,
     knownTelegramIds: Set<string>
   ): {
     recovered: Array<{ telegramId: string; publicKey: string }>;
-    unmatchedHashes: string[];
+    unmatchedParticipants: string[];
   } {
-    const rawHashes = gameAccount.participantHashes;
-    if (!Array.isArray(rawHashes) || rawHashes.length === 0) {
-      return { recovered: [], unmatchedHashes: [] };
+    const rawParticipants = gameAccount.participants;
+    if (!Array.isArray(rawParticipants) || rawParticipants.length === 0) {
+      return { recovered: [], unmatchedParticipants: [] };
     }
 
-    const participantHashes = rawHashes
-      .map((hash: any) => {
+    const onChainParticipants = new Set(
+      rawParticipants.flatMap((participant: any) => {
         try {
-          if (typeof hash === "bigint") {
-            return hash;
-          }
-          if (typeof hash === "number") {
-            return BigInt(hash);
-          }
-          if (hash && typeof hash.toString === "function") {
-            return BigInt(hash.toString());
-          }
+          return [new PublicKey(participant).toBase58()];
         } catch (_) {
-          return null;
+          return [];
         }
-        return null;
       })
-      .filter((value): value is bigint => value !== null);
+    );
 
-    if (participantHashes.length === 0) {
-      return { recovered: [], unmatchedHashes: [] };
+    if (onChainParticipants.size === 0) {
+      return { recovered: [], unmatchedParticipants: [] };
     }
 
-    const unmatchedHashes = new Set(
-      participantHashes.map((value) => value.toString())
-    );
+    const unmatchedParticipants = new Set(onChainParticipants);
 
     for (const telegramId of knownTelegramIds) {
       const publicKey = this.gameDb.getPlayerPublicKey(telegramId);
@@ -1357,20 +1328,12 @@ export class GameManager {
         continue;
       }
 
-      try {
-        const computed = this.computeParticipantHash(
-          gamePda,
-          new PublicKey(publicKey)
-        );
-        unmatchedHashes.delete(computed);
-      } catch (_) {
-        // Ignore malformed public keys
-      }
+      unmatchedParticipants.delete(publicKey);
     }
 
-    const initialUnmatched = unmatchedHashes.size;
+    const initialUnmatched = unmatchedParticipants.size;
     if (initialUnmatched === 0) {
-      return { recovered: [], unmatchedHashes: [] };
+      return { recovered: [], unmatchedParticipants: [] };
     }
 
     const recovered: Array<{ telegramId: string; publicKey: string }> = [];
@@ -1383,21 +1346,12 @@ export class GameManager {
         continue;
       }
 
-      try {
-        const computed = this.computeParticipantHash(
-          gamePda,
-          new PublicKey(publicKey)
-        );
-
-        if (unmatchedHashes.has(computed)) {
-          recovered.push({ telegramId, publicKey });
-          unmatchedHashes.delete(computed);
-        }
-      } catch (_) {
-        // Ignore invalid public keys
+      if (unmatchedParticipants.has(publicKey)) {
+        recovered.push({ telegramId, publicKey });
+        unmatchedParticipants.delete(publicKey);
       }
 
-      if (unmatchedHashes.size === 0) {
+      if (unmatchedParticipants.size === 0) {
         break;
       }
     }
@@ -1425,21 +1379,21 @@ export class GameManager {
 
     if (recovered.length > 0) {
       debugLog(
-        `🔄 Recovered ${recovered.length} participant(s) for ${gamePda.toBase58()} from on-chain hashes`
+        `🔄 Recovered ${recovered.length} participant(s) for ${gamePda.toBase58()} from on-chain public keys`
       );
     }
 
-    if (unmatchedHashes.size > 0 && initialUnmatched === unmatchedHashes.size) {
+    if (unmatchedParticipants.size > 0 && initialUnmatched === unmatchedParticipants.size) {
       console.warn(
-        `⚠️ Unable to match any on-chain participant hashes for ${gamePda.toBase58()}`
+        `⚠️ Unable to match any on-chain participants for ${gamePda.toBase58()}`
       );
-    } else if (unmatchedHashes.size > 0) {
+    } else if (unmatchedParticipants.size > 0) {
       console.warn(
-        `⚠️ Unable to map ${unmatchedHashes.size} participant hash(es) for ${gamePda.toBase58()}`
+        `⚠️ Unable to map ${unmatchedParticipants.size} participant(s) for ${gamePda.toBase58()}`
       );
     }
 
-    return { recovered, unmatchedHashes: Array.from(unmatchedHashes) };
+    return { recovered, unmatchedParticipants: Array.from(unmatchedParticipants) };
   }
 
   private async resolveTokenFormattingInfo(
@@ -1816,8 +1770,8 @@ export class GameManager {
    * - 8 bytes last_slot (u64)
    * - 1 byte is_private (bool)
    * - 8 bytes total_amount (u64)
-   * - 4 bytes participant_hashes vec length
-   * - 8 bytes per participant_hash (u64)
+   * - 4 bytes participants vec length
+   * - 32 bytes per participant public key
    */
   private async getGameCreationRentLamports(maxTickets: number): Promise<number> {
     // Calculate game account size dynamically
@@ -1834,9 +1788,9 @@ export class GameManager {
       8 +   // last_slot
       1 +   // is_private
       8 +   // total_amount
-      4;    // participant_hashes vec length prefix
+      4;    // participants vec length prefix
 
-    const BYTES_PER_PARTICIPANT = 8; // u64 hash per participant
+    const BYTES_PER_PARTICIPANT = 32;
 
     const safeMaxTickets = Math.max(0, Math.trunc(maxTickets) || 0);
     const accountSize = BASE_GAME_ACCOUNT_SIZE + (safeMaxTickets * BYTES_PER_PARTICIPANT);
@@ -5109,10 +5063,10 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     }
 
     try {
-      this.recoverParticipantsFromHashes(gamePda, gameAccount, knownIds);
+      this.recoverParticipantsFromChain(gamePda, gameAccount, knownIds);
     } catch (error) {
       console.warn(
-        `⚠️ Unable to reconcile participant hashes for ${gameAddress}:`,
+        `⚠️ Unable to reconcile on-chain participants for ${gameAddress}:`,
         error
       );
     }
@@ -6609,26 +6563,26 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     address: string
   ): Promise<boolean> {
     const onChainTickets = Number(gameAccount.ticketsCount ?? 0);
-    const onChainHashes = Array.isArray(gameAccount.participantHashes)
-      ? gameAccount.participantHashes.length
+    const onChainParticipants = Array.isArray(gameAccount.participants)
+      ? gameAccount.participants.length
       : 0;
     const dbParticipantsSnapshot = this.gameDb.getGameParticipants(address);
     await this.reconcilePendingParticipants(gamePda);
     const playerKeyInfo = this.analyzePlayerKeys(gamePda, gameAccount, address);
     const effectiveOnChainTickets =
       playerKeyInfo.onChainTickets ?? onChainTickets;
-    const effectiveOnChainHashes =
-      playerKeyInfo.onChainParticipantHashes ?? onChainHashes;
+    const effectiveOnChainParticipants =
+      playerKeyInfo.onChainParticipants ?? onChainParticipants;
     const effectiveDbParticipants =
       playerKeyInfo.dbParticipantCount ?? dbParticipantsSnapshot.length;
 
     debugLog(
-      "🪙 Coinflip " + address + ": " + playerKeyInfo.available.length + "/" + playerKeyInfo.total + " player keys available (on-chain tickets: " + effectiveOnChainTickets + ", on-chain hashes: " + effectiveOnChainHashes + ", db participants: " + effectiveDbParticipants + ")"
+      "🪙 Coinflip " + address + ": " + playerKeyInfo.available.length + "/" + playerKeyInfo.total + " player keys available (on-chain tickets: " + effectiveOnChainTickets + ", on-chain participants: " + effectiveOnChainParticipants + ", db participants: " + effectiveDbParticipants + ")"
     );
 
-    if (effectiveOnChainTickets !== effectiveOnChainHashes) {
+    if (effectiveOnChainTickets !== effectiveOnChainParticipants) {
       console.warn(
-        "⚠️ Participant hash mismatch for " + address + ": on-chain tickets " + effectiveOnChainTickets + ", hash list length " + effectiveOnChainHashes
+        "⚠️ Participant mismatch for " + address + ": on-chain tickets " + effectiveOnChainTickets + ", participant list length " + effectiveOnChainParticipants
       );
     }
 
@@ -6639,11 +6593,11 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
     }
 
     if (
-      Array.isArray(playerKeyInfo.unmatchedHashes) &&
-      playerKeyInfo.unmatchedHashes.length > 0
+      Array.isArray(playerKeyInfo.unmatchedParticipants) &&
+      playerKeyInfo.unmatchedParticipants.length > 0
     ) {
       console.warn(
-        "⚠️ Unable to map " + playerKeyInfo.unmatchedHashes.length + " participant hash(es) for " + address
+        "⚠️ Unable to map " + playerKeyInfo.unmatchedParticipants.length + " participant(s) for " + address
       );
     }
 
@@ -6773,11 +6727,11 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       }
     }
 
-    const onChainParticipantHashes = Array.isArray(gameAccount.participantHashes)
-      ? gameAccount.participantHashes.length
+    const onChainParticipantHashes = Array.isArray(gameAccount.participants)
+      ? gameAccount.participants.length
       : 0;
 
-    const { unmatchedHashes } = this.recoverParticipantsFromHashes(
+    const { unmatchedParticipants } = this.recoverParticipantsFromChain(
       gamePda,
       gameAccount,
       participantTelegramIds
@@ -6822,9 +6776,9 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       unavailable.push(creatorPubkey.toBase58());
     }
 
-    if (unmatchedHashes.length > 0) {
-      for (const hash of unmatchedHashes) {
-        unavailable.push("hash:" + hash);
+    if (unmatchedParticipants.length > 0) {
+      for (const participant of unmatchedParticipants) {
+        unavailable.push(participant);
       }
     }
 
@@ -6848,9 +6802,9 @@ You currently have ${formattedStake} ${gameData.token_ticker} reserved for the t
       canCompleteCleanup,
       total: totalParticipants,
       onChainTickets,
-      onChainParticipantHashes,
+      onChainParticipants: onChainParticipantHashes,
       dbParticipantCount: dbParticipants.length,
-      unmatchedHashes,
+      unmatchedParticipants,
     };
   }
 

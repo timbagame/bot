@@ -487,11 +487,11 @@ describe("GameManager confirm/reload helpers", () => {
     ).rejects.toThrow(/boom/);
   });
 
-  test("isPlayerInGame falls back to on-chain participant hashes", async () => {
+  test("isPlayerInGame falls back to on-chain participant public keys", async () => {
     const player = Keypair.generate();
     const gamePda = new PublicKey("BPFLoader3111111111111111111111111111111111");
 
-    const gameAccount: any = { participantHashes: [] };
+    const gameAccount: any = { participants: [] };
     const program = {
       account: {
         game: {
@@ -510,15 +510,7 @@ describe("GameManager confirm/reload helpers", () => {
       } as any,
     });
 
-    const participantHash = (gm as any).computeParticipantHash(
-      gamePda,
-      player.publicKey
-    );
-    gameAccount.participantHashes = [
-      {
-        toString: () => participantHash,
-      },
-    ];
+    gameAccount.participants = [player.publicKey];
 
     const inGame = await (gm as any).isPlayerInGame(gamePda, player.publicKey);
     expect(inGame).toBe(true);

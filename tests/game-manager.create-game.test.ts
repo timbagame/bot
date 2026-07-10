@@ -983,9 +983,8 @@ describe("GameManager.createGame", () => {
         1n
       );
 
-      // Base size = 126 bytes + 8 bytes per participant
-      // For 2 players: 126 + 16 = 142 bytes
-      const expectedSize2Players = 126 + (2 * 8);
+      // Base size = 126 bytes + 32 bytes per participant public key
+      const expectedSize2Players = 126 + (2 * 32);
       expect(capturedRentCalls).toContain(expectedSize2Players);
 
       // Reset for next test
@@ -1009,8 +1008,7 @@ describe("GameManager.createGame", () => {
         2n
       );
 
-      // For 50 players: 126 + 400 = 526 bytes
-      const expectedSize50Players = 126 + (50 * 8);
+      const expectedSize50Players = 126 + (50 * 32);
       expect(capturedRentCalls).toContain(expectedSize50Players);
     } finally {
       (PDAManager as any).getGamePDA = originalGetGamePda;

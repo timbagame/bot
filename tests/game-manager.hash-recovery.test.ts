@@ -7,8 +7,8 @@ function resetGM() {
   GameManager["instance"] = undefined;
 }
 
-describe("GameManager participant hash recovery", () => {
-  test("analyzePlayerKeys recovers participants from on-chain hashes", () => {
+describe("GameManager participant recovery", () => {
+  test("analyzePlayerKeys recovers participants from on-chain public keys", () => {
     resetGM();
     const gameAddress = "BPFLoader1111111111111111111111111111111111";
     const gamePda = new PublicKey(gameAddress);
@@ -42,13 +42,11 @@ describe("GameManager participant hash recovery", () => {
     } as any;
 
     const gm = GameManager.getInstance({} as any, {} as any, dbStub);
-    const participantHash = BigInt((gm as any).computeParticipantHash(gamePda, playerPubkey));
-
     const info = (gm as any).analyzePlayerKeys(
       gamePda,
       {
         creator: creatorPubkey,
-        participantHashes: [participantHash],
+        participants: [playerPubkey],
       },
       gameAddress
     );

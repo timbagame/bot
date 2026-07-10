@@ -171,6 +171,7 @@ export interface PlayerUnjoinedEvent {
   totalAmount: BN;
   ticketsCount: number;
   ticketIndex: number;
+  movedParticipant: PublicKey | null;
   lastSlot: BN;
   timestamp: BN;
 }

@@ -55,7 +55,7 @@ describe("GameManager expired coinflip handler", () => {
 
     const result = await (gm as any).handleExpiredCoinflip(
       new PublicKey("BPFLoader1111111111111111111111111111111111"),
-      { creator: "CREATOR", ticketsCount: 2, participantHashes: [1, 2] },
+      { creator: "CREATOR", ticketsCount: 2, participants: ["P1", "P2"] },
       "ADDR1"
     );
 
@@ -103,7 +103,7 @@ describe("GameManager expired coinflip handler", () => {
 
     const result = await (gm as any).handleExpiredCoinflip(
       new PublicKey("BPFLoader2111111111111111111111111111111111"),
-      { creator: "CREATOR2", ticketsCount: 1, participantHashes: [1] },
+      { creator: "CREATOR2", ticketsCount: 1, participants: ["P1"] },
       "ADDR2"
     );
 
