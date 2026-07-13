@@ -1,4 +1,4 @@
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, Transaction } from "@solana/web3.js";
 import type {
   AuthorizationResult,
   OracleApiResponse,
@@ -52,7 +52,7 @@ export class OracleClient {
 
       if (!response.ok) {
         throw new Error(
-          `Oracle API request failed: ${response.status} ${response.statusText}`
+          `Oracle API request failed: ${response.status} ${response.statusText}`,
         );
       }
 
@@ -71,6 +71,26 @@ export class OracleClient {
       console.error("❌ Error requesting random hash from oracle:", error);
       throw new Error(`Oracle API unavailable: ${(error as Error).message}`);
     }
+  }
+
+  public async signGameTransaction(
+    transaction: Transaction,
+  ): Promise<Transaction> {
+    const txBase64 = transaction
+      .serialize({ requireAllSignatures: false, verifySignatures: false })
+      .toString("base64");
+    const response = await fetch(`${this.oracleApiUrl}/sign-game-transaction`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ txBase64 }),
+    });
+    const data = (await response.json()) as OracleApiResponse & {
+      txBase64?: string;
+    };
+    if (!response.ok || !data.success || !data.txBase64) {
+      throw new Error(data.error || "Oracle rejected the game transaction");
+    }
+    return Transaction.from(Buffer.from(data.txBase64, "base64"));
   }
 
   /**
@@ -110,14 +130,16 @@ export class OracleClient {
         signal: AbortSignal.timeout(5000), // 5 second timeout
       });
 
-      console.log(`🔍 Oracle health response: ${response.status} ${response.statusText}`);
+      console.log(
+        `🔍 Oracle health response: ${response.status} ${response.statusText}`,
+      );
       return response.ok;
     } catch (error) {
       console.error("❌ Oracle health check failed:", {
         url: `${this.oracleApiUrl}/health`,
         error: error instanceof Error ? error.message : String(error),
         type: error?.constructor?.name || typeof error,
-        code: (error as any)?.code
+        code: (error as any)?.code,
       });
       return false;
     }
@@ -136,14 +158,17 @@ export class OracleClient {
 
       if (!response.ok) {
         console.warn(
-          `Oracle completion wake-up failed for ${gameAddress}: ${response.status} ${response.statusText}`
+          `Oracle completion wake-up failed for ${gameAddress}: ${response.status} ${response.statusText}`,
         );
         return false;
       }
 
       return true;
     } catch (error) {
-      console.warn(`Oracle completion wake-up failed for ${gameAddress}:`, error);
+      console.warn(
+        `Oracle completion wake-up failed for ${gameAddress}:`,
+        error,
+      );
       return false;
     }
   }
@@ -154,7 +179,7 @@ export class OracleClient {
 
   public async authorizePlayer(
     gamePda: PublicKey,
-    chatId: number
+    chatId: number,
   ): Promise<AuthorizationResult> {
     try {
       const game = this.gameDb.getGame(gamePda.toBase58());
